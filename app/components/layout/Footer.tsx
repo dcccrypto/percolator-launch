@@ -3,11 +3,28 @@
 import { FC, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { usePathname } from "next/navigation";
 
 const CA = "8PzFWyLpCVEmbZmVJcaRTU5r69XKJx1rd7YGpWvnpump";
 
 export const Footer: FC = () => {
   const [copied, setCopied] = useState(false);
+  const pathname = usePathname();
+  // Mobile overlap fix (375px repro): <Footer> is rendered once, globally,
+  // right after <main> (app/layout.tsx) — it's the last normal-flow content
+  // on every page, sitting directly above whatever's `fixed` at the bottom.
+  // <main>'s own `pb-[60px] md:pb-0` only clears MobileBottomNav for
+  // content INSIDE main; it does nothing for Footer, which follows main and
+  // has no bottom clearance of its own. On the trade page specifically
+  // there's a SECOND fixed bar below `lg` — the order-sheet "Trade" trigger
+  // (bottom-16, stacked above MobileBottomNav; see
+  // app/trade/[slab]/page.tsx's MobileOrderSheet) — so the footer's last
+  // row (social icons / "developers" link) rendered right underneath both,
+  // legible but literally covered. Give the footer extra bottom clearance,
+  // more on trade routes where the second bar exists, using the same
+  // `pb-32` figure the trade page's own mobile content spacer already uses
+  // for the identical stack (keeps the two clearances numerically in sync).
+  const isTradePage = pathname?.startsWith("/trade") ?? false;
 
   const copyCA = () => {
     navigator.clipboard.writeText(CA);
@@ -16,7 +33,11 @@ export const Footer: FC = () => {
   };
 
   return (
-    <footer className="relative border-t border-[var(--border)]">
+    <footer
+      className={`relative border-t border-[var(--border)] ${
+        isTradePage ? "pb-32 md:pb-16 lg:pb-0" : "pb-20 md:pb-0"
+      }`}
+    >
       <div className="mx-auto max-w-7xl px-6 py-8">
         {/* Main footer row */}
         <div className="flex flex-col items-center gap-6 sm:flex-row sm:justify-between">

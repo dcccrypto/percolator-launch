@@ -65,6 +65,8 @@ import { formatTokenAmount, formatUsdPriceE6, toE6 } from "@/lib/format";
 import { saveEntryPrice, getEntryPrice, clearEntryPrice } from "@/lib/entry-price";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
 import { useInitUser } from "@/hooks/useInitUser";
+import { AUTO_DEPOSIT_AMOUNT } from "@/hooks/useAutoDeposit";
+import { useWalletNetworkGuard } from "@/hooks/useWalletNetworkGuard";
 
 const LEVERAGE_SNAP_POINTS = [1, 3, 5, 10, 20];
 const SIZE_PRESETS = [25, 50, 75, 100];
@@ -295,6 +297,14 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   const { initUser, loading: initLoading, error: initError } = useInitUser(slabAddress);
   const [initCtaError, setInitCtaError] = useState<string | null>(null);
+  // Progressive disclosure (first-timer receipt): a never-funded account has
+  // never seen a receipt before, so the full fees/slippage/margin breakdown
+  // is more noise than help on the very first order — collapse it behind a
+  // toggle, defaulting closed. Once the account has capital (has traded /
+  // deposited before), always show the full breakdown — they already know
+  // what it means and want it visible without an extra click.
+  const [showReceiptDetails, setShowReceiptDetails] = useState(false);
+  const { networkWarning, reportTxError } = useWalletNetworkGuard();
 
   const lpEntry = useMemo(() => accounts.find(({ account }) => account.kind === AccountKind.LP) ?? null, [accounts]);
   const lpIdx = lpEntry?.idx ?? 0;
@@ -618,6 +628,9 @@ setEngineLockError(null);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error("[OrderTicket] raw error:", msg);
+      // PERC-onboarding-5: advisory-only wrong-network-wallet check on the
+      // raw (pre-humanization) message — see useWalletNetworkGuard's header.
+      reportTxError(msg);
       // TX1: Custom(9) from THIS call site is always a trade() CPI — humanize
       // it as the slippage/worst-fill-price rejection it actually is here,
       // not the generic "invalid instruction" text (still correct for
@@ -701,7 +714,11 @@ setEngineLockError(null);
         title={lockedMargin > 0n ? `${formatTokenAmount(lockedMargin, decimals, 3)} ${collateralSymbol} locked by your open position on this market` : undefined}
       >
         <span>
-          <span className="text-[var(--text-secondary)]">Balance </span>
+          {/* "Balance" read as ambiguous next to "Wallet" — new traders
+              couldn't tell which number was actually spendable on an order.
+              Plain-English: this is capital already deposited into the
+              Percolator account, i.e. what an order can actually draw on. */}
+          <span className="text-[var(--text-secondary)]">Available to trade </span>
           {userAccount ? formatTokenAmount(availableBalance, decimals, 3) : "0"}
           {lockedMargin > 0n && (
             <span className="text-[var(--text-secondary)]">/{formatTokenAmount(capital, decimals, 3)}</span>
@@ -709,11 +726,17 @@ setEngineLockError(null);
           <span className="text-[var(--text-secondary)]"> {collateralSymbol}</span>
         </span>
         <span>
-          <span className="text-[var(--text-secondary)]">Wallet </span>
+          <span className="text-[var(--text-secondary)]">In wallet (not deposited) </span>
           {walletAtaBalance != null ? formatTokenAmount(walletAtaBalance, decimals, 3) : "—"}
           <span className="text-[var(--text-secondary)]"> {collateralSymbol}</span>
         </span>
       </div>
+      {capital === 0n && (walletAtaBalance ?? 0n) > 0n && (
+        <p className="mb-2 text-[10px] leading-relaxed text-[var(--text-secondary)]">
+          You have {formatTokenAmount(walletAtaBalance ?? 0n, decimals, 3)} {collateralSymbol} in your wallet —
+          deposit it to start trading.
+        </p>
+      )}
 
       {/* Size — single input + unit toggle + quick-fill chips */}
       <div className="mb-2">
@@ -894,31 +917,48 @@ setEngineLockError(null);
           page-level darkness, rather than an elevated surface) so it reads
           as an inset readout inside the ticket panel — a small depth cue
           that reinforces the panel/ticket as the raised surface. */}
-      {hasOrder && (
-        <div className="mb-3 rounded-none border border-[var(--border)]/60 bg-[var(--bg)]/60 px-2.5 py-2 divide-y divide-[var(--border)]/30">
-          <DiffRow label="Entry" before="—" after={formatUsdPriceE6(estEntry)} />
-          <DiffRow
-            label="Liq price"
-            before={beforeLiqPrice > 0n ? formatUsdPriceE6(beforeLiqPrice) : "—"}
-            after={afterLiqPrice > 0n ? formatUsdPriceE6(afterLiqPrice) : "—"}
-            valueClass={direction === "long" ? "text-[var(--short)]" : "text-[var(--long)]"}
-            tooltip="Estimated liquidation price if this order fills at the estimated entry."
-          />
-          <DiffRow label="Fees" before="—" after={`${formatTokenAmount(fee, decimals)} ${collateralSymbol}`} />
-          <DiffRow
-            label="Slippage bound"
-            before="—"
-            after={slippageBoundE6 > 0n ? formatUsdPriceE6(slippageBoundE6) : "—"}
-            tooltip="Worst acceptable fill price sent on-chain - the trade reverts rather than fill worse than this."
-          />
-          <DiffRow
-            label="Margin req."
-            before={`${formatTokenAmount(beforeMargin, decimals)} ${collateralSymbol}`}
-            after={`${formatTokenAmount(afterMargin, decimals)} ${collateralSymbol}`}
-            tooltip="Margin reserved from your account balance to back this position — not a deposit, so your balance after opening is lower, not higher."
-          />
-        </div>
-      )}
+      {hasOrder && (() => {
+        const isFirstTimer = capital === 0n;
+        const detailsVisible = !isFirstTimer || showReceiptDetails;
+        return (
+          <div className="mb-3 rounded-none border border-[var(--border)]/60 bg-[var(--bg)]/60 px-2.5 py-2 divide-y divide-[var(--border)]/30">
+            <DiffRow label="Entry" before="—" after={formatUsdPriceE6(estEntry)} />
+            <DiffRow
+              label="Liq price"
+              before={beforeLiqPrice > 0n ? formatUsdPriceE6(beforeLiqPrice) : "—"}
+              after={afterLiqPrice > 0n ? formatUsdPriceE6(afterLiqPrice) : "—"}
+              valueClass={direction === "long" ? "text-[var(--short)]" : "text-[var(--long)]"}
+              tooltip="Estimated liquidation price if this order fills at the estimated entry."
+            />
+            {detailsVisible && (
+              <>
+                <DiffRow label="Fees" before="—" after={`${formatTokenAmount(fee, decimals)} ${collateralSymbol}`} />
+                <DiffRow
+                  label="Slippage bound"
+                  before="—"
+                  after={slippageBoundE6 > 0n ? formatUsdPriceE6(slippageBoundE6) : "—"}
+                  tooltip="Worst acceptable fill price sent on-chain - the trade reverts rather than fill worse than this."
+                />
+                <DiffRow
+                  label="Margin req."
+                  before={`${formatTokenAmount(beforeMargin, decimals)} ${collateralSymbol}`}
+                  after={`${formatTokenAmount(afterMargin, decimals)} ${collateralSymbol}`}
+                  tooltip="Margin reserved from your account balance to back this position — not a deposit, so your balance after opening is lower, not higher."
+                />
+              </>
+            )}
+            {isFirstTimer && (
+              <button
+                type="button"
+                onClick={() => setShowReceiptDetails((v) => !v)}
+                className="w-full pt-1.5 text-center text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--accent)] transition-colors duration-150 hover:brightness-110"
+              >
+                {showReceiptDetails ? "Hide details ▴" : "Show details ▾"}
+              </button>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Single validation banner (highest-priority issue only) */}
       {blockingIssue && (
@@ -960,12 +1000,34 @@ setEngineLockError(null);
             const onClickDirect = async () => {
               setInitCtaError(null);
               try {
-                await initUser(0n);
+                // PERC-onboarding-1: pass the wallet's own sim-USDC balance
+                // (capped at the same starter amount useAutoDeposit uses) so
+                // useInitUser folds Deposit into the SAME account-creation
+                // transaction when possible — one click can land a
+                // tradeable, funded account instead of always requiring a
+                // second manual deposit afterward.
+                const bal = walletAtaBalance ?? 0n;
+                const depositAmt = bal > 0n && bal < AUTO_DEPOSIT_AMOUNT ? bal : AUTO_DEPOSIT_AMOUNT;
+                await initUser(depositAmt);
               } catch (e) {
                 const msg = e instanceof Error ? e.message : String(e);
+                reportTxError(msg);
                 if (!/user rejected|cancelled|denied/i.test(msg)) setInitCtaError(msg);
               }
             };
+            // Single evolving CTA: one persistently-styled button whose label
+            // always names the NEXT unblocking action — "Start Trading" now
+            // covers account-creation + deposit in one click (fix #1), so
+            // most users only ever see that single state once.
+            const label = initLoading
+              ? "Setting up your account…"
+              : showInlineDeposit
+                ? "Close"
+                : canOneClick
+                  ? "Start Trading"
+                  : needsAccount
+                    ? "Get Tokens to Trade"
+                    : "Deposit to Trade";
             return (
               <button
                 onClick={canOneClick ? onClickDirect : () => setShowInlineDeposit((v) => !v)}
@@ -974,7 +1036,7 @@ setEngineLockError(null);
                   direction === "long" ? "bg-[var(--long)] text-black" : "bg-[var(--short)] text-white"
                 }`}
               >
-                {initLoading ? "Creating account…" : showInlineDeposit ? "Close" : canOneClick ? "Initialize Account" : needsAccount ? "Get Tokens to Trade" : "Deposit to Trade"}
+                {label}
               </button>
             );
           })()}
@@ -1047,6 +1109,17 @@ setEngineLockError(null);
           <p className="text-[10px] text-[var(--short)]">{humanError}</p>
         </div>
       ) : null}
+      {/* PERC-onboarding-5: advisory wrong-network-wallet banner — same
+          amber "informational, not a hard failure" treatment as the
+          engine-lock notice above, rendered independently since it can
+          co-occur with (or explain) whatever humanError/engineLockError is
+          also showing. Never blocks submission — purely informational. */}
+      {networkWarning && (
+        <div className="mt-2 rounded-none border border-[var(--warning)]/30 bg-[var(--warning)]/5 px-3 py-2">
+          <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--warning)]">Check your wallet's network</p>
+          <p className="mt-1 text-[10px] leading-relaxed text-[var(--text-secondary)]">{networkWarning}</p>
+        </div>
+      )}
       {lastSig && (
         <p className="mt-2 text-[10px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
           Tx: <a href={explorerTxUrl(lastSig)} target="_blank" rel="noopener noreferrer" className="text-[var(--accent)] hover:underline">{lastSig.slice(0, 16)}...</a>

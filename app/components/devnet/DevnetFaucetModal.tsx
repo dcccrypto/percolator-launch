@@ -13,6 +13,7 @@
 "use client";
 
 import { FC, useCallback, useEffect, useRef } from "react";
+import Link from "next/link";
 import { useDevnetFaucet } from "@/hooks/useDevnetFaucet";
 
 /* ── Step indicator ──────────────────────────────────── */
@@ -247,16 +248,24 @@ export const DevnetFaucetModal: FC = () => {
             {/* Connector line */}
             <div className="ml-3 h-3 w-px bg-[var(--border)]/30" />
 
-            {/* Step 3: Deposit (info only — AutoDepositProvider handles this) */}
+            {/* Step 3: account setup + deposit — handled by useAutoDeposit
+                after this modal is dismissed. Previously labeled "Deposit &
+                Trade" / "Auto after dismiss", which was vague about what
+                actually happens: dismissing triggers account creation with
+                a starter deposit folded into the same (or an immediately
+                chained) transaction — see useInitUser.ts / useAutoDeposit.ts.
+                Framed as "sets up", not a hard promise, since the deposit
+                leg is best-effort (falls back to a manual deposit prompt in
+                the order ticket if it doesn't land). */}
             <div className="flex items-center justify-between">
               <StepBadge
                 number={3}
-                label="Deposit & Trade"
+                label="Set Up Account"
                 status={allDone ? "active" : "pending"}
               />
               {allDone && (
                 <span className="text-[10px] text-[var(--text-secondary)]">
-                  Auto after dismiss
+                  Creates + funds your account on dismiss
                 </span>
               )}
             </div>
@@ -266,16 +275,28 @@ export const DevnetFaucetModal: FC = () => {
           {faucet.error && (
             <div className="rounded-none border border-[var(--short)]/20 bg-[var(--short)]/[0.04] px-3 py-2">
               <p className="text-[10px] text-[var(--short)]">{faucet.error}</p>
-              {faucet.step === "sol" && (
-                <a
-                  href="https://faucet.solana.com"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-1 inline-block text-[10px] text-[var(--accent)] underline hover:text-[var(--text)]"
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                {faucet.step === "sol" && (
+                  <a
+                    href="https://faucet.solana.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-block text-[10px] text-[var(--accent)] underline hover:text-[var(--text)]"
+                  >
+                    Try Solana Web Faucet →
+                  </a>
+                )}
+                {/* This app's own /faucet page mints BOTH sim-USDC and SOL
+                    under a separate rate limit (1/wallet/hour) from this
+                    modal's own gate — a real fallback for either step, not
+                    just SOL (faucet.solana.com is SOL-only). */}
+                <Link
+                  href="/faucet"
+                  className="inline-block text-[10px] text-[var(--accent)] underline hover:text-[var(--text)]"
                 >
-                  Try Solana Web Faucet →
-                </a>
-              )}
+                  Try our own faucet page →
+                </Link>
+              </div>
             </div>
           )}
 
@@ -286,6 +307,12 @@ export const DevnetFaucetModal: FC = () => {
                 Next claim available:{" "}
                 {new Date(faucet.nextClaimAt).toLocaleString()}
               </p>
+              <Link
+                href="/faucet"
+                className="mt-1 inline-block text-[10px] text-[var(--accent)] underline hover:text-[var(--text)]"
+              >
+                Try our own faucet page (separate limit) →
+              </Link>
             </div>
           )}
         </div>

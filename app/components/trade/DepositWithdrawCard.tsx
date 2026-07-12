@@ -10,6 +10,7 @@ import { useUserAccount } from "@/hooks/useUserAccount";
 import { useDeposit } from "@/hooks/useDeposit";
 import { useWithdraw } from "@/hooks/useWithdraw";
 import { useInitUser } from "@/hooks/useInitUser";
+import { AUTO_DEPOSIT_AMOUNT } from "@/hooks/useAutoDeposit";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { parseHumanAmount } from "@/lib/parseAmount";
@@ -90,6 +91,28 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
     return () => { cancelled = true; };
   }, [publicKey, mktConfig?.collateralMint, connection, lastSig]);
 
+  // Pre-fill deposit: the FIRST time this card is open for a brand-new
+  // (0-capital) account with a known wallet balance, default the amount
+  // field to min(walletBalance, the 500 USDC starter cap) instead of making
+  // the user type a number before they can even see what "Max" would give
+  // them. Only ever runs once per mount (prefilledRef) — after that, the
+  // field is the user's own to edit/clear, including clearing it back to
+  // empty on purpose. Gated to the Deposit tab and to a truly untouched
+  // field so it never clobbers a value the user is mid-typing.
+  const prefilledRef = useRef(false);
+  useEffect(() => {
+    if (prefilledRef.current) return;
+    if (mode !== "deposit") return;
+    if (amount !== "" || maxRawRef.current !== null) return;
+    if (walletBalance == null) return; // wait for a real balance read
+    const capitalNow = userAccount?.account.capital ?? 0n;
+    if (capitalNow !== 0n) return; // only for never-funded accounts
+    prefilledRef.current = true;
+    if (walletBalance <= 0n) return; // nothing to prefill
+    const prefillAmt = walletBalance < AUTO_DEPOSIT_AMOUNT ? walletBalance : AUTO_DEPOSIT_AMOUNT;
+    setAmount(formatTokenAmount(prefillAmt, decimals));
+  }, [mode, amount, walletBalance, userAccount, decimals]);
+
   if (!connected) {
     return (
       <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
@@ -129,12 +152,18 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
               Create your trading account on this market to start trading.
             </p>
             <button
-              onClick={async () => { 
-                try { 
-                  // feePayment=0 — just registers the slot.
-                  // Actual deposit follows in the deposit form once account exists.
-                  const sig = await initUser(0n); 
-                  setLastSig(sig ?? null); 
+              onClick={async () => {
+                try {
+                  // min(wallet balance, the same starter cap useAutoDeposit
+                  // uses) lets useInitUser fold Deposit into the same
+                  // account-creation transaction when possible — one click
+                  // can end in a tradeable, funded account instead of always
+                  // needing a second manual deposit afterward.
+                  const depositAmt = walletBalance != null && walletBalance < AUTO_DEPOSIT_AMOUNT
+                    ? walletBalance
+                    : AUTO_DEPOSIT_AMOUNT;
+                  const result = await initUser(depositAmt);
+                  setLastSig(result?.sig ?? null);
                 } catch {
                   // initError state is set by the hook and shown below
                 }

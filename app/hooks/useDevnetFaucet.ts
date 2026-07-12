@@ -193,6 +193,32 @@ export function useDevnetFaucet(): DevnetFaucetState {
     refreshBalances();
   }, [connected, publicKey, isDevnet, checked, refreshBalances]);
 
+  // "Stale popup" fix: this hook is mounted ONCE at the root layout (see
+  // WalletProvider) and lives for the whole wallet session — the initial
+  // check above is the only balance read unless the user clicks THIS
+  // modal's own airdrop buttons. If the wallet gets funded through any other
+  // path while connected (the trade page's DevnetTokenFaucetButton, a
+  // second tab, a manual faucet.solana.com airdrop), solBalance/usdcBalance
+  // stayed frozen at the connect-time snapshot and the modal could keep
+  // telling an already-funded user they still need to fund — mirrors
+  // usePortfolio.ts's visibility+interval refresh pattern. Gated on
+  // `checked && !dismissed` — no point polling before the first check lands,
+  // or once the user has dismissed the modal for this wallet.
+  useEffect(() => {
+    if (!connected || !publicKey || !isDevnet || !checked || dismissed) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshBalances();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") refreshBalances();
+    }, 15_000);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      clearInterval(interval);
+    };
+  }, [connected, publicKey, isDevnet, checked, dismissed, refreshBalances]);
+
   // PERC-808: Show when SOL < 0.05 OR USDC < 1,000 (no longer gated on userAccount)
   const shouldShow =
     isDevnet &&
