@@ -40,6 +40,16 @@ const nextConfig = {
       "@solana/wallet-adapter-react",
       "@solana/spl-token",
     ],
+    // Client Router Cache lifetime for prefetched routes. Next 15+ defaults
+    // `dynamic` to 0, which silently defeats <Link prefetch={true}> on dynamic
+    // routes: the full /trade/[slab] RSC payload IS prefetched when a market
+    // row enters the viewport, then discarded as instantly-stale, so the
+    // click pays the whole server round-trip again behind the loading.tsx
+    // skeleton (~0.6-1.3s measured). 300s matches fetchMarketMeta's own
+    // `revalidate: 300` — the payload is a static shell + metadata; all live
+    // trading data is fetched client-side after mount, so a minutes-old
+    // router-cache entry costs nothing in freshness.
+    staleTimes: { dynamic: 300, static: 300 },
   },
   async headers() {
     // Security headers are set here as a baseline. CSP is NOT set here because

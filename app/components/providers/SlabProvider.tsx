@@ -14,7 +14,7 @@ import {
 } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
-import { getCachedSlab, setCachedSlab } from "@/lib/slabCache";
+import { getSeedSlab, setCachedSlab } from "@/lib/slabCache";
 import {
   parseHeader,
   parseConfig,
@@ -472,11 +472,15 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
     }
 
     fetchRef.current = poll;
-    // 0-loading: if the slab bytes were prefetched on market-row hover, parse them
-    // synchronously NOW so the terminal renders immediately instead of showing a
-    // skeleton for the getAccountInfo round-trip. The poll below still runs and
-    // byte-equality-dedups the no-op re-parse when the fetched bytes match.
-    const cachedSeed = getCachedSlab(slabAddress);
+    // 0-loading: if the slab bytes were prefetched (market-row hover or the
+    // markets-page batch warm), parse them synchronously NOW so the terminal
+    // renders immediately instead of showing a skeleton for the getAccountInfo
+    // round-trip. getSeedSlab is the stale-tolerant tier (up to ~10min old):
+    // the poll below fires immediately and byte-equality-dedups the no-op
+    // re-parse, so a stale seed only bounds the ONE pre-paint frame — with the
+    // strict 20s getCachedSlab tier here, anyone browsing /markets for >20s
+    // before clicking missed the seed and ate a ~560ms full-page skeleton.
+    const cachedSeed = getSeedSlab(slabAddress);
     if (cachedSeed) parseSlab(cachedSeed.data, cachedSeed.owner);
     poll().then(schedulePoll);
 

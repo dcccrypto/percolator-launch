@@ -205,6 +205,12 @@ const MarketSwitcherInner: FC<MarketSwitcherProps> = ({ slabAddress, symbol, log
                   type="button"
                   role="option"
                   aria-selected={isCurrent}
+                  // Full-route prefetch on hover/focus: goTo uses router.push, which
+                  // (unlike an in-viewport <Link prefetch>) does no prefetching — so
+                  // switching markets paid the dynamic /trade/[slab] RSC round-trip
+                  // behind the route loading skeleton. Mirrors the markets-page rows.
+                  onMouseEnter={() => { if (!isCurrent) router.prefetch(`/trade/${r.slab}`); }}
+                  onFocus={() => { if (!isCurrent) router.prefetch(`/trade/${r.slab}`); }}
                   onClick={() => goTo(r.slab)}
                   className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left transition-colors hover:bg-[var(--bg-surface)] ${
                     isCurrent ? "bg-[var(--accent)]/[0.06]" : ""

@@ -1079,6 +1079,15 @@ function MarketsPageInner() {
                     <Link
                       key={m.slabAddress}
                       href={`/trade/${m.slabAddress}`}
+                      // prefetch={true}: /trade/[slab] is a DYNAMIC route, so the
+                      // default Link prefetch only fetches up to its loading.tsx
+                      // boundary — every click still paid a full RSC server
+                      // round-trip (layout generateMetadata included) behind the
+                      // 36-shimmer route skeleton (~0.6-1.3s measured). Full
+                      // prefetch pulls the whole payload when the row enters the
+                      // viewport, so the click swaps instantly. Off-screen rows
+                      // don't prefetch, so cost scales with what's visible.
+                      prefetch={true}
                       onMouseEnter={() => prefetchSlab(connection, m.slabAddress)}
                       onFocus={() => prefetchSlab(connection, m.slabAddress)}
                       onTouchStart={() => prefetchSlab(connection, m.slabAddress)}

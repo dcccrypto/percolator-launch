@@ -18,15 +18,34 @@ type CachedSlab = { data: Uint8Array; owner: PublicKey; ts: number };
 const cache = new Map<string, CachedSlab>();
 const inflight = new Map<string, Promise<void>>();
 
-/** How long a cached slab is considered fresh enough to seed the first render.
- *  The provider re-fetches immediately on mount regardless, so this only bounds
- *  how stale the ONE seed frame can be. */
+/** How long a cached slab is considered fresh enough to SKIP a re-fetch —
+ *  the dedup horizon for prefetchSlab/prefetchSlabsBatch. */
 const FRESH_MS = 20_000;
+
+/** How old an entry can be and still serve as the SEED for the trade page's
+ *  first paint (stale-while-revalidate). Deliberately much longer than
+ *  FRESH_MS: the provider's own poll fires immediately after seeding and
+ *  byte-dedups, so this only bounds how stale the ONE pre-paint frame can be
+ *  — and a minutes-old frame for ~500ms beats the full-page skeleton it
+ *  replaces. (With the old single 20s tier, any user who browsed /markets
+ *  for >20s before clicking missed the seed and got the skeleton for a full
+ *  RPC round-trip — ~560ms measured on the live site.) */
+const SEED_MAX_AGE_MS = 10 * 60_000;
 
 export function getCachedSlab(slab: string): CachedSlab | null {
   const e = cache.get(slab);
   if (!e) return null;
   if (dateNow() - e.ts > FRESH_MS) return null;
+  return e;
+}
+
+/** Stale-tolerant read for SlabProvider's seed-before-paint — see
+ *  SEED_MAX_AGE_MS above. Prefetch callers must keep using getCachedSlab so
+ *  a stale-but-seedable entry still gets refreshed by hover/batch warms. */
+export function getSeedSlab(slab: string): CachedSlab | null {
+  const e = cache.get(slab);
+  if (!e) return null;
+  if (dateNow() - e.ts > SEED_MAX_AGE_MS) return null;
   return e;
 }
 
