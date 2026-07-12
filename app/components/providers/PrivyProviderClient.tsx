@@ -180,10 +180,46 @@ const PrivyWalletApiBridge: FC<{ children: ReactNode }> = ({ children }) => {
     return async (txs: Transaction[]): Promise<Transaction[]> => {
       const network = getNetwork();
       const chain = network === "mainnet" ? "solana:mainnet" : "solana:devnet";
-      const inputs = txs.map((tx) => ({
-        transaction: new Uint8Array(
-          tx.serialize({ requireAllSignatures: false, verifySignatures: false }),
-        ),
+      const serialized = txs.map(
+        (tx) => new Uint8Array(tx.serialize({ requireAllSignatures: false, verifySignatures: false })),
+      );
+
+      // PREFER the wallet's OWN wallet-standard `solana:signTransaction`
+      // feature called with ALL inputs at once — this is the native batch
+      // path (what wallet-adapter's signAllTransactions does under the
+      // hood), and Phantom/Solflare render it as ONE approval listing every
+      // tx. Routing the batch through Privy's signer instead was observed to
+      // fan out one approval PER transaction for external wallets, which
+      // defeated the entire one-approval launch flow. Structural feature
+      // detection (no SDK types expose this cleanly); any failure falls
+      // through to Privy's variadic signer below.
+      try {
+        const walletUnknown = activeWallet as unknown as {
+          features?: Record<string, unknown>;
+          accounts?: Array<{ address: string }>;
+          address: string;
+        };
+        const feature = walletUnknown.features?.["solana:signTransaction"] as
+          | { signTransaction?: (...inputs: unknown[]) => Promise<Array<{ signedTransaction: Uint8Array }>> }
+          | undefined;
+        const account =
+          walletUnknown.accounts?.find((a) => a.address === walletUnknown.address) ??
+          walletUnknown.accounts?.[0];
+        if (feature?.signTransaction && account) {
+          const outputs = await feature.signTransaction(
+            ...serialized.map((bytes) => ({ transaction: bytes, account, chain })),
+          );
+          if (Array.isArray(outputs) && outputs.length === txs.length) {
+            console.info(`[PrivyProviderClient] batch-signed ${txs.length} txs via wallet-standard feature (one approval)`);
+            return outputs.map((o) => Transaction.from(Buffer.from(o.signedTransaction)));
+          }
+        }
+      } catch (e) {
+        console.warn("[PrivyProviderClient] wallet-standard batch sign unavailable/failed — using Privy signer:", e);
+      }
+
+      const inputs = serialized.map((bytes) => ({
+        transaction: bytes,
         wallet: activeWallet,
         chain: chain as any,
       }));
