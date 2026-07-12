@@ -30,6 +30,7 @@ import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { getEntryPrice, getEntryLeverage, clearEntryPrice } from "@/lib/entry-price";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { getBackendUrl } from "@/lib/config";
+import { pollWhenVisible } from "@/lib/pollWhenVisible";
 import { parseHumanAmount } from "@/lib/parseAmount";
 import {
   formatLeverage,
@@ -77,10 +78,11 @@ function useAdlRank(slabAddress: string, positionIdx: number | null): AdlRankRes
     };
 
     fetchRank();
-    const id = setInterval(fetchRank, 30_000);
+    // Visibility-gated so hidden tabs don't keep polling ADL rankings.
+    const dispose = pollWhenVisible(fetchRank, 30_000);
     return () => {
       cancelled = true;
-      clearInterval(id);
+      dispose();
     };
   }, [slabAddress, positionIdx]);
 

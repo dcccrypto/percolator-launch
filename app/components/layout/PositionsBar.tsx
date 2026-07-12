@@ -13,6 +13,7 @@ import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { formatTokenAmount } from "@/lib/format";
 import { isMockMode } from "@/lib/mock-mode";
+import { pollWhenVisible } from "@/lib/pollWhenVisible";
 import { getMockPortfolioPositions } from "@/lib/mock-trade-data";
 
 /** On-chain freshness floor for chips the WS feed isn't ticking: one batched
@@ -212,10 +213,12 @@ export function PositionsBar() {
       }
     };
     poll();
-    const id = setInterval(poll, ONCHAIN_POLL_MS);
+    // Visibility-gated: this bar mounts app-wide, so a hidden tab would
+    // otherwise keep batch-reading every position slab forever.
+    const dispose = pollWhenVisible(poll, ONCHAIN_POLL_MS);
     return () => {
       cancelled = true;
-      clearInterval(id);
+      dispose();
     };
   }, [connection, slabKey, usingMockData, hidden]);
 

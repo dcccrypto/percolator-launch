@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { FundingGlobalEntry } from "@/app/api/funding/global/route";
+import { pollWhenVisible } from "@/lib/pollWhenVisible";
 
 /**
  * Funding Rates — shows top markets by funding rate from /api/funding/global.
@@ -32,11 +33,11 @@ export function FundingRates() {
     }
 
     load();
-    // Refresh every 60s
-    const interval = setInterval(load, 60_000);
+    // Refresh every 60s — visibility-gated so hidden tabs don't keep polling
+    const dispose = pollWhenVisible(load, 60_000);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      dispose();
     };
   }, []);
 

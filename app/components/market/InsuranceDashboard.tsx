@@ -11,6 +11,7 @@ import { InsuranceExplainerModal } from "./InsuranceExplainerModal";
 import { InsuranceTopUpModal } from "./InsuranceTopUpModal";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
+import { pollWhenVisible } from "@/lib/pollWhenVisible";
 
 interface InsuranceData {
   balance: string; // U128 as string (in token units e6)
@@ -133,11 +134,12 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
     };
 
     fetchInsurance();
-    const interval = setInterval(fetchInsurance, 30000); // Refresh every 30s
+    // Refresh every 30s — visibility-gated so hidden tabs don't keep polling
+    const dispose = pollWhenVisible(fetchInsurance, 30000);
     return () => {
       cancelled = true;
       controller.abort();
-      clearInterval(interval);
+      dispose();
     };
   }, [slabAddress, mockMode, engine]);
 

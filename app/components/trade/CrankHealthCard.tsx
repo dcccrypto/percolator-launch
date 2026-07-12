@@ -3,9 +3,8 @@
 import { FC } from "react";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
-import { useConnectionCompat } from "@/hooks/useWalletCompat";
+import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { InfoIcon } from "@/components/ui/Tooltip";
-import { useEffect, useState } from "react";
 import {
   V17_MARKET_GROUP_OFF,
   V17_MARKET_GROUP_LEN,
@@ -50,21 +49,11 @@ function readV17AssetSlotLast(data: Uint8Array, assetIndex = 0): bigint | null {
 export const CrankHealthCard: FC = () => {
   const { engine, loading, isV17 } = useEngineState();
   const { raw } = useSlabState();
-  const { connection } = useConnectionCompat();
-  const [currentSlot, setCurrentSlot] = useState<number | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const fetch = async () => {
-      try {
-        const slot = await connection.getSlot();
-        if (!cancelled) setCurrentSlot(slot);
-      } catch { /* ignore */ }
-    };
-    fetch();
-    const interval = setInterval(fetch, 5000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [connection]);
+  // Shared, visibility-gated 10s slot ticker (useEngineFreshness) instead of a
+  // private 5s getSlot poll — the staleness cliff is ~500 slots (~190s), so
+  // 10s granularity loses nothing and this card stops being its own RPC poller.
+  const { currentSlot: currentSlotBig } = useEngineFreshness();
+  const currentSlot = currentSlotBig === null ? null : Number(currentSlotBig);
 
   if (loading) {
     return (

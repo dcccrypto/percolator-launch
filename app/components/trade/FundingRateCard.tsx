@@ -13,6 +13,7 @@ import { isMockSlab } from "@/lib/mock-trade-data";
 import { sanitizeFundingRateBps } from "@/lib/health";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { V17_ENGINE_CONFIG_OFF } from "@/lib/v17-engine-config";
+import { pollWhenVisible } from "@/lib/pollWhenVisible";
 
 /**
  * M19: `max_abs_funding_e9_per_slot` — a V16ConfigAccount field (u64) at
@@ -212,11 +213,12 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
     };
 
     fetchFunding();
-    const interval = setInterval(fetchFunding, 30000);
+    // Visibility-gated so hidden tabs don't keep polling funding data.
+    const dispose = pollWhenVisible(fetchFunding, 30000);
     return () => {
       cancelled = true;
       controller.abort();
-      clearInterval(interval);
+      dispose();
     };
   }, [slabAddress, mockMode, engine, fundingRate, fundingDisabled]);
 

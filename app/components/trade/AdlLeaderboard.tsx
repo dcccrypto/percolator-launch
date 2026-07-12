@@ -18,6 +18,7 @@
 
 import { FC, useEffect, useState, useCallback } from "react";
 import { InfoIcon } from "@/components/ui/Tooltip";
+import { pollWhenVisible } from "@/lib/pollWhenVisible";
 
 // ─── types ────────────────────────────────────────────────────────────────
 
@@ -107,8 +108,8 @@ export const AdlLeaderboard: FC<Props> = ({ slabAddress }) => {
 
   useEffect(() => {
     fetchRankings();
-    const id = setInterval(fetchRankings, 30_000); // refresh every 30s
-    return () => clearInterval(id);
+    // refresh every 30s — visibility-gated so hidden tabs don't keep polling
+    return pollWhenVisible(fetchRankings, 30_000);
   }, [fetchRankings]);
 
   // ── loading ──
