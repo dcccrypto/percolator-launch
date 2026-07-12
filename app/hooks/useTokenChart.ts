@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import type { CandleData } from "@/app/api/chart/[mint]/route";
+import { pollWhenVisible } from "@/lib/pollWhenVisible";
 
 export type ChartDataStatus = "idle" | "loading" | "success" | "error" | "empty";
 
@@ -64,6 +65,9 @@ export function useTokenChart(
 
   // Track current mint+timeframe to avoid stale updates
   const fetchKeyRef = useRef<string>("");
+  // Mirrors `candles` so the error branch below can check "do we already
+  // have data" without taking a stale closure over `candles` state.
+  const candlesRef = useRef<CandleData[]>([]);
 
   const fetchData = useCallback(
     async (mint: string, tf: Timeframe) => {
@@ -72,7 +76,10 @@ export function useTokenChart(
       const key = `${mint}:${tf}`;
       fetchKeyRef.current = key;
 
-      setStatus("loading");
+      // Don't flip to loading on a repoll that already has candles — keep
+      // showing them to avoid flicker every 60s (mirrors usePythChart's
+      // identical fix). Only the very first fetch for a key sees "loading".
+      setStatus((prev) => (prev === "success" ? "success" : "loading"));
       setError(null);
 
       try {
@@ -84,6 +91,7 @@ export function useTokenChart(
         if (fetchKeyRef.current !== key) return;
 
         const fetchedCandles: CandleData[] = json.candles ?? [];
+        candlesRef.current = fetchedCandles;
         setCandles(fetchedCandles);
         setPoolAddress(json.poolAddress ?? null);
         setStatus(fetchedCandles.length > 0 ? "success" : "empty");
@@ -91,7 +99,10 @@ export function useTokenChart(
         if (fetchKeyRef.current !== key) return;
         console.warn("[useTokenChart] fetch error:", err);
         setError(err instanceof Error ? err.message : "Unknown error");
-        setStatus("error");
+        // Keep-last-good: a transient repoll failure shouldn't blank a chart
+        // that already has candles retained — only surface "error" when we
+        // genuinely have nothing to show.
+        setStatus(candlesRef.current.length > 0 ? "success" : "error");
       }
     },
     []
@@ -100,6 +111,7 @@ export function useTokenChart(
   // Initial fetch + timeframe changes
   useEffect(() => {
     if (!mintAddress) {
+      candlesRef.current = [];
       setCandles([]);
       setPoolAddress(null);
       setStatus("idle");
@@ -109,13 +121,12 @@ export function useTokenChart(
 
     fetchData(mintAddress, timeframe);
 
-    // Phase 2: Poll for fresh data every 60 seconds (only short timeframes benefit)
+    // Phase 2: Poll for fresh data every 60 seconds (only short timeframes benefit).
+    // Paused while the tab is hidden — a backgrounded trade tab shouldn't
+    // keep re-fetching chart candles nobody is looking at.
     const POLLING_TIMEFRAMES: Timeframe[] = ["1m", "5m", "15m", "1h", "4h", "1d"];
     if (POLLING_TIMEFRAMES.includes(timeframe)) {
-      const interval = setInterval(() => {
-        fetchData(mintAddress, timeframe);
-      }, POLL_INTERVAL_MS);
-      return () => clearInterval(interval);
+      return pollWhenVisible(() => fetchData(mintAddress, timeframe), POLL_INTERVAL_MS);
     }
   }, [mintAddress, timeframe, fetchData]);
 

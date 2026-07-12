@@ -39,8 +39,16 @@ interface SwitcherRow {
  */
 const MarketSwitcherInner: FC<MarketSwitcherProps> = ({ slabAddress, symbol, logoUrl, mintAddress, mainnetCa }) => {
   const router = useRouter();
-  const { statsMap } = useAllMarketStats();
   const [open, setOpen] = useState(false);
+  // Only fire the 500-market/30s poll while the dropdown is actually open —
+  // this instance was keeping useAllMarketStats' SWR key alive at all times
+  // to back a panel that's closed the overwhelming majority of the session.
+  // No other trade-page component shares this hook instance's job (grep
+  // confirms MarketSwitcher is the only trade-page consumer of
+  // useAllMarketStats — markets/page.tsx, portfolio/page.tsx, and
+  // MarketSelector.tsx are different pages/flows with their own instances),
+  // so gating this one doesn't starve anything else of a warm cache.
+  const { statsMap } = useAllMarketStats({ enabled: open });
   const [query, setQuery] = useState("");
   const [panelPos, setPanelPos] = useState<{ left: number; top: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);

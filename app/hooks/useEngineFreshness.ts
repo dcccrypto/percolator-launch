@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { Connection } from "@solana/web3.js";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
+import { pollWhenVisible } from "@/lib/pollWhenVisible";
 
 /**
  * H6 (2026-07-08): ENGINE accrue-staleness — distinct from `useOracleFreshness`,
@@ -43,28 +45,62 @@ export interface EngineFreshnessState {
   lastGoodOracleSlot: bigint | null;
 }
 
+/**
+ * Module-level shared slot ticker — mirrors useOracleFreshness's shared 1s
+ * tick (same problem, different cadence): every `useEngineFreshness()`
+ * instance used to run its OWN 10s `getSlot()` poll. OrderTicket,
+ * PositionsDock's PositionRow (one per open position), PositionPanel,
+ * OtherMarketPositions, and portfolio/page.tsx all mount this hook for the
+ * same market simultaneously — 2+ identical RPC pollers hitting the same
+ * endpoint for the same value. Collapse to a single interval, refcounted by
+ * subscriber count, and pause it entirely while the tab is hidden via
+ * `pollWhenVisible` (a backgrounded trade tab has no business polling
+ * slots). `connection` is a module-level singleton itself (see
+ * useWalletCompat.ts's `getSharedConnection`), so there is only ever one
+ * poller regardless of which instance's `connection` value starts it.
+ */
+let sharedEngineSlot: bigint | null = null;
+let sharedEngineSlotListeners: Set<(slot: bigint) => void> | null = null;
+let sharedEngineSlotDisposer: (() => void) | null = null;
+
+function subscribeSharedSlot(connection: Connection, listener: (slot: bigint) => void): () => void {
+  if (sharedEngineSlotListeners === null) sharedEngineSlotListeners = new Set();
+  sharedEngineSlotListeners.add(listener);
+  // Replay the last known slot immediately so a newly-mounted subscriber
+  // doesn't wait a full poll cycle to see a value the ticker already has.
+  if (sharedEngineSlot !== null) listener(sharedEngineSlot);
+
+  if (sharedEngineSlotDisposer === null) {
+    const poll = () => {
+      connection.getSlot("confirmed").then((slot) => {
+        sharedEngineSlot = BigInt(slot);
+        sharedEngineSlotListeners?.forEach((cb) => cb(sharedEngineSlot!));
+      }).catch(() => {
+        // Transient RPC hiccup — keep the last known slot rather than flip
+        // to "unknown" (and therefore non-stale) on a single dropped call.
+      });
+    };
+    poll();
+    sharedEngineSlotDisposer = pollWhenVisible(poll, SLOT_POLL_MS);
+  }
+
+  return () => {
+    sharedEngineSlotListeners?.delete(listener);
+    if (sharedEngineSlotListeners?.size === 0 && sharedEngineSlotDisposer !== null) {
+      sharedEngineSlotDisposer();
+      sharedEngineSlotDisposer = null;
+      sharedEngineSlot = null;
+    }
+  };
+}
+
 export function useEngineFreshness(): EngineFreshnessState {
   const { wrapperConfigV17 } = useSlabState();
   const { connection } = useConnectionCompat();
   const [currentSlot, setCurrentSlot] = useState<bigint | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const slot = await connection.getSlot("confirmed");
-        if (!cancelled) setCurrentSlot(BigInt(slot));
-      } catch {
-        // Transient RPC hiccup — keep the last known slot rather than flip
-        // to "unknown" (and therefore non-stale) on a single dropped call.
-      }
-    };
-    poll();
-    const id = setInterval(poll, SLOT_POLL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
+    return subscribeSharedSlot(connection, setCurrentSlot);
   }, [connection]);
 
   // 0n means "never accrued yet" (e.g. a market mid-creation) — treat as

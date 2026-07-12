@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { PythCandleData } from "@/app/api/chart/pyth/route";
+import { pollWhenVisible } from "@/lib/pollWhenVisible";
 
 export type PythChartStatus = "idle" | "loading" | "success" | "empty" | "error";
 
@@ -52,6 +53,9 @@ export function usePythChart(
   const [status, setStatus] = useState<PythChartStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const fetchKeyRef = useRef<string>("");
+  // Mirrors `candles` so the error branch below can check "do we already
+  // have data" without taking a stale closure over `candles` state.
+  const candlesRef = useRef<PythCandleData[]>([]);
 
   const fetchData = useCallback(async (symbol: string, tf: Timeframe) => {
     const { resolution, lookbackSecs } = TIMEFRAME_CONFIG[tf];
@@ -72,6 +76,7 @@ export function usePythChart(
       if (fetchKeyRef.current !== key) return; // stale guard
       if (json.error) throw new Error(json.error);
       const bars = json.candles ?? [];
+      candlesRef.current = bars;
       setCandles(bars);
       setStatus(bars.length > 0 ? "success" : "empty");
     } catch (err) {
@@ -79,19 +84,24 @@ export function usePythChart(
       const msg = err instanceof Error ? err.message : String(err);
       console.warn("[usePythChart] fetch error:", msg);
       setError(msg);
-      setStatus("error");
+      // Keep-last-good: a transient repoll failure shouldn't blank a chart
+      // that already has candles retained — only surface "error" when we
+      // genuinely have nothing to show (same fix as the loading-state one
+      // above, applied to the failure path).
+      setStatus(candlesRef.current.length > 0 ? "success" : "error");
     }
   }, []);
 
   useEffect(() => {
     if (!pythSymbol) {
+      candlesRef.current = [];
       setCandles([]);
       setStatus("idle");
       return;
     }
     fetchData(pythSymbol, timeframe);
-    const id = setInterval(() => fetchData(pythSymbol, timeframe), POLL_INTERVAL_MS);
-    return () => clearInterval(id);
+    // Pause the ~30s repoll while the tab is hidden.
+    return pollWhenVisible(() => fetchData(pythSymbol, timeframe), POLL_INTERVAL_MS);
   }, [pythSymbol, timeframe, fetchData]);
 
   const refresh = useCallback(() => {

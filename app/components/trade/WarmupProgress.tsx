@@ -4,6 +4,7 @@ import { FC, useState, useEffect } from "react";
 import { WarmupExplainerModal } from "./WarmupExplainerModal";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
+import { pollWhenVisible } from "@/lib/pollWhenVisible";
 
 interface WarmupData {
   warmupStartedAtSlot: number;
@@ -59,9 +60,15 @@ export const WarmupProgress: FC<{
   const [countdown, setCountdown] = useState(0);
   const [progress, setProgress] = useState(0);
 
-  // Fetch warmup data
+  // Fetch warmup data. Stops polling once the value can no longer change:
+  // a 404 (no warmup exists for this position, ever) or the warmup period
+  // has fully elapsed (100% unlocked, terminal state) — previously polled
+  // /api/warmup every 5s indefinitely in BOTH cases. Also pauses while the
+  // tab is hidden via pollWhenVisible.
   useEffect(() => {
     if (mockMode) return;
+
+    let disposePoll: (() => void) | null = null;
 
     const fetchWarmup = async () => {
       try {
@@ -71,15 +78,25 @@ export const WarmupProgress: FC<{
         );
         if (!res.ok) {
           if (res.status === 404) {
+            // No warmup exists for this position — that can't change on
+            // its own, so stop polling instead of hitting the endpoint
+            // every 5s forever.
             setWarmupData(null);
             setError(null);
+            disposePoll?.();
             return;
           }
           throw new Error("Failed to fetch warmup data");
         }
-        const data = await res.json();
+        const data: WarmupData = await res.json();
         setWarmupData(data);
         setError(null);
+        // Once the warmup period has fully elapsed, the unlocked amount is
+        // a terminal value — stop polling it.
+        const elapsed = data.currentSlot - data.warmupStartedAtSlot;
+        if (elapsed >= data.warmupPeriodSlots) {
+          disposePoll?.();
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unknown error");
         setWarmupData(null);
@@ -89,8 +106,8 @@ export const WarmupProgress: FC<{
     };
 
     fetchWarmup();
-    const interval = setInterval(fetchWarmup, 5000);
-    return () => clearInterval(interval);
+    disposePoll = pollWhenVisible(fetchWarmup, 5000);
+    return () => disposePoll?.();
   }, [slabAddress, accountIdx, mockMode]);
 
   // Update countdown and progress every second

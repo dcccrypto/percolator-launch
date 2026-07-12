@@ -45,6 +45,7 @@ import { ChartDrawingOverlay } from "./ChartDrawingOverlay";
 import { ChartDrawingToolbar } from "./ChartDrawingToolbar";
 import { useChartDrawingTool } from "@/hooks/useChartDrawingTool";
 import { useChartDrawings } from "@/hooks/useChartDrawings";
+import { pollWhenVisible } from "@/lib/pollWhenVisible";
 import {
   isCandleStyle,
   candleStyleOptions,
@@ -442,6 +443,15 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
   // exact same 5s-gated behaviour, just sourced non-reactively).
   useEffect(() => {
     if (!config || !slabAddress) return;
+    // Only feed this fallback when it's actually the active source — same
+    // gate as the 10s fallback poll effect below. Previously ungated: on
+    // EVERY market (even ones with a real Percolator/Pyth/DEX source) this
+    // fired every ~5s anyway, minting a new oraclePrices array that fed
+    // nothing downstream actually used — candleData's memo re-mints on the
+    // new reference, forcing the structural series effect (a full
+    // removeSeries+addSeries+setData teardown) to rebuild the whole chart
+    // every 5s on every market.
+    if (hasPercolatorData || hasPythData || hasExternalData) return;
     return subscribeSlab(slabAddress, () => {
       const snap = getSnapshot(slabAddress);
       if (snap.priceUsd == null) return;
@@ -453,7 +463,7 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
         return [...prev, { timestamp: now, price: usd }].slice(-1000);
       });
     });
-  }, [config, slabAddress]);
+  }, [config, slabAddress, hasPercolatorData, hasPythData, hasExternalData]);
 
   // Fallback poll: when no Percolator/Pyth/DEX candle source has data, the two
   // effects above are the ONLY way `oraclePrices` ever grows — a one-shot
@@ -500,10 +510,13 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
         .catch(() => {});
     };
     poll();
-    const interval = setInterval(poll, 10_000);
+    // Pause while the tab is hidden — this is a background fallback for a
+    // sparse market, not something worth polling every 10s with nobody
+    // looking at it.
+    const disposePoll = pollWhenVisible(poll, 10_000);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      disposePoll();
     };
   }, [slabAddress, hasPercolatorData, hasPythData, hasExternalData, pythStatus, percolatorStatus, externalStatus]);
 

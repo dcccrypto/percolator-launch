@@ -100,13 +100,35 @@ function getModeLabel(mode: OracleMode): string {
   }
 }
 
+export interface UseOracleFreshnessOptions {
+  /**
+   * Opt-in to a real 1 Hz `elapsedSecs` (and therefore a re-render every
+   * second while mounted). Default `false`: the shared ticker still runs,
+   * but this hook instance only calls `setElapsedSecs` — and therefore only
+   * re-renders — when the DERIVED freshness `level` actually changes.
+   *
+   * Why: the trade-page consumers of this hook (OrderTicket, MarketInfoBar,
+   * PositionsDock, PositionPanel, OtherMarketPositions) read only
+   * `level`/`mode`/`ready`, never `elapsedSecs` — `level` transitions
+   * (fresh→aging→stale) at most a couple of times per push cycle, not once a
+   * second. Before this flag, every one of those consumers re-rendered at
+   * 1 Hz forever for a value nobody displayed (OrderTicket in particular
+   * re-runs its full bigint receipt-math chain on every render). Only the
+   * oracle-detail UI (`OracleFreshnessIndicator`, `OracleDetailsPanel`) that
+   * actually renders "Updated Xs ago" text needs the real per-second tick —
+   * those pass `{ trackSeconds: true }`.
+   */
+  trackSeconds?: boolean;
+}
+
 /**
  * Track oracle price freshness for the current market.
  *
  * For admin mode: uses authorityTimestamp (real unix timestamp).
  * For hyperp/pyth modes: tracks when lastEffectivePriceE6 last changed.
  */
-export function useOracleFreshness(): OracleFreshnessState {
+export function useOracleFreshness(options?: UseOracleFreshnessOptions): OracleFreshnessState {
+  const trackSeconds = options?.trackSeconds ?? false;
   const { config, engine, wrapperConfigV17 } = useSlabState();
   const [elapsedSecs, setElapsedSecs] = useState(0);
   const [lastUpdateMs, setLastUpdateMs] = useState<number | null>(null);
@@ -228,16 +250,29 @@ export function useOracleFreshness(): OracleFreshnessState {
   // Tick every second to update elapsed time — subscribes to the single
   // shared ticker (see subscribeSharedTick above) instead of running its own
   // setInterval per hook instance.
+  //
+  // Default (trackSeconds=false): gate the setState so this instance only
+  // re-renders when the derived `level` actually changes — see
+  // UseOracleFreshnessOptions.trackSeconds above for the full rationale.
+  // The functional update returns the SAME `prev` value (not a new number)
+  // when the level hasn't crossed a threshold, so React bails out of the
+  // re-render entirely (Object.is on an unchanged primitive).
   useEffect(() => {
     if (lastUpdateMs === null) return;
 
     const tick = () => {
       const elapsed = Math.max(0, Math.floor((Date.now() - lastUpdateMs) / 1000));
-      setElapsedSecs(elapsed);
+      if (trackSeconds) {
+        setElapsedSecs(elapsed);
+        return;
+      }
+      setElapsedSecs((prev) =>
+        getFreshnessLevel(prev) === getFreshnessLevel(elapsed) ? prev : elapsed
+      );
     };
     tick();
     return subscribeSharedTick(tick);
-  }, [lastUpdateMs]);
+  }, [lastUpdateMs, trackSeconds]);
 
   // GH#1338: If mode is detected but we never got a lastUpdateMs, the oracle is unavailable
   // (e.g. hyperp market never cranked). This is distinct from stale (had a price but it's old).
