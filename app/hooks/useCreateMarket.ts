@@ -74,6 +74,11 @@ import { getConfig, getNetwork } from "@/lib/config";
 import { normalizeDexType } from "@/lib/dex-type";
 import { parseMarketCreationError } from "@/lib/parseMarketError";
 import {
+  inspectV17MatcherContext,
+  isEmptyV17PortfolioMatcherConfig,
+  readV17PortfolioMatcherConfig,
+} from "@/lib/v17-matcher-state";
+import {
   saveInFlightMarket,
   updateInFlightStep,
   clearInFlightMarket,
@@ -1055,81 +1060,255 @@ export function useCreateMarket() {
             // magic+market+owner filter Step 3 below uses to FIND this portfolio — and
             // skip the whole TX A-D sequence if one already exists (mirrors the
             // existence-check pattern Steps 4/5 already use for their own accounts).
-            const V17_MAGIC_BYTES_STEP2 = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
-            const existingLpPortfolios = await connection.getProgramAccounts(programId, {
-              filters: [
-                { memcmp: { offset: 0, bytes: V17_MAGIC_BYTES_STEP2.toString("base64"), encoding: "base64" } },
-                { memcmp: { offset: 16, bytes: slabPk.toBase58() } },
-                { memcmp: { offset: 80, bytes: wallet.publicKey.toBase58() } },
-              ],
-            });
+            const V17_MAGIC_BYTES_STEP2 = Buffer.from([
+              0x00,
+              0x36,
+              0x31,
+              0x56,
+              0x43,
+              0x52,
+              0x45,
+              0x50,
+            ]);
 
-            if (existingLpPortfolios.length === 0) {
-              // TX A: Create LP portfolio account + InitPortfolio (tag 1).
-              // Size + fund rent for the FULL portfolio length (9347): InitPortfolio reallocs up to it
-              // and adds no lamports, so an undersized account fails with InsufficientFundsForRent.
-              const lpPortfolioKp = Keypair.generate();
-              const lpPortfolioPk = lpPortfolioKp.publicKey;
-              const portfolioRent = await connection.getMinimumBalanceForRentExemption(V17_PORTFOLIO_ACCOUNT_LEN);
+            const I128_MAX_STEP2 =
+              170141183460469231731687303715884105727n;
 
-              const createPortfolioIx = SystemProgram.createAccount({
-                fromPubkey: wallet.publicKey,
-                newAccountPubkey: lpPortfolioPk,
-                lamports: portfolioRent,
-                space: V17_PORTFOLIO_ACCOUNT_LEN,
+            const walletPublicKeyStep2 = wallet.publicKey;
+
+            if (!walletPublicKeyStep2) {
+              throw new Error(
+                "Wallet disconnected while recovering Step 2.",
+              );
+            }
+
+            const buildInitMatcherCtxInstruction = (
+              lpPortfolioPk: PublicKey,
+              matcherCtxPk: PublicKey,
+              delegatePk: PublicKey,
+            ): TransactionInstruction =>
+              buildIx({
                 programId,
-              });
-              const initPortfolioIx = buildIx({
-                programId,
-                keys: buildAccountMetas(ACCOUNTS_INIT_USER, [
-                  wallet.publicKey,
+                keys: buildAccountMetas(ACCOUNTS_INIT_MATCHER_CTX, [
+                  walletPublicKeyStep2,
                   slabPk,
                   lpPortfolioPk,
+                  matcherCtxPk,
+                  matcherProgramId,
+                  delegatePk,
                 ]),
-                data: encodeInitUser({}),
+                data: encodeInitMatcherCtx({
+                  kind: 0,
+                  tradingFeeBps: Number(params.tradingFeeBps),
+                  baseSpreadBps: 50,
+                  maxTotalBps: 200,
+                  impactKBps: 0,
+                  liquidityNotionalE6: 0n,
+                  maxFillAbs: I128_MAX_STEP2,
+                  maxInventoryAbs: I128_MAX_STEP2,
+                  feeToInsuranceBps: 0,
+                  skewSpreadMultBps: 0,
+                }),
               });
 
-              const sigPortfolio = await sendTx({
-                connection, wallet,
-                instructions: [createPortfolioIx, initPortfolioIx],
-                signers: [lpPortfolioKp],
+            const sendMatcherContextInitialization = async (
+              lpPortfolioPk: PublicKey,
+              matcherCtxPk: PublicKey,
+              delegatePk: PublicKey,
+            ): Promise<void> => {
+              const initMatcherCtxIx = buildInitMatcherCtxInstruction(
+                lpPortfolioPk,
+                matcherCtxPk,
+                delegatePk,
+              );
+
+              const signature = await sendTx({
+                connection,
+                wallet,
+                instructions: [initMatcherCtxIx],
                 computeUnits: 200_000,
               });
-              setState((s) => ({ ...s, txSigs: [...s.txSigs, sigPortfolio] }));
 
-              // TX B: Create matcher context account ONLY (empty, matcher-program-owned).
-              // No longer calls the matcher program directly here — see fix note above.
+              setState((state) => ({
+                ...state,
+                txSigs: [...state.txSigs, signature],
+              }));
+            };
+
+            const inspectConfiguredMatcherState = async (
+              lpPortfolioPk: PublicKey,
+              portfolioData: Uint8Array,
+            ) => {
+              const matcherConfig =
+                readV17PortfolioMatcherConfig(portfolioData);
+
+              if (!matcherConfig.enabled) {
+                throw new Error(
+                  "Existing LP portfolio has incomplete matcher initialization: " +
+                    "matcher configuration is disabled; cannot safely advance " +
+                    "past Step 2.",
+                );
+              }
+
+              if (!matcherConfig.matcherProgram.equals(matcherProgramId)) {
+                throw new Error(
+                  "Cannot safely resume Step 2: the existing LP portfolio " +
+                    "references an unexpected matcher program.",
+                );
+              }
+
+              if (matcherConfig.matcherContext.equals(PublicKey.default)) {
+                throw new Error(
+                  "Existing LP portfolio has incomplete matcher initialization: " +
+                    "matcher context is not configured; cannot safely advance " +
+                    "past Step 2.",
+                );
+              }
+
+              const [expectedDelegatePk] = deriveMatcherDelegate(
+                programId,
+                slabPk,
+                lpPortfolioPk,
+                walletPublicKeyStep2,
+                matcherProgramId,
+                matcherConfig.matcherContext,
+              );
+
+              if (!matcherConfig.matcherDelegate.equals(expectedDelegatePk)) {
+                throw new Error(
+                  "Cannot safely resume Step 2: the stored matcher delegate " +
+                    "does not match the expected PDA.",
+                );
+              }
+
+              const matcherContextInfo = await connection.getAccountInfo(
+                matcherConfig.matcherContext,
+              );
+
+              if (!matcherContextInfo) {
+                throw new Error(
+                  "Existing LP portfolio has incomplete matcher initialization: " +
+                    "the configured matcher-context account does not exist; " +
+                    "cannot safely advance past Step 2.",
+                );
+              }
+
+              if (!matcherContextInfo.owner.equals(matcherProgramId)) {
+                throw new Error(
+                  "Cannot safely resume Step 2: the matcher-context account " +
+                    "is owned by an unexpected program.",
+                );
+              }
+
+              const contextState = inspectV17MatcherContext(
+                new Uint8Array(matcherContextInfo.data),
+                expectedDelegatePk,
+              );
+
+              if (contextState === "invalid") {
+                throw new Error(
+                  "Cannot safely resume Step 2: the matcher-context account " +
+                    "has an invalid layout or is bound to another delegate.",
+                );
+              }
+
+              return {
+                matcherConfig,
+                expectedDelegatePk,
+                contextState,
+              };
+            };
+
+            const verifyMatcherReadiness = async (
+              lpPortfolioPk: PublicKey,
+            ): Promise<void> => {
+              const freshPortfolioInfo =
+                await connection.getAccountInfo(lpPortfolioPk);
+
+              if (!freshPortfolioInfo) {
+                throw new Error(
+                  "Matcher recovery could not be verified: the LP portfolio " +
+                    "account was not found after recovery.",
+                );
+              }
+
+              if (!freshPortfolioInfo.owner.equals(programId)) {
+                throw new Error(
+                  "Matcher recovery could not be verified: the LP portfolio " +
+                    "is owned by an unexpected program.",
+                );
+              }
+
+              if (
+                freshPortfolioInfo.data.length !==
+                V17_PORTFOLIO_ACCOUNT_LEN
+              ) {
+                throw new Error(
+                  "Matcher recovery could not be verified: the LP portfolio " +
+                    `has an unexpected length (${freshPortfolioInfo.data.length}).`,
+                );
+              }
+
+              const verifiedState = await inspectConfiguredMatcherState(
+                lpPortfolioPk,
+                new Uint8Array(freshPortfolioInfo.data),
+              );
+
+              if (verifiedState.contextState !== "initialized") {
+                throw new Error(
+                  "Matcher recovery transaction completed, but authoritative " +
+                    "on-chain state still reports an uninitialized matcher context.",
+                );
+              }
+            };
+
+            const createAndInitializeMatcher = async (
+              lpPortfolioPk: PublicKey,
+            ): Promise<void> => {
+              // TX B: create the matcher-program-owned context account.
               const matcherCtxKp = Keypair.generate();
               const matcherCtxPk = matcherCtxKp.publicKey;
-              const matcherCtxRent = await connection.getMinimumBalanceForRentExemption(MATCHER_CONTEXT_LEN);
+
+              const matcherCtxRent =
+                await connection.getMinimumBalanceForRentExemption(
+                  MATCHER_CONTEXT_LEN,
+                );
 
               const createCtxIx = SystemProgram.createAccount({
-                fromPubkey: wallet.publicKey,
+                fromPubkey: walletPublicKeyStep2,
                 newAccountPubkey: matcherCtxPk,
                 lamports: matcherCtxRent,
                 space: MATCHER_CONTEXT_LEN,
                 programId: matcherProgramId,
               });
 
-              // Derive matcher delegate PDA: seeds = ["matcher", market, lpPortfolio, lpOwner, matcherProg, ctx]
               const [delegatePk] = deriveMatcherDelegate(
-                programId, slabPk, lpPortfolioPk, wallet.publicKey, matcherProgramId, matcherCtxPk,
+                programId,
+                slabPk,
+                lpPortfolioPk,
+                walletPublicKeyStep2,
+                matcherProgramId,
+                matcherCtxPk,
               );
 
-              const sigCtx = await sendTx({
-                connection, wallet,
+              const contextSignature = await sendTx({
+                connection,
+                wallet,
                 instructions: [createCtxIx],
                 signers: [matcherCtxKp],
                 computeUnits: 150_000,
               });
-              setState((s) => ({ ...s, txSigs: [...s.txSigs, sigCtx] }));
 
-              // TX C: SetMatcherConfig (tag 68) on the LP portfolio — MUST land before TX D.
-              // Accounts: [lpOwner(s), market(ro), lpPortfolio(w), matcherProg(ro), matcherCtx(ro), delegate(ro)]
+              setState((state) => ({
+                ...state,
+                txSigs: [...state.txSigs, contextSignature],
+              }));
+
+              // TX C: commit the context and delegate to the LP portfolio.
               const setMatcherConfigIx = buildIx({
                 programId,
                 keys: buildAccountMetas(ACCOUNTS_SET_MATCHER_CONFIG, [
-                  wallet.publicKey,
+                  walletPublicKeyStep2,
                   slabPk,
                   lpPortfolioPk,
                   matcherProgramId,
@@ -1139,51 +1318,173 @@ export function useCreateMarket() {
                 data: encodeSetMatcherConfig({ enabled: 1 }),
               });
 
-              const sigMatcherCfg = await sendTx({
-                connection, wallet,
+              const configSignature = await sendTx({
+                connection,
+                wallet,
                 instructions: [setMatcherConfigIx],
                 computeUnits: 200_000,
               });
-              setState((s) => ({ ...s, txSigs: [...s.txSigs, sigMatcherCfg] }));
 
-              // TX D: InitMatcherCtx (tag 83) on the WRAPPER — CPIs into the matcher program,
-              // invoke_signed-ing the delegate PDA so the matcher's process_init sees
-              // lp_pda.is_signer == true. This is the real fix (see note above).
-              // Accounts: [lpOwner(s), market(ro), lpPortfolio(ro), matcherCtx(w), matcherProg(ro), matcherDelegate(ro)]
-              const I128_MAX = 170141183460469231731687303715884105727n;
-              const initMatcherCtxIx = buildIx({
+              setState((state) => ({
+                ...state,
+                txSigs: [...state.txSigs, configSignature],
+              }));
+
+              // TX D: initialize the committed matcher context through the wrapper.
+              await sendMatcherContextInitialization(
+                lpPortfolioPk,
+                matcherCtxPk,
+                delegatePk,
+              );
+            };
+
+            const existingLpPortfolios =
+              await connection.getProgramAccounts(programId, {
+                filters: [
+                  { dataSize: V17_PORTFOLIO_ACCOUNT_LEN },
+                  {
+                    memcmp: {
+                      offset: 0,
+                      bytes: V17_MAGIC_BYTES_STEP2.toString("base64"),
+                      encoding: "base64",
+                    },
+                  },
+                  {
+                    memcmp: {
+                      offset: 16,
+                      bytes: slabPk.toBase58(),
+                    },
+                  },
+                  {
+                    memcmp: {
+                      offset: 80,
+                      bytes: walletPublicKeyStep2.toBase58(),
+                    },
+                  },
+                ],
+              });
+
+            if (existingLpPortfolios.length === 0) {
+              // TX A: create and initialize the LP portfolio.
+              const lpPortfolioKp = Keypair.generate();
+              const lpPortfolioPk = lpPortfolioKp.publicKey;
+
+              const portfolioRent =
+                await connection.getMinimumBalanceForRentExemption(
+                  V17_PORTFOLIO_ACCOUNT_LEN,
+                );
+
+              const createPortfolioIx = SystemProgram.createAccount({
+                fromPubkey: walletPublicKeyStep2,
+                newAccountPubkey: lpPortfolioPk,
+                lamports: portfolioRent,
+                space: V17_PORTFOLIO_ACCOUNT_LEN,
                 programId,
-                keys: buildAccountMetas(ACCOUNTS_INIT_MATCHER_CTX, [
-                  wallet.publicKey,
+              });
+
+              const initPortfolioIx = buildIx({
+                programId,
+                keys: buildAccountMetas(ACCOUNTS_INIT_USER, [
+                  walletPublicKeyStep2,
                   slabPk,
                   lpPortfolioPk,
-                  matcherCtxPk,
-                  matcherProgramId,
-                  delegatePk,
                 ]),
-                data: encodeInitMatcherCtx({
-                  kind: 0, // Passive
-                  tradingFeeBps: Number(params.tradingFeeBps),
-                  baseSpreadBps: 50,
-                  maxTotalBps: 200,
-                  impactKBps: 0,
-                  liquidityNotionalE6: 0n,
-                  maxFillAbs: I128_MAX,
-                  maxInventoryAbs: I128_MAX,
-                  feeToInsuranceBps: 0,
-                  skewSpreadMultBps: 0,
-                }),
+                data: encodeInitUser({}),
               });
 
-              const sigInitMatcherCtx = await sendTx({
-                connection, wallet,
-                instructions: [initMatcherCtxIx],
+              const portfolioSignature = await sendTx({
+                connection,
+                wallet,
+                instructions: [createPortfolioIx, initPortfolioIx],
+                signers: [lpPortfolioKp],
                 computeUnits: 200_000,
               });
-              setState((s) => ({ ...s, txSigs: [...s.txSigs, sigInitMatcherCtx] }));
+
+              setState((state) => ({
+                ...state,
+                txSigs: [...state.txSigs, portfolioSignature],
+              }));
+
+              await createAndInitializeMatcher(lpPortfolioPk);
+              await verifyMatcherReadiness(lpPortfolioPk);
             } else {
-              console.log("[useCreateMarket] Step 2 already completed (LP portfolio exists) — skipping TX A-D.");
+              if (existingLpPortfolios.length !== 1) {
+                throw new Error(
+                  `Cannot safely resume Step 2: expected exactly one LP portfolio, ` +
+                    `found ${existingLpPortfolios.length}.`,
+                );
+              }
+
+              const existingLpPortfolio = existingLpPortfolios[0];
+
+              if (!existingLpPortfolio) {
+                throw new Error(
+                  "Cannot safely resume Step 2: the LP portfolio lookup " +
+                    "returned an empty result.",
+                );
+              }
+
+              const lpPortfolioPk = existingLpPortfolio.pubkey;
+              const lpPortfolioAccount = existingLpPortfolio.account;
+
+              if (!lpPortfolioAccount.owner.equals(programId)) {
+                throw new Error(
+                  "Cannot safely resume Step 2: the existing LP portfolio " +
+                    "is not owned by the configured wrapper program.",
+                );
+              }
+
+              const matcherConfig = readV17PortfolioMatcherConfig(
+                new Uint8Array(lpPortfolioAccount.data),
+              );
+
+              if (!matcherConfig.enabled) {
+                if (!isEmptyV17PortfolioMatcherConfig(matcherConfig)) {
+                  throw new Error(
+                    "Existing LP portfolio has incomplete matcher initialization: " +
+                      "the disabled matcher configuration contains committed " +
+                      "fields; cannot safely advance past Step 2.",
+                  );
+                }
+
+                // TX A already landed. Resume only TX B, TX C, and TX D.
+                await createAndInitializeMatcher(lpPortfolioPk);
+                await verifyMatcherReadiness(lpPortfolioPk);
+
+                console.log(
+                  "[useCreateMarket] Step 2 recovered missing matcher " +
+                    "context/config/initialization (TX B-D).",
+                );
+              } else {
+                const configuredState =
+                  await inspectConfiguredMatcherState(
+                    lpPortfolioPk,
+                    new Uint8Array(lpPortfolioAccount.data),
+                  );
+
+                if (configuredState.contextState === "uninitialized") {
+                  // TX A-C already landed. Resume only TX D using the committed context.
+                  await sendMatcherContextInitialization(
+                    lpPortfolioPk,
+                    configuredState.matcherConfig.matcherContext,
+                    configuredState.expectedDelegatePk,
+                  );
+
+                  await verifyMatcherReadiness(lpPortfolioPk);
+
+                  console.log(
+                    "[useCreateMarket] Step 2 recovered the missing matcher " +
+                      "context initialization (TX D only).",
+                  );
+                } else {
+                  console.log(
+                    "[useCreateMarket] Step 2 matcher state verified on-chain - " +
+                      "skipping duplicate TX A-D.",
+                  );
+                }
+              }
             }
+
             updateInFlightStep(slabPk.toBase58(), 3);
           } else {
             // v12 legacy: encodeInitLP (tag 2) is removed in v17 — skip for v17 slabs.
