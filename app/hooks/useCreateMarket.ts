@@ -1097,7 +1097,12 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
           // if it is DEFINITIVELY absent. On "landed" treat as success; on any
           // indeterminate result (RPC error, on-chain failure, processed-not-
           // confirmed) propagate rather than risk re-running a landed createAccount.
-          if (isConfirmationTimeoutError(err) && canRecover) {
+          if (isConfirmationTimeoutError(err)) {
+            // The landing-check is free (one RPC read) and ALWAYS safe, so it
+            // runs regardless of the recovery budget — a tx that already landed
+            // must be reported as success even after the rebuild cap is spent,
+            // otherwise a fully-successful launch gets reported as a failure.
+            // Only the REBUILD leg is gated on `canRecover`.
             const sig = (err as { signature?: string }).signature;
             const landed = sig ? await checkSignatureLanded(connection, sig) : "unknown";
             if (landed === "landed" && sig) {
@@ -1106,14 +1111,15 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
               );
               return sig; // it's on-chain; treat exactly like a normal success
             }
-            if (landed === "not-found") {
+            if (landed === "not-found" && canRecover) {
               console.warn(
                 `[useCreateMarket] batch: tail step ${idx} timed out and did not land — recovering (attempt ${blockhashRecoveries + 1}/${MAX_BLOCKHASH_RECOVERIES})`,
               );
               await recoverTailFrom(idx);
               continue;
             }
-            // "unknown" → indeterminate; do not rebuild (could double-execute).
+            // "unknown" (indeterminate — never rebuild), or "not-found" with the
+            // recovery budget exhausted → fall through and propagate (resumable).
           }
           throw err;
         }
