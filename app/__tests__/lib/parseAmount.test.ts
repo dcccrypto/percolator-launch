@@ -119,3 +119,23 @@ describe("formatHumanAmount", () => {
     expect(formatted).toBe("123.456789");
   });
 });
+
+describe("malformed decimals are guarded (do not throw a raw BigInt/padStart error)", () => {
+  it("parseHumanAmount folds NaN/Infinity/negative decimals to whole-unit parsing", () => {
+    // NaN → 0 decimals: "100" parses as 100 whole units; no BigInt(NaN) throw.
+    expect(parseHumanAmount("100", NaN)).toBe(100n);
+    expect(parseHumanAmount("100", Infinity)).toBe(100n);
+    expect(parseHumanAmount("100", -5)).toBe(100n);
+  });
+
+  it("formatHumanAmount folds malformed decimals to whole-unit formatting", () => {
+    expect(formatHumanAmount(100n, NaN)).toBe("100");
+    expect(formatHumanAmount(100n, Infinity)).toBe("100");
+    expect(formatHumanAmount(100n, -5)).toBe("100");
+  });
+
+  it("valid decimals are unchanged (no display/parse regression)", () => {
+    expect(parseHumanAmount("1.5", 6)).toBe(1_500_000n);
+    expect(formatHumanAmount(1_500_000n, 6)).toBe("1.5");
+  });
+});
