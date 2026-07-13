@@ -7,7 +7,7 @@ vi.mock("@/lib/config", () => ({
 }));
 
 import { TransactionExpiredBlockheightExceededError } from "@solana/web3.js";
-import { sendTx, estimateFees, getClockDriftWarning, isBlockhashExpiredError, isConfirmationTimeoutError, checkSignatureLanded } from "@/lib/tx";
+import { sendTx, estimateFees, getClockDriftWarning, isBlockhashExpiredError, isConfirmationTimeoutError, checkSignatureLanded, extractTxErrorMessage } from "@/lib/tx";
 import type { SendTxParams, FeeEstimate } from "@/lib/tx";
 
 describe("sendTx", () => {
@@ -57,10 +57,16 @@ describe("sendTx", () => {
     const conn = {
       rpcEndpoint: "https://api.devnet.solana.com",
       getGenesisHash,
+      getRecentPrioritizationFees: vi.fn().mockResolvedValue([]),
+      getBalance: vi.fn().mockResolvedValue(10_000_000),
+      getLatestBlockhash: vi.fn().mockResolvedValue({
+        blockhash: "11111111111111111111111111111111",
+        lastValidBlockHeight: 123,
+      }),
     } as any;
     const wallet = {
       publicKey: Keypair.generate().publicKey,
-      signTransaction: vi.fn(),
+      signTransaction: vi.fn().mockRejectedValue(new Error("mock wallet stop")),
     };
 
     let caught: unknown;
@@ -84,6 +90,35 @@ describe("sendTx", () => {
     };
     expect(params.computeUnits).toBe(200_000);
     expect(params.maxRetries).toBe(2);
+  });
+});
+
+
+describe("extractTxErrorMessage", () => {
+  it("preserves nested transaction logs when a wallet wraps the failure as unexpected", () => {
+    const err = new Error("Unexpected error") as Error & { cause?: unknown };
+    err.cause = {
+      logs: [
+        "Program log: Instruction: Trade",
+        "Program failed: custom program error: 0x15",
+      ],
+    };
+
+    const msg = extractTxErrorMessage(err);
+
+    expect(msg).toContain("Unexpected error");
+    expect(msg).toContain("Program log: Instruction: Trade");
+    expect(msg).toContain("custom program error: 0x15");
+  });
+
+  it("preserves nested cause messages from wrapped transaction errors", () => {
+    const err = new Error("Unexpected error") as Error & { cause?: unknown };
+    err.cause = new Error("Transaction simulation failed: Error processing Instruction 0: custom program error: 0x13");
+
+    const msg = extractTxErrorMessage(err);
+
+    expect(msg).toContain("Unexpected error");
+    expect(msg).toContain("custom program error: 0x13");
   });
 });
 

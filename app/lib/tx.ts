@@ -55,6 +55,60 @@ const PRIORITY_FEE_FALLBACK = Number(process.env.NEXT_PUBLIC_PRIORITY_FEE ?? 100
 const PRIORITY_FEE_CACHE_MS = 45_000;
 let cachedPriorityFee: { fee: number; ts: number } | null = null;
 
+function pushTxErrorString(out: string[], value: unknown) {
+  if (typeof value !== "string") return;
+  const trimmed = value.trim();
+  if (trimmed) out.push(trimmed);
+}
+
+function pushTxErrorLogs(out: string[], value: unknown) {
+  if (!Array.isArray(value)) return;
+  for (const line of value) {
+    pushTxErrorString(out, typeof line === "string" ? line : String(line));
+  }
+}
+
+export function extractTxErrorMessage(error: unknown): string {
+  const out: string[] = [];
+  const seen = new Set<object>();
+
+  const visit = (value: unknown, depth = 0) => {
+    if (value == null || depth > 4) return;
+
+    if (typeof value === "string") {
+      pushTxErrorString(out, value);
+      return;
+    }
+
+    if (typeof value !== "object") {
+      pushTxErrorString(out, String(value));
+      return;
+    }
+
+    if (seen.has(value)) return;
+    seen.add(value);
+
+    if (value instanceof Error) {
+      pushTxErrorString(out, value.message);
+    }
+
+    const record = value as Record<string, unknown>;
+    pushTxErrorString(out, record.message);
+    pushTxErrorString(out, record.transactionMessage);
+    pushTxErrorLogs(out, record.logs);
+    pushTxErrorLogs(out, record.transactionLogs);
+
+    visit(record.cause, depth + 1);
+    visit(record.error, depth + 1);
+    visit(record.err, depth + 1);
+  };
+
+  visit(error);
+
+  const unique = Array.from(new Set(out));
+  return unique.length > 0 ? unique.join("\n") : "Unexpected error";
+}
+
 /**
  * Get dynamic priority fee based on recent network conditions.
  * Cached for PRIORITY_FEE_CACHE_MS; falls back to hardcoded value if the RPC
@@ -537,7 +591,7 @@ export async function sendTx({
           // Privy returns raw signature bytes (64 bytes). Convert to base58.
           lastSignature = bs58.encode(sigBytes);
         } catch (sendErr) {
-          const sendMsg = sendErr instanceof Error ? sendErr.message : String(sendErr);
+          const sendMsg = extractTxErrorMessage(sendErr);
           // Check for Lighthouse-specific errors and provide user-friendly message
           if (
             sendMsg.includes(LIGHTHOUSE_PROGRAM_ID) ||
@@ -592,7 +646,7 @@ export async function sendTx({
             maxRetries: 5,
           });
         } catch (sendErr) {
-          const sendMsg = sendErr instanceof Error ? sendErr.message : String(sendErr);
+          const sendMsg = extractTxErrorMessage(sendErr);
           const isBatchError =
             sendMsg.includes("Missing response from batch") ||
             sendMsg.includes("failed to get recent blockhash") ||
@@ -880,6 +934,7 @@ export async function broadcastSignedTx(
       maxRetries: 5,
     });
   } catch (sendErr) {
+    const sendMsg = extractTxErrorMessage(sendErr);
     if (sendErr instanceof SendTransactionError) {
       try {
         const logs = await sendErr.getLogs(connection);
@@ -895,7 +950,7 @@ export async function broadcastSignedTx(
         if (logsErr instanceof Error && logsErr.message !== sendErr.message) throw logsErr;
       }
     }
-    throw sendErr;
+    throw new Error(sendMsg);
   }
   try {
     await pollConfirmation(connection, signature, opts.onProgress, opts.abortSignal);
