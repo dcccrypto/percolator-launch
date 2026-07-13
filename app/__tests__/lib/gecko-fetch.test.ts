@@ -71,23 +71,34 @@ describe("geckoFetch — bounded retry for GeckoTerminal", () => {
 });
 
 describe("geckoBackoffMs", () => {
+  // rng = 0.5 → jitter factor 0.8 + 0.4*0.5 = 1.0 (no change), keeping the
+  // base/cap assertions below deterministic.
+  const mid = () => 0.5;
+
   it("honors a numeric Retry-After (seconds) but CAPS it at the max backoff", () => {
     const r = res(429, { "retry-after": "100" }); // GT asks for 100s
-    expect(geckoBackoffMs(r, 0, Date.now())).toBe(GECKO_MAX_BACKOFF_MS); // never 100_000ms
+    expect(geckoBackoffMs(r, 0, Date.now(), mid)).toBe(GECKO_MAX_BACKOFF_MS); // never 100_000ms
   });
 
   it("ignores a non-numeric (HTTP-date) Retry-After and uses exponential backoff", () => {
     const r = res(429, { "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" });
-    expect(geckoBackoffMs(r, 0, Date.now())).toBe(300); // exponential, not a misparse
+    expect(geckoBackoffMs(r, 0, Date.now(), mid)).toBe(300); // exponential, not a misparse
   });
 
   it("uses exponential 300ms·2^n when there is no Retry-After", () => {
-    expect(geckoBackoffMs(null, 0, Date.now())).toBe(300);
-    expect(geckoBackoffMs(null, 1, Date.now())).toBe(600);
+    expect(geckoBackoffMs(null, 0, Date.now(), mid)).toBe(300);
+    expect(geckoBackoffMs(null, 1, Date.now(), mid)).toBe(600);
   });
 
   it("never returns negative and never sleeps past the deadline", () => {
     // startedAt already past the deadline → remaining is negative → clamps to 0.
-    expect(geckoBackoffMs(null, 2, Date.now() - GECKO_DEADLINE_MS - 5_000)).toBe(0);
+    expect(geckoBackoffMs(null, 2, Date.now() - GECKO_DEADLINE_MS - 5_000, mid)).toBe(0);
+  });
+
+  it("applies ±20% jitter to the base (below the cap) so retries don't align", () => {
+    // attempt 1 base = 600ms; jitter spans [480, 720].
+    expect(geckoBackoffMs(null, 1, Date.now(), () => 0)).toBe(480); // 600 * 0.8
+    expect(geckoBackoffMs(null, 1, Date.now(), () => 1)).toBeCloseTo(720, 5); // 600 * 1.2
+    expect(geckoBackoffMs(null, 1, Date.now(), mid)).toBe(600); // 600 * 1.0
   });
 });
