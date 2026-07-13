@@ -25,8 +25,8 @@ export function EarnHeader({ stats, loading }: EarnHeaderProps) {
 
         {/* Title */}
         <h1
-          className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl"
-          style={{ fontFamily: 'var(--font-heading)' }}
+          className="text-2xl font-medium tracking-[-0.01em] text-[var(--text)]"
+          style={{ fontFamily: 'var(--font-display)' }}
         >
           <span className="font-normal text-[var(--text-secondary)]">LP </span>Vaults
         </h1>
@@ -54,7 +54,7 @@ export function EarnHeader({ stats, loading }: EarnHeaderProps) {
               value={stats.tvl}
               prefix="$"
               decimals={0}
-              className="text-lg font-semibold text-[var(--text)]"
+              className="text-2xl font-bold text-[var(--text)]"
             />
           </StatCell>
           <StatCell
@@ -62,12 +62,12 @@ export function EarnHeader({ stats, loading }: EarnHeaderProps) {
             loading={loading}
             tooltip="Estimated from the last 30 days of insurance fund fee revenue. Past performance does not guarantee future returns."
           >
-            <span className="text-lg font-semibold text-[var(--cyan)]">
+            <span className="text-2xl font-bold text-[var(--cyan)]">
               <AnimatedNumber
                 value={stats.avgApyPct}
                 suffix="%"
                 decimals={1}
-                className="text-lg font-semibold text-[var(--cyan)]"
+                className="text-2xl font-bold text-[var(--cyan)]"
               />
             </span>
           </StatCell>
@@ -79,7 +79,7 @@ export function EarnHeader({ stats, loading }: EarnHeaderProps) {
               value={stats.dailyFeeRevenue}
               prefix="$"
               decimals={0}
-              className="text-lg font-semibold text-[var(--text)]"
+              className="text-2xl font-bold text-[var(--text)]"
             />
           </StatCell>
           <StatCell
@@ -90,7 +90,7 @@ export function EarnHeader({ stats, loading }: EarnHeaderProps) {
               value={stats.totalInsurance}
               prefix="$"
               decimals={0}
-              className="text-lg font-semibold text-[var(--text)]"
+              className="text-2xl font-bold text-[var(--text)]"
             />
           </StatCell>
         </div>

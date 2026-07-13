@@ -13,8 +13,8 @@ export default function Home() {
 
         {/* Title */}
         <h1
-          className="mb-4 text-3xl font-bold tracking-[-0.02em] text-[var(--text)] sm:text-4xl"
-          style={{ fontFamily: "var(--font-heading)" }}
+          className="mb-4 text-4xl font-bold tracking-tight text-[var(--text)]"
+          style={{ fontFamily: "var(--font-display)" }}
         >
           Percolator Playground
         </h1>

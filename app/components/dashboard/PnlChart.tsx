@@ -57,7 +57,7 @@ export function PnlChart() {
           </div>
         ) : (
           <div className="text-center">
-            <p className={`text-3xl font-bold ${isPositive ? "text-[var(--long)]" : "text-[var(--short)]"}`}
+            <p className={`text-4xl font-bold tabular-nums ${isPositive ? "text-[var(--long)]" : "text-[var(--short)]"}`}
                style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
               {isPositive ? "+" : ""}${Math.abs(pnlFloat).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>

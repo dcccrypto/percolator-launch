@@ -56,8 +56,8 @@ function CreatePageInner() {
               // deploy
             </div>
             <h1
-              className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl"
-              style={{ fontFamily: "var(--font-heading)" }}
+              className="text-2xl font-medium tracking-[-0.01em] text-[var(--text)]"
+              style={{ fontFamily: "var(--font-display)" }}
             >
               <span className="font-normal text-[var(--text)]">Launch a </span>Market
             </h1>

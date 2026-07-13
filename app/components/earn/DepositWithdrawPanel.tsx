@@ -223,7 +223,7 @@ export function DepositWithdrawPanel({
   if (!connected) {
     return (
       <div className="border border-[var(--border)] bg-[var(--panel-bg)] rounded-sm p-8 text-center hud-corners">
-        <div className="text-3xl mb-3">🔐</div>
+        <div className="text-4xl mb-3">🔐</div>
         <p className="text-[13px] text-[var(--text-secondary)] mb-4">
           Connect your wallet to deposit or withdraw
         </p>
@@ -329,7 +329,7 @@ export function DepositWithdrawPanel({
                 const v = e.target.value;
                 if (/^\d*\.?\d*$/.test(v)) setAmount(v);
               }}
-              className="w-full h-12 px-4 pr-16 text-lg font-mono tabular-nums bg-[var(--bg)] border border-[var(--border)] rounded-sm text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]/40 transition-colors"
+              className="w-full h-12 px-4 pr-16 text-2xl font-mono tabular-nums bg-[var(--bg)] border border-[var(--border)] rounded-sm text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]/40 transition-colors"
             />
             <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[12px] text-[var(--text-secondary)]">
               {tab === 'deposit' ? collateralSymbol : 'LP'}

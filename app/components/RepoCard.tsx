@@ -39,7 +39,7 @@ export const RepoCard: FC<Props> = ({ repo, ciStatus }) => {
 
       {/* Repo name */}
       <h3
-        className="mb-2 text-lg font-semibold text-[var(--text)]"
+        className="mb-2 text-2xl font-semibold text-[var(--text)]"
         style={{ fontFamily: "var(--font-display)" }}
       >
         {repo.name}

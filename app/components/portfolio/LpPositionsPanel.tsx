@@ -240,7 +240,7 @@ export function LpPositionsPanel({
         </div>
       ) : error ? (
         <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-6 flex flex-col items-center gap-3 text-center">
-          <span className="text-xl leading-none">⚠️</span>
+          <span className="text-2xl leading-none">⚠️</span>
           <div>
             <p className="text-[12px] font-semibold text-[var(--text-secondary)]">Unable to load LP positions</p>
             <p className="mt-0.5 text-[11px] text-[var(--text-secondary)]">Please try refreshing</p>

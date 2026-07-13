@@ -19,7 +19,7 @@ export function GlowButton({
   const sizeClasses = {
     sm: "px-4 py-2 text-xs",
     md: "px-6 py-3 text-sm",
-    lg: "px-10 py-4 text-base",
+    lg: "px-10 py-4 text-sm",
   };
 
   const variantClasses = {

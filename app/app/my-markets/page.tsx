@@ -594,7 +594,7 @@ const MyMarketsPage: FC = () => {
         <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" />
         <main className="relative mx-auto max-w-4xl px-4 py-10">
           {pageHeader}
-          <h1 className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+          <h1 className="text-2xl font-medium tracking-[-0.01em] text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
             <span className="font-normal text-[var(--text-muted)]">Your </span>Markets
           </h1>
           <p className="mt-2 mb-8 text-[13px] text-[var(--text-secondary)]">manage your markets and positions.</p>
@@ -614,7 +614,7 @@ const MyMarketsPage: FC = () => {
         <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" />
         <main className="relative mx-auto max-w-4xl px-4 py-10">
           {pageHeader}
-          <h1 className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+          <h1 className="text-2xl font-medium tracking-[-0.01em] text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
             <span className="font-normal text-[var(--text-muted)]">Your </span>Markets
           </h1>
           <p className="mt-2 mb-8 text-[13px] text-[var(--text-secondary)]">manage your markets and positions.</p>
@@ -632,7 +632,7 @@ const MyMarketsPage: FC = () => {
         <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" />
         <main className="relative mx-auto max-w-4xl px-4 py-10">
           {pageHeader}
-          <h1 className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+          <h1 className="text-2xl font-medium tracking-[-0.01em] text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
             <span className="font-normal text-[var(--text-muted)]">Your </span>Markets
           </h1>
           <p className="mt-2 mb-8 text-[13px] text-[var(--text-secondary)]">manage your markets and positions.</p>
@@ -678,7 +678,7 @@ const MyMarketsPage: FC = () => {
       <main ref={pageRef} className="relative mx-auto max-w-4xl px-4 py-10 gsap-fade">
         {/* Page Title */}
         <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">// admin</div>
-        <h1 className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+        <h1 className="text-2xl font-medium tracking-[-0.01em] text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
           <span className="font-normal text-[var(--text-muted)]">Your </span>Markets
         </h1>
         <p className="mt-2 mb-6 text-[13px] text-[var(--text-secondary)]">manage your markets and positions.</p>

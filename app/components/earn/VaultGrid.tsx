@@ -172,7 +172,7 @@ export function VaultGrid({ markets, loading }: VaultGridProps) {
         </div>
       ) : sorted.length === 0 ? (
         <div className="border border-[var(--border)] bg-[var(--panel-bg)] rounded-sm p-12 text-center">
-          <div className="text-3xl mb-3">🔍</div>
+          <div className="text-4xl mb-3">🔍</div>
           <p className="text-[13px] text-[var(--text-secondary)]">
             {searchQuery
               ? `No vaults matching "${searchQuery}"`

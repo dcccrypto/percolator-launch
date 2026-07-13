@@ -86,7 +86,7 @@ export function StatsBar() {
             {card.label}
           </p>
           <p
-            className={`text-lg font-bold ${card.color}`}
+            className={`text-2xl font-bold ${card.color}`}
             style={{ fontFamily: "var(--font-jetbrains-mono)" }}
           >
             {card.value}

@@ -478,7 +478,7 @@ export default function PortfolioPage() {
           <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
             // portfolio
           </div>
-          <h1 className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+          <h1 className="text-2xl font-medium tracking-[-0.01em] text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
             <span className="font-normal text-[var(--text)]">Your </span>Positions
           </h1>
           <p className="mt-2 mb-8 text-[13px] text-[var(--text-secondary)]">View all your positions across markets</p>
@@ -504,7 +504,7 @@ export default function PortfolioPage() {
               <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
                 // portfolio
               </div>
-              <h1 className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+              <h1 className="text-2xl font-medium tracking-[-0.01em] text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
                 <span className="font-normal text-[var(--text)]">Your </span>Positions
               </h1>
               <p className="mt-2 text-[13px] text-[var(--text-secondary)]">
@@ -567,7 +567,7 @@ export default function PortfolioPage() {
             ].map((stat, idx, arr) => (
               <div key={stat.label} className={`bg-[var(--panel-bg)] p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]${idx === arr.length - 1 && arr.length % 2 !== 0 ? " col-span-2 sm:col-span-1" : ""}`}>
                 <p className="mb-2 text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text)]">{stat.label}</p>
-                <p className={`text-xl font-bold tabular-nums ${stat.color}`} style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
+                <p className={`text-2xl font-bold tabular-nums ${stat.color}`} style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                   {stat.value}
                 </p>
                 {stat.sub && (

@@ -231,8 +231,8 @@ export default function DashboardPage() {
             // dashboard
           </div>
           <h1
-            className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl"
-            style={{ fontFamily: "var(--font-heading)" }}
+            className="text-2xl font-medium tracking-[-0.01em] text-[var(--text)]"
+            style={{ fontFamily: "var(--font-display)" }}
           >
             <span className="font-normal text-[var(--text-secondary)]">Trader </span>Dashboard
           </h1>
@@ -257,7 +257,7 @@ export default function DashboardPage() {
             {/* Overlay CTA */}
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="border border-[var(--border)] bg-[var(--bg)]/95 p-8 text-center backdrop-blur-md">
-                <div className="mb-3 text-3xl">🔒</div>
+                <div className="mb-3 text-4xl">🔒</div>
                 <p className="mb-4 text-[13px] text-[var(--text-secondary)]">
                   Connect your wallet to view your dashboard
                 </p>
@@ -283,8 +283,8 @@ export default function DashboardPage() {
               // dashboard
             </div>
             <h1
-              className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl"
-              style={{ fontFamily: "var(--font-heading)" }}
+              className="text-2xl font-medium tracking-[-0.01em] text-[var(--text)]"
+              style={{ fontFamily: "var(--font-display)" }}
             >
               <span className="font-normal text-[var(--text-secondary)]">Trader </span>Dashboard
             </h1>

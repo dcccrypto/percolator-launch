@@ -68,7 +68,7 @@ export const FundingExplainerModal: FC<FundingExplainerModalProps> = ({ onClose 
       >
         {/* Header */}
         <div className="sticky top-0 flex items-center justify-between border-b border-[var(--border)]/50 bg-[var(--bg)] px-4 py-3">
-          <h2 className="text-lg font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
+          <h2 className="text-2xl font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
             Understanding Funding Rates
           </h2>
           <button

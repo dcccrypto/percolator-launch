@@ -511,7 +511,7 @@ const DevnetMintContent: FC = () => {
         <ScrollReveal>
           <div className="mb-8">
             <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">// faucet</div>
-            <h1 className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+            <h1 className="text-2xl font-medium tracking-[-0.01em] text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
               <span className="font-normal text-[var(--text-muted)]">Devnet </span>Token Factory
             </h1>
             <p className="mt-2 text-[13px] text-[var(--text-secondary)]">Create SPL tokens on devnet for testing with the launch wizard.</p>

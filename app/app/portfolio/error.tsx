@@ -17,7 +17,7 @@ export default function PortfolioError({
   return (
     <main className="mx-auto max-w-5xl px-4 py-24 text-center">
       <div className="mx-auto max-w-md rounded-none border border-[var(--border)] bg-[var(--panel-bg)] p-8">
-        <h2 className="text-lg font-bold text-[var(--text)]">failed to load portfolio</h2>
+        <h2 className="text-2xl font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>failed to load portfolio</h2>
         <p className="mt-2 text-sm text-[var(--text-secondary)]">{error.message || "Something went wrong."}</p>
         <div className="mt-6 flex justify-center gap-3">
           <button

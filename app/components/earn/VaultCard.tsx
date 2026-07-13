@@ -49,7 +49,7 @@ export function VaultCard({ vault }: VaultCardProps) {
               >
                 Est. APY
               </div>
-              <div className="text-lg font-bold text-[var(--cyan)] font-mono tabular-nums">
+              <div className="text-2xl font-bold text-[var(--cyan)] font-mono tabular-nums">
                 {vault.estimatedApyPct.toFixed(1)}%
               </div>
             </div>

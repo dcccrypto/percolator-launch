@@ -629,15 +629,16 @@ function MarketsPageInner() {
       {/* Grid background — subtle decorative element */}
       <div className="absolute inset-x-0 top-0 h-16 bg-grid pointer-events-none opacity-50" />
 
-      <div className="relative mx-auto max-w-[1100px] px-4 sm:px-6 pt-4 pb-10">
-        {/* Header */}
-        <ScrollReveal>
+      <div className="relative mx-auto max-w-[1100px] px-4 sm:px-6 pt-0 pb-10">
+        <div className="sticky-markets-header pt-4 pb-2 z-30">
+          {/* Header */}
+          <ScrollReveal>
           <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
                 // browse
               </div>
-              <h1 className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+              <h1 className="text-2xl font-medium tracking-[-0.01em] text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
                 <span className="font-normal text-[var(--text)]">All </span>Markets
               </h1>
               <p className="mt-2 text-[13px] text-[var(--text-secondary)]">perpetual futures, pick your poison.</p>
@@ -826,6 +827,7 @@ function MarketsPageInner() {
             </span>
           </div>
         </ScrollReveal>
+      </div>
 
         {showDegradedBanner && (
           <ScrollReveal delay={0.15}>
@@ -856,12 +858,12 @@ function MarketsPageInner() {
             <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-16 text-center">
               {hasSearch || hasActiveFilters ? (
                 <>
-                  <h3 className="text-base font-semibold text-[var(--text)]">nothing here.</h3>
+                  <h3 className="text-2xl font-medium tracking-tight text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>nothing here.</h3>
                   <p className="mt-1 text-sm text-[var(--text-secondary)]">try a different search or filter.</p>
                 </>
               ) : loadErrorMessage ? (
                 <>
-                  <h3 className="text-base font-semibold text-white">couldn&apos;t load markets.</h3>
+                  <h3 className="text-2xl font-medium tracking-tight text-white" style={{ fontFamily: "var(--font-display)" }}>couldn&apos;t load markets.</h3>
                   <p className="mt-2 text-sm text-[var(--text-secondary)]">{loadErrorMessage}</p>
                   <div className="mt-6 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
                     <GlowButton type="button" onClick={() => window.location.reload()}>
@@ -876,7 +878,7 @@ function MarketsPageInner() {
                 </>
               ) : (
                 <>
-                  <h3 className="text-base font-semibold text-[var(--text)]">no markets yet. be the main character.</h3>
+                  <h3 className="text-2xl font-medium tracking-tight text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>no markets yet. be the main character.</h3>
                   <div className="mt-4">
                     <Link href="/create">
                       <GlowButton>launch first market</GlowButton>

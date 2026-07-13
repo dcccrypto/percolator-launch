@@ -239,13 +239,13 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-[var(--accent)]/10 border border-[var(--accent)]/20 flex items-center justify-center text-lg font-bold text-[var(--accent)]">
+            <div className="w-12 h-12 rounded-full bg-[var(--accent)]/10 border border-[var(--accent)]/20 flex items-center justify-center text-2xl font-bold text-[var(--accent)]">
               {symbol.slice(0, 2)}
             </div>
             <div>
               <h1
-                className="text-xl font-medium text-[var(--text)]"
-                style={{ fontFamily: 'var(--font-heading)' }}
+                className="text-2xl font-medium text-[var(--text)]"
+                style={{ fontFamily: 'var(--font-display)' }}
               >
                 {symbol}-PERP{' '}
                 <span className="text-[var(--text-secondary)] font-normal">Vault</span>
@@ -272,7 +272,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
               <div className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">
                 TVL
               </div>
-              <div className="text-lg font-semibold text-[var(--text)] font-mono tabular-nums">
+              <div className="text-2xl font-semibold text-[var(--text)] font-mono tabular-nums">
                 ${formatCompact(vaultUsd)}
               </div>
             </div>
