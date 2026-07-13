@@ -6,7 +6,8 @@ vi.mock("@/lib/config", () => ({
   getConfig: () => ({ network: "devnet", rpcUrl: "https://api.devnet.solana.com" }),
 }));
 
-import { sendTx, estimateFees, getClockDriftWarning } from "@/lib/tx";
+import { TransactionExpiredBlockheightExceededError } from "@solana/web3.js";
+import { sendTx, estimateFees, getClockDriftWarning, isBlockhashExpiredError } from "@/lib/tx";
 import type { SendTxParams, FeeEstimate } from "@/lib/tx";
 
 describe("sendTx", () => {
@@ -124,5 +125,50 @@ describe("getClockDriftWarning", () => {
   it("returns null when no drift has been detected", () => {
     // On module load, cachedClockDriftSeconds is 0 — no warning
     expect(getClockDriftWarning()).toBeNull();
+  });
+});
+
+describe("isBlockhashExpiredError", () => {
+  // Positive cases — the market-launch batch pipeline's tail-recovery
+  // (hooks/useCreateMarket.ts's `broadcastTailTx`) depends on these matching
+  // so a genuinely expired blockhash triggers the refresh-and-re-sign path.
+  it("matches web3.js's TransactionExpiredBlockheightExceededError class", () => {
+    expect(isBlockhashExpiredError(new TransactionExpiredBlockheightExceededError("some-signature"))).toBe(true);
+  });
+
+  it('matches a "Blockhash not found" message', () => {
+    expect(isBlockhashExpiredError(new Error("failed to send transaction: Blockhash not found"))).toBe(true);
+  });
+
+  it('matches a "block height exceeded" message', () => {
+    expect(isBlockhashExpiredError(new Error("Transaction expired: block height exceeded"))).toBe(true);
+  });
+
+  it('matches a raw "BlockhashNotFound" JSON-RPC transaction-error string', () => {
+    expect(isBlockhashExpiredError(new Error('{"err":"BlockhashNotFound"}'))).toBe(true);
+  });
+
+  it("is case-insensitive", () => {
+    expect(isBlockhashExpiredError(new Error("BLOCKHASH NOT FOUND"))).toBe(true);
+  });
+
+  // Negative cases — a generic send/simulation failure must NOT trigger the
+  // extra re-approval popup; only genuine expiry should.
+  it("does not match a generic program error", () => {
+    expect(isBlockhashExpiredError(new Error("custom program error: 0x1"))).toBe(false);
+  });
+
+  it("does not match an insufficient-funds error", () => {
+    expect(isBlockhashExpiredError(new Error("Attempt to debit an account but found no record of a prior credit."))).toBe(false);
+  });
+
+  it("does not match a non-Error, non-string value", () => {
+    expect(isBlockhashExpiredError({ some: "object" })).toBe(false);
+    expect(isBlockhashExpiredError(undefined)).toBe(false);
+    expect(isBlockhashExpiredError(null)).toBe(false);
+  });
+
+  it("does not match an empty-message Error", () => {
+    expect(isBlockhashExpiredError(new Error(""))).toBe(false);
   });
 });
