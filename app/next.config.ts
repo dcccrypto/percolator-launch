@@ -26,7 +26,19 @@ const nextConfig = {
   // Allow loading the dev server from the LAN IP (e.g. phone on the same WiFi).
   // Next 16 blocks /_next/* dev resources from non-localhost origins by default,
   // which makes the page render blank when accessed via an IP. Dev-only setting.
-  allowedDevOrigins: ["192.168.1.42", "192.168.1.*", "localhost", "127.0.0.1"],
+  // Dev-only. Next blocks cross-origin requests to /_next/* dev resources, so a
+  // dev server reached over anything other than localhost serves the HTML but no
+  // JS chunks — i.e. a blank page. "100.*" covers Tailscale's CGNAT range
+  // (100.64.0.0/10), which is how the dev server is reachable from a phone or a
+  // second machine when the LAN interface is firewalled.
+  allowedDevOrigins: [
+    "192.168.1.42",
+    "192.168.1.*",
+    "100.98.227.2", // Tailscale (tailnet) address of the dev machine
+    "100.64.*",
+    "localhost",
+    "127.0.0.1",
+  ],
   // @solana/kit must be transpiled: its browser export resolves to an ESM .mjs file
   // that webpack includes verbatim, causing "Unexpected token 'export'" in production bundles.
   transpilePackages: ["@percolator/sdk", "@solana/kit"],
