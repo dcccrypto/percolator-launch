@@ -64,11 +64,14 @@ function CreatePageInner() {
             <p className="mt-2 text-[13px] text-[var(--text-secondary)]">
               Deploy a perpetual futures market in ~60 seconds.
             </p>
+            {/* v17 has no slab tiers — the slab is always v17MarketAccountLen(14)
+                (26,364 B, the program's max capacity; InitMarket reverts on any
+                other size). The old per-tier costs quoted here were never real. */}
             <div
               className="mt-2 text-[11px] text-[var(--text-secondary)]"
               style={{ fontFamily: "var(--font-mono)" }}
             >
-              small: ~0.45 SOL &middot; medium: ~1.8 SOL &middot; large: ~7 SOL
+              ~0.19 SOL rent &middot; max capacity &middot; 1 approval
             </div>
           </div>
         </ScrollReveal>

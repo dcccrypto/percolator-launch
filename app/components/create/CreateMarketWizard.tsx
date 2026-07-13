@@ -21,7 +21,7 @@ import { toE6, formatMarkPrice } from "@/lib/format";
 import { useDuplicateMarket } from "@/hooks/useDuplicateMarket";
 import { WizardProgress } from "./WizardProgress";
 import { StepTokenSelect } from "./StepTokenSelect";
-import { StepControlRoom } from "./StepControlRoom";
+import { StepControlRoom, leverageToMarginBps, marginBpsToLeverage } from "./StepControlRoom";
 import { LaunchProgress } from "./LaunchProgress";
 import { LaunchSuccess } from "./LaunchSuccess";
 import { RecoverSolBanner } from "./RecoverSolBanner";
@@ -239,7 +239,16 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     setWizard((prev) => ({
       ...prev,
       tradingFeeBps: quickLaunch.config!.tradingFeeBps,
-      initialMarginBps: quickLaunch.config!.initialMarginBps,
+      // Normalise through the dial's own quantisation so the number ON the dial is
+      // exactly the number written on-chain. quick-launch still supplies 1000 bps
+      // ("10x"); create() floors that to MIN_SAFE_INITIAL_MARGIN_BPS (1500 = 6.67x),
+      // but the dial snaps to 0.5x and can only render 6.5x — so storing either the
+      // raw 1000 or a plain floor of 1500 would display 6.5x while actually creating
+      // a 6.67x market. Round-tripping bps → leverage → bps lands on 1538 bps, which
+      // IS 6.5x. Same class of lie as the old "10x" readout; closed here.
+      initialMarginBps: leverageToMarginBps(
+        marginBpsToLeverage(quickLaunch.config!.initialMarginBps),
+      ),
       lpCollateral: quickLaunch.config!.lpCollateral,
       // Apply detected oracle price as adminPrice (used if oracle ends up admin)
       adminPrice: quickLaunch.config!.initialPrice || prev.adminPrice,
