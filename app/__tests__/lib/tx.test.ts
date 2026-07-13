@@ -7,7 +7,7 @@ vi.mock("@/lib/config", () => ({
 }));
 
 import { TransactionExpiredBlockheightExceededError } from "@solana/web3.js";
-import { sendTx, estimateFees, getClockDriftWarning, isBlockhashExpiredError } from "@/lib/tx";
+import { sendTx, estimateFees, getClockDriftWarning, isBlockhashExpiredError, isConfirmationTimeoutError, checkSignatureLanded } from "@/lib/tx";
 import type { SendTxParams, FeeEstimate } from "@/lib/tx";
 
 describe("sendTx", () => {
@@ -152,6 +152,14 @@ describe("isBlockhashExpiredError", () => {
     expect(isBlockhashExpiredError(new Error("BLOCKHASH NOT FOUND"))).toBe(true);
   });
 
+  it('matches a "has expired" message (consistency with sendTx\'s own predicate)', () => {
+    expect(isBlockhashExpiredError(new Error("Transaction's blockhash has expired"))).toBe(true);
+  });
+
+  it("does NOT match a confirmation timeout (that path may have landed — needs a status check)", () => {
+    expect(isBlockhashExpiredError(new Error("Confirmation timeout (90s) — tx may still land. Check explorer: abc"))).toBe(false);
+  });
+
   // Negative cases — a generic send/simulation failure must NOT trigger the
   // extra re-approval popup; only genuine expiry should.
   it("does not match a generic program error", () => {
@@ -170,5 +178,47 @@ describe("isBlockhashExpiredError", () => {
 
   it("does not match an empty-message Error", () => {
     expect(isBlockhashExpiredError(new Error(""))).toBe(false);
+  });
+});
+
+describe("isConfirmationTimeoutError", () => {
+  it("matches pollConfirmation's timeout message", () => {
+    expect(isConfirmationTimeoutError(new Error("Confirmation timeout (90s) — tx may still land. Check explorer: sig123"))).toBe(true);
+  });
+  it("is case-insensitive", () => {
+    expect(isConfirmationTimeoutError(new Error("CONFIRMATION TIMEOUT"))).toBe(true);
+  });
+  it("does not match a blockhash-expiry error (that path has no signature to check)", () => {
+    expect(isConfirmationTimeoutError(new Error("Blockhash not found"))).toBe(false);
+  });
+  it("does not match generic errors or non-strings", () => {
+    expect(isConfirmationTimeoutError(new Error("custom program error: 0x1"))).toBe(false);
+    expect(isConfirmationTimeoutError(null)).toBe(false);
+    expect(isConfirmationTimeoutError({ x: 1 })).toBe(false);
+  });
+});
+
+describe("checkSignatureLanded", () => {
+  const conn = (value: unknown) =>
+    ({ getSignatureStatuses: vi.fn().mockResolvedValue({ value: [value] }) }) as never;
+
+  it('returns "landed" for a confirmed status with no error', async () => {
+    expect(await checkSignatureLanded(conn({ err: null, confirmationStatus: "confirmed" }), "s")).toBe("landed");
+  });
+  it('returns "landed" for a finalized status', async () => {
+    expect(await checkSignatureLanded(conn({ err: null, confirmationStatus: "finalized" }), "s")).toBe("landed");
+  });
+  it('returns "not-found" for a null status (dropped)', async () => {
+    expect(await checkSignatureLanded(conn(null), "s")).toBe("not-found");
+  });
+  it('returns "unknown" for an on-chain error (a rebuild would just fail again)', async () => {
+    expect(await checkSignatureLanded(conn({ err: { InstructionError: [0, "Custom"] } }), "s")).toBe("unknown");
+  });
+  it('returns "unknown" for processed-but-not-yet-confirmed (indeterminate)', async () => {
+    expect(await checkSignatureLanded(conn({ err: null, confirmationStatus: "processed" }), "s")).toBe("unknown");
+  });
+  it('returns "unknown" when the RPC call throws (fail safe — never rebuild on uncertainty)', async () => {
+    const throwing = { getSignatureStatuses: vi.fn().mockRejectedValue(new Error("rpc down")) } as never;
+    expect(await checkSignatureLanded(throwing, "s")).toBe("unknown");
   });
 });
