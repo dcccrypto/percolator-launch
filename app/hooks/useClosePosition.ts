@@ -333,17 +333,25 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         setTimeout(() => setPhase("idle"), 2000);
         return { signature: sig ?? null };
       } catch (e) {
-        // Drop any prewarmed read — whatever failed, the next attempt should
-        // start from a live view of the chain.
-        if (programId && publicKey) {
-          freshReadCache.delete(freshReadKey(programId, slabAddress, publicKey));
-        }
         const msg = e instanceof Error ? e.message : String(e);
         console.error("[useClosePosition] error:", msg);
         setError(humanizeError(msg));
         setPhase("idle");
         throw e;
       } finally {
+        // CRITICAL: a prewarmed read is SPENT once a close consumes it — on
+        // EVERY outcome, not just failure. Invalidating only in `catch` (as
+        // this originally did) left the PRE-CLOSE size cached for the rest of
+        // the 4s TTL after a SUCCESSFUL close, and the position had just
+        // changed. A second close inside that window then read the stale size:
+        // close 50% of 10 SOL (true size now 5), click Close 100% at T+2s, the
+        // cached size 10 is consumed, and the "close" sends -10 — closing 5 and
+        // OPENING A 5 SOL SHORT while the UI reports success. That is precisely
+        // the over-close-into-opposite-exposure this fresh-read guard exists to
+        // prevent; the cache had defeated the guard it was bolted onto.
+        if (programId && publicKey) {
+          freshReadCache.delete(freshReadKey(programId, slabAddress, publicKey));
+        }
         inflightRef.current = false;
         setLoading(false);
       }

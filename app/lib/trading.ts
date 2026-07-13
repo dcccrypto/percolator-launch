@@ -153,10 +153,30 @@ export function estimateEntryFromPnl(
 ): bigint {
   if (positionSize === 0n || oraclePrice === 0n) return oraclePrice;
   const absPos = positionSize < 0n ? -positionSize : positionSize;
-  // computeMarkPnl: pnl = diff * absPos / oraclePrice, where
-  //   diff = oraclePrice - entry (longs) or entry - oraclePrice (shorts).
-  // Invert: diff = onChainPnl * oraclePrice / absPos.
-  const diff = (onChainPnl * oraclePrice) / absPos;
+
+  // `onChainPnl` is the portfolio's `pnl` field, which is COLLATERAL ATOMS —
+  // not the coin-native value `computeMarkPnl` returns. Settled from the SDK
+  // type (`capital`: "Collateral capital in atoms", `pnl`: "Unrealised P&L in
+  // atoms" — the same unit) and, decisively, from the account layout: a
+  // portfolio has 16 LEG slots each with its own `assetIndex`, but only ONE
+  // scalar `pnl`. A single number summing P&L across several different assets
+  // is only meaningful in a common unit, and coin-native cannot express it.
+  //
+  // So the relation to invert is the COLLATERAL one:
+  //   pnl = absPos * (mark - entry) / 1e6        [long; sign flips for short]
+  // giving
+  //   (mark - entry) = pnl * 1e6 / absPos
+  //
+  // The previous formula inverted the coin-margined relation instead
+  // (`diff = pnl * oraclePrice / absPos`), overstating `diff` by ~the price.
+  // On a cache-miss (2nd device, cleared storage, NFT transfer) that produced:
+  // a negative entry for winning longs (silently clamped back to mark, so
+  // Entry showed as mark and PnL as $0), an absurd entry for losers (SOL @
+  // $81.17 with a -$6.17 PnL rendered Entry $581.99 and PnL -$500.81), a liq
+  // price above the mark on a long, and — worst — a `lockedMargin` computed
+  // off that inflated entry that could exceed capital and zero out buying
+  // power, locking the user out of trading a funded account.
+  const diff = (onChainPnl * 1_000_000n) / absPos;
   const entry = positionSize > 0n ? oraclePrice - diff : oraclePrice + diff;
   return entry > 0n ? entry : oraclePrice;
 }

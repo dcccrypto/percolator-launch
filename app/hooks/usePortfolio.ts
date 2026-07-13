@@ -1069,6 +1069,19 @@ export function usePortfolio(enabled: boolean = true): PortfolioData {
   const refresh = () => {
     forceNextLoad.current = true;
     setRefreshCounter((c) => c + 1);
+    // Reconciliation burst (mirrors useTrade's [1200, 2200, 3500]): an
+    // immediate refresh after a close reads back through /api/rpc's
+    // account-data cache (getAccountInfo ~1s, getProgramAccounts ~1.5s) and so
+    // re-publishes the PRE-close snapshot. Without a follow-up, the card kept
+    // showing the old size until the 30s poll — which is exactly what tempts a
+    // user into clicking Close a second time on a position that is already
+    // (partially) closed.
+    [1400, 2600, 4000].forEach((ms) =>
+      setTimeout(() => {
+        forceNextLoad.current = true;
+        setRefreshCounter((c) => c + 1);
+      }, ms),
+    );
   };
 
   // Auto-refresh when tab becomes visible (e.g., after closing position on trade page)

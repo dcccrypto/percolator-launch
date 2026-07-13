@@ -115,7 +115,12 @@ function PortfolioCloseFlow({
   decimals: number;
   onDone: (closed: boolean) => void;
 }) {
-  const { closePosition, loading, error } = useClosePosition(pos.slabAddress);
+  const { closePosition, loading, error, prewarmClose } = useClosePosition(pos.slabAddress);
+  // This flow mounts only when the close modal opens, so mount === modal-open:
+  // prewarm the fresh position read + tx caches. Without this, /portfolio was
+  // the ONE close path that never prewarmed (the dock and the cross-market list
+  // both do), so it consumed whatever the shared read cache happened to hold.
+  useEffect(() => { prewarmClose(); }, [prewarmClose]);
   // Reviewer blocker fix: PortfolioCloseFlow previously dropped `error` from
   // useClosePosition, so a failed close just silently re-enabled the modal
   // with no feedback. Also mirror the trade-page's engine-staleness guard
