@@ -22,8 +22,10 @@ describe("useCreateMarket fresh batched registration", () => {
 
     const freshBatchSource = hookSource.slice(functionStart, functionEnd);
 
+    // The batched path builds the payload via the SHARED factory, not an inline
+    // literal — see buildMarketRegistrationPayload.
     expect(freshBatchSource).toMatch(
-      /const registrationPayload:\s*MarketRegistrationPayload\s*=\s*\{/,
+      /const registrationPayload\s*=\s*buildMarketRegistrationPayload\(\{/,
     );
 
     expect(freshBatchSource).toContain(
@@ -71,5 +73,20 @@ describe("useCreateMarket fresh batched registration", () => {
     expect(registrationRequestSource).not.toMatch(/\bslab_address\s*:/);
     expect(registrationRequestSource).not.toMatch(/\bmint_address\s*:/);
     expect(registrationRequestSource).not.toMatch(/\bdeployer\s*:/);
+  });
+
+  it("builds the registration payload in exactly ONE place (no drift between paths)", () => {
+    // The signed canonical encoding and the POSTed body must be byte-identical
+    // (#2387). Both the batched and sequential paths must therefore go through
+    // the single buildMarketRegistrationPayload factory — never a hand-written
+    // `MarketRegistrationPayload = { ... }` literal that could silently drift.
+    const factoryDefs = hookSource.match(/function buildMarketRegistrationPayload\b/g) ?? [];
+    expect(factoryDefs.length).toBe(1);
+
+    const factoryCalls = hookSource.match(/buildMarketRegistrationPayload\(\{/g) ?? [];
+    expect(factoryCalls.length).toBe(2); // batched path + sequential fallback
+
+    // No inline payload literal survives in either path.
+    expect(hookSource).not.toMatch(/MarketRegistrationPayload\s*=\s*\{/);
   });
 });

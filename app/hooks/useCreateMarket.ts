@@ -553,6 +553,53 @@ interface TailTxDescriptor {
  *  the existing fatal/resumable error path. */
 const MAX_BLOCKHASH_RECOVERIES = 2;
 
+/**
+ * Single source of truth for the market-registration payload.
+ *
+ * The batched fast path and the sequential fallback both POST this object to
+ * /api/markets AND sign a canonical encoding of it (buildMarketRegistrationMessage,
+ * #2387). The signed bytes and the POSTed bytes MUST be byte-identical or the
+ * server's signature check 401s — so the payload must be built in exactly ONE
+ * place. Previously each path hand-wrote its own literal (they had already
+ * drifted cosmetically on the oracle_authority fallback); this factory removes
+ * any chance of a future field being added to one and forgotten on the other.
+ */
+function buildMarketRegistrationPayload(args: {
+  slabAddress: string;
+  params: CreateMarketParams;
+  deployer: string;
+  oracleMode: "pyth" | "hyperp" | "admin" | "keeper";
+  isAdminOracle: boolean;
+  isDevnetEnv: boolean;
+}): MarketRegistrationPayload {
+  const { slabAddress, params, deployer, oracleMode, isAdminOracle, isDevnetEnv } = args;
+  return {
+    slab_address: slabAddress,
+    mint_address: params.mint.toBase58(),
+    symbol: params.symbol ?? "UNKNOWN",
+    name: params.name ?? "Unknown Token",
+    decimals: params.decimals ?? 6,
+    deployer,
+    oracle_mode: oracleMode,
+    dex_pool_address: params.dexPoolAddress ?? null,
+    // Admin-oracle markets on devnet are cranked by the shared crank wallet;
+    // otherwise the deployer is its own oracle authority. (deployer === the
+    // connected wallet, so this matches the former walletPk.toBase58() literal.)
+    oracle_authority: isAdminOracle
+      ? (isDevnetEnv && getConfig().crankWallet ? getConfig().crankWallet : deployer)
+      : null,
+    initial_price_e6: params.initialPriceE6.toString(),
+    // BUG 16: advertise the FLOORED margin actually enforced on-chain, not the
+    // raw requested bps — see flooredInitialMarginBps.
+    max_leverage: params.initialMarginBps > 0
+      ? Math.floor(10000 / flooredInitialMarginBps(params.initialMarginBps))
+      : 1,
+    trading_fee_bps: Number(params.tradingFeeBps),
+    lp_collateral: params.lpCollateral.toString(),
+    mainnet_ca: params.mainnetCA ?? null,
+  };
+}
+
 async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshBatchOutcome> {
   const { connection, wallet, programId, slabKp, params, isDevnetEnv, isKeeperOracle, isAdminOracle, isHyperpOracle, oracleMode, setState } = ctx;
   const walletPk = wallet.publicKey;
@@ -666,32 +713,14 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
     // Build the registration payload once so the wallet signs the exact
     // market data later submitted to POST /api/markets.
     const deployerStr: string = walletPk.toBase58();
-    const registrationPayload: MarketRegistrationPayload = {
-      slab_address: slabPk.toBase58(),
-      mint_address: params.mint.toBase58(),
-      symbol: params.symbol ?? "UNKNOWN",
-      name: params.name ?? "Unknown Token",
-      decimals: params.decimals ?? 6,
+    const registrationPayload = buildMarketRegistrationPayload({
+      slabAddress: slabPk.toBase58(),
+      params,
       deployer: deployerStr,
-      oracle_mode: oracleMode,
-      dex_pool_address: params.dexPoolAddress ?? null,
-      oracle_authority: isAdminOracle
-        ? isDevnetEnv && getConfig().crankWallet
-          ? getConfig().crankWallet
-          : walletPk.toBase58()
-        : null,
-      initial_price_e6: params.initialPriceE6.toString(),
-      max_leverage:
-        params.initialMarginBps > 0
-          ? Math.floor(
-              10000 /
-                flooredInitialMarginBps(params.initialMarginBps),
-            )
-          : 1,
-      trading_fee_bps: Number(params.tradingFeeBps),
-      lp_collateral: params.lpCollateral.toString(),
-      mainnet_ca: params.mainnetCA ?? null,
-    };
+      oracleMode,
+      isAdminOracle,
+      isDevnetEnv,
+    });
 
     let marketsSignature: string | null = null;
     if (marketsNonce && wallet.signMessage) {
@@ -2753,28 +2782,14 @@ export function useCreateMarket() {
             const deployerStr = wallet.publicKey.toBase58();
 
             // Step 1: fetch nonce challenge
-            const registrationPayload: MarketRegistrationPayload = {
-              slab_address: slabPk.toBase58(),
-              mint_address: params.mint.toBase58(),
-              symbol: params.symbol ?? "UNKNOWN",
-              name: params.name ?? "Unknown Token",
-              decimals: params.decimals ?? 6,
+            const registrationPayload = buildMarketRegistrationPayload({
+              slabAddress: slabPk.toBase58(),
+              params,
               deployer: deployerStr,
-              oracle_mode: oracleMode,
-              dex_pool_address: params.dexPoolAddress ?? null,
-              oracle_authority: isAdminOracle
-                                ? (isDevnetEnv && getConfig().crankWallet ? getConfig().crankWallet : deployerStr)
-                                : null,
-              initial_price_e6: params.initialPriceE6.toString(),
-              // BUG 16 fix: advertise the FLOORED margin (what's actually enforced
-                              // on-chain), not the raw requested bps — see flooredInitialMarginBps doc.
-                              max_leverage: params.initialMarginBps > 0
-                                ? Math.floor(10000 / flooredInitialMarginBps(params.initialMarginBps))
-                                : 1,
-              trading_fee_bps: Number(params.tradingFeeBps),
-              lp_collateral: params.lpCollateral.toString(),
-              mainnet_ca: params.mainnetCA ?? null
-            };
+              oracleMode,
+              isAdminOracle,
+              isDevnetEnv,
+            });
 
             let nonce: string | null = null;
             let signature: string | null = null;
