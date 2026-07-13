@@ -5,6 +5,8 @@ import {
   candleStyleOptions,
   chartDataKind,
   hasRenderableData,
+  finiteCandles,
+  finitePricePoints,
   DEFAULT_CHART_STYLE,
   CHART_STYLE_LABELS,
   CHART_STYLE_DISPLAY_ORDER,
@@ -197,6 +199,90 @@ describe("hasRenderableData", () => {
       expect(r.ready).toBe(false);
       expect(r.sparse).toBe(true);
     }
+  });
+});
+
+describe("finiteCandles", () => {
+  const c = (o: number, h: number, l: number, cl: number, t = 1_000, v = 5) => ({
+    timestamp: t,
+    open: o,
+    high: h,
+    low: l,
+    close: cl,
+    volume: v,
+  });
+
+  it("keeps candles whose OHLC are all finite (incl. sub-cent values)", () => {
+    const good = [c(0.000613, 0.000614, 0.000612, 0.000613), c(1, 2, 0.5, 1.5)];
+    expect(finiteCandles(good)).toEqual(good);
+  });
+
+  it("drops any candle with a NaN in open/high/low/close", () => {
+    expect(finiteCandles([c(NaN, 1, 1, 1)])).toHaveLength(0);
+    expect(finiteCandles([c(1, NaN, 1, 1)])).toHaveLength(0);
+    expect(finiteCandles([c(1, 1, NaN, 1)])).toHaveLength(0);
+    expect(finiteCandles([c(1, 1, 1, NaN)])).toHaveLength(0);
+  });
+
+  it("drops candles with ±Infinity or a non-finite timestamp", () => {
+    expect(finiteCandles([c(Infinity, 1, 1, 1)])).toHaveLength(0);
+    expect(finiteCandles([c(1, 1, 1, -Infinity)])).toHaveLength(0);
+    expect(finiteCandles([c(1, 1, 1, 1, NaN)])).toHaveLength(0);
+  });
+
+  it("does NOT require volume to be finite — the volume series coerces that itself", () => {
+    const bar = c(1, 1, 1, 1, 1_000, NaN);
+    expect(finiteCandles([bar])).toEqual([bar]);
+  });
+
+  it("an all-NaN batch collapses to empty, so hasRenderableData reports not-ready (no crash path)", () => {
+    // This is the exact regression: a length>=1 batch of whitespace candles
+    // used to pass `ready` and then throw "Value is null" once a price line
+    // was drawn. After filtering, `ready` is false and the empty overlay shows.
+    const allNaN = [c(NaN, NaN, NaN, NaN), c(NaN, NaN, NaN, NaN)];
+    const filtered = finiteCandles(allNaN);
+    expect(filtered).toHaveLength(0);
+    expect(hasRenderableData("candle-solid", filtered, []).ready).toBe(false);
+  });
+
+  it("a mixed batch keeps only the finite candles", () => {
+    const mixed = [c(1, 1, 1, 1), c(NaN, 1, 1, 1), c(2, 2, 2, 2)];
+    expect(finiteCandles(mixed)).toHaveLength(2);
+  });
+
+  it("preserves input order and does not mutate the source array", () => {
+    const src = [c(1, 1, 1, 1, 1), c(NaN, 1, 1, 1, 2), c(3, 3, 3, 3, 3)];
+    const out = finiteCandles(src);
+    expect(out.map((x) => x.timestamp)).toEqual([1, 3]);
+    expect(src).toHaveLength(3); // source untouched
+  });
+});
+
+describe("finitePricePoints", () => {
+  const p = (price: number, timestamp = 1_000) => ({ timestamp, price });
+
+  it("keeps points with a finite price", () => {
+    const good = [p(0.000613), p(1.5)];
+    expect(finitePricePoints(good)).toEqual(good);
+  });
+
+  it("drops NaN / ±Infinity prices and non-finite timestamps", () => {
+    expect(finitePricePoints([p(NaN)])).toHaveLength(0);
+    expect(finitePricePoints([p(Infinity)])).toHaveLength(0);
+    expect(finitePricePoints([p(1, NaN)])).toHaveLength(0);
+  });
+
+  it("an all-NaN batch collapses to empty → line style reports not-ready", () => {
+    const filtered = finitePricePoints([p(NaN), p(NaN)]);
+    expect(filtered).toHaveLength(0);
+    expect(hasRenderableData("line", [], filtered).ready).toBe(false);
+  });
+
+  it("keeps only the finite points in a mixed batch, order preserved", () => {
+    const src = [p(1, 1), p(NaN, 2), p(3, 3)];
+    const out = finitePricePoints(src);
+    expect(out.map((x) => x.timestamp)).toEqual([1, 3]);
+    expect(src).toHaveLength(3);
   });
 });
 
