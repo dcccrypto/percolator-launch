@@ -1,14 +1,12 @@
 import { Buffer } from "node:buffer";
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { Connection, PublicKey } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
 import nacl from "tweetnacl";
 import * as Sentry from "@sentry/nextjs";
 import { getServiceClient } from "@/lib/supabase";
 import { validateSlabParam } from "@/lib/route-validators";
 import { detectRasterImage } from "@/lib/raster-image-bytes";
-import { isLpPortfolio } from "@/lib/lpPortfolio";
-import { getConfig } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 
@@ -49,16 +47,26 @@ const RATE_LIMIT_MS = 30_000; // 1 upload per 30s per slab
  * A PDA has no private key, so checking marketauth would make every
  * completed launch permanently unable to prove ownership.
  *
- * Instead this binds to the DURABLE creator marker: the market's LP
- * PORTFOLIO — the AMM counterparty account created by the wizard via
- * InitUser with the CREATOR's wallet as its mutable owner (offset 116), and
- * never rotated afterward (see lib/lpPortfolio.ts's isLpPortfolio doc and
- * hooks/useCreatedMarkets.ts). After the signature verifies for `deployer`,
- * this route runs a `getProgramAccounts` scan (magic@0 + market_group_id@16
- * == this slab + owner@116 == deployer) and accepts only if at least one
- * returned account is the market's actual LP (isLpPortfolio — trailing
- * PortfolioMatcherConfigV16.enabled == 1), not just any portfolio the wallet
- * happens to own on this market.
+ * So after the signature verifies for `deployer`, ownership is authorised
+ * against the `markets.deployer` column — the AUTHORITATIVE, durable creator
+ * marker. It's written once at market creation (POST /api/markets, "R2-S8")
+ * after that route independently proves the deployer both signed a nonce AND
+ * matched the slab's on-chain admin while marketauth was still the creator,
+ * and it is never rotated afterward. The route requires
+ * `deployer === markets.deployer`.
+ *
+ * DO NOT authorise on the market's LP portfolio (an earlier version did, via a
+ * getProgramAccounts scan for isLpPortfolio): that signal is FORGEABLE. The
+ * on-chain SetMatcherConfig(enabled=1) handler that sets the isLpPortfolio
+ * discriminator only checks the caller owns the portfolio being modified — NOT
+ * that they created the market — so any wallet can InitUser + SetMatcherConfig
+ * a portfolio on someone else's slab and pass an LP-based check, reopening the
+ * "anyone can overwrite any market's logo" hole this route exists to close.
+ * `useCreatedMarkets` uses the same signal harmlessly (a false positive only
+ * shows an attacker their OWN row); as an auth boundary it must not be trusted.
+ * The DB `deployer` column has no such forgery path. Markets with a null
+ * `deployer` (legacy / failed registration) have no authenticated creator on
+ * record and are reachable only via the admin bypass.
  *
  * Admin bypass: header `x-admin-secret` matching ADMIN_API_SECRET (same
  * convention as keeper-register / /api/oracle/set-price-cap), timing-safe,
@@ -108,34 +116,6 @@ function verifyStatelessDeployerProof(
     }
   }
   return false;
-}
-
-/** v17 portfolio account magic (PERCV16\0), base64 for the memcmp filter. */
-const V17_PORTFOLIO_MAGIC_B64 = Buffer.from([
-  0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50,
-]).toString("base64");
-/** market_group_id — the slab a portfolio belongs to. */
-const V17_PF_MARKET_OFF = 16;
-/** Mutable owner (SDK PF_OWNER_OFF) — NOT provenance@80. */
-const V17_PF_OWNER_OFF = 116;
-
-/**
- * True iff `deployer` owns the market's LP portfolio on `slabAddress` — the
- * durable creator marker (see file header). Scans the wrapper program for
- * portfolios matching (magic + this slab + this owner) and accepts if any of
- * the (0–2) results is the market's actual LP (isLpPortfolio).
- */
-async function verifyMarketOwnership(slabAddress: string, deployer: string): Promise<boolean> {
-  const cfg = getConfig();
-  const connection = new Connection(cfg.rpcUrl, "confirmed");
-  const accounts = await connection.getProgramAccounts(new PublicKey(cfg.programId), {
-    filters: [
-      { memcmp: { offset: 0, bytes: V17_PORTFOLIO_MAGIC_B64, encoding: "base64" } },
-      { memcmp: { offset: V17_PF_MARKET_OFF, bytes: slabAddress } },
-      { memcmp: { offset: V17_PF_OWNER_OFF, bytes: deployer } },
-    ],
-  });
-  return accounts.some(({ account }) => isLpPortfolio(account.data));
 }
 
 // GET /api/markets/[slab]/logo
@@ -197,6 +177,25 @@ export async function POST(
   const deployer = formData.get("deployer");
   const signature = formData.get("signature");
 
+  // Resolve the storage client + market row up front. `markets.deployer` is the
+  // authoritative creator marker used to authorise the upload below (see file
+  // header), and this same lookup doubles as the "market exists" check for both
+  // the wallet-proof and admin-bypass paths.
+  let supabase: ReturnType<typeof getServiceClient>;
+  try {
+    supabase = getServiceClient();
+  } catch {
+    return NextResponse.json({ error: "Storage backend unavailable" }, { status: 503 });
+  }
+  const { data: market, error: marketError } = await supabase
+    .from("markets")
+    .select("slab_address, deployer")
+    .eq("slab_address", validSlab)
+    .single();
+  if (marketError || !market) {
+    return NextResponse.json({ error: "Market not found" }, { status: 404 });
+  }
+
   // AUTH: per-market wallet ownership proof (or admin bypass) — see file
   // header for why this replaced the broken shared-key `requireAuth` gate.
   if (!isAdminBypass(req)) {
@@ -248,20 +247,19 @@ export async function POST(
       );
     }
 
-    // Cryptographic proof of the deployer key alone isn't enough — verify that
-    // key actually owns THIS market's LP portfolio (the durable creator
-    // marker; marketauth can't be used here — see file header for why).
-    try {
-      const owns = await verifyMarketOwnership(validSlab, deployer);
-      if (!owns) {
-        return NextResponse.json({ error: "Signer is not the creator of this market" }, { status: 403 });
-      }
-    } catch (err) {
-      console.error(
-        "[markets/logo] Market ownership check failed:",
-        err instanceof Error ? err.message : String(err),
+    // Cryptographic proof of the deployer key alone isn't enough — authorise
+    // it against the market's AUTHORITATIVE creator (markets.deployer, set at
+    // creation against the on-chain admin + a signed nonce; never rotated). Do
+    // NOT use the on-chain LP-portfolio signal here — it's forgeable (see file
+    // header). Null deployer = no authenticated creator on record → admin only.
+    if (!market.deployer) {
+      return NextResponse.json(
+        { error: "This market has no registered creator on record; a maintainer must set its logo." },
+        { status: 403 },
       );
-      return NextResponse.json({ error: "Failed to verify market ownership" }, { status: 400 });
+    }
+    if (market.deployer !== deployer) {
+      return NextResponse.json({ error: "Signer is not the creator of this market" }, { status: 403 });
     }
   }
 
@@ -289,24 +287,6 @@ export async function POST(
   // Max 2MB
   if (file.size > 2 * 1024 * 1024) {
     return NextResponse.json({ error: "File too large. Max 2MB." }, { status: 400 });
-  }
-
-  let supabase: ReturnType<typeof getServiceClient>;
-  try {
-    supabase = getServiceClient();
-  } catch {
-    return NextResponse.json({ error: "Storage backend unavailable" }, { status: 503 });
-  }
-
-  // Check market exists
-  const { data: market, error: marketError } = await supabase
-    .from("markets")
-    .select("slab_address")
-    .eq("slab_address", validSlab)
-    .single();
-
-  if (marketError || !market) {
-    return NextResponse.json({ error: "Market not found" }, { status: 404 });
   }
 
   try {
