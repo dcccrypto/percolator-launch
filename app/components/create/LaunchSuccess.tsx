@@ -11,7 +11,6 @@ interface LaunchSuccessProps {
   tokenSymbol: string;
   tradingFeeBps: number;
   maxLeverage: number;
-  slabLabel: string;
   marketAddress: string;
   txSigs: string[];
   onDeployAnother: () => void;
@@ -55,7 +54,6 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
   tokenSymbol,
   tradingFeeBps,
   maxLeverage,
-  slabLabel,
   marketAddress,
   txSigs,
   onDeployAnother,
@@ -205,7 +203,9 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
               <span className="text-[9px] text-[var(--text-secondary)]">·</span>
               <span className="text-[9px] text-[var(--text-secondary)]">Leverage: {maxLeverage}x</span>
               <span className="text-[9px] text-[var(--text-secondary)]">·</span>
-              <span className="text-[9px] text-[var(--text-secondary)]">Slab: {slabLabel}</span>
+              {/* v17 slabs are always sized to max capacity — there is no tier to
+                  report here anymore (see StepControlRoom's "Slab" pre-flight readout). */}
+              <span className="text-[9px] text-[var(--text-secondary)]">Slab: Max capacity</span>
             </div>
           </div>
         </div>

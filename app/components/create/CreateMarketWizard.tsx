@@ -14,47 +14,38 @@ import { useStuckSlabs } from "@/hooks/useStuckSlabs";
 import { clearInFlightMarket } from "@/lib/inFlightMarket";
 import { useQuickLaunch } from "@/hooks/useQuickLaunch";
 import { type DexPoolResult } from "@/hooks/useDexPoolSearch";
-import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
-import { SLAB_TIERS, type SlabTierKey } from "@/lib/slabTiers";
+import { parseHumanAmount } from "@/lib/parseAmount";
 import { getConfig, getNetwork } from "@/lib/config";
-import { toE6 } from "@/lib/format";
+import { toE6, formatMarkPrice } from "@/lib/format";
 
 import { useDuplicateMarket } from "@/hooks/useDuplicateMarket";
-import { ModeSelector } from "./ModeSelector";
 import { WizardProgress } from "./WizardProgress";
 import { StepTokenSelect } from "./StepTokenSelect";
-import { StepOracleSelect } from "./StepOracleSelect";
-import { StepParameters } from "./StepParameters";
-import { StepReview } from "./StepReview";
+import { StepControlRoom } from "./StepControlRoom";
 import { LaunchProgress } from "./LaunchProgress";
 import { LaunchSuccess } from "./LaunchSuccess";
 import { RecoverSolBanner } from "./RecoverSolBanner";
-import { SlabTierPicker } from "./SlabTierPicker";
 // W8 fix: share ONE SOL-cost formula with CostEstimate.tsx's own display so the
 // launch gate and the number shown to the user can never drift apart — see that
 // file's computeCreateMarketSolCost doc comment.
 import { computeCreateMarketSolCost } from "./CostEstimate";
-import { isValidBase58Pubkey, isValidHex64 } from "@/lib/createWizardUtils";
+import { isValidBase58Pubkey } from "@/lib/createWizardUtils";
 import { isMockMode } from "@/lib/mock-mode";
-import { getMockTokenByMint } from "@/lib/mock-trade-data";
 
-
-type WizardStep = 1 | 2 | 3 | 4;
+type WizardStep = 1 | 2;
 
 interface WizardState {
-  mode: "quick" | "manual";
   step: WizardStep;
-  // Step 1
+  // Step 1 — Token
   mintAddress: string;
   tokenMeta: { name: string; symbol: string; decimals: number } | null;
   walletBalance: bigint | null;
-  // Step 2
+  // Auto-resolved (no longer user-chosen) — set once when leaving Step 1
   oracleType: "pyth" | "hyperp_ema" | "admin" | "keeper";
   oracleFeed: string;
   dexPool: DexPoolResult | null;
   pythFeed: { id: string; name: string } | null;
-  // Step 3
-  slabTier: SlabTierKey;
+  // Step 2 — Control Room dials
   tradingFeeBps: number;
   initialMarginBps: number;
   lpCollateral: string;
@@ -63,7 +54,6 @@ interface WizardState {
 }
 
 const DEFAULT_STATE: WizardState = {
-  mode: "quick",
   step: 1,
   mintAddress: "",
   tokenMeta: null,
@@ -72,20 +62,22 @@ const DEFAULT_STATE: WizardState = {
   oracleFeed: "",
   dexPool: null,
   pythFeed: null,
-  // Quick mode defaults to small — cheapest tier for quick testing.
-  // Manual mode users can choose their own tier (defaults to large in the picker).
-  slabTier: "small",
   tradingFeeBps: 30,
-  initialMarginBps: 1000,
+  // The dial's leverage range floors to MIN_SAFE_INITIAL_MARGIN_BPS (1500 = 6.67x) —
+  // 2000 bps (5x) is the highest default we can promise without it being a lie once
+  // create() applies that floor on-chain. See StepControlRoom's MAX_LEVERAGE comment.
+  initialMarginBps: 2000,
   lpCollateral: "",
   insuranceAmount: "100",
   adminPrice: "1.000000",
 };
 
 /**
- * Market Creation Wizard — Linear 4-step flow.
- * Step 1: Token → Step 2: Oracle → Step 3: Parameters → Step 4: Review
- * Supports Quick Launch and Manual modes.
+ * Market Creation Wizard — the "Control Room" flow.
+ * Step 1: Token → Step 2: Control Room (auto-resolved price feed + slab size,
+ * four dials for leverage/fee/liquidity/insurance, hold-to-launch).
+ * There is no mode toggle and no slab-tier picker — v17 has exactly one slab
+ * size (max capacity) and oracle detection is always automatic.
  */
 export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }) => {
   const { publicKey } = useWalletCompat();
@@ -128,20 +120,18 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       const persisted = typeof window !== "undefined" ? localStorage.getItem(WIZARD_STORAGE_KEY) : null;
       if (persisted) {
         const parsed = JSON.parse(persisted);
-        // GH#1298: Don't restore directly to the Review page (step 4) — require the user to
-        // navigate there explicitly in the current session. Restoring to step 4 with all fields
-        // pre-populated (PERC-1219) leaves the LAUNCH MARKET button enabled on first render,
-        // risking accidental market creation (0.46 SOL lost in QA). Clamp to the last
-        // navigable form step so the user must click CONTINUE once more before launching.
+        // GH#1298: Don't restore directly to the Control Room (step 2) — require the user
+        // to navigate there explicitly in the current session. Restoring straight to the
+        // step that contains the launch control with all fields pre-populated risks the
+        // hold-to-launch control being immediately armable on first render. Clamp to Step 1
+        // so the user must click CONTINUE once more before reaching it.
         const restoredStep = Number(parsed.step ?? 1);
-        const safeStep: WizardStep = restoredStep >= 4
-          ? (parsed.mode === "quick" ? 2 : 3)
-          : restoredStep as WizardStep;
+        const safeStep: WizardStep = restoredStep >= 2 ? 1 : (restoredStep as WizardStep);
         // Restore serializable fields only — bigint and complex objects need special handling
         return {
           ...DEFAULT_STATE,
           ...parsed,
-          // GH#1298: Never restore to Review directly
+          // GH#1298: Never restore straight to the Control Room
           step: safeStep,
           // bigint fields can't survive JSON — restore as bigint or null
           walletBalance: parsed.walletBalance != null ? BigInt(parsed.walletBalance) : null,
@@ -149,8 +139,6 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
           dexPool: parsed.dexPool ?? null,
           pythFeed: parsed.pythFeed ?? null,
           tokenMeta: parsed.tokenMeta ?? null,
-          // GH#1182: LARGE tier removed — force returning users to "small"
-          slabTier: "small" as const,
           // initialMint prop overrides persisted mint
           mintAddress: initialMint ?? parsed.mintAddress ?? "",
         };
@@ -165,7 +153,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // This ensures WizardProgress shows correct state after a reload and allows
   // the user to click back to previous steps during resume.
   // GH#1298: Use safeStep (same clamping as wizard state above) so completedSteps
-  // doesn't mark step 3 as complete when we've rewound to step 2/3.
+  // doesn't mark step 1 complete when we've rewound past it.
   // GH#1719: Same fresh-navigation guard — don't restore completedSteps on new tabs.
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(() => {
     if (!isPageRefresh) return new Set<number>();
@@ -175,7 +163,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
         const parsed = JSON.parse(persisted);
         const step = Number(parsed.step ?? 1);
         // GH#1298: Apply same safe-step clamping as wizard state above
-        const safeStep = step >= 4 ? (parsed.mode === "quick" ? 2 : 3) : step;
+        const safeStep = step >= 2 ? 1 : step;
         if (safeStep > 1) {
           const steps = new Set<number>();
           for (let i = 1; i < safeStep; i++) steps.add(i);
@@ -209,14 +197,14 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     }
   }, [wizard]);
 
-  // Quick launch auto-detection for parameters
-  const quickMintForHook = wizard.mode === "quick" && wizard.mintAddress.length >= 32 ? wizard.mintAddress : null;
+  // Auto-detection for oracle + suggested parameters — always on, there is no manual mode.
+  const quickMintForHook = wizard.mintAddress.length >= 32 ? wizard.mintAddress : null;
   const quickLaunch = useQuickLaunch(quickMintForHook);
 
   // On-chain mint network validation (set by StepTokenSelect)
   // GH#1280: Initialize to true when restoring from localStorage with a valid tokenMeta.
   // The token was already validated in the previous session — re-validating is unnecessary
-  // and would block Step 4 Review during resume since StepTokenSelect hasn't rendered.
+  // and would block Step 2 during resume since StepTokenSelect hasn't rendered.
   const [mintExistsOnNetwork, setMintExistsOnNetwork] = useState<boolean>(() => {
     try {
       const persisted = typeof window !== "undefined" ? localStorage.getItem(WIZARD_STORAGE_KEY) : null;
@@ -230,7 +218,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     return false;
   });
 
-  // SOL balance for cost check in review step.
+  // SOL balance for the Control Room's launch gate.
   // In mock mode (?mock=1), force a funded-looking value (8.5 SOL) so
   // captures don't show "Insufficient SOL" regardless of the connected
   // wallet's real balance.
@@ -245,9 +233,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     return () => { cancelled = true; };
   }, [publicKey, connection]);
 
-  // Apply quick launch defaults to parameters (fee, margin, collateral, price)
+  // Apply auto-detected defaults to the dials (fee, margin, collateral, price)
   useEffect(() => {
-    if (wizard.mode !== "quick" || !quickLaunch.config) return;
+    if (!quickLaunch.config) return;
     setWizard((prev) => ({
       ...prev,
       tradingFeeBps: quickLaunch.config!.tradingFeeBps,
@@ -256,13 +244,13 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       // Apply detected oracle price as adminPrice (used if oracle ends up admin)
       adminPrice: quickLaunch.config!.initialPrice || prev.adminPrice,
     }));
-  }, [quickLaunch.config, wizard.mode]);
+  }, [quickLaunch.config]);
 
   // Derived values
   const mintValid = isValidBase58Pubkey(wizard.mintAddress) && wizard.mintAddress.length >= 32;
   // BUG 16 fix: use the FLOORED margin (what create() actually enforces on-chain via
   // MIN_SAFE_INITIAL_MARGIN_BPS) so the success screen advertises real leverage, not the
-  // raw requested value the user typed in Step 3.
+  // raw requested value the dial produced.
   const maxLeverage = Math.floor(10000 / flooredInitialMarginBps(wizard.initialMarginBps));
   const feeConflict = wizard.tradingFeeBps >= wizard.initialMarginBps;
   const hasTokens = wizard.walletBalance !== null && wizard.walletBalance > 0n;
@@ -290,48 +278,42 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   const hasSufficientTokensForSeed = wizard.walletBalance !== null && wizard.walletBalance >= totalTokensRequired;
   const symbol = wizard.tokenMeta?.symbol ?? "Token";
 
-  // Step validation
-  const step1Valid = mintValid && wizard.tokenMeta !== null && (wizard.tokenMeta.decimals <= 12) && mintExistsOnNetwork;
+  // Step 1 validation
   // One market per token: an existing market for this CA blocks step 1 —
-  // both the Continue button and Quick Launch's auto-advance — BEFORE the
-  // user spends SOL deploying a slab that POST /api/markets will 409 anyway
-  // (the server check is the authoritative half of this guard). Lives here,
-  // not in StepTokenSelect, because Quick Launch unmounts the step the
-  // moment it auto-advances — step-local state would be discarded before it
-  // could gate anything. Scoped to step-1 advancement only (NOT allValid) so
-  // a mid-launch/resume flow can't be flipped invalid by its own market
+  // both the Continue button and auto-advance — BEFORE the user spends SOL
+  // deploying a slab that POST /api/markets will 409 anyway (the server check
+  // is the authoritative half of this guard). Lives here, not in
+  // StepTokenSelect, because auto-advance unmounts this step the moment
+  // conditions are met — step-local state would be discarded before it could
+  // gate anything. Scoped to step-1 advancement only (NOT allValid) so a
+  // mid-launch/resume flow can't be flipped invalid by its own market
   // appearing in the registry. Fail-open on lookup errors; auto-advance also
   // waits while `checking` so a slow lookup can't be raced past.
+  const step1Valid = mintValid && wizard.tokenMeta !== null && (wizard.tokenMeta.decimals <= 12) && mintExistsOnNetwork;
   const duplicateCheck = useDuplicateMarket(wizard.step === 1 ? wizard.mintAddress : null);
   const step1CanAdvance = step1Valid && !duplicateCheck.checking && duplicateCheck.duplicates.length === 0;
-  const step2Valid = (() => {
-    if (wizard.oracleType === "admin") return true;
-    if (wizard.oracleType === "pyth") return isValidHex64(wizard.oracleFeed);
-    if (wizard.oracleType === "hyperp_ema") return isValidBase58Pubkey(wizard.oracleFeed);
-    if (wizard.oracleType === "keeper") return isValidBase58Pubkey(wizard.oracleFeed);
-    return false;
-  })();
-  const step3Valid =
+
+  // Control Room (dial) validation — trading fee, leverage margin, and seed amounts.
+  const paramsValid =
     wizard.tradingFeeBps >= 1 &&
     wizard.tradingFeeBps <= 1000 &&
     wizard.initialMarginBps >= 100 &&
     !feeConflict &&
     parseFloat(wizard.lpCollateral || "0") > 0 &&
     parseFloat(wizard.insuranceAmount) >= 100;
+
   // BUG 1 fix: rent estimate must be sized off the actual v17 slab length
-  // (DEFAULT_SLAB_SIZE = v17MarketAccountLen(14)), not the stale v12.19 tier.dataSize —
-  // every tier used to grossly over-estimate (and InitMarket itself always used the
-  // v17 size regardless of tier, via the DEFAULT_SLAB_SIZE fallback). The v17 slab size
-  // does NOT vary by tier — tier only selects which deployed program (max concurrent
-  // trader accounts) InitMarket targets, so this is now a constant, not a per-tier memo.
+  // (DEFAULT_SLAB_SIZE = v17MarketAccountLen(14)) — v17 has no slab tiers, the slab is
+  // always this fixed size.
   //
-  // W8 fix (2026-07-08): this used to hand-roll its own formula that omitted the Step 2
-  // LP-portfolio (9347 bytes) + matcher-ctx (320 bytes) rent entirely — under-counting
-  // required SOL by ~0.067 SOL, enough to pass this gate and then strand the user
-  // mid-flow at Step 2 with "insufficient lamports." Now delegates to
-  // computeCreateMarketSolCost() (CostEstimate.tsx), the SAME formula the Review step's
-  // displayed cost estimate uses, so the gate and the displayed number can't drift apart.
-  const requiredSol = useMemo(() => computeCreateMarketSolCost().totalSolCost, []);
+  // W8 fix (2026-07-08): this used to hand-roll its own formula that omitted the LP-portfolio
+  // (9347 bytes) + matcher-ctx (320 bytes) rent entirely — under-counting required SOL by
+  // ~0.067 SOL, enough to pass this gate and then strand the user mid-flow with "insufficient
+  // lamports." Delegates to computeCreateMarketSolCost() (CostEstimate.tsx), the SAME formula
+  // the Control Room's rent readout uses, so the gate and the displayed number can't drift
+  // apart.
+  const solCostBreakdown = useMemo(() => computeCreateMarketSolCost(), []);
+  const requiredSol = solCostBreakdown.totalSolCost;
   const hasSufficientSol = solBalance !== null && solBalance >= requiredSol;
   const isDevnet = getNetwork() === "devnet";
   // Collateral mint: on devnet, ALWAYS the universal Sim-USDC mint (app/lib/config.ts
@@ -343,6 +325,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // CONFIGS), collateral remains the user-entered mint, unchanged.
   const simUsdcMint = (getConfig() as Record<string, unknown>).testUsdcMint as string | undefined;
   const collateralMintAddress = isDevnet && simUsdcMint ? simUsdcMint : wizard.mintAddress;
+  const collateralSymbol = isDevnet ? "Sim-USDC" : symbol;
   // GH#1301 (superseded): tokens used to be auto-airdropped only for Percolator-managed
   // mirror mints. Now that devnet collateral is ALWAYS Sim-USDC and is ALWAYS auto-funded
   // via /api/devnet-pre-fund (called from useCreateMarket.ts's create() before every
@@ -352,7 +335,61 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // captures can walk through the wizard without funding a real wallet.
   const mockBypass = isMockMode();
   const skipTokenBalanceCheck = isDevnet || mockBypass;
-  const allValid = step1Valid && step2Valid && step3Valid && (skipTokenBalanceCheck || (hasTokens && hasSufficientTokensForSeed)) && (mockBypass || hasSufficientSol);
+
+  // Build oracle feed for create — also used below to gate launch on a real price
+  // being available (no on-chain InitMarket call should ever ship a priceE6 of 0).
+  const getOracleFeedAndPrice = (): { oracleFeed: string; priceE6: bigint } => {
+    if (wizard.oracleType === "pyth") {
+      return { oracleFeed: wizard.oracleFeed, priceE6: 0n };
+    }
+    if (wizard.oracleType === "hyperp_ema") {
+      // PERC-470: Hyperp mode uses index_feed_id = zeros.
+      // The DEX pool address is passed separately via dexPoolAddress.
+      // Use the detected DEX price as initial mark price.
+      const dexPrice = wizard.dexPool?.priceUsd;
+      if (!dexPrice || dexPrice <= 0) {
+        // Security: don't default to $1 — require a real price for hyperp mode
+        return { oracleFeed: "0".repeat(64), priceE6: 0n };
+      }
+      const priceE6 = toE6(dexPrice);
+      return { oracleFeed: "0".repeat(64), priceE6 };
+    }
+    // Admin / keeper oracle
+    const price = parseFloat(wizard.adminPrice ?? "1");
+    const priceE6 = toE6(isNaN(price) ? 1 : price);
+    return { oracleFeed: "0".repeat(64), priceE6 };
+  };
+
+  // Pyth doesn't rely on a client-computed priceE6 (the on-chain feed supplies it), so it's
+  // always "ready." Hyperp/admin/keeper all need a nonzero detected price before launching.
+  const { priceE6: currentPriceE6 } = getOracleFeedAndPrice();
+  const oraclePriceValid = wizard.oracleType === "pyth" ? true : currentPriceE6 !== 0n;
+
+  const allValid =
+    step1Valid &&
+    paramsValid &&
+    oraclePriceValid &&
+    (skipTokenBalanceCheck || (hasTokens && hasSufficientTokensForSeed)) &&
+    (mockBypass || hasSufficientSol);
+
+  const launchDisabled = !allValid || !publicKey;
+  const launchDisabledReason: string | undefined = !publicKey
+    ? "Connect wallet"
+    : !step1Valid
+      ? "Resolve a token first"
+      : duplicateCheck.duplicates.length > 0
+        ? "Market already exists for this token"
+        : feeConflict
+          ? "Trading fee must be below leverage margin"
+          : !paramsValid
+            ? "Adjust liquidity or insurance"
+            : !oraclePriceValid
+              ? "Waiting on price feed"
+              : !mockBypass && !hasSufficientSol
+                ? `Need ~${requiredSol.toFixed(3)} SOL`
+                : !skipTokenBalanceCheck && (!hasTokens || !hasSufficientTokensForSeed)
+                  ? "Insufficient token balance"
+                  : undefined;
 
   // Demo-launch state machine. When mockBypass is on and the user clicks
   // LAUNCH MARKET, fake the 5-step deploy progress over ~3 seconds, then
@@ -400,67 +437,23 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     return () => clearTimeout(t);
   }, [demoLaunch.active, demoLaunch.step, router]);
 
-  const handleDemoLaunch = useCallback(() => {
-    setDemoLaunch({ active: true, step: 0, txSigs: [] });
-  }, []);
-
-  // Quick Launch auto-advance: step 1 → step 2 when token is resolved and params ready
-  const quickAutoAdvancedRef = useRef(false);
-  useEffect(() => {
-    if (wizard.mode !== "quick") { quickAutoAdvancedRef.current = false; return; }
-    if (quickAutoAdvancedRef.current) return;
-    if (wizard.step !== 1) return;
-    // One market per token: step1CanAdvance additionally waits for the
-    // duplicate-market lookup to settle and come back clear — auto-advance
-    // must not race past a pending check (see useDuplicateMarket).
-    if (!step1CanAdvance) return;
-    if (quickLaunch.loading) return;
-    if (!quickLaunch.config) return;
-
-    quickAutoAdvancedRef.current = true;
-    setCompletedSteps((prev) => new Set(prev).add(1));
-    setWizard((prev) => ({ ...prev, step: 2 as WizardStep }));
-  }, [wizard.mode, wizard.step, step1CanAdvance, quickLaunch.loading, quickLaunch.config]);
-
-  // Quick Launch: step 2 is slab selection (NOT oracle).
-  // Oracle is resolved from useQuickLaunch and applied when user clicks Continue.
-  // No auto-advance from step 2 — user must explicitly choose a slab tier.
-
   // Navigation
   const goToStep = useCallback((step: WizardStep) => {
     setWizard((prev) => ({ ...prev, step }));
   }, []);
 
-  const advanceStep = useCallback(
-    (fromStep: WizardStep) => {
-      setCompletedSteps((prev) => new Set(prev).add(fromStep));
-      if (fromStep < 4) {
-        setWizard((prev) => ({ ...prev, step: (fromStep + 1) as WizardStep }));
-      }
-    },
-    []
-  );
-
   const goBack = useCallback(() => {
-    setWizard((prev) => {
-      // In quick mode, step 4 (review) goes back to step 2 (slab) — skip oracle step
-      if (prev.mode === "quick" && prev.step === 4) {
-        return { ...prev, step: 2 as WizardStep };
-      }
-      return { ...prev, step: Math.max(1, prev.step - 1) as WizardStep };
-    });
+    setWizard((prev) => ({ ...prev, step: Math.max(1, prev.step - 1) as WizardStep }));
   }, []);
 
-  // Quick Launch: user confirms slab tier → apply oracle from hook → jump to review (step 4)
-  const handleQuickSlabContinue = useCallback(() => {
-    setCompletedSteps((prev) => {
-      const next = new Set(prev);
-      next.add(2);
-      next.add(3); // oracle step auto-completed in quick mode
-      return next;
-    });
+  // Applies the auto-detected oracle (from useQuickLaunch) to wizard state and enters
+  // the Control Room (Step 2). This is the ONLY way to leave Step 1 — there is no
+  // separate manual oracle-selection step anymore, so the detection result must be
+  // captured the moment the user leaves the token step.
+  const applyOracleAndAdvance = useCallback(() => {
+    setCompletedSteps((prev) => new Set(prev).add(1));
     setWizard((prev) => {
-      const base = { ...prev, step: 4 as WizardStep };
+      const base = { ...prev, step: 2 as WizardStep };
       if (quickLaunch.oracleType === "pyth" && quickLaunch.pythFeedId) {
         return {
           ...base,
@@ -499,27 +492,25 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
         adminPrice: quickLaunch.adminPrice,
       };
     });
-  }, [quickLaunch]);
+  }, [quickLaunch, isDevnet]);
 
-  // Mode change
-  const handleModeChange = useCallback(
-    (mode: "quick" | "manual") => {
-      setWizard((prev) => ({
-        ...prev,
-        mode,
-        // Reset oracle fields when switching
-        oracleType: mode === "quick" ? "admin" : "pyth",
-        oracleFeed: "",
-        dexPool: null,
-        pythFeed: null,
-        // Reset slab tier to mode-appropriate default
-        // GH#1178: Always default to small — cheapest/safest for new users.
-        // Manual mode users can still change to medium/large in the picker.
-        slabTier: "small",
-      }));
-    },
-    []
-  );
+  // Auto-advance: step 1 → step 2 the moment the token resolves and detection settles.
+  // Only fires once per mount — a subsequent edit to the mint requires an explicit
+  // Continue click (StepTokenSelect's own button, wired to the same handler below).
+  const quickAutoAdvancedRef = useRef(false);
+  useEffect(() => {
+    if (quickAutoAdvancedRef.current) return;
+    if (wizard.step !== 1) return;
+    // One market per token: step1CanAdvance additionally waits for the
+    // duplicate-market lookup to settle and come back clear — auto-advance
+    // must not race past a pending check (see useDuplicateMarket).
+    if (!step1CanAdvance) return;
+    if (quickLaunch.loading) return;
+    if (!quickLaunch.config) return;
+
+    quickAutoAdvancedRef.current = true;
+    applyOracleAndAdvance();
+  }, [wizard.step, step1CanAdvance, quickLaunch.loading, quickLaunch.config, applyOracleAndAdvance]);
 
   // Keep a stable ref to the current mint address so setMintAddress (which has no
   // deps and therefore no closure over wizard) can detect same-value calls.
@@ -555,48 +546,14 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
 
   // Mock-mode wallet-balance override. As soon as token metadata is
   // available, fake a "3,000 token" balance so the Step 1 token panel
-  // and Step 3/4 review lines render as a funded wallet. No effect in
-  // production (isMockMode() returns false without ?mock=1).
+  // renders as a funded wallet. No effect in production (isMockMode()
+  // returns false without ?mock=1).
   useEffect(() => {
     if (!mockBypass) return;
     const decimals = wizard.tokenMeta?.decimals ?? 6;
     const mockAtoms = BigInt(3000) * BigInt(10) ** BigInt(decimals);
     setWizard((prev) => ({ ...prev, walletBalance: mockAtoms }));
   }, [mockBypass, wizard.tokenMeta?.decimals]);
-
-  // Mock-mode logo lookup. When the user enters a recognized mint
-  // (BONK, SOL, WIF, etc.), the wizard surfaces a real token logo
-  // instead of the text-initials fallback. Used by StepReviewDemo.
-  const mockLogoUrl = useMemo(() => {
-    if (!mockBypass || !wizard.mintAddress) return undefined;
-    return getMockTokenByMint(wizard.mintAddress)?.logoUrl;
-  }, [mockBypass, wizard.mintAddress]);
-
-  const setOracleType = useCallback(
-    (oracleType: "pyth" | "hyperp_ema" | "admin" | "keeper") => {
-      setWizard((prev) => ({ ...prev, oracleType }));
-    },
-    []
-  );
-
-  const setOracleFeed = useCallback((feed: string) => {
-    setWizard((prev) => ({ ...prev, oracleFeed: feed }));
-  }, []);
-
-  const setDexPool = useCallback((pool: DexPoolResult | null) => {
-    setWizard((prev) => ({ ...prev, dexPool: pool }));
-  }, []);
-
-  const setPythFeed = useCallback(
-    (feed: { id: string; name: string } | null) => {
-      setWizard((prev) => ({ ...prev, pythFeed: feed }));
-    },
-    []
-  );
-
-  const setSlabTier = useCallback((tier: SlabTierKey) => {
-    setWizard((prev) => ({ ...prev, slabTier: tier }));
-  }, []);
 
   const setTradingFeeBps = useCallback((bps: number) => {
     setWizard((prev) => ({ ...prev, tradingFeeBps: bps }));
@@ -614,33 +571,6 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     setWizard((prev) => ({ ...prev, insuranceAmount: val }));
   }, []);
 
-  const setAdminPrice = useCallback((val: string) => {
-    setWizard((prev) => ({ ...prev, adminPrice: val }));
-  }, []);
-
-  // Build oracle feed for create
-  const getOracleFeedAndPrice = (): { oracleFeed: string; priceE6: bigint } => {
-    if (wizard.oracleType === "pyth") {
-      return { oracleFeed: wizard.oracleFeed, priceE6: 0n };
-    }
-    if (wizard.oracleType === "hyperp_ema") {
-      // PERC-470: Hyperp mode uses index_feed_id = zeros.
-      // The DEX pool address is passed separately via dexPoolAddress.
-      // Use the detected DEX price as initial mark price.
-      const dexPrice = wizard.dexPool?.priceUsd;
-      if (!dexPrice || dexPrice <= 0) {
-        // Security: don't default to $1 — require a real price for hyperp mode
-        return { oracleFeed: "0".repeat(64), priceE6: 0n };
-      }
-      const priceE6 = toE6(dexPrice);
-      return { oracleFeed: "0".repeat(64), priceE6 };
-    }
-    // Admin oracle
-    const price = parseFloat(wizard.adminPrice ?? "1");
-    const priceE6 = toE6(isNaN(price) ? 1 : price);
-    return { oracleFeed: "0".repeat(64), priceE6 };
-  };
-
   // Launch market (or resume from a stuck slab when resumeFromStep is set)
   const handleLaunch = () => {
     if (!allValid || !publicKey) return;
@@ -656,7 +586,6 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       alert("Cannot create market: enter a valid initial oracle price greater than 0.");
       return;
     }
-    const tier = SLAB_TIERS[wizard.slabTier];
 
     // PERC-470: Map wizard oracle type to CreateMarketParams oracleMode
     // "keeper" = AUTH_MARK oracle with oracle_authority delegated to keeper service
@@ -685,11 +614,11 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       invert: false,
       tradingFeeBps: wizard.tradingFeeBps,
       initialMarginBps: wizard.initialMarginBps,
-      maxAccounts: tier.maxAccounts,
-      // BUG 1 fix: don't override the DEFAULT_SLAB_SIZE fallback with the stale v12.19
-      // tier.dataSize — InitMarket always encodes maxPortfolioAssets:14, so the slab MUST
-      // be exactly v17MarketAccountLen(14) regardless of tier, or InitMarket reverts with
-      // InvalidSlabLen (and over-charges ~0.67 SOL rent in the process).
+      // BUG 1 fix: don't override the DEFAULT_SLAB_SIZE fallback — InitMarket always
+      // encodes maxPortfolioAssets:14, so the slab MUST be exactly v17MarketAccountLen(14)
+      // regardless of anything the wizard used to let the user pick, or InitMarket reverts
+      // with InvalidSlabLen (and over-charges rent in the process). v17 has no slab tiers —
+      // maxAccounts is deliberately omitted here (create() defaults it).
       slabDataSize: DEFAULT_SLAB_SIZE,
       symbol: marketSymbol,
       name: marketName,
@@ -701,8 +630,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       mainnetCA: wizard.mintAddress,
       oracleMode,
       // PERC-470/#811: Pass DEX pool address for hyperp mode.
-      // wizard.dexPool is set when the user selects a pool from the UI.
-      // For Quick Launch, poolInfo may be null while oracleFeed holds the pool address —
+      // wizard.dexPool is set when auto-detection finds a pool.
+      // For auto-launch, poolInfo may be null while oracleFeed holds the pool address —
       // use oracleFeed as fallback ONLY when it's a valid base58 pubkey (pool address),
       // not a Pyth feed hex64 — prevents confusing on-chain rejection (security LOW fix).
       ...(oracleMode === "hyperp" ? {
@@ -731,7 +660,6 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     // the user clicks "Retry Step 1" (slabAddress is null until sendTx succeeds).
     if (createState.step > 0 && !createState.slabAddress) return;
     const { oracleFeed, priceE6 } = getOracleFeedAndPrice();
-    const tier = SLAB_TIERS[wizard.slabTier];
 
     // PERC-470: Include oracleMode + dexPoolAddress in retry params (fixes #810)
     const oracleMode = wizard.oracleType === "pyth" ? "pyth" as const
@@ -756,7 +684,6 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       invert: false,
       tradingFeeBps: wizard.tradingFeeBps,
       initialMarginBps: wizard.initialMarginBps,
-      maxAccounts: tier.maxAccounts,
       // BUG 1 fix: same rationale as handleLaunch above — always the real v17 slab size.
       slabDataSize: DEFAULT_SLAB_SIZE,
       symbol: retryMarketSymbol,
@@ -766,7 +693,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       mainnetCA: wizard.mintAddress,
       oracleMode,
       // PERC-470/#811: Same fallback as handleLaunch — oracleFeed holds pool address
-      // for Quick Launch when wizard.dexPool is null.
+      // when wizard.dexPool is null.
       // Guard: only use oracleFeed as fallback if it's a valid base58 pubkey (pool address).
       ...(oracleMode === "hyperp" ? {
         dexPoolAddress: wizard.dexPool?.poolAddress ??
@@ -849,7 +776,6 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
         tokenSymbol={symbol}
         tradingFeeBps={wizard.tradingFeeBps}
         maxLeverage={maxLeverage}
-        slabLabel={SLAB_TIERS[wizard.slabTier].label}
         marketAddress={createState.slabAddress!}
         txSigs={createState.txSigs}
         onDeployAnother={handleReset}
@@ -898,7 +824,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     );
   }
 
-  // Oracle label for review
+  // Pre-flight readouts for the Control Room panel
   const oracleLabel =
     wizard.oracleType === "pyth" && wizard.pythFeed
       ? wizard.pythFeed.name
@@ -914,35 +840,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
                 ? `${wizard.oracleFeed.slice(0, 12)}...`
                 : "Not configured";
 
-  const detectedPrice = wizard.dexPool?.priceUsd ?? undefined;
+  const startPrice = formatMarkPrice(wizard.adminPrice ? Number(wizard.adminPrice) : null);
 
-  // Wallet balance display for step 3
-  const walletBalanceDisplay =
-    wizard.walletBalance !== null && wizard.tokenMeta
-      ? formatHumanAmount(wizard.walletBalance, wizard.tokenMeta.decimals)
-      : null;
-
-  // Step labels — Quick Launch skips Oracle (step 2 auto-resolved), so relabel it
-  const stepLabels: readonly [string, string, string, string] =
-    wizard.mode === "quick"
-      ? ["Token", "Oracle ✓", "Slab Tier", "Review"]
-      : ["Token", "Oracle", "Parameters", "Review"];
-
-  // GH#1615: In Quick Launch mode, oracle (step 3) is auto-completed and never shown.
-  // Physical wizard.step goes 1 → 2 → 4.  Map to display step so the header reads
-  // "STEP 1 / 3 — Token", "STEP 2 / 3 — Slab Tier", "STEP 3 / 3 — Review".
-  // Quick mode step content labels (3 visible steps):
-  const quickStepDisplayLabel: Record<number, string> = { 1: "Token", 2: "Slab Tier", 4: "Review" };
-  const quickStepDisplayNum: Record<number, number> = { 1: 1, 2: 2, 4: 3 };
-  const headerStepLabel =
-    wizard.mode === "quick"
-      ? (quickStepDisplayLabel[wizard.step] ?? stepLabels[wizard.step - 1])
-      : stepLabels[wizard.step - 1];
-  const headerStepNum =
-    wizard.mode === "quick"
-      ? (quickStepDisplayNum[wizard.step] ?? wizard.step)
-      : wizard.step;
-  const headerStepTotal = wizard.mode === "quick" ? 3 : 4;
+  const stepLabels: readonly [string, string] = ["Token", "Market"];
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
@@ -1016,11 +916,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
         </div>
       )}
 
-      {/* Mode Selector */}
-      <ModeSelector mode={wizard.mode} onModeChange={handleModeChange} />
-
       {/* Progress indicator */}
-      {/* GH#1615: pass display overrides so mobile counter shows correct step/total in Quick Launch */}
       <WizardProgress
         currentStep={wizard.step}
         completedSteps={completedSteps}
@@ -1028,19 +924,14 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
         onStepClick={(step) => {
           if (completedSteps.has(step)) goToStep(step);
         }}
-        displayStep={headerStepNum}
-        displayTotal={headerStepTotal}
-        displayStepLabel={headerStepLabel}
       />
 
       {/* Step panel */}
       <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-5 sm:p-6">
         {/* Step header */}
-        {/* GH#1615: Use display step/total/label so Quick Launch shows "STEP 2 / 3 — Slab Tier"
-            instead of the confusing "STEP 2 / 4 — Oracle ✓" while rendering slab content. */}
         <div className="mb-5 pb-4 border-b border-[var(--border)]">
           <p className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">
-            STEP {headerStepNum} / {headerStepTotal} — {headerStepLabel}
+            STEP {wizard.step} / {stepLabels.length} — {stepLabels[wizard.step - 1]}
           </p>
         </div>
 
@@ -1052,140 +943,37 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             onTokenResolved={setTokenMeta}
             onBalanceChange={setWalletBalance}
             onMintNetworkValidChange={setMintExistsOnNetwork}
-            onContinue={() => advanceStep(1)}
+            onContinue={() => {
+              quickAutoAdvancedRef.current = true;
+              applyOracleAndAdvance();
+            }}
             canContinue={step1CanAdvance}
             duplicateMarkets={duplicateCheck.duplicates}
           />
         )}
 
-        {/* Step 2: Quick mode = Slab Tier selection; Manual mode = Oracle */}
-        {wizard.step === 2 && wizard.mode === "quick" && (
-          <div className="space-y-6">
-            <div>
-              <p className="text-[11px] text-[var(--text-secondary)] mb-4">
-                Choose your market size. Larger slabs support more concurrent traders but cost more SOL to deploy.
-              </p>
-              <label className="block text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text)] mb-3">
-                Slab Tier
-              </label>
-              <SlabTierPicker value={wizard.slabTier} onChange={setSlabTier} />
-            </div>
-            {/* Oracle detection status */}
-            {quickLaunch.loading ? (
-              <p className="text-[10px] text-[var(--text-dim)]">⏳ Detecting oracle...</p>
-            ) : quickLaunch.oracleType === "pyth" && quickLaunch.pythFeedId ? (
-              <p className="text-[10px] text-[var(--long)]">
-                ✓ Pyth oracle detected — price feed will be used automatically
-              </p>
-            ) : quickLaunch.oracleType === "hyperp_ema" && quickLaunch.dexPoolAddress && isDevnet ? (
-              <p className="text-[10px] text-[var(--long)]">
-                ✓ DEX pool detected — keeper will push mainnet prices to devnet (AUTH_MARK)
-              </p>
-            ) : quickLaunch.oracleType === "hyperp_ema" && quickLaunch.dexPoolAddress ? (
-              <p className="text-[10px] text-[var(--long)]">
-                ✓ DEX pool detected — permissionless on-chain pricing (no keeper needed)
-              </p>
-            ) : (
-              <p className="text-[10px] text-[var(--text-secondary)]">
-                ℹ Admin oracle — you&apos;ll control pricing (devnet token)
-              </p>
-            )}
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={goBack}
-                className="border border-[var(--border)] bg-transparent px-5 py-3 text-[12px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-all hud-btn-corners hover:border-[var(--accent)]/30 hover:text-[var(--text)]"
-              >
-                ← BACK
-              </button>
-              <button
-                type="button"
-                onClick={handleQuickSlabContinue}
-                className="flex-1 border border-[var(--accent)]/50 bg-[var(--accent)]/[0.08] py-3 text-[13px] font-bold uppercase tracking-[0.1em] text-[var(--accent)] transition-all duration-200 hud-btn-corners hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.15]"
-              >
-                CONTINUE →
-              </button>
-            </div>
-          </div>
-        )}
-        {wizard.step === 2 && wizard.mode === "manual" && (
-          <StepOracleSelect
-            mintAddress={wizard.mintAddress}
-            mintValid={mintValid}
-            tokenSymbol={wizard.tokenMeta?.symbol ?? null}
-            mode={wizard.mode}
-            oracleType={wizard.oracleType}
-            onOracleTypeChange={setOracleType}
-            oracleFeed={wizard.oracleFeed}
-            onOracleFeedChange={setOracleFeed}
-            onDexPoolDetected={setDexPool}
-            onPythDetected={setPythFeed}
-            onContinue={() => advanceStep(2)}
-            onBack={goBack}
-            canContinue={step2Valid}
-          />
-        )}
-
-        {/* Step 3: Parameters */}
-        {wizard.step === 3 && (
-          <StepParameters
-            mode={wizard.mode}
-            slabTier={wizard.slabTier}
-            onSlabTierChange={setSlabTier}
-            tradingFeeBps={wizard.tradingFeeBps}
-            onTradingFeeChange={setTradingFeeBps}
-            initialMarginBps={wizard.initialMarginBps}
-            onInitialMarginChange={setInitialMarginBps}
-            lpCollateral={wizard.lpCollateral}
-            onLpCollateralChange={setLpCollateral}
-            insuranceAmount={wizard.insuranceAmount}
-            onInsuranceAmountChange={setInsuranceAmount}
-            adminPrice={wizard.adminPrice}
-            onAdminPriceChange={setAdminPrice}
-            isAdminOracle={wizard.oracleType === "admin"}
-            tokenSymbol={symbol}
-            walletBalance={walletBalanceDisplay}
-            onContinue={() => advanceStep(3)}
-            onBack={goBack}
-            canContinue={step3Valid}
-          />
-        )}
-
-        {/* Step 4: Review — demo variant strips all balance / wallet / mint
-            gates and shows a clean "LAUNCH MARKET →" CTA. Production uses
-            the real StepReview which enforces SOL / token / mint validity. */}
-        {wizard.step === 4 && (
-          <StepReview
-            tokenSymbol={symbol}
-            tokenName={wizard.tokenMeta?.name ?? "Unknown Token"}
-            mintAddress={wizard.mintAddress}
-            tokenDecimals={decimals}
-            mintValid={mintValid}
-            mintExistsOnNetwork={mintExistsOnNetwork}
-            priceUsd={detectedPrice}
-            oracleType={wizard.oracleType}
+        {/* Step 2: Control Room — auto-resolved price feed + slab, four dials, hold-to-launch */}
+        {wizard.step === 2 && (
+          <StepControlRoom
+            symbol={symbol}
             oracleLabel={oracleLabel}
-            slabTier={wizard.slabTier}
-            tradingFeeBps={wizard.tradingFeeBps}
+            startPrice={startPrice}
+            slabBytes={DEFAULT_SLAB_SIZE}
+            rentSol={solCostBreakdown.slabRentSol}
             initialMarginBps={wizard.initialMarginBps}
+            tradingFeeBps={wizard.tradingFeeBps}
             lpCollateral={wizard.lpCollateral}
             insuranceAmount={wizard.insuranceAmount}
-            walletConnected={!!publicKey}
-            walletBalanceSol={solBalance}
-            hasSufficientBalance={hasSufficientSol}
-            requiredSol={requiredSol}
-            hasTokens={hasTokens}
-            hasSufficientTokensForSeed={hasSufficientTokensForSeed}
-            feeConflict={feeConflict}
-            // StepReview's isPercolatorMirror prop drives the "tokens auto-airdropped"
-            // banner + button label. Its meaning is generalized now: on devnet, EVERY
-            // market's collateral (Sim-USDC) is auto-funded via /api/devnet-pre-fund
-            // regardless of what the user pasted in Step 1 — there is no more per-market
-            // "mirror mint" distinction, so `isDevnet` alone is the right signal here.
-            isPercolatorMirror={isDevnet}
-            onBack={goBack}
+            collateralSymbol={collateralSymbol}
+            onMarginBpsChange={setInitialMarginBps}
+            onTradingFeeBpsChange={setTradingFeeBps}
+            onLpCollateralChange={setLpCollateral}
+            onInsuranceChange={setInsuranceAmount}
             onLaunch={handleLaunch}
-            canLaunch={allValid && !!publicKey}
+            launchDisabled={launchDisabled}
+            launchDisabledReason={launchDisabledReason}
+            instantLaunch={mockBypass}
+            onBack={goBack}
           />
         )}
       </div>

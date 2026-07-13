@@ -2,20 +2,19 @@
 
 import { FC } from "react";
 
-const DEFAULT_LABELS = ["Token", "Oracle", "Parameters", "Review"] as const;
+const DEFAULT_LABELS = ["Token", "Market"] as const;
 
 interface WizardProgressProps {
-  currentStep: 1 | 2 | 3 | 4;
+  currentStep: 1 | 2;
   completedSteps: Set<number>;
-  onStepClick?: (step: 1 | 2 | 3 | 4) => void;
-  /** Override step labels (e.g. Quick Launch swaps "Oracle" → "Slab Tier") */
-  stepLabels?: readonly [string, string, string, string];
+  onStepClick?: (step: 1 | 2) => void;
+  /** Override step labels. */
+  stepLabels?: readonly [string, string];
   /**
    * GH#1615: Display step number override for the mobile "Step N of M" counter.
-   * In Quick Launch, physical step 2 should display as "2", step 4 as "3".
    */
   displayStep?: number;
-  /** Display total override for mobile counter (e.g. 3 in Quick Launch mode). */
+  /** Display total override for mobile counter. */
   displayTotal?: number;
   /** Display label for the current step (used in mobile counter). */
   displayStepLabel?: string;
@@ -24,7 +23,7 @@ interface WizardProgressProps {
 /**
  * Horizontal step progress indicator with connectors.
  * Desktop: full horizontal strip with labels.
- * Mobile: compact "Step N of 4" counter.
+ * Mobile: compact "Step N of 2" counter.
  */
 export const WizardProgress: FC<WizardProgressProps> = ({
   currentStep,
@@ -43,7 +42,7 @@ export const WizardProgress: FC<WizardProgressProps> = ({
       {/* Desktop progress */}
       <div className="hidden sm:flex items-center justify-between">
         {stepLabels.map((label, idx) => {
-          const stepNum = (idx + 1) as 1 | 2 | 3 | 4;
+          const stepNum = (idx + 1) as 1 | 2;
           const isCompleted = completedSteps.has(stepNum);
           const isActive = currentStep === stepNum;
           const isUpcoming = !isCompleted && !isActive;
@@ -61,7 +60,7 @@ export const WizardProgress: FC<WizardProgressProps> = ({
                 className={`flex items-center gap-2 group ${
                   isCompleted ? "cursor-pointer" : "cursor-default"
                 }`}
-                aria-label={`Step ${stepNum} of 4: ${label}. ${
+                aria-label={`Step ${stepNum} of ${stepLabels.length}: ${label}. ${
                   isCompleted ? "Completed" : isActive ? "Current" : "Upcoming"
                 }`}
               >
@@ -115,7 +114,7 @@ export const WizardProgress: FC<WizardProgressProps> = ({
           Step {mobileStepNum} of {mobileStepTotal} — {mobileStepLabel}
         </span>
         <div className="flex items-center gap-1">
-          {[1, 2, 3, 4].map((s) => (
+          {[1, 2].map((s) => (
             <div
               key={s}
               className={`h-2 w-2 rounded-full transition-colors ${

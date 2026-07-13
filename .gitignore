@@ -125,3 +125,6 @@ docs/superpowers/
 /BUG-HUNT-FINDINGS-*.md
 /DEFINITIVE-PLAN-*.md
 /MASTER-PLAN-*.md
+
+# brainstorming mockups (local only)
+.superpowers/

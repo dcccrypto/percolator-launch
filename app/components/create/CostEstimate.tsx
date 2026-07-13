@@ -1,12 +1,10 @@
 "use client";
 
 import { FC, useMemo } from "react";
-import { type SlabTierKey, SLAB_TIERS } from "@/lib/slabTiers";
 import { DEFAULT_SLAB_SIZE } from "@/hooks/useCreateMarket";
 import { V17_PORTFOLIO_ACCOUNT_LEN, MATCHER_CONTEXT_LEN } from "@percolatorct/sdk";
 
 interface CostEstimateProps {
-  slabTier: SlabTierKey;
   lpCollateral: string;
   insuranceAmount: string;
   tokenSymbol: string;
@@ -21,8 +19,8 @@ const RENT_OVERHEAD_BYTES = 128;
 const LAMPORTS_PER_SOL = 1_000_000_000;
 
 /** Estimated transaction fees for the ~9-10 signed-transaction creation flow (see
- *  useCreateMarket's create() / StepReview's BASE_TX_STEPS for the exact sequence —
- *  bumped from 8 when the Earn vault + stake pool steps were added). */
+ *  useCreateMarket's create() for the exact sequence — bumped from 8 when the
+ *  Earn vault + stake pool steps were added). */
 const TX_FEE_ESTIMATE_SOL = 0.031; // ~10 transactions × 5000 lamports each + priority fee headroom
 
 /**
@@ -106,7 +104,6 @@ export function computeCreateMarketSolCost(): CreateMarketSolCostBreakdown {
  * Shows rent costs, token requirements, and transaction fees.
  */
 export const CostEstimate: FC<CostEstimateProps> = ({
-  slabTier,
   lpCollateral,
   insuranceAmount,
   tokenSymbol,
@@ -115,7 +112,6 @@ export const CostEstimate: FC<CostEstimateProps> = ({
   className = "",
 }) => {
   const estimate = useMemo(() => {
-    const tier = SLAB_TIERS[slabTier];
     const sol = computeCreateMarketSolCost();
 
     // Token costs.
@@ -143,12 +139,10 @@ export const CostEstimate: FC<CostEstimateProps> = ({
       insTokens: insNum,
       totalTokens,
       tokenUsdValue,
-      tierLabel: tier.label,
-      tierSlots: tier.maxAccounts,
       dataSize: DEFAULT_SLAB_SIZE,
       tokenDecimals,
     };
-  }, [slabTier, lpCollateral, insuranceAmount, tokenPriceUsd, tokenDecimals]);
+  }, [lpCollateral, insuranceAmount, tokenPriceUsd, tokenDecimals]);
 
   return (
     <div className={`border border-[var(--border)] bg-[var(--bg)] ${className}`}>
@@ -161,8 +155,10 @@ export const CostEstimate: FC<CostEstimateProps> = ({
       {/* SOL Costs */}
       <div className="px-4 py-3 space-y-2 border-b border-[var(--border)]">
         <div className="flex items-center justify-between text-[11px]">
+          {/* v17 slabs are always sized to max capacity — there is no tier to
+              display here (see DEFAULT_SLAB_SIZE doc comment above). */}
           <span className="text-[var(--text-secondary)]">
-            Slab account rent ({estimate.tierLabel}, {estimate.tierSlots} slots)
+            Slab account rent (max capacity)
           </span>
           <span className="font-mono text-[var(--text)]">{estimate.slabRentSol} SOL</span>
         </div>
