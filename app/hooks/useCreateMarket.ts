@@ -78,6 +78,7 @@ import {
   broadcastSignedTx,
   getFreshBlockhash,
   getPriorityFee,
+  isBlockhashExpiredError,
 } from "@/lib/tx";
 import { getConfig, getNetwork } from "@/lib/config";
 import { normalizeDexType } from "@/lib/dex-type";
@@ -521,6 +522,35 @@ type FreshBatchOutcome =
   | { status: "fallback" }
   | { status: "fatal" };
 
+// ---- Blockhash-expiry recovery for the batched launch's tail -------------
+//
+// M1/M2/M3a/M3b/M4 are all built against the SAME shared blockhash (fetched
+// once, below) and signed in the ONE wallet approval, but broadcast+confirmed
+// SEQUENTIALLY afterwards — a keeper-register network round-trip is even
+// awaited between M3b and M4 (see the `keeperRegisterPromise` await below).
+// That means the tail (especially M4 = StakeInitPool) can reach
+// `broadcastSignedTx` well after the shared blockhash's ~60-90s validity
+// window, hard-failing with "Blockhash not found" even though M1 (the slab)
+// already landed. `TailTxDescriptor` retains exactly what's needed to REBUILD
+// a not-yet-landed tx against a fresh blockhash — instructions/computeUnits
+// for `buildBatchTx`, plus the keypairs that must `partialSign` it AFTER the
+// wallet re-signs (Privy strips unknown sigs added before its own signing
+// flow — see the ordering note further down). cosignTx is deliberately NOT a
+// descriptor: it's server-built against its own blockhash and broadcast early
+// (2nd, low-risk) — an expiry there just surfaces as today's error.
+interface TailTxDescriptor {
+  label: string;
+  instructions: TransactionInstruction[];
+  computeUnits: number;
+  signers: Keypair[];
+}
+
+/** Cap total blockhash-refresh recoveries per launch attempt so a pathological
+ *  RPC (or a wallet that keeps stalling the re-approval popup) can't loop
+ *  forever — after this many, a persistent expiry rethrows and surfaces as
+ *  the existing fatal/resumable error path. */
+const MAX_BLOCKHASH_RECOVERIES = 2;
+
 async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshBatchOutcome> {
   const { connection, wallet, programId, slabKp, params, isDevnetEnv, isKeeperOracle, isAdminOracle, isHyperpOracle, oracleMode, setState } = ctx;
   const walletPk = wallet.publicKey;
@@ -769,10 +799,12 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       ],
       data: encodeSetNftProgramId({ nftProgramId: PERCOLATOR_NFT_PROGRAM_ID }),
     });
-    const m1 = buildBatchTx({
+    const m1Descriptor: TailTxDescriptor = {
+      label: "Creating the market",
       instructions: [createSlabIx, createAtaIx, initMarketIx, setNftProgramIdIx],
-      computeUnits: 400_000, priorityFeeMicroLamports: priorityFee, blockhash, feePayer: walletPk,
-    });
+      computeUnits: 400_000,
+      signers: [slabKp],
+    };
 
     // M2: createAccount(portfolio)+InitUser + createAccount(ctx)+SetMatcherConfig+InitMatcherCtx
     const createPortfolioIx = SystemProgram.createAccount({
@@ -807,10 +839,12 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
         feeToInsuranceBps: 0, skewSpreadMultBps: 0,
       }),
     });
-    const m2 = buildBatchTx({
+    const m2Descriptor: TailTxDescriptor = {
+      label: "Setting up the liquidity pool",
       instructions: [createPortfolioIx, initPortfolioIx, createCtxIx, setMatcherConfigIx, initMatcherCtxIx],
-      computeUnits: 800_000, priorityFeeMicroLamports: priorityFee, blockhash, feePayer: walletPk,
-    });
+      computeUnits: 800_000,
+      signers: [lpPortfolioKp, matcherCtxKp],
+    };
 
     // M3a: DepositCollateral + 2x TopUpBackingBucket (deadlock-prevention seed)
     const depositIx = buildIx({
@@ -831,10 +865,12 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
         }),
       }),
     );
-    const m3a = buildBatchTx({
+    const m3aDescriptor: TailTxDescriptor = {
+      label: "Funding liquidity",
       instructions: [depositIx, ...backingIxs],
-      computeUnits: 450_000, priorityFeeMicroLamports: priorityFee, blockhash, feePayer: walletPk,
-    });
+      computeUnits: 450_000,
+      signers: [],
+    };
 
     // M3b: TopUpInsurance + PermissionlessCrank — best-effort/non-fatal tail,
     // broadcast as its OWN transaction (never merged with M3a) so its failure
@@ -852,10 +888,12 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       programId, keys: crankKeys,
       data: encodePermissionlessCrank({ action: CrankAction.FeeSweep, assetIndex: 0, nowSlot: 0n, closeQ: 0n, feeBps: 0n, recoveryReason: 0 }),
     });
-    const m3b = buildBatchTx({
+    const m3bDescriptor: TailTxDescriptor = {
+      label: "Seeding the insurance fund",
       instructions: [topupIx, crankIx],
-      computeUnits: 450_000, priorityFeeMicroLamports: priorityFee, blockhash, feePayer: walletPk,
-    });
+      computeUnits: 450_000,
+      signers: [],
+    };
 
     // M4: CreateLpVault + createAccount(mint)+createAccount(vault)+StakeInitPool
     const createLpVaultIx = buildIx({
@@ -882,25 +920,40 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       }),
       data: encodeStakeInitPool(5n, 0n),
     });
-    const m4 = buildBatchTx({
+    const m4Descriptor: TailTxDescriptor = {
+      label: "Opening staking & LP vaults",
       instructions: [createLpVaultIx, createLpMintIx, createStakeVaultIx, initPoolIx],
-      computeUnits: 600_000, priorityFeeMicroLamports: priorityFee, blockhash, feePayer: walletPk,
-    });
+      computeUnits: 600_000,
+      signers: [stakeLpMintKp, stakeVaultKp],
+    };
+
+    // The 5 dependent, rebuild-capable txs — SAME order as before (M1, M2,
+    // M3a, M3b, M4). Building them here against the one shared `blockhash` is
+    // byte-for-byte equivalent to the old inline `buildBatchTx` calls; the
+    // descriptors are what let `recoverTailFrom` (below) rebuild only the
+    // not-yet-landed ones against a fresh blockhash if the tail's serial
+    // confirm-then-broadcast pipeline outruns this blockhash's validity.
+    const tailDescriptors: TailTxDescriptor[] = [m1Descriptor, m2Descriptor, m3aDescriptor, m3bDescriptor, m4Descriptor];
+    const buildTailTx = (d: TailTxDescriptor, hash: string): Transaction =>
+      buildBatchTx({ instructions: d.instructions, computeUnits: d.computeUnits, priorityFeeMicroLamports: priorityFee, blockhash: hash, feePayer: walletPk });
+    const [m1, m2, m3a, m3b, m4] = tailDescriptors.map((d) => buildTailTx(d, blockhash));
 
     // cosignTx is deserialized exactly as the server built it — its own
     // blockhash, no heap-frame/CU ixs added — never run through buildBatchTx.
+    // It is NOT a TailTxDescriptor and is never rebuilt on expiry (see the
+    // TailTxDescriptor comment above).
     const orderedTxs: Transaction[] = [m1, ...(cosignTx ? [cosignTx] : []), m2, m3a, m3b, m4];
     // Human-readable label per batched tx, in the SAME order — the progress UI
     // shows what is being CREATED ("Creating the market", "Funding liquidity"),
     // never internal transaction indices. A launching user cares about market
     // milestones, not our tx-packing scheme.
     const orderedLabels: string[] = [
-      "Creating the market",
+      m1Descriptor.label,
       ...(cosignTx ? ["Connecting the price feed"] : []),
-      "Setting up the liquidity pool",
-      "Funding liquidity",
-      "Seeding the insurance fund",
-      "Opening staking & LP vaults",
+      m2Descriptor.label,
+      m3aDescriptor.label,
+      m3bDescriptor.label,
+      m4Descriptor.label,
     ];
 
     // ---- ONE wallet approval for the whole batch --------------------------
@@ -923,6 +976,15 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
     signedM1.partialSign(slabKp);
     signedM2.partialSign(lpPortfolioKp, matcherCtxKp);
     signedM4.partialSign(stakeLpMintKp, stakeVaultKp);
+
+    // ---- Mutable tail state for blockhash-expiry recovery -----------------
+    // `signedTail[i]` is the CURRENTLY-SIGNED transaction for `tailDescriptors[i]`
+    // — starts as the one-approval batch's own signatures; `recoverTailFrom`
+    // below (defined after `landed`/`landingTotal`/`orderedLabels` exist, just
+    // before the pipelined broadcast starts) overwrites entries in place if a
+    // not-yet-landed one has to be rebuilt against a fresh blockhash.
+    const signedTail: Transaction[] = [signedM1, signedM2, signedM3a, signedM3b, signedM4];
+    let blockhashRecoveries = 0;
 
     // ---- Persist recovery state BEFORE the first broadcast ---------------
     saveInFlightMarket({
@@ -964,7 +1026,70 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       stepLabel: orderedLabels[0],
     }));
 
-    const m1Sig = await broadcastSignedTx(connection, signedM1);
+    /**
+     * Rebuild + re-sign `tailDescriptors[startIdx..]` (the not-yet-landed
+     * remainder of the tail) against a fresh blockhash, in ONE additional
+     * wallet approval, and write the results back into `signedTail`.
+     * Preserves the exact partial-sign ordering the happy path uses (wallet
+     * signs first, then keypairs — see the partial-sign comment above).
+     */
+    const recoverTailFrom = async (startIdx: number): Promise<void> => {
+      blockhashRecoveries += 1;
+      setState((s) => ({
+        ...s,
+        phase: "awaiting-signature",
+        stepLabel: "Blockhash expired — refreshing and re-approving the remaining steps...",
+      }));
+      const freshBlockhash = await getFreshBlockhash(connection, true);
+      const rebuiltDescriptors = tailDescriptors.slice(startIdx);
+      const rebuiltTxs = rebuiltDescriptors.map((d) => buildTailTx(d, freshBlockhash));
+      const resigned = await signAllCompat(wallet, rebuiltTxs);
+      for (let j = 0; j < rebuiltDescriptors.length; j++) {
+        const descriptor = rebuiltDescriptors[j];
+        const tx = resigned[j];
+        if (!descriptor || !tx) {
+          throw new Error("Wallet did not return a signature for every transaction in the blockhash-recovery batch.");
+        }
+        if (descriptor.signers.length > 0) tx.partialSign(...descriptor.signers);
+        signedTail[startIdx + j] = tx;
+      }
+      setState((s) => ({
+        ...s,
+        phase: "landing",
+        landingTotal,
+        landingLabels: orderedLabels,
+        stepLabel: orderedLabels[landed] ?? "Finishing up",
+      }));
+    };
+
+    /**
+     * Broadcast `signedTail[idx]` (one of M1/M2/M3a/M3b/M4), recovering ONCE
+     * per expiry (capped at `MAX_BLOCKHASH_RECOVERIES` total) if it fails
+     * with a blockhash-expiry error — never re-broadcasts a stale signed tx;
+     * `recoverTailFrom` always produces a fresh one first. Any other error
+     * (or expiry past the cap) rethrows unchanged, so the existing
+     * fatal/non-fatal handling around each call site is untouched.
+     */
+    const broadcastTailTx = async (idx: number): Promise<string> => {
+      for (;;) {
+        try {
+          const tx = signedTail[idx];
+          if (!tx) throw new Error(`Missing signed transaction for tail step ${idx}.`);
+          return await broadcastSignedTx(connection, tx);
+        } catch (err) {
+          if (isBlockhashExpiredError(err) && blockhashRecoveries < MAX_BLOCKHASH_RECOVERIES) {
+            console.warn(
+              `[useCreateMarket] batch: blockhash expired at tail step ${idx} — recovering (attempt ${blockhashRecoveries + 1}/${MAX_BLOCKHASH_RECOVERIES})`,
+            );
+            await recoverTailFrom(idx);
+            continue; // retry the SAME step with the freshly rebuilt+signed tx
+          }
+          throw err;
+        }
+      }
+    };
+
+    const m1Sig = await broadcastTailTx(0);
     setState((s) => ({ ...s, slabAddress: slabPk.toBase58() }));
     advanceLanding(m1Sig);
     updateInFlightStep(slabPk.toBase58(), 2);
@@ -1010,18 +1135,19 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       advanceLanding(cosignSig);
     }
 
-    const m2Sig = await broadcastSignedTx(connection, signedM2);
+    const m2Sig = await broadcastTailTx(1);
     advanceLanding(m2Sig);
     updateInFlightStep(slabPk.toBase58(), 3);
 
-    const m3aSig = await broadcastSignedTx(connection, signedM3a);
+    const m3aSig = await broadcastTailTx(2);
     advanceLanding(m3aSig);
 
     try {
-      const m3bSig = await broadcastSignedTx(connection, signedM3b);
+      const m3bSig = await broadcastTailTx(3);
       advanceLanding(m3bSig);
     } catch (m3bErr) {
-      // Non-fatal — mirrors the sequential path's own best-effort tail.
+      // Non-fatal — mirrors the sequential path's own best-effort tail. A
+      // rebuilt-and-recovered M3b that still fails stays non-fatal too.
       console.warn("[useCreateMarket] batch: insurance top-up/crank failed (non-fatal):", m3bErr);
       advanceLanding(undefined);
     }
@@ -1029,7 +1155,7 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
 
     const keeperOutcome = await keeperRegisterPromise;
 
-    const m4Sig = await broadcastSignedTx(connection, signedM4);
+    const m4Sig = await broadcastTailTx(4);
     advanceLanding(m4Sig);
     updateInFlightStep(slabPk.toBase58(), 6);
 

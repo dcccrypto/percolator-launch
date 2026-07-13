@@ -1,4 +1,4 @@
-import { Connection, Transaction, TransactionInstruction, ComputeBudgetProgram, SendTransactionError, SystemProgram } from "@solana/web3.js";
+import { Connection, Transaction, TransactionInstruction, ComputeBudgetProgram, SendTransactionError, SystemProgram, TransactionExpiredBlockheightExceededError } from "@solana/web3.js";
 import bs58 from "bs58";
 import type { PublicKey, Signer } from "@solana/web3.js";
 
@@ -698,6 +698,39 @@ export async function sendTx({
   }
 
   throw lastError ?? new Error("Transaction failed after retries");
+}
+
+/**
+ * True if `err` indicates the transaction's blockhash/blockheight expired
+ * (it never landed within its ~150-slot, ~60-90s validity window) rather
+ * than some other send/simulation failure. Used by the market-launch batch
+ * pipeline (`hooks/useCreateMarket.ts`'s `attemptFreshBatchedLaunch`) to
+ * decide whether a broadcast failure is worth recovering from — refreshing
+ * the blockhash and re-signing just the not-yet-landed remainder of the
+ * batch — versus a generic error that should simply propagate.
+ *
+ * Matches:
+ *  - web3.js's `TransactionExpiredBlockheightExceededError` class.
+ *  - The message variants this file's own retry logic already recognizes
+ *    above (`isBlockhashExpired` in `sendTx`): "Blockhash not found", "block
+ *    height exceeded".
+ *  - The raw JSON-RPC "BlockhashNotFound" transaction-error string some
+ *    `sendRawTransaction` failures surface verbatim.
+ *
+ * Deliberately does NOT match generic send failures (program errors,
+ * insufficient funds, network hiccups, "Missing response from batch", etc.)
+ * — only genuine expiry should trigger an extra re-approval popup.
+ */
+export function isBlockhashExpiredError(err: unknown): boolean {
+  if (err instanceof TransactionExpiredBlockheightExceededError) return true;
+  const msg = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+  if (!msg) return false;
+  const lower = msg.toLowerCase();
+  return (
+    lower.includes("blockhash not found") ||
+    lower.includes("block height exceeded") ||
+    lower.includes("blockhashnotfound")
+  );
 }
 
 // ============================================================================
