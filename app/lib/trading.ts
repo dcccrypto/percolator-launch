@@ -180,3 +180,23 @@ export function estimateEntryFromPnl(
   const entry = positionSize > 0n ? oraclePrice - diff : oraclePrice + diff;
   return entry > 0n ? entry : oraclePrice;
 }
+
+/**
+ * Clamp a close-position percentage to a valid whole number in [1, 100].
+ *
+ * The close-position modal's slider (`min=1 max=100 step=1`) and its presets are
+ * integer-safe by construction, so this is defence-in-depth: applied at the single
+ * `setPercent` source, it guarantees the `percent` state is ALWAYS a valid whole
+ * number, so every display/math/confirm site agrees by construction. A non-finite
+ * value would otherwise flow into `BigInt(percent)` sizing math and slip past
+ * `useClosePosition`'s range guard (`percent < 1 || percent > 100` is `false` for
+ * NaN). Malformed / out-of-low-range input folds to the MINIMUM (1), never the
+ * maximum — corrupted state must not silently escalate to a full 100% close.
+ */
+export function clampClosePercent(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  const rounded = Math.round(value);
+  if (rounded < 1) return 1;
+  if (rounded > 100) return 100;
+  return rounded;
+}
