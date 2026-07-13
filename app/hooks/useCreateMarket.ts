@@ -93,6 +93,10 @@ import {
   clearInFlightMarket,
   loadLastInFlightMarket,
 } from "@/lib/inFlightMarket";
+import {
+  buildMarketRegistrationMessage,
+  type MarketRegistrationPayload,
+} from "@/lib/market-registration-auth";
 // v17: max assets per portfolio (= the market's asset-slot capacity); program cap = 14.
 // The slab MUST be sized to exactly match this capacity or InitMarket reverts (dynamic-len validation).
 export const V17_MAX_PORTFOLIO_ASSETS = 14;
@@ -627,12 +631,49 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
     //    both proofs tolerate the ~15-30s the pipeline takes to actually use
     //    them (markets nonce has a 5-min TTL; the keeper proof window is
     //    -5min/+1min server-side — see keeper-register/route.ts).
+    // Build the registration payload once so the wallet signs the exact
+    // market data later submitted to POST /api/markets.
+    const deployerStr: string = walletPk.toBase58();
+    const registrationPayload: MarketRegistrationPayload = {
+      slab_address: slabPk.toBase58(),
+      mint_address: params.mint.toBase58(),
+      symbol: params.symbol ?? "UNKNOWN",
+      name: params.name ?? "Unknown Token",
+      decimals: params.decimals ?? 6,
+      deployer: deployerStr,
+      oracle_mode: oracleMode,
+      dex_pool_address: params.dexPoolAddress ?? null,
+      oracle_authority: isAdminOracle
+        ? isDevnetEnv && getConfig().crankWallet
+          ? getConfig().crankWallet
+          : walletPk.toBase58()
+        : null,
+      initial_price_e6: params.initialPriceE6.toString(),
+      max_leverage:
+        params.initialMarginBps > 0
+          ? Math.floor(
+              10000 /
+                flooredInitialMarginBps(params.initialMarginBps),
+            )
+          : 1,
+      trading_fee_bps: Number(params.tradingFeeBps),
+      lp_collateral: params.lpCollateral.toString(),
+      mainnet_ca: params.mainnetCA ?? null,
+    };
+
     let marketsSignature: string | null = null;
     if (marketsNonce && wallet.signMessage) {
       try {
-        const sigBytes = await wallet.signMessage(new TextEncoder().encode(marketsNonce));
+        const signingMessage = buildMarketRegistrationMessage({
+          nonce: marketsNonce,
+          deployer: deployerStr,
+          payload: registrationPayload,
+        });
+        const sigBytes = await wallet.signMessage(signingMessage);
         marketsSignature = Buffer.from(sigBytes).toString("base64");
-      } catch { /* non-fatal — mirrors the sequential path's own try/catch */ }
+      } catch {
+        /* non-fatal — mirrors the sequential path's own try/catch */
+      }
     }
     let keeperProofSignature: string | null = null;
     if (isKeeperOracle && params.dexPoolAddress && wallet.signMessage) {
@@ -938,25 +979,10 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            slab_address: slabPk.toBase58(),
-            mint_address: params.mint.toBase58(),
-            symbol: params.symbol ?? "UNKNOWN",
-            name: params.name ?? "Unknown Token",
-            decimals: params.decimals ?? 6,
-            deployer: walletPk.toBase58(),
-            oracle_mode: oracleMode,
-            dex_pool_address: params.dexPoolAddress ?? null,
-            oracle_authority: isAdminOracle
-              ? (isDevnetEnv && getConfig().crankWallet ? getConfig().crankWallet : walletPk.toBase58())
-              : null,
-            initial_price_e6: params.initialPriceE6.toString(),
-            max_leverage: params.initialMarginBps > 0
-              ? Math.floor(10000 / flooredInitialMarginBps(params.initialMarginBps))
-              : 1,
-            trading_fee_bps: Number(params.tradingFeeBps),
-            lp_collateral: params.lpCollateral.toString(),
-            mainnet_ca: params.mainnetCA ?? null,
-            ...(marketsNonce && marketsSignature ? { nonce: marketsNonce, signature: marketsSignature } : {}),
+            ...registrationPayload,
+            ...(marketsNonce && marketsSignature
+              ? { nonce: marketsNonce, signature: marketsSignature }
+              : {}),
           }),
         });
       } catch {
@@ -2557,13 +2583,36 @@ export function useCreateMarket() {
         // PERC-8332: Attach nonce + ed25519 signature so the POST handler can verify
         // deployer ownership without Supabase. Flow:
         //   1. GET /api/markets/challenge?deployer=<pubkey> → { nonce }
-        //   2. Sign nonce bytes with wallet.signMessage (ed25519)
+        // 2. Sign the canonical market-registration payload with wallet.signMessage (ed25519)
         //   3. POST with { nonce, signature: base64 }
         if (startStep <= 4) {
           try {
             const deployerStr = wallet.publicKey.toBase58();
 
             // Step 1: fetch nonce challenge
+            const registrationPayload: MarketRegistrationPayload = {
+              slab_address: slabPk.toBase58(),
+              mint_address: params.mint.toBase58(),
+              symbol: params.symbol ?? "UNKNOWN",
+              name: params.name ?? "Unknown Token",
+              decimals: params.decimals ?? 6,
+              deployer: deployerStr,
+              oracle_mode: oracleMode,
+              dex_pool_address: params.dexPoolAddress ?? null,
+              oracle_authority: isAdminOracle
+                                ? (isDevnetEnv && getConfig().crankWallet ? getConfig().crankWallet : deployerStr)
+                                : null,
+              initial_price_e6: params.initialPriceE6.toString(),
+              // BUG 16 fix: advertise the FLOORED margin (what's actually enforced
+                              // on-chain), not the raw requested bps — see flooredInitialMarginBps doc.
+                              max_leverage: params.initialMarginBps > 0
+                                ? Math.floor(10000 / flooredInitialMarginBps(params.initialMarginBps))
+                                : 1,
+              trading_fee_bps: Number(params.tradingFeeBps),
+              lp_collateral: params.lpCollateral.toString(),
+              mainnet_ca: params.mainnetCA ?? null
+            };
+
             let nonce: string | null = null;
             let signature: string | null = null;
             if (wallet.signMessage) {
@@ -2574,13 +2623,18 @@ export function useCreateMarket() {
                 if (challengeResp.ok) {
                   const { nonce: n } = await challengeResp.json() as { nonce: string };
                   nonce = n;
-                  // Step 2: sign the nonce bytes
-                  const nonceBytes = new TextEncoder().encode(nonce);
-                  const sigBytes = await wallet.signMessage(nonceBytes);
+                  // Step 2: sign the canonical market-registration payload
+                  const signingMessage =
+                    buildMarketRegistrationMessage({
+                      nonce,
+                      deployer: deployerStr,
+                      payload: registrationPayload,
+                    });
+                  const sigBytes = await wallet.signMessage(signingMessage);
                   signature = Buffer.from(sigBytes).toString("base64");
                 }
               } catch (sigErr) {
-                console.warn("[useCreateMarket] Nonce challenge/sign failed (non-fatal):", sigErr);
+                console.warn("[useCreateMarket] Market-registration challenge/sign failed (non-fatal):", sigErr);
                 // Fall through — POST will 400 if nonce/signature missing, but market is on-chain.
               }
             }
@@ -2589,29 +2643,10 @@ export function useCreateMarket() {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                slab_address: slabPk.toBase58(),
-                mint_address: params.mint.toBase58(),
-                symbol: params.symbol ?? "UNKNOWN",
-                name: params.name ?? "Unknown Token",
-                decimals: params.decimals ?? 6,
-                deployer: deployerStr,
-                oracle_mode: oracleMode,
-                dex_pool_address: params.dexPoolAddress ?? null,
-                oracle_authority: isAdminOracle
-                  ? (isDevnetEnv && getConfig().crankWallet ? getConfig().crankWallet : deployerStr)
-                  : null,
-                initial_price_e6: params.initialPriceE6.toString(),
-                // BUG 16 fix: advertise the FLOORED margin (what's actually enforced
-                // on-chain), not the raw requested bps — see flooredInitialMarginBps doc.
-                max_leverage: params.initialMarginBps > 0
-                  ? Math.floor(10000 / flooredInitialMarginBps(params.initialMarginBps))
-                  : 1,
-                trading_fee_bps: Number(params.tradingFeeBps),
-                lp_collateral: params.lpCollateral.toString(),
-                mainnet_ca: params.mainnetCA ?? null,
-                // PERC-8332: nonce + signature for deployer proof
-                ...(nonce && signature ? { nonce, signature } : {}),
-              }),
+                  ...registrationPayload,
+                  // PERC-8332: nonce + signature for deployer proof
+                                  ...(nonce && signature ? { nonce, signature } : {})
+                }),
             });
           } catch {
             // Non-fatal — market is on-chain even if DB write fails
