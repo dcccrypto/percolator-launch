@@ -24,13 +24,23 @@ export const GECKO_DEADLINE_MS = 9_000;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** Backoff before the next attempt: honor a numeric Retry-After (seconds) when
- *  present, else exponential 300ms·2^n — both capped, and never sleeping past
- *  the overall deadline. Exported for unit testing. */
-export function geckoBackoffMs(res: Response | null, attempt: number, startedAt: number): number {
+ *  present, else exponential 300ms·2^n — with ±20% jitter, both capped, and
+ *  never sleeping past the overall deadline. The jitter matters because all
+ *  chart requests share Vercel's single outbound IP, so without it every
+ *  concurrent request retries on the SAME schedule and triples outbound volume
+ *  to GeckoTerminal in the exact instant it's already signaling back-off. `rng`
+ *  is injectable so unit tests stay deterministic. Exported for unit testing. */
+export function geckoBackoffMs(
+  res: Response | null,
+  attempt: number,
+  startedAt: number,
+  rng: () => number = Math.random,
+): number {
   const ra = res?.headers.get("retry-after");
   const base = ra && /^\d+$/.test(ra) ? Number(ra) * 1000 : 300 * 2 ** attempt;
+  const jittered = base * (0.8 + 0.4 * rng()); // ±20%
   const remaining = GECKO_DEADLINE_MS - (Date.now() - startedAt);
-  return Math.max(0, Math.min(base, GECKO_MAX_BACKOFF_MS, remaining));
+  return Math.max(0, Math.min(jittered, GECKO_MAX_BACKOFF_MS, remaining));
 }
 
 /**
