@@ -62,18 +62,30 @@ function isRegisteredMarket(value: unknown): value is RegisteredMarket {
 }
 
 /**
- * Read the current registered-markets blob.
- * Returns an empty array if the blob does not exist yet, or on any read/parse error
- * (never throws — callers treat "empty" and "not-yet-created" identically).
+ * J: internal read result that DISTINGUISHES a genuine empty/not-found blob
+ * (`ok: true`, nothing to protect — safe to write straight over) from a
+ * transient read FAILURE (`ok: false` — network/CDN hiccup, non-OK response,
+ * malformed JSON). This distinction is the whole point: `readRegisteredMarkets`
+ * (the public, lenient API used by GET routes) collapses both cases to `[]`
+ * on purpose, but `upsertRegisteredMarket`'s read-modify-write MUST NOT — see
+ * its own doc comment below.
  */
-export async function readRegisteredMarkets(): Promise<RegisteredMarket[]> {
+interface RegisteredMarketsReadResult {
+  markets: RegisteredMarket[];
+  /** False only for a genuine read/parse FAILURE — never for a legitimate
+   *  not-yet-created blob (that's `ok: true, markets: []`). */
+  ok: boolean;
+}
+
+async function readRegisteredMarketsInternal(): Promise<RegisteredMarketsReadResult> {
   try {
     const { blobs } = await list({
       prefix: REGISTERED_MARKETS_BLOB_PATHNAME,
       limit: 1,
     });
     const found = blobs.find((b) => b.pathname === REGISTERED_MARKETS_BLOB_PATHNAME);
-    if (!found) return [];
+    // Genuinely nothing registered yet — a real empty state, not a failure.
+    if (!found) return { markets: [], ok: true };
 
     // Cache-bust: the public blob is served via a CDN that caches by pathname, so a
     // plain fetch (even `no-store`) can return a stale copy — which would silently
@@ -82,20 +94,42 @@ export async function readRegisteredMarkets(): Promise<RegisteredMarket[]> {
     const resp = await fetch(`${found.url}?ts=${Date.now()}`, { cache: "no-store" });
     if (!resp.ok) {
       console.warn(
-        `[playground-registered-markets] blob fetch ${resp.status} — treating as empty`,
+        `[playground-registered-markets] blob fetch ${resp.status} — read failed`,
       );
-      return [];
+      return { markets: [], ok: false };
     }
     const data: unknown = await resp.json();
-    if (!Array.isArray(data)) return [];
-    return data.filter(isRegisteredMarket);
+    // A found-but-non-array blob is corrupted data, not "empty" — treat as a
+    // failure so an upsert can't silently overwrite it with a partial list.
+    if (!Array.isArray(data)) {
+      console.warn("[playground-registered-markets] blob content is not an array — read failed");
+      return { markets: [], ok: false };
+    }
+    return { markets: data.filter(isRegisteredMarket), ok: true };
   } catch (err) {
     console.warn(
-      "[playground-registered-markets] read failed, treating as empty:",
+      "[playground-registered-markets] read failed:",
       err instanceof Error ? err.message : String(err),
     );
-    return [];
+    return { markets: [], ok: false };
   }
+}
+
+/**
+ * Read the current registered-markets blob.
+ * Returns an empty array if the blob does not exist yet, or on any read/parse error
+ * (never throws — callers treat "empty" and "not-yet-created" identically).
+ *
+ * This lenient contract is correct for GET-route callers (/api/markets,
+ * /api/playground/registered-markets, /api/stake/pools) — a transient read
+ * failure there should degrade to "show the curated markets only", not 500
+ * the whole route. It is deliberately NOT safe for a read-modify-write
+ * (see `upsertRegisteredMarket`, which uses the stricter
+ * `readRegisteredMarketsInternal` instead).
+ */
+export async function readRegisteredMarkets(): Promise<RegisteredMarket[]> {
+  const { markets } = await readRegisteredMarketsInternal();
+  return markets;
 }
 
 /**
@@ -125,11 +159,29 @@ export async function writeRegisteredMarkets(
  * — re-registering an existing slab refreshes its `registeredAt` (see the route),
  * which keeps actively-used markets from aging out ahead of stale ones. Returns the
  * updated array.
+ *
+ * J: this is a read-modify-write, so it MUST fail closed on a read failure. The
+ * previous version called the lenient `readRegisteredMarkets()`, which returns `[]`
+ * for BOTH "genuinely nothing registered yet" AND "the read just failed" (network
+ * blip, CDN hiccup, malformed JSON) — indistinguishable to this function. On a
+ * transient read failure it would proceed anyway, treat the blob as empty, and
+ * `writeRegisteredMarkets` a SINGLE-entry array over the top, destroying up to
+ * `MAX_REGISTERED_MARKETS` (100) existing market↔pool bindings. Using the stricter
+ * `readRegisteredMarketsInternal` (which reports `ok: false` only for a genuine
+ * failure, never for a legitimate empty/not-yet-created blob) lets this function
+ * throw and abort instead — the caller (keeper-register route) already catches and
+ * returns a 502, so this is a safe, visible failure instead of silent data loss.
  */
 export async function upsertRegisteredMarket(
   entry: RegisteredMarket,
 ): Promise<RegisteredMarket[]> {
-  const existing = await readRegisteredMarkets();
+  const { markets: existing, ok } = await readRegisteredMarketsInternal();
+  if (!ok) {
+    throw new Error(
+      "Failed to read the registered-markets blob before upsert — aborting without writing, " +
+      "to avoid overwriting existing registrations with a partial list. Retry the registration.",
+    );
+  }
   const idx = existing.findIndex((m) => m.slabAddress === entry.slabAddress);
   if (idx >= 0) {
     existing[idx] = entry;

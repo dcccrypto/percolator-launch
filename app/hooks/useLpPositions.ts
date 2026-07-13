@@ -7,6 +7,7 @@ import { getAssociatedTokenAddressSync, unpackAccount, unpackMint } from '@solan
 import { deriveDepositPda } from '@percolatorct/sdk';
 import { getConfig } from '@/lib/config';
 import { pollWhenVisible } from '@/lib/pollWhenVisible';
+import { getMultipleAccountsInfoChunked } from '@/lib/rpc-chunk';
 
 
 // ═══════════════════════════════════════════════════════════════
@@ -191,10 +192,13 @@ export function useLpPositions(): LpPositionsState & { refresh: () => void } {
       const ataBatchKeys = userLpAtas.map((k) => k ?? SystemProgram.programId);
       const depositBatchKeys = depositPdas.map((k) => k ?? SystemProgram.programId);
 
+      // G: at 51+ stake pools, 2×pools.length (ATA + deposit-PDA) keys alone
+      // exceeds the 100-key getMultipleAccountsInfo cap, which used to throw
+      // and blank LP positions for every user — see lib/rpc-chunk.ts.
       const [lpMintInfos, collateralMintInfos, combinedAccountInfos, slotNow] = await Promise.all([
-        connection.getMultipleAccountsInfo(lpMintKeys),
-        connection.getMultipleAccountsInfo(collateralMintKeys),
-        connection.getMultipleAccountsInfo([...ataBatchKeys, ...depositBatchKeys]),
+        getMultipleAccountsInfoChunked(connection, lpMintKeys),
+        getMultipleAccountsInfoChunked(connection, collateralMintKeys),
+        getMultipleAccountsInfoChunked(connection, [...ataBatchKeys, ...depositBatchKeys]),
         connection.getSlot(),
       ]);
       if (stale()) return;

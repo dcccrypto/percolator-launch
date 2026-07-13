@@ -28,11 +28,12 @@ import {
 import { sendTx } from "@/lib/tx";
 import { getPortfolioRawSnapshot, isLpPortfolio, makePortfolioScanKey } from "@/lib/userAccountScan";
 import { useSlabState } from "@/components/providers/SlabProvider";
-import { detectOracleMode } from "@/lib/oraclePrice";
+import { detectOracleMode, sanitizePriceE6, applyInvert } from "@/lib/oraclePrice";
 import { assertKnownProgram } from "@/lib/programAllowlist";
 import { humanizeError } from "@/lib/errorMessages";
-import { computePositionInitialMargin } from "@/lib/trading";
+import { computePositionInitialMargin, estimateEntryFromPnl } from "@/lib/trading";
 import { getEntryPrice } from "@/lib/entry-price";
+import { isSentinelValue } from "@/lib/health";
 
 // M7: withdraw's own EngineStale(19) surface. Unlike a trade (which can be
 // auto-retried after the next keeper crank via withTransientRetry — see
@@ -234,9 +235,28 @@ export function useWithdraw(slabAddress: string) {
               const activeLeg = portfolio.legs.find((l) => l.active);
               hasActiveLegs = activeLeg !== undefined;
               const positionSize = activeLeg ? activeLeg.basisPosQ : 0n;
-              const effectiveEntryPrice = getEntryPrice(slabAddress, 0, wallet.publicKey.toBase58());
+              // D: mirror OrderTicket/DepositWithdrawCard's 3-step entry-price
+              // fallback (on-chain entry_price -> locally-cached -> pnl-implied
+              // estimate) instead of ONLY the local cache — a cache miss used
+              // to silently resolve to 0n here, which zeroes lockedMargin and
+              // lets this pre-check's over-withdraw guard pass an amount that
+              // then reverts on-chain. If no entry price can be established at
+              // all, fail CLOSED (locked = full capital) rather than open.
+              const cachedEntryPrice = getEntryPrice(slabAddress, 0, wallet.publicKey.toBase58());
+              const wrapperOracleE6 = mktConfig
+                ? sanitizePriceE6(applyInvert(mktConfig.lastEffectivePriceE6, mktConfig.invert))
+                : 0n;
+              const safePnlForEstimate = isSentinelValue(portfolio.pnl) ? 0n : portfolio.pnl;
+              const estimatedEntryPrice = hasActiveLegs && wrapperOracleE6 > 0n
+                ? estimateEntryFromPnl(positionSize, safePnlForEstimate, wrapperOracleE6)
+                : 0n;
+              const effectiveEntryPrice = cachedEntryPrice > 0n ? cachedEntryPrice : estimatedEntryPrice;
               const initialMarginBps = slabParams?.initialMarginBps ?? 1000n;
-              const lockedMargin = computePositionInitialMargin(positionSize, effectiveEntryPrice, initialMarginBps);
+              const lockedMargin = !hasActiveLegs
+                ? 0n
+                : effectiveEntryPrice > 0n
+                  ? computePositionInitialMargin(positionSize, effectiveEntryPrice, initialMarginBps)
+                  : portfolio.capital; // fail closed: no entry price could be established
               const freeMargin = portfolio.capital > lockedMargin ? portfolio.capital - lockedMargin : 0n;
               if (params.amount > freeMargin) {
                 throw new Error(

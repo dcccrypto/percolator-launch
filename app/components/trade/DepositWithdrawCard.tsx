@@ -18,8 +18,10 @@ import { parseHumanAmount } from "@/lib/parseAmount";
 import { formatTokenAmount } from "@/lib/format";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
-import { computePositionInitialMargin } from "@/lib/trading";
+import { computePositionInitialMargin, estimateEntryFromPnl } from "@/lib/trading";
 import { getEntryPrice } from "@/lib/entry-price";
+import { useLivePrice } from "@/hooks/useLivePrice";
+import { isSentinelValue } from "@/lib/health";
 
 interface DepositWithdrawCardProps {
   slabAddress: string;
@@ -48,6 +50,7 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
   const { withdraw, loading: withdrawLoading, error: withdrawError } = useWithdraw(slabAddress);
   const { initUser, loading: initLoading, error: initError } = useInitUser(slabAddress);
   const { config: mktConfig, params: slabParams } = useSlabState();
+  const { priceE6: livePriceE6 } = useLivePrice();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const symbol = tokenMeta?.symbol ?? "Token";
 
@@ -206,19 +209,42 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
   const capital = userAccount.account.capital;
   const positionSize = userAccount.account.positionSize ?? 0n;
   const hasOpenPosition = positionSize !== 0n;
-  // M7: gate withdraw on FREE margin (capital minus the open position's own
-  // locked initial margin), not total capital — total capital includes
+  // M7 / D: gate withdraw on FREE margin (capital minus the open position's
+  // own locked initial margin), not total capital — total capital includes
   // margin backing an open position that the on-chain program refuses to
   // release. v17 doesn't store entry_price on-chain, so recover it the same
-  // way the rest of the trade UI does (client-side cache from trade-open
-  // time — see lib/entry-price.ts).
-  const effectiveEntryPrice = hasOpenPosition && publicKey
+  // 3-step fallback OrderTicket already uses: on-chain entry_price -> the
+  // locally-cached entry from this trade's open (lib/entry-price.ts) -> the
+  // on-chain-pnl-implied entry (estimateEntryFromPnl) for a cache miss (2nd
+  // device, cleared storage, or a Position NFT received via transfer).
+  //
+  // D: the previous version used ONLY getEntryPrice(), so a cache miss
+  // silently returned 0n -> computePositionInitialMargin(pos, 0n, bps) is
+  // guarded to return 0n -> lockedMargin=0 -> "Max" offered the FULL account
+  // capital of an account with an OPEN position, and the resulting withdrawal
+  // tx reverted on-chain. If even estimateEntryFromPnl can't establish an
+  // entry (no live oracle price yet), fail CLOSED: treat the WHOLE capital as
+  // locked (lockedMargin=capital -> freeMargin=0 -> the Max button, gated on
+  // `freeMargin > 0n` below, simply doesn't render) rather than open.
+  const rawEntryPrice = userAccount.account.entryPrice ?? 0n;
+  const cachedEntryPrice = hasOpenPosition && publicKey
     ? getEntryPrice(slabAddress, userAccount.idx, publicKey.toBase58())
     : 0n;
-  const initialMarginBps = slabParams?.initialMarginBps ?? 1000n;
-  const lockedMargin = hasOpenPosition
-    ? computePositionInitialMargin(positionSize, effectiveEntryPrice, initialMarginBps)
+  const safePnlForEstimate = isSentinelValue(userAccount.account.pnl) ? 0n : userAccount.account.pnl;
+  const estimatedEntryPrice = hasOpenPosition && livePriceE6 != null && livePriceE6 > 0n
+    ? estimateEntryFromPnl(positionSize, safePnlForEstimate, livePriceE6)
     : 0n;
+  const effectiveEntryPrice = rawEntryPrice > 0n
+    ? rawEntryPrice
+    : cachedEntryPrice > 0n
+      ? cachedEntryPrice
+      : estimatedEntryPrice;
+  const initialMarginBps = slabParams?.initialMarginBps ?? 1000n;
+  const lockedMargin = !hasOpenPosition
+    ? 0n
+    : effectiveEntryPrice > 0n
+      ? computePositionInitialMargin(positionSize, effectiveEntryPrice, initialMarginBps)
+      : capital; // fail closed: no entry price could be established at all
   const freeMargin = capital > lockedMargin ? capital - lockedMargin : 0n;
   const loading = mode === "deposit" ? depositLoading : withdrawLoading;
   const error = mode === "deposit" ? depositError : withdrawError;

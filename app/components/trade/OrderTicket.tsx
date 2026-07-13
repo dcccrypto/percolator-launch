@@ -63,6 +63,7 @@ import { sanitizeSymbol } from "@/lib/symbol-utils";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { formatTokenAmount, formatUsdPriceE6, toE6 } from "@/lib/format";
 import { saveEntryPrice, getEntryPrice, clearEntryPrice } from "@/lib/entry-price";
+import { isSentinelValue } from "@/lib/health";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
 import { useInitUser } from "@/hooks/useInitUser";
 import { AUTO_DEPOSIT_AMOUNT } from "@/hooks/useAutoDeposit";
@@ -348,12 +349,19 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const cachedExistingEntryPrice = userAccount && rawExistingEntryPrice === 0n
     ? getEntryPrice(slabAddress, userAccount.idx, publicKey?.toBase58())
     : 0n;
+  // E: guard the sentinel BEFORE it feeds estimateEntryFromPnl's math — same
+  // fix as PositionsDock/usePortfolio's identical call sites (an unguarded
+  // u64::MAX-class account.pnl can poison the derived entry/liq/margin math
+  // instead of being caught by estimateEntryFromPnl's own entry>0n clamp).
+  const safeExistingPnl = userAccount && !isSentinelValue(userAccount.account.pnl)
+    ? userAccount.account.pnl
+    : 0n;
   const existingEntryPriceE6 = rawExistingEntryPrice > 0n
     ? rawExistingEntryPrice
     : cachedExistingEntryPrice > 0n
       ? cachedExistingEntryPrice
       : userAccount
-        ? estimateEntryFromPnl(existingPositionSize, userAccount.account.pnl, livePriceE6 ?? 0n)
+        ? estimateEntryFromPnl(existingPositionSize, safeExistingPnl, livePriceE6 ?? 0n)
         : 0n;
   const lockedMargin = computePositionInitialMargin(existingPositionSize, existingEntryPriceE6, initialMarginBps);
   const availableBalance = userAccount ? (capital > lockedMargin ? capital - lockedMargin : 0n) : 0n;

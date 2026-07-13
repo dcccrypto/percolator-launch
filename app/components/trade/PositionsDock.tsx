@@ -181,9 +181,17 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   // unrealized PnL instead of naively substituting the mark price, which
   // silently implies zero PnL and cascades into a liq price clamped to
   // "N/A" below. See estimateEntryFromPnl.
+  // E: guard the sentinel BEFORE it feeds estimateEntryFromPnl's math, not
+  // just at display time (the isSentinelValue guard on pnlNative below is a
+  // SEPARATE, later use) — an unguarded u64::MAX-class account.pnl here can
+  // produce an insane `diff` that survives estimateEntryFromPnl's own
+  // entry>0n fallback (e.g. a short's `entry = oraclePrice + diff` stays
+  // positive even when `diff` is astronomically large), poisoning entry/liq/
+  // margin math downstream.
+  const safePnlForEntry = isSentinelValue(account.pnl) ? 0n : account.pnl;
   const entryPriceE6 = resolvedEntryPrice > 0n
     ? resolvedEntryPrice
-    : estimateEntryFromPnl(account.positionSize, account.pnl, currentPriceE6);
+    : estimateEntryFromPnl(account.positionSize, safePnlForEntry, currentPriceE6);
   const maintenanceBps = params?.maintenanceMarginBps ?? 500n;
   const initialMarginBps = params?.initialMarginBps ?? 1000n;
   const hasValidMark = currentPriceE6 > 0n;

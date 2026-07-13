@@ -16,6 +16,7 @@ import { getStakeProgramId, deriveStakePool } from "@percolatorct/sdk";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 import { readRegisteredMarkets, type RegisteredMarket } from "@/lib/playground-registered-markets";
 import { isBlockedSlab } from "@/lib/blocklist";
+import { getMultipleAccountsInfoChunked } from "@/lib/rpc-chunk";
 import * as Sentry from "@sentry/nextjs";
 
 // ── APR helpers ───────────────────────────────────────────────────────────────
@@ -422,15 +423,18 @@ export async function GET() {
 
     // 2b. Filter out orphan pools whose slab no longer exists on-chain, plus any
     // blocklisted slab (e.g. ANSEM — hidden from the whole app via lib/blocklist).
+    // H: curated(6) ∪ blob-registered(<=100) slabs can reach ~106 — chunked to
+    // stay under the 100-key getMultipleAccountsInfo cap (see lib/rpc-chunk.ts).
     const slabKeys = curatedFiltered.map(p => new PublicKey(p.pool.slab));
-    const slabInfos = await connection.getMultipleAccountsInfo(slabKeys);
+    const slabInfos = await getMultipleAccountsInfoChunked(connection, slabKeys);
     const parsed = curatedFiltered.filter(
       (p, i) => slabInfos[i] !== null && !isBlockedSlab(p.pool.slab),
     );
 
     // 3. Fetch vault token balances (SPL token amount in each vault)
     const vaultAddresses = parsed.map((p) => p.pool.vault);
-    const vaultInfos = await connection.getMultipleAccountsInfo(
+    const vaultInfos = await getMultipleAccountsInfoChunked(
+      connection,
       vaultAddresses.map((a) => new PublicKey(a))
     );
 

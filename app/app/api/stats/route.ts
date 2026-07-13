@@ -18,6 +18,7 @@ import {
   queryStatsAggregate,
   queryKnownSlabs,
 } from "@/lib/indexer-db";
+import { getMultipleAccountsInfoChunked } from "@/lib/rpc-chunk";
 import type { Database } from "@/lib/database.types";
 export const dynamic = "force-dynamic";
 
@@ -203,7 +204,9 @@ async function computeStatsFromOnChainDiscovery(): Promise<(ReturnType<typeof ze
  *  - Total open interest (USD) → batch getMultipleAccountsInfo for known slabs,
  *    parseEngine() per slab, sum (longOi + shortOi).
  *    Assumes 6-decimal USDC collateral for USD conversion (devnet playground invariant).
- *  - Volume 24h (USD) → raw collateral-unit sum divided by 1e6 (same 6-decimal assumption).
+ *  - Volume 24h (USD) → queryStatsAggregate() already returns real USD dollars
+ *    (size × price, summed server-side — see StatsAggregate.volume24hRaw's doc
+ *    comment); no further collateral-decimals division here.
  *
  * All sub-steps degrade gracefully: a failed RPC/DB call yields zeros for that
  * sub-component rather than propagating an error.
@@ -223,7 +226,10 @@ async function computeStatsFromIndexer(): Promise<ReturnType<typeof zeroStats>> 
     try {
       const connection = new Connection(getRpcEndpoint(), "confirmed");
       const pubkeys = knownSlabs.map((s) => new PublicKey(s));
-      const accountInfos = await connection.getMultipleAccountsInfo(pubkeys, "confirmed");
+      // I: queryKnownSlabs() caps at exactly 100 today (LIMIT 100), which sits
+      // right at the getMultipleAccountsInfo ceiling — chunked defensively so
+      // this doesn't silently break the moment that SQL cap is ever raised.
+      const accountInfos = await getMultipleAccountsInfoChunked(connection, pubkeys, "confirmed");
       for (const info of accountInfos) {
         if (!info) continue;
         try {
@@ -247,11 +253,16 @@ async function computeStatsFromIndexer(): Promise<ReturnType<typeof zeroStats>> 
     }
   }
 
-  // Volume: raw collateral units → USD (assumes 6-decimal USDC collateral)
+  // B: agg.volume24hRaw is already real USD dollars (queryStatsAggregate now
+  // multiplies by each trade's own price server-side, mirroring
+  // queryLeaderboard) — no collateral-decimals division here. The previous
+  // `/ COLLATERAL_FACTOR` treated a heterogeneous sum of raw base-asset
+  // quantities as if it were a collateral-atom count, which was wrong on
+  // both counts (wrong unit AND wrong divisor).
   const totalVolume24h =
     agg.volume24hRaw > BigInt(Number.MAX_SAFE_INTEGER)
-      ? Number.MAX_SAFE_INTEGER / COLLATERAL_FACTOR
-      : Number(agg.volume24hRaw) / COLLATERAL_FACTOR;
+      ? Number.MAX_SAFE_INTEGER
+      : Number(agg.volume24hRaw);
 
   return {
     totalMarkets: agg.marketCount,

@@ -259,9 +259,16 @@ function buildV17Position(
   // the position's own on-chain unrealized PnL, mirroring PositionsDock's
   // identical fallback (`estimateEntryFromPnl(positionSize, account.pnl,
   // currentPriceE6)`).
+  // E: guard the sentinel BEFORE it feeds estimateEntryFromPnl's math (the
+  // isSentinelValue guard later in this function, on pnlNative's fallback
+  // branch, is a separate/later use) — see PositionsDock's identical fix for
+  // why an unguarded u64::MAX-class portfolio.pnl here can poison the derived
+  // entry price instead of being caught by estimateEntryFromPnl's own
+  // entry>0n clamp.
+  const safePnlForEntry = isSentinelValue(account.pnl) ? 0n : account.pnl;
   const effectiveEntryPrice = savedEntryPrice > 0n
     ? savedEntryPrice
-    : estimateEntryFromPnl(account.positionSize, account.pnl, oraclePriceE6);
+    : estimateEntryFromPnl(account.positionSize, safePnlForEntry, oraclePriceE6);
   const liquidationPriceE6 = computeLiqPrice(
     effectiveEntryPrice,
     account.capital,

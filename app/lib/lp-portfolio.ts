@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { parsePortfolioV17 } from "@percolatorct/sdk";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
+import { getMultipleAccountsInfoChunked } from "@/lib/rpc-chunk";
 
 /**
  * On-chain "Market LP" (the v17 LP-portfolio account that backs a market as
@@ -86,7 +87,9 @@ export async function getKnownMarketLpCapitals(
 
   try {
     const pubkeys = entries.map((e) => new PublicKey(e.addr));
-    const infos = await connection.getMultipleAccountsInfo(pubkeys);
+    // Curated-only today (small, hardcoded), but chunked defensively so this
+    // doesn't silently break if the curated list ever grows past 100.
+    const infos = await getMultipleAccountsInfoChunked(connection, pubkeys);
     infos.forEach((info, i) => {
       if (!info?.data) return;
       const capital = readCapitalSafe(Buffer.from(info.data));

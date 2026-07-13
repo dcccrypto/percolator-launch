@@ -85,6 +85,9 @@ export const MarketStatsCard: FC = () => {
   const vaultAtoms = vaultField != null ? sanitizeOnChainValue(vaultField) : null;
   const oiLongAtoms = oiLong != null ? sanitizeOnChainValue(oiLong) : null;
   const oiShortAtoms = oiShort != null ? sanitizeOnChainValue(oiShort) : null;
+  // A: OI (totalOI/oiLong/oiShort) is a BASE-ASSET quantity (fixed-point,
+  // scale 1e6, denominated in whatever asset the market trades — SOL, BONK,
+  // ...) — it genuinely needs ×priceUsd to become a dollar figure.
   const fmtOI = (atoms: bigint): string =>
     showUsd && priceUsd != null
       ? formatNum((Number(atoms) / tokenDivisor) * priceUsd)
@@ -95,6 +98,17 @@ export const MarketStatsCard: FC = () => {
       : formatTokenAmount(atoms, decimals);
   const oiDisplay = fmtOI(totalOI);
   const oiFullDisplay = fmtOIFull(totalOI);
+  // A: "Market LP" is COLLATERAL (sim-USDC) atoms — already USD-denominated —
+  // never multiply by the market's base-asset price. Reusing fmtOI (OI's
+  // formatter) here rendered a LP holding 10,000 sim-USDC on the SOL market
+  // as "$811,700" (×81, the SOL price) and as low as "$26" on a sub-cent
+  // asset (385× understated). Mirrors EngineHealthCard's
+  // fmtV17InsuranceUsd/fmtV17OiUsd split (EngineHealthCard.tsx:100-124) —
+  // only OI gets ×price; collateral (LP, insurance) never does.
+  const fmtCollateralUsd = (atoms: bigint): string =>
+    showUsd ? formatNum(Number(atoms) / tokenDivisor) : formatCompactTokenAmount(atoms, decimals);
+  const fmtCollateralUsdFull = (atoms: bigint): string =>
+    showUsd ? formatNum(Number(atoms) / tokenDivisor) : formatTokenAmount(atoms, decimals);
   // GH#2334 follow-up: "Vault"/"Market LP" — engine.vault is v12-only (always
   // null on v17, which every playground market is now). On v17, fall back to
   // /api/markets/[slab]'s vault_balance — the real on-chain LP-portfolio
@@ -108,8 +122,8 @@ export const MarketStatsCard: FC = () => {
     return Number.isFinite(n) && n >= 0 ? BigInt(Math.round(n)) : null;
   })();
   const marketLpAtoms = vaultAtoms ?? marketLpFromApi;
-  const vaultDisplay = marketLpAtoms != null ? fmtOI(marketLpAtoms) : "—";
-  const vaultFullDisplay = marketLpAtoms != null ? fmtOIFull(marketLpAtoms) : "—";
+  const vaultDisplay = marketLpAtoms != null ? fmtCollateralUsd(marketLpAtoms) : "—";
+  const vaultFullDisplay = marketLpAtoms != null ? fmtCollateralUsdFull(marketLpAtoms) : "—";
   const oiLongDisplay = oiLongAtoms != null ? fmtOI(oiLongAtoms) : "—";
   const oiLongFullDisplay = oiLongAtoms != null ? fmtOIFull(oiLongAtoms) : "—";
   const oiShortDisplay = oiShortAtoms != null ? fmtOI(oiShortAtoms) : "—";

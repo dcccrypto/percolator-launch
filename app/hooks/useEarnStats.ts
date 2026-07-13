@@ -11,6 +11,7 @@ import { sanitizeOnChainValue } from '@/lib/health';
 import { PLAYGROUND_SLAB_META } from '@/lib/playground-slab-meta';
 import { parseV17RiskParams } from '@/lib/v17-engine-config';
 import { pollWhenVisible } from '@/lib/pollWhenVisible';
+import { getMultipleAccountsInfoChunked } from '@/lib/rpc-chunk';
 
 // ═══════════════════════════════════════════════════════════════
 // Types
@@ -270,7 +271,9 @@ async function fetchCuratedVaultsOnChain(
     const registryPdas = slabs.map(
       (slab) => deriveLpVaultRegistry(programId, new PublicKey(slab))[0],
     );
-    const infos = await connection.getMultipleAccountsInfo(registryPdas);
+    // I: curated(5) ∪ registered(<=100) slabs can exceed the 100-key cap —
+    // chunked (see lib/rpc-chunk.ts).
+    const infos = await getMultipleAccountsInfoChunked(connection, registryPdas);
 
     slabs.forEach((slab, i) => {
       const info = infos[i];
@@ -334,7 +337,8 @@ async function fetchOnChainMaxLeverage(
   try {
     const connection = getSharedEarnStatsConnection();
     const pks = slabs.map((s) => new PublicKey(s));
-    const infos = await connection.getMultipleAccountsInfo(pks);
+    // I: same allSlabs union as fetchCuratedVaultsOnChain above — chunked.
+    const infos = await getMultipleAccountsInfoChunked(connection, pks);
 
     infos.forEach((info, i) => {
       if (!info?.data) return;

@@ -324,10 +324,19 @@ export interface StatsAggregate {
   uniqueTraders: number;
   trades24h: number;
   /**
-   * Sum of ABS(size) for trades in the last 24 hours, as a raw bigint.
-   * `size` is stored in collateral token's smallest unit (e.g. microUSDC for
-   * a 6-decimal USDC-collateral market).  Callers must divide by 10^decimals
-   * to get USD volume.
+   * B: 24h trade volume in ACTUAL USD DOLLARS (not a raw collateral-atom
+   * count), truncated to a whole-dollar bigint.
+   *
+   * `size` is a raw base-coin "Q" quantity (fixed-point, scale 1e6) — NOT a
+   * collateral-token atom count, and NOT fungible across markets (100 SOL and
+   * 2,000,000 PENGU are wildly different notionals). Summing raw |size|
+   * directly (the previous behavior here) treated every market's base asset
+   * as if it were the same $1-pegged unit. Mirrors the sibling
+   * `queryLeaderboard` query below, which already multiplies by each trade's
+   * own `price` (actual USD, not price_e6) before summing:
+   *   SUM(ABS(size) * price / 1e6) = SUM((size/1e6) * price) = real USD.
+   * Callers must NOT divide this by a collateral decimals factor — it is
+   * already real dollars.
    */
   volume24hRaw: bigint;
 }
@@ -351,7 +360,7 @@ export async function queryStatsAggregate(): Promise<StatsAggregate> {
         FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours')::text
                                                        AS trades_24h,
       COALESCE(
-        SUM(ABS(size::numeric))
+        SUM(ABS(size::numeric) * price::numeric / 1e6)
           FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours'),
         0
       )::text                                          AS volume_24h_raw
@@ -362,7 +371,9 @@ export async function queryStatsAggregate(): Promise<StatsAggregate> {
     marketCount:  Number(row?.market_count   ?? "0"),
     uniqueTraders: Number(row?.unique_traders ?? "0"),
     trades24h:    Number(row?.trades_24h     ?? "0"),
-    volume24hRaw: BigInt(row?.volume_24h_raw ?? "0"),
+    // Truncates sub-dollar cents — acceptable for a display aggregate (mirrors
+    // queryLeaderboard's own BigInt(...split(".")[0]) truncation below).
+    volume24hRaw: BigInt((row?.volume_24h_raw ?? "0").split(".")[0]),
   };
 }
 
@@ -383,7 +394,15 @@ export async function queryKnownSlabs(): Promise<string[]> {
 export interface LeaderboardRow {
   trader: string;
   tradeCount: number;
-  totalVolume: bigint;
+  /**
+   * C: real USD dollars as a plain number (NOT a scaled bigint/atom count).
+   * `SUM(ABS(size) * price / 1e6)` below is already `Σ (size/1e6) * price` =
+   * real dollar notional (`size` is a fixed-point base-asset "Q" quantity,
+   * scale 1e6; `price` is an actual USD float, not price_e6). Callers must
+   * NOT rescale this by any collateral/base-asset decimals — see the
+   * unification note on `app/api/leaderboard/route.ts`'s `LeaderboardEntry`.
+   */
+  totalVolume: number;
   lastTradeAt: string;
 }
 
@@ -448,7 +467,9 @@ export async function queryLeaderboard(
   return rows.map((r) => ({
     trader: r.trader,
     tradeCount: Number(r.trade_count),
-    totalVolume: BigInt(r.total_volume.split(".")[0]),
+    // Already real USD dollars (see LeaderboardRow.totalVolume's doc comment)
+    // — Number(), not BigInt-truncated, so sub-dollar cents aren't lost.
+    totalVolume: Number(r.total_volume),
     lastTradeAt: r.last_trade_at instanceof Date
       ? r.last_trade_at.toISOString()
       : String(r.last_trade_at),
