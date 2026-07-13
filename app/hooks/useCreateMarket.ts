@@ -79,6 +79,8 @@ import {
   getFreshBlockhash,
   getPriorityFee,
   isBlockhashExpiredError,
+  isConfirmationTimeoutError,
+  checkSignatureLanded,
 } from "@/lib/tx";
 import { getConfig, getNetwork } from "@/lib/config";
 import { normalizeDexType } from "@/lib/dex-type";
@@ -1077,12 +1079,47 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
           if (!tx) throw new Error(`Missing signed transaction for tail step ${idx}.`);
           return await broadcastSignedTx(connection, tx);
         } catch (err) {
-          if (isBlockhashExpiredError(err) && blockhashRecoveries < MAX_BLOCKHASH_RECOVERIES) {
+          const canRecover = blockhashRecoveries < MAX_BLOCKHASH_RECOVERIES;
+
+          // Case A — the SEND was rejected as expired (no signature exists, the
+          // tx never landed): safe to rebuild against a fresh blockhash.
+          if (isBlockhashExpiredError(err) && canRecover) {
             console.warn(
               `[useCreateMarket] batch: blockhash expired at tail step ${idx} — recovering (attempt ${blockhashRecoveries + 1}/${MAX_BLOCKHASH_RECOVERIES})`,
             );
             await recoverTailFrom(idx);
             continue; // retry the SAME step with the freshly rebuilt+signed tx
+          }
+
+          // Case B — the tx was SUBMITTED but confirmation timed out at the edge
+          // of the blockhash window; it may still have landed. Status-check the
+          // signature FIRST (mirrors sendTx's R2-S7 landing check) — only rebuild
+          // if it is DEFINITIVELY absent. On "landed" treat as success; on any
+          // indeterminate result (RPC error, on-chain failure, processed-not-
+          // confirmed) propagate rather than risk re-running a landed createAccount.
+          if (isConfirmationTimeoutError(err)) {
+            // The landing-check is free (one RPC read) and ALWAYS safe, so it
+            // runs regardless of the recovery budget — a tx that already landed
+            // must be reported as success even after the rebuild cap is spent,
+            // otherwise a fully-successful launch gets reported as a failure.
+            // Only the REBUILD leg is gated on `canRecover`.
+            const sig = (err as { signature?: string }).signature;
+            const landed = sig ? await checkSignatureLanded(connection, sig) : "unknown";
+            if (landed === "landed" && sig) {
+              console.warn(
+                `[useCreateMarket] batch: tail step ${idx} confirmation timed out but the tx DID land — continuing`,
+              );
+              return sig; // it's on-chain; treat exactly like a normal success
+            }
+            if (landed === "not-found" && canRecover) {
+              console.warn(
+                `[useCreateMarket] batch: tail step ${idx} timed out and did not land — recovering (attempt ${blockhashRecoveries + 1}/${MAX_BLOCKHASH_RECOVERIES})`,
+              );
+              await recoverTailFrom(idx);
+              continue;
+            }
+            // "unknown" (indeterminate — never rebuild), or "not-found" with the
+            // recovery budget exhausted → fall through and propagate (resumable).
           }
           throw err;
         }

@@ -729,8 +729,52 @@ export function isBlockhashExpiredError(err: unknown): boolean {
   return (
     lower.includes("blockhash not found") ||
     lower.includes("block height exceeded") ||
-    lower.includes("blockhashnotfound")
+    lower.includes("blockhashnotfound") ||
+    // Consistency with `sendTx`'s own retry predicate above, which also treats
+    // "has expired" as an expiry signal.
+    lower.includes("has expired")
   );
+}
+
+/**
+ * True if `err` is `pollConfirmation`'s "Confirmation timeout" — the tx WAS
+ * submitted (it has a signature) but didn't confirm within MAX_POLL_TIME_MS
+ * (~= the blockhash validity window). Distinct from `isBlockhashExpiredError`:
+ * an expiry error means the send was REJECTED (never accepted, no signature),
+ * whereas a timeout means the tx may have landed and MUST be status-checked
+ * (via `checkSignatureLanded`) before any rebuild — re-broadcasting a rebuilt
+ * tx whose original actually landed would re-run a createAccount that already
+ * succeeded and hard-fail the operation.
+ */
+export function isConfirmationTimeoutError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+  return msg.toLowerCase().includes("confirmation timeout");
+}
+
+/**
+ * Definitive on-chain status of a submitted signature, for the "did it land
+ * before I rebuild?" check (mirrors `sendTx`'s R2-S7 landing check). Uses
+ * `searchTransactionHistory: true` so a confirmed-but-status-aged tx isn't
+ * mis-reported as missing.
+ *  - "landed"    → confirmed/finalized with no error: treat as success, do NOT rebuild.
+ *  - "not-found" → genuinely absent (dropped): safe to rebuild against a fresh blockhash.
+ *  - "unknown"   → on-chain error, or an RPC failure that leaves it indeterminate:
+ *                  caller must NOT rebuild (could double-execute) and should propagate.
+ */
+export async function checkSignatureLanded(
+  connection: Connection,
+  signature: string,
+): Promise<"landed" | "not-found" | "unknown"> {
+  try {
+    const resp = await connection.getSignatureStatuses([signature], { searchTransactionHistory: true });
+    const st = resp.value[0];
+    if (st?.err) return "unknown"; // failed on-chain — a rebuild would just fail again
+    if (st && (st.confirmationStatus === "confirmed" || st.confirmationStatus === "finalized")) return "landed";
+    if (!st) return "not-found";
+    return "unknown"; // processed-but-not-yet-confirmed — indeterminate, don't rebuild
+  } catch {
+    return "unknown"; // RPC hiccup — indeterminate, fail safe
+  }
 }
 
 // ============================================================================
@@ -853,6 +897,21 @@ export async function broadcastSignedTx(
     }
     throw sendErr;
   }
-  await pollConfirmation(connection, signature, opts.onProgress, opts.abortSignal);
+  try {
+    await pollConfirmation(connection, signature, opts.onProgress, opts.abortSignal);
+  } catch (confirmErr) {
+    // The tx WAS submitted (we have its signature) but confirmation failed —
+    // attach the signature so a caller (the batch pipeline) can status-check it
+    // before deciding to rebuild, instead of blindly re-broadcasting. Only the
+    // send path above (a rejected tx) has no signature to attach.
+    if (confirmErr && typeof confirmErr === "object") {
+      try {
+        (confirmErr as { signature?: string }).signature = signature;
+      } catch {
+        // Frozen/exotic error object — leave it; caller falls back to no-sig handling.
+      }
+    }
+    throw confirmErr;
+  }
   return signature;
 }
