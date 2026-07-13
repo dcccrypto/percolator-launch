@@ -61,7 +61,7 @@ import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccountIdle } from "@/lib/mock-trade-data";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
-import { formatTokenAmount, formatUsdPriceE6, toE6 } from "@/lib/format";
+import { formatTokenAmount, formatUsdPriceE6, toE6, normalizeTokenDecimals } from "@/lib/format";
 import { saveEntryPrice, getEntryPrice, clearEntryPrice } from "@/lib/entry-price";
 import { isSentinelValue } from "@/lib/health";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
@@ -82,7 +82,8 @@ function sanitizeDecimalInput(value: string): string {
 
 
 
-function parsePercToNative(input: string, decimals = 6): bigint {
+function parsePercToNative(input: string, decimalsRaw = 6): bigint {
+  const decimals = normalizeTokenDecimals(decimalsRaw); // guard NaN/Infinity/negative before BigInt/padEnd
   const parts = input.split(".");
   if (parts.length > 2) return 0n;
   const whole = parts[0] || "0";

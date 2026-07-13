@@ -1,3 +1,5 @@
+import { normalizeTokenDecimals } from "@/lib/format";
+
 /**
  * Parse a human-readable decimal string into native token units (smallest units).
  * Converts user input like "100.5" into blockchain-native format like 100_500_000n (for 6-decimal token).
@@ -23,7 +25,11 @@
  * parseHumanAmount("abc", 6) // -> 0n (invalid input)
  * parseHumanAmount("0.0000001", 6) // -> throws (too many decimals)
  */
-export function parseHumanAmount(input: string, decimals: number): bigint {
+export function parseHumanAmount(input: string, decimalsRaw: number): bigint {
+  // Guard malformed decimals (NaN/Infinity/negative/fractional) before they
+  // reach BigInt exponentiation or String.padEnd — same fix as the display
+  // formatters in lib/format.ts (#2389), extended to this input-parsing path.
+  const decimals = normalizeTokenDecimals(decimalsRaw);
   const trimmed = input.trim();
   if (!trimmed || trimmed === ".") return 0n;
 
@@ -75,9 +81,10 @@ export function parseHumanAmount(input: string, decimals: number): bigint {
  * formatHumanAmount(0n, 6) // -> "0"
  * formatHumanAmount(100000000n, 6) // -> "100" (trailing zeros stripped)
  */
-export function formatHumanAmount(raw: bigint, decimals: number): string {
+export function formatHumanAmount(raw: bigint, decimalsRaw: number): string {
   if (raw === 0n) return "0";
 
+  const decimals = normalizeTokenDecimals(decimalsRaw);
   const negative = raw < 0n;
   const abs = negative ? -raw : raw;
   const divisor = 10n ** BigInt(decimals);
