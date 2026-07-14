@@ -378,7 +378,7 @@ interface PortfolioSnapshot {
  * checks ITS `cancelled` flag only around applying the resolved snapshot to
  * local state.
  */
-async function fetchPortfolioSnapshot(
+export async function fetchPortfolioSnapshot(
   connection: ReturnType<typeof useConnectionCompat>["connection"],
   publicKey: PublicKey,
   programIds: string[],
@@ -641,7 +641,7 @@ async function fetchPortfolioSnapshot(
             // useUserAccount.ts / useDeposit.ts (commit 3ae16309).
             { memcmp: { offset: 116, bytes: pkStr } },
           ],
-        }).catch(() => [] as Awaited<ReturnType<typeof connection.getProgramAccounts>>),
+        }),
       ),
     );
 
@@ -690,11 +690,11 @@ async function fetchPortfolioSnapshot(
       }
     }
   } catch (error) {
-    // A total failure here (e.g. every program's scan rejected) should
-    // still surface to the console — see fetchPortfolioSnapshot's caller for
-    // the top-level equivalent — but must not throw; v12 positions above and
-    // the NFT-recovery pass below still run.
+    // A failed owner scan makes the aggregate snapshot incomplete.
+    // Reject this fetch so loadPortfolioShared does not cache or publish
+    // partial positions, balances, PnL, or portfolio totals.
     console.debug("[usePortfolio] v17 owner-scan failed:", error);
+    throw error;
   }
 
   // ── NFT-wrapped position recovery (v17) ──────────────────────────────
@@ -882,7 +882,7 @@ export function peekPortfolioSnapshot(key: string): PortfolioSnapshot | null {
  * explicit user action (e.g. closing a position) always gets a real fresh
  * read instead of silently replaying a stale cached snapshot.
  */
-function loadPortfolioShared(
+export function loadPortfolioShared(
   key: string,
   force: boolean,
   fetcher: () => Promise<PortfolioSnapshot>,
