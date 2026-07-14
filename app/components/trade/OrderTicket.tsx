@@ -430,7 +430,16 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       }
       const notionalUsd = unit === "token" ? n * priceUsd : n;
       const marginAmt = notionalUsd / lev;
-      setMarginInput(marginAmt.toFixed(decimals));
+      
+      // Truncate rather than round to prevent fractional float-overshoot
+      // from generating a marginNative slightly larger than the user's actual balance.
+      const str = marginAmt.toString();
+      if (str.includes("e")) {
+        setMarginInput(marginAmt.toFixed(decimals));
+      } else {
+        const dot = str.indexOf(".");
+        setMarginInput(dot === -1 ? str : str.slice(0, dot + 1 + decimals));
+      }
     },
     [priceUsd, decimals],
   );
@@ -450,7 +459,15 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       const n = parseFloat(sizeInput);
       if (!isNaN(n) && priceUsd && priceUsd > 0) {
         const converted = prev === "token" ? n * priceUsd : n / priceUsd;
-        const nextStr = next === "token" ? converted.toFixed(6) : converted.toFixed(2);
+        const targetDecimals = next === "token" ? 6 : 2;
+        const str = converted.toString();
+        let nextStr: string;
+        if (str.includes("e")) {
+          nextStr = converted.toFixed(targetDecimals);
+        } else {
+          const dot = str.indexOf(".");
+          nextStr = dot === -1 ? str : str.slice(0, dot + 1 + targetDecimals);
+        }
         setSizeInput(nextStr);
         recomputeFromSize(nextStr, next, leverage);
       }
@@ -478,7 +495,14 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       const notionalUsd = marginNum * leverage;
       if (priceUsd && priceUsd > 0) {
         const nextSize = sizeUnit === "token" ? notionalUsd / priceUsd : notionalUsd;
-        setSizeInput(sizeUnit === "token" ? nextSize.toFixed(6) : nextSize.toFixed(2));
+        const targetDecimals = sizeUnit === "token" ? 6 : 2;
+        const str = nextSize.toString();
+        if (str.includes("e")) {
+          setSizeInput(nextSize.toFixed(targetDecimals));
+        } else {
+          const dot = str.indexOf(".");
+          setSizeInput(dot === -1 ? str : str.slice(0, dot + 1 + targetDecimals));
+        }
       }
     },
     [effectiveBalance, decimals, leverage, priceUsd, sizeUnit],
@@ -600,7 +624,7 @@ setEngineLockError(null);
         async () =>
           trade(
             bindConfirmedLimitPrice(
-              { lpIdx, userIdx: userAccount!.idx, size },
+              { lpIdx, userIdx: userAccount!.idx, size, userPortfolioPk: userAccount!.pubkey },
               snapshotLimitPriceE6,
             ),
           ),

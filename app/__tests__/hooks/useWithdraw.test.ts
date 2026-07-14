@@ -29,6 +29,10 @@ vi.mock("@/lib/tx", () => ({
   sendTx: vi.fn(),
 }));
 
+vi.mock("@/lib/errorMessages", () => ({
+  humanizeError: vi.fn((msg) => msg),
+}));
+
 vi.mock("@/lib/config", () => ({
   getBackendUrl: vi.fn(() => "http://localhost:3001"),
 }));

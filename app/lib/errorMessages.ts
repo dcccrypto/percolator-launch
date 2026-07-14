@@ -230,6 +230,7 @@ export function isTransientError(msg: string): boolean {
   if (msg.includes("Blockhash not found")) return true;
   if (msg.includes("block height exceeded")) return true;
   if (msg.includes("has expired")) return true;
+  if (msg.includes("429") || msg.toLowerCase().includes("too many requests")) return true;
   return false;
 }
 

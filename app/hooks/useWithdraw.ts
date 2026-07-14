@@ -64,7 +64,7 @@ export function useWithdraw(slabAddress: string) {
   const inflightRef = useRef(false);
 
   const withdraw = useCallback(
-    async (params: { userIdx: number; amount: bigint }) => {
+    async (params: { userIdx: number; amount: bigint; portfolioPk?: PublicKey }) => {
       if (inflightRef.current) throw new Error("Withdrawal already in progress");
       inflightRef.current = true;
       setLoading(true);
@@ -142,29 +142,36 @@ export function useWithdraw(slabAddress: string) {
 
           // Find the user's portfolio account.
           const V17_MAGIC_BYTES = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
-          let portfolioPk: PublicKey | null = null;
+          let portfolioPk: PublicKey | null = params.portfolioPk ?? null;
           let portfolioData: Buffer | null = null;
-          // Latency: when the shared scan store knows the portfolio's pubkey
-          // (its address never changes for a wallet+market), one targeted
-          // getAccountInfo replaces the filtered program scan below — the
-          // DATA read is equally live either way (withdraw needs fresh data
-          // for the free-margin gate and the crank-prepend decision). The
-          // owner re-verification below applies to both paths.
-          const storePk = getPortfolioRawSnapshot(
-            makePortfolioScanKey(programId, slabAddress, wallet.publicKey),
-          )?.pubkey;
-          if (storePk) {
+          if (portfolioPk) {
             try {
-              const info = await connection.getAccountInfo(storePk, "confirmed");
-              if (info) {
-                const candidateData = Buffer.from(info.data);
-                const candidatePf = parsePortfolioV17(candidateData);
-                if (candidatePf.owner.equals(wallet.publicKey)) {
-                  portfolioPk = storePk;
-                  portfolioData = candidateData;
+              const info = await connection.getAccountInfo(portfolioPk, "confirmed");
+              if (info) portfolioData = Buffer.from(info.data);
+            } catch { /* best-effort */ }
+          } else {
+            // Latency: when the shared scan store knows the portfolio's pubkey
+            // (its address never changes for a wallet+market), one targeted
+            // getAccountInfo replaces the filtered program scan below — the
+            // DATA read is equally live either way (withdraw needs fresh data
+            // for the free-margin gate and the crank-prepend decision). The
+            // owner re-verification below applies to both paths.
+            const storePk = getPortfolioRawSnapshot(
+              makePortfolioScanKey(programId, slabAddress, wallet.publicKey),
+            )?.pubkey;
+            if (storePk) {
+              try {
+                const info = await connection.getAccountInfo(storePk, "confirmed");
+                if (info) {
+                  const candidateData = Buffer.from(info.data);
+                  const candidatePf = parsePortfolioV17(candidateData);
+                  if (candidatePf.owner.equals(wallet.publicKey)) {
+                    portfolioPk = storePk;
+                    portfolioData = candidateData;
+                  }
                 }
-              }
-            } catch { /* fall through to the scan */ }
+              } catch { /* fall through to the scan */ }
+            }
           }
           if (!portfolioPk) try {
             // Mutable owner (SDK PF_OWNER_OFF) is at offset 116, NOT offset 80
@@ -340,8 +347,8 @@ export function useWithdraw(slabAddress: string) {
         // crank+trade budget); all pre-existing paths keep the original 300k.
         const sig = await sendTx({ connection, wallet, instructions, computeUnits: v17CrankIncluded ? 600_000 : 300_000 });
         // Force immediate slab re-read so balance updates without waiting for the next poll.
-        refreshSlab();
-        setTimeout(() => refreshSlab(), 2000);
+        refreshSlab?.();
+        setTimeout(() => refreshSlab?.(), 2000);
         return sig;
       } catch (e) {
         const rawMsg = e instanceof Error ? e.message : String(e);
