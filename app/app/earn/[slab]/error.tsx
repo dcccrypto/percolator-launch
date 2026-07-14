@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import Link from 'next/link';
 import { GlowButton } from '@/components/ui/GlowButton';
 
@@ -10,18 +11,22 @@ export default function VaultDetailError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  useEffect(() => {
+    console.error('[earn/[slab]] vault error boundary:', error);
+  }, [error]);
+
   return (
-    <div className="min-h-[calc(100dvh-48px)] flex items-center justify-center">
+    <div role="alert" className="min-h-[calc(100dvh-48px)] flex items-center justify-center">
       <div className="max-w-md mx-auto text-center px-4">
-        <div className="text-4xl mb-4">⚠️</div>
+        <div aria-hidden="true" className="text-4xl mb-4">⚠️</div>
         <h1
-          className="text-2xl font-medium text-white mb-2"
+          className="text-2xl font-medium text-[var(--text)] mb-2"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Vault Error
         </h1>
         <p className="text-[13px] text-[var(--text-secondary)] mb-6">
-          {error.message || 'Something went wrong loading this vault.'}
+          Something went wrong loading this vault. Please try again.
         </p>
         <div className="flex items-center justify-center gap-3">
           <GlowButton onClick={reset} variant="primary" size="md">

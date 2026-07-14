@@ -1,5 +1,6 @@
 "use client";
 import { explorerTxUrl } from "@/lib/config";
+import { prewarmTxLanding } from "@/lib/tx";
 
 import { FC, useState, useEffect, useRef } from "react";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
@@ -10,14 +11,17 @@ import { useUserAccount } from "@/hooks/useUserAccount";
 import { useDeposit } from "@/hooks/useDeposit";
 import { useWithdraw } from "@/hooks/useWithdraw";
 import { useInitUser } from "@/hooks/useInitUser";
+import { AUTO_DEPOSIT_AMOUNT } from "@/hooks/useAutoDeposit";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { parseHumanAmount } from "@/lib/parseAmount";
 import { formatTokenAmount } from "@/lib/format";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
-import { computePositionInitialMargin } from "@/lib/trading";
+import { computePositionInitialMargin, estimateEntryFromPnl } from "@/lib/trading";
 import { getEntryPrice } from "@/lib/entry-price";
+import { useLivePrice } from "@/hooks/useLivePrice";
+import { isSentinelValue } from "@/lib/health";
 
 interface DepositWithdrawCardProps {
   slabAddress: string;
@@ -26,6 +30,13 @@ interface DepositWithdrawCardProps {
    *  order-ticket footer's separate Deposit / Withdraw triggers). The in-card
    *  tabs still switch modes locally. */
   initialMode?: "deposit" | "withdraw";
+}
+
+function sanitizeDecimalInput(value: string): string {
+  const cleaned = value.replace(/[^0-9.]/g, "");
+  const dotIndex = cleaned.indexOf(".");
+  if (dotIndex === -1) return cleaned;
+  return cleaned.slice(0, dotIndex + 1) + cleaned.slice(dotIndex + 1).replace(/\./g, "");
 }
 
 export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress, isDevnetMirror = false, initialMode = "deposit" }) => {
@@ -39,19 +50,42 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
   const { withdraw, loading: withdrawLoading, error: withdrawError } = useWithdraw(slabAddress);
   const { initUser, loading: initLoading, error: initError } = useInitUser(slabAddress);
   const { config: mktConfig, params: slabParams } = useSlabState();
+  const { priceE6: livePriceE6 } = useLivePrice();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const symbol = tokenMeta?.symbol ?? "Token";
 
   const [mode, setMode] = useState<"deposit" | "withdraw">(initialMode);
-
-  // Follow the parent's trigger while open (footer Deposit vs Withdraw links).
-  useEffect(() => { setMode(initialMode); }, [initialMode]);
   const [amount, setAmount] = useState("");
+
+  // Prewarm the tx-landing caches (blockhash, priority fee, clock drift) the
+  // moment this card appears — the user types an amount before submitting,
+  // and that time absorbs the fetches, so the deposit/withdraw click reaches
+  // the wallet popup without blocking on them. Fire-and-forget; sendTx falls
+  // back to live fetches if any prewarm failed.
+  useEffect(() => {
+    if (!mockMode && walletConnected) prewarmTxLanding(connection);
+  }, [connection, mockMode, walletConnected]);
   const [lastSig, setLastSig] = useState<string | null>(null);
   const [walletBalance, setWalletBalance] = useState<bigint | null>(mockMode ? 500_000_000n : null);
   const maxRawRef = useRef<bigint | null>(null);
   const [onChainDecimals, setOnChainDecimals] = useState<number | null>(null);
   const decimals = onChainDecimals ?? tokenMeta?.decimals ?? 6;
+
+  // Keep the mode-specific MAX raw value from leaking across Deposit/Withdraw.
+  // MAX stores exact BigInt precision in maxRawRef, so switching tabs must clear
+  // both the display amount and the raw ref before the opposite action can submit.
+  useEffect(() => {
+    setMode(initialMode);
+    setAmount("");
+    maxRawRef.current = null;
+  }, [initialMode]);
+
+  const switchMode = (nextMode: "deposit" | "withdraw") => {
+    if (nextMode === mode) return;
+    maxRawRef.current = null;
+    setAmount("");
+    setMode(nextMode);
+  };
   useEffect(() => {
     if (!publicKey || !mktConfig?.collateralMint) { setWalletBalance(null); setOnChainDecimals(null); return; }
     let cancelled = false;
@@ -69,6 +103,28 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
     })();
     return () => { cancelled = true; };
   }, [publicKey, mktConfig?.collateralMint, connection, lastSig]);
+
+  // Pre-fill deposit: the FIRST time this card is open for a brand-new
+  // (0-capital) account with a known wallet balance, default the amount
+  // field to min(walletBalance, the 500 USDC starter cap) instead of making
+  // the user type a number before they can even see what "Max" would give
+  // them. Only ever runs once per mount (prefilledRef) — after that, the
+  // field is the user's own to edit/clear, including clearing it back to
+  // empty on purpose. Gated to the Deposit tab and to a truly untouched
+  // field so it never clobbers a value the user is mid-typing.
+  const prefilledRef = useRef(false);
+  useEffect(() => {
+    if (prefilledRef.current) return;
+    if (mode !== "deposit") return;
+    if (amount !== "" || maxRawRef.current !== null) return;
+    if (walletBalance == null) return; // wait for a real balance read
+    const capitalNow = userAccount?.account.capital ?? 0n;
+    if (capitalNow !== 0n) return; // only for never-funded accounts
+    prefilledRef.current = true;
+    if (walletBalance <= 0n) return; // nothing to prefill
+    const prefillAmt = walletBalance < AUTO_DEPOSIT_AMOUNT ? walletBalance : AUTO_DEPOSIT_AMOUNT;
+    setAmount(formatTokenAmount(prefillAmt, decimals));
+  }, [mode, amount, walletBalance, userAccount, decimals]);
 
   if (!connected) {
     return (
@@ -109,12 +165,18 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
               Create your trading account on this market to start trading.
             </p>
             <button
-              onClick={async () => { 
-                try { 
-                  // feePayment=0 — just registers the slot.
-                  // Actual deposit follows in the deposit form once account exists.
-                  const sig = await initUser(0n); 
-                  setLastSig(sig ?? null); 
+              onClick={async () => {
+                try {
+                  // min(wallet balance, the same starter cap useAutoDeposit
+                  // uses) lets useInitUser fold Deposit into the same
+                  // account-creation transaction when possible — one click
+                  // can end in a tradeable, funded account instead of always
+                  // needing a second manual deposit afterward.
+                  const depositAmt = walletBalance != null && walletBalance < AUTO_DEPOSIT_AMOUNT
+                    ? walletBalance
+                    : AUTO_DEPOSIT_AMOUNT;
+                  const result = await initUser(depositAmt);
+                  setLastSig(result?.sig ?? null);
                 } catch {
                   // initError state is set by the hook and shown below
                 }
@@ -147,19 +209,42 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
   const capital = userAccount.account.capital;
   const positionSize = userAccount.account.positionSize ?? 0n;
   const hasOpenPosition = positionSize !== 0n;
-  // M7: gate withdraw on FREE margin (capital minus the open position's own
-  // locked initial margin), not total capital — total capital includes
+  // M7 / D: gate withdraw on FREE margin (capital minus the open position's
+  // own locked initial margin), not total capital — total capital includes
   // margin backing an open position that the on-chain program refuses to
   // release. v17 doesn't store entry_price on-chain, so recover it the same
-  // way the rest of the trade UI does (client-side cache from trade-open
-  // time — see lib/entry-price.ts).
-  const effectiveEntryPrice = hasOpenPosition && publicKey
+  // 3-step fallback OrderTicket already uses: on-chain entry_price -> the
+  // locally-cached entry from this trade's open (lib/entry-price.ts) -> the
+  // on-chain-pnl-implied entry (estimateEntryFromPnl) for a cache miss (2nd
+  // device, cleared storage, or a Position NFT received via transfer).
+  //
+  // D: the previous version used ONLY getEntryPrice(), so a cache miss
+  // silently returned 0n -> computePositionInitialMargin(pos, 0n, bps) is
+  // guarded to return 0n -> lockedMargin=0 -> "Max" offered the FULL account
+  // capital of an account with an OPEN position, and the resulting withdrawal
+  // tx reverted on-chain. If even estimateEntryFromPnl can't establish an
+  // entry (no live oracle price yet), fail CLOSED: treat the WHOLE capital as
+  // locked (lockedMargin=capital -> freeMargin=0 -> the Max button, gated on
+  // `freeMargin > 0n` below, simply doesn't render) rather than open.
+  const rawEntryPrice = userAccount.account.entryPrice ?? 0n;
+  const cachedEntryPrice = hasOpenPosition && publicKey
     ? getEntryPrice(slabAddress, userAccount.idx, publicKey.toBase58())
     : 0n;
-  const initialMarginBps = slabParams?.initialMarginBps ?? 1000n;
-  const lockedMargin = hasOpenPosition
-    ? computePositionInitialMargin(positionSize, effectiveEntryPrice, initialMarginBps)
+  const safePnlForEstimate = isSentinelValue(userAccount.account.pnl) ? 0n : userAccount.account.pnl;
+  const estimatedEntryPrice = hasOpenPosition && livePriceE6 != null && livePriceE6 > 0n
+    ? estimateEntryFromPnl(positionSize, safePnlForEstimate, livePriceE6)
     : 0n;
+  const effectiveEntryPrice = rawEntryPrice > 0n
+    ? rawEntryPrice
+    : cachedEntryPrice > 0n
+      ? cachedEntryPrice
+      : estimatedEntryPrice;
+  const initialMarginBps = slabParams?.initialMarginBps ?? 1000n;
+  const lockedMargin = !hasOpenPosition
+    ? 0n
+    : effectiveEntryPrice > 0n
+      ? computePositionInitialMargin(positionSize, effectiveEntryPrice, initialMarginBps)
+      : capital; // fail closed: no entry price could be established at all
   const freeMargin = capital > lockedMargin ? capital - lockedMargin : 0n;
   const loading = mode === "deposit" ? depositLoading : withdrawLoading;
   const error = mode === "deposit" ? depositError : withdrawError;
@@ -201,6 +286,7 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
         sig = await withdraw({ userIdx: userAccount.idx, amount: amtNative });
       }
       setLastSig(sig ?? null);
+      maxRawRef.current = null;
       setAmount("");
     } catch (err) {
       if (process.env.NODE_ENV === 'development') {
@@ -260,17 +346,18 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
       )}
 
       <div className="mb-2 flex gap-1">
-        <button onClick={() => setMode("deposit")} className={`flex-1 rounded-none py-1.5 text-[10px] font-medium uppercase tracking-[0.1em] ${mode === "deposit" ? "bg-[var(--accent)] text-white" : "border border-[var(--border)]/30 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"}`}>Deposit</button>
-        <button onClick={() => setMode("withdraw")} className={`flex-1 rounded-none py-1.5 text-[10px] font-medium uppercase tracking-[0.1em] ${mode === "withdraw" ? "bg-[var(--warning)] text-[var(--bg)]" : "border border-[var(--border)]/30 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"}`}>Withdraw</button>
+        <button onClick={() => switchMode("deposit")} className={`flex-1 rounded-none py-1.5 text-[10px] font-medium uppercase tracking-[0.1em] ${mode === "deposit" ? "bg-[var(--accent)] text-white" : "border border-[var(--border)]/30 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"}`}>Deposit</button>
+        <button onClick={() => switchMode("withdraw")} className={`flex-1 rounded-none py-1.5 text-[10px] font-medium uppercase tracking-[0.1em] ${mode === "withdraw" ? "bg-[var(--warning)] text-[var(--bg)]" : "border border-[var(--border)]/30 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"}`}>Withdraw</button>
       </div>
 
       <div className="mb-2">
         <div className="relative">
           <input
             type="text"
+            inputMode="decimal"
             value={amount}
-            onChange={(e) => { 
-              const newValue = e.target.value.replace(/[^0-9.]/g, "");
+            onChange={(e) => {
+              const newValue = sanitizeDecimalInput(e.target.value);
               if (newValue !== amount) {
                 maxRawRef.current = null;
               }

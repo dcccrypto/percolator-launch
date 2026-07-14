@@ -3,13 +3,15 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { deriveLpVaultRegistry, parseLpVaultRegistry, isV17Account } from '@percolatorct/sdk';
-import { getBackendUrl, getConfig, getRpcEndpoint } from '@/lib/config';
+import { getConfig, getRpcEndpoint } from '@/lib/config';
 import { getSupabase } from '@/lib/supabase';
 import { isMockMode } from '@/lib/mock-mode';
 import { isBlockedSlab } from '@/lib/blocklist';
 import { sanitizeOnChainValue } from '@/lib/health';
 import { PLAYGROUND_SLAB_META } from '@/lib/playground-slab-meta';
 import { parseV17RiskParams } from '@/lib/v17-engine-config';
+import { pollWhenVisible } from '@/lib/pollWhenVisible';
+import { getMultipleAccountsInfoChunked } from '@/lib/rpc-chunk';
 
 // ═══════════════════════════════════════════════════════════════
 // Types
@@ -35,8 +37,6 @@ export interface MarketVaultInfo {
   tradingFeeBps: number;
   /** Max leverage */
   maxLeverage: number;
-  /** Annualised APY estimate based on fee revenue */
-  estimatedApyPct: number;
   /** OI utilization percentage (totalOI / maxOI × 100) */
   oiUtilPct: number;
   /** Collateral token decimals */
@@ -50,8 +50,6 @@ export interface EarnStats {
   totalOI: number;
   /** Platform-wide max OI capacity */
   maxOI: number;
-  /** Platform-wide average APY */
-  avgApyPct: number;
   /** Platform-wide OI utilization */
   oiUtilPct: number;
   /** Insurance fund total */
@@ -66,7 +64,6 @@ const DEFAULT_STATS: EarnStats = {
   tvl: 0,
   totalOI: 0,
   maxOI: 0,
-  avgApyPct: 0,
   oiUtilPct: 0,
   totalInsurance: 0,
   markets: [],
@@ -108,7 +105,6 @@ function generateMockStats(): EarnStats {
       volume24h: 128_450,
       tradingFeeBps: 10,
       maxLeverage: 20,
-      estimatedApyPct: 18.7,
       oiUtilPct: 18.1, decimals: 9,
     },
     {
@@ -123,7 +119,6 @@ function generateMockStats(): EarnStats {
       volume24h: 89_200,
       tradingFeeBps: 15,
       maxLeverage: 10,
-      estimatedApyPct: 24.3,
       oiUtilPct: 13.0, decimals: 6,
     },
     {
@@ -138,7 +133,6 @@ function generateMockStats(): EarnStats {
       volume24h: 67_300,
       tradingFeeBps: 15,
       maxLeverage: 10,
-      estimatedApyPct: 31.2,
       oiUtilPct: 18.8, decimals: 6,
     },
     {
@@ -153,7 +147,6 @@ function generateMockStats(): EarnStats {
       volume24h: 41_600,
       tradingFeeBps: 12,
       maxLeverage: 15,
-      estimatedApyPct: 15.8,
       oiUtilPct: 12.4, decimals: 6,
     },
   ];
@@ -167,16 +160,10 @@ function generateMockStats(): EarnStats {
     0,
   );
 
-  const avgApy =
-    markets.length > 0
-      ? markets.reduce((s, m) => s + m.estimatedApyPct, 0) / markets.length
-      : 0;
-
   return {
     tvl: tvl * 150, // Convert SOL to rough USD at $150
     totalOI,
     maxOI,
-    avgApyPct: avgApy,
     oiUtilPct: maxOI > 0 ? (totalOI / maxOI) * 100 : 0,
     totalInsurance: totalInsurance * 150,
     markets,
@@ -189,9 +176,12 @@ function generateMockStats(): EarnStats {
 // ═══════════════════════════════════════════════════════════════
 
 /** Sim-USDC collateral decimals — the single collateral token shared by every playground market. */
-const CURATED_COLLATERAL_DECIMALS = 6;
+export const CURATED_COLLATERAL_DECIMALS = 6;
 
-interface CuratedVaultOnChain {
+/** GH#1165 — sanity cap on any single vault's displayed TVL (USD). */
+export const MAX_VAULT_USD = 10_000_000;
+
+export interface CuratedVaultOnChain {
   /** Total atoms backing the LP vault (shares outstanding + distributed fee atoms). */
   tvlAtoms: bigint;
   /** Redemption cooldown period from the registry, in slots. */
@@ -258,11 +248,22 @@ async function fetchRegisteredMarketsMeta(): Promise<RegisteredMarketMeta[]> {
  * Never throws — on any failure (RPC hiccup, registry not yet created, SDK
  * mismatch) the affected slab(s) default to `{ tvlAtoms: 0n, cooldownSlots: 0n,
  * found: false }` rather than surfacing garbage.
+ *
+ * Returns `{ data, ok }` — `ok` is false ONLY when the whole batched RPC call
+ * failed (e.g. transient devnet RPC hiccup), as distinct from a single slab
+ * legitimately having no registry yet (that's a normal `found: false`, not an
+ * error). `fetchStats` below uses `ok` to decide whether this cycle's result is
+ * trustworthy enough to publish, or whether to keep showing the last good
+ * snapshot (PERC-9204 — a single transient RPC failure on the 15s poll used to
+ * blank the whole Earn page to $0 TVL / vanished markets until the next good
+ * poll).
  */
-async function fetchCuratedVaultsOnChain(slabs: string[]): Promise<Record<string, CuratedVaultOnChain>> {
+async function fetchCuratedVaultsOnChain(
+  slabs: string[],
+): Promise<{ data: Record<string, CuratedVaultOnChain>; ok: boolean }> {
   const result: Record<string, CuratedVaultOnChain> = {};
   for (const slab of slabs) result[slab] = { tvlAtoms: 0n, cooldownSlots: 0n, found: false };
-  if (slabs.length === 0) return result;
+  if (slabs.length === 0) return { data: result, ok: true };
 
   try {
     const programId = new PublicKey(getConfig().programId);
@@ -270,7 +271,9 @@ async function fetchCuratedVaultsOnChain(slabs: string[]): Promise<Record<string
     const registryPdas = slabs.map(
       (slab) => deriveLpVaultRegistry(programId, new PublicKey(slab))[0],
     );
-    const infos = await connection.getMultipleAccountsInfo(registryPdas);
+    // I: curated(5) ∪ registered(<=100) slabs can exceed the 100-key cap —
+    // chunked (see lib/rpc-chunk.ts).
+    const infos = await getMultipleAccountsInfoChunked(connection, registryPdas);
 
     slabs.forEach((slab, i) => {
       const info = infos[i];
@@ -290,9 +293,10 @@ async function fetchCuratedVaultsOnChain(slabs: string[]): Promise<Record<string
     });
   } catch (err) {
     console.error('[useEarnStats] Failed to fetch LP vault registries on-chain:', err);
+    return { data: result, ok: false };
   }
 
-  return result;
+  return { data: result, ok: true };
 }
 
 /**
@@ -319,15 +323,22 @@ function computeMaxLeverageFromBps(bps: bigint | null | undefined): number {
  * slab(s) are simply absent from the result and callers fall back to the
  * Supabase/default value, same degrade-gracefully spirit as
  * fetchCuratedVaultsOnChain above.
+ *
+ * Returns `{ data, ok }` — same keep-last-good contract as
+ * fetchCuratedVaultsOnChain: `ok` is false only when the batched RPC call
+ * itself failed, not when an individual slab simply isn't a v17 account yet.
  */
-async function fetchOnChainMaxLeverage(slabs: string[]): Promise<Record<string, number>> {
+async function fetchOnChainMaxLeverage(
+  slabs: string[],
+): Promise<{ data: Record<string, number>; ok: boolean }> {
   const result: Record<string, number> = {};
-  if (slabs.length === 0) return result;
+  if (slabs.length === 0) return { data: result, ok: true };
 
   try {
     const connection = getSharedEarnStatsConnection();
     const pks = slabs.map((s) => new PublicKey(s));
-    const infos = await connection.getMultipleAccountsInfo(pks);
+    // I: same allSlabs union as fetchCuratedVaultsOnChain above — chunked.
+    const infos = await getMultipleAccountsInfoChunked(connection, pks);
 
     infos.forEach((info, i) => {
       if (!info?.data) return;
@@ -341,9 +352,10 @@ async function fetchOnChainMaxLeverage(slabs: string[]): Promise<Record<string, 
     });
   } catch (err) {
     console.error('[useEarnStats] Failed to fetch on-chain max leverage:', err);
+    return { data: result, ok: false };
   }
 
-  return result;
+  return { data: result, ok: true };
 }
 
 /**
@@ -351,7 +363,7 @@ async function fetchOnChainMaxLeverage(slabs: string[]): Promise<Record<string, 
  * Supabase cosmetic row. Shared by both the curated (PLAYGROUND_SLAB_META) markets
  * and the registered (user-launched) markets below.
  */
-function buildMarketVaultInfo(
+export function buildMarketVaultInfo(
   slab: string,
   symbol: string,
   name: string,
@@ -366,7 +378,12 @@ function buildMarketVaultInfo(
   const collDivisor = 10 ** decimals;
 
   const vaultAtoms = curatedVaults[slab]?.tvlAtoms ?? 0n;
-  const vaultBalance = Number(vaultAtoms); // atoms — matches MarketVaultInfo.vaultBalance convention
+  const vaultBalanceRaw = Number(vaultAtoms); // atoms — matches MarketVaultInfo.vaultBalance convention
+  // GH#1165: a corrupt-but-sub-sentinel atom count (e.g. 4e14 at 6 decimals =
+  // $400M) passes sanitizeOnChainValue's u64::MAX-class filter untouched. Cap
+  // any single vault's displayed TVL at a sane ceiling rather than trust it blind.
+  const vaultUsdUncapped = vaultBalanceRaw / collDivisor;
+  const vaultBalance = vaultUsdUncapped > MAX_VAULT_USD ? 0 : vaultBalanceRaw;
   const vaultUsd = vaultBalance / collDivisor;
 
   const oiLongRaw = Number(row?.open_interest_long ?? 0);
@@ -391,10 +408,6 @@ function buildMarketVaultInfo(
   const maxOI = Math.max(rawMaxOI, totalOI);
   const oiUtilPct = maxOI > 0 ? Math.min((totalOI / maxOI) * 100, 100) : 0;
 
-  const dailyFees = (volume24h * tradingFeeBps) / 10_000;
-  const annualFees = dailyFees * 365;
-  const estimatedApyPct = vaultUsd > 0 ? Math.min((annualFees / vaultUsd) * 100, 999) : 0;
-
   return {
     slabAddress: slab,
     symbol,
@@ -407,7 +420,6 @@ function buildMarketVaultInfo(
     volume24h,
     tradingFeeBps,
     maxLeverage,
-    estimatedApyPct,
     oiUtilPct,
     decimals,
   } satisfies MarketVaultInfo;
@@ -465,6 +477,31 @@ function buildCuratedMarkets(
   return [...curated, ...registered];
 }
 
+/**
+ * Compute the platform-wide aggregate fields of `EarnStats` from a market
+ * list. Shared by the success path, the cold-start on-chain-failure fallback,
+ * and the cold-start catch-block fallback below so the three snapshot-building
+ * call sites can't silently drift from each other.
+ */
+function computeAggregates(markets: MarketVaultInfo[]): Omit<EarnStats, 'markets'> {
+  const tvl = markets.reduce((s, m) => s + m.vaultBalance / (10 ** m.decimals), 0);
+  const totalOI = markets.reduce((s, m) => s + m.totalOI, 0);
+  const maxOI = markets.reduce((s, m) => s + m.maxOI, 0);
+  const totalInsurance = markets.reduce((s, m) => s + m.insuranceFund / (10 ** m.decimals), 0);
+  const dailyFeeRevenue = markets.reduce(
+    (s, m) => s + (m.volume24h * m.tradingFeeBps) / 10_000,
+    0,
+  );
+  return {
+    tvl,
+    totalOI,
+    maxOI,
+    oiUtilPct: maxOI > 0 ? (totalOI / maxOI) * 100 : 0,
+    totalInsurance,
+    dailyFeeRevenue,
+  };
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Hook
 // ═══════════════════════════════════════════════════════════════
@@ -475,8 +512,28 @@ export function useEarnStats() {
   const [error, setError] = useState<string | null>(null);
   const mockMode = isMockMode();
 
+  // PERC-9204: requestId/generation guard. fetchStats has several sequential
+  // awaits (registered-markets fetch, curatedVaults+maxLeverage batch,
+  // Supabase query) on a 15s poll — without this, an overlapping (out-of-
+  // order) response, or a response resolving after unmount, could
+  // setStats/setError/setLoading using stale data. The polling effect's
+  // cleanup below also bumps this on unmount for the same reason.
+  const requestIdRef = useRef(0);
+
+  // PERC-9204: keep-last-good gate — flips true once a fully successful
+  // on-chain fetch cycle has been published to `stats`. A later cycle that
+  // hits an on-chain RPC failure checks this before deciding whether to skip
+  // publishing (leaving the last good snapshot on screen) or, on a cold
+  // start where there's nothing good to preserve yet, fall back to a
+  // best-effort zeroed snapshot instead.
+  const hasGoodStatsRef = useRef(false);
+
   const fetchStats = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    const stale = () => requestId !== requestIdRef.current;
+
     if (mockMode) {
+      if (stale()) return;
       setStats(generateMockStats());
       setLoading(false);
       return;
@@ -488,6 +545,7 @@ export function useEarnStats() {
       // Never throws (see fetchRegisteredMarketsMeta); degrades to [] on failure,
       // which just means the Earn page shows the curated 5, same as before.
       const registeredMarkets = await fetchRegisteredMarketsMeta();
+      if (stale()) return;
 
       // On-chain LP Vault Registry TVL is the accuracy-critical piece — fetch it
       // unconditionally, independent of Supabase's availability, over the union of
@@ -506,10 +564,17 @@ export function useEarnStats() {
       // Max leverage is likewise read straight from each slab's real on-chain
       // initialMarginBps (accuracy-critical, same rationale as curatedVaults
       // above) — fetched in parallel, independent of Supabase's availability.
-      const [curatedVaults, onChainMaxLeverage] = await Promise.all([
+      const [curatedVaultsResult, maxLeverageResult] = await Promise.all([
         fetchCuratedVaultsOnChain(allSlabs),
         fetchOnChainMaxLeverage(allSlabs),
       ]);
+      if (stale()) return;
+      const curatedVaults = curatedVaultsResult.data;
+      const onChainMaxLeverage = maxLeverageResult.data;
+      // PERC-9204: a failed batch means THIS cycle's data isn't trustworthy —
+      // see the keep-last-good branch below, not per-slab "not found" (which
+      // both functions already treat as a legitimate, non-error default).
+      const onChainFailed = !curatedVaultsResult.ok || !maxLeverageResult.ok;
 
       // Supabase is optional enrichment only (name/volume/OI/insurance) — never
       // a hard requirement for the curated market list, its TVL, or its leverage.
@@ -531,46 +596,47 @@ export function useEarnStats() {
         // defaults (0 volume/OI/insurance, typical fee), same spirit as
         // PLAYGROUND.md's "external indexer is optional" guarantee elsewhere.
       }
+      if (stale()) return;
+
+      if (onChainFailed && hasGoodStatsRef.current) {
+        // Keep-last-good: a real snapshot is already on screen — a transient
+        // RPC hiccup on THIS 15s poll must not blank the whole Earn page back
+        // to $0 TVL / vanished markets. Leave `stats` untouched; just surface
+        // the error so a consumer can show a subtle "stale data" indicator.
+        setError('Failed to refresh on-chain data — showing last known values');
+        return;
+      }
 
       const markets = buildCuratedMarkets(curatedVaults, supabaseBySlab, registeredMarkets, onChainMaxLeverage);
+      setStats({ markets, ...computeAggregates(markets) });
 
-      const tvl = markets.reduce((s, m) => s + m.vaultBalance / (10 ** m.decimals), 0);
-      const totalOI = markets.reduce((s, m) => s + m.totalOI, 0);
-      const maxOI = markets.reduce((s, m) => s + m.maxOI, 0);
-      const totalInsurance = markets.reduce(
-        (s, m) => s + m.insuranceFund / (10 ** m.decimals),
-        0,
-      );
-      const dailyFeeRevenue = markets.reduce(
-        (s, m) => s + (m.volume24h * m.tradingFeeBps) / 10_000,
-        0,
-      );
-      const avgApy =
-        markets.length > 0
-          ? markets.reduce((s, m) => s + m.estimatedApyPct, 0) / markets.length
-          : 0;
-
-      setStats({
-        tvl,
-        totalOI,
-        maxOI,
-        avgApyPct: avgApy,
-        oiUtilPct: maxOI > 0 ? (totalOI / maxOI) * 100 : 0,
-        totalInsurance,
-        markets,
-        dailyFeeRevenue,
-      });
-      setError(null);
+      if (onChainFailed) {
+        // Cold start (no good snapshot published yet) — still show the
+        // best-effort (zeroed-where-unread) curated markets rather than
+        // nothing, but don't mark this as "good": if the NEXT cycle also
+        // fails, we want to keep retrying this fallback rather than
+        // incorrectly gate on a snapshot that was never actually good.
+        setError('Failed to refresh on-chain data — showing last known values');
+      } else {
+        setError(null);
+        hasGoodStatsRef.current = true;
+      }
     } catch (e) {
+      if (stale()) return;
+      if (hasGoodStatsRef.current) {
+        // Keep-last-good applies here too — an unexpected exception
+        // elsewhere in this cycle shouldn't blank an already-good Earn page.
+        setError(e instanceof Error ? e.message : 'Failed to load earn stats');
+        return;
+      }
       setError(e instanceof Error ? e.message : 'Failed to load earn stats');
-      // Total failure (e.g. RPC unreachable) — still show the 5 curated markets
-      // with zeroed stats rather than fabricated mock ones.
-      setStats((prev) => ({
-        ...prev,
-        markets: buildCuratedMarkets({}, new Map()),
-      }));
+      // Total failure on a cold start (e.g. RPC unreachable before any good
+      // snapshot exists) — still show the 5 curated markets with zeroed
+      // stats rather than fabricated mock ones.
+      const markets = buildCuratedMarkets({}, new Map());
+      setStats({ markets, ...computeAggregates(markets) });
     } finally {
-      setLoading(false);
+      if (!stale()) setLoading(false);
     }
   }, [mockMode]);
 
@@ -583,8 +649,16 @@ export function useEarnStats() {
   useEffect(() => {
     const doFetch = () => fetchRef.current();
     doFetch();
-    const interval = setInterval(doFetch, 15_000);
-    return () => clearInterval(interval);
+    // Visibility-gated: a backgrounded tab shouldn't keep hitting the
+    // rate-limited devnet RPC every 15s for an Earn page nobody is looking
+    // at. Fires immediately on tab re-focus (catch-up refresh).
+    const dispose = pollWhenVisible(doFetch, 15_000);
+    return () => {
+      dispose();
+      // Invalidate any fetch still in flight so its resolution can't
+      // setStats/setError/setLoading after unmount.
+      requestIdRef.current++;
+    };
   }, []);
 
   return { stats, loading, error, refresh: fetchStats };

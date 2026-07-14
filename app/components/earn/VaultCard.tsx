@@ -28,30 +28,15 @@ export function VaultCard({ vault }: VaultCardProps) {
 
         <div className="p-5">
           {/* Token header */}
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <MarketLogo mainnetCa={vault.mainnetCa} symbol={vault.symbol} pixelOverride={32} />
-              <div>
-                <h3 className="text-sm font-semibold text-[var(--text)]">
-                  {vault.symbol}-PERP
-                </h3>
-                <p className="text-[10px] text-[var(--text-secondary)]">
-                  {vault.name}
-                </p>
-              </div>
-            </div>
-
-            {/* APY badge */}
-            <div className="text-right">
-              <div
-                className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-secondary)] mb-0.5 cursor-help underline decoration-dotted decoration-[var(--text-muted)]"
-                title="APY is estimated from the last 30 days of insurance fund fee revenue. Past performance does not guarantee future returns."
-              >
-                Est. APY
-              </div>
-              <div className="text-2xl font-bold text-[var(--cyan)] font-mono tabular-nums">
-                {vault.estimatedApyPct.toFixed(1)}%
-              </div>
+          <div className="flex items-center gap-3 mb-4">
+            <MarketLogo mainnetCa={vault.mainnetCa} symbol={vault.symbol} pixelOverride={32} />
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--text)]">
+                {vault.symbol}-PERP
+              </h3>
+              <p className="text-[10px] text-[var(--text-secondary)]">
+                {vault.name}
+              </p>
             </div>
           </div>
 
@@ -71,7 +56,7 @@ export function VaultCard({ vault }: VaultCardProps) {
             />
             <MetricCell
               label="Max Leverage"
-              value={`${vault.maxLeverage || 10}×`}
+              value={`${vault.maxLeverage ?? 10}×`}
             />
           </div>
 
@@ -87,7 +72,7 @@ export function VaultCard({ vault }: VaultCardProps) {
             <span className="text-[11px] text-[var(--text-secondary)]">
               Fee: {(vault.tradingFeeBps / 100).toFixed(2)}%
             </span>
-            <span className="text-[11px] font-medium text-[var(--accent)] opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+            <span className="text-[11px] font-medium text-[var(--accent)] opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-visible:opacity-100 transition-opacity duration-200">
               Deposit →
             </span>
           </div>

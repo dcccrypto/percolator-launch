@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { isV17Account } from "@percolatorct/sdk";
@@ -65,6 +65,10 @@ export function useStuckSlabs() {
   const wallet = useWalletCompat();
   const [stuckSlabs, setStuckSlabs] = useState<StuckSlab[]>([]);
   const [loading, setLoading] = useState(true);
+  // Guards against wallet A's Promise.all landing after wallet B's and
+  // stomping it — bumped on every `check()` invocation; a resolved run only
+  // applies its result if it's still the most recent one requested.
+  const requestIdRef = useRef(0);
 
   const resolveOne = useCallback(
     async (inFlight: InFlightMarketState): Promise<StuckSlab> => {
@@ -131,31 +135,38 @@ export function useStuckSlabs() {
   );
 
   const check = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    const isCurrentRequest = () => requestIdRef.current === requestId;
+
     setLoading(true);
     try {
       // Wallet-match gate: only show entries that belong to the connected wallet.
       // Without this, two-tab race conditions could surface another tab's market.
       if (!wallet.publicKey) {
-        setStuckSlabs([]);
+        if (isCurrentRequest()) setStuckSlabs([]);
         return;
       }
       const walletB58 = wallet.publicKey.toBase58();
       const all = loadAllInFlightMarkets().filter((s) => s.adminAddress === walletB58);
       if (all.length === 0) {
-        setStuckSlabs([]);
+        if (isCurrentRequest()) setStuckSlabs([]);
         return;
       }
+      // Wallet A's Promise.all can land after wallet B's own check() started
+      // (and possibly already resolved) — only the most-recently-requested
+      // check is allowed to apply its result.
       const resolved = await Promise.all(all.map(resolveOne));
+      if (!isCurrentRequest()) return;
       // Most-recently-created first — matches the old single-banner ordering
       // (loadLastInFlightMarket always pointed at the latest touch).
       resolved.sort((a, b) => b.state.createdAt - a.state.createdAt);
       setStuckSlabs(resolved);
     } catch (err) {
       console.warn("[useStuckSlabs] Error checking stuck slabs:", err);
-      // Don't clear — might be a transient RPC error
-      setStuckSlabs([]);
+      // Don't clear — might be a transient RPC error. Keep the last-good
+      // list on screen rather than blanking the recovery banner.
     } finally {
-      setLoading(false);
+      if (isCurrentRequest()) setLoading(false);
     }
   }, [wallet.publicKey, resolveOne]);
 

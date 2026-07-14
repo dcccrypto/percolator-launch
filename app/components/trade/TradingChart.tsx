@@ -24,10 +24,8 @@ import { usePercolatorCandles } from "@/hooks/usePercolatorCandles";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useMarketConfig } from "@/hooks/useMarketConfig";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
-import { useEngineState } from "@/hooks/useEngineState";
 import { useLiqPrice } from "@/hooks/useLiqPrice";
 import { useChartTheme } from "@/hooks/useChartTheme";
-import { ChartEmptyState } from "./ChartEmptyState";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import { ChartStyleMenu } from "./ChartStyleMenu";
 import { ChartDisplayMenu } from "./ChartDisplayMenu";
@@ -47,6 +45,7 @@ import { ChartDrawingOverlay } from "./ChartDrawingOverlay";
 import { ChartDrawingToolbar } from "./ChartDrawingToolbar";
 import { useChartDrawingTool } from "@/hooks/useChartDrawingTool";
 import { useChartDrawings } from "@/hooks/useChartDrawings";
+import { pollWhenVisible } from "@/lib/pollWhenVisible";
 import {
   isCandleStyle,
   candleStyleOptions,
@@ -55,7 +54,7 @@ import {
   type ChartSeriesKind,
 } from "@/lib/chart-style";
 import { assertNever } from "@/lib/exhaustive";
-import { formatUsdFromNumber } from "@/lib/format";
+import { formatUsdFromNumber, chartPricePrecision } from "@/lib/format";
 
 // Phase 2: added 15m timeframe
 type Timeframe = "1m" | "5m" | "15m" | "1h" | "4h" | "1d" | "7d" | "30d";
@@ -125,7 +124,7 @@ function PositionSummary({ slabAddress }: PositionSummaryProps) {
 
   const isLong = account.positionSize > 0n;
   const direction = isLong ? "LONG" : "SHORT";
-  const dirColor = isLong ? "text-green-400" : "text-red-400";
+  const dirColor = isLong ? "text-[var(--long)]" : "text-[var(--short)]";
 
   return (
     <div className="flex items-center gap-1.5 rounded-none border border-[var(--border)]/60 bg-[var(--bg)]/90 px-2 py-1 backdrop-blur-sm">
@@ -444,6 +443,15 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
   // exact same 5s-gated behaviour, just sourced non-reactively).
   useEffect(() => {
     if (!config || !slabAddress) return;
+    // Only feed this fallback when it's actually the active source — same
+    // gate as the 10s fallback poll effect below. Previously ungated: on
+    // EVERY market (even ones with a real Percolator/Pyth/DEX source) this
+    // fired every ~5s anyway, minting a new oraclePrices array that fed
+    // nothing downstream actually used — candleData's memo re-mints on the
+    // new reference, forcing the structural series effect (a full
+    // removeSeries+addSeries+setData teardown) to rebuild the whole chart
+    // every 5s on every market.
+    if (hasPercolatorData || hasPythData || hasExternalData) return;
     return subscribeSlab(slabAddress, () => {
       const snap = getSnapshot(slabAddress);
       if (snap.priceUsd == null) return;
@@ -455,7 +463,7 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
         return [...prev, { timestamp: now, price: usd }].slice(-1000);
       });
     });
-  }, [config, slabAddress]);
+  }, [config, slabAddress, hasPercolatorData, hasPythData, hasExternalData]);
 
   // Fallback poll: when no Percolator/Pyth/DEX candle source has data, the two
   // effects above are the ONLY way `oraclePrices` ever grows — a one-shot
@@ -502,10 +510,13 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
         .catch(() => {});
     };
     poll();
-    const interval = setInterval(poll, 10_000);
+    // Pause while the tab is hidden — this is a background fallback for a
+    // sparse market, not something worth polling every 10s with nobody
+    // looking at it.
+    const disposePoll = pollWhenVisible(poll, 10_000);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      disposePoll();
     };
   }, [slabAddress, hasPercolatorData, hasPythData, hasExternalData, pythStatus, percolatorStatus, externalStatus]);
 
@@ -703,6 +714,21 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
     entryLineRef.current = null;
     prevTickPriceRef.current = null;
 
+    // Adaptive price-scale precision. lightweight-charts defaults every
+    // series to precision:2/minMove:0.01 when priceFormat is omitted — fine
+    // for SOL/TRUMP-sized markets, but it rounds anything under a cent (e.g.
+    // BURNIE @ $0.002573) to "0.00" on both the Y-axis ticks AND every
+    // createPriceLine label (Mark/Liq/Entry all render through the series'
+    // priceFormat — they have no formatter of their own). Derive a reference
+    // price from the freshest data we have (last candle/line close, falling
+    // back to the live snapshot) so small-price tokens get enough decimals.
+    const referencePriceUsd =
+      candleData[candleData.length - 1]?.close ??
+      lineData[lineData.length - 1]?.price ??
+      getSnapshot(slabAddress).priceUsd ??
+      null;
+    const priceFormat = { type: "price" as const, ...chartPricePrecision(referencePriceUsd) };
+
     // Series selection.
     //
     // The switch is exhaustive over ChartStyle: a future variant added to
@@ -772,6 +798,8 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
           // createPriceLine below draws the mark price as the only price label.
           lastValueVisible: false,
           priceLineVisible: false,
+          // Adaptive precision — see `priceFormat` comment above.
+          priceFormat,
         });
 
         const formatted = candleData.map((c) => ({
@@ -836,6 +864,8 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
           thinBars: false,
           lastValueVisible: false,
           priceLineVisible: false,
+          // Adaptive precision — see `priceFormat` comment above.
+          priceFormat,
         });
         const formatted = candleData.map((c) => ({
           time: (Math.floor(c.timestamp / 1000)) as import("lightweight-charts").UTCTimestamp,
@@ -862,6 +892,8 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
           // as a price-axis label. DEX last-close goes away.
           lastValueVisible: false,
           priceLineVisible: false,
+          // Adaptive precision — see `priceFormat` comment above.
+          priceFormat,
         });
         const formatted = lineData.map((p) => ({
           time: (Math.floor(p.timestamp / 1000)) as import("lightweight-charts").UTCTimestamp,
@@ -888,6 +920,8 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
           lineWidth: 2,
           lastValueVisible: false,
           priceLineVisible: false,
+          // Adaptive precision — see `priceFormat` comment above.
+          priceFormat,
         });
         const formatted = lineData.map((p) => ({
           time: (Math.floor(p.timestamp / 1000)) as import("lightweight-charts").UTCTimestamp,
@@ -1247,13 +1281,13 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
                 </svg>
                 <div
                   className="text-[15px] font-semibold text-[var(--text-secondary)]"
-                  style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif" }}
+                  style={{ fontFamily: "var(--font-display)" }}
                 >
                   No chart data yet
                 </div>
                 <div
                   className="mt-1 text-xs text-[var(--text-muted)]"
-                  style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif" }}
+                  style={{ fontFamily: "var(--font-display)" }}
                 >
                   Price history will appear once trading begins
                 </div>

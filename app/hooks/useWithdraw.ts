@@ -26,12 +26,14 @@ import {
   ACCOUNTS_PUSH_ORACLE_PRICE,
 } from "@/lib/sdk-compat";
 import { sendTx } from "@/lib/tx";
+import { getPortfolioRawSnapshot, isLpPortfolio, makePortfolioScanKey } from "@/lib/userAccountScan";
 import { useSlabState } from "@/components/providers/SlabProvider";
-import { detectOracleMode } from "@/lib/oraclePrice";
+import { detectOracleMode, sanitizePriceE6, applyInvert } from "@/lib/oraclePrice";
 import { assertKnownProgram } from "@/lib/programAllowlist";
 import { humanizeError } from "@/lib/errorMessages";
-import { computePositionInitialMargin } from "@/lib/trading";
+import { computePositionInitialMargin, estimateEntryFromPnl } from "@/lib/trading";
 import { getEntryPrice } from "@/lib/entry-price";
+import { isSentinelValue } from "@/lib/health";
 
 // M7: withdraw's own EngineStale(19) surface. Unlike a trade (which can be
 // auto-retried after the next keeper crank via withTransientRetry — see
@@ -75,14 +77,20 @@ export function useWithdraw(slabAddress: string) {
         // produce a wallet-signed withdrawal CPI under any bypass scenario.
         assertKnownProgram(slabProgramId);
 
-        // P-CRITICAL-3: Validate network before withdrawal
-        try {
-          const slabInfo = await connection.getAccountInfo(new PublicKey(slabAddress));
-          if (!slabInfo) {
-            throw new Error("Market not found on current network. Please switch networks in your wallet and refresh.");
+        // P-CRITICAL-3: Validate network before withdrawal.
+        // Latency: skipped when SlabProvider has already parsed a v17 config
+        // for this slab — the provider fetched it over THIS connection, so
+        // the market provably exists on the current network and the refetch
+        // is a pure round-trip between the click and the wallet popup.
+        if (wrapperConfigV17 == null) {
+          try {
+            const slabInfo = await connection.getAccountInfo(new PublicKey(slabAddress));
+            if (!slabInfo) {
+              throw new Error("Market not found on current network. Please switch networks in your wallet and refresh.");
+            }
+          } catch (e) {
+            if (e instanceof Error && e.message.includes("Market not found")) throw e;
           }
-        } catch (e) {
-          if (e instanceof Error && e.message.includes("Market not found")) throw e;
         }
         const programId = slabProgramId;
         const slabPk = new PublicKey(slabAddress);
@@ -136,7 +144,29 @@ export function useWithdraw(slabAddress: string) {
           const V17_MAGIC_BYTES = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
           let portfolioPk: PublicKey | null = null;
           let portfolioData: Buffer | null = null;
-          try {
+          // Latency: when the shared scan store knows the portfolio's pubkey
+          // (its address never changes for a wallet+market), one targeted
+          // getAccountInfo replaces the filtered program scan below — the
+          // DATA read is equally live either way (withdraw needs fresh data
+          // for the free-margin gate and the crank-prepend decision). The
+          // owner re-verification below applies to both paths.
+          const storePk = getPortfolioRawSnapshot(
+            makePortfolioScanKey(programId, slabAddress, wallet.publicKey),
+          )?.pubkey;
+          if (storePk) {
+            try {
+              const info = await connection.getAccountInfo(storePk, "confirmed");
+              if (info) {
+                const candidateData = Buffer.from(info.data);
+                const candidatePf = parsePortfolioV17(candidateData);
+                if (candidatePf.owner.equals(wallet.publicKey)) {
+                  portfolioPk = storePk;
+                  portfolioData = candidateData;
+                }
+              }
+            } catch { /* fall through to the scan */ }
+          }
+          if (!portfolioPk) try {
             // Mutable owner (SDK PF_OWNER_OFF) is at offset 116, NOT offset 80
             // (offset 80 is provenanceOwner — IMMUTABLE). MintPositionNft moves the
             // mutable owner to the escrow PDA on wrap but leaves provenance pointing
@@ -149,7 +179,13 @@ export function useWithdraw(slabAddress: string) {
                 { memcmp: { offset: 116, bytes: wallet.publicKey.toBase58() } },
               ],
             });
-            if (portfolioAccounts.length > 0) {
+            // Drop the market's LP portfolio BEFORE the sort/pick below —
+            // withdraw must never target the LP (owner == wallet only when
+            // this wallet is the market's CREATOR). See isLpPortfolio's doc.
+            const nonLpPortfolioAccounts = portfolioAccounts.filter(
+              ({ account }) => !isLpPortfolio(account.data),
+            );
+            if (nonLpPortfolioAccounts.length > 0) {
               // M10: getProgramAccounts doesn't guarantee stable ordering
               // across RPC nodes/calls. If more than one account ever matches
               // this owner+market filter, picking an arbitrary array element
@@ -158,7 +194,7 @@ export function useWithdraw(slabAddress: string) {
               // withdraw could silently act on a different account than the
               // one the UI displays. Sort deterministically by pubkey so
               // every caller converges on the same account.
-              const sortedPortfolios = [...portfolioAccounts].sort((a, b) =>
+              const sortedPortfolios = [...nonLpPortfolioAccounts].sort((a, b) =>
                 a.pubkey.toBase58().localeCompare(b.pubkey.toBase58()),
               );
               const d = sortedPortfolios[0].account.data;
@@ -199,9 +235,28 @@ export function useWithdraw(slabAddress: string) {
               const activeLeg = portfolio.legs.find((l) => l.active);
               hasActiveLegs = activeLeg !== undefined;
               const positionSize = activeLeg ? activeLeg.basisPosQ : 0n;
-              const effectiveEntryPrice = getEntryPrice(slabAddress, 0, wallet.publicKey.toBase58());
+              // D: mirror OrderTicket/DepositWithdrawCard's 3-step entry-price
+              // fallback (on-chain entry_price -> locally-cached -> pnl-implied
+              // estimate) instead of ONLY the local cache — a cache miss used
+              // to silently resolve to 0n here, which zeroes lockedMargin and
+              // lets this pre-check's over-withdraw guard pass an amount that
+              // then reverts on-chain. If no entry price can be established at
+              // all, fail CLOSED (locked = full capital) rather than open.
+              const cachedEntryPrice = getEntryPrice(slabAddress, 0, wallet.publicKey.toBase58());
+              const wrapperOracleE6 = mktConfig
+                ? sanitizePriceE6(applyInvert(mktConfig.lastEffectivePriceE6, mktConfig.invert))
+                : 0n;
+              const safePnlForEstimate = isSentinelValue(portfolio.pnl) ? 0n : portfolio.pnl;
+              const estimatedEntryPrice = hasActiveLegs && wrapperOracleE6 > 0n
+                ? estimateEntryFromPnl(positionSize, safePnlForEstimate, wrapperOracleE6)
+                : 0n;
+              const effectiveEntryPrice = cachedEntryPrice > 0n ? cachedEntryPrice : estimatedEntryPrice;
               const initialMarginBps = slabParams?.initialMarginBps ?? 1000n;
-              const lockedMargin = computePositionInitialMargin(positionSize, effectiveEntryPrice, initialMarginBps);
+              const lockedMargin = !hasActiveLegs
+                ? 0n
+                : effectiveEntryPrice > 0n
+                  ? computePositionInitialMargin(positionSize, effectiveEntryPrice, initialMarginBps)
+                  : portfolio.capital; // fail closed: no entry price could be established
               const freeMargin = portfolio.capital > lockedMargin ? portfolio.capital - lockedMargin : 0n;
               if (params.amount > freeMargin) {
                 throw new Error(

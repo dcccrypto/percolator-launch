@@ -10,6 +10,7 @@ import { useLivePrice } from "@/hooks/useLivePrice";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
+import { pollWhenVisible } from "@/lib/pollWhenVisible";
 
 interface OpenInterestData {
   totalOi: string; // U128 as string
@@ -145,8 +146,8 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
     };
 
     fetchOi();
-    const interval = setInterval(fetchOi, 30000); // Refresh every 30s
-    return () => clearInterval(interval);
+    // Refresh every 30s — visibility-gated so hidden tabs don't keep polling
+    return pollWhenVisible(fetchOi, 30000);
   }, [slabAddress, mockMode, engine, isV17, oiLong, oiShort]);
 
   // Calculate percentages and imbalance (unaffected by USD conversion — a

@@ -48,6 +48,23 @@ export const SendPositionNftModal: FC<SendPositionNftModalProps> = ({
   const prefersReduced = usePrefersReducedMotion();
   useLockBodyScroll();
 
+  // Mark a dialog as open on the body-level counter for the whole time this
+  // modal is mounted — same as ClosePositionModal / TradeConfirmationModal.
+  // The Position NFT panel that opens this modal lives inside the mobile order
+  // sheet (page.tsx MobileOrderSheet → OrderTicketRail → PositionNftPanel),
+  // whose own document-level Escape handler collapses the sheet. Without this
+  // counter a single Escape here fired BOTH: this modal cancelled AND the sheet
+  // collapsed underneath it. The sheet's handler ignores Escape while it's > 0.
+  useEffect(() => {
+    const current = Number(document.body.dataset.percOpenDialogs ?? "0");
+    document.body.dataset.percOpenDialogs = String(current + 1);
+    return () => {
+      const remaining = Number(document.body.dataset.percOpenDialogs ?? "1") - 1;
+      if (remaining <= 0) delete document.body.dataset.percOpenDialogs;
+      else document.body.dataset.percOpenDialogs = String(remaining);
+    };
+  }, []);
+
   const [destInput, setDestInput] = useState("");
   const [acknowledged, setAcknowledged] = useState(false);
 
@@ -105,7 +122,7 @@ export const SendPositionNftModal: FC<SendPositionNftModalProps> = ({
       onClick={(e) => {
         if (e.target === e.currentTarget && !loading) onCancel();
       }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-[2px] p-4"
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-[2px] p-4"
       aria-modal="true"
       role="dialog"
       aria-label="Send Position NFT"

@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useState, useEffect, useRef, type CSSProperties } from "react";
+import useSWR from "swr";
 import { useRouter } from "next/navigation";
 import { PublicKey } from "@solana/web3.js";
 import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
@@ -8,16 +9,14 @@ import { UsdToggleProvider, useUsdToggle } from "@/components/providers/UsdToggl
 import { OrderTicket } from "@/components/trade/OrderTicket";
 import { PositionNftPanel } from "@/components/trade/PositionNftPanel";
 import { PositionsDock } from "@/components/trade/PositionsDock";
-import { MarketBookCard } from "@/components/trade/MarketBookCard";
-import { TradingChart } from "@/components/trade/TradingChart";
+import dynamic from "next/dynamic";
 import { MarketInfoBar } from "@/components/trade/MarketInfoBar";
 import { useIsLargeScreen } from "@/hooks/useIsLargeScreen";
 import { useAdvanceOraclePhase } from "@/hooks/useAdvanceOraclePhase";
-import { useOrderBookVisibility } from "@/hooks/useOrderBookVisibility";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
-import { formatUsdFromNumber } from "@/lib/format";
-import { useLivePrice } from "@/hooks/useLivePrice";
-import { useTokenMeta } from "@/hooks/useTokenMeta";
+import { Tooltip } from "@/components/ui/Tooltip";
+import { useLivePriceHasData, livePriceJsonFetcher } from "@/hooks/useLivePrice";
+import { getMarketIdentity, setMarketIdentity } from "@/lib/marketIdentityCache";
 import { useToast } from "@/hooks/useToast";
 import { isPlaceholderSymbol, SLUG_ALIASES } from "@/lib/symbol-utils";
 import { AutoDepositProvider } from "@/components/providers/AutoDepositProvider";
@@ -27,6 +26,19 @@ import { getNetwork } from "@/lib/config";
 import { RenderProfiler } from "@/components/dev/RenderProfiler";
 import TradingPageLoading from "./loading";
 
+// Lazy-load the chart so lightweight-charts (~372KB) streams AFTER the order
+// ticket + positions are interactive, instead of blocking the trade page's
+// initial load. ssr:false — the chart is client-only (createChart needs the DOM).
+const TradingChart = dynamic(
+  () => import("@/components/trade/TradingChart").then((m) => m.TradingChart),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-full w-full animate-pulse rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]" />
+    ),
+  },
+);
+
 /**
  * Phase 3 (trade-terminal rebuild) layout notes:
  *
@@ -35,8 +47,8 @@ import TradingPageLoading from "./loading";
  *   custom property + styled-components (this codebase has neither
  *   styled-components nor a CSS-in-JS layer — Tailwind + plain `style` is
  *   the native equivalent here). Areas: MarketBar (top strip) / Chart
- *   (dominant center) / Orderbook (optional column, hidden by default) /
- *   OrderTicket (~340px right rail) / PositionsDock (bottom-docked tabs).
+ *   (dominant center) / OrderTicket (~340px right rail) / PositionsDock
+ *   (bottom-docked tabs).
  * - Desktop vs. mobile is a JS boolean fork (`useIsLargeScreen`), not a CSS
  *   dual-mount — same reasoning the pre-rebuild page already used for
  *   `TradingChart` specifically (avoid double-mounting live-subscribing
@@ -304,37 +316,40 @@ function MobileOrderSheet({ slab }: { slab: string }) {
 
 /* ── Main inner page ──────────────────────────────────────── */
 
+const MARKET_META_SWR_OPTS = { dedupingInterval: 10_000, refreshInterval: 0, revalidateOnFocus: false, revalidateIfStale: false, shouldRetryOnError: false } as const;
+
 function TradePageInner({ slab }: { slab: string }) {
   const isLargeScreen = useIsLargeScreen();
-  const [orderBookVisible, toggleOrderBook] = useOrderBookVisibility();
 
   const { engine, config, header, loading: slabLoading, error: slabError } = useSlabState();
   useAdvanceOraclePhase(slab);
-  const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
-  const { priceUsd } = useLivePrice();
+  // Boolean presence subscription, NOT the full live-price state: this keeps the
+  // trade-page shell OFF the ~4-5/sec price-tick re-render path (it only needs to
+  // know whether a price exists, for the no-data gate below). See useLivePriceHasData.
+  const hasPrice = useLivePriceHasData();
   const shortAddress = `${slab.slice(0, 4)}…${slab.slice(-4)}`;
 
   // Fetch Supabase market data (symbol, name, logo, mainnet_ca) as fallback for on-chain resolution
-  const [supabaseMarket, setSupabaseMarket] = useState<{ symbol?: string; name?: string; logo_url?: string; mainnet_ca?: string | null } | null>(null);
+  // Shares the SAME SWR key useLivePrice already fetches (/api/markets/[slab]) via
+  // the same exported fetcher, so the two dedupe into one request per load
+  // instead of a raw fetch() + an SWR fetch of the identical URL.
+  const { data: marketMetaJson } = useSWR<{ market?: { symbol?: string; name?: string; logo_url?: string; mainnet_ca?: string | null } }>(`/api/markets/${slab}`, livePriceJsonFetcher, MARKET_META_SWR_OPTS);
+  // Seed identity synchronously from lib/marketIdentityCache — the markets
+  // list / market switcher / a previous visit already knew this market's real
+  // symbol+logo and wrote them there, so an in-app navigation renders the
+  // correct pair name on its FIRST frame instead of flashing a fallback while
+  // /api/markets/[slab] is in flight.
+  const [supabaseMarket, setSupabaseMarket] = useState<{ symbol?: string; name?: string; logo_url?: string; mainnet_ca?: string | null } | null>(() => getMarketIdentity(slab));
   useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/markets/${slab}`)
-      .then(r => r.json())
-      .then(d => {
-        if (!cancelled && d.market) {
-          setSupabaseMarket({
-            symbol: d.market.symbol ?? undefined,
-            name: d.market.name ?? undefined,
-            logo_url: d.market.logo_url ?? undefined,
-            mainnet_ca: d.market.mainnet_ca ?? null,
-          });
-        }
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [slab]);
+    const m = marketMetaJson?.market;
+    if (!m) return;
+    setSupabaseMarket({ symbol: m.symbol ?? undefined, name: m.name ?? undefined, logo_url: m.logo_url ?? undefined, mainnet_ca: m.mainnet_ca ?? null });
+    // Write back so the switcher/other routes and the next visit to this
+    // market start with the resolved identity.
+    setMarketIdentity(slab, { symbol: m.symbol ?? undefined, name: m.name ?? undefined, logo_url: m.logo_url ?? undefined, mainnet_ca: m.mainnet_ca ?? null });
+  }, [marketMetaJson, slab]);
 
-  // Resolve symbol: Supabase market symbol (trading pair) → on-chain (collateral) → truncated address
+  // Resolve symbol: identity cache / market meta (trading pair) → truncated slab address.
   const collateralMintAddress = config?.collateralMint?.toBase58() ?? "";
   const mintAddress = supabaseMarket?.mainnet_ca ?? collateralMintAddress;
   // GH#chart-empty: TradingChart's GeckoTerminal lookup (useTokenChart) needs the market's
@@ -347,35 +362,33 @@ function TradePageInner({ slab }: { slab: string }) {
   // indexer backend is down) and a real wrong-chart flash once it's back. Pass `undefined`
   // instead of the collateral mint while the real CA is still unknown.
   const chartMintAddress = supabaseMarket?.mainnet_ca ?? undefined;
-  const onChainSymbol = tokenMeta?.symbol ?? null;
   const supabaseSymbol = supabaseMarket?.symbol ?? null;
   const symbol = (() => {
     if (!isPlaceholderSymbol(supabaseSymbol, mintAddress)) return supabaseSymbol!;
-    if (!isPlaceholderSymbol(onChainSymbol, mintAddress)) return onChainSymbol!;
-    if (config?.collateralMint) {
-      const b58 = config.collateralMint.toBase58();
-      return `${b58.slice(0, 4)}…${b58.slice(-4)}`;
-    }
-    return "TOKEN";
+    // NO collateral-token fallback here: every playground market collateralizes
+    // with sim-USDC, so the old `tokenMeta.symbol` tier named ANY market whose
+    // metadata was still loading (or missing from the registry) "USDC/USD" —
+    // the single most-reported identity bug. The collateral mint is never the
+    // traded pair. Unknown identity renders as the truncated slab address,
+    // which is honest and can't be mistaken for a different market.
+    return shortAddress;
   })();
   const logoUrl = supabaseMarket?.logo_url ?? null;
 
-  // Dynamic page title and meta tags
+  // Dynamic tab title — the symbol is resolved client-side (Supabase → on-chain
+  // → truncated address), which is strictly more available than the server's
+  // generateMetadata() `fetchMarketMeta`: on a devnet market the indexer doesn't
+  // know, the server title falls back to the generic "Perpetual Futures Market"
+  // while this still shows the real ticker. Only document.title is touched here.
+  //
+  // The og:*/meta[description] tags are intentionally NOT rewritten client-side:
+  // social crawlers (Twitter/Discord/Facebook) never execute JS, so mutating
+  // them after hydration is a no-op for their only purpose (link previews) —
+  // layout.tsx's server-rendered generateMetadata is the sole source of truth
+  // for those.
   useEffect(() => {
     document.title = `Trade ${symbol} | Percolator`;
-    const metaDesc = document.querySelector('meta[name="description"]');
-    if (metaDesc) {
-      const priceText = priceUsd != null ? `Current price: ${formatUsdFromNumber(priceUsd)}` : "";
-      metaDesc.setAttribute("content", `Trade ${symbol} perpetual futures on Percolator. ${priceText}`);
-    }
-    const ogTitle = document.querySelector('meta[property="og:title"]');
-    if (ogTitle) ogTitle.setAttribute("content", `Trade ${symbol} | Percolator`);
-    const ogDesc = document.querySelector('meta[property="og:description"]');
-    if (ogDesc) {
-      const priceText = priceUsd != null ? `Current price: ${formatUsdFromNumber(priceUsd)}` : "";
-      ogDesc.setAttribute("content", `Trade ${symbol} perpetual futures on Percolator. ${priceText}`);
-    }
-  }, [symbol, priceUsd]);
+  }, [symbol]);
 
   if (slabLoading && !engine) {
     return <TradingPageLoading />;
@@ -481,24 +494,14 @@ function TradePageInner({ slab }: { slab: string }) {
   // false there, so the "no oracle price" warning could never appear on a v17
   // market even during a genuine price outage. `config` is the version-agnostic
   // "market loaded" signal.
-  const hasNoPriceData = !slabLoading && !!config && priceUsd == null;
+  const hasNoPriceData = !slabLoading && !!config && !hasPrice;
 
   // Desktop grid — named areas (dYdX pattern, see file-header comment).
-  // Orderbook column width collapses to 0 when hidden; the area itself is
-  // still declared in the template (simpler than swapping two full
-  // template strings) but nothing is placed in it.
   const gridStyle: CSSProperties = {
     gridTemplateAreas: '"MarketBar MarketBar" "Chart OrderTicket" "PositionsDock OrderTicket"',
     gridTemplateColumns: "minmax(0,1fr) 340px",
     gridTemplateRows: "auto minmax(0,1fr) minmax(220px,340px)",
   };
-  // When the order book is visible it takes its own column between Chart and
-  // OrderTicket — swap in a 3-column template rather than trying to make one
-  // template string cover both states.
-  if (orderBookVisible) {
-    gridStyle.gridTemplateAreas = '"MarketBar MarketBar MarketBar" "Chart Orderbook OrderTicket" "PositionsDock PositionsDock OrderTicket"';
-    gridStyle.gridTemplateColumns = "minmax(0,1fr) 220px 340px";
-  }
 
   return (
     <RenderProfiler id="TradePageInner">
@@ -520,13 +523,21 @@ function TradePageInner({ slab }: { slab: string }) {
           <CopyButton text={slab} />
         </span>
         {header?.admin && (
-          <span className={`text-[9px] font-medium uppercase tracking-[0.12em] px-1.5 py-0.5 rounded-sm border ${
-            header.admin.toBase58() === "11111111111111111111111111111111"
-              ? "border-[var(--long)]/30 bg-[var(--long)]/5 text-[var(--long)]"
-              : "border-[var(--warning)]/30 bg-[var(--warning)]/5 text-[var(--warning)]"
-          }`}>
-            {header.admin.toBase58() === "11111111111111111111111111111111" ? "Admin Renounced" : "Admin Active"}
-          </span>
+          <Tooltip
+            text={
+              header.admin.toBase58() === "11111111111111111111111111111111"
+                ? "Admin key burned (set to the system program's default null address). No one can change this market's config, pause it, or touch its funds — it runs purely on its own code from here on."
+                : "This market still has a live admin key that can change config, pause the market, or adjust parameters. Not yet renounced."
+            }
+          >
+            <span className={`text-[9px] font-medium uppercase tracking-[0.12em] px-1.5 py-0.5 rounded-sm border ${
+              header.admin.toBase58() === "11111111111111111111111111111111"
+                ? "border-[var(--long)]/30 bg-[var(--long)]/5 text-[var(--long)]"
+                : "border-[var(--warning)]/30 bg-[var(--warning)]/5 text-[var(--warning)]"
+            }`}>
+              {header.admin.toBase58() === "11111111111111111111111111111111" ? "Admin Renounced" : "Admin Active"}
+            </span>
+          </Tooltip>
         )}
         <ShareButton slabAddress={slab} />
         <UsdToggleButton />
@@ -557,12 +568,6 @@ function TradePageInner({ slab }: { slab: string }) {
             </ErrorBoundary>
           </div>
 
-          {orderBookVisible && (
-            <div style={{ gridArea: "Orderbook" }} className="min-w-0 min-h-0 overflow-y-auto border border-[var(--border)] bg-[var(--panel-bg)]">
-              <ErrorBoundary label="MarketBookCard"><MarketBookCard /></ErrorBoundary>
-            </div>
-          )}
-
           <div style={{ gridArea: "OrderTicket" }} className="min-w-0 min-h-0">
             <RenderProfiler id="OrderTicketRail">
               <OrderTicketRail slab={slab} framed />
@@ -576,13 +581,6 @@ function TradePageInner({ slab }: { slab: string }) {
                   <ErrorBoundary label="PositionsDock"><PositionsDock slabAddress={slab} /></ErrorBoundary>
                 </div>
               </RenderProfiler>
-              <button
-                type="button"
-                onClick={toggleOrderBook}
-                className="mr-1.5 mt-1.5 shrink-0 self-start rounded-sm border border-[var(--border)] px-2 py-1 text-[9px] uppercase tracking-[0.12em] text-[var(--text-dim)] transition-colors duration-150 hover:border-[var(--accent)]/40 hover:text-[var(--text-secondary)]"
-              >
-                {orderBookVisible ? "Hide book" : "Show book"}
-              </button>
             </div>
           </div>
         </div>

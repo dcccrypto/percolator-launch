@@ -25,10 +25,11 @@ import {
   parseDexPool,
   computeDexSpotPriceE6,
   fetchMintDecimals,
+  WSOL_MINT,
   type DexType,
 } from "@percolatorct/sdk";
 
-/** Per-pool cached mint decimals (keyed by pool address string) — Meteora DLMM only. */
+/** Per-pool cached mint decimals (keyed by pool address string) — Meteora DLMM + PumpSwap. */
 export type DecimalsCache = Map<string, { base: number; quote: number }>;
 
 export interface PoolReadEntry {
@@ -74,11 +75,19 @@ async function withRpcBackoff<T>(fn: () => Promise<T>): Promise<T> {
 /**
  * Read the spot price (in e6) from a mainnet DEX pool. Identical behaviour
  * to `percolator-oracle-keeper`'s `readPoolPriceE6` — see file header.
+ *
+ * `solPriceE6` (current SOL/USD price, e6) is REQUIRED to produce a USD
+ * price for PumpSwap pools quoted in native WSOL (the vast majority of
+ * pump.fun pools) — callers should resolve it from a SOL/USD reference
+ * market (e.g. the SOL raydium-clmm entry) before calling this for a
+ * pumpswap entry. A WSOL-quoted pool with no `solPriceE6` supplied is
+ * skipped (not thrown). Ignored for raydium-clmm / meteora-dlmm.
  */
 export async function readPoolPriceE6(
   mainnetConn: Connection,
   entry: PoolReadEntry,
   decimalsCache: DecimalsCache,
+  solPriceE6?: bigint,
 ): Promise<PriceReadResult> {
   const poolPk = new PublicKey(entry.poolAddress);
   const shortPool = entry.poolAddress.slice(0, 8) + "…";
@@ -159,7 +168,38 @@ export async function readPoolPriceE6(
     if (baseAmount === 0n) {
       return { priceE6: 0n, source, skipped: true, skipReason: "PumpSwap: base vault amount=0 (pool not seeded / not live)" };
     }
-    const priceE6 = computeDexSpotPriceE6("pumpswap", data, { base: baseVaultData, quote: quoteVaultData });
+
+    // Cache mint decimals after the first successful read (same pattern as
+    // Meteora above) — pump.fun base tokens are almost always 6dp and WSOL is
+    // 9dp, but decimals are fetched from the real mints rather than assumed.
+    if (!decimalsCache.has(entry.poolAddress)) {
+      const [baseDecimals, quoteDecimals] = await Promise.all([
+        withRpcBackoff(() => fetchMintDecimals(mainnetConn, poolParsed.baseMint)),
+        withRpcBackoff(() => fetchMintDecimals(mainnetConn, poolParsed.quoteMint)),
+      ]);
+      decimalsCache.set(entry.poolAddress, { base: baseDecimals, quote: quoteDecimals });
+      console.log(
+        `[dexPoolReader] PumpSwap ${shortPool} decimals cached: base=${baseDecimals} quote=${quoteDecimals}`,
+      );
+    }
+    const dec = decimalsCache.get(entry.poolAddress)!;
+
+    const isWsolQuoted = poolParsed.quoteMint.equals(WSOL_MINT);
+    if (isWsolQuoted && solPriceE6 === undefined) {
+      return {
+        priceE6: 0n,
+        source,
+        skipped: true,
+        skipReason: "PumpSwap: pool is WSOL-quoted but no SOL/USD price was available this cycle",
+      };
+    }
+
+    let priceE6: bigint;
+    try {
+      priceE6 = computeDexSpotPriceE6("pumpswap", data, { base: baseVaultData, quote: quoteVaultData }, dec, solPriceE6);
+    } catch (err) {
+      return { priceE6: 0n, source, skipped: true, skipReason: `PumpSwap: ${err instanceof Error ? err.message : String(err)}` };
+    }
     if (priceE6 === 0n) {
       return { priceE6: 0n, source, skipped: true, skipReason: "PumpSwap: computed price=0n" };
     }

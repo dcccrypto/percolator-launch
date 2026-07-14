@@ -1,8 +1,6 @@
 import "@/lib/polyfills";
 import type { Metadata } from "next";
-import { headers } from "next/headers";
-import { Geist_Mono } from "next/font/google";
-import { Space_Grotesk, JetBrains_Mono, Outfit } from "next/font/google";
+import { JetBrains_Mono, Outfit } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 import { Header } from "@/components/layout/Header";
@@ -10,7 +8,6 @@ import { Footer } from "@/components/layout/Footer";
 import { MobileBottomNav } from "@/components/layout/MobileBottomNav";
 import { TickerBanner } from "@/components/layout/TickerBanner";
 import { PositionsBar } from "@/components/layout/PositionsBar";
-import { CursorGlow } from "@/components/ui/CursorGlow";
 import { MusicPlayer } from "@/components/ui/MusicPlayer";
 import { MainnetBetaBanner } from "@/components/layout/MainnetBetaBanner";
 import { ChromeGate } from "@/components/layout/ChromeGate";
@@ -20,23 +17,24 @@ import { Analytics } from "@vercel/analytics/next";
 import { GoogleAnalytics } from "@/components/analytics/GoogleAnalytics";
 import { CloudflareAnalytics } from "@/components/analytics/CloudflareAnalytics";
 
-// Geist (sans) and Inter Tight removed — neither --font-geist-sans nor
-// --font-inter-tight is referenced in globals.css or any component style.
-// Remaining 4 families are all actively consumed:
-//   JetBrains Mono  → --font-sans, --font-mono, --font-heading + inline styles
-//   Geist Mono      → fallback in --font-sans / --font-mono / --font-heading
-//   Outfit          → primary in --font-display (headings, OG image wordmark)
-//   Space Grotesk   → fallback in --font-display
-const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"], display: "swap" });
-const spaceGrotesk = Space_Grotesk({ variable: "--font-space-grotesk", subsets: ["latin"], weight: ["400", "500", "600", "700"], display: "swap" });
+// Geist (sans), Inter Tight, Geist Mono, and Space Grotesk removed — they were
+// never rendered (fallback-only entries in globals.css's font stacks, sitting
+// behind fonts that next/font self-hosts and therefore always loads). Down to
+// the 2 families actually painted on screen:
+//   JetBrains Mono  → --font-sans, --font-mono, --font-heading (the body/data font)
+//   Outfit          → --font-display (headings, OG image wordmark)
 const jetbrainsMono = JetBrains_Mono({ variable: "--font-jetbrains-mono", subsets: ["latin"], weight: ["400", "500", "600", "700"], display: "swap" });
 const outfit = Outfit({ variable: "--font-outfit", subsets: ["latin"], weight: ["400", "500", "600", "700"], display: "swap" });
 
-// PERC-695 (bug bounty — CSP static nonce): Force dynamic rendering so each request
-// generates a fresh layout render with the new per-request nonce from middleware.
-// Without this, Next.js may serve a cached layout with a stale nonce baked into
-// data-nonce, causing a CSP mismatch with the freshly generated nonce in the header.
-export const dynamic = "force-dynamic";
+// globals.css's font stacks still reference --font-geist-mono / --font-space-grotesk
+// as the (now-dropped) fallback link before the final generic keyword — alias them
+// to the fonts we kept instead of touching that file, so var() never resolves to
+// the guaranteed-invalid value (which would blank out the *entire* font-family
+// declaration at computed-value time, not just skip the missing link).
+const fontVarAliases = {
+  "--font-geist-mono": "var(--font-jetbrains-mono)",
+  "--font-space-grotesk": "var(--font-outfit)",
+} as React.CSSProperties;
 
 export const metadata: Metadata = {
   // Canonical host is percolator.trade — percolatorlaunch.com 301s to it.
@@ -84,17 +82,15 @@ export const metadata: Metadata = {
     : undefined,
 };
 
-export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const nonce = (await headers()).get("x-nonce") ?? undefined;
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning data-scroll-behavior="smooth" className={`${geistMono.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} ${outfit.variable}`}>
+    <html lang="en" suppressHydrationWarning data-scroll-behavior="smooth" className={`${jetbrainsMono.variable} ${outfit.variable}`} style={fontVarAliases}>
       <head>
         {/* suppressHydrationWarning: browsers blank the nonce content attribute after
             parsing (nonce hiding), so React's hydration diff always sees nonce="" vs
             the server value and logs a mismatch error on every load. The nonce itself
             still applies — only the noisy warning is suppressed. */}
         <script
-          nonce={nonce}
           suppressHydrationWarning
           dangerouslySetInnerHTML={{
             __html: `
@@ -108,11 +104,18 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             `,
           }}
         />
+        {/* Network hints: token logos are fetched cross-origin (next/image
+            unoptimized), so resolve/warm the logo CDN's connection early.
+            Cheap and safe — a no-op when unused. */}
+        <link rel="dns-prefetch" href="https://assets.coingecko.com" />
+        <link rel="preconnect" href="https://assets.coingecko.com" crossOrigin="anonymous" />
+        <link rel="dns-prefetch" href="https://coin-images.coingecko.com" />
+        <link rel="preconnect" href="https://coin-images.coingecko.com" crossOrigin="anonymous" />
+        <link rel="dns-prefetch" href="https://cdn.dexscreener.com" />
       </head>
-        <body suppressHydrationWarning className="min-h-screen antialiased" data-nonce={nonce}>
+        <body suppressHydrationWarning className="min-h-screen antialiased">
         <JsonLd data={[organizationSchema(), websiteSchema()]} />
         <Providers>
-          <CursorGlow />
           <div className="relative z-[1] flex min-h-screen flex-col">
             <ChromeGate>
               <TickerBanner />
@@ -130,8 +133,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <MusicPlayer />
           </ChromeGate>
         </Providers>
-        <GoogleAnalytics nonce={nonce} />
-        <CloudflareAnalytics nonce={nonce} />
+        <GoogleAnalytics />
+        <CloudflareAnalytics />
         <Analytics />
       </body>
     </html>

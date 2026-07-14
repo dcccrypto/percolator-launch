@@ -20,7 +20,9 @@ interface LeaderboardEntry {
   rank: number;
   trader: string;
   tradeCount: number;
-  totalVolume: string;
+  /** C: real USD dollars, a plain number — the API never sends a scaled
+   *  bigint/atom count anymore. Format for display; never rescale. */
+  totalVolume: number;
   lastTradeAt: string;
 }
 
@@ -44,63 +46,23 @@ function timeSince(iso: string): string {
 }
 
 /**
- * Hook to determine the collateral decimals for the current network by fetching
- * the markets list and finding the modal (most common) decimal value.
- *
- * GH#1833: Previously this was a hardcoded per-network constant — mainnet=6 (USDC),
- * devnet=9 (PERC token). That breaks multi-collateral markets. This hook fetches
- * actual market data so the displayed divisor matches reality.
- *
- * Falls back to the old IS_MAINNET heuristic if the API call fails.
+ * C: format a real USD-dollar number (the API's ONE convention for
+ * `LeaderboardEntry.totalVolume` — see that type's doc comment) as a compact
+ * human-readable string. NEVER rescale by a collateral/base-asset decimals
+ * divisor here — that was the root cause of a $250,000 trader rendering as
+ * "0.25": three incompatible conventions (real dollars from the indexer path,
+ * dollars×1e6 "atoms" from the Supabase path, and a divisor derived from the
+ * wrong token's decimals) collided in what used to be `fmtVolume(raw: string,
+ * divisor)`. The API now always returns dollars; this function only formats.
  */
-function useCollateralDecimals(): number {
-  const fallback = IS_MAINNET ? 6 : 9;
-  const [decimals, setDecimals] = useState<number>(fallback);
-
-  useEffect(() => {
-    fetch("/api/markets?limit=200")
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => {
-        if (!data?.markets?.length) return;
-        // Find the modal (most-common) decimal value across all active markets
-        const freq: Record<number, number> = {};
-        for (const m of data.markets) {
-          if (typeof m.decimals === "number" && m.decimals > 0) {
-            freq[m.decimals] = (freq[m.decimals] ?? 0) + 1;
-          }
-        }
-        const entries = Object.entries(freq);
-        if (entries.length === 0) return;
-        const modal = entries.reduce((a, b) => (b[1] > a[1] ? b : a));
-        setDecimals(Number(modal[0]));
-      })
-      .catch(() => {/* keep fallback */});
-  }, []);
-
-  return decimals;
-}
-
-/** Default divisor fallback used by fmtVolume when no divisor is provided. */
-const DEFAULT_DIVISOR = IS_MAINNET ? 1_000_000 : 1_000_000_000;
-
-/** Format raw bigint volume as a compact human-readable string.
- * @param raw - dollar-notional volume as string (sum of abs(size) * price across
- * trades, same scale/convention as trader-stats' totalVolume — NOT raw contract
- * quantity, so heterogeneous markets like SOL and sub-$1 tokens rank fairly)
- * @param divisor - 10^decimals for the collateral token (default: network-based heuristic)
- */
-function fmtVolume(raw: string, divisor = DEFAULT_DIVISOR): string {
-  try {
-    const n = BigInt(raw);
-    // Divide by 10^decimals to convert raw token units to human-readable amount
-    const units = Number(n) / divisor;
-    if (units >= 1_000_000_000) return `${(units / 1_000_000_000).toFixed(2)}B`;
-    if (units >= 1_000_000) return `${(units / 1_000_000).toFixed(2)}M`;
-    if (units >= 1_000) return `${(units / 1_000).toFixed(1)}K`;
-    return units.toLocaleString(undefined, { maximumFractionDigits: units < 1 ? 6 : 2 });
-  } catch {
-    return "—";
-  }
+function fmtVolume(usd: number): string {
+  if (!Number.isFinite(usd)) return "—";
+  const units = Math.abs(usd);
+  const sign = usd < 0 ? "-" : "";
+  if (units >= 1_000_000_000) return `${sign}${(units / 1_000_000_000).toFixed(2)}B`;
+  if (units >= 1_000_000) return `${sign}${(units / 1_000_000).toFixed(2)}M`;
+  if (units >= 1_000) return `${sign}${(units / 1_000).toFixed(1)}K`;
+  return `${sign}${units.toLocaleString(undefined, { maximumFractionDigits: units < 1 ? 6 : 2 })}`;
 }
 
 const PERIOD_LABELS: Record<Period, string> = {
@@ -125,8 +87,8 @@ function leaderboardUrl(): string {
   return `${window.location.origin}/leaderboard`;
 }
 
-function buildShareText(entry: LeaderboardEntry, divisor = DEFAULT_DIVISOR): string {
-  const vol = fmtVolume(entry.totalVolume, divisor);
+function buildShareText(entry: LeaderboardEntry): string {
+  const vol = fmtVolume(entry.totalVolume);
   const network = IS_MAINNET ? "mainnet" : "devnet";
   return (
     `I'm #${entry.rank} on the Percolator ${network} leaderboard with ${vol} volume.\n\n` +
@@ -151,13 +113,13 @@ interface MyRankCardProps {
   walletConnected: boolean;
 }
 
-function MyRankCard({ entry, walletConnected, divisor = DEFAULT_DIVISOR }: MyRankCardProps & { divisor?: number }) {
+function MyRankCard({ entry, walletConnected }: MyRankCardProps) {
   const [copied, setCopied] = useState(false);
 
   const handleShare = useCallback(() => {
-    const text = entry ? buildShareText(entry, divisor) : buildGenericShareText();
+    const text = entry ? buildShareText(entry) : buildGenericShareText();
     window.open(twitterUrl(text), "_blank", "noopener,noreferrer");
-  }, [entry, divisor]);
+  }, [entry]);
 
   const handleCopy = useCallback(async () => {
     try {
@@ -215,7 +177,7 @@ function MyRankCard({ entry, walletConnected, divisor = DEFAULT_DIVISOR }: MyRan
             <div className="text-[11px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
               <span className="tabular-nums">{entry.tradeCount.toLocaleString()} trades</span>
               <span className="mx-2">·</span>
-              <span className="tabular-nums">{fmtVolume(entry.totalVolume, divisor)} vol</span>
+              <span className="tabular-nums">{fmtVolume(entry.totalVolume)} vol</span>
             </div>
           </div>
         </div>
@@ -251,18 +213,24 @@ export default function LeaderboardPage() {
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
 
   const { publicKey, connected } = useWalletCompat();
-  // GH#1833: use per-network market decimals instead of hardcoded constant
-  const collateralDecimals = useCollateralDecimals();
-  const divisor = useMemo(() => Math.pow(10, collateralDecimals), [collateralDecimals]);
 
   const prefersReduced = usePrefersReducedMotion();
   const rowsRef = useRef<HTMLDivElement | null>(null);
 
+  // Bug: toggling 24H → 7D fast (before the 24H request lands) could leave
+  // 24H rows displayed under the 7D tab — no abort/sequence guard. Mirrors
+  // the requestSeq pattern in hooks/useTraderStats.ts:23-64.
+  const requestSeqRef = useRef(0);
+
   const fetchLeaderboard = useCallback(async (p: Period) => {
+    const requestSeq = ++requestSeqRef.current;
+    const isCurrentRequest = () => requestSeqRef.current === requestSeq;
+
     setLoading(true);
     setError(null);
     try {
       const res = await fetch(`/api/leaderboard?period=${p}&limit=100`);
+      if (!isCurrentRequest()) return;
       if (!res.ok) {
         if (res.status === 429) {
           throw new Error("Leaderboard is temporarily unavailable — too many requests. Try again in a moment.");
@@ -273,12 +241,14 @@ export default function LeaderboardPage() {
         throw new Error("Failed to load leaderboard. Please try again.");
       }
       const json = await res.json();
+      if (!isCurrentRequest()) return;
       setEntries(json.leaderboard ?? []);
       setGeneratedAt(json.generatedAt ?? null);
     } catch (err) {
+      if (!isCurrentRequest()) return;
       setError(err instanceof Error ? err.message : "Failed to load leaderboard. Please try again.");
     } finally {
-      setLoading(false);
+      if (isCurrentRequest()) setLoading(false);
     }
   }, []);
 
@@ -317,8 +287,7 @@ export default function LeaderboardPage() {
   const maxVolume = useMemo(() => {
     let max = 0;
     for (const e of entries) {
-      const n = Number(e.totalVolume);
-      if (Number.isFinite(n) && n > max) max = n;
+      if (Number.isFinite(e.totalVolume) && e.totalVolume > max) max = e.totalVolume;
     }
     return max;
   }, [entries]);
@@ -399,7 +368,7 @@ export default function LeaderboardPage() {
         {/* ── My Rank / Share ─────────────────────────────────────── */}
         {!loading && (
           <div className="animate-fade-in">
-            <MyRankCard entry={myEntry} walletConnected={connected} divisor={divisor} />
+            <MyRankCard entry={myEntry} walletConnected={connected} />
           </div>
         )}
 
@@ -459,9 +428,8 @@ export default function LeaderboardPage() {
               {entries.map((entry) => {
                 const isTop3 = entry.rank <= 3;
                 const isMe = myEntry != null && entry.trader === myEntry.trader;
-                const volNum = Number(entry.totalVolume);
-                const volPct = maxVolume > 0 && Number.isFinite(volNum)
-                  ? Math.max(2, Math.round((volNum / maxVolume) * 100))
+                const volPct = maxVolume > 0 && Number.isFinite(entry.totalVolume)
+                  ? Math.max(2, Math.round((entry.totalVolume / maxVolume) * 100))
                   : 0;
                 return (
                   <div
@@ -503,7 +471,7 @@ export default function LeaderboardPage() {
 
                     {/* Volume */}
                     <span className={`relative text-right tabular-nums ${isTop3 ? "text-[var(--text)]" : "text-[var(--text-secondary)]"}`}>
-                      {fmtVolume(entry.totalVolume, divisor)}
+                      {fmtVolume(entry.totalVolume)}
                     </span>
 
                     {/* Last active */}

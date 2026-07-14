@@ -28,6 +28,8 @@
 
 import { type NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
+import { boundedSet } from "@/lib/bounded-map";
+import { geckoFetch } from "@/lib/gecko-fetch";
 
 export const dynamic = "force-dynamic";
 
@@ -43,15 +45,48 @@ export interface CandleData {
 }
 
 const GECKOTERMINAL_BASE = "https://api.geckoterminal.com/api/v2/networks/solana";
-const FETCH_TIMEOUT_MS = 8_000;
-const GECKO_HEADERS = { Accept: "application/json", "User-Agent": "percolator-chart-proxy/1.0" };
 
 const CACHE_HEADERS = {
   "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120",
 } as const;
+/** Failure responses must NOT be CDN-cached: a GeckoTerminal 429/error would
+ *  otherwise pin an EMPTY chart for 60s+ even though a retry seconds later
+ *  would succeed — one rate-limit blip blanked every viewer's chart. */
+const NO_STORE_HEADERS = { "Cache-Control": "no-store" } as const;
 
 /** GeckoTerminal-supported OHLCV timeframe granularities. */
 const VALID_TIMEFRAMES = new Set(["minute", "hour", "day"]);
+
+/* ── In-process GeckoTerminal quota protection ──────────────────────────────
+ * GT's free tier allows ~30 calls/min per IP, and every chart request used to
+ * spend TWO of them (token→top_pools + ohlcv) with zero reuse — the pool
+ * lookup was repeated on every 60s poll and every timeframe switch, for every
+ * open chart. A single browser session could exhaust the quota, after which
+ * this route silently served empty candles (and the CDN cached the emptiness).
+ * Verified empirically: two chart requests in quick succession succeeded, the
+ * following ones returned 0 bars with pool resolution dead until cooldown.
+ *
+ * - mint → pool: pools don't move; cache hits for 6h, misses for 60s (a miss
+ *   may be a 429, not a real "no pools" — don't pin it).
+ * - candles: cache per (pool, timeframe, aggregate, limit) for 45s (matches
+ *   the client's 60s poll), and keep the last good batch for 15min as a
+ *   stale-if-error fallback so a 429 degrades to slightly-old candles
+ *   instead of a blank chart.
+ * Per-instance only (serverless), but the CDN s-maxage covers cross-instance
+ * reuse on the hosted deployment. */
+const POOL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const POOL_MISS_TTL_MS = 60 * 1000;
+const CANDLE_CACHE_TTL_MS = 45 * 1000;
+const CANDLE_STALE_MAX_MS = 15 * 60 * 1000;
+// Hard entry cap per cache. The route validates `mint` only as a well-formed
+// pubkey (not a real token), and resolveTopPool caches even NULL misses — so a
+// warm/long-lived instance hit with millions of distinct random pubkeys would
+// grow these Maps without bound (memory DoS). TTL is checked only on read,
+// never evicted, so the cap is the real backstop. ~10k small entries is far
+// above the handful of live markets yet trivially bounded (~sub-MB).
+const CACHE_MAX_ENTRIES = 10_000;
+const poolCache = new Map<string, { pool: string | null; at: number }>();
+const candleCache = new Map<string, { candles: CandleData[]; at: number }>();
 
 /** [unixSeconds, open, high, low, close, volume] — GeckoTerminal's OHLCV row shape. */
 type GeckoOhlcvBar = [number, number, number, number, number, number];
@@ -64,9 +99,11 @@ interface GeckoPoolIncluded {
 }
 
 function emptyResponse() {
+  // Empty results are almost always transient (GT rate limit / upstream
+  // hiccup) — never CDN-cache them; see NO_STORE_HEADERS.
   return NextResponse.json(
     { candles: [] as CandleData[], poolAddress: null, cached: false },
-    { headers: CACHE_HEADERS },
+    { headers: NO_STORE_HEADERS },
   );
 }
 
@@ -85,12 +122,25 @@ function emptyResponse() {
  * Returns null on any failure or when the token has no indexed pools.
  */
 async function resolveTopPool(mint: string): Promise<string | null> {
+  const cached = poolCache.get(mint);
+  if (cached) {
+    const ttl = cached.pool ? POOL_CACHE_TTL_MS : POOL_MISS_TTL_MS;
+    if (Date.now() - cached.at < ttl) return cached.pool;
+  }
+  const pool = await resolveTopPoolUncached(mint);
+  // A resolved pool is durable knowledge; a null may just be a 429 — the
+  // short miss-TTL above keeps us from hammering GT while never pinning it.
+  boundedSet(poolCache, mint, { pool: pool ?? cached?.pool ?? null, at: Date.now() }, CACHE_MAX_ENTRIES);
+  // If this attempt failed but we have ANY previously-known pool, keep using
+  // it — pools don't move, and a rate-limited lookup must not blank a chart
+  // that worked a minute ago.
+  return pool ?? cached?.pool ?? null;
+}
+
+async function resolveTopPoolUncached(mint: string): Promise<string | null> {
   try {
-    const res = await fetch(`${GECKOTERMINAL_BASE}/tokens/${mint}?include=top_pools`, {
-      headers: GECKO_HEADERS,
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-    if (!res.ok) return null;
+    const res = await geckoFetch(`${GECKOTERMINAL_BASE}/tokens/${mint}?include=top_pools`);
+    if (!res || !res.ok) return null;
     const json = await res.json();
 
     const topIds: string[] = (json?.data?.relationships?.top_pools?.data ?? [])
@@ -126,8 +176,8 @@ async function fetchCandles(
     const url =
       `${GECKOTERMINAL_BASE}/pools/${encodeURIComponent(pool)}/ohlcv/${timeframe}` +
       `?aggregate=${encodeURIComponent(aggregate)}&limit=${encodeURIComponent(limit)}`;
-    const res = await fetch(url, { headers: GECKO_HEADERS, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-    if (!res.ok) return [];
+    const res = await geckoFetch(url);
+    if (!res || !res.ok) return [];
     const json = await res.json();
     const bars = json?.data?.attributes?.ohlcv_list as GeckoOhlcvBar[] | undefined;
     if (!Array.isArray(bars) || bars.length === 0) return [];
@@ -177,8 +227,38 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ mint
     const pool = await resolveTopPool(canonicalMint);
     if (!pool) return emptyResponse();
 
+    const cacheKey = `${pool}:${timeframe}:${aggregate}:${limit}`;
+    const cached = candleCache.get(cacheKey);
+    const age = cached ? Date.now() - cached.at : Infinity;
+
+    // Fresh enough — serve without spending a GeckoTerminal call. This is
+    // what keeps N open charts + the client's 60s poll inside GT's quota.
+    if (cached && age < CANDLE_CACHE_TTL_MS) {
+      return NextResponse.json(
+        { candles: cached.candles, poolAddress: pool, cached: true },
+        { headers: CACHE_HEADERS },
+      );
+    }
+
     const candles = await fetchCandles(pool, timeframe, aggregate, limit);
-    return NextResponse.json({ candles, poolAddress: pool, cached: false }, { headers: CACHE_HEADERS });
+    if (candles.length > 0) {
+      boundedSet(candleCache, cacheKey, { candles, at: Date.now() }, CACHE_MAX_ENTRIES);
+      return NextResponse.json({ candles, poolAddress: pool, cached: false }, { headers: CACHE_HEADERS });
+    }
+
+    // Empty fetch = usually a GT 429, not "this pool has no history".
+    // Stale-if-error: serve the last good batch (up to 15min old) instead of
+    // blanking a chart that rendered fine a minute ago.
+    if (cached && age < CANDLE_STALE_MAX_MS && cached.candles.length > 0) {
+      return NextResponse.json(
+        { candles: cached.candles, poolAddress: pool, cached: true },
+        { headers: NO_STORE_HEADERS },
+      );
+    }
+    return NextResponse.json(
+      { candles, poolAddress: pool, cached: false },
+      { headers: NO_STORE_HEADERS },
+    );
   } catch {
     // Never let an unexpected error break the chart — the client falls back
     // to drawing from the live oracle price when candles is empty.

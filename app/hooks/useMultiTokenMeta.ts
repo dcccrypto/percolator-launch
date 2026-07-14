@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { fetchTokenMetaBatch, type TokenMeta } from "@/lib/tokenMeta";
@@ -20,10 +20,18 @@ export function useMultiTokenMeta(mints: PublicKey[]): Map<string, TokenMeta> {
   // SDK). Filter those out here instead of crashing on `.toBase58()` below —
   // a missing mint degrades to "no metadata for this position" rather than
   // taking down the whole component tree.
-  const definedMints = mints.filter((m): m is PublicKey => !!m);
+  const definedMints = useMemo(
+    () => mints.filter((m): m is PublicKey => !!m),
+    [mints],
+  );
 
-  // Stable key for the mints array
-  const mintsKey = definedMints.map((m) => m.toBase58()).sort().join(",");
+  // Stable key for the mints array — memoized so the filter+map+sort+join (over
+  // up to ~500 mints) only runs when the mints array reference changes, not on
+  // every render. Referentially stable when the caller memoizes `mints`.
+  const mintsKey = useMemo(
+    () => definedMints.map((m) => m.toBase58()).sort().join(","),
+    [definedMints],
+  );
 
   useEffect(() => {
     if (definedMints.length === 0) {
@@ -40,8 +48,13 @@ export function useMultiTokenMeta(mints: PublicKey[]): Map<string, TokenMeta> {
       .catch(() => {
         // GH#1808: On fetch failure, set an empty map explicitly so callers can detect
         // completion vs. never-resolved. Keeps existing data if we had partial results.
-        if (!cancelled && metaMap.size === 0) {
-          setMetaMap(new Map());
+        // Bug: reading `metaMap.size` here read the STALE closure from when this
+        // effect was created (metaMap is deliberately not in the deps array) — after
+        // switching mint sets, the guard saw the OLD set's size and skipped the
+        // fallback publish, leaving the NEW set's rows unresolved forever. Use a
+        // functional update to read the current state instead.
+        if (!cancelled) {
+          setMetaMap((prev) => (prev.size === 0 ? new Map() : prev));
         }
       });
 

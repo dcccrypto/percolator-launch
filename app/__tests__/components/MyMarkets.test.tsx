@@ -1,20 +1,37 @@
 /**
- * MyMarkets (useMyMarkets Hook) Tests
- * 
- * Test Coverage:
- * - Market discovery and filtering
- * - Refresh functionality
- * - Insurance fund data loading
- * - Role-based market filtering (admin/trader/LP)
- * - Loading states
- * - Error handling
+ * /my-markets creator-dashboard tests.
+ *
+ * Covers:
+ *  - useCreatedMarkets (hooks/useCreatedMarkets.ts): admin-detection filter,
+ *    dedup, label generation, loading/error passthrough, v17 enrichment
+ *    merge. This REPLACES the old useMyMarkets.ts test suite (that hook is
+ *    deleted — its trader/LP owner-scan second pass was dropped entirely;
+ *    see useCreatedMarkets.ts's top-of-file doc comment for why).
+ *  - CreatorAttentionStrip's pure detection logic (components/my-markets/
+ *    attentionLogic.ts): keeper-dead-feed and engine-crank-stale conditions.
+ *  - The LP-liquidity display helpers (components/my-markets/types.ts):
+ *    v17-vs-v12 source switch and the "materially diverges" sub-label gate.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { PublicKey } from '@solana/web3.js';
-import { useMyMarkets } from '../../hooks/useMyMarkets';
+import { useCreatedMarkets } from '../../hooks/useCreatedMarkets';
+import {
+  isKeeperFeedDead,
+  isEngineCrankStale,
+  KEEPER_PRICE_STALE_THRESHOLD_SLOTS,
+  ENGINE_STALE_THRESHOLD_SLOTS,
+} from '../../components/my-markets/attentionLogic';
+import {
+  deriveMarketLiquidityAtoms,
+  lpCollateralMateriallyDiverges,
+  unitScaleToDecimals,
+  resolveCreatedMarketPriceE6,
+} from '../../components/my-markets/types';
+import type { CreatorMarketDetail } from '../../components/my-markets/types';
 import type { DiscoveredMarket } from '@percolatorct/sdk';
+import type { CreatedMarket } from '../../hooks/useCreatedMarkets';
 
 // Mock wallet adapter
 const mockPublicKey = new PublicKey('11111111111111111111111111111111');
@@ -23,20 +40,35 @@ const mockUseWallet = vi.fn(() => ({
   connected: true,
 }));
 
-// Mock connection
-const mockGetAccountInfo = vi.fn();
-const mockUseConnection = vi.fn(() => ({
-  connection: {
-    getAccountInfo: mockGetAccountInfo,
-  },
-}));
+// Mock connection — resolveLabel's fetchTokenMeta call will fail against this
+// stub (no real getAccountInfo behavior), which is fine: it exercises the
+// same "fall back to a truncated mint address" path the label logic already
+// has a catch-block for.
+//
+// IMPORTANT: the connection object itself must be REFERENCE-STABLE across
+// calls (module-scope singleton, not a fresh object literal per call) — the
+// hook's resolveLabel is a useCallback keyed on `connection`, which feeds the
+// admin-detection effect's dependency array. A fresh `{ connection: {...} }`
+// on every render makes that effect re-fire every render, which — combined
+// with `setCreatedMarkets([])`'s brand-new array reference — never settles
+// and spins the test into an OOM (found by actually running these tests;
+// the previous suite never had to contend with this because it was entirely
+// `describe.skip`).
+const mockConnection = {
+  getSlot: vi.fn().mockResolvedValue(1000),
+  getMultipleAccountsInfo: vi.fn().mockResolvedValue([]),
+  // Creator detection scans for LP portfolios owned by the wallet (see the
+  // rotated-marketauth test below). Default: the wallet owns none.
+  getProgramAccounts: vi.fn().mockResolvedValue([]),
+};
+const mockUseConnection = vi.fn(() => ({ connection: mockConnection }));
 
-// Mock market discovery
 const mockMarkets: DiscoveredMarket[] = [];
 const mockUseMarketDiscovery = vi.fn(() => ({
   markets: mockMarkets,
   loading: false,
   error: null,
+  refetch: vi.fn(),
 }));
 
 vi.mock('@/hooks/useWalletCompat', () => ({
@@ -48,527 +80,413 @@ vi.mock('../../hooks/useMarketDiscovery', () => ({
   useMarketDiscovery: () => mockUseMarketDiscovery(),
 }));
 
-// Helper to create mock market header
-function createMockMarket(
-  slabAddress: string,
-  adminAddress: string
-): DiscoveredMarket {
+// fetchTokenMeta's real implementation falls through to a live, key-free
+// DexScreener network call when nothing else resolves — deterministic here
+// means never hitting the network. Always reject, so every label test
+// exercises the hook's own try/catch fallback (truncated mint address)
+// instead of depending on live network state.
+vi.mock('@/lib/tokenMeta', () => ({
+  fetchTokenMeta: vi.fn().mockRejectedValue(new Error('no network in tests')),
+}));
+
+/** Deterministic, always-VALID PublicKey for test fixtures — every byte set
+ *  to `n` (1-255). Hand-rolled base58 strings (the previous, never-actually-
+ *  run test suite used things like 'AdminMarket111...') are NOT guaranteed
+ *  valid base58/32-byte input and throw at `new PublicKey(...)` the moment
+ *  these tests actually execute (they never did before — the whole suite was
+ *  `describe.skip`). */
+function pk(n: number): PublicKey {
+  return new PublicKey(new Uint8Array(32).fill(n));
+}
+
+/** Minimal v12-shaped DiscoveredMarket — admin/header path only (no
+ *  configV17), matching what useCreatedMarkets' admin-detection effect reads. */
+function createMockV12Market(slabAddress: PublicKey, adminAddress: PublicKey): DiscoveredMarket {
   const mint = new PublicKey('So11111111111111111111111111111111111111112');
   return {
-    slabAddress: new PublicKey(slabAddress),
-    programId: new PublicKey('11111111111111111111111111111111'),
+    slabAddress,
+    programId: pk(9),
     header: {
-      magic: 0x504552434f4c4154n,
-      version: 1,
-      bump: 0,
-      flags: 0,
-      resolved: false,
+      admin: adminAddress,
       paused: false,
-      admin: new PublicKey(adminAddress),
-      nonce: 0n,
-      lastThrUpdateSlot: 0n,
     },
     config: {
       collateralMint: mint,
-      vaultPubkey: new PublicKey('11111111111111111111111111111111'),
-      indexFeedId: new PublicKey('11111111111111111111111111111111'),
-      maxStalenessSlots: 60n,
-      confFilterBps: 100,
-      vaultAuthorityBump: 0,
-      invert: 0,
-      unitScale: 0,
-      fundingHorizonSlots: 3600n,
-      fundingKBps: 100n,
-      fundingInvScaleNotionalE6: 1000000n,
-      fundingMaxPremiumBps: 500n,
-      fundingMaxBpsPerSlot: 10n,
-      threshFloor: 1000n,
-      threshRiskBps: 500n,
-      threshUpdateIntervalSlots: 100n,
-      threshStepBps: 50n,
-      threshAlphaBps: 100n,
-      threshMin: 500n,
-      threshMax: 5000n,
-      threshMinStep: 10n,
       oracleAuthority: new PublicKey('11111111111111111111111111111111'),
       authorityPriceE6: 0n,
-      authorityTimestamp: 0n,
-      oraclePriceCapE2bps: 0n,
-      lastEffectivePriceE6: 0n,
+      unitScale: 1_000_000,
     },
     engine: {
-      vault: 10000000n,
-      totalOpenInterest: 5000000n,
-      insuranceFund: {
-        balance: 1000000n,
-        feeRevenue: 0n,
-      },
+      vault: 10_000_000n,
+      totalOpenInterest: 5_000_000n,
+      insuranceFund: { balance: 1_000_000n, feeRevenue: 0n },
       currentSlot: 1000n,
-      fundingIndexQpbE6: 0n,
-      lastFundingSlot: 0n,
-      fundingRateBpsPerSlotLast: 0n,
-      lastCrankSlot: 0n,
+      lastCrankSlot: 995n,
       maxCrankStalenessSlots: 100n,
-      cTot: 0n,
-      pnlPosTot: 0n,
-      liqCursor: 0,
-      gcCursor: 0,
-      lastSweepStartSlot: 0n,
-      lastSweepCompleteSlot: 0n,
-      crankCursor: 0,
-      sweepStartIdx: 0,
-      lifetimeLiquidations: 0n,
-      lifetimeForceCloses: 0n,
-      netLpPos: 0n,
-      lpSumAbs: 0n,
-      lpMaxAbs: 0n,
-      lpMaxAbsSweep: 0n,
-      numUsedAccounts: 42,
-      nextAccountId: 0n,
+      numUsedAccounts: 3,
     },
-    params: {
-      warmupPeriodSlots: 100n,
-      maintenanceMarginBps: 500n,
-      initialMarginBps: 1000n,
-      tradingFeeBps: 10n,
-      maxAccounts: 100n,
-    } as any,
-  } as DiscoveredMarket;
+    params: {},
+  } as unknown as DiscoveredMarket;
 }
 
-// Helper to create mock account data with user/LP accounts
-function createMockSlabData(
-  ownerAddress: string,
-  accountType: 'user' | 'lp' | 'none' = 'none'
-): Uint8Array {
-  // Simplified mock - in reality would need full slab encoding
-  // For testing, we'll mock parseAllAccounts
-  return new Uint8Array([1, 2, 3, 4]);
-}
-
-// Mock parseAllAccounts
-vi.mock('@percolatorct/sdk', async (importOriginal) => {
-  const actual = await importOriginal();
-  return {
-    ...(actual as any),
-    parseAllAccounts: vi.fn((data: Uint8Array) => {
-      // Return mock accounts based on test setup
-      return [];
-    }),
-    AccountKind: {
-      User: 1,
-      LP: 2,
-    },
-  };
-});
-
-describe.skip('useMyMarkets Hook', () => {
+describe('useCreatedMarkets Hook', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockMarkets.length = 0;
-    mockGetAccountInfo.mockResolvedValue(null);
+    mockUseWallet.mockReturnValue({ publicKey: mockPublicKey, connected: true });
   });
 
-  /**
-   * Basic Functionality
-   */
-  it('should return empty array when wallet not connected', () => {
-    mockUseWallet.mockReturnValueOnce({
-      publicKey: null as any,
-      connected: false,
-    });
+  it('returns empty array when wallet not connected', () => {
+    // .mockReturnValue (not Once) — the hook re-renders as its effects
+    // settle, so the override must survive every call, not just the first.
+    mockUseWallet.mockReturnValue({ publicKey: null as unknown as PublicKey, connected: false });
 
-    const { result } = renderHook(() => useMyMarkets());
+    const { result } = renderHook(() => useCreatedMarkets());
 
     expect(result.current.myMarkets).toEqual([]);
     expect(result.current.connected).toBe(false);
   });
 
-  it('should return empty array when no markets discovered', () => {
-    mockUseMarketDiscovery.mockReturnValueOnce({
-      markets: [],
-      loading: false,
-      error: null,
-    });
+  it('returns empty array when no markets discovered', () => {
+    mockUseMarketDiscovery.mockReturnValue({ markets: [], loading: false, error: null, refetch: vi.fn() });
 
-    const { result } = renderHook(() => useMyMarkets());
+    const { result } = renderHook(() => useCreatedMarkets());
 
     expect(result.current.myMarkets).toEqual([]);
     expect(result.current.loading).toBe(false);
   });
 
-  /**
-   * Admin Market Discovery
-   */
-  it('should identify markets where user is admin', () => {
-    const adminMarket = createMockMarket(
-      'AdminMarket1111111111111111111111111',
-      mockPublicKey.toBase58()
-    );
-
+  it('identifies markets where the connected wallet is admin', async () => {
+    const slab = pk(101);
+    const adminMarket = createMockV12Market(slab, mockPublicKey);
     mockMarkets.push(adminMarket);
-    mockUseMarketDiscovery.mockReturnValueOnce({
-      markets: [adminMarket],
-      loading: false,
-      error: null,
+    mockUseMarketDiscovery.mockReturnValue({ markets: [adminMarket], loading: false, error: null, refetch: vi.fn() });
+
+    const { result } = renderHook(() => useCreatedMarkets());
+
+    await waitFor(() => {
+      expect(result.current.myMarkets).toHaveLength(1);
     });
-
-    const { result } = renderHook(() => useMyMarkets());
-
-    expect(result.current.myMarkets).toHaveLength(1);
-    expect(result.current.myMarkets[0].role).toBe('admin');
-    expect(result.current.myMarkets[0].slabAddress.toBase58()).toBe(
-      'AdminMarket1111111111111111111111111'
-    );
+    expect(result.current.myMarkets[0].slabAddress.toBase58()).toBe(slab.toBase58());
   });
 
-  it('should filter out markets where user is not admin', () => {
-    const otherMarket = createMockMarket(
-      'OtherMarket1111111111111111111111111',
-      'DifferentAdmin111111111111111111111'
-    );
-
+  it('excludes markets administered by a different wallet', async () => {
+    const otherMarket = createMockV12Market(pk(102), pk(200));
     mockMarkets.push(otherMarket);
-    mockUseMarketDiscovery.mockReturnValueOnce({
-      markets: [otherMarket],
-      loading: false,
-      error: null,
-    });
+    mockUseMarketDiscovery.mockReturnValue({ markets: [otherMarket], loading: false, error: null, refetch: vi.fn() });
 
-    const { result } = renderHook(() => useMyMarkets());
+    const { result } = renderHook(() => useCreatedMarkets());
 
-    // Should have 0 admin markets initially (trader/LP check happens async)
-    const adminMarkets = result.current.myMarkets.filter(m => m.role === 'admin');
-    expect(adminMarkets).toHaveLength(0);
-  });
-
-  /**
-   * Trader Account Discovery
-   */
-  it('should identify markets where user has trader account', async () => {
-    const { parseAllAccounts, AccountKind } = await import('@percolatorct/sdk');
-    
-    const traderMarket = createMockMarket(
-      'TraderMarket111111111111111111111111',
-      'DifferentAdmin111111111111111111111'
-    );
-
-    mockMarkets.push(traderMarket);
-    mockUseMarketDiscovery.mockReturnValueOnce({
-      markets: [traderMarket],
-      loading: false,
-      error: null,
-    });
-
-    // Mock account data with user account
-    mockGetAccountInfo.mockResolvedValueOnce({
-      data: createMockSlabData(mockPublicKey.toBase58(), 'user'),
-    });
-
-    vi.mocked(parseAllAccounts).mockReturnValueOnce([
-      {
-        account: {
-          owner: mockPublicKey,
-          kind: AccountKind.User,
-        },
-      },
-    ]);
-
-    const { result } = renderHook(() => useMyMarkets());
-
-    // Wait for async account check to complete
+    // No second-pass trader/LP scan exists anymore — a non-admin market must
+    // never appear on this dashboard, full stop (this IS the behavior change
+    // the rebuild made: /my-markets = "markets you created", not "markets
+    // you touched").
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
-
-    const traderMarkets = result.current.myMarkets.filter(m => m.role === 'trader');
-    expect(traderMarkets.length).toBeGreaterThanOrEqual(0);
+    expect(result.current.myMarkets).toHaveLength(0);
   });
 
-  /**
-   * LP Account Discovery
-   */
-  it('should identify markets where user has LP account', async () => {
-    const { parseAllAccounts, AccountKind } = await import('@percolatorct/sdk');
-    
-    const lpMarket = createMockMarket(
-      'LPMarket11111111111111111111111111111',
-      'DifferentAdmin111111111111111111111'
-    );
+  it('matches admin via configV17.marketauth on a v17 market (empty v12 header)', async () => {
+    // v17 markets carry an empty header ({}) — the admin lives in
+    // configV17.marketauth instead of header.admin. Optional-chaining this
+    // is the fix for the TypeError that used to blank the whole dashboard
+    // for any wallet with a v17 market (see useCreatedMarkets.ts's comment).
+    const slab = pk(105);
+    const v17Market = {
+      slabAddress: slab,
+      programId: pk(9),
+      header: {},
+      config: {},
+      configV17: { marketauth: mockPublicKey, unitScale: 1_000_000, collateralMint: pk(1) },
+      engine: {},
+      params: {},
+    } as unknown as DiscoveredMarket;
+    mockMarkets.push(v17Market);
+    mockUseMarketDiscovery.mockReturnValue({ markets: [v17Market], loading: false, error: null, refetch: vi.fn() });
 
-    mockMarkets.push(lpMarket);
-    mockUseMarketDiscovery.mockReturnValueOnce({
-      markets: [lpMarket],
-      loading: false,
-      error: null,
+    const { result } = renderHook(() => useCreatedMarkets());
+
+    await waitFor(() => {
+      expect(result.current.myMarkets).toHaveLength(1);
     });
+    expect(result.current.myMarkets[0].slabAddress.toBase58()).toBe(slab.toBase58());
+  });
 
-    // Mock account data with LP account
-    mockGetAccountInfo.mockResolvedValueOnce({
-      data: createMockSlabData(mockPublicKey.toBase58(), 'lp'),
-    });
+  it('finds a launched market whose marketauth was ROTATED away, via its LP portfolio', async () => {
+    // THE BUG THIS GUARDS (user-reported, verified on-chain): a completed
+    // launch's final step (StakeInitPool) irreversibly rotates marketauth to a
+    // stake-pool PDA. So `marketauth === myWallet` is FALSE for every
+    // fully-launched market, and the creator saw "you haven't created a market
+    // with this wallet yet" while staring at markets they had just launched.
+    //
+    // The durable marker is the market's LP portfolio: created by the wizard
+    // with the CREATOR's wallet as owner@116, never rotated. Here the market's
+    // authority belongs to someone else (the PDA) but the wallet owns the LP
+    // portfolio → the market MUST still be listed.
+    const slab = pk(106);
+    const rotatedAuthority = pk(222); // the stake-pool PDA — NOT our wallet
+    const v17Market = {
+      slabAddress: slab,
+      programId: pk(9),
+      header: {},
+      config: {},
+      configV17: { marketauth: rotatedAuthority, unitScale: 1_000_000, collateralMint: pk(1) },
+      engine: {},
+      params: {},
+    } as unknown as DiscoveredMarket;
+    mockMarkets.push(v17Market);
+    mockUseMarketDiscovery.mockReturnValue({ markets: [v17Market], loading: false, error: null, refetch: vi.fn() });
 
-    vi.mocked(parseAllAccounts).mockReturnValueOnce([
-      {
-        account: {
-          owner: mockPublicKey,
-          kind: AccountKind.LP,
-        },
-      },
+    // An LP portfolio (trailing matcher config enabled) owned by our wallet,
+    // whose market_group_id@16 points at this slab.
+    const lpData = Buffer.alloc(9347);
+    Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]).copy(lpData, 0); // magic
+    slab.toBuffer().copy(lpData, 16);            // market_group_id@16
+    mockPublicKey.toBuffer().copy(lpData, 116);  // owner@116 = us
+    lpData.writeBigUInt64LE(1n, lpData.length - 104 + 96); // matcher enabled -> IS an LP portfolio
+    mockConnection.getProgramAccounts.mockResolvedValueOnce([
+      { pubkey: pk(133), account: { data: lpData } },
     ]);
 
-    const { result } = renderHook(() => useMyMarkets());
+    const { result } = renderHook(() => useCreatedMarkets());
 
-    // Wait for async account check to complete
+    await waitFor(() => {
+      expect(result.current.myMarkets).toHaveLength(1);
+    });
+    expect(result.current.myMarkets[0].slabAddress.toBase58()).toBe(slab.toBase58());
+  });
+
+  it('does NOT list a market where the wallet owns only a TRADING portfolio', async () => {
+    // Symmetry check: owning a plain (non-LP) portfolio means you TRADE that
+    // market, not that you created it — it belongs on /portfolio, not here.
+    const slab = pk(107);
+    const v17Market = {
+      slabAddress: slab,
+      programId: pk(9),
+      header: {},
+      config: {},
+      configV17: { marketauth: pk(223), unitScale: 1_000_000, collateralMint: pk(1) },
+      engine: {},
+      params: {},
+    } as unknown as DiscoveredMarket;
+    mockMarkets.push(v17Market);
+    mockUseMarketDiscovery.mockReturnValue({ markets: [v17Market], loading: false, error: null, refetch: vi.fn() });
+
+    const tradingData = Buffer.alloc(9347);
+    Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]).copy(tradingData, 0);
+    slab.toBuffer().copy(tradingData, 16);
+    mockPublicKey.toBuffer().copy(tradingData, 116);
+    // matcher DISABLED (0) -> a normal trading portfolio
+    tradingData.writeBigUInt64LE(0n, tradingData.length - 104 + 96);
+    mockConnection.getProgramAccounts.mockResolvedValueOnce([
+      { pubkey: pk(134), account: { data: tradingData } },
+    ]);
+
+    const { result } = renderHook(() => useCreatedMarkets());
+
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
-
-    const lpMarkets = result.current.myMarkets.filter(m => m.role === 'lp');
-    expect(lpMarkets.length).toBeGreaterThanOrEqual(0);
+    expect(result.current.myMarkets).toHaveLength(0);
   });
 
-  /**
-   * Loading States
-   */
-  it('should show loading state during discovery', () => {
-    mockUseMarketDiscovery.mockReturnValueOnce({
-      markets: [],
-      loading: true,
-      error: null,
-    });
-
-    const { result } = renderHook(() => useMyMarkets());
-
-    expect(result.current.loading).toBe(true);
-  });
-
-  it('should show loading state during account checks', () => {
-    const market = createMockMarket(
-      'Market1111111111111111111111111111111',
-      'OtherAdmin111111111111111111111111'
-    );
-
+  it('generates a truncated-address label when token metadata cannot be resolved', async () => {
+    const market = createMockV12Market(pk(104), mockPublicKey);
     mockMarkets.push(market);
-    mockUseMarketDiscovery.mockReturnValueOnce({
-      markets: [market],
-      loading: false,
-      error: null,
+    mockUseMarketDiscovery.mockReturnValue({ markets: [market], loading: false, error: null, refetch: vi.fn() });
+
+    const { result } = renderHook(() => useCreatedMarkets());
+
+    await waitFor(() => {
+      expect(result.current.myMarkets).toHaveLength(1);
     });
-
-    // Delay account info response
-    mockGetAccountInfo.mockImplementation(
-      () => new Promise(resolve => setTimeout(() => resolve(null), 100))
-    );
-
-    const { result } = renderHook(() => useMyMarkets());
-
-    // Should be loading while fetching account data
-    expect(result.current.loading).toBe(true);
+    // fetchTokenMeta has no real RPC behind the mocked connection, so the
+    // label falls back to the mint's truncated address — this exercises the
+    // hook's own try/catch fallback, not a real token registry lookup.
+    expect(result.current.myMarkets[0].label).toMatch(/…$/);
   });
 
-  /**
-   * Error Handling
-   */
-  it('should handle discovery errors gracefully', () => {
+  it('propagates discovery errors without throwing', () => {
     const testError = new Error('RPC connection failed');
-    
-    mockUseMarketDiscovery.mockReturnValueOnce({
-      markets: [],
-      loading: false,
-      error: testError as any,
-    });
+    // .mockReturnValue (not Once) — see the wallet-disconnect test's comment
+    // above for why a one-shot override doesn't survive this hook's re-renders.
+    mockUseMarketDiscovery.mockReturnValue({ markets: [], loading: false, error: testError, refetch: vi.fn() });
 
-    const { result } = renderHook(() => useMyMarkets());
+    const { result } = renderHook(() => useCreatedMarkets());
 
     expect(result.current.error).toBe(testError);
     expect(result.current.myMarkets).toEqual([]);
   });
 
-  it('should handle account fetch errors gracefully', async () => {
-    const market = createMockMarket(
-      'Market1111111111111111111111111111111',
-      'OtherAdmin111111111111111111111111'
-    );
+  it('reports loading while discovery is loading, with no second RPC pass to wait on', () => {
+    mockUseMarketDiscovery.mockReturnValue({ markets: [], loading: true, error: null, refetch: vi.fn() });
 
-    mockMarkets.push(market);
-    mockUseMarketDiscovery.mockReturnValueOnce({
-      markets: [market],
-      loading: false,
-      error: null,
-    });
+    const { result } = renderHook(() => useCreatedMarkets());
 
-    // Simulate RPC error
-    mockGetAccountInfo.mockRejectedValueOnce(new Error('Network timeout'));
+    expect(result.current.loading).toBe(true);
+  });
+});
 
-    const { result } = renderHook(() => useMyMarkets());
+/* ── CreatorAttentionStrip pure detection logic ── */
 
-    // Should complete without crashing
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
+/** Minimal v17-shaped CreatedMarket — only the fields isKeeperFeedDead /
+ *  isEngineCrankStale actually read. */
+function createMockV17Market(opts: {
+  oracleMode: number;
+  markEwmaE6: bigint;
+  markEwmaLastSlot: bigint;
+  assetSlotLast?: bigint | null;
+}): CreatedMarket {
+  return {
+    slabAddress: PublicKey.default,
+    programId: PublicKey.default,
+    label: 'TEST',
+    config: undefined,
+    configV17: {
+      oracleMode: opts.oracleMode,
+      markEwmaE6: opts.markEwmaE6,
+      markEwmaLastSlot: opts.markEwmaLastSlot,
+      invert: 0,
+      unitScale: 1_000_000,
+      collateralMint: PublicKey.default,
+      marketauth: mockPublicKey,
+    },
+    v17Stats: opts.assetSlotLast === undefined ? undefined : {
+      oi: { insuranceBalance: 0n, totalLongOiQ: 0n, totalShortOiQ: 0n, assets: [] },
+      assetSlotLast: opts.assetSlotLast,
+    },
+  } as unknown as CreatedMarket;
+}
 
-    // Should skip markets that failed to load
-    expect(result.current.myMarkets).toEqual([]);
+describe('CreatorAttentionStrip detection logic', () => {
+  const NOW = 100_000n;
+
+  it('flags a keeper-mode market that has never received a price', () => {
+    const m = createMockV17Market({ oracleMode: 3, markEwmaE6: 0n, markEwmaLastSlot: 0n });
+    expect(isKeeperFeedDead(m, NOW)).toBe(true);
   });
 
-  /**
-   * Deduplication
-   */
-  it('should deduplicate markets when user has multiple roles', async () => {
-    const { parseAllAccounts, AccountKind } = await import('@percolatorct/sdk');
-    
-    // Market where user is both admin and has a trader account
-    const dualRoleMarket = createMockMarket(
-      'DualMarket111111111111111111111111111',
-      mockPublicKey.toBase58()
-    );
-
-    mockMarkets.push(dualRoleMarket);
-    mockUseMarketDiscovery.mockReturnValueOnce({
-      markets: [dualRoleMarket],
-      loading: false,
-      error: null,
+  it('flags a keeper-mode market whose last price push is far beyond the threshold', () => {
+    const m = createMockV17Market({
+      oracleMode: 3,
+      markEwmaE6: 150_000_000n,
+      markEwmaLastSlot: NOW - BigInt(KEEPER_PRICE_STALE_THRESHOLD_SLOTS) - 1n,
     });
-
-    vi.mocked(parseAllAccounts).mockReturnValueOnce([
-      {
-        account: {
-          owner: mockPublicKey,
-          kind: AccountKind.User,
-        },
-      },
-    ]);
-
-    const { result } = renderHook(() => useMyMarkets());
-
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
-
-    // Should only appear once (admin role takes priority)
-    const matchingMarkets = result.current.myMarkets.filter(
-      m => m.slabAddress.toBase58() === 'DualMarket111111111111111111111111111'
-    );
-    expect(matchingMarkets).toHaveLength(1);
-    expect(matchingMarkets[0].role).toBe('admin');
+    expect(isKeeperFeedDead(m, NOW)).toBe(true);
   });
 
-  /**
-   * Batch Processing
-   */
-  it('should limit account checks to 30 markets max', async () => {
-    // Create 40 non-admin markets
-    const manyMarkets = Array.from({ length: 40 }, (_, i) =>
-      createMockMarket(
-        `Market${i.toString().padStart(30, '0')}`,
-        'OtherAdmin111111111111111111111111'
-      )
-    );
-
-    mockMarkets.push(...manyMarkets);
-    mockUseMarketDiscovery.mockReturnValueOnce({
-      markets: manyMarkets,
-      loading: false,
-      error: null,
+  it('does NOT flag a keeper-mode market with a recent price push', () => {
+    const m = createMockV17Market({
+      oracleMode: 3,
+      markEwmaE6: 150_000_000n,
+      markEwmaLastSlot: NOW - 10n,
     });
-
-    mockGetAccountInfo.mockResolvedValue(null);
-
-    renderHook(() => useMyMarkets());
-
-    await waitFor(() => {
-      // Should only check first 30 markets (in batches of 5)
-      expect(mockGetAccountInfo).toHaveBeenCalledTimes(30);
-    });
+    expect(isKeeperFeedDead(m, NOW)).toBe(false);
   });
 
-  /**
-   * Market Label Generation
-   */
-  it('should generate correct label for markets', () => {
-    const market = createMockMarket(
-      'abcdefgh111111111111111111111111111',
-      mockPublicKey.toBase58()
-    );
-
-    mockMarkets.push(market);
-    mockUseMarketDiscovery.mockReturnValueOnce({
-      markets: [market],
-      loading: false,
-      error: null,
-    });
-
-    const { result } = renderHook(() => useMyMarkets());
-
-    expect(result.current.myMarkets[0].label).toBe('abcdefgh…');
+  it('does NOT flag a non-keeper (hyperp/admin) market even with markEwmaE6 = 0', () => {
+    // oracleMode !== 3 → detectOracleMode won't resolve to "keeper" purely
+    // from the byte; hyperp/admin markets are out of scope for this signal.
+    const m = createMockV17Market({ oracleMode: 1, markEwmaE6: 0n, markEwmaLastSlot: 0n });
+    expect(isKeeperFeedDead(m, NOW)).toBe(false);
   });
 
-  /**
-   * Insurance Fund Data
-   */
-  it('should include insurance fund data from market header', () => {
-    const market = createMockMarket(
-      'Market1111111111111111111111111111111',
-      mockPublicKey.toBase58()
-    );
-
-    // NOTE: These properties don't exist on SlabHeader type, but test is checking for them
-    // Using type assertions to allow assignment for testing purposes
-    (market.header as any).insuranceContributionBps = 250; // 2.5%
-    (market.header as any).insuranceWithdrawalLimitBps = 500; // 5%
-
-    mockMarkets.push(market);
-    mockUseMarketDiscovery.mockReturnValueOnce({
-      markets: [market],
-      loading: false,
-      error: null,
+  it('does not flag a keeper feed as dead when currentSlot is not yet known (never a false positive on first load)', () => {
+    const m = createMockV17Market({
+      oracleMode: 3,
+      markEwmaE6: 150_000_000n,
+      markEwmaLastSlot: 0n,
     });
-
-    const { result } = renderHook(() => useMyMarkets());
-
-    expect((result.current.myMarkets[0].header as any).insuranceContributionBps).toBe(250);
-    expect((result.current.myMarkets[0].header as any).insuranceWithdrawalLimitBps).toBe(500);
+    expect(isKeeperFeedDead(m, null)).toBe(false);
   });
 
-  /**
-   * Refresh Behavior
-   */
-  it('should support re-fetching when markets change', async () => {
-    // Initial render with 1 market
-    const market1 = createMockMarket(
-      'Market1111111111111111111111111111111',
-      mockPublicKey.toBase58()
-    );
-
-    mockMarkets.push(market1);
-    mockUseMarketDiscovery.mockReturnValueOnce({
-      markets: [market1],
-      loading: false,
-      error: null,
+  it('flags engine crank staleness at/above the threshold', () => {
+    const m = createMockV17Market({
+      oracleMode: 3,
+      markEwmaE6: 150_000_000n,
+      markEwmaLastSlot: NOW,
+      assetSlotLast: NOW - BigInt(ENGINE_STALE_THRESHOLD_SLOTS),
     });
+    expect(isEngineCrankStale(m, NOW)).toBe(true);
+  });
 
-    const { result, rerender } = renderHook(() => useMyMarkets());
-
-    expect(result.current.myMarkets).toHaveLength(1);
-
-    // Add another market and re-render
-    const market2 = createMockMarket(
-      'Market2222222222222222222222222222222',
-      mockPublicKey.toBase58()
-    );
-
-    mockMarkets.push(market2);
-    mockUseMarketDiscovery.mockReturnValueOnce({
-      markets: [market1, market2],
-      loading: false,
-      error: null,
+  it('does not flag engine crank staleness just under the threshold', () => {
+    const m = createMockV17Market({
+      oracleMode: 3,
+      markEwmaE6: 150_000_000n,
+      markEwmaLastSlot: NOW,
+      assetSlotLast: NOW - BigInt(ENGINE_STALE_THRESHOLD_SLOTS) + 1n,
     });
+    expect(isEngineCrankStale(m, NOW)).toBe(false);
+  });
 
-    rerender();
-
-    await waitFor(() => {
-      expect(result.current.myMarkets.length).toBeGreaterThanOrEqual(1);
+  it('treats crank-freshness and keeper-feed-liveness as independent signals', () => {
+    // Fresh price feed, but the engine hasn't accrued in a long time — both
+    // conditions must be able to fire independently of each other.
+    const m = createMockV17Market({
+      oracleMode: 3,
+      markEwmaE6: 150_000_000n,
+      markEwmaLastSlot: NOW - 5n,
+      assetSlotLast: NOW - BigInt(ENGINE_STALE_THRESHOLD_SLOTS) - 100n,
     });
+    expect(isKeeperFeedDead(m, NOW)).toBe(false);
+    expect(isEngineCrankStale(m, NOW)).toBe(true);
+  });
+});
+
+/* ── LP-liquidity display helpers ── */
+
+describe('LP-liquidity display helpers', () => {
+  function v17MarketWithConfig(): CreatedMarket {
+    return { configV17: { unitScale: 1_000_000 }, engine: undefined } as unknown as CreatedMarket;
+  }
+  function v12MarketWithVault(vault: bigint | undefined): CreatedMarket {
+    return { configV17: undefined, engine: vault === undefined ? undefined : { vault } } as unknown as CreatedMarket;
+  }
+
+  it('v17: uses the API-provided vault_balance (real on-chain LP capital)', () => {
+    const market = v17MarketWithConfig();
+    const detail = { vault_balance: 42_500_000 } as CreatorMarketDetail;
+    expect(deriveMarketLiquidityAtoms(market, detail)).toBe(42_500_000n);
+  });
+
+  it('v17: returns null (never fabricates 0) when the API has no vault_balance yet', () => {
+    const market = v17MarketWithConfig();
+    expect(deriveMarketLiquidityAtoms(market, null)).toBeNull();
+    expect(deriveMarketLiquidityAtoms(market, { vault_balance: null } as CreatorMarketDetail)).toBeNull();
+  });
+
+  it('v12: falls back to engine.vault, ignoring the API detail entirely', () => {
+    const market = v12MarketWithVault(7_000_000n);
+    const detail = { vault_balance: 1n } as CreatorMarketDetail; // must be ignored on v12
+    expect(deriveMarketLiquidityAtoms(market, detail)).toBe(7_000_000n);
+  });
+
+  it('lp_collateral divergence: flags a >2x drop or >2x growth from the stored figure', () => {
+    expect(lpCollateralMateriallyDiverges(10_000_000n, 100_000_000n)).toBe(true); // dropped to 1/10th
+    expect(lpCollateralMateriallyDiverges(300_000_000n, 100_000_000n)).toBe(true); // grew 3x
+    expect(lpCollateralMateriallyDiverges(150_000_000n, 100_000_000n)).toBe(false); // 1.5x — not material
+  });
+
+  it('lp_collateral divergence: never flags when either figure is unknown or stored is zero', () => {
+    expect(lpCollateralMateriallyDiverges(null, 100_000_000n)).toBe(false);
+    expect(lpCollateralMateriallyDiverges(100_000_000n, null)).toBe(false);
+    expect(lpCollateralMateriallyDiverges(100_000_000n, 0n)).toBe(false);
+  });
+
+  it('unitScaleToDecimals derives sane decimals, defaulting to 6', () => {
+    expect(unitScaleToDecimals(1_000_000)).toBe(6);
+    expect(unitScaleToDecimals(1_000_000_000)).toBe(9);
+    expect(unitScaleToDecimals(undefined)).toBe(6);
+    expect(unitScaleToDecimals(0)).toBe(6);
+  });
+
+  it('resolveCreatedMarketPriceE6 reads v17 markEwmaE6 and v12 authorityPriceE6', () => {
+    const v17 = { configV17: { markEwmaE6: 150_000_000n, invert: 0 } } as unknown as CreatedMarket;
+    expect(resolveCreatedMarketPriceE6(v17)).toBe(150_000_000n);
+
+    const v12 = { configV17: undefined, config: { authorityPriceE6: 5_000_000n } } as unknown as CreatedMarket;
+    expect(resolveCreatedMarketPriceE6(v12)).toBe(5_000_000n);
   });
 });

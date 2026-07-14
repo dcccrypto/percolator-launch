@@ -1,263 +1,70 @@
 "use client";
 
-import { useMemo } from "react";
-import { usePrivy } from "@privy-io/react-auth";
-import { useWallets, useSignTransaction, useSignAndSendTransaction, useSignMessage } from "@privy-io/react-auth/solana";
-import { useWallet } from "@solana/wallet-adapter-react";
-import { Connection, PublicKey, Transaction } from "@solana/web3.js";
-// bs58 v6: default export is the codec object
-import _bs58 from "bs58";
-const bs58 = _bs58 as { decode(str: string): Uint8Array };
-import { getConfig, getNetwork, getWsEndpoint } from "@/lib/config";
-import { usePrivyAvailable } from "@/hooks/usePrivySafe";
-import { useWalletAdapterAvailable } from "@/hooks/useWalletAdapterAvailable";
-import { usePreferredWallet, resolveActiveWallet } from "@/hooks/usePreferredWallet";
+import { useContext, useMemo } from "react";
+import { Connection } from "@solana/web3.js";
+import { getConfig, getWsEndpoint } from "@/lib/config";
+import { WalletApiContext } from "@/hooks/walletApiContext";
 import { getBatchRpc } from "@/lib/batchRpc";
 
 /**
- * Compatibility hook that provides the same interface as @solana/wallet-adapter-react's
- * useWallet() + useConnection(), backed by Privy (primary) or wallet-adapter (fallback).
+ * Compatibility hook that provides the same interface as
+ * @solana/wallet-adapter-react's `useWallet()`, backed by Privy (primary) or
+ * wallet-adapter (fallback).
  *
- * Resolution order:
- *   1. Privy  — when NEXT_PUBLIC_PRIVY_APP_ID is set and PrivyProvider is mounted.
- *   2. Wallet-adapter — when Privy is absent and WalletAdapterProvider is mounted.
- *      Covers Phantom / Solflare / Backpack and any Wallet Standard extension.
- *   3. Safe defaults (read-only) — no wallet at all.
- *
- * NOTE: The early-return pattern (calling inner hooks conditionally) technically
- * breaks React's rules-of-hooks, but is safe here because both context values
- * (`privyAvailable`, `adapterAvailable`) are stable — set once by the provider tree
- * and never changed during a component's lifetime.
+ * The actual wallet logic lives in the provider bridges (`PrivyProviderClient` /
+ * `WalletAdapterProviderClient`), which each compute a `WalletApi` and inject it
+ * through `WalletApiContext`. This hook is a pure context read — it imports NO
+ * wallet SDK, so its 60+ call sites no longer drag `@privy-io/react-auth` (and
+ * its transitive WalletConnect/Coinbase/viem graph) into the shared client
+ * bundle. Privy loads only when its provider mounts, as a separate async chunk,
+ * off the initial critical path. The bridges return memoized WalletApi objects,
+ * so consumers that list the wallet in a dep array stay stable.
  */
 export function useWalletCompat() {
-  const privyAvailable = usePrivyAvailable();
-  const adapterAvailable = useWalletAdapterAvailable();
-
-  if (privyAvailable) {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    return useWalletCompatPrivyInner();
-  }
-
-  if (adapterAvailable) {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    return useWalletCompatAdapterInner();
-  }
-
-  return {
-    publicKey: null as PublicKey | null,
-    connected: false,
-    connecting: false,
-    wallet: null,
-    signTransaction: undefined as ((tx: Transaction) => Promise<Transaction>) | undefined,
-    signAndSendTransaction: undefined as ((tx: Transaction) => Promise<Uint8Array>) | undefined,
-    signMessage: undefined as ((message: Uint8Array) => Promise<Uint8Array>) | undefined,
-    disconnect: async () => {},
-  };
+  return useContext(WalletApiContext);
 }
 
 /**
- * Inner hook that calls Privy hooks. Only called when PrivyProvider is mounted.
- */
-function useWalletCompatPrivyInner() {
-  const { ready, authenticated, user, logout } = usePrivy();
-  const { wallets } = useWallets();
-  const { signTransaction: privySignTransaction } = useSignTransaction();
-  const { signAndSendTransaction: privySignAndSend } = useSignAndSendTransaction();
-  const { signMessage: privySignMessage } = useSignMessage();
-  const { preferredAddress } = usePreferredWallet();
-
-  const activeWallet = useMemo(() => {
-    return resolveActiveWallet(wallets, preferredAddress);
-  }, [wallets, preferredAddress]);
-
-  const publicKey = useMemo(() => {
-    if (!activeWallet) return null;
-    try {
-      return new PublicKey(activeWallet.address);
-    } catch {
-      return null;
-    }
-  }, [activeWallet]);
-
-  const connected = authenticated && !!activeWallet;
-
-  const signTransaction = useMemo(() => {
-    if (!activeWallet) return undefined;
-    return async (tx: Transaction): Promise<Transaction> => {
-      // Serialize the transaction to bytes for Privy
-      const serialized = tx.serialize({
-        requireAllSignatures: false,
-        verifySignatures: false,
-      });
-      // Explicitly pass the chain so Privy uses the correct network's RPC.
-      // Without this, Privy defaults to solana:mainnet which causes 403s
-      // when the app is configured for devnet.
-      const network = getNetwork();
-      const chain = network === "mainnet" ? "solana:mainnet" : "solana:devnet";
-      const result = await privySignTransaction({
-        transaction: new Uint8Array(serialized),
-        wallet: activeWallet,
-        chain: chain as any, // SolanaChain type from Privy
-      });
-      return Transaction.from(Buffer.from(result.signedTransaction));
-    };
-  }, [activeWallet, privySignTransaction]);
-
-  /**
-   * PERC-8388: signAndSendTransaction bypasses Lighthouse/Blowfish injection.
-   * When the wallet signs AND sends atomically, there is no post-sign window
-   * for wallet middleware to inject assertion instructions that break our tx.
-   */
-  const signAndSendTransaction = useMemo(() => {
-    if (!activeWallet) return undefined;
-    return async (tx: Transaction): Promise<Uint8Array> => {
-      const serialized = tx.serialize({
-        requireAllSignatures: false,
-        verifySignatures: false,
-      });
-      const network = getNetwork();
-      const chain = network === "mainnet" ? "solana:mainnet" : "solana:devnet";
-      const result = await privySignAndSend({
-        transaction: new Uint8Array(serialized),
-        wallet: activeWallet,
-        chain: chain as any,
-      });
-      return new Uint8Array(result.signature);
-    };
-  }, [activeWallet, privySignAndSend]);
-
-  /**
-   * BUG FIX (2026-07-09): this previously hardcoded `undefined` with a comment
-   * claiming "Privy embedded wallets do not expose signMessage via this hook" —
-   * that was wrong. @privy-io/react-auth/solana exports a dedicated
-   * `useSignMessage()` hook (confirmed against the installed 3.14.1 solana.d.ts)
-   * that signs a message for ANY connected Solana Standard Wallet, embedded or
-   * external, the same way `useSignTransaction`/`useSignAndSendTransaction`
-   * above already do for transactions. Because signMessage was always
-   * `undefined` in Privy mode (the default/primary auth path for the hosted
-   * playground), every signMessage-gated flow silently degraded for the
-   * majority of users — e.g. useCreateMarket.ts's keeper-register step, which
-   * needs a signed stateless deployer proof and instead posted with no
-   * `signature` field, so the route rejected it with "Missing required fields:
-   * deployer, signature" and the market landed on-chain but never got priced.
-   */
-  const signMessage = useMemo(() => {
-    if (!activeWallet) return undefined;
-    return async (message: Uint8Array): Promise<Uint8Array> => {
-      const result = await privySignMessage({ message, wallet: activeWallet });
-      return result.signature;
-    };
-  }, [activeWallet, privySignMessage]);
-
-  return {
-    publicKey,
-    connected,
-    connecting: !ready,
-    wallet: activeWallet,
-    signTransaction,
-    signAndSendTransaction,
-    signMessage,
-    disconnect: logout,
-  };
-}
-
-/**
- * Inner hook that calls @solana/wallet-adapter-react hooks.
- * Only called when WalletAdapterProvider is mounted (no Privy).
+ * Module-level Connection singleton keyed by (rpcUrl, wsEndpoint).
  *
- * Provides sign + send helpers that match the Privy path so all existing
- * components (devnet-mint, trade flows) work unchanged.
+ * Every useConnectionCompat() consumer used to build its OWN Connection (each a
+ * potential WS channel); the RPC config is identical for all of them (single
+ * network per session), so one shared instance is behavior-identical and
+ * collapses the duplication. The batch transport (getBatchRpc) is already a
+ * singleton. Rebuilds only if the RPC/WS URL actually changes.
  */
-function useWalletCompatAdapterInner() {
-  const {
-    publicKey,
-    connected,
-    connecting,
-    wallet,
-    signTransaction: adapterSignTx,
-    signMessage: adapterSignMessage,
-    disconnect,
-  } = useWallet();
+let _sharedConnection: Connection | null = null;
+let _sharedConnectionKey = "";
 
-  const cfg = getConfig();
+function getSharedConnection(): Connection {
+  const url = getConfig().rpcUrl;
+  const wsEndpoint = getWsEndpoint();
+  const key = `${url}|${wsEndpoint}`;
+  if (_sharedConnection && _sharedConnectionKey === key) return _sharedConnection;
 
-  const signTransaction = useMemo(() => {
-    if (!adapterSignTx || !publicKey) return undefined;
-    return async (tx: Transaction): Promise<Transaction> => {
-      // Ensure fee payer + blockhash are set so the adapter can sign cleanly.
-      if (!tx.recentBlockhash) {
-        const conn = new Connection(cfg.rpcUrl, "confirmed");
-        const { blockhash } = await conn.getLatestBlockhash("confirmed");
-        tx.recentBlockhash = blockhash;
-      }
-      if (!tx.feePayer) {
-        tx.feePayer = publicKey;
-      }
-      return adapterSignTx(tx);
-    };
-  }, [adapterSignTx, publicKey, cfg.rpcUrl]);
+  const isClient = typeof window !== "undefined";
+  const fetchOption = isClient ? getBatchRpc().batchFetch : undefined;
 
-  const signAndSendTransaction = useMemo(() => {
-    if (!adapterSignTx || !publicKey) return undefined;
-    return async (tx: Transaction): Promise<Uint8Array> => {
-      const conn = new Connection(cfg.rpcUrl, "confirmed");
-      if (!tx.recentBlockhash) {
-        const { blockhash } = await conn.getLatestBlockhash("confirmed");
-        tx.recentBlockhash = blockhash;
-      }
-      if (!tx.feePayer) {
-        tx.feePayer = publicKey;
-      }
-      const signed = await adapterSignTx(tx);
-      const sig = await conn.sendRawTransaction(signed.serialize());
-      return bs58.decode(sig);
-    };
-  }, [adapterSignTx, publicKey, cfg.rpcUrl]);
-
-  return {
-    publicKey,
-    connected,
-    connecting,
-    wallet,
-    signTransaction,
-    signAndSendTransaction,
-    /** signMessage: available on most Wallet Standard adapters (Phantom, Solflare, etc.). */
-    signMessage: adapterSignMessage,
-    disconnect,
-  };
+  _sharedConnection = new Connection(url, {
+    commitment: "confirmed",
+    // #869: Always pass wsEndpoint explicitly — omitting it lets @solana/web3.js
+    // auto-derive wss:// from the HTTP proxy URL, causing reconnect storms on Vercel.
+    wsEndpoint,
+    // Disable web3.js built-in retry — our batch transport handles retries
+    // with proper exponential backoff instead of flat 500ms delays
+    ...(isClient ? { disableRetryOnRateLimit: true } : {}),
+    // Custom fetch that batches multiple RPC calls into single HTTP requests
+    ...(fetchOption ? { fetch: fetchOption as any } : {}),
+  });
+  _sharedConnectionKey = key;
+  return _sharedConnection;
 }
 
 /**
  * Compatibility hook replacing useConnection() from wallet-adapter.
- * Returns a Connection object using the app's configured RPC URL.
- *
- * Uses batching RPC transport on the client to coalesce individual JSON-RPC
- * calls into batch requests, reducing HTTP request count by 10-30x and
- * preventing 429 rate limit errors. See lib/batchRpc.ts for details.
+ * Returns the shared Connection object (see getSharedConnection).
  */
 export function useConnectionCompat() {
-  const connection = useMemo(() => {
-    const url = getConfig().rpcUrl;
-    const wsEndpoint = getWsEndpoint();
-
-    // On the client, use batching fetch to coalesce RPC calls
-    const isClient = typeof window !== "undefined";
-    const fetchOption = isClient ? getBatchRpc().batchFetch : undefined;
-
-    return new Connection(url, {
-      commitment: "confirmed",
-      // #869: Always pass wsEndpoint explicitly — omitting it lets @solana/web3.js
-      // auto-derive wss:// from the HTTP proxy URL, causing reconnect storms on Vercel.
-      // getWsEndpoint() always returns a valid WSS URL (Helius if configured,
-      // otherwise public Solana WS endpoint for the current network).
-      wsEndpoint,
-      // Disable web3.js built-in retry — our batch transport handles retries
-      // with proper exponential backoff instead of flat 500ms delays
-      ...(isClient ? { disableRetryOnRateLimit: true } : {}),
-      // Custom fetch that batches multiple RPC calls into single HTTP requests
-      ...(fetchOption ? { fetch: fetchOption as any } : {}),
-    });
-  }, []);
-
+  const connection = useMemo(() => getSharedConnection(), []);
   return { connection };
 }

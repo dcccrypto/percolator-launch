@@ -167,20 +167,15 @@ export const EngineHealthCard: FC = () => {
       { label: "Sweep Start", value: engine.sweepStartIdx?.toString() ?? "—" },
     ];
   } else {
-    // ── v17 path: insurance + OI are real; legacy engine counters show "—" ────
+    // ── v17 path: only insurance + OI are real. The legacy engine counters are
+    // dead here, so omit them entirely instead of rendering 8 "—" cells — the
+    // health score above (computeV17Health) is this card's real v17 value and
+    // is shown by no other analytics card.
     metrics = [
       { label: "Insurance", value: fmtV17InsuranceUsd(insuranceBalance) },
       { label: "Open Interest", value: fmtV17OiUsd(totalOI) },
       { label: "OI Long", value: fmtV17OiUsd(oiLong) },
       { label: "OI Short", value: fmtV17OiUsd(oiShort) },
-      { label: "Crank Age", value: "—" },
-      { label: "Current Slot", value: "—" },
-      { label: "Liquidations", value: "—" },
-      { label: "Force Closes", value: "—" },
-      { label: "Net LP Pos", value: "—" },
-      { label: "LP Sum |Pos|", value: "—" },
-      { label: "Total Capital", value: "—" },
-      { label: "Pos. PnL Tot", value: "—" },
     ];
   }
 

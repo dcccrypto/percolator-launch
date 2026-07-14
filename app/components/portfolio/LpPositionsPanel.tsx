@@ -88,6 +88,8 @@ function LpPositionCard({ position: pos }: LpPositionCardProps) {
               <img
                 src={pos.logoUrl}
                 alt={displaySymbol}
+                loading="lazy"
+                decoding="async"
                 className="h-6 w-6 rounded-full flex-shrink-0 object-cover"
                 onError={(e) => {
                   (e.currentTarget as HTMLImageElement).style.display = "none";

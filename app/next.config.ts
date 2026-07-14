@@ -1,5 +1,9 @@
 import type { NextConfig } from "next";
-import { withSentryConfig } from "@sentry/nextjs";
+// withSentryConfig disabled — its build-time instrumentation is not Turbopack-
+// compatible (Next 16 builds with Turbopack) and injects Node-only code into the
+// Edge middleware bundle, which Vercel rejects at deploy ("referencing unsupported
+// modules"). See the export at the bottom of this file.
+// import { withSentryConfig } from "@sentry/nextjs";
 
 // NEXT_PUBLIC_API_URL must be explicitly set — no hardcoded fallback
 // This ensures misconfigured deployments fail loudly, not silently to production
@@ -26,6 +30,27 @@ const nextConfig = {
   // @solana/kit must be transpiled: its browser export resolves to an ESM .mjs file
   // that webpack includes verbatim, causing "Unexpected token 'export'" in production bundles.
   transpilePackages: ["@percolator/sdk", "@solana/kit"],
+  // Tree-shake named imports out of large barrel packages so only the used
+  // members land in the bundle. @solana/wallet-adapter-wallets re-exports ~36
+  // adapters but we use one (Solflare); spl-token / wallet-adapter-react are
+  // wide barrels too. Behavior-identical — pure build-time import rewriting.
+  experimental: {
+    optimizePackageImports: [
+      "@solana/wallet-adapter-wallets",
+      "@solana/wallet-adapter-react",
+      "@solana/spl-token",
+    ],
+    // Client Router Cache lifetime for prefetched routes. Next 15+ defaults
+    // `dynamic` to 0, which silently defeats <Link prefetch={true}> on dynamic
+    // routes: the full /trade/[slab] RSC payload IS prefetched when a market
+    // row enters the viewport, then discarded as instantly-stale, so the
+    // click pays the whole server round-trip again behind the loading.tsx
+    // skeleton (~0.6-1.3s measured). 300s matches fetchMarketMeta's own
+    // `revalidate: 300` — the payload is a static shell + metadata; all live
+    // trading data is fetched client-side after mount, so a minutes-old
+    // router-cache entry costs nothing in freshness.
+    staleTimes: { dynamic: 300, static: 300 },
+  },
   async headers() {
     // Security headers are set here as a baseline. CSP is NOT set here because
     // middleware.ts handles it with per-request nonce generation. When both
@@ -132,29 +157,12 @@ const nextConfig = {
   },
 } as NextConfig;
 
-export default withSentryConfig(nextConfig, {
-  // Sentry webpack plugin options
-  silent: true, // Suppress verbose upload logs in CI
-
-  // Source maps: enabled when SENTRY_AUTH_TOKEN is set (CI/Vercel only).
-  // To enable: add SENTRY_AUTH_TOKEN + SENTRY_ORG + SENTRY_PROJECT to Vercel env vars.
-  //   SENTRY_ORG=dcc-pz
-  //   SENTRY_PROJECT=percolator-frontend
-  //   SENTRY_AUTH_TOKEN=<token from https://sentry.io/settings/auth-tokens/>
-  sourcemaps: {
-    disable: !process.env.SENTRY_AUTH_TOKEN,
-    deleteSourcemapsAfterUpload: true, // do not ship source maps to browsers
-  },
-
-  // Sentry org/project — must match your Sentry workspace.
-  // Defaults are the production values; override via env vars if needed.
-  org: process.env.SENTRY_ORG || "dcc-pz",
-  project: process.env.SENTRY_PROJECT || "percolator-frontend",
-  authToken: process.env.SENTRY_AUTH_TOKEN,
-
-  // Automatically instrument server components and route handlers
-  autoInstrumentServerFunctions: true,
-
-  // Disable the Sentry telemetry/privacy popup in the Next.js dev overlay
-  disableLogger: true,
-});
+// Export the config directly, WITHOUT Sentry's build wrapper. withSentryConfig
+// auto-instruments the middleware/edge bundle, but under Turbopack (Next 16's
+// default builder) that instrumentation injects Node-only code into middleware.js
+// → Vercel deploy fails with 'Edge Function "middleware" referencing unsupported
+// modules'. Sentry was already non-functional under Turbopack (see the build-log
+// deprecation warnings) and is optional telemetry for this devnet playground.
+// Runtime Sentry.init in sentry.*.config.* is unaffected. Re-wrap with
+// withSentryConfig only once Sentry supports Turbopack (or the build returns to webpack).
+export default nextConfig;

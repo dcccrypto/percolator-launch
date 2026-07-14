@@ -8,6 +8,21 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createUpstashRateLimiter } from "../../lib/upstash-rate-limit";
 
+const mockLimit = vi.fn();
+
+vi.mock("@upstash/ratelimit", () => {
+  const MockRatelimit = vi.fn().mockImplementation(function (this: any) {
+    this.limit = mockLimit;
+  });
+  (MockRatelimit as any).slidingWindow = vi.fn().mockReturnValue({ kind: "sliding" });
+  return {
+    Ratelimit: MockRatelimit,
+  };
+});
+vi.mock("@upstash/redis", () => ({
+  Redis: vi.fn(function (this: any) { return this; }),
+}));
+
 // Ensure Upstash env vars are absent so factory always falls back to local
 beforeEach(() => {
   delete process.env.UPSTASH_REDIS_REST_URL;
@@ -129,6 +144,8 @@ describe("createUpstashRateLimiter — in-memory fallback", () => {
   });
 
   it("falls back to in-memory when Redis throws at runtime", async () => {
+    mockLimit.mockRejectedValueOnce(new Error("Redis connection error"));
+
     // Set env vars so the factory tries to create a real Upstash limiter
     process.env.UPSTASH_REDIS_REST_URL = "https://fake.upstash.io";
     process.env.UPSTASH_REDIS_REST_TOKEN = "fake-token";

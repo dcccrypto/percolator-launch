@@ -2,6 +2,7 @@
 
 import { FC, useCallback, useEffect, useRef, useState } from "react";
 import { MarketLogo } from "@/components/market/MarketLogo";
+import { useWalletCompat } from "@/hooks/useWalletCompat";
 
 interface LogoUploadProps {
   /** Upload by slab address (market must exist) */
@@ -25,6 +26,7 @@ export const LogoUpload: FC<LogoUploadProps> = ({ slabAddress, mintAddress, main
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const wallet = useWalletCompat();
 
   const endpoint = mintAddress
     ? `/api/tokens/${mintAddress}/logo`
@@ -47,6 +49,31 @@ export const LogoUpload: FC<LogoUploadProps> = ({ slabAddress, mintAddress, main
         return;
       }
 
+      // Market (slab) logos are gated by a per-market wallet ownership proof
+      // (see app/api/markets/[slab]/logo/route.ts) — sign it up front so a
+      // wallet that can't (no connection, or signMessage unsupported) fails
+      // fast with an actionable message instead of a confusing 400/401 from
+      // the server. The mintAddress (faucet) path is unauthenticated and
+      // untouched — out of scope here.
+      let deployer: string | undefined;
+      let signature: string | undefined;
+      if (slabAddress) {
+        if (!wallet.publicKey || !wallet.signMessage) {
+          setError("Connect the creator wallet to upload a logo.");
+          return;
+        }
+        try {
+          const unixMinute = Math.floor(Date.now() / 60_000);
+          const proofMsg = new TextEncoder().encode(`market-logo:${slabAddress}:${unixMinute}`);
+          const sig = await wallet.signMessage(proofMsg);
+          deployer = wallet.publicKey.toBase58();
+          signature = Buffer.from(sig).toString("base64");
+        } catch (sigErr) {
+          setError(sigErr instanceof Error ? sigErr.message : "Wallet signature declined");
+          return;
+        }
+      }
+
       setPreview(URL.createObjectURL(file));
       setError(null);
       setUploading(true);
@@ -54,6 +81,10 @@ export const LogoUpload: FC<LogoUploadProps> = ({ slabAddress, mintAddress, main
       try {
         const form = new FormData();
         form.append("logo", file);
+        if (deployer && signature) {
+          form.append("deployer", deployer);
+          form.append("signature", signature);
+        }
 
         const res = await fetch(endpoint, { method: "POST", body: form });
         const data = await res.json();
@@ -71,7 +102,7 @@ export const LogoUpload: FC<LogoUploadProps> = ({ slabAddress, mintAddress, main
         setUploading(false);
       }
     },
-    [endpoint]
+    [endpoint, slabAddress, wallet]
   );
 
   // Cleanup preview URL to prevent memory leaks

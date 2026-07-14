@@ -1,18 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 import { PublicKey } from "@solana/web3.js";
 import { parseWrapperConfigV17, isV17Account, V17_HEADER_LEN } from "@percolatorct/sdk";
 import { subscribeSlab, getSnapshot, applyOnChainPoll } from "@/lib/priceStore/priceStore";
 import { sanitizePriceE6 } from "@/lib/oraclePrice";
-import { computeMarkPnl, computeMarkPnlCollateral, computePnlPercent, computePositionInitialMargin } from "@/lib/trading";
+import { computeLivePositionPnl } from "@/lib/trading";
 import { usePortfolio, type PortfolioPosition } from "@/hooks/usePortfolio";
 import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { formatTokenAmount } from "@/lib/format";
 import { isMockMode } from "@/lib/mock-mode";
+import { pollWhenVisible } from "@/lib/pollWhenVisible";
 import { getMockPortfolioPositions } from "@/lib/mock-trade-data";
 
 /** On-chain freshness floor for chips the WS feed isn't ticking: one batched
@@ -28,7 +29,15 @@ const RPC_ACCOUNT_BATCH_CAP = 100;
 // information gain. Perf-review fix: this list gates the usePortfolio HOOK
 // itself (via `enabled`), not just the render below — see the `hidden`
 // derivation and its use as `usePortfolio(!hidden && ...)`.
-const HIDDEN_ROUTES = ["/portfolio", "/dashboard"];
+//
+// "/trade" is hidden too: the trade page's PositionsDock now renders its own
+// OtherMarketPositions list (all-markets, via its own usePortfolio call) in
+// the Positions tab, so the strip is redundant chrome there. usePortfolio has
+// no cross-instance dedup — without this, every /trade page would run TWO
+// concurrent wallet-wide portfolio scans (market discovery + batched
+// getMultipleAccountsInfo + up to two getProgramAccounts/market, each on its
+// own 30s poll) for the same data.
+const HIDDEN_ROUTES = ["/portfolio", "/dashboard", "/trade"];
 
 /** One position chip: ticker + live PnL, colored by sign, linking to the market. */
 function PositionChip({ pos, decimals }: { pos: PortfolioPosition; decimals: number }) {
@@ -42,31 +51,18 @@ function PositionChip({ pos, decimals }: { pos: PortfolioPosition; decimals: num
   const posEntry = pos.effectiveEntryPrice;
   const markE6 = livePriceE6 != null && livePriceE6 > 0n ? livePriceE6 : pos.oraclePriceE6;
 
-  // Same collateral-unit conversion as usePortfolio / the portfolio cards:
-  // computeMarkPnl is coin-margined native units, NOT collateral — convert
-  // via computeMarkPnlCollateral. Falls back to the hook's own (already
-  // collateral-converted) unrealizedPnl when entry/mark are unavailable.
-  const pnl = (() => {
-    if (posSize === 0n || posEntry <= 0n || markE6 <= 0n) return pos.unrealizedPnl;
-    try {
-      return computeMarkPnlCollateral(computeMarkPnl(posSize, posEntry, markE6), markE6);
-    } catch {
-      return pos.unrealizedPnl;
-    }
-  })();
-
-  // Live ROE — same basis as the portfolio cards: PnL ÷ the position's own
-  // locked initial margin, capital fallback, hook's pnlPercent last resort.
-  const pnlPct = (() => {
-    try {
-      const im = computePositionInitialMargin(posSize, posEntry, pos.initialMarginBps);
-      if (im > 0n) return computePnlPercent(pnl, im);
-      const capital = pos.account?.capital ?? 0n;
-      return capital > 0n ? computePnlPercent(pnl, capital) : pos.pnlPercent;
-    } catch {
-      return pos.pnlPercent;
-    }
-  })();
+  // Same live-mark PnL/ROE chain as the portfolio cards (PositionCard) — see
+  // computeLivePositionPnl's doc comment for the full unit-conversion story
+  // (coin-margined native → collateral, ROE ÷ initial margin).
+  const { pnl, pnlPercent: pnlPct } = computeLivePositionPnl(
+    posSize,
+    posEntry,
+    markE6,
+    pos.initialMarginBps,
+    pos.account?.capital ?? 0n,
+    pos.unrealizedPnl,
+    pos.pnlPercent,
+  );
 
   const symbol = pos.symbol ?? `${pos.slabAddress.slice(0, 4)}…`;
   const colorClass =
@@ -144,13 +140,14 @@ export function PositionsBar() {
     const abs = size < 0n ? -size : size;
     return pos.oraclePriceE6 > 0n ? (abs * pos.oraclePriceE6) / 1_000_000n : abs;
   };
-  const openPositions = positions
+  const openPositions = useMemo(() => positions
     .filter((pos) => (pos.account?.positionSize ?? 0n) !== 0n)
-    .sort((a, b) => (notionalOf(b) > notionalOf(a) ? 1 : notionalOf(b) < notionalOf(a) ? -1 : 0));
+    .sort((a, b) => (notionalOf(b) > notionalOf(a) ? 1 : notionalOf(b) < notionalOf(a) ? -1 : 0)), [positions]);
 
   // Collateral decimals per mint (all playground markets use 6-decimal
   // sim-USDC; resolved properly anyway, matching the portfolio page).
-  const tokenMetaMap = useMultiTokenMeta(openPositions.map((pos) => pos.collateralMint));
+  const positionMints = useMemo(() => openPositions.map((pos) => pos.collateralMint), [openPositions]);
+  const tokenMetaMap = useMultiTokenMeta(positionMints);
 
   // Freshness floor for markets the WS feed isn't ticking: read every
   // position slab's markEwmaE6 (the exact field usePortfolio publishes as
@@ -203,10 +200,12 @@ export function PositionsBar() {
       }
     };
     poll();
-    const id = setInterval(poll, ONCHAIN_POLL_MS);
+    // Visibility-gated: this bar mounts app-wide, so a hidden tab would
+    // otherwise keep batch-reading every position slab forever.
+    const dispose = pollWhenVisible(poll, ONCHAIN_POLL_MS);
     return () => {
       cancelled = true;
-      clearInterval(id);
+      dispose();
     };
   }, [connection, slabKey, usingMockData, hidden]);
 

@@ -635,8 +635,14 @@ describe("useInsuranceLP", () => {
         expect(result.current.state.mintExists).toBe(false);
       });
 
-      // Importantly: the hook should NOT crash or leave loading stuck
-      expect(result.current.loading).toBe(false);
+      // Importantly: the hook should NOT crash or leave loading stuck.
+      // waitFor (not a sync assert): `setLoading(false)` lives in refreshState's
+      // stale-guarded `finally`, which can land in a separate React commit from
+      // the `mintExists` update awaited above — the contract is "loading
+      // eventually clears", not "in the same commit as mintExists".
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
 
       consoleSpy.mockRestore();
     });

@@ -38,11 +38,12 @@
 import { FC, memo, useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
-import { useTrade } from "@/hooks/useTrade";
-import { humanizeError, withTransientRetry } from "@/lib/errorMessages";
+import { useTrade, prewarmTradeSubmission } from "@/hooks/useTrade";
+import { humanizeError, isEngineLockError, withTransientRetry } from "@/lib/errorMessages";
 import { explorerTxUrl, getNetwork } from "@/lib/config";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { computeLimitPriceE6 } from "@/lib/slippage";
+import { bindConfirmedLimitPrice } from "@/lib/confirmedTrade";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
@@ -53,21 +54,36 @@ import { AccountKind, computePreTradeLiqPrice, computeLiqPrice } from "@percolat
 import { computeEstimatedEntryPrice, computeTradingFee, computePositionInitialMargin, estimateEntryFromPnl } from "@/lib/trading";
 import { TradeConfirmationModal } from "@/components/trade/TradeConfirmationModal";
 import { InfoIcon } from "@/components/ui/Tooltip";
-import { usePrivyLogin } from "@/hooks/usePrivySafe";
+import { usePrivyLogin, usePrivyAvailable } from "@/hooks/usePrivySafe";
+import { useWalletAdapterAvailable } from "@/hooks/useWalletAdapterAvailable";
+import { ConnectButton } from "@/components/wallet/ConnectButton";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccountIdle } from "@/lib/mock-trade-data";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
-import { formatTokenAmount, formatUsdPriceE6, toE6 } from "@/lib/format";
+import { formatTokenAmount, formatUsdPriceE6, toE6, normalizeTokenDecimals } from "@/lib/format";
 import { saveEntryPrice, getEntryPrice, clearEntryPrice } from "@/lib/entry-price";
+import { isSentinelValue } from "@/lib/health";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
 import { useInitUser } from "@/hooks/useInitUser";
+import { AUTO_DEPOSIT_AMOUNT } from "@/hooks/useAutoDeposit";
+import { useWalletNetworkGuard } from "@/hooks/useWalletNetworkGuard";
 
 const LEVERAGE_SNAP_POINTS = [1, 3, 5, 10, 20];
 const SIZE_PRESETS = [25, 50, 75, 100];
 const MAX_DISPLAY_LEVERAGE = 200;
 
-function parsePercToNative(input: string, decimals = 6): bigint {
+function sanitizeDecimalInput(value: string): string {
+  const cleaned = value.replace(/[^0-9.]/g, "");
+  const dotIndex = cleaned.indexOf(".");
+  if (dotIndex === -1) return cleaned;
+  return cleaned.slice(0, dotIndex + 1) + cleaned.slice(dotIndex + 1).replace(/\./g, "");
+}
+
+
+
+function parsePercToNative(input: string, decimalsRaw = 6): bigint {
+  const decimals = normalizeTokenDecimals(decimalsRaw); // guard NaN/Infinity/negative before BigInt/padEnd
   const parts = input.split(".");
   if (parts.length > 2) return 0n;
   const whole = parts[0] || "0";
@@ -200,7 +216,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const userAccount = realUserAccount ?? (mockMode ? getMockUserAccountIdle(slabAddress) : null);
   const { trade, loading, error } = useTrade(slabAddress);
   const { engine, params, insuranceBalance: liveInsuranceBalance, totalOI: liveTotalOI, hasData: engineHasData } = useEngineState();
-  const { accounts, config: mktConfig, header, refresh: refreshSlab } = useSlabState();
+  const { accounts, config: mktConfig, header, refresh: refreshSlab, programId: slabProgramId } = useSlabState();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   // Non-reactive — see file-header comment. NOT `useLivePrice()`.
   const { priceUsd, priceE6: livePriceE6 } = getLivePriceSnapshot(slabAddress);
@@ -213,6 +229,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // H6: engine accrue-staleness — see useEngineFreshness's file header.
   const { engineStale } = useEngineFreshness();
   const openWalletModal = usePrivyLogin();
+  const privyAvailable = usePrivyAvailable();
+  const adapterAvailable = useWalletAdapterAvailable();
   const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
   const collateralSymbol = sanitizeSymbol(tokenMeta?.symbol, mintAddress);
 
@@ -257,6 +275,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const [lastSig, setLastSig] = useState<string | null>(null);
   const [tradePhase, setTradePhase] = useState<"idle" | "submitting" | "confirming" | "error">("idle");
   const [humanError, setHumanError] = useState<string | null>(null);
+  const [engineLockError, setEngineLockError] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmSnapshot, setConfirmSnapshot] = useState<{
     positionSize: bigint;
@@ -280,6 +299,14 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   const { initUser, loading: initLoading, error: initError } = useInitUser(slabAddress);
   const [initCtaError, setInitCtaError] = useState<string | null>(null);
+  // Progressive disclosure (first-timer receipt): a never-funded account has
+  // never seen a receipt before, so the full fees/slippage/margin breakdown
+  // is more noise than help on the very first order — collapse it behind a
+  // toggle, defaulting closed. Once the account has capital (has traded /
+  // deposited before), always show the full breakdown — they already know
+  // what it means and want it visible without an extra click.
+  const [showReceiptDetails, setShowReceiptDetails] = useState(false);
+  const { networkWarning, reportTxError } = useWalletNetworkGuard();
 
   const lpEntry = useMemo(() => accounts.find(({ account }) => account.kind === AccountKind.LP) ?? null, [accounts]);
   const lpIdx = lpEntry?.idx ?? 0;
@@ -288,6 +315,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   const { market: marketInfo } = useMarketInfo(slabAddress);
   const symbol = marketInfo?.symbol ?? collateralSymbol;
+  // Base ticker for the size-unit toggle: the registry symbol carries a
+  // "-PERP" suffix ("SOL-PERP"), which overflowed the w-16 toggle button into
+  // "SOL-PE…". The size unit is the BASE asset, so strip the suffix; fall
+  // back to a neutral "TOKEN" (never the collateral symbol — sizing is in
+  // base units, and the collateral is sim-USDC on every playground market).
+  const baseTicker = (marketInfo?.symbol ?? "").replace(/-PERP$/i, "").trim() || "TOKEN";
   const initialMarginBps = params?.initialMarginBps ?? 1000n;
   const maintenanceMarginBps = params?.maintenanceMarginBps ?? 500n;
   const tradingFeeBps = params?.tradingFeeBps ?? 30n;
@@ -317,12 +350,19 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const cachedExistingEntryPrice = userAccount && rawExistingEntryPrice === 0n
     ? getEntryPrice(slabAddress, userAccount.idx, publicKey?.toBase58())
     : 0n;
+  // E: guard the sentinel BEFORE it feeds estimateEntryFromPnl's math — same
+  // fix as PositionsDock/usePortfolio's identical call sites (an unguarded
+  // u64::MAX-class account.pnl can poison the derived entry/liq/margin math
+  // instead of being caught by estimateEntryFromPnl's own entry>0n clamp).
+  const safeExistingPnl = userAccount && !isSentinelValue(userAccount.account.pnl)
+    ? userAccount.account.pnl
+    : 0n;
   const existingEntryPriceE6 = rawExistingEntryPrice > 0n
     ? rawExistingEntryPrice
     : cachedExistingEntryPrice > 0n
       ? cachedExistingEntryPrice
       : userAccount
-        ? estimateEntryFromPnl(existingPositionSize, userAccount.account.pnl, livePriceE6 ?? 0n)
+        ? estimateEntryFromPnl(existingPositionSize, safeExistingPnl, livePriceE6 ?? 0n)
         : 0n;
   const lockedMargin = computePositionInitialMargin(existingPositionSize, existingEntryPriceE6, initialMarginBps);
   const availableBalance = userAccount ? (capital > lockedMargin ? capital - lockedMargin : 0n) : 0n;
@@ -374,6 +414,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setLeverageText("1");
     setLastSig(null);
     setHumanError(null);
+    setEngineLockError(null);
     setTradePhase("idle");
   }, [slabAddress]);
 
@@ -396,7 +437,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   const handleSizeChange = useCallback(
     (val: string) => {
-      const cleaned = val.replace(/[^0-9.]/g, "");
+      const cleaned = sanitizeDecimalInput(val);
       setSizeInput(cleaned);
       recomputeFromSize(cleaned, sizeUnit, leverage);
     },
@@ -530,7 +571,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const needsAccount = connected && !userAccount;
   const needsDeposit = connected && userAccount && capital === 0n;
 
-  async function handleTrade(snapshotSize?: bigint) {
+  async function handleTrade(
+    snapshotSize?: bigint,
+    snapshotLimitPriceE6?: bigint,
+  ) {
     const effectiveSize = snapshotSize ?? positionSize;
     if (!marginInput || !userAccount || effectiveSize <= 0n || exceedsBalance) return;
 
@@ -546,17 +590,25 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     }
 
     setHumanError(null);
+setEngineLockError(null);
     setTradePhase("submitting");
     try {
       const size = direction === "short" ? -effectiveSize : effectiveSize;
-      // limitPriceE6 omitted — useTrade derives it from the live mark (its
-      // existing, unchanged market-order behaviour — see hooks/useTrade.ts).
+      // Confirmed submissions carry the exact worst-fill bound reviewed
+      // in the modal. Other callers retain useTrade's live-mark fallback.
       const sig = await withTransientRetry(
-        async () => trade({ lpIdx, userIdx: userAccount!.idx, size }),
+        async () =>
+          trade(
+            bindConfirmedLimitPrice(
+              { lpIdx, userIdx: userAccount!.idx, size },
+              snapshotLimitPriceE6,
+            ),
+          ),
         { maxRetries: 2, delayMs: 3000 },
       );
       setTradePhase("confirming");
       setLastSig(sig ?? null);
+setEngineLockError(null);
       setMarginInput("");
       setSizeInput("");
       if (livePriceE6 && livePriceE6 > 0n && userAccount) {
@@ -585,11 +637,18 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error("[OrderTicket] raw error:", msg);
+      // PERC-onboarding-5: advisory-only wrong-network-wallet check on the
+      // raw (pre-humanization) message — see useWalletNetworkGuard's header.
+      reportTxError(msg);
       // TX1: Custom(9) from THIS call site is always a trade() CPI — humanize
       // it as the slippage/worst-fill-price rejection it actually is here,
       // not the generic "invalid instruction" text (still correct for
       // deposit/withdraw/NFT/market-creation call sites).
-      setHumanError(humanizeError(msg, "trade"));
+      const friendlyMsg = humanizeError(msg, "trade");
+    if (isEngineLockError(msg)) {
+      setEngineLockError(friendlyMsg);
+    }
+    setHumanError(friendlyMsg)
       // Brief "Failed" flash on the submit button itself (matches the
       // "Confirmed!" success flash below) before reverting to idle — the
       // detailed reason stays in the humanError banner underneath.
@@ -664,7 +723,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         title={lockedMargin > 0n ? `${formatTokenAmount(lockedMargin, decimals, 3)} ${collateralSymbol} locked by your open position on this market` : undefined}
       >
         <span>
-          <span className="text-[var(--text-secondary)]">Balance </span>
+          {/* "Balance" read as ambiguous next to "Wallet" — new traders
+              couldn't tell which number was actually spendable on an order.
+              Plain-English: this is capital already deposited into the
+              Percolator account, i.e. what an order can actually draw on. */}
+          <span className="text-[var(--text-secondary)]">Available to trade </span>
           {userAccount ? formatTokenAmount(availableBalance, decimals, 3) : "0"}
           {lockedMargin > 0n && (
             <span className="text-[var(--text-secondary)]">/{formatTokenAmount(capital, decimals, 3)}</span>
@@ -672,21 +735,29 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           <span className="text-[var(--text-secondary)]"> {collateralSymbol}</span>
         </span>
         <span>
-          <span className="text-[var(--text-secondary)]">Wallet </span>
+          <span className="text-[var(--text-secondary)]">In wallet (not deposited) </span>
           {walletAtaBalance != null ? formatTokenAmount(walletAtaBalance, decimals, 3) : "—"}
           <span className="text-[var(--text-secondary)]"> {collateralSymbol}</span>
         </span>
       </div>
+      {capital === 0n && (walletAtaBalance ?? 0n) > 0n && (
+        <p className="mb-2 text-[10px] leading-relaxed text-[var(--text-secondary)]">
+          You have {formatTokenAmount(walletAtaBalance ?? 0n, decimals, 3)} {collateralSymbol} in your wallet —
+          deposit it to start trading.
+        </p>
+      )}
 
       {/* Size — single input + unit toggle + quick-fill chips */}
       <div className="mb-2">
-        <label className="mb-1.5 block text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">
+        <label htmlFor="order-size-input" className="mb-1.5 block text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">
           Size
           <InfoIcon tooltip="Position size in the toggled unit. Switch between token and USD - both stay in sync." />
         </label>
         <div className="flex gap-1.5">
           <input
+            id="order-size-input"
             type="text"
+            inputMode="decimal"
             value={sizeInput}
             onChange={(e) => handleSizeChange(e.target.value)}
             placeholder={sizeUnit === "token" ? "0.000000" : "$0.00"}
@@ -697,9 +768,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           />
           <button
             onClick={toggleSizeUnit}
-            className="w-16 shrink-0 rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-colors duration-150 hover:border-[var(--border-hover)] hover:text-[var(--text)]"
+            title={`Switch size unit (currently ${sizeUnit === "token" ? baseTicker : "USD"})`}
+            className="w-16 shrink-0 truncate rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] px-1 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-colors duration-150 hover:border-[var(--border-hover)] hover:text-[var(--text)]"
           >
-            {sizeUnit === "token" ? symbol : "USD"}
+            {sizeUnit === "token" ? baseTicker : "USD"}
           </button>
         </div>
         {exceedsBalance && (
@@ -740,16 +812,18 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           instead of one continuous unbroken stack. */}
       <div className="mb-4 border-t border-[var(--border)]/20 pt-3">
         <div className="mb-1 flex items-center justify-between">
-          <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">
+          <label htmlFor="order-leverage-input" className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">
             Leverage
             <InfoIcon tooltip="The multiplier used to size this order. On-chain margin params are the authoritative cap." />
           </label>
           <div className="flex items-center gap-1">
             <input
+              id="order-leverage-input"
               type="text"
+              inputMode="numeric"
               value={leverageText}
               onChange={(e) => {
-                const raw = e.target.value.replace(/[^0-9.]/g, "");
+                const raw = sanitizeDecimalInput(e.target.value);
                 setLeverageText(raw);
                 const parsed = parseFloat(raw);
                 if (!isNaN(parsed)) updateLeverage(Math.max(1, Math.min(maxLeverage, Math.round(parsed))));
@@ -852,31 +926,48 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           page-level darkness, rather than an elevated surface) so it reads
           as an inset readout inside the ticket panel — a small depth cue
           that reinforces the panel/ticket as the raised surface. */}
-      {hasOrder && (
-        <div className="mb-3 rounded-none border border-[var(--border)]/60 bg-[var(--bg)]/60 px-2.5 py-2 divide-y divide-[var(--border)]/30">
-          <DiffRow label="Entry" before="—" after={formatUsdPriceE6(estEntry)} />
-          <DiffRow
-            label="Liq price"
-            before={beforeLiqPrice > 0n ? formatUsdPriceE6(beforeLiqPrice) : "—"}
-            after={afterLiqPrice > 0n ? formatUsdPriceE6(afterLiqPrice) : "—"}
-            valueClass={direction === "long" ? "text-[var(--short)]" : "text-[var(--long)]"}
-            tooltip="Estimated liquidation price if this order fills at the estimated entry."
-          />
-          <DiffRow label="Fees" before="—" after={`${formatTokenAmount(fee, decimals)} ${collateralSymbol}`} />
-          <DiffRow
-            label="Slippage bound"
-            before="—"
-            after={slippageBoundE6 > 0n ? formatUsdPriceE6(slippageBoundE6) : "—"}
-            tooltip="Worst acceptable fill price sent on-chain - the trade reverts rather than fill worse than this."
-          />
-          <DiffRow
-            label="Margin req."
-            before={`${formatTokenAmount(beforeMargin, decimals)} ${collateralSymbol}`}
-            after={`${formatTokenAmount(afterMargin, decimals)} ${collateralSymbol}`}
-            tooltip="Margin reserved from your account balance to back this position — not a deposit, so your balance after opening is lower, not higher."
-          />
-        </div>
-      )}
+      {hasOrder && (() => {
+        const isFirstTimer = capital === 0n;
+        const detailsVisible = !isFirstTimer || showReceiptDetails;
+        return (
+          <div className="mb-3 rounded-none border border-[var(--border)]/60 bg-[var(--bg)]/60 px-2.5 py-2 divide-y divide-[var(--border)]/30">
+            <DiffRow label="Entry" before="—" after={formatUsdPriceE6(estEntry)} />
+            <DiffRow
+              label="Liq price"
+              before={beforeLiqPrice > 0n ? formatUsdPriceE6(beforeLiqPrice) : "—"}
+              after={afterLiqPrice > 0n ? formatUsdPriceE6(afterLiqPrice) : "—"}
+              valueClass={direction === "long" ? "text-[var(--short)]" : "text-[var(--long)]"}
+              tooltip="Estimated liquidation price if this order fills at the estimated entry."
+            />
+            {detailsVisible && (
+              <>
+                <DiffRow label="Fees" before="—" after={`${formatTokenAmount(fee, decimals)} ${collateralSymbol}`} />
+                <DiffRow
+                  label="Slippage bound"
+                  before="—"
+                  after={slippageBoundE6 > 0n ? formatUsdPriceE6(slippageBoundE6) : "—"}
+                  tooltip="Worst acceptable fill price sent on-chain - the trade reverts rather than fill worse than this."
+                />
+                <DiffRow
+                  label="Margin req."
+                  before={`${formatTokenAmount(beforeMargin, decimals)} ${collateralSymbol}`}
+                  after={`${formatTokenAmount(afterMargin, decimals)} ${collateralSymbol}`}
+                  tooltip="Margin reserved from your account balance to back this position — not a deposit, so your balance after opening is lower, not higher."
+                />
+              </>
+            )}
+            {isFirstTimer && (
+              <button
+                type="button"
+                onClick={() => setShowReceiptDetails((v) => !v)}
+                className="w-full pt-1.5 text-center text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--accent)] transition-colors duration-150 hover:brightness-110"
+              >
+                {showReceiptDetails ? "Hide details ▴" : "Show details ▾"}
+              </button>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Single validation banner (highest-priority issue only) */}
       {blockingIssue && (
@@ -888,12 +979,28 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
       {/* ONE big full-width submit */}
       {needsWallet ? (
-        <button
-          onClick={() => openWalletModal()}
-          className="w-full rounded-none bg-[var(--accent)] py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-white transition-[filter] duration-150 hover:brightness-110"
-        >
-          Connect Wallet
-        </button>
+        // Mode-aware connect CTA — mirrors app/faucet/page.tsx's connect-prompt
+        // pattern. usePrivyLogin() alone is a no-op in the default wallet-adapter
+        // deployment (no PrivyProvider mounted), which left this button dead.
+        adapterAvailable ? (
+          <div className="w-full [&>*]:w-full [&_button]:w-full [&_button]:rounded-none [&_button]:py-2.5 [&_button]:text-[11px] [&_button]:font-medium [&_button]:uppercase [&_button]:tracking-[0.1em]">
+            <ConnectButton />
+          </div>
+        ) : privyAvailable ? (
+          <button
+            onClick={() => openWalletModal()}
+            className="w-full rounded-none bg-[var(--accent)] py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-white transition-[filter] duration-150 hover:brightness-110"
+          >
+            Connect Wallet
+          </button>
+        ) : (
+          <button
+            disabled
+            className="w-full cursor-not-allowed rounded-none bg-[var(--border)] py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)]"
+          >
+            Wallet Unavailable
+          </button>
+        )
       ) : needsAccount || needsDeposit ? (
         <>
           {(() => {
@@ -902,12 +1009,34 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             const onClickDirect = async () => {
               setInitCtaError(null);
               try {
-                await initUser(0n);
+                // PERC-onboarding-1: pass the wallet's own sim-USDC balance
+                // (capped at the same starter amount useAutoDeposit uses) so
+                // useInitUser folds Deposit into the SAME account-creation
+                // transaction when possible — one click can land a
+                // tradeable, funded account instead of always requiring a
+                // second manual deposit afterward.
+                const bal = walletAtaBalance ?? 0n;
+                const depositAmt = bal > 0n && bal < AUTO_DEPOSIT_AMOUNT ? bal : AUTO_DEPOSIT_AMOUNT;
+                await initUser(depositAmt);
               } catch (e) {
                 const msg = e instanceof Error ? e.message : String(e);
+                reportTxError(msg);
                 if (!/user rejected|cancelled|denied/i.test(msg)) setInitCtaError(msg);
               }
             };
+            // Single evolving CTA: one persistently-styled button whose label
+            // always names the NEXT unblocking action — "Start Trading" now
+            // covers account-creation + deposit in one click (fix #1), so
+            // most users only ever see that single state once.
+            const label = initLoading
+              ? "Setting up your account…"
+              : showInlineDeposit
+                ? "Close"
+                : canOneClick
+                  ? "Start Trading"
+                  : needsAccount
+                    ? "Get Tokens to Trade"
+                    : "Deposit to Trade";
             return (
               <button
                 onClick={canOneClick ? onClickDirect : () => setShowInlineDeposit((v) => !v)}
@@ -916,7 +1045,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                   direction === "long" ? "bg-[var(--long)] text-black" : "bg-[var(--short)] text-white"
                 }`}
               >
-                {initLoading ? "Creating account…" : showInlineDeposit ? "Close" : canOneClick ? "Initialize Account" : needsAccount ? "Get Tokens to Trade" : "Deposit to Trade"}
+                {label}
               </button>
             );
           })()}
@@ -951,6 +1080,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               worstFillPriceE6,
             });
             setShowConfirmModal(true);
+            // Prewarm the entire submission path (blockhash, priority fee,
+            // v17 trade-account resolution) while the user reads the confirm
+            // modal — their confirm click then reaches the wallet popup with
+            // zero blocking RPC round-trips. Fire-and-forget.
+            prewarmTradeSubmission(connection, slabProgramId, slabAddress, publicKey ?? null);
           }}
           disabled={submitDisabled}
           className={`w-full rounded-none py-3 text-[12px] font-bold uppercase tracking-[0.12em] transition-[filter] duration-150 hover:brightness-110 disabled:cursor-not-allowed disabled:hover:brightness-100 ${
@@ -971,9 +1105,33 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         </button>
       )}
 
-      {humanError && (
+      {/* A trade that reverted with an engine-lock error (EngineStale/
+          EngineLockActive) persists here in a distinct, retryable amber notice
+          rather than the generic red failure banner — the market is temporarily
+          un-tradeable, not the order malformed. Non-blocking (submit stays
+          enabled): retrying clears it (see the submit handler) and re-attempts.
+          engineLockError takes precedence over humanError since a lock failure
+          sets both. */}
+      {engineLockError ? (
+        <div className="mt-2 rounded-none border border-[var(--warning)]/30 bg-[var(--warning)]/5 px-3 py-2">
+          <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--warning)]">Market temporarily locked</p>
+          <p className="mt-1 text-[10px] leading-relaxed text-[var(--text-secondary)]">{engineLockError}</p>
+          <p className="mt-1 text-[10px] leading-relaxed text-[var(--text-muted)]">This usually clears once the market is cranked again — try again shortly.</p>
+        </div>
+      ) : humanError ? (
         <div className="mt-2 rounded-none border border-[var(--short)]/20 bg-[var(--short)]/5 px-3 py-2">
           <p className="text-[10px] text-[var(--short)]">{humanError}</p>
+        </div>
+      ) : null}
+      {/* PERC-onboarding-5: advisory wrong-network-wallet banner — same
+          amber "informational, not a hard failure" treatment as the
+          engine-lock notice above, rendered independently since it can
+          co-occur with (or explain) whatever humanError/engineLockError is
+          also showing. Never blocks submission — purely informational. */}
+      {networkWarning && (
+        <div className="mt-2 rounded-none border border-[var(--warning)]/30 bg-[var(--warning)]/5 px-3 py-2">
+          <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--warning)]">Check your wallet's network</p>
+          <p className="mt-1 text-[10px] leading-relaxed text-[var(--text-secondary)]">{networkWarning}</p>
         </div>
       )}
       {lastSig && (
@@ -1037,10 +1195,13 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           collateralSymbol={collateralSymbol}
           decimals={decimals}
           onConfirm={() => {
-            const snapSize = confirmSnapshot.positionSize;
+            const snapshot = confirmSnapshot;
             setShowConfirmModal(false);
             setConfirmSnapshot(null);
-            handleTrade(snapSize);
+            void handleTrade(
+              snapshot.positionSize,
+              snapshot.worstFillPriceE6,
+            );
           }}
           onCancel={() => { setShowConfirmModal(false); setConfirmSnapshot(null); }}
         />

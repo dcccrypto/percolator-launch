@@ -6,7 +6,7 @@ import gsap from "gsap";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
 import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
-import { computeMarkPnl, computeMarkPnlCollateral } from "@/lib/trading";
+import { computeMarkPnl, computeMarkPnlCollateral, clampClosePercent } from "@/lib/trading";
 
 interface ClosePositionModalProps {
   positionSize: bigint;
@@ -71,6 +71,10 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   const prefersReduced = usePrefersReducedMotion();
   useLockBodyScroll();
   const [percent, setPercent] = useState(100);
+  // Single clamp source: every write to `percent` goes through here, so the state
+  // is always a valid whole [1,100] and every display/math/confirm site below
+  // agrees by construction — see clampClosePercent in lib/trading.ts.
+  const updatePercent = (value: number) => setPercent(clampClosePercent(value));
 
   // Ref-based callback to prevent WS price ticks from replaying the GSAP animation
   const onCancelRef = useRef(onCancel);
@@ -255,7 +259,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
             max={100}
             step={1}
             value={percent}
-            onChange={(e) => setPercent(Number(e.target.value))}
+            onChange={(e) => updatePercent(Number(e.target.value))}
             style={{
               background: `linear-gradient(to right, var(--short) 0%, var(--short) ${percent}%, rgba(255,255,255,0.03) ${percent}%, rgba(255,255,255,0.03) 100%)`,
               backgroundSize: "100% 2px",
@@ -269,7 +273,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
             {PRESETS.map((p) => (
               <button
                 key={p}
-                onClick={() => setPercent(p)}
+                onClick={() => updatePercent(p)}
                 className={`flex-1 rounded-none py-1 text-[10px] font-medium transition-colors duration-150 ${
                   percent === p
                     ? "bg-[var(--short)] text-white"
@@ -332,8 +336,8 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
 
         {/* GH#1842: Oracle staleness warning — mirrors TradeForm oracle stale block */}
         {oracleStale && (
-          <div className="mb-4 rounded-none border border-amber-500/30 bg-amber-500/[0.07] p-2.5">
-            <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-amber-400">
+          <div className="mb-4 rounded-none border border-[var(--warning)]/30 bg-[var(--warning)]/[0.07] p-2.5">
+            <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--warning)]">
               ⚠ Oracle Stale
             </p>
             <p className="mt-1 text-[9px] text-[var(--text-secondary)] leading-relaxed">

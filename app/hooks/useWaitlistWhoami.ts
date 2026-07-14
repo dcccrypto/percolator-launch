@@ -83,6 +83,9 @@ export function useWaitlistWhoami(): WhoamiState {
           referral_code?: string | null;
           position?: number | null;
         };
+        // Second guard: a stale run resolving after a newer one started must
+        // not stomp state set by the fresher request (missed-sibling bug).
+        if (cancelled) return;
         if (json.found && json.referral_code) {
           setState({
             status: "found",

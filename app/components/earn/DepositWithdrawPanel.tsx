@@ -277,15 +277,15 @@ export function DepositWithdrawPanel({
             {cooldownElapsed
               ? 'Cooldown elapsed — claim your redemption to receive the underlying collateral.'
               : cooldownRemainingSlots > 0n
-                ? `Cooldown in progress — ~${Math.ceil(Number(cooldownRemainingSlots) * 0.4)}s remaining.`
+                ? `Cooldown in progress — ~${slotsToSeconds(cooldownRemainingSlots)}s remaining.`
                 : 'Cooldown in progress.'}
           </p>
 
           {claimError && (
-            <p className="mb-2 text-[11px] text-[var(--short)]">{claimError}</p>
+            <p role="alert" className="mb-2 text-[11px] text-[var(--short)]">{claimError}</p>
           )}
           {claimSuccess && (
-            <p className="mb-2 text-[11px] text-[var(--cyan)]">{claimSuccess}</p>
+            <p role="status" aria-live="polite" className="mb-2 text-[11px] text-[var(--cyan)]">{claimSuccess}</p>
           )}
 
           <GlowButton
@@ -308,11 +308,12 @@ export function DepositWithdrawPanel({
         {/* Amount input */}
         <div className="mb-4">
           <div className="flex items-center justify-between mb-2">
-            <label className="text-[10px] uppercase tracking-[0.2em] text-[var(--text-secondary)]">
+            <label htmlFor="earn-amount-input" className="text-[10px] uppercase tracking-[0.2em] text-[var(--text-secondary)]">
               {tab === 'deposit' ? 'Deposit Amount' : 'LP Tokens to Burn'}
             </label>
             <button
               onClick={handleSetMax}
+              aria-label={`Set maximum amount: ${displayMaxAmount} ${tab === 'deposit' ? collateralSymbol : 'LP'}`}
               className="text-[10px] text-[var(--accent)] hover:text-[var(--accent)]/80 transition-colors"
             >
               Max: {displayMaxAmount} {tab === 'deposit' ? collateralSymbol : 'LP'}
@@ -321,6 +322,7 @@ export function DepositWithdrawPanel({
 
           <div className="relative">
             <input
+              id="earn-amount-input"
               type="text"
               inputMode="decimal"
               placeholder="0.00"
@@ -402,23 +404,28 @@ export function DepositWithdrawPanel({
                 <div className="flex items-center justify-between text-[12px]">
                   <span className="text-[var(--text-secondary)]">Rate (1 LP)</span>
                   <span className="font-mono tabular-nums text-[var(--text)]">
-                    ≈ {lpSupply > 0n
-                        ? formatRaw((vaultBalance * divisor) / lpSupply, decimals)
-                        : '1.0000'
-                      } {collateralSymbol}
+                    ≈ {formatRaw((vaultBalance * divisor) / lpSupply, decimals)} {collateralSymbol}
                   </span>
                 </div>
               )}
 
-              {/* Cooldown status */}
+              {/* Cooldown status — withdraw() only ever REQUESTS a redemption when
+                  there's no pending ticket yet (hasPendingRedemption === false);
+                  cooldownElapsed defaults to true in that state (nothing to wait
+                  on), so it must not drive this copy or it reads as "ready to
+                  withdraw now" when the action actually just starts the cooldown. */}
               <div className="flex items-center justify-between text-[12px]">
                 <span className="text-[var(--text-secondary)]">Cooldown</span>
-                <span className={`font-medium ${cooldownElapsed ? 'text-[var(--cyan)]' : 'text-[var(--warning)]'}`}>
-                  {cooldownElapsed
-                    ? 'Elapsed — ready to withdraw'
-                    : cooldownSlots && cooldownSlots > 0n
-                      ? `~${Math.ceil(Number(cooldownSlots) * 0.4)}s remaining`
-                      : 'Not elapsed'
+                <span className={`font-medium ${!hasPendingRedemption || cooldownElapsed ? 'text-[var(--cyan)]' : 'text-[var(--warning)]'}`}>
+                  {!hasPendingRedemption
+                    ? cooldownSlots && cooldownSlots > 0n
+                      ? `Starts on request (~${slotsToSeconds(cooldownSlots)}s)`
+                      : 'Starts on request'
+                    : cooldownElapsed
+                      ? 'Elapsed — ready to claim'
+                      : cooldownSlots && cooldownSlots > 0n
+                        ? `~${slotsToSeconds(cooldownSlots)}s remaining`
+                        : 'Not elapsed'
                   }
                 </span>
               </div>
@@ -433,7 +440,9 @@ export function DepositWithdrawPanel({
             {withdrawConfirming && (
               <div className="mt-3 pt-3 border-t border-[var(--warning)]/20">
                 <p className="text-[11px] text-[var(--warning)]">
-                  LP tokens will be permanently burned. This action cannot be undone.
+                  {hasPendingRedemption
+                    ? 'LP tokens will be permanently burned. This action cannot be undone.'
+                    : 'LP tokens will be locked in escrow until the cooldown completes and you claim the redemption.'}
                 </p>
               </div>
             )}
@@ -451,12 +460,12 @@ export function DepositWithdrawPanel({
 
         {/* Error / Success */}
         {txError && (
-          <div className="mb-4 p-3 bg-[var(--short)]/5 border border-[var(--short)]/20 rounded-sm">
+          <div role="alert" className="mb-4 p-3 bg-[var(--short)]/5 border border-[var(--short)]/20 rounded-sm">
             <p className="text-[11px] text-[var(--short)]">{txError}</p>
           </div>
         )}
         {txSuccess && (
-          <div className="mb-4 p-3 bg-[var(--cyan)]/5 border border-[var(--cyan)]/20 rounded-sm">
+          <div role="status" aria-live="polite" className="mb-4 p-3 bg-[var(--cyan)]/5 border border-[var(--cyan)]/20 rounded-sm">
             <p className="text-[11px] text-[var(--cyan)]">{txSuccess}</p>
           </div>
         )}
@@ -482,14 +491,21 @@ export function DepositWithdrawPanel({
               ? 'Confirming...'
               : tab === 'deposit'
                 ? 'Deposit'
-                : withdrawConfirming
-                  ? 'Confirm Withdrawal'
-                  : 'Withdraw'}
+                : hasPendingRedemption
+                  ? (withdrawConfirming ? 'Confirm Withdrawal' : 'Withdraw')
+                  : (withdrawConfirming ? 'Confirm Request' : 'Request Withdrawal')}
           </GlowButton>
         </div>
       </div>
     </div>
   );
+}
+
+/** Solana devnet slot time, used to render cooldowns as an approximate wall-clock duration. */
+const SLOT_SECONDS = 0.4;
+
+function slotsToSeconds(slots: bigint): number {
+  return Math.ceil(Number(slots) * SLOT_SECONDS);
 }
 
 /** Format raw bigint to human-readable decimal string */

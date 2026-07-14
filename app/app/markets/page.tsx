@@ -3,12 +3,15 @@
 import { useEffect, useState, useMemo, useRef, useCallback, useSyncExternalStore, Suspense, type FC } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { useConnectionCompat } from "@/hooks/useWalletCompat";
+import { prefetchSlab, prefetchSlabsBatch } from "@/lib/slabCache";
+import { setMarketIdentity } from "@/lib/marketIdentityCache";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMarketDiscovery } from "@/hooks/useMarketDiscovery";
-import { computeMarketHealth, computeMarketHealthFromStats, sanitizeOnChainValue, isSentinelValue } from "@/lib/health";
+import { computeMarketHealth, computeMarketHealthFromStats, sanitizeOnChainValue } from "@/lib/health";
 import { HealthBadge } from "@/components/market/HealthBadge";
 import { formatTokenAmount, formatUsdFromNumber } from "@/lib/format";
-import { isSaneMarketValue, isZombieMarket } from "@/lib/activeMarketFilter";
+import { isZombieMarket } from "@/lib/activeMarketFilter";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import type { Database } from "@/lib/database.types";
 
@@ -110,7 +113,16 @@ function resolveMarketDisplaySymbol(m: MergedMarket): string | null {
   const addresses = [m.slabAddress, m.mintAddress, m.supabase?.mainnet_ca];
   for (const candidate of [m.supabase?.symbol, m.symbol]) {
     const clean = candidate?.trim();
-    if (!clean || clean.length > 10) continue;
+    if (!clean) continue;
+    // Length sanity-check the BASE ticker, not the raw registry string: the
+    // registry stores symbols with a "-PERP" suffix ("BURNIE-PERP",
+    // "PERCOLATOR-PERP"), and checking the raw length rejected any base
+    // ticker over 5 chars — BURNIE and PERCOLATOR rendered as truncated slab
+    // addresses on this page while SOL/JUP/TRUMP/PENGU (≤10 raw chars)
+    // passed. Guard the suffix-stripped base at 12 chars, generous enough
+    // for real tickers while still rejecting address-like junk.
+    const base = clean.replace(/-PERP$/i, "");
+    if (base.length === 0 || base.length > 12) continue;
     if (!isPlaceholderMarketSymbol(clean, addresses)) return clean;
   }
   return null;
@@ -177,6 +189,7 @@ function MarketsPageInner() {
   }, []);
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { connection } = useConnectionCompat();
   const { markets: discovered, loading: discoveryLoading, error: discoveryError } = useMarketDiscovery();
   const { statsMap, loading: statsLoading, error: statsError } = useAllMarketStats();
 
@@ -221,9 +234,18 @@ function MarketsPageInner() {
     if (oracleFilter !== "all") params.set("oracle", oracleFilter);
     if (!showUsd) params.set("usd", "false");
     
-    const newUrl = params.toString() ? `?${params.toString()}` : "/markets";
-    router.replace(newUrl, { scroll: false });
-  }, [debouncedSearch, sortBy, leverageFilter, oracleFilter, showUsd, router]);
+    // Mirror the filters into the address bar WITHOUT navigating. router.replace()
+    // is an App Router soft-nav: it re-fetches the route's RSC payload, re-suspends
+    // the page's <Suspense>, and remounts the whole list — so even guarded against
+    // the mount no-op, every genuine filter/sort/keystroke paid a skeleton flash,
+    // a scroll-to-top (displayCount resets), and search-input focus loss. This is
+    // a pure URL sync (state is the source of truth), so use native shallow
+    // routing — updates window.location + the useSearchParams() context with no
+    // RSC refetch and no remount. Keep the no-op guard so we don't spam history.
+    const nextSearch = params.toString() ? `?${params.toString()}` : "";
+    if (nextSearch === window.location.search) return;
+    window.history.replaceState(null, "", nextSearch || "/markets");
+  }, [debouncedSearch, sortBy, leverageFilter, oracleFilter, showUsd]);
 
   const merged = useMemo<MergedMarket[]>(() => {
     const result: MergedMarket[] = [];
@@ -305,6 +327,49 @@ function MarketsPageInner() {
 
   // Only show mock data in development (never in production)
   const effectiveMarkets = merged.length > 0 ? merged : (process.env.NODE_ENV === "development" ? MOCK_MARKETS : []);
+
+  // Batch-warm the slab cache for every listed market in ONE getMultipleAccountsInfo
+  // so clicking ANY market opens the terminal instantly (not just hovered rows).
+  //
+  // Keyed on a joined, sorted slab-address STRING (not the `effectiveMarkets`
+  // array reference) — mirrors useMyMarkets.ts's v17SlabsKey and
+  // PositionsBar.tsx's slabKey. `merged` (and therefore `effectiveMarkets`)
+  // is rebuilt from `discovered`/`statsMap` on every SWR poll (~30s), which
+  // gives it a NEW array reference each time even when its contents are
+  // identical — keying the effect on that reference meant this "one-shot"
+  // warm-cache batch fetch re-ran on every poll tick forever. Compounding
+  // it, lib/slabCache.ts's FRESH_MS (20s) is shorter than the poll interval
+  // (30s), so by the time each re-run fired, the previous fetch's cache
+  // entries had already gone stale and the freshness guard inside
+  // prefetchSlabsBatch never actually skipped the refetch either — this was
+  // a real, continuous 30s RPC cost, not a harmless no-op.
+  const slabsKey = useMemo(
+    () => effectiveMarkets.map((m) => m.slabAddress).sort().join(","),
+    [effectiveMarkets],
+  );
+  useEffect(() => {
+    if (!slabsKey) return;
+    prefetchSlabsBatch(connection, slabsKey.split(","));
+  }, [slabsKey, connection]);
+
+  // Feed the identity cache: the trade page seeds its pair label/logo from
+  // this synchronously on navigation, so clicking a row never flashes a
+  // fallback name while /api/markets/[slab] is in flight (the "USDC/USD"
+  // flash). Uses the same resolvers the visible rows use, so what the trade
+  // page shows first-frame is exactly what the user just clicked on.
+  useEffect(() => {
+    for (const m of effectiveMarkets) {
+      const symbol = resolveMarketDisplaySymbol(m);
+      if (!symbol) continue;
+      setMarketIdentity(m.slabAddress, {
+        symbol,
+        name: resolveMarketDisplayName(m) ?? undefined,
+        logo_url: m.supabase?.logo_url ?? undefined,
+        mainnet_ca: m.supabase?.mainnet_ca ?? null,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on slabsKey (stable string), not the array identity, same as the prefetch effect above
+  }, [slabsKey]);
 
   // Fetch on-chain token metadata for ALL markets (no Supabase)
   const allMints = useMemo(() => {
@@ -1045,6 +1110,24 @@ function MarketsPageInner() {
                     <Link
                       key={m.slabAddress}
                       href={`/trade/${m.slabAddress}`}
+                      // prefetch={true}: /trade/[slab] is a DYNAMIC route, so the
+                      // default Link prefetch only fetches up to its loading.tsx
+                      // boundary — every click still paid a full RSC server
+                      // round-trip (layout generateMetadata included) behind the
+                      // 36-shimmer route skeleton (~0.6-1.3s measured). Full
+                      // prefetch pulls the whole payload when the row enters the
+                      // viewport, so the click swaps instantly. Off-screen rows
+                      // don't prefetch, so cost scales with what's visible.
+                      prefetch={true}
+                      onMouseEnter={() => prefetchSlab(connection, m.slabAddress)}
+                      onFocus={() => prefetchSlab(connection, m.slabAddress)}
+                      onTouchStart={() => prefetchSlab(connection, m.slabAddress)}
+                      // content-visibility:auto lets the browser skip layout+paint
+                      // of off-screen rows, so the full ~168-row list scrolls/paints
+                      // like a handful of rows. contain-intrinsic-size reserves each
+                      // off-screen row's box (auto width kept, ~52px tall) so the
+                      // scrollbar doesn't jump. Ignored gracefully where unsupported.
+                      style={{ contentVisibility: "auto", containIntrinsicSize: "auto 52px" }}
                       className={[
                         "grid w-full min-w-[500px] sm:min-w-[700px] grid-cols-[minmax(120px,2.5fr)_minmax(80px,1.2fr)_minmax(50px,0.6fr)_minmax(75px,0.8fr)] sm:grid-cols-[minmax(160px,3fr)_minmax(90px,1.2fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(65px,0.8fr)_minmax(80px,0.9fr)] gap-2 sm:gap-4 items-center px-3 sm:px-5 py-3 transition-all duration-200 hover:bg-[var(--accent)]/[0.06] border-l-2 border-l-transparent hover:border-l-[var(--accent)]/40",
                         i > 0 ? "border-t border-[var(--border)]" : "",

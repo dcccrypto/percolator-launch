@@ -3,12 +3,17 @@
  *
  * After auto-fund mints USDC to the user's wallet, this hook detects that the
  * user has no on-chain Percolator account for the current market and
- * auto-triggers initUser + deposit in a single transaction.
+ * auto-triggers account setup + deposit as ONE wallet approval.
  *
  * Flow:
  *   1. Watches for auto-fund completion (USDC balance > 0 in wallet)
  *   2. Checks if user has a Percolator account on the current market
- *   3. If not, prompts wallet for a single initUser + deposit transaction
+ *   3. If not, prompts wallet for account creation — useInitUser folds
+ *      Deposit into the SAME transaction when possible (falling back to a
+ *      second, automatic transaction if the combined one doesn't land; see
+ *      useInitUser.ts's v17 branch), so this is still a single logical setup
+ *      step from the user's point of view, not "create, then go deposit
+ *      separately."
  *   4. Deposits up to 500 USDC (or wallet balance, whichever is less)
  *
  * Only fires on devnet, once per market per session. Dedup uses sessionStorage
@@ -40,7 +45,6 @@ function markAutoDepositAttempted(key: string): void {
   }
 }
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
-import { isV17Account } from "@percolatorct/sdk";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useInitUser } from "@/hooks/useInitUser";
@@ -49,7 +53,11 @@ import { useAutoFundResult } from "@/components/providers/AutoFundProvider";
 import { useFaucetComplete } from "@/hooks/useDevnetFaucet";
 // PERC-808: useFaucetComplete returns true within 30s of faucet modal completion
 
-const AUTO_DEPOSIT_AMOUNT = 500_000_000n; // 500 USDC (6 decimals) — reasonable starter
+// Exported: OrderTicket's one-click "Initialize Account" CTA and
+// DepositWithdrawCard's "Create Trading Account" button reuse this same
+// starter-deposit cap so every first-time-setup entry point converges on
+// the same "reasonable starter" amount instead of each guessing its own.
+export const AUTO_DEPOSIT_AMOUNT = 500_000_000n; // 500 USDC (6 decimals) — reasonable starter
 const MIN_WALLET_BALANCE = 10_000_000n; // 10 USDC minimum to bother depositing
 
 export interface AutoDepositState {
@@ -70,7 +78,7 @@ export function useAutoDeposit(slabAddress: string): AutoDepositState {
   const { connection } = useConnectionCompat();
   const userAccount = useUserAccount();
   const { initUser } = useInitUser(slabAddress);
-  const { config: mktConfig, raw: slabRaw } = useSlabState();
+  const { config: mktConfig } = useSlabState();
   const { result: fundResult } = useAutoFundResult();
   const faucetComplete = useFaucetComplete();
 
@@ -115,16 +123,20 @@ export function useAutoDeposit(slabAddress: string): AutoDepositState {
       setDepositing(true);
       setError(null);
 
-      const sig = await initUser(depositAmount);
-      setSignature(sig ?? null);
-      // On v17, InitUser (tag 1) only creates the standalone portfolio account —
-      // it does NOT move collateral (the amount arg is ignored on-chain). Only the
-      // legacy v12 InitUser folds `feePayment` in as the initial deposit. So only
-      // report a deposited amount on v12; on v17 the account is created and the
-      // user funds it via the normal deposit card (reporting a bogus "$X deposited"
-      // toast here would be a lie). See useInitUser.ts v17 path.
-      const isV17 = !!slabRaw && slabRaw.length > 0 && isV17Account(slabRaw);
-      setAmountUsdc(isV17 ? null : Number(depositAmount) / 1_000_000);
+      const result = await initUser(depositAmount);
+      setSignature(result?.sig ?? null);
+      // PERC-onboarding-1: on v17, useInitUser now folds Deposit into the same
+      // (or a chained follow-up) transaction as InitPortfolio — see that
+      // hook's v17 branch. Read `depositedAmount` off the RESOLVED result,
+      // not hook state — a state read here would see a stale pre-call
+      // snapshot (React state updates from inside initUser aren't visible
+      // synchronously in this closure). `depositedAmount` reports what
+      // actually landed on-chain (0n if the deposit leg didn't happen for
+      // any reason), so don't just assume the requested `depositAmount`
+      // landed. On v12 the value is already accurate (InitUser folds
+      // `feePayment` in as the deposit unconditionally).
+      const actualDeposited = result?.depositedAmount ?? 0n;
+      setAmountUsdc(actualDeposited > 0n ? Number(actualDeposited) / 1_000_000 : null);
       setDeposited(true);
     } catch (e) {
       // User rejected or tx failed — not a critical error
@@ -139,7 +151,7 @@ export function useAutoDeposit(slabAddress: string): AutoDepositState {
       inflightRef.current = false;
       setDepositing(false);
     }
-  }, [publicKey, mktConfig, slabAddress, connection, initUser, isDevnet, slabRaw]);
+  }, [publicKey, mktConfig, slabAddress, connection, initUser, isDevnet]);
 
   useEffect(() => {
     if (!isDevnet || !connected || !publicKey) return;

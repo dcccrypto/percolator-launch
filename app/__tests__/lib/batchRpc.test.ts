@@ -31,8 +31,10 @@ describe("createBatchRpc", () => {
       batchWindowMs: 10,
     });
 
-    const p1 = enqueue("getBalance", ["addr1"]);
-    const p2 = enqueue("getBalance", ["addr2"]);
+    // getAccountInfo: a normally-batched method (getBalance is FAST_FLUSH now
+    // — it flushes immediately for tx-submission latency; covered separately below).
+    const p1 = enqueue("getAccountInfo", ["addr1"]);
+    const p2 = enqueue("getAccountInfo", ["addr2"]);
 
     // Advance timer to trigger flush
     await vi.advanceTimersByTimeAsync(20);
@@ -45,8 +47,8 @@ describe("createBatchRpc", () => {
     // Verify batch payload
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body).toHaveLength(2);
-    expect(body[0].method).toBe("getBalance");
-    expect(body[1].method).toBe("getBalance");
+    expect(body[0].method).toBe("getAccountInfo");
+    expect(body[1].method).toBe("getAccountInfo");
 
     // Verify individual responses
     const parsed1 = JSON.parse(r1);
@@ -71,9 +73,10 @@ describe("createBatchRpc", () => {
       batchWindowMs: 10,
     });
 
-    // Enqueue the exact same request twice
-    const p1 = enqueue("getBalance", ["sameAddr"]);
-    const p2 = enqueue("getBalance", ["sameAddr"]);
+    // Enqueue the exact same request twice (normally-batched method — see
+    // the fast-flush test below for getBalance's immediate-flush behavior)
+    const p1 = enqueue("getAccountInfo", ["sameAddr"]);
+    const p2 = enqueue("getAccountInfo", ["sameAddr"]);
 
     await vi.advanceTimersByTimeAsync(20);
 
@@ -86,6 +89,30 @@ describe("createBatchRpc", () => {
     // Both callers get the same result
     expect(JSON.parse(r1).result.value).toBe(42);
     expect(JSON.parse(r2).result.value).toBe(42);
+  });
+
+  it("flushes latency-critical methods immediately (no batch-window wait)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => [{ jsonrpc: "2.0", result: { blockhash: "abc" }, id: 1 }],
+      headers: new Headers({ "Content-Type": "application/json" }),
+    });
+    globalThis.fetch = fetchMock;
+
+    const { enqueue } = createBatchRpc({
+      endpoint: "http://localhost/api/rpc",
+      batchWindowMs: 10_000, // absurdly long window — must NOT be waited out
+    });
+
+    const p = enqueue("getLatestBlockhash", [{ commitment: "confirmed" }]);
+    // No timer advance at all: the fast path flushes synchronously on enqueue,
+    // so the request must already be on the wire. (Tx-submission methods —
+    // getLatestBlockhash / getRecentPrioritizationFees / getBalance — sit on
+    // the confirm-click → wallet-popup critical path where the batch window
+    // is pure added latency.)
+    await p;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("flushes immediately when batch size is reached", async () => {

@@ -60,7 +60,7 @@ export const ChartEmptyState: FC<ChartEmptyStateProps> = ({
               strokeWidth="1.5"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className="mb-2 text-[#475569]"
+              className="mb-2 text-[var(--text-muted)]"
               aria-hidden="true"
             >
               {/* Candlestick chart icon */}
@@ -75,14 +75,14 @@ export const ChartEmptyState: FC<ChartEmptyStateProps> = ({
               <rect x="3" y="10" width="6" height="7" rx="1" />
             </svg>
             <div
-              className="text-[15px] font-semibold text-[#94a3b8]"
-              style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif" }}
+              className="text-[15px] font-semibold text-[var(--text-secondary)]"
+              style={{ fontFamily: "var(--font-display)" }}
             >
               No chart data yet
             </div>
             <div
-              className="mt-1 text-xs text-[#475569]"
-              style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif" }}
+              className="mt-1 text-xs text-[var(--text-muted)]"
+              style={{ fontFamily: "var(--font-display)" }}
             >
               Price history will appear once trading begins
             </div>

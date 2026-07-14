@@ -18,6 +18,7 @@ import {
   queryStatsAggregate,
   queryKnownSlabs,
 } from "@/lib/indexer-db";
+import { getMultipleAccountsInfoChunked } from "@/lib/rpc-chunk";
 import type { Database } from "@/lib/database.types";
 export const dynamic = "force-dynamic";
 
@@ -79,6 +80,56 @@ function zeroStats() {
  * nothing, so the caller falls through to the indexer/Supabase paths instead
  * of masking a real outage as "0 markets".
  */
+/**
+ * QA 2026-07-12: consistency-first stats path — aggregate over the SAME
+ * market list `/api/markets` serves the rest of the site.
+ *
+ * The raw-discovery path below counts every v17 market-group account ever
+ * deployed to the devnet program (161 at last audit — bug-hunt leftovers,
+ * abandoned wizard launches, test junk), while `/api/markets` applies the
+ * curation/active/zombie filtering and shows 6. The dashboard's
+ * ProtocolStatsBar rendered THIS endpoint's numbers ("161 markets / $237K
+ * OI") next to pages showing 6 markets / ~$35K — on a "don't trust, verify"
+ * product that discrepancy reads as fabrication. Self-fetching the sibling
+ * route makes the two definitionally consistent, whatever its filtering
+ * evolves into. Falls through to the discovery path when unavailable.
+ */
+async function computeStatsFromMarketsApi(request: NextRequest): Promise<(ReturnType<typeof zeroStats>) | null> {
+  try {
+    const base = new URL(request.url).origin;
+    const res = await fetch(`${base}/api/markets?limit=500`, { next: { revalidate: 30 } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const markets: Array<Record<string, unknown>> = Array.isArray(data?.markets) ? data.markets : [];
+    if (markets.length === 0) return null;
+
+    let totalOpenInterest = 0;
+    for (const m of markets) {
+      const oiUsd = m.total_open_interest_usd;
+      if (typeof oiUsd === "number" && isSaneMarketValue(oiUsd)) totalOpenInterest += oiUsd;
+    }
+    const totalMarkets = typeof data.total === "number" ? data.total : markets.length;
+    const activeTotal = typeof data.activeTotal === "number" ? data.activeTotal : markets.length;
+
+    return {
+      totalMarkets,
+      activeTotal,
+      totalListedMarkets: totalMarkets,
+      // No on-chain source for trade history — honest zeros, same as the
+      // discovery path below.
+      totalVolume24h: 0,
+      totalOpenInterest,
+      totalTraders: 0,
+      trades24h: 0,
+      updatedAt: new Date().toISOString(),
+      live: true,
+    };
+  } catch (err) {
+    console.warn("[/api/stats] markets-api consistency path failed:", err);
+    return null;
+  }
+}
+
 async function computeStatsFromOnChainDiscovery(): Promise<(ReturnType<typeof zeroStats>) | null> {
   const cfg = getConfig();
   if (cfg.network !== "devnet") return null;
@@ -153,7 +204,9 @@ async function computeStatsFromOnChainDiscovery(): Promise<(ReturnType<typeof ze
  *  - Total open interest (USD) → batch getMultipleAccountsInfo for known slabs,
  *    parseEngine() per slab, sum (longOi + shortOi).
  *    Assumes 6-decimal USDC collateral for USD conversion (devnet playground invariant).
- *  - Volume 24h (USD) → raw collateral-unit sum divided by 1e6 (same 6-decimal assumption).
+ *  - Volume 24h (USD) → queryStatsAggregate() already returns real USD dollars
+ *    (size × price, summed server-side — see StatsAggregate.volume24hRaw's doc
+ *    comment); no further collateral-decimals division here.
  *
  * All sub-steps degrade gracefully: a failed RPC/DB call yields zeros for that
  * sub-component rather than propagating an error.
@@ -173,7 +226,10 @@ async function computeStatsFromIndexer(): Promise<ReturnType<typeof zeroStats>> 
     try {
       const connection = new Connection(getRpcEndpoint(), "confirmed");
       const pubkeys = knownSlabs.map((s) => new PublicKey(s));
-      const accountInfos = await connection.getMultipleAccountsInfo(pubkeys, "confirmed");
+      // I: queryKnownSlabs() caps at exactly 100 today (LIMIT 100), which sits
+      // right at the getMultipleAccountsInfo ceiling — chunked defensively so
+      // this doesn't silently break the moment that SQL cap is ever raised.
+      const accountInfos = await getMultipleAccountsInfoChunked(connection, pubkeys, "confirmed");
       for (const info of accountInfos) {
         if (!info) continue;
         try {
@@ -197,11 +253,16 @@ async function computeStatsFromIndexer(): Promise<ReturnType<typeof zeroStats>> 
     }
   }
 
-  // Volume: raw collateral units → USD (assumes 6-decimal USDC collateral)
+  // B: agg.volume24hRaw is already real USD dollars (queryStatsAggregate now
+  // multiplies by each trade's own price server-side, mirroring
+  // queryLeaderboard) — no collateral-decimals division here. The previous
+  // `/ COLLATERAL_FACTOR` treated a heterogeneous sum of raw base-asset
+  // quantities as if it were a collateral-atom count, which was wrong on
+  // both counts (wrong unit AND wrong divisor).
   const totalVolume24h =
     agg.volume24hRaw > BigInt(Number.MAX_SAFE_INTEGER)
-      ? Number.MAX_SAFE_INTEGER / COLLATERAL_FACTOR
-      : Number(agg.volume24hRaw) / COLLATERAL_FACTOR;
+      ? Number.MAX_SAFE_INTEGER
+      : Number(agg.volume24hRaw);
 
   return {
     totalMarkets: agg.marketCount,
@@ -248,7 +309,13 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // ── PRIMARY PATH: on-chain discovery (devnet, no DB dependency) ──────────
+  // ── PRIMARY PATH: aggregate the same curated list /api/markets serves ────
+  const marketsApiStats = await computeStatsFromMarketsApi(request);
+  if (marketsApiStats) {
+    return NextResponse.json(marketsApiStats, { headers: STATS_CACHE_HEADERS });
+  }
+
+  // ── SECONDARY PATH: raw on-chain discovery (devnet, no DB dependency) ────
   const onChainStats = await computeStatsFromOnChainDiscovery();
   if (onChainStats) {
     return NextResponse.json(onChainStats, { headers: STATS_CACHE_HEADERS });

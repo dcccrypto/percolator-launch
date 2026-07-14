@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useEarnStats } from '@/hooks/useEarnStats';
 import { ScrollReveal } from '@/components/ui/ScrollReveal';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
+import { VaultCardSkeleton } from '@/components/earn/VaultCardSkeleton';
 
 const EarnHeader = dynamic(
   () => import('@/components/earn/EarnHeader').then((m) => m.EarnHeader),
@@ -66,30 +67,7 @@ const VaultGrid = dynamic(
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="border border-[var(--border)] bg-[var(--panel-bg)] p-5 space-y-4 rounded-sm">
-              <div className="flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                  <ShimmerSkeleton className="w-8 h-8 rounded-full" />
-                  <div>
-                    <ShimmerSkeleton className="h-4 w-20 mb-1" />
-                    <ShimmerSkeleton className="h-3 w-16" />
-                  </div>
-                </div>
-                <div className="text-right space-y-1">
-                  <ShimmerSkeleton className="h-2.5 w-12" />
-                  <ShimmerSkeleton className="h-5 w-16" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                {[1, 2, 3, 4].map(j => (
-                  <div key={j} className="space-y-1">
-                    <ShimmerSkeleton className="h-2 w-10" />
-                    <ShimmerSkeleton className="h-4.5 w-16" />
-                  </div>
-                ))}
-              </div>
-              <ShimmerSkeleton className="h-2 w-full mt-2" />
-            </div>
+            <VaultCardSkeleton key={i} />
           ))}
         </div>
       </div>
@@ -134,11 +112,9 @@ const InsuranceFundDisplay = dynamic(
 );
 
 export default function EarnPage() {
-  useEffect(() => {
-    document.title = 'Earn — Percolator';
-  }, []);
-
   const { stats, loading, error } = useEarnStats();
+  const [dismissedError, setDismissedError] = useState<string | null>(null);
+  const showError = error && error !== dismissedError;
 
   return (
     <div className="min-h-[calc(100dvh-48px)] animate-fade-in">
@@ -172,7 +148,7 @@ export default function EarnPage() {
                   {stats.markets.length} market{stats.markets.length !== 1 ? 's' : ''}
                 </span>
               </div>
-              <VaultGrid markets={stats.markets} loading={loading} />
+              <VaultGrid markets={stats.markets} loading={loading} error={error} />
             </ScrollReveal>
           </div>
 
@@ -206,7 +182,7 @@ export default function EarnPage() {
                   <Step
                     num={3}
                     title="Track Yield"
-                    desc="Monitor your APY, share value, and position in real-time"
+                    desc="Monitor your share value and position in real-time"
                   />
                   <Step
                     num={4}
@@ -232,9 +208,19 @@ export default function EarnPage() {
         </div>
 
         {/* Error toast */}
-        {error && (
-          <div className="fixed bottom-4 right-4 z-50 bg-[var(--short)]/10 border border-[var(--short)]/30 rounded-sm px-4 py-3 text-[12px] text-[var(--short)]">
-            {error}
+        {showError && (
+          <div
+            role="alert"
+            className="fixed bottom-4 right-4 z-50 flex items-start gap-3 bg-[var(--short)]/10 border border-[var(--short)]/30 rounded-sm px-4 py-3 text-[12px] text-[var(--short)]"
+          >
+            <span>{error}</span>
+            <button
+              onClick={() => setDismissedError(error)}
+              aria-label="Dismiss error"
+              className="text-[var(--short)]/70 hover:text-[var(--short)] transition-colors"
+            >
+              ✕
+            </button>
           </div>
         )}
       </div>

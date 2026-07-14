@@ -24,6 +24,7 @@ import {
   deriveVaultAuthority,
 } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
+import { getPortfolioRawSnapshot, isLpPortfolio, makePortfolioScanKey } from "@/lib/userAccountScan";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { assertKnownProgram } from "@/lib/programAllowlist";
 import { humanizeError } from "@/lib/errorMessages";
@@ -63,7 +64,12 @@ async function findV17Portfolio(
         { memcmp: { offset: 116, bytes: ownerPk.toBase58() } },
       ],
     });
-    if (accounts.length === 0) return null;
+    // Drop the market's LP portfolio BEFORE the sort/pick below — CRITICAL:
+    // a market CREATOR depositing on their own market must create/top up
+    // THEIR OWN portfolio, never the LP (the LP's owner == the creator's
+    // wallet). See isLpPortfolio's doc comment.
+    const nonLpAccounts = accounts.filter(({ account }) => !isLpPortfolio(account.data));
+    if (nonLpAccounts.length === 0) return null;
     // M10: getProgramAccounts doesn't guarantee stable ordering across RPC
     // nodes/calls. If more than one account ever matches this owner+market
     // filter, picking an arbitrary array element can select a DIFFERENT
@@ -71,7 +77,7 @@ async function findV17Portfolio(
     // same wallet+market — deposit, withdraw, and display would silently
     // disagree about which account holds the user's funds. Sort
     // deterministically by pubkey so every caller converges on the same one.
-    const sorted = [...accounts].sort((a, b) => a.pubkey.toBase58().localeCompare(b.pubkey.toBase58()));
+    const sorted = [...nonLpAccounts].sort((a, b) => a.pubkey.toBase58().localeCompare(b.pubkey.toBase58()));
     // Defense-in-depth: re-verify the mutable owner actually matches after fetch —
     // memcmp filters are advisory server-side; don't trust them blindly.
     const data = sorted[0].account.data;
@@ -132,19 +138,25 @@ export function useDeposit(slabAddress: string) {
         // best-effort and let the chain surface any error naturally.
         // ----------------------------------------------------------------
         let slabData: Uint8Array | undefined;
-        try {
-          const slabInfo = await connection.getAccountInfo(slabPk);
-          if (slabInfo === null) {
-            throw new Error(
-              "Market not found on current network. Please switch networks in your wallet and refresh.",
-            );
+        // Latency: SlabProvider having parsed a v17 config for this slab
+        // proves the market exists on THIS connection's network AND settles
+        // the layout question — both purposes of this refetch. Only pay the
+        // round-trip when the provider hasn't loaded yet (first render).
+        if (wrapperConfigV17 == null) {
+          try {
+            const slabInfo = await connection.getAccountInfo(slabPk);
+            if (slabInfo === null) {
+              throw new Error(
+                "Market not found on current network. Please switch networks in your wallet and refresh.",
+              );
+            }
+            if (slabInfo) {
+              slabData = new Uint8Array(slabInfo.data);
+            }
+          } catch (e) {
+            if (e instanceof Error && e.message.includes("switch networks")) throw e;
+            // RPC error — fall through, let the tx surface any on-chain failure
           }
-          if (slabInfo) {
-            slabData = new Uint8Array(slabInfo.data);
-          }
-        } catch (e) {
-          if (e instanceof Error && e.message.includes("switch networks")) throw e;
-          // RPC error — fall through, let the tx surface any on-chain failure
         }
 
         const instructions: TransactionInstruction[] = [];
@@ -173,10 +185,25 @@ export function useDeposit(slabAddress: string) {
           // Portfolio accounts in v17 are standalone program-owned accounts.
           // We must find or create the user's portfolio account.
 
+          // Latency: the ATA-existence check and the portfolio lookup are
+          // independent — run them concurrently instead of serially. The
+          // portfolio lookup itself is usually FREE: the shared scan store
+          // (useUserAccount and friends) already knows the pubkey, which
+          // never changes for a (wallet, market) pair; the program scan is
+          // only the cold-start fallback.
+          const [ataExists, resolvedPortfolioPk] = await Promise.all([
+            getAccount(connection, userAta).then(() => true, () => false),
+            (async () => {
+              const snap = getPortfolioRawSnapshot(
+                makePortfolioScanKey(programId, slabAddress, wallet.publicKey!),
+              );
+              if (snap && snap.portfolio.owner.equals(wallet.publicKey!)) return snap.pubkey;
+              return findV17Portfolio(connection, programId, slabPk, wallet.publicKey!);
+            })(),
+          ]);
+
           // Ensure user ATA exists (prevents token transfer failure)
-          try {
-            await getAccount(connection, userAta);
-          } catch {
+          if (!ataExists) {
             instructions.push(
               createAssociatedTokenAccountInstruction(
                 wallet.publicKey,
@@ -188,7 +215,7 @@ export function useDeposit(slabAddress: string) {
           }
 
           // Find or create the user's portfolio account.
-          let portfolioPk = await findV17Portfolio(connection, programId, slabPk, wallet.publicKey);
+          let portfolioPk = resolvedPortfolioPk;
 
           if (!portfolioPk && !params.accountExists) {
             // No portfolio for this user — create one and run InitPortfolio (tag 1).

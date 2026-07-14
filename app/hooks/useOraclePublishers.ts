@@ -80,6 +80,11 @@ export function useOraclePublishers(): OraclePublishersState {
     if (!mode) return;
 
     let nextIntervalMs = POLL_INTERVAL_MS;
+    // Flips true in the cleanup below. Guards the `finally` block's reschedule
+    // so an in-flight fetch that resolves (or aborts) AFTER cleanup already ran
+    // can't spin up a new setInterval that nothing will ever clear again — a
+    // zombie 60s poller per panel open/close.
+    let disposed = false;
 
     const fetchPublishers = async () => {
       abortRef.current?.abort();
@@ -113,6 +118,8 @@ export function useOraclePublishers(): OraclePublishersState {
 
         const data = await resp.json();
 
+        if (controller.signal.aborted) return;
+
         setState({
           publisherCount: data.publisherCount ?? null,
           publisherTotal: data.publisherTotal ?? null,
@@ -131,15 +138,21 @@ export function useOraclePublishers(): OraclePublishersState {
           error: err instanceof Error ? err.message : String(err),
         }));
       } finally {
-        // Reschedule with the appropriate interval (normal or back-off)
-        clearInterval(intervalRef.current);
-        intervalRef.current = setInterval(fetchPublishers, nextIntervalMs);
+        // Only reschedule if the effect is still mounted. Without this guard,
+        // a fetch that resolves/aborts/errors AFTER cleanup already called
+        // abort()+clearInterval() would set up a brand-new interval that the
+        // (already-run) cleanup can never clear — a zombie 60s poller.
+        if (!disposed) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = setInterval(fetchPublishers, nextIntervalMs);
+        }
       }
     };
 
     fetchPublishers();
 
     return () => {
+      disposed = true;
       abortRef.current?.abort();
       clearInterval(intervalRef.current);
     };

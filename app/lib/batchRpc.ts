@@ -37,6 +37,22 @@ const UNBATCHABLE_METHODS = new Set([
   "getSignatureStatuses",
 ]);
 
+/**
+ * Latency-critical methods flushed IMMEDIATELY instead of waiting out the
+ * coalescing window. These sit on the transaction-submission critical path
+ * (confirm click → wallet popup), where the batch window is pure added
+ * latency: they fire as one-off calls at click time, so there is nothing to
+ * coalesce them with — but each still paid the full window before its batch
+ * flushed. They still ride the normal batch pipeline (dedupe, retry,
+ * backoff); only the timer wait is skipped. Anything already queued flushes
+ * with them, so no other request is ever delayed by this.
+ */
+const FAST_FLUSH_METHODS = new Set([
+  "getLatestBlockhash",
+  "getRecentPrioritizationFees",
+  "getBalance",
+]);
+
 /** Pending request waiting to be batched */
 interface PendingRequest {
   id: number;
@@ -242,8 +258,9 @@ export function createBatchRpc(config: BatchRpcConfig) {
       dedupeCache.set(key, promise);
     }
 
-    // Schedule flush, or flush immediately if batch is full
-    if (queue.length >= maxBatchSize) {
+    // Schedule flush — immediately when the batch is full or the method is
+    // latency-critical (tx-submission path, see FAST_FLUSH_METHODS).
+    if (queue.length >= maxBatchSize || FAST_FLUSH_METHODS.has(method)) {
       if (flushTimer) {
         clearTimeout(flushTimer);
         flushTimer = null;
@@ -377,9 +394,11 @@ export function getBatchRpc(): ReturnType<typeof createBatchRpc> {
       // on the trade page to coalesce into fewer batch requests. The wider window
       // reduces the ~6 sequential batch flushes per render cycle to ~3.
       batchWindowMs: 100,
-      // 50 slots (up from 30) accommodates the ~40 RPC calls per trade page mount
-      // in a single batch when they all arrive within the 100ms window.
-      maxBatchSize: 50,
+      // 40 slots (up from 30) accommodates the ~40 RPC calls per trade page mount
+      // in a single batch when they all arrive within the 100ms window. Must not
+      // exceed the server's MAX_BATCH_SIZE (app/api/rpc/route.ts) or every batch
+      // above the cap gets rejected with HTTP 400 for all callers in it.
+      maxBatchSize: 40,
     });
   }
   return _batchRpc;

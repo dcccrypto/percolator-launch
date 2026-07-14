@@ -6,7 +6,7 @@ export default function MarketsLoading() {
       {/* Grid background */}
       <div className="absolute inset-x-0 top-0 h-32 bg-grid pointer-events-none" />
 
-      <div className="relative mx-auto max-w-4xl px-4 pt-4 pb-10">
+      <div className="relative mx-auto max-w-[1100px] px-4 sm:px-6 pt-4 pb-10">
         {/* Header skeleton */}
         <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>

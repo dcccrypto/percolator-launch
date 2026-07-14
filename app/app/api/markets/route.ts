@@ -18,9 +18,15 @@ import { isSaneMarketValue, isActiveMarket, isZombieMarket } from "@/lib/activeM
 import { getKnownMarketLpCapitals, scanEnabledMarketLpCapitals } from "@/lib/lp-portfolio";
 import { isPhantomOpenInterest, MIN_VAULT_FOR_OI } from "@/lib/phantom-oi";
 import { computeDisplayOiUsd } from "@/lib/oi-display";
+import { hasInvisibleOrBidi } from "@/lib/text-safety";
+import { sanitizeLogoUrl } from "@/lib/token-metadata-validators";
 import { computeMarketHealthFromStats } from "@/lib/health";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import { SLUG_ALIASES } from "@/lib/symbol-utils";
+import {
+  buildMarketRegistrationMessage,
+  type MarketRegistrationPayload,
+} from "@/lib/market-registration-auth";
 
 /**
  * GH#1526: Map frontend oracle_mode filter values to DB-stored values.
@@ -503,7 +509,11 @@ async function onChainOrStaticResponse(request: NextRequest, reason: string): Pr
           const name = String(m.name ?? "").toLowerCase();
           const slab = String(m.slab_address ?? "").toLowerCase();
           const mint = String(m.mint_address ?? "").toLowerCase();
-          return symbol.includes(searchTrimmed) || name.includes(searchTrimmed) || slab.includes(searchTrimmed) || mint.includes(searchTrimmed);
+          // mainnet_ca is the TOKEN's identity on the playground (mint_address
+          // is the shared sim-USDC collateral) — searching by a token's CA must
+          // find its market (create-wizard duplicate check + markets search box).
+          const ca = String(m.mainnet_ca ?? "").toLowerCase();
+          return symbol.includes(searchTrimmed) || name.includes(searchTrimmed) || slab.includes(searchTrimmed) || mint.includes(searchTrimmed) || ca.includes(searchTrimmed);
         });
 
       if (filtered.length > 0) {
@@ -556,7 +566,7 @@ async function onChainOrStaticResponse(request: NextRequest, reason: string): Pr
 
         return NextResponse.json(
           { total: filteredWithLp.length, activeTotal: filteredWithLp.length, marketsWithPrice, zombieCount: 0, markets: filteredWithLp },
-          { headers: { "Cache-Control": "no-store", "X-Percolator-Data-Source": "on-chain-discovery" } },
+          { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30", "X-Percolator-Data-Source": "on-chain-discovery" } },
         );
       }
     }
@@ -590,10 +600,14 @@ function fallbackMarketsResponse(request: NextRequest, reason: string): NextResp
       const name = String(m.name ?? "").toLowerCase();
       const slab = String(m.slab_address ?? "").toLowerCase();
       const mint = String(m.mint_address ?? "").toLowerCase();
+      // Same mainnet_ca match as the on-chain-discovery path above — the CA is
+      // the token's identity on the playground (mint_address is shared sim-USDC).
+      const ca = String((m as Record<string, unknown>).mainnet_ca ?? "").toLowerCase();
       return symbol.includes(searchTrimmed) ||
         name.includes(searchTrimmed) ||
         slab.includes(searchTrimmed) ||
-        mint.includes(searchTrimmed);
+        mint.includes(searchTrimmed) ||
+        ca.includes(searchTrimmed);
     })
     .filter((m) => !dbOracleMode || m.oracle_mode === dbOracleMode);
 
@@ -1040,6 +1054,17 @@ export async function GET(request: NextRequest) {
             const mintAddress = ((m as Record<string, unknown>).mint_address as string | null) ?? "";
             const mainnetCa = ((m as Record<string, unknown>).mainnet_ca as string | null) ?? "";
             if (matchingMints.has(mintAddress) || matchingMints.has(mainnetCa)) return true;
+            // Direct address match: searching a token's CA (or mint/slab) must find
+            // its market — used by the create-wizard's one-market-per-token check
+            // and CA lookups in the markets search box. Substring like the other
+            // GET paths' filters.
+            if (
+              mintAddress.toLowerCase().includes(q) ||
+              mainnetCa.toLowerCase().includes(q) ||
+              (((m as Record<string, unknown>).slab_address as string | null) ?? "").toLowerCase().includes(q)
+            ) {
+              return true;
+            }
             return false;
           });
         })()
@@ -1403,11 +1428,38 @@ export async function POST(req: NextRequest) {
     // Previously, nonce was consumed first, then signature checked — allowing an attacker
     // to burn a victim's nonces by submitting invalid signatures. Now we verify the
     // cryptographic proof first (cheap, no DB write) so invalid signatures never touch nonces.
-    const nonceBytes = new Uint8Array(Buffer.from(nonce, "utf-8"));
+    /*
+     * Bind authorization to the complete registration payload.
+     * The shared helper excludes only nonce and signature from
+     * the authentication envelope.
+     */
+    let signingMessage: Uint8Array;
+
+    try {
+      signingMessage =
+        buildMarketRegistrationMessage({
+          nonce,
+          deployer,
+          payload:
+            body as MarketRegistrationPayload,
+        });
+    } catch {
+      return NextResponse.json(
+        {
+          error:
+            "Invalid market registration authorization payload.",
+        },
+        { status: 400 },
+      );
+    }
     const sigBytes = new Uint8Array(signatureBytes);
     let sigValid = false;
     try {
-      sigValid = nacl.sign.detached.verify(nonceBytes, sigBytes, deployerPubkeyBytes);
+      sigValid = nacl.sign.detached.verify(
+      signingMessage,
+      sigBytes,
+      deployerPubkeyBytes,
+    );
     } catch {
       // nacl throws on invalid input lengths — treat as signature failure
       sigValid = false;
@@ -1424,7 +1476,7 @@ export async function POST(req: NextRequest) {
         }
       );
       return NextResponse.json(
-        { error: "Signature verification failed. Ensure you signed the nonce bytes with the deployer keypair." },
+        { error: "Signature verification failed. Ensure you signed the exact market-registration payload with the deployer keypair." },
         { status: 401 }
       );
     }
@@ -1528,9 +1580,12 @@ export async function POST(req: NextRequest) {
 
   // GH#1963: Validate mainnet_ca is a valid Solana pubkey (when provided).
   // Previously inserted raw — could accept arbitrary strings that poison downstream UI/parsers.
+  // Canonicalized (PublicKey round-trip) so the one-market-per-token dedupe below can't be
+  // dodged with a non-canonical base58 encoding of the same key.
+  let canonicalMainnetCa: string | null = null;
   if (mainnet_ca) {
     try {
-      new PublicKey(mainnet_ca);
+      canonicalMainnetCa = new PublicKey(mainnet_ca).toBase58();
     } catch {
       return NextResponse.json(
         { error: "Invalid mainnet_ca: must be a valid Solana public key" },
@@ -1566,11 +1621,33 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
+  // SEC: reject invisible / bidirectional / format characters (RTL overrides,
+  // zero-width chars, etc.) \u2014 the name-impersonation vectors the sweep
+  // flagged. These are NOT control chars (they passed the check above).
+  // Visible Unicode (accents, CJK, emoji) stays allowed. See hasInvisibleOrBidi.
+  if (hasInvisibleOrBidi(resolvedName)) {
+    return NextResponse.json(
+      { error: "Invalid name: must not contain invisible or bidirectional formatting characters" },
+      { status: 400 }
+    );
+  }
 
-  // #813: Validate dex_pool_address is a valid Solana pubkey (when provided)
+  // SEC: sanitize the attacker-suppliable logo_url with the SAME allowlist
+  // (https/ipfs only, ≤500 chars) that external-API metadata already gets —
+  // the raw body value was previously stored and rendered as an <img src>,
+  // letting a market creator point every viewer's browser at an arbitrary
+  // host (tracking pixel / phishing graphic inside the trusted UI). Dropped
+  // to null (fallback avatar) when invalid rather than rejecting the launch.
+  const sanitizedLogoUrl = sanitizeLogoUrl(logo_url);
+
+  // #813: Validate dex_pool_address is a valid Solana pubkey (when provided).
+  // Canonicalized (PublicKey round-trip) so it's a reliable second dedupe key
+  // below — the pool is the token's on-chain identity when mainnet_ca is
+  // omitted, and a non-canonical encoding must not dodge the check.
+  let canonicalDexPool: string | null = null;
   if (dex_pool_address) {
     try {
-      new PublicKey(dex_pool_address);
+      canonicalDexPool = new PublicKey(dex_pool_address).toBase58();
     } catch {
       return NextResponse.json(
         { error: "Invalid dex_pool_address: must be a valid Solana public key" },
@@ -1748,6 +1825,44 @@ export async function POST(req: NextRequest) {
     supabase = getServiceClient();
   } catch {
     // Supabase not configured — register in the playground-local registry.
+    //
+    // One market per token: even without a DB, reject a SECOND market for the
+    // same underlying token. Keyed on mainnet_ca (the token's identity field —
+    // mint_address is the COLLATERAL mint, the same sim-USDC for every
+    // playground market, so deduping on it would false-positive everything).
+    // The Blob keeper-registry is the closest thing to a cross-instance
+    // market list in this mode; best-effort — an unreadable registry must not
+    // block legitimate launches (fail-open here; the Supabase path below is
+    // the authoritative gate on deployments that have a DB).
+    // Dedupe on the token's identity — mainnet_ca OR the DEX pool. Keying on
+    // BOTH closes the bypass where omitting the optional mainnet_ca skipped
+    // the check entirely: any keeper-priced market still carries a pool, so a
+    // clone is caught even with no CA. (A pure admin-price market with neither
+    // has no external token identity to duplicate.)
+    if (canonicalMainnetCa || canonicalDexPool) {
+      try {
+        const registered = await readRegisteredMarkets();
+        const dup = registered.find(
+          (r) =>
+            r.slabAddress !== slab_address &&
+            ((canonicalMainnetCa != null && r.mainnetCA === canonicalMainnetCa) ||
+              (canonicalDexPool != null && r.poolAddress === canonicalDexPool)),
+        );
+        if (dup) {
+          return NextResponse.json(
+            {
+              error:
+                `A market for this token already exists (${dup.symbol ?? dup.label} — slab ${dup.slabAddress}). ` +
+                "One market per token: trade the existing market instead of launching a duplicate.",
+              existing_slab: dup.slabAddress,
+            },
+            { status: 409 },
+          );
+        }
+      } catch {
+        /* registry unreadable — fail open, see comment above */
+      }
+    }
     registerPlaygroundSlab(slab_address);
     // Return a synthetic market row so the client flow can continue.
     const syntheticMarket = {
@@ -1759,8 +1874,8 @@ export async function POST(req: NextRequest) {
       deployer,
       oracle_authority: oracle_authority || deployer,
       oracle_mode: resolvedOracleMode,
-      dex_pool_address: dex_pool_address || null,
-      mainnet_ca: mainnet_ca || null,
+      dex_pool_address: canonicalDexPool,
+      mainnet_ca: canonicalMainnetCa,
       max_leverage: max_leverage || 10,
       trading_fee_bps: trading_fee_bps || 10,
     };
@@ -1794,6 +1909,56 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // One market per token: reject registering a SECOND market for the same
+  // underlying token on this network. Keyed on the token's identity —
+  // mainnet_ca OR the DEX pool — NOT mint_address, which is the on-chain
+  // COLLATERAL mint (the same sim-USDC for every playground market; deduping
+  // on it would 409 every launch). Both keys are PublicKey round-trips of the
+  // validated input, so alternate encodings can't dodge the check.
+  //
+  // SEC: mainnet_ca is OPTIONAL, so keying on it alone let a hand-crafted POST
+  // skip the gate by omitting it. dex_pool_address is the keeper's pricing
+  // source — a clone that omits mainnet_ca still names the same pool, so
+  // deduping on either key closes that bypass. (A pure admin-price market with
+  // neither key has no external token identity to duplicate.) Both base58
+  // canonical values are safe to interpolate into the PostgREST .or() filter —
+  // the base58 alphabet contains none of its delimiters (',' '.' '(' ')').
+  // Duplicates fragment liquidity and let a clone impersonate an existing
+  // listing; each market is isolated so this is a UX/trust policy, not a
+  // fund-safety guard.
+  const dedupeFilters: string[] = [];
+  if (canonicalMainnetCa) dedupeFilters.push(`mainnet_ca.eq.${canonicalMainnetCa}`);
+  if (canonicalDexPool) dedupeFilters.push(`dex_pool_address.eq.${canonicalDexPool}`);
+  if (dedupeFilters.length > 0) {
+    const { data: dupTokenRows, error: dupTokenError } = await supabase
+      .from("markets")
+      .select("slab_address, symbol")
+      .eq("network", insertNetwork)
+      .neq("slab_address", slab_address)
+      .or(dedupeFilters.join(","))
+      .limit(1);
+
+    if (dupTokenError) {
+      return NextResponse.json(
+        { error: "Failed to validate existing markets for this token" },
+        { status: 500 },
+      );
+    }
+
+    const dupToken = dupTokenRows?.[0];
+    if (dupToken) {
+      return NextResponse.json(
+        {
+          error:
+            `A market for this token already exists (${dupToken.symbol ?? "unnamed"} — slab ${dupToken.slab_address}). ` +
+            "One market per token: trade the existing market instead of launching a duplicate.",
+          existing_slab: dupToken.slab_address,
+        },
+        { status: 409 },
+      );
+    }
+  }
+
   // Insert market
 
   const { data: market, error: marketError } = await supabase.from("markets").insert({
@@ -1810,10 +1975,12 @@ export async function POST(req: NextRequest) {
       trading_fee_bps: trading_fee_bps || 10,
       lp_collateral,
       matcher_context,
-      logo_url: logo_url || null,
-      mainnet_ca: mainnet_ca || null,
+      logo_url: sanitizedLogoUrl,
+      // Store the canonical (PublicKey round-trip) forms so the dedupe keys
+      // above match on re-registration — a raw value could differ by encoding.
+      mainnet_ca: canonicalMainnetCa,
       oracle_mode: resolvedOracleMode,
-      dex_pool_address: dex_pool_address || null,
+      dex_pool_address: canonicalDexPool,
       network: insertNetwork,
     })
     .select()
@@ -1834,10 +2001,10 @@ export async function POST(req: NextRequest) {
   });
 
   // PERC-465: Hot-register with oracle keeper service (server-to-server, non-fatal)
-  if (mainnet_ca && process.env.KEEPER_REGISTER_SECRET) {
+  if (canonicalMainnetCa && process.env.KEEPER_REGISTER_SECRET) {
     try {
       const keeperRegisterUrl = `${process.env.NEXT_PUBLIC_BASE_URL ?? ""}/api/oracle-keeper/register`;
-      const keeperBody = JSON.stringify({ slabAddress: slab_address, mainnetCA: mainnet_ca });
+      const keeperBody = JSON.stringify({ slabAddress: slab_address, mainnetCA: canonicalMainnetCa });
       // LAUNCH-16: sign instead of forwarding KEEPER_REGISTER_SECRET as a raw header —
       // /api/oracle-keeper/register verifies this same HMAC-SHA256 scheme.
       const { timestamp, signature } = signKeeperRequest(process.env.KEEPER_REGISTER_SECRET, keeperBody);
@@ -1875,11 +2042,11 @@ export async function POST(req: NextRequest) {
   // this ensures the airdrop endpoint can still resolve the token metadata.
   // Only write if we have a valid mint_address and mainnet_ca (to avoid polluting the
   // table with self-referencing devnet-native entries that have no real mainnet CA).
-  if (mint_address && mainnet_ca && mainnet_ca !== mint_address) {
+  if (mint_address && canonicalMainnetCa && canonicalMainnetCa !== mint_address) {
     try {
       await (supabase.from("devnet_mints")).upsert(
         {
-          mainnet_ca,
+          mainnet_ca: canonicalMainnetCa,
           devnet_mint: mint_address,
           // GH#1963: use pre-validated resolvedSymbol/resolvedName
           symbol: resolvedSymbol,

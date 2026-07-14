@@ -1,13 +1,12 @@
 "use client";
 
-import { FC, useMemo } from "react";
+import { FC, memo, useMemo } from "react";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { usePriceFlash } from "@/hooks/usePriceFlash";
-import { MarketLogo } from "@/components/market/MarketLogo";
 import { MarketSwitcher } from "@/components/trade/MarketSwitcher";
 import { formatUsdFromNumber, formatMarkPrice } from "@/lib/format";
 import { computeMarketSpread } from "@/lib/oraclePrice";
@@ -42,7 +41,7 @@ function fundingRateBpsTo8h(rateBps: bigint): number {
 /** P3-3: Market health badge — surfaces oracle/liquidity status in the ticker bar */
 type HealthBadgeState = "live" | "no-oracle" | "no-liquidity" | "inactive";
 
-function MarketHealthBadge({ oracleDown, vaultEmpty }: { oracleDown: boolean; vaultEmpty: boolean }) {
+const MarketHealthBadge = memo(function MarketHealthBadge({ oracleDown, vaultEmpty }: { oracleDown: boolean; vaultEmpty: boolean }) {
   let state: HealthBadgeState;
   if (oracleDown && vaultEmpty) state = "inactive";
   else if (vaultEmpty) state = "no-liquidity";
@@ -67,7 +66,7 @@ function MarketHealthBadge({ oracleDown, vaultEmpty }: { oracleDown: boolean; va
       <span>{label}</span>
     </span>
   );
-}
+});
 
 /**
  * Header mark price with a subtle up/down tick flash — the classic perp-DEX

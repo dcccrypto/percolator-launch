@@ -42,6 +42,10 @@ vi.mock("@solana/web3.js", async (importOriginal) => {
 
 import { getServiceClient } from "@/lib/supabase";
 
+import {
+  buildMarketRegistrationMessage,
+  type MarketRegistrationPayload,
+} from "@/lib/market-registration-auth";
 /** Generate a fresh ed25519 keypair for testing */
 function genKeypair() {
   const kp = nacl.sign.keyPair();
@@ -52,11 +56,27 @@ function genKeypair() {
   };
 }
 
-/** Sign a nonce string with a secret key */
-function signNonce(nonce: string, secretKey: Uint8Array): string {
-  const nonceBytes = new Uint8Array(Buffer.from(nonce, "utf-8"));
-  const sig = nacl.sign.detached(nonceBytes, secretKey);
-  return Buffer.from(sig).toString("base64");
+/** Sign one exact market registration payload. */
+function signRegistration(
+  body: MarketRegistrationPayload,
+  secretKey: Uint8Array,
+  nonce = NONCE,
+): string {
+  const message =
+    buildMarketRegistrationMessage({
+      nonce,
+      deployer: String(body.deployer),
+      payload: body,
+    });
+
+  const signature = nacl.sign.detached(
+    message,
+    secretKey,
+  );
+
+  return Buffer.from(
+    signature,
+  ).toString("base64");
 }
 
 const NONCE = "550e8400-e29b-41d4-a716-446655440000";
@@ -140,7 +160,7 @@ describe("POST /api/markets — PERC-8332 deployer auth", () => {
     // claimCount=0 → DB found no matching unused, unexpired nonce for this deployer
     (getServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(buildMockSupabase(0));
     const { POST } = await import("@/app/api/markets/route");
-    const sig = signNonce(NONCE, kp.secretKey);
+    const sig = signRegistration(baseBody, kp.secretKey, NONCE);
     const req = new Request("http://localhost/api/markets", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -157,7 +177,7 @@ describe("POST /api/markets — PERC-8332 deployer auth", () => {
     // Expired nonce: DB's .gt("expires_at", now) filter excludes it → count=0
     (getServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(buildMockSupabase(0));
     const { POST } = await import("@/app/api/markets/route");
-    const sig = signNonce(NONCE, kp.secretKey);
+    const sig = signRegistration(baseBody, kp.secretKey, NONCE);
     const req = new Request("http://localhost/api/markets", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -175,7 +195,7 @@ describe("POST /api/markets — PERC-8332 deployer auth", () => {
     // Already-used nonce: DB's .is("used_at", null) filter excludes it → count=0
     (getServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(buildMockSupabase(0));
     const { POST } = await import("@/app/api/markets/route");
-    const sig = signNonce(NONCE, kp.secretKey);
+    const sig = signRegistration(baseBody, kp.secretKey, NONCE);
     const req = new Request("http://localhost/api/markets", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -195,7 +215,10 @@ describe("POST /api/markets — PERC-8332 deployer auth", () => {
     const { POST } = await import("@/app/api/markets/route");
     // Sign with a different keypair
     const wrongKp = nacl.sign.keyPair();
-    const sig = Buffer.from(nacl.sign.detached(new Uint8Array(Buffer.from(NONCE, "utf-8")), wrongKp.secretKey)).toString("base64");
+    const sig = signRegistration(
+      baseBody,
+      wrongKp.secretKey,
+    );
     const req = new Request("http://localhost/api/markets", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -208,12 +231,75 @@ describe("POST /api/markets — PERC-8332 deployer auth", () => {
     expect(body.error).toMatch(/signature/i);
   });
 
+  it("returns 401 before nonce claim when a signed registration payload is modified", async () => {
+    const mockSupa =
+      buildMockSupabase(1);
+
+    (
+      getServiceClient as ReturnType<
+        typeof vi.fn
+      >
+    ).mockReturnValue(mockSupa);
+
+    const { POST } = await import(
+      "@/app/api/markets/route"
+    );
+
+    const signature = signRegistration(
+      baseBody,
+      kp.secretKey,
+    );
+
+    const tamperedBody = {
+      ...baseBody,
+      symbol: "TAMPERED-PERP",
+    };
+
+    const request = new Request(
+      "http://localhost/api/markets",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          ...tamperedBody,
+          nonce: NONCE,
+          signature,
+        }),
+      },
+    );
+
+    // @ts-ignore - NextRequest wraps Request
+    const response = await POST(
+      request as any,
+    );
+
+    const responseBody =
+      await response.json();
+
+    expect(response.status).toBe(401);
+
+    expect(
+      responseBody.error,
+    ).toMatch(/signature/i);
+
+    /*
+     * Payload verification must fail before the route performs
+     * the atomic market_challenges nonce update.
+     */
+    expect(
+      mockSupa.from,
+    ).not.toHaveBeenCalled();
+  });
+
   it("passes auth check with valid signature (hits on-chain step after)", async () => {
     // Valid nonce, valid sig → auth passes, hits on-chain slab check (which fails with 400)
     const mockSupa = buildMockSupabase(1);
     (getServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(mockSupa);
     const { POST } = await import("@/app/api/markets/route");
-    const sig = signNonce(NONCE, kp.secretKey);
+    const sig = signRegistration(baseBody, kp.secretKey, NONCE);
     const req = new Request("http://localhost/api/markets", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

@@ -13,10 +13,10 @@ interface LpPositionDashboardProps {
   vaultBalance: bigint;
   /** Decimals for collateral */
   decimals: number;
+  /** Decimals for the LP token mint — NOT necessarily the same as collateral decimals */
+  lpDecimals: number;
   /** Collateral symbol */
   collateralSymbol: string;
-  /** Estimated APY % */
-  estimatedApyPct: number;
   /** Redemption rate (e6) */
   redemptionRateE6: bigint;
   /** Loading */
@@ -28,8 +28,8 @@ export function LpPositionDashboard({
   lpSupply,
   vaultBalance,
   decimals,
+  lpDecimals,
   collateralSymbol,
-  estimatedApyPct,
   redemptionRateE6,
   loading,
 }: LpPositionDashboardProps) {
@@ -46,12 +46,6 @@ export function LpPositionDashboard({
     lpSupply > 0n ? (userLpBalance * vaultBalance) / lpSupply : 0n;
 
   const userRedeemableFloat = Number(userRedeemableValue) / Number(divisor);
-
-  // Share value (how much 1 LP token is worth)
-  const shareValue =
-    lpSupply > 0n
-      ? Number(vaultBalance * 1_000_000n / lpSupply) / 1_000_000
-      : 1;
 
   if (loading) {
     return (
@@ -121,23 +115,20 @@ export function LpPositionDashboard({
             <div className="grid grid-cols-2 gap-4">
               <MetricCell
                 label="LP Tokens"
-                value={formatRaw(userLpBalance, decimals)}
+                value={formatRaw(userLpBalance, lpDecimals)}
               />
               <MetricCell
                 label="Pool Share"
                 value={`${userSharePct.toFixed(2)}%`}
                 highlight
               />
+              {/* "Share Value" — how much 1 LP token redeems for. Sourced from the
+                  on-chain redemption rate (vaultTotalAtoms / lpSupply, read fresh
+                  by useInsuranceLP) rather than recomputed locally — the two used
+                  to be shown as separate cells that could visibly disagree. */}
               <MetricCell
                 label="Share Value"
-                value={`${shareValue.toFixed(4)} ${collateralSymbol}`}
-              />
-              <MetricCell
-                label="Est. APY"
-                value={`${estimatedApyPct.toFixed(1)}%`}
-                highlight
-                color="var(--cyan)"
-                tooltip="Estimated from the last 30 days of insurance fund fee revenue. Past performance does not guarantee future returns."
+                value={`${(Number(redemptionRateE6) / 1_000_000).toFixed(4)} ${collateralSymbol}`}
               />
               <MetricCell
                 label="Redemption Rate"

@@ -30,6 +30,7 @@ import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { getEntryPrice, getEntryLeverage, clearEntryPrice } from "@/lib/entry-price";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { getBackendUrl } from "@/lib/config";
+import { pollWhenVisible } from "@/lib/pollWhenVisible";
 import { parseHumanAmount } from "@/lib/parseAmount";
 import {
   formatLeverage,
@@ -77,10 +78,11 @@ function useAdlRank(slabAddress: string, positionIdx: number | null): AdlRankRes
     };
 
     fetchRank();
-    const id = setInterval(fetchRank, 30_000);
+    // Visibility-gated so hidden tabs don't keep polling ADL rankings.
+    const dispose = pollWhenVisible(fetchRank, 30_000);
     return () => {
       cancelled = true;
-      clearInterval(id);
+      dispose();
     };
   }, [slabAddress, positionIdx]);
 
@@ -95,9 +97,10 @@ interface AddMarginModalProps {
   symbol: string;
   decimals: number;
   onClose: () => void;
+  onSuccess?: () => void;
 }
 
-const AddMarginModal: FC<AddMarginModalProps> = ({ slabAddress, userIdx, symbol, decimals, onClose }) => {
+export const AddMarginModal: FC<AddMarginModalProps> = ({ slabAddress, userIdx, symbol, decimals, onClose, onSuccess}) => {
   const [amount, setAmount] = useState("");
   const [lastSig, setLastSig] = useState<string | null>(null);
   const { deposit, loading, error } = useDeposit(slabAddress);
@@ -120,6 +123,10 @@ const AddMarginModal: FC<AddMarginModalProps> = ({ slabAddress, userIdx, symbol,
       const sig = await deposit({ userIdx, amount: parsedAmount, accountExists: true });
       setLastSig(sig ?? null);
       setAmount("");
+
+    // Add margin mutates the slab account. Refresh immediately so capital,
+    // liquidation risk, and position health do not stay stale until polling.
+    onSuccess?.();
     } catch {
       // error shown via hook
     }
@@ -199,7 +206,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const userAccount = realUserAccount ?? (mockMode ? getMockUserAccount(slabAddress) : null);
   const config = useMarketConfig();
   const { engine: engineState, fundingRate } = useEngineState();
-  const { accounts, config: mktConfig, params } = useSlabState();
+  const { accounts, config: mktConfig, params, refresh: refreshSlab } = useSlabState();
   const { priceE6: livePriceE6, priceUsd } = useLivePrice();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
@@ -208,7 +215,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const symbol = marketInfo?.symbol ?? collateralSymbol;
   const decimals = tokenMeta?.decimals ?? 6;
 
-  const { closePosition, loading: closeLoading, error: closeError } = useClosePosition(slabAddress);
+  const { closePosition, loading: closeLoading, error: closeError, prewarmClose } = useClosePosition(slabAddress);
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [showAddMarginModal, setShowAddMarginModal] = useState(false);
 
@@ -491,7 +498,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             {/* Spacer + CLOSE button */}
             <div className="flex-1" />
             <button
-              onClick={() => setShowCloseModal(true)}
+              onClick={() => { prewarmClose(); setShowCloseModal(true); }}
               disabled={closeLoading || lpUnderfunded || !hasValidMark || engineStale}
               title={!hasValidMark ? "Waiting for price data…" : engineStale ? "Market crank behind — trading paused. This market needs a re-seed before closing works." : "Close position"}
               aria-label="Close position"
@@ -648,7 +655,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 + Margin
               </button>
               <button
-                onClick={() => setShowCloseModal(true)}
+                onClick={() => { prewarmClose(); setShowCloseModal(true); }}
                 disabled={closeLoading || lpUnderfunded || !hasValidMark || engineStale}
                 title={!hasValidMark ? "Waiting for price data…" : engineStale ? "Market crank behind — trading paused. This market needs a re-seed before closing works." : undefined}
                 className="flex-1 rounded-none border border-[var(--short)]/30 py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-colors duration-150 hover:bg-[var(--short)]/8 disabled:cursor-not-allowed disabled:opacity-50"
@@ -697,6 +704,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           symbol={symbol}
           decimals={decimals}
           onClose={() => setShowAddMarginModal(false)}
+        onSuccess={refreshSlab}
         />
       )}
     </div>

@@ -56,6 +56,7 @@ import {
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { ClosePositionModal } from "./ClosePositionModal";
+import { OtherMarketPositions } from "./OtherMarketPositions";
 import { WarmupProgress } from "./WarmupProgress";
 import { TradeHistory } from "./TradeHistory";
 import { InfoIcon } from "@/components/ui/Tooltip";
@@ -115,7 +116,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   // is unaffected.
   const marketDisplaySymbol = symbol.replace(/-PERP$/i, "");
 
-  const { closePosition, loading: closeLoading, error: closeError } = useClosePosition(slabAddress);
+  const { closePosition, loading: closeLoading, error: closeError, prewarmClose } = useClosePosition(slabAddress);
   // Called unconditionally, before the `!activeInfo` early return below, per
   // rules of hooks — mirrors MarketInfoBar's MarkPrice / MarketBookCard's
   // Oracle cell (same shared hook, see hooks/usePriceFlash.ts).
@@ -148,6 +149,13 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const wrapped = useNftWrappedPosition(slabAddress, !hasNormalPosition && !mockMode);
   const activeInfo = hasNormalPosition ? userAccount : wrapped;
   const isNftWrapped = !hasNormalPosition && !!wrapped;
+  // Instant reflection of a just-confirmed trade (lib/userAccountScan.ts's
+  // applyConfirmedFill): the SIZE shown is already an on-chain-confirmed
+  // fact, not a guess — this flag only means capital/pnl on this same row
+  // are still the pre-trade values for another second or two, while the
+  // real scan (already in flight) reconciles them. Subtle affordance only;
+  // never blocks interaction.
+  const isSettling = hasNormalPosition && !!realUserAccount?.provisional;
 
   if (!activeInfo) {
     if (!userAccount) return <EmptyState subtitle="Connect your wallet and deposit collateral to start trading." />;
@@ -173,9 +181,17 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   // unrealized PnL instead of naively substituting the mark price, which
   // silently implies zero PnL and cascades into a liq price clamped to
   // "N/A" below. See estimateEntryFromPnl.
+  // E: guard the sentinel BEFORE it feeds estimateEntryFromPnl's math, not
+  // just at display time (the isSentinelValue guard on pnlNative below is a
+  // SEPARATE, later use) — an unguarded u64::MAX-class account.pnl here can
+  // produce an insane `diff` that survives estimateEntryFromPnl's own
+  // entry>0n fallback (e.g. a short's `entry = oraclePrice + diff` stays
+  // positive even when `diff` is astronomically large), poisoning entry/liq/
+  // margin math downstream.
+  const safePnlForEntry = isSentinelValue(account.pnl) ? 0n : account.pnl;
   const entryPriceE6 = resolvedEntryPrice > 0n
     ? resolvedEntryPrice
-    : estimateEntryFromPnl(account.positionSize, account.pnl, currentPriceE6);
+    : estimateEntryFromPnl(account.positionSize, safePnlForEntry, currentPriceE6);
   const maintenanceBps = params?.maintenanceMarginBps ?? 500n;
   const initialMarginBps = params?.initialMarginBps ?? 1000n;
   const hasValidMark = currentPriceE6 > 0n;
@@ -311,6 +327,12 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
               <td className="whitespace-nowrap px-3 py-2.5 text-right" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                 <span className="text-[var(--text)]">{formatTokenAmount(absPosition, decimals)}</span>
                 <span className="ml-1 text-[var(--text-secondary)]">{symbol}</span>
+                {isSettling && (
+                  <span
+                    className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)]/60 animate-pulse align-middle"
+                    title="Size reflects your confirmed trade — balance is still settling"
+                  />
+                )}
               </td>
               <td className="whitespace-nowrap px-3 py-2.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                 {formatUsdPriceE6(entryPriceE6)}
@@ -371,7 +393,10 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                   </span>
                 ) : (
                   <button
-                    onClick={() => setShowCloseModal(true)}
+                    // prewarmClose: start the fresh position read + tx prewarms
+                    // the moment the modal opens, so the confirm click reaches
+                    // the wallet popup with zero blocking round-trips.
+                    onClick={() => { prewarmClose(); setShowCloseModal(true); }}
                     disabled={closeLoading || lpUnderfunded || !hasValidMark || engineStale}
                     title={!hasValidMark ? "Waiting for price data…" : engineStale ? "Market crank behind — trading paused. This market needs a re-seed before closing works." : undefined}
                     className="rounded-none border border-[var(--short)]/30 px-3 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-colors duration-150 hover:bg-[var(--short)]/8 hover:border-[var(--short)]/50 disabled:cursor-not-allowed disabled:opacity-50"
@@ -458,9 +483,20 @@ const PositionsDockInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           PositionsDock boundary's count (see BUILD-LOG.md Phase 5) — i.e.
           the shell isn't adding re-renders on top of what the row itself
           needs. */}
-      <RenderProfiler id="PositionRow">
-        <PositionRow slabAddress={slabAddress} />
-      </RenderProfiler>
+      <div>
+        {/* This market's position stays pinned first, its own labeled
+            section; every other market the wallet holds follows below so a
+            trader never navigates away just to watch or close elsewhere. */}
+        <div className="flex items-center gap-2 px-4 pb-1 pt-3">
+          <span className="text-[9px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/80">
+            // this market
+          </span>
+        </div>
+        <RenderProfiler id="PositionRow">
+          <PositionRow slabAddress={slabAddress} />
+        </RenderProfiler>
+        <OtherMarketPositions currentSlab={slabAddress} />
+      </div>
       <TradeHistory slabAddress={slabAddress} />
     </DockTabs>
   );

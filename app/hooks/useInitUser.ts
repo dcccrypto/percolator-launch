@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
+import { Keypair, PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import {
   createAssociatedTokenAccountInstruction,
@@ -9,8 +9,10 @@ import {
 } from "@solana/spl-token";
 import {
   encodeInitUser,
+  encodeDepositCollateral,
   ACCOUNTS_INIT_USER,
   ACCOUNTS_INIT_LP,
+  ACCOUNTS_DEPOSIT_COLLATERAL,
   buildAccountMetas,
   WELL_KNOWN,
   buildIx,
@@ -19,8 +21,10 @@ import {
   isV17Account,
   parsePortfolioV17,
   V17_PORTFOLIO_ACCOUNT_LEN,
+  deriveVaultAuthority,
 } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
+import { isLpPortfolio } from "@/lib/userAccountScan";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { assertKnownProgram } from "@/lib/programAllowlist";
 import { humanizeError } from "@/lib/errorMessages";
@@ -57,7 +61,13 @@ async function findV17PortfolioForInit(
         { memcmp: { offset: V17_PF_OWNER_OFF, bytes: ownerPk.toBase58() } },
       ],
     });
-    if (accounts.length === 0) return null;
+    // Drop the market's LP portfolio BEFORE the sort/pick below — CRITICAL:
+    // a market CREATOR must never have their own LP mistaken for "already has
+    // a portfolio here" (that would silently skip InitPortfolio and leave the
+    // creator with no tradeable account of their own). See isLpPortfolio's
+    // doc comment.
+    const nonLpAccounts = accounts.filter(({ account }) => !isLpPortfolio(account.data));
+    if (nonLpAccounts.length === 0) return null;
     // BUG 11: with no cross-instance lock (OrderTicket / DepositWithdrawCard /
     // useAutoDeposit each mount their own useInitUser and can race through this
     // TOCTOU check concurrently), more than one portfolio can end up owned by
@@ -67,9 +77,9 @@ async function findV17PortfolioForInit(
     // DIFFERENT accounts non-deterministically ("deposit disappeared"). Sort
     // deterministically by pubkey so every caller lands on the same one.
     const sorted =
-      accounts.length > 1
-        ? [...accounts].sort((a, b) => a.pubkey.toBase58().localeCompare(b.pubkey.toBase58()))
-        : accounts;
+      nonLpAccounts.length > 1
+        ? [...nonLpAccounts].sort((a, b) => a.pubkey.toBase58().localeCompare(b.pubkey.toBase58()))
+        : nonLpAccounts;
     // Defense-in-depth: re-verify the mutable owner actually matches after fetch —
     // memcmp filters are advisory server-side; don't trust them blindly.
     const data = sorted[0].account.data;
@@ -94,8 +104,17 @@ export function useInitUser(slabAddress: string) {
   const [error, setError] = useState<string | null>(null);
   const inflightRef = useRef(false);
 
+  // PERC-onboarding-1: initUser resolves with how much collateral actually
+  // moved (0n when the account was created but nothing was deposited — no
+  // wallet balance, the deposit leg failed, etc). Returned on the promise
+  // itself (not hook state) deliberately — a caller reading hook state right
+  // after `await initUser(...)` would see a STALE snapshot from before this
+  // call's setState lands (React state updates aren't visible synchronously
+  // inside the same async closure), which is exactly the kind of "reads a
+  // snapshot from before the actual result" bug this file's callers need to
+  // avoid (see useAutoDeposit.ts).
   const initUser = useCallback(
-    async (feePayment?: bigint) => {
+    async (feePayment?: bigint): Promise<{ sig: string; depositedAmount: bigint } | undefined> => {
       // BUG 11: useInitUser is called from 3 independent instances (OrderTicket,
       // DepositWithdrawCard, useAutoDeposit post-faucet) whose disabled-states
       // don't share, so this only stops re-entrant calls through THIS hook
@@ -154,45 +173,126 @@ export function useInitUser(slabAddress: string) {
             data: encodeInitUser({}),
           });
 
-          let sig: string;
-          try {
-            sig = await sendTx({
-              connection,
-              wallet,
-              instructions: [createPortfolioIx, initPortfolioIx],
-              signers: [portfolioKp],
-            });
-          } catch (sendError) {
-            const errMsg = sendError instanceof Error ? sendError.message : String(sendError);
-            // PERC-8388: Lighthouse/Blowfish 0x1900 assertion injection — retry with skipPreflight.
-            const isLighthouse =
-              /custom program error:\s*0x1900\b/i.test(errMsg) ||
-              /L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95/i.test(errMsg) ||
-              (/"Custom"\s*:\s*6400/.test(errMsg) && /InstructionError/.test(errMsg));
-            if (isLighthouse) {
-              console.warn(
-                "[useInitUser] Lighthouse/Blowfish assertion failed (0x1900). " +
-                "Retrying with skipPreflight=true — error comes from wallet middleware, not our program.",
-              );
-              sig = await sendTx({
-                connection,
-                wallet,
-                instructions: [createPortfolioIx, initPortfolioIx],
-                signers: [portfolioKp],
-                skipPreflight: true,
-              });
-            } else {
-              throw sendError;
+          // ── PERC-onboarding-1: first-trade-setup — fold Deposit into the SAME
+          // transaction as InitPortfolio when the caller passed an amount and
+          // the wallet already holds sim-USDC. Previously `feePayment` was a
+          // v12-only concept and was silently dropped on v17 (this hook's
+          // header comment claimed "initUser + deposit in a single
+          // transaction" but only ever created the account) — the user then
+          // needed a second, separate manual deposit with no indication one
+          // was required. Reuses useDeposit.ts's exact v17 Deposit account
+          // list/encoder (ACCOUNTS_DEPOSIT_COLLATERAL / encodeDepositCollateral
+          // / deriveVaultAuthority) — not hand-rolled.
+          const requestedDeposit = feePayment != null && feePayment > 0n ? feePayment : 0n;
+          let depositIx: TransactionInstruction | null = null;
+          let clampedDeposit = 0n;
+          if (requestedDeposit > 0n) {
+            try {
+              const userAta = await getAta(wallet.publicKey, mktConfig.collateralMint);
+              let ataBalance = 0n;
+              try {
+                const info = await connection.getTokenAccountBalance(userAta);
+                ataBalance = BigInt(info.value.amount);
+              } catch {
+                ataBalance = 0n; // ATA doesn't exist yet, or a transient RPC hiccup — nothing to deposit
+              }
+              clampedDeposit = requestedDeposit < ataBalance ? requestedDeposit : ataBalance;
+              if (clampedDeposit > 0n) {
+                const [vaultPda] = deriveVaultAuthority(programId, slabPk);
+                const vaultTokenAta = await getAta(vaultPda, mktConfig.collateralMint, true);
+                depositIx = buildIx({
+                  programId,
+                  keys: buildAccountMetas(ACCOUNTS_DEPOSIT_COLLATERAL, [
+                    wallet.publicKey,
+                    slabPk,
+                    portfolioPk,
+                    userAta,
+                    vaultTokenAta,
+                    WELL_KNOWN.tokenProgram,
+                  ]),
+                  data: encodeDepositCollateral({ amount: clampedDeposit.toString() }),
+                });
+              }
+            } catch {
+              // Best-effort: fall through to init-only. The account still
+              // gets created; the user can deposit manually afterward.
+              depositIx = null;
+              clampedDeposit = 0n;
             }
           }
 
+          const baseInstructions: TransactionInstruction[] = [createPortfolioIx, initPortfolioIx];
+
+          // PERC-8388: Lighthouse/Blowfish 0x1900 assertion injection — retry with skipPreflight.
+          const sendV17 = async (ixs: TransactionInstruction[], signers?: Keypair[]): Promise<string> => {
+            try {
+              return await sendTx({ connection, wallet, instructions: ixs, signers });
+            } catch (sendError) {
+              const errMsg = sendError instanceof Error ? sendError.message : String(sendError);
+              const isLighthouse =
+                /custom program error:\s*0x1900\b/i.test(errMsg) ||
+                /L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95/i.test(errMsg) ||
+                (/"Custom"\s*:\s*6400/.test(errMsg) && /InstructionError/.test(errMsg));
+              if (isLighthouse) {
+                console.warn(
+                  "[useInitUser] Lighthouse/Blowfish assertion failed (0x1900). " +
+                  "Retrying with skipPreflight=true — error comes from wallet middleware, not our program.",
+                );
+                return await sendTx({ connection, wallet, instructions: ixs, signers, skipPreflight: true });
+              }
+              throw sendError;
+            }
+          };
+
+          let sig: string;
+          let depositedAmount = 0n;
+          if (depositIx) {
+            try {
+              // FIRST try: InitPortfolio + Deposit in ONE transaction — the
+              // portfolio's address is already known (client-generated
+              // keypair) before the tx lands, so Deposit can reference it
+              // in the same atomic tx.
+              sig = await sendV17([...baseInstructions, depositIx], [portfolioKp]);
+              depositedAmount = clampedDeposit;
+            } catch (combinedErr) {
+              // One-tx failed (compute/size limits, wallet simulation, or the
+              // program rejecting a same-tx Deposit against a portfolio
+              // initialized earlier in that same tx). Fall back to two
+              // transactions chained back-to-back — from the caller's POV
+              // this is still one "Setting up your account…" action. Account
+              // creation must succeed on its own merits; the deposit leg is
+              // best-effort on top of it.
+              if (process.env.NODE_ENV === "development") {
+                console.warn("[useInitUser] combined init+deposit tx failed, falling back to two-step:", combinedErr);
+              }
+              sig = await sendV17(baseInstructions, [portfolioKp]);
+              try {
+                sig = await sendV17([depositIx]);
+                depositedAmount = clampedDeposit;
+              } catch (depositErr) {
+                // Account exists; auto-deposit just didn't land. Not fatal —
+                // depositedAmount stays 0n on the resolved result so the
+                // caller can still prompt a manual deposit, not a scary
+                // top-level error.
+                if (process.env.NODE_ENV === "development") {
+                  console.warn("[useInitUser] follow-up deposit tx failed:", depositErr);
+                }
+              }
+            }
+          } else {
+            sig = await sendV17(baseInstructions, [portfolioKp]);
+          }
+
           if (process.env.NODE_ENV === "development") {
-            console.log("[useInitUser] v17 portfolio initialized:", portfolioPk.toBase58(), "sig:", sig);
+            console.log(
+              "[useInitUser] v17 portfolio initialized:", portfolioPk.toBase58(),
+              "sig:", sig, "deposited:", depositedAmount.toString(),
+            );
           }
 
           refreshSlab();
           setTimeout(() => refreshSlab(), 2000);
-          return sig;
+          return { sig, depositedAmount };
         }
 
         // ── v12 legacy path ─────────────────────────────────────────────────
@@ -270,7 +370,7 @@ export function useInitUser(slabAddress: string) {
         // Force immediate slab re-read so the new user sub-account is visible.
         refreshSlab();
         setTimeout(() => refreshSlab(), 2000);
-        return sig;
+        return { sig, depositedAmount: effectiveFee };
       } catch (e) {
         const raw = e instanceof Error ? e.message : String(e);
         // PERC-698: Custom program error 0x4 = InvalidSlabLen — V0/V1 program mismatch.

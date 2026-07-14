@@ -19,6 +19,7 @@ import { SLAB_TIERS, type SlabTierKey } from "@/lib/slabTiers";
 import { getConfig, getNetwork } from "@/lib/config";
 import { toE6 } from "@/lib/format";
 
+import { useDuplicateMarket } from "@/hooks/useDuplicateMarket";
 import { ModeSelector } from "./ModeSelector";
 import { WizardProgress } from "./WizardProgress";
 import { StepTokenSelect } from "./StepTokenSelect";
@@ -34,7 +35,6 @@ import { SlabTierPicker } from "./SlabTierPicker";
 // file's computeCreateMarketSolCost doc comment.
 import { computeCreateMarketSolCost } from "./CostEstimate";
 import { isValidBase58Pubkey, isValidHex64 } from "@/lib/createWizardUtils";
-import { useToast } from "@/hooks/useToast";
 import { isMockMode } from "@/lib/mock-mode";
 import { getMockTokenByMint } from "@/lib/mock-trade-data";
 
@@ -292,6 +292,18 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
 
   // Step validation
   const step1Valid = mintValid && wizard.tokenMeta !== null && (wizard.tokenMeta.decimals <= 12) && mintExistsOnNetwork;
+  // One market per token: an existing market for this CA blocks step 1 —
+  // both the Continue button and Quick Launch's auto-advance — BEFORE the
+  // user spends SOL deploying a slab that POST /api/markets will 409 anyway
+  // (the server check is the authoritative half of this guard). Lives here,
+  // not in StepTokenSelect, because Quick Launch unmounts the step the
+  // moment it auto-advances — step-local state would be discarded before it
+  // could gate anything. Scoped to step-1 advancement only (NOT allValid) so
+  // a mid-launch/resume flow can't be flipped invalid by its own market
+  // appearing in the registry. Fail-open on lookup errors; auto-advance also
+  // waits while `checking` so a slow lookup can't be raced past.
+  const duplicateCheck = useDuplicateMarket(wizard.step === 1 ? wizard.mintAddress : null);
+  const step1CanAdvance = step1Valid && !duplicateCheck.checking && duplicateCheck.duplicates.length === 0;
   const step2Valid = (() => {
     if (wizard.oracleType === "admin") return true;
     if (wizard.oracleType === "pyth") return isValidHex64(wizard.oracleFeed);
@@ -398,14 +410,17 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     if (wizard.mode !== "quick") { quickAutoAdvancedRef.current = false; return; }
     if (quickAutoAdvancedRef.current) return;
     if (wizard.step !== 1) return;
-    if (!step1Valid) return;
+    // One market per token: step1CanAdvance additionally waits for the
+    // duplicate-market lookup to settle and come back clear — auto-advance
+    // must not race past a pending check (see useDuplicateMarket).
+    if (!step1CanAdvance) return;
     if (quickLaunch.loading) return;
     if (!quickLaunch.config) return;
 
     quickAutoAdvancedRef.current = true;
     setCompletedSteps((prev) => new Set(prev).add(1));
     setWizard((prev) => ({ ...prev, step: 2 as WizardStep }));
-  }, [wizard.mode, wizard.step, step1Valid, quickLaunch.loading, quickLaunch.config]);
+  }, [wizard.mode, wizard.step, step1CanAdvance, quickLaunch.loading, quickLaunch.config]);
 
   // Quick Launch: step 2 is slab selection (NOT oracle).
   // Oracle is resolved from useQuickLaunch and applied when user clicks Continue.
@@ -1038,7 +1053,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             onBalanceChange={setWalletBalance}
             onMintNetworkValidChange={setMintExistsOnNetwork}
             onContinue={() => advanceStep(1)}
-            canContinue={step1Valid}
+            canContinue={step1CanAdvance}
+            duplicateMarkets={duplicateCheck.duplicates}
           />
         )}
 

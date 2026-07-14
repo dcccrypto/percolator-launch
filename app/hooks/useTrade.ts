@@ -14,7 +14,6 @@ import {
   deriveLpPda,
   derivePythPushOraclePDA,
   deriveMatcherDelegate,
-  WELL_KNOWN,
   isV17Account,
   parsePortfolioV17,
 } from "@percolatorct/sdk";
@@ -24,10 +23,12 @@ import {
   encodePushOraclePrice,
   ACCOUNTS_PUSH_ORACLE_PRICE,
 } from "@/lib/sdk-compat";
-import { sendTx } from "@/lib/tx";
+import { sendTx, prewarmTxLanding } from "@/lib/tx";
+import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
+import { applyConfirmedFill, getPortfolioRawSnapshot, isLpPortfolio, makePortfolioScanKey } from "@/lib/userAccountScan";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { detectOracleMode } from "@/lib/oraclePrice";
-import { assertKnownProgram } from "@/lib/programAllowlist";
+import { assertKnownProgram, assertCanonicalMatcher } from "@/lib/programAllowlist";
 import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
 import { computeLimitPriceE6 } from "@/lib/slippage";
 
@@ -125,15 +126,225 @@ async function findV17Portfolio(
         { memcmp: { offset: PORTFOLIO_OWNER_OFF, bytes: ownerPk.toBase58() } },
       ],
     });
-    if (accounts.length === 0) return null;
+    // Drop the market's LP portfolio BEFORE the sort/pick below — this is
+    // the TAKER's own-portfolio discovery (accountA); a market's CREATOR must
+    // never resolve to their own LP here (that's accountB's job, resolved
+    // separately in resolveV17TradeAccounts). See isLpPortfolio's doc comment.
+    const nonLpAccounts = accounts.filter(({ account }) => !isLpPortfolio(account.data));
+    if (nonLpAccounts.length === 0) return null;
+
+    // getProgramAccounts() does not guarantee stable result ordering.
+    // Use the same canonical pubkey ordering as deposit and withdraw
+    // so every owner+market flow targets the same portfolio account.
+    const sorted = [...nonLpAccounts].sort((a, b) =>
+      a.pubkey.toBase58().localeCompare(b.pubkey.toBase58()),
+    );
     // Defense-in-depth: re-verify the mutable owner actually matches after fetch —
     // memcmp filters are advisory server-side; don't trust them blindly.
-    const data = Buffer.from(accounts[0].account.data);
+    const data = Buffer.from(sorted[0].account.data);
     const portfolio = parsePortfolioV17(data);
     if (!portfolio.owner.equals(ownerPk)) return null;
-    return accounts[0].pubkey;
+    return sorted[0].pubkey;
   } catch {
     return null;
+  }
+}
+
+// ============================================================================
+// v17 trade-account resolution — cached + prewarmable
+// ============================================================================
+//
+// Resolving the 5 non-obvious TradeCpi accounts used to happen INLINE at
+// submit time: a getProgramAccounts scan over every portfolio on the market
+// (LP discovery) plus a second owner-filtered scan (taker portfolio) — two
+// heavy RPC round-trips between the user clicking confirm and the wallet
+// popup appearing. All five values are stable for a given (market, taker):
+// portfolio addresses never change, and the LP's matcher config only changes
+// on an explicit SetMatcherConfig. So they're resolved once, cached briefly
+// (TTL below), prewarmed the moment the confirmation modal opens (the user's
+// reading time absorbs the scans), and invalidated on any trade failure so a
+// retry re-resolves fresh.
+//
+// SECURITY: assertCanonicalMatcher runs inside the resolver — cached values
+// have passed the same gate as inline-resolved ones.
+
+interface V17TradeAccounts {
+  accountA: PublicKey;
+  accountB: PublicKey;
+  matcherProg: PublicKey;
+  matcherCtx: PublicKey;
+  matcherDelegate: PublicKey;
+}
+
+/** Short TTL: matcherCtx/matcherProg can in principle be rotated by the LP
+ *  (SetMatcherConfig); 60s staleness at worst produces one failed tx, which
+ *  invalidates the entry and the retry re-resolves fresh. */
+const V17_TRADE_ACCOUNTS_TTL_MS = 60_000;
+const v17TradeAccountsCache = new Map<string, { value: V17TradeAccounts; ts: number }>();
+const v17TradeAccountsInflight = new Map<string, Promise<V17TradeAccounts>>();
+
+function tradeAccountsKey(programId: PublicKey, slabPk: PublicKey, takerPk: PublicKey): string {
+  return `${programId.toBase58()}|${slabPk.toBase58()}|${takerPk.toBase58()}`;
+}
+
+/** Drop a cached resolution (called when a trade fails — the failure may be a
+ *  rotated matcher config or a migrated portfolio, so re-resolve next time). */
+function invalidateV17TradeAccounts(programId: PublicKey, slabPk: PublicKey, takerPk: PublicKey): void {
+  v17TradeAccountsCache.delete(tradeAccountsKey(programId, slabPk, takerPk));
+}
+
+async function resolveV17TradeAccounts(
+  connection: Connection,
+  programId: PublicKey,
+  slabPk: PublicKey,
+  takerPk: PublicKey,
+): Promise<V17TradeAccounts> {
+  // ── accountB: the LP portfolio (the one with an enabled matcher config) ──
+  // Curated markets have the LP portfolio address pinned in
+  // PLAYGROUND_SLAB_META — one targeted getAccountInfo instead of a full
+  // program scan. Wizard/unknown markets fall back to the scan.
+  let lpPortfolioData: Buffer | null = null;
+  let lpPortfolioPk: PublicKey | null = null;
+
+  const knownLp = PLAYGROUND_SLAB_META[slabPk.toBase58()]?.lp_portfolio_address;
+  if (knownLp) {
+    try {
+      const lpPk = new PublicKey(knownLp);
+      const info = await connection.getAccountInfo(lpPk, "confirmed");
+      if (info) {
+        const data = Buffer.from(info.data);
+        if (readPortfolioMatcherConfig(data)) {
+          lpPortfolioData = data;
+          lpPortfolioPk = lpPk;
+        }
+      }
+    } catch {
+      /* fall through to the scan */
+    }
+  }
+
+  if (!lpPortfolioPk || !lpPortfolioData) {
+    // v17 LP portfolios are standalone keypair-addressed accounts (NOT PDAs);
+    // scan all portfolios for this market and select the first with an active
+    // matcher config. Intentionally NOT owner-filtered — the LP owner is a
+    // separate wallet, not the taker.
+    let allPortfolios;
+    try {
+      allPortfolios = await connection.getProgramAccounts(programId, {
+        filters: [
+          { memcmp: { offset: 0, bytes: V17_PORTFOLIO_MAGIC.toString("base64"), encoding: "base64" } },
+          { memcmp: { offset: PORTFOLIO_PROVENANCE_MARKET_GROUP_OFF, bytes: slabPk.toBase58() } },
+        ],
+      });
+    } catch (scanErr) {
+      throw new Error(
+        `Failed to scan LP portfolio accounts on-chain: ${scanErr instanceof Error ? scanErr.message : String(scanErr)}`,
+      );
+    }
+    for (const { pubkey, account } of allPortfolios) {
+      const data = Buffer.from(account.data);
+      const cfg = readPortfolioMatcherConfig(data);
+      if (cfg) {
+        lpPortfolioData = data;
+        lpPortfolioPk = pubkey;
+        break;
+      }
+    }
+  }
+
+  if (!lpPortfolioPk || !lpPortfolioData) {
+    throw new Error(
+      "No LP portfolio with an active matcher config found for this market. " +
+      "The LP must call SetMatcherConfig before trading.",
+    );
+  }
+
+  const matcherCfg = readPortfolioMatcherConfig(lpPortfolioData)!;
+  const matcherProg = matcherCfg.matcherProgram;
+  const matcherCtx = matcherCfg.matcherContext;
+  // SEC: matcherProg/matcherCtx come from the LP portfolio's on-chain matcher
+  // config — attacker-controlled for an attacker-created market. The trade ix
+  // places matcherProg as the executable CPI target [4] and matcherCtx as a
+  // writable account [5], so pin the matcher to the canonical one before we
+  // build a signable tx around it. Runs on every resolution, so cached values
+  // have passed this gate too.
+  assertCanonicalMatcher(matcherProg);
+
+  // Read LP owner from provenance header; derive matcherDelegate to match
+  // what SetMatcherConfig stored.
+  const lpOwner = readPortfolioOwner(lpPortfolioData);
+  const [matcherDelegate] = deriveMatcherDelegate(
+    programId, slabPk, lpPortfolioPk, lpOwner, matcherProg, matcherCtx,
+  );
+
+  // ── accountA: the taker's own portfolio ──────────────────────────────────
+  // The shared scan store (useUserAccount and friends) almost always already
+  // knows it — its pubkey never changes for a (wallet, market) pair, so any
+  // cached snapshot is authoritative. Fall back to the owner-filtered scan.
+  let accountA: PublicKey | null = null;
+  const snapshot = getPortfolioRawSnapshot(
+    makePortfolioScanKey(programId, slabPk.toBase58(), takerPk),
+  );
+  if (snapshot && snapshot.portfolio.owner.equals(takerPk)) {
+    accountA = snapshot.pubkey;
+  } else {
+    accountA = await findV17Portfolio(connection, programId, slabPk, takerPk);
+  }
+  if (!accountA) {
+    throw new Error(
+      "No portfolio account found for your wallet on this market. " +
+      "Please deposit collateral first to create a portfolio.",
+    );
+  }
+
+  return { accountA, accountB: lpPortfolioPk, matcherProg, matcherCtx, matcherDelegate };
+}
+
+/** Cache-or-resolve with in-flight dedup (prewarm + submit share one scan). */
+function getOrResolveV17TradeAccounts(
+  connection: Connection,
+  programId: PublicKey,
+  slabPk: PublicKey,
+  takerPk: PublicKey,
+): Promise<V17TradeAccounts> {
+  const key = tradeAccountsKey(programId, slabPk, takerPk);
+  const cached = v17TradeAccountsCache.get(key);
+  if (cached && Date.now() - cached.ts < V17_TRADE_ACCOUNTS_TTL_MS) {
+    return Promise.resolve(cached.value);
+  }
+  const inflight = v17TradeAccountsInflight.get(key);
+  if (inflight) return inflight;
+  const p = resolveV17TradeAccounts(connection, programId, slabPk, takerPk)
+    .then((value) => {
+      v17TradeAccountsCache.set(key, { value, ts: Date.now() });
+      return value;
+    })
+    .finally(() => {
+      v17TradeAccountsInflight.delete(key);
+    });
+  v17TradeAccountsInflight.set(key, p);
+  return p;
+}
+
+/**
+ * Prewarm the v17 trade-account resolution + the tx-landing caches
+ * (blockhash, priority fee, clock drift) so a subsequent trade() reaches the
+ * wallet popup with zero blocking RPC round-trips. Call when the trade
+ * confirmation modal OPENS. Fire-and-forget safe.
+ */
+export function prewarmTradeSubmission(
+  connection: Connection,
+  programId: PublicKey | null,
+  slabAddress: string,
+  takerPk: PublicKey | null,
+): void {
+  prewarmTxLanding(connection);
+  if (!programId || !takerPk) return;
+  try {
+    const slabPk = new PublicKey(slabAddress);
+    void getOrResolveV17TradeAccounts(connection, programId, slabPk, takerPk).catch(() => {});
+  } catch {
+    /* malformed address — nothing to prewarm */
   }
 }
 
@@ -266,78 +477,30 @@ export function useTrade(slabAddress: string) {
           accountB = lpPda;
           matcherProg = lpAccount.account.matcherProgram;
           matcherCtx = lpAccount.account.matcherContext;
+          // NOTE: the canonical-matcher assertion is applied on the v17 path
+          // below (every current playground market is v17). It is deliberately
+          // NOT added to this legacy v12 branch — v12's matcher invariants
+          // aren't verifiable from the client here, and no current market
+          // takes this path, so guarding it risks changing legacy behavior for
+          // no live benefit.
           const [delegatePk] = deriveMatcherDelegate(
             programId, slabPk, accountB, lpAccount.account.owner, matcherProg, matcherCtx,
           );
           matcherDelegate = delegatePk;
         } else {
           // ── v17 market path ────────────────────────────────────────────────
-          // Portfolio accounts are standalone program-owned accounts (not PDAs).
-          // accountB = LP's portfolio, found by scanning the LP's config storage.
-          // The LP portfolio stores PortfolioMatcherConfigV16 appended at the end.
-          //
-          // LP portfolio discovery: scan all v17 portfolio accounts for this market
-          // and find the one that has an enabled PortfolioMatcherConfigV16.
-          // v17 LP portfolios are standalone keypair-addressed accounts (NOT PDAs),
-          // so deriveLpPda has no relationship to the real LP account address.
-          // We use getProgramAccounts filtered by magic + market_group_id, then
-          // iterate to find the portfolio with an enabled matcher config.
-          //
-          // NOTE: We intentionally do NOT filter by owner here — the LP portfolio
-          // owner is a separate wallet, not the taker. We scan all portfolios for
-          // this market and select the first one with an active matcher config.
-          let lpPortfolioData: Buffer | null = null;
-          let lpPortfolioPk: PublicKey | null = null;
-          try {
-            const allPortfolios = await connection.getProgramAccounts(programId, {
-              filters: [
-                { memcmp: { offset: 0, bytes: V17_PORTFOLIO_MAGIC.toString("base64"), encoding: "base64" } },
-                { memcmp: { offset: PORTFOLIO_PROVENANCE_MARKET_GROUP_OFF, bytes: slabPk.toBase58() } },
-              ],
-            });
-            for (const { pubkey, account } of allPortfolios) {
-              const data = Buffer.from(account.data);
-              const cfg = readPortfolioMatcherConfig(data);
-              if (cfg) {
-                lpPortfolioData = data;
-                lpPortfolioPk = pubkey;
-                break;
-              }
-            }
-          } catch (scanErr) {
-            throw new Error(
-              `Failed to scan LP portfolio accounts on-chain: ${scanErr instanceof Error ? scanErr.message : String(scanErr)}`,
-            );
-          }
-          if (!lpPortfolioPk || !lpPortfolioData) {
-            throw new Error(
-              "No LP portfolio with an active matcher config found for this market. " +
-              "The LP must call SetMatcherConfig before trading.",
-            );
-          }
-          accountB = lpPortfolioPk;
-          const matcherCfg = readPortfolioMatcherConfig(lpPortfolioData)!;
-          matcherProg = matcherCfg.matcherProgram;
-          matcherCtx = matcherCfg.matcherContext;
-
-          // Read LP owner from provenance header of the LP portfolio.
-          const lpOwner = readPortfolioOwner(lpPortfolioData);
-
-          // Derive matcherDelegate — must match what SetMatcherConfig stored.
-          const [delegatePk] = deriveMatcherDelegate(
-            programId, slabPk, accountB, lpOwner, matcherProg, matcherCtx,
-          );
-          matcherDelegate = delegatePk;
-
-          // Find taker's portfolio (accountA).
-          const userPortfolioPk = await findV17Portfolio(connection, programId, slabPk, wallet.publicKey);
-          if (!userPortfolioPk) {
-            throw new Error(
-              "No portfolio account found for your wallet on this market. " +
-              "Please deposit collateral first to create a portfolio.",
-            );
-          }
-          accountA = userPortfolioPk;
+          // Full resolution logic (LP-portfolio discovery + matcher config +
+          // canonical-matcher assertion + delegate derivation + taker
+          // portfolio lookup) lives in resolveV17TradeAccounts above — cached
+          // 60s and prewarmed when the confirmation modal opens, so this is
+          // normally an instant cache hit instead of two program scans
+          // between the confirm click and the wallet popup.
+          const resolved = await getOrResolveV17TradeAccounts(connection, programId, slabPk, wallet.publicKey);
+          accountA = resolved.accountA;
+          accountB = resolved.accountB;
+          matcherProg = resolved.matcherProg;
+          matcherCtx = resolved.matcherCtx;
+          matcherDelegate = resolved.matcherDelegate;
         }
 
         const tradeIx = buildIx({
@@ -396,6 +559,22 @@ export function useTrade(slabAddress: string) {
         instructions.push(tradeIx);
 
         const sig = await sendTx({ connection, wallet, instructions, computeUnits: 600_000 });
+
+        // Immediate local application of the confirmed fill: sendTx's
+        // pollConfirmation has ALREADY verified this tx landed on-chain by
+        // this point, so params.size's effect on position size is a known
+        // fact, not speculation — only the shared scan store's cached READ
+        // hasn't caught up yet (same /api/rpc cache the refresh burst below
+        // is timed around). Patch the store's cached position size right
+        // now so OrderTicket/PositionsDock/ChartPnlBadge (every subscriber)
+        // reflect the new size on THIS render instead of waiting 1-3.5s for
+        // the burst. Capital/pnl/fees are intentionally left untouched (not
+        // deterministic client-side) — those fields still wait on the
+        // refresh burst exactly as before. See applyConfirmedFill's doc.
+        if (isV17Market) {
+          applyConfirmedFill(makePortfolioScanKey(programId, slabAddress, wallet.publicKey), params.size);
+        }
+
         // Re-fetch the slab so useUserAccount re-scans: a trade opens/closes a
         // leg AND changes capital, and the order-ticket balance reads
         // userAccount.account.capital. sendTx already waited for confirmation,
@@ -409,6 +588,14 @@ export function useTrade(slabAddress: string) {
         [1200, 2200, 3500].forEach((ms) => setTimeout(() => refreshSlab(), ms));
         return sig;
       } catch (e) {
+        // Invalidate the cached v17 account resolution — the failure may be a
+        // rotated matcher config or a migrated portfolio; the retry (or the
+        // next attempt) re-resolves fresh instead of re-failing off the cache.
+        if (wallet.publicKey && slabProgramId) {
+          try {
+            invalidateV17TradeAccounts(slabProgramId, new PublicKey(slabAddress), wallet.publicKey);
+          } catch { /* malformed address — nothing cached */ }
+        }
         const msg = e instanceof Error ? e.message : String(e);
         if (mountedRef.current) setError(msg);
         throw e;

@@ -1,4 +1,14 @@
 /**
+ * Normalize token decimals received across typed and untyped data boundaries.
+ * Invalid values use the existing whole-unit fallback rather than reaching
+ * BigInt exponentiation or String.padStart with an unsafe argument.
+ */
+export function normalizeTokenDecimals(decimals: number): number {
+  if (!Number.isFinite(decimals)) return 0;
+  return Math.max(0, Math.trunc(decimals));
+}
+
+/**
  * Format a raw token amount (in smallest units) into a human-readable decimal string.
  * 
  * @param raw - The token amount in smallest units (e.g., lamports for SOL). Can be null/undefined.
@@ -21,12 +31,7 @@ export function formatTokenAmount(
   if (raw == null) return "0";
   const negative = raw < 0n;
   const abs = negative ? -raw : raw;
-  // Defense-in-depth: `10n ** BigInt(decimals)` throws RangeError for a
-  // negative exponent (bigint exponentiation has no fractional/negative
-  // result). A negative `decimals` has no sane meaning for a token amount —
-  // clamp to 0 instead of letting a malformed caller (e.g. a corrupted
-  // on-chain mint.decimals read) crash the render.
-  const safeDecimals = decimals < 0 ? 0 : decimals;
+  const safeDecimals = normalizeTokenDecimals(decimals);
   const divisor = 10n ** BigInt(safeDecimals);
   const whole = abs / divisor;
   const frac = abs % divisor;
@@ -143,6 +148,38 @@ export function formatMarkPrice(priceUsd: number | null | undefined, fallback = 
 }
 
 /**
+ * Derive a lightweight-charts `priceFormat: { type: 'price', precision, minMove }`
+ * pair from a reference price, mirroring formatMarkPrice's magnitude bands.
+ *
+ * lightweight-charts defaults every series to `precision: 2, minMove: 0.01`
+ * when no priceFormat is supplied. That's fine for SOL/TRUMP-sized prices but
+ * rounds anything under a cent (e.g. BURNIE @ $0.002573) to "0.00" on BOTH
+ * the Y-axis ticks and any `createPriceLine` label (Mark/Liq/Entry) — those
+ * price lines have no formatter of their own; they always render through the
+ * series' priceFormat. Passing an adaptive precision/minMove here (computed
+ * from the market's current price) is the fix for both at once.
+ *
+ *   - >= 1      → 2dp  (0.01)        e.g. "78.42" / "1.60"   — matches formatMarkPrice's whole-dollar band
+ *   - >= 0.01   → 4dp  (0.0001)      e.g. "0.4231"
+ *   - >= 0.0001 → 6dp  (0.000001)    e.g. "0.002573"          — BURNIE / Percolator land here
+ *   - >  0      → 8dp  (0.00000001) e.g. "0.00003182"
+ *   - unknown/zero → 2dp fallback (same as the library default)
+ *
+ * @param referencePrice - A representative price for the market (e.g. last
+ *   candle close or live snapshot price), used only to pick a magnitude band.
+ */
+export function chartPricePrecision(
+  referencePrice: number | null | undefined,
+): { precision: number; minMove: number } {
+  const abs = referencePrice != null && Number.isFinite(referencePrice) ? Math.abs(referencePrice) : 0;
+  if (abs <= 0) return { precision: 2, minMove: 0.01 };
+  if (abs >= 1) return { precision: 2, minMove: 0.01 };
+  if (abs >= 0.01) return { precision: 4, minMove: 0.0001 };
+  if (abs >= 0.0001) return { precision: 6, minMove: 0.000001 };
+  return { precision: 8, minMove: 0.00000001 };
+}
+
+/**
  * Format a liquidation price in e6 format.
  * Returns "∞" when the position is unliquidatable (liqPrice === max u64),
  * "-" when zero/null, otherwise delegates to formatUsd.
@@ -196,13 +233,14 @@ export function formatCompactTokenAmount(
   // null/undefined → unknown; known zero → "0.00" (never bare "0" per design rule #865)
   if (raw == null) return "—";
   if (raw <= 0n) return "0.00";
-  const divisor = 10n ** BigInt(decimals);
+  const safeDecimals = normalizeTokenDecimals(decimals);
+  const divisor = 10n ** BigInt(safeDecimals);
   const num = Number(raw) / Number(divisor);
   if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
   if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
   if (num >= 1) return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   // Sub-1 amounts: use full precision
-  return formatTokenAmount(raw, decimals);
+  return formatTokenAmount(raw, safeDecimals);
 }
 
 /**
@@ -281,12 +319,13 @@ export function formatSlotAge(currentSlot: bigint | null | undefined, targetSlot
  */
 export function formatPnl(raw: bigint | null | undefined, decimals: number = 6): string {
   if (raw == null) return "0";
+  const safeDecimals = normalizeTokenDecimals(decimals);
   const negative = raw < 0n;
   const abs = negative ? -raw : raw;
-  const divisor = 10n ** BigInt(decimals);
+  const divisor = 10n ** BigInt(safeDecimals);
   const whole = abs / divisor;
   const frac = abs % divisor;
-  const fracStr = frac.toString().padStart(decimals, "0").replace(/0+$/, "");
+  const fracStr = frac.toString().padStart(safeDecimals, "0").replace(/0+$/, "");
   const num = fracStr ? `${whole.toString()}.${fracStr}` : whole.toString();
   if (negative) return `-${num}`;
   if (raw > 0n) return `+${num}`;

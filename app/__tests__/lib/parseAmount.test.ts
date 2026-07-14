@@ -42,6 +42,14 @@ describe("parseHumanAmount", () => {
     expect(parseHumanAmount("1.2.3", 6)).toBe(0n);
   });
 
+  it("returns 0n for non-numeric input instead of throwing (documented contract)", () => {
+    // Previously these reached BigInt(...) and threw, contradicting the JSDoc
+    // (`"abc" -> 0n`) and risking an unhandled throw in a live-input caller.
+    for (const bad of ["abc", "1e6", "0x5", "1,000", "12.3a", "--5", "1 000", "NaN", "Infinity"]) {
+      expect(parseHumanAmount(bad, 6)).toBe(0n);
+    }
+  });
+
   it("throws if too many decimal places", () => {
     expect(() => parseHumanAmount("1.1234567", 6)).toThrow(/Input has 7 decimals/);
   });
@@ -109,5 +117,25 @@ describe("formatHumanAmount", () => {
     const parsed = parseHumanAmount(original, 9);
     const formatted = formatHumanAmount(parsed, 9);
     expect(formatted).toBe("123.456789");
+  });
+});
+
+describe("malformed decimals are guarded (do not throw a raw BigInt/padStart error)", () => {
+  it("parseHumanAmount folds NaN/Infinity/negative decimals to whole-unit parsing", () => {
+    // NaN → 0 decimals: "100" parses as 100 whole units; no BigInt(NaN) throw.
+    expect(parseHumanAmount("100", NaN)).toBe(100n);
+    expect(parseHumanAmount("100", Infinity)).toBe(100n);
+    expect(parseHumanAmount("100", -5)).toBe(100n);
+  });
+
+  it("formatHumanAmount folds malformed decimals to whole-unit formatting", () => {
+    expect(formatHumanAmount(100n, NaN)).toBe("100");
+    expect(formatHumanAmount(100n, Infinity)).toBe("100");
+    expect(formatHumanAmount(100n, -5)).toBe("100");
+  });
+
+  it("valid decimals are unchanged (no display/parse regression)", () => {
+    expect(parseHumanAmount("1.5", 6)).toBe(1_500_000n);
+    expect(formatHumanAmount(1_500_000n, 6)).toBe("1.5");
   });
 });

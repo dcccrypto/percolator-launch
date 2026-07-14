@@ -80,6 +80,8 @@ interface ManagerState {
   lastMessageAt: number;
   channelRefcounts: Map<string, number>;
   rawListeners: Set<(data: unknown) => void>;
+  /** slab/channel -> listeners; enables O(1) per-message dispatch (see ws.onmessage). */
+  channelListeners: Map<string, Set<(data: unknown) => void>>;
   statusListeners: Set<(status: WsConnectionStatus) => void>;
   destroyed: boolean;
   /** Consecutive failed reconnect attempts since the last successful `open`. */
@@ -154,6 +156,21 @@ function connect(state: ManagerState): void {
     } catch {
       return;
     }
+    // O(1) channel routing: dispatch only to listeners registered for THIS
+    // message's slab, instead of invoking every subscribed slab's listener (each
+    // of which then filtered by slab — O(subscribed slabs) work per tick, ~168x
+    // on the markets page). Flat rawListeners (non-channel callers, if any) still fire.
+    const msgObj = data as { slab?: unknown; slabAddress?: unknown } | null;
+    const ch =
+      typeof msgObj?.slab === "string"
+        ? msgObj.slab
+        : typeof msgObj?.slabAddress === "string"
+          ? msgObj.slabAddress
+          : null;
+    if (ch) {
+      const set = state.channelListeners.get(ch);
+      if (set) for (const l of set) l(data);
+    }
     for (const l of state.rawListeners) l(data);
   };
 
@@ -208,6 +225,7 @@ function getOrCreateManager(url: string): ManagerState {
     lastMessageAt: Date.now(),
     channelRefcounts: new Map(),
     rawListeners: new Set(),
+    channelListeners: new Map(),
     statusListeners: new Set(),
     destroyed: false,
     reconnectAttempts: 0,
@@ -217,7 +235,7 @@ function getOrCreateManager(url: string): ManagerState {
 }
 
 function maybeScheduleTeardown(state: ManagerState): void {
-  if (state.channelRefcounts.size > 0 || state.rawListeners.size > 0) return;
+  if (state.channelRefcounts.size > 0 || state.rawListeners.size > 0 || state.channelListeners.size > 0) return;
   if (state.teardownTimer) return;
   state.teardownTimer = setTimeout(() => {
     state.destroyed = true;
@@ -243,6 +261,9 @@ export interface WsManagerHandle {
    *  URL's socket. Routing/filtering by channel is the caller's job (see
    *  priceStore.ts, which filters by `msg.slab === slab`). */
   onMessage(listener: (data: unknown) => void): () => void;
+  /** Register a listener that fires ONLY for messages whose slab/slabAddress
+   *  equals `channel` — O(1) dispatch, no per-message filtering by the caller. */
+  onMessageForChannel(channel: string, listener: (data: unknown) => void): () => void;
   onStatusChange(listener: (status: WsConnectionStatus) => void): () => void;
   getStatus(): WsConnectionStatus;
 }
@@ -264,6 +285,7 @@ export function getWsManager(url: string): WsManagerHandle {
     return {
       subscribeChannel: () => () => {},
       onMessage: () => () => {},
+      onMessageForChannel: () => () => {},
       onStatusChange: () => () => {},
       getStatus: () => "closed",
     };
@@ -308,6 +330,25 @@ export function getWsManager(url: string): WsManagerHandle {
         if (released) return;
         released = true;
         state.rawListeners.delete(listener);
+        maybeScheduleTeardown(state);
+      };
+    },
+    onMessageForChannel(channel, listener) {
+      let set = state.channelListeners.get(channel);
+      if (!set) {
+        set = new Set();
+        state.channelListeners.set(channel, set);
+      }
+      set.add(listener);
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        const s = state.channelListeners.get(channel);
+        if (s) {
+          s.delete(listener);
+          if (s.size === 0) state.channelListeners.delete(channel);
+        }
         maybeScheduleTeardown(state);
       };
     },

@@ -1,10 +1,11 @@
 "use client";
 
-import { FC, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FC, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useAllMarketStats } from "@/hooks/useAllMarketStats";
 import { MarketLogo } from "@/components/market/MarketLogo";
+import { setMarketIdentity } from "@/lib/marketIdentityCache";
 
 interface MarketSwitcherProps {
   slabAddress: string;
@@ -37,10 +38,18 @@ interface SwitcherRow {
  * PORTALED to document.body and placed from the trigger's
  * boundingClientRect, clamped to the viewport.
  */
-export const MarketSwitcher: FC<MarketSwitcherProps> = ({ slabAddress, symbol, logoUrl, mintAddress, mainnetCa }) => {
+const MarketSwitcherInner: FC<MarketSwitcherProps> = ({ slabAddress, symbol, logoUrl, mintAddress, mainnetCa }) => {
   const router = useRouter();
-  const { statsMap } = useAllMarketStats();
   const [open, setOpen] = useState(false);
+  // Only fire the 500-market/30s poll while the dropdown is actually open —
+  // this instance was keeping useAllMarketStats' SWR key alive at all times
+  // to back a panel that's closed the overwhelming majority of the session.
+  // No other trade-page component shares this hook instance's job (grep
+  // confirms MarketSwitcher is the only trade-page consumer of
+  // useAllMarketStats — markets/page.tsx, portfolio/page.tsx, and
+  // MarketSelector.tsx are different pages/flows with their own instances),
+  // so gating this one doesn't starve anything else of a warm cache.
+  const { statsMap } = useAllMarketStats({ enabled: open });
   const [query, setQuery] = useState("");
   const [panelPos, setPanelPos] = useState<{ left: number; top: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -121,9 +130,16 @@ export const MarketSwitcher: FC<MarketSwitcherProps> = ({ slabAddress, symbol, l
   const goTo = useCallback(
     (slab: string) => {
       setOpen(false);
-      if (slab !== slabAddress) router.push(`/trade/${slab}`);
+      if (slab !== slabAddress) {
+        // Seed the destination's identity BEFORE navigating so the trade page
+        // renders the right pair label on its first frame instead of flashing
+        // a fallback while /api/markets/[slab] loads.
+        const row = allMarkets.find((r) => r.slab === slab);
+        if (row?.symbol) setMarketIdentity(slab, { symbol: row.symbol, name: row.name ?? undefined });
+        router.push(`/trade/${slab}`);
+      }
     },
-    [router, slabAddress],
+    [router, slabAddress, allMarkets],
   );
 
   const fmtPrice = (p: number | null) =>
@@ -197,6 +213,12 @@ export const MarketSwitcher: FC<MarketSwitcherProps> = ({ slabAddress, symbol, l
                   type="button"
                   role="option"
                   aria-selected={isCurrent}
+                  // Full-route prefetch on hover/focus: goTo uses router.push, which
+                  // (unlike an in-viewport <Link prefetch>) does no prefetching — so
+                  // switching markets paid the dynamic /trade/[slab] RSC round-trip
+                  // behind the route loading skeleton. Mirrors the markets-page rows.
+                  onMouseEnter={() => { if (!isCurrent) router.prefetch(`/trade/${r.slab}`); }}
+                  onFocus={() => { if (!isCurrent) router.prefetch(`/trade/${r.slab}`); }}
                   onClick={() => goTo(r.slab)}
                   className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left transition-colors hover:bg-[var(--bg-surface)] ${
                     isCurrent ? "bg-[var(--accent)]/[0.06]" : ""
@@ -232,3 +254,5 @@ export const MarketSwitcher: FC<MarketSwitcherProps> = ({ slabAddress, symbol, l
     </>
   );
 };
+
+export const MarketSwitcher = memo(MarketSwitcherInner);

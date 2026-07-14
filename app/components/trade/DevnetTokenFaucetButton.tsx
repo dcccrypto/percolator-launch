@@ -88,16 +88,28 @@ export function DevnetTokenFaucetButton({ mintAddress, symbol }: DevnetTokenFauc
     );
   }
 
-  // Rate limited — show countdown info
+  // Rate limited — show countdown info + a fallback to this app's own
+  // faucet page. This mint's own devnet-airdrop endpoint has a per-wallet
+  // cooldown (h/m below); /faucet mints the SAME sim-USDC under its own,
+  // separate 1-claim-per-hour limit, so it's a genuine fallback rather than
+  // just re-hitting the same rate limit.
   if (rateLimited) {
     const target = new Date(rateLimited.nextClaimAt);
     const remaining = Math.max(0, target.getTime() - Date.now());
     const h = Math.floor(remaining / 3_600_000);
     const m = Math.floor((remaining % 3_600_000) / 60_000);
     return (
-      <div className="flex items-center gap-2 px-3 py-2 border border-[var(--border)]/40 text-[10px]">
-        <span className="text-[var(--text-secondary)]">Next {symbol} claim in</span>
-        <span className="font-mono text-[var(--accent)] tabular-nums">{h}h {m}m</span>
+      <div className="flex flex-col gap-1.5 px-3 py-2 border border-[var(--border)]/40 text-[10px]">
+        <div className="flex items-center gap-2">
+          <span className="text-[var(--text-secondary)]">Next {symbol} claim in</span>
+          <span className="font-mono text-[var(--accent)] tabular-nums">{h}h {m}m</span>
+        </div>
+        <a
+          href="/faucet"
+          className="inline-block text-[var(--accent)] underline underline-offset-2 hover:text-[var(--text)]"
+        >
+          Try our own faucet page (separate limit) →
+        </a>
       </div>
     );
   }

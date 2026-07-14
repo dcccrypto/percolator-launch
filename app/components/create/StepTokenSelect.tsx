@@ -1,6 +1,7 @@
 "use client";
 
 import { FC, useState, useEffect, useMemo, useRef } from "react";
+import Link from "next/link";
 import { PublicKey } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddress, getAccount, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
@@ -8,6 +9,7 @@ import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { formatHumanAmount } from "@/lib/parseAmount";
 import { isValidBase58Pubkey } from "@/lib/createWizardUtils";
 import { getNetwork } from "@/lib/config";
+import type { DuplicateMarket } from "@/hooks/useDuplicateMarket";
 
 /** Derive whether we're on devnet from the live RPC endpoint (not build-time env var). */
 function isDevnetEndpoint(rpcEndpoint: string): boolean {
@@ -25,6 +27,11 @@ interface StepTokenSelectProps {
   onMintNetworkValidChange?: (valid: boolean) => void;
   onContinue: () => void;
   canContinue: boolean;
+  /** One market per token — markets already listed for this CA (owned by the
+   *  WIZARD via useDuplicateMarket, since Quick Launch auto-advances and
+   *  unmounts this step; `canContinue` above is already gated on it there).
+   *  Non-empty renders the blocking card. */
+  duplicateMarkets?: DuplicateMarket[];
 }
 
 /**
@@ -39,6 +46,7 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
   onMintNetworkValidChange,
   onContinue,
   canContinue,
+  duplicateMarkets = [],
 }) => {
   const { publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
@@ -244,7 +252,10 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
   const showResolved = mintValid && effectiveMeta && mintNetworkStatus === "valid";
   // Block continue if mint doesn't exist on the current network or is still being checked
   const mintNetworkBlocked = mintValid && (mintNetworkStatus === "loading" || mintNetworkStatus === "invalid");
-  const effectiveCanContinue = canContinue && !mintNetworkBlocked;
+  // One market per token — an existing market for this CA blocks Continue
+  // (server enforces the same rule with a 409 at registration).
+  const duplicateBlocked = mintValid && duplicateMarkets.length > 0;
+  const effectiveCanContinue = canContinue && !mintNetworkBlocked && !duplicateBlocked;
 
   return (
     <div className="space-y-5">
@@ -333,6 +344,30 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
               </p>
             </div>
           )}
+        </div>
+      )}
+
+      {/* One market per token — an existing market for this CA blocks the step */}
+      {duplicateBlocked && (
+        <div className="border border-[var(--short)]/30 bg-[var(--short)]/[0.04] p-4">
+          <p className="text-[11px] font-semibold text-[var(--short)]">
+            ✗ This token already has a market — one market per token
+          </p>
+          <p className="mt-1 text-[10px] leading-relaxed text-[var(--text-secondary)]">
+            A second market would split liquidity, positions, and pricing across two
+            identical-looking listings. Trade the existing market instead:
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {duplicateMarkets.slice(0, 3).map((m) => (
+              <Link
+                key={m.slab}
+                href={`/trade/${m.slab}`}
+                className="border border-[var(--accent)]/40 px-3 py-1 text-[10px] font-medium text-[var(--accent)] transition-colors hover:border-[var(--accent)]/70 hover:bg-[var(--accent)]/[0.08]"
+              >
+                Trade {m.symbol ?? `${m.slab.slice(0, 6)}…`} →
+              </Link>
+            ))}
+          </div>
         </div>
       )}
 

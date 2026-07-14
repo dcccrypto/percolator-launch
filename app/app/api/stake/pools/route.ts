@@ -16,6 +16,7 @@ import { getStakeProgramId, deriveStakePool } from "@percolatorct/sdk";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 import { readRegisteredMarkets, type RegisteredMarket } from "@/lib/playground-registered-markets";
 import { isBlockedSlab } from "@/lib/blocklist";
+import { getMultipleAccountsInfoChunked } from "@/lib/rpc-chunk";
 import * as Sentry from "@sentry/nextjs";
 
 // ── APR helpers ───────────────────────────────────────────────────────────────
@@ -204,12 +205,12 @@ async function computeAprs(
       continue;
     }
 
-    const growth = (cur.rate - old.rate) / old.rate;
-    const annualized = growth * (365 * MS_PER_DAY) / elapsed;
+    const periods = (365 * MS_PER_DAY) / elapsed;
+    const compounded = Math.pow(cur.rate / old.rate, periods) - 1;
 
-    // Clamp to 0: negative APR (insurance drawdown) would confuse stakers.
-    result[slab] = isFinite(annualized)
-      ? Math.max(0, Math.round(annualized * 10_000) / 100)  // → percentage, 2dp, floor 0
+    // Clamp to 0: negative APY (insurance drawdown) would confuse stakers.
+    result[slab] = isFinite(compounded)
+      ? Math.max(0, Math.round(compounded * 10_000) / 100)  // → percentage, 2dp, floor 0
       : 0;
   }
 
@@ -422,15 +423,18 @@ export async function GET() {
 
     // 2b. Filter out orphan pools whose slab no longer exists on-chain, plus any
     // blocklisted slab (e.g. ANSEM — hidden from the whole app via lib/blocklist).
+    // H: curated(6) ∪ blob-registered(<=100) slabs can reach ~106 — chunked to
+    // stay under the 100-key getMultipleAccountsInfo cap (see lib/rpc-chunk.ts).
     const slabKeys = curatedFiltered.map(p => new PublicKey(p.pool.slab));
-    const slabInfos = await connection.getMultipleAccountsInfo(slabKeys);
+    const slabInfos = await getMultipleAccountsInfoChunked(connection, slabKeys);
     const parsed = curatedFiltered.filter(
       (p, i) => slabInfos[i] !== null && !isBlockedSlab(p.pool.slab),
     );
 
     // 3. Fetch vault token balances (SPL token amount in each vault)
     const vaultAddresses = parsed.map((p) => p.pool.vault);
-    const vaultInfos = await connection.getMultipleAccountsInfo(
+    const vaultInfos = await getMultipleAccountsInfoChunked(
+      connection,
       vaultAddresses.map((a) => new PublicKey(a))
     );
 

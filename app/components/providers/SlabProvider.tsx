@@ -6,6 +6,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useState,
   useRef,
   useCallback,
@@ -13,6 +14,7 @@ import {
 } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
+import { getSeedSlab, setCachedSlab } from "@/lib/slabCache";
 import {
   parseHeader,
   parseConfig,
@@ -104,13 +106,36 @@ export const useSlabState = () => useContext(SlabContext);
 
 const POLL_INTERVAL_MS = 3000;
 
+/**
+ * Byte-for-byte comparison of two Uint8Arrays. Used to detect when a poll/WS
+ * update returns on-chain bytes identical to the last-processed poll, so we can
+ * skip the parse + setState entirely instead of re-emitting equivalent state
+ * (which would still mint a new object reference and re-render every context
+ * consumer). Cheap relative to the parse work + React re-render it replaces.
+ */
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+// Seed-before-paint: on the client the slab data effect runs as a LAYOUT effect,
+// so a slab prefetched on market-row hover (see lib/slabCache) is parsed and
+// committed BEFORE the browser paints — eliminating even the one-frame loading
+// skeleton on navigation. useLayoutEffect is a no-op on the server, so fall back
+// to useEffect there to avoid the SSR warning.
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
+
 export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({ children, slabAddress }) => {
   const { connection } = useConnectionCompat();
   const [state, setState] = useState<SlabState>({ ...defaultSlabState, slabAddress });
   const wsActive = useRef(false);
   const fetchRef = useRef<() => void>(() => {});
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     if (!slabAddress) {
       setState((s) => ({ ...s, slabAddress, loading: false, error: "No slab address" }));
       return;
@@ -151,8 +176,41 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
     // EXPECTED_SLAB_VERSION matches EXPECTED_SLAB_VERSION=16 exported from the v17 SDK.
     const EXPECTED_SLAB_VERSION = 16;
 
+    // Tracks the raw bytes (+ owner) from the last poll/WS update that actually
+    // triggered a parse, scoped to this effect run (reset whenever slabAddress
+    // changes). Lets parseSlab short-circuit on a no-op tick — the vast majority
+    // of 3s polls return byte-identical data — instead of re-parsing and calling
+    // setState with an equivalent-but-new state object that would still cascade
+    // a re-render through every SlabContext consumer.
+    let lastRawData: Uint8Array | null = null;
+    let lastOwnerKey: string | null = null;
+    // Tracks whether the last committed state update carries a non-null `error`.
+    // The byte-equality short-circuit below must NOT fire while an error is
+    // outstanding — otherwise a byte-identical successful poll that follows a
+    // transient error (e.g. the poll()'s null-account branch below, which sets
+    // `error` directly WITHOUT going through parseSlab / updating lastRawData)
+    // would short-circuit before the parse+setState that clears it, leaving a
+    // stale error on screen until the on-chain bytes actually change. Every
+    // branch that sets `error` (including the null-account poll branch) flips
+    // this true; every branch that sets `error: null` flips it back to false.
+    let lastHadError = false;
+
     function parseSlab(data: Uint8Array, owner?: PublicKey) {
       if (cancelled) return;
+      const ownerKey = owner ? owner.toBase58() : null;
+      if (
+        lastRawData !== null &&
+        ownerKey === lastOwnerKey &&
+        !lastHadError &&
+        bytesEqual(lastRawData, data)
+      ) {
+        // Identical bytes (and owner) to the last processed update, and no
+        // outstanding error to clear — nothing changed on-chain, skip the
+        // parse + setState entirely.
+        return;
+      }
+      lastRawData = data;
+      lastOwnerKey = ownerKey;
       // Refuse to surface programId for slabs owned by a program we did not
       // deploy. The slab address in the URL is user-controlled, and Solana
       // lets anyone create an account owned by any BPF program — so without
@@ -172,6 +230,7 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
             `[SlabProvider] Refusing to render slab owned by unknown program: ${owner.toBase58()}`,
           );
         }
+        lastHadError = true;
         setState((s) => ({
           ...s,
           loading: false,
@@ -285,6 +344,7 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
           // leverage, required margin) use the true on-chain values instead of
           // hardcoded ?? 500n/1000n fallbacks. See lib/v17-engine-config.ts.
           const v17Params = parseV17RiskParams(data, wrapperConfigV17.tradeFeeBps);
+          lastHadError = false;
           setState((s) => ({
             slabAddress,
             raw: data,
@@ -307,6 +367,7 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
 
         // Graceful version mismatch detection (bug #52f49b69)
         if (header.version !== EXPECTED_SLAB_VERSION) {
+          lastHadError = true;
           setState((s) => ({
             ...s,
             loading: false,
@@ -320,6 +381,7 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
         const engine = parseEngine(data);
         const params = parseParams(data);
         const accounts = parseAllAccounts(data);
+        lastHadError = false;
         setState((s) => ({
           slabAddress, raw: data, header, config, engine, params, accounts,
           loading: false, error: null,
@@ -342,6 +404,7 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
           msg.includes("buffer") ||
           (data.length > 0 && data.length < 200); // Suspiciously small for a slab
 
+        lastHadError = true;
         if (isLayoutMismatch) {
           setState((s) => ({
             ...s,
@@ -362,7 +425,9 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
       subId = connection.onAccountChange(slabPk, (info) => {
         if (cancelled) return;
         wsActive.current = true;
-        parseSlab(new Uint8Array(info.data), info.owner);
+        const bytes = new Uint8Array(info.data);
+        setCachedSlab(slabAddress, bytes, info.owner);
+        parseSlab(bytes, info.owner);
       });
     } catch { /* ws not available */ }
 
@@ -372,9 +437,17 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
       try {
         const info = await connection.getAccountInfo(slabPk);
         if (info) {
-          parseSlab(new Uint8Array(info.data), info.owner);
+          const bytes = new Uint8Array(info.data);
+          setCachedSlab(slabAddress, bytes, info.owner);
+          parseSlab(bytes, info.owner);
         } else {
-          // Slab account doesn't exist on-chain
+          // Slab account doesn't exist on-chain. This bypasses parseSlab entirely
+          // (no bytes to parse), so it must flip lastHadError itself — otherwise a
+          // later poll that returns the SAME bytes as before this null read would
+          // hit the byte-equality short-circuit in parseSlab and skip the
+          // setState that would clear this error, leaving it stuck until the
+          // on-chain bytes actually change.
+          lastHadError = true;
           setState((s) => ({ ...s, loading: false, error: "Market not found on-chain. It may have been closed or the address is invalid." }));
         }
       } catch (e) {
@@ -399,6 +472,16 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
     }
 
     fetchRef.current = poll;
+    // 0-loading: if the slab bytes were prefetched (market-row hover or the
+    // markets-page batch warm), parse them synchronously NOW so the terminal
+    // renders immediately instead of showing a skeleton for the getAccountInfo
+    // round-trip. getSeedSlab is the stale-tolerant tier (up to ~10min old):
+    // the poll below fires immediately and byte-equality-dedups the no-op
+    // re-parse, so a stale seed only bounds the ONE pre-paint frame — with the
+    // strict 20s getCachedSlab tier here, anyone browsing /markets for >20s
+    // before clicking missed the seed and ate a ~560ms full-page skeleton.
+    const cachedSeed = getSeedSlab(slabAddress);
+    if (cachedSeed) parseSlab(cachedSeed.data, cachedSeed.owner);
     poll().then(schedulePoll);
 
     return () => {

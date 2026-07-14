@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 import { SITE_NAME, SITE_URL, TWITTER_HANDLE } from "@/lib/seo";
 import { fetchMarketMeta, formatUsd } from "@/lib/market-meta";
 import { JsonLd } from "@/components/seo/JsonLd";
@@ -49,6 +49,34 @@ export async function generateMetadata({
   };
 }
 
+/**
+ * JSON-LD block, isolated behind Suspense so its fetchMarketMeta await (an
+ * HTTP self-fetch to /api/markets/[slab] — data-cached 300s, but a real
+ * network round-trip when cold) does NOT hold up streaming the client page
+ * shell. When the layout body itself awaited this fetch, every navigation
+ * held the entire RSC response behind it, pinning the route's loading.tsx
+ * skeleton on screen for the duration — structured data for crawlers isn't
+ * worth a visible skeleton for users. Crawlers still get the full JSON-LD:
+ * the stream completes before the document is read.
+ */
+async function TradeJsonLd({ slab }: { slab: string }) {
+  const market = await fetchMarketMeta(slab); // cached (revalidate 300) — shared with generateMetadata
+  const canonicalSlab = market?.slabAddress ?? slab;
+  const sym = market?.symbol || "";
+  const path = `/trade/${canonicalSlab}`;
+  return (
+    <JsonLd
+      data={[
+        marketSchema({ symbol: sym, path }),
+        breadcrumbSchema([
+          { name: "Markets", path: "/markets" },
+          { name: sym ? `${sym}-PERP` : "Market", path },
+        ]),
+      ]}
+    />
+  );
+}
+
 export default async function TradeSlabLayout({
   children,
   params,
@@ -57,22 +85,12 @@ export default async function TradeSlabLayout({
   params: Promise<{ slab: string }>;
 }) {
   const { slab } = await params;
-  const market = await fetchMarketMeta(slab); // cached (revalidate 300) — shared with generateMetadata
-  const canonicalSlab = market?.slabAddress ?? slab;
-  const sym = market?.symbol || "";
-  const path = `/trade/${canonicalSlab}`;
 
   return (
     <>
-      <JsonLd
-        data={[
-          marketSchema({ symbol: sym, path }),
-          breadcrumbSchema([
-            { name: "Markets", path: "/markets" },
-            { name: sym ? `${sym}-PERP` : "Market", path },
-          ]),
-        ]}
-      />
+      <Suspense fallback={null}>
+        <TradeJsonLd slab={slab} />
+      </Suspense>
       {children}
     </>
   );

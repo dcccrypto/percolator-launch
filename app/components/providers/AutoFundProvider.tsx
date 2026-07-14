@@ -8,7 +8,7 @@
 
 "use client";
 
-import { createContext, FC, ReactNode, useContext, useEffect, useRef, useState } from "react";
+import { createContext, FC, ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useAutoFund, type AutoFundResult } from "@/hooks/useAutoFund";
 
 interface AutoFundContextValue {
@@ -64,8 +64,10 @@ export const AutoFundProvider: FC<{ children?: ReactNode }> = ({ children }) => 
     };
   }, [rawResult]);
 
+  const value = useMemo(() => ({ result: windowedResult, funding }), [windowedResult, funding]);
+
   return (
-    <AutoFundContext.Provider value={{ result: windowedResult, funding }}>
+    <AutoFundContext.Provider value={value}>
       {children ?? null}
     </AutoFundContext.Provider>
   );

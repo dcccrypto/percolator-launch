@@ -106,11 +106,6 @@ export default function VaultDetailPage() {
 }
 
 function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
-
-  useEffect(() => {
-    document.title = 'Vault — Percolator';
-  }, []);
-
   // LP Vault ("Earn") state for this market — v17 CreateLpVault/DepositToLpVault/
   // RequestRedeemLpShares/ExecuteRedemption mechanism (wrapper program, tags 74-77).
   // NOT the percolator-stake pool — that's a separate on-chain account backing the
@@ -134,7 +129,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
   const collateralDecimals = collateralTokenMeta?.decimals ?? 6;
 
   // Get market info from earn stats
-  const { stats: earnStats, loading: earnLoading, error: earnStatsError } = useEarnStats();
+  const { stats: earnStats, loading: earnLoading, error: earnStatsError, refresh: refreshEarnStats } = useEarnStats();
   const marketInfo = useMemo<MarketVaultInfo | null>(() => {
     return earnStats.markets.find((m) => m.slabAddress === slabAddress) ?? null;
   }, [earnStats.markets, slabAddress]);
@@ -145,16 +140,25 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
   useEffect(() => {
     if (marketInfo || earnLoading) return;
     let cancelled = false;
-    getSupabase()
-      .from('markets_with_stats')
-      .select('symbol, name')
-      .eq('slab_address', slabAddress)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (!cancelled && data?.symbol) {
-          setFallbackSymbol(data.symbol);
-        }
-      });
+    try {
+      getSupabase()
+        .from('markets_with_stats')
+        .select('symbol, name')
+        .eq('slab_address', slabAddress)
+        .maybeSingle()
+        .then(
+          ({ data }) => {
+            if (!cancelled && data?.symbol) {
+              setFallbackSymbol(data.symbol);
+            }
+          },
+          (err: unknown) => {
+            console.error('[earn/[slab]] fallback symbol lookup failed:', err);
+          },
+        );
+    } catch (err) {
+      console.error('[earn/[slab]] fallback symbol lookup failed:', err);
+    }
     return () => { cancelled = true; };
   }, [marketInfo, earnLoading, slabAddress]);
 
@@ -165,8 +169,13 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
     async (amount: bigint) => {
       await lpVaultDeposit(amount);
       await refreshState();
+      // marketInfo (maxOI, insurance, APY) comes from a separate useEarnStats
+      // instance that only advances on its own 15s timer — without this the
+      // OI meter/APY/insurance figures would sit stale for up to 15s after a
+      // deposit changes the vault's TVL.
+      refreshEarnStats();
     },
-    [lpVaultDeposit, refreshState],
+    [lpVaultDeposit, refreshState, refreshEarnStats],
   );
 
   const handleWithdraw = useCallback(
@@ -176,21 +185,47 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
       // instead of a blanket "Withdrawal successful!".
       const result = await lpVaultWithdraw(lpAmount);
       await refreshState();
+      refreshEarnStats();
       return result;
     },
-    [lpVaultWithdraw, refreshState],
+    [lpVaultWithdraw, refreshState, refreshEarnStats],
   );
 
+  // No signal about this slab from any source (not in earn stats, no Supabase
+  // row, no on-chain LP vault registry) once both loads have settled — a
+  // genuinely bad/unknown slab, distinct from a market that's just excluded
+  // from useEarnStats (e.g. non-'active' status) but still has a real vault.
+  const marketNotFound =
+    !loading && !marketInfo && !fallbackSymbol && !lpVaultState.registryExists;
+
   const symbol = marketInfo?.symbol ?? fallbackSymbol ?? 'UNKNOWN';
+  // maxOI is only known once marketInfo resolves — without it we can't tell "no OI
+  // cap" (real 0) apart from "cap unknown" (marketInfo not loaded yet / market not
+  // in earn stats), so the meter must not claim a health status in the latter case.
   const maxOI = marketInfo?.maxOI ?? 0;
+  const oiCapKnown = marketInfo != null;
   const collDivisor = 10 ** collateralDecimals;
   const currentOI = marketInfo?.totalOI ?? (totalOI ? Number(totalOI) / collDivisor : 0);
-  const estimatedApy = marketInfo?.estimatedApyPct ?? 0;
   const collateralScale = Math.pow(10, collateralDecimals);
   // TVL = the LP Vault Registry's own backing (shares + distributed fees), NOT the
   // percolator-stake pool (poolState.vaultBalance, wrong account — see hook comment above).
   const vaultUsd = Number(lpVaultState.vaultTotalAtoms) / collateralScale;
   const insuranceFund = marketInfo?.insuranceFund ?? 0;
+
+  if (marketNotFound) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="text-center space-y-4 px-4">
+          <div className="text-[var(--text-secondary)] text-sm">
+            This market could not be found.
+          </div>
+          <Link href="/earn" className="text-[var(--accent)] text-sm hover:underline">
+            ← Back to Earn
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-[calc(100dvh-48px)] animate-fade-in">
@@ -219,7 +254,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
               ⚠ Couldn&apos;t refresh market stats
             </p>
             <p className="text-[11px] text-[var(--text-secondary)] mt-1">
-              {earnStatsError} — volume, insurance, and APY figures below may be stale. Vault balance and deposit/withdraw are unaffected.
+              {earnStatsError} — volume and insurance figures below may be stale. Vault balance and deposit/withdraw are unaffected.
             </p>
           </div>
         )}
@@ -258,17 +293,6 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
 
           <div className="flex items-center gap-6">
             <div className="text-right">
-              <div
-                className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-secondary)] cursor-help underline decoration-dotted decoration-[var(--text-muted)]"
-                title="APY is estimated from the last 30 days of insurance fund fee revenue. Past performance does not guarantee future returns."
-              >
-                Est. APY
-              </div>
-              <div className="text-2xl font-bold text-[var(--cyan)] font-mono tabular-nums">
-                {estimatedApy.toFixed(1)}%
-              </div>
-            </div>
-            <div className="text-right">
               <div className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">
                 TVL
               </div>
@@ -297,7 +321,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
             </StatCell>
             <StatCell label="Open Interest" loading={loading}>
               <span className="text-sm font-mono tabular-nums text-[var(--text)]">
-                ${formatCompact(currentOI)}
+                {oiCapKnown ? `$${formatCompact(currentOI)}` : '—'}
               </span>
             </StatCell>
             <StatCell label="Insurance" loading={loading}>
@@ -307,7 +331,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
             </StatCell>
             <StatCell label="Max Leverage" loading={loading}>
               <span className="text-sm font-mono tabular-nums text-[var(--text)]">
-                {marketInfo?.maxLeverage || 10}×
+                {marketInfo?.maxLeverage ?? 10}×
               </span>
             </StatCell>
           </div>
@@ -316,7 +340,13 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
         {/* OI meter */}
         <ScrollReveal>
           <div className="mb-8 border border-[var(--border)] bg-[var(--panel-bg)] rounded-sm p-5 hud-corners">
-            <OiCapMeter currentOI={currentOI} maxOI={maxOI} />
+            {oiCapKnown ? (
+              <OiCapMeter currentOI={currentOI} maxOI={maxOI} />
+            ) : (
+              <div className="text-[11px] text-[var(--text-secondary)]">
+                OI capacity data unavailable for this market.
+              </div>
+            )}
           </div>
         </ScrollReveal>
 
@@ -329,8 +359,8 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
               lpSupply={lpVaultState.lpSupply}
               vaultBalance={lpVaultState.vaultTotalAtoms}
               decimals={collateralDecimals}
+              lpDecimals={lpVaultState.lpDecimals}
               collateralSymbol={collateralSymbol}
-              estimatedApyPct={estimatedApy}
               redemptionRateE6={lpVaultState.vaultSharePriceE6}
               loading={loading}
             />
@@ -389,7 +419,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
               <InfoRow label="Deposit Cap" value="Unlimited" />
               <InfoRow
                 label="Trading Fee"
-                value={`${(marketInfo?.tradingFeeBps ?? 10) / 100}%`}
+                value={`${((marketInfo?.tradingFeeBps ?? 10) / 100).toFixed(2)}%`}
               />
               <InfoRow
                 label="Pool Status"

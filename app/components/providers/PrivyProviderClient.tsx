@@ -2,10 +2,20 @@
 
 import { FC, ReactNode, useMemo } from "react";
 import { PrivyProvider, usePrivy, type WalletListEntry } from "@privy-io/react-auth";
-import { toSolanaWalletConnectors } from "@privy-io/react-auth/solana";
+import {
+  toSolanaWalletConnectors,
+  useWallets,
+  useSignTransaction,
+  useSignAndSendTransaction,
+  useSignMessage,
+} from "@privy-io/react-auth/solana";
 import { createSolanaRpc, createSolanaRpcSubscriptions } from "@solana/kit";
+import { PublicKey, Transaction } from "@solana/web3.js";
 import { SentryUserContext } from "@/components/providers/SentryUserContext";
 import { PrivyLoginContext } from "@/hooks/usePrivySafe";
+import { WalletApiContext, type WalletApi } from "@/hooks/walletApiContext";
+import { usePreferredWallet, resolveActiveWallet } from "@/hooks/usePreferredWallet";
+import { getNetwork } from "@/lib/config";
 
 /**
  * Client-only Privy provider wrapper. Loaded via next/dynamic with ssr:false
@@ -93,9 +103,199 @@ const PrivyProviderClient: FC<{ appId: string; children: ReactNode }> = ({
       }}
     >
       <SentryUserContext />
-      <PrivyLoginBridge>{children}</PrivyLoginBridge>
+      <PrivyLoginBridge>
+        <PrivyWalletApiBridge>{children}</PrivyWalletApiBridge>
+      </PrivyLoginBridge>
     </PrivyProvider>
   );
+};
+
+/**
+ * Computes the unified WalletApi from Privy's hooks and injects it via
+ * WalletApiContext. Lives INSIDE the PrivyProvider tree and inside this
+ * dynamically-imported module, so `useWalletCompat()` consumers get the Privy
+ * implementation without ever importing @privy-io/react-auth themselves. Ported
+ * verbatim from the former `useWalletCompatPrivyInner` in useWalletCompat.ts.
+ */
+const PrivyWalletApiBridge: FC<{ children: ReactNode }> = ({ children }) => {
+  const { ready, authenticated, logout } = usePrivy();
+  const { wallets } = useWallets();
+  const { signTransaction: privySignTransaction } = useSignTransaction();
+  const { signAndSendTransaction: privySignAndSend } = useSignAndSendTransaction();
+  const { signMessage: privySignMessage } = useSignMessage();
+  const { preferredAddress } = usePreferredWallet();
+
+  const activeWallet = useMemo(() => {
+    return resolveActiveWallet(wallets, preferredAddress);
+  }, [wallets, preferredAddress]);
+
+  const publicKey = useMemo(() => {
+    if (!activeWallet) return null;
+    try {
+      return new PublicKey(activeWallet.address);
+    } catch {
+      return null;
+    }
+  }, [activeWallet]);
+
+  const connected = authenticated && !!activeWallet;
+
+  const signTransaction = useMemo(() => {
+    if (!activeWallet) return undefined;
+    return async (tx: Transaction): Promise<Transaction> => {
+      const serialized = tx.serialize({
+        requireAllSignatures: false,
+        verifySignatures: false,
+      });
+      // Explicitly pass the chain so Privy uses the correct network's RPC.
+      // Without this, Privy defaults to solana:mainnet which causes 403s
+      // when the app is configured for devnet.
+      const network = getNetwork();
+      const chain = network === "mainnet" ? "solana:mainnet" : "solana:devnet";
+      const result = await privySignTransaction({
+        transaction: new Uint8Array(serialized),
+        wallet: activeWallet,
+        chain: chain as any,
+      });
+      return Transaction.from(Buffer.from(result.signedTransaction));
+    };
+  }, [activeWallet, privySignTransaction]);
+
+  /**
+   * PERC-8388: signAndSendTransaction bypasses Lighthouse/Blowfish injection.
+   * When the wallet signs AND sends atomically, there is no post-sign window
+   * for wallet middleware to inject assertion instructions that break our tx.
+   */
+  /**
+   * signAllTransactions: the market-launch batching fast path's primary sign
+   * method — one Privy approval modal for the whole batch instead of one per
+   * tx. `useSignTransaction().signTransaction` is VARIADIC
+   * (`signTransaction(...inputs: SignTransactionInput[]): Promise<SignTransactionOutput[]>`
+   * — verified in @privy-io/react-auth's dist/dts/solana.d.ts) precisely for
+   * this multi-tx case; spreading N inputs returns N outputs in the same
+   * order, from a single approval.
+   */
+  const signAllTransactions = useMemo(() => {
+    if (!activeWallet) return undefined;
+    return async (txs: Transaction[]): Promise<Transaction[]> => {
+      const network = getNetwork();
+      const chain = network === "mainnet" ? "solana:mainnet" : "solana:devnet";
+      const serialized = txs.map(
+        (tx) => new Uint8Array(tx.serialize({ requireAllSignatures: false, verifySignatures: false })),
+      );
+
+      // ATTEMPT 1 — the wallet's OWN wallet-standard `solana:signTransaction`
+      // feature, invoked with ALL inputs in a single call. This is the native
+      // batch path (what wallet-adapter's signAllTransactions uses under the
+      // hood); Phantom/Solflare render it as ONE approval listing every tx.
+      //
+      // The features hang off `ConnectedStandardSolanaWallet.standardWallet`
+      // (a SolanaStandardWallet), NOT off the connected-wallet object itself —
+      // reading `activeWallet.features` finds nothing, silently falls through,
+      // and the user gets one Privy approval PER transaction (the exact
+      // "I still signed 8 times" report on Solflare). Verified against
+      // @privy-io/js-sdk-core's ConnectedStandardSolanaWallet class:
+      // `get standardWallet(): SolanaStandardWallet`.
+      try {
+        const connected = activeWallet as unknown as {
+          address: string;
+          standardWallet?: {
+            features?: Record<string, unknown>;
+            accounts?: Array<{ address: string }>;
+          };
+        };
+        const std = connected.standardWallet;
+        const feature = std?.features?.["solana:signTransaction"] as
+          | { signTransaction?: (...inputs: unknown[]) => Promise<Array<{ signedTransaction: Uint8Array }>> }
+          | undefined;
+        const account =
+          std?.accounts?.find((a) => a.address === connected.address) ?? std?.accounts?.[0];
+        if (typeof feature?.signTransaction === "function" && account) {
+          const outputs = await feature.signTransaction(
+            ...serialized.map((bytes) => ({ transaction: bytes, account, chain })),
+          );
+          if (Array.isArray(outputs) && outputs.length === txs.length) {
+            console.info(`[PrivyProviderClient] batch-signed ${txs.length} txs via wallet-standard feature (ONE approval)`);
+            return outputs.map((o) => Transaction.from(Buffer.from(o.signedTransaction)));
+          }
+        }
+      } catch (e) {
+        console.warn("[PrivyProviderClient] wallet-standard batch sign failed — trying the connected wallet's own signer:", e);
+      }
+
+      // ATTEMPT 2 — ConnectedStandardSolanaWallet's own VARIADIC
+      // signTransaction (a documented wrapper around the same
+      // solana:signTransaction feature). Covers wallets whose feature object
+      // isn't reachable structurally above.
+      try {
+        const walletSigner = activeWallet as unknown as {
+          signTransaction?: (...inputs: unknown[]) => Promise<Array<{ signedTransaction: Uint8Array }> | { signedTransaction: Uint8Array }>;
+        };
+        if (typeof walletSigner.signTransaction === "function" && txs.length > 1) {
+          const outputs = await walletSigner.signTransaction(
+            ...serialized.map((bytes) => ({ transaction: bytes, chain })),
+          );
+          if (Array.isArray(outputs) && outputs.length === txs.length) {
+            console.info(`[PrivyProviderClient] batch-signed ${txs.length} txs via connected-wallet variadic signer (ONE approval)`);
+            return outputs.map((o) => Transaction.from(Buffer.from(o.signedTransaction)));
+          }
+        }
+      } catch (e) {
+        console.warn("[PrivyProviderClient] connected-wallet variadic sign failed — using Privy signer (may prompt per tx):", e);
+      }
+
+      const inputs = serialized.map((bytes) => ({
+        transaction: bytes,
+        wallet: activeWallet,
+        chain: chain as any,
+      }));
+      const results = await privySignTransaction(...inputs);
+      return results.map((result) => Transaction.from(Buffer.from(result.signedTransaction)));
+    };
+  }, [activeWallet, privySignTransaction]);
+
+  const signAndSendTransaction = useMemo(() => {
+    if (!activeWallet) return undefined;
+    return async (tx: Transaction): Promise<Uint8Array> => {
+      const serialized = tx.serialize({
+        requireAllSignatures: false,
+        verifySignatures: false,
+      });
+      const network = getNetwork();
+      const chain = network === "mainnet" ? "solana:mainnet" : "solana:devnet";
+      const result = await privySignAndSend({
+        transaction: new Uint8Array(serialized),
+        wallet: activeWallet,
+        chain: chain as any,
+      });
+      return new Uint8Array(result.signature);
+    };
+  }, [activeWallet, privySignAndSend]);
+
+  const signMessage = useMemo(() => {
+    if (!activeWallet) return undefined;
+    return async (message: Uint8Array): Promise<Uint8Array> => {
+      const result = await privySignMessage({ message, wallet: activeWallet });
+      return result.signature;
+    };
+  }, [activeWallet, privySignMessage]);
+
+  const api = useMemo<WalletApi>(
+    () => ({
+      publicKey,
+      connected,
+      connecting: !ready,
+      wallet: activeWallet,
+      signTransaction,
+      signAndSendTransaction,
+      signMessage,
+      signAllTransactions,
+      disconnect: logout,
+    }),
+    [publicKey, connected, ready, activeWallet, signTransaction, signAndSendTransaction, signMessage, signAllTransactions, logout],
+  );
+
+  return <WalletApiContext.Provider value={api}>{children}</WalletApiContext.Provider>;
 };
 
 /**

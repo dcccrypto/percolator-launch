@@ -3,9 +3,8 @@
 import { FC } from "react";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
-import { useConnectionCompat } from "@/hooks/useWalletCompat";
+import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { InfoIcon } from "@/components/ui/Tooltip";
-import { useEffect, useState } from "react";
 import {
   V17_MARKET_GROUP_OFF,
   V17_MARKET_GROUP_LEN,
@@ -50,21 +49,11 @@ function readV17AssetSlotLast(data: Uint8Array, assetIndex = 0): bigint | null {
 export const CrankHealthCard: FC = () => {
   const { engine, loading, isV17 } = useEngineState();
   const { raw } = useSlabState();
-  const { connection } = useConnectionCompat();
-  const [currentSlot, setCurrentSlot] = useState<number | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const fetch = async () => {
-      try {
-        const slot = await connection.getSlot();
-        if (!cancelled) setCurrentSlot(slot);
-      } catch { /* ignore */ }
-    };
-    fetch();
-    const interval = setInterval(fetch, 5000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [connection]);
+  // Shared, visibility-gated 10s slot ticker (useEngineFreshness) instead of a
+  // private 5s getSlot poll — the staleness cliff is ~500 slots (~190s), so
+  // 10s granularity loses nothing and this card stops being its own RPC poller.
+  const { currentSlot: currentSlotBig } = useEngineFreshness();
+  const currentSlot = currentSlotBig === null ? null : Number(currentSlotBig);
 
   if (loading) {
     return (
@@ -162,25 +151,30 @@ export const CrankHealthCard: FC = () => {
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-px">
-        <div className="px-1.5 py-1 border-b border-r border-[var(--border)]/20 last:border-r-0 [&:nth-child(2n)]:border-r-0 [&:nth-last-child(-n+2)]:border-b-0">
-          <span className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">
-            Lifetime Liquidations
-          </span>
-          <p className="text-[11px] font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
-            {lifetimeLiquidations != null ? Number(lifetimeLiquidations).toLocaleString() : "—"}
-          </p>
+      {/* Stats — lifetimeLiquidations/lifetimeForceCloses are legacy engine-only
+          counters (explicitly nulled in the isV17 branch above), so this grid
+          is always dead ("—"/"—") on v17. Omit it there; the staleness bar
+          above is v17-correct and stays for both versions. */}
+      {!isV17 && (
+        <div className="grid grid-cols-2 gap-px">
+          <div className="px-1.5 py-1 border-b border-r border-[var(--border)]/20 last:border-r-0 [&:nth-child(2n)]:border-r-0 [&:nth-last-child(-n+2)]:border-b-0">
+            <span className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">
+              Lifetime Liquidations
+            </span>
+            <p className="text-[11px] font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
+              {lifetimeLiquidations != null ? Number(lifetimeLiquidations).toLocaleString() : "—"}
+            </p>
+          </div>
+          <div className="px-1.5 py-1 border-b border-r border-[var(--border)]/20 last:border-r-0 [&:nth-child(2n)]:border-r-0 [&:nth-last-child(-n+2)]:border-b-0">
+            <span className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">
+              Force Closes
+            </span>
+            <p className="text-[11px] font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
+              {lifetimeForceCloses != null ? Number(lifetimeForceCloses).toLocaleString() : "—"}
+            </p>
+          </div>
         </div>
-        <div className="px-1.5 py-1 border-b border-r border-[var(--border)]/20 last:border-r-0 [&:nth-child(2n)]:border-r-0 [&:nth-last-child(-n+2)]:border-b-0">
-          <span className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">
-            Force Closes
-          </span>
-          <p className="text-[11px] font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
-            {lifetimeForceCloses != null ? Number(lifetimeForceCloses).toLocaleString() : "—"}
-          </p>
-        </div>
-      </div>
+      )}
     </div>
   );
 };

@@ -8,6 +8,7 @@ import {
   Transaction,
   TransactionInstruction,
 } from "@solana/web3.js";
+import type { Connection } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import {
   createAssociatedTokenAccountInstruction,
@@ -28,6 +29,8 @@ import {
   encodeSetNftProgramId,
   encodeCreateLpVaultV17,
   encodeStakeInitPool,
+  encodeTopUpBackingBucket,
+  MAX_BACKING_BUCKET_EXPIRY_SLOT,
   CrankAction,
   detectDexType,
   parseDexPool,
@@ -39,6 +42,7 @@ import {
   ACCOUNTS_INIT_MATCHER_CTX,
   ACCOUNTS_INIT_USER,
   ACCOUNTS_CREATE_LP_VAULT,
+  ACCOUNTS_TOP_UP_BACKING_BUCKET,
   buildAccountMetas,
   WELL_KNOWN,
   buildIx,
@@ -66,16 +70,36 @@ import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
 // and UpdateConfig (tag 14) do not exist in v17. All oracle + risk params are embedded
 // in InitMarket (extended tail). The sdk-compat stubs throw at runtime if called.
 // We guard all callsites with isAdminOracle && !isV17Slab before using these.
-import { sendTx } from "@/lib/tx";
+import {
+  sendTx,
+  prewarmTxLanding,
+  buildBatchTx,
+  signAllCompat,
+  broadcastSignedTx,
+  getFreshBlockhash,
+  getPriorityFee,
+  isBlockhashExpiredError,
+  isConfirmationTimeoutError,
+  checkSignatureLanded,
+} from "@/lib/tx";
 import { getConfig, getNetwork } from "@/lib/config";
 import { normalizeDexType } from "@/lib/dex-type";
 import { parseMarketCreationError } from "@/lib/parseMarketError";
+import {
+  inspectV17MatcherContext,
+  isEmptyV17PortfolioMatcherConfig,
+  readV17PortfolioMatcherConfig,
+} from "@/lib/v17-matcher-state";
 import {
   saveInFlightMarket,
   updateInFlightStep,
   clearInFlightMarket,
   loadLastInFlightMarket,
 } from "@/lib/inFlightMarket";
+import {
+  buildMarketRegistrationMessage,
+  type MarketRegistrationPayload,
+} from "@/lib/market-registration-auth";
 // v17: max assets per portfolio (= the market's asset-slot capacity); program cap = 14.
 // The slab MUST be sized to exactly match this capacity or InitMarket reverts (dynamic-len validation).
 export const V17_MAX_PORTFOLIO_ASSETS = 14;
@@ -85,6 +109,17 @@ export const V17_MAX_PORTFOLIO_ASSETS = 14;
 // tier and made every InitMarket revert with InvalidSlabLen while over-charging ~0.67 SOL rent.
 export const DEFAULT_SLAB_SIZE = v17MarketAccountLen(V17_MAX_PORTFOLIO_ASSETS); // 26_364 bytes (cap-14)
 const ALL_ZEROS_FEED = "0".repeat(64);
+
+// BACKING-BUCKET-FRESHNESS DEADLOCK PREVENTION (2026-07-09): dust amount used to
+// seed BOTH backing-bucket domains (long=2*assetIndex, short=2*assetIndex+1) of
+// asset 0 to Fresh@MAX_BACKING_BUCKET_EXPIRY_SLOT via TopUpBackingBucket, inside
+// Step 3 below, right after DepositCollateral lands (buckets are still Empty —
+// nothing in Steps 0-5 ever calls TradeCpi). See the Step 3 block for the full
+// root-cause writeup. No engine-enforced minimum floor
+// (percolator/src/v16.rs deposit_fresh_counterparty_backing_not_atomic only
+// requires amount != 0) — 0.01 test-USDC is real (not spoofed) collateral and
+// negligible next to lpCollateral/insuranceAmount.
+const BACKING_BUCKET_DUST_AMOUNT = 10_000n; // 0.01 test-USDC (6 decimals)
 
 /**
  * PERC-465: Fetch the current USD price for a token from Jupiter price API.
@@ -234,6 +269,21 @@ export interface CreateMarketState {
   keeperMessage: string | null;
   /** True while a manual "Retry registration" call (see retryKeeperRegistration) is in flight. */
   keeperRegistering: boolean;
+  /**
+   * Batch-launch UI phase (fresh-launch fast path only — see
+   * `attemptFreshBatchedLaunch` below). Sequential/resume flows never set this
+   * away from "idle", so `LaunchProgress` falls back to its original
+   * per-step (0-5) rendering for those — this is purely additive UI state,
+   * `step`/`lastStep` remain the single source of truth the resume machinery
+   * (RecoverSolBanner, useStuckSlabs, updateInFlightStep) reads.
+   */
+  phase: "idle" | "preparing" | "awaiting-signature" | "landing" | "done";
+  /** "landing" phase only: 1-based index of the transaction currently confirming. */
+  landingIndex: number;
+  /** Human-readable market-creation step names, one per batched tx, in order. */
+  landingLabels?: string[];
+  /** "landing" phase only: total transactions in this batch (4-5 depending on oracle mode). */
+  landingTotal: number;
 }
 
 /** Minimal shape retryKeeperRegistration needs to re-run keeper-register for an
@@ -262,6 +312,15 @@ interface KeeperRegisterOutcome {
  *
  * NEVER throws — always resolves with an outcome describing what happened, so
  * callers can surface it directly as UI state.
+ *
+ * `precomputedProof` (batching fast path, 2026-07-12): the fresh-launch batch
+ * pipeline (see `attemptFreshBatchedLaunch`) signs the H1v2 stateless proof
+ * message UPFRONT — bursted alongside the markets-nonce signMessage prompt,
+ * before the batch tx signature — rather than at this call site (which in the
+ * batched flow runs well after M1 has already landed). When supplied, this
+ * skips the wallet.signMessage step entirely and posts with the given
+ * deployer/signature pair; the sequential path and retryKeeperRegistration()
+ * never pass it, so their sign-at-call-time behavior is unchanged.
  */
 async function registerMarketWithKeeper(
   wallet: {
@@ -269,6 +328,7 @@ async function registerMarketWithKeeper(
     signMessage?: (message: Uint8Array) => Promise<Uint8Array>;
   },
   params: KeeperRegisterRetryParams,
+  precomputedProof?: { deployer: string; signature: string },
 ): Promise<KeeperRegisterOutcome> {
   if (!wallet.publicKey) {
     return {
@@ -277,6 +337,13 @@ async function registerMarketWithKeeper(
     };
   }
 
+  let keeperDeployer: string;
+  let keeperSignature: string;
+
+  if (precomputedProof) {
+    keeperDeployer = precomputedProof.deployer;
+    keeperSignature = precomputedProof.signature;
+  } else {
   // BUG FIX (2026-07-09): previously this fell through with keeperSignature = null
   // and POSTed the request anyway, minus the `signature` field — the route always
   // 400'd with "Missing required fields: deployer, signature" and the wizard
@@ -294,8 +361,7 @@ async function registerMarketWithKeeper(
     };
   }
 
-  const keeperDeployer = wallet.publicKey.toBase58();
-  let keeperSignature: string;
+  keeperDeployer = wallet.publicKey.toBase58();
   try {
     // H1v2 auth: keeper-register verifies slab ownership via a STATELESS
     // deployer-signed proof — sign `keeper-register:<slabAddress>:<unix-minute>`
@@ -318,6 +384,7 @@ async function registerMarketWithKeeper(
         "be priced until it's registered. Click Retry registration to try again.",
     };
   }
+  } // end precomputedProof ? ... : sign-here
 
   try {
     const keeperRegResp = await fetch("/api/playground/keeper-register", {
@@ -364,6 +431,849 @@ async function registerMarketWithKeeper(
   }
 }
 
+// ============================================================================
+// Fresh-launch batching (2026-07-12)
+// ============================================================================
+//
+// GOAL: collapse the ~12 wallet approvals + 2 signMessage prompts a genuinely
+// FRESH quick-launch requires (see the sequential Steps 0-5 below) into ONE
+// signAllTransactions batch approval + the same 2 signMessage prompts,
+// bursted immediately before it. This function is ONLY attempted when
+// `create()` is called with `retryFromStep === undefined` — i.e. a real
+// "LAUNCH MARKET" click, never a resume/retry (those always pass an explicit
+// step number and keep using the battle-tested sequential per-step code
+// below unchanged, including every idempotency check it relies on to resume
+// a partially-created market safely).
+//
+// Maps the 12-tx sequential flow to 5-6 independent transactions:
+//   M1  = createAccount(slab)+createATA+InitMarket+SetNftProgramId
+//   cosignTx (keeper mode only) = the server-built keeper co-sign tx, wallet-
+//         signed inside the same batch, otherwise untouched
+//   M2  = createAccount(portfolio)+InitUser+createAccount(ctx)+
+//         SetMatcherConfig+InitMatcherCtx
+//   M3a = DepositCollateral + 2x TopUpBackingBucket (deadlock-prevention seed)
+//   M3b = TopUpInsurance + PermissionlessCrank (best-effort/non-fatal, same
+//         as the sequential path's own tail — its failure must never roll
+//         back the deposit, per the H9/W3 fix, so it's ALWAYS its own tx)
+//   M4  = CreateLpVault + createAccount(stakeLpMint)+createAccount(stakeVault)
+//         +StakeInitPool — broadcast only after keeper-register has returned,
+//         since StakeInitPool irreversibly rotates on-chain marketauth away
+//         from the creator wallet and keeper-register's H1 check requires
+//         marketauth === deployer.
+//
+// `updateInFlightStep` is called with the SAME lastStep values the resume
+// machinery already expects after each landing (M1→2, M2→3, M3(a+b)→4,
+// M4→6 — see inFlightMarket.ts's lastStep doc and RecoverSolBanner.tsx),
+// so a mid-pipeline failure falls back cleanly onto the existing
+// RecoverSolBanner/handleRetry resume flow (which always passes an explicit
+// step and therefore uses the sequential code, reading the same idempotency
+// state this batch path left behind).
+//
+// FALLBACK CONTRACT: any failure BEFORE the first transaction broadcasts
+// (capability gap, network hiccup, preflight failure, or the user declining
+// the single batch-approval popup) returns "fallback" and nothing on-chain
+// or in localStorage has changed — `create()` falls through to the
+// sequential path in the SAME call, so the user always reaches a working
+// flow (worst case: today's N-popup experience, never a dead end). Once ANY
+// tx has broadcast, a failure is "fatal": state.error is set and the user
+// must use the existing resume/retry UI — this code NEVER re-broadcasts a
+// stale pre-signed transaction.
+
+/** Rent-exemption lamports for a handful of FIXED account sizes used by every
+ *  market launch. These are Solana protocol constants for a given byte size
+ *  (they don't change mid-session) — cached module-level so the preflight
+ *  step of a batched launch (and any retry within the same page load) never
+ *  re-pays the RPC round-trip for a number it already knows. */
+const rentExemptionCache = new Map<number, number>();
+async function getCachedRentExemption(connection: Connection, sizeBytes: number): Promise<number> {
+  const cached = rentExemptionCache.get(sizeBytes);
+  if (cached !== undefined) return cached;
+  const rent = await connection.getMinimumBalanceForRentExemption(sizeBytes);
+  rentExemptionCache.set(sizeBytes, rent);
+  return rent;
+}
+
+/** Wallet shape `attemptFreshBatchedLaunch` needs — a narrowed, publicKey-
+ *  guaranteed subset of `WalletApi` (the caller has already checked
+ *  wallet.publicKey/signTransaction before generating the slab keypair). */
+interface FreshBatchWallet {
+  publicKey: PublicKey;
+  signTransaction?: (tx: Transaction) => Promise<Transaction>;
+  signAllTransactions?: (txs: Transaction[]) => Promise<Transaction[]>;
+  signMessage?: (message: Uint8Array) => Promise<Uint8Array>;
+}
+
+interface FreshBatchContext {
+  connection: Connection;
+  wallet: FreshBatchWallet;
+  programId: PublicKey;
+  /** The freshly-generated slab keypair (create() already generated this
+   *  before calling in — see the `retryFromStep === undefined` branch). */
+  slabKp: Keypair;
+  params: CreateMarketParams;
+  isDevnetEnv: boolean;
+  isKeeperOracle: boolean;
+  isAdminOracle: boolean;
+  isHyperpOracle: boolean;
+  oracleMode: "pyth" | "hyperp" | "admin" | "keeper";
+  setState: (updater: (s: CreateMarketState) => CreateMarketState) => void;
+}
+
+type FreshBatchOutcome =
+  | { status: "success" }
+  | { status: "fallback" }
+  | { status: "fatal" };
+
+// ---- Blockhash-expiry recovery for the batched launch's tail -------------
+//
+// M1/M2/M3a/M3b/M4 are all built against the SAME shared blockhash (fetched
+// once, below) and signed in the ONE wallet approval, but broadcast+confirmed
+// SEQUENTIALLY afterwards — a keeper-register network round-trip is even
+// awaited between M3b and M4 (see the `keeperRegisterPromise` await below).
+// That means the tail (especially M4 = StakeInitPool) can reach
+// `broadcastSignedTx` well after the shared blockhash's ~60-90s validity
+// window, hard-failing with "Blockhash not found" even though M1 (the slab)
+// already landed. `TailTxDescriptor` retains exactly what's needed to REBUILD
+// a not-yet-landed tx against a fresh blockhash — instructions/computeUnits
+// for `buildBatchTx`, plus the keypairs that must `partialSign` it AFTER the
+// wallet re-signs (Privy strips unknown sigs added before its own signing
+// flow — see the ordering note further down). cosignTx is deliberately NOT a
+// descriptor: it's server-built against its own blockhash and broadcast early
+// (2nd, low-risk) — an expiry there just surfaces as today's error.
+interface TailTxDescriptor {
+  label: string;
+  instructions: TransactionInstruction[];
+  computeUnits: number;
+  signers: Keypair[];
+}
+
+/** Cap total blockhash-refresh recoveries per launch attempt so a pathological
+ *  RPC (or a wallet that keeps stalling the re-approval popup) can't loop
+ *  forever — after this many, a persistent expiry rethrows and surfaces as
+ *  the existing fatal/resumable error path. */
+const MAX_BLOCKHASH_RECOVERIES = 2;
+
+/**
+ * Single source of truth for the market-registration payload.
+ *
+ * The batched fast path and the sequential fallback both POST this object to
+ * /api/markets AND sign a canonical encoding of it (buildMarketRegistrationMessage,
+ * #2387). The signed bytes and the POSTed bytes MUST be byte-identical or the
+ * server's signature check 401s — so the payload must be built in exactly ONE
+ * place. Previously each path hand-wrote its own literal (they had already
+ * drifted cosmetically on the oracle_authority fallback); this factory removes
+ * any chance of a future field being added to one and forgotten on the other.
+ */
+function buildMarketRegistrationPayload(args: {
+  slabAddress: string;
+  params: CreateMarketParams;
+  deployer: string;
+  oracleMode: "pyth" | "hyperp" | "admin" | "keeper";
+  isAdminOracle: boolean;
+  isDevnetEnv: boolean;
+}): MarketRegistrationPayload {
+  const { slabAddress, params, deployer, oracleMode, isAdminOracle, isDevnetEnv } = args;
+  return {
+    slab_address: slabAddress,
+    mint_address: params.mint.toBase58(),
+    symbol: params.symbol ?? "UNKNOWN",
+    name: params.name ?? "Unknown Token",
+    decimals: params.decimals ?? 6,
+    deployer,
+    oracle_mode: oracleMode,
+    dex_pool_address: params.dexPoolAddress ?? null,
+    // Admin-oracle markets on devnet are cranked by the shared crank wallet;
+    // otherwise the deployer is its own oracle authority. (deployer === the
+    // connected wallet, so this matches the former walletPk.toBase58() literal.)
+    oracle_authority: isAdminOracle
+      ? (isDevnetEnv && getConfig().crankWallet ? getConfig().crankWallet : deployer)
+      : null,
+    initial_price_e6: params.initialPriceE6.toString(),
+    // BUG 16: advertise the FLOORED margin actually enforced on-chain, not the
+    // raw requested bps — see flooredInitialMarginBps.
+    max_leverage: params.initialMarginBps > 0
+      ? Math.floor(10000 / flooredInitialMarginBps(params.initialMarginBps))
+      : 1,
+    trading_fee_bps: Number(params.tradingFeeBps),
+    lp_collateral: params.lpCollateral.toString(),
+    mainnet_ca: params.mainnetCA ?? null,
+  };
+}
+
+async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshBatchOutcome> {
+  const { connection, wallet, programId, slabKp, params, isDevnetEnv, isKeeperOracle, isAdminOracle, isHyperpOracle, oracleMode, setState } = ctx;
+  const walletPk = wallet.publicKey;
+  const slabPk = slabKp.publicKey;
+  let broadcastStarted = false;
+
+  try {
+    setState((s) => ({ ...s, loading: true, phase: "preparing", stepLabel: "Preparing market launch..." }));
+
+    const [vaultPda] = deriveVaultAuthority(programId, slabPk);
+    const vaultAta = await getAssociatedTokenAddress(params.mint, vaultPda, true);
+    const userAta = await getAssociatedTokenAddress(params.mint, walletPk);
+    const [nftRegistryPda] = deriveNftRegistry(programId, slabPk);
+    const matcherProgramId = new PublicKey(getConfig().matcherProgramId);
+    const [lpVaultRegistry] = deriveLpVaultRegistry(programId, slabPk);
+    const [lpVaultMint] = deriveInsuranceLpMint(programId, slabPk);
+    const stakeProgramId = new PublicKey(
+      (getConfig() as { vaultProgramId?: string }).vaultProgramId ??
+        "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ",
+    );
+    const [stakePoolPda] = deriveStakePool(slabPk, stakeProgramId);
+    const [stakeVaultAuth] = deriveStakeVaultAuth(stakePoolPda, stakeProgramId);
+
+    const lpPortfolioKp = Keypair.generate();
+    const matcherCtxKp = Keypair.generate();
+    const stakeLpMintKp = Keypair.generate();
+    const stakeVaultKp = Keypair.generate();
+
+    const [matcherDelegatePk] = deriveMatcherDelegate(
+      programId, slabPk, lpPortfolioKp.publicKey, walletPk, matcherProgramId, matcherCtxKp.publicKey,
+    );
+
+    // ---- Fire everything BEFORE any popup (orchestration step 1) ---------
+    const preFundPromise = isDevnetEnv
+      ? fetch("/api/devnet-pre-fund", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mintAddress: params.mint.toBase58(), walletAddress: walletPk.toBase58() }),
+        })
+      : Promise.resolve(null);
+
+    const challengePromise = wallet.signMessage
+      ? fetch(`/api/markets/challenge?deployer=${encodeURIComponent(walletPk.toBase58())}`)
+      : Promise.resolve(null);
+
+    const cosignPromise = isKeeperOracle
+      ? fetch("/api/playground/keeper-cosign", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            deployer: walletPk.toBase58(),
+            slabAddress: slabPk.toBase58(),
+            initialPriceE6: params.initialPriceE6.toString(),
+            assetIndex: 0,
+          }),
+        })
+      : Promise.resolve(null);
+
+    prewarmTxLanding(connection);
+
+    const rentPromise = Promise.all([
+      getCachedRentExemption(connection, params.slabDataSize ?? DEFAULT_SLAB_SIZE),
+      getCachedRentExemption(connection, V17_PORTFOLIO_ACCOUNT_LEN),
+      getCachedRentExemption(connection, MATCHER_CONTEXT_LEN),
+      getCachedRentExemption(connection, MINT_SIZE),
+      getCachedRentExemption(connection, ACCOUNT_SIZE),
+    ]);
+    const balancePromise = connection.getBalance(walletPk);
+
+    // 1. Devnet pre-fund MUST complete before we build/broadcast anything —
+    //    it funds the wallet's collateral ATA for the LP deposit + insurance.
+    if (isDevnetEnv) {
+      const preFundResp = await preFundPromise;
+      if (preFundResp && !preFundResp.ok) {
+        const err = await preFundResp.json().catch(() => ({ error: "Unknown error" }));
+        throw new Error(`Devnet pre-fund failed: ${(err as { error?: string }).error ?? preFundResp.status}`);
+      }
+    }
+
+    // 2. Resolve the markets-registration nonce — non-fatal if it fails (the
+    //    POST later just omits nonce/signature, same as the sequential path).
+    let marketsNonce: string | null = null;
+    try {
+      const challengeResp = await challengePromise;
+      if (challengeResp?.ok) {
+        const { nonce } = (await challengeResp.json()) as { nonce: string };
+        marketsNonce = nonce;
+      }
+    } catch { /* non-fatal — mirrors the sequential path's own try/catch */ }
+
+    // 3. Keeper co-sign (keeper oracle mode only) — fatal, matching the
+    //    sequential path's own hard throw for this call.
+    let cosignTx: Transaction | null = null;
+    if (isKeeperOracle) {
+      const cosignResp = await cosignPromise;
+      if (!cosignResp || !cosignResp.ok) {
+        const errData = cosignResp ? await cosignResp.json().catch(() => ({ error: "co-sign failed" })) : { error: "network error" };
+        throw new Error(
+          `Keeper co-sign failed (${cosignResp?.status ?? "network error"}): ${(errData as { error?: string }).error ?? "unknown"}. ` +
+          `Is PLAYGROUND_KEEPER_KEYPAIR set in server env?`,
+        );
+      }
+      const { partialTxBase64 } = (await cosignResp.json()) as { partialTxBase64: string };
+      cosignTx = Transaction.from(Buffer.from(partialTxBase64, "base64"));
+    }
+
+    // 4. Burst the 2 signMessage prompts NOW, immediately before the batch —
+    //    both proofs tolerate the ~15-30s the pipeline takes to actually use
+    //    them (markets nonce has a 5-min TTL; the keeper proof window is
+    //    -5min/+1min server-side — see keeper-register/route.ts).
+    // Build the registration payload once so the wallet signs the exact
+    // market data later submitted to POST /api/markets.
+    const deployerStr: string = walletPk.toBase58();
+    const registrationPayload = buildMarketRegistrationPayload({
+      slabAddress: slabPk.toBase58(),
+      params,
+      deployer: deployerStr,
+      oracleMode,
+      isAdminOracle,
+      isDevnetEnv,
+    });
+
+    let marketsSignature: string | null = null;
+    if (marketsNonce && wallet.signMessage) {
+      try {
+        const signingMessage = buildMarketRegistrationMessage({
+          nonce: marketsNonce,
+          deployer: deployerStr,
+          payload: registrationPayload,
+        });
+        const sigBytes = await wallet.signMessage(signingMessage);
+        marketsSignature = Buffer.from(sigBytes).toString("base64");
+      } catch {
+        /* non-fatal — mirrors the sequential path's own try/catch */
+      }
+    }
+    let keeperProofSignature: string | null = null;
+    if (isKeeperOracle && params.dexPoolAddress && wallet.signMessage) {
+      try {
+        const unixMinute = Math.floor(Date.now() / 60_000);
+        const proofMsg = new TextEncoder().encode(`keeper-register:${slabPk.toBase58()}:${unixMinute}`);
+        const sig = await wallet.signMessage(proofMsg);
+        keeperProofSignature = Buffer.from(sig).toString("base64");
+      } catch { /* non-fatal — the "Retry registration" button covers this */ }
+    }
+
+    const [slabRent, portfolioRent, matcherCtxRent, mintRent, tokenAcctRent] = await rentPromise;
+    const solBalance = await balancePromise;
+    const effectiveSlabSize = params.slabDataSize ?? DEFAULT_SLAB_SIZE;
+    const totalRent = slabRent + portfolioRent + matcherCtxRent + mintRent + tokenAcctRent;
+    const minSolRequired = totalRent + 20_000_000; // rent + ~0.02 SOL for 5-6 tx fees/priority fees
+    if (solBalance < minSolRequired) {
+      if (isDevnetEnv) {
+        setState((s) => ({ ...s, stepLabel: "Airdropping SOL for slab rent..." }));
+        const airdropSig = await connection.requestAirdrop(
+          walletPk,
+          Math.max(2_000_000_000, minSolRequired - solBalance + 500_000_000),
+        );
+        const airdropConfirm = await connection.confirmTransaction(airdropSig, "confirmed");
+        if (airdropConfirm.value.err) {
+          throw new Error(`Airdrop transaction failed on-chain: ${JSON.stringify(airdropConfirm.value.err)}`);
+        }
+      } else {
+        throw new Error(
+          `Insufficient SOL. You need ~${(minSolRequired / 1e9).toFixed(3)} SOL but your wallet has ` +
+          `${(solBalance / 1e9).toFixed(3)} SOL.`,
+        );
+      }
+    }
+
+    // ---- Build all txs against ONE fresh blockhash -----------------------
+    const [blockhash, priorityFee] = await Promise.all([
+      getFreshBlockhash(connection, true),
+      getPriorityFee(connection),
+    ]);
+
+    const requestedMarginBps = BigInt(params.initialMarginBps);
+    const initialMarginBps = requestedMarginBps < MIN_SAFE_INITIAL_MARGIN_BPS
+      ? MIN_SAFE_INITIAL_MARGIN_BPS
+      : requestedMarginBps;
+    const v17InitArgs: InitMarketV17Args = {
+      maxPortfolioAssets: V17_MAX_PORTFOLIO_ASSETS,
+      hMin: "1000",
+      hMax: "100000",
+      initialPrice: params.initialPriceE6.toString(),
+      minNonzeroMmReq: "1000000",
+      minNonzeroImReq: "2000000",
+      maintenanceMarginBps: (initialMarginBps / 2n).toString(),
+      initialMarginBps: initialMarginBps.toString(),
+      maxTradingFeeBps: BigInt(params.tradingFeeBps).toString(),
+      tradeFeeBaseBps: BigInt(params.tradingFeeBps).toString(),
+      liquidationFeeBps: "50",
+      liquidationFeeCap: "10000000000",
+      minLiquidationAbs: "0",
+      maxPriceMoveBpsPerSlot: "1",
+      maxAccrualDtSlots: "500",
+      maxAbsFundingE9PerSlot: "0",
+      minFundingLifetimeSlots: "500",
+      maxAccountBSettlementChunks: "10",
+      maxBankruptCloseChunks: "10",
+      maxBankruptCloseLifetimeSlots: "500",
+      publicBChunkAtoms: "1000000000000",
+      maintenanceFeePerSlot: "0",
+    };
+
+    // M1: createAccount(slab) + createATA + InitMarket + SetNftProgramId
+    const createSlabIx = SystemProgram.createAccount({
+      fromPubkey: walletPk, newAccountPubkey: slabPk,
+      lamports: slabRent, space: effectiveSlabSize, programId,
+    });
+    const createAtaIx = createAssociatedTokenAccountInstruction(walletPk, vaultAta, vaultPda, params.mint);
+    const initMarketIx = buildIx({
+      programId,
+      keys: buildAccountMetas(ACCOUNTS_INIT_MARKET, [
+        walletPk, slabPk, params.mint, vaultAta,
+        WELL_KNOWN.tokenProgram, WELL_KNOWN.clock, WELL_KNOWN.rent,
+        vaultPda, WELL_KNOWN.systemProgram,
+      ]),
+      data: encodeInitMarket(v17InitArgs),
+    });
+    const setNftProgramIdIx = buildIx({
+      programId,
+      keys: [
+        { pubkey: walletPk, isSigner: true, isWritable: true },
+        { pubkey: slabPk, isSigner: false, isWritable: false },
+        { pubkey: nftRegistryPda, isSigner: false, isWritable: true },
+        { pubkey: WELL_KNOWN.systemProgram, isSigner: false, isWritable: false },
+      ],
+      data: encodeSetNftProgramId({ nftProgramId: PERCOLATOR_NFT_PROGRAM_ID }),
+    });
+    const m1Descriptor: TailTxDescriptor = {
+      label: "Creating the market",
+      instructions: [createSlabIx, createAtaIx, initMarketIx, setNftProgramIdIx],
+      computeUnits: 400_000,
+      signers: [slabKp],
+    };
+
+    // M2: createAccount(portfolio)+InitUser + createAccount(ctx)+SetMatcherConfig+InitMatcherCtx
+    const createPortfolioIx = SystemProgram.createAccount({
+      fromPubkey: walletPk, newAccountPubkey: lpPortfolioKp.publicKey,
+      lamports: portfolioRent, space: V17_PORTFOLIO_ACCOUNT_LEN, programId,
+    });
+    const initPortfolioIx = buildIx({
+      programId,
+      keys: buildAccountMetas(ACCOUNTS_INIT_USER, [walletPk, slabPk, lpPortfolioKp.publicKey]),
+      data: encodeInitUser({}),
+    });
+    const createCtxIx = SystemProgram.createAccount({
+      fromPubkey: walletPk, newAccountPubkey: matcherCtxKp.publicKey,
+      lamports: matcherCtxRent, space: MATCHER_CONTEXT_LEN, programId: matcherProgramId,
+    });
+    const setMatcherConfigIx = buildIx({
+      programId,
+      keys: buildAccountMetas(ACCOUNTS_SET_MATCHER_CONFIG, [
+        walletPk, slabPk, lpPortfolioKp.publicKey, matcherProgramId, matcherCtxKp.publicKey, matcherDelegatePk,
+      ]),
+      data: encodeSetMatcherConfig({ enabled: 1 }),
+    });
+    const I128_MAX = 170141183460469231731687303715884105727n;
+    const initMatcherCtxIx = buildIx({
+      programId,
+      keys: buildAccountMetas(ACCOUNTS_INIT_MATCHER_CTX, [
+        walletPk, slabPk, lpPortfolioKp.publicKey, matcherCtxKp.publicKey, matcherProgramId, matcherDelegatePk,
+      ]),
+      data: encodeInitMatcherCtx({
+        kind: 0, tradingFeeBps: Number(params.tradingFeeBps), baseSpreadBps: 50, maxTotalBps: 200,
+        impactKBps: 0, liquidityNotionalE6: 0n, maxFillAbs: I128_MAX, maxInventoryAbs: I128_MAX,
+        feeToInsuranceBps: 0, skewSpreadMultBps: 0,
+      }),
+    });
+    const m2Descriptor: TailTxDescriptor = {
+      label: "Setting up the liquidity pool",
+      instructions: [createPortfolioIx, initPortfolioIx, createCtxIx, setMatcherConfigIx, initMatcherCtxIx],
+      computeUnits: 800_000,
+      signers: [lpPortfolioKp, matcherCtxKp],
+    };
+
+    // M3a: DepositCollateral + 2x TopUpBackingBucket (deadlock-prevention seed)
+    const depositIx = buildIx({
+      programId,
+      keys: buildAccountMetas(ACCOUNTS_DEPOSIT_COLLATERAL, [
+        walletPk, slabPk, lpPortfolioKp.publicKey, userAta, vaultAta, WELL_KNOWN.tokenProgram,
+      ]),
+      data: encodeDepositCollateral({ amount: params.lpCollateral.toString() }),
+    });
+    const backingIxs: TransactionInstruction[] = [0, 1].map((domain) =>
+      buildIx({
+        programId,
+        keys: buildAccountMetas(ACCOUNTS_TOP_UP_BACKING_BUCKET, [
+          walletPk, slabPk, userAta, vaultAta, WELL_KNOWN.tokenProgram,
+        ]),
+        data: encodeTopUpBackingBucket({
+          domain, amount: BACKING_BUCKET_DUST_AMOUNT.toString(), expirySlot: MAX_BACKING_BUCKET_EXPIRY_SLOT.toString(),
+        }),
+      }),
+    );
+    const m3aDescriptor: TailTxDescriptor = {
+      label: "Funding liquidity",
+      instructions: [depositIx, ...backingIxs],
+      computeUnits: 450_000,
+      signers: [],
+    };
+
+    // M3b: TopUpInsurance + PermissionlessCrank — best-effort/non-fatal tail,
+    // broadcast as its OWN transaction (never merged with M3a) so its failure
+    // can never roll back the deposit above — preserves the H9/W3 fix.
+    const topupIx = buildIx({
+      programId,
+      keys: buildAccountMetas(ACCOUNTS_TOPUP_INSURANCE, [walletPk, slabPk, userAta, vaultAta, WELL_KNOWN.tokenProgram]),
+      data: encodeTopUpInsurance({ amount: params.insuranceAmount.toString() }),
+    });
+    const crankKeys = buildAccountMetas(ACCOUNTS_PERMISSIONLESS_CRANK_BASE, [walletPk, slabPk, lpPortfolioKp.publicKey]);
+    if (!isAdminOracle && !isHyperpOracle) {
+      crankKeys.push({ pubkey: derivePythPushOraclePDA(params.oracleFeed)[0], isSigner: false, isWritable: false });
+    }
+    const crankIx = buildIx({
+      programId, keys: crankKeys,
+      data: encodePermissionlessCrank({ action: CrankAction.FeeSweep, assetIndex: 0, nowSlot: 0n, closeQ: 0n, feeBps: 0n, recoveryReason: 0 }),
+    });
+    const m3bDescriptor: TailTxDescriptor = {
+      label: "Seeding the insurance fund",
+      instructions: [topupIx, crankIx],
+      computeUnits: 450_000,
+      signers: [],
+    };
+
+    // M4: CreateLpVault + createAccount(mint)+createAccount(vault)+StakeInitPool
+    const createLpVaultIx = buildIx({
+      programId,
+      keys: buildAccountMetas(ACCOUNTS_CREATE_LP_VAULT, {
+        admin: walletPk, market: slabPk, registry: lpVaultRegistry, lpMint: lpVaultMint,
+        systemProgram: WELL_KNOWN.systemProgram, tokenProgram: WELL_KNOWN.tokenProgram,
+      }),
+      data: encodeCreateLpVaultV17({ feeShareBps: 1000, oiReservationThresholdBps: 8000, redemptionCooldownSlots: 5n, domain: 0 }),
+    });
+    const createLpMintIx = SystemProgram.createAccount({
+      fromPubkey: walletPk, newAccountPubkey: stakeLpMintKp.publicKey,
+      lamports: mintRent, space: MINT_SIZE, programId: WELL_KNOWN.tokenProgram,
+    });
+    const createStakeVaultIx = SystemProgram.createAccount({
+      fromPubkey: walletPk, newAccountPubkey: stakeVaultKp.publicKey,
+      lamports: tokenAcctRent, space: ACCOUNT_SIZE, programId: WELL_KNOWN.tokenProgram,
+    });
+    const initPoolIx = buildIx({
+      programId: stakeProgramId,
+      keys: initPoolAccounts({
+        admin: walletPk, slab: slabPk, pool: stakePoolPda, lpMint: stakeLpMintKp.publicKey,
+        vault: stakeVaultKp.publicKey, vaultAuth: stakeVaultAuth, collateralMint: params.mint, percolatorProgram: programId,
+      }),
+      data: encodeStakeInitPool(5n, 0n),
+    });
+    const m4Descriptor: TailTxDescriptor = {
+      label: "Opening staking & LP vaults",
+      instructions: [createLpVaultIx, createLpMintIx, createStakeVaultIx, initPoolIx],
+      computeUnits: 600_000,
+      signers: [stakeLpMintKp, stakeVaultKp],
+    };
+
+    // The 5 dependent, rebuild-capable txs — SAME order as before (M1, M2,
+    // M3a, M3b, M4). Building them here against the one shared `blockhash` is
+    // byte-for-byte equivalent to the old inline `buildBatchTx` calls; the
+    // descriptors are what let `recoverTailFrom` (below) rebuild only the
+    // not-yet-landed ones against a fresh blockhash if the tail's serial
+    // confirm-then-broadcast pipeline outruns this blockhash's validity.
+    const tailDescriptors: TailTxDescriptor[] = [m1Descriptor, m2Descriptor, m3aDescriptor, m3bDescriptor, m4Descriptor];
+    const buildTailTx = (d: TailTxDescriptor, hash: string): Transaction =>
+      buildBatchTx({ instructions: d.instructions, computeUnits: d.computeUnits, priorityFeeMicroLamports: priorityFee, blockhash: hash, feePayer: walletPk });
+    const [m1, m2, m3a, m3b, m4] = tailDescriptors.map((d) => buildTailTx(d, blockhash));
+
+    // cosignTx is deserialized exactly as the server built it — its own
+    // blockhash, no heap-frame/CU ixs added — never run through buildBatchTx.
+    // It is NOT a TailTxDescriptor and is never rebuilt on expiry (see the
+    // TailTxDescriptor comment above).
+    const orderedTxs: Transaction[] = [m1, ...(cosignTx ? [cosignTx] : []), m2, m3a, m3b, m4];
+    // Human-readable label per batched tx, in the SAME order — the progress UI
+    // shows what is being CREATED ("Creating the market", "Funding liquidity"),
+    // never internal transaction indices. A launching user cares about market
+    // milestones, not our tx-packing scheme.
+    const orderedLabels: string[] = [
+      m1Descriptor.label,
+      ...(cosignTx ? ["Connecting the price feed"] : []),
+      m2Descriptor.label,
+      m3aDescriptor.label,
+      m3bDescriptor.label,
+      m4Descriptor.label,
+    ];
+
+    // ---- ONE wallet approval for the whole batch --------------------------
+    setState((s) => ({ ...s, phase: "awaiting-signature", stepLabel: "Approve the transaction batch in your wallet..." }));
+    const signedTxs = await signAllCompat(wallet, orderedTxs);
+
+    // ---- Partial-sign keypairs AFTER the wallet signs (Privy embedded
+    //      wallets can strip unknown signatures added before their own
+    //      signing flow runs — mirrors lib/tx.ts's sendTx ordering) --------
+    let idx = 0;
+    const signedM1 = signedTxs[idx++];
+    const signedCosign = cosignTx ? signedTxs[idx++] : null;
+    const signedM2 = signedTxs[idx++];
+    const signedM3a = signedTxs[idx++];
+    const signedM3b = signedTxs[idx++];
+    const signedM4 = signedTxs[idx++];
+    if (!signedM1 || !signedM2 || !signedM3a || !signedM3b || !signedM4) {
+      throw new Error("Wallet did not return a signature for every transaction in the batch.");
+    }
+    signedM1.partialSign(slabKp);
+    signedM2.partialSign(lpPortfolioKp, matcherCtxKp);
+    signedM4.partialSign(stakeLpMintKp, stakeVaultKp);
+
+    // ---- Mutable tail state for blockhash-expiry recovery -----------------
+    // `signedTail[i]` is the CURRENTLY-SIGNED transaction for `tailDescriptors[i]`
+    // — starts as the one-approval batch's own signatures; `recoverTailFrom`
+    // below (defined after `landed`/`landingTotal`/`orderedLabels` exist, just
+    // before the pipelined broadcast starts) overwrites entries in place if a
+    // not-yet-landed one has to be rebuilt against a fresh blockhash.
+    const signedTail: Transaction[] = [signedM1, signedM2, signedM3a, signedM3b, signedM4];
+    let blockhashRecoveries = 0;
+
+    // ---- Persist recovery state BEFORE the first broadcast ---------------
+    saveInFlightMarket({
+      slabAddress: slabPk.toBase58(),
+      slabSecretKey: Array.from(slabKp.secretKey),
+      adminAddress: walletPk.toBase58(),
+      collateralAta: vaultAta.toBase58(),
+      collateralMint: params.mint.toBase58(),
+      programId: programId.toBase58(),
+      network: isDevnetEnv ? "devnet" : "mainnet",
+      createdAt: Date.now(),
+      lastStep: 0,
+    });
+
+    // ---- Pipelined broadcast ----------------------------------------------
+    broadcastStarted = true;
+    const landingTotal = orderedTxs.length;
+    let landed = 0;
+    const advanceLanding = (sig?: string) => {
+      landed += 1;
+      setState((s) => ({
+        ...s,
+        txSigs: sig ? [...s.txSigs, sig] : s.txSigs,
+        phase: "landing",
+        landingIndex: landed,
+        landingTotal,
+        landingLabels: orderedLabels,
+        // Label the step now IN PROGRESS (the one after what just landed);
+        // once everything has landed, show the finishing state.
+        stepLabel: orderedLabels[landed] ?? "Finishing up",
+      }));
+    };
+    setState((s) => ({
+      ...s,
+      phase: "landing",
+      landingIndex: 0,
+      landingTotal,
+      landingLabels: orderedLabels,
+      stepLabel: orderedLabels[0],
+    }));
+
+    /**
+     * Rebuild + re-sign `tailDescriptors[startIdx..]` (the not-yet-landed
+     * remainder of the tail) against a fresh blockhash, in ONE additional
+     * wallet approval, and write the results back into `signedTail`.
+     * Preserves the exact partial-sign ordering the happy path uses (wallet
+     * signs first, then keypairs — see the partial-sign comment above).
+     */
+    const recoverTailFrom = async (startIdx: number): Promise<void> => {
+      blockhashRecoveries += 1;
+      setState((s) => ({
+        ...s,
+        phase: "awaiting-signature",
+        stepLabel: "Blockhash expired — refreshing and re-approving the remaining steps...",
+      }));
+      const freshBlockhash = await getFreshBlockhash(connection, true);
+      const rebuiltDescriptors = tailDescriptors.slice(startIdx);
+      const rebuiltTxs = rebuiltDescriptors.map((d) => buildTailTx(d, freshBlockhash));
+      const resigned = await signAllCompat(wallet, rebuiltTxs);
+      for (let j = 0; j < rebuiltDescriptors.length; j++) {
+        const descriptor = rebuiltDescriptors[j];
+        const tx = resigned[j];
+        if (!descriptor || !tx) {
+          throw new Error("Wallet did not return a signature for every transaction in the blockhash-recovery batch.");
+        }
+        if (descriptor.signers.length > 0) tx.partialSign(...descriptor.signers);
+        signedTail[startIdx + j] = tx;
+      }
+      setState((s) => ({
+        ...s,
+        phase: "landing",
+        landingTotal,
+        landingLabels: orderedLabels,
+        stepLabel: orderedLabels[landed] ?? "Finishing up",
+      }));
+    };
+
+    /**
+     * Broadcast `signedTail[idx]` (one of M1/M2/M3a/M3b/M4), recovering ONCE
+     * per expiry (capped at `MAX_BLOCKHASH_RECOVERIES` total) if it fails
+     * with a blockhash-expiry error — never re-broadcasts a stale signed tx;
+     * `recoverTailFrom` always produces a fresh one first. Any other error
+     * (or expiry past the cap) rethrows unchanged, so the existing
+     * fatal/non-fatal handling around each call site is untouched.
+     */
+    const broadcastTailTx = async (idx: number): Promise<string> => {
+      for (;;) {
+        try {
+          const tx = signedTail[idx];
+          if (!tx) throw new Error(`Missing signed transaction for tail step ${idx}.`);
+          return await broadcastSignedTx(connection, tx);
+        } catch (err) {
+          const canRecover = blockhashRecoveries < MAX_BLOCKHASH_RECOVERIES;
+
+          // Case A — the SEND was rejected as expired (no signature exists, the
+          // tx never landed): safe to rebuild against a fresh blockhash.
+          if (isBlockhashExpiredError(err) && canRecover) {
+            console.warn(
+              `[useCreateMarket] batch: blockhash expired at tail step ${idx} — recovering (attempt ${blockhashRecoveries + 1}/${MAX_BLOCKHASH_RECOVERIES})`,
+            );
+            await recoverTailFrom(idx);
+            continue; // retry the SAME step with the freshly rebuilt+signed tx
+          }
+
+          // Case B — the tx was SUBMITTED but confirmation timed out at the edge
+          // of the blockhash window; it may still have landed. Status-check the
+          // signature FIRST (mirrors sendTx's R2-S7 landing check) — only rebuild
+          // if it is DEFINITIVELY absent. On "landed" treat as success; on any
+          // indeterminate result (RPC error, on-chain failure, processed-not-
+          // confirmed) propagate rather than risk re-running a landed createAccount.
+          if (isConfirmationTimeoutError(err)) {
+            // The landing-check is free (one RPC read) and ALWAYS safe, so it
+            // runs regardless of the recovery budget — a tx that already landed
+            // must be reported as success even after the rebuild cap is spent,
+            // otherwise a fully-successful launch gets reported as a failure.
+            // Only the REBUILD leg is gated on `canRecover`.
+            const sig = (err as { signature?: string }).signature;
+            const landed = sig ? await checkSignatureLanded(connection, sig) : "unknown";
+            if (landed === "landed" && sig) {
+              console.warn(
+                `[useCreateMarket] batch: tail step ${idx} confirmation timed out but the tx DID land — continuing`,
+              );
+              return sig; // it's on-chain; treat exactly like a normal success
+            }
+            if (landed === "not-found" && canRecover) {
+              console.warn(
+                `[useCreateMarket] batch: tail step ${idx} timed out and did not land — recovering (attempt ${blockhashRecoveries + 1}/${MAX_BLOCKHASH_RECOVERIES})`,
+              );
+              await recoverTailFrom(idx);
+              continue;
+            }
+            // "unknown" (indeterminate — never rebuild), or "not-found" with the
+            // recovery budget exhausted → fall through and propagate (resumable).
+          }
+          throw err;
+        }
+      }
+    };
+
+    const m1Sig = await broadcastTailTx(0);
+    setState((s) => ({ ...s, slabAddress: slabPk.toBase58() }));
+    advanceLanding(m1Sig);
+    updateInFlightStep(slabPk.toBase58(), 2);
+
+    // Fire markets-DB registration + (if keeper mode) keeper-register in
+    // parallel — non-fatal, but keeper-register MUST be awaited before M4
+    // (StakeInitPool rotates marketauth; keeper-register's H1 check requires
+    // marketauth still == deployer).
+    const marketsRegisterPromise = (async () => {
+      try {
+        await fetch("/api/markets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...registrationPayload,
+            ...(marketsNonce && marketsSignature
+              ? { nonce: marketsNonce, signature: marketsSignature }
+              : {}),
+          }),
+        });
+      } catch {
+        console.warn("[useCreateMarket] batch: markets DB registration failed (non-fatal)");
+      }
+    })();
+
+    const keeperRegisterPromise: Promise<KeeperRegisterOutcome> =
+      (isKeeperOracle && params.dexPoolAddress && keeperProofSignature)
+        ? registerMarketWithKeeper(
+            { publicKey: walletPk, signMessage: wallet.signMessage },
+            {
+              slabAddress: slabPk.toBase58(),
+              mainnetCA: params.mainnetCA,
+              dexPoolAddress: params.dexPoolAddress,
+              dexType: params.dexType,
+              symbol: params.symbol,
+            },
+            { deployer: walletPk.toBase58(), signature: keeperProofSignature },
+          )
+        : Promise.resolve<KeeperRegisterOutcome>({ registered: false, message: "" });
+
+    if (signedCosign) {
+      const cosignSig = await broadcastSignedTx(connection, signedCosign);
+      advanceLanding(cosignSig);
+    }
+
+    const m2Sig = await broadcastTailTx(1);
+    advanceLanding(m2Sig);
+    updateInFlightStep(slabPk.toBase58(), 3);
+
+    const m3aSig = await broadcastTailTx(2);
+    advanceLanding(m3aSig);
+
+    try {
+      const m3bSig = await broadcastTailTx(3);
+      advanceLanding(m3bSig);
+    } catch (m3bErr) {
+      // Non-fatal — mirrors the sequential path's own best-effort tail. A
+      // rebuilt-and-recovered M3b that still fails stays non-fatal too.
+      console.warn("[useCreateMarket] batch: insurance top-up/crank failed (non-fatal):", m3bErr);
+      advanceLanding(undefined);
+    }
+    updateInFlightStep(slabPk.toBase58(), 4);
+
+    const keeperOutcome = await keeperRegisterPromise;
+
+    const m4Sig = await broadcastTailTx(4);
+    advanceLanding(m4Sig);
+    updateInFlightStep(slabPk.toBase58(), 6);
+
+    await marketsRegisterPromise;
+
+    // Post-creation hook — devnet token airdrop, fired without awaiting.
+    if (isDevnetEnv) {
+      void fetch("/api/devnet-airdrop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mintAddress: params.mint.toBase58(), walletAddress: walletPk.toBase58() }),
+      }).then(async (resp) => {
+        const data = await resp.json().catch(() => ({} as Record<string, unknown>));
+        if (resp.ok || resp.status === 429) {
+          setState((s) => ({
+            ...s, devnetMint: params.mint.toBase58(),
+            devnetAirdropAmount: (data as { amount?: number }).amount ?? null,
+            devnetAirdropSymbol: (data as { symbol?: string }).symbol ?? null,
+          }));
+        } else {
+          setState((s) => ({ ...s, devnetMint: params.mint.toBase58(), devnetMintError: (data as { error?: string }).error ?? `HTTP ${resp.status}` }));
+        }
+      }).catch((mintErr) => {
+        setState((s) => ({ ...s, devnetMint: params.mint.toBase58(), devnetMintError: mintErr instanceof Error ? mintErr.message : "Airdrop request failed" }));
+      });
+    }
+
+    clearInFlightMarket(slabPk.toBase58());
+    setState((s) => ({
+      ...s,
+      loading: false,
+      step: 6,
+      phase: "done",
+      stepLabel: "Market created!",
+      keeperDelegated: keeperOutcome.registered,
+      keeperMessage: keeperOutcome.message || s.keeperMessage,
+      slabAddress: slabPk.toBase58(),
+    }));
+
+    return { status: "success" };
+  } catch (err) {
+    if (!broadcastStarted) {
+      // Nothing landed — safe to fall back to the sequential path in the
+      // SAME create() call. See the FALLBACK CONTRACT note above.
+      return { status: "fallback" };
+    }
+    const msg = parseMarketCreationError(err);
+    setState((s) => ({ ...s, loading: false, error: msg }));
+    return { status: "fatal" };
+  }
+}
+
 const STEP_LABELS = [
   "Creating slab & initializing market...",
   "Oracle setup & pre-LP crank...",
@@ -391,6 +1301,9 @@ export function useCreateMarket() {
     keeperDelegated: false,
     keeperMessage: null,
     keeperRegistering: false,
+    phase: "idle",
+    landingIndex: 0,
+    landingTotal: 0,
   });
 
   // PERC-8329 / GH#1964: Slab keypair is normally kept in-memory ONLY (this ref), not
@@ -498,6 +1411,13 @@ export function useCreateMarket() {
       }
 
       const startStep = retryFromStep ?? 0;
+      if (retryFromStep !== undefined) {
+        // Diagnosis breadcrumb (see signAllCompat's counterpart): resume and
+        // retry flows use the sequential per-step path BY DESIGN — if a user
+        // reports many signature prompts and this line is in their console,
+        // they were resuming a stuck launch, not missing the batch path.
+        console.info(`[useCreateMarket] resume/retry from step ${retryFromStep} — sequential flow by design`);
+      }
 
       setState((s) => ({
         ...s,
@@ -560,6 +1480,52 @@ export function useCreateMarket() {
       // if needed. Setting isLegacyOracle = false skips all removed oracle instructions.
       // TODO: When v12 legacy support is needed, detect from on-chain magic bytes (like Step 1 does).
       const isLegacyOracle = false;
+
+      // Fresh-launch batching fast path (2026-07-12): only a genuine "LAUNCH
+      // MARKET" click (retryFromStep === undefined, which is exactly the
+      // branch above that generated a brand-new slabKp) attempts this —
+      // every resume/retry call passes an explicit step number and always
+      // uses the sequential per-step code below unchanged. See
+      // `attemptFreshBatchedLaunch`'s header comment for the full contract.
+      if (retryFromStep === undefined && wallet.publicKey) {
+        console.info("[useCreateMarket] fresh launch — attempting BATCHED flow (one approval)");
+        const batchWalletPk = wallet.publicKey;
+        const outcome = await attemptFreshBatchedLaunch({
+          connection,
+          wallet: {
+            publicKey: batchWalletPk,
+            signTransaction: wallet.signTransaction,
+            signAllTransactions: wallet.signAllTransactions,
+            signMessage: wallet.signMessage,
+          },
+          programId,
+          slabKp,
+          params,
+          isDevnetEnv,
+          isKeeperOracle,
+          isAdminOracle,
+          isHyperpOracle,
+          oracleMode,
+          setState,
+        });
+        if (outcome.status === "success") {
+          slabKpRef.current = null;
+          return;
+        }
+        if (outcome.status === "fatal") {
+          // state.error already set inside attemptFreshBatchedLaunch — do
+          // NOT fall through to the sequential path (something already
+          // broadcast; resuming happens via the existing RecoverSolBanner /
+          // handleRetry flow, which passes an explicit step and therefore
+          // uses the sequential code below on its own next call).
+          return;
+        }
+        // status === "fallback" — nothing broadcast; safe to run the
+        // sequential path below in this SAME call. Reset the phase/landing
+        // UI state so LaunchProgress falls back to its per-step rendering.
+        console.warn("[useCreateMarket] Batch launch unavailable or failed before broadcast — falling back to the sequential flow.");
+        setState((s) => ({ ...s, phase: "idle", landingIndex: 0, landingTotal: 0, error: null }));
+      }
 
       try {
         // Step 0: Create slab + vault ATA + InitMarket (ATOMIC — all-or-nothing)
@@ -1041,81 +2007,255 @@ export function useCreateMarket() {
             // magic+market+owner filter Step 3 below uses to FIND this portfolio — and
             // skip the whole TX A-D sequence if one already exists (mirrors the
             // existence-check pattern Steps 4/5 already use for their own accounts).
-            const V17_MAGIC_BYTES_STEP2 = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
-            const existingLpPortfolios = await connection.getProgramAccounts(programId, {
-              filters: [
-                { memcmp: { offset: 0, bytes: V17_MAGIC_BYTES_STEP2.toString("base64"), encoding: "base64" } },
-                { memcmp: { offset: 16, bytes: slabPk.toBase58() } },
-                { memcmp: { offset: 80, bytes: wallet.publicKey.toBase58() } },
-              ],
-            });
+            const V17_MAGIC_BYTES_STEP2 = Buffer.from([
+              0x00,
+              0x36,
+              0x31,
+              0x56,
+              0x43,
+              0x52,
+              0x45,
+              0x50,
+            ]);
 
-            if (existingLpPortfolios.length === 0) {
-              // TX A: Create LP portfolio account + InitPortfolio (tag 1).
-              // Size + fund rent for the FULL portfolio length (9347): InitPortfolio reallocs up to it
-              // and adds no lamports, so an undersized account fails with InsufficientFundsForRent.
-              const lpPortfolioKp = Keypair.generate();
-              const lpPortfolioPk = lpPortfolioKp.publicKey;
-              const portfolioRent = await connection.getMinimumBalanceForRentExemption(V17_PORTFOLIO_ACCOUNT_LEN);
+            const I128_MAX_STEP2 =
+              170141183460469231731687303715884105727n;
 
-              const createPortfolioIx = SystemProgram.createAccount({
-                fromPubkey: wallet.publicKey,
-                newAccountPubkey: lpPortfolioPk,
-                lamports: portfolioRent,
-                space: V17_PORTFOLIO_ACCOUNT_LEN,
+            const walletPublicKeyStep2 = wallet.publicKey;
+
+            if (!walletPublicKeyStep2) {
+              throw new Error(
+                "Wallet disconnected while recovering Step 2.",
+              );
+            }
+
+            const buildInitMatcherCtxInstruction = (
+              lpPortfolioPk: PublicKey,
+              matcherCtxPk: PublicKey,
+              delegatePk: PublicKey,
+            ): TransactionInstruction =>
+              buildIx({
                 programId,
-              });
-              const initPortfolioIx = buildIx({
-                programId,
-                keys: buildAccountMetas(ACCOUNTS_INIT_USER, [
-                  wallet.publicKey,
+                keys: buildAccountMetas(ACCOUNTS_INIT_MATCHER_CTX, [
+                  walletPublicKeyStep2,
                   slabPk,
                   lpPortfolioPk,
+                  matcherCtxPk,
+                  matcherProgramId,
+                  delegatePk,
                 ]),
-                data: encodeInitUser({}),
+                data: encodeInitMatcherCtx({
+                  kind: 0,
+                  tradingFeeBps: Number(params.tradingFeeBps),
+                  baseSpreadBps: 50,
+                  maxTotalBps: 200,
+                  impactKBps: 0,
+                  liquidityNotionalE6: 0n,
+                  maxFillAbs: I128_MAX_STEP2,
+                  maxInventoryAbs: I128_MAX_STEP2,
+                  feeToInsuranceBps: 0,
+                  skewSpreadMultBps: 0,
+                }),
               });
 
-              const sigPortfolio = await sendTx({
-                connection, wallet,
-                instructions: [createPortfolioIx, initPortfolioIx],
-                signers: [lpPortfolioKp],
+            const sendMatcherContextInitialization = async (
+              lpPortfolioPk: PublicKey,
+              matcherCtxPk: PublicKey,
+              delegatePk: PublicKey,
+            ): Promise<void> => {
+              const initMatcherCtxIx = buildInitMatcherCtxInstruction(
+                lpPortfolioPk,
+                matcherCtxPk,
+                delegatePk,
+              );
+
+              const signature = await sendTx({
+                connection,
+                wallet,
+                instructions: [initMatcherCtxIx],
                 computeUnits: 200_000,
               });
-              setState((s) => ({ ...s, txSigs: [...s.txSigs, sigPortfolio] }));
 
-              // TX B: Create matcher context account ONLY (empty, matcher-program-owned).
-              // No longer calls the matcher program directly here — see fix note above.
+              setState((state) => ({
+                ...state,
+                txSigs: [...state.txSigs, signature],
+              }));
+            };
+
+            const inspectConfiguredMatcherState = async (
+              lpPortfolioPk: PublicKey,
+              portfolioData: Uint8Array,
+            ) => {
+              const matcherConfig =
+                readV17PortfolioMatcherConfig(portfolioData);
+
+              if (!matcherConfig.enabled) {
+                throw new Error(
+                  "Existing LP portfolio has incomplete matcher initialization: " +
+                    "matcher configuration is disabled; cannot safely advance " +
+                    "past Step 2.",
+                );
+              }
+
+              if (!matcherConfig.matcherProgram.equals(matcherProgramId)) {
+                throw new Error(
+                  "Cannot safely resume Step 2: the existing LP portfolio " +
+                    "references an unexpected matcher program.",
+                );
+              }
+
+              if (matcherConfig.matcherContext.equals(PublicKey.default)) {
+                throw new Error(
+                  "Existing LP portfolio has incomplete matcher initialization: " +
+                    "matcher context is not configured; cannot safely advance " +
+                    "past Step 2.",
+                );
+              }
+
+              const [expectedDelegatePk] = deriveMatcherDelegate(
+                programId,
+                slabPk,
+                lpPortfolioPk,
+                walletPublicKeyStep2,
+                matcherProgramId,
+                matcherConfig.matcherContext,
+              );
+
+              if (!matcherConfig.matcherDelegate.equals(expectedDelegatePk)) {
+                throw new Error(
+                  "Cannot safely resume Step 2: the stored matcher delegate " +
+                    "does not match the expected PDA.",
+                );
+              }
+
+              const matcherContextInfo = await connection.getAccountInfo(
+                matcherConfig.matcherContext,
+              );
+
+              if (!matcherContextInfo) {
+                throw new Error(
+                  "Existing LP portfolio has incomplete matcher initialization: " +
+                    "the configured matcher-context account does not exist; " +
+                    "cannot safely advance past Step 2.",
+                );
+              }
+
+              if (!matcherContextInfo.owner.equals(matcherProgramId)) {
+                throw new Error(
+                  "Cannot safely resume Step 2: the matcher-context account " +
+                    "is owned by an unexpected program.",
+                );
+              }
+
+              const contextState = inspectV17MatcherContext(
+                new Uint8Array(matcherContextInfo.data),
+                expectedDelegatePk,
+              );
+
+              if (contextState === "invalid") {
+                throw new Error(
+                  "Cannot safely resume Step 2: the matcher-context account " +
+                    "has an invalid layout or is bound to another delegate.",
+                );
+              }
+
+              return {
+                matcherConfig,
+                expectedDelegatePk,
+                contextState,
+              };
+            };
+
+            const verifyMatcherReadiness = async (
+              lpPortfolioPk: PublicKey,
+            ): Promise<void> => {
+              const freshPortfolioInfo =
+                await connection.getAccountInfo(lpPortfolioPk);
+
+              if (!freshPortfolioInfo) {
+                throw new Error(
+                  "Matcher recovery could not be verified: the LP portfolio " +
+                    "account was not found after recovery.",
+                );
+              }
+
+              if (!freshPortfolioInfo.owner.equals(programId)) {
+                throw new Error(
+                  "Matcher recovery could not be verified: the LP portfolio " +
+                    "is owned by an unexpected program.",
+                );
+              }
+
+              if (
+                freshPortfolioInfo.data.length !==
+                V17_PORTFOLIO_ACCOUNT_LEN
+              ) {
+                throw new Error(
+                  "Matcher recovery could not be verified: the LP portfolio " +
+                    `has an unexpected length (${freshPortfolioInfo.data.length}).`,
+                );
+              }
+
+              const verifiedState = await inspectConfiguredMatcherState(
+                lpPortfolioPk,
+                new Uint8Array(freshPortfolioInfo.data),
+              );
+
+              if (verifiedState.contextState !== "initialized") {
+                throw new Error(
+                  "Matcher recovery transaction completed, but authoritative " +
+                    "on-chain state still reports an uninitialized matcher context.",
+                );
+              }
+            };
+
+            const createAndInitializeMatcher = async (
+              lpPortfolioPk: PublicKey,
+            ): Promise<void> => {
+              // TX B: create the matcher-program-owned context account.
               const matcherCtxKp = Keypair.generate();
               const matcherCtxPk = matcherCtxKp.publicKey;
-              const matcherCtxRent = await connection.getMinimumBalanceForRentExemption(MATCHER_CONTEXT_LEN);
+
+              const matcherCtxRent =
+                await connection.getMinimumBalanceForRentExemption(
+                  MATCHER_CONTEXT_LEN,
+                );
 
               const createCtxIx = SystemProgram.createAccount({
-                fromPubkey: wallet.publicKey,
+                fromPubkey: walletPublicKeyStep2,
                 newAccountPubkey: matcherCtxPk,
                 lamports: matcherCtxRent,
                 space: MATCHER_CONTEXT_LEN,
                 programId: matcherProgramId,
               });
 
-              // Derive matcher delegate PDA: seeds = ["matcher", market, lpPortfolio, lpOwner, matcherProg, ctx]
               const [delegatePk] = deriveMatcherDelegate(
-                programId, slabPk, lpPortfolioPk, wallet.publicKey, matcherProgramId, matcherCtxPk,
+                programId,
+                slabPk,
+                lpPortfolioPk,
+                walletPublicKeyStep2,
+                matcherProgramId,
+                matcherCtxPk,
               );
 
-              const sigCtx = await sendTx({
-                connection, wallet,
+              const contextSignature = await sendTx({
+                connection,
+                wallet,
                 instructions: [createCtxIx],
                 signers: [matcherCtxKp],
                 computeUnits: 150_000,
               });
-              setState((s) => ({ ...s, txSigs: [...s.txSigs, sigCtx] }));
 
-              // TX C: SetMatcherConfig (tag 68) on the LP portfolio — MUST land before TX D.
-              // Accounts: [lpOwner(s), market(ro), lpPortfolio(w), matcherProg(ro), matcherCtx(ro), delegate(ro)]
+              setState((state) => ({
+                ...state,
+                txSigs: [...state.txSigs, contextSignature],
+              }));
+
+              // TX C: commit the context and delegate to the LP portfolio.
               const setMatcherConfigIx = buildIx({
                 programId,
                 keys: buildAccountMetas(ACCOUNTS_SET_MATCHER_CONFIG, [
-                  wallet.publicKey,
+                  walletPublicKeyStep2,
                   slabPk,
                   lpPortfolioPk,
                   matcherProgramId,
@@ -1125,51 +2265,173 @@ export function useCreateMarket() {
                 data: encodeSetMatcherConfig({ enabled: 1 }),
               });
 
-              const sigMatcherCfg = await sendTx({
-                connection, wallet,
+              const configSignature = await sendTx({
+                connection,
+                wallet,
                 instructions: [setMatcherConfigIx],
                 computeUnits: 200_000,
               });
-              setState((s) => ({ ...s, txSigs: [...s.txSigs, sigMatcherCfg] }));
 
-              // TX D: InitMatcherCtx (tag 83) on the WRAPPER — CPIs into the matcher program,
-              // invoke_signed-ing the delegate PDA so the matcher's process_init sees
-              // lp_pda.is_signer == true. This is the real fix (see note above).
-              // Accounts: [lpOwner(s), market(ro), lpPortfolio(ro), matcherCtx(w), matcherProg(ro), matcherDelegate(ro)]
-              const I128_MAX = 170141183460469231731687303715884105727n;
-              const initMatcherCtxIx = buildIx({
+              setState((state) => ({
+                ...state,
+                txSigs: [...state.txSigs, configSignature],
+              }));
+
+              // TX D: initialize the committed matcher context through the wrapper.
+              await sendMatcherContextInitialization(
+                lpPortfolioPk,
+                matcherCtxPk,
+                delegatePk,
+              );
+            };
+
+            const existingLpPortfolios =
+              await connection.getProgramAccounts(programId, {
+                filters: [
+                  { dataSize: V17_PORTFOLIO_ACCOUNT_LEN },
+                  {
+                    memcmp: {
+                      offset: 0,
+                      bytes: V17_MAGIC_BYTES_STEP2.toString("base64"),
+                      encoding: "base64",
+                    },
+                  },
+                  {
+                    memcmp: {
+                      offset: 16,
+                      bytes: slabPk.toBase58(),
+                    },
+                  },
+                  {
+                    memcmp: {
+                      offset: 80,
+                      bytes: walletPublicKeyStep2.toBase58(),
+                    },
+                  },
+                ],
+              });
+
+            if (existingLpPortfolios.length === 0) {
+              // TX A: create and initialize the LP portfolio.
+              const lpPortfolioKp = Keypair.generate();
+              const lpPortfolioPk = lpPortfolioKp.publicKey;
+
+              const portfolioRent =
+                await connection.getMinimumBalanceForRentExemption(
+                  V17_PORTFOLIO_ACCOUNT_LEN,
+                );
+
+              const createPortfolioIx = SystemProgram.createAccount({
+                fromPubkey: walletPublicKeyStep2,
+                newAccountPubkey: lpPortfolioPk,
+                lamports: portfolioRent,
+                space: V17_PORTFOLIO_ACCOUNT_LEN,
                 programId,
-                keys: buildAccountMetas(ACCOUNTS_INIT_MATCHER_CTX, [
-                  wallet.publicKey,
+              });
+
+              const initPortfolioIx = buildIx({
+                programId,
+                keys: buildAccountMetas(ACCOUNTS_INIT_USER, [
+                  walletPublicKeyStep2,
                   slabPk,
                   lpPortfolioPk,
-                  matcherCtxPk,
-                  matcherProgramId,
-                  delegatePk,
                 ]),
-                data: encodeInitMatcherCtx({
-                  kind: 0, // Passive
-                  tradingFeeBps: Number(params.tradingFeeBps),
-                  baseSpreadBps: 50,
-                  maxTotalBps: 200,
-                  impactKBps: 0,
-                  liquidityNotionalE6: 0n,
-                  maxFillAbs: I128_MAX,
-                  maxInventoryAbs: I128_MAX,
-                  feeToInsuranceBps: 0,
-                  skewSpreadMultBps: 0,
-                }),
+                data: encodeInitUser({}),
               });
 
-              const sigInitMatcherCtx = await sendTx({
-                connection, wallet,
-                instructions: [initMatcherCtxIx],
+              const portfolioSignature = await sendTx({
+                connection,
+                wallet,
+                instructions: [createPortfolioIx, initPortfolioIx],
+                signers: [lpPortfolioKp],
                 computeUnits: 200_000,
               });
-              setState((s) => ({ ...s, txSigs: [...s.txSigs, sigInitMatcherCtx] }));
+
+              setState((state) => ({
+                ...state,
+                txSigs: [...state.txSigs, portfolioSignature],
+              }));
+
+              await createAndInitializeMatcher(lpPortfolioPk);
+              await verifyMatcherReadiness(lpPortfolioPk);
             } else {
-              console.log("[useCreateMarket] Step 2 already completed (LP portfolio exists) — skipping TX A-D.");
+              if (existingLpPortfolios.length !== 1) {
+                throw new Error(
+                  `Cannot safely resume Step 2: expected exactly one LP portfolio, ` +
+                    `found ${existingLpPortfolios.length}.`,
+                );
+              }
+
+              const existingLpPortfolio = existingLpPortfolios[0];
+
+              if (!existingLpPortfolio) {
+                throw new Error(
+                  "Cannot safely resume Step 2: the LP portfolio lookup " +
+                    "returned an empty result.",
+                );
+              }
+
+              const lpPortfolioPk = existingLpPortfolio.pubkey;
+              const lpPortfolioAccount = existingLpPortfolio.account;
+
+              if (!lpPortfolioAccount.owner.equals(programId)) {
+                throw new Error(
+                  "Cannot safely resume Step 2: the existing LP portfolio " +
+                    "is not owned by the configured wrapper program.",
+                );
+              }
+
+              const matcherConfig = readV17PortfolioMatcherConfig(
+                new Uint8Array(lpPortfolioAccount.data),
+              );
+
+              if (!matcherConfig.enabled) {
+                if (!isEmptyV17PortfolioMatcherConfig(matcherConfig)) {
+                  throw new Error(
+                    "Existing LP portfolio has incomplete matcher initialization: " +
+                      "the disabled matcher configuration contains committed " +
+                      "fields; cannot safely advance past Step 2.",
+                  );
+                }
+
+                // TX A already landed. Resume only TX B, TX C, and TX D.
+                await createAndInitializeMatcher(lpPortfolioPk);
+                await verifyMatcherReadiness(lpPortfolioPk);
+
+                console.log(
+                  "[useCreateMarket] Step 2 recovered missing matcher " +
+                    "context/config/initialization (TX B-D).",
+                );
+              } else {
+                const configuredState =
+                  await inspectConfiguredMatcherState(
+                    lpPortfolioPk,
+                    new Uint8Array(lpPortfolioAccount.data),
+                  );
+
+                if (configuredState.contextState === "uninitialized") {
+                  // TX A-C already landed. Resume only TX D using the committed context.
+                  await sendMatcherContextInitialization(
+                    lpPortfolioPk,
+                    configuredState.matcherConfig.matcherContext,
+                    configuredState.expectedDelegatePk,
+                  );
+
+                  await verifyMatcherReadiness(lpPortfolioPk);
+
+                  console.log(
+                    "[useCreateMarket] Step 2 recovered the missing matcher " +
+                      "context initialization (TX D only).",
+                  );
+                } else {
+                  console.log(
+                    "[useCreateMarket] Step 2 matcher state verified on-chain - " +
+                      "skipping duplicate TX A-D.",
+                  );
+                }
+              }
             }
+
             updateInFlightStep(slabPk.toBase58(), 3);
           } else {
             // v12 legacy: encodeInitLP (tag 2) is removed in v17 — skip for v17 slabs.
@@ -1188,7 +2450,10 @@ export function useCreateMarket() {
           // Pre-flight: verify user has enough tokens for LP deposit + insurance top-up.
           // Fixes #757/#758 — pre-fund only checked seed amount (500), but TX4 also
           // needs lpCollateral + insuranceAmount (default 1,000 + 100 = 1,100 more).
-          const tx4Required = params.lpCollateral + params.insuranceAmount;
+          // Also covers the two backing-bucket dust deposits (long+short domains,
+          // see BACKING_BUCKET_DUST_AMOUNT above) so the deadlock-prevention TopUp
+          // below never fails on a wallet funded to the exact old minimum.
+          const tx4Required = params.lpCollateral + params.insuranceAmount + 2n * BACKING_BUCKET_DUST_AMOUNT;
           let tx4Balance = 0n;
           try {
             const tx4Acct = await getAccount(connection, userAta);
@@ -1317,6 +2582,82 @@ export function useCreateMarket() {
             console.log("[useCreateMarket] Step 3 deposit already landed (portfolio capital >= target) — skipping.");
           }
 
+          // ── Backing-bucket-freshness deadlock prevention (2026-07-09) ──────────
+          // ROOT CAUSE (percolator/src/v16.rs prepare_counterparty_backing_add_delta,
+          // ~line 755): a source-domain backing bucket that is Fresh-but-lapsed
+          // (current_slot >= expiry_slot) permanently reverts Custom(21) LockActive
+          // the next time ANYTHING requests a new (later) finite expiry for it —
+          // which happens AUTOMATICALLY inside the engine's loss-reserve path
+          // (reserve_new_capital_backed_loss_for_source_domain_not_atomic) the
+          // first time either side of a trade realizes a genuine loss. The only
+          // escape (expire_source_backing_bucket_not_atomic) is reachable exclusively
+          // from a Resolved-market terminal close — dead code for a Live market.
+          //
+          // CreateLpVault (Step 4 below) does NOT protect against this: it only
+          // creates the LP-vault registry/mint PDAs (handle_create_lp_vault,
+          // v16_program.rs:11646) — it never calls DepositToLpVault, so it never
+          // touches a backing bucket. Seeding only ever happens if/when someone
+          // later, optionally, calls the permissionless DepositToLpVault from the
+          // Earn page (by design — "anyone, including the creator, later" — see the
+          // Step 4 comment) — not guaranteed for any given market, and even then
+          // only for domain 0 (long); there is no equivalent for domain 1 (short).
+          //
+          // FIX: explicitly seed BOTH domains (long=0, short=1) to
+          // Fresh@MAX_BACKING_BUCKET_EXPIRY_SLOT (u64::MAX/2) here, deterministically,
+          // as part of market creation — while both buckets are still Empty (no
+          // Step 0-5 instruction ever calls TradeCpi). fresh_counterparty_backing_
+          // expiry_slot() then always returns this same MAX value, so every later
+          // automatic loss-reserve request matches the existing expiry and hits the
+          // harmless no-op arm — the LockActive trap becomes unreachable for this
+          // market's lifetime. backing_bucket_authority defaults to config.marketauth
+          // at InitMarket (== wallet.publicKey, the creator, set in Step 0) and
+          // nothing in Steps 0-5 ever rotates it (Stake InitPool, Step 5, makes no
+          // wrapper CPI at all — verified against percolator-stake/src/processor.rs),
+          // so the connected wallet can sign this here with no prior authority setup.
+          //
+          // v17-only (backing-bucket domains are a v16/v17 engine concept; v12
+          // legacy markets have no equivalent trap or instruction). Best-effort/
+          // non-fatal like the insurance top-up above: a transient RPC failure here
+          // must not strand an otherwise-successful market creation — a retry of
+          // this step (or a later maintainer backfill) is safe because a repeat
+          // TopUp against an already-Fresh-at-MAX bucket hits the harmless no-op arm.
+          if (isV17SlabDeposit) {
+            try {
+              const backingVaultToken = vaultTokenAta;
+              const LONG_DOMAIN = 0; // 2*assetIndex, assetIndex=0
+              const SHORT_DOMAIN = 1; // 2*assetIndex+1
+              const backingIxs: TransactionInstruction[] = [];
+              for (const domain of [LONG_DOMAIN, SHORT_DOMAIN]) {
+                backingIxs.push(
+                  buildIx({
+                    programId,
+                    keys: buildAccountMetas(ACCOUNTS_TOP_UP_BACKING_BUCKET, [
+                      wallet.publicKey, slabPk, userAta, backingVaultToken, WELL_KNOWN.tokenProgram,
+                    ]),
+                    data: encodeTopUpBackingBucket({
+                      domain,
+                      amount: BACKING_BUCKET_DUST_AMOUNT.toString(),
+                      expirySlot: MAX_BACKING_BUCKET_EXPIRY_SLOT.toString(),
+                    }),
+                  }),
+                );
+              }
+              const backingSig = await sendTx({
+                connection, wallet,
+                instructions: backingIxs,
+                computeUnits: 200_000,
+              });
+              setState((s) => ({ ...s, txSigs: [...s.txSigs, backingSig] }));
+            } catch (backingBucketErr) {
+              console.warn(
+                "[useCreateMarket] Step 3 backing-bucket seeding (deadlock prevention) failed — " +
+                "market is otherwise live, but domains 0/1 may still be vulnerable to the freshness " +
+                "deadlock until this is retried or backfilled:",
+                backingBucketErr,
+              );
+            }
+          }
+
           // TopUpInsurance + final crank — NOT part of the proven on-chain sequence
           // (launch-test-market.ts, the 8/8 ground truth, creates a tradeable market
           // without ever calling TopUpInsurance) and, per the H9/W3 fix above, no longer
@@ -1434,13 +2775,22 @@ export function useCreateMarket() {
         // PERC-8332: Attach nonce + ed25519 signature so the POST handler can verify
         // deployer ownership without Supabase. Flow:
         //   1. GET /api/markets/challenge?deployer=<pubkey> → { nonce }
-        //   2. Sign nonce bytes with wallet.signMessage (ed25519)
+        // 2. Sign the canonical market-registration payload with wallet.signMessage (ed25519)
         //   3. POST with { nonce, signature: base64 }
         if (startStep <= 4) {
           try {
             const deployerStr = wallet.publicKey.toBase58();
 
             // Step 1: fetch nonce challenge
+            const registrationPayload = buildMarketRegistrationPayload({
+              slabAddress: slabPk.toBase58(),
+              params,
+              deployer: deployerStr,
+              oracleMode,
+              isAdminOracle,
+              isDevnetEnv,
+            });
+
             let nonce: string | null = null;
             let signature: string | null = null;
             if (wallet.signMessage) {
@@ -1451,13 +2801,18 @@ export function useCreateMarket() {
                 if (challengeResp.ok) {
                   const { nonce: n } = await challengeResp.json() as { nonce: string };
                   nonce = n;
-                  // Step 2: sign the nonce bytes
-                  const nonceBytes = new TextEncoder().encode(nonce);
-                  const sigBytes = await wallet.signMessage(nonceBytes);
+                  // Step 2: sign the canonical market-registration payload
+                  const signingMessage =
+                    buildMarketRegistrationMessage({
+                      nonce,
+                      deployer: deployerStr,
+                      payload: registrationPayload,
+                    });
+                  const sigBytes = await wallet.signMessage(signingMessage);
                   signature = Buffer.from(sigBytes).toString("base64");
                 }
               } catch (sigErr) {
-                console.warn("[useCreateMarket] Nonce challenge/sign failed (non-fatal):", sigErr);
+                console.warn("[useCreateMarket] Market-registration challenge/sign failed (non-fatal):", sigErr);
                 // Fall through — POST will 400 if nonce/signature missing, but market is on-chain.
               }
             }
@@ -1466,29 +2821,10 @@ export function useCreateMarket() {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                slab_address: slabPk.toBase58(),
-                mint_address: params.mint.toBase58(),
-                symbol: params.symbol ?? "UNKNOWN",
-                name: params.name ?? "Unknown Token",
-                decimals: params.decimals ?? 6,
-                deployer: deployerStr,
-                oracle_mode: oracleMode,
-                dex_pool_address: params.dexPoolAddress ?? null,
-                oracle_authority: isAdminOracle
-                  ? (isDevnetEnv && getConfig().crankWallet ? getConfig().crankWallet : deployerStr)
-                  : null,
-                initial_price_e6: params.initialPriceE6.toString(),
-                // BUG 16 fix: advertise the FLOORED margin (what's actually enforced
-                // on-chain), not the raw requested bps — see flooredInitialMarginBps doc.
-                max_leverage: params.initialMarginBps > 0
-                  ? Math.floor(10000 / flooredInitialMarginBps(params.initialMarginBps))
-                  : 1,
-                trading_fee_bps: Number(params.tradingFeeBps),
-                lp_collateral: params.lpCollateral.toString(),
-                mainnet_ca: params.mainnetCA ?? null,
-                // PERC-8332: nonce + signature for deployer proof
-                ...(nonce && signature ? { nonce, signature } : {}),
-              }),
+                  ...registrationPayload,
+                  // PERC-8332: nonce + signature for deployer proof
+                                  ...(nonce && signature ? { nonce, signature } : {})
+                }),
             });
           } catch {
             // Non-fatal — market is on-chain even if DB write fails
@@ -1774,6 +3110,9 @@ export function useCreateMarket() {
       keeperDelegated: false,
       keeperMessage: null,
       keeperRegistering: false,
+      phase: "idle",
+      landingIndex: 0,
+      landingTotal: 0,
     });
   }, []);
 

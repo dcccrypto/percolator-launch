@@ -1,11 +1,13 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, SystemProgram } from '@solana/web3.js';
 import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
 import { getAssociatedTokenAddressSync, unpackAccount, unpackMint } from '@solana/spl-token';
 import { deriveDepositPda } from '@percolatorct/sdk';
 import { getConfig } from '@/lib/config';
+import { pollWhenVisible } from '@/lib/pollWhenVisible';
+import { getMultipleAccountsInfoChunked } from '@/lib/rpc-chunk';
 
 
 // ═══════════════════════════════════════════════════════════════
@@ -101,8 +103,20 @@ export function useLpPositions(): LpPositionsState & { refresh: () => void } {
 
   const walletKeyStr = wallet.publicKey?.toBase58() ?? null;
 
+  // PERC-9204: requestId/generation guard — fetchPositions has multiple
+  // sequential awaits (pools fetch, mint batch, ATA+deposit-PDA batch,
+  // getSlot). Without this, switching wallets mid-fetch let the OLD wallet's
+  // slower in-flight fetch resolve AFTER the new wallet's fetch and stomp its
+  // state (setPositions/setTotalRedeemable/setError, and the finally's
+  // setLoading(false)/hasLoadedOnce). Mirrors the `stale()` pattern in
+  // useInsuranceLP's refreshState.
+  const requestIdRef = useRef(0);
+
   const fetchPositions = useCallback(async () => {
     if (!walletKeyStr || !connection) {
+      // Invalidate any in-flight fetch from a previous wallet — it must not
+      // land after this "no wallet" reset.
+      requestIdRef.current++;
       setPositions([]);
       setTotalRedeemable(0);
       setLoading(false);
@@ -110,6 +124,9 @@ export function useLpPositions(): LpPositionsState & { refresh: () => void } {
       hasLoadedOnce.current = false;
       return;
     }
+
+    const requestId = ++requestIdRef.current;
+    const stale = () => requestId !== requestIdRef.current;
 
     if (hasLoadedOnce.current) {
       setIsRefreshing(true);
@@ -123,8 +140,10 @@ export function useLpPositions(): LpPositionsState & { refresh: () => void } {
       const res = await fetch(`/api/stake/pools`);
       if (!res.ok) throw new Error(`Failed to fetch pools: ${res.status}`);
       const { pools } = (await res.json()) as { pools: ApiPool[] };
+      if (stale()) return;
 
       if (!pools?.length) {
+        if (stale()) return;
         setPositions([]);
         setTotalRedeemable(0);
         return;
@@ -144,10 +163,48 @@ export function useLpPositions(): LpPositionsState & { refresh: () => void } {
       const lpMintKeys = pools.map((p) => new PublicKey(p.lpMint));
       const collateralMintStrs = Array.from(new Set(pools.map((p) => p.collateralMint)));
       const collateralMintKeys = collateralMintStrs.map((m) => new PublicKey(m));
-      const [lpMintInfos, collateralMintInfos] = await Promise.all([
-        connection.getMultipleAccountsInfo(lpMintKeys),
-        connection.getMultipleAccountsInfo(collateralMintKeys),
+
+      // 2b. Precompute each pool's user LP ATA + deposit PDA (pure, synchronous
+      // derivations — no RPC involved) so both can be read in the SAME batched
+      // getMultipleAccountsInfo call as the mint lookups below, instead of the
+      // previous per-pool `getAccountInfo(ata)` + `getAccountInfo(depositPda)`
+      // pair (up to 2×N individual RPC round-trips for N pools against a
+      // rate-limited devnet RPC). A pool whose ATA/PDA derivation fails is
+      // marked invalid and simply excluded from the batch — the placeholder
+      // System Program key still occupies its slot so every array stays
+      // index-aligned with `pools`.
+      const userLpAtas: (PublicKey | null)[] = pools.map((p) => {
+        try {
+          return getAssociatedTokenAddressSync(new PublicKey(p.lpMint), walletPk);
+        } catch {
+          return null;
+        }
+      });
+      const depositPdas: (PublicKey | null)[] = pools.map((p) => {
+        try {
+          const poolPk = new PublicKey(p.poolAddress);
+          const [depositPda] = deriveDepositPda(poolPk, walletPk, stakeProgramPk);
+          return depositPda;
+        } catch {
+          return null;
+        }
+      });
+      const ataBatchKeys = userLpAtas.map((k) => k ?? SystemProgram.programId);
+      const depositBatchKeys = depositPdas.map((k) => k ?? SystemProgram.programId);
+
+      // G: at 51+ stake pools, 2×pools.length (ATA + deposit-PDA) keys alone
+      // exceeds the 100-key getMultipleAccountsInfo cap, which used to throw
+      // and blank LP positions for every user — see lib/rpc-chunk.ts.
+      const [lpMintInfos, collateralMintInfos, combinedAccountInfos, slotNow] = await Promise.all([
+        getMultipleAccountsInfoChunked(connection, lpMintKeys),
+        getMultipleAccountsInfoChunked(connection, collateralMintKeys),
+        getMultipleAccountsInfoChunked(connection, [...ataBatchKeys, ...depositBatchKeys]),
+        connection.getSlot(),
       ]);
+      if (stale()) return;
+      const ataInfos = combinedAccountInfos.slice(0, pools.length);
+      const depositInfos = combinedAccountInfos.slice(pools.length);
+
       const lpDecimalsByMint: Record<string, number> = {};
       for (let i = 0; i < pools.length; i++) {
         const mintInfo = lpMintInfos[i];
@@ -177,115 +234,104 @@ export function useLpPositions(): LpPositionsState & { refresh: () => void } {
         }
       }
 
-      // 2b. For each pool, fetch user's LP token ATA and deposit PDA in parallel
-      const slotNow = await connection.getSlot();
+      // 3. Build each pool's position synchronously from the batched account
+      // infos fetched above — no more per-pool awaits, so this is a plain
+      // map/filter instead of Promise.allSettled.
+      const resolved: LpPosition[] = pools.reduce<LpPosition[]>((acc, pool, i) => {
+        if (!userLpAtas[i]) return acc; // ATA derivation failed for this pool
 
-      const positionResults = await Promise.allSettled(
-        pools.map(async (pool): Promise<LpPosition | null> => {
-          const lpMintPk = new PublicKey(pool.lpMint);
+        const ataInfo = ataInfos[i];
+        if (!ataInfo || ataInfo.data.length < 165) return acc;
 
-          // Compute user's LP ATA
-          let userLpAta: PublicKey;
-          try {
-            userLpAta = getAssociatedTokenAddressSync(lpMintPk, walletPk);
-          } catch {
-            return null;
+        let lpBalanceRaw: bigint;
+        try {
+          const ata = unpackAccount(userLpAtas[i]!, ataInfo);
+          lpBalanceRaw = ata.amount;
+        } catch {
+          return acc;
+        }
+
+        // Skip pools where user has no LP tokens
+        if (lpBalanceRaw === 0n) return acc;
+
+        // Compute redeemable value: (lpBalance / totalLpSupply) * tvl
+        // Use per-mint decimals — do NOT hardcode 6 (PERC-8197).
+        const lpMintDecimals = lpDecimalsByMint[pool.lpMint] ?? 6;
+        const lpBalance = Number(lpBalanceRaw) / Math.pow(10, lpMintDecimals);
+        const totalLpSupply = pool.totalLpSupply;
+        const tvlRaw = BigInt(pool.tvlRaw);
+
+        const redeemableRaw: bigint = totalLpSupply > 0
+          ? (lpBalanceRaw * tvlRaw) / BigInt(Math.round(totalLpSupply))
+          : 0n;
+        // Redeemable value is in the pool's collateral token — look up actual decimals.
+        const collateralDecimals = collateralDecimalsByMint[pool.collateralMint] ?? 6;
+        const redeemable = Number(redeemableRaw) / Math.pow(10, collateralDecimals);
+        const userSharePct = totalLpSupply > 0
+          ? (Number(lpBalanceRaw) / totalLpSupply) * 100
+          : 0;
+
+        // Check cooldown status from the batched deposit PDA info.
+        let cooldownElapsed = true;
+        const depositInfo = depositPdas[i] ? depositInfos[i] : null;
+        try {
+          if (depositInfo && depositInfo.data.length >= 80) {
+            // StakeDeposit layout (percolator-stake/src/state.rs, #[repr(C)] Pod):
+            //   is_initialized: u8 (1) + bump: u8 (1) + _padding: [u8;6] (6)
+            //   pool: [u8;32] (32) + user: [u8;32] (32) → last_deposit_slot: u64 at offset 72
+            //   lp_amount: u64 at offset 80 → total minimum size = 80 bytes
+            // Use DataView for browser-safe u64 read (Buffer.readBigUInt64LE is Node.js-only)
+            const _dv72 = new DataView(depositInfo.data.buffer, depositInfo.data.byteOffset, depositInfo.data.byteLength);
+            const depositSlot = _dv72.getBigUint64(72, /* littleEndian= */ true);
+            const cooldownSlots = BigInt(pool.cooldownSlots);
+            cooldownElapsed = depositSlot === 0n || cooldownSlots === 0n
+              || BigInt(slotNow) >= depositSlot + cooldownSlots;
           }
+        } catch {
+          // If parsing fails, assume cooldown elapsed (safe default: let withdraw attempt fail on-chain)
+          cooldownElapsed = true;
+        }
 
-          // Fetch ATA account
-          const ataInfo = await connection.getAccountInfo(userLpAta);
-          if (!ataInfo || ataInfo.data.length < 165) return null;
+        acc.push({
+          poolAddress: pool.poolAddress,
+          slabAddress: pool.slabAddress,
+          collateralMint: pool.collateralMint,
+          lpMint: pool.lpMint,
+          name: pool.name,
+          symbol: pool.symbol,
+          logoUrl: pool.logoUrl,
+          lpBalanceRaw,
+          lpBalance,
+          redeemableRaw,
+          redeemable,
+          totalLpSupply: pool.totalLpSupply,
+          tvl: pool.tvl,
+          userSharePct,
+          cooldownSlots: pool.cooldownSlots,
+          cooldownElapsed,
+          apr: pool.apr,
+          poolMode: pool.poolMode,
+        });
+        return acc;
+      }, []);
 
-          let lpBalanceRaw: bigint;
-          try {
-            const ata = unpackAccount(userLpAta, ataInfo);
-            lpBalanceRaw = ata.amount;
-          } catch {
-            return null;
-          }
-
-          // Skip pools where user has no LP tokens
-          if (lpBalanceRaw === 0n) return null;
-
-          // 3. Compute redeemable value: (lpBalance / totalLpSupply) * tvl
-          // Use per-mint decimals — do NOT hardcode 6 (PERC-8197).
-          const lpMintDecimals = lpDecimalsByMint[pool.lpMint] ?? 6;
-          const lpBalance = Number(lpBalanceRaw) / Math.pow(10, lpMintDecimals);
-          const totalLpSupply = pool.totalLpSupply;
-          const tvlRaw = BigInt(pool.tvlRaw);
-
-          const redeemableRaw: bigint = totalLpSupply > 0
-            ? (lpBalanceRaw * tvlRaw) / BigInt(Math.round(totalLpSupply))
-            : 0n;
-          // Redeemable value is in the pool's collateral token — look up actual decimals.
-          const collateralDecimals = collateralDecimalsByMint[pool.collateralMint] ?? 6;
-          const redeemable = Number(redeemableRaw) / Math.pow(10, collateralDecimals);
-          const userSharePct = totalLpSupply > 0
-            ? (Number(lpBalanceRaw) / totalLpSupply) * 100
-            : 0;
-
-          // 4. Check cooldown status from deposit PDA
-          // deriveDepositPda(pool PDA, user) — note: pool PDA, not slab
-          let cooldownElapsed = true;
-          try {
-            const poolPk = new PublicKey(pool.poolAddress);
-            const [depositPda] = deriveDepositPda(poolPk, walletPk, stakeProgramPk);
-            const depositInfo = await connection.getAccountInfo(depositPda);
-            if (depositInfo && depositInfo.data.length >= 80) {
-              // StakeDeposit layout (percolator-stake/src/state.rs, #[repr(C)] Pod):
-              //   is_initialized: u8 (1) + bump: u8 (1) + _padding: [u8;6] (6)
-              //   pool: [u8;32] (32) + user: [u8;32] (32) → last_deposit_slot: u64 at offset 72
-              //   lp_amount: u64 at offset 80 → total minimum size = 80 bytes
-              // Use DataView for browser-safe u64 read (Buffer.readBigUInt64LE is Node.js-only)
-              const _dv72 = new DataView(depositInfo.data.buffer, depositInfo.data.byteOffset, depositInfo.data.byteLength);
-              const depositSlot = _dv72.getBigUint64(72, /* littleEndian= */ true);
-              const cooldownSlots = BigInt(pool.cooldownSlots);
-              cooldownElapsed = depositSlot === 0n || cooldownSlots === 0n
-                || BigInt(slotNow) >= depositSlot + cooldownSlots;
-            }
-          } catch {
-            // If PDA fetch fails, assume cooldown elapsed (safe default: let withdraw attempt fail on-chain)
-            cooldownElapsed = true;
-          }
-
-          return {
-            poolAddress: pool.poolAddress,
-            slabAddress: pool.slabAddress,
-            collateralMint: pool.collateralMint,
-            lpMint: pool.lpMint,
-            name: pool.name,
-            symbol: pool.symbol,
-            logoUrl: pool.logoUrl,
-            lpBalanceRaw,
-            lpBalance,
-            redeemableRaw,
-            redeemable,
-            totalLpSupply: pool.totalLpSupply,
-            tvl: pool.tvl,
-            userSharePct,
-            cooldownSlots: pool.cooldownSlots,
-            cooldownElapsed,
-            apr: pool.apr,
-            poolMode: pool.poolMode,
-          };
-        })
-      );
-
-      const resolved: LpPosition[] = positionResults
-        .filter((r): r is PromiseFulfilledResult<LpPosition | null> => r.status === 'fulfilled')
-        .map((r) => r.value)
-        .filter((p): p is LpPosition => p !== null);
-
+      if (stale()) return;
       const total = resolved.reduce((s, p) => s + p.redeemable, 0);
       setPositions(resolved);
       setTotalRedeemable(total);
     } catch (err: any) {
+      if (stale()) return;
       console.error('[useLpPositions]', err);
       setError(err.message ?? 'Failed to load LP positions');
     } finally {
-      setLoading(false);
-      setIsRefreshing(false);
-      hasLoadedOnce.current = true;
+      // Guarded: a stale (superseded) call's finally must not clobber the
+      // loading/refresh flags a newer call (e.g. after a wallet switch) is
+      // still managing.
+      if (!stale()) {
+        setLoading(false);
+        setIsRefreshing(false);
+        hasLoadedOnce.current = true;
+      }
     }
   }, [walletKeyStr, connection]);
 
@@ -298,8 +344,10 @@ export function useLpPositions(): LpPositionsState & { refresh: () => void } {
     hasLoadedOnce.current = false;
     setIsRefreshing(false);
     fetchRef.current();
-    const interval = setInterval(() => fetchRef.current(), 30_000);
-    return () => clearInterval(interval);
+    // Visibility-gated: a backgrounded tab shouldn't keep polling the
+    // rate-limited devnet RPC every 30s for a dashboard nobody is looking at.
+    // Fires immediately on tab re-focus (catch-up refresh).
+    return pollWhenVisible(() => fetchRef.current(), 30_000);
   }, [walletKeyStr]); // Re-subscribe when wallet changes
 
   return { positions, totalRedeemable, loading, isRefreshing, error, refresh: fetchPositions };

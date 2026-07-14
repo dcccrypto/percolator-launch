@@ -15,6 +15,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
+import { pollWhenVisible } from "@/lib/pollWhenVisible";
 
 interface ProtocolStats {
   volume24h: number;
@@ -46,13 +47,22 @@ const POLL_INTERVAL_MS = 30_000;
 export function ProtocolStatsBar() {
   const [stats, setStats] = useState<ProtocolStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // PERC-9204: cancellation guard — without it, a fetch that resolves after
+  // unmount (or after a newer poll cycle already started) could still call
+  // setStats/setLoading on this component. Bumped on unmount by the effect
+  // below, and incremented at the start of every fetchStats() call so an
+  // out-of-order (overlapping) response can detect it's been superseded.
+  const requestIdRef = useRef(0);
 
   async function fetchStats() {
+    const requestId = ++requestIdRef.current;
+    const stale = () => requestId !== requestIdRef.current;
+
     try {
       const res = await fetch("/api/stats");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
+      if (stale()) return;
       setStats({
         volume24h: Number(data.totalVolume24h) || 0,
         openInterest: Number(data.totalOpenInterest) || 0,
@@ -63,17 +73,24 @@ export function ProtocolStatsBar() {
     } catch {
       // non-fatal — keep showing stale stats, but the fetch itself failed so
       // it's no longer "live".
+      if (stale()) return;
       setStats((prev) => (prev ? { ...prev, live: false } : prev));
     } finally {
-      setLoading(false);
+      if (!stale()) setLoading(false);
     }
   }
 
   useEffect(() => {
     fetchStats();
-    timerRef.current = setInterval(fetchStats, POLL_INTERVAL_MS);
+    // Visibility-gated: a backgrounded tab shouldn't keep polling /api/stats
+    // every 30s for a dashboard bar nobody is looking at. Fires immediately
+    // on tab re-focus (catch-up refresh).
+    const dispose = pollWhenVisible(fetchStats, POLL_INTERVAL_MS);
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      dispose();
+      // Invalidate any fetch still in flight so its resolution can't
+      // setStats/setLoading after unmount.
+      requestIdRef.current++;
     };
   }, []);
 

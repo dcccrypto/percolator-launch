@@ -84,6 +84,18 @@ const HARDCODED_BLOCKED_SLABS: readonly string[] = [
   // conversion). Hidden from the UI; kept in the keeper registry as the PumpSwap
   // parser-fix verification reference. Lineup is now SOL/JUP/TRUMP/PENGU only.
   "7mzqfnuAhANvDV8PiqJBG3jehyv3rPrCMr9V6j2bCHPV",
+  // 2026-07-10: retired lineup, replaced by 5 born-immortal markets. Full re-seed
+  // to fix the backing-bucket-freshness deadlock (engine line-776 trap) — every
+  // new market seeds both backing-bucket domains to a non-lapsing expiry
+  // (u64::MAX/2) via TopUpBackingBucket at creation. These 6 old slabs are
+  // superseded and blocked so on-chain discovery (getProgramAccounts) doesn't
+  // re-surface them.
+  "Fs13SX1b33wRh3DBbh1NmkuHSz5Z89oRb2ew7aNn1jMH", // old SOL/USDC
+  "J9unPVyDykcoQyxGxF1MfSE6mGyaaCfZhGEAk5eQokXG", // old JUP/USDC
+  "8WNAuxLDvo3S5Yf9Z5sm2me69N4d1RLvxoS1tCnPpo83", // old TRUMP/USDC
+  "DeWGMtVo8VHjUJ5qsPXSZsQS9rFJhnB3gE4tPGWrEcCB", // old PENGU/USDC
+  "dLKhJAVPgmgxJJWvbcGvfQUNBmc7wwjdQp8Jzpg4UGq", // old Percolator/USDC
+  "9oBMLGXq9mLGa5DQapTL2gia9eM425dNvf4DUNoMrzz6", // old BURNIE/USDC
 ];
 
 /**
@@ -147,6 +159,9 @@ export function validateBlocklist(): void {
   }
 }
 
-// Auto-run at module load so the warning fires during both dev and production
-// startup without requiring an explicit call site.
-validateBlocklist();
+// NOTE: previously this module auto-ran `validateBlocklist()` at import time.
+// blocklist.ts is imported by the Edge middleware, and a top-level side effect that
+// reads a server-only env var (process.env.BLOCKED_MARKET_ADDRESSES) at module
+// evaluation makes Vercel's Edge-Function analyzer reject the module ("referencing
+// unsupported modules"). Call validateBlocklist() explicitly from a Node-runtime
+// entrypoint (e.g. instrumentation.ts) instead of running it at import.

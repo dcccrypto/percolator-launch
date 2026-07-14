@@ -136,6 +136,7 @@ describe("useTrade", () => {
         },
       ],
       programId: mockProgramId,
+      refresh: vi.fn(),
     };
 
     vi.mocked(useConnectionCompat).mockReturnValue({ connection: mockConnection });

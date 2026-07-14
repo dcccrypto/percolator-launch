@@ -12,6 +12,18 @@ interface LaunchProgressProps {
     slabAddress: string | null;
     txSigs: string[];
     stepLabel: string;
+    /**
+     * Batch-launch phase (2026-07-12) — set only by the fresh quick-launch
+     * fast path (see useCreateMarket.ts's attemptFreshBatchedLaunch).
+     * Resume/retry/demo flows never set this away from "idle"/undefined, so
+     * this component falls back to the original per-step (0-5) view for
+     * those — the phase view is purely additive.
+     */
+    phase?: "idle" | "preparing" | "awaiting-signature" | "landing" | "done";
+    landingIndex?: number;
+    /** Named market-creation steps, one per batched tx, in order. */
+    landingLabels?: string[];
+    landingTotal?: number;
   };
   onReset: () => void;
   onRetry?: () => void;
@@ -41,6 +53,11 @@ export const LaunchProgress: FC<LaunchProgressProps> = ({ state, onReset, onRetr
   // is available for exactly that "timed out but landed" case, not just once `state`
   // catches up.
   const hasInFlightRecovery = loadAllInFlightMarkets().length > 0;
+  // Batch-launch phase view: only rendered when the fresh quick-launch fast
+  // path is active (phase set to something other than "idle"/undefined).
+  // Resume/retry/demo flows fall straight through to the original per-step
+  // list below, unchanged.
+  const isBatchPhaseActive = !!state.phase && state.phase !== "idle";
   return (
     <div
       className="border border-[var(--border)] bg-[var(--panel-bg)] p-4 sm:p-6"
@@ -53,7 +70,109 @@ export const LaunchProgress: FC<LaunchProgressProps> = ({ state, onReset, onRetr
       </h2>
       <div className="h-px bg-[var(--border)] mb-5" />
 
-      {/* Step list */}
+      {isBatchPhaseActive && !state.error && (
+        <div className="space-y-4" aria-live="polite">
+          {/* Preparing / awaiting-signature: single spinner + label */}
+          {(state.phase === "preparing" || state.phase === "awaiting-signature") && (
+            <div className="flex items-center gap-3">
+              <span className="h-5 w-5 flex-shrink-0 animate-spin border-2 border-[var(--border)] border-t-[var(--accent)]" />
+              <div>
+                <p className="text-[12px] font-medium text-[var(--text)]">{state.stepLabel}</p>
+                {state.phase === "awaiting-signature" && (
+                  <p className="mt-0.5 text-[10px] text-[var(--text-secondary)]">
+                    One approval signs the whole market launch.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Landing: named market-creation steps (NOT transaction indices —
+              a launching user cares about what's being built, not our tx
+              packing). Each step shows done / in-progress / pending, with the
+              explorer link on the ones that have landed. */}
+          {state.phase === "landing" && (
+            <div>
+              {(() => {
+                const labels = state.landingLabels ?? [];
+                const done = state.landingIndex ?? 0;
+                const total = state.landingTotal ?? labels.length;
+                return (
+                  <>
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-[11px] font-medium text-[var(--text)]">
+                        {labels[Math.min(done, labels.length - 1)] ?? "Finishing up"}
+                      </span>
+                      <span className="text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--warning)] animate-pulse">
+                        CONFIRMING...
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden bg-[var(--bg-surface)]">
+                      <div
+                        className="h-full bg-[var(--accent)] transition-all duration-300"
+                        style={{ width: `${total ? Math.min(100, (done / total) * 100) : 0}%` }}
+                      />
+                    </div>
+                    <ul className="mt-3 space-y-1">
+                      {labels.map((label, i) => {
+                        const isDone = i < done;
+                        const isActive = i === done;
+                        const sig = state.txSigs[i];
+                        return (
+                          <li key={label} className="flex items-center gap-2">
+                            <span
+                              className={[
+                                "flex h-4 w-4 flex-shrink-0 items-center justify-center border text-[9px]",
+                                isDone
+                                  ? "border-[var(--long)]/30 bg-[var(--long)]/[0.08] text-[var(--long)]"
+                                  : isActive
+                                    ? "border-[var(--accent)]/40 bg-[var(--accent)]/[0.08] text-[var(--accent)]"
+                                    : "border-[var(--border)] text-[var(--text-dim)]",
+                              ].join(" ")}
+                            >
+                              {isDone ? "✓" : isActive ? "•" : ""}
+                            </span>
+                            <span
+                              className={[
+                                "text-[10px]",
+                                isDone
+                                  ? "text-[var(--text-secondary)]"
+                                  : isActive
+                                    ? "font-medium text-[var(--text)]"
+                                    : "text-[var(--text-dim)]",
+                              ].join(" ")}
+                            >
+                              {label}
+                            </span>
+                            {isDone && sig && (
+                              <a
+                                href={`https://explorer.solana.com/tx/${sig}?cluster=devnet`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="ml-auto font-mono text-[9px] text-[var(--text-dim)] transition-colors hover:text-[var(--accent)]"
+                              >
+                                {sig.slice(0, 6)}…
+                              </a>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </>
+                );
+              })()}
+            </div>
+          )}
+        </div>
+      )}
+
+      {isBatchPhaseActive && (
+        <div className="h-px bg-[var(--border)] my-5" />
+      )}
+
+      {/* Step list — original per-step (0-5) view, used by resume/retry/demo
+          flows and hidden while the batch-launch phase view is active. */}
+      {!isBatchPhaseActive && (
       <div className="space-y-3" aria-live="polite">
         {STEP_LABELS.map((label, i) => {
           let status: "pending" | "active" | "done" | "error" = "pending";
@@ -138,9 +257,10 @@ export const LaunchProgress: FC<LaunchProgressProps> = ({ state, onReset, onRetr
           );
         })}
       </div>
+      )}
 
       {/* Progress text */}
-      {state.loading && !state.error && (
+      {!isBatchPhaseActive && state.loading && !state.error && (
         <p className="mt-5 text-[12px] text-[var(--text-secondary)]">
           Step {state.step + 1} of 6 — Sign the transaction in your wallet
         </p>

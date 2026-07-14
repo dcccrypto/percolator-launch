@@ -1,6 +1,6 @@
 "use client";
 
-import { FC, useState, useRef, useEffect } from "react";
+import { FC, useState, useRef, useEffect, useId } from "react";
 import { createPortal } from "react-dom";
 import gsap from "gsap";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
@@ -17,6 +17,11 @@ export const Tooltip: FC<TooltipProps> = ({ text, children, className = "" }) =>
   const triggerRef = useRef<HTMLSpanElement>(null);
   const tooltipRef = useRef<HTMLSpanElement>(null);
   const prefersReduced = usePrefersReducedMotion();
+  const id = useId();
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const open = () => { if (hideTimer.current) clearTimeout(hideTimer.current); setShow(true); };
+  // small delay so moving the pointer from trigger to panel keeps it open (WCAG 1.4.13 hoverable)
+  const close = () => { if (hideTimer.current) clearTimeout(hideTimer.current); hideTimer.current = setTimeout(() => setShow(false), 80); };
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -72,7 +77,11 @@ export const Tooltip: FC<TooltipProps> = ({ text, children, className = "" }) =>
   const tooltipEl = (
     <span
       ref={tooltipRef}
-      className="fixed z-[9999] w-64 rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--text-secondary)] shadow-xl pointer-events-none"
+      id={id}
+      role="tooltip"
+      onMouseEnter={open}
+      onMouseLeave={close}
+      className="fixed z-[9999] w-64 rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--text-secondary)] shadow-xl"
       style={{ visibility: "hidden", opacity: 0 }}
     >
       {text}
@@ -83,9 +92,14 @@ export const Tooltip: FC<TooltipProps> = ({ text, children, className = "" }) =>
     <>
       <span
         ref={triggerRef}
-        className={`relative inline-flex cursor-help ${className}`}
-        onMouseEnter={() => setShow(true)}
-        onMouseLeave={() => setShow(false)}
+        tabIndex={0}
+        aria-describedby={show ? id : undefined}
+        className={`relative inline-flex cursor-help rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${className}`}
+        onMouseEnter={open}
+        onMouseLeave={close}
+        onFocus={open}
+        onBlur={close}
+        onKeyDown={(e) => { if (e.key === "Escape") setShow(false); }}
       >
         {children}
       </span>

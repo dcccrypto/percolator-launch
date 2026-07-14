@@ -227,9 +227,16 @@ describe("LaunchSuccess", () => {
   });
 
   it("shows transaction signatures with explorer links", () => {
-    render(<LaunchSuccess {...defaultProps} />);
+    // The success screen had grown into a wall of text, so the tx links moved
+    // into the "Details" disclosure (still rendered in the DOM — <details>
+    // content is present, just visually collapsed) and shortened from
+    // "Step N: <sig>… ↗" to "tx N ↗". The contract this test guards is
+    // unchanged: one explorer link per landed transaction.
+    render(<LaunchSuccess {...defaultProps} devnetMint="DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC" />);
     for (let i = 0; i < 5; i++) {
-      expect(screen.getByText(new RegExp(`Step ${i + 1}:`))).toBeDefined();
+      const link = screen.getByText(new RegExp(`^tx ${i + 1}\\s`));
+      expect(link).toBeDefined();
+      expect(link.getAttribute("href")).toContain(defaultProps.txSigs[i]);
     }
   });
 
@@ -332,7 +339,9 @@ describe("LaunchSuccess", () => {
           devnetAirdropSymbol="USDC"
         />
       );
-      expect(screen.getByText("COLLATERAL & PRICING")).toBeDefined();
+      // The "COLLATERAL & PRICING" heading is gone — that whole explainer now
+      // lives inside the "Details" disclosure (text-trim pass). The mint and
+      // the framing copy it guards are still rendered.
       expect(screen.getByText(simUsdcMint)).toBeDefined();
       // The old copy claimed devnet used "a different mint address than mainnet"
       // for the launched token — that framing must be gone.

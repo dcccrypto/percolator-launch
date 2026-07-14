@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { usePortfolio } from "@/hooks/usePortfolio";
 
 function formatUsd(val: number): string {
@@ -16,13 +17,16 @@ function formatTradeFeeBps(bps: bigint): string {
 export function StatsBar() {
   const { positions, loading } = usePortfolio();
 
-  // Calculate real stats from portfolio positions
-  const totalPnlRaw = positions.reduce((sum, p) => sum + (p.unrealizedPnl ?? 0n), 0n);
-  const totalPnl = Number(totalPnlRaw) / 1e6; // e6 → human
-  const wins = positions.filter((p) => (p.unrealizedPnl ?? 0n) > 0n).length;
-  const losses = positions.filter((p) => (p.unrealizedPnl ?? 0n) < 0n).length;
-  const total = wins + losses;
-  const winRate = total > 0 ? ((wins / total) * 100).toFixed(1) : "--";
+  // Calculate real stats from portfolio positions (memoized — pure over `positions`)
+  const { totalPnl, wins, losses, total, winRate } = useMemo(() => {
+    const totalPnlRaw = positions.reduce((sum, p) => sum + (p.unrealizedPnl ?? 0n), 0n);
+    const totalPnl = Number(totalPnlRaw) / 1e6; // e6 → human
+    const wins = positions.filter((p) => (p.unrealizedPnl ?? 0n) > 0n).length;
+    const losses = positions.filter((p) => (p.unrealizedPnl ?? 0n) < 0n).length;
+    const total = wins + losses;
+    const winRate = total > 0 ? ((wins / total) * 100).toFixed(1) : "--";
+    return { totalPnl, wins, losses, total, winRate };
+  }, [positions]);
 
   // M15: v17 has no maker/taker fee split — "Fee Tier" used to fabricate one
   // (a hardcoded "Maker 0.02% / Taker 0.06%" that doesn't exist in the

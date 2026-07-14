@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { PythCandleData } from "@/app/api/chart/pyth/route";
+import { pollWhenVisible } from "@/lib/pollWhenVisible";
+import { boundedSet } from "@/lib/bounded-map";
 
 export type PythChartStatus = "idle" | "loading" | "success" | "empty" | "error";
 
@@ -28,6 +30,22 @@ const TIMEFRAME_CONFIG: Record<
 
 const POLL_INTERVAL_MS = 30_000; // re-poll the in-progress bar every 30 s
 
+// Module-level (not per-component-instance) so switching timeframe and back
+// within the same page session repaints instantly from cache instead of
+// re-fetching. Bounded to a handful of symbols x timeframes; see
+// lib/bounded-map.ts for the eviction rationale.
+const CACHE_MAX_ENTRIES = 30;
+/** Successful batches only, with a paint-freshness stamp — see useTokenChart's
+ *  chartCache comment for the empty-cache bug this avoids. */
+const CACHE_PAINT_MAX_AGE_MS = 10 * 60_000;
+const chartCache = new Map<string, { candles: PythCandleData[]; at: number }>();
+
+// `to` is quantized to this grid so repeated requests within the window
+// reuse the exact same URL and actually hit the route's `s-maxage=60` CDN
+// cache instead of missing on every call because Date.now() mints a unique
+// URL every time.
+const QUANTIZE_SEC = 30;
+
 export interface UsePythChartResult {
   candles: PythCandleData[];
   status: PythChartStatus;
@@ -52,19 +70,54 @@ export function usePythChart(
   const [status, setStatus] = useState<PythChartStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const fetchKeyRef = useRef<string>("");
+  // Mirrors `candles` so the error branch below can check "do we already
+  // have data" without taking a stale closure over `candles` state.
+  const candlesRef = useRef<PythCandleData[]>([]);
+  // WHICH key candlesRef holds data for — keep-last-good must be per-key or a
+  // failed/empty fetch on a NEW timeframe renders the PREVIOUS timeframe's
+  // candles under the new selector with a "success" status. See useTokenChart.
+  const lastGoodKeyRef = useRef<string>("");
+
+  /** Empty batch or fetch failure: retain candles ONLY if they belong to this
+   *  exact key; otherwise show an honest empty/error state. */
+  const applyEmptyOrError = useCallback((key: string, errMsg: string | null) => {
+    setError(errMsg);
+    if (lastGoodKeyRef.current === key && candlesRef.current.length > 0) {
+      setStatus("success");
+      return;
+    }
+    candlesRef.current = [];
+    setCandles([]);
+    setStatus(errMsg ? "error" : "empty");
+  }, []);
 
   const fetchData = useCallback(async (symbol: string, tf: Timeframe) => {
-    const { resolution, lookbackSecs } = TIMEFRAME_CONFIG[tf];
-    const to = Math.floor(Date.now() / 1000);
-    const from = to - lookbackSecs;
-    const url = `/api/chart/pyth?symbol=${encodeURIComponent(symbol)}&resolution=${resolution}&from=${from}&to=${to}`;
     const key = `${symbol}:${tf}`;
     fetchKeyRef.current = key;
 
-    // Don't flip to loading on refreshes — keep showing cached data to avoid
-    // flicker on the ~30 s repoll. Only go to loading on the very first fetch.
-    setStatus((prev) => (prev === "success" ? "success" : "loading"));
-    setError(null);
+    // Stale-while-revalidate: paint any cached bars for this (symbol,
+    // timeframe) instantly, then refetch in the background — without this,
+    // every repeat timeframe switch blanked the chart to "loading" for a
+    // fresh round trip even though we fetched this exact pair moments ago.
+    const cached = chartCache.get(key);
+    if (cached && Date.now() - cached.at < CACHE_PAINT_MAX_AGE_MS) {
+      candlesRef.current = cached.candles;
+      lastGoodKeyRef.current = key;
+      setCandles(cached.candles);
+      setStatus("success");
+      setError(null);
+    } else {
+      // Don't flip to loading on refreshes — keep showing cached data to avoid
+      // flicker on the ~30 s repoll. Only go to loading on the very first fetch.
+      setStatus((prev) => (prev === "success" ? "success" : "loading"));
+      setError(null);
+    }
+
+    const { resolution, lookbackSecs } = TIMEFRAME_CONFIG[tf];
+    const nowSec = Math.floor(Date.now() / 1000);
+    const to = Math.floor(nowSec / QUANTIZE_SEC) * QUANTIZE_SEC;
+    const from = to - lookbackSecs;
+    const url = `/api/chart/pyth?symbol=${encodeURIComponent(symbol)}&resolution=${resolution}&from=${from}&to=${to}`;
     try {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -72,26 +125,36 @@ export function usePythChart(
       if (fetchKeyRef.current !== key) return; // stale guard
       if (json.error) throw new Error(json.error);
       const bars = json.candles ?? [];
-      setCandles(bars);
-      setStatus(bars.length > 0 ? "success" : "empty");
+      if (bars.length > 0) {
+        candlesRef.current = bars;
+        lastGoodKeyRef.current = key;
+        setCandles(bars);
+        setStatus("success");
+        // Only SUCCESSFUL batches are cached — an empty result (what a
+        // transient upstream failure looks like) previously got cached and
+        // repainted as a blank chart on every revisit.
+        boundedSet(chartCache, key, { candles: bars, at: Date.now() }, CACHE_MAX_ENTRIES);
+        return;
+      }
+      applyEmptyOrError(key, null);
     } catch (err) {
       if (fetchKeyRef.current !== key) return;
       const msg = err instanceof Error ? err.message : String(err);
       console.warn("[usePythChart] fetch error:", msg);
-      setError(msg);
-      setStatus("error");
+      applyEmptyOrError(key, msg);
     }
-  }, []);
+  }, [applyEmptyOrError]);
 
   useEffect(() => {
     if (!pythSymbol) {
+      candlesRef.current = [];
       setCandles([]);
       setStatus("idle");
       return;
     }
     fetchData(pythSymbol, timeframe);
-    const id = setInterval(() => fetchData(pythSymbol, timeframe), POLL_INTERVAL_MS);
-    return () => clearInterval(id);
+    // Pause the ~30s repoll while the tab is hidden.
+    return pollWhenVisible(() => fetchData(pythSymbol, timeframe), POLL_INTERVAL_MS);
   }, [pythSymbol, timeframe, fetchData]);
 
   const refresh = useCallback(() => {

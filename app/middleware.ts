@@ -1,8 +1,29 @@
+// ── Proxy (formerly middleware.ts) ───────────────────────────────────────────
+// Next 16 renamed the `middleware` file convention to `proxy`, and a `proxy.ts`
+// file ALWAYS runs on the Node.js runtime (never the Edge runtime). We migrated
+// middleware.ts → proxy.ts specifically to leave the Edge runtime:
+//
+//   The Edge middleware bundle co-bundled @sentry/nextjs's edge build (pulled in
+//   via instrumentation.ts) and a shared "[root-of-the-server]" chunk that also
+//   carries this file's `@/lib/blocklist` import. Vercel's deploy-time Edge
+//   validator ("Deploying outputs") rejected the Node-referencing code in that
+//   shared chunk and mis-attributed it to the userland import it could name:
+//     The Edge Function "middleware" is referencing unsupported modules:
+//       - @/lib/blocklist
+//   Running as a Node proxy removes the Edge Function entirely, so that
+//   validation cannot run against this code. All APIs used below (NextResponse,
+//   @upstash/* REST clients, Web Crypto `crypto.getRandomValues`, `btoa`,
+//   `process.env`) are Node-runtime-native, so behavior is preserved 1:1.
+//
+// The proxy still runs before the Next.js router (same as middleware did), so
+// the rate-limiting, blocklist, redirect, and CSP-nonce guarantees are intact.
+// NOTE: `proxy.ts` must export a `proxy` (or default) function; a route-segment
+// `export const runtime = ...` is NOT allowed (proxy is always Node.js).
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { Redis } from "@upstash/redis";
 import { Ratelimit } from "@upstash/ratelimit";
-import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
+import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist-edge";
 
 // ── Rate limiter configuration ───────────────────────────────────────────────
 // Two tiers: RPC proxy gets a higher limit since Solana web3.js generates many calls per page load.
@@ -44,8 +65,11 @@ function getUpstashLimiters(): { general: Ratelimit | null; rpc: Ratelimit | nul
       prefix: "rl:rpc",
       analytics: false,
     });
-  } catch {
+  } catch (err) {
     // Redis init error — fall through to in-memory
+    if (process.env.NODE_ENV === "production") {
+      console.error("[RateLimit] ERROR: Upstash Redis initialization failed:", err);
+    }
     _generalLimiter = null;
     _rpcLimiter = null;
   }
@@ -111,8 +135,15 @@ async function getRateLimit(
         remaining: Math.max(0, remaining),
         reset: Math.max(0, Math.ceil((reset - Date.now()) / 1000)),
       };
-    } catch {
+    } catch (err) {
       // Redis request failed — degrade gracefully to in-memory
+      if (process.env.NODE_ENV === "production") {
+        console.error("[RateLimit] ERROR: Upstash Redis request failed, falling back to in-memory rate limiting:", err);
+      }
+    }
+  } else {
+    if (process.env.NODE_ENV === "production") {
+      console.warn("[RateLimit] WARNING: Upstash Redis is not configured. Falling back to in-memory rate limiting in production!");
     }
   }
 
@@ -209,7 +240,7 @@ function _blockedSlabFromPath(pathname: string): string | null {
 // next.config.ts redirects are processed by the Next.js router, but when an RSC
 // hits BAILOUT_TO_CLIENT_SIDE_RENDERING the redirect is swallowed by the JS
 // navigation layer and the HTTP response comes back as 200 (not 308).
-// Middleware runs at the Edge before the Next.js router, so it is guaranteed to
+// The proxy runs before the Next.js router, so it is guaranteed to
 // emit the correct 308 status code for all clients (curl, crawlers, JS-disabled).
 // This is belt-and-suspenders alongside the next.config.ts entry (kept for dev).
 const _marketsSlabRe = /^\/markets\/([^/]+)\/?$/;
@@ -454,21 +485,15 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
-  // Generate a per-request nonce for CSP using Web Crypto API (Edge Runtime compatible)
-  const nonceBytes = new Uint8Array(16);
-  crypto.getRandomValues(nonceBytes);
-  const nonce = btoa(String.fromCharCode(...nonceBytes));
-
-  // Forward nonce to layout.tsx via request headers
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set("x-nonce", nonce);
-
-  const response = NextResponse.next({ request: { headers: requestHeaders } });
-  addSecurityHeaders(response, nonce);
-  // PERC-695: Prevent CDN/edge caching of nonce-protected HTML responses.
-  // A cached response would carry the old nonce in data-nonce while the middleware
-  // generates a fresh nonce for the CSP header — making the nonce effectively static.
-  response.headers.set("Cache-Control", "no-store, must-revalidate");
+  // Static-rendering perf: the CSP no longer uses a per-request nonce, so the
+  // layout can be statically prerendered + CDN-cached instead of force-dynamic
+  // server-rendered (which cost ~1s TTFB on a cold serverless start). script-src
+  // falls back to the 'unsafe-inline' already declared in addSecurityHeaders.
+  // React escapes rendered output by default so baseline XSS protection remains;
+  // this drops the nonce defense-in-depth layer, a deliberate trade for the
+  // devnet playground's load speed. No per-request nonce → HTML is cacheable.
+  const response = NextResponse.next();
+  addSecurityHeaders(response);
   return response;
 }
 

@@ -634,6 +634,7 @@ function DepositWidget({
   useEffect(() => {
     if (!connected || !publicKey || !pool?.slabAddress) {
       setWithdrawPosition(null);
+      setWithdrawPositionLoading(false);
       return;
     }
     let cancelled = false;
@@ -685,6 +686,11 @@ function DepositWidget({
       const sig = await deposit(rawAmount);
       setAmount("");
       setTxStatus({ type: "success", msg: `Deposit confirmed: ${sig.slice(0, 8)}…` });
+
+      // Refresh the selected pool's withdraw position immediately after a deposit
+      // so the Withdraw tab can enable manual amount entry and MAX without waiting
+      // for a full pool/position reload.
+      setWithdrawRefreshKey((k) => k + 1);
       onTxSuccess?.();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

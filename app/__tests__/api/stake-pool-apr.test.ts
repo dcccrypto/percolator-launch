@@ -53,10 +53,10 @@ function computeAprs(
     const elapsed = cur.ts - old.ts;
     if (elapsed < MS_PER_DAY) { result[slab] = 0; continue; }
 
-    const growth = (cur.rate - old.rate) / old.rate;
-    const annualized = growth * (365 * MS_PER_DAY) / elapsed;
-    // Clamp to 0: negative APR (insurance drawdown) would confuse stakers.
-    result[slab] = isFinite(annualized) ? Math.max(0, Math.round(annualized * 10_000) / 100) : 0;
+    const periods = (365 * MS_PER_DAY) / elapsed;
+    const compounded = Math.pow(cur.rate / old.rate, periods) - 1;
+    // Clamp to 0: negative APY (insurance drawdown) would confuse stakers.
+    result[slab] = isFinite(compounded) ? Math.max(0, Math.round(compounded * 10_000) / 100) : 0;
   }
   return result;
 }
@@ -101,9 +101,9 @@ describe("computeAprs", () => {
       earliest30d: [{ slab: SLAB_A, redemption_rate_e6: 1_000_000, created_at: sevenDaysAgo }],
       latest: [{ slab: SLAB_A, redemption_rate_e6: 1_010_000, created_at: new Date().toISOString() }],
     });
-    // 1% over 7d → (0.01 * 365/7) * 100 ≈ 52.14%
-    expect(result[SLAB_A]).toBeGreaterThan(50);
-    expect(result[SLAB_A]).toBeLessThan(55);
+    // 1% over 7d compounded → (1.01^(365/7) - 1) * 100 ≈ 67.97%
+    expect(result[SLAB_A]).toBeGreaterThan(65);
+    expect(result[SLAB_A]).toBeLessThan(70);
   });
 
   it("returns 0 when redemption rate has not grown (no fees earned)", () => {
@@ -124,9 +124,9 @@ describe("computeAprs", () => {
       earliest30d: [{ slab: SLAB_A, redemption_rate_e6: 1_000_000, created_at: thirtyDaysAgo }],
       latest: [{ slab: SLAB_A, redemption_rate_e6: 1_030_000, created_at: new Date().toISOString() }],
     });
-    // 3% over 30 days → ≈ 36.5% annualised
-    expect(result[SLAB_A]).toBeGreaterThan(34);
-    expect(result[SLAB_A]).toBeLessThan(39);
+    // 3% over 30 days compounded → (1.03^(365/30) - 1) * 100 ≈ 43.3%
+    expect(result[SLAB_A]).toBeGreaterThan(41);
+    expect(result[SLAB_A]).toBeLessThan(45);
   });
 
   it("handles multiple slabs independently", () => {

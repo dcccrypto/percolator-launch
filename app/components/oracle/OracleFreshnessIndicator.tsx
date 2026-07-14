@@ -17,6 +17,9 @@ import { OracleDetailsPanel } from "./OracleDetailsPanel";
  *   > 30s → red    (stale) + warning banner
  */
 export const OracleFreshnessIndicator: FC = () => {
+  // trackSeconds: this component renders the live "Updated Xs ago" text and
+  // the freshness bar, so it genuinely needs the 1 Hz elapsedSecs tick — see
+  // useOracleFreshness's UseOracleFreshnessOptions doc comment.
   const {
     mode,
     modeLabel,
@@ -24,7 +27,7 @@ export const OracleFreshnessIndicator: FC = () => {
     level,
     color,
     ready,
-  } = useOracleFreshness();
+  } = useOracleFreshness({ trackSeconds: true });
 
   const {
     publisherCount,

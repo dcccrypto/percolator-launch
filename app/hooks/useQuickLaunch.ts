@@ -42,7 +42,7 @@ export interface QuickLaunchResult {
  */
 export function useQuickLaunch(mint: string | null): QuickLaunchResult {
   const { connection } = useConnectionCompat();
-  const { pools, loading: poolsLoading } = useDexPoolSearch(mint);
+  const { pools, loading: poolsLoading, error: poolsError } = useDexPoolSearch(mint);
   const [config, setConfig] = useState<QuickLaunchConfig | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +72,11 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
         if (cancelled) return;
         if (resp.ok) {
           const data = await resp.json();
+          // Mint A's response can resolve after a newer mint B request has
+          // already started (or landed) — without this second guard, A's
+          // stale parsed body would stomp B's fresh oracle-type state and the
+          // market gets created with the WRONG oracle config.
+          if (cancelled) return;
           if (data.feedId) {
             setOracleType("pyth");
             setPythFeedId(data.feedId);
@@ -146,6 +151,16 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
       return;
     }
 
+    // The DEX pool lookup failed (network error / non-2xx) rather than
+    // genuinely finding zero pools. Don't silently fall through to the
+    // "low liquidity" tier defaults for what might be a highly liquid token —
+    // surface the error and withhold the suggested config instead.
+    if (poolsError) {
+      setError(`Could not determine liquidity for this token (pool lookup failed: ${poolsError}). Try again, or set market parameters manually.`);
+      setConfig(null);
+      return;
+    }
+
     const bestPool = pools.length > 0 ? pools[0] : null;
     const liquidity = bestPool?.liquidityUsd ?? 0;
     const price = bestPool?.priceUsd ?? 0;
@@ -189,7 +204,7 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
       lpCollateral: "1000",
       liquidityTier: tier,
     });
-  }, [tokenMeta, pools, mint]);
+  }, [tokenMeta, pools, mint, poolsError]);
 
   const bestPool = pools.length > 0 ? pools[0] : null;
 

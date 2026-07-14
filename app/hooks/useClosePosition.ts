@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
-import { PublicKey } from "@solana/web3.js";
+import { Connection, PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { AccountKind, isV17Account, parsePortfolioV17 } from "@percolatorct/sdk";
-import { useTrade } from "@/hooks/useTrade";
+import { useTrade, prewarmTradeSubmission } from "@/hooks/useTrade";
 import { useUserAccount } from "@/hooks/useUserAccount";
+import { getPortfolioRawSnapshot, isLpPortfolio, makePortfolioScanKey } from "@/lib/userAccountScan";
 import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { humanizeError, withTransientRetry } from "@/lib/errorMessages";
@@ -24,6 +25,10 @@ export interface UseClosePositionReturn {
   phase: "idle" | "submitting" | "confirming";
   lastSig: string | null;
   resetPhase: () => void;
+  /** Fire when the close MODAL opens (fire-and-forget): starts the fresh
+   *  portfolio read + trade-account/blockhash/fee prewarms so the confirm
+   *  click reaches the wallet popup with zero blocking RPC round-trips. */
+  prewarmClose: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -36,6 +41,93 @@ export interface UseClosePositionReturn {
 const V17_PORTFOLIO_MAGIC_CP = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
 const V17_PF_MARKET_OFF_CP = 16;
 const V17_PF_OWNER_OFF_CP = 116;
+
+// ---------------------------------------------------------------------------
+// Prewarmable fresh-portfolio read.
+//
+// The authoritative pre-close position read is safety-critical (an outdated
+// size can over-close and open opposite exposure), so it is NEVER replaced by
+// cached UI state. But "authoritative" doesn't have to mean "started only
+// after the user clicks": a direct chain read taken when the close MODAL
+// opened, at most FRESH_READ_TTL_MS old, is dramatically fresher than the 30s
+// UI poll this guard exists to distrust — and consuming it makes the click →
+// wallet-popup gap near-zero. If the user lingers past the TTL, the click
+// falls back to a live read exactly as before. Any close failure invalidates
+// the entry.
+// ---------------------------------------------------------------------------
+/** Maximum age of a prewarmed read the close click may consume. Position size
+ *  only moves via the owner's own txs, liquidation, or ADL — a ≤4s window is
+ *  well inside the risk this guard was built for (stale 30s UI polls). */
+const FRESH_READ_TTL_MS = 4_000;
+const freshReadCache = new Map<string, { data: Buffer | null; ts: number }>();
+const freshReadInflight = new Map<string, Promise<Buffer | null>>();
+
+function freshReadKey(programId: PublicKey, slab: string, owner: PublicKey): string {
+  return `${programId.toBase58()}|${slab}|${owner.toBase58()}`;
+}
+
+/** One direct chain read of the caller's v17 portfolio for this market:
+ *  targeted getAccountInfo when the shared scan store knows the pubkey
+ *  (address never changes; the DATA read is live either way), full
+ *  owner-filtered scan otherwise. `null` = read succeeded, no portfolio. */
+async function readFreshPortfolioData(
+  connection: Connection,
+  programId: PublicKey,
+  slabAddress: string,
+  owner: PublicKey,
+): Promise<Buffer | null> {
+  const slabPk = new PublicKey(slabAddress);
+  const cachedPk = getPortfolioRawSnapshot(
+    makePortfolioScanKey(programId, slabAddress, owner),
+  )?.pubkey;
+  if (cachedPk) {
+    const info = await connection.getAccountInfo(cachedPk, "confirmed");
+    if (info) return Buffer.from(info.data);
+    // account gone or unreadable → fall through to the scan
+  }
+  const results = await connection.getProgramAccounts(programId, {
+    filters: [
+      { memcmp: { offset: 0, bytes: V17_PORTFOLIO_MAGIC_CP.toString("base64"), encoding: "base64" } },
+      { memcmp: { offset: V17_PF_MARKET_OFF_CP, bytes: slabPk.toBase58() } },
+      { memcmp: { offset: V17_PF_OWNER_OFF_CP, bytes: owner.toBase58() } },
+    ],
+  });
+  // Drop the market's LP portfolio (owner == this wallet only when this
+  // wallet is the market's CREATOR) BEFORE picking a result — closing a
+  // position must never target the LP. See isLpPortfolio's doc comment.
+  const nonLpResults = results.filter(({ account }) => !isLpPortfolio(account.data));
+  if (nonLpResults.length === 0) return null;
+  const data = nonLpResults[0].account.data;
+  return data instanceof Buffer ? data : Buffer.from(data);
+}
+
+/** Cache-or-read with in-flight dedup. `maxAgeMs` bounds how old an accepted
+ *  cached read may be (0 forces a live read). */
+function getFreshPortfolioData(
+  connection: Connection,
+  programId: PublicKey,
+  slabAddress: string,
+  owner: PublicKey,
+  maxAgeMs: number,
+): Promise<Buffer | null> {
+  const key = freshReadKey(programId, slabAddress, owner);
+  const cached = freshReadCache.get(key);
+  if (cached && Date.now() - cached.ts < maxAgeMs) {
+    return Promise.resolve(cached.data);
+  }
+  const inflight = freshReadInflight.get(key);
+  if (inflight) return inflight;
+  const p = readFreshPortfolioData(connection, programId, slabAddress, owner)
+    .then((data) => {
+      freshReadCache.set(key, { data, ts: Date.now() });
+      return data;
+    })
+    .finally(() => {
+      freshReadInflight.delete(key);
+    });
+  freshReadInflight.set(key, p);
+  return p;
+}
 
 export function useClosePosition(slabAddress: string): UseClosePositionReturn {
   const { connection } = useConnectionCompat();
@@ -84,52 +176,103 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
           return { signature: null };
         }
 
-        // Fetch fresh on-chain position size to avoid stale state.
-        let freshPositionSize = userAccount.account.positionSize;
+        // Fetch the authoritative on-chain position size before closing.
+    // Never fall back to cached UI state: an outdated size can over-close
+    // the actual position and unintentionally open exposure in the
+    // opposite direction.
+    let freshPositionSize: bigint | null = null;
 
-        if (isV17Market) {
-          // v17: re-fetch via getProgramAccounts + parsePortfolioV17.
-          // parseAccount(bitmap, idx) is a v12-only function and throws on v17 data.
-          try {
-            if (programId && publicKey) {
-              const slabPk = new PublicKey(slabAddress);
-              const results = await connection.getProgramAccounts(programId, {
-                filters: [
-                  { memcmp: { offset: 0, bytes: V17_PORTFOLIO_MAGIC_CP.toString("base64"), encoding: "base64" } },
-                  { memcmp: { offset: V17_PF_MARKET_OFF_CP, bytes: slabPk.toBase58() } },
-                  { memcmp: { offset: V17_PF_OWNER_OFF_CP, bytes: publicKey.toBase58() } },
-                ],
-              });
-              if (results.length > 0) {
-                const data = results[0].account.data;
-                const portfolio = parsePortfolioV17(
-                  data instanceof Buffer ? data : Buffer.from(data),
-                );
-                // Defense-in-depth: re-verify the mutable owner actually matches
-                // after fetch — memcmp filters are advisory server-side; don't
-                // trust them blindly. Otherwise fall through and use cached state.
-                if (portfolio.owner.equals(publicKey)) {
-                  const activeLeg = portfolio.legs.find((l) => l.active);
-                  freshPositionSize = activeLeg ? activeLeg.basisPosQ : 0n;
-                }
-              }
-            }
-          } catch {
-            console.warn("[useClosePosition] v17 fresh portfolio fetch failed — using cached state");
-          }
-        } else {
-          // v12: re-fetch via fetchSlab + parseAccount (bitmap-based).
-          try {
-            const { fetchSlab, parseAccount } = await import("@percolatorct/sdk");
-            const freshData = await fetchSlab(connection, new PublicKey(slabAddress));
-            const freshAccount = parseAccount(freshData, userAccount.idx);
-            freshPositionSize = freshAccount.positionSize;
-          } catch {
-            console.warn("[useClosePosition] Could not fetch fresh position — using cached state");
-          }
+    if (isV17Market) {
+      // v17: re-fetch via a FRESH on-chain read + parsePortfolioV17.
+      // parseAccount(bitmap, idx) is a v12-only function and throws on v17 data.
+      try {
+        if (!programId || !publicKey) {
+          throw new Error(
+            "Wallet or market program is unavailable for position verification.",
+          );
         }
 
-        if (freshPositionSize === 0n) {
+        // Prewarm the rest of the submission path (blockhash, priority fee,
+        // trade-account resolution) so it overlaps this freshness read
+        // instead of running serially after it. Usually a no-op: prewarmClose
+        // already fired all of this when the close modal opened.
+        prewarmTradeSubmission(connection, programId, slabAddress, publicKey);
+
+        // Consume the modal-open prewarmed read when it's ≤FRESH_READ_TTL_MS
+        // old (see the cache's doc comment for why that preserves the safety
+        // property); otherwise this performs a live read right now, exactly
+        // as before the prewarm existed.
+        const freshData = await getFreshPortfolioData(
+          connection, programId, slabAddress, publicKey, FRESH_READ_TTL_MS,
+        );
+
+        if (!freshData) {
+          // The query completed successfully and found no current
+          // portfolio for this wallet and market.
+          freshPositionSize = 0n;
+        } else {
+          const portfolio = parsePortfolioV17(freshData);
+
+          // Re-check the mutable owner after the read — covers both the
+          // RPC-side memcmp filter AND the cached-pubkey shortcut (a wrapped
+          // position's owner moves to the escrow PDA; a mismatch here falls
+          // back to "could not verify" rather than closing someone else's
+          // account).
+          if (!portfolio.owner.equals(publicKey)) {
+            throw new Error(
+              "Fresh portfolio owner does not match the connected wallet.",
+            );
+          }
+
+          const activeLeg = portfolio.legs.find((leg) => leg.active);
+          freshPositionSize = activeLeg ? activeLeg.basisPosQ : 0n;
+        }
+      } catch (cause) {
+        console.warn(
+          "[useClosePosition] v17 fresh portfolio verification failed",
+          cause,
+        );
+
+        throw new Error(
+          "Could not verify current on-chain position. Please try again.",
+        );
+      }
+    } else {
+      // v12: re-fetch via fetchSlab + parseAccount (bitmap-based).
+      try {
+        const { fetchSlab, parseAccount } =
+          await import("@percolatorct/sdk");
+
+        const freshData = await fetchSlab(
+          connection,
+          new PublicKey(slabAddress),
+        );
+
+        const freshAccount = parseAccount(
+          freshData,
+          userAccount.idx,
+        );
+
+        freshPositionSize = freshAccount.positionSize;
+      } catch (cause) {
+        console.warn(
+          "[useClosePosition] v12 fresh position verification failed",
+          cause,
+        );
+
+        throw new Error(
+          "Could not verify current on-chain position. Please try again.",
+        );
+      }
+    }
+
+    if (freshPositionSize === null) {
+      throw new Error(
+        "Could not verify current on-chain position. Please try again.",
+      );
+    }
+
+    if (freshPositionSize === 0n) {
           setPhase("idle");
           inflightRef.current = false;
           setLoading(false);
@@ -196,6 +339,19 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         setPhase("idle");
         throw e;
       } finally {
+        // CRITICAL: a prewarmed read is SPENT once a close consumes it — on
+        // EVERY outcome, not just failure. Invalidating only in `catch` (as
+        // this originally did) left the PRE-CLOSE size cached for the rest of
+        // the 4s TTL after a SUCCESSFUL close, and the position had just
+        // changed. A second close inside that window then read the stale size:
+        // close 50% of 10 SOL (true size now 5), click Close 100% at T+2s, the
+        // cached size 10 is consumed, and the "close" sends -10 — closing 5 and
+        // OPENING A 5 SOL SHORT while the UI reports success. That is precisely
+        // the over-close-into-opposite-exposure this fresh-read guard exists to
+        // prevent; the cache had defeated the guard it was bolted onto.
+        if (programId && publicKey) {
+          freshReadCache.delete(freshReadKey(programId, slabAddress, publicKey));
+        }
         inflightRef.current = false;
         setLoading(false);
       }
@@ -203,5 +359,13 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
     [connection, publicKey, userAccount, trade, lpIdx, slabAddress, mockMode, isV17Market, programId],
   );
 
-  return { closePosition, loading, error, phase, lastSig, resetPhase };
+  const prewarmClose = useCallback(() => {
+    if (mockMode || !isV17Market || !programId || !publicKey) return;
+    prewarmTradeSubmission(connection, programId, slabAddress, publicKey);
+    // maxAge 1.5s: dedupes a double-fire (open + re-render) without letting a
+    // seconds-old read masquerade as a prewarm of THIS modal-open.
+    void getFreshPortfolioData(connection, programId, slabAddress, publicKey, 1_500).catch(() => {});
+  }, [connection, programId, publicKey, slabAddress, mockMode, isV17Market]);
+
+  return { closePosition, loading, error, phase, lastSig, resetPhase, prewarmClose };
 }

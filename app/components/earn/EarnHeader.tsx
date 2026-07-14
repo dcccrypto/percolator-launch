@@ -45,7 +45,7 @@ export function EarnHeader({ stats, loading }: EarnHeaderProps) {
         </div>
 
         {/* Stats row */}
-        <div className="mt-6 grid grid-cols-2 gap-px border border-[var(--border)] bg-[var(--border)] sm:grid-cols-4" aria-label="Earn statistics">
+        <div className="mt-6 grid grid-cols-1 gap-px border border-[var(--border)] bg-[var(--border)] sm:grid-cols-3" aria-label="Earn statistics">
           <StatCell
             label="Total Value Locked"
             loading={loading}
@@ -56,20 +56,6 @@ export function EarnHeader({ stats, loading }: EarnHeaderProps) {
               decimals={0}
               className="text-2xl font-bold text-[var(--text)]"
             />
-          </StatCell>
-          <StatCell
-            label="Average APY"
-            loading={loading}
-            tooltip="Estimated from the last 30 days of insurance fund fee revenue. Past performance does not guarantee future returns."
-          >
-            <span className="text-2xl font-bold text-[var(--cyan)]">
-              <AnimatedNumber
-                value={stats.avgApyPct}
-                suffix="%"
-                decimals={1}
-                className="text-2xl font-bold text-[var(--cyan)]"
-              />
-            </span>
           </StatCell>
           <StatCell
             label="Daily Fee Revenue"

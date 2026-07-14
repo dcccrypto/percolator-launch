@@ -4,16 +4,33 @@ import {
   queryLeaderboard,
 } from "@/lib/indexer-db";
 
-/**
- * ISR: recompute at most once every 30 seconds.
- */
-export const revalidate = 30;
+// Bug: `export const revalidate = 30` was INERT here — this handler reads
+// request.url search params (period/limit), which makes the route dynamic;
+// Next.js route handlers are uncached by default and don't honor
+// `revalidate` once a request is dynamic. No Cache-Control was set either,
+// so every visitor re-ran the full query (the Supabase fallback pulls up to
+// 100k rows). Fix: set real CDN cache headers instead, mirroring the sibling
+// pattern in app/api/stats/route.ts (STATS_CACHE_HEADERS).
+const LEADERBOARD_CACHE_HEADERS = {
+  "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60",
+} as const;
 
 export interface LeaderboardEntry {
   rank: number;
   trader: string;
   tradeCount: number;
-  totalVolume: string; // Raw bigint as string (sum of abs(size) * price — dollar notional, same scale as trader-stats)
+  /**
+   * C: real USD dollars as a plain number — NOT a scaled bigint/string. This
+   * is the ONE convention both the indexer and Supabase paths below now
+   * agree on: the API always returns dollars; the client (leaderboard/page.tsx)
+   * formats for display and must NEVER rescale by a divisor derived from
+   * base-asset or collateral decimals (that was the root cause of a
+   * $250,000 trader rendering as "0.25" — three incompatible conventions
+   * were colliding: this route's indexer path returned real dollars, its
+   * Supabase path returned dollars×1e6 "atoms", and the client divided
+   * AGAIN by a divisor derived from the wrong token's decimals).
+   */
+  totalVolume: number;
   lastTradeAt: string;
 }
 
@@ -37,10 +54,14 @@ export async function GET(request: Request) {
         rank: i + 1,
         trader: row.trader,
         tradeCount: row.tradeCount,
-        totalVolume: row.totalVolume.toString(),
+        // Already real USD dollars (see LeaderboardRow.totalVolume's doc comment).
+        totalVolume: row.totalVolume,
         lastTradeAt: row.lastTradeAt,
       }));
-      return NextResponse.json({ leaderboard, period, generatedAt: new Date().toISOString() });
+      return NextResponse.json(
+        { leaderboard, period, generatedAt: new Date().toISOString() },
+        { headers: LEADERBOARD_CACHE_HEADERS },
+      );
     } catch (err) {
       console.warn("[leaderboard] indexer-db error, falling back:", err instanceof Error ? err.message : String(err));
       // fall through to Supabase path
@@ -80,25 +101,34 @@ export async function GET(request: Request) {
 
     if (error) throw error;
 
-    const traderMap = new Map<string, { tradeCount: number; totalVolume: bigint; lastTradeAt: string }>();
+    // C: accumulate in a precision-safe bigint scale internally (micro-USD,
+    // i.e. dollars×1e6 — same scale computeMarkPnlCollateral-style code uses
+    // elsewhere) so the ranking sort never hits float precision issues, then
+    // convert to real USD dollars ONCE at the very end (see the `.map` below)
+    // — never re-scaled again downstream. This is what LeaderboardEntry.totalVolume
+    // documents as the one convention both this route's paths must agree on.
+    const traderMap = new Map<string, { tradeCount: number; totalVolumeMicroUsd: bigint; lastTradeAt: string }>();
     for (const row of data ?? []) {
       const rowCreatedAt = row.created_at ?? new Date().toISOString();
-      const entry = traderMap.get(row.trader) ?? { tradeCount: 0, totalVolume: 0n, lastTradeAt: rowCreatedAt };
+      const entry = traderMap.get(row.trader) ?? { tradeCount: 0, totalVolumeMicroUsd: 0n, lastTradeAt: rowCreatedAt };
       entry.tradeCount += 1;
       // Dollar notional = abs(size) * price, computed BEFORE summing/ranking —
       // otherwise Σabs(size) alone ranks by raw contract quantity across
       // heterogeneous markets (a $50 PENGU trade would outrank a $10k SOL
       // trade). Matches the trader-stats convention (absSize * priceE6 / 1e6)
-      // in /api/trader/[wallet]/stats/route.ts.
+      // in /api/trader/[wallet]/stats/route.ts. `size` is a raw base-asset "Q"
+      // quantity (fixed-point, scale 1e6); `row.price` is a real USD float
+      // (not price_e6) — both branches below produce the SAME micro-USD scale
+      // (dollars × 1e6).
       try {
         const rawSize = BigInt(String(row.size).split(".")[0]);
         const absSize = rawSize < 0n ? -rawSize : rawSize;
         const priceE6 = BigInt(Math.round((Number(row.price) || 0) * 1_000_000));
-        entry.totalVolume += (absSize * priceE6) / 1_000_000n;
+        entry.totalVolumeMicroUsd += (absSize * priceE6) / 1_000_000n;
       } catch {
         const size = Math.abs(parseFloat(String(row.size)) || 0);
         const price = Math.abs(parseFloat(String(row.price)) || 0);
-        entry.totalVolume += BigInt(Math.round(size * price));
+        entry.totalVolumeMicroUsd += BigInt(Math.round(size * price));
       }
       if (rowCreatedAt > entry.lastTradeAt) entry.lastTradeAt = rowCreatedAt;
       traderMap.set(row.trader, entry);
@@ -106,8 +136,8 @@ export async function GET(request: Request) {
 
     const sorted = [...traderMap.entries()]
       .sort(([, a], [, b]) => {
-        if (b.totalVolume > a.totalVolume) return 1;
-        if (b.totalVolume < a.totalVolume) return -1;
+        if (b.totalVolumeMicroUsd > a.totalVolumeMicroUsd) return 1;
+        if (b.totalVolumeMicroUsd < a.totalVolumeMicroUsd) return -1;
         return b.tradeCount - a.tradeCount;
       })
       .slice(0, limit);
@@ -116,14 +146,22 @@ export async function GET(request: Request) {
       rank: i + 1,
       trader,
       tradeCount: stats.tradeCount,
-      totalVolume: stats.totalVolume.toString(),
+      // Convert the internal micro-USD accumulator to real USD dollars —
+      // the ONE convention LeaderboardEntry.totalVolume documents.
+      totalVolume: Number(stats.totalVolumeMicroUsd) / 1_000_000,
       lastTradeAt: stats.lastTradeAt,
     }));
 
-    return NextResponse.json({ leaderboard, period, generatedAt: new Date().toISOString() });
+    return NextResponse.json(
+      { leaderboard, period, generatedAt: new Date().toISOString() },
+      { headers: LEADERBOARD_CACHE_HEADERS },
+    );
   } catch (err) {
     // Supabase unavailable (playground) — return empty leaderboard, never 500
     console.warn("[leaderboard] supabase unavailable:", err instanceof Error ? err.message : String(err));
-    return NextResponse.json({ leaderboard: [], period, generatedAt: new Date().toISOString() });
+    return NextResponse.json(
+      { leaderboard: [], period, generatedAt: new Date().toISOString() },
+      { headers: LEADERBOARD_CACHE_HEADERS },
+    );
   }
 }

@@ -11,6 +11,16 @@ import { getAllProgramIds, getNetwork } from "@/lib/config";
 import { isBlockedSlab } from "@/lib/blocklist";
 import { discoverMarketsViaProgramDirectory } from "@/lib/market-directory-discovery";
 
+/**
+ * Stable identity fallback so downstream memos don't churn while loading.
+ * Frozen so a future in-place mutation (push/splice/sort/etc.) on this shared
+ * singleton can't silently corrupt the fallback for every hook instance. Cast
+ * back to the mutable element type — Object.freeze's return type would
+ * otherwise widen to `readonly DiscoveredMarket[]`, which isn't assignable
+ * everywhere `DiscoveredMarket[]` is expected; the runtime freeze still holds.
+ */
+const EMPTY_MARKETS: DiscoveredMarket[] = Object.freeze([] as DiscoveredMarket[]) as DiscoveredMarket[];
+
 const MAINNET_STATIC_MARKETS = [
   {
     slabAddress: "AiVcTXxKfKmcpUBG3unxCdEHHtXvAq8zYpbtS6oPrV6J",
@@ -108,7 +118,7 @@ export function useMarketDiscovery() {
   );
 
   return {
-    markets: data ?? [],
+    markets: data ?? EMPTY_MARKETS,
     loading: isLoading,
     error: programIds.length === 0
       ? "PROGRAM_ID not configured"

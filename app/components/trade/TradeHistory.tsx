@@ -1,6 +1,6 @@
 "use client";
 
-import { FC, useEffect, useState, useCallback } from "react";
+import { FC, useEffect, useRef, useState, useCallback } from "react";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 
 import { formatTokenAmount, formatUsdFromNumber } from "@/lib/format";
@@ -9,6 +9,7 @@ import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockTrades } from "@/lib/mock-trade-data";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
+import { pollWhenVisible } from "@/lib/pollWhenVisible";
 
 interface Trade {
   id: string;
@@ -38,9 +39,31 @@ export const TradeHistory: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Mirrors `trades` for the equality bail below (avoid a stale closure).
+  const tradesRef = useRef<Trade[]>([]);
+  // Always holds the CURRENTLY RENDERED slab — read at response time (not
+  // captured in fetchTrades' closure) so a response for a market the user
+  // has since switched away from can detect that it's stale.
+  const activeSlabRef = useRef(slabAddress);
+  activeSlabRef.current = slabAddress;
+  // Monotonic per-call id — guards against a slower earlier request (e.g.
+  // manual "refresh" click racing the 15s poll) resolving after a newer one
+  // and clobbering it with older data.
+  const requestIdRef = useRef(0);
+
   const fetchTrades = useCallback(async () => {
+    const slabForThisRequest = slabAddress;
+    const requestId = ++requestIdRef.current;
+    // Bails if a slab switch happened, or a newer fetchTrades call has since
+    // been issued for the same slab (rapid poll/manual-refresh overlap).
+    const isStale = () =>
+      activeSlabRef.current !== slabForThisRequest || requestIdRef.current !== requestId;
+
     if (isMockMode() && isMockSlab(slabAddress)) {
-      setTrades(getMockTrades(slabAddress) as Trade[]);
+      const mockTrades = getMockTrades(slabAddress) as Trade[];
+      if (isStale()) return;
+      tradesRef.current = mockTrades;
+      setTrades(mockTrades);
       setLoading(false);
       return;
     }
@@ -48,19 +71,38 @@ export const TradeHistory: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       const res = await fetch(`/api/markets/${slabAddress}/trades?limit=25`);
       if (!res.ok) throw new Error(`${res.status}`);
       const data = await res.json();
-      setTrades(data.trades ?? []);
+      if (isStale()) return;
+      const nextTrades: Trade[] = data.trades ?? [];
+      // Equality bail: same first row + same length -> nothing changed.
+      // Skips minting a new 25-row array reference (and the re-render it
+      // causes) on the common case where a 15s poll returns identical data.
+      const prev = tradesRef.current;
+      const unchanged =
+        prev.length === nextTrades.length &&
+        prev[0]?.id === nextTrades[0]?.id &&
+        prev[0]?.tx_signature === nextTrades[0]?.tx_signature;
+      if (!unchanged) {
+        tradesRef.current = nextTrades;
+        setTrades(nextTrades);
+      }
       setError(null);
     } catch {
-      setError("Failed to load trades");
+      if (isStale()) return;
+      // Keep last-good rows on a transient failure; only surface the
+      // unavailable state when we have nothing to show. The trade-tape
+      // indexer is an optional external dependency on the playground —
+      // when it's down this endpoint 404s permanently, and a red
+      // "Failed to load trades" error read as the terminal being broken.
+      if (tradesRef.current.length === 0) setError("unavailable");
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
   }, [slabAddress]);
 
   useEffect(() => {
     fetchTrades();
-    const interval = setInterval(fetchTrades, 15000);
-    return () => clearInterval(interval);
+    // Pause the 15s poll while the tab is hidden.
+    return pollWhenVisible(fetchTrades, 15000);
   }, [fetchTrades]);
 
   const formatTime = (iso: string) => {
@@ -81,9 +123,15 @@ export const TradeHistory: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   }
 
   if (error) {
+    // Quiet empty-style state, not a red error: matches the Positions tab's
+    // "No open positions" treatment. "Unavailable" (not "no trades") because
+    // trades may exist that we simply can't read while the indexer is down.
     return (
-      <div className="p-3">
-        <p className="text-[10px] text-[var(--text-dim)]">{error}</p>
+      <div className="flex h-full flex-col items-center justify-center gap-1 p-6 text-center">
+        <p className="text-[11px] text-[var(--text-dim)]">Trade history unavailable</p>
+        <p className="text-[9px] text-[var(--text-dim)] opacity-70">
+          The trade-tape indexer isn&apos;t reachable right now — trading itself is unaffected.
+        </p>
       </div>
     );
   }

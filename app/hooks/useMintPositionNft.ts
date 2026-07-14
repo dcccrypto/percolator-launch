@@ -5,9 +5,11 @@ import { PublicKey, Keypair, TransactionInstruction, SYSVAR_RENT_PUBKEY, SystemP
 import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
+import { assertKnownProgram } from "@/lib/programAllowlist";
 import { sendTx } from "@/lib/tx";
 import { humanizeError } from "@/lib/errorMessages";
 import { useToast } from "@/hooks/useToast";
+import { isLpPortfolio } from "@/lib/userAccountScan";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
 import {
   deriveNftPda,
@@ -34,11 +36,18 @@ export function useMintPositionNft(slabAddress: string) {
       setError("Wallet not connected or market not loaded");
       return;
     }
-
     setLoading(true);
     setError(null);
 
     try {
+      // Defense-in-depth parity with useTrade/useDeposit/useWithdraw: these
+      // NFT hooks derive PDAs from `programId` (useSlabState) and use it as an
+      // account, but relied solely on SlabProvider nulling programId for an
+      // unknown-owner slab. Assert it's a known program before building a
+      // signable tx, so a phishing slab can never reach the tx-build path.
+      // Inside the try so the existing catch surfaces it like any other error.
+      assertKnownProgram(programId);
+
       const slabPk = new PublicKey(slabAddress);
       const nftProgId = PERCOLATOR_NFT_PROGRAM_ID;
       const isV17 = raw != null && raw.length > 0 && isV17Account(raw);
@@ -73,17 +82,21 @@ export function useMintPositionNft(slabAddress: string) {
             { memcmp: { offset: PORTFOLIO_OWNER_OFF, bytes: walletPubkey.toBase58() } },
           ],
         });
-        if (allPortfolios.length === 0) {
+        // Drop the market's LP portfolio BEFORE picking a result — a market
+        // CREATOR must never mint an NFT wrapping the LP itself. See
+        // isLpPortfolio's doc comment.
+        const nonLpPortfolios = allPortfolios.filter(({ account }) => !isLpPortfolio(account.data));
+        if (nonLpPortfolios.length === 0) {
           throw new Error("No portfolio found for your wallet on this market. Deposit collateral first.");
         }
         // Defense-in-depth: re-verify the mutable owner actually matches after
         // fetch — memcmp filters are advisory server-side; don't trust them
         // blindly (mirrors useDeposit/usePositionNft's re-verify).
-        const pf = parsePortfolioV17(new Uint8Array(allPortfolios[0].account.data));
+        const pf = parsePortfolioV17(new Uint8Array(nonLpPortfolios[0].account.data));
         if (!pf.owner.equals(walletPubkey)) {
           throw new Error("No portfolio found for your wallet on this market. Deposit collateral first.");
         }
-        portfolioPk = allPortfolios[0].pubkey;
+        portfolioPk = nonLpPortfolios[0].pubkey;
         const activeLeg = pf.legs.find((l) => l.active);
         if (!activeLeg) {
           throw new Error("No active position to mint an NFT for. Open a position first.");

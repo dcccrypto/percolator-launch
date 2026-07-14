@@ -15,6 +15,8 @@ interface PageSkeletonProps {
   form?: boolean;
   /** Show card grid (2-col or 3-col) */
   cards?: number;
+  /** Outer container max-width class (e.g. "max-w-5xl"). */
+  maxWidth?: string;
 }
 
 /**
@@ -29,12 +31,13 @@ export function PageSkeleton({
   rows = 6,
   form = false,
   cards = 0,
+  maxWidth = "max-w-4xl",
 }: PageSkeletonProps) {
   return (
     <div className="min-h-[calc(100dvh-48px)] relative">
       <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" />
 
-      <div className="relative mx-auto max-w-4xl px-4 py-10 space-y-8">
+      <div className={`relative mx-auto ${maxWidth} px-4 py-10 space-y-8`}>
         {/* Page header */}
         <div>
           <ShimmerSkeleton className={`h-3 ${labelWidth} mb-2`} />

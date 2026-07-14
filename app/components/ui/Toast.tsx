@@ -34,10 +34,13 @@ const SingleToast: FC<{ item: ToastItem; onDismiss: (id: string) => void }> = ({
       el.style.opacity = "1";
       el.style.transform = "none";
     } else {
+      // Fast slide/fade — a trading terminal needs toasts to feel snappy, not
+      // bouncy. Previously a 500ms elastic overshoot; that reads as sluggish
+      // against sub-second price ticks elsewhere in the UI.
       gsap.fromTo(
         el,
-        { opacity: 0, scale: 0.95, x: 40 },
-        { opacity: 1, scale: 1, x: 0, duration: 0.5, ease: "elastic.out(1, 0.5)" }
+        { opacity: 0, x: 40 },
+        { opacity: 1, x: 0, duration: 0.18, ease: "power2.out" }
       );
     }
 
@@ -46,8 +49,7 @@ const SingleToast: FC<{ item: ToastItem; onDismiss: (id: string) => void }> = ({
         gsap.to(el, {
           opacity: 0,
           x: 40,
-          scale: 0.95,
-          duration: 0.3,
+          duration: 0.15,
           ease: "power2.in",
           onComplete: () => onDismiss(item.id),
         });
@@ -67,8 +69,7 @@ const SingleToast: FC<{ item: ToastItem; onDismiss: (id: string) => void }> = ({
       gsap.to(el, {
         opacity: 0,
         x: 40,
-        scale: 0.95,
-        duration: 0.3,
+        duration: 0.15,
         ease: "power2.in",
         onComplete: () => onDismiss(item.id),
       });

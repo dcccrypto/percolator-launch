@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { PublicKey } from "@solana/web3.js";
-import { isKnownProgram, assertKnownProgram } from "@/lib/programAllowlist";
-import { getAllProgramIds } from "@/lib/config";
+import { isKnownProgram, assertKnownProgram, assertCanonicalMatcher } from "@/lib/programAllowlist";
+import { getAllProgramIds, getConfig } from "@/lib/config";
 
 // vitest.config.ts pins NEXT_PUBLIC_DEFAULT_NETWORK=devnet for tests, so
 // getAllProgramIds() returns the devnet set: default + small/medium/large.
@@ -77,5 +77,56 @@ describe("programAllowlist", () => {
     const ids = getAllProgramIds();
     expect(ids).toContain(cfg.matcherProgramId);
     expect(isKnownProgram(cfg.matcherProgramId)).toBe(true);
+  });
+
+  describe("assertCanonicalMatcher", () => {
+    const canonical = getConfig().matcherProgramId as string;
+
+    it("accepts exactly the canonical matcher (string and PublicKey)", () => {
+      expect(() => assertCanonicalMatcher(canonical)).not.toThrow();
+      expect(() => assertCanonicalMatcher(new PublicKey(canonical))).not.toThrow();
+    });
+
+    it("is STRICTLY TIGHTER than assertKnownProgram — rejects another KNOWN program", () => {
+      // The wrapper program id is allowlisted (assertKnownProgram passes) but
+      // is NOT the matcher — swapping the matcher for it must still be rejected.
+      const wrapper = getConfig().programId as string;
+      if (wrapper !== canonical) {
+        expect(() => assertKnownProgram(wrapper)).not.toThrow(); // known...
+        const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        try {
+          expect(() => assertCanonicalMatcher(wrapper)).toThrow(/matcher/i); // ...but not the matcher
+        } finally {
+          errSpy.mockRestore();
+        }
+      }
+    });
+
+    it("rejects an attacker program and null/undefined", () => {
+      const attacker = new PublicKey("11111111111111111111111111111112");
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        expect(() => assertCanonicalMatcher(attacker)).toThrow(/matcher/i);
+        expect(() => assertCanonicalMatcher(null)).toThrow();
+        expect(() => assertCanonicalMatcher(undefined)).toThrow();
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
+
+    it("does NOT echo the bad program ID in the thrown message", () => {
+      const attacker = new PublicKey("11111111111111111111111111111112");
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        try {
+          assertCanonicalMatcher(attacker);
+          throw new Error("expected throw");
+        } catch (e) {
+          expect((e as Error).message).not.toContain(attacker.toBase58());
+        }
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
   });
 });
