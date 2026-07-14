@@ -16,10 +16,10 @@
  * it's the only place that carries `poolAddress`/`dexType` alongside the devnet
  * `marketAddress`.
  */
-import { list, put } from "@vercel/blob";
+import { BlobPreconditionFailedError, get, list, put } from '@vercel/blob';
 
 /** Fixed, non-random-suffixed pathname — there is exactly one blob for this store. */
-export const REGISTERED_MARKETS_BLOB_PATHNAME = "playground/registered-markets.json";
+export const REGISTERED_MARKETS_BLOB_PATHNAME = 'playground/registered-markets.json';
 
 /**
  * H1 hardening: cap the registry so an unbounded stream of registrations (the
@@ -48,16 +48,16 @@ export interface RegisteredMarket {
 }
 
 function isRegisteredMarket(value: unknown): value is RegisteredMarket {
-  if (typeof value !== "object" || value === null) return false;
+  if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
   return (
-    typeof v.slabAddress === "string" &&
-    typeof v.marketAddress === "string" &&
-    typeof v.poolAddress === "string" &&
-    typeof v.dexType === "string" &&
-    typeof v.label === "string" &&
-    typeof v.collateral === "string" &&
-    typeof v.registeredAt === "number"
+    typeof v.slabAddress === 'string' &&
+    typeof v.marketAddress === 'string' &&
+    typeof v.poolAddress === 'string' &&
+    typeof v.dexType === 'string' &&
+    typeof v.label === 'string' &&
+    typeof v.collateral === 'string' &&
+    typeof v.registeredAt === 'number'
   );
 }
 
@@ -77,6 +77,96 @@ interface RegisteredMarketsReadResult {
   ok: boolean;
 }
 
+interface RegisteredMarketsMutationReadResult {
+  markets: RegisteredMarket[];
+  /**
+   * ETag belonging to the exact content returned in `markets`.
+   * Null means that the registry blob has not been created yet.
+   */
+  etag: string | null;
+  ok: boolean;
+}
+
+interface RegisteredMarketsWriteOptions {
+  /**
+   * Existing-blob optimistic concurrency token.
+   * Blob requires overwrite mode whenever `ifMatch` is supplied.
+   */
+  ifMatch?: string;
+
+  /**
+   * False on the initial-create path so another concurrent creator
+   * cannot be overwritten.
+   */
+  allowOverwrite?: boolean;
+}
+
+const REGISTERED_MARKETS_WRITE_MAX_ATTEMPTS = 5;
+
+/**
+ * Read registry content and its ETag from the same Blob response.
+ *
+ * Mutation reads bypass the CDN so retries always merge against the
+ * latest origin version.
+ */
+async function readRegisteredMarketsForMutation(): Promise<RegisteredMarketsMutationReadResult> {
+  try {
+    const result = await get(REGISTERED_MARKETS_BLOB_PATHNAME, {
+      access: 'public',
+      useCache: false,
+    });
+
+    if (result === null) {
+      return {
+        markets: [],
+        etag: null,
+        ok: true,
+      };
+    }
+
+    if (result.statusCode !== 200 || result.stream === null) {
+      console.error('[playground-registered-markets] unexpected Blob GET response');
+
+      return {
+        markets: [],
+        etag: null,
+        ok: false,
+      };
+    }
+
+    const data: unknown = await new Response(result.stream).json();
+
+    if (!Array.isArray(data)) {
+      console.error(
+        '[playground-registered-markets] blob content is not an array — mutation read failed',
+      );
+
+      return {
+        markets: [],
+        etag: null,
+        ok: false,
+      };
+    }
+
+    return {
+      markets: data.filter(isRegisteredMarket),
+      etag: result.blob.etag,
+      ok: true,
+    };
+  } catch (err) {
+    console.error(
+      '[playground-registered-markets] mutation read failed:',
+      err instanceof Error ? err.message : String(err),
+    );
+
+    return {
+      markets: [],
+      etag: null,
+      ok: false,
+    };
+  }
+}
+
 async function readRegisteredMarketsInternal(): Promise<RegisteredMarketsReadResult> {
   try {
     const { blobs } = await list({
@@ -91,24 +181,22 @@ async function readRegisteredMarketsInternal(): Promise<RegisteredMarketsReadRes
     // plain fetch (even `no-store`) can return a stale copy — which would silently
     // drop registrations in the read-modify-write upsert and hide markets from the
     // keeper. A unique query forces a fresh origin read every time.
-    const resp = await fetch(`${found.url}?ts=${Date.now()}`, { cache: "no-store" });
+    const resp = await fetch(`${found.url}?ts=${Date.now()}`, { cache: 'no-store' });
     if (!resp.ok) {
-      console.warn(
-        `[playground-registered-markets] blob fetch ${resp.status} — read failed`,
-      );
+      console.warn(`[playground-registered-markets] blob fetch ${resp.status} — read failed`);
       return { markets: [], ok: false };
     }
     const data: unknown = await resp.json();
     // A found-but-non-array blob is corrupted data, not "empty" — treat as a
     // failure so an upsert can't silently overwrite it with a partial list.
     if (!Array.isArray(data)) {
-      console.warn("[playground-registered-markets] blob content is not an array — read failed");
+      console.warn('[playground-registered-markets] blob content is not an array — read failed');
       return { markets: [], ok: false };
     }
     return { markets: data.filter(isRegisteredMarket), ok: true };
   } catch (err) {
     console.warn(
-      "[playground-registered-markets] read failed:",
+      '[playground-registered-markets] read failed:',
       err instanceof Error ? err.message : String(err),
     );
     return { markets: [], ok: false };
@@ -133,74 +221,128 @@ export async function readRegisteredMarkets(): Promise<RegisteredMarket[]> {
 }
 
 /**
- * Overwrite the registered-markets blob with `markets`.
- * Throws on failure — callers are expected to catch and return a clear 502.
+ * Persist a complete registry snapshot.
+ *
+ * Existing snapshots may be guarded by `ifMatch`. Initial creation may
+ * disable overwrite so a concurrent creator cannot be silently replaced.
  */
 export async function writeRegisteredMarkets(
   markets: RegisteredMarket[],
+  options: RegisteredMarketsWriteOptions = {},
 ): Promise<void> {
+  const ifMatch = options.ifMatch;
+
   await put(REGISTERED_MARKETS_BLOB_PATHNAME, JSON.stringify(markets), {
-    access: "public",
+    access: 'public',
     addRandomSuffix: false,
-    contentType: "application/json",
-    // Fixed pathname + upsert semantics: every registration overwrites the single
-    // registry blob. Without this, only the first-ever registration succeeds and
-    // every subsequent one 502s ("blob already exists").
-    allowOverwrite: true,
-    // This blob mutates on every registration — don't let the CDN serve a stale copy.
+    contentType: 'application/json',
+
+    allowOverwrite: ifMatch !== undefined ? true : (options.allowOverwrite ?? true),
+
+    ...(ifMatch !== undefined ? { ifMatch } : {}),
+
     cacheControlMaxAge: 0,
   });
 }
 
 /**
- * Upsert a single market by `slabAddress` (dedup — replace if present, else append)
- * and persist the result. Caps the registry at MAX_REGISTERED_MARKETS, evicting the
- * oldest entries (by `registeredAt`) first when a fresh registration would exceed it
- * — re-registering an existing slab refreshes its `registeredAt` (see the route),
- * which keeps actively-used markets from aging out ahead of stale ones. Returns the
- * updated array.
- *
- * J: this is a read-modify-write, so it MUST fail closed on a read failure. The
- * previous version called the lenient `readRegisteredMarkets()`, which returns `[]`
- * for BOTH "genuinely nothing registered yet" AND "the read just failed" (network
- * blip, CDN hiccup, malformed JSON) — indistinguishable to this function. On a
- * transient read failure it would proceed anyway, treat the blob as empty, and
- * `writeRegisteredMarkets` a SINGLE-entry array over the top, destroying up to
- * `MAX_REGISTERED_MARKETS` (100) existing market↔pool bindings. Using the stricter
- * `readRegisteredMarketsInternal` (which reports `ok: false` only for a genuine
- * failure, never for a legitimate empty/not-yet-created blob) lets this function
- * throw and abort instead — the caller (keeper-register route) already catches and
- * returns a 502, so this is a safe, visible failure instead of silent data loss.
+ * Apply deduplication, insertion and registry-cap eviction without
+ * mutating the snapshot that was read.
  */
-export async function upsertRegisteredMarket(
+function applyRegisteredMarketUpsert(
+  current: RegisteredMarket[],
   entry: RegisteredMarket,
-): Promise<RegisteredMarket[]> {
-  const { markets: existing, ok } = await readRegisteredMarketsInternal();
-  if (!ok) {
-    throw new Error(
-      "Failed to read the registered-markets blob before upsert — aborting without writing, " +
-      "to avoid overwriting existing registrations with a partial list. Retry the registration.",
-    );
-  }
-  const idx = existing.findIndex((m) => m.slabAddress === entry.slabAddress);
-  if (idx >= 0) {
-    existing[idx] = entry;
+): RegisteredMarket[] {
+  const next = [...current];
+
+  const index = next.findIndex((market) => market.slabAddress === entry.slabAddress);
+
+  if (index >= 0) {
+    next[index] = entry;
   } else {
-    existing.push(entry);
+    next.push(entry);
   }
 
-  let capped = existing;
-  if (capped.length > MAX_REGISTERED_MARKETS) {
-    const overflow = capped.length - MAX_REGISTERED_MARKETS;
-    const evictSlabs = new Set(
-      [...capped]
-        .sort((a, b) => a.registeredAt - b.registeredAt)
-        .slice(0, overflow)
-        .map((m) => m.slabAddress),
-    );
-    capped = capped.filter((m) => !evictSlabs.has(m.slabAddress));
+  if (next.length <= MAX_REGISTERED_MARKETS) {
+    return next;
   }
 
-  await writeRegisteredMarkets(capped);
-  return capped;
+  const overflow = next.length - MAX_REGISTERED_MARKETS;
+
+  const evictSlabs = new Set(
+    [...next]
+      .sort((left, right) => left.registeredAt - right.registeredAt)
+      .slice(0, overflow)
+      .map((market) => market.slabAddress),
+  );
+
+  return next.filter((market) => !evictSlabs.has(market.slabAddress));
+}
+
+/**
+ * Upsert a registered market using Blob optimistic concurrency.
+ *
+ * A stale ETag causes the operation to read the newest registry,
+ * recompute the merge and retry. A failed initial create is retried only
+ * when a follow-up read confirms another request created the blob.
+ */
+export async function upsertRegisteredMarket(entry: RegisteredMarket): Promise<RegisteredMarket[]> {
+  let lastConflict: unknown;
+
+  for (let attempt = 1; attempt <= REGISTERED_MARKETS_WRITE_MAX_ATTEMPTS; attempt += 1) {
+    const snapshot = await readRegisteredMarketsForMutation();
+
+    if (!snapshot.ok) {
+      throw new Error(
+        'Failed to read the registered-markets blob before upsert — ' +
+          'aborting without writing to avoid overwriting existing ' +
+          'registrations with a partial list. Retry the registration.',
+      );
+    }
+
+    const next = applyRegisteredMarketUpsert(snapshot.markets, entry);
+
+    try {
+      if (snapshot.etag === null) {
+        await writeRegisteredMarkets(next, {
+          allowOverwrite: false,
+        });
+      } else {
+        await writeRegisteredMarkets(next, {
+          ifMatch: snapshot.etag,
+        });
+      }
+
+      return next;
+    } catch (err) {
+      if (snapshot.etag !== null) {
+        if (err instanceof BlobPreconditionFailedError) {
+          lastConflict = err;
+          continue;
+        }
+
+        throw err;
+      }
+
+      /*
+       * Blob SDK 2.6.1 does not expose a dedicated already-exists
+       * exception. Confirm an initial-create race by reading again.
+       */
+      const afterCreateFailure = await readRegisteredMarketsForMutation();
+
+      if (afterCreateFailure.ok && afterCreateFailure.etag !== null) {
+        lastConflict = err;
+        continue;
+      }
+
+      throw err;
+    }
+  }
+
+  const conflictDetail =
+    lastConflict instanceof Error ? ` Last conflict: ${lastConflict.message}` : '';
+
+  throw new Error(
+    `Failed to update the registered-markets blob after ${REGISTERED_MARKETS_WRITE_MAX_ATTEMPTS} optimistic-concurrency attempts.${conflictDetail}`,
+  );
 }
