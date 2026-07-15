@@ -3,9 +3,8 @@
  *
  * Server-assisted transaction builder for mobile market creation (GH #80).
  *
- * Problem: Mobile cannot execute the 5-step on-chain deployment flow that the web
- * wizard does client-side. The slab and matcher-context keypairs must co-sign TX0
- * and TX2 respectively, which requires server-side key generation.
+ * The slab, LP portfolio, and matcher-context accounts are derived from
+ * the deployer so every transaction requires only the deployer signature.
  *
  * Flow:
  *  1. Client posts { deployer, mint, tier, name, oracle_mode, initial_price_e6 }
@@ -16,14 +15,14 @@
  *  5. Mobile signs each tx with MWA (adds deployer signature) and sends in order
  *  6. Mobile calls POST /api/markets to register the new market in the dashboard DB
  *
- * Security: server keypairs are ephemeral (never persisted). The deployer field is
- * validated as a valid Solana pubkey. The endpoint uses an allowlist guard — only
+ * Security: no account private keys are generated or persisted. The deployer field
+ * is validated as a valid Solana pubkey. The endpoint uses an allowlist guard — only
  * NEXT_PUBLIC_DEFAULT_NETWORK (or NEXT_PUBLIC_SOLANA_NETWORK) === "devnet" is
  * accepted; all other values (mainnet, staging, unset) return 403 (GH#1950).
  */
+import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import {
-  Keypair,
   PublicKey,
   SystemProgram,
   Transaction,
@@ -241,10 +240,27 @@ export async function POST(req: NextRequest) {
     const { blockhash, lastValidBlockHeight } =
       await connection.getLatestBlockhash("confirmed");
 
-    // ── Ephemeral keypairs (server-side only, never persisted) ────────────────
-    const slabKp = Keypair.generate();
-    const matcherCtxKp = Keypair.generate();
-    const slabPk = slabKp.publicKey;
+    // ── Refreshable deployer-derived accounts ────────────────
+  // Unique, non-secret seeds allow every account-creation transaction
+  // to be authorized and refreshed using the deployer signature only.
+  const accountNonce = randomBytes(12).toString("hex");
+  const slabSeed = `s-${accountNonce}`;
+  const lpPortfolioSeed = `p-${accountNonce}`;
+  const matcherCtxSeed = `m-${accountNonce}`;
+
+  const [slabPk, lpPortfolioPk, matcherCtxPk] = await Promise.all([
+    PublicKey.createWithSeed(deployerPk, slabSeed, programId),
+    PublicKey.createWithSeed(
+      deployerPk,
+      lpPortfolioSeed,
+      programId,
+    ),
+    PublicKey.createWithSeed(
+      deployerPk,
+      matcherCtxSeed,
+      matcherProgramId,
+    ),
+  ]);
 
     // ── PDAs & associated accounts ────────────────────────────────────────────
     const [vaultPda] = deriveVaultAuthority(programId, slabPk);
@@ -259,11 +275,13 @@ export async function POST(req: NextRequest) {
 
     // ═══════════════════════════════════════════════════════════════════════════
     // TX 0: createAccount(slab) + createATA(vaultAta) + seedTransfer + initMarket
-    // Partially signed by: slabKp (server), deployer (mobile)
+    // Signed by: deployer only
     // ═══════════════════════════════════════════════════════════════════════════
-    const createSlabIx = SystemProgram.createAccount({
-      fromPubkey: deployerPk,
-      newAccountPubkey: slabPk,
+  const createSlabIx = SystemProgram.createAccountWithSeed({
+    fromPubkey: deployerPk,
+    basePubkey: deployerPk,
+    seed: slabSeed,
+    newAccountPubkey: slabPk,
       lamports: slabRent,
       space: slabDataSize,
       programId,
@@ -328,24 +346,23 @@ export async function POST(req: NextRequest) {
     tx0.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
     tx0.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }));
     tx0.add(createSlabIx, createVaultAtaIx, seedTransferIx, initMarketIx);
-    tx0.partialSign(slabKp); // server co-signs as the new slab account
 
     // ═══════════════════════════════════════════════════════════════════════════
     // TX 1: LP Portfolio Init (v17 replacement for pre-LP crank)
     // v17: PermissionlessCrank needs a portfolio at accounts[2] — which doesn't exist
     // before InitPortfolio. TX1 now creates the LP portfolio account + runs InitPortfolio.
-    // The portfolio keypair is ephemeral (server-side only, never persisted).
-    // Partially signed by: lpPortfolioKp (server), deployer (mobile)
+    // The portfolio address is derived from the deployer and a unique seed.
+    // Signed by: deployer only
     // ═══════════════════════════════════════════════════════════════════════════
-    const lpPortfolioKp = Keypair.generate();
-    const lpPortfolioPk = lpPortfolioKp.publicKey;
     // Full portfolio length (9347): InitPortfolio reallocs up to it and adds no lamports, so an
     // undersized createAccount leaves the account below rent-exempt → InsufficientFundsForRent.
     const portfolioRent = await connection.getMinimumBalanceForRentExemption(V17_PORTFOLIO_ACCOUNT_LEN);
 
-    const createPortfolioIx = SystemProgram.createAccount({
-      fromPubkey: deployerPk,
-      newAccountPubkey: lpPortfolioPk,
+  const createPortfolioIx = SystemProgram.createAccountWithSeed({
+    fromPubkey: deployerPk,
+    basePubkey: deployerPk,
+    seed: lpPortfolioSeed,
+    newAccountPubkey: lpPortfolioPk,
       lamports: portfolioRent,
       space: V17_PORTFOLIO_ACCOUNT_LEN,
       programId,
@@ -366,24 +383,25 @@ export async function POST(req: NextRequest) {
     tx1.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
     tx1.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }));
     tx1.add(createPortfolioIx, initPortfolioIx);
-    tx1.partialSign(lpPortfolioKp); // server co-signs as the new portfolio account
 
     // ═══════════════════════════════════════════════════════════════════════════
     // TX 2: createAccount(matcherCtx) + matcher init passive + SetMatcherConfig
     // v17: encodeInitLP (tag 2) is REMOVED — throws removedInstruction().
     // Replacement: create matcher context account + call matcher program (InitPassive) +
     // call wrapper SetMatcherConfig (tag 68) on the LP portfolio created in TX1.
-    // Partially signed by: matcherCtxKp (server), deployer (mobile)
+    // Signed by: deployer only
     // ═══════════════════════════════════════════════════════════════════════════
 
     // Derive matcher delegate PDA: seeds = ["matcher", market, lpPortfolio, lpOwner, matcherProg, ctx]
     const [delegatePk] = deriveMatcherDelegate(
-      programId, slabPk, lpPortfolioPk, deployerPk, matcherProgramId, matcherCtxKp.publicKey,
+      programId, slabPk, lpPortfolioPk, deployerPk, matcherProgramId, matcherCtxPk,
     );
 
-    const createCtxIx = SystemProgram.createAccount({
-      fromPubkey: deployerPk,
-      newAccountPubkey: matcherCtxKp.publicKey,
+  const createCtxIx = SystemProgram.createAccountWithSeed({
+    fromPubkey: deployerPk,
+    basePubkey: deployerPk,
+    seed: matcherCtxSeed,
+    newAccountPubkey: matcherCtxPk,
       lamports: matcherCtxRent,
       space: MATCHER_CTX_SIZE,
       programId: matcherProgramId,
@@ -394,7 +412,7 @@ export async function POST(req: NextRequest) {
       programId: matcherProgramId,
       keys: [
         { pubkey: delegatePk, isSigner: false, isWritable: false },
-        { pubkey: matcherCtxKp.publicKey, isSigner: false, isWritable: true },
+        { pubkey: matcherCtxPk, isSigner: false, isWritable: true },
       ],
       data: Buffer.from(encodeMatcherInitPassive({ maxFillAbs: BigInt("340282366920938463463374607431768211455") })),
     });
@@ -408,7 +426,7 @@ export async function POST(req: NextRequest) {
         slabPk,
         lpPortfolioPk,
         matcherProgramId,
-        matcherCtxKp.publicKey,
+        matcherCtxPk,
         delegatePk,
       ]),
       data: encodeSetMatcherConfig({ enabled: 1 }),
@@ -421,7 +439,6 @@ export async function POST(req: NextRequest) {
     tx2.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
     tx2.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }));
     tx2.add(createCtxIx, matcherInitIx, setMatcherConfigIx);
-    tx2.partialSign(matcherCtxKp); // server co-signs as the new matcher context account
 
     // ═══════════════════════════════════════════════════════════════════════════
     // TX 3: DepositCollateral + TopUpInsurance + PermissionlessCrank (final)
@@ -488,7 +505,7 @@ export async function POST(req: NextRequest) {
     // ═══════════════════════════════════════════════════════════════════════════
     return NextResponse.json({
       slab_address: slabPk.toBase58(),
-      /** Base64-encoded partially-signed transactions. Mobile adds deployer signature. */
+      /** Base64-encoded unsigned transactions. Mobile adds the deployer signature. */
       unsigned_txs: [tx0, tx1, tx2, tx3].map(txToBase64),
       /** Config for the POST /api/markets registration call after all txs succeed. */
       registration: {

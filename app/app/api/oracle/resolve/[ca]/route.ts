@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 import { SUPPORTED_DEX_IDS } from "@/lib/dex-constants";
+import { BoundedTtlCache } from "@/lib/bounded-ttl-cache";
 
 export const dynamic = "force-dynamic";
 
@@ -77,15 +78,22 @@ const MINT_TO_PYTH: Record<string, { feedId: string; symbol: string }> = {
 };
 
 // ---------------------------------------------------------------------------
-// Simple in-memory cache (TTL 5 minutes)
 // ---------------------------------------------------------------------------
-
-interface CacheEntry {
-  data: OracleResolveResult;
-  expiresAt: number;
-}
-const cache = new Map<string, CacheEntry>();
+// Bounded resolver cache and in-flight request state
+// ---------------------------------------------------------------------------
 const CACHE_TTL_MS = 5 * 60 * 1000;
+const MAX_CACHE_ENTRIES = 256;
+const MAX_IN_FLIGHT_REQUESTS = 64;
+
+const cache = new BoundedTtlCache<string, OracleResolveResult>({
+  maxEntries: MAX_CACHE_ENTRIES,
+  ttlMs: CACHE_TTL_MS,
+});
+
+const inFlight = new Map<
+  string,
+  ReturnType<typeof fetchOracleSources>
+>();
 
 interface OracleResolveResult {
   feedId: string | null;
@@ -191,6 +199,13 @@ async function fetchDexScreenerInfo(
   }
 }
 
+function fetchOracleSources(ca: string) {
+  return Promise.all([
+    fetchJupiterPrice(ca),
+    fetchDexScreenerInfo(ca),
+  ] as const);
+}
+
 // ---------------------------------------------------------------------------
 // Route handler
 // ---------------------------------------------------------------------------
@@ -217,20 +232,45 @@ export async function GET(
     );
   }
 
-  // Cache hit
+  // Return a fresh value from the bounded TTL/LRU cache.
   const cached = cache.get(ca);
-  if (cached && Date.now() < cached.expiresAt) {
-    return NextResponse.json({ ...cached.data, cached: true });
+
+  if (cached) {
+    return NextResponse.json({
+      ...cached,
+      cached: true,
+    });
   }
 
   // --- 1. Check static Pyth feed map ---
   const pythEntry = MINT_TO_PYTH[ca];
 
-  // Fetch price in parallel from both Jupiter and DexScreener
-  const [jupResult, dexResult] = await Promise.all([
-    fetchJupiterPrice(ca),
-    fetchDexScreenerInfo(ca),
-  ]);
+  /*
+   * Reuse one upstream operation for concurrent requests targeting
+   * the same mint. New unique operations are rejected once the hard
+   * in-flight capacity is reached.
+   */
+  let sourceLookup = inFlight.get(ca);
+
+  if (!sourceLookup) {
+    if (inFlight.size >= MAX_IN_FLIGHT_REQUESTS) {
+      return NextResponse.json(
+        { error: "Oracle resolver is busy. Retry shortly." },
+        {
+          status: 503,
+          headers: { "Retry-After": "1" },
+        },
+      );
+    }
+
+    sourceLookup = fetchOracleSources(ca).finally(() => {
+      inFlight.delete(ca);
+    });
+
+    inFlight.set(ca, sourceLookup);
+  }
+
+  const [jupResult, dexResult] = await sourceLookup;
 
   // Best price: prefer DexScreener for memecoins, Jupiter as fallback
   const priceSource = dexResult ?? jupResult;
@@ -273,6 +313,6 @@ export async function GET(
   }
 
   // Cache and return
-  cache.set(ca, { data: result, expiresAt: Date.now() + CACHE_TTL_MS });
+  cache.set(ca, result);
   return NextResponse.json({ ...result, cached: false });
 }
