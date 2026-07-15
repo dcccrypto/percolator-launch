@@ -587,6 +587,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const needsWallet = !connected;
   const needsAccount = connected && !userAccount;
   const needsDeposit = connected && userAccount && capital === 0n;
+  // With no wallet, no account, or an unfunded account, every control below
+  // can only compose an order that cannot be submitted — the CTA at the
+  // bottom (Connect / Start Trading / Deposit to Trade) is the only real
+  // action. Lock the whole ticket so the controls read as "not yet", instead
+  // of inviting input that dead-ends.
+  const ticketLocked = needsWallet || needsAccount || !!needsDeposit;
 
   async function handleTrade(
     snapshotSize?: bigint,
@@ -697,6 +703,17 @@ setEngineLockError(null);
           {leverage}x
         </span>
       </div>
+
+      {/* Locked shell — a disabled fieldset natively disables every input and
+          button inside (including keyboard focus), and the opacity drop makes
+          the "not yet" state legible at a glance. min-w-0 counters fieldset's
+          default min-inline-size: min-content, which would otherwise stop the
+          ticket from shrinking in narrow layouts. */}
+      <fieldset
+        disabled={ticketLocked}
+        aria-disabled={ticketLocked}
+        className={`min-w-0 transition-opacity duration-150 ${ticketLocked ? "pointer-events-none select-none opacity-40" : ""}`}
+      >
 
       {/* Long / Short segmented — semantic long/short tokens only, symmetric
           unselected states (both read as neutral until chosen — previously
@@ -985,6 +1002,8 @@ setEngineLockError(null);
           </div>
         );
       })()}
+
+      </fieldset>
 
       {/* Single validation banner (highest-priority issue only) */}
       {blockingIssue && (
