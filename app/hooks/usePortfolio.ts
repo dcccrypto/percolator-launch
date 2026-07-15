@@ -46,6 +46,17 @@ function getApiBaseUrl(): string | undefined {
   return new URL("/api", window.location.origin).toString();
 }
 
+/**
+ * Fail-closed market discovery: distinguishes "a discovery source FAILED"
+ * (throw, so fetchPortfolioSnapshot rejects and loadPortfolioShared keeps the
+ * last-good cached snapshot) from "every source succeeded but reported zero
+ * markets" (a legitimately empty market universe — return []). The old
+ * `.catch(() => [])` on both sources made a directory outage
+ * indistinguishable from "no markets exist", so a failed discovery cached an
+ * empty-but-"successful" snapshot that blanked every mounted portfolio widget.
+ * The mainnet static bundle keeps its existing role as a fallback when the
+ * API directory fails or comes back empty.
+ */
 async function discoverPortfolioMarkets(
   connection: ReturnType<typeof useConnectionCompat>["connection"],
   programId: PublicKey,
@@ -53,22 +64,42 @@ async function discoverPortfolioMarkets(
   const network = getNetwork();
   const apiBaseUrl = getApiBaseUrl();
 
+  let anySourceSucceeded = false;
+  let lastError: unknown = null;
+
   if (apiBaseUrl) {
-    const viaApi = await discoverMarketsViaProgramDirectory(connection, programId, apiBaseUrl, {
-      timeoutMs: 8_000,
-    }).catch(() => [] as DiscoveredMarket[]);
-    if (viaApi.length > 0) return viaApi;
+    try {
+      const viaApi = await discoverMarketsViaProgramDirectory(connection, programId, apiBaseUrl, {
+        timeoutMs: 8_000,
+      });
+      if (viaApi.length > 0) return viaApi;
+      anySourceSucceeded = true;
+    } catch (error) {
+      lastError = error;
+    }
   }
 
   if (network === "mainnet") {
-    const viaStatic = await discoverMarketsViaStaticBundle(
-      connection,
-      programId,
-      MAINNET_STATIC_MARKETS,
-    ).catch(() => [] as DiscoveredMarket[]);
-    if (viaStatic.length > 0) return viaStatic;
+    try {
+      const viaStatic = await discoverMarketsViaStaticBundle(
+        connection,
+        programId,
+        MAINNET_STATIC_MARKETS,
+      );
+      if (viaStatic.length > 0) return viaStatic;
+      anySourceSucceeded = true;
+    } catch (error) {
+      lastError = error;
+    }
   }
 
+  // Every attempted source failed → fail closed. (No sources attempted —
+  // e.g. SSR with no apiBaseUrl on a non-mainnet network — keeps the
+  // pre-existing "return empty" behavior: there was no failure to report.)
+  if (!anySourceSucceeded && lastError !== null) {
+    console.debug("[usePortfolio] market discovery failed:", lastError);
+    throw lastError;
+  }
   return [];
 }
 
@@ -372,7 +403,7 @@ interface PortfolioSnapshot {
  * checks ITS `cancelled` flag only around applying the resolved snapshot to
  * local state.
  */
-async function fetchPortfolioSnapshot(
+export async function fetchPortfolioSnapshot(
   connection: ReturnType<typeof useConnectionCompat>["connection"],
   publicKey: PublicKey,
   programIds: string[],
@@ -419,8 +450,12 @@ async function fetchPortfolioSnapshot(
     );
     slabAccountsInfo = results.flat();
   } catch (error) {
+    // Fail closed: one failed chunk (Promise.all) means the slab context is
+    // incomplete — swallowing it here used to yield an empty-but-"successful"
+    // snapshot that loadPortfolioShared then cached over the last-good one.
+    // Reject the fetch instead so the previous complete snapshot survives.
     console.error("[usePortfolio] Failed to batch fetch slabs:", error);
-    slabAccountsInfo = [];
+    throw error;
   }
 
   // Process each slab to find user accounts
@@ -608,9 +643,10 @@ async function fetchPortfolioSnapshot(
   // run one scan per program (normally just one program), then group
   // the (typically small) result set by `portfolio.marketGroupId`
   // client-side to match it back to the market it belongs to.
+  const V17_PORTFOLIO_MAGIC_P = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
+  let scanResults: Awaited<ReturnType<typeof connection.getProgramAccounts>>[];
   try {
-    const V17_PORTFOLIO_MAGIC_P = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
-    const scanResults = await Promise.all(
+    scanResults = await Promise.all(
       Array.from(v17ProgramIdsSeen.values()).map((programId) =>
         connection.getProgramAccounts(programId, {
           filters: [
@@ -626,12 +662,26 @@ async function fetchPortfolioSnapshot(
             // useUserAccount.ts / useDeposit.ts (commit 3ae16309).
             { memcmp: { offset: 116, bytes: pkStr } },
           ],
-        }).catch(() => [] as Awaited<ReturnType<typeof connection.getProgramAccounts>>),
+        }),
       ),
     );
+  } catch (error) {
+    // Fail closed on the RPC scan ONLY: a failed owner scan makes the
+    // aggregate snapshot incomplete, so reject this fetch and let
+    // loadPortfolioShared keep serving the last-good cached snapshot instead
+    // of caching/publishing partial positions, balances, PnL, or totals.
+    console.debug("[usePortfolio] v17 owner-scan failed:", error);
+    throw error;
+  }
 
-    for (const portfolioResults of scanResults) {
-      for (const { account: portAcct } of portfolioResults) {
+  for (const portfolioResults of scanResults) {
+    for (const { pubkey, account: portAcct } of portfolioResults) {
+      // Per-account isolation (mirrors the NFT recovery pass below): the scan
+      // itself succeeded, so ONE permanently-unparseable account (e.g. a
+      // truncated/magic-matching account or version skew) must only lose that
+      // account, NOT reject every future fetch — rethrowing parse errors here
+      // would blank the portfolio forever with no self-heal.
+      try {
         const portData = portAcct.data instanceof Buffer ? portAcct.data : Buffer.from(portAcct.data);
         // Skip the market's LP portfolio (owner == this wallet only when this
         // wallet is the market's CREATOR) — a creator's OWN portfolio page
@@ -672,14 +722,13 @@ async function fetchPortfolioSnapshot(
         pnlSum += isSentinelValue(pos.account.pnl) ? 0n : pos.account.pnl;
         depositSum += pos.account.capital;
         unrealizedPnlSum += pos.unrealizedPnl;
+      } catch (error) {
+        console.debug(
+          `[usePortfolio] skipping unparseable v17 portfolio account ${pubkey?.toBase58?.() ?? "?"}:`,
+          error,
+        );
       }
     }
-  } catch (error) {
-    // A total failure here (e.g. every program's scan rejected) should
-    // still surface to the console — see fetchPortfolioSnapshot's caller for
-    // the top-level equivalent — but must not throw; v12 positions above and
-    // the NFT-recovery pass below still run.
-    console.debug("[usePortfolio] v17 owner-scan failed:", error);
   }
 
   // ── NFT-wrapped position recovery (v17) ──────────────────────────────
@@ -689,7 +738,8 @@ async function fetchPortfolioSnapshot(
   // /portfolio after wrapping. Recover it the only way still possible:
   // scan the NFT program for PositionNfts this wallet still holds
   // (last_holder == wallet, offset 167) and load the escrowed portfolio
-  // each one wraps. Best-effort: a failure here must never break the load.
+  // each one wraps. Scan-level failures fail CLOSED (rethrow, see the catch
+  // below); only per-NFT parse errors are skipped best-effort.
   try {
     const POSITION_NFT_V17_LEN = 199;
     const NFT_LAST_HOLDER_OFF = 167;
@@ -768,9 +818,14 @@ async function fetchPortfolioSnapshot(
       }
     }
   } catch (error) {
-    // NFT scan is best-effort — never break the core portfolio load — but a
-    // silent failure here used to leave no trace at all.
+    // Fail closed: a wallet holding NFT-wrapped positions whose recovery scan
+    // fails would otherwise cache a "successful" snapshot MISSING those
+    // positions (and their capital/PnL) over the last-good one. Per-NFT parse
+    // errors are already isolated by the inner try/catches above — only
+    // scan/batch-level RPC failures reach here, and those reject the fetch so
+    // loadPortfolioShared preserves the previous complete snapshot.
     console.debug("[usePortfolio] NFT-wrapped position recovery failed:", error);
+    throw error;
   }
 
   // Sort: at-risk positions first, then by PnL
@@ -867,7 +922,7 @@ export function peekPortfolioSnapshot(key: string): PortfolioSnapshot | null {
  * explicit user action (e.g. closing a position) always gets a real fresh
  * read instead of silently replaying a stale cached snapshot.
  */
-function loadPortfolioShared(
+export function loadPortfolioShared(
   key: string,
   force: boolean,
   fetcher: () => Promise<PortfolioSnapshot>,
