@@ -32,17 +32,11 @@ function currentEtag(): string {
   return `etag-${fakeEtagVersion}`;
 }
 
-function streamFromText(value: string): ReadableStream<Uint8Array> {
-  const bytes = new TextEncoder().encode(value);
-
-  return new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(bytes);
-      controller.close();
-    },
-  });
-}
-
+/*
+ * Mutation reads now go through list() + an origin-fresh fetch (etag taken
+ * from the response headers) — no more @vercel/blob get(). The fetch fixtures
+ * below simulate healthy, non-OK, network-throw and malformed reads.
+ */
 vi.mock('@vercel/blob', () => ({
   BlobPreconditionFailedError,
 
@@ -58,38 +52,6 @@ vi.mock('@vercel/blob', () => ({
           url: FAKE_BLOB_URL,
         },
       ],
-    };
-  }),
-
-  get: vi.fn(async () => {
-    if (fakeStore === null) {
-      return null;
-    }
-
-    /*
-     * Delegate reads to the existing fetch fixture so the fail-closed
-     * tests can continue simulating non-OK, network and malformed reads.
-     */
-    const response = await global.fetch(FAKE_BLOB_URL);
-
-    if (!response.ok) {
-      return {
-        statusCode: response.status || 500,
-        stream: null,
-        blob: {
-          etag: currentEtag(),
-        },
-      };
-    }
-
-    const payload = await response.json();
-
-    return {
-      statusCode: 200,
-      stream: streamFromText(JSON.stringify(payload)),
-      blob: {
-        etag: currentEtag(),
-      },
     };
   }),
 
@@ -147,6 +109,7 @@ describe('J: playground-registered-markets fails CLOSED on a read failure', () =
   it('baseline: a healthy read + upsert round-trips normally', async () => {
     global.fetch = vi.fn(async () => ({
       ok: true,
+      headers: new Headers({ etag: currentEtag() }),
       json: async () => JSON.parse(fakeStore ?? '[]'),
     })) as any;
     await upsertRegisteredMarket(makeEntry(1));
@@ -158,6 +121,7 @@ describe('J: playground-registered-markets fails CLOSED on a read failure', () =
     // Seed the blob with 3 existing registrations via a healthy read/write.
     global.fetch = vi.fn(async () => ({
       ok: true,
+      headers: new Headers({ etag: currentEtag() }),
       json: async () => JSON.parse(fakeStore ?? '[]'),
     })) as any;
     await upsertRegisteredMarket(makeEntry(1));
@@ -191,6 +155,7 @@ describe('J: playground-registered-markets fails CLOSED on a read failure', () =
   it('upsertRegisteredMarket ABORTS on a network-level fetch throw', async () => {
     global.fetch = vi.fn(async () => ({
       ok: true,
+      headers: new Headers({ etag: currentEtag() }),
       json: async () => JSON.parse(fakeStore ?? '[]'),
     })) as any;
     await upsertRegisteredMarket(makeEntry(1));
@@ -208,6 +173,7 @@ describe('J: playground-registered-markets fails CLOSED on a read failure', () =
   it('upsertRegisteredMarket ABORTS on malformed (non-array) blob content', async () => {
     global.fetch = vi.fn(async () => ({
       ok: true,
+      headers: new Headers({ etag: currentEtag() }),
       json: async () => JSON.parse(fakeStore ?? '[]'),
     })) as any;
     await upsertRegisteredMarket(makeEntry(1));
@@ -216,6 +182,7 @@ describe('J: playground-registered-markets fails CLOSED on a read failure', () =
     fakeStore = JSON.stringify({ not: 'an array' });
     global.fetch = vi.fn(async () => ({
       ok: true,
+      headers: new Headers({ etag: currentEtag() }),
       json: async () => JSON.parse(fakeStore!),
     })) as any;
 

@@ -141,17 +141,6 @@ vi.mock('@vercel/blob', () => {
 
   const currentEtag = () => `etag-${state.fakeEtagVersion}`;
 
-  const streamFromText = (value: string): ReadableStream<Uint8Array> => {
-    const bytes = new TextEncoder().encode(value);
-
-    return new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(bytes);
-        controller.close();
-      },
-    });
-  };
-
   return {
     BlobPreconditionFailedError,
 
@@ -163,37 +152,6 @@ vi.mock('@vercel/blob', () => {
         },
       ],
     })),
-
-    get: vi.fn(async () => {
-      /*
-       * Both POST requests initially read the same registry and ETag.
-       * A later retry reads the latest committed registry immediately.
-       */
-      const capturedSnapshot = state.fakeStore;
-      const capturedEtag = currentEtag();
-
-      if (state.registrationReads < 2) {
-        state.registrationReads += 1;
-        state.readSnapshots.push(capturedSnapshot);
-
-        if (state.registrationReads === 2) {
-          state.releaseRegistrationReads();
-        }
-
-        await state.allRegistrationReadsArrived;
-      } else {
-        state.registrationReads += 1;
-        state.readSnapshots.push(capturedSnapshot);
-      }
-
-      return {
-        statusCode: 200,
-        stream: streamFromText(capturedSnapshot),
-        blob: {
-          etag: capturedEtag,
-        },
-      };
-    }),
 
     put: vi.fn(
       async (
@@ -311,10 +269,11 @@ beforeEach(() => {
 
   globalThis.fetch = vi.fn(async () => {
     const capturedSnapshot = state.fakeStore;
+    const capturedEtag = `etag-${state.fakeEtagVersion}`;
 
     /*
      * The first two reads belong to the two concurrent POST requests.
-     * Capture their snapshots before releasing either request.
+     * Capture their snapshot+ETag pairs before releasing either request.
      */
     if (state.registrationReads < 2) {
       state.registrationReads += 1;
@@ -342,6 +301,7 @@ beforeEach(() => {
       status: 200,
       headers: {
         'content-type': 'application/json',
+        etag: capturedEtag,
       },
     });
   }) as typeof fetch;

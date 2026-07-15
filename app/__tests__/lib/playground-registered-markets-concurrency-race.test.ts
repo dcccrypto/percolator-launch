@@ -34,17 +34,6 @@ vi.mock('@vercel/blob', () => {
 
   const currentEtag = () => `etag-${state.fakeEtagVersion}`;
 
-  const streamFromText = (value: string): ReadableStream<Uint8Array> => {
-    const bytes = new TextEncoder().encode(value);
-
-    return new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(bytes);
-        controller.close();
-      },
-    });
-  };
-
   return {
     BlobPreconditionFailedError,
 
@@ -56,36 +45,6 @@ vi.mock('@vercel/blob', () => {
         },
       ],
     })),
-
-    get: vi.fn(async () => {
-      /*
-       * Force both initial mutation reads to observe the same content and ETag.
-       * Retry reads are allowed through immediately and observe the latest state.
-       */
-      const capturedSnapshot = state.fakeStore;
-      const capturedEtag = currentEtag();
-
-      if (state.readArrivals < 2) {
-        state.readArrivals += 1;
-        state.readSnapshots.push(capturedSnapshot);
-
-        if (state.readArrivals === 2) {
-          state.releaseReads();
-        }
-
-        await state.allReadsArrived;
-      } else {
-        state.readSnapshots.push(capturedSnapshot);
-      }
-
-      return {
-        statusCode: 200,
-        stream: streamFromText(capturedSnapshot),
-        blob: {
-          etag: capturedEtag,
-        },
-      };
-    }),
 
     put: vi.fn(
       async (
@@ -179,10 +138,11 @@ beforeEach(() => {
 
   global.fetch = vi.fn(async () => {
     /*
-     * Capture the snapshot before waiting at the barrier.
-     * Therefore both requests deterministically retain the same stale value.
+     * Capture the snapshot AND its ETag before waiting at the barrier.
+     * Therefore both requests deterministically retain the same stale pair.
      */
     const capturedSnapshot = state.fakeStore;
+    const capturedEtag = `etag-${state.fakeEtagVersion}`;
 
     state.readSnapshots.push(capturedSnapshot);
     state.readArrivals += 1;
@@ -196,6 +156,7 @@ beforeEach(() => {
     return {
       ok: true,
       status: 200,
+      headers: new Headers({ etag: capturedEtag }),
       json: async () => JSON.parse(capturedSnapshot),
     } as Response;
   });

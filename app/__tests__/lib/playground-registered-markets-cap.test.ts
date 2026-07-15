@@ -25,17 +25,10 @@ function currentEtag(): string {
   return `etag-${fakeEtagVersion}`;
 }
 
-function streamFromText(value: string): ReadableStream<Uint8Array> {
-  const bytes = new TextEncoder().encode(value);
-
-  return new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(bytes);
-      controller.close();
-    },
-  });
-}
-
+/*
+ * Mutation reads go through list() + an origin-fresh fetch (etag taken from
+ * the response headers), so the fetch fixture below is the read layer.
+ */
 vi.mock('@vercel/blob', () => ({
   BlobPreconditionFailedError,
 
@@ -51,38 +44,6 @@ vi.mock('@vercel/blob', () => ({
           url: FAKE_BLOB_URL,
         },
       ],
-    };
-  }),
-
-  get: vi.fn(async () => {
-    if (fakeStore === null) {
-      return null;
-    }
-
-    /*
-     * Delegate reads to the existing fetch fixture so the fail-closed
-     * tests can continue simulating non-OK, network and malformed reads.
-     */
-    const response = await global.fetch(FAKE_BLOB_URL);
-
-    if (!response.ok) {
-      return {
-        statusCode: response.status || 500,
-        stream: null,
-        blob: {
-          etag: currentEtag(),
-        },
-      };
-    }
-
-    const payload = await response.json();
-
-    return {
-      statusCode: 200,
-      stream: streamFromText(JSON.stringify(payload)),
-      blob: {
-        etag: currentEtag(),
-      },
     };
   }),
 
@@ -118,6 +79,7 @@ beforeEach(() => {
   fakeStore = null;
   global.fetch = vi.fn(async () => ({
     ok: true,
+    headers: new Headers({ etag: currentEtag() }),
     json: async () => JSON.parse(fakeStore ?? '[]'),
   })) as unknown as typeof fetch;
 });

@@ -16,7 +16,7 @@
  * it's the only place that carries `poolAddress`/`dexType` alongside the devnet
  * `marketAddress`.
  */
-import { BlobPreconditionFailedError, get, list, put } from '@vercel/blob';
+import { BlobPreconditionFailedError, list, put } from '@vercel/blob';
 
 /** Fixed, non-random-suffixed pathname — there is exactly one blob for this store. */
 export const REGISTERED_MARKETS_BLOB_PATHNAME = 'playground/registered-markets.json';
@@ -87,36 +87,75 @@ interface RegisteredMarketsMutationReadResult {
   ok: boolean;
 }
 
-interface RegisteredMarketsWriteOptions {
-  /**
-   * Existing-blob optimistic concurrency token.
-   * Blob requires overwrite mode whenever `ifMatch` is supplied.
-   */
-  ifMatch?: string;
-
-  /**
-   * False on the initial-create path so another concurrent creator
-   * cannot be overwritten.
-   */
-  allowOverwrite?: boolean;
-}
+/**
+ * Write guard: every write MUST be conditional — either an existing-blob
+ * optimistic-concurrency token (`ifMatch`) or a create-only write
+ * (`allowOverwrite: false`). There is deliberately no unconditional-overwrite
+ * variant: this union (plus the function no longer being exported) makes a
+ * CAS-bypassing "just put()" write unrepresentable.
+ */
+type RegisteredMarketsWriteOptions =
+  | {
+      /**
+       * Existing-blob optimistic concurrency token.
+       * Blob requires overwrite mode whenever `ifMatch` is supplied.
+       */
+      ifMatch: string;
+    }
+  | {
+      /**
+       * False on the initial-create path so another concurrent creator
+       * cannot be overwritten.
+       */
+      allowOverwrite: false;
+    };
 
 const REGISTERED_MARKETS_WRITE_MAX_ATTEMPTS = 5;
+const REGISTERED_MARKETS_RETRY_BASE_DELAY_MS = 150;
+const REGISTERED_MARKETS_RETRY_MAX_DELAY_MS = 2_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
- * Read registry content and its ETag from the same Blob response.
+ * Exponential backoff with jitter between CAS attempts: 150ms base, doubling,
+ * capped at 2s, jittered to 50-100% of the computed delay. Without this, a
+ * precondition_failed retry loop re-reads immediately and (behind a CDN edge
+ * that can serve the same stale snapshot for up to ~60s after a write) burns
+ * all attempts in milliseconds against the identical stale content+etag pair.
+ */
+function casRetryDelayMs(attempt: number): number {
+  const exp = Math.min(
+    REGISTERED_MARKETS_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
+    REGISTERED_MARKETS_RETRY_MAX_DELAY_MS,
+  );
+  return Math.floor(exp / 2 + Math.random() * (exp / 2));
+}
+
+/**
+ * Read registry content AND its ETag from one origin-fresh response, so the
+ * CAS token always belongs to the exact bytes that were merged against.
  *
- * Mutation reads bypass the CDN so retries always merge against the
- * latest origin version.
+ * Why not `get(..., { useCache: false })`: on a PUBLIC blob store the SDK's
+ * `useCache: false` is a silent no-op (its cache-busting query is only added
+ * for `access: 'private'`), so `get()` reads go through the CDN and can be
+ * stale for up to ~60s after a write — every retry would then re-read the same
+ * stale content+etag pair and deterministically exhaust. Instead we `list()`
+ * for the blob URL and fetch it with a unique `?ts=` query (plus
+ * `cache: 'no-store'`), which forces a fresh origin read, taking both the body
+ * and the `etag` response header from that same response.
  */
 async function readRegisteredMarketsForMutation(): Promise<RegisteredMarketsMutationReadResult> {
   try {
-    const result = await get(REGISTERED_MARKETS_BLOB_PATHNAME, {
-      access: 'public',
-      useCache: false,
+    const { blobs } = await list({
+      prefix: REGISTERED_MARKETS_BLOB_PATHNAME,
+      limit: 1,
     });
+    const found = blobs.find((b) => b.pathname === REGISTERED_MARKETS_BLOB_PATHNAME);
 
-    if (result === null) {
+    // Genuinely not created yet — the caller takes the create-only write path.
+    if (!found) {
       return {
         markets: [],
         etag: null,
@@ -124,8 +163,12 @@ async function readRegisteredMarketsForMutation(): Promise<RegisteredMarketsMuta
       };
     }
 
-    if (result.statusCode !== 200 || result.stream === null) {
-      console.error('[playground-registered-markets] unexpected Blob GET response');
+    const resp = await fetch(`${found.url}?ts=${Date.now()}`, { cache: 'no-store' });
+
+    if (!resp.ok) {
+      console.error(
+        `[playground-registered-markets] blob fetch ${resp.status} — mutation read failed`,
+      );
 
       return {
         markets: [],
@@ -134,7 +177,23 @@ async function readRegisteredMarketsForMutation(): Promise<RegisteredMarketsMuta
       };
     }
 
-    const data: unknown = await new Response(result.stream).json();
+    // Strip a weak-validator prefix if an intermediary added one; ifMatch
+    // must carry the token exactly as the Blob store knows it.
+    const etag = resp.headers.get('etag')?.replace(/^W\//, '') ?? null;
+
+    if (etag === null) {
+      console.error(
+        '[playground-registered-markets] blob response carried no ETag — cannot CAS, mutation read failed',
+      );
+
+      return {
+        markets: [],
+        etag: null,
+        ok: false,
+      };
+    }
+
+    const data: unknown = await resp.json();
 
     if (!Array.isArray(data)) {
       console.error(
@@ -150,7 +209,7 @@ async function readRegisteredMarketsForMutation(): Promise<RegisteredMarketsMuta
 
     return {
       markets: data.filter(isRegisteredMarket),
-      etag: result.blob.etag,
+      etag,
       ok: true,
     };
   } catch (err) {
@@ -221,23 +280,24 @@ export async function readRegisteredMarkets(): Promise<RegisteredMarket[]> {
 }
 
 /**
- * Persist a complete registry snapshot.
- *
- * Existing snapshots may be guarded by `ifMatch`. Initial creation may
- * disable overwrite so a concurrent creator cannot be silently replaced.
+ * Persist a complete registry snapshot. NOT exported: all writes must go
+ * through `upsertRegisteredMarket`'s read-merge-CAS loop, and the options
+ * union makes an unconditional overwrite unrepresentable — existing
+ * snapshots are guarded by `ifMatch`, initial creation disables overwrite
+ * so a concurrent creator cannot be silently replaced.
  */
-export async function writeRegisteredMarkets(
+async function writeRegisteredMarkets(
   markets: RegisteredMarket[],
-  options: RegisteredMarketsWriteOptions = {},
+  options: RegisteredMarketsWriteOptions,
 ): Promise<void> {
-  const ifMatch = options.ifMatch;
+  const ifMatch = 'ifMatch' in options ? options.ifMatch : undefined;
 
   await put(REGISTERED_MARKETS_BLOB_PATHNAME, JSON.stringify(markets), {
     access: 'public',
     addRandomSuffix: false,
     contentType: 'application/json',
 
-    allowOverwrite: ifMatch !== undefined ? true : (options.allowOverwrite ?? true),
+    allowOverwrite: ifMatch !== undefined,
 
     ...(ifMatch !== undefined ? { ifMatch } : {}),
 
@@ -282,9 +342,10 @@ function applyRegisteredMarketUpsert(
 /**
  * Upsert a registered market using Blob optimistic concurrency.
  *
- * A stale ETag causes the operation to read the newest registry,
- * recompute the merge and retry. A failed initial create is retried only
- * when a follow-up read confirms another request created the blob.
+ * A stale ETag causes the operation to back off (exponential + jitter),
+ * read the newest registry, recompute the merge and retry. A failed
+ * initial create is retried only when a follow-up read confirms another
+ * request created the blob.
  */
 export async function upsertRegisteredMarket(entry: RegisteredMarket): Promise<RegisteredMarket[]> {
   let lastConflict: unknown;
@@ -318,6 +379,7 @@ export async function upsertRegisteredMarket(entry: RegisteredMarket): Promise<R
       if (snapshot.etag !== null) {
         if (err instanceof BlobPreconditionFailedError) {
           lastConflict = err;
+          await sleep(casRetryDelayMs(attempt));
           continue;
         }
 
@@ -332,6 +394,7 @@ export async function upsertRegisteredMarket(entry: RegisteredMarket): Promise<R
 
       if (afterCreateFailure.ok && afterCreateFailure.etag !== null) {
         lastConflict = err;
+        await sleep(casRetryDelayMs(attempt));
         continue;
       }
 
