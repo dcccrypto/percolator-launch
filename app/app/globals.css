@@ -471,9 +471,14 @@ body::before {
 }
 
 /* ─── Grid Background ─── */
-.bg-grid {
-  position: relative;
-}
+/* `.bg-grid` deliberately sets NO `position` of its own. Every usage in the app
+   applies it as an ABSOLUTE overlay (`absolute inset-x-0 top-0 h-48 bg-grid …`),
+   and that `absolute` already establishes the containing block the `::before`
+   needs. A previous `.bg-grid { position: relative }` here (unlayered, so it beat
+   Tailwind's layered `.absolute` utility) forced the overlay into normal flow —
+   turning the 192px-tall grid into a real block that shoved page content ~192px
+   down on portfolio/earn/wallet/dashboard/etc. Removing it lets the element's own
+   `absolute` take effect so the overlay is out of flow again. */
 .bg-grid::before {
   content: "";
   position: absolute;
