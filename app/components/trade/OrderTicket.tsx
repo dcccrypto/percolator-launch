@@ -314,6 +314,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   const { initUser, loading: initLoading, error: initError } = useInitUser(slabAddress);
   const [initCtaError, setInitCtaError] = useState<string | null>(null);
+  // Starter-deposit amount for the one-click "Start Trading" CTA. The system
+  // no longer chooses for the user: this is an EDITABLE field, prefilled with
+  // the suggested min(500, wallet balance) once the balance resolves. A user
+  // edit wins over the prefill from then on (touched ref).
+  const [starterAmountInput, setStarterAmountInput] = useState("");
+  const starterTouchedRef = useRef(false);
   // Progressive disclosure (first-timer receipt): a never-funded account has
   // never seen a receipt before, so the full fees/slippage/margin breakdown
   // is more noise than help on the very first order — collapse it behind a
@@ -322,6 +328,17 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // what it means and want it visible without an extra click.
   const [showReceiptDetails, setShowReceiptDetails] = useState(false);
   const { networkWarning, reportTxError } = useWalletNetworkGuard();
+
+  // Prefill the starter-deposit field once the wallet balance resolves —
+  // plain decimal string (no thousands separators) so parsePercToNative can
+  // read it back verbatim. Never stomps a user edit.
+  useEffect(() => {
+    if (starterTouchedRef.current) return;
+    const bal = walletAtaBalance ?? 0n;
+    if (bal <= 0n) return;
+    const suggested = bal < AUTO_DEPOSIT_AMOUNT ? bal : AUTO_DEPOSIT_AMOUNT;
+    setStarterAmountInput((Number(suggested) / 10 ** decimals).toString());
+  }, [walletAtaBalance, decimals]);
 
   const lpEntry = useMemo(() => accounts.find(({ account }) => account.kind === AccountKind.LP) ?? null, [accounts]);
   const lpIdx = lpEntry?.idx ?? 0;
@@ -1042,18 +1059,22 @@ setEngineLockError(null);
           {(() => {
             const hasWalletTokens = (walletAtaBalance ?? 0n) > 0n;
             const canOneClick = needsAccount && hasWalletTokens && !showInlineDeposit;
+            const bal = walletAtaBalance ?? 0n;
+            const suggestedStarter = bal > 0n && bal < AUTO_DEPOSIT_AMOUNT ? bal : AUTO_DEPOSIT_AMOUNT;
+            // The user chooses the starter deposit — read the editable field,
+            // falling back to the suggested default when cleared, clamped to
+            // the wallet balance so the folded init+deposit tx can't bounce.
+            const enteredStarter = starterAmountInput ? parsePercToNative(starterAmountInput, decimals) : 0n;
+            let starterDeposit = enteredStarter > 0n ? enteredStarter : suggestedStarter;
+            if (bal > 0n && starterDeposit > bal) starterDeposit = bal;
             const onClickDirect = async () => {
               setInitCtaError(null);
               try {
-                // PERC-onboarding-1: pass the wallet's own sim-USDC balance
-                // (capped at the same starter amount useAutoDeposit uses) so
-                // useInitUser folds Deposit into the SAME account-creation
-                // transaction when possible — one click can land a
-                // tradeable, funded account instead of always requiring a
-                // second manual deposit afterward.
-                const bal = walletAtaBalance ?? 0n;
-                const depositAmt = bal > 0n && bal < AUTO_DEPOSIT_AMOUNT ? bal : AUTO_DEPOSIT_AMOUNT;
-                await initUser(depositAmt);
+                // PERC-onboarding-1: useInitUser folds Deposit into the SAME
+                // account-creation transaction when possible — one click can
+                // land a tradeable, funded account instead of always
+                // requiring a second manual deposit afterward.
+                await initUser(starterDeposit);
               } catch (e) {
                 const msg = e instanceof Error ? e.message : String(e);
                 reportTxError(msg);
@@ -1074,15 +1095,43 @@ setEngineLockError(null);
                     ? "Get Tokens to Trade"
                     : "Deposit to Trade";
             return (
-              <button
-                onClick={canOneClick ? onClickDirect : () => setShowInlineDeposit((v) => !v)}
-                disabled={initLoading}
-                className={`w-full rounded-none py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] transition-[filter] duration-150 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70 ${
-                  direction === "long" ? "bg-[var(--long)] text-black" : "bg-[var(--short)] text-white"
-                }`}
-              >
-                {label}
-              </button>
+              <>
+                {canOneClick && (
+                  <div className="mb-1.5 flex items-center gap-1.5 rounded-none border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5">
+                    <label
+                      htmlFor="starter-deposit-amount"
+                      className="whitespace-nowrap text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]"
+                    >
+                      Deposit
+                    </label>
+                    <input
+                      id="starter-deposit-amount"
+                      type="text"
+                      inputMode="decimal"
+                      value={starterAmountInput}
+                      onChange={(e) => {
+                        starterTouchedRef.current = true;
+                        setStarterAmountInput(sanitizeDecimalInput(e.target.value));
+                      }}
+                      disabled={initLoading}
+                      className="w-full bg-transparent text-right text-[12px] text-[var(--text)] outline-none placeholder-[var(--text-muted)]"
+                      style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
+                      placeholder={(Number(suggestedStarter) / 10 ** decimals).toString()}
+                      aria-label={`Starter deposit amount in ${collateralSymbol}`}
+                    />
+                    <span className="text-[10px] text-[var(--text-secondary)]">{collateralSymbol}</span>
+                  </div>
+                )}
+                <button
+                  onClick={canOneClick ? onClickDirect : () => setShowInlineDeposit((v) => !v)}
+                  disabled={initLoading}
+                  className={`w-full rounded-none py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] transition-[filter] duration-150 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70 ${
+                    direction === "long" ? "bg-[var(--long)] text-black" : "bg-[var(--short)] text-white"
+                  }`}
+                >
+                  {label}
+                </button>
+              </>
             );
           })()}
           {(initCtaError || initError) && <p className="mt-1 text-[10px] text-[var(--short)]">{initCtaError ?? initError}</p>}
