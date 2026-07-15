@@ -8,6 +8,7 @@ import type { MarketConfig, EngineState, RiskParams, SlabHeader, Account } from 
 import { AccountKind } from "@percolatorct/sdk";
 import type { PortfolioPosition } from "@/hooks/usePortfolio";
 import { computeLiquidationDistancePct } from "@/lib/liquidation-distance";
+import type { UserAccountInfo } from "@/hooks/useUserAccount";
 
 interface MockMarketData {
   symbol: string;
@@ -304,7 +305,7 @@ export function getMockUserAccount(address: string) {
   return getMockUserAccountIdle(address);
 }
 
-export function getMockUserAccountWithPosition(address: string) {
+export function getMockUserAccountWithPosition(address: string): UserAccountInfo | null {
   const m = MOCK_MAP[address];
   if (!m) return null;
   const priceE6 = BigInt(Math.round(m.priceUsd * 1_000_000));
@@ -357,7 +358,7 @@ export function getMockUserAccountWithPosition(address: string) {
 }
 
 /** Mock user account with NO open position (for showing the trade form) */
-export function getMockUserAccountIdle(address: string) {
+export function getMockUserAccountIdle(address: string): UserAccountInfo | null {
   const m = MOCK_MAP[address];
   if (!m) return null;
   const capital = 50_000_000n;

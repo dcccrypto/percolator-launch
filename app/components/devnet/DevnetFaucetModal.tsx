@@ -144,14 +144,14 @@ export const DevnetFaucetModal: FC = () => {
             </div>
             <h2
               className="text-[15px] font-medium text-[var(--text)]"
-              style={{ fontFamily: "var(--font-heading)" }}
+              style={{ fontFamily: "var(--font-display)" }}
             >
               Fund Your Account
             </h2>
           </div>
           <button
             onClick={faucet.dismiss}
-            className="text-[var(--text-dim)] transition-colors hover:text-[var(--text)] text-lg leading-none"
+            className="text-[var(--text-dim)] transition-colors hover:text-[var(--text)] text-2xl leading-none"
             aria-label="Close faucet modal"
           >
             ✕

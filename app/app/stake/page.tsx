@@ -304,8 +304,8 @@ function StakeHero({ pools, totalUserDeposited }: { pools: StakePool[]; totalUse
                 // insurance lp
               </div>
               <h1
-                className="mb-4 text-3xl font-medium tracking-[-0.02em] sm:text-4xl lg:text-[52px]"
-                style={{ fontFamily: "var(--font-heading)" }}
+                className="mb-4 text-4xl font-bold tracking-tight lg:text-6xl"
+                style={{ fontFamily: "var(--font-display)" }}
               >
                 <span className="text-[var(--text)]">Stake. Earn.</span>
                 <br />
@@ -350,7 +350,7 @@ function StakeHero({ pools, totalUserDeposited }: { pools: StakePool[]; totalUse
                 {metrics.map((m) => (
                   <div key={m.label} className="min-w-0 overflow-hidden bg-[var(--panel-bg)] p-3 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]">
                     <p className="mb-1.5 truncate text-[9px] font-medium uppercase tracking-[0.15em] text-[#9ca3af] sm:text-[10px] sm:tracking-[0.2em]">{m.label}</p>
-                    <p className={`truncate text-base font-semibold tracking-tight tabular-nums sm:text-xl ${m.color}`} style={{ fontFamily: "var(--font-heading)" }}>
+                    <p className={`truncate text-2xl font-bold tracking-tight tabular-nums ${m.color}`} style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                       {m.value}
                     </p>
                   </div>
@@ -1082,7 +1082,7 @@ function PoolPlaceholderCard() {
       href="/create"
       className="group flex flex-col items-center justify-center gap-2 border border-dashed border-[var(--border)] bg-[var(--panel-bg)]/40 p-4 text-center transition-colors duration-200 hover:border-[var(--accent)]/40 hover:bg-[var(--bg-elevated)] sm:p-5"
     >
-      <span className="text-xl text-[var(--text-muted)] transition-colors group-hover:text-[var(--accent)]">＋</span>
+      <span className="text-2xl text-[var(--text-muted)] transition-colors group-hover:text-[var(--accent)]">＋</span>
       <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-colors group-hover:text-[var(--accent)]">
         Create a market
       </p>

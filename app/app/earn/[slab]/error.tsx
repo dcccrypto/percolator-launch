@@ -20,8 +20,8 @@ export default function VaultDetailError({
       <div className="max-w-md mx-auto text-center px-4">
         <div aria-hidden="true" className="text-4xl mb-4">⚠️</div>
         <h1
-          className="text-lg font-medium text-[var(--text)] mb-2"
-          style={{ fontFamily: 'var(--font-heading)' }}
+          className="text-2xl font-medium text-[var(--text)] mb-2"
+          style={{ fontFamily: 'var(--font-display)' }}
         >
           Vault Error
         </h1>

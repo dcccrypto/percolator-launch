@@ -175,7 +175,7 @@ export const InsuranceTopUpModal: FC<InsuranceTopUpModalProps> = ({
         <div className="flex items-center justify-between border-b border-[var(--border)]/50 bg-[var(--bg)] px-4 py-3">
           <h2
             id="insurance-topup-title"
-            className="text-lg font-bold text-[var(--text)]"
+            className="text-2xl font-bold text-[var(--text)]"
             style={{ fontFamily: "var(--font-display)" }}
           >
             Top Up Insurance Fund
@@ -324,7 +324,7 @@ export const InsuranceTopUpModal: FC<InsuranceTopUpModalProps> = ({
                         New Balance
                       </span>
                       <span
-                        className="text-base font-bold text-[var(--long)]"
+                        className="text-2xl font-bold text-[var(--long)]"
                         style={{ fontFamily: "var(--font-mono)" }}
                       >
                         ${newBalanceUsd}
@@ -390,7 +390,7 @@ export const InsuranceTopUpModal: FC<InsuranceTopUpModalProps> = ({
                   </svg>
                 </div>
               </div>
-              <h3 className="mb-2 text-lg font-bold text-[var(--text)]">
+              <h3 className="mb-2 text-2xl font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
                 Deposit Successful!
               </h3>
               <p className="mb-4 text-sm text-[var(--text-secondary)]">

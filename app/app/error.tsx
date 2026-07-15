@@ -27,7 +27,7 @@ export default function GlobalError({
             </svg>
           </div>
         </div>
-        <h2 className="mb-2 text-lg font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
+        <h2 className="mb-2 text-2xl font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
           something went wrong
         </h2>
         <p className="mb-1 text-sm text-[var(--text-secondary)]">

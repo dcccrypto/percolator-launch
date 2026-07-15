@@ -98,7 +98,7 @@ export function useDeposit(slabAddress: string) {
   const inflightRef = useRef(false);
 
   const deposit = useCallback(
-    async (params: { userIdx: number; amount: bigint; accountExists?: boolean }) => {
+    async (params: { userIdx: number; amount: bigint; accountExists?: boolean; portfolioPk?: PublicKey }) => {
       if (inflightRef.current) throw new Error("Deposit already in progress");
       inflightRef.current = true;
       setLoading(true);
@@ -177,7 +177,7 @@ export function useDeposit(slabAddress: string) {
 
         if (isV17) {
           // v17: derive vault authority PDA to build the vault token ATA.
-          // vaultPda is a program PDA (off the ed25519 curve) → allowOwnerOffCurve=true,
+          // vaultPda is program PDA (off the ed25519 curve) → allowOwnerOffCurve=true,
           // else spl-token throws TokenOwnerOffCurveError.
           const [vaultPda] = deriveVaultAuthority(programId, slabPk);
           const vaultTokenAta = await getAta(vaultPda, mktConfig.collateralMint, true);
@@ -194,6 +194,7 @@ export function useDeposit(slabAddress: string) {
           const [ataExists, resolvedPortfolioPk] = await Promise.all([
             getAccount(connection, userAta).then(() => true, () => false),
             (async () => {
+              if (params.portfolioPk) return params.portfolioPk;
               const snap = getPortfolioRawSnapshot(
                 makePortfolioScanKey(programId, slabAddress, wallet.publicKey!),
               );
@@ -348,8 +349,8 @@ export function useDeposit(slabAddress: string) {
 
         // Force immediate slab re-read so balance updates without waiting for
         // the next poll cycle (which can be up to 30 s when WS is active).
-        refreshSlab();
-        setTimeout(() => refreshSlab(), 2000);
+        refreshSlab?.();
+        setTimeout(() => refreshSlab?.(), 2000);
         return sig;
       } catch (e) {
         setError(humanizeError(e instanceof Error ? e.message : String(e)));

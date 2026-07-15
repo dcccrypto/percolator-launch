@@ -231,7 +231,7 @@ function PanelContent({
       <Section title="Price Feed">
         <div className="flex items-baseline justify-between">
           <span
-            className="text-lg font-bold tabular-nums"
+            className="text-2xl font-bold tabular-nums"
             style={{
               fontFamily: "var(--font-mono)",
               color: level === "stale" ? "var(--text-muted)" : "var(--text)",

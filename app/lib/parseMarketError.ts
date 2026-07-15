@@ -47,6 +47,57 @@ const LAUNCH_ERROR_OVERRIDES: Record<number, string> = {
   21: "Engine lock is active on this market (a close or recovery hasn't finished). If this doesn't clear after a retry or two, the market may need a full re-seed rather than simply waiting — contact a maintainer.",
 };
 
+const SPL_TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+
+/**
+ * Anchored parse of the FIRST failing program-error log line in `msg`
+ * (innermost failure — outer programs re-log the same failure afterwards).
+ * Returns the exact hex code and the failing program's identity: the id named
+ * on the failing line itself ("Program <id> failed: custom program error:…"),
+ * or, when the failing line doesn't name one, the innermost still-open
+ * "Program <id> invoke" tracked via an invoke/success stack.
+ *
+ * This replaces the old substring heuristic
+ * `includes("custom program error: 0x1") && includes("TokenkegQ")`, which
+ * (a) prefix-matched 0x1 against 0x13/0x1a/…, and (b) attributed the failure
+ * to the token program if a Tokenkeg line appeared ANYWHERE in the logs —
+ * including a successful token CPI preceding an unrelated engine failure.
+ */
+function findFailingProgramError(msg: string): { code: number; program: string | null } | null {
+  const invokeStack: string[] = [];
+  for (const raw of msg.split(/\r?\n/)) {
+    // Tolerate lines embedded as JSON array elements (leading/trailing quotes).
+    const line = raw.trim().replace(/^"/, "").replace(/",?$/, "");
+    const failMatch = line.match(/failed: custom program error: (0x[0-9a-fA-F]+)/);
+    if (failMatch) {
+      const idMatch = line.match(/Program ([1-9A-HJ-NP-Za-km-z]{32,44}) failed:/);
+      return {
+        code: parseInt(failMatch[1], 16),
+        program: idMatch ? idMatch[1] : invokeStack[invokeStack.length - 1] ?? null,
+      };
+    }
+    const invokeMatch = line.match(/^Program ([1-9A-HJ-NP-Za-km-z]{32,44}) invoke/);
+    if (invokeMatch) {
+      invokeStack.push(invokeMatch[1]);
+      continue;
+    }
+    if (/^Program ([1-9A-HJ-NP-Za-km-z]{32,44}) success/.test(line)) {
+      invokeStack.pop();
+    }
+  }
+  return null;
+}
+
+/**
+ * SPL Token "insufficient funds" is custom error 1 (0x1) thrown BY the token
+ * program. Route to the token-balance message only when the failing line's
+ * code is exactly 0x1 AND its program context is Tokenkeg.
+ */
+function isTokenProgramInsufficientFunds(msg: string): boolean {
+  const failing = findFailingProgramError(msg);
+  return failing !== null && failing.code === 0x1 && failing.program === SPL_TOKEN_PROGRAM_ID;
+}
+
 export function parseMarketCreationError(error: unknown): string {
   const msg = error instanceof Error ? error.message : String(error);
 
@@ -66,7 +117,7 @@ export function parseMarketCreationError(error: unknown): string {
   if (
     msg.includes("insufficient funds for transfer") ||
     (msg.includes("insufficient funds") && !msg.includes("lamports") && !msg.includes("for rent")) ||
-    (msg.includes("custom program error: 0x1") && msg.includes("TokenkegQ"))
+    isTokenProgramInsufficientFunds(msg)
   ) {
     return "Insufficient token balance. Your wallet doesn't have enough collateral tokens to complete this step. On devnet, refresh the page and retry — the faucet will top up your balance.";
   }

@@ -54,7 +54,7 @@ export const HowToContribute: FC<Props> = ({
       {/* Section header */}
       <div className="mb-10">
         <h2
-          className="mb-2 text-3xl font-bold tracking-tight text-[#f0f0f5] sm:text-4xl"
+          className="mb-2 text-4xl font-bold tracking-tight text-[#f0f0f5]"
           style={{ fontFamily: "var(--font-display)" }}
         >
           How to contribute
@@ -73,13 +73,13 @@ export const HowToContribute: FC<Props> = ({
             className="group rounded-xl border border-[var(--border)] bg-[var(--panel-bg)] p-7 transition-all duration-200 hover:border-[rgba(124,58,237,0.25)] hover:shadow-[0_0_20px_rgba(124,58,237,0.06)]"
           >
             <div
-              className="mb-4 text-5xl font-bold text-[rgba(124,58,237,0.20)]"
+              className="mb-4 text-6xl font-bold text-[rgba(124,58,237,0.20)]"
               style={{ fontFamily: "var(--font-mono)" }}
             >
               {step.number}
             </div>
             <h3
-              className="mb-2 text-lg font-semibold text-[#f0f0f5]"
+              className="mb-2 text-2xl font-semibold text-[#f0f0f5]"
               style={{ fontFamily: "var(--font-display)" }}
             >
               {step.title}

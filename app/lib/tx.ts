@@ -55,6 +55,135 @@ const PRIORITY_FEE_FALLBACK = Number(process.env.NEXT_PUBLIC_PRIORITY_FEE ?? 100
 const PRIORITY_FEE_CACHE_MS = 45_000;
 let cachedPriorityFee: { fee: number; ts: number } | null = null;
 
+function pushTxErrorString(out: string[], value: unknown) {
+  if (typeof value !== "string") return;
+  const trimmed = value.trim();
+  if (trimmed) out.push(trimmed);
+}
+
+/** Only log lines carrying a failure signal belong in a thrown message —
+ *  success/invoke noise ("Program X invoke [1]", "Program X success",
+ *  "Program log: Instruction: Trade") drowns the failing line AND creates
+ *  false positives in downstream substring classifiers (e.g. a PASSING
+ *  Lighthouse assertion's invoke line must not trigger the wallet-security
+ *  message, and a successful Tokenkeg CPI line must not route an unrelated
+ *  engine error to "insufficient token balance"). */
+const TX_ERROR_LOG_LINE_RE =
+  /error|failed|failure|panicked|insufficient|exceeded|denied|custom program error/i;
+/** Hard cap on log lines admitted into a thrown message. */
+const TX_ERROR_LOG_LINE_CAP = 12;
+
+/** Keep only failure-relevant log lines (order preserved, capped). */
+function filterTxErrorLogLines(lines: readonly unknown[]): string[] {
+  const out: string[] = [];
+  for (const raw of lines) {
+    const line = (typeof raw === "string" ? raw : String(raw)).trim();
+    if (!line || !TX_ERROR_LOG_LINE_RE.test(line)) continue;
+    out.push(line);
+    if (out.length >= TX_ERROR_LOG_LINE_CAP) break;
+  }
+  return out;
+}
+
+function pushTxErrorLogs(out: string[], value: unknown) {
+  if (!Array.isArray(value)) return;
+  for (const line of filterTxErrorLogLines(value)) {
+    out.push(line);
+  }
+}
+
+export function extractTxErrorMessage(error: unknown): string {
+  const out: string[] = [];
+  const seen = new Set<object>();
+
+  const visit = (value: unknown, depth = 0) => {
+    if (value == null || depth > 4) return;
+
+    if (typeof value === "string") {
+      pushTxErrorString(out, value);
+      return;
+    }
+
+    if (typeof value !== "object") {
+      pushTxErrorString(out, String(value));
+      return;
+    }
+
+    if (seen.has(value)) return;
+    seen.add(value);
+
+    if (value instanceof Error) {
+      pushTxErrorString(out, value.message);
+    }
+
+    const record = value as Record<string, unknown>;
+    pushTxErrorString(out, record.message);
+    pushTxErrorString(out, record.transactionMessage);
+    pushTxErrorLogs(out, record.logs);
+    pushTxErrorLogs(out, record.transactionLogs);
+
+    visit(record.cause, depth + 1);
+    visit(record.error, depth + 1);
+    visit(record.err, depth + 1);
+  };
+
+  visit(error);
+
+  const unique = Array.from(new Set(out));
+  return unique.length > 0 ? unique.join("\n") : "Unexpected error";
+}
+
+/**
+ * True only when the extracted message carries an actual Lighthouse FAILURE
+ * signal:
+ *  - a line with exactly error code 0x1900 (Anchor ConstraintAddress — the
+ *    code Lighthouse assertions fail with), or
+ *  - a line naming Lighthouse alongside a failure word, or
+ *  - a line where the Lighthouse program id itself appears with a failure word.
+ *
+ * Mere PRESENCE of the Lighthouse program id anywhere in the message is not
+ * enough: nested transaction logs legitimately contain "Program L2TExM…
+ * invoke"/"success" lines for PASSING assertions, and attributing an unrelated
+ * program failure to "wallet security" would hide the real error.
+ */
+function isLighthouseFailureMessage(msg: string): boolean {
+  for (const rawLine of msg.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    // \b keeps 0x1900 from matching longer codes (e.g. 0x19001).
+    if (/custom program error:\s*0x1900\b/i.test(line)) return true;
+    if (/Lighthouse/i.test(line) && /error|failed|failure|blocked|denied/i.test(line)) return true;
+    if (line.includes(LIGHTHOUSE_PROGRAM_ID) && /error|failed|failure/i.test(line)) return true;
+  }
+  return false;
+}
+
+/**
+ * Final thrown message for a failed sendRawTransaction: the filtered extract
+ * of everything already on the error object, plus — for SendTransactionError,
+ * whose logs sometimes only materialize via getLogs() — any failure-relevant
+ * log lines the extract didn't already surface. Line-wise deduped so the
+ * message carries ONE copy of each failing log line (previously the same
+ * failing lines could appear up to three times: embedded in web3.js's own
+ * message, again via the error's log array, and a third time via a manual
+ * "relevant logs" append).
+ */
+async function buildSendErrorMessage(connection: Connection, sendErr: unknown): Promise<string> {
+  const sendMsg = extractTxErrorMessage(sendErr);
+  if (!(sendErr instanceof SendTransactionError)) return sendMsg;
+  try {
+    const logs = await sendErr.getLogs(connection);
+    if (logs && logs.length > 0) {
+      const seen = new Set(sendMsg.split("\n").map((l) => l.trim()));
+      const fresh = filterTxErrorLogLines(logs).filter((l) => !seen.has(l));
+      if (fresh.length > 0) return `${sendMsg}\n${fresh.join("\n")}`;
+    }
+  } catch {
+    // Best-effort log fetch — the extract alone is already informative.
+  }
+  return sendMsg;
+}
+
 /**
  * Get dynamic priority fee based on recent network conditions.
  * Cached for PRIORITY_FEE_CACHE_MS; falls back to hardcoded value if the RPC
@@ -83,11 +212,10 @@ async function fetchPriorityFee(connection: Connection): Promise<number> {
     const dynamicFee = sorted[p75Index] || 0;
     
     // Use dynamic fee if it's reasonable, otherwise fall back
-    // Cap at 10x the fallback to avoid excessive fees
-    if (dynamicFee > 0 && dynamicFee < PRIORITY_FEE_FALLBACK * 10) {
-      return dynamicFee;
+    // Cap at 10x fallback to prevent massive spikes
+    if (dynamicFee > 0) {
+      return Math.min(dynamicFee, PRIORITY_FEE_FALLBACK * 10);
     }
-    
     return PRIORITY_FEE_FALLBACK;
   } catch (error) {
     console.warn("[getPriorityFee] Failed to fetch dynamic fees, using fallback:", error);
@@ -537,21 +665,25 @@ export async function sendTx({
           // Privy returns raw signature bytes (64 bytes). Convert to base58.
           lastSignature = bs58.encode(sigBytes);
         } catch (sendErr) {
-          const sendMsg = sendErr instanceof Error ? sendErr.message : String(sendErr);
-          // Check for Lighthouse-specific errors and provide user-friendly message
-          if (
-            sendMsg.includes(LIGHTHOUSE_PROGRAM_ID) ||
-            sendMsg.includes("0x1900") ||
-            sendMsg.includes("Lighthouse")
-          ) {
+          const sendMsg = extractTxErrorMessage(sendErr);
+          // Lighthouse-specific failure → user-friendly message. Gated on an
+          // actual failure signal, not mere program-id presence: nested logs
+          // can contain PASSING Lighthouse assertion lines while the real
+          // failure lives elsewhere.
+          if (isLighthouseFailureMessage(sendMsg)) {
             throw new Error(
               "Transaction blocked by wallet security (Blowfish/Lighthouse). " +
               "Your wallet's transaction guard flagged this as unknown. " +
               "Try disabling transaction simulation in your wallet settings, " +
-              "or use a different wallet. This is a known issue for new DeFi programs."
+              "or use a different wallet. This is a known issue for new DeFi programs.",
+              { cause: sendErr }
             );
           }
-          throw sendErr;
+          // Throw the EXTRACTED message: wallets (notably Privy) wrap program
+          // failures in a generic "Unexpected error" whose real detail lives
+          // in nested cause/logs — rethrowing sendErr verbatim discarded it.
+          // The original error rides along as `cause` for debugging.
+          throw new Error(sendMsg, { cause: sendErr });
         }
       } else if (wallet.signTransaction) {
         // Fallback: signTransaction + sendRawTransaction (legacy path)
@@ -592,7 +724,7 @@ export async function sendTx({
             maxRetries: 5,
           });
         } catch (sendErr) {
-          const sendMsg = sendErr instanceof Error ? sendErr.message : String(sendErr);
+          const sendMsg = extractTxErrorMessage(sendErr);
           const isBatchError =
             sendMsg.includes("Missing response from batch") ||
             sendMsg.includes("failed to get recent blockhash") ||
@@ -603,25 +735,11 @@ export async function sendTx({
               `[sendTx] Batch RPC error (attempt ${attempt + 1}); will retry.`
             );
             throw sendErr;
-          } else if (sendErr instanceof SendTransactionError) {
-            try {
-              const logs = await sendErr.getLogs(connection);
-              if (logs && logs.length > 0) {
-                const relevantLogs = logs
-                  .filter((l: string) =>
-                    l.includes("Error") || l.includes("failed") || l.includes("Program log:")
-                  )
-                  .slice(-5)
-                  .join("\n");
-                throw new Error(`${sendMsg}${relevantLogs ? `\n${relevantLogs}` : ""}`);
-              }
-            } catch (logsErr) {
-              if (logsErr instanceof Error && logsErr.message !== sendMsg) throw logsErr;
-            }
-            throw sendErr;
-          } else {
-            throw sendErr;
           }
+          // One source of log lines: the filtered extract (+ getLogs() lines
+          // it couldn't see), deduped — see buildSendErrorMessage. Original
+          // error preserved as `cause`.
+          throw new Error(await buildSendErrorMessage(connection, sendErr), { cause: sendErr });
         }
       } else {
         throw new Error("Wallet not connected — no sign method available");
@@ -880,22 +998,9 @@ export async function broadcastSignedTx(
       maxRetries: 5,
     });
   } catch (sendErr) {
-    if (sendErr instanceof SendTransactionError) {
-      try {
-        const logs = await sendErr.getLogs(connection);
-        if (logs && logs.length > 0) {
-          const relevantLogs = logs
-            .filter((l: string) => l.includes("Error") || l.includes("failed") || l.includes("Program log:"))
-            .slice(-5)
-            .join("\n");
-          const sendMsg = sendErr instanceof Error ? sendErr.message : String(sendErr);
-          throw new Error(`${sendMsg}${relevantLogs ? `\n${relevantLogs}` : ""}`);
-        }
-      } catch (logsErr) {
-        if (logsErr instanceof Error && logsErr.message !== sendErr.message) throw logsErr;
-      }
-    }
-    throw sendErr;
+    // Same semantics as sendTx's legacy send path: filtered extracted message
+    // (single deduped source of log lines), original error kept as `cause`.
+    throw new Error(await buildSendErrorMessage(connection, sendErr), { cause: sendErr });
   }
   try {
     await pollConfirmation(connection, signature, opts.onProgress, opts.abortSignal);

@@ -1,3 +1,10 @@
+// @vitest-environment node
+//
+// Node, not jsdom: sendTx's tx-build path calls
+// ComputeBudgetProgram.requestHeapFrame, whose buffer-layout encoder rejects
+// jsdom's realm-separated Uint8Array ("b must be a Uint8Array") — the same
+// test-environment artifact __tests__/setup.ts documents for tweetnacl.
+// Nothing in this file touches the DOM.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Keypair } from "@solana/web3.js";
 
@@ -7,7 +14,7 @@ vi.mock("@/lib/config", () => ({
 }));
 
 import { TransactionExpiredBlockheightExceededError } from "@solana/web3.js";
-import { sendTx, estimateFees, getClockDriftWarning, isBlockhashExpiredError, isConfirmationTimeoutError, checkSignatureLanded } from "@/lib/tx";
+import { sendTx, estimateFees, getClockDriftWarning, isBlockhashExpiredError, isConfirmationTimeoutError, checkSignatureLanded, extractTxErrorMessage } from "@/lib/tx";
 import type { SendTxParams, FeeEstimate } from "@/lib/tx";
 
 describe("sendTx", () => {
@@ -57,10 +64,16 @@ describe("sendTx", () => {
     const conn = {
       rpcEndpoint: "https://api.devnet.solana.com",
       getGenesisHash,
+      getRecentPrioritizationFees: vi.fn().mockResolvedValue([]),
+      getBalance: vi.fn().mockResolvedValue(10_000_000),
+      getLatestBlockhash: vi.fn().mockResolvedValue({
+        blockhash: "11111111111111111111111111111111",
+        lastValidBlockHeight: 123,
+      }),
     } as any;
     const wallet = {
       publicKey: Keypair.generate().publicKey,
-      signTransaction: vi.fn(),
+      signTransaction: vi.fn().mockRejectedValue(new Error("mock wallet stop")),
     };
 
     let caught: unknown;
@@ -84,6 +97,152 @@ describe("sendTx", () => {
     };
     expect(params.computeUnits).toBe(200_000);
     expect(params.maxRetries).toBe(2);
+  });
+});
+
+
+describe("extractTxErrorMessage", () => {
+  it("preserves nested failing log lines when a wallet wraps the failure as unexpected, filtering noise", () => {
+    const err = new Error("Unexpected error") as Error & { cause?: unknown };
+    err.cause = {
+      logs: [
+        "Program log: Instruction: Trade",
+        "Program failed: custom program error: 0x15",
+      ],
+    };
+
+    const msg = extractTxErrorMessage(err);
+
+    expect(msg).toContain("Unexpected error");
+    expect(msg).toContain("custom program error: 0x15");
+    // Non-failure log noise must NOT enter the thrown message — it drowns the
+    // failing line and creates substring false positives downstream.
+    expect(msg).not.toContain("Instruction: Trade");
+  });
+
+  it("preserves nested cause messages from wrapped transaction errors", () => {
+    const err = new Error("Unexpected error") as Error & { cause?: unknown };
+    err.cause = new Error("Transaction simulation failed: Error processing Instruction 0: custom program error: 0x13");
+
+    const msg = extractTxErrorMessage(err);
+
+    expect(msg).toContain("Unexpected error");
+    expect(msg).toContain("custom program error: 0x13");
+  });
+
+  it("drops invoke/success log lines and caps admitted log lines at 12, preserving order", () => {
+    const noisy = Array.from({ length: 30 }, (_, i) => `Program log: step ${i} ok`);
+    const failures = Array.from({ length: 20 }, (_, i) => `Program log: failed check ${i}`);
+    const err = new Error("boom") as Error & { cause?: unknown };
+    err.cause = {
+      logs: [
+        "Program SomeProg1111111111111111111111111111111111 invoke [1]",
+        ...noisy,
+        ...failures,
+        "Program SomeProg1111111111111111111111111111111111 success",
+      ],
+    };
+
+    const msg = extractTxErrorMessage(err);
+    const lines = msg.split("\n");
+
+    expect(msg).not.toContain("invoke [1]");
+    expect(msg).not.toContain("success");
+    expect(msg).not.toContain("step 0 ok");
+    // "boom" + capped 12 failure lines
+    expect(lines.length).toBe(13);
+    expect(lines[1]).toBe("Program log: failed check 0");
+    expect(lines[12]).toBe("Program log: failed check 11");
+  });
+});
+
+describe("sendTx atomic signAndSendTransaction path — error detail preservation", () => {
+  const LIGHTHOUSE_ID = "L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95";
+
+  const makeConn = () =>
+    ({
+      rpcEndpoint: "https://api.devnet.solana.com",
+      getRecentPrioritizationFees: vi.fn().mockResolvedValue([]),
+      getBalance: vi.fn().mockResolvedValue(1_000_000_000),
+      getLatestBlockhash: vi.fn().mockResolvedValue({
+        blockhash: "11111111111111111111111111111111",
+        lastValidBlockHeight: 123,
+      }),
+      simulateTransaction: vi.fn().mockResolvedValue({ value: { err: null, logs: [] } }),
+    }) as any;
+
+  const makeWallet = (sendErr: unknown) => ({
+    publicKey: Keypair.generate().publicKey,
+    signAndSendTransaction: vi.fn().mockRejectedValue(sendErr),
+  });
+
+  it("throws the EXTRACTED message (nested cause detail) instead of the wallet's generic wrapper", async () => {
+    // Privy-style: generic top-level message, real detail buried in cause.logs.
+    const privyErr = new Error("Unexpected error") as Error & { cause?: unknown };
+    privyErr.cause = {
+      logs: [
+        "Program log: Instruction: Deposit",
+        "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P failed: custom program error: 0x13",
+      ],
+    };
+
+    let caught: unknown;
+    try {
+      await sendTx({ connection: makeConn(), wallet: makeWallet(privyErr), instructions: [] });
+    } catch (e) {
+      caught = e;
+    }
+
+    const err = caught as Error;
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toContain("Unexpected error");
+    expect(err.message).toContain("custom program error: 0x13");
+    // Original wallet error preserved for debugging.
+    expect(err.cause).toBe(privyErr);
+  });
+
+  it("does NOT show the wallet-security message for a PASSING Lighthouse assertion + unrelated 0x31 failure", async () => {
+    const privyErr = new Error("Unexpected error") as Error & { cause?: unknown };
+    privyErr.cause = {
+      logs: [
+        `Program ${LIGHTHOUSE_ID} invoke [1]`,
+        `Program ${LIGHTHOUSE_ID} success`,
+        "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P invoke [1]",
+        "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P failed: custom program error: 0x31",
+      ],
+    };
+
+    let caught: unknown;
+    try {
+      await sendTx({ connection: makeConn(), wallet: makeWallet(privyErr), instructions: [] });
+    } catch (e) {
+      caught = e;
+    }
+
+    const err = caught as Error;
+    expect(err.message).not.toContain("wallet security");
+    expect(err.message).toContain("custom program error: 0x31");
+  });
+
+  it("shows the wallet-security message for a GENUINE Lighthouse 0x1900 failure", async () => {
+    const privyErr = new Error("Unexpected error") as Error & { cause?: unknown };
+    privyErr.cause = {
+      logs: [
+        `Program ${LIGHTHOUSE_ID} invoke [1]`,
+        `Program ${LIGHTHOUSE_ID} failed: custom program error: 0x1900`,
+      ],
+    };
+
+    let caught: unknown;
+    try {
+      await sendTx({ connection: makeConn(), wallet: makeWallet(privyErr), instructions: [] });
+    } catch (e) {
+      caught = e;
+    }
+
+    const err = caught as Error;
+    expect(err.message).toContain("Transaction blocked by wallet security");
+    expect(err.cause).toBe(privyErr);
   });
 });
 
