@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getNetwork: vi.fn(),
   isV17Account: vi.fn(),
   parseWrapperConfigV17: vi.fn(),
+  parsePortfolioV17: vi.fn(),
   parseV17RiskParams: vi.fn(),
 }));
 
@@ -29,6 +30,7 @@ vi.mock('@percolatorct/sdk', async () => {
     ...actual,
     isV17Account: mocks.isV17Account,
     parseWrapperConfigV17: mocks.parseWrapperConfigV17,
+    parsePortfolioV17: mocks.parsePortfolioV17,
   };
 });
 
@@ -162,6 +164,12 @@ describe('usePortfolio v17 owner-scan behavioral regression', () => {
       initialMarginBps: 1_000n,
     });
 
+    // vi.clearAllMocks() does NOT clear implementations — reset to a loud
+    // default each test so a per-test stub can't leak into its neighbors.
+    mocks.parsePortfolioV17.mockImplementation(() => {
+      throw new Error('parsePortfolioV17 not stubbed for this test');
+    });
+
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => ({
@@ -187,6 +195,166 @@ describe('usePortfolio v17 owner-scan behavioral regression', () => {
 
     expect(scenario.getProgramAccounts).toHaveBeenCalledTimes(2);
     expect(peekPortfolioSnapshot(cacheKey)).toBeNull();
+  });
+
+  it('rejects when the batched slab fetch fails, preserving the last-good snapshot', async () => {
+    const wallet = uniquePublicKey();
+    const prog = uniquePublicKey();
+    const market = makeMarket(uniquePublicKey());
+    mocks.discoverMarketsViaProgramDirectory.mockResolvedValue([market]);
+
+    const getMultipleAccountsInfo = vi.fn().mockRejectedValue(new Error('429 slab batch failed'));
+    const getProgramAccounts = vi.fn().mockResolvedValue([]);
+    const connection = {
+      getMultipleAccountsInfo,
+      getProgramAccounts,
+    } as unknown as Parameters<typeof fetchPortfolioSnapshot>[0];
+
+    const cacheKey = `slab-batch-fail:${wallet.toBase58()}`;
+    const lastGoodSnapshot = makeLastGoodSnapshot();
+    await loadPortfolioShared(cacheKey, true, async () => lastGoodSnapshot);
+
+    await expect(
+      loadPortfolioShared(cacheKey, true, () =>
+        fetchPortfolioSnapshot(connection, wallet, [prog.toBase58()]),
+      ),
+    ).rejects.toThrow('429 slab batch failed');
+
+    // The failed fetch must not overwrite the last-good cached snapshot.
+    expect(peekPortfolioSnapshot(cacheKey)).toBe(lastGoodSnapshot);
+  });
+
+  it('rejects when market discovery fails instead of caching an empty snapshot', async () => {
+    const wallet = uniquePublicKey();
+    const prog = uniquePublicKey();
+    mocks.discoverMarketsViaProgramDirectory.mockRejectedValue(new Error('directory down'));
+
+    const getMultipleAccountsInfo = vi.fn().mockResolvedValue([]);
+    const getProgramAccounts = vi.fn().mockResolvedValue([]);
+    const connection = {
+      getMultipleAccountsInfo,
+      getProgramAccounts,
+    } as unknown as Parameters<typeof fetchPortfolioSnapshot>[0];
+
+    const cacheKey = `discovery-fail:${wallet.toBase58()}`;
+    await expect(
+      loadPortfolioShared(cacheKey, true, () =>
+        fetchPortfolioSnapshot(connection, wallet, [prog.toBase58()]),
+      ),
+    ).rejects.toThrow('directory down');
+
+    expect(peekPortfolioSnapshot(cacheKey)).toBeNull();
+    // The scan never got as far as fetching slabs.
+    expect(getMultipleAccountsInfo).not.toHaveBeenCalled();
+  });
+
+  it('treats a discovery source that succeeds with zero markets as a legitimate empty snapshot', async () => {
+    const wallet = uniquePublicKey();
+    const prog = uniquePublicKey();
+    mocks.discoverMarketsViaProgramDirectory.mockResolvedValue([]);
+
+    const getMultipleAccountsInfo = vi.fn().mockResolvedValue([]);
+    const getProgramAccounts = vi.fn().mockResolvedValue([]);
+    const connection = {
+      getMultipleAccountsInfo,
+      getProgramAccounts,
+    } as unknown as Parameters<typeof fetchPortfolioSnapshot>[0];
+
+    const cacheKey = `discovery-zero:${wallet.toBase58()}`;
+    const snap = await loadPortfolioShared(cacheKey, true, () =>
+      fetchPortfolioSnapshot(connection, wallet, [prog.toBase58()]),
+    );
+
+    expect(snap.positions).toHaveLength(0);
+    expect(peekPortfolioSnapshot(cacheKey)).toBe(snap);
+  });
+
+  it('rejects when the NFT-wrapped recovery scan fails instead of caching a snapshot missing wrapped positions', async () => {
+    const wallet = uniquePublicKey();
+    const prog = uniquePublicKey();
+    const wrapperProgram = uniquePublicKey();
+    const market = makeMarket(uniquePublicKey());
+    mocks.discoverMarketsViaProgramDirectory.mockResolvedValue([market]);
+
+    const getMultipleAccountsInfo = vi.fn().mockResolvedValue([
+      { data: Buffer.alloc(256), owner: wrapperProgram },
+    ]);
+    const getProgramAccounts = vi.fn(async (programId: PublicKey) => {
+      // Owner scan succeeds (no plain positions) …
+      if (programId.equals(wrapperProgram)) return [];
+      // … but the NFT last_holder scan fails.
+      throw new Error('429 during NFT last_holder scan');
+    });
+    const connection = {
+      getMultipleAccountsInfo,
+      getProgramAccounts,
+    } as unknown as Parameters<typeof fetchPortfolioSnapshot>[0];
+
+    const cacheKey = `nft-scan-fail:${wallet.toBase58()}`;
+    await expect(
+      loadPortfolioShared(cacheKey, true, () =>
+        fetchPortfolioSnapshot(connection, wallet, [prog.toBase58()]),
+      ),
+    ).rejects.toThrow('429 during NFT last_holder scan');
+
+    expect(peekPortfolioSnapshot(cacheKey)).toBeNull();
+  });
+
+  it('skips one unparseable portfolio account but still surfaces the good ones (self-healing)', async () => {
+    const wallet = uniquePublicKey();
+    const prog = uniquePublicKey();
+    const wrapperProgram = uniquePublicKey();
+    const slab = uniquePublicKey();
+    const market = makeMarket(slab);
+    mocks.discoverMarketsViaProgramDirectory.mockResolvedValue([market]);
+
+    // Corrupt: passes the server-side magic+owner memcmp but is truncated.
+    // Good: parses into a live one-leg portfolio owned by this wallet.
+    const corruptData = Buffer.alloc(120);
+    const goodData = Buffer.alloc(300);
+    mocks.parsePortfolioV17.mockImplementation((data: Buffer | Uint8Array) => {
+      if (data.length < 200) throw new Error('portfolio data too short');
+      return {
+        owner: wallet,
+        marketGroupId: slab,
+        capital: 1_000n,
+        pnl: 0n,
+        reservedPnl: 0n,
+        feeCredits: 0n,
+        lastFeeSlot: 0n,
+        legs: [{ active: true, basisPosQ: 5n }],
+      };
+    });
+
+    const getMultipleAccountsInfo = vi.fn().mockResolvedValue([
+      { data: Buffer.alloc(256), owner: wrapperProgram },
+    ]);
+    const getProgramAccounts = vi.fn(async (programId: PublicKey) => {
+      if (programId.equals(wrapperProgram)) {
+        return [
+          { pubkey: uniquePublicKey(), account: { data: corruptData } },
+          { pubkey: uniquePublicKey(), account: { data: goodData } },
+        ];
+      }
+      // NFT recovery scan: nothing wrapped.
+      return [];
+    });
+    const connection = {
+      getMultipleAccountsInfo,
+      getProgramAccounts,
+    } as unknown as Parameters<typeof fetchPortfolioSnapshot>[0];
+
+    const cacheKey = `corrupt-account-isolated:${wallet.toBase58()}`;
+    const snap = await loadPortfolioShared(cacheKey, true, () =>
+      fetchPortfolioSnapshot(connection, wallet, [prog.toBase58()]),
+    );
+
+    // The scan succeeded: ONE permanently-unparseable account must only lose
+    // that account — not reject every future fetch (permanent blank portfolio).
+    expect(snap.positions).toHaveLength(1);
+    expect(snap.positions[0].slabAddress).toBe(slab.toBase58());
+    expect(snap.totalDeposited).toBe(1_000n);
+    expect(peekPortfolioSnapshot(cacheKey)).toBe(snap);
   });
 
   it('preserves the last-good complete snapshot after a failed forced refresh', async () => {
