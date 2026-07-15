@@ -186,7 +186,23 @@
   --accent-text: var(--accent-muted);
   --hud-line:       rgba(153, 69, 255, 0.15);
   --hud-line-hover: rgba(153, 69, 255, 0.35);
-  --cyan-muted:     rgba(20, 241, 149, 0.10);
+
+  /* Semantic colors — the dark-theme values are neons tuned for dark
+     surfaces and collapse on white (#14F195 lands at ~1.4:1 — every
+     positive-PnL numeral, Long fill, and APR figure was near-invisible in
+     light mode). These darker tones stay legible as TEXT on the light bg
+     (emerald-600 3.9:1, red-600 4.5:1, amber-700 4.6:1, teal-700 4.9:1)
+     while keeping the two FILL pairings readable: Long fills pair with
+     black text (black on #059669 ≈ 5.9:1), Short fills with white text
+     (white on #DC2626 ≈ 4.6:1). Chart candles use the same values via
+     useChartTheme's LIGHT_THEME — keep the two in sync. */
+  --long:     #059669;
+  --short:    #DC2626;
+  --good:     #059669;
+  --critical: #DC2626;
+  --warning:  #B45309;
+  --cyan:     #0F766E;
+  --cyan-muted: rgba(5, 150, 105, 0.10);
 
   /* Elevation — lighter neutral shadows read correctly on a white surface */
   --shadow-xs: 0 1px 2px rgba(13, 14, 21, 0.06);

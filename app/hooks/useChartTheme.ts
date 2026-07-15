@@ -11,6 +11,10 @@ export interface ChartTheme {
   downColor: string;
   volUpColor: string;
   volDownColor: string;
+  /** Neutral overlay-line color (the Mark price line before any tick). */
+  neutralLine: string;
+  /** Entry price overlay line — cyan family, per-theme so it stays legible. */
+  entryLine: string;
 }
 
 const DARK_THEME: ChartTheme = {
@@ -36,6 +40,8 @@ const DARK_THEME: ChartTheme = {
   downColor: "#FF3B5C",
   volUpColor: "rgba(20,241,149,0.6)",
   volDownColor: "rgba(255,59,92,0.6)",
+  neutralLine: "rgba(255,255,255,0.6)",
+  entryLine: "#22d3ee",
 };
 
 const LIGHT_THEME: ChartTheme = {
@@ -43,10 +49,14 @@ const LIGHT_THEME: ChartTheme = {
   textColor: "rgba(13,14,21,0.65)",
   gridColor: "rgba(0,0,0,0.05)",
   borderColor: "rgba(0,0,0,0.10)",
-  upColor: "#16a34a",
-  downColor: "#dc2626",
-  volUpColor: "rgba(22,163,74,0.5)",
+  // Same values as the light-theme --long/--short tokens in globals.css —
+  // candles and UI numerals must agree on what "up" green looks like.
+  upColor: "#059669",
+  downColor: "#DC2626",
+  volUpColor: "rgba(5,150,105,0.5)",
   volDownColor: "rgba(220,38,38,0.5)",
+  neutralLine: "rgba(13,14,21,0.55)",
+  entryLine: "#0F766E",
 };
 
 function getThemeFromDOM(): "dark" | "light" {

@@ -273,6 +273,12 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
   // isolated ~10-line leaf (`LiveMarkPriceLabel`, defined above) that
   // subscribes to useLivePrice() itself so only IT re-renders on a tick.
   const chartTheme = useChartTheme();
+  // Ref mirror for the tick handler below — that effect deliberately deps
+  // only on [slabAddress] (rebuilding the subscription on theme change would
+  // be wasteful), so it must read the CURRENT theme through a ref or a theme
+  // flip would leave its closure coloring ticks with the old palette.
+  const chartThemeRef = useRef(chartTheme);
+  chartThemeRef.current = chartTheme;
   const [chartStyle, setChartStyle] = useChartStylePref();
   const [overlayPrefs, setOverlayPref] = useChartOverlayPrefs();
   const {
@@ -716,6 +722,12 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
       rightPriceScale: { borderColor: chartTheme.borderColor },
       timeScale: { borderColor: chartTheme.borderColor },
     });
+    // Overlay price lines were created with the previous theme's palette —
+    // repaint them too (the tick handler recolors the Mark line on the next
+    // tick anyway, but a flat market shouldn't keep stale-theme lines).
+    priceLineRef.current?.applyOptions({ color: chartTheme.neutralLine });
+    liqLineRef.current?.applyOptions({ color: chartTheme.downColor });
+    entryLineRef.current?.applyOptions({ color: chartTheme.entryLine });
   }, [chartTheme]);
 
   // Derive entry price from user account
@@ -791,7 +803,7 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
       if (initialPriceUsd != null && Number.isFinite(initialPriceUsd)) {
         priceLineRef.current = s.createPriceLine({
           price: initialPriceUsd,
-          color: "rgba(255,255,255,0.6)",
+          color: chartThemeRef.current.neutralLine,
           lineWidth: 1,
           lineStyle: LineStyle.Dashed,
           axisLabelVisible: true,
@@ -803,7 +815,8 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
       if (overlayPrefs.liq && liqPriceNum != null && liqPriceNum > 0) {
         liqLineRef.current = s.createPriceLine({
           price: liqPriceNum,
-          color: "#FF3B5C", // matches --short (canvas can't read CSS vars)
+          // Per-theme --short equivalent (canvas can't read CSS vars)
+          color: chartThemeRef.current.downColor,
           lineWidth: 2,
           lineStyle: LineStyle.Solid,
           axisLabelVisible: true,
@@ -814,7 +827,7 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
       if (overlayPrefs.entry && entryPriceNum != null && entryPriceNum > 0) {
         entryLineRef.current = s.createPriceLine({
           price: entryPriceNum,
-          color: "#22d3ee",
+          color: chartThemeRef.current.entryLine,
           lineWidth: 1,
           lineStyle: LineStyle.Dashed,
           axisLabelVisible: true,
@@ -1074,10 +1087,12 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
         // long-green/short-red on each tick instead of sitting flat gray —
         // same semantic tokens as MarketInfoBar's MarkPrice flash, applied
         // here via the price line's own color (canvas can't read CSS vars,
-        // so these are the literal --long/--short hex values). Holds its
-        // last color on an exact-equal tick rather than resetting to gray.
+        // so ChartTheme carries the per-theme --long/--short equivalents;
+        // read through the ref, this effect deps only on slabAddress). Holds
+        // its last color on an exact-equal tick rather than resetting to gray.
         const prev = prevTickPriceRef.current;
-        const color = prev == null ? "rgba(255,255,255,0.6)" : usd > prev ? "#14F195" : usd < prev ? "#FF3B5C" : undefined;
+        const t = chartThemeRef.current;
+        const color = prev == null ? t.neutralLine : usd > prev ? t.upColor : usd < prev ? t.downColor : undefined;
         prevTickPriceRef.current = usd;
         priceLineRef.current.applyOptions(color ? { price: usd, color } : { price: usd });
       }
