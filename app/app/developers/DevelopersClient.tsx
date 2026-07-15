@@ -98,7 +98,7 @@ export const DevelopersClient: FC<Props> = ({
         {/* ★ H + A/K Risk Engine Formulas */}
         <section className="mt-16 mb-12">
           <h2
-            className="mb-2 text-2xl font-bold tracking-tight text-[var(--text)] sm:text-3xl"
+            className="mb-2 text-2xl font-bold tracking-tight text-[var(--text)] sm:text-4xl"
             style={{ fontFamily: "var(--font-display)" }}
           >
             Risk Engine — H&nbsp;+&nbsp;A/K

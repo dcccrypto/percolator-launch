@@ -71,7 +71,7 @@ export function LpPositionDashboard({
         <div className="flex items-center justify-between mb-5">
           <h3
             className="text-sm font-medium text-[var(--text)]"
-            style={{ fontFamily: 'var(--font-heading)' }}
+            style={{ fontFamily: 'var(--font-display)' }}
           >
             Your LP Position
           </h3>

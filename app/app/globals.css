@@ -263,7 +263,6 @@ html {
   --font-sans: var(--font-jetbrains-mono), var(--font-geist-mono), monospace;
   --font-mono: var(--font-jetbrains-mono), var(--font-geist-mono), monospace;
   --font-display: var(--font-outfit), var(--font-space-grotesk), system-ui;
-  --font-heading: var(--font-jetbrains-mono), var(--font-geist-mono), monospace;
 
   /* Custom Animations & Keyframes for Tailwind v4 */
   --animate-shimmer-sweep: shimmer-sweep 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;

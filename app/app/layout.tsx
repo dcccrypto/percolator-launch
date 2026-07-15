@@ -21,7 +21,7 @@ import { CloudflareAnalytics } from "@/components/analytics/CloudflareAnalytics"
 // never rendered (fallback-only entries in globals.css's font stacks, sitting
 // behind fonts that next/font self-hosts and therefore always loads). Down to
 // the 2 families actually painted on screen:
-//   JetBrains Mono  → --font-sans, --font-mono, --font-heading (the body/data font)
+//   JetBrains Mono  → --font-sans, --font-mono (the body/data font)
 //   Outfit          → --font-display (headings, OG image wordmark)
 const jetbrainsMono = JetBrains_Mono({ variable: "--font-jetbrains-mono", subsets: ["latin"], weight: ["400", "500", "600", "700"], display: "swap" });
 const outfit = Outfit({ variable: "--font-outfit", subsets: ["latin"], weight: ["400", "500", "600", "700"], display: "swap" });

@@ -169,8 +169,8 @@ function MyRankCard({ entry, walletConnected }: MyRankCardProps) {
           </p>
           <div className="flex items-center gap-3">
             <span
-              className="text-xl font-bold tabular-nums text-[var(--accent)]"
-              style={{ fontFamily: "var(--font-heading)" }}
+              className="text-2xl font-bold tabular-nums text-[var(--accent)]"
+              style={{ fontFamily: "var(--font-display)" }}
             >
               #{entry.rank}
             </span>
@@ -321,8 +321,8 @@ export default function LeaderboardPage() {
           </div>
           <div className="mb-1 flex items-center gap-3">
             <h1
-              className="text-3xl font-medium tracking-[-0.02em] text-[var(--text)]"
-              style={{ fontFamily: "var(--font-heading)" }}
+              className="text-4xl font-bold tracking-tight text-[var(--text)]"
+              style={{ fontFamily: "var(--font-display)" }}
             >
               Top Traders
             </h1>

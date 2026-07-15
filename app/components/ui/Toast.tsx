@@ -84,7 +84,7 @@ const SingleToast: FC<{ item: ToastItem; onDismiss: (id: string) => void }> = ({
       className={`pointer-events-auto flex items-center gap-3 rounded-sm border px-4 py-3 shadow-lg bg-[var(--panel-bg)] ${c.border}`}
       style={{ opacity: 0 }}
     >
-      <span className={`text-base font-bold ${TEXT_COLORS[item.type]}`}>{c.icon}</span>
+      <span className={`text-sm font-bold ${TEXT_COLORS[item.type]}`}>{c.icon}</span>
       <span className="text-sm text-[var(--text)]">{item.message}</span>
       <button
         onClick={handleDismiss}

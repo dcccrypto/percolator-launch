@@ -111,7 +111,7 @@ function WalletPageInner() {
                 <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">
                   Active Wallet
                 </p>
-                <h2 className="mt-2 text-lg font-semibold text-[var(--text)]">
+                <h2 className="mt-2 text-2xl font-semibold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
                   {activeWallet?.standardWallet?.name ?? "Connected Wallet"}
                 </h2>
                 <div className="mt-3">
@@ -305,7 +305,7 @@ function WalletLayout({ children }: { children: React.ReactNode }) {
             <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
               // wallet
             </div>
-            <h1 className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+            <h1 className="text-2xl font-medium tracking-[-0.01em] text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
               Wallet Command
             </h1>
             <p className="mt-2 text-[13px] text-[var(--text-secondary)]">
