@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
 import { computeLivePositionPnl } from "@/lib/trading";
+import { computeLiquidationDistancePct } from "@/lib/liquidation-distance";
 import { SlabProvider } from "@/components/providers/SlabProvider";
 import { useClosePosition } from "@/hooks/useClosePosition";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
@@ -209,10 +210,12 @@ function PositionCard({
     pos.unrealizedPnl,
     pos.pnlPercent,
   );
-  const liquidationDistancePct =
-    hasPosition && liquidationPriceE6 > 0n && markE6 > 0n
-      ? Math.max(0, Math.min(100, (Math.abs(Number(markE6) - Number(liquidationPriceE6)) / Number(markE6)) * 100))
-      : pos.liquidationDistancePct;
+  const liquidationDistancePct = computeLiquidationDistancePct(
+    posSize,
+    markE6,
+    liquidationPriceE6,
+    pos.liquidationDistancePct,
+  );
   const pnlPositive = pnlTokens >= 0n;
   const severity = getLiquidationSeverity(liquidationDistancePct);
   const livePriceUsd = getSnapshot(pos.slabAddress).priceUsd ?? (markE6 > 0n ? Number(markE6) / 1e6 : null);
