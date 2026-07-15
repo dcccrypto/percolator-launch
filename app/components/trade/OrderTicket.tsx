@@ -549,12 +549,17 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const beforeLiqPrice = userAccount && userAccount.account.positionSize !== 0n && existingEntryPriceE6 > 0n
     ? computeLiqPrice(existingEntryPriceE6, capital, userAccount.account.positionSize, maintenanceMarginBps)
     : 0n;
-  // BUG 9 fix: opening a position RESERVES margin from existing capital — it is
-  // not a deposit — so this must show capital -> capital MINUS the reserved
-  // margin (what's left available), never capital + marginNative, which
-  // fabricated a higher post-trade balance (e.g. "100 -> 120 USDC").
-  const beforeMargin = capital;
-  const afterMargin = beforeMargin > marginNative ? beforeMargin - marginNative : 0n;
+  // BUG 9 fix + copy clarity: opening a position RESERVES margin from
+  // existing capital — it is not a deposit. The old receipt row was labeled
+  // "Margin req." but actually showed capital -> capital-minus-margin (a
+  // balance readout), so the actual requirement never appeared as a number
+  // and the label lied about the row. The receipt now shows BOTH, on the
+  // same "available" basis as the account strip above (capital minus margin
+  // already locked by an open position) so the two readouts can't disagree:
+  //   Margin            — what THIS order reserves (the requirement)
+  //   Available to trade — before -> after reserving it
+  const beforeAvailable = availableBalance;
+  const afterAvailable = beforeAvailable > marginNative ? beforeAvailable - marginNative : 0n;
   // Slippage: distance between the mark and the worst acceptable fill
   // (same computeLimitPriceE6 useTrade itself uses to derive the on-chain
   // limit when the caller doesn't supply one explicitly).
@@ -983,10 +988,16 @@ setEngineLockError(null);
                   tooltip="Worst acceptable fill price sent on-chain - the trade reverts rather than fill worse than this."
                 />
                 <DiffRow
-                  label="Margin req."
-                  before={`${formatTokenAmount(beforeMargin, decimals)} ${collateralSymbol}`}
-                  after={`${formatTokenAmount(afterMargin, decimals)} ${collateralSymbol}`}
-                  tooltip="Margin reserved from your account balance to back this position — not a deposit, so your balance after opening is lower, not higher."
+                  label="Margin"
+                  before="—"
+                  after={`${formatTokenAmount(marginNative, decimals)} ${collateralSymbol}`}
+                  tooltip="Collateral this order reserves from your account to back the position — returned (plus or minus PnL) when it closes. Not a fee."
+                />
+                <DiffRow
+                  label="Available to trade"
+                  before={`${formatTokenAmount(beforeAvailable, decimals)} ${collateralSymbol}`}
+                  after={`${formatTokenAmount(afterAvailable, decimals)} ${collateralSymbol}`}
+                  tooltip="Balance left for new orders after this one reserves its margin — same number as the account strip above."
                 />
               </>
             )}
