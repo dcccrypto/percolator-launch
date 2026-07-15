@@ -28,6 +28,7 @@ import { parseV17RiskParams } from "@/lib/v17-engine-config";
 import { getAllProgramIds, getNetwork } from "@/lib/config";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { getEntryPrice } from "@/lib/entry-price";
+import { computeLiquidationDistancePct } from "@/lib/liquidation-distance";
 import { discoverMarketsViaProgramDirectory } from "@/lib/market-directory-discovery";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
@@ -294,18 +295,11 @@ function buildV17Position(
     ? computePnlPercent(unrealizedPnl, positionInitialMargin)
     : computePnlPercent(unrealizedPnl, account.capital);
 
-  let liquidationDistancePct = 100;
-  if (oraclePriceE6 > 0n && liquidationPriceE6 > 0n && account.positionSize !== 0n) {
-    if (account.positionSize > 0n) {
-      liquidationDistancePct = oraclePriceE6 > liquidationPriceE6
-        ? Number(((oraclePriceE6 - liquidationPriceE6) * 10000n) / oraclePriceE6) / 100
-        : 0;
-    } else {
-      liquidationDistancePct = liquidationPriceE6 > oraclePriceE6
-        ? Number(((liquidationPriceE6 - oraclePriceE6) * 10000n) / liquidationPriceE6) / 100
-        : 0;
-    }
-  }
+  const liquidationDistancePct = computeLiquidationDistancePct(
+    account.positionSize,
+    oraclePriceE6,
+    liquidationPriceE6,
+  );
 
   const absPos = account.positionSize < 0n ? -account.positionSize : account.positionSize;
   let leverage = 0;
@@ -554,20 +548,11 @@ async function fetchPortfolioSnapshot(
               : computePnlPercent(unrealizedPnl, account.capital);
 
             // Liquidation distance percentage
-            let liquidationDistancePct = 100;
-            if (oraclePriceE6 > 0n && liquidationPriceE6 > 0n && account.positionSize !== 0n) {
-              if (account.positionSize > 0n) {
-                // Long: liq price is below oracle
-                liquidationDistancePct = oraclePriceE6 > liquidationPriceE6
-                  ? Number(((oraclePriceE6 - liquidationPriceE6) * 10000n) / oraclePriceE6) / 100
-                  : 0;
-              } else {
-                // Short: liq price is above oracle
-                liquidationDistancePct = liquidationPriceE6 > oraclePriceE6
-                  ? Number(((liquidationPriceE6 - oraclePriceE6) * 10000n) / liquidationPriceE6) / 100
-                  : 0;
-              }
-            }
+            const liquidationDistancePct = computeLiquidationDistancePct(
+              account.positionSize,
+              oraclePriceE6,
+              liquidationPriceE6,
+            );
 
             // Risk leverage = notional / slab account capital.
             const absPos = account.positionSize < 0n ? -account.positionSize : account.positionSize;
