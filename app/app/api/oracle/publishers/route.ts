@@ -98,7 +98,10 @@ export async function GET(req: NextRequest) {
   }
 
   // Check the bounded cache for externally resolved publisher modes.
-  const cacheKey = `${mode}:${feedId || ""}`;
+  // Normalize the feedId so case/0x-prefix variants of the SAME feed share
+  // one cache entry instead of each burning a slot in the bounded cache
+  // (hex is case-insensitive and the 0x prefix is optional throughout).
+  const cacheKey = `${mode}:${(feedId || "").toLowerCase().replace(/^0x/, "")}`;
   const cached = cache.get(cacheKey);
 
   if (cached) {
@@ -137,7 +140,17 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: `Unknown mode: ${mode}` }, { status: 400 });
     }
 
-    // Store only externally resolved modes in the bounded cache.
+    // Error-sentinel results (publisherCount === null: Pythnet unreachable /
+    // non-200 / bad magic, or the oracle bridge being down) are NOT cached —
+    // caching one would pin a transient upstream blip as "no publishers" for
+    // the full 5-minute TTL. Return it uncached so the next request retries.
+    if (result.publisherCount === null) {
+      return NextResponse.json(result, {
+        headers: { "Cache-Control": "no-store" },
+      });
+    }
+
+    // Store only successfully resolved external modes in the bounded cache.
     cache.set(cacheKey, result);
 
     return NextResponse.json(result, {

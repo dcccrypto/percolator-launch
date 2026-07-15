@@ -1073,6 +1073,12 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             {/* Oracle detection status */}
             {quickLaunch.loading ? (
               <p className="text-[10px] text-[var(--text-dim)]">⏳ Detecting oracle...</p>
+            ) : quickLaunch.oracleResolveFailed ? (
+              <p className="text-[10px] text-[var(--warning)]">
+                ⚠ Price feed lookup failed — this market will launch with an
+                admin oracle at $1.00. Re-enter the mint to retry, or proceed
+                only if that price is intentional.
+              </p>
             ) : quickLaunch.oracleType === "pyth" && quickLaunch.pythFeedId ? (
               <p className="text-[10px] text-[var(--long)]">
                 ✓ Pyth oracle detected — price feed will be used automatically

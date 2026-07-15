@@ -21,6 +21,7 @@ import {
 } from "@/lib/trading";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
+import { computeLiquidationDistancePct } from "@/lib/liquidation-distance";
 import { WarmupProgress } from "./WarmupProgress";
 import { ClosePositionModal } from "./ClosePositionModal";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
@@ -327,10 +328,14 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     maintenanceBps,
   );
 
-  // Liq price danger color: amber when mark is within 15% of liq
+  // Liq price danger color: amber when mark is within 15% of liq.
+  // Direction-aware (shared helper): a short whose mark has crossed ABOVE its
+  // liq price is distance 0 (critical), not "safe" — the old
+  // Math.abs(cur-liq)/cur showed a crossed position as far from liquidation.
+  // Helper returns percent 0-100; thresholds below consume a 0-1 fraction.
   const liqDistPct = (() => {
     if (liqPriceE6 <= 0n || !hasValidMark || currentPriceE6 <= 0n) return Infinity;
-    return Math.abs(Number(currentPriceE6) - Number(liqPriceE6)) / Number(currentPriceE6);
+    return computeLiquidationDistancePct(account.positionSize, currentPriceE6, liqPriceE6) / 100;
   })();
 
   // Long-side clamp: liq at/below $0 with a resolved entry = cannot be

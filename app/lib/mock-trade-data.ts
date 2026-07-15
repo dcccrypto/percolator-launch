@@ -7,6 +7,7 @@ import { PublicKey } from "@solana/web3.js";
 import type { MarketConfig, EngineState, RiskParams, SlabHeader, Account } from "@percolatorct/sdk";
 import { AccountKind } from "@percolatorct/sdk";
 import type { PortfolioPosition } from "@/hooks/usePortfolio";
+import { computeLiquidationDistancePct } from "@/lib/liquidation-distance";
 import type { UserAccountInfo } from "@/hooks/useUserAccount";
 
 interface MockMarketData {
@@ -465,10 +466,8 @@ export function getMockPortfolioPositions(): PortfolioPosition[] {
     // Mock liquidation: assume liq at 80% loss for longs, 120% gain for shorts
     const liqFactor = isLong ? 0.2 : 1.8;
     const liquidationPriceE6 = BigInt(Math.round(m.priceUsd * liqFactor * 1_000_000));
-    const liqDist = isLong
-      ? (Number(priceE6 - liquidationPriceE6) / Number(priceE6)) * 100
-      : (Number(liquidationPriceE6 - priceE6) / Number(priceE6)) * 100;
-    const liquidationDistancePct = Math.max(0, Math.min(100, liqDist));
+    // Same direction-aware helper the real portfolio scan uses (percent 0-100).
+    const liquidationDistancePct = computeLiquidationDistancePct(posSize, priceE6, liquidationPriceE6);
 
     positions.push({
       slabAddress: slabAddr,
