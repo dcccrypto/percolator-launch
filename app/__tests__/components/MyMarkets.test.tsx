@@ -2,19 +2,14 @@
  * /my-markets creator-dashboard tests.
  *
  * Covers:
- *  - useCreatedMarkets (hooks/useCreatedMarkets.ts): admin-detection filter,
- *    dedup, label generation, loading/error passthrough, v17 enrichment
- *    merge. This REPLACES the old useMyMarkets.ts test suite (that hook is
- *    deleted — its trader/LP owner-scan second pass was dropped entirely;
- *    see useCreatedMarkets.ts's top-of-file doc comment for why).
- *  - CreatorAttentionStrip's pure detection logic (components/my-markets/
- *    attentionLogic.ts): keeper-dead-feed and engine-crank-stale conditions.
- *  - The LP-liquidity display helpers (components/my-markets/types.ts):
- *    v17-vs-v12 source switch and the "materially diverges" sub-label gate.
+ * - useCreatedMarkets: creator detection, label generation, wallet-scoped
+ *   loading/error lifecycle, and v17 enrichment merging.
+ * - CreatorAttentionStrip's pure detection logic.
+ * - LP-liquidity display helpers and v17-vs-v12 source selection.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { PublicKey } from '@solana/web3.js';
 import { useCreatedMarkets } from '../../hooks/useCreatedMarkets';
 import {
@@ -177,10 +172,9 @@ describe('useCreatedMarkets Hook', () => {
 
     const { result } = renderHook(() => useCreatedMarkets());
 
-    // No second-pass trader/LP scan exists anymore — a non-admin market must
-    // never appear on this dashboard, full stop (this IS the behavior change
-    // the rebuild made: /my-markets = "markets you created", not "markets
-    // you touched").
+    // A market administered by another wallet remains excluded unless the
+    // connected wallet owns its creator LP portfolio. This fixture owns
+    // neither, so it must not appear on the creator dashboard.
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
@@ -319,7 +313,137 @@ describe('useCreatedMarkets Hook', () => {
     expect(result.current.myMarkets).toEqual([]);
   });
 
-  it('reports loading while discovery is loading, with no second RPC pass to wait on', () => {
+  it('keeps a verified creator snapshot stable across same-content discovery replacements', async () => {
+    const market = createMockV12Market(pk(112), mockPublicKey);
+    const refetch = vi.fn();
+
+    mockMarkets.push(market);
+    mockUseMarketDiscovery.mockReturnValue({
+      markets: [market],
+      loading: false,
+      error: null,
+      refetch,
+    });
+
+    mockConnection.getProgramAccounts.mockResolvedValueOnce([]);
+
+    const { result, rerender } = renderHook(() => useCreatedMarkets());
+
+    await waitFor(() => {
+      expect(result.current.myMarkets).toHaveLength(1);
+    });
+
+    expect(mockConnection.getProgramAccounts).toHaveBeenCalledTimes(1);
+
+    // A discovery refresh may replace the array while preserving the exact
+    // same wallet, slab, program, authority, and collateral identities.
+    mockUseMarketDiscovery.mockReturnValue({
+      markets: [market],
+      loading: false,
+      error: null,
+      refetch,
+    });
+    await act(async () => {
+      rerender();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockConnection.getProgramAccounts).toHaveBeenCalledTimes(1);
+    expect(result.current.error).toBeNull();
+    expect(result.current.myMarkets).toHaveLength(1);
+  });
+  it('withholds wallet A markets while wallet B ownership scan is pending', async () => {
+    const walletA = mockPublicKey;
+    const walletB = pk(226);
+    const marketA = createMockV12Market(pk(110), walletA);
+
+    mockMarkets.push(marketA);
+    mockUseMarketDiscovery.mockReturnValue({
+      markets: [marketA],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    mockConnection.getProgramAccounts
+      .mockResolvedValueOnce([])
+      .mockImplementationOnce(() => new Promise<never[]>(() => {}));
+
+    const { result, rerender } = renderHook(() => useCreatedMarkets());
+
+    await waitFor(() => {
+      expect(result.current.myMarkets).toHaveLength(1);
+    });
+
+    expect(mockConnection.getProgramAccounts).toHaveBeenCalledTimes(1);
+
+    mockUseWallet.mockReturnValue({
+      publicKey: walletB,
+      connected: true,
+    });
+
+    rerender();
+
+    await waitFor(() => {
+      expect(mockConnection.getProgramAccounts).toHaveBeenCalledTimes(2);
+    });
+
+    expect(result.current.myMarkets).toEqual([]);
+    expect(result.current.loading).toBe(true);
+  });
+  it('surfaces creator ownership scan failures instead of confirming an empty result', async () => {
+    const market = createMockV12Market(pk(109), pk(225));
+
+    mockMarkets.push(market);
+    mockUseMarketDiscovery.mockReturnValue({
+      markets: [market],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    mockConnection.getProgramAccounts.mockRejectedValueOnce(
+      new Error('creator ownership RPC scan failed'),
+    );
+
+    const { result } = renderHook(() => useCreatedMarkets());
+
+    await waitFor(() => {
+      expect(mockConnection.getProgramAccounts).toHaveBeenCalledTimes(1);
+    });
+
+    await waitFor(
+      () => {
+        expect(result.current.error).not.toBeNull();
+      },
+      { timeout: 500 },
+    );
+
+    expect(result.current.myMarkets).toEqual([]);
+  });
+  it('keeps loading while creator ownership scan is pending', async () => {
+    const market = createMockV12Market(pk(108), pk(224));
+
+    mockMarkets.push(market);
+    mockUseMarketDiscovery.mockReturnValue({
+      markets: [market],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    mockConnection.getProgramAccounts.mockImplementationOnce(() => new Promise<never[]>(() => {}));
+
+    const { result } = renderHook(() => useCreatedMarkets());
+
+    await waitFor(() => {
+      expect(mockConnection.getProgramAccounts).toHaveBeenCalledTimes(1);
+    });
+
+    expect(result.current.loading).toBe(true);
+  });
+  it('reports loading while market discovery is loading', () => {
     mockUseMarketDiscovery.mockReturnValue({ markets: [], loading: true, error: null, refetch: vi.fn() });
 
     const { result } = renderHook(() => useCreatedMarkets());
