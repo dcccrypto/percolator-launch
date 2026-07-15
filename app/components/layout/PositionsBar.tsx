@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
-import { usePathname } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { parseWrapperConfigV17, isV17Account, V17_HEADER_LEN } from "@percolatorct/sdk";
 import { subscribeSlab, getSnapshot, applyOnChainPoll } from "@/lib/priceStore/priceStore";
@@ -21,23 +20,6 @@ import { getMockPortfolioPositions } from "@/lib/mock-trade-data";
 const ONCHAIN_POLL_MS = 4_000;
 /** getMultipleAccountsInfo hard cap per request (RPC rejects >100). */
 const RPC_ACCOUNT_BATCH_CAP = 100;
-
-// The portfolio page already renders every position in full (and mounts its
-// own usePortfolio), and the dashboard mounts FOUR separate usePortfolio
-// instances (StatsBar/PnlChart/PositionSummary/DashboardHeader) — showing
-// the strip on either page doubles/quintuples chrome and RPC scans for no
-// information gain. Perf-review fix: this list gates the usePortfolio HOOK
-// itself (via `enabled`), not just the render below — see the `hidden`
-// derivation and its use as `usePortfolio(!hidden && ...)`.
-//
-// "/trade" is hidden too: the trade page's PositionsDock now renders its own
-// OtherMarketPositions list (all-markets, via its own usePortfolio call) in
-// the Positions tab, so the strip is redundant chrome there. usePortfolio has
-// no cross-instance dedup — without this, every /trade page would run TWO
-// concurrent wallet-wide portfolio scans (market discovery + batched
-// getMultipleAccountsInfo + up to two getProgramAccounts/market, each on its
-// own 30s poll) for the same data.
-const HIDDEN_ROUTES = ["/portfolio", "/dashboard", "/trade"];
 
 /** One position chip: ticker + live PnL, colored by sign, linking to the market. */
 function PositionChip({ pos, decimals }: { pos: PortfolioPosition; decimals: number }) {
@@ -101,33 +83,29 @@ function PositionChip({ pos, decimals }: { pos: PortfolioPosition; decimals: num
  * so a trader navigating anywhere on the site can watch their book and jump
  * straight to a market that's moving against them.
  *
- * Renders nothing (zero height) when the wallet is disconnected, the route
- * is one that already runs its own portfolio scan (see HIDDEN_ROUTES), the
- * portfolio is still on its first load, or there are no open positions.
+ * Shown on EVERY route (a trader wanted their book visible the whole time),
+ * including /trade, /portfolio and /dashboard where the same data also renders
+ * in full. Renders nothing (zero height) only when the wallet is disconnected,
+ * the portfolio is still on its first load, or there are no open positions.
  *
- * Perf: `usePortfolio` is a genuinely expensive hook — full market
- * discovery, a batched `getMultipleAccountsInfo`, and up to two
- * `getProgramAccounts` scans per market, on a 30s auto-refresh interval.
- * Gating only the RENDER (returning null below) while still calling the
- * hook unconditionally would mount that full cost on EVERY route for any
- * connected wallet, plus a redundant second scan on /portfolio (whose page
- * already mounts its own `usePortfolio()`). `enabled` below gates the HOOK
- * itself instead, so the strip has zero RPC footprint anywhere it isn't
- * actually shown.
+ * Perf: `usePortfolio` is a genuinely expensive hook — full market discovery,
+ * a batched `getMultipleAccountsInfo`, and up to two `getProgramAccounts` scans
+ * per market. Showing the strip alongside a page that already mounts its own
+ * `usePortfolio()` (portfolio: 1, dashboard: 4, trade's PositionsDock: 1) does
+ * NOT multiply that cost: `usePortfolio` is fronted by a wallet-keyed dedup
+ * layer (`loadPortfolioShared` — 12s TTL cache + in-flight join) that collapses
+ * every mounted instance into ONE scan cycle, so the strip's scan coalesces
+ * with the page's rather than duplicating it.
  */
 export function PositionsBar() {
-  const pathname = usePathname();
   const { connected: walletConnected } = useWalletCompat();
   const mockMode = isMockMode();
 
-  const hidden =
-    pathname != null && HIDDEN_ROUTES.some((r) => pathname === r || pathname.startsWith(r + "/"));
-
-  // Mock-mode positions never touch the network (see getMockPortfolioPositions),
-  // so there's nothing to gate there — only the real hook's fetch/poll needs
-  // `enabled` to track "would this strip actually show anything right now".
   const usingMockData = mockMode && !walletConnected;
-  const portfolio = usePortfolio(!hidden && walletConnected);
+  // Deduped across the app (loadPortfolioShared) — mounting this alongside a
+  // page that already runs its own usePortfolio() joins that scan rather than
+  // firing a second one, so showing the strip everywhere costs one book scan.
+  const portfolio = usePortfolio(walletConnected);
 
   const mockPositions = usingMockData ? getMockPortfolioPositions() : null;
   const positions = mockPositions ?? portfolio.positions;
@@ -170,10 +148,9 @@ export function PositionsBar() {
     .sort()
     .join(",");
   useEffect(() => {
-    // No poll when the bar isn't showing (hidden route), disconnected, or
-    // the book is mock (mock slabs aren't on-chain accounts) — zero RPC
-    // when invisible.
-    if (!slabKey || usingMockData || hidden) return;
+    // No poll when there's nothing to watch or the book is mock (mock slabs
+    // aren't on-chain accounts).
+    if (!slabKey || usingMockData) return;
     const slabAddrs = slabKey.split(",").slice(0, RPC_ACCOUNT_BATCH_CAP);
     let keys: PublicKey[];
     try {
@@ -207,25 +184,87 @@ export function PositionsBar() {
       cancelled = true;
       dispose();
     };
-  }, [connection, slabKey, usingMockData, hidden]);
+  }, [connection, slabKey, usingMockData]);
 
-  if (hidden || (!walletConnected && !mockPositions) || openPositions.length === 0) return null;
+  // ── Overflow affordance ──────────────────────────────────────────────────
+  // The chip row scrolls horizontally when the book is wider than the viewport
+  // (scrollbar is hidden for a clean strip). Without a cue, off-screen chips are
+  // undiscoverable — so show a fading edge + a click-to-scroll arrow on whichever
+  // side has more content. `overflow.{left,right}` track which arrows to render.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [overflow, setOverflow] = useState<{ left: boolean; right: boolean }>({ left: false, right: false });
+
+  const updateOverflow = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    // 1px slack absorbs sub-pixel rounding so the arrow doesn't flicker at the ends.
+    const left = el.scrollLeft > 1;
+    const right = Math.ceil(el.scrollLeft + el.clientWidth) < el.scrollWidth - 1;
+    setOverflow((prev) => (prev.left === left && prev.right === right ? prev : { left, right }));
+  }, []);
+
+  // Recompute on viewport resize (ResizeObserver) and whenever the set of chips
+  // changes (the openPositions.length dep) — both change whether the row overflows.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    updateOverflow();
+    const ro = new ResizeObserver(updateOverflow);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [updateOverflow, openPositions.length]);
+
+  const scrollByArrow = useCallback((dir: -1 | 1) => {
+    scrollRef.current?.scrollBy({ left: dir * 240, behavior: "smooth" });
+  }, []);
+
+  if ((!walletConnected && !mockPositions) || openPositions.length === 0) return null;
 
   return (
     <div
-      className="sticky top-14 z-40 flex items-center overflow-x-auto border-b border-[var(--border)] bg-[var(--bg)]/95 backdrop-blur-md [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="sticky top-14 z-40 flex items-center border-b border-[var(--border)] bg-[var(--bg)]/95 backdrop-blur-md"
       data-testid="positions-bar"
     >
       <span className="shrink-0 select-none border-r border-[var(--border)] px-3 py-1 text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">
         Positions
       </span>
-      {openPositions.map((pos, i) => (
-        <PositionChip
-          key={`${pos.slabAddress}-${pos.idx ?? i}`}
-          pos={pos}
-          decimals={tokenMetaMap.get(pos.collateralMint.toBase58())?.decimals ?? 6}
-        />
-      ))}
+      <div className="relative min-w-0 flex-1">
+        {/* Left fade + scroll-back arrow — only when there's content to the left. */}
+        {overflow.left && (
+          <button
+            type="button"
+            onClick={() => scrollByArrow(-1)}
+            aria-label="Scroll positions left"
+            className="absolute inset-y-0 left-0 z-10 flex w-9 items-center justify-start bg-gradient-to-r from-[var(--bg)] via-[var(--bg)]/85 to-transparent pl-1 text-[13px] leading-none text-[var(--text-secondary)] transition-colors hover:text-[var(--text)]"
+          >
+            <span aria-hidden>‹</span>
+          </button>
+        )}
+        <div
+          ref={scrollRef}
+          onScroll={updateOverflow}
+          className="flex items-center overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {openPositions.map((pos, i) => (
+            <PositionChip
+              key={`${pos.slabAddress}-${pos.idx ?? i}`}
+              pos={pos}
+              decimals={tokenMetaMap.get(pos.collateralMint.toBase58())?.decimals ?? 6}
+            />
+          ))}
+        </div>
+        {/* Right fade + scroll-forward arrow — only when there's more off-screen. */}
+        {overflow.right && (
+          <button
+            type="button"
+            onClick={() => scrollByArrow(1)}
+            aria-label="Scroll positions right"
+            className="absolute inset-y-0 right-0 z-10 flex w-9 items-center justify-end bg-gradient-to-l from-[var(--bg)] via-[var(--bg)]/85 to-transparent pr-1 text-[13px] leading-none text-[var(--text-secondary)] transition-colors hover:text-[var(--text)]"
+          >
+            <span aria-hidden>›</span>
+          </button>
+        )}
+      </div>
     </div>
   );
 }

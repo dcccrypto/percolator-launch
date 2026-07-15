@@ -152,6 +152,56 @@ export function hasRenderableData(
   return { ready: len >= 1, sparse: len < 2 };
 }
 
+/** Full numeric OHLC shape the finite-filter reads (superset of `OhlcLike`,
+ *  which only carries `timestamp` for the length-based readiness check). */
+interface OhlcValues {
+  readonly timestamp: number;
+  readonly open: number;
+  readonly high: number;
+  readonly low: number;
+  readonly close: number;
+}
+
+/** Single-value point shape the finite-filter reads. */
+interface PriceValue {
+  readonly timestamp: number;
+  readonly price: number;
+}
+
+/** Drop any candle lightweight-charts would treat as a WHITESPACE point.
+ *
+ *  A point whose value isn't a finite number (NaN / ±Infinity) is silently
+ *  demoted by lightweight-charts to a "whitespace" item: it still reserves the
+ *  time slot but plots nothing and contributes NO price range. A series whose
+ *  points are ALL whitespace has a null `firstValue`/`priceRange`, and drawing
+ *  any price line (Mark / Liq / Entry) onto it makes the library throw
+ *  "Value is null" on the next paint (the TradingChart error boundary then
+ *  shows "something broke"). That state is reachable when the oracle-aggregated
+ *  fallback runs over price points that parsed to NaN (e.g. a malformed
+ *  `price_e6` from the indexer on a brand-new market) — the candle sources are
+ *  otherwise clean. Filtering here keeps `hasRenderableData`'s length check
+ *  honest: a "ready" array now always has >= 1 point that will genuinely plot,
+ *  so an all-NaN batch degrades to the empty/building overlay instead of a
+ *  crash. Volume is intentionally NOT required finite — the volume series
+ *  already coerces a non-finite bar to 0 at its own setData site. */
+export function finiteCandles<T extends OhlcValues>(candles: readonly T[]): T[] {
+  return candles.filter(
+    (c) =>
+      Number.isFinite(c.timestamp) &&
+      Number.isFinite(c.open) &&
+      Number.isFinite(c.high) &&
+      Number.isFinite(c.low) &&
+      Number.isFinite(c.close),
+  );
+}
+
+/** Single-value counterpart to `finiteCandles` for line/area + oracle points.
+ *  Same rationale — a non-finite `price` is a whitespace point that plots
+ *  nothing and establishes no price range. */
+export function finitePricePoints<T extends PriceValue>(points: readonly T[]): T[] {
+  return points.filter((p) => Number.isFinite(p.timestamp) && Number.isFinite(p.price));
+}
+
 /** Build the `addCandlestickSeries` option preset for a given candle variant.
  *
  *  - `candle-solid`: filled bodies in trend color (the default lightweight-charts look)

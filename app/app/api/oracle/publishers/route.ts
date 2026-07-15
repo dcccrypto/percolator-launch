@@ -1,4 +1,7 @@
+import { PublicKey } from "@solana/web3.js";
 import { NextRequest, NextResponse } from "next/server";
+
+import { BoundedTtlCache } from "@/lib/bounded-ttl-cache";
 
 const PYTHNET_RPC =
   process.env.PYTHNET_RPC_URL || "https://pythnet.rpcpool.com";
@@ -23,14 +26,20 @@ const KNOWN_PYTH_PUBLISHERS: Record<string, string> = {
   "4RVFNKH15CxFSYdoNBJJGggjszuTKmpFs4PGwuXSNaK7": "Raydium",
 };
 
-/** Max age for cached publisher data (5 minutes) */
+/** Max age for cached publisher data (5 minutes). */
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
-interface CacheEntry {
-  data: PublishersResponse;
-  timestamp: number;
-}
-const cache = new Map<string, CacheEntry>();
+/**
+ * Publisher responses have a small expected key space.
+ * Keep the process-local cache strictly bounded so request-controlled
+ * inputs cannot create persistent unbounded memory retention.
+ */
+const MAX_CACHE_ENTRIES = 128;
+
+const cache = new BoundedTtlCache<string, PublishersResponse>({
+  maxEntries: MAX_CACHE_ENTRIES,
+  ttlMs: CACHE_TTL_MS,
+});
 
 interface PublisherInfo {
   key: string;
@@ -65,11 +74,35 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Missing mode parameter" }, { status: 400 });
   }
 
-  // Check cache
-  const cacheKey = `${mode}:${feedId || authority || ""}`;
+  /*
+   * Admin output is generated locally and is intentionally excluded
+   * from the shared cache. This prevents attacker-controlled authority
+   * values from increasing cache cardinality.
+   */
+  if (mode === "admin") {
+    const validation = validateAdminAuthority(authority);
+
+    if (!validation.ok) {
+      return NextResponse.json(
+        { error: validation.error },
+        { status: 400 },
+      );
+    }
+
+    return NextResponse.json(
+      getAdminPublishers(validation.authority),
+      {
+        headers: { "Cache-Control": "no-store" },
+      },
+    );
+  }
+
+  // Check the bounded cache for externally resolved publisher modes.
+  const cacheKey = `${mode}:${feedId || ""}`;
   const cached = cache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-    return NextResponse.json(cached.data, {
+
+  if (cached) {
+    return NextResponse.json(cached, {
       headers: { "Cache-Control": "public, max-age=300" },
     });
   }
@@ -99,16 +132,13 @@ export async function GET(req: NextRequest) {
         result = await fetchHyperpPublishers();
         break;
 
-      case "admin":
-        result = getAdminPublishers(authority);
-        break;
 
       default:
         return NextResponse.json({ error: `Unknown mode: ${mode}` }, { status: 400 });
     }
 
-    // Update cache
-    cache.set(cacheKey, { data: result, timestamp: Date.now() });
+    // Store only externally resolved modes in the bounded cache.
+    cache.set(cacheKey, result);
 
     return NextResponse.json(result, {
       headers: { "Cache-Control": "public, max-age=300" },
@@ -300,8 +330,45 @@ async function fetchHyperpPublishers(): Promise<PublishersResponse> {
 // Admin: Single oracle authority
 // ---------------------------------------------------------------------------
 
+const SYSTEM_PROGRAM_ID = "11111111111111111111111111111111";
+
+type AdminAuthorityValidation =
+  | { ok: true; authority: string | null }
+  | { ok: false; error: string };
+
+function validateAdminAuthority(
+  authority: string | null,
+): AdminAuthorityValidation {
+  /*
+   * Preserve the existing empty-state behavior when no authority is
+   * configured or the system-program placeholder is supplied.
+   */
+  if (!authority || authority === SYSTEM_PROGRAM_ID) {
+    return { ok: true, authority };
+  }
+
+  if (authority.length < 32 || authority.length > 44) {
+    return { ok: false, error: "Invalid admin authority" };
+  }
+
+  try {
+    const canonicalAuthority = new PublicKey(authority).toBase58();
+
+    if (canonicalAuthority !== authority) {
+      return { ok: false, error: "Invalid admin authority" };
+    }
+
+    return {
+      ok: true,
+      authority: canonicalAuthority,
+    };
+  } catch {
+    return { ok: false, error: "Invalid admin authority" };
+  }
+}
+
 function getAdminPublishers(authority: string | null): PublishersResponse {
-  if (!authority || authority === "11111111111111111111111111111111") {
+  if (!authority || authority === SYSTEM_PROGRAM_ID) {
     return {
       mode: "admin",
       publisherCount: 0,

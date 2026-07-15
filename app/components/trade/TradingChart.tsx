@@ -51,6 +51,8 @@ import {
   candleStyleOptions,
   chartDataKind,
   hasRenderableData,
+  finiteCandles,
+  finitePricePoints,
   type ChartSeriesKind,
 } from "@/lib/chart-style";
 import { assertNever } from "@/lib/exhaustive";
@@ -527,7 +529,13 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
   const oracleFiltered = useMemo(
     () => {
       const cutoff = Date.now() - TIMEFRAME_MS[timeframe];
-      return oraclePrices.filter((p) => p.timestamp >= cutoff);
+      // finitePricePoints drops any point whose price parsed to NaN (e.g. a
+      // malformed price_e6 from the indexer) — a non-finite value is a
+      // whitespace point that plots nothing and establishes no price range,
+      // which is what makes an overlay price line throw "Value is null". This
+      // is the single chokepoint feeding both the oracle line fallback and the
+      // aggregated-candle fallback, so sanitising here covers both.
+      return finitePricePoints(oraclePrices.filter((p) => p.timestamp >= cutoff));
     },
     [oraclePrices, timeframe],
   );
@@ -541,17 +549,26 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
   // unrelated state like timeframe-pill hover) creates a new array, which
   // re-fires the indicator hooks' effects and tears down + reallocates the
   // oscillator pane on every WebSocket tick.
+  // finiteCandles / finitePricePoints strip any non-finite point BEFORE it can
+  // reach lightweight-charts' setData. A NaN OHLC/price is silently demoted to
+  // a whitespace point (plots nothing, no price range); a series that ends up
+  // all-whitespace has a null firstValue and any overlay price line drawn on it
+  // throws "Value is null" on paint. Sanitising at the source means every
+  // downstream consumer (the render switch, indicator overlays, the volume
+  // pane, referencePriceUsd) sees only plottable data, and an all-NaN batch
+  // degrades to the empty/building overlay via hasRenderableData instead of
+  // crashing the chart. oracleFiltered is already sanitised above.
   const candleData = useMemo(() => {
-    if (hasPercolatorData) return percolatorCandles;
-    if (hasPythData) return pythCandles as { timestamp: number; open: number; high: number; low: number; close: number; volume: number }[];
-    if (hasExternalData) return externalCandles as { timestamp: number; open: number; high: number; low: number; close: number; volume: number }[];
-    return aggregateCandles(oracleFiltered, CANDLE_INTERVAL_MS);
+    if (hasPercolatorData) return finiteCandles(percolatorCandles);
+    if (hasPythData) return finiteCandles(pythCandles as { timestamp: number; open: number; high: number; low: number; close: number; volume: number }[]);
+    if (hasExternalData) return finiteCandles(externalCandles as { timestamp: number; open: number; high: number; low: number; close: number; volume: number }[]);
+    return finiteCandles(aggregateCandles(oracleFiltered, CANDLE_INTERVAL_MS));
   }, [hasPercolatorData, hasPythData, hasExternalData, percolatorCandles, pythCandles, externalCandles, oracleFiltered]);
 
   const lineData = useMemo(() => {
-    if (hasPercolatorData) return percolatorCandles.map((c) => ({ timestamp: c.timestamp, price: c.close }));
-    if (hasPythData) return pythCandles.map((c) => ({ timestamp: c.timestamp, price: c.close }));
-    if (hasExternalData) return externalCandles.map((c) => ({ timestamp: c.timestamp, price: c.close }));
+    if (hasPercolatorData) return finitePricePoints(percolatorCandles.map((c) => ({ timestamp: c.timestamp, price: c.close })));
+    if (hasPythData) return finitePricePoints(pythCandles.map((c) => ({ timestamp: c.timestamp, price: c.close })));
+    if (hasExternalData) return finitePricePoints(externalCandles.map((c) => ({ timestamp: c.timestamp, price: c.close })));
     return oracleFiltered;
   }, [hasPercolatorData, hasPythData, hasExternalData, percolatorCandles, pythCandles, externalCandles, oracleFiltered]);
 
@@ -748,7 +765,9 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
       // (this effect no longer depends on priceUsd; the "Live tick -> chart"
       // effect keeps this line fresh via applyOptions() afterward).
       const initialPriceUsd = getSnapshot(slabAddress).priceUsd;
-      if (initialPriceUsd != null) {
+      // Finite-guard mirrors the Liq/Entry lines below: a NaN mark price would
+      // pass `!= null` yet feed a non-finite price into createPriceLine.
+      if (initialPriceUsd != null && Number.isFinite(initialPriceUsd)) {
         priceLineRef.current = s.createPriceLine({
           price: initialPriceUsd,
           color: "rgba(255,255,255,0.6)",
@@ -1021,7 +1040,11 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
     if (!slabAddress) return;
     return subscribeSlab(slabAddress, () => {
       const snap = getSnapshot(slabAddress);
-      if (snap.priceUsd == null) return;
+      // Reject a non-finite tick too, not just null: a NaN would corrupt the
+      // last bar/point via series.update() below, re-introducing a whitespace
+      // point on an already-rendered series and reviving the "Value is null"
+      // crash after the initial safe paint.
+      if (snap.priceUsd == null || !Number.isFinite(snap.priceUsd)) return;
       const finishSpan = startPerfSpan("chart-tick-to-paint");
       const usd = snap.priceUsd;
 
