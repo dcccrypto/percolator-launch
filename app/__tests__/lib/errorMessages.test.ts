@@ -113,6 +113,37 @@ describe("isTransientError", () => {
   it("returns false for unknown text", () => {
     expect(isTransientError("something went wrong")).toBe(false);
   });
+
+  it("returns true for genuine HTTP 429 rate limit", () => {
+    expect(isTransientError("429 Too Many Requests")).toBe(true);
+    expect(isTransientError("Server responded with 429: rate limit exceeded")).toBe(true);
+    expect(isTransientError("Too many requests for a specific RPC call")).toBe(true);
+  });
+
+  it("does NOT classify a bare '429' inside a base58 signature as transient", () => {
+    // '429' at a word boundary inside a signature-bearing message must not
+    // trigger a retry — withTransientRetry callers rebuild and RESEND the tx.
+    expect(isTransientError("failed: see tx 5Kd429Xw8pQzR7vGm2NhLt3fUj6yBcAeSD9krWq4TnYoZxEHVuJgP1M8iC7sbFa2")).toBe(false);
+    expect(isTransientError("error at slot 429")).toBe(false);
+    expect(isTransientError("balance is 429 lamports")).toBe(false);
+  });
+
+  it("NEVER classifies a confirmation-timeout message as transient (tx may have landed — resend double-fills)", () => {
+    const sigWith429 =
+      "429aBcDeFgHiJkMnPqRsTuVwXyZ123456789ABCDEFGHJKLMNPQRSTUVWXYZabc";
+    expect(
+      isTransientError(
+        `Confirmation timeout (90s) — tx may still land. Check explorer: ${sigWith429}`,
+      ),
+    ).toBe(false);
+    // Even if the message ALSO contains rate-limit phrasing, timeout wins.
+    expect(
+      isTransientError(
+        "Confirmation timeout (90s) — tx may still land. Check explorer: abc (429 Too Many Requests)",
+      ),
+    ).toBe(false);
+    expect(isTransientError("tx may still land, check explorer")).toBe(false);
+  });
 });
 
 describe("isOracleStaleError", () => {

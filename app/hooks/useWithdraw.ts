@@ -145,17 +145,39 @@ export function useWithdraw(slabAddress: string) {
           let portfolioPk: PublicKey | null = params.portfolioPk ?? null;
           let portfolioData: Buffer | null = null;
           if (portfolioPk) {
+            // Fast path: caller supplied the portfolio pubkey (SlabProvider's
+            // userAccount). Fetch, parse, and owner-verify it exactly like the
+            // scan-store path below. On ANY failure — fetch throw, missing
+            // account, parse error, or owner mismatch — reset portfolioPk to
+            // null so the GPA scan fallback runs. Leaving portfolioPk set with
+            // portfolioData null would silently skip the M7 over-withdraw
+            // pre-check AND the hasActiveLegs crank-prepend decision, turning
+            // a transient RPC blip into an on-chain EngineStale(19) revert
+            // with a misleading "needs maintainer crank" message.
             try {
               const info = await connection.getAccountInfo(portfolioPk, "confirmed");
-              if (info) portfolioData = Buffer.from(info.data);
-            } catch { /* best-effort */ }
-          } else {
+              if (info) {
+                const candidateData = Buffer.from(info.data);
+                const candidatePf = parsePortfolioV17(candidateData);
+                if (candidatePf.owner.equals(wallet.publicKey)) {
+                  portfolioData = candidateData;
+                } else {
+                  portfolioPk = null; // owner mismatch — fall back to the scan
+                }
+              } else {
+                portfolioPk = null; // account not found — fall back to the scan
+              }
+            } catch {
+              portfolioPk = null; // fetch/parse failed — fall back to the scan
+            }
+          }
+          if (!portfolioPk) {
             // Latency: when the shared scan store knows the portfolio's pubkey
             // (its address never changes for a wallet+market), one targeted
             // getAccountInfo replaces the filtered program scan below — the
             // DATA read is equally live either way (withdraw needs fresh data
-            // for the free-margin gate and the crank-prepend decision). The
-            // owner re-verification below applies to both paths.
+            // for the free-margin gate and the crank-prepend decision). Owner
+            // re-verification happens inline in each path before trusting it.
             const storePk = getPortfolioRawSnapshot(
               makePortfolioScanKey(programId, slabAddress, wallet.publicKey),
             )?.pubkey;

@@ -324,7 +324,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         // resolves accountA via findV17Portfolio + accountB via GPA scan.
         // v12: pass the real lpIdx and userAccount.idx as before.
         const sig = await withTransientRetry(
-          async () => trade({ lpIdx, userIdx: userAccount.idx, size: closeSize, userPortfolioPk: userAccount.pubkey }),
+          async () => trade({ lpIdx, userIdx: userAccount.idx, size: closeSize }),
           { maxRetries: 2, delayMs: 3000 },
         );
 

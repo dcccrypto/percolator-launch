@@ -489,7 +489,7 @@ export function useTrade(slabAddress: string) {
           // normally an instant cache hit instead of two program scans
           // between the confirm click and the wallet popup.
           const resolved = await getOrResolveV17TradeAccounts(connection, programId, slabPk, wallet.publicKey);
-          accountA = params.userPortfolioPk ?? resolved.accountA;
+          accountA = resolved.accountA;
           accountB = resolved.accountB;
           matcherProg = resolved.matcherProg;
           matcherCtx = resolved.matcherCtx;

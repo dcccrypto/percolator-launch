@@ -80,6 +80,21 @@ function sanitizeDecimalInput(value: string): string {
   return cleaned.slice(0, dotIndex + 1) + cleaned.slice(dotIndex + 1).replace(/\./g, "");
 }
 
+// Truncate (never round) a number's decimal representation to `decimals`
+// places. Rounding up can produce a native amount slightly larger than the
+// user's actual balance (fractional float-overshoot), so derived input fields
+// must truncate. Exponent-notation values fall back to toFixed (which never
+// overshoots for the tiny magnitudes that render as e-notation). decimals=0
+// returns the bare integer part — no trailing ".".
+function truncateToDecimals(value: number, decimals: number): string {
+  const str = value.toString();
+  if (str.includes("e")) return value.toFixed(decimals);
+  const dot = str.indexOf(".");
+  if (dot === -1) return str;
+  if (decimals === 0) return str.slice(0, dot);
+  return str.slice(0, dot + 1 + decimals);
+}
+
 
 
 function parsePercToNative(input: string, decimalsRaw = 6): bigint {
@@ -430,16 +445,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       }
       const notionalUsd = unit === "token" ? n * priceUsd : n;
       const marginAmt = notionalUsd / lev;
-      
       // Truncate rather than round to prevent fractional float-overshoot
       // from generating a marginNative slightly larger than the user's actual balance.
-      const str = marginAmt.toString();
-      if (str.includes("e")) {
-        setMarginInput(marginAmt.toFixed(decimals));
-      } else {
-        const dot = str.indexOf(".");
-        setMarginInput(dot === -1 ? str : str.slice(0, dot + 1 + decimals));
-      }
+      setMarginInput(truncateToDecimals(marginAmt, decimals));
     },
     [priceUsd, decimals],
   );
@@ -459,15 +467,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       const n = parseFloat(sizeInput);
       if (!isNaN(n) && priceUsd && priceUsd > 0) {
         const converted = prev === "token" ? n * priceUsd : n / priceUsd;
-        const targetDecimals = next === "token" ? 6 : 2;
-        const str = converted.toString();
-        let nextStr: string;
-        if (str.includes("e")) {
-          nextStr = converted.toFixed(targetDecimals);
-        } else {
-          const dot = str.indexOf(".");
-          nextStr = dot === -1 ? str : str.slice(0, dot + 1 + targetDecimals);
-        }
+        const nextStr = truncateToDecimals(converted, next === "token" ? 6 : 2);
         setSizeInput(nextStr);
         recomputeFromSize(nextStr, next, leverage);
       }
@@ -495,14 +495,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       const notionalUsd = marginNum * leverage;
       if (priceUsd && priceUsd > 0) {
         const nextSize = sizeUnit === "token" ? notionalUsd / priceUsd : notionalUsd;
-        const targetDecimals = sizeUnit === "token" ? 6 : 2;
-        const str = nextSize.toString();
-        if (str.includes("e")) {
-          setSizeInput(nextSize.toFixed(targetDecimals));
-        } else {
-          const dot = str.indexOf(".");
-          setSizeInput(dot === -1 ? str : str.slice(0, dot + 1 + targetDecimals));
-        }
+        setSizeInput(truncateToDecimals(nextSize, sizeUnit === "token" ? 6 : 2));
       }
     },
     [effectiveBalance, decimals, leverage, priceUsd, sizeUnit],
@@ -624,7 +617,7 @@ setEngineLockError(null);
         async () =>
           trade(
             bindConfirmedLimitPrice(
-              { lpIdx, userIdx: userAccount!.idx, size, userPortfolioPk: userAccount!.pubkey },
+              { lpIdx, userIdx: userAccount!.idx, size },
               snapshotLimitPriceE6,
             ),
           ),
