@@ -111,4 +111,72 @@ describe("parseMarketCreationError", () => {
     );
     expect(msg).toContain("code 255");
   });
+
+  // Anchored program-error routing — a successful Tokenkeg CPI in the logs
+  // must NOT hijack an unrelated engine failure into "insufficient token
+  // balance" (old heuristic: includes("custom program error: 0x1") — which
+  // also prefix-matched 0x13 — && includes("TokenkegQ") anywhere).
+  describe("token-program error routing (anchored)", () => {
+    const TOKENKEG = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+    const WRAPPER = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
+
+    it("routes 0x13 EngineStale to the engine-stale message even with a successful Tokenkeg CPI in the logs", () => {
+      const msg = parseMarketCreationError(new Error(
+        [
+          "Transaction failed: Unexpected error",
+          `Program ${WRAPPER} invoke [1]`,
+          `Program ${TOKENKEG} invoke [2]`,
+          "Program log: Instruction: Transfer",
+          `Program ${TOKENKEG} success`,
+          `Program ${WRAPPER} failed: custom program error: 0x13`,
+        ].join("\n")
+      ));
+      expect(msg).not.toContain("Insufficient token balance");
+      expect(msg).toContain("stale");
+    });
+
+    it("still routes a genuine Tokenkeg 0x1 failure to the insufficient-token-balance message", () => {
+      const msg = parseMarketCreationError(new Error(
+        [
+          `Program ${WRAPPER} invoke [1]`,
+          `Program ${TOKENKEG} invoke [2]`,
+          "Program log: Instruction: Transfer",
+          `Program ${TOKENKEG} failed: custom program error: 0x1`,
+        ].join("\n")
+      ));
+      expect(msg).toContain("Insufficient token balance");
+    });
+
+    it("attributes a bare failing line to the innermost still-open invoke (Tokenkeg)", () => {
+      const msg = parseMarketCreationError(new Error(
+        [
+          `Program ${TOKENKEG} invoke [2]`,
+          "Program failed: custom program error: 0x1",
+        ].join("\n")
+      ));
+      expect(msg).toContain("Insufficient token balance");
+    });
+
+    it("routes a non-token 0x1 failure to the program-error decode path, not token balance", () => {
+      const msg = parseMarketCreationError(new Error(
+        `Program ${WRAPPER} failed: custom program error: 0x1`
+      ));
+      expect(msg).not.toContain("Insufficient token balance");
+      // 0x1 = v17 InvalidVersion override
+      expect(msg).toContain("version mismatch");
+    });
+
+    it("routes exact-code 0x12 (not a 0x1 prefix match) via the hex decode path", () => {
+      const msg = parseMarketCreationError(new Error(
+        [
+          `Program ${TOKENKEG} invoke [2]`,
+          `Program ${TOKENKEG} success`,
+          `Program ${WRAPPER} failed: custom program error: 0x12`,
+        ].join("\n")
+      ));
+      expect(msg).not.toContain("Insufficient token balance");
+      // 0x12 = 18 EngineInvalidLeg
+      expect(msg).toContain("leg");
+    });
+  });
 });
