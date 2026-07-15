@@ -413,12 +413,6 @@ export function useTrade(slabAddress: string) {
 
         // Determine oracle mode using centralised detectOracleMode (oraclePrice.ts).
         // "pyth-pinned" = Pyth feed; "admin" or "hyperp" = use slab as oracle account.
-        // Pass wrapperConfigV17?.oracleMode (the on-chain oracle_mode byte) so v17
-        // AUTH_MARK/keeper markets (byte=3) classify as "keeper" instead of falling
-        // through to "hyperp" — SlabProvider forces indexFeedId to ZERO for both
-        // modes, so key-based detection alone can't tell them apart. Every other
-        // call site (MarketStatsCard, useOracleFreshness, markets/page,
-        // MarketBrowser) already passes this; useTrade was the one straggler.
         const oracleMode = detectOracleMode({ ...mktConfig, oracleModeByte: wrapperConfigV17?.oracleMode });
         const useAdminOracle = oracleMode !== "pyth-pinned";
         const feedHex = Array.from(mktConfig.indexFeedId.toBytes()).map(b => b.toString(16).padStart(2, "0")).join("");
@@ -426,7 +420,10 @@ export function useTrade(slabAddress: string) {
 
         const instructions = [];
 
-        // For admin oracle markets where user IS the oracle authority,
+        // If user is oracle authority, push price first.
+        // B-2: Check that oracleAuthority actually matches wallet before attempting
+        // inline push.
+        // B-3: In beta.29 on-chain wrapper removed inline advance-phase support, so
         // push a fresh price before cranking (crank needs fresh oracle data).
         // PERC-8328 / GH#1966: NEVER fall back to a hardcoded price — if we can't get
         // a valid, fresh price from the backend, abort the trade entirely. Pushing a
@@ -435,10 +432,6 @@ export function useTrade(slabAddress: string) {
         if (userIsOracleAuth) {
           throw new Error(INLINE_ORACLE_PUSH_REMOVED_ERROR);
         }
-
-        // Pre-trade crank ix will be built after portfolio (accountA) is resolved below,
-        // since v17 PermissionlessCrank needs a valid portfolio at accounts[2].
-        // The crank is inserted into instructions[] before the trade ix at the end.
 
         // ── v17 TradeCpi account resolution ──────────────────────────────────
         // v17 TradeCpi (tag 10) requires 7 accounts:
@@ -584,8 +577,8 @@ export function useTrade(slabAddress: string) {
         // the balance/position reflect the trade within ~1-2s instead of waiting
         // on the (30s when WS-active) background poll. Fixes "balance doesn't
         // update after I trade". Mirrors useDeposit/useWithdraw.
-        refreshSlab();
-        [1200, 2200, 3500].forEach((ms) => setTimeout(() => refreshSlab(), ms));
+        refreshSlab?.();
+        [1200, 2200, 3500].forEach((ms) => setTimeout(() => refreshSlab?.(), ms));
         return sig;
       } catch (e) {
         // Invalidate the cached v17 account resolution — the failure may be a
@@ -604,7 +597,7 @@ export function useTrade(slabAddress: string) {
         if (mountedRef.current) setLoading(false);
       }
     },
-    [connection, wallet, mktConfig, accounts, raw, slabAddress, slabProgramId, refreshSlab]
+    [connection, wallet, mktConfig, accounts, raw, slabAddress, slabProgramId, refreshSlab, wrapperConfigV17]
   );
 
   return { trade, loading, error };

@@ -28,6 +28,10 @@ vi.mock("@/lib/tx", () => ({
   sendTx: vi.fn(),
 }));
 
+vi.mock("@/lib/errorMessages", () => ({
+  humanizeError: vi.fn((msg) => msg),
+}));
+
 // Bypass the program-allowlist gate for tests that focus on the deposit flow.
 // The gate is exercised in app/__tests__/lib/programAllowlist.test.ts and
 // app/__tests__/providers/SlabProvider-allowlist.test.tsx.

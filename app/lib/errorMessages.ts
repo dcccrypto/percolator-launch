@@ -225,11 +225,24 @@ function extractCustomIndex(msg: string): number | null {
 const TRANSIENT_CODES = new Set([20, 26, 27]);
 
 export function isTransientError(msg: string): boolean {
+  // A confirmation timeout must NEVER classify as transient: the tx may have
+  // already landed, and withTransientRetry callers (OrderTicket handleTrade,
+  // useClosePosition) REBUILD AND RESEND the transaction — retrying a landed
+  // trade double-fills. pollConfirmation's message also embeds a base58
+  // signature whose digit runs ("429") used to false-positive the old
+  // substring rate-limit check. Guard first, before any other match.
+  if (/confirmation timeout|may still land/i.test(msg)) return false;
   const code = extractErrorCode(msg);
   if (code !== null && TRANSIENT_CODES.has(code)) return true;
   if (msg.includes("Blockhash not found")) return true;
   if (msg.includes("block height exceeded")) return true;
   if (msg.includes("has expired")) return true;
+  // HTTP 429 rate limit → safe to retry (the tx was never accepted). A bare
+  // "429" substring is NOT enough — base58 signatures and arbitrary numbers
+  // can contain it — so require explicit rate-limit phrasing, optionally
+  // alongside a word-bounded 429 status code.
+  if (/too many requests/i.test(msg)) return true;
+  if (/\b429\b/.test(msg) && /rate.?limit/i.test(msg)) return true;
   return false;
 }
 

@@ -80,6 +80,21 @@ function sanitizeDecimalInput(value: string): string {
   return cleaned.slice(0, dotIndex + 1) + cleaned.slice(dotIndex + 1).replace(/\./g, "");
 }
 
+// Truncate (never round) a number's decimal representation to `decimals`
+// places. Rounding up can produce a native amount slightly larger than the
+// user's actual balance (fractional float-overshoot), so derived input fields
+// must truncate. Exponent-notation values fall back to toFixed (which never
+// overshoots for the tiny magnitudes that render as e-notation). decimals=0
+// returns the bare integer part — no trailing ".".
+function truncateToDecimals(value: number, decimals: number): string {
+  const str = value.toString();
+  if (str.includes("e")) return value.toFixed(decimals);
+  const dot = str.indexOf(".");
+  if (dot === -1) return str;
+  if (decimals === 0) return str.slice(0, dot);
+  return str.slice(0, dot + 1 + decimals);
+}
+
 
 
 function parsePercToNative(input: string, decimalsRaw = 6): bigint {
@@ -430,7 +445,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       }
       const notionalUsd = unit === "token" ? n * priceUsd : n;
       const marginAmt = notionalUsd / lev;
-      setMarginInput(marginAmt.toFixed(decimals));
+      // Truncate rather than round to prevent fractional float-overshoot
+      // from generating a marginNative slightly larger than the user's actual balance.
+      setMarginInput(truncateToDecimals(marginAmt, decimals));
     },
     [priceUsd, decimals],
   );
@@ -450,7 +467,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       const n = parseFloat(sizeInput);
       if (!isNaN(n) && priceUsd && priceUsd > 0) {
         const converted = prev === "token" ? n * priceUsd : n / priceUsd;
-        const nextStr = next === "token" ? converted.toFixed(6) : converted.toFixed(2);
+        const nextStr = truncateToDecimals(converted, next === "token" ? 6 : 2);
         setSizeInput(nextStr);
         recomputeFromSize(nextStr, next, leverage);
       }
@@ -478,7 +495,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       const notionalUsd = marginNum * leverage;
       if (priceUsd && priceUsd > 0) {
         const nextSize = sizeUnit === "token" ? notionalUsd / priceUsd : notionalUsd;
-        setSizeInput(sizeUnit === "token" ? nextSize.toFixed(6) : nextSize.toFixed(2));
+        setSizeInput(truncateToDecimals(nextSize, sizeUnit === "token" ? 6 : 2));
       }
     },
     [effectiveBalance, decimals, leverage, priceUsd, sizeUnit],

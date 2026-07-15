@@ -89,6 +89,7 @@ import { isLpPortfolio } from "@/lib/lpPortfolio";
 export interface UserAccountInfo {
   idx: number;
   account: Account;
+  pubkey?: PublicKey;
   /** `true` only on the snapshot published immediately by
    *  `applyConfirmedFill` (a locally-patched confirmed-fill result), and
    *  only until the next real scan reconciles it (see that function's doc
@@ -287,7 +288,7 @@ function publishPortfolioResult(entry: PortfolioEntry, result: OwnPortfolioScanR
   const bypassEqualityForProvisional = entry.provisionalUntil > 0 && Date.now() < entry.provisionalUntil;
   if (!bypassEqualityForProvisional && ownPortfolioResultsEqual(entry.raw, result)) return;
   entry.raw = result;
-  entry.userAccount = result ? { idx: 0, account: portfolioV17ToAccount(result.portfolio) } : null;
+  entry.userAccount = result ? { idx: 0, account: portfolioV17ToAccount(result.portfolio), pubkey: result.pubkey } : null;
   entry.provisionalUntil = 0;
   notifyPortfolio(entry);
 }
@@ -476,7 +477,7 @@ export function applyConfirmedFill(key: string, signedSizeDeltaQ: bigint): boole
   };
 
   entry.raw = patched;
-  entry.userAccount = { idx: 0, account: portfolioV17ToAccount(patched.portfolio), provisional: true };
+  entry.userAccount = { idx: 0, account: portfolioV17ToAccount(patched.portfolio), pubkey: patched.pubkey, provisional: true };
   entry.provisionalUntil = Date.now() + CONFIRMED_FILL_PROVISIONAL_MS;
   notifyPortfolio(entry);
   return true;

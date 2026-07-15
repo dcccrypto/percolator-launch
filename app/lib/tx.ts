@@ -83,11 +83,10 @@ async function fetchPriorityFee(connection: Connection): Promise<number> {
     const dynamicFee = sorted[p75Index] || 0;
     
     // Use dynamic fee if it's reasonable, otherwise fall back
-    // Cap at 10x the fallback to avoid excessive fees
-    if (dynamicFee > 0 && dynamicFee < PRIORITY_FEE_FALLBACK * 10) {
-      return dynamicFee;
+    // Cap at 10x fallback to prevent massive spikes
+    if (dynamicFee > 0) {
+      return Math.min(dynamicFee, PRIORITY_FEE_FALLBACK * 10);
     }
-    
     return PRIORITY_FEE_FALLBACK;
   } catch (error) {
     console.warn("[getPriorityFee] Failed to fetch dynamic fees, using fallback:", error);
