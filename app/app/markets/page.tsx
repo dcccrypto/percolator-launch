@@ -694,10 +694,9 @@ function MarketsPageInner() {
       {/* Grid background — subtle decorative element */}
       <div className="absolute inset-x-0 top-0 h-16 bg-grid pointer-events-none opacity-50" />
 
-      <div className="relative mx-auto max-w-[1100px] px-4 sm:px-6 pt-0 pb-10">
-        <div className="sticky-markets-header pt-4 pb-2 z-30">
-          {/* Header */}
-          <ScrollReveal>
+      <div className="relative mx-auto max-w-[1100px] px-4 sm:px-6 pt-4 pb-10">
+        {/* Header */}
+        <ScrollReveal>
           <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
@@ -892,7 +891,6 @@ function MarketsPageInner() {
             </span>
           </div>
         </ScrollReveal>
-      </div>
 
         {showDegradedBanner && (
           <ScrollReveal delay={0.15}>

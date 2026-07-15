@@ -393,7 +393,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
             <div className="h-px bg-gradient-to-r from-transparent via-[var(--accent)]/20 to-transparent -mx-5 -mt-5 mb-5" />
             <h3
               className="text-sm font-medium text-[var(--text)] mb-4"
-              style={{ fontFamily: 'var(--font-heading)' }}
+              style={{ fontFamily: 'var(--font-display)' }}
             >
               Vault Details
             </h3>

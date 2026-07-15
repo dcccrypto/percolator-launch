@@ -29,7 +29,7 @@ export default async function OpengraphImage() {
   const logoSrc = `data:image/png;base64,${logoBuffer.toString("base64")}`;
 
   // Site type system: Outfit is the logo wordmark (--font-display); JetBrains
-  // Mono is the body/heading face (--font-sans / --font-heading). Match both so
+  // Mono is the body face (--font-sans / --font-mono). Match both so
   // the card reads like the site rather than a generic sans.
   let fonts:
     | { name: string; data: ArrayBuffer; weight: 400 | 700; style: "normal" }[]

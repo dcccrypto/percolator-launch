@@ -170,7 +170,7 @@ function MyRankCard({ entry, walletConnected }: MyRankCardProps) {
           <div className="flex items-center gap-3">
             <span
               className="text-2xl font-bold tabular-nums text-[var(--accent)]"
-              style={{ fontFamily: "var(--font-heading)" }}
+              style={{ fontFamily: "var(--font-display)" }}
             >
               #{entry.rank}
             </span>

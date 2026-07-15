@@ -144,7 +144,7 @@ export const DevnetFaucetModal: FC = () => {
             </div>
             <h2
               className="text-[15px] font-medium text-[var(--text)]"
-              style={{ fontFamily: "var(--font-heading)" }}
+              style={{ fontFamily: "var(--font-display)" }}
             >
               Fund Your Account
             </h2>

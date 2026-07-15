@@ -55,7 +55,7 @@ export const MarketPreview: FC<MarketPreviewProps> = ({
         <div className="flex items-center gap-3">
           <MarketLogo mainnetCa={tokenMint} symbol={symbol} pixelOverride={36} />
           <div>
-            <h3 className="text-[14px] font-bold text-white" style={{ fontFamily: "var(--font-heading)" }}>
+            <h3 className="text-[14px] font-bold text-white" style={{ fontFamily: "var(--font-display)" }}>
               {symbol}/USD
             </h3>
             <p className="text-[10px] text-[var(--text-secondary)]">{name} · Perpetual</p>

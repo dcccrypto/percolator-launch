@@ -28,9 +28,9 @@
   --cyan-muted: rgba(20,241,149,0.08);
 
   --text: #E1E2E8;
-  --text-secondary: #A0A5B5;
-  --text-muted: #808595;
-  --text-dim: #5E6478;
+  --text-secondary: #7A7F96;
+  --text-muted: #454B5F;
+  --text-dim: #2A2E3D;
 
   --long: #14F195;
   --short: #FF3B5C;
@@ -78,7 +78,7 @@
   /* ─── Button Tokens ─── */
 
   /* Base */
-  --btn-radius: 0px;
+  --btn-radius: 8px;
   --btn-font-family: var(--font-sans);
   --btn-font-weight: 600;
   --btn-letter-spacing: 0.01em;
@@ -172,14 +172,11 @@
   --border-subtle: #ECEDF5;
   --border-hover:  #C4C4D8;
 
-  /* Text & Semantic Colors */
+  /* Text */
   --text:           #0D0E15;
-  --text-secondary: #3A3B52;
-  --text-muted:     #5A5C78;
-  --text-dim:       #808298;
-  --long:           #059669;
-  --short:          #DC2626;
-  --cyan:           #059669;
+  --text-secondary: #4A4B62;
+  --text-muted:     #8A8BA8;
+  --text-dim:       #B8B9CC;
 
   /* Accent subtle overlays — lighten on white bg */
   --accent-subtle:  rgba(153, 69, 255, 0.08);
@@ -266,7 +263,6 @@ html {
   --font-sans: var(--font-jetbrains-mono), var(--font-geist-mono), monospace;
   --font-mono: var(--font-jetbrains-mono), var(--font-geist-mono), monospace;
   --font-display: var(--font-outfit), var(--font-space-grotesk), system-ui;
-  --font-heading: var(--font-jetbrains-mono), var(--font-geist-mono), monospace;
 
   /* Custom Animations & Keyframes for Tailwind v4 */
   --animate-shimmer-sweep: shimmer-sweep 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
@@ -1261,15 +1257,7 @@ input[type="range"].leverage-slider:focus-visible::-moz-range-thumb {
   input[type="email"],
   textarea,
   select {
-    border-radius: 0 !important;
     transition: border-color var(--timing-fast) ease, box-shadow var(--timing-fast) ease;
-  }
-  input[type="text"],
-  input[type="number"],
-  input[type="password"],
-  input[type="email"],
-  select {
-    height: 40px; /* h-10 standard height */
   }
   input[type="text"]:focus-visible,
   input[type="number"]:focus-visible,
@@ -1282,16 +1270,4 @@ input[type="range"].leverage-slider:focus-visible::-moz-range-thumb {
     outline: none !important;
   }
 }
-
-.sticky-markets-header {
-  position: sticky;
-  top: 56px;
-  z-index: 30;
-  background-color: var(--bg);
-}
-
-body:has([data-testid="positions-bar"]) .sticky-markets-header {
-  top: 80px;
-}
-
 

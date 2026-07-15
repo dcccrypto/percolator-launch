@@ -59,7 +59,7 @@ export function InsuranceFundDisplay({
           </div>
           <h3
             className="text-sm font-medium text-[var(--text)]"
-            style={{ fontFamily: 'var(--font-heading)' }}
+            style={{ fontFamily: 'var(--font-display)' }}
           >
             Insurance Fund
           </h3>

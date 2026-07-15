@@ -304,14 +304,14 @@ function StakeHero({ pools, totalUserDeposited }: { pools: StakePool[]; totalUse
                 // insurance lp
               </div>
               <h1
-                className="mb-4 text-4xl font-bold tracking-tight sm:text-[36px] lg:text-[64px]"
+                className="mb-4 text-4xl font-bold tracking-tight lg:text-6xl"
                 style={{ fontFamily: "var(--font-display)" }}
               >
                 <span className="text-[var(--text)]">Stake. Earn.</span>
                 <br />
                 <span className="text-[var(--cyan)]">Back the Fund.</span>
               </h1>
-              <p className="mb-6 max-w-[520px] text-sm leading-[1.6] text-[var(--text-secondary)]">
+              <p className="mb-6 max-w-[520px] text-base leading-[1.6] text-[var(--text-secondary)]">
                 Deposit collateral into insurance pools to back the Percolator insurance fund.
               </p>
 

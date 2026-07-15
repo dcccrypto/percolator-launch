@@ -50,13 +50,13 @@ export const DevelopersClient: FC<Props> = ({
           </span>
 
           <h1
-            className="mb-2 text-4xl font-bold tracking-tight text-[var(--text)] sm:text-[64px]"
+            className="mb-2 text-4xl font-bold tracking-tight text-[var(--text)] sm:text-6xl"
             style={{ fontFamily: "var(--font-display)" }}
           >
             Built in public.
           </h1>
           <h1
-            className="mb-6 text-4xl font-bold tracking-tight text-[var(--text)] sm:text-[64px]"
+            className="mb-6 text-4xl font-bold tracking-tight text-[var(--text)] sm:text-6xl"
             style={{
               fontFamily: "var(--font-display)",
               textShadow: "0 0 40px rgba(124,58,237,0.4)",
@@ -65,7 +65,7 @@ export const DevelopersClient: FC<Props> = ({
             Every line on-chain.
           </h1>
 
-          <p className="mb-8 max-w-xl text-sm leading-relaxed text-[var(--text-secondary)]">
+          <p className="mb-8 max-w-xl text-lg leading-relaxed text-[var(--text-secondary)]">
             Percolator is an open-source protocol. Browse the repos, fork the
             code, or contribute — everything that powers permissionless perps is
             here.

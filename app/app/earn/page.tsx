@@ -140,7 +140,7 @@ export default function EarnPage() {
               <div className="mb-4 flex items-center justify-between">
                 <h2
                   className="text-sm font-medium text-[var(--text)]"
-                  style={{ fontFamily: 'var(--font-heading)' }}
+                  style={{ fontFamily: 'var(--font-display)' }}
                 >
                   <span className="text-[var(--text-secondary)]">Active </span>Vaults
                 </h2>
@@ -164,7 +164,7 @@ export default function EarnPage() {
                 <div className="h-px bg-gradient-to-r from-transparent via-[var(--accent)]/30 to-transparent -mx-5 -mt-5 mb-5" />
                 <h3
                   className="text-sm font-medium text-[var(--text)] mb-4"
-                  style={{ fontFamily: 'var(--font-heading)' }}
+                  style={{ fontFamily: 'var(--font-display)' }}
                 >
                   How It Works
                 </h3>

@@ -25,12 +25,12 @@ export default function NotFound() {
       <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" />
       <div ref={containerRef} className="relative mx-auto max-w-xl px-4 py-20 text-center" style={{ opacity: 0 }}>
         <div className="mb-4">
-          <span className="text-[80px] font-bold text-[var(--accent)] leading-none" style={{ fontFamily: "var(--font-heading)" }}>
+          <span className="text-[80px] font-bold text-[var(--accent)] leading-none" style={{ fontFamily: "var(--font-display)" }}>
             404
           </span>
         </div>
         
-        <h1 className="mb-3 text-2xl font-semibold text-[var(--text)]" style={{ fontFamily: "var(--font-heading)" }}>
+        <h1 className="mb-3 text-2xl font-semibold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
           Page Not Found
         </h1>
         
