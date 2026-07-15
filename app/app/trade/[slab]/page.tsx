@@ -19,7 +19,6 @@ import { useLivePriceHasData, livePriceJsonFetcher } from "@/hooks/useLivePrice"
 import { getMarketIdentity, setMarketIdentity } from "@/lib/marketIdentityCache";
 import { useToast } from "@/hooks/useToast";
 import { isPlaceholderSymbol, SLUG_ALIASES } from "@/lib/symbol-utils";
-import { AutoDepositProvider } from "@/components/providers/AutoDepositProvider";
 // DevnetFaucetModal moved to WalletProvider (PERC-808: global placement on all pages)
 import { ShareButton } from "@/components/market/ShareCard";
 import { getNetwork } from "@/lib/config";
@@ -714,9 +713,11 @@ export default function TradePage({ params }: { params: Promise<{ slab: string }
     // a clean loading state instead of leaking stale state across markets.
     <SlabProvider key={slab} slabAddress={slab}>
       <UsdToggleProvider>
-        <AutoDepositProvider slabAddress={slab}>
-          <TradePageInner slab={slab} />
-        </AutoDepositProvider>
+        {/* Item-4 (let the user choose): AutoDepositProvider used to silently
+            initUser+deposit a system-chosen starter amount here after the
+            faucet. Onboarding now completes through OrderTicket's "Start
+            Trading" CTA, whose deposit amount is an editable prefilled field. */}
+        <TradePageInner slab={slab} />
       </UsdToggleProvider>
     </SlabProvider>
   );

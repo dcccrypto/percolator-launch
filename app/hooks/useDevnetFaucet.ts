@@ -5,7 +5,7 @@
  * Manages a multi-step faucet flow for devnet:
  *   Step 1: Airdrop SOL (via Solana devnet requestAirdrop)
  *   Step 2: Airdrop USDC (via /api/faucet mint endpoint)
- *   Step 3: Auto-deposit into Percolator account (handled by AutoDepositProvider)
+ *   Step 3: Account setup + user-chosen starter deposit (order ticket "Start Trading")
  *
  * Target: wallet connect → trading in <60 seconds.
  * Rate limit: 1 claim per wallet per 24h (enforced server-side).
@@ -97,8 +97,8 @@ export function useDevnetFaucet(): DevnetFaucetState {
   const [usdcBalance, setUsdcBalance] = useState<number | null>(null);
   const [solDone, setSolDone] = useState(false);
   const [usdcDone, setUsdcDone] = useState(false);
-  // depositDone is intentionally never set to true here — the actual deposit
-  // completion is tracked by AutoDepositProvider. This flag exists in the
+  // depositDone is intentionally never set to true here — account setup +
+  // deposit now happen via the order ticket CTA. This flag exists in the
   // return type for UI consumers that need a unified status interface.
   const [depositDone] = useState(false);
   const [rateLimited, setRateLimited] = useState(false);

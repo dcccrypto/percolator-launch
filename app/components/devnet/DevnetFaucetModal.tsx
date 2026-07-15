@@ -4,7 +4,9 @@
  * Shows a stepped modal when a new devnet user connects:
  *   1. Airdrop SOL (2 SOL via Solana devnet faucet)
  *   2. Airdrop USDC (10,000 test USDC via /api/faucet)
- *   3. Auto-deposit (handled by AutoDepositProvider after dismiss)
+ *   3. Account setup — the order ticket's "Start Trading" CTA creates and
+ *      funds the account with a user-editable starter deposit (the silent
+ *      AutoDepositProvider flow was removed: the user picks the amount)
  *
  * Target: wallet connect → trading in <60 seconds.
  * Modeled after Drift Protocol's devnet deposit modal UX.
@@ -248,15 +250,13 @@ export const DevnetFaucetModal: FC = () => {
             {/* Connector line */}
             <div className="ml-3 h-3 w-px bg-[var(--border)]/30" />
 
-            {/* Step 3: account setup + deposit — handled by useAutoDeposit
-                after this modal is dismissed. Previously labeled "Deposit &
-                Trade" / "Auto after dismiss", which was vague about what
-                actually happens: dismissing triggers account creation with
-                a starter deposit folded into the same (or an immediately
-                chained) transaction — see useInitUser.ts / useAutoDeposit.ts.
-                Framed as "sets up", not a hard promise, since the deposit
-                leg is best-effort (falls back to a manual deposit prompt in
-                the order ticket if it doesn't land). */}
+            {/* Step 3: account setup + deposit — completed by the order
+                ticket's "Start Trading" CTA after this modal is dismissed:
+                the user confirms (or edits) the prefilled starter-deposit
+                amount and one click folds account creation + deposit into
+                the same (or an immediately chained) transaction — see
+                useInitUser.ts. The old silent auto-deposit was removed so
+                the amount is always user-chosen. */}
             <div className="flex items-center justify-between">
               <StepBadge
                 number={3}
@@ -265,7 +265,7 @@ export const DevnetFaucetModal: FC = () => {
               />
               {allDone && (
                 <span className="text-[10px] text-[var(--text-secondary)]">
-                  Creates + funds your account on dismiss
+                  Pick your deposit in the order ticket
                 </span>
               )}
             </div>
