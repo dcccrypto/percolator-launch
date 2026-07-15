@@ -236,9 +236,10 @@ describe("finiteCandles", () => {
   });
 
   it("an all-NaN batch collapses to empty, so hasRenderableData reports not-ready (no crash path)", () => {
-    // This is the exact regression: a length>=1 batch of whitespace candles
-    // used to pass `ready` and then throw "Value is null" once a price line
-    // was drawn. After filtering, `ready` is false and the empty overlay shows.
+    // This is the exact regression: a length>=1 batch of all-NaN candles
+    // (fulfilled rows the autoscale pass skips → null autoscale range) used to
+    // pass `ready` and then throw "Value is null" (ensureNotNull) once a price
+    // line was drawn. After filtering, `ready` is false and the empty overlay shows.
     const allNaN = [c(NaN, NaN, NaN, NaN), c(NaN, NaN, NaN, NaN)];
     const filtered = finiteCandles(allNaN);
     expect(filtered).toHaveLength(0);

@@ -228,7 +228,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
   }
 
   return (
-    <div className="min-h-[calc(100dvh-48px)] animate-fade-in">
+    <div className="relative min-h-[calc(100dvh-48px)] animate-fade-in">
       {/* Background */}
       <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" />
 

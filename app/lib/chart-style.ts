@@ -168,14 +168,15 @@ interface PriceValue {
   readonly price: number;
 }
 
-/** Drop any candle lightweight-charts would treat as a WHITESPACE point.
+/** Drop any candle whose OHLC/timestamp isn't a finite number.
  *
- *  A point whose value isn't a finite number (NaN / ±Infinity) is silently
- *  demoted by lightweight-charts to a "whitespace" item: it still reserves the
- *  time slot but plots nothing and contributes NO price range. A series whose
- *  points are ALL whitespace has a null `firstValue`/`priceRange`, and drawing
- *  any price line (Mark / Liq / Entry) onto it makes the library throw
- *  "Value is null" on the next paint (the TradingChart error boundary then
+ *  A row with a NaN / ±Infinity value is NOT demoted to a whitespace item by
+ *  lightweight-charts — it stays a fulfilled plot row. The problem is the
+ *  autoscale pass (`_plotMinMax`), which skips non-finite values: a series
+ *  whose rows are ALL non-finite computes a null autoscale range /
+ *  `firstValue`, and the paint paths — including drawing any price line
+ *  (Mark / Liq / Entry) — then hit `ensureNotNull` and throw
+ *  "Value is null" (the TradingChart error boundary then
  *  shows "something broke"). That state is reachable when the oracle-aggregated
  *  fallback runs over price points that parsed to NaN (e.g. a malformed
  *  `price_e6` from the indexer on a brand-new market) — the candle sources are
@@ -196,8 +197,8 @@ export function finiteCandles<T extends OhlcValues>(candles: readonly T[]): T[] 
 }
 
 /** Single-value counterpart to `finiteCandles` for line/area + oracle points.
- *  Same rationale — a non-finite `price` is a whitespace point that plots
- *  nothing and establishes no price range. */
+ *  Same rationale — a non-finite `price` is skipped by the autoscale pass and
+ *  establishes no price range, so an all-NaN series crashes on paint. */
 export function finitePricePoints<T extends PriceValue>(points: readonly T[]): T[] {
   return points.filter((p) => Number.isFinite(p.timestamp) && Number.isFinite(p.price));
 }

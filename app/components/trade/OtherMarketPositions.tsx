@@ -18,14 +18,13 @@
  * modal is open (useClosePosition needs slab context) — so this list never
  * pays N providers' RPC cost for rows the user isn't closing.
  *
- * Perf note (review fix): this component reuses the SAME usePortfolio scan
- * the header's PositionsBar strip would otherwise also run on /trade — see
- * PositionsBar's HIDDEN_ROUTES, which now includes "/trade" so the strip
- * hides here and this dock is the only usePortfolio caller on the page.
- * Without that, /trade would run TWO concurrent wallet-wide portfolio scans
- * (market discovery + batched getMultipleAccountsInfo + up to two
- * getProgramAccounts/market, each on its own 30s poll) for no extra
- * information — usePortfolio has no cross-instance dedup.
+ * Perf note: the header's PositionsBar strip renders on /trade too, so this
+ * dock is NOT the page's only usePortfolio caller — but that doesn't double
+ * the cost. usePortfolio is fronted by a wallet-keyed dedup layer
+ * (loadPortfolioShared: 12s TTL cache + in-flight join) that collapses every
+ * mounted instance into ONE scan cycle (market discovery + batched
+ * getMultipleAccountsInfo + up to two getProgramAccounts/market), so this
+ * dock's scan coalesces with the strip's rather than duplicating it.
  */
 
 import { FC, memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";

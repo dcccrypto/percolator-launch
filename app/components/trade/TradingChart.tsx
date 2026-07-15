@@ -394,6 +394,24 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
     [percolatorCandlesRaw],
   );
 
+  // Finite-filtered views of each candle source, memoized ONCE so both the
+  // source-selection gates below and the candleData memo share the same
+  // filtering pass (identical semantics: full-OHLC + timestamp finiteness,
+  // volume exempt — see finiteCandles). The gates MUST count these, not the
+  // raw arrays: a feed whose rows are mostly/all non-finite (e.g. a corrupt
+  // Percolator batch) would otherwise pass the raw length checks, win source
+  // selection, then collapse to nothing after filtering — defeating the
+  // Pyth/Gecko fallback and mislabeling the source badge.
+  const percolatorFinite = useMemo(() => finiteCandles(percolatorCandles), [percolatorCandles]);
+  const pythFinite = useMemo(
+    () => finiteCandles(pythCandles as { timestamp: number; open: number; high: number; low: number; close: number; volume: number }[]),
+    [pythCandles],
+  );
+  const externalFinite = useMemo(
+    () => finiteCandles(externalCandles as { timestamp: number; open: number; high: number; low: number; close: number; volume: number }[]),
+    [externalCandles],
+  );
+
   // Prefer Percolator as the chart source only when it has enough coverage to
   // form a readable chart. With 1–2 candles against a 24 h window, the tier-0
   // source produces a mostly-empty chart that looks broken — Pyth's deep spot
@@ -408,15 +426,15 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
   // In either case "any Percolator data" is strictly better than nothing.
   const MIN_PERC_BARS = 10;
   const percHasEnough =
-    percolatorStatus === "success" && percolatorCandles.length >= MIN_PERC_BARS;
+    percolatorStatus === "success" && percolatorFinite.length >= MIN_PERC_BARS;
   const pythHasNothing =
-    (pythStatus === "success" && pythCandles.length === 0) || pythStatus === "error";
+    (pythStatus === "success" && pythFinite.length === 0) || pythStatus === "error";
   const hasPercolatorData =
     percolatorStatus === "success" &&
-    percolatorCandles.length > 0 &&
+    percolatorFinite.length > 0 &&
     (percHasEnough || pythHasNothing);
-  const hasPythData = !hasPercolatorData && pythStatus === "success" && pythCandles.length > 0;
-  const hasExternalData = !hasPercolatorData && !hasPythData && externalStatus === "success" && externalCandles.length > 0;
+  const hasPythData = !hasPercolatorData && pythStatus === "success" && pythFinite.length > 0;
+  const hasExternalData = !hasPercolatorData && !hasPythData && externalStatus === "success" && externalFinite.length > 0;
 
   // Fetch oracle price history
   useEffect(() => {
@@ -530,10 +548,11 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
     () => {
       const cutoff = Date.now() - TIMEFRAME_MS[timeframe];
       // finitePricePoints drops any point whose price parsed to NaN (e.g. a
-      // malformed price_e6 from the indexer) — a non-finite value is a
-      // whitespace point that plots nothing and establishes no price range,
-      // which is what makes an overlay price line throw "Value is null". This
-      // is the single chokepoint feeding both the oracle line fallback and the
+      // malformed price_e6 from the indexer) — a NaN row is a fulfilled plot
+      // row that the autoscale pass (_plotMinMax) skips, so an all-NaN series
+      // has a null autoscale range and an overlay price line throws
+      // "Value is null" (ensureNotNull) on paint. This is the single
+      // chokepoint feeding both the oracle line fallback and the
       // aggregated-candle fallback, so sanitising here covers both.
       return finitePricePoints(oraclePrices.filter((p) => p.timestamp >= cutoff));
     },
@@ -550,20 +569,22 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
   // re-fires the indicator hooks' effects and tears down + reallocates the
   // oscillator pane on every WebSocket tick.
   // finiteCandles / finitePricePoints strip any non-finite point BEFORE it can
-  // reach lightweight-charts' setData. A NaN OHLC/price is silently demoted to
-  // a whitespace point (plots nothing, no price range); a series that ends up
-  // all-whitespace has a null firstValue and any overlay price line drawn on it
-  // throws "Value is null" on paint. Sanitising at the source means every
-  // downstream consumer (the render switch, indicator overlays, the volume
-  // pane, referencePriceUsd) sees only plottable data, and an all-NaN batch
-  // degrades to the empty/building overlay via hasRenderableData instead of
-  // crashing the chart. oracleFiltered is already sanitised above.
+  // reach lightweight-charts' setData. A NaN OHLC/price row is NOT treated as
+  // whitespace by lightweight-charts — it's a fulfilled plot row; but the
+  // autoscale pass (_plotMinMax) skips non-finite values, so a series whose
+  // rows are all NaN computes a null autoscale range / firstValue, and the
+  // paint paths (incl. any Mark/Liq/Entry price line) then hit
+  // ensureNotNull → throw "Value is null". Sanitising at the source means
+  // every downstream consumer (the render switch, indicator overlays, the
+  // volume pane, referencePriceUsd) sees only plottable data, and an all-NaN
+  // batch degrades to the empty/building overlay via hasRenderableData
+  // instead of crashing the chart. oracleFiltered is already sanitised above.
   const candleData = useMemo(() => {
-    if (hasPercolatorData) return finiteCandles(percolatorCandles);
-    if (hasPythData) return finiteCandles(pythCandles as { timestamp: number; open: number; high: number; low: number; close: number; volume: number }[]);
-    if (hasExternalData) return finiteCandles(externalCandles as { timestamp: number; open: number; high: number; low: number; close: number; volume: number }[]);
+    if (hasPercolatorData) return percolatorFinite;
+    if (hasPythData) return pythFinite;
+    if (hasExternalData) return externalFinite;
     return finiteCandles(aggregateCandles(oracleFiltered, CANDLE_INTERVAL_MS));
-  }, [hasPercolatorData, hasPythData, hasExternalData, percolatorCandles, pythCandles, externalCandles, oracleFiltered]);
+  }, [hasPercolatorData, hasPythData, hasExternalData, percolatorFinite, pythFinite, externalFinite, oracleFiltered]);
 
   const lineData = useMemo(() => {
     if (hasPercolatorData) return finitePricePoints(percolatorCandles.map((c) => ({ timestamp: c.timestamp, price: c.close })));
@@ -1041,8 +1062,8 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
     return subscribeSlab(slabAddress, () => {
       const snap = getSnapshot(slabAddress);
       // Reject a non-finite tick too, not just null: a NaN would corrupt the
-      // last bar/point via series.update() below, re-introducing a whitespace
-      // point on an already-rendered series and reviving the "Value is null"
+      // last bar/point via series.update() below, re-introducing a non-finite
+      // row on an already-rendered series and reviving the "Value is null"
       // crash after the initial safe paint.
       if (snap.priceUsd == null || !Number.isFinite(snap.priceUsd)) return;
       const finishSpan = startPerfSpan("chart-tick-to-paint");

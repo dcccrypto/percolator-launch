@@ -55,6 +55,7 @@ import {
 } from "@/lib/trading";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
+import { computeLiquidationDistancePct } from "@/lib/liquidation-distance";
 import { ClosePositionModal } from "./ClosePositionModal";
 import { OtherMarketPositions } from "./OtherMarketPositions";
 import { WarmupProgress } from "./WarmupProgress";
@@ -256,7 +257,10 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
     if (liqUnliquidatable) return "text-[var(--text-secondary)]";
     if (liqPriceE6 <= 0n) return "text-[var(--text-secondary)]";
     if (!hasValidMark || currentPriceE6 <= 0n) return "text-[var(--warning)]";
-    const distPct = Math.abs(Number(currentPriceE6) - Number(liqPriceE6)) / Number(currentPriceE6);
+    // Direction-aware (shared helper): a short whose mark has crossed ABOVE
+    // its liq price is distance 0 (critical), not "safe". Helper returns
+    // percent 0-100; thresholds here consume a 0-1 fraction.
+    const distPct = computeLiquidationDistancePct(account.positionSize, currentPriceE6, liqPriceE6) / 100;
     if (distPct < 0.05) return "text-[var(--short)]";
     if (distPct < 0.10) return "text-[var(--warning)]";
     return "text-[var(--text-secondary)]";

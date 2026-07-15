@@ -33,6 +33,15 @@ export interface QuickLaunchResult {
   adminPrice: string;
   /** PERC-470: DEX pool address for hyperp oracle mode */
   dexPoolAddress: string | null;
+  /**
+   * True when the /api/oracle/resolve lookup itself FAILED (non-ok response,
+   * network error, timeout) — as opposed to succeeding and genuinely finding
+   * no feed. In the failure case the hook still falls back to the admin
+   * oracle with adminPrice "1.000000" (a transient 503 must not block
+   * launches), but consumers should surface this so the user doesn't
+   * unknowingly create a market hardcoded at $1.00.
+   */
+  oracleResolveFailed: boolean;
 }
 
 /**
@@ -53,6 +62,7 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
   const [pythFeedId, setPythFeedId] = useState<string | null>(null);
   const [adminPrice, setAdminPrice] = useState<string>("1.000000");
   const [dexPoolAddress, setDexPoolAddress] = useState<string | null>(null);
+  const [oracleResolveFailed, setOracleResolveFailed] = useState(false);
 
   // Oracle resolution: call /api/oracle/resolve/[mint] after token meta loads.
   // If Pyth feed found → pyth oracle; else → admin oracle with best available price.
@@ -61,6 +71,7 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
     setPythFeedId(null);
     setAdminPrice("1.000000");
     setDexPoolAddress(null);
+    setOracleResolveFailed(false);
     if (!mint || mint.length < 32 || !tokenMeta) return;
 
     let cancelled = false;
@@ -77,6 +88,7 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
           // stale parsed body would stomp B's fresh oracle-type state and the
           // market gets created with the WRONG oracle config.
           if (cancelled) return;
+          setOracleResolveFailed(false);
           if (data.feedId) {
             setOracleType("pyth");
             setPythFeedId(data.feedId);
@@ -95,14 +107,18 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
             if (data.price > 0) setAdminPrice(data.price.toFixed(6));
           }
         } else {
-          // 404 or error — fall back to admin oracle
+          // Non-ok response — fall back to admin oracle, but flag the failure
+          // so the wizard can warn: a transient 503 would otherwise silently
+          // create a market with a hardcoded $1.00 admin price.
           setOracleType("admin");
           setPythFeedId(null);
+          setOracleResolveFailed(true);
         }
       } catch {
         if (!cancelled) {
           setOracleType("admin");
           setPythFeedId(null);
+          setOracleResolveFailed(true);
         }
       }
     })();
@@ -217,5 +233,6 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
     pythFeedId,
     adminPrice,
     dexPoolAddress,
+    oracleResolveFailed,
   };
 }
