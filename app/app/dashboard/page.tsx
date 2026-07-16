@@ -240,9 +240,12 @@ export default function DashboardPage() {
             Your personal command centre for trading on Percolator
           </p>
 
-          {/* Blurred preview */}
+          {/* Ghost preview of the dashboard layout behind the connect gate.
+              Crisp at reduced opacity, NOT blurred: blur-sm + near-white
+              panels on the light theme's white bg dissolved into shapeless
+              smudges that read as a rendering glitch rather than a preview. */}
           <div className="relative">
-            <div className="pointer-events-none select-none blur-sm opacity-40">
+            <div className="pointer-events-none select-none opacity-40">
               <div className="grid grid-cols-2 gap-px border border-[var(--border)] bg-[var(--border)] lg:grid-cols-4">
                 {[1, 2, 3, 4].map((i) => (
                   <div key={i} className="bg-[var(--panel-bg)] p-5 h-20" />

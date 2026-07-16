@@ -93,7 +93,7 @@ function UsdToggleButton() {
           "rounded-sm px-2 py-0.5 text-[9px] font-medium transition-colors duration-150",
           !showUsd
             ? "bg-[var(--accent)]/10 text-[var(--accent)]"
-            : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]",
+            : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]",
         ].join(" ")}
       >
         tokens
@@ -104,7 +104,7 @@ function UsdToggleButton() {
           "rounded-sm px-2 py-0.5 text-[9px] font-medium transition-colors duration-150",
           showUsd
             ? "bg-[var(--accent)]/10 text-[var(--accent)]"
-            : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]",
+            : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]",
         ].join(" ")}
       >
         usd
@@ -124,7 +124,7 @@ function CopyButton({ text }: { text: string }) {
         toast("Address copied to clipboard!", "success");
         setTimeout(() => setCopied(false), 1500);
       }}
-      className="inline-flex items-center text-[var(--text-dim)] transition-colors duration-150 hover:text-[var(--accent)]"
+      className="inline-flex items-center text-[var(--text-muted)] transition-colors duration-150 hover:text-[var(--accent)]"
       title="Copy address"
     >
       {copied ? (
@@ -301,7 +301,7 @@ function MobileOrderSheet({ slab }: { slab: string }) {
       >
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--border)]/50 bg-[var(--bg)] px-3 py-2">
           <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Order ticket</span>
-          <button onClick={() => setOpen(false)} className="text-[var(--text-dim)] transition-colors duration-150 hover:text-[var(--text)]" aria-label="Close">
+          <button onClick={() => setOpen(false)} className="text-[var(--text-muted)] transition-colors duration-150 hover:text-[var(--text)]" aria-label="Close">
             ✕
           </button>
         </div>
@@ -517,7 +517,7 @@ function TradePageInner({ slab }: { slab: string }) {
           Shown on all breakpoints (the pre-rebuild page only showed this on
           mobile; desktop had no equivalent, which was inconsistent). */}
       <div className="flex items-center gap-3 border-b border-[var(--border)]/30 px-3 py-1.5 overflow-x-auto whitespace-nowrap scrollbar-none">
-        <span className="flex items-center gap-1 text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
+        <span className="flex items-center gap-1 text-[10px] text-[var(--text-muted)]" style={{ fontFamily: "var(--font-mono)" }}>
           {shortAddress}
           <CopyButton text={slab} />
         </span>
@@ -542,7 +542,7 @@ function TradePageInner({ slab }: { slab: string }) {
         <UsdToggleButton />
         <a
           href={`/analytics/${slab}`}
-          className="ml-auto shrink-0 text-[10px] uppercase tracking-[0.12em] text-[var(--text-dim)] transition-colors duration-150 hover:text-[var(--accent)]"
+          className="ml-auto shrink-0 text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)] transition-colors duration-150 hover:text-[var(--accent)]"
         >
           Analytics →
         </a>

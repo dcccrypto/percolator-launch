@@ -207,12 +207,15 @@ export const Header: FC = () => {
 
         {/* Right */}
         <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-2.5">
-          {/* DEVNET badge — non-interactive pill */}
+          {/* DEVNET badge — non-interactive pill. var(--warning), not
+              hardcoded amber-400: #fbbf24 lands at ~1.7:1 on the light
+              theme's white header (near-invisible); the token resolves to a
+              readable amber-700 in light mode and stays amber in dark. */}
           {network === "devnet" && (
             <span
               ref={badgeRef}
               title="You are on devnet - no real funds"
-              className="inline-flex items-center gap-1 rounded-full border border-[#fbbf24]/35 bg-[#fbbf24]/[0.12] px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-[0.06em] text-[#fbbf24] cursor-default pointer-events-none select-none"
+              className="inline-flex items-center gap-1 rounded-full border border-[var(--warning)]/35 bg-[var(--warning)]/[0.12] px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-[0.06em] text-[var(--warning)] cursor-default pointer-events-none select-none"
             >
               devnet
             </span>
