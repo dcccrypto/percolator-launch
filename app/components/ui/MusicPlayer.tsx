@@ -66,11 +66,38 @@ function matchesRoute(pathname: string | null | undefined, route: string): boole
   return pathname === route || pathname.startsWith(route + "/");
 }
 
+/** localStorage key remembering that the user expanded the player. */
+const PLAYER_EXPANDED_KEY = "pco-player-expanded";
+
 export function MusicPlayer() {
   const [playing, setPlaying] = useState(false);
   const [volume, setVolume] = useState(0.5);
   const [progress, setProgress] = useState(0);
-  const [collapsed, setCollapsed] = useState(false);
+  // Collapsed by default: expanded, the floating pill sits over interactive
+  // content (on /trade it covers the OTHER MARKETS table header; on /markets
+  // the table edge), and an unlabeled transport strip reads as broken UI to
+  // anyone who doesn't know it's a radio. Start as one small labeled button;
+  // remember the user's expand across pages (effect below — reading
+  // localStorage in the initializer would risk an SSR hydration mismatch).
+  const [collapsed, setCollapsed] = useState(true);
+
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(PLAYER_EXPANDED_KEY) === "1") setCollapsed(false);
+    } catch {
+      // localStorage unavailable — stay collapsed
+    }
+  }, []);
+
+  const expand = useCallback(() => {
+    setCollapsed(false);
+    try { localStorage.setItem(PLAYER_EXPANDED_KEY, "1"); } catch {}
+  }, []);
+
+  const collapse = useCallback(() => {
+    setCollapsed(true);
+    try { localStorage.removeItem(PLAYER_EXPANDED_KEY); } catch {}
+  }, []);
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -198,18 +225,21 @@ export function MusicPlayer() {
 
       {collapsed ? (
         <button
-          onClick={() => setCollapsed(false)}
+          onClick={expand}
+          title="Lo-fi radio"
           className="flex h-8 w-8 items-center justify-center rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] text-[var(--accent)] transition-colors hover:border-[var(--accent)]"
-          aria-label="Expand music player"
+          aria-label="Open lo-fi radio player"
         >
-          <svg width="8" height="8" viewBox="0 0 12 12" fill="currentColor">
-            <polygon points="2,1 10,6 2,11" />
+          {/* Music note — a play triangle here read as a mystery control;
+              the note says "this is a radio" before the user commits a click. */}
+          <svg width="10" height="10" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+            <path d="M5.5 2.5l6-1.2v7.2a2 2 0 1 1-1-1.73V3.5l-4 .8v6.2a2 2 0 1 1-1-1.73V2.5z" />
           </svg>
         </button>
       ) : (
-        <div className="flex items-center rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]">
+        <div className="flex items-center rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]" title="Lo-fi radio">
           {/* Play / Pause */}
-          <button onClick={togglePlay} className={btn} aria-label={playing ? "Pause" : "Play"}>
+          <button onClick={togglePlay} className={btn} aria-label={playing ? "Pause lo-fi radio" : "Play lo-fi radio"}>
             {playing ? <PauseIcon /> : <PlayIcon />}
           </button>
 
@@ -245,7 +275,7 @@ export function MusicPlayer() {
 
           {/* Collapse */}
           <button
-            onClick={() => setCollapsed(true)}
+            onClick={collapse}
             className={btnMuted}
             aria-label="Minimize player"
           >
