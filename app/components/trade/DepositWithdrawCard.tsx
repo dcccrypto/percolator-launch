@@ -90,6 +90,14 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
 
   const maxRawRef = useRef<bigint | null>(null);
 
+  // A typed or Max-derived amount belongs to the wallet/mint scope that
+  // produced it. Clear both representations immediately after that scope
+  // changes so a replacement wallet cannot submit the previous value.
+  useEffect(() => {
+    maxRawRef.current = null;
+    setAmount("");
+  }, [walletBalanceScopeKey]);
+
   const onChainDecimals =
     !mockMode && walletBalanceSnapshot?.scopeKey === walletBalanceScopeKey
       ? walletBalanceSnapshot.decimals
@@ -309,6 +317,8 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
   const freeMargin = capital > lockedMargin ? capital - lockedMargin : 0n;
   const loading = mode === "deposit" ? depositLoading : withdrawLoading;
   const error = mode === "deposit" ? depositError : withdrawError;
+  const isDepositBalanceUnverified =
+    !mockMode && mode === "deposit" && walletBalance === null;
 
   let parsedAmount: bigint = 0n;
   let parseError: string | null = null;
@@ -332,7 +342,7 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
     : null;
 
   async function handleSubmit() {
-    if (!amount || !userAccount || validationError) return;
+    if (!amount || !userAccount || validationError || isDepositBalanceUnverified) return;
     if (mockMode) { setAmount(""); return; }
     try {
       const amtNative = maxRawRef.current ?? parseHumanAmount(amount, decimals);
@@ -469,7 +479,7 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
 
       <button
         onClick={handleSubmit}
-        disabled={loading || !amount || !!validationError}
+        disabled={loading || !amount || !!validationError || isDepositBalanceUnverified}
         className={`w-full rounded-none py-2 text-[10px] font-medium uppercase tracking-[0.1em] hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:cursor-not-allowed disabled:opacity-50 ${mode === "deposit" ? "bg-[var(--accent)] text-white hover:brightness-110" : "bg-[var(--warning)] text-[var(--bg)] hover:brightness-110"}`}
       >
         {loading ? "Sending..." : validationError ? validationError : mode === "deposit" ? `Deposit ${symbol}` : `Withdraw ${symbol}`}

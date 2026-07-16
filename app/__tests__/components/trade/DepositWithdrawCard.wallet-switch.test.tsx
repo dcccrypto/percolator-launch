@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   useSlabState: vi.fn(),
   useTokenMeta: vi.fn(),
   initUser: vi.fn(),
+  deposit: vi.fn(),
 }));
 
 vi.mock('@/hooks/useWalletCompat', () => ({
@@ -30,7 +31,7 @@ vi.mock('@/hooks/useUserAccount', () => ({
 
 vi.mock('@/hooks/useDeposit', () => ({
   useDeposit: () => ({
-    deposit: vi.fn(),
+    deposit: mocks.deposit,
     loading: false,
     error: null,
   }),
@@ -123,6 +124,8 @@ describe('DepositWithdrawCard wallet-scoped balance lifecycle', () => {
       symbol: 'USDC',
       decimals: 6,
     });
+
+    mocks.deposit.mockResolvedValue('deposit-signature');
 
     mocks.initUser.mockResolvedValue({
       sig: 'test-signature',
@@ -247,5 +250,95 @@ describe('DepositWithdrawCard wallet-scoped balance lifecycle', () => {
     });
 
     expect(mocks.getAssociatedTokenAddressSync).toHaveBeenNthCalledWith(2, collateralMint, walletB);
+  });
+  it('clears a wallet A Max amount and blocks deposit while wallet B balance is unverified', async () => {
+    let resolveWalletBBalance:
+      | ((value: { value: { amount: string; decimals: number } }) => void)
+      | undefined;
+
+    mocks.useUserAccount.mockImplementation(() => ({
+      idx: 7,
+      pubkey: activeWallet,
+      account: {
+        capital: 100_000_000n,
+        positionSize: 0n,
+        entryPrice: 0n,
+        pnl: 0n,
+      },
+    }));
+
+    mocks.getTokenAccountBalance
+      .mockResolvedValueOnce({
+        value: {
+          amount: '900000000',
+          decimals: 6,
+        },
+      })
+      .mockImplementationOnce(
+        () =>
+          new Promise<{ value: { amount: string; decimals: number } }>((resolve) => {
+            resolveWalletBBalance = resolve;
+          }),
+      );
+
+    const { rerender } = render(<DepositWithdrawCard slabAddress="test-slab" />);
+
+    const maxButton = await screen.findByRole('button', { name: 'Max' });
+    fireEvent.click(maxButton);
+
+    const amountInput = screen.getByPlaceholderText('Amount (USDC)');
+    expect(amountInput).toHaveValue('900');
+
+    activeWallet = walletB;
+
+    await act(async () => {
+      rerender(<DepositWithdrawCard slabAddress="test-slab" />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(mocks.getTokenAccountBalance).toHaveBeenCalledTimes(2);
+    });
+
+    expect(amountInput).toHaveValue('');
+
+    const pendingDepositButton = screen.getByRole('button', {
+      name: 'Deposit USDC',
+    });
+
+    expect(pendingDepositButton).toBeDisabled();
+    fireEvent.click(pendingDepositButton);
+    expect(mocks.deposit).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveWalletBBalance?.({
+        value: {
+          amount: '25000000',
+          decimals: 6,
+        },
+      });
+      await Promise.resolve();
+    });
+
+    const walletBMaxButton = await screen.findByRole('button', { name: 'Max' });
+    fireEvent.click(walletBMaxButton);
+
+    expect(amountInput).toHaveValue('25');
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Deposit USDC',
+      }),
+    );
+
+    await waitFor(() => {
+      expect(mocks.deposit).toHaveBeenCalledWith({
+        userIdx: 7,
+        amount: 25_000_000n,
+        accountExists: true,
+        portfolioPk: walletB,
+      });
+    });
   });
 });
