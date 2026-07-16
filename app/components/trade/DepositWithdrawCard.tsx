@@ -66,9 +66,35 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
     if (!mockMode && walletConnected) prewarmTxLanding(connection);
   }, [connection, mockMode, walletConnected]);
   const [lastSig, setLastSig] = useState<string | null>(null);
-  const [walletBalance, setWalletBalance] = useState<bigint | null>(mockMode ? 500_000_000n : null);
+
+  type WalletBalanceSnapshot = {
+    scopeKey: string;
+    amount: bigint | null;
+    decimals: number | null;
+  };
+
+  const walletBalanceScopeKey =
+    publicKey && mktConfig?.collateralMint
+      ? `${publicKey.toBase58()}:${mktConfig.collateralMint.toBase58()}`
+      : null;
+
+  const [walletBalanceSnapshot, setWalletBalanceSnapshot] = useState<WalletBalanceSnapshot | null>(
+    null,
+  );
+
+  const walletBalance = mockMode
+    ? 500_000_000n
+    : walletBalanceSnapshot?.scopeKey === walletBalanceScopeKey
+      ? walletBalanceSnapshot.amount
+      : null;
+
   const maxRawRef = useRef<bigint | null>(null);
-  const [onChainDecimals, setOnChainDecimals] = useState<number | null>(null);
+
+  const onChainDecimals =
+    !mockMode && walletBalanceSnapshot?.scopeKey === walletBalanceScopeKey
+      ? walletBalanceSnapshot.decimals
+      : null;
+
   const decimals = onChainDecimals ?? tokenMeta?.decimals ?? 6;
 
   // Keep the mode-specific MAX raw value from leaking across Deposit/Withdraw.
@@ -76,33 +102,68 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
   // both the display amount and the raw ref before the opposite action can submit.
   useEffect(() => {
     setMode(initialMode);
-    setAmount("");
+    setAmount('');
     maxRawRef.current = null;
   }, [initialMode]);
 
-  const switchMode = (nextMode: "deposit" | "withdraw") => {
+  const switchMode = (nextMode: 'deposit' | 'withdraw') => {
     if (nextMode === mode) return;
     maxRawRef.current = null;
-    setAmount("");
+    setAmount('');
     setMode(nextMode);
   };
   useEffect(() => {
-    if (!publicKey || !mktConfig?.collateralMint) { setWalletBalance(null); setOnChainDecimals(null); return; }
+    if (mockMode) return;
+
+    if (!publicKey || !mktConfig?.collateralMint || !walletBalanceScopeKey) {
+      setWalletBalanceSnapshot(null);
+      return;
+    }
+
+    const requestScopeKey = walletBalanceScopeKey;
     let cancelled = false;
+
+    // Immediately invalidate a snapshot owned by a different wallet or mint.
+    // Same-scope refreshes retain their verified value while a post-transaction
+    // balance refresh is pending.
+    setWalletBalanceSnapshot((current) =>
+      current?.scopeKey === requestScopeKey
+        ? current
+        : {
+            scopeKey: requestScopeKey,
+            amount: null,
+            decimals: null,
+          },
+    );
+
     (async () => {
       try {
         const ata = getAssociatedTokenAddressSync(mktConfig.collateralMint, publicKey);
+
         const info = await connection.getTokenAccountBalance(ata);
+
         if (!cancelled && info.value.amount) {
-          setWalletBalance(BigInt(info.value.amount));
-          if (info.value.decimals !== undefined) {
-            setOnChainDecimals(info.value.decimals);
-          }
+          setWalletBalanceSnapshot({
+            scopeKey: requestScopeKey,
+            amount: BigInt(info.value.amount),
+            decimals: info.value.decimals ?? null,
+          });
         }
-      } catch { if (!cancelled) { setWalletBalance(null); setOnChainDecimals(null); } }
+      } catch {
+        if (!cancelled) {
+          setWalletBalanceSnapshot({
+            scopeKey: requestScopeKey,
+            amount: null,
+            decimals: null,
+          });
+        }
+      }
     })();
-    return () => { cancelled = true; };
-  }, [publicKey, mktConfig?.collateralMint, connection, lastSig]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [mockMode, publicKey, mktConfig?.collateralMint, walletBalanceScopeKey, connection, lastSig]);
 
   // Pre-fill deposit: the FIRST time this card is open for a brand-new
   // (0-capital) account with a known wallet balance, default the amount
