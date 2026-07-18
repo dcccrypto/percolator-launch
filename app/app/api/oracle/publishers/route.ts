@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createBoundedTtlCache } from "@/lib/bounded-ttl-cache";
 
 const PYTHNET_RPC =
   process.env.PYTHNET_RPC_URL || "https://pythnet.rpcpool.com";
@@ -26,11 +27,29 @@ const KNOWN_PYTH_PUBLISHERS: Record<string, string> = {
 /** Max age for cached publisher data (5 minutes) */
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
-interface CacheEntry {
-  data: PublishersResponse;
-  timestamp: number;
+/**
+ * GH#2416: cap the cache. The key derives from request-controlled query
+ * params, so an unbounded Map lets an unauthenticated caller mint unlimited
+ * unique keys and exhaust process memory. `pyth-pinned` keys are additionally
+ * capped by the far smaller number of real Pyth feeds, so 500 is generous.
+ */
+const CACHE_MAX_ENTRIES = 500;
+
+const cache = createBoundedTtlCache<PublishersResponse>({
+  ttlMs: CACHE_TTL_MS,
+  maxEntries: CACHE_MAX_ENTRIES,
+});
+
+/**
+ * GH#2416: a Solana public key is 32 bytes, which is 32–44 base58 chars.
+ * Without this, `authority` was accepted as an arbitrary-length arbitrary
+ * string and used directly as a cache key.
+ */
+const BASE58_PUBKEY_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+function isValidAuthority(authority: string): boolean {
+  return BASE58_PUBKEY_RE.test(authority);
 }
-const cache = new Map<string, CacheEntry>();
 
 interface PublisherInfo {
   key: string;
@@ -65,13 +84,28 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Missing mode parameter" }, { status: 400 });
   }
 
-  // Check cache
+  // GH#2416: reject a malformed authority before it can become a cache key or
+  // be echoed back in the response body.
+  if (authority !== null && !isValidAuthority(authority)) {
+    return NextResponse.json(
+      { error: "Invalid authority: expected a base58 Solana public key" },
+      { status: 400 },
+    );
+  }
+
+  // GH#2416: `admin` mode is a pure local function over `authority` — no
+  // network, no decoding. Caching it bought nothing and was precisely the
+  // unbounded-cardinality vector, so it is served uncached.
+  const isCacheable = mode !== "admin";
   const cacheKey = `${mode}:${feedId || authority || ""}`;
-  const cached = cache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-    return NextResponse.json(cached.data, {
-      headers: { "Cache-Control": "public, max-age=300" },
-    });
+
+  if (isCacheable) {
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached, {
+        headers: { "Cache-Control": "public, max-age=300" },
+      });
+    }
   }
 
   try {
@@ -107,8 +141,8 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: `Unknown mode: ${mode}` }, { status: 400 });
     }
 
-    // Update cache
-    cache.set(cacheKey, { data: result, timestamp: Date.now() });
+    // Update cache (skipped for `admin` — see isCacheable above)
+    if (isCacheable) cache.set(cacheKey, result);
 
     return NextResponse.json(result, {
       headers: { "Cache-Control": "public, max-age=300" },

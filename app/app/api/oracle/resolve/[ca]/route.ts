@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 import { SUPPORTED_DEX_IDS } from "@/lib/dex-constants";
+import { createBoundedTtlCache } from "@/lib/bounded-ttl-cache";
 
 export const dynamic = "force-dynamic";
 
@@ -80,12 +81,21 @@ const MINT_TO_PYTH: Record<string, { feedId: string; symbol: string }> = {
 // Simple in-memory cache (TTL 5 minutes)
 // ---------------------------------------------------------------------------
 
-interface CacheEntry {
-  data: OracleResolveResult;
-  expiresAt: number;
-}
-const cache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * GH#2416: cap the cache. `ca` is validated as a base58 pubkey below, but any
+ * random 32 bytes is a syntactically valid pubkey, so validation alone does
+ * not bound cardinality — an unauthenticated caller can still mint unlimited
+ * distinct keys. Each miss also fans out to Jupiter and DexScreener, so an
+ * unbounded map is both a memory leak and upstream request amplification.
+ */
+const CACHE_MAX_ENTRIES = 500;
+
+const cache = createBoundedTtlCache<OracleResolveResult>({
+  ttlMs: CACHE_TTL_MS,
+  maxEntries: CACHE_MAX_ENTRIES,
+});
 
 interface OracleResolveResult {
   feedId: string | null;
@@ -219,8 +229,8 @@ export async function GET(
 
   // Cache hit
   const cached = cache.get(ca);
-  if (cached && Date.now() < cached.expiresAt) {
-    return NextResponse.json({ ...cached.data, cached: true });
+  if (cached) {
+    return NextResponse.json({ ...cached, cached: true });
   }
 
   // --- 1. Check static Pyth feed map ---
@@ -273,6 +283,6 @@ export async function GET(
   }
 
   // Cache and return
-  cache.set(ca, { data: result, expiresAt: Date.now() + CACHE_TTL_MS });
+  cache.set(ca, result);
   return NextResponse.json({ ...result, cached: false });
 }
