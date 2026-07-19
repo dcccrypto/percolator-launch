@@ -55,6 +55,12 @@ import {
   finitePricePoints,
   type ChartSeriesKind,
 } from "@/lib/chart-style";
+import {
+  mergeMarkPriceIntoBar,
+  mergeMarkPriceIntoPoint,
+  resolveChartDataSource,
+  type ChartDataSource,
+} from "@/lib/chart-live-tick";
 import { assertNever } from "@/lib/exhaustive";
 import { formatUsdFromNumber, chartPricePrecision } from "@/lib/format";
 
@@ -339,6 +345,10 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
   // effect below (that effect should not resubscribe just because the user
   // changed candle vs. line style — only the merge SHAPE changes).
   const chartDataKindRef = useRef<"ohlc" | "single">("ohlc");
+  // The tick subscription deliberately depends only on slabAddress. Mirror the
+  // active series source so every live tick can enforce source integrity
+  // without rebuilding the subscription.
+  const activeDataSourceRef = useRef<ChartDataSource>("oracle");
   // Track whether we've done the initial viewport fit for the current
   // timeframe/chart-type/data-source. Without this, calling fitContent() on
   // every poll (new bar arrives every ~30s for Pyth / 60s for GeckoTerminal)
@@ -441,6 +451,12 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
     (percHasEnough || pythHasNothing);
   const hasPythData = !hasPercolatorData && pythStatus === "success" && pythFinite.length > 0;
   const hasExternalData = !hasPercolatorData && !hasPythData && externalStatus === "success" && externalFinite.length > 0;
+
+  const activeDataSource = resolveChartDataSource(
+    hasPercolatorData,
+    hasPythData,
+    hasExternalData,
+  );
 
   // Fetch oracle price history
   useEffect(() => {
@@ -1033,14 +1049,13 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
     // OHLC; line + area both read the single-value lineData stream. Flipping
     // between styles that share a data source preserves pan/zoom; only
     // switching kinds (candle ↔ line) refits the viewport.
-    const source = hasPercolatorData
-      ? "percolator"
-      : hasPythData
-        ? "pyth"
-        : hasExternalData
-          ? "dex"
-          : "oracle";
-    const fitKey = `${chartDataKind(chartStyle)}:${timeframe}:${source}`;
+    //
+    // Commit the source ref only after this structural effect has finished
+    // rebuilding the visible series. Updating the ref during render creates a
+    // brief mismatch window where a tick can treat the previous DEX/Pyth/PERC
+    // series as the new oracle series and mutate it before the effect runs.
+    activeDataSourceRef.current = activeDataSource;
+    const fitKey = `${chartDataKind(chartStyle)}:${timeframe}:${activeDataSource}`;
     if (fitKeyRef.current !== fitKey) {
       chart.timeScale().fitContent();
       fitKeyRef.current = fitKey;
@@ -1060,7 +1075,7 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
     // measured perf bug (see BUILD-LOG.md Phase 2). Live price now reaches
     // the chart exclusively through the "Live tick -> chart" effect below,
     // via series.update()/applyOptions() — cheap, no series recreation.
-  }, [chartStyle, timeframe, candleData, lineData, liqPriceE6, entryPriceNum, chartTheme, hasPercolatorData, hasPythData, hasExternalData, overlayPrefs.entry, overlayPrefs.liq]);
+  }, [chartStyle, timeframe, candleData, lineData, liqPriceE6, entryPriceNum, chartTheme, activeDataSource, overlayPrefs.entry, overlayPrefs.liq]);
 
   // Phase 2: Live tick -> chart. Subscribes directly to the price store
   // (bypassing React state/useLivePrice() entirely, per the reference doc's
@@ -1099,19 +1114,32 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
 
       const series = seriesRef.current;
       if (series) {
+        // Mark ticks may mutate the visible series only when that series is
+        // the oracle fallback built from the same mark-price stream. Pyth and
+        // DEX history have independent upstreams, while Percolator candles are
+        // updated by actual trades:<slab> events.
         if (chartDataKindRef.current === "ohlc" && lastBarRef.current) {
-          const merged = {
-            ...lastBarRef.current,
-            high: Math.max(lastBarRef.current.high, usd),
-            low: Math.min(lastBarRef.current.low, usd),
-            close: usd,
-          };
-          lastBarRef.current = merged;
-          (series as ISeriesApi<"Candlestick">).update(merged);
+          const current = lastBarRef.current;
+          const merged = mergeMarkPriceIntoBar(
+            activeDataSourceRef.current,
+            current,
+            usd,
+          );
+          if (merged !== current) {
+            lastBarRef.current = merged;
+            (series as ISeriesApi<"Candlestick">).update(merged);
+          }
         } else if (chartDataKindRef.current === "single" && lastPointRef.current) {
-          const merged = { time: lastPointRef.current.time, value: usd };
-          lastPointRef.current = merged;
-          (series as ISeriesApi<"Line">).update(merged);
+          const current = lastPointRef.current;
+          const merged = mergeMarkPriceIntoPoint(
+            activeDataSourceRef.current,
+            current,
+            usd,
+          );
+          if (merged !== current) {
+            lastPointRef.current = merged;
+            (series as ISeriesApi<"Line">).update(merged);
+          }
         }
       }
 
