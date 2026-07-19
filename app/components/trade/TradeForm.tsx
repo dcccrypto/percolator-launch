@@ -28,6 +28,7 @@ import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
 import { useClosePosition } from "@/hooks/useClosePosition";
 import { saveEntryPrice, getEntryPrice, getEntryLeverage, clearEntryPrice } from "@/lib/entry-price";
+import { resolveSubmittedLimitPriceE6 } from "@/lib/submitted-limit-price";
 import { isSentinelValue } from "@/lib/health";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
 import { useInitUser } from "@/hooks/useInitUser";
@@ -458,7 +459,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const needsDeposit = connected && userAccount && capital === 0n;
   const canTrade = connected && userAccount && capital > 0n && !lpUnderfunded;
 
-  async function handleTrade(snapshotSize?: bigint) {
+  async function handleTrade(snapshotSize?: bigint, snapshotLimitPriceE6?: bigint) {
     // Use the snapshotted size from the confirmation modal so the submitted
     // trade matches what the user reviewed, even if the live price moved
     // between modal-open and confirm. Fall back to live size if no snapshot
@@ -482,8 +483,23 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setTradePhase("submitting");
     try {
       const size = direction === "short" ? -effectiveSize : effectiveSize;
+      // GH#2362: submit the worst-fill bound the user actually reviewed. The
+      // modal already displays this value as the binding slippage limit, but it
+      // was never forwarded, so useTrade re-derived one from the live mark at
+      // submit time — a market move between opening the modal and pressing
+      // Confirm silently changed the protection bound out from under the user.
+      // See resolveSubmittedLimitPriceE6 for why a 0n snapshot is NOT forwarded.
+      const submittedLimitPriceE6 = resolveSubmittedLimitPriceE6(snapshotLimitPriceE6);
+      const tradeParams: { lpIdx: number; userIdx: number; size: bigint; limitPriceE6?: bigint } = {
+        lpIdx,
+        userIdx: userAccount!.idx,
+        size,
+      };
+      if (submittedLimitPriceE6 !== undefined) {
+        tradeParams.limitPriceE6 = submittedLimitPriceE6;
+      }
       const sig = await withTransientRetry(
-        async () => trade({ lpIdx, userIdx: userAccount!.idx, size }),
+        async () => trade(tradeParams),
         { maxRetries: 2, delayMs: 3000 },
       );
       setTradePhase("confirming");
@@ -1048,9 +1064,12 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           decimals={decimals}
           onConfirm={() => {
             const snapSize = confirmSnapshot.positionSize;
+            // GH#2362: carry the reviewed worst-fill bound through to submission
+            // so the transaction is protected at the price the user approved.
+            const snapLimitPriceE6 = confirmSnapshot.worstFillPriceE6;
             setShowConfirmModal(false);
             setConfirmSnapshot(null);
-            handleTrade(snapSize);
+            handleTrade(snapSize, snapLimitPriceE6);
           }}
           onCancel={() => { setShowConfirmModal(false); setConfirmSnapshot(null); }}
         />
