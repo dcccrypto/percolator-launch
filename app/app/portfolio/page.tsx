@@ -51,6 +51,10 @@ export default function PortfolioPage() {
   const atRiskCount = portfolio.atRiskCount ?? 0;
   const loading = mockPositions ? false : portfolio.loading;
   const refresh = portfolio.refresh;
+  // GH#2414: an incomplete scan must not render as a complete picture — the
+  // totals below can understate real exposure. Mock mode is always complete.
+  const isPartial = mockPositions ? false : portfolio.isPartial;
+  const failedMarketCount = portfolio.failedMarketCount ?? 0;
 
   // LP positions (insurance fund deposits)
   const lpPositions = useLpPositions();
@@ -150,6 +154,24 @@ export default function PortfolioPage() {
                   </span>
                 )}
               </p>
+              {/* GH#2414: the scan failed for at least one market, so positions
+                  may be missing and every total shown below may be understated.
+                  Say so explicitly — silently rendering a partial portfolio as
+                  complete is what let users believe a position had closed. */}
+              {isPartial && !loading && (
+                <div
+                  role="alert"
+                  data-testid="portfolio-partial-warning"
+                  className="mt-3 rounded-sm border border-[var(--warning,#f5a623)]/40 bg-[var(--warning,#f5a623)]/10 px-3 py-2 text-[12px] text-[var(--text)]"
+                >
+                  <span className="font-bold">⚠ Incomplete portfolio.</span>{" "}
+                  {failedMarketCount > 0
+                    ? `${failedMarketCount} market${failedMarketCount === 1 ? "" : "s"} could not be loaded.`
+                    : "Some markets could not be loaded."}{" "}
+                  Positions may be missing and the totals below may be understated. Use Refresh, and
+                  check the market page directly before acting on these numbers.
+                </div>
+              )}
             </div>
             {refresh && (
               <button

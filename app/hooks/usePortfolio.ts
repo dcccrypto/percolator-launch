@@ -114,6 +114,15 @@ export interface PortfolioData {
   loading: boolean;
   /** True only during background refreshes (not initial load) */
   isRefreshing: boolean;
+  /**
+   * GH#2414: true when at least one market could not be scanned, so this
+   * snapshot is INCOMPLETE. Positions may be missing and every total below
+   * (deposited, value, PnL, atRiskCount) may be understated. Callers must not
+   * present a partial snapshot as a complete picture of the wallet's exposure.
+   */
+  isPartial: boolean;
+  /** GH#2414: how many markets failed to scan. 0 when isPartial is false. */
+  failedMarketCount: number;
   refresh: () => void;
 }
 
@@ -132,6 +141,10 @@ export function usePortfolio(): PortfolioData {
   const [atRiskCount, setAtRiskCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  // GH#2414: incompleteness must be part of the published snapshot, not a
+  // console.error nobody sees.
+  const [isPartial, setIsPartial] = useState(false);
+  const [failedMarketCount, setFailedMarketCount] = useState(0);
   const hasLoadedOnce = useRef(false);
   const [refreshCounter, setRefreshCounter] = useState(0);
 
@@ -156,6 +169,10 @@ export function usePortfolio(): PortfolioData {
       setAtRiskCount(0);
       setLoading(false);
       setIsRefreshing(false);
+      // No wallet is a COMPLETE (empty) picture, not a failed scan — clear any
+      // partial flag left over from a previously connected wallet (GH#2414).
+      setIsPartial(false);
+      setFailedMarketCount(0);
       hasLoadedOnce.current = false;
       return;
     }
@@ -180,6 +197,11 @@ export function usePortfolio(): PortfolioData {
         let depositSum = 0n;
         let unrealizedPnlSum = 0n;
         let riskCount = 0;
+        // GH#2414: every failure below used to be swallowed into an empty
+        // result, making an incomplete scan indistinguishable from a wallet
+        // with no positions. Count them so the snapshot can declare itself
+        // partial instead of silently understating the user's exposure.
+        let failedMarkets = 0;
 
         // Batch fetch all slab accounts using getMultipleAccountsInfo
         // RPC limit is 100 accounts per call, so chunk into batches
@@ -197,8 +219,12 @@ export function usePortfolio(): PortfolioData {
           );
           slabAccountsInfo = results.flat();
         } catch (error) {
+          // GH#2414: this is the worst case — the batch slab fetch covers EVERY
+          // market, so failing here previously produced an empty portfolio that
+          // rendered as "you have no positions".
           console.error("[usePortfolio] Failed to batch fetch slabs:", error);
           slabAccountsInfo = [];
+          failedMarkets += markets.length;
         }
         
         // Process each slab to find user accounts
@@ -446,8 +472,17 @@ export function usePortfolio(): PortfolioData {
                 }
               }
             }
-          } catch {
-            // Skip markets that fail to parse
+          } catch (error) {
+            // GH#2414: a market that fails to scan is NOT a market with no
+            // positions. This path covers the v17 getProgramAccounts owner scan,
+            // so swallowing it hid real positions while the same positions
+            // stayed visible on the market page.
+            console.error(
+              "[usePortfolio] Market scan failed:",
+              market.slabAddress.toBase58(),
+              error,
+            );
+            failedMarkets++;
           }
         }
 
@@ -478,9 +513,20 @@ export function usePortfolio(): PortfolioData {
           setTotalValue(depositSum + unrealizedPnlSum);
           setTotalUnrealizedPnl(unrealizedPnlSum);
           setAtRiskCount(riskCount);
+          // GH#2414: publish completeness alongside the numbers it qualifies,
+          // so no consumer can read the totals without it.
+          setIsPartial(failedMarkets > 0);
+          setFailedMarketCount(failedMarkets);
         }
-      } catch {
-        // ignore
+      } catch (error) {
+        // GH#2414: a throw here means market discovery itself failed, so we
+        // know nothing about this wallet. Previously this was ignored and the
+        // stale/empty state was left rendering as a completed scan.
+        console.error("[usePortfolio] Portfolio load failed:", error);
+        if (!cancelled) {
+          setIsPartial(true);
+          setFailedMarketCount((prev) => (prev > 0 ? prev : 1));
+        }
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -516,5 +562,5 @@ export function usePortfolio(): PortfolioData {
     };
   }, []);
 
-  return { positions, totalPnl, totalDeposited, totalValue, totalUnrealizedPnl, atRiskCount, loading, isRefreshing, refresh };
+  return { positions, totalPnl, totalDeposited, totalValue, totalUnrealizedPnl, atRiskCount, loading, isRefreshing, isPartial, failedMarketCount, refresh };
 }
