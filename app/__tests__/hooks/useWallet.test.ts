@@ -1,40 +1,21 @@
 /**
- * useWalletCompat Hook Tests
- * 
- * Tests Privy wallet compatibility layer:
- * - Connection detection
- * - Disconnection detection
- * - Public key derivation
- * - Wallet state transitions
- * 
- * Note: This tests integration with @privy-io/react-auth via useWalletCompat
+ * useWalletCompat / useConnectionCompat Hook Tests
+ *
+ * `useWalletCompat()` used to own the Privy integration. It no longer does:
+ * the derivation moved into `PrivyWalletApiBridge` (PrivyProviderClient.tsx)
+ * so that the 60+ call sites stop dragging @privy-io/react-auth into the
+ * shared client bundle, and the hook became a pure `WalletApiContext` read.
+ *
+ * These tests therefore cover what the hook IS — a context read with a safe
+ * read-only default. The Privy → WalletApi derivation they used to assert is
+ * covered against the bridge itself, in
+ * __tests__/components/PrivyProviderClient.test.tsx.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
 import { PublicKey } from "@solana/web3.js";
-
-// Mock Privy hooks
-const mockUsePrivy = vi.fn();
-const mockUseWallets = vi.fn();
-const mockUseSignTransaction = vi.fn();
-const mockUseSignAndSendTransaction = vi.fn();
-const mockUseSignMessage = vi.fn();
-
-vi.mock("@privy-io/react-auth", () => ({
-  usePrivy: () => mockUsePrivy(),
-}));
-
-vi.mock("@privy-io/react-auth/solana", () => ({
-  useWallets: () => mockUseWallets(),
-  useSignTransaction: () => mockUseSignTransaction(),
-  useSignAndSendTransaction: () => mockUseSignAndSendTransaction(),
-  useSignMessage: () => mockUseSignMessage(),
-}));
-
-vi.mock("@/hooks/usePrivySafe", () => ({
-  usePrivyAvailable: () => true,
-}));
 
 vi.mock("@/lib/config", () => ({
   getConfig: () => ({
@@ -47,129 +28,93 @@ vi.mock("@/lib/config", () => ({
 }));
 
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
+import {
+  WalletApiContext,
+  READ_ONLY_WALLET_API,
+  type WalletApi,
+} from "@/hooks/walletApiContext";
 
 describe("useWalletCompat", () => {
-  const mockAddress = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
+  it("falls back to the read-only API when no wallet provider is mounted", () => {
+    const { result } = renderHook(() => useWalletCompat());
 
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockUseSignTransaction.mockReturnValue({ signTransaction: vi.fn() });
-    mockUseSignAndSendTransaction.mockReturnValue({ signAndSendTransaction: vi.fn() });
-    mockUseSignMessage.mockReturnValue({ signMessage: vi.fn() });
+    // Server-rendered pages and any tree outside a provider must degrade to
+    // read-only rather than throwing — every call site reads this unguarded.
+    expect(result.current).toBe(READ_ONLY_WALLET_API);
+    expect(result.current.connected).toBe(false);
+    expect(result.current.publicKey).toBeNull();
+    expect(result.current.signTransaction).toBeUndefined();
+    expect(result.current.signMessage).toBeUndefined();
   });
 
-  describe("Connection State", () => {
-    it("should report connected=false when not authenticated", () => {
-      mockUsePrivy.mockReturnValue({ ready: true, authenticated: false, user: null, logout: vi.fn() });
-      mockUseWallets.mockReturnValue({ wallets: [] });
-
-      const { result } = renderHook(() => useWalletCompat());
-      expect(result.current.connected).toBe(false);
-      expect(result.current.publicKey).toBeNull();
-    });
-
-    it("should report connected=true when authenticated with wallet", () => {
-      mockUsePrivy.mockReturnValue({ ready: true, authenticated: true, user: { id: "1" }, logout: vi.fn() });
-      mockUseWallets.mockReturnValue({ wallets: [{ address: mockAddress, standardWallet: { name: "Phantom" } }] });
-
-      const { result } = renderHook(() => useWalletCompat());
-      expect(result.current.connected).toBe(true);
-      expect(result.current.publicKey).toEqual(new PublicKey(mockAddress));
-    });
-
-    it("should report connecting=true when Privy is not ready", () => {
-      mockUsePrivy.mockReturnValue({ ready: false, authenticated: false, user: null, logout: vi.fn() });
-      mockUseWallets.mockReturnValue({ wallets: [] });
-
-      const { result } = renderHook(() => useWalletCompat());
-      expect(result.current.connecting).toBe(true);
-    });
-
-    it("should report connecting=false when Privy is ready", () => {
-      mockUsePrivy.mockReturnValue({ ready: true, authenticated: false, user: null, logout: vi.fn() });
-      mockUseWallets.mockReturnValue({ wallets: [] });
-
-      const { result } = renderHook(() => useWalletCompat());
-      expect(result.current.connecting).toBe(false);
-    });
-
-    it("should return null publicKey when no wallets connected", () => {
-      mockUsePrivy.mockReturnValue({ ready: true, authenticated: true, user: { id: "1" }, logout: vi.fn() });
-      mockUseWallets.mockReturnValue({ wallets: [] });
-
-      const { result } = renderHook(() => useWalletCompat());
-      expect(result.current.publicKey).toBeNull();
-      expect(result.current.connected).toBe(false);
-    });
-
-    it("should prefer external wallet over embedded (Privy) wallet", () => {
-      const externalAddr = "9xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
-      mockUsePrivy.mockReturnValue({ ready: true, authenticated: true, user: { id: "1" }, logout: vi.fn() });
-      mockUseWallets.mockReturnValue({
-        wallets: [
-          { address: mockAddress, standardWallet: { name: "Privy" } },
-          { address: externalAddr, standardWallet: { name: "Phantom" } },
-        ],
-      });
-
-      const { result } = renderHook(() => useWalletCompat());
-      expect(result.current.publicKey?.toBase58()).toBe(externalAddr);
-    });
-
-    it("should fall back to embedded wallet when no external wallet", () => {
-      mockUsePrivy.mockReturnValue({ ready: true, authenticated: true, user: { id: "1" }, logout: vi.fn() });
-      mockUseWallets.mockReturnValue({
-        wallets: [{ address: mockAddress, standardWallet: { name: "Privy" } }],
-      });
-
-      const { result } = renderHook(() => useWalletCompat());
-      expect(result.current.publicKey?.toBase58()).toBe(mockAddress);
-    });
+  it("returns the read-only disconnect as a no-op promise", async () => {
+    const { result } = renderHook(() => useWalletCompat());
+    await expect(result.current.disconnect()).resolves.toBeUndefined();
   });
 
-  describe("Disconnect", () => {
-    it("should expose logout as disconnect", () => {
-      const mockLogout = vi.fn();
-      mockUsePrivy.mockReturnValue({ ready: true, authenticated: true, user: { id: "1" }, logout: mockLogout });
-      mockUseWallets.mockReturnValue({ wallets: [{ address: mockAddress, standardWallet: { name: "Phantom" } }] });
+  it("returns whatever WalletApi the mounted provider injected", () => {
+    const publicKey = new PublicKey(
+      "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+    );
+    const disconnect = vi.fn(async () => {});
+    const signMessage = vi.fn(async () => new Uint8Array([1, 2, 3]));
+    const injected: WalletApi = {
+      ...READ_ONLY_WALLET_API,
+      publicKey,
+      connected: true,
+      signMessage,
+      disconnect,
+    };
 
-      const { result } = renderHook(() => useWalletCompat());
-      expect(result.current.disconnect).toBe(mockLogout);
-    });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(WalletApiContext.Provider, { value: injected }, children);
+
+    const { result } = renderHook(() => useWalletCompat(), { wrapper });
+
+    expect(result.current).toBe(injected);
+    expect(result.current.connected).toBe(true);
+    expect(result.current.publicKey?.toBase58()).toBe(publicKey.toBase58());
+    expect(result.current.signMessage).toBe(signMessage);
+    expect(result.current.disconnect).toBe(disconnect);
   });
 
-  describe("signMessage (2026-07-09 fix)", () => {
-    it("should expose a working signMessage backed by Privy's useSignMessage when a wallet is connected", async () => {
-      const wallet = { address: mockAddress, standardWallet: { name: "Privy" } };
-      const signature = new Uint8Array([1, 2, 3]);
-      const privySignMessage = vi.fn().mockResolvedValue({ signature });
-      mockUsePrivy.mockReturnValue({ ready: true, authenticated: true, user: { id: "1" }, logout: vi.fn() });
-      mockUseWallets.mockReturnValue({ wallets: [wallet] });
-      mockUseSignMessage.mockReturnValue({ signMessage: privySignMessage });
+  it("imports no wallet SDK — the bundle-split invariant the refactor exists for", async () => {
+    // If this ever fails, @privy-io/react-auth (and its WalletConnect /
+    // Coinbase / viem graph) is back in the shared client bundle.
+    const [fs, path] = await Promise.all([
+      import("node:fs/promises"),
+      import("node:path"),
+    ]);
+    const source = await fs.readFile(
+      path.join(process.cwd(), "hooks/useWalletCompat.ts"),
+      "utf8",
+    );
 
-      const { result } = renderHook(() => useWalletCompat());
-      expect(result.current.signMessage).toBeInstanceOf(Function);
+    // Match real import statements only — the file names both packages in
+    // prose comments explaining why it must not import them.
+    const imported = [...source.matchAll(/^import\s[^;]*?from\s+["']([^"']+)["']/gm)].map(
+      (m) => m[1],
+    );
 
-      const message = new TextEncoder().encode("keeper-register:Slab111:12345");
-      const sig = await result.current.signMessage!(message);
-
-      expect(privySignMessage).toHaveBeenCalledWith({ message, wallet });
-      expect(sig).toBe(signature);
-    });
-
-    it("should leave signMessage undefined when no wallet is connected", () => {
-      mockUsePrivy.mockReturnValue({ ready: true, authenticated: false, user: null, logout: vi.fn() });
-      mockUseWallets.mockReturnValue({ wallets: [] });
-
-      const { result } = renderHook(() => useWalletCompat());
-      expect(result.current.signMessage).toBeUndefined();
-    });
+    expect(imported.length).toBeGreaterThan(0);
+    expect(imported.filter((s) => s.startsWith("@privy-io/"))).toEqual([]);
+    expect(imported.filter((s) => s.startsWith("@solana/wallet-adapter"))).toEqual([]);
   });
 });
 
 describe("useConnectionCompat", () => {
-  it("should use the configured RPC endpoint", () => {
+  it("uses the configured RPC endpoint", () => {
     const { result } = renderHook(() => useConnectionCompat());
-    expect((result.current.connection as any)._rpcEndpoint).toBe("https://example.com/api/rpc");
+    expect((result.current.connection as any)._rpcEndpoint).toBe(
+      "https://example.com/api/rpc",
+    );
+  });
+
+  it("returns the same Connection instance across consumers", () => {
+    // The singleton is the point: every consumer used to build its own
+    // Connection, each a potential extra WS channel.
+    const a = renderHook(() => useConnectionCompat());
+    const b = renderHook(() => useConnectionCompat());
+    expect(a.result.current.connection).toBe(b.result.current.connection);
   });
 });

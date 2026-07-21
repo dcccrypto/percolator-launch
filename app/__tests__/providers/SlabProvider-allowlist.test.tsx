@@ -12,11 +12,19 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { FC, ReactNode } from "react";
-import { PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey } from "@solana/web3.js";
 
 const ALLOWED_PROGRAM = "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9"; // v17 devnet default
 const ATTACKER_PROGRAM = "11111111111111111111111111111112";
-const SLAB_ADDRESS = "So11111111111111111111111111111111111111112";
+
+/**
+ * Fresh slab address per test. `lib/slabCache` is a MODULE-level cache that
+ * SlabProvider seeds from on mount (getSeedSlab) and writes to on every fetch
+ * (setCachedSlab) — so reusing one address let the legitimate case's parsed
+ * bytes and the attacker case's owner leak into later tests, and each case
+ * silently asserted against the previous one's residue.
+ */
+let SLAB_ADDRESS: string;
 
 // Stub the SDK parsers so we don't have to hand-craft large v17 slab buffers.
 // The gate runs BEFORE parseHeader, so legitimate parses succeed and
@@ -62,8 +70,12 @@ vi.mock("@/hooks/useWalletCompat", () => ({
 
 describe("SlabProvider phishing guard", () => {
   beforeEach(() => {
+    SLAB_ADDRESS = Keypair.generate().publicKey.toBase58();
     getAccountInfo.mockReset();
-    onAccountChange.mockClear();
+    // mockReset (not mockClear): the WS test installs an implementation that
+    // captures the subscription callback, and mockClear would leave it in
+    // place for every later test.
+    onAccountChange.mockReset();
     onAccountChange.mockReturnValue(1);
   });
 
