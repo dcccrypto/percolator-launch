@@ -71,20 +71,48 @@ const mockWalletPubkey = new PublicKey('7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJos
 const mockSlabAddress = Keypair.generate().publicKey.toBase58();
 const mockCollateralMint = new PublicKey('So11111111111111111111111111111111111111112');
 
+/**
+ * Real deployed StakePool v1 layout (352 bytes). These offsets are the ones
+ * `decodeStakePoolV1` reads, and they match `parseStakePool` in
+ * app/app/api/stake/pools/route.ts — the route that reads live pools.
+ *
+ * The previous fixture packed lpMint@65 / vault@97 / cooldownSlots@162, which
+ * matched no decoder. The mint/vault reads still produced *a* PublicKey from
+ * whatever bytes landed there (any 32 bytes are valid), and unpackMint /
+ * unpackAccount are mocked to return fixed balances regardless of which
+ * account was fetched — so the balance and share tests passed vacuously while
+ * only the cooldown fields, which are actually read as numbers, showed the
+ * mismatch.
+ */
+const OFF = {
+  isInitialized: 0,
+  bump: 1,
+  vaultAuthBump: 2,
+  slab: 8,
+  admin: 40,
+  collateralMint: 72,
+  lpMint: 104,
+  vault: 136,
+  totalDeposited: 168,
+  totalLpSupply: 176,
+  cooldownSlots: 184,
+  depositCap: 192,
+} as const;
+
 function buildPoolAccountData(opts?: {
   cooldownSlots?: bigint;
   depositCap?: bigint;
   totalDeposited?: bigint;
 }): Buffer {
   const buf = Buffer.alloc(352);
-  buf[0] = 1;
-  mockLpMint.toBuffer().copy(buf, 65);
-  mockVault.toBuffer().copy(buf, 97);
-  mockVaultAuth.toBuffer().copy(buf, 129);
-  buf[161] = 254;
-  buf.writeBigUInt64LE(opts?.cooldownSlots ?? 0n, 162);
-  buf.writeBigUInt64LE(opts?.depositCap ?? 0n, 170);
-  buf.writeBigUInt64LE(opts?.totalDeposited ?? 0n, 178);
+  buf[OFF.isInitialized] = 1;
+  buf[OFF.bump] = 255;
+  buf[OFF.vaultAuthBump] = 254;
+  mockLpMint.toBuffer().copy(buf, OFF.lpMint);
+  mockVault.toBuffer().copy(buf, OFF.vault);
+  buf.writeBigUInt64LE(opts?.totalDeposited ?? 0n, OFF.totalDeposited);
+  buf.writeBigUInt64LE(opts?.cooldownSlots ?? 0n, OFF.cooldownSlots);
+  buf.writeBigUInt64LE(opts?.depositCap ?? 0n, OFF.depositCap);
   return buf;
 }
 

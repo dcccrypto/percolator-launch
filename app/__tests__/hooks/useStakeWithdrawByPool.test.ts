@@ -9,9 +9,12 @@ import { renderHook, act } from '@testing-library/react';
 import { PublicKey, Keypair } from '@solana/web3.js';
 
 // ── Hoisted values ────────────────────────────────────────────
-const { mockPool, mockVaultAuth, mockDepositPda, mockLpMint, mockVault } = vi.hoisted(() => {
+const { mockPool, mockVaultAuth, mockDepositPda, mockLpMint, mockVault, STAKE_PROGRAM } = vi.hoisted(() => {
   const { Keypair: Kp } = require('@solana/web3.js');
   return {
+    // The hook reads the stake program from getConfig().vaultProgramId and
+    // requires the pool account to be owned by it — NOT from the SDK.
+    STAKE_PROGRAM: Kp.generate().publicKey,
     mockPool: Kp.generate().publicKey,
     mockVaultAuth: Kp.generate().publicKey,
     mockDepositPda: Kp.generate().publicKey,
@@ -31,13 +34,16 @@ vi.mock('@/lib/tx', () => ({
   sendTx: vi.fn(),
 }));
 
+// The by-pool hooks resolve the stake program from config, so the owner check
+// (`poolInfo.owner.equals(stakeProgramId)`) is only satisfiable if the test
+// pins both sides to the same key.
+vi.mock('@/lib/config', () => ({
+  getConfig: () => ({ vaultProgramId: STAKE_PROGRAM.toBase58() }),
+}));
+
 vi.mock('@percolatorct/sdk', () => {
   const { PublicKey: PK } = require('@solana/web3.js');
-  const devnetProgramId = new PK('6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k');
   return {
-    STAKE_PROGRAM_ID: devnetProgramId,
-    getStakeProgramId: vi.fn().mockReturnValue(devnetProgramId),
-    STAKE_POOL_SIZE: 352,
     deriveStakePool: vi.fn().mockReturnValue([mockPool, 255]),
     deriveStakeVaultAuth: vi.fn().mockReturnValue([mockVaultAuth, 254]),
     deriveDepositPda: vi.fn().mockReturnValue([mockDepositPda, 253]),
@@ -45,7 +51,6 @@ vi.mock('@percolatorct/sdk', () => {
     withdrawAccounts: vi.fn().mockReturnValue([
       { pubkey: new PK('7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU'), isSigner: true, isWritable: false },
     ]),
-    decodeStakePool: vi.fn().mockReturnValue({ lpMint: mockLpMint, vault: mockVault }),
   };
 });
 
@@ -68,12 +73,15 @@ import { useConnectionCompat, useWalletCompat } from '@/hooks/useWalletCompat';
 import { sendTx } from '@/lib/tx';
 import { encodeStakeWithdraw, withdrawAccounts } from '@percolatorct/sdk';
 
-// Build a fake pool account buffer (352 bytes — canonical StakePool size).
-// lpMint at offset 104, vault at offset 136 per decodeStakePool layout.
-// decodeStakePool is mocked, so exact content doesn't matter; size must be ≥ 352.
+/**
+ * Real deployed StakePool v1 layout (352 bytes) — the offsets `decodeStakePoolV1`
+ * reads, matching `parseStakePool` in app/app/api/stake/pools/route.ts.
+ */
 function buildPoolAccountData(): Buffer {
   const buf = Buffer.alloc(352);
-  buf[0] = 1; // is_initialized
+  buf[0] = 1;   // is_initialized
+  buf[1] = 255; // bump
+  buf[2] = 254; // vault_auth_bump
   mockLpMint.toBuffer().copy(buf, 104);
   mockVault.toBuffer().copy(buf, 136);
   return buf;
@@ -95,7 +103,7 @@ describe('useStakeWithdrawByPool', () => {
     mockConnection = {
       getAccountInfo: vi.fn().mockImplementation(async (pubkey: PublicKey) => {
         if (pubkey.equals(mockPool)) {
-          return { data: buildPoolAccountData(), owner: new PublicKey('6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k') };
+          return { data: buildPoolAccountData(), owner: STAKE_PROGRAM };
         }
         return { data: Buffer.alloc(165), owner: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') };
       }),
@@ -184,7 +192,7 @@ describe('useStakeWithdrawByPool', () => {
     let callIdx = 0;
     mockConnection.getAccountInfo.mockImplementation(async (pubkey: PublicKey) => {
       if (pubkey.equals(mockPool)) {
-        return { data: buildPoolAccountData(), owner: new PublicKey('6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k') };
+        return { data: buildPoolAccountData(), owner: STAKE_PROGRAM };
       }
       callIdx++;
       if (callIdx >= 2) return null; // collateral ATA missing
@@ -221,6 +229,27 @@ describe('useStakeWithdrawByPool', () => {
       resolveFirst('sig1');
       await firstPromise!;
     });
+  });
+
+  it('rejects a pool account not owned by the configured stake program', async () => {
+    // Defense-in-depth guard. The pool is a PDA so an attacker cannot normally
+    // substitute an account, but a network/config mismatch (mainnet config
+    // against a devnet pool, say) would otherwise let the hook decode a
+    // foreign account's bytes as a StakePool and sign against it.
+    const foreignProgram = Keypair.generate().publicKey;
+    mockConnection.getAccountInfo.mockImplementation(async (pubkey: PublicKey) => {
+      if (pubkey.equals(mockPool)) {
+        return { data: buildPoolAccountData(), owner: foreignProgram };
+      }
+      return { data: Buffer.alloc(165), owner: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') };
+    });
+
+    const { result } = renderHook(() => useStakeWithdrawByPool(DEFAULT_PARAMS));
+
+    await act(async () => {
+      await expect(result.current.withdraw(1_000_000n)).rejects.toThrow('owner mismatch');
+    });
+    expect(sendTx).not.toHaveBeenCalled();
   });
 
   it('does NOT depend on SlabProvider or useParams', () => {
