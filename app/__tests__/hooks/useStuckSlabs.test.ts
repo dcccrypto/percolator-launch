@@ -251,16 +251,27 @@ describe("useStuckSlabs", () => {
       expect(result.current.stuckSlabs).toEqual([]);
     });
 
-    it("keeps the last-good list when the RPC lookup fails", async () => {
-      persistInFlight();
-      mockGetAccountInfo.mockRejectedValue(new Error("RPC connection failed"));
+    it("keeps the last-good list when a later RPC lookup fails", async () => {
+      // Must seed a SUCCESSFUL load first. Asserting an empty list straight
+      // after a failed initial mount proves nothing — it is empty either way,
+      // whether the catch preserves state or blanks it.
+      const { state } = persistInFlight();
+      mockGetAccountInfo.mockResolvedValue(null);
 
       const { result } = renderHook(() => useStuckSlabs());
-      await waitFor(() => expect(result.current.loading).toBe(false));
+      await waitFor(() => expect(result.current.stuckSlabs).toHaveLength(1));
 
-      // A transient RPC error must not blank the recovery banner.
-      expect(result.current.stuckSlabs).toEqual([]);
-      expect(result.current.stuckSlab).toBeNull();
+      // Now break the RPC and force a refresh.
+      mockGetAccountInfo.mockRejectedValue(new Error("RPC connection failed"));
+      await act(async () => {
+        await result.current.refresh();
+      });
+
+      // A transient RPC error must not blank the recovery banner — the user
+      // would lose sight of a market still holding their rent.
+      expect(result.current.stuckSlabs).toHaveLength(1);
+      expect(result.current.stuckSlab!.publicKey.toBase58()).toBe(state.slabAddress);
+      expect(result.current.loading).toBe(false);
     });
   });
 
