@@ -6,15 +6,24 @@
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 
-// Capture the WS message listener so tests can inject "live" ticks without
-// a real socket. subscribeChannel/onMessage mirror WsManagerHandle's shape.
-const messageListeners: Array<(data: unknown) => void> = [];
+// Capture the WS message listeners so tests can inject "live" ticks without a
+// real socket. priceStore subscribes via `onMessageForChannel(slab, listener)`,
+// which dispatches ONLY to listeners registered for that channel — so the mock
+// keys listeners by channel rather than holding one global list. A global list
+// would deliver every tick to every slab, which the real manager never does.
+const channelListeners = new Map<string, Array<(data: unknown) => void>>();
 vi.mock("@/lib/priceStore/wsManager", () => ({
   getWsManager: () => ({
     subscribeChannel: () => () => {},
-    onMessage: (l: (data: unknown) => void) => {
-      messageListeners.push(l);
-      return () => {};
+    onMessage: () => () => {},
+    onMessageForChannel: (channel: string, l: (data: unknown) => void) => {
+      const list = channelListeners.get(channel) ?? [];
+      list.push(l);
+      channelListeners.set(channel, list);
+      return () => {
+        const cur = channelListeners.get(channel);
+        if (cur) channelListeners.set(channel, cur.filter((x) => x !== l));
+      };
     },
     onStatusChange: () => () => {},
   }),
@@ -31,7 +40,7 @@ import {
  *  visibilitychange handler flushes pending ticks synchronously — same
  *  path the real store uses when a backgrounded tab returns). */
 function deliverLiveTick(slab: string, price: number) {
-  for (const l of messageListeners) l({ type: "price", slab, price });
+  for (const l of channelListeners.get(slab) ?? []) l({ type: "price", slab, price });
   document.dispatchEvent(new Event("visibilitychange"));
 }
 

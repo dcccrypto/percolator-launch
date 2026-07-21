@@ -62,11 +62,18 @@ describe('v17 matcher-state helpers', () => {
     expect(inspectV17MatcherContext(data, publicKey(21))).toBe('uninitialized');
   });
 
+  // The 16-byte VAMM magic occupies CTX_VAMM_OFFSET; the delegate starts
+  // immediately after it. Writing at CTX_VAMM_OFFSET itself lands on the magic
+  // and leaves the real delegate slot half-zeroed — which is why the 'invalid'
+  // case below used to pass for the wrong reason. Matches the offset already
+  // used by __tests__/hooks/useCreateMarket.v17-matcher-{resume,recovery}.test.ts.
+  const DELEGATE_OFFSET = CTX_VAMM_OFFSET + 16;
+
   it('classifies a context containing the expected delegate as initialized', () => {
     const data = new Uint8Array(MATCHER_CONTEXT_LEN);
     const delegate = publicKey(22);
 
-    data.set(delegate.toBytes(), CTX_VAMM_OFFSET);
+    data.set(delegate.toBytes(), DELEGATE_OFFSET);
 
     expect(inspectV17MatcherContext(data, delegate)).toBe('initialized');
   });
@@ -74,9 +81,20 @@ describe('v17 matcher-state helpers', () => {
   it('rejects a context bound to another delegate', () => {
     const data = new Uint8Array(MATCHER_CONTEXT_LEN);
 
-    data.set(publicKey(23).toBytes(), CTX_VAMM_OFFSET);
+    data.set(publicKey(23).toBytes(), DELEGATE_OFFSET);
 
     expect(inspectV17MatcherContext(data, publicKey(24))).toBe('invalid');
+  });
+
+  it('does not read the delegate from the magic bytes at CTX_VAMM_OFFSET', () => {
+    // Guards the exact regression the reader's comment describes: a context
+    // whose delegate slot is untouched must read as uninitialized, no matter
+    // what the magic region contains.
+    const data = new Uint8Array(MATCHER_CONTEXT_LEN);
+    data.set(publicKey(25).toBytes(), CTX_VAMM_OFFSET);
+    data.fill(0, DELEGATE_OFFSET, DELEGATE_OFFSET + 32);
+
+    expect(inspectV17MatcherContext(data, publicKey(25))).toBe('uninitialized');
   });
 
   it('rejects an undersized matcher context', () => {
