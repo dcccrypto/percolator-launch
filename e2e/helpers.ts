@@ -90,6 +90,12 @@ export function collectConsoleErrors(page: Page): string[] {
       // Sentry DSN / monitoring not configured in CI
       if (text.includes("Sentry")) return;
       if (text.includes("sentry")) return;
+      // Vercel / Cloudflare analytics are only wired up on a real deployment.
+      // Against localhost the RUM beacon is refused by CORS and the insights
+      // script 404s to an HTML error page, failing strict MIME checking.
+      if (text.includes("cloudflareinsights.com")) return;
+      if (text.includes("cdn-cgi/rum")) return;
+      if (text.includes("_vercel/insights")) return;
       errors.push(text);
     }
   });
