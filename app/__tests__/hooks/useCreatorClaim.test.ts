@@ -81,7 +81,7 @@ function makeRaw(operator: PublicKey, insurance = 10_000_000_000n): Uint8Array {
   const buf = new Uint8Array(SLOTS_BASE + 1 * V17_MARKET_ASSET_SLOT_LEN);
   // v17 header: magic, version, kind
   buf.set([0, 54, 49, 86, 67, 82, 69, 80], 0); // V17_MAGIC bytes
-  buf[8] = 16; // version LE
+  buf[8] = 17; // version LE — V17_EXPECTED_VERSION on the fee-split wrapper (was 16 pre-cutover)
   buf[10] = 1; // kind = MARKET
   // group insurance (for the withdraw clamp) at MARKET_GROUP_OFF + 301
   writeU128LE(buf, V17_MARKET_GROUP_OFF + 301, insurance);

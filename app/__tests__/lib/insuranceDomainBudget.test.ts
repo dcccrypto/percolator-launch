@@ -36,8 +36,10 @@ const OPERATOR = new PublicKey("FbTbDeGWQpjrEqJdqoBHX3sTWHoAmU2xywD7wyxH6WC7");
 
 describe("insuranceDomainBudget readers", () => {
   it("infers asset capacity from the account length (single-asset market)", () => {
-    // 3003 = the exact on-chain length of a cap-1 v17 market.
-    expect(SLOTS_BASE + 1 * V17_MARKET_ASSET_SLOT_LEN).toBe(3003);
+    // 3147 = the exact on-chain length of a cap-1 v17 market on the fee-split
+    // wrapper (SLOTS_BASE = V17_MARKET_GROUP_OFF 592 + V17_MARKET_GROUP_LEN 758
+    // = 1350, + one 1797-byte asset slot). Was 3003 pre-fee-split (448-based).
+    expect(SLOTS_BASE + 1 * V17_MARKET_ASSET_SLOT_LEN).toBe(3147);
     expect(marketAssetCapacity(makeMarketBuffer(1))).toBe(1);
     expect(marketAssetCapacity(makeMarketBuffer(10))).toBe(10);
   });
