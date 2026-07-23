@@ -12,7 +12,7 @@ import { NextResponse } from "next/server";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { getRpcEndpoint } from "@/lib/config";
-import { getStakeProgramId, deriveStakePool } from "@percolatorct/sdk";
+import { getStakeProgramId, deriveStakePool, STAKE_POOL_SIZE } from "@percolatorct/sdk";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 import { readRegisteredMarkets, type RegisteredMarket } from "@/lib/playground-registered-markets";
 import { isBlockedSlab } from "@/lib/blocklist";
@@ -222,12 +222,19 @@ export const dynamic = "force-dynamic";
 // ── Constants ────────────────────────────────────────────────────────────────
 
 /**
- * Expected on-chain size of a StakePool account (must match Rust struct).
- * The deployed v17 devnet stake program (51CeUNpb…) uses 352-byte pool accounts.
- * Using 384 caused getProgramAccounts to filter by the wrong dataSize and return
- * 0 results, so /stake and the stake side of /earn showed no pools.
+ * Expected on-chain size of a StakePool account — imported from the SDK
+ * (`STAKE_POOL_SIZE`) so it tracks the deployed Rust struct instead of a
+ * hand-copied literal.
+ *
+ * CUTOVER (2026-07): the FRESH devnet stake program
+ * (GCHhcgwPyrai8SWHEVWw3odedguFXEtJobNnWSfWBCU3) deploys 392-byte pool accounts
+ * (the v2 layout: adds pendingAdmin / HWM / tranche fields after `pool_mode`).
+ * The retired program (51CeUNpb…) used 352-byte accounts. This route previously
+ * hardcoded 352, so `getProgramAccounts({ filters: [{ dataSize: 352 }] })`
+ * matched ZERO real pools on the new program and /stake + the stake side of
+ * /earn showed no pools. `parseStakePool` below reads no field past offset 280,
+ * which is byte-identical between the two layouts, so it stays correct for both.
  */
-const STAKE_POOL_SIZE = 352;
 
 // ── Binary layout helpers ─────────────────────────────────────────────────────
 
@@ -264,7 +271,9 @@ interface ParsedStakePool {
 }
 
 /**
- * Parse the raw 352-byte StakePool account data (deployed v17 devnet layout).
+ * Parse a raw StakePool account (deployed v17 devnet layout, 392 bytes on the
+ * fresh GCHhcgw… program; reads no field past offset 280, which is identical
+ * on the retired 352-byte program).
  *
  * Rust layout (repr(C), #[derive(Pod)]):
  *   0:  is_initialized u8
@@ -339,10 +348,10 @@ export async function GET() {
     const isDevnet = net === "devnet";
     let stakeProgramId: PublicKey;
     try {
-      // v17 devnet: stake/vault program is 51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ
+      // v17 devnet: stake/vault program is GCHhcgwPyrai8SWHEVWw3odedguFXEtJobNnWSfWBCU3
       // mainnet: DC5fovFQD5SZYsetwvEqd4Wi4PFY1Yfnc669VMe6oa7F
       const programIdStr = isDevnet
-        ? (process.env.STAKE_PROGRAM_ID ?? "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ")
+        ? (process.env.STAKE_PROGRAM_ID ?? "GCHhcgwPyrai8SWHEVWw3odedguFXEtJobNnWSfWBCU3")
         : "DC5fovFQD5SZYsetwvEqd4Wi4PFY1Yfnc669VMe6oa7F";
       stakeProgramId = new PublicKey(programIdStr);
     } catch {

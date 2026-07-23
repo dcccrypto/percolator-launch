@@ -158,14 +158,14 @@ describe('useCreateMarket v17 matcher recovery', () => {
 
     const slabData = Buffer.alloc(26_364);
     v17Magic.copy(slabData, 0);
-    slabData.writeUInt16LE(16, 8);
+    slabData.writeUInt16LE(17, 8);
 
     const slabAccount = makeAccount(slabData, programId);
 
     const emptyPortfolioData = Buffer.alloc(actualSdk.V17_PORTFOLIO_ACCOUNT_LEN);
 
     v17Magic.copy(emptyPortfolioData, 0);
-    emptyPortfolioData.writeUInt16LE(16, 8);
+    emptyPortfolioData.writeUInt16LE(17, 8);
 
     slabKeypair.publicKey.toBuffer().copy(emptyPortfolioData, 16);
 
@@ -328,14 +328,14 @@ describe('useCreateMarket v17 matcher recovery', () => {
 
     const slabData = Buffer.alloc(26_364);
     v17Magic.copy(slabData, 0);
-    slabData.writeUInt16LE(16, 8);
+    slabData.writeUInt16LE(17, 8);
 
     const slabAccount = makeAccount(slabData, programId);
 
     const portfolioData = Buffer.alloc(actualSdk.V17_PORTFOLIO_ACCOUNT_LEN);
 
     v17Magic.copy(portfolioData, 0);
-    portfolioData.writeUInt16LE(16, 8);
+    portfolioData.writeUInt16LE(17, 8);
 
     slabKeypair.publicKey.toBuffer().copy(portfolioData, 16);
 

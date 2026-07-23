@@ -181,10 +181,9 @@ async function fetchPoolPosition(
     const [poolPda] = deriveStakePool(slabPk, stakeProgramId);
     const [depositPdaAddress] = deriveDepositPda(poolPda, publicKey, stakeProgramId);
 
-    // Fetch pool account to get lpMint. Decode using the REAL deployed
-    // 352-byte v1 layout — NOT the SDK's decodeStakePool, which assumes
-    // a 384-byte v2 layout that was never deployed here (see
-    // STAKE_POOL_SIZE_V1 comment in useStakePool.ts).
+    // Fetch pool account to get lpMint. Decode via decodeStakePoolV1 — the
+    // needed offsets are identical across the retired 352-byte and deployed
+    // 392-byte layouts (see STAKE_POOL_SIZE_V1 comment in useStakePool.ts).
     const poolInfo = await connection.getAccountInfo(poolPda);
     if (!poolInfo || poolInfo.data.length < STAKE_POOL_SIZE_V1) return null;
     const { lpMint } = decodeStakePoolV1(poolInfo.data);
@@ -576,10 +575,10 @@ function DepositWidget({
   const withdrawAmountNum = parseFloat(withdrawAmount) || 0;
 
   // Bug #12: the Junior (first-loss) tranche selector was removed — DepositJunior
-  // (tag 16, PERC-303) belongs to the 384-byte v2 StakePool program, which hasn't
-  // been deployed to this devnet vault program (still 352-byte v1, no tag-16
-  // handler). Senior deposit is the only path the deployed program supports.
-  // See the warning atop useStakeDepositJunior.ts.
+  // (tag 16, PERC-303) belongs to the v2 StakePool program. The fresh devnet
+  // program (GCHhcgw…) now uses the 392-byte v2 layout, so tranches may be
+  // supported, but the tag-16 handler is unverified live — keep Senior-only
+  // until confirmed. See the warning atop useStakeDepositJunior.ts.
   const { deposit, loading: depositLoading, error: depositError } = useStakeDepositByPool({
     slabAddress: pool?.slabAddress ?? "",
     collateralMint: pool?.collateralMint ?? "",
@@ -645,7 +644,7 @@ function DepositWidget({
         // (getConfig().vaultProgramId), NOT the SDK's default stake program id.
         const stakeProgramId = new PublicKey(
           (getConfig() as { vaultProgramId?: string }).vaultProgramId
-          ?? "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ"
+          ?? "GCHhcgwPyrai8SWHEVWw3odedguFXEtJobNnWSfWBCU3"
         );
         const found = await fetchPoolPosition(pool, publicKey, connection, stakeProgramId);
         if (!cancelled) setWithdrawPosition(found);
@@ -1219,7 +1218,7 @@ export default function StakePage() {
         // (getConfig().vaultProgramId), NOT the SDK's default stake program id.
         const stakeProgramId = new PublicKey(
           (getConfig() as { vaultProgramId?: string }).vaultProgramId
-          ?? "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ"
+          ?? "GCHhcgwPyrai8SWHEVWw3odedguFXEtJobNnWSfWBCU3"
         );
         // Check every pool for user's LP position — same detection logic the
         // Withdraw tab uses for a single selected pool (fetchPoolPosition).

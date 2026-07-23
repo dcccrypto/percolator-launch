@@ -20,32 +20,36 @@
  *
  * OFFSETS — how they were derived (and how to re-verify)
  * ------------------------------------------------------
- * The v17 account layout is:
+ * The v17 account layout is (post-fee-split, 576-byte WrapperConfigV16):
  *   [0..16)     v17 header
- *   [16..448)   WrapperConfigV16 (432 bytes)         (SDK: parseWrapperConfigV17)
- *   [448..1206) market-group region (758 bytes)      (holds V16ConfigAccount)
- *   [1206..]    per-asset slots (1797 bytes each)
+ *   [16..592)   WrapperConfigV16 (576 bytes)         (SDK: parseWrapperConfigV17)
+ *   [592..1350) market-group region (758 bytes)      (holds V16ConfigAccount)
+ *   [1350..]    per-asset slots (1797 bytes each)
  * `V16ConfigAccount` begins 32 bytes into the market-group region (after a
- * 32-byte group header) at absolute offset 480, and is packed repr(C) with no
- * padding. Verified empirically against all 5 live devnet markets — the 12
- * leading fields (max_portfolio_assets, min_nonzero_{mm,im}_req, h_min, h_max,
- * maintenance_margin_bps=600, initial_margin_bps=1200, max_trading_fee_bps=100,
- * liquidation_fee_bps=50, liquidation_fee_cap=1e10, min_liquidation_abs=0)
- * decode exactly to the values the markets were created with.
- * Re-verification harness:
- *   ~/percolator-v17-devnet-test/playground/flowtest/verify-config-layout.ts
+ * 32-byte group header) at absolute offset 624, and is packed repr(C) with no
+ * padding. The config length + group offset are now imported from the SDK
+ * (V17_WRAPPER_CONFIG_LEN / V17_MARKET_GROUP_OFF) so the engine offset tracks
+ * the wrapper layout automatically — the previous hardcoded 432/448/480 was the
+ * PRE-fee-split (496/... earlier 432) layout and read garbage against the fresh
+ * fee-split wrapper (DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj).
+ * Verified empirically on-chain against market
+ * BPgSUbDsxZ9bkauWgd6eQ8oLHVx6pSsvfAjPGsS2Sso8: the leading fields
+ * (max_portfolio_assets=4, maintenance_margin_bps=600, initial_margin_bps=1200,
+ * max_trading_fee_bps=100, liquidation_fee_bps=50) decode exactly at offset 624.
  */
 
 import type { RiskParams } from "@percolatorct/sdk";
+import { V17_MARKET_GROUP_OFF } from "@percolatorct/sdk";
 
-const V17_HEADER_LEN = 16;
-const V17_WRAPPER_CONFIG_LEN = 432;
-const V17_MARKET_GROUP_OFF = V17_HEADER_LEN + V17_WRAPPER_CONFIG_LEN; // 448
 /** Bytes of market-group header preceding the embedded V16ConfigAccount. */
 const V17_MARKET_GROUP_HEADER_LEN = 32;
-/** Absolute byte offset of V16ConfigAccount inside the v17 slab account. */
+/**
+ * Absolute byte offset of V16ConfigAccount inside the v17 slab account.
+ * Derived from the SDK layout constants — NEVER hardcoded — so it tracks the
+ * wrapper config length (576 post-fee-split): 592 + 32 = 624.
+ */
 export const V17_ENGINE_CONFIG_OFF =
-  V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_HEADER_LEN; // 480
+  V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_HEADER_LEN; // 624
 
 /** Field offsets WITHIN V16ConfigAccount (packed, no padding). */
 const F = {

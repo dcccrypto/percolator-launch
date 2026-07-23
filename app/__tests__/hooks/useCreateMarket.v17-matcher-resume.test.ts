@@ -124,7 +124,7 @@ describe('useCreateMarket v17 matcher resume PoC', () => {
     // V17 magic used by the production account-discovery path:
     // [00, 36, 31, 56, 43, 52, 45, 50].
     const v17Magic = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
-    const v17Version = 16;
+    const v17Version = 17; // SDK 4.2.0: V17_EXPECTED_VERSION bumped 16 -> 17 (deployed markets are v17)
     // A v17 market/slab response so create(params, 2) enters
     // the v17 matcher-initialization branch.
     const slabData = Buffer.alloc(26_364);
@@ -224,7 +224,7 @@ describe('useCreateMarket v17 matcher resume PoC', () => {
 
     const slabRecognizedByActualSdk = actualSdk.isV17Account(new Uint8Array(slabData));
 
-    expect(slabHeaderHex).toBe('00363156435245501000');
+    expect(slabHeaderHex).toBe('00363156435245501100');
     expect(slabRecognizedByActualSdk).toBe(true);
 
     // The existing LP lookup must occur before matcher readiness is evaluated.
@@ -283,7 +283,7 @@ describe('useCreateMarket v17 matcher resume PoC', () => {
     // Valid v17 slab fixture.
     const v17Magic = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
 
-    const v17Version = 16;
+    const v17Version = 17; // SDK 4.2.0: V17_EXPECTED_VERSION bumped 16 -> 17 (deployed markets are v17)
     const slabData = Buffer.alloc(26_364);
 
     v17Magic.copy(slabData, 0);
