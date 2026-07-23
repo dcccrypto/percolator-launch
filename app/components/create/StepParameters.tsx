@@ -5,6 +5,7 @@ import { type SlabTierKey } from "@/lib/slabTiers";
 import { SlabTierPicker } from "./SlabTierPicker";
 import { FeeSlider } from "./FeeSlider";
 import { ConflictWarning } from "./ConflictWarning";
+import { FeeSplitControl, type FeeSplitBps } from "./FeeSplitControl";
 import { getNetwork } from "@/lib/config";
 
 interface StepParametersProps {
@@ -13,6 +14,8 @@ interface StepParametersProps {
   onSlabTierChange: (tier: SlabTierKey) => void;
   tradingFeeBps: number;
   onTradingFeeChange: (bps: number) => void;
+  feeSplit: FeeSplitBps;
+  onFeeSplitChange: (next: FeeSplitBps) => void;
   initialMarginBps: number;
   onInitialMarginChange: (bps: number) => void;
   lpCollateral: string;
@@ -38,6 +41,8 @@ export const StepParameters: FC<StepParametersProps> = ({
   onSlabTierChange,
   tradingFeeBps,
   onTradingFeeChange,
+  feeSplit,
+  onFeeSplitChange,
   initialMarginBps,
   onInitialMarginChange,
   lpCollateral,
@@ -76,6 +81,14 @@ export const StepParameters: FC<StepParametersProps> = ({
         max={1000}
         showPercent
       />
+
+      {/* Fee Split — creator/LP/insurance shares of the trade fee.
+          Manual mode only; quick launch keeps the on-chain defaults (no
+          UpdateFeeSplit tx). The wrapper enforces the sum + floors; this control
+          validates client-side so a bad split can't reach chain. */}
+      {mode === "manual" && (
+        <FeeSplitControl value={feeSplit} onChange={onFeeSplitChange} />
+      )}
 
       {/* Leverage (derived, read-only) */}
       <div className="border border-[var(--border)] bg-[var(--bg)] px-4 py-3">

@@ -227,8 +227,9 @@ export async function POST(req: NextRequest) {
     const matcherProgramId = new PublicKey(cfg.matcherProgramId);
 
     // v17 markets are dynamically sized by maxPortfolioAssets (NOT the v12 SLAB_TIERS byte counts —
-    // those fail InitMarket's (len-448-758)%1797==0 check and revert). `tier` still selects the
-    // program ID above; the slab account length is computed from the asset-slot capacity.
+    // those fail InitMarket's (len-592-758)%1797==0 check and revert; 592 = header+config after the
+    // 576-byte fee-split config). `tier` still selects the program ID above; the slab account length
+    // is computed from the asset-slot capacity via the SDK's v17MarketAccountLen (SDK-derived offsets).
     const slabDataSize = v17MarketAccountLen(14);
 
     // Default margin/leverage params — conservative for new markets
@@ -486,7 +487,7 @@ export async function POST(req: NextRequest) {
     const crankIx3 = buildIx({
       programId,
       keys: crankKeys3,
-      data: encodePermissionlessCrank({ action: CrankAction.FeeSweep, assetIndex: 0, nowSlot: 0n, closeQ: 0n, feeBps: 0n, recoveryReason: 0 }),
+      data: encodePermissionlessCrank({ action: CrankAction.FeeSweep, assetIndex: 0, nowSlot: 0n, recoveryReason: 0 }),
     });
 
     const tx3 = new Transaction({ recentBlockhash: blockhash, feePayer: deployerPk });

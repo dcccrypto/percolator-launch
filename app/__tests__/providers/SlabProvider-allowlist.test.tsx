@@ -12,19 +12,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { FC, ReactNode } from "react";
-import { Keypair, PublicKey } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
 
-const ALLOWED_PROGRAM = "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9"; // v17 devnet default
+const ALLOWED_PROGRAM = "DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj"; // v17 devnet default (fresh fee-split wrapper)
 const ATTACKER_PROGRAM = "11111111111111111111111111111112";
-
-/**
- * Fresh slab address per test. `lib/slabCache` is a MODULE-level cache that
- * SlabProvider seeds from on mount (getSeedSlab) and writes to on every fetch
- * (setCachedSlab) — so reusing one address let the legitimate case's parsed
- * bytes and the attacker case's owner leak into later tests, and each case
- * silently asserted against the previous one's residue.
- */
-let SLAB_ADDRESS: string;
+const SLAB_ADDRESS = "So11111111111111111111111111111111111111112";
 
 // Stub the SDK parsers so we don't have to hand-craft large v17 slab buffers.
 // The gate runs BEFORE parseHeader, so legitimate parses succeed and
@@ -44,7 +36,9 @@ vi.mock("@percolatorct/sdk", () => ({
   parseWrapperConfigV17: () => ({}),
   parseAssetOracleProfileV17: () => ({ oracleLegFeeds: [] }),
   V17_HEADER_LEN: 16,
-  V17_WRAPPER_CONFIG_LEN: 432,
+  V17_WRAPPER_CONFIG_LEN: 576,
+  V17_MARKET_GROUP_OFF: 592,
+  V17_MARKET_GROUP_LEN: 758,
 }));
 
 vi.mock("@/lib/mock-mode", () => ({ isMockMode: () => false }));
@@ -70,12 +64,14 @@ vi.mock("@/hooks/useWalletCompat", () => ({
 
 describe("SlabProvider phishing guard", () => {
   beforeEach(() => {
-    SLAB_ADDRESS = Keypair.generate().publicKey.toBase58();
+    // Reset the module registry so SlabProvider's module-level slab cache
+    // (lib/slabCache) starts empty for each test — otherwise a prior test's
+    // owner (for the shared SLAB_ADDRESS) leaks in as a pre-paint seed and
+    // flips the owner-guard assertions. Pre-existing cross-test leak, surfaced
+    // once the SDK-mock module actually loads.
+    vi.resetModules();
     getAccountInfo.mockReset();
-    // mockReset (not mockClear): the WS test installs an implementation that
-    // captures the subscription callback, and mockClear would leave it in
-    // place for every later test.
-    onAccountChange.mockReset();
+    onAccountChange.mockClear();
     onAccountChange.mockReturnValue(1);
   });
 

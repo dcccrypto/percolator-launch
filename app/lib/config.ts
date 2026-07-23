@@ -120,19 +120,24 @@ const CONFIGS = {
   },
   devnet: {
     get rpcUrl() { return getRpcEndpoint(); },
-    // v17 deployed devnet programs (2026-06-26)
-    programId: "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",
+    // v17 deployed devnet programs — FRESH triple, deployed + upgraded 2026-07-17,
+    // hash-verified on-chain (SDK PROGRAM_IDS_V17). Supersedes the 2026-06-26 wrapper
+    // (69VUZ7a2..., vault 51CeUNpb..., nft 5TnritLt...), which stays live with ~152 old
+    // markets but is no longer targeted. This is the fee-split-capable wrapper: the
+    // 576-byte WrapperConfigV16 with creator/LP/insurance split (tag 86) only exists here.
+    programId: "DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj",
+    // Matcher was already live and upgraded in place at the same address (unchanged).
     matcherProgramId: "4seJWjv3R5qfXY8R5ntuPHWsoqcVvaxvfFSnU2AnGMhT",
-    nftProgramId: "5TnritLtHS76s5iV8axqDmqhcmJKMRUekMGrk9rBTqSP",
-    vaultProgramId: "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ",
+    nftProgramId: "CNGBPZRALk9Xu8BdgWNyrLJ7daQ9eJYFf1GnEEC7YCU3",
+    vaultProgramId: "GCHhcgwPyrai8SWHEVWw3odedguFXEtJobNnWSfWBCU3",
     crankWallet: "FF7KFfU5Bb3Mze2AasDHCCZuyhdaSLjUZy2K3JvjdB7x",
     explorerUrl: "https://explorer.solana.com",
     // v17 uses a single unified wrapper — no slab-tier program splits.
     // All tiers use the same program ID.
     programsBySlabTier: {
-      small:  "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",
-      medium: "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",
-      large:  "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",
+      small:  "DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj",
+      medium: "DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj",
+      large:  "DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj",
     } satisfies Record<string, string>,
     // Playground: canonical Sim-USDC mint (6 decimals).
     // Overridable via NEXT_PUBLIC_TEST_USDC_MINT env var.
@@ -201,12 +206,15 @@ export function getConfig() {
 // These are NOT yet deployed; real on-chain addresses will be set at cutover (Phase 7).
 // Listed here so the known-program gate is ready for v17 cutover without a code change.
 // IMPORTANT: Do NOT add production keys here until they are audited and deployed.
-// v17 deployed devnet program IDs (2026-06-26) — pre-listed for allowlist gate
+// v17 deployed devnet program IDs — FRESH triple (2026-07-17, hash-verified),
+// pre-listed for the known-program allowlist gate. These are the fee-split wrapper
+// lineage the app now targets; the 2026-06-26 IDs are intentionally NOT listed here
+// so the allowlist gate treats old-wrapper markets as untrusted after the cutover.
 const V17_PROGRAM_ID_PLACEHOLDERS = [
-  "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",  // v17 wrapper
-  "4seJWjv3R5qfXY8R5ntuPHWsoqcVvaxvfFSnU2AnGMhT",  // v17 matcher
-  "5TnritLtHS76s5iV8axqDmqhcmJKMRUekMGrk9rBTqSP",  // v17 nft
-  "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ",  // v17 vault
+  "DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj",  // v17 wrapper (fresh)
+  "4seJWjv3R5qfXY8R5ntuPHWsoqcVvaxvfFSnU2AnGMhT",  // v17 matcher (same address, upgraded in place)
+  "CNGBPZRALk9Xu8BdgWNyrLJ7daQ9eJYFf1GnEEC7YCU3",  // v17 nft (fresh)
+  "GCHhcgwPyrai8SWHEVWw3odedguFXEtJobNnWSfWBCU3",  // v17 stake/vault (fresh)
 ] as const;
 
 /**

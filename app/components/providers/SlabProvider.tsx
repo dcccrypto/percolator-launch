@@ -55,15 +55,18 @@ export interface SlabState {
   /** The on-chain program that owns this slab account */
   programId: PublicKey | null;
   /**
-   * v17 only: parsed WrapperConfigV17 block (432 bytes at offset 16).
+   * v17 only: parsed WrapperConfigV17 block (576 bytes at offset 16, post-fee-split).
    * Null for v12.x (legacy) slabs. Use this for v17-specific config fields
-   * not present in the MarketConfig compatibility shim.
+   * not present in the MarketConfig compatibility shim (incl. the fee split:
+   * creatorShareBps / lpShareBps / insuranceShareBps).
    */
   wrapperConfigV17: WrapperConfigV17 | null;
   /**
    * v17 only: parsed AssetOracleProfileV17 for asset index 0.
-   * Offset = V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN = 448 + 758 = 1206.
-   * (V17_HEADER_LEN + V17_WRAPPER_CONFIG_LEN = 448 is only the start of the
+   * Offset = V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN = 592 + 758 = 1350
+   * (post-fee-split; the constants are imported from the SDK so this tracks the
+   * 576-byte config automatically).
+   * (V17_HEADER_LEN + V17_WRAPPER_CONFIG_LEN = 592 is only the start of the
    * MarketGroupV16HeaderAccount region, NOT an asset profile — see the parse
    * path below for the full layout.)
    * Null for v12.x (legacy) slabs.
@@ -252,9 +255,9 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
         // ── v17 parse path ──────────────────────────────────────────────────
         // v17 market group accounts use a completely different layout:
         //   bytes   0-15:    v17 header (magic[8] + version[2] + kind[1] + pad[1] + reserved[4])
-        //   bytes  16-447:   WrapperConfigV16 (432 bytes)
-        //   bytes 448-1205:  MarketGroupV16HeaderAccount (758 bytes) — NOT an asset profile
-        //   bytes 1206+:     per-asset slots (1797 bytes each), starting with
+        //   bytes  16-591:   WrapperConfigV16 (576 bytes, post-fee-split)
+        //   bytes 592-1349:  MarketGroupV16HeaderAccount (758 bytes) — NOT an asset profile
+        //   bytes 1350+:     per-asset slots (1797 bytes each), starting with
         //                    AssetOracleProfileV16 (400 bytes) for asset index 0.
         //
         // v17 slabs use a different magic (PERCV16\0 vs PERCOLAT) — parseHeader() THROWS on v17 data.
@@ -263,7 +266,7 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
         if (isV17Account(data)) {
           // v17: do NOT call parseHeader — v17 magic differs from v12 and parseHeader throws.
           // Build a minimal SlabHeader shim from v17 fields (admin = cfg.marketauth).
-          // parseWrapperConfigV17 reads the 432-byte config block at offset V17_HEADER_LEN (16).
+          // parseWrapperConfigV17 reads the 576-byte config block at offset V17_HEADER_LEN (16).
           const wrapperConfigV17 = parseWrapperConfigV17(data, V17_HEADER_LEN);
           const header: SlabHeader = {
             magic: 0n,
@@ -277,11 +280,12 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
             lastThrUpdateSlot: 0n,
           };
           // AssetOracleProfileV17 for asset index 0 starts AFTER the MarketGroupV16HeaderAccount,
-          // i.e. V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN = 448 + 758 = 1206 — NOT at
-          // V17_HEADER_LEN + V17_WRAPPER_CONFIG_LEN (448), which is only the start of the
+          // i.e. V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN = 592 + 758 = 1350 (post-fee-split) —
+          // NOT at V17_HEADER_LEN + V17_WRAPPER_CONFIG_LEN (592), which is only the start of the
           // market-group header region (bug: was parsing the header as an asset profile,
-          // producing garbage oracleAuthority/authorityPriceE6/authorityTimestamp).
-          const assetProfileOffset = V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN; // = 448 + 758 = 1206
+          // producing garbage oracleAuthority/authorityPriceE6/authorityTimestamp). Constants
+          // are imported from the SDK, so this offset tracks the 576-byte config automatically.
+          const assetProfileOffset = V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN; // = 592 + 758 = 1350
           const assetProfile = parseAssetOracleProfileV17(data, assetProfileOffset);
 
           // Build a MarketConfig shim from v17 wrapper config for backward compat.
