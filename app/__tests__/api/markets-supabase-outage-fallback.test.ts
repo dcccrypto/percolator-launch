@@ -90,14 +90,14 @@ describe("GET /api/markets — Supabase outage fallback", () => {
   });
 
   it("filters the static devnet directory by program_id", async () => {
-    // The devnet fallback was migrated to the single v17 wrapper program
-    // (69VUZ7a2…, deployed 2026-06-26). It previously held per-slab-tier
-    // entries, which is why this filtered on a `programsBySlabTier` value and
-    // expected 3 hits — that directory no longer exists.
+    // The devnet fallback is a single v17 wrapper program. It has been
+    // re-migrated over time (per-slab-tier → 69VUZ7a2… → the current fee-split
+    // wrapper DhSkE7uTb8…), which is exactly why this asserts the filter's
+    // BEHAVIOUR against getConfig().programId rather than a hardcoded id/count.
     //
     // Asserts the filter's behaviour rather than a hardcoded count, so editing
     // the directory doesn't break this again.
-    const V17_DEVNET_PROGRAM = "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9";
+    const V17_DEVNET_PROGRAM = "DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj";
 
     mockConfig.value = {
       rpcUrl: "https://api.devnet.solana.com",
@@ -126,7 +126,7 @@ describe("GET /api/markets — Supabase outage fallback", () => {
     mockConfig.value = {
       rpcUrl: "https://api.devnet.solana.com",
       network: "devnet",
-      programId: "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",
+      programId: "DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj",
       programsBySlabTier: undefined,
     };
 
