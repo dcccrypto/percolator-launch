@@ -2,6 +2,7 @@
 
 import { FC, useState, useEffect, useMemo } from "react";
 import { useSlabState } from "@/components/providers/SlabProvider";
+import { adlSideFactor, effectiveExposureQ } from "@/lib/v17-adl";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 
 import { useEngineState } from "@/hooks/useEngineState";
@@ -98,7 +99,7 @@ function formatCountdown(slots: number): string {
 }
 
 export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) => {
-  const { params, config, raw } = useSlabState();
+  const { params, config, raw, adlFactors } = useSlabState();
   const { engine, fundingRate, isV17 } = useEngineState();
   const userAccount = useUserAccount();
   const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
@@ -257,7 +258,13 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
     const { account } = userAccount;
     const hasPosition = account.positionSize !== 0n;
     const isLong = account.positionSize > 0n;
-    const absPosition = account.positionSize < 0n ? -account.positionSize : account.positionSize;
+    // Funding accrues through the same per-side `f` accumulator that `k` does,
+    // scaled by the side's live ADL factor (v16.rs:9564-9576), so a deleveraged
+    // leg pays/receives funding on its REDUCED exposure, not its nominal basis.
+    const effSize = adlFactors
+      ? effectiveExposureQ(account.positionSize, account.adlABasis, adlSideFactor(adlFactors, isLong ? 0 : 1))
+      : account.positionSize;
+    const absPosition = effSize < 0n ? -effSize : effSize;
     
     if (!hasPosition) {
       return {

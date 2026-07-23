@@ -40,6 +40,7 @@ import { isMockSlab, getMockSlabState } from "@/lib/mock-trade-data";
 import { isMockMode } from "@/lib/mock-mode";
 import { isKnownProgram } from "@/lib/programAllowlist";
 import { parseV17RiskParams } from "@/lib/v17-engine-config";
+import { parseAssetAdlFactors, type AssetAdlFactors } from "@/lib/v17-adl";
 
 export interface SlabState {
   /** The slab account address this provider is tracking */
@@ -74,6 +75,17 @@ export interface SlabState {
    * oracle_authority (per-asset), and asset_admin.
    */
   assetProfile: AssetOracleProfileV17 | null;
+  /**
+   * v17 only: live per-side auto-deleveraging factors (`a_long` / `a_short`)
+   * for asset index 0.
+   *
+   * ADL never rewrites a leg's `basis_pos_q` — it scales this shared per-side
+   * factor instead — so a position's real exposure is
+   * `basis * a_side / leg.a_basis`, not `basis`. Consumers showing a size,
+   * exposure or notional MUST apply it (see lib/v17-adl.ts). Null for v12.x
+   * slabs, which have no such factor.
+   */
+  adlFactors: AssetAdlFactors | null;
 }
 
 /** Full context value exposed to consumers — includes stable callbacks on top of SlabState. */
@@ -99,6 +111,7 @@ const defaultSlabState: SlabState = {
   programId: null,
   wrapperConfigV17: null,
   assetProfile: null,
+  adlFactors: null,
 };
 
 const defaultContextValue: SlabContextValue = { ...defaultSlabState, refresh: () => {} };
@@ -161,6 +174,7 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
           programId: null,
           wrapperConfigV17: null,
           assetProfile: null,
+          adlFactors: null,
         });
       }
       return;
@@ -280,6 +294,8 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
           // are imported from the SDK, so this offset tracks the 576-byte config automatically.
           const assetProfileOffset = V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN; // = 592 + 758 = 1350
           const assetProfile = parseAssetOracleProfileV17(data, assetProfileOffset);
+          // Live ADL factors for asset slot 0, from the same bytes (no extra RPC).
+          const adlFactors = parseAssetAdlFactors(data, 0);
 
           // Build a MarketConfig shim from v17 wrapper config for backward compat.
           // Fields not present in v17 are set to safe defaults (0n / zero PublicKey).
@@ -362,6 +378,7 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
             programId: owner ?? s.programId,
             wrapperConfigV17,
             assetProfile,
+            adlFactors,
           }));
           return;
         }
@@ -392,6 +409,7 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
           programId: owner ?? s.programId,
           wrapperConfigV17: null,
           assetProfile: null,
+          adlFactors: null,
         }));
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);

@@ -23,8 +23,16 @@ import {
 } from "@percolatorct/sdk";
 import { isSentinelValue } from "@/lib/health";
 import { isLpPortfolio } from "@/lib/userAccountScan";
-import { computeMarkPnlCollateral, computePositionInitialMargin, estimateEntryFromPnl } from "@/lib/trading";
+import { computeMarkPnlCollateral, computePositionInitialMargin, estimateEntryFromPnl, resolveEntryPrice, type EntryPriceSource } from "@/lib/trading";
 import { parseV17RiskParams } from "@/lib/v17-engine-config";
+import {
+  parseAssetAdlFactors,
+  adlSideFactor,
+  effectiveExposureQ,
+  adlRemainingBps,
+  isDeleveraged,
+  type AssetAdlFactors,
+} from "@/lib/v17-adl";
 import { getAllProgramIds, getNetwork } from "@/lib/config";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { getEntryPrice } from "@/lib/entry-price";
@@ -180,6 +188,48 @@ export interface PortfolioPosition {
   liquidationDistancePct: number;
   /** Unrealized PnL (mark-to-market using oracle) */
   unrealizedPnl: bigint;
+  /**
+   * How trustworthy `effectiveEntryPrice` / `unrealizedPnl` are — see
+   * `resolveEntryPrice`. When "unknown" the entry price could not be
+   * recovered (no local cache, and the on-chain `pnl` is 0 on an open
+   * position because the loss was crystallized out of `capital`), so
+   * `unrealizedPnl` is 0 as a PLACEHOLDER, not as a real "flat" reading.
+   * Display sites MUST render "--" rather than "$0.00" in that case.
+   */
+  entryPriceSource: EntryPriceSource;
+  /**
+   * Cumulative realized loss already taken out of `capital`, straight from the
+   * chain (`residual_crystallized_loss_atoms_total`, v16.rs:8836). This is the
+   * number that explains a shrinking balance when `unrealizedPnl` reads flat —
+   * without it a drained account looks unexplained.
+   */
+  realizedLoss: bigint;
+  /**
+   * The exposure this position ACTUALLY carries, after any auto-deleveraging.
+   *
+   * ADL does not rewrite `basis_pos_q` — it scales a shared per-side factor on
+   * the asset and leaves every leg's stored basis alone — so `account.positionSize`
+   * (raw basis) over-reports a deleveraged position by up to 10x. This is
+   * `basis * a_side / a_basis`; see lib/v17-adl.ts for the derivation and the
+   * on-chain cross-check against `oi_eff_*`.
+   *
+   * Equal to `account.positionSize` on every market that has never deleveraged,
+   * which is the overwhelmingly common case. Use THIS for anything the user
+   * reads as "size"/"exposure"/"notional", and `account.positionSize` for
+   * closing and margin (see `adlRemainingBps`).
+   */
+  effectiveSize: bigint;
+  /**
+   * How much of this leg survived ADL, in basis points (10000 = untouched).
+   * 5000 means the position now moves at half its nominal basis.
+   */
+  adlRemainingBps: number;
+  /**
+   * True when this specific leg has been auto-deleveraged — the side factor has
+   * fallen below the value frozen into the leg when it was opened. A leg opened
+   * after someone else's ADL is NOT flagged; it carries its full exposure.
+   */
+  deleveraged: boolean;
   /** PnL as percentage of capital */
   pnlPercent: number;
   /** Risk leverage (position notional / slab account capital) */
@@ -232,6 +282,13 @@ function buildV17Position(
    * BUG-HUNT-FINDINGS-2026-07-08 #4.
    */
   walletStr: string,
+  /**
+   * Live per-side ADL factors for this market's asset slot, read from the same
+   * slab bytes the caller already fetched. `null` when unavailable (legacy
+   * layout, short buffer) — the position then falls back to raw basis, i.e.
+   * exactly the pre-ADL-fix behaviour.
+   */
+  adlFactors: AssetAdlFactors | null = null,
 ): PortfolioPosition {
   // v17 markets return an empty `market.config` from the SDK — the real
   // collateral mint lives in `market.configV17` (see markets/page.tsx's
@@ -241,6 +298,25 @@ function buildV17Position(
   const ZERO_PK = new PublicKey(new Uint8Array(32));
   const activeLeg = portfolio.legs.find((l) => l.active);
   const positionSize = activeLeg ? activeLeg.basisPosQ : 0n;
+
+  // Auto-deleveraging leaves `basis_pos_q` untouched and scales the asset's
+  // shared per-side factor instead, so raw basis over-reports a deleveraged
+  // position (2x on live devnet markets today). Resolve the exposure the leg
+  // actually carries; identical to `positionSize` when nothing was deleveraged.
+  // NOTE: `account.positionSize` deliberately stays RAW basis below — closing
+  // and margin are denominated in basis (v16.rs:12640, :9707) and the close
+  // path re-reads it from a fresh scan. Only display/PnL use `effectiveSize`.
+  const aSide =
+    activeLeg && adlFactors ? adlSideFactor(adlFactors, activeLeg.side) : 0n;
+  const aBasis = activeLeg ? activeLeg.aBasis : 0n;
+  const effectiveSize =
+    activeLeg && adlFactors
+      ? effectiveExposureQ(positionSize, aBasis, aSide)
+      : positionSize;
+  const adlRemaining =
+    activeLeg && adlFactors ? adlRemainingBps(aBasis, aSide) : 10000;
+  const deleveraged =
+    activeLeg !== undefined && adlFactors !== null && isDeleveraged(aBasis, aSide);
 
   const account: Account = {
     kind: AccountKind.User,
@@ -265,10 +341,12 @@ function buildV17Position(
     overflowOlderPresent: null,
     overflowNewest: null,
     overflowNewestPresent: null,
-    fSnap: 0n,
-    adlABasis: 0n,
-    adlKSnap: 0n,
-    adlEpochSnap: 0n,
+    fSnap: activeLeg ? activeLeg.fSnap : 0n,
+    // See lib/userAccountScan.ts — the leg's frozen ADL factor is what lets a
+    // consumer recover effective exposure from raw basis.
+    adlABasis: aBasis,
+    adlKSnap: activeLeg ? activeLeg.kSnap : 0n,
+    adlEpochSnap: activeLeg ? activeLeg.epochSnap : 0n,
     schedPresent: null,
     schedRemainingQ: null,
     schedAnchorQ: null,
@@ -297,10 +375,26 @@ function buildV17Position(
   // why an unguarded u64::MAX-class portfolio.pnl here can poison the derived
   // entry price instead of being caught by estimateEntryFromPnl's own
   // entry>0n clamp.
+  //
+  // 2026-07-22: that derivation is only sound while the on-chain `pnl` still
+  // CARRIES the loss. It does not: a realized loss is crystallized out of
+  // `capital` and `pnl` is pushed back to 0 (v16.rs:9382-9437), so a solvent
+  // loser reads `pnl == 0` and the derivation collapses to "entry == mark" —
+  // the exact silent-zero-PnL outcome the comment above set out to avoid.
+  // `resolveEntryPrice` keeps the same numeric fallback for risk math but
+  // reports source === "unknown" so display sites can print "--".
   const safePnlForEntry = isSentinelValue(account.pnl) ? 0n : account.pnl;
-  const effectiveEntryPrice = savedEntryPrice > 0n
-    ? savedEntryPrice
-    : estimateEntryFromPnl(account.positionSize, safePnlForEntry, oraclePriceE6);
+  // Derive against EFFECTIVE exposure: the on-chain `pnl` this back-solves from
+  // was accrued at the deleveraged rate, so `pnl / basis` would understate the
+  // entry offset by the ADL factor. No-op on markets that never deleveraged.
+  const resolvedEntry = resolveEntryPrice(
+    effectiveSize,
+    savedEntryPrice,
+    safePnlForEntry,
+    oraclePriceE6,
+  );
+  const effectiveEntryPrice = resolvedEntry.entry;
+  const entryPriceSource = resolvedEntry.source;
   const liquidationPriceE6 = computeLiqPrice(
     effectiveEntryPrice,
     account.capital,
@@ -312,8 +406,17 @@ function buildV17Position(
   // PnL in coin-margined native units, not collateral/USD. Convert once via
   // computeMarkPnlCollateral before it's displayed or fed to computePnlPercent
   // — mirrors PositionsDock's pnlNative/pnlTokens split.
+  // entryPriceSource === "unknown" => effectiveEntryPrice is just the mark, so
+  // this evaluates to 0. That 0 is a PLACEHOLDER, not a "flat" reading — it is
+  // only safe to render because `entryPriceSource` travels with it and display
+  // sites show "--" instead. Never treat it as a real zero.
+  // PnL moves with EFFECTIVE exposure, not raw basis: a deleveraged leg
+  // realizes basis*(k_now-k_snap)/(a_basis*POS_SCALE) and k accrues scaled by
+  // the side's live `a` (v16.rs:9547-9576, :10497-10502), so it gains/loses at
+  // `basis * a_side / a_basis` per unit of price. Feeding raw basis here
+  // overstated a deleveraged position's PnL by the same factor as its size.
   const pnlNative = oraclePriceE6 > 0n && effectiveEntryPrice > 0n
-    ? computeMarkPnl(account.positionSize, effectiveEntryPrice, oraclePriceE6)
+    ? computeMarkPnl(effectiveSize, effectiveEntryPrice, oraclePriceE6)
     : (isSentinelValue(account.pnl) ? 0n : account.pnl);
   const unrealizedPnl = oraclePriceE6 > 0n ? computeMarkPnlCollateral(pnlNative, oraclePriceE6) : 0n;
   // ROE: divide by this position's own locked initial margin, matching the
@@ -350,6 +453,11 @@ function buildV17Position(
     liquidationPriceE6,
     liquidationDistancePct,
     unrealizedPnl,
+    entryPriceSource,
+    realizedLoss: portfolio.residualCrystallizedLossAtomsTotal,
+    effectiveSize,
+    adlRemainingBps: adlRemaining,
+    deleveraged,
     pnlPercent,
     leverage,
     maintenanceMarginBps,
@@ -421,7 +529,15 @@ export async function fetchPortfolioSnapshot(
   // the same market context the owner-scan used.
   const marketMetaBySlab = new Map<
     string,
-    { market: DiscoveredMarket; oraclePriceE6: bigint; maintenanceMarginBps: bigint; initialMarginBps: bigint }
+    {
+      market: DiscoveredMarket;
+      oraclePriceE6: bigint;
+      maintenanceMarginBps: bigint;
+      initialMarginBps: bigint;
+      /** Live per-side ADL factors, so both the owner-scan and the NFT-wrapped
+       *  recovery scan resolve effective exposure the same way. */
+      adlFactors: AssetAdlFactors | null;
+    }
   >();
   // Distinct v17 wrapper program ids actually seen while scanning slabs
   // below (keyed by base58 to dedup) — normally just one, but derived
@@ -492,6 +608,9 @@ export async function fetchPortfolioSnapshot(
         // SlabProvider's real-values-not-hardcoded-fallbacks comment).
         let maintenanceMarginBps = 600n;
         let initialMarginBps = 1000n;
+        // Auto-deleveraging state for asset slot 0 (every playground market is
+        // single-asset). Read from the slab bytes already in hand — no extra RPC.
+        const adlFactors = parseAssetAdlFactors(slabData, 0);
         try {
           const wCfg = parseWrapperConfigV17(slabData, V17_HEADER_LEN);
           // markEwmaE6 is the last effective price in v17 wrapper config.
@@ -508,7 +627,7 @@ export async function fetchPortfolioSnapshot(
         // Remember this v17 market's context so both the batched
         // owner-scan phase below AND the NFT-wrapped recovery scan can
         // enrich portfolios/escrows the same way.
-        marketMetaBySlab.set(slabAddrStr, { market, oraclePriceE6, maintenanceMarginBps, initialMarginBps });
+        marketMetaBySlab.set(slabAddrStr, { market, oraclePriceE6, maintenanceMarginBps, initialMarginBps, adlFactors });
         v17ProgramIdsSeen.set(v17ProgramId.toBase58(), v17ProgramId);
       } else {
         // ── v12.x legacy path ──────────────────────────────────────────
@@ -545,8 +664,19 @@ export async function fetchPortfolioSnapshot(
             // V12_1: entry_price was removed from on-chain struct. Fall back to
             // localStorage (saved by TradeForm at trade time) so portfolio PnL
             // and liq-price compute correctly instead of showing 0/—.
-            const effectiveEntryPrice =
+            // Both sources here are trustworthy entry prices (the v12 on-chain
+            // field, or the mark cached at open time), so either counts as a
+            // cache hit. When BOTH miss, resolveEntryPrice refuses to invent a
+            // number from a crystallized-to-zero `pnl` — see its doc comment.
+            const knownEntryPrice =
               account.entryPrice > 0n ? account.entryPrice : getEntryPrice(slabAddrStr, idx, account.owner.toBase58());
+            const resolvedEntry = resolveEntryPrice(
+              account.positionSize,
+              knownEntryPrice,
+              isSentinelValue(account.pnl) ? 0n : account.pnl,
+              oraclePriceE6,
+            );
+            const effectiveEntryPrice = resolvedEntry.entry;
 
             // Compute liquidation price
             const liquidationPriceE6 = computeLiqPrice(
@@ -614,6 +744,16 @@ export async function fetchPortfolioSnapshot(
               liquidationPriceE6,
               liquidationDistancePct,
               unrealizedPnl,
+              entryPriceSource: resolvedEntry.source,
+              // v12 accounts carry no residual-loss counter (it is a v17
+              // portfolio-header field), so there is nothing to surface here.
+              realizedLoss: 0n,
+              // The v12.x engine has no per-side `a_long`/`a_short` factor and
+              // no frozen `a_basis` on a leg — `positionSize` IS the exposure,
+              // so there is nothing to rescale and nothing to disclose.
+              effectiveSize: account.positionSize,
+              adlRemainingBps: 10000,
+              deleveraged: false,
               pnlPercent,
               leverage,
               maintenanceMarginBps,
@@ -712,6 +852,7 @@ export async function fetchPortfolioSnapshot(
           meta.initialMarginBps,
           resolveSymbol(slabAddrStr, symbolBySlab),
           pkStr,
+          meta.adlFactors,
         );
 
         if (pos.liquidationDistancePct <= 30 && pos.account.positionSize !== 0n) {
@@ -802,6 +943,7 @@ export async function fetchPortfolioSnapshot(
             meta.initialMarginBps,
             resolveSymbol(slabAddrStr, symbolBySlab),
             pkStr,
+            meta.adlFactors,
           );
 
           if (pos.liquidationDistancePct <= 30 && pos.account.positionSize !== 0n) {

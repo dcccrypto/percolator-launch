@@ -10,6 +10,7 @@ import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { getEntryPrice } from "@/lib/entry-price";
 import { formatPnl } from "@/lib/chart-pnl-format";
+import { adlSideFactor, effectiveExposureQ } from "@/lib/v17-adl";
 
 interface ChartPnlBadgeProps {
   slabAddress: string;
@@ -31,7 +32,7 @@ export const ChartPnlBadge: FC<ChartPnlBadgeProps> = ({ slabAddress }) => {
   const mockMode = isMockMode() && isMockSlab(slabAddress);
   const userAccount = realUserAccount ?? (mockMode ? getMockUserAccount(slabAddress) : null);
   const { priceE6: livePriceE6, priceUsd } = useLivePrice();
-  const { config: marketConfig, params } = useSlabState();
+  const { config: marketConfig, params, adlFactors } = useSlabState();
   const tokenMeta = useTokenMeta(marketConfig?.collateralMint ?? null);
   const decimals = tokenMeta?.decimals ?? 6;
 
@@ -53,7 +54,13 @@ export const ChartPnlBadge: FC<ChartPnlBadgeProps> = ({ slabAddress }) => {
     rawEntryPrice > 0n ? rawEntryPrice : getEntryPrice(slabAddress, userAccount.idx, account.owner.toBase58());
   if (resolvedEntryPrice <= 0n) return null;
 
-  const pnlTokens = computeMarkPnl(account.positionSize, resolvedEntryPrice, livePriceE6);
+  // A deleveraged leg moves at `basis * a_side / a_basis`, not at raw basis —
+  // feeding nominal size here overstated the badge by the ADL factor (2x on
+  // live devnet markets). See lib/v17-adl.ts.
+  const effectiveSize = adlFactors
+    ? effectiveExposureQ(account.positionSize, account.adlABasis, adlSideFactor(adlFactors, account.positionSize > 0n ? 0 : 1))
+    : account.positionSize;
+  const pnlTokens = computeMarkPnl(effectiveSize, resolvedEntryPrice, livePriceE6);
   const pnlUsd = (Number(pnlTokens) / 10 ** decimals) * priceUsd;
   // pnlTokens is coin-margined native scale (same units as positionSize), not
   // collateral — convert via computeMarkPnlCollateral before it's the basis

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
 import { computeLivePositionPnl } from "@/lib/trading";
+import { adlReductionTooltip } from "@/lib/v17-adl";
 import { computeLiquidationDistancePct } from "@/lib/liquidation-distance";
 import { SlabProvider } from "@/components/providers/SlabProvider";
 import { useClosePosition } from "@/hooks/useClosePosition";
@@ -187,7 +188,9 @@ function PositionCard({
   const getSnap = useCallback(() => getSnapshot(pos.slabAddress).priceE6, [pos.slabAddress]);
   const livePriceE6 = useSyncExternalStore(subscribe, getSnap, () => null);
 
-  const posSize = pos.account?.positionSize ?? 0n;
+  // Exposure actually carried (ADL-adjusted); equals nominal basis on
+  // markets that never deleveraged. See lib/v17-adl.ts.
+  const posSize = pos.effectiveSize;
   const posCapital = pos.account?.capital ?? 0n;
   const posEntry = pos.effectiveEntryPrice;
   const side = posSize > 0n ? "Long" : posSize < 0n ? "Short" : "Flat";
@@ -309,6 +312,20 @@ function PositionCard({
               <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Size</p>
               <p className="text-[12px] text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                 {formatTokenAmount(sizeAbs, decimals)}
+                {pos.deleveraged && (
+                  <span
+                    className="ml-1 inline-block rounded-sm bg-[var(--short)]/10 px-1 py-0.5 text-[8px] font-bold uppercase text-[var(--short)]"
+                    title={adlReductionTooltip(
+                      pos.account.positionSize < 0n ? -pos.account.positionSize : pos.account.positionSize,
+                      sizeAbs,
+                      pos.adlRemainingBps,
+                      decimals,
+                      baseSymbol,
+                    )}
+                  >
+                    ADL
+                  </span>
+                )}
               </p>
             </div>
             <div>
@@ -497,24 +514,30 @@ export default function PortfolioPage() {
   const computeUsdTotals = () => {
     let depositedUsd = 0;
     let unrealizedPnlUsd = 0;
+    // Losses already taken out of capital. The engine crystallizes a realized
+    // loss out of `capital` and resets `pnl` to 0 (percolator/src/v16.rs:9382-9437),
+    // so without this line a drained balance has NO explanation anywhere in the
+    // UI — unrealized PnL reads flat while the deposit total quietly shrinks.
+    let realizedLossUsd = 0;
     for (const pos of activePositions) {
       const decimals = getDecimals(pos);
       const divisor = 10 ** decimals;
       const capital = Number(pos.account.capital ?? 0n) / divisor;
       depositedUsd += capital;
+      realizedLossUsd += Number(pos.realizedLoss ?? 0n) / divisor;
       // pos.unrealizedPnl is already collateral-scale (usePortfolio.ts converts
       // the SDK's native computeMarkPnl output via computeMarkPnlCollateral) —
       // divide by decimals only, same as PositionsDock's pnlUsdRaw and raw
       // capital above (collateral is sim-USDC dollars, no price factor).
       unrealizedPnlUsd += Number(pos.unrealizedPnl) / divisor;
     }
-    return { depositedUsd, unrealizedPnlUsd, valueUsd: depositedUsd + unrealizedPnlUsd };
+    return { depositedUsd, unrealizedPnlUsd, realizedLossUsd, valueUsd: depositedUsd + unrealizedPnlUsd };
   };
   // Don't compute USD totals until token metadata (decimals) has loaded —
   // using the default 6 decimals for a 9-decimal token inflates values 1000x
   const usdTotals = activePositions.length > 0 && !tokenMetasLoading
     ? computeUsdTotals()
-    : { depositedUsd: 0, unrealizedPnlUsd: 0, valueUsd: 0 };
+    : { depositedUsd: 0, unrealizedPnlUsd: 0, realizedLossUsd: 0, valueUsd: 0 };
 
   // PERF PLAN #3: the hero tiles (Portfolio Value / Unrealized PnL) tick
   // LIVE off the shared WS price store, instead of only refreshing on
@@ -530,7 +553,7 @@ export default function PortfolioPage() {
         for (const pos of activePositions) {
           const decimals = getDecimals(pos);
           const divisor = 10 ** decimals;
-          const posSize = pos.account?.positionSize ?? 0n;
+          const posSize = pos.effectiveSize;
           const liveE6 = livePrices.get(pos.slabAddress);
           const markE6 = liveE6 != null && liveE6 > 0n ? liveE6 : pos.oraclePriceE6;
           // Same live-mark chain as PositionCard/PositionChip (see
@@ -650,6 +673,22 @@ export default function PortfolioPage() {
                   className={`text-xs font-medium ${liveUsdTotals.unrealizedPnlUsd >= 0 ? "text-[var(--long)]/70" : "text-[var(--short)]/70"}`}
                 >
                   {formatPnlPct(usdTotals.depositedUsd > 0 ? (liveUsdTotals.unrealizedPnlUsd / usdTotals.depositedUsd) * 100 : 0)} unrealized
+                </span>
+              </div>
+            )}
+            {/* Realized loss is settled straight out of capital on-chain, so it
+                never appears in the unrealized figure above. Surfacing it is
+                what makes a shrinking Portfolio Value explainable. */}
+            {walletConnected && !loading && !tokenMetasLoading && usdTotals.realizedLossUsd > 0 && (
+              <div className="mt-1.5 flex items-baseline gap-2">
+                <span
+                  className="text-xs font-medium text-[var(--short)]"
+                  style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
+                >
+                  -${usdTotals.realizedLossUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+                <span className="text-xs font-medium text-[var(--text-secondary)]">
+                  realized loss, already deducted from your capital
                 </span>
               </div>
             )}

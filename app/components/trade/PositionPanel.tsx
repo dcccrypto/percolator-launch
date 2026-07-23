@@ -18,7 +18,17 @@ import {
   computeLiqPrice,
   computePnlPercent,
   computePositionInitialMargin,
+  resolveEntryPrice,
+  UNKNOWN_ENTRY_TOOLTIP,
 } from "@/lib/trading";
+import { InfoIcon } from "@/components/ui/Tooltip";
+import {
+  adlSideFactor,
+  effectiveExposureQ,
+  isDeleveraged,
+  adlRemainingBps,
+  adlReductionTooltip,
+} from "@/lib/v17-adl";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { computeLiquidationDistancePct } from "@/lib/liquidation-distance";
@@ -208,7 +218,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const userAccount = realUserAccount ?? (mockMode ? getMockUserAccount(slabAddress) : null);
   const config = useMarketConfig();
   const { engine: engineState, fundingRate } = useEngineState();
-  const { accounts, config: mktConfig, params, refresh: refreshSlab } = useSlabState();
+  const { accounts, config: mktConfig, params, adlFactors, refresh: refreshSlab } = useSlabState();
   const { priceE6: livePriceE6, priceUsd } = useLivePrice();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
@@ -270,7 +280,19 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const { account } = userAccount;
   const hasPosition = account.positionSize !== 0n;
   const isLong = account.positionSize > 0n;
-  const absPosition = abs(account.positionSize);
+  // ADL scales the asset's shared per-side factor and never rewrites the leg's
+  // basis, so raw `positionSize` is the NOMINAL size. `absPosition` is the
+  // exposure actually carried — size, notional-for-display and funding all
+  // follow it. See lib/v17-adl.ts.
+  const aSide = adlFactors ? adlSideFactor(adlFactors, isLong ? 0 : 1) : 0n;
+  const effectiveSize = adlFactors
+    ? effectiveExposureQ(account.positionSize, account.adlABasis, aSide)
+    : account.positionSize;
+  const wasDeleveraged = !!adlFactors && isDeleveraged(account.adlABasis, aSide);
+  const adlRemaining = adlFactors ? adlRemainingBps(account.adlABasis, aSide) : 10000;
+  const absPosition = abs(effectiveSize);
+  /** Nominal basis — margin and closing are denominated in it, not in exposure. */
+  const absNominal = abs(account.positionSize);
   // Apply invert + sanitize on the on-chain fallback so an inverted market
   // doesn't show the reciprocal price during WS reconnects (~$0.0000067 vs $150).
   const onChainPriceE6 = config
@@ -286,7 +308,20 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const rawEntryPrice = account.entryPrice;
   const savedEntryPrice = rawEntryPrice > 0n ? 0n : getEntryPrice(slabAddress, userAccount.idx, account.owner.toBase58());
   const resolvedEntryPrice = rawEntryPrice > 0n ? rawEntryPrice : (savedEntryPrice > 0n ? savedEntryPrice : 0n);
-  const entryPriceE6 = resolvedEntryPrice > 0n ? resolvedEntryPrice : currentPriceE6;
+  // 2026-07-22: substituting the mark when no entry is known implies a flat
+  // position, and on v17 that is exactly the wrong guess — a realized loss is
+  // crystallized out of `capital` and `pnl` is reset to 0
+  // (percolator/src/v16.rs:9382-9437), so a losing account also reads `pnl == 0`.
+  // Keep the mark as the numeric fallback for margin math, but track whether
+  // PnL can be honestly DISPLAYED. See resolveEntryPrice.
+  const resolvedEntry = resolveEntryPrice(
+    account.positionSize,
+    resolvedEntryPrice,
+    isSentinelValue(account.pnl) ? 0n : account.pnl,
+    currentPriceE6,
+  );
+  const entryPriceE6 = resolvedEntry.entry;
+  const pnlIsKnown = resolvedEntry.source !== "unknown";
 
   // PERC-297: Mark price is considered "available" when it's a positive value.
   const hasValidMark = currentPriceE6 > 0n;
@@ -295,7 +330,8 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // fall back to on-chain realized PnL if neither is available.
   const pnlTokens = hasValidMark
     ? (resolvedEntryPrice > 0n
-        ? computeMarkPnl(account.positionSize, resolvedEntryPrice, currentPriceE6)
+        // Effective, not nominal — a deleveraged leg moves at the reduced rate.
+        ? computeMarkPnl(effectiveSize, resolvedEntryPrice, currentPriceE6)
         : (isSentinelValue(account.pnl) ? 0n : account.pnl))
     : 0n;
   const pnlUsdRaw =
@@ -364,7 +400,13 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   // 3.1: Leverage = notional / capital. Notional = contracts × markPrice / 1e6.
   // Old formula used raw contract count which gives ~0 for coin-margined positions.
-  const notionalE6 = absPosition * currentPriceE6;
+  // NOMINAL, deliberately. This drives risk leverage and margin health, and the
+  // engine still charges margin against the leg's full basis after ADL
+  // (`risk_notional_ceil(leg.basis_pos_q…)`, v16.rs:9707). Using the reduced
+  // exposure here would shrink the denominator and render a deleveraged
+  // position as SAFER than it is — the same unsafe direction lib/v17-engine-config.ts
+  // was written to eliminate.
+  const notionalE6 = absNominal * currentPriceE6;
   const accountLeverage = hasPosition && account.capital > 0n && currentPriceE6 > 0n
     ? Number(notionalE6 / 1_000_000n) / Number(account.capital)
     : 0;
@@ -520,6 +562,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               pnlTokens={pnlTokens}
               pnlUsd={pnlUsd}
               roe={roe}
+              pnlIsKnown={pnlIsKnown}
               pnlColor={pnlColor}
               pnlBarWidth={pnlBarWidth}
               hasValidMark={hasValidMark}
@@ -547,7 +590,20 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 <div className="flex flex-col items-end gap-0.5">
                   <span className="text-[11px] text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
                     {formatTokenAmount(absPosition, decimals)} {symbol}
+                    {wasDeleveraged && (
+                      <span
+                        className="ml-1 inline-block rounded-sm bg-[var(--short)]/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--short)]"
+                        title={adlReductionTooltip(absNominal, absPosition, adlRemaining, decimals, symbol)}
+                      >
+                        ADL
+                      </span>
+                    )}
                   </span>
+                  {wasDeleveraged && (
+                    <span className="text-[10px] text-[var(--short)]">
+                      reduced from {formatTokenAmount(absNominal, decimals)} {symbol}
+                    </span>
+                  )}
                   {priceUsd != null && priceUsd > 0 && (
                     <span className="text-[10px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
                       ${(Number(absPosition) / 10 ** decimals * priceUsd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -557,8 +613,13 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               </div>
               <div className="flex items-center justify-between py-1.5">
                 <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Entry Price</span>
-                <span className="text-[11px] text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
-                  {formatUsdPriceE6(entryPriceE6)}
+                <span className={`text-[11px] ${pnlIsKnown ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)" }}>
+                  {pnlIsKnown ? formatUsdPriceE6(entryPriceE6) : (
+                    <span className="inline-flex items-center gap-1">
+                      --
+                      <InfoIcon tooltip={UNKNOWN_ENTRY_TOOLTIP} />
+                    </span>
+                  )}
                 </span>
               </div>
               {/* 3.4: Funding/8h inline — replaces the entry price row area */}
@@ -765,6 +826,9 @@ interface PnlSectionProps {
   pnlTokens: bigint;
   pnlUsd: number | null;
   roe: number;
+  /** False when entry price is unrecoverable, so `pnlTokens` is a placeholder
+   *  zero rather than a real flat reading — see resolveEntryPrice. */
+  pnlIsKnown: boolean;
   pnlColor: string;
   pnlBarWidth: number;
   hasValidMark: boolean;
@@ -780,6 +844,7 @@ const PnlSection: FC<PnlSectionProps> = ({
   pnlTokens,
   pnlUsd,
   roe,
+  pnlIsKnown,
   pnlColor,
   pnlBarWidth,
   hasValidMark,
@@ -815,7 +880,15 @@ const PnlSection: FC<PnlSectionProps> = ({
       <div className="flex items-start justify-between">
         <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Unrealized PnL</span>
         <div className="text-right">
-          {hasValidMark ? (
+          {!pnlIsKnown ? (
+            <span
+              className="inline-flex items-center gap-1 text-sm font-bold text-[var(--text-dim)] tabular-nums"
+              style={{ fontFamily: "var(--font-mono)" }}
+            >
+              --
+              <InfoIcon tooltip={UNKNOWN_ENTRY_TOOLTIP} />
+            </span>
+          ) : hasValidMark ? (
             <div className="flex items-baseline gap-1.5">
               <span
                 className={`text-sm font-bold ${pnlColor} tabular-nums`}

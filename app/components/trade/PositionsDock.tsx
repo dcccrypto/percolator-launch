@@ -49,10 +49,18 @@ import {
   computeMarkPnl,
   computeLiqPrice,
   computePnlPercent,
-  estimateEntryFromPnl,
+  resolveEntryPrice,
+  UNKNOWN_ENTRY_TOOLTIP,
   computeMarkPnlCollateral,
   computePositionInitialMargin,
 } from "@/lib/trading";
+import {
+  adlSideFactor,
+  effectiveExposureQ,
+  isDeleveraged,
+  adlRemainingBps,
+  adlReductionTooltip,
+} from "@/lib/v17-adl";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { computeLiquidationDistancePct } from "@/lib/liquidation-distance";
@@ -101,7 +109,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const mockMode = isMockMode() && isMockSlab(slabAddress);
   const userAccount = realUserAccount ?? (mockMode ? getMockUserAccount(slabAddress) : null);
   const config = useMarketConfig();
-  const { accounts, config: mktConfig, params } = useSlabState();
+  const { accounts, config: mktConfig, params, adlFactors } = useSlabState();
   const { engine, insuranceBalance } = useEngineState();
   const { priceE6: livePriceE6, priceUsd } = useLivePrice();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
@@ -165,7 +173,20 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const { account } = activeInfo;
 
   const isLong = account.positionSize > 0n;
-  const absPosition = abs(account.positionSize);
+  // Auto-deleveraging scales the asset's shared per-side factor and leaves the
+  // leg's stored basis alone, so `account.positionSize` is the NOMINAL basis,
+  // not what the position is worth today. Everything the trader reads as size,
+  // exposure or PnL must use the effective figure (lib/v17-adl.ts); closing and
+  // margin keep using raw basis, which is what the engine denominates them in.
+  const aSide = adlFactors ? adlSideFactor(adlFactors, isLong ? 0 : 1) : 0n;
+  const effectiveSize = adlFactors
+    ? effectiveExposureQ(account.positionSize, account.adlABasis, aSide)
+    : account.positionSize;
+  const wasDeleveraged = !!adlFactors && isDeleveraged(account.adlABasis, aSide);
+  const adlRemaining = adlFactors ? adlRemainingBps(account.adlABasis, aSide) : 10000;
+  const absPosition = abs(effectiveSize);
+  /** Nominal basis, shown only to explain an ADL reduction. */
+  const absNominal = abs(account.positionSize);
   const onChainPriceE6 = config ? sanitizePriceE6(applyInvert(config.lastEffectivePriceE6, config.invert)) : null;
   const currentPriceE6 = livePriceE6 ?? onChainPriceE6 ?? 0n;
   const rawEntryPrice = account.entryPrice;
@@ -189,10 +210,25 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   // entry>0n fallback (e.g. a short's `entry = oraclePrice + diff` stays
   // positive even when `diff` is astronomically large), poisoning entry/liq/
   // margin math downstream.
+  //
+  // 2026-07-22: the derivation above only works while `account.pnl` still
+  // CARRIES the loss, and it does not — a realized loss is crystallized out of
+  // `capital` and `pnl` is pushed back to 0 (percolator/src/v16.rs:9382-9437).
+  // A solvent loser therefore reads `pnl == 0`, the derived entry collapses to
+  // the mark, and this row printed a confident "$0.00 / 0.00%" over a position
+  // that is actually deep underwater. `resolveEntryPrice` keeps the same
+  // numeric fallback for the liq/margin math below but reports
+  // source === "unknown" so the PnL, ROE and entry CELLS render "--" instead.
   const safePnlForEntry = isSentinelValue(account.pnl) ? 0n : account.pnl;
-  const entryPriceE6 = resolvedEntryPrice > 0n
-    ? resolvedEntryPrice
-    : estimateEntryFromPnl(account.positionSize, safePnlForEntry, currentPriceE6);
+  const resolvedEntry = resolveEntryPrice(
+    account.positionSize,
+    resolvedEntryPrice,
+    safePnlForEntry,
+    currentPriceE6,
+  );
+  const entryPriceE6 = resolvedEntry.entry;
+  /** False when entry (and therefore PnL/ROE) cannot be honestly displayed. */
+  const pnlIsKnown = resolvedEntry.source !== "unknown";
   const maintenanceBps = params?.maintenanceMarginBps ?? 500n;
   const initialMarginBps = params?.initialMarginBps ?? 1000n;
   const hasValidMark = currentPriceE6 > 0n;
@@ -207,7 +243,9 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   // conversion below covers both branches.
   const pnlNative = hasValidMark
     ? (resolvedEntryPrice > 0n
-        ? computeMarkPnl(account.positionSize, resolvedEntryPrice, currentPriceE6)
+        // Effective, not nominal: a deleveraged leg gains/loses at
+        // `basis * a_side / a_basis` per unit of price (v16.rs:9547-9576).
+        ? computeMarkPnl(effectiveSize, resolvedEntryPrice, currentPriceE6)
         : (isSentinelValue(account.pnl) ? 0n : account.pnl))
     : 0n;
   // Collateral-equivalent PnL — the single number this row's USDC line, USD
@@ -331,6 +369,14 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
               <td className="whitespace-nowrap px-3 py-2.5 text-right" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                 <span className="text-[var(--text)]">{formatTokenAmount(absPosition, decimals)}</span>
                 <span className="ml-1 text-[var(--text-secondary)]">{symbol}</span>
+                {wasDeleveraged && (
+                  <span
+                    className="ml-1 inline-block rounded-sm bg-[var(--short)]/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--short)]"
+                    title={adlReductionTooltip(absNominal, absPosition, adlRemaining, decimals, symbol)}
+                  >
+                    ADL
+                  </span>
+                )}
                 {isSettling && (
                   <span
                     className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)]/60 animate-pulse align-middle"
@@ -338,8 +384,13 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                   />
                 )}
               </td>
-              <td className="whitespace-nowrap px-3 py-2.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-                {formatUsdPriceE6(entryPriceE6)}
+              <td className={`whitespace-nowrap px-3 py-2.5 text-right ${pnlIsKnown ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+                {pnlIsKnown ? formatUsdPriceE6(entryPriceE6) : (
+                  <span className="inline-flex items-center justify-end gap-1">
+                    --
+                    <InfoIcon tooltip={UNKNOWN_ENTRY_TOOLTIP} />
+                  </span>
+                )}
               </td>
               <td
                 className={`whitespace-nowrap px-3 py-2.5 text-right transition-colors duration-300 ease-out ${
@@ -358,8 +409,13 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
               >
                 {formatLiqPrice(liqPriceE6, { hasPosition: liqUnliquidatable })}
               </td>
-              <td className={`whitespace-nowrap px-3 py-2.5 text-right ${hasValidMark ? pnlColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-                {hasValidMark ? (
+              <td className={`whitespace-nowrap px-3 py-2.5 text-right ${hasValidMark && pnlIsKnown ? pnlColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+                {!pnlIsKnown ? (
+                  <span className="inline-flex items-center justify-end gap-1">
+                    --
+                    <InfoIcon tooltip={UNKNOWN_ENTRY_TOOLTIP} />
+                  </span>
+                ) : hasValidMark ? (
                   <>
                     <div className="flex items-center justify-end gap-1">
                       {formatPnl(pnlTokens, decimals)} {collateralSymbol}
@@ -384,8 +440,8 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                   <span>--</span>
                 )}
               </td>
-              <td className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${hasValidMark ? roeColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-                {hasValidMark ? formatPercent(roe) : "--"}
+              <td className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${hasValidMark && pnlIsKnown ? roeColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+                {hasValidMark && pnlIsKnown ? formatPercent(roe) : "--"}
               </td>
               <td className="whitespace-nowrap px-3 py-2.5 text-right">
                 {isNftWrapped ? (
