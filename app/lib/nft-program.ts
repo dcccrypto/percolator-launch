@@ -22,7 +22,7 @@ import { PublicKey } from "@solana/web3.js";
  * default `FqhKJT9g…` is NOT deployed on devnet, which made position-NFT mint/
  * burn/transfer fail with "Account not found on-chain" (program AccountNotFound). */
 export const PERCOLATOR_NFT_PROGRAM_ID = new PublicKey(
-  "5TnritLtHS76s5iV8axqDmqhcmJKMRUekMGrk9rBTqSP"
+  "CNGBPZRALk9Xu8BdgWNyrLJ7daQ9eJYFf1GnEEC7YCU3"
 );
 
 // ---------------------------------------------------------------------------

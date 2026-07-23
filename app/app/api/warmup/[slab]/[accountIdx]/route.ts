@@ -4,8 +4,10 @@ import { fetchSlab, parseAccount, parseEngine, parseParams } from "@percolatorct
 import { getConfig, getAllProgramIds } from "@/lib/config";
 
 // v17 wrapper program IDs — parseEngine does not support v17 account format.
+// Fresh fee-split wrapper (2026-07-17). The 2026-06-26 wrapper (69VUZ7a2...) is
+// intentionally not listed — the app no longer targets it after the cutover.
 const V17_PROGRAM_IDS = new Set([
-  "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",
+  "DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj",
 ]);
 
 function isV17Account(cfg: ReturnType<typeof getConfig>): boolean {

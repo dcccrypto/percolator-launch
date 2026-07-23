@@ -106,6 +106,23 @@ const ERROR_CODE_MAP: Record<number, string> = {
   47: "Insurance withdrawal cooldown is still active.",
   48: "Insurance withdrawal exceeds the allowed ceiling (deposits-only limit).",
   49: "Insufficient margin for this trade - deposit more collateral or reduce size/leverage.",
+  // ── v17 fee-split + stake/keeper ordinals (50-61) ────────────────────────
+  // Source: SDK abi/errors.ts (v16_program.rs PercolatorError, percolator-prog@10acb5ae,
+  // deployed to the fresh wrapper DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj). These
+  // were missing entirely from this map — 51/52 in particular are the fee-split floors/sum
+  // errors the launch wizard's UpdateFeeSplit (tag 86) can trip if a bad split reaches chain.
+  50: "First LP vault deposit is below the minimum-liquidity floor. Deposit a larger amount.",
+  51: "Fee split violates the on-chain floors (creator ≤ 3600 bps, LP ≥ 3200 bps, insurance ≥ 1200 bps of the post-protocol remainder). Adjust the shares in the launch wizard.",
+  52: "Fee split shares must sum to exactly 8000 bps (the 80% left after the fixed 20% protocol cut). Adjust the shares in the launch wizard.",
+  53: "Nothing to claim from the insurance reserve yet — it's already fully pushed. Retry after more trading volume.",
+  54: "No stake pool bound to this market — BindInsuranceAuthority hasn't run, so the staker/insurance leg has no exit.",
+  55: "The supplied stake pool is not owned by the canonical stake program (forgery gate).",
+  56: "Stake pool authority mismatch — this pool did not bind itself to this market.",
+  57: "Stake pool belongs to a different market.",
+  58: "Stake pool was initialized against a different wrapper program.",
+  59: "Stake pool is not in insurance-LP mode, so it is not owed the insurance/staker fee leg.",
+  60: "This wrapper build has no pinned stake program — the insurance-reserve-to-stake withdrawal has no trusted destination (expected off devnet).",
+  61: "This asset slot is already configured/active — only an append at the next index or a re-activation of a retired slot is allowed.",
 };
 
 /** Legacy Anchor error map (unused but kept for compatibility) */
@@ -158,7 +175,7 @@ const NFT_ERROR_CODE_MAP: Record<number, string> = {
 
 /** Hard-coded NFT program id. Matches app/lib/nft-program.ts. Kept here to
  *  avoid importing the (client-only) PublicKey wrapper from this module. */
-const NFT_PROGRAM_ID = "5TnritLtHS76s5iV8axqDmqhcmJKMRUekMGrk9rBTqSP";
+const NFT_PROGRAM_ID = "CNGBPZRALk9Xu8BdgWNyrLJ7daQ9eJYFf1GnEEC7YCU3";
 
 function isNftProgramError(msg: string): boolean {
   if (msg.includes(NFT_PROGRAM_ID)) return true;

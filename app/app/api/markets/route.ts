@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { validateNumericParam } from "@/lib/route-validators";
-import { parseHeader, parseConfig, discoverMarkets, type DiscoveredMarket, isV17Account, parseWrapperConfigV17, parseAssetOracleProfileV17, parseMarketGroupV17OI, type V17MarketGroupOI, type RiskParams, V17_HEADER_LEN, V17_WRAPPER_CONFIG_LEN } from "@percolatorct/sdk";
+import { parseHeader, parseConfig, discoverMarkets, type DiscoveredMarket, isV17Account, parseWrapperConfigV17, parseAssetOracleProfileV17, parseMarketGroupV17OI, type V17MarketGroupOI, type RiskParams, V17_HEADER_LEN, V17_MARKET_GROUP_OFF, V17_MARKET_GROUP_LEN } from "@percolatorct/sdk";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { getConfig, getRpcEndpoint } from "@/lib/config";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
@@ -92,55 +92,22 @@ const MAINNET_MARKET_DIRECTORY_FALLBACK: Record<string, unknown>[] = [
 ];
 
 // v17 devnet static fallback — used only when Supabase AND on-chain discovery both fail.
-// Program: 69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9 (v17 wrapper, deployed 2026-06-26)
-// Collateral: DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC (Sim-USDC, 6dp)
+// Program: DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj (fresh fee-split wrapper, 2026-07-17).
+// Points at the one real market currently live on the fresh wrapper. On-chain discovery
+// (getProgramAccounts on the fresh wrapper) normally supersedes this list; it exists only
+// so the markets page is never fully empty if both Supabase and discovery are down.
 const DEVNET_MARKET_DIRECTORY_FALLBACK: Record<string, unknown>[] = [
   {
-    // dexoracle-poc market — SOL-PERP, hyperp oracle (Raydium-CLMM pool)
-    slab_address: "7VrvSC57aB9gdM8iymEDJtrgjE4RGZMPfkuxCR4sFcrj",
-    program_id: "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",
-    mint_address: "DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC",
+    // First real market on the fresh fee-split wrapper (fresh 6dp collateral mint).
+    slab_address: "BPgSUbDsxZ9bkauWgd6eQ8oLHVx6pSsvfAjPGsS2Sso8",
+    program_id: "DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj",
+    mint_address: "94jhyh8ZwoGpGxvPw1WAxstB6WUrm3d4KjQQCTo1GGCz",
     symbol: "SOL-PERP",
     name: "SOL/USD Perpetual (Devnet)",
     decimals: 6,
     deployer: null,
     oracle_authority: null,
     oracle_mode: "hyperp",
-    dex_pool_address: "8sLbNZoA1cfnvMJLPfp98ZLAnFSYCFApfJKMbiXNLwxj",
-    mainnet_ca: "So11111111111111111111111111111111111111112",
-    created_at: null,
-    stats_updated_at: null,
-    is_zombie: false,
-    last_price: null,
-    mark_price: null,
-    index_price: null,
-    volume_24h: 0,
-    trade_count_24h: 0,
-    open_interest_long: 0,
-    open_interest_short: 0,
-    total_open_interest: 0,
-    total_open_interest_usd: 0,
-    insurance_fund: 0,
-    insurance_balance: 0,
-    total_accounts: 0,
-    funding_rate: null,
-    net_lp_pos: 0,
-    lp_sum_abs: 0,
-    c_tot: 0,
-    volume_24h_usd: 0,
-    vault_balance: 0,
-  },
-  {
-    // okm.env market — SOL TEST-PERP, admin oracle mode
-    slab_address: "B3QmZRHqdLfxqMUbPp5Hzx4KwUwQDCmYNbFmWdbY1DBG",
-    program_id: "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",
-    mint_address: "DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC",
-    symbol: "TEST-PERP",
-    name: "SOL TEST-PERP (Devnet)",
-    decimals: 6,
-    deployer: null,
-    oracle_authority: null,
-    oracle_mode: "admin",
     dex_pool_address: null,
     mainnet_ca: "So11111111111111111111111111111111111111112",
     created_at: null,
@@ -1730,8 +1697,11 @@ export async function POST(req: NextRequest) {
     // above — parseConfig() can't read v17 slabs, and this block "fails closed" (rejects
     // registration) on any parse error, so this ALSO rejected every v17 market on its own.
     // v17's collateralMint lives on wrapperConfig; oracleAuthority is PER-ASSET on
-    // AssetOracleProfileV17 (offset V17_HEADER_LEN + V17_WRAPPER_CONFIG_LEN) — mirrors
-    // flowtest/_common.ts buildV17MktConfigShim()'s exact shim logic.
+    // AssetOracleProfileV17. The asset profile starts AFTER the market-group region at
+    // V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN (592 + 758 = 1350 post-fee-split), NOT
+    // at V17_HEADER_LEN + V17_WRAPPER_CONFIG_LEN (= V17_MARKET_GROUP_OFF, 592) which is the
+    // START of the MarketGroupV16HeaderAccount, not an asset profile. Reading it there
+    // returned a garbage oracleAuthority. Mirrors SlabProvider.tsx's corrected offset.
     try {
       const dataBytes = new Uint8Array(accountInfo.data);
       const isV17 = isV17Account(dataBytes);
@@ -1765,7 +1735,7 @@ export async function POST(req: NextRequest) {
       // mode is unaffected — it DOES set a real, predictable on-chain oracle_authority via
       // UpdateAssetAuthority, so this check stays fully enforced there.
       const onChainOracleAuth = isV17
-        ? parseAssetOracleProfileV17(dataBytes, V17_HEADER_LEN + V17_WRAPPER_CONFIG_LEN).oracleAuthority.toBase58()
+        ? parseAssetOracleProfileV17(dataBytes, V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN).oracleAuthority.toBase58()
         : parseConfig(accountInfo.data).oracleAuthority.toBase58();
       const resolvedOracleAuth = oracle_authority || deployer;
       const SYSTEM_PROGRAM = "11111111111111111111111111111111";

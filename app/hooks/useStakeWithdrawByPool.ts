@@ -91,7 +91,7 @@ export function useStakeWithdrawByPool({ slabAddress, collateralMint }: StakeWit
         // NOT the SDK's default stake program id. Derive all PDAs against the correct program.
         const stakeProgramId = new PublicKey(
           (getConfig() as { vaultProgramId?: string }).vaultProgramId
-          ?? '51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ'
+          ?? 'GCHhcgwPyrai8SWHEVWw3odedguFXEtJobNnWSfWBCU3'
         );
 
         // Derive all PDAs
@@ -112,9 +112,9 @@ export function useStakeWithdrawByPool({ slabAddress, collateralMint }: StakeWit
           throw new Error('Stake pool account owner mismatch — possible network misconfiguration.');
         }
 
-        // Decode pool using the REAL deployed 352-byte v1 layout — NOT the SDK's
-        // decodeStakePool, which assumes a 384-byte v2 layout that was never
-        // deployed here (see STAKE_POOL_SIZE_V1 comment in useStakePool.ts).
+        // Decode the fields needed (lpMint, vault) via decodeStakePoolV1 — offsets
+        // are identical across the retired 352-byte and deployed 392-byte layouts
+        // (see STAKE_POOL_SIZE_V1 comment in useStakePool.ts).
         const { lpMint, vault } = decodeStakePoolV1(poolInfo.data);
 
         // Get user's ATAs
