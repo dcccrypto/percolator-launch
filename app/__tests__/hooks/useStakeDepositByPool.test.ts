@@ -44,6 +44,10 @@ vi.mock('@/lib/config', () => ({
 vi.mock('@percolatorct/sdk', () => {
   const { PublicKey: PK } = require('@solana/web3.js');
   return {
+    // v17-engine-config.ts (pulled in transitively by the stake hooks) now
+    // imports V17_MARKET_GROUP_OFF from the SDK — the mock must define it or
+    // the module fails to load (surfaced by the 2026-07 fee-split merge).
+    V17_MARKET_GROUP_OFF: 592,
     deriveStakePool: vi.fn().mockReturnValue([mockPool, 255]),
     deriveStakeVaultAuth: vi.fn().mockReturnValue([mockVaultAuth, 254]),
     deriveDepositPda: vi.fn().mockReturnValue([mockDepositPda, 253]),
