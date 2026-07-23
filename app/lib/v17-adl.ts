@@ -29,7 +29,8 @@
  * OVER-REPORTS a deleveraged position by `a_basis / a_side` — up to 10x, since
  * `a` is floored at `MIN_A_SIDE = ADL_ONE / 10` (percolator/src/lib.rs:16-17).
  *
- * VERIFIED ON THE DEPLOYED PLAYGROUND (wrapper 69VUZ7a2…, devnet, 2026-07-22).
+ * VERIFIED ON THE DEPLOYED DEVNET PLAYGROUND (2026-07-22; the math is
+ * engine-level and unchanged on the current fee-split wrapper).
  * Four live markets carry `a_short < ADL_ONE`, and the effective exposures this
  * module computes sum EXACTLY to the engine's own `oi_eff_short_q` aggregate —
  * an independent cross-check of the formula against on-chain state:

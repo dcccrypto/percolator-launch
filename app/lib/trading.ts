@@ -173,9 +173,10 @@ export function computeLivePositionPnl(
  * position that is actually deep underwater and draining the trader's capital.
  * On a perps venue traders read PnL to decide whether to close, so that is a
  * materially misleading number, not a cosmetic one. This is not hypothetical:
- * on the deployed playground wrapper (69VUZ7a2...) 188 of 557 live portfolios
- * currently hold an open position with `pnl == 0`, and 123 carry a non-zero
- * `residual_crystallized_loss_atoms_total`.
+ * measured on the deployed devnet playground, 188 of 557 live portfolios held an
+ * open position with `pnl == 0`, and 123 carried a non-zero
+ * `residual_crystallized_loss_atoms_total`. The behaviour is engine-level, so it
+ * holds identically on the current fee-split wrapper.
  *
  * The true open price is genuinely NOT recoverable from v17 chain state on a
  * cache miss (there is no `entry_price` field, and `k_snap` is rewritten at

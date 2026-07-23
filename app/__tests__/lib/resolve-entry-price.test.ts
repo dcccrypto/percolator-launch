@@ -40,7 +40,7 @@ describe("resolveEntryPrice — crystallized-loss PnL misreport", () => {
   });
 
   it("REFUSES to invent an entry for an open position whose pnl is 0", () => {
-    // Live devnet portfolio 4Fg5efmt on wrapper 69VUZ7a2...: an OPEN 200_000
+    // A real devnet portfolio observed on the playground: an OPEN 200_000
     // long with pnl == 0, capital 20_109_960, and 29_800_040 atoms of
     // residual_crystallized_loss — i.e. it has already lost MORE than the
     // capital it has left, yet its on-chain pnl reads exactly zero.
