@@ -29,6 +29,11 @@ import {
   encodeSetNftProgramId,
   encodeCreateLpVaultV17,
   encodeStakeInitPool,
+  encodeUpdateFeeSplit,
+  encodeStakeBindInsuranceAuthority,
+  bindInsuranceAuthorityAccounts,
+  ACCOUNTS_UPDATE_FEE_SPLIT,
+  validateFeeSplit,
   encodeTopUpBackingBucket,
   MAX_BACKING_BUCKET_EXPIRY_SLOT,
   CrankAction,
@@ -109,6 +114,38 @@ export const V17_MAX_PORTFOLIO_ASSETS = 14;
 // tier and made every InitMarket revert with InvalidSlabLen while over-charging ~0.67 SOL rent.
 export const DEFAULT_SLAB_SIZE = v17MarketAccountLen(V17_MAX_PORTFOLIO_ASSETS); // 26_364 bytes (cap-14)
 const ALL_ZEROS_FEED = "0".repeat(64);
+
+/**
+ * Order the stake-tail instructions so the fee-split → stake-pool sequence is
+ * always correct, in BOTH the batched (M4) and sequential (Step 5) create paths:
+ *
+ *   [...preInitPool] → [UpdateFeeSplit?] → StakeInitPool → BindInsuranceAuthority
+ *
+ * WHY the order is load-bearing:
+ *  - UpdateFeeSplit (wrapper tag 86) is gated on cfg.marketauth. StakeInitPool
+ *    irreversibly rotates cfg.marketauth to the pool PDA, so tag 86 MUST precede
+ *    it (afterwards it is reachable only via the stake CPI proxy, stake tag 25).
+ *  - BindInsuranceAuthority (stake tag 19) needs the pool PDA to already exist,
+ *    so it MUST follow StakeInitPool. The creator still signs it as asset-0's
+ *    insurance_authority (InitPool rotates marketauth, not insurance_authority).
+ *
+ * `updateFeeSplitIx` is null for a default split (no tx needed — defaults are
+ * written at InitMarket). Exported so the sequence invariant can be unit-tested
+ * without driving the whole wallet/RPC create flow.
+ */
+export function orderStakeTailInstructions<T>(
+  preInitPool: T[],
+  updateFeeSplitIx: T | null,
+  initPoolIx: T,
+  bindInsuranceIx: T,
+): T[] {
+  return [
+    ...preInitPool,
+    ...(updateFeeSplitIx ? [updateFeeSplitIx] : []),
+    initPoolIx,
+    bindInsuranceIx,
+  ];
+}
 
 // BACKING-BUCKET-FRESHNESS DEADLOCK PREVENTION (2026-07-09): dust amount used to
 // seed BOTH backing-bucket domains (long=2*assetIndex, short=2*assetIndex+1) of
@@ -208,6 +245,21 @@ export interface CreateMarketParams {
   oracleFeed: string;
   invert: boolean;
   tradingFeeBps: number;
+  /**
+   * Fee-collection split (bps of the trade fee T). When provided AND different
+   * from the on-chain defaults, an UpdateFeeSplit (wrapper tag 86) instruction is
+   * sent BEFORE StakeInitPool (which irreversibly rotates marketauth to the pool
+   * PDA, after which tag 86 is only reachable via the stake CPI proxy). Omit to
+   * keep the on-chain defaults (creator 1600 / LP 4800 / insurance 1600), which
+   * are written at InitMarket and need no tx. Must satisfy validateFeeSplit
+   * (sum == 8000, creator ≤ 3600, LP ≥ 3200, insurance ≥ 1200) or the wrapper
+   * rejects it with Custom(52)/Custom(51).
+   */
+  feeSplit?: {
+    creatorShareBps: number;
+    lpShareBps: number;
+    insuranceShareBps: number;
+  };
   initialMarginBps: number;
   /** Number of trader slots (256, 1024, 4096). Defaults to 4096 if omitted.
    *  IMPORTANT: Must match the compiled MAX_ACCOUNTS of the target program binary.
@@ -618,7 +670,7 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
     const [lpVaultMint] = deriveInsuranceLpMint(programId, slabPk);
     const stakeProgramId = new PublicKey(
       (getConfig() as { vaultProgramId?: string }).vaultProgramId ??
-        "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ",
+        "GCHhcgwPyrai8SWHEVWw3odedguFXEtJobNnWSfWBCU3",
     );
     const [stakePoolPda] = deriveStakePool(slabPk, stakeProgramId);
     const [stakeVaultAuth] = deriveStakeVaultAuth(stakePoolPda, stakeProgramId);
@@ -917,7 +969,7 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
     }
     const crankIx = buildIx({
       programId, keys: crankKeys,
-      data: encodePermissionlessCrank({ action: CrankAction.FeeSweep, assetIndex: 0, nowSlot: 0n, closeQ: 0n, feeBps: 0n, recoveryReason: 0 }),
+      data: encodePermissionlessCrank({ action: CrankAction.FeeSweep, assetIndex: 0, nowSlot: 0n, recoveryReason: 0 }),
     });
     const m3bDescriptor: TailTxDescriptor = {
       label: "Seeding the insurance fund",
@@ -951,10 +1003,50 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       }),
       data: encodeStakeInitPool(5n, 0n),
     });
+    // UpdateFeeSplit (wrapper tag 86) — creator-chosen split, MARKETAUTH-GATED, so it
+    // MUST land BEFORE initPoolIx (StakeInitPool irreversibly rotates cfg.marketauth to
+    // the pool PDA; after that this tag is only reachable via the stake CPI proxy).
+    // Only emitted for a non-default split (defaults are written at InitMarket). Guarded
+    // by the SAME rule the wrapper enforces so a bad split can never reach chain here.
+    const feeSplitArgs = params.feeSplit;
+    const updateFeeSplitIx = feeSplitArgs
+      ? (() => {
+          const reason = validateFeeSplit(feeSplitArgs);
+          if (reason) throw new Error(`Invalid fee split: ${reason}`);
+          return buildIx({
+            programId,
+            keys: buildAccountMetas(ACCOUNTS_UPDATE_FEE_SPLIT, { admin: walletPk, market: slabPk }),
+            data: encodeUpdateFeeSplit(feeSplitArgs),
+          });
+        })()
+      : null;
+    // BindInsuranceAuthority (stake tag 19) — binds the vault_auth PDA as asset-0's
+    // insurance_authority + insurance_operator (two CPIs to wrapper UpdateAssetAuthority).
+    // REQUIRED, or the staker/insurance fee leg has no exit. Runs AFTER initPoolIx (the
+    // pool PDA must exist), signed by the creator, who is still asset-0's insurance
+    // authority (InitPool rotates marketauth, not insurance_authority).
+    const bindInsuranceIx = buildIx({
+      programId: stakeProgramId,
+      keys: bindInsuranceAuthorityAccounts({
+        admin: walletPk,
+        poolPda: stakePoolPda,
+        vaultAuth: stakeVaultAuth,
+        slab: slabPk,
+        percolatorProgram: programId,
+      }),
+      data: encodeStakeBindInsuranceAuthority(),
+    });
     const m4Descriptor: TailTxDescriptor = {
       label: "Opening staking & LP vaults",
-      instructions: [createLpVaultIx, createLpMintIx, createStakeVaultIx, initPoolIx],
-      computeUnits: 600_000,
+      // Order is load-bearing (see orderStakeTailInstructions): UpdateFeeSplit (if any)
+      // BEFORE InitPool, Bind AFTER InitPool.
+      instructions: orderStakeTailInstructions(
+        [createLpVaultIx, createLpMintIx, createStakeVaultIx],
+        updateFeeSplitIx,
+        initPoolIx,
+        bindInsuranceIx,
+      ),
+      computeUnits: 900_000,
       signers: [stakeLpMintKp, stakeVaultKp],
     };
 
@@ -1936,7 +2028,7 @@ export function useCreateMarket() {
             console.warn("[useCreateMarket] v12 hyperp oracle mode not supported on v17 binary; skipping pre-LP crank");
           } else if (!isV17Slab) {
             // v12 legacy: KeeperCrank for Pyth and admin modes
-            const crankData = encodePermissionlessCrank({ action: CrankAction.FeeSweep, assetIndex: 0, nowSlot: 0n, closeQ: 0n, feeBps: 0n, recoveryReason: 0 });
+            const crankData = encodePermissionlessCrank({ action: CrankAction.FeeSweep, assetIndex: 0, nowSlot: 0n, recoveryReason: 0 });
             const oracleAccount = isAdminOracle ? slabPk : derivePythPushOraclePDA(params.oracleFeed)[0];
             const crankKeys = buildAccountMetas(ACCOUNTS_PERMISSIONLESS_CRANK_BASE, [
               wallet.publicKey, slabPk, slabPk,
@@ -2717,7 +2809,7 @@ export function useCreateMarket() {
             // Final crank uses PermissionlessCrank for all oracle modes.
             // v17 PermissionlessCrank: [owner(s,w), market(w), portfolio(w)] + optional oracle tail.
             {
-              const crankData = encodePermissionlessCrank({ action: CrankAction.FeeSweep, assetIndex: 0, nowSlot: 0n, closeQ: 0n, feeBps: 0n, recoveryReason: 0 });
+              const crankData = encodePermissionlessCrank({ action: CrankAction.FeeSweep, assetIndex: 0, nowSlot: 0n, recoveryReason: 0 });
               const crankPortfolioPk = isV17SlabDeposit ? depositPortfolioPk : slabPk;
               const crankKeys = buildAccountMetas(ACCOUNTS_PERMISSIONLESS_CRANK_BASE, [
                 wallet.publicKey, slabPk, crankPortfolioPk,
@@ -2952,7 +3044,7 @@ export function useCreateMarket() {
           // hooks/useStakeDeposit.ts and hooks/useStakePool.ts.
           const stakeProgramId = new PublicKey(
             (getConfig() as { vaultProgramId?: string }).vaultProgramId ??
-              "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ",
+              "GCHhcgwPyrai8SWHEVWw3odedguFXEtJobNnWSfWBCU3",
           );
           const [stakePoolPda] = deriveStakePool(slabPk, stakeProgramId);
 
@@ -2998,12 +3090,52 @@ export function useCreateMarket() {
               data: encodeStakeInitPool(5n, 0n),
             });
 
+            // UpdateFeeSplit (wrapper tag 86) — MARKETAUTH-GATED, so it MUST land
+            // BEFORE initPoolIx (which rotates cfg.marketauth to the pool PDA). Only
+            // for a non-default split; validated with the wrapper's own rule.
+            const feeSplitArgs = params.feeSplit;
+            const updateFeeSplitIx = feeSplitArgs
+              ? (() => {
+                  const reason = validateFeeSplit(feeSplitArgs);
+                  if (reason) throw new Error(`Invalid fee split: ${reason}`);
+                  return buildIx({
+                    programId,
+                    keys: buildAccountMetas(ACCOUNTS_UPDATE_FEE_SPLIT, {
+                      admin: wallet.publicKey,
+                      market: slabPk,
+                    }),
+                    data: encodeUpdateFeeSplit(feeSplitArgs),
+                  });
+                })()
+              : null;
+            // BindInsuranceAuthority (stake tag 19) — REQUIRED (staker/insurance leg
+            // exit). Runs AFTER initPoolIx; creator still signs as asset-0 insurance
+            // authority (InitPool rotates marketauth, not insurance_authority).
+            const bindInsuranceIx = buildIx({
+              programId: stakeProgramId,
+              keys: bindInsuranceAuthorityAccounts({
+                admin: wallet.publicKey,
+                poolPda: stakePoolPda,
+                vaultAuth: stakeVaultAuth,
+                slab: slabPk,
+                percolatorProgram: programId,
+              }),
+              data: encodeStakeBindInsuranceAuthority(),
+            });
+
             const sigStake = await sendTx({
               connection,
               wallet,
-              instructions: [createLpMintIx, createVaultIx, initPoolIx],
+              // Order is load-bearing (see orderStakeTailInstructions): fee split BEFORE
+              // InitPool, Bind AFTER InitPool.
+              instructions: orderStakeTailInstructions(
+                [createLpMintIx, createVaultIx],
+                updateFeeSplitIx,
+                initPoolIx,
+                bindInsuranceIx,
+              ),
               signers: [stakeLpMintKp, stakeVaultKp],
-              computeUnits: 300_000,
+              computeUnits: 900_000,
             });
             setState((s) => ({ ...s, txSigs: [...s.txSigs, sigStake] }));
           }

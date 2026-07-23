@@ -89,7 +89,7 @@ export function useStakeDepositByPool({ slabAddress, collateralMint }: StakeDepo
         // NOT the SDK's default stake program id. Derive all PDAs against the correct program.
         const stakeProgramId = new PublicKey(
           (getConfig() as { vaultProgramId?: string }).vaultProgramId
-          ?? '51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ'
+          ?? 'GCHhcgwPyrai8SWHEVWw3odedguFXEtJobNnWSfWBCU3'
         );
 
         // Derive all PDAs

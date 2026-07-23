@@ -339,10 +339,10 @@ export async function GET() {
     const isDevnet = net === "devnet";
     let stakeProgramId: PublicKey;
     try {
-      // v17 devnet: stake/vault program is 51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ
+      // v17 devnet: stake/vault program is GCHhcgwPyrai8SWHEVWw3odedguFXEtJobNnWSfWBCU3
       // mainnet: DC5fovFQD5SZYsetwvEqd4Wi4PFY1Yfnc669VMe6oa7F
       const programIdStr = isDevnet
-        ? (process.env.STAKE_PROGRAM_ID ?? "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ")
+        ? (process.env.STAKE_PROGRAM_ID ?? "GCHhcgwPyrai8SWHEVWw3odedguFXEtJobNnWSfWBCU3")
         : "DC5fovFQD5SZYsetwvEqd4Wi4PFY1Yfnc669VMe6oa7F";
       stakeProgramId = new PublicKey(programIdStr);
     } catch {

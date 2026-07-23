@@ -645,7 +645,7 @@ function DepositWidget({
         // (getConfig().vaultProgramId), NOT the SDK's default stake program id.
         const stakeProgramId = new PublicKey(
           (getConfig() as { vaultProgramId?: string }).vaultProgramId
-          ?? "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ"
+          ?? "GCHhcgwPyrai8SWHEVWw3odedguFXEtJobNnWSfWBCU3"
         );
         const found = await fetchPoolPosition(pool, publicKey, connection, stakeProgramId);
         if (!cancelled) setWithdrawPosition(found);
@@ -1219,7 +1219,7 @@ export default function StakePage() {
         // (getConfig().vaultProgramId), NOT the SDK's default stake program id.
         const stakeProgramId = new PublicKey(
           (getConfig() as { vaultProgramId?: string }).vaultProgramId
-          ?? "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ"
+          ?? "GCHhcgwPyrai8SWHEVWw3odedguFXEtJobNnWSfWBCU3"
         );
         // Check every pool for user's LP position — same detection logic the
         // Withdraw tab uses for a single selected pool (fetchPoolPosition).

@@ -154,7 +154,7 @@ export function useLpPositions(): LpPositionsState & { refresh: () => void } {
       // (getConfig().vaultProgramId), NOT the SDK's default stake program id.
       const stakeProgramPk = new PublicKey(
         (getConfig() as { vaultProgramId?: string }).vaultProgramId
-        ?? '51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ'
+        ?? 'GCHhcgwPyrai8SWHEVWw3odedguFXEtJobNnWSfWBCU3'
       );
 
       // 2a. Batch-fetch LP + collateral mint accounts to read per-mint decimals (PERC-8197).

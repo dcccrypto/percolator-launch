@@ -26,6 +26,12 @@ import { StepTokenSelect } from "./StepTokenSelect";
 import { StepOracleSelect } from "./StepOracleSelect";
 import { StepParameters } from "./StepParameters";
 import { StepReview } from "./StepReview";
+import {
+  type FeeSplitBps,
+  DEFAULT_FEE_SPLIT,
+  isDefaultFeeSplit,
+} from "./FeeSplitControl";
+import { validateFeeSplit } from "@percolatorct/sdk";
 import { LaunchProgress } from "./LaunchProgress";
 import { LaunchSuccess } from "./LaunchSuccess";
 import { RecoverSolBanner } from "./RecoverSolBanner";
@@ -56,6 +62,8 @@ interface WizardState {
   // Step 3
   slabTier: SlabTierKey;
   tradingFeeBps: number;
+  /** Creator/LP/insurance fee split (bps of T). Defaults to the on-chain defaults. */
+  feeSplit: FeeSplitBps;
   initialMarginBps: number;
   lpCollateral: string;
   insuranceAmount: string;
@@ -76,6 +84,7 @@ const DEFAULT_STATE: WizardState = {
   // Manual mode users can choose their own tier (defaults to large in the picker).
   slabTier: "small",
   tradingFeeBps: 30,
+  feeSplit: DEFAULT_FEE_SPLIT,
   initialMarginBps: 1000,
   lpCollateral: "",
   insuranceAmount: "100",
@@ -311,11 +320,16 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     if (wizard.oracleType === "keeper") return isValidBase58Pubkey(wizard.oracleFeed);
     return false;
   })();
+  // Fee-split gate: block Step 3 while the creator/LP/insurance shares would be
+  // rejected on-chain (Custom(52) sum / Custom(51) floors). validateFeeSplit is
+  // the SAME rule set the wrapper enforces, so a passing split here always lands.
+  const feeSplitError = validateFeeSplit(wizard.feeSplit);
   const step3Valid =
     wizard.tradingFeeBps >= 1 &&
     wizard.tradingFeeBps <= 1000 &&
     wizard.initialMarginBps >= 100 &&
     !feeConflict &&
+    feeSplitError === null &&
     parseFloat(wizard.lpCollateral || "0") > 0 &&
     parseFloat(wizard.insuranceAmount) >= 100;
   // BUG 1 fix: rent estimate must be sized off the actual v17 slab length
@@ -602,6 +616,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     setWizard((prev) => ({ ...prev, tradingFeeBps: bps }));
   }, []);
 
+  const setFeeSplit = useCallback((next: FeeSplitBps) => {
+    setWizard((prev) => ({ ...prev, feeSplit: next }));
+  }, []);
+
   const setInitialMarginBps = useCallback((bps: number) => {
     setWizard((prev) => ({ ...prev, initialMarginBps: bps }));
   }, []);
@@ -684,6 +702,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       oracleFeed,
       invert: false,
       tradingFeeBps: wizard.tradingFeeBps,
+      // Fee split (bps of T). Only forwarded when it differs from the on-chain
+      // defaults — a default split needs no UpdateFeeSplit tx (see useCreateMarket).
+      feeSplit: isDefaultFeeSplit(wizard.feeSplit) ? undefined : wizard.feeSplit,
       initialMarginBps: wizard.initialMarginBps,
       maxAccounts: tier.maxAccounts,
       // BUG 1 fix: don't override the DEFAULT_SLAB_SIZE fallback with the stale v12.19
@@ -755,6 +776,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       oracleFeed,
       invert: false,
       tradingFeeBps: wizard.tradingFeeBps,
+      // Fee split (bps of T). Only forwarded when it differs from the on-chain
+      // defaults — a default split needs no UpdateFeeSplit tx (see useCreateMarket).
+      feeSplit: isDefaultFeeSplit(wizard.feeSplit) ? undefined : wizard.feeSplit,
       initialMarginBps: wizard.initialMarginBps,
       maxAccounts: tier.maxAccounts,
       // BUG 1 fix: same rationale as handleLaunch above — always the real v17 slab size.
@@ -1140,6 +1164,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             onSlabTierChange={setSlabTier}
             tradingFeeBps={wizard.tradingFeeBps}
             onTradingFeeChange={setTradingFeeBps}
+            feeSplit={wizard.feeSplit}
+            onFeeSplitChange={setFeeSplit}
             initialMarginBps={wizard.initialMarginBps}
             onInitialMarginChange={setInitialMarginBps}
             lpCollateral={wizard.lpCollateral}
