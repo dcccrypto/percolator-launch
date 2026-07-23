@@ -53,7 +53,7 @@ import { renderHook, act, waitFor } from "@testing-library/react";
 import { useCreatorClaim } from "@/hooks/useCreatorClaim";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
-const PROGRAM_ID = "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9";
+const PROGRAM_ID = "DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj";
 const SLAB = "GsBBecjFRwUvsrJ3bCinmCqDhERGtop9BKKEkE8SVa1C";
 const COLLATERAL = new PublicKey("EqDqqRzRwA5xnZYu7oJ6LfJbcFuwkTKs7KBSTu2xaG66");
 const OPERATOR = new PublicKey("FbTbDeGWQpjrEqJdqoBHX3sTWHoAmU2xywD7wyxH6WC7");
