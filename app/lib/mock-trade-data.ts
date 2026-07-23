@@ -479,6 +479,15 @@ export function getMockPortfolioPositions(): PortfolioPosition[] {
       liquidationPriceE6,
       liquidationDistancePct,
       unrealizedPnl: pnl,
+      // Mock positions carry a real `entryE6`, so PnL here is always
+      // displayable — mock mode must not exercise the "--" path.
+      entryPriceSource: "cache",
+      realizedLoss: 0n,
+      // Mock positions are never deleveraged, so effective exposure IS the
+      // nominal size — mock mode keeps exercising the normal (non-ADL) path.
+      effectiveSize: posSize,
+      adlRemainingBps: 10000,
+      deleveraged: false,
       pnlPercent,
       leverage,
       maintenanceMarginBps: maintenanceBps,

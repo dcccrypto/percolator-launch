@@ -144,10 +144,16 @@ export function portfolioV17ToAccount(portfolio: PortfolioV17): Account {
     overflowOlderPresent: null,
     overflowNewest: null,
     overflowNewestPresent: null,
-    fSnap: 0n,
-    adlABasis: 0n,
-    adlKSnap: 0n,
-    adlEpochSnap: 0n,
+    fSnap: activeLeg ? activeLeg.fSnap : 0n,
+    // The ADL factor frozen into the leg when it was opened. Carried through so
+    // consumers can recover the position's EFFECTIVE exposure: auto-deleveraging
+    // scales the asset's shared per-side `a` and never rewrites `basis_pos_q`, so
+    // `positionSize` alone over-reports a deleveraged position (see lib/v17-adl.ts).
+    // Was hardcoded 0n, which silently discarded the only leg-side input that math
+    // needs. `entryPrice` above stays 0n — v17 genuinely does not store one.
+    adlABasis: activeLeg ? activeLeg.aBasis : 0n,
+    adlKSnap: activeLeg ? activeLeg.kSnap : 0n,
+    adlEpochSnap: activeLeg ? activeLeg.epochSnap : 0n,
     schedPresent: null,
     schedRemainingQ: null,
     schedAnchorQ: null,

@@ -29,7 +29,9 @@ function PositionChip({ pos, decimals }: { pos: PortfolioPosition; decimals: num
   const getSnap = useCallback(() => getSnapshot(pos.slabAddress).priceE6, [pos.slabAddress]);
   const livePriceE6 = useSyncExternalStore(subscribe, getSnap, () => null);
 
-  const posSize = pos.account?.positionSize ?? 0n;
+  // Exposure actually carried (ADL-adjusted); equals nominal basis on
+  // markets that never deleveraged. See lib/v17-adl.ts.
+  const posSize = pos.effectiveSize;
   const posEntry = pos.effectiveEntryPrice;
   const markE6 = livePriceE6 != null && livePriceE6 > 0n ? livePriceE6 : pos.oraclePriceE6;
 
@@ -114,7 +116,7 @@ export function PositionsBar() {
   // (1000 WIF ≠ 1000 SOL). Sorted on the poll's oracle price, not the live
   // mark, so chips don't reshuffle on every price tick.
   const notionalOf = (pos: PortfolioPosition): bigint => {
-    const size = pos.account?.positionSize ?? 0n;
+    const size = pos.effectiveSize;
     const abs = size < 0n ? -size : size;
     return pos.oraclePriceE6 > 0n ? (abs * pos.oraclePriceE6) / 1_000_000n : abs;
   };

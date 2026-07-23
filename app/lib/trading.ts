@@ -146,6 +146,93 @@ export function computeLivePositionPnl(
   return { pnl, pnlPercent };
 }
 
+/**
+ * How much to trust the entry price a position row is about to display.
+ *
+ *   "cache"   — the real mark at open time, saved by OrderTicket. Trustworthy:
+ *               entry, unrealized PnL, ROE and liq price are all meaningful.
+ *   "derived" — no cache; entry was BACKED OUT of the on-chain `pnl` by
+ *               `estimateEntryFromPnl`. Self-consistent but only a lower bound
+ *               on the true PnL (see below) — display it as an estimate.
+ *   "unknown" — no cache AND the on-chain `pnl` carries no information (it is
+ *               0 on an OPEN position). Nothing about entry or PnL can be
+ *               honestly displayed. Render "--", never a number.
+ *
+ * WHY "unknown" has to exist (engine ground truth, percolator/src/v16.rs):
+ * a realized loss is NOT carried as negative `pnl`. `reserve_new_capital_
+ * backed_loss_for_source_domain_not_atomic` (v16.rs:9382-9437) moves the loss
+ * OUT of `capital` and adds the same amount BACK to `pnl`, pushing `pnl`
+ * toward 0, then records the amount in `residual_crystallized_loss_atoms_total`
+ * (v16.rs:8836-8852). Settlement then resets the leg's reference with
+ * `leg.k_snap = k_now` (v16.rs:9657). So for a SOLVENT losing account after a
+ * settle crank the on-chain state is `pnl == 0` and less `capital` — the total
+ * equity is right, the attribution is gone.
+ *
+ * Feeding that `pnl == 0` into `estimateEntryFromPnl` yields `diff == 0`, i.e.
+ * `entry == mark`, i.e. a confident **"$0.00 / 0.00% ROE"** printed for a
+ * position that is actually deep underwater and draining the trader's capital.
+ * On a perps venue traders read PnL to decide whether to close, so that is a
+ * materially misleading number, not a cosmetic one. This is not hypothetical:
+ * on the deployed playground wrapper (69VUZ7a2...) 188 of 557 live portfolios
+ * currently hold an open position with `pnl == 0`, and 123 carry a non-zero
+ * `residual_crystallized_loss_atoms_total`.
+ *
+ * The true open price is genuinely NOT recoverable from v17 chain state on a
+ * cache miss (there is no `entry_price` field, and `k_snap` is rewritten at
+ * every settlement), so the honest answer is "--" plus the realized-loss
+ * figure from `residualCrystallizedLossAtomsTotal` — not a fabricated zero.
+ */
+export type EntryPriceSource = "cache" | "derived" | "unknown";
+
+/**
+ * Shared copy for every "--" cell produced by `source === "unknown"`, so the
+ * trade terminal, the positions dock and the portfolio page all explain the
+ * same on-chain fact the same way instead of drifting apart.
+ */
+export const UNKNOWN_ENTRY_TOOLTIP =
+  "Entry price for this position isn't recoverable on this device, so PnL can't be shown. " +
+  "Percolator doesn't store entry price on-chain, and a realized loss is settled straight " +
+  "out of your capital rather than being carried as negative PnL — so an on-chain PnL of 0 " +
+  "does NOT mean the position is flat. Check Realized loss and your capital balance, or " +
+  "reopen this market in the browser you traded from.";
+
+export interface ResolvedEntryPrice {
+  /** Best available entry price. Falls back to the mark so that liq-price and
+   *  margin math keep a sane, non-zero denominator even when `source` is
+   *  "unknown" — only DISPLAY should branch on `source`. */
+  entry: bigint;
+  source: EntryPriceSource;
+}
+
+/**
+ * Resolve the entry price for one position and say how much to trust it.
+ *
+ * Risk math (liq price, locked margin, buying power) should keep using
+ * `.entry` unconditionally — it degrades to the mark, which is the same
+ * behaviour those call sites had before this helper existed. Only PnL / ROE /
+ * entry-price DISPLAY should gate on `.source === "unknown"`.
+ */
+export function resolveEntryPrice(
+  positionSize: bigint,
+  cachedEntryPrice: bigint,
+  onChainPnl: bigint,
+  oraclePrice: bigint,
+): ResolvedEntryPrice {
+  if (cachedEntryPrice > 0n) return { entry: cachedEntryPrice, source: "cache" };
+  if (positionSize === 0n || oraclePrice <= 0n) {
+    return { entry: oraclePrice, source: "unknown" };
+  }
+  // An open position whose on-chain PnL is exactly 0 tells us nothing: either
+  // it is genuinely flat to its last settlement mark, or its loss has been
+  // crystallized out of capital. Indistinguishable from here, and guessing
+  // "flat" is the dangerous guess — so refuse to display a number.
+  if (onChainPnl === 0n) return { entry: oraclePrice, source: "unknown" };
+  return {
+    entry: estimateEntryFromPnl(positionSize, onChainPnl, oraclePrice),
+    source: "derived",
+  };
+}
+
 export function estimateEntryFromPnl(
   positionSize: bigint,
   onChainPnl: bigint,

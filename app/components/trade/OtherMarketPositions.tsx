@@ -44,6 +44,7 @@ import {
   computeMarkPnlCollateral,
   computePnlPercent,
   computePositionInitialMargin,
+  UNKNOWN_ENTRY_TOOLTIP,
 } from "@/lib/trading";
 import {
   formatTokenAmount,
@@ -134,7 +135,9 @@ const OtherMarketRow: FC<{
   const livePriceE6 = useSyncExternalStore(subscribe, getSnap, () => null);
 
   const account = pos.account;
-  const posSize = account?.positionSize ?? 0n;
+  // Exposure actually carried (ADL-adjusted); equals nominal basis on
+  // markets that never deleveraged. See lib/v17-adl.ts.
+  const posSize = pos.effectiveSize;
   const isLong = posSize > 0n;
   // Entry: the hook's effectiveEntryPrice already resolves on-chain price →
   // client cache → PnL-derived estimate; re-check the cache here only as a
@@ -142,6 +145,12 @@ const OtherMarketRow: FC<{
   const entryE6 = pos.effectiveEntryPrice > 0n
     ? pos.effectiveEntryPrice
     : getEntryPrice(pos.slabAddress, pos.idx, account?.owner?.toBase58?.() ?? "");
+  // When the hook could not recover an entry price it hands back the MARK, so
+  // `entryE6 > 0n` is true and the PnL below computes to a confident 0 for a
+  // position that may be deep underwater (a realized loss is settled out of
+  // capital and `pnl` reset to 0 on-chain — see resolveEntryPrice). Gate the
+  // display on the hook's own verdict instead of on `entryE6 > 0n`.
+  const pnlIsKnown = pos.entryPriceSource !== "unknown";
   const markE6 = livePriceE6 != null && livePriceE6 > 0n ? livePriceE6 : pos.oraclePriceE6;
   const hasValidMark = markE6 > 0n;
 
@@ -197,8 +206,8 @@ const OtherMarketRow: FC<{
           <span className="text-[var(--text)]">{formatTokenAmount(abs(posSize), decimals)}</span>
           <span className="ml-1 text-[var(--text-secondary)]">{displaySymbol}</span>
         </td>
-        <td className="whitespace-nowrap px-3 py-2.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-          {entryE6 > 0n ? formatUsdPriceE6(entryE6) : "--"}
+        <td className={`whitespace-nowrap px-3 py-2.5 text-right ${pnlIsKnown ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }} title={pnlIsKnown ? undefined : UNKNOWN_ENTRY_TOOLTIP}>
+          {pnlIsKnown && entryE6 > 0n ? formatUsdPriceE6(entryE6) : "--"}
         </td>
         <td className={`whitespace-nowrap px-3 py-2.5 text-right ${hasValidMark ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
           {hasValidMark ? formatUsdPriceE6(markE6) : "--"}
@@ -210,8 +219,10 @@ const OtherMarketRow: FC<{
         >
           {formatLiqPrice(liqPriceE6, { hasPosition: liqUnliquidatable })}
         </td>
-        <td className={`whitespace-nowrap px-3 py-2.5 text-right ${hasValidMark ? pnlColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-          {hasValidMark ? (
+        <td className={`whitespace-nowrap px-3 py-2.5 text-right ${hasValidMark && pnlIsKnown ? pnlColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }} title={pnlIsKnown ? undefined : UNKNOWN_ENTRY_TOOLTIP}>
+          {!pnlIsKnown ? (
+            <span>--</span>
+          ) : hasValidMark ? (
             <>
               <div>{formatPnl(pnlTokens, decimals)} USDC</div>
               {pnlUsd !== null && (
@@ -224,8 +235,8 @@ const OtherMarketRow: FC<{
             <span>--</span>
           )}
         </td>
-        <td className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${hasValidMark ? roeColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-          {hasValidMark ? formatPercent(roe) : "--"}
+        <td className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${hasValidMark && pnlIsKnown ? roeColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+          {hasValidMark && pnlIsKnown ? formatPercent(roe) : "--"}
         </td>
         <td className="whitespace-nowrap px-3 py-2.5 text-right">
           {pos.nftWrapped ? (
@@ -292,7 +303,7 @@ const OtherMarketPositionsInner: FC<{ currentSlab: string }> = ({ currentSlab })
   // strip, and sorted on the poll's oracle price so rows don't reshuffle on
   // live ticks. (filter() copies, so sort() never mutates hook state.)
   const notionalOf = (pos: PortfolioPosition): bigint => {
-    const size = pos.account?.positionSize ?? 0n;
+    const size = pos.effectiveSize;
     const a = size < 0n ? -size : size;
     return pos.oraclePriceE6 > 0n ? (a * pos.oraclePriceE6) / 1_000_000n : a;
   };

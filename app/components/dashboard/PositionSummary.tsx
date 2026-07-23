@@ -23,7 +23,9 @@ function formatPnlPct(pct: number): string {
 }
 
 function PositionCard({ pos, symbol, decimals = 6 }: { pos: PortfolioPosition; symbol: string; decimals?: number }) {
-  const posSize = pos.account?.positionSize ?? 0n;
+  // Exposure actually carried (ADL-adjusted); equals nominal basis on
+  // markets that never deleveraged. See lib/v17-adl.ts.
+  const posSize = pos.effectiveSize;
   const side = posSize > 0n ? "Long" : posSize < 0n ? "Short" : "Flat";
   const sizeAbs = posSize < 0n ? -posSize : posSize;
   const severity = getLiquidationSeverity(pos.liquidationDistancePct);
