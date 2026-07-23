@@ -21,6 +21,7 @@ import { EngineHealthCard } from "@/components/trade/EngineHealthCard";
 import { CrankHealthCard } from "@/components/trade/CrankHealthCard";
 import { OpenInterestCard } from "@/components/market/OpenInterestCard";
 import { InsuranceDashboard } from "@/components/market/InsuranceDashboard";
+import { CreatorClaimPanel } from "@/components/market/CreatorClaimPanel";
 import { LiquidationAnalytics } from "@/components/trade/LiquidationAnalytics";
 import { SystemCapitalCard } from "@/components/trade/SystemCapitalCard";
 import { AdlLeaderboard } from "@/components/trade/AdlLeaderboard";
@@ -113,6 +114,13 @@ function AnalyticsPageInner({ slab }: { slab: string }) {
         <ErrorBoundary label="OpenInterestCard">
           <Section title="Open interest"><OpenInterestCard slabAddress={slab} /></Section>
         </ErrorBoundary>
+        {/* Creator fee-claim (v17 only). Self-hides for non-operators, so it
+            renders nothing for traders who did not create this market. */}
+        {isV17 && (
+          <ErrorBoundary label="CreatorClaimPanel">
+            <CreatorClaimPanel slabAddress={slab} />
+          </ErrorBoundary>
+        )}
         {!isV17 && (
           <ErrorBoundary label="InsuranceDashboard">
             <Section title="Insurance"><InsuranceDashboard slabAddress={slab} /></Section>
