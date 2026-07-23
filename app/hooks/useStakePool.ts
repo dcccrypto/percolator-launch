@@ -115,23 +115,27 @@ function parseDepositPdaAccount(data: Buffer) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// StakePool account layout (v1, 352 bytes — the REAL deployed layout)
+// StakePool account — minimal frontend reader (fields ≤ offset 200)
 // ═══════════════════════════════════════════════════════════════
 
 /**
- * Real deployed size of a StakePool account on the v17 devnet vault program
- * (51CeUNpb…, 17 live pools). The SDK's `STAKE_POOL_SIZE` (384) and
- * `decodeStakePool` describe a newer v2 layout that adds pendingAdmin/HWM/
- * tranche fields — it has never been deployed here. Guarding on 384 (or
- * calling the SDK decoder) makes every real 352-byte pool look
- * "uninitialized": `384 < 352` is never true, and the SDK decoder reads past
- * byte 352 (out of bounds) for fields that simply don't exist on-chain.
+ * Minimum byte-length this frontend reader requires from a StakePool account.
  *
+ * CUTOVER (2026-07): the FRESH devnet stake program
+ * (GCHhcgwPyrai8SWHEVWw3odedguFXEtJobNnWSfWBCU3) deploys 392-byte pool accounts
+ * (the v2 layout: pendingAdmin / HWM / tranche fields after `pool_mode` @ 280).
+ * The SDK's `STAKE_POOL_SIZE` (392) and `decodeStakePool` decode that layout
+ * correctly and are safe to use against the deployed accounts. This file keeps
+ * a small local reader instead only because it needs just five fields
+ * (isInitialized, lpMint, vault, cooldownSlots, depositCap) — all at offsets
+ * that are byte-identical between the retired 352-byte program and the deployed
+ * 392-byte one — so `decodeStakePoolV1` stays correct without a shape change.
+ *
+ * This value is a MINIMUM (a `data.length < …` floor), not an exact size: a
+ * real 392-byte account clears it. It is intentionally 352 (the smaller of the
+ * two historical layouts) so the reader accepts pools from either program.
  * Field offsets below match `parseStakePool` in
- * `app/app/api/stake/pools/route.ts` (the route that already reads pools
- * correctly) — they also happen to coincide with the SDK's v2 offsets for
- * every field up through `pool_mode` @ 280; the two layouts only diverge
- * after that point, where the v2 struct keeps growing to 384 bytes.
+ * `app/app/api/stake/pools/route.ts`.
  */
 export const STAKE_POOL_SIZE_V1 = 352;
 
@@ -144,10 +148,11 @@ export interface StakePoolV1 {
 }
 
 /**
- * Decode the fields the frontend needs from a raw StakePool account using the
- * real 352-byte v1 layout. Do NOT use the SDK's `decodeStakePool` here — see
- * the `STAKE_POOL_SIZE_V1` comment above for why it's unsafe against a real
- * account.
+ * Decode the five fields the frontend needs from a raw StakePool account. The
+ * offsets (lpMint@104, vault@136, cooldown@184, cap@192) are byte-identical
+ * across the retired 352-byte and deployed 392-byte layouts, so this reader is
+ * correct for both. The SDK's `decodeStakePool` also decodes the deployed
+ * 392-byte account correctly and may be used where the full struct is needed.
  */
 export function decodeStakePoolV1(data: Uint8Array): StakePoolV1 {
   if (data.length < STAKE_POOL_SIZE_V1) {
@@ -256,9 +261,8 @@ export function useStakePool() {
         return;
       }
 
-      // Decode pool using the REAL deployed 352-byte v1 layout — NOT the SDK's
-      // decodeStakePool (384-byte v2 layout, never deployed here). See the
-      // STAKE_POOL_SIZE_V1 comment above for why the SDK decoder is unsafe here.
+      // Decode the five fields the frontend needs via decodeStakePoolV1 (offsets
+      // are identical across the retired 352-byte and deployed 392-byte layouts).
       let poolData: StakePoolV1 | null = null;
       try {
         const decoded = decodeStakePoolV1(poolInfo.data);

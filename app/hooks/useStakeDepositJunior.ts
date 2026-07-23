@@ -34,10 +34,11 @@ export interface StakeDepositJuniorParams {
  * handles the tranche accounting.
  *
  * ⚠ NOT currently wired into the UI (see stake/page.tsx). Tranches (tag 16,
- * PERC-303) are part of the newer 384-byte v2 StakePool layout; the deployed
- * devnet vault program (51CeUNpb…) still runs the 352-byte v1 program, which
- * has no tag-16 handler — sending this instruction to it will fail on-chain.
- * Re-enable the Junior tranche option once the v2 program is deployed here.
+ * PERC-303) are part of the v2 StakePool layout. The fresh devnet stake program
+ * (GCHhcgw…, deployed 2026-07) uses the 392-byte v2 layout with tranche fields,
+ * so the previous blocker (retired 51CeUNpb… ran the 352-byte v1 program with no
+ * tag-16 handler) no longer applies by account shape. Keep this disabled until
+ * the tag-16 handler is verified live on GCHhcgw before re-enabling the UI.
  *
  * Usage:
  * ```tsx
@@ -115,9 +116,9 @@ export function useStakeDepositJunior({ slabAddress, collateralMint }: StakeDepo
           );
         }
 
-        // Decode pool using the REAL deployed 352-byte v1 layout — NOT the SDK's
-        // decodeStakePool, which assumes a 384-byte v2 layout that was never
-        // deployed here (see STAKE_POOL_SIZE_V1 comment in useStakePool.ts).
+        // Decode the fields needed (lpMint, vault) via decodeStakePoolV1 — offsets
+        // are identical across the retired 352-byte and deployed 392-byte layouts
+        // (see STAKE_POOL_SIZE_V1 comment in useStakePool.ts).
         const { lpMint, vault } = decodeStakePoolV1(poolInfo.data);
 
         const userCollateralAta = await getAssociatedTokenAddress(collMintPk, wallet.publicKey);
