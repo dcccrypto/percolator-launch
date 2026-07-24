@@ -125,3 +125,10 @@ docs/superpowers/
 /BUG-HUNT-FINDINGS-*.md
 /DEFINITIVE-PLAN-*.md
 /MASTER-PLAN-*.md
+
+# Secrets + tooling scratch — never track (2026-07-24 incident)
+app/.env.local.bak*
+.env.local.bak*
+**/.env*.bak*
+app/.superpowers/
+.superpowers/

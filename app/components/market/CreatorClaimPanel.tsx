@@ -7,42 +7,31 @@ import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useSlabState } from "@/components/providers/SlabProvider";
 
 /**
- * Creator fee-claim panel (audit gap #2).
+ * Creator fee-claim panel — `WithdrawCreatorFee` (tag 90).
  *
- * Renders ONLY for the market's insurance_operator (the creator) — non-creators
- * never see it. Shows the accrued claimable creator revenue (the real per-asset
- * insurance_domain_budget) and a Claim button that sends WithdrawInsuranceAsset
- * (tag 57), then re-reads on-chain state so the displayed amount drops to 0.
+ * Renders ONLY for asset 0's `insurance_operator` (the creator); non-creators
+ * never see it. It shows `creator_fee_claimable_atoms` — the market-level
+ * counter the creator's cut of trade fees accrues into — and a Claim button
+ * that pays exactly that out of the vault, then re-reads on-chain state so the
+ * displayed amount drops.
  *
- * Rough devnet slot time (~0.4s) used only to humanize the cooldown countdown;
- * the on-chain cooldown gate is authoritative.
+ * WHAT THIS IS NOT: the market's insurance fund / loss backstop. This panel
+ * used to display `insurance_domain_budget` (the pot the engine draws down to
+ * cover negative trader PnL) and drain it via tag 57, which was a solvency
+ * withdrawal dressed up as revenue. Tag 90 cannot reach that pot, and nothing
+ * here should ever describe it as creator earnings again.
+ *
+ * There is deliberately NO cooldown UI: tag 57's cooldown/ceiling gates
+ * rate-limit backstop withdrawals, and `handle_withdraw_creator_fee` applies
+ * neither.
  */
-const APPROX_SLOT_MS = 400;
-
-function formatCooldown(remainingSlots: bigint): string {
-  const secs = Math.max(0, Math.round((Number(remainingSlots) * APPROX_SLOT_MS) / 1000));
-  if (secs < 90) return `~${secs}s`;
-  const mins = Math.round(secs / 60);
-  if (mins < 90) return `~${mins}m`;
-  return `~${Math.round(mins / 60)}h`;
-}
-
 export const CreatorClaimPanel: FC<{ slabAddress?: string }> = () => {
   const { config } = useSlabState();
   const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
   const decimals = tokenMeta?.decimals ?? 6;
   const symbol = tokenMeta?.symbol ?? "";
 
-  const {
-    isOperator,
-    claimable,
-    cooldownActive,
-    cooldownRemainingSlots,
-    loading,
-    error,
-    success,
-    claim,
-  } = useCreatorClaim();
+  const { isOperator, claimable, loading, error, success, claim } = useCreatorClaim();
 
   const [justClaimed, setJustClaimed] = useState(false);
 
@@ -50,7 +39,7 @@ export const CreatorClaimPanel: FC<{ slabAddress?: string }> = () => {
   if (!isOperator) return null;
 
   const hasClaimable = claimable > 0n;
-  const disabled = loading || !hasClaimable || cooldownActive;
+  const disabled = loading || !hasClaimable;
 
   const onClaim = async () => {
     setJustClaimed(false);
@@ -74,55 +63,48 @@ export const CreatorClaimPanel: FC<{ slabAddress?: string }> = () => {
       </div>
 
       <div className="p-3">
-      <div className="mb-1.5 flex items-baseline justify-between">
-        <span className="text-[9px] text-[var(--text-dim)]">Claimable</span>
-        <span
-          className="text-[13px] font-medium text-[var(--text)]"
-          style={{ fontFamily: "var(--font-mono)" }}
-          data-testid="creator-claimable"
+        <div className="mb-1.5 flex items-baseline justify-between">
+          <span className="text-[9px] text-[var(--text-dim)]">Claimable</span>
+          <span
+            className="text-[13px] font-medium text-[var(--text)]"
+            style={{ fontFamily: "var(--font-mono)" }}
+            data-testid="creator-claimable"
+          >
+            {formatTokenAmount(claimable, decimals)} {symbol}
+          </span>
+        </div>
+
+        <button
+          type="button"
+          onClick={onClaim}
+          disabled={disabled}
+          data-testid="creator-claim-button"
+          className={`w-full rounded-none px-2 py-1 text-[11px] font-medium transition-colors ${
+            disabled
+              ? "cursor-not-allowed bg-[var(--bg)] text-[var(--text-dim)]"
+              : "bg-[var(--accent)] text-[var(--accent-contrast,#fff)] hover:opacity-90"
+          }`}
         >
-          {formatTokenAmount(claimable, decimals)} {symbol}
-        </span>
-      </div>
+          {loading ? "Claiming…" : hasClaimable ? "Claim fees" : "No fees to claim"}
+        </button>
 
-      <button
-        type="button"
-        onClick={onClaim}
-        disabled={disabled}
-        data-testid="creator-claim-button"
-        className={`w-full rounded-none px-2 py-1 text-[11px] font-medium transition-colors ${
-          disabled
-            ? "cursor-not-allowed bg-[var(--bg)] text-[var(--text-dim)]"
-            : "bg-[var(--accent)] text-[var(--accent-contrast,#fff)] hover:opacity-90"
-        }`}
-      >
-        {loading
-          ? "Claiming…"
-          : cooldownActive
-            ? `Cooldown ${formatCooldown(cooldownRemainingSlots)}`
-            : hasClaimable
-              ? "Claim fees"
-              : "No fees to claim"}
-      </button>
-
-      {cooldownActive && !loading && (
-        <div className="mt-1 text-[8px] text-[var(--text-dim)]">
-          Fees can be claimed once per cooldown window. Next claim available in about{" "}
-          {formatCooldown(cooldownRemainingSlots)}.
+        <div className="mt-1 text-[8px] leading-relaxed text-[var(--text-dim)]">
+          Your share of this market&apos;s trade fees. Paid from the market vault and
+          separate from the insurance fund, which backs trader losses and is not
+          claimable.
         </div>
-      )}
 
-      {error && (
-        <div className="mt-1 text-[8px] text-[var(--warning,#e0a000)]" data-testid="creator-claim-error">
-          {error}
-        </div>
-      )}
+        {error && (
+          <div className="mt-1 text-[8px] text-[var(--warning,#e0a000)]" data-testid="creator-claim-error">
+            {error}
+          </div>
+        )}
 
-      {success && justClaimed && !error && (
-        <div className="mt-1 text-[8px] text-[var(--long,#22c55e)]" data-testid="creator-claim-success">
-          Claimed. Balance updated.
-        </div>
-      )}
+        {success && justClaimed && !error && (
+          <div className="mt-1 text-[8px] text-[var(--long,#22c55e)]" data-testid="creator-claim-success">
+            Claimed. Balance updated.
+          </div>
+        )}
       </div>
     </div>
   );

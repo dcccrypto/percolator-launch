@@ -1,17 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useParams } from "next/navigation";
 import { PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddress } from "@solana/spl-token";
 import {
-  encodeWithdrawInsuranceAsset,
+  ACCOUNTS_WITHDRAW_CREATOR_FEE,
   buildAccountMetas,
   buildIx,
   deriveVaultAuthority,
-  parseMarketGroupV17OI,
-  ACCOUNTS_WITHDRAW_INSURANCE,
+  encodeWithdrawCreatorFee,
   WELL_KNOWN,
 } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
@@ -19,171 +18,160 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { assertKnownProgram } from "@/lib/programAllowlist";
 import {
-  marketAssetCapacity,
-  readInsuranceDomainBudget,
-  readAssetInsuranceOperator,
-} from "@/lib/insuranceDomainBudget";
+  isCreatorFeeClaimAuthority,
+  readCreatorFeeClaimable,
+} from "@/lib/v17-creator-fee";
 import { mapCreatorClaimError } from "@/lib/creatorClaimError";
 
-export interface CreatorClaimAsset {
-  /** Asset (market slot) index within the market group. */
-  assetIndex: number;
-  /** Accrued creator-fee revenue for this asset = insurance_domain_budget long+short. */
-  claimable: bigint;
-}
-
 export interface CreatorClaimData {
-  /** True iff the connected wallet is the insurance_operator (or marketauth) of >=1 asset. */
+  /** True iff the connected wallet is asset 0's `insurance_operator` — the ONLY wallet tag 90 accepts. */
   isOperator: boolean;
-  /** Total claimable across every asset the connected wallet operates. */
+  /** Unclaimed creator trade-fee revenue, in collateral atoms (`creator_fee_claimable_atoms`). */
   claimable: bigint;
-  /** Per-asset breakdown for the operator's assets. */
-  claimableAssets: CreatorClaimAsset[];
+  /** Mint the payout is denominated in, read from the same account as `claimable`. */
+  collateralMint: PublicKey | null;
+  /** The wallet tag 90 will accept as the claimant, or null when it could not be resolved. */
+  claimAuthority: PublicKey | null;
   /** Collateral-token decimals for human display. */
   decimals: number;
-  /** True while the market-wide insurance-withdrawal cooldown blocks a claim. */
-  cooldownActive: boolean;
-  /** Slots remaining until the cooldown elapses (0 when inactive). */
-  cooldownRemainingSlots: bigint;
 }
 
-const EMPTY: CreatorClaimData = {
+const EMPTY: Omit<CreatorClaimData, "decimals"> = {
   isOperator: false,
   claimable: 0n,
-  claimableAssets: [],
-  decimals: 6,
-  cooldownActive: false,
-  cooldownRemainingSlots: 0n,
+  collateralMint: null,
+  claimAuthority: null,
 };
 
 /**
- * Creator fee-claim hook (audit gap #2).
+ * Creator fee-claim hook — `WithdrawCreatorFee` (tag 90).
  *
- * The market's accrued creator revenue lives in each asset's on-chain
- * `insurance_domain_budget`. The insurance_operator (defaults to the creator)
- * withdraws it with WithdrawInsuranceAsset (tag 57). This hook:
- *   1. reads the per-asset budget + operator from the raw slab bytes (see
- *      lib/insuranceDomainBudget.ts — the budget because the SDK never decodes
- *      it, and the operator per-asset at the SAME offset SlabProvider's
- *      post-cutover `assetProfile` uses, extended to assets 1..n which
- *      SlabProvider does not parse);
- *   2. gates on operator === wallet (or marketauth === wallet, both of which the
- *      on-chain handler authorizes);
- *   3. builds + sends the tag-57 tx and re-reads state so the displayed
- *      claimable drops to 0 after a successful claim.
+ * WHAT CHANGED AND WHY IT MATTERS
+ * ───────────────────────────────
+ * This hook used to display the market's `insurance_domain_budget` as the
+ * creator's "claimable" balance and drain it with `WithdrawInsuranceAsset`
+ * (tag 57). That budget is the LOSS BACKSTOP the engine draws down to cover
+ * negative trader PnL (`consume_domain_insurance_for_negative_pnl`), and tag
+ * 57's health gate only bites during active stress — so the button let a
+ * creator preemptively remove the market's solvency backstop while it looked
+ * healthy, and the number next to it was never creator revenue in the first
+ * place.
+ *
+ * The deployed wrapper (`DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj`) now
+ * accrues the creator fee leg into a dedicated market-level counter,
+ * `creator_fee_claimable_atoms` (u64 LE, WrapperConfig byte 568 / absolute
+ * 584), and pays it out with `WithdrawCreatorFee` (tag 90). Tag 90 cannot
+ * touch a domain budget and tag 57 cannot touch this counter — they are
+ * disjoint by construction. This hook therefore:
+ *
+ *   1. reads the balance through `lib/v17-creator-fee.ts`, which delegates the
+ *      decode to the SDK's `parseWrapperConfigV17` so byte 568 has exactly one
+ *      owner in this repo (app-local copies of layout constants going stale is
+ *      what caused the 496→576 outage);
+ *   2. gates on asset 0's `insurance_operator` and ONLY that — deliberately
+ *      NOT `marketauth`, which `StakeInitPool` rotates to the stake-pool PDA
+ *      and which the on-chain handler rejects;
+ *   3. builds + sends the 17-byte tag-90 instruction and re-reads the account
+ *      so the displayed claimable drops after a successful claim.
+ *
+ * SHAPE CHANGE: the old flow was PER-ASSET (it summed each asset's long+short
+ * budget and looped assets). The new counter is a SINGLE MARKET-LEVEL value —
+ * there is no per-asset creator revenue on-chain any more, so there is no
+ * per-asset breakdown to show.
+ *
+ * NO COOLDOWN: tag 57's `insurance_withdraw_cooldown_slots` / ceiling gates
+ * exist to rate-limit backstop withdrawals. `handle_withdraw_creator_fee`
+ * deliberately has neither (see its doc comment, divergence #2) because the
+ * counter is disjoint from the backstop. Surfacing a cooldown here would block
+ * legitimate claims for a gate the program does not apply.
  */
 export function useCreatorClaim() {
   const { connection } = useConnectionCompat();
   const wallet = useWalletCompat();
   const slabState = useSlabState();
   const params = useParams();
-  const slabAddress = (params?.slab as string | undefined) ?? slabState.slabAddress;
+
+  // Prefer the address the parsed bytes actually came from. On a route change
+  // SlabProvider can briefly lag `params`, and sending a tag-90 whose `amount`
+  // was read from a DIFFERENT market's counter would either over-claim (revert)
+  // or silently under-claim. Self-consistency beats freshness here.
+  const slabAddress = slabState.slabAddress ?? (params?.slab as string | undefined) ?? null;
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [currentSlot, setCurrentSlot] = useState<bigint | null>(null);
 
   const walletKeyStr = wallet.publicKey?.toBase58() ?? null;
   const raw = slabState.raw;
-  const tokenMeta = useTokenMeta(slabState.config?.collateralMint ?? null);
-  const decimals = tokenMeta?.decimals ?? 6;
-  const marketauthStr = slabState.wrapperConfigV17?.marketauth?.toBase58() ?? null;
 
-  // ── Synchronous read of the operator gate + claimable budget from raw bytes ──
-  const data: CreatorClaimData = useMemo(() => {
-    if (!raw || !walletKeyStr) return { ...EMPTY, decimals };
-    const cap = marketAssetCapacity(raw);
-    if (cap <= 0) return { ...EMPTY, decimals };
+  // ── Read the claimable counter + claim authority straight from the account ──
+  const parsed = useMemo(() => (raw ? readCreatorFeeClaimable(raw) : null), [raw]);
 
-    const controlled: CreatorClaimAsset[] = [];
-    for (let i = 0; i < cap; i++) {
-      const op = readAssetInsuranceOperator(raw, i);
-      const opStr = op?.toBase58() ?? null;
-      // The on-chain handler authorizes the asset's insurance_operator OR marketauth.
-      const isController = opStr === walletKeyStr || marketauthStr === walletKeyStr;
-      if (!isController) continue;
-      let budget = 0n;
-      try {
-        budget = readInsuranceDomainBudget(raw, i);
-      } catch {
-        budget = 0n;
-      }
-      controlled.push({ assetIndex: i, claimable: budget });
-    }
-
-    const total = controlled.reduce((acc, a) => acc + a.claimable, 0n);
-
-    // Cooldown pre-check (market-wide) from the correctly-parsed WrapperConfigV17.
-    const cooldownSlots = slabState.wrapperConfigV17?.insuranceWithdrawCooldownSlots ?? 0n;
-    const lastSlot = slabState.wrapperConfigV17?.lastInsuranceWithdrawSlot ?? 0n;
-    let cooldownActive = false;
-    let cooldownRemainingSlots = 0n;
-    if (cooldownSlots > 0n && lastSlot > 0n && currentSlot != null) {
-      const earliest = lastSlot + cooldownSlots;
-      if (currentSlot < earliest) {
-        cooldownActive = true;
-        cooldownRemainingSlots = earliest - currentSlot;
-      }
-    }
-
+  const gated = useMemo(() => {
+    if (!parsed || !walletKeyStr) return EMPTY;
+    if (!isCreatorFeeClaimAuthority(parsed, wallet.publicKey ?? null)) return EMPTY;
     return {
-      isOperator: controlled.length > 0,
-      claimable: total,
-      claimableAssets: controlled,
-      decimals,
-      cooldownActive,
-      cooldownRemainingSlots,
+      isOperator: true,
+      claimable: parsed.atoms,
+      collateralMint: parsed.collateralMint,
+      claimAuthority: parsed.claimAuthority,
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [raw, walletKeyStr, marketauthStr, decimals, currentSlot, slabState.wrapperConfigV17]);
+  }, [parsed, walletKeyStr, wallet.publicKey]);
 
-  // Fetch the current slot (only when this wallet is an operator) for the cooldown countdown.
-  const isOperator = data.isOperator;
-  useEffect(() => {
-    if (!isOperator || !connection) return;
-    let cancelled = false;
-    connection
-      .getSlot()
-      .then((s: number) => {
-        if (!cancelled) setCurrentSlot(BigInt(s));
-      })
-      .catch(() => {
-        /* cooldown countdown is best-effort; the on-chain gate is authoritative */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isOperator, connection, slabState.raw]);
+  const tokenMeta = useTokenMeta(gated.collateralMint);
+  const decimals = tokenMeta?.decimals ?? 6;
+
+  const data: CreatorClaimData = { ...gated, decimals };
 
   /**
-   * Claim the accrued creator fees for one asset (default: the first operated
-   * asset with a positive balance). Sends WithdrawInsuranceAsset (tag 57):
-   *   wire  = tag(57) + asset_index(u16) + amount(u128)
-   *   metas = [operator(signer,w), market(w), destToken(w), vaultToken(w),
-   *            vaultAuthority(ro), tokenProgram(ro)]  (ACCOUNTS_WITHDRAW_INSURANCE)
-   * amount is clamped to the group insurance balance so a healthy single-asset
-   * market never over-requests; the on-chain handler is the final cap.
+   * Claim accrued creator fees. Sends `WithdrawCreatorFee` (tag 90):
+   *   wire  = tag(90) + amount(u128 LE)  → EXACTLY 17 bytes
+   *   metas = [authority(signer,w), market(w), destToken(w), vaultToken(w),
+   *            vaultAuthority(ro), tokenProgram(ro)]  (ACCOUNTS_WITHDRAW_CREATOR_FEE)
+   *
+   * `amount` defaults to the full counter. It is NOT clamped against anything
+   * else on-chain: the handler rejects an over-claim outright (Custom(62)
+   * CreatorFeeOverClaim) rather than partial-filling, and debits nothing on
+   * rejection, so silently sending less than the user asked for would be a lie
+   * with no upside. `amount == 0` is likewise rejected on-chain (Custom(9)) —
+   * tag 90 does NOT use tag 84's "0 means withdraw everything" convention.
    */
   const claim = useCallback(
-    async (assetIndexArg?: number) => {
+    async (amountArg?: bigint) => {
+      /** Surface the reason in the panel *and* reject, so a caller's catch{} is not silent. */
+      const fail = (msg: string): never => {
+        setSuccess(null);
+        setError(msg);
+        throw new Error(msg);
+      };
+
       if (!wallet.publicKey || !wallet.signTransaction) {
-        throw new Error("Wallet not connected");
+        return fail("Wallet not connected");
       }
-      if (!raw || !slabState.programId || !slabState.config) {
-        throw new Error("Market not loaded");
+      if (!raw || !slabState.programId || !slabAddress) {
+        return fail("Market not loaded");
       }
       assertKnownProgram(slabState.programId);
 
-      const target =
-        assetIndexArg != null
-          ? data.claimableAssets.find((a) => a.assetIndex === assetIndexArg)
-          : data.claimableAssets.find((a) => a.claimable > 0n);
-      if (!target) {
-        throw new Error("No claimable creator fees for this market.");
+      // Re-read at send time rather than trusting the render-time snapshot: the
+      // amount on the wire must match the counter this instruction will debit.
+      const current = readCreatorFeeClaimable(raw);
+      if (!current) {
+        return fail("This market does not expose a creator fee counter.");
       }
-      if (target.claimable <= 0n) {
-        throw new Error("Nothing to claim — no accrued fee revenue for this asset yet.");
+      if (!isCreatorFeeClaimAuthority(current, wallet.publicKey)) {
+        return fail(
+          "Only this market's insurance operator (the creator) can claim its fees. Connect the creator wallet.",
+        );
+      }
+      const amount = amountArg ?? current.atoms;
+      if (amount <= 0n) {
+        return fail("Nothing to claim — this market has not accrued any creator fees yet.");
+      }
+      if (amount > current.atoms) {
+        return fail(
+          "Claim exceeds the accrued creator fees for this market. The claim is exact-amount — request no more than the accrued balance.",
+        );
       }
 
       setLoading(true);
@@ -192,48 +180,27 @@ export function useCreatorClaim() {
       try {
         const progPk = new PublicKey(slabState.programId);
         const marketPk = new PublicKey(slabAddress);
-        const collateralMint = slabState.config.collateralMint;
-
-        // Clamp to the group insurance balance (the on-chain handler also caps at
-        // min(capacity, insurance, vault); insurance <= vault always, so this
-        // avoids the most common EngineLockActive revert without misrepresenting
-        // the displayed budget).
-        let amount = target.claimable;
-        try {
-          const insuranceBalance = parseMarketGroupV17OI(raw).insuranceBalance;
-          if (insuranceBalance > 0n && insuranceBalance < amount) {
-            amount = insuranceBalance;
-          }
-        } catch {
-          /* fall back to the full budget if OI parse fails */
-        }
+        const collateralMint = current.collateralMint;
 
         const [vaultPda] = deriveVaultAuthority(progPk, marketPk);
         const destToken = await getAssociatedTokenAddress(collateralMint, wallet.publicKey);
         const vaultToken = await getAssociatedTokenAddress(collateralMint, vaultPda, true);
 
-        const data57 = encodeWithdrawInsuranceAsset({
-          assetIndex: target.assetIndex,
-          amount,
-        });
-        const keys = buildAccountMetas(ACCOUNTS_WITHDRAW_INSURANCE, [
-          wallet.publicKey, // authority (insurance_operator)
+        const data90 = encodeWithdrawCreatorFee({ amount });
+        const keys = buildAccountMetas(ACCOUNTS_WITHDRAW_CREATOR_FEE, [
+          wallet.publicKey, // authority — asset 0's insurance_operator
           marketPk, // market
-          destToken, // destToken — operator's collateral ATA
-          vaultToken, // vaultToken — market vault ATA
+          destToken, // destToken — claimant's collateral ATA
+          vaultToken, // vaultToken — market vault ATA (source)
           vaultPda, // vaultAuthority PDA
           WELL_KNOWN.tokenProgram, // tokenProgram
         ]);
-        const ix = buildIx({ programId: progPk, keys, data: data57 });
+        const ix = buildIx({ programId: progPk, keys, data: data90 });
 
         const sig = await sendTx({ connection, wallet, instructions: [ix] });
 
-        // Re-read on-chain truth so the displayed claimable drops to 0.
+        // Re-read on-chain truth so the displayed claimable drops.
         slabState.refresh();
-        connection
-          .getSlot()
-          .then((s: number) => setCurrentSlot(BigInt(s)))
-          .catch(() => {});
         setSuccess(typeof sig === "string" ? sig : "Claim submitted");
         return sig;
       } catch (err) {
@@ -245,18 +212,12 @@ export function useCreatorClaim() {
         setLoading(false);
       }
     },
-    [wallet, raw, slabState, slabAddress, data.claimableAssets, connection],
+    [wallet, raw, slabState, slabAddress, connection],
   );
 
   const refresh = useCallback(() => {
     slabState.refresh();
-    if (connection) {
-      connection
-        .getSlot()
-        .then((s: number) => setCurrentSlot(BigInt(s)))
-        .catch(() => {});
-    }
-  }, [slabState, connection]);
+  }, [slabState]);
 
   // Keep a stable ref so callers can clear transient status.
   const clearStatus = useRef(() => {
