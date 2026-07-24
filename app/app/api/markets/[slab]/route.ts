@@ -13,6 +13,7 @@ import {
 } from "@percolatorct/sdk";
 import { getConfig, getRpcEndpoint } from "@/lib/config";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
+import { readCreatorFeeClaimable } from "@/lib/v17-creator-fee";
 import { readRegisteredMarkets } from "@/lib/playground-registered-markets";
 import { getMarketLpCapital } from "@/lib/lp-portfolio";
 
@@ -80,6 +81,10 @@ async function onChainSlabFallback(slab: string): Promise<NextResponse> {
     const cfg = parseWrapperConfigV17(data, V17_HEADER_LEN);
     const markPriceRaw = cfg.markEwmaE6;
     const markPriceUsd = markPriceRaw > 0n ? Number(markPriceRaw) / 1_000_000 : null;
+    // Creator fee claim (tag 90): the accrued balance + the wallet that may claim
+    // it (asset 0's asset_admin). Surfaced so My Markets can show creators their
+    // claimable fees without a separate on-chain read. Cheap — reuses `data`.
+    const creatorFee = readCreatorFeeClaimable(data);
     const playgroundMeta = PLAYGROUND_SLAB_META[slab];
     // Wizard-launched markets carry their metadata in the registration Blob —
     // without this lookup the trade page header falls back to the collateral
@@ -128,6 +133,11 @@ async function onChainSlabFallback(slab: string): Promise<NextResponse> {
       total_open_interest_usd: markPriceUsd != null ? ((oiLong + oiShort) / 1_000_000) * markPriceUsd : 0,
       insurance_fund: insurance,
       insurance_balance: insurance,
+      // Creator fee claim (tag 90). atoms as a string (u64 can exceed JS number
+      // precision); authority is asset-0 asset_admin, the only wallet that can
+      // claim. null when not a v17 market.
+      creator_fee_claimable_atoms: creatorFee ? creatorFee.atoms.toString() : "0",
+      creator_fee_authority: creatorFee?.claimAuthority?.toBase58() ?? null,
       total_accounts: 0,
       funding_rate: null,
       net_lp_pos: 0,

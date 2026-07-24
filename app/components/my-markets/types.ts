@@ -44,6 +44,12 @@ export interface CreatorMarketDetail {
   /** Market admin/creator wallet (`deployer` column — same wallet as
    *  configV17.marketauth at creation time; may have since rotated). */
   deployer: string | null;
+  /** Creator-fee claim (tag 90): accrued claimable balance, atoms as a string
+   *  (u64 can exceed JS number precision). null/"0" = nothing to claim. */
+  creator_fee_claimable_atoms: string | null;
+  /** Wallet that may claim those fees — asset 0's `asset_admin`. The creator can
+   *  claim only from THIS wallet (survives staking, unlike marketauth). */
+  creator_fee_authority: string | null;
 }
 
 /** Map a raw /api/markets/[slab] JSON body into the fields this dashboard needs.
@@ -70,6 +76,8 @@ export function toCreatorMarketDetail(raw: Record<string, unknown>): CreatorMark
     logo_url: str(raw.logo_url),
     oracle_mode: str(raw.oracle_mode),
     deployer: str(raw.deployer),
+    creator_fee_claimable_atoms: str(raw.creator_fee_claimable_atoms),
+    creator_fee_authority: str(raw.creator_fee_authority),
   };
 }
 

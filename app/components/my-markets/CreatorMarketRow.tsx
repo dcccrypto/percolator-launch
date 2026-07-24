@@ -8,6 +8,9 @@ import type { CreatorMarketDetail } from "./types";
 import { unitScaleToDecimals, deriveMarketLiquidityAtoms, lpCollateralMateriallyDiverges } from "./types";
 import { useAdminActions } from "@/hooks/useAdminActions";
 import { useCloseMarket } from "@/hooks/useCloseMarket";
+import { useWalletCompat } from "@/hooks/useWalletCompat";
+import { SlabProvider } from "@/components/providers/SlabProvider";
+import { CreatorClaimPanel } from "@/components/market/CreatorClaimPanel";
 import { useToast } from "@/hooks/useToast";
 import { explorerAccountUrl } from "@/lib/config";
 import { computeMarketHealthFromStats } from "@/lib/health";
@@ -141,6 +144,20 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, ch
   const slab = market.slabAddress.toBase58();
   const isV17 = !!market.configV17;
   const v17Stats = market.v17Stats;
+
+  // Creator-fee claim (tag 90) surfacing. The connected wallet can claim only
+  // when it IS this market's fee authority (asset 0's asset_admin). We show a
+  // non-interactive "to claim" indicator on the collapsed row so creators SEE
+  // accrued fees without hunting for the hidden /analytics URL, and mount the
+  // real one-click claim panel in the expand drawer below.
+  const wallet = useWalletCompat();
+  const claimableAtoms = detail?.creator_fee_claimable_atoms
+    ? (() => { try { return BigInt(detail.creator_fee_claimable_atoms!); } catch { return 0n; } })()
+    : 0n;
+  const isClaimAuthority =
+    !!wallet.publicKey && !!detail?.creator_fee_authority &&
+    detail.creator_fee_authority === wallet.publicKey.toBase58();
+  const hasClaimableFees = isClaimAuthority && claimableAtoms > 0n;
 
   const decimals = unitScaleToDecimals(market.configV17?.unitScale ?? market.config?.unitScale);
 
@@ -276,6 +293,14 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, ch
         <div className="min-w-[92px]">
           <p className="text-[13px] font-semibold text-[var(--text)]">{symbol}</p>
           <p className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>{shortAddr(slab)}</p>
+          {hasClaimableFees && (
+            <span
+              className="mt-1 inline-flex items-center gap-1 rounded-full border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--accent)]"
+              title="You have accrued creator fees. Expand this market to claim."
+            >
+              ◈ {formatUsdFromNumber(Number(claimableAtoms) / 1_000_000)} to claim
+            </span>
+          )}
         </div>
         <div className="min-w-[70px]">
           <p className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-dim)]">price</p>
@@ -352,6 +377,19 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, ch
                 view on explorer ↗
               </a>
             </div>
+          </div>
+
+          {/* Creator fee claim (tag 90). Mounted lazily — only when this row's
+              drawer is open, and only one drawer is open at a time — so the
+              per-slab SlabProvider fetch/subscribe is paid on demand, not for
+              every market. CreatorClaimPanel self-hides unless the connected
+              wallet is asset 0's asset_admin (the claim authority), and shows a
+              disabled "nothing to claim" state at 0. This is the one-click claim
+              home so creators never need the hidden /analytics/[slab] URL. */}
+          <div className="mb-4 border-t border-[var(--border)]/30 pt-4">
+            <SlabProvider slabAddress={slab}>
+              <CreatorClaimPanel slabAddress={slab} />
+            </SlabProvider>
           </div>
 
           <div className="flex flex-wrap items-center gap-3 border-t border-[var(--border)]/30 pt-3">
