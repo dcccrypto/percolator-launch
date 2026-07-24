@@ -121,6 +121,11 @@ const SlabContext = createContext<SlabContextValue>(defaultContextValue);
 export const useSlabState = () => useContext(SlabContext);
 
 const POLL_INTERVAL_MS = 3000;
+// Steady backup-poll cadence (WS rides on top for instant updates). Bounds
+// worst-case staleness when the WebSocket drops. The keeper writes the AuthMark
+// roughly every ~7s, so 5s catches every on-chain change even with a fully dead
+// socket, while staying gentle on the RPC. `bytesEqual` dedups no-op re-parses.
+const WS_BACKUP_POLL_MS = 5000;
 
 /**
  * Byte-for-byte comparison of two Uint8Arrays. Used to detect when a poll/WS
@@ -484,13 +489,21 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
       }
     }
 
-    // Adaptive polling: 30s when WS active, 3s when not
+    // Steady backup poll. `onAccountChange` (WS) delivers near-instant updates
+    // while the socket is alive; this bounds worst-case lag to WS_BACKUP_POLL_MS
+    // even when the WS silently drops — frequent on Vercel/public RPC.
+    //
+    // Previously this was "30s when wsActive, 3s when not", but `wsActive`
+    // latched to true on the FIRST WS message and was never reset, so a dead
+    // socket (undetected) left the page refreshing only every 30s. That was the
+    // "data lags behind reality" report. A dropped WS now costs at most one
+    // WS_BACKUP_POLL_MS of staleness instead of 30s, and `bytesEqual` in
+    // parseSlab dedups the no-op re-parses so a steady poll adds no re-renders.
     function schedulePoll() {
       if (cancelled) return;
-      const interval = wsActive.current ? 30_000 : POLL_INTERVAL_MS;
       timer = setTimeout(() => {
         poll().then(schedulePoll);
-      }, interval);
+      }, WS_BACKUP_POLL_MS);
     }
 
     fetchRef.current = poll;

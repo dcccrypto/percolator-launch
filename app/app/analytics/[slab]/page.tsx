@@ -14,6 +14,7 @@
  */
 
 import { use } from "react";
+import dynamic from "next/dynamic";
 import { PublicKey } from "@solana/web3.js";
 import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
 import { UsdToggleProvider } from "@/components/providers/UsdToggleProvider";
@@ -22,13 +23,33 @@ import { CrankHealthCard } from "@/components/trade/CrankHealthCard";
 import { OpenInterestCard } from "@/components/market/OpenInterestCard";
 import { InsuranceDashboard } from "@/components/market/InsuranceDashboard";
 import { CreatorClaimPanel } from "@/components/market/CreatorClaimPanel";
-import { LiquidationAnalytics } from "@/components/trade/LiquidationAnalytics";
-import { SystemCapitalCard } from "@/components/trade/SystemCapitalCard";
-import { AdlLeaderboard } from "@/components/trade/AdlLeaderboard";
-import { AccountsCard } from "@/components/trade/AccountsCard";
 import { MarketStatsCard } from "@/components/trade/MarketStatsCard";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
+
+// Below-the-fold, account-scanning cards are code-split (dynamic, ssr:false) so
+// they don't bloat the initial analytics JS bundle or block first paint. Each
+// renders a skeleton until its own chunk + the slab data arrive. These are the
+// heaviest cards (they iterate every portfolio in the 26KB slab), and few
+// visitors scroll to all of them — so paying their cost lazily, after the light
+// top-of-page cards paint, is the initial-load win. (2026-07-24.)
+const cardFallback = () => <ShimmerSkeleton className="h-40 w-full" />;
+const LiquidationAnalytics = dynamic(
+  () => import("@/components/trade/LiquidationAnalytics").then((m) => m.LiquidationAnalytics),
+  { ssr: false, loading: cardFallback },
+);
+const SystemCapitalCard = dynamic(
+  () => import("@/components/trade/SystemCapitalCard").then((m) => m.SystemCapitalCard),
+  { ssr: false, loading: cardFallback },
+);
+const AdlLeaderboard = dynamic(
+  () => import("@/components/trade/AdlLeaderboard").then((m) => m.AdlLeaderboard),
+  { ssr: false, loading: cardFallback },
+);
+const AccountsCard = dynamic(
+  () => import("@/components/trade/AccountsCard").then((m) => m.AccountsCard),
+  { ssr: false, loading: cardFallback },
+);
 
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
