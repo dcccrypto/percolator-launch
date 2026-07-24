@@ -25,6 +25,16 @@
  *   [16..592)   WrapperConfigV16 (576 bytes)         (SDK: parseWrapperConfigV17)
  *   [592..1350) market-group region (758 bytes)      (holds V16ConfigAccount)
  *   [1350..]    per-asset slots (1797 bytes each)
+ *
+ * The creator-fee-claim change (2026-07-23) added `creator_fee_claimable_atoms`
+ * (u64) at config-relative 568 — absolute 584..592, the tail of the WrapperConfig
+ * block above. It does NOT belong to V16ConfigAccount and is not read here; see
+ * lib/v17-creator-fee.ts. It was carved out of the existing `_padding_split`
+ * bytes IN PLACE, so WrapperConfigV16 is STILL 576 bytes and every offset in
+ * this file — V17_ENGINE_CONFIG_OFF (624) and the F.* table below — is unmoved.
+ * If V17_WRAPPER_CONFIG_LEN ever changes, this file's offsets shift with it
+ * automatically (they are derived), but the on-chain markets would need
+ * re-seeding — which is exactly why that field was made additive-in-place.
  * `V16ConfigAccount` begins 32 bytes into the market-group region (after a
  * 32-byte group header) at absolute offset 624, and is packed repr(C) with no
  * padding. The config length + group offset are now imported from the SDK
