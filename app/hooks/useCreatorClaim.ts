@@ -24,8 +24,8 @@ import {
 import { mapCreatorClaimError } from "@/lib/creatorClaimError";
 
 export interface CreatorClaimData {
-  /** True iff the connected wallet is asset 0's `insurance_operator` — the ONLY wallet tag 90 accepts. */
-  isOperator: boolean;
+  /** True iff the connected wallet is asset 0's `asset_admin` — the ONLY wallet tag 90 accepts. */
+  isClaimAuthority: boolean;
   /** Unclaimed creator trade-fee revenue, in collateral atoms (`creator_fee_claimable_atoms`). */
   claimable: bigint;
   /** Mint the payout is denominated in, read from the same account as `claimable`. */
@@ -37,7 +37,7 @@ export interface CreatorClaimData {
 }
 
 const EMPTY: Omit<CreatorClaimData, "decimals"> = {
-  isOperator: false,
+  isClaimAuthority: false,
   claimable: 0n,
   collateralMint: null,
   claimAuthority: null,
@@ -68,9 +68,12 @@ const EMPTY: Omit<CreatorClaimData, "decimals"> = {
  *      decode to the SDK's `parseWrapperConfigV17` so byte 568 has exactly one
  *      owner in this repo (app-local copies of layout constants going stale is
  *      what caused the 496→576 outage);
- *   2. gates on asset 0's `insurance_operator` and ONLY that — deliberately
- *      NOT `marketauth`, which `StakeInitPool` rotates to the stake-pool PDA
- *      and which the on-chain handler rejects;
+ *   2. gates on asset 0's `asset_admin` and ONLY that — deliberately NOT
+ *      `insurance_operator` (re-gated on-chain 2026-07-23) nor `marketauth`. The
+ *      wizard's full create flow rotates `marketauth`, `insurance_authority` AND
+ *      `insurance_operator` to program PDAs; `asset_admin` is the sole field that
+ *      stays the creator's wallet, so it is the only gate that leaves a staked
+ *      market claimable by its creator (and what the on-chain handler accepts);
  *   3. builds + sends the 17-byte tag-90 instruction and re-reads the account
  *      so the displayed claimable drops after a successful claim.
  *
@@ -111,7 +114,7 @@ export function useCreatorClaim() {
     if (!parsed || !walletKeyStr) return EMPTY;
     if (!isCreatorFeeClaimAuthority(parsed, wallet.publicKey ?? null)) return EMPTY;
     return {
-      isOperator: true,
+      isClaimAuthority: true,
       claimable: parsed.atoms,
       collateralMint: parsed.collateralMint,
       claimAuthority: parsed.claimAuthority,
@@ -161,7 +164,7 @@ export function useCreatorClaim() {
       }
       if (!isCreatorFeeClaimAuthority(current, wallet.publicKey)) {
         return fail(
-          "Only this market's insurance operator (the creator) can claim its fees. Connect the creator wallet.",
+          "Only this market's admin (the creator) can claim its fees. Connect the creator wallet.",
         );
       }
       const amount = amountArg ?? current.atoms;
@@ -188,7 +191,7 @@ export function useCreatorClaim() {
 
         const data90 = encodeWithdrawCreatorFee({ amount });
         const keys = buildAccountMetas(ACCOUNTS_WITHDRAW_CREATOR_FEE, [
-          wallet.publicKey, // authority — asset 0's insurance_operator
+          wallet.publicKey, // authority — asset 0's asset_admin
           marketPk, // market
           destToken, // destToken — claimant's collateral ATA
           vaultToken, // vaultToken — market vault ATA (source)

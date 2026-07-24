@@ -14,15 +14,16 @@ import { useCreatorClaim } from "@/hooks/useCreatorClaim";
 import { CreatorClaimPanel } from "@/components/market/CreatorClaimPanel";
 
 const COLLATERAL = new PublicKey("EqDqqRzRwA5xnZYu7oJ6LfJbcFuwkTKs7KBSTu2xaG66");
-const OPERATOR = new PublicKey("FbTbDeGWQpjrEqJdqoBHX3sTWHoAmU2xywD7wyxH6WC7");
+/** asset 0's `asset_admin` — the creator wallet the tag-90 gate accepts. */
+const ADMIN = new PublicKey("7JVQvrAfzj3aasLxCkoLYX5KQcrb5nEZhUe5Qa8PvV5G");
 
 /** Mirrors the tag-90 hook's return shape — a single market-level claimable. */
 function hookValue(over: Record<string, unknown> = {}) {
   return {
-    isOperator: true,
+    isClaimAuthority: true,
     claimable: 5_005_176_875n, // 5005.176875 USDC
     collateralMint: COLLATERAL,
-    claimAuthority: OPERATOR,
+    claimAuthority: ADMIN,
     decimals: 6,
     loading: false,
     error: null,
@@ -37,13 +38,13 @@ function hookValue(over: Record<string, unknown> = {}) {
 beforeEach(() => vi.clearAllMocks());
 
 describe("CreatorClaimPanel", () => {
-  it("renders NOTHING for a non-operator (traders never see it)", () => {
-    vi.mocked(useCreatorClaim).mockReturnValue(hookValue({ isOperator: false }) as never);
+  it("renders NOTHING for a non-admin (traders never see it)", () => {
+    vi.mocked(useCreatorClaim).mockReturnValue(hookValue({ isClaimAuthority: false }) as never);
     const { container } = render(<CreatorClaimPanel slabAddress="slab" />);
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("shows the human-formatted claimable and an active Claim button for the operator", () => {
+  it("shows the human-formatted claimable and an active Claim button for the creator", () => {
     vi.mocked(useCreatorClaim).mockReturnValue(hookValue() as never);
     render(<CreatorClaimPanel slabAddress="slab" />);
     expect(screen.getByText(/Creator fees/i)).toBeInTheDocument();

@@ -9,9 +9,11 @@
  *  - the synthetic market carries a large, distinct `insurance_domain_budget`
  *    AND a different `creator_fee_claimable_atoms` at byte 584, so reading the
  *    wrong field returns a recognisably wrong number rather than a plausible one;
- *  - `marketauth` is a different key from asset 0's `insurance_operator`, and the
- *    marketauth wallet must NOT be granted the panel (the old gate accepted it,
- *    tag 90 rejects it);
+ *  - the gate is asset 0's `asset_admin`; asset 0's `insurance_operator` and
+ *    `marketauth` are DIFFERENT keys here (mirroring the live staked market
+ *    7FBXdrm…, where the wizard rotated both to program PDAs), and NEITHER may be
+ *    granted the panel — the pre-2026-07-23 `insurance_operator` gate would grant
+ *    a PDA and hide the button from the real creator;
  *  - the emitted instruction is asserted byte-for-byte: 17 bytes, tag 90, u128
  *    LE amount — and explicitly NOT tag 57;
  *  - a static source guard asserts the module cannot even reference the tag-57
@@ -75,8 +77,11 @@ import { useCreatorClaim } from "@/hooks/useCreatorClaim";
 const PROGRAM_ID = "DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj";
 const SLAB = "GsBBecjFRwUvsrJ3bCinmCqDhERGtop9BKKEkE8SVa1C";
 const COLLATERAL = new PublicKey("EqDqqRzRwA5xnZYu7oJ6LfJbcFuwkTKs7KBSTu2xaG66");
-const OPERATOR = new PublicKey("FbTbDeGWQpjrEqJdqoBHX3sTWHoAmU2xywD7wyxH6WC7");
-/** Deliberately NOT the operator: tag 90 rejects marketauth (stake-pool PDA case). */
+/** asset 0's `asset_admin` — the creator wallet, the ONLY wallet tag 90 accepts. */
+const ADMIN = new PublicKey("7JVQvrAfzj3aasLxCkoLYX5KQcrb5nEZhUe5Qa8PvV5G");
+/** asset 0's `insurance_operator` — a program PDA on a staked market; tag 90 rejects it. */
+const OPERATOR = new PublicKey("6a3tiSd27Rh7JCnKLJQbJKUwRxVYEr33sUdHoJ64AZCg");
+/** Deliberately NOT the admin: tag 90 rejects marketauth (stake-pool PDA case). */
 const MARKETAUTH = new PublicKey("HLyBte5HgLjZRAfhXRXgzRFc4BXTqPVwadBHEUxY6ftD");
 const STRANGER = new PublicKey("9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin");
 
@@ -97,6 +102,7 @@ const ASSET_SLOT_WRAPPER_PREFIX = 512;
 const INSURANCE_DOMAIN_BUDGET_LONG_REL = 499;
 const INSURANCE_DOMAIN_BUDGET_SHORT_REL = 515;
 const PROFILE_INSURANCE_OPERATOR_REL = 56;
+const PROFILE_ASSET_ADMIN_REL = 368; // v17 asset_admin — the tag-90 claim authority
 const BUDGET_LONG_ABS = SLOTS_BASE + ASSET_SLOT_WRAPPER_PREFIX + INSURANCE_DOMAIN_BUDGET_LONG_REL;
 const BUDGET_SHORT_ABS = SLOTS_BASE + ASSET_SLOT_WRAPPER_PREFIX + INSURANCE_DOMAIN_BUDGET_SHORT_REL;
 /** Absolute offset of the counter this hook is allowed to read. */
@@ -117,10 +123,11 @@ function readU128LE(buf: Uint8Array, offset: number): bigint {
 
 /**
  * A valid single-asset v17 market: the creator counter at 584, a fat insurance
- * domain budget at the engine offsets, marketauth != insurance_operator.
+ * domain budget at the engine offsets, and THREE distinct authorities —
+ * asset_admin (the claimant, rel 368) != insurance_operator (rel 56) != marketauth.
  */
 function makeRaw(
-  operator: PublicKey,
+  admin: PublicKey,
   claimable: bigint = CLAIMABLE,
   budgetLong: bigint = BUDGET_LONG,
 ): Uint8Array {
@@ -143,15 +150,18 @@ function makeRaw(
   // group insurance total (what the old clamp read) @ MARKET_GROUP_OFF + 301
   writeU128LE(b, V17_MARKET_GROUP_OFF + 301, 10_000_000_000n);
 
-  // asset 0 profile: insurance_operator = the claim authority
-  buf.set(operator.toBytes(), SLOTS_BASE + PROFILE_INSURANCE_OPERATOR_REL);
+  // asset 0 profile: asset_admin (rel 368) is the tag-90 claim authority. A
+  // DIFFERENT insurance_operator (rel 56) is present too — the pre-2026-07-23 gate
+  // read that field, so a regression would grant OPERATOR and reject ADMIN.
+  buf.set(OPERATOR.toBytes(), SLOTS_BASE + PROFILE_INSURANCE_OPERATOR_REL);
+  buf.set(admin.toBytes(), SLOTS_BASE + PROFILE_ASSET_ADMIN_REL);
   return new Uint8Array(buf);
 }
 
 function slabState(over: Record<string, unknown> = {}) {
   return {
     slabAddress: SLAB,
-    raw: makeRaw(OPERATOR),
+    raw: makeRaw(ADMIN),
     config: { collateralMint: COLLATERAL, vaultPubkey: DEST_ATA },
     programId: PROGRAM_ID,
     wrapperConfigV17: { marketauth: MARKETAUTH },
@@ -177,31 +187,45 @@ beforeEach(() => {
   vi.mocked(useParams).mockReturnValue({ slab: SLAB } as never);
   vi.mocked(sendTx).mockResolvedValue("claim-signature" as never);
   vi.mocked(useWalletCompat).mockReturnValue({
-    publicKey: OPERATOR,
+    publicKey: ADMIN,
     signTransaction: vi.fn(),
   } as never);
   connection.getSlot.mockResolvedValue(1000);
 });
 
-describe("useCreatorClaim — authority gate is asset 0's insurance_operator", () => {
-  it("recognizes the insurance_operator and reports the counter at byte 584", () => {
+describe("useCreatorClaim — authority gate is asset 0's asset_admin", () => {
+  it("recognizes the asset_admin and reports the counter at byte 584", () => {
     vi.mocked(useSlabState).mockReturnValue(slabState() as never);
     const { result } = renderHook(() => useCreatorClaim());
-    expect(result.current.isOperator).toBe(true);
+    expect(result.current.isClaimAuthority).toBe(true);
     expect(result.current.claimable).toBe(CLAIMABLE);
-    expect(result.current.claimAuthority?.toBase58()).toBe(OPERATOR.toBase58());
+    expect(result.current.claimAuthority?.toBase58()).toBe(ADMIN.toBase58());
+  });
+
+  it("does NOT grant the panel to insurance_operator (rotated to a PDA on a staked market)", () => {
+    // The pre-2026-07-23 gate read insurance_operator and would grant it; the
+    // deployed tag-90 handler gates on asset_admin, and the wizard rotates
+    // insurance_operator to a program PDA. This is the whole point of the change.
+    vi.mocked(useWalletCompat).mockReturnValue({
+      publicKey: OPERATOR,
+      signTransaction: vi.fn(),
+    } as never);
+    vi.mocked(useSlabState).mockReturnValue(slabState() as never);
+    const { result } = renderHook(() => useCreatorClaim());
+    expect(result.current.isClaimAuthority).toBe(false);
+    expect(result.current.claimable).toBe(0n);
   });
 
   it("does NOT grant the panel to marketauth (tag 90 rejects it on a staked market)", () => {
-    // The old tag-57 gate accepted marketauth; the deployed tag-90 handler does
-    // not, and StakeInitPool rotates marketauth to the stake-pool PDA.
+    // marketauth is likewise rotated to the stake-pool PDA; the deployed tag-90
+    // handler gates on asset_admin only.
     vi.mocked(useWalletCompat).mockReturnValue({
       publicKey: MARKETAUTH,
       signTransaction: vi.fn(),
     } as never);
     vi.mocked(useSlabState).mockReturnValue(slabState() as never);
     const { result } = renderHook(() => useCreatorClaim());
-    expect(result.current.isOperator).toBe(false);
+    expect(result.current.isClaimAuthority).toBe(false);
     expect(result.current.claimable).toBe(0n);
   });
 
@@ -212,14 +236,14 @@ describe("useCreatorClaim — authority gate is asset 0's insurance_operator", (
     } as never);
     vi.mocked(useSlabState).mockReturnValue(slabState() as never);
     const { result } = renderHook(() => useCreatorClaim());
-    expect(result.current.isOperator).toBe(false);
+    expect(result.current.isClaimAuthority).toBe(false);
     expect(result.current.claimable).toBe(0n);
   });
 
   it("reports 0n and no authority on a non-v17 account", () => {
     vi.mocked(useSlabState).mockReturnValue(slabState({ raw: new Uint8Array(4096) }) as never);
     const { result } = renderHook(() => useCreatorClaim());
-    expect(result.current.isOperator).toBe(false);
+    expect(result.current.isClaimAuthority).toBe(false);
     expect(result.current.claimAuthority).toBeNull();
   });
 });
@@ -236,14 +260,14 @@ describe("useCreatorClaim — the claimable comes from byte 584, NOT the insuran
   });
 
   it("moving the insurance budget does not move the claimable", () => {
-    const raw = makeRaw(OPERATOR, CLAIMABLE, 999_999_999_999n);
+    const raw = makeRaw(ADMIN, CLAIMABLE, 999_999_999_999n);
     vi.mocked(useSlabState).mockReturnValue(slabState({ raw }) as never);
     const { result } = renderHook(() => useCreatorClaim());
     expect(result.current.claimable).toBe(CLAIMABLE);
   });
 
   it("moving byte 584 DOES move the claimable (proves the read offset)", () => {
-    const raw = makeRaw(OPERATOR, 42n);
+    const raw = makeRaw(ADMIN, 42n);
     vi.mocked(useSlabState).mockReturnValue(slabState({ raw }) as never);
     const { result } = renderHook(() => useCreatorClaim());
     expect(result.current.claimable).toBe(42n);
@@ -251,7 +275,7 @@ describe("useCreatorClaim — the claimable comes from byte 584, NOT the insuran
 
   it("keeps full precision above 2^53 (bigint, never Number)", () => {
     const big = 9_007_199_254_740_993n; // 2^53 + 1
-    vi.mocked(useSlabState).mockReturnValue(slabState({ raw: makeRaw(OPERATOR, big) }) as never);
+    vi.mocked(useSlabState).mockReturnValue(slabState({ raw: makeRaw(ADMIN, big) }) as never);
     const { result } = renderHook(() => useCreatorClaim());
     expect(typeof result.current.claimable).toBe("bigint");
     expect(result.current.claimable).toBe(big);
@@ -280,7 +304,7 @@ describe("useCreatorClaim — claim tx shape (tag 90)", () => {
     // ACCOUNTS_WITHDRAW_CREATOR_FEE:
     // [authority(s,w), market(w), destToken(w), vaultToken(w), vaultAuthority(ro), tokenProgram(ro)]
     expect(ix.keys).toHaveLength(6);
-    expect(ix.keys[0].pubkey.toBase58()).toBe(OPERATOR.toBase58());
+    expect(ix.keys[0].pubkey.toBase58()).toBe(ADMIN.toBase58());
     expect(ix.keys[0].isSigner).toBe(true);
     expect(ix.keys[0].isWritable).toBe(true);
     expect(ix.keys[1].pubkey.toBase58()).toBe(SLAB);
@@ -331,15 +355,15 @@ describe("useCreatorClaim — claim tx shape (tag 90)", () => {
     expect(sendTx).not.toHaveBeenCalled();
   });
 
-  it("refuses to send when the wallet is not the insurance_operator", async () => {
+  it("refuses to send when the wallet is not the asset_admin (e.g. the insurance_operator PDA)", async () => {
     vi.mocked(useWalletCompat).mockReturnValue({
-      publicKey: MARKETAUTH,
+      publicKey: OPERATOR,
       signTransaction: vi.fn(),
     } as never);
     vi.mocked(useSlabState).mockReturnValue(slabState() as never);
     const { result } = renderHook(() => useCreatorClaim());
     await act(async () => {
-      await expect(result.current.claim()).rejects.toThrow(/insurance operator|creator wallet/i);
+      await expect(result.current.claim()).rejects.toThrow(/admin|creator wallet/i);
     });
     expect(sendTx).not.toHaveBeenCalled();
   });

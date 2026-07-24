@@ -14,9 +14,13 @@
  *  - the real devnet fixture (a pre-upgrade market whose 584..592 is genuinely
  *    zero) has NON-ZERO bytes on both sides, so "reads 0n" pins the offset
  *    instead of being satisfied by any mistake that happens to land on a zero;
- *  - the claim authority is asserted to be `insurance_operator` and explicitly
- *    NOT `marketauth` — the divergence that keeps a staked market claimable by
- *    its creator rather than by the stake-pool PDA.
+ *  - the claim authority is asserted to be asset 0's `asset_admin` and explicitly
+ *    NOT `insurance_operator` (nor `marketauth`) — the divergence that keeps a
+ *    staked market claimable by its creator rather than by a program PDA. The
+ *    fixtures mirror the live staked market 7FBXdrm…, where the wizard rotated
+ *    marketauth / insurance_authority / insurance_operator to PDAs while
+ *    asset_admin stayed the creator wallet; a read that still used
+ *    insurance_operator would return the PDA and fail these assertions.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -47,11 +51,16 @@ import { formatTokenAmount } from "@/lib/format";
 const CFG = V17_HEADER_LEN; // 16
 const PROFILE_OFF = V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN; // 1350
 const PROFILE_INSURANCE_OPERATOR_REL = 56;
+const PROFILE_ASSET_ADMIN_REL = 368; // v17 asset_admin — the tag-90 claim authority
 
 /** > 2^53: a Number() round-trip of this loses the low bits. */
 const CLAIMABLE = 9_007_199_254_740_993n; // 2^53 + 1
 const MARKETAUTH = new PublicKey("HLyBte5HgLjZRAfhXRXgzRFc4BXTqPVwadBHEUxY6ftD");
-const OPERATOR = new PublicKey("FeDAMgMCs4RHoSmZg9egBKfQFyf4eZb98PLAqK88c2Ah");
+// Three DISTINCT authority keys, mirroring the live staked market 7FBXdrm…:
+// insurance_operator is a program PDA the wizard rotated to; asset_admin stays the
+// creator's wallet. Reading the wrong field returns a recognisably wrong claimant.
+const OPERATOR = new PublicKey("6a3tiSd27Rh7JCnKLJQbJKUwRxVYEr33sUdHoJ64AZCg"); // insurance_operator PDA — NOT the claimant
+const ASSET_ADMIN = new PublicKey("7JVQvrAfzj3aasLxCkoLYX5KQcrb5nEZhUe5Qa8PvV5G"); // asset_admin = creator wallet — the claimant
 const MINT = new PublicKey("DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC");
 
 function makeV17Market(claimable: bigint, kind: number = V17_KIND_MARKET): Uint8Array {
@@ -81,8 +90,11 @@ function makeV17Market(claimable: bigint, kind: number = V17_KIND_MARKET): Uint8
   // the counter, drags these bytes in.
   buf.fill(0xc3, V17_MARKET_GROUP_OFF, V17_MARKET_GROUP_OFF + 8);
 
-  // asset 0 profile: insurance_operator (the claim authority)
+  // asset 0 profile: asset_admin (rel 368) is the tag-90 claim authority. Write a
+  // DIFFERENT key into insurance_operator (rel 56) too — the pre-2026-07-23 gate
+  // read that field, so a regression would return OPERATOR instead of ASSET_ADMIN.
   buf.set(OPERATOR.toBytes(), PROFILE_OFF + PROFILE_INSURANCE_OPERATOR_REL);
+  buf.set(ASSET_ADMIN.toBytes(), PROFILE_OFF + PROFILE_ASSET_ADMIN_REL);
   return new Uint8Array(buf);
 }
 
@@ -157,13 +169,14 @@ describe("readCreatorFeeClaimable — synthetic account with poisoned neighbours
     expect(claim.collateralMint.toBase58()).toBe(MINT.toBase58());
   });
 
-  it("reports insurance_operator as the claim authority, NOT marketauth", () => {
+  it("reports asset_admin as the claim authority, NOT insurance_operator or marketauth", () => {
     const claim = readCreatorFeeClaimable(data)!;
     expect(claim.claimAuthority).not.toBeNull();
-    expect(claim.claimAuthority!.toBase58()).toBe(OPERATOR.toBase58());
-    // marketauth is a DIFFERENT key here on purpose: StakeInitPool rotates
-    // marketauth to the pool PDA but never insurance_operator, so reading
-    // marketauth would show the wrong claimant on a staked market.
+    expect(claim.claimAuthority!.toBase58()).toBe(ASSET_ADMIN.toBase58());
+    // insurance_operator and marketauth are DIFFERENT keys here on purpose: the
+    // wizard rotates BOTH (plus insurance_authority) to program PDAs on a staked
+    // market, so reading either would show a PDA — not the creator — as claimant.
+    expect(claim.claimAuthority!.toBase58()).not.toBe(OPERATOR.toBase58());
     expect(claim.claimAuthority!.toBase58()).not.toBe(MARKETAUTH.toBase58());
   });
 
@@ -192,13 +205,18 @@ describe("readCreatorFeeClaimable — real devnet market (pre-upgrade padding)",
     expect(claim!.atoms).toBe(0n);
   });
 
-  it("resolves the real on-chain insurance_operator, not the real marketauth", () => {
+  it("resolves the real on-chain asset_admin, not insurance_operator or marketauth", () => {
     const claim = readCreatorFeeClaimable(fixtureData)!;
+    // Captured BPgSUbDs carries three DISTINCT authority keys, so this pins the
+    // read to asset_admin rather than any adjacent authority field.
     expect(claim.claimAuthority!.toBase58()).toBe(
-      "FeDAMgMCs4RHoSmZg9egBKfQFyf4eZb98PLAqK88c2Ah",
+      "FbTbDeGWQpjrEqJdqoBHX3sTWHoAmU2xywD7wyxH6WC7", // asset_admin
     );
     expect(claim.claimAuthority!.toBase58()).not.toBe(
-      "HLyBte5HgLjZRAfhXRXgzRFc4BXTqPVwadBHEUxY6ftD", // this market's marketauth
+      "FeDAMgMCs4RHoSmZg9egBKfQFyf4eZb98PLAqK88c2Ah", // insurance_operator — the OLD gate
+    );
+    expect(claim.claimAuthority!.toBase58()).not.toBe(
+      "HLyBte5HgLjZRAfhXRXgzRFc4BXTqPVwadBHEUxY6ftD", // marketauth
     );
   });
 });
@@ -232,11 +250,17 @@ describe("readCreatorFeeClaimable — rejects what it must not decode", () => {
   });
 });
 
-describe("isCreatorFeeClaimAuthority — gate for a future claim button", () => {
+describe("isCreatorFeeClaimAuthority — gate for the claim button", () => {
   const claim = readCreatorFeeClaimable(makeV17Market(CLAIMABLE))!;
 
-  it("is true for the insurance_operator wallet", () => {
-    expect(isCreatorFeeClaimAuthority(claim, OPERATOR)).toBe(true);
+  it("is true for the asset_admin wallet (the creator)", () => {
+    expect(isCreatorFeeClaimAuthority(claim, ASSET_ADMIN)).toBe(true);
+  });
+
+  it("is false for insurance_operator (rotated to a PDA on a staked market)", () => {
+    // The pre-2026-07-23 gate returned true here; the deployed tag-90 handler
+    // rejects it, so the button must NOT render for this wallet.
+    expect(isCreatorFeeClaimAuthority(claim, OPERATOR)).toBe(false);
   });
 
   it("is false for marketauth (the staked-market pool PDA case)", () => {
@@ -246,13 +270,13 @@ describe("isCreatorFeeClaimAuthority — gate for a future claim button", () => 
   it("fails closed for a disconnected wallet or an unknown claim", () => {
     expect(isCreatorFeeClaimAuthority(claim, null)).toBe(false);
     expect(isCreatorFeeClaimAuthority(claim, undefined)).toBe(false);
-    expect(isCreatorFeeClaimAuthority(null, OPERATOR)).toBe(false);
-    expect(isCreatorFeeClaimAuthority(undefined, OPERATOR)).toBe(false);
+    expect(isCreatorFeeClaimAuthority(null, ASSET_ADMIN)).toBe(false);
+    expect(isCreatorFeeClaimAuthority(undefined, ASSET_ADMIN)).toBe(false);
   });
 
   it("fails closed when the claim authority could not be resolved", () => {
     expect(
-      isCreatorFeeClaimAuthority({ ...claim, claimAuthority: null }, OPERATOR),
+      isCreatorFeeClaimAuthority({ ...claim, claimAuthority: null }, ASSET_ADMIN),
     ).toBe(false);
   });
 });

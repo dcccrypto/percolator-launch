@@ -94,14 +94,18 @@ export interface CreatorFeeClaimable {
   collateralMint: PublicKey;
   /**
    * The wallet allowed to call `WithdrawCreatorFee` (tag 90): asset 0's
-   * `insurance_operator`, which defaults to the creator at InitMarket.
+   * `asset_admin`, which defaults to the creator at InitMarket.
    *
-   * Deliberately NOT `marketauth`: `StakeInitPool` rotates `marketauth` to the
-   * stake-pool PDA but never touches `insurance_operator`, so on a staked market
-   * `marketauth` is the pool — showing it as the claimant would tell the real
-   * creator their revenue belongs to someone else (and a UI that gated the claim
-   * button on `marketauth` would hide the button from the only wallet that can
-   * actually claim).
+   * Deliberately NOT `insurance_operator` (nor `marketauth`): the launch wizard's
+   * full create flow (`StakeInitPool` + `BindInsuranceAuthority`) rotates
+   * `marketauth`, `insurance_authority` AND `insurance_operator` to program PDAs,
+   * so on a real staked market none of those is the creator any more — a gate on
+   * `insurance_operator` would hide the claim button from EVERY wallet, because no
+   * wallet holds a PDA key. `asset_admin` is the one field that stays the
+   * creator's wallet through staking, and it is what the on-chain tag-90 handler
+   * now checks (re-gated 2026-07-23 from `insurance_operator` to `asset_admin`).
+   * Verified on the live staked market `7FBXdrm1…`: `insurance_operator` is a PDA
+   * `6a3tiSd2…` while `asset_admin` is the creator wallet `7JVQvrAf…`.
    *
    * `null` when the account is too short to carry an asset profile.
    */
@@ -127,10 +131,15 @@ export function readCreatorFeeClaimable(
 
   let claimAuthority: PublicKey | null = null;
   if (data.length >= V17_ASSET_PROFILE_OFF + V17_ASSET_ORACLE_PROFILE_LEN) {
+    // asset_admin (profile-relative offset 368) — the field the on-chain tag-90
+    // handler gates on. Read it through the SDK's parser so the byte offset has a
+    // single owner (`parseAssetOracleProfileV17`), never a hand-rolled literal
+    // here. See `claimAuthority` above for why this is asset_admin and not
+    // insurance_operator/marketauth.
     claimAuthority = parseAssetOracleProfileV17(
       data,
       V17_ASSET_PROFILE_OFF,
-    ).insuranceOperator;
+    ).assetAdmin;
   }
 
   return {
@@ -141,7 +150,10 @@ export function readCreatorFeeClaimable(
 }
 
 /**
- * Whether `wallet` is the wallet that can claim `claim`.
+ * Whether `wallet` is the wallet that can claim `claim` — i.e. asset 0's
+ * `asset_admin` (see {@link CreatorFeeClaimable.claimAuthority}), the field the
+ * on-chain tag-90 handler gates on and the only one that survives the wizard's
+ * PDA rotations on a staked market.
  *
  * Fails closed: an unknown claim authority (account too short to carry an asset
  * profile) or a disconnected wallet is `false`, never "probably yes".
