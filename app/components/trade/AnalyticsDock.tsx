@@ -115,7 +115,7 @@ const CapitalSection: FC<{ slab: string }> = ({ slab }) => {
         ))}
       </div>
       <p className="mt-1.5 text-[8px] leading-relaxed text-[var(--text-muted)]">
-        Loss order: stake (first-loss) → insurance → LP vault.
+        Losses hit the stake pool first, then insurance, then the LP vault.
       </p>
     </div>
   );

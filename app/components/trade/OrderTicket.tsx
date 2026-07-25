@@ -178,7 +178,14 @@ function DiffRow({
   valueClass?: string;
   tooltip?: string;
 }) {
-  const changed = before !== after;
+  // Only show the "before → after" transition when `before` is a REAL prior
+  // value. A placeholder before ("—") means there's nothing to transition from
+  // — the row is just previewing `after` — so the struck-through "— →" prefix
+  // was pure noise and read as a conversion arrow. (Only rows with an actual
+  // prior state, e.g. "Available to trade", pass a real `before`.)
+  const beforeTrim = before.trim();
+  const hasBefore = beforeTrim !== "" && beforeTrim !== "—" && beforeTrim !== "-";
+  const changed = hasBefore && before !== after;
   return (
     <div className="flex items-center justify-between py-1 text-[10px]">
       <span className="flex items-center gap-1 text-[var(--text-secondary)] uppercase tracking-[0.08em]">
