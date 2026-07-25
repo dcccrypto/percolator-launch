@@ -74,19 +74,24 @@ const CapitalSection: FC<{ slab: string }> = ({ slab }) => {
     return <p className="w-[320px] text-[10px] text-[var(--text-secondary)]">Loading capital…</p>;
   }
 
-  const total = (lpUsd ?? 0) + (insUsd ?? 0) + stakeUsd;
-  const pct = (v: number) => (total > 0 ? (v / total) * 100 : 0);
+  // "Total backing" = the capital that actually backs positions: the LP vault
+  // (counterparty) + the insurance fund (bad-debt backstop). The stake pool is
+  // NOT in the automatic loss path — verified against the v17 engine + wrapper
+  // + stake program: the engine has no stake concept, and mode-0 stakers only
+  // pre-fund insurance via a manual admin FlushToInsurance (the junior tranche
+  // is off by default). So stake is shown separately, not summed into backing.
+  const backing = (lpUsd ?? 0) + (insUsd ?? 0);
+  const pct = (v: number) => (backing > 0 ? (v / backing) * 100 : 0);
   const layers = [
     { key: "lp", label: "LP vault", role: "Counterparty capital", usd: lpUsd ?? 0, color: "var(--long)", muted: lpUsd == null },
-    { key: "ins", label: "Insurance fund", role: "Reserve backstop", usd: insUsd ?? 0, color: "var(--accent-text)", muted: insUsd == null },
-    { key: "stake", label: "Stake pool", role: stakeExists ? "Junior tranche" : "Not staked", usd: stakeUsd, color: "var(--text-muted)", muted: stakeUsd === 0 },
+    { key: "ins", label: "Insurance fund", role: "Bad-debt backstop", usd: insUsd ?? 0, color: "var(--accent-text)", muted: insUsd == null },
   ];
 
   return (
     <div className="w-[268px]">
       <div className="flex items-baseline gap-2">
         <span className="text-[15px] font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
-          {formatUsdFromNumber(total)}
+          {formatUsdFromNumber(backing)}
         </span>
         <span className={SECTION_LABEL}>total backing</span>
       </div>
@@ -108,14 +113,26 @@ const CapitalSection: FC<{ slab: string }> = ({ slab }) => {
                 {formatUsdFromNumber(l.usd)}
               </div>
               <div className="text-[8px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
-                {l.usd === 0 ? (l.key === "stake" && !stakeExists ? "—" : "empty") : `${pct(l.usd).toFixed(1)}%`}
+                {l.usd === 0 ? "empty" : `${pct(l.usd).toFixed(1)}%`}
               </div>
             </div>
           </div>
         ))}
       </div>
+      {/* Stake pool — deliberately NOT in "total backing": not an automatic
+          loss tier; mode-0 stakers only pre-fund insurance via a manual flush. */}
+      <div className="mt-1.5 flex items-center gap-2 border-t border-[var(--border)]/40 pt-1.5">
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--text-muted)]" />
+        <div className="min-w-0">
+          <div className="text-[11px] text-[var(--text-secondary)]">Stake pool</div>
+          <div className="text-[8px] uppercase tracking-[0.08em] text-[var(--text-muted)]">{stakeExists ? "Pre-funds insurance" : "Not staked"}</div>
+        </div>
+        <div className="ml-auto text-[12px] font-bold text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
+          {stakeExists ? formatUsdFromNumber(stakeUsd) : "—"}
+        </div>
+      </div>
       <p className="mt-1.5 text-[8px] leading-relaxed text-[var(--text-muted)]">
-        Losses hit the stake pool first, then insurance, then the LP vault.
+        Losses fall on the position margin first, then the insurance fund, then LP and winning positions. Staked funds help only if an admin flushes them into insurance.
       </p>
     </div>
   );
