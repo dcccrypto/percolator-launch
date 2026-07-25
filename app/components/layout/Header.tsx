@@ -44,18 +44,14 @@ function filterForWaitlistHost(items: NavItem[], group: "trade" | "build" | "com
 
 const tradeLinks: NavItem[] = [
   { href: "/markets", label: "Markets" },
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/earn", label: "Earn" },
   { href: "/portfolio", label: "Portfolio" },
-  { href: "/wallet", label: "Wallet" },
+  { href: "/earn", label: "Earn" },
 ];
 
 const buildLinks: NavItem[] = [
   { href: "/create", label: "Create a Market" },
-  { href: "/my-markets", label: "My Markets" },
   { href: "/developers", label: "Developers" },
   { href: "/faucet", label: "Faucet" },
-  { href: "/stake", label: "Stake" },
 ];
 
 const communityLinks: NavItem[] = [

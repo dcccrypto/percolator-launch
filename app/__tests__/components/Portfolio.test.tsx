@@ -13,7 +13,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import PortfolioPage from "@/app/portfolio/page";
+// Portfolio's positions view was extracted from app/portfolio/page.tsx into
+// this component when /portfolio became a tabbed hub. These tests exercise the
+// positions view directly (aliased to the old local name so the render calls
+// below are unchanged).
+import { PortfolioPositionsView as PortfolioPage } from "@/components/portfolio/PortfolioPositionsView";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { usePortfolio } from "@/hooks/usePortfolio";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
