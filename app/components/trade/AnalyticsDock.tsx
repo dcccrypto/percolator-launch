@@ -281,19 +281,24 @@ export const AnalyticsDock: FC<{ slab: string }> = ({ slab }) => {
     // part is a left-aligned segmented control matching the site's own toggles.
     <div className="fixed inset-x-0 bottom-0 z-40 hidden h-9 border-t border-[var(--border)] bg-[var(--bg)]/95 backdrop-blur-sm lg:block">
       {/* pl clears the fixed MusicPlayer button in the bottom-left corner */}
-      <div className="mx-auto flex h-full max-w-[1920px] items-center gap-2.5 pl-16 pr-3">
-        <span className="hidden items-center gap-1.5 text-[9px] font-medium uppercase tracking-[0.18em] text-[var(--text-dim)] xl:flex">
+      <div className="mx-auto flex h-full max-w-[1920px] items-center pl-16 pr-4">
+        {/* left: link out to the full analytics page */}
+        <a
+          href={`/analytics/${slab}`}
+          className="flex items-center gap-1.5 text-[9px] font-medium uppercase tracking-[0.16em] text-[var(--text-muted)] transition-colors duration-150 hover:text-[var(--accent-text)]"
+        >
           <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
           </svg>
-          Analytics
-        </span>
+          Full analytics
+          <span aria-hidden="true" className="text-[var(--text-dim)]">↗</span>
+        </a>
 
-        {/* segmented tab control + its anchored panel */}
-        <div className="relative" onMouseLeave={scheduleClose}>
+        {/* right: plain inline tabs (no well) + panel anchored above them */}
+        <div className="relative ml-auto flex h-full items-stretch" onMouseLeave={scheduleClose}>
           {active && (
             <div
-              className="absolute bottom-full left-0 mb-1.5 w-max max-w-[min(94vw,520px)] max-h-[70vh] overflow-y-auto border border-[var(--border)] bg-[var(--bg)]/98 backdrop-blur-md shadow-[0_-12px_40px_rgba(0,0,0,0.5)]"
+              className="absolute bottom-full right-0 mb-1.5 w-max max-w-[min(94vw,520px)] max-h-[70vh] overflow-y-auto border border-[var(--border)] bg-[var(--bg)]/98 backdrop-blur-md shadow-[0_-12px_40px_rgba(0,0,0,0.5)]"
               onMouseEnter={cancelClose}
               onMouseLeave={scheduleClose}
             >
@@ -310,37 +315,33 @@ export const AnalyticsDock: FC<{ slab: string }> = ({ slab }) => {
               </div>
             </div>
           )}
-          <div className="flex items-center gap-0.5 rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5">
-            {TABS.map((t) => {
-              const on = active === t.key;
-              return (
-                <button
-                  key={t.key}
-                  type="button"
-                  onMouseEnter={() => open(t.key)}
-                  onFocus={() => open(t.key)}
-                  onClick={() => (on ? setActive(null) : setActive(t.key))}
-                  aria-expanded={on}
+          {TABS.map((t) => {
+            const on = active === t.key;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                onMouseEnter={() => open(t.key)}
+                onFocus={() => open(t.key)}
+                onClick={() => (on ? setActive(null) : setActive(t.key))}
+                aria-expanded={on}
+                className={[
+                  "relative flex items-center px-3 text-[10px] font-medium uppercase tracking-[0.12em] transition-colors duration-150",
+                  on ? "text-[var(--accent-text)]" : "text-[var(--text-secondary)] hover:text-[var(--text)]",
+                ].join(" ")}
+              >
+                {t.label}
+                {/* active indicator: a hairline at the top edge, pointing up to the panel */}
+                <span
                   className={[
-                    "rounded-sm px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.1em] transition-colors duration-150",
-                    on
-                      ? "bg-[var(--accent)]/15 text-[var(--accent-text)]"
-                      : "text-[var(--text-secondary)] hover:bg-[var(--bg)]/60 hover:text-[var(--text)]",
+                    "absolute inset-x-2 top-0 h-px bg-[var(--accent)] transition-opacity duration-150",
+                    on ? "opacity-100" : "opacity-0",
                   ].join(" ")}
-                >
-                  {t.label}
-                </button>
-              );
-            })}
-          </div>
+                />
+              </button>
+            );
+          })}
         </div>
-
-        <a
-          href={`/analytics/${slab}`}
-          className="ml-auto text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)] transition-colors duration-150 hover:text-[var(--accent-text)]"
-        >
-          Full analytics →
-        </a>
       </div>
     </div>
   );
