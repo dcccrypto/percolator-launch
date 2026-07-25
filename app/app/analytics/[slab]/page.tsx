@@ -24,6 +24,7 @@ import { OpenInterestCard } from "@/components/market/OpenInterestCard";
 import { InsuranceDashboard } from "@/components/market/InsuranceDashboard";
 import { CreatorClaimPanel } from "@/components/market/CreatorClaimPanel";
 import { MarketStatsCard } from "@/components/trade/MarketStatsCard";
+import { FeeDistributionCard } from "@/components/market/FeeDistributionCard";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 
@@ -125,6 +126,9 @@ function AnalyticsPageInner({ slab }: { slab: string }) {
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
         <ErrorBoundary label="MarketStatsCard">
           <Section title="Market stats"><MarketStatsCard /></Section>
+        </ErrorBoundary>
+        <ErrorBoundary label="FeeDistributionCard">
+          <Section title="Fee distribution"><FeeDistributionCard /></Section>
         </ErrorBoundary>
         <ErrorBoundary label="EngineHealthCard">
           <Section title="Engine health"><EngineHealthCard /></Section>
