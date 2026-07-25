@@ -11,6 +11,7 @@ import { PositionNftPanel } from "@/components/trade/PositionNftPanel";
 import { PositionsDock } from "@/components/trade/PositionsDock";
 import dynamic from "next/dynamic";
 import { MarketInfoBar } from "@/components/trade/MarketInfoBar";
+import { AnalyticsDock } from "@/components/trade/AnalyticsDock";
 import { useIsLargeScreen } from "@/hooks/useIsLargeScreen";
 import { useAdvanceOraclePhase } from "@/hooks/useAdvanceOraclePhase";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
@@ -554,7 +555,7 @@ function TradePageInner({ slab }: { slab: string }) {
       {/* ════════════════ DESKTOP (≥ lg) — named grid ════════════════ */}
       {isLargeScreen && (
         <div
-          className="hidden lg:grid gap-3 px-4 lg:px-6 pb-3 pt-2 min-h-[calc(100dvh-150px)]"
+          className="hidden lg:grid gap-3 px-4 lg:px-6 pb-11 pt-2 min-h-[calc(100dvh-150px)]"
           style={gridStyle}
         >
           <div style={{ gridArea: "Chart" }} className="min-w-0 min-h-0">
@@ -605,6 +606,12 @@ function TradePageInner({ slab }: { slab: string }) {
           <MobileOrderSheet slab={slab} />
         </div>
       )}
+
+      {/* Sticky analytics dock (desktop only; self-hides < lg). Inline
+          capital/health/liquidation/fee reads on hover — no trip to
+          /analytics. Lives inside SlabProvider so it reuses the page's
+          already-loaded slab data (no extra RPC). */}
+      <AnalyticsDock slab={slab} />
     </div>
     </RenderProfiler>
   );
