@@ -7,35 +7,34 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { useStakePool } from "@/hooks/useStakePool";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
+import { useLivePrice } from "@/hooks/useLivePrice";
 import { sanitizeOnChainValue } from "@/lib/health";
 import { formatUsdFromNumber } from "@/lib/format";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { EngineHealthCard } from "@/components/trade/EngineHealthCard";
 import { CrankHealthCard } from "@/components/trade/CrankHealthCard";
-import { LiquidationAnalytics } from "@/components/trade/LiquidationAnalytics";
 
 /**
  * Sticky bottom analytics dock (desktop ≥ lg).
  *
- * The old flow sent traders to a separate `/analytics/[slab]` route for every
- * engine/capital/fee read. This surfaces the same data inline: a thin footer
- * bar with four tabs — hovering (or clicking/focusing) one slides its panel up
- * over the terminal, so the numbers are one glance away without a navigation.
+ * A thin footer bar with four tabs — hovering (or clicking/focusing) one opens
+ * a compact, LEFT-ANCHORED popover sized to its own content (not a full-width
+ * strip), so the same data the `/analytics/[slab]` route shows is one glance
+ * away without a navigation.
  *
- * Design rules baked in here:
+ * Design rules baked in:
+ *  - Panels hug their content on the left — no full-bleed, no dead space.
  *  - No repetition of the top MarketInfoBar (mark price, 24h Δ, vol, OI total,
- *    high/low, spread, funding, live badge live up there) — the dock only shows
- *    what the bar does NOT: the capital stack, health internals, liquidation
- *    params, and the fee split.
+ *    high/low, spread, funding, live badge). The dock shows only what the bar
+ *    does NOT: the capital stack, health internals, liquidation/risk params,
+ *    and the fee split.
  *  - No claimable-fee figure (that's the creator-only /analytics claim panel).
- *    The Fees tab shows the split policy + realized protocol/LP/insurance
- *    amounts; the creator leg is a share % only.
  *  - Fast: each tab's data hooks live in a subcomponent that only MOUNTS while
- *    that tab is open, so the closed dock costs nothing, and reused cards ride
- *    the SlabProvider already mounted by the trade page (no extra RPC).
- *  - No garbage: every on-chain figure goes through the same sanitizeOnChainValue
- *    guard (u64::MAX sentinels → filtered) the analytics cards already use, and
- *    the reused Engine/Crank/Liquidation cards keep their own sanitization.
+ *    that tab is open; the closed dock costs nothing and reused cards ride the
+ *    SlabProvider the trade page already mounted (no extra RPC).
+ *  - No garbage: every on-chain figure goes through sanitizeOnChainValue (the
+ *    u64::MAX sentinel guard the analytics cards use); Engine/Crank cards keep
+ *    their own sanitization.
  */
 
 const TABS = [
@@ -46,11 +45,11 @@ const TABS = [
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
 
+const SECTION_LABEL = "text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]";
+
 /* ── Capital: the backstop stack (LP vault + insurance + stake) ─────────────
-   None of these three appear in the top bar. All are collateral (sim-USDC)
-   atoms — divided by the collateral decimals only, NEVER multiplied by the
-   market's base-asset price (that mislabel is the exact bug MarketStatsCard
-   documents for "Market LP"). */
+   None of these three are in the top bar. All are collateral (sim-USDC) atoms
+   — divided by collateral decimals only, NEVER ×base-asset price. */
 const CapitalSection: FC<{ slab: string }> = ({ slab }) => {
   const { insuranceBalance, loading } = useEngineState();
   const { config } = useSlabState();
@@ -61,8 +60,6 @@ const CapitalSection: FC<{ slab: string }> = ({ slab }) => {
   const decimals = useTokenMeta(config?.collateralMint ?? null)?.decimals ?? 6;
   const div = 10 ** decimals;
 
-  // LP vault: on-chain LP-portfolio capital, same source + null-guard as
-  // MarketStatsCard's "Market LP" (vault_balance ?? c_tot from /api/markets).
   const lpUsd = (() => {
     const raw = market?.vault_balance ?? market?.c_tot;
     if (raw == null) return null;
@@ -71,12 +68,10 @@ const CapitalSection: FC<{ slab: string }> = ({ slab }) => {
     return Number(sanitizeOnChainValue(BigInt(Math.round(n)))) / div;
   })();
   const insUsd = insuranceBalance != null ? Number(sanitizeOnChainValue(insuranceBalance)) / div : null;
-  // Stake pool: only real when the pool exists on-chain; empty/uninitialized
-  // pools legitimately read $0, not "missing".
   const stakeUsd = stakeExists ? Number(sanitizeOnChainValue(stakeVault)) / div : 0;
 
   if (loading && lpUsd == null && insUsd == null) {
-    return <p className="text-[10px] text-[var(--text-secondary)]">Loading capital…</p>;
+    return <p className="w-[320px] text-[10px] text-[var(--text-secondary)]">Loading capital…</p>;
   }
 
   const total = (lpUsd ?? 0) + (insUsd ?? 0) + stakeUsd;
@@ -88,49 +83,40 @@ const CapitalSection: FC<{ slab: string }> = ({ slab }) => {
   ];
 
   return (
-    <div className="grid gap-4 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
-      {/* stack */}
-      <div>
-        <div className="flex items-baseline gap-2">
-          <span className="text-lg font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
-            {formatUsdFromNumber(total)}
-          </span>
-          <span className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">total backing</span>
-        </div>
-        <div className="mt-2.5 flex h-2 w-full overflow-hidden rounded-full bg-[var(--bg-elevated)]">
-          {layers.filter((l) => l.usd > 0).map((l) => (
-            <div key={l.key} style={{ width: `${pct(l.usd)}%`, background: l.color }} title={`${l.label} ${pct(l.usd).toFixed(1)}%`} />
-          ))}
-        </div>
-        <div className="mt-3">
-          {layers.map((l) => (
-            <div key={l.key} className="flex items-center gap-2.5 border-b border-[var(--border)]/20 py-2 last:border-b-0">
-              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: l.color }} />
-              <div className="min-w-0">
-                <div className="text-[12px] text-[var(--text)]">{l.label}</div>
-                <div className="text-[8px] uppercase tracking-[0.1em] text-[var(--text-muted)]">{l.role}</div>
+    <div className="w-[268px]">
+      <div className="flex items-baseline gap-2">
+        <span className="text-[15px] font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
+          {formatUsdFromNumber(total)}
+        </span>
+        <span className={SECTION_LABEL}>total backing</span>
+      </div>
+      <div className="mt-1.5 flex h-1.5 w-full overflow-hidden rounded-full bg-[var(--bg-elevated)]">
+        {layers.filter((l) => l.usd > 0).map((l) => (
+          <div key={l.key} style={{ width: `${pct(l.usd)}%`, background: l.color }} title={`${l.label} ${pct(l.usd).toFixed(1)}%`} />
+        ))}
+      </div>
+      <div className="mt-1.5">
+        {layers.map((l) => (
+          <div key={l.key} className="flex items-center gap-2 border-b border-[var(--border)]/20 py-1 last:border-b-0">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: l.color }} />
+            <div className="min-w-0">
+              <div className="text-[11px] text-[var(--text)]">{l.label}</div>
+              <div className="text-[8px] uppercase tracking-[0.08em] text-[var(--text-muted)]">{l.role}</div>
+            </div>
+            <div className="ml-auto text-right">
+              <div className={`text-[12px] font-bold ${l.muted ? "text-[var(--text-secondary)]" : "text-[var(--text)]"}`} style={{ fontFamily: "var(--font-mono)" }}>
+                {formatUsdFromNumber(l.usd)}
               </div>
-              <div className="ml-auto text-right">
-                <div className={`text-[13px] font-bold ${l.muted ? "text-[var(--text-secondary)]" : "text-[var(--text)]"}`} style={{ fontFamily: "var(--font-mono)" }}>
-                  {formatUsdFromNumber(l.usd)}
-                </div>
-                <div className="text-[9px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
-                  {l.usd === 0 ? (l.key === "stake" && !stakeExists ? "—" : "empty") : `${pct(l.usd).toFixed(1)}%`}
-                </div>
+              <div className="text-[8px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
+                {l.usd === 0 ? (l.key === "stake" && !stakeExists ? "—" : "empty") : `${pct(l.usd).toFixed(1)}%`}
               </div>
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
       </div>
-      {/* explainer — no repeated OI/price stats, just what the stack means */}
-      <div className="rounded-none border border-[var(--border)]/30 bg-[var(--bg-elevated)] p-3">
-        <div className="text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--text-secondary)]">Loss-absorption order</div>
-        <ol className="mt-2 space-y-1.5 text-[11px] leading-relaxed text-[var(--text-secondary)]">
-          <li><span className="text-[var(--text-muted)]">1 ·</span> <span className="text-[var(--text)]">Stake pool</span> — junior / first-loss</li>
-          <li><span className="text-[var(--text-muted)]">2 ·</span> <span className="text-[var(--text)]">Insurance fund</span> — reserve backstop</li>
-          <li><span className="text-[var(--text-muted)]">3 ·</span> <span className="text-[var(--text)]">LP vault</span> — counterparty capital</li>
-        </ol>
-      </div>
+      <p className="mt-1.5 text-[8px] leading-relaxed text-[var(--text-muted)]">
+        Loss order: stake (first-loss) → insurance → LP vault.
+      </p>
     </div>
   );
 };
@@ -141,7 +127,7 @@ const FeesSection: FC = () => {
   const decimals = useTokenMeta(cfg?.collateralMint ?? null)?.decimals ?? 6;
 
   if (!cfg) {
-    return <p className="text-[11px] text-[var(--text-secondary)]">Fee split is a v17 feature — unavailable on this market.</p>;
+    return <p className="w-[320px] text-[11px] text-[var(--text-secondary)]">Fee split is a v17 feature — unavailable on this market.</p>;
   }
   const toUsd = (a: bigint) => Number(a) / 10 ** decimals;
   const baseFeeBps = Number(cfg.tradeFeeBps);
@@ -150,38 +136,35 @@ const FeesSection: FC = () => {
     { key: "lp", label: "LP", bps: cfg.lpShareBps, usd: toUsd(cfg.lpFeeAccruedAtoms) as number | null, color: "var(--long)" },
     { key: "protocol", label: "Protocol", bps: FEE_SPLIT.PROTOCOL_FEE_BPS, usd: toUsd(cfg.protocolFeeAccruedAtoms) as number | null, color: "var(--text-dim)" },
     { key: "insurance", label: "Insurance", bps: cfg.insuranceShareBps, usd: toUsd(cfg.insuranceReserveAccruedAtoms) as number | null, color: "var(--short)" },
-    // Creator leg: share % only. The claimable amount is intentionally omitted
-    // here — it lives on the creator-only /analytics claim panel.
+    // Creator leg: share % only. Claimable amount intentionally omitted here.
     { key: "creator", label: "Creator", bps: cfg.creatorShareBps, usd: null, color: "var(--accent-text)" },
   ];
   const pct = (bps: number) => `${((bps / 10_000) * 100).toFixed(Number.isInteger((bps / 10_000) * 100) ? 0 : 1)}%`;
 
   return (
-    <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
-      <div>
-        <div className="flex items-baseline justify-between">
-          <span className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">trade fee · split 4 ways</span>
-          <span className="text-[13px] text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{baseFeeStr}</span>
-        </div>
-        <div className="mt-2.5 flex h-2 w-full overflow-hidden rounded-full bg-[var(--bg-elevated)]">
-          {legs.map((l) => (
-            <div key={l.key} style={{ width: pct(l.bps), background: l.color }} title={`${l.label} ${pct(l.bps)}`} />
-          ))}
-        </div>
+    <div className="w-[268px]">
+      <div className="flex items-baseline justify-between">
+        <span className={SECTION_LABEL}>trade fee · split 4 ways</span>
+        <span className="text-[12px] text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{baseFeeStr}</span>
       </div>
-      <div>
+      <div className="mt-1.5 flex h-1.5 w-full overflow-hidden rounded-full bg-[var(--bg-elevated)]">
         {legs.map((l) => (
-          <div key={l.key} className="flex items-center gap-2.5 border-b border-[var(--border)]/20 py-2 text-[12px] last:border-b-0">
-            <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: l.color }} />
+          <div key={l.key} style={{ width: pct(l.bps), background: l.color }} title={`${l.label} ${pct(l.bps)}`} />
+        ))}
+      </div>
+      <div className="mt-1.5">
+        {legs.map((l) => (
+          <div key={l.key} className="flex items-center gap-2 border-b border-[var(--border)]/20 py-1 text-[11px] last:border-b-0">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: l.color }} />
             <span className="text-[var(--text-secondary)]">{l.label}</span>
             <span className="text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{pct(l.bps)}</span>
             <span className="ml-auto text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
               {l.usd == null ? (
-                <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-muted)]">share only</span>
+                <span className="text-[8px] uppercase tracking-[0.1em] text-[var(--text-muted)]">share only</span>
               ) : (
                 <>
                   {formatUsdFromNumber(l.usd)}
-                  <span className="ml-1.5 text-[8px] uppercase tracking-[0.1em] text-[var(--text-muted)]">collected</span>
+                  <span className="ml-1 text-[8px] uppercase tracking-[0.1em] text-[var(--text-muted)]">collected</span>
                 </>
               )}
             </span>
@@ -192,15 +175,81 @@ const FeesSection: FC = () => {
   );
 };
 
-/* ── Health / Liquidations reuse the audited analytics cards verbatim ──────── */
+/* ── Liquidations / risk: params + insurance coverage. Richer than the old
+   /analytics card (which showed only liq-fee + buffer + coverage on v17). ── */
+const LiquidationsSection: FC = () => {
+  const { params, insuranceBalance, totalOI, isV17, loading, hasData } = useEngineState();
+  const { config } = useSlabState();
+  const decimals = useTokenMeta(config?.collateralMint ?? null)?.decimals ?? 6;
+  const div = 10 ** decimals;
+  const { priceUsd } = useLivePrice();
+
+  if (loading) return <p className="w-[320px] text-[10px] text-[var(--text-secondary)]">Loading…</p>;
+  if (!hasData) return <p className="w-[320px] text-[10px] text-[var(--text-secondary)]">No liquidation data for this market.</p>;
+
+  const bps = (v: bigint | number | null | undefined) => (v == null ? null : Number(v));
+  const pctStr = (b: number | null) => (b == null ? "—" : `${(b / 100).toFixed(2)}%`);
+  const liqFee = params ? bps(params.liquidationFeeBps) : null;
+  const buffer = params ? bps(params.liquidationBufferBps) : null;
+  const maint = params ? bps(params.maintenanceMarginBps) : null;
+  const initMargin = params ? bps(params.initialMarginBps) : null;
+  const maxLev = initMargin && initMargin > 0 ? `${(10_000 / initMargin).toFixed(1)}×` : "—";
+
+  // Insurance coverage = insurance (collateral USD) / OI (USD). v17 OI is a
+  // base-asset Q qty → ×price; v12 OI is already collateral-notional.
+  const insUsd = insuranceBalance != null ? Number(sanitizeOnChainValue(insuranceBalance)) / div : null;
+  const oiRaw = totalOI != null ? Number(sanitizeOnChainValue(totalOI)) : null;
+  const oiUsd = oiRaw == null ? null : isV17 ? (priceUsd != null ? (oiRaw / 1_000_000) * priceUsd : null) : oiRaw / div;
+  const coverage = insUsd == null || oiUsd == null ? null : oiUsd > 0 ? (insUsd / oiUsd) * 100 : Infinity;
+  const covColor = coverage == null ? "text-[var(--text-secondary)]" : coverage === Infinity || coverage > 100 ? "text-[var(--long)]" : coverage >= 10 ? "text-[var(--warning)]" : "text-[var(--short)]";
+  const covDot = coverage == null ? "bg-[var(--text-dim)]" : coverage === Infinity || coverage > 100 ? "bg-[var(--long)]" : coverage >= 10 ? "bg-[var(--warning)]" : "bg-[var(--short)]";
+  const covText = coverage == null ? "—" : coverage === Infinity ? "∞" : `${coverage.toFixed(1)}%`;
+  const fmt = (n: number | null) => (n == null ? "—" : n >= 1e6 ? `$${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `$${(n / 1e3).toFixed(2)}K` : `$${n.toFixed(2)}`);
+
+  const cells = [
+    { k: "Liq. fee", v: pctStr(liqFee) },
+    { k: "Buffer", v: pctStr(buffer) },
+    { k: "Maint. margin", v: pctStr(maint) },
+    { k: "Init. margin", v: pctStr(initMargin) },
+    { k: "Max leverage", v: maxLev },
+    { k: "Insurance", v: fmt(insUsd) },
+  ];
+
+  return (
+    <div className="w-[320px]">
+      <div className="grid grid-cols-3 gap-px overflow-hidden border border-[var(--border)]/30">
+        {cells.map((c) => (
+          <div key={c.k} className="bg-[var(--bg)]/40 px-2 py-1">
+            <div className="text-[7.5px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">{c.k}</div>
+            <div className="mt-0.5 text-[12px] font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{c.v}</div>
+          </div>
+        ))}
+      </div>
+      {/* Insurance coverage — the key liquidation-safety signal */}
+      <div className="mt-1.5 flex items-center justify-between border border-[var(--border)]/30 bg-[var(--bg-elevated)] px-2 py-1.5">
+        <span className={SECTION_LABEL}>insurance coverage</span>
+        <div className="flex items-center gap-2.5">
+          <span className="text-[8px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>OI {fmt(oiUsd)}</span>
+          <span className="flex items-center gap-1.5">
+            <span className={`inline-block h-1.5 w-1.5 rounded-full ${covDot}`} />
+            <span className={`text-[12px] font-bold ${covColor}`} style={{ fontFamily: "var(--font-mono)" }}>{covText}</span>
+          </span>
+        </div>
+      </div>
+      <p className="mt-1.5 text-[8px] leading-relaxed text-[var(--text-muted)]">
+        Positions liquidate below maintenance margin; the buffer prevents re-liquidation.
+      </p>
+    </div>
+  );
+};
+
+/* ── Health reuses the audited analytics cards, stacked in one narrow column
+   (keeps their sanitization; narrow width matches the other panels) ───────── */
 const HealthSection: FC = () => (
-  <div className="grid gap-3 md:grid-cols-2">
+  <div className="flex w-[300px] flex-col gap-1.5">
     <ErrorBoundary label="EngineHealthCard"><EngineHealthCard /></ErrorBoundary>
     <ErrorBoundary label="CrankHealthCard"><CrankHealthCard /></ErrorBoundary>
   </div>
-);
-const LiquidationsSection: FC = () => (
-  <ErrorBoundary label="LiquidationAnalytics"><LiquidationAnalytics /></ErrorBoundary>
 );
 
 export const AnalyticsDock: FC<{ slab: string }> = ({ slab }) => {
@@ -221,20 +270,19 @@ export const AnalyticsDock: FC<{ slab: string }> = ({ slab }) => {
 
   return (
     // Desktop-only: hover is the interaction, and at ≥ lg there's no competing
-    // bottom bar (MobileBottomNav is md:hidden, MobileOrderSheet is lg:hidden).
-    // Mobile keeps the utility-row "Analytics →" link.
+    // bottom bar. Mobile keeps the utility-row "Analytics →" link.
     <div
       className="fixed inset-x-0 bottom-0 z-40 hidden border-t border-[var(--border)] bg-[var(--bg)]/95 backdrop-blur-sm lg:block"
       onMouseLeave={scheduleClose}
     >
-      {/* expanding panel — slides up OVER the terminal, above the bar */}
+      {/* content-sized popover, anchored to the left, rising above the bar */}
       {active && (
         <div
-          className="absolute inset-x-0 bottom-full max-h-[48vh] overflow-y-auto border-t border-[var(--border)] bg-[var(--bg)]/98 backdrop-blur-md shadow-[0_-16px_48px_rgba(0,0,0,0.55)]"
+          className="absolute bottom-full left-0 mb-px w-max max-w-[min(94vw,520px)] max-h-[70vh] overflow-y-auto border border-[var(--border)] bg-[var(--bg)]/98 backdrop-blur-md shadow-[0_-14px_44px_rgba(0,0,0,0.55)]"
           onMouseEnter={cancelClose}
           onMouseLeave={scheduleClose}
         >
-          <div className="mx-auto max-w-[1920px] px-4 py-3.5 lg:px-6">
+          <div className="px-3 py-2.5">
             {active === "capital" && <CapitalSection slab={slab} />}
             {active === "health" && <HealthSection />}
             {active === "liquidations" && <LiquidationsSection />}
