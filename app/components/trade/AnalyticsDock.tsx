@@ -252,6 +252,13 @@ const HealthSection: FC = () => (
   </div>
 );
 
+const PANEL_TITLES: Record<TabKey, string> = {
+  capital: "Capital stack",
+  health: "Market health",
+  liquidations: "Liquidation & risk",
+  fees: "Fee distribution",
+};
+
 export const AnalyticsDock: FC<{ slab: string }> = ({ slab }) => {
   const [active, setActive] = useState<TabKey | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -269,66 +276,70 @@ export const AnalyticsDock: FC<{ slab: string }> = ({ slab }) => {
   }, [cancelClose]);
 
   return (
-    // Desktop-only: hover is the interaction, and at ≥ lg there's no competing
-    // bottom bar. Mobile keeps the utility-row "Analytics →" link.
-    <div
-      className="fixed inset-x-0 bottom-0 z-40 hidden border-t border-[var(--border)] bg-[var(--bg)]/95 backdrop-blur-sm lg:block"
-      onMouseLeave={scheduleClose}
-    >
-      {/* content-sized popover, anchored to the left, rising above the bar */}
-      {active && (
-        <div
-          className="absolute bottom-full left-0 mb-px w-max max-w-[min(94vw,520px)] max-h-[70vh] overflow-y-auto border border-[var(--border)] bg-[var(--bg)]/98 backdrop-blur-md shadow-[0_-14px_44px_rgba(0,0,0,0.55)]"
-          onMouseEnter={cancelClose}
-          onMouseLeave={scheduleClose}
-        >
-          <div className="px-3 py-2.5">
-            {active === "capital" && <CapitalSection slab={slab} />}
-            {active === "health" && <HealthSection />}
-            {active === "liquidations" && <LiquidationsSection />}
-            {active === "fees" && <FeesSection />}
-          </div>
-        </div>
-      )}
-
-      {/* the thin sticky bar — pl clears the fixed MusicPlayer button (bottom-left) */}
-      <div className="mx-auto flex max-w-[1920px] items-stretch pl-16 pr-2">
-        <span className="hidden items-center gap-1.5 pr-3 text-[9px] font-medium uppercase tracking-[0.18em] text-[var(--text-dim)] xl:flex">
+    // Desktop-only status bar (self-hides < lg, where the mobile bars live).
+    // A thin baseline that reads as the terminal's status bar; the interactive
+    // part is a left-aligned segmented control matching the site's own toggles.
+    <div className="fixed inset-x-0 bottom-0 z-40 hidden h-9 border-t border-[var(--border)] bg-[var(--bg)]/95 backdrop-blur-sm lg:block">
+      {/* pl clears the fixed MusicPlayer button in the bottom-left corner */}
+      <div className="mx-auto flex h-full max-w-[1920px] items-center gap-2.5 pl-16 pr-3">
+        <span className="hidden items-center gap-1.5 text-[9px] font-medium uppercase tracking-[0.18em] text-[var(--text-dim)] xl:flex">
           <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
           </svg>
           Analytics
         </span>
-        {TABS.map((t) => {
-          const on = active === t.key;
-          return (
-            <button
-              key={t.key}
-              type="button"
-              onMouseEnter={() => open(t.key)}
-              onFocus={() => open(t.key)}
-              onClick={() => (on ? setActive(null) : setActive(t.key))}
-              aria-expanded={on}
-              className={[
-                "relative px-3.5 py-2 text-[10px] font-medium uppercase tracking-[0.14em] transition-colors duration-150",
-                on ? "text-[var(--text)]" : "text-[var(--text-secondary)] hover:text-[var(--text)]",
-              ].join(" ")}
+
+        {/* segmented tab control + its anchored panel */}
+        <div className="relative" onMouseLeave={scheduleClose}>
+          {active && (
+            <div
+              className="absolute bottom-full left-0 mb-1.5 w-max max-w-[min(94vw,520px)] max-h-[70vh] overflow-y-auto border border-[var(--border)] bg-[var(--bg)]/98 backdrop-blur-md shadow-[0_-12px_40px_rgba(0,0,0,0.5)]"
+              onMouseEnter={cancelClose}
+              onMouseLeave={scheduleClose}
             >
-              {t.label}
-              <span
-                className={[
-                  "absolute inset-x-2 -top-px h-px transition-opacity duration-150",
-                  on ? "bg-[var(--accent)] opacity-100" : "opacity-0",
-                ].join(" ")}
-              />
-            </button>
-          );
-        })}
+              {/* header — same idiom as the /analytics Section wrapper */}
+              <div className="flex items-center justify-between border-b border-[var(--border)]/50 px-3 py-1.5">
+                <span className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">{PANEL_TITLES[active]}</span>
+                <a href={`/analytics/${slab}`} className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-muted)] transition-colors hover:text-[var(--accent-text)]">full →</a>
+              </div>
+              <div className="px-3 py-2.5">
+                {active === "capital" && <CapitalSection slab={slab} />}
+                {active === "health" && <HealthSection />}
+                {active === "liquidations" && <LiquidationsSection />}
+                {active === "fees" && <FeesSection />}
+              </div>
+            </div>
+          )}
+          <div className="flex items-center gap-0.5 rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5">
+            {TABS.map((t) => {
+              const on = active === t.key;
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  onMouseEnter={() => open(t.key)}
+                  onFocus={() => open(t.key)}
+                  onClick={() => (on ? setActive(null) : setActive(t.key))}
+                  aria-expanded={on}
+                  className={[
+                    "rounded-sm px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.1em] transition-colors duration-150",
+                    on
+                      ? "bg-[var(--accent)]/15 text-[var(--accent-text)]"
+                      : "text-[var(--text-secondary)] hover:bg-[var(--bg)]/60 hover:text-[var(--text)]",
+                  ].join(" ")}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <a
           href={`/analytics/${slab}`}
-          className="ml-auto flex items-center pr-2 text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)] transition-colors duration-150 hover:text-[var(--accent)]"
+          className="ml-auto text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)] transition-colors duration-150 hover:text-[var(--accent-text)]"
         >
-          Full page →
+          Full analytics →
         </a>
       </div>
     </div>
