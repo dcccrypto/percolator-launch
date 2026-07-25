@@ -5,7 +5,7 @@ import useSWR from "swr";
 import { useRouter } from "next/navigation";
 import { PublicKey } from "@solana/web3.js";
 import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
-import { UsdToggleProvider, useUsdToggle } from "@/components/providers/UsdToggleProvider";
+import { UsdToggleProvider } from "@/components/providers/UsdToggleProvider";
 import { OrderTicket } from "@/components/trade/OrderTicket";
 import { PositionNftPanel } from "@/components/trade/PositionNftPanel";
 import { PositionsDock } from "@/components/trade/PositionsDock";
@@ -21,7 +21,6 @@ import { getMarketIdentity, setMarketIdentity } from "@/lib/marketIdentityCache"
 import { useToast } from "@/hooks/useToast";
 import { isPlaceholderSymbol, SLUG_ALIASES } from "@/lib/symbol-utils";
 // DevnetFaucetModal moved to WalletProvider (PERC-808: global placement on all pages)
-import { ShareButton } from "@/components/market/ShareCard";
 import { getNetwork } from "@/lib/config";
 import { RenderProfiler } from "@/components/dev/RenderProfiler";
 import TradingPageLoading from "./loading";
@@ -83,36 +82,6 @@ const TradingChart = dynamic(
  */
 
 /* ── Reusable tiny components ─────────────────────────────── */
-
-function UsdToggleButton() {
-  const { showUsd, setShowUsd } = useUsdToggle();
-  return (
-    <div className="flex gap-0.5 rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5">
-      <button
-        onClick={() => setShowUsd(false)}
-        className={[
-          "rounded-sm px-2 py-0.5 text-[9px] font-medium transition-colors duration-150",
-          !showUsd
-            ? "bg-[var(--accent)]/10 text-[var(--accent)]"
-            : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]",
-        ].join(" ")}
-      >
-        tokens
-      </button>
-      <button
-        onClick={() => setShowUsd(true)}
-        className={[
-          "rounded-sm px-2 py-0.5 text-[9px] font-medium transition-colors duration-150",
-          showUsd
-            ? "bg-[var(--accent)]/10 text-[var(--accent)]"
-            : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]",
-        ].join(" ")}
-      >
-        usd
-      </button>
-    </div>
-  );
-}
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -514,9 +483,9 @@ function TradePageInner({ slab }: { slab: string }) {
         </div>
       )}
 
-      {/* Utility row — market address, devnet faucet, share, analytics link.
-          Shown on all breakpoints (the pre-rebuild page only showed this on
-          mobile; desktop had no equivalent, which was inconsistent). */}
+      {/* Utility row — market address + admin status. (Share, the tokens/usd
+          toggle, and the Analytics link were removed; analytics now lives in
+          the bottom AnalyticsDock.) */}
       <div className="flex items-center gap-3 border-b border-[var(--border)]/30 px-3 py-1.5 overflow-x-auto whitespace-nowrap scrollbar-none">
         <span className="flex items-center gap-1 text-[10px] text-[var(--text-muted)]" style={{ fontFamily: "var(--font-mono)" }}>
           {shortAddress}
@@ -539,14 +508,6 @@ function TradePageInner({ slab }: { slab: string }) {
             </span>
           </Tooltip>
         )}
-        <ShareButton slabAddress={slab} />
-        <UsdToggleButton />
-        <a
-          href={`/analytics/${slab}`}
-          className="ml-auto shrink-0 text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)] transition-colors duration-150 hover:text-[var(--accent)]"
-        >
-          Analytics →
-        </a>
       </div>
 
       {/* MarketBar — always mounted, already responsive/scrollable on mobile */}
