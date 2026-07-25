@@ -659,8 +659,9 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 </span>
               </div>
               <div className="flex items-center justify-between py-1.5">
-                <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]" title={RISK_LEVERAGE_TITLE}>
+                <span className="inline-flex items-center text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">
                   {RISK_LEVERAGE_LABEL}
+                  <InfoIcon tooltip={RISK_LEVERAGE_TITLE} />
                 </span>
                 <span className="text-[11px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
                   {formatLeverage(accountLeverage)}
@@ -668,8 +669,9 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               </div>
               {savedOrderLeverage != null && (
                 <div className="flex items-center justify-between py-1.5">
-                  <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]" title={ORDER_LEVERAGE_TITLE}>
+                  <span className="inline-flex items-center text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">
                     Order Lev.
+                    <InfoIcon tooltip={ORDER_LEVERAGE_TITLE} />
                   </span>
                   <span className="text-[11px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
                     {formatLeverage(savedOrderLeverage)}

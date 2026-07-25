@@ -5,7 +5,8 @@ import { createPortal } from "react-dom";
 import gsap from "gsap";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
-import { formatLeverage, ORDER_LEVERAGE_LABEL, RISK_LEVERAGE_LABEL } from "@/lib/leverage-display";
+import { formatLeverage, ORDER_LEVERAGE_LABEL, ORDER_LEVERAGE_TITLE, RISK_LEVERAGE_LABEL, RISK_LEVERAGE_TITLE } from "@/lib/leverage-display";
+import { InfoIcon } from "@/components/ui/Tooltip";
 import { formatTokenAmount } from "@/lib/format";
 
 interface TradeConfirmationModalProps {
@@ -228,12 +229,12 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
             </span>
           </div>
           <div className="flex justify-between">
-            <span className="text-[var(--text-secondary)]">{ORDER_LEVERAGE_LABEL}:</span>
+            <span className="inline-flex items-center text-[var(--text-secondary)]">{ORDER_LEVERAGE_LABEL}:<InfoIcon tooltip={ORDER_LEVERAGE_TITLE} /></span>
             <span className="font-mono font-medium text-[var(--text)]">{formatLeverage(leverage)}</span>
           </div>
           {riskLeverage !== null && (
             <div className="flex justify-between">
-              <span className="text-[var(--text-secondary)]">{RISK_LEVERAGE_LABEL}:</span>
+              <span className="inline-flex items-center text-[var(--text-secondary)]">{RISK_LEVERAGE_LABEL}:<InfoIcon tooltip={RISK_LEVERAGE_TITLE} /></span>
               <span className="font-mono font-medium text-[var(--text-secondary)]">{formatLeverage(riskLeverage)}</span>
             </div>
           )}

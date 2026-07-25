@@ -28,6 +28,7 @@ import { isMockMode } from "@/lib/mock-mode";
 import { getMockPortfolioPositions } from "@/lib/mock-trade-data";
 import { useTraderStats } from "@/hooks/useTraderStats";
 import { formatLeverage, RISK_LEVERAGE_LABEL, RISK_LEVERAGE_TITLE } from "@/lib/leverage-display";
+import { InfoIcon } from "@/components/ui/Tooltip";
 
 const ConnectButton = dynamic(
   () => import("@/components/wallet/ConnectButton").then((m) => m.ConnectButton),
@@ -347,8 +348,9 @@ function PositionCard({
               </p>
             </div>
             <div>
-              <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]" title={RISK_LEVERAGE_TITLE}>
+              <p className="inline-flex items-center text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">
                 {RISK_LEVERAGE_LABEL}
+                <InfoIcon tooltip={RISK_LEVERAGE_TITLE} />
               </p>
               <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                 {leverage > 0 ? formatLeverage(leverage) : "—"}
