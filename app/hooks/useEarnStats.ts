@@ -460,7 +460,18 @@ export function buildMarketVaultInfo(
   const oiLongRaw = Number(row?.open_interest_long ?? 0);
   const oiShortRaw = Number(row?.open_interest_short ?? 0);
   const totalOIRaw = Number(row?.total_open_interest ?? oiLongRaw + oiShortRaw);
-  const totalOI = isSentinel(totalOIRaw) ? 0 : totalOIRaw / collDivisor;
+  // OI must be USD. Prefer the indexer's `total_open_interest_usd` (already
+  // notional USD). The raw `total_open_interest` is a base-asset "Q" quantity
+  // (scale 1e6) — dividing it by decimals alone (the old code) treated Q units
+  // as dollars, overstating OI by ~1/price (≈600× on a sub-cent market — e.g.
+  // Percolator rendered ~$589K instead of the real ~$971). Fall back to
+  // (raw / 1e6) × last_price when the USD field is missing.
+  const oiPrice = Number(row?.last_price ?? 0);
+  const oiPriceUsd = Number.isFinite(oiPrice) && oiPrice > 0 ? oiPrice : 0;
+  const totalOIUsdField = Number(row?.total_open_interest_usd ?? NaN);
+  const totalOI = Number.isFinite(totalOIUsdField) && totalOIUsdField >= 0 && !isSentinel(totalOIUsdField)
+    ? totalOIUsdField
+    : isSentinel(totalOIRaw) ? 0 : (totalOIRaw / collDivisor) * oiPriceUsd;
 
   // Real on-chain initialMarginBps first (accurate per-market cap); Supabase
   // max_leverage as secondary (populated on networks where the DB is live);
