@@ -291,7 +291,7 @@ function StakeHero({ pools, totalUserDeposited }: { pools: StakePool[]; totalUse
   ];
 
   return (
-    <section className="relative overflow-hidden py-12 lg:py-16">
+    <section className="relative overflow-hidden py-8 lg:py-12">
       <div className="mx-auto max-w-[1100px] px-6">
         <ScrollReveal>
           {/* Two-pane hero: heading/CTA/banner on the left, metrics on the
@@ -303,14 +303,14 @@ function StakeHero({ pools, totalUserDeposited }: { pools: StakePool[]; totalUse
                 // insurance lp
               </div>
               <h1
-                className="mb-4 text-4xl font-bold tracking-tight lg:text-6xl"
+                className="mb-4 text-3xl font-bold tracking-tight lg:text-4xl"
                 style={{ fontFamily: "var(--font-display)" }}
               >
                 <span className="text-[var(--text)]">Stake. Earn.</span>
                 <br />
                 <span className="text-[var(--cyan)]">Back the Fund.</span>
               </h1>
-              <p className="mb-6 max-w-[520px] text-base leading-[1.6] text-[var(--text-secondary)]">
+              <p className="mb-6 max-w-[520px] text-[13px] leading-[1.6] text-[var(--text-secondary)]">
                 Deposit collateral into insurance pools to back the Percolator insurance fund.
               </p>
 
@@ -318,7 +318,7 @@ function StakeHero({ pools, totalUserDeposited }: { pools: StakePool[]; totalUse
               <div className="mb-6 flex flex-wrap items-center gap-3">
                 <a
                   href="#deposit"
-                  className="group inline-flex items-center gap-2 rounded-md bg-violet-700 px-6 py-3 text-sm font-semibold text-white transition-all duration-200 hover:bg-violet-600"
+                  className="group inline-flex items-center gap-2 rounded-sm border border-[var(--accent)]/50 bg-[var(--accent)]/[0.10] px-6 py-3 text-[12px] font-semibold uppercase tracking-[0.1em] text-[var(--accent)] transition-all duration-200 hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.18]"
                 >
                   Deposit Now
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="transition-transform group-hover:translate-y-0.5">
@@ -334,7 +334,7 @@ function StakeHero({ pools, totalUserDeposited }: { pools: StakePool[]; totalUse
               </div>
 
               <div className="max-w-[640px]">
-                <InDevelopmentBanner>
+                <InDevelopmentBanner variant="inline">
                   Staking backs the insurance fund and withdrawals work, but there&apos;s no yield
                   distribution on the deployed program — <span className="text-[var(--text)]">APR is
                   genuinely 0%</span>, and flushes to insurance reduce staked value. Experimental, not a
@@ -348,8 +348,8 @@ function StakeHero({ pools, totalUserDeposited }: { pools: StakePool[]; totalUse
               <div className="grid grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)]">
                 {metrics.map((m) => (
                   <div key={m.label} className="min-w-0 overflow-hidden bg-[var(--panel-bg)] p-3 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]">
-                    <p className="mb-1.5 truncate text-[9px] font-medium uppercase tracking-[0.15em] text-[#9ca3af] sm:text-[10px] sm:tracking-[0.2em]">{m.label}</p>
-                    <p className={`truncate text-2xl font-bold tracking-tight tabular-nums ${m.color}`} style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
+                    <p className="mb-1.5 truncate text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)] sm:text-[10px] sm:tracking-[0.2em]">{m.label}</p>
+                    <p className={`truncate text-2xl font-bold tracking-tight tabular-nums ${m.color}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                       {m.value}
                     </p>
                   </div>
@@ -1259,7 +1259,11 @@ export default function StakePage() {
     : connected ? 0 : null;
 
   return (
-    <div className="relative min-h-screen overflow-x-hidden">
+    // No min-h-screen: this page renders both standalone at /stake AND as a tab
+    // inside the Earn hub (app/earn), which supplies the outer layout — a forced
+    // full-viewport height left an awkward gap under the hub's tab bar. Content
+    // flows naturally at both mount points.
+    <div className="relative overflow-x-hidden">
       {/* Hero */}
       <ErrorBoundary label="Stake Hero">
         <StakeHero pools={pools} totalUserDeposited={totalUserDeposited} />

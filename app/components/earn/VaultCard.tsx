@@ -22,7 +22,7 @@ export function VaultCard({ vault }: VaultCardProps) {
       href={`/earn/${vault.slabAddress}`}
       className="group block"
     >
-      <div className="border border-[var(--border)] bg-[var(--panel-bg)] rounded-sm overflow-hidden transition-all duration-200 hover:border-[var(--accent)]/20 hud-corners">
+      <div className="border border-[var(--border)] bg-[var(--panel-bg)] rounded-none overflow-hidden transition-all duration-200 hover:border-[var(--accent)]/30 hud-corners">
         {/* Accent top line */}
         <div className="h-px bg-gradient-to-r from-transparent via-[var(--accent)]/40 to-transparent" />
 
@@ -67,13 +67,17 @@ export function VaultCard({ vault }: VaultCardProps) {
             compact
           />
 
-          {/* CTA */}
-          <div className="mt-4 flex items-center justify-between">
-            <span className="text-[11px] text-[var(--text-secondary)]">
-              Fee: {(vault.tradingFeeBps / 100).toFixed(2)}%
+          {/* CTA — always visible, clear deposit/withdraw affordance */}
+          <div className="mt-4 flex items-center justify-between border-t border-[var(--border)]/60 pt-3">
+            <span
+              className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)] tabular-nums"
+              style={{ fontFamily: 'var(--font-mono)' }}
+            >
+              Fee {(vault.tradingFeeBps / 100).toFixed(2)}%
             </span>
-            <span className="text-[11px] font-medium text-[var(--accent)] opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-visible:opacity-100 transition-opacity duration-200">
-              Deposit →
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--accent-text)] transition-colors group-hover:text-[var(--accent)]">
+              Deposit / Withdraw
+              <span aria-hidden="true">→</span>
             </span>
           </div>
         </div>

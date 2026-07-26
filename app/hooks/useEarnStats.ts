@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { deriveLpVaultRegistry, parseLpVaultRegistry, isV17Account } from '@percolatorct/sdk';
 import { getConfig, getRpcEndpoint } from '@/lib/config';
-import { getSupabase } from '@/lib/supabase';
 import { isMockMode } from '@/lib/mock-mode';
 import { isBlockedSlab } from '@/lib/blocklist';
 import { sanitizeOnChainValue } from '@/lib/health';
@@ -231,6 +230,78 @@ async function fetchRegisteredMarketsMeta(): Promise<RegisteredMarketMeta[]> {
 }
 
 /**
+ * Minimal shape read from GET /api/markets for Earn-page seeding — the SAME
+ * endpoint (and row shape) the /markets page renders from (see
+ * hooks/useAllMarketStats.ts). `row` is the full markets_with_stats row, reused
+ * as the cosmetic-enrichment source below so no separate Supabase round-trip is
+ * needed.
+ */
+interface LiveMarketMeta {
+  slabAddress: string;
+  symbol: string;
+  name: string;
+  mainnetCa: string | null;
+  row: Record<string, unknown>;
+}
+
+/**
+ * Fetch the LIVE markets the playground actually lists — the exact source
+ * /markets uses: GET /api/markets (markets_with_stats rows), which resolves the
+ * right backend server-side (Supabase on the live site, on-chain discovery on
+ * the local devnet playground) and needs no client Supabase credentials.
+ *
+ * This REPLACES seeding the Earn list from PLAYGROUND_SLAB_META's hardcoded
+ * (now-stale) July-10 slabs — the Earn "LP Vault" tab now lists the same markets
+ * as /markets. PLAYGROUND_SLAB_META is still consulted per-slab here as a
+ * symbol/logo fallback, just never as the list itself.
+ *
+ * Never throws. Returns `{ data, ok }`:
+ *  - ok=false → the fetch itself failed (network / non-2xx / malformed body):
+ *    THIS cycle is untrustworthy → keep-last-good (see fetchStats).
+ *  - ok=true, data=[] → the API responded but has no markets (e.g. the external
+ *    indexer is down locally): a legitimate empty list → render a clean empty
+ *    state, NOT an error.
+ */
+async function fetchLiveMarketsMeta(): Promise<{ data: LiveMarketMeta[]; ok: boolean }> {
+  try {
+    // Mirror useAllMarketStats.ts's fetch: same endpoint + generous limit, Accept JSON.
+    const resp = await fetch('/api/markets?limit=500', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    });
+    if (!resp.ok) return { data: [], ok: false };
+    const body: unknown = await resp.json();
+    const rows = (body as { markets?: unknown })?.markets;
+    if (!Array.isArray(rows)) return { data: [], ok: false };
+
+    const data = rows.reduce<LiveMarketMeta[]>((acc, entry) => {
+      if (typeof entry !== 'object' || entry === null) return acc;
+      const m = entry as Record<string, unknown>;
+      const slabAddress = typeof m.slab_address === 'string' ? m.slab_address : null;
+      if (!slabAddress || isBlockedSlab(slabAddress)) return acc;
+      const meta = PLAYGROUND_SLAB_META[slabAddress];
+      const rowSymbol = typeof m.symbol === 'string' && m.symbol ? m.symbol : null;
+      const rowName = typeof m.name === 'string' && m.name ? m.name : null;
+      const rowCa = typeof m.mainnet_ca === 'string' && m.mainnet_ca ? m.mainnet_ca : null;
+      acc.push({
+        slabAddress,
+        // Curated meta wins (stable ticker/name), else the live row, else a
+        // short slab-derived placeholder. buildMarketVaultInfo strips any
+        // "-PERP" suffix so the card's own "-PERP" label never doubles up.
+        symbol: meta?.symbol ?? rowSymbol ?? slabAddress.slice(0, 6),
+        name: meta?.name ?? rowName ?? rowSymbol ?? slabAddress.slice(0, 6),
+        mainnetCa: meta?.mainnet_ca ?? rowCa,
+        row: m,
+      });
+      return acc;
+    }, []);
+    return { data, ok: true };
+  } catch {
+    return { data: [], ok: false };
+  }
+}
+
+/**
  * Read the LP Vault Registry for each given slab directly on-chain (batched via
  * getMultipleAccountsInfo) and return each vault's real backing
  * (`totalLpSharesOutstanding + feeDistributionTotalAtoms`).
@@ -408,9 +479,15 @@ export function buildMarketVaultInfo(
   const maxOI = Math.max(rawMaxOI, totalOI);
   const oiUtilPct = maxOI > 0 ? Math.min((totalOI / maxOI) * 100, 100) : 0;
 
+  // Consumers (VaultCard, InsuranceFundDisplay, the /earn/[slab] header) render
+  // `${symbol}-PERP`, so store the BASE ticker: strip a trailing "-PERP" (curated
+  // meta + many indexer rows carry it) so "SOL-PERP" doesn't become
+  // "SOL-PERP-PERP". Falls back to the raw symbol if stripping empties it.
+  const displaySymbol = symbol.replace(/-perp$/i, '').trim() || symbol;
+
   return {
     slabAddress: slab,
-    symbol,
+    symbol: displaySymbol,
     name,
     mainnetCa,
     vaultBalance,
@@ -426,45 +503,48 @@ export function buildMarketVaultInfo(
 }
 
 /**
- * Build the Earn-page market list: the 5 curated markets, seeded from
- * PLAYGROUND_SLAB_META (always present, so all 5 always render) PLUS any
- * registered (user-launched) markets that have a real LP Vault Registry on-chain.
+ * Build the Earn-page market list from the LIVE markets (`liveMarkets`, seeded
+ * from /api/markets — the same set /markets shows) PLUS any registered
+ * (user-launched) markets not already in that list that have a real LP Vault
+ * Registry on-chain.
  *
  * Each market is enriched with:
  *  - TVL from the on-chain LP Vault Registry (`curatedVaults`) — always accurate.
- *  - Cosmetic stats (volume/insurance/OI/leverage/fees) from Supabase when a row
- *    exists for that slab, else sane defaults (0 / typical playground values).
+ *  - Cosmetic stats (volume/insurance/OI/leverage/fees) from the market's
+ *    markets_with_stats row (`supabaseBySlab`, built from the same /api/markets
+ *    response), else sane defaults.
  *
- * This never falls back to fabricated mock markets — if Supabase has no data for
- * a curated slab, it still renders with real on-chain TVL and zeroed cosmetics,
- * which is strictly more accurate than showing an unrelated fake market.
+ * This never falls back to fabricated mock markets, and never re-introduces the
+ * stale PLAYGROUND_SLAB_META slabs as list entries: only markets the API
+ * actually returns (plus registered-with-vault) appear.
  *
- * Registered markets are gated on `curatedVaults[slab].found` — a launched market
- * without an on-chain LP Vault Registry yet (no Earn vault created for it) is
- * excluded entirely rather than showing a fabricated $0 entry. The curated 5 have
- * no such gate: they always render (matches prior behavior), since they're the
- * seeded/guaranteed markets even when their registry hasn't been read yet.
+ * Live markets always render (they're real, indexed markets). Registered markets
+ * are gated on `curatedVaults[slab].found` — a launched market without an
+ * on-chain LP Vault Registry yet (no Earn vault created for it) is excluded
+ * rather than shown as a fabricated $0 entry.
  */
-function buildCuratedMarkets(
-  curatedVaults: Record<string, CuratedVaultOnChain>,
-  supabaseBySlab: Map<string, Record<string, unknown>>,
+function buildLiveMarkets(
+  liveMarkets: LiveMarketMeta[],
+  liveSlabSet: Set<string>,
+  curatedVaults: Record<string, CuratedVaultOnChain> = {},
+  supabaseBySlab: Map<string, Record<string, unknown>> = new Map(),
   registeredMarkets: RegisteredMarketMeta[] = [],
   onChainMaxLeverage: Record<string, number> = {},
 ): MarketVaultInfo[] {
-  const curated = Object.entries(PLAYGROUND_SLAB_META)
-    .filter(([slab]) => !isBlockedSlab(slab))
-    .map(([slab, meta]) =>
-      buildMarketVaultInfo(slab, meta.symbol, meta.name, meta.mainnet_ca, curatedVaults, supabaseBySlab, onChainMaxLeverage),
+  const live = liveMarkets
+    .filter((m) => !isBlockedSlab(m.slabAddress))
+    .map((m) =>
+      buildMarketVaultInfo(m.slabAddress, m.symbol, m.name, m.mainnetCa, curatedVaults, supabaseBySlab, onChainMaxLeverage),
     );
 
-  const curatedSlabs = new Set(Object.keys(PLAYGROUND_SLAB_META));
-  const seenRegistered = new Set<string>();
+  // Dedup registered markets against the live list (live wins) and against
+  // duplicate registry rows, in one pass.
+  const seen = new Set<string>(liveSlabSet);
   const registered = registeredMarkets
-    // Dedup against the curated set (curated wins) and against duplicate registry rows.
-    .filter((m) => !curatedSlabs.has(m.slabAddress) && !isBlockedSlab(m.slabAddress))
+    .filter((m) => !isBlockedSlab(m.slabAddress))
     .filter((m) => {
-      if (seenRegistered.has(m.slabAddress)) return false;
-      seenRegistered.add(m.slabAddress);
+      if (seen.has(m.slabAddress)) return false;
+      seen.add(m.slabAddress);
       return true;
     })
     // Only show launched markets that actually have an Earn vault on-chain —
@@ -474,7 +554,7 @@ function buildCuratedMarkets(
       buildMarketVaultInfo(m.slabAddress, m.symbol, m.name, m.mainnetCa, curatedVaults, supabaseBySlab, onChainMaxLeverage),
     );
 
-  return [...curated, ...registered];
+  return [...live, ...registered];
 }
 
 /**
@@ -540,30 +620,30 @@ export function useEarnStats() {
     }
 
     try {
-      // Registered (user-launched) markets — fetched from the registration Blob
-      // endpoint so their Earn vaults can be seeded alongside the 5 curated ones.
-      // Never throws (see fetchRegisteredMarketsMeta); degrades to [] on failure,
-      // which just means the Earn page shows the curated 5, same as before.
-      const registeredMarkets = await fetchRegisteredMarketsMeta();
+      // The Earn market list is now the LIVE markets from /api/markets — the
+      // SAME source /markets renders from (see hooks/useAllMarketStats.ts) — NOT
+      // the hardcoded, now-stale July-10 keys of PLAYGROUND_SLAB_META. Fetched
+      // alongside the registered (user-launched) markets, which remain a
+      // supplemental source deduped by slab below. Both never throw.
+      const [liveResult, registeredMarkets] = await Promise.all([
+        fetchLiveMarketsMeta(),
+        fetchRegisteredMarketsMeta(),
+      ]);
       if (stale()) return;
+      const liveMarkets = liveResult.data;
+      const liveSlabSet = new Set(liveMarkets.map((m) => m.slabAddress));
 
-      // On-chain LP Vault Registry TVL is the accuracy-critical piece — fetch it
-      // unconditionally, independent of Supabase's availability, over the union of
-      // curated ∪ registered slabs. This is what keeps the Earn list accurate for
-      // the 5 curated playground markets even when the indexer/DB has no rows for
-      // them yet (verified 2026-07-07: this local environment's Supabase
-      // credentials are blank, which previously caused this hook to render 4
-      // fabricated mock markets instead of the 5 real curated ones), while also
+      // On-chain LP Vault Registry TVL + max leverage are the accuracy-critical
+      // pieces — read straight from chain over the union of live ∪ registered
+      // slabs, independent of any indexer. This keeps every listed market's TVL
+      // real even when the indexer/DB has no rows for it yet, while also
       // surfacing any launched market that has created a real Earn vault.
       const allSlabs = Array.from(
         new Set([
-          ...Object.keys(PLAYGROUND_SLAB_META),
+          ...liveMarkets.map((m) => m.slabAddress),
           ...registeredMarkets.map((m) => m.slabAddress),
         ]),
       );
-      // Max leverage is likewise read straight from each slab's real on-chain
-      // initialMarginBps (accuracy-critical, same rationale as curatedVaults
-      // above) — fetched in parallel, independent of Supabase's availability.
       const [curatedVaultsResult, maxLeverageResult] = await Promise.all([
         fetchCuratedVaultsOnChain(allSlabs),
         fetchOnChainMaxLeverage(allSlabs),
@@ -571,51 +651,47 @@ export function useEarnStats() {
       if (stale()) return;
       const curatedVaults = curatedVaultsResult.data;
       const onChainMaxLeverage = maxLeverageResult.data;
-      // PERC-9204: a failed batch means THIS cycle's data isn't trustworthy —
-      // see the keep-last-good branch below, not per-slab "not found" (which
-      // both functions already treat as a legitimate, non-error default).
-      const onChainFailed = !curatedVaultsResult.ok || !maxLeverageResult.ok;
 
-      // Supabase is optional enrichment only (name/volume/OI/insurance) — never
-      // a hard requirement for the curated market list, its TVL, or its leverage.
-      let supabaseBySlab = new Map<string, Record<string, unknown>>();
-      try {
-        const supabase = getSupabase();
-        const { data, error: dbError } = await supabase
-          .from('markets_with_stats')
-          .select('*');
-        if (!dbError && data) {
-          supabaseBySlab = new Map(
-            data
-              .filter((m) => !!m.slab_address)
-              .map((m) => [m.slab_address as string, m as Record<string, unknown>]),
-          );
-        }
-      } catch {
-        // No Supabase configured, or the query failed — enrichment degrades to
-        // defaults (0 volume/OI/insurance, typical fee), same spirit as
-        // PLAYGROUND.md's "external indexer is optional" guarantee elsewhere.
-      }
-      if (stale()) return;
+      // Cosmetic enrichment (volume/OI/insurance/fee/leverage) comes from the
+      // live rows themselves — they're markets_with_stats rows, the exact shape
+      // the old direct Supabase query returned — so no separate DB round-trip is
+      // needed and it works in every deployment (the API resolves the backend
+      // server-side).
+      const supabaseBySlab = new Map<string, Record<string, unknown>>(
+        liveMarkets.map((m) => [m.slabAddress, m.row]),
+      );
 
-      if (onChainFailed && hasGoodStatsRef.current) {
+      // PERC-9204: a failed FETCH (the market list OR the on-chain batch) means
+      // THIS cycle's data isn't trustworthy — keep-last-good below. A successful
+      // but EMPTY market list is NOT a failure (the indexer legitimately has no
+      // rows — expected locally), so it publishes a clean empty state instead.
+      const fetchFailed =
+        !liveResult.ok || !curatedVaultsResult.ok || !maxLeverageResult.ok;
+
+      if (fetchFailed && hasGoodStatsRef.current) {
         // Keep-last-good: a real snapshot is already on screen — a transient
-        // RPC hiccup on THIS 15s poll must not blank the whole Earn page back
-        // to $0 TVL / vanished markets. Leave `stats` untouched; just surface
-        // the error so a consumer can show a subtle "stale data" indicator.
+        // fetch/RPC hiccup on THIS 15s poll must not blank the whole Earn page
+        // back to $0 TVL / vanished markets. Leave `stats` untouched; just
+        // surface the error so a consumer can show a subtle "stale data" hint.
         setError('Failed to refresh on-chain data — showing last known values');
         return;
       }
 
-      const markets = buildCuratedMarkets(curatedVaults, supabaseBySlab, registeredMarkets, onChainMaxLeverage);
+      const markets = buildLiveMarkets(
+        liveMarkets,
+        liveSlabSet,
+        curatedVaults,
+        supabaseBySlab,
+        registeredMarkets,
+        onChainMaxLeverage,
+      );
       setStats({ markets, ...computeAggregates(markets) });
 
-      if (onChainFailed) {
+      if (fetchFailed) {
         // Cold start (no good snapshot published yet) — still show the
-        // best-effort (zeroed-where-unread) curated markets rather than
-        // nothing, but don't mark this as "good": if the NEXT cycle also
-        // fails, we want to keep retrying this fallback rather than
-        // incorrectly gate on a snapshot that was never actually good.
+        // best-effort (zeroed-where-unread) markets rather than nothing, but
+        // don't mark this as "good": if the NEXT cycle also fails, we want to
+        // keep retrying rather than gate on a snapshot that was never good.
         setError('Failed to refresh on-chain data — showing last known values');
       } else {
         setError(null);
@@ -631,9 +707,9 @@ export function useEarnStats() {
       }
       setError(e instanceof Error ? e.message : 'Failed to load earn stats');
       // Total failure on a cold start (e.g. RPC unreachable before any good
-      // snapshot exists) — still show the 5 curated markets with zeroed
-      // stats rather than fabricated mock ones.
-      const markets = buildCuratedMarkets({}, new Map());
+      // snapshot exists) — publish an empty, clean list rather than fabricated
+      // mock markets. The next poll retries the live fetch.
+      const markets = buildLiveMarkets([], new Set());
       setStats({ markets, ...computeAggregates(markets) });
     } finally {
       if (!stale()) setLoading(false);

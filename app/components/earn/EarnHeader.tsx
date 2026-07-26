@@ -35,12 +35,11 @@ export function EarnHeader({ stats, loading }: EarnHeaderProps) {
           transparent.
         </p>
 
-        <div className="mt-5 max-w-3xl">
-          <InDevelopmentBanner>
-            LP vaults accept deposits and redemptions work, but yield distribution isn&apos;t live on
-            the deployed program yet — <span className="text-[var(--text)]">APY is genuinely 0%</span>.
-            Deposited capital is held as protocol counterparty backing; treat this as experimental, not
-            a yield product.
+        <div className="mt-4 max-w-3xl">
+          <InDevelopmentBanner variant="inline">
+            LP deposits are held as protocol counterparty backing. Deposits and redemptions work, but
+            yield distribution isn&apos;t live on the deployed program yet — <span className="text-[var(--text)]">APY
+            is genuinely 0%</span>. Treat this as experimental, not a yield product.
           </InDevelopmentBanner>
         </div>
 

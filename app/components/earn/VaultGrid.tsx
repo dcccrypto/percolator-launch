@@ -138,14 +138,19 @@ export function VaultGrid({ markets, loading, error }: VaultGridProps) {
           ))}
         </div>
       ) : sorted.length === 0 ? (
-        <div className="border border-[var(--border)] bg-[var(--panel-bg)] rounded-sm p-12 text-center">
-          <div aria-hidden="true" className="text-4xl mb-3">{error && !searchQuery ? '⚠' : '🔍'}</div>
-          <p className="text-[13px] text-[var(--text-secondary)]">
+        <div className="border border-[var(--border)] bg-[var(--panel-bg)] rounded-none p-12 text-center hud-corners">
+          <div
+            className="text-[10px] uppercase tracking-[0.2em] text-[var(--text-secondary)]"
+            style={{ fontFamily: 'var(--font-mono)' }}
+          >
+            {searchQuery ? 'No matches' : error ? 'Unavailable' : 'No vaults'}
+          </div>
+          <p className="mt-2 text-[13px] text-[var(--text-secondary)]">
             {searchQuery
               ? `No vaults matching "${searchQuery}"`
               : error
                 ? "Couldn't load vaults — please try again shortly"
-                : 'No active vaults found'}
+                : 'No LP vaults are live yet.'}
           </p>
         </div>
       ) : (

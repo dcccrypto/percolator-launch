@@ -171,8 +171,8 @@ export function EarnVaultView() {
                 <div className="space-y-3">
                   <Step
                     num={1}
-                    title="Deposit SOL"
-                    desc="Provide collateral to any perp market vault"
+                    title="Deposit Collateral"
+                    desc="Provide sim-USDC to any perp market vault"
                   />
                   <Step
                     num={2}
