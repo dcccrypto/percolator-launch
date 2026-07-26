@@ -21,6 +21,7 @@ import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
+import { MarketLogo } from "@/components/market/MarketLogo";
 
 /* ── Types ── */
 
@@ -29,6 +30,7 @@ interface StakePool {
   name: string;
   symbol: string;
   slabAddress: string;
+  logoUrl?: string | null;
   /** SPL mint for pool collateral (USDC). Used to query wallet ATA balance. */
   collateralMint?: string;
   tvl: number;
@@ -88,6 +90,7 @@ function apiPoolToStakePool(p: ApiPool): StakePool {
     name: p.name,
     symbol: p.symbol,
     slabAddress: p.slabAddress,
+    logoUrl: p.logoUrl,
     collateralMint: p.collateralMint,
     tvl: p.tvl,
     apr: p.apr,
@@ -261,9 +264,20 @@ async function fetchPoolPosition(
   }
 }
 
-/* ── Hero Section ── */
+/* ── Header + Stats Strip ──────────────────────────────────────────────────
+   Compact terminal header (mirrors EarnHeader) — a `// insurance lp` eyebrow,
+   a concise title, a one-line description, the honest in-development note, and
+   a four-cell stats strip. No display hero, no marketing CTA. */
 
-function StakeHero({ pools, totalUserDeposited }: { pools: StakePool[]; totalUserDeposited: number | null }) {
+function StakeHeader({
+  pools,
+  totalUserDeposited,
+  loading,
+}: {
+  pools: StakePool[];
+  totalUserDeposited: number | null;
+  loading: boolean;
+}) {
   const { connected } = useWalletCompat();
   const totalStaked = pools.reduce((s, p) => s + p.tvl, 0);
   const activePools = pools.length;
@@ -271,95 +285,73 @@ function StakeHero({ pools, totalUserDeposited }: { pools: StakePool[]; totalUse
     ? pools.reduce((s, p) => s + p.apr, 0) / pools.length
     : 0;
 
-  const yourDepositsLabel = !connected
-    ? "Connect wallet"
-    : totalUserDeposited === null
-    ? "Loading..."
-    : totalUserDeposited > 0
-    ? formatUsd(totalUserDeposited)
-    : "$—";
+  const yourDeposits =
+    !connected
+      ? "—"
+      : totalUserDeposited === null
+        ? "…"
+        : totalUserDeposited > 0
+          ? formatUsd(totalUserDeposited)
+          : "$—";
 
-  const metrics = [
-    { label: "Total Staked", value: formatUsd(totalStaked), color: "text-[var(--accent)]" },
-    {
-      label: "Your Deposits",
-      value: yourDepositsLabel,
-      color: connected && totalUserDeposited !== null ? "text-[var(--text-secondary)]" : "text-[var(--text-muted)] text-[11px]",
-    },
-    { label: "Active Pools", value: String(activePools), color: "text-[var(--accent)]" },
-    { label: "Avg APR", value: avgApr > 0 ? `${avgApr.toFixed(1)}%` : "—%", color: "text-[var(--cyan)]" },
+  const stats: { label: string; value: string; muted?: boolean }[] = [
+    { label: "Total Staked", value: loading ? "…" : formatUsd(totalStaked) },
+    { label: "Your Deposits", value: yourDeposits, muted: !connected || totalUserDeposited === null || (totalUserDeposited ?? 0) <= 0 },
+    { label: "Active Pools", value: loading ? "…" : String(activePools) },
+    { label: "Avg APR", value: avgApr > 0 ? `${avgApr.toFixed(1)}%` : "0%", muted: avgApr <= 0 },
   ];
 
   return (
-    <section className="relative overflow-hidden py-8 lg:py-12">
-      <div className="mx-auto max-w-[1100px] px-6">
-        <ScrollReveal>
-          {/* Two-pane hero: heading/CTA/banner on the left, metrics on the
-              right (stacks to a single column below lg). */}
-          <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_380px] lg:items-center lg:gap-12">
-            {/* Left pane */}
-            <div className="min-w-0">
-              <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
-                // insurance lp
+    <div className="relative">
+      {/* Background grid fade — same idiom as EarnHeader */}
+      <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" />
+
+      <div className="relative mx-auto max-w-6xl px-4 pt-10 pb-6">
+        <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
+          // insurance lp
+        </div>
+
+        <h1
+          className="text-2xl font-medium tracking-[-0.01em] text-[var(--text)]"
+          style={{ fontFamily: "var(--font-display)" }}
+        >
+          <span className="font-normal text-[var(--text-secondary)]">Insurance </span>Staking
+        </h1>
+        <p className="mt-2 max-w-lg text-[13px] text-[var(--text-secondary)]">
+          Stake collateral into a market&apos;s insurance pool to provide first-loss backing —
+          fully on-chain and transparent.
+        </p>
+
+        <div className="mt-4 max-w-3xl">
+          <InDevelopmentBanner variant="inline">
+            Staking backs the insurance fund and withdrawals work, but there&apos;s no yield
+            distribution on the deployed program — <span className="text-[var(--text)]">APR is
+            genuinely 0%</span>, and flushes to insurance reduce staked value. Experimental, not a
+            yield product.
+          </InDevelopmentBanner>
+        </div>
+
+        {/* Stats strip */}
+        <div
+          className="mt-6 grid grid-cols-2 gap-px border border-[var(--border)] bg-[var(--border)] sm:grid-cols-4"
+          aria-label="Staking statistics"
+        >
+          {stats.map((s) => (
+            <div key={s.label} className="min-w-0 bg-[var(--panel-bg)] p-4 sm:p-5">
+              <div className="mb-1 truncate text-[10px] uppercase tracking-[0.2em] text-[var(--text-secondary)]">
+                {s.label}
               </div>
-              <h1
-                className="mb-4 text-3xl font-bold tracking-tight lg:text-4xl"
-                style={{ fontFamily: "var(--font-display)" }}
+              <div
+                className={`truncate text-2xl font-bold tabular-nums ${s.muted ? "text-[var(--text-muted)]" : "text-[var(--text)]"}`}
+                style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
               >
-                <span className="text-[var(--text)]">Stake. Earn.</span>
-                <br />
-                <span className="text-[var(--cyan)]">Back the Fund.</span>
-              </h1>
-              <p className="mb-6 max-w-[520px] text-[13px] leading-[1.6] text-[var(--text-secondary)]">
-                Deposit collateral into insurance pools to back the Percolator insurance fund.
-              </p>
-
-              {/* CTA buttons */}
-              <div className="mb-6 flex flex-wrap items-center gap-3">
-                <a
-                  href="#deposit"
-                  className="group inline-flex items-center gap-2 rounded-sm border border-[var(--accent)]/50 bg-[var(--accent)]/[0.10] px-6 py-3 text-[12px] font-semibold uppercase tracking-[0.1em] text-[var(--accent)] transition-all duration-200 hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.18]"
-                >
-                  Deposit Now
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="transition-transform group-hover:translate-y-0.5">
-                    <path d="M12 5v14M5 12l7 7 7-7" />
-                  </svg>
-                </a>
-                <a
-                  href="#pools"
-                  className="inline-flex items-center gap-1 text-[14px] font-medium text-[var(--cyan)] border-b border-[var(--cyan)]/40 pb-px transition-colors hover:border-[var(--cyan)]/70"
-                >
-                  Learn More <span aria-hidden="true">→</span>
-                </a>
-              </div>
-
-              <div className="max-w-[640px]">
-                <InDevelopmentBanner variant="inline">
-                  Staking backs the insurance fund and withdrawals work, but there&apos;s no yield
-                  distribution on the deployed program — <span className="text-[var(--text)]">APR is
-                  genuinely 0%</span>, and flushes to insurance reduce staked value. Experimental, not a
-                  yield product.
-                </InDevelopmentBanner>
+                {s.value}
               </div>
             </div>
-
-            {/* Right pane: metrics */}
-            <div className="w-full shrink-0 lg:w-[380px]">
-              <div className="grid grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)]">
-                {metrics.map((m) => (
-                  <div key={m.label} className="min-w-0 overflow-hidden bg-[var(--panel-bg)] p-3 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]">
-                    <p className="mb-1.5 truncate text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)] sm:text-[10px] sm:tracking-[0.2em]">{m.label}</p>
-                    <p className={`truncate text-2xl font-bold tracking-tight tabular-nums ${m.color}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-                      {m.value}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </ScrollReveal>
+          ))}
+        </div>
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -408,42 +400,39 @@ function PositionCard({
     : 1;
 
   return (
-    <div className="border border-[var(--border)]/50 bg-[var(--panel-bg)]">
-      <div className="px-4 py-2 border-b border-[var(--border)]/30">
-        <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">// your position</span>
+    <div className="border border-[var(--border)] bg-[var(--panel-bg)]">
+      <div className="flex items-center justify-between gap-2 border-b border-[var(--border)]/60 px-3 py-2">
+        <span className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">{position.poolName}</span>
+        <span className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--accent-text)]">Staked</span>
       </div>
-      <div className="p-4 space-y-3">
-        <div className="grid grid-cols-2 gap-3 text-[12px]">
+      <div className="space-y-3 p-3">
+        <div className="grid grid-cols-2 gap-3">
           <div>
-            <span className="text-[var(--text-secondary)]">Pool</span>
-            <p className="font-medium text-[var(--text)]">{position.poolName}</p>
+            <div className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">LP Balance</div>
+            <div className="text-sm font-mono tabular-nums text-[var(--text)]">
+              {position.lpBalance.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+            </div>
           </div>
           <div>
-            <span className="text-[var(--text-secondary)]">LP Balance</span>
-            <p className="font-medium text-[var(--text)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
-              {position.lpBalance.toLocaleString(undefined, { maximumFractionDigits: 4 })} LP
-            </p>
-          </div>
-          <div>
-            <span className="text-[var(--text-secondary)]">Est. Value</span>
-            <p className="font-medium text-[var(--text)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+            <div className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">Est. Value</div>
+            <div className="text-sm font-mono tabular-nums text-[var(--text)]">
               {formatUsd(position.estimatedValue)}
-            </p>
+            </div>
           </div>
         </div>
 
         {/* Cooldown */}
         <div>
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[10px] text-[var(--text-secondary)]">Cooldown</span>
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">Cooldown</span>
             <span className="text-[10px] text-[var(--text-muted)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
               {position.cooldownElapsed
                 ? "Complete ✓"
-                : `~${position.cooldownRemaining.toLocaleString()} slots (${slotsToTime(position.cooldownRemaining)})`
+                : `${position.cooldownRemaining.toLocaleString()} slots (${slotsToTime(position.cooldownRemaining)})`
               }
             </span>
           </div>
-          <ProgressBar value={cooldownPct} height={8} fillClassName="bg-gradient-to-r from-blue-500 to-[var(--cyan)]" />
+          <ProgressBar value={cooldownPct} height={6} fillClassName="bg-gradient-to-r from-blue-500 to-[var(--cyan)]" />
         </div>
 
         {/* Tx feedback */}
@@ -462,7 +451,7 @@ function PositionCard({
           <button
             disabled={!position.cooldownElapsed || withdrawLoading}
             onClick={handleWithdraw}
-            className={`w-full rounded-md py-2.5 text-[12px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
+            className={`w-full rounded-sm py-2 text-[11px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
               position.cooldownElapsed && !withdrawLoading
                 ? "border border-[var(--cyan)]/50 bg-[var(--cyan)]/[0.10] text-[var(--cyan)] hover:border-[var(--cyan)] hover:bg-[var(--cyan)]/[0.18]"
                 : "border border-[var(--border)] bg-[var(--bg)] text-[var(--text-secondary)] cursor-not-allowed"
@@ -471,7 +460,7 @@ function PositionCard({
             {withdrawLoading
               ? "Withdrawing…"
               : position.cooldownElapsed
-              ? "Withdraw LP →"
+              ? "Withdraw All →"
               : `Withdraw in ${position.cooldownRemaining.toLocaleString()} slots`}
           </button>
 
@@ -481,7 +470,7 @@ function PositionCard({
           <button
             type="button"
             onClick={() => onManage?.(position.poolId)}
-            className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-all duration-200 hover:border-[var(--accent)]/30 hover:text-[var(--accent)]"
+            className="w-full rounded-sm border border-[var(--border)] bg-[var(--bg)] py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-all duration-200 hover:border-[var(--accent)]/30 hover:text-[var(--accent-text)]"
           >
             Manage / Withdraw Partial
           </button>
@@ -511,27 +500,34 @@ function YourPositionPanel({
 }) {
   const { connected } = useWalletCompat();
 
-  if (!connected) return null;
-  if (positions.length === 0) {
-    return (
-      <div className="border border-[var(--border)]/50 bg-[var(--panel-bg)] p-6 text-center">
-        <p className="text-[11px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">No open positions</p>
-        <p className="mt-1 text-[10px] text-[var(--text-secondary)]">Deposit into a pool to get started</p>
-        <a
-          href="#deposit"
-          className="mt-3 inline-block text-[11px] font-medium text-[var(--accent)] transition-colors hover:text-[var(--text)]"
-        >
-          Deposit Now →
-        </a>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-3">
-      {positions.map((position) => (
-        <PositionCard key={position.poolId} position={position} onWithdrawSuccess={onWithdrawSuccess} onManage={onManage} />
-      ))}
+    <div>
+      <div className="mb-3 flex items-center justify-between">
+        <span className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">
+          // your positions
+        </span>
+        {connected && positions.length > 0 && (
+          <span className="text-[10px] text-[var(--text-secondary)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+            {positions.length}
+          </span>
+        )}
+      </div>
+
+      {!connected ? (
+        <div className="border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-3 text-[11px] text-[var(--text-secondary)]">
+          Connect a wallet to see your staked positions.
+        </div>
+      ) : positions.length === 0 ? (
+        <div className="border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-3 text-[11px] text-[var(--text-secondary)]">
+          No open positions. Select a pool and deposit to get started.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {positions.map((position) => (
+            <PositionCard key={position.poolId} position={position} onWithdrawSuccess={onWithdrawSuccess} onManage={onManage} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -718,9 +714,9 @@ function DepositWidget({
   }, [pool, withdrawPosition, withdrawAmount, withdraw, withdrawLoading, onTxSuccess]);
 
   return (
-    <div id="deposit" className="border border-[var(--border)]/50 bg-[var(--panel-bg)]">
-      <div className="px-4 py-2 border-b border-[var(--border)]/30 flex items-center justify-between gap-2">
-        <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">// {mode}</span>
+    <div id="deposit" className="border border-[var(--border)] bg-[var(--panel-bg)] hud-corners">
+      <div className="flex items-center justify-between gap-2 border-b border-[var(--border)]/60 px-3 py-2">
+        <span className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">// {mode}</span>
         {pool && (
           <span className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--text)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
             {pool.symbol}
@@ -728,7 +724,7 @@ function DepositWidget({
           </span>
         )}
       </div>
-      <div className="p-4 space-y-4">
+      <div className="space-y-4 p-4">
         {/* Deposit / Withdraw toggle */}
         <div className="flex gap-1 border border-[var(--border)] p-0.5">
           <button
@@ -736,7 +732,7 @@ function DepositWidget({
             onClick={() => { setMode("deposit"); setTxStatus(null); setWithdrawTxStatus(null); }}
             className={`flex-1 rounded-sm py-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] transition-colors ${
               mode === "deposit"
-                ? "bg-[var(--accent)]/[0.12] text-[var(--accent)]"
+                ? "bg-[var(--accent)]/[0.12] text-[var(--accent-text)]"
                 : "text-[var(--text-secondary)] hover:text-[var(--text)]"
             }`}
           >
@@ -780,7 +776,7 @@ function DepositWidget({
                   <button
                     type="button"
                     onClick={() => setAmount(String(walletBalance))}
-                    className="text-[10px] text-[var(--text-muted)] tabular-nums transition-colors hover:text-[var(--accent)] cursor-pointer"
+                    className="text-[10px] text-[var(--text-muted)] tabular-nums transition-colors hover:text-[var(--accent-text)] cursor-pointer"
                     style={{ fontFamily: "var(--font-mono)" }}
                     title="Click to use max balance"
                   >
@@ -802,7 +798,7 @@ function DepositWidget({
                 <button
                   type="button"
                   onClick={() => { if (walletBalance !== null && walletBalance > 0) setAmount(String(walletBalance)); }}
-                  className="border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)]/30 hover:text-[var(--accent)]"
+                  className="border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)]/30 hover:text-[var(--accent-text)]"
                 >
                   MAX
                 </button>
@@ -820,7 +816,7 @@ function DepositWidget({
                         setAmount(val.toFixed(2));
                         setTxStatus(null);
                       }}
-                      className="flex-1 rounded-sm border border-[var(--border)] bg-[var(--bg)] py-1 text-[10px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)]/30 hover:text-[var(--accent)]"
+                      className="flex-1 rounded-sm border border-[var(--border)] bg-[var(--bg)] py-1 text-[10px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)]/30 hover:text-[var(--accent-text)]"
                     >
                       {pct}%
                     </button>
@@ -842,8 +838,8 @@ function DepositWidget({
             {/* Pool cap bar */}
             {pool && (
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] text-[var(--text-secondary)]">Pool cap</span>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">Pool cap</span>
                   <span className="text-[10px] text-[var(--text-muted)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
                     {pool.capTotal > 0
                       ? `${formatUsd(pool.capUsed)} / ${formatUsd(pool.capTotal)} (${Math.round(capRatio * 100)}%)`
@@ -873,16 +869,16 @@ function DepositWidget({
 
             {/* CTA */}
             {!connected ? (
-              <button className="w-full rounded-md py-3 border border-[var(--border)] bg-[var(--bg)] text-[12px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)] cursor-not-allowed">
+              <button className="w-full rounded-sm py-3 border border-[var(--border)] bg-[var(--bg)] text-[12px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)] cursor-not-allowed">
                 Connect Wallet to Deposit
               </button>
             ) : (
               <button
                 disabled={amountNum <= 0 || depositLoading}
                 onClick={handleDeposit}
-                className={`w-full rounded-md py-3 text-[12px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
+                className={`w-full rounded-sm py-3 text-[12px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
                   amountNum > 0 && !depositLoading
-                    ? "border border-[var(--accent)]/50 bg-[var(--accent)]/[0.10] text-[var(--accent)] hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.18]"
+                    ? "border border-[var(--accent)]/50 bg-[var(--accent)]/[0.10] text-[var(--accent-text)] hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.18]"
                     : "border border-[var(--border)] bg-[var(--bg)] text-[var(--text-secondary)] cursor-not-allowed"
                 }`}
               >
@@ -900,7 +896,7 @@ function DepositWidget({
                   <button
                     type="button"
                     onClick={() => setWithdrawAmount(formatHumanAmount(withdrawPosition.lpBalanceRaw, withdrawPosition.lpDecimals))}
-                    className="text-[10px] text-[var(--text-muted)] tabular-nums transition-colors hover:text-[var(--accent)] cursor-pointer"
+                    className="text-[10px] text-[var(--text-muted)] tabular-nums transition-colors hover:text-[var(--accent-text)] cursor-pointer"
                     style={{ fontFamily: "var(--font-mono)" }}
                     title="Click to use full staked balance"
                   >
@@ -924,7 +920,7 @@ function DepositWidget({
                   type="button"
                   onClick={() => { if (withdrawPosition) setWithdrawAmount(formatHumanAmount(withdrawPosition.lpBalanceRaw, withdrawPosition.lpDecimals)); }}
                   disabled={!withdrawPosition}
-                  className="border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)]/30 hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)]/30 hover:text-[var(--accent-text)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   MAX
                 </button>
@@ -980,14 +976,14 @@ function DepositWidget({
 
             {/* CTA */}
             {!connected ? (
-              <button className="w-full rounded-md py-3 border border-[var(--border)] bg-[var(--bg)] text-[12px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)] cursor-not-allowed">
+              <button className="w-full rounded-sm py-3 border border-[var(--border)] bg-[var(--bg)] text-[12px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)] cursor-not-allowed">
                 Connect Wallet to Withdraw
               </button>
             ) : (
               <button
                 disabled={!withdrawPosition || !withdrawPosition.cooldownElapsed || withdrawAmountNum <= 0 || withdrawLoading}
                 onClick={handleWithdraw}
-                className={`w-full rounded-md py-3 text-[12px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
+                className={`w-full rounded-sm py-3 text-[12px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
                   withdrawPosition && withdrawPosition.cooldownElapsed && withdrawAmountNum > 0 && !withdrawLoading
                     ? "border border-[var(--cyan)]/50 bg-[var(--cyan)]/[0.10] text-[var(--cyan)] hover:border-[var(--cyan)] hover:bg-[var(--cyan)]/[0.18]"
                     : "border border-[var(--border)] bg-[var(--bg)] text-[var(--text-secondary)] cursor-not-allowed"
@@ -1011,78 +1007,126 @@ function DepositWidget({
 
 /* ── Pool Card ── */
 
-function PoolCard({ pool }: { pool: StakePool }) {
+function PoolMetricCell({
+  label,
+  value,
+  valueClass = "text-[var(--text)]",
+}: {
+  label: string;
+  value: string;
+  valueClass?: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="mb-0.5 text-[9px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">{label}</div>
+      <div className={`truncate text-sm font-mono tabular-nums ${valueClass}`}>{value}</div>
+    </div>
+  );
+}
+
+/**
+ * Individual staking pool card — the VaultCard idiom (market logo + symbol,
+ * a 2×2 metric grid, a cap meter, and a select-to-deposit footer). Clicking
+ * the footer selects this pool in the DepositWidget and scrolls to it.
+ */
+function PoolCard({
+  pool,
+  position,
+  connected,
+  onSelect,
+}: {
+  pool: StakePool;
+  position?: UserPosition;
+  connected: boolean;
+  onSelect: (poolId: string) => void;
+}) {
   const capRatio = pool.capTotal > 0 ? pool.capUsed / pool.capTotal : 0;
+  const yourStake = position ? formatUsd(position.estimatedValue) : connected ? "$—" : "—";
 
   return (
-    <article className="group relative border border-[var(--border)] bg-[var(--panel-bg)] p-4 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)] hover:border-[var(--border-hover)]">
-      <div className="mb-4 flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[var(--accent)]/15 bg-[var(--accent)]/[0.04] text-[12px]">
-            💧
+    <div className="group block">
+      <div className="overflow-hidden rounded-none border border-[var(--border)] bg-[var(--panel-bg)] transition-all duration-200 hover:border-[var(--accent)]/30 hud-corners">
+        {/* Accent top line */}
+        <div className="h-px bg-gradient-to-r from-transparent via-[var(--accent)]/40 to-transparent" />
+
+        <div className="p-5">
+          {/* Token header */}
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-3">
+              <MarketLogo logoUrl={pool.logoUrl} symbol={pool.symbol} pixelOverride={32} decorative />
+              <div className="min-w-0">
+                <h3 className="truncate text-sm font-semibold text-[var(--text)]">{pool.symbol}</h3>
+                <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Insurance Pool</p>
+              </div>
+            </div>
+            <LivePoolPrice
+              slab={pool.slabAddress}
+              className="shrink-0 whitespace-nowrap text-[13px] font-semibold text-[var(--text)] tabular-nums"
+              style={{ fontFamily: "var(--font-mono)" }}
+            />
           </div>
-          <div className="min-w-0">
-            <h3 className="truncate text-[13px] font-semibold text-[var(--text)]">{pool.symbol}</h3>
-            <p className="text-[10px] text-[var(--text-muted)]">POOL</p>
+
+          {/* Stats grid */}
+          <div className="mb-4 grid grid-cols-2 gap-3">
+            <PoolMetricCell label="TVL" value={formatUsd(pool.tvl)} />
+            <PoolMetricCell
+              label="Your Stake"
+              value={yourStake}
+              valueClass={position ? "text-[var(--accent-text)]" : "text-[var(--text-muted)]"}
+            />
+            <PoolMetricCell
+              label="APR"
+              value={pool.apr > 0 ? `${pool.apr.toFixed(2)}%` : "0%"}
+              valueClass={pool.apr > 0 ? "text-[var(--cyan)]" : "text-[var(--text-muted)]"}
+            />
+            <PoolMetricCell label="Cooldown" value={slotsToTime(pool.cooldownSlots)} />
+          </div>
+
+          {/* Cap meter */}
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">Cap</span>
+              <span className="text-[10px] text-[var(--text-muted)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+                {pool.capTotal > 0 ? `${Math.round(capRatio * 100)}% full` : "No cap"}
+              </span>
+            </div>
+            <ProgressBar value={capRatio} height={4} fillClassName="bg-gradient-to-r from-[var(--accent)]/60 to-[var(--accent)]" />
+          </div>
+
+          {/* CTA — select this pool + jump to the deposit panel */}
+          <div className="mt-4 flex items-center justify-between border-t border-[var(--border)]/60 pt-3">
+            <span
+              className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)] tabular-nums"
+              style={{ fontFamily: "var(--font-mono)" }}
+            >
+              {pool.cooldownSlots.toLocaleString()} slots
+            </span>
+            <button
+              type="button"
+              onClick={() => onSelect(pool.id)}
+              className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--accent-text)] transition-colors hover:text-[var(--accent)]"
+            >
+              Deposit / Withdraw
+              <span aria-hidden="true">→</span>
+            </button>
           </div>
         </div>
-        <LivePoolPrice
-          slab={pool.slabAddress}
-          className="shrink-0 whitespace-nowrap text-[13px] font-semibold text-[var(--text)] tabular-nums"
-          style={{ fontFamily: "var(--font-mono)" }}
-        />
       </div>
-
-      <div className="space-y-2 text-[12px]">
-        <div className="flex justify-between">
-          <span className="text-[var(--text-secondary)]">TVL</span>
-          <span className="font-medium text-[var(--text)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>{formatUsd(pool.tvl)}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-[var(--text-secondary)]">APR</span>
-          <span className="font-semibold text-[var(--cyan)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>{pool.apr.toFixed(2)}%</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-[var(--text-secondary)]">Cap</span>
-          <span className="text-[var(--text-muted)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
-            {pool.capTotal > 0 ? `${Math.round(capRatio * 100)}% full` : "No cap"}
-          </span>
-        </div>
-        <div className="flex justify-between gap-x-2">
-          <span className="shrink-0 text-[var(--text-secondary)]">Cooldown</span>
-          <span className="text-right text-[var(--text-muted)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>{pool.cooldownSlots.toLocaleString()} slots ({slotsToTime(pool.cooldownSlots)})</span>
-        </div>
-      </div>
-
-      {/* Cap bar */}
-      <div className="mt-3">
-        <ProgressBar value={capRatio} height={4} fillClassName="bg-gradient-to-r from-[var(--accent)]/60 to-[var(--accent)]" />
-      </div>
-
-      {/* Deposit ghost button */}
-      <a
-        href="#deposit"
-        className="mt-4 flex w-full items-center justify-center gap-1.5 border border-[var(--accent)]/30 bg-transparent py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--accent)] transition-all duration-200 hover:border-[var(--accent)]/60 hover:bg-[var(--accent)]/[0.06]"
-      >
-        Deposit
-      </a>
-
-      <div className="absolute bottom-0 left-0 right-0 h-px bg-[var(--accent)]/0 transition-all duration-300 group-hover:bg-[var(--accent)]/30" />
-    </article>
+    </div>
   );
 }
 
 /** Subtle grid filler so an odd pool count doesn't leave a dangling empty
- *  cell in the last row of the (now capped at 2-col) pools grid — points at
- *  market creation instead of being dead space. */
+ *  cell in the last row of the pools grid — points at market creation instead
+ *  of being dead space. */
 function PoolPlaceholderCard() {
   return (
     <a
       href="/create"
-      className="group flex flex-col items-center justify-center gap-2 border border-dashed border-[var(--border)] bg-[var(--panel-bg)]/40 p-4 text-center transition-colors duration-200 hover:border-[var(--accent)]/40 hover:bg-[var(--bg-elevated)] sm:p-5"
+      className="group flex flex-col items-center justify-center gap-2 border border-dashed border-[var(--border)] bg-[var(--panel-bg)]/40 p-5 text-center transition-colors duration-200 hover:border-[var(--accent)]/40 hover:bg-[var(--bg-elevated)]"
     >
-      <span className="text-2xl text-[var(--text-muted)] transition-colors group-hover:text-[var(--accent)]">＋</span>
-      <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-colors group-hover:text-[var(--accent)]">
+      <span className="text-2xl text-[var(--text-muted)] transition-colors group-hover:text-[var(--accent-text)]">＋</span>
+      <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-colors group-hover:text-[var(--accent-text)]">
         Create a market
       </p>
       <p className="text-[10px] text-[var(--text-muted)]">More pools coming →</p>
@@ -1092,31 +1136,56 @@ function PoolPlaceholderCard() {
 
 /* ── Pool List Section ── */
 
-function PoolList({ pools, loading }: { pools: StakePool[]; loading: boolean }) {
+function PoolList({
+  pools,
+  loading,
+  positions,
+  connected,
+  onSelect,
+}: {
+  pools: StakePool[];
+  loading: boolean;
+  positions: UserPosition[];
+  connected: boolean;
+  onSelect: (poolId: string) => void;
+}) {
+  const positionByPoolId = new Map(positions.map((p) => [p.poolId, p]));
+
+  const header = (
+    <div className="mb-4 flex items-center justify-between">
+      <h2 className="text-sm font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
+        <span className="text-[var(--text-secondary)]">Insurance </span>Pools
+      </h2>
+      <span className="text-[11px] text-[var(--text-secondary)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+        {loading ? "…" : `${pools.length} pool${pools.length !== 1 ? "s" : ""}`}
+      </span>
+    </div>
+  );
+
   if (loading) {
     return (
       <section id="pools">
-        <div className="mb-4 flex items-center justify-between">
-          <span className="text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">// available pools</span>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] lg:grid-cols-2">
+        {header}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="bg-[var(--panel-bg)] p-4 sm:p-5 space-y-3">
-              <div className="flex items-center gap-2.5 mb-4">
-                <ShimmerSkeleton className="h-8 w-8 rounded-full" />
+            <div key={i} className="space-y-3 border border-[var(--border)] bg-[var(--panel-bg)] p-5">
+              <div className="mb-4 flex items-center gap-3">
+                <ShimmerSkeleton className="h-8 w-8" />
                 <div className="space-y-1.5">
                   <ShimmerSkeleton className="h-3 w-20" />
-                  <ShimmerSkeleton className="h-2.5 w-10" />
+                  <ShimmerSkeleton className="h-2.5 w-16" />
                 </div>
               </div>
-              {[0, 1, 2, 3].map((j) => (
-                <div key={j} className="flex justify-between">
-                  <ShimmerSkeleton className="h-3 w-16" />
-                  <ShimmerSkeleton className="h-3 w-20" />
-                </div>
-              ))}
-              <ShimmerSkeleton className="h-1 w-full mt-3" />
-              <ShimmerSkeleton className="h-8 w-full mt-2" />
+              <div className="grid grid-cols-2 gap-3">
+                {[0, 1, 2, 3].map((j) => (
+                  <div key={j} className="space-y-1">
+                    <ShimmerSkeleton className="h-2.5 w-10" />
+                    <ShimmerSkeleton className="h-4 w-16" />
+                  </div>
+                ))}
+              </div>
+              <ShimmerSkeleton className="mt-2 h-1 w-full" />
+              <ShimmerSkeleton className="mt-3 h-4 w-full" />
             </div>
           ))}
         </div>
@@ -1126,38 +1195,132 @@ function PoolList({ pools, loading }: { pools: StakePool[]; loading: boolean }) 
 
   if (pools.length === 0) {
     return (
-      <div className="border border-[var(--border)]/50 bg-[var(--panel-bg)] p-10 text-center">
-        <div className="mb-3 text-2xl text-[var(--text-muted)]">💧</div>
-        <p className="text-[11px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">No pools available yet</p>
-        <p className="mt-1 text-[10px] text-[var(--text-secondary)]">Check back soon.</p>
-      </div>
+      <section id="pools">
+        {header}
+        <div className="border border-[var(--border)] bg-[var(--panel-bg)] px-4 py-4 text-[11px] text-[var(--text-secondary)]">
+          No insurance pools available yet. Check back soon, or{" "}
+          <a href="/create" className="text-[var(--accent-text)] transition-colors hover:text-[var(--accent)]">create a market →</a>
+        </div>
+      </section>
     );
   }
 
-  // Bug #850 (extended) + clipping fix: the pools column lives in a
-  // lg:grid-cols-[380px_1fr] layout inside a max-w-[1100px] page, leaving only
-  // ~696px for pools at lg+. The old xl:grid-cols-3 needed 3 columns to fit,
-  // which overflowed that width and clipped the right column (including the
-  // live price) — capped at 2 columns everywhere fixes that. A pool count
-  // that isn't even still leaves a dangling empty cell in the last row, so
-  // top up to the next even count with a subtle placeholder card instead of
-  // leaving dead grid space.
+  // Cap at 2 columns; top up an odd count with a placeholder so the last row
+  // isn't a dangling empty cell.
   const fillerCount = pools.length >= 2 ? (2 - (pools.length % 2)) % 2 : 0;
 
   return (
     <section id="pools">
-      <div className="mb-4 flex items-center justify-between">
-        <span className="text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">// available pools</span>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] lg:grid-cols-2">
+      {header}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {pools.map((pool) => (
-          <PoolCard key={pool.id} pool={pool} />
+          <PoolCard
+            key={pool.id}
+            pool={pool}
+            position={positionByPoolId.get(pool.id)}
+            connected={connected}
+            onSelect={onSelect}
+          />
         ))}
         {Array.from({ length: fillerCount }).map((_, i) => (
           <PoolPlaceholderCard key={`filler-${i}`} />
         ))}
       </div>
     </section>
+  );
+}
+
+/* ── Sidebar: how staking works + what it backs + risk ─────────────────────
+   Mirrors EarnVaultView's sidebar idiom (Step rows + coverage list + a risk
+   notice) so the Stake tab reads as a sibling of the LP Vault tab. */
+
+function SidebarStep({ num, title, desc }: { num: number; title: string; desc: string }) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border border-[var(--accent)]/20 bg-[var(--accent)]/10 text-[10px] font-bold text-[var(--accent-text)]">
+        {num}
+      </div>
+      <div>
+        <div className="text-[12px] font-medium text-[var(--text)]">{title}</div>
+        <div className="text-[11px] text-[var(--text-secondary)]">{desc}</div>
+      </div>
+    </div>
+  );
+}
+
+function CoverageItem({ icon, label, description }: { icon: string; label: string; description: string }) {
+  return (
+    <div className="flex items-start gap-2">
+      <span aria-hidden="true" className="mt-0.5 text-xs">{icon}</span>
+      <div>
+        <div className="text-[12px] font-medium text-[var(--text)]">{label}</div>
+        <div className="text-[11px] text-[var(--text-secondary)]">{description}</div>
+      </div>
+    </div>
+  );
+}
+
+function StakeSidebar() {
+  return (
+    <div className="space-y-6">
+      {/* What staking backs */}
+      <div className="overflow-hidden rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] hud-corners">
+        <div className="h-px bg-gradient-to-r from-transparent via-[var(--warning)]/30 to-transparent" />
+        <div className="p-5">
+          <div className="mb-4 flex items-center gap-2">
+            <div aria-hidden="true" className="flex h-6 w-6 items-center justify-center rounded-sm bg-[var(--warning)]/10 text-xs">
+              🛡️
+            </div>
+            <h3 className="text-sm font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
+              What Staking Backs
+            </h3>
+          </div>
+          <div className="space-y-2">
+            <CoverageItem
+              icon="⚡"
+              label="Liquidation Shortfall"
+              description="First-loss capital when liquidations don't fully cover a position"
+            />
+            <CoverageItem
+              icon="🔄"
+              label="Socialized Loss Buffer"
+              description="Absorbs bad debt before it cascades to LPs and other depositors"
+            />
+            <CoverageItem
+              icon="🏗️"
+              label="Protocol Solvency"
+              description="Pre-funds the market's insurance fund via an admin flush"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* How staking works */}
+      <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-5 hud-corners">
+        <div className="-mx-5 -mt-5 mb-5 h-px bg-gradient-to-r from-transparent via-[var(--accent)]/30 to-transparent" />
+        <h3 className="mb-4 text-sm font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
+          How It Works
+        </h3>
+        <div className="space-y-3">
+          <SidebarStep num={1} title="Deposit Collateral" desc="Stake sim-USDC into a market's insurance pool" />
+          <SidebarStep num={2} title="Back the Fund" desc="Your deposit becomes first-loss backing for that market" />
+          <SidebarStep num={3} title="Cooldown" desc="A redemption cooldown applies before you can withdraw" />
+          <SidebarStep num={4} title="Withdraw" desc="Redeem LP tokens for your share of the pool after cooldown" />
+        </div>
+
+        {/* Risk notice */}
+        <div className="mt-5 border-t border-[var(--border)] pt-4">
+          <div className="mb-2 text-[10px] uppercase tracking-[0.15em] text-[var(--warning)]">
+            ⚠ Risk Notice
+          </div>
+          <p className="text-[11px] leading-relaxed text-[var(--text-secondary)]">
+            Staked funds are first-loss insurance capital. Admin flushes to insurance permanently
+            reduce your redeemable value, and there is no yield distribution — APR is genuinely 0%.
+            Only stake what you can afford to lose.
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1258,58 +1421,70 @@ export default function StakePage() {
     ? positions.reduce((sum, p) => sum + p.estimatedValue, 0)
     : connected ? 0 : null;
 
+  const selectPoolAndScroll = useCallback((poolId: string, mode: "deposit" | "withdraw") => {
+    setSelectedPool(poolId);
+    setWidgetMode(mode);
+    document.getElementById("deposit")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, []);
+
   return (
     // No min-h-screen: this page renders both standalone at /stake AND as a tab
-    // inside the Earn hub (app/earn), which supplies the outer layout — a forced
-    // full-viewport height left an awkward gap under the hub's tab bar. Content
+    // inside the Earn hub (app/earn), which supplies the outer layout. Content
     // flows naturally at both mount points.
-    <div className="relative overflow-x-hidden">
-      {/* Hero */}
-      <ErrorBoundary label="Stake Hero">
-        <StakeHero pools={pools} totalUserDeposited={totalUserDeposited} />
+    <div className="relative animate-fade-in overflow-x-hidden">
+      {/* Compact header + stats strip (mirrors EarnHeader) */}
+      <ErrorBoundary label="Stake Header">
+        <StakeHeader pools={pools} totalUserDeposited={totalUserDeposited} loading={poolsLoading} />
       </ErrorBoundary>
 
       {/* Main content */}
-      <div className="mx-auto max-w-[1100px] px-6 pb-16">
-        <ScrollReveal>
-          {/* Mobile: single-column stack (position → deposit → pools) */}
-          {/* Desktop lg+: 2-column — sidebar [380px] on left, pools on right */}
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-[380px_1fr]">
-            {/* Left column: Position + Deposit — full-width on mobile, sidebar on lg+ */}
-            {/* pb-24 on mobile ensures deposit widget clears the fixed bottom nav (56px) */}
-            <div className="space-y-4 pb-24 lg:pb-0">
-              <ErrorBoundary label="Your Position">
-                <YourPositionPanel
-                  positions={positions}
-                  onWithdrawSuccess={handleTxSuccess}
-                  onManage={(poolId) => {
-                    setSelectedPool(poolId);
-                    setWidgetMode("withdraw");
-                    document.getElementById("deposit")?.scrollIntoView({ behavior: "smooth" });
-                  }}
-                />
-              </ErrorBoundary>
-              <ErrorBoundary label="Deposit Widget">
-                <DepositWidget
-                  pools={pools}
-                  onTxSuccess={handleTxSuccess}
-                  selectedPool={selectedPool}
-                  setSelectedPool={setSelectedPool}
-                  mode={widgetMode}
-                  setMode={setWidgetMode}
-                />
-              </ErrorBoundary>
-            </div>
-
-            {/* Right column: Pool list — stacks below on mobile, sidebar on lg+ */}
-            {/* pb-24 on mobile clears the fixed bottom nav (56px + safe-area) */}
-            <div className="min-w-0 pb-24 lg:pb-0">
+      <div className="mx-auto max-w-6xl px-4 pb-24 lg:pb-16">
+        {/* MAIN (pools + deposit/withdraw) + SIDEBAR (how it works / risk) */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
+          {/* MAIN — pool list on top, then deposit panel + your positions */}
+          <div className="space-y-6 lg:col-span-3">
+            <ScrollReveal>
               <ErrorBoundary label="Pool List">
-                <PoolList pools={pools} loading={poolsLoading} />
+                <PoolList
+                  pools={pools}
+                  loading={poolsLoading}
+                  positions={positions}
+                  connected={connected}
+                  onSelect={(poolId) => selectPoolAndScroll(poolId, "deposit")}
+                />
               </ErrorBoundary>
-            </div>
+            </ScrollReveal>
+
+            <ScrollReveal>
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <ErrorBoundary label="Deposit Widget">
+                  <DepositWidget
+                    pools={pools}
+                    onTxSuccess={handleTxSuccess}
+                    selectedPool={selectedPool}
+                    setSelectedPool={setSelectedPool}
+                    mode={widgetMode}
+                    setMode={setWidgetMode}
+                  />
+                </ErrorBoundary>
+                <ErrorBoundary label="Your Positions">
+                  <YourPositionPanel
+                    positions={positions}
+                    onWithdrawSuccess={handleTxSuccess}
+                    onManage={(poolId) => selectPoolAndScroll(poolId, "withdraw")}
+                  />
+                </ErrorBoundary>
+              </div>
+            </ScrollReveal>
           </div>
-        </ScrollReveal>
+
+          {/* SIDEBAR — how staking works / what it backs / risk */}
+          <div className="lg:col-span-1">
+            <ScrollReveal>
+              <StakeSidebar />
+            </ScrollReveal>
+          </div>
+        </div>
       </div>
     </div>
   );
