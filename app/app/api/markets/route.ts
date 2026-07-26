@@ -729,7 +729,7 @@ export async function GET(request: NextRequest) {
     // fields to null/0 without touching the sanitization/zombie/health logic
     // below. OI, price, and insurance are read live from chain elsewhere.
     const SELECT_FIELDS =
-      "slab_address,mint_address,symbol,name,decimals,deployer,logo_url,max_leverage,trading_fee_bps," +
+      "slab_address,mint_address,symbol,name,decimals,deployer,logo_url,metadata_source,max_leverage,trading_fee_bps," +
       "last_price,volume_24h,trade_count_24h," +
       "created_at,oracle_mode,dex_pool_address,mainnet_ca,oracle_authority";
 
@@ -931,13 +931,22 @@ export async function GET(request: NextRequest) {
       // though the API returned null. Using sanitizedPrice keeps zombie check consistent with
       // what consumers receive.
       // GH#1564: All n_* locals already coerced via numericOrNull() above — no double-coerce needed.
+      // REDUCED SCHEMA (2026-07): SELECT_FIELDS no longer requests vault_balance,
+      // c_tot, total_accounts or total_open_interest, so those keys are ABSENT on
+      // the row. numericOrNull() maps absent to null, which isZombieMarket reads
+      // as "zero → dead". Forward undefined for keys the query never selected so
+      // it can tell "not mirrored" from "present and zero" (see the note there).
+      const asSupplied = (raw: unknown, coerced: number | null) =>
+        raw === undefined ? undefined : coerced;
+      const rawRow = m as Record<string, unknown>;
+
       const is_zombie = isZombieMarket({
-        vault_balance: n_vault_balance,
-        c_tot: n_c_tot,
+        vault_balance: asSupplied(rawRow.vault_balance, n_vault_balance),
+        c_tot: asSupplied(rawRow.c_tot, n_c_tot),
         last_price: sanitizedPrice,
         volume_24h: n_volume_24h,
-        total_open_interest: n_total_open_interest,
-        total_accounts: n_total_accounts,
+        total_open_interest: asSupplied(rawRow.total_open_interest, n_total_open_interest),
+        total_accounts: asSupplied(rawRow.total_accounts, n_total_accounts),
       });
 
       return {

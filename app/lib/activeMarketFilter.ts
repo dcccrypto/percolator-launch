@@ -77,6 +77,25 @@ export function isZombieMarket(row: {
   total_open_interest?: number | null;
   total_accounts?: number | null;
 }): boolean {
+  // REDUCED SCHEMA (2026-07): market_stats no longer mirrors vault_balance, c_tot,
+  // total_accounts or total_open_interest — the frontend reads vault/OI/insurance
+  // live from chain instead. A DB row therefore OMITS those keys entirely.
+  //
+  // Every check below reads absence as death: `vault_balance ?? null` collapses
+  // undefined to null, hasActivity sees `total_accounts ?? 0` as 0, and the
+  // null-vault branch then returns true. That classified all four live devnet
+  // markets as zombies and served an empty market list (total:0, zombieCount:4).
+  //
+  // Absent is not zero. Without any of the three liveness signals there is no
+  // evidence either way, so decline to classify. Genuinely dead markets are still
+  // excluded upstream: the indexer's sweep sets status=closed + indexer_excluded
+  // on dust-vault/no-account slabs, and both the view and the query filter those.
+  const hasLivenessSignals =
+    row.vault_balance !== undefined ||
+    row.c_tot !== undefined ||
+    row.total_accounts !== undefined;
+  if (!hasLivenessSignals) return false;
+
   const vaultBal = row.vault_balance ?? null;
   const cTot = row.c_tot ?? null;
 

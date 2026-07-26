@@ -642,13 +642,22 @@ export async function GET(request: NextRequest) {
     const sanitizedPrice = (rawPrice != null && rawPrice > 0 && rawPrice <= MAX_SANE_PRICE_FOR_ACTIVE)
       ? rawPrice
       : null;
+    // REDUCED SCHEMA (2026-07): vault_balance / c_tot / total_accounts /
+    // total_open_interest are no longer mirrored into market_stats, so these keys
+    // are absent here. numericOrNull() would map absent to null, which
+    // isZombieMarket reads as "zero → dead" and would zombie every live market.
+    // Forward undefined for keys the row doesn't carry (see the note in
+    // lib/activeMarketFilter.ts).
+    const asSupplied = (key: string) =>
+      raw[key] === undefined ? undefined : numericOrNull(raw[key]);
+
     return !isZombieMarket({
-      vault_balance: numericOrNull(raw.vault_balance),
-      c_tot: numericOrNull(raw.c_tot),
+      vault_balance: asSupplied("vault_balance"),
+      c_tot: asSupplied("c_tot"),
       last_price: sanitizedPrice,
       volume_24h: numericOrNull(raw.volume_24h),
-      total_open_interest: numericOrNull(raw.total_open_interest),
-      total_accounts: numericOrNull(raw.total_accounts),
+      total_open_interest: asSupplied("total_open_interest"),
+      total_accounts: asSupplied("total_accounts"),
     });
   });
   const nonZombieCount = statsData.length - nonZombieListedMarkets.length;

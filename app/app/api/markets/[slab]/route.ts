@@ -16,6 +16,8 @@ import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 import { readCreatorFeeClaimable } from "@/lib/v17-creator-fee";
 import { readRegisteredMarkets } from "@/lib/playground-registered-markets";
 import { getMarketLpCapital } from "@/lib/lp-portfolio";
+import { verifyKeeperSignature } from "@/lib/keeper-hmac";
+import { sanitizeLogoUrl } from "@/lib/token-metadata-validators";
 
 /**
  * GH#2334 follow-up: `vault_balance`/`c_tot` are NULL for every v17 market in
@@ -381,6 +383,152 @@ export async function GET(
   } catch (error) {
     Sentry.captureException(error, {
       tags: { endpoint: "/api/markets/[slab]", method: "GET", slab },
+    });
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
+/**
+ * PATCH /api/markets/[slab] — set a market's displayed identity.
+ *
+ * Why this exists: v17 admin-oracle markets carry NO on-chain pointer to what
+ * they track (no Pyth indexFeedId, no DEX pool, no mainnet CA). The indexer
+ * cannot name them — it writes a neutral "UNKNOWN" / "Market <prefix>"
+ * placeholder — so a human supplies the real symbol, name, and logo here.
+ *
+ * Writing through this route flips `metadata_source` to 'manual', which the
+ * indexer treats as off-limits: its registration path only ever INSERTs missing
+ * slabs, so an edit made here is never overwritten by a later discovery cycle.
+ *
+ * Auth: the same HMAC-SHA256 scheme as /api/oracle-keeper/register — the shared
+ * secret never crosses the wire, and the signed timestamp bounds replay. This is
+ * an operator endpoint, not a user-facing one.
+ *
+ *   x-keeper-timestamp: <ms epoch>
+ *   x-keeper-signature: hex HMAC-SHA256("<timestamp>.<rawBody>", KEEPER_REGISTER_SECRET)
+ *
+ * Body (every field optional; at least one required):
+ *   { "symbol": "SOL", "name": "SOL/USDC Perpetual", "logo_url": "https://…" }
+ *
+ * `logo_url: null` explicitly clears the logo.
+ */
+export async function PATCH(
+  req: NextRequest,
+  context: { params: Promise<{ slab: string }> },
+) {
+  const { slab } = await context.params;
+
+  // PATCH targets a concrete market, so unlike GET it does not accept slug
+  // aliases ("SOL") — always require a real slab address.
+  const validation = validateSlabParam(slab);
+  if (!validation.valid) {
+    return validation.response;
+  }
+
+  const secret = process.env.KEEPER_REGISTER_SECRET;
+  if (!secret) {
+    // Fail closed: without a secret every request would otherwise be "authorized".
+    return NextResponse.json({ error: "Not configured" }, { status: 503 });
+  }
+
+  // Read the body ONCE as raw text — the HMAC covers the exact bytes sent, so it
+  // must be verified before parsing, and re-reading the stream is not possible.
+  const rawBody = await req.text();
+  const signed = verifyKeeperSignature(
+    secret,
+    req.headers.get("x-keeper-timestamp"),
+    rawBody,
+    req.headers.get("x-keeper-signature"),
+  );
+  if (!signed) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  let body: unknown;
+  try {
+    body = JSON.parse(rawBody);
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ error: "Body must be an object" }, { status: 400 });
+  }
+  const input = body as Record<string, unknown>;
+
+  // Build the patch from supplied keys only, so omitting a field leaves it alone
+  // while `logo_url: null` deliberately clears it.
+  const patch: Record<string, unknown> = {};
+
+  if ("symbol" in input) {
+    const symbol = typeof input.symbol === "string" ? input.symbol.trim() : "";
+    if (symbol.length === 0 || symbol.length > 32) {
+      return NextResponse.json({ error: "symbol must be 1-32 characters" }, { status: 400 });
+    }
+    // Same control-character/markup strip the indexer applies to DAS metadata —
+    // this value is stored and rendered.
+    patch.symbol = symbol.replace(/[\x00-\x1f\x7f<>]/g, "");
+  }
+
+  if ("name" in input) {
+    const name = typeof input.name === "string" ? input.name.trim() : "";
+    if (name.length === 0 || name.length > 128) {
+      return NextResponse.json({ error: "name must be 1-128 characters" }, { status: 400 });
+    }
+    patch.name = name.replace(/[\x00-\x1f\x7f<>]/g, "");
+  }
+
+  if ("logo_url" in input) {
+    if (input.logo_url === null) {
+      patch.logo_url = null;
+    } else {
+      // Reuse the same allowlist the launch flow uses, so a URL accepted here
+      // renders identically to one set at registration.
+      const sanitized = sanitizeLogoUrl(input.logo_url);
+      if (!sanitized) {
+        return NextResponse.json(
+          { error: "logo_url must be an https:// or ipfs:// URL, or null to clear" },
+          { status: 400 },
+        );
+      }
+      patch.logo_url = sanitized;
+    }
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return NextResponse.json(
+      { error: "Supply at least one of: symbol, name, logo_url" },
+      { status: 400 },
+    );
+  }
+
+  // Mark the row as human-authored so the indexer leaves it alone from now on.
+  // updated_at is set by the markets_set_updated_at trigger, not here.
+  patch.metadata_source = "manual";
+
+  try {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from("markets")
+      .update(patch)
+      .eq("slab_address", slab)
+      .eq("network", getServerNetwork())
+      .select("slab_address,symbol,name,logo_url,metadata_source")
+      .maybeSingle();
+
+    if (error) {
+      Sentry.captureException(error, {
+        tags: { endpoint: "/api/markets/[slab]", method: "PATCH", slab },
+      });
+      return NextResponse.json({ error: "Update failed" }, { status: 500 });
+    }
+    if (!data) {
+      return NextResponse.json({ error: "Market not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ market: data });
+  } catch (error) {
+    Sentry.captureException(error, {
+      tags: { endpoint: "/api/markets/[slab]", method: "PATCH", slab },
     });
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
