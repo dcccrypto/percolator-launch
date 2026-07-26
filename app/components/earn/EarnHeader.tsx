@@ -3,7 +3,6 @@
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
 import type { EarnStats } from '@/hooks/useEarnStats';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
-import { InDevelopmentBanner } from '@/components/InDevelopmentBanner';
 
 
 interface EarnHeaderProps {
@@ -34,17 +33,14 @@ export function EarnHeader({ stats, loading }: EarnHeaderProps) {
           Provide counterparty backing to Percolator markets — fully on-chain and
           transparent.
         </p>
-
-        <div className="mt-4 max-w-3xl">
-          <InDevelopmentBanner variant="inline">
-            LP deposits are held as protocol counterparty backing. Deposits and redemptions work, but
-            yield distribution isn&apos;t live on the deployed program yet — <span className="text-[var(--text)]">APY
-            is genuinely 0%</span>. Treat this as experimental, not a yield product.
-          </InDevelopmentBanner>
-        </div>
+        {/* Honest 0% caption — kept small and muted, not a prominent banner. */}
+        <p className="mt-1.5 text-[11px] text-[var(--text-muted)] max-w-lg">
+          Deposits and redemptions are live on devnet; yield distribution isn&apos;t active on the
+          deployed program yet, so APY is currently 0%.
+        </p>
 
         {/* Stats row */}
-        <div className="mt-6 grid grid-cols-1 gap-px border border-[var(--border)] bg-[var(--border)] sm:grid-cols-3" aria-label="Earn statistics">
+        <div className="mt-5 grid grid-cols-1 gap-px border border-[var(--border)] bg-[var(--border)] sm:grid-cols-3" aria-label="Earn statistics">
           <StatCell
             label="Total Value Locked"
             loading={loading}

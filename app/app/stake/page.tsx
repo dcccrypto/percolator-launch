@@ -13,11 +13,9 @@ import { getConfig } from "@/lib/config";
 import { unpackAccount, getMint } from "@solana/spl-token";
 import { useStakeDepositByPool } from "@/hooks/useStakeDepositByPool";
 import { useStakeWithdrawByPool } from "@/hooks/useStakeWithdrawByPool";
-import { InDevelopmentBanner } from "@/components/InDevelopmentBanner";
 import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
 import { formatMarkPrice } from "@/lib/format";
-import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
@@ -321,19 +319,15 @@ function StakeHeader({
           Stake collateral into a market&apos;s insurance pool to provide first-loss backing —
           fully on-chain and transparent.
         </p>
-
-        <div className="mt-4 max-w-3xl">
-          <InDevelopmentBanner variant="inline">
-            Staking backs the insurance fund and withdrawals work, but there&apos;s no yield
-            distribution on the deployed program — <span className="text-[var(--text)]">APR is
-            genuinely 0%</span>, and flushes to insurance reduce staked value. Experimental, not a
-            yield product.
-          </InDevelopmentBanner>
-        </div>
+        {/* Honest 0% caption — kept small and muted, not a prominent banner. */}
+        <p className="mt-1.5 max-w-lg text-[11px] text-[var(--text-muted)]">
+          Deposits and withdrawals are live on devnet; there&apos;s no yield distribution on the
+          deployed program yet, so APR is currently 0% and flushes to insurance reduce staked value.
+        </p>
 
         {/* Stats strip */}
         <div
-          className="mt-6 grid grid-cols-2 gap-px border border-[var(--border)] bg-[var(--border)] sm:grid-cols-4"
+          className="mt-5 grid grid-cols-2 gap-px border border-[var(--border)] bg-[var(--border)] sm:grid-cols-4"
           aria-label="Staking statistics"
         >
           {stats.map((s) => (
@@ -1005,154 +999,105 @@ function DepositWidget({
   );
 }
 
-/* ── Pool Card ── */
-
-function PoolMetricCell({
-  label,
-  value,
-  valueClass = "text-[var(--text)]",
-}: {
-  label: string;
-  value: string;
-  valueClass?: string;
-}) {
-  return (
-    <div className="min-w-0">
-      <div className="mb-0.5 text-[9px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">{label}</div>
-      <div className={`truncate text-sm font-mono tabular-nums ${valueClass}`}>{value}</div>
-    </div>
-  );
-}
+/* ── Pool Table ── */
 
 /**
- * Individual staking pool card — the VaultCard idiom (market logo + symbol,
- * a 2×2 metric grid, a cap meter, and a select-to-deposit footer). Clicking
- * the footer selects this pool in the DepositWidget and scrolls to it.
+ * Shared CSS-grid column template for the insurance-pool table — used by both
+ * the column-header row and every PoolRow so they stay aligned. Mirrors the
+ * terminal-table idiom (TradeHistoryTable / the LP-vault table).
+ *
+ * Columns: Pool · TVL · Cooldown · Your Stake · APR.
  */
-function PoolCard({
+const STAKE_GRID_COLS =
+  "grid grid-cols-[minmax(120px,1.6fr)_84px_84px_92px_64px] items-center gap-x-3";
+
+/**
+ * A single selectable insurance-pool row. Clicking (or keyboard-activating)
+ * loads this pool into the deposit rail on the right — the "obvious deposit
+ * flow." The whole row is the target.
+ */
+function PoolRow({
   pool,
   position,
   connected,
+  selected,
   onSelect,
 }: {
   pool: StakePool;
   position?: UserPosition;
   connected: boolean;
+  selected: boolean;
   onSelect: (poolId: string) => void;
 }) {
-  const capRatio = pool.capTotal > 0 ? pool.capUsed / pool.capTotal : 0;
   const yourStake = position ? formatUsd(position.estimatedValue) : connected ? "$—" : "—";
 
   return (
-    <div className="group block">
-      <div className="overflow-hidden rounded-none border border-[var(--border)] bg-[var(--panel-bg)] transition-all duration-200 hover:border-[var(--accent)]/30 hud-corners">
-        {/* Accent top line */}
-        <div className="h-px bg-gradient-to-r from-transparent via-[var(--accent)]/40 to-transparent" />
-
-        <div className="p-5">
-          {/* Token header */}
-          <div className="mb-4 flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-3">
-              <MarketLogo logoUrl={pool.logoUrl} symbol={pool.symbol} pixelOverride={32} decorative />
-              <div className="min-w-0">
-                <h3 className="truncate text-sm font-semibold text-[var(--text)]">{pool.symbol}</h3>
-                <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Insurance Pool</p>
-              </div>
-            </div>
-            <LivePoolPrice
-              slab={pool.slabAddress}
-              className="shrink-0 whitespace-nowrap text-[13px] font-semibold text-[var(--text)] tabular-nums"
-              style={{ fontFamily: "var(--font-mono)" }}
-            />
-          </div>
-
-          {/* Stats grid */}
-          <div className="mb-4 grid grid-cols-2 gap-3">
-            <PoolMetricCell label="TVL" value={formatUsd(pool.tvl)} />
-            <PoolMetricCell
-              label="Your Stake"
-              value={yourStake}
-              valueClass={position ? "text-[var(--accent-text)]" : "text-[var(--text-muted)]"}
-            />
-            <PoolMetricCell
-              label="APR"
-              value={pool.apr > 0 ? `${pool.apr.toFixed(2)}%` : "0%"}
-              valueClass={pool.apr > 0 ? "text-[var(--cyan)]" : "text-[var(--text-muted)]"}
-            />
-            <PoolMetricCell label="Cooldown" value={slotsToTime(pool.cooldownSlots)} />
-          </div>
-
-          {/* Cap meter */}
-          <div>
-            <div className="mb-1 flex items-center justify-between">
-              <span className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">Cap</span>
-              <span className="text-[10px] text-[var(--text-muted)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
-                {pool.capTotal > 0 ? `${Math.round(capRatio * 100)}% full` : "No cap"}
-              </span>
-            </div>
-            <ProgressBar value={capRatio} height={4} fillClassName="bg-gradient-to-r from-[var(--accent)]/60 to-[var(--accent)]" />
-          </div>
-
-          {/* CTA — select this pool + jump to the deposit panel */}
-          <div className="mt-4 flex items-center justify-between border-t border-[var(--border)]/60 pt-3">
-            <span
-              className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)] tabular-nums"
-              style={{ fontFamily: "var(--font-mono)" }}
-            >
-              {pool.cooldownSlots.toLocaleString()} slots
-            </span>
-            <button
-              type="button"
-              onClick={() => onSelect(pool.id)}
-              className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--accent-text)] transition-colors hover:text-[var(--accent)]"
-            >
-              Deposit / Withdraw
-              <span aria-hidden="true">→</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** Subtle grid filler so an odd pool count doesn't leave a dangling empty
- *  cell in the last row of the pools grid — points at market creation instead
- *  of being dead space. */
-function PoolPlaceholderCard() {
-  return (
-    <a
-      href="/create"
-      className="group flex flex-col items-center justify-center gap-2 border border-dashed border-[var(--border)] bg-[var(--panel-bg)]/40 p-5 text-center transition-colors duration-200 hover:border-[var(--accent)]/40 hover:bg-[var(--bg-elevated)]"
+    <button
+      type="button"
+      onClick={() => onSelect(pool.id)}
+      aria-pressed={selected}
+      className={`${STAKE_GRID_COLS} w-full border-b border-[var(--border)] border-l-2 px-3 py-2.5 text-left transition-colors duration-100 ${
+        selected
+          ? "border-l-[var(--accent)] bg-[var(--accent)]/[0.06]"
+          : "border-l-transparent hover:bg-[var(--bg-elevated)]"
+      }`}
     >
-      <span className="text-2xl text-[var(--text-muted)] transition-colors group-hover:text-[var(--accent-text)]">＋</span>
-      <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-colors group-hover:text-[var(--accent-text)]">
-        Create a market
-      </p>
-      <p className="text-[10px] text-[var(--text-muted)]">More pools coming →</p>
-    </a>
+      {/* Pool / market */}
+      <div className="flex min-w-0 items-center gap-2">
+        <MarketLogo logoUrl={pool.logoUrl} symbol={pool.symbol} pixelOverride={22} decorative />
+        <span className="min-w-0 truncate text-[12px] font-medium text-[var(--text)]">{pool.symbol}</span>
+      </div>
+
+      {/* TVL */}
+      <span className="text-right text-[12px] tabular-nums text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
+        {formatUsd(pool.tvl)}
+      </span>
+
+      {/* Cooldown */}
+      <span className="text-right text-[12px] tabular-nums text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
+        {slotsToTime(pool.cooldownSlots)}
+      </span>
+
+      {/* Your stake */}
+      <span
+        className={`text-right text-[12px] tabular-nums ${position ? "text-[var(--accent-text)]" : "text-[var(--text-muted)]"}`}
+        style={{ fontFamily: "var(--font-mono)" }}
+      >
+        {yourStake}
+      </span>
+
+      {/* APR */}
+      <span
+        className={`text-right text-[12px] tabular-nums ${pool.apr > 0 ? "text-[var(--cyan)]" : "text-[var(--text-muted)]"}`}
+        style={{ fontFamily: "var(--font-mono)" }}
+      >
+        {pool.apr > 0 ? `${pool.apr.toFixed(1)}%` : "0%"}
+      </span>
+    </button>
   );
 }
 
-/* ── Pool List Section ── */
+/* ── Pool Table Section ── */
 
-function PoolList({
+function PoolTable({
   pools,
   loading,
   positions,
   connected,
+  selectedPool,
   onSelect,
 }: {
   pools: StakePool[];
   loading: boolean;
   positions: UserPosition[];
   connected: boolean;
+  selectedPool: string;
   onSelect: (poolId: string) => void;
 }) {
   const positionByPoolId = new Map(positions.map((p) => [p.poolId, p]));
 
   const header = (
-    <div className="mb-4 flex items-center justify-between">
+    <div className="mb-3 flex items-center justify-between">
       <h2 className="text-sm font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
         <span className="text-[var(--text-secondary)]">Insurance </span>Pools
       </h2>
@@ -1162,32 +1107,36 @@ function PoolList({
     </div>
   );
 
+  const columnHeader = (
+    <div className={`${STAKE_GRID_COLS} border-b border-[var(--border)] bg-[var(--bg-elevated)]/50 px-3 py-2`}>
+      <span className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Pool</span>
+      <span className="text-right text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">TVL</span>
+      <span className="text-right text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Cooldown</span>
+      <span className="text-right text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Your Stake</span>
+      <span className="text-right text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">APR</span>
+    </div>
+  );
+
   if (loading) {
     return (
       <section id="pools">
         {header}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="space-y-3 border border-[var(--border)] bg-[var(--panel-bg)] p-5">
-              <div className="mb-4 flex items-center gap-3">
-                <ShimmerSkeleton className="h-8 w-8" />
-                <div className="space-y-1.5">
-                  <ShimmerSkeleton className="h-3 w-20" />
-                  <ShimmerSkeleton className="h-2.5 w-16" />
+        <div className="overflow-x-auto border border-[var(--border)] bg-[var(--panel-bg)]">
+          <div className="min-w-[520px]">
+            {columnHeader}
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className={`${STAKE_GRID_COLS} border-b border-[var(--border)] px-3 py-2.5`}>
+                <div className="flex items-center gap-2">
+                  <ShimmerSkeleton className="h-[22px] w-[22px]" />
+                  <ShimmerSkeleton className="h-3.5 w-16" />
                 </div>
+                <ShimmerSkeleton className="ml-auto h-3.5 w-12" />
+                <ShimmerSkeleton className="ml-auto h-3.5 w-10" />
+                <ShimmerSkeleton className="ml-auto h-3.5 w-12" />
+                <ShimmerSkeleton className="ml-auto h-3.5 w-8" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                {[0, 1, 2, 3].map((j) => (
-                  <div key={j} className="space-y-1">
-                    <ShimmerSkeleton className="h-2.5 w-10" />
-                    <ShimmerSkeleton className="h-4 w-16" />
-                  </div>
-                ))}
-              </div>
-              <ShimmerSkeleton className="mt-2 h-1 w-full" />
-              <ShimmerSkeleton className="mt-3 h-4 w-full" />
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </section>
     );
@@ -1205,26 +1154,23 @@ function PoolList({
     );
   }
 
-  // Cap at 2 columns; top up an odd count with a placeholder so the last row
-  // isn't a dangling empty cell.
-  const fillerCount = pools.length >= 2 ? (2 - (pools.length % 2)) % 2 : 0;
-
   return (
     <section id="pools">
       {header}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {pools.map((pool) => (
-          <PoolCard
-            key={pool.id}
-            pool={pool}
-            position={positionByPoolId.get(pool.id)}
-            connected={connected}
-            onSelect={onSelect}
-          />
-        ))}
-        {Array.from({ length: fillerCount }).map((_, i) => (
-          <PoolPlaceholderCard key={`filler-${i}`} />
-        ))}
+      <div className="overflow-x-auto border border-[var(--border)] bg-[var(--panel-bg)]">
+        <div className="min-w-[520px]">
+          {columnHeader}
+          {pools.map((pool) => (
+            <PoolRow
+              key={pool.id}
+              pool={pool}
+              position={positionByPoolId.get(pool.id)}
+              connected={connected}
+              selected={pool.id === selectedPool}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -1260,65 +1206,46 @@ function CoverageItem({ icon, label, description }: { icon: string; label: strin
   );
 }
 
+/* Slim secondary strip — explanatory content kept BELOW the functional
+   table+rail, as a row of small cards (mirrors EarnVaultView's info strip). */
 function StakeSidebar() {
   return (
-    <div className="space-y-6">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
       {/* What staking backs */}
-      <div className="overflow-hidden rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] hud-corners">
-        <div className="h-px bg-gradient-to-r from-transparent via-[var(--warning)]/30 to-transparent" />
-        <div className="p-5">
-          <div className="mb-4 flex items-center gap-2">
-            <div aria-hidden="true" className="flex h-6 w-6 items-center justify-center rounded-sm bg-[var(--warning)]/10 text-xs">
-              🛡️
-            </div>
-            <h3 className="text-sm font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
-              What Staking Backs
-            </h3>
-          </div>
-          <div className="space-y-2">
-            <CoverageItem
-              icon="⚡"
-              label="Liquidation Shortfall"
-              description="First-loss capital when liquidations don't fully cover a position"
-            />
-            <CoverageItem
-              icon="🔄"
-              label="Socialized Loss Buffer"
-              description="Absorbs bad debt before it cascades to LPs and other depositors"
-            />
-            <CoverageItem
-              icon="🏗️"
-              label="Protocol Solvency"
-              description="Pre-funds the market's insurance fund via an admin flush"
-            />
-          </div>
+      <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-4 hud-corners">
+        <div className="mb-3 flex items-center gap-2">
+          <span aria-hidden="true" className="text-xs">🛡️</span>
+          <h3 className="text-[12px] font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
+            What Staking Backs
+          </h3>
+        </div>
+        <div className="space-y-2">
+          <CoverageItem icon="⚡" label="Liquidation Shortfall" description="First-loss capital when liquidations don't fully cover a position" />
+          <CoverageItem icon="🔄" label="Socialized Loss Buffer" description="Absorbs bad debt before it cascades to LPs and depositors" />
+          <CoverageItem icon="🏗️" label="Protocol Solvency" description="Pre-funds the market's insurance fund via an admin flush" />
         </div>
       </div>
 
       {/* How staking works */}
-      <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-5 hud-corners">
-        <div className="-mx-5 -mt-5 mb-5 h-px bg-gradient-to-r from-transparent via-[var(--accent)]/30 to-transparent" />
-        <h3 className="mb-4 text-sm font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
+      <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-4 hud-corners">
+        <h3 className="mb-3 text-[12px] font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
           How It Works
         </h3>
-        <div className="space-y-3">
-          <SidebarStep num={1} title="Deposit Collateral" desc="Stake sim-USDC into a market's insurance pool" />
-          <SidebarStep num={2} title="Back the Fund" desc="Your deposit becomes first-loss backing for that market" />
-          <SidebarStep num={3} title="Cooldown" desc="A redemption cooldown applies before you can withdraw" />
-          <SidebarStep num={4} title="Withdraw" desc="Redeem LP tokens for your share of the pool after cooldown" />
+        <div className="space-y-2">
+          <SidebarStep num={1} title="Deposit" desc="Stake sim-USDC into a market's insurance pool" />
+          <SidebarStep num={2} title="Back the fund" desc="Your deposit becomes first-loss backing" />
+          <SidebarStep num={3} title="Withdraw" desc="Redeem LP tokens for your share after cooldown" />
         </div>
+      </div>
 
-        {/* Risk notice */}
-        <div className="mt-5 border-t border-[var(--border)] pt-4">
-          <div className="mb-2 text-[10px] uppercase tracking-[0.15em] text-[var(--warning)]">
-            ⚠ Risk Notice
-          </div>
-          <p className="text-[11px] leading-relaxed text-[var(--text-secondary)]">
-            Staked funds are first-loss insurance capital. Admin flushes to insurance permanently
-            reduce your redeemable value, and there is no yield distribution — APR is genuinely 0%.
-            Only stake what you can afford to lose.
-          </p>
-        </div>
+      {/* Risk notice */}
+      <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-4 hud-corners">
+        <div className="mb-2 text-[10px] uppercase tracking-[0.15em] text-[var(--warning)]">⚠ Risk Notice</div>
+        <p className="text-[11px] leading-relaxed text-[var(--text-secondary)]">
+          Staked funds are first-loss insurance capital. Admin flushes permanently reduce your
+          redeemable value, and there is no yield distribution — APR is genuinely 0%. Only stake
+          what you can afford to lose.
+        </p>
       </div>
     </div>
   );
@@ -1438,52 +1365,49 @@ export default function StakePage() {
       </ErrorBoundary>
 
       {/* Main content */}
-      <div className="mx-auto max-w-6xl px-4 pb-24 lg:pb-16">
-        {/* MAIN (pools + deposit/withdraw) + SIDEBAR (how it works / risk) */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
-          {/* MAIN — pool list on top, then deposit panel + your positions */}
-          <div className="space-y-6 lg:col-span-3">
-            <ScrollReveal>
-              <ErrorBoundary label="Pool List">
-                <PoolList
-                  pools={pools}
-                  loading={poolsLoading}
-                  positions={positions}
-                  connected={connected}
-                  onSelect={(poolId) => selectPoolAndScroll(poolId, "deposit")}
-                />
-              </ErrorBoundary>
-            </ScrollReveal>
-
-            <ScrollReveal>
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                <ErrorBoundary label="Deposit Widget">
-                  <DepositWidget
-                    pools={pools}
-                    onTxSuccess={handleTxSuccess}
-                    selectedPool={selectedPool}
-                    setSelectedPool={setSelectedPool}
-                    mode={widgetMode}
-                    setMode={setWidgetMode}
-                  />
-                </ErrorBoundary>
-                <ErrorBoundary label="Your Positions">
-                  <YourPositionPanel
-                    positions={positions}
-                    onWithdrawSuccess={handleTxSuccess}
-                    onManage={(poolId) => selectPoolAndScroll(poolId, "withdraw")}
-                  />
-                </ErrorBoundary>
-              </div>
-            </ScrollReveal>
+      <div className="mx-auto max-w-[1400px] px-4 pb-24 lg:px-6 lg:pb-16">
+        {/* MAIN (pool table) + RIGHT RAIL (deposit/withdraw + your positions) —
+            mirrors the trade terminal's main + OrderTicket shape. */}
+        <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-6">
+          {/* MAIN — scannable pool table */}
+          <div className="min-w-0">
+            <ErrorBoundary label="Pool Table">
+              <PoolTable
+                pools={pools}
+                loading={poolsLoading}
+                positions={positions}
+                connected={connected}
+                selectedPool={selectedPool}
+                onSelect={(poolId) => selectPoolAndScroll(poolId, "deposit")}
+              />
+            </ErrorBoundary>
           </div>
 
-          {/* SIDEBAR — how staking works / what it backs / risk */}
-          <div className="lg:col-span-1">
-            <ScrollReveal>
-              <StakeSidebar />
-            </ScrollReveal>
+          {/* RIGHT RAIL — deposit/withdraw bound to the selected pool, then positions */}
+          <div className="space-y-3 lg:sticky lg:top-4">
+            <ErrorBoundary label="Deposit Widget">
+              <DepositWidget
+                pools={pools}
+                onTxSuccess={handleTxSuccess}
+                selectedPool={selectedPool}
+                setSelectedPool={setSelectedPool}
+                mode={widgetMode}
+                setMode={setWidgetMode}
+              />
+            </ErrorBoundary>
+            <ErrorBoundary label="Your Positions">
+              <YourPositionPanel
+                positions={positions}
+                onWithdrawSuccess={handleTxSuccess}
+                onManage={(poolId) => selectPoolAndScroll(poolId, "withdraw")}
+              />
+            </ErrorBoundary>
           </div>
+        </div>
+
+        {/* SECONDARY — what staking backs / how it works / risk */}
+        <div className="mt-8">
+          <StakeSidebar />
         </div>
       </div>
     </div>

@@ -106,7 +106,12 @@ export function useInsuranceLP() {
   const wallet = useWalletCompat();
   const slabState = useSlabState();
   const params = useParams();
-  const slabAddress = params?.slab as string | undefined;
+  // Prefer the SlabProvider's resolved slab (set from its `slabAddress` prop) so
+  // this hook works BOTH on the /earn/[slab] route AND when mounted inside a
+  // provider on a route without a `[slab]` param — e.g. the Earn hub's deposit
+  // rail, which binds the panel to whichever vault row is selected. Falls back to
+  // the route param while the provider's slab is still empty on the first render.
+  const slabAddress = slabState.slabAddress || (params?.slab as string | undefined);
   const programId = slabState.programId;
 
   const [state, setState] = useState<InsuranceLPState>({

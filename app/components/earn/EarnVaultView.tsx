@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { useEarnStats } from '@/hooks/useEarnStats';
-import { ScrollReveal } from '@/components/ui/ScrollReveal';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
-import { VaultCardSkeleton } from '@/components/earn/VaultCardSkeleton';
+import { VaultGrid } from '@/components/earn/VaultGrid';
+import { VaultDepositRail } from '@/components/earn/VaultDepositRail';
+import { formatCompact } from '@/lib/formatters';
 
 const EarnHeader = dynamic(
   () => import('@/components/earn/EarnHeader').then((m) => m.EarnHeader),
@@ -29,223 +30,153 @@ const EarnHeader = dynamic(
   },
 );
 
-const OiCapMeter = dynamic(
-  () => import('@/components/earn/OiCapMeter').then((m) => m.OiCapMeter),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="space-y-3 p-5">
-        <div className="flex justify-between items-center">
-          <ShimmerSkeleton className="h-3 w-20" />
-          <ShimmerSkeleton className="h-4.5 w-16 rounded-sm" />
-        </div>
-        <ShimmerSkeleton className="h-3 w-full" />
-        <div className="flex justify-between items-center">
-          <div className="flex gap-4">
-            <ShimmerSkeleton className="h-3 w-28" />
-            <ShimmerSkeleton className="h-3 w-20" />
-          </div>
-          <ShimmerSkeleton className="h-3 w-8" />
-        </div>
-      </div>
-    ),
-  },
-);
-
-const VaultGrid = dynamic(
-  () => import('@/components/earn/VaultGrid').then((m) => m.VaultGrid),
-  {
-    ssr: false,
-    loading: () => (
-      <div>
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6">
-          <ShimmerSkeleton className="h-9 w-full sm:w-64" />
-          <div className="flex items-center gap-1">
-            <ShimmerSkeleton className="h-3 w-10 mr-2" />
-            {[1, 2, 3, 4].map(i => <ShimmerSkeleton key={i} className="h-8 w-16" />)}
-          </div>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[1, 2, 3].map((i) => (
-            <VaultCardSkeleton key={i} />
-          ))}
-        </div>
-      </div>
-    ),
-  },
-);
-
-const InsuranceFundDisplay = dynamic(
-  () =>
-    import('@/components/earn/InsuranceFundDisplay').then(
-      (m) => m.InsuranceFundDisplay,
-    ),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="border border-[var(--border)] bg-[var(--panel-bg)] rounded-sm p-5 space-y-4">
-        <div className="flex items-center gap-2">
-          <ShimmerSkeleton className="w-6 h-6 rounded-sm shrink-0" />
-          <ShimmerSkeleton className="h-4 w-28" />
-        </div>
-        <div className="space-y-1">
-          <ShimmerSkeleton className="h-7 w-20" />
-          <ShimmerSkeleton className="h-3 w-40" />
-        </div>
-        <div className="border-t border-[var(--border)] pt-4 space-y-3">
-          <ShimmerSkeleton className="h-3 w-16" />
-          <div className="space-y-3">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="flex gap-2">
-                <ShimmerSkeleton className="w-4 h-4 rounded-full shrink-0" />
-                <div className="flex-1 space-y-1">
-                  <ShimmerSkeleton className="h-3.5 w-24" />
-                  <ShimmerSkeleton className="h-3 w-full" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    ),
-  },
-);
-
 export function EarnVaultView() {
-  const { stats, loading, error } = useEarnStats();
+  const { stats, loading, error, refresh } = useEarnStats();
   const [dismissedError, setDismissedError] = useState<string | null>(null);
+  const [selectedSlab, setSelectedSlab] = useState<string | null>(null);
+  const [userDeposits, setUserDeposits] = useState<Record<string, number>>({});
+
   const showError = error && error !== dismissedError;
 
+  // Auto-select the first vault once markets load so the deposit rail is always
+  // bound to something (mirrors the trade terminal always having a live ticket).
+  useEffect(() => {
+    if (selectedSlab) return;
+    if (stats.markets.length > 0) setSelectedSlab(stats.markets[0].slabAddress);
+  }, [stats.markets, selectedSlab]);
+
+  const selectedVault = useMemo(
+    () => stats.markets.find((m) => m.slabAddress === selectedSlab) ?? null,
+    [stats.markets, selectedSlab],
+  );
+
+  // The rail reports the connected wallet's resolved deposit for the selected
+  // vault; store it so the table's "Your Deposit" column fills in per row as the
+  // user browses. Only writes on an actual value change (no render loop).
+  const handlePositionResolved = useCallback((slab: string, usd: number) => {
+    setUserDeposits((prev) => (prev[slab] === usd ? prev : { ...prev, [slab]: usd }));
+  }, []);
+
   return (
-    <div className="min-h-[calc(100dvh-48px)] animate-fade-in">
-      {/* Header with stats banner */}
+    <div className="animate-fade-in">
+      {/* Compact header + stats strip */}
       <EarnHeader stats={stats} loading={loading} />
 
-      <div className="mx-auto max-w-6xl px-4 pb-16">
-        {/* Platform-wide OI cap meter */}
-        <ScrollReveal>
-          <div className="mb-8 border border-[var(--border)] bg-[var(--panel-bg)] rounded-sm p-5 hud-corners">
-            <OiCapMeter
-              currentOI={stats.totalOI}
-              maxOI={stats.maxOI}
+      <div className="mx-auto max-w-[1400px] px-4 pb-16 lg:px-6">
+        {/* MAIN (table) + RIGHT RAIL (deposit/withdraw) — mirrors the trade terminal */}
+        <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-6">
+          {/* MAIN — scannable vault table */}
+          <div className="min-w-0">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-medium text-[var(--text)]" style={{ fontFamily: 'var(--font-display)' }}>
+                <span className="text-[var(--text-secondary)]">Active </span>Vaults
+              </h2>
+              <span className="text-[11px] text-[var(--text-secondary)] tabular-nums" style={{ fontFamily: 'var(--font-mono)' }}>
+                {loading ? '…' : `${stats.markets.length} market${stats.markets.length !== 1 ? 's' : ''}`}
+              </span>
+            </div>
+            <VaultGrid
+              markets={stats.markets}
+              loading={loading}
+              error={error}
+              selectedSlab={selectedSlab}
+              onSelect={setSelectedSlab}
+              userDeposits={userDeposits}
             />
           </div>
-        </ScrollReveal>
 
-        {/* Main content grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Vault list — 3 cols */}
-          <div className="lg:col-span-3">
-            <ScrollReveal>
-              <div className="mb-4 flex items-center justify-between">
-                <h2
-                  className="text-sm font-medium text-[var(--text)]"
-                  style={{ fontFamily: 'var(--font-display)' }}
-                >
-                  <span className="text-[var(--text-secondary)]">Active </span>Vaults
-                </h2>
-                <span className="text-[11px] text-[var(--text-secondary)]">
-                  {stats.markets.length} market{stats.markets.length !== 1 ? 's' : ''}
-                </span>
-              </div>
-              <VaultGrid markets={stats.markets} loading={loading} error={error} />
-            </ScrollReveal>
-          </div>
-
-          {/* Sidebar — insurance + info */}
-          <div className="lg:col-span-1 space-y-6">
-            <ScrollReveal>
-              <InsuranceFundDisplay stats={stats} loading={loading} />
-            </ScrollReveal>
-
-            {/* How it works */}
-            <ScrollReveal>
-              <div className="border border-[var(--border)] bg-[var(--panel-bg)] rounded-sm p-5 hud-corners">
-                <div className="h-px bg-gradient-to-r from-transparent via-[var(--accent)]/30 to-transparent -mx-5 -mt-5 mb-5" />
-                <h3
-                  className="text-sm font-medium text-[var(--text)] mb-4"
-                  style={{ fontFamily: 'var(--font-display)' }}
-                >
-                  How It Works
-                </h3>
-                <div className="space-y-3">
-                  <Step
-                    num={1}
-                    title="Deposit Collateral"
-                    desc="Provide sim-USDC to any perp market vault"
-                  />
-                  <Step
-                    num={2}
-                    title="Earn Fees"
-                    desc="Every trade on that market generates fees for LPs"
-                  />
-                  <Step
-                    num={3}
-                    title="Track Yield"
-                    desc="Monitor your share value and position in real-time"
-                  />
-                  <Step
-                    num={4}
-                    title="Withdraw"
-                    desc="Redeem LP tokens for your share of the vault anytime"
-                  />
-                </div>
-
-                {/* Risk notice */}
-                <div className="mt-5 pt-4 border-t border-[var(--border)]">
-                  <div className="text-[10px] uppercase tracking-[0.15em] text-[var(--warning)] mb-2">
-                    ⚠ Risk Notice
-                  </div>
-                  <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
-                    LP deposits are exposed to trader PnL. When traders win, LPs may
-                    see temporary drawdowns. The insurance fund provides a buffer.
-                    Only deposit what you can afford to lose.
-                  </p>
-                </div>
-              </div>
-            </ScrollReveal>
+          {/* RIGHT RAIL — deposit/withdraw bound to the selected row */}
+          <div className="lg:sticky lg:top-4">
+            <VaultDepositRail
+              slab={selectedSlab}
+              vault={selectedVault}
+              onTxSuccess={refresh}
+              onPositionResolved={handlePositionResolved}
+            />
           </div>
         </div>
 
-        {/* Error toast */}
-        {showError && (
-          <div
-            role="alert"
-            className="fixed bottom-4 right-4 z-50 flex items-start gap-3 bg-[var(--short)]/10 border border-[var(--short)]/30 rounded-sm px-4 py-3 text-[12px] text-[var(--short)]"
+        {/* SECONDARY — explanatory content, kept below the functional table+rail */}
+        <EarnInfoStrip totalInsurance={stats.totalInsurance} />
+      </div>
+
+      {/* Error toast */}
+      {showError && (
+        <div
+          role="alert"
+          className="fixed bottom-4 right-4 z-50 flex items-start gap-3 rounded-sm border border-[var(--short)]/30 bg-[var(--short)]/10 px-4 py-3 text-[12px] text-[var(--short)]"
+        >
+          <span>{error}</span>
+          <button
+            onClick={() => setDismissedError(error)}
+            aria-label="Dismiss error"
+            className="text-[var(--short)]/70 transition-colors hover:text-[var(--short)]"
           >
-            <span>{error}</span>
-            <button
-              onClick={() => setDismissedError(error)}
-              aria-label="Dismiss error"
-              className="text-[var(--short)]/70 hover:text-[var(--short)] transition-colors"
-            >
-              ✕
-            </button>
-          </div>
-        )}
+            ✕
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Secondary info strip — slim row of small cards below the table+rail ── */
+
+function EarnInfoStrip({ totalInsurance }: { totalInsurance: number }) {
+  return (
+    <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+      {/* How it works */}
+      <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-4 hud-corners">
+        <h3 className="mb-3 text-[12px] font-medium text-[var(--text)]" style={{ fontFamily: 'var(--font-display)' }}>
+          How It Works
+        </h3>
+        <ol className="space-y-2">
+          <MiniStep num={1} title="Deposit" desc="Provide sim-USDC as counterparty backing" />
+          <MiniStep num={2} title="Earn fees" desc="Every trade on that market generates LP fees" />
+          <MiniStep num={3} title="Withdraw" desc="Redeem LP tokens for your share after cooldown" />
+        </ol>
+      </div>
+
+      {/* Insurance fund */}
+      <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-4 hud-corners">
+        <div className="mb-1 flex items-center gap-2">
+          <span aria-hidden="true" className="text-xs">🛡️</span>
+          <h3 className="text-[12px] font-medium text-[var(--text)]" style={{ fontFamily: 'var(--font-display)' }}>
+            Insurance Fund
+          </h3>
+        </div>
+        <div className="mb-2 text-lg font-bold tabular-nums text-[var(--text)]" style={{ fontFamily: 'var(--font-mono)' }}>
+          ${formatCompact(totalInsurance)}
+        </div>
+        <ul className="space-y-1 text-[11px] text-[var(--text-secondary)]">
+          <li>· Absorbs liquidation shortfalls</li>
+          <li>· Buffers socialized losses before LPs</li>
+          <li>· Backstops protocol solvency</li>
+        </ul>
+      </div>
+
+      {/* Risk notice */}
+      <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-4 hud-corners">
+        <div className="mb-2 text-[10px] uppercase tracking-[0.15em] text-[var(--warning)]">⚠ Risk Notice</div>
+        <p className="text-[11px] leading-relaxed text-[var(--text-secondary)]">
+          LP deposits are exposed to trader PnL — when traders win, LPs may see drawdowns. The
+          insurance fund provides a buffer. Only deposit what you can afford to lose.
+        </p>
       </div>
     </div>
   );
 }
 
-function Step({
-  num,
-  title,
-  desc,
-}: {
-  num: number;
-  title: string;
-  desc: string;
-}) {
+function MiniStep({ num, title, desc }: { num: number; title: string; desc: string }) {
   return (
-    <div className="flex items-start gap-3">
-      <div className="w-5 h-5 rounded-sm bg-[var(--accent)]/10 border border-[var(--accent)]/20 flex items-center justify-center text-[10px] font-bold text-[var(--accent)] shrink-0 mt-0.5">
+    <li className="flex items-start gap-2.5">
+      <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-[var(--accent)]/20 bg-[var(--accent)]/10 text-[9px] font-bold text-[var(--accent-text)]">
         {num}
-      </div>
-      <div>
-        <div className="text-[12px] text-[var(--text)] font-medium">{title}</div>
+      </span>
+      <div className="min-w-0">
+        <div className="text-[11px] font-medium text-[var(--text)]">{title}</div>
         <div className="text-[11px] text-[var(--text-secondary)]">{desc}</div>
       </div>
-    </div>
+    </li>
   );
 }
