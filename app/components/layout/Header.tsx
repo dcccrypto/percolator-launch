@@ -34,36 +34,50 @@ function filterForNetwork(items: NavItem[], network: string): NavItem[] {
  * /create, /devnet-mint, /stake from Build) and keep only the
  * dev/community-facing routes.  Trading lives on the playground.
  */
-const WAITLIST_HOST_BUILD_KEEP = new Set(["/developers"]);
-function filterForWaitlistHost(items: NavItem[], group: "trade" | "build" | "community", isWaitlistHost: boolean): NavItem[] {
+const WAITLIST_HOST_KEEP = new Set(["/developers"]);
+function filterForWaitlistHost(items: NavItem[], group: "menu" | "community", isWaitlistHost: boolean): NavItem[] {
   if (!isWaitlistHost) return items;
-  if (group === "trade") return [];
-  if (group === "build") return items.filter((item) => WAITLIST_HOST_BUILD_KEEP.has(item.href));
-  return items; // community: keep everything
+  // Waitlist marketing site (percolator.trade): hide the trading surfaces
+  // entirely; from Community keep only the dev-facing links.
+  if (group === "menu") return [];
+  return items.filter((item) => WAITLIST_HOST_KEEP.has(item.href));
 }
 
-const tradeLinks: NavItem[] = [
-  { href: "/markets", label: "Markets" },
-  { href: "/portfolio", label: "Portfolio" },
+/* Flat top-level links (desktop) — the Trade/Build dropdowns are gone; these
+   render as plain nav links. Markets is intentionally NOT a top-level item —
+   it's reached via the market switcher on the trade page + the /markets route. */
+const primaryLinks: NavItem[] = [
   { href: "/earn", label: "Earn" },
+  { href: "/create", label: "Create a Market" },
 ];
 
-const buildLinks: NavItem[] = [
-  { href: "/create", label: "Create a Market" },
+/* Only dropdown left. Absorbs the former Build utilities (Developers, Faucet). */
+const communityLinks: NavItem[] = [
+  { href: "/leaderboard", label: "Leaderboard" },
   { href: "/developers", label: "Developers" },
   { href: "/faucet", label: "Faucet" },
 ];
 
-const communityLinks: NavItem[] = [
-  { href: "/leaderboard", label: "Leaderboard" },
-];
-
-/* ── All links flat (for mobile) ── */
+/* Mobile: flat primary links + Trade + Portfolio, plus the Community group. */
 const mobileGroupsAll = [
-  { label: "Trade", items: tradeLinks },
-  { label: "Build", items: buildLinks },
+  {
+    label: "Menu",
+    items: [
+      { href: "/trade", label: "Trade" },
+      ...primaryLinks,
+      { href: "/portfolio", label: "Portfolio" },
+    ],
+  },
   { label: "Community", items: communityLinks },
 ];
+
+/* Shared style for the flat top-level links (Earn, Create, Portfolio). */
+const navLinkCls = (active: boolean) =>
+  `flex min-h-8 items-center rounded-sm px-3 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)] ${
+    active
+      ? "text-[var(--text)] bg-[var(--accent)]/[0.06]"
+      : "text-[var(--text-secondary)] hover:text-[var(--text)] hover:bg-[var(--accent)]/[0.06]"
+  }`;
 
 export const Header: FC = () => {
   const [network, setNet] = useState<Network>("mainnet");
@@ -175,17 +189,12 @@ export const Header: FC = () => {
           <nav className="hidden items-center gap-0.5 md:flex" aria-label="Main navigation">
             {!isWaitlistHost && (
               <>
-                {/* Always-visible top-level entry into the trade terminal itself
-                    (redirects to the default SOL-PERP slab). The "Trade" dropdown
-                    next to it links to markets/dashboard/earn/etc — the terminal
-                    had no top-level nav item of its own even though mobile already
-                    has a dedicated Trade tab (MobileBottomNav). Styled distinctly
-                    (filled/accent) so it doesn't read as just another dropdown. */}
+                {/* Trade — filled primary CTA into the terminal. */}
                 <Link
                   href="/trade"
                   aria-label="Trade terminal"
                   aria-current={pathname === "/trade" || pathname.startsWith("/trade/") ? "page" : undefined}
-                  className={`mr-1 flex min-h-8 items-center rounded-sm px-3 text-[13px] font-semibold text-[var(--text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)] ${
+                  className={`flex min-h-8 items-center rounded-sm px-3 text-[13px] font-semibold text-[var(--text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)] ${
                     pathname === "/trade" || pathname.startsWith("/trade/")
                       ? "bg-[var(--accent)]/25"
                       : "bg-[var(--accent)]/15 hover:bg-[var(--accent)]/25"
@@ -193,16 +202,35 @@ export const Header: FC = () => {
                 >
                   Trade
                 </Link>
-                <NavDropdown label="Trade" items={filterForWaitlistHost(filterForNetwork(tradeLinks, network), "trade", isWaitlistHost)} />
+                {/* Earn + Create a Market — plain flat links, no dropdown. */}
+                {filterForNetwork(primaryLinks, network).map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    aria-current={pathname.startsWith(item.href) ? "page" : undefined}
+                    className={navLinkCls(pathname.startsWith(item.href))}
+                  >
+                    {item.label}
+                  </Link>
+                ))}
               </>
             )}
-            <NavDropdown label="Build" items={filterForWaitlistHost(filterForNetwork(buildLinks, network), "build", isWaitlistHost)} />
             <NavDropdown label="Community" items={filterForWaitlistHost(filterForNetwork(communityLinks, network), "community", isWaitlistHost)} />
           </nav>
         </div>
 
         {/* Right */}
         <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-2.5">
+          {/* Portfolio — lives on the right, by the wallet (it IS your account hub). */}
+          {!isWaitlistHost && (
+            <Link
+              href="/portfolio"
+              aria-current={pathname.startsWith("/portfolio") ? "page" : undefined}
+              className={`hidden md:flex ${navLinkCls(pathname.startsWith("/portfolio"))}`}
+            >
+              Portfolio
+            </Link>
+          )}
           {/* DEVNET badge — non-interactive pill. var(--warning), not
               hardcoded amber-400: #fbbf24 lands at ~1.7:1 on the light
               theme's white header (near-invisible); the token resolves to a
@@ -248,7 +276,7 @@ export const Header: FC = () => {
       >
         <div className="flex flex-col gap-0.5 p-3">
           {mobileGroupsAll.map((g) => {
-            const groupKey = g.label.toLowerCase() as "trade" | "build" | "community";
+            const groupKey = g.label.toLowerCase() as "menu" | "community";
             return { ...g, items: filterForWaitlistHost(filterForNetwork(g.items, network), groupKey, isWaitlistHost) };
           }).filter((g) => g.items.length > 0).map((group) => (
             <div key={group.label}>
