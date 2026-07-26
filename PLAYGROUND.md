@@ -117,9 +117,8 @@ That's it. No Rust, no Solana CLI, no Docker.
 
 ## 5. Setup — clone and install
 
-Just this one repo. The SDK (`@percolatorct/sdk`) is pulled in automatically from
-GitHub, pinned to a specific version — there's no second repo to clone and nothing to
-build.
+Just this one repo. The SDK (`@percolatorct/sdk`) installs from npm like any other
+dependency — there's no second repo to clone and nothing to build.
 
 ```bash
 # The playground lives on the `playground` branch (main is the marketing site)
@@ -128,10 +127,7 @@ cd percolator-launch
 pnpm install
 ```
 
-`pnpm install` fetches the pinned SDK for you. Requires **Node 20+** and **pnpm**.
-
-> ❗ **If `pnpm install` fails** while fetching `@percolatorct/sdk`, it's almost always a
-> transient network/GitHub hiccup — just re-run `pnpm install`.
+`pnpm install` pulls the SDK for you. Requires **Node 20+** and **pnpm**.
 
 ---
 
@@ -321,7 +317,7 @@ Run `npx tsc --noEmit` and `pnpm test` locally before pushing so CI passes first
 
 | Symptom | Fix |
 |---|---|
-| `pnpm install` fails fetching `@percolatorct/sdk` | Transient GitHub/network hiccup — re-run `pnpm install`. The SDK is a pinned git dependency, fetched automatically (no separate clone). |
+| `pnpm install` fails fetching `@percolatorct/sdk` | Transient registry/network hiccup — re-run `pnpm install`. The SDK is a normal npm dependency (no separate clone). |
 | Prices don't move in the UI | Start `pnpm dev:price-ws` too, and make sure `NEXT_PUBLIC_WS_URL=ws://localhost:8787` is in `app/.env.local`. Both terminals must run. |
 | RPC errors / "rate limited" | Add your own free `HELIUS_DEVNET_API_KEY=<key>` to `app/.env.local`. |
 | Wallet won't connect / wrong network | Set the wallet extension to **Devnet**. |
