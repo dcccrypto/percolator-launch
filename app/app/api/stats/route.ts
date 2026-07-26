@@ -356,7 +356,14 @@ export async function GET(request: NextRequest) {
     // GH#2072: Use .or() instead of .neq("indexer_excluded", true) because PostgREST's
     // neq filter excludes NULL rows (SQL: NULL <> true → NULL → excluded). Most markets
     // have indexer_excluded=NULL so .neq(true) returned 0 rows, zeroing all stats.
-    supabase.from("markets_with_stats").select("slab_address, volume_24h, trade_count_24h, open_interest_long, open_interest_short, total_open_interest, last_price, decimals, vault_balance, c_tot, total_accounts, stats_updated_at").eq("network", getServerNetwork()).or("indexer_excluded.is.null,indexer_excluded.neq.true").limit(500),
+    // REDUCED SCHEMA (2026-07): open_interest_long/short, total_open_interest,
+    // vault_balance, c_tot, total_accounts, and stats_updated_at were all dropped
+    // from market_stats — no longer selected. Downstream this route already
+    // treats every one of these as optional via `Number(...) || 0`/`?? null`
+    // fallbacks (this is the rarely-hit tertiary Supabase path; the primary
+    // path aggregates /api/markets instead), so removing them degrades those
+    // fields to 0/null without further logic changes.
+    supabase.from("markets_with_stats").select("slab_address, volume_24h, trade_count_24h, last_price, decimals").eq("network", getServerNetwork()).or("indexer_excluded.is.null,indexer_excluded.neq.true").limit(500),
     supabase.from("trades").select("trader").eq("network", getServerNetwork()).limit(5000),
   ]);
 
@@ -372,7 +379,10 @@ export async function GET(request: NextRequest) {
 
   // GH#2070: Include network in SELECT so Tier 3 (unfiltered) fallback can still
   // filter client-side if the column exists but .eq() failed for another reason.
-  const STATS_SELECT = "slab_address, volume_24h, trade_count_24h, open_interest_long, open_interest_short, total_open_interest, last_price, decimals, vault_balance, c_tot, total_accounts, stats_updated_at, network";
+  // REDUCED SCHEMA (2026-07): mirrors the trim applied to the primary query above —
+  // open_interest_long/short, total_open_interest, vault_balance, c_tot,
+  // total_accounts, and stats_updated_at no longer exist on market_stats.
+  const STATS_SELECT = "slab_address, volume_24h, trade_count_24h, last_price, decimals, network";
 
   if (statsRes.error) {
     const errMsg = statsRes.error.message ?? "";
@@ -563,11 +573,13 @@ export async function GET(request: NextRequest) {
       // GH#1438: Now uses shared isPhantomOpenInterest() from lib/phantom-oi.ts (MIN_VAULT_FOR_OI = 1_000_000, strict <).
       const accountsCount = (m as Record<string, unknown>).total_accounts as number ?? 0;
       const vaultBal = (m as Record<string, unknown>).vault_balance as number ?? 0;
-      const rawOi = isSaneMarketValue(m.total_open_interest)
-        ? m.total_open_interest!
-        : (isSaneMarketValue((m.open_interest_long ?? 0) + (m.open_interest_short ?? 0))
-            ? (m.open_interest_long ?? 0) + (m.open_interest_short ?? 0)
-            : 0);
+      // REDUCED SCHEMA (2026-07): open_interest_long/short and total_open_interest
+      // were dropped from market_stats — this tertiary Supabase-only fallback path
+      // (the primary /api/markets-aggregation path above and the on-chain-discovery
+      // path both compute real OI directly and are always tried first) has no OI
+      // source left. rawOi is always 0 here, so this reduce contributes nothing —
+      // an honest degrade rather than a stale/fabricated number.
+      const rawOi = 0;
       if (!isSaneMarketValue(rawOi)) return sum;
       if (isPhantomOpenInterest(accountsCount, vaultBal)) return sum;
       // GH#1318: No $1 fallback — markets without a valid oracle price have indeterminate

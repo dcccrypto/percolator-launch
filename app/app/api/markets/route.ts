@@ -717,11 +717,21 @@ export async function GET(request: NextRequest) {
     // applied to this Supabase instance), retry without the filter to restore service.
     // The column absence causes a hard 500; we detect it by error message and degrade
     // gracefully rather than keeping the endpoint broken for all users.
+    // REDUCED SCHEMA (2026-07): the indexer was cut down to history-only —
+    // market_stats now carries ONLY slab_address/volume_24h/volume_24h_usd/
+    // trade_count_24h/last_price/network/updated_at. mark_price, index_price,
+    // open_interest_long/short, total_open_interest, insurance_fund,
+    // insurance_balance, total_accounts, funding_rate, net_lp_pos, lp_sum_abs,
+    // c_tot, vault_balance, and stats_updated_at were all dropped and are no
+    // longer selected. Downstream this map()'s numericOrNull()/`?? null`
+    // guards already treat every one of these as optional (v17 markets never
+    // populated them either), so removing them from the SELECT degrades those
+    // fields to null/0 without touching the sanitization/zombie/health logic
+    // below. OI, price, and insurance are read live from chain elsewhere.
     const SELECT_FIELDS =
       "slab_address,mint_address,symbol,name,decimals,deployer,logo_url,max_leverage,trading_fee_bps," +
-      "last_price,mark_price,index_price,volume_24h,trade_count_24h,open_interest_long,open_interest_short,total_open_interest," +
-      "insurance_fund,insurance_balance,total_accounts,funding_rate,net_lp_pos,lp_sum_abs,c_tot," +
-      "vault_balance,created_at,stats_updated_at,oracle_mode,dex_pool_address,mainnet_ca,oracle_authority";
+      "last_price,volume_24h,trade_count_24h," +
+      "created_at,oracle_mode,dex_pool_address,mainnet_ca,oracle_authority";
 
     // PERC-8387: Progressive fallback for missing DB columns/migrations.
     // Production Supabase may not have all migrations applied. Rather than crashing

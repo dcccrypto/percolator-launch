@@ -35,6 +35,12 @@ const HISTORY_LIMIT_MAX     = 500;
  *
  * GH#1357: Return 404 for blocklisted slabs.
  * MEDIUM-003: slab parameter validation.
+ *
+ * REDUCED SCHEMA (2026-07): `funding_history` was dropped from the indexer DB
+ * (history-only reduction) — queryFundingHistory() is now a stable no-op that
+ * always returns []. The direct-Postgres branch below therefore always yields
+ * an empty `history: []` payload rather than erroring; the current funding
+ * rate should be read live from chain, not from this historical series.
  */
 export async function GET(
   req: NextRequest,

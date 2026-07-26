@@ -163,61 +163,20 @@ export async function queryTrades(
 /**
  * Funding rate history for a market, oldest first (chart time-series).
  * When `sinceIso` is provided, only returns rows at or after that timestamp.
+ *
+ * REDUCED SCHEMA (2026-07): the indexer was cut down to history-only and the
+ * `funding_history` table was dropped from the new Supabase project — querying
+ * it would 500. This function is kept (signature unchanged) as a stable no-op
+ * so callers keep working; funding history is simply no longer indexed. The
+ * current funding rate is available live from chain instead (see the wrapper
+ * config parse used by the trade page), not from this historical series.
  */
 export async function queryFundingHistory(
-  slabAddress: string,
-  limit: number,
-  sinceIso?: string,
+  _slabAddress: string,
+  _limit: number,
+  _sinceIso?: string,
 ): Promise<IndexerFundingPoint[]> {
-  const sql = getSql();
-
-  let rows: RawFundingRow[];
-  if (sinceIso) {
-    rows = await sql<RawFundingRow[]>`
-      SELECT slot, rate_bps_per_slot, net_lp_pos, price_e6,
-             funding_index_qpb_e6, timestamp
-      FROM funding_history
-      WHERE market_slab = ${slabAddress}
-        AND timestamp >= ${sinceIso}::timestamptz
-      ORDER BY timestamp ASC
-      LIMIT ${limit}
-    `;
-  } else {
-    // Default: last N rows, returned oldest-first so the chart is a time-series
-    rows = await sql<RawFundingRow[]>`
-      SELECT slot, rate_bps_per_slot, net_lp_pos, price_e6,
-             funding_index_qpb_e6, timestamp
-      FROM (
-        SELECT slot, rate_bps_per_slot, net_lp_pos, price_e6,
-               funding_index_qpb_e6, timestamp
-        FROM funding_history
-        WHERE market_slab = ${slabAddress}
-        ORDER BY timestamp DESC
-        LIMIT ${limit}
-      ) sub
-      ORDER BY timestamp ASC
-    `;
-  }
-
-  return rows.map((r) => {
-    const rateBpsPerSlot = Number(r.rate_bps_per_slot);
-    const tsMs =
-      r.timestamp instanceof Date
-        ? r.timestamp.getTime()
-        : new Date(r.timestamp).getTime();
-    return {
-      slot: Number(r.slot),
-      rateBpsPerSlot,
-      netLpPos: String(r.net_lp_pos),
-      priceE6: String(r.price_e6),
-      fundingIndexQpbE6: String(r.funding_index_qpb_e6),
-      timestampIso: r.timestamp instanceof Date
-        ? r.timestamp.toISOString()
-        : String(r.timestamp),
-      timestamp: tsMs,
-      hourlyRatePercent: toHourlyPercent(rateBpsPerSlot),
-    };
-  });
+  return [];
 }
 
 /**
@@ -605,33 +564,13 @@ export interface FundingGlobalLocalEntry {
 /**
  * Aggregate latest funding rate per market from the local indexer.
  * Used as fallback when Railway /funding/global is unavailable.
+ *
+ * REDUCED SCHEMA (2026-07): `funding_history` no longer exists in the reduced
+ * indexer DB — funding history isn't indexed anymore. Kept as a stable no-op
+ * (signature unchanged) so /api/funding/global's fallback path degrades to an
+ * empty markets list instead of a 500. The current rate per market is read
+ * live from chain elsewhere, not from this aggregate.
  */
 export async function queryFundingGlobal(): Promise<FundingGlobalLocalEntry[]> {
-  const sql = getSql();
-  const rows = await sql<Array<{
-    market_slab: string;
-    rate_bps_per_slot: string;
-    net_lp_pos: string;
-  }>>`
-    SELECT DISTINCT ON (market_slab)
-      market_slab,
-      rate_bps_per_slot::text,
-      net_lp_pos::text
-    FROM funding_history
-    ORDER BY market_slab, timestamp DESC
-    LIMIT 200
-  `;
-
-  return rows.map((r) => {
-    const rateBpsPerSlot = Number(r.rate_bps_per_slot);
-    const hourlyRatePercent = toHourlyPercent(rateBpsPerSlot);
-    const dailyRatePercent = hourlyRatePercent * 24;
-    return {
-      slabAddress: r.market_slab,
-      rateBpsPerSlot,
-      hourlyRatePercent,
-      dailyRatePercent,
-      netLpPos: Number(r.net_lp_pos),
-    };
-  });
+  return [];
 }

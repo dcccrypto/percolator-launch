@@ -35,6 +35,12 @@ export interface FundingGlobalEntry {
  * Returns graceful {} if both unavailable.
  *
  * GH#1461: blocked slabs are stripped from the response at this layer.
+ *
+ * REDUCED SCHEMA (2026-07): `funding_history` was dropped from the indexer DB
+ * (history-only reduction) — queryFundingGlobal() is now a stable no-op that
+ * always returns []. When the Railway proxy is unavailable this route falls
+ * straight through to the graceful `{ markets: [], count: 0 }` response below;
+ * current rates should be read live from chain, not from this local fallback.
  */
 export async function GET(req: NextRequest) {
   // ── 1. Try Railway proxy ───────────────────────────────────────────────────
