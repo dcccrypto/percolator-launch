@@ -39,50 +39,59 @@ vi.mock("@/lib/config", () => ({
 import { Header } from "@/components/layout/Header";
 
 describe("Header", () => {
-  it("renders dropdown group triggers", () => {
+  // Desktop nav is FLAT since d6156f5c: Trade / Earn / Create a Market are
+  // plain links, Portfolio sits on the right next to the wallet, and Community
+  // is the ONLY remaining dropdown (it absorbed the former Build utilities,
+  // Developers + Faucet). The Trade and Build dropdowns no longer exist, so the
+  // dropdown behaviour below is exercised against Community — the same
+  // NavDropdown component, just the group that survived.
+  it("renders the flat top-level links", () => {
     render(<Header />);
-    expect(screen.getByRole("button", { name: /Trade/i })).toBeDefined();
-    expect(screen.getByRole("button", { name: /Build/i })).toBeDefined();
+    expect(screen.getByRole("link", { name: /Trade terminal/i })).toHaveAttribute("href", "/trade");
+    expect(screen.getByRole("link", { name: /^Earn$/i })).toHaveAttribute("href", "/earn");
+    expect(screen.getByRole("link", { name: /Create a Market/i })).toHaveAttribute("href", "/create");
+    expect(screen.getByRole("link", { name: /^Portfolio$/i })).toHaveAttribute("href", "/portfolio");
+  });
+
+  it("renders Community as the only dropdown trigger", () => {
+    render(<Header />);
     expect(screen.getByRole("button", { name: /Community/i })).toBeDefined();
+    // The former Trade/Build groups are flat links now, not dropdown buttons.
+    expect(screen.queryByRole("button", { name: /^Build$/i })).toBeNull();
   });
 
-  // The Trade group is Markets/Portfolio/Earn since the nav consolidation:
-  // Dashboard, Wallet, My Markets and Stake became tabs of the /portfolio and
-  // /earn hubs (their standalone routes still work, they are just no longer
-  // top-level dropdown entries). Portfolio is used below as the probe for
-  // "the dropdown is open" because it is a stable member of the group.
-  it("shows Portfolio link inside Trade dropdown", () => {
+  it("shows Leaderboard link inside Community dropdown", () => {
     render(<Header />);
-    const tradeTrigger = screen.getByRole("button", { name: /Trade/i });
+    const trigger = screen.getByRole("button", { name: /Community/i });
     // Click to open (fireEvent avoids mouseenter/leave side-effects)
-    fireEvent.click(tradeTrigger);
-    expect(tradeTrigger.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
     // menuitem should be accessible when open
-    const portfolioLink = screen.getByRole("menuitem", { name: /Portfolio/i });
-    expect(portfolioLink).toHaveAttribute("href", "/portfolio");
+    const leaderboard = screen.getByRole("menuitem", { name: /Leaderboard/i });
+    expect(leaderboard).toHaveAttribute("href", "/leaderboard");
   });
 
-  it("dismisses Trade dropdown on Escape", () => {
+  it("dismisses Community dropdown on Escape", () => {
     render(<Header />);
-    const tradeTrigger = screen.getByRole("button", { name: /Trade/i });
-    fireEvent.click(tradeTrigger);
-    expect(screen.getByRole("menuitem", { name: /Portfolio/i })).toBeDefined();
+    const trigger = screen.getByRole("button", { name: /Community/i });
+    fireEvent.click(trigger);
+    expect(screen.getByRole("menuitem", { name: /Leaderboard/i })).toBeDefined();
 
     fireEvent.keyDown(document, { key: "Escape" });
     // After Escape, dropdown closed — menuitem hidden from accessibility tree
-    expect(screen.queryByRole("menuitem", { name: /Portfolio/i })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /Leaderboard/i })).toBeNull();
   });
 
-  it("dismisses Trade dropdown on outside click", () => {
+  it("dismisses Community dropdown on outside click", () => {
     render(<Header />);
-    const tradeTrigger = screen.getByRole("button", { name: /Trade/i });
-    fireEvent.click(tradeTrigger);
-    expect(screen.getByRole("menuitem", { name: /Portfolio/i })).toBeDefined();
+    const trigger = screen.getByRole("button", { name: /Community/i });
+    fireEvent.click(trigger);
+    expect(screen.getByRole("menuitem", { name: /Leaderboard/i })).toBeDefined();
 
     // Click outside the dropdown
     fireEvent.mouseDown(document.body);
     // After outside click, dropdown closed — menuitem hidden from accessibility tree
-    expect(screen.queryByRole("menuitem", { name: /Portfolio/i })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /Leaderboard/i })).toBeNull();
   });
 
   it("renders DEVNET badge as non-interactive", () => {
