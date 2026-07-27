@@ -62,6 +62,7 @@ import { isMockSlab, getMockUserAccountIdle } from "@/lib/mock-trade-data";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { formatTokenAmount, formatUsdPriceE6, toE6, normalizeTokenDecimals } from "@/lib/format";
+import { formatLeverageValue } from "@/lib/leverage-display";
 import { saveEntryPrice, getEntryPrice, clearEntryPrice } from "@/lib/entry-price";
 import { isSentinelValue } from "@/lib/health";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
@@ -363,7 +364,17 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const initialMarginBps = params?.initialMarginBps ?? 1000n;
   const maintenanceMarginBps = params?.maintenanceMarginBps ?? 500n;
   const tradingFeeBps = params?.tradingFeeBps ?? 30n;
-  const maxLeverageFromOnChain = initialMarginBps > 0n ? Math.max(1, Number(10000n / initialMarginBps)) : 0;
+  // HONEST cap: the engine allows notional / margin up to 10000/initial_margin_bps.
+  // For the standard 1500-bps (15%) market that is 6.6667x, NOT 6 — the old
+  // `Number(10000n / initialMarginBps)` truncated the remainder to 6, so the slider
+  // silently robbed traders of the last ~0.67x the engine actually permits.
+  // Floor to 2 decimals so a max-leverage order stays just UNDER the margin edge
+  // (6.66x → margin ratio 15.02% ≥ 15%, never rejected), and displays as "6.7x".
+  // The market list / wizard keep advertising the round floored value (6x); this
+  // ticket exposes the true achievable ceiling.
+  const maxLeverageFromOnChain = initialMarginBps > 0n
+    ? Math.max(1, Math.floor((10000 / Number(initialMarginBps)) * 100) / 100)
+    : 0;
   const supabaseLeverage = Number(marketInfo?.max_leverage) || 0;
   const rawMaxLeverage = maxLeverageFromOnChain > 0 ? maxLeverageFromOnChain : supabaseLeverage || 1;
   const maxLeverage = Math.min(MAX_DISPLAY_LEVERAGE, rawMaxLeverage);
@@ -410,7 +421,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // open at the current max leverage with their full AVAILABLE (not total)
   // balance — capital already locked by an open position can't back a
   // second one too.
-  const buyingPower = effectiveBalance * BigInt(Math.max(1, Math.round(maxLeverage)));
+  // Fractional-safe: maxLeverage can be 6.66, so scale by 100 rather than
+  // Math.round (which would overshoot to 7x and make "Max" size a rejected order).
+  const buyingPower = (effectiveBalance * BigInt(Math.max(100, Math.round(maxLeverage * 100)))) / 100n;
 
   useEffect(() => {
     if (!publicKey || !mktConfig?.collateralMint || mockMode) {
@@ -502,7 +515,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const updateLeverage = useCallback(
     (newLev: number) => {
       setLeverage(newLev);
-      setLeverageText(String(newLev));
+      setLeverageText(formatLeverageValue(newLev));
       if (sizeInput) recomputeFromSize(sizeInput, sizeUnit, newLev);
     },
     [sizeInput, sizeUnit, recomputeFromSize],
@@ -526,7 +539,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   );
 
   const marginNative = marginInput ? parsePercToNative(marginInput, decimals) : 0n;
-  const notionalNative = marginNative * BigInt(leverage);
+  // Fractional-safe (leverage may be 6.66): scale by 100 instead of BigInt(leverage),
+  // which throws on a non-integer. Round is safe because every reachable leverage
+  // value (integers, or the 2-decimal max) has at most 2 decimals.
+  const notionalNative = (marginNative * BigInt(Math.round(leverage * 100))) / 100n;
   const rawPositionSize = livePriceE6 && livePriceE6 > 0n ? (notionalNative * 1_000_000n) / livePriceE6 : 0n;
   const positionSize = rawPositionSize < 0n ? 0n : rawPositionSize;
   const exceedsBalance = marginNative > 0n && marginNative > effectiveBalance;
@@ -891,7 +907,7 @@ setEngineLockError(null);
                 const parsed = parseFloat(raw);
                 if (!isNaN(parsed)) updateLeverage(Math.max(1, Math.min(maxLeverage, Math.round(parsed))));
               }}
-              onBlur={() => setLeverageText(String(leverage))}
+              onBlur={() => setLeverageText(formatLeverageValue(leverage))}
               style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
               className="w-12 rounded-none border border-[var(--border)]/50 bg-[var(--bg)] px-1.5 py-0.5 text-right text-[11px] text-[var(--text)] focus:border-[var(--accent)]/50 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]/20"
             />
@@ -974,14 +990,14 @@ setEngineLockError(null);
                         : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]"
                     }`}
                   >
-                    {l}x
+                    {formatLeverageValue(l)}x
                   </button>
                 ))}
               </div>
             </div>
           );
         })() : (
-          <p className="text-[9px] text-[var(--text-dim)] font-mono">{maxLeverage}x (fixed)</p>
+          <p className="text-[9px] text-[var(--text-dim)] font-mono">{formatLeverageValue(maxLeverage)}x (fixed)</p>
         )}
       </div>
 
@@ -1280,7 +1296,7 @@ setEngineLockError(null);
 
       {getNetwork() === "mainnet" && (
         <div className="mt-3 border border-[var(--accent)]/30 bg-[var(--accent)]/[0.04] px-3 py-2 text-[10px] text-[var(--text)]">
-          {maxLeverage}x max leverage enforced on-chain.
+          {formatLeverageValue(maxLeverage)}x max leverage enforced on-chain.
         </div>
       )}
 
