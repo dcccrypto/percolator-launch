@@ -16,6 +16,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { isSaneMarketValue, isActiveMarket, isZombieMarket } from "@/lib/activeMarketFilter";
 import { getKnownMarketLpCapitals, scanEnabledMarketLpCapitals } from "@/lib/lp-portfolio";
+import { loadMergedMarketRows } from "@/lib/market-registry";
 import { isPhantomOpenInterest, MIN_VAULT_FOR_OI } from "@/lib/phantom-oi";
 import { computeDisplayOiUsd } from "@/lib/oi-display";
 import { hasInvisibleOrBidi } from "@/lib/text-safety";
@@ -533,7 +534,7 @@ async function onChainOrStaticResponse(request: NextRequest, reason: string): Pr
 
         return NextResponse.json(
           { total: filteredWithLp.length, activeTotal: filteredWithLp.length, marketsWithPrice, zombieCount: 0, markets: filteredWithLp },
-          { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30", "X-Percolator-Data-Source": "on-chain-discovery" } },
+          { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=60", "X-Percolator-Data-Source": "on-chain-discovery" } },
         );
       }
     }
@@ -614,7 +615,7 @@ function fallbackMarketsResponse(request: NextRequest, reason: string): NextResp
     { total: filtered.length, activeTotal, marketsWithPrice, zombieCount: 0, markets: limited },
     {
       headers: {
-        "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30",
+        "Cache-Control": "public, s-maxage=10, stale-while-revalidate=60",
         "X-Percolator-Data-Source": "static-directory-fallback",
       },
     },
@@ -712,107 +713,10 @@ export async function GET(request: NextRequest) {
     // they have slab=null, mainnet_ca=null, vault_balance=null and cannot be indexed.
     // Filtering at the query level prevents them polluting the response even if
     // the JS-layer zombie/blocklist guards don't catch them (Set.has(null) → false).
-    // PERC-8195: filter by network so devnet and mainnet rows don't mix.
-    // PERC-8215: Graceful fallback — if the network column is missing (migration not yet
-    // applied to this Supabase instance), retry without the filter to restore service.
-    // The column absence causes a hard 500; we detect it by error message and degrade
-    // gracefully rather than keeping the endpoint broken for all users.
-    // REDUCED SCHEMA (2026-07): the indexer was cut down to history-only —
-    // market_stats now carries ONLY slab_address/volume_24h/volume_24h_usd/
-    // trade_count_24h/last_price/network/updated_at. mark_price, index_price,
-    // open_interest_long/short, total_open_interest, insurance_fund,
-    // insurance_balance, total_accounts, funding_rate, net_lp_pos, lp_sum_abs,
-    // c_tot, vault_balance, and stats_updated_at were all dropped and are no
-    // longer selected. Downstream this map()'s numericOrNull()/`?? null`
-    // guards already treat every one of these as optional (v17 markets never
-    // populated them either), so removing them from the SELECT degrades those
-    // fields to null/0 without touching the sanitization/zombie/health logic
-    // below. OI, price, and insurance are read live from chain elsewhere.
-    const SELECT_FIELDS =
-      "slab_address,mint_address,symbol,name,decimals,deployer,logo_url,metadata_source,max_leverage,trading_fee_bps," +
-      "last_price,volume_24h,trade_count_24h," +
-      "created_at,oracle_mode,dex_pool_address,mainnet_ca,oracle_authority";
-
-    // PERC-8387: Progressive fallback for missing DB columns/migrations.
-    // Production Supabase may not have all migrations applied. Rather than crashing
-    // with a 500, we try progressively simpler queries:
-    //   1. Full query (network + indexer_excluded filters)
-    //   2. Drop indexer_excluded filter (migration 046 not applied)
-    //   3. Drop network filter too (migration 20260329180000 not applied)
-    // The view-level WHERE clause (migration 20260402170000) already filters
-    // indexer_excluded markets when applied, so the PostgREST filter is defense-in-depth.
-    let { data, error } = await supabase
-      .from("markets_with_stats")
-      .select(SELECT_FIELDS)
-      .eq("network", getServerNetwork())
-      .not("slab_address", "is", null)
-      // GH#2072: .neq("indexer_excluded", true) excludes NULL rows (SQL: NULL <> true → NULL → excluded).
-      // Since most markets have indexer_excluded=NULL, use .or() to include both NULL and non-true values.
-      .or("indexer_excluded.is.null,indexer_excluded.neq.true");
-
-    // Fallback 1: indexer_excluded column missing (migration 046 / 20260402170000 not applied).
-    // PostgREST error: "Could not find the 'indexer_excluded' column of 'markets_with_stats'"
-    if (error && error.message?.includes("indexer_excluded")) {
-      Sentry.captureMessage(
-        "PERC-8387: indexer_excluded column missing — apply migration 046 + 20260402170000. " +
-        "Falling back without indexer_excluded filter.",
-        {
-          level: "warning",
-          tags: { endpoint: "/api/markets", method: "GET", degraded: "true" },
-          fingerprint: ["perc-8387-indexer-excluded-missing"],
-        }
-      );
-      const fb1 = await supabase
-        .from("markets_with_stats")
-        .select(SELECT_FIELDS)
-        .eq("network", getServerNetwork())
-        .not("slab_address", "is", null);
-      data = fb1.data;
-      error = fb1.error;
-    }
-
-    // Fallback 2: network column also missing (migration 20260329180000 not applied)
-    if (error && error.message?.includes("network")) {
-      Sentry.captureMessage(
-        "PERC-8215: network column missing — apply migration 20260329180000. " +
-        "Falling back to unfiltered query.",
-        {
-          level: "warning",
-          tags: { endpoint: "/api/markets", method: "GET", degraded: "true" },
-          fingerprint: ["perc-8215-network-column-missing"],
-        }
-      );
-      const fb2 = await supabase
-        .from("markets_with_stats")
-        .select(SELECT_FIELDS)
-        .not("slab_address", "is", null);
-      data = fb2.data;
-      error = fb2.error;
-    }
-
-    // Fallback 3: catch-all for any other column-related errors.
-    // If we still have an error that mentions "column" or "does not exist",
-    // try the absolute minimum query to restore service.
-    if (error && (error.message?.includes("column") || error.message?.includes("does not exist"))) {
-      Sentry.captureMessage(
-        `PERC-8387: Unexpected column error in markets query, using bare fallback. Error: ${error.message}`,
-        {
-          level: "error",
-          tags: { endpoint: "/api/markets", method: "GET", degraded: "true" },
-          fingerprint: ["perc-8387-bare-fallback"],
-        }
-      );
-      const fb3 = await supabase
-        .from("markets_with_stats")
-        .select(SELECT_FIELDS);
-      data = fb3.data;
-      error = fb3.error;
-    }
-
-    if (error) {
-      Sentry.captureException(error, {
-        tags: { endpoint: "/api/markets", method: "GET" },
-      });
+    // Registry + live on-chain state, from the shared loader that /api/stats
+    // also uses — see lib/market-registry.ts for why these two must not drift.
+    const mergedRows = await loadMergedMarketRows();
+    if (mergedRows === null) {
       return fallbackMarketsResponse(request, "supabase-query-error");
     }
 
@@ -823,12 +727,24 @@ export async function GET(request: NextRequest) {
     // Default to "admin" when unknown — safest assumption for old devnet markets.
     const ZERO_PUBKEY = "11111111111111111111111111111111";
     // GH#1420: Parse ?include_zombie=true to opt-in to zombie markets in the response.
-    // By default, markets with vault_balance=0 are excluded as they have no LP liquidity
-    // and return garbage/stale prices (e.g. BTC@$148, SOL@$0.60).
     const includeZombie = request?.nextUrl?.searchParams?.get("include_zombie") === "true";
 
-    const sanitized = ((data ?? []) as unknown as Record<string, unknown>[])
-      .filter((m) => !BLOCKED_SLAB_ADDRESSES.has(m.slab_address as string))
+    // MERGED READ (2026-07): the registry above supplies what only Postgres has
+    // (identity, logo, 24h volume). Price / OI / insurance / vault / c_tot are
+    // on-chain values the reduction stopped mirroring, so they are read here
+    // from the chain and merged in BEFORE the zombie and active-market
+    // classifications below — which is the whole point: those heuristics were
+    // reading absent columns as evidence of death, so every market came back
+    // `activeTotal: 0` and, until the isZombieMarket fix, hidden entirely.
+    //
+    // One batched getMultipleAccountsInfo per 100 slabs, using addresses the
+    // registry already gave us. This replaces the getProgramAccounts LP scan
+    // that used to run further down: that call scans the entire program, so its
+    // cost tracks protocol size rather than market count.
+    //
+    // Degrades to exactly the previous behaviour: a slab missing from the map
+    // keeps whatever the registry row had.
+    const sanitized = mergedRows
       .map((m) => {
       let oracle_mode = m.oracle_mode as string | null;
       if (!oracle_mode) {
@@ -897,7 +813,8 @@ export async function GET(request: NextRequest) {
       // so /api/markets and /api/stats are guaranteed to use the same predicate (single source of truth).
       // GH#1494/GH#1564: coerce NUMERIC (string from Supabase) to number before arithmetic comparisons.
       // Uses module-level numericOrNull() already applied above; fall back to 0 for nulls.
-      const accountsCount = n_total_accounts ?? 0;
+      // Pass through as null when the column wasn't supplied (see isPhantomOpenInterest).
+      const accountsCount = n_total_accounts;
       const vaultBal = n_vault_balance ?? 0;
       const isPhantomOI = isPhantomOpenInterest(accountsCount, vaultBal);
       // GH#1599: When OI is genuinely 0, display 0 regardless of phantom status.
@@ -1248,54 +1165,21 @@ export async function GET(request: NextRequest) {
     // LP-portfolio address (wizard-launched) keep the existing "—" — see
     // lib/lp-portfolio.ts's getMarketLpCapital (used by /api/markets/[slab])
     // for the full on-chain scan used on the trade-page detail view instead.
-    let limitedWithLp = limited;
-    try {
-      const candidateSlabs = limited
-        .map((m) => {
-          const row = m as Record<string, unknown>;
-          const hasVault = row.vault_balance != null && Number.isFinite(Number(row.vault_balance));
-          const hasCtot = row.c_tot != null && Number.isFinite(Number(row.c_tot));
-          return hasVault || hasCtot ? null : String(row.slab_address ?? "");
-        })
-        .filter((s): s is string => !!s);
+    // The getProgramAccounts LP-capital scan that used to run here is gone:
+    // vault_balance now arrives with the merged on-chain read above, in the same
+    // batched getMultipleAccountsInfo as price and OI. That scan existed only
+    // because the Supabase view had NULL vault_balance for every v17 market
+    // (GH#2334) — it walked the entire program on every list request to
+    // reconstruct one number per market. In this route vault_balance is only a
+    // liveness / phantom-OI guard, never a rendered column, and the engine vault
+    // from the market-group header is the value those guards were written
+    // against. The trade-page detail view (/api/markets/[slab]) keeps its own
+    // single-market LP-portfolio lookup, which is a different figure.
 
-      if (candidateSlabs.length > 0) {
-        const lpConnection = new Connection(getRpcEndpoint(), "confirmed");
-        const knownLpCapitals = await getKnownMarketLpCapitals(lpConnection, candidateSlabs);
-
-        // Wizard-launched markets (e.g. Percolator, BURNIE) have no hardcoded
-        // lp_portfolio_address in PLAYGROUND_SLAB_META, so
-        // getKnownMarketLpCapitals never covers them. One additional batched
-        // getProgramAccounts scan (not per-market) covers every remaining
-        // candidate by grouping enabled LP-matcher portfolios by their
-        // marketGroupId (== slab address) — see scanEnabledMarketLpCapitals.
-        const stillMissing = candidateSlabs.filter((s) => !knownLpCapitals.has(s));
-        if (stillMissing.length > 0) {
-          const scanned = await scanEnabledMarketLpCapitals(lpConnection, new PublicKey(getConfig().programId));
-          for (const slab of stillMissing) {
-            const capital = scanned.get(slab);
-            if (capital != null) knownLpCapitals.set(slab, capital);
-          }
-        }
-
-        if (knownLpCapitals.size > 0) {
-          // Note: spread `m` directly (not a `Record<string, unknown>`-cast
-          // copy) so TS preserves its real inferred shape — spreading a bare
-          // index-signature type loses all named properties from the result.
-          limitedWithLp = limited.map((m) => {
-            const slabAddr = String((m as Record<string, unknown>).slab_address ?? "");
-            const capital = knownLpCapitals.get(slabAddr);
-            return capital != null ? { ...m, vault_balance: Number(capital) } : m;
-          });
-        }
-      }
-    } catch {
-      // Degrade to the original "—" — never let the LP overlay break the list.
-    }
-
-    return NextResponse.json({ total: sorted.length, activeTotal, marketsWithPrice, zombieCount, markets: limitedWithLp }, {
+    return NextResponse.json({ total: sorted.length, activeTotal, marketsWithPrice, zombieCount, markets: limited }, {
       headers: {
-        "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30",
+        // See the cache-policy note above readLiveMarketStates usage.
+        "Cache-Control": "public, s-maxage=10, stale-while-revalidate=60",
       },
     });
   } catch (error) {

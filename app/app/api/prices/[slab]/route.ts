@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getBackendUrl } from "@/lib/config";
 import { validateSlabParam } from "@/lib/route-validators";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 import * as Sentry from "@sentry/nextjs";
@@ -190,27 +189,16 @@ export async function GET(
     }
     const validSlab = validation.slab;
 
-    // Primary: indexer backend oracle-price history. Absent on the local /
-    // hosted playground — any failure falls through to the Pyth fallback
-    // instead of 502ing (this endpoint is polled every 10s by useLivePrice).
-    // getBackendUrl() THROWS when NEXT_PUBLIC_API_URL is unset (the documented
-    // playground config), so it must be inside this try too.
-    let prices: Array<{ price_e6: string; timestamp: number }> = [];
-    try {
-      const backendUrl = getBackendUrl();
-      const res = await fetch(`${backendUrl}/prices/${validSlab}`, {
-        headers: { "Content-Type": "application/json" },
-        signal: AbortSignal.timeout(5000),
-      });
-      if (res.ok) {
-        const data = await res.json() as {
-          prices?: Array<{ price_e6: string; timestamp: number }>;
-        };
-        prices = data.prices ?? [];
-      }
-    } catch {
-      /* backend unreachable — use the Pyth fallback below */
-    }
+    // The oracle-price-history proxy that used to run first is gone. It called
+    // `${NEXT_PUBLIC_API_URL}/prices/:slab` on percolator-api, a service that no
+    // longer exists (the host answers "Application not found"), so it could only
+    // ever fail — burning a round trip on every call of an endpoint useLivePrice
+    // polls every 10s, per market. The indexer that replaced that service is
+    // ingest-only: it serves /health and the Helius webhook, nothing else.
+    //
+    // The Pyth / GeckoTerminal fallbacks below were already doing all the real
+    // work; they are now simply the primary path.
+    const prices: Array<{ price_e6: string; timestamp: number }> = [];
 
     if (prices.length === 0) {
       // pythStatsFallback only covers the curated PLAYGROUND_SLAB_META markets

@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { getBackendUrl } from "@/lib/config";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import * as Sentry from "@sentry/nextjs";
 
@@ -93,19 +92,12 @@ export async function GET() {
       }
     }
 
-    // ── Fallback: proxy to backend /prices ─────────────────────
-    const backendUrl = getBackendUrl();
-    const res = await fetch(`${backendUrl}/prices`, {
-      headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(5000),
-    });
-
-    if (!res.ok) {
-      return NextResponse.json({ prices: {} }, { status: res.status, headers: NO_STORE });
-    }
-
-    const data = await res.json();
-    return NextResponse.json(data, { headers: NO_STORE });
+    // The proxy fallback to `${NEXT_PUBLIC_API_URL}/prices` is gone: that host
+    // (percolator-api) no longer exists and answered "Application not found",
+    // so this route surfaced ITS 404 as its own status. An empty price map is
+    // the honest answer — market_stats.last_price is populated by indexed
+    // trades, so "no prices yet" is a real state, not an error.
+    return NextResponse.json({ prices: {} }, { headers: NO_STORE });
   } catch (err) {
     Sentry.captureException(err, { tags: { endpoint: "/api/prices" } });
     return NextResponse.json({ prices: {} }, { status: 502, headers: NO_STORE });

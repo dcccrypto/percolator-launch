@@ -27,8 +27,20 @@ export const MIN_VAULT_FOR_OI = 1_000_000;
  * @param vaultBalance   Value of `vault_balance`   from the market row (0 when null).
  */
 export function isPhantomOpenInterest(
-  accountsCount: number,
+  accountsCount: number | null | undefined,
   vaultBalance: number,
 ): boolean {
-  return accountsCount === 0 || vaultBalance < MIN_VAULT_FOR_OI;
+  // REDUCED SCHEMA (2026-07): total_accounts is no longer mirrored into
+  // market_stats, so callers reading it from the DB get null/undefined rather
+  // than a count. Coercing that to 0 asserts "this market definitely has no
+  // accounts" — which made EVERY market's OI phantom and zeroed it, even
+  // markets with hundreds of millions in vault and OI that /api/open-interest
+  // reported correctly from the same slab.
+  //
+  // Unknown is not zero. Both conditions guard one hazard — a stale slab
+  // carrying OI counters with nothing real behind it — and the vault condition
+  // catches it on its own, now that vault_balance is read live from the chain.
+  // So an unknown account count simply abstains instead of voting "phantom".
+  const noAccounts = accountsCount != null && accountsCount === 0;
+  return noAccounts || vaultBalance < MIN_VAULT_FOR_OI;
 }

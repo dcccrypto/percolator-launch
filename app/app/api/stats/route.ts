@@ -8,6 +8,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import { parseEngine, isV17Account, discoverMarkets, parseMarketGroupV17OI } from "@percolatorct/sdk";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { isActiveMarket, isSaneMarketValue, isZombieMarket } from "@/lib/activeMarketFilter";
+import { loadMergedMarketRows, type MarketRegistryRow } from "@/lib/market-registry";
 import { isPhantomOpenInterest } from "@/lib/phantom-oi";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import { getClientIp } from "@/lib/get-client-ip";
@@ -20,6 +21,9 @@ import {
 } from "@/lib/indexer-db";
 import { getMultipleAccountsInfoChunked } from "@/lib/rpc-chunk";
 import type { Database } from "@/lib/database.types";
+
+/** $1M ceiling — mirrors /api/markets sanitizePrice. */
+const MAX_SANE_PRICE_FOR_ACTIVE = 1_000_000;
 export const dynamic = "force-dynamic";
 
 type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'];
@@ -37,7 +41,7 @@ const rateLimiter = createMemoryRateLimiter({ limit: 60, windowMs: 60_000 });
 // ---------------------------------------------------------------------------
 
 const STATS_CACHE_HEADERS = {
-  "Cache-Control": "public, s-maxage=15, stale-while-revalidate=45",
+  "Cache-Control": "public, s-maxage=15, stale-while-revalidate=60",
 } as const;
 
 /**
@@ -94,27 +98,55 @@ function zeroStats() {
  * route makes the two definitionally consistent, whatever its filtering
  * evolves into. Falls through to the discovery path when unavailable.
  */
-async function computeStatsFromMarketsApi(request: NextRequest): Promise<(ReturnType<typeof zeroStats>) | null> {
+async function computeStatsFromMarketsApi(_request: NextRequest): Promise<(ReturnType<typeof zeroStats>) | null> {
   try {
-    const base = new URL(request.url).origin;
-    const res = await fetch(`${base}/api/markets?limit=500`, { next: { revalidate: 30 } });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const markets: Array<Record<string, unknown>> = Array.isArray(data?.markets) ? data.markets : [];
-    if (markets.length === 0) return null;
+    // Shared loader — NOT an HTTP fetch of /api/markets. Self-fetching kept the
+    // two routes consistent but paid a second serverless invocation (and its
+    // cold start) plus a duplicate round of RPC work on every stats request.
+    // Reading the same rows in process gives the same guarantee structurally.
+    const rows = await loadMergedMarketRows();
+    if (rows === null || rows.length === 0) return null;
+
+    // Mirror /api/markets' visibility rule so the counts stay definitionally
+    // equal: it excludes zombies from its default response, so they must not be
+    // counted here either. Blocked slabs are already dropped by the loader.
+    const numericOrNull = (v: unknown): number | null => {
+      if (v == null) return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    const asSupplied = (row: Record<string, unknown>, key: string): number | null | undefined =>
+      row[key] === undefined ? undefined : numericOrNull(row[key]);
+
+    const visible = rows.filter((m: MarketRegistryRow) => {
+      const row = m as Record<string, unknown>;
+      const rawPrice = numericOrNull(row.last_price);
+      const sanitizedPrice =
+        rawPrice != null && rawPrice > 0 && rawPrice <= MAX_SANE_PRICE_FOR_ACTIVE ? rawPrice : null;
+      return !isZombieMarket({
+        vault_balance: asSupplied(row, "vault_balance"),
+        c_tot: asSupplied(row, "c_tot"),
+        last_price: sanitizedPrice,
+        volume_24h: numericOrNull(row.volume_24h),
+        total_open_interest: asSupplied(row, "total_open_interest"),
+        total_accounts: asSupplied(row, "total_accounts"),
+      });
+    });
 
     let totalOpenInterest = 0;
-    for (const m of markets) {
-      const oiUsd = m.total_open_interest_usd;
-      if (typeof oiUsd === "number" && isSaneMarketValue(oiUsd)) totalOpenInterest += oiUsd;
+    for (const m of visible) {
+      const oiUsd = numericOrNull((m as Record<string, unknown>).total_open_interest_usd);
+      if (oiUsd != null && isSaneMarketValue(oiUsd)) totalOpenInterest += oiUsd;
     }
-    const totalMarkets = typeof data.total === "number" ? data.total : markets.length;
-    const activeTotal = typeof data.activeTotal === "number" ? data.activeTotal : markets.length;
+
+    const activeTotal = visible.filter((m: MarketRegistryRow) =>
+      isActiveMarket(m as Parameters<typeof isActiveMarket>[0]),
+    ).length;
 
     return {
-      totalMarkets,
+      totalMarkets: visible.length,
       activeTotal,
-      totalListedMarkets: totalMarkets,
+      totalListedMarkets: visible.length,
       // No on-chain source for trade history — honest zeros, same as the
       // discovery path below.
       totalVolume24h: 0,
@@ -125,7 +157,7 @@ async function computeStatsFromMarketsApi(request: NextRequest): Promise<(Return
       live: true,
     };
   } catch (err) {
-    console.warn("[/api/stats] markets-api consistency path failed:", err);
+    console.warn("[/api/stats] shared market-registry path failed:", err);
     return null;
   }
 }
@@ -482,7 +514,6 @@ export async function GET(request: NextRequest) {
   // as "active" in stats while being nulled in /api/markets. Previously this cap was
   // only applied during USD conversion (toUsd), not before the isActiveMarket check,
   // causing 65 corrupt-price markets to be counted in totalMarkets but not activeTotal.
-  const MAX_SANE_PRICE_FOR_ACTIVE = 1_000_000; // $1M — mirrors /api/markets sanitizePrice
   const phantomAwareData = statsData.map((m) => {
     const accountsCount = (m as Record<string, unknown>).total_accounts as number ?? 0;
     const vaultBal = (m as Record<string, unknown>).vault_balance as number ?? 0;
@@ -710,7 +741,7 @@ export async function GET(request: NextRequest) {
     live: true,
   }, {
     headers: {
-      "Cache-Control": "public, s-maxage=15, stale-while-revalidate=45",
+      "Cache-Control": "public, s-maxage=15, stale-while-revalidate=60",
     },
   });
 }

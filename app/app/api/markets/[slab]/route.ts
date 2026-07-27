@@ -54,7 +54,7 @@ async function withOnChainMarketLp(
 
 /** Success responses only — matches GET /api/markets (errors omit this to avoid caching 404/500). */
 const MARKETS_CACHE_HEADERS = {
-  "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30",
+  "Cache-Control": "public, s-maxage=10, stale-while-revalidate=60",
 } as const;
 
 /**
@@ -167,7 +167,7 @@ async function onChainSlabFallback(slab: string): Promise<NextResponse> {
 
     return NextResponse.json(
       { market: marketWithLp },
-      { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30", "X-Percolator-Data-Source": "on-chain-direct" } },
+      { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=60", "X-Percolator-Data-Source": "on-chain-direct" } },
     );
   } catch {
     return NextResponse.json({ error: "Market not found" }, { status: 404 });
