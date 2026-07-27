@@ -96,6 +96,41 @@ const HARDCODED_BLOCKED_SLABS: readonly string[] = [
   "DeWGMtVo8VHjUJ5qsPXSZsQS9rFJhnB3gE4tPGWrEcCB", // old PENGU/USDC
   "dLKhJAVPgmgxJJWvbcGvfQUNBmc7wwjdQp8Jzpg4UGq", // old Percolator/USDC
   "9oBMLGXq9mLGa5DQapTL2gia9eM425dNvf4DUNoMrzz6", // old BURNIE/USDC
+  // 2026-07-27: retire the entire devnet-2.0 lineup — all six rows of the
+  // `markets` table. Blocklisted rather than deleted because neither DB lever
+  // is durable: StatsCollector.syncMarkets() re-inserts any on-chain market
+  // missing from the table every COLLECT_INTERVAL_MS (60s) via
+  // insertMarketRow({status:"active"}), and the auto-close sweep flips
+  // indexer_excluded back to false for anything still in the discovery map
+  // with vault > $1 or numUsedAccounts > 0 (StatsCollector.ts:901). Only this
+  // blocklist holds, because it is independent of on-chain state.
+  // Percolator/USDC — healthy at time of writing (all engine lock flags clear,
+  // a full-size close simulates clean), but its LP portfolio is draining:
+  // capital fell $240.35 → $215.91 in ~12 min with $784.09 already
+  // crystallized. Same trajectory as Jimothy below.
+  "7FBXdrm1vQ4ktQJjMwurq4cAHkVB1gKoZ7Hx3CAQv6P4",
+  // Jimothy/USDC — LP vault bankrupt: capital $0.00, pnl −$2,479. It is the
+  // sole negative-PnL account, so negative_pnl_account_count=1 pins
+  // bankruptcy_hlock_active=1, try_clear_bankruptcy_hlock_if_healthy() can
+  // never fire, h_lock_lane returns HMax and every favorable action (closes,
+  // withdrawals) reverts Custom(21). Not recoverable without settling that
+  // position. Also spends ~10% of each minute in target-effective-lag.
+  "gHey79gB1xGQyXne8yEHoKmGi6jrEVigLwxSXQrYkD3",
+  // TROLL/USDC — healthy (LP $1000.00, all flags clear); retired with the rest
+  // of the lineup, not for a fault of its own.
+  "8SHhSKuY9cun15Y2Q9p9SNEV86zzSWbeP4e59xLAv99h",
+  // SOL/USDC — dead. asset0.slot_last is 1,143,246 slots behind (~5.3 days),
+  // oracle_epoch=0, and it has no matcher-enabled LP portfolio, so the keeper's
+  // recovery cranker skips it every cycle ("no LP-vault portfolio found yet")
+  // and has never cranked it once. Renders as symbol UNKNOWN.
+  "BPgSUbDsxZ9bkauWgd6eQ8oLHVx6pSsvfAjPGsS2Sso8",
+  // Empty slab, vault 0, no on-chain identity → placeholderIdentity() renders
+  // it as UNKNOWN. Already indexer_excluded (sticks, since vault is 0).
+  "BLAHwD5wZ3Wo6naHD4GTT6zpYFcyLWAviEWR4zT7C36p",
+  // ANSEM/USDC (devnet-2.0 re-launch; distinct from the 2026-07-09 ANSEM at
+  // 7mzqfnuA… above). Vault 0 and already indexer_excluded, so it never
+  // reached the live market list — blocked to keep discovery from re-surfacing it.
+  "CseeeuKKbgNU38VRukG38mTdcPJ4KWci5GmFikEtp1X5",
 ];
 
 /**
