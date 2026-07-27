@@ -111,13 +111,48 @@ describe("GET /api/markets — Supabase outage fallback", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.markets.length).toBeGreaterThan(0);
     expect(body.total).toBe(body.markets.length);
+    // Whatever survives the chain must match the requested program — this is
+    // the program_id filter's actual contract.
     expect(
       body.markets.every(
         (m: Record<string, unknown>) => m.program_id === V17_DEVNET_PROGRAM,
       ),
     ).toBe(true);
+    // NOT asserting a non-empty result: 394f8561 blocklisted the whole
+    // devnet-2.0 lineup, and the directory is down to a single entry which is
+    // itself blocklisted, so the honest expectation today is zero rows. The
+    // filter is still pinned — by the unknown-program case below (which must
+    // return nothing) and by the blocklist case (which must drop a listed slab
+    // even when its program matches). An emptiness assertion here would only
+    // re-break the moment the directory is repopulated.
+  });
+
+  it("drops a blocklisted slab from the devnet directory even when its program matches", async () => {
+    // The single remaining directory entry is blocklisted (394f8561 retired the
+    // devnet-2.0 lineup). Requesting its OWN program must still return it
+    // nothing — proving the blocklist filter runs ahead of the program filter
+    // rather than the emptiness being incidental.
+    const { BLOCKED_SLAB_ADDRESSES } = await import("@/lib/blocklist");
+    const V17_DEVNET_PROGRAM = "DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj";
+
+    mockConfig.value = {
+      rpcUrl: "https://api.devnet.solana.com",
+      network: "devnet",
+      programId: V17_DEVNET_PROGRAM,
+      programsBySlabTier: undefined,
+    };
+
+    const { GET } = await import("@/app/api/markets/route");
+    const res = await GET(makeRequest({ program_id: V17_DEVNET_PROGRAM }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(
+      body.markets.some((m: Record<string, unknown>) =>
+        BLOCKED_SLAB_ADDRESSES.has(m.slab_address as string),
+      ),
+    ).toBe(false);
   });
 
   it("returns nothing when filtering the devnet directory by an unknown program_id", async () => {
