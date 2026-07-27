@@ -236,15 +236,29 @@ describe("middleware — funding slab blocklist guard (GH#1363)", () => {
     expect(body.error).toBe("Market not found");
   });
 
-  it("returns 404 for env-var-injected blocked slab", async () => {
+  it("does NOT honour env-var-injected slabs — the Edge blocklist is hardcoded-only", async () => {
+    // Deliberate architectural boundary, not a bug. middleware.ts imports
+    // `@/lib/blocklist-edge`, which is edge-pure and intentionally omits the
+    // env-var overrides: importing the env-reading `@/lib/blocklist` here
+    // co-bundled Node-only code into the Edge chunk and Vercel's deploy-time
+    // validator rejected it ("referencing unsupported modules").
+    //
+    // Consequence worth knowing: setting NEXT_PUBLIC_BLOCKED_MARKET_ADDRESSES
+    // (or the legacy BLOCKED_MARKET_ADDRESSES) blocks a market at the Node API
+    // layer only. To block it HERE it must be added to lib/blocklist-edge.ts
+    // and redeployed.
+    process.env.NEXT_PUBLIC_BLOCKED_MARKET_ADDRESSES = "RuntimeBlockedSlabXXXXXXXXXXXXXXXXXXXXX";
     process.env.BLOCKED_MARKET_ADDRESSES = "RuntimeBlockedSlabXXXXXXXXXXXXXXXXXXXXX";
-    // Need a fresh middleware so module-level set picks up the new env var
-    const mw = await freshMiddleware();
-    const res = await mw(
-      makeReq("/api/funding/RuntimeBlockedSlabXXXXXXXXXXXXXXXXXXXXX"),
-    );
-    expect(res.status).toBe(404);
-    delete process.env.BLOCKED_MARKET_ADDRESSES;
+    try {
+      const mw = await freshMiddleware();
+      const res = await mw(
+        makeReq("/api/funding/RuntimeBlockedSlabXXXXXXXXXXXXXXXXXXXXX"),
+      );
+      expect(res.status).not.toBe(404);
+    } finally {
+      delete process.env.NEXT_PUBLIC_BLOCKED_MARKET_ADDRESSES;
+      delete process.env.BLOCKED_MARKET_ADDRESSES;
+    }
   });
 
   it("passes through unblocked slabs (does not return 404)", async () => {
@@ -289,14 +303,29 @@ describe("middleware — open-interest slab blocklist guard (GH#1390)", () => {
     expect(body.error).toBe("Market not found");
   });
 
-  it("returns 404 for env-var-injected blocked slab on /api/open-interest/:slab", async () => {
+  it("does NOT honour env-var-injected slabs — the Edge blocklist is hardcoded-only", async () => {
+    // Deliberate architectural boundary, not a bug. middleware.ts imports
+    // `@/lib/blocklist-edge`, which is edge-pure and intentionally omits the
+    // env-var overrides: importing the env-reading `@/lib/blocklist` here
+    // co-bundled Node-only code into the Edge chunk and Vercel's deploy-time
+    // validator rejected it ("referencing unsupported modules").
+    //
+    // Consequence worth knowing: setting NEXT_PUBLIC_BLOCKED_MARKET_ADDRESSES
+    // (or the legacy BLOCKED_MARKET_ADDRESSES) blocks a market at the Node API
+    // layer only. To block it HERE it must be added to lib/blocklist-edge.ts
+    // and redeployed.
+    process.env.NEXT_PUBLIC_BLOCKED_MARKET_ADDRESSES = "RuntimeBlockedSlabXXXXXXXXXXXXXXXXXXXXX";
     process.env.BLOCKED_MARKET_ADDRESSES = "RuntimeBlockedSlabXXXXXXXXXXXXXXXXXXXXX";
-    const mw = await freshMiddleware();
-    const res = await mw(
-      makeReq("/api/open-interest/RuntimeBlockedSlabXXXXXXXXXXXXXXXXXXXXX"),
-    );
-    expect(res.status).toBe(404);
-    delete process.env.BLOCKED_MARKET_ADDRESSES;
+    try {
+      const mw = await freshMiddleware();
+      const res = await mw(
+        makeReq("/api/open-interest/RuntimeBlockedSlabXXXXXXXXXXXXXXXXXXXXX"),
+      );
+      expect(res.status).not.toBe(404);
+    } finally {
+      delete process.env.NEXT_PUBLIC_BLOCKED_MARKET_ADDRESSES;
+      delete process.env.BLOCKED_MARKET_ADDRESSES;
+    }
   });
 
   it("passes through unblocked slabs on /api/open-interest/:slab", async () => {
@@ -332,14 +361,29 @@ describe("middleware — insurance slab blocklist guard (GH#1390)", () => {
     expect(body.error).toBe("Market not found");
   });
 
-  it("returns 404 for env-var-injected blocked slab on /api/insurance/:slab", async () => {
+  it("does NOT honour env-var-injected slabs — the Edge blocklist is hardcoded-only", async () => {
+    // Deliberate architectural boundary, not a bug. middleware.ts imports
+    // `@/lib/blocklist-edge`, which is edge-pure and intentionally omits the
+    // env-var overrides: importing the env-reading `@/lib/blocklist` here
+    // co-bundled Node-only code into the Edge chunk and Vercel's deploy-time
+    // validator rejected it ("referencing unsupported modules").
+    //
+    // Consequence worth knowing: setting NEXT_PUBLIC_BLOCKED_MARKET_ADDRESSES
+    // (or the legacy BLOCKED_MARKET_ADDRESSES) blocks a market at the Node API
+    // layer only. To block it HERE it must be added to lib/blocklist-edge.ts
+    // and redeployed.
+    process.env.NEXT_PUBLIC_BLOCKED_MARKET_ADDRESSES = "RuntimeBlockedSlabXXXXXXXXXXXXXXXXXXXXX";
     process.env.BLOCKED_MARKET_ADDRESSES = "RuntimeBlockedSlabXXXXXXXXXXXXXXXXXXXXX";
-    const mw = await freshMiddleware();
-    const res = await mw(
-      makeReq("/api/insurance/RuntimeBlockedSlabXXXXXXXXXXXXXXXXXXXXX"),
-    );
-    expect(res.status).toBe(404);
-    delete process.env.BLOCKED_MARKET_ADDRESSES;
+    try {
+      const mw = await freshMiddleware();
+      const res = await mw(
+        makeReq("/api/insurance/RuntimeBlockedSlabXXXXXXXXXXXXXXXXXXXXX"),
+      );
+      expect(res.status).not.toBe(404);
+    } finally {
+      delete process.env.NEXT_PUBLIC_BLOCKED_MARKET_ADDRESSES;
+      delete process.env.BLOCKED_MARKET_ADDRESSES;
+    }
   });
 
   it("passes through unblocked slabs on /api/insurance/:slab", async () => {

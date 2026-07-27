@@ -11,12 +11,19 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextResponse } from "next/server";
 
-// Mock the shared proxy utility — the route has no other deps
+// Mock the shared proxy utility and the indexer-db fallback — the route's
+// only two data sources.
 vi.mock("@/lib/api-proxy", () => ({
   proxyToApi: vi.fn(),
 }));
 
+vi.mock("@/lib/indexer-db", () => ({
+  hasIndexerDb: vi.fn(() => false),
+  queryFundingGlobal: vi.fn(),
+}));
+
 import { proxyToApi } from "@/lib/api-proxy";
+import { hasIndexerDb, queryFundingGlobal } from "@/lib/indexer-db";
 
 // Helper: call the route handler directly (module cached after first import)
 async function callRoute(url = "http://localhost/api/funding/global?limit=5") {
@@ -136,46 +143,114 @@ describe("GET /api/funding/global", () => {
     expect(json.count).toBe(2);
   });
 
-  it("forwards 502 when proxy cannot reach upstream", async () => {
-    vi.mocked(proxyToApi).mockResolvedValue(
-      NextResponse.json({ error: "Backend unavailable" }, { status: 502 })
-    );
+  // The route stopped being a pass-through proxy: it is now a three-tier
+  // chain (Railway proxy -> local indexer Postgres -> graceful empty). It
+  // deliberately does NOT surface an upstream failure to the browser, so the
+  // funding UI degrades to "no data" instead of an error state when the
+  // backend is down — which is the live situation whenever Railway is dead
+  // (see #2443). These used to assert the old forward-the-status contract.
+  describe("upstream failure — degrades instead of forwarding the error", () => {
+    it.each([
+      [502, "Backend unavailable"],
+      [504, "Backend timeout"],
+      [500, "Internal error"],
+    ])("swallows a %i from upstream and returns an empty list", async (status, error) => {
+      vi.mocked(hasIndexerDb).mockReturnValue(false);
+      vi.mocked(proxyToApi).mockResolvedValue(
+        NextResponse.json({ error }, { status })
+      );
 
-    const res = await callRoute();
-    expect(res.status).toBe(502);
-    const json = await res.json();
-    expect(json.error).toBeDefined();
+      const res = await callRoute();
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json).toEqual({ markets: [], count: 0 });
+      expect(json.error).toBeUndefined();
+    });
+
+    it("degrades gracefully when proxyToApi itself throws", async () => {
+      vi.mocked(hasIndexerDb).mockReturnValue(false);
+      vi.mocked(proxyToApi).mockRejectedValue(new Error("socket hang up"));
+
+      const res = await callRoute();
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ markets: [], count: 0 });
+    });
+
+    it("is not cached, so recovery is picked up on the next request", async () => {
+      vi.mocked(hasIndexerDb).mockReturnValue(false);
+      vi.mocked(proxyToApi).mockResolvedValue(
+        NextResponse.json({ error: "Backend unavailable" }, { status: 502 })
+      );
+
+      const res = await callRoute();
+
+      // Caching an empty degraded response would keep the funding UI blank
+      // for the whole TTL after the backend comes back.
+      expect(res.headers.get("Cache-Control")).toBe("no-store, max-age=0");
+    });
   });
 
-  it("forwards 504 when upstream times out", async () => {
-    vi.mocked(proxyToApi).mockResolvedValue(
-      NextResponse.json({ error: "Backend timeout" }, { status: 504 })
-    );
+  describe("indexer-db fallback (playground / Railway down)", () => {
+    it("serves funding rows from the local indexer when the proxy fails", async () => {
+      vi.mocked(proxyToApi).mockResolvedValue(
+        NextResponse.json({ error: "Backend unavailable" }, { status: 502 })
+      );
+      vi.mocked(hasIndexerDb).mockReturnValue(true);
+      vi.mocked(queryFundingGlobal).mockResolvedValue([
+        {
+          slabAddress: CLEAN_SLAB,
+          rateBpsPerSlot: 10,
+          hourlyRatePercent: 0.9,
+          dailyRatePercent: 21.6,
+          netLpPos: 500,
+        },
+      ] as never);
 
-    const res = await callRoute();
-    expect(res.status).toBe(504);
-    const json = await res.json();
-    expect(json.error).toBe("Backend timeout");
-  });
+      const res = await callRoute();
 
-  it("forwards 502 when backend URL is not configured", async () => {
-    vi.mocked(proxyToApi).mockResolvedValue(
-      NextResponse.json({ error: "Backend URL not configured" }, { status: 502 })
-    );
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.markets).toHaveLength(1);
+      expect(json.markets[0].slabAddress).toBe(CLEAN_SLAB);
+      expect(json.count).toBe(1);
+    });
 
-    const res = await callRoute();
-    expect(res.status).toBe(502);
-  });
+    it("applies the blocklist to the fallback path too (GH#1461)", async () => {
+      vi.mocked(proxyToApi).mockResolvedValue(
+        NextResponse.json({ error: "Backend unavailable" }, { status: 502 })
+      );
+      vi.mocked(hasIndexerDb).mockReturnValue(true);
+      vi.mocked(queryFundingGlobal).mockResolvedValue([
+        { slabAddress: BLOCKED_SLAB_1, rateBpsPerSlot: 0, hourlyRatePercent: 0, dailyRatePercent: 0 },
+        { slabAddress: CLEAN_SLAB, rateBpsPerSlot: 10, hourlyRatePercent: 0.9, dailyRatePercent: 21.6 },
+      ] as never);
 
-  it("forwards 500 when upstream returns an internal error", async () => {
-    vi.mocked(proxyToApi).mockResolvedValue(
-      NextResponse.json({ error: "Internal error" }, { status: 500 })
-    );
+      const res = await callRoute();
 
-    const res = await callRoute();
-    expect(res.status).toBe(500);
-    const json = await res.json();
-    expect(json.error).toBeDefined();
+      // A blocked slab must not reach the client via the back door.
+      const json = await res.json();
+      expect(json.markets).toHaveLength(1);
+      expect(json.markets[0].slabAddress).toBe(CLEAN_SLAB);
+    });
+
+    it("falls through to empty when the indexer query itself fails", async () => {
+      vi.mocked(proxyToApi).mockResolvedValue(
+        NextResponse.json({ error: "Backend unavailable" }, { status: 502 })
+      );
+      vi.mocked(hasIndexerDb).mockReturnValue(true);
+      vi.mocked(queryFundingGlobal).mockRejectedValue(new Error("connection refused"));
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      try {
+        const res = await callRoute();
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({ markets: [], count: 0 });
+      } finally {
+        warn.mockRestore();
+      }
+    });
   });
 
   it("passes query params to proxyToApi (limit forwarded)", async () => {
