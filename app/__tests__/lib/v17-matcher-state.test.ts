@@ -62,11 +62,16 @@ describe('v17 matcher-state helpers', () => {
     expect(inspectV17MatcherContext(data, publicKey(21))).toBe('uninitialized');
   });
 
+  // The delegate lives at CTX_VAMM_OFFSET + 16, NOT at CTX_VAMM_OFFSET: the
+  // 16-byte VAMM magic occupies +0..+16 and the LP-signer delegate follows it
+  // (verified against live devnet matcher contexts). These fixtures used to
+  // write at +0 — i.e. they encoded the exact bug lib/v17-matcher-state.ts was
+  // fixed to stop doing, so the "initialized" case could never pass.
   it('classifies a context containing the expected delegate as initialized', () => {
     const data = new Uint8Array(MATCHER_CONTEXT_LEN);
     const delegate = publicKey(22);
 
-    data.set(delegate.toBytes(), CTX_VAMM_OFFSET);
+    data.set(delegate.toBytes(), CTX_VAMM_OFFSET + 16);
 
     expect(inspectV17MatcherContext(data, delegate)).toBe('initialized');
   });
@@ -74,7 +79,7 @@ describe('v17 matcher-state helpers', () => {
   it('rejects a context bound to another delegate', () => {
     const data = new Uint8Array(MATCHER_CONTEXT_LEN);
 
-    data.set(publicKey(23).toBytes(), CTX_VAMM_OFFSET);
+    data.set(publicKey(23).toBytes(), CTX_VAMM_OFFSET + 16);
 
     expect(inspectV17MatcherContext(data, publicKey(24))).toBe('invalid');
   });

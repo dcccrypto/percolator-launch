@@ -16,6 +16,15 @@ vi.mock("@/lib/priceStore/wsManager", () => ({
       messageListeners.push(l);
       return () => {};
     },
+    // priceStore now subscribes PER CHANNEL (one listener per slab) rather than
+    // to the global message stream. The mock only had onMessage, so the store
+    // threw "manager.onMessageForChannel is not a function" on first subscribe.
+    // Listeners land in the same array so the existing tick assertions still
+    // drive them.
+    onMessageForChannel: (_channel: string, l: (data: unknown) => void) => {
+      messageListeners.push(l);
+      return () => {};
+    },
     onStatusChange: () => () => {},
   }),
 }));

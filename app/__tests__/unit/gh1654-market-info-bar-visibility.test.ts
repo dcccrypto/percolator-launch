@@ -29,9 +29,21 @@ describe("GH#1654 — MarketInfoBar visibility", () => {
     expect(barSource).toContain("sticky");
   });
 
-  test("imports MarketLogo", () => {
-    expect(barSource).toContain("MarketLogo");
-    expect(barSource).toContain("@/components/market/MarketLogo");
+  test("still renders a market logo (now via MarketSwitcher)", () => {
+    // GH#1654 asked that the info bar show the market's logo. It no longer
+    // imports MarketLogo DIRECTLY — the symbol + logo became a dropdown market
+    // switcher — so assert the requirement through the indirection instead of
+    // pinning the old import, which asserted the implementation rather than the
+    // behaviour and started failing on a pure refactor.
+    expect(barSource).toContain("MarketSwitcher");
+    expect(barSource).toContain("@/components/trade/MarketSwitcher");
+
+    const switcherSource = readFileSync(
+      join(__dirname, "../../components/trade/MarketSwitcher.tsx"),
+      "utf-8"
+    );
+    expect(switcherSource).toContain("@/components/market/MarketLogo");
+    expect(switcherSource).toMatch(/<MarketLogo\b/);
   });
 
   test("page renders MarketInfoBar without hidden wrapper", () => {
