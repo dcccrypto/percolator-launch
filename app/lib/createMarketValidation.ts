@@ -1,4 +1,5 @@
 import type { ValidationError } from "@/components/create/ValidationSummary";
+import { MIN_LEVERAGE_X, MAX_LEVERAGE_X } from "@/lib/market-params";
 
 /**
  * Minimum LP collateral thresholds per token decimals.
@@ -91,11 +92,25 @@ export function validateCreateForm(values: CreateFormValues): ValidationError[] 
     errors.push({ field: "Trading Fee", message: "Must be 100 bps or less (1%).", severity: "error" });
   }
 
-  // Margin
-  if (initialMarginBps < 100) {
-    errors.push({ field: "Initial Margin", message: "Must be at least 100 bps (100x max leverage).", severity: "error" });
-  } else if (initialMarginBps > 5000) {
-    errors.push({ field: "Initial Margin", message: "Must be 5000 bps or less (2x min leverage).", severity: "error" });
+  // Margin. Bounds must match deriveMarketParams' clamp exactly: it silently
+  // clamps leverage to [MIN_LEVERAGE_X, MAX_LEVERAGE_X], so anything the
+  // validator lets through outside that range gets quietly changed instead of
+  // rejected — a creator asking for 100x would have been handed a 10x market
+  // with no warning. Reject here so the number they see is the number they get.
+  const MAX_MARGIN_BPS = Math.ceil(10_000 / MIN_LEVERAGE_X); // 2x  -> 5000
+  const MIN_MARGIN_BPS = Math.ceil(10_000 / MAX_LEVERAGE_X); // 10x -> 1000
+  if (initialMarginBps < MIN_MARGIN_BPS) {
+    errors.push({
+      field: "Initial Margin",
+      message: `Must be at least ${MIN_MARGIN_BPS} bps (${MAX_LEVERAGE_X}x max leverage).`,
+      severity: "error",
+    });
+  } else if (initialMarginBps > MAX_MARGIN_BPS) {
+    errors.push({
+      field: "Initial Margin",
+      message: `Must be ${MAX_MARGIN_BPS} bps or less (${MIN_LEVERAGE_X}x min leverage).`,
+      severity: "error",
+    });
   }
 
   // Fee vs Margin

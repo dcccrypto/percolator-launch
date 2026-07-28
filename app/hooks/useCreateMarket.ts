@@ -214,19 +214,43 @@ export const MIN_INIT_MARKET_SEED = 500_000_000n;
  * hit this failure mode. If product wants to offer >6.67x leverage again, this needs a fresh
  * on-chain bisection first.
  */
+/**
+ * SUPERSEDED 2026-07-27. Kept only so nothing silently imports a stale floor.
+ *
+ * The 1500-bps (6.67x) floor above came from a bisection that concluded "10x
+ * fails on-chain". That was a misdiagnosis: 10x fails only when paired with the
+ * OLD hardcoded price-move budget (1 bps/slot x 500 slots = 500), which exceeds
+ * what 500-bps maintenance margin can absorb. Re-bisected against the deployed
+ * program with a compatible budget (4 x 100 = 400), **10x is accepted**. The
+ * fresh bisection the comment above asks for is the MAX_PRICE_MOVE_BY_MARGIN
+ * table in lib/market-params.ts.
+ *
+ * Leaving the floor in place was not neutral: `derived` sized the price-move
+ * budget for the leverage the creator PICKED while InitMarket wrote the floored
+ * margin, so a creator who chose 10x got a 6.67x market. Margin and budget now
+ * both come from deriveMarketParams(), which makes them coherent by
+ * construction.
+ */
 export const MIN_SAFE_INITIAL_MARGIN_BPS = 1500n;
 
 /**
- * BUG 16 fix (2026-07-06): create() floors the on-chain initial_margin_bps at
- * MIN_SAFE_INITIAL_MARGIN_BPS, but every leverage display (success screen, StepReview,
- * markets DB `max_leverage`) previously computed leverage from the raw, UNfloored bps the
- * user requested — so a market "created" at 1000 bps (advertised 10x) was actually
- * initialized on-chain at 1500 bps (~6.67x). This is a pure, deterministic mirror of the
- * floor applied inside create() (same constant, same comparison) — safe to call anywhere
- * BEFORE submission too, since the floor never depends on retry/session state.
+ * The on-chain initial_margin_bps this request will ACTUALLY be created with.
+ *
+ * Every leverage display (success screen, StepReview, markets DB `max_leverage`)
+ * must go through this rather than the raw bps the user typed. Originally that
+ * was BUG 16 (2026-07-06): create() floored the margin at 1500 but the displays
+ * read the unfloored value, so a market advertised as 10x was initialized at
+ * ~6.67x.
+ *
+ * The floor is gone (see MIN_SAFE_INITIAL_MARGIN_BPS above), but the reason for
+ * this mirror is not: deriveMarketParams clamps leverage to [MIN_LEVERAGE_X,
+ * MAX_LEVERAGE_X] and rounds margin UP, so the requested bps and the on-chain
+ * bps can still differ. A pure function of the request — no retry/session
+ * state — so it is safe to call before submission.
  */
 export function flooredInitialMarginBps(requestedBps: number): number {
-  return Math.max(requestedBps, Number(MIN_SAFE_INITIAL_MARGIN_BPS));
+  const lev = requestedBps > 0 ? 10_000 / requestedBps : MIN_LEVERAGE_X;
+  return deriveMarketParams(lev, 0n, 1_000_000n).initialMarginBps;
 }
 
 export interface VammParams {
@@ -837,10 +861,9 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       getPriorityFee(connection),
     ]);
 
-    const requestedMarginBps = BigInt(params.initialMarginBps);
-    const initialMarginBps = requestedMarginBps < MIN_SAFE_INITIAL_MARGIN_BPS
-      ? MIN_SAFE_INITIAL_MARGIN_BPS
-      : requestedMarginBps;
+    // Margin comes from the SAME derivation as the price-move budget below, so
+    // the two can never disagree (see lib/market-params.ts).
+    const initialMarginBps = BigInt(derived.initialMarginBps);
     const v17InitArgs: InitMarketV17Args = {
       maxPortfolioAssets: V17_MAX_PORTFOLIO_ASSETS,
       hMin: "1000",
@@ -848,7 +871,7 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       initialPrice: params.initialPriceE6.toString(),
       minNonzeroMmReq: "1000000",
       minNonzeroImReq: "2000000",
-      maintenanceMarginBps: (initialMarginBps / 2n).toString(),
+      maintenanceMarginBps: String(derived.maintenanceMarginBps),
       initialMarginBps: initialMarginBps.toString(),
       maxTradingFeeBps: BigInt(params.tradingFeeBps).toString(),
       tradeFeeBaseBps: BigInt(params.tradingFeeBps).toString(),
@@ -1756,10 +1779,9 @@ export function useCreateMarket() {
               // never accounts for or requires this deposit. Removing it drops an
               // unnecessary token requirement (and a devnet-pre-fund round-trip) from the
               // very first step of every market creation / recovery attempt.
-              const requestedMarginBps = BigInt(params.initialMarginBps);
-              const initialMarginBps = requestedMarginBps < MIN_SAFE_INITIAL_MARGIN_BPS
-                ? MIN_SAFE_INITIAL_MARGIN_BPS
-                : requestedMarginBps;
+              // Margin and the price-move budget share one derivation — see
+              // lib/market-params.ts.
+              const initialMarginBps = BigInt(derived.initialMarginBps);
               const v17InitArgs: InitMarketV17Args = {
                 maxPortfolioAssets: V17_MAX_PORTFOLIO_ASSETS,
                 hMin: "1000",
@@ -1767,7 +1789,7 @@ export function useCreateMarket() {
                 initialPrice: params.initialPriceE6.toString(),
                 minNonzeroMmReq: "1000000",
                 minNonzeroImReq: "2000000",
-                maintenanceMarginBps: (initialMarginBps / 2n).toString(),
+                maintenanceMarginBps: String(derived.maintenanceMarginBps),
                 initialMarginBps: initialMarginBps.toString(),
                 maxTradingFeeBps: BigInt(params.tradingFeeBps).toString(),
                 tradeFeeBaseBps: BigInt(params.tradingFeeBps).toString(),
@@ -1866,10 +1888,9 @@ export function useCreateMarket() {
               wallet.publicKey, vaultAta, vaultPda, params.mint,
             );
 
-            const requestedMarginBps = BigInt(params.initialMarginBps);
-            const initialMarginBps = requestedMarginBps < MIN_SAFE_INITIAL_MARGIN_BPS
-              ? MIN_SAFE_INITIAL_MARGIN_BPS
-              : requestedMarginBps;
+            // Margin and the price-move budget share one derivation — see
+            // lib/market-params.ts.
+            const initialMarginBps = BigInt(derived.initialMarginBps);
             const v17InitArgs: InitMarketV17Args = {
               maxPortfolioAssets: 14,
               hMin: "1000",
@@ -1877,7 +1898,7 @@ export function useCreateMarket() {
               initialPrice: params.initialPriceE6.toString(),
               minNonzeroMmReq: "1000000",
               minNonzeroImReq: "2000000",
-              maintenanceMarginBps: (initialMarginBps / 2n).toString(),
+              maintenanceMarginBps: String(derived.maintenanceMarginBps),
               initialMarginBps: initialMarginBps.toString(),
               maxTradingFeeBps: BigInt(params.tradingFeeBps).toString(),
               tradeFeeBaseBps: BigInt(params.tradingFeeBps).toString(),
