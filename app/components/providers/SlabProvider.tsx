@@ -253,8 +253,15 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
           );
         }
         lastHadError = true;
+        // Reset to defaults rather than spreading the previous state: the seed
+        // cache (getSeedSlab, below) can already have parsed and published
+        // `config`/`engine`/`accounts` for this address before the owner is
+        // known. Spreading `...s` left that parsed state visible to consumers
+        // on an account we are actively refusing to trust. Nulling programId
+        // alone is not enough — downstream UI reads config/engine too.
         setState((s) => ({
-          ...s,
+          ...defaultSlabState,
+          slabAddress: s.slabAddress,
           loading: false,
           error:
             "This market is not owned by a recognized Percolator program. " +
