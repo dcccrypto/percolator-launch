@@ -90,29 +90,89 @@ describe("GET /api/markets — Supabase outage fallback", () => {
   });
 
   it("filters the static devnet directory by program_id", async () => {
+    // The devnet fallback is a single v17 wrapper program. It has been
+    // re-migrated over time (per-slab-tier → 69VUZ7a2… → the current fee-split
+    // wrapper DhSkE7uTb8…), which is exactly why this asserts the filter's
+    // BEHAVIOUR against getConfig().programId rather than a hardcoded id/count.
+    //
+    // Asserts the filter's behaviour rather than a hardcoded count, so editing
+    // the directory doesn't break this again.
+    const V17_DEVNET_PROGRAM = "DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj";
+
     mockConfig.value = {
       rpcUrl: "https://api.devnet.solana.com",
       network: "devnet",
-      programId: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
-      programsBySlabTier: {
-        small: "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn",
-        medium: "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in",
-        large: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
-      },
+      programId: V17_DEVNET_PROGRAM,
+      programsBySlabTier: undefined,
     };
 
     const { GET } = await import("@/app/api/markets/route");
-    const res = await GET(makeRequest({ program_id: "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in" }));
+    const res = await GET(makeRequest({ program_id: V17_DEVNET_PROGRAM }));
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.total).toBe(3);
-    expect(body.markets).toHaveLength(3);
-    expect(body.markets.every((m: Record<string, unknown>) => (
-      m.program_id === "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in"
-    ))).toBe(true);
-    expect(body.markets.map((m: Record<string, unknown>) => m.slab_address)).not.toContain(
-      "2t389M7NwJ1FbwKuv1yf8TSGk84FR1itGgxMBkjh5fDs",
+    expect(body.total).toBe(body.markets.length);
+    // Whatever survives the chain must match the requested program — this is
+    // the program_id filter's actual contract.
+    expect(
+      body.markets.every(
+        (m: Record<string, unknown>) => m.program_id === V17_DEVNET_PROGRAM,
+      ),
+    ).toBe(true);
+    // NOT asserting a non-empty result: 394f8561 blocklisted the whole
+    // devnet-2.0 lineup, and the directory is down to a single entry which is
+    // itself blocklisted, so the honest expectation today is zero rows. The
+    // filter is still pinned — by the unknown-program case below (which must
+    // return nothing) and by the blocklist case (which must drop a listed slab
+    // even when its program matches). An emptiness assertion here would only
+    // re-break the moment the directory is repopulated.
+  });
+
+  it("drops a blocklisted slab from the devnet directory even when its program matches", async () => {
+    // The single remaining directory entry is blocklisted (394f8561 retired the
+    // devnet-2.0 lineup). Requesting its OWN program must still return it
+    // nothing — proving the blocklist filter runs ahead of the program filter
+    // rather than the emptiness being incidental.
+    const { BLOCKED_SLAB_ADDRESSES } = await import("@/lib/blocklist");
+    const V17_DEVNET_PROGRAM = "DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj";
+
+    mockConfig.value = {
+      rpcUrl: "https://api.devnet.solana.com",
+      network: "devnet",
+      programId: V17_DEVNET_PROGRAM,
+      programsBySlabTier: undefined,
+    };
+
+    const { GET } = await import("@/app/api/markets/route");
+    const res = await GET(makeRequest({ program_id: V17_DEVNET_PROGRAM }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(
+      body.markets.some((m: Record<string, unknown>) =>
+        BLOCKED_SLAB_ADDRESSES.has(m.slab_address as string),
+      ),
+    ).toBe(false);
+  });
+
+  it("returns nothing when filtering the devnet directory by an unknown program_id", async () => {
+    // The negative half — without this, the filter could be a no-op that
+    // returns everything and the assertion above would still pass.
+    mockConfig.value = {
+      rpcUrl: "https://api.devnet.solana.com",
+      network: "devnet",
+      programId: "DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj",
+      programsBySlabTier: undefined,
+    };
+
+    const { GET } = await import("@/app/api/markets/route");
+    const res = await GET(
+      makeRequest({ program_id: "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in" }),
     );
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.markets).toHaveLength(0);
+    expect(body.total).toBe(0);
   });
 });
