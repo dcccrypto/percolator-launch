@@ -71,7 +71,7 @@ import {
   parsePortfolioV17,
 } from "@percolatorct/sdk";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
-import { deriveMarketParams, MIN_LEVERAGE_X } from "@/lib/market-params";
+import { deriveMarketParams, MIN_LEVERAGE_X, backingSeedPerDomain } from "@/lib/market-params";
 // v17: SetOracleAuthority (tag 17), PushOraclePrice (tag 16), SetOraclePriceCap (tag 16),
 // and UpdateConfig (tag 14) do not exist in v17. All oracle + risk params are embedded
 // in InitMarket (extended tail). The sdk-compat stubs throw at runtime if called.
@@ -148,16 +148,14 @@ export function orderStakeTailInstructions<T>(
   ];
 }
 
-// BACKING-BUCKET-FRESHNESS DEADLOCK PREVENTION (2026-07-09): dust amount used to
-// seed BOTH backing-bucket domains (long=2*assetIndex, short=2*assetIndex+1) of
-// asset 0 to Fresh@MAX_BACKING_BUCKET_EXPIRY_SLOT via TopUpBackingBucket, inside
-// Step 3 below, right after DepositCollateral lands (buckets are still Empty —
-// nothing in Steps 0-5 ever calls TradeCpi). See the Step 3 block for the full
-// root-cause writeup. No engine-enforced minimum floor
-// (percolator/src/v16.rs deposit_fresh_counterparty_backing_not_atomic only
-// requires amount != 0) — 0.01 test-USDC is real (not spoofed) collateral and
-// negligible next to lpCollateral/insuranceAmount.
-const BACKING_BUCKET_DUST_AMOUNT = 10_000n; // 0.01 test-USDC (6 decimals)
+// BACKING-BUCKET SEEDING: both domains of asset 0 (long=2*assetIndex,
+// short=2*assetIndex+1) are seeded to Fresh@MAX_BACKING_BUCKET_EXPIRY_SLOT via
+// TopUpBackingBucket in Step 3, right after DepositCollateral lands (buckets are
+// still Empty — nothing in Steps 0-5 calls TradeCpi). That defuses the
+// freshness deadlock. The AMOUNT now comes from backingSeedPerDomain() rather
+// than a flat 0.01 dust: the SHORT domain can never be topped up again once
+// CreateLpVault rebinds backing_bucket_authority, so dust there meant shorts
+// were permanently backed by one cent. See lib/market-params.ts.
 
 /**
  * PERC-465: Fetch the current USD price for a token from Jupiter price API.
@@ -665,6 +663,9 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
     params.lpCollateral,
     params.initialPriceE6,
   );
+  // Collateral seeded into EACH backing domain. Must be real, not dust — the
+  // SHORT domain is unfundable after CreateLpVault. See lib/market-params.ts.
+  const backingSeed = backingSeedPerDomain(params.lpCollateral);
 
   try {
     setState((s) => ({ ...s, loading: true, phase: "preparing", stepLabel: "Preparing market launch..." }));
@@ -959,7 +960,9 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
           walletPk, slabPk, userAta, vaultAta, WELL_KNOWN.tokenProgram,
         ]),
         data: encodeTopUpBackingBucket({
-          domain, amount: BACKING_BUCKET_DUST_AMOUNT.toString(), expirySlot: MAX_BACKING_BUCKET_EXPIRY_SLOT.toString(),
+          // Real seed, not dust: the SHORT domain can never be topped up again
+          // once CreateLpVault runs. See backingSeedPerDomain in lib/market-params.ts.
+          domain, amount: backingSeed.toString(), expirySlot: MAX_BACKING_BUCKET_EXPIRY_SLOT.toString(),
         }),
       }),
     );
@@ -1267,11 +1270,26 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
     advanceLanding(m1Sig);
     updateInFlightStep(slabPk.toBase58(), 2);
 
-    // Fire markets-DB registration + (if keeper mode) keeper-register in
-    // parallel — non-fatal, but keeper-register MUST be awaited before M4
-    // (StakeInitPool rotates marketauth; keeper-register's H1 check requires
-    // marketauth still == deployer).
-    const marketsRegisterPromise = (async () => {
+    // ZOMBIE-MARKET FIX (2026-07-27): this POST is what makes a market VISIBLE
+    // in the app. It used to fire here, immediately after M1, in parallel with
+    // the funding steps — so a launch that died at M3a (which is exactly what
+    // happened to ANSEM: slab + LP portfolio created, deposit never landed,
+    // steps 4-5 never ran) still published a listed, unfunded, untradeable
+    // market. Because "create the market" is always step 1 and always succeeds,
+    // EVERY failed launch left one behind.
+    //
+    // Now it is deferred: `registerMarketInDb()` is called only after M3a
+    // (DepositCollateral + backing seed) has landed, so a market becomes
+    // visible only once it actually holds collateral. A launch that dies before
+    // then leaves an on-chain slab nobody sees, instead of a broken listing.
+    //
+    // keeper-register is NOT deferred — it must still run before M4, because
+    // StakeInitPool rotates marketauth and keeper-register's H1 check requires
+    // marketauth to still equal the deployer.
+    let marketsRegistered = false;
+    const registerMarketInDb = async () => {
+      if (marketsRegistered) return;
+      marketsRegistered = true;
       try {
         await fetch("/api/markets", {
           method: "POST",
@@ -1286,7 +1304,7 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       } catch {
         console.warn("[useCreateMarket] batch: markets DB registration failed (non-fatal)");
       }
-    })();
+    };
 
     const keeperRegisterPromise: Promise<KeeperRegisterOutcome> =
       (isKeeperOracle && params.dexPoolAddress && keeperProofSignature)
@@ -1314,6 +1332,11 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
 
     const m3aSig = await broadcastTailTx(2);
     advanceLanding(m3aSig);
+
+    // The market now holds collateral and both backing domains are seeded, so
+    // it is safe to publish. Fired without awaiting — a slow DB write must not
+    // delay M3b/M4, and it is awaited once at the end of the tail.
+    const marketsRegisterPromise = registerMarketInDb();
 
     try {
       const m3bSig = await broadcastTailTx(3);
@@ -1475,6 +1498,7 @@ export function useCreateMarket() {
         params.lpCollateral,
         params.initialPriceE6,
       );
+      const backingSeed = backingSeedPerDomain(params.lpCollateral);
 
       // Select program based on slab tier — each MAX_ACCOUNTS variant is a separate deployment
       const cfg = getConfig();
@@ -2571,9 +2595,9 @@ export function useCreateMarket() {
           // Fixes #757/#758 — pre-fund only checked seed amount (500), but TX4 also
           // needs lpCollateral + insuranceAmount (default 1,000 + 100 = 1,100 more).
           // Also covers the two backing-bucket dust deposits (long+short domains,
-          // see BACKING_BUCKET_DUST_AMOUNT above) so the deadlock-prevention TopUp
+          // see backingSeedPerDomain) so the deadlock-prevention TopUp
           // below never fails on a wallet funded to the exact old minimum.
-          const tx4Required = params.lpCollateral + params.insuranceAmount + 2n * BACKING_BUCKET_DUST_AMOUNT;
+          const tx4Required = params.lpCollateral + params.insuranceAmount + 2n * backingSeed;
           let tx4Balance = 0n;
           try {
             const tx4Acct = await getAccount(connection, userAta);
@@ -2756,7 +2780,7 @@ export function useCreateMarket() {
                     ]),
                     data: encodeTopUpBackingBucket({
                       domain,
-                      amount: BACKING_BUCKET_DUST_AMOUNT.toString(),
+                      amount: backingSeed.toString(),
                       expirySlot: MAX_BACKING_BUCKET_EXPIRY_SLOT.toString(),
                     }),
                   }),

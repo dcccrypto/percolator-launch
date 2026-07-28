@@ -82,6 +82,37 @@ export const MAX_LEVERAGE_X = 10;
 /** Trading fee is NOT creator-settable — one rate for every market. */
 export const FIXED_TRADING_FEE_BPS = 30;
 
+/**
+ * How much collateral to seed into EACH backing domain (long + short) at
+ * creation, as a percentage of the LP seed.
+ *
+ * This used to be a flat 0.01 test-USDC "dust" amount whose only job was to
+ * defuse the backing-bucket freshness deadlock. That is fine for the LONG
+ * domain — `DepositToLpVault` can top it up later. It is NOT fine for SHORT:
+ * `CreateLpVault` overwrites the asset's `backing_bucket_authority` to the
+ * vault registry PDA, and that field is shared by BOTH domains while a vault
+ * serves only the one it was created for (domain 0). After that the creator is
+ * Unauthorized (Custom 8) on TopUpBackingBucket, WithdrawBackingBucket AND
+ * SyncBackingDomainLedger for both domains — verified on devnet 2026-07-27, and
+ * irreversible (all three escape routes checked: UpdateAssetAuthority needs a
+ * signature the PDA cannot give, CloseLpVault does not restore the field, and
+ * UpdateAssetLifecycle returns AssetSlotAlreadyConfigured on an active asset).
+ *
+ * So whatever the SHORT domain gets at creation is all it will ever have.
+ * Seeding a real amount here is the only chance to give shorts counterparty
+ * backing at all.
+ */
+export const BACKING_SEED_PCT_OF_LP = 10n;
+
+/** Absolute floor so a tiny LP seed still defuses the freshness deadlock. */
+export const BACKING_SEED_MIN_ATOMS = 10_000n;
+
+/** Collateral to seed into one backing domain, given the LP seed. */
+export function backingSeedPerDomain(lpCollateralAtoms: bigint): bigint {
+  const pct = (lpCollateralAtoms * BACKING_SEED_PCT_OF_LP) / 100n;
+  return pct > BACKING_SEED_MIN_ATOMS ? pct : BACKING_SEED_MIN_ATOMS;
+}
+
 export interface DerivedMarketParams {
   initialMarginBps: number;
   maintenanceMarginBps: number;
