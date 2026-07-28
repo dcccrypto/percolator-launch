@@ -71,6 +71,7 @@ import {
   parsePortfolioV17,
 } from "@percolatorct/sdk";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
+import { deriveMarketParams, MIN_LEVERAGE_X } from "@/lib/market-params";
 // v17: SetOracleAuthority (tag 17), PushOraclePrice (tag 16), SetOraclePriceCap (tag 16),
 // and UpdateConfig (tag 14) do not exist in v17. All oracle + risk params are embedded
 // in InitMarket (extended tail). The sdk-compat stubs throw at runtime if called.
@@ -657,6 +658,13 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
   const walletPk = wallet.publicKey;
   const slabPk = slabKp.publicKey;
   let broadcastStarted = false;
+  // Every risk parameter for this market, derived from the creator's leverage
+  // and LP seed. Nothing below hand-picks a price-move rate or an LP cap.
+  const derived = deriveMarketParams(
+    params.initialMarginBps > 0 ? 10_000 / params.initialMarginBps : MIN_LEVERAGE_X,
+    params.lpCollateral,
+    params.initialPriceE6,
+  );
 
   try {
     setState((s) => ({ ...s, loading: true, phase: "preparing", stepLabel: "Preparing market launch..." }));
@@ -846,8 +854,11 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       liquidationFeeBps: "50",
       liquidationFeeCap: "10000000000",
       minLiquidationAbs: "0",
-      maxPriceMoveBpsPerSlot: "1",
-      maxAccrualDtSlots: "500",
+      // Auto-derived from the creator's leverage — see lib/market-params.ts.
+      // Was hardcoded 1 / 500, which froze new positions for ~17 min after a
+      // 26% move (verified causally on devnet 2026-07-27).
+      maxPriceMoveBpsPerSlot: String(derived.maxPriceMoveBpsPerSlot),
+      maxAccrualDtSlots: String(derived.maxAccrualDtSlots),
       maxAbsFundingE9PerSlot: "0",
       minFundingLifetimeSlots: "500",
       maxAccountBSettlementChunks: "10",
@@ -918,8 +929,12 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       ]),
       data: encodeInitMatcherCtx({
         kind: 0, tradingFeeBps: Number(params.tradingFeeBps), baseSpreadBps: 50, maxTotalBps: 200,
-        impactKBps: 0, liquidityNotionalE6: 0n, maxFillAbs: I128_MAX, maxInventoryAbs: I128_MAX,
-        feeToInsuranceBps: 0, skewSpreadMultBps: 0,
+        impactKBps: 0, liquidityNotionalE6: 0n,
+        // LP GUARDRAILS (2026-07-27). These were i128::MAX / 0 — an unlimited,
+        // fixed-price counterparty with no skew, which is how Jimothy's LP was
+        // drained to $0 / -$2,479. Now sized to LP capital: see lib/market-params.ts.
+        maxFillAbs: derived.maxFillAbs, maxInventoryAbs: derived.maxInventoryAbs,
+        feeToInsuranceBps: 0, skewSpreadMultBps: derived.skewSpreadMultBps,
       }),
     });
     const m2Descriptor: TailTxDescriptor = {
@@ -1451,6 +1466,16 @@ export function useCreateMarket() {
         return;
       }
 
+      // Every risk parameter for this market, derived from the creator's
+      // leverage and LP seed (see lib/market-params.ts). Shared by the
+      // sequential path's InitMarket + InitMatcherCtx sites below, exactly as
+      // the merged path derives its own copy.
+      const derived = deriveMarketParams(
+        params.initialMarginBps > 0 ? 10_000 / params.initialMarginBps : MIN_LEVERAGE_X,
+        params.lpCollateral,
+        params.initialPriceE6,
+      );
+
       // Select program based on slab tier — each MAX_ACCOUNTS variant is a separate deployment
       const cfg = getConfig();
       // PERC-277: Default to 4096 (large) — the main devnet program binary is compiled for
@@ -1725,8 +1750,9 @@ export function useCreateMarket() {
                 liquidationFeeBps: "50",
                 liquidationFeeCap: "10000000000",
                 minLiquidationAbs: "0",
-                maxPriceMoveBpsPerSlot: "1",
-                maxAccrualDtSlots: "500",
+                // Auto-derived — see lib/market-params.ts (mirrors the merged path).
+                maxPriceMoveBpsPerSlot: String(derived.maxPriceMoveBpsPerSlot),
+                maxAccrualDtSlots: String(derived.maxAccrualDtSlots),
                 maxAbsFundingE9PerSlot: "0",
                 minFundingLifetimeSlots: "500",
                 maxAccountBSettlementChunks: "10",
@@ -1834,8 +1860,9 @@ export function useCreateMarket() {
               liquidationFeeBps: "50",
               liquidationFeeCap: "10000000000",
               minLiquidationAbs: "0",
-              maxPriceMoveBpsPerSlot: "1",
-              maxAccrualDtSlots: "500",
+              // Auto-derived — see lib/market-params.ts (mirrors the other paths).
+              maxPriceMoveBpsPerSlot: String(derived.maxPriceMoveBpsPerSlot),
+              maxAccrualDtSlots: String(derived.maxAccrualDtSlots),
               maxAbsFundingE9PerSlot: "0",
               minFundingLifetimeSlots: "500",
               maxAccountBSettlementChunks: "10",
@@ -2143,10 +2170,11 @@ export function useCreateMarket() {
                   maxTotalBps: 200,
                   impactKBps: 0,
                   liquidityNotionalE6: 0n,
-                  maxFillAbs: I128_MAX_STEP2,
-                  maxInventoryAbs: I128_MAX_STEP2,
+                  // LP guardrails — mirrors the merged path. See lib/market-params.ts.
+                  maxFillAbs: derived.maxFillAbs,
+                  maxInventoryAbs: derived.maxInventoryAbs,
                   feeToInsuranceBps: 0,
-                  skewSpreadMultBps: 0,
+                  skewSpreadMultBps: derived.skewSpreadMultBps,
                 }),
               });
 
