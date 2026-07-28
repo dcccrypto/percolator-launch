@@ -30,6 +30,67 @@ if (typeof window !== 'undefined') {
   });
 }
 
+// ── Web Storage polyfill ──────────────────────────────────────────────────────
+//
+// Under this jsdom setup `window.localStorage` is a PLAIN EMPTY OBJECT — no
+// getItem, no setItem, no clear (verified: its prototype is Object.prototype).
+// So every test touching storage died on the first call, which is why the whole
+// useChartDrawings / useChartDrawingTool suites failed as a block (29 tests)
+// with `window.localStorage.clear is not a function`. That is one missing
+// global, not 29 broken behaviours.
+//
+// Methods are defined as OWN, writable, configurable properties so tests can
+// still `vi.spyOn(window.localStorage, "setItem")` — several deliberately do,
+// to simulate a quota error or Safari Private Mode throwing on read.
+// Methods live on a shared PROTOTYPE, not on the instance, because the suites
+// spy via `vi.spyOn(window.localStorage.__proto__, "setItem")` — which is also
+// how real jsdom behaves (every Storage shares Storage.prototype). Putting them
+// on the instance makes the prototype empty and spyOn throws
+// "The property setItem is not defined on the object".
+const storageBacking = new WeakMap<object, Map<string, string>>();
+
+class MemoryStorage {
+  constructor() {
+    storageBacking.set(this, new Map());
+  }
+  private get map(): Map<string, string> {
+    let m = storageBacking.get(this);
+    if (!m) { m = new Map(); storageBacking.set(this, m); }
+    return m;
+  }
+  getItem(key: string): string | null {
+    const v = this.map.get(String(key));
+    return v === undefined ? null : v;
+  }
+  setItem(key: string, value: string): void {
+    this.map.set(String(key), String(value));
+  }
+  removeItem(key: string): void {
+    this.map.delete(String(key));
+  }
+  clear(): void {
+    this.map.clear();
+  }
+  key(index: number): string | null {
+    return [...this.map.keys()][index] ?? null;
+  }
+  get length(): number {
+    return this.map.size;
+  }
+}
+
+function createStorage(): Storage {
+  return new MemoryStorage() as unknown as Storage;
+}
+
+for (const name of ["localStorage", "sessionStorage"] as const) {
+  const impl = createStorage();
+  Object.defineProperty(window, name, { value: impl, writable: true, configurable: true });
+  // jsdom's window is not always the same object the module under test closes
+  // over, so mirror onto globalThis too.
+  Object.defineProperty(globalThis, name, { value: impl, writable: true, configurable: true });
+}
+
 // Cleanup after each test
 afterEach(() => {
   cleanup();
