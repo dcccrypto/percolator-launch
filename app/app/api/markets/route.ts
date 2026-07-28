@@ -7,6 +7,7 @@ import { getConfig, getRpcEndpoint } from "@/lib/config";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 import { readRegisteredMarkets, type RegisteredMarket } from "@/lib/playground-registered-markets";
 import { parseV17RiskParams } from "@/lib/v17-engine-config";
+import { leverageFromMarginBps } from "@/lib/market-params";
 import { getClientIp } from "@/lib/get-client-ip";
 import { claimPlaygroundChallenge } from "@/lib/playground-nonce-store";
 import { signKeeperRequest } from "@/lib/keeper-hmac";
@@ -246,7 +247,13 @@ function numericOrNull(v: unknown): number | null {
 const FALLBACK_MAX_LEVERAGE = 10;
 function computeMaxLeverage(initialMarginBps: bigint | null | undefined): number {
   if (initialMarginBps == null || initialMarginBps <= 0n) return FALLBACK_MAX_LEVERAGE;
-  const lev = Math.floor(10000 / Number(initialMarginBps));
+  // Must ROUND, not floor. The launch path derives margin with
+  // `ceil(10000 / leverage)`, so 3x stores 3334 bps — and floor(10000 / 3334)
+  // is 2. Flooring here advertised a 3x market as 2x in the markets list and in
+  // every consumer of this route. Same defect was fixed on the client in
+  // lib/market-params.ts `leverageFromMarginBps`; this server route was missed
+  // because it has its own copy of the calculation.
+  const lev = leverageFromMarginBps(Number(initialMarginBps));
   return Number.isFinite(lev) && lev > 0 ? lev : FALLBACK_MAX_LEVERAGE;
 }
 

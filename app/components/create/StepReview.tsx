@@ -6,6 +6,7 @@ import { CostEstimate } from "./CostEstimate";
 import Link from "next/link";
 import { getNetwork } from "@/lib/config";
 import { flooredInitialMarginBps } from "@/hooks/useCreateMarket";
+import { leverageFromMarginBps } from "@/lib/market-params";
 
 interface StepReviewProps {
   // Token
@@ -139,7 +140,7 @@ export const StepReview: FC<StepReviewProps> = ({
   // BUG 16 fix: preview the FLOORED margin (MIN_SAFE_INITIAL_MARGIN_BPS applies inside
   // create()) so what's shown here matches what actually lands on-chain — previously this
   // showed unfloored leverage (e.g. "10x") for a market that would be created at ~6.67x.
-  const maxLeverage = Math.floor(10000 / flooredInitialMarginBps(initialMarginBps));
+  const maxLeverage = leverageFromMarginBps(flooredInitialMarginBps(initialMarginBps));
   const tier = SLAB_TIERS[slabTier];
 
   // BUG 17 fix: keeper-oracle markets fire one extra signed tx (oracle authority

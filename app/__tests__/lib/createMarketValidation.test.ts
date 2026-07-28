@@ -12,7 +12,7 @@ function validForm(overrides: Partial<CreateFormValues> = {}): CreateFormValues 
     oracleResolved: true,
     oracleMode: "auto",
     tradingFeeBps: 10,
-    initialMarginBps: 500,
+    initialMarginBps: 1000,
     lpCollateral: "100",
     insuranceAmount: "10",
     tokenBalance: 200_000_000_000n, // 200 SOL
@@ -125,14 +125,33 @@ describe("validateCreateForm", () => {
     ).toBe(true);
   });
 
-  // Initial Margin
-  it("rejects margin < 100 bps", () => {
+  // Initial Margin.
+  //
+  // The bounds must match deriveMarketParams' leverage clamp exactly. They used
+  // to be 100..5000 bps (100x..2x) while the clamp allowed only 10x..2x, so a
+  // request for 20x or 100x passed validation and was then silently turned into
+  // a 10x market. Rejecting is the point: the creator sees the number they get.
+  it("rejects margin below the 10x bound (would be silently clamped)", () => {
     const errors = validateCreateForm(validForm({ initialMarginBps: 50 }));
     expect(
       errors.some(
-        (e) => e.field === "Initial Margin" && e.message.includes("at least 100")
+        (e) => e.field === "Initial Margin" && e.message.includes("at least 1000")
       )
     ).toBe(true);
+  });
+
+  it("rejects 500 bps (20x) rather than quietly handing back a 10x market", () => {
+    const errors = validateCreateForm(validForm({ initialMarginBps: 500 }));
+    expect(
+      errors.some((e) => e.field === "Initial Margin" && e.severity === "error")
+    ).toBe(true);
+  });
+
+  it("accepts the exact bounds — 1000 bps (10x) and 5000 bps (2x)", () => {
+    for (const bps of [1000, 5000]) {
+      const errors = validateCreateForm(validForm({ initialMarginBps: bps }));
+      expect(errors.some((e) => e.field === "Initial Margin")).toBe(false);
+    }
   });
 
   it("rejects margin > 5000 bps", () => {

@@ -71,6 +71,7 @@ import {
   parsePortfolioV17,
 } from "@percolatorct/sdk";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
+import { deriveMarketParams, MIN_LEVERAGE_X, backingSeedPerDomain, leverageFromMarginBps } from "@/lib/market-params";
 // v17: SetOracleAuthority (tag 17), PushOraclePrice (tag 16), SetOraclePriceCap (tag 16),
 // and UpdateConfig (tag 14) do not exist in v17. All oracle + risk params are embedded
 // in InitMarket (extended tail). The sdk-compat stubs throw at runtime if called.
@@ -147,16 +148,14 @@ export function orderStakeTailInstructions<T>(
   ];
 }
 
-// BACKING-BUCKET-FRESHNESS DEADLOCK PREVENTION (2026-07-09): dust amount used to
-// seed BOTH backing-bucket domains (long=2*assetIndex, short=2*assetIndex+1) of
-// asset 0 to Fresh@MAX_BACKING_BUCKET_EXPIRY_SLOT via TopUpBackingBucket, inside
-// Step 3 below, right after DepositCollateral lands (buckets are still Empty —
-// nothing in Steps 0-5 ever calls TradeCpi). See the Step 3 block for the full
-// root-cause writeup. No engine-enforced minimum floor
-// (percolator/src/v16.rs deposit_fresh_counterparty_backing_not_atomic only
-// requires amount != 0) — 0.01 test-USDC is real (not spoofed) collateral and
-// negligible next to lpCollateral/insuranceAmount.
-const BACKING_BUCKET_DUST_AMOUNT = 10_000n; // 0.01 test-USDC (6 decimals)
+// BACKING-BUCKET SEEDING: both domains of asset 0 (long=2*assetIndex,
+// short=2*assetIndex+1) are seeded to Fresh@MAX_BACKING_BUCKET_EXPIRY_SLOT via
+// TopUpBackingBucket in Step 3, right after DepositCollateral lands (buckets are
+// still Empty — nothing in Steps 0-5 calls TradeCpi). That defuses the
+// freshness deadlock. The AMOUNT now comes from backingSeedPerDomain() rather
+// than a flat 0.01 dust: the SHORT domain can never be topped up again once
+// CreateLpVault rebinds backing_bucket_authority, so dust there meant shorts
+// were permanently backed by one cent. See lib/market-params.ts.
 
 /**
  * PERC-465: Fetch the current USD price for a token from Jupiter price API.
@@ -215,19 +214,43 @@ export const MIN_INIT_MARKET_SEED = 500_000_000n;
  * hit this failure mode. If product wants to offer >6.67x leverage again, this needs a fresh
  * on-chain bisection first.
  */
+/**
+ * SUPERSEDED 2026-07-27. Kept only so nothing silently imports a stale floor.
+ *
+ * The 1500-bps (6.67x) floor above came from a bisection that concluded "10x
+ * fails on-chain". That was a misdiagnosis: 10x fails only when paired with the
+ * OLD hardcoded price-move budget (1 bps/slot x 500 slots = 500), which exceeds
+ * what 500-bps maintenance margin can absorb. Re-bisected against the deployed
+ * program with a compatible budget (4 x 100 = 400), **10x is accepted**. The
+ * fresh bisection the comment above asks for is the MAX_PRICE_MOVE_BY_MARGIN
+ * table in lib/market-params.ts.
+ *
+ * Leaving the floor in place was not neutral: `derived` sized the price-move
+ * budget for the leverage the creator PICKED while InitMarket wrote the floored
+ * margin, so a creator who chose 10x got a 6.67x market. Margin and budget now
+ * both come from deriveMarketParams(), which makes them coherent by
+ * construction.
+ */
 export const MIN_SAFE_INITIAL_MARGIN_BPS = 1500n;
 
 /**
- * BUG 16 fix (2026-07-06): create() floors the on-chain initial_margin_bps at
- * MIN_SAFE_INITIAL_MARGIN_BPS, but every leverage display (success screen, StepReview,
- * markets DB `max_leverage`) previously computed leverage from the raw, UNfloored bps the
- * user requested — so a market "created" at 1000 bps (advertised 10x) was actually
- * initialized on-chain at 1500 bps (~6.67x). This is a pure, deterministic mirror of the
- * floor applied inside create() (same constant, same comparison) — safe to call anywhere
- * BEFORE submission too, since the floor never depends on retry/session state.
+ * The on-chain initial_margin_bps this request will ACTUALLY be created with.
+ *
+ * Every leverage display (success screen, StepReview, markets DB `max_leverage`)
+ * must go through this rather than the raw bps the user typed. Originally that
+ * was BUG 16 (2026-07-06): create() floored the margin at 1500 but the displays
+ * read the unfloored value, so a market advertised as 10x was initialized at
+ * ~6.67x.
+ *
+ * The floor is gone (see MIN_SAFE_INITIAL_MARGIN_BPS above), but the reason for
+ * this mirror is not: deriveMarketParams clamps leverage to [MIN_LEVERAGE_X,
+ * MAX_LEVERAGE_X] and rounds margin UP, so the requested bps and the on-chain
+ * bps can still differ. A pure function of the request — no retry/session
+ * state — so it is safe to call before submission.
  */
 export function flooredInitialMarginBps(requestedBps: number): number {
-  return Math.max(requestedBps, Number(MIN_SAFE_INITIAL_MARGIN_BPS));
+  const lev = requestedBps > 0 ? 10_000 / requestedBps : MIN_LEVERAGE_X;
+  return deriveMarketParams(lev, 0n, 1_000_000n).initialMarginBps;
 }
 
 export interface VammParams {
@@ -644,7 +667,7 @@ function buildMarketRegistrationPayload(args: {
     // BUG 16: advertise the FLOORED margin actually enforced on-chain, not the
     // raw requested bps — see flooredInitialMarginBps.
     max_leverage: params.initialMarginBps > 0
-      ? Math.floor(10000 / flooredInitialMarginBps(params.initialMarginBps))
+      ? leverageFromMarginBps(flooredInitialMarginBps(params.initialMarginBps))
       : 1,
     trading_fee_bps: Number(params.tradingFeeBps),
     lp_collateral: params.lpCollateral.toString(),
@@ -657,6 +680,16 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
   const walletPk = wallet.publicKey;
   const slabPk = slabKp.publicKey;
   let broadcastStarted = false;
+  // Every risk parameter for this market, derived from the creator's leverage
+  // and LP seed. Nothing below hand-picks a price-move rate or an LP cap.
+  const derived = deriveMarketParams(
+    params.initialMarginBps > 0 ? 10_000 / params.initialMarginBps : MIN_LEVERAGE_X,
+    params.lpCollateral,
+    params.initialPriceE6,
+  );
+  // Collateral seeded into EACH backing domain. Must be real, not dust — the
+  // SHORT domain is unfundable after CreateLpVault. See lib/market-params.ts.
+  const backingSeed = backingSeedPerDomain(params.lpCollateral);
 
   try {
     setState((s) => ({ ...s, loading: true, phase: "preparing", stepLabel: "Preparing market launch..." }));
@@ -828,10 +861,35 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       getPriorityFee(connection),
     ]);
 
-    const requestedMarginBps = BigInt(params.initialMarginBps);
-    const initialMarginBps = requestedMarginBps < MIN_SAFE_INITIAL_MARGIN_BPS
-      ? MIN_SAFE_INITIAL_MARGIN_BPS
-      : requestedMarginBps;
+    // Margin comes from the SAME derivation as the price-move budget below, so
+    // the two can never disagree (see lib/market-params.ts).
+    const initialMarginBps = BigInt(derived.initialMarginBps);
+    // WRITE-ONCE PARAMETERS.
+    //
+    // Everything below is fixed for the life of the market — InitMarket runs
+    // once and there is no instruction to change these afterwards. That is
+    // exactly how the 6.67x leverage cap and the missing LP caps survived for
+    // months: a value typed here is invisible and permanent. Anything not
+    // derived from the creator's choice is listed with why it is safe to pin.
+    //
+    //  hMin/hMax, minNonzeroMmReq/ImReq  dust + health bounds; below these a
+    //                                    position is not worth gas to maintain.
+    //  liquidationFee 50 bps, cap $10k   standard; minLiquidationAbs 0 lets any
+    //                                    size be liquidated rather than
+    //                                    stranding dust positions.
+    //  maxAbsFundingE9PerSlot: "0"       funding is deliberately OFF. Trades
+    //                                    settle at the pushed AuthMark, which
+    //                                    IS the reference price, so there is no
+    //                                    perp-vs-spot basis for funding to
+    //                                    correct. A non-zero cap here would let
+    //                                    a rate accrue against nothing.
+    //  maintenanceFeePerSlot: "0"        no rent on open positions.
+    //  chunk/lifetime limits             settlement batching; sized so a
+    //                                    bankrupt close fits in one tx.
+    //
+    // Verified 2026-07-28: with these EXACT args, every leverage the wizard
+    // offers (2..10x) simulates ACCEPTED against the deployed program, so no
+    // creator choice can produce a config InitMarket rejects.
     const v17InitArgs: InitMarketV17Args = {
       maxPortfolioAssets: V17_MAX_PORTFOLIO_ASSETS,
       hMin: "1000",
@@ -839,15 +897,18 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       initialPrice: params.initialPriceE6.toString(),
       minNonzeroMmReq: "1000000",
       minNonzeroImReq: "2000000",
-      maintenanceMarginBps: (initialMarginBps / 2n).toString(),
+      maintenanceMarginBps: String(derived.maintenanceMarginBps),
       initialMarginBps: initialMarginBps.toString(),
       maxTradingFeeBps: BigInt(params.tradingFeeBps).toString(),
       tradeFeeBaseBps: BigInt(params.tradingFeeBps).toString(),
       liquidationFeeBps: "50",
       liquidationFeeCap: "10000000000",
       minLiquidationAbs: "0",
-      maxPriceMoveBpsPerSlot: "1",
-      maxAccrualDtSlots: "500",
+      // Auto-derived from the creator's leverage — see lib/market-params.ts.
+      // Was hardcoded 1 / 500, which froze new positions for ~17 min after a
+      // 26% move (verified causally on devnet 2026-07-27).
+      maxPriceMoveBpsPerSlot: String(derived.maxPriceMoveBpsPerSlot),
+      maxAccrualDtSlots: String(derived.maxAccrualDtSlots),
       maxAbsFundingE9PerSlot: "0",
       minFundingLifetimeSlots: "500",
       maxAccountBSettlementChunks: "10",
@@ -910,7 +971,6 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       ]),
       data: encodeSetMatcherConfig({ enabled: 1 }),
     });
-    const I128_MAX = 170141183460469231731687303715884105727n;
     const initMatcherCtxIx = buildIx({
       programId,
       keys: buildAccountMetas(ACCOUNTS_INIT_MATCHER_CTX, [
@@ -918,8 +978,12 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       ]),
       data: encodeInitMatcherCtx({
         kind: 0, tradingFeeBps: Number(params.tradingFeeBps), baseSpreadBps: 50, maxTotalBps: 200,
-        impactKBps: 0, liquidityNotionalE6: 0n, maxFillAbs: I128_MAX, maxInventoryAbs: I128_MAX,
-        feeToInsuranceBps: 0, skewSpreadMultBps: 0,
+        impactKBps: 0, liquidityNotionalE6: 0n,
+        // LP GUARDRAILS (2026-07-27). These were i128::MAX / 0 — an unlimited,
+        // fixed-price counterparty with no skew, which is how Jimothy's LP was
+        // drained to $0 / -$2,479. Now sized to LP capital: see lib/market-params.ts.
+        maxFillAbs: derived.maxFillAbs, maxInventoryAbs: derived.maxInventoryAbs,
+        feeToInsuranceBps: 0, skewSpreadMultBps: derived.skewSpreadMultBps,
       }),
     });
     const m2Descriptor: TailTxDescriptor = {
@@ -944,7 +1008,9 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
           walletPk, slabPk, userAta, vaultAta, WELL_KNOWN.tokenProgram,
         ]),
         data: encodeTopUpBackingBucket({
-          domain, amount: BACKING_BUCKET_DUST_AMOUNT.toString(), expirySlot: MAX_BACKING_BUCKET_EXPIRY_SLOT.toString(),
+          // Real seed, not dust: the SHORT domain can never be topped up again
+          // once CreateLpVault runs. See backingSeedPerDomain in lib/market-params.ts.
+          domain, amount: backingSeed.toString(), expirySlot: MAX_BACKING_BUCKET_EXPIRY_SLOT.toString(),
         }),
       }),
     );
@@ -1252,11 +1318,26 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
     advanceLanding(m1Sig);
     updateInFlightStep(slabPk.toBase58(), 2);
 
-    // Fire markets-DB registration + (if keeper mode) keeper-register in
-    // parallel — non-fatal, but keeper-register MUST be awaited before M4
-    // (StakeInitPool rotates marketauth; keeper-register's H1 check requires
-    // marketauth still == deployer).
-    const marketsRegisterPromise = (async () => {
+    // ZOMBIE-MARKET FIX (2026-07-27): this POST is what makes a market VISIBLE
+    // in the app. It used to fire here, immediately after M1, in parallel with
+    // the funding steps — so a launch that died at M3a (which is exactly what
+    // happened to ANSEM: slab + LP portfolio created, deposit never landed,
+    // steps 4-5 never ran) still published a listed, unfunded, untradeable
+    // market. Because "create the market" is always step 1 and always succeeds,
+    // EVERY failed launch left one behind.
+    //
+    // Now it is deferred: `registerMarketInDb()` is called only after M3a
+    // (DepositCollateral + backing seed) has landed, so a market becomes
+    // visible only once it actually holds collateral. A launch that dies before
+    // then leaves an on-chain slab nobody sees, instead of a broken listing.
+    //
+    // keeper-register is NOT deferred — it must still run before M4, because
+    // StakeInitPool rotates marketauth and keeper-register's H1 check requires
+    // marketauth to still equal the deployer.
+    let marketsRegistered = false;
+    const registerMarketInDb = async () => {
+      if (marketsRegistered) return;
+      marketsRegistered = true;
       try {
         await fetch("/api/markets", {
           method: "POST",
@@ -1271,7 +1352,7 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       } catch {
         console.warn("[useCreateMarket] batch: markets DB registration failed (non-fatal)");
       }
-    })();
+    };
 
     const keeperRegisterPromise: Promise<KeeperRegisterOutcome> =
       (isKeeperOracle && params.dexPoolAddress && keeperProofSignature)
@@ -1299,6 +1380,11 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
 
     const m3aSig = await broadcastTailTx(2);
     advanceLanding(m3aSig);
+
+    // The market now holds collateral and both backing domains are seeded, so
+    // it is safe to publish. Fired without awaiting — a slow DB write must not
+    // delay M3b/M4, and it is awaited once at the end of the tail.
+    const marketsRegisterPromise = registerMarketInDb();
 
     try {
       const m3bSig = await broadcastTailTx(3);
@@ -1450,6 +1536,17 @@ export function useCreateMarket() {
         setState((s) => ({ ...s, error: "Wallet not connected" }));
         return;
       }
+
+      // Every risk parameter for this market, derived from the creator's
+      // leverage and LP seed (see lib/market-params.ts). Shared by the
+      // sequential path's InitMarket + InitMatcherCtx sites below, exactly as
+      // the merged path derives its own copy.
+      const derived = deriveMarketParams(
+        params.initialMarginBps > 0 ? 10_000 / params.initialMarginBps : MIN_LEVERAGE_X,
+        params.lpCollateral,
+        params.initialPriceE6,
+      );
+      const backingSeed = backingSeedPerDomain(params.lpCollateral);
 
       // Select program based on slab tier — each MAX_ACCOUNTS variant is a separate deployment
       const cfg = getConfig();
@@ -1707,10 +1804,9 @@ export function useCreateMarket() {
               // never accounts for or requires this deposit. Removing it drops an
               // unnecessary token requirement (and a devnet-pre-fund round-trip) from the
               // very first step of every market creation / recovery attempt.
-              const requestedMarginBps = BigInt(params.initialMarginBps);
-              const initialMarginBps = requestedMarginBps < MIN_SAFE_INITIAL_MARGIN_BPS
-                ? MIN_SAFE_INITIAL_MARGIN_BPS
-                : requestedMarginBps;
+              // Margin and the price-move budget share one derivation — see
+              // lib/market-params.ts.
+              const initialMarginBps = BigInt(derived.initialMarginBps);
               const v17InitArgs: InitMarketV17Args = {
                 maxPortfolioAssets: V17_MAX_PORTFOLIO_ASSETS,
                 hMin: "1000",
@@ -1718,15 +1814,16 @@ export function useCreateMarket() {
                 initialPrice: params.initialPriceE6.toString(),
                 minNonzeroMmReq: "1000000",
                 minNonzeroImReq: "2000000",
-                maintenanceMarginBps: (initialMarginBps / 2n).toString(),
+                maintenanceMarginBps: String(derived.maintenanceMarginBps),
                 initialMarginBps: initialMarginBps.toString(),
                 maxTradingFeeBps: BigInt(params.tradingFeeBps).toString(),
                 tradeFeeBaseBps: BigInt(params.tradingFeeBps).toString(),
                 liquidationFeeBps: "50",
                 liquidationFeeCap: "10000000000",
                 minLiquidationAbs: "0",
-                maxPriceMoveBpsPerSlot: "1",
-                maxAccrualDtSlots: "500",
+                // Auto-derived — see lib/market-params.ts (mirrors the merged path).
+                maxPriceMoveBpsPerSlot: String(derived.maxPriceMoveBpsPerSlot),
+                maxAccrualDtSlots: String(derived.maxAccrualDtSlots),
                 maxAbsFundingE9PerSlot: "0",
                 minFundingLifetimeSlots: "500",
                 maxAccountBSettlementChunks: "10",
@@ -1816,10 +1913,9 @@ export function useCreateMarket() {
               wallet.publicKey, vaultAta, vaultPda, params.mint,
             );
 
-            const requestedMarginBps = BigInt(params.initialMarginBps);
-            const initialMarginBps = requestedMarginBps < MIN_SAFE_INITIAL_MARGIN_BPS
-              ? MIN_SAFE_INITIAL_MARGIN_BPS
-              : requestedMarginBps;
+            // Margin and the price-move budget share one derivation — see
+            // lib/market-params.ts.
+            const initialMarginBps = BigInt(derived.initialMarginBps);
             const v17InitArgs: InitMarketV17Args = {
               maxPortfolioAssets: 14,
               hMin: "1000",
@@ -1827,15 +1923,16 @@ export function useCreateMarket() {
               initialPrice: params.initialPriceE6.toString(),
               minNonzeroMmReq: "1000000",
               minNonzeroImReq: "2000000",
-              maintenanceMarginBps: (initialMarginBps / 2n).toString(),
+              maintenanceMarginBps: String(derived.maintenanceMarginBps),
               initialMarginBps: initialMarginBps.toString(),
               maxTradingFeeBps: BigInt(params.tradingFeeBps).toString(),
               tradeFeeBaseBps: BigInt(params.tradingFeeBps).toString(),
               liquidationFeeBps: "50",
               liquidationFeeCap: "10000000000",
               minLiquidationAbs: "0",
-              maxPriceMoveBpsPerSlot: "1",
-              maxAccrualDtSlots: "500",
+              // Auto-derived — see lib/market-params.ts (mirrors the other paths).
+              maxPriceMoveBpsPerSlot: String(derived.maxPriceMoveBpsPerSlot),
+              maxAccrualDtSlots: String(derived.maxAccrualDtSlots),
               maxAbsFundingE9PerSlot: "0",
               minFundingLifetimeSlots: "500",
               maxAccountBSettlementChunks: "10",
@@ -2110,9 +2207,6 @@ export function useCreateMarket() {
               0x50,
             ]);
 
-            const I128_MAX_STEP2 =
-              170141183460469231731687303715884105727n;
-
             const walletPublicKeyStep2 = wallet.publicKey;
 
             if (!walletPublicKeyStep2) {
@@ -2143,10 +2237,11 @@ export function useCreateMarket() {
                   maxTotalBps: 200,
                   impactKBps: 0,
                   liquidityNotionalE6: 0n,
-                  maxFillAbs: I128_MAX_STEP2,
-                  maxInventoryAbs: I128_MAX_STEP2,
+                  // LP guardrails — mirrors the merged path. See lib/market-params.ts.
+                  maxFillAbs: derived.maxFillAbs,
+                  maxInventoryAbs: derived.maxInventoryAbs,
                   feeToInsuranceBps: 0,
-                  skewSpreadMultBps: 0,
+                  skewSpreadMultBps: derived.skewSpreadMultBps,
                 }),
               });
 
@@ -2543,9 +2638,9 @@ export function useCreateMarket() {
           // Fixes #757/#758 — pre-fund only checked seed amount (500), but TX4 also
           // needs lpCollateral + insuranceAmount (default 1,000 + 100 = 1,100 more).
           // Also covers the two backing-bucket dust deposits (long+short domains,
-          // see BACKING_BUCKET_DUST_AMOUNT above) so the deadlock-prevention TopUp
+          // see backingSeedPerDomain) so the deadlock-prevention TopUp
           // below never fails on a wallet funded to the exact old minimum.
-          const tx4Required = params.lpCollateral + params.insuranceAmount + 2n * BACKING_BUCKET_DUST_AMOUNT;
+          const tx4Required = params.lpCollateral + params.insuranceAmount + 2n * backingSeed;
           let tx4Balance = 0n;
           try {
             const tx4Acct = await getAccount(connection, userAta);
@@ -2728,7 +2823,7 @@ export function useCreateMarket() {
                     ]),
                     data: encodeTopUpBackingBucket({
                       domain,
-                      amount: BACKING_BUCKET_DUST_AMOUNT.toString(),
+                      amount: backingSeed.toString(),
                       expirySlot: MAX_BACKING_BUCKET_EXPIRY_SLOT.toString(),
                     }),
                   }),
