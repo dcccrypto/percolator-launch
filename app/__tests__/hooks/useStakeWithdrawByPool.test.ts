@@ -36,8 +36,12 @@ vi.mock('@percolatorct/sdk', () => {
   const devnetProgramId = new PK('6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k');
   return {
     STAKE_PROGRAM_ID: devnetProgramId,
+    // A vi.mock factory REPLACES the module, so anything the hook's import
+    // chain reads must be listed. The hook now pulls in a module that reads
+    // V17_MARKET_GROUP_OFF; without it the import throws before any test runs.
+    V17_MARKET_GROUP_OFF: 592,
     getStakeProgramId: vi.fn().mockReturnValue(devnetProgramId),
-    STAKE_POOL_SIZE: 352,
+    STAKE_POOL_SIZE: 384,
     deriveStakePool: vi.fn().mockReturnValue([mockPool, 255]),
     deriveStakeVaultAuth: vi.fn().mockReturnValue([mockVaultAuth, 254]),
     deriveDepositPda: vi.fn().mockReturnValue([mockDepositPda, 253]),
@@ -68,11 +72,12 @@ import { useConnectionCompat, useWalletCompat } from '@/hooks/useWalletCompat';
 import { sendTx } from '@/lib/tx';
 import { encodeStakeWithdraw, withdrawAccounts } from '@percolatorct/sdk';
 
-// Build a fake pool account buffer (352 bytes — canonical StakePool size).
+// Build a fake pool account buffer (384 bytes — the v2 StakePool size;
+// the v1 352 was superseded by `prior 352 + pending_admin[32]`).
 // lpMint at offset 104, vault at offset 136 per decodeStakePool layout.
 // decodeStakePool is mocked, so exact content doesn't matter; size must be ≥ 352.
 function buildPoolAccountData(): Buffer {
-  const buf = Buffer.alloc(352);
+  const buf = Buffer.alloc(384);
   buf[0] = 1; // is_initialized
   mockLpMint.toBuffer().copy(buf, 104);
   mockVault.toBuffer().copy(buf, 136);
@@ -95,7 +100,7 @@ describe('useStakeWithdrawByPool', () => {
     mockConnection = {
       getAccountInfo: vi.fn().mockImplementation(async (pubkey: PublicKey) => {
         if (pubkey.equals(mockPool)) {
-          return { data: buildPoolAccountData(), owner: new PublicKey('6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k') };
+          return { data: buildPoolAccountData(), owner: new PublicKey('GCHhcgwPyrai8SWHEVWw3odedguFXEtJobNnWSfWBCU3') };
         }
         return { data: Buffer.alloc(165), owner: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') };
       }),
@@ -184,7 +189,7 @@ describe('useStakeWithdrawByPool', () => {
     let callIdx = 0;
     mockConnection.getAccountInfo.mockImplementation(async (pubkey: PublicKey) => {
       if (pubkey.equals(mockPool)) {
-        return { data: buildPoolAccountData(), owner: new PublicKey('6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k') };
+        return { data: buildPoolAccountData(), owner: new PublicKey('GCHhcgwPyrai8SWHEVWw3odedguFXEtJobNnWSfWBCU3') };
       }
       callIdx++;
       if (callIdx >= 2) return null; // collateral ATA missing

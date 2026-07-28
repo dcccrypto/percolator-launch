@@ -83,11 +83,17 @@ function createStorage(): Storage {
   return new MemoryStorage() as unknown as Storage;
 }
 
+// Guarded: some suites opt into `@vitest-environment node`, where `window` does
+// not exist. Touching it unconditionally here throws ReferenceError during
+// setup and fails those files before their first test runs.
+const hasWindow = typeof window !== "undefined";
 for (const name of ["localStorage", "sessionStorage"] as const) {
   const impl = createStorage();
-  Object.defineProperty(window, name, { value: impl, writable: true, configurable: true });
+  if (hasWindow) {
+    Object.defineProperty(window, name, { value: impl, writable: true, configurable: true });
+  }
   // jsdom's window is not always the same object the module under test closes
-  // over, so mirror onto globalThis too.
+  // over, so mirror onto globalThis too (and in node this is the only target).
   Object.defineProperty(globalThis, name, { value: impl, writable: true, configurable: true });
 }
 

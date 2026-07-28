@@ -18,6 +18,12 @@ vi.mock("@privy-io/react-auth", () => ({
 vi.mock("@privy-io/react-auth/solana", () => ({
   toSolanaWalletConnectors: () => [],
   useWallets: () => ({ wallets: [] }),
+  // A vi.mock factory REPLACES the module, so every hook the provider imports
+  // must be listed here or the import throws before any test runs. These four
+  // are what PrivyProviderClient builds its WalletApi from.
+  useSignTransaction: () => ({ signTransaction: vi.fn() }),
+  useSignAndSendTransaction: () => ({ signAndSendTransaction: vi.fn() }),
+  useSignMessage: () => ({ signMessage: vi.fn() }),
 }));
 
 import PrivyProviderClient from "@/components/providers/PrivyProviderClient";
