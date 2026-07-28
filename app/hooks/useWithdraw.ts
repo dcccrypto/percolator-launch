@@ -9,7 +9,6 @@ import {
   CrankAction,
   ACCOUNTS_WITHDRAW_COLLATERAL,
   ACCOUNTS_KEEPER_CRANK,
-  ACCOUNTS_PERMISSIONLESS_CRANK_BASE,
   buildAccountMetas,
   WELL_KNOWN,
   buildIx,
@@ -49,8 +48,20 @@ function isEngineStaleWithdrawError(msg: string): boolean {
   const m = msg.match(/Custom\((\d+)\)/) ?? msg.match(/"Custom"\s*:\s*(\d+)/);
   return m !== null && parseInt(m[1], 10) === ENGINE_STALE_CODE;
 }
+// VERIFIED against the deployed engine 2026-07-27: `withdraw_not_atomic`
+// (percolator/src/v16.rs:14412) returns `Stale` (Custom 19) UNCONDITIONALLY
+// whenever the account's active_bitmap is non-empty — i.e. whenever ANY position
+// is open — regardless of oracle/crank freshness. It is NOT a stale-data
+// condition and a maintainer crank does NOT clear it (proven: an account with
+// all four cert epochs matching the header still reverts 19 while a leg is open).
+// The engine simply refuses to release collateral that backs an open position.
+// So the honest message points the user at the real remedy: close first.
 const ENGINE_STALE_WITHDRAW_MESSAGE =
-  "This market's on-chain price/crank data is too stale to process a withdrawal. This won't clear on its own retry — the market needs a fresh crank from the maintainer before withdrawals will work again.";
+  "You can't withdraw while you have an open position on this market — the collateral backs your position. Close (or fully reduce) your position first, then withdraw. If you have no open position and still see this, the market may need a maintainer crank.";
+
+// Client-side guard message for the same rule, shown BEFORE sending a doomed tx.
+const OPEN_POSITION_WITHDRAW_MESSAGE =
+  "You have an open position on this market. Close it (fully) before withdrawing — this market can't release collateral while a position is open.";
 
 const INLINE_ORACLE_PUSH_REMOVED_ERROR =
   "Inline oracle price push was removed on-chain in beta.29. Migrate this flow to /api/oracle/advance-phase or another server-side oracle publisher before withdrawing as the oracle authority.";
@@ -130,9 +141,6 @@ export function useWithdraw(slabAddress: string) {
             if (slabInfo?.data) isV17 = isV17Account(new Uint8Array(slabInfo.data));
           } catch { /* fall through — layout detection best-effort */ }
         }
-        // Set when the v17 path prepends a crank — bumps the CU budget below.
-        let v17CrankIncluded = false;
-
         if (isV17) {
           // ── v17 withdraw path ─────────────────────────────────────────────
           // v17 Withdraw (tag 4): [owner(signer,w), market(w), portfolio(w), destToken(w), vaultToken(w), vaultAuthority, tokenProgram]
@@ -263,6 +271,14 @@ export function useWithdraw(slabAddress: string) {
               const portfolio = parsePortfolioV17(portfolioData);
               const activeLeg = portfolio.legs.find((l) => l.active);
               hasActiveLegs = activeLeg !== undefined;
+              // The engine forbids ANY withdrawal while a position is open
+              // (v16.rs:14412, active_bitmap non-empty -> Stale). "Free margin"
+              // is not withdrawable here — the whole account is locked until the
+              // position is closed. Block the doomed tx up front with the true
+              // reason instead of letting it revert Custom(19) on-chain.
+              if (hasActiveLegs) {
+                throw new Error(OPEN_POSITION_WITHDRAW_MESSAGE);
+              }
               const positionSize = activeLeg ? activeLeg.basisPosQ : 0n;
               // D: mirror OrderTicket/DepositWithdrawCard's 3-step entry-price
               // fallback (on-chain entry_price -> locally-cached -> pnl-implied
@@ -295,10 +311,11 @@ export function useWithdraw(slabAddress: string) {
                 );
               }
             } catch (checkErr) {
-              // Re-throw our own validation error; ignore parse failures (best-effort).
+              // Re-throw our own validation errors; ignore parse failures (best-effort).
               if (
                 checkErr instanceof Error &&
-                checkErr.message.startsWith("Withdrawal amount exceeds")
+                (checkErr.message.startsWith("Withdrawal amount exceeds") ||
+                  checkErr.message === OPEN_POSITION_WITHDRAW_MESSAGE)
               ) {
                 throw checkErr;
               }
@@ -309,26 +326,14 @@ export function useWithdraw(slabAddress: string) {
           // state before releasing margin — a standalone withdraw rejects with
           // StaleData (code 19) unless something cranked recently. Trades solve
           // this by prepending PermissionlessCrank(FeeSweep) in the same tx
-          // (see useTrade), which is why "close, then withdraw" worked while a
-          // plain withdraw said "market data is stale". Mirror the trade flow
-          // exactly: crank only when the portfolio has active legs (cranking an
-          // empty portfolio returns EngineNonProgress 0x16 and aborts the tx).
-          if (hasActiveLegs && portfolioPk) {
-            v17CrankIncluded = true;
-            const crankKeys = buildAccountMetas(ACCOUNTS_PERMISSIONLESS_CRANK_BASE, [
-              wallet.publicKey, slabPk, portfolioPk,
-            ]);
-            // For Pyth mode, append oracle feed account as tail (same as useTrade)
-            if (!useAdminOracle) {
-              crankKeys.push({ pubkey: oracleAccount, isSigner: false, isWritable: false });
-            }
-            instructions.push(buildIx({
-              programId,
-              keys: crankKeys,
-              data: encodePermissionlessCrank({ action: CrankAction.FeeSweep, assetIndex: 0, nowSlot: 0n, recoveryReason: 0 }),
-            }));
-          }
-
+          // NOTE (2026-07-27): a prior version prepended PermissionlessCrank here
+          // when the account had active legs, believing it un-staled the withdraw.
+          // That was WRONG — withdraw_not_atomic (v16.rs:14412) rejects ANY
+          // withdrawal while active_bitmap is non-empty, and a crank cannot empty
+          // the bitmap (proven: an account with all cert epochs matching still
+          // reverts Custom 19 while a leg is open). So a position withdraw is now
+          // blocked up front (see OPEN_POSITION_WITHDRAW_MESSAGE above) and we never
+          // reach here with an open position — no crank to prepend for v17.
           instructions.push(buildIx({
             programId,
             keys: buildAccountMetas(ACCOUNTS_WITHDRAW_COLLATERAL, [
@@ -367,7 +372,7 @@ export function useWithdraw(slabAddress: string) {
 
         // 600k CU when the v17 crank rides along (matches useTrade's
         // crank+trade budget); all pre-existing paths keep the original 300k.
-        const sig = await sendTx({ connection, wallet, instructions, computeUnits: v17CrankIncluded ? 600_000 : 300_000 });
+        const sig = await sendTx({ connection, wallet, instructions, computeUnits: 300_000 });
         // Force immediate slab re-read so balance updates without waiting for the next poll.
         refreshSlab?.();
         setTimeout(() => refreshSlab?.(), 2000);

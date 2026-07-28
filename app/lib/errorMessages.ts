@@ -68,7 +68,15 @@ const ERROR_CODE_MAP: Record<number, string> = {
   // tripped it does not self-clear from a normal price push or crank; only a
   // maintainer re-seeding the market fixes it. See useEngineFreshness.ts and
   // TRANSIENT_CODES below (removed from it, along with 21).
-  19: "Engine stalled - no crank has landed on this market recently enough to trade. This will not clear on its own; the market needs a fresh re-seed. Please report it.",
+  // Custom(19) = V16Error::Stale. It has THREE distinct causes (verified against
+  // the deployed engine 2026-07-27), so the copy must not assert only one:
+  //   1. Withdraw with an open position — withdraw_not_atomic (v16.rs:14412)
+  //      returns Stale whenever active_bitmap is non-empty, BY DESIGN. Close first.
+  //      (useWithdraw overrides this with a position-specific message.)
+  //   2. A favorable action (e.g. claim released PnL) on an account whose health
+  //      cert has drifted behind the header epoch — clears with a crank.
+  //   3. A genuinely deep-stale market — needs a maintainer crank/re-seed.
+  19: "This action can't be completed right now. If you're withdrawing, close your open position first — collateral backing a position can't be withdrawn. Otherwise the market may just need a moment; try again shortly, and report it if it persists.",
   20: "Counterparty (backing) state is stale - crank the market, then retry.",
   // LF1 (2026-07-08): EngineLockActive is the OTHER symptom of the same cliff
   // as EngineStale(19) above - once a market crosses it, every trade/close
@@ -77,7 +85,13 @@ const ERROR_CODE_MAP: Record<number, string> = {
   // comment (claiming this self-clears via the keeper's ~20s Refresh crank)
   // were both disproven by the same live-devnet verification - see
   // TRANSIENT_CODES below (removed from it).
-  21: "Engine lock is stuck (a crank/recovery never completed) - this will not clear on its own. The market needs a fresh re-seed before trading/closing can resume.",
+  // Custom(21) = V16Error::LockActive. Causes (verified 2026-07-27): the market
+  // is not Live / in recovery; an account has a close-in-progress ledger; the
+  // market's LP counterparty went bankrupt (bankruptcy_hlock, needs the losing
+  // position settled); or a genuinely deep-stale market. It does NOT always mean
+  // "re-seed" — a transient lag clears on its own; a bankrupt/recovery market
+  // needs maintainer action. Don't promise either outcome.
+  21: "This market is temporarily locked. If it's a brief lag it clears on its own — try again in a moment. If it persists, the market needs maintainer attention (it may be in recovery). Please report it.",
   22: "Crank made no progress - the market may need attention. Try again shortly.",
   23: "This market is in recovery mode and must be cranked before trading resumes.",
   24: "Engine counter overflow.",
