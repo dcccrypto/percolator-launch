@@ -38,7 +38,13 @@ vi.mock('@percolatorct/sdk', () => {
   const devnetProgramId = new PK('6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k');
   return {
     STAKE_PROGRAM_ID: devnetProgramId,
-    STAKE_POOL_SIZE: 352,
+    // v2 layout. The struct grew 352 -> 384 (percolator-stake state.rs:
+    // "prior 352 + pending_admin[32] = 384"), which moved cooldown_slots from
+    // 162 to 184. The fixture kept the v1 numbers, so the hook read 0 for
+    // cooldown and every cooldown assertion failed — the HOOK was correct all
+    // along: verified against a live devnet pool, offset 184 reads exactly the
+    // 5 slots the market was created with, while 162 reads garbage.
+    STAKE_POOL_SIZE: 384,
     getStakeProgramId: vi.fn().mockReturnValue(devnetProgramId),
     deriveStakePool: vi.fn().mockReturnValue([mockPool, 255]),
     deriveStakeVaultAuth: vi.fn().mockReturnValue([mockVaultAuth, 254]),
@@ -76,15 +82,15 @@ function buildPoolAccountData(opts?: {
   depositCap?: bigint;
   totalDeposited?: bigint;
 }): Buffer {
-  const buf = Buffer.alloc(352);
+  const buf = Buffer.alloc(384);
   buf[0] = 1;
   mockLpMint.toBuffer().copy(buf, 65);
   mockVault.toBuffer().copy(buf, 97);
   mockVaultAuth.toBuffer().copy(buf, 129);
   buf[161] = 254;
-  buf.writeBigUInt64LE(opts?.cooldownSlots ?? 0n, 162);
-  buf.writeBigUInt64LE(opts?.depositCap ?? 0n, 170);
-  buf.writeBigUInt64LE(opts?.totalDeposited ?? 0n, 178);
+  buf.writeBigUInt64LE(opts?.cooldownSlots ?? 0n, 184);
+  buf.writeBigUInt64LE(opts?.depositCap ?? 0n, 192);
+  buf.writeBigUInt64LE(opts?.totalDeposited ?? 0n, 168);
   return buf;
 }
 

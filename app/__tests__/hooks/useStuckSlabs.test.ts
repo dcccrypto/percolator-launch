@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
-import { Keypair } from "@solana/web3.js";
+import { Keypair, PublicKey } from "@solana/web3.js";
 
 // ─── Mocks ───
 
@@ -12,7 +12,15 @@ const stableConnection = { getAccountInfo: mockGetAccountInfo };
 
 vi.mock("@/hooks/useWalletCompat", () => ({
   useConnectionCompat: () => ({ connection: stableConnection }),
+  // useStuckSlabs also calls useWalletCompat() (it scopes stuck slabs to the
+  // connected wallet). A vi.mock factory REPLACES the whole module, so omitting
+  // this made every render throw "No useWalletCompat export is defined".
+  useWalletCompat: () => ({ publicKey: MOCK_WALLET, connected: true }),
 }));
+
+// The hook scopes stuck slabs to the CONNECTED wallet, so fixtures must be
+// attributed to one or they are filtered out.
+const MOCK_WALLET = Keypair.generate().publicKey;
 
 // Mock localStorage
 const storageStore: Record<string, string> = {};
@@ -31,10 +39,32 @@ import { useStuckSlabs } from "@/hooks/useStuckSlabs";
 
 // ─── Helpers ───
 
-function persistKeypair(): Keypair {
+/**
+ * Write an in-flight market entry the way lib/inFlightMarket.ts does.
+ *
+ * These tests used to write the LEGACY single-keypair blob
+ * (`percolator-pending-slab-keypair` = a bare secretKey array). The hook moved
+ * to wallet-scoped entries — `loadAllInFlightMarkets()` filtered by
+ * `adminAddress === connectedWallet` — so the legacy fixture matched nothing and
+ * every assertion saw an empty list. Writing the real shape is what makes these
+ * tests exercise the recovery path again instead of the empty path.
+ */
+function persistKeypair(admin: PublicKey = MOCK_WALLET): Keypair {
   const kp = Keypair.generate();
-  const json = JSON.stringify(Array.from(kp.secretKey));
-  storageStore["percolator-pending-slab-keypair"] = json;
+  const slabAddress = kp.publicKey.toBase58();
+  const state = {
+    slabAddress,
+    slabSecretKey: Array.from(kp.secretKey),
+    adminAddress: admin.toBase58(),
+    collateralAta: PublicKey.default.toBase58(),
+    collateralMint: PublicKey.default.toBase58(),
+    programId: PublicKey.default.toBase58(),
+    network: "devnet" as const,
+    createdAt: Date.now(),
+    lastStep: 1,
+  };
+  storageStore[`percolator:in-flight-market:${slabAddress}`] = JSON.stringify(state);
+  storageStore["percolator:last-in-flight-key"] = `percolator:in-flight-market:${slabAddress}`;
   return kp;
 }
 
@@ -110,13 +140,15 @@ describe("useStuckSlabs", () => {
   });
 
   it("handles corrupted localStorage data gracefully", async () => {
-    storageStore["percolator-pending-slab-keypair"] = "not valid json";
+    storageStore["percolator:in-flight-market:bogus"] = "not valid json";
 
     const { result } = renderHook(() => useStuckSlabs());
     await waitFor(() => expect(result.current.loading).toBe(false));
 
+    // A corrupted entry must be ignored, not crash the banner. (It used to
+    // assert removal of the legacy `percolator-pending-slab-keypair`; entries
+    // are now per-slab keys, and an unparseable one is simply skipped.)
     expect(result.current.stuckSlab).toBeNull();
-    expect(mockLocalStorage.removeItem).toHaveBeenCalledWith("percolator-pending-slab-keypair");
   });
 
   it("handles RPC errors gracefully", async () => {
@@ -129,8 +161,8 @@ describe("useStuckSlabs", () => {
     expect(result.current.stuckSlab).toBeNull();
   });
 
-  it("clearStuck removes localStorage entry", async () => {
-    persistKeypair();
+  it("clearStuck removes the in-flight entry for that slab", async () => {
+    const kp = persistKeypair();
     mockGetAccountInfo.mockResolvedValue(null);
 
     const { result } = renderHook(() => useStuckSlabs());
@@ -140,7 +172,10 @@ describe("useStuckSlabs", () => {
       result.current.clearStuck();
     });
 
-    expect(mockLocalStorage.removeItem).toHaveBeenCalledWith("percolator-pending-slab-keypair");
+    // Per-slab key, not the retired global one.
+    expect(mockLocalStorage.removeItem).toHaveBeenCalledWith(
+      `percolator:in-flight-market:${kp.publicKey.toBase58()}`,
+    );
     expect(result.current.stuckSlab).toBeNull();
   });
 
