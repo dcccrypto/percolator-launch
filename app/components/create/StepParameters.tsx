@@ -3,7 +3,7 @@
 import { FC } from "react";
 import { type SlabTierKey } from "@/lib/slabTiers";
 import { SlabTierPicker } from "./SlabTierPicker";
-import { FeeSlider } from "./FeeSlider";
+import { LeveragePicker } from "./LeveragePicker";
 import { ConflictWarning } from "./ConflictWarning";
 import { FeeSplitControl, type FeeSplitBps } from "./FeeSplitControl";
 import { getNetwork } from "@/lib/config";
@@ -13,7 +13,6 @@ interface StepParametersProps {
   slabTier: SlabTierKey;
   onSlabTierChange: (tier: SlabTierKey) => void;
   tradingFeeBps: number;
-  onTradingFeeChange: (bps: number) => void;
   feeSplit: FeeSplitBps;
   onFeeSplitChange: (next: FeeSplitBps) => void;
   initialMarginBps: number;
@@ -40,7 +39,6 @@ export const StepParameters: FC<StepParametersProps> = ({
   slabTier,
   onSlabTierChange,
   tradingFeeBps,
-  onTradingFeeChange,
   feeSplit,
   onFeeSplitChange,
   initialMarginBps,
@@ -58,7 +56,6 @@ export const StepParameters: FC<StepParametersProps> = ({
   onBack,
   canContinue,
 }) => {
-  const maxLeverage = Math.floor(10000 / initialMarginBps);
   const feeConflict = tradingFeeBps >= initialMarginBps;
   const isMainnet = getNetwork() === "mainnet";
 
@@ -72,15 +69,24 @@ export const StepParameters: FC<StepParametersProps> = ({
         <SlabTierPicker value={slabTier} onChange={onSlabTierChange} />
       </div>
 
-      {/* Trading Fee */}
-      <FeeSlider
-        label="Trading Fee"
-        value={tradingFeeBps}
-        onChange={onTradingFeeChange}
-        min={1}
-        max={1000}
-        showPercent
-      />
+      {/* Trading Fee — FIXED, not creator-settable.
+          One rate for every market: a creator undercutting on fees does not
+          make their market better, it just starves the LP and insurance shares
+          that keep it solvent. The creator's cut is set in the fee SPLIT below,
+          which is the knob that actually belongs to them. */}
+      <div className="border border-[var(--border)] bg-[var(--bg)] px-4 py-3">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text)]">
+            Trading Fee
+          </span>
+          <span className="text-[14px] font-bold tabular-nums text-[var(--text)]">
+            {tradingFeeBps} bps
+          </span>
+        </div>
+        <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
+          Same on every market. Your share of it is set in the fee split below.
+        </p>
+      </div>
 
       {/* Fee Split — creator/LP/insurance shares of the trade fee.
           Manual mode only; quick launch keeps the on-chain defaults (no
@@ -90,32 +96,14 @@ export const StepParameters: FC<StepParametersProps> = ({
         <FeeSplitControl value={feeSplit} onChange={onFeeSplitChange} />
       )}
 
-      {/* Leverage (derived, read-only) */}
-      <div className="border border-[var(--border)] bg-[var(--bg)] px-4 py-3">
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text)]">
-            Max Leverage
-          </span>
-          <span className="text-[14px] font-bold text-[var(--text)]">
-            {maxLeverage}x
-          </span>
-        </div>
-        <p className="text-[10px] text-[var(--text-secondary)] mt-1">
-          Auto from margin: {initialMarginBps} bps ({(initialMarginBps / 100).toFixed(0)}%)
-        </p>
-      </div>
-
-      {/* Initial Margin (editable in manual mode, derived display in quick) */}
-      {mode === "manual" && (
-        <FeeSlider
-          label="Initial Margin"
-          value={initialMarginBps}
-          onChange={onInitialMarginChange}
-          min={100}
-          max={5000}
-          showPercent={false}
-        />
-      )}
+      {/* Leverage — the creator's choice, and the ONLY risk parameter they set.
+          Everything downstream (maintenance margin, price-move budget, LP fill
+          and inventory caps) is derived from it in lib/market-params.ts, so a
+          creator cannot pick an incoherent combination. */}
+      <LeveragePicker
+        initialMarginBps={initialMarginBps}
+        onChange={onInitialMarginChange}
+      />
 
       {/* Mainnet Phase 1 Guards */}
       {isMainnet && (

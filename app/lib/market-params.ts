@@ -113,6 +113,22 @@ export function backingSeedPerDomain(lpCollateralAtoms: bigint): bigint {
   return pct > BACKING_SEED_MIN_ATOMS ? pct : BACKING_SEED_MIN_ATOMS;
 }
 
+/**
+ * Leverage a market actually offers, given its on-chain initial margin.
+ *
+ * The exact inverse of the margin derivation, which rounds UP
+ * (`ceil(10000 / lev)`). That makes naive `floor(10000 / bps)` wrong for every
+ * leverage that does not divide evenly: 3x stores 3334 bps, and
+ * `floor(10000 / 3334)` is **2**, so a 3x market advertised itself as 2x — on
+ * the review screen, the success screen, and in the markets DB's `max_leverage`
+ * column. Rounding is correct because the stored bps is never more than one
+ * unit above the exact value.
+ */
+export function leverageFromMarginBps(initialMarginBps: number): number {
+  if (!Number.isFinite(initialMarginBps) || initialMarginBps <= 0) return 0;
+  return Math.round(10_000 / initialMarginBps);
+}
+
 export interface DerivedMarketParams {
   initialMarginBps: number;
   maintenanceMarginBps: number;

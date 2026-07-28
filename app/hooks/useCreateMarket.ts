@@ -71,7 +71,7 @@ import {
   parsePortfolioV17,
 } from "@percolatorct/sdk";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
-import { deriveMarketParams, MIN_LEVERAGE_X, backingSeedPerDomain } from "@/lib/market-params";
+import { deriveMarketParams, MIN_LEVERAGE_X, backingSeedPerDomain, leverageFromMarginBps } from "@/lib/market-params";
 // v17: SetOracleAuthority (tag 17), PushOraclePrice (tag 16), SetOraclePriceCap (tag 16),
 // and UpdateConfig (tag 14) do not exist in v17. All oracle + risk params are embedded
 // in InitMarket (extended tail). The sdk-compat stubs throw at runtime if called.
@@ -667,7 +667,7 @@ function buildMarketRegistrationPayload(args: {
     // BUG 16: advertise the FLOORED margin actually enforced on-chain, not the
     // raw requested bps — see flooredInitialMarginBps.
     max_leverage: params.initialMarginBps > 0
-      ? Math.floor(10000 / flooredInitialMarginBps(params.initialMarginBps))
+      ? leverageFromMarginBps(flooredInitialMarginBps(params.initialMarginBps))
       : 1,
     trading_fee_bps: Number(params.tradingFeeBps),
     lp_collateral: params.lpCollateral.toString(),

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   deriveMarketParams,
+  leverageFromMarginBps,
   maxPriceMoveForMaintenanceBps,
   backingSeedPerDomain,
   ACCRUAL_DT_SLOTS,
@@ -162,5 +163,29 @@ describe("backingSeedPerDomain — the SHORT domain gets one chance", () => {
     for (const lp of [0n, 1n, 10_000n, LP, LP * 1_000n]) {
       expect(backingSeedPerDomain(lp)).toBeGreaterThan(0n);
     }
+  });
+});
+
+describe("leverageFromMarginBps — the inverse must survive the round trip", () => {
+  it("round-trips every offered leverage", () => {
+    for (const lev of [2, 3, 4, 5, 6, 7, 8, 9, 10]) {
+      const bps = deriveMarketParams(lev, LP, PRICE_E6).initialMarginBps;
+      expect(leverageFromMarginBps(bps)).toBe(lev);
+    }
+  });
+
+  it("does NOT floor 3x down to 2x", () => {
+    // The regression: margin rounds UP, so 3x stores 3334 bps and
+    // floor(10000/3334) is 2. A 3x market advertised itself as 2x on the review
+    // screen, the success screen, and in the markets DB's max_leverage column.
+    expect(deriveMarketParams(3, LP, PRICE_E6).initialMarginBps).toBe(3334);
+    expect(Math.floor(10_000 / 3334)).toBe(2); // what it used to do
+    expect(leverageFromMarginBps(3334)).toBe(3); // what it does now
+  });
+
+  it("is safe on degenerate input instead of returning Infinity", () => {
+    expect(leverageFromMarginBps(0)).toBe(0);
+    expect(leverageFromMarginBps(-1)).toBe(0);
+    expect(leverageFromMarginBps(Number.NaN)).toBe(0);
   });
 });

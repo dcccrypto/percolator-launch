@@ -18,6 +18,7 @@ import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
 import { SLAB_TIERS, type SlabTierKey } from "@/lib/slabTiers";
 import { getConfig, getNetwork } from "@/lib/config";
 import { toE6 } from "@/lib/format";
+import { FIXED_TRADING_FEE_BPS, leverageFromMarginBps } from "@/lib/market-params";
 
 import { useDuplicateMarket } from "@/hooks/useDuplicateMarket";
 import { ModeSelector } from "./ModeSelector";
@@ -83,7 +84,7 @@ const DEFAULT_STATE: WizardState = {
   // Quick mode defaults to small — cheapest tier for quick testing.
   // Manual mode users can choose their own tier (defaults to large in the picker).
   slabTier: "small",
-  tradingFeeBps: 30,
+  tradingFeeBps: FIXED_TRADING_FEE_BPS,
   feeSplit: DEFAULT_FEE_SPLIT,
   initialMarginBps: 1000,
   lpCollateral: "",
@@ -259,7 +260,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     if (wizard.mode !== "quick" || !quickLaunch.config) return;
     setWizard((prev) => ({
       ...prev,
-      tradingFeeBps: quickLaunch.config!.tradingFeeBps,
+      // Trading fee is FIXED for every market — a preset must not override it.
+      tradingFeeBps: FIXED_TRADING_FEE_BPS,
       initialMarginBps: quickLaunch.config!.initialMarginBps,
       lpCollateral: quickLaunch.config!.lpCollateral,
       // Apply detected oracle price as adminPrice (used if oracle ends up admin)
@@ -272,7 +274,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // BUG 16 fix: use the FLOORED margin (what create() actually enforces on-chain via
   // MIN_SAFE_INITIAL_MARGIN_BPS) so the success screen advertises real leverage, not the
   // raw requested value the user typed in Step 3.
-  const maxLeverage = Math.floor(10000 / flooredInitialMarginBps(wizard.initialMarginBps));
+  const maxLeverage = leverageFromMarginBps(flooredInitialMarginBps(wizard.initialMarginBps));
   const feeConflict = wizard.tradingFeeBps >= wizard.initialMarginBps;
   const hasTokens = wizard.walletBalance !== null && wizard.walletBalance > 0n;
   // Collateral is ALWAYS the universal Sim-USDC mint on devnet (6 decimals) — never the
@@ -1163,7 +1165,6 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             slabTier={wizard.slabTier}
             onSlabTierChange={setSlabTier}
             tradingFeeBps={wizard.tradingFeeBps}
-            onTradingFeeChange={setTradingFeeBps}
             feeSplit={wizard.feeSplit}
             onFeeSplitChange={setFeeSplit}
             initialMarginBps={wizard.initialMarginBps}
