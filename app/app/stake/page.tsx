@@ -319,10 +319,23 @@ function StakeHeader({
           Stake collateral into a market&apos;s insurance pool to provide first-loss backing —
           fully on-chain and transparent.
         </p>
-        {/* Honest 0% caption — kept small and muted, not a prominent banner. */}
+        {/* Honest 0% caption — kept small and muted, not a prominent banner.
+            CHECKED 2026-07-28, and it is accurate — do NOT "correct" it the way
+            the Earn caption was corrected. Those two are different products:
+              - Earn / LP vault DOES earn trading fees (48% share, cranked by the
+                keeper). Its old "not active on the deployed program" copy was
+                false and has been fixed.
+              - Stake is INSURANCE backing. The wizard creates its pool with
+                StakeInitPool, which sets pool_mode = 0; percolator-stake's
+                process_accrue_fees rejects anything but pool_mode == 1
+                (InitTradingPool) with InvalidPoolMode. Verified on a freshly
+                created market: pool_mode reads 0 at offset 280.
+            So stake genuinely earns nothing here — not because a crank is
+            missing, but because an insurance pool is not a fee-earning pool. */}
         <p className="mt-1.5 max-w-lg text-[11px] text-[var(--text-muted)]">
-          Deposits and withdrawals are live on devnet; there&apos;s no yield distribution on the
-          deployed program yet, so APR is currently 0% and flushes to insurance reduce staked value.
+          Staking backs the insurance fund — it doesn&apos;t earn trading fees, so APR is
+          0% by design and flushes to insurance reduce staked value. For fee yield, use
+          an LP vault on Earn.
         </p>
 
         {/* Stats strip */}

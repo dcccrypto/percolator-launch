@@ -5,9 +5,16 @@
  * Why this file exists
  * ───────────────────
  * The launch wizard used to hardcode `maxPriceMoveBpsPerSlot: 1` and disable
- * every LP guardrail (`impactKBps: 0`, `maxFillAbs`/`maxInventoryAbs` at
- * i128::MAX, `skewSpreadMultBps: 0`). Both were verified on devnet (2026-07-27)
- * to be actively harmful:
+ * the LP guardrails (`maxFillAbs`/`maxInventoryAbs` at i128::MAX,
+ * `skewSpreadMultBps: 0`). Both were verified on devnet (2026-07-27) to be
+ * actively harmful:
+ *
+ * (`impactKBps: 0` used to be listed here too. It is NOT a missing guardrail:
+ * impact is vAMM-only. `compute_passive_execution` in percolator-match/src/vamm.rs
+ * prices off `base_spread_bps + trading_fee_bps + skew_extra` and never reads
+ * `impact_k_bps`, and the impact term zeroes out anyway when
+ * `liquidity_notional_e6` is 0. These markets are `kind: 0` (Passive), so 0 is
+ * the correct value — do not "fix" it.)
  *
  *  1. A price move freezes NEW positions for as long as the settlement price
  *     lags the oracle. At 1 bps/slot a 26% move froze a market for ~17 minutes.

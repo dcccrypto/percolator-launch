@@ -864,6 +864,32 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
     // Margin comes from the SAME derivation as the price-move budget below, so
     // the two can never disagree (see lib/market-params.ts).
     const initialMarginBps = BigInt(derived.initialMarginBps);
+    // WRITE-ONCE PARAMETERS.
+    //
+    // Everything below is fixed for the life of the market — InitMarket runs
+    // once and there is no instruction to change these afterwards. That is
+    // exactly how the 6.67x leverage cap and the missing LP caps survived for
+    // months: a value typed here is invisible and permanent. Anything not
+    // derived from the creator's choice is listed with why it is safe to pin.
+    //
+    //  hMin/hMax, minNonzeroMmReq/ImReq  dust + health bounds; below these a
+    //                                    position is not worth gas to maintain.
+    //  liquidationFee 50 bps, cap $10k   standard; minLiquidationAbs 0 lets any
+    //                                    size be liquidated rather than
+    //                                    stranding dust positions.
+    //  maxAbsFundingE9PerSlot: "0"       funding is deliberately OFF. Trades
+    //                                    settle at the pushed AuthMark, which
+    //                                    IS the reference price, so there is no
+    //                                    perp-vs-spot basis for funding to
+    //                                    correct. A non-zero cap here would let
+    //                                    a rate accrue against nothing.
+    //  maintenanceFeePerSlot: "0"        no rent on open positions.
+    //  chunk/lifetime limits             settlement batching; sized so a
+    //                                    bankrupt close fits in one tx.
+    //
+    // Verified 2026-07-28: with these EXACT args, every leverage the wizard
+    // offers (2..10x) simulates ACCEPTED against the deployed program, so no
+    // creator choice can produce a config InitMarket rejects.
     const v17InitArgs: InitMarketV17Args = {
       maxPortfolioAssets: V17_MAX_PORTFOLIO_ASSETS,
       hMin: "1000",
@@ -945,7 +971,6 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       ]),
       data: encodeSetMatcherConfig({ enabled: 1 }),
     });
-    const I128_MAX = 170141183460469231731687303715884105727n;
     const initMatcherCtxIx = buildIx({
       programId,
       keys: buildAccountMetas(ACCOUNTS_INIT_MATCHER_CTX, [
@@ -2181,9 +2206,6 @@ export function useCreateMarket() {
               0x45,
               0x50,
             ]);
-
-            const I128_MAX_STEP2 =
-              170141183460469231731687303715884105727n;
 
             const walletPublicKeyStep2 = wallet.publicKey;
 
