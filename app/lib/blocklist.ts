@@ -131,6 +131,29 @@ const HARDCODED_BLOCKED_SLABS: readonly string[] = [
   // 7mzqfnuA… above). Vault 0 and already indexer_excluded, so it never
   // reached the live market list — blocked to keep discovery from re-surfacing it.
   "CseeeuKKbgNU38VRukG38mTdcPJ4KWci5GmFikEtp1X5",
+
+  // ── 2026-07-28: harness/QA markets from the devnet-2.0 verification sweep ──
+  // Created by the launch + lifecycle harnesses while proving the new market
+  // path end to end (leverage matrix, fee-split checks, trade/close/withdraw,
+  // LP fee distribution). They are real, funded, wrapper-owned markets, so
+  // /api/markets discovers them on-chain and they were showing on the live
+  // playground as untitled "UNKNOWN" rows. They are test fixtures, not
+  // products — hide them. Nothing depends on them; the keeper prices only what
+  // is in its own registry, which these were never added to.
+  "14RFDSTK6eJ3VKprgfAafU3kqgYRVCATMV7f5Ukf2pzh",
+  "2Md6RJoxQG89bKh7uzhhcHqwAmgGTJN9PN7EkZt1ZTPC",
+  "43zufCcajU6H8ySqjG9vDcwFCbjGPhRCSJJAEf3E6Hiw",
+  "4gM5qkkmsSqnBXHXtbM4pqGZ36sheo3cYL1jpdDfsJrS",
+  "54Bbsy7q5L5LhusWkKeCon7StywWa8Vezb5zw5pfBo2o",
+  "BgWFGPgNasesbiihEhadYuDdHAckSTu6AMvEBBkrdfmn",
+  "CZJHRKQMHNUVy2muC7iojovnTgGtyVnpjCk1QpqheUZ5",
+  "D6QgPGvo5KGFzYCuzk4U9tDm6UbEpCrjWwu9SGQTfQeU",
+  "DE2c59suA6NVxRMHvhEhaWJxtBQu8XSMB2CM8wxwyoT7",
+  "EtgRphLa69F15krir2E1kZL6LCCuQHDS9Cher3hmYunJ",
+  "EuYE6qaNic3KhaRAtB9cM5YG62Z88dTcu3YQJNkKZQ3F",
+  "GHCLa7oMUZo7qTwV8YH5RrPJGHG7z9sZ3y19dAAsgE2e",
+  "GzQCM1DLMDXkbX85kVB2Un12aKc62ZRN5RdKGjqnNsbX",
+  "XxCeVcNDHqEuB7GDx6zMPKN5iwvskPYAJgpy51TLuy6",
 ];
 
 /**
