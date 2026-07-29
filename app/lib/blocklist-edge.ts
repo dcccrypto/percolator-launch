@@ -67,4 +67,10 @@ export const BLOCKED_SLAB_ADDRESSES: ReadonlySet<string> = new Set<string>([
   "GHCLa7oMUZo7qTwV8YH5RrPJGHG7z9sZ3y19dAAsgE2e",
   "GzQCM1DLMDXkbX85kVB2Un12aKc62ZRN5RdKGjqnNsbX",
   "XxCeVcNDHqEuB7GDx6zMPKN5iwvskPYAJgpy51TLuy6",
+
+  // 2026-07-29: full retirement of every market in the database — see the
+  // matching note in lib/blocklist.ts. These rows were also deleted from the DB
+  // and are blocked in percolator-indexer/src/blocklist.ts so discovery cannot
+  // re-register them.
+  "5kSw1fX8Ps2kBkVU4bc1qHgUQ8AKFXHkqoq2u2ztcdJs",
 ]);

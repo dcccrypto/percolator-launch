@@ -154,6 +154,19 @@ const HARDCODED_BLOCKED_SLABS: readonly string[] = [
   "GHCLa7oMUZo7qTwV8YH5RrPJGHG7z9sZ3y19dAAsgE2e",
   "GzQCM1DLMDXkbX85kVB2Un12aKc62ZRN5RdKGjqnNsbX",
   "XxCeVcNDHqEuB7GDx6zMPKN5iwvskPYAJgpy51TLuy6",
+
+  // ── 2026-07-29: full retirement of every market in the database ──
+  // The last remaining visible market. Retired with the rest so devnet 2.0
+  // starts from an empty board: every slab above predates the launch wizard
+  // applying real LP guardrails and a sane price-move budget, and the matcher
+  // has no update instruction, so their params are write-once wrong — they can
+  // only be replaced, never repaired.
+  //
+  // These rows were also DELETED from the database. That alone does not retire
+  // a market: the indexer re-registers whatever discovery finds on chain, so
+  // percolator-indexer/src/blocklist.ts carries the same list and is what makes
+  // the deletion stick. Keep the two in sync.
+  "5kSw1fX8Ps2kBkVU4bc1qHgUQ8AKFXHkqoq2u2ztcdJs",
 ];
 
 /**
