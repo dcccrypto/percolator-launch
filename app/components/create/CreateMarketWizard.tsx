@@ -3,6 +3,7 @@
 import { FC, useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { PublicKey } from "@solana/web3.js";
+import { getAssociatedTokenAddress, getAccount } from "@solana/spl-token";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import {
   useCreateMarket,
@@ -379,6 +380,43 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // CONFIGS), collateral remains the user-entered mint, unchanged.
   const simUsdcMint = (getConfig() as Record<string, unknown>).testUsdcMint as string | undefined;
   const collateralMintAddress = isDevnet && simUsdcMint ? simUsdcMint : wizard.mintAddress;
+
+  // COLLATERAL identity — deliberately NOT the market's symbol.
+  //
+  // `collateralMintAddress` above resolves to the universal Sim-USDC mint on
+  // devnet, so a FRANK market is seeded in Sim-USDC, not in FRANK. The deposit
+  // fields were labelled with `symbol` and showed `wizard.walletBalance`, which
+  // is the BASE token's balance read from the base token's own ATA — so a FRANK
+  // launch said "Seed deposit in FRANK / Wallet balance: 0 FRANK" while the
+  // amount actually required was Sim-USDC, and that 0 was a true FRANK balance
+  // answering a question nobody asked. CostEstimate on the same screen already
+  // said "Sim-USDC", so the wizard contradicted itself.
+  //
+  // Display-only: the affordability gate is skipped on devnet
+  // (skipTokenBalanceCheck) and /api/devnet-pre-fund tops the wallet up. But it
+  // sent creators looking for the wrong token.
+  const collateralSymbol = isDevnet ? "Sim-USDC" : symbol;
+
+  const [collateralBalance, setCollateralBalance] = useState<bigint | null>(null);
+  useEffect(() => {
+    if (!publicKey || !collateralMintAddress) {
+      setCollateralBalance(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const ata = await getAssociatedTokenAddress(new PublicKey(collateralMintAddress), publicKey);
+        const acct = await getAccount(connection, ata);
+        if (!cancelled) setCollateralBalance(acct.amount);
+      } catch {
+        // No ATA yet — that is a real 0, not "unknown". The launch pre-funds on
+        // devnet, so this is informational.
+        if (!cancelled) setCollateralBalance(0n);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [publicKey, collateralMintAddress, connection]);
   // GH#1301 (superseded): tokens used to be auto-airdropped only for Percolator-managed
   // mirror mints. Now that devnet collateral is ALWAYS Sim-USDC and is ALWAYS auto-funded
   // via /api/devnet-pre-fund (called from useCreateMarket.ts's create() before every
@@ -918,10 +956,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   const detectedPrice = wizard.dexPool?.priceUsd ?? undefined;
 
   // Wallet balance display for step 3
+  // Collateral balance at the COLLATERAL's decimals (6 — see `decimals` above),
+  // not the base token's.
   const walletBalanceDisplay =
-    wizard.walletBalance !== null && wizard.tokenMeta
-      ? formatHumanAmount(wizard.walletBalance, wizard.tokenMeta.decimals)
-      : null;
+    collateralBalance !== null ? formatHumanAmount(collateralBalance, decimals) : null;
 
   // Step labels — one linear flow: Token -> Parameters -> Review.
   // The old Oracle and Slab Tier steps are gone (see FIXED_SLAB_TIER and the
@@ -1065,7 +1103,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             adminPrice={wizard.adminPrice}
             onAdminPriceChange={setAdminPrice}
             isAdminOracle={wizard.oracleType === "admin"}
-            tokenSymbol={symbol}
+            tokenSymbol={collateralSymbol}
             walletBalance={walletBalanceDisplay}
             onContinue={handleParametersContinue}
             onBack={goBack}
