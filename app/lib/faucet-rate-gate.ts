@@ -29,6 +29,18 @@ export interface GateResult {
  * @param wallet    Wallet address
  * @param fundType  "sol" | "usdc" | "auto-fund"
  */
+/**
+ * Thrown when the gate cannot function at all (its table is missing), as opposed
+ * to a claim being denied. Callers catch this and fall back to their durable
+ * claim store — a real gate, not an open door.
+ */
+export class FaucetGateUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FaucetGateUnavailableError";
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function tryFaucetGate(supabase: any, wallet: string, fundType: string): Promise<GateResult> {
   const windowStart = new Date(Date.now() - RATE_LIMIT_MS).toISOString();
@@ -54,6 +66,25 @@ export async function tryFaucetGate(supabase: any, wallet: string, fundType: str
       .maybeSingle();
 
     if (preCheckError) {
+      // A SCHEMA error is not a rate-limit answer — it means this gate cannot
+      // function at all, and the caller has a durable fallback gate for exactly
+      // that case. Returning `allowed: false` here (rather than throwing) is
+      // what let a missing `faucet_claims` table answer "Already pre-funded
+      // recently" to every caller, including a wallet's first ever request —
+      // silently breaking market creation at the deposit step for everyone,
+      // because the caller's catch (which engages the Blob fallback) never ran.
+      //
+      // PGRST205 = table not in the schema cache; 42P01 = undefined_table.
+      // Throw so the caller falls back to a REAL gate instead of a permanent no.
+      // Fail-closed is still correct for anything else: a transient DB blip must
+      // not open the faucet.
+      const code = (preCheckError as { code?: string }).code;
+      if (code === "PGRST205" || code === "42P01") {
+        throw new FaucetGateUnavailableError(
+          `faucet_claims is unavailable (${code}: ${preCheckError.message}) — ` +
+            "falling back to the durable claim store. Apply the migration that creates it.",
+        );
+      }
       console.warn(`[faucet-gate] pre-check SELECT error: ${preCheckError.message}`);
       return { allowed: false, nextClaimAt: null };
     }
@@ -103,6 +134,10 @@ export async function tryFaucetGate(supabase: any, wallet: string, fundType: str
 
     return { allowed: true, nextClaimAt: null, claimId: (data as { id: number } | null)?.id };
   } catch (err) {
+    // "The gate is unavailable" is not "the claim is denied". Swallowing it here
+    // is what turned a missing table into a permanent no for every caller, with
+    // the durable fallback never reached. Let it out.
+    if (err instanceof FaucetGateUnavailableError) throw err;
     console.warn("[faucet-gate] threw:", err instanceof Error ? err.message : String(err));
     return { allowed: false, nextClaimAt: null };
   }
