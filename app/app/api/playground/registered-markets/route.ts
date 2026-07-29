@@ -9,13 +9,72 @@
  *
  * No secrets in the payload — public read is intentional so the NAT'd keeper can
  * reach it with a plain unauthenticated GET.
+ *
+ * RETIREMENT FILTER (2026-07-29)
+ * ------------------------------
+ * The Blob is append-only: a market registered by the wizard stays in it forever.
+ * That made the keeper the last place a retired market survived — it kept pushing
+ * AUTH_MARK prices to slabs long after they were blocklisted in the UI and deleted
+ * from the database, and clearing its local registry.json did NOT help, because
+ * this endpoint handed them straight back on its next 30s poll.
+ *
+ * So the payload is filtered here, at the source the keeper already polls, rather
+ * than by teaching the keeper a second blocklist it would then have to keep in
+ * sync:
+ *
+ *   1. blocklisted slabs are dropped outright;
+ *   2. what remains is intersected with the live `markets` table, so a market
+ *      that has been deleted stops being served without having to be named.
+ *
+ * The DB is the authority for what exists; the Blob only supplies the extra fields
+ * the keeper needs that the DB does not carry (dexType, poolAddress). If the DB is
+ * unreachable the blocklist filter still applies and the Blob set is served —
+ * degrading to "slightly stale" rather than "keeper prices nothing".
  */
 import { NextResponse } from "next/server";
 import { readRegisteredMarkets } from "@/lib/playground-registered-markets";
+import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
+import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Slabs the database currently knows about, or null when it cannot be read.
+ * Null means "skip this filter" — see the degradation note above.
+ */
+async function liveSlabAddresses(): Promise<Set<string> | null> {
+  try {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from("markets")
+      .select("slab_address")
+      .eq("network", getServerNetwork());
+    if (error || !data) return null;
+    return new Set(
+      (data as Array<{ slab_address: string | null }>)
+        .map((r) => r.slab_address)
+        .filter((s): s is string => !!s),
+    );
+  } catch {
+    return null; // Supabase not configured (local playground) — skip this filter.
+  }
+}
+
 export async function GET() {
-  const markets = await readRegisteredMarkets();
-  return NextResponse.json({ markets });
+  const all = await readRegisteredMarkets();
+  const notBlocked = all.filter((m) => !BLOCKED_SLAB_ADDRESSES.has(m.slabAddress));
+
+  const live = await liveSlabAddresses();
+  const markets = live === null ? notBlocked : notBlocked.filter((m) => live.has(m.slabAddress));
+
+  return NextResponse.json(
+    { markets },
+    {
+      headers: {
+        // The keeper polls every 30s; a short cache keeps a burst of polls off the
+        // DB without making a newly launched market wait long to be priced.
+        "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30",
+      },
+    },
+  );
 }
