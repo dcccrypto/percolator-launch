@@ -71,9 +71,17 @@ export async function GET() {
     { markets },
     {
       headers: {
-        // The keeper polls every 30s; a short cache keeps a burst of polls off the
-        // DB without making a newly launched market wait long to be priced.
-        "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30",
+        // NO CACHE. This is a liveness feed, not a page.
+        //
+        // The keeper polls it to learn about markets that did not exist when it
+        // booted, so any edge cache is added latency on the one thing that has
+        // to be immediate: a market the user just created must be priced now,
+        // not up to s-maxage seconds from now. A stale-while-revalidate window
+        // is worse still — it serves the pre-launch answer while refreshing.
+        //
+        // The cost is one Supabase read per poll, which is a single indexed
+        // select over a table with a handful of rows.
+        "Cache-Control": "no-store, max-age=0, must-revalidate",
       },
     },
   );

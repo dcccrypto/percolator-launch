@@ -16,6 +16,7 @@ import nacl from "tweetnacl";
 import * as fs from "fs";
 import * as path from "path";
 import { isSaneMarketValue, isActiveMarket, isZombieMarket } from "@/lib/activeMarketFilter";
+import { resolveTokenLogo } from "@/lib/token-logo";
 import { getKnownMarketLpCapitals, scanEnabledMarketLpCapitals } from "@/lib/lp-portfolio";
 import { loadMergedMarketRows } from "@/lib/market-registry";
 import { isPhantomOpenInterest, MIN_VAULT_FOR_OI } from "@/lib/phantom-oi";
@@ -1515,7 +1516,7 @@ export async function POST(req: NextRequest) {
   // letting a market creator point every viewer's browser at an arbitrary
   // host (tracking pixel / phishing graphic inside the trusted UI). Dropped
   // to null (fallback avatar) when invalid rather than rejecting the launch.
-  const sanitizedLogoUrl = sanitizeLogoUrl(logo_url);
+  let sanitizedLogoUrl = sanitizeLogoUrl(logo_url);
 
   // #813: Validate dex_pool_address is a valid Solana pubkey (when provided).
   // Canonicalized (PublicKey round-trip) so it's a reliable second dedupe key
@@ -1840,6 +1841,20 @@ export async function POST(req: NextRequest) {
   }
 
   // Insert market
+
+  // Resolve the logo NOW rather than leaving it null.
+  //
+  // The launch wizard does not send logo_url, so a freshly created market used
+  // to render with the initials placeholder and only gain its real image when
+  // the indexer's metadata pass next ran — up to 10 minutes later. Resolving
+  // here means the logo is already on the row the markets page reads first.
+  //
+  // Only runs when the caller supplied no logo and we have a mainnet CA to look
+  // up, and never fails the launch: resolveTokenLogo swallows its own errors and
+  // a null just restores the previous placeholder behaviour.
+  if (!sanitizedLogoUrl && canonicalMainnetCa) {
+    sanitizedLogoUrl = sanitizeLogoUrl(await resolveTokenLogo(canonicalMainnetCa));
+  }
 
   const { data: market, error: marketError } = await supabase.from("markets").insert({
       slab_address,
