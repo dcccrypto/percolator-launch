@@ -1387,14 +1387,45 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
     // delay M3b/M4, and it is awaited once at the end of the tail.
     const marketsRegisterPromise = registerMarketInDb();
 
+    // M3b carries the insurance seed, which is NOT optional: it is the layer
+    // that absorbs losses before the LP does. This used to swallow every
+    // failure, so a market could come up with insurance = 0 and nothing said so.
+    //
+    // Assert the OUTCOME rather than the transaction result. M3b bundles
+    // TopUpInsurance with a best-effort PermissionlessCrank, so a crank revert
+    // rolls the deposit back even though the deposit itself was fine — and a
+    // skipped build (see the idempotency check in the sequential path) produces
+    // no error at all. Reading the engine's own insuranceBalance afterwards
+    // catches all three: never built, reverted, and partially applied.
+    let m3bError: unknown = null;
     try {
       const m3bSig = await broadcastTailTx(3);
       advanceLanding(m3bSig);
-    } catch (m3bErr) {
-      // Non-fatal — mirrors the sequential path's own best-effort tail. A
-      // rebuilt-and-recovered M3b that still fails stays non-fatal too.
-      console.warn("[useCreateMarket] batch: insurance top-up/crank failed (non-fatal):", m3bErr);
+    } catch (err) {
+      m3bError = err;
       advanceLanding(undefined);
+    }
+
+    if (params.insuranceAmount > 0n) {
+      let insuranceOnChain = 0n;
+      try {
+        const slabInfo = await connection.getAccountInfo(slabPk);
+        if (slabInfo?.data) {
+          insuranceOnChain = parseMarketGroupV17OI(new Uint8Array(slabInfo.data)).insuranceBalance;
+        }
+      } catch {
+        // Fall through — an unverifiable seed is treated as a failed one.
+      }
+      if (insuranceOnChain < params.insuranceAmount) {
+        throw new Error(
+          `Insurance fund was not seeded (on-chain ${insuranceOnChain} < requested ${params.insuranceAmount}). ` +
+            "The market exists and is funded — retry this step to seed it." +
+            (m3bError ? ` Cause: ${m3bError instanceof Error ? m3bError.message : String(m3bError)}` : ""),
+        );
+      }
+    } else if (m3bError) {
+      // No insurance requested — the crank alone stays best-effort.
+      console.warn("[useCreateMarket] batch: post-LP crank failed (non-fatal):", m3bError);
     }
     updateInFlightStep(slabPk.toBase58(), 4);
 
@@ -2852,6 +2883,8 @@ export function useCreateMarket() {
           // bundled with the load-bearing deposit. Treat as best-effort: log and continue
           // rather than throwing, so a topup/crank revert can never strand an
           // otherwise-successful deposit or block Steps 4/5.
+          // Recorded by the catch below; the outcome check after it decides.
+          let topupCrankError: unknown = null;
           try {
             // W2 idempotency for the top-up: the vault ATA is dedicated to this market
             // (each market gets its own vaultAuth PDA + ATA) and — since the W11 fix
@@ -2951,10 +2984,42 @@ export function useCreateMarket() {
               setState((s) => ({ ...s, txSigs: [...s.txSigs, sig] }));
             }
           } catch (topupCrankErr) {
+            // Recorded, not swallowed — the outcome check below decides.
+            topupCrankError = topupCrankErr;
             console.warn(
-              "[useCreateMarket] Step 3 insurance top-up/crank failed (non-fatal — deposit already landed):",
+              "[useCreateMarket] Step 3 insurance top-up/crank threw:",
               topupCrankErr,
             );
+          }
+
+          // The insurance seed is NOT optional: it is the layer that absorbs
+          // losses before the LP does, and it is written once at creation.
+          // Assert the OUTCOME rather than the transaction result — the seed can
+          // be missing with no error at all (the idempotency check above can
+          // skip building it) or be rolled back by the best-effort crank bundled
+          // into the same transaction. Reading the engine's own insuranceBalance
+          // catches never-built, reverted and partial alike.
+          if (params.insuranceAmount > 0n) {
+            let insuranceOnChain = 0n;
+            try {
+              const slabInfoFinal = await connection.getAccountInfo(slabPk);
+              if (slabInfoFinal?.data) {
+                insuranceOnChain = parseMarketGroupV17OI(
+                  new Uint8Array(slabInfoFinal.data),
+                ).insuranceBalance;
+              }
+            } catch {
+              // Unverifiable — treat as unseeded rather than assume success.
+            }
+            if (insuranceOnChain < params.insuranceAmount) {
+              throw new Error(
+                `Insurance fund was not seeded (on-chain ${insuranceOnChain} < requested ${params.insuranceAmount}). ` +
+                  "The market exists and its liquidity is deposited — retry this step to seed it." +
+                  (topupCrankError
+                    ? ` Cause: ${topupCrankError instanceof Error ? topupCrankError.message : String(topupCrankError)}`
+                    : ""),
+              );
+            }
           }
 
           // W9 fix (2026-07-08): this call was missing entirely, so lastStep never

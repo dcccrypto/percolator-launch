@@ -167,6 +167,17 @@ const HARDCODED_BLOCKED_SLABS: readonly string[] = [
   // percolator-indexer/src/blocklist.ts carries the same list and is what makes
   // the deletion stick. Keep the two in sync.
   "5kSw1fX8Ps2kBkVU4bc1qHgUQ8AKFXHkqoq2u2ztcdJs",
+
+  // ── 2026-07-29: the two launch-verification markets ──
+  // Created while proving the devnet-2.0 launch path end to end. Both are real,
+  // funded, wrapper-owned markets, but both were seeded with insurance = 0: the
+  // step-4 idempotency check mistook the backing-bucket collateral for the
+  // insurance seed and skipped TopUpInsurance entirely (tag 9 appears in none of
+  // their launch transactions). Insurance is written once at creation and is the
+  // layer that absorbs losses before the LP, so these cannot be repaired into
+  // the shape a real market should have — retire them and launch fresh.
+  "H9ey1RBnVoBBit2o7EUCPZWJLMNtQpuA6QiqGmM95ZJ4",  // FRANK
+  "4hJ9hUotH6BwUXVmgLGmXWHfg3YLjnmA8fwAtjex3wBU",  // Percolator
 ];
 
 /**
