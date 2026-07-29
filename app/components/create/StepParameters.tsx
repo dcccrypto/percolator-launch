@@ -1,17 +1,12 @@
 "use client";
 
 import { FC } from "react";
-import { type SlabTierKey } from "@/lib/slabTiers";
-import { SlabTierPicker } from "./SlabTierPicker";
 import { LeveragePicker } from "./LeveragePicker";
 import { ConflictWarning } from "./ConflictWarning";
 import { FeeSplitControl, type FeeSplitBps } from "./FeeSplitControl";
 import { getNetwork } from "@/lib/config";
 
 interface StepParametersProps {
-  mode: "quick" | "manual";
-  slabTier: SlabTierKey;
-  onSlabTierChange: (tier: SlabTierKey) => void;
   tradingFeeBps: number;
   feeSplit: FeeSplitBps;
   onFeeSplitChange: (next: FeeSplitBps) => void;
@@ -32,12 +27,13 @@ interface StepParametersProps {
 }
 
 /**
- * Step 3 — Market Parameters: slab tier, trading fee, leverage, seed deposits.
+ * Step 2 — Market Parameters: fee split, leverage, seed deposits.
+ *
+ * Slab tier was removed with the mode selector (vestigial under v17). Trading
+ * fee is displayed but deliberately has NO setter — it is fixed for every
+ * market so a creator cannot undercut the fees that keep the market solvent.
  */
 export const StepParameters: FC<StepParametersProps> = ({
-  mode,
-  slabTier,
-  onSlabTierChange,
   tradingFeeBps,
   feeSplit,
   onFeeSplitChange,
@@ -61,14 +57,6 @@ export const StepParameters: FC<StepParametersProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Slab Tier */}
-      <div>
-        <label className="block text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text)] mb-3">
-          Slab Tier
-        </label>
-        <SlabTierPicker value={slabTier} onChange={onSlabTierChange} />
-      </div>
-
       {/* Trading Fee — FIXED, not creator-settable.
           One rate for every market: a creator undercutting on fees does not
           make their market better, it just starves the LP and insurance shares
@@ -88,13 +76,11 @@ export const StepParameters: FC<StepParametersProps> = ({
         </p>
       </div>
 
-      {/* Fee Split — creator/LP/insurance shares of the trade fee.
-          Manual mode only; quick launch keeps the on-chain defaults (no
-          UpdateFeeSplit tx). The wrapper enforces the sum + floors; this control
-          validates client-side so a bad split can't reach chain. */}
-      {mode === "manual" && (
-        <FeeSplitControl value={feeSplit} onChange={onFeeSplitChange} />
-      )}
+      {/* Fee Split — creator/LP/insurance shares of the trade fee. Previously
+          manual-mode only; now a core parameter, since the mode selector is
+          gone. The wrapper enforces the sum + floors; this control validates
+          client-side so a bad split can't reach chain. */}
+      <FeeSplitControl value={feeSplit} onChange={onFeeSplitChange} />
 
       {/* Leverage — the creator's choice, and the ONLY risk parameter they set.
           Everything downstream (maintenance margin, price-move budget, LP fill

@@ -2,14 +2,17 @@
 
 import { FC } from "react";
 
-const DEFAULT_LABELS = ["Token", "Oracle", "Parameters", "Review"] as const;
+// Oracle and Slab Tier steps were removed with the mode selector: slab tier is
+// vestigial under v17, and on devnet the oracle always resolves automatically
+// (keeper-delegated AUTH_MARK, else admin). Default is the linear 3-step flow.
+const DEFAULT_LABELS = ["Token", "Parameters", "Review"] as const;
 
 interface WizardProgressProps {
-  currentStep: 1 | 2 | 3 | 4;
+  currentStep: number;
   completedSteps: Set<number>;
-  onStepClick?: (step: 1 | 2 | 3 | 4) => void;
-  /** Override step labels (e.g. Quick Launch swaps "Oracle" → "Slab Tier") */
-  stepLabels?: readonly [string, string, string, string];
+  onStepClick?: (step: number) => void;
+  /** Override step labels. Length drives how many pips are rendered. */
+  stepLabels?: readonly string[];
   /**
    * GH#1615: Display step number override for the mobile "Step N of M" counter.
    * In Quick Launch, physical step 2 should display as "2", step 4 as "3".
@@ -24,7 +27,7 @@ interface WizardProgressProps {
 /**
  * Horizontal step progress indicator with connectors.
  * Desktop: full horizontal strip with labels.
- * Mobile: compact "Step N of 4" counter.
+ * Mobile: compact "Step N of M" counter.
  */
 export const WizardProgress: FC<WizardProgressProps> = ({
   currentStep,

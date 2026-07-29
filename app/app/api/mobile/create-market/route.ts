@@ -68,6 +68,7 @@ import {
   CREATE_MARKET_RATE_LIMIT,
 } from "@/lib/create-market-rate-limit";
 import * as Sentry from "@sentry/nextjs";
+import { deriveMarketParams, leverageFromMarginBps } from "@/lib/market-params";
 
 /** Minimum token amount for vault seed transfer (matches on-chain guard). */
 const MIN_INIT_MARKET_SEED = 500_000_000n;
@@ -235,6 +236,18 @@ export async function POST(req: NextRequest) {
     // Default margin/leverage params — conservative for new markets
     const initialMarginBps = 2000n; // 50% margin = 5× leverage
 
+    // Risk params come from the SAME derivation the launch wizard uses. This
+    // route previously hardcoded maxPriceMoveBpsPerSlot:4 / maxAccrualDtSlots:400
+    // — a budget of 1600 against the ~800 the deployed program accepts at this
+    // maintenance margin, so InitMarket rejected it — and initialised the
+    // matcher with maxFillAbs = u128::MAX, the unlimited-LP configuration that
+    // drained every devnet-1 market. See lib/market-params.ts.
+    const derivedParams = deriveMarketParams(
+      leverageFromMarginBps(Number(initialMarginBps)),
+      DEFAULT_LP_COLLATERAL,
+      priceE6,
+    );
+
     // ── RPC & blockhash ───────────────────────────────────────────────────────
     const rpcUrl = getRpcEndpoint();
     const connection = new Connection(rpcUrl, "confirmed");
@@ -316,8 +329,8 @@ export async function POST(req: NextRequest) {
       liquidationFeeBps: "100",
       liquidationFeeCap: "100000000000",
       minLiquidationAbs: "1000000",
-      maxPriceMoveBpsPerSlot: "4",
-      maxAccrualDtSlots: "400",
+      maxPriceMoveBpsPerSlot: String(derivedParams.maxPriceMoveBpsPerSlot),
+      maxAccrualDtSlots: String(derivedParams.maxAccrualDtSlots),
       maxAbsFundingE9PerSlot: "1000",
       minFundingLifetimeSlots: "50",
       maxAccountBSettlementChunks: "10",
@@ -415,7 +428,8 @@ export async function POST(req: NextRequest) {
         { pubkey: delegatePk, isSigner: false, isWritable: false },
         { pubkey: matcherCtxPk, isSigner: false, isWritable: true },
       ],
-      data: Buffer.from(encodeMatcherInitPassive({ maxFillAbs: BigInt("340282366920938463463374607431768211455") })),
+      // Bounded fill, sized to LP capital — NOT u128::MAX (see derivedParams above).
+      data: Buffer.from(encodeMatcherInitPassive({ maxFillAbs: derivedParams.maxFillAbs })),
     });
 
     // SetMatcherConfig (tag 68) on the LP portfolio
