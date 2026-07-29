@@ -69,6 +69,7 @@ import {
   // `capital` so Step 3 can detect an already-landed deposit/top-up before
   // resending it — see the Step 3 block below.
   parsePortfolioV17,
+  parseMarketGroupV17OI,
 } from "@percolatorct/sdk";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
 import { deriveMarketParams, MIN_LEVERAGE_X, backingSeedPerDomain, leverageFromMarginBps } from "@/lib/market-params";
@@ -2859,19 +2860,32 @@ export function useCreateMarket() {
             // insurance component from (vault balance − LP capital) instead of a direct
             // balance read (the v17 SDK exposes no typed insurance-fund accessor) and
             // skip if it's already at/above target.
+            // How much insurance is ALREADY in the market.
+            //
+            // This used to infer it as `vaultBalance - lpCapital`, which is
+            // wrong: the vault also holds the BACKING-BUCKET seeds
+            // (TopUpBackingBucket, one per domain — see backingSeedPerDomain).
+            // For a 1000-token LP seed that is 100 x 2 = 200 sitting in the
+            // vault, so the check computed 200 "already topped up", compared it
+            // against a 100 insurance seed, concluded insurance had landed, and
+            // skipped the deposit. The market came up with insurance = 0 and no
+            // failed transaction anywhere, because TopUpInsurance was never
+            // built — verified on-chain: tag 9 appears in none of the launch
+            // transactions.
+            //
+            // Read the real balance from the market group header instead. It is
+            // the value the engine itself uses, so it cannot be confused with
+            // anything else the vault happens to hold.
             let alreadyToppedUp = 0n;
             if (isV17SlabDeposit) {
               try {
-                const [vaultAcct, freshPortInfo] = await Promise.all([
-                  getAccount(connection, vaultTokenAta),
-                  connection.getAccountInfo(depositPortfolioPk),
-                ]);
-                const freshCapital = freshPortInfo?.data
-                  ? parsePortfolioV17(new Uint8Array(freshPortInfo.data)).capital
-                  : alreadyDepositedCapital;
-                alreadyToppedUp = vaultAcct.amount - freshCapital;
+                const slabInfo = await connection.getAccountInfo(slabPk);
+                if (slabInfo?.data) {
+                  alreadyToppedUp = parseMarketGroupV17OI(new Uint8Array(slabInfo.data)).insuranceBalance;
+                }
               } catch {
-                // Treat as not-yet-topped-up — fall through to topup.
+                // Unreadable — treat as not-yet-topped-up and send the deposit.
+                // Re-depositing is caught by the engine; skipping it is not.
               }
             }
 
