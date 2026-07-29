@@ -1881,8 +1881,57 @@ export async function POST(req: NextRequest) {
     .select()
     .single();
 
+  let marketRow = market;
+
   if (marketError) {
-    return NextResponse.json({ error: marketError.message }, { status: 500 });
+    // 23505 = the slab is already registered. This is the NORMAL case, not an
+    // error: the indexer discovers a slab from chain within ~60s of InitMarket
+    // (step 1) and inserts it with an "UNKNOWN" placeholder, because nothing
+    // on-chain says what a v17 market tracks. The wizard only gets here after
+    // step 4, minutes later — so the indexer always wins the race, this insert
+    // always collided, and the 500 was swallowed as non-fatal by the caller.
+    //
+    // The visible result was every freshly launched market sitting at "UNKNOWN"
+    // with no logo, and — because mainnet_ca was never written either — the
+    // indexer's DexScreener refresh could not resolve it later either. The
+    // metadata the creator actually chose was discarded on every single launch.
+    //
+    // So on a duplicate, UPDATE instead. Fenced on metadata_source='auto' so a
+    // row a human has curated via PATCH /api/markets/[slab] is never clobbered.
+    if (marketError.code === "23505") {
+      const { data: updated, error: updateError } = await supabase
+        .from("markets")
+        .update({
+          symbol: resolvedSymbol,
+          name: resolvedName,
+          decimals: decimals || 6,
+          logo_url: sanitizedLogoUrl,
+          mainnet_ca: canonicalMainnetCa,
+          oracle_mode: resolvedOracleMode,
+          dex_pool_address: canonicalDexPool,
+          max_leverage: max_leverage || 10,
+          trading_fee_bps: trading_fee_bps || 10,
+          lp_collateral,
+          matcher_context,
+        })
+        .eq("slab_address", slab_address)
+        .eq("network", insertNetwork)
+        .eq("metadata_source", "auto")
+        .select()
+        .maybeSingle();
+
+      if (updateError) {
+        Sentry.captureException(updateError, {
+          tags: { endpoint: "/api/markets", method: "POST", phase: "duplicate-update" },
+        });
+        return NextResponse.json({ error: updateError.message }, { status: 500 });
+      }
+      // maybeSingle() returns null when the row is 'manual' — a human's curation
+      // wins, and that is a success, not a failure.
+      marketRow = updated ?? market;
+    } else {
+      return NextResponse.json({ error: marketError.message }, { status: 500 });
+    }
   }
 
   // Playground: also add to local registry so GET immediately shows it.
@@ -1957,7 +2006,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
-    return NextResponse.json({ market }, { status: 201 });
+    // marketRow, not `market`: on a duplicate the row came from the UPDATE
+    // above, and `market` is null in that path.
+    return NextResponse.json({ market: marketRow }, { status: 201 });
   } catch (error) {
     Sentry.captureException(error, {
       tags: { endpoint: "/api/markets", method: "POST" },
