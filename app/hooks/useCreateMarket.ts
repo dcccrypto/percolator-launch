@@ -361,6 +361,20 @@ export interface CreateMarketState {
   landingTotal: number;
 }
 
+/**
+ * slab -> the registration payload built at launch time.
+ *
+ * The retry path has no CreateMarketParams, so without this a retry re-registers
+ * with only symbol + pool and the row keeps the indexer's column defaults —
+ * 10x/10bps regardless of what the creator actually chose. Stashing the payload
+ * lets a retry replay the SAME registration rather than a partial one.
+ *
+ * Module-level and per-slab: it survives a failed launch on the same page,
+ * which is when Retry is used. A full page reload loses it and the retry falls
+ * back to the partial shape.
+ */
+const launchRegistrationPayloads = new Map<string, MarketRegistrationPayload>();
+
 /** Minimal shape retryKeeperRegistration needs to re-run keeper-register for an
  *  already-live slab — a subset of CreateMarketParams, since the market is already
  *  on-chain and everything else about it is fixed. */
@@ -1365,14 +1379,19 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
               dexPoolAddress: params.dexPoolAddress,
               dexType: params.dexType,
               symbol: params.symbol,
-              payload: buildMarketRegistrationPayload({
-                slabAddress: slabPk.toBase58(),
-                params,
-                deployer: walletPk.toBase58(),
-                oracleMode,
-                isAdminOracle,
-                isDevnetEnv,
-              }),
+              payload: (() => {
+                const built = buildMarketRegistrationPayload({
+                  slabAddress: slabPk.toBase58(),
+                  params,
+                  deployer: walletPk.toBase58(),
+                  oracleMode,
+                  isAdminOracle,
+                  isDevnetEnv,
+                });
+                // Keep it for Retry — see launchRegistrationPayloads.
+                launchRegistrationPayloads.set(slabPk.toBase58(), built);
+                return built;
+              })(),
             },
             { deployer: walletPk.toBase58(), signature: keeperProofSignature },
           )
@@ -3375,7 +3394,12 @@ export function useCreateMarket() {
   const retryKeeperRegistration = useCallback(
     async (params: KeeperRegisterRetryParams) => {
       setState((s) => ({ ...s, keeperRegistering: true }));
-      const outcome = await registerMarketWithKeeper(wallet, params);
+      // Replay the launch payload when we still have it, so Retry writes the
+      // creator's real leverage/fee rather than leaving the column defaults.
+      const outcome = await registerMarketWithKeeper(wallet, {
+        ...params,
+        payload: params.payload ?? launchRegistrationPayloads.get(params.slabAddress) ?? null,
+      });
       setState((s) => ({
         ...s,
         keeperRegistering: false,
