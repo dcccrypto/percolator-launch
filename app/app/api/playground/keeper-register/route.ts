@@ -102,6 +102,7 @@ import { upsertRegisteredMarket } from "@/lib/playground-registered-markets";
 import { normalizeDexType, KEEPER_DEX_TYPES, type KeeperDexType } from "@/lib/dex-type";
 import { getConfig, getAllProgramIds } from "@/lib/config";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
+import { resolveTokenLogo } from "@/lib/token-logo";
 import { upsertRegisteredMarketRow, type RegistrationRow } from "@/lib/market-registration";
 
 export const dynamic = "force-dynamic";
@@ -449,6 +450,24 @@ export async function POST(req: NextRequest) {
   const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
   const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
+  // Resolve the logo HERE, at registration.
+  //
+  // The indexer's metadata pass is guarded by .eq("metadata_source","auto"), so
+  // the moment registration marks a row 'manual' the indexer can never fill in
+  // logo_url again. Registration therefore has to supply it, or every properly
+  // registered market would show a blank icon while the abandoned placeholder
+  // rows kept theirs. Best-effort: a missing logo must never fail a launch.
+  let resolvedLogo: string | null = null;
+  try {
+    const logoMint = mainnetCA ?? null;
+    if (logoMint) resolvedLogo = await resolveTokenLogo(logoMint);
+  } catch (err) {
+    console.warn(
+      "[playground/keeper-register] logo resolution failed (non-fatal):",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+
   const dbResult = await upsertRegisteredMarketRow(getServiceClient(), {
     slab_address: slabAddress,
     mint_address: str(p.mint_address) ?? PLAYGROUND_COLLATERAL_MINT,
@@ -465,6 +484,7 @@ export async function POST(req: NextRequest) {
     lp_collateral: str(p.lp_collateral),
     max_leverage: num(p.max_leverage),
     trading_fee_bps: num(p.trading_fee_bps),
+    logo_url: resolvedLogo,
   });
   if (!dbResult.ok) {
     // Surface the underlying cause. This is a devnet playground and the launch

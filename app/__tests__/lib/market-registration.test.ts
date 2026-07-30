@@ -170,3 +170,35 @@ describe("upsertRegisteredMarketRow", () => {
     }
   });
 });
+
+describe("registration completeness (what the markets page needs)", () => {
+  it("writes logo_url when supplied — the indexer can never fill it in later", async () => {
+    // updateAutoMarketMetadata is guarded by .eq("metadata_source","auto"), so
+    // once registration marks the row 'manual' the indexer's logo pass can
+    // never touch it again. Registration is the only chance.
+    const fake = fakeSupabase({ existing: null });
+    await upsertRegisteredMarketRow(fake.client as never, row({ logo_url: "https://cdn/x.png" }));
+    expect(fake.captured?.payload.logo_url).toBe("https://cdn/x.png");
+  });
+
+  it("omits logo_url when resolution failed, rather than blanking an existing one", async () => {
+    const fake = fakeSupabase({ existing: { id: "1", metadata_source: "auto" } });
+    await upsertRegisteredMarketRow(fake.client as never, row({ logo_url: null }));
+    expect(fake.captured?.payload).not.toHaveProperty("logo_url");
+  });
+
+  it("writes every field the markets page renders", async () => {
+    const fake = fakeSupabase({ existing: null });
+    await upsertRegisteredMarketRow(
+      fake.client as never,
+      row({ symbol: "TRIP", name: "TripleT", max_leverage: 10, trading_fee_bps: 30, logo_url: "L" }),
+    );
+    const p = fake.captured!.payload;
+    for (const k of ["symbol", "name", "max_leverage", "trading_fee_bps", "logo_url",
+                     "dex_pool_address", "deployer", "keeper_status", "metadata_source"]) {
+      expect(p, `missing ${k}`).toHaveProperty(k);
+    }
+    expect(p.keeper_status).toBe("active");
+    expect(p.metadata_source).toBe("manual");
+  });
+});

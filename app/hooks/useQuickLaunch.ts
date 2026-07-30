@@ -5,6 +5,7 @@ import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { PublicKey } from "@solana/web3.js";
 import { useDexPoolSearch, type DexPoolResult } from "./useDexPoolSearch";
 import { fetchTokenMeta } from "@/lib/tokenMeta";
+import { getNetwork } from "@/lib/config";
 
 export interface QuickLaunchConfig {
   mint: string;
@@ -96,12 +97,22 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
           // market gets created with the WRONG oracle config.
           if (cancelled) return;
           setOracleResolveFailed(false);
-          if (data.feedId) {
+          // The devnet playground is ALWAYS keeper-delegated (AUTH_MARK): the
+          // keeper reads a mainnet DEX pool and pushes the mark on-chain, and
+          // keeper-register — the only writer of the markets row — runs solely
+          // on that path. So whenever a supported pool exists, prefer it, even
+          // if the token also has a Pyth feed. Previously feedId won outright
+          // and nulled the pool, which sent every Pyth-listed token down a
+          // branch that is never registered and never priced. Pyth still wins
+          // on mainnet, where it is a real on-chain oracle rather than a
+          // keeper-pushed mark.
+          const preferPool = getNetwork() === "devnet" && !!data.dexPoolAddress;
+          if (data.feedId && !preferPool) {
             setOracleType("pyth");
             setPythFeedId(data.feedId);
             setDexPoolAddress(null);
             if (data.price > 0) setAdminPrice(data.price.toFixed(6));
-          } else if (data.oracleMode === "hyperp" && data.dexPoolAddress) {
+          } else if (preferPool || (data.oracleMode === "hyperp" && data.dexPoolAddress)) {
             // PERC-470: Hyperp mode — DEX pool is the oracle
             setOracleType("hyperp_ema");
             setPythFeedId(null);

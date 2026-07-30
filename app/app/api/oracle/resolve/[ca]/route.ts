@@ -290,6 +290,15 @@ export async function GET(
       price,
       source: "pyth",
       oracleMode: "pyth",
+      // Carry the DEX pool even on the Pyth branch. The devnet playground is
+      // ALWAYS keeper-delegated (AUTH_MARK): the keeper reads a mainnet pool and
+      // pushes the mark on-chain. Omitting the pool here made a Pyth-listed
+      // token unreachable by that path — it resolved to oracleMode 'pyth', so
+      // keeper-register never ran, no markets row was written and the market
+      // became an unpriced placeholder. The caller decides which to use; this
+      // route just reports what exists.
+      dexPoolAddress: bestPool,
+      dexType: bestDexType,
     };
   } else if (jupResult || dexResult) {
     // PERC-470: No Pyth feed — use hyperp mode if we have a supported DEX pool
