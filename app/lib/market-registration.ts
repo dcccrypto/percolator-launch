@@ -54,7 +54,22 @@ export interface RegistrationRow {
 
 export type UpsertResult =
   | { ok: true; action: "inserted" | "updated" }
-  | { ok: false; status: number; error: string };
+  | { ok: false; status: number; error: string; detail?: string };
+
+/**
+ * Postgres/PostgREST error rendered for a log line and for the caller.
+ *
+ * The first version of this module returned a bare "Failed to register market",
+ * which made a real production failure undiagnosable — the launch UI showed
+ * that string and the underlying cause (constraint? column? permission?) was
+ * nowhere. A generic message is not a safe default when it is the ONLY signal.
+ */
+function describe(err: { code?: string; message?: string; details?: string; hint?: string } | null): string {
+  if (!err) return "unknown error";
+  return [err.code && `code=${err.code}`, err.message, err.details, err.hint]
+    .filter(Boolean)
+    .join(" | ");
+}
 
 /**
  * Insert or update the market row.
@@ -84,7 +99,13 @@ export async function upsertRegisteredMarketRow(
     .maybeSingle();
 
   if (readErr) {
-    return { ok: false, status: 500, error: "Failed to read existing market state" };
+    console.error("[market-registration] read failed:", describe(readErr));
+    return {
+      ok: false,
+      status: 500,
+      error: "Failed to read existing market state",
+      detail: describe(readErr),
+    };
   }
 
   // Drop null/undefined optional fields before writing. The retry path
@@ -109,10 +130,14 @@ export async function upsertRegisteredMarketRow(
           .update(payload as never)
           .eq("slab_address", row.slab_address)
           .eq("network", row.network);
-        if (updErr) return { ok: false, status: 500, error: "Failed to register market" };
+        if (updErr) {
+          console.error("[market-registration] post-23505 update failed:", describe(updErr));
+          return { ok: false, status: 500, error: "Failed to register market", detail: describe(updErr) };
+        }
         return { ok: true, action: "updated" };
       }
-      return { ok: false, status: 500, error: "Failed to register market" };
+      console.error("[market-registration] insert failed:", describe(error));
+      return { ok: false, status: 500, error: "Failed to register market", detail: describe(error) };
     }
     return { ok: true, action: "inserted" };
   }
@@ -122,6 +147,14 @@ export async function upsertRegisteredMarketRow(
     .update(payload as never)
     .eq("slab_address", row.slab_address)
     .eq("network", row.network);
-  if (updErr) return { ok: false, status: 500, error: "Failed to update market registration" };
+  if (updErr) {
+    console.error("[market-registration] update failed:", describe(updErr));
+    return {
+      ok: false,
+      status: 500,
+      error: "Failed to update market registration",
+      detail: describe(updErr),
+    };
+  }
   return { ok: true, action: "updated" };
 }

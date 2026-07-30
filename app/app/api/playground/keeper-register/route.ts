@@ -467,9 +467,21 @@ export async function POST(req: NextRequest) {
     trading_fee_bps: num(p.trading_fee_bps),
   });
   if (!dbResult.ok) {
-    console.error("[playground/keeper-register] markets row write failed:", dbResult.error);
+    // Surface the underlying cause. This is a devnet playground and the launch
+    // UI is the only place this failure is ever seen — a bare "Failed to
+    // register market" left a real production failure with no diagnosable
+    // signal anywhere.
+    console.error(
+      "[playground/keeper-register] markets row write failed:",
+      dbResult.error,
+      dbResult.detail ?? "(no detail)",
+    );
     return NextResponse.json(
-      { ok: false, registered: false, error: dbResult.error },
+      {
+        ok: false,
+        registered: false,
+        error: dbResult.detail ? `${dbResult.error}: ${dbResult.detail}` : dbResult.error,
+      },
       { status: dbResult.status },
     );
   }
