@@ -39,6 +39,7 @@ import { FC, memo, useState, useMemo, useCallback, useEffect, useRef } from "rea
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { useTrade, prewarmTradeSubmission } from "@/hooks/useTrade";
+import { useMarketFillCap } from "@/hooks/useMarketFillCap";
 import { humanizeError, isEngineLockError, withTransientRetry } from "@/lib/errorMessages";
 import { explorerTxUrl, getNetwork } from "@/lib/config";
 import { useUserAccount } from "@/hooks/useUserAccount";
@@ -124,6 +125,13 @@ interface TicketValidationCtx {
   mockMode: boolean;
   exceedsBalance: boolean;
   balanceLabel: string;
+  /** True when this order asks for more size than the market's matcher will
+   *  fill in ONE trade (matcherCaps.maxFillAbs). Over the cap the trade does
+   *  NOT partially fill — it reverts with a bare InvalidAccountData — so this
+   *  has to block submit, not just warn. See lib/matcherCaps.ts. */
+  exceedsFillCap: boolean;
+  /** Human-readable per-trade ceiling, e.g. "694.20 USDC". */
+  fillCapLabel: string;
 }
 interface ValidationIssue {
   severity: "error" | "warning";
@@ -162,6 +170,15 @@ function buildValidationIssues(ctx: TicketValidationCtx): ValidationIssue[] {
   }
   if (ctx.exceedsBalance) {
     issues.push({ severity: "error", title: "Exceeds balance", message: `Order size exceeds your available balance (${ctx.balanceLabel}).` });
+  }
+  if (ctx.exceedsFillCap) {
+    issues.push({
+      severity: "error",
+      title: "Over the market's trade limit",
+      message:
+        `This market fills at most ${ctx.fillCapLabel} in a single trade — the cap that protects its ` +
+        `liquidity provider. Reduce your size, or open the position in several smaller trades.`,
+    });
   }
   return issues;
 }
@@ -238,6 +255,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const connected = walletConnected || mockMode;
   const userAccount = realUserAccount ?? (mockMode ? getMockUserAccountIdle(slabAddress) : null);
   const { trade, loading, error } = useTrade(slabAddress);
+  // The market's per-trade size ceiling (immutable, resolved once).
+  const fillCaps = useMarketFillCap(slabAddress);
   const { engine, params, insuranceBalance: liveInsuranceBalance, totalOI: liveTotalOI, hasData: engineHasData } = useEngineState();
   const { accounts, config: mktConfig, header, refresh: refreshSlab, programId: slabProgramId } = useSlabState();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
@@ -613,6 +632,24 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     slippageBoundE6 = 0n;
   }
 
+  // ── Per-trade fill cap ──
+  // The matcher will not fill more than `maxFillAbs` (base-token units) in one
+  // trade, and going over does NOT partially fill — the wrapper rejects the
+  // whole thing with a bare InvalidAccountData. Compare in the SAME units the
+  // trade instruction takes (positionSize is the `sizeQ` passed to trade()),
+  // then express the ceiling in collateral for the banner, since that is the
+  // unit the size/margin inputs are denominated in.
+  const exceedsFillCap =
+    !mockMode && fillCaps != null && positionSize > 0n && positionSize > fillCaps.maxFillAbs;
+  const fillCapNotional =
+    fillCaps != null && livePriceE6 && livePriceE6 > 0n
+      ? (fillCaps.maxFillAbs * livePriceE6) / 1_000_000n
+      : null;
+  const fillCapLabel =
+    fillCapNotional != null
+      ? `${formatTokenAmount(fillCapNotional, decimals)} ${collateralSymbol}`
+      : "its per-trade limit";
+
   // ── Validation (single banner, priority-ordered) ──
   const validationIssues = buildValidationIssues({
     marketPaused: !!header?.paused,
@@ -626,6 +663,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     mockMode,
     exceedsBalance,
     balanceLabel: `${formatTokenAmount(effectiveBalance, decimals)} ${collateralSymbol}`,
+    exceedsFillCap,
+    fillCapLabel,
   });
   const blockingIssue = validationIssues.find((i) => i.severity === "error") ?? null;
 
@@ -1039,6 +1078,20 @@ setEngineLockError(null);
                   after={`${formatTokenAmount(afterAvailable, decimals)} ${collateralSymbol}`}
                   tooltip="Balance left for new orders after this one reserves its margin — same number as the account strip above."
                 />
+                {/* The market's own ceiling, shown alongside the user's. Buying
+                    power is `collateral x leverage`, but the market fills at
+                    most `10% x LP x leverage` per trade — the two can differ by
+                    a lot, and until this row existed the gap was invisible
+                    until the transaction reverted. */}
+                {fillCapNotional != null && (
+                  <DiffRow
+                    label="Market max / trade"
+                    before="—"
+                    after={`${formatTokenAmount(fillCapNotional, decimals)} ${collateralSymbol}`}
+                    valueClass={exceedsFillCap ? "text-[var(--short)]" : "text-[var(--text)]"}
+                    tooltip="Largest position this market will fill in a single trade — a cap that protects its liquidity provider. Orders above it are rejected, not partially filled; split them across several trades."
+                  />
+                )}
               </>
             )}
             {isFirstTimer && (

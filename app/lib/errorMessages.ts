@@ -315,6 +315,24 @@ export function humanizeError(rawMsg: string, context?: "trade"): string {
   // These are string-form errors like "InvalidAccountData", "AccountAlreadyInitialized" etc.
   // They must NOT be confused with Percolator custom program error codes.
   if (rawMsg.includes('"InvalidAccountData"')) {
+    // On the TRADE path this is almost never an account problem. The wrapper's
+    // validate_matcher_return maps EVERY matcher-return rejection to
+    // ProgramError::InvalidAccountData, and the common trigger by far is an
+    // order larger than the matcher's per-trade cap (maxFillAbs): the matcher
+    // clamps the fill but does not set FLAG_PARTIAL_OK, so the wrapper refuses
+    // the under-fill. Verified on devnet 2026-07-29 — a trade of exactly
+    // maxFillAbs succeeded and maxFillAbs+1 failed with this error, while every
+    // wrong-account permutation produced a DIFFERENT error (Custom(8),
+    // Custom(9), InvalidArgument, IncorrectProgramId). The old text sent people
+    // to check their wallet and accounts, which are fine. See lib/matcherCaps.
+    if (context === "trade") {
+      return (
+        "This trade is larger than the market can fill in one go. " +
+        "Each market caps the size of a single trade to protect its liquidity provider, " +
+        "and orders above that cap are rejected outright rather than partially filled. " +
+        "Try a smaller size, or open the position in several trades."
+      );
+    }
     return "Invalid account data - one of the accounts has unexpected data. The transaction may need different accounts or the market state may have changed.";
   }
   if (rawMsg.includes('"AccountAlreadyInitialized"')) {
