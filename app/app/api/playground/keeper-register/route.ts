@@ -255,6 +255,16 @@ export async function POST(req: NextRequest) {
   // inject or repoint any market's pricing pool. Two accepted paths (see the
   // file header doc comment): admin bypass, or wallet-signed proof that the
   // caller actually administers this specific slab.
+  // Kick the logo lookup off NOW, before the two RPC round-trips below (slab
+  // ownership + pool classification), so it overlaps them instead of adding its
+  // own latency. It used to run just before the DB write, where its two
+  // sequential 5s-timeout fetches could add up to 10s to a launch — and this
+  // route is awaited between M3a and M4, so that delay was on the critical path.
+  // Deliberately not awaited here; see the bounded await at the write.
+  const logoPromise: Promise<string | null> = mainnetCA
+    ? resolveTokenLogo(mainnetCA).catch(() => null)
+    : Promise.resolve(null);
+
   // The slab's on-chain admin/marketauth, captured by the ownership check below
   // so the registration write can record who actually administers this market.
   let slabAdmin: string | null = null;
@@ -458,18 +468,23 @@ export async function POST(req: NextRequest) {
   // logo_url again. Registration therefore has to supply it, or every properly
   // registered market would show a blank icon while the abandoned placeholder
   // rows kept theirs. Best-effort: a missing logo must never fail a launch.
+  // Bounded await: by now the lookup has had the whole auth + classification
+  // window to finish, so it is normally already resolved. A slow logo API must
+  // never hold up a launch — past the deadline the market registers without one
+  // (the success screen offers a manual upload).
+  //
+  // sanitizeLogoUrl, not the raw value: this string is rendered as an image src,
+  // and the removed POST /api/markets path sanitized it before writing.
+  const LOGO_DEADLINE_MS = 1_500;
   let resolvedLogo: string | null = null;
   try {
-    const logoMint = mainnetCA ?? null;
-    // sanitizeLogoUrl, not the raw value: this string is rendered as an image
-    // src, and the removed POST /api/markets path sanitized it before writing.
-    // Dropping that on the way over would have been a silent regression.
-    if (logoMint) resolvedLogo = sanitizeLogoUrl(await resolveTokenLogo(logoMint));
-  } catch (err) {
-    console.warn(
-      "[playground/keeper-register] logo resolution failed (non-fatal):",
-      err instanceof Error ? err.message : String(err),
-    );
+    const raw = await Promise.race([
+      logoPromise,
+      new Promise<null>((r) => setTimeout(() => r(null), LOGO_DEADLINE_MS)),
+    ]);
+    resolvedLogo = sanitizeLogoUrl(raw);
+  } catch {
+    resolvedLogo = null;
   }
 
   const dbResult = await upsertRegisteredMarketRow(getServiceClient(), {
