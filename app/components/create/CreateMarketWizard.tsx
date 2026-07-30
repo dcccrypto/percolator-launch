@@ -337,6 +337,30 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // waits while `checking` so a slow lookup can't be raced past.
   const duplicateCheck = useDuplicateMarket(wizard.step === 1 ? wizard.mintAddress : null);
   const step1CanAdvance = step1Valid && !duplicateCheck.checking && duplicateCheck.duplicates.length === 0;
+
+  // REGISTRABILITY GATE.
+  //
+  // Only a "keeper" market is ever registered: keeper-register runs under
+  // `isKeeperOracle`, and that is the sole writer of the markets row. A market
+  // that resolves to "admin" (no supported DEX pool found) therefore launches
+  // successfully and is then never registered and never priced — the indexer
+  // discovers the slab and fills in a placeholder, which is exactly how every
+  // UNKNOWN/USD market on the board was created.
+  //
+  // On devnet the keeper IS the price source, so a market with no supported
+  // pool has nothing to price it. Refuse the launch instead of producing
+  // another orphan. `oracleType === "keeper"` is set (in the quickLaunch mapping
+  // above) precisely when a supported pool was detected, so it is the right
+  // signal — it also covers the Raydium block, since a Raydium-only token
+  // resolves to no supported pool and lands on "admin".
+  const isDevnetEnv = getNetwork() === "devnet";
+  const registrable = !isDevnetEnv || wizard.oracleType === "keeper";
+  const notRegistrableReason = registrable
+    ? null
+    : quickLaunch.error ??
+      "This token has no supported DEX pool (Pump.fun or Meteora), so the keeper " +
+        "cannot price it. A market launched now would never be listed or priced. " +
+        "Pick a token that trades on a supported pool.";
   const step2Valid = (() => {
     if (wizard.oracleType === "admin") return true;
     if (wizard.oracleType === "pyth") return isValidHex64(wizard.oracleFeed);
@@ -361,7 +385,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     // once at creation, so launching without a real one permanently mis-sizes
     // the market's per-trade cap. Stops the flow here rather than at the final
     // launch alert.
-    (wizard.oracleType !== "admin" || !!wizard.adminPrice);
+    (wizard.oracleType !== "admin" || !!wizard.adminPrice) &&
+    // Never let an unregistrable market reach the launch button.
+    registrable;
   // BUG 1 fix: rent estimate must be sized off the actual v17 slab length
   // (DEFAULT_SLAB_SIZE = v17MarketAccountLen(14)), not the stale v12.19 tier.dataSize —
   // every tier used to grossly over-estimate (and InitMarket itself always used the
@@ -696,6 +722,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     // PERC-470 security: block hyperp launch without valid DEX price
     if (wizard.oracleType === "hyperp_ema" && priceE6 === 0n) {
       alert("Cannot create market: no DEX price available for this token. Try again or switch to Admin oracle.");
+      return;
+    }
+    if (!registrable) {
+      alert(`Cannot create market: ${notRegistrableReason}`);
       return;
     }
     // C-10: block admin/keeper launch if initial oracle price is 0 or unset.

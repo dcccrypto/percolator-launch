@@ -84,4 +84,16 @@ export const BLOCKED_SLAB_ADDRESSES: ReadonlySet<string> = new Set<string>([
   // the shape a real market should have — retire them and launch fresh.
   "H9ey1RBnVoBBit2o7EUCPZWJLMNtQpuA6QiqGmM95ZJ4",  // FRANK
   "4hJ9hUotH6BwUXVmgLGmXWHfg3YLjnmA8fwAtjex3wBU",  // Percolator
+
+  // ── 2026-07-30 clean slate: every market still live on the current wrapper ──
+  // None had a creator-written row: POST /api/markets sent oracle_mode='keeper'
+  // into a column whose CHECK accepts only pyth|hyperp|admin, so that write
+  // failed on every keeper-oracle launch and the indexer's placeholder is all
+  // that ever existed. Relaunch on the fixed path rather than repair them.
+  "5sDvEs2Zwn42ESkAmQm6Ycvi1XC3X8zHhhTDX1FX3hT7",  // Fauci
+  "5xRkBU83ogswJnjzqMb1a2M41NczMzyajSLvrVAsAG9Z",  // ZERO
+  "3bGWBK25iHH4FusT2c7JS7VjKxghtEHLWxXpLQarwRf3",  // TripleT-PERP
+  "2DDBehzGAKJPzwZXZ9HbcHBEtdkoHPRPaGBDjMCqSAUv",  // unnamed
+  "FaNFCmyputbCTvSGGmxe7EU1DyjagtGKf6eYPDTvmdFC",  // unnamed
+  "6RobABa7gpPvN8WsoQuXgbKKinpURwGXzUS4NJiYNaPR",  // unnamed
 ]);
