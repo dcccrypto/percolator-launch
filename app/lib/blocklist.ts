@@ -178,6 +178,21 @@ const HARDCODED_BLOCKED_SLABS: readonly string[] = [
   // the shape a real market should have — retire them and launch fresh.
   "H9ey1RBnVoBBit2o7EUCPZWJLMNtQpuA6QiqGmM95ZJ4",  // FRANK
   "4hJ9hUotH6BwUXVmgLGmXWHfg3YLjnmA8fwAtjex3wBU",  // Percolator
+  // 2026-07-30 clean slate: every market still live on the current wrapper,
+  // retired together so the board starts empty. These were all created before
+  // registration was consolidated onto the markets row, so none of them has a
+  // creator-written row — the indexer discovered each slab on chain and filled
+  // in a placeholder (metadata_source='auto', symbol='UNKNOWN', no pool
+  // binding), because POST /api/markets was sending oracle_mode='keeper' into a
+  // column whose CHECK constraint only accepts pyth|hyperp|admin and failed on
+  // every single keeper-oracle launch. Relaunch on the fixed path instead of
+  // repairing rows that were never written by their creator.
+  "5sDvEs2Zwn42ESkAmQm6Ycvi1XC3X8zHhhTDX1FX3hT7",  // Fauci
+  "5xRkBU83ogswJnjzqMb1a2M41NczMzyajSLvrVAsAG9Z",  // ZERO
+  "3bGWBK25iHH4FusT2c7JS7VjKxghtEHLWxXpLQarwRf3",  // TripleT-PERP
+  "2DDBehzGAKJPzwZXZ9HbcHBEtdkoHPRPaGBDjMCqSAUv",  // unnamed
+  "FaNFCmyputbCTvSGGmxe7EU1DyjagtGKf6eYPDTvmdFC",  // unnamed
+  "6RobABa7gpPvN8WsoQuXgbKKinpURwGXzUS4NJiYNaPR",  // unnamed
 ];
 
 /**
