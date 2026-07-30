@@ -97,7 +97,10 @@ vi.mock('@solana/web3.js', () => {
 
       /*
        * Force classifyPoolByOwner() into its documented dexType
-       * fallback path. The body supplies dexType: "raydium-clmm".
+       * fallback path. The body supplies dexType: "meteora-dlmm".
+       * (Any SUPPORTED type works — this test is about the concurrency
+       * race, not the DEX. It used "raydium-clmm" until that type was
+       * blocked for new markets, which made the route 400 here.)
        */
       throw new Error('mock mainnet RPC unavailable');
     }
@@ -220,7 +223,7 @@ function buildKeeperRegisterRequest(slabAddress: string, suffix: string): NextRe
     body: JSON.stringify({
       slabAddress,
       dexPoolAddress: suffix === 'a' ? state.poolA : state.poolB,
-      dexType: 'raydium-clmm',
+      dexType: 'meteora-dlmm',
       symbol: `RACE-${suffix.toUpperCase()}`,
       label: `Route race market ${suffix}`,
       deployer: state.deployer,

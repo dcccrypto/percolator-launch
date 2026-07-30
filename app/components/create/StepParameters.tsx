@@ -16,8 +16,9 @@ interface StepParametersProps {
   onLpCollateralChange: (val: string) => void;
   insuranceAmount: string;
   onInsuranceAmountChange: (val: string) => void;
+  /** Resolved opening price (USD, as a decimal string), or null if the oracle
+   *  lookup has not produced one. Display-only — see the render block below. */
   adminPrice: string | null;
-  onAdminPriceChange: (val: string) => void;
   isAdminOracle: boolean;
   tokenSymbol: string;
   walletBalance: string | null;
@@ -44,7 +45,6 @@ export const StepParameters: FC<StepParametersProps> = ({
   insuranceAmount,
   onInsuranceAmountChange,
   adminPrice,
-  onAdminPriceChange,
   isAdminOracle,
   tokenSymbol,
   walletBalance,
@@ -107,25 +107,37 @@ export const StepParameters: FC<StepParametersProps> = ({
         initialMarginBps={initialMarginBps}
       />
 
-      {/* Admin price input (if no oracle) */}
+      {/* Opening price — DERIVED, not creator-settable.
+          This price does far more than set the starting mark: deriveMarketParams()
+          converts the LP's notional guardrails (maxInventoryAbs / maxFillAbs) into a
+          TOKEN count using it, and those caps are written once at creation and can
+          never be changed (the matcher has no update instruction). A typed price that
+          disagrees with the oracle's therefore mis-sizes the per-trade cap by exactly
+          that ratio, permanently. That is not hypothetical: market 5sDvEs2… launched
+          at a hand-entered 0.001359 while its feed published 0.000011, and its $1,000
+          per-trade cap became $9.57 — every larger trade failed with a bare
+          InvalidAccountData. So the opening price now comes from the same oracle
+          resolution the market will actually run on, and is shown read-only. */}
       {isAdminOracle && (
-        <div>
-          <label
-            htmlFor="admin-price"
-            className="block text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text)] mb-2"
-          >
-            Initial Price (admin oracle)
-          </label>
-          <input
-            id="admin-price"
-            type="text"
-            value={adminPrice ?? "1.000000"}
-            onChange={(e) => onAdminPriceChange(e.target.value.replace(/[^0-9.]/g, ""))}
-            placeholder="1.000000"
-            className="w-full border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-[12px] font-mono text-[var(--text)] placeholder:text-[var(--text-dim)] focus:border-[var(--accent)]/40 focus:outline-none"
-          />
+        <div className="border border-[var(--border)] bg-[var(--bg)] px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text)]">
+              Opening Price
+            </span>
+            {adminPrice ? (
+              <span className="text-[14px] font-bold tabular-nums text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
+                ${adminPrice}
+              </span>
+            ) : (
+              <span className="text-[12px] font-semibold text-[var(--danger,#ef4444)]">
+                unavailable
+              </span>
+            )}
+          </div>
           <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
-            This sets the starting mark price. Update via your crank.
+            {adminPrice
+              ? "Detected from this token's live market. Sets the opening mark and sizes the LP's trade caps, so it is not editable."
+              : "No live price could be resolved for this token. A market cannot be launched until one is — launching at a wrong price permanently mis-sizes the LP's trade caps."}
           </p>
         </div>
       )}

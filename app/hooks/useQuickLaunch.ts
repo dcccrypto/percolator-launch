@@ -11,7 +11,9 @@ export interface QuickLaunchConfig {
   name: string;
   symbol: string;
   decimals: number;
-  initialPrice: string;
+  /** Opening price (USD decimal string) from the best detected pool, or `null`
+   *  when no live price was found. Never a placeholder — see `adminPrice`. */
+  initialPrice: string | null;
   maxLeverage: number;
   initialMarginBps: number;
   maintenanceMarginBps: number;
@@ -29,17 +31,22 @@ export interface QuickLaunchResult {
   oracleType: "pyth" | "hyperp_ema" | "admin";
   /** Pyth feed ID (hex64) if oracleType === "pyth", else null */
   pythFeedId: string | null;
-  /** Best price string for adminPrice field */
-  adminPrice: string;
+  /**
+   * Resolved opening price (USD decimal string), or `null` when no live price
+   * could be resolved. NEVER defaults to a placeholder: this value sizes the
+   * LP's per-trade cap at creation and can never be changed afterwards, so a
+   * fabricated price permanently mis-sizes the market (see
+   * `deriveMarketParams` and StepParameters' "Opening Price" block). `null`
+   * makes the launch guard in CreateMarketWizard refuse the launch.
+   */
+  adminPrice: string | null;
   /** PERC-470: DEX pool address for hyperp oracle mode */
   dexPoolAddress: string | null;
   /**
    * True when the /api/oracle/resolve lookup itself FAILED (non-ok response,
    * network error, timeout) — as opposed to succeeding and genuinely finding
-   * no feed. In the failure case the hook still falls back to the admin
-   * oracle with adminPrice "1.000000" (a transient 503 must not block
-   * launches), but consumers should surface this so the user doesn't
-   * unknowingly create a market hardcoded at $1.00.
+   * no feed. Either way `adminPrice` stays null and the launch is blocked;
+   * this flag lets the wizard explain WHICH of the two happened.
    */
   oracleResolveFailed: boolean;
 }
@@ -51,7 +58,7 @@ export interface QuickLaunchResult {
  */
 export function useQuickLaunch(mint: string | null): QuickLaunchResult {
   const { connection } = useConnectionCompat();
-  const { pools, loading: poolsLoading, error: poolsError } = useDexPoolSearch(mint);
+  const { pools, loading: poolsLoading, error: poolsError, blockedReason } = useDexPoolSearch(mint);
   const [config, setConfig] = useState<QuickLaunchConfig | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +67,7 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
   // Oracle detection state
   const [oracleType, setOracleType] = useState<"pyth" | "hyperp_ema" | "admin">("admin");
   const [pythFeedId, setPythFeedId] = useState<string | null>(null);
-  const [adminPrice, setAdminPrice] = useState<string>("1.000000");
+  const [adminPrice, setAdminPrice] = useState<string | null>(null);
   const [dexPoolAddress, setDexPoolAddress] = useState<string | null>(null);
   const [oracleResolveFailed, setOracleResolveFailed] = useState(false);
 
@@ -69,7 +76,7 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
   useEffect(() => {
     setOracleType("admin");
     setPythFeedId(null);
-    setAdminPrice("1.000000");
+    setAdminPrice(null);
     setDexPoolAddress(null);
     setOracleResolveFailed(false);
     if (!mint || mint.length < 32 || !tokenMeta) return;
@@ -177,6 +184,16 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
       return;
     }
 
+    // The token trades, but only on a DEX we withhold from new markets (see
+    // BLOCKED_DEX_IDS). Say so explicitly — otherwise this is indistinguishable
+    // from "no pools at all" and the launch fails later with a bare
+    // "no live price could be resolved".
+    if (blockedReason) {
+      setError(blockedReason);
+      setConfig(null);
+      return;
+    }
+
     const bestPool = pools.length > 0 ? pools[0] : null;
     const liquidity = bestPool?.liquidityUsd ?? 0;
     const price = bestPool?.priceUsd ?? 0;
@@ -212,7 +229,9 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
       name: tokenMeta.name,
       symbol: tokenMeta.symbol,
       decimals: tokenMeta.decimals,
-      initialPrice: price > 0 ? price.toFixed(6) : "1.000000",
+      // null, never "1.000000": a fabricated opening price permanently
+      // mis-sizes the LP's per-trade cap (see QuickLaunchConfig.initialPrice).
+      initialPrice: price > 0 ? price.toFixed(6) : null,
       maxLeverage,
       initialMarginBps,
       maintenanceMarginBps,
@@ -220,7 +239,7 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
       lpCollateral: "1000",
       liquidityTier: tier,
     });
-  }, [tokenMeta, pools, mint, poolsError]);
+  }, [tokenMeta, pools, mint, poolsError, blockedReason]);
 
   const bestPool = pools.length > 0 ? pools[0] : null;
 

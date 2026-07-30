@@ -473,7 +473,12 @@ async function registerMarketWithKeeper(
         // params.dexType carries DexScreener's raw dexId ("meteora",
         // "raydium") — normalize to the keeper vocabulary or the route
         // 400s and the market is orphaned (no price, no name).
-        dexType: normalizeDexType(params.dexType) ?? params.dexType ?? "raydium-clmm",
+        // No "raydium-clmm" fallback: it is only a HINT (the route classifies
+        // the pool by its on-chain owner and ignores this when it can), and
+        // Raydium is blocked for new markets — labelling an unknown pool as
+        // Raydium would be both wrong and, if the RPC check failed, the exact
+        // value the route now rejects. Send what we actually know, or nothing.
+        dexType: normalizeDexType(params.dexType) ?? params.dexType ?? null,
         symbol: params.symbol ?? null,
         // H1v2 deployer proof (stateless, see above)
         deployer: keeperDeployer,

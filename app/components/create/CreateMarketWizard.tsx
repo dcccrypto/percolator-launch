@@ -102,7 +102,8 @@ const DEFAULT_STATE: WizardState = {
   initialMarginBps: 1000,
   lpCollateral: "",
   insuranceAmount: "100",
-  adminPrice: "1.000000",
+  // null until oracle resolution supplies a real price — never a placeholder.
+  adminPrice: null,
 };
 
 /**
@@ -354,7 +355,13 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     !feeConflict &&
     feeSplitError === null &&
     parseFloat(wizard.lpCollateral || "0") > 0 &&
-    parseFloat(wizard.insuranceAmount) >= 100;
+    parseFloat(wizard.insuranceAmount) >= 100 &&
+    // An admin-oracle market cannot advance without a resolved opening price:
+    // it is what converts the LP's notional caps into the TOKEN counts written
+    // once at creation, so launching without a real one permanently mis-sizes
+    // the market's per-trade cap. Stops the flow here rather than at the final
+    // launch alert.
+    (wizard.oracleType !== "admin" || !!wizard.adminPrice);
   // BUG 1 fix: rent estimate must be sized off the actual v17 slab length
   // (DEFAULT_SLAB_SIZE = v17MarketAccountLen(14)), not the stale v12.19 tier.dataSize —
   // every tier used to grossly over-estimate (and InitMarket itself always used the
@@ -647,9 +654,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     setWizard((prev) => ({ ...prev, insuranceAmount: val }));
   }, []);
 
-  const setAdminPrice = useCallback((val: string) => {
-    setWizard((prev) => ({ ...prev, adminPrice: val }));
-  }, []);
+  // NOTE: there is deliberately no setAdminPrice. The opening price is derived
+  // from oracle resolution and is not creator-editable — it permanently sizes
+  // the LP's per-trade cap at creation.
 
   // Build oracle feed for create
   const getOracleFeedAndPrice = (): { oracleFeed: string; priceE6: bigint } => {
@@ -668,10 +675,18 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       const priceE6 = toE6(dexPrice);
       return { oracleFeed: "0".repeat(64), priceE6 };
     }
-    // Admin oracle
-    const price = parseFloat(wizard.adminPrice ?? "1");
-    const priceE6 = toE6(isNaN(price) ? 1 : price);
-    return { oracleFeed: "0".repeat(64), priceE6 };
+    // Admin oracle — the opening price is DERIVED from oracle resolution, never
+    // typed (the input was removed; see StepParameters' "Opening Price" block).
+    //
+    // The old `?? "1"` / `isNaN ? 1` fallbacks made the priceE6===0 guard in
+    // handleLaunch unreachable: an unresolved price silently became $1.00 and
+    // the market launched with LP caps sized against a fabricated price. Return
+    // 0n instead so that guard actually fires and the launch is refused.
+    const price = parseFloat(wizard.adminPrice ?? "");
+    if (!Number.isFinite(price) || price <= 0) {
+      return { oracleFeed: "0".repeat(64), priceE6: 0n };
+    }
+    return { oracleFeed: "0".repeat(64), priceE6: toE6(price) };
   };
 
   // Launch market (or resume from a stuck slab when resumeFromStep is set)
@@ -685,8 +700,16 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     }
     // C-10: block admin/keeper launch if initial oracle price is 0 or unset.
     // InitMarket rejects priceE6=0 on-chain; guard here for a cleaner error.
+    // Reachable now that getOracleFeedAndPrice no longer invents a $1.00 price:
+    // this is the stop that keeps a market from being created with LP caps sized
+    // against a price its oracle will never publish.
     if ((wizard.oracleType === "admin" || wizard.oracleType === "keeper") && priceE6 === 0n) {
-      alert("Cannot create market: enter a valid initial oracle price greater than 0.");
+      alert(
+        "Cannot create market: no live price could be resolved for this token.\n\n" +
+        "The opening price sizes the LP's per-trade cap permanently, so launching " +
+        "without a real one would leave the market untradeable. Wait for the price " +
+        "to load and try again.",
+      );
       return;
     }
     const tier = SLAB_TIERS[FIXED_SLAB_TIER];
@@ -750,7 +773,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       ...(oracleMode === "keeper" ? {
         dexPoolAddress: wizard.dexPool?.poolAddress ??
           (isValidBase58Pubkey(wizard.oracleFeed) ? wizard.oracleFeed : undefined),
-        dexType: wizard.dexPool?.dexId ?? "raydium-clmm",
+        // No silent "raydium-clmm" default: Raydium is blocked for new markets
+        // (BLOCKED_DEX_IDS), and mislabelling an unknown pool as Raydium would
+        // register it for a price path we do not trust. undefined = "unknown".
+        dexType: wizard.dexPool?.dexId,
       } : {}),
     };
     // PERC-513: If resuming from a stuck slab, skip slab creation (step 0).
@@ -814,7 +840,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       ...(oracleMode === "keeper" ? {
         dexPoolAddress: wizard.dexPool?.poolAddress ??
           (isValidBase58Pubkey(wizard.oracleFeed) ? wizard.oracleFeed : undefined),
-        dexType: wizard.dexPool?.dexId ?? "raydium-clmm",
+        // No silent "raydium-clmm" default: Raydium is blocked for new markets
+        // (BLOCKED_DEX_IDS), and mislabelling an unknown pool as Raydium would
+        // register it for a price path we do not trust. undefined = "unknown".
+        dexType: wizard.dexPool?.dexId,
       } : {}),
     };
     create(params, createState.step);
@@ -835,7 +864,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       slabAddress: createState.slabAddress,
       mainnetCA: wizard.mintAddress,
       dexPoolAddress,
-      dexType: wizard.dexPool?.dexId ?? "raydium-clmm",
+      // See the same note above: never default an unknown pool to Raydium.
+      dexType: wizard.dexPool?.dexId,
       symbol: wizard.tokenMeta?.symbol ?? "UNKNOWN",
     });
   }, [createState.slabAddress, wizard.dexPool, wizard.oracleFeed, wizard.mintAddress, wizard.tokenMeta, retryKeeperRegistration]);
@@ -1101,7 +1131,6 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             insuranceAmount={wizard.insuranceAmount}
             onInsuranceAmountChange={setInsuranceAmount}
             adminPrice={wizard.adminPrice}
-            onAdminPriceChange={setAdminPrice}
             isAdminOracle={wizard.oracleType === "admin"}
             tokenSymbol={collateralSymbol}
             walletBalance={walletBalanceDisplay}

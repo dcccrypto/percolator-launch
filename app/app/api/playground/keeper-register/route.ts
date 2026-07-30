@@ -365,6 +365,33 @@ export async function POST(req: NextRequest) {
     normalizedDexType = classified;
   }
 
+  // Raydium CLMM is withheld from new markets. THIS is the real gate: the
+  // client-side filter (SUPPORTED_DEX_IDS / BLOCKED_DEX_IDS) only shapes the
+  // wizard's pool list and can be bypassed by POSTing here directly, whereas
+  // `normalizedDexType` above is derived from the pool's on-chain owner
+  // program and cannot be spoofed.
+  //
+  // Why: the keeper cannot yet publish a correct USD price for a Raydium CLMM
+  // pool paired against SOL. Raydium orders its mints by PUBKEY and prices
+  // "mint1 per mint0", so WSOL lands on either side depending on the other
+  // token's address — one side needs a multiply by SOL/USD, the other an
+  // invert. Registering such a market publishes a price that is ~80x wrong
+  // half the time, which does not just mis-draw the chart: it permanently
+  // mis-sizes the LP trade caps written once at market creation (the
+  // 2026-07-29 Meteora/WSOL incident had exactly this shape). Lift this once
+  // price-reader.ts handles both orientations.
+  if (normalizedDexType === "raydium-clmm") {
+    return NextResponse.json(
+      {
+        error:
+          "Raydium pools are not supported for new markets yet — the price feed cannot " +
+          "yet publish a reliable USD price for Raydium pools paired against SOL. " +
+          "Launch against a Pump.fun or Meteora pool instead.",
+      },
+      { status: 400 },
+    );
+  }
+
   const resolvedLabel = label ?? (symbol ? `${symbol}/USDC — ${normalizedDexType}` : `${slabAddress.slice(0, 8)}… — ${normalizedDexType}`);
 
   const entry: RegisteredMarket = {

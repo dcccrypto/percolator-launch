@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { PublicKey } from "@solana/web3.js";
-import { SUPPORTED_DEX_IDS } from "@/lib/dex-constants";
+import { SUPPORTED_DEX_IDS, BLOCKED_DEX_IDS } from "@/lib/dex-constants";
 
 export interface DexPoolResult {
   poolAddress: string;
@@ -27,7 +27,8 @@ function isValidSolanaMint(mint: string): boolean {
 
 /**
  * Search DexScreener for DEX pools containing a given token mint.
- * Filters to supported DEXes (PumpSwap, Raydium, Meteora) and sorts by liquidity.
+ * Filters to supported DEXes (PumpSwap, Meteora) and sorts by liquidity.
+ * Raydium is currently withheld — see BLOCKED_DEX_IDS for why.
  *
  * Mint must be a valid Solana address before any browser fetch — avoids noisy calls
  * and leaking malformed input to a third-party API (Prompt 87).
@@ -40,15 +41,22 @@ export function useDexPoolSearch(mint: string | null): {
    *  callers computing liquidity tiers should NOT treat an error the same
    *  as "no pools" (that would silently mis-tier a liquid token as low). */
   error: string | null;
+  /** Explanation when this token HAS liquidity but only on a DEX we block for
+   *  new markets (see BLOCKED_DEX_IDS). Distinguishes "we won't list this yet"
+   *  from "this token has no pools", which otherwise look identical: both
+   *  produce an empty `pools` array and then a bare "no price" launch error. */
+  blockedReason: string | null;
 } {
   const [pools, setPools] = useState<DexPoolResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [blockedReason, setBlockedReason] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     setPools([]);
     setError(null);
+    setBlockedReason(null);
     // Abort any in-flight request unconditionally, even when the new mint is
     // invalid/empty — a stale request must never resolve after this point.
     abortRef.current?.abort();
@@ -96,12 +104,22 @@ export function useDexPoolSearch(mint: string | null): {
         const pairs = json.pairs || [];
 
         const results: DexPoolResult[] = [];
+        /** A blocked DEX we actually saw real liquidity on — reported only if
+         *  nothing supported turns up, so a token that also trades on Meteora
+         *  is never nagged about its Raydium pool. */
+        let blockedHit: string | null = null;
         for (const pair of pairs) {
           if (pair.chainId !== "solana") continue;
           const dexId = (pair.dexId || "").toLowerCase();
-          if (!SUPPORTED_DEX_IDS.has(dexId)) continue;
+          const liquidityRaw = pair.liquidity?.usd || 0;
+          if (!SUPPORTED_DEX_IDS.has(dexId)) {
+            if (BLOCKED_DEX_IDS[dexId] && liquidityRaw >= 100) {
+              blockedHit ??= BLOCKED_DEX_IDS[dexId];
+            }
+            continue;
+          }
 
-          const liquidity = pair.liquidity?.usd || 0;
+          const liquidity = liquidityRaw;
           if (liquidity < 100) continue; // skip tiny pools
 
           const baseSymbol = pair.baseToken?.symbol || "?";
@@ -122,11 +140,14 @@ export function useDexPoolSearch(mint: string | null): {
 
         if (cancelled) return;
         setPools(results.slice(0, 10));
+        // Only surface the block when it actually cost this token every option.
+        setBlockedReason(results.length === 0 ? blockedHit : null);
       } catch (err) {
         if (cancelled) return;
         if (err instanceof Error && err.name === "AbortError") return; // genuine cancellation, not a real error
         setError(err instanceof Error ? err.message : "Failed to fetch DEX pools");
         setPools([]);
+        setBlockedReason(null);
       } finally {
         // Always resolve loading for the CURRENT request — `cancelled` is
         // scoped per effect run, so a superseded/unmounted run's finally
@@ -141,5 +162,5 @@ export function useDexPoolSearch(mint: string | null): {
     };
   }, [mint]);
 
-  return { pools, loading, error };
+  return { pools, loading, error, blockedReason };
 }
