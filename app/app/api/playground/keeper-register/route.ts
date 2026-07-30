@@ -103,6 +103,7 @@ import { normalizeDexType, KEEPER_DEX_TYPES, type KeeperDexType } from "@/lib/de
 import { getConfig, getAllProgramIds } from "@/lib/config";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { resolveTokenLogo } from "@/lib/token-logo";
+import { sanitizeLogoUrl } from "@/lib/token-metadata-validators";
 import { upsertRegisteredMarketRow, type RegistrationRow } from "@/lib/market-registration";
 
 export const dynamic = "force-dynamic";
@@ -460,7 +461,10 @@ export async function POST(req: NextRequest) {
   let resolvedLogo: string | null = null;
   try {
     const logoMint = mainnetCA ?? null;
-    if (logoMint) resolvedLogo = await resolveTokenLogo(logoMint);
+    // sanitizeLogoUrl, not the raw value: this string is rendered as an image
+    // src, and the removed POST /api/markets path sanitized it before writing.
+    // Dropping that on the way over would have been a silent regression.
+    if (logoMint) resolvedLogo = sanitizeLogoUrl(await resolveTokenLogo(logoMint));
   } catch (err) {
     console.warn(
       "[playground/keeper-register] logo resolution failed (non-fatal):",
