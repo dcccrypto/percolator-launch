@@ -151,4 +151,22 @@ describe("upsertRegisteredMarketRow", () => {
     const res = await upsertRegisteredMarketRow(fake.client as never, row());
     expect(res.ok).toBe(false);
   });
+
+  it("maps oracle_mode 'keeper' to 'admin' — the column rejects 'keeper'", async () => {
+    // markets_oracle_mode_check allows only ('pyth','hyperp','admin'). The
+    // wizard's fourth type, "keeper", is an admin-oracle market whose authority
+    // is delegated — sending it raw is what failed the first live launch, and
+    // what made POST /api/markets fail every time before that.
+    const fake = fakeSupabase({ existing: null });
+    await upsertRegisteredMarketRow(fake.client as never, row({ oracle_mode: "keeper" }));
+    expect(fake.captured?.payload.oracle_mode).toBe("admin");
+  });
+
+  it("leaves the other oracle modes untouched", async () => {
+    for (const mode of ["pyth", "hyperp", "admin"]) {
+      const fake = fakeSupabase({ existing: null });
+      await upsertRegisteredMarketRow(fake.client as never, row({ oracle_mode: mode }));
+      expect(fake.captured?.payload.oracle_mode).toBe(mode);
+    }
+  });
 });

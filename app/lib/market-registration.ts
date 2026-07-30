@@ -87,6 +87,25 @@ function describe(err: { code?: string; message?: string; details?: string; hint
  * the column default ('retired'), so auto-discovery can never enroll a market
  * for pricing.
  */
+/**
+ * Map the wizard's oracle vocabulary onto the column's.
+ *
+ * `markets_oracle_mode_check` allows only ('pyth','hyperp','admin'), but the
+ * wizard has a fourth type — "keeper" — for DEX-priced markets. On chain that
+ * IS an admin-oracle (AUTH_MARK) market whose oracle_authority is delegated to
+ * the keeper service, which is why every row written by the indexer, Fauci
+ * included, reads 'admin'. So the value is normalised here rather than widening
+ * the constraint: 'keeper' is not a distinct oracle mode, it is who holds the
+ * authority, and that is already recorded in oracle_authority.
+ *
+ * This is what made the FIRST live launch fail with a check violation — and,
+ * before that, what made POST /api/markets fail 100% of the time rather than
+ * merely lose the race with the indexer. It sent this same unmapped value.
+ */
+function toDbOracleMode(mode: string): string {
+  return mode === "keeper" ? "admin" : mode;
+}
+
 export async function upsertRegisteredMarketRow(
   supabase: SupabaseClient,
   row: RegistrationRow,
@@ -117,6 +136,7 @@ export async function upsertRegisteredMarketRow(
   for (const [k, v] of Object.entries(row)) {
     if (v !== null && v !== undefined) payload[k] = v;
   }
+  payload.oracle_mode = toDbOracleMode(row.oracle_mode);
 
   if (!existing) {
     const { error } = await supabase.from("markets").insert(payload as never);
