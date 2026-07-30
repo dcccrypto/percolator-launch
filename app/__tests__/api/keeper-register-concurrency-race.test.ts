@@ -130,6 +130,32 @@ vi.mock('@percolatorct/sdk', () => ({
   })),
 }));
 
+/*
+ * keeper-register now writes the markets row as well as the blob — that row is
+ * the single source of truth the keeper reads. This double records the write so
+ * the concurrency test can assert BOTH stores stay consistent, rather than
+ * failing on missing Supabase env.
+ */
+const dbWrites: Array<Record<string, unknown>> = [];
+vi.mock('@/lib/supabase', () => ({
+  getServerNetwork: () => 'devnet',
+  getServiceClient: () => ({
+    from: () => ({
+      select: () => ({
+        eq: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }),
+      }),
+      insert: async (payload: Record<string, unknown>) => {
+        dbWrites.push(payload);
+        return { error: null };
+      },
+      update: (payload: Record<string, unknown>) => {
+        dbWrites.push(payload);
+        return { eq: () => ({ eq: async () => ({ error: null }) }) };
+      },
+    }),
+  }),
+}));
+
 vi.mock('@sentry/nextjs', () => ({
   captureMessage: vi.fn(),
 }));
@@ -372,6 +398,11 @@ describe('POST /api/playground/keeper-register concurrency safety', () => {
      */
     expect(responseA.status).toBe(200);
     expect(responseB.status).toBe(200);
+    // Registration must also have written the markets row — that row, not the
+    // blob, is what the keeper reads and what lists the market.
+    expect(dbWrites.length).toBeGreaterThanOrEqual(2);
+    expect(dbWrites.every((w) => w.keeper_status === 'active')).toBe(true);
+    expect(dbWrites.every((w) => w.metadata_source === 'manual')).toBe(true);
 
     expect(bodyA).toMatchObject({
       ok: true,
@@ -430,6 +461,11 @@ describe('POST /api/playground/keeper-register concurrency safety', () => {
      */
     expect(responseA.status).toBe(200);
     expect(responseB.status).toBe(200);
+    // Registration must also have written the markets row — that row, not the
+    // blob, is what the keeper reads and what lists the market.
+    expect(dbWrites.length).toBeGreaterThanOrEqual(2);
+    expect(dbWrites.every((w) => w.keeper_status === 'active')).toBe(true);
+    expect(dbWrites.every((w) => w.metadata_source === 'manual')).toBe(true);
 
     expect(bodyA).toMatchObject({
       ok: true,

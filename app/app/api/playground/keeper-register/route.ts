@@ -101,6 +101,8 @@ import type { RegisteredMarket } from "@/lib/playground-registered-markets";
 import { upsertRegisteredMarket } from "@/lib/playground-registered-markets";
 import { normalizeDexType, KEEPER_DEX_TYPES, type KeeperDexType } from "@/lib/dex-type";
 import { getConfig, getAllProgramIds } from "@/lib/config";
+import { getServiceClient, getServerNetwork } from "@/lib/supabase";
+import { upsertRegisteredMarketRow, type RegistrationRow } from "@/lib/market-registration";
 
 export const dynamic = "force-dynamic";
 
@@ -216,7 +218,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { slabAddress, mainnetCA, dexPoolAddress, dexType, symbol, label, deployer, signature } = body as {
+  const { slabAddress, mainnetCA, dexPoolAddress, dexType, symbol, label, deployer, signature, payload } = body as {
     slabAddress?: string;
     mainnetCA?: string;
     dexPoolAddress?: string;
@@ -225,6 +227,9 @@ export async function POST(req: NextRequest) {
     label?: string;
     deployer?: string;
     signature?: string;
+    /** Full markets-row payload from the wizard's buildMarketRegistrationPayload.
+     *  Absent on the retry path, which re-registers an already-listed market. */
+    payload?: Record<string, unknown> | null;
   };
 
   if (!slabAddress) return NextResponse.json({ error: "slabAddress required" }, { status: 400 });
@@ -248,6 +253,10 @@ export async function POST(req: NextRequest) {
   // inject or repoint any market's pricing pool. Two accepted paths (see the
   // file header doc comment): admin bypass, or wallet-signed proof that the
   // caller actually administers this specific slab.
+  // The slab's on-chain admin/marketauth, captured by the ownership check below
+  // so the registration write can record who actually administers this market.
+  let slabAdmin: string | null = null;
+
   if (!isAdminBypass(req)) {
     if (!deployer || !signature) {
       return NextResponse.json(
@@ -323,6 +332,7 @@ export async function POST(req: NextRequest) {
       if (admin.toBase58() !== deployer) {
         return NextResponse.json({ error: "Deployer does not match slab admin" }, { status: 403 });
       }
+      slabAdmin = admin.toBase58();
     } catch (err) {
       console.error(
         "[playground/keeper-register] Slab ownership check failed:",
@@ -405,6 +415,64 @@ export async function POST(req: NextRequest) {
     collateral: PLAYGROUND_COLLATERAL_MINT,
     registeredAt: Date.now(),
   };
+
+  // ── The registration write (markets row) ─────────────────────────────────
+  // This is the store that matters: the keeper reads keeper_status='active'
+  // from here. The blob write below is retained only until the keeper cutover
+  // is proven, then removed (rollout step 4). Runs FIRST so a DB failure fails
+  // the registration outright rather than leaving the blob ahead of the row.
+  //
+  // Everything above has already verified the caller against the slab's live
+  // on-chain marketauth, so this write is authenticated. See
+  // lib/market-registration.ts for why an 'auto' row may be overwritten.
+  // `deployer` must be the wallet that ADMINISTERS the market. On the signed
+  // path that is the verified deployer (already proven equal to the on-chain
+  // marketauth); on the admin-bypass path nobody signed, so fall back to the
+  // marketauth read from chain rather than writing something that merely looks
+  // plausible. Every pre-existing row has the sim-USDC MINT in this column —
+  // that is the mistake this avoids repeating.
+  const registeredDeployer = deployer ?? slabAdmin;
+  if (!registeredDeployer) {
+    return NextResponse.json(
+      { ok: false, registered: false, error: "Cannot determine the market's deployer" },
+      { status: 400 },
+    );
+  }
+
+  // Prefer the wizard's payload: it is the single source of truth for the
+  // DERIVED fields (floored max_leverage, oracle_authority's crank-wallet rule,
+  // initial_price_e6, lp_collateral). Falling back to literals here would give
+  // every market the column defaults — 10x and 10bps — regardless of what the
+  // creator chose. Identity fields stay pinned to values this route has already
+  // verified, so a crafted payload cannot repoint the row.
+  const p = (payload ?? {}) as Record<string, unknown>;
+  const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+  const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+  const dbResult = await upsertRegisteredMarketRow(getServiceClient(), {
+    slab_address: slabAddress,
+    mint_address: str(p.mint_address) ?? PLAYGROUND_COLLATERAL_MINT,
+    symbol: str(p.symbol) ?? symbol ?? "UNKNOWN",
+    name: str(p.name) ?? label ?? symbol ?? `Market ${slabAddress.slice(0, 8)}`,
+    decimals: num(p.decimals) ?? 6,
+    deployer: registeredDeployer,
+    dex_pool_address: dexPoolAddress,
+    mainnet_ca: mainnetCA ?? null,
+    oracle_mode: str(p.oracle_mode) ?? "admin",
+    network: getServerNetwork(),
+    oracle_authority: str(p.oracle_authority),
+    initial_price_e6: str(p.initial_price_e6),
+    lp_collateral: str(p.lp_collateral),
+    max_leverage: num(p.max_leverage),
+    trading_fee_bps: num(p.trading_fee_bps),
+  });
+  if (!dbResult.ok) {
+    console.error("[playground/keeper-register] markets row write failed:", dbResult.error);
+    return NextResponse.json(
+      { ok: false, registered: false, error: dbResult.error },
+      { status: dbResult.status },
+    );
+  }
 
   try {
     await upsertRegisteredMarket(entry);

@@ -104,7 +104,6 @@ import {
   loadLastInFlightMarket,
 } from "@/lib/inFlightMarket";
 import {
-  buildMarketRegistrationMessage,
   type MarketRegistrationPayload,
 } from "@/lib/market-registration-auth";
 // v17: max assets per portfolio (= the market's asset-slot capacity); program cap = 14.
@@ -371,6 +370,13 @@ export interface KeeperRegisterRetryParams {
   dexPoolAddress: string;
   dexType?: string | null;
   symbol?: string | null;
+  /** Full markets-row payload from buildMarketRegistrationPayload().
+   *  keeper-register writes the row, so without this the row falls back to
+   *  column defaults (max_leverage 10, trading_fee_bps 10) and loses
+   *  oracle_authority / initial_price_e6 / lp_collateral entirely. Optional so
+   *  the retry path, which has no CreateMarketParams, still compiles — it
+   *  re-registers an already-listed market and only needs the pool binding. */
+  payload?: MarketRegistrationPayload | null;
 }
 
 interface KeeperRegisterOutcome {
@@ -480,6 +486,10 @@ async function registerMarketWithKeeper(
         // value the route now rejects. Send what we actually know, or nothing.
         dexType: normalizeDexType(params.dexType) ?? params.dexType ?? null,
         symbol: params.symbol ?? null,
+        // The markets-row fields. keeper-register writes that row now, so
+        // without this the row takes column defaults and the board shows the
+        // wrong leverage/fee. Null on the retry path (already-listed market).
+        payload: params.payload ?? null,
         // H1v2 deployer proof (stateless, see above)
         deployer: keeperDeployer,
         signature: keeperSignature,
@@ -732,10 +742,6 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
         })
       : Promise.resolve(null);
 
-    const challengePromise = wallet.signMessage
-      ? fetch(`/api/markets/challenge?deployer=${encodeURIComponent(walletPk.toBase58())}`)
-      : Promise.resolve(null);
-
     const cosignPromise = isKeeperOracle
       ? fetch("/api/playground/keeper-cosign", {
           method: "POST",
@@ -770,17 +776,6 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       }
     }
 
-    // 2. Resolve the markets-registration nonce — non-fatal if it fails (the
-    //    POST later just omits nonce/signature, same as the sequential path).
-    let marketsNonce: string | null = null;
-    try {
-      const challengeResp = await challengePromise;
-      if (challengeResp?.ok) {
-        const { nonce } = (await challengeResp.json()) as { nonce: string };
-        marketsNonce = nonce;
-      }
-    } catch { /* non-fatal — mirrors the sequential path's own try/catch */ }
-
     // 3. Keeper co-sign (keeper oracle mode only) — fatal, matching the
     //    sequential path's own hard throw for this call.
     let cosignTx: Transaction | null = null;
@@ -797,36 +792,16 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       cosignTx = Transaction.from(Buffer.from(partialTxBase64, "base64"));
     }
 
-    // 4. Burst the 2 signMessage prompts NOW, immediately before the batch —
-    //    both proofs tolerate the ~15-30s the pipeline takes to actually use
-    //    them (markets nonce has a 5-min TTL; the keeper proof window is
-    //    -5min/+1min server-side — see keeper-register/route.ts).
-    // Build the registration payload once so the wallet signs the exact
-    // market data later submitted to POST /api/markets.
-    const deployerStr: string = walletPk.toBase58();
-    const registrationPayload = buildMarketRegistrationPayload({
-      slabAddress: slabPk.toBase58(),
-      params,
-      deployer: deployerStr,
-      oracleMode,
-      isAdminOracle,
-      isDevnetEnv,
-    });
-
-    let marketsSignature: string | null = null;
-    if (marketsNonce && wallet.signMessage) {
-      try {
-        const signingMessage = buildMarketRegistrationMessage({
-          nonce: marketsNonce,
-          deployer: deployerStr,
-          payload: registrationPayload,
-        });
-        const sigBytes = await wallet.signMessage(signingMessage);
-        marketsSignature = Buffer.from(sigBytes).toString("base64");
-      } catch {
-        /* non-fatal — mirrors the sequential path's own try/catch */
-      }
-    }
+    // 4. Burst the signMessage prompt NOW, immediately before the batch — the
+    //    proof tolerates the ~15-30s the pipeline takes to actually use it (the
+    //    keeper proof window is -5min/+1min server-side — see
+    //    keeper-register/route.ts).
+    //
+    //    This used to burst TWO prompts. The second signed a markets-challenge
+    //    nonce for POST /api/markets, which no longer exists — keeper-register
+    //    writes the row under the marketauth proof instead. That made the whole
+    //    challenge fetch + payload build + signature dead work, and it cost the
+    //    user a wallet prompt that fed nothing.
     let keeperProofSignature: string | null = null;
     if (isKeeperOracle && params.dexPoolAddress && wallet.signMessage) {
       try {
@@ -1340,41 +1315,17 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
     // keeper-register is NOT deferred — it must still run before M4, because
     // StakeInitPool rotates marketauth and keeper-register's H1 check requires
     // marketauth to still equal the deployer.
-    let marketsRegistered = false;
-    const registerMarketInDb = async () => {
-      if (marketsRegistered) return;
-      marketsRegistered = true;
-      try {
-        await fetch("/api/markets", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...registrationPayload,
-            ...(marketsNonce && marketsSignature
-              ? { nonce: marketsNonce, signature: marketsSignature }
-              : {}),
-          }),
-        });
-      } catch {
-        console.warn("[useCreateMarket] batch: markets DB registration failed (non-fatal)");
-      }
-    };
-
-    const keeperRegisterPromise: Promise<KeeperRegisterOutcome> =
-      (isKeeperOracle && params.dexPoolAddress && keeperProofSignature)
-        ? registerMarketWithKeeper(
-            { publicKey: walletPk, signMessage: wallet.signMessage },
-            {
-              slabAddress: slabPk.toBase58(),
-              mainnetCA: params.mainnetCA,
-              dexPoolAddress: params.dexPoolAddress,
-              dexType: params.dexType,
-              symbol: params.symbol,
-            },
-            { deployer: walletPk.toBase58(), signature: keeperProofSignature },
-          )
-        : Promise.resolve<KeeperRegisterOutcome>({ registered: false, message: "" });
-
+    // POST /api/markets is gone: keeper-register now writes the markets row
+    // itself, so a launch makes ONE registration call.
+    //
+    // It had to go, not just move. It 409s when a row already exists
+    // ("metadata is immutable via this endpoint") and this call site swallowed
+    // that as non-fatal, while the indexer inserts a row for any slab it
+    // discovers within ~60s. The slab exists before this ran, so the indexer
+    // usually won: measured 2026-07-30, all 5 rows on the live DB were
+    // metadata_source='auto' and this endpoint had never once created one.
+    // Registration now happens under the marketauth proof, which can safely
+    // overwrite an 'auto' row. See lib/market-registration.ts.
     if (signedCosign) {
       const cosignSig = await broadcastSignedTx(connection, signedCosign);
       advanceLanding(cosignSig);
@@ -1390,7 +1341,42 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
     // The market now holds collateral and both backing domains are seeded, so
     // it is safe to publish. Fired without awaiting — a slow DB write must not
     // delay M3b/M4, and it is awaited once at the end of the tail.
-    const marketsRegisterPromise = registerMarketInDb();
+
+    // REGISTRATION — deliberately pinned to this window, between M3a and M4.
+    //
+    // It used to be created before M2, which was safe while it only wrote the
+    // keeper's blob. It now writes the `markets` row, and that row is what
+    // LISTS the market. Firing it earlier would republish the zombie bug this
+    // ordering exists to prevent: registration used to fire right after M1, so
+    // any launch that died later still published a listed, unfunded,
+    // untradeable market (that is what happened to the ANSEM market).
+    //
+    // It also cannot move any LATER: M4's StakeInitPool rotates marketauth away
+    // from the deployer, and keeper-register's H1 check requires marketauth to
+    // still equal the deployer. After M3a and before M4 is the only window that
+    // satisfies both constraints.
+    const keeperRegisterPromise: Promise<KeeperRegisterOutcome> =
+      (isKeeperOracle && params.dexPoolAddress && keeperProofSignature)
+        ? registerMarketWithKeeper(
+            { publicKey: walletPk, signMessage: wallet.signMessage },
+            {
+              slabAddress: slabPk.toBase58(),
+              mainnetCA: params.mainnetCA,
+              dexPoolAddress: params.dexPoolAddress,
+              dexType: params.dexType,
+              symbol: params.symbol,
+              payload: buildMarketRegistrationPayload({
+                slabAddress: slabPk.toBase58(),
+                params,
+                deployer: walletPk.toBase58(),
+                oracleMode,
+                isAdminOracle,
+                isDevnetEnv,
+              }),
+            },
+            { deployer: walletPk.toBase58(), signature: keeperProofSignature },
+          )
+        : Promise.resolve<KeeperRegisterOutcome>({ registered: false, message: "" });
 
     // M3b carries the insurance seed, which is NOT optional: it is the layer
     // that absorbs losses before the LP does. This used to swallow every
@@ -1440,7 +1426,6 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
     advanceLanding(m4Sig);
     updateInFlightStep(slabPk.toBase58(), 6);
 
-    await marketsRegisterPromise;
 
     // Post-creation hook — devnet token airdrop, fired without awaiting.
     if (isDevnetEnv) {
@@ -3048,60 +3033,13 @@ export function useCreateMarket() {
         //   1. GET /api/markets/challenge?deployer=<pubkey> → { nonce }
         // 2. Sign the canonical market-registration payload with wallet.signMessage (ed25519)
         //   3. POST with { nonce, signature: base64 }
-        if (startStep <= 4) {
-          try {
-            const deployerStr = wallet.publicKey.toBase58();
-
-            // Step 1: fetch nonce challenge
-            const registrationPayload = buildMarketRegistrationPayload({
-              slabAddress: slabPk.toBase58(),
-              params,
-              deployer: deployerStr,
-              oracleMode,
-              isAdminOracle,
-              isDevnetEnv,
-            });
-
-            let nonce: string | null = null;
-            let signature: string | null = null;
-            if (wallet.signMessage) {
-              try {
-                const challengeResp = await fetch(
-                  `/api/markets/challenge?deployer=${encodeURIComponent(deployerStr)}`,
-                );
-                if (challengeResp.ok) {
-                  const { nonce: n } = await challengeResp.json() as { nonce: string };
-                  nonce = n;
-                  // Step 2: sign the canonical market-registration payload
-                  const signingMessage =
-                    buildMarketRegistrationMessage({
-                      nonce,
-                      deployer: deployerStr,
-                      payload: registrationPayload,
-                    });
-                  const sigBytes = await wallet.signMessage(signingMessage);
-                  signature = Buffer.from(sigBytes).toString("base64");
-                }
-              } catch (sigErr) {
-                console.warn("[useCreateMarket] Market-registration challenge/sign failed (non-fatal):", sigErr);
-                // Fall through — POST will 400 if nonce/signature missing, but market is on-chain.
-              }
-            }
-
-            await fetch("/api/markets", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                  ...registrationPayload,
-                  // PERC-8332: nonce + signature for deployer proof
-                                  ...(nonce && signature ? { nonce, signature } : {})
-                }),
-            });
-          } catch {
-            // Non-fatal — market is on-chain even if DB write fails
-            console.warn("GH#1761: Failed to register market in dashboard DB");
-          }
-        }
+        // The markets-row write used to live here as a second POST /api/markets
+        // guarded by its own nonce+signature challenge. Both are gone:
+        // keeper-register writes the row under the marketauth proof, so a launch
+        // makes ONE registration call and the weaker wallet-possession challenge
+        // is redundant. See lib/market-registration.ts for why the endpoint had
+        // to be removed rather than merely moved — its blanket 409 meant the
+        // indexer won this race every time.
 
         // Step 4: Create the Earn LP vault (CreateLpVault, tag 74) — the same
         // mechanism the 5 curated/seeded markets use (see

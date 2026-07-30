@@ -25,43 +25,18 @@ describe("useCreateMarket fresh batched registration", () => {
     expect(freshBatchSource.length).toBeGreaterThan(1000);
   });
 
-  it("signs the canonical registration payload and posts that same payload", () => {
-    // The signed message and the POSTed body must be byte-identical (#2387).
-    expect(freshBatchSource).toMatch(
-      /const registrationPayload\s*=\s*buildMarketRegistrationPayload\(\{/,
-    );
-    expect(freshBatchSource).toContain(
-      "const deployerStr: string = walletPk.toBase58();",
-    );
-    expect(freshBatchSource).toMatch(
-      /buildMarketRegistrationMessage\(\{\s*nonce:\s*marketsNonce,\s*deployer:\s*deployerStr,\s*payload:\s*registrationPayload,\s*\}\)/s,
-    );
-    expect(freshBatchSource).toContain("wallet.signMessage(signingMessage)");
-    expect(freshBatchSource).not.toContain(
-      "new TextEncoder().encode(marketsNonce)",
-    );
-  });
+  it("registers in exactly ONE call, with no dead markets-challenge signature", () => {
+    // Registration was consolidated onto keeper-register, which writes the
+    // markets row under the on-chain marketauth proof. POST /api/markets and
+    // its separate nonce+signature challenge are gone — that challenge cost the
+    // user a second wallet prompt whose result fed nothing.
+    expect(freshBatchSource).not.toContain('fetch("/api/markets"');
+    expect(freshBatchSource).not.toContain("marketsNonce");
+    expect(freshBatchSource).not.toContain("marketsSignature");
+    expect(freshBatchSource).not.toContain("/api/markets/challenge");
 
-  it("POSTs the shared payload, never a re-typed literal", () => {
-    // Scoped to the registerMarketInDb body — the zombie fix moved the fetch
-    // into that helper, so slicing on the old `marketsRegisterPromise` marker
-    // no longer covers it.
-    const start = freshBatchSource.indexOf("const registerMarketInDb");
-    expect(start).toBeGreaterThanOrEqual(0);
-    // Bound to the helper itself — running past it picks up keeper-register's
-    // own `{ deployer: ... }` argument and produces a false positive.
-    const end = freshBatchSource.indexOf("const keeperRegisterPromise", start);
-    expect(end).toBeGreaterThan(start);
-    const body = freshBatchSource.slice(start, end);
-
-    expect(body).toMatch(/body:\s*JSON\.stringify\(\{\s*\.\.\.registrationPayload,/s);
-    expect(body).toMatch(
-      /\.\.\.\(marketsNonce\s*&&\s*marketsSignature\s*\?\s*\{\s*nonce:\s*marketsNonce,\s*signature:\s*marketsSignature\s*\}/s,
-    );
-    // Must not drift back to a separately duplicated registration object.
-    expect(body).not.toMatch(/\bslab_address\s*:/);
-    expect(body).not.toMatch(/\bmint_address\s*:/);
-    expect(body).not.toMatch(/\bdeployer\s*:/);
+    // The keeper proof is the one remaining signature.
+    expect(freshBatchSource).toContain("keeper-register:");
   });
 
   it("does not publish the market until it actually holds collateral", () => {
@@ -73,22 +48,13 @@ describe("useCreateMarket fresh batched registration", () => {
     //
     // Registration must therefore come AFTER the M3a broadcast
     // (DepositCollateral + backing seed).
+    // keeper-register now writes the markets row, so THE REGISTRATION CALL is
+    // what must come after M3a. It used to be created before M2, which was safe
+    // only while it wrote nothing but the keeper's blob.
     const m3a = freshBatchSource.indexOf("const m3aSig = await broadcastTailTx(2)");
-    // Match the CALL, not the prose — the doc comment above also contains
-    // "registerMarketInDb()" and sits before M3a, which made this pass a
-    // stale-looking failure the first time round.
-    const register = freshBatchSource.indexOf(
-      "const marketsRegisterPromise = registerMarketInDb();",
-    );
+    const register = freshBatchSource.indexOf("const keeperRegisterPromise");
     expect(m3a).toBeGreaterThanOrEqual(0);
     expect(register).toBeGreaterThan(m3a);
-
-    // And it must be idempotent — the helper is reachable from more than one
-    // place, so a second call must not double-POST.
-    expect(freshBatchSource).toMatch(/let marketsRegistered\s*=\s*false/);
-    expect(freshBatchSource).toMatch(
-      /if\s*\(marketsRegistered\)\s*return;\s*marketsRegistered\s*=\s*true;/s,
-    );
   });
 
   it("keeps keeper-registration before M4, where marketauth still works", () => {
@@ -102,13 +68,10 @@ describe("useCreateMarket fresh batched registration", () => {
     expect(m4).toBeGreaterThan(keeper);
   });
 
-  it("builds the registration payload in exactly ONE place (no drift between paths)", () => {
-    const factoryDefs = hookSource.match(/function buildMarketRegistrationPayload\b/g) ?? [];
-    expect(factoryDefs.length).toBe(1);
-
-    const factoryCalls = hookSource.match(/buildMarketRegistrationPayload\(\{/g) ?? [];
-    expect(factoryCalls.length).toBe(2); // batched path + sequential fallback
-
-    expect(hookSource).not.toMatch(/MarketRegistrationPayload\s*=\s*\{/);
+  it("keeps registration to a single call site in the batched path", () => {
+    // Two registration writes to two stores is what let the creator's metadata
+    // lose to the indexer. One call, one store.
+    const calls = freshBatchSource.match(/registerMarketWithKeeper\(/g) ?? [];
+    expect(calls.length).toBe(1);
   });
 });
