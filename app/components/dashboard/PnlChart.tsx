@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { usePortfolio } from "@/hooks/usePortfolio";
+import { usePortfolio, isOpenPosition } from "@/hooks/usePortfolio";
 
 /**
  * PnL Chart — shows real portfolio PnL.
@@ -15,12 +15,16 @@ export function PnlChart() {
   const [range, setRange] = useState<typeof ranges[number]>("7D");
   const { totalUnrealizedPnl, positions, loading } = usePortfolio();
 
+  // Only OPEN positions contribute PnL — exclude closed (size-0 "Flat") ones so
+  // the "Across N positions" caption matches the real open-position count.
+  const openPositions = positions.filter(isOpenPosition);
+
   // Use totalUnrealizedPnl (mark-to-market, already guarded against u64::MAX sentinels)
   // rather than totalPnl (raw account.pnl sum) which can contain uninitialized sentinel
   // values producing septillion-dollar overflow display (GH#1352).
   const pnlFloat = Number(totalUnrealizedPnl) / 1e6;
   const isPositive = pnlFloat >= 0;
-  const hasData = positions.length > 0;
+  const hasData = openPositions.length > 0;
 
   return (
     <div className="border border-[var(--border)] bg-[var(--panel-bg)]">
@@ -62,7 +66,7 @@ export function PnlChart() {
               {isPositive ? "+" : ""}${Math.abs(pnlFloat).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
             <p className="mt-1 text-[9px] text-[var(--text-secondary)]">
-              Across {positions.length} position{positions.length !== 1 ? "s" : ""} • Historical chart coming soon
+              Across {openPositions.length} position{openPositions.length !== 1 ? "s" : ""} • Historical chart coming soon
             </p>
           </div>
         )}

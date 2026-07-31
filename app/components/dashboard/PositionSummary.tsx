@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePortfolio, getLiquidationSeverity, type PortfolioPosition } from "@/hooks/usePortfolio";
+import { usePortfolio, getLiquidationSeverity, isOpenPosition, type PortfolioPosition } from "@/hooks/usePortfolio";
 import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 
@@ -179,7 +179,9 @@ export function PositionSummary() {
   const { connected } = useWalletCompat();
   const portfolio = usePortfolio();
 
-  const positions = (portfolio.positions ?? []) as PortfolioPosition[];
+  // Only OPEN positions — exclude closed (size-0 "Flat") ones that still have a
+  // portfolio account, so a market you've closed doesn't linger in the list/count.
+  const positions = ((portfolio.positions ?? []) as PortfolioPosition[]).filter(isOpenPosition);
   const loading = portfolio.loading;
 
   // v17 markets return an empty `market.config` from the SDK (real value in

@@ -258,6 +258,20 @@ export function getLiquidationSeverity(distancePct: number): LiquidationSeverity
 }
 
 /**
+ * True when a position is actually OPEN (non-zero size).
+ * `usePortfolio().positions` also includes closed positions that still have a
+ * portfolio account in that market (size 0, "Flat" — often holding idle
+ * capital): those must be excluded from any "open positions" count/list, or a
+ * market you've closed keeps showing as an active position. Keyed on
+ * `account.positionSize` to match the canonical open/idle split already used by
+ * PortfolioPositionsView and the site-wide PositionsBar, so every
+ * open-position surface agrees.
+ */
+export function isOpenPosition(pos: PortfolioPosition): boolean {
+  return (pos.account?.positionSize ?? 0n) !== 0n;
+}
+
+/**
  * Map a parsed v17 portfolio into an enriched PortfolioPosition (liq price, PnL,
  * leverage). Shared by the owner-scan path and the NFT-wrapped recovery scan so
  * both surface identical rows. `nftWrapped` flags escrowed positions for the UI.
