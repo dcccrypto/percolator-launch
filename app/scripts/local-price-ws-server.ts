@@ -51,7 +51,8 @@
  *   PRICE_WS_POLL_MS  (default 500 — DEX-poll interval for the 2 pump.fun markets)
  *   HERMES_BASE       (default https://hermes.pyth.network)
  */
-import { Connection } from "@solana/web3.js";
+import { Connection, PublicKey } from "@solana/web3.js";
+import { detectDexType } from "@percolatorct/sdk";
 import { WebSocketServer, WebSocket } from "ws";
 import { readPoolPriceE6, type DecimalsCache, type PoolReadEntry } from "../lib/priceStore/dexPoolReader";
 
@@ -110,11 +111,107 @@ interface DexMarketEntry extends PoolReadEntry {
   slab: string;
 }
 
-/** Mirrors app/PLAYGROUND.md's "Live markets" table (2026-07-10 born-immortal re-seed). */
-const DEX_MARKETS: DexMarketEntry[] = [
+/**
+ * Seed list, mirroring app/PLAYGROUND.md's "Live markets" table (2026-07-10
+ * born-immortal re-seed). These are NOT the whole story any more — see
+ * refreshDbMarkets(): every market registered since is discovered from the
+ * database instead of being pinned here.
+ *
+ * Pinning was the reason a newly launched market never ticked. The feed only
+ * ever streamed these six slabs, so a market created after this file was last
+ * deployed had no live price at all and only moved when the page re-read
+ * on-chain — indistinguishable from a broken price feed.
+ */
+const SEED_DEX_MARKETS: DexMarketEntry[] = [
   { slab: "GPpyVaHAEJ8u6W9UAyCPp6tuQB2Chm1Z6uLUKA9ePJBC", poolAddress: "5tYFviFWQRKV9BJSTHGitbdqEYC1BGUgRUDnSADUXqJP", dexType: "pumpswap", label: "BURNIE/WSOL" },
   { slab: "FGaUkXepxCggbmpbgXDWUZ3V2CGSh6MeDCU6KLTLShbH", poolAddress: "Ebs3mXAzqZfzHfsdinTNw7gPy4uNyEAywcCiJxzLRrBW", dexType: "pumpswap", label: "PERC/WSOL" },
 ];
+
+/**
+ * Live DEX market list = the seed above plus every `keeper_status='active'`
+ * market in the database, refreshed on an interval. Same source of truth the
+ * oracle keeper reads, so a market starts ticking as soon as it registers —
+ * no redeploy of this service.
+ */
+let dexMarkets: DexMarketEntry[] = [...SEED_DEX_MARKETS];
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY =
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY;
+const DB_REFRESH_MS = 60_000;
+
+/** Pool -> dexType, resolved from the pool account's on-chain owner and cached
+ *  for the process. dex_type is deliberately not a database column: the owner
+ *  program is authoritative and a stored copy could disagree with chain. */
+const dexTypeByPool = new Map<string, PoolReadEntry["dexType"]>();
+
+/**
+ * Rebuild `dexMarkets` from the database.
+ *
+ * Failure is a no-op: the previous list keeps streaming rather than the feed
+ * going silent because one query failed.
+ */
+async function refreshDbMarkets(): Promise<void> {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return;
+  try {
+    const url =
+      `${SUPABASE_URL}/rest/v1/markets` +
+      `?select=slab_address,dex_pool_address,symbol` +
+      `&keeper_status=eq.active&network=eq.devnet&dex_pool_address=not.is.null`;
+    const resp = await fetch(url, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!resp.ok) {
+      console.warn(`[local-price-ws] market refresh: HTTP ${resp.status} — keeping the previous list`);
+      return;
+    }
+    const rows = (await resp.json()) as Array<{
+      slab_address: string; dex_pool_address: string; symbol: string | null;
+    }>;
+    if (!Array.isArray(rows)) return;
+
+    // Classify any pool we have not seen before, from its on-chain owner.
+    const unknown = rows.map((r) => r.dex_pool_address).filter((p) => p && !dexTypeByPool.has(p));
+    for (let i = 0; i < unknown.length; i += 100) {
+      const chunk = unknown.slice(i, i + 100);
+      const infos = await mainnetConn.getMultipleAccountsInfo(
+        chunk.map((p) => new PublicKey(p)),
+        "confirmed",
+      );
+      infos.forEach((info, j) => {
+        if (!info) return;
+        const dex = detectDexType(info.owner);
+        if (dex) dexTypeByPool.set(chunk[j], dex as PoolReadEntry["dexType"]);
+      });
+    }
+
+    const seeded = new Set(SEED_DEX_MARKETS.map((m) => m.slab));
+    const discovered: DexMarketEntry[] = [];
+    for (const r of rows) {
+      if (seeded.has(r.slab_address)) continue;      // already pinned above
+      if (PYTH_FEED[r.slab_address]) continue;        // streamed off Pyth instead
+      const dexType = dexTypeByPool.get(r.dex_pool_address);
+      if (!dexType) continue;                         // unclassifiable — never guess
+      discovered.push({
+        slab: r.slab_address,
+        poolAddress: r.dex_pool_address,
+        dexType,
+        label: `${r.symbol ?? r.slab_address.slice(0, 8)}/WSOL`,
+      });
+    }
+    const next = [...SEED_DEX_MARKETS, ...discovered];
+    if (next.length !== dexMarkets.length) {
+      console.log(`[local-price-ws] market list: ${dexMarkets.length} -> ${next.length} (${discovered.length} from db)`);
+    }
+    dexMarkets = next;
+  } catch (err) {
+    console.warn(
+      "[local-price-ws] market refresh failed — keeping the previous list:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+}
 
 /** Fallback SOL/USDC raydium-clmm pool, used only if Pyth SOL hasn't arrived yet. */
 const SOL_FALLBACK_ENTRY: PoolReadEntry = {
@@ -268,7 +365,7 @@ function logSkip(label: string, key: string, reason: string | undefined): void {
  * hiccup, transient 429, etc.) never kills the loop or blocks the other
  * market.
  *
- * Both DEX_MARKETS entries are WSOL-quoted PumpSwap pools, so they need a
+ * The seeded entries are WSOL-quoted PumpSwap pools, so they need a
  * SOL/USD price to convert to USD — prefer the latest value captured off
  * the (continuous, more accurate) Pyth stream; only fall back to a one-off
  * DEX read of the SOL pool if Pyth SOL hasn't arrived yet (e.g. right at
@@ -290,7 +387,7 @@ async function pollOnce(): Promise<void> {
   }
 
   await Promise.all(
-    DEX_MARKETS.map(async (entry) => {
+    dexMarkets.map(async (entry) => {
       try {
         const result = await readPoolPriceE6(mainnetConn, entry, decimalsCache, solPriceE6);
         if (result.skipped) {
@@ -320,9 +417,16 @@ console.log(
 for (const slab of Object.keys(PYTH_FEED)) {
   console.log(`  ${(PYTH_LABELS[slab] ?? "?").padEnd(11)} slab=${slab.slice(0, 8)}…  pyth=${PYTH_FEED[slab].slice(0, 8)}…`);
 }
-for (const m of DEX_MARKETS) {
+for (const m of SEED_DEX_MARKETS) {
   console.log(`  ${m.label.padEnd(11)} slab=${m.slab.slice(0, 8)}…  pool=${m.poolAddress.slice(0, 8)}… (${m.dexType})`);
 }
+
+// Discover database-registered markets before the first poll, then keep the
+// list current. Runs alongside the price loops; a failure never stops them.
+void (async () => {
+  await refreshDbMarkets();
+  setInterval(() => { void refreshDbMarkets(); }, DB_REFRESH_MS);
+})();
 
 void streamPrices();
 void pollLoop();

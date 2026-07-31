@@ -121,8 +121,10 @@ export async function readPoolPriceE6(
   }
 
   if (entry.dexType === "meteora-dlmm") {
+    // Parsed unconditionally (pure byte parsing, no RPC): the quote mint is what
+    // decides whether this pool prices in USD or in SOL.
+    const poolParsed = parseDexPool("meteora-dlmm", poolPk, data);
     if (!decimalsCache.has(entry.poolAddress)) {
-      const poolParsed = parseDexPool("meteora-dlmm", poolPk, data);
       const [baseDecimals, quoteDecimals] = await Promise.all([
         withRpcBackoff(() => fetchMintDecimals(mainnetConn, poolParsed.baseMint)),
         withRpcBackoff(() => fetchMintDecimals(mainnetConn, poolParsed.quoteMint)),
@@ -133,6 +135,38 @@ export async function readPoolPriceE6(
       );
     }
     const dec = decimalsCache.get(entry.poolAddress)!;
+
+    // A WSOL-quoted Meteora pool prices in SOL, not USD. computeDexSpotPriceE6
+    // applies the WSOL->USD conversion for `pumpswap` ONLY, so without this the
+    // DISPLAY price for such a market is low by the whole SOL/USD rate (~80x) —
+    // the same bug fixed on the on-chain side in percolator-oracle-keeper's
+    // price-reader (2026-07-29, market 5sDvEs2…: $0.000011 vs a real $0.000943).
+    //
+    // Precision: converting from the e6 SOL price is 5-17% off for cheap tokens,
+    // whose SOL price is a 1-2 digit integer in e6. Meteora's price scales as
+    // 10^(baseDecimals - quoteDecimals), so asking for 6 EXTRA base decimals
+    // returns the same price at e12 and the conversion is exact. `base` is
+    // inflated rather than `quote` deflated so the argument can never go
+    // negative for a low-decimal quote mint.
+    if (poolParsed.quoteMint.equals(WSOL_MINT)) {
+      if (solPriceE6 === undefined) {
+        return {
+          priceE6: 0n,
+          source,
+          skipped: true,
+          skipReason: "Meteora DLMM: pool is WSOL-quoted but no SOL/USD price was available",
+        };
+      }
+      const nativeE12 = computeDexSpotPriceE6("meteora-dlmm", data, undefined, {
+        base: dec.base + 6,
+        quote: dec.quote,
+      });
+      if (nativeE12 <= 0n) {
+        return { priceE6: 0n, source, skipped: true, skipReason: "Meteora DLMM: binStep=0 (pool not initialised or live)" };
+      }
+      return { priceE6: (nativeE12 * solPriceE6) / 1_000_000_000_000n, source };
+    }
+
     const priceE6 = computeDexSpotPriceE6("meteora-dlmm", data, undefined, dec);
     if (priceE6 === 0n) {
       return { priceE6: 0n, source, skipped: true, skipReason: "Meteora DLMM: binStep=0 (pool not initialised or live)" };
