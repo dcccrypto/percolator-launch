@@ -30,6 +30,14 @@ interface ClosePositionModalProps {
    *  mounts this modal, instead of relying on a banner elsewhere in the page that a
    *  full-screen modal portal would visually cover. */
   error?: string | null;
+  /**
+   * The market's per-fill cap (matcherCaps.maxFillAbs, base q units), when
+   * known. A close bigger than this executes as several batch legs in one
+   * transaction (useClosePosition), which is invisible unless we SAY so —
+   * without this line the user just sees a bigger fee than the preview
+   * implied and no explanation. Null/absent hides the line.
+   */
+  maxFillAbs?: bigint | null;
   onConfirm: (percent: number) => void;
   onCancel: () => void;
 }
@@ -63,6 +71,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   tradingFeeBps = 0n,
   oracleStale = false,
   error = null,
+  maxFillAbs = null,
   onConfirm,
   onCancel,
 }) => {
@@ -153,6 +162,15 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
 
   const colSym = collateralSymbol ?? symbol;
   const absPosition = abs(positionSize);
+
+  // How many matcher fills this close needs (lib/closeChunks.ts does the real
+  // split in useClosePosition — this is the same ceil, for the explainer line).
+  const closeAbsForFills =
+    percent >= 100 ? absPosition : (absPosition * BigInt(clampClosePercent(percent))) / 100n;
+  const fillCount =
+    maxFillAbs != null && maxFillAbs > 0n && closeAbsForFills > 0n
+      ? Number((closeAbsForFills + maxFillAbs - 1n) / maxFillAbs)
+      : 1;
 
   const preview = useMemo(() => {
     const closeAbs = percent >= 100
@@ -342,6 +360,21 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
             </p>
             <p className="mt-1 text-[9px] text-[var(--text-secondary)] leading-relaxed">
               The oracle price has not been updated recently. Closing is temporarily disabled to prevent failed transactions.
+            </p>
+          </div>
+        )}
+
+        {/* Over-cap close: it still lands in ONE transaction, but as several
+            matcher fills — say so, or the user sees nothing but a slightly
+            different fee than the preview implied. */}
+        {fillCount > 1 && (
+          <div className="mb-4 rounded-none border border-[var(--border)] bg-[var(--bg)] p-2.5">
+            <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--text-secondary)]">
+              Closes as {fillCount} fills
+            </p>
+            <p className="mt-1 text-[9px] text-[var(--text-secondary)] leading-relaxed">
+              This close is larger than the market fills in one trade, so it executes as {fillCount} back-to-back
+              fills inside a single transaction — one signature, no extra steps.
             </p>
           </div>
         )}

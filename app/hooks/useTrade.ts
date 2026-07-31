@@ -5,6 +5,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import {
   encodeTradeCpi,
+  encodeBatchTradeCpi,
   encodePermissionlessCrank,
   CrankAction,
   ACCOUNTS_TRADE_CPI,
@@ -369,7 +370,20 @@ export function useTrade(slabAddress: string) {
   }, []);
 
   const trade = useCallback(
-    async (params: { lpIdx: number; userIdx: number; size: bigint; limitPriceE6?: bigint }) => {
+    async (params: {
+      lpIdx: number;
+      userIdx: number;
+      /** Signed TOTAL size — slippage limit, store patch, and the single-leg path all use this. */
+      size: bigint;
+      /**
+       * Optional leg split for sizes over the matcher's per-fill cap
+       * (lib/closeChunks.ts). Legs must sum to `size`; >1 leg builds ONE
+       * BatchTradeCpi (tag 67) instead of a TradeCpi — each leg passes the
+       * matcher's per-fill clamp individually, one signature for the lot.
+       */
+      sizes?: bigint[];
+      limitPriceE6?: bigint;
+    }) => {
       if (inflightRef.current) throw new Error("Trade already in progress");
       inflightRef.current = true;
       setLoading(true);
@@ -496,6 +510,15 @@ export function useTrade(slabAddress: string) {
           matcherDelegate = resolved.matcherDelegate;
         }
 
+        // Leg split (defaults to the single full-size leg). The sum invariant
+        // is enforced here, not trusted: a split that doesn't reproduce
+        // params.size exactly would silently close the wrong amount.
+        const legs: bigint[] =
+          params.sizes && params.sizes.length > 0 ? params.sizes : [params.size];
+        if (legs.reduce((a, b) => a + b, 0n) !== params.size) {
+          throw new Error("Trade leg split does not sum to the requested size");
+        }
+
         const tradeIx = buildIx({
           programId,
           keys: buildAccountMetas(ACCOUNTS_TRADE_CPI, [
@@ -509,7 +532,19 @@ export function useTrade(slabAddress: string) {
           ]),
           // v17: TradeCpi wire changed — assetIndex (u16) replaces lpIdx; sizeQ+feeBps+limitPrice.
           // feeBps=0n → program applies the market's configured tradingFeeBps.
-          data: encodeTradeCpi({ assetIndex: 0, sizeQ: params.size.toString(), feeBps: 0n, limitPrice: effectiveLimitPriceE6.toString() }),
+          // >1 leg: BatchTradeCpi — same 7 accounts, several matcher fills in
+          // one instruction, so an over-cap close lands with ONE signature.
+          data:
+            legs.length > 1
+              ? encodeBatchTradeCpi({
+                  legs: legs.map((legSize) => ({
+                    assetIndex: 0,
+                    sizeQ: legSize.toString(),
+                    feeBps: 0n,
+                    limitPrice: effectiveLimitPriceE6.toString(),
+                  })),
+                })
+              : encodeTradeCpi({ assetIndex: 0, sizeQ: params.size.toString(), feeBps: 0n, limitPrice: effectiveLimitPriceE6.toString() }),
         });
         // v17 PermissionlessCrank (tag 5): [owner(s,w), market(w), portfolio(w)] + oracle tail.
         // Build after accountA is resolved — portfolio = accountA (taker's portfolio).
@@ -551,7 +586,12 @@ export function useTrade(slabAddress: string) {
         }
         instructions.push(tradeIx);
 
-        const sig = await sendTx({ connection, wallet, instructions, computeUnits: 600_000 });
+        // Each extra batch leg is another matcher CPI + fill settle — scale
+        // the budget rather than letting a 3-leg close die on compute. Legs
+        // are bounded structurally (position ≤ 4× fill cap ⇒ ≤ 5 legs), so
+        // this stays inside the 1.4M tx ceiling.
+        const computeUnits = Math.min(600_000 + 250_000 * (legs.length - 1), 1_400_000);
+        const sig = await sendTx({ connection, wallet, instructions, computeUnits });
 
         // Immediate local application of the confirmed fill: sendTx's
         // pollConfirmation has ALREADY verified this tx landed on-chain by

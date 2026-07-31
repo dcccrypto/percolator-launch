@@ -10,6 +10,8 @@ import { getPortfolioRawSnapshot, isLpPortfolio, makePortfolioScanKey } from "@/
 import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { humanizeError, withTransientRetry } from "@/lib/errorMessages";
+import { getMatcherCaps } from "@/lib/matcherCaps";
+import { chunkCloseSize } from "@/lib/closeChunks";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
@@ -320,11 +322,30 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
           );
         }
 
+        // A position can be up to 4× the matcher's per-fill cap (it was built
+        // over several trades), but the matcher will NOT fill more than the
+        // cap in one shot — and it doesn't partial-fill, it rejects the whole
+        // trade. Split an over-cap close into batch legs (one tx, one
+        // signature). A caps read failure degrades to the single-leg path —
+        // exactly the pre-existing behavior — rather than blocking the close.
+        let closeLegs: bigint[] | undefined;
+        if (programId) {
+          try {
+            const caps = await getMatcherCaps(connection, programId, new PublicKey(slabAddress));
+            if (caps) {
+              const legs = chunkCloseSize(closeSize, caps.maxFillAbs);
+              if (legs.length > 1) closeLegs = legs;
+            }
+          } catch {
+            /* caps unavailable — single-leg close as before */
+          }
+        }
+
         // v17: pass lpIdx=0, userIdx=0 — useTrade v17 path ignores both and
         // resolves accountA via findV17Portfolio + accountB via GPA scan.
         // v12: pass the real lpIdx and userAccount.idx as before.
         const sig = await withTransientRetry(
-          async () => trade({ lpIdx, userIdx: userAccount.idx, size: closeSize }),
+          async () => trade({ lpIdx, userIdx: userAccount.idx, size: closeSize, sizes: closeLegs }),
           { maxRetries: 2, delayMs: 3000 },
         );
 

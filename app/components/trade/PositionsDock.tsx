@@ -67,6 +67,7 @@ import { computeLiquidationDistancePct } from "@/lib/liquidation-distance";
 import { ClosePositionModal } from "./ClosePositionModal";
 import { OtherMarketPositions } from "./OtherMarketPositions";
 import { WarmupProgress } from "./WarmupProgress";
+import { useMarketFillCap } from "@/hooks/useMarketFillCap";
 import { TradeHistory } from "./TradeHistory";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
@@ -126,6 +127,8 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const marketDisplaySymbol = symbol.replace(/-PERP$/i, "");
 
   const { closePosition, loading: closeLoading, error: closeError, prewarmClose } = useClosePosition(slabAddress);
+  // Per-trade fill cap — the close modal uses it to explain multi-fill closes.
+  const fillCaps = useMarketFillCap(slabAddress);
   // Called unconditionally, before the `!activeInfo` early return below, per
   // rules of hooks — mirrors MarketInfoBar's MarkPrice / MarketBookCard's
   // Oracle cell (same shared hook, see hooks/usePriceFlash.ts).
@@ -495,6 +498,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
           // but if the modal is somehow already open when engine-staleness
           // is detected, keep its Confirm button blocked too.
           oracleStale={closeBlockedByStaleness}
+          maxFillAbs={fillCaps?.maxFillAbs ?? null}
           onConfirm={handleConfirmClose}
           onCancel={() => setShowCloseModal(false)}
         />

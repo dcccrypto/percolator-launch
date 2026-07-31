@@ -77,10 +77,15 @@ export const WarmupProgress: FC<{
           `/api/warmup/${slabAddress}/${accountIdx}`
         );
         if (!res.ok) {
-          if (res.status === 404) {
-            // No warmup exists for this position — that can't change on
-            // its own, so stop polling instead of hitting the endpoint
-            // every 5s forever.
+          if (res.status === 404 || res.status === 501) {
+            // 404: no warmup exists for this position. 501: this is a v17
+            // market — the v17 engine has NO per-position warmup at all and
+            // the endpoint says so permanently. Neither can change on its
+            // own, so stop polling instead of hitting the endpoint every 5s
+            // forever. (Pre-fix, the 501 fell into the retry path below and
+            // every 5s repoll flashed the loading skeleton — a phantom
+            // "timer" that appeared and vanished forever on every v17
+            // position.)
             setWarmupData(null);
             setError(null);
             disposePoll?.();
@@ -134,14 +139,16 @@ export const WarmupProgress: FC<{
 
   if (!warmupData && !loading) return null;
 
-  if (loading && !warmupData) {
+  // Skeleton only while the FIRST answer is pending. After an error the 5s
+  // retry loop keeps running — flashing the skeleton on every retry rendered
+  // a phantom bar that blinked in and out forever.
+  if (loading && !warmupData && !error) {
     return (
       <div className="flex items-center gap-2 py-1">
         <div className="h-1 flex-1 animate-pulse rounded-full bg-[var(--border)]/30" />
       </div>
     );
   }
-
   if (!warmupData) return null;
 
   const isComplete = progress >= 100 || countdown === 0;

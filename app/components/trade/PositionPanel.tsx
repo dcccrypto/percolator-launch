@@ -33,6 +33,7 @@ import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { computeLiquidationDistancePct } from "@/lib/liquidation-distance";
 import { WarmupProgress } from "./WarmupProgress";
+import { useMarketFillCap } from "@/hooks/useMarketFillCap";
 import { ClosePositionModal } from "./ClosePositionModal";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
 import { sanitizeFundingRateBps, isSentinelValue } from "@/lib/health";
@@ -228,6 +229,8 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const decimals = tokenMeta?.decimals ?? 6;
 
   const { closePosition, loading: closeLoading, error: closeError, prewarmClose } = useClosePosition(slabAddress);
+  // Per-trade fill cap — the close modal uses it to explain multi-fill closes.
+  const fillCaps = useMarketFillCap(slabAddress);
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [showAddMarginModal, setShowAddMarginModal] = useState(false);
 
@@ -760,6 +763,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           // but if the modal is somehow already open when engine-staleness
           // is detected, keep its Confirm button blocked too.
           oracleStale={closeBlockedByStaleness}
+          maxFillAbs={fillCaps?.maxFillAbs ?? null}
           onConfirm={handleConfirmClose}
           onCancel={() => setShowCloseModal(false)}
         />
