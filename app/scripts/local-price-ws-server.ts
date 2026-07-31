@@ -55,6 +55,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import { detectDexType } from "@percolatorct/sdk";
 import { WebSocketServer, WebSocket } from "ws";
 import { readPoolPriceE6, type DecimalsCache, type PoolReadEntry } from "../lib/priceStore/dexPoolReader";
+import { isBlockedSlab } from "../lib/blocklist";
 
 // Railway (and most PaaS) inject PORT and route the public domain to it, so
 // prefer it; PRICE_WS_PORT is the local-dev override; 8787 is the local default.
@@ -200,9 +201,23 @@ async function refreshDbMarkets(): Promise<void> {
         label: `${r.symbol ?? r.slab_address.slice(0, 8)}/WSOL`,
       });
     }
-    const next = [...SEED_DEX_MARKETS, ...discovered];
+    // Seeds go through the blocklist too: a pinned entry used to stream
+    // FOREVER regardless of retirement — only a redeploy could silence it
+    // (2026-07-31 audit).
+    const next = [...SEED_DEX_MARKETS, ...discovered].filter((m) => !isBlockedSlab(m.slab));
     if (next.length !== dexMarkets.length) {
       console.log(`[local-price-ws] market list: ${dexMarkets.length} -> ${next.length} (${discovered.length} from db)`);
+    }
+    // Evict cached prices for slabs leaving the list: without this, a client
+    // subscribing to a RETIRED slab was replayed the last pre-retirement
+    // price stamped with a FRESH timestamp — a frozen price presented as
+    // live (2026-07-31 audit).
+    const liveSlabs = new Set(next.map((m) => m.slab));
+    for (const slab of lastPriceE6.keys()) {
+      if (!liveSlabs.has(slab) && !PYTH_FEED[slab]) {
+        lastPriceE6.delete(slab);
+        console.log(`[local-price-ws] evicted cached price for removed market ${slab.slice(0, 8)}…`);
+      }
     }
     dexMarkets = next;
   } catch (err) {
