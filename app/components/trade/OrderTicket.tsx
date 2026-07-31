@@ -41,6 +41,7 @@ import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { useTrade, prewarmTradeSubmission } from "@/hooks/useTrade";
 import { useMarketFillCap } from "@/hooks/useMarketFillCap";
 import { remainingSideCapacityQ, wouldExceedInventoryCap, UNLIMITED_CAPACITY } from "@/lib/marketCapacity";
+import { isBlockedSlab } from "@/lib/blocklist";
 import { humanizeError, isEngineLockError, withTransientRetry } from "@/lib/errorMessages";
 import { explorerTxUrl, getNetwork } from "@/lib/config";
 import { useUserAccount } from "@/hooks/useUserAccount";
@@ -115,6 +116,10 @@ function parsePercToNative(input: string, decimalsRaw = 6): bigint {
  * only `error`-severity issues block submit (matches the reference doc's
  * two-severity model — warnings display but don't disable the button). */
 interface TicketValidationCtx {
+  /** Blocklisted/retired market: opens are pointless (and on a bankrupt
+   *  market, DANGEROUS — new money can become unwithdrawable). Highest
+   *  priority: nothing else about the market matters if it's retired. */
+  marketRetired: boolean;
   marketPaused: boolean;
   vaultEmpty: boolean;
   lpUnderfunded: boolean;
@@ -151,6 +156,15 @@ interface ValidationIssue {
 function buildValidationIssues(ctx: TicketValidationCtx): ValidationIssue[] {
   if (ctx.mockMode) return [];
   const issues: ValidationIssue[] = [];
+  if (ctx.marketRetired) {
+    issues.push({
+      severity: "error",
+      title: "Market retired",
+      message:
+        "This market has been retired and no longer accepts new positions or deposits. " +
+        "Existing positions can still be closed and funds withdrawn where the market allows it.",
+    });
+  }
   if (ctx.marketPaused) {
     issues.push({ severity: "error", title: "Market paused", message: "Trading, deposits, and withdrawals are disabled by the market admin." });
   }
@@ -701,6 +715,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   // ── Validation (single banner, priority-ordered) ──
   const validationIssues = buildValidationIssues({
+    marketRetired: !mockMode && isBlockedSlab(slabAddress),
     marketPaused: !!header?.paused,
     vaultEmpty,
     lpUnderfunded,

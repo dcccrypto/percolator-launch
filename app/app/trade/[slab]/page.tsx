@@ -5,6 +5,7 @@ import useSWR from "swr";
 import { useRouter } from "next/navigation";
 import { PublicKey } from "@solana/web3.js";
 import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
+import { isBlockedSlab } from "@/lib/blocklist";
 import { UsdToggleProvider } from "@/components/providers/UsdToggleProvider";
 import { OrderTicket } from "@/components/trade/OrderTicket";
 import { PositionNftPanel } from "@/components/trade/PositionNftPanel";
@@ -475,6 +476,23 @@ function TradePageInner({ slab }: { slab: string }) {
   return (
     <RenderProfiler id="TradePageInner">
     <div className="mx-auto max-w-[1920px] overflow-x-hidden animate-fade-in">
+      {/* Retired market (2026-07-31 audit): this page deliberately still
+          renders on a direct URL — it is the ONLY self-serve surface where a
+          depositor can reach funds stuck in a retired market — but without
+          this banner it looked like a LIVE market with a silently frozen
+          price. Opens/deposits are blocked at the ticket + hook level;
+          close/withdraw stay available. */}
+      {isBlockedSlab(slab) && (
+        <div className="border-b border-[var(--short)]/40 bg-[var(--short)]/[0.07] px-4 py-2.5 text-center">
+          <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-[var(--short)]">
+            Market retired — close &amp; withdraw only
+          </p>
+          <p className="mt-0.5 text-[10px] text-[var(--text-secondary)]">
+            This market no longer trades and its price is frozen. New positions and deposits are
+            disabled; existing positions can be closed and funds withdrawn where the market allows it.
+          </p>
+        </div>
+      )}
       {hasNoPriceData && (
         <div className="border-b border-[var(--warning)]/30 bg-[var(--warning)]/5 px-4 py-2.5 text-center">
           <p className="text-[11px] font-medium text-[var(--warning)]">
