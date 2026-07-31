@@ -10,7 +10,8 @@ import { getPortfolioRawSnapshot, isLpPortfolio, makePortfolioScanKey } from "@/
 import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { humanizeError, withTransientRetry } from "@/lib/errorMessages";
-import { getMatcherCaps } from "@/lib/matcherCaps";
+import { getMatcherCaps, getMatcherInventory } from "@/lib/matcherCaps";
+import { remainingSideCapacityQ, wouldExceedInventoryCap } from "@/lib/marketCapacity";
 import { chunkCloseSize } from "@/lib/closeChunks";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
@@ -331,13 +332,40 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         let closeLegs: bigint[] | undefined;
         if (programId) {
           try {
-            const caps = await getMatcherCaps(connection, programId, new PublicKey(slabAddress));
+            const slabPk = new PublicKey(slabAddress);
+            const caps = await getMatcherCaps(connection, programId, slabPk);
             if (caps) {
+              // A close is not automatically inventory-safe: when the closer
+              // is AGAINST the crowd (e.g. closing a long while the LP is
+              // already long), the close pushes LP inventory further and the
+              // matcher clamps → wrapper rejects. Check the chosen side's
+              // remaining capacity and fail with the real reason instead of
+              // the bare on-chain error. closeSize < 0 = user sells ("short"
+              // side of the capacity math); > 0 = user buys ("long").
+              const inv = await getMatcherInventory(connection, programId, slabPk);
+              if (inv !== null) {
+                const side = closeSize < 0n ? "short" : "long";
+                const sizeAbs = closeSize < 0n ? -closeSize : closeSize;
+                if (wouldExceedInventoryCap(inv, caps.maxInventoryAbs, side, sizeAbs)) {
+                  const capacity = remainingSideCapacityQ(inv, caps.maxInventoryAbs, side);
+                  const pct = sizeAbs > 0n ? Number((capacity * 100n) / sizeAbs) : 0;
+                  throw new Error(
+                    `The market can only absorb ${pct}% of this close right now — its liquidity ` +
+                      `provider is at its exposure cap on your side. Close up to ${Math.max(pct, 0)}% ` +
+                      `now, or wait for other trades to free capacity.`,
+                  );
+                }
+              }
               const legs = chunkCloseSize(closeSize, caps.maxFillAbs);
               if (legs.length > 1) closeLegs = legs;
             }
-          } catch {
-            /* caps unavailable — single-leg close as before */
+          } catch (capErr) {
+            // The capacity error above is a REAL, user-facing block — rethrow.
+            // Anything else (caps/inventory read failed) degrades to the
+            // single-leg close exactly as before.
+            if (capErr instanceof Error && capErr.message.includes("can only absorb")) {
+              throw capErr;
+            }
           }
         }
 
