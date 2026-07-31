@@ -409,6 +409,39 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     (resolvedOracleType !== "admin" || !!wizard.adminPrice) &&
     // Never let an unregistrable market reach the launch button.
     registrable;
+
+  /**
+   * WHY Continue is disabled on Step 3, in the same order step3Valid evaluates.
+   *
+   * Every clause of step3Valid gets a sentence here. Most blockers are visible
+   * at the field that causes them, but several are not — an invalid fee split,
+   * a fee/margin conflict, or an unregistrable token all just greyed the button
+   * out with no explanation anywhere on the page, which is indistinguishable
+   * from the app being broken. Null when nothing is blocking.
+   */
+  const step3BlockedReason: string | null = (() => {
+    if (wizard.tradingFeeBps < 1 || wizard.tradingFeeBps > 1000) {
+      return `Trading fee must be between 1 and 1000 bps (currently ${wizard.tradingFeeBps}).`;
+    }
+    if (wizard.initialMarginBps < 100) {
+      return "Leverage is too high for this market — initial margin must be at least 100 bps (100x).";
+    }
+    if (feeConflict) {
+      return `The trading fee (${wizard.tradingFeeBps} bps) must be smaller than the initial margin (${wizard.initialMarginBps} bps), or a single trade could cost more than the margin backing it.`;
+    }
+    if (feeSplitError) return `Fee split: ${feeSplitError}`;
+    if (!(parseFloat(wizard.lpCollateral || "0") > 0)) {
+      return "Enter a seed deposit — the LP is the counterparty to every trade, so a market cannot open without one.";
+    }
+    if (!(parseFloat(wizard.insuranceAmount) >= 100)) {
+      return "Insurance fund seed must be at least 100 — it is the layer that absorbs losses before the LP, and it is written once at creation.";
+    }
+    if (resolvedOracleType === "admin" && !wizard.adminPrice) {
+      return "No live price could be resolved for this token yet. The opening price sizes the LP's trade caps permanently, so the launch is blocked until one is available.";
+    }
+    if (!registrable) return notRegistrableReason;
+    return null;
+  })();
   // BUG 1 fix: rent estimate must be sized off the actual v17 slab length
   // (DEFAULT_SLAB_SIZE = v17MarketAccountLen(14)), not the stale v12.19 tier.dataSize —
   // every tier used to grossly over-estimate (and InitMarket itself always used the
@@ -1182,7 +1215,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             onContinue={handleParametersContinue}
             onBack={goBack}
             canContinue={step3Valid}
-            blockedReason={notRegistrableReason}
+            blockedReason={step3BlockedReason}
           />
         )}
 
