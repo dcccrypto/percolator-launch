@@ -40,6 +40,7 @@ import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { useTrade, prewarmTradeSubmission } from "@/hooks/useTrade";
 import { useMarketFillCap } from "@/hooks/useMarketFillCap";
+import { remainingSideCapacityQ, wouldExceedInventoryCap } from "@/lib/marketCapacity";
 import { humanizeError, isEngineLockError, withTransientRetry } from "@/lib/errorMessages";
 import { explorerTxUrl, getNetwork } from "@/lib/config";
 import { useUserAccount } from "@/hooks/useUserAccount";
@@ -132,6 +133,15 @@ interface TicketValidationCtx {
   exceedsFillCap: boolean;
   /** Human-readable per-trade ceiling, e.g. "694.20 USDC". */
   fillCapLabel: string;
+  /** True when the order fits the per-trade cap but would push the LP's NET
+   *  inventory past maxInventoryAbs — the matcher clamps, the wrapper rejects,
+   *  same bare InvalidAccountData. Direction-dependent: one side can be full
+   *  while the other still has the whole cap. See lib/marketCapacity.ts. */
+  exceedsSideCapacity: boolean;
+  /** Which side the user is taking, for the capacity message. */
+  direction: "long" | "short";
+  /** Human-readable remaining capacity on that side, e.g. "312.40 USDC". */
+  sideCapacityLabel: string;
 }
 interface ValidationIssue {
   severity: "error" | "warning";
@@ -178,6 +188,19 @@ function buildValidationIssues(ctx: TicketValidationCtx): ValidationIssue[] {
       message:
         `This market fills at most ${ctx.fillCapLabel} in a single trade — the cap that protects its ` +
         `liquidity provider. Reduce your size, or open the position in several smaller trades.`,
+    });
+  } else if (ctx.exceedsSideCapacity) {
+    // Only when the per-trade cap ISN'T the blocker — one banner, most
+    // specific reason wins. This is the "market is full on your side" case:
+    // the trade fits the per-trade cap but would push the LP's net exposure
+    // past its ceiling, and the matcher rejects rather than partially fills.
+    const other = ctx.direction === "long" ? "shorts" : "longs";
+    issues.push({
+      severity: "error",
+      title: `Market is near its ${ctx.direction} capacity`,
+      message:
+        `This market can only absorb about ${ctx.sideCapacityLabel} more ${ctx.direction} exposure right now ` +
+        `(the LP's total-exposure cap). Reduce your size, or wait for ${other} or position closes to free capacity.`,
     });
   }
   return issues;
@@ -650,6 +673,32 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       ? `${formatTokenAmount(fillCapNotional, decimals)} ${collateralSymbol}`
       : "its per-trade limit";
 
+  // ── Side capacity (LP net-inventory ceiling) ──
+  // A trade under the per-trade cap still reverts when it would push the LP's
+  // NET inventory past maxInventoryAbs — the state a one-sided market drifts
+  // into. Direction-dependent: the full side blocks, the other side still has
+  // room. inventoryBase is a 20s poll, so this is advisory-fresh — the banner
+  // stops the guaranteed failures; a razor's-edge race still surfaces as the
+  // humanized on-chain error.
+  const sideCapacityQ =
+    fillCaps != null && fillCaps.inventoryBase != null
+      ? remainingSideCapacityQ(fillCaps.inventoryBase, fillCaps.maxInventoryAbs, direction)
+      : null;
+  const exceedsSideCapacity =
+    !mockMode &&
+    fillCaps != null &&
+    fillCaps.inventoryBase != null &&
+    positionSize > 0n &&
+    wouldExceedInventoryCap(fillCaps.inventoryBase, fillCaps.maxInventoryAbs, direction, positionSize);
+  const sideCapacityNotional =
+    sideCapacityQ != null && livePriceE6 && livePriceE6 > 0n
+      ? (sideCapacityQ * livePriceE6) / 1_000_000n
+      : null;
+  const sideCapacityLabel =
+    sideCapacityNotional != null
+      ? `${formatTokenAmount(sideCapacityNotional, decimals)} ${collateralSymbol}`
+      : "its remaining capacity";
+
   // ── Validation (single banner, priority-ordered) ──
   const validationIssues = buildValidationIssues({
     marketPaused: !!header?.paused,
@@ -665,6 +714,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     balanceLabel: `${formatTokenAmount(effectiveBalance, decimals)} ${collateralSymbol}`,
     exceedsFillCap,
     fillCapLabel,
+    exceedsSideCapacity,
+    direction,
+    sideCapacityLabel,
   });
   const blockingIssue = validationIssues.find((i) => i.severity === "error") ?? null;
 
@@ -909,6 +961,41 @@ setEngineLockError(null);
           </button>
         ))}
       </div>
+
+      {/* Market limits — shown BEFORE the user hits them, not only as a
+          rejection banner. Two ceilings the matcher enforces silently (over
+          either one the trade reverts whole, no partial fill): the per-trade
+          cap, and the LP's remaining net-exposure capacity on the CHOSEN side
+          (direction-aware, refreshed on a 20s poll). Without this row the
+          only way to discover the limits was to trip them. */}
+      {!mockMode && fillCapNotional != null && (
+        <div className="mb-3 space-y-0.5">
+          <div className="flex items-center justify-between text-[10px]">
+            <span className="flex items-center gap-1 text-[var(--text-secondary)] uppercase tracking-[0.08em]">
+              Max per trade
+              <InfoIcon tooltip="The most this market fills in a single trade — the matcher's per-fill cap protecting the LP. Bigger positions need multiple trades." />
+            </span>
+            <span
+              className={`font-mono tabular-nums ${exceedsFillCap ? "text-[var(--short)]" : "text-[var(--text)]"}`}
+            >
+              {formatTokenAmount(fillCapNotional, decimals)} {collateralSymbol}
+            </span>
+          </div>
+          {sideCapacityNotional != null && (
+            <div className="flex items-center justify-between text-[10px]">
+              <span className="flex items-center gap-1 text-[var(--text-secondary)] uppercase tracking-[0.08em]">
+                {direction} capacity left
+                <InfoIcon tooltip="How much more exposure the market can absorb on your side before the LP's total-exposure cap. Fills up as one direction dominates; frees up when the other side trades or positions close." />
+              </span>
+              <span
+                className={`font-mono tabular-nums ${exceedsSideCapacity ? "text-[var(--short)]" : "text-[var(--text)]"}`}
+              >
+                {formatTokenAmount(sideCapacityNotional, decimals)} {collateralSymbol}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Order value — surfaced right under the size input (Hyperliquid
           shows notional at a glance here, not buried below leverage). Moved

@@ -50,6 +50,7 @@ const PORTFOLIO_MATCHER_CONFIG_LEN = 104;
 const CTX_VAMM_OFFSET = 64;
 /** Field offsets WITHIN the vAMM context (see percolator-match `struct MatcherCtx`). */
 const CTX_MAX_FILL_ABS_OFF = 80;
+const CTX_INVENTORY_BASE_OFF = 96;
 const CTX_MAX_INVENTORY_ABS_OFF = 128;
 
 export interface MatcherCaps {
@@ -64,6 +65,24 @@ function readU128LE(data: Buffer, offset: number): bigint {
   const lo = data.readBigUInt64LE(offset);
   const hi = data.readBigUInt64LE(offset + 8);
   return (hi << 64n) | lo;
+}
+
+/** Read a little-endian i128 (two's complement) as a signed bigint. */
+function readI128LE(data: Buffer, offset: number): bigint {
+  const u = readU128LE(data, offset);
+  return u >= 1n << 127n ? u - (1n << 128n) : u;
+}
+
+/**
+ * Parse the LP's LIVE net inventory (base-token units, signed: positive =
+ * LP long, negative = LP short) out of a raw matcher-context account.
+ * Unlike the caps this is mutated by every fill, so it must never share
+ * their forever-cache.
+ */
+export function parseMatcherInventory(data: Buffer): bigint | null {
+  const end = CTX_VAMM_OFFSET + CTX_INVENTORY_BASE_OFF + 16;
+  if (data.length < end) return null;
+  return readI128LE(data, CTX_VAMM_OFFSET + CTX_INVENTORY_BASE_OFF);
 }
 
 /**
@@ -90,12 +109,22 @@ function readMatcherContext(data: Buffer): PublicKey | null {
 /** Caps are immutable once initialised, so this cache never expires. */
 const capsCache = new Map<string, MatcherCaps | null>();
 const inflight = new Map<string, Promise<MatcherCaps | null>>();
+/**
+ * The matcher-context ADDRESS is as immutable as the caps (the LP's trailing
+ * matcher config is written once), so cache it too: it turns every live
+ * inventory refresh into ONE getAccountInfo instead of a program scan.
+ */
+const ctxAddressCache = new Map<string, PublicKey>();
 
-async function resolveCaps(
+async function resolveCtxAddress(
   connection: Connection,
   programId: PublicKey,
   slabPk: PublicKey,
-): Promise<MatcherCaps | null> {
+): Promise<PublicKey | null> {
+  const key = `${programId.toBase58()}|${slabPk.toBase58()}`;
+  const cached = ctxAddressCache.get(key);
+  if (cached) return cached;
+
   // The market's LP portfolio holds the matcher config. Curated markets pin it
   // in PLAYGROUND_SLAB_META (one getAccountInfo); everything else scans.
   let matcherCtx: PublicKey | null = null;
@@ -126,6 +155,16 @@ async function resolveCaps(
     }
   }
 
+  if (matcherCtx) ctxAddressCache.set(key, matcherCtx);
+  return matcherCtx;
+}
+
+async function resolveCaps(
+  connection: Connection,
+  programId: PublicKey,
+  slabPk: PublicKey,
+): Promise<MatcherCaps | null> {
+  const matcherCtx = await resolveCtxAddress(connection, programId, slabPk);
   if (!matcherCtx) return null;
 
   const ctxInfo = await connection.getAccountInfo(matcherCtx, "confirmed");
@@ -135,6 +174,28 @@ async function resolveCaps(
   // entirely), so treat it as no cap rather than a cap of zero.
   if (!caps || caps.maxFillAbs === 0n) return null;
   return caps;
+}
+
+/**
+ * Fetch the LP's CURRENT net inventory for this market (base-token units,
+ * signed). Never cached — every fill moves it, and the whole point of reading
+ * it is telling the user how much capacity is left RIGHT NOW. Resolves to
+ * null when the market has no matcher context or the read fails.
+ */
+export async function getMatcherInventory(
+  connection: Connection,
+  programId: PublicKey,
+  slabPk: PublicKey,
+): Promise<bigint | null> {
+  try {
+    const matcherCtx = await resolveCtxAddress(connection, programId, slabPk);
+    if (!matcherCtx) return null;
+    const ctxInfo = await connection.getAccountInfo(matcherCtx, "confirmed");
+    if (!ctxInfo) return null;
+    return parseMatcherInventory(Buffer.from(ctxInfo.data));
+  } catch {
+    return null;
+  }
 }
 
 /**
