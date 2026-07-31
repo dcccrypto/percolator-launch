@@ -96,4 +96,9 @@ export const BLOCKED_SLAB_ADDRESSES: ReadonlySet<string> = new Set<string>([
   "2DDBehzGAKJPzwZXZ9HbcHBEtdkoHPRPaGBDjMCqSAUv",  // unnamed
   "FaNFCmyputbCTvSGGmxe7EU1DyjagtGKf6eYPDTvmdFC",  // unnamed
   "6RobABa7gpPvN8WsoQuXgbKKinpURwGXzUS4NJiYNaPR",  // unnamed
+
+  // ── 2026-07-31: retired after the CATE LP drain (bankrupt LP, permanent
+  // bankruptcy hlock; Percolator launched on the same raw-spot feed) ──
+  "6CFMN29zPgsczCQUjeZZiWxVPDUKN52RJqBLvRsTTERn",  // CATE (bankrupt LP, hlocked)
+  "5erG74dYhhjhB3ReATJmFPh1XRb9MVnUjVgV4BSM21c1",  // Percolator (pre-smoother launch)
 ]);

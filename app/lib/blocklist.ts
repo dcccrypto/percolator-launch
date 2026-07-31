@@ -193,6 +193,17 @@ const HARDCODED_BLOCKED_SLABS: readonly string[] = [
   "2DDBehzGAKJPzwZXZ9HbcHBEtdkoHPRPaGBDjMCqSAUv",  // unnamed
   "FaNFCmyputbCTvSGGmxe7EU1DyjagtGKf6eYPDTvmdFC",  // unnamed
   "6RobABa7gpPvN8WsoQuXgbKKinpURwGXzUS4NJiYNaPR",  // unnamed
+
+  // ── 2026-07-31: retired after the CATE LP drain (see the launch repo's
+  // docs + percolator-oracle-keeper mark-smoother.ts for the full story) ──
+  // CATE's LP was drained to $0 by real on-chain bot churn (two-level ±1.6%
+  // price oscillation) that the engine ratchets into one-way losses; the
+  // market is permanently in bankruptcy hlock (negative_pnl_account_count=1
+  // can never clear), which blocks EVERY user's close and withdraw. Percolator
+  // never traded but was created on the same raw-spot feed; both retired so
+  // the board restarts on the median-smoothed AuthMark keeper.
+  "6CFMN29zPgsczCQUjeZZiWxVPDUKN52RJqBLvRsTTERn",  // CATE (bankrupt LP, hlocked)
+  "5erG74dYhhjhB3ReATJmFPh1XRb9MVnUjVgV4BSM21c1",  // Percolator (pre-smoother launch)
 ];
 
 /**
