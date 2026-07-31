@@ -356,7 +356,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         console.error("[useClosePosition] error:", msg);
-        setError(humanizeError(msg));
+        setError(humanizeError(msg, "trade"));
         setPhase("idle");
         throw e;
       } finally {

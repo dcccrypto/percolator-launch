@@ -44,17 +44,19 @@ export function useMarketFillCap(slabAddress: string): MarketFillLimits | null {
   const [inventoryBase, setInventoryBase] = useState<bigint | null>(null);
 
   useEffect(() => {
+    // Reset on market switch: without this, market B's order briefly
+    // validates against market A's caps and inventory.
+    setCaps(null);
+    setInventoryBase(null);
     if (!programId || !slabAddress) return;
     let cancelled = false;
+    let dispose: (() => void) | null = null;
     let slabPk: PublicKey;
     try {
       slabPk = new PublicKey(slabAddress);
     } catch {
       return; // malformed address — nothing to resolve
     }
-    void getMatcherCaps(connection, programId, slabPk).then((c) => {
-      if (!cancelled) setCaps(c);
-    });
     // Live inventory: one immediate read (pollWhenVisible does NOT tick on
     // start), then the visible-tab poll. In-flight guard so a slow RPC can't
     // stack requests.
@@ -70,11 +72,21 @@ export function useMarketFillCap(slabAddress: string): MarketFillLimits | null {
           fetching = false;
         });
     };
-    refresh();
-    const dispose = pollWhenVisible(refresh, INVENTORY_POLL_MS);
+    // Inventory polling starts ONLY once caps resolve: a market with no
+    // matcher config (v12 slab, mock slab, broken launch) would otherwise
+    // re-run a full getProgramAccounts scan every 20s per mounted instance,
+    // forever, for nothing.
+    void getMatcherCaps(connection, programId, slabPk).then((c) => {
+      if (cancelled) return;
+      setCaps(c);
+      if (c) {
+        refresh();
+        dispose = pollWhenVisible(refresh, INVENTORY_POLL_MS);
+      }
+    });
     return () => {
       cancelled = true;
-      dispose();
+      dispose?.();
     };
   }, [connection, programId, slabAddress]);
 

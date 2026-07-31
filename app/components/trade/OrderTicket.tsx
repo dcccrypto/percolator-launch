@@ -40,7 +40,7 @@ import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { useTrade, prewarmTradeSubmission } from "@/hooks/useTrade";
 import { useMarketFillCap } from "@/hooks/useMarketFillCap";
-import { remainingSideCapacityQ, wouldExceedInventoryCap } from "@/lib/marketCapacity";
+import { remainingSideCapacityQ, wouldExceedInventoryCap, UNLIMITED_CAPACITY } from "@/lib/marketCapacity";
 import { humanizeError, isEngineLockError, withTransientRetry } from "@/lib/errorMessages";
 import { explorerTxUrl, getNetwork } from "@/lib/config";
 import { useUserAccount } from "@/hooks/useUserAccount";
@@ -691,7 +691,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     positionSize > 0n &&
     wouldExceedInventoryCap(fillCaps.inventoryBase, fillCaps.maxInventoryAbs, direction, positionSize);
   const sideCapacityNotional =
-    sideCapacityQ != null && livePriceE6 && livePriceE6 > 0n
+    sideCapacityQ != null && sideCapacityQ !== UNLIMITED_CAPACITY && livePriceE6 && livePriceE6 > 0n
       ? (sideCapacityQ * livePriceE6) / 1_000_000n
       : null;
   const sideCapacityLabel =

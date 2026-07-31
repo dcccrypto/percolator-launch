@@ -9,7 +9,7 @@
  * which would block the EMPTY side and allow the FULL one — cannot survive.
  */
 import { describe, it, expect } from "vitest";
-import { remainingSideCapacityQ, wouldExceedInventoryCap } from "@/lib/marketCapacity";
+import { remainingSideCapacityQ, wouldExceedInventoryCap, UNLIMITED_CAPACITY } from "@/lib/marketCapacity";
 import { parseMatcherCaps, parseMatcherInventory } from "@/lib/matcherCaps";
 
 describe("remainingSideCapacityQ", () => {
@@ -40,8 +40,11 @@ describe("remainingSideCapacityQ", () => {
     expect(remainingSideCapacityQ(-1200n, 1000n, "long")).toBe(0n);
   });
 
-  it("no cap configured (0) → no capacity computed", () => {
-    expect(remainingSideCapacityQ(-800n, 0n, "long")).toBe(0n);
+  it("cap of 0 means UNLIMITED on-chain (vamm v3-compat) — never a block", () => {
+    // Returning 0 here would hard-block every order on a market the matcher
+    // fills without limit. Must be the unlimited sentinel instead.
+    expect(remainingSideCapacityQ(-800n, 0n, "long")).toBe(UNLIMITED_CAPACITY);
+    expect(wouldExceedInventoryCap(-800n, 0n, "long", 10n ** 30n)).toBe(false);
   });
 
   it("the CATE numbers: LP short 202.5B of an 821.5B cap", () => {

@@ -35,12 +35,20 @@ export type TradeSide = "long" | "short";
  * `side` before the LP's net inventory would exceed `maxInventoryAbs`.
  * Ignores the separate per-trade cap — callers combine both.
  */
+/**
+ * Sentinel: `maxInventoryAbs == 0` means UNLIMITED on-chain (vamm.rs
+ * check_inventory_limit v3-compat), NOT zero capacity. Returning 0 here
+ * would hard-block every order on a market that fills fine.
+ */
+export const UNLIMITED_CAPACITY = (1n << 127n) - 1n;
+
 export function remainingSideCapacityQ(
   inventoryBase: bigint,
   maxInventoryAbs: bigint,
   side: TradeSide,
 ): bigint {
-  if (maxInventoryAbs <= 0n) return 0n;
+  if (maxInventoryAbs < 0n) return 0n;
+  if (maxInventoryAbs === 0n) return UNLIMITED_CAPACITY;
   const cap = side === "long" ? maxInventoryAbs + inventoryBase : maxInventoryAbs - inventoryBase;
   return cap > 0n ? cap : 0n;
 }

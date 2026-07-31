@@ -23,10 +23,11 @@
  * `ProgramError::InvalidAccountData` — surfaced to the user as "one of the
  * accounts has unexpected data", which is both wrong and unactionable.
  *
- * These caps are IMMUTABLE: the matcher program has exactly two instructions
- * (MATCHER_CALL, INIT_VAMM) and `process_init` refuses an already-initialised
- * context with AccountAlreadyInitialized. So once read they are cached for the
- * lifetime of the page — no TTL needed.
+ * The caps of a GIVEN context are immutable (the matcher program has exactly
+ * two instructions and `process_init` refuses an already-initialised context)
+ * — but WHICH context a market uses is not: SetMatcherConfig (tag 68) can
+ * re-point or disable the LP's matcher config at any time. Hence the TTL +
+ * failure-driven invalidation below rather than a forever-cache.
  *
  * NOTE the caps are denominated in BASE TOKEN units (the same `sizeQ` units
  * the trade instruction takes), not dollars, so their USD value moves with the
@@ -60,10 +61,16 @@ export interface MatcherCaps {
   maxInventoryAbs: bigint;
 }
 
-/** Read a little-endian u128 as a bigint. */
+/** Read a little-endian u128 as a bigint.
+ *  DataView, NOT Buffer.readBigUInt64LE: in the browser this data is a
+ *  Uint8Array, and Next's webpack Buffer polyfill lacks the BigInt read
+ *  methods (see useTrade.ts readPortfolioMatcherConfig) — a throw here is
+ *  swallowed by the callers' catch-to-null, silently disabling the whole
+ *  caps/capacity/chunking safety layer while Node-side tests stay green. */
 function readU128LE(data: Buffer, offset: number): bigint {
-  const lo = data.readBigUInt64LE(offset);
-  const hi = data.readBigUInt64LE(offset + 8);
+  const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const lo = dv.getBigUint64(offset, true);
+  const hi = dv.getBigUint64(offset + 8, true);
   return (hi << 64n) | lo;
 }
 
@@ -102,19 +109,31 @@ export function parseMatcherCaps(data: Buffer): MatcherCaps | null {
 function readMatcherContext(data: Buffer): PublicKey | null {
   if (data.length < PORTFOLIO_MATCHER_CONFIG_LEN) return null;
   const off = data.length - PORTFOLIO_MATCHER_CONFIG_LEN;
-  if (data.readBigUInt64LE(off + 96) !== 1n) return null; // enabled != 1
+  const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  if (dv.getBigUint64(off + 96, true) !== 1n) return null; // enabled != 1
   return new PublicKey(data.subarray(off + 32, off + 64));
 }
 
-/** Caps are immutable once initialised, so this cache never expires. */
-const capsCache = new Map<string, MatcherCaps | null>();
-const inflight = new Map<string, Promise<MatcherCaps | null>>();
 /**
- * The matcher-context ADDRESS is as immutable as the caps (the LP's trailing
- * matcher config is written once), so cache it too: it turns every live
- * inventory refresh into ONE getAccountInfo instead of a program scan.
+ * Caps and the ctx address are NEARLY immutable — but not actually: the LP
+ * owner can re-point or disable the matcher config at any time via
+ * SetMatcherConfig (tag 68). A forever-cache would then chunk closes by the
+ * WRONG cap (every over-cap close reverts for the rest of the session) and
+ * read inventory from an orphaned context (capacity row frozen). So: a TTL
+ * bounds silent staleness, and invalidateMatcherCaps() heals immediately on
+ * any trade/close failure (mirroring useTrade's account-cache invalidation).
  */
-const ctxAddressCache = new Map<string, PublicKey>();
+const CAPS_TTL_MS = 300_000;
+const capsCache = new Map<string, { caps: MatcherCaps | null; ts: number }>();
+const inflight = new Map<string, Promise<MatcherCaps | null>>();
+const ctxAddressCache = new Map<string, { pk: PublicKey; ts: number }>();
+
+/** Drop cached caps + ctx address for one market — call on trade/close failure. */
+export function invalidateMatcherCaps(programId: PublicKey, slabPk: PublicKey): void {
+  const key = `${programId.toBase58()}|${slabPk.toBase58()}`;
+  capsCache.delete(key);
+  ctxAddressCache.delete(key);
+}
 
 async function resolveCtxAddress(
   connection: Connection,
@@ -123,7 +142,7 @@ async function resolveCtxAddress(
 ): Promise<PublicKey | null> {
   const key = `${programId.toBase58()}|${slabPk.toBase58()}`;
   const cached = ctxAddressCache.get(key);
-  if (cached) return cached;
+  if (cached && Date.now() - cached.ts < CAPS_TTL_MS) return cached.pk;
 
   // The market's LP portfolio holds the matcher config. Curated markets pin it
   // in PLAYGROUND_SLAB_META (one getAccountInfo); everything else scans.
@@ -155,7 +174,7 @@ async function resolveCtxAddress(
     }
   }
 
-  if (matcherCtx) ctxAddressCache.set(key, matcherCtx);
+  if (matcherCtx) ctxAddressCache.set(key, { pk: matcherCtx, ts: Date.now() });
   return matcherCtx;
 }
 
@@ -209,7 +228,8 @@ export function getMatcherCaps(
   slabPk: PublicKey,
 ): Promise<MatcherCaps | null> {
   const key = `${programId.toBase58()}|${slabPk.toBase58()}`;
-  if (capsCache.has(key)) return Promise.resolve(capsCache.get(key)!);
+  const cached = capsCache.get(key);
+  if (cached && Date.now() - cached.ts < CAPS_TTL_MS) return Promise.resolve(cached.caps);
   const existing = inflight.get(key);
   if (existing) return existing;
 
@@ -217,7 +237,7 @@ export function getMatcherCaps(
     .then((caps) => {
       // Only cache a successful read: a transient RPC failure must not pin
       // "no cap" for the rest of the session.
-      if (caps) capsCache.set(key, caps);
+      if (caps) capsCache.set(key, { caps, ts: Date.now() });
       return caps;
     })
     .catch(() => null)

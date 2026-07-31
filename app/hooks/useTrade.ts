@@ -30,6 +30,7 @@ import { applyConfirmedFill, getPortfolioRawSnapshot, isLpPortfolio, makePortfol
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { detectOracleMode } from "@/lib/oraclePrice";
 import { assertKnownProgram, assertCanonicalMatcher } from "@/lib/programAllowlist";
+import { invalidateMatcherCaps } from "@/lib/matcherCaps";
 import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
 import { computeLimitPriceE6 } from "@/lib/slippage";
 
@@ -518,6 +519,13 @@ export function useTrade(slabAddress: string) {
         if (legs.reduce((a, b) => a + b, 0n) !== params.size) {
           throw new Error("Trade leg split does not sum to the requested size");
         }
+        // BatchTradeCpi is a v17 instruction (tag 67); the v12 wrapper has no
+        // such tag. Unreachable today (caps never resolve on v12 slabs, so
+        // callers can't produce legs), but nothing structural stops a future
+        // caller — fail loudly rather than send v12 a tx it can't decode.
+        if (legs.length > 1 && !isV17Market) {
+          throw new Error("Multi-leg trades are only supported on v17 markets");
+        }
 
         const tradeIx = buildIx({
           programId,
@@ -627,6 +635,10 @@ export function useTrade(slabAddress: string) {
         if (wallet.publicKey && slabProgramId) {
           try {
             invalidateV17TradeAccounts(slabProgramId, new PublicKey(slabAddress), wallet.publicKey);
+            // Same reasoning for the caps/ctx cache: the failure may be a
+            // re-pointed matcher config, and a stale cap re-fails every
+            // retry with the same wrong leg split.
+            invalidateMatcherCaps(slabProgramId, new PublicKey(slabAddress));
           } catch { /* malformed address — nothing cached */ }
         }
         const msg = e instanceof Error ? e.message : String(e);

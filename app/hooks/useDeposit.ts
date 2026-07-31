@@ -24,6 +24,7 @@ import {
   deriveVaultAuthority,
 } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
+import { isBlockedSlab } from "@/lib/blocklist";
 import { getPortfolioRawSnapshot, isLpPortfolio, makePortfolioScanKey } from "@/lib/userAccountScan";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { assertKnownProgram } from "@/lib/programAllowlist";
@@ -106,6 +107,17 @@ export function useDeposit(slabAddress: string) {
       try {
         if (!wallet.publicKey || !mktConfig || !slabProgramId)
           throw new Error("Wallet not connected or market not loaded");
+        // Retired/blocklisted market: the market pages are hidden from
+        // discovery, but the trade page still renders on a direct URL — and a
+        // deposit into a retired market can be UNRECOVERABLE (a market in
+        // bankruptcy hlock rejects every withdrawal; that is exactly how CATE
+        // died). Withdrawals stay ungated — money must always be able to
+        // leave — but no new money gets in.
+        if (isBlockedSlab(slabAddress)) {
+          throw new Error(
+            "This market has been retired — deposits are disabled. Existing funds can still be withdrawn where the market allows it.",
+          );
+        }
         // Defense-in-depth: refuse to build a tx whose programId is not in
         // our deployed allowlist, even if SlabProvider somehow surfaced one
         // (e.g. a future code path mutates programId post-load, or a future
