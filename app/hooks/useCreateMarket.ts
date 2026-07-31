@@ -690,7 +690,13 @@ function buildMarketRegistrationPayload(args: {
     // Admin-oracle markets on devnet are cranked by the shared crank wallet;
     // otherwise the deployer is its own oracle authority. (deployer === the
     // connected wallet, so this matches the former walletPk.toBase58() literal.)
-    oracle_authority: isAdminOracle
+    //
+    // A "keeper" market counts here. On devnet it is created in AUTH_MARK/admin
+    // mode and its oracle authority is DELEGATED to the keeper — that is what
+    // the mode means. Testing `isAdminOracle` alone (oracleMode === "admin")
+    // excluded exactly those markets, so the row recorded oracle_authority=null
+    // for the ones the keeper actually drives. Fauci's row shows the symptom.
+    oracle_authority: (isAdminOracle || oracleMode === "keeper")
       ? (isDevnetEnv && getConfig().crankWallet ? getConfig().crankWallet : deployer)
       : null,
     initial_price_e6: params.initialPriceE6.toString(),
@@ -1025,7 +1031,15 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       data: encodeTopUpInsurance({ amount: params.insuranceAmount.toString() }),
     });
     const crankKeys = buildAccountMetas(ACCOUNTS_PERMISSIONLESS_CRANK_BASE, [walletPk, slabPk, lpPortfolioKp.publicKey]);
-    if (!isAdminOracle && !isHyperpOracle) {
+    // ONLY a pyth market carries a Pyth push-oracle account on the crank.
+    //
+    // This used to be `!isAdminOracle && !isHyperpOracle`, which is TRUE for a
+    // keeper market — and a keeper market's `oracleFeed` is the mainnet DEX POOL
+    // address, not a Pyth hex feed id. So every keeper launch derived a
+    // push-oracle PDA from a pool address and appended that garbage account to
+    // its crank. Keeper markets are AUTH_MARK/admin-mode on chain with the
+    // authority delegated to the crank wallet; they have no Pyth account at all.
+    if (oracleMode === "pyth") {
       crankKeys.push({ pubkey: derivePythPushOraclePDA(params.oracleFeed)[0], isSigner: false, isWritable: false });
     }
     const crankIx = buildIx({
@@ -2965,8 +2979,12 @@ export function useCreateMarket() {
               const crankKeys = buildAccountMetas(ACCOUNTS_PERMISSIONLESS_CRANK_BASE, [
                 wallet.publicKey, slabPk, crankPortfolioPk,
               ]);
-              // For Pyth mode, append oracle feed account as tail
-              if (!isAdminOracle && !isHyperpOracle) {
+              // ONLY a pyth market carries a Pyth oracle tail. Same bug as the
+              // batched path: `!isAdminOracle && !isHyperpOracle` is TRUE for a
+              // keeper market, whose oracleFeed is the mainnet DEX POOL address
+              // rather than a Pyth feed id — so this derived a push-oracle PDA
+              // from a pool address and appended that account to the crank.
+              if (oracleMode === "pyth") {
                 crankKeys.push({ pubkey: derivePythPushOraclePDA(params.oracleFeed)[0], isSigner: false, isWritable: false });
               }
               finalInstructions.push(buildIx({ programId, keys: crankKeys, data: crankData }));

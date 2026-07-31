@@ -75,3 +75,28 @@ describe("useCreateMarket fresh batched registration", () => {
     expect(calls.length).toBe(1);
   });
 });
+
+describe("keeper-market oracle wiring", () => {
+  it("attaches a Pyth oracle account ONLY on the pyth path", () => {
+    // A keeper market's oracleFeed is the mainnet DEX POOL address, not a Pyth
+    // hex feed id. The old gate (!isAdminOracle && !isHyperpOracle) was TRUE for
+    // keeper markets, so every keeper launch derived a push-oracle PDA from a
+    // pool address and appended that account to its crank.
+    expect(hookSource).not.toMatch(
+      /if \(!isAdminOracle && !isHyperpOracle\) \{\s*crankKeys\.push/,
+    );
+    expect(hookSource).toMatch(
+      /if \(oracleMode === "pyth"\) \{\s*crankKeys\.push/,
+    );
+  });
+
+  it("records the crank wallet as oracle_authority for keeper markets", () => {
+    // On devnet a keeper market is created in AUTH_MARK/admin mode with its
+    // authority DELEGATED to the keeper. Gating on isAdminOracle alone
+    // (oracleMode === "admin") excluded exactly those markets, writing
+    // oracle_authority=null for the ones the keeper drives.
+    expect(hookSource).toMatch(
+      /oracle_authority: \(isAdminOracle \|\| oracleMode === "keeper"\)/,
+    );
+  });
+});
