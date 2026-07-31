@@ -349,12 +349,32 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   //
   // On devnet the keeper IS the price source, so a market with no supported
   // pool has nothing to price it. Refuse the launch instead of producing
-  // another orphan. `oracleType === "keeper"` is set (in the quickLaunch mapping
-  // above) precisely when a supported pool was detected, so it is the right
-  // signal — it also covers the Raydium block, since a Raydium-only token
-  // resolves to no supported pool and lands on "admin".
+  // another orphan. A supported pool was detected exactly when the oracle
+  // resolves to "keeper", so that is the right signal — it also covers the
+  // Raydium block, since a Raydium-only token resolves to no supported pool and
+  // lands on "admin".
   const isDevnetEnv = getNetwork() === "devnet";
-  const registrable = !isDevnetEnv || wizard.oracleType === "keeper";
+  // The oracle this launch WILL use, derived straight from detection.
+  //
+  // It must NOT be read off `wizard.oracleType`. That field is still "admin"
+  // (its initial default) for the whole of Step 3, because the only thing that
+  // ever writes it is handleParametersContinue — the Continue handler itself.
+  // Gating Continue on the value Continue would set deadlocked the wizard on
+  // devnet: registrable was false, so the button never enabled, so the click
+  // that would have set "keeper" could never fire. Every devnet launch was
+  // blocked, with no message, from the moment the gate landed.
+  //
+  // Kept as ONE derivation, shared with handleParametersContinue below, so the
+  // gate and the value actually written cannot drift apart again.
+  const resolvedOracleType: "pyth" | "hyperp_ema" | "admin" | "keeper" =
+    quickLaunch.oracleType === "pyth" && quickLaunch.pythFeedId
+      ? "pyth"
+      : quickLaunch.oracleType === "hyperp_ema" && quickLaunch.dexPoolAddress
+        ? isDevnetEnv
+          ? "keeper"
+          : "hyperp_ema"
+        : "admin";
+  const registrable = !isDevnetEnv || resolvedOracleType === "keeper";
   const notRegistrableReason = registrable
     ? null
     : quickLaunch.error ??
@@ -384,8 +404,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     // it is what converts the LP's notional caps into the TOKEN counts written
     // once at creation, so launching without a real one permanently mis-sizes
     // the market's per-trade cap. Stops the flow here rather than at the final
-    // launch alert.
-    (wizard.oracleType !== "admin" || !!wizard.adminPrice) &&
+    // launch alert. Same reason as the gate above: read the RESOLVED oracle, not
+    // wizard.oracleType, which is still the "admin" default while Step 3 renders.
+    (resolvedOracleType !== "admin" || !!wizard.adminPrice) &&
     // Never let an unregistrable market reach the launch button.
     registrable;
   // BUG 1 fix: rent estimate must be sized off the actual v17 slab length
@@ -554,53 +575,44 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
 
   // Quick Launch: user confirms slab tier → apply oracle from hook → jump to review (step 4)
   /**
-   * Leaving Parameters -> Review. Applies the oracle that useQuickLaunch
-   * auto-detected; this used to hang off the slab-tier step's continue button.
-   * The detection logic is unchanged — only its trigger point moved.
+   * Leaving Parameters -> Review. Writes the oracle that useQuickLaunch
+   * auto-detected into wizard state; this used to hang off the slab-tier step's
+   * continue button. The detection logic is unchanged — only its trigger point
+   * moved.
+   *
+   * WHICH oracle is decided by `resolvedOracleType` (see the registrability gate
+   * above), NOT re-derived here. This handler used to own that decision, which
+   * is why the gate could disagree with it and lock the wizard shut. One
+   * derivation, two readers.
+   *
+   * PERC-470: on mainnet a detected DEX pool maps to hyperp_ema; on devnet it
+   * maps to "keeper", which delegates oracle_authority to our keeper service —
+   * it reads the mainnet pool and pushes prices via PushAuthMark.
    */
   const handleParametersContinue = useCallback(() => {
     setCompletedSteps((prev) => new Set(prev).add(2));
     setWizard((prev) => {
-      const base = { ...prev, step: 3 as WizardStep };
-      if (quickLaunch.oracleType === "pyth" && quickLaunch.pythFeedId) {
-        return {
-          ...base,
-          oracleType: "pyth" as const,
-          oracleFeed: quickLaunch.pythFeedId,
-          adminPrice: quickLaunch.adminPrice,
-        };
-      }
-      // PERC-470: Hyperp EMA — auto-detected DEX pool as oracle (mainnet only)
-      // On devnet: DEX pool detected → use keeper oracle instead (AUTH_MARK, keeper pushes from mainnet)
-      if (quickLaunch.oracleType === "hyperp_ema" && quickLaunch.dexPoolAddress) {
-        // Devnet playground: keeper oracle delegates oracle_authority to our keeper service
-        // which reads the mainnet DEX pool and pushes prices via PushAuthMark.
-        if (isDevnet) {
+      // adminPrice is carried on every branch: it is the resolved opening price
+      // and sizes the LP's trade caps regardless of which oracle settles trades.
+      const base = { ...prev, step: 3 as WizardStep, adminPrice: quickLaunch.adminPrice };
+      switch (resolvedOracleType) {
+        case "pyth":
+          return { ...base, oracleType: "pyth" as const, oracleFeed: quickLaunch.pythFeedId! };
+        case "keeper":
+        case "hyperp_ema":
           return {
             ...base,
-            oracleType: "keeper" as const,
-            oracleFeed: quickLaunch.dexPoolAddress,
-            adminPrice: quickLaunch.adminPrice,
+            oracleType: resolvedOracleType,
+            oracleFeed: quickLaunch.dexPoolAddress!,
             dexPool: quickLaunch.poolInfo ?? null,
           };
-        }
-        return {
-          ...base,
-          oracleType: "hyperp_ema" as const,
-          oracleFeed: quickLaunch.dexPoolAddress,
-          adminPrice: quickLaunch.adminPrice,
-          dexPool: quickLaunch.poolInfo ?? null,
-        };
+        default:
+          // Admin oracle — unknown token, or no supported pool. On devnet the
+          // registrability gate stops this reaching Review at all.
+          return { ...base, oracleType: "admin" as const, oracleFeed: "" };
       }
-      // Admin oracle — devnet-only or unknown token
-      return {
-        ...base,
-        oracleType: "admin" as const,
-        oracleFeed: "",
-        adminPrice: quickLaunch.adminPrice,
-      };
     });
-  }, [quickLaunch]);
+  }, [quickLaunch, resolvedOracleType]);
 
   // Mode change
 
@@ -1161,12 +1173,16 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             insuranceAmount={wizard.insuranceAmount}
             onInsuranceAmountChange={setInsuranceAmount}
             adminPrice={wizard.adminPrice}
-            isAdminOracle={wizard.oracleType === "admin"}
+            // Resolved, not wizard.oracleType: the latter is still its "admin"
+            // default until Continue is clicked, so it mislabelled every keeper
+            // market as admin-priced.
+            isAdminOracle={resolvedOracleType === "admin"}
             tokenSymbol={collateralSymbol}
             walletBalance={walletBalanceDisplay}
             onContinue={handleParametersContinue}
             onBack={goBack}
             canContinue={step3Valid}
+            blockedReason={notRegistrableReason}
           />
         )}
 

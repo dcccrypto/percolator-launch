@@ -25,6 +25,14 @@ interface StepParametersProps {
   onContinue: () => void;
   onBack: () => void;
   canContinue: boolean;
+  /**
+   * Why Continue is disabled, when the reason is a property of the TOKEN rather
+   * than of a field on this form (e.g. no supported DEX pool, so the keeper
+   * could never price the market). Every other blocker here is visible at the
+   * field that causes it; this one has no field, so without it the user just
+   * gets a dead button and no way to work out why. Null when not blocked.
+   */
+  blockedReason?: string | null;
 }
 
 /**
@@ -51,6 +59,7 @@ export const StepParameters: FC<StepParametersProps> = ({
   onContinue,
   onBack,
   canContinue,
+  blockedReason = null,
 }) => {
   const feeConflict = tradingFeeBps >= initialMarginBps;
   const isMainnet = getNetwork() === "mainnet";
@@ -195,6 +204,19 @@ export const StepParameters: FC<StepParametersProps> = ({
           Minimum: 100 tokens
         </p>
       </div>
+
+      {/* Why Continue is dead, when the cause is the token and not a field. */}
+      {blockedReason && (
+        <div
+          role="alert"
+          className="border border-[var(--short)]/40 bg-[var(--short)]/[0.06] px-3 py-2.5 text-[11px] leading-relaxed text-[var(--text-secondary)]"
+        >
+          <span className="font-medium uppercase tracking-[0.1em] text-[var(--short)]">
+            Cannot launch
+          </span>
+          <p className="mt-1">{blockedReason}</p>
+        </div>
+      )}
 
       {/* Navigation */}
       <div className="flex items-center gap-3">
