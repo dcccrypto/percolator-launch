@@ -5,6 +5,7 @@ import DashboardPage from "@/app/dashboard/page";
 import WalletPage from "@/app/wallet/page";
 import MyMarketsPage from "@/app/my-markets/page";
 import { PortfolioPositionsView } from "@/components/portfolio/PortfolioPositionsView";
+import { RetiredHoldings } from "@/components/portfolio/RetiredHoldings";
 
 /**
  * Portfolio hub. Consolidates the four account surfaces (Overview / Positions
@@ -75,7 +76,15 @@ export default function PortfolioHubPage() {
       </div>
 
       {tab === "overview" && <DashboardPage />}
-      {tab === "positions" && <PortfolioPositionsView />}
+      {tab === "positions" && (
+        <>
+          <PortfolioPositionsView />
+          {/* Funds in RETIRED (blocklisted) markets — the filtered portfolio
+              universe above cannot show them by design; this section is the
+              audit fix that keeps them visible to their owners. */}
+          <RetiredHoldings />
+        </>
+      )}
       {tab === "wallet" && <WalletPage />}
       {tab === "markets" && <MyMarketsPage />}
     </div>
