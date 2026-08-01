@@ -1,5 +1,6 @@
 /**
- * The create wizard is a single linear flow: Token → Parameters → Review.
+ * The create wizard is a single linear flow: Token → Market (2-step Control
+ * Room, #2404; was Token → Parameters → Review).
  *
  * Replaces gh1615-wizard-step-header-quick-mode.test.ts, which asserted the
  * Quick/Manual step-header remapping. That file re-implemented the wizard's
@@ -25,11 +26,13 @@ import { render, screen } from "@testing-library/react";
 import { WizardProgress } from "@/components/create/WizardProgress";
 
 describe("create wizard — single linear flow", () => {
-  it("renders exactly three steps by default", () => {
+  it("renders exactly the two Control Room steps by default", () => {
     render(<WizardProgress currentStep={1} completedSteps={new Set()} />);
-    for (const label of ["Token", "Parameters", "Review"]) {
+    for (const label of ["Token", "Market"]) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
+    // The old third step is gone — parameters and review are one screen now.
+    expect(screen.queryByText("Review")).toBeNull();
   });
 
   it("no longer offers Oracle or Slab Tier as steps", () => {
@@ -39,10 +42,10 @@ describe("create wizard — single linear flow", () => {
     expect(screen.queryByText("Slab Tier")).toBeNull();
   });
 
-  it("reports 'of 3' rather than the old 'of 4'", () => {
+  it("never reports the old 3- or 4-step totals", () => {
     render(<WizardProgress currentStep={2} completedSteps={new Set([1])} />);
-    // Mobile counter renders the total; assert 3 appears and 4 does not.
     expect(screen.queryByText(/of\s*4/i)).toBeNull();
+    expect(screen.queryByText(/of\s*3/i)).toBeNull();
   });
 
   it("accepts a step count other than four (was hard-typed to a 4-tuple)", () => {

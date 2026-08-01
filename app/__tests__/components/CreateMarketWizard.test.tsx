@@ -192,7 +192,6 @@ describe("LaunchSuccess", () => {
     tokenSymbol: "SOL",
     tradingFeeBps: 30,
     maxLeverage: 10,
-    slabLabel: "Small",
     marketAddress: "FakeSlab11111111111111111111111111111111111",
     txSigs: ["sig1", "sig2", "sig3", "sig4", "sig5"],
     onDeployAnother: vi.fn(),
@@ -248,10 +247,11 @@ describe("LaunchSuccess", () => {
 
   it("shows market preview card with parameters", () => {
     render(<LaunchSuccess {...defaultProps} />);
-    // Fee, leverage, and slab tier are shown in the market preview
+    // Fee, leverage, and slab capacity are shown in the market preview.
+    // v17 slabs have no tier — see LaunchSuccess.tsx's "Max capacity" comment.
     expect(screen.getByText(/30 bps/)).toBeDefined();
     expect(screen.getByText(/10x/)).toBeDefined();
-    expect(screen.getByText(/Small/)).toBeDefined();
+    expect(screen.getByText(/Max capacity/)).toBeDefined();
   });
 
   it("copy button changes to checkmark on click", async () => {

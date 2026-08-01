@@ -131,4 +131,5 @@ app/.env.local.bak*
 .env.local.bak*
 **/.env*.bak*
 app/.superpowers/
+# brainstorming mockups (local only)
 .superpowers/
