@@ -66,9 +66,43 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
     if (!mockMode && walletConnected) prewarmTxLanding(connection);
   }, [connection, mockMode, walletConnected]);
   const [lastSig, setLastSig] = useState<string | null>(null);
-  const [walletBalance, setWalletBalance] = useState<bigint | null>(mockMode ? 500_000_000n : null);
+
+  type WalletBalanceSnapshot = {
+    scopeKey: string;
+    amount: bigint | null;
+    decimals: number | null;
+  };
+
+  const walletBalanceScopeKey =
+    publicKey && mktConfig?.collateralMint
+      ? `${publicKey.toBase58()}:${mktConfig.collateralMint.toBase58()}`
+      : null;
+
+  const [walletBalanceSnapshot, setWalletBalanceSnapshot] = useState<WalletBalanceSnapshot | null>(
+    null,
+  );
+
+  const walletBalance = mockMode
+    ? 500_000_000n
+    : walletBalanceSnapshot?.scopeKey === walletBalanceScopeKey
+      ? walletBalanceSnapshot.amount
+      : null;
+
   const maxRawRef = useRef<bigint | null>(null);
-  const [onChainDecimals, setOnChainDecimals] = useState<number | null>(null);
+
+  // A typed or Max-derived amount belongs to the wallet/mint scope that
+  // produced it. Clear both representations immediately after that scope
+  // changes so a replacement wallet cannot submit the previous value.
+  useEffect(() => {
+    maxRawRef.current = null;
+    setAmount("");
+  }, [walletBalanceScopeKey]);
+
+  const onChainDecimals =
+    !mockMode && walletBalanceSnapshot?.scopeKey === walletBalanceScopeKey
+      ? walletBalanceSnapshot.decimals
+      : null;
+
   const decimals = onChainDecimals ?? tokenMeta?.decimals ?? 6;
 
   // Keep the mode-specific MAX raw value from leaking across Deposit/Withdraw.
@@ -76,33 +110,68 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
   // both the display amount and the raw ref before the opposite action can submit.
   useEffect(() => {
     setMode(initialMode);
-    setAmount("");
+    setAmount('');
     maxRawRef.current = null;
   }, [initialMode]);
 
-  const switchMode = (nextMode: "deposit" | "withdraw") => {
+  const switchMode = (nextMode: 'deposit' | 'withdraw') => {
     if (nextMode === mode) return;
     maxRawRef.current = null;
-    setAmount("");
+    setAmount('');
     setMode(nextMode);
   };
   useEffect(() => {
-    if (!publicKey || !mktConfig?.collateralMint) { setWalletBalance(null); setOnChainDecimals(null); return; }
+    if (mockMode) return;
+
+    if (!publicKey || !mktConfig?.collateralMint || !walletBalanceScopeKey) {
+      setWalletBalanceSnapshot(null);
+      return;
+    }
+
+    const requestScopeKey = walletBalanceScopeKey;
     let cancelled = false;
+
+    // Immediately invalidate a snapshot owned by a different wallet or mint.
+    // Same-scope refreshes retain their verified value while a post-transaction
+    // balance refresh is pending.
+    setWalletBalanceSnapshot((current) =>
+      current?.scopeKey === requestScopeKey
+        ? current
+        : {
+            scopeKey: requestScopeKey,
+            amount: null,
+            decimals: null,
+          },
+    );
+
     (async () => {
       try {
         const ata = getAssociatedTokenAddressSync(mktConfig.collateralMint, publicKey);
+
         const info = await connection.getTokenAccountBalance(ata);
+
         if (!cancelled && info.value.amount) {
-          setWalletBalance(BigInt(info.value.amount));
-          if (info.value.decimals !== undefined) {
-            setOnChainDecimals(info.value.decimals);
-          }
+          setWalletBalanceSnapshot({
+            scopeKey: requestScopeKey,
+            amount: BigInt(info.value.amount),
+            decimals: info.value.decimals ?? null,
+          });
         }
-      } catch { if (!cancelled) { setWalletBalance(null); setOnChainDecimals(null); } }
+      } catch {
+        if (!cancelled) {
+          setWalletBalanceSnapshot({
+            scopeKey: requestScopeKey,
+            amount: null,
+            decimals: null,
+          });
+        }
+      }
     })();
-    return () => { cancelled = true; };
-  }, [publicKey, mktConfig?.collateralMint, connection, lastSig]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [mockMode, publicKey, mktConfig?.collateralMint, walletBalanceScopeKey, connection, lastSig]);
 
   // Pre-fill deposit: the FIRST time this card is open for a brand-new
   // (0-capital) account with a known wallet balance, default the amount
@@ -248,6 +317,8 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
   const freeMargin = capital > lockedMargin ? capital - lockedMargin : 0n;
   const loading = mode === "deposit" ? depositLoading : withdrawLoading;
   const error = mode === "deposit" ? depositError : withdrawError;
+  const isDepositBalanceUnverified =
+    !mockMode && mode === "deposit" && walletBalance === null;
 
   let parsedAmount: bigint = 0n;
   let parseError: string | null = null;
@@ -271,7 +342,7 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
     : null;
 
   async function handleSubmit() {
-    if (!amount || !userAccount || validationError) return;
+    if (!amount || !userAccount || validationError || isDepositBalanceUnverified) return;
     if (mockMode) { setAmount(""); return; }
     try {
       const amtNative = maxRawRef.current ?? parseHumanAmount(amount, decimals);
@@ -408,7 +479,7 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
 
       <button
         onClick={handleSubmit}
-        disabled={loading || !amount || !!validationError}
+        disabled={loading || !amount || !!validationError || isDepositBalanceUnverified}
         className={`w-full rounded-none py-2 text-[10px] font-medium uppercase tracking-[0.1em] hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:cursor-not-allowed disabled:opacity-50 ${mode === "deposit" ? "bg-[var(--accent)] text-white hover:brightness-110" : "bg-[var(--warning)] text-[var(--bg)] hover:brightness-110"}`}
       >
         {loading ? "Sending..." : validationError ? validationError : mode === "deposit" ? `Deposit ${symbol}` : `Withdraw ${symbol}`}
