@@ -276,11 +276,75 @@ jobs:
       - name: Run security tests (api)
         run: pnpm --filter @percolator/api test
 
+  # The app's own suite (2702 tests). Every other test job above is gated on
+  # `packages/*`, which no longer exists on playground or main — so before this
+  # job, CI ran no tests at all while ✅ Merge Gate still reported green (#2447).
+  #
+  # NON-BLOCKING ON PURPOSE (`continue-on-error`). Clean playground currently has
+  # 95 failing tests across 28 files; making this a hard gate on day one would
+  # wall off every open PR for failures none of them introduced. This lands the
+  # measurement first — the number becomes visible in the job summary on every
+  # PR. Flipping it to blocking is the follow-up once the suite is green, and
+  # is the whole point of landing it: see #2447.
+  app-tests:
+    name: App Tests (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup pnpm
+        run: npm install -g pnpm@9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `pnpm test` is `vitest run`. Tee so the tail lands in the step summary
+      # even on failure — the count is the deliverable here, not the exit code.
+      - name: Run app test suite
+        id: run
+        run: |
+          set -o pipefail
+          cd app && pnpm test 2>&1 | tee /tmp/app-tests.log
+
+      - name: Summarise results
+        if: always()
+        run: |
+          {
+            echo "### App test suite (\`cd app && pnpm test\`)"
+            echo
+            # Strip ANSI *before* matching: vitest emits the colour escape
+            # ahead of the leading whitespace ("\e[2m Test Files"), so an
+            # anchored ^[[:space:]]* never matches the raw line.
+            counts="$(sed 's/\x1b\[[0-9;]*m//g' /tmp/app-tests.log 2>/dev/null \
+              | grep -E '^[[:space:]]*(Test Files|Tests)[[:space:]]' || true)"
+            if [ -n "$counts" ]; then
+              printf '%s\n' "$counts" | sed 's/^/    /'
+            else
+              echo "    Suite did not reach a result line — see the job log."
+            fi
+            echo
+            if [ "${{ steps.run.outcome }}" = "success" ]; then
+              echo "Suite is green. It can now be made blocking — see #2447."
+            else
+              echo "Suite is red. This job is non-blocking, so it does NOT gate this PR (#2447)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
   type-check:
     name: Type Check
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -312,9 +376,29 @@ jobs:
     if: ${{ always() && github.event_name == 'pull_request' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
 
     steps:
-      - name: All checks passed
+      # This gate reports what actually ran. It previously printed "All test
+      # suites passed" unconditionally — but four of its five dependencies are
+      # permanently skipped (no `packages/*`), so that line certified nothing
+      # and reviewers reasonably read the green tick as "tests passed" (#2447).
+      # Skipped still does not fail the gate; it is just no longer reported as
+      # a pass. `app-tests` is deliberately NOT in `needs`: it is non-blocking,
+      # and depending on it would put this gate's outcome at the mercy of
+      # continue-on-error result semantics for no gain. Read its own job
+      # summary for the real pass/fail count.
+      - name: Report what actually ran
         run: |
-          echo "✅ All test suites passed (skipped jobs treated as passing)"
-          echo "✅ Type checking passed"
-          echo "✅ Security checks passed"
-          echo "🚀 Ready to merge"
+          report() {
+            case "$2" in
+              success) echo "✅ $1: passed" ;;
+              skipped) echo "⏭️  $1: SKIPPED — this check certifies nothing" ;;
+              *)       echo "⚠️  $1: $2" ;;
+            esac
+          }
+          report "Unit Tests"        "${{ needs.unit-tests.result }}"
+          report "Integration Tests" "${{ needs.integration-tests.result }}"
+          report "E2E Tests"         "${{ needs.e2e-tests.result }}"
+          report "Security Tests"    "${{ needs.security-tests.result }}"
+          report "Type Check"        "${{ needs.type-check.result }}"
+          echo "ℹ️  App Tests: non-blocking — see its job summary for pass/fail counts"
+          echo
+          echo "No required job failed. Skipped jobs are not evidence of passing tests."
