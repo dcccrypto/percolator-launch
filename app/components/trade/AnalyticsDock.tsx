@@ -1,6 +1,6 @@
 "use client";
 
-import { FC, useCallback, useRef, useState } from "react";
+import { FC, useCallback, useEffect, useRef, useState } from "react";
 import { FEE_SPLIT } from "@percolatorct/sdk";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
@@ -292,11 +292,40 @@ export const AnalyticsDock: FC<{ slab: string }> = ({ slab }) => {
     closeTimer.current = setTimeout(() => setActive(null), 140);
   }, [cancelClose]);
 
+  // This dock is `position: fixed` at the bottom of the viewport, so when the
+  // page is scrolled to the end it sits directly on top of the site footer —
+  // covering the footer's links AND making its own tabs collide with them
+  // (both go "dead"). Watch the footer with an IntersectionObserver and, while
+  // any of it is on screen, slide + fade the dock out of the way (with
+  // pointer-events off so clicks reach the footer); restore it the moment the
+  // footer scrolls back off screen. Both transitions ride the CSS transition
+  // on the dock below, so it's smooth in and out.
+  const [footerVisible, setFooterVisible] = useState(false);
+  useEffect(() => {
+    const footer = document.querySelector("footer");
+    if (!footer) return;
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        setFooterVisible(entry.isIntersecting);
+        // Don't leave a hover panel floating in mid-air as the dock slides out.
+        if (entry.isIntersecting) setActive(null);
+      },
+      { threshold: 0 },
+    );
+    io.observe(footer);
+    return () => io.disconnect();
+  }, []);
+
   return (
     // Desktop-only status bar (self-hides < lg, where the mobile bars live).
     // A thin baseline that reads as the terminal's status bar; the interactive
     // part is a left-aligned segmented control matching the site's own toggles.
-    <div className="fixed inset-x-0 bottom-0 z-40 hidden h-9 border-t border-[var(--border)] bg-[var(--bg)]/95 backdrop-blur-sm lg:block">
+    <div
+      aria-hidden={footerVisible || undefined}
+      className={`fixed inset-x-0 bottom-0 z-40 hidden h-9 border-t border-[var(--border)] bg-[var(--bg)]/95 backdrop-blur-sm transition-[opacity,transform] duration-200 ease-out lg:block ${
+        footerVisible ? "pointer-events-none translate-y-full opacity-0" : "translate-y-0 opacity-100"
+      }`}
+    >
       {/* pl clears the fixed MusicPlayer button in the bottom-left corner */}
       <div className="mx-auto flex h-full max-w-[1920px] items-center pl-16 pr-4">
         {/* left: link out to the full analytics page */}
