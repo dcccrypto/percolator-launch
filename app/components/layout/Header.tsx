@@ -63,7 +63,7 @@ const mobileGroupsAll = [
   {
     label: "Menu",
     items: [
-      { href: "/trade", label: "Trade" },
+      { href: "/markets", label: "Trade" },
       ...primaryLinks,
       { href: "/portfolio", label: "Portfolio" },
     ],
@@ -189,13 +189,17 @@ export const Header: FC = () => {
           <nav className="hidden items-center gap-0.5 md:flex" aria-label="Main navigation">
             {!isWaitlistHost && (
               <>
-                {/* Trade — filled primary CTA into the terminal. */}
+                {/* Trade — filled primary CTA into the markets browser (was
+                    /trade, which auto-redirected into one default market;
+                    users expect it to land on the full markets list). Stays
+                    highlighted across the whole trade flow: the browser
+                    (/markets) and the terminal (/trade/:slab). */}
                 <Link
-                  href="/trade"
-                  aria-label="Trade terminal"
-                  aria-current={pathname === "/trade" || pathname.startsWith("/trade/") ? "page" : undefined}
+                  href="/markets"
+                  aria-label="Trade — browse all markets"
+                  aria-current={pathname.startsWith("/markets") || pathname.startsWith("/trade") ? "page" : undefined}
                   className={`flex min-h-8 items-center rounded-sm px-3 text-[13px] font-semibold text-[var(--text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)] ${
-                    pathname === "/trade" || pathname.startsWith("/trade/")
+                    pathname.startsWith("/markets") || pathname.startsWith("/trade")
                       ? "bg-[var(--accent)]/25"
                       : "bg-[var(--accent)]/15 hover:bg-[var(--accent)]/25"
                   }`}
