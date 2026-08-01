@@ -54,7 +54,14 @@ vi.mock("@privy-io/react-auth/solana", () => ({
   useFundWallet: () => ({ fundWallet: vi.fn() }),
 }));
 
-import { ConnectButton } from "@/components/wallet/ConnectButton";
+/**
+ * The Privy-backed behaviour lives in ConnectButtonPrivyInner — ConnectButton
+ * itself is only a `dynamic(ssr:false)` shell that keeps @privy-io/react-auth
+ * out of the shared bundle. Rendering the shell in jsdom yields its "Loading
+ * wallet" placeholder forever (the dynamic import never resolves), so these
+ * assert against the inner component, where the behaviour actually is.
+ */
+import { ConnectButtonPrivyInner as ConnectButton } from "@/components/wallet/ConnectButtonPrivyInner";
 
 describe("ConnectButton", () => {
   beforeEach(() => {
