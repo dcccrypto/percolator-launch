@@ -47,7 +47,14 @@ describe("Header", () => {
   // NavDropdown component, just the group that survived.
   it("renders the flat top-level links", () => {
     render(<Header />);
-    expect(screen.getByRole("link", { name: /Trade terminal/i })).toHaveAttribute("href", "/trade");
+    // The Trade CTA points at the markets BROWSER, not a default market:
+    // /trade auto-redirected into one arbitrary slab, so a42d9ebd repointed it
+    // at /markets and relabelled it accordingly. Matching the full label rather
+    // than a bare /Trade/i keeps this from also matching the Portfolio/Earn
+    // links or the mobile menu's own "Trade" entry.
+    expect(
+      screen.getByRole("link", { name: /Trade — browse all markets/i })
+    ).toHaveAttribute("href", "/markets");
     expect(screen.getByRole("link", { name: /^Earn$/i })).toHaveAttribute("href", "/earn");
     expect(screen.getByRole("link", { name: /Create a Market/i })).toHaveAttribute("href", "/create");
     expect(screen.getByRole("link", { name: /^Portfolio$/i })).toHaveAttribute("href", "/portfolio");
