@@ -28,9 +28,14 @@
   --cyan-muted: rgba(20,241,149,0.08);
 
   --text: #E1E2E8;
-  --text-secondary: #7A7F96;
-  --text-muted: #454B5F;
-  --text-dim: #2A2E3D;
+  /* Brightened a step for legibility — the secondary/muted/dim tiers read too
+     faint on --bg (labels like VOL 24H / ENTRY / LEVERAGE, nav items, axis
+     text). Contrast vs --bg: secondary 4.99->7.00, muted 2.28->4.62 (now clears
+     WCAG AA), dim 1.46->2.55. Hierarchy (text > secondary > muted > dim) and the
+     cool-gray hue are preserved. */
+  --text-secondary: #9499B0;
+  --text-muted: #737997;
+  --text-dim: #4C5268;
 
   --long: #14F195;
   --short: #FF3B5C;
