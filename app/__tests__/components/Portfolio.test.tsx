@@ -633,8 +633,21 @@ describe("Portfolio Component Tests", () => {
 
       render(<PortfolioPage />);
 
-      expect(screen.queryByText(/Liquidation risk/i)).not.toBeInTheDocument();
-      expect(screen.queryByText(/Approaching liquidation/i)).not.toBeInTheDocument();
+      // `ignore` skips the always-mounted tooltip span. <Tooltip> keeps its
+      // copy in the DOM permanently and hides it with inline
+      // visibility/opacity (it animates on hover), so its text is invisible to
+      // users but still visible to queryByText. RISK_LEVERAGE_TITLE ends with
+      // "...lowers liquidation risk.", which matched this /i assertion the
+      // moment the Risk Lev. label swapped its `title=` attribute for an
+      // <InfoIcon>. Hidden tooltip copy is not a rendered banner, so it must
+      // not satisfy these assertions.
+      const ignoreTooltip = { ignore: '[role="tooltip"]' } as const;
+      expect(
+        screen.queryByText(/Liquidation risk/i, ignoreTooltip)
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/Approaching liquidation/i, ignoreTooltip)
+      ).not.toBeInTheDocument();
     });
   });
 
