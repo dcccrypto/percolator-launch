@@ -90,6 +90,7 @@ import {
   checkSignatureLanded,
 } from "@/lib/tx";
 import { getConfig, getNetwork } from "@/lib/config";
+import { resolveMarketOracleMode } from "@/lib/resolveMarketOracleMode";
 import { normalizeDexType } from "@/lib/dex-type";
 import { parseMarketCreationError } from "@/lib/parseMarketError";
 import {
@@ -1617,23 +1618,28 @@ export function useCreateMarket() {
       // - "pyth": index_feed_id = pyth hex, uses KeeperCrank with Pyth PDA
       // - "hyperp": index_feed_id = zeros, uses UpdateHyperpMark (reads DEX pool directly)
       // - "admin": index_feed_id = zeros, uses PushOraclePrice + KeeperCrank
-      // PERC-470 devnet guard: Hyperp mode reads live DEX pool accounts on-chain.
-      // On devnet, mirror tokens have no PumpSwap pool — mainnet pool addresses are invalid.
-      // Force admin oracle mode for all devnet mirror markets (params.mainnetCA is set).
-      const isDevnetMirror = !!params.mainnetCA;
-      const resolvedOracleMode = params.oracleMode ?? (params.oracleFeed === ALL_ZEROS_FEED ? "admin" : "pyth");
-      // "keeper" mode: AUTH_MARK oracle with oracle_authority delegated to our keeper service.
-      // On devnet mirrors, hyperp falls back to admin; keeper stays keeper (it's designed for devnet).
-      const oracleMode: "pyth" | "hyperp" | "admin" | "keeper" = (resolvedOracleMode === "hyperp" && isDevnetMirror) ? "admin" : resolvedOracleMode as "pyth" | "hyperp" | "admin" | "keeper";
+      // PERC-devnet: detect the runtime network instead of inferring it from
+      // params.mainnetCA. mainnetCA identifies mirrored-token metadata and is
+      // populated for mainnet market creation as well.
+      const network = getNetwork();
+      const isDevnetEnv = network === "devnet";
+
+      const resolvedOracleMode =
+        params.oracleMode ??
+        (params.oracleFeed === ALL_ZEROS_FEED ? "admin" : "pyth");
+
+      // Hyperp reads live DEX pool accounts on-chain. Mainnet pool accounts are
+      // unavailable for devnet mirrors, so only that exact combination falls
+      // back to Admin. Mainnet Hyperp must remain Hyperp.
+      const oracleMode = resolveMarketOracleMode({
+        requestedMode: resolvedOracleMode,
+        network,
+        hasMainnetCA: !!params.mainnetCA,
+      });
+
       const isAdminOracle = oracleMode === "admin";
       const isHyperpOracle = oracleMode === "hyperp";
       const isKeeperOracle = oracleMode === "keeper";
-      // PERC-devnet: isDevnetEnv must be runtime-detected, not build-time.
-      // Users toggle devnet via localStorage — NEXT_PUBLIC_DEFAULT_NETWORK is always "mainnet" on Vercel prod.
-      // Use getNetwork() which reads localStorage("percolator-network") first, then env var, then defaults
-      // to "mainnet" (fail-closed). DO NOT use params.mainnetCA as a devnet proxy — it signals
-      // "this is a devnet mirror market" not "the user is connected to devnet" (issue #835).
-      const isDevnetEnv = getNetwork() === "devnet";
 
       // PERC-470: Resolve DEX pool vault addresses for hyperp mode
       // If vaults weren't provided, fetch the pool account on-chain
