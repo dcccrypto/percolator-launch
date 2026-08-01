@@ -101,4 +101,12 @@ export const BLOCKED_SLAB_ADDRESSES: ReadonlySet<string> = new Set<string>([
   // bankruptcy hlock; Percolator launched on the same raw-spot feed) ──
   "6CFMN29zPgsczCQUjeZZiWxVPDUKN52RJqBLvRsTTERn",  // CATE (bankrupt LP, hlocked)
   "5erG74dYhhjhB3ReATJmFPh1XRb9MVnUjVgV4BSM21c1",  // Percolator (pre-smoother launch)
+
+  // ── 2026-08-01: the last two slabs on the current wrapper, completing the
+  // clean slate. Both are small-tier (8538B) shells abandoned 2026-07-22 with
+  // vault=0, insurance=0, c_tot=0 — no user funds, never traded. With these
+  // every market on wrapper DhSkE7uT… (33 total) is retired, so the board is
+  // empty from discovery down and only newly-launched markets can appear.
+  "78enGzvjkwfnbTMsgXEt4jVckFQFkGZisggADc8gCN8W",
+  "CZBmJF8mixe3pyw1sELaxJWEabhqxGdPhrf6UNzaQVoe",
 ]);
