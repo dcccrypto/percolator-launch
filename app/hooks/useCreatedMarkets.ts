@@ -27,30 +27,16 @@ const V17_PF_MARKET_OFF = 16;
 const V17_PF_OWNER_OFF = 116;
 
 /**
- * /my-markets creator dashboard — "markets you CREATED" only.
+ * /my-markets creator dashboard — markets created by the connected wallet.
  *
- * This is a deliberately trimmed extraction of the old hooks/useMyMarkets.ts
- * (now deleted — it had exactly one consumer, this page). That hook did TWO
- * passes: (1) a cheap admin-detection filter over discovery's header-only
- * data, and (2) an expensive second pass that fetched every non-admin
- * market's full slab + ran a getProgramAccounts owner-scan to find markets
- * where the wallet merely TRADED or LP'd. The creator dashboard has no use
- * for pass (2) — "lp" is a strict subset of "admin" for a market's own
- * creator (the LP portfolio is owned by the creator's wallet by
- * construction — see lib/userAccountScan.ts's isLpPortfolio doc comment),
- * and "trader" positions across ALL markets are already covered by
- * /portfolio. Dropping it removes the single biggest RPC/perf cost on this
- * page (a getAccountInfo batch + a getProgramAccounts scan over every market
- * the wallet didn't create) with zero loss of the "your markets" feature.
+ * Incomplete launches are identified through their remaining wallet
+ * authority. Completed launches rotate marketauth to a stake-pool PDA, so
+ * creator-owned LP portfolios are used as the durable creator marker.
+ * Trading portfolios remain excluded.
  *
- * What's kept, verbatim in spirit:
- *  - The admin-detection effect (was useMyMarkets.ts:113-140).
- *  - The H11 v17 enrichment effect (was useMyMarkets.ts:367-435) — real
- *    OI/insurance from parseMarketGroupV17OI, plus the asset's accrue slot
- *    for real health/staleness. See that block's comments below for the full
- *    byte-offset derivation; unchanged from the original.
+ * Creator verification is wallet-scoped and participates in loading/error
+ * state so pending or failed scans are never rendered as confirmed-empty.
  */
-
 // v17 market group accounts carry no v12 config — the asset's accrue slot
 // (slot_last) has no SDK parser yet, so it's read directly off raw bytes.
 // Offset derivation (fully-packed repr(C) Pod struct, zero padding — verified
@@ -90,14 +76,16 @@ export interface CreatedMarket extends DiscoveredMarket {
 }
 
 /**
- * Returns markets where the connected wallet is the ADMIN (creator) — see
- * this file's top comment for why trader/LP roles were dropped from this
- * hook. Every market returned here is one the wallet can administer.
+ * Returns markets created by the connected wallet.
+ *
+ * Incomplete launches are matched through their remaining wallet authority.
+ * Completed launches are recovered through creator-owned LP portfolios
+ * after marketauth rotates. Trading portfolios remain excluded.
  */
 export function useCreatedMarkets() {
   const { publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
-  const { markets, loading: discoveryLoading, error, refetch: discoveryRefetch } = useMarketDiscovery();
+  const { markets, loading: discoveryLoading, error: discoveryError, refetch: discoveryRefetch } = useMarketDiscovery();
 
   // Token label cache: mint → symbol (persists across re-renders)
   const tokenLabelCache = useRef<Map<string, string>>(new Map());
@@ -118,88 +106,261 @@ export function useCreatedMarkets() {
     }
   }, [connection]);
 
-  const [createdMarkets, setCreatedMarkets] = useState<CreatedMarket[]>([]);
+  type CreatorScanState = {
+    key: string | null;
+    status: 'idle' | 'loading' | 'success' | 'error';
+    slabAddresses: string[];
+    labels: Record<string, string>;
+    error: string | null;
+  };
+
+  const [creatorScanState, setCreatorScanState] = useState<CreatorScanState>({
+    key: null,
+    status: 'idle',
+    slabAddresses: [],
+    labels: {},
+    error: null,
+  });
+  const [creatorScanGeneration, setCreatorScanGeneration] = useState(0);
+
+  const walletStr = publicKey?.toBase58() ?? null;
+
+  // Keep the latest discovery objects without making the ownership
+  // RPC scan depend on the markets array reference itself.
+  // creatorScanKey remains the content-derived execution identity.
+  const creatorScanMarketsRef = useRef(markets);
 
   useEffect(() => {
-    if (!publicKey || !markets.length) {
-      // Bail out instead of unconditionally calling setCreatedMarkets([]) —
-      // a brand-new empty-array reference still fails React's Object.is
-      // state-update check even when the value is semantically unchanged,
-      // which forces an extra render every time this effect's OTHER deps
-      // (e.g. `resolveLabel`, if a caller's connection reference happens to
-      // be unstable) merely re-fire without publicKey/markets changing.
-      setCreatedMarkets((prev) => (prev.length === 0 ? prev : []));
+    creatorScanMarketsRef.current = markets;
+  }, [markets]);
+
+  // Use content-derived identities so same-content SWR array replacements do
+  // not invalidate verified creator results. Authority and collateral mint are
+  // included because either can change while a slab address remains stable.
+  const creatorProgramIdsKey = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          markets
+            .map((market) => market.programId?.toBase58())
+            .filter((programId): programId is string => !!programId),
+        ),
+      )
+        .sort()
+        .join(','),
+    [markets],
+  );
+
+  const creatorMarketSetKey = useMemo(
+    () =>
+      markets
+        .map((market) => {
+          const slab = market.slabAddress.toBase58();
+          const programId = market.programId?.toBase58() ?? '';
+          const authority =
+            (market.configV17?.marketauth ?? market.header?.admin)?.toBase58() ?? '';
+          const collateralMint = market.config?.collateralMint?.toBase58() ?? '';
+          return [slab, programId, authority, collateralMint].join(':');
+        })
+        .sort()
+        .join('|'),
+    [markets],
+  );
+
+  const creatorScanKey =
+    walletStr && markets.length > 0
+      ? [walletStr, creatorProgramIdsKey, creatorMarketSetKey, String(creatorScanGeneration)].join(
+          '::',
+        )
+      : null;
+
+  const refetch = useCallback(() => {
+    // Changing the generation invalidates the verified scan immediately,
+    // before the next effect executes, so stale results cannot remain visible.
+    setCreatorScanGeneration((generation) => generation + 1);
+    return discoveryRefetch();
+  }, [discoveryRefetch]);
+
+  useEffect(() => {
+    if (!creatorScanKey || !walletStr) {
+      setCreatorScanState((previous) => {
+        if (
+          previous.key === null &&
+          previous.status === 'idle' &&
+          previous.slabAddresses.length === 0 &&
+          previous.error === null
+        ) {
+          return previous;
+        }
+
+        return {
+          key: null,
+          status: 'idle',
+          slabAddresses: [],
+          labels: {},
+          error: null,
+        };
+      });
       return;
     }
+
+    const scanKey = creatorScanKey;
+    const scanMarkets = creatorScanMarketsRef.current;
+    const programIds = creatorProgramIdsKey ? creatorProgramIdsKey.split(',') : [];
     let cancelled = false;
-    const walletStr = publicKey.toBase58();
 
-    // ── Which markets did THIS wallet create? ────────────────────────────
-    //
-    // NOT "marketauth == my wallet". A completed launch's LAST step
-    // (StakeInitPool) irreversibly ROTATES marketauth to a stake-pool PDA —
-    // verified on-chain against this playground's own wizard-launched markets
-    // (e.g. dui5i3MN… → marketauth ByFxYX3a…, a PDA, not the creator). So the
-    // authority check is FALSE for every fully-launched market, and a creator
-    // saw "you haven't created a market with this wallet yet" while looking at
-    // markets they had just launched. (The old useMyMarkets had the same
-    // defect; its trader/LP roles merely masked it.)
-    //
-    // The durable creator marker is the market's LP PORTFOLIO — the AMM
-    // counterparty holding the seeded liquidity, created by the wizard via
-    // InitUser with the CREATOR's wallet as its owner, and never rotated. One
-    // getProgramAccounts scan (magic + owner@116 == wallet, no market filter)
-    // returns every portfolio this wallet owns across all markets; the ones
-    // that are LP portfolios (isLpPortfolio — trailing matcher config enabled,
-    // the same discriminator that keeps them OUT of trading-account lookups)
-    // identify the markets it created. Their market_group_id@16 is the slab.
-    //
-    // Unioned with the authority check so INCOMPLETE launches (stake-pool step
-    // never ran, marketauth still the wallet) also appear — exactly the markets
-    // a creator most needs to see and finish.
+    setCreatorScanState((previous) => {
+      // A same-key background revalidation may retain its last verified
+      // snapshot. A wallet, market-set, program-set, or manual-refresh change
+      // always has a new key and is withheld immediately by render-time gating.
+      if (previous.key === scanKey && previous.status === 'success') {
+        return previous;
+      }
+
+      return {
+        key: scanKey,
+        status: 'loading',
+        slabAddresses: [],
+        labels: {},
+        error: null,
+      };
+    });
+
     const run = async () => {
-      const createdSlabs = new Set<string>(
-        markets
-          .filter((m) => (m.configV17?.marketauth ?? m.header?.admin)?.toBase58() === walletStr)
-          .map((m) => m.slabAddress.toBase58()),
-      );
+      try {
+        // Keep incomplete launches whose authority has not yet been rotated.
+        const createdSlabs = new Set<string>(
+          scanMarkets
+            .filter(
+              (market) =>
+                (market.configV17?.marketauth ?? market.header?.admin)?.toBase58() === walletStr,
+            )
+            .map((market) => market.slabAddress.toBase58()),
+        );
 
-      const programIds = Array.from(
-        new Set(markets.map((m) => m.programId?.toBase58()).filter((p): p is string => !!p)),
-      );
-      await Promise.all(
-        programIds.map(async (pid) => {
-          try {
-            const owned = await connection.getProgramAccounts(new PublicKey(pid), {
+        // Every configured program scan is required for a verified result.
+        // Promise.all intentionally rejects the scan if any RPC request fails,
+        // preventing a partial result from being presented as confirmed empty.
+        const ownedByProgram = await Promise.all(
+          programIds.map((programId) =>
+            connection.getProgramAccounts(new PublicKey(programId), {
               filters: [
-                { memcmp: { offset: 0, bytes: V17_PORTFOLIO_MAGIC_B64, encoding: "base64" } },
-                { memcmp: { offset: V17_PF_OWNER_OFF, bytes: walletStr } },
+                {
+                  memcmp: {
+                    offset: 0,
+                    bytes: V17_PORTFOLIO_MAGIC_B64,
+                    encoding: 'base64',
+                  },
+                },
+                {
+                  memcmp: {
+                    offset: V17_PF_OWNER_OFF,
+                    bytes: walletStr,
+                  },
+                },
               ],
-            });
-            for (const { account } of owned) {
-              if (!isLpPortfolio(account.data)) continue; // a trading portfolio, not a market I created
+            }),
+          ),
+        );
+
+        if (cancelled) return;
+
+        for (const owned of ownedByProgram) {
+          for (const { account } of owned) {
+            if (!isLpPortfolio(account.data)) continue;
+
+            try {
               const data =
                 account.data instanceof Buffer ? account.data : Buffer.from(account.data);
-              // market_group_id — the slab this LP portfolio backs.
+
+              if (data.length < V17_PF_MARKET_OFF + 32) continue;
+
               createdSlabs.add(
                 new PublicKey(data.subarray(V17_PF_MARKET_OFF, V17_PF_MARKET_OFF + 32)).toBase58(),
               );
+            } catch {
+              // Ignore an individually malformed account without converting a
+              // successful RPC request into a false creator match.
             }
-          } catch {
-            /* transient RPC failure — the authority-derived set above still stands */
           }
-        }),
-      );
+        }
 
-      if (cancelled) return;
-      const mine = markets.filter((m) => createdSlabs.has(m.slabAddress.toBase58()));
-      const results = await Promise.all(mine.map(async (m) => ({ ...m, label: await resolveLabel(m) })));
-      if (!cancelled) setCreatedMarkets(results);
+        const mine = scanMarkets.filter((market) =>
+          createdSlabs.has(market.slabAddress.toBase58()),
+        );
+
+        const labelEntries = await Promise.all(
+          mine.map(async (market) => {
+            const slab = market.slabAddress.toBase58();
+            return [slab, await resolveLabel(market)] as const;
+          }),
+        );
+
+        if (cancelled) return;
+
+        setCreatorScanState({
+          key: scanKey,
+          status: 'success',
+          slabAddresses: mine.map((market) => market.slabAddress.toBase58()),
+          labels: Object.fromEntries(labelEntries),
+          error: null,
+        });
+      } catch (cause) {
+        if (cancelled) return;
+
+        const detail = cause instanceof Error && cause.message ? `: ${cause.message}` : '';
+
+        setCreatorScanState({
+          key: scanKey,
+          status: 'error',
+          slabAddresses: [],
+          labels: {},
+          error: `Unable to verify created markets${detail}`,
+        });
+      }
     };
+
     void run();
 
-    return () => { cancelled = true; };
-  }, [publicKey, markets, resolveLabel, connection]);
+    return () => {
+      cancelled = true;
+    };
+  }, [creatorScanKey, creatorProgramIdsKey, walletStr, resolveLabel, connection]);
+
+  const creatorScanMatchesCurrentKey =
+    creatorScanKey !== null && creatorScanState.key === creatorScanKey;
+
+  const verifiedCreatorScan =
+    creatorScanMatchesCurrentKey && creatorScanState.status === 'success' ? creatorScanState : null;
+
+  // Always merge verified slab identities with the latest discovery objects.
+  // This avoids retaining stale market snapshots when discovery refreshes.
+  const createdMarkets = useMemo<CreatedMarket[]>(() => {
+    if (!verifiedCreatorScan) return [];
+
+    const verifiedSlabs = new Set(verifiedCreatorScan.slabAddresses);
+
+    return markets
+      .filter((market) => verifiedSlabs.has(market.slabAddress.toBase58()))
+      .map((market) => {
+        const slab = market.slabAddress.toBase58();
+        return {
+          ...market,
+          label: verifiedCreatorScan.labels[slab] ?? slab.slice(0, 8) + '…',
+        };
+      });
+  }, [markets, verifiedCreatorScan]);
+
+  const creatorScanLoading =
+    creatorScanKey !== null &&
+    (!creatorScanMatchesCurrentKey ||
+      creatorScanState.status === 'idle' ||
+      creatorScanState.status === 'loading');
+
+  const creatorScanError =
+    creatorScanMatchesCurrentKey && creatorScanState.status === 'error'
+      ? creatorScanState.error
+      : null;
 
   // H11: enrich v17 markets with real OI/insurance/health data. Runs as a
   // separate pass (not folded into the admin effect above) because it needs a
@@ -273,14 +434,11 @@ export function useCreatedMarkets() {
 
   return {
     myMarkets: enrichedMarkets,
-    // No second RPC pass here, so loading is purely discovery + the cheap
-    // admin-detection resolveLabel() promise — never gated on the (removed)
-    // trader/LP owner-scan.
-    loading: discoveryLoading,
-    error,
+    loading: discoveryLoading || creatorScanLoading,
+    error: discoveryError ?? creatorScanError,
     connected: !!publicKey,
-    /** Trigger a fresh discovery fetch (bypasses SWR dedup window). */
-    refetch: discoveryRefetch,
+    /** Refresh market discovery and wallet-scoped creator ownership. */
+    refetch,
     /** Current on-chain slot from the v17 enrichment fetch — null until it resolves. */
     currentSlot: v17Enrichment.currentSlot,
   };
