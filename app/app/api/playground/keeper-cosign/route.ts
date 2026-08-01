@@ -143,6 +143,23 @@ export async function POST(req: NextRequest) {
     const connection = new Connection(rpcUrl, "confirmed");
     const keeperPk = new PublicKey(keeper.publicKey());
 
+    /*
+     * Preserve the creator-signature authorization boundary.
+     *
+     * Solana deduplicates required signer slots by public key. If the
+     * requester aliases deployer to the server keeper, the keeper signature
+     * can satisfy both logical signer roles and turn this response into a
+     * fully signed transaction without an independent creator signature.
+     */
+    if (deployerPk.equals(keeperPk)) {
+      return NextResponse.json(
+        {
+          error: "deployer must be distinct from keeper",
+        },
+        { status: 400 },
+      );
+    }
+
     // Fetch slot (used as initial mark timestamp in ConfigureAuthMark)
     const nowSlot = BigInt(await connection.getSlot("confirmed"));
 
