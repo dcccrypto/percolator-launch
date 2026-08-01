@@ -1,6 +1,6 @@
 "use client";
 
-import { usePortfolio } from "@/hooks/usePortfolio";
+import { usePortfolio, isOpenPosition } from "@/hooks/usePortfolio";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { formatTokenAmount } from "@/lib/format";
 import { useState } from "react";
@@ -40,7 +40,9 @@ export function DashboardHeader() {
   const address = publicKey?.toBase58() ?? "";
   const totalValue = portfolio.totalValue ?? 0n;
   const totalPnl = portfolio.totalUnrealizedPnl ?? 0n;
-  const positionCount = portfolio.positions?.length ?? 0;
+  // Count OPEN positions only — a closed (size-0 "Flat") position still has a
+  // portfolio account and would otherwise inflate the "Active Positions" stat.
+  const positionCount = (portfolio.positions ?? []).filter(isOpenPosition).length;
 
   const displayValue = totalValue > 0n
     ? formatTokenAmount(totalValue)

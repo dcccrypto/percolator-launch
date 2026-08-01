@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { usePortfolio } from "@/hooks/usePortfolio";
+import { usePortfolio, isOpenPosition } from "@/hooks/usePortfolio";
 
 function formatUsd(val: number): string {
   if (val === 0) return "--";
@@ -15,7 +15,14 @@ function formatTradeFeeBps(bps: bigint): string {
 }
 
 export function StatsBar() {
-  const { positions, loading } = usePortfolio();
+  const { positions: allPositions, loading } = usePortfolio();
+
+  // Stats reflect OPEN positions only — closed (size-0 "Flat") positions still
+  // carry a portfolio account and would otherwise skew the "empty state" checks
+  // and per-market fee readout. Memoized so downstream memos stay referentially
+  // stable across renders. (Win/loss already ignore flat rows via the >0/<0 PnL
+  // test; this also fixes the length-based cases below.)
+  const positions = useMemo(() => allPositions.filter(isOpenPosition), [allPositions]);
 
   // Calculate real stats from portfolio positions (memoized — pure over `positions`)
   const { totalPnl, wins, losses, total, winRate } = useMemo(() => {
