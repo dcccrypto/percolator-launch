@@ -19,6 +19,7 @@ import {
 } from "@solana/spl-token";
 import { getConfig } from "@/lib/config";
 import { getDevnetMintSigner } from "@/lib/devnet-signer";
+import { assertSuccessfulConfirmation } from "@/lib/transaction-confirmation";
 import * as Sentry from "@sentry/nextjs";
 
 // ── In-memory rate limiter (fallback when Supabase unavailable) ───────────────
@@ -190,8 +191,20 @@ export async function POST(req: NextRequest) {
 
             // Sign and send transaction using sealed signer
             const signed = mintSigner.signTransaction(tx);
-            const sig = await connection.sendRawTransaction((signed as Transaction).serialize());
-            await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
+            const sig = await connection.sendRawTransaction(
+              (signed as Transaction).serialize(),
+            );
+
+            const confirmation =
+              await connection.confirmTransaction(
+                { signature: sig, blockhash, lastValidBlockHeight },
+                "confirmed",
+              );
+
+            assertSuccessfulConfirmation(
+              confirmation,
+              "Auto-fund USDC mint",
+            );
 
             results.usdc_minted = true;
             results.usdc_amount = USDC_MINT_AMOUNT / 1_000_000;

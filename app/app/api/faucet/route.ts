@@ -35,6 +35,7 @@ import {
 } from "@solana/spl-token";
 import { getConfig } from "@/lib/config";
 import { getDevnetMintSigner } from "@/lib/devnet-signer";
+import { assertSuccessfulConfirmation } from "@/lib/transaction-confirmation";
 import * as Sentry from "@sentry/nextjs";
 
 // ── In-memory rate-limit fallback (when Supabase unavailable) ─────────────────
@@ -175,7 +176,14 @@ export async function POST(req: NextRequest) {
         const pubConn = new Connection(rpcUrl, "confirmed");
         try {
           sig = await pubConn.requestAirdrop(walletPk, SOL_AIRDROP_AMOUNT);
-          await pubConn.confirmTransaction(sig, "confirmed");
+          const confirmation =
+            await pubConn.confirmTransaction(sig, "confirmed");
+
+          assertSuccessfulConfirmation(
+            confirmation,
+            "SOL airdrop",
+          );
+
           break; // success — exit loop
         } catch (airdropErr) {
           // GH#1474: fall back to toString() when .message is empty
@@ -399,9 +407,15 @@ export async function POST(req: NextRequest) {
       sig = await connection.sendRawTransaction(
         (signedTx as Transaction).serialize(),
       );
-      await connection.confirmTransaction(
-        { signature: sig, blockhash, lastValidBlockHeight },
-        "confirmed",
+      const confirmation =
+        await connection.confirmTransaction(
+          { signature: sig, blockhash, lastValidBlockHeight },
+          "confirmed",
+        );
+
+      assertSuccessfulConfirmation(
+        confirmation,
+        "USDC faucet mint",
       );
     } catch (chainErr) {
       if (supabase && gate.claimId) { try { const { releaseFaucetClaim } = await import("@/lib/faucet-rate-gate"); await releaseFaucetClaim(supabase, gate.claimId); } catch { /* best-effort */ } }
