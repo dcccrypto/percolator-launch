@@ -1,0 +1,16 @@
+# CodeRabbit configuration.
+#
+# Why this file exists: CodeRabbit only auto-reviews PRs whose BASE branch is
+# the repository default branch (`main`) unless told otherwise — the default
+# for `base_branches` is an empty list. This repo does almost all of its work
+# against `playground` (13 of the last 15 merged PRs), so in practice the
+# large majority of PRs were being opened with "Review skipped: auto reviews
+# are disabled on base/target branches other than the default branch" and
+# received no automated review at all.
+#
+# Entries are regex patterns matched against the PR's base branch name.
+reviews:
+  auto_review:
+    base_branches:
+      - "main"
+      - "playground"
