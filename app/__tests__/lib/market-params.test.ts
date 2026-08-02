@@ -150,8 +150,14 @@ describe("backingSeedPerDomain — the SHORT domain gets one chance", () => {
   // domain 0. After that the creator is Unauthorized on every top-up path for
   // both domains — verified on devnet and irreversible. So whatever SHORT is
   // seeded with at creation is all it will ever have.
-  it("seeds a real percentage of the LP, not dust", () => {
-    expect(backingSeedPerDomain(LP)).toBe((LP * 10n) / 100n);
+  it("seeds the LP's full collateral, not a fraction of it", () => {
+    // Raised 10% -> 100% on 2026-08-02. The seed is the LP's gain-support
+    // budget: at 10% the ZERO market's LP exhausted it after earning back
+    // $100 of a $1,000 collateral and then ratcheted to bankruptcy, because
+    // gains past the budget are discarded while losses always apply.
+    // See BACKING_SEED_PCT_OF_LP and __tests__/lib/backingSeed.test.ts.
+    expect(backingSeedPerDomain(LP)).toBe(LP);
+    expect(backingSeedPerDomain(LP)).toBeGreaterThanOrEqual(LP);
   });
 
   it("still clears the freshness deadlock for a tiny LP seed", () => {

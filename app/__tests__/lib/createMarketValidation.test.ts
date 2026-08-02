@@ -15,7 +15,10 @@ function validForm(overrides: Partial<CreateFormValues> = {}): CreateFormValues 
     initialMarginBps: 1000,
     lpCollateral: "100",
     insuranceAmount: "10",
-    tokenBalance: 200_000_000_000n, // 200 SOL
+    // LP 100 + insurance 10 + counterparty backing 2x100 = 310 required.
+    // (Backing was added to the check on 2026-08-02; it was previously
+    // omitted, so this fixture only needed 110.)
+    tokenBalance: 400_000_000_000n, // 400 SOL
     walletConnected: true,
     decimals: 9,
     ...overrides,
@@ -261,7 +264,8 @@ describe("validateCreateForm", () => {
       validForm({
         lpCollateral: "95",
         insuranceAmount: "5",
-        tokenBalance: 105_000_000_000n, // 105 SOL — 100/105 ≈ 95%
+        // 95 LP + 5 ins + 190 backing = 290 required; 290/305 ≈ 95%.
+        tokenBalance: 305_000_000_000n,
       })
     );
     expect(

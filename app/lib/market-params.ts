@@ -109,7 +109,48 @@ export const FIXED_TRADING_FEE_BPS = 30;
  * Seeding a real amount here is the only chance to give shorts counterparty
  * backing at all.
  */
-export const BACKING_SEED_PCT_OF_LP = 10n;
+export const BACKING_SEED_PCT_OF_LP = 100n;
+
+/*
+ * WHY 100%, RAISED FROM 10% (2026-08-02, verified on the ZERO market)
+ * -------------------------------------------------------------------
+ * This number is not a safety margin — it is the LP's entire ability to EARN
+ * BACK a drawdown, and at 10% it guaranteed the LP's death on any churning
+ * price.
+ *
+ * The engine settles an LP's losses and gains against two DIFFERENT domains:
+ * a loss on a short leg draws from the SHORT domain (and confiscates the LP's
+ * capital into it, v16.rs:9046), while a GAIN on that leg must be credited
+ * from the opposite — LONG — domain via source_domain_realizable_support_for_face
+ * (v16.rs:7184 -> :1141), which is capped by that domain's available backing.
+ * When the budget hits zero, `support_consumed` is 0 and the gain is silently
+ * DISCARDED while losses keep applying in full. That is a one-way ratchet: the
+ * LP can only ever go down, no matter where the price ends up.
+ *
+ * Measured on ZERO (5PRM2X5H…), LP $1,000 seeded 10% = $100 per domain:
+ *   source_credit_LONG.spent_backing_num      = $99.999999   (100% of seed)
+ *   source_credit_LONG.fresh_reserved_backing = $ 0.000001   (exhausted)
+ *   LP capital $1,000 -> $0, crystallized $1,000, pnl -$775 and falling
+ *   …while the price round-tripped to within 294 units of the LP's entry,
+ *   which justifies about $129 of loss. The other ~$1,650 is discarded gains.
+ *
+ * Sizing: the LP can lose at most its collateral before it is bankrupt, so to
+ * be able to round-trip back from ANY survivable drawdown it needs gain-support
+ * equal to that collateral. Hence 100%.
+ *
+ * HONEST LIMIT — this is mitigation, not a cure. The budget is consumed by
+ * cumulative discarded gains, so a long-lived market with enough churn will
+ * still exhaust it eventually; 100% buys headroom proportional to the LP's real
+ * risk instead of a tenth of it. The actual fix is engine-side (credit gains
+ * against the same capital that absorbed the loss) and is upstream of us.
+ *
+ * COST: the seed is posted by the CREATOR from their wallet (TopUpBackingBucket
+ * pulls from userAta, separate from the LP deposit), for BOTH domains. Total
+ * launch funding is therefore LP + insurance + 2x seed — 3x LP + insurance at
+ * this setting, vs 1.2x LP + insurance before. createMarketValidation and
+ * CostEstimate both account for it (they previously did not, and would let a
+ * creator start a launch they could not finish).
+ */
 
 /** Absolute floor so a tiny LP seed still defuses the freshness deadlock. */
 export const BACKING_SEED_MIN_ATOMS = 10_000n;

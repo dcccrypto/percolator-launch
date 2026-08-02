@@ -1,5 +1,5 @@
 import type { ValidationError } from "@/components/create/ValidationSummary";
-import { MIN_LEVERAGE_X, MAX_LEVERAGE_X } from "@/lib/market-params";
+import { MIN_LEVERAGE_X, MAX_LEVERAGE_X, BACKING_SEED_PCT_OF_LP } from "@/lib/market-params";
 
 /**
  * Minimum LP collateral thresholds per token decimals.
@@ -154,19 +154,25 @@ export function validateCreateForm(values: CreateFormValues): ValidationError[] 
     if (tokenBalance === 0n) {
       errors.push({ field: "Token Balance", message: "You have no tokens for this mint. Use the devnet faucet to mint some.", severity: "error" });
     } else if (lpNum > 0 && insNum > 0) {
-      // Compare combined amount to balance (rough check using float)
-      const totalRequired = lpNum + insNum;
+      // Compare combined amount to balance (rough check using float).
+      // MUST include the backing seed: TopUpBackingBucket runs for BOTH
+      // domains during the launch and pulls from the creator's wallet,
+      // separately from the LP deposit. Omitting it (as this check did until
+      // 2026-08-02) let a creator pass validation and then fail mid-launch,
+      // and it understated the real cost by 2x the seed.
+      const backingTotal = (lpNum * Number(BACKING_SEED_PCT_OF_LP)) / 100 * 2;
+      const totalRequired = lpNum + insNum + backingTotal;
       const balanceFloat = Number(tokenBalance) / Math.pow(10, decimals);
       if (totalRequired > balanceFloat) {
         errors.push({
           field: "Token Balance",
-          message: `You need ${totalRequired.toLocaleString()} tokens but only have ${balanceFloat.toLocaleString()}. Reduce amounts or get more tokens.`,
+          message: `You need ${totalRequired.toLocaleString()} tokens (LP ${lpNum.toLocaleString()} + insurance ${insNum.toLocaleString()} + ${backingTotal.toLocaleString()} counterparty backing) but only have ${balanceFloat.toLocaleString()}. Reduce amounts or get more tokens.`,
           severity: "error",
         });
       } else if (totalRequired > balanceFloat * 0.9) {
         errors.push({
           field: "Token Balance",
-          message: "Combined LP + insurance is over 90% of your balance. Consider keeping a reserve.",
+          message: "Combined LP + insurance + backing is over 90% of your balance. Consider keeping a reserve.",
           severity: "warning",
         });
       }

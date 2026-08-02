@@ -1,6 +1,7 @@
 "use client";
 
 import { FC, useMemo } from "react";
+import { BACKING_SEED_PCT_OF_LP } from "@/lib/market-params";
 import { DEFAULT_SLAB_SIZE } from "@/hooks/useCreateMarket";
 import { V17_PORTFOLIO_ACCOUNT_LEN, MATCHER_CONTEXT_LEN } from "@percolatorct/sdk";
 
@@ -122,7 +123,14 @@ export const CostEstimate: FC<CostEstimateProps> = ({
     // dropped; total tokens required is just LP collateral + insurance.
     const lpNum = parseFloat(lpCollateral) || 0;
     const insNum = parseFloat(insuranceAmount) || 0;
-    const totalTokens = lpNum + insNum;
+    // Counterparty backing (2026-08-02): TopUpBackingBucket runs for BOTH
+    // domains during the launch, pulling from the creator's wallet on top of
+    // the LP deposit. This line was missing entirely, so the quoted total
+    // understated the real cost and a creator could start a launch they could
+    // not finish. See BACKING_SEED_PCT_OF_LP in lib/market-params.ts for why
+    // the seed is sized at the LP's full collateral.
+    const backingTokens = (lpNum * Number(BACKING_SEED_PCT_OF_LP)) / 100 * 2;
+    const totalTokens = lpNum + insNum + backingTokens;
 
     // Collateral (LP + insurance) is the universal Sim-USDC mint — 1:1 with USD,
     // NOT the launched token. Value it at $1 each, not the token's price.
@@ -137,6 +145,7 @@ export const CostEstimate: FC<CostEstimateProps> = ({
       totalSolCost: sol.totalSolCost.toFixed(4),
       lpTokens: lpNum,
       insTokens: insNum,
+      backingTokens,
       totalTokens,
       tokenUsdValue,
       dataSize: DEFAULT_SLAB_SIZE,
