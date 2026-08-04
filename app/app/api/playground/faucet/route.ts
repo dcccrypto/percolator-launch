@@ -125,11 +125,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid wallet address" }, { status: 400 });
     }
 
-    // Rate limit check
-    const { limited, nextClaimAt: limitNext } = isRateLimited(walletAddress);
-    if (limited) {
+    // Rate limit: durable Supabase gate (insert-as-gate) when available, the
+    // process-local in-memory Map as fallback — mirrors /api/faucet and
+    // /api/auto-fund so the 1h per-wallet limit survives a serverless cold start
+    // (the in-memory Map resets on cold start / a different warm instance). A
+    // distinct fund_type keeps it off the sol/usdc/auto-fund slots; RATE_LIMIT_MS
+    // (1h) preserves this faucet's shorter window.
+    let supabase: ReturnType<typeof import("@/lib/supabase").getServiceClient> | null = null;
+    let gate: { allowed: boolean; nextClaimAt: string | null; claimId?: number } = { allowed: true, nextClaimAt: null };
+    try {
+      const sbMod = await import("@/lib/supabase");
+      const gateMod = await import("@/lib/faucet-rate-gate");
+      supabase = sbMod.getServiceClient();
+      gate = await gateMod.tryFaucetGate(supabase, walletAddress, "playground-faucet", RATE_LIMIT_MS);
+    } catch {
+      // Supabase unavailable — fall back to the in-memory limiter.
+      const { limited, nextClaimAt } = isRateLimited(walletAddress);
+      gate = { allowed: !limited, nextClaimAt: nextClaimAt || null };
+    }
+    if (!gate.allowed) {
       return NextResponse.json(
-        { error: "Already claimed in the last hour. Come back later.", nextClaimAt: limitNext },
+        { error: "Already claimed in the last hour. Come back later.", nextClaimAt: gate.nextClaimAt },
         { status: 429 },
       );
     }
@@ -137,6 +153,10 @@ export async function POST(req: NextRequest) {
     // Load mint signer — required for USDC mint
     const mintSigner = getDevnetMintSigner();
     if (!mintSigner) {
+      // Release the durable claim slot so a config error doesn't lock the wallet.
+      if (supabase && gate.claimId) {
+        try { const { releaseFaucetClaim } = await import("@/lib/faucet-rate-gate"); await releaseFaucetClaim(supabase, gate.claimId); } catch { /* best-effort */ }
+      }
       return NextResponse.json(
         {
           error:
@@ -203,6 +223,10 @@ export async function POST(req: NextRequest) {
         "confirmed",
       );
     } catch (mintErr) {
+      // Release the durable claim slot so a mint failure doesn't lock the wallet.
+      if (supabase && gate.claimId) {
+        try { const { releaseFaucetClaim } = await import("@/lib/faucet-rate-gate"); await releaseFaucetClaim(supabase, gate.claimId); } catch { /* best-effort */ }
+      }
       Sentry.captureException(mintErr, {
         tags: { endpoint: "/api/playground/faucet", step: "mint_usdc" },
         extra: { walletAddress },
