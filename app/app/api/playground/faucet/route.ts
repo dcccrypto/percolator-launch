@@ -28,6 +28,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { getClientIp } from "@/lib/get-client-ip";
+import { checkFundRateLimit } from "@/lib/fund-ip-rate-limit";
 import {
   Connection,
   PublicKey,
@@ -99,6 +101,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: "Playground faucet only available on devnet" },
         { status: 403 },
+      );
+    }
+
+    // SEC: per-IP rate limit. The per-wallet gate below is trivially bypassed
+    // with fresh keypairs, and every mint/airdrop spends the shared
+    // DEVNET_MINT_AUTHORITY_KEYPAIR — bound the drain per IP (shared across the
+    // fund endpoints), mirroring /api/devnet-mirror-mint.
+    const fundRl = await checkFundRateLimit(getClientIp(req));
+    if (!fundRl.allowed) {
+      return NextResponse.json(
+        { error: "Too many requests. Please slow down and try again shortly." },
+        { status: 429, headers: { "Retry-After": String(fundRl.retryAfter) } },
       );
     }
 
