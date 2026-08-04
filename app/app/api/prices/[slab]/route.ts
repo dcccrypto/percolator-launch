@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateSlabParam } from "@/lib/route-validators";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
+import { boundedSet } from "@/lib/bounded-map";
 import * as Sentry from "@sentry/nextjs";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +30,12 @@ type Stats24h = { change24h: number; high24h: string; low24h: string };
  *  (or local dev, where there's no CDN in front to honor s-maxage) this still
  *  collapses repeated ~10s polls into one upstream fetch per TTL window per slab. */
 const FALLBACK_CACHE_TTL_MS = 60_000;
+// Hard cap on this in-memory cache. The GeckoTerminal fallback path serves ANY
+// slab and writes an entry on every miss (including null misses), so the key
+// space is attacker-controlled; TTL is checked only on read and nothing else
+// evicts. Without a bound, a flood of distinct slabs would grow this Map without
+// limit (memory-exhaustion DoS). Matches the sibling /api/chart route's cap.
+const FALLBACK_CACHE_MAX_ENTRIES = 10_000;
 const fallbackCache = new Map<string, { value: Stats24h | null; expiresAt: number }>();
 
 /** Compute 24h stats from Pyth Benchmarks hourly bars for a playground slab.
@@ -56,12 +63,12 @@ async function pythStatsFallback(slab: string): Promise<Stats24h | null> {
   // Cache negative results too (short TTL) — otherwise a rate-limited (429)
   // upstream gets hammered again on the very next ~10s poll instead of backing off.
   if (!res.ok) {
-    fallbackCache.set(slab, { value: null, expiresAt: Date.now() + FALLBACK_CACHE_TTL_MS });
+    boundedSet(fallbackCache, slab, { value: null, expiresAt: Date.now() + FALLBACK_CACHE_TTL_MS }, FALLBACK_CACHE_MAX_ENTRIES);
     return null;
   }
   const data = (await res.json()) as { s?: string; o?: number[]; h?: number[]; l?: number[]; c?: number[] };
   if (data.s !== "ok" || !data.o?.length || !data.h?.length || !data.l?.length || !data.c?.length) {
-    fallbackCache.set(slab, { value: null, expiresAt: Date.now() + FALLBACK_CACHE_TTL_MS });
+    boundedSet(fallbackCache, slab, { value: null, expiresAt: Date.now() + FALLBACK_CACHE_TTL_MS }, FALLBACK_CACHE_MAX_ENTRIES);
     return null;
   }
 
@@ -70,7 +77,7 @@ async function pythStatsFallback(slab: string): Promise<Stats24h | null> {
   const first = data.o[0];
   const last = data.c[data.c.length - 1];
   if (!Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(first) || first <= 0) {
-    fallbackCache.set(slab, { value: null, expiresAt: Date.now() + FALLBACK_CACHE_TTL_MS });
+    boundedSet(fallbackCache, slab, { value: null, expiresAt: Date.now() + FALLBACK_CACHE_TTL_MS }, FALLBACK_CACHE_MAX_ENTRIES);
     return null;
   }
 
@@ -80,7 +87,7 @@ async function pythStatsFallback(slab: string): Promise<Stats24h | null> {
     high24h: toE6Str(high),
     low24h: toE6Str(low),
   };
-  fallbackCache.set(slab, { value: result, expiresAt: Date.now() + FALLBACK_CACHE_TTL_MS });
+  boundedSet(fallbackCache, slab, { value: result, expiresAt: Date.now() + FALLBACK_CACHE_TTL_MS }, FALLBACK_CACHE_MAX_ENTRIES);
   return result;
 }
 
@@ -109,7 +116,7 @@ async function geckoTerminalStatsFallback(slab: string, origin: string): Promise
     return cached.value;
   }
   const setCache = (value: Stats24h | null): Stats24h | null => {
-    fallbackCache.set(cacheKey, { value, expiresAt: Date.now() + FALLBACK_CACHE_TTL_MS });
+    boundedSet(fallbackCache, cacheKey, { value, expiresAt: Date.now() + FALLBACK_CACHE_TTL_MS }, FALLBACK_CACHE_MAX_ENTRIES);
     return value;
   };
 
