@@ -10,6 +10,7 @@ import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { isActiveMarket, isSaneMarketValue, isZombieMarket } from "@/lib/activeMarketFilter";
 import { loadMergedMarketRows, type MarketRegistryRow } from "@/lib/market-registry";
 import { isPhantomOpenInterest } from "@/lib/phantom-oi";
+import { computeDisplayOiUsd } from "@/lib/oi-display";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import { getClientIp } from "@/lib/get-client-ip";
 import { createMemoryRateLimiter } from "@/lib/memory-rate-limit";
@@ -135,8 +136,19 @@ async function computeStatsFromMarketsApi(_request: NextRequest): Promise<(Retur
 
     let totalOpenInterest = 0;
     for (const m of visible) {
-      const oiUsd = numericOrNull((m as Record<string, unknown>).total_open_interest_usd);
-      if (oiUsd != null && isSaneMarketValue(oiUsd)) totalOpenInterest += oiUsd;
+      const row = m as Record<string, unknown>;
+      // Mirror /api/markets exactly (markets/route.ts:827-833): suppress phantom-OI
+      // markets (no accounts / dust vault) via the shared predicate before summing,
+      // so a market shown as $0 OI in the list can't inflate the protocol-wide
+      // total. Previously this path summed total_open_interest_usd raw, re-introducing
+      // the drift the shared predicate exists to prevent.
+      const isPhantomOI = isPhantomOpenInterest(numericOrNull(row.total_accounts), numericOrNull(row.vault_balance) ?? 0);
+      const displayOiUsd = computeDisplayOiUsd(
+        numericOrNull(row.total_open_interest_usd),
+        isPhantomOI,
+        numericOrNull(row.total_open_interest),
+      );
+      if (displayOiUsd != null && isSaneMarketValue(displayOiUsd)) totalOpenInterest += displayOiUsd;
     }
 
     const activeTotal = visible.filter((m: MarketRegistryRow) =>
