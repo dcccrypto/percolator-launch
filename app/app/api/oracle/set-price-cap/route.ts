@@ -120,6 +120,14 @@ export async function POST(req: NextRequest) {
         );
       }
       maxChangeE2bps = BigInt(raw);
+      // Bound the number path to u64 too — the string path already does this, but a
+      // JS number like 1e21 is a non-negative integer that overflows u64.
+      if (maxChangeE2bps > 0xffff_ffff_ffff_ffffn) {
+        return NextResponse.json(
+          { error: "maxChangeE2bps exceeds u64 max" },
+          { status: 400 },
+        );
+      }
     } else if (typeof raw === "string" && /^\d+$/.test(raw)) {
       const parsed = BigInt(raw);
       if (parsed > 0xffff_ffff_ffff_ffffn) {
