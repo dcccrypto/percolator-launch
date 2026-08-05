@@ -439,9 +439,17 @@ function buildV17Position(
   // this specific position. Falls back to capital when initial margin can't
   // be computed (e.g. flat position) to preserve prior behavior.
   const positionInitialMargin = computePositionInitialMargin(account.positionSize, effectiveEntryPrice, initialMarginBps);
-  const pnlPercent = positionInitialMargin > 0n
-    ? computePnlPercent(unrealizedPnl, positionInitialMargin)
-    : computePnlPercent(unrealizedPnl, account.capital);
+  // computePnlPercent throws when pnl*10000/denominator overflows MAX_SAFE_INTEGER
+  // (dust margin + large PnL). Guard so the throw can't propagate to the per-account
+  // catch and silently drop this position from the portfolio (mirrors PositionsDock).
+  let pnlPercent = 0;
+  try {
+    pnlPercent = positionInitialMargin > 0n
+      ? computePnlPercent(unrealizedPnl, positionInitialMargin)
+      : computePnlPercent(unrealizedPnl, account.capital);
+  } catch {
+    pnlPercent = 0;
+  }
 
   const liquidationDistancePct = computeLiquidationDistancePct(
     account.positionSize,
@@ -722,9 +730,17 @@ export async function fetchPortfolioSnapshot(
             // Falls back to capital when initial margin can't be computed (e.g.
             // flat position) to preserve prior behavior.
             const positionInitialMargin = computePositionInitialMargin(account.positionSize, effectiveEntryPrice, initialMarginBps);
-            const pnlPercent = positionInitialMargin > 0n
-              ? computePnlPercent(unrealizedPnl, positionInitialMargin)
-              : computePnlPercent(unrealizedPnl, account.capital);
+            // Guard: computePnlPercent throws on overflow (dust margin + large PnL);
+            // without this the throw drops the whole market's accounts (see the
+            // per-market catch below), mirroring PositionsDock's guard.
+            let pnlPercent = 0;
+            try {
+              pnlPercent = positionInitialMargin > 0n
+                ? computePnlPercent(unrealizedPnl, positionInitialMargin)
+                : computePnlPercent(unrealizedPnl, account.capital);
+            } catch {
+              pnlPercent = 0;
+            }
 
             // Liquidation distance percentage
             const liquidationDistancePct = computeLiquidationDistancePct(
