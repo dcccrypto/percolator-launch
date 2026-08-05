@@ -24,6 +24,7 @@ import type { NextRequest } from "next/server";
 import { Redis } from "@upstash/redis";
 import { Ratelimit } from "@upstash/ratelimit";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist-edge";
+import { parseBlocklist, isIpBlocked } from "@/lib/ip-blocklist";
 
 // ── Rate limiter configuration ───────────────────────────────────────────────
 // Two tiers: RPC proxy gets a higher limit since Solana web3.js generates many calls per page load.
@@ -153,54 +154,26 @@ async function getRateLimit(
 // ── IP Blocklist ────────────────────────────────────────────────────────────
 // Parsed once at module load (Edge Runtime: module is re-evaluated per region,
 // not per request, so this is effectively a startup cost).
-// Configure via IP_BLOCKLIST env var: comma-separated IPs or /8|/16|/24|/32 CIDRs.
-// Example (Railway): IP_BLOCKLIST=88.97.223.158,10.0.0.0/8
+// Configure via IP_BLOCKLIST env var: comma-separated addresses and/or CIDRs,
+// IPv4 or IPv6 (any prefix 0-32 for v4, 0-128 for v6).
+// Example (Railway): IP_BLOCKLIST=88.97.223.158,10.0.0.0/8,2001:db8::1,2001:db8::/32
 const _rawBlocklist = (process.env.IP_BLOCKLIST ?? "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
 
-interface _BlockEntry {
-  type: "exact" | "cidr";
-  ip?: string;
-  network?: number;
-  mask?: number;
-}
-
-// IPv4 only — IPv6 addresses are not supported and will pass through unblocked.
-// See packages/api/src/middleware/ip-blocklist.ts for the Hono equivalent (also IPv4-only).
-function _ipToInt(ip: string): number {
-  const p = ip.split(".").map(Number);
-  if (p.length !== 4 || p.some((n) => isNaN(n) || n < 0 || n > 255)) return -1;
-  return ((p[0]! << 24) | (p[1]! << 16) | (p[2]! << 8) | p[3]!) >>> 0;
-}
-
-const _blocklist: _BlockEntry[] = _rawBlocklist
-  .map((entry): _BlockEntry | null => {
-    if (entry.includes("/")) {
-      const [addr, prefStr] = entry.split("/");
-      const prefix = Number(prefStr);
-      if (!addr || isNaN(prefix) || prefix < 0 || prefix > 32) return null;
-      const net = _ipToInt(addr);
-      if (net === -1) return null;
-      const mask = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
-      return { type: "cidr", network: (net & mask) >>> 0, mask };
-    }
-    return { type: "exact", ip: entry };
-  })
-  .filter((e): e is _BlockEntry => e !== null);
-
-function _isBlocked(clientIp: string): boolean {
-  if (_blocklist.length === 0) return false;
-  const clientInt = _ipToInt(clientIp);
-  for (const e of _blocklist) {
-    if (e.type === "exact" && clientIp === e.ip) return true;
-    if (e.type === "cidr" && clientInt !== -1) {
-      if ((clientInt & e.mask!) >>> 0 === e.network) return true;
-    }
-  }
-  return false;
-}
+// GH#2486: this was an inline IPv4-only parser. `_ipToInt` returned -1 for
+// anything without four dotted octets, which meant (a) an IPv6 CIDR entry was
+// silently DROPPED at parse time so no IPv6 range could be banned, and (b) a
+// bare IPv6 entry survived but was matched by literal string equality — so
+// banning "2001:db8::1" missed the same host written as
+// "2001:0db8:0000:...:0001", "2001:DB8::1", or "[2001:db8::1]:443".
+// lib/ip-blocklist parses both families to bytes and compares bytes.
+// Invalid entries are now logged rather than dropped in silence — a typo'd
+// rule reading as "protected" is what kept this invisible.
+const _blocklist = parseBlocklist(_rawBlocklist, (entry, reason) => {
+  console.warn(`[middleware] IP_BLOCKLIST: ignoring "${entry}" — ${reason}`);
+});
 
 // ── Slab blocklist (GH#1363, GH#1390) ────────────────────────────────────────
 // next.config.ts rewrites /api/funding/:slab, /api/open-interest/:slab, and
@@ -368,7 +341,7 @@ export async function middleware(request: NextRequest) {
     const _proxyDepth = Math.max(0, Number(process.env.TRUSTED_PROXY_DEPTH ?? 1));
     let _clientIp = "unknown";
     // NOTE: depth=0 means "no proxy" — _clientIp stays "unknown" and
-    // _isBlocked("unknown") returns false, effectively disabling the
+    // isIpBlocked("unknown", ...) returns false, effectively disabling the
     // Edge Runtime blocklist. The Hono ip-blocklist.ts middleware
     // handles depth=0 correctly for the API server path.
     if (_proxyDepth > 0) {
@@ -378,7 +351,7 @@ export async function middleware(request: NextRequest) {
         _clientIp = _ips[Math.max(0, _ips.length - _proxyDepth)] ?? "unknown";
       }
     }
-    if (_isBlocked(_clientIp)) {
+    if (isIpBlocked(_clientIp, _blocklist)) {
       return new NextResponse(JSON.stringify({ error: "Forbidden" }), {
         status: 403,
         headers: { "Content-Type": "application/json" },
