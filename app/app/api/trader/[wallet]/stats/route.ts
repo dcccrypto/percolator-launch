@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 import { getClientIp } from "@/lib/get-client-ip";
-import { createMemoryRateLimiter } from "@/lib/memory-rate-limit";
+import { createUpstashRateLimiter } from "@/lib/upstash-rate-limit";
 import { hasIndexerDb, queryTraderStatsRows } from "@/lib/indexer-db";
 
 /**
@@ -14,7 +14,12 @@ import { hasIndexerDb, queryTraderStatsRows } from "@/lib/indexer-db";
 export const dynamic = "force-dynamic";
 
 const RATE_LIMIT = 30;
-const rateLimiter = createMemoryRateLimiter({ limit: RATE_LIMIT, windowMs: 60_000 });
+// GH#2487: was createMemoryRateLimiter — a per-process Map, so on serverless the
+// limit is per instance and a client spread across warm instances multiplies it
+// by the instance count. createUpstashRateLimiter shares the window through
+// Redis when configured and falls back to the same in-memory behaviour when it
+// is not, so dev/CI are unchanged while production becomes global.
+const rateLimiter = createUpstashRateLimiter({ limit: RATE_LIMIT, windowMs: 60_000, prefix: "rl:trader-stats" });
 
 export interface TraderStatsResponse {
   totalTrades: number;
@@ -76,7 +81,8 @@ export async function GET(
   { params }: { params: Promise<{ wallet: string }> },
 ) {
   const ip = getClientIp(request);
-  if (rateLimiter.isLimited(ip)) {
+  const rl = await rateLimiter.check(ip);
+  if (!rl.allowed) {
     return NextResponse.json(
       { error: "Too many requests — max 30 per minute" },
       { status: 429, headers: { "Retry-After": "60", "X-RateLimit-Limit": String(RATE_LIMIT), "X-RateLimit-Window": "60s" } },
