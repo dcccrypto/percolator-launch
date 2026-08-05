@@ -44,6 +44,7 @@ import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { getBackendUrl } from "@/lib/config";
 import { pollWhenVisible } from "@/lib/pollWhenVisible";
 import { parseHumanAmount } from "@/lib/parseAmount";
+import { isOracleStaleBlocking } from "@/lib/oracle-stale-gate";
 import {
   formatLeverage,
   ORDER_LEVERAGE_TITLE,
@@ -240,7 +241,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // playground markets) never blocked closing.
   const { level: oracleLevel, mode: oracleMode, ready: oracleReady } = useOracleFreshness();
   const oracleUnavailable = oracleLevel === "unavailable";
-  const oracleStale = !mockMode && (oracleUnavailable || (oracleReady && oracleLevel === "stale" && (oracleMode === "admin" || oracleMode === "hyperp" || oracleMode === "keeper")));
+  const oracleStale = !mockMode && (oracleUnavailable || isOracleStaleBlocking(oracleLevel, oracleMode, oracleReady));
   // H6: engine accrue-staleness — distinct from the oracle-push freshness
   // above. A market can look perfectly fresh here (keeper still pushing
   // prices) while the ENGINE hasn't accrued in ~500 slots, cliff-dead and

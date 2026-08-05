@@ -72,6 +72,7 @@ import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
 import { useInitUser } from "@/hooks/useInitUser";
 import { AUTO_DEPOSIT_AMOUNT } from "@/hooks/useAutoDeposit";
 import { useWalletNetworkGuard } from "@/hooks/useWalletNetworkGuard";
+import { isOracleStaleBlocking } from "@/lib/oracle-stale-gate";
 
 const LEVERAGE_SNAP_POINTS = [1, 3, 5, 10, 20];
 const SIZE_PRESETS = [25, 50, 75, 100];
@@ -301,10 +302,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const { priceUsd, priceE6: livePriceE6 } = getLivePriceSnapshot(slabAddress);
   const { level: oracleLevel, mode: oracleMode, ready: oracleReady } = useOracleFreshness();
   const oracleUnavailable = oracleLevel === "unavailable";
-  // H7: this gate was dead for keeper-mode markets (byte=3/AUTH_MARK) — the
-  // mode set only listed "admin"/"hyperp", so a stale keeper-priced market
-  // never blocked trading (fired for 0/5 live markets). "keeper" added.
-  const oracleStale = !oracleUnavailable && oracleReady && oracleLevel === "stale" && (oracleMode === "admin" || oracleMode === "hyperp" || oracleMode === "keeper");
+  // GH#2484: this was an inline ALLOWLIST of oracle modes, and it leaked twice —
+  // first "keeper" (H7: a stale keeper-priced market never blocked trading,
+  // firing for 0/5 live markets), then "pyth-pinned". The predicate now lives in
+  // lib/oracle-stale-gate and blocks every recognised mode by default, so the
+  // next mode added to the union cannot silently trade on a stale price.
+  const oracleStale = !oracleUnavailable && isOracleStaleBlocking(oracleLevel, oracleMode, oracleReady);
   // H6: engine accrue-staleness — see useEngineFreshness's file header.
   const { engineStale } = useEngineFreshness();
   const openWalletModal = usePrivyLogin();
