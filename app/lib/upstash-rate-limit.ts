@@ -18,6 +18,7 @@
 
 import { Redis } from "@upstash/redis";
 import { Ratelimit } from "@upstash/ratelimit";
+import * as Sentry from "@sentry/nextjs";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -113,6 +114,23 @@ export function createUpstashRateLimiter(
     };
   }
 
+  // Alert once per process (production only) when this limiter degrades to the
+  // per-instance in-memory fallback. Previously this happened SILENTLY when
+  // Upstash was unconfigured, so a misconfigured deploy lost GLOBAL rate limiting
+  // with no signal (limits still apply per-instance, but not across the fleet).
+  // Making it loud means a degraded deploy can no longer ship unnoticed.
+  let _degradedAlerted = false;
+  function alertDegradedOnce(reason: string): void {
+    if (_degradedAlerted || process.env.NODE_ENV !== "production") return;
+    _degradedAlerted = true;
+    const msg =
+      `[rate-limit] ${prefix}: DEGRADED to per-instance in-memory limiting (${reason}). ` +
+      `Rate limits are NOT enforced globally across serverless instances until Upstash ` +
+      `(UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN) is configured.`;
+    console.error(msg);
+    try { Sentry.captureMessage(msg, "error"); } catch { /* best-effort */ }
+  }
+
   return {
     async check(key: string): Promise<RateLimitResult> {
       const limiter = getUpstashLimiter();
@@ -130,14 +148,17 @@ export function createUpstashRateLimiter(
           };
         } catch (err) {
           // Redis/network error — fall through to per-instance in-memory fallback.
-          // Log so operators know rate limiting is degraded (per-instance, not global).
           console.warn(
             `[rate-limit] ${prefix}: Redis error, falling back to in-memory limiter (per-instance only).`,
             err instanceof Error ? err.message : err,
           );
+          alertDegradedOnce("Redis unreachable");
+          return checkLocal(key);
         }
       }
 
+      // limiter === null → Upstash is not configured.
+      alertDegradedOnce("Upstash not configured");
       return checkLocal(key);
     },
   };
