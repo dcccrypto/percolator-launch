@@ -1,3 +1,5 @@
+import { MAX_PRICE_E6 } from "@/lib/oraclePrice";
+
 /**
  * Normalize token decimals received across typed and untyped data boundaries.
  * Invalid values use the existing whole-unit fallback rather than reaching
@@ -89,8 +91,10 @@ export const LIQ_PRICE_UNLIQUIDATABLE = 18446744073709551615n; // max u64
  */
 export function formatUsd(priceE6: bigint | null | undefined): string {
   if (priceE6 == null) return "$0.00";
-  // Defense-in-depth: reject absurd values (matches Rust MAX_ORACLE_PRICE = 1e15)
-  if (priceE6 > 1_000_000_000_000_000n) return "$—";
+  // Defense-in-depth: reject absurd values above the on-chain price cap
+  // (MAX_PRICE_E6 = $1M in E6). These formatters are price-scale only, so a value
+  // above it is garbage (e.g. an uninitialized/dust liquidation price).
+  if (priceE6 > MAX_PRICE_E6) return "$—";
   if (priceE6 < 0n) return "$—";
   // PERC-297: 0 price means oracle data unavailable — show dash instead of "$0.00"
   if (priceE6 === 0n) return "$—";
@@ -99,7 +103,7 @@ export function formatUsd(priceE6: bigint | null | undefined): string {
 }
 
 export function formatUsdPriceE6(priceE6: bigint | null | undefined, fallback = "—"): string {
-  if (priceE6 == null || priceE6 <= 0n || priceE6 > 1_000_000_000_000_000n) return fallback;
+  if (priceE6 == null || priceE6 <= 0n || priceE6 > MAX_PRICE_E6) return fallback;
   const val = Number(priceE6) / 1_000_000;
   return `$${val.toLocaleString(undefined, { minimumFractionDigits: 6, maximumFractionDigits: 6 })}`;
 }

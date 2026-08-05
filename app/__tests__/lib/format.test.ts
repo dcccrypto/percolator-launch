@@ -144,7 +144,7 @@ describe("formatUsd", () => {
   it("returns '$—' for absurdly large prices (defense-in-depth)", () => {
     // The $13T bug: raw on-chain value exceeds MAX_ORACLE_PRICE
     expect(formatUsd(13_065_687_626_137_560_000n)).toBe("$—");
-    // Just over the MAX_ORACLE_PRICE threshold
+    // Well above the price cap (MAX_PRICE_E6 = $1M)
     expect(formatUsd(1_000_000_000_000_001n)).toBe("$—");
   });
 
@@ -152,11 +152,13 @@ describe("formatUsd", () => {
     expect(formatUsd(-1n)).toBe("$—");
   });
 
-  it("formats prices at the MAX_ORACLE_PRICE boundary", () => {
-    // Exactly at limit ($1B) — should still format normally
-    const result = formatUsd(1_000_000_000_000_000n);
+  it("formats prices at the MAX_PRICE_E6 boundary ($1M)", () => {
+    // Exactly at the on-chain price cap — should still format normally
+    const result = formatUsd(1_000_000_000_000n);
     expect(result).not.toBe("$—");
-    expect(result.replace(/,/g, "")).toContain("1000000000");
+    expect(result.replace(/,/g, "")).toContain("1000000");
+    // Just over the cap → dash
+    expect(formatUsd(1_000_000_000_001n)).toBe("$—");
   });
 });
 
