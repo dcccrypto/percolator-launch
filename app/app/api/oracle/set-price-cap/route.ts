@@ -43,7 +43,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { timingSafeEqual } from "node:crypto";
+import { checkAdminSecret } from "@/lib/admin-secret";
 import {
   Connection,
   Keypair,
@@ -80,12 +80,7 @@ function loadCrankKeypair(): Keypair | null {
 
 /** Timing-safe auth check. Empty ADMIN_API_SECRET must deny (GH#1692 follow-up). */
 function isAuthorized(req: NextRequest): boolean {
-  const secret = (process.env.ADMIN_API_SECRET ?? "").trim();
-  if (!secret) return false;
-  const provided = req.headers.get("x-admin-secret") ?? "";
-  const a = Buffer.from(provided, "utf8");
-  const b = Buffer.from(secret, "utf8");
-  return a.length === b.length && timingSafeEqual(a, b);
+  return checkAdminSecret(req, "oracle");
 }
 
 export async function POST(req: NextRequest) {

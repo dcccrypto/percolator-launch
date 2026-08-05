@@ -92,7 +92,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { timingSafeEqual } from "node:crypto";
+import { checkAdminSecret } from "@/lib/admin-secret";
 import { Connection, PublicKey } from "@solana/web3.js";
 import nacl from "tweetnacl";
 import * as Sentry from "@sentry/nextjs";
@@ -111,12 +111,7 @@ export const dynamic = "force-dynamic";
 /** Timing-safe admin-bypass check (H1b) — same secret/header convention as
  *  /api/oracle/set-price-cap. Empty/unset ADMIN_API_SECRET always denies. */
 function isAdminBypass(req: NextRequest): boolean {
-  const secret = (process.env.ADMIN_API_SECRET ?? "").trim();
-  if (!secret) return false;
-  const provided = req.headers.get("x-admin-secret") ?? "";
-  const a = Buffer.from(provided, "utf8");
-  const b = Buffer.from(secret, "utf8");
-  return a.length === b.length && timingSafeEqual(a, b);
+  return checkAdminSecret(req, "register");
 }
 
 /** H1v2 stateless deployer proof — see "Authentication (H1v2)" in the file header
