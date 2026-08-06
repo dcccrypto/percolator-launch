@@ -105,12 +105,26 @@ create policy "Trades readable by all" on trades for select using (true);
 create policy "Prices readable by all" on oracle_prices for select using (true);
 
 -- Service role writes (API routes use service key)
-create policy "Service can insert markets" on markets for insert with check (true);
-create policy "Service can update markets" on markets for update using (true);
-create policy "Service can insert stats" on market_stats for insert with check (true);
-create policy "Service can update stats" on market_stats for update using (true);
-create policy "Service can insert trades" on trades for insert with check (true);
-create policy "Service can insert prices" on oracle_prices for insert with check (true);
+--
+-- GH#2499: every one of these MUST carry `to service_role`. A policy with no `TO`
+-- clause applies to the PUBLIC pseudo-role, which includes `anon` — the role behind
+-- NEXT_PUBLIC_SUPABASE_ANON_KEY — so an omission here lets anyone holding the public
+-- key INSERT fake markets/trades or UPDATE stats/prices straight through PostgREST,
+-- bypassing every check in the API routes.
+--
+-- This file previously omitted them. Migration 021 added service_role-only policies
+-- alongside, and 20260402180100 dropped these permissive ones by name, so a database
+-- built from `supabase/migrations/` is not affected. But this file is the reference
+-- schema that still gets run by hand in the Supabase SQL Editor to bootstrap an
+-- environment, and PostgreSQL OR's permissive policies — re-running the old version
+-- would silently re-open write access alongside the correct policies, exactly what
+-- 20260402180100 exists to undo. Fixed at the source so a fresh bootstrap is safe.
+create policy "Service can insert markets" on markets for insert to service_role with check (true);
+create policy "Service can update markets" on markets for update to service_role using (true) with check (true);
+create policy "Service can insert stats" on market_stats for insert to service_role with check (true);
+create policy "Service can update stats" on market_stats for update to service_role using (true) with check (true);
+create policy "Service can insert trades" on trades for insert to service_role with check (true);
+create policy "Service can insert prices" on oracle_prices for insert to service_role with check (true);
 
 -- Realtime subscriptions
 alter publication supabase_realtime add table markets;
