@@ -56,8 +56,12 @@ export async function GET(
     // Check if account index is valid. Clamp the on-chain count first — a
     // sentinel/garbage numUsedAccounts (uninitialized slab) would otherwise defeat
     // this bound and let parseAccount read an out-of-range slot (accountIdx has no
-    // upper bound of its own).
-    const numUsed = sanitizeAccountCount(Number(engine.numUsedAccounts));
+    // upper bound of its own). Pass the slab's real maxAccounts so a plausible-but-
+    // garbage count below the 4096 default is also rejected (mirrors MarketStatsCard).
+    const numUsed = sanitizeAccountCount(
+      Number(engine.numUsedAccounts),
+      Number(riskParams.maxAccounts),
+    );
     if (accountIdx >= numUsed) {
       return NextResponse.json({ error: "Account not found" }, { status: 404 });
     }
