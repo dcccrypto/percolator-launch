@@ -81,6 +81,14 @@ export interface InsuranceLPState {
   registryExists: boolean;
   /** The LP Vault Registry PDA address. */
   registryAddress: PublicKey | null;
+  /**
+   * The pot of its asset this vault was bound to at CreateLpVault
+   * (`registry.domain`). v17 vaults are DUAL-DOMAIN: the vault serves BOTH pots
+   * of its asset, and every LP-vault instruction names the pot it acts on, so
+   * this must come off-chain rather than being assumed to be 0. Defaults to 0
+   * until the registry has been read.
+   */
+  lpVaultDomain: number;
   /** User's collateral ATA balance (available to deposit), in raw atoms. */
   userCollateralBalance: bigint;
   /** Total atoms currently backing the LP vault: shares outstanding + distributed fee atoms. */
@@ -126,6 +134,7 @@ export function useInsuranceLP() {
     lpDecimals: 6,
     registryExists: false,
     registryAddress: null,
+    lpVaultDomain: 0,
     userCollateralBalance: 0n,
     vaultTotalAtoms: 0n,
     vaultSharePriceE6: 1_000_000n,
@@ -297,6 +306,7 @@ export function useInsuranceLP() {
       // created, RPC hiccup, or an SDK without this export) never blocks the
       // insuranceBalance/lpSupply/userLpBalance state already computed above.
       let registryExists = false;
+      let lpVaultDomain = 0;
       let registryAddress: PublicKey | null = null;
       let vaultTotalAtoms = 0n;
       let vaultSharePriceE6 = 1_000_000n;
@@ -315,6 +325,7 @@ export function useInsuranceLP() {
           if (registryAcctInfo && registryAcctInfo.data.length > 0) {
             const registry = parseLpVaultRegistry(new Uint8Array(registryAcctInfo.data));
             registryExists = true;
+            lpVaultDomain = Number(registry.domain);
             redemptionCooldownSlots = sanitizeOnChainValue(registry.redemptionCooldownSlots);
 
             // Total backing = shares outstanding (minted 1:1 with deposited atoms)
@@ -378,6 +389,7 @@ export function useInsuranceLP() {
         lpDecimals,
         registryExists,
         registryAddress,
+        lpVaultDomain,
         userCollateralBalance,
         vaultTotalAtoms,
         vaultSharePriceE6,
@@ -508,6 +520,13 @@ export function useInsuranceLP() {
    *   [7] ledger (writable, PDA: ["lp_backing_ledger", market, domain_le])
    *   [8] tokenProgram
    *   [9] systemProgram
+   *   [10] siblingLedger (writable, the OTHER pot of this asset)
+   *
+   * v17 DUAL-DOMAIN: the vault serves both pots of its asset and NAV is summed
+   * across the two, so [10] is required even when that ledger does not exist yet
+   * — omitting it understates NAV and mints the depositor free shares at
+   * existing holders' expense. The `domain` argument picks which pot actually
+   * receives the backing; we send it to the vault's own pot.
    */
   const deposit = useCallback(async (amount: bigint) => {
     if (!wallet.publicKey || !wallet.signTransaction) {
@@ -526,8 +545,10 @@ export function useInsuranceLP() {
       const [vaultPda] = deriveVaultAuthority(progPk, marketPk);
       const [registryPda] = deriveLpVaultRegistry(progPk, marketPk);
       const [lpMintPda] = deriveInsuranceLpMint(progPk, marketPk);
-      // Domain 0 = primary insurance domain
-      const [ledgerPda] = deriveLpBackingLedger(progPk, marketPk, 0);
+      // The vault's own pot, read from the registry — NOT assumed to be 0.
+      const domain = state.lpVaultDomain;
+      const [ledgerPda] = deriveLpBackingLedger(progPk, marketPk, domain);
+      const [siblingLedgerPda] = deriveLpBackingLedger(progPk, marketPk, domain ^ 1);
 
       const collateralMint = slabState.config.collateralMint;
       const vaultTokenAta = await getAssociatedTokenAddress(collateralMint, vaultPda, true);
@@ -559,11 +580,12 @@ export function useInsuranceLP() {
         ledgerPda,
         WELL_KNOWN.tokenProgram,
         WELL_KNOWN.systemProgram,
+        siblingLedgerPda,
       ]);
       ixs.push(buildIx({
         programId: progPk,
         keys,
-        data: encodeDepositToLpVault({ amount: amount.toString() }),
+        data: encodeDepositToLpVault({ amount: amount.toString(), domain }),
       }));
       const sig = await sendTx({ connection, wallet, instructions: ixs });
       await refreshState();
@@ -575,7 +597,7 @@ export function useInsuranceLP() {
     } finally {
       setLoading(false);
     }
-  }, [wallet, connection, slabAddress, programId, slabState, refreshState]);
+  }, [wallet, connection, slabAddress, programId, slabState, state.lpVaultDomain, refreshState]);
 
   /**
    * RequestRedeemLpShares (tag 76) — begin LP share redemption (starts cooldown).
@@ -654,8 +676,15 @@ export function useInsuranceLP() {
         // and is directly credited the redemption PDA's reclaimed rent) — the UI always
         // calls it as the redeemer themselves.
         const [vaultPda] = deriveVaultAuthority(progPk, marketPk);
-        // Domain 0 — matches this hook's createMint()/deposit() hardcoded primary domain.
-        const [ledgerPda] = deriveLpBackingLedger(progPk, marketPk, 0);
+        // v17 DUAL-DOMAIN: [11] is the sibling pot's ledger. NAV and
+        // available-principal are summed across both pots, so it is required
+        // even when uninitialised, or the redeemer is underpaid by whatever sits
+        // in the sibling. The `domain` argument says which pot the payout is
+        // DRAWN from — the vault's own. A redemption draws from ONE pot and
+        // fails closed if that pot cannot cover it (rebalance, tag 91, first).
+        const domain = state.lpVaultDomain;
+        const [ledgerPda] = deriveLpBackingLedger(progPk, marketPk, domain);
+        const [siblingLedgerPda] = deriveLpBackingLedger(progPk, marketPk, domain ^ 1);
         const collateralMint = slabState.config.collateralMint;
         const vaultTokenAta = await getAssociatedTokenAddress(collateralMint, vaultPda, true);
         const redeemerAta = await getAssociatedTokenAddress(collateralMint, wallet.publicKey);
@@ -672,11 +701,12 @@ export function useInsuranceLP() {
           { pubkey: ledgerPda, isSigner: false, isWritable: true },
           { pubkey: redeemerAta, isSigner: false, isWritable: true },
           { pubkey: WELL_KNOWN.tokenProgram, isSigner: false, isWritable: false },
+          { pubkey: siblingLedgerPda, isSigner: false, isWritable: true },
         ];
         const executeIx = buildIx({
           programId: progPk,
           keys: executeKeys,
-          data: encodeExecuteRedemption(),
+          data: encodeExecuteRedemption({ domain }),
         });
         signature = await sendTx({ connection, wallet, instructions: [executeIx] });
         step = 'executed';
@@ -690,7 +720,7 @@ export function useInsuranceLP() {
     } finally {
       setLoading(false);
     }
-  }, [wallet, connection, slabAddress, programId, slabState, refreshState]);
+  }, [wallet, connection, slabAddress, programId, slabState, state.lpVaultDomain, refreshState]);
 
   return {
     state,

@@ -45,7 +45,7 @@
     "tsx": "^4.21.0"
   },
   "dependencies": {
-    "@percolatorct/sdk": "^4.3.0",
+    "@percolatorct/sdk": "github:dcccrypto/percolator-sdk#886aa6b9eb96950c8e415df695cd3ae3614472d5",
     "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.98.4",
     "dotenv": "^17.3.1"

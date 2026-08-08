@@ -66,6 +66,14 @@ vi.mock("@percolatorct/sdk", async () => {
     encodeDepositToLpVault: vi.fn().mockReturnValue(Buffer.alloc(16)),
     encodeRequestRedeemLpShares: vi.fn().mockReturnValue(Buffer.alloc(16)),
     encodeExecuteRedemption: vi.fn().mockReturnValue(Buffer.alloc(8)),
+    // Without this the hook's registry read throws into its catch and
+    // lpVaultDomain silently stays 0, so no test could ever see a wrong domain.
+    parseLpVaultRegistry: vi.fn().mockReturnValue({
+      totalLpSharesOutstanding: 1_000_000n,
+      feeDistributionTotalAtoms: 0n,
+      redemptionCooldownSlots: 0n,
+      domain: 0,
+    }),
     buildAccountMetas: vi.fn().mockReturnValue([]),
     buildIx: vi.fn().mockReturnValue({
       programId: progId,
@@ -549,6 +557,44 @@ describe("useInsuranceLP", () => {
       });
 
       expect(sendTx).toHaveBeenCalledTimes(1);
+    });
+
+    // v17 DUAL-DOMAIN. The vault is bound to a pot at CreateLpVault and it is NOT
+    // always 0 — a market that appends an asset binds its vault to that asset's
+    // domain. The hook must take the domain off the registry and derive BOTH
+    // ledgers from it; NAV is summed across the two pots, so a wrong or missing
+    // sibling misprices every deposit.
+    it("routes the deposit to the registry's own domain, not a hardcoded 0", async () => {
+      const sdk = await import("@percolatorct/sdk");
+      vi.mocked(sdk.parseLpVaultRegistry).mockReturnValue({
+        totalLpSharesOutstanding: 1_000_000n,
+        feeDistributionTotalAtoms: 0n,
+        redemptionCooldownSlots: 0n,
+        domain: 3,
+      } as never);
+      mockConnection.getAccountInfo.mockResolvedValue({
+        data: Buffer.alloc(176),
+        lamports: 2_000_000,
+        executable: false,
+        owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+      });
+
+      const { result } = renderHook(() => useInsuranceLP());
+      await waitFor(() => expect(result.current.state.lpVaultDomain).toBe(3));
+
+      vi.mocked(sdk.deriveLpBackingLedger).mockClear();
+      await act(async () => {
+        await result.current.deposit(500_000n);
+      });
+
+      expect(sdk.encodeDepositToLpVault).toHaveBeenCalledWith(
+        expect.objectContaining({ domain: 3 }),
+      );
+      const domainsDerived = vi
+        .mocked(sdk.deriveLpBackingLedger)
+        .mock.calls.map((c) => c[2]);
+      expect(domainsDerived).toContain(3);
+      expect(domainsDerived).toContain(2); // sibling = 3 ^ 1
     });
 
     it("should throw if wallet not connected", async () => {
