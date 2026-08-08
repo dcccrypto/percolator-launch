@@ -44,8 +44,8 @@ importers:
   .:
     dependencies:
       '@percolatorct/sdk':
-        specifier: github:dcccrypto/percolator-sdk#886aa6b9eb96950c8e415df695cd3ae3614472d5
-        version: https://codeload.github.com/dcccrypto/percolator-sdk/tar.gz/886aa6b9eb96950c8e415df695cd3ae3614472d5(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
+        specifier: ^4.4.0
+        version: 4.4.0(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
       '@solana/spl-token':
         specifier: ^0.4.14
         version: 0.4.14(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10))(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
@@ -81,8 +81,8 @@ importers:
   app:
     dependencies:
       '@percolatorct/sdk':
-        specifier: github:dcccrypto/percolator-sdk#886aa6b9eb96950c8e415df695cd3ae3614472d5
-        version: https://codeload.github.com/dcccrypto/percolator-sdk/tar.gz/886aa6b9eb96950c8e415df695cd3ae3614472d5(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
+        specifier: ^4.4.0
+        version: 4.4.0(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
       '@privy-io/node':
         specifier: ^0.18.0
         version: 0.18.0(@solana/kit@6.1.0(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10))(viem@2.46.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6))
@@ -1602,9 +1602,8 @@ packages:
     resolution: {integrity: sha512-IHnV6A+zxU7XwmKFinmYjUcwlyK9+xkG3/s9KcQhI9BjQKycrJ1JRO+FbNYPwZiPKW3je/DR0k7w8/gLa5eaxQ==}
     deprecated: 'The package is now available as "qr": npm install qr'
 
-  '@percolatorct/sdk@https://codeload.github.com/dcccrypto/percolator-sdk/tar.gz/886aa6b9eb96950c8e415df695cd3ae3614472d5':
-    resolution: {tarball: https://codeload.github.com/dcccrypto/percolator-sdk/tar.gz/886aa6b9eb96950c8e415df695cd3ae3614472d5}
-    version: 4.3.0
+  '@percolatorct/sdk@4.4.0':
+    resolution: {integrity: sha512-HRzuWwIVG5vh2CAd5bawJQdEcpRD5lbEi7IeSP1oAWZwudRJoTSi6dwYYNQ0pcluVA26XGjHJF0af5MIhRYTcA==}
     engines: {node: '>=20.0.0'}
 
   '@phosphor-icons/webcomponents@2.1.5':
@@ -10960,7 +10959,7 @@ snapshots:
 
   '@paulmillr/qr@0.2.1': {}
 
-  '@percolatorct/sdk@https://codeload.github.com/dcccrypto/percolator-sdk/tar.gz/886aa6b9eb96950c8e415df695cd3ae3614472d5(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)':
+  '@percolatorct/sdk@4.4.0(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)':
     dependencies:
       '@solana/spl-token': 0.4.14(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10))(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
       '@solana/web3.js': 1.98.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
