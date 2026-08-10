@@ -588,7 +588,7 @@ export function useTrade(slabAddress: string) {
           const crankIx = buildIx({
             programId,
             keys: crankKeys,
-            data: encodePermissionlessCrank({ action: CrankAction.FeeSweep, assetIndex: 0, nowSlot: 0n, recoveryReason: 0 }),
+            data: encodePermissionlessCrank({ action: CrankAction.FeeSweep, assetIndex: 0, nowSlot: 0n, closeQ: 0n, feeBps: 0n, recoveryReason: 0 } as Parameters<typeof encodePermissionlessCrank>[0] & { closeQ: bigint; feeBps: bigint }),
           });
           instructions.unshift(crankIx);
         }
