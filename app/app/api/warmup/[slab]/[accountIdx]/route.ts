@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { fetchSlab, parseAccount, parseEngine, parseParams } from "@percolatorct/sdk";
 import { getConfig, getAllProgramIds } from "@/lib/config";
+import { sanitizeAccountCount } from "@/lib/health";
 
 // v17 wrapper program IDs — parseEngine does not support v17 account format.
 // Fresh fee-split wrapper (2026-07-17). The 2026-06-26 wrapper (69VUZ7a2...) is
@@ -52,8 +53,16 @@ export async function GET(
     const engine = parseEngine(data);
     const riskParams = parseParams(data);
 
-    // Check if account index is valid
-    if (accountIdx >= engine.numUsedAccounts) {
+    // Check if account index is valid. Clamp the on-chain count first — a
+    // sentinel/garbage numUsedAccounts (uninitialized slab) would otherwise defeat
+    // this bound and let parseAccount read an out-of-range slot (accountIdx has no
+    // upper bound of its own). Pass the slab's real maxAccounts so a plausible-but-
+    // garbage count below the 4096 default is also rejected (mirrors MarketStatsCard).
+    const numUsed = sanitizeAccountCount(
+      Number(engine.numUsedAccounts),
+      Number(riskParams.maxAccounts),
+    );
+    if (accountIdx >= numUsed) {
       return NextResponse.json({ error: "Account not found" }, { status: 404 });
     }
 
