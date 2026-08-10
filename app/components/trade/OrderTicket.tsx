@@ -53,7 +53,7 @@ import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
-import { AccountKind, computePreTradeLiqPrice, computeLiqPrice } from "@percolatorct/sdk";
+import { AccountKind, computeLiqPrice } from "@percolatorct/sdk";
 import { computeEstimatedEntryPrice, computeTradingFee, computePositionInitialMargin, estimateEntryFromPnl } from "@/lib/trading";
 import { TradeConfirmationModal } from "@/components/trade/TradeConfirmationModal";
 import { InfoIcon } from "@/components/ui/Tooltip";
@@ -638,12 +638,16 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     // Opposite direction: a partial reduce keeps the original cost basis; a
     // flip's residual position takes on this trade's fill price as its entry.
     : (positionSize < existingAbsSize ? existingEntryPriceE6 : estEntry);
-  const afterLiqPrice = hasOrder
-    ? (existingPositionSize === 0n
-        ? computePreTradeLiqPrice(oracleE6, marginNative, positionSize, maintenanceMarginBps, tradingFeeBps, direction)
-        : (combinedSignedSize !== 0n && combinedEntryPriceE6 > 0n
-            ? computeLiqPrice(combinedEntryPriceE6, capital, combinedSignedSize, maintenanceMarginBps)
-            : 0n))
+  // Cross-margin: the full account capital backs the position — including a fresh
+  // open (withdraw is blocked while any leg is open). Price both the fresh-open and
+  // scale-in cases with the same capital-based computeLiqPrice as PositionsDock /
+  // useLiqPrice: when there is no existing position, combinedSignedSize and
+  // combinedEntryPriceE6 already reduce to this order's own signed size and
+  // estimated entry, so one branch is correct for both. (Previously the fresh-open
+  // case priced against only the order's margin, understating liq distance and
+  // making the preview jump once the position opened on full capital.)
+  const afterLiqPrice = hasOrder && combinedSignedSize !== 0n && combinedEntryPriceE6 > 0n
+    ? computeLiqPrice(combinedEntryPriceE6, capital, combinedSignedSize, maintenanceMarginBps)
     : 0n;
   const beforeLiqPrice = userAccount && userAccount.account.positionSize !== 0n && existingEntryPriceE6 > 0n
     ? computeLiqPrice(existingEntryPriceE6, capital, userAccount.account.positionSize, maintenanceMarginBps)
