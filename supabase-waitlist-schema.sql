@@ -6,7 +6,9 @@
 -- end state.
 --
 -- Design:
--- - Anonymous users insert via the publishable key (RLS allows insert only).
+-- - Inserts are server-only, via WAITLIST_SUPABASE_SERVICE_ROLE_KEY (GH#2503).
+--   The publishable key can no longer write; it is only used for anon-callable
+--   SECURITY DEFINER RPCs.
 -- - Server-side route /api/waitlist/signup verifies the wallet signature
 --   BEFORE inserting, so RLS-allowed inserts are gated on real ownership.
 -- - SELECT is denied to anon (privacy: don't leak the email-list-equivalent).
@@ -216,12 +218,33 @@ alter table public.waitlist enable row level security;
 
 drop policy if exists "anon insert" on public.waitlist;
 drop policy if exists "deny select" on public.waitlist;
+drop policy if exists "service_role insert" on public.waitlist;
 
--- Anon can insert (server-side route validates the signature first).
-create policy "anon insert"
+-- GH#2503: writes are server-only.
+--
+-- This previously read `to anon with check (true)` — an unconditional grant to
+-- the role the PUBLISHABLE key maps to. Every anti-abuse control (referral-code
+-- requirement, Turnstile, honeypot, dwell time, disposable-email block, bot-UA
+-- filter, per-IP and per-code caps, wallet-signature verification) lives in
+-- POST /api/waitlist/signup, so that route was being treated as the security
+-- boundary while the database accepted writes from anyone holding a key that is
+-- public by design. A direct PostgREST INSERT skipped all of it and could set
+-- created_at (→ position #1, since waitlist_position orders by created_at ASC),
+-- tier, referral_code and referred_by_code (→ leaderboard fraud) at will.
+--
+-- Note on what actually closes it: the protection comes from REMOVING the anon
+-- policy, not from adding the one below. With RLS enabled and no policy
+-- applying to anon, anon INSERT is denied by default; service_role holds
+-- BYPASSRLS and would write regardless. The policy is written out anyway so the
+-- intended writer is stated in the schema rather than implied by an absence,
+-- and so a future `create policy ... to anon` reads as the regression it is.
+--
+-- The signup route uses getWaitlistServiceSupabase() for this insert. SELECT /
+-- UPDATE / DELETE remain unpolicied for anon, as before.
+create policy "service_role insert"
   on public.waitlist
   for insert
-  to anon
+  to service_role
   with check (true);
 
 -- Anon cannot read individual rows. Intentionally no select policy →
@@ -325,13 +348,16 @@ grant execute on function public.waitlist_referral_code_exists(text) to anon;
 -- WHY IT'S TAMPER-RESISTANT:
 --   • referred_by_code is set at INSERT time by the signup route. The route
 --     never UPDATEs it afterwards.
---   • The RLS policy on the waitlist table grants anon INSERT only — no
---     UPDATE or DELETE policy exists, so anon cannot mutate the column.
+--   • The RLS policy on the waitlist table grants INSERT to service_role only
+--     (GH#2503) — anon holds no write policy at all, and no UPDATE or DELETE
+--     policy exists for any role, so the column cannot be mutated after insert.
 --   • This function reads `count(*)` of rows that reference each code; an
 --     attacker would need INSERT access to a row with a chosen
---     referred_by_code (which they have — but their inserted row is then
---     subject to the same RLS, and the route validates `referred_by_code`
---     points at a real code before accepting). They cannot decrement, edit
+--     referred_by_code. Before GH#2503 they had exactly that: this rationale
+--     leaned on "the route validates referred_by_code", but the route was not
+--     the only write path — a publishable-key INSERT never reached it. With
+--     writes scoped to service_role the route IS the only path, so that
+--     sentence is now true rather than assumed. They cannot decrement, edit
 --     ownership of, or hide existing referrals.
 --   • Service role bypasses RLS but the service-role key lives in operator
 --     env (Vercel project + local .env), not in the browser bundle.
