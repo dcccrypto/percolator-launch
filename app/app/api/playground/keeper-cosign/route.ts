@@ -55,6 +55,7 @@ import {
   buildAccountMetas,
 } from "@percolatorct/sdk";
 import { getRpcEndpoint, getConfig } from "@/lib/config";
+import { MAX_PRICE_E6 } from "@/lib/oraclePrice";
 import { requirePlaygroundKeeperSigner } from "@/lib/playground-keeper-signer";
 
 export const dynamic = "force-dynamic";
@@ -129,8 +130,16 @@ export async function POST(req: NextRequest) {
   try {
     priceE6 = BigInt(initialPriceE6);
     if (priceE6 <= 0n) throw new Error("must be positive");
+    // SEC: bound the caller-supplied initial mark to the protocol max — the same
+    // ceiling every other price path is clamped to (lib/oraclePrice MAX_PRICE_E6).
+    // Without it a creator could seed their own market's ConfigureAuthMark with an
+    // absurd initial mark.
+    if (priceE6 > MAX_PRICE_E6) throw new Error("exceeds max");
   } catch {
-    return NextResponse.json({ error: "Invalid initialPriceE6 — must be positive bigint string" }, { status: 400 });
+    return NextResponse.json(
+      { error: `Invalid initialPriceE6 — must be a positive bigint string ≤ ${MAX_PRICE_E6} (E6)` },
+      { status: 400 },
+    );
   }
 
   const assetIdx = typeof assetIndex === "number" ? assetIndex : 0;
