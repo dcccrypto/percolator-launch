@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 import { validateNumericParam } from "@/lib/route-validators";
 import { getClientIp } from "@/lib/get-client-ip";
-import { createMemoryRateLimiter } from "@/lib/memory-rate-limit";
+import { createUpstashRateLimiter } from "@/lib/upstash-rate-limit";
 import { hasIndexerDb, queryTraderTradesPage } from "@/lib/indexer-db";
 
 /**
@@ -14,7 +14,12 @@ import { hasIndexerDb, queryTraderTradesPage } from "@/lib/indexer-db";
 export const dynamic = "force-dynamic";
 
 const RATE_LIMIT = 60;
-const rateLimiter = createMemoryRateLimiter({ limit: RATE_LIMIT, windowMs: 60_000 });
+// GH#2487: was createMemoryRateLimiter — a per-process Map, so on serverless the
+// limit is per instance and a client spread across warm instances multiplies it
+// by the instance count. createUpstashRateLimiter shares the window through
+// Redis when configured and falls back to the same in-memory behaviour when it
+// is not, so dev/CI are unchanged while production becomes global.
+const rateLimiter = createUpstashRateLimiter({ limit: RATE_LIMIT, windowMs: 60_000, prefix: "rl:trader-trades" });
 
 export interface TraderTradeEntry {
   id: string;
@@ -33,7 +38,8 @@ export async function GET(
   { params }: { params: Promise<{ wallet: string }> },
 ) {
   const ip = getClientIp(_request);
-  if (rateLimiter.isLimited(ip)) {
+  const rl = await rateLimiter.check(ip);
+  if (!rl.allowed) {
     return NextResponse.json(
       { error: "Too many requests — max 60 per minute" },
       {
@@ -94,7 +100,7 @@ export async function GET(
           headers: {
             "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30",
             "X-RateLimit-Limit": String(RATE_LIMIT),
-            "X-RateLimit-Remaining": String(rateLimiter.remaining(ip)),
+            "X-RateLimit-Remaining": String(rl.remaining),
             "X-RateLimit-Window": "60s",
           },
         },
@@ -156,7 +162,7 @@ export async function GET(
         headers: {
           "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30",
           "X-RateLimit-Limit": String(RATE_LIMIT),
-          "X-RateLimit-Remaining": String(rateLimiter.remaining(ip)),
+          "X-RateLimit-Remaining": String(rl.remaining),
           "X-RateLimit-Window": "60s",
         },
       },
@@ -170,7 +176,7 @@ export async function GET(
         headers: {
           "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30",
           "X-RateLimit-Limit": String(RATE_LIMIT),
-          "X-RateLimit-Remaining": String(rateLimiter.remaining(ip)),
+          "X-RateLimit-Remaining": String(rl.remaining),
           "X-RateLimit-Window": "60s",
         },
       },

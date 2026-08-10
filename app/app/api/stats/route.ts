@@ -13,7 +13,7 @@ import { isPhantomOpenInterest } from "@/lib/phantom-oi";
 import { computeDisplayOiUsd } from "@/lib/oi-display";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import { getClientIp } from "@/lib/get-client-ip";
-import { createMemoryRateLimiter } from "@/lib/memory-rate-limit";
+import { createUpstashRateLimiter } from "@/lib/upstash-rate-limit";
 import { getConfig, getRpcEndpoint } from "@/lib/config";
 import {
   hasIndexerDb,
@@ -30,12 +30,16 @@ export const dynamic = "force-dynamic";
 type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'];
 
 // ---------------------------------------------------------------------------
-// PERC-660: In-memory rate limiter — 60 req/min per IP (matches /api/trader pattern)
-// Uses shared createMemoryRateLimiter from lib/memory-rate-limit.ts.
-// Per-process only (multi-instance: effective limit = 60 × N). At mainnet
-// scale, replace with Redis-backed rate limiting.
+// PERC-660: Rate limiter — 60 req/min per IP (matches /api/trader pattern).
+// The "at mainnet scale, replace with Redis-backed rate limiting" note that used
+// to sit here is now done — see below.
 // ---------------------------------------------------------------------------
-const rateLimiter = createMemoryRateLimiter({ limit: 60, windowMs: 60_000 });
+// GH#2487: was createMemoryRateLimiter — a per-process Map, so on serverless the
+// limit is per instance and a client spread across warm instances multiplies it
+// by the instance count. createUpstashRateLimiter shares the window through
+// Redis when configured and falls back to the same in-memory behaviour when it
+// is not, so dev/CI are unchanged while production becomes global.
+const rateLimiter = createUpstashRateLimiter({ limit: 60, windowMs: 60_000, prefix: "rl:stats" });
 
 // ---------------------------------------------------------------------------
 // Playground self-contained stats path (no Supabase required)
@@ -346,7 +350,8 @@ async function computeStatsFromIndexer(): Promise<ReturnType<typeof zeroStats>> 
  */
 export async function GET(request: NextRequest) {
   const ip = getClientIp(request);
-  if (rateLimiter.isLimited(ip)) {
+  const rl = await rateLimiter.check(ip);
+  if (!rl.allowed) {
     return NextResponse.json(
       { error: "Rate limited. Max 60 requests per minute." },
       { status: 429, headers: { "Retry-After": "60" } },
