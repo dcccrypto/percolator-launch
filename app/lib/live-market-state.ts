@@ -7,6 +7,7 @@ import {
   V17_MARKET_GROUP_OFF,
 } from "@percolatorct/sdk";
 import { getRpcEndpoint } from "@/lib/config";
+import { sanitizeOnChainValue } from "@/lib/health";
 
 /**
  * Live per-market state, read straight from the slab account.
@@ -111,9 +112,12 @@ function parseLiveState(data: Uint8Array): LiveMarketState | null {
   let insurance = 0;
   try {
     const oi = parseMarketGroupV17OI(data);
-    oiLongQ = Number(oi.totalLongOiQ);
-    oiShortQ = Number(oi.totalShortOiQ);
-    insurance = Number(oi.insuranceBalance);
+    // Sanitize sentinel/negative on-chain values (u64::MAX from an uninitialized
+    // slab) to 0 before Number() — otherwise they become astronomical OI/insurance
+    // that poisons total_open_interest_usd downstream. Same treatment markPrice gets.
+    oiLongQ = Number(sanitizeOnChainValue(oi.totalLongOiQ));
+    oiShortQ = Number(sanitizeOnChainValue(oi.totalShortOiQ));
+    insurance = Number(sanitizeOnChainValue(oi.insuranceBalance));
   } catch {
     // OI unreadable — zeros, same as the pre-existing degradation behaviour.
   }
