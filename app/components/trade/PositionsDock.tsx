@@ -78,6 +78,7 @@ import { getEntryPrice, clearEntryPrice } from "@/lib/entry-price";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { isSentinelValue } from "@/lib/health";
 import { RenderProfiler } from "@/components/dev/RenderProfiler";
+import { isOracleStaleBlocking } from "@/lib/oracle-stale-gate";
 
 function abs(n: bigint): bigint {
   return n < 0n ? -n : n;
@@ -138,7 +139,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   // H7: "keeper" added to the mode set — this gate previously only fired for
   // admin/hyperp markets, so a stale keeper-priced market (all 5 live
   // playground markets) never blocked closing.
-  const oracleStale = !mockMode && (oracleUnavailable || (oracleReady && oracleLevel === "stale" && (oracleMode === "admin" || oracleMode === "hyperp" || oracleMode === "keeper")));
+  const oracleStale = !mockMode && (oracleUnavailable || isOracleStaleBlocking(oracleLevel, oracleMode, oracleReady));
   // H6: engine accrue-staleness — distinct from the oracle-push freshness
   // above. A market can look perfectly fresh here (keeper still pushing
   // prices) while the ENGINE hasn't accrued in ~500 slots, cliff-dead and

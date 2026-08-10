@@ -55,6 +55,7 @@ import {
 } from "@/lib/format";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockPortfolioPositions } from "@/lib/mock-trade-data";
+import { isOracleStaleBlocking } from "@/lib/oracle-stale-gate";
 
 function abs(n: bigint): bigint {
   return n < 0n ? -n : n;
@@ -88,8 +89,7 @@ const CloseFlow: FC<{
   const mockExempt = isMockMode() && isMockSlab(pos.slabAddress);
   const oracleStale =
     !mockExempt &&
-    (oracleLevel === "unavailable" ||
-      (oracleReady && oracleLevel === "stale" && (oracleMode === "admin" || oracleMode === "hyperp" || oracleMode === "keeper")));
+    (oracleLevel === "unavailable" || isOracleStaleBlocking(oracleLevel, oracleMode, oracleReady));
   const posSize = pos.account?.positionSize ?? 0n;
   return (
     <ClosePositionModal
