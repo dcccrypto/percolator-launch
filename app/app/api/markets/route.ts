@@ -21,7 +21,7 @@ import { getKnownMarketLpCapitals, scanEnabledMarketLpCapitals } from "@/lib/lp-
 import { loadMergedMarketRows } from "@/lib/market-registry";
 import { isPhantomOpenInterest, MIN_VAULT_FOR_OI } from "@/lib/phantom-oi";
 import { computeDisplayOiUsd } from "@/lib/oi-display";
-import { hasInvisibleOrBidi } from "@/lib/text-safety";
+import { validateSymbol, validateName } from "@/lib/market-metadata-validation";
 import { sanitizeLogoUrl } from "@/lib/token-metadata-validators";
 import { computeMarketHealthFromStats } from "@/lib/health";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
@@ -1474,41 +1474,18 @@ export async function POST(req: NextRequest) {
 
   // GH#1963: Validate symbol — alphanumeric + dash/dot/underscore, 1–20 chars.
   // Prevents deceptive or garbage metadata from entering the registry.
-  const SYMBOL_RE = /^[A-Za-z0-9._\-]{1,20}$/;
-  const resolvedSymbol: string = symbol || mint_address.slice(0, 4).toUpperCase();
-  if (!SYMBOL_RE.test(resolvedSymbol)) {
-    return NextResponse.json(
-      { error: "Invalid symbol: must be 1–20 chars, alphanumeric/dash/dot/underscore only" },
-      { status: 400 }
-    );
+  const symbolCheck = validateSymbol(symbol, mint_address.slice(0, 4).toUpperCase());
+  if (!symbolCheck.ok) {
+    return NextResponse.json({ error: symbolCheck.error }, { status: 400 });
   }
+  const resolvedSymbol: string = symbolCheck.value!;
 
   // GH#1963: Validate name — printable ASCII, 1–64 chars.
-  const resolvedName: string = name || `Token ${mint_address.slice(0, 8)}`;
-  if (typeof resolvedName !== "string" || resolvedName.trim().length === 0 || resolvedName.length > 64) {
-    return NextResponse.json(
-      { error: "Invalid name: must be 1–64 characters" },
-      { status: 400 }
-    );
+  const nameCheck = validateName(name, `Token ${mint_address.slice(0, 8)}`);
+  if (!nameCheck.ok) {
+    return NextResponse.json({ error: nameCheck.error }, { status: 400 });
   }
-  // Reject control characters and non-printable chars.
-  // eslint-disable-next-line no-control-regex
-  if (/[\x00-\x1f\x7f]/.test(resolvedName)) {
-    return NextResponse.json(
-      { error: "Invalid name: must not contain control characters" },
-      { status: 400 }
-    );
-  }
-  // SEC: reject invisible / bidirectional / format characters (RTL overrides,
-  // zero-width chars, etc.) \u2014 the name-impersonation vectors the sweep
-  // flagged. These are NOT control chars (they passed the check above).
-  // Visible Unicode (accents, CJK, emoji) stays allowed. See hasInvisibleOrBidi.
-  if (hasInvisibleOrBidi(resolvedName)) {
-    return NextResponse.json(
-      { error: "Invalid name: must not contain invisible or bidirectional formatting characters" },
-      { status: 400 }
-    );
-  }
+  const resolvedName: string = nameCheck.value!;
 
   // SEC: sanitize the attacker-suppliable logo_url with the SAME allowlist
   // (https/ipfs only, ≤500 chars) that external-API metadata already gets —

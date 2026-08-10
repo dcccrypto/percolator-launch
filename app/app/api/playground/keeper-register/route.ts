@@ -105,6 +105,7 @@ import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { resolveTokenLogo } from "@/lib/token-logo";
 import { sanitizeLogoUrl } from "@/lib/token-metadata-validators";
 import { upsertRegisteredMarketRow, type RegistrationRow } from "@/lib/market-registration";
+import { checkSymbol, checkName } from "@/lib/market-metadata-validation";
 
 export const dynamic = "force-dynamic";
 
@@ -242,6 +243,32 @@ export async function POST(req: NextRequest) {
   if (mainnetCA) {
     try { new PublicKey(mainnetCA); } catch {
       return NextResponse.json({ error: "Invalid mainnetCA" }, { status: 400 });
+    }
+  }
+
+  // SEC: validate all caller-supplied metadata BEFORE it can reach the markets
+  // DB row (upsertRegisteredMarketRow) or the Blob registry
+  // (upsertRegisteredMarket). `symbol`/`label` (body) and `payload.symbol`/
+  // `payload.name` are attacker-controllable and are rendered as the market's
+  // identity across the UI; without this, deceptive names (homoglyph / RTL /
+  // zero-width), control characters, or overlong values could impersonate a
+  // real market. This mirrors the guards the removed POST /api/markets path
+  // enforced (see lib/market-metadata-validation). Server-derived fallbacks
+  // ("UNKNOWN", the derived label, `Market <slab>`) are safe and unvalidated;
+  // the retry path sends nulls here and is unaffected.
+  {
+    const payloadMeta = (payload ?? {}) as Record<string, unknown>;
+    const metaFields: Array<[unknown, "symbol" | "name"]> = [
+      [symbol, "symbol"],
+      [payloadMeta.symbol, "symbol"],
+      [label, "name"],
+      [payloadMeta.name, "name"],
+    ];
+    for (const [raw, kind] of metaFields) {
+      if (typeof raw === "string" && raw.length > 0) {
+        const res = kind === "symbol" ? checkSymbol(raw) : checkName(raw);
+        if (!res.ok) return NextResponse.json({ error: res.error }, { status: 400 });
+      }
     }
   }
 
