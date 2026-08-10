@@ -21,6 +21,16 @@ describe("warmup account-index clamp", () => {
     expect(sanitizeAccountCount(-1)).toBe(0);
   });
 
+  it("clamps a sentinel/garbage maxAccounts cap to the structural max", () => {
+    // The cap is on-chain data too: on an uninitialized slab it is a sentinel, so
+    // it must be clamped to MAX_SLAB_ACCOUNTS rather than taken at face value —
+    // otherwise a sentinel cap admits the sentinel count it is meant to reject.
+    expect(sanitizeAccountCount(Number(2n ** 64n - 1n), Number(2n ** 64n - 1n))).toBe(0);
+    expect(sanitizeAccountCount(5000, 999_999)).toBe(0); // cap > 4096 clamped → 5000 rejected
+    expect(sanitizeAccountCount(50, 10)).toBe(0);        // real tighter cap honored
+    expect(sanitizeAccountCount(5, 10)).toBe(5);         // in range under the real cap
+  });
+
   it("legitimate counts pass through", () => {
     expect(sanitizeAccountCount(10)).toBe(10);
     expect(sanitizeAccountCount(4096)).toBe(4096); // large-slab capacity

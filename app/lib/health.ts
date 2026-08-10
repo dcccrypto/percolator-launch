@@ -61,7 +61,14 @@ const MAX_SLAB_ACCOUNTS = 4096;
  */
 export function sanitizeAccountCount(count: number, maxAccounts?: number): number {
   if (count < 0) return 0;
-  const cap = maxAccounts != null && maxAccounts > 0 ? maxAccounts : MAX_SLAB_ACCOUNTS;
+  // The caller-supplied cap is itself on-chain data and can be a sentinel on an
+  // uninitialized slab (both numUsedAccounts and maxAccounts are garbage together).
+  // Never let it exceed the structural maximum, or a sentinel cap would admit a
+  // sentinel count instead of rejecting it.
+  const cap =
+    maxAccounts != null && maxAccounts > 0 && maxAccounts <= MAX_SLAB_ACCOUNTS
+      ? maxAccounts
+      : MAX_SLAB_ACCOUNTS;
   if (count > cap) return 0;
   return count;
 }

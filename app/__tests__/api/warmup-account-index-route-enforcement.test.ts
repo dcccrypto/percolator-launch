@@ -7,7 +7,9 @@
  * GET handler with the SDK parsers mocked, and binds two properties:
  *   1. the clamp exists — a sentinel count is rejected at the bound;
  *   2. it uses the slab's maxAccounts — a plausible-but-garbage count that is below
- *      the 4096 default but above the real cap is also rejected.
+ *      the 4096 default but above the real cap is also rejected;
+ *   3. the cap is itself clamped — on an uninitialized slab maxAccounts is a sentinel
+ *      too, and it must not become the ceiling that admits the sentinel count.
  * A control confirms an in-range index passes the bound (fails later, differently).
  */
 import { describe, expect, it, vi } from "vitest";
@@ -44,6 +46,16 @@ const errOf = async (r: Response) => String(((await r.json()) as { error?: strin
 describe("warmup clamps numUsedAccounts against the slab's real maxAccounts", () => {
   it("sentinel count (u64::MAX) is rejected at the bound (binds the clamp)", async () => {
     h.count = 2n ** 64n - 1n; h.max = 256n;
+    const res = await call("5");
+    expect(res.status).toBe(404);
+    expect(await errOf(res)).toBe("Account not found");
+  });
+
+  it("sentinel count AND sentinel maxAccounts is still rejected (binds the cap clamp)", async () => {
+    // Uninitialized slab: BOTH fields are garbage. A sentinel cap must not become
+    // the ceiling — otherwise the sentinel count slips through the bound and the
+    // request falls to a different, later 404 ("No active warmup") instead.
+    h.count = 2n ** 64n - 1n; h.max = 2n ** 64n - 1n;
     const res = await call("5");
     expect(res.status).toBe(404);
     expect(await errOf(res)).toBe("Account not found");
