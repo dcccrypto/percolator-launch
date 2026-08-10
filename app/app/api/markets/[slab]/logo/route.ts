@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { timingSafeEqual } from "node:crypto";
+import { checkAdminSecret } from "@/lib/admin-secret";
 import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 import nacl from "tweetnacl";
@@ -77,12 +77,7 @@ const RATE_LIMIT_MS = 30_000; // 1 upload per 30s per slab
  *  /api/playground/keeper-register and /api/oracle/set-price-cap. Empty/unset
  *  ADMIN_API_SECRET always denies. */
 function isAdminBypass(req: NextRequest): boolean {
-  const secret = (process.env.ADMIN_API_SECRET ?? "").trim();
-  if (!secret) return false;
-  const provided = req.headers.get("x-admin-secret") ?? "";
-  const a = Buffer.from(provided, "utf8");
-  const b = Buffer.from(secret, "utf8");
-  return a.length === b.length && timingSafeEqual(a, b);
+  return checkAdminSecret(req, "logo");
 }
 
 /** Stateless deployer proof — see the file header for why this mirrors
