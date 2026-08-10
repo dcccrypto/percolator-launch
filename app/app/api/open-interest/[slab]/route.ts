@@ -208,11 +208,18 @@ export async function GET(
     });
   }
 
-  // ── FALLBACK: all paths failed — return empty zeros ───────────────────────
-  // Valid shape so the component doesn't throw; renders "Balanced / 0 / 0" state.
-  console.warn(`[/api/open-interest/${validSlab}] all paths failed — returning zero OI`);
+  // ── FALLBACK: all paths failed — signal a DEGRADED state, do not fabricate $0 ──
+  // Returning 200 with zeros made a transient RPC failure render as a genuine
+  // "$0 OI / Balanced" market. A 5xx lets the client distinguish "temporarily
+  // unavailable" from "no open interest": OpenInterestCard already throws on
+  // !res.ok and falls back to the real on-chain engine OI, so this restores the
+  // correct value instead of a fabricated zero. The zero fields + `unavailable`
+  // flag keep the body shape valid for any other consumer.
+  console.warn(`[/api/open-interest/${validSlab}] all paths failed — returning 503 (degraded)`);
   return NextResponse.json(
     {
+      error: "Open interest temporarily unavailable",
+      unavailable: true,
       totalOi: "0",
       longOi: "0",
       shortOi: "0",
@@ -220,6 +227,7 @@ export async function GET(
       historicalOi: [],
     },
     {
+      status: 503,
       headers: { "Cache-Control": "no-store" },
     },
   );
