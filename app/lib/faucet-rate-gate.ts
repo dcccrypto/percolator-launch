@@ -27,7 +27,9 @@ export interface GateResult {
  *
  * @param supabase  Service-role Supabase client
  * @param wallet    Wallet address
- * @param fundType  "sol" | "usdc" | "auto-fund"
+ * @param fundType  "sol" | "usdc" | "auto-fund" | "playground-faucet"
+ * @param windowMs  Rate-limit window (defaults to 24h; the playground faucet
+ *                  passes a shorter 1h window while keeping the durable gate).
  */
 /**
  * Thrown when the gate cannot function at all (its table is missing), as opposed
@@ -42,8 +44,8 @@ export class FaucetGateUnavailableError extends Error {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function tryFaucetGate(supabase: any, wallet: string, fundType: string): Promise<GateResult> {
-  const windowStart = new Date(Date.now() - RATE_LIMIT_MS).toISOString();
+export async function tryFaucetGate(supabase: any, wallet: string, fundType: string, windowMs: number = RATE_LIMIT_MS): Promise<GateResult> {
+  const windowStart = new Date(Date.now() - windowMs).toISOString();
 
   try {
     // GH#1803: Step 0 — Pre-check SELECT FIRST.
@@ -91,7 +93,7 @@ export async function tryFaucetGate(supabase: any, wallet: string, fundType: str
 
     if (activeClaim) {
       const nextClaimAt = new Date(
-        new Date(activeClaim.claimed_at as string).getTime() + RATE_LIMIT_MS,
+        new Date(activeClaim.claimed_at as string).getTime() + windowMs,
       ).toISOString();
       return { allowed: false, nextClaimAt };
     }
@@ -122,7 +124,7 @@ export async function tryFaucetGate(supabase: any, wallet: string, fundType: str
           .maybeSingle();
 
         const nextClaimAt = existing
-          ? new Date(new Date(existing.claimed_at as string).getTime() + RATE_LIMIT_MS).toISOString()
+          ? new Date(new Date(existing.claimed_at as string).getTime() + windowMs).toISOString()
           : null;
         return { allowed: false, nextClaimAt };
       }
