@@ -455,12 +455,30 @@ export interface TraderStatsRow {
  * approximate, it was the timestamp of the 10 000th trade rather than the most
  * recent one.
  *
- * The arithmetic mirrors the JS reducer exactly so the two paths cannot drift:
- *   volume += abs(trunc(size)) * round(price * 1e6) / 1e6
- *   fees   += round(fee)
- * `size` is truncated at the decimal point (the JS did `String(size).split(".")[0]`)
- * and `numeric` keeps full precision, so this does not inherit the float rounding
- * a `Number()` round-trip would.
+ * The arithmetic mirrors the JS reducer PER ROW, which is subtler than it looks
+ * and got it wrong on the first attempt (caught in review on #2512):
+ *
+ *   volume += trunc(abs(trunc(size)) * floor(price * 1e6 + 0.5) / 1e6)
+ *   fees   += floor(fee + 0.5)
+ *
+ * Two details the obvious translation misses:
+ *
+ * 1. The reducer accumulates with BigInt division — `(absSize * priceE6) / 1e6n`
+ *    — which TRUNCATES on every trade. Summing the fractional values and
+ *    rounding once at the end is a different number, and not by a rounding
+ *    error: ten trades of size 1 at price 1.9 give 10 the per-row way and 19
+ *    the sum-then-round way. The per-row `trunc()` is load-bearing.
+ * 2. `::bigint` ROUNDS in Postgres, so a fractional total would round up rather
+ *    than truncate. With per-row truncation the sum is already integral, so the
+ *    cast is exact.
+ *
+ * `floor(x + 0.5)` rather than `round()` because that is what JS `Math.round`
+ * does: they disagree on negative halves (`Math.round(-1.5) === -1`, while
+ * Postgres `round(-1.5) = -2`).
+ *
+ * `size` is truncated at the decimal point to match the reducer's
+ * `String(size).split(".")[0]`, and the sums stay in `numeric`, so this does not
+ * inherit the float rounding a `Number()` round-trip would introduce.
  */
 export interface TraderStatsAggregate {
   totalTrades: number;
@@ -491,10 +509,10 @@ export async function queryTraderStatsAggregate(
       count(*)::text                                            AS total_trades,
       count(*) FILTER (WHERE side = 'long')::text               AS long_trades,
       count(*) FILTER (WHERE side <> 'long')::text              AS short_trades,
-      COALESCE(sum(
-        abs(trunc(size::numeric)) * round(price::numeric * 1000000) / 1000000
-      ), 0)::bigint::text                                       AS total_volume,
-      COALESCE(sum(round(fee::numeric)), 0)::bigint::text       AS total_fees,
+      COALESCE(sum(trunc(
+        abs(trunc(size::numeric)) * floor(price::numeric * 1000000 + 0.5) / 1000000
+      )), 0)::bigint::text                                      AS total_volume,
+      COALESCE(sum(floor(fee::numeric + 0.5)), 0)::bigint::text AS total_fees,
       count(DISTINCT slab_address)::text                        AS unique_markets,
       min(created_at)                                           AS first_trade_at,
       max(created_at)                                           AS last_trade_at
