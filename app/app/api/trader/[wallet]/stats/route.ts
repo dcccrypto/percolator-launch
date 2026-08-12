@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 import { getClientIp } from "@/lib/get-client-ip";
 import { createUpstashRateLimiter } from "@/lib/upstash-rate-limit";
-import { hasIndexerDb, queryTraderStatsRows } from "@/lib/indexer-db";
+import { hasIndexerDb, queryTraderStatsAggregate } from "@/lib/indexer-db";
 
 /**
  * GET /api/trader/:wallet/stats
@@ -30,7 +30,20 @@ export interface TraderStatsResponse {
   uniqueMarkets: number;
   firstTradeAt: string | null;
   lastTradeAt: string | null;
+  /**
+   * GH#2510: true when these numbers describe only part of the wallet's history.
+   *
+   * The primary (indexer) path aggregates in the database over the full history
+   * and never sets this. The Supabase fallback cannot aggregate without a
+   * server-side function, so it still reads rows under a cap — when it hits that
+   * cap the sums below are partial, and saying so is the difference between an
+   * approximate answer and a wrong one. Absent/false means complete.
+   */
+  truncated?: boolean;
 }
+
+/** Row cap on the Supabase fallback path. See TraderStatsResponse.truncated. */
+const SUPABASE_ROW_CAP = 10_000;
 
 function aggregateRows(rows: { side: string; size: string; price: string; fee: string; slab_address: string; created_at: string }[]): TraderStatsResponse {
   let longTrades = 0;
@@ -101,8 +114,9 @@ export async function GET(
   // P0: prefer local indexer
   if (hasIndexerDb()) {
     try {
-      const rows = await queryTraderStatsRows(walletKey);
-      const stats = aggregateRows(rows);
+      // GH#2510: aggregated in SQL over the FULL history — no row cap, no
+      // JavaScript reduce, and one row on the wire instead of up to 10 000.
+      const stats: TraderStatsResponse = await queryTraderStatsAggregate(walletKey);
       return NextResponse.json(stats, {
         headers: { "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60" },
       });
@@ -123,7 +137,7 @@ export async function GET(
       .eq("trader", walletKey)
       .eq("network", getServerNetwork())
       .order("created_at", { ascending: true })
-      .limit(10_000);
+      .limit(SUPABASE_ROW_CAP);
 
     if (error && error.message?.includes("network")) {
       const fallback = await supabase
@@ -131,7 +145,7 @@ export async function GET(
         .select("side, size, price, fee, slab_address, created_at")
         .eq("trader", walletKey)
         .order("created_at", { ascending: true })
-        .limit(10_000);
+        .limit(SUPABASE_ROW_CAP);
       data = fallback.data;
       error = fallback.error;
     }
@@ -147,7 +161,13 @@ export async function GET(
       created_at: String(r.created_at),
     }));
 
-    const stats = aggregateRows(rows);
+    // GH#2510: this path reads rows under a cap, so when it is hit the totals
+    // below describe only the OLDEST SUPABASE_ROW_CAP trades (the query orders
+    // by created_at ASC). Flag it rather than presenting a partial sum as a
+    // total. Making this path exact needs a server-side aggregate function,
+    // which is a schema change and out of scope here.
+    const stats: TraderStatsResponse = aggregateRows(rows);
+    if (rows.length >= SUPABASE_ROW_CAP) stats.truncated = true;
     return NextResponse.json(stats, {
       headers: { "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60" },
     });
