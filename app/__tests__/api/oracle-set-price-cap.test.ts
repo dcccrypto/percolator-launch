@@ -55,6 +55,18 @@ function post(
   });
 }
 
+/** GH#2509: send a raw body verbatim, so malformed/empty payloads can be exercised. */
+function postRaw(
+  raw: string | undefined,
+  headers: Record<string, string> = {},
+): NextRequest {
+  return new NextRequest("http://localhost/api/oracle/set-price-cap", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    ...(raw === undefined ? {} : { body: raw }),
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   process.env.ADMIN_API_SECRET = "test-admin-secret";
@@ -93,6 +105,61 @@ describe("POST /api/oracle/set-price-cap", () => {
     const req = post({}, { "x-admin-secret": "wrong" });
     const res = await POST(req);
     expect(res.status).toBe(401);
+  });
+
+  // ── GH#2509: malformed input must fail closed, not widen the operation ──────
+  //
+  // The route treats an EMPTY body as "apply to every admin-oracle market". It
+  // used to reach that same state on ANY parse failure, so a truncated payload
+  // was indistinguishable from the deliberate all-market command and could
+  // submit one signed transaction per market.
+
+  it("GH#2509: returns 400 for malformed JSON instead of targeting all markets", async () => {
+    const req = postRaw('{"slabAddress": "7G3SsnevWwUWjWAwGGmr2N11x8KAGn1abzjV3bBbZkAM"', {
+      "x-admin-secret": "test-admin-secret",
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const j = await res.json();
+    expect(j.error).toMatch(/malformed JSON/i);
+    // The point of the fix: no transaction may be signed for a request we
+    // could not parse.
+    expect(mockSendAndConfirm).not.toHaveBeenCalled();
+  });
+
+  it("GH#2509: returns 400 for a non-object JSON body", async () => {
+    // These parse successfully, so a try/catch alone would not catch them, yet
+    // every field read yields undefined — the same all-market path.
+    for (const raw of ["[]", '"a string"', "123", "null"]) {
+      const res = await POST(postRaw(raw, { "x-admin-secret": "test-admin-secret" }));
+      expect(res.status).toBe(400);
+      const j = await res.json();
+      expect(j.error).toMatch(/must be a JSON object/i);
+    }
+    expect(mockSendAndConfirm).not.toHaveBeenCalled();
+  });
+
+  it("GH#2509: an empty body is still routed to the all-markets command", async () => {
+    // The contract this fix must NOT break: empty body still means "all
+    // admin-oracle markets".
+    //
+    // What counts as evidence here needs stating, because this harness does not
+    // mock far enough to reach a response on that branch. The all-market path
+    // runs `new PublicKey(config.programId)`, and this file's PublicKey mock is
+    // an arrow function, so it throws "is not a constructor". That throw is
+    // raised BELOW the parse gate — so reaching it proves the empty body was
+    // accepted and dispatched to the all-market branch. Being rejected at the
+    // gate would instead return a 400 and never touch PublicKey.
+    for (const raw of ["", "   \n  ", undefined]) {
+      let status: number | null = null;
+      try {
+        status = (await POST(postRaw(raw, { "x-admin-secret": "test-admin-secret" }))).status;
+      } catch (err) {
+        expect(String(err)).toMatch(/not a constructor/);
+        continue; // got past the gate — which is the property under test
+      }
+      expect(status).not.toBe(400);
+    }
   });
 
   it("returns 400 for non-integer maxChangeE2bps", async () => {

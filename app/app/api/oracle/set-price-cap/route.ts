@@ -97,11 +97,47 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let body: { slabAddress?: string; maxChangeE2bps?: number } = {};
-  try {
-    body = await req.json();
-  } catch {
-    // empty body is valid — means "all admin-oracle markets"
+  // GH#2509: an EMPTY body is the documented "all admin-oracle markets" command.
+  // Malformed JSON must not be indistinguishable from it.
+  //
+  // This previously read `body = await req.json()` inside a try whose catch was
+  // empty, so any parse failure left `body` as `{}` — the same state an empty
+  // body produces. A truncated or malformed payload therefore fell through to
+  // the `else` branch below, which selects every admin-oracle market and can
+  // submit one signed transaction per market (bounded only by MAX_SLAB_BATCH).
+  // That is a fail-OPEN scope expansion on an administrative write path: the
+  // worse the input, the broader the operation.
+  //
+  // Read the raw text once and branch on whether the caller actually sent
+  // anything, so "no body" and "bad body" are distinguishable.
+  let body: { slabAddress?: string; maxChangeE2bps?: number | string } = {};
+  const rawBody = await req.text();
+  if (rawBody.trim() !== "") {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json(
+        {
+          error:
+            "malformed JSON body. Send a valid JSON object, or an empty body to target all admin-oracle markets.",
+        },
+        { status: 400 },
+      );
+    }
+    // A non-object (array, string, number, null) also yields `undefined` for
+    // every field read below, which would silently reach the all-market path
+    // the same way. `typeof null === "object"`, so null is excluded explicitly.
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return NextResponse.json(
+        {
+          error:
+            "request body must be a JSON object, or empty to target all admin-oracle markets.",
+        },
+        { status: 400 },
+      );
+    }
+    body = parsed as { slabAddress?: string; maxChangeE2bps?: number | string };
   }
 
   let maxChangeE2bps: bigint;
