@@ -56,6 +56,54 @@ describe("GET /api/trader/:wallet/stats", () => {
   // STATS-006: rateMap eviction is now tested in lib/memory-rate-limit.test.ts.
   // The shared rate limiter factory handles eviction internally.
 
+  // ── GH#2510: partial history must not be reported as exact totals ──────────
+  //
+  // Both backends capped at 10 000 rows ordered by created_at ASC, so a wallet
+  // past the cap got the OLDEST 10 000 aggregated and returned under field names
+  // like `totalTrades` / `lastTradeAt`, with nothing marking it partial. The
+  // indexer path now aggregates in SQL over the full history; this fallback
+  // still reads rows, so it must at least say when it is incomplete.
+
+  it("GH#2510: flags truncated when the Supabase fallback hits the row cap", async () => {
+    const rows = Array.from({ length: 10_000 }, (_, i) => ({
+      side: i % 2 === 0 ? "long" : "short",
+      size: "1",
+      price: "1",
+      fee: "0",
+      slab_address: "SLAB",
+      created_at: new Date(1_700_000_000_000 + i).toISOString(),
+    }));
+    const res = await callRoute(VALID_WALLET, rows);
+    expect(res.status).toBe(200);
+    const j = await res.json();
+    expect(j.truncated).toBe(true);
+    // The numbers are still returned — the flag is what stops them being read
+    // as complete.
+    expect(j.totalTrades).toBe(10_000);
+  });
+
+  it("GH#2510: does not flag truncated below the cap", async () => {
+    const rows = Array.from({ length: 3 }, (_, i) => ({
+      side: "long",
+      size: "1",
+      price: "1",
+      fee: "0",
+      slab_address: "SLAB",
+      created_at: new Date(1_700_000_000_000 + i).toISOString(),
+    }));
+    const res = await callRoute(VALID_WALLET, rows);
+    const j = await res.json();
+    expect(j.truncated).toBeUndefined();
+    expect(j.totalTrades).toBe(3);
+  });
+
+  it("GH#2510: an empty result is complete, not truncated", async () => {
+    const res = await callRoute(VALID_WALLET, []);
+    const j = await res.json();
+    expect(j.truncated).toBeUndefined();
+    expect(j.totalTrades).toBe(0);
+  });
+
   // STATS-003: Invalid wallet rejected
   it("returns 400 for invalid wallet address", async () => {
     const req = makeRequest("not-a-valid-wallet");

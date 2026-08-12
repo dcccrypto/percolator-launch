@@ -146,9 +146,17 @@ export const TradeStatsPanel: FC<TradeStatsPanelProps> = ({
         {/* Total trades */}
         <div className="bg-[var(--panel-bg)] p-3.5">
           <StatCell
-            label="Total Trades"
+            // GH#2510: when the API reports `truncated`, these numbers cover
+            // only part of the wallet's history, so they must not be labelled
+            // as totals. The API being honest is not enough on its own — the
+            // panel is where a reader forms the belief.
+            label={stats.truncated ? "Trades (partial)" : "Total Trades"}
             value={stats.totalTrades.toLocaleString()}
-            sub={`${stats.uniqueMarkets} market${stats.uniqueMarkets !== 1 ? "s" : ""}`}
+            sub={
+              stats.truncated
+                ? "partial history — showing the earliest trades only"
+                : `${stats.uniqueMarkets} market${stats.uniqueMarkets !== 1 ? "s" : ""}`
+            }
           />
         </div>
 

@@ -445,8 +445,102 @@ export interface TraderStatsRow {
 }
 
 /**
+ * GH#2510: aggregate a wallet's trade statistics in the DATABASE, over its full
+ * history.
+ *
+ * `queryTraderStatsRows` below fetches at most 10 000 rows and the route reduces
+ * them in JavaScript, so any wallet past that cap had its partial history
+ * returned as exact totals — with no flag to say so. The cap also orders by
+ * `created_at ASC`, so it keeps the OLDEST 10 000: `lastTradeAt` was not merely
+ * approximate, it was the timestamp of the 10 000th trade rather than the most
+ * recent one.
+ *
+ * The arithmetic mirrors the JS reducer PER ROW, which is subtler than it looks
+ * and got it wrong on the first attempt (caught in review on #2512):
+ *
+ *   volume += trunc(abs(trunc(size)) * floor(price * 1e6 + 0.5) / 1e6)
+ *   fees   += floor(fee + 0.5)
+ *
+ * Two details the obvious translation misses:
+ *
+ * 1. The reducer accumulates with BigInt division — `(absSize * priceE6) / 1e6n`
+ *    — which TRUNCATES on every trade. Summing the fractional values and
+ *    rounding once at the end is a different number, and not by a rounding
+ *    error: ten trades of size 1 at price 1.9 give 10 the per-row way and 19
+ *    the sum-then-round way. The per-row `trunc()` is load-bearing.
+ * 2. `::bigint` ROUNDS in Postgres, so a fractional total would round up rather
+ *    than truncate. With per-row truncation the sum is already integral, so the
+ *    cast is exact.
+ *
+ * `floor(x + 0.5)` rather than `round()` because that is what JS `Math.round`
+ * does: they disagree on negative halves (`Math.round(-1.5) === -1`, while
+ * Postgres `round(-1.5) = -2`).
+ *
+ * `size` is truncated at the decimal point to match the reducer's
+ * `String(size).split(".")[0]`, and the sums stay in `numeric`, so this does not
+ * inherit the float rounding a `Number()` round-trip would introduce.
+ */
+export interface TraderStatsAggregate {
+  totalTrades: number;
+  longTrades: number;
+  shortTrades: number;
+  totalVolume: string;
+  totalFees: string;
+  uniqueMarkets: number;
+  firstTradeAt: string | null;
+  lastTradeAt: string | null;
+}
+
+export async function queryTraderStatsAggregate(
+  wallet: string,
+): Promise<TraderStatsAggregate> {
+  const sql = getSql();
+  const rows = await sql<Array<{
+    total_trades: string;
+    long_trades: string;
+    short_trades: string;
+    total_volume: string;
+    total_fees: string;
+    unique_markets: string;
+    first_trade_at: Date | null;
+    last_trade_at: Date | null;
+  }>>`
+    SELECT
+      count(*)::text                                            AS total_trades,
+      count(*) FILTER (WHERE side = 'long')::text               AS long_trades,
+      count(*) FILTER (WHERE side <> 'long')::text              AS short_trades,
+      COALESCE(sum(trunc(
+        abs(trunc(size::numeric)) * floor(price::numeric * 1000000 + 0.5) / 1000000
+      )), 0)::bigint::text                                      AS total_volume,
+      COALESCE(sum(floor(fee::numeric + 0.5)), 0)::bigint::text AS total_fees,
+      count(DISTINCT slab_address)::text                        AS unique_markets,
+      min(created_at)                                           AS first_trade_at,
+      max(created_at)                                           AS last_trade_at
+    FROM trades
+    WHERE trader = ${wallet}
+  `;
+  const r = rows[0];
+  const iso = (d: Date | null) =>
+    d == null ? null : d instanceof Date ? d.toISOString() : String(d);
+  return {
+    totalTrades: Number(r?.total_trades ?? 0),
+    longTrades: Number(r?.long_trades ?? 0),
+    shortTrades: Number(r?.short_trades ?? 0),
+    totalVolume: r?.total_volume ?? "0",
+    totalFees: r?.total_fees ?? "0",
+    uniqueMarkets: Number(r?.unique_markets ?? 0),
+    firstTradeAt: iso(r?.first_trade_at ?? null),
+    lastTradeAt: iso(r?.last_trade_at ?? null),
+  };
+}
+
+/**
  * Fetch all trade rows for a wallet for stats aggregation.
  * Returns at most 10 000 rows (same cap as the Supabase path).
+ *
+ * GH#2510: no longer used by /api/trader/:wallet/stats, which aggregates in the
+ * database via queryTraderStatsAggregate. Kept for callers that need the rows
+ * themselves rather than the totals.
  */
 export async function queryTraderStatsRows(wallet: string): Promise<TraderStatsRow[]> {
   const sql = getSql();
