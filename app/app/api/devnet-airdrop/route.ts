@@ -53,6 +53,7 @@ import { getConfig } from "@/lib/config";
 import { getDevnetMintSigner } from "@/lib/devnet-signer";
 import type { getServiceClient as _GetServiceClient } from "@/lib/supabase";
 import * as Sentry from "@sentry/nextjs";
+import { assertSuccessfulConfirmation } from "@/lib/transaction-confirmation";
 
 type SupabaseClient = ReturnType<typeof _GetServiceClient>;
 
@@ -368,7 +369,14 @@ async function resolveServerOwnedDevnetMint(
 
   try {
     const createSig = await connection.sendRawTransaction(signedCreateTx.serialize());
-    await connection.confirmTransaction(createSig, "confirmed");
+    // GH#2517: confirmTransaction() can RESOLVE with a SignatureResult whose
+    // `err` records an on-chain failure, so awaiting it is not proof of
+    // success. Without this, a mint that failed on chain still reached the
+    // `devnet_mints` upsert below and became the stored mapping.
+    assertSuccessfulConfirmation(
+      await connection.confirmTransaction(createSig, "confirmed"),
+      "Devnet mirror-mint creation",
+    );
   } catch (e) {
     Sentry.captureException(e, {
       tags: { endpoint: "/api/devnet-airdrop", step: "resolveServerOwnedDevnetMint.createMint" },
@@ -757,7 +765,12 @@ export async function POST(req: NextRequest) {
             const txSig = await connection.sendRawTransaction(
               (signedTx as Transaction).serialize(),
             );
-            await connection.confirmTransaction(txSig, "confirmed");
+            // GH#2517: without this the 24h claim stays reserved and the
+            // response reports an amount even though nothing was minted.
+            assertSuccessfulConfirmation(
+              await connection.confirmTransaction(txSig, "confirmed"),
+              "Devnet airdrop mint",
+            );
             return txSig;
           })(),
           30_000,
