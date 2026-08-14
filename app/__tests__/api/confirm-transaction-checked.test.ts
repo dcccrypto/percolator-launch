@@ -49,21 +49,60 @@ interface Site {
   checked: boolean;
 }
 
+/**
+ * Decide whether ONE call's result is checked, bound to that call rather than
+ * to its neighbourhood.
+ *
+ * An earlier version of this scan looked for `assertSuccessfulConfirmation`
+ * anywhere within ±500 characters, which CodeRabbit correctly flagged on #2519:
+ * a bare confirmation sitting next to a guarded one would pass. That defeats the
+ * point of a guard whose whole job is catching the NEXT call site.
+ *
+ * Every call in the tree is one of two shapes, so both are recognised exactly:
+ *
+ *   A  assertSuccessfulConfirmation(await conn.confirmTransaction(...), "...")
+ *   B  const result = await conn.confirmTransaction(...)   // then result is
+ *                                                          // asserted or
+ *                                                          // result.value.err
+ *                                                          // is inspected
+ *
+ * Shape B is tied to the BINDING NAME, so an unrelated guarded call elsewhere
+ * in the file cannot vouch for it.
+ */
+function isChecked(code: string, callIdx: number): boolean {
+  const before = code.slice(0, callIdx);
+
+  // A: the call is the argument to the assertion. Allow the receiver
+  // expression and an `await` between the paren and the call.
+  if (/assertSuccessfulConfirmation\(\s*(?:await\s+)?[\w$.]*$/.test(before)) {
+    return true;
+  }
+
+  // B: the call's result is bound; require that binding to be checked later.
+  const bound = before.match(/(?:const|let|var)\s+([\w$]+)\s*(?::[^=]+)?=\s*(?:await\s+)?[\w$.]*$/);
+  if (bound) {
+    const name = bound[1];
+    const after = code.slice(callIdx);
+    const asserted = new RegExp(
+      `assertSuccessfulConfirmation\\(\\s*${name}\\b`,
+    ).test(after);
+    const inspected = new RegExp(`\\b${name}\\.value\\.err\\b`).test(after);
+    return asserted || inspected;
+  }
+
+  return false;
+}
+
 function callSites(): Site[] {
   const sites: Site[] = [];
   for (const file of routeFiles(API_DIR)) {
     const code = stripComments(fs.readFileSync(file, "utf8"));
     for (const m of code.matchAll(/\.confirmTransaction\(/g)) {
       const idx = m.index ?? 0;
-      const window = code.slice(Math.max(0, idx - 500), idx + 500);
       sites.push({
         file: path.relative(API_DIR, file),
         line: code.slice(0, idx).split("\n").length,
-        // Either the shared helper, or auto-fund's older hand-rolled
-        // `airdropResult.value.err` check — both enforce the invariant.
-        checked:
-          window.includes("assertSuccessfulConfirmation") ||
-          /\.value\.err/.test(window),
+        checked: isChecked(code, idx),
       });
     }
   }
