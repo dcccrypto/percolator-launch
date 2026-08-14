@@ -29,6 +29,8 @@ interface LaunchSuccessProps {
    * Shows a soft warning on the success screen; does not block trading.
    */
   insuranceMintFailed?: boolean;
+  /** GH#2514: backing-domain seeding failed (non-fatal, but must not be silent). */
+  backingSeedFailed?: boolean;
   /** Keeper oracle: true when oracle_authority was delegated to the keeper service */
   keeperDelegated?: boolean;
   /** Keeper registration message */
@@ -63,6 +65,7 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
   devnetAirdropSymbol,
   devnetMintError,
   insuranceMintFailed,
+  backingSeedFailed,
   keeperDelegated,
   keeperMessage,
   keeperRegistering,
@@ -210,6 +213,19 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
           </div>
         </div>
       </div>
+
+      {/* GH#2514: backing-domain seeding failed. Non-fatal by design — a transient
+          RPC error must not strand a live market — but it must not be silent
+          either: at the current policy each domain's seed is 100% of LP
+          collateral, so an unreported failure leaves the creator believing a
+          market is seeded when it is short twice their LP. */}
+      {backingSeedFailed && (
+        <div className="border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] px-4 py-2 mb-4 text-left w-full max-w-sm mx-auto">
+          <p className="text-[11px] text-[var(--text-secondary)]">
+            Market is <strong className="text-[var(--text)]">live and tradeable</strong>, but counterparty backing was <strong className="text-[var(--text)]">not seeded</strong> — the deposit for both domains did not land. Retry it from market settings before the market takes size.
+          </p>
+        </div>
+      )}
 
       {/* GH#1761: Insurance LP Mint soft warning — shown when step 5 failed non-fatally */}
       {insuranceMintFailed && (

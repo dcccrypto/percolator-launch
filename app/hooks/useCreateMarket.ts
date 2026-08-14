@@ -339,6 +339,24 @@ export interface CreateMarketState {
    * step). Kept for backwards-compatible UI wiring; never set to true by create().
    */
   insuranceMintFailed: boolean;
+  /**
+   * GH#2514: set when the sequential path's backing-bucket seeding failed.
+   *
+   * That step is deliberately non-fatal (see the Step 3 comment in create()) so
+   * a transient RPC error cannot strand an otherwise-live market. But it was
+   * ALSO silent: the launch went on to report an unqualified "Market created!"
+   * while both backing domains were left unseeded.
+   *
+   * That was defensible when the seed was dust. It is not now the seed is
+   * `backingSeedPerDomain(lp)` per domain — 100% of LP collateral each at the
+   * current policy, so a silent failure leaves the creator's market short two
+   * allocations totalling twice their LP.
+   *
+   * Non-fatal is kept; silent is not. The launch still succeeds, and the
+   * success screen says what did not happen so the creator can retry or
+   * backfill rather than believing the market is fully seeded.
+   */
+  backingSeedFailed: boolean;
   /** Keeper oracle mode: true when oracle_authority was delegated to keeper */
   keeperDelegated: boolean;
   /** Keeper registration result message */
@@ -1532,6 +1550,7 @@ export function useCreateMarket() {
     devnetAirdropSymbol: null,
     devnetMintError: null,
     insuranceMintFailed: false,
+    backingSeedFailed: false,
     keeperDelegated: false,
     keeperMessage: null,
     keeperRegistering: false,
@@ -2903,6 +2922,14 @@ export function useCreateMarket() {
                 "deadlock until this is retried or backfilled:",
                 backingBucketErr,
               );
+              // GH#2514: staying non-fatal is right — a transient RPC error must
+              // not strand a live market, and a repeat TopUp against an
+              // already-Fresh-at-MAX bucket is a harmless no-op. Staying SILENT
+              // is not. The rationale above was written when this seed was dust;
+              // it is now backingSeedPerDomain(lp) per domain, so swallowing the
+              // failure hands the creator a "Market created!" for a market
+              // missing two allocations worth twice their LP collateral.
+              setState((s) => ({ ...s, backingSeedFailed: true }));
             }
           }
 
@@ -3399,6 +3426,7 @@ export function useCreateMarket() {
       devnetAirdropSymbol: null,
       devnetMintError: null,
       insuranceMintFailed: false,
+      backingSeedFailed: false,
       keeperDelegated: false,
       keeperMessage: null,
       keeperRegistering: false,

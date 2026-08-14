@@ -838,6 +838,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
         devnetAirdropSymbol={createState.devnetAirdropSymbol}
         devnetMintError={createState.devnetMintError}
         insuranceMintFailed={createState.insuranceMintFailed}
+        backingSeedFailed={createState.backingSeedFailed}
         keeperDelegated={createState.keeperDelegated}
         keeperMessage={createState.keeperMessage}
         keeperRegistering={createState.keeperRegistering}
