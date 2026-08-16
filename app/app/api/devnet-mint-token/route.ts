@@ -37,6 +37,7 @@ import * as Sentry from "@sentry/nextjs";
 import { getClientIp } from "@/lib/get-client-ip";
 import { checkMintRateLimit } from "@/lib/devnet-mirror-mint-rate-limit";
 import { tryFaucetGate, releaseFaucetClaim } from "@/lib/faucet-rate-gate";
+import { assertSuccessfulConfirmation } from "@/lib/transaction-confirmation";
 
 export const dynamic = "force-dynamic";
 
@@ -310,7 +311,12 @@ export async function POST(req: NextRequest) {
         const airdropTxSig = await connection.sendRawTransaction(
           (signedAirdropTx as Transaction).serialize(),
         );
-        await connection.confirmTransaction(airdropTxSig, "confirmed");
+        // GH#2517: the thrown-error branch omits the airdrop fields, so an
+        // unchecked result here reports the optional airdrop as successful.
+        assertSuccessfulConfirmation(
+          await connection.confirmTransaction(airdropTxSig, "confirmed"),
+          "Devnet token airdrop",
+        );
 
         mintSucceeded = true;
         return NextResponse.json({
@@ -399,7 +405,12 @@ export async function POST(req: NextRequest) {
     (tx as Transaction).partialSign(mintKeypair);
     tx = mintSigner.signTransaction(tx);
     const sig = await connection.sendRawTransaction((tx as Transaction).serialize());
-    await connection.confirmTransaction(sig, "confirmed");
+    // GH#2517: a nonexistent mint must not become the stored mapping or be
+    // returned as `status: "created"` to later callers.
+    assertSuccessfulConfirmation(
+      await connection.confirmTransaction(sig, "confirmed"),
+      "Devnet mint creation",
+    );
 
     const devnetMint = mintKeypair.publicKey.toBase58();
 

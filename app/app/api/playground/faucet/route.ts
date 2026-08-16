@@ -45,6 +45,7 @@ import {
 } from "@solana/spl-token";
 import { getDevnetMintSigner } from "@/lib/devnet-signer";
 import * as Sentry from "@sentry/nextjs";
+import { assertSuccessfulConfirmation } from "@/lib/transaction-confirmation";
 
 export const dynamic = "force-dynamic";
 
@@ -232,9 +233,15 @@ export async function POST(req: NextRequest) {
         (signedTx as Transaction).serialize(),
         { skipPreflight: false },
       );
-      await connection.confirmTransaction(
-        { signature: usdcSig, blockhash, lastValidBlockHeight },
-        "confirmed",
+      // GH#2517: the catch below releases the durable claim slot, so throwing
+      // here is what stops a failed mint from recording the claim and telling
+      // the caller 10,000 Sim-USDC was delivered.
+      assertSuccessfulConfirmation(
+        await connection.confirmTransaction(
+          { signature: usdcSig, blockhash, lastValidBlockHeight },
+          "confirmed",
+        ),
+        "Playground USDC faucet mint",
       );
     } catch (mintErr) {
       // Release the durable claim slot so a mint failure doesn't lock the wallet.
@@ -268,7 +275,12 @@ export async function POST(req: NextRequest) {
         const airdropSig: string = await Promise.race([
           (async () => {
             const s = await pubConn.requestAirdrop(walletPk, SOL_AIRDROP_AMOUNT);
-            await pubConn.confirmTransaction(s, "confirmed");
+            // GH#2517: an unchecked result advertises SOL success and stops the
+            // RPC fallback loop from trying the next endpoint.
+            assertSuccessfulConfirmation(
+              await pubConn.confirmTransaction(s, "confirmed"),
+              "Playground SOL airdrop",
+            );
             return s;
           })(),
           new Promise<never>((_, reject) =>

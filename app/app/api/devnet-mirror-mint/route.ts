@@ -45,6 +45,7 @@ import { getServiceClient } from "@/lib/supabase";
 import { getDevnetMintSigner } from "@/lib/devnet-signer";
 import { validateTokenMetadata, validateDexScreenerResponse, validateJupiterTokenResponse } from "@/lib/token-metadata-validators";
 import * as Sentry from "@sentry/nextjs";
+import { assertSuccessfulConfirmation } from "@/lib/transaction-confirmation";
 
 export const dynamic = "force-dynamic";
 
@@ -359,7 +360,12 @@ export async function POST(req: NextRequest) {
     let sig: string;
     try {
       sig = await connection.sendRawTransaction(tx.serialize());
-      await connection.confirmTransaction(sig, "confirmed");
+      // GH#2517: with no pre-existing canonical row this route would otherwise
+      // persist or return an address whose mint creation failed.
+      assertSuccessfulConfirmation(
+        await connection.confirmTransaction(sig, "confirmed"),
+        "Devnet mirror-mint creation",
+      );
     } catch (e) {
       Sentry.captureException(e, {
         tags: { endpoint: "/api/devnet-mirror-mint", step: "sendAndConfirm" },
