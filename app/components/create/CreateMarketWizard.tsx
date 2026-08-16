@@ -15,6 +15,7 @@ import { clearInFlightMarket } from "@/lib/inFlightMarket";
 import { useQuickLaunch } from "@/hooks/useQuickLaunch";
 import { type DexPoolResult } from "@/hooks/useDexPoolSearch";
 import { parseHumanAmount } from "@/lib/parseAmount";
+import { backingSeedPerDomain } from "@/lib/market-params";
 import { getConfig, getNetwork } from "@/lib/config";
 import { toE6, formatMarkPrice } from "@/lib/format";
 
@@ -279,10 +280,27 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // (the proven on-chain reference, launch-test-market.ts, never seeds the vault and
   // succeeds; the engine doesn't require or account for it). Keeping the old +500 here
   // would over-require tokens the flow no longer needs.
+  // GH#2515: the launch also seeds BOTH backing domains from the creator's
+  // wallet (TopUpBackingBucket, one per domain), so LP + insurance is not what
+  // a launch costs. At the current policy backingSeedPerDomain(lp) === lp, so a
+  // 1,000 LP / 100 insurance launch needs 3,100 tokens, not 1,100 — this gate
+  // enabled LAUNCH at 1,100 and the flow then stranded mid-way, after M1/M2 had
+  // already landed on chain and spent SOL.
+  //
+  // The wizard was the only place that got this wrong: CostEstimate (:132) and
+  // createMarketValidation (:163) both already add the two seeds, and
+  // useCreateMarket's tx4 pre-flight (:2704) requires
+  // `lpCollateral + insuranceAmount + 2n * backingSeed`. So the panel showed the
+  // creator the correct total while the button beside it used a smaller one.
+  //
+  // Uses backingSeedPerDomain rather than re-deriving from
+  // BACKING_SEED_PCT_OF_LP, which is what the other two call sites do: the
+  // helper also applies BACKING_SEED_MIN_ATOMS, so a tiny LP seed does not
+  // under-require here the way a bare percentage would.
   const totalTokensRequired = useMemo((): bigint => {
     const lpRaw = parseHumanAmount(wizard.lpCollateral || "0", decimals);
     const insRaw = parseHumanAmount(wizard.insuranceAmount, decimals);
-    return lpRaw + insRaw;
+    return lpRaw + insRaw + 2n * backingSeedPerDomain(lpRaw);
   }, [wizard.lpCollateral, wizard.insuranceAmount, decimals]);
   const hasSufficientTokensForSeed = wizard.walletBalance !== null && wizard.walletBalance >= totalTokensRequired;
   const symbol = wizard.tokenMeta?.symbol ?? "Token";
