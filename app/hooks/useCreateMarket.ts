@@ -2045,13 +2045,38 @@ export function useCreateMarket() {
           const instructions: TransactionInstruction[] = [];
 
           // Detect if this is a v17 slab (v17 magic at bytes 0-7).
-          let isV17Slab = false;
-          try {
-            const newSlabInfo = await connection.getAccountInfo(slabPk);
-            if (newSlabInfo?.data) {
-              isV17Slab = isV17Account(new Uint8Array(newSlabInfo.data));
+          //
+          // This must FAIL CLOSED. It used to default to false and swallow the error, so any
+          // hiccup reading a slab we had just created routed a v17 market down the legacy v12
+          // branch below — which calls sdk-compat stubs that THROW by design (the instructions
+          // were removed on-chain in beta.29). The user then saw an opaque
+          // "[sdk-compat] ... removed in beta.29" instead of the real problem.
+          //
+          // The slab was created moments ago in this same flow, so a null read is an ordinary
+          // propagation race, not an exceptional case. Retry, and if v17-ness still cannot be
+          // established, say so plainly rather than guessing "v12".
+          let isV17Slab: boolean | null = null;
+          let lastDetectErr: unknown = null;
+          for (let attempt = 0; attempt < 5 && isV17Slab === null; attempt++) {
+            try {
+              const newSlabInfo = await connection.getAccountInfo(slabPk, "confirmed");
+              if (newSlabInfo?.data) {
+                isV17Slab = isV17Account(new Uint8Array(newSlabInfo.data));
+                break;
+              }
+            } catch (e) {
+              lastDetectErr = e;
             }
-          } catch { /* fall through — conservative: assume v12 */ }
+            await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
+          }
+          if (isV17Slab === null) {
+            throw new Error(
+              `Could not read the market account ${slabPk.toBase58()} just after creating it, ` +
+                `so its program version could not be determined. Nothing further was sent. ` +
+                `Retry the oracle setup step.` +
+                (lastDetectErr ? ` (last read error: ${String(lastDetectErr)})` : ""),
+            );
+          }
 
           if (!isV17Slab && isAdminOracle) {
             // v12 admin oracle setup (removed in v17):
