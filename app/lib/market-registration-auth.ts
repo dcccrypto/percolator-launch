@@ -114,8 +114,16 @@ function encodeCanonicalJson(
     return `{${entries.join(",")}}`;
   }
 
+  // #2523: name the offending TYPE. This throw is the last resort of a recursive
+  // canonicaliser, so without it the caller sees one opaque sentence for a value
+  // buried anywhere in the payload — "market creation failed" with nothing to act
+  // on. `typeof` is enough to identify the culprit (bigint, function, symbol and
+  // undefined-in-array are the reachable cases) and, unlike printing the value,
+  // cannot leak payload contents into a client-visible error or a log.
   throw new TypeError(
-    "Unsupported market registration payload value",
+    `Unsupported market registration payload value of type "${typeof value}" — ` +
+      "the payload must contain only JSON primitives, plain objects and arrays. " +
+      "bigint and function values are the usual causes; convert them before signing.",
   );
 }
 
