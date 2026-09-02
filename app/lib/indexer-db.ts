@@ -525,6 +525,7 @@ export async function queryTraderStatsAggregate(
       max(created_at)                                           AS last_trade_at
     FROM trades
     WHERE trader = ${wallet}
+      AND network = ${getServerNetwork()}
   `;
   const r = rows[0];
   const iso = (d: Date | null) =>
