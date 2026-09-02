@@ -97,11 +97,34 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // #2509: an EMPTY body and a MALFORMED body are different requests, and this
+  // catch treated them identically. Omitting `slabAddress` deliberately means
+  // "apply to ALL admin-oracle markets", so a truncated or corrupt payload — a
+  // half-sent request, a proxy mangling the body, a typo'd curl — silently
+  // widened a single-market change into a fleet-wide one. Fail closed on
+  // malformed input; keep the genuinely-empty body working as documented.
   let body: { slabAddress?: string; maxChangeE2bps?: number } = {};
-  try {
-    body = await req.json();
-  } catch {
-    // empty body is valid — means "all admin-oracle markets"
+  const rawBody = await req.text();
+  if (rawBody.trim() !== "") {
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json(
+        {
+          error:
+            "Malformed JSON body. Send valid JSON, or send NO body at all to " +
+            "apply to every admin-oracle market — an unparseable body is not " +
+            "treated as 'all markets'.",
+        },
+        { status: 400 },
+      );
+    }
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      return NextResponse.json(
+        { error: "Body must be a JSON object." },
+        { status: 400 },
+      );
+    }
   }
 
   let maxChangeE2bps: bigint;
