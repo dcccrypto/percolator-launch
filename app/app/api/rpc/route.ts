@@ -310,6 +310,13 @@ function validateRequest(req: Record<string, unknown>): { jsonrpc: string; error
  * @param networkOverride — optional "mainnet"|"devnet" to route to a specific Helius endpoint
  *   (used by Privy so both chains can be initialised without exposing any API key)
  */
+/**
+ * #2522: upstream RPC timeout. 15s is above p99 for a healthy provider and well
+ * under the platform function limit, so a hung upstream surfaces as a clean
+ * error to the caller instead of consuming the whole invocation budget.
+ */
+const RPC_UPSTREAM_TIMEOUT_MS = 15_000;
+
 async function processSingleRequest(
   req: JsonRpcRequest,
   networkOverride?: "mainnet" | "devnet",
@@ -333,15 +340,36 @@ async function processSingleRequest(
 
   // Deduplicate in-flight requests for read-only methods
   if (!isMutating && inflightRequests.has(cacheKey)) {
-    const result = await inflightRequests.get(cacheKey)!;
-    return { ...(result as Record<string, unknown>), id: req.id };
+    // #2522: this await is OUTSIDE the try/catch below, so a rejection here
+    // bypasses BUG 14's batch protection and fails the whole batch. That was
+    // rare while the upstream fetch had no timeout (it hung rather than
+    // rejected); adding AbortSignal.timeout makes rejection the NORMAL outcome
+    // of a slow upstream, so the dedup path needs the same handling.
+    try {
+      const result = await inflightRequests.get(cacheKey)!;
+      return { ...(result as Record<string, unknown>), id: req.id };
+    } catch (err) {
+      console.error(`[/api/rpc] deduped request failed for method ${method}:`, err);
+      return {
+        jsonrpc: "2.0",
+        error: { code: -32603, message: "Upstream RPC request failed" },
+        id: req.id,
+      };
+    }
   }
 
   const fetchPromise = (async () => {
+    // #2522: bound the upstream call. Without a signal this fetch inherits the
+    // platform default (effectively none), so one unresponsive RPC holds the
+    // route open until the function times out. That is worse than it looks here:
+    // read-only requests are DEDUPLICATED on `cacheKey`, so every later caller
+    // for the same method awaits the SAME hung promise (`:335-337`) rather than
+    // issuing its own — one slow upstream call stalls all of them together.
     const response = await fetch(getRpcUrl(networkOverride), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(req),
+      signal: AbortSignal.timeout(RPC_UPSTREAM_TIMEOUT_MS),
     });
     return await response.json();
   })();
