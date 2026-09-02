@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { formatCompactUsd } from "@/lib/formatters";
 import Link from "next/link";
 
 interface MarketEntry {
@@ -13,12 +14,7 @@ interface MarketEntry {
   total_open_interest_usd?: number | null;
 }
 
-function formatCompact(val: number): string {
-  if (val >= 1_000_000_000) return `$${(val / 1_000_000_000).toFixed(1)}B`;
-  if (val >= 1_000_000) return `$${(val / 1_000_000).toFixed(1)}M`;
-  if (val >= 1_000) return `$${(val / 1_000).toFixed(1)}K`;
-  return `$${val.toFixed(2)}`;
-}
+
 
 export function Watchlist() {
   const [markets, setMarkets] = useState<MarketEntry[]>([]);
@@ -68,10 +64,10 @@ export function Watchlist() {
               </span>
               <div className="flex-1 text-right">
                 <p className="text-[9px] text-[var(--text-secondary)]">
-                  Vol: {m.volume_24h_usd != null && m.volume_24h_usd > 0 ? formatCompact(m.volume_24h_usd) : "--"}
+                  Vol: {m.volume_24h_usd != null && m.volume_24h_usd > 0 ? formatCompactUsd(m.volume_24h_usd) : "--"}
                 </p>
                 <p className="text-[9px] text-[var(--text-secondary)]">
-                  OI: {m.total_open_interest_usd != null && m.total_open_interest_usd > 0 ? formatCompact(m.total_open_interest_usd) : "--"}
+                  OI: {m.total_open_interest_usd != null && m.total_open_interest_usd > 0 ? formatCompactUsd(m.total_open_interest_usd) : "--"}
                 </p>
               </div>
             </Link>

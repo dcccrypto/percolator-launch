@@ -9,6 +9,7 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { usePriceFlash } from "@/hooks/usePriceFlash";
 import { MarketSwitcher } from "@/components/trade/MarketSwitcher";
 import { formatUsdFromNumber, formatMarkPrice } from "@/lib/format";
+import { formatCompactUsd } from "@/lib/formatters";
 import { computeMarketSpread } from "@/lib/oraclePrice";
 
 interface MarketInfoBarProps {
@@ -20,12 +21,7 @@ interface MarketInfoBarProps {
   mainnetCa?: string | null;
 }
 
-function formatCompact(n: number | null | undefined): string {
-  if (n == null) return "—";
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
-  return `$${n.toFixed(0)}`;
-}
+
 
 /**
  * Phase 2: funding rate display — designer note says show funding / 8h.
@@ -209,7 +205,7 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
             className={`text-xs font-medium ${volume == null ? "text-[var(--text-dim)]" : "text-[var(--text)]"}`}
             style={{ fontFamily: "var(--font-mono)" }}
           >
-            {volume == null ? "—" : formatCompact(volume as number)}
+            {volume == null ? "—" : formatCompactUsd(volume as number)}
           </span>
         </div>
 
@@ -217,7 +213,7 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
         <div className="flex flex-col shrink-0">
           <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">Open Interest</span>
           <span className="text-xs font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
-            {formatCompact(oi as number)}
+            {formatCompactUsd(oi as number)}
           </span>
         </div>
 

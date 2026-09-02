@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useMemo } from 'react';
+import { formatPercent } from "@/lib/formatters";
 import { GlowButton } from '@/components/ui/GlowButton';
 import { useWalletCompat } from '@/hooks/useWalletCompat';
 import dynamic from 'next/dynamic';
@@ -364,7 +365,7 @@ export function DepositWithdrawPanel({
               </span>
               {lpSupply > 0n && (
                 <span className="text-[10px] text-[var(--text-secondary)]">
-                  Share: {((Number(previewShares) / Number(lpSupply + previewShares)) * 100).toFixed(2)}%
+                  Share: {formatPercent((Number(previewShares) / Number(lpSupply + previewShares)) * 100)}
                 </span>
               )}
             </div>
