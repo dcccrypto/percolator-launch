@@ -67,12 +67,19 @@ export const EMPTY_PRICE_STATE: PriceState = Object.freeze({
 
 /* ── WS URL resolution — ported verbatim from the pre-refactor useLivePrice.ts ──
  * SECURITY REVIEW (mainnet, carried over): the WS price feed sends no auth
- * token. If WS_AUTH_REQUIRED=false server-side (current default per
- * SECURITY.md), any caller can open unauthenticated connections and
- * enumerate active markets; per-IP connection limits are the only defense.
- * If WS_AUTH_REQUIRED=true, this client fails to authenticate and silently
- * falls back to REST seeding — decide before mainnet whether the feed is
- * intentionally public or needs HMAC tokens matching SECURITY.md. */
+ * token. GH#2525: this used to cite "WS_AUTH_REQUIRED=false, the current
+ * default per SECURITY.md", which was wrong in the direction that matters —
+ * SECURITY.md said `false` flatly, but the server that implements it
+ * (percolator-api/src/routes/ws.ts:52-56) defaults to REQUIRED whenever
+ * NODE_ENV=production and only optional otherwise. Docs corrected.
+ *
+ * So the live consequence is the opposite of what was written here: on a
+ * production API this client does NOT get an open feed, it fails to
+ * authenticate and silently falls back to REST seeding. Off production, the
+ * feed is open and per-IP connection limits are the only defense.
+ *
+ * Still to decide before mainnet: whether this client should carry an HMAC
+ * token so it keeps the WS path in production instead of degrading to REST. */
 function getWsUrl(): string {
   const explicit = process.env.NEXT_PUBLIC_WS_URL;
   if (explicit !== undefined) return explicit;
