@@ -78,11 +78,21 @@ describe("useCreateMarket — retryKeeperRegistration", () => {
     });
 
     expect(signMessage).toHaveBeenCalledOnce();
-    // The signed message must be the exact H1v2 stateless proof format the server
-    // reconstructs and verifies — see route.ts's statelessProofMessage().
+    // The signed message must be the exact proof the server reconstructs and
+    // verifies — see route.ts's statelessProofMessage().
+    //
+    // #2505 / #2468 INVERTED: this used to pin `^keeper-register:<slab>:<minute>$`,
+    // which is precisely the unbound message the two issues report — it authorised
+    // the slab and nothing else, so one signature covered any pool. The proof now
+    // binds the registration parameters, and asserting the OLD shape would pin the
+    // vulnerability.
     const signedBytes = signMessage.mock.calls[0][0] as Uint8Array;
     const signedText = new TextDecoder().decode(signedBytes);
-    expect(signedText).toMatch(new RegExp(`^keeper-register:${SLAB}:\\d+$`));
+    expect(signedText.startsWith("keeper-register\n")).toBe(true);
+    expect(signedText).toContain(SLAB);
+    // The pool must be covered — this is the #2468 attack, stated as an assertion.
+    expect(signedText).toContain("dexPoolAddress=");
+    expect(signedText).not.toMatch(new RegExp(`^keeper-register:${SLAB}:\\d+$`));
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/playground/keeper-register",

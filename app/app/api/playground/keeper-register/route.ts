@@ -93,6 +93,10 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { checkAdminSecret } from "@/lib/admin-secret";
+import {
+  buildKeeperRegisterProofMessage,
+  type KeeperRegisterProofParams,
+} from "@/lib/keeper-register-proof";
 import { Connection, PublicKey } from "@solana/web3.js";
 import nacl from "tweetnacl";
 import * as Sentry from "@sentry/nextjs";
@@ -127,8 +131,14 @@ const STATELESS_PROOF_PREFIX = "keeper-register";
 const STATELESS_PROOF_WINDOW_BACK_MIN = 5;
 const STATELESS_PROOF_WINDOW_FWD_MIN = 1;
 
-function statelessProofMessage(slabAddress: string, unixMinute: number): Uint8Array {
-  return new TextEncoder().encode(`${STATELESS_PROOF_PREFIX}:${slabAddress}:${unixMinute}`);
+// #2505 / #2468: the proof now covers the parameters the route ACTS ON, not just
+// the slab. Built by the shared module so the client and this verifier cannot
+// drift — see lib/keeper-register-proof.ts for what is and is not fixed.
+function statelessProofMessage(
+  params: KeeperRegisterProofParams,
+  unixMinute: number,
+): Uint8Array {
+  return buildKeeperRegisterProofMessage(params, unixMinute);
 }
 
 /** Verify `signatureBytes` is a valid ed25519 signature by `deployerPubkeyBytes` over
@@ -136,13 +146,13 @@ function statelessProofMessage(slabAddress: string, unixMinute: number): Uint8Ar
  *  window of the server's own clock. Stateless — no nonce store, no shared memory
  *  needed between the "issuing" and "verifying" request (there is no issuing request). */
 function verifyStatelessDeployerProof(
-  slabAddress: string,
+  params: KeeperRegisterProofParams,
   deployerPubkeyBytes: Uint8Array,
   signatureBytes: Uint8Array,
 ): boolean {
   const nowMinute = Math.floor(Date.now() / 60_000);
   for (let d = -STATELESS_PROOF_WINDOW_BACK_MIN; d <= STATELESS_PROOF_WINDOW_FWD_MIN; d++) {
-    const msg = statelessProofMessage(slabAddress, nowMinute + d);
+    const msg = statelessProofMessage(params, nowMinute + d);
     try {
       if (nacl.sign.detached.verify(msg, signatureBytes, deployerPubkeyBytes)) return true;
     } catch {
@@ -326,7 +336,15 @@ export async function POST(req: NextRequest) {
     // H1v2: stateless deployer proof — no nonce to claim, so no server-stored state to
     // race across serverless lambda instances (see file header for why this replaced
     // the nonce+claim scheme).
-    const sigValid = verifyStatelessDeployerProof(slabAddress, deployerPubkeyBytes, signatureBytes);
+    // #2505 / #2468: verify against the parameters this request ACTS ON, not the
+    // slab alone. A signature is now valid for exactly one (slab, pool, CA, type,
+    // symbol, label) tuple, so a captured one can no longer authorise the same
+    // slab against a substituted pool.
+    const sigValid = verifyStatelessDeployerProof(
+      { slabAddress, dexPoolAddress, mainnetCA: mainnetCA ?? "", dexType: dexType ?? "", symbol, label },
+      deployerPubkeyBytes,
+      signatureBytes,
+    );
     if (!sigValid) {
       Sentry.captureMessage("[playground/keeper-register] Deployer signature verification failed", {
         level: "warning",
@@ -336,7 +354,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            'Signature verification failed. Ensure you signed "keeper-register:<slabAddress>:<unix-minute>" ' +
+            "Signature verification failed. The proof must cover the registration " +
+            "parameters, not just the slab — build it with " +
+            "buildKeeperRegisterProofMessage() from lib/keeper-register-proof and sign " +
             "with the deployer keypair within the last few minutes.",
         },
         { status: 401 },

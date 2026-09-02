@@ -36,7 +36,13 @@ describe("useCreateMarket fresh batched registration", () => {
     expect(freshBatchSource).not.toContain("/api/markets/challenge");
 
     // The keeper proof is the one remaining signature.
-    expect(freshBatchSource).toContain("keeper-register:");
+    //
+    // #2505 / #2468: this used to look for the literal "keeper-register:" — the
+    // old message, which bound the slab and nothing else. The proof is now built
+    // by the shared module that binds the registration PARAMETERS, so assert on
+    // the builder rather than on a string that must no longer appear.
+    expect(freshBatchSource).toContain("buildKeeperRegisterProofMessage");
+    expect(freshBatchSource).not.toContain("keeper-register:${");
   });
 
   it("does not publish the market until it actually holds collateral", () => {
