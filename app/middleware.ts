@@ -50,7 +50,29 @@ function getUpstashLimiters(): { general: Ratelimit | null; rpc: Ratelimit | nul
 
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return { general: null, rpc: null };
+  if (!url || !token) {
+    // GH#2341: unconfigured Upstash silently degrades to the per-instance
+    // in-memory limiter below, which on Vercel is not really a rate limit —
+    // every cold start gets its own budget, so an attacker spreading requests
+    // across instances bypasses it entirely.
+    //
+    // The init-FAILURE branch already logged in production; MISSING env vars
+    // returned quietly, which is the more likely way to end up here (a fresh
+    // deployment, or a preview promoted to prod without the vars set). So the
+    // case that actually happens was the one that said nothing.
+    //
+    // Logged rather than thrown: middleware runs on every request, and failing
+    // closed here would take the whole site down over a rate limiter. That
+    // trade is deliberate, and is exactly why it has to be loud.
+    if (process.env.NODE_ENV === "production") {
+      console.error(
+        "[RateLimit] ERROR: UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN are unset in " +
+          "production — falling back to the PER-INSTANCE in-memory limiter. Distributed rate " +
+          "limiting is NOT in effect and limits can be bypassed across serverless instances.",
+      );
+    }
+    return { general: null, rpc: null };
+  }
 
   try {
     const redis = new Redis({ url, token });
