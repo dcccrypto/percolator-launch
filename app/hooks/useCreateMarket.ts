@@ -72,6 +72,7 @@ import {
   parseMarketGroupV17OI,
 } from "@percolatorct/sdk";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
+import { buildKeeperRegisterProofMessage } from "@/lib/keeper-register-proof";
 import { deriveMarketParams, MIN_LEVERAGE_X, backingSeedPerDomain, leverageFromMarginBps } from "@/lib/market-params";
 // v17: SetOracleAuthority (tag 17), PushOraclePrice (tag 16), SetOraclePriceCap (tag 16),
 // and UpdateConfig (tag 14) do not exist in v17. All oracle + risk params are embedded
@@ -482,9 +483,28 @@ async function registerMarketWithKeeper(
     // deployer-signed proof — sign `keeper-register:<slabAddress>:<unix-minute>`
     // and the route independently reconstructs + verifies it against a small
     // window around its own clock. No server-stored nonce (see route.ts header).
+    // #2505 / #2468: the proof binds the registration PARAMETERS, not just the
+    // slab — otherwise one signature authorises this slab against any pool.
+    // Built by the shared module so this and the route cannot drift.
     const unixMinute = Math.floor(Date.now() / 60_000);
-    const proofMsg = new TextEncoder().encode(
-      `keeper-register:${params.slabAddress}:${unixMinute}`,
+    const proofMsg = buildKeeperRegisterProofMessage(
+      {
+        slabAddress: params.slabAddress,
+        dexPoolAddress: params.dexPoolAddress,
+        mainnetCA: params.mainnetCA ?? "",
+        // MUST be the normalized value, because that is what the body below
+        // carries and therefore what the route binds. Signing the raw dexId
+        // while sending the normalized one would fail verification on every
+        // market whose DexScreener id differs from the keeper vocabulary.
+        dexType: normalizeDexType(params.dexType) ?? params.dexType ?? "",
+        symbol: params.symbol ?? undefined,
+        // This path sends no label, so both sides bind the empty string. Left
+        // explicit rather than omitted: the canonicaliser encodes an absent
+        // optional as empty precisely so "no label" and "label removed" cannot
+        // share a signature.
+        label: undefined,
+      },
+      unixMinute,
     );
     const sig = await wallet.signMessage(proofMsg);
     keeperSignature = Buffer.from(sig).toString("base64");
@@ -844,8 +864,19 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
     let keeperProofSignature: string | null = null;
     if (isKeeperOracle && params.dexPoolAddress && wallet.signMessage) {
       try {
+        // #2505 / #2468 — same bound message as the retry path above.
         const unixMinute = Math.floor(Date.now() / 60_000);
-        const proofMsg = new TextEncoder().encode(`keeper-register:${slabPk.toBase58()}:${unixMinute}`);
+        const proofMsg = buildKeeperRegisterProofMessage(
+          {
+            slabAddress: slabPk.toBase58(),
+            dexPoolAddress: params.dexPoolAddress ?? "",
+            mainnetCA: params.mainnetCA ?? "",
+            dexType: normalizeDexType(params.dexType) ?? params.dexType ?? "",
+            symbol: params.symbol ?? undefined,
+            label: undefined,
+          },
+          unixMinute,
+        );
         const sig = await wallet.signMessage(proofMsg);
         keeperProofSignature = Buffer.from(sig).toString("base64");
       } catch { /* non-fatal — the "Retry registration" button covers this */ }
