@@ -258,3 +258,50 @@ export function deriveMarketParams(
     estimatedFreezeSecondsFor26PctMove: Math.round((2600 / maxPriceMoveBpsPerSlot) * 0.4),
   };
 }
+
+/**
+ * GH#2514: which of the two launch backing domains are NOT seeded.
+ *
+ * `backingSeedPerDomain` above declares both domains mandatory (100% of LP
+ * collateral each), but the sequential launch path used to treat the
+ * TopUpBackingBucket transaction as best-effort: it caught the error, warned to
+ * the console, and reported `Market created!` anyway. So a retry/resume launch
+ * could finish with neither allocation present and nothing saying so.
+ *
+ * Pure so it can be tested without driving the whole wizard. Takes the buckets
+ * from `parseBackingBucketsV17`.
+ *
+ * The check is on STATUS + nonzero backing, deliberately NOT on amount: the
+ * bucket stores a u128 BackingNum, not collateral atoms, so comparing it
+ * against a `backingSeedPerDomain` result would be a units mismatch. (That is
+ * the same class of error as the "insurance already topped up" miscount in
+ * useCreateMarket, which compared a vault balance that also held these very
+ * backing seeds against an insurance target.)
+ *
+ * Empty means never seeded. Expired/Impaired are reported too: neither is a
+ * usable seed, and both are states the launch is supposed to have prevented.
+ */
+export const LAUNCH_BACKING_DOMAINS = [0, 1] as const;
+
+export interface BackingBucketLike {
+  domain: number;
+  status: number;
+  statusName: string;
+  freshUnlienedBackingNum: bigint;
+}
+
+export function findUnseededBackingDomains(
+  buckets: readonly BackingBucketLike[],
+): string[] {
+  const missing: string[] = [];
+  for (const domain of LAUNCH_BACKING_DOMAINS) {
+    const b = buckets.find((x) => x.domain === domain);
+    const side = domain === 0 ? "long" : "short";
+    if (!b) {
+      missing.push(`domain ${domain} (${side}): absent`);
+    } else if (b.status !== 1 /* Fresh */ || b.freshUnlienedBackingNum === 0n) {
+      missing.push(`domain ${domain} (${side}): ${b.statusName}`);
+    }
+  }
+  return missing;
+}

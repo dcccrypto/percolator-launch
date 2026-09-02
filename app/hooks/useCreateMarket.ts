@@ -70,9 +70,10 @@ import {
   // resending it — see the Step 3 block below.
   parsePortfolioV17,
   parseMarketGroupV17OI,
+  parseBackingBucketsV17,
 } from "@percolatorct/sdk";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
-import { deriveMarketParams, MIN_LEVERAGE_X, backingSeedPerDomain, leverageFromMarginBps } from "@/lib/market-params";
+import { deriveMarketParams, MIN_LEVERAGE_X, backingSeedPerDomain, leverageFromMarginBps, findUnseededBackingDomains } from "@/lib/market-params";
 // v17: SetOracleAuthority (tag 17), PushOraclePrice (tag 16), SetOraclePriceCap (tag 16),
 // and UpdateConfig (tag 14) do not exist in v17. All oracle + risk params are embedded
 // in InitMarket (extended tail). The sdk-compat stubs throw at runtime if called.
@@ -2869,6 +2870,7 @@ export function useCreateMarket() {
           // must not strand an otherwise-successful market creation — a retry of
           // this step (or a later maintainer backfill) is safe because a repeat
           // TopUp against an already-Fresh-at-MAX bucket hits the harmless no-op arm.
+          let backingSeedError: unknown = null;
           if (isV17SlabDeposit) {
             try {
               const backingVaultToken = vaultTokenAta;
@@ -2897,12 +2899,65 @@ export function useCreateMarket() {
               });
               setState((s) => ({ ...s, txSigs: [...s.txSigs, backingSig] }));
             } catch (backingBucketErr) {
+              backingSeedError = backingBucketErr;
               console.warn(
                 "[useCreateMarket] Step 3 backing-bucket seeding (deadlock prevention) failed — " +
                 "market is otherwise live, but domains 0/1 may still be vulnerable to the freshness " +
                 "deadlock until this is retried or backfilled:",
                 backingBucketErr,
               );
+            }
+
+            // GH#2514: assert the OUTCOME, not the transaction result.
+            //
+            // The catch above used to be the whole story: it warned to the console
+            // and fell through to "Market created!". So a sequential launch (an
+            // explicit retry/resume with startStep <= 3, or the pre-broadcast
+            // fallback from fresh batching) could report success with BOTH backing
+            // domains unseeded — the two allocations this same revision declares
+            // mandatory at 100% of LP collateral each (backingSeedPerDomain,
+            // lib/market-params.ts). The batched M3a path is unaffected: it bundles
+            // the deposit and both top-ups in one atomic transaction.
+            //
+            // This is the same treatment the insurance seed already gets twice in
+            // this file, for the same reason and in the same shape: reading the
+            // engine's own state catches never-built, reverted and partially
+            // applied alike — including the half-failure where one domain landed
+            // and the other did not, which no transaction result can distinguish.
+            //
+            // The assertion is deliberately on STATUS, not amount. The bucket
+            // stores a u128 BackingNum, not collateral atoms, so comparing it
+            // against backingSeed would be a units mismatch — exactly the class of
+            // bug that produced the "insurance already topped up" miscount recorded
+            // below. Empty(0) means never seeded; a Fresh bucket with nonzero
+            // fresh-unliened backing is what TopUpBackingBucket produces.
+            {
+              let unseeded: string[] | null = null;
+              try {
+                const slabInfoBacking = await connection.getAccountInfo(slabPk);
+                if (slabInfoBacking?.data) {
+                  const parsed = parseBackingBucketsV17(new Uint8Array(slabInfoBacking.data));
+                  const missing = findUnseededBackingDomains(parsed.buckets);
+                  if (missing.length > 0) unseeded = missing;
+                }
+                // Unreadable/unparseable slab: fall through without throwing. Unlike
+                // the insurance seed, an unseeded backing domain is recoverable —
+                // TopUpBackingBucket is replayable by the backing authority, and
+                // ExpireBackingBucket is permissionless — so failing the launch on a
+                // transient RPC error would strand a live market for no gain.
+              } catch {
+                // Same rationale as above.
+              }
+              if (unseeded) {
+                throw new Error(
+                  `Backing domains were not seeded (${unseeded.join("; ")}). ` +
+                    "The market exists and its liquidity is deposited — retry this step to seed them. " +
+                    "Until then the market is exposed to the backing-freshness deadlock." +
+                    (backingSeedError
+                      ? ` Cause: ${backingSeedError instanceof Error ? backingSeedError.message : String(backingSeedError)}`
+                      : ""),
+                );
+              }
             }
           }
 
