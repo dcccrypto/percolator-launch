@@ -32,7 +32,12 @@ WebSocket connections support optional authentication:
 
 ### Configuration
 
-- `WS_AUTH_REQUIRED=true` — Require authentication (default: false)
+- `WS_AUTH_REQUIRED` — Require authentication. **The default is environment-dependent, not `false`:**
+  required when `NODE_ENV=production`, optional otherwise. Setting the variable to
+  `true` or `false` overrides that in either direction.
+  (Implemented in `percolator-api/src/routes/ws.ts:52-56`; this repo only documents it.)
+  Startup fails closed: production without `WS_AUTH_SECRET` exits, and so does
+  `WS_AUTH_REQUIRED=true` without a secret.
 - `WS_AUTH_SECRET` — Secret key for HMAC tokens (change in production!)
 
 ### Authentication Methods
@@ -164,7 +169,9 @@ Rate limit violations are:
    CORS_ORIGINS=http://localhost:3000,http://localhost:3001
    ```
 
-2. **Keep auth disabled** for easier testing
+2. **Auth is already off in development** — the default outside
+   `NODE_ENV=production` is optional, so no setting is needed. Set it explicitly
+   only to override:
    ```bash
    WS_AUTH_REQUIRED=false
    ```

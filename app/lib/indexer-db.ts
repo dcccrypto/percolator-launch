@@ -22,6 +22,7 @@
 // Loaded only in Node.js (Next.js server-side route handlers, never the browser).
 // The import is dynamic so bundling for the browser never fails.
 import postgres from "postgres";
+import { getServerNetwork } from "./supabase";
 
 // ── connection pool ─────────────────────────────────────────────────────────
 
@@ -141,6 +142,7 @@ export async function queryTrades(
       created_at, asset_index
     FROM trades
     WHERE slab_address = ${slabAddress}
+      AND network = ${getServerNetwork()}
     ORDER BY created_at DESC
     LIMIT ${limit}
   `;
@@ -196,6 +198,7 @@ export async function queryTradesForCandles(
     SELECT price::text AS price, size::text AS size, created_at
     FROM trades
     WHERE slab_address = ${slabAddress}
+      AND network = ${getServerNetwork()}
       AND created_at >= ${fromIso}::timestamptz
       AND created_at <= ${toIso}::timestamptz
     ORDER BY created_at ASC
@@ -324,6 +327,7 @@ export async function queryStatsAggregate(): Promise<StatsAggregate> {
         0
       )::text                                          AS volume_24h_raw
     FROM trades
+    WHERE network = ${getServerNetwork()}
   `;
   const row = rows[0];
   return {
@@ -343,7 +347,7 @@ export async function queryStatsAggregate(): Promise<StatsAggregate> {
 export async function queryKnownSlabs(): Promise<string[]> {
   const sql = getSql();
   const rows = await sql<Array<{ slab_address: string }>>`
-    SELECT DISTINCT slab_address FROM trades LIMIT 100
+    SELECT DISTINCT slab_address FROM trades WHERE network = ${getServerNetwork()} LIMIT 100
   `;
   return rows.map((r) => r.slab_address);
 }
@@ -392,6 +396,7 @@ export async function queryLeaderboard(
         MAX(created_at)           AS last_trade_at
       FROM trades
       WHERE created_at >= NOW() - INTERVAL '24 hours'
+        AND network = ${getServerNetwork()}
       GROUP BY trader
       ORDER BY SUM(ABS(size::numeric) * price::numeric / 1e6) DESC
       LIMIT ${limit}
@@ -405,6 +410,7 @@ export async function queryLeaderboard(
         MAX(created_at)           AS last_trade_at
       FROM trades
       WHERE created_at >= NOW() - INTERVAL '7 days'
+        AND network = ${getServerNetwork()}
       GROUP BY trader
       ORDER BY SUM(ABS(size::numeric) * price::numeric / 1e6) DESC
       LIMIT ${limit}
@@ -417,6 +423,7 @@ export async function queryLeaderboard(
         SUM(ABS(size::numeric) * price::numeric / 1e6)::text AS total_volume,
         MAX(created_at)           AS last_trade_at
       FROM trades
+      WHERE network = ${getServerNetwork()}
       GROUP BY trader
       ORDER BY SUM(ABS(size::numeric) * price::numeric / 1e6) DESC
       LIMIT ${limit}
@@ -518,6 +525,7 @@ export async function queryTraderStatsAggregate(
       max(created_at)                                           AS last_trade_at
     FROM trades
     WHERE trader = ${wallet}
+      AND network = ${getServerNetwork()}
   `;
   const r = rows[0];
   const iso = (d: Date | null) =>
@@ -556,6 +564,7 @@ export async function queryTraderStatsRows(wallet: string): Promise<TraderStatsR
            fee::text AS fee, slab_address, created_at
     FROM trades
     WHERE trader = ${wallet}
+      AND network = ${getServerNetwork()}
     ORDER BY created_at ASC
     LIMIT 10000
   `;
@@ -590,10 +599,12 @@ export async function queryTraderTradesPage(
     ? await sql<Array<{ cnt: string }>>`
         SELECT COUNT(*)::text AS cnt FROM trades
         WHERE trader = ${wallet} AND slab_address = ${slabFilter}
+          AND network = ${getServerNetwork()}
       `
     : await sql<Array<{ cnt: string }>>`
         SELECT COUNT(*)::text AS cnt FROM trades
         WHERE trader = ${wallet}
+          AND network = ${getServerNetwork()}
       `;
   const total = Number(countRows[0]?.cnt ?? "0");
 
@@ -616,6 +627,7 @@ export async function queryTraderTradesPage(
                created_at, asset_index
         FROM trades
         WHERE trader = ${wallet} AND slab_address = ${slabFilter}
+          AND network = ${getServerNetwork()}
         ORDER BY created_at DESC
         LIMIT ${limit} OFFSET ${offset}
       `
@@ -625,6 +637,7 @@ export async function queryTraderTradesPage(
                created_at, asset_index
         FROM trades
         WHERE trader = ${wallet}
+          AND network = ${getServerNetwork()}
         ORDER BY created_at DESC
         LIMIT ${limit} OFFSET ${offset}
       `;

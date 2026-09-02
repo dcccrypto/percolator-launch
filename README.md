@@ -448,7 +448,7 @@ All backend services share a single `.env` file (root or per-package). Copy `.en
 | `API_AUTH_KEY` | — | API key for protected endpoints |
 | `CORS_ORIGINS` | `http://localhost:3000` | Comma-separated allowed origins (required in production) |
 | `WS_AUTH_SECRET` | — | HMAC secret for WebSocket token auth |
-| `WS_AUTH_REQUIRED` | `false` | Require WS auth tokens |
+| `WS_AUTH_REQUIRED` | *(prod: `true`, else `false`)* | Require WS auth tokens. Default follows `NODE_ENV`; set explicitly to override. |
 | `MAX_WS_CONNECTIONS` | `1000` | Global WebSocket connection limit |
 
 ### Keeper Service

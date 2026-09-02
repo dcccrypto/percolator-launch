@@ -623,7 +623,13 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
   const { sparse: effectiveSparse } = hasRenderableData(chartStyle, candleData, lineData);
 
   // Phase 2: volume has data (used to show empty state in volume pane)
-  const hasVolumeData = candleData.some((c) => (c.volume ?? 0) > 0);
+  // #2321: guard on Number.isFinite, not just `> 0`. NaN > 0 is false so NaN was
+  // already excluded here, but Infinity > 0 is TRUE — so a single corrupt candle
+  // from external data enabled the volume pane and handed Infinity straight to
+  // the histogram series, which then scales the whole pane off that value.
+  const hasVolumeData = candleData.some(
+    (c) => Number.isFinite(c.volume) && (c.volume ?? 0) > 0,
+  );
 
   // Indicator overlays (SMA / EMA / Bollinger). Memo the filtered subset so
   // the overlay hook's effect only re-runs when the user actually adds /

@@ -11,7 +11,9 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { PublicKey } from "@solana/web3.js";
+import { Connection, PublicKey } from "@solana/web3.js";
+import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { getRpcEndpoint } from "@/lib/config";
 import * as Sentry from "@sentry/nextjs";
 import { getServiceClient } from "@/lib/supabase";
 import { getClientIp } from "@/lib/get-client-ip";
@@ -104,6 +106,41 @@ export async function POST(req: NextRequest) {
     const safeDecimals = decimals ?? 6;
     if (!Number.isInteger(safeDecimals) || safeDecimals < 0 || safeDecimals > 18) {
       return NextResponse.json({ error: "Invalid decimals (must be integer 0-18)" }, { status: 400 });
+    }
+
+    // #2520: every check above is SHAPE-only — a syntactically valid pubkey for an
+    // account that was never created still landed in `devnet_mints`, so the registry
+    // could carry entries with no mint behind them. Confirm the account exists and
+    // is an SPL mint owned by the token program (same shape /api/devnet-airdrop uses
+    // before trusting a mirror row). SPL Mint is a fixed 82 bytes.
+    //
+    // This is EXISTENCE, not ownership: it does not prove the caller controls the
+    // mint. Ownership would need a signature and a client-contract change — tracked
+    // separately on the issue.
+    const SPL_MINT_LEN = 82;
+    try {
+      const conn = new Connection(getRpcEndpoint(), "confirmed");
+      const info = await conn.getAccountInfo(new PublicKey(mintAddress));
+      if (!info) {
+        return NextResponse.json(
+          { error: "mintAddress does not exist on devnet" },
+          { status: 400 },
+        );
+      }
+      if (!info.owner.equals(TOKEN_PROGRAM_ID) || info.data.length !== SPL_MINT_LEN) {
+        return NextResponse.json(
+          { error: "mintAddress is not an SPL mint account" },
+          { status: 400 },
+        );
+      }
+    } catch (rpcErr) {
+      // Fail CLOSED: an RPC failure must not fall through to the upsert, or the
+      // check becomes advisory and this issue is only half-closed.
+      console.warn("[devnet-register-mint] mint existence check failed:", rpcErr);
+      return NextResponse.json(
+        { error: "Could not verify mintAddress on-chain — try again" },
+        { status: 503 },
+      );
     }
 
     // Best-effort DB upsert — guarded when Supabase unavailable
