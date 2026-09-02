@@ -116,6 +116,30 @@ interface SlabEntry {
 
 const entries = new Map<string, SlabEntry>();
 
+/**
+ * #2320: `entries` was only ever written, never pruned. The WebSocket resources
+ * ARE released when the last listener unsubscribes (see the returned teardown
+ * below), so this was never a socket leak — but the last-known snapshot is
+ * deliberately retained so a quick remount or market-switch-back doesn't flash
+ * back to loading, and nothing bounded how many of those accumulated over a long
+ * session of browsing markets.
+ *
+ * Cap the retained snapshots and evict the oldest IDLE entry (no listeners, so
+ * nothing is subscribed to it). An entry with live listeners is never evicted, so
+ * the cap cannot disturb an open market. 64 is far above any realistic
+ * switch-back working set, which keeps the no-flash behaviour intact.
+ */
+const MAX_CACHED_ENTRIES = 64;
+
+function evictIdleEntriesIfNeeded(): void {
+  if (entries.size <= MAX_CACHED_ENTRIES) return;
+  // Map iteration is insertion-ordered, so this walks oldest-first.
+  for (const [slab, entry] of entries) {
+    if (entries.size <= MAX_CACHED_ENTRIES) return;
+    if (entry.listeners.size === 0) entries.delete(slab);
+  }
+}
+
 function getOrCreateEntry(slab: string): SlabEntry {
   let entry = entries.get(slab);
   if (!entry) {
@@ -133,6 +157,7 @@ function getOrCreateEntry(slab: string): SlabEntry {
       lastLiveTickAt: 0,
     };
     entries.set(slab, entry);
+    evictIdleEntriesIfNeeded();
   }
   return entry;
 }
