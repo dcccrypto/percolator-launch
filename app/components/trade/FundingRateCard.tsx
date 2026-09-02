@@ -54,7 +54,17 @@ function FundingMiniChart({ rates }: { rates: number[] }) {
           <div
             key={i}
             title={`${r >= 0 ? "+" : ""}${r.toFixed(4)}%`}
-            className={`w-6 rounded-sm ${isPos ? "bg-green-500/60" : "bg-red-500/60"}`}
+            // #2368: semantic colours come from the design tokens, not Tailwind's
+            // palette — `bg-green-500`/`bg-red-500` are fixed sRGB and do not follow a
+            // theme change, so this sparkline drifted from every other long/short
+            // surface.
+            //
+            // Direction matches THIS FILE's own convention for the same quantity: a
+            // POSITIVE funding rate is rendered with --short (`:365` for
+            // eightHourRatePercent, `:298` for userPays), because positive funding
+            // means longs pay. The old green/red pair read the opposite way round,
+            // so the sparkline disagreed with the headline rate directly above it.
+            className={`w-6 rounded-sm ${isPos ? "bg-[var(--short)]/60" : "bg-[var(--long)]/60"}`}
             style={{ height: `${heightPct}%` }}
           />
         );
