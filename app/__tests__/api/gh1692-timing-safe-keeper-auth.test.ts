@@ -53,7 +53,17 @@ describe("GH#1692/LAUNCH-16: oracle-keeper/register HMAC auth", () => {
     mainnetCA: "22222222222222222222222222222222",
   });
 
+  // #2476: the signed string now binds the METHOD and PATH, not just
+  // "<timestamp>.<rawBody>". This helper signs what a MIGRATED caller signs;
+  // signUnbound below is the pre-#2476 form, kept so the legacy-rejection test
+  // below has something real to reject.
   function sign(secret: string, rawBody: string, timestamp = Date.now().toString()) {
+    const message = [timestamp, "POST", "/api/oracle-keeper/register", rawBody].join("\n");
+    const signature = createHmac("sha256", secret).update(message).digest("hex");
+    return { timestamp, signature };
+  }
+
+  function signUnbound(secret: string, rawBody: string, timestamp = Date.now().toString()) {
     const signature = createHmac("sha256", secret).update(`${timestamp}.${rawBody}`).digest("hex");
     return { timestamp, signature };
   }
@@ -141,5 +151,58 @@ describe("GH#1692/LAUNCH-16: oracle-keeper/register HMAC auth", () => {
     // Should pass auth and fail on pubkey validation, not on auth
     expect(res.status).not.toBe(401);
     expect(res.status).not.toBe(503);
+  });
+
+  // ── #2476: the signature binds the endpoint ────────────────────────────────
+  //
+  // Before this, the signed string was "<timestamp>.<rawBody>" — no method, no
+  // path — so every route sharing KEEPER_REGISTER_SECRET accepted every other
+  // route's signatures. The credential authenticated "someone who knows the
+  // secret", not "this request".
+
+  it("rejects a signature that was not bound to this endpoint (#2476)", async () => {
+    // A signature minted for a DIFFERENT path, same secret, same body, same
+    // minute. Under the old scheme this verified here.
+    const rawBody = RAW_BODY;
+    const timestamp = Date.now().toString();
+    const otherPath = createHmac("sha256", CORRECT_SECRET)
+      .update([timestamp, "POST", "/api/markets/SomeSlab", rawBody].join("\n"))
+      .digest("hex");
+
+    const { POST } = await import("@/app/api/oracle-keeper/register/route");
+    const res = await POST(
+      new NextRequest("http://localhost/api/oracle-keeper/register", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-keeper-timestamp": timestamp,
+          "x-keeper-signature": otherPath,
+        },
+        body: rawBody,
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects the legacy UNBOUND signature on this endpoint (#2476)", async () => {
+    // This route's signer lives in the same repo and was migrated in the same
+    // commit, so it is strict — no legacy acceptance. (markets/[slab] is the one
+    // that still accepts the legacy form, because its caller is external.)
+    const rawBody = RAW_BODY;
+    const { timestamp, signature } = signUnbound(CORRECT_SECRET, rawBody);
+
+    const { POST } = await import("@/app/api/oracle-keeper/register/route");
+    const res = await POST(
+      new NextRequest("http://localhost/api/oracle-keeper/register", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-keeper-timestamp": timestamp,
+          "x-keeper-signature": signature,
+        },
+        body: rawBody,
+      }),
+    );
+    expect(res.status).toBe(401);
   });
 });

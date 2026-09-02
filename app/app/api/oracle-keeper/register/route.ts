@@ -49,11 +49,14 @@ export async function POST(req: NextRequest) {
   // LAUNCH-16: HMAC-SHA256(REGISTER_SECRET, "<timestamp>.<rawBody>") replaces the raw
   // x-keeper-secret header — the credential itself never appears on the wire. Verification
   // is timing-safe and rejects stale/replayed signatures (see verifyKeeperSignature).
+  // #2476: the signature is bound to THIS method and path, so one issued for
+  // another route sharing the secret no longer verifies here.
   const signed = verifyKeeperSignature(
     REGISTER_SECRET,
     req.headers.get("x-keeper-timestamp"),
     rawBody,
     req.headers.get("x-keeper-signature"),
+    { method: "POST", path: "/api/oracle-keeper/register" },
   );
   if (!signed) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -131,7 +134,13 @@ export async function POST(req: NextRequest) {
       // The keeper verifies: HMAC-SHA256(REGISTER_SECRET, "<timestamp>.<body>") == x-keeper-signature.
       // This means the raw credential is never sent on the wire regardless of URL scheme.
       const keeperPayload = JSON.stringify({ slabAddress, mainnetCA });
-      const { timestamp: keeperTimestamp, signature: keeperSig } = signKeeperRequest(REGISTER_SECRET, keeperPayload);
+      const { timestamp: keeperTimestamp, signature: keeperSig } = signKeeperRequest(REGISTER_SECRET, keeperPayload, {
+          // #2533: the keeper service verifies x-shared-secret, NOT this HMAC, so
+          // this binding is currently INERT on this hop. Bound anyway, so the
+          // sender is already correct when the keeper adopts HMAC verification.
+          method: "POST",
+          path: "/register",
+        });
 
       const keeperResp = await fetch(`${KEEPER_URL}/register`, {
         method: "POST",
