@@ -406,6 +406,25 @@ export async function middleware(request: NextRequest) {
   //   • Every /api/admin/* route gates on requireAdminSession(req) server-
   //     side, so even if the page leaked HTML the data is locked down.
   //
+  // #2342 / STATE AS OF 2026-09-02: NEITHER OF THOSE ROUTES EXISTS IN THIS REPO
+  // ANY MORE. There is no `app/admin` page and no `app/api/admin/*` handler —
+  // the built route manifest has no /admin entry, and `requireAdminSession`
+  // (lib/admin-session.ts) has zero callers outside its own test. The admin
+  // surface now lives in the separate API service.
+  //
+  // The branch below is dead for the routes it names, and is kept only so that
+  // an /admin path re-added here inherits the security headers rather than
+  // silently skipping them.
+  //
+  // Recorded because the two bullets above, read alone, assert that admin data
+  // "is locked down" by handlers in this repo — and a reader checking that claim
+  // would find nothing to check. #2342 asked for a middleware guard as
+  // defence-in-depth against a future route forgetting its own check. The
+  // accurate answer today is that there is no route here to forget, and the
+  // middleware cannot verify a Privy session in the Edge runtime anyway (see
+  // above). If admin routes return, add the guard WITH them — do not trust this
+  // comment to still be true.
+  //
   // We still attach the security headers + skip /admin/login from any host-
   // level redirects above.
   const isAdminRoute =
