@@ -252,6 +252,21 @@ export interface PortfolioPosition {
 export type LiquidationSeverity = "safe" | "warning" | "danger";
 
 export function getLiquidationSeverity(distancePct: number): LiquidationSeverity {
+  // #2412: a non-finite distance must NOT read as "safe". Both comparisons below
+  // are FALSE for NaN (and for Infinity on the first two), so an unguarded NaN
+  // fell straight through to "safe" — a position at liquidation risk rendering
+  // as fine, which is the one direction this indicator must never fail in.
+  //
+  // NaN reaches here from ordinary upstream arithmetic: 0/0 when a position's
+  // notional is momentarily zero mid-refresh, or a subtraction against an
+  // undefined mark before the first oracle tick lands.
+  //
+  // Fail to "danger": an absent risk signal is not evidence of safety, and the
+  // cost of asymmetry is right — a spurious warning is noise, a suppressed one
+  // is a liquidation the user never saw coming. +Infinity (genuinely far from
+  // liquidation) is the only non-finite value that would prefer "safe", and it
+  // is not worth a special case against that downside.
+  if (!Number.isFinite(distancePct)) return "danger";
   if (distancePct <= 10) return "danger";
   if (distancePct <= 30) return "warning";
   return "safe";
