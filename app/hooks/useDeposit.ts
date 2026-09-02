@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Keypair, PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
 import {
   createAssociatedTokenAccountInstruction,
@@ -97,6 +97,17 @@ export function useDeposit(slabAddress: string) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inflightRef = useRef(false);
+  // #2323: the delayed refreshSlab below outlives the component if the user
+  // navigates within its 2s window — the callback then fires against an unmounted
+  // tree. Track pending timers so the unmount effect can clear them.
+  const pendingTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(
+    () => () => {
+      for (const t of pendingTimersRef.current) clearTimeout(t);
+      pendingTimersRef.current = [];
+    },
+    [],
+  );
 
   const deposit = useCallback(
     async (params: { userIdx: number; amount: bigint; accountExists?: boolean; portfolioPk?: PublicKey }) => {
@@ -362,7 +373,7 @@ export function useDeposit(slabAddress: string) {
         // Force immediate slab re-read so balance updates without waiting for
         // the next poll cycle (which can be up to 30 s when WS is active).
         refreshSlab?.();
-        setTimeout(() => refreshSlab?.(), 2000);
+        pendingTimersRef.current.push(setTimeout(() => refreshSlab?.(), 2000));
         return sig;
       } catch (e) {
         setError(humanizeError(e instanceof Error ? e.message : String(e)));
