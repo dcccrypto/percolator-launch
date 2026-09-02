@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRpcEndpoint } from "@/lib/config";
+import { getRpcEndpoint, getAllProgramIds, getConfig } from "@/lib/config";
 import { createHash, timingSafeEqual } from "crypto";
 import { getClientIp } from "@/lib/get-client-ip";
 import { createUpstashRateLimiter } from "@/lib/upstash-rate-limit";
@@ -281,6 +281,34 @@ function validateRequest(req: Record<string, unknown>): { jsonrpc: string; error
   if (method === "getProgramAccounts") {
     const params = req?.params;
     const cfg = Array.isArray(params) ? (params[1] as Record<string, unknown> | undefined) : undefined;
+
+    // #2204 (second half): the filter requirement below bounds the RESULT SHAPE
+    // but not the PROGRAM. The issue's own example — a full dump of the SPL Token
+    // Program — passes a `dataSize: 165` filter happily and still returns every
+    // token account on the cluster. A filter is not a bound when the program has
+    // millions of matching accounts.
+    //
+    // So pin the program too. This proxy exists to serve THIS app, and the app
+    // only ever queries programs it owns: the wrapper (plus every slab tier), the
+    // matcher, the NFT program and the stake/vault program.
+    const target = Array.isArray(params) ? params[0] : undefined;
+    const appConfig = getConfig() as Record<string, unknown>;
+    const extraIds = ["nftProgramId", "vaultProgramId", "matcherProgramId"]
+      .map((k) => appConfig[k])
+      .filter((v): v is string => typeof v === "string" && v.length > 0);
+    const gpaAllowed = new Set<string>([...getAllProgramIds(), ...extraIds]);
+    if (typeof target !== "string" || !gpaAllowed.has(target)) {
+      console.warn("[/api/rpc] Blocked getProgramAccounts for a non-Percolator program");
+      return {
+        jsonrpc: "2.0",
+        error: {
+          code: -32602,
+          message: "getProgramAccounts is restricted to Percolator programs",
+        },
+        id: req?.id ?? null,
+      };
+    }
+
     const filters = cfg?.filters;
     const bounded =
       Array.isArray(filters) &&
