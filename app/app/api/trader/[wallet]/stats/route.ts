@@ -21,8 +21,22 @@ const RATE_LIMIT = 30;
 // is not, so dev/CI are unchanged while production becomes global.
 const rateLimiter = createUpstashRateLimiter({ limit: RATE_LIMIT, windowMs: 60_000, prefix: "rl:trader-stats" });
 
+/**
+ * #2510: the trade scan is capped. Making the cap a named constant keeps the
+ * query, the truncation test and the response field from drifting apart — the
+ * bug was that `totalTrades` reported `rows.length` (i.e. the CAPPED count) with
+ * nothing telling the caller it was a floor rather than a total.
+ */
+export const TRADER_STATS_MAX_ROWS = 10_000;
+
 export interface TraderStatsResponse {
   totalTrades: number;
+  /**
+   * True when the scan hit TRADER_STATS_MAX_ROWS, i.e. every aggregate here is a
+   * LOWER BOUND computed over the oldest TRADER_STATS_MAX_ROWS trades, not the
+   * wallet's full history. Additive, so existing consumers are unaffected.
+   */
+  truncated: boolean;
   longTrades: number;
   shortTrades: number;
   totalVolume: string;
@@ -66,6 +80,8 @@ function aggregateRows(rows: { side: string; size: string; price: string; fee: s
 
   return {
     totalTrades: rows.length,
+    // #2510: >= the cap means the DB had at least this many and probably more.
+    truncated: rows.length >= TRADER_STATS_MAX_ROWS,
     longTrades,
     shortTrades,
     totalVolume: totalVolume.toString(),
@@ -123,7 +139,7 @@ export async function GET(
       .eq("trader", walletKey)
       .eq("network", getServerNetwork())
       .order("created_at", { ascending: true })
-      .limit(10_000);
+      .limit(TRADER_STATS_MAX_ROWS);
 
     if (error && error.message?.includes("network")) {
       const fallback = await supabase
@@ -131,7 +147,7 @@ export async function GET(
         .select("side, size, price, fee, slab_address, created_at")
         .eq("trader", walletKey)
         .order("created_at", { ascending: true })
-        .limit(10_000);
+        .limit(TRADER_STATS_MAX_ROWS);
       data = fallback.data;
       error = fallback.error;
     }
@@ -156,6 +172,7 @@ export async function GET(
     console.warn("[trader-stats] supabase unavailable:", err instanceof Error ? err.message : String(err));
     return NextResponse.json({
       totalTrades: 0,
+      truncated: false,
       longTrades: 0,
       shortTrades: 0,
       totalVolume: "0",
