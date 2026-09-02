@@ -1928,7 +1928,10 @@ export async function POST(req: NextRequest) {
       const keeperBody = JSON.stringify({ slabAddress: slab_address, mainnetCA: canonicalMainnetCa });
       // LAUNCH-16: sign instead of forwarding KEEPER_REGISTER_SECRET as a raw header —
       // /api/oracle-keeper/register verifies this same HMAC-SHA256 scheme.
-      const { timestamp, signature } = signKeeperRequest(process.env.KEEPER_REGISTER_SECRET, keeperBody);
+      const { timestamp, signature } = signKeeperRequest(process.env.KEEPER_REGISTER_SECRET, keeperBody, {
+        method: "POST",
+        path: "/api/oracle-keeper/register",
+      });
       const res = await fetch(keeperRegisterUrl, {
         method: "POST",
         headers: {

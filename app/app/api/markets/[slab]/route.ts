@@ -434,11 +434,21 @@ export async function PATCH(
   // Read the body ONCE as raw text — the HMAC covers the exact bytes sent, so it
   // must be verified before parsing, and re-reading the stream is not possible.
   const rawBody = await req.text();
+  // #2476: bound to this method and path. `req.nextUrl.pathname` rather than a
+  // literal, because this route is parameterised by slab — a literal would be
+  // wrong, and reconstructing it would duplicate what the router already has.
   const signed = verifyKeeperSignature(
     secret,
     req.headers.get("x-keeper-timestamp"),
     rawBody,
     req.headers.get("x-keeper-signature"),
+    { method: req.method, path: req.nextUrl.pathname },
+    // Transition: this endpoint's signer is NOT in this repo — the keeper
+    // service has no createHmac at all, so the caller is external and could
+    // not be updated in the same commit. Accepting the legacy form keeps that
+    // hop alive across the rollout and logs every use. Drop this argument once
+    // the warnings stop. See #2476.
+    true,
   );
   if (!signed) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
