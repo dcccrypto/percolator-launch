@@ -57,10 +57,22 @@ describe("useCreateMarket fresh batched registration", () => {
     // keeper-register now writes the markets row, so THE REGISTRATION CALL is
     // what must come after M3a. It used to be created before M2, which was safe
     // only while it wrote nothing but the keeper's blob.
+    //
+    // #2464 TIGHTENED THIS. The call used to be STARTED here and awaited later,
+    // so it was in flight — and could have completed — while the insurance check
+    // was still deciding whether the launch had failed. It is now a thunk
+    // (`startKeeperRegister`) INVOKED after that check, so assert on the
+    // invocation, which is the moment the request actually leaves.
     const m3a = freshBatchSource.indexOf("const m3aSig = await broadcastTailTx(2)");
-    const register = freshBatchSource.indexOf("const keeperRegisterPromise");
+    const register = freshBatchSource.indexOf("await startKeeperRegister()");
     expect(m3a).toBeGreaterThanOrEqual(0);
     expect(register).toBeGreaterThan(m3a);
+
+    // And the point of #2464: it must also come after the insurance verification,
+    // so a launch that throws there publishes nothing.
+    const insuranceGate = freshBatchSource.indexOf("Insurance fund was not seeded");
+    expect(insuranceGate).toBeGreaterThanOrEqual(0);
+    expect(register).toBeGreaterThan(insuranceGate);
   });
 
   it("keeps keeper-registration before M4, where marketauth still works", () => {
@@ -68,7 +80,11 @@ describe("useCreateMarket fresh batched registration", () => {
     // rotates marketauth away from the deployer, and keeper-register's H1 check
     // requires marketauth to still equal the deployer. Pinning the order stops
     // someone "fixing" the asymmetry and silently breaking keeper registration.
-    const keeper = freshBatchSource.indexOf("const keeperRegisterPromise");
+    //
+    // #2464 narrowed the window from "after M3a" to "after the insurance check",
+    // but this upper bound is unchanged and is the reason it could not move any
+    // later. Asserting on the INVOCATION, not the thunk's declaration.
+    const keeper = freshBatchSource.indexOf("await startKeeperRegister()");
     const m4 = freshBatchSource.indexOf("const m4Sig = await broadcastTailTx(4)");
     expect(keeper).toBeGreaterThanOrEqual(0);
     expect(m4).toBeGreaterThan(keeper);
