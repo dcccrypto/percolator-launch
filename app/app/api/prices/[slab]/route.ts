@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateSlabParam } from "@/lib/route-validators";
+import { toE6 } from "@/lib/format";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 import { boundedSet } from "@/lib/bounded-map";
 import * as Sentry from "@sentry/nextjs";
@@ -81,7 +82,7 @@ async function pythStatsFallback(slab: string): Promise<Stats24h | null> {
     return null;
   }
 
-  const toE6Str = (v: number) => BigInt(Math.round(v * 1_000_000)).toString();
+  const toE6Str = (v: number) => toE6(v).toString();
   const result: Stats24h = {
     change24h: ((last - first) / first) * 100,
     high24h: toE6Str(high),
@@ -154,7 +155,7 @@ async function geckoTerminalStatsFallback(slab: string, origin: string): Promise
       return setCache(null);
     }
 
-    const toE6Str = (v: number) => BigInt(Math.round(v * 1_000_000)).toString();
+    const toE6Str = (v: number) => toE6(v).toString();
     return setCache({
       change24h: ((last - first) / first) * 100,
       high24h: toE6Str(high),

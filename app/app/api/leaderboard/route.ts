@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { toE6 } from "@/lib/format";
 import {
   hasIndexerDb,
   queryLeaderboard,
@@ -123,7 +124,7 @@ export async function GET(request: Request) {
       try {
         const rawSize = BigInt(String(row.size).split(".")[0]);
         const absSize = rawSize < 0n ? -rawSize : rawSize;
-        const priceE6 = BigInt(Math.round((Number(row.price) || 0) * 1_000_000));
+        const priceE6 = toE6(Number(row.price) || 0);
         entry.totalVolumeMicroUsd += (absSize * priceE6) / 1_000_000n;
       } catch {
         const size = Math.abs(parseFloat(String(row.size)) || 0);

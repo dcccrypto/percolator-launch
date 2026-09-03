@@ -1,6 +1,7 @@
 'use client';
 
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
+import { bigintRatio } from "@/lib/formatters";
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 
 
@@ -45,7 +46,9 @@ export function LpPositionDashboard({
   const userRedeemableValue =
     lpSupply > 0n ? (userLpBalance * vaultBalance) / lpSupply : 0n;
 
-  const userRedeemableFloat = Number(userRedeemableValue) / Number(divisor);
+  // #2324: both sides can be large while the quotient is small, so scale inside
+  // bigint arithmetic rather than converting each side to a float first.
+  const userRedeemableFloat = bigintRatio(userRedeemableValue, divisor) ?? 0;
 
   if (loading) {
     return (

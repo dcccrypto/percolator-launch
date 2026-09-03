@@ -36,6 +36,7 @@
  */
 
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
+import { toE6 } from "@/lib/format";
 import { getBackendUrl } from "@/lib/config";
 import { startPerfSpan } from "@/lib/perf/perfTiming";
 import { getWsManager } from "./wsManager";
@@ -260,7 +261,7 @@ function handleRawMessage(slab: string, entry: SlabEntry, data: unknown): void {
 
   let rawE6: bigint | null = null;
   if (isCurrentServer) {
-    rawE6 = BigInt(Math.round(msg.price! * 1_000_000));
+    rawE6 = toE6(msg.price!);
   } else if (isLegacy) {
     const priceStr = msg.data!.priceE6!;
     if (typeof priceStr === "string" && /^-?\d+$/.test(priceStr)) {
@@ -374,7 +375,7 @@ export function setInvertFlag(slab: string, invert: number | undefined): void {
 export function seedFromDbIfEmpty(slab: string, dbPrice: number, invert: number | undefined): void {
   if (dbPrice <= 0) return;
   const entry = getOrCreateEntry(slab);
-  const rawE6 = BigInt(Math.round(dbPrice * 1_000_000));
+  const rawE6 = toE6(dbPrice);
   entry.lastDbRawE6 = rawE6;
   if (entry.snapshot.price !== null) return; // real data already present — never clobber it
   const e6 = applyInvert(rawE6, invert);
