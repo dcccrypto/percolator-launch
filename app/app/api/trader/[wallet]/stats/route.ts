@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 import { getClientIp } from "@/lib/get-client-ip";
+import { toE6 } from "@/lib/format";
 import { createUpstashRateLimiter } from "@/lib/upstash-rate-limit";
 import { hasIndexerDb, queryTraderStatsAggregate } from "@/lib/indexer-db";
 
@@ -61,7 +62,7 @@ function aggregateRows(rows: { side: string; size: string; price: string; fee: s
     try {
       const rawSize = BigInt(String(row.size).split(".")[0]);
       const absSize = rawSize < 0n ? -rawSize : rawSize;
-      const priceE6 = BigInt(Math.round(Number(row.price) * 1_000_000));
+      const priceE6 = toE6(Number(row.price));
       totalVolume += (absSize * priceE6) / 1_000_000n;
     } catch { /* skip malformed */ }
 

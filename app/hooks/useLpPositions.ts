@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { bigintToFloat } from "@/lib/formatters";
 import { PublicKey, SystemProgram } from '@solana/web3.js';
 import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
 import { getAssociatedTokenAddressSync, unpackAccount, unpackMint } from '@solana/spl-token';
@@ -257,7 +258,10 @@ export function useLpPositions(): LpPositionsState & { refresh: () => void } {
         // Compute redeemable value: (lpBalance / totalLpSupply) * tvl
         // Use per-mint decimals — do NOT hardcode 6 (PERC-8197).
         const lpMintDecimals = lpDecimalsByMint[pool.lpMint] ?? 6;
-        const lpBalance = Number(lpBalanceRaw) / Math.pow(10, lpMintDecimals);
+        // #2324: null above MAX_SAFE_INTEGER rather than a wrong balance. 0 is a
+        // deliberate fallback here — this feeds a list row, and a missing position
+        // reads better than a confident wrong one.
+        const lpBalance = bigintToFloat(lpBalanceRaw, lpMintDecimals) ?? 0;
         const totalLpSupply = pool.totalLpSupply;
         const tvlRaw = BigInt(pool.tvlRaw);
 
@@ -266,10 +270,15 @@ export function useLpPositions(): LpPositionsState & { refresh: () => void } {
           : 0n;
         // Redeemable value is in the pool's collateral token — look up actual decimals.
         const collateralDecimals = collateralDecimalsByMint[pool.collateralMint] ?? 6;
-        const redeemable = Number(redeemableRaw) / Math.pow(10, collateralDecimals);
-        const userSharePct = totalLpSupply > 0
-          ? (Number(lpBalanceRaw) / totalLpSupply) * 100
-          : 0;
+        // #2324: same guard as the balance above.
+        const redeemable = bigintToFloat(redeemableRaw, collateralDecimals) ?? 0;
+        // `totalLpSupply` is a number here, so this is a bigint/number mix. Guard
+        // the bigint side — the divisor cannot overflow, only the dividend can.
+        const lpBalanceForPct = bigintToFloat(lpBalanceRaw, 0);
+        const userSharePct =
+          totalLpSupply > 0 && lpBalanceForPct !== null
+            ? (lpBalanceForPct / totalLpSupply) * 100
+            : 0;
 
         // Check cooldown status from the batched deposit PDA info.
         let cooldownElapsed = true;

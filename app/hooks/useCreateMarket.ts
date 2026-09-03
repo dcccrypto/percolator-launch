@@ -72,6 +72,7 @@ import {
   parseMarketGroupV17OI,
 } from "@percolatorct/sdk";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
+import { toE6 } from "@/lib/format";
 import { buildKeeperRegisterProofMessage } from "@/lib/keeper-register-proof";
 import { deriveMarketParams, MIN_LEVERAGE_X, backingSeedPerDomain, leverageFromMarginBps } from "@/lib/market-params";
 // v17: SetOracleAuthority (tag 17), PushOraclePrice (tag 16), SetOraclePriceCap (tag 16),
@@ -175,7 +176,7 @@ async function fetchJupiterPriceE6(ca: string): Promise<bigint | null> {
       const json = await resp.json() as { data?: Record<string, { price?: number }> };
       const price = json.data?.[ca]?.price;
       if (price && isFinite(price) && price > 0) {
-        return BigInt(Math.round(price * 1_000_000));
+        return toE6(price);
       }
     }
   } catch { /* fall through */ }
@@ -191,7 +192,7 @@ async function fetchJupiterPriceE6(ca: string): Promise<bigint | null> {
       const priceStr = json.pairs?.[0]?.priceUsd;
       const price = priceStr ? parseFloat(priceStr) : 0;
       if (price > 0 && isFinite(price)) {
-        return BigInt(Math.round(price * 1_000_000));
+        return toE6(price);
       }
     }
   } catch { /* fall through */ }

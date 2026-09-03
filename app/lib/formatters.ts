@@ -30,6 +30,42 @@
  *
  * Shared and guarded here so the two call sites cannot drift apart again.
  */
+/**
+ * Convert a `bigint` of base units to a float, refusing silently-wrong results.
+ *
+ * #2324: `Number(someBigint)` loses precision above `Number.MAX_SAFE_INTEGER`
+ * (~9e15) and says nothing — it returns a plausible, wrong number. For 6-decimal
+ * USDC that ceiling is ~9 billion tokens; for a 9-decimal mint it is ~9 million,
+ * which is not a comfortable margin.
+ *
+ * Returns `null` rather than a wrong figure, so the caller renders a placeholder
+ * the way it already does for missing data. Returning 0 would be worse than the
+ * bug: a silently wrong LARGE number at least looks suspicious, whereas a
+ * confident 0 reads as a real balance.
+ *
+ * Note this checks the RAW base-unit magnitude, before dividing by the decimal
+ * scale — that is where the precision is actually lost. Dividing first would
+ * hide it.
+ */
+export function bigintToFloat(raw: bigint, decimals: number): number | null {
+  const abs = raw < 0n ? -raw : raw;
+  if (abs > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+  return Number(raw) / 10 ** decimals;
+}
+
+/**
+ * `bigintToFloat` for a ratio of two bigints, where neither side alone need be
+ * small — only their quotient. Scales inside bigint arithmetic first, so a large
+ * numerator and denominator still produce an exact result.
+ */
+export function bigintRatio(numerator: bigint, denominator: bigint, precision = 1_000_000n): number | null {
+  if (denominator === 0n) return null;
+  const scaled = (numerator * precision) / denominator;
+  const abs = scaled < 0n ? -scaled : scaled;
+  if (abs > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+  return Number(scaled) / Number(precision);
+}
+
 export function formatCompactUsd(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return '—';
   if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;

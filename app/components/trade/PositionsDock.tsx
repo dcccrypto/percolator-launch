@@ -62,6 +62,7 @@ import {
   adlReductionTooltip,
 } from "@/lib/v17-adl";
 import { isMockMode } from "@/lib/mock-mode";
+import { bigintToFloat } from "@/lib/formatters";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { computeLiquidationDistancePct } from "@/lib/liquidation-distance";
 import { ClosePositionModal } from "./ClosePositionModal";
@@ -259,7 +260,10 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const pnlTokens = hasValidMark ? computeMarkPnlCollateral(pnlNative, currentPriceE6) : 0n;
   // sim-USDC is $1-pegged collateral (see PLAYGROUND.md) — the collateral
   // amount above already IS the dollar figure, just formatted differently.
-  const pnlUsdRaw = hasValidMark ? Number(pnlTokens) / 10 ** decimals : null;
+  // #2324: null rather than a silently-wrong figure above MAX_SAFE_INTEGER.
+  // The `: null` branch already exists for an invalid mark, so the render path
+  // downstream already handles it.
+  const pnlUsdRaw = hasValidMark ? bigintToFloat(pnlTokens, decimals) : null;
   const pnlUsd = pnlUsdRaw !== null && Number.isFinite(pnlUsdRaw) ? pnlUsdRaw : null;
   // The position's own locked initial margin (its entry notional at the
   // market's initial-margin requirement) — NOT total account capital — is
