@@ -4,6 +4,7 @@ import { FC, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import gsap from "gsap";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
+import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
 
 interface FundingExplainerModalProps {
   onClose: () => void;
@@ -13,6 +14,10 @@ export const FundingExplainerModal: FC<FundingExplainerModalProps> = ({ onClose 
   const overlayRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const prefersReduced = usePrefersReducedMotion();
+  // #2286: this was the ONE modal of the five without a scroll lock, so the
+  // page scrolled behind it. The other four already call this hook; the
+  // divergence the issue describes is now down to this and the scrim.
+  useLockBodyScroll();
 
   // Keep the onClose callback in a ref so the mount effect never re-runs on parent
   // re-renders. The parent FundingRateCard runs a 1-second `setCountdown` setInterval,
