@@ -135,9 +135,13 @@ export async function POST(req: NextRequest) {
       // This means the raw credential is never sent on the wire regardless of URL scheme.
       const keeperPayload = JSON.stringify({ slabAddress, mainnetCA });
       const { timestamp: keeperTimestamp, signature: keeperSig } = signKeeperRequest(REGISTER_SECRET, keeperPayload, {
-          // #2533: the keeper service verifies x-shared-secret, NOT this HMAC, so
-          // this binding is currently INERT on this hop. Bound anyway, so the
-          // sender is already correct when the keeper adopts HMAC verification.
+          // #2533: the keeper now VERIFIES this HMAC (percolator-keeper#447,
+          // src/lib/register-auth.ts), so this binding is live rather than
+          // aspirational. The keeper computes the same signed string —
+          // [timestamp, METHOD, path, rawBody].join("\n") — and still accepts
+          // x-shared-secret for operators. Keep the method/path below in lockstep
+          // with that module: a mismatch fails closed, but it fails closed at
+          // market-creation time, which is how #2533 hid for as long as it did.
           method: "POST",
           path: "/register",
         });

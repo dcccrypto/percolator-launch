@@ -80,6 +80,74 @@ export interface ComputeLimitArgs {
   slippageBps?: bigint;
 }
 
+/**
+ * Maximum the off-chain feed may deviate from the ON-CHAIN oracle before its
+ * value is refused as a basis for the slippage limit.
+ *
+ * PLAYGROUND.md documents the intended gap: the UI ticks off Pyth while trades
+ * settle at the AuthMark, and the two sit ~0.1% apart. 2% is twenty times that,
+ * so an honest feed never touches this bound.
+ */
+export const MAX_FEED_DEVIATION_BPS = 200n;
+
+/**
+ * GH#2525 (item 1): bound the off-chain mark against the on-chain oracle.
+ *
+ * `computeLimitPriceE6` derives `limit_price_e6` — the BINDING on-chain slippage
+ * constraint — from `livePriceE6`, which comes from the unauthenticated WS feed,
+ * then a REST `last_price` fallback, then an on-chain seed. The only sanitisation
+ * was an ABSOLUTE band (reject <= 0, reject > $1,000,000), with nothing relative
+ * to the oracle the trade actually settles against.
+ *
+ * That made the client-side guard worth almost nothing: a feed biased high
+ * widens the band an adversarial matcher or LP can fill inside, and the "worst
+ * fill price" shown to the user is only as honest as the feed. The user believes
+ * they set a 0.5% limit; the limit is 0.5% around a number someone else chose.
+ *
+ * So the feed is now checked against the on-chain price before it is trusted:
+ *
+ *   within  MAX_FEED_DEVIATION_BPS  -> use the feed. It is fresher, and the small
+ *                                      documented Pyth/AuthMark gap is real signal.
+ *   beyond  it                      -> REFUSE, rather than clamp.
+ *
+ * Refusing rather than clamping is the deliberate choice. Clamping would silently
+ * hand the user a limit computed from a different price than the one the UI quoted
+ * them, which is its own trust problem — the number on the confirm screen would
+ * stop matching the number in the transaction. A 2% disagreement between the feed
+ * and the chain means something is wrong; the honest response is to stop and say
+ * so, not to paper over it and trade anyway.
+ *
+ * This is defence in depth, not an independent exploit fix: it only bites if the
+ * off-chain feed can be influenced, which is the separately-tracked oracle-keeper
+ * price-integrity class. What it removes is the property that a bad feed silently
+ * degrades a protection the user thinks they have.
+ */
+export function assertFeedAgreesWithChain(args: {
+  /** The off-chain feed price the limit would be derived from. */
+  feedE6: bigint;
+  /**
+   * The on-chain reference — the price the trade settles against. Pass `null`
+   * when it genuinely could not be read; the check then no-ops rather than
+   * blocking every trade, because failing closed here would take the whole app
+   * down on an RPC hiccup for a defence-in-depth guard.
+   */
+  onChainE6: bigint | null;
+}): void {
+  const { feedE6, onChainE6 } = args;
+  if (onChainE6 === null || onChainE6 <= 0n || feedE6 <= 0n) return;
+
+  const diff = feedE6 > onChainE6 ? feedE6 - onChainE6 : onChainE6 - feedE6;
+  const deviationBps = (diff * 10_000n) / onChainE6;
+  if (deviationBps <= MAX_FEED_DEVIATION_BPS) return;
+
+  throw new SlippageError(
+    `Price feed disagrees with the on-chain oracle by ${deviationBps} bps ` +
+      `(limit is ${MAX_FEED_DEVIATION_BPS}). Refusing to derive a slippage limit ` +
+      `from it — the limit would not mean what the screen says. Wait for the feed ` +
+      `to reconverge, or set an explicit limit price.`,
+  );
+}
+
 export function computeLimitPriceE6(args: ComputeLimitArgs): bigint {
   const { markE6, size } = args;
   const slippageBps =
