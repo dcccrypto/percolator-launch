@@ -1434,7 +1434,24 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
     // from the deployer, and keeper-register's H1 check requires marketauth to
     // still equal the deployer. After M3a and before M4 is the only window that
     // satisfies both constraints.
-    const keeperRegisterPromise: Promise<KeeperRegisterOutcome> =
+    // #2464: this used to be STARTED here and awaited after the insurance check,
+    // so the registration request was already in flight — and could already have
+    // completed — while that check was still deciding whether the launch had
+    // failed. A launch that threw on an unseeded insurance fund could therefore
+    // leave the market listed and keeper-registered anyway.
+    //
+    // It is now a THUNK, invoked below only once insurance has verified. The
+    // window it must run in is unchanged and still satisfied: after M3a (so a
+    // market is only listed once it holds collateral) and before M4 (whose
+    // StakeInitPool rotates marketauth away from the deployer, which
+    // keeper-register's H1 check requires).
+    //
+    // The cost is latency: the round-trip no longer overlaps M3b's broadcast, so
+    // the tail sits a little longer against the shared blockhash. That is the
+    // right trade — the blockhash-expiry path already REBUILDS a not-yet-landed
+    // tail tx (see TailTxDescriptor), whereas an incorrectly published market has
+    // no equivalent undo.
+    const startKeeperRegister = (): Promise<KeeperRegisterOutcome> =>
       (isKeeperOracle && params.dexPoolAddress && keeperProofSignature)
         ? registerMarketWithKeeper(
             { publicKey: walletPk, signMessage: wallet.signMessage },
@@ -1504,7 +1521,10 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
     }
     updateInFlightStep(slabPk.toBase58(), 4);
 
-    const keeperOutcome = await keeperRegisterPromise;
+    // #2464: started HERE, not above — everything that can fail the launch has
+    // now run, so no externally visible registration happens for a launch that is
+    // about to be reported as failed.
+    const keeperOutcome = await startKeeperRegister();
 
     const m4Sig = await broadcastTailTx(4);
     advanceLanding(m4Sig);
