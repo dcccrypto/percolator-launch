@@ -37,6 +37,11 @@ vi.mock("@/lib/programAllowlist", () => ({
 
 vi.mock("@/lib/oraclePrice", () => ({
   detectOracleMode: () => "admin",
+  // GH#2525: useTrade now cross-checks the off-chain feed against the on-chain
+  // price before deriving a slippage limit. Returning the same $1.00 the slab
+  // fixture carries keeps this suite focused on portfolio selection instead of
+  // tripping that guard.
+  resolveMarketPriceE6: () => 1_000_000n,
 }));
 
 vi.mock("@/lib/priceStore/priceStore", () => ({
@@ -153,10 +158,16 @@ describe("useTrade v17 portfolio selection", () => {
       254,
     ]);
 
+    // GH#2525: the off-chain feed must sit within 200 bps of the on-chain
+    // price (authorityPriceE6: 1_000_000n below), or the derived slippage
+    // limit is refused. This fixture used $1.50 against an on-chain $1.00 — a
+    // 50% divergence no real market shows. These tests are about PORTFOLIO
+    // SELECTION, so the price is incidental; it is aligned rather than the
+    // guard being loosened for them.
     mocks.getLivePriceSnapshot.mockReturnValue({
-      priceUsd: 1.5,
-      priceE6: 1_500_000n,
-      price: 1.5,
+      priceUsd: 1.0,
+      priceE6: 1_000_000n,
+      price: 1.0,
       change24h: null,
       high24h: null,
       low24h: null,

@@ -28,11 +28,11 @@ import { sendTx, prewarmTxLanding } from "@/lib/tx";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 import { applyConfirmedFill, getPortfolioRawSnapshot, isLpPortfolio, makePortfolioScanKey } from "@/lib/userAccountScan";
 import { useSlabState } from "@/components/providers/SlabProvider";
-import { detectOracleMode } from "@/lib/oraclePrice";
+import { detectOracleMode, resolveMarketPriceE6 } from "@/lib/oraclePrice";
 import { assertKnownProgram, assertCanonicalMatcher } from "@/lib/programAllowlist";
 import { invalidateMatcherCaps } from "@/lib/matcherCaps";
 import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
-import { computeLimitPriceE6 } from "@/lib/slippage";
+import { computeLimitPriceE6, assertFeedAgreesWithChain } from "@/lib/slippage";
 
 const INLINE_ORACLE_PUSH_REMOVED_ERROR =
   "Inline oracle price push was removed on-chain in beta.29. Migrate this flow to /api/oracle/advance-phase or another server-side oracle publisher before trading as the oracle authority.";
@@ -446,6 +446,37 @@ export function useTrade(slabAddress: string) {
         const userIsOracleAuth = useAdminOracle && mktConfig.oracleAuthority.equals(wallet.publicKey);
         if (userIsOracleAuth) {
           throw new Error(INLINE_ORACLE_PUSH_REMOVED_ERROR);
+        }
+
+        // GH#2525 (item 1): the binding on-chain slippage limit is derived from
+        // the OFF-CHAIN feed, so check that feed against the ON-CHAIN oracle —
+        // the price the trade actually settles against.
+        //
+        // Sanitisation used to be an ABSOLUTE band only (reject <= 0, reject
+        // > $1,000,000), with nothing relative to the chain. A feed biased high
+        // therefore widened the band an adversarial matcher or LP could fill
+        // inside, and the "worst fill price" on the confirm screen was only as
+        // honest as the feed: the user believes they set a 0.5% limit, but it is
+        // 0.5% around a number someone else chose.
+        //
+        // DELIBERATELY placed here, after the oracle-mode and inline-push guards,
+        // rather than next to the limit derivation above. This is defence in
+        // depth, and it must not pre-empt a more specific primary error — an
+        // earlier draft ran it first and made "inline oracle push was removed"
+        // surface as a price-disagreement message instead, which is a worse
+        // diagnosis for the same underlying misconfiguration.
+        //
+        // Only guards the DERIVED limit. An explicit `limitPriceE6` is the user's
+        // own number and passes through untouched.
+        if (params.limitPriceE6 === undefined) {
+          const onChainRefE6 = resolveMarketPriceE6({
+            ...mktConfig,
+            oracleModeByte: wrapperConfigV17?.oracleMode,
+          });
+          assertFeedAgreesWithChain({
+            feedE6: livePriceE6 ?? 0n,
+            onChainE6: onChainRefE6 > 0n ? onChainRefE6 : null,
+          });
         }
 
         // ── v17 TradeCpi account resolution ──────────────────────────────────

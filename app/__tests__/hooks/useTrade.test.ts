@@ -123,7 +123,12 @@ describe("useTrade", () => {
       config: {
         oracleAuthority: PublicKey.default,
         indexFeedId: new PublicKey(feedIdBuffer),
-        authorityPriceE6: 1000000n,
+          // GH#2525: must agree with the mocked live feed (priceE6 1_500_000n) to
+          // within 200 bps, or the derived slippage limit is refused. This was
+          // 1_000_000n against a $1.50 feed — a 50% divergence no real market
+          // shows. Raised to match the FEED rather than lowering the feed, because
+          // the slippage assertions further down are written against a 1_500_000 mark.
+          authorityPriceE6: 1_500_000n,
       },
       accounts: [
         {
