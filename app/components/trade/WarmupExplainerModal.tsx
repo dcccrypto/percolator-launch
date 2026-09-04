@@ -1,10 +1,7 @@
 "use client";
 
-import { FC, useEffect, useRef } from "react";
-import { createPortal } from "react-dom";
-import gsap from "gsap";
-import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
-import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
+import { FC } from "react";
+import { Modal } from "@/components/ui/Modal";
 
 interface WarmupExplainerModalProps {
   onClose: () => void;
@@ -13,66 +10,11 @@ interface WarmupExplainerModalProps {
 export const WarmupExplainerModal: FC<WarmupExplainerModalProps> = ({
   onClose,
 }) => {
-  const overlayRef = useRef<HTMLDivElement>(null);
-  const modalRef = useRef<HTMLDivElement>(null);
-  const prefersReduced = usePrefersReducedMotion();
-  useLockBodyScroll();
-
-  // Keep the onClose callback in a ref so the mount effect never re-runs on parent
-  // re-renders. Trade-page parents re-render frequently (countdown ticks, WS price
-  // updates, etc.) and pass freshly-allocated inline `onClose` closures each time;
-  // with `onClose` in the effect deps, every parent re-render re-fired the gsap
-  // fade-in (opacity 0 → 1) and made the modal blink continuously while open.
-  // Same canonical pattern as TradeConfirmationModal.tsx.
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-
-  useEffect(() => {
-    const overlay = overlayRef.current;
-    const modal = modalRef.current;
-    if (!overlay || !modal) return;
-
-    if (prefersReduced) {
-      overlay.style.opacity = "1";
-      modal.style.opacity = "1";
-      modal.style.transform = "scale(1)";
-    } else {
-      gsap.fromTo(
-        overlay,
-        { opacity: 0 },
-        { opacity: 1, duration: 0.15, ease: "power2.out" }
-      );
-      gsap.fromTo(
-        modal,
-        { opacity: 0, scale: 0.97, y: -4 },
-        { opacity: 1, scale: 1, y: 0, duration: 0.2, ease: "power2.out" }
-      );
-    }
-
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCloseRef.current();
-    };
-    document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefersReduced]);
-
-  const handleOverlayClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) onClose();
-  };
-
-  const content = (
-    <div
-      ref={overlayRef}
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4"
-      onClick={handleOverlayClick}
-    style={{ opacity: 0 }}
+  return (
+    <Modal
+      onClose={onClose}
+      panelClassName="w-full max-w-sm border border-[var(--border)] bg-[var(--bg)] shadow-2xl shadow-black/30"
     >
-      <div
-        ref={modalRef}
-        className="w-full max-w-sm border border-[var(--border)] bg-[var(--bg)] shadow-2xl shadow-black/30"
-      style={{ opacity: 0 }}
-      >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[var(--border)]/50 px-4 py-2">
           <span className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">
@@ -154,11 +96,6 @@ export const WarmupExplainerModal: FC<WarmupExplainerModalProps> = ({
             Close
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
-
-  return typeof document !== "undefined"
-    ? createPortal(content, document.body)
-    : null;
 };

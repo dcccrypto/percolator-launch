@@ -1,76 +1,20 @@
 "use client";
 
+import { Modal } from "@/components/ui/Modal";
+
 import { FC, useEffect, useRef } from "react";
-import { createPortal } from "react-dom";
-import gsap from "gsap";
-import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
-import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
 
 interface FundingExplainerModalProps {
   onClose: () => void;
 }
 
 export const FundingExplainerModal: FC<FundingExplainerModalProps> = ({ onClose }) => {
-  const overlayRef = useRef<HTMLDivElement>(null);
-  const modalRef = useRef<HTMLDivElement>(null);
-  const prefersReduced = usePrefersReducedMotion();
-  // #2286: this was the ONE modal of the five without a scroll lock, so the
-  // page scrolled behind it. The other four already call this hook; the
-  // divergence the issue describes is now down to this and the scrim.
-  useLockBodyScroll();
-
-  // Keep the onClose callback in a ref so the mount effect never re-runs on parent
-  // re-renders. The parent FundingRateCard runs a 1-second `setCountdown` setInterval,
-  // so it re-renders every second and passes a freshly-allocated
-  // `() => setShowExplainer(false)` closure as `onClose` each time. With `onClose` in
-  // the effect deps, every parent tick re-fired the gsap fade-in (opacity 0 → 1),
-  // making the modal blink continuously while open. Same canonical pattern as
-  // TradeConfirmationModal.tsx.
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-
-  useEffect(() => {
-    const overlay = overlayRef.current;
-    const modal = modalRef.current;
-    if (!overlay || !modal) return;
-
-    if (prefersReduced) {
-      overlay.style.opacity = "1";
-      modal.style.opacity = "1";
-      modal.style.transform = "scale(1)";
-    } else {
-      gsap.fromTo(overlay, { opacity: 0 }, { opacity: 1, duration: 0.2, ease: "power2.out" });
-      gsap.fromTo(
-        modal,
-        { opacity: 0, scale: 0.95 },
-        { opacity: 1, scale: 1, duration: 0.25, ease: "power2.out" }
-      );
-    }
-
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCloseRef.current();
-    };
-    document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefersReduced]);
-
-  const handleOverlayClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) onClose();
-  };
-
-  const content = (
-    <div
-      ref={overlayRef}
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
-      onClick={handleOverlayClick}
-    style={{ opacity: 0 }}
+  return (
+    <Modal
+      onClose={onClose}
+      scrimClassName="backdrop-blur-sm"
+      panelClassName="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-sm border border-[var(--border)] bg-[var(--bg)] shadow-2xl"
     >
-      <div
-        ref={modalRef}
-        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-sm border border-[var(--border)] bg-[var(--bg)] shadow-2xl"
-      style={{ opacity: 0 }}
-      >
         {/* Header */}
         <div className="sticky top-0 flex items-center justify-between border-b border-[var(--border)]/50 bg-[var(--bg)] px-4 py-3">
           <h2 className="text-2xl font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
@@ -242,9 +186,6 @@ export const FundingExplainerModal: FC<FundingExplainerModalProps> = ({ onClose 
             Got it
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
-
-  return typeof document !== "undefined" ? createPortal(content, document.body) : null;
 };
