@@ -758,7 +758,14 @@ export async function POST(req: Request) {
   //     fresh random 8-char Crockford code; retry with a new one
   //   • waitlist_pubkey_key or waitlist_email_unique_idx — the same user
   //     re-submitting; idempotent, mark as duplicate and move on
-  const supabase = getWaitlistSupabase();
+  // GH#2503: this insert must go through the SERVICE-ROLE client. The waitlist
+  // table's INSERT policy is scoped to service_role; the publishable/anon key
+  // has no write policy, because every anti-abuse control this route applies
+  // (referral code, Turnstile, honeypot, dwell time, disposable-email block,
+  // bot-UA filter, per-IP and per-code caps, signature verification) is only a
+  // boundary if this route is the ONLY write path. It was not, while anon could
+  // INSERT directly against PostgREST with a key that is public by design.
+  const supabase = getWaitlistServiceSupabase();
   const baseRow: Record<string, unknown> = {
     twitter_handle,
     source,
