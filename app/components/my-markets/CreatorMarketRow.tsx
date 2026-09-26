@@ -16,6 +16,7 @@ import { explorerAccountUrl } from "@/lib/config";
 import { computeMarketHealthFromStats } from "@/lib/health";
 import { HealthBadge } from "@/components/market/HealthBadge";
 import { MarketLogo } from "@/components/market/MarketLogo";
+import { resolveIdentity, type ResolvedIdentity } from "@/lib/bulk-identity";
 import { LogoUpload } from "@/components/create/LogoUpload";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
@@ -130,13 +131,17 @@ interface CreatorMarketRowProps {
    *  (fetched once, batched, at the page level — see app/my-markets/page.tsx —
    *  NOT re-fetched again when the drawer opens). */
   detail: CreatorMarketDetail | null;
+  /** Ticker/name/logo resolved on a much faster clock than `detail` — the
+   *  session identity cache synchronously, then one bulk directory call. Null
+   *  when neither knows this market yet. See hooks/useMarketIdentities.ts. */
+  identity: ResolvedIdentity | null;
   /** Current on-chain slot from useCreatedMarkets' v17 enrichment fetch. */
   chainCurrentSlot: bigint | null;
   expanded: boolean;
   onToggleExpand: () => void;
 }
 
-export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, chainCurrentSlot, expanded, onToggleExpand }) => {
+export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, identity, chainCurrentSlot, expanded, onToggleExpand }) => {
   const { toast } = useToast();
   const actions = useAdminActions();
   const closeMarket = useCloseMarket();
@@ -231,8 +236,15 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, ch
     ? (Number(oiAtoms) / 10 ** decimals) * priceUsdForOi
     : null;
 
-  const symbol = detail?.symbol ?? market.label;
-  const name = detail?.name ?? undefined;
+  // Field-level merge, detail first. Merging per SOURCE instead would let the
+  // slow per-market detail blank a ticker the fast path already resolved: the
+  // API's on-chain fallback returns `symbol: null` and carries no `logo_url`
+  // key at all for any market absent from PLAYGROUND_SLAB_META and the
+  // registration blob, so the row painted its real ticker and then DEGRADED to
+  // `market.label` a second later. Per field, identity only ever sharpens.
+  const resolved = resolveIdentity(detail, identity);
+  const symbol = resolved.symbol ?? market.label;
+  const name = resolved.name ?? undefined;
 
   const [showBurnConfirm, setShowBurnConfirm] = useState(false);
   const [burnConfirmText, setBurnConfirmText] = useState("");
@@ -289,7 +301,7 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, ch
         className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--bg-elevated)]"
         aria-expanded={expanded}
       >
-        <MarketLogo logoUrl={detail?.logo_url} mainnetCa={detail?.mainnet_ca} symbol={symbol} size="sm" decorative />
+        <MarketLogo logoUrl={resolved.logo_url ?? undefined} mainnetCa={resolved.mainnet_ca} symbol={symbol} size="sm" decorative />
         <div className="min-w-[92px]">
           <p className="text-[13px] font-semibold text-[var(--text)]">{symbol}</p>
           <p className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>{shortAddr(slab)}</p>
@@ -424,7 +436,7 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, ch
             <p className="mt-2 text-[10px] text-[var(--short)]">{closeMarket.error}</p>
           )}
 
-          <LogoUpload slabAddress={slab} mainnetCa={detail?.mainnet_ca} symbol={symbol} />
+          <LogoUpload slabAddress={slab} mainnetCa={resolved.mainnet_ca} symbol={symbol} />
         </div>
       )}
 

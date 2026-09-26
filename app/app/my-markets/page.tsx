@@ -7,12 +7,13 @@ import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import { useCreatedMarkets, type CreatedMarket } from "@/hooks/useCreatedMarkets";
 import { CreatorMarketRow } from "@/components/my-markets/CreatorMarketRow";
 import { CreatorAttentionStrip } from "@/components/my-markets/CreatorAttentionStrip";
-import { toCreatorMarketDetail, unitScaleToDecimals, resolveCreatedMarketPriceE6, type CreatorMarketDetail } from "@/components/my-markets/types";
+import { unitScaleToDecimals, resolveCreatedMarketPriceE6 } from "@/components/my-markets/types";
 import { isKeeperFeedDead, isEngineCrankStale } from "@/components/my-markets/attentionLogic";
 import { useLiveSlabPrices } from "@/hooks/useLiveSlabPrices";
-import { setMarketIdentity } from "@/lib/marketIdentityCache";
 import { isMockMode } from "@/lib/mock-mode";
 import { getMockMyMarkets } from "@/lib/mock-trade-data";
+import { useMarketIdentities } from "@/hooks/useMarketIdentities";
+import { useCreatorMarketDetails } from "@/hooks/useCreatorMarketDetails";
 
 const pageHeader = (
   <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
@@ -54,63 +55,6 @@ const LoadingSkeleton: FC = () => (
   </div>
 );
 
-/** Batched fetch of /api/markets/[slab] for every created market — the ONE
- *  RPC-heavy-adjacent cost this page still pays, but scoped to markets the
- *  wallet actually created (typically a handful), never the full markets
- *  list. Powers both the Tier-2 tiles (aggregate sums) and each row's
- *  Liquidity/health/dex info — fetched ONCE here, not again when a row's
- *  drawer expands (see CreatorMarketRow's "lazy" doc comment). */
-function useCreatorMarketDetails(slabs: string[]) {
-  const slabsKey = useMemo(() => [...slabs].sort().join(","), [slabs]);
-  const [details, setDetails] = useState<Record<string, CreatorMarketDetail>>({});
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    const list = slabsKey ? slabsKey.split(",") : [];
-    if (list.length === 0) {
-      setDetails({});
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    Promise.all(
-      list.map(async (slab) => {
-        try {
-          const res = await fetch(`/api/markets/${slab}`);
-          if (!res.ok) return null;
-          const body = (await res.json()) as { market?: Record<string, unknown> };
-          if (!body.market) return null;
-          return toCreatorMarketDetail(body.market);
-        } catch {
-          return null;
-        }
-      }),
-    ).then((results) => {
-      if (cancelled) return;
-      const next: Record<string, CreatorMarketDetail> = {};
-      results.forEach((d, i) => {
-        if (d) {
-          next[list[i]] = d;
-          // Feed the cross-navigation identity cache as each market resolves
-          // so /trade/[slab] never flashes a placeholder name for a market
-          // this creator just clicked into from their own dashboard.
-          setMarketIdentity(list[i], {
-            symbol: d.symbol ?? undefined,
-            name: d.name ?? undefined,
-            logo_url: d.logo_url ?? undefined,
-            mainnet_ca: d.mainnet_ca ?? null,
-          });
-        }
-      });
-      setDetails(next);
-      setLoading(false);
-    });
-    return () => { cancelled = true; };
-  }, [slabsKey]);
-
-  return { details, detailsLoading: loading };
-}
-
 const MyMarketsPage: FC = () => {
   const {
     myMarkets: realMyMarkets,
@@ -146,6 +90,10 @@ const MyMarketsPage: FC = () => {
 
   const slabs = useMemo(() => myMarkets.map((m) => m.slabAddress.toBase58()), [myMarkets]);
   const { details, detailsLoading } = useCreatorMarketDetails(slabs);
+  // Identity on its own clock: the session cache synchronously, then ONE bulk
+  // directory call (~150ms) instead of waiting out each market's per-slab
+  // detail (~520-1020ms, blocked on an on-chain LP scan). #2569.
+  const identities = useMarketIdentities(slabs);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -339,7 +287,7 @@ const MyMarketsPage: FC = () => {
         </div>
 
         {/* Attention strip — zero height unless something actually needs it. */}
-        <CreatorAttentionStrip markets={myMarkets} details={details} currentSlot={chainCurrentSlot} />
+        <CreatorAttentionStrip markets={myMarkets} details={details} identities={identities} currentSlot={chainCurrentSlot} />
 
         {/* Hero: Markets Created count + live total-liquidity-seeded sub-line. */}
         <div className="mb-2 border border-[var(--border)] bg-[var(--panel-bg)] p-6 transition-colors duration-200 hover:bg-[var(--bg-elevated)] sm:p-8">
@@ -348,9 +296,15 @@ const MyMarketsPage: FC = () => {
             {myMarkets.length}
           </p>
           <p className="mt-2 text-[11px] text-[var(--text-secondary)]">
-            {resolvedCount < slabs.length && detailsLoading
-              ? `Resolving liquidity seeded — ${resolvedCount} of ${slabs.length} markets…`
-              : `${fmtUsd(liquiditySeededTotal)} liquidity seeded across your markets`}
+            {resolvedCount >= slabs.length
+              ? `${fmtUsd(liquiditySeededTotal)} liquidity seeded across your markets`
+              : detailsLoading
+                ? `Resolving liquidity seeded — ${resolvedCount} of ${slabs.length} markets…`
+                // Settled but incomplete: a market's detail fetch FAILED. The
+                // sum is real for what resolved, so show it — but never as if
+                // it covered every market. Saying "across your markets" here
+                // understates a creator's own liquidity by whole markets.
+                : `${fmtUsd(liquiditySeededTotal)} liquidity seeded across ${resolvedCount} of ${slabs.length} markets`}
           </p>
         </div>
 
@@ -360,14 +314,23 @@ const MyMarketsPage: FC = () => {
             {
               label: "Liquidity Seeded",
               value: fmtUsd(liquiditySeededTotal),
-              sub: lpCollateralDivergesAgg && storedLpCollateralTotal != null
-                ? `stored at creation: ${fmtUsd(storedLpCollateralTotal)}`
-                : undefined,
+              // This tile had NO in-flight label at all, so it published the
+              // running partial as a finished figure while the hero beside it
+              // correctly said "resolving". Coverage first — the divergence
+              // note is only meaningful once the sum is complete.
+              sub: resolvedCount < slabs.length
+                ? `${resolvedCount} of ${slabs.length} markets`
+                : lpCollateralDivergesAgg && storedLpCollateralTotal != null
+                  ? `stored at creation: ${fmtUsd(storedLpCollateralTotal)}`
+                  : undefined,
             },
             {
               label: "Aggregate OI",
               value: fmtUsd(aggregateOiTotal),
-              sub: oiResolvedCount < v17MarketsList.length ? `${oiResolvedCount} of ${myMarkets.length} markets` : undefined,
+              // Denominator matches the numerator: oiResolvedCount counts over
+              // v17 markets only, so printing myMarkets.length read "1 of 5"
+              // when 2 of the 5 were v12 and never counted.
+              sub: oiResolvedCount < v17MarketsList.length ? `${oiResolvedCount} of ${v17MarketsList.length} markets` : undefined,
             },
             {
               label: "Insurance",
@@ -401,6 +364,7 @@ const MyMarketsPage: FC = () => {
                 key={slab}
                 market={m}
                 detail={details[slab] ?? null}
+                identity={identities[slab] ?? null}
                 chainCurrentSlot={chainCurrentSlot}
                 expanded={expandedSlab === slab}
                 onToggleExpand={() => setExpandedSlab((cur) => (cur === slab ? null : slab))}

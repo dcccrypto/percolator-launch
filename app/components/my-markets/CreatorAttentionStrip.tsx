@@ -7,14 +7,20 @@ import type { CreatorMarketDetail } from "./types";
 import { RecoverSolBanner } from "@/components/create/RecoverSolBanner";
 import { useCreateMarket, type KeeperRegisterRetryParams } from "@/hooks/useCreateMarket";
 import { isKeeperFeedDead, isEngineCrankStale } from "./attentionLogic";
+import { resolveIdentity, type ResolvedIdentity } from "@/lib/bulk-identity";
 
 /** One "retry keeper registration" row. Its own useCreateMarket() instance so
  *  N dead-feed markets in the strip have independent loading/message state
  *  instead of sharing one global "registering…" flag. */
-const KeeperRetryRow: FC<{ market: CreatedMarket; detail: CreatorMarketDetail | null }> = ({ market, detail }) => {
+const KeeperRetryRow: FC<{ market: CreatedMarket; detail: CreatorMarketDetail | null; identity: ResolvedIdentity | null }> = ({ market, detail, identity }) => {
   const { state, retryKeeperRegistration } = useCreateMarket();
   const slab = market.slabAddress.toBase58();
-  const symbol = detail?.symbol ?? market.label;
+  // Same field-level merge the row uses, so the alert names the market by
+  // its real ticker even before the per-market detail lands.
+  const resolved = resolveIdentity(detail, identity);
+  const symbol = resolved.symbol ?? market.label;
+  // NOT merged: the bulk directory does not carry dex_pool_address, and this
+  // value is passed to a real transaction, not rendered. Detail only.
   const dexPoolAddress = detail?.dex_pool_address;
 
   return (
@@ -37,7 +43,7 @@ const KeeperRetryRow: FC<{ market: CreatedMarket; detail: CreatorMarketDetail | 
               slabAddress: slab,
               mainnetCA: detail?.mainnet_ca ?? null,
               dexPoolAddress,
-              symbol: detail?.symbol ?? null,
+              symbol: resolved.symbol,
             };
             retryKeeperRegistration(params);
           }}
@@ -57,6 +63,7 @@ const KeeperRetryRow: FC<{ market: CreatedMarket; detail: CreatorMarketDetail | 
 interface CreatorAttentionStripProps {
   markets: CreatedMarket[];
   details: Record<string, CreatorMarketDetail | null>;
+  identities: Record<string, ResolvedIdentity>;
   currentSlot: bigint | null;
 }
 
@@ -82,7 +89,7 @@ interface CreatorAttentionStripProps {
  * row's drawer already carries its own burn control for the rare case a
  * creator wants it — no strip nudge needed.
  */
-export const CreatorAttentionStrip: FC<CreatorAttentionStripProps> = ({ markets, details, currentSlot }) => {
+export const CreatorAttentionStrip: FC<CreatorAttentionStripProps> = ({ markets, details, identities, currentSlot }) => {
   const keeperDead = markets.filter((m) => isKeeperFeedDead(m, currentSlot));
   const crankStale = markets.filter((m) => isEngineCrankStale(m, currentSlot));
 
@@ -97,7 +104,7 @@ export const CreatorAttentionStrip: FC<CreatorAttentionStripProps> = ({ markets,
         <div className="mb-6 divide-y divide-[var(--border)]/40 border border-[var(--warning)]/20 bg-[var(--warning)]/[0.03]">
           {/* (b) keeper-fed, dead price feed — the highest-value new wiring here */}
           {keeperDead.map((m) => (
-            <KeeperRetryRow key={m.slabAddress.toBase58()} market={m} detail={details[m.slabAddress.toBase58()] ?? null} />
+            <KeeperRetryRow key={m.slabAddress.toBase58()} market={m} detail={details[m.slabAddress.toBase58()] ?? null} identity={identities[m.slabAddress.toBase58()] ?? null} />
           ))}
 
           {/* (c) engine crank stale — informational only, no fake fix button */}
