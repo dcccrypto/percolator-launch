@@ -246,6 +246,8 @@ export default function LeaderboardPage() {
       setGeneratedAt(json.generatedAt ?? null);
     } catch (err) {
       if (!isCurrentRequest()) return;
+      setEntries([]);
+      setGeneratedAt(null);
       setError(err instanceof Error ? err.message : "Failed to load leaderboard. Please try again.");
     } finally {
       if (isCurrentRequest()) setLoading(false);
@@ -366,7 +368,7 @@ export default function LeaderboardPage() {
         </div>
 
         {/* ── My Rank / Share ─────────────────────────────────────── */}
-        {!loading && (
+        {!loading && !error && (
           <div className="animate-fade-in">
             <MyRankCard entry={myEntry} walletConnected={connected} />
           </div>

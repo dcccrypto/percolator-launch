@@ -39,13 +39,23 @@ export interface LeaderboardEntry {
  * GET /api/leaderboard?period=24h|7d|alltime&limit=50
  *
  * Self-contained path: reads from local indexer Postgres when INDEXER_DATABASE_URL is set.
- * Falls back to Supabase (guarded) or returns empty list on failure.
+ * Falls back to Supabase. Empty list when neither is configured; 503 when a
+ * configured source fails.
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const period = url.searchParams.get("period") ?? "alltime";
   const rawLimit = parseInt(url.searchParams.get("limit") ?? "50", 10);
   const limit = Math.min(Math.max(1, Number.isNaN(rawLimit) ? 50 : rawLimit), 200);
+
+  // No data source configured (the contributor setup in PLAYGROUND.md): an empty
+  // board is the true answer, not an outage. Same env check as getSupabase().
+  if (!hasIndexerDb() && !(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)) {
+    return NextResponse.json(
+      { leaderboard: [], period, generatedAt: new Date().toISOString() },
+      { headers: LEADERBOARD_CACHE_HEADERS },
+    );
+  }
 
   // P0: prefer local indexer when INDEXER_DATABASE_URL is configured
   if (hasIndexerDb()) {
@@ -158,11 +168,12 @@ export async function GET(request: Request) {
       { headers: LEADERBOARD_CACHE_HEADERS },
     );
   } catch (err) {
-    // Supabase unavailable (playground) — return empty leaderboard, never 500
+    // GH#2709: a configured source failed. A 200 [] here renders "No trades this
+    // period" and gets CDN-cached, hiding the outage. Same shape as GH#2489.
     console.warn("[leaderboard] supabase unavailable:", err instanceof Error ? err.message : String(err));
     return NextResponse.json(
-      { leaderboard: [], period, generatedAt: new Date().toISOString() },
-      { headers: LEADERBOARD_CACHE_HEADERS },
+      { error: "Leaderboard temporarily unavailable", unavailable: true, leaderboard: [], period, generatedAt: new Date().toISOString() },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
     );
   }
 }
