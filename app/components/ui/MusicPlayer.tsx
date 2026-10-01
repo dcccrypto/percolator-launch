@@ -32,10 +32,24 @@ const VolDownIcon = () => (
   </svg>
 );
 
-/** Routes where the floating player should be hidden on mobile (<640px)
- *  to avoid overlaying critical interactive UI (e.g. trade margin inputs,
- *  stake pool cards that scroll under the player at 370-640px widths). */
-const HIDE_ON_MOBILE_ROUTES = ["/trade", "/stake"];
+/** Routes where the floating player should be hidden across the whole mobile
+ *  layout to avoid overlaying critical interactive UI (trade margin inputs,
+ *  stake pool cards, the wizard's action button).
+ *
+ *  The cutoff is `lg` (1024px), NOT `sm` (640px), because `lg` is the
+ *  breakpoint this app actually uses to decide it is in its mobile layout:
+ *  `useIsLargeScreen()` splits there, and the order sheet / mobile trade
+ *  column are `lg:hidden`. Anything below that is still the mobile UI while
+ *  sitting above 640px — so a 640–1023px device (large phone in landscape,
+ *  iPad portrait, a narrow desktop window) kept the z-[90] player stacked
+ *  over the very controls `hideOnMobile` exists to protect. That width range
+ *  is exactly where "the buttons overlap on SOME devices/browsers" came from.
+ *
+ *  /create: the player sits at `bottom-[72px] right-3` (and `md:bottom-3`
+ *  above 768px) — the same band the wizard card's own action button (CONTINUE
+ *  / HOLD TO LAUNCH) scrolls into, so the two buttons became one unclickable
+ *  pile. Same failure mode as /trade. */
+const HIDE_ON_MOBILE_ROUTES = ["/trade", "/stake", "/create"];
 
 /**
  * Routes where the floating player should move to top-right instead of
@@ -206,7 +220,7 @@ export function MusicPlayer() {
   return (
     <div
       ref={containerRef}
-      className={`fixed z-[90] gsap-fade${hideOnMobile ? " hidden sm:block" : ""}${
+      className={`fixed z-[90] gsap-fade${hideOnMobile ? " hidden lg:block" : ""}${
         moveToTop
           ? " top-[80px] right-3 sm:top-[72px] sm:right-5"
           : moveToBottomLeftLg

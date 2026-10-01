@@ -149,7 +149,16 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
           <div className="text-[10px] text-[var(--text-muted)]">scroll · arrow keys · −/+</div>
         </div>
 
-        <div className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3">
+        {/* ONE control per row below `sm`, centered on the card. The old
+            `grid-cols-2` packed two dials into ~142px columns at 375px, but a
+            dial's own step row is 36+6+74+6+36 = 158px wide — so each control
+            overflowed its column, the −/+ buttons collided with the neighbour's
+            and the right-hand `+` was clipped off the card entirely. A single
+            full-width track gives every dial the whole card to sit in, and
+            `justify-items-center` centres the control rather than stretching it.
+            `sm:grid-cols-3` keeps the instrument-cluster layout from 640px up,
+            where (568 − 2×16) ÷ 3 ≈ 178px comfortably fits 158px. */}
+        <div className="grid grid-cols-1 justify-items-center gap-x-4 gap-y-6 sm:grid-cols-3">
           <RotaryDial
             label="Leverage"
             value={leverage}
