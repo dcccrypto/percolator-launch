@@ -123,9 +123,11 @@ export function PnlShareModal({ data, onClose }: { data: PnlCardData; onClose: (
       aria-modal="true"
       aria-label="Share your PnL"
       onClick={onClose}
-      style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(3,2,10,0.94)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, overflowY: "auto" }}
+      style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(3,2,10,0.94)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}
     >
-      <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, maxWidth: "100%" }}>
+      {/* margin:auto centers vertically when there's room and lets the top scroll into
+          view on short/landscape phones — flex align-items:center would clip it. */}
+      <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, maxWidth: "100%", margin: "auto 0" }}>
         {/* Card (scaled for display; captured at 1:1). The wrapper's shadow lifts the
             opaque card off the backdrop so the site never reads as interfering with it. */}
         <div style={{ width: PNL_CARD_SIZE * scale, height: PNL_CARD_SIZE * scale, position: "relative", borderRadius: 28 * scale, boxShadow: "0 30px 90px rgba(0,0,0,0.65), 0 0 0 1px rgba(255,255,255,0.05)" }}>
