@@ -34,8 +34,10 @@
  * lib/lp-portfolio.ts). Live 2026-09-29: COLLECT/TEXTIT/Murphy opens revert
  * Custom(49) at the trade once the lock is repaired — this is that state.
  */
+import { decodeAssetVaultLpP3 } from "@percolatorct/sdk";
 import { decodeMarketLiveness, planLivenessRepairs } from "@/lib/self-heal";
 import type { LivenessRepair } from "@/lib/self-heal";
+import { TICKET_FUNDS_LINE } from "@/lib/limits/copy";
 import { decodeAssetRiskLimits, decodeMarketEngineView } from "@/lib/limits/decode";
 import { isAdlReduceOnly } from "@/lib/limits/adl-reduce-only";
 import { limitsFlags } from "@/lib/limits/flags";
@@ -114,6 +116,11 @@ export interface MarketHealth {
   /** LP portfolio capital in collateral atoms; null = unknown. */
   lpCapital: bigint | null;
   lpDepleted: boolean;
+  /**
+   * Asset 0's counterparty is a bound P3 vault LP, so the Earn vault's funds reach it (senior draw).
+   * On any other market Earn and staking deposits never reach the counterparty's capital.
+   */
+  lpIsVault: boolean;
   /**
    * P1 auto-halt (flag NEXT_PUBLIC_LIMITS_P1): LP capital <= the protocol floor
    * (AssetRiskLimitsV17.lp_floor_atoms @ wrapper-slot 608). Capital bounds IM-lane
@@ -197,6 +204,12 @@ export function decodeMarketHealth(
     .map((x): "long" | "short" => (x.side === 0 ? "long" : "short"));
 
   const lpDepleted = lpCapital !== null && lpCapital === 0n;
+  let lpIsVault = false;
+  try {
+    lpIsVault = decodeAssetVaultLpP3(data, 0).bound === true;
+  } catch {
+    // Older layout / undecodable: treat as a non-vault counterparty.
+  }
   const p1Limits = limitsFlags().p1 ? decodeAssetRiskLimits(data, 0) : null;
   const lpHalted = p1Limits !== null && lpCapital !== null && lpCapital <= p1Limits.lpFloorAtoms;
   const lockReasons: LockReason[] = [];
@@ -222,6 +235,7 @@ export function decodeMarketHealth(
     drainOnlySides,
     lpCapital,
     lpDepleted,
+    lpIsVault,
     lpHalted,
     lockReasons,
   };
@@ -264,7 +278,7 @@ export function healthBadges(h: MarketHealth): HealthBadge[] {
       id: "lp-depleted",
       label: "Paused",
       tone: "danger",
-      detail: "The market has no liquidity for new positions right now. Closing works normally.",
+      detail: `${TICKET_FUNDS_LINE(h.lpIsVault)} Closing works normally.`,
     });
   }
   if (h.payoutHaircutBps > 0) {
@@ -308,6 +322,8 @@ export const MAX_HEALTH_SLABS = 50;
 export interface MarketHealthRow {
   lpCapital: string | null;
   lpDepleted: boolean;
+  /** See MarketHealth.lpIsVault. Optional: a cached row from before this field reads as false. */
+  lpIsVault?: boolean;
   payoutHaircutBps: number;
   openProfitAtoms: string;
   realizableProfitAtoms: string;

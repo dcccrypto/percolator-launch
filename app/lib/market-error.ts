@@ -26,9 +26,10 @@ import { limitsFlags } from "@/lib/limits/flags";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 export type MarketTxAction = "open" | "close" | "deposit" | "withdraw" | "earn-deposit" | "earn-withdraw";
 
+// No refill promise: nothing in the app can re-fund the counterparty of a non-vault market (GH#2882).
 export const MSG_LP_DEPLETED_OPEN =
-  "LP depleted: the market's liquidity provider has no capital left, so there is no counterparty for a new position. " +
-  "Opening is disabled until the LP is re-funded. Closing existing positions still works.";
+  "The market has no funds left to take the other side of new trades, so new positions can't open right now. " +
+  "Closing works normally.";
 export const MSG_RESOLVED =
   "This market is resolved. New positions can't be opened; you can still close positions and withdraw.";
 export const MSG_RECOVERY = "This market is in recovery mode. New positions are blocked until it recovers.";
@@ -41,7 +42,7 @@ export const MSG_REPAIRABLE =
 export const MSG_LOSS_STALE =
   "Positions on this market are being refreshed after a price move. Try again in a few seconds.";
 export const MSG_ADL_REDUCE_ONLY_OPEN =
-  "This market is reduce-only while it recovers from a bankruptcy, so new positions are paused. Closing positions still works, and the market reopens on its own once one side has closed out.";
+  "This market is reduce-only while it recovers from a bankruptcy, so new positions are paused. Closing positions still works. New positions reopen once the positions on one side have closed, which depends on those traders and can take a while.";
 export const MSG_ADL_REDUCE_ONLY_CLOSE =
   "This market is reduce-only while it recovers from a bankruptcy. Closing still works: try the close again and it is sent as a unilateral exit you sign yourself.";
 export const MSG_DRAIN_ONLY = "This side of the market only accepts position-reducing trades right now.";

@@ -88,6 +88,7 @@ export async function GET(req: NextRequest) {
         markets[slab] = {
           lpCapital: h.lpCapital === null ? null : h.lpCapital.toString(),
           lpDepleted: h.lpDepleted,
+          lpIsVault: h.lpIsVault,
           payoutHaircutBps: h.payoutHaircutBps,
           openProfitAtoms: h.openProfitAtoms.toString(),
           realizableProfitAtoms: h.realizableProfitAtoms.toString(),

@@ -378,6 +378,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // P2 fee channel: slippage margin on the signed fee cap (default NEXT_PUBLIC_FEE_CAP_MARGIN_BPS or +2).
   const [feeMarginBps, setFeeMarginBps] = useState<number>(() => defaultFeeCapMarginBps());
   const lpDepleted = marketHealth?.lpDepleted === true;
+  const lpIsVault = marketHealth?.lpIsVault === true;
   const marketResolved = marketHealth?.lockReasons.includes("resolved") === true;
 
   const { market: marketInfo } = useMarketInfo(slabAddress);
@@ -836,6 +837,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     waitingForPrice: !mockMode && (oracleUnavailable || oracleStale || priceUsd == null),
     sidePaused,
     openingPaused: !mockMode && (vaultEmpty || lpDepleted || lpUnderfunded || riskGateActive),
+    lpDepleted: !mockMode && lpDepleted,
+    lpIsVault,
     sameOwner: ticketLimits.sameOwner,
     exceedsBalance,
     shortfallLabel: fundingMode ? fundLabel : `${formatTokenAmount(shortfall, decimals)} ${collateralSymbol}`,
@@ -1037,7 +1040,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         side: direction,
         symbol: marketInfo?.symbol ?? undefined,
         maxNow: sideMaxQ !== null && sideMaxQ > 0n && sideMaxQ < UNLIMITED_CAPACITY ? fmtQ(sideMaxQ) : undefined,
-        health: { lpDepleted, adlReduceOnly, resolved: marketResolved },
+        health: { lpDepleted, lpIsVault, adlReduceOnly, resolved: marketResolved },
       });
       if (um.quiet) {
         setTradePhase("idle");

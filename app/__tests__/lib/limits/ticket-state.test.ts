@@ -40,10 +40,10 @@ describe("deriveTicketState: the §3.3 priority table", () => {
   it("each row: label = state, one calm line, the right variant", () => {
     const rows: Array<[Partial<TicketStateInput>, string, string, string, string]> = [
       [{ marketResolved: true }, "settled", "Market settled", "info", "This market has settled. Close any position and withdraw; there's nothing else to do."],
-      [{ adlReduceOnly: true }, "close-only", "Close-only for now", "paused", "Close-only for now while the market rebalances after a liquidation. Closing works normally; new positions reopen on their own, usually within minutes."],
+      [{ adlReduceOnly: true }, "close-only", "Close-only for now", "paused", "Close-only for now after a liquidation. Closing works normally. New positions reopen once the positions on one side have closed, which depends on those traders and can take a while."],
       [{ engineStale: true }, "catching-up", "Waiting for prices…", "wait", "Prices are catching up. Trading resumes automatically, usually within a minute."],
       [{ waitingForPrice: true }, "waiting-price", "Waiting for price…", "wait", "Waiting for a fresh price. This usually takes a few seconds."],
-      [{ openingPaused: true }, "both-paused", "Opening paused", "paused", "New positions are paused until the market's liquidity recovers. Closing works normally."],
+      [{ openingPaused: true }, "both-paused", "Opening paused", "paused", "New positions are paused right now. Closing works normally."],
       [{ sameOwner: true }, "same-owner", "Close-only for this wallet", "paused", "You created this market, so this wallet can only close positions here. Use another wallet to trade it."],
       [{ feeOverMax: true, feeSuggested: "2.5 SOL" }, "fee-over-max", "Reduce size", "error", "This size costs more than the market's maximum fee. Try 2.5 SOL."],
     ];
@@ -55,6 +55,45 @@ describe("deriveTicketState: the §3.3 priority table", () => {
       expect(s.status?.variant, row).toBe(variant);
       expect(s.status?.body, row).toBe(body);
     }
+  });
+
+  // GH#2882 (SI): the ADL copy promised a reopen "on their own, usually within minutes", and the
+  // generic paused copy "until the market's liquidity recovers". With the counterparty out of funds
+  // neither happens by itself, and Earn / staking deposits don't refill a non-vault market.
+  describe("no funds to take the other side (lpDepleted)", () => {
+    it("its own reason, worded for a non-vault market", () => {
+      const s = deriveTicketState(base({ lpDepleted: true, openingPaused: true }));
+      expect(s.row).toBe("both-paused");
+      expect(s.status?.kind).toBe("lp-depleted");
+      expect(s.status?.body).toBe(
+        "The market has no funds left to take the other side of new trades. Opening resumes once it is funded again; deposits to Earn or staking don't reopen it. Closing works normally.",
+      );
+    });
+
+    it("a P3 vault-LP market points at the Earn vault instead", () => {
+      const s = deriveTicketState(base({ lpDepleted: true, lpIsVault: true, openingPaused: true }));
+      expect(s.status?.body).toBe(
+        "The market has no funds left to take the other side of new trades. Opening resumes when the Earn vault has funds to back them. Closing works normally.",
+      );
+    });
+
+    it("close-only and depleted: the close-only line, plus what else reopening needs", () => {
+      const s = deriveTicketState(base({ adlReduceOnly: true, lpDepleted: true }));
+      expect(s.row).toBe("close-only");
+      expect(s.status?.body).toMatch(/^Close-only for now after a liquidation\./);
+      expect(s.status?.body).toMatch(/deposits to Earn or staking don't reopen it\.$/);
+    });
+
+    it("CONTROL: opening paused for another reason keeps the neutral text", () => {
+      const s = deriveTicketState(base({ openingPaused: true }));
+      expect(s.status?.kind).toBe("both-paused");
+      expect(s.status?.body).toBe("New positions are paused right now. Closing works normally.");
+    });
+
+    it("CONTROL: both sides capped, not depleted, keeps the neutral text", () => {
+      const s = deriveTicketState(base({ sidePaused: { long: true, short: true } }));
+      expect(s.status?.body).toBe("New positions are paused right now. Closing works normally.");
+    });
   });
 
   it("rows 3/4 are waiting rows (the button re-enables itself)", () => {

@@ -10,6 +10,7 @@
  * generated WRAPPER_ERR table (lib/wrapper-errors.ts), never a literal.
  */
 import { WRAPPER_ERR } from "../wrapper-errors";
+import { TICKET_FUNDS_LINE } from "./copy";
 import { resolveDevnetProgramIds } from "../program-ids";
 
 export type StatusVariant = "info" | "wait" | "paused" | "error";
@@ -41,7 +42,7 @@ export interface MessageContext {
   /** Earn cooldown remaining, seconds (36). */
   cooldownSecs?: number;
   /** Live market state, when the caller has it. */
-  health?: { resolved?: boolean; adlReduceOnly?: boolean; lpDepleted?: boolean; lossStale?: boolean };
+  health?: { resolved?: boolean; adlReduceOnly?: boolean; lpDepleted?: boolean; lpIsVault?: boolean; lossStale?: boolean };
   /** Earn: the vault owns its market's liquidity (P3); changes what 21 on a withdrawal means. */
   p3Bound?: boolean;
   /** Wallet display name for the locked-wallet line. */
@@ -290,9 +291,9 @@ export function resolveUserMessage(err: unknown, ctx: MessageContext): UserMessa
         if (ctx.surface === "earn-deposit")
           return m("earn-deposit-wait", "wait", "Vault updating", "This vault is updating after a market move. Nothing was deposited. Try again in a moment.");
         if (h.adlReduceOnly && ctx.surface === "trade")
-          return m("adl-reduce-only", "paused", "Close-only for now", "Closing works normally; new positions reopen on their own, usually within minutes.");
+          return m("adl-reduce-only", "paused", "Close-only for now", "Closing works normally. New positions reopen once the positions on one side have closed, which depends on those traders and can take a while.");
         if (h.lpDepleted && ctx.surface === "trade")
-          return m("lp-depleted", "paused", "New positions paused", "The market has no room for new positions right now. Closing works normally.");
+          return m("lp-depleted", "paused", "New positions paused", `${TICKET_FUNDS_LINE(h.lpIsVault === true)} Closing works normally.`);
         if (h.lossStale) return m("price-wait", "wait", "Waiting for price", "Updating to the latest price, usually a few seconds.", { autoRetry: true });
         return ctx.surface === "trade"
           // Only the trade ticket waits through this and resends (sendTxWaiting); nothing reads

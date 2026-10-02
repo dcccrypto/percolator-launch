@@ -4,7 +4,7 @@
  * Everything the component shows in the slot or on the button comes from here and is tested.
  */
 import { UNLIMITED_CAPACITY } from "@/lib/marketCapacity";
-import { TICKET_COPY as T } from "./copy";
+import { TICKET_COPY as T, TICKET_FUNDS_LINE } from "./copy";
 import type { StatusVariant } from "./user-message";
 import type { Side } from "./risk-limits";
 
@@ -39,6 +39,10 @@ export interface TicketStateInput {
   sidePaused: Record<Side, boolean>;
   /** The market as a whole can't open (no liquidity, de-risking). */
   openingPaused: boolean;
+  /** No funds left to take the other side of new trades (market health lpDepleted). */
+  lpDepleted?: boolean;
+  /** The counterparty is a P3 Earn-vault LP, so the Earn vault is what refills it. */
+  lpIsVault?: boolean;
   sameOwner: boolean;
   exceedsBalance: boolean;
   /** The deposit that rides with the trade, "Deposit {x} & Long", e.g. "12.50 USDC" (UX WP-6). */
@@ -82,9 +86,16 @@ export function deriveTicketState(i: TicketStateInput): TicketState {
   if (i.marketRetired) return paused("retired", "retired", T.retired.title, T.retired.body, T.retired.button);
   if (i.marketResolved) return paused("settled", "settled", T.settled.title, T.settled.body, T.settled.button, "info");
   if (i.marketPaused) return paused("admin-paused", "admin-paused", T.adminPaused.title, T.adminPaused.body, T.adminPaused.button);
-  if (i.adlReduceOnly) return paused("close-only", "close-only", T.closeOnly.title, T.closeOnly.body, T.closeOnly.button);
+  if (i.adlReduceOnly) {
+    // Depleted as well: the close-only lock lifting is not enough on its own, so say what else it needs.
+    const body = i.lpDepleted ? `${T.closeOnly.body} ${TICKET_FUNDS_LINE(i.lpIsVault === true)}` : T.closeOnly.body;
+    return paused("close-only", "close-only", T.closeOnly.title, body, T.closeOnly.button);
+  }
   if (i.engineStale) return paused("catching-up", "engine-catching-up", T.catchingUp.title, T.catchingUp.body, T.catchingUp.button, "wait");
   if (i.waitingForPrice) return paused("waiting-price", "waiting-price", T.waitingPrice.title, T.waitingPrice.body, T.waitingPrice.button, "wait");
+  // A depleted market gets its own reason; the generic "Opening paused" stays neutral because it
+  // also fires for an empty vault, an underfunded counterparty and the risk gate.
+  if (i.lpDepleted) return paused("both-paused", "lp-depleted", T.lpDepleted.title, T.lpDepleted.body(i.lpIsVault === true), T.lpDepleted.button);
   const bothSides = i.openingPaused || (i.sidePaused.long && i.sidePaused.short);
   if (!bothSides && i.sidePaused[d]) {
     const s = paused("side-paused", "side-paused", T.sidePaused.title(plural(d)), T.sidePaused.body(plural(d), d, cap(plural(other(d)))), T.sidePaused.button(plural(d)));
