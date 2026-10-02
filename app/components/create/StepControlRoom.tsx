@@ -250,7 +250,7 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
           <Readout k="Price feed" v={oracleLabel} tone="good" />
           <Readout k="Start price" v={startPrice} />
           <Readout k="Market size" v={`${slabBytes.toLocaleString()} B · max capacity`} />
-          <Readout k="Rent" v={rentSol === null ? "—" : `${rentSol.toFixed(3)} SOL`} />
+          <Readout k="Market rent" v={rentSol === null ? "—" : `${rentSol.toFixed(3)} SOL`} />
           {/* GH#2622: set expectations UP FRONT, before launch — not only after
               a creator gets stuck (RecoverSolBanner's gated RECLAIM handles that
               case). Rent is reclaimable only if setup stops before any deposit

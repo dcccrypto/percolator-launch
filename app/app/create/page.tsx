@@ -6,6 +6,8 @@ import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { CreateMarketWizard } from "@/components/create/CreateMarketWizard";
+import { computeCreateMarketSolCost } from "@/components/create/CostEstimate";
+import { p3WizardEnabled } from "@/lib/limits/flags";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 
@@ -64,14 +66,12 @@ function CreatePageInner() {
             <p className="mt-2 text-[13px] text-[var(--text-secondary)]">
               Deploy a perpetual futures market in ~60 seconds.
             </p>
-            {/* v17 has no slab tiers — the slab is always v17MarketAccountLen(14)
-                (26,364 B, the program's max capacity; InitMarket reverts on any
-                other size). The old per-tier costs quoted here were never real. */}
+            {/* Same estimate the wizard's "Need ~N SOL" launch gate checks. */}
             <div
               className="mt-2 text-[11px] text-[var(--text-secondary)]"
               style={{ fontFamily: "var(--font-mono)" }}
             >
-              ≈ 0.19 SOL &middot; 1 approval &middot; about a minute
+              ≈ {computeCreateMarketSolCost({ p3: p3WizardEnabled() }).totalSolCost.toFixed(2)} SOL &middot; 1 approval &middot; about a minute
             </div>
           </div>
         </ScrollReveal>

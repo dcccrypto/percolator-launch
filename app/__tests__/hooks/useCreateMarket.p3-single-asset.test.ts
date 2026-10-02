@@ -65,10 +65,14 @@ describe("P3 wizard creates single-asset markets", () => {
   it("the rent estimate charges the P3 slab, not the 14-slot slab", () => {
     const p3 = computeCreateMarketSolCost({ p3: true });
     const legacy = computeCreateMarketSolCost();
-    const rent = (bytes: number) => Math.ceil((bytes + 128) * 6960) / 1e9;
+    const rent = (bytes: number) => ((bytes + 128) * 5080) / 1e9;
     expect(p3.slabRentSol).toBeCloseTo(rent(v17MarketAccountLen(1)), 9);
     expect(legacy.slabRentSol).toBeCloseTo(rent(v17MarketAccountLen(14)), 9);
-    expect(legacy.totalSolCost - p3.totalSolCost).toBeCloseTo(legacy.slabRentSol - p3.slabRentSol, 9);
+    // P3 differs by the slab and by the vault-owned LP portfolio + matcher ctx it also creates.
+    expect(legacy.totalSolCost - p3.totalSolCost).toBeCloseTo(
+      legacy.slabRentSol - p3.slabRentSol - (p3.lpPortfolioMatcherRentSol - legacy.lpPortfolioMatcherRentSol),
+      9,
+    );
   });
 
   describe("source guards (every sizing site goes through the helper)", () => {

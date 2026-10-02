@@ -4,6 +4,7 @@ import { FC, useMemo } from "react";
 import { BACKING_SEED_PCT_OF_LP } from "@/lib/market-params";
 import { wizardSlabBytes } from "@/lib/create-market-args";
 import { p3WizardEnabled } from "@/lib/limits/flags";
+import { VAULT_LP_MATCHER_CTX_LEN } from "@/lib/limits/constants";
 import { V17_PORTFOLIO_ACCOUNT_LEN, MATCHER_CONTEXT_LEN } from "@percolatorct/sdk";
 
 interface CostEstimateProps {
@@ -15,10 +16,21 @@ interface CostEstimateProps {
   className?: string;
 }
 
-/** Lamports per byte for rent exemption (approximation: 6960 lamports/byte + 128 bytes overhead) */
-const RENT_PER_BYTE = 6960;
+/**
+ * Rent-exempt minimum per account: (data bytes + 128) × lamports per byte. The rate was
+ * 6960; getMinimumBalanceForRentExemption on devnet AND mainnet now returns 5080/byte
+ * (0 B → 650,240; 33,900 B → 172,862,240), so 6960 over-quoted every launch by ~37%.
+ * ponytail: hard-coded rate — if rent changes again, read it once from
+ * getMinimumBalanceForRentExemption(0) / 128 instead.
+ */
+const RENT_PER_BYTE = 5080;
 const RENT_OVERHEAD_BYTES = 128;
 const LAMPORTS_PER_SOL = 1_000_000_000;
+
+/** Rent-exempt minimum, in SOL, for accounts of the given data sizes. */
+function rentSol(...sizes: number[]): number {
+  return sizes.reduce((sum, bytes) => sum + (bytes + RENT_OVERHEAD_BYTES) * RENT_PER_BYTE, 0) / LAMPORTS_PER_SOL;
+}
 
 /** Estimated transaction fees for the ~9-10 signed-transaction creation flow (see
  *  useCreateMarket's create() for the exact sequence — bumped from 8 when the
@@ -34,20 +46,24 @@ const TX_FEE_ESTIMATE_SOL = 0.031; // ~10 transactions × 5000 lamports each + p
  *   - Stake pool collateral vault token account: 165 bytes (explicit client-paid CreateAccount)
  *   - Stake pool PDA itself: 352 bytes (paid by the creator via CPI inside StakeInitPool)
  */
-const EARN_VAULT_AND_STAKE_RENT_BYTES = 176 + 82 + 82 + 165 + 352;
+const EARN_VAULT_AND_STAKE_ACCOUNT_BYTES = [176, 82, 82, 165, 352];
 
 /**
  * W8 fix (2026-07-08): Step 2 (LP init, see useCreateMarket.ts) creates an LP
- * portfolio account (V17_PORTFOLIO_ACCOUNT_LEN = 9347 bytes — InitPortfolio
+ * portfolio account (V17_PORTFOLIO_ACCOUNT_LEN — InitPortfolio
  * reallocs up to this and needs it pre-funded, so it's real client-paid rent, not
  * a later top-up) and a matcher context account (MATCHER_CONTEXT_LEN = 320 bytes).
  * Both were completely missing from every SOL-cost estimate — this file's own
  * display AND CreateMarketWizard.tsx's `requiredSol` launch gate — under-counting
- * required SOL by ~0.067 SOL (9667 bytes × 6960 lamports/byte). That's enough to
+ * required SOL by ~0.067 SOL. That's enough to
  * pass the pre-launch gate and then strand the user mid-flow at Step 2 with
  * "insufficient lamports."
+ *
+ * P3 launches also create the vault-owned LP portfolio + its matcher context
+ * client-side (buildP3BindIxs in lib/limits/p3-wizard.ts).
  */
-export const LP_PORTFOLIO_AND_MATCHER_RENT_BYTES = V17_PORTFOLIO_ACCOUNT_LEN + MATCHER_CONTEXT_LEN;
+const LP_PORTFOLIO_AND_MATCHER_ACCOUNT_BYTES = [V17_PORTFOLIO_ACCOUNT_LEN, MATCHER_CONTEXT_LEN];
+const P3_VAULT_LP_ACCOUNT_BYTES = [V17_PORTFOLIO_ACCOUNT_LEN, VAULT_LP_MATCHER_CTX_LEN];
 
 export interface CreateMarketSolCostBreakdown {
   slabRentSol: number;
@@ -76,19 +92,22 @@ export function computeCreateMarketSolCost(
   const dataSize = wizardSlabBytes(opts.p3 === true);
 
   // Rent-exempt minimum for the slab account
-  const slabRentSol = Math.ceil((dataSize + RENT_OVERHEAD_BYTES) * RENT_PER_BYTE) / LAMPORTS_PER_SOL;
+  const slabRentSol = rentSol(dataSize);
 
   // Additional rent for token accounts (vault ATA, LP mint, insurance LP mint)
   // Each token account ~165 bytes, each mint ~82 bytes
-  const tokenAccountRentSol = (165 * 3 + 82 * 2) * RENT_PER_BYTE / LAMPORTS_PER_SOL;
+  const tokenAccountRentSol = rentSol(165, 165, 165, 82, 82);
 
   // Rent for the Step 2 LP portfolio + matcher context accounts — see
-  // LP_PORTFOLIO_AND_MATCHER_RENT_BYTES doc comment above.
-  const lpPortfolioMatcherRentSol = (LP_PORTFOLIO_AND_MATCHER_RENT_BYTES * RENT_PER_BYTE) / LAMPORTS_PER_SOL;
+  // LP_PORTFOLIO_AND_MATCHER_ACCOUNT_BYTES doc comment above.
+  const lpPortfolioMatcherRentSol = rentSol(
+    ...LP_PORTFOLIO_AND_MATCHER_ACCOUNT_BYTES,
+    ...(opts.p3 === true ? P3_VAULT_LP_ACCOUNT_BYTES : []),
+  );
 
   // Rent for the Earn vault (Step 4) + stake pool (Step 5) accounts — see
-  // EARN_VAULT_AND_STAKE_RENT_BYTES doc comment above.
-  const earnVaultStakeRentSol = (EARN_VAULT_AND_STAKE_RENT_BYTES * RENT_PER_BYTE) / LAMPORTS_PER_SOL;
+  // EARN_VAULT_AND_STAKE_ACCOUNT_BYTES doc comment above.
+  const earnVaultStakeRentSol = rentSol(...EARN_VAULT_AND_STAKE_ACCOUNT_BYTES);
 
   const totalSolCost =
     slabRentSol + tokenAccountRentSol + lpPortfolioMatcherRentSol + earnVaultStakeRentSol + TX_FEE_ESTIMATE_SOL;
