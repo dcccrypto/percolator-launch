@@ -4,6 +4,7 @@ import { validateNumericParam } from "@/lib/route-validators";
 import { getClientIp } from "@/lib/get-client-ip";
 import { createUpstashRateLimiter } from "@/lib/upstash-rate-limit";
 import { hasIndexerDb, queryTraderTradesPage } from "@/lib/indexer-db";
+import { getRetiredSlabs } from "@/lib/retired-slabs";
 
 /**
  * GET /api/trader/:wallet/trades?limit=20&offset=0&slab=<optional>
@@ -85,10 +86,14 @@ export async function GET(
     return NextResponse.json({ trades: [], total: 0, limit, offset });
   }
 
+  // GH#2795: fills on markets of an abandoned wrapper (the ones /api/markets no longer lists)
+  // are left out of both paths, so `total` and paging stay consistent. [] = no filter.
+  const retired = await getRetiredSlabs();
+
   // P0: prefer local indexer
   if (hasIndexerDb()) {
     try {
-      const { trades: rawTrades, total } = await queryTraderTradesPage(walletKey, limit, offset, safeSlab);
+      const { trades: rawTrades, total } = await queryTraderTradesPage(walletKey, limit, offset, safeSlab, retired);
       const trades: TraderTradeEntry[] = rawTrades.map((r) => ({
         id: r.id,
         slab_address: r.slab_address,
@@ -131,6 +136,7 @@ export async function GET(
       .range(offset, offset + limit - 1);
 
     if (safeSlab) query = query.eq("slab_address", safeSlab);
+    if (retired.length > 0) query = query.not("slab_address", "in", `(${retired.join(",")})`);
 
     let { data, error, count } = await query;
 
@@ -142,6 +148,7 @@ export async function GET(
         .order("created_at", { ascending: false })
         .range(offset, offset + limit - 1);
       if (safeSlab) fallbackQuery = fallbackQuery.eq("slab_address", safeSlab);
+      if (retired.length > 0) fallbackQuery = fallbackQuery.not("slab_address", "in", `(${retired.join(",")})`);
       const fallback = await fallbackQuery;
       data = fallback.data;
       error = fallback.error;
