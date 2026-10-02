@@ -174,7 +174,12 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
   const closePosition = useCallback(
     async (closePercent: number): Promise<ClosePositionResult> => {
       if (inflightRef.current) throw new Error("Close already in progress");
-      if (!userAccount) throw new Error("No user account");
+      if (!userAccount) {
+        // A fresh SlabProvider (/portfolio, other markets) can still be loading it. Say so; keep the
+        // throw, which keeps the modal open. The in-progress guard above stays silent on purpose.
+        setError(COPY.closeNotLoaded);
+        throw new Error("No user account");
+      }
       if (closePercent < 1 || closePercent > 100) throw new Error("Close percent must be 1-100");
 
       inflightRef.current = true;
