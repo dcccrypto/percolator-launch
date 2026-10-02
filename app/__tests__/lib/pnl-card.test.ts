@@ -12,6 +12,9 @@ import {
   formatPriceUsd,
   buildShareTweet,
   buildShareToXUrl,
+  pnlCardBackgrounds,
+  PNL_CARD_BACKGROUNDS_PROFIT,
+  PNL_CARD_BACKGROUNDS_LOSS,
   type PnlCardData,
 } from "@/lib/pnl-card";
 
@@ -91,5 +94,18 @@ describe("Share to X", () => {
     expect(url).toContain("https://twitter.com/intent/tweet?text=");
     expect(decodeURIComponent(url)).toContain("Percolator Trade Devnet V2");
     expect(decodeURIComponent(url)).toContain(`https://example.com/trade/${base.slab}`);
+  });
+});
+
+describe("backgrounds", () => {
+  it("profit and loss use separate, non-empty, non-overlapping scene sets", () => {
+    expect(PNL_CARD_BACKGROUNDS_PROFIT.length).toBeGreaterThan(0);
+    expect(PNL_CARD_BACKGROUNDS_LOSS.length).toBeGreaterThan(0);
+    const overlap = PNL_CARD_BACKGROUNDS_PROFIT.filter((u) => PNL_CARD_BACKGROUNDS_LOSS.includes(u));
+    expect(overlap).toEqual([]);
+  });
+  it("pnlCardBackgrounds selects the set by result", () => {
+    expect(pnlCardBackgrounds(true)).toBe(PNL_CARD_BACKGROUNDS_PROFIT);
+    expect(pnlCardBackgrounds(false)).toBe(PNL_CARD_BACKGROUNDS_LOSS);
   });
 });

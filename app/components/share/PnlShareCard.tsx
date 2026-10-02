@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef } from "react";
+import { forwardRef, useEffect, useRef, useState } from "react";
 import { formatSignedUsd, formatSignedPct, formatPriceUsd, PERCOLATOR_TAG } from "@/lib/pnl-card";
 
 export interface PnlShareCardView {
@@ -26,6 +26,35 @@ const GREEN = { base: "#4ade80", glow: "rgba(74,222,128,0.6)", soft: "rgba(74,22
 const RED = { base: "#f87171", glow: "rgba(248,113,113,0.6)", soft: "rgba(248,113,113,0.14)", line: "rgba(248,113,113,0.65)" };
 const FONT = "var(--font-jetbrains-mono, ui-monospace), 'DejaVu Sans Mono', monospace";
 const SHADOW = "0 2px 10px rgba(0,0,0,0.75)";
+// Ease the green↔red tonal flip so a change of result glides rather than snaps.
+// Harmless to the PNG export (the one-shot SVG raster has nothing to animate).
+const COLOR_TX = "color 320ms ease, border-color 320ms ease, background-color 320ms ease, text-shadow 320ms ease";
+
+/** Old background scene fading out above the new one — the profit/loss (or picker)
+ *  crossfade. Capture ignores it: the export inlines only the ROOT background, and
+ *  this child's relative-url background never resolves in the serialised SVG. */
+function FadeOutScene({ url }: { url: string }) {
+  const [op, setOp] = useState(1);
+  useEffect(() => {
+    const r = requestAnimationFrame(() => requestAnimationFrame(() => setOp(0)));
+    return () => cancelAnimationFrame(r);
+  }, []);
+  return (
+    <div
+      aria-hidden
+      style={{
+        position: "absolute",
+        inset: 0,
+        backgroundImage: `url("${url}")`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        opacity: op,
+        transition: "opacity 360ms ease",
+        pointerEvents: "none",
+      }}
+    />
+  );
+}
 
 /**
  * The shareable live-PnL card. The background art already carries the neon frame
@@ -37,6 +66,20 @@ const SHADOW = "0 2px 10px rgba(0,0,0,0.75)";
 export const PnlShareCard = forwardRef<HTMLDivElement, PnlShareCardView>(function PnlShareCard(v, ref) {
   const good = v.isProfit;
   const C = good ? GREEN : RED;
+
+  // Crossfade the scene when bgUrl changes (polarity flip or the viewer picking
+  // another background): the root paints the CURRENT scene immediately, and the
+  // previous one is flashed on top and faded out. The root always holds the live
+  // scene, so the PNG export (root background only) stays correct.
+  const [prevBg, setPrevBg] = useState<string | null>(null);
+  const bgRef = useRef<string | null>(v.bgUrl);
+  useEffect(() => {
+    if (bgRef.current === v.bgUrl) return;
+    setPrevBg(bgRef.current);
+    bgRef.current = v.bgUrl;
+    const t = setTimeout(() => setPrevBg(null), 380);
+    return () => clearTimeout(t);
+  }, [v.bgUrl]);
 
   return (
     <div
@@ -57,6 +100,9 @@ export const PnlShareCard = forwardRef<HTMLDivElement, PnlShareCardView>(functio
         userSelect: "none",
       }}
     >
+      {/* Outgoing scene (crossfade) — above the root background, below the scrim. */}
+      {prevBg ? <FadeOutScene key={prevBg} url={prevBg} /> : null}
+
       {/* Gentle upper-left scrim for text legibility — inset so it never dims the baked frame. */}
       <div
         style={{
@@ -95,7 +141,7 @@ export const PnlShareCard = forwardRef<HTMLDivElement, PnlShareCardView>(functio
         </div>
 
         <div style={{ marginTop: 16 }}>
-          <span style={{ display: "inline-block", padding: "5px 13px", borderRadius: 9, fontSize: 12.5, fontWeight: 800, letterSpacing: "0.12em", color: C.base, border: `1.5px solid ${C.line}`, background: C.soft }}>
+          <span style={{ display: "inline-block", padding: "5px 13px", borderRadius: 9, fontSize: 12.5, fontWeight: 800, letterSpacing: "0.12em", color: C.base, border: `1.5px solid ${C.line}`, background: C.soft, transition: COLOR_TX }}>
             {good ? "PROFIT" : "LOSS"}
           </span>
         </div>
@@ -103,12 +149,12 @@ export const PnlShareCard = forwardRef<HTMLDivElement, PnlShareCardView>(functio
         <div style={{ marginTop: 13, fontSize: 14, fontWeight: 700, letterSpacing: "0.08em", color: "rgba(255,255,255,0.82)", textShadow: SHADOW }}>
           {good ? "YOU'VE MADE" : "YOU'RE DOWN"}
         </div>
-        <div style={{ fontSize: 54, fontWeight: 800, lineHeight: 1.0, marginTop: 4, color: C.base, textShadow: `0 0 24px ${C.glow}, 0 2px 8px rgba(0,0,0,0.6)`, letterSpacing: "-0.02em" }}>
+        <div style={{ fontSize: 54, fontWeight: 800, lineHeight: 1.0, marginTop: 4, color: C.base, textShadow: `0 0 24px ${C.glow}, 0 2px 8px rgba(0,0,0,0.6)`, letterSpacing: "-0.02em", transition: COLOR_TX }}>
           {formatSignedUsd(v.pnlUsd)}
         </div>
 
         <div style={{ marginTop: 12 }}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: 9, fontSize: 17, fontWeight: 800, color: C.base, border: `1.5px solid ${C.line}`, background: C.soft }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: 9, fontSize: 17, fontWeight: 800, color: C.base, border: `1.5px solid ${C.line}`, background: C.soft, transition: COLOR_TX }}>
             <span style={{ fontSize: 13 }}>{good ? "▲" : "▼"}</span>
             {formatSignedPct(v.roePct)}
           </span>

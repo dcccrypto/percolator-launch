@@ -148,11 +148,27 @@ export function buildShareToXUrl(data: PnlCardData, stats: PnlCardStats, origin:
   return `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
 }
 
-/** Background scenes live in public/pnl-cards/. The card falls back to a gradient per slot. */
-export const PNL_CARD_BACKGROUNDS: readonly string[] = [
+/**
+ * Background scenes live in public/pnl-cards/. The card falls back to a gradient
+ * per slot. The two sets are tone-matched to the result — the celebratory art
+ * only shows on a profit; a loss gets its own, so the card never reads
+ * "I made money" over a red PnL.
+ */
+export const PNL_CARD_BACKGROUNDS_PROFIT: readonly string[] = [
   "/pnl-cards/bg-1.png",
   "/pnl-cards/bg-2.png",
   "/pnl-cards/bg-3.png",
   "/pnl-cards/bg-4.png",
   "/pnl-cards/bg-5.png",
 ];
+
+export const PNL_CARD_BACKGROUNDS_LOSS: readonly string[] = [
+  "/pnl-cards/negpnl-1.jpg",
+  "/pnl-cards/negpnl-2.jpg",
+  "/pnl-cards/negpnl-3.jpg",
+];
+
+/** The background set for the given result. */
+export function pnlCardBackgrounds(isProfit: boolean): readonly string[] {
+  return isProfit ? PNL_CARD_BACKGROUNDS_PROFIT : PNL_CARD_BACKGROUNDS_LOSS;
+}

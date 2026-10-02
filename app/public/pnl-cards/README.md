@@ -1,13 +1,17 @@
 # PnL share-card backgrounds
 
-Full card artwork for the live PnL share card, as:
+Full card artwork for the live PnL share card. There are two tone-matched sets —
+the card shows the profit set on a gain and the loss set on a loss, so a red PnL
+never sits on "I made money" art:
 
 ```
-bg-1.png  bg-2.png  bg-3.png  bg-4.png  bg-5.png
+profit:  bg-1.png  bg-2.png  bg-3.png  bg-4.png  bg-5.png
+loss:    negpnl-1.jpg  negpnl-2.jpg  negpnl-3.jpg
 ```
 
-(The list lives in `app/lib/pnl-card.ts` → `PNL_CARD_BACKGROUNDS`; add/rename there
-to change the count.)
+(The lists live in `app/lib/pnl-card.ts` → `PNL_CARD_BACKGROUNDS_PROFIT` /
+`PNL_CARD_BACKGROUNDS_LOSS`, selected by `pnlCardBackgrounds(isProfit)`; add/rename
+there to change the count. The viewer can cycle within the current set.)
 
 Each image is the **complete card art** — character + neon frame + an **empty dark
 stats panel** along the bottom. The app overlays the live data on top:
