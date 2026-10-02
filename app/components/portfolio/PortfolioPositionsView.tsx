@@ -12,7 +12,7 @@ import { useClosePosition } from "@/hooks/useClosePosition";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { ClosePositionModal } from "@/components/trade/ClosePositionModal";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
-import { usePortfolio, getLiquidationSeverity, getLiquidationSeverityForState, type PortfolioPosition } from "@/hooks/usePortfolio";
+import { usePortfolio, getLiquidationSeverity, getLiquidationSeverityForState, positionRowKeys, type PortfolioPosition } from "@/hooks/usePortfolio";
 import { classifyLiquidation } from "@/lib/liquidation-state";
 import { describeLiqPrice } from "@/lib/liq-price-display";
 import { LiqPriceValue } from "@/components/trade/LiqPriceValue";
@@ -567,6 +567,9 @@ export function PortfolioPositionsView() {
   // (and counting deposits in the POSITIONS stat) read as bogus data.
   const openPositions = activePositions.filter((pos) => (pos.account?.positionSize ?? 0n) !== 0n);
   const idleDeposits = activePositions.filter((pos) => (pos.account?.positionSize ?? 0n) === 0n);
+  // A card holds its open close modal in state, so its key must not move to another
+  // position when the list re-sorts (an owned and a wrapped row can share a market).
+  const openKeys = positionRowKeys(openPositions);
 
   // Market symbol/name per slab — the row label used to show the COLLATERAL
   // token's symbol, which is the same sim-USDC mint (with no token-list
@@ -863,7 +866,7 @@ export function PortfolioPositionsView() {
             <div className="space-y-3">
               {openPositions.map((pos, i) => (
                 <PositionCard
-                  key={`${pos.slabAddress}-${i}`}
+                  key={openKeys[i]}
                   pos={pos}
                   label={marketLabel(pos)}
                   baseSymbol={(pos.symbol ?? statsMap.get(pos.slabAddress)?.symbol ?? pos.slabAddress.slice(0, 6)).replace(/-PERP$/i, "")}

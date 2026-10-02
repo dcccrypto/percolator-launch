@@ -8,7 +8,7 @@ import { subscribeSlab, getSnapshot, applyOnChainPoll } from "@/lib/priceStore/p
 import { sanitizePriceE6 } from "@/lib/oraclePrice";
 import { computeLivePositionPnl, UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
 import { displayEntryE6, isEntryKnown } from "@/lib/entry-price-display";
-import { usePortfolio, type PortfolioPosition } from "@/hooks/usePortfolio";
+import { positionRowKeys, usePortfolio, type PortfolioPosition } from "@/hooks/usePortfolio";
 import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { formatTokenAmount } from "@/lib/format";
@@ -137,6 +137,7 @@ export function PositionsBar() {
   // Collateral decimals per mint (all playground markets use 6-decimal
   // sim-USDC; resolved properly anyway, matching the portfolio page).
   const positionMints = useMemo(() => openPositions.map((pos) => pos.collateralMint), [openPositions]);
+  const chipKeys = useMemo(() => positionRowKeys(openPositions), [openPositions]);
   const tokenMetaMap = useMultiTokenMeta(positionMints);
 
   // Freshness floor for markets the WS feed isn't ticking: read every
@@ -259,7 +260,7 @@ export function PositionsBar() {
         >
           {openPositions.map((pos, i) => (
             <PositionChip
-              key={`${pos.slabAddress}-${pos.idx ?? i}`}
+              key={chipKeys[i]}
               pos={pos}
               decimals={tokenMetaMap.get(pos.collateralMint.toBase58())?.decimals ?? 6}
             />

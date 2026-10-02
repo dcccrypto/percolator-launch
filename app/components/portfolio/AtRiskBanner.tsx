@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { getLiquidationSeverity, type PortfolioPosition } from "@/hooks/usePortfolio";
+import { getLiquidationSeverity, positionRowKeys, type PortfolioPosition } from "@/hooks/usePortfolio";
 
 interface AtRiskBannerProps {
   /** Open positions only — flat/idle deposits always report distancePct=100
@@ -24,6 +24,7 @@ export function AtRiskBanner({ positions }: AtRiskBannerProps) {
       getLiquidationSeverity(pos.liquidationDistancePct) !== "safe",
   );
   if (atRisk.length === 0) return null;
+  const keys = positionRowKeys(atRisk);
 
   const hasDanger = atRisk.some((pos) => getLiquidationSeverity(pos.liquidationDistancePct) === "danger");
 
@@ -42,12 +43,12 @@ export function AtRiskBanner({ positions }: AtRiskBannerProps) {
       >
         {hasDanger ? "⚠ Liquidation risk" : "⚡ Approaching liquidation"}
       </span>
-      {atRisk.map((pos) => {
+      {atRisk.map((pos, i) => {
         const severity = getLiquidationSeverity(pos.liquidationDistancePct);
         const label = (pos.symbol ?? `${pos.slabAddress.slice(0, 6)}…`).replace(/-PERP$/i, "");
         return (
           <Link
-            key={pos.slabAddress}
+            key={keys[i]}
             href={`/trade/${pos.slabAddress}`}
             className={`text-[11px] font-semibold underline-offset-2 hover:underline ${
               severity === "danger" ? "text-[var(--short)]" : "text-[var(--warning)]"

@@ -318,6 +318,24 @@ export function isOpenPosition(pos: PortfolioPosition): boolean {
 }
 
 /**
+ * React keys for a list of positions. A market can list more than one row (a portfolio
+ * the wallet owns plus an NFT-wrapped one), so the slab alone collides. Rows are numbered
+ * per market and kind, which keeps a key unchanged when the list re-sorts or another
+ * market's row disappears, and never hands an owned row's key to a wrapped one: a
+ * remount or a swap would move a row's open close modal. Two rows of the same kind on
+ * one market (two owned portfolios) still swap keys if their order flips.
+ */
+export function positionRowKeys(positions: PortfolioPosition[]): string[] {
+  const seen = new Map<string, number>();
+  return positions.map((p) => {
+    const base = `${p.slabAddress}-${p.nftWrapped ? "w" : "o"}`;
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    return `${base}-${n}`;
+  });
+}
+
+/**
  * Map a parsed v17 portfolio into an enriched PortfolioPosition (liq price, PnL,
  * leverage). Shared by the owner-scan path and the NFT-wrapped recovery scan so
  * both surface identical rows. `nftWrapped` flags escrowed positions for the UI.
@@ -889,7 +907,7 @@ export async function fetchPortfolioSnapshot(
             // pointing at the original wallet, so filtering on 80 would still
             // match a wrapped (NFT-escrowed) portfolio here — it would render as
             // a plain owned row whose Close then fails on-chain (owner mismatch),
-            // and it would poison the seenSlabs dedup below so the NFT-recovery
+            // and it would poison the seenPortfolios dedup below so the NFT-recovery
             // scan skips re-adding it with nftWrapped: true. Mirrors
             // useUserAccount.ts / useDeposit.ts (commit 3ae16309).
             { memcmp: { offset: 116, bytes: pkStr } },
@@ -906,6 +924,11 @@ export async function fetchPortfolioSnapshot(
     throw error;
   }
 
+  // Portfolio ACCOUNTS already listed. The NFT pass below dedups against these,
+  // not by market: InitPortfolio has no per-(market, owner) uniqueness, so after
+  // wrapping a position a wallet can own a fresh portfolio on that same market,
+  // and both must be listed.
+  const seenPortfolios = new Set<string>();
   for (const portfolioResults of scanResults) {
     for (const { pubkey, account: portAcct } of portfolioResults) {
       // Per-account isolation (mirrors the NFT recovery pass below): the scan
@@ -952,6 +975,7 @@ export async function fetchPortfolioSnapshot(
         }
 
         allPositions.push(pos);
+        seenPortfolios.add(pubkey.toBase58());
         pnlSum += isSentinelValue(pos.account.pnl) ? 0n : pos.account.pnl;
         depositSum += pos.account.capital;
         unrealizedPnlSum += pos.unrealizedPnl;
@@ -966,7 +990,7 @@ export async function fetchPortfolioSnapshot(
 
   // ── NFT-wrapped position recovery (v17) ──────────────────────────────
   // Minting a Position NFT B-3-transfers `portfolio.owner` to the NFT
-  // program's escrow PDA, so the owner-scan above (memcmp offset 80 ==
+  // program's escrow PDA, so the owner-scan above (memcmp offset 116 ==
   // wallet) never matches a wrapped portfolio — the position vanishes from
   // /portfolio after wrapping. Recover it the only way still possible:
   // scan the NFT program for PositionNfts this wallet still holds
@@ -976,8 +1000,6 @@ export async function fetchPortfolioSnapshot(
   try {
     const POSITION_NFT_V17_LEN = 199;
     const NFT_LAST_HOLDER_OFF = 167;
-    // Dedup guard: markets that already surfaced a (non-wrapped) position.
-    const seenSlabs = new Set(allPositions.map((p) => p.slabAddress));
     const nfts = await connection.getProgramAccounts(PERCOLATOR_NFT_PROGRAM_ID, {
       filters: [
         { dataSize: POSITION_NFT_V17_LEN },
@@ -1019,9 +1041,12 @@ export async function fetchPortfolioSnapshot(
           if (!activeLeg || activeLeg.basisPosQ === 0n) continue;
           const slabAddrStr = portfolio.marketGroupId?.toBase58();
           if (!slabAddrStr) continue;
-          // Skip if this market already produced a position, and only surface
-          // markets we actually discovered (so we have oracle/margin context).
-          if (seenSlabs.has(slabAddrStr)) continue;
+          // Skip a portfolio already listed (the owner scan saw it, e.g. a wrap
+          // landing between the two scans, or a stale NFT for a portfolio the wallet
+          // owns again), and only surface markets we actually discovered (so we have
+          // oracle/margin context).
+          const pfKey = portfolioPks[i].toBase58();
+          if (seenPortfolios.has(pfKey)) continue;
           const meta = marketMetaBySlab.get(slabAddrStr);
           if (!meta) continue;
 
@@ -1042,7 +1067,7 @@ export async function fetchPortfolioSnapshot(
             riskCount++;
           }
           allPositions.push(pos);
-          seenSlabs.add(slabAddrStr);
+          seenPortfolios.add(pfKey);
           pnlSum += isSentinelValue(pos.account.pnl) ? 0n : pos.account.pnl;
           depositSum += pos.account.capital;
           unrealizedPnlSum += pos.unrealizedPnl;
