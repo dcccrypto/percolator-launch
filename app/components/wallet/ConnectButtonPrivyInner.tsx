@@ -49,15 +49,14 @@ export const ConnectButtonPrivyInner: FC = () => {
     fallbackEligible: isReconnectFallbackEligible(user?.linkedAccounts),
   });
 
-  // "Connect loops": the modal reports success, closes, and we are still signed out.
-  const { needsReset, noteLoginComplete, noteConnectAttempt } = useSignInLoopRecovery({
+  // "Connect loops": the session the user just signed in with is dropped again right away.
+  const { needsReset, noteConnectAttempt, noteUserLogout } = useSignInLoopRecovery({
     ready,
     authenticated,
   });
 
   const { login } = useLogin({
     onComplete: ({ loginAccount }) => {
-      noteLoginComplete();
       // `loginAccount` is the account actually used for this login flow.
       // Bind that wallet explicitly instead of relying on linked-wallet order
       // or `user.wallet`, which may still point at a previously-linked wallet.
@@ -146,6 +145,7 @@ export const ConnectButtonPrivyInner: FC = () => {
         <button
           onClick={() => {
             setPreferredAddress(null);
+            noteUserLogout();
             logout();
           }}
           className="min-h-10 rounded-sm border border-[var(--border)] px-2 text-[13px] text-[var(--text-muted)] transition-colors hover:text-[var(--error)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
@@ -183,6 +183,7 @@ export const ConnectButtonPrivyInner: FC = () => {
           data-testid="wallet-reset"
           onClick={() => {
             setPreferredAddress(null);
+            noteUserLogout();
             void resetPrivyConnection(logout);
           }}
           title="Clears the saved wallet sign-in from this browser and reloads. You will then connect again."
@@ -262,6 +263,7 @@ export const ConnectButtonPrivyInner: FC = () => {
           <button
             onClick={() => {
               setPreferredAddress(null);
+              noteUserLogout();
               logout();
               setMenuOpen(false);
             }}

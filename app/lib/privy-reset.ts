@@ -1,50 +1,43 @@
 /**
- * Browser-side Privy state reset — the in-app equivalent of "Clear site data" for the wallet
- * connect loop (GH#2862 sibling): the Privy modal says "Successfully connected … Wallet was
- * already linked", closes, and the session is gone again.
+ * User-click-only "Reset wallet connection": the in-app equivalent of "Clear site data" for the
+ * signed-out Connect loop (GH#2862 sibling). The main cause of that loop (logging in on the old
+ * vercel.app host, where the Domain=percolator.trade `privy-session` cookie can never be visible)
+ * is removed by the old-host redirect + legacy-token purge (PR #2950); this is the last-resort
+ * escape for whatever is left.
  *
- * `usePrivy().logout()` clears the active user's tokens, but residual records written under an
- * older configuration (pre-2026-10-02: no HttpOnly cookies / no privy.percolator.trade) can
- * survive it. This removes only Privy's own keys (`privy:*` storage, `privy-*` JS-readable
- * cookies). HttpOnly cookies cannot be touched from JS; they are cleared by `logout()`'s server
- * call. It never touches the app's own storage or other wallets' keys.
+ * What it touches, and why only that:
+ *   - `logout()` (Privy SDK): posts the session logout to Privy's API (in HttpOnly-cookie mode the
+ *     server clears its own cookies) and then always destroys the local tokens; it swallows its
+ *     own network errors (`_destroy(){try{await api.post(...)}catch{}this.destroyLocalState()}`,
+ *     toViemAccount-*.mjs).
+ *   - Privy's own `privy:*` keys in this origin's localStorage/sessionStorage (tokens, `privy:caid`,
+ *     `privy:connections`, OAuth state). Embedded-wallet key material lives in Privy's iframe on its
+ *     own origin and is never in this storage. The app's own keys (`percolator:*`) and WalletConnect
+ *     keys (`wc@2:*`) are left alone.
+ *   - NOT the `privy-*` cookies. `privy-session` is Domain=percolator.trade and shared with the
+ *     waitlist site, which reads `privy-token` / `privy-id-token` server-side; deleting it from JS
+ *     would sign the user out of percolator.trade too and can race Privy's own cookie handling.
+ *     Server-set cookies are Privy's to clear via `logout()`.
+ *
+ * Compatible with PR #2950's `purgeLegacyPrivyState()`: that runs once at module load and only
+ * removes the four token keys when they hold a legacy (non-"deprecated") refresh token. After this
+ * sweep those keys are absent, so on the reload the purge finds nothing and is a no-op.
  */
 
-const PRIVY_KEY_PREFIXES = ["privy:", "privy-"];
-
-function isPrivyKey(key: string): boolean {
-  return PRIVY_KEY_PREFIXES.some((p) => key.startsWith(p));
-}
+const PRIVY_STORAGE_PREFIX = "privy:";
 
 function clearStorage(storage: Storage | undefined): number {
   if (!storage) return 0;
   const keys: string[] = [];
   for (let i = 0; i < storage.length; i++) {
     const k = storage.key(i);
-    if (k && isPrivyKey(k)) keys.push(k);
+    if (k && k.startsWith(PRIVY_STORAGE_PREFIX)) keys.push(k);
   }
   keys.forEach((k) => storage.removeItem(k));
   return keys.length;
 }
 
-function clearPrivyCookies(doc: Document, hostname: string): number {
-  const names = doc.cookie
-    .split(";")
-    .map((c) => c.split("=")[0]?.trim() ?? "")
-    .filter((n) => n && isPrivyKey(n));
-  // Host-only and every parent-domain scope (Privy's base domain is percolator.trade).
-  const parts = hostname.split(".");
-  const domains: Array<string | null> = [null];
-  for (let i = 0; i < parts.length - 1; i++) domains.push("." + parts.slice(i).join("."));
-  for (const name of names) {
-    for (const d of domains) {
-      doc.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/${d ? `; domain=${d}` : ""}`;
-    }
-  }
-  return names.length;
-}
-
-/** Removes Privy's own browser state. Returns how many entries were removed. Never throws. */
+/** Removes Privy's own `privy:*` storage keys. Returns how many were removed. Never throws. */
 export function clearPrivyBrowserState(): number {
   if (typeof window === "undefined") return 0;
   let n = 0;
@@ -58,18 +51,12 @@ export function clearPrivyBrowserState(): number {
   } catch {
     /* storage blocked */
   }
-  try {
-    n += clearPrivyCookies(document, window.location.hostname);
-  } catch {
-    /* cookies blocked */
-  }
   return n;
 }
 
 /**
- * Full reset: Privy `logout()` (server-side session + HttpOnly cookies; failures are ignored
- * because there may be no session), then the browser-state sweep, then `reload` so the SDK
- * re-initialises from clean storage. Does not open any wallet prompt.
+ * Full reset: Privy `logout()`, then the storage sweep, then `reload` so the SDK re-initialises from
+ * clean storage. Does not open any wallet prompt and never signs.
  */
 export async function resetPrivyConnection(
   logout: () => Promise<void> | void,

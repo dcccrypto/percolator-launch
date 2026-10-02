@@ -1,9 +1,13 @@
 /**
  * Regression (GH#2862 sibling, Squid 2026-10-02): signed-out header loops on Connect. Privy's modal
  * says "Successfully connected with Solflare — Wallet was already linked", closes, and the header is
- * still "Connect". The header must (a) offer an in-app "Reset wallet connection" once it sees the
- * loop, (b) never offer it on a healthy signed-out load or a signed-in session, and (c) the reset
- * must log out, clear only Privy's browser state, and not prompt a wallet.
+ * still "Connect". In Privy 3.41.0 that is: the login commits `authenticated: true`, then the SDK
+ * tears the session down (`onDeleteCustomerAccessToken`) a moment later, and the modal closes with
+ * login `onError`, not `onComplete` (see hooks/useSignInLoopRecovery.ts). The header must (a) offer an
+ * in-app "Reset wallet connection" after a dropped session the user just signed in with, (b) never
+ * offer it for a healthy signed-out load, a cancelled modal, repeated cancels, a signed-in session,
+ * a session restored on load, or a Disconnect the user asked for, and (c) the reset must log out,
+ * clear only Privy's browser state, and not prompt a wallet.
  */
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -42,14 +46,27 @@ vi.mock("@privy-io/react-auth/solana", () => ({
 vi.mock("@/lib/privy-reset", () => ({ resetPrivyConnection: (...a: unknown[]) => mockReset(...a) }));
 
 import { ConnectButtonPrivyInner } from "@/components/wallet/ConnectButtonPrivyInner";
-import { LOOP_ATTEMPTS, SESSION_SETTLE_MS } from "@/hooks/useSignInLoopRecovery";
+import { SESSION_DROP_WINDOW_MS } from "@/hooks/useSignInLoopRecovery";
 
 const SIGNED_OUT = { ready: true, authenticated: false, logout: mockLogout, exportWallet: vi.fn(), user: null };
-const completeLogin = () =>
-  act(() => {
-    loginOpts.current?.onComplete?.({ loginAccount: { type: "wallet", chainType: "solana", address: "SOLFLARE" } });
-  });
+const SIGNED_IN = {
+  ...SIGNED_OUT,
+  authenticated: true,
+  user: { wallet: { address: "SOLFLARE" }, linkedAccounts: [] },
+};
 const resetBtn = () => screen.queryByTestId("wallet-reset");
+const clickConnect = () => fireEvent.click(screen.getByRole("button", { name: "Connect wallet" }));
+
+type R = ReturnType<typeof render>["rerender"];
+/** The SDK's sequence in the loop: authenticated true is committed, then dropped. */
+function sessionAppears(rerender: R) {
+  mockUsePrivy.mockReturnValue(SIGNED_IN);
+  rerender(<ConnectButtonPrivyInner />);
+}
+function sessionDropped(rerender: R) {
+  mockUsePrivy.mockReturnValue(SIGNED_OUT);
+  rerender(<ConnectButtonPrivyInner />);
+}
 
 describe("signed-out Connect loop", () => {
   beforeEach(() => {
@@ -60,71 +77,95 @@ describe("signed-out Connect loop", () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it("login completes but the session never appears: offers Reset after the settle window", () => {
-    render(<ConnectButtonPrivyInner />);
-    fireEvent.click(screen.getByRole("button", { name: "Connect wallet" }));
-    completeLogin();
-    act(() => void vi.advanceTimersByTime(SESSION_SETTLE_MS - 1));
-    expect(resetBtn()).toBeNull();
-    act(() => void vi.advanceTimersByTime(1));
-    expect(resetBtn()).not.toBeNull();
-  });
-
-  it("CONTROL: login completes and the session DOES appear: no Reset", () => {
+  it("Connect → session appears → SDK drops it: offers Reset", () => {
     const { rerender } = render(<ConnectButtonPrivyInner />);
-    completeLogin();
-    mockUsePrivy.mockReturnValue({
-      ...SIGNED_OUT,
-      authenticated: true,
-      user: { wallet: { address: "SOLFLARE" }, linkedAccounts: [] },
-    });
-    rerender(<ConnectButtonPrivyInner />);
-    act(() => void vi.advanceTimersByTime(SESSION_SETTLE_MS * 3));
+    clickConnect();
+    sessionAppears(rerender);
+    expect(resetBtn()).toBeNull();
+    sessionDropped(rerender);
+    expect(resetBtn()).not.toBeNull();
+  });
+
+  it("the loop again after Reset is hidden by a good login: a later drop still re-offers it", () => {
+    const { rerender } = render(<ConnectButtonPrivyInner />);
+    clickConnect();
+    sessionAppears(rerender);
+    sessionDropped(rerender);
+    expect(resetBtn()).not.toBeNull();
+    clickConnect();
+    sessionAppears(rerender);
+    expect(resetBtn()).toBeNull();
+    sessionDropped(rerender);
+    expect(resetBtn()).not.toBeNull();
+  });
+
+  it("CONTROL: a session that lasts past the drop window and then ends is not a loop", () => {
+    const { rerender } = render(<ConnectButtonPrivyInner />);
+    clickConnect();
+    sessionAppears(rerender);
+    act(() => void vi.advanceTimersByTime(SESSION_DROP_WINDOW_MS + 1));
+    sessionDropped(rerender);
     expect(resetBtn()).toBeNull();
   });
 
-  it("repeated Connect clicks with no session also offer Reset (drop never surfaced onComplete)", () => {
+  it("CONTROL: the user cancels the modal (no session ever appears), even repeatedly: no Reset", () => {
     render(<ConnectButtonPrivyInner />);
-    for (let i = 0; i < LOOP_ATTEMPTS - 1; i++) {
-      fireEvent.click(screen.getByRole("button", { name: "Connect wallet" }));
-    }
+    clickConnect();
+    clickConnect();
+    clickConnect();
+    act(() => void vi.advanceTimersByTime(SESSION_DROP_WINDOW_MS * 2));
     expect(resetBtn()).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Connect wallet" }));
-    expect(resetBtn()).not.toBeNull();
+  });
+
+  it("CONTROL: the user clicks Disconnect right after signing in: no Reset", () => {
+    const { rerender } = render(<ConnectButtonPrivyInner />);
+    clickConnect();
+    sessionAppears(rerender);
+    fireEvent.click(screen.getByRole("button", { name: /^Wallet:/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    expect(mockLogout).toHaveBeenCalledTimes(1);
+    sessionDropped(rerender);
+    expect(resetBtn()).toBeNull();
+  });
+
+  it("CONTROL: a session restored on page load that later ends (no Connect click) is not a loop", () => {
+    mockUsePrivy.mockReturnValue(SIGNED_IN);
+    const { rerender } = render(<ConnectButtonPrivyInner />);
+    sessionDropped(rerender);
+    expect(resetBtn()).toBeNull();
   });
 
   it("CONTROL: a healthy signed-out page never shows Reset", () => {
     render(<ConnectButtonPrivyInner />);
-    act(() => void vi.advanceTimersByTime(SESSION_SETTLE_MS * 5));
+    act(() => void vi.advanceTimersByTime(SESSION_DROP_WINDOW_MS * 5));
     expect(resetBtn()).toBeNull();
   });
 
   it("CONTROL: a signed-in session never shows Reset", () => {
-    mockUsePrivy.mockReturnValue({
-      ...SIGNED_OUT,
-      authenticated: true,
-      user: { wallet: { address: "A" }, linkedAccounts: [] },
-    });
-    mockUseWallets.mockReturnValue({ ready: true, wallets: [{ address: "A" }] });
+    mockUsePrivy.mockReturnValue(SIGNED_IN);
+    mockUseWallets.mockReturnValue({ ready: true, wallets: [{ address: "SOLFLARE" }] });
     render(<ConnectButtonPrivyInner />);
-    completeLogin();
-    act(() => void vi.advanceTimersByTime(SESSION_SETTLE_MS * 2));
+    act(() => void vi.advanceTimersByTime(SESSION_DROP_WINDOW_MS * 2));
     expect(resetBtn()).toBeNull();
   });
 
-  it("CONTROL: Connect still opens Privy login exactly once per click (no extra auto-prompt)", () => {
-    render(<ConnectButtonPrivyInner />);
-    completeLogin();
-    act(() => void vi.advanceTimersByTime(SESSION_SETTLE_MS * 2));
-    expect(mockLogin).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Connect wallet" }));
+  it("CONTROL: Connect opens Privy login exactly once per click (no auto-prompt after a drop)", () => {
+    const { rerender } = render(<ConnectButtonPrivyInner />);
+    clickConnect();
+    sessionAppears(rerender);
+    sessionDropped(rerender);
+    act(() => void vi.advanceTimersByTime(SESSION_DROP_WINDOW_MS * 2));
     expect(mockLogin).toHaveBeenCalledTimes(1);
+    clickConnect();
+    expect(mockLogin).toHaveBeenCalledTimes(2);
   });
 
   it("clicking Reset clears the preferred wallet and runs the reset with Privy logout; no login prompt", () => {
-    render(<ConnectButtonPrivyInner />);
-    completeLogin();
-    act(() => void vi.advanceTimersByTime(SESSION_SETTLE_MS));
+    const { rerender } = render(<ConnectButtonPrivyInner />);
+    clickConnect();
+    sessionAppears(rerender);
+    sessionDropped(rerender);
+    mockLogin.mockClear();
     fireEvent.click(screen.getByTestId("wallet-reset"));
     expect(mockSetPreferred).toHaveBeenCalledWith(null);
     expect(mockReset).toHaveBeenCalledWith(mockLogout);
