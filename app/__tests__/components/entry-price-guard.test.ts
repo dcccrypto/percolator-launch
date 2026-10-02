@@ -203,6 +203,11 @@ const ENTRY_FORMAT = /format\w*\(\s*([\w?.]*[eE]ntry[\w?.]*)\s*\)/g;
 const FORMAT_EXEMPT: Record<string, string> = {
   "components/trade/OrderTicket.tsx|estEntry": "projected fill for the order being placed, not a held entry",
   "components/trade/AccountsCard.tsx|row.entryPrice": "pre-v17 accounts only; entry_price decoded from chain there",
+  "components/share/PnlShareCard.tsx|v.avgEntryUsd":
+    "Pure presentation: v.avgEntryUsd is derived from the already-resolved entryE6 its callers pass, " +
+    "and the Share-PnL button only renders for a gated position — PositionsDock passes it only when " +
+    "`pnlIsKnown && resolvedEntryPrice > 0n`, PortfolioPositionsView only when `displayEntryE6(...) > 0n` — " +
+    "so the card never shows a mark as the entry (it never reads account.entryPrice).",
 };
 
 describe("#2673: every formatted entry sits under a resolved-entry gate (per call)", () => {
@@ -215,6 +220,7 @@ describe("#2673: every formatted entry sits under a resolved-entry gate (per cal
 
   it("inventory is pinned (a new entry readout fails here until reviewed)", () => {
     expect(calls.map((c) => `${c.file}|${c.arg}`).sort()).toEqual([
+      "components/share/PnlShareCard.tsx|v.avgEntryUsd",
       "components/trade/AccountsCard.tsx|row.entryPrice",
       "components/trade/ClosePositionForm.tsx|entryPrice",
       "components/trade/OrderTicket.tsx|estEntry",

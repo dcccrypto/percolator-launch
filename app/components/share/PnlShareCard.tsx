@@ -78,8 +78,12 @@ export const PnlShareCard = forwardRef<HTMLDivElement, PnlShareCardView>(functio
               {(v.symbol || "?").slice(0, 2).toUpperCase()}
             </span>
             {v.logoUrl ? (
+              /* No crossOrigin: the logo is an external CDN URL (via /api/token-logo);
+                 crossOrigin="anonymous" would FAIL the load (→ initials) on any CDN without
+                 CORS headers. The PNG export inlines it best-effort (lib/capture-node), falling
+                 back to initials when CORS/CSP blocks the fetch. */
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={v.logoUrl} alt="" width={50} height={50} style={{ position: "absolute", inset: 0, width: 50, height: 50, objectFit: "cover" }} crossOrigin="anonymous" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+              <img src={v.logoUrl} alt="" width={50} height={50} style={{ position: "absolute", inset: 0, width: 50, height: 50, objectFit: "cover" }} onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
             ) : null}
           </div>
           <div style={{ minWidth: 0 }}>

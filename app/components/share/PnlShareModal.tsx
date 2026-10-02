@@ -27,8 +27,12 @@ type Toast = { msg: string; kind: "ok" | "err" } | null;
 
 export function PnlShareModal({ data, onClose }: { data: PnlCardData; onClose: () => void }) {
   const cardRef = useRef<HTMLDivElement>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const markE6 = useLiveMarkE6(data.slab, data.initialMarkE6);
   const stats = computePnlCardStats(data, markE6);
+
+  // Clear a pending toast timer on unmount so it can't setState after teardown.
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
 
   // Resolve the token logo from the mint when the caller didn't supply one.
   const [logoUrl, setLogoUrl] = useState<string | null>(data.logoUrl);
@@ -74,8 +78,9 @@ export function PnlShareModal({ data, onClose }: { data: PnlCardData; onClose: (
   }, [onClose]);
 
   const flash = (t: Toast) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast(t);
-    setTimeout(() => setToast(null), 2200);
+    toastTimer.current = setTimeout(() => setToast(null), 2200);
   };
 
   if (typeof document === "undefined") return null;
@@ -122,7 +127,14 @@ export function PnlShareModal({ data, onClose }: { data: PnlCardData; onClose: (
       role="dialog"
       aria-modal="true"
       aria-label="Share your PnL"
-      onClick={onClose}
+      // React portals bubble synthetic events up the COMPONENT tree, not the DOM
+      // tree — so without stopping here, a backdrop click reaches the parent
+      // (e.g. the portfolio row's <Link>) and navigates. Stop it, then close.
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }}
       style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(3,2,10,0.94)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}
     >
       {/* margin:auto centers vertically when there's room and lets the top scroll into

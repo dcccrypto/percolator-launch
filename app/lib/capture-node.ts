@@ -4,8 +4,9 @@
  * The card (components/share/PnlShareCard) is authored with INLINE styles and
  * concrete colours (no CSS vars / color-mix), so it serialises cleanly inside an
  * SVG <foreignObject>; we inline the background scene and the logo as data URIs
- * (same-origin bg in public/, logo via the same-origin /api/token-logo proxy) so
- * the canvas is never tainted, then rasterise to a PNG blob.
+ * (the bg is same-origin in public/; the logo is an EXTERNAL CDN URL from
+ * /api/token-logo, inlined best-effort — kept when CORS/CSP allow the fetch,
+ * otherwise dropped so the card falls back to its initials) and rasterise to a PNG.
  *
  * Fonts: the SVG render falls back to the card's monospace fallback stack (the
  * app CSS var can't resolve in the sandboxed image), so the export is best-effort
