@@ -74,7 +74,7 @@ const CloseFlow: FC<{
   decimals: number;
   onDone: (closed: boolean) => void;
 }> = ({ pos, markE6, priceUsd, symbol, decimals, onDone }) => {
-  const { closePosition, loading, prewarmClose } = useClosePosition(pos.slabAddress);
+  const { closePosition, loading, error, prewarmClose } = useClosePosition(pos.slabAddress);
   // CloseFlow only mounts when the close modal opens, so mount === modal-open:
   // start the fresh position read + tx prewarms now, and the confirm click
   // reaches the wallet popup with zero blocking round-trips.
@@ -105,13 +105,14 @@ const CloseFlow: FC<{
       priceUsd={priceUsd}
       isLong={posSize > 0n}
       loading={loading}
+      error={error}
       oracleStale={oracleStale || (!mockExempt && engineStale)}
       onConfirm={async (percent) => {
         try {
           await closePosition(percent);
           onDone(true);
         } catch {
-          /* keep the modal open; the tx error is surfaced by the hook */
+          /* keep the modal open; the hook's `error` shows inside it */
         }
       }}
       onCancel={() => onDone(false)}
