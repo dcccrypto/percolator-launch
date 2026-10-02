@@ -1518,7 +1518,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                     onClick={() => updateLeverage(l)}
                     data-testid="trade-leverage-preset"
                     data-leverage={l}
-                    className={`text-[8px] font-mono transition-colors duration-100 ${
+                    className={`-mx-2 px-2 text-[8px] font-mono transition-colors duration-100 ${
                       leverage === l
                         ? "text-[var(--accent)] font-bold"
                         : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]"

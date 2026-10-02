@@ -317,7 +317,7 @@ function MobileOrderSheet({ slab }: { slab: string }) {
             >
               <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--border)]/50 bg-[var(--bg)] px-3 py-2">
                 <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Order ticket</span>
-                <button onClick={() => setOpen(false)} className="text-[var(--text-muted)] transition-colors duration-150 hover:text-[var(--text)]" aria-label="Close">
+                <button onClick={() => setOpen(false)} className="-mr-3 flex h-10 w-10 items-center justify-center text-[var(--text-muted)] transition-colors duration-150 hover:text-[var(--text)]" aria-label="Close">
                   ✕
                 </button>
               </div>
