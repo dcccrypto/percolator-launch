@@ -556,6 +556,10 @@ export interface PortfolioData {
   loading: boolean;
   /** True only during background refreshes (not initial load) */
   isRefreshing: boolean;
+  /** Set when the scan failed and nothing has loaded yet for this wallet, so
+   *  the empty positions/zero totals are NOT a real account. A failed
+   *  background refresh keeps the last good data and leaves this null. */
+  error: string | null;
   refresh: () => void;
 }
 
@@ -1230,6 +1234,7 @@ export function usePortfolio(enabled: boolean = true): PortfolioData {
   // refresh (`isRefreshing`), not an initial load.
   const [loading, setLoading] = useState(() => peekNow() === null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const hasLoadedOnce = useRef(peekNow() !== null);
   const [refreshCounter, setRefreshCounter] = useState(0);
   // Set by `refresh()` just before it bumps refreshCounter, and consumed
@@ -1249,6 +1254,7 @@ export function usePortfolio(enabled: boolean = true): PortfolioData {
     if (pkStr === prevPublicKeyRef.current) return;
     prevPublicKeyRef.current = pkStr;
     setIsRefreshing(false);
+    setError(null);
 
     const snap = pkStr ? peekPortfolioSnapshot(portfolioCacheKey(pkStr, getNetwork())) : null;
     if (snap) {
@@ -1289,6 +1295,7 @@ export function usePortfolio(enabled: boolean = true): PortfolioData {
       // any of the fetch work below — the early return already prevents that.
       setLoading(false);
       setIsRefreshing(false);
+      setError(null);
       hasLoadedOnce.current = false;
       return;
     }
@@ -1327,15 +1334,19 @@ export function usePortfolio(enabled: boolean = true): PortfolioData {
           setTotalValue(snapshot.totalValue);
           setTotalUnrealizedPnl(snapshot.totalUnrealizedPnl);
           setAtRiskCount(snapshot.atRiskCount);
+          setError(null);
         }
-      } catch (error) {
-        // This used to be a fully silent catch — a hard failure (e.g. RPC
-        // outage mid-load) left `loading: false` with an empty/stale position
-        // list and NO signal anywhere that anything went wrong. PortfolioData
-        // has no `error` field to surface this through today (adding one is a
-        // public-API change out of scope for this fix), so at minimum this is
-        // now visible in the console instead of vanishing entirely.
-        console.debug("[usePortfolio] load() failed:", error);
+      } catch (err) {
+        console.debug("[usePortfolio] load() failed:", err);
+        // Nothing has loaded yet for this wallet, so the state is still the
+        // blank seed (no positions, every total 0) and would read as a
+        // confirmed-empty account. Flag it. Once data has loaded, a failed
+        // refresh keeps showing that data and stays silent. The error is
+        // cleared only by a successful load, so a retry that is still in
+        // flight doesn't flash the $0 state back.
+        if (!cancelled && !hasLoadedOnce.current) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -1411,5 +1422,5 @@ export function usePortfolio(enabled: boolean = true): PortfolioData {
     };
   }, [enabled]);
 
-  return { positions, totalPnl, totalDeposited, totalValue, totalUnrealizedPnl, atRiskCount, loading, isRefreshing, refresh };
+  return { positions, totalPnl, totalDeposited, totalValue, totalUnrealizedPnl, atRiskCount, loading, isRefreshing, error, refresh };
 }

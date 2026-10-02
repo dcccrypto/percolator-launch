@@ -515,6 +515,9 @@ export function PortfolioPositionsView() {
   const positions: PortfolioPosition[] = mockPositions ?? portfolio.positions ?? [];
   const atRiskCount = portfolio.atRiskCount ?? 0;
   const loading = mockPositions ? false : portfolio.loading;
+  // First scan failed with nothing loaded: the empty list and $0 totals are
+  // not real, so show "—" and an error instead of an empty account.
+  const loadError = mockPositions ? null : portfolio.error;
   const refresh = portfolio.refresh;
 
   // LP positions (insurance fund deposits)
@@ -715,16 +718,18 @@ export function PortfolioPositionsView() {
           <div className="mb-2 border border-[var(--border)] bg-[var(--panel-bg)] p-6 transition-colors duration-200 hover:bg-[var(--bg-elevated)] sm:p-8">
             <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--text)]">Portfolio Value</p>
             <p
-              className={`text-3xl font-bold tabular-nums sm:text-4xl ${!walletConnected ? "text-[var(--text-dim)]" : "text-[var(--text)]"}`}
+              className={`text-3xl font-bold tabular-nums sm:text-4xl ${!walletConnected || loadError ? "text-[var(--text-dim)]" : "text-[var(--text)]"}`}
               style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
             >
               {!walletConnected
                 ? "\u2014"
                 : (loading || tokenMetasLoading)
                   ? "\u2026"
-                  : `$${liveUsdTotals.valueUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                  : loadError
+                    ? "\u2014"
+                    : `$${liveUsdTotals.valueUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             </p>
-            {walletConnected && !loading && !tokenMetasLoading && (
+            {walletConnected && !loadError && !loading && !tokenMetasLoading && (
               <div className="mt-3 flex items-baseline gap-2">
                 <span
                   className={`text-sm font-bold sm:text-base ${liveUsdTotals.unrealizedPnlUsd >= 0 ? "text-[var(--long)]" : "text-[var(--short)]"}`}
@@ -766,8 +771,8 @@ export function PortfolioPositionsView() {
             {[
               {
                 label: "Total Deposited",
-                value: !walletConnected ? "\u2014" : (loading || tokenMetasLoading) ? "\u2026" : `$${usdTotals.depositedUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-                color: !walletConnected ? "text-[var(--text-dim)]" : "text-[var(--text)]",
+                value: !walletConnected ? "\u2014" : (loading || tokenMetasLoading) ? "\u2026" : loadError ? "\u2014" : `$${usdTotals.depositedUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                color: !walletConnected || loadError ? "text-[var(--text-dim)]" : "text-[var(--text)]",
               },
               {
                 label: "LP Value",
@@ -779,15 +784,15 @@ export function PortfolioPositionsView() {
               },
               {
                 label: "Open Positions",
-                value: !walletConnected ? "\u2014" : loading ? "\u2026" : openPositions.length.toString(),
-                color: !walletConnected ? "text-[var(--text-dim)]" : "text-[var(--text)]",
+                value: !walletConnected ? "\u2014" : loading ? "\u2026" : loadError ? "\u2014" : openPositions.length.toString(),
+                color: !walletConnected || loadError ? "text-[var(--text-dim)]" : "text-[var(--text)]",
                 sub: walletConnected && atRiskCount > 0 ? `${atRiskCount} at risk` : undefined,
                 subColor: atRiskCount > 0 ? "text-[var(--short)]" : undefined,
               },
               {
                 label: "Idle Deposits",
-                value: !walletConnected ? "\u2014" : (loading || tokenMetasLoading) ? "\u2026" : `$${idleDepositsUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-                color: !walletConnected ? "text-[var(--text-dim)]" : "text-[var(--text)]",
+                value: !walletConnected ? "\u2014" : (loading || tokenMetasLoading) ? "\u2026" : loadError ? "\u2014" : `$${idleDepositsUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                color: !walletConnected || loadError ? "text-[var(--text-dim)]" : "text-[var(--text)]",
                 sub: walletConnected && idleDeposits.length > 0 ? `${idleDeposits.length} market deposit${idleDeposits.length === 1 ? "" : "s"}` : undefined,
               },
             ].map((stat) => (
@@ -834,6 +839,20 @@ export function PortfolioPositionsView() {
                   </div>
                 </div>
               ))}
+            </div>
+          ) : loadError && walletConnected ? (
+            <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-6 flex flex-col items-center gap-3 text-center">
+              <span className="text-2xl leading-none">⚠️</span>
+              <div>
+                <p className="text-[12px] font-semibold text-[var(--text-secondary)]">Couldn't load your positions</p>
+                <p className="mt-0.5 text-[11px] text-[var(--text-secondary)]">Please try refreshing</p>
+              </div>
+              <button
+                onClick={refresh}
+                className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] px-4 py-2 text-xs text-[var(--text-secondary)] transition-all hover:border-[var(--accent)]/40 hover:text-[var(--text)]"
+              >
+                Retry
+              </button>
             </div>
           ) : openPositions.length === 0 ? (
             <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-10 text-center">
