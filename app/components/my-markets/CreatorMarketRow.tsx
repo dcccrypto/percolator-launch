@@ -15,6 +15,7 @@ import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider"
 import { CreatorClaimPanel } from "@/components/market/CreatorClaimPanel";
 import { useToast } from "@/hooks/useToast";
 import { explorerAccountUrl } from "@/lib/config";
+import { ZERO_PUBKEY } from "@/lib/update-asset-authority-keys";
 import { computeMarketHealthFromStats } from "@/lib/health";
 import { HealthBadge } from "@/components/market/HealthBadge";
 import { MarketLogo } from "@/components/market/MarketLogo";
@@ -222,6 +223,10 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
   const isAssetAdmin =
     !!walletB58AdminGate && !!detail?.creator_fee_authority &&
     detail.creator_fee_authority === walletB58AdminGate;
+  // The burn writes the zero key into asset_admin (useAdminActions.renounceAdmin), which the detail
+  // route serves as creator_fee_authority. Burned is then a fact about the market, not a wallet
+  // mismatch, so the drawer must not ask the creator to "connect the creator wallet".
+  const adminBurned = detail?.creator_fee_authority === ZERO_PUBKEY.toBase58();
   const marketAuthB58 = market.configV17?.marketauth?.toBase58() ?? null;
   const isMarketAuth = !!walletB58AdminGate && !!marketAuthB58 && marketAuthB58 === walletB58AdminGate;
   const rowClaim = useClaimCreatorFees();
@@ -357,12 +362,9 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
   const handleBurnAdmin = useCallback(async () => {
     try {
       await actions.renounceAdmin(market);
-      // Audit finding: after a successful burn, this market's admin no longer
-      // matches this wallet — it legitimately vanishes from Your Markets on
-      // the next scan. Say so explicitly, in ONE toast, so that read isn't
-      // mistaken for a bug (a generic "successful!" toast alone wouldn't
-      // explain the disappearance).
-      toast("Admin key burned — this market is now permissionless and will no longer appear in Your Markets", "success");
+      // The market stays in Your Markets: useCreatedMarkets lists every market whose LP
+      // portfolio this wallet owns (owner @116), and burning asset_admin doesn't change that.
+      toast("Admin key burned. The market stays in Your Markets because your wallet still owns its liquidity position.", "success");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Burn admin key failed", "error");
     }
@@ -527,10 +529,16 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
             <button
               onClick={() => setShowBurnConfirm(true)}
               disabled={actions.loading === "renounceAdmin" || !isAssetAdmin}
-              title={isAssetAdmin ? undefined : "Only the market admin (asset_admin) can burn the admin key — connect the creator wallet."}
+              title={
+                adminBurned
+                  ? "The admin key is already burned."
+                  : isAssetAdmin
+                    ? undefined
+                    : "Only the market admin (asset_admin) can burn the admin key — connect the creator wallet."
+              }
               className="text-[10px] uppercase tracking-[0.1em] text-[var(--short)]/70 hover:text-[var(--short)] transition-colors disabled:opacity-40"
             >
-              burn admin key
+              {adminBurned ? "admin key burned" : "burn admin key"}
             </button>
             <button
               data-testid="close-market-button"
@@ -547,7 +555,7 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
           {!isMarketAuth && (
             <p className="mt-2 text-[10px] text-[var(--text-secondary)]">
               This market is autonomous — admin control was permanently renounced to the stake-pool
-              program at creation, so it can’t be closed. You can still burn your remaining admin key.
+              program at creation, so it can’t be closed.{isAssetAdmin && " You can still burn your remaining admin key."}
             </p>
           )}
           {closeMarket.error && (
