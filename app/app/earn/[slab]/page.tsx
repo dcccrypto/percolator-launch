@@ -16,6 +16,7 @@ import { earnExitProps } from '@/lib/limits/resolved-finish';
 import { EarnTrancheCardView } from '@/components/limits/EarnTrancheCard';
 import { useVaultLpValuation } from '@/hooks/useVaultLpValuation';
 import { useMarketLimits } from '@/hooks/useMarketLimits';
+import { useSingleMarketHealth } from '@/hooks/useMarketHealth';
 import { earnViewFromLimits, earnPanelPricing, withSplitPotPricing } from '@/lib/limits/earn';
 import { cooldownPhrase, previewWithdrawAtoms } from '@/lib/limits/earn-withdraw';
 import { formatTokenAmount } from '@/lib/format';
@@ -144,6 +145,8 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
   const firstLoad = !loadedOnce;
   const earnWallet = useWalletCompat();
   const earnLimits = useMarketLimits(slabAddress);
+  // GH#2882: a depleted counterparty pauses trading; Earn deposits on an unbound vault can't reopen it.
+  const marketHealth = useSingleMarketHealth(slabAddress);
   // UX WP-5 (§3.7): a stale LP certificate is valued by a simulated crank, never "Needs refresh".
   const lpValuation = useVaultLpValuation(slabAddress, earnLimits);
   const earnTrancheView = earnViewFromLimits(earnLimits, lpVaultState.backingNavAtoms, lpVaultState.userLpBalance, undefined, lpValuation.value);
@@ -457,6 +460,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
               onDeposit={handleDeposit}
               onWithdraw={handleWithdraw}
               p3Bound={earnLimits.vaultLp?.bound === true}
+              lpDepleted={marketHealth?.lpDepleted === true}
               drawSummary={lastDrawSummary}
               pricing={earnPricing}
               onRefresh={refreshState}

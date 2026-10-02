@@ -85,6 +85,13 @@ interface DepositWithdrawPanelProps {
   onWithdraw: (lpAmount: bigint) => Promise<WithdrawStepResult | void>;
   /** P3: the vault owns its market's LP, which changes what a claim-side 21 means (E2E B24). */
   p3Bound?: boolean;
+  /**
+   * The market's counterparty has no funds left (market health lpDepleted), so trading is paused.
+   * On an unbound vault an Earn deposit goes to the backing that pays traders' payouts and never
+   * reaches the counterparty, so it can't reopen trading (GH#2882). Not shown when p3Bound: there
+   * the vault funds the counterparty.
+   */
+  lpDepleted?: boolean;
   /** d119eebd: senior draw booked / restored by the user's last Earn tx (its program logs). */
   drawSummary?: DrawSummary | null;
   /**
@@ -126,6 +133,7 @@ export function DepositWithdrawPanel({
   depositBlockedReason = null,
   depositBlockKind = null,
   p3Bound = false,
+  lpDepleted = false,
   drawSummary = null,
   pricing = null,
   onRefresh,
@@ -538,6 +546,19 @@ export function DepositWithdrawPanel({
           >
             <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--warning)]">Deposits paused</p>
             <p className="mt-1 text-[10px] leading-relaxed text-[var(--text-secondary)]">{depositBlockedReason}</p>
+          </div>
+        )}
+
+        {tab === 'deposit' && lpDepleted && !p3Bound && (
+          <div
+            role="status"
+            data-testid="earn-lp-depleted-note"
+            className="mb-3 border border-[var(--warning)]/30 bg-[var(--warning)]/5 px-3 py-2"
+          >
+            <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--warning)]">Trading paused</p>
+            <p className="mt-1 text-[10px] leading-relaxed text-[var(--text-secondary)]">
+              Trading on this market is paused. Deposits here back traders&apos; payouts and don&apos;t reopen trading.
+            </p>
           </div>
         )}
 

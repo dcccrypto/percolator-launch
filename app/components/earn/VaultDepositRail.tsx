@@ -12,6 +12,7 @@ import { earnExitProps } from '@/lib/limits/resolved-finish';
 import { useWalletCompat } from '@/hooks/useWalletCompat';
 import { LoadingValue } from '@/components/ui/LoadingValue';
 import { useMarketLimits } from '@/hooks/useMarketLimits';
+import { useSingleMarketHealth } from '@/hooks/useMarketHealth';
 import { earnDepositPause, earnGateShares, earnViewFromLimits, earnPanelPricing, withSplitPotPricing } from '@/lib/limits/earn';
 import { earnDepositBlock } from '@/lib/limits/vault-tranche';
 import { COPY } from '@/lib/limits/copy';
@@ -99,6 +100,8 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
   // P3 (flag-gated; "off" = no RPC): one limits read model feeds the tranche card AND the
   // deposit gate, which mirrors the program's own tag-75 refusals (lib/limits/vault-tranche.ts).
   const marketLimits = useMarketLimits(slab);
+  // GH#2882: a depleted counterparty pauses trading; Earn deposits on an unbound vault can't reopen it.
+  const marketHealth = useSingleMarketHealth(slab);
   // UX WP-5 (§3.7): a stale LP certificate is valued by a simulated crank, never "Needs refresh".
   const lpValuation = useVaultLpValuation(slab, marketLimits);
   const trancheView = earnViewFromLimits(marketLimits, state.backingNavAtoms, state.userLpBalance, undefined, lpValuation.value);
@@ -223,6 +226,7 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
         depositBlockKind={depositBlock}
         onWithdraw={handleWithdraw}
         p3Bound={marketLimits.vaultLp?.bound === true}
+        lpDepleted={marketHealth?.lpDepleted === true}
         drawSummary={lastDrawSummary}
         pricing={earnPricing}
         onRefresh={refreshState}
