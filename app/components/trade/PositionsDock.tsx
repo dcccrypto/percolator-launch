@@ -30,7 +30,7 @@
 import { FC, memo, useMemo, useState } from "react";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useNftWrappedPosition } from "@/hooks/useNftWrappedPosition";
-import { PositionNftMenu, NFT_MENU_COPY } from "@/components/trade/PositionNftMenu";
+import { PositionNftMenu, ClosedPositionNftNotice, NFT_MENU_COPY } from "@/components/trade/PositionNftMenu";
 import { useClosePosition } from "@/hooks/useClosePosition";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useMarketLimits } from "@/hooks/useMarketLimits";
@@ -184,8 +184,14 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const isSettling = hasNormalPosition && !!realUserAccount?.provisional;
 
   if (!activeInfo) {
-    if (!userAccount) return <EmptyState subtitle="Connect your wallet and deposit collateral to start trading." />;
-    return <EmptyState subtitle="Use the order ticket to open a position." />;
+    // A position closed while wrapped as an NFT has no row (useNftWrappedPosition skips size-0 legs), so its
+    // Unwrap lives under the empty state; renders nothing unless the wallet holds such an NFT on this market.
+    return (
+      <>
+        <EmptyState subtitle={userAccount ? "Use the order ticket to open a position." : "Connect your wallet and deposit collateral to start trading."} />
+        <ClosedPositionNftNotice slabAddress={slabAddress} />
+      </>
+    );
   }
   const { account } = activeInfo;
 
