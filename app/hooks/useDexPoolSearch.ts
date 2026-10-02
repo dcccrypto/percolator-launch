@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { PublicKey } from "@solana/web3.js";
-import { SUPPORTED_DEX_IDS, BLOCKED_DEX_IDS, NON_USD_QUOTE_REASON } from "@/lib/dex-constants";
+import { SUPPORTED_DEX_IDS, BLOCKED_DEX_IDS, NON_USD_QUOTE_REASON, BELOW_LIQUIDITY_FLOOR_REASON } from "@/lib/dex-constants";
 import { dexTypeLabel, isOfferable, MAX_CLASSIFY_POOLS, type PoolClass } from "@/lib/dex-pool-owner";
 import type { KeeperDexType } from "@/lib/dex-type";
 
@@ -58,9 +58,11 @@ export const UNSUPPORTED_POOL_TYPES =
   "This token's pools are on DEX types our price feed can't read yet (for example Meteora DAMM). " +
   "Markets can launch against Meteora DLMM or PumpSwap pools.";
 
-/** Why none of the candidate pools was offered: a non-USD quote is the actionable reason. */
+/** Why none of the candidate pools was offered: a non-USD quote or a too-shallow pool is the actionable reason. */
 export function unverifiedReason(candidates: DexPoolResult[], classes: Record<string, PoolClass>): string {
-  return candidates.some((c) => classes[c.poolAddress] === "non-usd-quote") ? NON_USD_QUOTE_REASON : UNSUPPORTED_POOL_TYPES;
+  if (candidates.some((c) => classes[c.poolAddress] === "non-usd-quote")) return NON_USD_QUOTE_REASON;
+  if (candidates.some((c) => classes[c.poolAddress] === "below-liquidity-floor")) return BELOW_LIQUIDITY_FLOOR_REASON;
+  return UNSUPPORTED_POOL_TYPES;
 }
 
 /**

@@ -6,6 +6,7 @@ import { classifyPoolsByOwner, isOfferable, MAX_CLASSIFY_POOLS } from "@/lib/dex
 import type { KeeperDexType } from "@/lib/dex-type";
 import { BoundedTtlCache } from "@/lib/bounded-ttl-cache";
 import { fetchJupiterUsdPrice } from "@/lib/jupiter-price";
+import { belowLiquidityFloorReason } from "@/lib/pool-liquidity";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +53,8 @@ interface OracleResolveResult {
   dexPoolAddress?: string | null;
   /** Keeper dexType of `dexPoolAddress`, classified by mainnet owner ("meteora-dlmm" | "pumpswap"). */
   dexType?: string | null;
+  /** Set when no pool was offered because every candidate was under the keeper's liquidity floor. */
+  poolBlockedReason?: string;
   /** PERC-470: Recommended oracle mode */
   oracleMode?: "hyperp" | "admin";
 }
@@ -230,6 +233,7 @@ export async function GET(
   // E2E B21: the pool must be one the keeper can price, by mainnet OWNER.
   let bestPool: string | null = null;
   let bestDexType: string | null = null;
+  let poolBlockedReason: string | undefined;
   const candidates = dexResult?.candidates ?? [];
   if (registered) {
     bestPool = registered.pool;
@@ -252,6 +256,8 @@ export async function GET(
     if (pick) {
       bestPool = pick;
       bestDexType = classes[pick] as KeeperDexType;
+    } else if (candidates.some((c) => classes[c] === "below-liquidity-floor")) {
+      poolBlockedReason = belowLiquidityFloorReason();
     }
   }
 
@@ -266,6 +272,7 @@ export async function GET(
       source: dexResult ? "dexscreener" : "jupiter",
       dexPoolAddress: bestPool,
       dexType: bestDexType,
+      ...(poolBlockedReason ? { poolBlockedReason } : {}),
       oracleMode: hasPool ? "hyperp" : "admin",
     };
   } else {

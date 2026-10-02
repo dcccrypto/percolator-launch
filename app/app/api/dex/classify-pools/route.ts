@@ -1,6 +1,8 @@
 /**
  * POST /api/dex/classify-pools  { addresses: string[] (<= 20) }
- *   -> 200 { classes: { [address]: "meteora-dlmm" | "pumpswap" | "raydium-clmm" | "unsupported" | "missing" } }
+ *   -> 200 { classes: { [address]: "meteora-dlmm" | "pumpswap" | "raydium-clmm" | "unsupported" | "missing"
+ *                          | "non-usd-quote" | "below-liquidity-floor" } }
+ *   ("below-liquidity-floor": PumpSwap pool under the keeper's MIN_POOL_LIQUIDITY_USD, lib/pool-liquidity)
  *   -> 503 when mainnet could not be reached (the wizard must not offer unverified pools)
  *
  * The wizard's pool search (hooks/useDexPoolSearch) calls this so it only OFFERS pools

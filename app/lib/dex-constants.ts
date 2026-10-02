@@ -41,6 +41,15 @@ export const NON_USD_QUOTE_REASON =
   "can't convert them to a USD price. It needs a SOL- or USDC-quoted Pump.fun or Meteora pool.";
 
 /**
+ * Client-side copy for a PumpSwap pool under the keeper's liquidity floor (lib/pool-liquidity).
+ * No figure: the floor is a server env (MIN_POOL_LIQUIDITY_USD), the browser can't read it.
+ */
+export const BELOW_LIQUIDITY_FLOOR_REASON =
+  "This token's pool is too shallow to price safely. Our price feed refuses to quote pools with " +
+  "so little liquidity, so a market launched on it would never get a price. Pick a deeper pool, " +
+  "or wait until the pool has more liquidity.";
+
+/**
  * DEXes deliberately withheld from new market creation, and why. Rendered to
  * the creator so a blocked launch reads as "not supported yet" rather than the
  * generic "no price could be resolved".

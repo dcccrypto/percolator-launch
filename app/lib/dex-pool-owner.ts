@@ -15,6 +15,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import { parseDexPool } from "@percolatorct/sdk";
 import type { KeeperDexType } from "@/lib/dex-type";
 import { USD_PRICEABLE_QUOTE_MINTS } from "@/lib/dex-constants";
+import { isBelowFloor, minPoolLiquidityUsdE6, readPumpswapDepths } from "@/lib/pool-liquidity";
 
 /** Mainnet DEX program -> keeper dexType (verified against the curated playground pools). */
 export const DEX_PROGRAM_TO_TYPE: Readonly<Record<string, KeeperDexType>> = {
@@ -35,7 +36,13 @@ export const OFFERABLE_DEX_TYPES: readonly KeeperDexType[] = ["meteora-dlmm", "p
  * such a pool would be priced as USD in the wrong unit (2026-10-02 incident: SI quoted in MM,
  * ratio ~13.7 pushed as $13.7 against a real ~$0.03). It is never offered or registered.
  */
-export type PoolClass = KeeperDexType | "unsupported" | "missing" | "non-usd-quote";
+/**
+ * "below-liquidity-floor": a PumpSwap pool whose quote-side depth (USD) is under the keeper's
+ * MIN_POOL_LIQUIDITY_USD floor, or whose depth cannot be established. The keeper refuses to price
+ * it ("pool below the liquidity floor"), so a market launched on it could never be priced
+ * (2026-10-02: BOME on GmoZsr3G..., depth $1.64). Never offered or registered. See lib/pool-liquidity.
+ */
+export type PoolClass = KeeperDexType | "unsupported" | "missing" | "non-usd-quote" | "below-liquidity-floor";
 
 export interface PoolClassification {
   cls: PoolClass;
@@ -91,6 +98,7 @@ export async function classifyPoolsByOwner(
 ): Promise<Record<string, PoolClass> | null> {
   const keys: PublicKey[] = [];
   const out: Record<string, PoolClass> = {};
+  const pumpswap: Array<{ pool: string; quoteVault: PublicKey; quoteMint: string }> = [];
   for (const a of addresses.slice(0, MAX_CLASSIFY_POOLS)) {
     try {
       keys.push(new PublicKey(a));
@@ -99,18 +107,40 @@ export async function classifyPoolsByOwner(
     }
   }
   if (keys.length === 0) return out;
-  try {
+  const withTimeout = <T>(p: Promise<T>): Promise<T> => {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const infos = await Promise.race([
-      conn.getMultipleAccountsInfo(keys),
+    return Promise.race([
+      p,
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error("mainnet RPC timeout")), timeoutMs);
       }),
     ]).finally(() => clearTimeout(timer));
+  };
+  try {
+    const infos = await withTimeout(conn.getMultipleAccountsInfo(keys));
     keys.forEach((k, i) => {
       const info = infos[i];
-      out[k.toBase58()] = info ? classifyPoolAccount(k, info.owner.toBase58(), new Uint8Array(info.data)).cls : "missing";
+      if (!info) {
+        out[k.toBase58()] = "missing";
+        return;
+      }
+      const data = new Uint8Array(info.data);
+      const c = classifyPoolAccount(k, info.owner.toBase58(), data);
+      out[k.toBase58()] = c.cls;
+      if (c.cls === "pumpswap") {
+        // classifyPoolAccount parsed this pool already, so it parses again; the vault is what we need.
+        const parsed = parseDexPool("pumpswap", k, data);
+        if (parsed.quoteVault) pumpswap.push({ pool: k.toBase58(), quoteVault: parsed.quoteVault, quoteMint: parsed.quoteMint.toBase58() });
+        else out[k.toBase58()] = "below-liquidity-floor"; // keeper: "vault addresses missing" -> cannot price
+      }
     });
+    // Liquidity floor: ONE more batched read (quote vaults + SOL/USD reference pool). An RPC failure
+    // here fails the whole call (null), exactly like the owner read: an unmeasured pool is not offered.
+    const floor = minPoolLiquidityUsdE6();
+    if (floor > 0n && pumpswap.length > 0) {
+      const depths = await withTimeout(readPumpswapDepths({ pools: pumpswap }, conn));
+      for (const p of pumpswap) if (isBelowFloor(depths[p.pool] ?? null, floor)) out[p.pool] = "below-liquidity-floor";
+    }
     return out;
   } catch {
     return null;
