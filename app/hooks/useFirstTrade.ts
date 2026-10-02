@@ -2,11 +2,20 @@
 
 /**
  * UX WP-6 (audit §3.2): fund and trade in one approval.
- *  - No trading account yet: tx A = [CreateAccount, InitPortfolio], tx B = [Deposit, Trade] with
- *    the PREDICTED portfolio id (lib/first-trade.ts); both signed in ONE prompt; A lands, then B.
- *    A race on the id (someone initialised in between) rebuilds B with the real id: one more
- *    prompt, labelled. A failed deposit leg is surfaced (FirstTradeDepositError), never swallowed.
+ *  - No trading account yet: ONE transaction [CreateAccount, InitPortfolio, Deposit, Trade] with
+ *    the PREDICTED portfolio id (lib/first-trade.ts); the portfolio keypair co-signs after the
+ *    wallet. GH#2959: it used to be two transactions (A = create+init, B = deposit+trade) signed
+ *    together with signAllTransactions; a wallet that simulates each transaction on its own
+ *    (Solflare) saw B fail ({"InstructionError":[3,"IncorrectProgramId"]}: the portfolio does not
+ *    exist until A lands), showed "Simulation failed" and disabled Approve. One transaction is
+ *    811 bytes / ~335k CU measured live (limit 1232 / 1.4M), simulates clean in every wallet, and
+ *    is atomic: a refused trade or deposit leaves nothing behind (no empty, rent-paid account).
+ *    A race on the id (someone initialised in between) reverts the whole tx; it is rebuilt with
+ *    the real next id: one more prompt, labelled.
  *  - Account exists but short of margin: one tx [Deposit, Trade] (1 prompt).
+ *  - Both: a pre-sign refusal 19/21 while the keeper is mid-cycle (its accrual has marked the
+ *    K/F cohort stale and its follow-up refresh lands ~1-4 s later) is re-checked a few times
+ *    before the wallet opens, never signed into a transaction that would fail on chain.
  */
 import { useCallback, useState } from "react";
 import { Keypair, PublicKey, type TransactionInstruction } from "@solana/web3.js";
@@ -15,15 +24,7 @@ import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { assertKnownProgram } from "@/lib/programAllowlist";
 import { assertDepositWithinBalance } from "@/lib/deposit-guard";
-import {
-  SimulationRefusal,
-  broadcastSignedTx,
-  buildBatchTx,
-  getPriorityFee,
-  sendTx,
-  signAllCompat,
-  simulateForGate,
-} from "@/lib/tx";
+import { SimulationRefusal, sendTx } from "@/lib/tx";
 import { tradeCuCap } from "@/lib/compute-budget";
 import { fetchAssetMarketId, fetchPortfolioIdentity } from "@/lib/v18-wire";
 import { findV17Portfolio, resolveLpTradeAccounts } from "@/hooks/useTrade";
@@ -31,17 +32,36 @@ import {
   buildFirstTradeInitIxs,
   buildFundAndTradeIxs,
   type FirstTradeIxParams,
-  FirstTradeDepositError,
-  failedFirstTradeLeg,
   isPortfolioIdRace,
   predictPortfolioId,
   readNextPortfolioId,
 } from "@/lib/first-trade";
 import { invalidatePortfolio } from "@/lib/portfolio-invalidation";
 import { readU64LE } from "@/lib/u64le";
+import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 
-/** Thrown before the wallet opens when the pre-sign simulation could not reach Solana. */
-export const PRESIGN_SIM_UNREACHABLE = "Couldn't reach Solana to check this order. Nothing was sent.";
+/** CU cap for [deposit, trade]: the trade's cap + the deposit. */
+const FUND_AND_TRADE_CU_CAP = tradeCuCap(1) + 60_000;
+/** CU cap for the first trade: + CreateAccount and InitPortfolio (~38k measured; 60k budgeted). */
+export const FIRST_TRADE_CU_CAP = FUND_AND_TRADE_CU_CAP + 60_000;
+
+/**
+ * Pre-sign re-checks of a 19/21 refusal (nothing is signed or sent while waiting). Measured live
+ * 2026-10-02 (keeper 90f0ffe, 30 markets, 7 min): 13 stale-cohort windows, 11 of them 0.8-3.9 s
+ * (the keeper's follow-up refresh), 2 of ~20 s (one cycle). 3 x 1.5 s covers the common window;
+ * past it the ticket shows the calm "Nothing was sent. Try again in a moment." line.
+ */
+export const PRESIGN_WAIT_ATTEMPTS = 3;
+export const PRESIGN_WAIT_MS = 1_500;
+
+/** A pre-sign wrapper refusal that the keeper's next step clears: EngineStale 19 / EngineLockActive 21. */
+export function isPresignWaitable(e: unknown, programId: PublicKey): boolean {
+  return (
+    e instanceof SimulationRefusal &&
+    e.programId === programId.toBase58() &&
+    (e.code === WRAPPER_ERR.EngineStale || e.code === WRAPPER_ERR.EngineLockActive)
+  );
+}
 
 export interface FundAndTradeParams {
   /** Signed size (base q). */
@@ -62,9 +82,6 @@ export interface FundAndTradeResult {
   created: boolean;
 }
 
-/** Budget prefix sendTx/buildBatchTx put in front (heap frame + CU limit + CU price). */
-const BUDGET_PREFIX = 3;
-
 export function useFirstTrade(slabAddress: string) {
   const wallet = useWalletCompat();
   const { connection } = useConnectionCompat();
@@ -78,6 +95,18 @@ export function useFirstTrade(slabAddress: string) {
       const owner = wallet.publicKey;
       const programId = slabProgramId;
       const market = new PublicKey(slabAddress);
+      /** Re-run `send` while its pre-sign simulation is refused 19/21 (the wallet never opened). */
+      const withPresignWait = async <T,>(send: () => Promise<T>): Promise<T> => {
+        for (let attempt = 0; ; attempt++) {
+          try {
+            return await send();
+          } catch (e) {
+            if (attempt >= PRESIGN_WAIT_ATTEMPTS || !isPresignWaitable(e, programId)) throw e;
+            console.info(`[first-trade] pre-sign ${(e as SimulationRefusal).code}: market mid-update, re-checking (${attempt + 1}/${PRESIGN_WAIT_ATTEMPTS})`);
+            await new Promise((r) => setTimeout(r, PRESIGN_WAIT_MS));
+          }
+        }
+      };
       setLoading(true);
       try {
         const userAta = await getAta(owner, mktConfig.collateralMint);
@@ -101,67 +130,53 @@ export function useFirstTrade(slabAddress: string) {
         const existing = await findV17Portfolio(connection, programId, market, owner);
         if (existing) {
           const id = await fetchPortfolioIdentity(connection, existing);
-          const signature = await sendTx({
-            connection,
-            wallet,
-            instructions: buildFundAndTradeIxs(ixp(existing), { portfolioId: id.portfolioId, sequence: id.matcherSequence, positionEpoch: id.positionEpoch }),
-            computeUnitsFromSim: { cap: tradeCuCap(1) + 60_000 },
-          });
+          const signature = await withPresignWait(() =>
+            sendTx({
+              connection,
+              wallet,
+              instructions: buildFundAndTradeIxs(ixp(existing), { portfolioId: id.portfolioId, sequence: id.matcherSequence, positionEpoch: id.positionEpoch }),
+              computeUnitsFromSim: { cap: FUND_AND_TRADE_CU_CAP },
+            }),
+          );
           invalidatePortfolio();
           refreshSlab();
           return { signature, portfolio: existing, prompts: 1, created: false };
         }
 
-        // ── First trade: A = [create, init]; B = [deposit, trade] at the predicted id. ──
-        const marketInfo = await connection.getAccountInfo(market, "confirmed");
-        const next = marketInfo ? readNextPortfolioId(new Uint8Array(marketInfo.data)) : null;
-        if (next === null) throw new Error("Market not loaded");
-        const predicted = predictPortfolioId(next);
-        const kp = Keypair.generate();
+        // ── First trade: ONE tx [create, init, deposit, trade] at the predicted id. ──
+        // sendTx simulates the whole list before the wallet opens (its CU-sizing simulation is
+        // the pre-sign verdict), so a refusal of any leg is caught there and mapped to its line;
+        // the portfolio keypair signs AFTER the wallet (embedded wallets strip earlier signatures).
         const rent = await connection.getMinimumBalanceForRentExemption(V17_PORTFOLIO_ACCOUNT_LEN);
-        const aIxs: TransactionInstruction[] = buildFirstTradeInitIxs({ programId, owner, market, portfolio: kp.publicKey }, rent);
-        // A is simulated alone (its CU sizing), then A+B as ONE simulated list: B's portfolio
-        // does not exist until A lands, but inside one simulated tx it does, so a refusal of the
-        // trade leg (SameOwnerTrade 67, exec band 66, caps 68-70, ...) is caught here, before the
-        // wallet opens, attributed to the program that raised it, and mapped to its line.
-        const simA = await simulateForGate(connection, owner, aIxs);
-        if (simA.err) throw new SimulationRefusal(simA.err, simA.logs, simA.simulated);
-        const bIxs = buildFundAndTradeIxs(ixp(kp.publicKey), { portfolioId: predicted, sequence: 0n, positionEpoch: 0n });
-        const simAB = await simulateForGate(connection, owner, [...aIxs, ...bIxs]);
-        if (simAB.err) throw new SimulationRefusal(simAB.err, simAB.logs, simAB.simulated);
-        // A simulation that could not RUN (RPC error) is not a pass: signing on it would let A
-        // (create + init) land and B fail on chain, the "Something went wrong" path. Stop first.
-        if (simA.rpcFailed || simAB.rpcFailed) throw new Error(PRESIGN_SIM_UNREACHABLE);
-        const [{ blockhash }, fee] = await Promise.all([connection.getLatestBlockhash("confirmed"), getPriorityFee(connection)]);
-        const txA = buildBatchTx({ instructions: aIxs, computeUnits: Math.max(60_000, Math.ceil((simA.consumed ?? 50_000) * 1.3)), priorityFeeMicroLamports: fee, blockhash, feePayer: owner });
-        const txB = buildBatchTx({ instructions: bIxs, computeUnits: tradeCuCap(1) + 60_000, priorityFeeMicroLamports: fee, blockhash, feePayer: owner });
-        const [signedA, signedB] = await signAllCompat(wallet, [txA, txB]);
-        // The portfolio keypair co-signs AFTER the wallet (embedded wallets strip earlier signatures).
-        signedA.partialSign(kp);
-        await broadcastSignedTx(connection, signedA);
-        try {
-          const signature = await broadcastSignedTx(connection, signedB);
-          invalidatePortfolio();
-          refreshSlab();
-          return { signature, portfolio: kp.publicKey, prompts: 1, created: true };
-        } catch (e) {
-          if (isPortfolioIdRace(e)) {
-            p.onRace?.();
-            const id = await fetchPortfolioIdentity(connection, kp.publicKey);
-            const signature = await sendTx({
-              connection,
-              wallet,
-              instructions: buildFundAndTradeIxs(ixp(kp.publicKey), { portfolioId: id.portfolioId, sequence: id.matcherSequence, positionEpoch: id.positionEpoch }),
-              computeUnitsFromSim: { cap: tradeCuCap(1) + 60_000 },
-            });
+        let prompts: 1 | 2 = 1;
+        for (let raceRetry = 0; ; raceRetry++) {
+          const marketInfo = await connection.getAccountInfo(market, "confirmed");
+          const next = marketInfo ? readNextPortfolioId(new Uint8Array(marketInfo.data)) : null;
+          if (next === null) throw new Error("Market not loaded");
+          const kp = Keypair.generate();
+          const ixs: TransactionInstruction[] = [
+            ...buildFirstTradeInitIxs({ programId, owner, market, portfolio: kp.publicKey }, rent),
+            ...buildFundAndTradeIxs(ixp(kp.publicKey), { portfolioId: predictPortfolioId(next), sequence: 0n, positionEpoch: 0n }),
+          ];
+          try {
+            const signature = await withPresignWait(() =>
+              sendTx({ connection, wallet, instructions: ixs, signers: [kp], computeUnitsFromSim: { cap: FIRST_TRADE_CU_CAP } }),
+            );
             invalidatePortfolio();
             refreshSlab();
-            return { signature, portfolio: kp.publicKey, prompts: 2, created: true };
+            return { signature, portfolio: kp.publicKey, prompts, created: true };
+          } catch (e) {
+            // Someone took the predicted id first. The tx is atomic, so nothing landed: rebuild
+            // with the new next id. Refused before the wallet opened: no extra prompt, no note.
+            if (raceRetry === 0 && isPortfolioIdRace(e)) {
+              if (!(e instanceof SimulationRefusal)) {
+                prompts = 2;
+                p.onRace?.();
+              }
+              continue;
+            }
+            throw e;
           }
-          invalidatePortfolio();
-          refreshSlab();
-          if (failedFirstTradeLeg(e, BUDGET_PREFIX) === "deposit") throw new FirstTradeDepositError(p.amountLabel, e);
-          throw e;
         }
       } finally {
         setLoading(false);

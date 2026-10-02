@@ -1043,6 +1043,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         health: { lpDepleted, lpIsVault, adlReduceOnly, resolved: marketResolved },
       });
       if (um.quiet) {
+        // GH#2959: a first fund-and-trade the user turned down in the wallet reset the ticket
+        // with no word (some wallets showed their own warning, so it read as "nothing happened").
+        // Say it, calmly. Other cancels (and Stop) stay quiet.
+        if (fundingMode && um.kind === "cancelled") {
+          setRefusal({ ...um, quiet: false, title: "Cancelled", body: FIRST_TRADE_COPY.cancelled });
+        }
         setTradePhase("idle");
         return;
       }
