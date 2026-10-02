@@ -571,6 +571,22 @@ function fallbackMarketsResponse(request: NextRequest, reason: string): NextResp
   const rows = network === "mainnet"
     ? MAINNET_MARKET_DIRECTORY_FALLBACK
     : devnetMarketDirectoryFallback();
+
+  // Nothing to fall back to (the devnet directory is empty since the 2026-10-01 relaunch): an
+  // empty 200 read as "no markets yet — create the first one" on every page and was CDN-cached
+  // for up to 70 s. Say the data is unavailable instead, uncached, with the same body shape for
+  // callers that only read `markets`; every caller treats !ok as an error or keeps its last data.
+  if (rows.length === 0) {
+    Sentry.captureMessage(`PERC-8450: /api/markets has no static directory to fall back to (${reason})`, {
+      level: "warning",
+      tags: { endpoint: "/api/markets", method: "GET", degraded: "true", network },
+      fingerprint: ["perc-8450-markets-static-directory-fallback"],
+    });
+    return NextResponse.json(
+      { total: 0, activeTotal: 0, marketsWithPrice: 0, zombieCount: 0, markets: [], error: "Markets are temporarily unavailable", unavailable: true },
+      { status: 503, headers: { "Cache-Control": "no-store", "X-Percolator-Data-Source": "unavailable" } },
+    );
+  }
   const programIdParam = request?.nextUrl?.searchParams?.get("program_id") ?? null;
   const searchParam =
     request?.nextUrl?.searchParams?.get("search") ??

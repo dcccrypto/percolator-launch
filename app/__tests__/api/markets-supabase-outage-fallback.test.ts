@@ -89,90 +89,59 @@ describe("GET /api/markets — Supabase outage fallback", () => {
     expect(body.markets).toHaveLength(0);
   });
 
-  it("filters the static devnet directory by program_id", async () => {
-    // The devnet fallback is a single v17 wrapper program. It has been
-    // re-migrated over time (per-slab-tier → 69VUZ7a2… → the current fee-split
-    // wrapper DhSkE7uTb8…), which is exactly why this asserts the filter's
-    // BEHAVIOUR against getConfig().programId rather than a hardcoded id/count.
-    //
-    // Asserts the filter's behaviour rather than a hardcoded count, so editing
-    // the directory doesn't break this again.
-    const V17_DEVNET_PROGRAM = "DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj";
-
-    mockConfig.value = {
-      rpcUrl: "https://api.devnet.solana.com",
-      network: "devnet",
-      programId: V17_DEVNET_PROGRAM,
-      programsBySlabTier: undefined,
-    };
-
+  // The program_id filter, on the mainnet directory (it has an entry; the devnet one is empty).
+  it("filters the fallback directory by program_id: a match keeps the entry", async () => {
     const { GET } = await import("@/app/api/markets/route");
-    const res = await GET(makeRequest({ program_id: V17_DEVNET_PROGRAM }));
+    const res = await GET(makeRequest({ program_id: "ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv" }));
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.total).toBe(body.markets.length);
-    // Whatever survives the chain must match the requested program — this is
-    // the program_id filter's actual contract.
-    expect(
-      body.markets.every(
-        (m: Record<string, unknown>) => m.program_id === V17_DEVNET_PROGRAM,
-      ),
-    ).toBe(true);
-    // NOT asserting a non-empty result: 394f8561 blocklisted the whole
-    // devnet-2.0 lineup, and the directory is down to a single entry which is
-    // itself blocklisted, so the honest expectation today is zero rows. The
-    // filter is still pinned — by the unknown-program case below (which must
-    // return nothing) and by the blocklist case (which must drop a listed slab
-    // even when its program matches). An emptiness assertion here would only
-    // re-break the moment the directory is repopulated.
+    expect(body.markets.map((m: Record<string, unknown>) => m.slab_address)).toEqual(["AiVcTXxKfKmcpUBG3unxCdEHHtXvAq8zYpbtS6oPrV6J"]);
   });
 
-  it("drops a blocklisted slab from the devnet directory even when its program matches", async () => {
-    // The single remaining directory entry is blocklisted (394f8561 retired the
-    // devnet-2.0 lineup). Requesting its OWN program must still return it
-    // nothing — proving the blocklist filter runs ahead of the program filter
-    // rather than the emptiness being incidental.
-    const { BLOCKED_SLAB_ADDRESSES } = await import("@/lib/blocklist");
-    const V17_DEVNET_PROGRAM = "DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj";
-
-    mockConfig.value = {
-      rpcUrl: "https://api.devnet.solana.com",
-      network: "devnet",
-      programId: V17_DEVNET_PROGRAM,
-      programsBySlabTier: undefined,
-    };
-
+  it("an unknown program_id over a non-empty directory is a real empty result (200), not an outage", async () => {
+    // The negative half: without it the filter could be a no-op and the match case would still pass.
     const { GET } = await import("@/app/api/markets/route");
-    const res = await GET(makeRequest({ program_id: V17_DEVNET_PROGRAM }));
-    const body = await res.json();
-
-    expect(res.status).toBe(200);
-    expect(
-      body.markets.some((m: Record<string, unknown>) =>
-        BLOCKED_SLAB_ADDRESSES.has(m.slab_address as string),
-      ),
-    ).toBe(false);
-  });
-
-  it("returns nothing when filtering the devnet directory by an unknown program_id", async () => {
-    // The negative half — without this, the filter could be a no-op that
-    // returns everything and the assertion above would still pass.
-    mockConfig.value = {
-      rpcUrl: "https://api.devnet.solana.com",
-      network: "devnet",
-      programId: "DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj",
-      programsBySlabTier: undefined,
-    };
-
-    const { GET } = await import("@/app/api/markets/route");
-    const res = await GET(
-      makeRequest({ program_id: "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in" }),
-    );
+    const res = await GET(makeRequest({ program_id: "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in" }));
     const body = await res.json();
 
     expect(res.status).toBe(200);
     expect(body.markets).toHaveLength(0);
     expect(body.total).toBe(0);
+  });
+
+  // The devnet directory is empty since the 2026-10-01 relaunch (PLAYGROUND_SLAB_META = {}). An
+  // empty 200 read as "No markets yet. Create the first one" on every page during a backend
+  // hiccup, CDN-cached for up to 70 s. With nothing to fall back to, the route says so.
+  describe("devnet: nothing to fall back to", () => {
+    beforeEach(() => {
+      mockConfig.value = {
+        rpcUrl: "https://api.devnet.solana.com",
+        network: "devnet",
+        programId: "ETDLAdiAyWnEUngspYczTXUceT6X8f92eZQvr8nmSkWB",
+        programsBySlabTier: undefined,
+      };
+    });
+
+    it("503, not cached, same body shape, flagged unavailable", async () => {
+      const { GET } = await import("@/app/api/markets/route");
+      const res = await GET(makeRequest());
+      const body = await res.json();
+
+      expect(res.status).toBe(503);
+      expect(res.headers.get("Cache-Control")).toBe("no-store");
+      expect(res.headers.get("X-Percolator-Data-Source")).toBe("unavailable");
+      expect(body).toMatchObject({ total: 0, activeTotal: 0, marketsWithPrice: 0, zombieCount: 0, markets: [], unavailable: true });
+      expect(captureMessage).toHaveBeenCalledWith(
+        expect.stringContaining("no static directory to fall back to"),
+        expect.objectContaining({ tags: expect.objectContaining({ degraded: "true", network: "devnet" }) }),
+      );
+    });
+
+    it("a search does not turn the outage into a \"no match\"", async () => {
+      const { GET } = await import("@/app/api/markets/route");
+      const res = await GET(makeRequest({ search: "SOL" }));
+      expect(res.status).toBe(503);
+    });
   });
 });
