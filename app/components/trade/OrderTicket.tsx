@@ -64,7 +64,7 @@ import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { AccountKind, computeLiqPrice } from "@percolatorct/sdk";
-import { computeEstimatedEntryPrice, computeTradingFee, computePositionInitialMargin, resolveEntryPrice } from "@/lib/trading";
+import { computeEstimatedEntryPrice, computeTradingFee, computePositionInitialMargin, orderAgainstPosition, resolveEntryPrice } from "@/lib/trading";
 import { TradeConfirmationModal } from "@/components/trade/TradeConfirmationModal";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { usePrivyLogin, usePrivyAvailable } from "@/hooks/usePrivySafe";
@@ -633,7 +633,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const notionalNative = computeNotionalNative(marginNative, leverage);
   const rawPositionSize = livePriceE6 && livePriceE6 > 0n ? (notionalNative * 1_000_000n) / livePriceE6 : 0n;
   const positionSize = rawPositionSize < 0n ? 0n : rawPositionSize;
-  const exceedsBalance = marginNative > 0n && marginNative > effectiveBalance;
+  // An order on the other side of the open position cuts it instead of adding exposure:
+  // it releases margin, and only a flip that ends larger can need any.
+  const vsPosition = userAccount
+    ? orderAgainstPosition(marginNative, positionSize, direction, existingPositionSize, lockedMargin, capital)
+    : null;
+  const exceedsBalance = marginNative > 0n && (vsPosition ? vsPosition.shortBy > 0n : marginNative > effectiveBalance);
 
   const needsWallet = !connected;
   const needsAccount = connected && !userAccount;
@@ -649,7 +654,13 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const estEntry = hasOrder ? computeEstimatedEntryPrice(oracleE6, tradingFeeBps, direction) : 0n;
   const fee = hasOrder ? computeTradingFee((positionSize * oracleE6) / 1_000_000n, tradingFeeBps) : 0n;
   // The deposit this order needs (margin + fee + 10%), editable; never more than the wallet holds.
-  const marginShort = needsAccount ? marginNative : marginNative > availableBalance ? marginNative - availableBalance : 0n;
+  const marginShort = needsAccount
+    ? marginNative
+    : vsPosition
+      ? vsPosition.shortBy
+      : marginNative > availableBalance
+        ? marginNative - availableBalance
+        : 0n;
   const fundNeededAtoms = fundingMode && hasOrder ? fundDepositAtoms(marginShort, fee, walletAtaBalance ?? 0n, decimals) : 0n;
   const fundMinAtoms = fundingMode && hasOrder ? marginShort + fee : 0n;
   const fundEnteredAtoms = fundInput ? parsePercToNative(fundInput, decimals) : 0n;
@@ -745,7 +756,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   //   Margin            — what THIS order reserves (the requirement)
   //   Available to trade — before -> after reserving it
   const beforeAvailable = availableBalance;
-  const afterAvailable = beforeAvailable > marginNative ? beforeAvailable - marginNative : 0n;
+  const afterAvailable = vsPosition
+    ? vsPosition.afterAvailable
+    : beforeAvailable > marginNative
+      ? beforeAvailable - marginNative
+      : 0n;
   // Slippage: distance between the mark and the worst acceptable fill
   // (same computeLimitPriceE6 useTrade itself uses to derive the on-chain
   // limit when the caller doesn't supply one explicitly).
@@ -822,7 +837,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   const feeOverMax = ticketLimits.issues.some((x) => x.kind === "fee-over-max");
   const feeFitQ = feeOverMax ? feeFitSizeQ(limitsInput) : null;
-  const shortfall = marginNative > effectiveBalance ? marginNative - effectiveBalance : 0n;
+  const shortfall = vsPosition ? vsPosition.shortBy : marginNative > effectiveBalance ? marginNative - effectiveBalance : 0n;
 
   // ── The state machine (audit §3.3): one status slot, one state-labelled button ──
   const ticketState = deriveTicketState({
@@ -1604,7 +1619,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           </div>
           {!fundOverWallet && !fundTooSmall && (
             <p data-testid="fund-explain" className="mt-1 text-[11px] leading-snug text-[var(--text-secondary)]">
-              {`Covers ${formatTokenAmount(marginShort, decimals, 2)} margin + fee for this ${formatTokenAmount(notionalNative, decimals, 2)} position${!needsAccount && availableBalance > 0n ? `; ${formatTokenAmount(availableBalance, decimals, 2)} already on this market` : ""}. Anything unused stays in your account.`}
+              {`Covers ${formatTokenAmount(marginShort, decimals, 2)} margin + fee for this ${formatTokenAmount(notionalNative, decimals, 2)} position${!needsAccount && !vsPosition && availableBalance > 0n ? `; ${formatTokenAmount(availableBalance, decimals, 2)} already on this market` : ""}. Anything unused stays in your account.`}
             </p>
           )}
           {fundOverWallet && (
