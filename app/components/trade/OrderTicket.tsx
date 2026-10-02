@@ -649,7 +649,13 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const estEntry = hasOrder ? computeEstimatedEntryPrice(oracleE6, tradingFeeBps, direction) : 0n;
   const fee = hasOrder ? computeTradingFee((positionSize * oracleE6) / 1_000_000n, tradingFeeBps) : 0n;
   // The deposit this order needs (margin + fee + 10%), editable; never more than the wallet holds.
-  const marginShort = needsAccount ? marginNative : marginNative > availableBalance ? marginNative - availableBalance : 0n;
+  // GH#2953: the engine's initial margin is max(notional x IM bps, min_nonzero_im_req) (engine
+  // v16.rs:23050 margin_requirement), so a new position needs at least the market's floor ($2 on
+  // the wizard markets) however small it is. A $1 first trade deposited $1.11 and was refused
+  // Custom(49) EngineInsufficientInitialMargin. The bundled deposit now covers the floor.
+  const imFloor = params?.minNonzeroImReq ?? 0n;
+  const marginNeed = existingPositionSize === 0n && marginNative > 0n && marginNative < imFloor ? imFloor : marginNative;
+  const marginShort = needsAccount ? marginNeed : marginNeed > availableBalance ? marginNeed - availableBalance : 0n;
   const fundNeededAtoms = fundingMode && hasOrder ? fundDepositAtoms(marginShort, fee, walletAtaBalance ?? 0n, decimals) : 0n;
   const fundMinAtoms = fundingMode && hasOrder ? marginShort + fee : 0n;
   const fundEnteredAtoms = fundInput ? parsePercToNative(fundInput, decimals) : 0n;
@@ -1041,6 +1047,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         symbol: marketInfo?.symbol ?? undefined,
         maxNow: sideMaxQ !== null && sideMaxQ > 0n && sideMaxQ < UNLIMITED_CAPACITY ? fmtQ(sideMaxQ) : undefined,
         health: { lpDepleted, lpIsVault, adlReduceOnly, resolved: marketResolved },
+        // GH#2953: fund-and-trade does not wait and resend; never promise "goes through automatically".
+        oneShot: fundingMode,
       });
       if (um.quiet) {
         setTradePhase("idle");

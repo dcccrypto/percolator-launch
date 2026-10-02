@@ -39,6 +39,14 @@ import {
 } from "@/lib/first-trade";
 import { invalidatePortfolio } from "@/lib/portfolio-invalidation";
 import { readU64LE } from "@/lib/u64le";
+import { healedListUsable, isRepairableFailure } from "@/lib/self-heal";
+import {
+  STALE_REFRESH_CU,
+  buildStaleRefreshIx,
+  decodeStaleCohort,
+  findStalePortfolios,
+  hasStaleCohort,
+} from "@/lib/stale-refresh";
 
 /** Thrown before the wallet opens when the pre-sign simulation could not reach Solana. */
 export const PRESIGN_SIM_UNREACHABLE = "Couldn't reach Solana to check this order. Nothing was sent.";
@@ -61,6 +69,10 @@ export interface FundAndTradeResult {
   prompts: 1 | 2;
   created: boolean;
 }
+
+/** GH#2953: stale-cohort refresh attempts before the first trade gives up (lib/stale-refresh.ts). */
+export const STALE_REFRESH_ATTEMPTS = 3;
+export const STALE_REFRESH_RETRY_MS = 1_500;
 
 /** Budget prefix sendTx/buildBatchTx put in front (heap frame + CU limit + CU price). */
 const BUDGET_PREFIX = 3;
@@ -106,6 +118,7 @@ export function useFirstTrade(slabAddress: string) {
             wallet,
             instructions: buildFundAndTradeIxs(ixp(existing), { portfolioId: id.portfolioId, sequence: id.matcherSequence, positionEpoch: id.positionEpoch }),
             computeUnitsFromSim: { cap: tradeCuCap(1) + 60_000 },
+            selfHeal: { programId, market, staleRefresh: true },
           });
           invalidatePortfolio();
           refreshSlab();
@@ -126,15 +139,37 @@ export function useFirstTrade(slabAddress: string) {
         // wallet opens, attributed to the program that raised it, and mapped to its line.
         const simA = await simulateForGate(connection, owner, aIxs);
         if (simA.err) throw new SimulationRefusal(simA.err, simA.logs, simA.simulated);
-        const bIxs = buildFundAndTradeIxs(ixp(kp.publicKey), { portfolioId: predicted, sequence: 0n, positionEpoch: 0n });
-        const simAB = await simulateForGate(connection, owner, [...aIxs, ...bIxs]);
+        let bIxs = buildFundAndTradeIxs(ixp(kp.publicKey), { portfolioId: predicted, sequence: 0n, positionEpoch: 0n });
+        let simAB = await simulateForGate(connection, owner, [...aIxs, ...bIxs]);
+        // GH#2953: a stale K/F cohort the keeper could not refresh refuses every new position
+        // Custom(21). Refresh those portfolios at the front of B (the trade's own tx) and keep
+        // them only when that clears the 19/21 (lib/stale-refresh.ts).
+        // A refresh is refused (22) while a newer mark is pending, so a few short retries.
+        let refreshes = 0;
+        for (let attempt = 0; attempt < STALE_REFRESH_ATTEMPTS && refreshes === 0; attempt++) {
+          if (!simAB.err || !isRepairableFailure(simAB.err, simAB.simulated, programId)) break;
+          if (attempt > 0) await new Promise((r) => setTimeout(r, STALE_REFRESH_RETRY_MS));
+          const now = await connection.getAccountInfo(market, "confirmed");
+          const cohort = now ? decodeStaleCohort(new Uint8Array(now.data)) : null;
+          if (!cohort || !hasStaleCohort(cohort)) break;
+          const stale = await findStalePortfolios(connection, programId, market, cohort).catch(() => []);
+          if (stale.length === 0) break;
+          const refreshIxs = stale.map((pf) => buildStaleRefreshIx(programId, owner, market, pf));
+          const healed = await simulateForGate(connection, owner, [...aIxs, ...refreshIxs, ...bIxs]);
+          console.info(`[first-trade] stale-cohort refresh x${refreshIxs.length} (attempt ${attempt + 1}): ${healed.err ? JSON.stringify(healed.err) : "clean"}`);
+          if (!healed.rpcFailed && healedListUsable(healed.err, healed.simulated, programId, healed.simulated.length - bIxs.length)) {
+            bIxs = [...refreshIxs, ...bIxs];
+            simAB = healed;
+            refreshes = refreshIxs.length;
+          }
+        }
         if (simAB.err) throw new SimulationRefusal(simAB.err, simAB.logs, simAB.simulated);
         // A simulation that could not RUN (RPC error) is not a pass: signing on it would let A
         // (create + init) land and B fail on chain, the "Something went wrong" path. Stop first.
         if (simA.rpcFailed || simAB.rpcFailed) throw new Error(PRESIGN_SIM_UNREACHABLE);
         const [{ blockhash }, fee] = await Promise.all([connection.getLatestBlockhash("confirmed"), getPriorityFee(connection)]);
         const txA = buildBatchTx({ instructions: aIxs, computeUnits: Math.max(60_000, Math.ceil((simA.consumed ?? 50_000) * 1.3)), priorityFeeMicroLamports: fee, blockhash, feePayer: owner });
-        const txB = buildBatchTx({ instructions: bIxs, computeUnits: tradeCuCap(1) + 60_000, priorityFeeMicroLamports: fee, blockhash, feePayer: owner });
+        const txB = buildBatchTx({ instructions: bIxs, computeUnits: tradeCuCap(1) + 60_000 + STALE_REFRESH_CU * refreshes, priorityFeeMicroLamports: fee, blockhash, feePayer: owner });
         const [signedA, signedB] = await signAllCompat(wallet, [txA, txB]);
         // The portfolio keypair co-signs AFTER the wallet (embedded wallets strip earlier signatures).
         signedA.partialSign(kp);
@@ -153,6 +188,7 @@ export function useFirstTrade(slabAddress: string) {
               wallet,
               instructions: buildFundAndTradeIxs(ixp(kp.publicKey), { portfolioId: id.portfolioId, sequence: id.matcherSequence, positionEpoch: id.positionEpoch }),
               computeUnitsFromSim: { cap: tradeCuCap(1) + 60_000 },
+              selfHeal: { programId, market, staleRefresh: true },
             });
             invalidatePortfolio();
             refreshSlab();
@@ -160,7 +196,7 @@ export function useFirstTrade(slabAddress: string) {
           }
           invalidatePortfolio();
           refreshSlab();
-          if (failedFirstTradeLeg(e, BUDGET_PREFIX) === "deposit") throw new FirstTradeDepositError(p.amountLabel, e);
+          if (failedFirstTradeLeg(e, BUDGET_PREFIX + refreshes) === "deposit") throw new FirstTradeDepositError(p.amountLabel, e);
           throw e;
         }
       } finally {

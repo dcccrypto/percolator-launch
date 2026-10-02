@@ -47,6 +47,12 @@ export interface MessageContext {
   p3Bound?: boolean;
   /** Wallet display name for the locked-wallet line. */
   walletName?: string;
+  /**
+   * GH#2953: this call does NOT wait and resend (the first fund-and-trade signs two transactions
+   * once). A waitable refusal must then say nothing was sent and to try again, never promise
+   * that the order "goes through automatically".
+   */
+  oneShot?: boolean;
 }
 
 export interface UserMessageAction {
@@ -144,8 +150,20 @@ function mmss(secs: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
+/** GH#2953: the one-shot form of a waitable line (see MessageContext.oneShot). */
+const ONE_SHOT_BODY: Record<string, string> = {
+  "engine-catching-up": "The market is catching up with the latest prices. Nothing was sent. Try again in a moment.",
+  "price-wait": "Waiting for a fresh price. Nothing was sent. Try again in a few seconds.",
+};
+
 /** The one resolver (§5.3). Never throws. */
 export function resolveUserMessage(err: unknown, ctx: MessageContext): UserMessage {
+  const u = resolveUserMessageInner(err, ctx);
+  if (!ctx.oneShot || !u.autoRetry) return u;
+  return { ...u, autoRetry: false, body: ONE_SHOT_BODY[u.kind] ?? `${u.body} Nothing was sent. Try again in a moment.` };
+}
+
+function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage {
   const p = parseFailure(err);
   const origin = originOf(p.programId);
   // A Custom(n) is decoded by the program that RAISED it (error-codes-4b1a5d30.md: CPI callees —

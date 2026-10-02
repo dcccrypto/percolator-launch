@@ -87,6 +87,8 @@ export interface SendTxParams {
     market: PublicKey;
     /** UX WP-2: repair a lagging engine clock with catch-up cranks of this LP (null = bound vault LP). */
     catchUp?: { portfolio: PublicKey | null; oracleTail?: AccountMeta[] };
+    /** GH#2953: refresh the market's stale K/F cohort portfolios in THIS tx (lib/stale-refresh.ts). */
+    staleRefresh?: boolean;
   };
   /** Test/diagnostic hook: receives the self-heal decision once per sendTx. */
   onSelfHeal?: (result: SelfHealResult) => void;
@@ -793,6 +795,7 @@ export async function sendTx({
             instructions,
             computeUnits,
             catchUp: selfHeal.catchUp ? { cranker: feePayer, portfolio: selfHeal.catchUp.portfolio, oracleTail: selfHeal.catchUp.oracleTail } : undefined,
+            staleRefreshCranker: selfHeal.staleRefresh ? feePayer : undefined,
           },
           connectionSelfHealDeps(connection, selfHeal.market, feePayer),
         )
@@ -818,7 +821,10 @@ export async function sendTx({
           if (heal.outcome === "repaired") {
             healedInstructions = heal.instructions;
             healedComputeUnits = heal.computeUnits;
-            console.info(`[self-heal] prepended ${heal.repairs.map(describeRepair).join(", ")}`);
+            console.info(
+              `[self-heal] prepended ${heal.repairs.map(describeRepair).join(", ")}` +
+                (heal.staleRefreshes ? ` + ${heal.staleRefreshes} stale-cohort refresh(es)` : ""),
+            );
           }
         }
       }
