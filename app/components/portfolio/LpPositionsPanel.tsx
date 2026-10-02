@@ -60,73 +60,98 @@ function slotsToTime(slots: number): string {
   return `~${Math.round(mins / 60)}h`;
 }
 
+// A position is an insurance STAKE when poolMode === 0; anything else is an Earn
+// (trading-LP) VAULT deposit. Centralised so the split, totals, colour and link
+// target can't drift apart.
+type PositionKind = "earn" | "stake";
+function kindOf(pos: LpPosition): PositionKind {
+  return pos.poolMode === 0 ? "stake" : "earn";
+}
+
+/** Per-kind presentation. Earn (Vault) reads cyan; Stake reads violet accent. */
+const KIND = {
+  earn: { title: "Vault", subtitle: "Earn deposits", accent: "var(--cyan)" },
+  stake: { title: "Stake", subtitle: "Insurance pools", accent: "var(--accent)" },
+} as const;
+
 // ═══════════════════════════════════════════════════════════════
 // Components
 // ═══════════════════════════════════════════════════════════════
 
-interface LpPositionCardProps {
-  position: LpPosition;
+/**
+ * Pool avatar that ALWAYS renders something: a gradient+initials chip sits
+ * underneath, and the real logo (when the pool has one) layers on top and simply
+ * reveals the chip again if it 404s. So every row shows a logo, tinted to its
+ * section — no blank gaps for pools without a configured image.
+ */
+function PoolAvatar({ logoUrl, symbol, accent }: { logoUrl: string | null; symbol: string; accent: string }) {
+  const initials = (symbol || "?").slice(0, 2).toUpperCase();
+  return (
+    <div className="relative h-7 w-7 flex-shrink-0">
+      <div
+        className="absolute inset-0 flex items-center justify-center rounded-full text-[9px] font-bold"
+        style={{
+          background: `linear-gradient(135deg, color-mix(in srgb, ${accent} 18%, transparent), color-mix(in srgb, ${accent} 5%, transparent))`,
+          color: accent,
+        }}
+      >
+        {initials}
+      </div>
+      {logoUrl ? (
+        <img
+          src={logoUrl}
+          alt={symbol}
+          loading="lazy"
+          decoding="async"
+          className="absolute inset-0 h-7 w-7 rounded-full object-cover"
+          style={{ boxShadow: `0 0 0 1px color-mix(in srgb, ${accent} 28%, transparent)` }}
+          onError={(e) => {
+            (e.currentTarget as HTMLImageElement).style.display = "none";
+          }}
+        />
+      ) : null}
+    </div>
+  );
 }
 
-function LpPositionCard({ position: pos }: LpPositionCardProps) {
-  const displaySymbol = getDisplaySymbol(pos);
-  const cooldownLabel = pos.cooldownElapsed
-    ? null
-    : slotsToTime(pos.cooldownSlots);
+function LpPositionCard({ position: pos, kind }: { position: LpPosition; kind: PositionKind }) {
+  const displaySymbol = getDisplaySymbol(pos).replace(/-PERP$/i, "");
+  const accent = KIND[kind].accent;
+  const cooldownLabel = pos.cooldownElapsed ? null : slotsToTime(pos.cooldownSlots);
+  const secondary =
+    pos.apr > 0 ? `${formatPct(pos.apr)} APR` : kind === "earn" ? "Earn vault" : "Insurance pool";
 
   return (
     <Link
-      href={pos.kind === "earn" ? "/earn" : "/stake"}
-      className="block border border-[var(--border)] bg-[var(--panel-bg)] transition-all duration-200 hover:border-[var(--cyan)]/30 hover:bg-[var(--bg-elevated)]"
+      href={kind === "earn" && pos.slabAddress ? `/earn/${pos.slabAddress}` : "/stake"}
+      className="group block rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] transition-all duration-200 hover:bg-[var(--bg-elevated)] hover:translate-y-[-1px]"
+      style={{ borderLeft: `2px solid ${accent}` }}
     >
       <div className="p-4">
         {/* Header row */}
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            {/* Pool icon */}
-            {pos.logoUrl ? (
-              <img
-                src={pos.logoUrl}
-                alt={displaySymbol}
-                loading="lazy"
-                decoding="async"
-                className="h-6 w-6 rounded-full flex-shrink-0 object-cover"
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).style.display = "none";
-                }}
-              />
-            ) : (
-              <div className="h-6 w-6 rounded-full flex-shrink-0 bg-[var(--accent)]/20 flex items-center justify-center text-[9px] font-bold text-[var(--accent)]">
-                {displaySymbol.slice(0, 2)}
-              </div>
-            )}
+            <PoolAvatar logoUrl={pos.logoUrl} symbol={displaySymbol} accent={accent} />
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-[var(--text)] truncate" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
-                {/* Pool symbols on the new markets already carry "-PERP"
-                    (e.g. "BONK-PERP") — appending unconditionally rendered
-                    "BONK-PERP-PERP". */}
-                {displaySymbol.replace(/-PERP$/i, "")}
+              <p
+                className="text-sm font-semibold text-[var(--text)] truncate"
+                style={{ fontFamily: "var(--font-jetbrains-mono)" }}
+              >
+                {displaySymbol}
               </p>
-              <p className="text-[10px] text-[var(--text-secondary)] truncate">
-                {pos.kind === "stake" && pos.poolMode === 0 ? "Insurance stake" : "Earn deposit"}
-              </p>
+              <p className="text-[10px] text-[var(--text-secondary)] truncate">{secondary}</p>
             </div>
-            <span className="rounded bg-[var(--cyan)]/10 px-2 py-0.5 text-[10px] font-bold text-[var(--cyan)] flex-shrink-0">
-              {pos.kind === "stake" && pos.poolMode === 0 ? "Stake" : "Earn"}
-            </span>
           </div>
 
           {/* Value */}
           <div className="text-right flex-shrink-0">
             <p
-              className="text-sm font-bold text-[var(--cyan)]"
-              style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
+              className="text-sm font-bold"
+              style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums", color: accent }}
             >
               {formatUsd(pos.redeemable)}
             </p>
-            <p className="text-[10px] text-[var(--text-secondary)]">
-              redeemable
-            </p>
+            <p className="text-[10px] text-[var(--text-secondary)]">redeemable</p>
           </div>
         </div>
 
@@ -166,19 +191,49 @@ function LpPositionCard({ position: pos }: LpPositionCardProps) {
           <div>
             <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Withdraw</p>
             {pos.cooldownElapsed ? (
-              <p className="text-[12px] font-semibold text-[var(--long)]">
-                ✓ Ready
-              </p>
+              <p className="text-[12px] font-semibold text-[var(--long)]">✓ Ready</p>
             ) : (
-              <p className="text-[12px] text-[var(--warning)]">
-                Cooldown {cooldownLabel}
-              </p>
+              <p className="text-[12px] text-[var(--warning)]">Cooldown {cooldownLabel}</p>
             )}
           </div>
         </div>
         )}
       </div>
     </Link>
+  );
+}
+
+/** One titled section (Vault or Stake) with its own redeemable total. */
+function PositionGroup({ kind, positions }: { kind: PositionKind; positions: LpPosition[] }) {
+  const { title, subtitle, accent } = KIND[kind];
+  const total = positions.reduce((s, p) => s + p.redeemable, 0);
+  return (
+    <section>
+      <div className="mb-2 flex items-end justify-between border-b border-[var(--border)] pb-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="h-2 w-2 rounded-full flex-shrink-0" style={{ background: accent }} />
+          <h3 className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--text)]">{title}</h3>
+          <span className="rounded-full bg-[var(--bg-elevated)] px-1.5 py-0.5 text-[9px] font-semibold tabular-nums text-[var(--text-secondary)]">
+            {positions.length}
+          </span>
+          <span className="truncate text-[10px] text-[var(--text-secondary)]">· {subtitle}</span>
+        </div>
+        <div className="text-right flex-shrink-0">
+          <p
+            className="text-[13px] font-bold tabular-nums"
+            style={{ fontFamily: "var(--font-jetbrains-mono)", color: accent }}
+          >
+            {formatUsd(total)}
+          </p>
+          <p className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">total redeemable</p>
+        </div>
+      </div>
+      <div className="space-y-2">
+        {positions.map((pos) => (
+          <LpPositionCard key={pos.poolAddress} position={pos} kind={kind} />
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -201,6 +256,12 @@ export function LpPositionsPanel({
   error,
   onRetry,
 }: LpPositionsPanelProps) {
+  // Split into the two distinct products so each reads as its own section with
+  // its own total, rather than one mixed list (Earn vaults and insurance stakes
+  // behave differently and the user tracks them separately).
+  const vaultPositions = positions.filter((p) => kindOf(p) === "earn");
+  const stakePositions = positions.filter((p) => kindOf(p) === "stake");
+
   return (
     <div>
       {/* Section heading */}
@@ -210,7 +271,7 @@ export function LpPositionsPanel({
         </h2>
         {positions.length > 0 && !loading && (
           <span
-            className="text-[11px] font-semibold text-[var(--cyan)]"
+            className="text-[11px] font-semibold text-[var(--text-secondary)]"
             style={{ fontFamily: "var(--font-jetbrains-mono)" }}
           >
             {formatUsd(totalRedeemable)} total
@@ -225,9 +286,8 @@ export function LpPositionsPanel({
             <div key={i} className="border border-[var(--border)] bg-[var(--panel-bg)] p-4">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-3">
-                  <ShimmerSkeleton className="h-6 w-6 rounded-full" />
+                  <ShimmerSkeleton className="h-7 w-7 rounded-full" />
                   <ShimmerSkeleton className="h-4 w-24" />
-                  <ShimmerSkeleton className="h-4 w-8 rounded" />
                 </div>
                 <ShimmerSkeleton className="h-5 w-20" />
               </div>
@@ -246,7 +306,7 @@ export function LpPositionsPanel({
         <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-6 flex flex-col items-center gap-3 text-center">
           <span className="text-2xl leading-none">⚠️</span>
           <div>
-            <p className="text-[12px] font-semibold text-[var(--text-secondary)]">Couldn't load your Earn and stake positions</p>
+            <p className="text-[12px] font-semibold text-[var(--text-secondary)]">Couldn&apos;t load your Earn and stake positions</p>
             <p className="mt-0.5 text-[11px] text-[var(--text-secondary)]">Please try refreshing</p>
           </div>
           {onRetry && (
@@ -274,10 +334,9 @@ export function LpPositionsPanel({
           </Link>
         </div>
       ) : (
-        <div className="space-y-2">
-          {positions.map((pos) => (
-            <LpPositionCard key={pos.poolAddress} position={pos} />
-          ))}
+        <div className="space-y-6">
+          {vaultPositions.length > 0 && <PositionGroup kind="earn" positions={vaultPositions} />}
+          {stakePositions.length > 0 && <PositionGroup kind="stake" positions={stakePositions} />}
         </div>
       )}
     </div>
