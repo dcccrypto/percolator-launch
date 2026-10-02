@@ -76,7 +76,7 @@ import { sanitizeSymbol } from "@/lib/symbol-utils";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { formatTokenAmount, formatUsdPriceE6, toE6, normalizeTokenDecimals } from "@/lib/format";
 import { describeLiqPrice, type LiqPriceDisplay } from "@/lib/liq-price-display";
-import { formatLeverageValue } from "@/lib/leverage-display";
+import { computeRiskLeverage, formatLeverageValue } from "@/lib/leverage-display";
 import { saveEntryPrice, getEntryPrice, clearEntryPrice } from "@/lib/entry-price";
 import { isSentinelValue } from "@/lib/health";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
@@ -319,6 +319,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     estimatedLiqDisplay: LiqPriceDisplay;
     tradingFee: bigint;
     worstFillPriceE6: bigint;
+    riskLeverage: number | null;
+    depositAtoms: bigint;
   } | null>(null);
   const [showInlineDeposit, setShowInlineDeposit] = useState(false);
   // A faucet claim changes none of the wallet-balance effect's other deps.
@@ -1837,6 +1839,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               estimatedLiqDisplay: afterLiqDisplay,
               tradingFee: fee,
               worstFillPriceE6,
+              // The account after this trade: the resulting position and the bundled deposit, as
+              // the liq row uses, over capital + deposit + pnl, as the position panel's Lev.
+              riskLeverage: computeRiskLeverage(combinedSignedSize, livePriceE6 ?? 0n, capitalAfterFund + safeExistingPnl),
+              depositAtoms: fundingMode && hasOrder ? fundAtoms : 0n,
             });
             setShowConfirmModal(true);
             // Prewarm the entire submission path (blockhash, priority fee,
@@ -1922,6 +1928,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           tradingFee={confirmSnapshot.tradingFee}
           worstFillPriceE6={confirmSnapshot.worstFillPriceE6}
           accountEquity={userAccount ? capital : null}
+          riskLeverage={confirmSnapshot.riskLeverage}
+          depositAmount={confirmSnapshot.depositAtoms}
           symbol={symbol}
           collateralSymbol={collateralSymbol}
           decimals={decimals}
