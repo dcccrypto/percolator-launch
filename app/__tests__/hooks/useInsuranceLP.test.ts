@@ -906,4 +906,159 @@ describe("useInsuranceLP", () => {
       expect(result.current.loading).toBe(false);
     });
   });
+
+  // A failed read is unknown, not "this market has no Earn vault" / $0.
+  describe("vault read failures", () => {
+    const MINT = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+    const REGISTRY = "7pXnR8Eg2g7YDtPkUeEmcYNpPN5yzGLbNHREeHJMzNhq";
+    const acct = { data: Buffer.alloc(64), lamports: 1, executable: false, owner: mockProgramId };
+    const REDEMPTION = "6UwgpB4FBfQpKW8ACFv7EW5vXg1NiHRQijYzGBaXJSHJ";
+    let failMint = false;
+    let failRegistry = false;
+    let failRedemption = false;
+
+    beforeEach(async () => {
+      failMint = false;
+      failRegistry = false;
+      failRedemption = false;
+      mockConnection.getAccountInfo.mockImplementation(async (pk: PublicKey) => {
+        const k = pk.toBase58();
+        if (k === MINT) {
+          if (failMint) throw new Error("429 Too Many Requests");
+          return acct;
+        }
+        if (k === REGISTRY) {
+          if (failRegistry) throw new Error("429 Too Many Requests");
+          return acct;
+        }
+        if (k === REDEMPTION && failRedemption) throw new Error("429 Too Many Requests");
+        return null;
+      });
+      vi.mocked(unpackMint).mockReturnValue({ supply: 1_000_000n, decimals: 6, isInitialized: true } as never);
+      const sdk = await import("@percolatorct/sdk");
+      vi.mocked(sdk.parseLpVaultRegistry).mockReturnValue({
+        totalLpSharesOutstanding: 1_000_000n,
+        feeDistributionTotalAtoms: 0n,
+        redemptionCooldownSlots: 0n,
+        domain: 0,
+      } as never);
+    });
+
+    it("a failed registry read keeps the last good vault and flags readError", async () => {
+      const { result } = renderHook(() => useInsuranceLP());
+      await waitFor(() => expect(result.current.state.registryExists).toBe(true));
+      expect(result.current.readError).toBe(false);
+      failRegistry = true;
+      await act(async () => {
+        await result.current.refreshState();
+      });
+      expect(result.current.readError).toBe(true);
+      expect(result.current.state.registryExists).toBe(true);
+      expect(result.current.state.vaultTotalAtoms).toBe(1_000_000n);
+    });
+
+    it("a failed first registry read flags readError (state is not a confirmed no-vault)", async () => {
+      failRegistry = true;
+      const { result } = renderHook(() => useInsuranceLP());
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.readError).toBe(true);
+      expect(result.current.state.registryExists).toBe(false);
+    });
+
+    // Parse mocks set per test here would otherwise outlive this describe.
+    afterEach(async () => {
+      const sdk = await import("@percolatorct/sdk");
+      vi.mocked(sdk.parseLpVaultRegistry).mockReturnValue({
+        totalLpSharesOutstanding: 1_000_000n,
+        feeDistributionTotalAtoms: 0n,
+        redemptionCooldownSlots: 0n,
+        domain: 0,
+      } as never);
+      vi.mocked(unpackMint).mockReset();
+    });
+
+    it("a failed redemption-ticket read keeps the last good state and flags readError", async () => {
+      const { result } = renderHook(() => useInsuranceLP());
+      await waitFor(() => expect(result.current.state.registryExists).toBe(true));
+      failRedemption = true;
+      await act(async () => {
+        await result.current.refreshState();
+      });
+      expect(result.current.readError).toBe(true);
+      expect(result.current.state.registryExists).toBe(true);
+    });
+
+    it("a failed mint read flags readError", async () => {
+      failMint = true;
+      const { result } = renderHook(() => useInsuranceLP());
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.readError).toBe(true);
+    });
+
+    it("the next good read clears readError", async () => {
+      failRegistry = true;
+      const { result } = renderHook(() => useInsuranceLP());
+      await waitFor(() => expect(result.current.readError).toBe(true));
+      failRegistry = false;
+      await act(async () => {
+        await result.current.refreshState();
+      });
+      expect(result.current.readError).toBe(false);
+      expect(result.current.state.registryExists).toBe(true);
+    });
+
+    it("a registry that fails to parse is still published as absent, with no readError", async () => {
+      const sdk = await import("@percolatorct/sdk");
+      vi.mocked(sdk.parseLpVaultRegistry).mockImplementation(() => {
+        throw new Error("bad layout");
+      });
+      const { result } = renderHook(() => useInsuranceLP());
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.readError).toBe(false);
+      expect(result.current.state.registryExists).toBe(false);
+      expect(result.current.state.mintExists).toBe(true);
+    });
+
+    it("stays loading while the slab is still loading, then loads", async () => {
+      const loadingSlab = { ...mockSlabState, programId: null, loading: true };
+      vi.mocked(useSlabState).mockReturnValue(loadingSlab);
+      const { result, rerender } = renderHook(() => useInsuranceLP());
+      await act(async () => {
+        await result.current.refreshState();
+      });
+      expect(result.current.loading).toBe(true);
+      vi.mocked(useSlabState).mockReturnValue({ ...mockSlabState, loading: false });
+      rerender();
+      await waitFor(() => expect(result.current.state.registryExists).toBe(true));
+      expect(result.current.loading).toBe(false);
+    });
+
+    it("a slab that finishes loading with no programId stops loading", async () => {
+      vi.mocked(useSlabState).mockReturnValue({ ...mockSlabState, programId: null, loading: true });
+      const { result, rerender } = renderHook(() => useInsuranceLP());
+      await act(async () => {
+        await result.current.refreshState();
+      });
+      expect(result.current.loading).toBe(true);
+      vi.mocked(useSlabState).mockReturnValue({ ...mockSlabState, programId: null, loading: false, error: "Market not found on-chain." });
+      rerender();
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.readError).toBe(false);
+    });
+
+    it("a slab read that failed on the network flags readError", async () => {
+      vi.mocked(useSlabState).mockReturnValue({ ...mockSlabState, programId: null, loading: true });
+      const { result, rerender } = renderHook(() => useInsuranceLP());
+      vi.mocked(useSlabState).mockReturnValue({
+        ...mockSlabState,
+        programId: null,
+        config: null,
+        loading: false,
+        error: "RPC error: 429 Too Many Requests",
+      });
+      rerender();
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.readError).toBe(true);
+    });
+  });
 });
