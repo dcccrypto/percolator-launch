@@ -31,11 +31,15 @@ describe("PositionNftMenuView", () => {
   });
   it("own unwrapped position: Wrap opens the confirm sheet; confirm wraps once", () => {
     const onWrap = vi.fn();
-    const { getByTestId, queryByTestId } = render(<PositionNftMenuView {...base} canWrap onWrap={onWrap} />);
+    const { container, getByTestId, queryByTestId } = render(<PositionNftMenuView {...base} canWrap onWrap={onWrap} />);
     fireEvent.click(getByTestId("position-nft-menu-button"));
     expect(queryByTestId("position-nft-send")).toBeNull();
     fireEvent.click(getByTestId("position-nft-wrap"));
     const sheet = getByTestId("position-nft-wrap-sheet");
+    // Portaled to <body>: inline, the trade page's animate-fade-in root capped its z-index under
+    // the mobile tab bar, which covered Cancel / Wrap.
+    expect(container.contains(sheet)).toBe(false);
+    expect(sheet.parentElement).toBe(document.body);
     expect(sheet.textContent).toContain(NFT_MENU_COPY.wrapTitle);
     expect(sheet.textContent).toContain(
       "Your whole trading account on this market (the position and all 120 USDC of its collateral) moves into the NFT. Whoever holds the NFT controls it. Unwrap any time to get it back.",
@@ -43,6 +47,7 @@ describe("PositionNftMenuView", () => {
     expect(onWrap).not.toHaveBeenCalled();
     fireEvent.click(getByTestId("position-nft-wrap-confirm"));
     expect(onWrap).toHaveBeenCalledTimes(1);
+    expect(queryByTestId("position-nft-wrap-sheet")).toBeNull();
   });
   it("wrapped: Send and Unwrap, no Wrap", () => {
     const onSend = vi.fn();
