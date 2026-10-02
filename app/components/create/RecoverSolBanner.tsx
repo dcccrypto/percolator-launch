@@ -1,6 +1,7 @@
 "use client";
 
 import { FC, useState } from "react";
+import { explorerTxUrl, explorerAccountUrl } from "@/lib/config";
 import { useStuckSlabs, type StuckSlab } from "@/hooks/useStuckSlabs";
 import { useCloseMarket } from "@/hooks/useCloseMarket";
 import { useReclaimSlabRent } from "@/hooks/useReclaimSlabRent";
@@ -258,7 +259,7 @@ const StuckSlabCard: FC<{
             <p className="w-full text-[10px] text-[var(--long)]">
               ✓ Reclaimed {reclaimResult.sol.toFixed(4)} SOL —{" "}
               <a
-                href={`https://solscan.io/tx/${reclaimResult.sig}?cluster=devnet`}
+                href={explorerTxUrl(reclaimResult.sig)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="underline"
@@ -331,7 +332,7 @@ const UninitialisedSlabBanner: FC<{
             <>
               {" "}
               <a
-                href={`https://explorer.solana.com/tx/${txSig}?cluster=devnet`}
+                href={explorerTxUrl(txSig)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-[var(--accent)]/80 hover:text-[var(--accent)] underline underline-offset-2"
@@ -435,7 +436,7 @@ const UninitialisedSlabBanner: FC<{
           DISCARD &amp; START NEW
         </button>
         <a
-          href={`https://explorer.solana.com/address/${stuckSlab.publicKey.toBase58()}?cluster=devnet`}
+          href={explorerAccountUrl(stuckSlab.publicKey.toBase58())}
           target="_blank"
           rel="noopener noreferrer"
           className="border border-[var(--border)] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors"

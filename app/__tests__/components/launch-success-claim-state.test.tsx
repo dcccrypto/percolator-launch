@@ -39,7 +39,12 @@ import { resolve } from "node:path";
 const push = vi.fn();
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
-vi.mock("@/lib/config", () => ({ getNetwork: () => "devnet" }));
+vi.mock("@/lib/config", () => ({
+  getNetwork: () => "devnet",
+  // The real helpers on a devnet build (lib/config.ts explorerTxUrl / explorerAccountUrl).
+  explorerTxUrl: (sig: string) => `https://explorer.solana.com/tx/${sig}?cluster=devnet`,
+  explorerAccountUrl: (addr: string) => `https://explorer.solana.com/account/${addr}?cluster=devnet`,
+}));
 vi.mock("@/hooks/useWalletCompat", () => ({
   useWalletCompat: () => ({ publicKey: { toBase58: () => "WaLLet1111111111111111111111111111111111111" } }),
 }));

@@ -1,6 +1,7 @@
 "use client";
 
 import { FC, useEffect, useRef, useState } from "react";
+import { explorerTxUrl } from "@/lib/config";
 import { createPortal } from "react-dom";
 import gsap from "gsap";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
@@ -435,7 +436,7 @@ export const InsuranceTopUpModal: FC<InsuranceTopUpModalProps> = ({
                     Transaction
                   </div>
                   <a
-                    href={`https://explorer.solana.com/tx/${txSignature}?cluster=devnet`}
+                    href={explorerTxUrl(txSignature)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="mt-1 block break-all text-xs text-[var(--accent)] hover:underline"

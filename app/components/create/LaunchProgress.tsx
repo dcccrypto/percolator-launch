@@ -1,6 +1,7 @@
 "use client";
 
 import { FC } from "react";
+import { explorerTxUrl } from "@/lib/config";
 import { RecoveryExportButton } from "./RecoveryExportButton";
 import { loadAllInFlightMarkets } from "@/lib/inFlightMarket";
 
@@ -181,7 +182,7 @@ export const LaunchProgress: FC<LaunchProgressProps> = ({ state, onReset, onRetr
                             </span>
                             {isDone && sig && (
                               <a
-                                href={`https://explorer.solana.com/tx/${sig}?cluster=devnet`}
+                                href={explorerTxUrl(sig)}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="ml-auto font-mono text-[9px] text-[var(--text-dim)] transition-colors hover:text-[var(--accent)]"
@@ -278,7 +279,7 @@ export const LaunchProgress: FC<LaunchProgressProps> = ({ state, onReset, onRetr
                 {status === "done" && state.txSigs[i] && (
                   <p className="mt-0.5">
                     <a
-                      href={`https://explorer.solana.com/tx/${state.txSigs[i]}?cluster=devnet`}
+                      href={explorerTxUrl(state.txSigs[i])}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="font-mono text-[10px] text-[var(--text-secondary)] hover:text-[var(--accent)] transition-colors"

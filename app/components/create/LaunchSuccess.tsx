@@ -5,7 +5,7 @@ import { FC, useState, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { LogoUpload } from "./LogoUpload";
-import { getNetwork } from "@/lib/config";
+import { getNetwork, explorerTxUrl, explorerAccountUrl } from "@/lib/config";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { launchPriceFeedStatus } from "@/lib/launch-outcome";
 import { KEEPER_REGISTER_COPY, userFacingRegistrationReason } from "@/lib/keeper-register-client";
@@ -246,7 +246,7 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
           {copied ? "✓" : "copy"}
         </button>
         <a
-          href={`https://explorer.solana.com/address/${marketAddress}?cluster=devnet`}
+          href={explorerAccountUrl(marketAddress)}
           target="_blank"
           rel="noopener noreferrer"
           className="border border-[var(--border)] px-2 py-1.5 text-[9px] font-medium text-[var(--text-secondary)] hover:text-[var(--accent)] hover:border-[var(--accent)]/30 transition-colors"
@@ -382,7 +382,7 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
                   {txSigs.map((sig, i) => (
                     <a
                       key={i}
-                      href={`https://explorer.solana.com/tx/${sig}?cluster=devnet`}
+                      href={explorerTxUrl(sig)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="font-mono text-[9px] text-[var(--text-dim)] transition-colors hover:text-[var(--accent)]"

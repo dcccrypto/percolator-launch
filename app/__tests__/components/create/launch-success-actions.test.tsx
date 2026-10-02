@@ -15,7 +15,12 @@ import { PublicKey } from "@solana/web3.js";
 
 const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
-vi.mock("@/lib/config", () => ({ getNetwork: () => "devnet" }));
+vi.mock("@/lib/config", () => ({
+  getNetwork: () => "devnet",
+  // The real helpers on a devnet build (lib/config.ts explorerTxUrl / explorerAccountUrl).
+  explorerTxUrl: (sig: string) => `https://explorer.solana.com/tx/${sig}?cluster=devnet`,
+  explorerAccountUrl: (addr: string) => `https://explorer.solana.com/account/${addr}?cluster=devnet`,
+}));
 const WALLET = new PublicKey("11111111111111111111111111111112");
 vi.mock("@/hooks/useWalletCompat", () => ({ useWalletCompat: () => ({ publicKey: WALLET, connected: true }) }));
 vi.mock("@/components/create/LogoUpload", () => ({ LogoUpload: () => null }));
