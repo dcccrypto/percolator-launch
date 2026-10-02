@@ -102,6 +102,16 @@ export function formatUsd(priceE6: bigint | null | undefined): string {
   return `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`;
 }
 
+/**
+ * Mark − index spread in USD, signed: "+$0.06", "−$0.06", or "$0.00" when they match.
+ * Not formatUsd on its own: that reads 0 as "no price" ("$—"), so an exact match rendered "+$—".
+ */
+export function formatSpreadUsd(spreadE6: bigint): string {
+  if (spreadE6 === 0n) return "$0.00";
+  const abs = spreadE6 < 0n ? -spreadE6 : spreadE6;
+  return `${spreadE6 > 0n ? "+" : "−"}${formatUsd(abs)}`;
+}
+
 export function formatUsdPriceE6(priceE6: bigint | null | undefined, fallback = "—"): string {
   if (priceE6 == null || priceE6 <= 0n || priceE6 > MAX_PRICE_E6) return fallback;
   const val = Number(priceE6) / 1_000_000;

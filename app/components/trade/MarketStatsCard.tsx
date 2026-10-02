@@ -6,7 +6,7 @@ import { useMarketConfig } from "@/hooks/useMarketConfig";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useUsdToggle } from "@/components/providers/UsdToggleProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
-import { formatTokenAmount, formatCompactTokenAmount, formatUsd, formatUsdPriceE6, formatBps } from "@/lib/format";
+import { formatTokenAmount, formatCompactTokenAmount, formatSpreadUsd, formatUsdPriceE6, formatBps } from "@/lib/format";
 import { sanitizeOnChainValue, sanitizeAccountCount, sanitizeBps, sanitizeFundingRateBps } from "@/lib/health";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { resolveMarketPriceE6, computeMarketSpread } from "@/lib/oraclePrice";
@@ -137,11 +137,9 @@ export const MarketStatsCard: FC = () => {
     : null;
   const spreadDisplayValue = (() => {
     if (!showSpread || spreadAbs === null || spreadBps === null) return "—";
-    const absSpread = spreadAbs < 0n ? -spreadAbs : spreadAbs;
     const sign = spreadAbs >= 0n ? "+" : "−";
-    const dollarPart = formatUsd(absSpread).replace("$", `${sign}$`);
-    const pctPart = `${sign}${Math.abs(spreadBps / 100).toFixed(2)}%`;
-    return `${dollarPart} (${pctPart})`;
+    const pctPart = spreadBps === 0 ? "0.00%" : `${sign}${Math.abs(spreadBps / 100).toFixed(2)}%`;
+    return `${formatSpreadUsd(spreadAbs)} (${pctPart})`;
   })();
   // Color spread amber if abs spread > 0.5% (50 bps)
   const spreadColor = (() => {
