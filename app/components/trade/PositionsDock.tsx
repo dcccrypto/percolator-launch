@@ -32,6 +32,8 @@ import { useUserAccount, useUserAccountScanPending } from "@/hooks/useUserAccoun
 import { useNftWrappedPosition } from "@/hooks/useNftWrappedPosition";
 import { PositionNftMenu, ClosedPositionNftNotice, NFT_MENU_COPY } from "@/components/trade/PositionNftMenu";
 import { useClosePosition } from "@/hooks/useClosePosition";
+import { PnlShareButton } from "@/components/share/PnlShareButton";
+import type { PnlCardData } from "@/lib/pnl-card";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useMarketLimits } from "@/hooks/useMarketLimits";
 import { PositionLimitsRow } from "@/components/limits/PositionLimitsRow";
@@ -370,6 +372,24 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const pnlColor = pnlTokens === 0n ? "text-[var(--text-muted)]" : pnlTokens > 0n ? "text-[var(--long)]" : "text-[var(--short)]";
   const roeColor = roe === 0 ? "text-[var(--text-muted)]" : roe > 0 ? "text-[var(--long)]" : "text-[var(--short)]";
 
+  // "Share PnL" card data — only when we can price the PnL honestly (known mark + entry).
+  const pnlCardData: PnlCardData | null =
+    hasValidMark && pnlIsKnown && resolvedEntryPrice > 0n
+      ? {
+          slab: slabAddress,
+          symbol: marketDisplaySymbol,
+          name: marketInfo?.name ?? marketDisplaySymbol,
+          logoUrl: null,
+          mintAddress: marketInfo?.mint_address ?? null,
+          decimals,
+          nominalSizeQ: account.positionSize,
+          effectiveSizeQ: effectiveSize,
+          entryE6: resolvedEntryPrice,
+          initialMarginBps,
+          initialMarkE6: currentPriceE6,
+        }
+      : null;
+
   const handleConfirmClose = async (percent: number) => {
     try {
       await closePosition(percent);
@@ -519,6 +539,11 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
               </td>
               <td className="whitespace-nowrap px-3 py-2.5 text-right">
                 <span className="inline-flex items-center justify-end gap-1">
+                <PnlShareButton
+                  data={pnlCardData}
+                  label="Share PnL"
+                  className="rounded-none border border-[var(--accent)]/30 px-3 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--accent)] transition-colors duration-150 hover:bg-[var(--accent)]/8 hover:border-[var(--accent)]/50"
+                />
                 {isNftWrapped ? (
                   <span data-testid="position-close-wrapped" className="text-[9px] text-[var(--text-secondary)]">
                     {NFT_MENU_COPY.closeWrapped}
