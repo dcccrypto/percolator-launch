@@ -23,6 +23,14 @@ import { PrivyLoginContext } from "@/hooks/usePrivySafe";
 import { WalletApiContext, type WalletApi } from "@/hooks/walletApiContext";
 import { usePreferredWallet, resolveActiveWallet } from "@/hooks/usePreferredWallet";
 import { getNetwork } from "@/lib/config";
+import { purgeLegacyPrivyState } from "@/lib/privy-legacy-purge";
+
+// Drop legacy pre-cookie Privy tokens at module-evaluation time. This chunk is
+// loaded via next/dynamic (ssr:false) before PrivyProvider is ever rendered, and
+// the Privy SDK only reads localStorage when its provider/client mounts (render
+// or later), never at import. So this runs strictly before Privy's boot refresh,
+// without an inline script (CSP-safe) and without racing a React effect.
+purgeLegacyPrivyState();
 
 /**
  * Client-only Privy provider wrapper. Loaded via next/dynamic with ssr:false
