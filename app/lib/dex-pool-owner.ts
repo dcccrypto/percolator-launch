@@ -12,7 +12,9 @@
  * RPC helper is used by server routes only.
  */
 import { Connection, PublicKey } from "@solana/web3.js";
+import { parseDexPool } from "@percolatorct/sdk";
 import type { KeeperDexType } from "@/lib/dex-type";
+import { USD_PRICEABLE_QUOTE_MINTS } from "@/lib/dex-constants";
 
 /** Mainnet DEX program -> keeper dexType (verified against the curated playground pools). */
 export const DEX_PROGRAM_TO_TYPE: Readonly<Record<string, KeeperDexType>> = {
@@ -27,7 +29,37 @@ export const METEORA_DAMM_V1_PROGRAM = "Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn
 /** Keeper types the wizard may OFFER for a new market (Raydium CLMM is withheld, see dex-constants). */
 export const OFFERABLE_DEX_TYPES: readonly KeeperDexType[] = ["meteora-dlmm", "pumpswap"];
 
-export type PoolClass = KeeperDexType | "unsupported" | "missing";
+/**
+ * "non-usd-quote": a PumpSwap / Meteora DLMM pool whose QUOTE mint is neither WSOL nor a USD
+ * stable. The keeper publishes the pool's price in quote-token units and only converts WSOL, so
+ * such a pool would be priced as USD in the wrong unit (2026-10-02 incident: SI quoted in MM,
+ * ratio ~13.7 pushed as $13.7 against a real ~$0.03). It is never offered or registered.
+ */
+export type PoolClass = KeeperDexType | "unsupported" | "missing" | "non-usd-quote";
+
+export interface PoolClassification {
+  cls: PoolClass;
+  /** Set when `cls` is "non-usd-quote": the offending quote mint (base58). */
+  quoteMint?: string;
+}
+
+/**
+ * Classify one pool account from its owner + bytes. Pure. For PumpSwap / Meteora DLMM the quote
+ * mint is parsed with the SDK's own parser (the one the keeper prices with), so this check
+ * cannot drift from the keeper's `quoteIsNotUsdOrWsol`. A pool that does not parse is
+ * "unsupported" - never waved through. Raydium CLMM keeps its own refusal (dex-constants).
+ */
+export function classifyPoolAccount(poolAddress: PublicKey, owner: string, data: Uint8Array): PoolClassification {
+  const type = classifyOwner(owner);
+  if (type === "unsupported") return { cls: "unsupported" };
+  if (type === "raydium-clmm") return { cls: type };
+  try {
+    const quote = parseDexPool(type, poolAddress, data).quoteMint.toBase58();
+    return USD_PRICEABLE_QUOTE_MINTS.has(quote) ? { cls: type } : { cls: "non-usd-quote", quoteMint: quote };
+  } catch {
+    return { cls: "unsupported" };
+  }
+}
 
 export function classifyOwner(owner: string): KeeperDexType | "unsupported" {
   return DEX_PROGRAM_TO_TYPE[owner] ?? "unsupported";
@@ -77,7 +109,7 @@ export async function classifyPoolsByOwner(
     ]).finally(() => clearTimeout(timer));
     keys.forEach((k, i) => {
       const info = infos[i];
-      out[k.toBase58()] = info ? classifyOwner(info.owner.toBase58()) : "missing";
+      out[k.toBase58()] = info ? classifyPoolAccount(k, info.owner.toBase58(), new Uint8Array(info.data)).cls : "missing";
     });
     return out;
   } catch {

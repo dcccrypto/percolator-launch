@@ -121,6 +121,11 @@ vi.mock('@solana/web3.js', () => {
 vi.mock('@percolatorct/sdk', () => ({
   V17_HEADER_LEN: 16,
 
+  // The quote gate (lib/dex-pool-owner.ts) parses the pool with the SDK; this pool is WSOL-quoted.
+  parseDexPool: vi.fn(() => ({
+    quoteMint: { toBase58: () => 'So11111111111111111111111111111111111111112' },
+  })),
+
   isV17Account: vi.fn(() => false),
 
   parseHeader: vi.fn(() => ({

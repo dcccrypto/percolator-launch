@@ -81,6 +81,7 @@ import {
   verifyKeeperRegisterProofTx,
 } from "@/lib/keeper-register-memo";
 import { UNSUPPORTED_POOL_COPY } from "@/lib/wizard-copy";
+import { NON_USD_QUOTE_REASON } from "@/lib/dex-constants";
 import { isV18MarketHeader } from "@/lib/limits/decode";
 import { PublicKey } from "@solana/web3.js";
 import * as Sentry from "@sentry/nextjs";
@@ -301,6 +302,12 @@ export async function POST(req: NextRequest) {
       },
       { status: 400 },
     );
+  }
+  if (classified === "non-usd-quote") {
+    // The pool is quoted in a token the keeper cannot turn into USD (2026-10-02: SI quoted in
+    // MM was priced ~450x too high). Refused here, server-side, so a hand-built POST cannot
+    // bypass the wizard's pool picker. Checked from the same account bytes as the owner.
+    return NextResponse.json({ error: NON_USD_QUOTE_REASON }, { status: 400 });
   }
   if (classified === "rpc-failed") {
     // E2E B21: never register a pool whose owner we could not verify. The

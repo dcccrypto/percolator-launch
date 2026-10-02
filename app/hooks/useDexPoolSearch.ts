@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { PublicKey } from "@solana/web3.js";
-import { SUPPORTED_DEX_IDS, BLOCKED_DEX_IDS } from "@/lib/dex-constants";
+import { SUPPORTED_DEX_IDS, BLOCKED_DEX_IDS, NON_USD_QUOTE_REASON } from "@/lib/dex-constants";
 import { dexTypeLabel, isOfferable, MAX_CLASSIFY_POOLS, type PoolClass } from "@/lib/dex-pool-owner";
 import type { KeeperDexType } from "@/lib/dex-type";
 
@@ -57,6 +57,11 @@ export const POOL_VERIFY_FAILED = "Couldn't verify which DEX these pools are on 
 export const UNSUPPORTED_POOL_TYPES =
   "This token's pools are on DEX types our price feed can't read yet (for example Meteora DAMM). " +
   "Markets can launch against Meteora DLMM or PumpSwap pools.";
+
+/** Why none of the candidate pools was offered: a non-USD quote is the actionable reason. */
+export function unverifiedReason(candidates: DexPoolResult[], classes: Record<string, PoolClass>): string {
+  return candidates.some((c) => classes[c.poolAddress] === "non-usd-quote") ? NON_USD_QUOTE_REASON : UNSUPPORTED_POOL_TYPES;
+}
 
 /**
  * Search DexScreener for DEX pools containing a given token mint.
@@ -175,6 +180,7 @@ export function useDexPoolSearch(mint: string | null): {
         // E2E B21: classify by mainnet OWNER before offering anything. DexScreener's
         // "meteora" covers DAMM v1 pools the keeper cannot price.
         let verified: DexPoolResult[] = [];
+        let classesSeen: Record<string, PoolClass> = {};
         if (candidates.length > 0) {
           const cr = await fetch("/api/dex/classify-pools", {
             method: "POST",
@@ -185,6 +191,7 @@ export function useDexPoolSearch(mint: string | null): {
           if (!cr.ok) throw new Error(POOL_VERIFY_FAILED);
           const { classes } = (await cr.json()) as { classes?: Record<string, PoolClass> };
           if (!classes) throw new Error(POOL_VERIFY_FAILED);
+          classesSeen = classes;
           verified = applyPoolClasses(candidates, classes);
         }
 
@@ -193,7 +200,7 @@ export function useDexPoolSearch(mint: string | null): {
         // Only surface the block when it actually cost this token every option.
         setBlockedReason(
           verified.length === 0
-            ? blockedHit ?? (candidates.length > 0 ? UNSUPPORTED_POOL_TYPES : null)
+            ? blockedHit ?? (candidates.length > 0 ? unverifiedReason(candidates, classesSeen) : null)
             : null,
         );
       } catch (err) {

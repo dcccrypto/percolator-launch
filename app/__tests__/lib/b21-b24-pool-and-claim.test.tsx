@@ -50,6 +50,12 @@ const key = (i: number) => {
 const DAMM_POOL = key(1); // stands in for WIF's 5rxahS44… (owner Eo7W…)
 const DLMM_POOL = key(2);
 const PUMP_POOL = key(3);
+/** Pool bytes long enough for every parser, quote (token Y / quote mint) = WSOL at the DLMM offset. */
+const wsolQuotedPool = () => {
+  const d = new Uint8Array(904);
+  d.set(new PublicKey("So11111111111111111111111111111111111111112").toBytes(), 120);
+  return d;
+};
 const read = (f: string) => readFileSync(resolve(process.cwd(), f), "utf8");
 
 describe("B21: pools are classified by mainnet OWNER, never by DexScreener's dexId", () => {
@@ -68,7 +74,7 @@ describe("B21: pools are classified by mainnet OWNER, never by DexScreener's dex
     const owners: Record<string, string> = { [DAMM_POOL]: METEORA_DAMM_V1_PROGRAM, [DLMM_POOL]: DLMM };
     const conn = {
       getMultipleAccountsInfo: vi.fn(async (ks: PublicKey[]) =>
-        ks.map((k) => (owners[k.toBase58()] ? { owner: new PublicKey(owners[k.toBase58()]) } : null)),
+        ks.map((k) => (owners[k.toBase58()] ? { owner: new PublicKey(owners[k.toBase58()]), data: wsolQuotedPool() } : null)),
       ),
     };
     const r = await classifyPoolsByOwner([DAMM_POOL, DLMM_POOL, PUMP_POOL, "not-a-key"], conn as never);

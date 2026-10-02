@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { classifyPoolsByOwner } from "@/lib/dex-pool-owner";
+import { NON_USD_QUOTE_REASON } from "@/lib/dex-constants";
 import { buildMarketDirectoryFallback } from "@/lib/markets-fallback";
 import { resolveDevnetProgramIds } from "@/lib/program-ids";
 import { PublicKey } from "@solana/web3.js";
@@ -1542,6 +1544,18 @@ export async function POST(req: NextRequest) {
         { error: "Invalid dex_pool_address: must be a valid Solana public key" },
         { status: 400 }
       );
+    }
+  }
+
+  // A pool quoted in a token that is neither WSOL nor a USD stable can't be priced in USD
+  // (2026-10-02: SI quoted in MM, ~450x). keeper-register is the authoritative gate; this is
+  // the same check on the other write path that accepts a pool. Only a DEFINITE non-USD quote
+  // is refused: this route does not feed the keeper, so an unreachable mainnet RPC must not
+  // block registering a market that already exists on-chain.
+  if (canonicalDexPool) {
+    const poolClasses = await classifyPoolsByOwner([canonicalDexPool]);
+    if (poolClasses?.[canonicalDexPool] === "non-usd-quote") {
+      return NextResponse.json({ error: NON_USD_QUOTE_REASON }, { status: 400 });
     }
   }
 
