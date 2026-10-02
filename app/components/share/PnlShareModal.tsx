@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
 import {
   computePnlCardStats,
@@ -77,6 +78,8 @@ export function PnlShareModal({ data, onClose }: { data: PnlCardData; onClose: (
     setTimeout(() => setToast(null), 2200);
   };
 
+  if (typeof document === "undefined") return null;
+
   const bgUrl = PNL_CARD_BACKGROUNDS.length ? PNL_CARD_BACKGROUNDS[bgIdx % PNL_CARD_BACKGROUNDS.length] : null;
   const cycleBg = (dir: number) =>
     setBgIdx((i) => (i + dir + PNL_CARD_BACKGROUNDS.length) % PNL_CARD_BACKGROUNDS.length);
@@ -114,7 +117,7 @@ export function PnlShareModal({ data, onClose }: { data: PnlCardData; onClose: (
       if (!ok) throw new Error("clipboard");
     }, "Image copied");
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -176,6 +179,7 @@ export function PnlShareModal({ data, onClose }: { data: PnlCardData; onClose: (
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
