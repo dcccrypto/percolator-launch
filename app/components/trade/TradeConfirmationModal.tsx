@@ -11,9 +11,12 @@ import { formatTokenAmount } from "@/lib/format";
 import { computeNotionalNative } from "@/lib/notional";
 import { describeLiqPrice, type LiqPriceDisplay } from "@/lib/liq-price-display";
 import { LiqPriceValue } from "./LiqPriceValue";
+import { orderHeading } from "@/lib/trading";
 
 interface TradeConfirmationModalProps {
   direction: "long" | "short";
+  /** Signed size of the account's open position on this market (omitted: none). */
+  existingPositionSize?: bigint;
   positionSize: bigint;
   margin: bigint;
   leverage: number;
@@ -56,6 +59,7 @@ const FOCUSABLE_SELECTOR =
 
 export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   direction,
+  existingPositionSize = 0n,
   positionSize,
   margin,
   leverage,
@@ -233,7 +237,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
             : "border-[var(--short)]/30 bg-[var(--short)]/5"
         }`}>
           <p className="text-[10px] font-medium uppercase tracking-[0.15em]" style={{ color: direction === "long" ? "var(--long)" : "var(--short)" }}>
-            {direction === "long" ? "Opening Long Position" : "Opening Short Position"}
+            {orderHeading(direction, positionSize, existingPositionSize)}
           </p>
           <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
             Review the details carefully before confirming. This trade cannot be undone.

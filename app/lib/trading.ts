@@ -321,3 +321,20 @@ export function clampClosePercent(value: number): number {
   if (rounded > 100) return 100;
   return rounded;
 }
+
+/**
+ * Confirm-modal heading for an Open-tab order. An order on the other side of the
+ * account's open position (`existingSize`, signed, same units as `orderSize`) cuts that
+ * position first: it reduces it, closes it exactly, or closes it and opens the rest on
+ * the order's side. Flat or same side: an open. Same rule as the ticket's liq preview
+ * (sameDirection, then orderSize < |existingSize|).
+ */
+export function orderHeading(direction: "long" | "short", orderSize: bigint, existingSize: bigint): string {
+  const side = direction === "long" ? "Long" : "Short";
+  const held = direction === "long" ? "Short" : "Long";
+  const existingAbs = existingSize < 0n ? -existingSize : existingSize;
+  if (existingSize === 0n || (existingSize > 0n) === (direction === "long")) return `Opening ${side} Position`;
+  if (orderSize < existingAbs) return `Reducing ${held} Position`;
+  if (orderSize === existingAbs) return `Closing ${held} Position`;
+  return `Closing ${held}, Opening ${side}`;
+}
