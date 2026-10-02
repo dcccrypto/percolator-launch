@@ -349,18 +349,30 @@ function PositionCard({
                   </span>
                 )}
               </div>
-              <button
-                type="button"
-                onClick={(e) => {
-                  // Card is a Link — keep the click from navigating.
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setShowClose(true);
-                }}
-                className="shrink-0 rounded-none border border-[var(--short)]/30 px-2.5 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-all duration-150 hover:border-[var(--short)]/60 hover:bg-[var(--short)]/10"
-              >
-                Close
-              </button>
+              {/* An NFT-wrapped position belongs to the NFT, so this wallet can't close it here
+                  (useClosePosition never finds it). Same badge as the trade page's other-markets
+                  list; the card link leads to the market page, where it can be unwrapped. */}
+              {pos.nftWrapped ? (
+                <span
+                  title="This position is wrapped in a Position NFT. Burn the NFT on its market's trade page to unwrap it, then close."
+                  className="inline-block shrink-0 cursor-help rounded-none border border-[var(--accent)]/30 px-2.5 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--accent)]"
+                >
+                  🎫 Wrapped
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    // Card is a Link — keep the click from navigating.
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setShowClose(true);
+                  }}
+                  className="shrink-0 rounded-none border border-[var(--short)]/30 px-2.5 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-all duration-150 hover:border-[var(--short)]/60 hover:bg-[var(--short)]/10"
+                >
+                  Close
+                </button>
+              )}
             </div>
           </div>
 
