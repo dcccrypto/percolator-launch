@@ -1,0 +1,23 @@
+import * as P from "../../lib/perc.ts";
+import { ComputeBudgetProgram, Transaction, VersionedTransaction } from "@solana/web3.js";
+const K = "/Users/khubair/wt/e2e-keeper-0930/src/cross-cluster/";
+const PR = await import(K + "positioned-refresh.ts");
+const LR = await import(K + "liveness-repair.ts");
+const m = P.markets()[process.env.SYM ?? "BURNIE"]; const market = P.pk(m.slab);
+const acct = await P.conn.getAccountInfoAndContext(market);
+const d = new Uint8Array(acct.value!.data); const slot = BigInt(acct.context.slot);
+const pre = PR.decodeMarketRefreshState(d);
+const catchup = PR.catchupCrankCount(slot - pre.slotLast, pre.maxAccrualDtSlots);
+const accs = await P.conn.getProgramAccounts(P.WRAPPER, { filters: [{ dataSize: 1 << 0 === 1 ? (await import("@percolatorct/sdk")).V17_PORTFOLIO_ACCOUNT_LEN : 0 }] });
+const targets = PR.selectPositionedPortfolios(accs.filter((a) => Buffer.from(a.account.data).includes(market.toBuffer())).map((a) => ({ pubkey: a.pubkey, data: new Uint8Array(a.account.data) })));
+const repairs = LR.planLivenessRepairs(LR.decodeLivenessState(d), slot);
+console.log(P.j({ slotLast: pre.slotLast, slot, maxDt: pre.maxAccrualDtSlots, catchup, targets: targets.map((t: any) => t.pubkey.toBase58().slice(0, 8)), repairs }));
+const sim = async (plan: any, label: string) => {
+  const tx = new Transaction(); tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: plan.computeUnits })); for (const c of plan.cranks) tx.add(c.ix);
+  tx.recentBlockhash = (await P.conn.getLatestBlockhash()).blockhash; tx.feePayer = P.admin.publicKey; tx.sign(P.admin);
+  const r = await P.conn.simulateTransaction(new VersionedTransaction(tx.compileMessage()), { sigVerify: false });
+  console.log(label, plan.cranks.map((c: any) => c.kind).join(","), JSON.stringify(r.value.err)); if (r.value.err) console.log(r.value.logs?.slice(-8).join("\n"));
+};
+await sim(PR.planCrankTx({ owner: P.admin.publicKey, market, lpPortfolio: P.pk(m.lpPortfolio), catchup, refreshTargets: targets, repairs, liquidateTargets: [] }), "FULL");
+await sim(PR.planCrankTx({ owner: P.admin.publicKey, market, lpPortfolio: P.pk(m.lpPortfolio), catchup, refreshTargets: [], repairs: [], liquidateTargets: [] }), "ACCRUE-ONLY");
+await sim(PR.planCrankTx({ owner: P.admin.publicKey, market, lpPortfolio: P.pk(m.lpPortfolio), catchup: 0, refreshTargets: [], repairs: [], liquidateTargets: [] }), "NO-CATCHUP");
