@@ -74,14 +74,6 @@ import { defaultCrankObservations } from "@/lib/v18-wire";
 
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { decodeAssetVaultLp } from "@/lib/limits/decode";
-import {
-  STALE_REFRESH_CU,
-  buildStaleRefreshIx,
-  decodeStaleCohort,
-  findStalePortfolios,
-  hasStaleCohort,
-  type StaleCohort,
-} from "@/lib/stale-refresh";
 // ── Wire tags (deployed wrapper decode arms) ─────────────────────────────────
 export const EXPIRE_BACKING_BUCKET_TAG = 89;
 export const FINALIZE_RESET_SIDE_TAG = 45;
@@ -287,26 +279,6 @@ export function isRepairableFailure(
   return !!ix && ix.programId.equals(wrapperProgramId);
 }
 
-/**
- * GH#2953: a healed list is only kept when it simulates clean, or when what still fails is the
- * user's OWN instruction (index >= firstUserIndex) with a non-19/21 code: the real diagnosis.
- * A repair that is itself refused (e.g. a stale refresh refused EngineNonProgress 22 because a
- * new mark arrived in between) must never replace the user's 19/21 with its own error.
- */
-export function healedListUsable(
-  err: unknown,
-  list: readonly TransactionInstruction[],
-  wrapperProgramId: PublicKey,
-  firstUserIndex: number,
-): boolean {
-  if (!err) return true;
-  if (isRepairableFailure(err, list, wrapperProgramId)) return false;
-  const p = parseCustomInstructionError(err);
-  const ie = (err as { InstructionError?: unknown } | null)?.InstructionError;
-  const index = p?.index ?? (Array.isArray(ie) && typeof ie[0] === "number" ? ie[0] : null);
-  return index !== null && index >= firstUserIndex;
-}
-
 /** The compute-budget prefix sendTx puts in front of every transaction. */
 export function computeBudgetPrefix(computeUnits: number): TransactionInstruction[] {
   return [
@@ -324,8 +296,6 @@ export interface SelfHealDeps {
   readMarket: () => Promise<{ data: Uint8Array; slot: bigint } | null>;
   /** Simulate a full instruction list (compute-budget prefix included). */
   simulate: (instructions: TransactionInstruction[]) => Promise<SimResult>;
-  /** GH#2953: the market's stale-cohort portfolios (lib/stale-refresh.ts); [] = none / too many. */
-  findStaleRefreshes?: (programId: PublicKey, cohort: StaleCohort) => Promise<PublicKey[]>;
 }
 
 export interface SelfHealParams {
@@ -339,11 +309,6 @@ export interface SelfHealParams {
    * bound vault LP on P3 when null), each accruing up to max_accrual_dt_slots.
    */
   catchUp?: { cranker: PublicKey; portfolio: PublicKey | null; oracleTail?: readonly AccountMeta[] };
-  /**
-   * GH#2953: when set and the market has a stale K/F cohort, a wrapper 19/21 is repaired by
-   * prepending a no-observation refresh crank (signed by this cranker) of each stale portfolio.
-   */
-  staleRefreshCranker?: PublicKey;
 }
 
 /**
@@ -424,8 +389,6 @@ export interface SelfHealResult {
   catchUpCranks?: number;
   /** The engine clock lags past the catch-up cap (SH-3: the keeper must catch up). */
   catchUpBeyondCap?: boolean;
-  /** GH#2953: stale-cohort refresh cranks included; 0 / absent when none. */
-  staleRefreshes?: number;
 }
 
 /** See the module header for the flow. Never throws. */
@@ -450,34 +413,13 @@ export async function planSelfHeal(params: SelfHealParams, deps: SelfHealDeps): 
     }
     const cranks = catchUp && catchUp.k > 0 && crankPortfolio ? catchUp.k : 0;
     const beyondCap = catchUp?.beyondCap === true;
-    // GH#2953: a stale K/F cohort locks every risk-increasing trade (lib/stale-refresh.ts).
-    const cohort = params.staleRefreshCranker && deps.findStaleRefreshes ? decodeStaleCohort(acct.data) : null;
-    const staleOn = hasStaleCohort(cohort);
-    if (repairs.length === 0 && cranks === 0 && !staleOn) return unchanged("no-repair-needed", { catchUpBeyondCap: beyondCap });
+    if (repairs.length === 0 && cranks === 0) return unchanged("no-repair-needed", { catchUpBeyondCap: beyondCap });
 
     const prefixOrig = computeBudgetPrefix(params.computeUnits);
     const origList = [...prefixOrig, ...params.instructions];
     const orig = await deps.simulate(origList);
     if (!orig.err) return unchanged("user-tx-ok");
     if (!isRepairableFailure(orig.err, origList, params.programId)) return unchanged("not-repairable");
-
-    // Stale-cohort refreshes first, WITHOUT catch-up cranks: an accrual in front of them would
-    // move K/F again and re-stale every positioned portfolio.
-    if (staleOn && cohort && deps.findStaleRefreshes && params.staleRefreshCranker) {
-      const stale = await deps.findStaleRefreshes(params.programId, cohort);
-      if (stale.length > 0) {
-        const refreshIxs = stale.map((pf) => buildStaleRefreshIx(params.programId, params.staleRefreshCranker!, params.market, pf));
-        const libIxs = repairs.map((r) => buildLivenessRepairIx(params.programId, params.market, r));
-        const cu = Math.min(MAX_TX_CU, params.computeUnits + REPAIR_CU * repairs.length + STALE_REFRESH_CU * refreshIxs.length);
-        const ixs = [...libIxs, ...refreshIxs, ...params.instructions];
-        const list = [...computeBudgetPrefix(cu), ...ixs];
-        const r = await deps.simulate(list);
-        if (healedListUsable(r.err, list, params.programId, list.length - params.instructions.length)) {
-          return { instructions: ixs, computeUnits: cu, repairs, outcome: "repaired", staleRefreshes: refreshIxs.length };
-        }
-      }
-      if (repairs.length === 0 && cranks === 0) return unchanged("repair-did-not-help", { catchUpBeyondCap: beyondCap });
-    }
 
     const crankIxs = cranks > 0 && params.catchUp && crankPortfolio
       ? Array.from({ length: cranks }, () =>
@@ -522,7 +464,6 @@ export function connectionSelfHealDeps(connection: Connection, market: PublicKey
       });
       return { err: sim.value.err };
     },
-    findStaleRefreshes: (programId, cohort) => findStalePortfolios(connection, programId, market, cohort),
   };
 }
 

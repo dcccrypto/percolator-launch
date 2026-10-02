@@ -639,9 +639,6 @@ export function useTrade(slabAddress: string) {
               ? {
                   programId,
                   market: slabPk,
-                  // GH#2953: a stale K/F cohort the keeper could not refresh locks every new
-                  // position (Custom 21); refresh those portfolios inside this trade.
-                  staleRefresh: true,
                   catchUp: {
                     portfolio: accountB,
                     oracleTail: useAdminOracle ? [] : [{ pubkey: oracleAccount, isSigner: false, isWritable: false }],

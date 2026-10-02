@@ -161,3 +161,77 @@ describe("GH#2953 the bundled deposit covers the market's minimum initial margin
     expect(submit().textContent).toBe("Deposit 5.52 USDC & Long");
   });
 });
+
+describe("GH#2959 the IM floor also applies to an account that already holds some margin", () => {
+  const withFloor = (floor: bigint) =>
+    mocks.useEngineState.mockReturnValue({
+      engine: null,
+      params: { initialMarginBps: 1000n, maintenanceMarginBps: 500n, tradingFeeBps: 30n, minNonzeroImReq: floor },
+      insuranceBalance: 1_000_000n, totalOI: 0n, hasData: true,
+    });
+  const holding = (capital: bigint) =>
+    mocks.useUserAccount.mockReturnValue({ account: { capital, positionSize: 0n, entryPrice: 0n, pnl: 0n }, idx: 3 });
+
+  it("$1.50 on the market, $1 first trade on a $2-floor market: the top-up to the floor is bundled (no Custom 49)", async () => {
+    withFloor(2_000_000n);
+    holding(1_500_000n);
+    render(<OrderTicket slabAddress={SLAB} />);
+    await waitFor(() => expect(screen.queryByTestId("trade-submit")).not.toBeNull());
+    size("1");
+    // shortfall to the floor 0.50 + fee 0.003, +10% -> 0.56
+    expect(submit().textContent).toBe("Deposit 0.56 USDC & Long");
+    await place();
+    expect(mocks.trade).not.toHaveBeenCalled();
+    expect(mocks.fund.mock.calls[0][0]).toMatchObject({ size: 1_000_000n, depositAtoms: 560_000n });
+  });
+
+  it("NEGATIVE CONTROL: $2.50 on the market already covers the floor: a plain trade, nothing bundled", async () => {
+    withFloor(2_000_000n);
+    holding(2_500_000n);
+    mocks.trade.mockResolvedValue("sigPlain");
+    render(<OrderTicket slabAddress={SLAB} />);
+    await waitFor(() => expect(screen.queryByTestId("trade-submit")).not.toBeNull());
+    size("1");
+    expect(submit().textContent).not.toMatch(/^Deposit/);
+    await place();
+    expect(mocks.fund).not.toHaveBeenCalled();
+    expect(mocks.trade).toHaveBeenCalledTimes(1);
+  });
+
+  it("NEGATIVE CONTROL: no floor -> $1.50 covers a $1 order, a plain trade", async () => {
+    withFloor(0n);
+    holding(1_500_000n);
+    mocks.trade.mockResolvedValue("sigPlain");
+    render(<OrderTicket slabAddress={SLAB} />);
+    await waitFor(() => expect(screen.queryByTestId("trade-submit")).not.toBeNull());
+    size("1");
+    await place();
+    expect(mocks.fund).not.toHaveBeenCalled();
+    expect(mocks.trade).toHaveBeenCalledTimes(1);
+  });
+
+  it("a Custom(49) on a new position below the floor says the floor, not 'lower the size'", async () => {
+    withFloor(2_000_000n);
+    mocks.fund.mockRejectedValueOnce(refusal(49));
+    render(<OrderTicket slabAddress={SLAB} />);
+    await waitFor(() => expect(screen.queryByTestId("trade-submit")).not.toBeNull());
+    size("1");
+    await place();
+    await waitFor(() => expect(screen.queryByTestId("status-line")).not.toBeNull());
+    expect(screen.getByTestId("status-line").dataset.kind).toBe("insufficient-margin");
+    const body = screen.getByTestId("status-line-body").textContent ?? "";
+    expect(body).toBe("New positions on this market need at least $2 of margin.");
+    expect(body).not.toMatch(/lower the size/i);
+  });
+
+  it("NEGATIVE CONTROL: a Custom(49) on an order above the floor keeps the size/leverage advice", async () => {
+    withFloor(2_000_000n);
+    mocks.fund.mockRejectedValueOnce(refusal(49));
+    render(<OrderTicket slabAddress={SLAB} />);
+    await waitFor(() => expect(screen.queryByTestId("trade-submit")).not.toBeNull());
+    size("5");
+    await place();
+    await waitFor(() => expect(screen.queryByTestId("status-line")).not.toBeNull());
+    expect(screen.getByTestId("status-line-body").textContent).toBe("Add collateral or lower the size or leverage.");
+  });
+});

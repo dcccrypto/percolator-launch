@@ -48,11 +48,17 @@ export interface MessageContext {
   /** Wallet display name for the locked-wallet line. */
   walletName?: string;
   /**
-   * GH#2953: this call does NOT wait and resend (the first fund-and-trade signs two transactions
-   * once). A waitable refusal must then say nothing was sent and to try again, never promise
-   * that the order "goes through automatically".
+   * GH#2953: this call does NOT wait and resend (fund-and-trade signs once). A waitable refusal
+   * must then say nothing was sent and to try again, never promise that the order "goes through
+   * automatically".
    */
   oneShot?: boolean;
+  /**
+   * GH#2959: the order opens a NEW position below the market's minimum initial margin
+   * (min_nonzero_im_req), already formatted ("$2"). A Custom(49) is then the floor, and
+   * "lower the size" is the wrong advice: a smaller order is refused the same way.
+   */
+  imFloorLabel?: string;
 }
 
 export interface UserMessageAction {
@@ -320,6 +326,9 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
           : m("engine-catching-up", "wait", "Catching up", "The market is catching up with the latest prices. Try again in a moment.");
       }
       case W.EngineInsufficientInitialMargin:
+        if (ctx.imFloorLabel) {
+          return m("insufficient-margin", "error", "Not enough margin", `New positions on this market need at least ${ctx.imFloorLabel} of margin.`);
+        }
         return m("insufficient-margin", "error", "Not enough margin", "Add collateral or lower the size or leverage.");
       case W.ExecPriceOutsideOracleBand:
         return m("price-moved", "error", "Price moved", ctx.maxNow ? `The price moved too far for this size. Most you can open now: ${ctx.maxNow}${sym ? ` ${sym}` : ""}.` : "The price moved too far for this size. Try a smaller size.", useMax);
