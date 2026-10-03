@@ -68,6 +68,7 @@ import {
   type ChartDataSource,
 } from "@/lib/chart-live-tick";
 import { assertNever } from "@/lib/exhaustive";
+import { syncOverlayPriceLine } from "@/lib/chart-overlay-price-line";
 import { formatUsdFromNumber, chartPricePrecision } from "@/lib/format";
 
 // Phase 2: added 15m timeframe
@@ -828,7 +829,7 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
   // Resolve the chart Entry through the same display contract used by the
   // other position surfaces. v17/v18 does not persist entry_price on-chain:
   // prefer the exact wallet-scoped cache, then allow a PnL-derived entry when
-  // resolveEntryPrice can establish one. source==="unknown" stays hidden ?
+  // resolveEntryPrice can establish one. source==="unknown" stays hidden —
   // its numeric .entry is a risk-math fallback, not a trader-visible Entry.
   const entryPriceNum = (() => {
     const ua = realUserAccount;
@@ -944,39 +945,10 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
           title: "Mark",
         });
       }
-      // Liq price overlay.
-      // Deliberately NOT routed through lib/liq-price-display (#2634): this draws
-      // a price LINE, only when a real liquidation price exists (useLiqPrice
-      // returns null for the covered case, so nothing is drawn — there is no
-      // "—" or "∞" to explain), and its title cannot carry the account's margin
-      // health without making this series-rebuild effect depend on the mark
-      // (health moves every tick; see the Phase 2 note on its dependency
-      // array). The exemption is recorded in
-      // __tests__/components/margin-health-surfaces.test.ts, which fails if
-      // this stops being true.
-      const liqPriceNum = liqPriceE6 != null && liqPriceE6 > 0n ? Number(liqPriceE6) / 1e6 : null;
-      if (overlayPrefs.liq && liqPriceNum != null && liqPriceNum > 0) {
-        liqLineRef.current = s.createPriceLine({
-          price: liqPriceNum,
-          // Per-theme --short equivalent (canvas can't read CSS vars)
-          color: chartThemeRef.current.downColor,
-          lineWidth: 2,
-          lineStyle: LineStyle.Solid,
-          axisLabelVisible: true,
-          title: "Liq",
-        });
-      }
-      // Entry price overlay — cyan dashed when position is open
-      if (overlayPrefs.entry && entryPriceNum != null && entryPriceNum > 0) {
-        entryLineRef.current = s.createPriceLine({
-          price: entryPriceNum,
-          color: chartThemeRef.current.entryLine,
-          lineWidth: 1,
-          lineStyle: LineStyle.Dashed,
-          axisLabelVisible: true,
-          title: "Entry",
-        });
-      }
+      // Liq / Entry lines are NOT created here: they move with the on-chain
+      // mark on the cache-miss path (#2990), so they live in their own
+      // in-place effect below ("Liq / Entry overlay lines"), which re-attaches
+      // them to each new series via seriesEpoch.
     };
 
     switch (chartStyle) {
@@ -1217,7 +1189,54 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
     // measured perf bug (see BUILD-LOG.md Phase 2). Live price now reaches
     // the chart exclusively through the "Live tick -> chart" effect below,
     // via series.update()/applyOptions() — cheap, no series recreation.
-  }, [chartStyle, timeframe, candleData, lineData, liqPriceE6, entryPriceNum, chartTheme, activeDataSource, overlayPrefs.entry, overlayPrefs.liq]);
+    // liqPriceE6 / entryPriceNum / overlayPrefs.{liq,entry} are deliberately
+    // EXCLUDED too (#2990): with no local entry cache both values are derived
+    // from config.lastEffectivePriceE6 (markEwma), which changes on every
+    // keeper push. They are applied in place by the effect below.
+  }, [chartStyle, timeframe, candleData, lineData, chartTheme, activeDataSource]);
+
+  // Liq / Entry overlay lines — updated IN PLACE (priceLine.applyOptions),
+  // never by rebuilding the series. Re-runs on seriesEpoch so a freshly
+  // rebuilt series (style/timeframe/theme/data change) gets its lines back.
+  //
+  // Liq is deliberately NOT routed through lib/liq-price-display (#2634): this
+  // draws a price LINE, only when a real liquidation price exists (useLiqPrice
+  // returns null for the covered case, so nothing is drawn — there is no "—"
+  // or "∞" to explain), and its title does not carry the account's margin
+  // health. The exemption is recorded in
+  // __tests__/components/margin-health-surfaces.test.ts.
+  //
+  // Mark source: useLiqPrice and entryPriceNum read the ON-CHAIN mark
+  // (config.lastEffectivePriceE6), not livePriceE6, so these lines move per
+  // keeper push rather than per WS tick. On the unknown/derived entry paths
+  // they can therefore differ from PositionPanel/PositionsDock (which prefer
+  // the live price) by (live − on-chain mark).
+  const liqLinePrice = (() => {
+    const n = liqPriceE6 != null && liqPriceE6 > 0n ? Number(liqPriceE6) / 1e6 : null;
+    return overlayPrefs.liq && n != null && Number.isFinite(n) && n > 0 ? n : null;
+  })();
+  const entryLinePrice =
+    overlayPrefs.entry && entryPriceNum != null && Number.isFinite(entryPriceNum) && entryPriceNum > 0
+      ? entryPriceNum
+      : null;
+  useEffect(() => {
+    const series = seriesRef.current;
+    syncOverlayPriceLine(series, liqLineRef, liqLinePrice, () => ({
+      // Per-theme --short equivalent (canvas can't read CSS vars)
+      color: chartThemeRef.current.downColor,
+      lineWidth: 2 as const,
+      lineStyle: LineStyle.Solid,
+      axisLabelVisible: true,
+      title: "Liq",
+    }));
+    syncOverlayPriceLine(series, entryLineRef, entryLinePrice, () => ({
+      color: chartThemeRef.current.entryLine,
+      lineWidth: 1 as const,
+      lineStyle: LineStyle.Dashed,
+      axisLabelVisible: true,
+      title: "Entry",
+    }));
+  }, [seriesEpoch, liqLinePrice, entryLinePrice]);
 
   // Phase 2: Live tick -> chart. Subscribes directly to the price store
   // (bypassing React state/useLivePrice() entirely, per the reference doc's

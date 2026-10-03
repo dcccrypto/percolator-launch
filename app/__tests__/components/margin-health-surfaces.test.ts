@@ -62,7 +62,7 @@ export function usesSharedLiqDisplay(src: string): boolean {
  */
 const EXEMPT: Record<string, string> = {
   "components/trade/TradingChart.tsx":
-    "Draws a price LINE only when a real price exists (useLiqPrice is null for the covered case, so there is no '—'/'∞' to explain); its title cannot carry health without making the series-rebuild effect depend on the mark. #2634 item 3.",
+    "Draws a price LINE only when a real price exists (useLiqPrice is null for the covered case, so there is no '—'/'∞' to explain); its title does not carry health (the line is moved in place per keeper push, #2990). #2634 item 3.",
 };
 
 const rel = (abs: string) => path.relative(APP_ROOT, abs).split(path.sep).join("/");

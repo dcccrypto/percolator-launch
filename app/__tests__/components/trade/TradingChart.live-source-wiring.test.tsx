@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const harness = vi.hoisted(() => {
@@ -15,6 +15,7 @@ const harness = vi.hoisted(() => {
     update: vi.fn(),
     applyOptions: vi.fn(),
     createPriceLine: vi.fn(() => priceLine),
+    removePriceLine: vi.fn(),
     priceScale: vi.fn(() => seriesPriceScale),
     dataByIndex: vi.fn(),
     coordinateToPrice: vi.fn(),
@@ -116,6 +117,19 @@ const harness = vi.hoisted(() => {
 
 const positionHarness = vi.hoisted(() => ({
   slab: 'Eacc111111111111111111111111111111111111111',
+  // Mutable on-chain mark (config.lastEffectivePriceE6 = markEwma) so a test
+  // can simulate a keeper push and re-render (#2990 perf regression).
+  markE6: 100_000_000n,
+  // useSyncExternalStore-backed so a change re-renders TradingChart the way a
+  // real SlabProvider context update does (TradingChart is memoised, so a bare
+  // rerender() with identical props would not reach it).
+  listeners: new Set<() => void>(),
+  version: 0,
+  setState(patch: () => void) {
+    patch();
+    this.version += 1;
+    this.listeners.forEach((l) => l());
+  },
   wallet: 'DYvC111111111111111111111111111111111111111',
 
   userAccount: {
@@ -168,18 +182,30 @@ vi.mock('@/lib/chart-live-tick', async (importOriginal) => {
   };
 });
 
-vi.mock('@/components/providers/SlabProvider', () => ({
-  useSlabState: () => ({
+vi.mock('@/components/providers/SlabProvider', async () => {
+  const React = await import('react');
+  return {
+  useSlabState: () => {
+    React.useSyncExternalStore(
+      (l: () => void) => {
+        positionHarness.listeners.add(l);
+        return () => positionHarness.listeners.delete(l);
+      },
+      () => positionHarness.version,
+    );
+    return {
     slabAddress: positionHarness.slab,
     config: {
-      lastEffectivePriceE6: 100_000_000n,
+      lastEffectivePriceE6: positionHarness.markE6,
       invert: 0,
     },
     params: {
       maintenanceMarginBps: 500n,
     },
-  }),
-}));
+  };
+  },
+  };
+});
 
 vi.mock('@/hooks/useLivePrice', () => ({
   useLivePrice: () => ({
@@ -331,6 +357,7 @@ vi.mock('@/components/trade/ChartDrawingToolbar', () => ({
 import { TradingChart } from '@/components/trade/TradingChart';
 import { selectChartSource } from '@/lib/chart-source-select';
 import { saveEntryPrice } from '@/lib/entry-price';
+import { computeLiqPrice } from '@/lib/trading';
 
 describe('TradingChart live-source wiring', () => {
   beforeEach(() => {
@@ -339,6 +366,7 @@ describe('TradingChart live-source wiring', () => {
 
     positionHarness.userAccount.account.entryPrice = 0n;
     positionHarness.userAccount.account.pnl = 0n;
+    positionHarness.markE6 = 100_000_000n;
 
     positionHarness.overlayPrefs = {
       position: true,
@@ -564,6 +592,124 @@ describe('TradingChart live-source wiring', () => {
     expect(screen.queryByText("SHORT")).toBeNull();
     expect(drawnPriceLineTitles()).not.toContain("Entry");
     expect(drawnPriceLineTitles()).not.toContain("Liq");
+  });
+
+  // ---- #2990 follow-up: a mark change must NOT rebuild the series ----------
+  // With no local entry cache, Liq (mark ± capital/|pos|·k) and a derived
+  // Entry both move with config.lastEffectivePriceE6 (markEwma), which changes
+  // on every keeper push. They must be moved IN PLACE via applyOptions, not by
+  // the removeSeries+addSeries+setData teardown (BUILD-LOG Phase 2).
+  const liqForMark = (markE6: bigint) =>
+    Number(
+      computeLiqPrice(
+        markE6, // unknown path: risk-math entry falls back to the mark
+        positionHarness.userAccount.account.capital,
+        positionHarness.userAccount.account.positionSize,
+        500n,
+      ),
+    ) / 1e6;
+
+  const appliedPrices = () =>
+    harness.priceLine.applyOptions.mock.calls
+      .map(([o]) => (o as { price?: number }).price)
+      .filter((p): p is number => p != null);
+
+  // Every price a Liq/Entry line has been shown at, however it got there
+  // (created on a rebuilt series OR moved in place). Waiting on this — rather
+  // than on applyOptions alone — lets the rebuild-count assertions below be
+  // the thing that fails when the series is torn down per mark change.
+  const shownPrices = (title: string) => [
+    ...harness.series.createPriceLine.mock.calls
+      .map(([o]) => o as { title?: string; price?: number })
+      .filter((o) => o.title === title)
+      .map((o) => o.price),
+    ...appliedPrices(),
+  ];
+
+  it("PERF: mark changes on a cache-miss position move Liq in place without rebuilding the series", async () => {
+    render(
+      <TradingChart
+        slabAddress={positionHarness.slab}
+        mintAddress="TestMint1111111111111111111111111111111111"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(drawnPriceLineTitles()).toContain("Liq");
+    });
+    const liq0 = harness.series.createPriceLine.mock.calls
+      .map(([o]) => o as { title?: string; price?: number })
+      .find((o) => o.title === "Liq")?.price;
+    expect(liq0).toBe(liqForMark(100_000_000n));
+
+    const adds = harness.chart.addSeries.mock.calls.length;
+    const removes = harness.chart.removeSeries.mock.calls.length;
+    const creates = harness.series.createPriceLine.mock.calls.length;
+
+    const marks = [100_010_000n, 100_020_000n, 100_030_000n, 100_040_000n, 100_050_000n];
+    for (const m of marks) {
+      act(() => positionHarness.setState(() => { positionHarness.markE6 = m; }));
+    }
+
+    // CONTROL: the Liq value really did move with the mark (otherwise the
+    // zero-rebuild assertions below would pass vacuously).
+    await waitFor(() => {
+      for (const m of marks) expect(shownPrices("Liq")).toContain(liqForMark(m));
+    });
+
+    expect(harness.chart.removeSeries.mock.calls.length).toBe(removes);
+    expect(harness.chart.addSeries.mock.calls.length).toBe(adds);
+    expect(harness.series.createPriceLine.mock.calls.length).toBe(creates);
+    // ...and it moved in place.
+    for (const m of marks) expect(appliedPrices()).toContain(liqForMark(m));
+  });
+
+  it("PERF: a derived Entry follows the mark in place, without rebuilding the series", async () => {
+    positionHarness.userAccount.account.pnl = 10_000_000n; // SHORT, entry = mark + $1
+    render(
+      <TradingChart
+        slabAddress={positionHarness.slab}
+        mintAddress="TestMint1111111111111111111111111111111111"
+      />,
+    );
+    await waitFor(() => {
+      expect(drawnPriceLineTitles()).toContain("Entry");
+    });
+    const adds = harness.chart.addSeries.mock.calls.length;
+    const removes = harness.chart.removeSeries.mock.calls.length;
+
+    act(() => positionHarness.setState(() => { positionHarness.markE6 = 105_000_000n; }));
+
+    await waitFor(() => {
+      expect(shownPrices("Entry")).toContain(106);
+    });
+    expect(harness.chart.removeSeries.mock.calls.length).toBe(removes);
+    expect(harness.chart.addSeries.mock.calls.length).toBe(adds);
+    expect(appliedPrices()).toContain(106);
+  });
+
+  it("toggling the Liq/Entry Display prefs removes the lines without rebuilding the series", async () => {
+    saveEntryPrice(positionHarness.slab, positionHarness.userAccount.idx, 100_000_000n, 2, positionHarness.wallet);
+    render(
+      <TradingChart
+        slabAddress={positionHarness.slab}
+        mintAddress="TestMint1111111111111111111111111111111111"
+      />,
+    );
+    await waitFor(() => {
+      expect(drawnPriceLineTitles()).toEqual(expect.arrayContaining(["Entry", "Liq"]));
+    });
+    const adds = harness.chart.addSeries.mock.calls.length;
+
+    act(() =>
+      positionHarness.setState(() => {
+        positionHarness.overlayPrefs = { ...positionHarness.overlayPrefs, entry: false, liq: false };
+      }),
+    );
+    await waitFor(() => {
+      expect(harness.series.removePriceLine).toHaveBeenCalledTimes(2);
+    });
+    expect(harness.chart.addSeries.mock.calls.length).toBe(adds);
   });
 
 });
