@@ -1,7 +1,8 @@
 "use client";
 
 import { FC } from "react";
-import { computeMarkPnl, computeMarkPnlCollateral, computePnlPercent, computePositionInitialMargin } from "@/lib/trading";
+import { computeMarkPnl, computeMarkPnlCollateral, computePnlPercent, computePositionInitialMargin, resolveEntryPrice } from "@/lib/trading";
+import { isSentinelValue } from "@/lib/health";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useSlabState } from "@/components/providers/SlabProvider";
@@ -50,9 +51,28 @@ export const ChartPnlBadge: FC<ChartPnlBadgeProps> = ({ slabAddress }) => {
   // shared by every wallet that traded it in this browser (v17 accountIdx is
   // always 0), so switching wallets showed the previous wallet's entry price.
   const rawEntryPrice = account.entryPrice ?? 0n;
-  const resolvedEntryPrice =
+  const cachedEntryPrice =
     rawEntryPrice > 0n ? rawEntryPrice : getEntryPrice(slabAddress, userAccount.idx, account.owner.toBase58());
-  if (resolvedEntryPrice <= 0n) return null;
+  // #2990: a cache MISS is the normal state on any device other than the one
+  // that opened the trade — `saveEntryPrice` has a single production writer, in
+  // OrderTicket at trade time, and v17/v18 store no entry on chain. Bailing out
+  // on the miss hid this badge (and the Liq/Entry lines) for a trader who opened
+  // on desktop and looked on their phone, while the positions strip on the same
+  // screen showed the position and its PnL. Resolve it the way PositionsDock and
+  // PositionPanel already do — cache, else back-solve from the on-chain pnl —
+  // so the chart agrees with the rest of the app instead of going blank.
+  const safePnlForEntry = isSentinelValue(account.pnl) ? 0n : account.pnl;
+  const resolvedEntry = resolveEntryPrice(
+    account.positionSize,
+    cachedEntryPrice,
+    safePnlForEntry,
+    livePriceE6,
+  );
+  // "unknown" carries the MARK as its entry, so a PnL computed from it would be
+  // a confident $0.00 — the "your position is flat" reading this component's doc
+  // comment forbids. Display stays gated; only cache/derived render.
+  if (resolvedEntry.source === "unknown") return null;
+  const resolvedEntryPrice = resolvedEntry.entry;
 
   // A deleveraged leg moves at `basis * a_side / a_basis`, not at raw basis —
   // feeding nominal size here overstated the badge by the ADL factor (2x on
