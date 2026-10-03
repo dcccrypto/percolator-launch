@@ -16,6 +16,12 @@ const LAUNCHPAD_LABEL: Record<TrendingToken["launchpad"], string> = {
   pumpfun: "Pump.fun",
 };
 
+/** The token's page on its launchpad (clicking the token opens this). */
+const launchpadUrl: Record<TrendingToken["launchpad"], (mint: string) => string> = {
+  pumpfun: (mint) => `https://pump.fun/coin/${mint}`,
+};
+const tokenUrl = (t: TrendingToken) => (launchpadUrl[t.launchpad] ?? launchpadUrl.pumpfun)(t.mint);
+
 const shortCa = (ca: string) => `${ca.slice(0, 4)}…${ca.slice(-4)}`;
 
 const fetcher = (url: string): Promise<TrendingTokensResult> =>
@@ -56,12 +62,20 @@ const TrendingRow: FC<{ t: TrendingToken; isLast: boolean }> = ({ t, isLast }) =
       isLast ? "" : "border-b border-[var(--border)]",
     ].join(" ")}
   >
-    <MarketLogo logoUrl={t.logoUrl} mainnetCa={t.mint} symbol={t.symbol} size="sm" decorative />
-
-    <div className="min-w-0 flex-1">
-      <div className="truncate text-[13px] font-semibold text-[var(--text)]">{t.symbol}</div>
-      <div className="hidden truncate text-[11px] text-[var(--text-secondary)] sm:block">{t.name}</div>
-    </div>
+    {/* Clicking the token opens its launchpad page (pump.fun) in a new tab. */}
+    <a
+      href={tokenUrl(t)}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={`View ${t.symbol} on ${LAUNCHPAD_LABEL[t.launchpad]}`}
+      className="group/tok flex min-w-0 flex-1 items-center gap-3 focus-visible:outline-none sm:gap-4"
+    >
+      <MarketLogo logoUrl={t.logoUrl} mainnetCa={t.mint} symbol={t.symbol} size="sm" decorative />
+      <div className="min-w-0">
+        <div className="truncate text-[13px] font-semibold text-[var(--text)] transition-colors group-hover/tok:text-[var(--accent-text)]">{t.symbol}</div>
+        <div className="hidden truncate text-[11px] text-[var(--text-secondary)] sm:block">{t.name}</div>
+      </div>
+    </a>
 
     <div className="hidden shrink-0 sm:block" style={{ minWidth: 72 }}>
       <span className="rounded-sm border border-[var(--border)] bg-[var(--accent)]/[0.04] px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">

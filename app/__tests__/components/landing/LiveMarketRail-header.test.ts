@@ -37,22 +37,27 @@ describe("LiveMarketRail column header", () => {
     expect(headerAt).toBeLessThan(mapAt);
   });
 
-  it("labels the market column and all three stat columns", () => {
+  it("labels the market column and every stat column", () => {
     expect(SRC).toMatch(/>\s*Market\s*</);
-    expect(SRC).toMatch(/>\s*Lev\s*</);
+    expect(SRC).toMatch(/>\s*Max Lev\s*</);
     expect(SRC).toMatch(/>\s*24h Vol\s*</);
+    expect(SRC).toMatch(/>\s*Open Interest\s*</);
     expect(SRC).toMatch(/>\s*Price\s*</);
+    expect(SRC).toMatch(/>\s*24h Change\s*</);
   });
 
-  it("reveals each stat label at the same breakpoint as its data column", () => {
+  it("reveals each stat label at the same breakpoint + width as its data column", () => {
     const header = SRC.slice(
       SRC.indexOf("const RailHeader"),
       SRC.indexOf("The landing page's live market rail"),
     );
-    // Lev column is sm:block in RailRow; 24h Vol is md:block. minWidths match too.
-    expect(header).toMatch(/hidden shrink-0 text-right sm:block[^>]*minWidth: 28/s);
-    expect(header).toMatch(/hidden shrink-0 text-right md:block[^>]*minWidth: 68/s);
-    expect(header).toMatch(/shrink-0 text-right[^>]*minWidth: 84/s);
+    // Breakpoints + minWidths mirror RailRow: Max Lev sm:, 24h Vol md:, OI lg:,
+    // Price always, 24h Change sm:.
+    expect(header).toMatch(/hidden shrink-0 text-right sm:block[^>]*minWidth: 34/s);
+    expect(header).toMatch(/hidden shrink-0 text-right md:block[^>]*minWidth: 64/s);
+    expect(header).toMatch(/hidden shrink-0 text-right lg:block[^>]*minWidth: 72/s);
+    expect(header).toMatch(/shrink-0 text-right[^>]*minWidth: 80/s);
+    expect(header).toMatch(/hidden shrink-0 text-right sm:block[^>]*minWidth: 56/s);
   });
 
   it("is aria-hidden — the row links already expose each value", () => {

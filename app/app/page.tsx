@@ -107,11 +107,20 @@ export default function Home() {
       </section>
 
       {/* ─── Live market rail ─── */}
-      <section className="mx-auto max-w-[1100px] px-6 pb-20 sm:px-8">
+      <section className="relative mx-auto mt-28 max-w-[1100px] px-6 pb-20 sm:mt-40 sm:px-8">
+        {/* Character banner floats above the whole section (heading + table) so it
+            never overlaps the links or columns. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/landing/char-markets.png"
+          alt=""
+          aria-hidden="true"
+          className="pointer-events-none z-20 mx-auto -mb-2 block w-[84%] drop-shadow-[0_14px_26px_rgba(0,0,0,0.55)] sm:absolute sm:bottom-full sm:left-1/2 sm:mx-0 sm:mb-1.5 sm:w-[min(52%,560px)] sm:-translate-x-1/2"
+        />
         <ScrollReveal delay={0.05}>
           <div className="mb-4 flex items-baseline justify-between gap-4">
             <h2 className="text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent-text)]">
-              // live markets
+              // Live Markets on Percolator Trade
             </h2>
             <Link
               href="/markets"
@@ -130,11 +139,18 @@ export default function Home() {
       </section>
 
       {/* ─── Tokens trending (launchpad tokens without a perp yet) ─── */}
-      <section className="mx-auto max-w-[1100px] px-6 pb-20 sm:px-8">
+      <section className="relative mx-auto mt-28 max-w-[1100px] px-6 pb-20 sm:mt-40 sm:px-8">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/landing/char-trending.png"
+          alt=""
+          aria-hidden="true"
+          className="pointer-events-none z-20 mx-auto -mb-2 block w-[84%] drop-shadow-[0_14px_26px_rgba(0,0,0,0.55)] sm:absolute sm:bottom-full sm:right-[3%] sm:mx-0 sm:mb-1.5 sm:w-[min(52%,560px)]"
+        />
         <ScrollReveal delay={0.05}>
           <div className="mb-4 flex items-baseline justify-between gap-4">
             <h2 className="text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent-text)]">
-              // tokens trending
+              // Tokens Trending
             </h2>
           </div>
         </ScrollReveal>

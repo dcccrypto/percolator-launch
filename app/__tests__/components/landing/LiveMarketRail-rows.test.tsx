@@ -17,6 +17,9 @@ vi.mock("@/lib/priceStore/priceStore", () => ({
   getSnapshot: () => ({ priceUsd: null, priceE6: null }),
 }));
 vi.mock("@/components/market/MarketLogo", () => ({ MarketLogo: () => null }));
+// Each row polls /api/prices for the 24h change via SWR — keep it inert so the
+// rows test stays a pure render (no network); the 24h column just reads "—".
+vi.mock("swr", () => ({ default: () => ({ data: undefined, error: undefined, isLoading: false }) }));
 
 import { LiveMarketRail } from "@/components/landing/LiveMarketRail";
 import { HARDCODED_BLOCKED_SLABS } from "@/lib/blocklist-data";
