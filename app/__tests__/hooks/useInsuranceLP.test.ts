@@ -32,6 +32,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/tx", () => ({
   sendTx: vi.fn(),
+  SimulationRefusal: class SimulationRefusal extends Error {},
 }));
 
 // Allow the test program ID through the program allowlist gate.
@@ -102,6 +103,19 @@ vi.mock("@solana/spl-token", () => ({
   unpackAccount: vi.fn(),
 }));
 
+// Non-bound pot state: the deposit now FAILS CLOSED when it cannot be read, so the deposit tests
+// hand the hook a healthy two-pot vault (domain = registry's; see the fail-closed test below).
+vi.mock("@/lib/limits/earn-split-pot", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/limits/earn-split-pot")>();
+  return { ...actual, readSplitPotState: vi.fn(async () => null) };
+});
+import { readSplitPotState, EarnDepositsPausedError } from "@/lib/limits/earn-split-pot";
+const healthySp = (ownDomain: number) => {
+  const pot = { bucket: { freshUnliened: 1_000_000n * 10n ** 18n, validLiened: 0n, consumed: 0n, impaired: 0n, utilFeeEarnings: 0n, status: 1 },
+    source: { positiveClaimBound: 0n, freshReserved: 0n, validLienedBacking: 0n, insuranceCreditReserved: 0n, validLienedInsurance: 0n, impairedLienedInsurance: 0n },
+    ledger: { totalPrincipal: 1_000_000n, totalEarnings: 0n, totalEarningsWithdrawn: 0n, lastObsBucketEarnings: 0n, cumulativeLoss: 0n, cumulativeRecovery: 0n, lastObsUnavailable: 0n } };
+  return { own: pot, sib: pot, ownDomain, totalShares: 1_000_000n, feeShareBps: 1000, ownLedger: new PublicKey("11111111111111111111111111111112"), sibLedger: new PublicKey("11111111111111111111111111111113"), navFloor: false, harvestableAtoms: 0n } as never;
+};
 import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useParams } from "next/navigation";
@@ -164,6 +178,7 @@ describe("useInsuranceLP", () => {
     vi.mocked(useSlabState).mockReturnValue(mockSlabState);
     vi.mocked(useParams).mockReturnValue({ slab: mockSlabAddress });
     vi.mocked(sendTx).mockResolvedValue("mock-signature");
+    vi.mocked(readSplitPotState).mockResolvedValue(null);
     vi.mocked(getAssociatedTokenAddress).mockResolvedValue(mockAtaPk);
   });
 
@@ -576,6 +591,7 @@ describe("useInsuranceLP", () => {
   describe("Deposit (v17 LP Vault — DepositToLpVault tag 75)", () => {
     // v17: deposit() is now DepositToLpVault (tag 75) — a real on-chain tx.
     it("should call sendTx with deposit amount", async () => {
+      vi.mocked(readSplitPotState).mockResolvedValue(healthySp(0));
       // ATA exists — no createATA needed. Wallet holds 10M base units
       // (the deposit guard refuses amounts above the wallet balance).
       mockConnection.getAccountInfo.mockResolvedValue({
@@ -592,6 +608,21 @@ describe("useInsuranceLP", () => {
       });
 
       expect(sendTx).toHaveBeenCalledTimes(1);
+    });
+
+    it("FAILS CLOSED: a non-bound vault whose pot state cannot be read is not deposited into", async () => {
+      vi.mocked(readSplitPotState).mockResolvedValue(null); // RPC error / 429 -> null
+      mockConnection.getAccountInfo.mockResolvedValue({
+        data: (() => { const b = Buffer.alloc(165); b.writeBigUInt64LE(10_000_000n, 64); return b; })(),
+        lamports: 2_000_000,
+        executable: false,
+        owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+      });
+      const { result } = renderHook(() => useInsuranceLP());
+      await act(async () => {
+        await expect(result.current.deposit(500_000n)).rejects.toBeInstanceOf(EarnDepositsPausedError);
+      });
+      expect(sendTx).not.toHaveBeenCalled();
     });
 
     it("refuses to build a deposit above the wallet's collateral balance", async () => {
@@ -616,6 +647,7 @@ describe("useInsuranceLP", () => {
     // ledgers from it; NAV is summed across the two pots, so a wrong or missing
     // sibling misprices every deposit.
     it("routes the deposit to the registry's own domain, not a hardcoded 0", async () => {
+      vi.mocked(readSplitPotState).mockResolvedValue(healthySp(3));
       const sdk = await import("@percolatorct/sdk");
       vi.mocked(sdk.parseLpVaultRegistry).mockReturnValue({
         totalLpSharesOutstanding: 1_000_000n,

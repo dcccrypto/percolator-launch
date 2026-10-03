@@ -122,7 +122,9 @@ export function useMarketFillCap(slabAddress: string): MarketFillLimits | null {
         .then((st) => {
           if (cancelled || st === null) return;
           if (st.counterQ !== null) setInventoryBase(st.counterQ);
-          if (st.realQ !== null) setLpRealQ(st.realQ);
+          // A successful read that yields no real position (InvalidLeg) clears it: post-upgrade the
+          // room then falls back to the counter instead of a stale real position.
+          setLpRealQ(st.realQ);
           setSyncLive(st.syncLive);
         })
         .finally(() => {

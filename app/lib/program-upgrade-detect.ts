@@ -3,7 +3,7 @@
  *
  * Runbook: ~/percolator-ops/ledger/deploy-runbook-matcher-sync-2026-10-03.md. Two in-place upgrades
  * at the SAME program ids: matcher EDKKgRaV (4a0f696 -> b5b419da, first) and wrapper ETDLAdi
- * (553d76f0/cc5095fb -> 7a3ac04c or its H-1 successor, second). Neither exposes a version byte or
+ * (553d76f0/cc5095fb -> the fix/matcher-inventory-sync head, second; rebuilt several times). Neither exposes a version byte or
  * a ctx-layout change, so the app reads the PROGRAM BYTES: the first 4096 bytes of each program's
  * ELF (programdata offset 45; the ELF header encodes the section-table offset, i.e. the file size,
  * so any rebuild of different code differs here) are hashed and compared with the PRE-upgrade
@@ -13,15 +13,22 @@
  *   matcher 7d16a4b4...1422 (4a0f696)   first 4096 B sha256 76ff4adb...13ab
  *
  * "pre"  = still exactly those bytes (also what a rollback restores).
- * "post" = different bytes. Detecting by "not the old build" rather than "equals the new hash"
- *          is deliberate: the wrapper that ships is the H-1 successor of 7a3ac04c (security review
- *          2026-10-03), whose hash does not exist yet.
+ * "post" = different bytes. Detection deliberately keys ONLY on "not the old build": the shipping
+ *          wrapper has been rebuilt several times (7a3ac04c -> bc228e1b H-1 -> impairment-ratio
+ *          pause + inline(never)), so no post-upgrade hash is pinned anywhere in the app.
  * "unknown" = the read failed. Every caller treats unknown exactly like "pre" (conservative).
  *
  * Only the devnet relaunch ids are probed; any other program id (mainnet, a test program) is "pre":
  * a mainnet build does not carry the sync (`matcher_takes_lp_position` is devnet-only, L-2).
  *
  * Override (build-time): NEXT_PUBLIC_MATCHER_SYNC_UPGRADE = "pre" | "post" | "auto" (default).
+ *
+ * NOTE: ANY later wrapper/matcher deploy will also read as "post". Revisit this module (move the
+ * pre fingerprints forward, or retire it) before the next program deploy.
+ *
+ * Freshness around the cutover: results are cached 45 s (a failed or timed-out read 15 s); every
+ * read is raced against READ_TIMEOUT_MS so a hung RPC can never wedge the callers, and an Earn tx
+ * refused with 91 / 25 calls `invalidateUpgradeDetection()` and rebuilds once with fresh state.
  */
 import { PublicKey, type Connection } from "@solana/web3.js";
 import { DEVNET_PROGRAM_IDS } from "@/lib/program-ids";
@@ -35,14 +42,6 @@ export const PROGRAMDATA_ELF_OFFSET = 45;
 export const PRE_SYNC_FINGERPRINTS: Readonly<Record<string, string>> = Object.freeze({
   [DEVNET_PROGRAM_IDS.wrapper]: "af1cbc1101def37482ccca11cedbf56dcca2ebece8572f2d4195c64309cb8e2b",
   [DEVNET_PROGRAM_IDS.matcher]: "76ff4adbd30acaeddc71f64726e30fda58b0f05c1a3d2e35ddf3520e714813ab",
-});
-
-/** For tests / the runbook: the first-4096 fingerprints of the built upgrade artifacts. */
-export const KNOWN_POST_SYNC_FINGERPRINTS: Readonly<Record<string, string>> = Object.freeze({
-  // wrapper 7a3ac04c build 3a46ffac (NOT the one that ships: H-1 successor pending)
-  [DEVNET_PROGRAM_IDS.wrapper]: "53f1bcf775b60ca33ac06363f43f7c24b18752e073bad53bb7e478b40dc0e568",
-  // matcher b5b419da build e0fe9a6a
-  [DEVNET_PROGRAM_IDS.matcher]: "23b91fe4a4590b65b4869adf3c10232b04edfe63803cab55d065f03015fa86f9",
 });
 
 function overrideMode(): "pre" | "post" | null {
@@ -79,12 +78,30 @@ async function readElfPrefix(connection: Connection, programId: PublicKey): Prom
   return pd ? new Uint8Array(pd.data) : null;
 }
 
-const TTL_MS = 5 * 60_000;
-const FAIL_TTL_MS = 30_000;
+const TTL_MS = 45_000;
+const FAIL_TTL_MS = 15_000;
+/** A detection read that has not answered by then is "unknown" (treated as pre). */
+export const READ_TIMEOUT_MS = 5_000;
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("upgrade-detect read timed out")), ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e: unknown) => {
+        clearTimeout(t);
+        reject(e instanceof Error ? e : new Error(String(e)));
+      },
+    );
+  });
+}
 const cache = new Map<string, { v: UpgradeState; ts: number }>();
 const inflight = new Map<string, Promise<UpgradeState>>();
 
-/** One program's state (cached 5 min; a failed read is retried after 30 s). */
+/** One program's state (cached 45 s; a failed / timed-out read is retried after 15 s). */
 export function programUpgradeState(connection: Connection, programId: PublicKey | string): Promise<UpgradeState> {
   const id = typeof programId === "string" ? programId : programId.toBase58();
   const forced = overrideMode();
@@ -97,12 +114,16 @@ export function programUpgradeState(connection: Connection, programId: PublicKey
   const p = (async () => {
     let v: UpgradeState;
     try {
-      v = await classifyElfPrefix(id, await readElfPrefix(connection, new PublicKey(id)));
+      v = await withTimeout(
+        (async () => classifyElfPrefix(id, await readElfPrefix(connection, new PublicKey(id))))(),
+        READ_TIMEOUT_MS,
+      );
     } catch {
       v = "unknown";
+    } finally {
+      inflight.delete(id);
     }
     cache.set(id, { v, ts: Date.now() });
-    inflight.delete(id);
     return v;
   })();
   inflight.set(id, p);
@@ -132,6 +153,16 @@ export async function matcherLpSyncLive(
   if (wrapper !== DEVNET_PROGRAM_IDS.wrapper || lpMatcher !== DEVNET_PROGRAM_IDS.matcher) return false;
   const [w, m] = await Promise.all([programUpgradeState(connection, wrapper), programUpgradeState(connection, lpMatcher)]);
   return w === "post" && m === "post";
+}
+
+/**
+ * Drop every cached detection result (and any in-flight read) so the next call re-reads the
+ * program bytes. Called when an Earn tx is refused with 91 / 25: around the cutover that refusal
+ * is exactly the symptom of building against the other program version.
+ */
+export function invalidateUpgradeDetection(): void {
+  cache.clear();
+  inflight.clear();
 }
 
 /** Tests only. */

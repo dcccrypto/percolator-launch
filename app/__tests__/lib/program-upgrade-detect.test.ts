@@ -2,7 +2,9 @@
  * Upgrade detection for the matcher-inventory-sync + NAV-floor deploy (lib/program-upgrade-detect.ts).
  * Fixtures are the first 4096 bytes of the REAL ELFs (~/percolator-ops/artifacts/matcher-sync-2026-10-03):
  * the live/rollback builds (wrapper f2fbf36d, matcher 7d16a4b4; == devnet on-chain 2026-10-03, read-only
- * check) and the upgrade builds (wrapper 3a46ffac @ 7a3ac04c, matcher e0fe9a6a @ b5b419da).
+ * check) and EARLIER upgrade builds (wrapper 3a46ffac @ 7a3ac04c, superseded; matcher e0fe9a6a @
+ * b5b419da). The app pins no post-upgrade hash: any build whose prefix differs from the pre one is
+ * "post", so the final wrapper artifact is detected without a code change.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -10,10 +12,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import {
   ELF_FINGERPRINT_LEN,
-  KNOWN_POST_SYNC_FINGERPRINTS,
   PRE_SYNC_FINGERPRINTS,
   PROGRAMDATA_ELF_OFFSET,
+  READ_TIMEOUT_MS,
   __resetUpgradeDetectCache,
+  invalidateUpgradeDetection,
   classifyElfPrefix,
   earnNavFloorLive,
   matcherLpSyncLive,
@@ -26,6 +29,8 @@ const W_PRE = fx("wrapper-f2fbf36d-pre.bin");
 const W_POST = fx("wrapper-3a46ffac-7a3ac04c.bin");
 const M_PRE = fx("matcher-7d16a4b4-pre.bin");
 const M_POST = fx("matcher-e0fe9a6a-b5b419d.bin");
+/** The H-1 wrapper artifact (bc228e1b, 45e24eb3; prefix d3b7bdff…d9e8) — itself superseded. */
+const W_H1 = fx("wrapper-bc228e1b.bin");
 const W = DEVNET_PROGRAM_IDS.wrapper;
 const M = DEVNET_PROGRAM_IDS.matcher;
 
@@ -65,7 +70,7 @@ describe("classifyElfPrefix (real ELF prefixes)", () => {
   it("fixtures are the recorded fingerprints", async () => {
     expect(W_PRE.length).toBe(ELF_FINGERPRINT_LEN);
     expect(PRE_SYNC_FINGERPRINTS[W]).toBe("af1cbc1101def37482ccca11cedbf56dcca2ebece8572f2d4195c64309cb8e2b");
-    expect(KNOWN_POST_SYNC_FINGERPRINTS[M]).toBe("23b91fe4a4590b65b4869adf3c10232b04edfe63803cab55d065f03015fa86f9");
+    expect(PRE_SYNC_FINGERPRINTS[M]).toBe("76ff4adbd30acaeddc71f64726e30fda58b0f05c1a3d2e35ddf3520e714813ab");
   });
   it("live / rollback bytes = pre; upgrade builds = post", async () => {
     expect(await classifyElfPrefix(W, W_PRE)).toBe("pre");
@@ -73,7 +78,10 @@ describe("classifyElfPrefix (real ELF prefixes)", () => {
     expect(await classifyElfPrefix(W, W_POST)).toBe("post");
     expect(await classifyElfPrefix(M, M_POST)).toBe("post");
   });
-  it("any OTHER build (e.g. the pending H-1 successor) is post: detection keys on 'not the old bytes'", async () => {
+  it("the H-1 artifact (bc228e1b) and any later build are post with no pinned post hash", async () => {
+    expect(await classifyElfPrefix(W, W_H1)).toBe("post");
+  });
+  it("any OTHER build (e.g. the pending impairment-pause rebuild) is post: detection keys on 'not the old bytes'", async () => {
     const other = W_POST.slice();
     other[100] ^= 1;
     expect(await classifyElfPrefix(W, other)).toBe("post");
@@ -127,5 +135,44 @@ describe("programUpgradeState / earnNavFloorLive / matcherLpSyncLive over RPC", 
     expect(await programUpgradeState(c, W)).toBe("post");
     expect(await programUpgradeState(c, MAINNET_PROGRAM_IDS.wrapper)).toBe("pre");
     expect(calls.n).toBe(0);
+  });
+  it("a THROWING read is never 'post' (unknown -> treated as pre)", async () => {
+    const c = { getAccountInfo: vi.fn(async () => { throw new Error("429"); }) } as never;
+    expect(await programUpgradeState(c, W)).toBe("unknown");
+    expect(await earnNavFloorLive(c, W)).toBe(false);
+    expect(await matcherLpSyncLive(c, W, M)).toBe(false);
+  });
+});
+
+describe("freshness around the cutover", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("a HUNG read resolves 'unknown' after READ_TIMEOUT_MS and does not wedge later calls", async () => {
+    vi.useFakeTimers();
+    const hung = { getAccountInfo: vi.fn(() => new Promise(() => {})) } as never;
+    const p = programUpgradeState(hung, W);
+    await vi.advanceTimersByTimeAsync(READ_TIMEOUT_MS + 1);
+    expect(await p).toBe("unknown");
+    // NEGATIVE CONTROL for the inflight leak: after the failure TTL a healthy connection is read.
+    await vi.advanceTimersByTimeAsync(16_000);
+    expect(await programUpgradeState(conn({ [W]: W_H1 }), W)).toBe("post");
+  });
+
+  it("a cached 'pre' expires within 45 s (was 5 min)", async () => {
+    vi.useFakeTimers();
+    const pre = conn({ [W]: W_PRE });
+    expect(await programUpgradeState(pre, W)).toBe("pre");
+    const post = conn({ [W]: W_H1 });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(await programUpgradeState(post, W)).toBe("pre"); // still cached
+    await vi.advanceTimersByTimeAsync(16_000);
+    expect(await programUpgradeState(post, W)).toBe("post");
+  });
+
+  it("invalidateUpgradeDetection() forces a re-read immediately (Earn 91/25 retry path)", async () => {
+    expect(await programUpgradeState(conn({ [W]: W_PRE }), W)).toBe("pre");
+    expect(await programUpgradeState(conn({ [W]: W_H1 }), W)).toBe("pre");
+    invalidateUpgradeDetection();
+    expect(await programUpgradeState(conn({ [W]: W_H1 }), W)).toBe("post");
   });
 });

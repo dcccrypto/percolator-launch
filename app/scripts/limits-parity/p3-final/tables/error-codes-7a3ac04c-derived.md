@@ -25,6 +25,7 @@ unless this table equals `allErrors` in `__tests__/fixtures/limits/rust-p3-final
 | `V16Error::CounterUnderflow` | 25 |
 | `V16Error::InsufficientInitialMargin` | 49 |
 | `V16Error::LpVaultZeroSharesMinted` | 41 |
+
 | Custom(n) | Hex | PercolatorError | Engine V16Error mapped here | Source line | Meaning (from the doc comment) |
 |---:|---|---|---|---:|---|
 | 0 | 0x0 | `InvalidMagic` |  | 964 |  |

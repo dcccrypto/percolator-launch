@@ -3,6 +3,11 @@
  * Numbers are the live drifted markets from ~/percolator-ops/ledger/matcher-inventory-drift-2026-10-03.md §1/§4.
  */
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { parsePortfolioV17 } from "@percolatorct/sdk";
+import { decodeMarketEngineView } from "@/lib/limits/decode";
+import { effectiveLeg } from "@/lib/limits/effective-quantity";
 import * as C from "@/lib/limits/constants";
 import { ADL_ONE } from "@/lib/limits/constants";
 import { lpEffectiveSignedQ, lpInventoryRoomQ, matcherPricingInventoryQ } from "@/lib/limits/lp-inventory-room";
@@ -126,5 +131,27 @@ describe("ticket side limits (maxTradeSizePerSide) use the same room", () => {
     const post = maxTradeSizePerSide({ ...base, matcher: { maxFillAbs: 0n, maxInventoryAbs: cap, inventoryBase: cap, lpRealQ: 0n, syncLive: true } });
     expect(post.short.maxQ).toBe(cap);
     expect(post.short.reason).toBe("matcher-inventory");
+  });
+});
+
+describe("lpEffectiveSignedQ on REAL on-chain bytes (pins LEG_A_BASIS / LEG_EPOCH_SNAP independently)", () => {
+  // Read-only devnet getMultipleAccounts at slot 507,153,025: LP 9mpgfUsA… and market 4EGvEGdL…
+  // (the ADL'd drift market: raw short basis 9,724,439,576, A_short < 1).
+  const fx = (f: string) => new Uint8Array(readFileSync(join(process.cwd(), "__tests__/fixtures/upgrade-detect", f)));
+  const lp = fx("lp-9mpgfUsA-4EGvEGdL.bin");
+  const market = fx("market-4EGvEGdL.bin");
+
+  it("equals the value computed from the SDK parser's own offsets (parsePortfolioV17)", () => {
+    const engine = decodeMarketEngineView(market, 0)!;
+    expect(engine).not.toBeNull();
+    const leg = parsePortfolioV17(lp).legs.find((l) => l.active && l.assetIndex === 0 && l.marketId === engine.marketId)!;
+    expect(leg.basisPosQ < 0n ? -leg.basisPosQ : leg.basisPosQ).toBe(9_724_439_576n);
+    expect(leg.side).toBe(1);
+    const viaSdk = effectiveLeg(engine, { active: true, side: leg.side, basisPosQ: leg.basisPosQ, aBasis: leg.aBasis, epochSnap: leg.epochSnap });
+    expect(viaSdk.kind).toBe("live");
+    const app = lpEffectiveSignedQ(lp, engine, 0, engine.marketId);
+    expect(app).toBe(viaSdk.kind === "live" ? viaSdk.signedQ : null);
+    // ADL'd: strictly smaller than the raw basis, and short.
+    expect(app! < 0n && -app! < 9_724_439_576n).toBe(true);
   });
 });

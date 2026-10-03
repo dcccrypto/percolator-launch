@@ -211,7 +211,7 @@ export const P3_ERROR_COPY_BY_NAME: Record<keyof typeof P3_ERR, string> = {
  * so it is keyed here and merged into the code table by `p3ErrorCopyByCode`.
  */
 export const EARN_FLOOR_ERROR_COPY_BY_NAME = {
-  LpVaultTargetPotImpaired: "Earn deposits are paused while this vault settles. Nothing was sent, and withdrawals still work.",
+  LpVaultTargetPotImpaired: "Earn deposits are paused while this vault settles. Nothing was sent.",
 } as const;
 
 /** P3 copy re-keyed by the CURRENT provisional ordinals. */

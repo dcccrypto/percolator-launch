@@ -136,6 +136,16 @@ describe("share-price collapse gate (H-1 / B-1), both regimes", () => {
     expect(planEarnDeposit(vault(d0, FRESH_D1, 0, true, 5n * EARN_PRICE_COLLAPSE_FACTOR))).toEqual({ ok: true, domain: 0 });
     expect(planEarnDeposit(vault(d0, FRESH_D1, 0, true, 5n * EARN_PRICE_COLLAPSE_FACTOR + 1n))).toEqual({ ok: false, reason: "price-collapsed" });
   });
+  it("A-1: harvestable LP fees count toward the collapse NAV, exactly as tag 75 prices", () => {
+    const d0: DomainState = { bucket: bucket(5n), source: source(5n), ledger: ledger(5n) };
+    const shares = 10n * EARN_PRICE_COLLAPSE_FACTOR; // needs NAV >= 10
+    const without = vault(d0, FRESH_D1, 0, true, shares);
+    expect(planEarnDeposit(without)).toEqual({ ok: false, reason: "price-collapsed" }); // NAV 5
+    expect(planEarnDeposit({ ...without, harvestableAtoms: 5n })).toEqual({ ok: true, domain: 0 }); // 5 + 5
+    expect(planEarnDeposit({ ...without, harvestableAtoms: 4n })).toEqual({ ok: false, reason: "price-collapsed" });
+    // The program's harvestable read underflows (withdrawn > accrued -> 25): don't send.
+    expect(planEarnDeposit({ ...without, harvestableAtoms: null })).toEqual({ ok: false, reason: "unpriceable" });
+  });
   it("a genesis vault (0 shares) is never 'collapsed'", () => {
     const d0: DomainState = { bucket: bucket(0n), source: source(0n), ledger: null };
     expect(planEarnDeposit(vault(d0, FRESH_D1, 0, true, 0n))).toEqual({ ok: true, domain: 0 });

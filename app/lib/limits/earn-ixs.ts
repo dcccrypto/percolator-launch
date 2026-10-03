@@ -12,6 +12,7 @@
  *   - registry flag other than 0/1 => the program refuses every Earn op (InvalidAccountData).
  * Pure; the hook reads the accounts and executes.
  */
+import { invalidateUpgradeDetection } from "@/lib/program-upgrade-detect";
 import type { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { ACCOUNTS_LP_VAULT_DEPOSIT, buildAccountMetas, buildIx, encodeDepositToLpVault, encodeExecuteRedemption, encodeRequestRedeemLpShares, WELL_KNOWN } from "@percolatorct/sdk";
 import { buildLpVaultCrankFeesIx, withBoundVaultLpTail } from "./p3-ix";
@@ -200,6 +201,22 @@ export async function sendWithHarvestOn84<T>(p: {
   } catch (e) {
     if (!p.isHarvestPendingRefusal(e)) throw e;
     return p.send(await p.build(true));
+  }
+}
+
+/**
+ * Run `attempt` (which re-reads state and rebuilds its tx); if it is refused BEFORE signing with
+ * what `isVersionRefusal` recognises (wrapper 91 / 25 around the matcher-sync upgrade cutover),
+ * drop the cached program-version detection and run it ONCE more. Only pre-sign refusals qualify,
+ * so nothing is ever sent twice.
+ */
+export async function sendWithUpgradeRetry<T>(attempt: () => Promise<T>, isVersionRefusal: (e: unknown) => boolean): Promise<T> {
+  try {
+    return await attempt();
+  } catch (e) {
+    if (!isVersionRefusal(e)) throw e;
+    invalidateUpgradeDetection();
+    return attempt();
   }
 }
 

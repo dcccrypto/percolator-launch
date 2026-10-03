@@ -41,7 +41,8 @@ import {
   parseLpVaultRegistry,
 } from "@percolatorct/sdk";
 import * as C from "./constants";
-import { decodeLpVaultRegistryBound, u128 } from "./decode";
+import { decodeLpVaultRegistryBound, decodeMarketEngineView, u128 } from "./decode";
+import { harvestableFeeAtoms } from "./vault-tranche";
 import { earnNavFloorLive } from "@/lib/program-upgrade-detect";
 
 const BS = C.BOUND_SCALE;
@@ -436,10 +437,8 @@ export type EarnDepositPlan =
  *     makes 75 price at all today); no repair possible while a pot is underwater -> Custom 25.
  *   - upgraded wrapper (navFloor true): the raw pots (no prefix; B-2). H-1 refuses 75 when EITHER
  *     pot is over-impaired (7a3ac04c alone refuses only the target pot, Custom 91).
- * So in both regimes: any pot over-impaired -> "pot-impaired"; NAV collapsed against the share
- * supply -> "price-collapsed". Otherwise the vault's own pot if its principal covers its net
- * impairment, else the sibling (never reached while both pass the first gate; kept so routing
- * stays correct if the program's rule is narrowed to the target pot).
+ * So in both regimes: any pot over-impaired -> "pot-impaired"; NAV (+ harvestable fees, A-1)
+ * collapsed against the share supply -> "price-collapsed". Otherwise the vault's own pot.
  */
 export function planEarnDeposit(sp: SplitPotState, ownDomain = sp.ownDomain): EarnDepositPlan {
   const fixed = repairUnderwaterPot(sp);
@@ -450,14 +449,20 @@ export function planEarnDeposit(sp: SplitPotState, ownDomain = sp.ownDomain): Ea
   if (ownOver || sibOver) return { ok: false, reason: "pot-impaired" };
   const v = combinedVault(st.own, st.sib, st.feeShareBps, sp.navFloor === true);
   if (!v) return { ok: false, reason: "unpriceable" };
-  if (st.totalShares > 0n && v.nav * EARN_PRICE_COLLAPSE_FACTOR < st.totalShares) return { ok: false, reason: "price-collapsed" };
-  return { ok: true, domain: ownOver ? ownDomain ^ 1 : ownDomain };
+  // A-1: the program checks the FINAL pricing NAV = floored pots + harvestable LP fees.
+  // `harvestableAtoms === null` = the program's harvestable read underflows (25): don't send.
+  if (sp.harvestableAtoms === null) return { ok: false, reason: "unpriceable" };
+  const pricingNav = v.nav + (sp.harvestableAtoms ?? 0n);
+  if (st.totalShares > 0n && pricingNav * EARN_PRICE_COLLAPSE_FACTOR < st.totalShares) return { ok: false, reason: "price-collapsed" };
+  // Either-pot rule: reaching here means neither pot is over-impaired, so the vault's own pot
+  // (principal >= its impairment) always takes it - today's routing.
+  return { ok: true, domain: ownDomain };
 }
 
 /** Thrown before the wallet opens when `planEarnDeposit` says the deposit must not be sent. */
 export class EarnDepositsPausedError extends Error {
   constructor(public readonly reason: Exclude<EarnDepositPlan, { ok: true }>["reason"]) {
-    super("Earn deposits are paused while this vault settles. Nothing was sent, and withdrawals still work.");
+    super("Earn deposits are paused while this vault settles. Nothing was sent.");
     this.name = "EarnDepositsPausedError";
   }
 }
@@ -587,6 +592,12 @@ export interface SplitPotState {
    * into an impaired / collapsed vault. Absent / false = today's live program (fail closed, 25).
    */
   navFloor?: boolean;
+  /**
+   * `lp_vault_harvestable_fee_atoms` from the market (what a tag-78 crank would add to NAV now).
+   * Tag 75 prices on `combined NAV + harvestable` and runs the collapse check on that sum
+   * (bc228e1b :24607-24623). null / absent = unreadable (the program would fail 25 then).
+   */
+  harvestableAtoms?: bigint | null;
 }
 
 /**
@@ -688,6 +699,10 @@ export function vaultPotStateFromAccounts(
       sibLedger: keys.sibLedger,
       bound: keys.bound,
       navFloor,
+      harvestableAtoms: (() => {
+        const e = decodeMarketEngineView(md, 0);
+        return e ? harvestableFeeAtoms(e) : null;
+      })(),
     };
   } catch {
     return null;

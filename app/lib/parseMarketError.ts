@@ -95,7 +95,7 @@ export function extractCustomCode(msg: string): number | null {
 // All other codes fall through to decodeError() for the SDK hint.
 const LAUNCH_ERROR_OVERRIDES: Record<number, string> = {
   // 91: LpVaultTargetPotImpaired (wrapper 7a3ac04c+; SDK 8.0.0 does not know it yet)
-  [WRAPPER_ERR.LpVaultTargetPotImpaired]: "Earn deposits are paused while this vault settles. Nothing was sent, and withdrawals still work.",
+  [WRAPPER_ERR.LpVaultTargetPotImpaired]: "Earn deposits are paused while this vault settles. Nothing was sent.",
   // 0: InvalidMagic
   [WRAPPER_ERR.InvalidMagic]: "Invalid magic number. The market account data is corrupted. Check the market address.",
   // 1: InvalidVersion

@@ -39,6 +39,6 @@ describe("Earn deposit refused BEFORE sending (planEarnDeposit -> EarnDepositsPa
     const { EarnDepositsPausedError } = await import("@/lib/limits/earn-split-pot");
     const m = resolveUserMessage(new EarnDepositsPausedError("price-collapsed") as never, { surface: "earn-deposit" } as never);
     expect(m.kind).toBe("earn-pot-impaired");
-    expect(m.body).toBe("Earn deposits are paused while this vault settles. Nothing was sent, and withdrawals still work.");
+    expect(m.body).toBe("Earn deposits are paused while this vault settles. Nothing was sent.");
   });
 });
