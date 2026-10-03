@@ -420,7 +420,8 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
       {isNftWrapped && (
         <div className="border-b border-[var(--accent)]/20 bg-[var(--accent)]/5 px-4 py-1.5 text-center">
           <span className="text-[9px] font-medium uppercase tracking-[0.12em] text-[var(--accent)]">
-            🎫 Wrapped in Position NFT — burn it in the Position NFT panel to unwrap &amp; close
+            {/* The Position NFT panel was removed (UX WP-9): Unwrap lives in the row's ⋯ menu. */}
+            🎫 Wrapped in Position NFT — Unwrap it from the ⋯ menu to close
           </span>
         </div>
       )}
