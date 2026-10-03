@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FC } from "react";
+import { useEffect, useMemo, useRef, useState, type FC } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { MarketLogo } from "@/components/market/MarketLogo";
@@ -33,6 +33,8 @@ const fetcher = (url: string): Promise<TrendingTokensResult> =>
 /** Copy-to-clipboard contract-address chip with a brief "copied" confirmation. */
 const CopyCa: FC<{ ca: string }> = ({ ca }) => {
   const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
   return (
     <button
       type="button"
@@ -40,7 +42,8 @@ const CopyCa: FC<{ ca: string }> = ({ ca }) => {
         try {
           await navigator.clipboard.writeText(ca);
           setCopied(true);
-          setTimeout(() => setCopied(false), 1200);
+          if (timer.current) clearTimeout(timer.current);
+          timer.current = setTimeout(() => setCopied(false), 1200);
         } catch {
           /* clipboard blocked — no-op */
         }

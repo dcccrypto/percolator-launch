@@ -36,7 +36,8 @@ const statsFetcher = (url: string): Promise<{ stats?: { change24h?: number | nul
 
 function formatChangePct(pct: number | null): string {
   if (pct == null || !Number.isFinite(pct)) return "—";
-  return `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
+  if (pct === 0) return "0.0%";
+  return `${pct > 0 ? "+" : ""}${pct.toFixed(1)}%`;
 }
 
 /** Stable getServerSnapshot (SSR/first paint) — null price until the store ticks. */
@@ -71,7 +72,12 @@ const RailRow: FC<RailRowProps> = ({ slab, symbol, name, mainnetCa, fallbackPric
 
   const flash = usePriceFlash(livePriceE6);
   const tintClass = flash === "up" ? "text-[var(--long)]" : flash === "down" ? "text-[var(--short)]" : "text-[var(--text)]";
-  const changeClass = change24h == null ? "text-[var(--text-dim)]" : change24h >= 0 ? "text-[var(--long)]" : "text-[var(--short)]";
+  const changeClass =
+    change24h == null || change24h === 0
+      ? "text-[var(--text-dim)]"
+      : change24h > 0
+        ? "text-[var(--long)]"
+        : "text-[var(--short)]";
 
   const priceLabel = formatMarkPrice(livePriceUsd ?? fallbackPrice);
   const displaySymbol = symbol.replace(/-PERP$/, "");
