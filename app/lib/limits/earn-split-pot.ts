@@ -425,9 +425,33 @@ export function repairUnderwaterPot(sp: SplitPotState): { state: SplitPotState; 
  */
 export const EARN_PRICE_COLLAPSE_FACTOR = 1_000n;
 
+/**
+ * Wrapper 7c906e45 `LP_VAULT_MAX_DEPOSIT_IMPAIRMENT_BPS` (security R-1): a non-bound 75 is
+ * refused while the vault's total net impairment exceeds 10% of its total principal.
+ */
+export const EARN_MAX_DEPOSIT_IMPAIRMENT_BPS = 1_000n;
+
+/**
+ * Port of 7c906e45 `lp_vault_impairment_exceeds`: `impairment > floor(principal * bps / 10_000)`
+ * (exact; `principal == 0` is never impaired).
+ */
+export function vaultImpairmentExceeds(impairment: bigint, principal: bigint, maxBps: bigint = EARN_MAX_DEPOSIT_IMPAIRMENT_BPS): boolean {
+  return impairment > (principal * maxBps) / 10_000n;
+}
+
+/**
+ * One pot's (principal, min(loss − recovery, principal)) from its SYNCED ledger, as 7c906e45
+ * `lp_vault_pot_impairment_parts` (a missing ledger reads as new: principal 0, impairment 0).
+ */
+export function potImpairmentParts(l: DomainLedger): { principal: bigint; impairment: bigint } {
+  const net = l.cumulativeLoss - l.cumulativeRecovery;
+  const imp = net > 0n ? net : 0n;
+  return { principal: l.totalPrincipal, impairment: imp < l.totalPrincipal ? imp : l.totalPrincipal };
+}
+
 export type EarnDepositPlan =
   | { ok: true; domain: number }
-  | { ok: false; reason: "pot-impaired" | "price-collapsed" | "unpriceable" };
+  | { ok: false; reason: "pot-impaired" | "vault-impaired" | "price-collapsed" | "unpriceable" };
 
 /**
  * Where a NON-bound Earn deposit (75) goes, or why the app must not send it.
@@ -437,8 +461,10 @@ export type EarnDepositPlan =
  *     makes 75 price at all today); no repair possible while a pot is underwater -> Custom 25.
  *   - upgraded wrapper (navFloor true): the raw pots (no prefix; B-2). H-1 refuses 75 when EITHER
  *     pot is over-impaired (7a3ac04c alone refuses only the target pot, Custom 91).
- * So in both regimes: any pot over-impaired -> "pot-impaired"; NAV (+ harvestable fees, A-1)
- * collapsed against the share supply -> "price-collapsed". Otherwise the vault's own pot.
+ * So in both regimes, in the program's order (7c906e45 tag 75): any pot over-impaired ->
+ * "pot-impaired"; vault-total impairment > 10% of vault-total principal -> "vault-impaired";
+ * NAV (+ harvestable fees, A-1) collapsed against the share supply -> "price-collapsed".
+ * Otherwise the vault's own pot.
  */
 export function planEarnDeposit(sp: SplitPotState, ownDomain = sp.ownDomain): EarnDepositPlan {
   const fixed = repairUnderwaterPot(sp);
@@ -447,6 +473,10 @@ export function planEarnDeposit(sp: SplitPotState, ownDomain = sp.ownDomain): Ea
   const ownOver = potDeficit(syncedLedger(st.own)) > 0n;
   const sibOver = potDeficit(syncedLedger(st.sib)) > 0n;
   if (ownOver || sibOver) return { ok: false, reason: "pot-impaired" };
+  // R-1 (7c906e45): vault-total net impairment above 10% of vault-total principal.
+  const a = potImpairmentParts(syncedLedger(st.own));
+  const b = potImpairmentParts(syncedLedger(st.sib));
+  if (vaultImpairmentExceeds(a.impairment + b.impairment, a.principal + b.principal)) return { ok: false, reason: "vault-impaired" };
   const v = combinedVault(st.own, st.sib, st.feeShareBps, sp.navFloor === true);
   if (!v) return { ok: false, reason: "unpriceable" };
   // A-1: the program checks the FINAL pricing NAV = floored pots + harvestable LP fees.
