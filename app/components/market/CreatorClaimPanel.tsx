@@ -5,6 +5,7 @@ import { useCreatorClaim } from "@/hooks/useCreatorClaim";
 import { formatTokenAmount } from "@/lib/format";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useSlabState } from "@/components/providers/SlabProvider";
+import { useCreatorFeesClaimed } from "@/hooks/useCreatorFeesClaimed";
 
 /**
  * Creator fee-claim panel — `WithdrawCreatorFee` (tag 90).
@@ -34,7 +35,9 @@ export const CreatorClaimPanel: FC<{ slabAddress?: string }> = () => {
   const decimals = tokenMeta?.decimals ?? 6;
   const symbol = tokenMeta?.symbol ?? "";
 
-  const { isClaimAuthority, claimable, loading, error, success, claim } = useCreatorClaim();
+  const { isClaimAuthority, claimAuthority, claimable, loading, error, success, claim } = useCreatorClaim();
+  // All-time claimed, rebuilt from this market's claim history (the chain keeps only the balance).
+  const claimed = useCreatorFeesClaimed(isClaimAuthority ? (claimAuthority?.toBase58() ?? null) : null, claimable);
 
   const [justClaimed, setJustClaimed] = useState(false);
 
@@ -74,6 +77,29 @@ export const CreatorClaimPanel: FC<{ slabAddress?: string }> = () => {
             data-testid="creator-claimable"
           >
             {formatTokenAmount(claimable, decimals)} {symbol}
+          </span>
+        </div>
+
+        <div className="mb-2 flex items-baseline justify-between">
+          <span className="text-[9px] text-[var(--text-dim)]" title="Every claim paid to this wallet on this market">
+            Claimed all time
+            {claimed.kind === "ready" && claimed.claims > 0 && (
+              <span className="ml-1 text-[var(--text-dim)]/70">
+                · {claimed.claims} {claimed.claims === 1 ? "claim" : "claims"}
+              </span>
+            )}
+          </span>
+          <span
+            className="text-[12px] text-[var(--text-secondary)]"
+            style={{ fontFamily: "var(--font-mono)" }}
+            data-testid="creator-claimed-all-time"
+            title={claimed.kind === "error" ? "Couldn't read this market's claim history. Reload to try again." : undefined}
+          >
+            {claimed.kind === "ready"
+              ? `${formatTokenAmount(claimed.claimedAtoms, decimals)} ${symbol}`
+              : claimed.kind === "error"
+                ? "unavailable"
+                : "—"}
           </span>
         </div>
 
