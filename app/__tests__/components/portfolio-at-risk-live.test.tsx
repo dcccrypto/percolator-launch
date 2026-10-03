@@ -6,7 +6,7 @@
  */
 import "@testing-library/jest-dom";
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { PortfolioPositionsView } from "@/components/portfolio/PortfolioPositionsView";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { usePortfolio } from "@/hooks/usePortfolio";
@@ -52,14 +52,18 @@ function renderWith(slab: string, over: Record<string, unknown> = {}) {
   render(<PortfolioPositionsView />);
 }
 
+/** The at-risk strip (AtRiskBanner), or null when nothing is at risk. */
+const strip = () => screen.queryByRole("region", { name: "Positions near liquidation" });
+const stripShows = (pct: string) => expect(within(strip()!).getByText(pct)).toBeInTheDocument();
+
 describe("/portfolio at-risk strip follows the live mark", () => {
   it("strip, card and count agree at the live price", () => {
     const slab = "SlabLiveRisk1111";
     renderWith(slab);
-    expect(screen.getByText("SOL (20.0%)")).toBeInTheDocument();
+    stripShows("20.0%");
     act(() => applyOnChainPoll(slab, 85_000_000n)); // (85 - 80) / 85 = 5.88%
-    expect(screen.getByText("SOL (5.9%)")).toBeInTheDocument();
-    expect(screen.getByText(/Liquidation Risk — 5\.9% away/)).toBeInTheDocument();
+    stripShows("5.9%");
+    expect(screen.getByText("5.9% from liquidation")).toBeInTheDocument(); // the card
     expect(screen.getAllByText(/1 at risk/).length).toBeGreaterThan(0);
   });
 
@@ -70,7 +74,7 @@ describe("/portfolio at-risk strip follows the live mark", () => {
     expect(screen.queryByText(/at risk/)).not.toBeInTheDocument();
     act(() => applyOnChainPoll(slab, 55_000_000n)); // (55 - 50) / 55 = 9.1%
     expect(screen.getAllByText(/1 at risk/).length).toBeGreaterThan(0);
-    expect(screen.getByText("SOL (9.1%)")).toBeInTheDocument();
+    stripShows("9.1%");
   });
 
   it("short: distance is measured up to the liquidation price", () => {
@@ -81,17 +85,17 @@ describe("/portfolio at-risk strip follows the live mark", () => {
       account: { kind: AccountKind.User, owner: pk, capital: 1_000_000n, positionSize: -5_000_000n, pnl: 0n, entryPrice: 100_000_000n },
       liquidationPriceE6: 120_000_000n, liquidationDistancePct: 16.67,
     });
-    expect(screen.getByText("SOL (16.7%)")).toBeInTheDocument();
+    stripShows("16.7%");
     act(() => applyOnChainPoll(slab, 115_000_000n)); // (120 - 115) / 120 = 4.17%
-    expect(screen.getByText("SOL (4.2%)")).toBeInTheDocument();
+    stripShows("4.2%");
   });
 
   it("clears when the price recovers, though the poll still says 20%", () => {
     const slab = "SlabLiveRisk2222";
     renderWith(slab);
-    expect(screen.getByText("SOL (20.0%)")).toBeInTheDocument();
-    act(() => applyOnChainPoll(slab, 120_000_000n)); // (120 - 80) / 120 = 33%: safe
-    expect(screen.queryByText(/SOL \(/)).not.toBeInTheDocument();
+    stripShows("20.0%");
+    act(() => applyOnChainPoll(slab, 120_000_000n)); // (120 - 80) / 120 = 33%: safe (over 20%)
+    expect(strip()).toBeNull();
     expect(screen.queryByText(/at risk/)).not.toBeInTheDocument();
   });
 });

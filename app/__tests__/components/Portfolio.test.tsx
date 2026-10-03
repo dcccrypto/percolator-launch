@@ -11,7 +11,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 // Portfolio's positions view was extracted from app/portfolio/page.tsx into
 // this component when /portfolio became a tabbed hub. These tests exercise the
@@ -668,12 +668,12 @@ describe("Portfolio Component Tests", () => {
 
       render(<PortfolioPage />);
 
-      // No /i flag: AtRiskBanner's own copy is "Liquidation risk" (lowercase
-      // "risk") — PositionCard's PER-ROW banner is "Liquidation Risk"
-      // (capital R) + a "— X% away" suffix, a deliberately different string
-      // so this assertion targets AtRiskBanner specifically, not both.
-      expect(screen.getByText(/Liquidation risk/)).toBeInTheDocument();
-      expect(screen.getByText(/SOL \(5\.0%\)/)).toBeInTheDocument();
+      // The strip (AtRiskBanner) lists the position with its distance and actions.
+      const strip = screen.getByRole("region", { name: "Positions near liquidation" });
+      expect(within(strip).getByText("Liquidation risk")).toBeInTheDocument();
+      expect(within(strip).getByText("SOL")).toBeInTheDocument();
+      expect(within(strip).getByText("5.0%")).toBeInTheDocument();
+      expect(within(strip).getByRole("link", { name: "Go to market" })).toHaveAttribute("href", "/trade/test-slab-risk");
     });
 
     it("renders nothing (zero height) when no position is at risk", () => {

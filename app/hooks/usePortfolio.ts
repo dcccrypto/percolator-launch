@@ -293,6 +293,10 @@ export function liveLiquidationDistancePct(pos: PortfolioPosition, liveMarkE6: b
   return computeLiquidationDistancePct(pos.effectiveSize, markE6, pos.liquidationPriceE6, pos.liquidationDistancePct);
 }
 
+/** Within this % of liquidation a position is "at risk" (amber) / in "danger" (red). */
+export const LIQ_WARNING_PCT = 20;
+export const LIQ_DANGER_PCT = 10;
+
 export function getLiquidationSeverity(distancePct: number): LiquidationSeverity {
   // #2412: a non-finite distance must NOT read as "safe". Both comparisons below
   // are FALSE for NaN (and for Infinity on the first two), so an unguarded NaN
@@ -309,8 +313,8 @@ export function getLiquidationSeverity(distancePct: number): LiquidationSeverity
   // liquidation) is the only non-finite value that would prefer "safe", and it
   // is not worth a special case against that downside.
   if (!Number.isFinite(distancePct)) return "danger";
-  if (distancePct <= 10) return "danger";
-  if (distancePct <= 30) return "warning";
+  if (distancePct <= LIQ_DANGER_PCT) return "danger";
+  if (distancePct <= LIQ_WARNING_PCT) return "warning";
   return "safe";
 }
 
@@ -852,7 +856,7 @@ export async function fetchPortfolioSnapshot(
             }
 
             // Track liquidation risk
-            if (liquidationDistancePct <= 30 && account.positionSize !== 0n) {
+            if (liquidationDistancePct <= LIQ_WARNING_PCT && account.positionSize !== 0n) {
               riskCount++;
             }
 
@@ -985,7 +989,7 @@ export async function fetchPortfolioSnapshot(
           meta.adlFactors,
         );
 
-        if (pos.liquidationDistancePct <= 30 && pos.account.positionSize !== 0n) {
+        if (pos.liquidationDistancePct <= LIQ_WARNING_PCT && pos.account.positionSize !== 0n) {
           riskCount++;
         }
 
@@ -1078,7 +1082,7 @@ export async function fetchPortfolioSnapshot(
             meta.adlFactors,
           );
 
-          if (pos.liquidationDistancePct <= 30 && pos.account.positionSize !== 0n) {
+          if (pos.liquidationDistancePct <= LIQ_WARNING_PCT && pos.account.positionSize !== 0n) {
             riskCount++;
           }
           allPositions.push(pos);

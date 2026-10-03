@@ -27,6 +27,7 @@
  * `OrderTicket` already owns the deposit entry point (its account row).
  */
 
+import { LIQ_DANGER_PCT, LIQ_WARNING_PCT } from "@/hooks/usePortfolio";
 import { FC, memo, useMemo, useState } from "react";
 import { useUserAccount, useUserAccountScanPending } from "@/hooks/useUserAccount";
 import { useNftWrappedPosition } from "@/hooks/useNftWrappedPosition";
@@ -366,8 +367,9 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
     // its liq price is distance 0 (critical), not "safe". Helper returns
     // percent 0-100; thresholds here consume a 0-1 fraction.
     const distPct = computeLiquidationDistancePct(account.positionSize, currentPriceE6, liqPriceE6) / 100;
-    if (distPct < 0.05) return "text-[var(--short)]";
-    if (distPct < 0.10) return "text-[var(--warning)]";
+    // Same tiers as the site-wide liquidation warning (red <= 10%, amber <= 20%).
+    if (distPct <= LIQ_DANGER_PCT / 100) return "text-[var(--short)]";
+    if (distPct <= LIQ_WARNING_PCT / 100) return "text-[var(--warning)]";
     return "text-[var(--text-secondary)]";
   })();
   const pnlColor = pnlTokens === 0n ? "text-[var(--text-muted)]" : pnlTokens > 0n ? "text-[var(--long)]" : "text-[var(--short)]";

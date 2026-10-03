@@ -1,5 +1,6 @@
 "use client";
 
+import { LIQ_DANGER_PCT, LIQ_WARNING_PCT } from "@/hooks/usePortfolio";
 import { FC, useMemo, useState, useRef, useEffect } from "react";
 import { Q_SCALE } from "@/lib/q-usd";
 import { useUserAccount } from "@/hooks/useUserAccount";
@@ -351,7 +352,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     maintenanceBps,
   );
 
-  // Liq price danger color: amber when mark is within 15% of liq.
+  // Liq price color and banner use the site-wide warning tiers (red <= 10%, amber <= 20%).
   // Direction-aware (shared helper): a short whose mark has crossed ABOVE its
   // liq price is distance 0 (critical), not "safe" — the old
   // Math.abs(cur-liq)/cur showed a crossed position as far from liquidation.
@@ -368,13 +369,12 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const liqPriceColor = (() => {
     if (liqUnliquidatable) return "text-[var(--text-secondary)]";
     if (liqPriceE6 <= 0n || !hasValidMark || currentPriceE6 <= 0n) return "text-[var(--warning)]";
-    if (liqDistPct < 0.05) return "text-[var(--short)]";   // <5% — critical red
-    if (liqDistPct < 0.10) return "text-[var(--warning)]"; // <10% — amber
+    if (liqDistPct <= LIQ_DANGER_PCT / 100) return "text-[var(--short)]";
+    if (liqDistPct <= LIQ_WARNING_PCT / 100) return "text-[var(--warning)]";
     return "text-[var(--text-secondary)]";
   })();
 
-  // 3.5: Liq warning banner at <15%
-  const showLiqWarning = hasValidMark && liqPriceE6 > 0n && liqDistPct < 0.15;
+  const showLiqWarning = hasValidMark && liqPriceE6 > 0n && liqDistPct <= LIQ_WARNING_PCT / 100;
 
   const pnlColor =
     pnlTokens === 0n
@@ -566,7 +566,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               decimals={decimals}
             />
 
-            {/* 3.5: Liq warning when <15% away */}
+            {/* Liq warning within the site-wide warning distance */}
             {showLiqWarning && (
               <div className="mb-2 flex items-center gap-1.5 rounded-none border border-[var(--short)]/30 bg-[var(--short)]/5 px-2 py-1.5">
                 <span className="text-[8px] text-[var(--short)] font-medium uppercase tracking-[0.12em]">

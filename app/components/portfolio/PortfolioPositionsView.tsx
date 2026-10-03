@@ -290,19 +290,32 @@ function PositionCard({
             : "border-[var(--border)] hover:border-[var(--accent)]/30",
         ].join(" ")}
       >
-        {/* Liquidation warning banner */}
-        {severity === "danger" && hasPosition && (
-          <div className="flex items-center gap-2 border-b border-[var(--short)]/20 bg-[var(--short)]/5 px-4 py-1.5">
-            <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--short)]">
-              ⚠ Liquidation Risk — {liquidationDistancePct.toFixed(1)}% away
+        {/* Liquidation warning: same look as the at-risk strip and the site-wide alert. */}
+        {severity !== "safe" && hasPosition && (
+          <div
+            className="flex items-center gap-2 border-b px-4 py-1.5"
+            style={{ borderColor: `color-mix(in srgb, ${severity === "danger" ? "var(--short)" : "var(--warning)"} 25%, transparent)` }}
+          >
+            <span
+              className="inline-block h-1.5 w-1.5 rounded-full"
+              style={{ background: severity === "danger" ? "var(--short)" : "var(--warning)" }}
+              aria-hidden
+            />
+            <span
+              className="text-[11px] font-medium"
+              style={{ color: severity === "danger" ? "var(--short)" : "var(--warning)" }}
+            >
+              {severity === "danger" ? "Liquidation risk" : "Approaching liquidation"}
             </span>
-          </div>
-        )}
-        {severity === "warning" && hasPosition && (
-          <div className="flex items-center gap-2 border-b border-[var(--warning)]/20 bg-[var(--warning)]/5 px-4 py-1.5">
-            <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--warning)]">
-              ⚡ Approaching Liquidation — {liquidationDistancePct.toFixed(1)}% away
-            </span>
+            {/* Only a measured distance is shown; an unknown mark or entry also reads as risk. */}
+            {liveLiquidationState.kind === "liquidatable" && (
+              <span
+                className="ml-auto font-mono text-[11px] tabular-nums"
+                style={{ color: severity === "danger" ? "var(--short)" : "var(--warning)" }}
+              >
+                {liquidationDistancePct.toFixed(1)}% from liquidation
+              </span>
+            )}
           </div>
         )}
 
@@ -765,7 +778,7 @@ export function PortfolioPositionsView() {
 
         {/* At-risk strip — zero height unless a position is within the
             liquidation warning distance (see getLiquidationSeverity). */}
-        <AtRiskBanner positions={openPositions} livePrices={livePrices} />
+        <AtRiskBanner positions={openPositions} livePrices={livePrices} decimalsOf={getDecimals} onClosed={refresh} />
 
         {/* Tier 1 hero: Portfolio Value (live) + live Unrealized PnL beneath. */}
         <ScrollReveal stagger={0.08}>

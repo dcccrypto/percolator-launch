@@ -66,7 +66,7 @@ function abs(n: bigint): bigint {
 /** On-demand close flow — SlabProvider mounted only while the modal is open
  *  (useClosePosition needs slab context; a provider per visible row would
  *  multiply RPC polling by the number of open markets). */
-const CloseFlow: FC<{
+export const CloseFlow: FC<{
   pos: PortfolioPosition;
   markE6: bigint;
   priceUsd: number | null;

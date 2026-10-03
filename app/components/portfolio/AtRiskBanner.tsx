@@ -1,73 +1,75 @@
 "use client";
 
-import Link from "next/link";
+import { useState } from "react";
+import { LIQ_WARNING_PCT, type PortfolioPosition } from "@/hooks/usePortfolio";
 import {
-  getLiquidationSeverity,
-  liveLiquidationDistancePct,
-  positionRowKeys,
-  type PortfolioPosition,
-} from "@/hooks/usePortfolio";
+  collectLiquidationRisks,
+  LiquidationRiskItem,
+  riskKey,
+  RiskCloseFlow,
+  type LiquidationRisk,
+} from "@/components/portfolio/LiquidationRiskItem";
 
 interface AtRiskBannerProps {
-  /** Open positions only — flat/idle deposits always report distancePct=100
-   *  ("safe") so passing them in is harmless, but the caller should filter
+  /** Open positions only — flat/idle deposits are skipped, but the caller should filter
    *  to positions with a nonzero size for a cheaper pass. */
   positions: PortfolioPosition[];
   /** Live marks by slab (useLiveSlabPrices), so the strip shows the same figure as the cards.
    *  Without it the strip falls back to the poll's price. */
   livePrices?: ReadonlyMap<string, bigint>;
+  /** Collateral decimals per position, for the close modal (default 6). */
+  decimalsOf?: (pos: PortfolioPosition) => number;
+  /** Called after a position is closed from here (e.g. to refresh the portfolio). */
+  onClosed?: () => void;
 }
 
 /**
- * Full-width strip listing every position within liquidation-warning
- * distance (see `getLiquidationSeverity` — "warning" <=30%, "danger" <=10%),
- * each linking straight to its market so the trader can act immediately.
- * Renders `null` (zero height) when nothing is at risk — this is a
- * conditional alert surfaced under the header, not decorative chrome.
+ * Every position within liquidation-warning distance (see `getLiquidationSeverity`:
+ * "warning" <= LIQ_WARNING_PCT, "danger" <= LIQ_DANGER_PCT), closest first, each with
+ * Go to market and Close. Renders `null` (zero height) when nothing is at risk.
  */
-export function AtRiskBanner({ positions, livePrices }: AtRiskBannerProps) {
-  const distanceOf = (pos: PortfolioPosition) => liveLiquidationDistancePct(pos, livePrices?.get(pos.slabAddress));
-  const atRisk = positions.filter(
-    (pos) =>
-      (pos.account?.positionSize ?? 0n) !== 0n &&
-      getLiquidationSeverity(distanceOf(pos)) !== "safe",
+export function AtRiskBanner({ positions, livePrices, decimalsOf, onClosed }: AtRiskBannerProps) {
+  const [closing, setClosing] = useState<LiquidationRisk | null>(null);
+  const risks = collectLiquidationRisks(positions, livePrices, decimalsOf);
+  const closeFlow = closing && (
+    <RiskCloseFlow
+      risk={closing}
+      onDone={(closed) => {
+        setClosing(null);
+        if (closed) onClosed?.();
+      }}
+    />
   );
-  if (atRisk.length === 0) return null;
-  const keys = positionRowKeys(atRisk);
+  const danger = risks.some((r) => r.severity === "danger");
 
-  const hasDanger = atRisk.some((pos) => getLiquidationSeverity(distanceOf(pos)) === "danger");
-
+  // The close flow keeps the same place in the tree whether or not the list renders: a
+  // remount would reset useClosePosition's in-flight guard mid-close.
   return (
-    <div
-      className={`mb-6 flex flex-wrap items-center gap-x-3 gap-y-1.5 border px-4 py-2.5 ${
-        hasDanger
-          ? "border-[var(--short)]/40 bg-[var(--short)]/5"
-          : "border-[var(--warning)]/30 bg-[var(--warning)]/5"
-      }`}
-    >
-      <span
-        className={`text-[10px] font-bold uppercase tracking-[0.1em] ${
-          hasDanger ? "text-[var(--short)]" : "text-[var(--warning)]"
-        }`}
-      >
-        {hasDanger ? "⚠ Liquidation risk" : "⚡ Approaching liquidation"}
-      </span>
-      {atRisk.map((pos, i) => {
-        const distance = distanceOf(pos);
-        const severity = getLiquidationSeverity(distance);
-        const label = (pos.symbol ?? `${pos.slabAddress.slice(0, 6)}…`).replace(/-PERP$/i, "");
-        return (
-          <Link
-            key={keys[i]}
-            href={`/trade/${pos.slabAddress}`}
-            className={`text-[11px] font-semibold underline-offset-2 hover:underline ${
-              severity === "danger" ? "text-[var(--short)]" : "text-[var(--warning)]"
-            }`}
-          >
-            {label} ({distance.toFixed(1)}%)
-          </Link>
-        );
-      })}
-    </div>
+    <>
+      {risks.length > 0 && (
+        <section className="mb-6" aria-label="Positions near liquidation">
+          <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <span
+              className="inline-block h-1.5 w-1.5 translate-y-[-1px] rounded-full"
+              style={{ background: danger ? "var(--short)" : "var(--warning)" }}
+              aria-hidden
+            />
+            <h2 className="whitespace-nowrap text-[12px] font-medium text-[var(--text)]">
+              {danger ? "Liquidation risk" : "Approaching liquidation"}
+            </h2>
+            <span className="text-[11px] text-[var(--text-secondary)]">
+              {risks.length === 1 ? "1 position" : `${risks.length} positions`} within {LIQ_WARNING_PCT}% of
+              liquidation
+            </span>
+          </div>
+          <div className="grid gap-2 md:grid-cols-2">
+            {risks.map((risk) => (
+              <LiquidationRiskItem key={riskKey(risk.pos)} risk={risk} onClose={() => setClosing(risk)} />
+            ))}
+          </div>
+        </section>
+      )}
+      {closeFlow}
+    </>
   );
 }
