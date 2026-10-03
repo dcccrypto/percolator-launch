@@ -526,6 +526,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setDirection("long");
     setSizeInput("");
     setMarginInput("");
+    // A typed deposit belongs to this market's first trade, not the next market's.
+    setFundInput("");
     setLeverage(1);
     setLeverageText("1");
     setLastSig(null);
@@ -913,7 +915,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
     if (mockMode) {
       setTradePhase("submitting");
-      setTimeout(() => { setTradePhase("confirming"); setMarginInput(""); setSizeInput(""); }, 800);
+      setTimeout(() => { setTradePhase("confirming"); setMarginInput(""); setSizeInput(""); setFundInput(""); }, 800);
       setTimeout(() => setTradePhase("idle"), 2000);
       return;
     }
@@ -1002,6 +1004,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       setEngineLockError(null);
       setMarginInput("");
       setSizeInput("");
+      setFundInput("");
       // A first fund-and-trade runs with no account in this closure (fundingMode allows it), and the
       // portfolio it just created is a v17 one: idx 0, like every v17 account (lib/userAccountScan.ts).
       const entryIdx = userAccount?.idx ?? (fundingMode ? 0 : null);
