@@ -2,10 +2,11 @@
  * GET /api/playground/registered-markets
  *
  * Public read of the playground's dynamically-registered markets (Vercel Blob
- * backed — see lib/playground-registered-markets.ts). This is the endpoint the
- * oracle keeper polls outbound (percolator-oracle-keeper/src/cross-cluster/
- * register-poll.ts) to discover markets created through the create-market wizard
- * after the keeper process started.
+ * backed — see lib/playground-registered-markets.ts). The oracle keeper used to
+ * poll this endpoint to discover wizard-created markets; the live relaunch keeper
+ * (percolator-oracle-keeper relaunch, src/cross-cluster/register-poll.ts) now reads
+ * the Supabase `markets` table (keeper_status='active') instead. In-app, the Earn
+ * page seeds from it (hooks/useEarnStats.ts).
  *
  * No secrets in the payload — public read is intentional so the NAT'd keeper can
  * reach it with a plain unauthenticated GET.
@@ -24,7 +25,11 @@
  *
  *   1. blocklisted slabs are dropped outright;
  *   2. what remains is intersected with the live `markets` table, so a market
- *      that has been deleted stops being served without having to be named.
+ *      that has been deleted stops being served without having to be named;
+ *   3. (GH#2988) a slab the RPC positively reports as gone (explicit `null`, e.g.
+ *      after CloseSlab) is dropped. An RPC failure, a short reply or a read in
+ *      which NO slab exists (wrong cluster) proves nothing and drops nothing —
+ *      see readSlabExistence in lib/live-market-state.ts.
  *
  * The DB is the authority for what exists; the Blob only supplies the extra fields
  * the keeper needs that the DB does not carry (dexType, poolAddress). If the DB is
@@ -35,7 +40,7 @@ import { NextResponse } from "next/server";
 import { readRegisteredMarkets } from "@/lib/playground-registered-markets";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
-import { readLiveMarketStateResolutions } from "@/lib/live-market-state";
+import { readSlabExistence } from "@/lib/live-market-state";
 
 export const dynamic = "force-dynamic";
 
@@ -67,24 +72,12 @@ export async function GET() {
 
   const live = await liveSlabAddresses();
 
-  const dbFiltered =
-    live === null
-      ? notBlocked
-      : notBlocked.filter((m) =>
-          live.has(m.slabAddress),
-        );
+  const dbFiltered = live === null ? notBlocked : notBlocked.filter((m) => live.has(m.slabAddress));
 
-  const chain =
-    await readLiveMarketStateResolutions(
-      dbFiltered.map((m) => m.slabAddress),
-    );
-
-  // GH#2988: an explicit RPC `null` proves that the slab no longer exists.
-  // Drop only positively missing accounts. RPC/parse uncertainty intentionally
-  // remains fail-open so an infrastructure outage cannot empty the keeper feed.
-  const markets = dbFiltered.filter(
-    (m) => !chain.missing.has(m.slabAddress),
-  );
+  // GH#2988: drop only slabs the RPC positively reports as absent. Existence-only probe (zero-length
+  // dataSlice), so this costs no slab bytes; RPC/parse uncertainty keeps the fail-open policy.
+  const chain = await readSlabExistence(dbFiltered.map((m) => m.slabAddress));
+  const markets = dbFiltered.filter((m) => !chain.missing.has(m.slabAddress));
 
   return NextResponse.json(
     { markets },

@@ -91,12 +91,11 @@ vi.mock("@/lib/supabase", () => ({
 }));
 
 vi.mock("@/lib/live-market-state", () => ({
-  readLiveMarketStateResolutions:
+  readSlabExistence:
     async (slabs: string[]) => {
       h.chainCalls.push([...slabs]);
 
       return {
-        states: new Map(),
         missing: new Set(h.missing),
         unresolved: new Set(
           h.unresolved,

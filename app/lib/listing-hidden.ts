@@ -2,7 +2,8 @@
  * Markets hidden from LISTINGS only (the /markets page, the landing Live Markets rail and the
  * /trade default pick). Unlike lib/blocklist.ts this does NOT block the market: its trade page,
  * positions, close, withdraw and Earn exit keep working by direct link, and the keeper keeps
- * cranking it (registered-markets is unfiltered) — holders must still be able to exit.
+ * cranking it (the keeper reads the `markets` table, not the listing) — holders must still be
+ * able to exit.
  *
  * 2026-10-02: SI (8WC8vALs…) — LP capital 0 + ADL reduce-only, so every open fails; hidden for
  * the launch until it is restored. Extra slabs: NEXT_PUBLIC_LISTING_HIDDEN (comma-separated).
