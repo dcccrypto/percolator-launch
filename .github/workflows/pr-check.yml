@@ -13,6 +13,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  tv-library-leak-guard:
+    # The TradingView Advanced Charts licence forbids the library in public repos.
+    # It is fetched at build time (app/scripts/fetch-tv-library.mjs) into a
+    # gitignored folder; this fails the PR if any of it is ever committed.
+    name: TradingView library leak guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Check no library files are tracked
+        run: node scripts/check-tv-library-leak.mjs
+
   build-and-test:
     name: Build & Fast Tests
     runs-on: ubuntu-latest

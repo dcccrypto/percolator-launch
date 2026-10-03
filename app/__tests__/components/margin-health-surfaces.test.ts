@@ -63,6 +63,8 @@ export function usesSharedLiqDisplay(src: string): boolean {
 const EXEMPT: Record<string, string> = {
   "components/trade/TradingChart.tsx":
     "Draws a price LINE only when a real price exists (useLiqPrice is null for the covered case, so there is no '—'/'∞' to explain); its title cannot carry health without making the series-rebuild effect depend on the mark. #2634 item 3.",
+  "components/trade/tv/TvChart.tsx":
+    "TradingView twin of TradingChart's Liq line: a locked horizontal LINE drawn only when a real price exists (usePositionLinePrices -> null for the covered case; desiredLines skips null/<=0), same premise as the TradingChart exemption.",
 };
 
 const rel = (abs: string) => path.relative(APP_ROOT, abs).split(path.sep).join("/");
@@ -139,6 +141,11 @@ describe("exemptions are explicit and current", () => {
     expect(hook).toMatch(/return liq > 0n \? liq : null;/);
     const chart = sources.find((s) => s.file === "components/trade/TradingChart.tsx")!.src;
     expect(chart).toMatch(/liqPriceE6 != null && liqPriceE6 > 0n/);
+    // TradingView chart: same rule, in the hook that feeds its Liq line and in the line planner.
+    const tvHook = fs.readFileSync(path.join(APP_ROOT, "hooks/usePositionLinePrices.ts"), "utf8");
+    expect(tvHook).toMatch(/liqE6 != null && liqE6 > 0n/);
+    const tvLines = fs.readFileSync(path.join(APP_ROOT, "lib/tv/positionLines.ts"), "utf8");
+    expect(tvLines).toMatch(/if \(i\.prefs\.liq && valid\(i\.liqPrice\)\)/);
   });
 });
 

@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/fetch-tv-library.mjs && next build",
+    "tv:fetch": "node scripts/fetch-tv-library.mjs",
     "start": "next start",
     "test": "vitest run",
     "test:unit": "vitest run --reporter=verbose --coverage",

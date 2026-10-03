@@ -31,11 +31,13 @@ import { getNetwork } from "@/lib/config";
 import { RenderProfiler } from "@/components/dev/RenderProfiler";
 import TradingPageLoading from "./loading";
 
-// Lazy-load the chart so lightweight-charts (~372KB) streams AFTER the order
-// ticket + positions are interactive, instead of blocking the trade page's
-// initial load. ssr:false — the chart is client-only (createChart needs the DOM).
+// Lazy-load the chart so it streams AFTER the order ticket + positions are
+// interactive, instead of blocking the trade page's initial load. ssr:false —
+// the chart is client-only. ChartSwitch renders TradingView Advanced Charts
+// when this build has the library, else the lightweight-charts TradingChart
+// (also the automatic fallback) — see components/trade/ChartSwitch.tsx.
 const TradingChart = dynamic(
-  () => import("@/components/trade/TradingChart").then((m) => m.TradingChart),
+  () => import("@/components/trade/ChartSwitch").then((m) => m.ChartSwitch),
   {
     ssr: false,
     loading: () => (

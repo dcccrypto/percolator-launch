@@ -1,3 +1,7 @@
 .vercel
 .env*.local
 .env.pulled
+
+# TradingView Advanced Charts library (build-time fetch; licence forbids committing it)
+/public/charting_library/
+/public/tv-datafeeds/

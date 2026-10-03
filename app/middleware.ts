@@ -663,6 +663,10 @@ export const config = {
     // Image-extension skip is TOP-LEVEL only ([^/]+): a nested /trade/x.png used
     // to skip middleware entirely and would render the [slab] page shell past
     // the playground gate. public/ asset folders are skipped by name instead.
-    "/((?!_next/static|_next/image|favicon.ico|images/|icons/|audio/|token-metadata/|[^/]+\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    // charting_library/ + tv-theme/: the TradingView library's ~2,300 static
+    // files and our theme CSS for it (the chart iframe loads them) — no gate
+    // redirect inside the iframe, no per-asset middleware cost. Their headers
+    // (CSP for the iframe document, caching) come from next.config.ts.
+    "/((?!_next/static|_next/image|favicon.ico|images/|icons/|audio/|token-metadata/|charting_library/|tv-theme/|[^/]+\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };
