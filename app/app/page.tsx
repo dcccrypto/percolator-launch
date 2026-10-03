@@ -5,6 +5,7 @@ import { ButtonLink } from "@/components/ui/Button";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { LiveMarketRail } from "@/components/landing/LiveMarketRail";
+import { MAX_LEVERAGE_X } from "@/lib/market-params";
 
 const ARROW = (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
@@ -49,7 +50,7 @@ const HOW_IT_WORKS = [
   {
     step: "03",
     title: "Go long or short",
-    body: "Real oracle pricing, transparent liquidation math, up to 20x leverage.",
+    body: `Real oracle pricing, transparent liquidation math, up to ${MAX_LEVERAGE_X}x leverage.`,
   },
 ];
 

@@ -40,7 +40,7 @@ import { isListedMarketRow, MAX_SANE_PRICE_USD } from "@/lib/listed-markets";
 /** GH#1483: Upper bound for UI leverage display. The Solana program enforces margin
  *  requirements at execution time, so this is display-only protection against corrupt
  *  DB values (keeper bug, row injection, data corruption). 200x is well above any
- *  legitimate max leverage on Percolator devnet (current max: 20x). */
+ *  legitimate max leverage on Percolator devnet (MAX_LEVERAGE_X, lib/market-params.ts). */
 const MAX_DISPLAY_LEVERAGE = 200;
 
 function formatNum(n: number | null | undefined): string {
