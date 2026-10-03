@@ -673,6 +673,12 @@ export function useEarnStats() {
   // best-effort zeroed snapshot instead.
   const hasGoodStatsRef = useRef(false);
 
+  // Start time of the cycle that is still allowed to publish (0 = none). The poll skips
+  // its tick while one is running: on a slow (e.g. 429-backoff) RPC a cycle can outlast
+  // the 15s interval, and superseding it every tick meant nothing ever published and
+  // `loading` never cleared, while each tick stacked another cycle of RPC load.
+  const inFlightSinceRef = useRef(0);
+
   const fetchStats = useCallback(async () => {
     const requestId = ++requestIdRef.current;
     const stale = () => requestId !== requestIdRef.current;
@@ -684,6 +690,7 @@ export function useEarnStats() {
       return;
     }
 
+    inFlightSinceRef.current = Date.now();
     try {
       // The Earn market list is now the LIVE markets from /api/markets — the
       // SAME source /markets renders from (see hooks/useAllMarketStats.ts) — NOT
@@ -778,7 +785,10 @@ export function useEarnStats() {
       const markets = buildLiveMarkets([], new Set());
       setStats({ markets, ...computeAggregates(markets) });
     } finally {
-      if (!stale()) setLoading(false);
+      if (!stale()) {
+        setLoading(false);
+        inFlightSinceRef.current = 0;
+      }
     }
   }, [mockMode]);
 
@@ -789,7 +799,13 @@ export function useEarnStats() {
   }, [fetchStats]);
 
   useEffect(() => {
-    const doFetch = () => fetchRef.current();
+    const doFetch = () => {
+      // A cycle still running after 60s (hung, or slower than any 429 backoff) is superseded,
+      // so polling can't stall for good.
+      const since = inFlightSinceRef.current;
+      if (since !== 0 && Date.now() - since < 60_000) return;
+      void fetchRef.current();
+    };
     doFetch();
     // Visibility-gated: a backgrounded tab shouldn't keep hitting the
     // rate-limited devnet RPC every 15s for an Earn page nobody is looking
@@ -800,6 +816,8 @@ export function useEarnStats() {
       // Invalidate any fetch still in flight so its resolution can't
       // setStats/setError/setLoading after unmount.
       requestIdRef.current++;
+      // ...and so a remount (StrictMode re-runs this effect with the same refs) isn't skipped.
+      inFlightSinceRef.current = 0;
     };
   }, []);
 
