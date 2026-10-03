@@ -55,6 +55,8 @@ import {
   type SplitPotState,
   repairUnderwaterPot,
   splitPotPrefixIxs,
+  planEarnDeposit,
+  EarnDepositsPausedError,
 } from "@/lib/limits/earn-split-pot";
 import { TAG_DEPOSIT_TO_LP_VAULT, TAG_EXECUTE_REDEMPTION } from "@/lib/limits/constants";
 import { COPY as LIMITS_COPY } from "@/lib/limits/copy";
@@ -513,7 +515,8 @@ export function useInsuranceLP() {
         // pot, #2853) lands.
         const rawSp: SplitPotState | null = vp && !vp.bound ? vp : null;
         const sp = rawSp ? repairUnderwaterPot(rawSp)?.state ?? null : null;
-        const v = sp ? combinedVault(sp.own, sp.sib, sp.feeShareBps) : null;
+        // Wrapper 7a3ac04c+ (navFloor): an over-impaired pot is worth 0 instead of unpriceable.
+        const v = sp ? combinedVault(sp.own, sp.sib, sp.feeShareBps, sp.navFloor === true) : null;
         if (sp && v && sp.totalShares > 0n) {
           const held = userLpBalance + pendingRedemptionShares;
           vaultTotalAtoms = v.nav;
@@ -521,7 +524,7 @@ export function useInsuranceLP() {
           userVaultValueAtoms = (held * v.nav) / sp.totalShares;
           let maxNowAtoms: bigint | null = null;
           if (held > 0n) {
-            const plan = planSplitPotRedemption({ own: sp.own, sib: sp.sib, totalShares: sp.totalShares, shares: held, feeShareBps: sp.feeShareBps });
+            const plan = planSplitPotRedemption({ own: sp.own, sib: sp.sib, totalShares: sp.totalShares, shares: held, feeShareBps: sp.feeShareBps, navFloor: sp.navFloor });
             if (plan && !plan.payable) maxNowAtoms = (cappedShares(plan.maxShares, held) * v.nav) / sp.totalShares;
           }
           splitPot = { totalShares: sp.totalShares, navAtoms: v.nav, maxNowAtoms };
@@ -748,12 +751,21 @@ export function useInsuranceLP() {
       // with the LiteSVM bridge (lib/limits/earn-ixs.ts), so the sim runs this exact code.
       const p3 = earnTxPlan(TAG_DEPOSIT_TO_LP_VAULT, await readEarnP3Context(connection, progPk, marketPk));
       assertEarnPlan(p3);
-      // Non-bound vault with an underwater pot: every deposit is refused (Custom 25) until the
-      // permissionless repair (91) lands, so it rides in front of the user's own deposit.
-      if (!p3.tail) {
+      // Non-bound vault. Live wrapper: an underwater pot makes every deposit fail Custom 25 until the
+      // permissionless repair (91) lands, so it rides in front of the user's own deposit. Upgraded
+      // wrapper (sp.navFloor): no repair, ever (it would move Earn holders' money into the impaired
+      // pot, security review B-2) - `splitPotPrefixIxs` returns nothing then.
+      const sp = p3.tail ? null : await readSplitPotState(connection, progPk, marketPk);
+      // Never send a deposit the vault should not take: a pot over-impaired (H-1 / Custom 25) or a
+      // collapsed share price (B-1). Otherwise route to the pot whose principal covers its
+      // impairment. `ledger` / `siblingLedger` stay pinned; only the `domain` argument picks the pot.
+      let targetDomain = domain;
+      if (sp) {
+        const plan = planEarnDeposit(sp, domain);
+        if (!plan.ok) throw new EarnDepositsPausedError(plan.reason);
+        targetDomain = plan.domain;
         ixs.push(...splitPotPrefixIxs({
-          programId: progPk, cranker: wallet.publicKey, market: marketPk, registry: registryPda,
-          sp: await readSplitPotState(connection, progPk, marketPk),
+          programId: progPk, cranker: wallet.publicKey, market: marketPk, registry: registryPda, sp,
         }));
       }
       ixs.push(...buildEarnDepositIxs({
@@ -767,7 +779,7 @@ export function useInsuranceLP() {
         vaultToken: vaultTokenAta,
         ledger: ledgerPda,
         siblingLedger: siblingLedgerPda,
-        domain,
+        domain: targetDomain,
         amount,
         plan: p3,
       }));

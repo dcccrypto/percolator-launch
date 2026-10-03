@@ -56,6 +56,10 @@ const STEP_ERROR_OVERRIDES: Partial<Record<CreateStepKind, Record<number, string
     // LpVaultBackingBucketNotEmpty. Only reachable on a market whose backing was
     // seeded by the pre-fix launcher (direct top-up): retrying can never succeed.
     [WRAPPER_ERR.LpVaultBackingBucketNotEmpty]: EARN_VAULT_BUCKET_NOT_EMPTY_MESSAGE,
+    // Wrapper 7a3ac04c+: the seed deposit (75) refused because a pot is over-impaired / the share
+    // price collapsed. A brand-new vault cannot be in that state; kept so it never reads raw.
+    [WRAPPER_ERR.LpVaultTargetPotImpaired]:
+      "The Earn vault isn't taking deposits right now, so its starting deposit was refused. Nothing from this step was applied.",
   },
   // P3 InitVaultLp (94) + DepositJuniorTranche (96): codes from the one constants module.
   "vault-lp": {
@@ -90,6 +94,8 @@ export function extractCustomCode(msg: string): number | null {
 // (e.g. code 5 — InvalidAccountLen — gets a slab-tier-specific message).
 // All other codes fall through to decodeError() for the SDK hint.
 const LAUNCH_ERROR_OVERRIDES: Record<number, string> = {
+  // 91: LpVaultTargetPotImpaired (wrapper 7a3ac04c+; SDK 8.0.0 does not know it yet)
+  [WRAPPER_ERR.LpVaultTargetPotImpaired]: "Earn deposits are paused while this vault settles. Nothing was sent, and withdrawals still work.",
   // 0: InvalidMagic
   [WRAPPER_ERR.InvalidMagic]: "Invalid magic number. The market account data is corrupted. Check the market address.",
   // 1: InvalidVersion

@@ -51,7 +51,7 @@ vi.mock("@/lib/programAllowlist", () => ({
 vi.mock("@/lib/priceStore/priceStore", () => ({ getLivePriceSnapshot: mocks.getLivePriceSnapshot }));
 vi.mock("@/lib/matcherCaps", () => ({
   getMatcherCaps: vi.fn(async () => null),
-  getMatcherInventory: vi.fn(async () => null),
+  getLpInventoryState: vi.fn(async () => null),
   invalidateMatcherCaps: vi.fn(),
 }));
 vi.mock("@/lib/errorMessages", async () => {

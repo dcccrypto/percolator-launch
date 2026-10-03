@@ -16,7 +16,8 @@ import {
   MAX_OI_SIDE_Q,
   POS_SCALE,
 } from "./constants";
-import { UNLIMITED_CAPACITY, remainingSideCapacityQ } from "@/lib/marketCapacity";
+import { UNLIMITED_CAPACITY } from "@/lib/marketCapacity";
+import { lpInventoryRoomQ } from "./lp-inventory-room";
 import { conservativeEquity, vaultLpCapQ } from "./vault-tranche";
 
 export type Side = "long" | "short";
@@ -233,8 +234,13 @@ export interface SizeLimitInputs {
   lp: { posQ: bigint; capital: bigint; pnl: bigint; feeCredits: bigint } | null;
   /** The taker's own signed position on the asset (0 if none / unknown). */
   takerPosQ: bigint;
-  /** Matcher caps; null = unknown. `maxFillAbs == 0` = no per-fill cap. */
-  matcher: { maxFillAbs: bigint; maxInventoryAbs: bigint; inventoryBase: bigint | null } | null;
+  /**
+   * Matcher caps; null = unknown. `maxFillAbs == 0` = no per-fill cap. `inventoryBase` is the ctx
+   * counter; `lpRealQ` the LP's real ADL-effective position and `syncLive` whether the upgraded
+   * matcher prices from it (lib/limits/lp-inventory-room.ts: min of both until live). Both
+   * optional so a caller without them keeps the counter-only behaviour.
+   */
+  matcher: { maxFillAbs: bigint; maxInventoryAbs: bigint; inventoryBase: bigint | null; lpRealQ?: bigint | null; syncLive?: boolean } | null;
   /**
    * P3-H2: the LP IS the asset's bound vault LP => its protocol exposure cap
    * (`|pos|·mark <= conservative_equity · lev / 1e4`, default 1x) also applies.
@@ -294,10 +300,11 @@ export function maxTradeSizePerSide(i: SizeLimitInputs): Record<Side, SideLimit>
     }
     if (i.matcher) {
       if (i.matcher.maxFillAbs > 0n) cands.push({ q: i.matcher.maxFillAbs, r: "matcher-fill" });
-      if (i.matcher.inventoryBase !== null) {
-        const inv = remainingSideCapacityQ(i.matcher.inventoryBase, i.matcher.maxInventoryAbs, side);
-        if (inv !== UNLIMITED_CAPACITY) cands.push({ q: inv, r: "matcher-inventory" });
-      }
+      const inv = lpInventoryRoomQ(
+        { counterQ: i.matcher.inventoryBase, realQ: i.matcher.lpRealQ ?? null, maxInventoryAbs: i.matcher.maxInventoryAbs, syncLive: i.matcher.syncLive === true },
+        side,
+      );
+      if (inv !== null && inv !== UNLIMITED_CAPACITY) cands.push({ q: inv, r: "matcher-inventory" });
     }
     let best: SideLimit = { maxQ: UNLIMITED_CAPACITY, reason: "none", halted };
     for (const c of cands) if (c.q < best.maxQ) best = { maxQ: c.q, reason: c.r, halted };

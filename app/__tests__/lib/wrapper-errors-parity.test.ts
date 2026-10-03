@@ -11,6 +11,7 @@ import { P1_ERR, P3_ERR } from "@/lib/limits/constants";
 
 const fx = JSON.parse(readFileSync(join(process.cwd(), "__tests__/fixtures/limits/rust-p3-final.json"), "utf8")) as {
   p3Sha: string;
+  allErrorsSha?: string;
   allErrors: Record<string, number>;
 };
 const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
@@ -20,7 +21,7 @@ describe("WRAPPER_ERR == the wrapper's PercolatorError (oracle, rustc ordinals)"
     expect(WRAPPER_ERR).toEqual(fx.allErrors);
     const v = Object.values(WRAPPER_ERR).sort((a, b) => a - b);
     expect(v).toEqual(v.map((_, i) => i));
-    expect(read("lib/wrapper-errors.ts")).toContain(fx.p3Sha.slice(0, 8));
+    expect(read("lib/wrapper-errors.ts")).toContain((fx.allErrorsSha ?? fx.p3Sha).slice(0, 8));
   });
   it("the ordinals the gate-100 sweep asked about (4b1a5d30): nothing shifted, 87/88/89 appended", () => {
     expect(WRAPPER_ERR.EngineStale).toBe(19);
@@ -30,6 +31,12 @@ describe("WRAPPER_ERR == the wrapper's PercolatorError (oracle, rustc ordinals)"
     expect(WRAPPER_ERR.VaultLpSeniorDrawRequired).toBe(87);
     expect(WRAPPER_ERR.VaultLpRedeemNeedsRecall).toBe(88);
     expect(WRAPPER_ERR.VaultLpPausedForSeniorDraw).toBe(89);
+  });
+  it("7a3ac04c (matcher-inventory sync + non-bound NAV floor) appends exactly 91 LpVaultTargetPotImpaired", () => {
+    expect(fx.allErrorsSha).toBe("7a3ac04c710240c1fa6be7ee7ea302b403012e4e");
+    expect(WRAPPER_ERR.VaultLpBindRequiresFlatAsset).toBe(90);
+    expect(WRAPPER_ERR.LpVaultTargetPotImpaired).toBe(91);
+    expect(Object.keys(WRAPPER_ERR)).toHaveLength(92);
   });
   it("P1_ERR / P3_ERR are views of WRAPPER_ERR", () => {
     for (const [n, c] of Object.entries(P1_ERR)) expect(c).toBe((WRAPPER_ERR as Record<string, number>)[n]);

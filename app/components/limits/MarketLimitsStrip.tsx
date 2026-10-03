@@ -5,6 +5,7 @@
  * vs the protocol side cap, LP health / halt state, the oracle band, and the
  * book-skew indicator. Renders nothing with every limits flag off.
  */
+import { matcherPricingInventoryQ } from "@/lib/limits/lp-inventory-room";
 import { type FC } from "react";
 import { useMarketLimits, type MarketLimits } from "@/hooks/useMarketLimits";
 import {
@@ -48,8 +49,12 @@ export const MarketLimitsStripView: FC<{ limits: MarketLimits; symbol: string }>
       ? lpFloorHalts(lpEquityInitRaw(limits.lp.capital, limits.lp.pnl, limits.lp.feeCredits), limits.riskLimits.lpFloorAtoms, true)
       : null;
   const ref = limits.matcher?.v2?.skewRefInventory ?? 0n;
-  const skewBps = limits.flags.p2 && limits.matcher ? skewIndicatorBps(limits.matcher.inventoryBase, ref) : null;
-  const inv = limits.matcher?.inventoryBase ?? 0n;
+  // The inventory the matcher prices skew from: the real LP position once the sync is live.
+  const pricingInv = limits.matcher
+    ? matcherPricingInventoryQ({ counterQ: limits.matcher.inventoryBase, realQ: limits.lpRealQ, syncLive: limits.matcherSyncLive })
+    : null;
+  const skewBps = limits.flags.p2 && limits.matcher && pricingInv !== null ? skewIndicatorBps(pricingInv, ref) : null;
+  const inv = pricingInv ?? 0n;
   // LP short (inv < 0) => traders net long.
   const skewDir: "long" | "short" | "flat" = inv < 0n ? "long" : inv > 0n ? "short" : "flat";
 

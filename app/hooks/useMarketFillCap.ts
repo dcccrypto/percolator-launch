@@ -37,7 +37,9 @@ import { useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
-import { getMatcherCaps, getMatcherInventory, type MatcherCaps } from "@/lib/matcherCaps";
+import { getLpInventoryState, getMatcherCaps, type MatcherCaps } from "@/lib/matcherCaps";
+import { lpInventoryRoomQ } from "@/lib/limits/lp-inventory-room";
+import type { TradeSide } from "@/lib/marketCapacity";
 import { pollWhenVisible } from "@/lib/pollWhenVisible";
 
 const INVENTORY_POLL_MS = 20_000;
@@ -57,6 +59,18 @@ export interface MarketFillLimits extends MatcherCaps {
    * while unknown. Null disables the inventory check — never the fill cap.
    */
   inventoryBase: bigint | null;
+  /**
+   * The LP's REAL (ADL-effective) engine position, or null while unknown. The counter above goes
+   * stale on liquidation / ADL / reset (matcher-inventory drift 2026-10-03).
+   */
+  lpRealQ: bigint | null;
+  /** The upgraded wrapper + matcher price from the real position (lib/program-upgrade-detect.ts). */
+  syncLive: boolean;
+  /**
+   * The LP's inventory room on `side` (`lpInventoryRoomQ`): min(counter, real) until the upgrade
+   * is detected, the real position after. null = unknown (no inventory check).
+   */
+  sideRoomQ: (side: TradeSide) => bigint | null;
 }
 
 export function useMarketFillCap(slabAddress: string): MarketFillLimits | null {
@@ -64,6 +78,8 @@ export function useMarketFillCap(slabAddress: string): MarketFillLimits | null {
   const { programId } = useSlabState();
   const [caps, setCaps] = useState<MatcherCaps | null>(null);
   const [inventoryBase, setInventoryBase] = useState<bigint | null>(null);
+  const [lpRealQ, setLpRealQ] = useState<bigint | null>(null);
+  const [syncLive, setSyncLive] = useState(false);
 
   // PERC-9204: stable primitive standing in for `programId` below. The effect
   // BLANKS caps+inventory before refetching, which is right on a real market
@@ -81,6 +97,8 @@ export function useMarketFillCap(slabAddress: string): MarketFillLimits | null {
     // validates against market A's caps and inventory.
     setCaps(null);
     setInventoryBase(null);
+    setLpRealQ(null);
+    setSyncLive(false);
     if (!programIdStr || !slabAddress) return;
     let cancelled = false;
     let dispose: (() => void) | null = null;
@@ -100,9 +118,12 @@ export function useMarketFillCap(slabAddress: string): MarketFillLimits | null {
     const refresh = () => {
       if (fetching) return;
       fetching = true;
-      void getMatcherInventory(connection, programPk, slabPk)
-        .then((inv) => {
-          if (!cancelled && inv !== null) setInventoryBase(inv);
+      void getLpInventoryState(connection, programPk, slabPk)
+        .then((st) => {
+          if (cancelled || st === null) return;
+          if (st.counterQ !== null) setInventoryBase(st.counterQ);
+          if (st.realQ !== null) setLpRealQ(st.realQ);
+          setSyncLive(st.syncLive);
         })
         .finally(() => {
           fetching = false;
@@ -150,5 +171,7 @@ export function useMarketFillCap(slabAddress: string): MarketFillLimits | null {
   }, [connection, programIdStr, slabAddress]);
 
   if (!caps) return null;
-  return { ...caps, inventoryBase };
+  const sideRoomQ = (side: TradeSide) =>
+    lpInventoryRoomQ({ counterQ: inventoryBase, realQ: lpRealQ, maxInventoryAbs: caps.maxInventoryAbs, syncLive }, side);
+  return { ...caps, inventoryBase, lpRealQ, syncLive, sideRoomQ };
 }

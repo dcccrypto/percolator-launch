@@ -362,7 +362,7 @@ export const CreatorTranchePanelView: FC<{
           limits: limits.riskLimits,
           lp,
           takerPosQ: 0n,
-          matcher: limits.matcher ? { maxFillAbs: limits.matcher.maxFillAbs, maxInventoryAbs: limits.matcher.maxInventoryAbs, inventoryBase: limits.matcher.inventoryBase } : null,
+          matcher: limits.matcher ? { maxFillAbs: limits.matcher.maxFillAbs, maxInventoryAbs: limits.matcher.maxInventoryAbs, inventoryBase: limits.matcher.inventoryBase, lpRealQ: limits.lpRealQ, syncLive: limits.matcherSyncLive } : null,
         })
       : null;
   const capQ =

@@ -3,6 +3,7 @@
  * so the error map, the ticket and the E2E lane share one wording.
  * No dependency on the rest of the app (imported by lib/errorMessages.ts).
  */
+import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { P2_ERR, P3_ERR } from "./constants";
 
 export const COPY = {
@@ -204,12 +205,22 @@ export const P3_ERROR_COPY_BY_NAME: Record<keyof typeof P3_ERR, string> = {
     "An Earn vault can only provide liquidity to a single-asset market, and this market holds more than one asset. Create a new market to use the Earn vault.",
 };
 
+/**
+ * Non-bound Earn (wrapper 7a3ac04c+ NAV floor): 75 refused while a pot is over-impaired or the
+ * share price has collapsed (`LpVaultTargetPotImpaired`, Custom 91). Not a P3 (bound-vault) code,
+ * so it is keyed here and merged into the code table by `p3ErrorCopyByCode`.
+ */
+export const EARN_FLOOR_ERROR_COPY_BY_NAME = {
+  LpVaultTargetPotImpaired: "Earn deposits are paused while this vault settles. Nothing was sent, and withdrawals still work.",
+} as const;
+
 /** P3 copy re-keyed by the CURRENT provisional ordinals. */
 export function p3ErrorCopyByCode(): Record<number, string> {
   const out: Record<number, string> = {};
   for (const [name, code] of Object.entries(P3_ERR) as [keyof typeof P3_ERR, number][]) {
     out[code] = P3_ERROR_COPY_BY_NAME[name];
   }
+  out[WRAPPER_ERR.LpVaultTargetPotImpaired] = EARN_FLOOR_ERROR_COPY_BY_NAME.LpVaultTargetPotImpaired;
   return out;
 }
 

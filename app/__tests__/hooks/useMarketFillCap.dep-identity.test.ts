@@ -36,13 +36,13 @@ vi.mock("@/hooks/useWalletCompat", () => ({
 vi.mock("@/components/providers/SlabProvider", () => ({ useSlabState: vi.fn() }));
 vi.mock("@/lib/matcherCaps", () => ({
   getMatcherCaps: vi.fn(),
-  getMatcherInventory: vi.fn(),
+  getLpInventoryState: vi.fn(),
 }));
 
 import { useMarketFillCap } from "../../hooks/useMarketFillCap";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
-import { getMatcherCaps, getMatcherInventory } from "@/lib/matcherCaps";
+import { getMatcherCaps, getLpInventoryState } from "@/lib/matcherCaps";
 
 const PROGRAM_ID_B58 = "GnwdeQrAh4qzChJeVLrM21CXXWC1akjLH3DiijwzEEYZ";
 const SLAB_A = Keypair.generate().publicKey.toBase58();
@@ -61,7 +61,7 @@ describe("useMarketFillCap — slab-poll churn must not blank the capacity row",
     vi.clearAllMocks();
     vi.mocked(useConnectionCompat).mockReturnValue({ connection });
     vi.mocked(getMatcherCaps).mockResolvedValue(CAPS);
-    vi.mocked(getMatcherInventory).mockResolvedValue(INVENTORY);
+    vi.mocked(getLpInventoryState).mockResolvedValue({ counterQ: INVENTORY, realQ: null, syncLive: false });
   });
 
   /** SlabProvider hands out a BRAND NEW PublicKey for the same program. */
@@ -98,7 +98,7 @@ describe("useMarketFillCap — slab-poll churn must not blank the capacity row",
     // A slab poll lands: same program, new object. Nothing may resolve after
     // this point, so whatever the effect does is what stays on screen.
     vi.mocked(getMatcherCaps).mockReturnValue(pending());
-    vi.mocked(getMatcherInventory).mockReturnValue(pending());
+    vi.mocked(getLpInventoryState).mockReturnValue(pending());
     setProgramId(PROGRAM_ID_B58);
     await act(async () => {
       rerender({ s: SLAB_A });
@@ -131,7 +131,7 @@ describe("useMarketFillCap — slab-poll churn must not blank the capacity row",
     expect(result.current?.inventoryBase).toBe(INVENTORY);
 
     vi.mocked(getMatcherCaps).mockReturnValue(pending());
-    vi.mocked(getMatcherInventory).mockReturnValue(pending());
+    vi.mocked(getLpInventoryState).mockReturnValue(pending());
     await act(async () => {
       rerender({ s: SLAB_B });
     });
@@ -149,7 +149,7 @@ describe("useMarketFillCap — slab-poll churn must not blank the capacity row",
     const { result, rerender } = await renderSettled(SLAB_A);
     expect(result.current?.inventoryBase).toBe(INVENTORY);
 
-    vi.mocked(getMatcherInventory).mockResolvedValue(INVENTORY_B);
+    vi.mocked(getLpInventoryState).mockResolvedValue({ counterQ: INVENTORY_B, realQ: null, syncLive: false });
     await act(async () => {
       rerender({ s: SLAB_B });
     });
@@ -164,7 +164,7 @@ describe("useMarketFillCap — slab-poll churn must not blank the capacity row",
     expect(result.current?.inventoryBase).toBe(INVENTORY);
 
     vi.mocked(getMatcherCaps).mockReturnValue(pending());
-    vi.mocked(getMatcherInventory).mockReturnValue(pending());
+    vi.mocked(getLpInventoryState).mockReturnValue(pending());
     setProgramId(Keypair.generate().publicKey.toBase58());
     await act(async () => {
       rerender({ s: SLAB_A });
@@ -184,7 +184,7 @@ describe("useMarketFillCap — a failed caps read must not disable the cap guard
     vi.mocked(useSlabState).mockReturnValue({
       programId: new PublicKey(PROGRAM_ID_B58),
     } as never);
-    vi.mocked(getMatcherInventory).mockResolvedValue(INVENTORY);
+    vi.mocked(getLpInventoryState).mockResolvedValue({ counterQ: INVENTORY, realQ: null, syncLive: false });
   });
 
   afterEach(() => {
@@ -256,7 +256,7 @@ describe("useMarketFillCap — a failed caps read must not disable the cap guard
     expect(result.current?.maxFillAbs).toBe(CAPS.maxFillAbs);
 
     vi.mocked(getMatcherCaps).mockResolvedValue(null);
-    vi.mocked(getMatcherInventory).mockResolvedValue(null);
+    vi.mocked(getLpInventoryState).mockResolvedValue({ counterQ: null, realQ: null, syncLive: false });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(20_000);
     });

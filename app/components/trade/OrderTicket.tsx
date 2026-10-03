@@ -45,7 +45,7 @@ import { useTrade, prewarmTradeSubmission } from "@/hooks/useTrade";
 import { useFirstTrade } from "@/hooks/useFirstTrade";
 import { FIRST_TRADE_COPY, FirstTradeDepositError, fundDepositAtoms, tradableMarginAtoms } from "@/lib/first-trade";
 import { useMarketFillCap } from "@/hooks/useMarketFillCap";
-import { remainingSideCapacityQ, UNLIMITED_CAPACITY } from "@/lib/marketCapacity";
+import { UNLIMITED_CAPACITY } from "@/lib/marketCapacity";
 import { isBlockedSlab } from "@/lib/blocklist";
 import { humanizeError, isEngineLockError, withTransientRetry } from "@/lib/errorMessages";
 import { useSingleMarketHealth } from "@/hooks/useMarketHealth";
@@ -817,9 +817,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     fillCaps != null && (fillCaps.maxFillAbs <= 0n || fillCaps.maxFillAbs >= UNLIMITED_CAPACITY);
   const fillCapQ = !mockMode && fillCaps != null && !fillCapUnlimited ? fillCaps.maxFillAbs : null;
   const legacySideCapQ = (side: "long" | "short"): bigint | null =>
-    !mockMode && fillCaps != null && fillCaps.inventoryBase != null
-      ? remainingSideCapacityQ(fillCaps.inventoryBase, fillCaps.maxInventoryAbs, side)
-      : null;
+    // Matcher-inventory drift: min(counter, real LP position) until the upgrade is live, then the
+    // real position (useMarketFillCap.sideRoomQ / lib/limits/lp-inventory-room.ts).
+    !mockMode && fillCaps != null && typeof fillCaps.sideRoomQ === "function" ? fillCaps.sideRoomQ(side) : null;
   const marketMaxQFor = (side: "long" | "short") =>
     oneMaxQ([ticketLimits.sideLimits?.[side]?.maxQ, fillCapQ, legacySideCapQ(side)]);
   const marketMaxQ = marketMaxQFor(direction);

@@ -120,6 +120,10 @@ export const LEG_ASSET_INDEX = 1;
 export const LEG_MARKET_ID = 5;
 export const LEG_SIDE = 13; // 0 Long, 1 Short (engine encode_side)
 export const LEG_BASIS_POS_Q = 14;
+/** u128 ADL index snapshot (SDK parsePortfolioV17 `aBasis`, leg +30). */
+export const LEG_A_BASIS = 30;
+/** u64 side-epoch snapshot (SDK parsePortfolioV17 `epochSnap`, leg +86). */
+export const LEG_EPOCH_SNAP = 86;
 
 /** Engine constants (percolator/src/lib.rs). */
 export const POS_SCALE = 1_000_000n;

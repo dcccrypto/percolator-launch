@@ -42,6 +42,7 @@ import {
 } from "@percolatorct/sdk";
 import * as C from "./constants";
 import { decodeLpVaultRegistryBound, u128 } from "./decode";
+import { earnNavFloorLive } from "@/lib/program-upgrade-detect";
 
 const BS = C.BOUND_SCALE;
 
@@ -167,16 +168,25 @@ export function syncedLedger(dom: DomainState): DomainLedger {
   return l;
 }
 
-/** `lp_vault_domain_available_principal_atoms` (null = the program would underflow). */
-export function availablePrincipal(l: DomainLedger): bigint | null {
+/**
+ * `lp_vault_domain_available_principal_atoms`. `floored = false` (the live 553d76f0/cc5095fb
+ * wrapper): null = the program would underflow (Custom 25). `floored = true` (wrapper 7a3ac04c+,
+ * non-bound NAV floor): `principal.saturating_sub(loss.saturating_sub(recovery))`, never null —
+ * an over-impaired pot is worth 0 (`backing_ledger_available_principal_atoms`).
+ */
+export function availablePrincipal(l: DomainLedger, floored = false): bigint | null {
   const net = l.cumulativeLoss - l.cumulativeRecovery;
+  if (floored) {
+    const n = net > 0n ? net : 0n;
+    return l.totalPrincipal > n ? l.totalPrincipal - n : 0n;
+  }
   if (net < 0n || l.totalPrincipal < net) return null;
   return l.totalPrincipal - net;
 }
 
-/** `lp_vault_nav_atoms`. */
-export function domainNav(l: DomainLedger, feeShareBps: number): bigint | null {
-  const avail = availablePrincipal(l);
+/** `lp_vault_nav_atoms` (`floored`: 7a3ac04c `lp_vault_nav_atoms_floored`). */
+export function domainNav(l: DomainLedger, feeShareBps: number, floored = false): bigint | null {
+  const avail = availablePrincipal(l, floored);
   if (avail === null) return null;
   const netEarnings = l.totalEarnings - l.totalEarningsWithdrawn;
   if (netEarnings < 0n) return null;
@@ -203,14 +213,14 @@ function creditRoomAtoms(s: SourceCredit): bigint {
 const min = (...xs: bigint[]) => xs.reduce((a, b) => (b < a ? b : a));
 const pos = (x: bigint) => (x > 0n ? x : 0n);
 
-/** Combined NAV and available principal of the two pots, as 77 prices them. */
-export function combinedVault(own: DomainState, sib: DomainState, feeShareBps: number): { nav: bigint; available: bigint } | null {
+/** Combined NAV and available principal of the two pots, as 75 / 77 price them (`floored`: 7a3ac04c+). */
+export function combinedVault(own: DomainState, sib: DomainState, feeShareBps: number, floored = false): { nav: bigint; available: bigint } | null {
   const lo = syncedLedger(own);
   const ls = syncedLedger(sib);
-  const ao = availablePrincipal(lo);
-  const as = availablePrincipal(ls);
-  const no = domainNav(lo, feeShareBps);
-  const ns = domainNav(ls, feeShareBps);
+  const ao = availablePrincipal(lo, floored);
+  const as = availablePrincipal(ls, floored);
+  const no = domainNav(lo, feeShareBps, floored);
+  const ns = domainNav(ls, feeShareBps, floored);
   if (ao === null || as === null || no === null || ns === null) return null;
   return { nav: no + ns, available: ao + as };
 }
@@ -259,9 +269,9 @@ function potFreeAtoms(d: DomainState): bigint {
 }
 
 /** Most principal 77's own sibling top-up can bring into the payout pot (non-bound rules). */
-function siblingTopUpAtoms(sib: DomainState): bigint {
+function siblingTopUpAtoms(sib: DomainState, floored = false): bigint {
   if (!sib.ledger) return 0n; // the program skips an uninitialised sibling ledger
-  const avail = availablePrincipal(syncedLedger(sib));
+  const avail = availablePrincipal(syncedLedger(sib), floored);
   if (avail === null) return 0n;
   return min(potFreeAtoms(sib), avail);
 }
@@ -294,11 +304,14 @@ export function planSplitPotRedemption(p: {
   totalShares: bigint;
   shares: bigint;
   feeShareBps: number;
+  /** Wrapper 7a3ac04c+ per-pot NAV floor is live (lib/program-upgrade-detect.ts). Default false. */
+  navFloor?: boolean;
 }): SplitPotPlan | null {
   if (p.totalShares <= 0n) return null;
-  const v = combinedVault(p.own, p.sib, p.feeShareBps);
+  const floored = p.navFloor === true;
+  const v = combinedVault(p.own, p.sib, p.feeShareBps, floored);
   if (!v) return null;
-  const ownAvail = availablePrincipal(syncedLedger(p.own));
+  const ownAvail = availablePrincipal(syncedLedger(p.own), floored);
   if (ownAvail === null) return null;
   const principalFor = (s: bigint) => (s * v.available) / p.totalShares;
   const atomsFor = (s: bigint) => (s * v.nav) / p.totalShares;
@@ -308,7 +321,7 @@ export function planSplitPotRedemption(p: {
   // all grow by r.
   const ownCap = (r: bigint) =>
     pos(min(ownAvail + r, (p.own.bucket.freshUnliened + r * BS) / BS, creditRoomAtoms({ ...p.own.source, freshReserved: p.own.source.freshReserved + r * BS })));
-  const capMax = ownCap(siblingTopUpAtoms(p.sib));
+  const capMax = ownCap(siblingTopUpAtoms(p.sib, floored));
   // 77's earnings gate: the gross LP earnings slice (ceil(earnings * 10_000 / fee_share_bps)) must
   // fit the payout pot's bucket after 77 relabels the sibling's unwithdrawn earnings onto it.
   const earningsRoom = p.own.bucket.utilFeeEarnings + siblingEarningsTopUp(p.sib);
@@ -357,6 +370,10 @@ export interface PotRepair {
  * that, and the program's own refusal is what the user sees.
  */
 export function repairUnderwaterPot(sp: SplitPotState): { state: SplitPotState; repair: PotRepair | null } | null {
+  // Wrapper 7a3ac04c+ (NAV floor live): NEVER repair. Pricing no longer fails on an over-impaired
+  // pot (it is worth 0), and a 91 into it books principal while the impairment stays, so it only
+  // moves Earn holders' money into that pot (security review 2026-10-03 B-2; SI ~79.6M atoms).
+  if (sp.navFloor === true) return { state: sp, repair: null };
   const lo = syncedLedger(sp.own);
   const ls = syncedLedger(sp.sib);
   if (lo.cumulativeLoss < lo.cumulativeRecovery || ls.cumulativeLoss < ls.cumulativeRecovery) return null;
@@ -398,10 +415,57 @@ export function repairUnderwaterPot(sp: SplitPotState): { state: SplitPotState; 
   };
 }
 
+/**
+ * Share-price collapse guard (security review 2026-10-03 H-1): a deposit at a near-zero NAV mints
+ * almost every share and captures the existing holders' future recovery (live OTC 6Y4bf: NAV 3
+ * atoms vs 2,000,000,000 shares). The H-1 wrapper refuses 75 when `nav * 1000 < total_shares`;
+ * the app never sends one in that state, before or after the upgrade (pre-upgrade the same
+ * boundary state is exploitable on the live bytes, B-1 "pre-existing").
+ */
+export const EARN_PRICE_COLLAPSE_FACTOR = 1_000n;
+
+export type EarnDepositPlan =
+  | { ok: true; domain: number }
+  | { ok: false; reason: "pot-impaired" | "price-collapsed" | "unpriceable" };
+
+/**
+ * Where a NON-bound Earn deposit (75) goes, or why the app must not send it.
+ *
+ * Judged on the pots as the program will see them when 75 runs:
+ *   - live wrapper (navFloor false): after the repair 91 `splitPotPrefixIxs` prepends (it is what
+ *     makes 75 price at all today); no repair possible while a pot is underwater -> Custom 25.
+ *   - upgraded wrapper (navFloor true): the raw pots (no prefix; B-2). H-1 refuses 75 when EITHER
+ *     pot is over-impaired (7a3ac04c alone refuses only the target pot, Custom 91).
+ * So in both regimes: any pot over-impaired -> "pot-impaired"; NAV collapsed against the share
+ * supply -> "price-collapsed". Otherwise the vault's own pot if its principal covers its net
+ * impairment, else the sibling (never reached while both pass the first gate; kept so routing
+ * stays correct if the program's rule is narrowed to the target pot).
+ */
+export function planEarnDeposit(sp: SplitPotState, ownDomain = sp.ownDomain): EarnDepositPlan {
+  const fixed = repairUnderwaterPot(sp);
+  if (!fixed) return { ok: false, reason: "pot-impaired" };
+  const st = fixed.state;
+  const ownOver = potDeficit(syncedLedger(st.own)) > 0n;
+  const sibOver = potDeficit(syncedLedger(st.sib)) > 0n;
+  if (ownOver || sibOver) return { ok: false, reason: "pot-impaired" };
+  const v = combinedVault(st.own, st.sib, st.feeShareBps, sp.navFloor === true);
+  if (!v) return { ok: false, reason: "unpriceable" };
+  if (st.totalShares > 0n && v.nav * EARN_PRICE_COLLAPSE_FACTOR < st.totalShares) return { ok: false, reason: "price-collapsed" };
+  return { ok: true, domain: ownOver ? ownDomain ^ 1 : ownDomain };
+}
+
+/** Thrown before the wallet opens when `planEarnDeposit` says the deposit must not be sent. */
+export class EarnDepositsPausedError extends Error {
+  constructor(public readonly reason: Exclude<EarnDepositPlan, { ok: true }>["reason"]) {
+    super("Earn deposits are paused while this vault settles. Nothing was sent, and withdrawals still work.");
+    this.name = "EarnDepositsPausedError";
+  }
+}
+
 /** Combined NAV / available principal as the program prices them once any underwater pot is repaired. */
 export function vaultValue(sp: SplitPotState): { nav: bigint; available: bigint } | null {
   const fixed = repairUnderwaterPot(sp);
-  return fixed ? combinedVault(fixed.state.own, fixed.state.sib, fixed.state.feeShareBps) : null;
+  return fixed ? combinedVault(fixed.state.own, fixed.state.sib, fixed.state.feeShareBps, sp.navFloor === true) : null;
 }
 
 /** The repair 91 for `sp` (accounts from the read). */
@@ -496,10 +560,10 @@ export function splitPotPrefixIxs(p: {
   if (!fixed) return [];
   const sp = fixed.state;
   if (p.payoutShares != null) {
-    const plan = planSplitPotRedemption({ own: sp.own, sib: sp.sib, totalShares: sp.totalShares, shares: p.payoutShares, feeShareBps: sp.feeShareBps });
+    const plan = planSplitPotRedemption({ own: sp.own, sib: sp.sib, totalShares: sp.totalShares, shares: p.payoutShares, feeShareBps: sp.feeShareBps, navFloor: sp.navFloor });
     if (plan && !plan.payable) {
       const capped = cappedShares(plan.maxShares, p.payoutShares);
-      const v = combinedVault(sp.own, sp.sib, sp.feeShareBps);
+      const v = combinedVault(sp.own, sp.sib, sp.feeShareBps, sp.navFloor === true);
       throw new EarnPayoutCapError(capped, v ? (capped * v.nav) / sp.totalShares : 0n);
     }
   }
@@ -518,6 +582,11 @@ export interface SplitPotState {
   feeShareBps: number;
   ownLedger: PublicKey;
   sibLedger: PublicKey;
+  /**
+   * The upgraded wrapper (7a3ac04c+) is live: per-pot NAV floor, no repair prefix, 75 refused
+   * into an impaired / collapsed vault. Absent / false = today's live program (fail closed, 25).
+   */
+  navFloor?: boolean;
 }
 
 /**
@@ -577,8 +646,9 @@ export function splitPotStateFromAccounts(
   marketData: Uint8Array | Buffer | null,
   ownLedgerData: Uint8Array | Buffer | null,
   sibLedgerData: Uint8Array | Buffer | null,
+  navFloor = false,
 ): SplitPotState | null {
-  const st = vaultPotStateFromAccounts(programId, market, registryData, marketData, ownLedgerData, sibLedgerData);
+  const st = vaultPotStateFromAccounts(programId, market, registryData, marketData, ownLedgerData, sibLedgerData, navFloor);
   if (!st || st.bound) return null;
   const { bound: _bound, ...rest } = st;
   return rest;
@@ -592,6 +662,7 @@ export function vaultPotStateFromAccounts(
   marketData: Uint8Array | Buffer | null,
   ownLedgerData: Uint8Array | Buffer | null,
   sibLedgerData: Uint8Array | Buffer | null,
+  navFloor = false,
 ): (SplitPotState & { bound: boolean }) | null {
   try {
     const keys = vaultPotLedgerKeys(programId, market, registryData);
@@ -616,6 +687,7 @@ export function vaultPotStateFromAccounts(
       ownLedger: keys.ownLedger,
       sibLedger: keys.sibLedger,
       bound: keys.bound,
+      navFloor,
     };
   } catch {
     return null;
@@ -624,7 +696,7 @@ export function vaultPotStateFromAccounts(
 
 /** The backing NAV the program prices a vault at: bound -> boundVaultNav, two-pot -> combinedVault. */
 export function vaultBackingNav(st: SplitPotState & { bound: boolean }): bigint | null {
-  const v = st.bound ? boundVaultNav(st.own, st.sib, st.feeShareBps) : combinedVault(st.own, st.sib, st.feeShareBps);
+  const v = st.bound ? boundVaultNav(st.own, st.sib, st.feeShareBps) : combinedVault(st.own, st.sib, st.feeShareBps, st.navFloor === true);
   return v ? v.nav : null;
 }
 
@@ -640,8 +712,11 @@ export async function readVaultPotState(
     if (!r || !r.owner.equals(programId)) return null;
     const keys = vaultPotLedgerKeys(programId, market, r.data);
     if (!keys) return null;
-    const [m, lo, ls] = await connection.getMultipleAccountsInfo([market, keys.ownLedger, keys.sibLedger], "confirmed");
-    return vaultPotStateFromAccounts(programId, market, r.data, m?.data ?? null, lo?.data ?? null, ls?.data ?? null);
+    const [[m, lo, ls], navFloor] = await Promise.all([
+      connection.getMultipleAccountsInfo([market, keys.ownLedger, keys.sibLedger], "confirmed"),
+      earnNavFloorLive(connection, programId).catch(() => false),
+    ]);
+    return vaultPotStateFromAccounts(programId, market, r.data, m?.data ?? null, lo?.data ?? null, ls?.data ?? null, navFloor);
   } catch {
     return null;
   }

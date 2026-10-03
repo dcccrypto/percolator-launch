@@ -38,6 +38,9 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 import { resolveMarketLp } from "@/lib/market-lp";
+import { decodeMarketEngineView } from "@/lib/limits/decode";
+import { lpEffectiveSignedQ } from "@/lib/limits/lp-inventory-room";
+import { matcherLpSyncLive } from "@/lib/program-upgrade-detect";
 
 /**
  * Start of the vAMM context inside the matcher context account
@@ -112,7 +115,7 @@ export function parseMatcherCaps(data: Buffer): MatcherCaps | null {
 const CAPS_TTL_MS = 300_000;
 const capsCache = new Map<string, { caps: MatcherCaps | null; ts: number }>();
 const inflight = new Map<string, Promise<MatcherCaps | null>>();
-const ctxAddressCache = new Map<string, { pk: PublicKey; ts: number }>();
+const ctxAddressCache = new Map<string, { pk: PublicKey; lp: PublicKey; ts: number }>();
 
 /** Drop cached caps + ctx address for one market — call on trade/close failure. */
 export function invalidateMatcherCaps(programId: PublicKey, slabPk: PublicKey): void {
@@ -143,8 +146,52 @@ async function resolveCtxAddress(
   const lp = await resolveMarketLp(connection, programId, slabPk, knownPk);
   const matcherCtx: PublicKey | null = lp ? lp.matcherCtx : null;
 
-  if (matcherCtx) ctxAddressCache.set(key, { pk: matcherCtx, ts: Date.now() });
+  if (lp && matcherCtx) ctxAddressCache.set(key, { pk: matcherCtx, lp: lp.pubkey, ts: Date.now() });
   return matcherCtx;
+}
+
+/** The market's LP portfolio address (same resolution + cache as the ctx address). */
+async function resolveLpAddress(connection: Connection, programId: PublicKey, slabPk: PublicKey): Promise<PublicKey | null> {
+  const ctx = await resolveCtxAddress(connection, programId, slabPk);
+  if (!ctx) return null;
+  return ctxAddressCache.get(`${programId.toBase58()}|${slabPk.toBase58()}`)?.lp ?? null;
+}
+
+export interface LpInventoryState {
+  /** The matcher ctx `inventory_base` counter (null = unread). */
+  counterQ: bigint | null;
+  /** The LP's REAL ADL-effective position on asset 0 (null = unread / InvalidLeg). */
+  realQ: bigint | null;
+  /** The upgraded wrapper + matcher are live for this LP (lib/program-upgrade-detect.ts). */
+  syncLive: boolean;
+}
+
+/**
+ * Matcher-inventory drift (2026-10-03): the counter AND the LP's real engine position, read
+ * fresh in ONE getMultipleAccountsInfo (ctx, LP portfolio, market), plus whether the upgraded
+ * programs are live. Never cached (every fill, liquidation and ADL moves them). Combine with
+ * `lpInventoryRoomQ` (lib/limits/lp-inventory-room.ts). null = no LP / read failed.
+ */
+export async function getLpInventoryState(
+  connection: Connection,
+  programId: PublicKey,
+  slabPk: PublicKey,
+): Promise<LpInventoryState | null> {
+  try {
+    const ctx = await resolveCtxAddress(connection, programId, slabPk);
+    const lp = await resolveLpAddress(connection, programId, slabPk);
+    if (!ctx || !lp) return null;
+    const [ctxInfo, lpInfo, marketInfo] = await connection.getMultipleAccountsInfo([ctx, lp, slabPk], "confirmed");
+    if (!ctxInfo) return null;
+    const counterQ = parseMatcherInventory(Buffer.from(ctxInfo.data));
+    const engine = marketInfo ? decodeMarketEngineView(new Uint8Array(marketInfo.data), 0) : null;
+    const realQ = engine && lpInfo ? lpEffectiveSignedQ(new Uint8Array(lpInfo.data), engine, 0, engine.marketId) : null;
+    // The ctx is owned by the LP's matcher program (resolveMarketLp checks ctx.owner == matcherProg).
+    const syncLive = await matcherLpSyncLive(connection, programId, ctxInfo.owner).catch(() => false);
+    return { counterQ, realQ, syncLive };
+  } catch {
+    return null;
+  }
 }
 
 async function resolveCaps(

@@ -66,7 +66,7 @@ vi.mock("@/components/providers/SlabProvider", () => ({
 }));
 vi.mock("@/lib/priceStore/priceStore", () => ({ getLivePriceSnapshot: () => ({ priceE6: 1_000_000n, priceUsd: 1 }) }));
 vi.mock("@/lib/portfolio-invalidation", () => ({ invalidatePortfolio: vi.fn() }));
-vi.mock("@/lib/matcherCaps", () => ({ getMatcherCaps: vi.fn(async () => null), getMatcherInventory: vi.fn(async () => null) }));
+vi.mock("@/lib/matcherCaps", () => ({ getMatcherCaps: vi.fn(async () => null), getLpInventoryState: vi.fn(async () => null) }));
 
 import { useClosePosition, COPY_RESET_LEG } from "@/hooks/useClosePosition";
 import { getMatcherCaps } from "@/lib/matcherCaps";

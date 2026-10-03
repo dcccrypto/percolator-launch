@@ -2,6 +2,8 @@
     "p3Sha": "5544302ad689dd94cff300f50a2964c4a1c07ede",
     "p1Sha": "3acb34ae83b4038a88a02731d1aa023142ef6c11",
     "engineSha": "35ddd692",
+    "allErrorsSha": "7a3ac04c710240c1fa6be7ee7ea302b403012e4e",
+    "allErrorsNote": "allErrors is the rustc ordinal set at percolator-prog 7a3ac04c (percolator-sdk scripts/wrapper-errors/gen.py: 92 codes, 0-90 identical to 5544302a, 91 LpVaultTargetPotImpaired appended). Every other field is the 5544302a oracle (p3Sha).",
     "vectors": {
         "init_vault_lp_min": {
             "hex": "5ee803",
@@ -507,7 +509,8 @@
         "VaultLpSeniorDrawRequired": 87,
         "VaultLpRedeemNeedsRecall": 88,
         "VaultLpPausedForSeniorDraw": 89,
-        "VaultLpBindRequiresFlatAsset": 90
+        "VaultLpBindRequiresFlatAsset": 90,
+        "LpVaultTargetPotImpaired": 91
     },
     "layout": {
         "marketGroupOff": 592,

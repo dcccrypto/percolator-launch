@@ -116,7 +116,7 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
         lp: L.lp,
         takerPosQ: i.takerPosQ,
         matcher: L.matcher
-          ? { maxFillAbs: L.matcher.maxFillAbs, maxInventoryAbs: L.matcher.maxInventoryAbs, inventoryBase: L.matcher.inventoryBase }
+          ? { maxFillAbs: L.matcher.maxFillAbs, maxInventoryAbs: L.matcher.maxInventoryAbs, inventoryBase: L.matcher.inventoryBase, lpRealQ: L.lpRealQ ?? null, syncLive: L.matcherSyncLive === true }
           : null,
         vaultLp: boundVaultLpCap(L),
       });
@@ -147,7 +147,10 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
     // The wrapper hands the matcher the engine's effective_price (not the UI's live tick).
     const mark = e.effectivePriceE6;
     const lim = out.sideLimits?.[i.direction];
-    out.quote = preTradeQuote(L.matcher, mark, out.clampToQ ?? i.sizeQ, i.direction === "long", {
+    // Post-upgrade the matcher prices / clips from the LP's real position, not its stored counter.
+    const quoteCtx =
+      L.matcherSyncLive === true && L.lpRealQ != null ? { ...L.matcher, inventoryBase: L.lpRealQ } : L.matcher;
+    out.quote = preTradeQuote(quoteCtx, mark, out.clampToQ ?? i.sizeQ, i.direction === "long", {
       bandBps: L.bandBps ?? undefined,
       headroomQ: lim && lim.maxQ !== UNLIMITED_CAPACITY ? lim.maxQ : undefined,
     });

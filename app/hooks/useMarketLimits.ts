@@ -41,6 +41,8 @@ import {
 import { deriveVaultLpStatePda, resolveLpAccounts } from "@/lib/limits/lp-discovery";
 import { LP_VAULT_REGISTRY_SEED, VAULT_LP_STATE_SEED } from "@/lib/limits/constants";
 import { effectiveExecBandBps } from "@/lib/limits/risk-limits";
+import { lpEffectiveSignedQ } from "@/lib/limits/lp-inventory-room";
+import { matcherLpSyncLive } from "@/lib/program-upgrade-detect";
 
 const POLL_MS = 20_000;
 
@@ -64,6 +66,13 @@ export interface MarketLimits {
   vaultLp: AssetVaultLp | null;
   lp: LpView | null;
   matcher: MatcherCtxView | null;
+  /**
+   * The LP's REAL ADL-effective position on this asset (null = unread / InvalidLeg). The matcher
+   * ctx `inventoryBase` counter drifts on liquidation / ADL / reset (2026-10-03).
+   */
+  lpRealQ: bigint | null;
+  /** Upgraded wrapper + matcher live for this LP: the matcher prices from `lpRealQ`. */
+  matcherSyncLive: boolean;
   vaultState: VaultLpStateView | null;
   /** P3: registry `total_lp_shares_outstanding` (the program's share count); null = unread. */
   registryShares: bigint | null;
@@ -79,6 +88,8 @@ const OFF = (flags: LimitsFlags): MarketLimits => ({
   vaultLp: null,
   lp: null,
   matcher: null,
+  lpRealQ: null,
+  matcherSyncLive: false,
   vaultState: null,
   registryShares: null,
   assetAdmin: null,
@@ -94,7 +105,9 @@ export function useMarketLimits(slabAddress: string | null | undefined, assetInd
   const [accts, setAccts] = useState<{
     slab: string;
     lp: LpView | null;
+    lpBytes: Uint8Array | null;
     matcher: MatcherCtxView | null;
+    matcherSyncLive: boolean;
     vaultState: VaultLpStateView | null;
     registryShares: bigint | null;
     error: boolean;
@@ -149,26 +162,33 @@ export function useMarketLimits(slabAddress: string | null | undefined, assetInd
         const vaultInfo = vaultPda ? infos[k++] : null;
         const registryInfo = registryPda ? infos[k++] : null;
         let lp: LpView | null = null;
+        let lpBytes: Uint8Array | null = null;
         if (lpAccts && lpInfo) {
           const d = new Uint8Array(lpInfo.data);
+          lpBytes = d;
           const r = decodePortfolioRisk(d);
           if (r) lp = { ...r, address: lpAccts.lpPortfolio, posQ: marketId === null ? 0n : signedPositionForAsset(d, assetIndex, marketId), legs: decodePortfolioLegs(d) };
         }
         const matcher = ctxInfo ? decodeMatcherCtx(new Uint8Array(ctxInfo.data)) : null;
+        // The ctx is owned by the LP's matcher program; unknown / failed detection = not live.
+        const matcherSyncLive = ctxInfo ? await matcherLpSyncLive(connection, programPk, ctxInfo.owner).catch(() => false) : false;
+        if (!alive) return;
         const vaultState = vaultInfo ? decodeVaultLpState(new Uint8Array(vaultInfo.data)) : null;
         const registryShares = registryInfo ? decodeLpVaultRegistryShares(new Uint8Array(registryInfo.data)) : null;
         setAccts((prev) => ({
           slab: slabAddress,
           // never blank a good value on a failed/empty read
           lp: lp ?? (prev?.slab === slabAddress ? prev.lp : null),
+          lpBytes: lpBytes ?? (prev?.slab === slabAddress ? prev.lpBytes : null),
           matcher: matcher ?? (prev?.slab === slabAddress ? prev.matcher : null),
+          matcherSyncLive: ctxInfo ? matcherSyncLive : prev?.slab === slabAddress ? prev.matcherSyncLive : false,
           vaultState: vaultState ?? (prev?.slab === slabAddress ? prev.vaultState : null),
           registryShares: registryShares ?? (prev?.slab === slabAddress ? prev.registryShares : null),
           error: false,
         }));
       } catch {
         if (alive) {
-          setAccts((prev) => (prev && prev.slab === slabAddress ? { ...prev, error: true } : { slab: slabAddress, lp: null, matcher: null, vaultState: null, registryShares: null, error: true }));
+          setAccts((prev) => (prev && prev.slab === slabAddress ? { ...prev, error: true } : { slab: slabAddress, lp: null, lpBytes: null, matcher: null, matcherSyncLive: false, vaultState: null, registryShares: null, error: true }));
         }
       } finally {
         fetching = false;
@@ -200,9 +220,14 @@ export function useMarketLimits(slabAddress: string | null | undefined, assetInd
       vaultLp: slabPart?.vaultLp ?? null,
       lp: accPart?.lp ?? null,
       matcher: accPart?.matcher ?? null,
+      lpRealQ:
+        accPart?.lpBytes && slabPart?.engine
+          ? lpEffectiveSignedQ(accPart.lpBytes, slabPart.engine, assetIndex, slabPart.engine.marketId)
+          : null,
+      matcherSyncLive: accPart?.matcherSyncLive ?? false,
       vaultState: accPart?.vaultState ?? null,
       registryShares: accPart?.registryShares ?? null,
       assetAdmin: admin,
     };
-  }, [anyOn, flags, accts, slabAddress, slabPart, raw, assetProfile]);
+  }, [anyOn, flags, accts, slabAddress, slabPart, raw, assetProfile, assetIndex]);
 }

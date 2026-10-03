@@ -15,8 +15,8 @@ import { isPartialLegSendError } from "@/lib/trade-leg-groups";
 import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { humanizeError, UserFacingError, userFacingMessage, withTransientRetry } from "@/lib/errorMessages";
-import { getMatcherCaps, getMatcherInventory } from "@/lib/matcherCaps";
-import { remainingSideCapacityQ, wouldExceedInventoryCap } from "@/lib/marketCapacity";
+import { getLpInventoryState, getMatcherCaps } from "@/lib/matcherCaps";
+import { lpInventoryRoomQ } from "@/lib/limits/lp-inventory-room";
 import { chunkCloseSize } from "@/lib/closeChunks";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
@@ -394,12 +394,17 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
               // remaining capacity and fail with the real reason instead of
               // the bare on-chain error. closeSize < 0 = user sells ("short"
               // side of the capacity math); > 0 = user buys ("long").
-              const inv = await getMatcherInventory(connection, programId, slabPk);
-              if (inv !== null) {
-                const side = closeSize < 0n ? "short" : "long";
+              // Matcher-inventory drift (2026-10-03): the ctx counter goes stale on liquidation /
+              // ADL / reset. Room = min(counter, LP's real position) until the upgraded matcher is
+              // detected, then the real position (lib/limits/lp-inventory-room.ts).
+              const invState = await getLpInventoryState(connection, programId, slabPk);
+              const side = closeSize < 0n ? "short" : "long";
+              const capacity = invState
+                ? lpInventoryRoomQ({ counterQ: invState.counterQ, realQ: invState.realQ, maxInventoryAbs: caps.maxInventoryAbs, syncLive: invState.syncLive }, side)
+                : null;
+              if (capacity !== null) {
                 const sizeAbs = closeSize < 0n ? -closeSize : closeSize;
-                if (wouldExceedInventoryCap(inv, caps.maxInventoryAbs, side, sizeAbs)) {
-                  const capacity = remainingSideCapacityQ(inv, caps.maxInventoryAbs, side);
+                if (sizeAbs > capacity) {
                   const pct = sizeAbs > 0n ? Number((capacity * 100n) / sizeAbs) : 0;
                   throw new UserFacingError(
                     `The market can only absorb ${pct}% of this close right now — its liquidity ` +

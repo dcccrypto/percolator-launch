@@ -1,5 +1,6 @@
 'use client';
 
+import { earnNavFloorLive } from "@/lib/program-upgrade-detect";
 import { isHiddenFromListing } from "@/lib/listing-hidden";
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Connection, PublicKey } from '@solana/web3.js';
@@ -389,9 +390,11 @@ export async function fetchCuratedVaultsOnChain(
         connection,
         splitPot.flatMap((s) => [s.market, s.ownLedger, s.sibLedger]),
       );
+      // Wrapper 7a3ac04c+ per-pot NAV floor (one cached probe for every vault).
+      const navFloor = await earnNavFloorLive(connection, programId).catch(() => false);
       splitPot.forEach((s, j) => {
         const [m, lo, ls] = spInfos.slice(3 * j, 3 * j + 3);
-        const sp = splitPotStateFromAccounts(programId, s.market, s.registryData, m?.data ?? null, lo?.data ?? null, ls?.data ?? null);
+        const sp = splitPotStateFromAccounts(programId, s.market, s.registryData, m?.data ?? null, lo?.data ?? null, ls?.data ?? null, navFloor);
         const v = sp ? vaultValue(sp) : null;
         if (sp && v && sp.totalShares > 0n) result[s.slab] = { ...result[s.slab], tvlAtoms: v.nav };
       });
