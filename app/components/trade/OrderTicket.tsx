@@ -372,8 +372,14 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // /api/markets/health. Blocks OPENS only — a close reduces the LP's risk and
   // is not gated on this (OrderTicketClosePanel keeps the legacy value).
   const marketHealth = useSingleMarketHealth(slabAddress);
-  // Limits UI (P1/P2/P3, flag-gated; returns state "off" and does no RPC when all flags are off).
-  const marketLimits = useMarketLimits(slabAddress);
+  // SameOwnerTrade is unconditional even when the optional limits phases
+  // are OFF. The hook resolves canonical LP ownership only when asset_admin
+  // is actually renounced; normal markets do not pay for that extra read.
+  const marketLimits = useMarketLimits(
+    slabAddress,
+    0,
+    true,
+  );
   /** WP-3 row 9: the size was just reduced to the max; the helper turns --warning for 4 s. */
   const [clampedToQ, setClampedToQ] = useState<bigint | null>(null);
   /** WP-3 result line (§3.3): full / partial / zero fill of the last order, in the status slot. */
@@ -1120,6 +1126,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   const submitDisabled =
     accountPending ||
+    marketLimits.sameOwnerPending === true ||
     tradePhase !== "idle" ||
     loading ||
     ticketState.blocks ||
@@ -1909,9 +1916,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             ? TICKET_COPY.confirmInWallet
             : tradePhase === "waiting"
               ? TICKET_COPY.waitingLatest
-              : accountPending
-                ? "Loading account…"
-                : fundOverWallet && !ticketState.blocks
+              : marketLimits.sameOwnerPending
+                ? "Loading market..."
+                : accountPending
+                  ? "Loading account…"
+                  : fundOverWallet && !ticketState.blocks
                 ? "Get test funds"
                 : fundingMode && ticketState.row === "ok"
                   ? FIRST_TRADE_COPY.button(fundLabel, direction === "long" ? "Long" : "Short")

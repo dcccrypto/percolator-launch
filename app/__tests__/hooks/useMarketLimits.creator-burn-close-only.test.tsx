@@ -20,10 +20,19 @@ const ZERO_ADMIN = new Uint8Array(32);
 const SLAB = "AzagguvrWmRgcBpsKuqomW7Yb1YUUd6UzcrkiRsqdhr";
 const PROGRAM = "GnwdeQrAh4qzChJeVLrM21CXXWC1akjLH3DiijwzEEYZ";
 
-const mocks = vi.hoisted(() => ({
-  resolveLpAccounts: vi.fn(),
-  getMultipleAccountsInfo: vi.fn(),
-}));
+const mocks = vi.hoisted(() => {
+  const getMultipleAccountsInfo = vi.fn();
+
+  return {
+    resolveLpAccounts: vi.fn(),
+    resolveMarketLp: vi.fn(),
+    getMultipleAccountsInfo,
+    assetAdminBytes: new Uint8Array(32),
+    connection: {
+      getMultipleAccountsInfo,
+    },
+  };
+});
 
 vi.mock("@/lib/limits/flags", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/limits/flags")>();
@@ -48,15 +57,17 @@ vi.mock("@/lib/limits/lp-discovery", async (importOriginal) => {
   };
 });
 
+vi.mock("@/lib/market-lp", () => ({
+  resolveMarketLp: mocks.resolveMarketLp,
+}));
+
 vi.mock("@/lib/pollWhenVisible", () => ({
   pollWhenVisible: () => () => undefined,
 }));
 
 vi.mock("@/hooks/useWalletCompat", () => ({
   useConnectionCompat: () => ({
-    connection: {
-      getMultipleAccountsInfo: mocks.getMultipleAccountsInfo,
-    },
+    connection: mocks.connection,
   }),
 }));
 
@@ -68,7 +79,7 @@ vi.mock("@/components/providers/SlabProvider", () => ({
     // Burn Admin Key writes the zero pubkey into asset_admin.
     assetProfile: {
       assetAdmin: {
-        toBytes: () => ZERO_ADMIN,
+        toBytes: () => mocks.assetAdminBytes,
       },
     },
   }),
@@ -118,11 +129,8 @@ function ticketFor(
 
 describe("creator close-only after Burn Admin Key", () => {
   it("remains close-only from LP ownership when asset_admin is zero and flags are OFF", async () => {
-    mocks.resolveLpAccounts.mockResolvedValue({
-      lpPortfolio: new PublicKey(
-        "11111111111111111111111111111111",
-      ),
-      matcherCtx: null,
+    mocks.resolveMarketLp.mockResolvedValue({
+      owner: new PublicKey(CREATOR),
     });
 
     mocks.getMultipleAccountsInfo.mockResolvedValue([
@@ -133,7 +141,7 @@ describe("creator close-only after Burn Admin Key", () => {
       await import("@/hooks/useMarketLimits");
 
     const { result } = renderHook(() =>
-      useMarketLimits(SLAB),
+      useMarketLimits(SLAB, 0, true),
     );
 
     // Establish the post-burn condition first.
@@ -159,8 +167,13 @@ describe("creator close-only after Burn Admin Key", () => {
       await import("@/hooks/useMarketLimits");
 
     const { result } = renderHook(() =>
-      useMarketLimits(SLAB),
+      useMarketLimits(SLAB, 0, true),
     );
+
+    await waitFor(() => {
+      expect(result.current.sameOwnerPending).toBe(false);
+      expect(result.current.sameOwnerLpOwner).not.toBeNull();
+    });
 
     const ticket = ticketFor(result.current, OTHER_WALLET);
 
@@ -219,8 +232,15 @@ describe("user-facing ticket impact", () => {
       await import("@/lib/limits/ticket-state");
 
     const { result } = renderHook(() =>
-      useMarketLimits(SLAB),
+      useMarketLimits(SLAB, 0, true),
     );
+
+    await waitFor(() => {
+      expect(result.current.sameOwnerPending).toBe(false);
+      expect(
+        ticketFor(result.current, CREATOR).sameOwner,
+      ).toBe(true);
+    });
 
     const limitsTicket = ticketFor(
       result.current,
@@ -256,5 +276,34 @@ describe("user-facing ticket impact", () => {
       buttonLabel: "Close-only for this wallet",
       blocks: true,
     });
+  });
+});
+
+
+describe("same-owner LP resolution gating", () => {
+  it("does not resolve the canonical LP while asset_admin is still non-zero", async () => {
+    mocks.assetAdminBytes = CREATOR;
+    mocks.resolveMarketLp.mockClear();
+
+    const { useMarketLimits } =
+      await import("@/hooks/useMarketLimits");
+
+    const { result } = renderHook(() =>
+      useMarketLimits(SLAB, 0, true),
+    );
+
+    await waitFor(() => {
+      expect(result.current.sameOwnerPending).toBe(false);
+    });
+
+    expect(mocks.resolveMarketLp).not.toHaveBeenCalled();
+
+    // Existing asset_admin identity is still enough for SameOwnerTrade.
+    const ticket = ticketFor(result.current, CREATOR);
+
+    expect(ticket.sameOwner).toBe(true);
+    expect(ticket.sameOwnerCloseOnly).toBe(true);
+
+    mocks.assetAdminBytes = ZERO_ADMIN;
   });
 });
