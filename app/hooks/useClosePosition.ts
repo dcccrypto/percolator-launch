@@ -16,7 +16,7 @@ import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { humanizeError, UserFacingError, userFacingMessage, withTransientRetry } from "@/lib/errorMessages";
 import { getMatcherCaps, getMatcherInventory } from "@/lib/matcherCaps";
-import { remainingSideCapacityQ, wouldExceedInventoryCap } from "@/lib/marketCapacity";
+import { closeCapacityMessage, remainingSideCapacityQ, wouldExceedInventoryCap } from "@/lib/marketCapacity";
 import { chunkCloseSize } from "@/lib/closeChunks";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
@@ -399,13 +399,10 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
                 const side = closeSize < 0n ? "short" : "long";
                 const sizeAbs = closeSize < 0n ? -closeSize : closeSize;
                 if (wouldExceedInventoryCap(inv, caps.maxInventoryAbs, side, sizeAbs)) {
+                  // The percent offered is of the WHOLE position (what the slider means), not of
+                  // this close's size (lib/marketCapacity.ts closeCapacityMessage).
                   const capacity = remainingSideCapacityQ(inv, caps.maxInventoryAbs, side);
-                  const pct = sizeAbs > 0n ? Number((capacity * 100n) / sizeAbs) : 0;
-                  throw new UserFacingError(
-                    `The market can only absorb ${pct}% of this close right now — its liquidity ` +
-                      `provider is at its exposure cap on your side. Close up to ${Math.max(pct, 0)}% ` +
-                      `now, or wait for other trades to free capacity.`,
-                  );
+                  throw new UserFacingError(closeCapacityMessage(capacity, freshAbs));
                 }
               }
               const legs = chunkCloseSize(closeSize, caps.maxFillAbs);
@@ -415,7 +412,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
             // The capacity error above is a REAL, user-facing block — rethrow.
             // Anything else (caps/inventory read failed) degrades to the
             // single-leg close exactly as before.
-            if (capErr instanceof Error && capErr.message.includes("can only absorb")) {
+            if (capErr instanceof UserFacingError) {
               throw capErr;
             }
           }
