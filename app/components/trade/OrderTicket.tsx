@@ -89,6 +89,7 @@ import { invalidatePortfolio } from "@/lib/portfolio-invalidation";
 import { FEE_LEGS, legPercent, splitFeeAtoms } from "@/lib/fee-breakdown";
 import { useMarketLimits } from "@/hooks/useMarketLimits";
 import { closeLimitNotice, deriveTicketLimits, feeFitSizeQ, sizeQToInput, type TicketLimitsInput } from "@/lib/limits/ticket";
+import { sameOwnerRoomQ } from "@/lib/limits/risk-limits";
 import { balanceMaxQ, deriveTicketState, maxInUnit, oneMaxQ, type TicketRow } from "@/lib/limits/ticket-state";
 import { publishTicketRow } from "@/lib/limits/ticket-status-store";
 import { fmtQ } from "@/lib/limits/format";
@@ -373,13 +374,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // is not gated on this (OrderTicketClosePanel keeps the legacy value).
   const marketHealth = useSingleMarketHealth(slabAddress);
   // SameOwnerTrade is unconditional even when the optional limits phases
-  // are OFF. The hook resolves canonical LP ownership only when asset_admin
-  // is actually renounced; normal markets do not pay for that extra read.
-  const marketLimits = useMarketLimits(
-    slabAddress,
-    0,
-    true,
-  );
+  // are OFF (#2976). The hook resolves canonical LP ownership only for a connected
+  // wallet on a market whose asset_admin is renounced (cached per market); normal
+  // markets, visitors without a wallet and mock mode pay for no extra read.
+  const marketLimits = useMarketLimits(slabAddress, 0, mockMode ? null : publicKey?.toBase58() ?? null);
   /** WP-3 row 9: the size was just reduced to the max; the helper turns --warning for 4 s. */
   const [clampedToQ, setClampedToQ] = useState<bigint | null>(null);
   /** WP-3 result line (§3.3): full / partial / zero fill of the last order, in the status slot. */
@@ -1124,10 +1122,16 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     }
   }
 
+  // #2976: while the post-burn LP owner is first being resolved (bounded), hold only an
+  // order that would OPEN / grow / flip this wallet. A close (within the reducing room) is
+  // never held; an unresolved owner never blocks (on-chain 67 + pre-sign simulation refuse).
+  const sameOwnerOpenPending =
+    marketLimits.sameOwnerPending === true &&
+    positionSize > sameOwnerRoomQ(existingPositionSize, direction);
+
   const submitDisabled =
     accountPending ||
-    marketLimits.sameOwnerPending === true ||
-    marketLimits.sameOwnerUnresolved === true ||
+    sameOwnerOpenPending ||
     tradePhase !== "idle" ||
     loading ||
     ticketState.blocks ||
@@ -1917,30 +1921,16 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             ? TICKET_COPY.confirmInWallet
             : tradePhase === "waiting"
               ? TICKET_COPY.waitingLatest
-              : marketLimits.sameOwnerPending
-                ? "Loading market..."
-                : marketLimits.sameOwnerUnresolved
-                  ? "Market ownership unavailable"
-                  : accountPending
-                  ? "Loading account…"
-                  : fundOverWallet && !ticketState.blocks
+              : sameOwnerOpenPending
+                ? "Loading market…"
+                : accountPending
+                ? "Loading account…"
+                : fundOverWallet && !ticketState.blocks
                 ? "Get test funds"
                 : fundingMode && ticketState.row === "ok"
                   ? FIRST_TRADE_COPY.button(fundLabel, direction === "long" ? "Long" : "Short")
                   : ticketState.buttonLabel}
         </button>
-
-        {marketLimits.sameOwnerUnresolved &&
-          marketLimits.retrySameOwnerResolution && (
-            <button
-              type="button"
-              data-testid="same-owner-retry"
-              onClick={marketLimits.retrySameOwnerResolution}
-              className="mt-2 w-full border border-[var(--border)] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)] transition-colors hover:text-[var(--text)]"
-            >
-              Retry market check
-            </button>
-          )}
         </>
       )}
 

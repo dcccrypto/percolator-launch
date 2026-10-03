@@ -8,7 +8,7 @@
  * but dropped the LP identity needed after an admin burn. That could make the
  * creator ticket look tradeable even though the wrapper remained close-only.
  */
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
 import { deriveTicketLimits } from "@/lib/limits/ticket";
@@ -19,6 +19,8 @@ const ZERO_ADMIN = new Uint8Array(32);
 
 const SLAB = "AzagguvrWmRgcBpsKuqomW7Yb1YUUd6UzcrkiRsqdhr";
 const PROGRAM = "GnwdeQrAh4qzChJeVLrM21CXXWC1akjLH3DiijwzEEYZ";
+/** The ticket passes the connected wallet; resolution runs only with one. */
+const WALLET = new PublicKey(CREATOR).toBase58();
 
 const mocks = vi.hoisted(() => {
   const getMultipleAccountsInfo = vi.fn();
@@ -110,6 +112,10 @@ vi.mock("@/lib/limits/decode", async (importOriginal) => {
   };
 });
 
+beforeEach(async () => {
+  (await import("@/hooks/useMarketLimits")).__resetSameOwnerLpCache();
+});
+
 function ticketFor(
   limits: ReturnType<
     typeof import("@/hooks/useMarketLimits")["useMarketLimits"]
@@ -141,7 +147,7 @@ describe("creator close-only after Burn Admin Key", () => {
       await import("@/hooks/useMarketLimits");
 
     const { result } = renderHook(() =>
-      useMarketLimits(SLAB, 0, true),
+      useMarketLimits(SLAB, 0, WALLET),
     );
 
     // Establish the post-burn condition first.
@@ -167,7 +173,7 @@ describe("creator close-only after Burn Admin Key", () => {
       await import("@/hooks/useMarketLimits");
 
     const { result } = renderHook(() =>
-      useMarketLimits(SLAB, 0, true),
+      useMarketLimits(SLAB, 0, WALLET),
     );
 
     await waitFor(() => {
@@ -250,7 +256,7 @@ describe("user-facing ticket impact", () => {
       await import("@/lib/limits/ticket-state");
 
     const { result } = renderHook(() =>
-      useMarketLimits(SLAB, 0, true),
+      useMarketLimits(SLAB, 0, WALLET),
     );
 
     await waitFor(() => {
@@ -307,7 +313,7 @@ describe("same-owner LP resolution gating", () => {
       await import("@/hooks/useMarketLimits");
 
     const { result } = renderHook(() =>
-      useMarketLimits(SLAB, 0, true),
+      useMarketLimits(SLAB, 0, WALLET),
     );
 
     await waitFor(() => {
@@ -328,7 +334,7 @@ describe("same-owner LP resolution gating", () => {
 
 
 describe("same-owner resolution recovery", () => {
-  it("exposes an explicit retry after bounded resolution attempts are exhausted", async () => {
+  it("retries in the background after a failed resolution, without blocking", async () => {
     vi.useFakeTimers();
 
     try {
@@ -340,50 +346,29 @@ describe("same-owner resolution recovery", () => {
         await import("@/hooks/useMarketLimits");
 
       const { result } = renderHook(() =>
-        useMarketLimits(SLAB, 0, true),
+        useMarketLimits(SLAB, 0, WALLET),
       );
 
-      // Initial resolution attempt.
+      // Initial resolution attempt settles: no longer pending (fails open).
       await act(async () => {
+        await Promise.resolve();
         await Promise.resolve();
       });
 
       expect(mocks.resolveMarketLp).toHaveBeenCalledTimes(1);
-
-      // Bounded retries: 2 s, 8 s, 30 s.
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(2_000);
-      });
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(8_000);
-      });
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(30_000);
-      });
-
-      expect(mocks.resolveMarketLp).toHaveBeenCalledTimes(4);
       expect(result.current.sameOwnerPending).toBe(false);
       expect(result.current.sameOwnerUnresolved).toBe(true);
-      expect(result.current.retrySameOwnerResolution).toBeTypeOf(
-        "function",
-      );
 
-      // RPC recovers. Explicit retry must restart resolution without
-      // reintroducing a continuous polling loop.
+      // RPC recovers before the first background retry (2 s).
       mocks.resolveMarketLp.mockResolvedValue({
         owner: new PublicKey(CREATOR),
       });
 
-      act(() => {
-        result.current.retrySameOwnerResolution?.();
-      });
-
       await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(2_000);
       });
 
-      expect(mocks.resolveMarketLp).toHaveBeenCalledTimes(5);
+      expect(mocks.resolveMarketLp).toHaveBeenCalledTimes(2);
       expect(result.current.sameOwnerPending).toBe(false);
       expect(result.current.sameOwnerUnresolved).toBe(false);
       expect(result.current.sameOwnerLpOwner).not.toBeNull();
