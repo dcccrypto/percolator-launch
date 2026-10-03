@@ -262,7 +262,7 @@ export function PositionSummary() {
             Open Positions
           </p>
           <span className="text-[9px] font-bold text-[var(--text-secondary)]">
-            ({positions.length})
+            ({portfolio.error ? "—" : positions.length})
           </span>
           {positions.length > 0 && (
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--long)]" />
@@ -277,6 +277,20 @@ export function PositionSummary() {
             {[1, 2, 3].map((i) => (
               <ShimmerSkeleton key={i} className="h-24" />
             ))}
+          </div>
+        ) : portfolio.error ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+            <span className="text-2xl leading-none">⚠️</span>
+            <div>
+              <p className="text-[12px] font-semibold text-[var(--text-secondary)]">Couldn't load your positions</p>
+              <p className="mt-0.5 text-[11px] text-[var(--text-secondary)]">Please try refreshing</p>
+            </div>
+            <button
+              onClick={portfolio.refresh}
+              className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] px-4 py-2 text-xs text-[var(--text-secondary)] transition-all hover:border-[var(--accent)]/40 hover:text-[var(--text)]"
+            >
+              Retry
+            </button>
           </div>
         ) : positions.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center p-6 text-center">

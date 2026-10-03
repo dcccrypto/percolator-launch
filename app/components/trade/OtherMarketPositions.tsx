@@ -30,7 +30,7 @@
 import { FC, memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
-import { usePortfolio, type PortfolioPosition } from "@/hooks/usePortfolio";
+import { positionRowKeys, usePortfolio, type PortfolioPosition } from "@/hooks/usePortfolio";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { useClosePosition } from "@/hooks/useClosePosition";
@@ -74,7 +74,7 @@ const CloseFlow: FC<{
   decimals: number;
   onDone: (closed: boolean) => void;
 }> = ({ pos, markE6, priceUsd, symbol, decimals, onDone }) => {
-  const { closePosition, loading, prewarmClose } = useClosePosition(pos.slabAddress);
+  const { closePosition, loading, error, prewarmClose } = useClosePosition(pos.slabAddress);
   // CloseFlow only mounts when the close modal opens, so mount === modal-open:
   // start the fresh position read + tx prewarms now, and the confirm click
   // reaches the wallet popup with zero blocking round-trips.
@@ -105,13 +105,14 @@ const CloseFlow: FC<{
       priceUsd={priceUsd}
       isLong={posSize > 0n}
       loading={loading}
+      error={error}
       oracleStale={oracleStale || (!mockExempt && engineStale)}
       onConfirm={async (percent) => {
         try {
           await closePosition(percent);
           onDone(true);
         } catch {
-          /* keep the modal open; the tx error is surfaced by the hook */
+          /* keep the modal open; the hook's `error` shows inside it */
         }
       }}
       onCancel={() => onDone(false)}
@@ -319,6 +320,7 @@ const OtherMarketPositionsInner: FC<{ currentSlab: string }> = ({ currentSlab })
     .filter((pos) => pos.slabAddress !== currentSlab && (pos.account?.positionSize ?? 0n) !== 0n)
     .sort((a, b) => (notionalOf(b) > notionalOf(a) ? 1 : notionalOf(b) < notionalOf(a) ? -1 : 0)), [positions, currentSlab]);
   const otherMints = useMemo(() => others.map((pos) => pos.collateralMint), [others]);
+  const otherKeys = useMemo(() => positionRowKeys(others), [others]);
   const tokenMetaMap = useMultiTokenMeta(otherMints);
 
   if (others.length === 0) return null;
@@ -349,9 +351,9 @@ const OtherMarketPositionsInner: FC<{ currentSlab: string }> = ({ currentSlab })
             </tr>
           </thead>
           <tbody>
-            {others.map((pos) => (
+            {others.map((pos, i) => (
               <OtherMarketRow
-                key={`${pos.slabAddress}-${pos.idx}`}
+                key={otherKeys[i]}
                 pos={pos}
                 decimals={tokenMetaMap.get(pos.collateralMint.toBase58())?.decimals ?? 6}
                 onClosed={portfolio.refresh}

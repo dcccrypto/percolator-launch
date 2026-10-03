@@ -47,6 +47,18 @@ export interface MessageContext {
   p3Bound?: boolean;
   /** Wallet display name for the locked-wallet line. */
   walletName?: string;
+  /**
+   * GH#2953: this call does NOT wait and resend (fund-and-trade signs once). A waitable refusal
+   * must then say nothing was sent and to try again, never promise that the order "goes through
+   * automatically".
+   */
+  oneShot?: boolean;
+  /**
+   * GH#2959: the order opens a NEW position below the market's minimum initial margin
+   * (min_nonzero_im_req), already formatted ("$2"). A Custom(49) is then the floor, and
+   * "lower the size" is the wrong advice: a smaller order is refused the same way.
+   */
+  imFloorLabel?: string;
 }
 
 export interface UserMessageAction {
@@ -144,8 +156,23 @@ function mmss(secs: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
+/** GH#2953: the one-shot form of a waitable line (see MessageContext.oneShot). */
+const ONE_SHOT_BODY: Record<string, string> = {
+  "engine-catching-up": "The market is catching up with the latest prices. Nothing was sent. Try again in a moment.",
+  "price-wait": "Waiting for a fresh price. Nothing was sent. Try again in a few seconds.",
+};
+
 /** The one resolver (§5.3). Never throws. */
 export function resolveUserMessage(err: unknown, ctx: MessageContext): UserMessage {
+  const u = resolveUserMessageInner(err, ctx);
+  // Only the PRE-SEND waits have a one-shot form. Anything else (notably "still-confirming": the tx
+  // WAS broadcast and may still land) keeps its own line — "Nothing was sent. Try again" there would
+  // invite a second deposit+trade while the first can still land.
+  const body = ctx.oneShot && u.autoRetry ? ONE_SHOT_BODY[u.kind] : undefined;
+  return body ? { ...u, autoRetry: false, body } : u;
+}
+
+function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage {
   const p = parseFailure(err);
   const origin = originOf(p.programId);
   // A Custom(n) is decoded by the program that RAISED it (error-codes-4b1a5d30.md: CPI callees —
@@ -302,6 +329,9 @@ export function resolveUserMessage(err: unknown, ctx: MessageContext): UserMessa
           : m("engine-catching-up", "wait", "Catching up", "The market is catching up with the latest prices. Try again in a moment.");
       }
       case W.EngineInsufficientInitialMargin:
+        if (ctx.imFloorLabel) {
+          return m("insufficient-margin", "error", "Not enough margin", `New positions on this market need at least ${ctx.imFloorLabel} of margin.`);
+        }
         return m("insufficient-margin", "error", "Not enough margin", "Add collateral or lower the size or leverage.");
       case W.ExecPriceOutsideOracleBand:
         return m("price-moved", "error", "Price moved", ctx.maxNow ? `The price moved too far for this size. Most you can open now: ${ctx.maxNow}${sym ? ` ${sym}` : ""}.` : "The price moved too far for this size. Try a smaller size.", useMax);

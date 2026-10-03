@@ -49,7 +49,9 @@ import { ConnectButtonPrivyInner } from "@/components/wallet/ConnectButtonPrivyI
 import { PrivyLoginContext } from "@/hooks/usePrivySafe";
 import {
   RECONNECT_GRACE_MS,
+  RECONNECT_FALLBACK_MS,
   isStaleWalletSession,
+  isReconnectFallbackEligible,
 } from "@/hooks/useWalletNeedsReconnect";
 
 const STALE_SESSION = {
@@ -57,8 +59,21 @@ const STALE_SESSION = {
   authenticated: true,
   logout: mockLogout,
   exportWallet: vi.fn(),
-  user: { wallet: { address: "PHANTOM_LINKED_ADDRESS" }, linkedAccounts: [] },
+  user: {
+    wallet: { address: "PHANTOM_LINKED_ADDRESS" },
+    linkedAccounts: [
+      { type: "wallet", chainType: "solana", walletClientType: "phantom", address: "PHANTOM_LINKED_ADDRESS" },
+    ],
+  },
 };
+
+const EMBEDDED_ACCOUNT = {
+  type: "wallet",
+  chainType: "solana",
+  walletClientType: "privy",
+  address: "EMBEDDED_ADDRESS",
+};
+const EMAIL_ACCOUNT = { type: "email", address: "a@b.co" };
 
 const PHANTOM = { address: "PHANTOM_LINKED_ADDRESS", standardWallet: { name: "Phantom" } };
 
@@ -147,12 +162,102 @@ describe("ConnectButtonPrivyInner — stale Privy session", () => {
     expect(screen.queryByRole("button", { name: "Reconnect wallet" })).toBeNull();
   });
 
+  // Live on the playground (2026-10-02): after an idle session the header kept the linked address
+  // while every Connect gate said "connect". Privy never reported walletsReady, which was the only
+  // thing holding the stale check back.
+  it("wallets never report ready: Reconnect shows after the fallback, not the stale address", () => {
+    mockUseWallets.mockReturnValue({ ready: false, wallets: [] });
+    renderHeader();
+    act(() => {
+      vi.advanceTimersByTime(RECONNECT_FALLBACK_MS - 1);
+    });
+    expect(screen.queryByRole("button", { name: "Reconnect wallet" })).toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(screen.getByRole("button", { name: "Reconnect wallet" })).toBeTruthy();
+    expect(screen.queryByText("PHAN...RESS")).toBeNull();
+  });
+
+  it("CONTROL: a wallet that turns up during the fallback wait never shows Reconnect", () => {
+    mockUseWallets.mockReturnValue({ ready: false, wallets: [] });
+    const { rerender } = renderHeader();
+    act(() => {
+      vi.advanceTimersByTime(RECONNECT_FALLBACK_MS - 1000);
+    });
+    mockUseWallets.mockReturnValue({ ready: false, wallets: [PHANTOM] });
+    rerender(
+      <PrivyLoginContext.Provider value={vi.fn()}>
+        <ConnectButtonPrivyInner />
+      </PrivyLoginContext.Provider>,
+    );
+    act(() => {
+      vi.advanceTimersByTime(RECONNECT_FALLBACK_MS);
+    });
+    expect(screen.queryByRole("button", { name: "Reconnect wallet" })).toBeNull();
+    expect(screen.getByText("PHAN...RESS")).toBeTruthy();
+  });
+
+  // Review correction: the fallback is for external-wallet sessions only.
+  it("NEGATIVE: embedded Privy wallet session never gets the fallback Reconnect, however long wallets lag", () => {
+    mockUsePrivy.mockReturnValue({
+      ...STALE_SESSION,
+      user: { wallet: { address: "EMBEDDED_ADDRESS" }, linkedAccounts: [EMAIL_ACCOUNT, EMBEDDED_ACCOUNT] },
+    });
+    mockUseWallets.mockReturnValue({ ready: false, wallets: [] });
+    renderHeader();
+    act(() => {
+      vi.advanceTimersByTime(RECONNECT_FALLBACK_MS * 3);
+    });
+    expect(screen.queryByRole("button", { name: "Reconnect wallet" })).toBeNull();
+  });
+
+  it("NEGATIVE: fresh AutoSignIn email session (embedded wallet still being created) is not stale", () => {
+    mockUsePrivy.mockReturnValue({
+      ...STALE_SESSION,
+      user: { wallet: undefined, linkedAccounts: [EMAIL_ACCOUNT] },
+    });
+    mockUseWallets.mockReturnValue({ ready: false, wallets: [] });
+    renderHeader();
+    act(() => {
+      vi.advanceTimersByTime(RECONNECT_FALLBACK_MS * 3);
+    });
+    expect(screen.queryByRole("button", { name: "Reconnect wallet" })).toBeNull();
+  });
+
+  it("CONTROL: the same lagging state WITH an external wallet linked does show Reconnect", () => {
+    mockUseWallets.mockReturnValue({ ready: false, wallets: [] });
+    renderHeader();
+    act(() => {
+      vi.advanceTimersByTime(RECONNECT_FALLBACK_MS);
+    });
+    expect(screen.getByRole("button", { name: "Reconnect wallet" })).toBeTruthy();
+  });
+
   it("with no session it is the plain Connect button", () => {
     mockUsePrivy.mockReturnValue({ ...STALE_SESSION, authenticated: false, user: null });
     renderHeader();
     passGrace();
     expect(screen.queryByRole("button", { name: "Reconnect wallet" })).toBeNull();
     expect(screen.getByRole("button", { name: "Connect wallet" })).toBeTruthy();
+  });
+});
+
+describe("isReconnectFallbackEligible", () => {
+  const ext = { type: "wallet", chainType: "solana", walletClientType: "solflare" };
+  const emb = { type: "wallet", chainType: "solana", walletClientType: "privy" };
+  it.each([
+    [[ext], true],
+    [[ext, { type: "email" }], true],
+    [[ext, emb], false],
+    [[emb], false],
+    [[{ type: "email" }], false],
+    [[{ ...ext, chainType: "ethereum" }], false],
+    [[], false],
+    [null, false],
+    [undefined, false],
+  ])("%j → %s", (accounts, expected) => {
+    expect(isReconnectFallbackEligible(accounts as never)).toBe(expected);
   });
 });
 

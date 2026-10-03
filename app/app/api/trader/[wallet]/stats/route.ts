@@ -4,6 +4,7 @@ import { getClientIp } from "@/lib/get-client-ip";
 import { toE6 } from "@/lib/format";
 import { createUpstashRateLimiter } from "@/lib/upstash-rate-limit";
 import { hasIndexerDb, queryTraderStatsAggregate } from "@/lib/indexer-db";
+import { getRetiredSlabs } from "@/lib/retired-slabs";
 
 /**
  * GET /api/trader/:wallet/stats
@@ -139,12 +140,16 @@ export async function GET(
     return NextResponse.json(EMPTY_STATS);
   }
 
+  // GH#2795: fills on markets of an abandoned wrapper (the ones /api/markets no longer lists)
+  // are left out of both paths. [] = no filter.
+  const retired = await getRetiredSlabs();
+
   // P0: prefer local indexer
   if (hasIndexerDb()) {
     try {
       // GH#2510: aggregated in SQL over the FULL history — no row cap, no
       // JavaScript reduce, and one row on the wire instead of up to 10 000.
-      const stats: TraderStatsResponse = await queryTraderStatsAggregate(walletKey);
+      const stats: TraderStatsResponse = await queryTraderStatsAggregate(walletKey, retired);
       return NextResponse.json(stats, {
         headers: { "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60" },
       });
@@ -159,19 +164,23 @@ export async function GET(
     const { getServiceClient, getServerNetwork } = await import("@/lib/supabase");
     const supabase = getServiceClient();
 
-    let { data, error } = await supabase
+    let query = supabase
       .from("trades")
       .select("side, size, price, fee, slab_address, created_at")
       .eq("trader", walletKey)
-      .eq("network", getServerNetwork())
+      .eq("network", getServerNetwork());
+    if (retired.length > 0) query = query.not("slab_address", "in", `(${retired.join(",")})`);
+    let { data, error } = await query
       .order("created_at", { ascending: true })
       .limit(SUPABASE_ROW_CAP);
 
     if (error && error.message?.includes("network")) {
-      const fallback = await supabase
+      let fallbackQuery = supabase
         .from("trades")
         .select("side, size, price, fee, slab_address, created_at")
-        .eq("trader", walletKey)
+        .eq("trader", walletKey);
+      if (retired.length > 0) fallbackQuery = fallbackQuery.not("slab_address", "in", `(${retired.join(",")})`);
+      const fallback = await fallbackQuery
         .order("created_at", { ascending: true })
         .limit(SUPABASE_ROW_CAP);
       data = fallback.data;

@@ -169,15 +169,20 @@ function LivePoolPrice({
 /**
  * Fetch a single pool's staked-LP position for a wallet: LP balance (raw +
  * human, using the LP mint's real decimals — never assumed), redemption
- * cooldown status, and estimated USD value. Returns null when the pool has
- * no on-chain StakePool account yet, or the wallet holds zero LP for it.
+ * cooldown status, and estimated USD value. Returns null ONLY for a confirmed
+ * "no position": the pool has no on-chain StakePool account yet, the wallet has
+ * no LP token account, or it holds zero LP.
  *
  * Shared by the multi-pool scan (`StakePage`'s effect below, feeds
  * `YourPositionPanel`) and the per-selected-pool Withdraw tab
  * (`DepositWidget`) so both read the exact same on-chain detection logic
- * instead of two hand-rolled copies that could silently drift apart. Never
- * throws — all failures resolve to `null` so a scan across many pools can't
- * be aborted by one bad account.
+ * instead of two hand-rolled copies that could silently drift apart.
+ *
+ * Throws when the position could not be read (RPC error, undecodable account)
+ * (#2706). It used to swallow every failure into `null`, so a transient RPC
+ * error on one pool rendered as "you have no stake in that pool" and dropped
+ * the position (and its withdraw row) until reload. The multi-pool scan uses
+ * Promise.allSettled, so one failing pool still can't abort the others.
  */
 async function fetchPoolPosition(
   pool: StakePool,
@@ -186,101 +191,96 @@ async function fetchPoolPosition(
   stakeProgramId: PublicKey,
 ): Promise<UserPosition | null> {
   if (!pool.slabAddress || !pool.collateralMint) return null;
+  const slabPk = new PublicKey(pool.slabAddress);
+  const [poolPda] = deriveStakePool(slabPk, stakeProgramId);
+  const [depositPdaAddress] = deriveDepositPda(poolPda, publicKey, stakeProgramId);
+
+  // Fetch pool account to get lpMint. Decode via decodeStakePoolV1 — the
+  // needed offsets are identical across the retired 352-byte and deployed
+  // 392-byte layouts (see STAKE_POOL_SIZE_V1 comment in useStakePool.ts).
+  const poolInfo = await connection.getAccountInfo(poolPda);
+  if (!poolInfo || poolInfo.data.length < STAKE_POOL_SIZE_V1) return null;
+  const poolV1 = decodeStakePoolV1(poolInfo.data);
+  const { lpMint } = poolV1;
+
+  // Get user LP ATA balance
+  const userLpAta = getAssociatedTokenAddressSync(lpMint, publicKey);
+  const lpAtaInfo = await connection.getAccountInfo(userLpAta);
+  if (!lpAtaInfo) return null;
+  const lpAccount = unpackAccount(userLpAta, lpAtaInfo);
+  if (lpAccount.amount === 0n) return null;
+
+  // Derive decimals from on-chain LP mint rather than assuming 6.
+  // Wrapped in its own try/catch: a transient RPC error must not gate
+  // position discovery — lpAccount.amount already confirmed the position exists.
+  let lpDecimals = 6; // safe default
   try {
-    const slabPk = new PublicKey(pool.slabAddress);
-    const [poolPda] = deriveStakePool(slabPk, stakeProgramId);
-    const [depositPdaAddress] = deriveDepositPda(poolPda, publicKey, stakeProgramId);
-
-    // Fetch pool account to get lpMint. Decode via decodeStakePoolV1 — the
-    // needed offsets are identical across the retired 352-byte and deployed
-    // 392-byte layouts (see STAKE_POOL_SIZE_V1 comment in useStakePool.ts).
-    const poolInfo = await connection.getAccountInfo(poolPda);
-    if (!poolInfo || poolInfo.data.length < STAKE_POOL_SIZE_V1) return null;
-    const poolV1 = decodeStakePoolV1(poolInfo.data);
-    const { lpMint } = poolV1;
-
-    // Get user LP ATA balance
-    const userLpAta = getAssociatedTokenAddressSync(lpMint, publicKey);
-    const lpAtaInfo = await connection.getAccountInfo(userLpAta);
-    if (!lpAtaInfo) return null;
-    const lpAccount = unpackAccount(userLpAta, lpAtaInfo);
-    if (lpAccount.amount === 0n) return null;
-
-    // Derive decimals from on-chain LP mint rather than assuming 6.
-    // Wrapped in its own try/catch: a transient RPC error must not gate
-    // position discovery — lpAccount.amount already confirmed the position exists.
-    let lpDecimals = 6; // safe default
-    try {
-      const lpMintInfo = await getMint(connection, lpMint);
-      lpDecimals = lpMintInfo.decimals;
-    } catch {
-      // RPC failure: fall back to default decimals; position is still shown
-    }
-    const lpBalance = Number(lpAccount.amount) / Math.pow(10, lpDecimals);
-
-    // Estimated value = (user_lp / total_lp_supply) * vault_balance, from FRESH on-chain pool +
-    // vault reads (lib/stake-position.ts). The cached /api/stake/pools snapshot (pool.tvl /
-    // pool.totalLpSupply) predates a first deposit into a fresh pool and valued the stake at $0.
-    let chainVaultAtoms: bigint | null = null;
-    try {
-      const vaultInfo = await connection.getAccountInfo(poolV1.vault);
-      if (vaultInfo) chainVaultAtoms = unpackAccount(poolV1.vault, vaultInfo, vaultInfo.owner).amount;
-    } catch {
-      // fall back to the API snapshot below
-    }
-    const estimatedValue = valueStakePosition({
-      lpRaw: lpAccount.amount,
-      chainTotalLpSupplyRaw: readPoolTotalLpSupply(poolInfo.data),
-      chainVaultAtoms,
-      apiTotalLpSupply: pool.totalLpSupply,
-      apiTvlUsd: pool.tvl,
-      lpDecimals,
-    });
-
-    // Fetch deposit PDA for cooldown info
-    let cooldownRemaining = 0;
-    let cooldownElapsed = true;
-    let userDepositSlot = 0n;
-
-    const depInfo = await connection.getAccountInfo(depositPdaAddress);
-    if (depInfo && depInfo.data.length >= 81) {
-      const depData = depInfo.data;
-      if (depData[0] === 1) {
-        userDepositSlot = readU64LE(depData, 72);
-      }
-    }
-
-    if (userDepositSlot > 0n && pool.cooldownSlots > 0) {
-      try {
-        const currentSlot = BigInt(await connection.getSlot());
-        const slotsElapsed = currentSlot - userDepositSlot;
-        const cooldownTotal = BigInt(pool.cooldownSlots);
-        if (slotsElapsed < cooldownTotal) {
-          cooldownElapsed = false;
-          cooldownRemaining = Number(cooldownTotal - slotsElapsed);
-        }
-      } catch {
-        cooldownElapsed = false;
-      }
-    }
-
-    return {
-      poolId: pool.id,
-      poolName: pool.name,
-      slabAddress: pool.slabAddress,
-      collateralMint: pool.collateralMint,
-      lpBalance,
-      lpBalanceRaw: lpAccount.amount,
-      lpDecimals,
-      estimatedValue,
-      cooldownRemaining,
-      cooldownTotal: pool.cooldownSlots,
-      cooldownElapsed,
-    };
-  } catch (err) {
-    console.error("[fetchPoolPosition] Failed for pool:", pool.slabAddress, err);
-    return null;
+    const lpMintInfo = await getMint(connection, lpMint);
+    lpDecimals = lpMintInfo.decimals;
+  } catch {
+    // RPC failure: fall back to default decimals; position is still shown
   }
+  const lpBalance = Number(lpAccount.amount) / Math.pow(10, lpDecimals);
+
+  // Estimated value = (user_lp / total_lp_supply) * vault_balance, from FRESH on-chain pool +
+  // vault reads (lib/stake-position.ts). The cached /api/stake/pools snapshot (pool.tvl /
+  // pool.totalLpSupply) predates a first deposit into a fresh pool and valued the stake at $0.
+  let chainVaultAtoms: bigint | null = null;
+  try {
+    const vaultInfo = await connection.getAccountInfo(poolV1.vault);
+    if (vaultInfo) chainVaultAtoms = unpackAccount(poolV1.vault, vaultInfo, vaultInfo.owner).amount;
+  } catch {
+    // fall back to the API snapshot below
+  }
+  const estimatedValue = valueStakePosition({
+    lpRaw: lpAccount.amount,
+    chainTotalLpSupplyRaw: readPoolTotalLpSupply(poolInfo.data),
+    chainVaultAtoms,
+    apiTotalLpSupply: pool.totalLpSupply,
+    apiTvlUsd: pool.tvl,
+    lpDecimals,
+  });
+
+  // Fetch deposit PDA for cooldown info
+  let cooldownRemaining = 0;
+  let cooldownElapsed = true;
+  let userDepositSlot = 0n;
+
+  const depInfo = await connection.getAccountInfo(depositPdaAddress);
+  if (depInfo && depInfo.data.length >= 81) {
+    const depData = depInfo.data;
+    if (depData[0] === 1) {
+      userDepositSlot = readU64LE(depData, 72);
+    }
+  }
+
+  if (userDepositSlot > 0n && pool.cooldownSlots > 0) {
+    try {
+      const currentSlot = BigInt(await connection.getSlot());
+      const slotsElapsed = currentSlot - userDepositSlot;
+      const cooldownTotal = BigInt(pool.cooldownSlots);
+      if (slotsElapsed < cooldownTotal) {
+        cooldownElapsed = false;
+        cooldownRemaining = Number(cooldownTotal - slotsElapsed);
+      }
+    } catch {
+      cooldownElapsed = false;
+    }
+  }
+
+  return {
+    poolId: pool.id,
+    poolName: pool.name,
+    slabAddress: pool.slabAddress,
+    collateralMint: pool.collateralMint,
+    lpBalance,
+    lpBalanceRaw: lpAccount.amount,
+    lpDecimals,
+    estimatedValue,
+    cooldownRemaining,
+    cooldownTotal: pool.cooldownSlots,
+    cooldownElapsed,
+  };
 }
 
 /* ── Header + Stats Strip ──────────────────────────────────────────────────
@@ -518,8 +518,15 @@ function YourPositionPanel({
   positions,
   onWithdrawSuccess,
   onManage,
+  unreadable = 0,
+  onRetry,
 }: {
   positions: UserPosition[];
+  /** Pools whose position could not be read (#2706) — 0 means every pool was
+   *  read, so an empty list really is "no positions". -1 = the pool list
+   *  itself failed, so no pool could be checked. */
+  unreadable?: number;
+  onRetry?: () => void;
   onWithdrawSuccess?: () => void;
   /** Threaded through to each PositionCard's "Manage / Withdraw Partial"
    *  button — see PositionCard for what it does. */
@@ -540,11 +547,22 @@ function YourPositionPanel({
         )}
       </div>
 
+      {connected && unreadable !== 0 && (
+        <div role="alert" data-testid="stake-positions-error" className="mb-3 border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-3 text-[11px] text-[var(--text-secondary)]">
+          {unreadable < 0
+            ? "Couldn't load your positions."
+            : `Couldn't read your position in ${unreadable} pool${unreadable === 1 ? "" : "s"}.`}{" "}
+          <button type="button" onClick={onRetry} className="text-[var(--accent-text)] transition-colors hover:text-[var(--accent)]">
+            Try again
+          </button>
+        </div>
+      )}
+
       {!connected ? (
         <div className="border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-3 text-[11px] text-[var(--text-secondary)]">
           Connect a wallet to see your staked positions.
         </div>
-      ) : positions.length === 0 ? (
+      ) : positions.length === 0 && unreadable !== 0 ? null : positions.length === 0 ? (
         <div className="border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-3 text-[11px] text-[var(--text-secondary)]">
           No open positions. Select a pool and deposit to get started.
         </div>
@@ -1161,6 +1179,8 @@ function PoolTable({
   connected,
   selectedPool,
   onSelect,
+  loadError,
+  onRetry,
 }: {
   pools: StakePool[];
   loading: boolean;
@@ -1168,6 +1188,10 @@ function PoolTable({
   connected: boolean;
   selectedPool: string;
   onSelect: (poolId: string) => void;
+  /** The pools fetch failed and nothing was loaded (#2706): show the failure,
+   *  never the "no pools yet" empty state. */
+  loadError?: boolean;
+  onRetry?: () => void;
 }) {
   const positionByPoolId = new Map(positions.map((p) => [p.poolId, p]));
 
@@ -1222,6 +1246,20 @@ function PoolTable({
               </div>
             ))}
           </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (pools.length === 0 && loadError) {
+    return (
+      <section id="pools">
+        {header}
+        <div role="alert" data-testid="stake-pools-error" className="border border-[var(--border)] bg-[var(--panel-bg)] px-4 py-4 text-[11px] text-[var(--text-secondary)]">
+          Couldn&apos;t load insurance pools.{" "}
+          <button type="button" onClick={onRetry} className="text-[var(--accent-text)] transition-colors hover:text-[var(--accent)]">
+            Try again
+          </button>
         </div>
       </section>
     );
@@ -1363,6 +1401,11 @@ function StakeSidebar() {
 export default function StakePage() {
   const [pools, setPools] = useState<StakePool[]>([]);
   const [poolsLoading, setPoolsLoading] = useState(true);
+  // #2706: a failed pools fetch is a failure, not "no pools". Cleared by the
+  // next successful fetch.
+  const [poolsError, setPoolsError] = useState(false);
+  // #2706: how many pools' positions could not be read on the last scan.
+  const [positionsUnreadable, setPositionsUnreadable] = useState(0);
   // S-M1 fix: ALL positions the wallet holds across pools, not just the first
   // one found.
   const [positions, setPositions] = useState<UserPosition[]>([]);
@@ -1385,9 +1428,15 @@ export default function StakePage() {
         const res = await fetch("/api/stake/pools");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json() as { pools: ApiPool[] };
-        if (!cancelled) setPools((json.pools ?? []).map(apiPoolToStakePool));
+        if (!cancelled) {
+          setPools((json.pools ?? []).map(apiPoolToStakePool));
+          setPoolsError(false);
+        }
       } catch (err) {
         console.error("[StakePage] Failed to fetch pools:", err);
+        // Keep any previously loaded pools (a background refresh after a tx
+        // failing must not blank the table); flag the failure.
+        if (!cancelled) setPoolsError(true);
       } finally {
         if (!cancelled) setPoolsLoading(false);
       }
@@ -1405,6 +1454,7 @@ export default function StakePage() {
   useEffect(() => {
     if (!connected || !publicKey || pools.length === 0) {
       setPositions([]);
+      setPositionsUnreadable(0);
       return;
     }
     let cancelled = false;
@@ -1420,18 +1470,29 @@ export default function StakePage() {
         // Check every pool for user's LP position — same detection logic the
         // Withdraw tab uses for a single selected pool (fetchPoolPosition).
         // allSettled: one bad pool/RPC hiccup must not blank out the rest.
+        // fetchPoolPosition rejects when a pool could not be read (#2706), so a
+        // rejection is counted and surfaced, never treated as "no position".
         const results = await Promise.allSettled(
           pools.map((pool) => fetchPoolPosition(pool, publicKey, connection, stakeProgramId)),
         );
         if (cancelled) return;
+        results.forEach((r, i) => {
+          if (r.status === "rejected") {
+            console.error("[StakePage] Failed to read position for pool:", pools[i]?.slabAddress, r.reason);
+          }
+        });
         const found = results
           .filter((r): r is PromiseFulfilledResult<UserPosition | null> => r.status === "fulfilled")
           .map((r) => r.value)
           .filter((p): p is UserPosition => p !== null);
         setPositions(found);
+        setPositionsUnreadable(results.filter((r) => r.status === "rejected").length);
       } catch (err) {
         console.error("[StakePage] Failed to fetch user positions:", err);
-        if (!cancelled) setPositions([]);
+        if (!cancelled) {
+          setPositions([]);
+          setPositionsUnreadable(pools.length);
+        }
       }
     })();
 
@@ -1451,9 +1512,20 @@ export default function StakePage() {
   }, []);
 
   // S-M1 fix: sum across ALL positions, not just a single (possibly-missing) one.
-  const totalUserDeposited = positions.length > 0
-    ? positions.reduce((sum, p) => sum + p.estimatedValue, 0)
-    : connected ? 0 : null;
+  // #2706: if any pool could not be read (or the pool list failed), the total
+  // is unknown — show it as unknown rather than an under-count or "$—".
+  const totalUserDeposited =
+    connected && (positionsUnreadable > 0 || (poolsError && pools.length === 0))
+      ? null
+      : positions.length > 0
+        ? positions.reduce((sum, p) => sum + p.estimatedValue, 0)
+        : connected ? 0 : null;
+
+  const retryPools = useCallback(() => {
+    setPoolsLoading(true);
+    setPoolsRefreshKey((k) => k + 1);
+  }, []);
+  const retryPositions = useCallback(() => setPositionRefreshKey((k) => k + 1), []);
 
   const selectPoolAndScroll = useCallback((poolId: string, mode: "deposit" | "withdraw") => {
     setSelectedPool(poolId);
@@ -1468,7 +1540,8 @@ export default function StakePage() {
     <div className="relative animate-fade-in overflow-x-hidden">
       {/* Compact header + stats strip (mirrors EarnHeader) */}
       <ErrorBoundary label="Stake Header">
-        <StakeHeader pools={pools} totalUserDeposited={totalUserDeposited} loading={poolsLoading} />
+        {/* A failed pools fetch must not read as "0 pools / $0 staked" (#2706). */}
+        <StakeHeader pools={pools} totalUserDeposited={totalUserDeposited} loading={poolsLoading || (poolsError && pools.length === 0)} />
       </ErrorBoundary>
 
       {/* Main content */}
@@ -1486,6 +1559,8 @@ export default function StakePage() {
                 connected={connected}
                 selectedPool={selectedPool}
                 onSelect={(poolId) => selectPoolAndScroll(poolId, "deposit")}
+                loadError={poolsError}
+                onRetry={retryPools}
               />
             </ErrorBoundary>
           </div>
@@ -1507,6 +1582,8 @@ export default function StakePage() {
                 positions={positions}
                 onWithdrawSuccess={handleTxSuccess}
                 onManage={(poolId) => selectPoolAndScroll(poolId, "withdraw")}
+                unreadable={poolsError && pools.length === 0 ? -1 : positionsUnreadable}
+                onRetry={poolsError && pools.length === 0 ? retryPools : retryPositions}
               />
             </ErrorBoundary>
           </div>

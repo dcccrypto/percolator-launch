@@ -11,9 +11,12 @@ import { formatTokenAmount } from "@/lib/format";
 import { computeNotionalNative } from "@/lib/notional";
 import { describeLiqPrice, type LiqPriceDisplay } from "@/lib/liq-price-display";
 import { LiqPriceValue } from "./LiqPriceValue";
+import { orderHeading } from "@/lib/trading";
 
 interface TradeConfirmationModalProps {
   direction: "long" | "short";
+  /** Signed size of the account's open position on this market (omitted: none). */
+  existingPositionSize?: bigint;
   positionSize: bigint;
   margin: bigint;
   leverage: number;
@@ -37,6 +40,13 @@ interface TradeConfirmationModalProps {
   worstFillPriceE6?: bigint;
   /** Current slab account equity in collateral units. Used to show risk leverage. */
   accountEquity?: bigint | null;
+  /**
+   * Risk Lev. after this trade (computeRiskLeverage); null hides the row. When omitted,
+   * falls back to this order's notional over `accountEquity`.
+   */
+  riskLeverage?: number | null;
+  /** Wallet deposit signed together with this trade (fund-and-trade), in collateral atoms. */
+  depositAmount?: bigint;
   /** Underlying asset symbol (e.g. SOL). Used to label the position size. */
   symbol: string;
   /** Collateral token symbol (e.g. USDC). Used to label margin/fee. */
@@ -56,6 +66,7 @@ const FOCUSABLE_SELECTOR =
 
 export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   direction,
+  existingPositionSize = 0n,
   positionSize,
   margin,
   leverage,
@@ -64,6 +75,8 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   tradingFee,
   worstFillPriceE6,
   accountEquity,
+  riskLeverage: riskLeverageAfter,
+  depositAmount,
   symbol,
   collateralSymbol,
   decimals,
@@ -97,9 +110,12 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
       hasResolvedEntry: true,
       formatPrice: (e6) => `$${formatTokenAmount(e6, 6)}`,
     });
-  const riskLeverage = accountEquity != null && accountEquity > 0n
-    ? Number(notional) / Number(accountEquity)
-    : null;
+  const riskLeverage =
+    riskLeverageAfter !== undefined
+      ? riskLeverageAfter
+      : accountEquity != null && accountEquity > 0n
+        ? Number(notional) / Number(accountEquity)
+        : null;
 
   // Keep callback refs so the mount effect never re-runs on parent re-renders.
   // Without this, every WS price tick creates a new onCancel reference which
@@ -233,7 +249,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
             : "border-[var(--short)]/30 bg-[var(--short)]/5"
         }`}>
           <p className="text-[10px] font-medium uppercase tracking-[0.15em]" style={{ color: direction === "long" ? "var(--long)" : "var(--short)" }}>
-            {direction === "long" ? "Opening Long Position" : "Opening Short Position"}
+            {orderHeading(direction, positionSize, existingPositionSize)}
           </p>
           <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
             Review the details carefully before confirming. This trade cannot be undone.
@@ -254,6 +270,14 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
               {formatTokenAmount(margin, decimals)} {settleSymbol}
             </span>
           </div>
+          {depositAmount != null && depositAmount > 0n && (
+            <div className="flex justify-between">
+              <span className="text-[var(--text-secondary)]">Deposit from Wallet:</span>
+              <span className="font-mono font-medium text-[var(--text)]">
+                {formatTokenAmount(depositAmount, decimals)} {settleSymbol}
+              </span>
+            </div>
+          )}
           <div className="flex justify-between">
             <span className="inline-flex items-center text-[var(--text-secondary)]">{ORDER_LEVERAGE_LABEL}:<InfoIcon tooltip={ORDER_LEVERAGE_TITLE} /></span>
             <span className="font-mono font-medium text-[var(--text)]">{formatLeverage(leverage)}</span>

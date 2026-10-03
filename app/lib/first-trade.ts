@@ -1,17 +1,19 @@
 /**
  * UX WP-6 (audit §3.2, TR-5): the first trade on a market in ONE approval.
  *
- *   tx A = [CreateAccount, InitPortfolio]                         (portfolio keypair co-signs)
- *   tx B = [Deposit(predicted id, sequence 0), TradeCpi(predicted id, position epoch 0)]
- *   signAllCompat([A, B]) = 1 prompt; send A, confirm, send B.
+ *   ONE tx = [CreateAccount, InitPortfolio, Deposit(predicted id, sequence 0),
+ *             TradeCpi(predicted id, position epoch 0)]          (portfolio keypair co-signs)
+ *   GH#2959: this was two txs (A = create+init, B = deposit+trade) signed together; wallets that
+ *   simulate each tx alone (Solflare) refused B ("IncorrectProgramId": no portfolio until A lands).
  *
  * The predicted id is what InitPortfolio will assign, read from the DEPLOYED handler's own source:
  * `handle_init_portfolio` allocates `allocate_portfolio_id(profile0.next_portfolio_id)` from asset
  * 0's `AssetOracleProfileV16` (NOT `WrapperConfigV16`, whatever older comments say), and a fresh
  * portfolio's matcher sequence and position epoch are both 0 (whole-buffer zero at init). The
  * offset comes from rustc's offset_of! (fixture rust-p3-final.json `op.next_portfolio_id`), never
- * the SDK. If someone else initialises in between, B fails EngineProvenanceMismatch and is rebuilt
- * with the real id: the one 2-prompt case ("someone joined this market at the same moment").
+ * the SDK. If someone else initialises in between, the tx fails EngineProvenanceMismatch (atomic:
+ * nothing lands) and is rebuilt with the real id: the one 2-prompt case ("someone joined this
+ * market at the same moment").
  */
 import { PublicKey as PublicKey, SystemProgram, type TransactionInstruction } from "@solana/web3.js";
 import {
@@ -141,6 +143,8 @@ export const FIRST_TRADE_COPY = {
   line: "First trade on this market sets up your trading account (one approval)",
   button: (amount: string, side: string) => `Deposit ${amount} & ${side}`,
   race: "One more approval: someone joined this market at the same moment.",
+  /** GH#2959: the user turned the fund-and-trade down in the wallet. */
+  cancelled: "Trade cancelled in your wallet.",
 } as const;
 
 // ── The instructions (shared by hooks/useFirstTrade.ts and the LiteSVM bridge) ──────────────
@@ -162,7 +166,7 @@ export interface FirstTradeIxParams {
   marketTradeFeeBps?: bigint;
 }
 
-/** tx A: [CreateAccount(portfolio, full length), InitPortfolio]. */
+/** The first trade's set-up legs: [CreateAccount(portfolio, full length), InitPortfolio]. */
 export function buildFirstTradeInitIxs(p: Pick<FirstTradeIxParams, "programId" | "owner" | "market" | "portfolio">, rentLamports: number): TransactionInstruction[] {
   return [
     SystemProgram.createAccount({ fromPubkey: p.owner, newAccountPubkey: p.portfolio, lamports: rentLamports, space: V17_PORTFOLIO_ACCOUNT_LEN, programId: p.programId }),
@@ -170,7 +174,7 @@ export function buildFirstTradeInitIxs(p: Pick<FirstTradeIxParams, "programId" |
   ];
 }
 
-/** tx B: [Deposit(id, sequence), TradeCpi(id, position epoch)] — for a fresh portfolio id is the
+/** [Deposit(id, sequence), TradeCpi(id, position epoch)] — for a fresh portfolio id is the
  *  PREDICTED one and sequence / epoch are 0. */
 export function buildFundAndTradeIxs(p: FirstTradeIxParams, id: { portfolioId: bigint; sequence: bigint; positionEpoch: bigint }): TransactionInstruction[] {
   return [

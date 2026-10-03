@@ -4,6 +4,7 @@ import {
   hasIndexerDb,
   queryLeaderboard,
 } from "@/lib/indexer-db";
+import { getRetiredSlabs } from "@/lib/retired-slabs";
 
 // Bug: `export const revalidate = 30` was INERT here — this handler reads
 // request.url search params (period/limit), which makes the route dynamic;
@@ -57,10 +58,14 @@ export async function GET(request: Request) {
     );
   }
 
+  // GH#2795: fills on markets of an abandoned wrapper (the ones /api/markets no longer lists)
+  // are left out of both paths. [] (no filter) when the set cannot be determined.
+  const retired = await getRetiredSlabs();
+
   // P0: prefer local indexer when INDEXER_DATABASE_URL is configured
   if (hasIndexerDb()) {
     try {
-      const rows = await queryLeaderboard(period, limit);
+      const rows = await queryLeaderboard(period, limit, retired);
       const leaderboard: LeaderboardEntry[] = rows.map((row, i) => ({
         rank: i + 1,
         trader: row.trader,
@@ -96,6 +101,7 @@ export async function GET(request: Request) {
       const since = new Date(Date.now() - 7 * 86_400_000).toISOString();
       query = query.gte("created_at", since);
     }
+    if (retired.length > 0) query = query.not("slab_address", "in", `(${retired.join(",")})`);
     query = query.limit(100_000);
 
     let { data, error } = await query;
@@ -104,6 +110,7 @@ export async function GET(request: Request) {
       let fallbackQuery = supabase.from("trades").select("trader, size, price, created_at");
       if (period === "24h") fallbackQuery = fallbackQuery.gte("created_at", new Date(Date.now() - 86_400_000).toISOString());
       else if (period === "7d") fallbackQuery = fallbackQuery.gte("created_at", new Date(Date.now() - 7 * 86_400_000).toISOString());
+      if (retired.length > 0) fallbackQuery = fallbackQuery.not("slab_address", "in", `(${retired.join(",")})`);
       fallbackQuery = fallbackQuery.limit(100_000);
       const fallback = await fallbackQuery;
       data = fallback.data;

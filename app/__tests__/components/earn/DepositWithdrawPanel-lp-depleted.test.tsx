@@ -11,7 +11,7 @@ import { join } from "node:path";
 
 import { DepositWithdrawPanel } from "@/components/earn/DepositWithdrawPanel";
 
-vi.mock("@/hooks/useWalletCompat", () => ({ useWalletCompat: vi.fn(() => ({ connected: true })) }));
+vi.mock("@/hooks/useWalletCompat", () => ({ useWalletCompat: vi.fn(() => ({ connected: true })), useConnectionCompat: () => ({ connection: {} }) }));
 vi.mock("@/components/ui/GlowButton", () => ({
   GlowButton: ({ children, disabled, onClick }: { children: React.ReactNode; disabled?: boolean; onClick?: () => void }) => (
     <button disabled={disabled} onClick={onClick}>{children}</button>

@@ -64,7 +64,7 @@ import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { AccountKind, computeLiqPrice } from "@percolatorct/sdk";
-import { computeEstimatedEntryPrice, computeTradingFee, computePositionInitialMargin, resolveEntryPrice } from "@/lib/trading";
+import { computeEstimatedEntryPrice, computeTradingFee, computePositionInitialMargin, orderAgainstPosition, resolveEntryPrice } from "@/lib/trading";
 import { TradeConfirmationModal } from "@/components/trade/TradeConfirmationModal";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { usePrivyLogin, usePrivyAvailable } from "@/hooks/usePrivySafe";
@@ -76,7 +76,7 @@ import { sanitizeSymbol } from "@/lib/symbol-utils";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { formatTokenAmount, formatUsdPriceE6, toE6, normalizeTokenDecimals } from "@/lib/format";
 import { describeLiqPrice, type LiqPriceDisplay } from "@/lib/liq-price-display";
-import { formatLeverageValue } from "@/lib/leverage-display";
+import { computeRiskLeverage, formatLeverageValue } from "@/lib/leverage-display";
 import { saveEntryPrice, getEntryPrice, clearEntryPrice } from "@/lib/entry-price";
 import { isSentinelValue } from "@/lib/health";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
@@ -324,6 +324,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     estimatedLiqDisplay: LiqPriceDisplay;
     tradingFee: bigint;
     worstFillPriceE6: bigint;
+    riskLeverage: number | null;
+    depositAtoms: bigint;
   } | null>(null);
   const [showInlineDeposit, setShowInlineDeposit] = useState(false);
   // A faucet claim changes none of the wallet-balance effect's other deps.
@@ -638,7 +640,22 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const notionalNative = computeNotionalNative(marginNative, leverage);
   const rawPositionSize = livePriceE6 && livePriceE6 > 0n ? (notionalNative * 1_000_000n) / livePriceE6 : 0n;
   const positionSize = rawPositionSize < 0n ? 0n : rawPositionSize;
-  const exceedsBalance = marginNative > 0n && marginNative > effectiveBalance;
+  // GH#2953: the engine's initial margin is max(notional x IM bps, min_nonzero_im_req) (engine
+  // v16.rs:23050 margin_requirement), so a NEW position needs at least the market's floor ($2 on
+  // the wizard markets) however small it is: a $1 first trade deposited $1.11 and was refused
+  // Custom(49) EngineInsufficientInitialMargin. Every margin check below (does the account hold
+  // enough? how much to bundle?) uses this floored need, not the typed margin: an account holding
+  // $1.50 placing a $1 first trade must bundle a top-up, not be refused 49.
+  // The floor only applies with no open position, where vsPosition is always null.
+  const imFloor = params?.minNonzeroImReq ?? 0n;
+  const belowImFloor = existingPositionSize === 0n && marginNative > 0n && marginNative < imFloor;
+  const marginNeed = belowImFloor ? imFloor : marginNative;
+  // An order on the other side of the open position cuts it instead of adding exposure:
+  // it releases margin, and only a flip that ends larger can need any.
+  const vsPosition = userAccount
+    ? orderAgainstPosition(marginNative, positionSize, direction, existingPositionSize, lockedMargin, capital)
+    : null;
+  const exceedsBalance = marginNative > 0n && (vsPosition ? vsPosition.shortBy > 0n : marginNeed > effectiveBalance);
 
   const needsWallet = !connected;
   const needsAccount = connected && !userAccount && !accountPending;
@@ -654,7 +671,14 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const estEntry = hasOrder ? computeEstimatedEntryPrice(oracleE6, tradingFeeBps, direction) : 0n;
   const fee = hasOrder ? computeTradingFee((positionSize * oracleE6) / 1_000_000n, tradingFeeBps) : 0n;
   // The deposit this order needs (margin + fee + 10%), editable; never more than the wallet holds.
-  const marginShort = needsAccount ? marginNative : marginNative > availableBalance ? marginNative - availableBalance : 0n;
+  // GH#2953: the bundled deposit covers the IM floor (marginNeed, above).
+  const marginShort = needsAccount
+    ? marginNeed
+    : vsPosition
+      ? vsPosition.shortBy
+      : marginNeed > availableBalance
+        ? marginNeed - availableBalance
+        : 0n;
   const fundNeededAtoms = fundingMode && hasOrder ? fundDepositAtoms(marginShort, fee, walletAtaBalance ?? 0n, decimals) : 0n;
   const fundMinAtoms = fundingMode && hasOrder ? marginShort + fee : 0n;
   const fundEnteredAtoms = fundInput ? parsePercToNative(fundInput, decimals) : 0n;
@@ -750,7 +774,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   //   Margin            — what THIS order reserves (the requirement)
   //   Available to trade — before -> after reserving it
   const beforeAvailable = availableBalance;
-  const afterAvailable = beforeAvailable > marginNative ? beforeAvailable - marginNative : 0n;
+  const afterAvailable = vsPosition
+    ? vsPosition.afterAvailable
+    : beforeAvailable > marginNative
+      ? beforeAvailable - marginNative
+      : 0n;
   // Slippage: distance between the mark and the worst acceptable fill
   // (same computeLimitPriceE6 useTrade itself uses to derive the on-chain
   // limit when the caller doesn't supply one explicitly).
@@ -827,7 +855,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   const feeOverMax = ticketLimits.issues.some((x) => x.kind === "fee-over-max");
   const feeFitQ = feeOverMax ? feeFitSizeQ(limitsInput) : null;
-  const shortfall = marginNative > effectiveBalance ? marginNative - effectiveBalance : 0n;
+  const shortfall = vsPosition ? vsPosition.shortBy : marginNeed > effectiveBalance ? marginNeed - effectiveBalance : 0n;
 
   // ── The state machine (audit §3.3): one status slot, one state-labelled button ──
   const ticketState = deriveTicketState({
@@ -1047,8 +1075,18 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         symbol: marketInfo?.symbol ?? undefined,
         maxNow: sideMaxQ !== null && sideMaxQ > 0n && sideMaxQ < UNLIMITED_CAPACITY ? fmtQ(sideMaxQ) : undefined,
         health: { lpDepleted, lpIsVault, adlReduceOnly, resolved: marketResolved },
+        // GH#2953: fund-and-trade does not wait and resend; never promise "goes through automatically".
+        oneShot: fundingMode,
+        // GH#2959: a 49 on a new position below the market's floor is the floor, not the size.
+        ...(belowImFloor ? { imFloorLabel: `$${usd2(imFloor, decimals).replace(/\.00$/, "")}` } : {}),
       });
       if (um.quiet) {
+        // GH#2959: a first fund-and-trade the user turned down in the wallet reset the ticket
+        // with no word (some wallets showed their own warning, so it read as "nothing happened").
+        // Say it, calmly. Other cancels (and Stop) stay quiet.
+        if (fundingMode && um.kind === "cancelled") {
+          setRefusal({ ...um, quiet: false, title: "Cancelled", body: FIRST_TRADE_COPY.cancelled });
+        }
         setTradePhase("idle");
         return;
       }
@@ -1612,7 +1650,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           </div>
           {!fundOverWallet && !fundTooSmall && (
             <p data-testid="fund-explain" className="mt-1 text-[11px] leading-snug text-[var(--text-secondary)]">
-              {`Covers ${formatTokenAmount(marginShort, decimals, 2)} margin + fee for this ${formatTokenAmount(notionalNative, decimals, 2)} position${!needsAccount && availableBalance > 0n ? `; ${formatTokenAmount(availableBalance, decimals, 2)} already on this market` : ""}. Anything unused stays in your account.`}
+              {`${belowImFloor ? `New positions on this market need at least $${usd2(imFloor, decimals).replace(/\.00$/, "")} of margin. ` : ""}Covers ${formatTokenAmount(marginShort, decimals, 2)} margin + fee for this ${formatTokenAmount(notionalNative, decimals, 2)} position${!needsAccount && !vsPosition && availableBalance > 0n ? `; ${formatTokenAmount(availableBalance, decimals, 2)} already on this market` : ""}. Anything unused stays in your account.`}
             </p>
           )}
           {fundOverWallet && (
@@ -1845,6 +1883,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               estimatedLiqDisplay: afterLiqDisplay,
               tradingFee: fee,
               worstFillPriceE6,
+              // The account after this trade: the resulting position and the bundled deposit, as
+              // the liq row uses, over capital + deposit + pnl, as the position panel's Lev.
+              riskLeverage: computeRiskLeverage(combinedSignedSize, livePriceE6 ?? 0n, capitalAfterFund + safeExistingPnl),
+              depositAtoms: fundingMode && hasOrder ? fundAtoms : 0n,
             });
             setShowConfirmModal(true);
             // Prewarm the entire submission path (blockhash, priority fee,
@@ -1924,6 +1966,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {showConfirmModal && confirmSnapshot && (
         <TradeConfirmationModal
           direction={direction}
+          existingPositionSize={existingPositionSize}
           positionSize={confirmSnapshot.positionSize}
           margin={confirmSnapshot.marginNative}
           leverage={leverage}
@@ -1932,6 +1975,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           tradingFee={confirmSnapshot.tradingFee}
           worstFillPriceE6={confirmSnapshot.worstFillPriceE6}
           accountEquity={userAccount ? capital : null}
+          riskLeverage={confirmSnapshot.riskLeverage}
+          depositAmount={confirmSnapshot.depositAtoms}
           symbol={symbol}
           collateralSymbol={collateralSymbol}
           decimals={decimals}

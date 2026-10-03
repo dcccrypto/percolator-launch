@@ -460,20 +460,16 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      // FIX: Also upsert markets table so /api/airdrop can find the mint.
-      // The airdrop route looks up mint_address in the markets table, not devnet_mints.
-      // Best-effort: if this fails, airdrop can still fall back to devnet_mints.
-      if (marketAddress) {
-        const { error: upsertErr } = await supabase.from("markets")
-          .update({
-            mint_address: devnetMint,
-            symbol: tokenInfo.symbol,
-          })
-          .eq("slab_address", marketAddress);
-        if (upsertErr) {
-          console.warn("devnet-mint-token: markets upsert failed (non-fatal):", upsertErr.message);
-        }
-      }
+      // GH#2751: this route must NOT write to the `markets` table. It used to
+      // `update({ mint_address, symbol })` on whatever `marketAddress` the
+      // caller sent, with no check that the caller deployed that market — so
+      // anyone could repoint a live market's mint_address at a fresh mirror
+      // mint and rename its symbol. `markets` rows are owned by registration
+      // (POST /api/markets via lib/market-registration.ts), which requires a
+      // deployer signature and pins mint_address to the slab's on-chain
+      // collateral mint (GH#1987). The write was also dead weight: the
+      // "/api/airdrop" it fed no longer exists, and /api/devnet-airdrop finds
+      // this mint through the devnet_mints row inserted just above.
 
       mintSucceeded = true;
       return NextResponse.json({

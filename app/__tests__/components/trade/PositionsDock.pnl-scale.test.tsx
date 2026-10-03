@@ -54,7 +54,7 @@ vi.mock("@/components/trade/OtherMarketPositions", () => ({ OtherMarketPositions
 vi.mock("@/components/trade/TradeHistory", () => ({ TradeHistory: () => null }));
 vi.mock("@/components/trade/WarmupProgress", () => ({ WarmupProgress: () => null }));
 vi.mock("@/components/trade/ClosePositionModal", () => ({ ClosePositionModal: () => null }));
-vi.mock("@/components/trade/PositionNftMenu", () => ({ PositionNftMenu: () => <span data-testid="nft-menu-marker" />, NFT_MENU_COPY: { badge: "NFT", closeWrapped: "Unwrap to close this position" } }));
+vi.mock("@/components/trade/PositionNftMenu", () => ({ PositionNftMenu: () => <span data-testid="nft-menu-marker" />, ClosedPositionNftNotice: () => <span data-testid="closed-nft-marker" />, NFT_MENU_COPY: { badge: "NFT", closeWrapped: "Unwrap to close this position" } }));
 
 import { PositionsDock } from "@/components/trade/PositionsDock";
 import { saveEntryPrice } from "@/lib/entry-price";

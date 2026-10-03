@@ -30,7 +30,7 @@
 import { FC, memo, useMemo, useState } from "react";
 import { useUserAccount, useUserAccountScanPending } from "@/hooks/useUserAccount";
 import { useNftWrappedPosition } from "@/hooks/useNftWrappedPosition";
-import { PositionNftMenu, NFT_MENU_COPY } from "@/components/trade/PositionNftMenu";
+import { PositionNftMenu, ClosedPositionNftNotice, NFT_MENU_COPY } from "@/components/trade/PositionNftMenu";
 import { useClosePosition } from "@/hooks/useClosePosition";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useMarketLimits } from "@/hooks/useMarketLimits";
@@ -143,7 +143,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   // is unaffected.
   const marketDisplaySymbol = symbol.replace(/-PERP$/i, "");
 
-  const { closePosition, loading: closeLoading, error: closeError, prewarmClose } = useClosePosition(slabAddress);
+  const { closePosition, loading: closeLoading, error: closeError, prewarmClose, resetPhase } = useClosePosition(slabAddress);
   // Per-trade fill cap — the close modal uses it to explain multi-fill closes.
   const fillCaps = useMarketFillCap(slabAddress);
   // Called unconditionally, before the `!activeInfo` early return below, per
@@ -187,9 +187,20 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const isSettling = hasNormalPosition && !!realUserAccount?.provisional;
 
   if (!activeInfo) {
-    if (accountPending) return <EmptyState title="Loading positions…" subtitle="Checking this market for your account." />;
-    if (!userAccount) return <EmptyState subtitle="Connect your wallet and deposit collateral to start trading." />;
-    return <EmptyState subtitle="Use the order ticket to open a position." />;
+    // A position closed while wrapped as an NFT has no row (useNftWrappedPosition skips size-0 legs), so its
+    // Unwrap lives under the empty state; renders nothing unless the wallet holds such an NFT on this market.
+    // While the portfolio scan is pending (#2707) say "Loading", not "no account" (#2933).
+    const subtitle = accountPending
+      ? "Checking this market for your account."
+      : userAccount
+        ? "Use the order ticket to open a position."
+        : "Connect your wallet and deposit collateral to start trading.";
+    return (
+      <>
+        <EmptyState title={accountPending ? "Loading positions…" : undefined} subtitle={subtitle} />
+        <ClosedPositionNftNotice slabAddress={slabAddress} />
+      </>
+    );
   }
   const { account } = activeInfo;
 
@@ -517,7 +528,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                     // prewarmClose: start the fresh position read + tx prewarms
                     // the moment the modal opens, so the confirm click reaches
                     // the wallet popup with zero blocking round-trips.
-                    onClick={() => { prewarmClose(); setShowCloseModal(true); }}
+                    onClick={() => { resetPhase(); prewarmClose(); setShowCloseModal(true); }}
                     data-testid="position-close"
                     disabled={closeLoading || lpUnderfunded || !hasValidMark || engineStale}
                     title={!hasValidMark ? "Waiting for price data…" : engineStale ? "Prices are catching up. Closing resumes automatically, usually within a minute." : undefined}
@@ -568,6 +579,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
           priceUsd={priceUsd}
           isLong={isLong}
           loading={closeLoading}
+          error={closeError}
           tradingFeeBps={params?.tradingFeeBps}
           // Defense-in-depth: the row-level Close button above is already
           // disabled on engineStale (with its own correctly-labeled title),

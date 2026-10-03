@@ -9,7 +9,9 @@ import { getConfig } from "@/lib/config";
 import { usePreferredWallet, resolveActiveWallet } from "@/hooks/usePreferredWallet";
 import { buildSolflareBrowseUrl } from "@/lib/solflare";
 import { usePrivyLogin } from "@/hooks/usePrivySafe";
-import { useWalletNeedsReconnect } from "@/hooks/useWalletNeedsReconnect";
+import { useSignInLoopRecovery } from "@/hooks/useSignInLoopRecovery";
+import { resetPrivyConnection } from "@/lib/privy-reset";
+import { isReconnectFallbackEligible, useWalletNeedsReconnect } from "@/hooks/useWalletNeedsReconnect";
 
 /**
  * Privy-backed connect button. Split into its own module (loaded via
@@ -44,6 +46,13 @@ export const ConnectButtonPrivyInner: FC = () => {
     authenticated,
     walletsReady: walletsReady === true,
     hasActiveWallet: !!activeWallet,
+    fallbackEligible: isReconnectFallbackEligible(user?.linkedAccounts),
+  });
+
+  // "Connect loops": the session the user just signed in with is dropped again right away.
+  const { needsReset, noteConnectAttempt, noteUserLogout } = useSignInLoopRecovery({
+    ready,
+    authenticated,
   });
 
   const { login } = useLogin({
@@ -95,11 +104,12 @@ export const ConnectButtonPrivyInner: FC = () => {
 
   const handleClick = useCallback(() => {
     if (!authenticated) {
+      noteConnectAttempt();
       login({ loginMethods: ["wallet", "email"], walletChainType: "solana-only" });
       return;
     }
     setMenuOpen((v) => !v);
-  }, [authenticated, login]);
+  }, [authenticated, login, noteConnectAttempt]);
 
   const debugFlag = searchParams?.get("walletDebug") ?? "";
   const showDebug = DEBUG_ENABLED.has(debugFlag.toLowerCase());
@@ -135,6 +145,7 @@ export const ConnectButtonPrivyInner: FC = () => {
         <button
           onClick={() => {
             setPreferredAddress(null);
+            noteUserLogout();
             logout();
           }}
           className="min-h-10 rounded-sm border border-[var(--border)] px-2 text-[13px] text-[var(--text-muted)] transition-colors hover:text-[var(--error)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
@@ -165,6 +176,22 @@ export const ConnectButtonPrivyInner: FC = () => {
       >
         {authenticated ? (displayAddress || "Wallet") : "Connect"}
       </button>
+
+      {!authenticated && needsReset ? (
+        <button
+          type="button"
+          data-testid="wallet-reset"
+          onClick={() => {
+            setPreferredAddress(null);
+            noteUserLogout();
+            void resetPrivyConnection(logout);
+          }}
+          title="Clears the saved wallet sign-in from this browser and reloads. You will then connect again."
+          className="absolute right-0 top-full z-50 mt-1 whitespace-nowrap rounded-sm border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-[11px] text-[var(--text-secondary)] underline hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+        >
+          Reset wallet connection
+        </button>
+      ) : null}
 
       {!authenticated && showDebug && solflareBrowseUrl ? (
         <a
@@ -236,6 +263,7 @@ export const ConnectButtonPrivyInner: FC = () => {
           <button
             onClick={() => {
               setPreferredAddress(null);
+              noteUserLogout();
               logout();
               setMenuOpen(false);
             }}

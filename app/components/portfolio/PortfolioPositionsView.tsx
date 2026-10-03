@@ -12,7 +12,7 @@ import { useClosePosition } from "@/hooks/useClosePosition";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { ClosePositionModal } from "@/components/trade/ClosePositionModal";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
-import { usePortfolio, getLiquidationSeverity, getLiquidationSeverityForState, type PortfolioPosition } from "@/hooks/usePortfolio";
+import { usePortfolio, getLiquidationSeverity, getLiquidationSeverityForState, positionRowKeys, type PortfolioPosition } from "@/hooks/usePortfolio";
 import { classifyLiquidation } from "@/lib/liquidation-state";
 import { describeLiqPrice } from "@/lib/liq-price-display";
 import { LiqPriceValue } from "@/components/trade/LiqPriceValue";
@@ -349,18 +349,30 @@ function PositionCard({
                   </span>
                 )}
               </div>
-              <button
-                type="button"
-                onClick={(e) => {
-                  // Card is a Link — keep the click from navigating.
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setShowClose(true);
-                }}
-                className="shrink-0 rounded-none border border-[var(--short)]/30 px-2.5 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-all duration-150 hover:border-[var(--short)]/60 hover:bg-[var(--short)]/10"
-              >
-                Close
-              </button>
+              {/* An NFT-wrapped position belongs to the NFT, so this wallet can't close it here
+                  (useClosePosition never finds it). Same badge as the trade page's other-markets
+                  list; the card link leads to the market page, where it can be unwrapped. */}
+              {pos.nftWrapped ? (
+                <span
+                  title="This position is wrapped in a Position NFT. Burn the NFT on its market's trade page to unwrap it, then close."
+                  className="inline-block shrink-0 cursor-help rounded-none border border-[var(--accent)]/30 px-2.5 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--accent)]"
+                >
+                  🎫 Wrapped
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    // Card is a Link — keep the click from navigating.
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setShowClose(true);
+                  }}
+                  className="shrink-0 rounded-none border border-[var(--short)]/30 px-2.5 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-all duration-150 hover:border-[var(--short)]/60 hover:bg-[var(--short)]/10"
+                >
+                  Close
+                </button>
+              )}
             </div>
           </div>
 
@@ -515,6 +527,9 @@ export function PortfolioPositionsView() {
   const positions: PortfolioPosition[] = mockPositions ?? portfolio.positions ?? [];
   const atRiskCount = portfolio.atRiskCount ?? 0;
   const loading = mockPositions ? false : portfolio.loading;
+  // First scan failed with nothing loaded: the empty list and $0 totals are
+  // not real, so show "—" and an error instead of an empty account.
+  const loadError = mockPositions ? null : portfolio.error;
   const refresh = portfolio.refresh;
 
   // LP positions (insurance fund deposits)
@@ -555,6 +570,9 @@ export function PortfolioPositionsView() {
   // (and counting deposits in the POSITIONS stat) read as bogus data.
   const openPositions = activePositions.filter((pos) => (pos.account?.positionSize ?? 0n) !== 0n);
   const idleDeposits = activePositions.filter((pos) => (pos.account?.positionSize ?? 0n) === 0n);
+  // A card holds its open close modal in state, so its key must not move to another
+  // position when the list re-sorts (an owned and a wrapped row can share a market).
+  const openKeys = positionRowKeys(openPositions);
 
   // Market symbol/name per slab — the row label used to show the COLLATERAL
   // token's symbol, which is the same sim-USDC mint (with no token-list
@@ -715,16 +733,18 @@ export function PortfolioPositionsView() {
           <div className="mb-2 border border-[var(--border)] bg-[var(--panel-bg)] p-6 transition-colors duration-200 hover:bg-[var(--bg-elevated)] sm:p-8">
             <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--text)]">Portfolio Value</p>
             <p
-              className={`text-3xl font-bold tabular-nums sm:text-4xl ${!walletConnected ? "text-[var(--text-dim)]" : "text-[var(--text)]"}`}
+              className={`text-3xl font-bold tabular-nums sm:text-4xl ${!walletConnected || loadError ? "text-[var(--text-dim)]" : "text-[var(--text)]"}`}
               style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
             >
               {!walletConnected
                 ? "\u2014"
                 : (loading || tokenMetasLoading)
                   ? "\u2026"
-                  : `$${liveUsdTotals.valueUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                  : loadError
+                    ? "\u2014"
+                    : `$${liveUsdTotals.valueUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             </p>
-            {walletConnected && !loading && !tokenMetasLoading && (
+            {walletConnected && !loadError && !loading && !tokenMetasLoading && (
               <div className="mt-3 flex items-baseline gap-2">
                 <span
                   className={`text-sm font-bold sm:text-base ${liveUsdTotals.unrealizedPnlUsd >= 0 ? "text-[var(--long)]" : "text-[var(--short)]"}`}
@@ -766,8 +786,8 @@ export function PortfolioPositionsView() {
             {[
               {
                 label: "Total Deposited",
-                value: !walletConnected ? "\u2014" : (loading || tokenMetasLoading) ? "\u2026" : `$${usdTotals.depositedUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-                color: !walletConnected ? "text-[var(--text-dim)]" : "text-[var(--text)]",
+                value: !walletConnected ? "\u2014" : (loading || tokenMetasLoading) ? "\u2026" : loadError ? "\u2014" : `$${usdTotals.depositedUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                color: !walletConnected || loadError ? "text-[var(--text-dim)]" : "text-[var(--text)]",
               },
               {
                 label: "LP Value",
@@ -779,15 +799,15 @@ export function PortfolioPositionsView() {
               },
               {
                 label: "Open Positions",
-                value: !walletConnected ? "\u2014" : loading ? "\u2026" : openPositions.length.toString(),
-                color: !walletConnected ? "text-[var(--text-dim)]" : "text-[var(--text)]",
+                value: !walletConnected ? "\u2014" : loading ? "\u2026" : loadError ? "\u2014" : openPositions.length.toString(),
+                color: !walletConnected || loadError ? "text-[var(--text-dim)]" : "text-[var(--text)]",
                 sub: walletConnected && atRiskCount > 0 ? `${atRiskCount} at risk` : undefined,
                 subColor: atRiskCount > 0 ? "text-[var(--short)]" : undefined,
               },
               {
                 label: "Idle Deposits",
-                value: !walletConnected ? "\u2014" : (loading || tokenMetasLoading) ? "\u2026" : `$${idleDepositsUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-                color: !walletConnected ? "text-[var(--text-dim)]" : "text-[var(--text)]",
+                value: !walletConnected ? "\u2014" : (loading || tokenMetasLoading) ? "\u2026" : loadError ? "\u2014" : `$${idleDepositsUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                color: !walletConnected || loadError ? "text-[var(--text-dim)]" : "text-[var(--text)]",
                 sub: walletConnected && idleDeposits.length > 0 ? `${idleDeposits.length} market deposit${idleDeposits.length === 1 ? "" : "s"}` : undefined,
               },
             ].map((stat) => (
@@ -835,6 +855,20 @@ export function PortfolioPositionsView() {
                 </div>
               ))}
             </div>
+          ) : loadError && walletConnected ? (
+            <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-6 flex flex-col items-center gap-3 text-center">
+              <span className="text-2xl leading-none">⚠️</span>
+              <div>
+                <p className="text-[12px] font-semibold text-[var(--text-secondary)]">Couldn't load your positions</p>
+                <p className="mt-0.5 text-[11px] text-[var(--text-secondary)]">Please try refreshing</p>
+              </div>
+              <button
+                onClick={refresh}
+                className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] px-4 py-2 text-xs text-[var(--text-secondary)] transition-all hover:border-[var(--accent)]/40 hover:text-[var(--text)]"
+              >
+                Retry
+              </button>
+            </div>
           ) : openPositions.length === 0 ? (
             <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-10 text-center">
               <h3 className="mb-1 text-[15px] font-semibold text-[var(--text)]">No open positions</h3>
@@ -851,7 +885,7 @@ export function PortfolioPositionsView() {
             <div className="space-y-3">
               {openPositions.map((pos, i) => (
                 <PositionCard
-                  key={`${pos.slabAddress}-${i}`}
+                  key={openKeys[i]}
                   pos={pos}
                   label={marketLabel(pos)}
                   baseSymbol={(pos.symbol ?? statsMap.get(pos.slabAddress)?.symbol ?? pos.slabAddress.slice(0, 6)).replace(/-PERP$/i, "")}

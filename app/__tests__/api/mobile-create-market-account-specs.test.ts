@@ -38,7 +38,8 @@ import {
   ACCOUNTS_INIT_MATCHER_CTX,
   ACCOUNTS_DEPOSIT_COLLATERAL,
   ACCOUNTS_TOPUP_INSURANCE,
-  ACCOUNTS_TOP_UP_BACKING_BUCKET,
+  ACCOUNTS_CREATE_LP_VAULT,
+  ACCOUNTS_LP_VAULT_DEPOSIT,
   ACCOUNTS_PERMISSIONLESS_CRANK_BASE,
   deriveVaultAuthority,
 } from '@percolatorct/sdk';
@@ -79,10 +80,14 @@ const IX_TAG = {
   DepositCollateral: 3,
   PermissionlessCrank: 5,
   TopUpInsurance: 9,
-  TopUpBackingBucket: 24,
   SetMatcherConfig: 68,
+  CreateLpVault: 74,
+  DepositToLpVault: 75,
   InitMatcherCtx: 83,
 } as const;
+
+/** GH#2749: the route must never send a direct TopUpBackingBucket (tag 24). */
+const TOP_UP_BACKING_BUCKET_TAG = 24;
 
 interface AccountSpecEntry {
   name: string;
@@ -101,7 +106,8 @@ const SPEC_BY_TAG: Record<number, { spec: AccountSpecEntry[]; label: string }> =
   [IX_TAG.DepositCollateral]: { spec: ACCOUNTS_DEPOSIT_COLLATERAL, label: 'DepositCollateral' },
   [IX_TAG.PermissionlessCrank]: { spec: ACCOUNTS_PERMISSIONLESS_CRANK_BASE, label: 'PermissionlessCrank' },
   [IX_TAG.TopUpInsurance]: { spec: ACCOUNTS_TOPUP_INSURANCE, label: 'TopUpInsurance' },
-  [IX_TAG.TopUpBackingBucket]: { spec: ACCOUNTS_TOP_UP_BACKING_BUCKET, label: 'TopUpBackingBucket' },
+  [IX_TAG.CreateLpVault]: { spec: ACCOUNTS_CREATE_LP_VAULT, label: 'CreateLpVault' },
+  [IX_TAG.DepositToLpVault]: { spec: ACCOUNTS_LP_VAULT_DEPOSIT, label: 'DepositToLpVault' },
   [IX_TAG.SetMatcherConfig]: { spec: ACCOUNTS_SET_MATCHER_CONFIG, label: 'SetMatcherConfig' },
   [IX_TAG.InitMatcherCtx]: { spec: ACCOUNTS_INIT_MATCHER_CTX, label: 'InitMatcherCtx' },
 };
@@ -201,6 +207,7 @@ describe('mobile create-market account specs (#2542)', () => {
         if (ix.data.length === 0) continue;
 
         const tag = ix.data[0];
+        expect(tag, 'no direct TopUpBackingBucket (GH#2749)').not.toBe(TOP_UP_BACKING_BUCKET_TAG);
         const entry = SPEC_BY_TAG[tag];
         if (!entry) continue; // SetNftProgramId (73) — no spec to compare against, see note above
 
@@ -209,7 +216,7 @@ describe('mobile create-market account specs (#2542)', () => {
 
         expect(ix.keys.length, `${label}: account count`).toBe(spec.length);
 
-        for (const name of ['admin', 'owner', 'lpOwner', 'signer']) {
+        for (const name of ['admin', 'owner', 'lpOwner', 'signer', 'depositor']) {
           const pk = bySpecName(spec, ix.keys, name);
           if (pk) expect(pk.toBase58(), `${label}.${name}`).toBe(deployer);
         }

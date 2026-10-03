@@ -30,19 +30,18 @@ import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import {
   encodeDepositCollateral,
   encodeTopUpInsurance,
-  encodeTopUpBackingBucket,
   encodePermissionlessCrank,
   ACCOUNTS_DEPOSIT_COLLATERAL,
   ACCOUNTS_TOPUP_INSURANCE,
-  ACCOUNTS_TOP_UP_BACKING_BUCKET,
   ACCOUNTS_PERMISSIONLESS_CRANK_BASE,
   buildAccountMetas,
   buildIx,
-  deriveLpBackingLedger,
+  deriveLpVaultRegistry,
+  deriveInsuranceLpMint,
   WELL_KNOWN,
-  MAX_BACKING_BUCKET_EXPIRY_SLOT,
 } from "@percolatorct/sdk";
 import { backingSeedPerDomain } from "@/lib/market-params";
+import { buildEarnVaultSeedInstructions } from "@/lib/earn-vault-seed";
 import { defaultCrankObservations } from "@/lib/v18-wire";
 
 /** Minimum token amount for the vault seed transfer (matches the on-chain guard). */
@@ -87,7 +86,8 @@ export interface MobileFundingIxs {
   /** Load-bearing: the LP deposit, the insurance top-up and the closing crank. */
   mandatory: TransactionInstruction[];
   /**
-   * The two backing seeds. SEPARATE, and deliberately so.
+   * The backing seed group (Earn vault create + one deposit per domain).
+   * SEPARATE, and deliberately so.
    *
    * GH#2514 settled that seeding is NON-FATAL: "a transient RPC error must not
    * strand a live market, and a repeat TopUp against an already-Fresh-at-MAX
@@ -99,11 +99,9 @@ export interface MobileFundingIxs {
    * 1,100 to 3,000 tokens, so the commonest outcome of an under-funded wallet
    * becomes a reverted LP deposit on a launch that previously succeeded.
    *
-   * Their lanes are 2 and 3, after the mandatory group's insurance at 1, so the
-   * shared one-shot lane is still consumed in increasing order. If this group
-   * never lands the market is still live, exactly as it is today, and because this
-   * flow never calls CreateLpVault the creator keeps backing authority and can top
-   * up later.
+   * The group is atomic: if it never lands nothing in it applied, the market is
+   * still live, both buckets stay Empty, and the creator (still marketauth and
+   * backing authority) can create the Earn vault later.
    */
   backingSeeds: TransactionInstruction[];
 }
@@ -111,8 +109,9 @@ export interface MobileFundingIxs {
 /**
  * Build the funding instructions, grouped by whether they are load-bearing.
  *
- * ORDER IS PART OF THE CONTRACT: `mandatory` before `backingSeeds`, because the
- * one-shot `intentId` lane is strictly increasing and insurance holds lane 1.
+ * The route sends `mandatory` (TX3) before `backingSeeds` (TX4). The seed group
+ * consumes no `intentId` lane, so this order is no longer load-bearing for the
+ * one-shot nonce; it is kept so the non-fatal group always runs last.
  */
 export function buildMobileFundingIxs(p: FundingIxParams): MobileFundingIxs {
   const { programId, market, lpPortfolio, deployer, userAta, vaultAta } = p;
@@ -139,47 +138,39 @@ export function buildMobileFundingIxs(p: FundingIxParams): MobileFundingIxs {
   });
 
   /**
-   * One backing seed PER DOMAIN (GH#2595). This flow previously seeded neither,
-   * diverging from the web launch. Two reasons it matters:
+   * Backing for BOTH asset-0 domains (GH#2595), funded through the Earn vault
+   * exactly like the web launch (lib/earn-vault-seed.ts, bug C-1):
+   * CreateLpVault(domain 0) + LP-share ATA + DepositToLpVault(domain 0 and 1).
    *
-   *   1. Counterparty backing for shorts — at BACKING_SEED_PCT_OF_LP = 100 the
-   *      seed is a real amount, not dust.
-   *   2. The backing-bucket freshness deadlock. Seeding to
-   *      Fresh@MAX_BACKING_BUCKET_EXPIRY_SLOT while the buckets are still Empty
-   *      is what stops one ever being Fresh-but-lapsed — the state that
-   *      permanently reverts Custom(21) LockActive from the loss-reserve path.
-   *      A FINITE expiry here would re-arm exactly that.
+   * GH#2749: this used to be two direct TopUpBackingBucket seeds at
+   * MAX_BACKING_BUCKET_EXPIRY_SLOT (u64::MAX / 2). That value IS the wrapper's
+   * reserved LP_VAULT_BACKING_EXPIRY_SLOT, and handle_top_up_backing_bucket
+   * refuses it with InvalidInstruction (Custom 9) whenever amount != 0
+   * (percolator-prog 553d76f0, v16_program.rs ~L17362 and ~L17422), so this
+   * transaction reverted on every launch. Moving to MAX - 1 would land, but a
+   * domain funded at any expiry other than the sentinel makes CreateLpVault
+   * refuse forever with LpVaultBackingBucketNotEmpty (Custom 63) — the exact state
+   * C-1 removed from the web launch. DepositToLpVault stamps the sentinel itself,
+   * so the buckets never lapse (the Custom(21) freshness deadlock stays closed).
    *
-   * `signer` is the deployer: backing_bucket_authority defaults to the market's
-   * marketauth at InitMarket, which on this route is the InitMarket signer.
+   * Preconditions, all true at this point on this route: market Live, signer ==
+   * marketauth (the deployer, InitMarket signer), both buckets still Empty. No
+   * intent lane or authority epoch is consumed, so insurance's lane 1 is
+   * unaffected. The deployer receives the LP shares for the same collateral the
+   * direct seeds drew (backingSeedPerDomain x 2).
    */
-  const backingSeed = backingSeedPerDomain(DEFAULT_LP_COLLATERAL);
-  const backingIxs = [0, 1].map((domain) => {
-    // Per-domain PDA — derived inside the map, never hoisted.
-    const [ledger] = deriveLpBackingLedger(programId, market, domain);
-    return buildIx({
-      programId,
-      keys: buildAccountMetas(ACCOUNTS_TOP_UP_BACKING_BUCKET, {
-        signer: deployer,
-        market,
-        sourceToken: userAta,
-        vaultToken: vaultAta,
-        tokenProgram: WELL_KNOWN.tokenProgram,
-        ledger,
-        systemProgram: WELL_KNOWN.systemProgram,
-      }),
-      data: encodeTopUpBackingBucket({
-        domain,
-        marketId: 1n,
-        // Lanes 2 and 3. Insurance keeps lane 1 in the mandatory group, which runs
-        // first — so the one-shot lane is still consumed in increasing order and
-        // insurance needed no renumbering.
-        intentId: BigInt(domain) + 2n,
-        authorityEpoch: 0n,
-        amount: backingSeed.toString(),
-        expirySlot: MAX_BACKING_BUCKET_EXPIRY_SLOT.toString(),
-      }),
-    });
+  const [registry] = deriveLpVaultRegistry(programId, market);
+  const [lpMint] = deriveInsuranceLpMint(programId, market);
+  const backingIxs = buildEarnVaultSeedInstructions({
+    programId,
+    wallet: deployer,
+    market,
+    registry,
+    lpMint,
+    userAta,
+    vaultAta,
+    seedPerDomain: backingSeedPerDomain(DEFAULT_LP_COLLATERAL),
+    includeCreate: true,
   });
 
   // Insurance keeps one-shot lane 1 and runs in the mandatory group, before the

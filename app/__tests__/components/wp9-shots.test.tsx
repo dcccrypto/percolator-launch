@@ -66,6 +66,6 @@ describe("WP-9 screens", () => {
     await snap("nft-menu", r.container.firstElementChild!);
     fireEvent.click(r.getByTestId("position-nft-wrap"));
     expect(r.getByTestId("position-nft-wrap-sheet")).toBeTruthy();
-    await snap("nft-wrap-sheet", r.container.firstElementChild!);
+    await snap("nft-wrap-sheet", r.getByTestId("position-nft-wrap-sheet"));
   });
 });

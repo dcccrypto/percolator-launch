@@ -14,7 +14,7 @@ import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
 import { CreatorClaimPanel } from "@/components/market/CreatorClaimPanel";
 import { useToast } from "@/hooks/useToast";
-import { explorerAccountUrl } from "@/lib/config";
+import { explorerAccountUrl, explorerTxUrl } from "@/lib/config";
 import { ZERO_PUBKEY } from "@/lib/update-asset-authority-keys";
 import { computeMarketHealthFromStats } from "@/lib/health";
 import { HealthBadge } from "@/components/market/HealthBadge";
@@ -237,7 +237,8 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
       // click would also toggle the drawer.
       e.stopPropagation();
       void rowClaim.claim([slab]).then((results) => {
-        if (results.some((r) => r.signature)) onClaimed?.();
+        // A pending claim (#2742) may already have landed: re-read the balance for it too.
+        if (results.some((r) => r.signature || r.pendingSignature)) onClaimed?.();
       });
     },
     [rowClaim, slab, onClaimed],
@@ -415,6 +416,7 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
           {rowClaim.outcomes[0]?.error && (
             <span className="mt-1 block text-[9px] text-[var(--short)]">{rowClaim.outcomes[0].error}</span>
           )}
+          {rowClaim.outcomes[0]?.pendingSignature && <ClaimPendingNote signature={rowClaim.outcomes[0].pendingSignature} />}
         </div>
         <div className="min-w-[70px]">
           <p className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-dim)]">price</p>
@@ -651,3 +653,31 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
     </div>
   );
 };
+
+/**
+ * #2742: a row claim that was sent but did not confirm before the poll deadline. It may still
+ * land, so it is neither "claimed" nor an error, and the signature stays in front of the creator.
+ * A span with role="link", not an <a>: it renders inside the row's expand <button> (no
+ * interactive nesting), and a click must open the explorer without toggling the drawer.
+ */
+export function ClaimPendingNote({ signature }: { signature: string }) {
+  const open = (e: { preventDefault: () => void; stopPropagation: () => void }) => {
+    e.preventDefault();
+    e.stopPropagation();
+    window.open(explorerTxUrl(signature), "_blank", "noopener,noreferrer");
+  };
+  return (
+    <span data-testid="creator-row-claim-pending" className="mt-1 block text-[9px] text-[var(--text-secondary)]">
+      Claim sent, not confirmed yet.{" "}
+      <span
+        role="link"
+        tabIndex={0}
+        onClick={open}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") open(e); }}
+        className="cursor-pointer text-[var(--accent)] hover:brightness-125"
+      >
+        check on explorer ↗
+      </span>
+    </span>
+  );
+}

@@ -28,6 +28,7 @@ import type { CreatedMarket } from "@/hooks/useCreatedMarkets";
 import type { CreatorMarketDetail } from "./types";
 import { unitScaleToDecimals } from "./types";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
+import { explorerTxUrl } from "@/lib/config";
 import { claimAllResultCopy, useClaimCreatorFees } from "@/hooks/useClaimCreatorFees";
 import {
   classifyClaimable,
@@ -195,6 +196,16 @@ export const CreatorFeesPanel: FC<CreatorFeesPanelProps> = ({
           {outcomes.filter((o) => o.error).map((o) => (
             <p key={o.slab} data-testid="creator-claim-unclaimed" className="text-[10px] text-[var(--text-secondary)]">
               {labelFor(o.slab)} not claimed: {o.error}
+            </p>
+          ))}
+          {/* #2742: sent but not confirmed before the poll deadline — it may still land, so it is
+              neither "claimed" nor "not claimed"; the signature is the creator's way to check. */}
+          {outcomes.filter((o) => !o.signature && o.pendingSignature).map((o) => (
+            <p key={o.slab} data-testid="creator-claim-pending" className="text-[10px] text-[var(--text-secondary)]">
+              {labelFor(o.slab)} sent, not confirmed yet.{" "}
+              <a href={explorerTxUrl(o.pendingSignature!)} target="_blank" rel="noopener noreferrer" className="text-[var(--accent)] hover:brightness-125">
+                check on explorer ↗
+              </a>
             </p>
           ))}
         </div>
