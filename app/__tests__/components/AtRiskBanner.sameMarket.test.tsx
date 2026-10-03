@@ -12,7 +12,9 @@ import type { PortfolioPosition } from '@/hooks/usePortfolio';
 // hidden by a market-level dedup.
 const row = (nftWrapped: boolean) =>
   ({ slabAddress: 'SLAB1111', symbol: 'SOL-PERP', idx: 0, nftWrapped,
-     liquidationDistancePct: 5, account: { positionSize: 10n } }) as unknown as PortfolioPosition;
+     liquidationDistancePct: 5, account: { positionSize: 10n },
+     // Long at 100 with liquidation at 95: 5% away.
+     effectiveSize: 10n, oraclePriceE6: 100_000_000n, liquidationPriceE6: 95_000_000n }) as unknown as PortfolioPosition;
 
 describe('AtRiskBanner: two at-risk rows on one market', () => {
   afterEach(cleanup);

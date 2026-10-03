@@ -1,13 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { getLiquidationSeverity, positionRowKeys, type PortfolioPosition } from "@/hooks/usePortfolio";
+import {
+  getLiquidationSeverity,
+  liveLiquidationDistancePct,
+  positionRowKeys,
+  type PortfolioPosition,
+} from "@/hooks/usePortfolio";
 
 interface AtRiskBannerProps {
   /** Open positions only — flat/idle deposits always report distancePct=100
    *  ("safe") so passing them in is harmless, but the caller should filter
    *  to positions with a nonzero size for a cheaper pass. */
   positions: PortfolioPosition[];
+  /** Live marks by slab (useLiveSlabPrices), so the strip shows the same figure as the cards.
+   *  Without it the strip falls back to the poll's price. */
+  livePrices?: ReadonlyMap<string, bigint>;
 }
 
 /**
@@ -17,16 +25,17 @@ interface AtRiskBannerProps {
  * Renders `null` (zero height) when nothing is at risk — this is a
  * conditional alert surfaced under the header, not decorative chrome.
  */
-export function AtRiskBanner({ positions }: AtRiskBannerProps) {
+export function AtRiskBanner({ positions, livePrices }: AtRiskBannerProps) {
+  const distanceOf = (pos: PortfolioPosition) => liveLiquidationDistancePct(pos, livePrices?.get(pos.slabAddress));
   const atRisk = positions.filter(
     (pos) =>
       (pos.account?.positionSize ?? 0n) !== 0n &&
-      getLiquidationSeverity(pos.liquidationDistancePct) !== "safe",
+      getLiquidationSeverity(distanceOf(pos)) !== "safe",
   );
   if (atRisk.length === 0) return null;
   const keys = positionRowKeys(atRisk);
 
-  const hasDanger = atRisk.some((pos) => getLiquidationSeverity(pos.liquidationDistancePct) === "danger");
+  const hasDanger = atRisk.some((pos) => getLiquidationSeverity(distanceOf(pos)) === "danger");
 
   return (
     <div
@@ -44,7 +53,8 @@ export function AtRiskBanner({ positions }: AtRiskBannerProps) {
         {hasDanger ? "⚠ Liquidation risk" : "⚡ Approaching liquidation"}
       </span>
       {atRisk.map((pos, i) => {
-        const severity = getLiquidationSeverity(pos.liquidationDistancePct);
+        const distance = distanceOf(pos);
+        const severity = getLiquidationSeverity(distance);
         const label = (pos.symbol ?? `${pos.slabAddress.slice(0, 6)}…`).replace(/-PERP$/i, "");
         return (
           <Link
@@ -54,7 +64,7 @@ export function AtRiskBanner({ positions }: AtRiskBannerProps) {
               severity === "danger" ? "text-[var(--short)]" : "text-[var(--warning)]"
             }`}
           >
-            {label} ({pos.liquidationDistancePct.toFixed(1)}%)
+            {label} ({distance.toFixed(1)}%)
           </Link>
         );
       })}

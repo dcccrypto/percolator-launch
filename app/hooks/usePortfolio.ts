@@ -282,6 +282,17 @@ export function getLiquidationSeverityForState(
   return state.reason === "no-position" ? "safe" : "danger";
 }
 
+/**
+ * Distance to liquidation at the LIVE mark (the shared WS price store), falling back to the
+ * poll's oracle price until the first tick, then to the poll's own figure. The position card,
+ * the at-risk strip and the at-risk count all read this, so they agree with each other and
+ * move with the price instead of with the 30s poll.
+ */
+export function liveLiquidationDistancePct(pos: PortfolioPosition, liveMarkE6: bigint | null | undefined): number {
+  const markE6 = liveMarkE6 != null && liveMarkE6 > 0n ? liveMarkE6 : pos.oraclePriceE6;
+  return computeLiquidationDistancePct(pos.effectiveSize, markE6, pos.liquidationPriceE6, pos.liquidationDistancePct);
+}
+
 export function getLiquidationSeverity(distancePct: number): LiquidationSeverity {
   // #2412: a non-finite distance must NOT read as "safe". Both comparisons below
   // are FALSE for NaN (and for Infinity on the first two), so an unguarded NaN
