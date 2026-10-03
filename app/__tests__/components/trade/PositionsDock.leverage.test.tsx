@@ -53,7 +53,7 @@ vi.mock("@/components/trade/OtherMarketPositions", () => ({ OtherMarketPositions
 vi.mock("@/components/trade/TradeHistory", () => ({ TradeHistory: () => null }));
 vi.mock("@/components/trade/WarmupProgress", () => ({ WarmupProgress: () => null }));
 vi.mock("@/components/trade/ClosePositionModal", () => ({ ClosePositionModal: () => null }));
-vi.mock("@/components/trade/PositionNftMenu", () => ({ PositionNftMenu: () => <span data-testid="nft-menu-marker" />, NFT_MENU_COPY: { badge: "NFT", closeWrapped: "Unwrap to close this position" } }));
+vi.mock("@/components/trade/PositionNftMenu", () => ({ PositionNftMenu: () => <span data-testid="nft-menu-marker" />, ClosedPositionNftNotice: () => <span data-testid="closed-nft-marker" />, NFT_MENU_COPY: { badge: "NFT", closeWrapped: "Unwrap to close this position" } }));
 
 import { PositionsDock } from "@/components/trade/PositionsDock";
 
@@ -104,3 +104,25 @@ describe("PositionsDock: NFT actions in the row", () => {
   });
 });
 
+// H8: the empty state also hosts the Unwrap for a position that closed while wrapped (no row exists for it).
+describe("PositionsDock: closed NFT position", () => {
+  it("mounts the closed-NFT notice under the empty state with no account", () => {
+    h.account = null;
+    render(<PositionsDock slabAddress="s" />);
+    expect(screen.getByText("No open positions")).toBeInTheDocument();
+    expect(screen.getByTestId("closed-nft-marker")).toBeInTheDocument();
+  });
+
+  it("mounts it with a flat account too", () => {
+    h.account = acct({ positionSize: 0n });
+    render(<PositionsDock slabAddress="s" />);
+    expect(screen.getByText("Use the order ticket to open a position.")).toBeInTheDocument();
+    expect(screen.getByTestId("closed-nft-marker")).toBeInTheDocument();
+  });
+
+  it("not when a position row renders", () => {
+    render(<PositionsDock slabAddress="s" />);
+    expect(screen.queryByTestId("closed-nft-marker")).toBeNull();
+    expect(lev()).toBeInTheDocument();
+  });
+});

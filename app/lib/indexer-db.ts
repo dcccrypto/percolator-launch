@@ -351,6 +351,7 @@ interface RawLeaderboardRow {
 export async function queryLeaderboard(
   period: string,
   limit: number,
+  excludeSlabs: string[] = [],
 ): Promise<LeaderboardRow[]> {
   const sql = getSql();
 
@@ -365,6 +366,7 @@ export async function queryLeaderboard(
       FROM trades
       WHERE created_at >= NOW() - INTERVAL '24 hours'
         AND network = ${getServerNetwork()}
+        AND NOT (slab_address = ANY(${excludeSlabs}::text[]))
       GROUP BY trader
       ORDER BY SUM(ABS(size::numeric) * price::numeric / 1e6) DESC
       LIMIT ${limit}
@@ -379,6 +381,7 @@ export async function queryLeaderboard(
       FROM trades
       WHERE created_at >= NOW() - INTERVAL '7 days'
         AND network = ${getServerNetwork()}
+        AND NOT (slab_address = ANY(${excludeSlabs}::text[]))
       GROUP BY trader
       ORDER BY SUM(ABS(size::numeric) * price::numeric / 1e6) DESC
       LIMIT ${limit}
@@ -392,6 +395,7 @@ export async function queryLeaderboard(
         MAX(created_at)           AS last_trade_at
       FROM trades
       WHERE network = ${getServerNetwork()}
+        AND NOT (slab_address = ANY(${excludeSlabs}::text[]))
       GROUP BY trader
       ORDER BY SUM(ABS(size::numeric) * price::numeric / 1e6) DESC
       LIMIT ${limit}
@@ -488,6 +492,7 @@ export interface TraderStatsAggregate {
 
 export async function queryTraderStatsAggregate(
   wallet: string,
+  excludeSlabs: string[] = [],
 ): Promise<TraderStatsAggregate> {
   const sql = getSql();
   const rows = await sql<Array<{
@@ -518,6 +523,7 @@ export async function queryTraderStatsAggregate(
     FROM trades
     WHERE trader = ${wallet}
       AND network = ${getServerNetwork()}
+      AND NOT (slab_address = ANY(${excludeSlabs}::text[]))
   `;
   const r = rows[0];
   const iso = (d: Date | null) =>
@@ -585,6 +591,7 @@ export async function queryTraderTradesPage(
   limit: number,
   offset: number,
   slabFilter?: string,
+  excludeSlabs: string[] = [],
 ): Promise<TraderTradesPageResult> {
   const sql = getSql();
 
@@ -594,11 +601,13 @@ export async function queryTraderTradesPage(
         SELECT COUNT(*)::text AS cnt FROM trades
         WHERE trader = ${wallet} AND slab_address = ${slabFilter}
           AND network = ${getServerNetwork()}
+          AND NOT (slab_address = ANY(${excludeSlabs}::text[]))
       `
     : await sql<Array<{ cnt: string }>>`
         SELECT COUNT(*)::text AS cnt FROM trades
         WHERE trader = ${wallet}
           AND network = ${getServerNetwork()}
+          AND NOT (slab_address = ANY(${excludeSlabs}::text[]))
       `;
   const total = Number(countRows[0]?.cnt ?? "0");
 
@@ -622,6 +631,7 @@ export async function queryTraderTradesPage(
         FROM trades
         WHERE trader = ${wallet} AND slab_address = ${slabFilter}
           AND network = ${getServerNetwork()}
+          AND NOT (slab_address = ANY(${excludeSlabs}::text[]))
         ORDER BY created_at DESC
         LIMIT ${limit} OFFSET ${offset}
       `
@@ -632,6 +642,7 @@ export async function queryTraderTradesPage(
         FROM trades
         WHERE trader = ${wallet}
           AND network = ${getServerNetwork()}
+          AND NOT (slab_address = ANY(${excludeSlabs}::text[]))
         ORDER BY created_at DESC
         LIMIT ${limit} OFFSET ${offset}
       `;

@@ -6,8 +6,8 @@ import { useEffect, useState, type RefObject } from "react";
  *
  * Used by fixed chrome that is portaled to <body> (the mobile Trade band) so it
  * can step aside while a dialog is up. Several trade-page dialogs still render
- * inline inside the layout's `z-[1]` page wrapper (Add Margin, the NFT wrap
- * sheet, the oracle details panel), so their own z-50/z-[60] is capped at 1 in
+ * inline inside the layout's `z-[1]` page wrapper (Add Margin, the oracle
+ * details panel), so their own z-50/z-[60] is capped at 1 in
  * the root stacking context and a root-level z-40 band would paint over their
  * buttons. Watching the DOM covers every dialog — inline, portaled, or from a
  * third-party wallet modal — without each one having to opt in.

@@ -503,7 +503,7 @@ export async function POST(req: NextRequest) {
     tx2.add(createCtxIx, setMatcherConfigIx, initMatcherCtxIx);
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // TX 3: DepositCollateral + TopUpBackingBucket x2 + TopUpInsurance + Crank
+    // TX 3: DepositCollateral + TopUpInsurance + Crank (backing is TX4)
     // v17: Deposit account list = [owner, market, portfolio, sourceToken, vaultToken, tokenProgram]
     // No clock. Portfolio = lpPortfolioPk (created in TX1).
     // v17: PermissionlessCrank uses [owner, market, portfolio] — portfolio = lpPortfolioPk.
@@ -531,14 +531,15 @@ export async function POST(req: NextRequest) {
     tx3.add(...funding.mandatory);
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // TX4: both backing seeds — NON-FATAL by GH#2514 policy (GH#2595).
+    // TX4: both backing domains, via CreateLpVault + DepositToLpVault x2 (the web
+    // launch's C-1 path; GH#2749) — NON-FATAL by GH#2514 policy (GH#2595).
     //
     // Kept out of TX3 on purpose. Merging them would make a deliberately non-fatal
     // step fatal and would raise TX3's draw from 1,100 to 3,000 tokens, so an
     // under-funded wallet would revert the LP deposit on a launch that previously
-    // succeeded. If this transaction does not land the market is still live, and
-    // since this flow never calls CreateLpVault the creator keeps
-    // backing_bucket_authority and can top up later.
+    // succeeded. TX4 is atomic: if it does not land, nothing in it applied, the
+    // market is still live with Empty buckets, and the creator (still marketauth)
+    // can create the Earn vault later.
     // ═══════════════════════════════════════════════════════════════════════════
     const tx4 = new Transaction({ recentBlockhash: blockhash, feePayer: deployerPk });
     tx4.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));

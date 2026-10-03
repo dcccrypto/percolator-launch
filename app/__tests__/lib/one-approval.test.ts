@@ -49,4 +49,24 @@ describe("runOneApproval", () => {
     await runOneApproval(units(2), { simulate: async () => ({ err: "x", consumed: null }), build: () => 0, signAll, broadcast: async () => "" });
     expect(signAll).not.toHaveBeenCalled();
   });
+  it("#2743: a unit whose simulation could not RUN is never signed (no verdict is not a pass)", async () => {
+    const signAll = vi.fn(async (t: string[]) => t);
+    const broadcast = vi.fn(async (t: string) => `sig-${t}`);
+    const out = await runOneApproval(units(3), {
+      simulate: async (ixs) => (ixs[0]!.data[0] === 1 ? { err: null, consumed: null, unchecked: true } : { err: null, consumed: 1000 }),
+      build: (ixs) => `tx-for-${ixs[0]!.data[0]}`,
+      signAll,
+      broadcast,
+    });
+    expect(signAll.mock.calls[0]![0]).toEqual(["tx-for-0", "tx-for-2"]);
+    expect(broadcast).toHaveBeenCalledTimes(2);
+    expect(out[1]).toMatchObject({ key: "m1", ok: false, stage: "unchecked" });
+    expect(out[0]!.ok && out[2]!.ok).toBe(true);
+  });
+  it("#2743: every simulation unreachable: the wallet is never opened", async () => {
+    const signAll = vi.fn(async (t: unknown[]) => t);
+    const out = await runOneApproval(units(2), { simulate: async () => ({ err: null, consumed: null, unchecked: true }), build: () => 0, signAll, broadcast: async () => "" });
+    expect(signAll).not.toHaveBeenCalled();
+    expect(out.map((o) => (o.ok ? "ok" : o.stage))).toEqual(["unchecked", "unchecked"]);
+  });
 });

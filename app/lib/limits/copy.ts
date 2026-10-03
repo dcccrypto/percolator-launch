@@ -91,6 +91,8 @@ export const COPY = {
   } as const,
   juniorResolvedExplain:
     "Earn depositors are paid first: each redeems up to their claim from the vault's backing. You can take what is left above their remaining claim once the market is fully closed out.",
+  /** useClosePosition: Confirm pressed before this market's position loaded. Nothing was sent. */
+  closeNotLoaded: "We couldn't load your position on this market yet. Nothing was sent. Try again in a moment.",
   adlExitTrapped:
     "The other side of this market has fully closed, and your position can settle once the market catches up. Nothing was sent. Try again in a moment.",
   closePartial: (filled: string, requested: string) => `Partially closed: ${filled} of ${requested}. The rest of your position is still open.`,

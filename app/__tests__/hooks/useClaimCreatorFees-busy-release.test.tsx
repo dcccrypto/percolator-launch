@@ -112,10 +112,9 @@ vi.mock("@/lib/tx", async (orig) => ({
     err: null,
     consumed: 20_000,
     logs: [],
-    // NOTE: `rpcFailed: false` here is the happy case. That the hook's adapter
-    // reads only `err` -- so a simulation that could not RUN (`rpcFailed: true`,
-    // `err: null`) is treated as "would land" and gets signed -- is a separate
-    // filed defect, not intended behaviour. Do not read this mock as a spec.
+    // `rpcFailed: false` = the simulation ran and would land. A simulation that
+    // could not RUN (`rpcFailed: true`) is held back unsigned since #2743 —
+    // covered in useClaimCreatorFees-pending-unchecked.test.tsx.
     rpcFailed: false,
     simulated: ixs,
   }),

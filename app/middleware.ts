@@ -261,6 +261,39 @@ const REDIRECT_HOSTS = new Set([
   "percolatorlaunch.com",
   "www.percolatorlaunch.com",
 ]);
+// ── Old playground host → play.percolator.trade (issue #2862) ────────────────
+// Privy runs in server-cookie mode; its `privy-session` cookie is
+// Domain=percolator.trade and can never be visible on *.vercel.app, so every
+// login there is torn down by the SDK (see ledger/privy-logout-loop-rootcause-2026-10-02.md).
+// The old production alias still serves the full app, so send everyone to the
+// real host. Only the exact production aliases are matched: preview deployments
+// (*-khubair-nasirs-projects.vercel.app) and localhost are untouched.
+const OLD_PLAYGROUND_HOSTS = new Set([
+  "percolator-playground.vercel.app",
+  "www.percolator-playground.vercel.app",
+]);
+const PLAYGROUND_CANONICAL_ORIGIN = "https://play.percolator.trade";
+// Fetched from the old host by things that are not browser sessions and must
+// keep resolving there: Sim-USDC on-chain metadata URI (wallets/explorers),
+// well-known files, and the cookie-less server-to-server routes the gate also
+// exempts (uptime monitor, keeper/ops signers). Redirecting those would break
+// callers that do not follow redirects.
+const OLD_HOST_PASSTHROUGH_PREFIXES = ["/token-metadata/", "/.well-known/"];
+const OLD_HOST_PASSTHROUGH_API: ReadonlyArray<{ method: string; re: RegExp }> = [
+  { method: "GET", re: /^\/api\/health\/?$/ },
+  { method: "GET", re: /^\/api\/playground\/registered-markets\/?$/ },
+  { method: "PATCH", re: /^\/api\/markets\/[1-9A-HJ-NP-Za-km-z]{32,44}\/?$/ },
+  { method: "POST", re: /^\/api\/oracle-keeper\/register\/?$/ },
+  { method: "POST", re: /^\/api\/oracle\/set-price-cap\/?$/ },
+];
+function isOldHostPassthrough(pathname: string, method: string): boolean {
+  if (OLD_HOST_PASSTHROUGH_PREFIXES.some((p) => pathname.startsWith(p))) return true;
+  const m = method.toUpperCase();
+  return OLD_HOST_PASSTHROUGH_API.some(
+    (e) => (e.method === m || (m === "HEAD" && e.method === "GET")) && e.re.test(pathname),
+  );
+}
+
 // Paths that ARE allowed on the waitlist host (percolator.trade). Anything else
 // → redirect to /waitlist. Trading-product surfaces (markets, dashboard,
 // portfolio, wallet, trade, create, stake, devnet-mint, faucet) stay blocked
@@ -311,7 +344,19 @@ function isAllowedOnWaitlistHost(pathname: string): boolean {
 
 export async function middleware(request: NextRequest) {
   // ── Hostname routing ───────────────────────────────────────────────────────
-  const host = (request.headers.get("host") ?? "").toLowerCase().split(":")[0];
+  const host = (request.headers.get("host") || request.nextUrl.hostname || "").toLowerCase().split(":")[0];
+
+  // Old playground host → canonical host. FIRST, so it runs before the waitlist
+  // gate: old-host visitors must not be handed a gate redirect/cookie there.
+  if (OLD_PLAYGROUND_HOSTS.has(host) && !isOldHostPassthrough(request.nextUrl.pathname, request.method)) {
+    const target = new URL(
+      request.nextUrl.pathname + request.nextUrl.search,
+      PLAYGROUND_CANONICAL_ORIGIN,
+    );
+    const res = NextResponse.redirect(target, { status: 308 });
+    res.headers.set("Cache-Control", "no-store");
+    return res;
+  }
 
   // Apex/www redirect: percolatorlaunch.com → percolator.trade (path-preserving 301)
   if (REDIRECT_HOSTS.has(host)) {

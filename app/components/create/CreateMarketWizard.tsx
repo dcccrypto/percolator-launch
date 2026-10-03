@@ -127,7 +127,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // button) for ANY in-flight market, not only the most-recently-touched one. Looking
   // up only `stuckSlab` here would silently fail to hand over the right keypair for an
   // older stuck slab's resume click.
-  const { stuckSlab, stuckSlabs } = useStuckSlabs();
+  const { stuckSlab, stuckSlabs, refresh: refreshStuckSlabs } = useStuckSlabs();
 
   // PERC-516: Persist wizard state to localStorage so form survives page refresh.
   // This fixes the "Continue button does nothing" bug — without persisted state,
@@ -1016,10 +1016,12 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // Issue #1141: Re-apply initialMint from URL param so 'Clear & Start Fresh'
   // doesn't lose the ?mint= address the user navigated here with.
   const handleReset = () => {
-    // Clear in-flight recovery state for the slab the user is abandoning, if any.
-    if (createState.slabAddress) {
-      clearInFlightMarket(createState.slabAddress);
-    }
+    // Keep the in-flight record: Start Over only resets this tab. A market that reached the
+    // chain stays recoverable from RecoverSolBanner (RESUME / RECLAIM), as the LaunchProgress
+    // recovery copy promises; deleting it stays an explicit Discard on that card. Re-read the
+    // records so RESUME on a market started this session finds its keypair in stuckSlabs.
+    // `?.` like `stuckSlabs?.find` below: some test mocks of useStuckSlabs omit it.
+    refreshStuckSlabs?.();
     resetCreate();
     setWizard({ ...DEFAULT_STATE, mintAddress: initialMint ?? "" });
     setCompletedSteps(new Set());

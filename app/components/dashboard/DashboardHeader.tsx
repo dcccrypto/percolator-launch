@@ -47,9 +47,13 @@ export function DashboardHeader() {
   const totalPnl = liveMetrics.totalUnrealizedPnl;
   const positionCount = liveMetrics.openPositions.length;
 
-  const displayValue = totalValue > 0n
-    ? formatTokenAmount(totalValue)
-    : "$0.00";
+  // First scan failed with nothing loaded: "$0.00" / 0 would be a false claim.
+  const loadError = portfolio.error;
+  const displayValue = loadError
+    ? "—"
+    : totalValue > 0n
+      ? formatTokenAmount(totalValue)
+      : "$0.00";
 
   const pnlPositive = totalPnl >= 0n;
 
@@ -91,7 +95,7 @@ export function DashboardHeader() {
             className="text-sm font-bold text-[var(--text)]"
             style={{ fontFamily: "var(--font-jetbrains-mono)" }}
           >
-            {positionCount}
+            {loadError ? "—" : positionCount}
           </p>
         </div>
       </div>

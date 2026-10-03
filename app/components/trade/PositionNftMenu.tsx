@@ -7,8 +7,10 @@
  * position already closed, useBurnPositionNft). Replaces PositionNftPanel (removed from the rail).
  * The eligibility logic is PositionNftPanel's, unchanged (#13: mint only on the wallet's own
  * unwrapped leg; send / unwrap act on the NFT actually held, self-minted or received).
+ * ClosedPositionNftNotice covers the one case the row menu can't: a wrapped position that closed, which has no row.
  */
 import { type FC, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { usePositionNft } from "@/hooks/usePositionNft";
 import { useMintPositionNft } from "@/hooks/useMintPositionNft";
 import { useBurnPositionNft } from "@/hooks/useBurnPositionNft";
@@ -35,6 +37,8 @@ export const NFT_MENU_COPY = {
   badge: "NFT",
   closeWrapped: "Unwrap to close this position",
   heldElsewhere: "Held as an NFT by another wallet",
+  closedTitle: "Your NFT-wrapped position has closed",
+  closedBody: "Unwrap the NFT to get back any collateral left in it.",
 } as const;
 
 export interface PositionNftMenuViewProps {
@@ -94,7 +98,9 @@ export const PositionNftMenuView: FC<PositionNftMenuViewProps> = ({ canWrap, isW
           )}
         </div>
       )}
-      {confirmWrap && (
+      {/* Portaled: inline, the trade page's animate-fade-in root caps its z-[60], so on phones the
+          bottom tab bar (z-50) covered Cancel / Wrap and took their taps. */}
+      {confirmWrap && typeof document !== "undefined" && createPortal(
         <div role="dialog" aria-modal="true" aria-labelledby="wrap-nft-title" data-testid="position-nft-wrap-sheet" className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60 md:items-center">
           <div className="w-full max-w-md border border-[var(--border)] bg-[var(--bg)] p-5 text-left">
             <h3 id="wrap-nft-title" className="text-[13px] font-semibold text-[var(--text)]">{NFT_MENU_COPY.wrapTitle}</h3>
@@ -114,7 +120,8 @@ export const PositionNftMenuView: FC<PositionNftMenuViewProps> = ({ canWrap, isW
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
       {error && (
         <p data-testid="position-nft-error" className="mt-1 max-w-[220px] text-right text-[10px] text-[var(--short)]">
@@ -190,5 +197,45 @@ export const PositionNftMenu: FC<{ slabAddress: string }> = ({ slabAddress }) =>
         />
       )}
     </>
+  );
+};
+
+/**
+ * H8: a position closed while wrapped (liquidated) has no row in the dock — useNftWrappedPosition skips size-0
+ * legs — so the row's "⋯" menu never mounts and nothing offered Unwrap. Shown under the empty state instead.
+ * Unwrap routes to EmergencyBurn itself on LegNotActive (useBurnPositionNft, NF-2). No Send: a closed leg can't
+ * be transferred. Hidden once an unwrap lands, so a click during the rescan can't hit "already burned?".
+ */
+export const ClosedPositionNftNotice: FC<{ slabAddress: string }> = ({ slabAddress }) => {
+  const { hasMintedNft, pendingSettlement, nftMint, nftPdaAddress } = usePositionNft(slabAddress);
+  const { burn, loading, error } = useBurnPositionNft(
+    slabAddress,
+    nftMint && nftPdaAddress ? { nftMint, nftPdaAddress } : undefined,
+  );
+  const [burnedPda, setBurnedPda] = useState<string | null>(null);
+  if (!hasMintedNft || !pendingSettlement || !nftPdaAddress || burnedPda === nftPdaAddress) return null;
+  return (
+    <div data-testid="closed-nft-notice" className="mx-auto -mt-4 mb-6 max-w-[260px] text-center">
+      <p className="text-[11px] font-medium text-[var(--text)]">{NFT_MENU_COPY.closedTitle}</p>
+      <p className="mt-1 text-[10px] leading-relaxed text-[var(--text-secondary)]">{NFT_MENU_COPY.closedBody}</p>
+      <button
+        type="button"
+        data-testid="closed-nft-unwrap"
+        disabled={loading}
+        onClick={() =>
+          void burn().then((sig) => {
+            if (sig) setBurnedPda(nftPdaAddress);
+          })
+        }
+        className="mt-2 min-h-[44px] border border-[var(--accent)]/50 bg-[var(--accent)]/[0.08] px-4 text-[11px] font-semibold text-[var(--accent)] disabled:opacity-40 md:min-h-0 md:py-1.5"
+      >
+        {loading ? "Unwrapping…" : NFT_MENU_COPY.unwrap}
+      </button>
+      {error && (
+        <p data-testid="closed-nft-error" className="mt-1 text-[10px] text-[var(--short)]">
+          {error}
+        </p>
+      )}
+    </div>
   );
 };

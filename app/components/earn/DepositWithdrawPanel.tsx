@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { formatPercent } from "@/lib/formatters";
 import { earnErrorMessage } from "@/lib/earnErrors";
 import { formatTokenAmount } from "@/lib/format";
@@ -17,7 +17,10 @@ import {
   sharesForUsdc,
   withdrawFlow,
 } from '@/lib/limits/earn-withdraw';
-import { useWalletCompat } from '@/hooks/useWalletCompat';
+import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
+import { checkSignatureLanded, timedOutSignature } from '@/lib/tx';
+import { watchPendingSignature } from '@/lib/pending-signature';
+import { explorerTxUrl } from '@/lib/config';
 import dynamic from 'next/dynamic';
 
 const ConnectButton = dynamic(
@@ -27,6 +30,14 @@ const ConnectButton = dynamic(
 );
 
 type Tab = 'deposit' | 'withdraw';
+
+/**
+ * GH#2804: a submitted tx whose confirmation timed out. 'watching': its signature is polled and the
+ * submit stays disabled (a second click would send a second deposit while the first may land).
+ * 'undetermined': still unresolved after the watch window; the form is usable again, the explorer
+ * link stays.
+ */
+type PendingTx = { sig: string; action: Tab; state: 'watching' | 'undetermined' };
 
 /**
  * S2 fix: `onWithdraw` reports which redemption step actually ran so the
@@ -140,6 +151,7 @@ export function DepositWithdrawPanel({
   onResizeRedemption,
 }: DepositWithdrawPanelProps) {
   const { connected } = useWalletCompat();
+  const { connection } = useConnectionCompat();
   const [tab, setTab] = useState<Tab>('deposit');
   const [amount, setAmount] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -156,6 +168,9 @@ export function DepositWithdrawPanel({
   const [armed, setArmed] = useState(false);
   // The payout was refused before signing because the vault can pay only part of it right now.
   const [resizeOffer, setResizeOffer] = useState<{ shares: bigint; atoms: bigint } | null>(null);
+  const [pendingTx, setPendingTx] = useState<PendingTx | null>(null);
+  const watchAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => watchAbort.current?.abort(), []);
 
   const divisor = 10n ** BigInt(decimals);
 
@@ -238,12 +253,51 @@ export function DepositWithdrawPanel({
     [loading, vaultAvailable, tab, userBalance, withdrawMaxRaw, decimals],
   );
 
+  // GH#2804: after a confirmation timeout, watch the signature until it lands, is dropped, or the
+  // watch window ends. Only then does the form take another submit.
+  const watchTimedOut = useCallback(
+    (sig: string, action: Tab) => {
+      watchAbort.current?.abort();
+      const ctl = new AbortController();
+      watchAbort.current = ctl;
+      setPendingTx({ sig, action, state: 'watching' });
+      const refresh = () => {
+        try {
+          void Promise.resolve(onRefresh?.()).catch(() => {});
+        } catch {
+          /* a refresh failure must not mask the outcome */
+        }
+      };
+      void watchPendingSignature(() => checkSignatureLanded(connection, sig), { signal: ctl.signal }).then((outcome) => {
+        if (outcome === 'aborted' || ctl.signal.aborted) return;
+        if (outcome === 'landed') {
+          setPendingTx(null);
+          setAmount('');
+          setTxSuccess(action === 'deposit' ? 'Deposit successful!' : 'Your withdrawal transaction confirmed.');
+          refresh();
+        } else if (outcome === 'dropped') {
+          setPendingTx(null);
+          setTxError(
+            action === 'deposit'
+              ? "This deposit didn't go through. Nothing was sent. You can try again."
+              : "This didn't go through. Nothing was sent. You can try again.",
+          );
+        } else {
+          setPendingTx({ sig, action, state: 'undetermined' });
+          refresh();
+        }
+      });
+    },
+    [connection, onRefresh],
+  );
+
   const handleSubmit = useCallback(async () => {
-    if (!vaultAvailable || rawAmount <= 0n) return;
+    if (!vaultAvailable || rawAmount <= 0n || pendingTx?.state === 'watching') return;
 
     setSubmitting(true);
     setTxError(null);
     setTxSuccess(null);
+    setPendingTx(null);
 
     try {
       if (tab === 'deposit') {
@@ -258,13 +312,19 @@ export function DepositWithdrawPanel({
       }
       setAmount('');
     } catch (e) {
+      // GH#2804: submitted but not yet confirmed — it may still land. Watch it; no second send.
+      const sig = timedOutSignature(e);
+      if (sig) {
+        watchTimedOut(sig, tab);
+        return;
+      }
       // Decode the program error into Earn-specific copy (a locked vault used to
       // surface as a raw "custom program error: 0x15").
       setTxError(earnErrorMessage(e, tab === 'deposit' ? 'deposit' : 'claim', { p3Bound }));
     } finally {
       setSubmitting(false);
     }
-  }, [vaultAvailable, rawAmount, tab, onDeposit, onWithdraw, withdrawShares, previewCollateral, decimals, collateralSymbol, p3Bound]);
+  }, [vaultAvailable, rawAmount, pendingTx, tab, onDeposit, onWithdraw, withdrawShares, previewCollateral, decimals, collateralSymbol, p3Bound, watchTimedOut]);
 
   // The payout (77) of a pending withdrawal: automatic when armed, "Finish withdrawal" otherwise.
   // Deliberately bypasses the form's userLpBalance gate — a full request escrows every share.
@@ -524,6 +584,24 @@ export function DepositWithdrawPanel({
             <p className="text-[11px] text-[var(--short)]">{txError}</p>
           </div>
         )}
+        {pendingTx && (
+          <div role="status" aria-live="polite" data-testid="earn-tx-pending" data-state={pendingTx.state} className="mb-4 p-3 bg-[var(--warning)]/5 border border-[var(--warning)]/20 rounded-sm">
+            <p className="text-[11px] text-[var(--text-secondary)]">
+              {pendingTx.state === 'watching'
+                ? 'Still confirming. Checking the network…'
+                : "Couldn't confirm it yet. Check the explorer before trying again."}{' '}
+              <a
+                href={explorerTxUrl(pendingTx.sig)}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="earn-tx-explorer"
+                className="text-[var(--accent)] underline"
+              >
+                View on explorer
+              </a>
+            </p>
+          </div>
+        )}
         {drawSummary && (
           <div role="status" data-testid="earn-draw-notice" className="mb-4 p-3 bg-[var(--warning)]/5 border border-[var(--warning)]/20 rounded-sm">
             <p className="text-[11px] text-[var(--text-secondary)]">
@@ -572,14 +650,16 @@ export function DepositWithdrawPanel({
           <GlowButton
             data-testid={tab === 'deposit' ? 'earn-deposit-submit' : 'earn-withdraw-request'}
             onClick={handleSubmit}
-            disabled={!isValid || submitting || loading}
+            disabled={!isValid || submitting || loading || pendingTx?.state === 'watching'}
             variant="primary"
             size="lg"
             className="flex-1"
           >
             {submitting
               ? 'Confirm in wallet…'
-              : tab === 'deposit'
+              : pendingTx?.state === 'watching'
+                ? 'Confirming…'
+                : tab === 'deposit'
                 ? 'Deposit'
                 : WC.requestButton(rawAmount > 0n ? `${formatUsdc(previewCollateral, decimals)} ${collateralSymbol}` : collateralSymbol)}
           </GlowButton>

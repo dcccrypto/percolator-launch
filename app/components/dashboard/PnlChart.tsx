@@ -43,6 +43,11 @@ export function PnlChart() {
       <div className="flex h-[200px] items-center justify-center px-5">
         {loading ? (
           <p className="text-[11px] text-[var(--text-secondary)]">Loading...</p>
+        ) : portfolio.error ? (
+          <div className="text-center">
+            <p className="text-[11px] text-[var(--text-secondary)]">Couldn't load your positions</p>
+            <p className="mt-1 text-[9px] text-[var(--text-secondary)]">Please try refreshing</p>
+          </div>
         ) : !hasData ? (
           <div className="text-center">
             <p className="text-[11px] text-[var(--text-secondary)]">No positions yet</p>

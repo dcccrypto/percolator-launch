@@ -24,7 +24,7 @@ import { useCallback, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import type { TransactionInstruction } from "@solana/web3.js";
-import { broadcastSignedTx, buildBatchTx, getFreshBlockhash, getPriorityFee, signAllCompat, simulateForGate } from "@/lib/tx";
+import { broadcastSignedTx, buildBatchTx, getFreshBlockhash, getPriorityFee, isConfirmationTimeoutError, signAllCompat, simulateForGate } from "@/lib/tx";
 import { sizeComputeUnitLimit } from "@/lib/compute-budget";
 import { runOneApproval } from "@/lib/one-approval";
 import { getConfig } from "@/lib/config";
@@ -34,12 +34,39 @@ import { mapCreatorClaimError } from "@/lib/creatorClaimError";
 
 export interface ClaimOutcome {
   slab: string;
-  /** Transaction signature on success. */
+  /** Transaction signature on success (CONFIRMED). */
   signature?: string;
   /** User-facing reason on failure — already passed through mapCreatorClaimError. */
   error?: string;
-  /** Atoms actually submitted, for the success message. */
+  /** Atoms actually submitted, for the success message (and for a pending claim). */
   amount?: bigint;
+  /**
+   * #2742: the claim WAS broadcast but did not confirm before the poll deadline, so it may still
+   * land. Neither a success (never counted in the "Claimed {total}" line) nor a failure (the
+   * signature is kept so the creator can check it on the explorer). A separate field, not
+   * `signature`, so every existing "did it land?" check (`o.signature`) stays confirmed-only.
+   */
+  pendingSignature?: string;
+}
+
+/** #2743: the pre-sign simulation could not run, so the claim was NOT sent. */
+export const CLAIM_UNCHECKED_MESSAGE = "Couldn't reach Solana to check this claim, so nothing was sent. Try again in a moment.";
+
+/**
+ * The signature of a claim that was broadcast but whose confirmation timed out, else null.
+ * broadcastSignedTx attaches `.signature` to ANY post-send error, including a definite on-chain
+ * failure ("Transaction failed: …"), so the signature alone is not enough: only the poll
+ * deadline (`isConfirmationTimeoutError`) is indeterminate. Total: a hostile error object
+ * (throwing getter) reads as "not pending".
+ */
+function pendingClaimSignature(err: unknown): string | null {
+  try {
+    if (!isConfirmationTimeoutError(err)) return null;
+    const sig = (err as { signature?: unknown } | null)?.signature;
+    return typeof sig === "string" && sig.length > 0 ? sig : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface ClaimProgress {
@@ -89,14 +116,24 @@ function claimErrorText(err: unknown): string {
  */
 export function claimAllResultCopy(outcomes: readonly ClaimOutcome[], fmt: (atoms: bigint) => string): string | null {
   const ok = outcomes.filter((o) => o.signature);
-  const bad = outcomes.length - ok.length;
+  // #2742: submitted-but-unconfirmed claims are neither in the total (confirmed money only) nor
+  // counted as "couldn't be claimed" (they may well have landed).
+  const pending = outcomes.filter((o) => !o.signature && o.pendingSignature).length;
+  const bad = outcomes.length - ok.length - pending;
   if (outcomes.length === 0) return null;
   const total = ok.reduce((a, o) => a + (o.amount ?? 0n), 0n);
   const n = ok.length;
   const head = `Claimed ${fmt(total)} from ${n} market${n === 1 ? "" : "s"}.`;
-  if (bad === 0) return head;
-  if (n === 0) return `${bad} market${bad === 1 ? "" : "s"} couldn't be claimed right now; we'll show ${bad === 1 ? "it" : "them"} here.`;
-  return `${head} ${bad} couldn't be claimed right now; we'll show them here.`;
+  if (pending === 0) {
+    if (bad === 0) return head;
+    if (n === 0) return `${bad} market${bad === 1 ? "" : "s"} couldn't be claimed right now; we'll show ${bad === 1 ? "it" : "them"} here.`;
+    return `${head} ${bad} couldn't be claimed right now; we'll show them here.`;
+  }
+  const parts: string[] = [];
+  if (n > 0) parts.push(head);
+  parts.push(`${pending} claim${pending === 1 ? "" : "s"} sent but not confirmed yet; check ${pending === 1 ? "it" : "them"} on the explorer.`);
+  if (bad > 0) parts.push(`${bad} couldn't be claimed right now.`);
+  return parts.join(" ");
 }
 
 export function useClaimCreatorFees() {
@@ -150,7 +187,9 @@ export function useClaimCreatorFees() {
           const outcomes = await runOneApproval(units, {
             simulate: async (ixs) => {
               const g = await simulateForGate(connection, payer, ixs);
-              return { err: g.err, consumed: g.consumed };
+              // #2743: `rpcFailed` (no verdict) must reach the gate — with `err: null` alone it
+              // read as "would land" and the claim was signed with no pre-check.
+              return { err: g.err, consumed: g.consumed, unchecked: g.rpcFailed };
             },
             build: (ixs, consumed, i) => {
               const tx = buildBatchTx({ instructions: ixs, computeUnits: sizeComputeUnitLimit(consumed, { cap: CLAIM_CU_CAP }), priorityFeeMicroLamports: fee + i, blockhash, feePayer: payer });
@@ -186,9 +225,15 @@ export function useClaimCreatorFees() {
             if (o.ok) {
               results.set(u.key, { slab: u.key, signature: o.signature, amount: u.amount });
             } else {
+              // #2742: a confirmation timeout is indeterminate — keep the signature, never "failed".
+              const pendingSig = o.stage === "failed" ? pendingClaimSignature(o.error) : null;
+              if (pendingSig) {
+                results.set(u.key, { slab: u.key, pendingSignature: pendingSig, amount: u.amount });
+                continue;
+              }
               let text: string;
               try {
-                text = claimErrorText(o.error);
+                text = o.stage === "unchecked" ? CLAIM_UNCHECKED_MESSAGE : claimErrorText(o.error);
               } catch {
                 text = "Claim failed.";
               }

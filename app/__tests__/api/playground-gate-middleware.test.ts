@@ -27,7 +27,7 @@ let middleware: Mw;
 function req(p: string, init: { method?: string; cookie?: string } = {}) {
   const headers: Record<string, string> = { "x-forwarded-for": `10.0.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}` };
   if (init.cookie) headers.cookie = `pg_access=${init.cookie}`;
-  return new NextRequest(`https://percolator-playground.vercel.app${p}`, { method: init.method ?? "GET", headers });
+  return new NextRequest(`https://play.percolator.trade${p}`, { method: init.method ?? "GET", headers });
 }
 
 const isPassThrough = (r: Response) => r.headers.get("x-middleware-next") === "1";

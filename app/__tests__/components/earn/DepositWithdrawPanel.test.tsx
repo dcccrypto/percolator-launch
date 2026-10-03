@@ -7,6 +7,7 @@ vi.mock("@/hooks/useWalletCompat", () => ({
   useWalletCompat: vi.fn(() => ({
     connected: true,
   })),
+  useConnectionCompat: () => ({ connection: {} }),
 }));
 
 vi.mock("@/components/ui/GlowButton", () => ({

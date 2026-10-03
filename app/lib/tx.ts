@@ -1183,6 +1183,20 @@ export function isConfirmationTimeoutError(err: unknown): boolean {
 }
 
 /**
+ * GH#2804: the signature of a submitted tx whose confirmation timed out, or null. `broadcastSignedTx`
+ * attaches it as `err.signature`; `sendTx` does not, but `pollConfirmation`'s message ends with
+ * "Check explorer: <sig>". Null for any other error (nothing was submitted, or no signature known).
+ */
+export function timedOutSignature(err: unknown): string | null {
+  if (!isConfirmationTimeoutError(err)) return null;
+  const attached = (err as { signature?: unknown } | null)?.signature;
+  if (typeof attached === "string" && /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(attached)) return attached;
+  const msg = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+  const m = /check explorer:\s*([1-9A-HJ-NP-Za-km-z]{64,88})\b/i.exec(msg);
+  return m ? m[1] : null;
+}
+
+/**
  * Definitive on-chain status of a submitted signature, for the "did it land
  * before I rebuild?" check (mirrors `sendTx`'s R2-S7 landing check). Uses
  * `searchTransactionHistory: true` so a confirmed-but-status-aged tx isn't

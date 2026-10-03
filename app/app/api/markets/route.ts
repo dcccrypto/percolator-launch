@@ -21,7 +21,8 @@ import * as Sentry from "@sentry/nextjs";
 import nacl from "tweetnacl";
 import * as fs from "fs";
 import * as path from "path";
-import { isSaneMarketValue, isActiveMarket, isZombieMarket } from "@/lib/activeMarketFilter";
+import { isSaneMarketValue, isActiveMarket } from "@/lib/activeMarketFilter";
+import { isProvenIncompleteMarket, isZombieRegistryRow } from "@/lib/market-visibility";
 import { resolveTokenLogo } from "@/lib/token-logo";
 import { getKnownMarketLpCapitals, scanEnabledMarketLpCapitals } from "@/lib/lp-portfolio";
 import { loadMergedMarketRows } from "@/lib/market-registry";
@@ -490,7 +491,7 @@ async function onChainOrStaticResponse(request: NextRequest, reason: string): Pr
         // is_complete there); curated seeds are never hidden (proven complete out
         // of band, and is_complete only flips false on an EXPLICIT proof). Only an
         // explicit false is dropped — undefined (legacy v12 / unknown) is kept.
-        .filter(m => m.is_complete !== false || PLAYGROUND_SLAB_META[m.slab_address as string])
+        .filter(m => !isProvenIncompleteMarket(m as Record<string, unknown>))
         .filter(m => !programIdParam || m.program_id === programIdParam)
         .filter(m => {
           if (!searchTrimmed) return true;
@@ -880,18 +881,12 @@ export async function GET(request: NextRequest) {
       // the row. numericOrNull() maps absent to null, which isZombieMarket reads
       // as "zero → dead". Forward undefined for keys the query never selected so
       // it can tell "not mirrored" from "present and zero" (see the note there).
-      const asSupplied = (raw: unknown, coerced: number | null) =>
-        raw === undefined ? undefined : coerced;
       const rawRow = m as Record<string, unknown>;
 
-      const is_zombie = isZombieMarket({
-        vault_balance: asSupplied(rawRow.vault_balance, n_vault_balance),
-        c_tot: asSupplied(rawRow.c_tot, n_c_tot),
-        last_price: sanitizedPrice,
-        volume_24h: n_volume_24h,
-        total_open_interest: asSupplied(rawRow.total_open_interest, n_total_open_interest),
-        total_accounts: asSupplied(rawRow.total_accounts, n_total_accounts),
-      });
+      // GH#2705: the same predicate /api/stats counts with (lib/market-visibility.ts):
+      // identical inputs — last_price capped to (0, $1M] like sanitizedPrice,
+      // absent keys forwarded as undefined.
+      const is_zombie = isZombieRegistryRow(rawRow);
 
       return {
         ...m,
@@ -951,10 +946,8 @@ export async function GET(request: NextRequest) {
     // never finished.
     const completeOnly = sanitized.filter((m) => {
       const row = m as Record<string, unknown>;
-      if (row.is_complete === false && !PLAYGROUND_SLAB_META[row.slab_address as string]) {
-        return false;
-      }
-      return true;
+      // GH#2705: shared with /api/stats (lib/market-visibility.ts).
+      return !isProvenIncompleteMarket(row);
     });
 
     // GH#1420: Filter zombie markets (vault_balance=0) unless ?include_zombie=true

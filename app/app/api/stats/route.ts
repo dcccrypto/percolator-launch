@@ -8,6 +8,7 @@ import { PublicKey } from "@solana/web3.js";
 import { parseEngine, isV17Account, discoverMarkets, parseMarketGroupV17OI } from "@percolatorct/sdk";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { isActiveMarket, isSaneMarketValue, isZombieMarket } from "@/lib/activeMarketFilter";
+import { isListedMarket } from "@/lib/market-visibility";
 import { loadMergedMarketRows, type MarketRegistryRow } from "@/lib/market-registry";
 import { isPhantomOpenInterest } from "@/lib/phantom-oi";
 import { qToUsd, Q_SCALE } from "@/lib/q-usd";
@@ -114,31 +115,20 @@ async function computeStatsFromMarketsApi(_request: NextRequest): Promise<(Retur
     const rows = await loadMergedMarketRows();
     if (rows === null || rows.length === 0) return null;
 
-    // Mirror /api/markets' visibility rule so the counts stay definitionally
-    // equal: it excludes zombies from its default response, so they must not be
-    // counted here either. Blocked slabs are already dropped by the loader.
+    // GH#2705: one shared rule (lib/market-visibility.ts) instead of a hand-kept
+    // mirror of /api/markets. The old filter here applied only the zombie half,
+    // so markets whose creation provably never finished (is_complete === false,
+    // which /api/markets drops) were counted, and their OI / volume summed —
+    // "Active Markets 25" beside a /markets page of 20. isListedMarket is also
+    // what the /markets page counts: zombie, incomplete, blocked and
+    // listing-hidden slabs are all excluded.
     const numericOrNull = (v: unknown): number | null => {
       if (v == null) return null;
       const n = Number(v);
       return Number.isFinite(n) ? n : null;
     };
-    const asSupplied = (row: Record<string, unknown>, key: string): number | null | undefined =>
-      row[key] === undefined ? undefined : numericOrNull(row[key]);
 
-    const visible = rows.filter((m: MarketRegistryRow) => {
-      const row = m as Record<string, unknown>;
-      const rawPrice = numericOrNull(row.last_price);
-      const sanitizedPrice =
-        rawPrice != null && rawPrice > 0 && rawPrice <= MAX_SANE_PRICE_FOR_ACTIVE ? rawPrice : null;
-      return !isZombieMarket({
-        vault_balance: asSupplied(row, "vault_balance"),
-        c_tot: asSupplied(row, "c_tot"),
-        last_price: sanitizedPrice,
-        volume_24h: numericOrNull(row.volume_24h),
-        total_open_interest: asSupplied(row, "total_open_interest"),
-        total_accounts: asSupplied(row, "total_accounts"),
-      });
-    });
+    const visible = rows.filter((m: MarketRegistryRow) => isListedMarket(m as Record<string, unknown>));
 
     let totalOpenInterest = 0;
     for (const m of visible) {

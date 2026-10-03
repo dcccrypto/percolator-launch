@@ -67,6 +67,40 @@ export function computePositionInitialMargin(
 }
 
 /**
+ * An Open-tab order on the other side of the account's open position on this market.
+ * The part that cuts the position reserves nothing and releases its share of
+ * `existingMargin` (computePositionInitialMargin of that position); only the part past
+ * it opens new exposure, at the order's own leverage. The program checks initial margin
+ * only when the trade leaves the position at least as large as before
+ * (trade_account_requires_initial_margin: |next| >= |current|), so a reduce, a close and
+ * a flip that ends smaller never need a deposit.
+ *
+ * Returns null for a flat account, a same-side order or an empty order: those keep the
+ * ticket's plain "order margin vs free margin" check.
+ *   shortBy        — margin the account lacks for this order (0 when it fits)
+ *   afterAvailable — free margin after the order, the "Available to trade" after-value
+ */
+export function orderAgainstPosition(
+  orderMargin: bigint,
+  orderSize: bigint,
+  direction: "long" | "short",
+  existingPositionSize: bigint,
+  existingMargin: bigint,
+  capital: bigint,
+): { shortBy: bigint; afterAvailable: bigint } | null {
+  if (existingPositionSize === 0n || orderSize <= 0n || (existingPositionSize > 0n) === (direction === "long")) return null;
+  const existingAbs = existingPositionSize < 0n ? -existingPositionSize : existingPositionSize;
+  const reduced = orderSize < existingAbs ? orderSize : existingAbs;
+  const opening = (orderMargin * (orderSize - reduced)) / orderSize;
+  const released = (existingMargin * reduced) / existingAbs;
+  // Free margin after the order, unclamped: an account under its locked margin still
+  // gains the released share on a reduce, and a large flip is checked against capital.
+  const after = capital - existingMargin + released - opening;
+  const checked = orderSize >= 2n * existingAbs;
+  return { shortBy: checked && after < 0n ? -after : 0n, afterAvailable: after > 0n ? after : 0n };
+}
+
+/**
  * Estimate an effective entry price when no on-chain or client-cached entry
  * price is available for a position.
  *
@@ -320,4 +354,21 @@ export function clampClosePercent(value: number): number {
   if (rounded < 1) return 1;
   if (rounded > 100) return 100;
   return rounded;
+}
+
+/**
+ * Confirm-modal heading for an Open-tab order. An order on the other side of the
+ * account's open position (`existingSize`, signed, same units as `orderSize`) cuts that
+ * position first: it reduces it, closes it exactly, or closes it and opens the rest on
+ * the order's side. Flat or same side: an open. Same rule as the ticket's liq preview
+ * (sameDirection, then orderSize < |existingSize|).
+ */
+export function orderHeading(direction: "long" | "short", orderSize: bigint, existingSize: bigint): string {
+  const side = direction === "long" ? "Long" : "Short";
+  const held = direction === "long" ? "Short" : "Long";
+  const existingAbs = existingSize < 0n ? -existingSize : existingSize;
+  if (existingSize === 0n || (existingSize > 0n) === (direction === "long")) return `Opening ${side} Position`;
+  if (orderSize < existingAbs) return `Reducing ${held} Position`;
+  if (orderSize === existingAbs) return `Closing ${held} Position`;
+  return `Closing ${held}, Opening ${side}`;
 }

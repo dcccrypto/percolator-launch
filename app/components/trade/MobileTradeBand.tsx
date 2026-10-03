@@ -24,8 +24,8 @@ interface MobileTradeBandProps {
  * `z-[1]` page wrapper instead (40 > 1).
  *
  * That same move means it would now also paint over any dialog still rendered
- * inline in the page wrapper (Add Margin, the NFT wrap sheet, the oracle
- * panel) — so it steps aside whenever another modal dialog is showing.
+ * inline in the page wrapper (Add Margin, the oracle panel) — so it steps
+ * aside whenever another modal dialog is showing.
  *
  * It docks on top of MobileBottomNav: the calc is that nav's exact height —
  * `min-h-[56px]` + `border-t` (1px) + `env(safe-area-inset-bottom)` — so the
