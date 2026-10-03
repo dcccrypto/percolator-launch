@@ -26,10 +26,12 @@ interface SendPositionNftModalProps {
   onCancel: () => void;
 }
 
-function isValidPubkey(s: string): PublicKey | null {
-  if (!s || s.length < 32 || s.length > 44) return null;
+function isValidPubkey(input: string): PublicKey | null {
+  // Trim before the length check: a pasted address often carries a space or newline.
+  const s = input.trim();
+  if (s.length < 32 || s.length > 44) return null;
   try {
-    return new PublicKey(s.trim());
+    return new PublicKey(s);
   } catch {
     return null;
   }
