@@ -102,14 +102,29 @@ interface SigEntry {
   ok: boolean;
 }
 
-/** Every signature for `address` (failed ones too), newest first, back to `until` (exclusive). */
-async function signatures(connection: Connection, address: PublicKey, until?: string): Promise<SigEntry[]> {
+interface SigOptions {
+  /** Stop at this signature (exclusive). */
+  until?: string;
+  /** Read from a node that has reached this slot; the RPC errors instead of answering from behind it. */
+  minContextSlot?: number;
+  /** Stop paging once a page reaches entries older than this slot (they are not needed). */
+  stopBelowSlot?: number;
+}
+
+/** Signatures for `address` (failed ones too), newest first, back to `until` (exclusive). */
+async function signatures(connection: Connection, address: PublicKey, opts: SigOptions = {}): Promise<SigEntry[]> {
   const out: SigEntry[] = [];
   let before: string | undefined;
   for (;;) {
-    const page = await connection.getSignaturesForAddress(address, { before, until, limit: 1000 });
+    const page = await connection.getSignaturesForAddress(address, {
+      before,
+      until: opts.until,
+      limit: 1000,
+      ...(opts.minContextSlot ? { minContextSlot: opts.minContextSlot } : {}),
+    });
     for (const s of page) out.push({ signature: s.signature, slot: s.slot, ok: !s.err });
     if (page.length < 1000) break;
+    if (opts.stopBelowSlot !== undefined && page[page.length - 1].slot < opts.stopBelowSlot) break;
     before = page[page.length - 1].signature;
   }
   return out;
@@ -126,9 +141,10 @@ async function signatures(connection: Connection, address: PublicKey, until?: st
  *
  * The two lists are separate calls and can come from RPC nodes at different heights. A fresh
  * claim already in the vault list but not yet in the claimant's would be skipped, and the cache
- * would move past it for good. So only vault entries at or below the slot the claimant's list
- * has reached are counted, and the cache advances only that far; newer ones wait for the next
- * scan.
+ * would move past it for good. So the claimant's list is read with `minContextSlot` = the
+ * newest vault entry's slot: a node that hasn't reached it errors (the read fails and is
+ * retried) instead of answering without the claim. Every vault entry is then decided, so the
+ * cache advances to the newest one and the next scan reads only what landed after it.
  */
 export async function fetchCreatorFeesClaimed(
   connection: Connection,
@@ -143,24 +159,26 @@ export async function fetchCreatorFeesClaimed(
   const key = cacheKey(market, claimant);
   const cached = readCache(key);
 
-  const vault = await signatures(connection, vaultToken, cached?.newest ?? undefined);
+  const vault = await signatures(connection, vaultToken, {
+    until: cached?.newest ?? undefined,
+    minContextSlot: cached?.newest ? cached.newestSlot : undefined,
+  });
   // A node behind the cached scan doesn't know `until`, so it returns the whole history, which
   // would be added on top of the cached total. Anything older than the cached slot means that.
   if (cached?.newest && vault.some((e) => e.slot < cached.newestSlot)) {
     throw new Error("Transaction history is still loading");
   }
-  let window: SigEntry[] = [];
   let mine = new Set<string>();
   if (vault.length > 0) {
-    // ponytail: reads the claimant's full token-account history on every scan with new vault
-    // activity, and the cache only advances to the claimant's latest activity, so a quiet creator
-    // on a busy market re-reads the vault since then each time. Bound both by a getSlot height if
-    // that gets slow.
-    const claimantSigs = await signatures(connection, claimantToken);
-    const reached = claimantSigs[0]?.slot ?? -1;
-    window = vault.filter((e) => e.slot <= reached);
+    // Only the claimant's entries from the oldest new vault entry onward can match, so paging
+    // stops there; and the node must have reached the newest one (see above).
+    const claimantSigs = await signatures(connection, claimantToken, {
+      minContextSlot: vault[0].slot,
+      stopBelowSlot: vault[vault.length - 1].slot,
+    });
     mine = new Set(claimantSigs.filter((e) => e.ok).map((e) => e.signature));
   }
+  const window = vault;
 
   let claimedAtoms = cached?.claimedAtoms ?? 0n;
   let claims = cached?.claims ?? 0;

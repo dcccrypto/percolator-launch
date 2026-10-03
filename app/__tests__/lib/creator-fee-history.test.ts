@@ -82,16 +82,31 @@ describe("fetchCreatorFeesClaimed", () => {
   type Sig = { signature: string; slot: number; err: unknown };
   let vaultSigs: Sig[] = [];
   let mySigs: Sig[] = [];
+  // Each list is served by a "node" at some height: like a real RPC it errors when asked for a
+  // minContextSlot it hasn't reached, and pages 1000 at a time from `before`.
+  let heights = { vault: Infinity, mine: Infinity };
   const conn = {
-    getSignaturesForAddress: vi.fn(async (addr: PublicKey, opts: { until?: string }) => {
-      const list = addr.equals(VAULT_AUTH) ? vaultSigs : mySigs;
-      const out: Sig[] = [];
-      for (const s of list) {
-        if (s.signature === opts.until) break;
-        out.push(s);
-      }
-      return out;
-    }),
+    getSignaturesForAddress: vi.fn(
+      async (addr: PublicKey, opts: { until?: string; before?: string; limit?: number; minContextSlot?: number }) => {
+        const isVault = addr.equals(VAULT_AUTH);
+        const list = isVault ? vaultSigs : mySigs;
+        const height = isVault ? heights.vault : heights.mine;
+        if (opts.minContextSlot !== undefined && opts.minContextSlot > height) {
+          throw new Error("Minimum context slot has not been reached");
+        }
+        const out: Sig[] = [];
+        let started = opts.before === undefined;
+        for (const s of list) {
+          if (!started) {
+            started = s.signature === opts.before;
+            continue;
+          }
+          if (s.signature === opts.until || out.length === (opts.limit ?? 1000)) break;
+          out.push(s);
+        }
+        return out;
+      },
+    ),
     getTransaction: vi.fn(async (sig: string) => TXS[sig] ?? null),
   };
   const fetch = (claimant = CREATOR) => fetchCreatorFeesClaimed(conn as never, PROGRAM, MARKET, MINT, claimant);
@@ -101,6 +116,7 @@ describe("fetchCreatorFeesClaimed", () => {
   beforeEach(() => {
     localStorage.clear();
     TXS = {};
+    heights = { vault: Infinity, mine: Infinity };
     ataCalls.length = 0;
     conn.getSignaturesForAddress.mockClear();
     conn.getTransaction.mockClear();
@@ -137,13 +153,50 @@ describe("fetchCreatorFeesClaimed", () => {
     expect(fetched()).toEqual(["d"]);
   });
 
-  it("a claim the claimant's list hasn't reached yet (lagging RPC node) is counted on the next scan", async () => {
+  it("a claimant list from a node behind the vault's newest entry fails, then counts the claim", async () => {
     TXS = { a: tx([claimIx(MARKET, 100n)]), n: tx([claimIx(MARKET, 40n)]) };
     vaultSigs = [ok("n", 12), ok("a", 4)];
-    mySigs = [ok("a", 4)]; // a node one claim behind
-    expect(await fetch()).toEqual({ claimedAtoms: 100n, claims: 1 });
+    mySigs = [ok("a", 4)]; // a node one claim behind: it hasn't reached slot 12
+    heights.mine = 11;
+    await expect(fetch()).rejects.toThrow(/context slot/);
+    expect(localStorage.length).toBe(0); // nothing half-read is saved
     mySigs = [ok("n", 12), ok("a", 4)]; // caught up
+    heights.mine = 12;
     expect(await fetch()).toEqual({ claimedAtoms: 140n, claims: 2 });
+  });
+
+  const sigCalls = (addr: PublicKey) =>
+    conn.getSignaturesForAddress.mock.calls.filter((c) => (c[0] as PublicKey).equals(addr)).map((c) => c[1]);
+
+  it("moves past other traders' vault activity: the next scan reads only what landed after it", async () => {
+    TXS = { a: tx([claimIx(MARKET, 100n)]) };
+    // The creator's last activity is "a" (slot 4); t1/t2 are other traders' deposits after it.
+    vaultSigs = [ok("t2", 9), ok("t1", 8), ok("a", 4)];
+    mySigs = [ok("a", 4)];
+    expect(await fetch()).toEqual({ claimedAtoms: 100n, claims: 1 });
+    conn.getSignaturesForAddress.mockClear();
+    // A trade changes the claimable balance and the hook re-scans: nothing new on the vault.
+    expect(await fetch()).toEqual({ claimedAtoms: 100n, claims: 1 });
+    expect(sigCalls(VAULT_AUTH)).toEqual([expect.objectContaining({ until: "t2", minContextSlot: 9 })]);
+    expect(sigCalls(CREATOR)).toEqual([]); // the claimant's history isn't re-read
+    expect(conn.getTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads the claimant's list from a node at the vault's newest slot, and stops paging below the oldest", async () => {
+    TXS = {};
+    vaultSigs = [ok("a", 100), ok("z", 1)];
+    mySigs = [];
+    expect(await fetch()).toEqual({ claimedAtoms: 0n, claims: 0 }); // seeds the cursor at "a"
+    // 4001 claimant entries; only those from the oldest new vault entry (slot 4000) can match.
+    mySigs = Array.from({ length: 4000 }, (_, i) => ok(`m${i}`, 6000 - i));
+    mySigs.splice(1000, 0, ok("c", 5000));
+    TXS.c = tx([claimIx(MARKET, 7n)]);
+    vaultSigs = [ok("new", 5999), ok("c", 5000), ok("old", 4000), ...vaultSigs];
+    conn.getSignaturesForAddress.mockClear();
+    expect(await fetch()).toEqual({ claimedAtoms: 7n, claims: 1 });
+    const mine = sigCalls(CREATOR);
+    expect(mine.every((o) => o?.minContextSlot === 5999)).toBe(true);
+    expect(mine).toHaveLength(3); // page 3 reaches slot 3002 < 4000; a 4th isn't read
   });
 
   it("a node that hasn't seen the cached scan fails instead of counting history twice", async () => {
