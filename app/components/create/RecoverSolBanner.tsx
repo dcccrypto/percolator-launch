@@ -24,6 +24,12 @@ interface RecoverSolBannerProps {
    * clear its own persisted state (localStorage) and reset to the initial step.
    */
   onReclaimSuccess?: () => void;
+  /**
+   * The slab the parent wizard is currently resuming, or null when it isn't in resume mode.
+   * Drives the card's "RESUMING…" state, so leaving resume mode (the wizard's CANCEL, a
+   * reclaim, a reset) re-enables RESUME on the card instead of leaving it stuck.
+   */
+  resumingSlab?: string | null;
 }
 
 /**
@@ -44,7 +50,7 @@ interface RecoverSolBannerProps {
  * singular `stuckSlab` when a caller/test mocks the hook with the old shape) so every
  * in-flight market for the connected wallet gets its own card.
  */
-export const RecoverSolBanner: FC<RecoverSolBannerProps> = ({ onResume, onReset, onReclaimSuccess }) => {
+export const RecoverSolBanner: FC<RecoverSolBannerProps> = ({ onResume, onReset, onReclaimSuccess, resumingSlab }) => {
   const hookResult = useStuckSlabs();
   const { stuckSlab, loading, clearStuck } = hookResult;
   // Backward-compat fallback: if the hook (or a test mock) doesn't supply the plural
@@ -66,6 +72,7 @@ export const RecoverSolBanner: FC<RecoverSolBannerProps> = ({ onResume, onReset,
           onResume={onResume}
           onReset={onReset}
           onReclaimSuccess={onReclaimSuccess}
+          resuming={resumingSlab === slab.publicKey.toBase58()}
           clearStuck={() => clearStuck(slab.publicKey.toBase58())}
         />
       ))}
@@ -80,8 +87,9 @@ const StuckSlabCard: FC<{
   onResume?: (slabPublicKey: string, fromStep: number) => void;
   onReset?: () => void;
   onReclaimSuccess?: () => void;
+  resuming: boolean;
   clearStuck: () => void;
-}> = ({ stuckSlab, onResume, onReset, onReclaimSuccess, clearStuck }) => {
+}> = ({ stuckSlab, onResume, onReset, onReclaimSuccess, resuming, clearStuck }) => {
   const { closeSlab, loading: closeLoading, error: closeError } = useCloseMarket();
   const [dismissed, setDismissed] = useState(false);
   const [reclaimResult, setReclaimResult] = useState<{ sig: string; sol: number } | null>(null);
@@ -90,9 +98,9 @@ const StuckSlabCard: FC<{
   // React state (resumeFromStep + the restored slab keypair) — it never gave
   // THIS card any visible acknowledgment, unlike RECLAIM (which shows a tx
   // link) and DISCARD (which dismisses the card). To a tester the click
-  // looked like it did nothing: same card, same buttons, no change. Track the
-  // click locally so this card confirms it immediately, same as its siblings.
-  const [resumeClicked, setResumeClicked] = useState(false);
+  // looked like it did nothing: same card, same buttons, no change. The card now
+  // confirms it, from the parent's resume state (`resuming`): a local flag set on
+  // click never cleared, so the wizard's CANCEL left the card stuck on "RESUMING…".
 
   // Already dismissed this session
   if (dismissed) return null;
@@ -219,14 +227,13 @@ const StuckSlabCard: FC<{
           {onResume && (
             <button
               type="button"
-              disabled={resumeClicked}
+              disabled={resuming}
               onClick={() => {
                 onResume(stuckSlab.publicKey.toBase58(), resumeFromStep);
-                setResumeClicked(true);
               }}
               className="border border-[var(--accent)]/50 bg-[var(--accent)]/[0.08] px-4 py-2 text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--accent)] hover:bg-[var(--accent)]/[0.15] transition-colors disabled:opacity-50"
             >
-              {resumeClicked ? "RESUMING…" : "RESUME CREATION →"}
+              {resuming ? "RESUMING…" : "RESUME CREATION →"}
             </button>
           )}
           {/* #2622: only offer RECLAIM while the market is still empty. Once it
@@ -269,9 +276,9 @@ const StuckSlabCard: FC<{
             </p>
           )}
           {/* Visible confirmation that the click registered — see the
-              resumeClicked fix note above. Without this, the card looked
+              resuming fix note above. Without this, the card looked
               unchanged after clicking RESUME CREATION (a "dead button"). */}
-          {resumeClicked && (
+          {resuming && (
             <p className="w-full text-[10px] text-[var(--accent)]">
               ✓ Resume mode set for step {resumeFromStep} of 6 — scroll up, re-enter this
               market&apos;s parameters, and click LAUNCH MARKET to continue.
