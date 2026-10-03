@@ -61,9 +61,24 @@ export const ChartPnlBadge: FC<ChartPnlBadgeProps> = ({ slabAddress }) => {
   // screen showed the position and its PnL. Resolve it the way PositionsDock and
   // PositionPanel already do — cache, else back-solve from the on-chain pnl —
   // so the chart agrees with the rest of the app instead of going blank.
+  //
+  // A deleveraged leg moves at `basis * a_side / a_basis`, not at raw basis —
+  // feeding nominal size here overstated the badge by the ADL factor (2x on
+  // live devnet markets). See lib/v17-adl.ts.
+  const effectiveSize = adlFactors
+    ? effectiveExposureQ(account.positionSize, account.adlABasis, adlSideFactor(adlFactors, account.positionSize > 0n ? 0 : 1))
+    : account.positionSize;
+  // The back-solve divides the on-chain pnl by the size it was EARNED on, and
+  // that is the effective size, not raw basis: the engine accrues K per side
+  // scaled by the live `a` and realizes `basis * (K_now - K_snap) / a_basis`
+  // (percolator v16.rs@35ddd692 ~14767-14773), so a deleveraged leg's pnl is
+  // `effective * price_move`. Back-solving over nominal basis put the entry
+  // only `a_side / a_basis` as far from the mark as it is, and the PnL below
+  // (effective size x that gap) then showed `pnl * a_side / a_basis` instead of
+  // the pnl itself. On a cache hit `effectiveSize` is unused by the resolver.
   const safePnlForEntry = isSentinelValue(account.pnl) ? 0n : account.pnl;
   const resolvedEntry = resolveEntryPrice(
-    account.positionSize,
+    effectiveSize,
     cachedEntryPrice,
     safePnlForEntry,
     livePriceE6,
@@ -74,12 +89,6 @@ export const ChartPnlBadge: FC<ChartPnlBadgeProps> = ({ slabAddress }) => {
   if (resolvedEntry.source === "unknown") return null;
   const resolvedEntryPrice = resolvedEntry.entry;
 
-  // A deleveraged leg moves at `basis * a_side / a_basis`, not at raw basis —
-  // feeding nominal size here overstated the badge by the ADL factor (2x on
-  // live devnet markets). See lib/v17-adl.ts.
-  const effectiveSize = adlFactors
-    ? effectiveExposureQ(account.positionSize, account.adlABasis, adlSideFactor(adlFactors, account.positionSize > 0n ? 0 : 1))
-    : account.positionSize;
   const pnlTokens = computeMarkPnl(effectiveSize, resolvedEntryPrice, livePriceE6);
   const pnlUsd = (Number(pnlTokens) / 10 ** decimals) * priceUsd;
   // pnlTokens is coin-margined native scale (same units as positionSize), not

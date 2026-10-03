@@ -15,9 +15,16 @@
  * separately in #2991/#3012 (useLiqPrice.ts, TradingChart.tsx) — deliberately
  * not asserted here, so this file cannot pin behaviour those PRs are changing.
  *
- * Fixture is the reported eacc short with the real numbers from the reporter's
- * desktop fill receipt (13,940.5894 eacc short at $0.013432, mark $0.0133): an
- * on-chain pnl that back-solves to EXACTLY that entry.
+ * Fixture is the reported eacc short at the reporter's prices (entry $0.013432
+ * per the desktop fill receipt, mark $0.01333), sized at 10,000 eacc so the
+ * PnL is a visible +$1.02: an on-chain pnl that back-solves to EXACTLY that
+ * entry. Every rendering test asserts the dollar figure, not just that a badge
+ * appeared — a badge that renders the wrong number is worse than none.
+ *
+ * ADL: the on-chain pnl of a deleveraged leg is earned on its EFFECTIVE size
+ * (`basis * a_side / a_basis`; engine v16.rs@35ddd692 accrues K per side scaled
+ * by the live `a` and realizes `basis * dK / a_basis`). The back-solve must
+ * divide by that size, or the badge shows `pnl * a_side / a_basis`.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -30,23 +37,35 @@ const SLAB = "Fz5JfUcbEdt5DNSNwZpBn2dZ7NpN8MnvJMiYjnqMacMh";
 const OWNER = new PublicKey("9sM73A4MvS2ye2Fuvpr1tmkj68iA61eebuRKz1rnGUWa");
 const IDX = 0;
 
-const POSITION_SIZE = -1_000_000n; // short
-const ORACLE_E6 = 13_330n; // mark  $0.0133
+const POSITION_SIZE = -10_000_000_000n; // short 10,000 eacc (6 dp)
+const ORACLE_E6 = 13_330n; // mark  $0.01333
 const TRUE_ENTRY_E6 = 13_432n; // entry $0.013432, per the desktop fill receipt
-/** on-chain collateral pnl that back-solves to TRUE_ENTRY_E6 exactly. */
-const ON_CHAIN_PNL = 102n;
+/** on-chain collateral pnl (atoms, 6 dp) = 10,000 x $0.000102 = $1.02, which
+ *  back-solves to TRUE_ENTRY_E6 exactly. */
+const ON_CHAIN_PNL = 1_020_000n;
 const U64_MAX = 18_446_744_073_709_551_615n;
+const ADL_ONE = 1_000_000_000_000_000n;
 
 let zeroPnl = false;
 let sentinelPnl = false;
+/** Leg state for the ADL cases: raw basis + the side factor frozen at open. */
+let positionSize = POSITION_SIZE;
+let adlABasis = 0n;
+let adlFactors: { aLong: bigint; aShort: bigint } | null = null;
+let onChainPnl = ON_CHAIN_PNL;
 
 const account = {
   owner: OWNER,
-  positionSize: POSITION_SIZE,
+  get positionSize() {
+    return positionSize;
+  },
+  get adlABasis() {
+    return adlABasis;
+  },
   capital: 20_000_000n,
   entryPrice: 0n,
   get pnl() {
-    return sentinelPnl ? U64_MAX : zeroPnl ? 0n : ON_CHAIN_PNL;
+    return sentinelPnl ? U64_MAX : zeroPnl ? 0n : onChainPnl;
   },
 };
 
@@ -56,7 +75,7 @@ vi.mock("@/components/providers/SlabProvider", () => ({
     slabAddress: SLAB,
     params: { maintenanceMarginBps: 500n, initialMarginBps: 1000n },
     config: { collateralMint: null },
-    adlFactors: null,
+    adlFactors,
   }),
 }));
 vi.mock("@/hooks/useLivePrice", () => ({
@@ -65,6 +84,21 @@ vi.mock("@/hooks/useLivePrice", () => ({
 vi.mock("@/hooks/useTokenMeta", () => ({ useTokenMeta: () => ({ decimals: 6 }) }));
 
 const { ChartPnlBadge } = await import("@/components/trade/ChartPnlBadge");
+const { effectiveLeg } = await import("@/lib/limits/effective-quantity");
+
+/** The badge's dollar figure, e.g. "+$1.02". */
+function badgeUsd(container: HTMLElement): string | null {
+  return container.textContent?.match(/[+-]?\$\d+\.\d{2}/)?.[0] ?? null;
+}
+
+/** Halve the short side after this leg opened: raw basis -20,000 eacc now
+ *  carries 10,000 eacc of exposure, and the engine credited the +$1.02 move on
+ *  those 10,000 — the same on-chain pnl as the un-deleveraged fixture. */
+function asDeleveragedShort() {
+  positionSize = 2n * POSITION_SIZE;
+  adlABasis = ADL_ONE;
+  adlFactors = { aLong: ADL_ONE, aShort: ADL_ONE / 2n };
+}
 
 /** Any browser other than the one that placed the trade. */
 function asSecondDevice() {
@@ -81,19 +115,59 @@ describe("ChartPnlBadge resolves its entry like every other position surface", (
     localStorage.clear();
     zeroPnl = false;
     sentinelPnl = false;
+    positionSize = POSITION_SIZE;
+    adlABasis = 0n;
+    adlFactors = null;
+    onChainPnl = ON_CHAIN_PNL;
   });
 
-  it("CONTROL: renders on the device that opened the trade (cache hit)", () => {
+  it("CONTROL: renders on the device that opened the trade (cache hit) at the cached-entry PnL", () => {
     asTradingDevice();
     const { container } = render(<ChartPnlBadge slabAddress={SLAB} />);
     expect(container.textContent).toMatch(/PnL/i);
+    // 10,000 short from $0.013432 to $0.01333 = +$1.02.
+    expect(badgeUsd(container)).toBe("+$1.02");
   });
 
-  it("renders on ANY OTHER device, from the entry back-solved on chain", () => {
+  it("renders on ANY OTHER device, from the entry back-solved on chain, at the SAME PnL", () => {
     // The regression. Before the fix this returned null and the badge vanished.
+    // The number must match the trading device's, not merely appear.
     asSecondDevice();
     const { container } = render(<ChartPnlBadge slabAddress={SLAB} />);
     expect(container.textContent).toMatch(/PnL/i);
+    expect(badgeUsd(container)).toBe("+$1.02");
+  });
+
+  it("a losing derived position reads as a loss of the on-chain amount", () => {
+    asSecondDevice();
+    onChainPnl = -ON_CHAIN_PNL;
+    const { container } = render(<ChartPnlBadge slabAddress={SLAB} />);
+    expect(badgeUsd(container)).toBe("-$1.02");
+  });
+
+  it("ADL: a deleveraged leg on a second device shows its on-chain pnl, not pnl x a_side/a_basis", () => {
+    // Fixture sanity: the app's effective size equals the engine port
+    // (effective_abs_quantity_for_leg, engine 35ddd692 v16.rs:1695) for this leg.
+    asDeleveragedShort();
+    const eff = effectiveLeg(
+      { aLong: ADL_ONE, aShort: ADL_ONE / 2n, epochLong: 0n, epochShort: 0n, modeLong: 0, modeShort: 0 },
+      { active: true, side: 1, basisPosQ: positionSize, aBasis: adlABasis, epochSnap: 0n },
+    );
+    expect(eff).toEqual({ kind: "live", absQ: -POSITION_SIZE, signedQ: POSITION_SIZE });
+
+    asSecondDevice();
+    const { container } = render(<ChartPnlBadge slabAddress={SLAB} />);
+    // On-chain pnl is +$1.02, earned on the 10,000 effective. Back-solving over
+    // the 20,000 raw basis put the entry at $0.013381 and showed +$0.51.
+    expect(badgeUsd(container)).toBe("+$1.02");
+  });
+
+  it("CONTROL (ADL): the same deleveraged leg with its cached entry also shows +$1.02", () => {
+    // Cache path is untouched by the fix: effective 10,000 x $0.000102.
+    asDeleveragedShort();
+    asTradingDevice();
+    const { container } = render(<ChartPnlBadge slabAddress={SLAB} />);
+    expect(badgeUsd(container)).toBe("+$1.02");
   });
 
   it("the back-solve recovers the reporter's actual fill price, not an approximation", () => {
