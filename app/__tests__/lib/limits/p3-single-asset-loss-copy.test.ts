@@ -41,18 +41,23 @@ describe("error 86 VaultLpMultiAssetMarket", () => {
   });
 });
 
-describe("loss copy = P3 doc §0.8: junior first, then Earn pro rata; winners paid in full unless Earn's backing is used up", () => {
+describe("loss copy = P3 doc §0.8: junior first, then Earn pro rata; winners paid in full unless Earn's backing is used up or the losing side's backing falls short", () => {
   const SECTION_0_8 =
     "The creator's junior tranche takes losses first. Only a loss bigger than the junior reaches Earn, and then every Earn depositor loses the same percentage. Winning traders are always paid in full unless Earn's backing is used up too.";
   // UX WP-5 / audit §5.2: "Earn's money" is accepted as the synonym for "Earn's backing".
-  const QUALIFIER = /always paid in full unless Earn's (backing|money) is used up too/;
+  // #2999 follow-up: the senior draw (wrapper 553d76f0 v16_program.rs:1291 VaultLpSeniorDrawRequired)
+  // only pre-empts a bankruptcy of the VAULT LP. A trader-vs-trader bankruptcy past insurance is still
+  // spread over the opposite side's accounts (engine 35ddd692 v16.rs:17372/17519), and a source-domain
+  // haircut can apply while Earn still holds funds (v16.rs:11094). So never "always", and name the
+  // losing side's backing as the second exception.
+  const QUALIFIER = /paid in full unless Earn's (backing|money) is used up too, or the losing side's backing falls short/;
   const HOW_LOSSES_WORK =
-    "The market creator's stake takes losses first. Only a loss bigger than that stake reaches Earn, and then every Earn depositor loses the same percentage. Winning traders are always paid in full unless Earn's money is used up too. Share value can go down; only deposit what you can afford to lose.";
+    "The market creator's stake takes losses first. Only a loss bigger than that stake reaches Earn, and then every Earn depositor loses the same percentage. Winning traders are paid in full unless Earn's money is used up too, or the losing side's backing falls short. Share value can go down; only deposit what you can afford to lose.";
   // Audit §5.2: the §0.8 rule is binding and only the framing words change ("junior tranche" ->
   // "the market creator's stake", "Earn's backing" -> "Earn's money"); §5.1 bans "junior"/"tranche"
   // in user-visible copy. FLAG for the P3 owner: the three surfaces now carry the plain-words form.
   const SECTION_0_8_PLAIN =
-    "The market creator's stake takes losses first. Only a loss bigger than that stake reaches Earn, and then every Earn depositor loses the same percentage. Winning traders are always paid in full unless Earn's money is used up too.";
+    "The market creator's stake takes losses first. Only a loss bigger than that stake reaches Earn, and then every Earn depositor loses the same percentage. Winning traders are paid in full unless Earn's money is used up too, or the losing side's backing falls short.";
   it("the wizard requirement, wizard explainer and Earn risk notice carry §0.8 (plain-words framing, §5.2)", () => {
     expect(HOW_LOSSES_WORK.startsWith(SECTION_0_8_PLAIN)).toBe(true);
     void SECTION_0_8;
@@ -88,7 +93,8 @@ describe("loss copy = P3 doc §0.8: junior first, then Earn pro rata; winners pa
     for (const s of strings) {
       expect(s).not.toMatch(WRONG);
       // Every "paid in full" claim must carry the qualifier.
-      for (const m of s.matchAll(/paid in full[^.]*\./g)) expect(m[0]).toMatch(/unless Earn's (backing|money) is used up too/);
+      for (const m of s.matchAll(/paid in full[^.]*\./g)) expect(m[0]).toMatch(QUALIFIER);
+      expect(s).not.toMatch(/always paid in full/i);
     }
     const creator = readFileSync(resolve(process.cwd(), "components/limits/CreatorLimits.tsx"), "utf8");
     expect(creator).toContain("{COPY.juniorExhausted}");
