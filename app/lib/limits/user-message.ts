@@ -165,8 +165,11 @@ const ONE_SHOT_BODY: Record<string, string> = {
 /** The one resolver (§5.3). Never throws. */
 export function resolveUserMessage(err: unknown, ctx: MessageContext): UserMessage {
   const u = resolveUserMessageInner(err, ctx);
-  if (!ctx.oneShot || !u.autoRetry) return u;
-  return { ...u, autoRetry: false, body: ONE_SHOT_BODY[u.kind] ?? `${u.body} Nothing was sent. Try again in a moment.` };
+  // Only the PRE-SEND waits have a one-shot form. Anything else (notably "still-confirming": the tx
+  // WAS broadcast and may still land) keeps its own line — "Nothing was sent. Try again" there would
+  // invite a second deposit+trade while the first can still land.
+  const body = ctx.oneShot && u.autoRetry ? ONE_SHOT_BODY[u.kind] : undefined;
+  return body ? { ...u, autoRetry: false, body } : u;
 }
 
 function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage {
