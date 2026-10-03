@@ -5,10 +5,11 @@ import { useCallback, useSyncExternalStore } from "react";
 import { getSnapshot, subscribeSlab } from "@/lib/priceStore/priceStore";
 import { SlabProvider } from "@/components/providers/SlabProvider";
 import { CloseFlow } from "@/components/trade/OtherMarketPositions";
+import { LIQ_WARNING_CUSHION } from "@/lib/liquidation-risk";
 import {
-  getLiquidationSeverity,
   liveLiquidationDistancePct,
-  LIQ_WARNING_PCT,
+  liveLiquidationSeverity,
+  liveMarginCushion,
   type LiquidationSeverity,
   type PortfolioPosition,
 } from "@/hooks/usePortfolio";
@@ -19,8 +20,10 @@ import { LiqPriceValue } from "@/components/trade/LiqPriceValue";
 
 export interface LiquidationRisk {
   pos: PortfolioPosition;
-  /** Distance to liquidation at the live mark (liveLiquidationDistancePct). */
+  /** Distance to the engine's liquidation price at the live mark (liveLiquidationDistancePct). */
   distancePct: number;
+  /** Share of the position's margin cushion left (liveMarginCushion); sets the tier and gauge. */
+  cushion: number;
   severity: Exclude<LiquidationSeverity, "safe">;
   /** The mark the distance was measured at (live, else the poll's oracle price). */
   markE6: bigint;
@@ -60,7 +63,7 @@ export function LiquidationRiskItem({
   /** Shown as a small "Hide" control when set (the site-wide alert). */
   onDismiss?: () => void;
 }) {
-  const { pos, distancePct, severity, markE6, decimals } = risk;
+  const { pos, distancePct, cushion, severity, markE6, decimals } = risk;
   // The shared liquidation-price display, as on the position card (margin-health-surfaces guard).
   const liqDisplay = describeLiqPrice({
     liqPriceE6: pos.liquidationPriceE6,
@@ -76,8 +79,8 @@ export function LiquidationRiskItem({
   const tone = danger ? "var(--short)" : "var(--warning)";
   const size = pos.effectiveSize;
   const label = riskLabel(pos);
-  // Full at the warning line, empty at liquidation.
-  const gauge = Math.max(0, Math.min(1, distancePct / LIQ_WARNING_PCT)) * 100;
+  // Margin cushion left: full at the warning line, empty at liquidation.
+  const gauge = Math.max(0, Math.min(1, cushion / LIQ_WARNING_CUSHION)) * 100;
 
   return (
     <div
@@ -191,8 +194,9 @@ export function RiskCloseFlow({
 }
 
 /**
- * Open positions within the warning distance at the live mark, closest to liquidation first.
- * A position with no size is skipped (flat/idle rows carry no risk).
+ * Open positions at the warning tier or worse at the live mark (liveLiquidationSeverity:
+ * relative to the position's own margin, not a flat distance), closest to liquidation
+ * first. A position with no size, or nothing to measure it with, is skipped.
  */
 export function collectLiquidationRisks(
   positions: readonly PortfolioPosition[],
@@ -203,11 +207,12 @@ export function collectLiquidationRisks(
   for (const pos of positions) {
     if ((pos.account?.positionSize ?? 0n) === 0n) continue;
     const live = livePrices?.get(pos.slabAddress);
+    const severity = liveLiquidationSeverity(pos, live);
+    const cushion = liveMarginCushion(pos, live);
+    if (severity === "safe" || cushion == null) continue;
     const distancePct = liveLiquidationDistancePct(pos, live);
-    const severity = getLiquidationSeverity(distancePct);
-    if (severity === "safe") continue;
     const markE6 = live != null && live > 0n ? live : pos.oraclePriceE6;
-    risks.push({ pos, distancePct, severity, markE6, decimals: decimalsOf(pos) });
+    risks.push({ pos, distancePct, cushion, severity, markE6, decimals: decimalsOf(pos) });
   }
-  return risks.sort((a, b) => a.distancePct - b.distancePct);
+  return risks.sort((a, b) => a.cushion - b.cushion);
 }

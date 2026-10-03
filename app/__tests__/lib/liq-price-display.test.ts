@@ -29,8 +29,8 @@ describe("describeLiqPrice", () => {
     const d = describeLiqPrice({ ...base, liqPriceE6: 0n, capital: 200_000_000n });
     expect(d.kind).toBe("covered");
     expect(d.text).toBe("200% mgn");
-    expect(d.healthThresholdPct).toBe(105);
-    expect(d.title).toContain("105%");
+    expect(d.healthThresholdPct).toBe(100);
+    expect(d.title).toContain("100%");
   });
 
   it("shows margin health for a short's u64::MAX sentinel too (was a bare infinity)", () => {
@@ -44,9 +44,10 @@ describe("describeLiqPrice", () => {
     expect(d.text).toBe("200% mgn");
   });
 
-  it("derives the threshold from maintenance margin, never a hard-coded 105", () => {
+  it("puts the threshold at 100% at any maintenance margin, where the engine liq price disappears (#2987)", () => {
+    // The SDK formula's (100 + mm)% (105, 110, ...) was not the engine's line.
     const d = describeLiqPrice({ ...base, liqPriceE6: 0n, maintenanceMarginBps: 1000n });
-    expect(d.healthThresholdPct).toBe(110);
+    expect(d.healthThresholdPct).toBe(100);
   });
 
   it("agrees with computeMarginHealthPct (no re-derived formula)", () => {

@@ -4,8 +4,8 @@
  *
  * Percolator is cross-margin: everything deposited into a market's portfolio
  * backs every position in it. A consequence is that `computeLiqPrice` clamps a
- * long's liquidation price to `0n` once collateral exceeds roughly
- * `notional * (1 + mm)` — the position genuinely cannot be liquidated by
+ * long's liquidation price to `0n` once collateral reaches the notional at entry
+ * (engine model, lib/liquidation-risk.ts) — the position genuinely cannot be liquidated by
  * price, so there is no price to show. Correct, and useless as a risk signal:
  * the surfaces that lead with a liquidation price then have nothing to say
  * precisely when the trader asks "how close am I?".
@@ -15,9 +15,11 @@
  * survives every case that makes the liquidation price unavailable. The two are
  * the same fact expressed differently:
  *
- *      health >= (10000 + mm) / 100 %      <=>      no liquidation price
+ *      health >= 100 %      <=>      no liquidation price
  *
- * At mm = 500 that is 105%. Below it a liquidation price exists and the usual
+ * at every mm: with equity >= notional, equity stays >= mm x notional at any price
+ * (the engine's maintenance check). The SDK's old formula put the line at (100 + mm)%,
+ * 105% at mm = 500 (#2987). Below it a liquidation price exists and the usual
  * distance-based colouring applies; at or above it, the position is covered at
  * any price. Surfacing the number lets the UI say which side of that line the
  * trader is on instead of rendering a dash.
@@ -75,20 +77,16 @@ export function computeMarginHealthPct(
 }
 
 /**
- * The health percentage at or above which a long has no liquidation price.
- * `(10000 + maintenanceMarginBps) / 100` — 105% at the default 5%.
+ * The health percentage at or above which a long has no liquidation price: 100% at
+ * every maintenance margin on the engine model (capital covers the whole notional).
+ * The argument is kept for callers; an unusable one still degrades to 100.
  */
 export function unliquidatableHealthThresholdPct(
-  // Accepts a number as well as a bigint on purpose. The declared type is
-  // bigint, but this feeds a RISK readout rendered during paint: a
-  // "Cannot mix BigInt and other types" throw from one mistyped caller would
-  // blank the whole position row rather than degrade one figure. Normalising
-  // is cheaper than that failure mode.
-  maintenanceMarginBps: bigint | number,
+  // Accepts a number as well as a bigint on purpose: this feeds a RISK readout
+  // rendered during paint, and must not throw for a mistyped caller.
+  _maintenanceMarginBps: bigint | number,
 ): number {
-  const mm = Number(maintenanceMarginBps);
-  if (!Number.isFinite(mm) || mm < 0) return 100;
-  return (10_000 + mm) / 100;
+  return 100;
 }
 
 /**

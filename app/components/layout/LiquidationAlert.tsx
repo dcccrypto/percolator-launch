@@ -4,12 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
-import {
-  usePortfolio,
-  liveLiquidationDistancePct,
-  LIQ_WARNING_PCT,
-  type LiquidationSeverity,
-} from "@/hooks/usePortfolio";
+import { usePortfolio, liveMarginCushion, type LiquidationSeverity } from "@/hooks/usePortfolio";
+import { LIQ_FORGET_HIDE_CUSHION } from "@/lib/liquidation-risk";
 import { useLiveSlabPrices } from "@/hooks/useLiveSlabPrices";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { useOtherModalOpen } from "@/hooks/useOtherModalOpen";
@@ -25,9 +21,9 @@ import {
 
 /** Positions shown before "+N more"; the rest are one click away on /portfolio. */
 const MAX_SHOWN = 3;
-/** A hidden warning is forgotten only once the position is this far from liquidation, so a
- *  price hovering at the warning line doesn't re-alert on every crossing. */
-const FORGET_HIDE_ABOVE_PCT = LIQ_WARNING_PCT + 5;
+/** A hidden warning is forgotten only once the position's margin cushion is back above
+ *  this, so a price hovering at the warning line doesn't re-alert on every crossing. */
+const FORGET_HIDE_ABOVE_CUSHION = LIQ_FORGET_HIDE_CUSHION;
 
 type Tier = Exclude<LiquidationSeverity, "safe">;
 const rank: Record<Tier, number> = { warning: 1, danger: 2 };
@@ -45,8 +41,9 @@ export function visibleRisks(risks: LiquidationRisk[], dismissed: Record<string,
 
 /**
  * Site-wide liquidation warning: a card pinned to a corner of every page (except /portfolio,
- * which shows the same rows inline) listing each open position within LIQ_WARNING_PCT of
- * liquidation at the live mark, with Go to market and Close. It shares the app-wide deduped
+ * which shows the same rows inline) listing each open position that has used half or more
+ * of its margin cushion at the live mark (lib/liquidation-risk.ts), with Go to market and
+ * Close. It shares the app-wide deduped
  * portfolio scan with PositionsBar, so it adds no RPC load.
  *
  * Hide lasts for the session in memory: the alert lives in the root layout and is not
@@ -77,9 +74,9 @@ export function LiquidationAlert() {
   // The card would sit over the lower part of another dialog (including its own close modal); step aside.
   const otherModalOpen = useOtherModalOpen(cardRef);
 
-  // Forget a Hide once its position is clearly out of range again (see FORGET_HIDE_ABOVE_PCT).
+  // Forget a Hide once its position is clearly out of range again (see FORGET_HIDE_ABOVE_CUSHION).
   const recoveredKeys = open
-    .filter((p) => liveLiquidationDistancePct(p, livePrices.get(p.slabAddress)) > FORGET_HIDE_ABOVE_PCT)
+    .filter((p) => (liveMarginCushion(p, livePrices.get(p.slabAddress)) ?? 0) > FORGET_HIDE_ABOVE_CUSHION)
     .map(riskKey)
     .join(",");
   useEffect(() => {
@@ -140,7 +137,7 @@ export function LiquidationAlert() {
                 </span>
               </div>
               <span className="text-[10px] text-[var(--text-secondary)]">
-                {count} within {LIQ_WARNING_PCT}%
+                {count}
               </span>
             </div>
             <div className="flex max-h-[60vh] flex-col gap-1.5 overflow-y-auto">

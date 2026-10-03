@@ -22,6 +22,7 @@ import {
   getLiquidationSeverityForState,
 } from "@/hooks/usePortfolio";
 import { computeLiquidationDistancePct } from "@/lib/liquidation-distance";
+import { computeLiqPrice } from "@/lib/trading";
 
 const E6 = 1_000_000n;
 const LONG = 200n * E6;
@@ -102,12 +103,15 @@ describe("a real liquidation price still ranks normally", () => {
 });
 
 describe("the collateral threshold the UI can explain", () => {
-  it("is notional scaled by the maintenance margin", () => {
-    // $200 notional at 5% maintenance -> $210 of collateral removes the liq
-    // price. This is the number that makes the behaviour explicable rather
-    // than arbitrary.
-    expect(unliquidatableCollateralThreshold(LONG, MARK, 500n)).toBe(210n * E6);
+  it("is the notional at entry, at every maintenance margin (engine model, #2987)", () => {
+    // $200 notional -> $200 of collateral removes the liq price: the engine never
+    // liquidates a long whose equity covers its notional. This is the number that makes
+    // the behaviour explicable rather than arbitrary.
+    expect(unliquidatableCollateralThreshold(LONG, MARK, 500n)).toBe(200n * E6);
     expect(unliquidatableCollateralThreshold(LONG, MARK, 0n)).toBe(200n * E6);
+    // ...and it is exactly where the shipped liquidation price disappears.
+    expect(computeLiqPrice(MARK, 200n * E6, LONG, 500n)).toBe(0n);
+    expect(computeLiqPrice(MARK, 200n * E6 - 1n, LONG, 500n)).toBeGreaterThan(0n);
   });
 
   it("declines when there is nothing to compute from", () => {

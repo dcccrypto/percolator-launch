@@ -15,19 +15,15 @@ import {
   marginHealthBand,
   unliquidatableHealthThresholdPct,
 } from "@/lib/margin-health";
+import { computeLiqPrice } from "@/lib/trading";
 
 const E6 = 1_000_000n;
 const MARK = 1n * E6; // $1.00
 const SIZE = 200n * E6; // 200 units -> $200 notional
 const MM = 500n; // 5%
 
-/** The shipped formula, for reference: liq clamps to 0 past the threshold. */
-function liqPrice(entry: bigint, capital: bigint, pos: bigint, mm: bigint): bigint {
-  const abs = pos < 0n ? -pos : pos;
-  const adjusted = ((capital * E6) / abs) * 10_000n / (10_000n + mm);
-  const liq = entry - adjusted;
-  return liq > 0n ? liq : 0n;
-}
+/** The shipped (engine-consistent) formula: liq clamps to 0 past the threshold. */
+const liqPrice = computeLiqPrice;
 
 describe("margin health exists when the liquidation price does not", () => {
   it("is defined with no entry price and no liquidation price", () => {
@@ -37,12 +33,12 @@ describe("margin health exists when the liquidation price does not", () => {
   });
 
   it("crosses its threshold exactly where the liquidation price disappears", () => {
-    // health >= (10000+mm)/100  <=>  no liq price. Same fact, two expressions.
+    // health >= 100%  <=>  no liq price (engine model, #2987). Same fact, two expressions.
     const threshold = unliquidatableHealthThresholdPct(MM);
-    expect(threshold).toBe(105);
+    expect(threshold).toBe(100);
 
-    const justBelow = 209n * E6;
-    const atLine = 210n * E6;
+    const justBelow = 199n * E6;
+    const atLine = 200n * E6;
     expect(computeMarginHealthPct(justBelow, SIZE, MARK)).toBeLessThan(threshold);
     expect(liqPrice(MARK, justBelow, SIZE, MM)).toBeGreaterThan(0n);
 
@@ -89,23 +85,25 @@ describe("it must not overstate safety", () => {
 
 describe("bands are anchored to the liquidation threshold, not invented", () => {
   it("at or above the threshold the position is covered", () => {
-    expect(marginHealthBand(105, MM)).toBe("covered");
+    expect(marginHealthBand(100, MM)).toBe("covered");
     expect(marginHealthBand(400, MM)).toBe("covered");
   });
 
   it("below it, lower health is worse", () => {
-    expect(marginHealthBand(100, MM)).toBe("safe"); // just under the line
+    expect(marginHealthBand(99, MM)).toBe("safe"); // just under the line
     expect(marginHealthBand(80, MM)).toBe("warning");
     expect(marginHealthBand(50, MM)).toBe("danger");
     expect(marginHealthBand(1, MM)).toBe("danger");
   });
 
-  it("CONTROL: the bands move with the maintenance margin", () => {
-    // Hard-coding 105 would be wrong for any market with a different mm.
-    expect(unliquidatableHealthThresholdPct(0n)).toBe(100);
-    expect(unliquidatableHealthThresholdPct(1_000n)).toBe(110);
-    expect(marginHealthBand(105, 1_000n)).not.toBe("covered"); // 105 < 110
-    expect(marginHealthBand(110, 1_000n)).toBe("covered");
+  it("CONTROL: the line is where the engine-consistent liquidation price disappears, at every mm", () => {
+    // The SDK's old formula put it at (100 + mm)%; the engine never liquidates a long whose
+    // collateral covers its notional, whatever the maintenance margin.
+    for (const mm of [0n, 500n, 1_000n, 1_666n]) {
+      expect(unliquidatableHealthThresholdPct(mm)).toBe(100);
+      expect(computeLiqPrice(MARK, 200n * E6, SIZE, mm)).toBe(0n); // health 100%
+      expect(computeLiqPrice(MARK, 199n * E6, SIZE, mm)).toBeGreaterThan(0n); // 99.5%
+    }
   });
 });
 
@@ -115,8 +113,8 @@ describe("the threshold must not throw during a render", () => {
     // during paint — a "Cannot mix BigInt and other types" throw from one
     // mistyped caller blanks the whole row instead of one figure. Found by
     // Portfolio.test.tsx, whose mock supplies a plain number.
-    expect(unliquidatableHealthThresholdPct(500 as unknown as bigint)).toBe(105);
-    expect(unliquidatableHealthThresholdPct(500n)).toBe(105);
+    expect(unliquidatableHealthThresholdPct(500 as unknown as bigint)).toBe(100);
+    expect(unliquidatableHealthThresholdPct(500n)).toBe(100);
     expect(marginHealthBand(110, 500 as unknown as bigint)).toBe("covered");
   });
 

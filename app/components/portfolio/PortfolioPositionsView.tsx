@@ -15,9 +15,10 @@ import { ClosePositionModal } from "@/components/trade/ClosePositionModal";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import {
   usePortfolio,
-  getLiquidationSeverity,
   getLiquidationSeverityForState,
   liveLiquidationDistancePct,
+  liveLiquidationSeverity,
+  liveMarginCushion,
   positionRowKeys,
   type PortfolioPosition,
 } from "@/hooks/usePortfolio";
@@ -258,7 +259,7 @@ function PositionCard({
     liquidationPriceE6,
     entryDisplay.known,
   );
-  const severity = getLiquidationSeverityForState(liveLiquidationState);
+  const severity = getLiquidationSeverityForState(liveLiquidationState, liveMarginCushion(pos, livePriceE6));
   // The risk figure that survives a missing liquidation price: capital over
   // notional, needing neither an entry nor a liq price. It crosses its
   // threshold at exactly the collateral level where the liq price disappears,
@@ -677,7 +678,7 @@ export function PortfolioPositionsView() {
   const livePrices = useLiveSlabPrices(openPositions.map((pos) => pos.slabAddress));
   // Counted at the live mark, like the strip and the cards (the poll's count lagged them by up to 30s).
   const atRiskCount = openPositions.filter(
-    (pos) => getLiquidationSeverity(liveLiquidationDistancePct(pos, livePrices.get(pos.slabAddress))) !== "safe",
+    (pos) => liveLiquidationSeverity(pos, livePrices.get(pos.slabAddress)) !== "safe",
   ).length;
   const liveUsdTotals = activePositions.length > 0 && !tokenMetasLoading
     ? (() => {
@@ -777,7 +778,7 @@ export function PortfolioPositionsView() {
         </ScrollReveal>
 
         {/* At-risk strip — zero height unless a position is within the
-            liquidation warning distance (see getLiquidationSeverity). */}
+            liquidation warning tier (see liveLiquidationSeverity). */}
         <AtRiskBanner positions={openPositions} livePrices={livePrices} decimalsOf={getDecimals} onClosed={refresh} />
 
         {/* Tier 1 hero: Portfolio Value (live) + live Unrealized PnL beneath. */}

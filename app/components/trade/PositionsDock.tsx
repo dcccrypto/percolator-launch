@@ -27,7 +27,7 @@
  * `OrderTicket` already owns the deposit entry point (its account row).
  */
 
-import { LIQ_DANGER_PCT, LIQ_WARNING_PCT } from "@/hooks/usePortfolio";
+import { computeMarginCushion, severityFromCushion } from "@/lib/liquidation-risk";
 import { FC, memo, useMemo, useState } from "react";
 import { useUserAccount, useUserAccountScanPending } from "@/hooks/useUserAccount";
 import { useNftWrappedPosition } from "@/hooks/useNftWrappedPosition";
@@ -69,7 +69,6 @@ import {
 import { isMockMode } from "@/lib/mock-mode";
 import { bigintToFloat } from "@/lib/formatters";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
-import { computeLiquidationDistancePct } from "@/lib/liquidation-distance";
 import { ClosePositionModal } from "./ClosePositionModal";
 import { OtherMarketPositions } from "./OtherMarketPositions";
 import { WarmupProgress } from "./WarmupProgress";
@@ -363,13 +362,19 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
     if (liqUnliquidatable) return "text-[var(--text-secondary)]";
     if (liqPriceE6 <= 0n) return "text-[var(--text-secondary)]";
     if (!hasValidMark || currentPriceE6 <= 0n) return "text-[var(--warning)]";
-    // Direction-aware (shared helper): a short whose mark has crossed ABOVE
-    // its liq price is distance 0 (critical), not "safe". Helper returns
-    // percent 0-100; thresholds here consume a 0-1 fraction.
-    const distPct = computeLiquidationDistancePct(account.positionSize, currentPriceE6, liqPriceE6) / 100;
-    // Same tiers as the site-wide liquidation warning (red <= 10%, amber <= 20%).
-    if (distPct <= LIQ_DANGER_PCT / 100) return "text-[var(--short)]";
-    if (distPct <= LIQ_WARNING_PCT / 100) return "text-[var(--warning)]";
+    // Same tiers as the site-wide liquidation warning: the share of this position's
+    // margin cushion left (lib/liquidation-risk.ts), not a flat price distance.
+    const cushion = computeMarginCushion({
+      positionSize: account.positionSize,
+      entryPriceE6,
+      capital: account.capital,
+      markPriceE6: currentPriceE6,
+      maintenanceMarginBps: maintenanceBps,
+      initialMarginBps,
+    });
+    const tier = cushion == null ? "safe" : severityFromCushion(cushion);
+    if (tier === "danger") return "text-[var(--short)]";
+    if (tier === "warning") return "text-[var(--warning)]";
     return "text-[var(--text-secondary)]";
   })();
   const pnlColor = pnlTokens === 0n ? "text-[var(--text-muted)]" : pnlTokens > 0n ? "text-[var(--long)]" : "text-[var(--short)]";
@@ -505,6 +510,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                 {hasValidMark ? formatUsdPriceE6(currentPriceE6) : "--"}
               </td>
               <td
+                data-testid="position-liq"
                 className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${liqPriceColor}`}
                 style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
               >

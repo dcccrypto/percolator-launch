@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePortfolio, getLiquidationSeverity, liveLiquidationDistancePct, type PortfolioPosition } from "@/hooks/usePortfolio";
+import { usePortfolio, liveLiquidationSeverity, liveLiquidationDistancePct, type PortfolioPosition } from "@/hooks/usePortfolio";
 import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { describeLiqPrice } from "@/lib/liq-price-display";
@@ -47,7 +47,7 @@ function PositionCard({
   const markE6 = live.markE6;
   // At the live mark, like /portfolio's cards and strip (the poll's figure lagged them).
   const liquidationDistancePct = liveLiquidationDistancePct(pos, markE6);
-  const severity = getLiquidationSeverity(liquidationDistancePct);
+  const severity = liveLiquidationSeverity(pos, markE6);
   // Current effective leverage: nominal notional / (capital + pnl) at the live mark.
   const leverageDisplay = describePositionLeverage(
     computePositionLeverage({

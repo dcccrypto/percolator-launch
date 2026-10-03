@@ -39,7 +39,7 @@ export interface LiqPriceDisplay {
   title: string | undefined;
   /** capital / nominal notional, or null when not computable. */
   marginHealthPct: number | null;
-  /** Health at/above which a long has no liquidation price (105 at mm=500). */
+  /** Health at/above which a long has no liquidation price (100: engine model, any mm). */
   healthThresholdPct: number;
 }
 

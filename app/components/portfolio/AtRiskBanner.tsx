@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { LIQ_WARNING_PCT, type PortfolioPosition } from "@/hooks/usePortfolio";
+import { type PortfolioPosition } from "@/hooks/usePortfolio";
 import {
   collectLiquidationRisks,
   LiquidationRiskItem,
@@ -24,9 +24,9 @@ interface AtRiskBannerProps {
 }
 
 /**
- * Every position within liquidation-warning distance (see `getLiquidationSeverity`:
- * "warning" <= LIQ_WARNING_PCT, "danger" <= LIQ_DANGER_PCT), closest first, each with
- * Go to market and Close. Renders `null` (zero height) when nothing is at risk.
+ * Every position at the warning tier or worse (see `liveLiquidationSeverity`: half or
+ * three quarters of its margin cushion gone), closest first, each with Go to market and
+ * Close. Renders `null` (zero height) when nothing is at risk.
  */
 export function AtRiskBanner({ positions, livePrices, decimalsOf, onClosed }: AtRiskBannerProps) {
   const [closing, setClosing] = useState<LiquidationRisk | null>(null);
@@ -58,8 +58,7 @@ export function AtRiskBanner({ positions, livePrices, decimalsOf, onClosed }: At
               {danger ? "Liquidation risk" : "Approaching liquidation"}
             </h2>
             <span className="text-[11px] text-[var(--text-secondary)]">
-              {risks.length === 1 ? "1 position" : `${risks.length} positions`} within {LIQ_WARNING_PCT}% of
-              liquidation
+              {risks.length === 1 ? "1 position" : `${risks.length} positions`}
             </span>
           </div>
           <div className="grid gap-2 md:grid-cols-2">
