@@ -116,9 +116,10 @@ export const HARDCODED_BLOCKED_SLABS: readonly string[] = [
   // Jimothy/USDC — LP vault bankrupt: capital $0.00, pnl −$2,479. It is the
   // sole negative-PnL account, so negative_pnl_account_count=1 pins
   // bankruptcy_hlock_active=1, try_clear_bankruptcy_hlock_if_healthy() can
-  // never fire, h_lock_lane returns HMax and every favorable action (closes,
-  // withdrawals) reverts Custom(21). Not recoverable without settling that
-  // position. Also spends ~10% of each minute in target-effective-lag.
+  // never fire. (Engine 35ddd692: the h-lock gates only LP-backing / insurance
+  // withdrawals and admin oracle reconfig, NOT closes or user withdrawals; the
+  // closes reverted here under an older engine.) Not recoverable without settling
+  // that position. Also spends ~10% of each minute in target-effective-lag.
   "gHey79gB1xGQyXne8yEHoKmGi6jrEVigLwxSXQrYkD3",
   // TROLL/USDC — healthy (LP $1000.00, all flags clear); retired with the rest
   // of the lineup, not for a fault of its own.
@@ -203,7 +204,8 @@ export const HARDCODED_BLOCKED_SLABS: readonly string[] = [
   // CATE's LP was drained to $0 by real on-chain bot churn (two-level ±1.6%
   // price oscillation) that the engine ratchets into one-way losses; the
   // market is permanently in bankruptcy hlock (negative_pnl_account_count=1
-  // can never clear), which blocks EVERY user's close and withdraw. Percolator
+  // can never clear); on the older engine this blocked every user's close and
+  // withdraw (current engine: LP-backing/insurance withdrawals only). Percolator
   // never traded but was created on the same raw-spot feed; both retired so
   // the board restarts on the median-smoothed AuthMark keeper.
   "6CFMN29zPgsczCQUjeZZiWxVPDUKN52RJqBLvRsTTERn",  // CATE (bankrupt LP, hlocked)

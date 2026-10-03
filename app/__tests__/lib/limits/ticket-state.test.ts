@@ -4,6 +4,8 @@
  * first match wins. Plus the ONE max per side (§4.2, TR-2) and the fee-fit suggestion (row 11).
  */
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { balanceMaxQ, deriveTicketState, maxInUnit, oneMaxQ, type TicketStateInput } from "@/lib/limits/ticket-state";
 import { ticketRowShortLabel } from "@/lib/limits/ticket-status-store";
 import { deriveTicketLimits, feeFitSizeQ } from "@/lib/limits/ticket";
@@ -216,5 +218,20 @@ describe("row 11: the fee-fit suggestion", () => {
     });
     expect(over(L, 100_000_000n)).toBe(false);
     expect(feeFitSizeQ(input(L))).toBeNull();
+  });
+});
+
+describe("the order ticket never blocks on the bankruptcy h-lock (engine 35ddd692: it gates only LP/insurance withdrawals)", () => {
+  const src = (rel: string) => readFileSync(resolve(process.cwd(), rel), "utf8");
+  it("no ticket-state / ticket-wiring source reads the flag or the 'bankruptcy' lock reason", () => {
+    for (const f of ["lib/limits/ticket-state.ts", "lib/limits/ticket-status-store.ts", "components/trade/OrderTicket.tsx", "components/limits/OrderTicketLimits.tsx"]) {
+      expect(src(f), f).not.toMatch(/bankruptcy_hlock|hlock|h-lock|\"bankruptcy\"|bankruptcyHlock/i);
+    }
+  });
+  it("a market that is otherwise open stays unblocked whatever else is true of its health", () => {
+    expect(deriveTicketState(base())).toMatchObject({ row: "ok", blocks: false });
+  });
+  it("NEGATIVE CONTROL: the scan would catch a regression (the health module does mention it)", () => {
+    expect(src("lib/market-health.ts")).toMatch(/bankruptcy/i);
   });
 });

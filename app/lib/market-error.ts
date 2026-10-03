@@ -8,7 +8,8 @@
  *     "market locked" (live 2026-09-29: COLLECT/TEXTIT/Murphy; after the
  *     self-heal repairs the remaining revert is Custom(49) at the trade);
  *   - 21 on a Resolved market → "resolved: close/withdraw only";
- *   - 21 with the bankruptcy h-lock up → "a bankrupt account is being settled";
+ *   - the bankruptcy h-lock is NEVER blamed for a trader Custom(21): it gates only LP-backing /
+ *     insurance withdrawals, so a 21 on a trader path has another cause (ADL, LP depleted, …);
  *   - 19/21 with a lapsed bucket / ResetPending side → "retry: the repair is
  *     included" (self-heal normally prevents this; it can race the keeper);
  *   - 49 on an open with LP capital 0 → "LP depleted", not "deposit more".
@@ -33,9 +34,6 @@ export const MSG_LP_DEPLETED_OPEN =
 export const MSG_RESOLVED =
   "This market is resolved. New positions can't be opened; you can still close positions and withdraw.";
 export const MSG_RECOVERY = "This market is in recovery mode. New positions are blocked until it recovers.";
-export const MSG_BANKRUPTCY =
-  "Market temporarily locked: a bankrupt account must be liquidated before new risk is accepted. " +
-  "The keeper does this automatically — try again in a minute.";
 export const MSG_REPAIRABLE =
   "Market temporarily locked by an expired backing bucket or a side waiting to reset. " +
   "Try again: your next transaction includes the repair automatically.";
@@ -94,7 +92,6 @@ export function explainMarketTxError(
     if (has(health, "repairable")) return MSG_REPAIRABLE;
     if (code === WRAPPER_ERR.EngineLockActive && has(health, "adl-reduce-only")) return opening ? MSG_ADL_REDUCE_ONLY_OPEN : MSG_ADL_REDUCE_ONLY_CLOSE;
     if (code === WRAPPER_ERR.EngineLockActive && opening && health.lpDepleted) return MSG_LP_DEPLETED_OPEN;
-    if (code === WRAPPER_ERR.EngineLockActive && has(health, "bankruptcy")) return MSG_BANKRUPTCY;
     if (code === WRAPPER_ERR.EngineLockActive && has(health, "loss-stale")) return MSG_LOSS_STALE;
     if (code === WRAPPER_ERR.EngineLockActive && opening && has(health, "drain-only")) return MSG_DRAIN_ONLY;
     return null;

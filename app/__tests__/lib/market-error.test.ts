@@ -8,7 +8,7 @@ import { describe, it, expect } from "vitest";
 import { detectWalletError, failingProgramId, humanizeError, WALLET_LOCKED_MESSAGE, extractErrorCode } from "@/lib/errorMessages";
 import {
   explainMarketTxError,
-  MSG_BANKRUPTCY,
+  MSG_ADL_REDUCE_ONLY_OPEN,
   MSG_LOSS_STALE,
   MSG_LP_DEPLETED_OPEN,
   MSG_REPAIRABLE,
@@ -121,11 +121,18 @@ describe("explainMarketTxError: 19/21/49 refined by live health", () => {
     expect(humanizeError(presim(4, 49))).toMatch(/Insufficient margin/);
     expect(explainMarketTxError(presim(4, 49), "close", health({ lpDepleted: true }))).toBeNull();
   });
-  it("resolved / bankruptcy / repairable / loss-stale", () => {
+  it("resolved / repairable / loss-stale", () => {
     expect(explainMarketTxError(presim(4, 21), "open", health({ lockReasons: ["resolved"] }))).toBe(MSG_RESOLVED);
-    expect(explainMarketTxError(presim(4, 21), "open", health({ lockReasons: ["bankruptcy"] }))).toBe(MSG_BANKRUPTCY);
     expect(explainMarketTxError(presim(4, 19), "close", health({ lockReasons: ["repairable"] }))).toBe(MSG_REPAIRABLE);
     expect(explainMarketTxError(presim(4, 21), "deposit", health({ lockReasons: ["loss-stale"] }))).toBe(MSG_LOSS_STALE);
+  });
+  it("A-2: the bankruptcy h-lock is never blamed for a trader Custom(21), on any action", () => {
+    for (const action of ["open", "close", "deposit", "withdraw"] as const) {
+      expect(explainMarketTxError(presim(4, 21), action, health({ lockReasons: ["bankruptcy"] }))).toBeNull();
+    }
+    // The real cause still wins when it co-occurs with the flag.
+    expect(explainMarketTxError(presim(4, 21), "open", health({ lockReasons: ["bankruptcy", "adl-reduce-only"] }))).toBe(MSG_ADL_REDUCE_ONLY_OPEN);
+    expect(explainMarketTxError(presim(4, 21), "open", health({ lockReasons: ["bankruptcy"], lpDepleted: true, lpCapital: "0" }))).toBe(MSG_LP_DEPLETED_OPEN);
   });
   it("NEGATIVE CONTROL: no health / healthy market / unrelated code → keep the generic text", () => {
     expect(explainMarketTxError(presim(4, 21), "open", null)).toBeNull();

@@ -1063,7 +1063,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       // still correct for deposit/withdraw/NFT/market-creation call sites).
       // Custom(9) is NOT always slippage — see the #2643 refinement below.
       // P0b: refine 19/21/49 with live market health (LP depleted / resolved /
-      // bankruptcy / repairable) — lib/market-error.ts. Wallet lock and program
+      // ADL reduce-only / repairable) — lib/market-error.ts. Wallet lock and program
       // Unauthorized(8) are never refined into "locked".
       // UX WP-1: one resolver. A mapped refusal (usually caught by sendTx's pre-sign
       // simulation, so the wallet never opened) renders as ONE StatusLine with its next

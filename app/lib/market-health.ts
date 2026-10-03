@@ -77,7 +77,7 @@ export const MARKET_HEALTH_SLICE_LEN = MARKET_GROUP_OFF + MARKET_GROUP_LEN + 232
 export type LockReason =
   | "resolved" //       header.mode == Resolved: closes/withdrawals only
   | "recovery" //       header.mode == Recovery
-  | "bankruptcy" //     bankruptcy_hlock_active: a bankrupt account must be settled first
+  | "bankruptcy" //     bankruptcy_hlock_active: gates LP-backing/insurance withdrawals only (NOT trading); clears when pnl_pos_tot == 0
   | "loss-stale" //     loss_stale_active: positioned accounts need a refresh crank (keeper, ~seconds)
   | "repairable" //     lapsed backing bucket / ResetPending side — self-heal repairs it in your tx
   | "drain-only" //     a side is DrainOnly: only risk-reducing trades on that side
@@ -300,7 +300,11 @@ export function healthBadges(h: MarketHealth): HealthBadge[] {
     });
   }
   if (h.lockReasons.includes("bankruptcy")) {
-    out.push({ id: "bankruptcy", label: "Catching up", tone: "warning", detail: "A position is being settled after a large loss. New positions reopen automatically, usually within a minute." });
+    // The h-lock gates ONLY LP-backing / insurance withdrawals and admin oracle reconfiguration
+    // (wrapper tags 50/52/57); trading, deposits, user withdrawals and liquidations are unaffected.
+    // Info tone + not a list badge + not a header state: it is surfaced only where badges are
+    // rendered in full, never as a trading lock.
+    out.push({ id: "bankruptcy", label: "LP withdrawals paused", tone: "info", detail: "LP and insurance withdrawals are paused until open profits in this market are settled. Trading, closing and your own deposits and withdrawals are not affected." });
   }
   if (h.lockReasons.includes("drain-only")) {
     out.push({ id: "drain-only", label: `${h.drainOnlySides.join(" & ")} close-only`, tone: "warning", detail: "One side of this market only accepts trades that reduce positions right now." });
