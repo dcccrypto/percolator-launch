@@ -58,6 +58,21 @@ vi.mock('@/lib/config', () => ({
   getAllProgramIds: vi.fn(() => [state.programId]),
 }));
 
+/*
+ * GET /api/playground/registered-markets drops slabs the RPC confirms are gone
+ * (GH#2988) via lib/live-market-state, which pulls in the real slab parsers
+ * (v17-engine-config → SDK V17_* layout constants) and lib/server-rpc. This
+ * test is about the Blob lost-update race, not chain liveness, so every slab
+ * is reported as existing: the route's chain filter drops nothing and the race
+ * assertions below keep their meaning.
+ */
+vi.mock('@/lib/live-market-state', () => ({
+  readSlabExistence: vi.fn(async () => ({
+    missing: new Set<string>(),
+    unresolved: new Set<string>(),
+  })),
+}));
+
 vi.mock('@solana/web3.js', () => {
   class PublicKey {
     private readonly value: string;
