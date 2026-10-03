@@ -144,7 +144,7 @@ describe("readLiveMarketStateResolutions", () => {
 });
 
 describe("readSlabExistence", () => {
-  it("asks for a zero-length dataSlice and treats any non-null account as existing", async () => {
+  it("asks for a 17-byte dataSlice (header + 1) and treats any non-tombstone account as existing", async () => {
     const rpc = vi.fn(async () => [
       null,
       { data: Buffer.alloc(0) },
@@ -156,10 +156,10 @@ describe("readSlabExistence", () => {
 
     expect(rpc).toHaveBeenCalledTimes(1);
     expect((rpc.mock.calls[0] as unknown[])[1]).toEqual({
-      dataSlice: { offset: 0, length: 0 },
+      dataSlice: { offset: 0, length: 17 },
     });
     expect([...result.missing]).toEqual([SLAB]);
-    // An existing account with zero returned bytes is neither missing nor unresolved.
+    // An existing account that is not the tombstone is neither missing nor unresolved.
     expect(result.unresolved.size).toBe(0);
   });
 

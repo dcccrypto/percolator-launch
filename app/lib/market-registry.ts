@@ -123,7 +123,8 @@ async function fetchRegistryRows(
  * chain supplies what only it has (price, OI, insurance, vault, c_tot). Blocked
  * slabs are dropped here so every consumer inherits that filter.
  *
- * A slab positively confirmed missing is dropped. Unresolved RPC/parse reads
+ * A slab confirmed dead is dropped: an explicit RPC `null`, or the wrapper-owned closed-market
+ * tombstone CloseSlab leaves (CloseSlab shrinks to 16 bytes, it does not delete). Unresolved RPC/parse reads
  * keep their registry values and preserve the existing fail-open behaviour.
  */
 export async function loadMergedMarketRows(): Promise<MarketRegistryRow[] | null> {
@@ -148,8 +149,9 @@ export async function loadMergedMarketRows(): Promise<MarketRegistryRow[] | null
   // program is a market of an abandoned wrapper — never list it.
   //
   // GH#2988: distinguish positive account absence from an unresolved RPC gap.
-  // A successful RPC `null` proves the slab is gone and should no longer be
-  // discoverable. RPC/parse uncertainty keeps the existing fail-open policy.
+  // A successful RPC `null`, or the CloseSlab tombstone (liveRead.missing covers both, and this
+  // applies to curated PLAYGROUND_SLAB_META markets too), means the slab is gone and should no
+  // longer be discoverable. RPC/parse uncertainty keeps the existing fail-open policy.
   const wrapper = getConfig().programId;
   const current = registryRows.filter((m) => {
     const slab = String(m.slab_address ?? "");

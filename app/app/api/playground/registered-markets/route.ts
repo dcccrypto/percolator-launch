@@ -26,10 +26,21 @@
  *   1. blocklisted slabs are dropped outright;
  *   2. what remains is intersected with the live `markets` table, so a market
  *      that has been deleted stops being served without having to be named;
- *   3. (GH#2988) a slab the RPC positively reports as gone (explicit `null`, e.g.
- *      after CloseSlab) is dropped. An RPC failure, a short reply or a read in
- *      which NO slab exists (wrong cluster) proves nothing and drops nothing —
- *      see readSlabExistence in lib/live-market-state.ts.
+ *   3. (GH#2988) a slab confirmed dead is dropped: either the RPC returned an
+ *      explicit `null` (never existed / garbage-collected), or the account is
+ *      the wrapper-owned closed-market TOMBSTONE. CloseSlab does NOT delete the
+ *      slab (wrapper 553d76f0 handle_close_slab: realloc to 16 bytes, stamp
+ *      KIND_CLOSED_MARKET, keep the rent, stay owned by the wrapper), so a
+ *      closed market is never `null` — see lib/closed-market-tombstone.ts. An
+ *      RPC failure, a short reply, an unparseable account or a read in which NO
+ *      slab exists (wrong cluster) proves nothing and drops nothing — see
+ *      readSlabExistence in lib/live-market-state.ts.
+ *
+ * KEEPER: the live relaunch keeper's register-poll sources its list from the
+ * Supabase `markets` table (REGISTER_SOURCE_URL is legacy/log-only), so this
+ * endpoint's contents do not drive it. A keeper that does consume the list
+ * retires an absent entry only after ABSENCE_THRESHOLD consecutive absences and
+ * refuses a 0-market wipe, so dropping a closed market is safe.
  *
  * The DB is the authority for what exists; the Blob only supplies the extra fields
  * the keeper needs that the DB does not carry (dexType, poolAddress). If the DB is
@@ -74,8 +85,8 @@ export async function GET() {
 
   const dbFiltered = live === null ? notBlocked : notBlocked.filter((m) => live.has(m.slabAddress));
 
-  // GH#2988: drop only slabs the RPC positively reports as absent. Existence-only probe (zero-length
-  // dataSlice), so this costs no slab bytes; RPC/parse uncertainty keeps the fail-open policy.
+  // GH#2988: drop only slabs confirmed dead (null, or the closed-market tombstone). Existence-only probe
+  // (17-byte dataSlice), so this costs ~no slab bytes; RPC/parse uncertainty keeps the fail-open policy.
   const chain = await readSlabExistence(dbFiltered.map((m) => m.slabAddress));
   const markets = dbFiltered.filter((m) => !chain.missing.has(m.slabAddress));
 

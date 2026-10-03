@@ -11,6 +11,8 @@ import { sanitizeOnChainValue } from "@/lib/health";
 import { isMarketauthComplete } from "@/lib/market-completeness";
 import { parseV17RiskParams } from "@/lib/v17-engine-config";
 import { leverageFromMarginBps } from "@/lib/market-params";
+import { getConfig } from "@/lib/config";
+import { isClosedMarketTombstone, TOMBSTONE_PROBE_SLICE_LEN } from "@/lib/closed-market-tombstone";
 
 /**
  * Live per-market state, read straight from the slab account.
@@ -236,7 +238,10 @@ function parseLiveState(data: Uint8Array, slabKey: PublicKey): LiveMarketState |
 /**
  * Resolution-aware result for batched slab reads (GH#2988).
  *
- * - `missing`: the RPC call succeeded and returned an explicit `null` for the slab.
+ * - `missing`: confirmed dead. Either (a) the RPC call succeeded and returned an explicit `null`
+ *   (never existed / garbage-collected), or (b) the account is the wrapper-owned closed-market
+ *   TOMBSTONE that CloseSlab leaves behind (see lib/closed-market-tombstone.ts: CloseSlab shrinks the
+ *   slab to 16 bytes and keeps it, it never returns `null`). `tombstoned` is the (b) subset.
  * - `unresolved`: nothing can be concluded — the chunk failed, the address is not a pubkey, the
  *   reply was short, or the account exists but is not a readable slab.
  *
@@ -245,6 +250,8 @@ function parseLiveState(data: Uint8Array, slabKey: PublicKey): LiveMarketState |
 export interface SlabResolution {
   missing: Set<string>;
   unresolved: Set<string>;
+  /** Subset of `missing` that is a closed-market tombstone rather than an absent account. */
+  tombstoned: Set<string>;
 }
 
 export interface LiveMarketReadResult extends SlabResolution {
@@ -254,9 +261,13 @@ export interface LiveMarketReadResult extends SlabResolution {
 type AccountProbe = { slab: string; key: PublicKey };
 type ProbedAccount = { data?: Uint8Array | null; owner?: PublicKey | null };
 
+/** What `onExisting` concluded about a non-null account. */
+type ExistingVerdict = true | false | "tombstone";
+
 /**
  * Batched getMultipleAccountsInfo with existence provenance. `onExisting` handles each non-null
- * account and returns false when it cannot be classified (→ unresolved).
+ * account: true = readable and alive, false = cannot be classified (→ unresolved), "tombstone" =
+ * the wrapper's closed-market marker (→ confirmed dead, reported in `missing` + `tombstoned`).
  *
  * WRONG-CLUSTER GUARD: a `null` only proves absence if the RPC is looking at the cluster that
  * holds our slabs. If not one requested account came back non-null (DEVNET_RPC_URL pointed at
@@ -267,10 +278,11 @@ async function resolveSlabAccounts(
   slabAddresses: string[],
   connection: Connection | undefined,
   dataSlice: { offset: number; length: number } | undefined,
-  onExisting: (probe: AccountProbe, info: ProbedAccount) => boolean,
+  onExisting: (probe: AccountProbe, info: ProbedAccount) => ExistingVerdict,
 ): Promise<SlabResolution> {
   const missing = new Set<string>();
   const unresolved = new Set<string>();
+  const tombstoned = new Set<string>();
 
   // Deduplicate; an invalid address is unresolved, never proof that an account is absent.
   const probes: AccountProbe[] = [];
@@ -281,7 +293,7 @@ async function resolveSlabAccounts(
       unresolved.add(slab);
     }
   }
-  if (probes.length === 0) return { missing, unresolved };
+  if (probes.length === 0) return { missing, unresolved, tombstoned };
 
   const conn = connection ?? getServerConnection("confirmed");
   let sawExisting = false;
@@ -302,7 +314,11 @@ async function resolveSlabAccounts(
           unresolved.add(probe.slab);
         } else {
           sawExisting = true;
-          if (!onExisting(probe, info)) unresolved.add(probe.slab);
+          const verdict = onExisting(probe, info);
+          if (verdict === "tombstone") {
+            missing.add(probe.slab);
+            tombstoned.add(probe.slab);
+          } else if (!verdict) unresolved.add(probe.slab);
         }
       });
     } catch {
@@ -315,7 +331,17 @@ async function resolveSlabAccounts(
     for (const slab of missing) unresolved.add(slab);
     missing.clear();
   }
-  return { missing, unresolved };
+  return { missing, unresolved, tombstoned };
+}
+
+/**
+ * Exact closed-market classification of an account the RPC returned. The tombstone must be owned by
+ * the current wrapper (only a wrapper can write program data; this also rejects a lookalike under
+ * another program).
+ */
+function classifyTombstone(data: Uint8Array | null | undefined, owner: PublicKey | null | undefined): boolean {
+  if (!owner || owner.toBase58() !== getConfig().programId) return false;
+  return isClosedMarketTombstone(data);
 }
 
 /** Read live state while preserving account-resolution provenance. Never throws. */
@@ -324,12 +350,14 @@ export async function readLiveMarketStateResolutions(
   connection?: Connection,
 ): Promise<LiveMarketReadResult> {
   const states = new Map<string, LiveMarketState>();
-  const { missing, unresolved } = await resolveSlabAccounts(
+  const { missing, unresolved, tombstoned } = await resolveSlabAccounts(
     slabAddresses,
     connection,
     undefined,
     ({ slab, key }, info) => {
       if (!info.data) return false;
+      // CloseSlab leaves a 16-byte wrapper-owned tombstone, not a null account: confirmed dead.
+      if (classifyTombstone(info.data, info.owner)) return "tombstone";
       const state = parseLiveState(new Uint8Array(info.data), key);
       // Exists but is not a readable v17 slab: unresolved, never "absent".
       if (!state) return false;
@@ -337,20 +365,27 @@ export async function readLiveMarketStateResolutions(
       return true;
     },
   );
-  return { states, missing, unresolved };
+  return { states, missing, unresolved, tombstoned };
 }
 
 /**
  * Existence-only probe for callers that only need to know whether a slab is gone (the
- * registered-markets route). Same missing/unresolved semantics and wrong-cluster guard as
- * readLiveMarketStateResolutions, but asks for a zero-length dataSlice, so it transfers no slab
- * bytes (a full read is ~25KB per slab). Never throws.
+ * registered-markets route). Same missing/unresolved/tombstoned semantics and wrong-cluster guard
+ * as readLiveMarketStateResolutions, but asks for a 17-byte dataSlice, so it transfers ~17 bytes per
+ * slab instead of ~25KB. Never throws.
  */
 export async function readSlabExistence(
   slabAddresses: string[],
   connection?: Connection,
 ): Promise<SlabResolution> {
-  return resolveSlabAccounts(slabAddresses, connection, { offset: 0, length: 0 }, () => true);
+  // Slice 17 bytes (header + 1): a reply of exactly 16 bytes proves the account IS 16 bytes long,
+  // which, with the exact header bytes and the wrapper owner, is the CloseSlab tombstone.
+  return resolveSlabAccounts(
+    slabAddresses,
+    connection,
+    { offset: 0, length: TOMBSTONE_PROBE_SLICE_LEN },
+    (_probe, info) => (classifyTombstone(info.data, info.owner) ? "tombstone" : true),
+  );
 }
 
 /**
