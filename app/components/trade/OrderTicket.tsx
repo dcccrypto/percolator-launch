@@ -1127,6 +1127,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const submitDisabled =
     accountPending ||
     marketLimits.sameOwnerPending === true ||
+    marketLimits.sameOwnerUnresolved === true ||
     tradePhase !== "idle" ||
     loading ||
     ticketState.blocks ||
@@ -1918,7 +1919,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               ? TICKET_COPY.waitingLatest
               : marketLimits.sameOwnerPending
                 ? "Loading market..."
-                : accountPending
+                : marketLimits.sameOwnerUnresolved
+                  ? "Market ownership unavailable"
+                  : accountPending
                   ? "Loading account…"
                   : fundOverWallet && !ticketState.blocks
                 ? "Get test funds"
@@ -1926,6 +1929,18 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                   ? FIRST_TRADE_COPY.button(fundLabel, direction === "long" ? "Long" : "Short")
                   : ticketState.buttonLabel}
         </button>
+
+        {marketLimits.sameOwnerUnresolved &&
+          marketLimits.retrySameOwnerResolution && (
+            <button
+              type="button"
+              data-testid="same-owner-retry"
+              onClick={marketLimits.retrySameOwnerResolution}
+              className="mt-2 w-full border border-[var(--border)] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)] transition-colors hover:text-[var(--text)]"
+            >
+              Retry market check
+            </button>
+          )}
         </>
       )}
 

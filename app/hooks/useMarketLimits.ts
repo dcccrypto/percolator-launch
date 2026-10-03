@@ -16,7 +16,7 @@
  * resolution after asset_admin is renounced because SameOwnerTrade is enforced
  * on-chain independently of those feature flags.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
@@ -79,10 +79,18 @@ export interface MarketLimits {
    */
   sameOwnerLpOwner?: Uint8Array | null;
   /**
-   * True while that canonical identity is still unresolved.
-   * The trade ticket must fail closed during this window.
+   * True while canonical same-owner identity is actively resolving.
    */
   sameOwnerPending?: boolean;
+  /**
+   * True after bounded canonical-owner resolution retries are exhausted.
+   * Opening remains fail-closed until the user explicitly retries.
+   */
+  sameOwnerUnresolved?: boolean;
+  /**
+   * Explicitly restart canonical same-owner identity resolution.
+   */
+  retrySameOwnerResolution?: () => void;
 }
 
 const OFF = (flags: LimitsFlags): MarketLimits => ({
@@ -137,9 +145,16 @@ export function useMarketLimits(
     slab: string;
     owner: Uint8Array;
   } | null>(null);
+  const [sameOwnerUnresolved, setSameOwnerUnresolved] = useState(false);
+  const [sameOwnerRetryNonce, setSameOwnerRetryNonce] = useState(0);
+
+  const retrySameOwnerResolution = useCallback(() => {
+    setSameOwnerRetryNonce((nonce) => nonce + 1);
+  }, []);
 
   useEffect(() => {
     setSameOwnerLp(null);
+    setSameOwnerUnresolved(false);
 
     if (
       anyOn ||
@@ -188,6 +203,7 @@ export function useMarketLimits(
             slab: slabAddress,
             owner: lp.owner.toBytes(),
           });
+          setSameOwnerUnresolved(false);
           return;
         }
       } catch {
@@ -203,6 +219,11 @@ export function useMarketLimits(
           () => void resolve(),
           delay,
         );
+        return;
+      }
+
+      if (alive) {
+        setSameOwnerUnresolved(true);
       }
     };
 
@@ -222,6 +243,7 @@ export function useMarketLimits(
     slabAddress,
     programIdStr,
     connection,
+    sameOwnerRetryNonce,
   ]);
 
   // Slab-derived parts: pure, recomputed per slab poll.
@@ -327,8 +349,23 @@ export function useMarketLimits(
           resolveSameOwnerLp &&
           (
             !assetAdminKnown ||
-            (assetAdminRenounced && !sameOwnerPart?.owner)
+            (
+              assetAdminRenounced &&
+              !sameOwnerPart?.owner &&
+              !sameOwnerUnresolved
+            )
           ),
+        sameOwnerUnresolved:
+          resolveSameOwnerLp &&
+          assetAdminRenounced &&
+          !sameOwnerPart?.owner &&
+          sameOwnerUnresolved,
+        retrySameOwnerResolution:
+          resolveSameOwnerLp &&
+          assetAdminRenounced &&
+          sameOwnerUnresolved
+            ? retrySameOwnerResolution
+            : undefined,
       };
     }
 
@@ -350,6 +387,8 @@ export function useMarketLimits(
       assetAdmin: admin,
       sameOwnerLpOwner: null,
       sameOwnerPending: false,
+      sameOwnerUnresolved: false,
+      retrySameOwnerResolution: undefined,
     };
   }, [
     anyOn,
@@ -362,6 +401,8 @@ export function useMarketLimits(
     assetAdminKnown,
     assetAdminRenounced,
     sameOwnerLp,
+    sameOwnerUnresolved,
     resolveSameOwnerLp,
+    retrySameOwnerResolution,
   ]);
 }

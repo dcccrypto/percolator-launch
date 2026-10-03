@@ -4,12 +4,12 @@
  * owns the market's matcher-LP portfolio. SameOwnerTrade (Custom 67) therefore
  * still applies on-chain through LP ownership.
  *
- * With limits flags OFF, useMarketLimits currently carries asset_admin but
- * drops the LP view entirely. That can make the creator ticket look tradeable
- * after the admin burn even though the wrapper remains close-only.
+ * Before this fix, with limits flags OFF, useMarketLimits carried asset_admin
+ * but dropped the LP identity needed after an admin burn. That could make the
+ * creator ticket look tradeable even though the wrapper remained close-only.
  */
 import { describe, expect, it, vi } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
 import { deriveTicketLimits } from "@/lib/limits/ticket";
 
@@ -220,6 +220,24 @@ describe("root-cause control", () => {
     expect(ticket.issues.map((x) => x.kind)).toContain(
       "same-owner",
     );
+
+    // Close-only does not mean frozen: a valid partial reduction remains
+    // permitted while an opening / position-increasing order is blocked.
+    const reduction = deriveTicketLimits({
+      limits: postBurnLimitsWithLpOwner,
+      direction: "short",
+      sizeQ: 1_000n,
+      takerPosQ: 5_000n,
+      takerOwner: CREATOR,
+      leverage: 1,
+      limitPriceE6: 0n,
+    });
+
+    expect(reduction.sameOwnerCloseOnly).toBe(true);
+    expect(reduction.sameOwner).toBe(false);
+    expect(reduction.issues.map((x) => x.kind)).not.toContain(
+      "same-owner",
+    );
   });
 });
 
@@ -305,5 +323,72 @@ describe("same-owner LP resolution gating", () => {
     expect(ticket.sameOwnerCloseOnly).toBe(true);
 
     mocks.assetAdminBytes = ZERO_ADMIN;
+  });
+});
+
+
+describe("same-owner resolution recovery", () => {
+  it("exposes an explicit retry after bounded resolution attempts are exhausted", async () => {
+    vi.useFakeTimers();
+
+    try {
+      mocks.assetAdminBytes = ZERO_ADMIN;
+      mocks.resolveMarketLp.mockReset();
+      mocks.resolveMarketLp.mockResolvedValue(null);
+
+      const { useMarketLimits } =
+        await import("@/hooks/useMarketLimits");
+
+      const { result } = renderHook(() =>
+        useMarketLimits(SLAB, 0, true),
+      );
+
+      // Initial resolution attempt.
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(mocks.resolveMarketLp).toHaveBeenCalledTimes(1);
+
+      // Bounded retries: 2 s, 8 s, 30 s.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(8_000);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+
+      expect(mocks.resolveMarketLp).toHaveBeenCalledTimes(4);
+      expect(result.current.sameOwnerPending).toBe(false);
+      expect(result.current.sameOwnerUnresolved).toBe(true);
+      expect(result.current.retrySameOwnerResolution).toBeTypeOf(
+        "function",
+      );
+
+      // RPC recovers. Explicit retry must restart resolution without
+      // reintroducing a continuous polling loop.
+      mocks.resolveMarketLp.mockResolvedValue({
+        owner: new PublicKey(CREATOR),
+      });
+
+      act(() => {
+        result.current.retrySameOwnerResolution?.();
+      });
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(mocks.resolveMarketLp).toHaveBeenCalledTimes(5);
+      expect(result.current.sameOwnerPending).toBe(false);
+      expect(result.current.sameOwnerUnresolved).toBe(false);
+      expect(result.current.sameOwnerLpOwner).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
