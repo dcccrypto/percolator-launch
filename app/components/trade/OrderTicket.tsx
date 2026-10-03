@@ -1243,6 +1243,30 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     </div>
   );
 
+  // Mode-aware connect CTA, shared by Open and Close: with no wallet, Close can't know whether
+  // there is a position, so it asks to connect instead of saying "No open position". Mirrors
+  // app/faucet/page.tsx's connect prompt. usePrivyLogin() alone is a no-op in the default
+  // wallet-adapter deployment (no PrivyProvider mounted), which left this button dead.
+  const connectCta = adapterAvailable ? (
+    <div className="w-full [&>*]:w-full [&_button]:w-full [&_button]:rounded-none [&_button]:py-2.5 [&_button]:text-[11px] [&_button]:font-medium [&_button]:uppercase [&_button]:tracking-[0.1em]">
+      <ConnectButton />
+    </div>
+  ) : privyAvailable ? (
+    <button
+      onClick={() => openWalletModal()}
+      className="w-full rounded-none bg-[var(--accent)] py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-white transition-[filter] duration-150 hover:brightness-110"
+    >
+      Connect Wallet
+    </button>
+  ) : (
+    <button
+      disabled
+      className="w-full cursor-not-allowed rounded-none bg-[var(--border)] py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)]"
+    >
+      Wallet Unavailable
+    </button>
+  );
+
   // ── Close mode — swap the order form for a compact close panel ───────────
   if (ticketMode === "close") {
     return (
@@ -1263,22 +1287,26 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             </div>
           ) : null;
         })()}
-        <OrderTicketClosePanel
-          slabAddress={slabAddress}
-          positionSize={existingPositionSize}
-          accountPending={accountPending}
-          entryPriceE6={existingEntryKnown ? existingEntryPriceE6 : 0n}
-          capital={capital}
-          symbol={symbol}
-          collateralSymbol={collateralSymbol}
-          decimals={decimals}
-          tradingFeeBps={params?.tradingFeeBps}
-          maxFillAbs={fillCaps?.maxFillAbs ?? null}
-          lpUnderfunded={lpUnderfunded}
-          engineStale={engineStale}
-          oracleBlocked={!mockMode && (oracleUnavailable || oracleStale)}
-          onClosed={handleClosed}
-        />
+        {needsWallet ? (
+          connectCta
+        ) : (
+          <OrderTicketClosePanel
+            slabAddress={slabAddress}
+            positionSize={existingPositionSize}
+            accountPending={accountPending}
+            entryPriceE6={existingEntryKnown ? existingEntryPriceE6 : 0n}
+            capital={capital}
+            symbol={symbol}
+            collateralSymbol={collateralSymbol}
+            decimals={decimals}
+            tradingFeeBps={params?.tradingFeeBps}
+            maxFillAbs={fillCaps?.maxFillAbs ?? null}
+            lpUnderfunded={lpUnderfunded}
+            engineStale={engineStale}
+            oracleBlocked={!mockMode && (oracleUnavailable || oracleStale)}
+            onClosed={handleClosed}
+          />
+        )}
       </div>
     );
   }
@@ -1712,28 +1740,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
       {/* ONE big full-width submit */}
       {needsWallet ? (
-        // Mode-aware connect CTA — mirrors app/faucet/page.tsx's connect-prompt
-        // pattern. usePrivyLogin() alone is a no-op in the default wallet-adapter
-        // deployment (no PrivyProvider mounted), which left this button dead.
-        adapterAvailable ? (
-          <div className="w-full [&>*]:w-full [&_button]:w-full [&_button]:rounded-none [&_button]:py-2.5 [&_button]:text-[11px] [&_button]:font-medium [&_button]:uppercase [&_button]:tracking-[0.1em]">
-            <ConnectButton />
-          </div>
-        ) : privyAvailable ? (
-          <button
-            onClick={() => openWalletModal()}
-            className="w-full rounded-none bg-[var(--accent)] py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-white transition-[filter] duration-150 hover:brightness-110"
-          >
-            Connect Wallet
-          </button>
-        ) : (
-          <button
-            disabled
-            className="w-full cursor-not-allowed rounded-none bg-[var(--border)] py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)]"
-          >
-            Wallet Unavailable
-          </button>
-        )
+        connectCta
       ) : (needsAccount || needsDeposit) && !walletHasTokens ? (
         <>
           {(() => {
