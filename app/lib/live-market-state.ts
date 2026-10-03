@@ -234,47 +234,156 @@ function parseLiveState(data: Uint8Array, slabKey: PublicKey): LiveMarketState |
 }
 
 /**
- * Read live state for the given slabs in batched RPC calls.
+ * Resolution-aware result for batched slab reads.
  *
- * Never throws: a chunk that fails is simply absent from the result, and
- * callers fall back to whatever the registry gave them. Partial results are
- * expected and fine — a market missing from the map renders exactly as it did
- * before this enrichment existed.
+ * `missing` and `unresolved` intentionally mean different things:
+ *
+ * - `missing`: RPC succeeded and explicitly returned `null`;
+ * - `unresolved`: chain state could not be classified because the RPC/chunk
+ *   failed, the address was invalid, or an existing account was unreadable.
+ *
+ * This distinction lets visibility callers remove positively absent slabs
+ * without breaking the existing fail-open behaviour for transient RPC gaps.
+ */
+export interface LiveMarketReadResult {
+  states: Map<string, LiveMarketState>;
+  missing: Set<string>;
+  unresolved: Set<string>;
+}
+
+/**
+ * Read live state while preserving account-resolution provenance.
+ *
+ * Never throws. A failed RPC chunk is `unresolved`; an explicit `null` from a
+ * successful RPC call is `missing`.
+ */
+export async function readLiveMarketStateResolutions(
+  slabAddresses: string[],
+  connection?: Connection,
+): Promise<LiveMarketReadResult> {
+  const states = new Map<string, LiveMarketState>();
+  const missing = new Set<string>();
+  const unresolved = new Set<string>();
+
+  if (slabAddresses.length === 0) {
+    return { states, missing, unresolved };
+  }
+
+  // Deduplicate before RPC work. Invalid addresses remain unresolved rather
+  // than being treated as proof that an on-chain account is absent.
+  const pubkeys: Array<{
+    slab: string;
+    key: PublicKey;
+  }> = [];
+
+  for (const slab of new Set(slabAddresses)) {
+    try {
+      pubkeys.push({
+        slab,
+        key: new PublicKey(slab),
+      });
+    } catch {
+      unresolved.add(slab);
+    }
+  }
+
+  if (pubkeys.length === 0) {
+    return { states, missing, unresolved };
+  }
+
+  const conn =
+    connection ?? getServerConnection("confirmed");
+
+  for (
+    let start = 0;
+    start < pubkeys.length;
+    start += CHUNK
+  ) {
+    const chunk = pubkeys.slice(
+      start,
+      start + CHUNK,
+    );
+
+    try {
+      const infos =
+        await conn.getMultipleAccountsInfo(
+          chunk.map((c) => c.key),
+        );
+
+      // Iterate requested accounts rather than only returned entries. A short
+      // or malformed response is unresolved; only an explicit null is missing.
+      for (let i = 0; i < chunk.length; i += 1) {
+        const { slab, key } = chunk[i];
+
+        if (i >= infos.length) {
+          unresolved.add(slab);
+          continue;
+        }
+
+        const info = infos[i];
+
+        if (info === null) {
+          missing.add(slab);
+          continue;
+        }
+
+        if (!info?.data) {
+          unresolved.add(slab);
+          continue;
+        }
+
+        const state = parseLiveState(
+          new Uint8Array(info.data),
+          key,
+        );
+
+        if (!state) {
+          // Account exists but cannot be classified as a readable v17 slab.
+          // Preserve fail-open semantics rather than calling it absent.
+          unresolved.add(slab);
+          continue;
+        }
+
+        states.set(
+          slab,
+          info.owner
+            ? {
+                ...state,
+                owner: info.owner.toBase58(),
+              }
+            : state,
+        );
+      }
+    } catch {
+      // RPC failure provides no account-existence evidence.
+      for (const { slab } of chunk) {
+        unresolved.add(slab);
+      }
+    }
+  }
+
+  return {
+    states,
+    missing,
+    unresolved,
+  };
+}
+
+/**
+ * Backward-compatible live-state API.
+ *
+ * Existing callers keep the previous Map-only contract. Visibility decisions
+ * that need to distinguish confirmed absence from an RPC gap should use
+ * `readLiveMarketStateResolutions()`.
  */
 export async function readLiveMarketStates(
   slabAddresses: string[],
   connection?: Connection,
 ): Promise<Map<string, LiveMarketState>> {
-  const out = new Map<string, LiveMarketState>();
-  if (slabAddresses.length === 0) return out;
-
-  // Deduplicate and drop anything that isn't a usable pubkey before spending an
-  // RPC round trip on it.
-  const pubkeys: Array<{ slab: string; key: PublicKey }> = [];
-  for (const slab of new Set(slabAddresses)) {
-    try {
-      pubkeys.push({ slab, key: new PublicKey(slab) });
-    } catch {
-      // Not a valid address — skip.
-    }
-  }
-  if (pubkeys.length === 0) return out;
-
-  const conn = connection ?? getServerConnection("confirmed");
-
-  for (let start = 0; start < pubkeys.length; start += CHUNK) {
-    const chunk = pubkeys.slice(start, start + CHUNK);
-    try {
-      const infos = await conn.getMultipleAccountsInfo(chunk.map((c) => c.key));
-      infos.forEach((info, i) => {
-        if (!info?.data) return;
-        const state = parseLiveState(new Uint8Array(info.data), chunk[i].key);
-        if (state) out.set(chunk[i].slab, info.owner ? { ...state, owner: info.owner.toBase58() } : state);
-      });
-    } catch {
-      // This chunk stays unresolved; the rest still land.
-    }
-  }
-
-  return out;
+  return (
+    await readLiveMarketStateResolutions(
+      slabAddresses,
+      connection,
+    )
+  ).states;
 }

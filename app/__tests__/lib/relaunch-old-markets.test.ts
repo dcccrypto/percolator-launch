@@ -18,8 +18,14 @@ const OLD_WRAPPER = "GnwdeQrAh4qzChJeVLrM21CXXWC1akjLH3DiijwzEEYZ";
 const FRESH_SLAB = "4zopgi4NbdPbnBisYNMkWbVizGuWKHHuKYLpxXQoT5Hy";
 const OLD_SLAB = "AzagguvrWmRgcBpsKuqomW7Yb1YUUd6UzcrkiRsqdhr";
 const UNREAD_SLAB = "HvCDVSx5gStg1WAxBAaXwpouLyTvAHCyBPHJHh3RfVJg";
+const DEAD_SLAB = "AcaTmUFncaVEBCvUoR57yWUseJgonUvanWHGYxmXok18";
 
-const m = vi.hoisted(() => ({ rows: [] as Record<string, unknown>[], live: new Map<string, Record<string, unknown>>() }));
+const m = vi.hoisted(() => ({
+  rows: [] as Record<string, unknown>[],
+  live: new Map<string, Record<string, unknown>>(),
+  missing: new Set<string>(),
+  unresolved: new Set<string>(),
+}));
 
 vi.mock("@sentry/nextjs", () => ({ captureMessage: vi.fn(), captureException: vi.fn() }));
 vi.mock("@/lib/config", () => ({ getConfig: () => ({ network: "devnet", programId: WRAPPER }) }));
@@ -29,7 +35,13 @@ vi.mock("@/lib/supabase", () => {
   chain.or = async () => ({ data: m.rows, error: null });
   return { getServiceClient: () => chain, getServerNetwork: () => "devnet" };
 });
-vi.mock("@/lib/live-market-state", () => ({ readLiveMarketStates: async () => m.live }));
+vi.mock("@/lib/live-market-state", () => ({
+  readLiveMarketStateResolutions: async () => ({
+    states: m.live,
+    missing: m.missing,
+    unresolved: m.unresolved,
+  }),
+}));
 
 import { loadMergedMarketRows } from "@/lib/market-registry";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
@@ -37,11 +49,26 @@ import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 const live = (owner: string) => ({ markPriceUsd: 1, oiLongQ: 0, oiShortQ: 0, totalOiQ: 0, totalOiUsd: 0, insurance: 0, vault: 1, cTot: 0, isComplete: true, maxLeverage: 10, owner });
 
 beforeEach(() => {
-  m.rows = [FRESH_SLAB, OLD_SLAB, UNREAD_SLAB].map((slab_address) => ({ slab_address, symbol: slab_address.slice(0, 4) }));
+  m.rows = [
+    FRESH_SLAB,
+    OLD_SLAB,
+    UNREAD_SLAB,
+    DEAD_SLAB,
+  ].map((slab_address) => ({
+    slab_address,
+    symbol: slab_address.slice(0, 4),
+  }));
+
   m.live = new Map([
     [FRESH_SLAB, live(WRAPPER)],
     [OLD_SLAB, live(OLD_WRAPPER)],
   ]);
+
+  // Confirmed account absence must be hidden.
+  m.missing = new Set([DEAD_SLAB]);
+
+  // RPC/parse uncertainty must retain the historical fail-open behavior.
+  m.unresolved = new Set([UNREAD_SLAB]);
 });
 
 describe("relaunch: abandoned-wrapper markets are never listed", () => {
@@ -49,9 +76,26 @@ describe("relaunch: abandoned-wrapper markets are never listed", () => {
     expect(Object.keys(PLAYGROUND_SLAB_META)).toEqual([]);
   });
 
-  it("the registry drops a row owned by another program; keeps the current wrapper's and an unreadable one", async () => {
-    const rows = (await loadMergedMarketRows())!.map((r) => r.slab_address);
-    expect(rows).toEqual([FRESH_SLAB, UNREAD_SLAB]);
+  it("drops another-program and confirmed-missing slabs while keeping an unresolved RPC gap", async () => {
+    const rows = (
+      await loadMergedMarketRows()
+    )!.map((r) => r.slab_address);
+
+    expect(rows).toEqual([
+      FRESH_SLAB,
+      UNREAD_SLAB,
+    ]);
+  });
+
+  it("NEGATIVE CONTROL: the same slab is retained when unresolved instead of positively missing", async () => {
+    m.missing.delete(DEAD_SLAB);
+    m.unresolved.add(DEAD_SLAB);
+
+    const rows = (
+      await loadMergedMarketRows()
+    )!.map((r) => r.slab_address);
+
+    expect(rows).toContain(DEAD_SLAB);
   });
 
   it("NEGATIVE CONTROL: with the old wrapper's slab read as the current owner, it is listed", async () => {

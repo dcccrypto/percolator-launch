@@ -35,6 +35,7 @@ import { NextResponse } from "next/server";
 import { readRegisteredMarkets } from "@/lib/playground-registered-markets";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
+import { readLiveMarketStateResolutions } from "@/lib/live-market-state";
 
 export const dynamic = "force-dynamic";
 
@@ -65,7 +66,25 @@ export async function GET() {
   const notBlocked = all.filter((m) => !BLOCKED_SLAB_ADDRESSES.has(m.slabAddress));
 
   const live = await liveSlabAddresses();
-  const markets = live === null ? notBlocked : notBlocked.filter((m) => live.has(m.slabAddress));
+
+  const dbFiltered =
+    live === null
+      ? notBlocked
+      : notBlocked.filter((m) =>
+          live.has(m.slabAddress),
+        );
+
+  const chain =
+    await readLiveMarketStateResolutions(
+      dbFiltered.map((m) => m.slabAddress),
+    );
+
+  // GH#2988: an explicit RPC `null` proves that the slab no longer exists.
+  // Drop only positively missing accounts. RPC/parse uncertainty intentionally
+  // remains fail-open so an infrastructure outage cannot empty the keeper feed.
+  const markets = dbFiltered.filter(
+    (m) => !chain.missing.has(m.slabAddress),
+  );
 
   return NextResponse.json(
     { markets },
