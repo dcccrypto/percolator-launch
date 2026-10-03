@@ -2,9 +2,9 @@
  * The chart's PnL badge carries a Share-PnL button for THIS market's open
  * position. The REAL badge builds the card data; PnlShareButton is a probe that
  * records it. Mirrors PositionsDock.share-pnl: identity from the market row,
- * entry from the on-chain/cached value (never a derived estimate — the badge
- * never renders without one), pool capacity from vault + insurance, and no
- * button at all when there's no open position or no entry.
+ * entry from the on-chain/cached value (never a derived estimate, even when the
+ * badge itself renders from one), pool capacity from vault + insurance, and no
+ * button at all when there's no open position or no recorded entry.
  */
 import "@testing-library/jest-dom";
 import { render, screen, cleanup } from "@testing-library/react";
@@ -95,6 +95,27 @@ describe("ChartPnlBadge — Share PnL", () => {
     render(<ChartPnlBadge slabAddress={SLAB} />);
     expect(screen.queryByRole("button", { name: "Share" })).not.toBeInTheDocument();
     expect(lastShared()).toBeUndefined(); // the badge returned before building data
+  });
+
+  it("never offers a card on a cache miss, even when on-chain pnl could back-solve an entry", () => {
+    // No cached entry, but a non-zero on-chain pnl: resolveEntryPrice would
+    // return a "derived" entry here (40e6 atoms over a 40e6-q long at $2.00
+    // back-solves to $1.00). Whether or not the badge itself renders from that
+    // estimate (#2990), the share card must not publish it — only the entry
+    // recorded at open is shareable, same as the dock.
+    h.entry = 0n;
+    h.account = acct({ pnl: 40_000_000n });
+    render(<ChartPnlBadge slabAddress={SLAB} />);
+    expect(screen.queryByRole("button", { name: "Share" })).not.toBeInTheDocument();
+    expect(h.shared.filter((d) => d !== null)).toEqual([]); // no card data built from it
+  });
+
+  it("CONTROL: the same position WITH a cached entry is shareable at that entry", () => {
+    h.entry = 1_000_000n;
+    h.account = acct({ pnl: 40_000_000n });
+    render(<ChartPnlBadge slabAddress={SLAB} />);
+    expect(screen.getByRole("button", { name: "Share" })).toBeInTheDocument();
+    expect(lastShared()!.entryE6).toBe(1_000_000n);
   });
 
   it("renders nothing when no entry is known (on-chain 0 and nothing cached)", () => {

@@ -97,13 +97,18 @@ export const ChartPnlBadge: FC<ChartPnlBadgeProps> = ({ slabAddress }) => {
   const colorClass =
     sign === "positive" ? "text-[var(--long)]" : sign === "negative" ? "text-[var(--short)]" : "text-[var(--text-secondary)]";
 
-  // Share-PnL card for THIS market's open position. The badge only reaches here
-  // with an open position, a cached/on-chain entry (getEntryPrice — never a
-  // back-solved estimate) and a valid mark, so the data is always shareable —
-  // same gate the dock's Share button applies. The pool payout capacity rides
-  // along so the card caps a winning PnL exactly where the dock's caveat does.
+  // Share-PnL card for THIS market's open position — only with the entry
+  // RECORDED at open (on chain, or this device's getEntryPrice cache), never a
+  // back-solved estimate. Same gate the dock's Share button applies
+  // (PositionsDock: `resolvedEntryPrice > 0n`, cache-only). The shareable entry
+  // is read here directly rather than inferred from how the badge resolved its
+  // display entry, so the gate holds even when the badge renders from a derived
+  // entry on a device with no cache (#2990/#3020). The pool payout capacity
+  // rides along so the card caps a winning PnL exactly where the dock's caveat does.
+  const recordedEntryE6 =
+    rawEntryPrice > 0n ? rawEntryPrice : getEntryPrice(slabAddress, userAccount.idx, account.owner.toBase58());
   const marketDisplaySymbol = (marketInfo?.symbol ?? "").replace(/-PERP$/i, "");
-  const pnlCardData: PnlCardData = {
+  const pnlCardData: PnlCardData | null = recordedEntryE6 <= 0n ? null : {
     slab: slabAddress,
     symbol: marketDisplaySymbol,
     name: marketInfo?.name ?? marketDisplaySymbol,
@@ -113,7 +118,7 @@ export const ChartPnlBadge: FC<ChartPnlBadgeProps> = ({ slabAddress }) => {
     decimals,
     nominalSizeQ: account.positionSize,
     effectiveSizeQ: effectiveSize,
-    entryE6: resolvedEntryPrice,
+    entryE6: recordedEntryE6,
     initialMarginBps,
     initialMarkE6: livePriceE6,
   };
@@ -129,6 +134,7 @@ export const ChartPnlBadge: FC<ChartPnlBadgeProps> = ({ slabAddress }) => {
       {/* The badge group is itself the drag handle — DraggableChartBadges takes
           pointer capture on pointerdown — so stop pointerdown here, otherwise a
           tap on Share starts a drag and the click never lands. */}
+      {pnlCardData && (
       <span onPointerDown={(e) => e.stopPropagation()}>
         <PnlShareButton
           data={pnlCardData}
@@ -137,6 +143,7 @@ export const ChartPnlBadge: FC<ChartPnlBadgeProps> = ({ slabAddress }) => {
           className="cursor-pointer rounded-none border border-[var(--accent)]/50 bg-[var(--bg)]/90 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--accent)] backdrop-blur-sm transition-colors hover:border-[var(--accent)] hover:bg-[var(--accent)]/10"
         />
       </span>
+      )}
     </>
   );
 };
