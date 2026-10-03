@@ -389,7 +389,6 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const marketResolved = marketHealth?.lockReasons.includes("resolved") === true;
 
   const { market: marketInfo } = useMarketInfo(slabAddress);
-  const symbol = marketInfo?.symbol ?? collateralSymbol;
   // Base ticker for the size-unit toggle: the registry symbol carries a
   // "-PERP" suffix ("SOL-PERP"), which overflowed the w-16 toggle button into
   // "SOL-PE…". The size unit is the BASE asset, so strip the suffix; fall
@@ -1269,7 +1268,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           accountPending={accountPending}
           entryPriceE6={existingEntryKnown ? existingEntryPriceE6 : 0n}
           capital={capital}
-          symbol={symbol}
+          symbol={baseTicker}
           collateralSymbol={collateralSymbol}
           decimals={decimals}
           tradingFeeBps={params?.tradingFeeBps}
@@ -1977,7 +1976,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           accountEquity={userAccount ? capital : null}
           riskLeverage={confirmSnapshot.riskLeverage}
           depositAmount={confirmSnapshot.depositAtoms}
-          symbol={symbol}
+          symbol={baseTicker}
           collateralSymbol={collateralSymbol}
           decimals={decimals}
           onConfirm={() => {
