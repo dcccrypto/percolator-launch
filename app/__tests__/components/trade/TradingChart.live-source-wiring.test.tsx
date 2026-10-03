@@ -114,6 +114,32 @@ const harness = vi.hoisted(() => {
   };
 });
 
+const positionHarness = vi.hoisted(() => ({
+  slab: 'Eacc111111111111111111111111111111111111111',
+  wallet: 'DYvC111111111111111111111111111111111111111',
+
+  userAccount: {
+    idx: 0,
+    account: {
+      positionSize: -10_000_000n,
+      capital: 500_000_000n,
+      entryPrice: 0n,
+      pnl: 0n,
+      owner: {
+        toBase58: () =>
+          'DYvC111111111111111111111111111111111111111',
+      },
+    },
+  },
+
+  overlayPrefs: {
+    position: true,
+    entry: true,
+    liq: true,
+    pnl: false,
+  },
+}));
+
 vi.mock('lightweight-charts', () => ({
   createChart: vi.fn(() => harness.chart),
   LineStyle: {
@@ -144,8 +170,14 @@ vi.mock('@/lib/chart-live-tick', async (importOriginal) => {
 
 vi.mock('@/components/providers/SlabProvider', () => ({
   useSlabState: () => ({
-    config: {},
-    params: {},
+    slabAddress: positionHarness.slab,
+    config: {
+      lastEffectivePriceE6: 100_000_000n,
+      invert: 0,
+    },
+    params: {
+      maintenanceMarginBps: 500n,
+    },
   }),
 }));
 
@@ -180,7 +212,7 @@ vi.mock('@/hooks/useTokenChart', () => ({
 }));
 
 vi.mock('@/hooks/useUserAccount', () => ({
-  useUserAccount: () => null,
+  useUserAccount: () => positionHarness.userAccount,
 }));
 
 vi.mock('@/hooks/useMarketConfig', () => ({
@@ -195,10 +227,6 @@ vi.mock('@/hooks/useMarketInfo', () => ({
   }),
 }));
 
-vi.mock('@/hooks/useLiqPrice', () => ({
-  useLiqPrice: () => null,
-}));
-
 vi.mock('@/hooks/useChartTheme', () => ({
   useChartTheme: () => harness.chartTheme,
 }));
@@ -209,12 +237,7 @@ vi.mock('@/hooks/useChartStylePref', () => ({
 
 vi.mock('@/hooks/useChartOverlayPrefs', () => ({
   useChartOverlayPrefs: () => [
-    {
-      liq: false,
-      entry: false,
-      position: false,
-      pnl: false,
-    },
+    positionHarness.overlayPrefs,
     vi.fn(),
   ],
 }));
@@ -277,10 +300,6 @@ vi.mock('@/lib/mock-trade-data', () => ({
   getMockUserAccount: vi.fn(() => null),
 }));
 
-vi.mock('@/lib/entry-price', () => ({
-  getEntryPrice: vi.fn(() => 0n),
-}));
-
 vi.mock('@/components/ui/ShimmerSkeleton', () => ({
   ShimmerSkeleton: () => null,
 }));
@@ -311,10 +330,22 @@ vi.mock('@/components/trade/ChartDrawingToolbar', () => ({
 
 import { TradingChart } from '@/components/trade/TradingChart';
 import { selectChartSource } from '@/lib/chart-source-select';
+import { saveEntryPrice } from '@/lib/entry-price';
 
 describe('TradingChart live-source wiring', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
+
+    positionHarness.userAccount.account.entryPrice = 0n;
+    positionHarness.userAccount.account.pnl = 0n;
+
+    positionHarness.overlayPrefs = {
+      position: true,
+      entry: true,
+      liq: true,
+      pnl: false,
+    };
     harness.sources.percolatorStatus = 'success';
     harness.sources.percolatorCandlesOverride = null;
     harness.sources.dexStatus = 'idle';
@@ -408,4 +439,131 @@ describe('TradingChart live-source wiring', () => {
     });
     expect(screen.queryByText('DEX')).toBeNull();
   });
+
+  const drawnPriceLineTitles = () =>
+    harness.series.createPriceLine.mock.calls.map(
+      ([options]) => (options as { title?: string }).title,
+    );
+
+  it("CASE B: open SHORT with missing entry cache keeps Liq but does not invent Entry", async () => {
+    render(
+      <TradingChart
+        slabAddress={positionHarness.slab}
+        mintAddress="TestMint1111111111111111111111111111111111"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("SHORT")).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(drawnPriceLineTitles()).toContain("Mark");
+    });
+
+    expect(drawnPriceLineTitles()).not.toContain("Entry");
+    expect(drawnPriceLineTitles()).toContain("Liq");
+  });
+
+  it("CASE A: exact slab + idx + wallet entry cache restores Entry and Liq", async () => {
+    saveEntryPrice(
+      positionHarness.slab,
+      positionHarness.userAccount.idx,
+      100_000_000n,
+      2,
+      positionHarness.wallet,
+    );
+
+    render(
+      <TradingChart
+        slabAddress={positionHarness.slab}
+        mintAddress="TestMint1111111111111111111111111111111111"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("SHORT")).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      const titles = drawnPriceLineTitles();
+
+      expect(titles).toContain("Mark");
+      expect(titles).toContain("Entry");
+      expect(titles).toContain("Liq");
+    });
+  });
+
+  it("CASE D: missing cache with derivable PnL restores a trusted derived Entry and Liq", async () => {
+    // SHORT at a $100 mark with +10 collateral units of PnL:
+    //
+    // diff = pnl * 1e6 / abs(position)
+    //      = 10_000_000 * 1_000_000 / 10_000_000
+    //      = 1_000_000 e6
+    //
+    // SHORT entry = mark + diff = $101.
+    positionHarness.userAccount.account.pnl = 10_000_000n;
+
+    render(
+      <TradingChart
+        slabAddress={positionHarness.slab}
+        mintAddress="TestMint1111111111111111111111111111111111"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("SHORT")).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      const lines = harness.series.createPriceLine.mock.calls.map(
+        ([options]) =>
+          options as {
+            title?: string;
+            price?: number;
+          },
+      );
+
+      const entryLine = lines.find(
+        (line) => line.title === "Entry",
+      );
+
+      expect(entryLine?.price).toBe(101);
+      expect(lines.some((line) => line.title === "Mark")).toBe(true);
+      expect(lines.some((line) => line.title === "Liq")).toBe(true);
+    });
+  });
+
+  it("CASE C: Display preference OFF suppresses overlays globally unlike a missing per-market entry cache", async () => {
+    saveEntryPrice(
+      positionHarness.slab,
+      positionHarness.userAccount.idx,
+      100_000_000n,
+      2,
+      positionHarness.wallet,
+    );
+
+    positionHarness.overlayPrefs = {
+      position: false,
+      entry: false,
+      liq: false,
+      pnl: false,
+    };
+
+    render(
+      <TradingChart
+        slabAddress={positionHarness.slab}
+        mintAddress="TestMint1111111111111111111111111111111111"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(drawnPriceLineTitles()).toContain("Mark");
+    });
+
+    expect(screen.queryByText("SHORT")).toBeNull();
+    expect(drawnPriceLineTitles()).not.toContain("Entry");
+    expect(drawnPriceLineTitles()).not.toContain("Liq");
+  });
+
 });

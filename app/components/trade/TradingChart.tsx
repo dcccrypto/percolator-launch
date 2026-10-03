@@ -33,6 +33,10 @@ import { computeRef24h, computePriceChange } from "@/lib/chart-stats";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { getEntryPrice } from "@/lib/entry-price";
+import { displayEntryE6 } from "@/lib/entry-price-display";
+import { isSentinelValue } from "@/lib/health";
+import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
+import { resolveEntryPrice } from "@/lib/trading";
 import { useChartStylePref } from "@/hooks/useChartStylePref";
 import { useChartOverlayPrefs } from "@/hooks/useChartOverlayPrefs";
 import { useChartIndicatorPrefs } from "@/hooks/useChartIndicatorPrefs";
@@ -821,19 +825,58 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
     entryLineRef.current?.applyOptions({ color: chartTheme.entryLine });
   }, [chartTheme]);
 
-  // Derive entry price from user account
+  // Resolve the chart Entry through the same display contract used by the
+  // other position surfaces. v17/v18 does not persist entry_price on-chain:
+  // prefer the exact wallet-scoped cache, then allow a PnL-derived entry when
+  // resolveEntryPrice can establish one. source==="unknown" stays hidden ?
+  // its numeric .entry is a risk-math fallback, not a trader-visible Entry.
   const entryPriceNum = (() => {
     const ua = realUserAccount;
     if (!ua) return null;
-    const ep = ua.account.entryPrice;
-    // Read the client-side entry with the per-wallet key (account.owner === the
-    // connected wallet that saved it) — matching OrderTicket's save + every other
-    // reader. Omitting the wallet hits the legacy wallet-less key and misses, so
-    // the Entry line never drew for v17 positions.
-    const resolvedEntryPrice =
-      ep != null && ep > 0n ? ep : getEntryPrice(slabAddress, ua.idx, ua.account.owner.toBase58());
-    if (resolvedEntryPrice <= 0n) return null;
-    return Number(resolvedEntryPrice) / 1e6;
+
+    const { account } = ua;
+    if (account.positionSize === 0n) return null;
+
+    const rawEntryPrice = account.entryPrice ?? 0n;
+
+    const cachedEntryPrice =
+      rawEntryPrice > 0n
+        ? rawEntryPrice
+        : getEntryPrice(
+            slabAddress,
+            ua.idx,
+            account.owner.toBase58(),
+          );
+
+    const oraclePriceE6 = config
+      ? sanitizePriceE6(
+          applyInvert(
+            config.lastEffectivePriceE6,
+            config.invert,
+          ),
+        )
+      : 0n;
+
+    const safePnl =
+      account.pnl != null && !isSentinelValue(account.pnl)
+        ? account.pnl
+        : 0n;
+
+    const resolvedEntry = resolveEntryPrice(
+      account.positionSize,
+      cachedEntryPrice,
+      safePnl,
+      oraclePriceE6,
+    );
+
+    const displayEntry = displayEntryE6(
+      resolvedEntry.entry,
+      resolvedEntry.source,
+    );
+
+    return displayEntry > 0n
+      ? Number(displayEntry) / 1e6
+      : null;
   })();
 
   // Update series when data or chartStyle changes
