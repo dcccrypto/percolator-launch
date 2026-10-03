@@ -12,7 +12,8 @@ describe("wrapped-position hint in the positions dock", () => {
   it("points at the ⋯ menu's Unwrap, not the removed panel", () => {
     const dock = read("components/trade/PositionsDock.tsx");
     expect(dock).not.toMatch(/in the Position NFT panel/);
-    expect(dock).toContain("Unwrap it from the ⋯ menu to close");
+    // The banner text now lives in NFT_MENU_COPY.wrappedHint (wrapped-close-hint-copy.test.ts).
+    expect(dock).toContain("{NFT_MENU_COPY.wrappedHint}");
   });
 
   it("the menu it names exists with that button and action", () => {

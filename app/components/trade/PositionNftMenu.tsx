@@ -36,6 +36,8 @@ export const NFT_MENU_COPY = {
   cancel: "Cancel",
   badge: "NFT",
   closeWrapped: "Unwrap to close this position",
+  /** The dock's wrapped-position banner: names the ⋯ button and this menu's Unwrap item. */
+  wrappedHint: "Wrapped in Position NFT — Unwrap it from the ⋯ menu to close",
   heldElsewhere: "Held as an NFT by another wallet",
   closedTitle: "Your NFT-wrapped position has closed",
   closedBody: "Unwrap the NFT to get back any collateral left in it.",

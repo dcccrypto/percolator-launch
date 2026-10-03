@@ -77,7 +77,7 @@ export default function TradingPageLoading() {
           <ShimmerSkeleton className="h-full w-full" />
         </div>
 
-        {/* Order-ticket rail — single framed panel (order ticket + NFT panel) */}
+        {/* Order-ticket rail — single framed panel (the order ticket; the NFT panel left in UX WP-9) */}
         <div style={{ gridArea: "OrderTicket" }} className="border border-[var(--border)] p-3.5 space-y-3">
           {/* Long / Short segmented */}
           <div className="flex gap-1">
