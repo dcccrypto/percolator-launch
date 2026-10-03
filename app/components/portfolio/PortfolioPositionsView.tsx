@@ -6,7 +6,6 @@ import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
 import { computeLivePositionPnl, UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
 import { describeEntryPrice, displayEntryE6 } from "@/lib/entry-price-display";
 import { adlReductionTooltip } from "@/lib/v17-adl";
-import { computeLiquidationDistancePct } from "@/lib/liquidation-distance";
 import { SlabProvider } from "@/components/providers/SlabProvider";
 import { useClosePosition } from "@/hooks/useClosePosition";
 import { PnlShareButton } from "@/components/share/PnlShareButton";
@@ -14,7 +13,14 @@ import type { PnlCardData } from "@/lib/pnl-card";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { ClosePositionModal } from "@/components/trade/ClosePositionModal";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
-import { usePortfolio, getLiquidationSeverity, getLiquidationSeverityForState, positionRowKeys, type PortfolioPosition } from "@/hooks/usePortfolio";
+import {
+  usePortfolio,
+  getLiquidationSeverity,
+  getLiquidationSeverityForState,
+  liveLiquidationDistancePct,
+  positionRowKeys,
+  type PortfolioPosition,
+} from "@/hooks/usePortfolio";
 import { classifyLiquidation } from "@/lib/liquidation-state";
 import { describeLiqPrice } from "@/lib/liq-price-display";
 import { LiqPriceValue } from "@/components/trade/LiqPriceValue";
@@ -240,12 +246,7 @@ function PositionCard({
     pos.unrealizedPnl,
     pos.pnlPercent,
   );
-  const liquidationDistancePct = computeLiquidationDistancePct(
-    posSize,
-    markE6,
-    liquidationPriceE6,
-    pos.liquidationDistancePct,
-  );
+  const liquidationDistancePct = liveLiquidationDistancePct(pos, livePriceE6);
   const pnlPositive = pnlTokens >= 0n;
   // Classified from the LIVE mark this row renders with, not the snapshot the
   // hook captured. Severity must come from the state, because the percentage
@@ -560,7 +561,6 @@ export function PortfolioPositionsView() {
   // In mock mode, use synthetic positions
   const mockPositions = mockMode && !walletConnected ? getMockPortfolioPositions() : null;
   const positions: PortfolioPosition[] = mockPositions ?? portfolio.positions ?? [];
-  const atRiskCount = portfolio.atRiskCount ?? 0;
   const loading = mockPositions ? false : portfolio.loading;
   // First scan failed with nothing loaded: the empty list and $0 totals are
   // not real, so show "—" and an error instead of an empty account.
@@ -662,6 +662,10 @@ export function PortfolioPositionsView() {
   // subscribing effect (see its own doc comment) rather than mounting N
   // useSyncExternalStore instances just for this roll-up.
   const livePrices = useLiveSlabPrices(openPositions.map((pos) => pos.slabAddress));
+  // Counted at the live mark, like the strip and the cards (the poll's count lagged them by up to 30s).
+  const atRiskCount = openPositions.filter(
+    (pos) => getLiquidationSeverity(liveLiquidationDistancePct(pos, livePrices.get(pos.slabAddress))) !== "safe",
+  ).length;
   const liveUsdTotals = activePositions.length > 0 && !tokenMetasLoading
     ? (() => {
         let unrealizedPnlUsd = 0;
@@ -761,7 +765,7 @@ export function PortfolioPositionsView() {
 
         {/* At-risk strip — zero height unless a position is within the
             liquidation warning distance (see getLiquidationSeverity). */}
-        <AtRiskBanner positions={openPositions} />
+        <AtRiskBanner positions={openPositions} livePrices={livePrices} />
 
         {/* Tier 1 hero: Portfolio Value (live) + live Unrealized PnL beneath. */}
         <ScrollReveal stagger={0.08}>

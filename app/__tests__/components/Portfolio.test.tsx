@@ -638,7 +638,9 @@ describe("Portfolio Component Tests", () => {
       oraclePriceE6: 92000000n,
       pnlPercent: -90,
       leverage: 5,
-      liquidationPriceE6: 90000000n,
+      effectiveSize: 5000000n,
+      // (92 - 87.4) / 92 = 5%: the strip recomputes this from the mark (live, else oracle).
+      liquidationPriceE6: 87400000n,
       // Within "danger" distance (<=10%, see getLiquidationSeverity).
       liquidationDistancePct: 5,
       initialMarginBps: 1000n,
