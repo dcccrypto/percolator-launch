@@ -206,7 +206,7 @@ const FORMAT_EXEMPT: Record<string, string> = {
   "components/share/PnlShareCard.tsx|v.avgEntryUsd":
     "Pure presentation: v.avgEntryUsd is derived from the already-resolved entryE6 its callers pass, " +
     "and the Share-PnL button only renders for a gated position — PositionsDock passes it only when " +
-    "`pnlIsKnown && resolvedEntryPrice > 0n`, PortfolioPositionsView only when `displayEntryE6(...) > 0n` — " +
+    "`pnlIsKnown && resolvedEntryPrice > 0n` (a cached entry), PortfolioPositionsView only when `entryPriceSource === \"cache\"` — " +
     "so the card never shows a mark as the entry (it never reads account.entryPrice).",
 };
 

@@ -12,6 +12,8 @@ import {
   formatPriceUsd,
   buildShareTweet,
   buildShareToXUrl,
+  isPnlPoolCapped,
+  poolPayableCapacity,
   pnlCardBackgrounds,
   PNL_CARD_BACKGROUNDS_PROFIT,
   PNL_CARD_BACKGROUNDS_LOSS,
@@ -65,7 +67,8 @@ describe("formatting", () => {
   it("signs USD and percent, and shows a loss as -$…", () => {
     expect(formatSignedUsd(378.96)).toBe("+$378.96");
     expect(formatSignedUsd(-12.4)).toBe("-$12.40");
-    expect(formatSignedUsd(0)).toBe("+$0.00");
+    expect(formatSignedUsd(0)).toBe("$0.00");
+    expect(formatSignedPct(0)).toBe("0.0%");
     expect(formatSignedPct(42.8)).toBe("+42.8%");
     expect(formatSignedPct(-9.05)).toBe("-9.1%");
   });
@@ -107,5 +110,38 @@ describe("backgrounds", () => {
   it("pnlCardBackgrounds selects the set by result", () => {
     expect(pnlCardBackgrounds(true)).toBe(PNL_CARD_BACKGROUNDS_PROFIT);
     expect(pnlCardBackgrounds(false)).toBe(PNL_CARD_BACKGROUNDS_LOSS);
+  });
+});
+
+describe("tone, tweet and pool cap (credit/2907 corrections)", () => {
+  it("tone is the exact sign of the shown PnL; exactly zero is flat", () => {
+    expect(computePnlCardStats(base, 500_000n).tone).toBe("profit");
+    expect(computePnlCardStats(base, 300_000n).tone).toBe("loss");
+    expect(computePnlCardStats(base, 400_000n).tone).toBe("flat");
+  });
+  it("the tweet never contains a rocket, up, down or flat", () => {
+    for (const m of [500_000n, 300_000n, 400_000n]) {
+      expect(buildShareTweet(base, computePnlCardStats(base, m))).not.toContain("🚀");
+    }
+    expect(buildShareTweet(base, computePnlCardStats(base, 400_000n))).toMatch(/^I'm at breakeven \(\$0\.00, 0\.0%\)/);
+  });
+  it("isPnlPoolCapped matches the dock's rule (profit only, known capacity, strictly above)", () => {
+    expect(isPnlPoolCapped(10n, 5n)).toBe(true);
+    expect(isPnlPoolCapped(5n, 5n)).toBe(false);
+    expect(isPnlPoolCapped(-10n, 5n)).toBe(false);
+    expect(isPnlPoolCapped(10n, 0n)).toBe(false);
+    expect(isPnlPoolCapped(10n, null)).toBe(false);
+    expect(poolPayableCapacity(null, 7n)).toBe(7n);
+    expect(poolPayableCapacity(3n, undefined)).toBe(3n);
+  });
+  it("a capped PnL shows the payable figure; ROE is on that figure; paper PnL is kept", () => {
+    // Paper profit above $1 ($0.40 -> $0.44 on base); the pool can pay $1.
+    const s = computePnlCardStats({ ...base, payableCapacityAtoms: 1_000_000n }, 440_000n);
+    expect(s.isCapped).toBe(true);
+    expect(s.pnlUsd).toBe(1);
+    expect(s.paperPnlUsd).toBeGreaterThan(1);
+    const uncapped = computePnlCardStats(base, 440_000n);
+    expect(s.roePct).toBeLessThan(uncapped.roePct);
+    expect(buildShareTweet(base, s)).toContain("I'm up $1.00 (");
   });
 });

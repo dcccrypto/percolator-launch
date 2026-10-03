@@ -98,13 +98,23 @@ export function downloadBlob(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
-export async function copyBlobToClipboard(blob: Blob): Promise<boolean> {
+/**
+ * Write a PNG to the clipboard from a Promise<Blob>. Call this SYNCHRONOUSLY from
+ * the click handler (before any await): Safari/iOS require clipboard.write() to
+ * run inside the user activation, and accept a ClipboardItem whose value is a
+ * Promise so the async render can finish afterwards. Resolves true on success and
+ * false when unsupported or refused (callers fall back to a download).
+ */
+export function writeImageToClipboard(blobPromise: Promise<Blob>): Promise<boolean> {
   try {
     const CI = (window as unknown as { ClipboardItem?: typeof ClipboardItem }).ClipboardItem;
-    if (!CI || !navigator.clipboard?.write) return false;
-    await navigator.clipboard.write([new CI({ [blob.type]: blob })]);
-    return true;
+    if (!CI || !navigator.clipboard?.write) return Promise.resolve(false);
+    const item = new CI({ "image/png": blobPromise });
+    return navigator.clipboard.write([item]).then(
+      () => true,
+      () => false,
+    );
   } catch {
-    return false;
+    return Promise.resolve(false);
   }
 }

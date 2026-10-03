@@ -175,7 +175,8 @@ function PositionCard({
   collateralSymbol,
   decimals,
   marketName,
-  mintAddress,
+  logoUrl,
+  mainnetCa,
   onRefresh,
 }: {
   pos: PortfolioPosition;
@@ -183,9 +184,10 @@ function PositionCard({
   baseSymbol: string;
   collateralSymbol: string;
   decimals: number;
-  /** Market display name + token mint from the stats directory — for the Share-PnL card. */
+  /** Market display name, uploaded logo and mainnet CA from the stats directory — for the Share-PnL card. */
   marketName?: string | null;
-  mintAddress?: string | null;
+  logoUrl?: string | null;
+  mainnetCa?: string | null;
   onRefresh: () => void;
 }) {
   const [showClose, setShowClose] = useState(false);
@@ -357,14 +359,19 @@ function PositionCard({
                 )}
               </div>
               <PnlShareButton
+                // Only for an entry CACHED at open on this device — the dock's rule.
+                // A "derived" entry is an estimate back-solved from on-chain pnl;
+                // fine for the row (it says so in a tooltip) but not for a card
+                // that gets shared as a fact.
+                liveSlabCapacity
                 data={
-                  hasPosition && posEntry > 0n && markE6 > 0n
+                  hasPosition && pos.entryPriceSource === "cache" && posEntry > 0n && markE6 > 0n
                     ? {
                         slab: pos.slabAddress,
                         symbol: baseSymbol,
                         name: marketName || baseSymbol,
-                        logoUrl: null,
-                        mintAddress: mintAddress ?? null,
+                        logoUrl: logoUrl ?? null,
+                        mainnetCa: mainnetCa ?? null,
                         decimals,
                         nominalSizeQ: pos.account?.positionSize ?? posSize,
                         effectiveSizeQ: posSize,
@@ -920,7 +927,8 @@ export function PortfolioPositionsView() {
                   collateralSymbol={tokenMetaMap.get(pos.collateralMint.toBase58())?.symbol ?? "USDC"}
                   decimals={getDecimals(pos)}
                   marketName={statsMap.get(pos.slabAddress)?.name ?? null}
-                  mintAddress={statsMap.get(pos.slabAddress)?.mint_address ?? null}
+                  logoUrl={statsMap.get(pos.slabAddress)?.logo_url ?? null}
+                  mainnetCa={statsMap.get(pos.slabAddress)?.mainnet_ca ?? null}
                   onRefresh={refresh}
                 />
               ))}

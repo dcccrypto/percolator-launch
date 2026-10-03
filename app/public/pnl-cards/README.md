@@ -2,7 +2,9 @@
 
 Full card artwork for the live PnL share card. There are two tone-matched sets —
 the card shows the profit set on a gain and the loss set on a loss, so a red PnL
-never sits on "I made money" art:
+never sits on "I made money" art. (Only the scene is rate-limited: it flips at most
+once per 1.2 s so a breakeven PnL can't strobe it. The PnL, %, PROFIT/LOSS/BREAKEVEN
+label and colour always follow the live sign immediately.)
 
 ```
 profit:  bg-1.png  bg-2.png  bg-3.png  bg-4.png  bg-5.png

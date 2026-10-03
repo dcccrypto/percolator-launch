@@ -9,6 +9,10 @@ import type { PnlCardData } from "@/lib/pnl-card";
 const PnlShareModal = dynamic(() => import("@/components/share/PnlShareModal").then((m) => m.PnlShareModal), {
   ssr: false,
 });
+const PnlShareModalWithSlabCapacity = dynamic(
+  () => import("@/components/share/PnlShareModalWithSlabCapacity").then((m) => m.PnlShareModalWithSlabCapacity),
+  { ssr: false },
+);
 
 /**
  * "Share PnL" trigger. `data` is assembled by the caller from its own position
@@ -20,8 +24,15 @@ export function PnlShareButton({
   className,
   label = "Share PnL",
   title = "Share your PnL as a card",
+  liveSlabCapacity = false,
 }: {
   data: PnlCardData | null;
+  /**
+   * The caller has no slab context (portfolio rows): mount one with the modal so
+   * the card can read the pool's payout capacity and cap the PnL like the dock.
+   * The dock already passes `data.payableCapacityAtoms` and leaves this off.
+   */
+  liveSlabCapacity?: boolean;
   className?: string;
   label?: string;
   title?: string;
@@ -46,7 +57,12 @@ export function PnlShareButton({
       >
         {label}
       </button>
-      {open && <PnlShareModal data={data} onClose={() => setOpen(false)} />}
+      {open &&
+        (liveSlabCapacity ? (
+          <PnlShareModalWithSlabCapacity data={data} onClose={() => setOpen(false)} />
+        ) : (
+          <PnlShareModal data={data} onClose={() => setOpen(false)} />
+        ))}
     </>
   );
 }

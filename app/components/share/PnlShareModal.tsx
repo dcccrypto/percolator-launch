@@ -10,7 +10,8 @@ import {
   type PnlCardData,
 } from "@/lib/pnl-card";
 import { PnlShareCard, PNL_CARD_SIZE } from "@/components/share/PnlShareCard";
-import { captureCardToBlob, downloadBlob, copyBlobToClipboard } from "@/lib/capture-node";
+import { captureCardToBlob, downloadBlob, writeImageToClipboard } from "@/lib/capture-node";
+import { useTokenLogo } from "@/hooks/useTokenLogo";
 
 /** Live market mark for a slab from the shared price store; falls back to the given snapshot. */
 function useLiveMarkE6(slab: string, fallbackE6: bigint): bigint {
@@ -25,44 +26,34 @@ function useLiveMarkE6(slab: string, fallbackE6: bigint): bigint {
 
 const POLARITY_DWELL_MS = 1200;
 
-/** PnL dead-band (USD) for the polarity hold — at least $0.25, scaling to 0.5% of
- *  the amount spent. Shared by the hysteresis and the breakeven clamp below. */
-function polarityBand(spentUsd: number): number {
-  return Math.max(0.25, Math.abs(spentUsd) * 0.005);
-}
-
 /**
- * Stable profit/loss polarity for the card. A live PnL sitting at breakeven would
- * otherwise flip the card between its green and red treatments on every price
- * tick, so we hold the current polarity until the PnL is DECISIVELY on the other
- * side — past a small dead-band that scales with the position — and a minimum
- * dwell has elapsed since the last flip. The effect re-runs on every PnL change,
- * so a pending flip is continually re-evaluated (and cancelled if the PnL settles
- * back). Returns [isProfit, flipToken]; flipToken increments on each committed
- * flip so the view can play a transition.
+ * Profit/loss polarity for the BACKGROUND SCENE only (the artwork set and the
+ * flip shake) — never the card's text, which always follows the live sign. A PnL
+ * hovering at breakeven would otherwise swap the full-card artwork on every price
+ * tick, so the scene flips at most once per POLARITY_DWELL_MS. There is no
+ * dead-band: any lag between the scene and the true sign is bounded by the dwell.
+ * Returns [isProfit, flipToken]; flipToken increments on each committed flip so
+ * the view can play a transition.
  */
-function useStablePolarity(pnlUsd: number, spentUsd: number): [boolean, number] {
-  const band = polarityBand(spentUsd);
-  const [state, setState] = useState(() => ({ isProfit: pnlUsd >= 0, flips: 0 }));
+function useStablePolarity(pnlUsd: number): [boolean, number] {
+  const want = pnlUsd >= 0;
+  const [state, setState] = useState(() => ({ isProfit: want, flips: 0 }));
   const lastFlip = useRef(0);
   useEffect(() => {
-    const want = pnlUsd >= 0;
     if (want === state.isProfit) return; // steady — nothing to do
-    if (Math.abs(pnlUsd) < band) return; // inside the dead-band — hold current
     const commit = () => {
       lastFlip.current = Date.now();
-      setState((s) => ({ isProfit: pnlUsd >= 0, flips: s.flips + 1 }));
+      setState((s) => ({ isProfit: want, flips: s.flips + 1 }));
     };
     const wait = Math.max(0, POLARITY_DWELL_MS - (Date.now() - lastFlip.current));
     if (wait === 0) {
       commit();
       return;
     }
-    const t = setTimeout(() => {
-      if ((pnlUsd >= 0) !== state.isProfit && Math.abs(pnlUsd) >= band) commit();
-    }, wait);
+    // Re-armed on every sign change; cancelled if the sign settles back.
+    const t = setTimeout(commit, wait);
     return () => clearTimeout(t);
-  }, [pnlUsd, state.isProfit, band]);
+  }, [want, state.isProfit]);
   return [state.isProfit, state.flips];
 }
 
@@ -74,57 +65,36 @@ export function PnlShareModal({ data, onClose }: { data: PnlCardData; onClose: (
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const markE6 = useLiveMarkE6(data.slab, data.initialMarkE6);
   const stats = computePnlCardStats(data, markE6);
-  // Smoothed polarity drives the whole card (colours + background set), so a
-  // breakeven PnL can't strobe it; flipToken fires the shake on a real flip.
-  const [displayIsProfit, flipToken] = useStablePolarity(stats.pnlUsd, stats.spentUsd);
-
-  // During the brief hysteresis lag at a zero-crossing the live sign can disagree
-  // with the still-held polarity. A sub-dead-band blip (immaterial, near zero) is
-  // shown as breakeven ($0.00) so the card never reads as a contradiction
-  // ("YOU'VE MADE -$0.80"); a MATERIAL opposite value (|pnl| ≥ band, only possible
-  // during the dwell window of a fast swing) is shown truthfully — we never hide a
-  // real gain/loss, even if its label lags for a beat.
-  const subBandBlip = displayIsProfit !== (stats.pnlUsd >= 0) && Math.abs(stats.pnlUsd) < polarityBand(stats.spentUsd);
-  const shownPnlUsd = subBandBlip ? 0 : stats.pnlUsd;
-  const shownRoePct = subBandBlip ? 0 : stats.roePct;
+  // Smoothed polarity picks ONLY the background artwork set (so a breakeven PnL
+  // can't strobe the scene); flipToken fires the shake on a committed flip. The
+  // card's text — amount, ROE, PROFIT/LOSS label, wording, arrow, colour — always
+  // shows the TRUE signed figures from `stats` (the same numbers the dock shows),
+  // and the tweet is built from that same `stats`, so the two can't disagree.
+  const [sceneIsProfit, flipToken] = useStablePolarity(stats.pnlUsd);
 
   // Clear a pending toast timer on unmount so it can't setState after teardown.
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
 
-  // Resolve the token logo from the mint when the caller didn't supply one.
-  const [logoUrl, setLogoUrl] = useState<string | null>(data.logoUrl);
-  useEffect(() => {
-    if (data.logoUrl || !data.mintAddress) return;
-    let alive = true;
-    (async () => {
-      try {
-        const r = await fetch(`/api/token-logo/${data.mintAddress}`);
-        if (!r.ok) return;
-        const j = (await r.json()) as { logoUrl?: string | null };
-        if (alive && j?.logoUrl) setLogoUrl(j.logoUrl);
-      } catch {
-        /* logo is cosmetic — initials fallback */
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [data.logoUrl, data.mintAddress]);
+  // Logo precedence exactly as components/market/MarketLogo.tsx: the uploaded
+  // logo_url wins; otherwise the DEX logo resolved from the MAINNET contract
+  // address (never the devnet mint); otherwise the card's initials tile.
+  const dexLogoUrl = useTokenLogo(data.logoUrl ? null : data.mainnetCa);
+  const logoUrl = data.logoUrl ?? dexLogoUrl;
 
   // Backgrounds are tone-matched to the result and each set is separate. On a
   // polarity flip the new set starts at its first scene — resolved on the SAME
   // render as the flip (via the ref) so the card crossfades straight to the new
   // scene instead of flashing the old index against the new set first.
-  const backgrounds = pnlCardBackgrounds(displayIsProfit);
+  const backgrounds = pnlCardBackgrounds(sceneIsProfit);
   const [bgIdx, setBgIdx] = useState(0);
-  const lastPolarity = useRef(displayIsProfit);
-  const effectiveBgIdx = lastPolarity.current === displayIsProfit ? bgIdx : 0;
+  const lastPolarity = useRef(sceneIsProfit);
+  const effectiveBgIdx = lastPolarity.current === sceneIsProfit ? bgIdx : 0;
   useEffect(() => {
-    if (lastPolarity.current !== displayIsProfit) {
-      lastPolarity.current = displayIsProfit;
+    if (lastPolarity.current !== sceneIsProfit) {
+      lastPolarity.current = sceneIsProfit;
       setBgIdx(0);
     }
-  }, [displayIsProfit]);
+  }, [sceneIsProfit]);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<Toast>(null);
   const [scale, setScale] = useState(1);
@@ -185,26 +155,43 @@ export function PnlShareModal({ data, onClose }: { data: PnlCardData; onClose: (
       flash({ msg: "Couldn't copy link", kind: "err" });
     }
   };
-  const withCapture = async (action: (b: Blob) => Promise<void> | void, okMsg: string) => {
+  const fileName = `percolator-pnl-${data.symbol || "position"}.png`;
+  const saveImage = async () => {
     if (!cardRef.current || busy) return;
     setBusy(true);
     try {
-      const blob = await captureCardToBlob(cardRef.current, 2);
-      await action(blob);
-      flash({ msg: okMsg, kind: "ok" });
+      downloadBlob(await captureCardToBlob(cardRef.current, 2), fileName);
+      flash({ msg: "Image downloaded", kind: "ok" });
     } catch {
       flash({ msg: "Image export failed — try Share to X", kind: "err" });
     } finally {
       setBusy(false);
     }
   };
-  const saveImage = () =>
-    withCapture((b) => downloadBlob(b, `percolator-pnl-${data.symbol || "position"}.png`), "Image downloaded");
-  const copyImage = () =>
-    withCapture(async (b) => {
-      const ok = await copyBlobToClipboard(b);
-      if (!ok) throw new Error("clipboard");
-    }, "Image copied");
+  // Safari/iOS only allow clipboard.write() while the click's user activation is
+  // live, and the PNG render is async. So the ClipboardItem is created and written
+  // SYNCHRONOUSLY in this handler with a Promise<Blob> (no await before it); the
+  // browser waits for the image itself. Where that isn't supported (or the write
+  // is refused) the image is downloaded instead.
+  const copyImage = async () => {
+    if (!cardRef.current || busy) return;
+    setBusy(true);
+    const blobPromise = captureCardToBlob(cardRef.current, 2);
+    blobPromise.catch(() => {}); // observed below; avoid an unhandled-rejection report
+    const copied = writeImageToClipboard(blobPromise);
+    try {
+      if (await copied) {
+        flash({ msg: "Image copied", kind: "ok" });
+      } else {
+        downloadBlob(await blobPromise, fileName);
+        flash({ msg: "Copying images isn't supported here — image downloaded", kind: "ok" });
+      }
+    } catch {
+      flash({ msg: "Image export failed — try Share to X", kind: "err" });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return createPortal(
     <div
@@ -234,12 +221,14 @@ export function PnlShareModal({ data, onClose }: { data: PnlCardData; onClose: (
               symbol={data.symbol}
               name={data.name}
               logoUrl={logoUrl}
-              pnlUsd={shownPnlUsd}
-              roePct={shownRoePct}
+              pnlUsd={stats.pnlUsd}
+              roePct={stats.roePct}
+              paperPnlUsd={stats.paperPnlUsd}
+              isCapped={stats.isCapped}
               spentUsd={stats.spentUsd}
               avgEntryUsd={stats.avgEntryUsd}
               avgExitUsd={stats.avgExitUsd}
-              isProfit={displayIsProfit}
+              tone={stats.tone}
               bgUrl={bgUrl}
             />
           </div>

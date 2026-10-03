@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef, useEffect, useRef, useState } from "react";
-import { formatSignedUsd, formatSignedPct, formatPriceUsd, PERCOLATOR_TAG } from "@/lib/pnl-card";
+import { formatSignedUsd, formatSignedPct, formatPriceUsd, pnlCardWording, PERCOLATOR_TAG, PNL_CAPPED_NOTE, type PnlTone } from "@/lib/pnl-card";
 
 export interface PnlShareCardView {
   symbol: string;
@@ -12,7 +12,11 @@ export interface PnlShareCardView {
   spentUsd: number;
   avgEntryUsd: number;
   avgExitUsd: number;
-  isProfit: boolean;
+  /** Sign of the shown PnL — label, wording, arrow and colour all follow it. */
+  tone: PnlTone;
+  /** The PnL is pool-capped; pnlUsd is the payable figure and paperPnlUsd the uncapped one. */
+  isCapped?: boolean;
+  paperPnlUsd?: number;
   /** Background scene URL (the full card art: character + neon frame + empty
    *  stats panel). A gradient shows if unset or it fails to load. */
   bgUrl: string | null;
@@ -24,6 +28,7 @@ export const PNL_CARD_SIZE = 560;
 // Concrete colours (no CSS vars / color-mix) so the card serialises cleanly for image export.
 const GREEN = { base: "#4ade80", glow: "rgba(74,222,128,0.6)", soft: "rgba(74,222,128,0.14)", line: "rgba(74,222,128,0.65)" };
 const RED = { base: "#f87171", glow: "rgba(248,113,113,0.6)", soft: "rgba(248,113,113,0.14)", line: "rgba(248,113,113,0.65)" };
+const NEUTRAL = { base: "#e5e7eb", glow: "rgba(229,231,235,0.35)", soft: "rgba(229,231,235,0.12)", line: "rgba(229,231,235,0.5)" };
 const FONT = "var(--font-jetbrains-mono, ui-monospace), 'DejaVu Sans Mono', monospace";
 const SHADOW = "0 2px 10px rgba(0,0,0,0.75)";
 // Ease the green↔red tonal flip so a change of result glides rather than snaps.
@@ -60,12 +65,13 @@ function FadeOutScene({ url }: { url: string }) {
  * The shareable live-PnL card. The background art already carries the neon frame
  * and the empty bottom stats panel, so this only OVERLAYS the live data: the
  * logo / name / PnL / % on the upper-left, and the Spent / Avg entry / Avg exit
- * strip inside the baked panel. Green for profit, red for loss; the PnL is always
- * signed so a loss reads "-$…".
+ * strip inside the baked panel. Everything textual follows the SIGN of the PnL
+ * it is given (`tone`): green PROFIT / red LOSS / neutral BREAKEVEN, and the PnL
+ * is always signed so a loss reads "-$…".
  */
 export const PnlShareCard = forwardRef<HTMLDivElement, PnlShareCardView>(function PnlShareCard(v, ref) {
-  const good = v.isProfit;
-  const C = good ? GREEN : RED;
+  const C = v.tone === "profit" ? GREEN : v.tone === "loss" ? RED : NEUTRAL;
+  const words = pnlCardWording(v.tone);
 
   // Crossfade the scene when bgUrl changes (polarity flip or the viewer picking
   // another background): the root paints the CURRENT scene immediately, and the
@@ -141,21 +147,26 @@ export const PnlShareCard = forwardRef<HTMLDivElement, PnlShareCardView>(functio
         </div>
 
         <div style={{ marginTop: 16 }}>
-          <span style={{ display: "inline-block", padding: "5px 13px", borderRadius: 9, fontSize: 12.5, fontWeight: 800, letterSpacing: "0.12em", color: C.base, border: `1.5px solid ${C.line}`, background: C.soft, transition: COLOR_TX }}>
-            {good ? "PROFIT" : "LOSS"}
+          <span data-testid="pnl-card-label" style={{ display: "inline-block", padding: "5px 13px", borderRadius: 9, fontSize: 12.5, fontWeight: 800, letterSpacing: "0.12em", color: C.base, border: `1.5px solid ${C.line}`, background: C.soft, transition: COLOR_TX }}>
+            {words.label}
           </span>
         </div>
 
-        <div style={{ marginTop: 13, fontSize: 14, fontWeight: 700, letterSpacing: "0.08em", color: "rgba(255,255,255,0.82)", textShadow: SHADOW }}>
-          {good ? "YOU'VE MADE" : "YOU'RE DOWN"}
+        <div data-testid="pnl-card-headline" style={{ marginTop: 13, fontSize: 14, fontWeight: 700, letterSpacing: "0.08em", color: "rgba(255,255,255,0.82)", textShadow: SHADOW }}>
+          {words.headline}
         </div>
-        <div style={{ fontSize: 54, fontWeight: 800, lineHeight: 1.0, marginTop: 4, color: C.base, textShadow: `0 0 24px ${C.glow}, 0 2px 8px rgba(0,0,0,0.6)`, letterSpacing: "-0.02em", transition: COLOR_TX }}>
+        <div data-testid="pnl-card-amount" style={{ fontSize: 54, fontWeight: 800, lineHeight: 1.0, marginTop: 4, color: C.base, textShadow: `0 0 24px ${C.glow}, 0 2px 8px rgba(0,0,0,0.6)`, letterSpacing: "-0.02em", transition: COLOR_TX }}>
           {formatSignedUsd(v.pnlUsd)}
         </div>
+        {v.isCapped ? (
+          <div data-testid="pnl-card-capped" style={{ marginTop: 6, fontSize: 11, fontWeight: 700, letterSpacing: "0.04em", color: "rgba(255,255,255,0.72)", textShadow: SHADOW }}>
+            {PNL_CAPPED_NOTE} · paper {formatSignedUsd(v.paperPnlUsd ?? v.pnlUsd)}
+          </div>
+        ) : null}
 
         <div style={{ marginTop: 12 }}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: 9, fontSize: 17, fontWeight: 800, color: C.base, border: `1.5px solid ${C.line}`, background: C.soft, transition: COLOR_TX }}>
-            <span style={{ fontSize: 13 }}>{good ? "▲" : "▼"}</span>
+          <span data-testid="pnl-card-roe" style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: 9, fontSize: 17, fontWeight: 800, color: C.base, border: `1.5px solid ${C.line}`, background: C.soft, transition: COLOR_TX }}>
+            {words.arrow ? <span style={{ fontSize: 13 }}>{words.arrow}</span> : null}
             {formatSignedPct(v.roePct)}
           </span>
         </div>
