@@ -261,6 +261,19 @@ export interface LiveMarketReadResult extends SlabResolution {
 type AccountProbe = { slab: string; key: PublicKey };
 type ProbedAccount = { data?: Uint8Array | null; owner?: PublicKey | null };
 
+/** Rejects if `p` has not settled within `ms` (no timer when `ms` is undefined). */
+function withTimeout<T>(p: Promise<T>, ms: number | undefined): Promise<T> {
+  if (ms === undefined) return p;
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`slab probe timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
+}
+
+/** Existence probe budget per chunk; the registered-markets feed must not hang on a slow RPC. */
+export const SLAB_PROBE_TIMEOUT_MS = 4_000;
+
 /** What `onExisting` concluded about a non-null account. */
 type ExistingVerdict = true | false | "tombstone";
 
@@ -279,6 +292,7 @@ async function resolveSlabAccounts(
   connection: Connection | undefined,
   dataSlice: { offset: number; length: number } | undefined,
   onExisting: (probe: AccountProbe, info: ProbedAccount) => ExistingVerdict,
+  opts: { timeoutMs?: number; noRateLimitRetry?: boolean } = {},
 ): Promise<SlabResolution> {
   const missing = new Set<string>();
   const unresolved = new Set<string>();
@@ -295,16 +309,20 @@ async function resolveSlabAccounts(
   }
   if (probes.length === 0) return { missing, unresolved, tombstoned };
 
-  const conn = connection ?? getServerConnection("confirmed");
+  const conn =
+    connection ??
+    getServerConnection("confirmed", opts.noRateLimitRetry ? { disableRetryOnRateLimit: true } : {});
   let sawExisting = false;
 
   for (let start = 0; start < probes.length; start += CHUNK) {
     const chunk = probes.slice(start, start + CHUNK);
     try {
       const keys = chunk.map((c) => c.key);
-      const infos = dataSlice
-        ? await conn.getMultipleAccountsInfo(keys, { dataSlice })
-        : await conn.getMultipleAccountsInfo(keys);
+      const read = dataSlice
+        ? conn.getMultipleAccountsInfo(keys, { dataSlice })
+        : conn.getMultipleAccountsInfo(keys);
+      // A timeout rejects into the catch below: the chunk is unresolved, never hidden.
+      const infos = await withTimeout(read, opts.timeoutMs);
       // Walk the REQUESTED accounts: a short reply leaves the tail unresolved, not missing.
       chunk.forEach((probe, i) => {
         const info = i < infos.length ? infos[i] : undefined;
@@ -385,6 +403,9 @@ export async function readSlabExistence(
     connection,
     { offset: 0, length: TOMBSTONE_PROBE_SLICE_LEN },
     (_probe, info) => (classifyTombstone(info.data, info.owner) ? "tombstone" : true),
+    // This feed is polled constantly: bound each chunk and do not let web3.js back off on a 429.
+    // Both end in `unresolved` (fail open), never `missing`.
+    { timeoutMs: SLAB_PROBE_TIMEOUT_MS, noRateLimitRetry: true },
   );
 }
 

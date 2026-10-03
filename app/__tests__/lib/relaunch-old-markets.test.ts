@@ -18,7 +18,7 @@ const OLD_WRAPPER = "GnwdeQrAh4qzChJeVLrM21CXXWC1akjLH3DiijwzEEYZ";
 const FRESH_SLAB = "4zopgi4NbdPbnBisYNMkWbVizGuWKHHuKYLpxXQoT5Hy";
 const OLD_SLAB = "AzagguvrWmRgcBpsKuqomW7Yb1YUUd6UzcrkiRsqdhr";
 const UNREAD_SLAB = "HvCDVSx5gStg1WAxBAaXwpouLyTvAHCyBPHJHh3RfVJg";
-const DEAD_SLAB = "AcaTmUFncaVEBCvUoR57yWUseJgonUvanWHGYxmXok18";
+const MISTYPED_2988_SLAB = "AcaTmUFncaVEBCvUoR57yWUseJgonUvanWHGYxmXok18";
 
 const m = vi.hoisted(() => ({
   rows: [] as Record<string, unknown>[],
@@ -53,7 +53,7 @@ beforeEach(() => {
     FRESH_SLAB,
     OLD_SLAB,
     UNREAD_SLAB,
-    DEAD_SLAB,
+    MISTYPED_2988_SLAB,
   ].map((slab_address) => ({
     slab_address,
     symbol: slab_address.slice(0, 4),
@@ -65,7 +65,7 @@ beforeEach(() => {
   ]);
 
   // Confirmed account absence must be hidden.
-  m.missing = new Set([DEAD_SLAB]);
+  m.missing = new Set([MISTYPED_2988_SLAB]);
 
   // RPC/parse uncertainty must retain the historical fail-open behavior.
   m.unresolved = new Set([UNREAD_SLAB]);
@@ -88,14 +88,14 @@ describe("relaunch: abandoned-wrapper markets are never listed", () => {
   });
 
   it("NEGATIVE CONTROL: the same slab is retained when unresolved instead of positively missing", async () => {
-    m.missing.delete(DEAD_SLAB);
-    m.unresolved.add(DEAD_SLAB);
+    m.missing.delete(MISTYPED_2988_SLAB);
+    m.unresolved.add(MISTYPED_2988_SLAB);
 
     const rows = (
       await loadMergedMarketRows()
     )!.map((r) => r.slab_address);
 
-    expect(rows).toContain(DEAD_SLAB);
+    expect(rows).toContain(MISTYPED_2988_SLAB);
   });
 
   it("NEGATIVE CONTROL: with the old wrapper's slab read as the current owner, it is listed", async () => {

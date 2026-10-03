@@ -5,7 +5,7 @@ import { PublicKey } from "@solana/web3.js";
 
 const h = vi.hoisted(() => ({
   WRAPPER: "ETDLAdiAyWnEUngspYczTXUceT6X8f92eZQvr8nmSkWB",
-  CLOSED: "AcaTmUFncavEBcvUoR57yWU5eJgonUvanWHGYxmXok18",
+  CLOSED: "Vote111111111111111111111111111111111111111",
   GAP: "4zopgi4NbdPbnBisYNMkWbVizGuWKHHuKYLpxXQoT5Hy",
   fail: false,
 }));

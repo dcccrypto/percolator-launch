@@ -10,7 +10,7 @@ import { PublicKey } from "@solana/web3.js";
 const h = vi.hoisted(() => ({
   WRAPPER: "ETDLAdiAyWnEUngspYczTXUceT6X8f92eZQvr8nmSkWB",
   OTHER: "GnwdeQrAh4qzChJeVLrM21CXXWC1akjLH3DiijwzEEYZ",
-  CLOSED: "AcaTmUFncavEBcvUoR57yWU5eJgonUvanWHGYxmXok18",
+  CLOSED: "Vote111111111111111111111111111111111111111",
   LIVE: "4zopgi4NbdPbnBisYNMkWbVizGuWKHHuKYLpxXQoT5Hy",
   LOOKALIKE: "HvCDVSx5gStg1WAxBAaXwpouLyTvAHCyBPHJHh3RfVJg",
   replies: new Map<string, unknown>(),

@@ -143,6 +143,37 @@ describe("readLiveMarketStateResolutions", () => {
   });
 });
 
+describe("multi-chunk RPC failure (the real exposure for the never-hide-on-RPC-failure property)", () => {
+  // 101 slabs = 2 chunks (CHUNK = 100). Chunk 1 succeeds (accounts exist, so the wrong-cluster guard
+  // cannot rescue anything); chunk 2 rejects like a 429. A single failing chunk would be rescued by
+  // the guard and prove nothing, so these two tests are the independent control for that handler.
+  it("readLiveMarketStateResolutions: a rejected second chunk is unresolved, never missing", async () => {
+    const { Keypair } = await import("@solana/web3.js");
+    const slabs = Array.from({ length: 101 }, () => Keypair.generate().publicKey.toBase58());
+    const rpc = vi
+      .fn()
+      .mockResolvedValueOnce(slabs.slice(0, 100).map(() => EXISTING_INFO))
+      .mockRejectedValueOnce(new Error("429 Too Many Requests"));
+    const r = await readLiveMarketStateResolutions(slabs, { getMultipleAccountsInfo: rpc } as unknown as Connection);
+    expect(rpc).toHaveBeenCalledTimes(2);
+    expect(r.missing.size).toBe(0);
+    expect(r.unresolved.has(slabs[100])).toBe(true);
+  });
+
+  it("readSlabExistence: a rejected second chunk is unresolved, never missing", async () => {
+    const { Keypair } = await import("@solana/web3.js");
+    const slabs = Array.from({ length: 101 }, () => Keypair.generate().publicKey.toBase58());
+    const rpc = vi
+      .fn()
+      .mockResolvedValueOnce(slabs.slice(0, 100).map(() => EXISTING_INFO))
+      .mockRejectedValueOnce(new Error("429 Too Many Requests"));
+    const r = await readSlabExistence(slabs, { getMultipleAccountsInfo: rpc } as unknown as Connection);
+    expect(rpc).toHaveBeenCalledTimes(2);
+    expect(r.missing.size).toBe(0);
+    expect(r.unresolved.has(slabs[100])).toBe(true);
+  });
+});
+
 describe("readSlabExistence", () => {
   it("asks for a 17-byte dataSlice (header + 1) and treats any non-tombstone account as existing", async () => {
     const rpc = vi.fn(async () => [

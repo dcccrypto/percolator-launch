@@ -13,7 +13,8 @@ import {
  * those factories must also be created through vi.hoisted().
  */
 const h = vi.hoisted(() => ({
-  DEAD:
+  MISTYPED_2988: // mistyped copy of BURNIE from issue #2988; no such account
+   
     "AcaTmUFncaVEBCvUoR57yWUseJgonUvanWHGYxmXok18",
 
   LIVE:
@@ -48,7 +49,7 @@ vi.mock(
       });
 
       return [
-        entry(h.DEAD),
+        entry(h.MISTYPED_2988),
         entry(h.LIVE),
         entry(h.BLOCKED),
       ];
@@ -110,7 +111,7 @@ beforeEach(() => {
   h.dbError = false;
 
   h.dbSlabs = new Set([
-    h.DEAD,
+    h.MISTYPED_2988,
     h.LIVE,
     h.BLOCKED,
   ]);
@@ -127,7 +128,7 @@ describe(
       "POSITIVE CONTROL: drops a DB+Blob market whose slab is confirmed missing on-chain",
       async () => {
         h.missing = new Set([
-          h.DEAD,
+          h.MISTYPED_2988,
         ]);
 
         const response = await GET();
@@ -151,7 +152,7 @@ describe(
         // Blocklisted markets must be removed before chain liveness reads.
         expect(h.chainCalls).toEqual([
           [
-            h.DEAD,
+            h.MISTYPED_2988,
             h.LIVE,
           ],
         ]);
@@ -162,7 +163,7 @@ describe(
       "NEGATIVE CONTROL: keeps an unresolved slab when the chain read fails",
       async () => {
         h.unresolved = new Set([
-          h.DEAD,
+          h.MISTYPED_2988,
         ]);
 
         const response = await GET();
@@ -180,7 +181,7 @@ describe(
               market.slabAddress,
           ),
         ).toEqual([
-          h.DEAD,
+          h.MISTYPED_2988,
           h.LIVE,
         ]);
       },
@@ -192,7 +193,7 @@ describe(
         h.dbError = true;
 
         h.unresolved = new Set([
-          h.DEAD,
+          h.MISTYPED_2988,
           h.LIVE,
         ]);
 
@@ -211,7 +212,7 @@ describe(
               market.slabAddress,
           ),
         ).toEqual([
-          h.DEAD,
+          h.MISTYPED_2988,
           h.LIVE,
         ]);
       },
