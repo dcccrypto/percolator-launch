@@ -1,13 +1,66 @@
 import type { NextConfig } from "next";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 // withSentryConfig disabled — its build-time instrumentation is not Turbopack-
 // compatible (Next 16 builds with Turbopack) and injects Node-only code into the
 // Edge middleware bundle, which Vercel rejects at deploy ("referencing unsupported
 // modules"). See the export at the bottom of this file.
 // import { withSentryConfig } from "@sentry/nextjs";
 
+/**
+ * TradingView Advanced Charts availability, decided at BUILD time.
+ *
+ * `scripts/fetch-tv-library.mjs` (run by `pnpm build`) unpacks the licensed
+ * library into public/charting_library/ when TV_LIBRARY_TOKEN is set. The
+ * library is never committed (public repo — licence), so builds without the
+ * token (fork PRs, CI's bare `next build`, most local dev) have no library and
+ * the trade page renders the built-in lightweight-charts chart instead. The
+ * version is inlined into the client bundle so the page never requests a
+ * loader that was not deployed.
+ */
+function tvLibraryVersion(): string {
+  const dir = path.join(process.cwd(), "public", "charting_library");
+  try {
+    if (!existsSync(path.join(dir, "charting_library.standalone.js"))) return "";
+    if (!existsSync(path.join(dir, "sameorigin.html"))) return "";
+    const v = JSON.parse(readFileSync(path.join(dir, ".percolator-version.json"), "utf8")) as { tag?: unknown };
+    return typeof v.tag === "string" ? v.tag : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * The same-origin chart iframe document (/charting_library/sameorigin.html) is a
+ * static file the middleware matcher skips, so it gets its CSP here. It only
+ * loads the library's own same-origin bundles; the datafeed runs in the parent
+ * page.
+ *  - No 'unsafe-eval': the bundles were checked (2026-10-03, v32.2.0) and the chart
+ *    runs with zero securitypolicyviolation events under this policy.
+ *  - script-src 'unsafe-inline': the loader writes a few bootstrap <script>s into
+ *    the iframe (featureset/locale/theme setup). Same allowance the app page's own
+ *    CSP already makes (middleware.ts); the iframe document holds no user content.
+ *  - style-src 'unsafe-inline': the library injects inline styles and does not
+ *    support nonce-based style-src.
+ */
+const TV_FRAME_CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "frame-ancestors 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+].join("; ");
+
 // `eslint`/`typescript` are valid next.config runtime keys, but this @types/next
 // version omits them from the NextConfig type — hence the `as NextConfig` cast below.
 const nextConfig = {
+  env: {
+    NEXT_PUBLIC_TV_LIBRARY_VERSION: tvLibraryVersion(),
+  },
   // Playground is a fast-moving devnet contributor app: don't let a lint warning block
   // `next build` (Vercel already builds this way).
   eslint: { ignoreDuringBuilds: true },
@@ -79,6 +132,24 @@ const nextConfig = {
             value: "camera=(), microphone=(), geolocation=(), usb=(), bluetooth=()",
           },
         ],
+      },
+      // TradingView library (build-time fetched, see tvLibraryVersion above).
+      {
+        source: "/charting_library/:path*",
+        headers: [
+          { key: "Content-Security-Policy", value: TV_FRAME_CSP },
+          // The loader + iframe page reference hashed bundle names: keep them fresh.
+          { key: "Cache-Control", value: "public, max-age=0, must-revalidate" },
+        ],
+      },
+      {
+        // Content-hashed file names — safe to cache forever.
+        source: "/charting_library/bundles/:path*",
+        headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
+      },
+      {
+        source: "/tv-theme/:path*",
+        headers: [{ key: "Cache-Control", value: "public, max-age=300, must-revalidate" }],
       },
     ];
   },

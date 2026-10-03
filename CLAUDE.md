@@ -22,3 +22,9 @@ the guardrails.
 5. **Branch + PR.** Never commit to `main`.
 6. The external indexer API is **optional** — candles / 24h stats show empty locally.
    Expected, not a bug.
+7. **Never commit the TradingView library.** Its licence forbids it in public repos. It is
+   fetched at build time into `app/public/charting_library/` (gitignored) by
+   `app/scripts/fetch-tv-library.mjs` when `TV_LIBRARY_TOKEN` is set; without it the trade
+   page uses the built-in chart. Never `git add -f` anything under that folder, never copy
+   its `.d.ts` (our typings are hand-written in `app/lib/tv/types.ts`).
+   `node scripts/check-tv-library-leak.mjs` (CI runs it) must pass.

@@ -15,6 +15,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  tv-library-leak-guard:
+    # See pr-check.yml — also runs on pushes to main/playground.
+    name: TradingView library leak guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Check no library files are tracked
+        run: node scripts/check-tv-library-leak.mjs
+
   # hashFiles() is NOT valid in a job-level `if:` (only step-level) — using it there
   # made GitHub reject the whole workflow ("workflow file issue"). Detect package
   # presence once here and gate the backend jobs on this output instead.

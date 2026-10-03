@@ -1,0 +1,71 @@
+/*
+ * Percolator theme for the TradingView chart iframe (custom_css_url).
+ * Our own file — the library itself is fetched at build time and never committed.
+ * Values mirror app/app/globals.css (--bg, --panel-bg, --border, --accent, --text*).
+ * Do NOT hide the TradingView attribution/logo here: the licence requires it to stay visible.
+ */
+:root:not(.theme-dark) {
+  --tv-color-platform-background: #FAFAFD;
+  --tv-color-pane-background: #FAFAFD;
+  --tv-color-toolbar-button-background-hover: #ECECF4;
+  --tv-color-toolbar-button-background-expanded: #ECECF4;
+  --tv-color-toolbar-button-background-active: rgba(153, 69, 255, 0.10);
+  --tv-color-toolbar-button-background-active-hover: rgba(153, 69, 255, 0.16);
+  --tv-color-toolbar-button-text: #4A4B62;
+  --tv-color-toolbar-button-text-hover: #0D0E15;
+  --tv-color-toolbar-button-text-active: #9945FF;
+  --tv-color-toolbar-button-text-active-hover: #7C2FE0;
+  --tv-color-item-active-text: #9945FF;
+  --tv-color-toolbar-toggle-button-background-active: #9945FF;
+  --tv-color-toolbar-toggle-button-background-active-hover: #7C2FE0;
+  --tv-color-toolbar-divider-background: #E0E0EC;
+  --tv-color-toolbar-save-layout-loader: #8A8DA3;
+
+  --tv-color-popup-background: #FFFFFF;
+  --tv-color-popup-element-text: #0D0E15;
+  --tv-color-popup-element-text-hover: #0D0E15;
+  --tv-color-popup-element-background-hover: #F1F1F8;
+  --tv-color-popup-element-divider-background: #E0E0EC;
+  --tv-color-popup-element-secondary-text: #4A4B62;
+  --tv-color-popup-element-hint-text: #6B6F86;
+  --tv-color-popup-element-text-active: #9945FF;
+  --tv-color-popup-element-background-active: rgba(153, 69, 255, 0.10);
+  --tv-color-popup-element-toolbox-text: #4A4B62;
+  --tv-color-popup-element-toolbox-text-hover: #0D0E15;
+  --tv-color-popup-element-toolbox-text-active-hover: #0D0E15;
+  --tv-color-popup-element-toolbox-background-hover: #ECECF4;
+  --tv-color-popup-element-toolbox-background-active-hover: #E2E2EE;
+}
+
+.theme-dark:root {
+  --tv-color-platform-background: #0D0E15;
+  --tv-color-pane-background: #0D0D0F;
+  --tv-color-toolbar-button-background-hover: #161825;
+  --tv-color-toolbar-button-background-expanded: #161825;
+  --tv-color-toolbar-button-background-active: rgba(153, 69, 255, 0.14);
+  --tv-color-toolbar-button-background-active-hover: rgba(153, 69, 255, 0.22);
+  --tv-color-toolbar-button-text: #9499B0;
+  --tv-color-toolbar-button-text-hover: #E1E2E8;
+  --tv-color-toolbar-button-text-active: #B47CFF;
+  --tv-color-toolbar-button-text-active-hover: #C79BFF;
+  --tv-color-item-active-text: #B47CFF;
+  --tv-color-toolbar-toggle-button-background-active: #9945FF;
+  --tv-color-toolbar-toggle-button-background-active-hover: #A85CFF;
+  --tv-color-toolbar-divider-background: #1C1F2E;
+  --tv-color-toolbar-save-layout-loader: #6B6F86;
+
+  --tv-color-popup-background: #0F1018;
+  --tv-color-popup-element-text: #E1E2E8;
+  --tv-color-popup-element-text-hover: #FFFFFF;
+  --tv-color-popup-element-background-hover: #161825;
+  --tv-color-popup-element-divider-background: #1C1F2E;
+  --tv-color-popup-element-secondary-text: #9499B0;
+  --tv-color-popup-element-hint-text: #6B6F86;
+  --tv-color-popup-element-text-active: #B47CFF;
+  --tv-color-popup-element-background-active: rgba(153, 69, 255, 0.14);
+  --tv-color-popup-element-toolbox-text: #9499B0;
+  --tv-color-popup-element-toolbox-text-hover: #E1E2E8;
+  --tv-color-popup-element-toolbox-text-active-hover: #E1E2E8;
+  --tv-color-popup-element-toolbox-background-hover: #161825;
+  --tv-color-popup-element-toolbox-background-active-hover: #1C1F2E;
+}
