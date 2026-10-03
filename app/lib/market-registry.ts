@@ -10,7 +10,7 @@ import { getConfig } from "@/lib/config";
  * /api/markets and /api/stats must agree: they used to disagree badly enough
  * that the dashboard rendered "161 markets / $237K OI" beside pages showing 6
  * markets / ~$35K, which on a verifiability-first product reads as fabrication.
- * That was patched by having /api/stats HTTP-fetch /api/markets â€” correct in
+ * That was patched by having /api/stats HTTP-fetch /api/markets — correct in
  * result, but it costs a second serverless invocation (and its cold start) on
  * every stats request, and duplicates all the RPC work.
  *
@@ -22,7 +22,7 @@ import { getConfig } from "@/lib/config";
 /**
  * Columns read from markets_with_stats.
  *
- * REDUCED SCHEMA (2026-07): the indexer was cut to history-only â€” market_stats
+ * REDUCED SCHEMA (2026-07): the indexer was cut to history-only — market_stats
  * carries ONLY slab_address/volume_24h/volume_24h_usd/trade_count_24h/
  * last_price/network/updated_at. mark_price, index_price, open_interest_*,
  * total_open_interest, insurance_*, total_accounts, funding_rate, net_lp_pos,
@@ -40,7 +40,7 @@ export type MarketRegistryRow = Record<string, unknown>;
  * Fetch registry rows, degrading through progressively simpler queries when a
  * migration has not been applied to this Supabase instance.
  *
- * Returns null on an error we cannot degrade past â€” callers fall back to their
+ * Returns null on an error we cannot degrade past — callers fall back to their
  * own non-DB path rather than serving a half-answer.
  */
 async function fetchRegistryRows(
@@ -51,14 +51,14 @@ async function fetchRegistryRows(
     .select(MARKET_SELECT_FIELDS)
     .eq("network", getServerNetwork())
     .not("slab_address", "is", null)
-    // GH#2072: .neq("indexer_excluded", true) excludes NULL rows (SQL: NULL <> true â†’ NULL â†’ excluded).
+    // GH#2072: .neq("indexer_excluded", true) excludes NULL rows (SQL: NULL <> true → NULL → excluded).
     // Since most markets have indexer_excluded=NULL, use .or() to include both NULL and non-true values.
     .or("indexer_excluded.is.null,indexer_excluded.neq.true");
 
   // Fallback 1: indexer_excluded column missing (migration 046 / 20260402170000 not applied).
   if (error && error.message?.includes("indexer_excluded")) {
     Sentry.captureMessage(
-      "PERC-8387: indexer_excluded column missing â€” apply migration 046 + 20260402170000. " +
+      "PERC-8387: indexer_excluded column missing — apply migration 046 + 20260402170000. " +
         "Falling back without indexer_excluded filter.",
       {
         level: "warning",
@@ -78,7 +78,7 @@ async function fetchRegistryRows(
   // Fallback 2: network column also missing (migration 20260329180000 not applied).
   if (error && error.message?.includes("network")) {
     Sentry.captureMessage(
-      "PERC-8215: network column missing â€” apply migration 20260329180000. Falling back to unfiltered query.",
+      "PERC-8215: network column missing — apply migration 20260329180000. Falling back to unfiltered query.",
       {
         level: "warning",
         tags: { endpoint: "market-registry", degraded: "true" },
@@ -93,7 +93,7 @@ async function fetchRegistryRows(
     error = fb2.error;
   }
 
-  // Fallback 3: catch-all for any other column-related error â€” bare query.
+  // Fallback 3: catch-all for any other column-related error — bare query.
   if (error && (error.message?.includes("column") || error.message?.includes("does not exist"))) {
     Sentry.captureMessage(
       `PERC-8387: Unexpected column error in markets query, using bare fallback. Error: ${error.message}`,
@@ -123,15 +123,15 @@ async function fetchRegistryRows(
  * chain supplies what only it has (price, OI, insurance, vault, c_tot). Blocked
  * slabs are dropped here so every consumer inherits that filter.
  *
- * A slab missing from the live map keeps its registry values â€” partial RPC
- * results degrade to the pre-merge behaviour rather than zeroing a market out.
+ * A slab positively confirmed missing is dropped. Unresolved RPC/parse reads
+ * keep their registry values and preserve the existing fail-open behaviour.
  */
 export async function loadMergedMarketRows(): Promise<MarketRegistryRow[] | null> {
   let supabase: ReturnType<typeof getServiceClient>;
   try {
     supabase = getServiceClient();
   } catch {
-    return null; // Supabase not configured â€” caller uses its on-chain path.
+    return null; // Supabase not configured — caller uses its on-chain path.
   }
 
   const rows = await fetchRegistryRows(supabase);
@@ -168,7 +168,7 @@ export async function loadMergedMarketRows(): Promise<MarketRegistryRow[] | null
     return {
       ...m,
       mark_price: live.markPriceUsd,
-      // v17 has no separate index feed â€” mark is the only on-chain price.
+      // v17 has no separate index feed — mark is the only on-chain price.
       index_price: m.index_price ?? null,
       last_price: m.last_price ?? live.markPriceUsd,
       open_interest_long: live.oiLongQ,
@@ -188,10 +188,10 @@ export async function loadMergedMarketRows(): Promise<MarketRegistryRow[] | null
       max_leverage: live.maxLeverage ?? m.max_leverage,
       // BUG FIX (2026-09-25): completeness signal for filtering markets whose
       // creation died partway through (e.g. failed at "Create Earn vault",
-      // before stake-pool init ever ran) â€” see LiveMarketState.isComplete's
+      // before stake-pool init ever ran) — see LiveMarketState.isComplete's
       // doc comment in lib/live-market-state.ts for what this actually checks.
       // Left absent (not merged in) when live state couldn't be read, so a
-      // transient RPC gap degrades to "unknown" rather than "incomplete" â€”
+      // transient RPC gap degrades to "unknown" rather than "incomplete" —
       // consumers (app/api/markets/route.ts) treat undefined as visible,
       // matching this file's existing "partial RPC results degrade to the
       // pre-merge behaviour rather than zeroing a market out" policy.
