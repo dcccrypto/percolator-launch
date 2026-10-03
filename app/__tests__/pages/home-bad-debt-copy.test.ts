@@ -17,6 +17,14 @@ describe("home page loss-order claim", () => {
 
   it("says the market's backing pays first and that winners can be paid in part", () => {
     expect(src).toContain("come out of that market's own backing first");
-    expect(src).toContain("winning traders on that side may be paid only part of their profit");
+    expect(src).toContain("If the losing side's backing falls short, winning traders may be paid only part of their profit.");
+  });
+
+  // A winner's profit is backed by the LOSING side (engine 35ddd692 v16.rs:13728-13733 source_side =
+  // opposite_side when net > 0; bankruptcy residual hits the opposite side, v16.rs:17372). Profit taken
+  // during a haircut burns the unpaid part for good (v16.rs:1771-1785), so no "until it recovers".
+  it("blames the losing side's backing and does not promise the unpaid part comes back", () => {
+    expect(src).not.toMatch(/winning traders on that side/i);
+    expect(src).not.toMatch(/until it recovers/i);
   });
 });

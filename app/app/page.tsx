@@ -16,7 +16,7 @@ const PROOF_POINTS = [
   {
     index: "01",
     title: "Insurance fund on every market",
-    body: "Each market seeds its own on-chain insurance pool at launch. Losses a liquidation can't cover come out of that market's own backing first. If a side's backing falls short, winning traders on that side may be paid only part of their profit until it recovers.",
+    body: "Each market seeds its own on-chain insurance pool at launch. Losses a liquidation can't cover come out of that market's own backing first. If the losing side's backing falls short, winning traders may be paid only part of their profit.",
   },
   {
     index: "02",
