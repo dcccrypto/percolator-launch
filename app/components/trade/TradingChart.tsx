@@ -29,7 +29,7 @@ import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import { ChartStyleMenu } from "./ChartStyleMenu";
 import { ChartDisplayMenu } from "./ChartDisplayMenu";
 import { ChartPnlBadge } from "./ChartPnlBadge";
-import { computeRef24h, computePriceChange } from "@/lib/chart-stats";
+import { computeRef24h, computePriceChange, formatPriceChange } from "@/lib/chart-stats";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { getEntryPrice } from "@/lib/entry-price";
@@ -1278,7 +1278,7 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-xs" style={{ color: isUp ? "var(--long)" : "var(--short)" }}>
-              {isUp ? "+" : ""}{priceChange.toFixed(4)} ({isUp ? "+" : ""}{priceChangePercent.toFixed(2)}%)
+              {isUp ? "+" : ""}{formatPriceChange(priceChange, currentPrice)} ({isUp ? "+" : ""}{priceChangePercent.toFixed(2)}%)
             </span>
             {hasPercolatorData ? (
               <span
