@@ -33,7 +33,7 @@ describe("the Earn hub lists every way to earn", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
-  it("calls the staking tab \"Fee staking\" (it pays a share of trading fees and is first-loss capital)", () => {
+  it("calls the staking tab \"Fee staking\" (it pays a share of trading fees)", () => {
     expect(EARN_TABS.find((t) => t.key === "stake")?.label).toBe("Fee staking");
   });
 
