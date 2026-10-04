@@ -37,6 +37,9 @@ export const LogoUpload: FC<LogoUploadProps> = ({ slabAddress, mintAddress, main
   const handleFileChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
+      // Clear the picker so choosing the same file again fires onChange: after a declined
+      // signature or a failed upload, re-picking it otherwise did nothing.
+      e.target.value = "";
       if (!file || !endpoint) return;
 
       const allowed = ["image/png", "image/jpeg", "image/webp", "image/gif"];
