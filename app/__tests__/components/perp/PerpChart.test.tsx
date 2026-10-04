@@ -4,12 +4,14 @@ import type { LiveHandlers as BarHandlers, ProviderBar } from "@/lib/tv/data/pro
 import type { TickMessage } from "@/lib/chart/perp-types";
 
 // ── lightweight-charts: a recording fake ─────────────────────────────────────
-const created = vi.hoisted(() => ({ series: [] as Array<{ kind: string; setData: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; createPriceLine: ReturnType<typeof vi.fn>; removePriceLine: ReturnType<typeof vi.fn>; applyOptions: ReturnType<typeof vi.fn>; lines: Array<{ opts: Record<string, unknown>; applyOptions: ReturnType<typeof vi.fn> }> }>, charts: 0, removed: 0 }));
+const coordState = vi.hoisted(() => ({ coord: 100 as number | null }));
+const created = vi.hoisted(() => ({ series: [] as Array<{ kind: string; priceToCoordinate: (p: number) => number | null; setData: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; createPriceLine: ReturnType<typeof vi.fn>; removePriceLine: ReturnType<typeof vi.fn>; applyOptions: ReturnType<typeof vi.fn>; lines: Array<{ opts: Record<string, unknown>; applyOptions: ReturnType<typeof vi.fn> }> }>, charts: 0, removed: 0 }));
 vi.mock("lightweight-charts", () => {
   const mkSeries = (kind: string) => {
     const lines: Array<{ opts: Record<string, unknown>; applyOptions: ReturnType<typeof vi.fn> }> = [];
     const s = {
       kind, lines,
+      priceToCoordinate: (_p: number) => coordState.coord,
       setData: vi.fn(), update: vi.fn(), applyOptions: vi.fn(),
       createPriceLine: vi.fn((opts: Record<string, unknown>) => { const l = { opts, applyOptions: vi.fn() }; lines.push(l); return l; }),
       removePriceLine: vi.fn(),
@@ -28,7 +30,7 @@ vi.mock("lightweight-charts", () => {
         applyOptions: vi.fn(),
         remove: () => { created.removed++; },
         priceScale: () => ({ applyOptions: vi.fn() }),
-        timeScale: () => ({ fitContent: vi.fn(), subscribeVisibleLogicalRangeChange: vi.fn(), unsubscribeVisibleLogicalRangeChange: vi.fn(), getVisibleLogicalRange: () => ({ from: 100, to: 200 }), setVisibleLogicalRange: vi.fn() }),
+        timeScale: () => ({ height: () => 20, fitContent: vi.fn(), subscribeVisibleLogicalRangeChange: vi.fn(), unsubscribeVisibleLogicalRangeChange: vi.fn(), getVisibleLogicalRange: () => ({ from: 100, to: 200 }), setVisibleLogicalRange: vi.fn() }),
       };
     },
   };
@@ -70,6 +72,8 @@ async function mount() {
 const flushRaf = () => act(async () => { await new Promise((r) => setTimeout(r, 40)); });
 
 beforeEach(() => {
+  coordState.coord = 100;
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get: () => 420 });
   created.series.length = 0; created.charts = 0; created.removed = 0; h.subscribeCalls = 0;
   h.getBars.mockReset();
   h.getBars.mockResolvedValue({ bars: [bar(0, 100), bar(1, 101)], noMoreHistory: false, source: "perp-mark" });
@@ -202,6 +206,75 @@ describe("PerpChart", () => {
       await waitFor(() => expect(h.getBars.mock.calls.length).toBeGreaterThanOrEqual(2));
       await new Promise((r) => setTimeout(r, 30));
       expect(screen.queryByTestId("coingecko-attribution")).toBeNull();
+    });
+  });
+
+  describe("off-screen liquidation chip (ported from TradingChart, #3102)", () => {
+    const chip = () => screen.queryByTestId("liq-edge-chip");
+    it("shows an up chip with the value when the liq line maps above the pane", async () => {
+      coordState.coord = -300;
+      await mount();
+      await waitFor(() => expect(chip()).not.toBeNull());
+      expect(chip()!.textContent).toContain("↑");
+      expect(chip()!.textContent).toContain("0.002100");
+      expect(chip()!.className).toContain("top-2");
+    });
+    it("shows a down chip when it maps below the pane (pane = height 420 minus the 20px time axis)", async () => {
+      coordState.coord = 401; // > 400
+      await mount();
+      await waitFor(() => expect(chip()).not.toBeNull());
+      expect(chip()!.textContent).toContain("↓");
+      expect(chip()!.className).toContain("bottom-8");
+    });
+    it("NEGATIVE CONTROLS: in view, exactly at the edge, no coordinate yet, or a zero-height pane -> no chip", async () => {
+      for (const c of [100, 0, 400, null]) {
+        coordState.coord = c;
+        const { unmount } = await mount();
+        await waitFor(() => expect(h.getBars).toHaveBeenCalled());
+        await new Promise((r) => setTimeout(r, 30));
+        expect(chip(), `coord ${c}`).toBeNull();
+        unmount();
+      }
+      coordState.coord = -300;
+      Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get: () => 0 });
+      await mount();
+      await new Promise((r) => setTimeout(r, 30));
+      expect(chip()).toBeNull();
+    });
+    it("NEGATIVE CONTROL: no chip when there is no liq price (covered / pnl unknown), even if a stale coordinate is off-screen", async () => {
+      coordState.coord = -300;
+      lineState.v = { liq: null, entry: 0.0034, entryIsEstimate: false };
+      await mount();
+      await waitFor(() => expect(h.getBars).toHaveBeenCalled());
+      await new Promise((r) => setTimeout(r, 30));
+      expect(chip()).toBeNull();
+      lineState.v = { liq: 0.0021, entry: 0.0034, entryIsEstimate: false };
+    });
+    it("follows a drifting mark: a pushed bar that moves the line off-screen raises the chip, and bringing it back clears it", async () => {
+      await mount();
+      await waitFor(() => expect(h.barHandlers).not.toBeNull());
+      expect(chip()).toBeNull();
+      coordState.coord = -50;
+      act(() => h.barHandlers!.onBar(bar(1, 140)));
+      await flushRaf();
+      await waitFor(() => expect(chip()).not.toBeNull());
+      coordState.coord = 200;
+      act(() => h.barHandlers!.onBar(bar(1, 141)));
+      await flushRaf();
+      await waitFor(() => expect(chip()).toBeNull());
+    });
+    it("the Liq display toggle off hides the chip (the overlay is off)", async () => {
+      coordState.coord = -300;
+      window.localStorage.setItem("perc:chart:overlays", JSON.stringify({ liq: false }));
+      await mount();
+      await waitFor(() => expect(h.getBars).toHaveBeenCalled());
+      await new Promise((r) => setTimeout(r, 30));
+      expect(chip()).toBeNull();
+      // control: the same setup with the toggle ON does show it
+      window.localStorage.setItem("perc:chart:overlays", JSON.stringify({ liq: true }));
+      const again = await mount();
+      await waitFor(() => expect(screen.queryAllByTestId("liq-edge-chip").length).toBeGreaterThan(0));
+      again.unmount();
     });
   });
 

@@ -7,7 +7,7 @@ import type { PerpHeaderStats } from "@/hooks/usePerpHeaderStats";
 function Stat({ label, children, title }: { label: string; children: React.ReactNode; title?: string }) {
   return (
     <div className="flex shrink-0 flex-col" title={title}>
-      <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">{label}</span>
+      <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-muted)]">{label}</span>
       <span className="text-[12px] tabular-nums text-[var(--text)]">{children}</span>
     </div>
   );
@@ -54,7 +54,7 @@ export function PerpChartHeader({
   return (
     <div className="flex items-end gap-4 overflow-x-auto px-2 py-1.5 [scrollbar-width:none]" data-testid="perp-chart-header">
       <div className="flex shrink-0 flex-col">
-        <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">Price</span>
+        <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-muted)]">Price</span>
         <span className="text-sm font-medium tabular-nums text-[var(--text)]" data-testid="perp-price">{formatPerpPrice(price)}</span>
       </div>
       <Stat label="24h" title={`${ch?.partial ? "Since the first available bar (less than 24h of history)" : "Change over the last 24 hours"} · ${seriesLabel} price`}>
@@ -63,7 +63,7 @@ export function PerpChartHeader({
       <Stat label="24h volume">{formatCompactUsd(stats.volume24hUsd)}</Stat>
       <Stat label="Open interest">{formatCompactUsd(stats.oiUsd)}</Stat>
       <Stat label="Funding" title={fundingTitle}>{funding}</Stat>
-      <div className="ml-auto flex shrink-0 items-center gap-1.5 pb-0.5 text-[10px] text-[var(--text-dim)]" aria-live="off">
+      <div className="ml-auto flex shrink-0 items-center gap-1.5 pb-0.5 text-[10px] text-[var(--text-muted)]" aria-live="off">
         <span className={`inline-block h-1.5 w-1.5 rounded-full ${dot}`} aria-hidden="true" />
         <span>{label}{ageSec !== null && live !== "offline" ? ` ${ageSec < 10 ? ageSec.toFixed(1) : Math.round(ageSec)}s` : ""}</span>
       </div>

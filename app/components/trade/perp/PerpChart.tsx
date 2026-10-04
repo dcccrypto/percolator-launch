@@ -33,7 +33,8 @@ import {
   type ProviderResolution,
 } from "@/lib/tv/data/provider";
 import { getSeriesStore, SERIES_LABEL } from "@/lib/chart/perp-series";
-import { perpPricePrecision } from "@/lib/chart/precision";
+import { perpPricePrecision, formatPerpPrice } from "@/lib/chart/precision";
+import { liqEdgeFromCoordinate } from "@/lib/chart-liq-edge";
 import { ESTIMATE_LABEL } from "@/lib/entry-price-display";
 import type { PerpSeries } from "@/lib/chart/perp-types";
 import { ChartDisplayMenu } from "../ChartDisplayMenu";
@@ -107,6 +108,13 @@ function PerpChartInner({ slabAddress }: Props) {
   const [proxyBefore, setProxyBefore] = useState<number | null>(null);
   // Any bar on screen sourced from GeckoTerminal / CoinGecko (pre-launch history): attribution is then mandatory.
   const [usesDex, setUsesDex] = useState(false);
+  // Off-screen liquidation indicator (same behaviour as TradingChart's, #3102): price lines are not part of
+  // the autoscale, so a liq far outside the candles is drawn past the canvas edge with nothing to show where
+  // it went. `liqEdge` drives a chip pinned to the edge it hides behind; null = in view / no liq. The ref
+  // mirrors it so the hot tick path only calls setState when the state flips.
+  const [liqEdge, setLiqEdge] = useState<"above" | "below" | null>(null);
+  const liqEdgeRef = useRef<"above" | "below" | null>(null);
+  const liqPriceRef = useRef<number | null>(null);
   const [lastPrice, setLastPrice] = useState<number | null>(null); // the shown series' newest value
   const [markPrice, setMarkPrice] = useState<number | null>(null);
   const [lastTickAt, setLastTickAt] = useState<number | null>(null);
@@ -162,6 +170,24 @@ function PerpChartInner({ slabAddress }: Props) {
     else linesRef.current[key] = s.createPriceLine({ price, color: opts.color, lineWidth: opts.width, lineStyle: opts.style, axisLabelVisible: true, title: opts.title });
   }, []);
 
+  // Recompute whether the liq line is off the top/bottom of the visible pane. One priceToCoordinate; stable
+  // identity (reads through refs) so it can sit in effect deps and be called from tick / range callbacks.
+  const recomputeLiqEdge = useCallback(() => {
+    const series = candleRef.current;
+    const container = containerRef.current;
+    const price = liqPriceRef.current;
+    let next: "above" | "below" | null = null;
+    if (series && container && price != null) {
+      const coord = (series.priceToCoordinate as (p: number) => number | null)(price);
+      const axisH = chartRef.current?.timeScale().height() ?? 0; // price pane = chart height minus the time axis
+      next = liqEdgeFromCoordinate(coord, container.clientHeight - axisH);
+    }
+    if (next !== liqEdgeRef.current) {
+      liqEdgeRef.current = next;
+      setLiqEdge(next);
+    }
+  }, []);
+
   // The Mark line is only drawn when the candles are NOT the mark (on the Mark view it would sit on the last candle).
   useEffect(() => {
     setLine("mark", series === "mark" ? null : markPrice, { title: "Mark", color: theme.neutralLine, style: LineStyle.Dashed, width: 1 });
@@ -170,8 +196,11 @@ function PerpChartInner({ slabAddress }: Props) {
     setLine("entry", overlayPrefs.entry ? lines.entry : null, { title: lines.entryIsEstimate ? `Entry ${ESTIMATE_LABEL}` : "Entry", color: theme.entryLine, style: LineStyle.Dashed, width: 1 });
   }, [lines.entry, lines.entryIsEstimate, overlayPrefs.entry, theme.entryLine, setLine, status]);
   useEffect(() => {
-    setLine("liq", overlayPrefs.liq ? lines.liq : null, { title: "Liq", color: theme.downColor, style: LineStyle.Solid, width: 2 });
-  }, [lines.liq, overlayPrefs.liq, theme.downColor, setLine, status]);
+    const liq = overlayPrefs.liq ? lines.liq : null;
+    liqPriceRef.current = liq != null && Number.isFinite(liq) && liq > 0 ? liq : null;
+    setLine("liq", liq, { title: "Liq", color: theme.downColor, style: LineStyle.Solid, width: 2 });
+    recomputeLiqEdge(); // the line was just (re)synced: refresh the chip to match
+  }, [lines.liq, overlayPrefs.liq, theme.downColor, setLine, recomputeLiqEdge, status]);
 
   // ── data: history + push-fed forming candle, per (slab, series, resolution) ──
   useEffect(() => {
@@ -228,6 +257,7 @@ function PerpChartInner({ slabAddress }: Props) {
       candle.update(toCandle(b));
       vol?.update({ time: toTime(b.timeSec), value: b.volume, color: b.close >= b.open ? t.volUpColor : t.volDownColor });
       setLastPrice(b.close);
+      recomputeLiqEdge(); // a drifting mark can autoscale the range and move the liq line in or out of view
       const p = probe();
       if (p) for (let i = p.length - 1; i >= 0 && p[i].paintMs === null; i--) p[i].paintMs = Date.now();
     };
@@ -246,6 +276,7 @@ function PerpChartInner({ slabAddress }: Props) {
         setAll(page.bars);
         setLastPrice(page.bars.length ? page.bars[page.bars.length - 1].close : null);
         setStatus(page.bars.length ? "ready" : "empty");
+        requestAnimationFrame(() => { if (!cancelled) recomputeLiqEdge(); }); // autoscale has settled on the new data
         if (page.bars.length) chart.timeScale().fitContent();
       } catch {
         if (!cancelled) setStatus("error");
@@ -269,6 +300,7 @@ function PerpChartInner({ slabAddress }: Props) {
 
     // Scroll-back paging: when the user nears the left edge, fetch the page before the oldest bar.
     const onRange = async () => {
+      recomputeLiqEdge(); // any pan/zoom can move the liq line in or out of view
       if (paging || noMore || barsRef.current.length === 0 || cancelled) return;
       const r = chart.timeScale().getVisibleLogicalRange();
       if (!r || r.from > 20) return;
@@ -306,7 +338,7 @@ function PerpChartInner({ slabAddress }: Props) {
       linesRef.current = {};
       barsRef.current = [];
     };
-  }, [slabAddress, series, res]);
+  }, [slabAddress, series, res, recomputeLiqEdge]);
 
   // ── header feed: independent of the candle series (mark line, price, liveness) ──
   useEffect(() => {
@@ -363,7 +395,7 @@ function PerpChartInner({ slabAddress }: Props) {
       <div className="relative min-h-0 flex-1">
         <div ref={containerRef} className="absolute inset-0" />
         {status !== "ready" && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-[var(--text-dim)]">
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-[var(--text-muted)]">
             {status === "loading" ? "Loading chart…"
               : status === "error" ? "Chart history is unavailable right now. Live ticks will still draw."
               : series === "last" ? "No trades on this market yet."
@@ -371,7 +403,7 @@ function PerpChartInner({ slabAddress }: Props) {
           </div>
         )}
         {status === "ready" && series !== "last" && ((series === "mark" && proxyBefore !== null) || usesDex) && (
-          <div className="absolute bottom-7 left-2 flex max-w-[70%] flex-col gap-0.5 rounded-sm bg-[var(--bg)]/80 px-1.5 py-0.5 text-[9px] text-[var(--text-dim)]">
+          <div className="absolute bottom-7 left-2 flex max-w-[70%] flex-col gap-0.5 rounded-sm bg-[var(--bg)]/80 px-1.5 py-0.5 text-[9px] text-[var(--text-muted)]">
             {series === "mark" && proxyBefore !== null && (
               <span className="pointer-events-none">
                 Before {new Date(proxyBefore * 1000).toLocaleDateString()}: DEX pool price (no mark existed yet)
@@ -389,6 +421,23 @@ function PerpChartInner({ slabAddress }: Props) {
                 Powered by CoinGecko
               </a>
             )}
+          </div>
+        )}
+        {liqPriceRef.current != null && liqEdge && (
+          <div
+            data-testid="liq-edge-chip"
+            className={[
+              "pointer-events-none absolute left-1/2 z-10 flex -translate-x-1/2 items-center gap-1",
+              "whitespace-nowrap rounded-none border border-[var(--short)]/50 bg-[var(--bg)]/90",
+              "px-1.5 py-0.5 font-mono text-[9px] font-semibold shadow-sm backdrop-blur-sm",
+              liqEdge === "above" ? "top-2" : "bottom-8",
+            ].join(" ")}
+            aria-hidden="true"
+            title={`Liquidation price ${formatPerpPrice(liqPriceRef.current)} is off the ${liqEdge === "above" ? "top" : "bottom"} of the chart — scroll the price axis to see the line`}
+          >
+            <span className="uppercase tracking-[0.1em] text-[var(--short)]">Liq</span>
+            <span className="text-[var(--short)]">{liqEdge === "above" ? "↑" : "↓"}</span>
+            <span className="text-[var(--text)]">{formatPerpPrice(liqPriceRef.current)}</span>
           </div>
         )}
         <DraggableChartBadges>
