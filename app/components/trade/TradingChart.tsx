@@ -66,6 +66,7 @@ import {
 } from "@/lib/chart-live-tick";
 import { assertNever } from "@/lib/exhaustive";
 import { syncOverlayPriceLine } from "@/lib/chart-overlay-price-line";
+import { liqEdgeFromCoordinate } from "@/lib/chart-liq-edge";
 import { formatUsdFromNumber, chartPricePrecision } from "@/lib/format";
 
 // Phase 2: added 15m timeframe
@@ -309,6 +310,43 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
   const prevTickPriceRef = useRef<number | null>(null);
   const liqLineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
   const entryLineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
+  // When the liquidation price falls outside the visible price range (e.g. a
+  // far-above-entry liq on a low-leverage / heavily-collateralized short), the
+  // Liq price LINE is drawn off the top/bottom of the canvas with nothing to
+  // show where it went — price lines aren't part of the series autoscale and
+  // nothing refits the axis to include them. `liqEdge` drives a small pinned
+  // chip pointing at the edge the line hides behind; `null` = in view or no
+  // liq. The ref mirrors it so the hot tick path can skip setState unless the
+  // on/off-screen state actually flips, and liqLinePriceRef lets ref-based
+  // callbacks read the current liq without re-subscribing.
+  const [liqEdge, setLiqEdge] = useState<"above" | "below" | null>(null);
+  const liqEdgeRef = useRef<"above" | "below" | null>(null);
+  const liqLinePriceRef = useRef<number | null>(null);
+
+  // Recompute whether the liq line is off the top/bottom of the visible pane.
+  // Cheap (one priceToCoordinate); only re-renders when the on/off-screen state
+  // flips, so it is safe to call on the hot tick path. Stable identity (reads
+  // everything through refs — including the current liq via liqLinePriceRef,
+  // mirrored below once liqLinePrice is computed) so adding it to effect deps
+  // never re-subscribes. Declared here, above the pan/zoom subscription that
+  // uses it, to stay out of its temporal dead zone.
+  const recomputeLiqEdge = useCallback(() => {
+    const series = seriesRef.current;
+    const container = containerRef.current;
+    const price = liqLinePriceRef.current;
+    let next: "above" | "below" | null = null;
+    if (series && container && price != null) {
+      // priceToCoordinate takes a branded BarPrice; a plain number is fine here.
+      const coord = (series.priceToCoordinate as (p: number) => number | null)(price);
+      // Price pane = chart height minus the time-axis strip along the bottom.
+      const axisH = chartRef.current?.timeScale().height() ?? 0;
+      next = liqEdgeFromCoordinate(coord, container.clientHeight - axisH);
+    }
+    if (next !== liqEdgeRef.current) {
+      liqEdgeRef.current = next;
+      setLiqEdge(next);
+    }
+  }, []);
   // Phase 2: the currently-forming bar/point, kept in sync by the structural
   // series effect (on every setData) and merged into by live ticks (on
   // every price-store notification) via series.update() — never setData().
@@ -776,6 +814,9 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
     const handleVisibleLogicalRangeChange = (
       range: Parameters<Parameters<ReturnType<IChartApi["timeScale"]>["subscribeVisibleLogicalRangeChange"]>[0]>[0],
     ) => {
+      // Any pan/zoom can move the liq line in or out of view — recheck first,
+      // independent of the paging logic below.
+      recomputeLiqEdge();
       if (!range) return;
       // Only the DEX/GeckoTerminal source (useTokenChart) supports
       // before_timestamp paging today. The oracle-aggregated fallback isn't
@@ -797,7 +838,7 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
     return () => {
       timeScale.unsubscribeVisibleLogicalRangeChange(handleVisibleLogicalRangeChange);
     };
-  }, [chartReady]);
+  }, [chartReady, recomputeLiqEdge]);
 
   // Apply theme changes to existing chart without recreating it
   useEffect(() => {
@@ -1201,6 +1242,12 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
     overlayPrefs.entry && entryPriceNum != null && Number.isFinite(entryPriceNum) && entryPriceNum > 0
       ? entryPriceNum
       : null;
+
+  // Mirror the current liq line price so the ref-based recomputeLiqEdge
+  // callback (declared up with the refs, for the pan/zoom subscription that
+  // runs earlier in the body) reads it without re-subscribing.
+  liqLinePriceRef.current = liqLinePrice;
+
   useEffect(() => {
     const series = seriesRef.current;
     syncOverlayPriceLine(series, liqLineRef, liqLinePrice, () => ({
@@ -1218,7 +1265,9 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
       axisLabelVisible: true,
       title: "Entry",
     }));
-  }, [seriesEpoch, liqLinePrice, entryLinePrice]);
+    // The liq line was just (re)synced — refresh the off-screen chip to match.
+    recomputeLiqEdge();
+  }, [seriesEpoch, liqLinePrice, entryLinePrice, recomputeLiqEdge]);
 
   // Phase 2: Live tick -> chart. Subscribes directly to the price store
   // (bypassing React state/useLivePrice() entirely, per the reference doc's
@@ -1286,9 +1335,14 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
         }
       }
 
+      // A drifting mark can autoscale the price range, moving the liq line in or
+      // out of view without any pan/zoom event — recheck. No-op re-render unless
+      // the on/off-screen state flips, so this stays off the hot path's cost.
+      recomputeLiqEdge();
+
       finishSpan();
     });
-  }, [slabAddress]);
+  }, [slabAddress, recomputeLiqEdge]);
 
   // Header % change is ALWAYS trailing 24 h vs current — the industry
   // convention users expect, independent of what timeframe/zoom they picked.
@@ -1581,6 +1635,32 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
             {overlayPrefs.position && <PositionSummary slabAddress={slabAddress} />}
             {overlayPrefs.pnl && <ChartPnlBadge slabAddress={slabAddress} />}
           </DraggableChartBadges>
+        )}
+
+        {/* Off-screen liquidation indicator (#3077-adjacent UX): the Liq overlay
+            is on and its price exists, but the line is drawn past the top/bottom
+            of the visible range (a far-above-entry liq on a low-leverage short
+            sits ~24x above the candles). lightweight-charts price lines aren't
+            part of autoscale, so without this the user never finds their liq —
+            the exact "it was out of sight on my chart" report. A pinned chip
+            points to the edge it hides behind and shows the value; scrolling the
+            price axis reveals the line itself. Centered top/bottom to clear the
+            draggable position/PnL badges (top-right) and the time axis. */}
+        {liqLinePrice != null && liqEdge && (
+          <div
+            className={[
+              "pointer-events-none absolute left-1/2 z-10 flex -translate-x-1/2 items-center gap-1",
+              "whitespace-nowrap rounded-none border border-[var(--short)]/50 bg-[var(--bg)]/90",
+              "px-1.5 py-0.5 font-mono text-[9px] font-semibold shadow-sm backdrop-blur-sm",
+              liqEdge === "above" ? "top-2" : "bottom-8",
+            ].join(" ")}
+            aria-hidden="true"
+            title={`Liquidation price ${formatUsdFromNumber(liqLinePrice)} is off the ${liqEdge === "above" ? "top" : "bottom"} of the chart — scroll the price axis to see the line`}
+          >
+            <span className="uppercase tracking-[0.1em] text-[var(--short)]">Liq</span>
+            <span className="text-[var(--short)]">{liqEdge === "above" ? "↑" : "↓"}</span>
+            <span className="text-[var(--text)]">{formatUsdFromNumber(liqLinePrice)}</span>
+          </div>
         )}
       </div>
     </div>
