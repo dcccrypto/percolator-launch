@@ -189,7 +189,7 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
     // scaled by the side's live ADL factor (v16.rs:9564-9576), so a deleveraged
     // leg pays/receives funding on its REDUCED exposure, not its nominal basis.
     const effSize = adlFactors
-      ? effectiveExposureQ(account.positionSize, account.adlABasis, adlSideFactor(adlFactors, isLong ? 0 : 1))
+      ? (effectiveExposureQ(account.positionSize, account.adlABasis, adlSideFactor(adlFactors, isLong ? 0 : 1)) ?? account.positionSize)
       : account.positionSize;
     const absPosition = effSize < 0n ? -effSize : effSize;
     

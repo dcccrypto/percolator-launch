@@ -25,7 +25,7 @@ const acct = (over: Record<string, unknown>) => ({
   idx: 0,
   account: {
     owner: OWNER, capital: 1_000_000_000n, pnl: 0n, positionSize: 40_000_000n,
-    entryPrice: 0n, adlABasis: 0n,
+    entryPrice: 0n, adlABasis: 1_000_000_000_000_000n,
     ...over,
   },
 });

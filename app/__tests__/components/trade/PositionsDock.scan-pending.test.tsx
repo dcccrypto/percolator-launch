@@ -18,7 +18,7 @@ const acct = (over: Record<string, unknown>) => ({
   pubkey: OWNER,
   account: {
     kind: 0, owner: OWNER, capital: 1_000_000_000n, pnl: 0n, positionSize: 40_000_000n,
-    entryPrice: 0n, adlABasis: 0n, reservedPnl: 0n, feeCredits: 0n,
+    entryPrice: 0n, adlABasis: 1_000_000_000_000_000n, reservedPnl: 0n, feeCredits: 0n,
     ...over,
   },
 });
@@ -33,7 +33,7 @@ vi.mock("@/components/providers/SlabProvider", () => ({
     accounts: [],
     config: { collateralMint: OWNER, lastEffectivePriceE6: 100_000_000n, invert: 0 },
     params: { maintenanceMarginBps: 500n, initialMarginBps: 1000n },
-    adlFactors: null,
+    adlFactors: { aLong: 1_000_000_000_000_000n, aShort: 1_000_000_000_000_000n },
   }),
 }));
 vi.mock("@/hooks/useTokenMeta", () => ({ useTokenMeta: () => ({ symbol: "USDC", decimals: 6 }) }));

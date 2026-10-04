@@ -79,7 +79,7 @@ function defaultPosition() {
   return {
     slabAddress: "11111111111111111111111111111111",
     symbol: "SOLCAT-PERP",
-    account: { positionSize: 1_000_000n, capital: CAPITAL, entryPrice: 0n, adlABasis: 0n, pnl: 0n },
+    account: { adlABasis: 1_000_000_000_000_000n, positionSize: 1_000_000n, capital: CAPITAL, entryPrice: 0n, adlABasis: 1_000_000_000_000_000n, pnl: 0n },
     effectiveSize: 1_000_000n,
     adlKnown: true,
     adlFactors: { aLong: 1_000_000_000_000_000n, aShort: 1_000_000_000_000_000n },
@@ -120,7 +120,7 @@ function livePosition() {
     slabAddress: "11111111111111111111111111111111",
     symbol: "SOLCAT-PERP",
 
-    account: {
+    account: { adlABasis: 1_000_000_000_000_000n,
       positionSize: SIZE,
       capital: CAPITAL,
       entryPrice: 0n,
@@ -312,5 +312,36 @@ describe("StatsBar live aggregate freshness", () => {
       expect(pnlCard!.textContent).not.toContain("+$20.00");
       expect(screen.queryByText("In Profit")).toBeNull();
     });
+  });
+});
+
+describe("dashboard aggregates say when a position's PnL is unknown (#3077 item 2)", () => {
+  const unknownPosition = () => ({ ...defaultPosition(), entryPriceSource: "unknown", effectiveEntryPrice: 106_690_000n, unrealizedPnl: 0n });
+
+  it("StatsBar: one known + one unknown keeps the number and names the exclusion", () => {
+    state.positions = [defaultPosition(), unknownPosition()];
+    render(<StatsBar />);
+    expect(screen.getByText("+$6.69")).toBeTruthy();
+    expect(screen.getByText(/Excludes 1 position /)).toBeTruthy();
+  });
+
+  it("StatsBar: every position unknown shows '--', not +$0.00", () => {
+    state.positions = [unknownPosition()];
+    render(<StatsBar />);
+    expect(screen.getAllByText("--").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/\+\$0\.00/)).toBeNull();
+  });
+
+  it("PnlChart: every position unknown shows '--' and the caveat", () => {
+    state.positions = [unknownPosition()];
+    render(<PnlChart />);
+    expect(screen.getByText("--")).toBeTruthy();
+    expect(screen.getByTestId("pnl-caveat").textContent).toMatch(/Excludes 1 position /);
+  });
+
+  it("CONTROL: all known -> no caveat", () => {
+    state.positions = [defaultPosition()];
+    render(<StatsBar />);
+    expect(screen.queryByText(/Excludes/)).toBeNull();
   });
 });

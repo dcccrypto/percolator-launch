@@ -3,8 +3,7 @@
 import { FC } from "react";
 import { bigintToFloat } from "@/lib/formatters";
 import { isExactEntrySource, DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL } from "@/lib/entry-price-display";
-import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
-import { terminalPositionPnl } from "@/lib/position-pnl";
+import { onChainMarkE6, terminalPositionPnl } from "@/lib/position-pnl";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useSlabState } from "@/components/providers/SlabProvider";
@@ -64,7 +63,7 @@ export const ChartPnlBadge: FC<ChartPnlBadgeProps> = ({ slabAddress }) => {
     adlFactors,
     adlApplicable: wrapperConfigV17 !== null,
     markE6: livePriceE6,
-    anchorMarkE6: marketConfig ? sanitizePriceE6(applyInvert(marketConfig.lastEffectivePriceE6, marketConfig.invert)) : undefined,
+    anchorMarkE6: onChainMarkE6(marketConfig, wrapperConfigV17 !== null) ?? undefined,
     initialMarginBps,
   });
   // No entry / unknown ADL factors: no number, and no "$0.00" that reads as flat.

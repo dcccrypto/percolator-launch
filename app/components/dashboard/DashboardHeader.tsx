@@ -2,6 +2,7 @@
 
 import { usePortfolio } from "@/hooks/usePortfolio";
 import { useLivePortfolioMetrics } from "@/hooks/useLivePortfolioMetrics";
+import { unknownPnlCaveat } from "@/lib/position-pnl";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { formatTokenAmount } from "@/lib/format";
 import { useState } from "react";
@@ -75,7 +76,7 @@ export function DashboardHeader() {
             style={{ fontFamily: "var(--font-jetbrains-mono)" }}
           >
             {displayValue}
-            {totalPnl !== 0n && (
+            {totalPnl !== 0n && liveMetrics.unknownPnlCount === 0 && (
               <span
                 className={`ml-2 text-[10px] ${pnlPositive ? "text-[var(--long)]" : "text-[var(--short)]"}`}
               >
@@ -83,6 +84,11 @@ export function DashboardHeader() {
               </span>
             )}
           </p>
+          {unknownPnlCaveat(liveMetrics.unknownPnlCount) && (
+            <p className="text-[8px] text-[var(--text-secondary)]" data-testid="header-pnl-caveat">
+              {unknownPnlCaveat(liveMetrics.unknownPnlCount)}
+            </p>
+          )}
         </div>
 
         <div className="h-6 w-px bg-[var(--border)]" />

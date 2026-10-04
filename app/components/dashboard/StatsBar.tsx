@@ -2,6 +2,7 @@
 
 import { usePortfolio } from "@/hooks/usePortfolio";
 import { useLivePortfolioMetrics } from "@/hooks/useLivePortfolioMetrics";
+import { unknownPnlCaveat } from "@/lib/position-pnl";
 
 function formatUsd(val: number): string {
   if (val === 0) return "--";
@@ -28,6 +29,7 @@ export function StatsBar() {
   // This keeps Dashboard StatsBar aligned with PositionSummary, PnlChart,
   // DashboardHeader, PositionsBar and the trade terminal.
   const totalPnl = Number(liveMetrics.totalUnrealizedPnl) / 1e6;
+  const allPnlUnknown = positions.length > 0 && liveMetrics.unknownPnlCount >= positions.length;
 
   // M15: v17 has no maker/taker fee split — "Fee Tier" used to fabricate one
   // (a hardcoded "Maker 0.02% / Taker 0.06%" that doesn't exist in the
@@ -62,9 +64,10 @@ export function StatsBar() {
       // "you made nothing today" beside live figures, so it is removed until an
       // equity-snapshot source exists (see the issue for the plan).
       label: "Unrealized PnL",
-      value: loading ? "..." : formatUsd(totalPnl),
-      sub: "Open positions",
-      color: totalPnl >= 0 ? "text-[var(--long)]" : "text-[var(--short)]",
+      // Unknown-PnL positions add 0 to the total: "--" when none is known, a caveat otherwise.
+      value: loading ? "..." : allPnlUnknown ? "--" : formatUsd(totalPnl),
+      sub: unknownPnlCaveat(liveMetrics.unknownPnlCount) ?? "Open positions",
+      color: allPnlUnknown ? "text-[var(--text-secondary)]" : totalPnl >= 0 ? "text-[var(--long)]" : "text-[var(--short)]",
     },
     {
       label: "Trade Fee",

@@ -19,6 +19,7 @@ const h = vi.hoisted(() => ({
 
       // v17/v18 does not persist the held entry here.
       entryPrice: 0n,
+      adlABasis: 1_000_000_000_000_000n,
 
       // Explicit unknown-entry state: no recoverable entry information
       // remains in on-chain PnL.
@@ -46,6 +47,7 @@ vi.mock("@/components/providers/SlabProvider", () => ({
     params: {
       maintenanceMarginBps: h.maintenanceMarginBps,
     },
+    adlFactors: { aLong: 1_000_000_000_000_000n, aShort: 1_000_000_000_000_000n },
   }),
 }));
 

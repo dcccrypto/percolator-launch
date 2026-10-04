@@ -38,7 +38,12 @@ const SLOTS_BASE = V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN;
 const WRAPPER = V17_ASSET_SLOT_WRAPPER_LEN;
 const A_LONG_REL = 49;
 const A_SHORT_REL = 65;
-const OI_LONG_REL = 273;
+// oi_eff_long_q: 49 + 15 x 16 = 289 (verified against a live devnet slab with open interest).
+const OI_LONG_REL = 289;
+const EPOCH_LONG_REL = 497;
+const EPOCH_SHORT_REL = 505;
+const MODE_LONG_REL = 513;
+const MODE_SHORT_REL = 514;
 
 function writeU128LE(buf: Uint8Array, off: number, v: bigint): void {
   let x = v;
@@ -93,6 +98,32 @@ describe("parseAssetAdlFactors", () => {
     expect(parseAssetAdlFactors(makeSlab(ADL_ONE, 1n), 0)!.aShort).toBe(1n);
   });
 
+  it("reads BOTH sides drained below MIN_A_SIDE (the M5 control, extended)", () => {
+    const f = parseAssetAdlFactors(makeSlab(ADL_ONE / 50n, ADL_ONE / 20n), 0);
+    expect(f).not.toBeNull();
+    expect(f!.aLong).toBe(ADL_ONE / 50n);
+    expect(f!.aShort).toBe(ADL_ONE / 20n);
+    // CONTROL: the old [MIN_A_SIDE, ADL_ONE] guard would have made this null.
+    expect(ADL_ONE / 50n < ADL_ONE / 10n && ADL_ONE / 20n < ADL_ONE / 10n).toBe(true);
+  });
+
+  it("reads the side epochs and modes at the tail of the asset state", () => {
+    const buf = makeSlab(ADL_ONE, ADL_ONE);
+    const base = SLOTS_BASE + WRAPPER;
+    new DataView(buf.buffer).setBigUint64(base + EPOCH_LONG_REL, 7n, true);
+    new DataView(buf.buffer).setBigUint64(base + EPOCH_SHORT_REL, 9n, true);
+    buf[base + MODE_LONG_REL] = 2;
+    buf[base + MODE_SHORT_REL] = 1;
+    const f = parseAssetAdlFactors(buf, 0)!;
+    expect(f.epochLong).toBe(7n);
+    expect(f.epochShort).toBe(9n);
+    expect(f.modeLong).toBe(2);
+    expect(f.modeShort).toBe(1);
+    // CONTROL: an untouched slab reads epoch 0 / mode 0.
+    const z = parseAssetAdlFactors(makeSlab(ADL_ONE, ADL_ONE), 0)!;
+    expect([z.epochLong, z.epochShort, z.modeLong, z.modeShort]).toEqual([0n, 0n, 0, 0]);
+  });
+
   it("refuses garbage and the retired 0/0 shape (unknown, never raw basis)", () => {
     // Above ADL_ONE can only mean this is not an AssetStateV16Account.
     expect(parseAssetAdlFactors(makeSlab(ADL_ONE * 2n, ADL_ONE), 0)).toBeNull();
@@ -109,7 +140,7 @@ describe("parseAssetAdlFactors", () => {
     writeU128LE(buf, SLOTS_BASE + WRAPPER + OI_LONG_REL, 12_345n);
     const f = parseAssetAdlFactors(buf, 0);
     expect(f!.aLong).toBe(ADL_ONE);
-    expect(OI_LONG_REL - A_LONG_REL).toBe(14 * 16);
+    expect(OI_LONG_REL - A_LONG_REL).toBe(15 * 16);
   });
 });
 
@@ -180,9 +211,11 @@ describe("effectiveExposureQ — the reported bug", () => {
     expect(adlRemainingBps(ADL_ONE, minA)).toBe(1000);
   });
 
-  it("falls back to raw basis rather than dividing by zero", () => {
-    expect(effectiveExposureQ(500n, 0n, ADL_ONE)).toBe(500n);
-    expect(effectiveExposureQ(500n, ADL_ONE, 0n)).toBe(500n);
+  it("reports unknown (null), never raw basis, when the factors cannot describe a leg (#3077 item 5)", () => {
+    expect(effectiveExposureQ(500n, 0n, ADL_ONE)).toBeNull();
+    expect(effectiveExposureQ(500n, ADL_ONE, 0n)).toBeNull();
+    expect(effectiveExposureQ(500n, ADL_ONE / 2n, ADL_ONE)).toBeNull(); // a_side > a_basis
+    expect(effectiveExposureQ(500n, ADL_ONE, ADL_ONE)).toBe(500n); // CONTROL: valid equal factors
     expect(effectiveExposureQ(0n, ADL_ONE, ADL_ONE / 2n)).toBe(0n);
   });
 });

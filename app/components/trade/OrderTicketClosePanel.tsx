@@ -27,6 +27,8 @@ export interface OrderTicketClosePanelProps {
   engineStale: boolean;
   /** Oracle unavailable/stale (already mock-mode aware) — blocks the close. */
   oracleBlocked: boolean;
+  /** ADL state unknown: withhold the raw-size preview (see ClosePositionFormProps). */
+  previewUnavailable?: boolean;
   /** Called after a SUCCESSFUL close with the percent that was closed. */
   onClosed: (percent: number) => void;
 }
@@ -63,6 +65,7 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
   lpUnderfunded,
   engineStale,
   oracleBlocked,
+  previewUnavailable = false,
   onClosed,
 }) => {
   const { closePosition, loading, error, prewarmClose } = useClosePosition(slabAddress);
@@ -151,6 +154,7 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
         oracleStale={oracleBlocked}
         error={error}
         maxFillAbs={maxFillAbs}
+        previewUnavailable={previewUnavailable}
         onConfirm={handleConfirm}
         submitDisabled={submitDisabled}
         submitDisabledLabel={submitDisabledLabel}

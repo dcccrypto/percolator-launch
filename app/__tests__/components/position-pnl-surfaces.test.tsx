@@ -38,7 +38,10 @@ const h = vi.hoisted(() => ({
   /** the slab's raw on-chain mark + its invert flag (the terminal's fallback/anchor) */
   rawOnChainE6: 100_000_000n as bigint,
   invert: 0,
+  /** v17/v18 slab (has a wrapper config) vs legacy v12 */
+  wrapperV17: true,
   positions: [] as unknown[],
+  modalProps: null as Record<string, unknown> | null,
 }));
 
 const mkAccount = (over: Record<string, unknown>) => ({
@@ -46,7 +49,7 @@ const mkAccount = (over: Record<string, unknown>) => ({
   pubkey: OWNER,
   account: {
     kind: 0, owner: OWNER, capital: 1_000_000_000n, pnl: 0n, positionSize: 80_000_000n,
-    entryPrice: 0n, adlABasis: ADL_ONE, reservedPnl: 0n, feeCredits: 0n,
+    entryPrice: 0n, adlABasis: ADL_ONE, adlEpochSnap: 0n, reservedPnl: 0n, feeCredits: 0n,
     ...over,
   },
 });
@@ -55,7 +58,7 @@ const mkAccount = (over: Record<string, unknown>) => ({
 vi.mock("@/hooks/useUserAccount", () => ({ useUserAccount: () => h.account, useUserAccountScanPending: () => false }));
 vi.mock("@/hooks/useNftWrappedPosition", () => ({ useNftWrappedPosition: () => null }));
 vi.mock("@/hooks/useClosePosition", () => ({
-  useClosePosition: () => ({ closePosition: vi.fn(), loading: false, error: null, prewarmClose: vi.fn() }),
+  useClosePosition: () => ({ closePosition: vi.fn(), loading: false, error: null, prewarmClose: vi.fn(), resetPhase: vi.fn() }),
 }));
 vi.mock("@/components/providers/SlabProvider", () => ({
   useSlabState: () => ({
@@ -64,14 +67,16 @@ vi.mock("@/components/providers/SlabProvider", () => ({
     config: { collateralMint: OWNER, lastEffectivePriceE6: h.rawOnChainE6, invert: h.invert },
     params: { maintenanceMarginBps: 500n, initialMarginBps: 1000n },
     adlFactors: h.adlFactors,
-    wrapperConfigV17: {},
+    wrapperConfigV17: h.wrapperV17 ? {} : null,
   }),
 }));
 vi.mock("@/hooks/useTokenMeta", () => ({ useTokenMeta: () => ({ symbol: "USDC", decimals: 6 }) }));
 vi.mock("@/hooks/useLivePrice", () => ({
   useLivePrice: () => ({ priceE6: h.priceE6, priceUsd: h.priceE6 === null ? null : Number(h.priceE6) / 1e6 }),
 }));
-vi.mock("@/hooks/useMarketConfig", () => ({ useMarketConfig: () => null }));
+vi.mock("@/hooks/useMarketConfig", () => ({
+  useMarketConfig: () => ({ lastEffectivePriceE6: h.rawOnChainE6, invert: h.invert }),
+}));
 vi.mock("@/hooks/useMarketInfo", () => ({ useMarketInfo: () => ({ market: { symbol: "TEST-PERP" } }) }));
 vi.mock("@/hooks/useEngineState", () => ({ useEngineState: () => ({ engine: null, insuranceBalance: 0n }) }));
 vi.mock("@/hooks/useMarketFillCap", () => ({ useMarketFillCap: () => ({ maxFillAbs: null }) }));
@@ -84,7 +89,12 @@ vi.mock("@/components/dev/RenderProfiler", () => ({ RenderProfiler: ({ children 
 vi.mock("@/components/trade/OtherMarketPositions", () => ({ OtherMarketPositions: () => null }));
 vi.mock("@/components/trade/TradeHistory", () => ({ TradeHistory: () => null }));
 vi.mock("@/components/trade/WarmupProgress", () => ({ WarmupProgress: () => null }));
-vi.mock("@/components/trade/ClosePositionModal", () => ({ ClosePositionModal: () => null }));
+vi.mock("@/components/trade/ClosePositionModal", () => ({
+  ClosePositionModal: (props: Record<string, unknown>) => {
+    h.modalProps = props;
+    return null;
+  },
+}));
 vi.mock("@/components/share/PnlShareButton", () => ({ PnlShareButton: () => null }));
 vi.mock("@/components/trade/PositionNftMenu", () => ({
   PositionNftMenu: () => null,
@@ -111,9 +121,13 @@ import { PositionsBar } from "@/components/layout/PositionsBar";
 import { ChartPnlBadge } from "@/components/trade/ChartPnlBadge";
 import { PositionsDock } from "@/components/trade/PositionsDock";
 import { computePnlCardStats } from "@/lib/pnl-card";
-import { portfolioPositionPnl, terminalPositionPnl } from "@/lib/position-pnl";
+import { onChainMarkE6, portfolioPositionPnl, terminalPositionPnl } from "@/lib/position-pnl";
+import { computeEngineLiqPrice } from "@/lib/liquidation-risk";
+import { parseAssetAdlFactors } from "@/lib/v17-adl";
+import { V17_MARKET_GROUP_OFF, V17_MARKET_GROUP_LEN, V17_MARKET_ASSET_SLOT_LEN, V17_ASSET_SLOT_WRAPPER_LEN } from "@percolatorct/sdk";
+import { fireEvent } from "@testing-library/react";
+import { formatUsdPriceE6 } from "@/lib/format";
 import { saveEntryPrice } from "@/lib/entry-price";
-import { applyInvert } from "@/lib/oraclePrice";
 
 interface Scenario {
   /** raw leg basis (signed) */
@@ -130,6 +144,8 @@ interface Scenario {
   /** the slab's RAW on-chain mark + invert flag (the terminal's anchor/fallback) */
   rawOnChain: bigint;
   invert: 0 | 1;
+  /** the leg's epoch_snap (default 0) */
+  epochSnap?: bigint;
 }
 
 const HALF: Factors = { aLong: ADL_ONE / 2n, aShort: ADL_ONE };
@@ -158,7 +174,9 @@ function setup(s: Scenario): { pos: PortfolioPosition } {
   h.adlFactors = s.factors;
   h.rawOnChainE6 = s.rawOnChain;
   h.invert = s.invert;
-  h.account = mkAccount({ positionSize: s.basis, adlABasis: s.aBasis, pnl: s.onChainPnl });
+  h.wrapperV17 = true;
+  h.modalProps = null;
+  h.account = mkAccount({ positionSize: s.basis, adlABasis: s.aBasis, adlEpochSnap: s.epochSnap ?? 0n, pnl: s.onChainPnl });
 
   const portfolio = {
     owner: OWNER,
@@ -177,7 +195,7 @@ function setup(s: Scenario): { pos: PortfolioPosition } {
         aBasis: s.aBasis,
         fSnap: 0n,
         kSnap: 0n,
-        epochSnap: 0n,
+        epochSnap: s.epochSnap ?? 0n,
       },
     ],
   };
@@ -256,7 +274,7 @@ function allFigures(s: Scenario) {
     adlFactors: s.factors,
     adlApplicable: true,
     markE6: s.mark,
-    anchorMarkE6: applyInvert(s.rawOnChain, s.invert),
+    anchorMarkE6: onChainMarkE6({ lastEffectivePriceE6: s.rawOnChain, invert: s.invert }, true) ?? undefined,
     initialMarginBps: 1000n,
   });
   return {
@@ -302,6 +320,10 @@ describe("one position, every surface, one PnL (#3077)", () => {
     // ROE is one number too (raw-basis initial margin: 80 x $99.875 x 10%).
     expect(f.roe.builder).toBe(f.roe.portfolio);
     expect(f.roe.builder).toBe(f.roe.terminal);
+    // ... and it is the engine's ROE: +$5.00 on 40 EFFECTIVE tokens x $99.875 x 10% = $399.50 margin.
+    expect(f.roe.builder).toBeCloseTo(1.25, 1);
+    // NEGATIVE CONTROL: the raw-basis denominator (80 tokens) would read 0.63%.
+    expect(f.roe.builder).not.toBeCloseTo(0.63, 1);
   });
 
   it("NEGATIVE CONTROL: ignoring ADL (the raw-size bug) prints +10.00, so the assertion above can fail", () => {
@@ -360,17 +382,38 @@ describe("one position, every surface, one PnL (#3077)", () => {
     expect(allFigures({ ...BASE, factors: null }).bar).toBe("--");
   });
 
-  it("INVERTED market: raw on-chain 0.01 with invert=1 is $100 post-inversion; every surface reads +5.00", () => {
-    // raw 10_000 e6 ($0.01) inverted = 1e12 / 1e4 = 100_000_000 ($100).
-    expect(applyInvert(10_000n, 1)).toBe(100_000_000n);
-    const f = allFigures({ ...BASE, rawOnChain: 10_000n, invert: 1 });
+  it("INVERTED v17 market (invert=1): markEwmaE6 is ALREADY post-inversion, so it is not inverted again", () => {
+    // The wrapper applies `invert` while composing the price (v16_program.rs:6440-6445);
+    // the stored on-chain mark is $100 and every surface must read it as $100.
+    const f = allFigures({ ...BASE, rawOnChain: 100_000_000n, invert: 1 });
     expectAll(f, "+5.00");
   });
 
-  it("INVERTED market, derived entry: the estimate is anchored in the inverted domain on every surface", () => {
-    const f = allFigures({ ...BASE, rawOnChain: 10_000n, invert: 1, cached: 0n });
+  it("INVERTED v17 market, derived entry: the estimate is anchored on the un-reinverted mark on every surface", () => {
+    const f = allFigures({ ...BASE, rawOnChain: 100_000_000n, invert: 1, cached: 0n });
     expectAll(f, "+5.00");
     expect(f.pos.entryPriceSource).toBe("derived");
+  });
+
+  it("INVERTED v17 market with NO live price: the dock's on-chain fallback mark is $100, not the $0.01 reciprocal", () => {
+    allFigures({ ...BASE, rawOnChain: 100_000_000n, invert: 1 });
+    h.priceE6 = null; // WS dropped: the on-chain fallback is what the mark cell shows
+    const { container } = render(<PositionsDock slabAddress={SLAB} />);
+    expect(container.textContent).toContain(formatUsdPriceE6(100_000_000n));
+    expect(container.textContent).not.toContain(formatUsdPriceE6(10_000n));
+  });
+
+  it("NEGATIVE CONTROL: a legacy v12 slab DOES apply the flag to its raw price (raw $0.01, invert=1 -> $100)", () => {
+    allFigures({ ...BASE, rawOnChain: 10_000n, invert: 1 });
+    h.wrapperV17 = false;
+    h.priceE6 = null;
+    const { container } = render(<PositionsDock slabAddress={SLAB} />);
+    expect(container.textContent).toContain(formatUsdPriceE6(100_000_000n));
+    // ... and treating that same raw value as a v17 mark shows the unflipped $0.01.
+    cleanup();
+    h.wrapperV17 = true;
+    const v17 = render(<PositionsDock slabAddress={SLAB} />);
+    expect(v17.container.textContent).toContain(formatUsdPriceE6(10_000n));
   });
 
   it("NEGATIVE CONTROL: mixing the UN-inverted raw mark ($0.01) into an inverted market blows the figure up", () => {
@@ -395,5 +438,103 @@ describe("one position, every surface, one PnL (#3077)", () => {
   it("a loss reads as a loss everywhere (derived, negative on-chain pnl)", () => {
     const f = allFigures({ ...BASE, cached: 0n, onChainPnl: -5_000_000n });
     expectAll(f, "-5.00");
+  });
+});
+
+// ── #3077 follow-ups ────────────────────────────────────────────────────────
+
+const SLOTS_BASE = V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN + V17_ASSET_SLOT_WRAPPER_LEN;
+/** A real v17 slab byte layout (parsed by the real parser), not a hand-built factors object. */
+function slabFactors(aLong: bigint, aShort: bigint, epochLong = 0n, modeLong = 0): Factors {
+  const buf = new Uint8Array(V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN + V17_MARKET_ASSET_SLOT_LEN);
+  const dv = new DataView(buf.buffer);
+  const u128 = (off: number, v: bigint) => {
+    dv.setBigUint64(SLOTS_BASE + off, v & 0xffffffffffffffffn, true);
+    dv.setBigUint64(SLOTS_BASE + off + 8, v >> 64n, true);
+  };
+  u128(49, aLong);
+  u128(65, aShort);
+  dv.setBigUint64(SLOTS_BASE + 497, epochLong, true);
+  buf[SLOTS_BASE + 513] = modeLong;
+  return parseAssetAdlFactors(buf, 0);
+}
+
+describe("a_side below MIN_A_SIDE, end to end (the M5 control at surface level)", () => {
+  it("a long whose a_long drained to 5% (< MIN_A_SIDE = 10%) still reads +0.50 on every surface", () => {
+    const factors = slabFactors(ADL_ONE / 20n, ADL_ONE);
+    expect(factors).not.toBeNull(); // the old [MIN_A_SIDE, ADL_ONE] guard made this null
+    const f = allFigures({ ...BASE, factors });
+    // 80 raw x 5% = 4 effective tokens x $0.125
+    expectAll(f, "+0.50");
+    expect(f.pos.effectiveSize).toBe(4_000_000n);
+    expect(f.pos.adlKnown).toBe(true);
+  });
+
+  it("BOTH sides drained below MIN_A_SIDE: the long still reads its own side (+0.20)", () => {
+    const factors = slabFactors(ADL_ONE / 50n, ADL_ONE / 20n);
+    expect(factors).not.toBeNull();
+    // 80 raw x 2% = 1.6 tokens x $0.125
+    expectAll(allFigures({ ...BASE, factors }), "+0.20");
+  });
+
+  it("NEGATIVE CONTROL: if the slot were unreadable (null), the same position shows '--', not a raw-size number", () => {
+    expectAll(allFigures({ ...BASE, factors: null }), "--");
+  });
+});
+
+describe("invalid and reset legs are unknown on every surface (item 5)", () => {
+  it("an epoch that no longer matches the side: '--'", () => {
+    expectAll(allFigures({ ...BASE, factors: slabFactors(ADL_ONE / 2n, ADL_ONE, 5n), epochSnap: 3n }), "--");
+  });
+  it("a prior-reset obligation (ResetPending, epoch_snap + 1 == epoch): '--'", () => {
+    expectAll(allFigures({ ...BASE, factors: slabFactors(ADL_ONE / 2n, ADL_ONE, 5n, 2), epochSnap: 4n }), "--");
+  });
+  it("CONTROL: the same slab with the leg in the current epoch reads +5.00", () => {
+    expectAll(allFigures({ ...BASE, factors: slabFactors(ADL_ONE / 2n, ADL_ONE, 5n), epochSnap: 5n }), "+5.00");
+  });
+  it("a_side above a_basis (the engine's InvalidLeg): '--'", () => {
+    expectAll(allFigures({ ...BASE, aBasis: ADL_ONE / 2n, factors: slabFactors(ADL_ONE, ADL_ONE) }), "--");
+  });
+});
+
+describe("liquidation price is on EFFECTIVE size (item 1)", () => {
+  it("dock, builder and helper show the engine price over 40 effective tokens, not over 80 raw", () => {
+    const f = allFigures(BASE);
+    const eff = computeEngineLiqPrice(BASE.cached, 1_000_000_000n, 40_000_000n, 500n);
+    const raw = computeEngineLiqPrice(BASE.cached, 1_000_000_000n, 80_000_000n, 500n);
+    expect(eff).not.toBe(raw); // control: the two sizes give different prices
+    expect(f.pos.liquidationPriceE6).toBe(eff);
+    const { container } = render(<PositionsDock slabAddress={SLAB} />);
+    const liq = container.querySelector('[data-testid="position-liq"]')?.textContent ?? "";
+    // the dock prints the price trimmed of trailing zeros
+    const px = (e6: bigint) => `$${Number(e6) / 1e6}`;
+    expect(liq).toContain(px(eff));
+    expect(liq).not.toContain(px(raw));
+  });
+
+  it("unknown ADL state: no liquidation number on the dock (it falls back to margin health)", () => {
+    allFigures({ ...BASE, factors: null });
+    const { container } = render(<PositionsDock slabAddress={SLAB} />);
+    const liq = container.querySelector('[data-testid="position-liq"]')?.textContent ?? "";
+    expect(liq).not.toContain(`$${Number(computeEngineLiqPrice(BASE.cached, 1_000_000_000n, 80_000_000n, 500n)) / 1e6}`);
+    expect(liq).not.toContain("∞");
+  });
+});
+
+describe("ClosePositionModal when the ADL state is unknown (item 3)", () => {
+  const openModal = () => {
+    const { container } = render(<PositionsDock slabAddress={SLAB} />);
+    fireEvent.click(container.querySelector('[data-testid="position-close"]') as HTMLElement);
+  };
+  it("known ADL: the modal gets the EFFECTIVE size and a live preview", () => {
+    allFigures(BASE);
+    openModal();
+    expect(h.modalProps?.positionSize).toBe(40_000_000n);
+    expect(h.modalProps?.previewUnavailable).toBe(false);
+  });
+  it("unknown ADL: the preview is withheld", () => {
+    allFigures({ ...BASE, factors: null });
+    openModal();
+    expect(h.modalProps?.previewUnavailable).toBe(true);
   });
 });

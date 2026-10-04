@@ -4,8 +4,7 @@ import { useMemo } from "react";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { computeLiqPrice } from "@/lib/trading";
-import { terminalPositionPnl } from "@/lib/position-pnl";
-import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
+import { onChainMarkE6, terminalPositionPnl } from "@/lib/position-pnl";
 
 /**
  * Phase 2: Returns the liquidation price (as bigint e6) for the current user's
@@ -28,14 +27,8 @@ export function useLiqPrice(): bigint | null {
     // (lib/position-pnl.ts: server > cache > back-solve over EFFECTIVE size), so
     // the chart's liq line, the dock and the badge cannot disagree. Risk math
     // keeps using `.entry` (the mark when unknown), like the other surfaces.
-    const oraclePriceE6 = config
-      ? sanitizePriceE6(
-          applyInvert(
-            config.lastEffectivePriceE6,
-            config.invert,
-          ),
-        )
-      : 0n;
+    // v17 `markEwmaE6` is already post-inversion: do NOT apply `invert` again.
+    const oraclePriceE6 = onChainMarkE6(config, wrapperConfigV17 !== null) ?? 0n;
 
     const resolvedEntry = terminalPositionPnl({
       account,
@@ -45,19 +38,15 @@ export function useLiqPrice(): bigint | null {
       adlApplicable: wrapperConfigV17 !== null,
       markE6: oraclePriceE6,
       initialMarginBps: params?.initialMarginBps ?? 1000n,
+      maintenanceMarginBps: params?.maintenanceMarginBps ?? 500n,
     });
 
     if (resolvedEntry.entry <= 0n) return null;
 
-    const maintenanceBps =
-      params?.maintenanceMarginBps ?? 500n;
-
-    const liq = computeLiqPrice(
-      resolvedEntry.entry,
-      account.capital,
-      account.positionSize,
-      maintenanceBps,
-    );
+    // EFFECTIVE size (engine maintenance runs over effective_abs_q, v16.rs:13896-13912).
+    // Unknown ADL state => no line at all, never one drawn from raw basis.
+    const liq = resolvedEntry.liquidationPriceE6;
+    if (liq === null) return null;
 
     // Long-side clamp: liq at/below $0 means there is no real chart line.
     return liq > 0n ? liq : null;

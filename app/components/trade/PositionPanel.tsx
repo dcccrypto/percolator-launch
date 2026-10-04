@@ -17,10 +17,9 @@ import { AccountKind } from "@percolatorct/sdk";
 import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import {
-  computeLiqPrice,
   UNKNOWN_ENTRY_TOOLTIP,
 } from "@/lib/trading";
-import { terminalPositionPnl } from "@/lib/position-pnl";
+import { onChainMarkE6, terminalPositionPnl } from "@/lib/position-pnl";
 import { bigintToFloat } from "@/lib/formatters";
 import { DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL, isEntryKnown } from "@/lib/entry-price-display";
 import { InfoIcon } from "@/components/ui/Tooltip";
@@ -48,7 +47,6 @@ import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { StatusLine } from "@/components/ui/StatusLine";
 import { getEntryPrice, getEntryLeverage } from "@/lib/entry-price";
-import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { parseHumanAmount } from "@/lib/parseAmount";
 import { isOracleStaleBlocking } from "@/lib/oracle-stale-gate";
 import { computeMarginHealthPct } from "@/lib/margin-health";
@@ -273,11 +271,10 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const adlRemaining = adlFactors ? adlRemainingBps(account.adlABasis, aSide) : 10000;
   /** Nominal basis — margin and closing are denominated in it, not in exposure. */
   const absNominal = abs(account.positionSize);
-  // Apply invert + sanitize on the on-chain fallback so an inverted market
-  // doesn't show the reciprocal price during WS reconnects (~$0.0000067 vs $150).
-  const onChainPriceE6 = config
-    ? sanitizePriceE6(applyInvert(config.lastEffectivePriceE6, config.invert))
-    : null;
+  // On-chain fallback mark. v17 `markEwmaE6` is already post-inversion (the wrapper
+  // applies `invert` when composing the price), so it must NOT be inverted again;
+  // only legacy v12 stores a raw price the flag still applies to. See onChainMarkE6.
+  const onChainPriceE6 = onChainMarkE6(config, wrapperConfigV17 !== null);
   const currentPriceE6 = livePriceE6 ?? onChainPriceE6 ?? 0n;
 
   const initialMarginBps = params?.initialMarginBps ?? 1000n;
@@ -299,6 +296,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     markE6: currentPriceE6,
     anchorMarkE6: onChainPriceE6 ?? undefined,
     initialMarginBps,
+    maintenanceMarginBps: params?.maintenanceMarginBps ?? 500n,
   });
   const effectiveSize = pnlResult.effectiveSize ?? account.positionSize;
   const absPosition = abs(effectiveSize);
@@ -314,12 +312,9 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const roe = pnlResult.roe ?? 0;
 
   const maintenanceBps = params?.maintenanceMarginBps ?? 500n;
-  const liqPriceE6 = computeLiqPrice(
-    entryPriceE6,
-    account.capital,
-    account.positionSize,
-    maintenanceBps,
-  );
+  // Liquidation price on EFFECTIVE size (v16.rs:13896-13912); unknown ADL => 0n and
+  // `pnlIsKnown` is false, so the row shows margin health instead of a number.
+  const liqPriceE6 = pnlResult.liquidationPriceE6 ?? 0n;
 
   // Liq price color and banner use the site-wide warning tiers: the share of this
   // position's margin cushion left (lib/liquidation-risk.ts), not a flat distance.
@@ -731,6 +726,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         <ClosePositionModal
           // EFFECTIVE exposure for the close preview (#3077); the close re-reads the leg.
           positionSize={effectiveSize}
+          previewUnavailable={!pnlResult.adlKnown}
           entryPrice={pnlIsKnown ? entryPriceE6 : 0n}
           currentPrice={currentPriceE6}
           capital={account.capital}

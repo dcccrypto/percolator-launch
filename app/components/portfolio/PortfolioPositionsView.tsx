@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
 import { UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
 import { describeEntryPrice, displayEntryE6, isExactEntrySource, DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL } from "@/lib/entry-price-display";
-import { portfolioPositionPnl } from "@/lib/position-pnl";
+import { portfolioPositionPnl, unknownPnlCaveat } from "@/lib/position-pnl";
 import { adlReductionTooltip } from "@/lib/v17-adl";
 import { SlabProvider } from "@/components/providers/SlabProvider";
 import { useClosePosition } from "@/hooks/useClosePosition";
@@ -152,6 +152,7 @@ function PortfolioCloseFlow({
   return (
     <ClosePositionModal
       positionSize={posSize}
+      previewUnavailable={!closePnl.adlKnown}
       entryPrice={closePnl.pnlKnown ? closePnl.entry : 0n}
       currentPrice={markE6}
       capital={pos.account?.capital ?? 0n}
@@ -685,6 +686,7 @@ export function PortfolioPositionsView() {
   const liveUsdTotals = activePositions.length > 0 && !tokenMetasLoading
     ? (() => {
         let unrealizedPnlUsd = 0;
+        let unknownPnlCount = 0;
         for (const pos of activePositions) {
           const decimals = getDecimals(pos);
           const divisor = 10 ** decimals;
@@ -692,14 +694,15 @@ export function PortfolioPositionsView() {
           // Same shared computation as every other PnL surface; an unknown
           // PnL (no entry / unknown ADL factors) contributes nothing rather
           // than a wrong number. Flat positions are 0 by construction.
-          const pnl = portfolioPositionPnl(pos, liveE6).unrealizedPnl ?? 0n;
-          unrealizedPnlUsd += Number(pnl) / divisor;
+          const livePnl = portfolioPositionPnl(pos, liveE6);
+          if (!livePnl.pnlKnown) unknownPnlCount++;
+          unrealizedPnlUsd += Number(livePnl.unrealizedPnl ?? 0n) / divisor;
         }
         // Deposited total isn't price-dependent — reuse usdTotals' value
         // rather than re-summing capital a second time.
-        return { unrealizedPnlUsd, valueUsd: usdTotals.depositedUsd + unrealizedPnlUsd };
+        return { unrealizedPnlUsd, unknownPnlCount, valueUsd: usdTotals.depositedUsd + unrealizedPnlUsd };
       })()
-    : { unrealizedPnlUsd: 0, valueUsd: 0 };
+    : { unrealizedPnlUsd: 0, unknownPnlCount: 0, valueUsd: 0 };
 
   // Idle (parked, non-position) collateral value — its own Tier-2 tile now
   // that "Positions" no longer conflates open positions with idle deposits.
@@ -786,6 +789,12 @@ export function PortfolioPositionsView() {
                     : `$${liveUsdTotals.valueUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             </p>
             {walletConnected && !loadError && !loading && !tokenMetasLoading && (
+              liveUsdTotals.unknownPnlCount > 0 && liveUsdTotals.unknownPnlCount >= openPositions.length ? (
+                <div className="mt-3 flex items-baseline gap-2" data-testid="hero-pnl-unknown">
+                  <span className="text-sm font-bold text-[var(--text-secondary)] sm:text-base" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>--</span>
+                  <span className="text-xs font-medium text-[var(--text-secondary)]">{unknownPnlCaveat(liveUsdTotals.unknownPnlCount)}</span>
+                </div>
+              ) : (
               <div className="mt-3 flex items-baseline gap-2">
                 <span
                   className={`text-sm font-bold sm:text-base ${liveUsdTotals.unrealizedPnlUsd >= 0 ? "text-[var(--long)]" : "text-[var(--short)]"}`}
@@ -800,6 +809,12 @@ export function PortfolioPositionsView() {
                   {formatPnlPct(usdTotals.depositedUsd > 0 ? (liveUsdTotals.unrealizedPnlUsd / usdTotals.depositedUsd) * 100 : 0)} unrealized
                 </span>
               </div>
+              )
+            )}
+            {walletConnected && !loadError && !loading && !tokenMetasLoading && liveUsdTotals.unknownPnlCount > 0 && liveUsdTotals.unknownPnlCount < openPositions.length && (
+              <p className="mt-1.5 text-xs font-medium text-[var(--text-secondary)]" data-testid="hero-pnl-caveat">
+                {unknownPnlCaveat(liveUsdTotals.unknownPnlCount)}
+              </p>
             )}
             {/* Realized loss is settled straight out of capital on-chain, so it
                 never appears in the unrealized figure above. Surfacing it is

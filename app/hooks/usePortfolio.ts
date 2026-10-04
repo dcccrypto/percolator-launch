@@ -20,7 +20,7 @@ import {
 } from "@percolatorct/sdk";
 import { isSentinelValue } from "@/lib/health";
 import { isLpPortfolio } from "@/lib/userAccountScan";
-import { computeLiqPrice, type EntryPriceSource } from "@/lib/trading";
+import { type EntryPriceSource } from "@/lib/trading";
 import { parseV17RiskParams } from "@/lib/v17-engine-config";
 import {
   parseAssetAdlFactors,
@@ -386,6 +386,11 @@ export function getLiquidationSeverity(distancePct: number): LiquidationSeverity
  * PortfolioPositionsView and the site-wide PositionsBar, so every
  * open-position surface agrees.
  */
+/** Open positions whose PnL is unknown: they contribute 0 to the aggregate totals. */
+export function countUnknownPnl(positions: PortfolioPosition[]): number {
+  return positions.filter((p) => isOpenPosition(p) && p.pnlKnown === false).length;
+}
+
 export function isOpenPosition(pos: PortfolioPosition): boolean {
   return (pos.account?.positionSize ?? 0n) !== 0n;
 }
@@ -523,12 +528,14 @@ export function buildV17Position(
   const pnlResult = computePositionPnl({
     basisQ: positionSize,
     aBasis,
+    epochSnap: activeLeg ? activeLeg.epochSnap : undefined,
     adlFactors,
     markE6: oraclePriceE6,
     serverEntryE6: knownEntries.serverEntryE6,
     cachedEntryE6: knownEntries.cachedEntryE6,
     onChainPnl: account.pnl,
     initialMarginBps,
+    maintenanceMarginBps,
     capital: account.capital,
   });
   // NOTE: when the ADL state is unknown `effectiveSize` falls back to raw basis
@@ -537,12 +544,11 @@ export function buildV17Position(
   const effectiveSize = pnlResult.effectiveSize ?? positionSize;
   const effectiveEntryPrice = pnlResult.entry;
   const entryPriceSource = pnlResult.entrySource;
-  const liquidationPriceE6 = computeLiqPrice(
-    effectiveEntryPrice,
-    account.capital,
-    account.positionSize,
-    maintenanceMarginBps,
-  );
+  // Liquidation price on EFFECTIVE size (the engine's maintenance check runs over
+  // effective_abs_q, v16.rs:13896-13912). Unknown size => 0n placeholder, and the
+  // classifyLiquidation call below is told there is no usable entry, so it reads
+  // "unknown" rather than "collateral covers it".
+  const liquidationPriceE6 = pnlResult.liquidationPriceE6 ?? 0n;
   const unrealizedPnl = pnlResult.unrealizedPnl ?? 0n;
   const pnlPercent = pnlResult.roe ?? 0;
 
@@ -557,7 +563,7 @@ export function buildV17Position(
     account.positionSize,
     oraclePriceE6,
     liquidationPriceE6,
-    entryPriceSource !== "unknown",
+    pnlResult.adlKnown && entryPriceSource !== "unknown",
   );
 
   const absPos = account.positionSize < 0n ? -account.positionSize : account.positionSize;
@@ -598,6 +604,11 @@ export function buildV17Position(
 }
 
 export interface PortfolioData {
+  /**
+   * Open positions whose PnL is unknown (no entry / unknown ADL state). They add 0 to
+   * `totalUnrealizedPnl` / `totalValue`, so any aggregate built from those must say so.
+   */
+  unknownPnlCount: number;
   positions: PortfolioPosition[];
   totalPnl: bigint;
   totalDeposited: bigint;
@@ -816,18 +827,14 @@ export async function fetchPortfolioSnapshot(
               cachedEntryE6: cachedV12Entry,
               onChainPnl: account.pnl,
               initialMarginBps,
+              maintenanceMarginBps,
               capital: account.capital,
             });
             const resolvedEntry = { entry: v12Pnl.entry, source: v12Pnl.entrySource };
             const effectiveEntryPrice = resolvedEntry.entry;
 
             // Compute liquidation price
-            const liquidationPriceE6 = computeLiqPrice(
-              effectiveEntryPrice,
-              account.capital,
-              account.positionSize,
-              maintenanceMarginBps,
-            );
+            const liquidationPriceE6 = v12Pnl.liquidationPriceE6 ?? 0n;
 
             // GH#1331: the helper sentinel-guards account.pnl (u64::MAX on
             // uninitialized/flat accounts) before it can feed the back-solve.
@@ -1475,5 +1482,6 @@ export function usePortfolio(enabled: boolean = true): PortfolioData {
     };
   }, [enabled]);
 
-  return { positions, totalPnl, totalDeposited, totalValue, totalUnrealizedPnl, atRiskCount, loading, isRefreshing, error, refresh };
+  const unknownPnlCount = countUnknownPnl(positions);
+  return { positions, totalPnl, totalDeposited, totalValue, totalUnrealizedPnl, unknownPnlCount, atRiskCount, loading, isRefreshing, error, refresh };
 }

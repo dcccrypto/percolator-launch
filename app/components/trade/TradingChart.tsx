@@ -33,8 +33,7 @@ import { computeRef24h, computePriceChange, formatPriceChange } from "@/lib/char
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { displayEntryE6 } from "@/lib/entry-price-display";
-import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
-import { terminalPositionPnl } from "@/lib/position-pnl";
+import { onChainMarkE6, terminalPositionPnl } from "@/lib/position-pnl";
 import { useChartStylePref } from "@/hooks/useChartStylePref";
 import { useChartOverlayPrefs } from "@/hooks/useChartOverlayPrefs";
 import { useChartIndicatorPrefs } from "@/hooks/useChartIndicatorPrefs";
@@ -836,14 +835,8 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
     const { account } = ua;
     if (account.positionSize === 0n) return null;
 
-    const oraclePriceE6 = config
-      ? sanitizePriceE6(
-          applyInvert(
-            config.lastEffectivePriceE6,
-            config.invert,
-          ),
-        )
-      : 0n;
+    // v17 `markEwmaE6` is already post-inversion: do NOT apply `invert` again.
+    const oraclePriceE6 = onChainMarkE6(config, wrapperConfigV17 !== null) ?? 0n;
 
     // Same shared resolution as every PnL surface (lib/position-pnl.ts): server >
     // cache > back-solve over EFFECTIVE size - this line used to back-solve over

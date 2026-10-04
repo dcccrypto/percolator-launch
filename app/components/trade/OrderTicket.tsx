@@ -55,6 +55,7 @@ import { diagnoseTradeRejection } from "@/lib/tradeRejectDiagnosis";
 import { explorerTxUrl, getNetwork } from "@/lib/config";
 import { useUserAccount, useUserAccountScanPending } from "@/hooks/useUserAccount";
 import { OrderTicketClosePanel } from "@/components/trade/OrderTicketClosePanel";
+import { terminalPositionPnl } from "@/lib/position-pnl";
 import { computeLimitPriceE6 } from "@/lib/slippage";
 import { bindConfirmedLimitPrice } from "@/lib/confirmedTrade";
 import { useEngineState } from "@/hooks/useEngineState";
@@ -246,7 +247,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // The market's per-trade size ceiling (immutable, resolved once).
   const fillCaps = useMarketFillCap(slabAddress);
   const { engine, params, insuranceBalance: liveInsuranceBalance, totalOI: liveTotalOI, hasData: engineHasData } = useEngineState();
-  const { accounts, config: mktConfig, header, refresh: refreshSlab, programId: slabProgramId, raw: slabRaw } = useSlabState();
+  const { accounts, config: mktConfig, header, refresh: refreshSlab, programId: slabProgramId, raw: slabRaw, adlFactors: slabAdlFactors, wrapperConfigV17: slabWrapperV17 } = useSlabState();
   // F-3 / R1 (not flag-gated — deployed engine behaviour): ADL reduce-only after a bankruptcy.
   const adlReduceOnly = useMemo(() => (slabRaw ? isAdlReduceOnly(decodeMarketEngineView(slabRaw)) : false), [slabRaw]);
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
@@ -463,6 +464,20 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       )
     : null;
   const existingEntryPriceE6 = existingResolved?.entry ?? 0n;
+  // The Close tab previews size/PnL/balance for a close that acts on the leg's
+  // EFFECTIVE size (engine plan_delta, v16.rs:6075), so it is handed that size -
+  // never raw basis - and withholds the preview when the ADL state is unknown.
+  const closeView = ticketMode === "close" && userAccount && userAccount.account.positionSize !== 0n
+    ? terminalPositionPnl({
+        account: userAccount.account,
+        slabAddress,
+        accountIdx: userAccount.idx,
+        adlFactors: slabAdlFactors,
+        adlApplicable: slabWrapperV17 !== null,
+        markE6: livePriceE6 ?? 0n,
+        initialMarginBps: 1000n,
+      })
+    : null;
   const existingEntryKnown = existingResolved != null && existingResolved.source !== "unknown" && existingEntryPriceE6 > 0n;
   const lockedMargin = computePositionInitialMargin(existingPositionSize, existingEntryPriceE6, initialMarginBps);
   const availableBalance = userAccount ? (capital > lockedMargin ? capital - lockedMargin : 0n) : 0n;
@@ -1306,7 +1321,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         ) : (
           <OrderTicketClosePanel
             slabAddress={slabAddress}
-            positionSize={existingPositionSize}
+            positionSize={closeView?.effectiveSize ?? existingPositionSize}
+            previewUnavailable={closeView != null && !closeView.adlKnown}
             accountPending={accountPending}
             entryPriceE6={existingEntryKnown ? existingEntryPriceE6 : 0n}
             capital={capital}

@@ -23,8 +23,14 @@
  *   3. Entry priority is `server` > `cache` > `derived` > `unknown`. The derived
  *      entry is back-solved over the effective size and is only an ESTIMATE
  *      (`isEstimate`); every surface labels it "est." (ESTIMATE_LABEL).
- *   4. ROE divides by the position's own initial margin on RAW basis (the
- *      engine denominates margin in basis), falling back to capital.
+ *   4. ROE divides by the position's own initial margin on EFFECTIVE size (the
+ *      engine's risk_notional runs over effective_abs_q), falling back to capital.
+ *   5. The effective size mirrors the engine's `effective_abs_quantity_for_leg`
+ *      (lib/limits/effective-quantity.ts): a leg whose factors are invalid
+ *      (a_side > a_basis, a_basis out of range) or whose epoch no longer matches
+ *      the side is UNKNOWN; a prior-reset obligation owns 0 and its PnL is
+ *      withheld (it settles at the next refresh).
+ *   6. The liquidation price is computed on effective size too.
  *
  * Pure: no React, no storage, no network. Callers fetch the inputs.
  */
@@ -37,13 +43,22 @@ import {
 } from "@/lib/trading";
 import { isSentinelValue } from "@/lib/health";
 import { getEntryPrice } from "@/lib/entry-price";
-import { adlSideFactor, effectiveExposureQ, type AssetAdlFactors } from "@/lib/v17-adl";
+import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
+import type { AssetAdlFactors } from "@/lib/v17-adl";
+import { adlEffectiveQuantityCeil, effectiveLeg } from "@/lib/limits/effective-quantity";
+import { computeEngineLiqPrice } from "@/lib/liquidation-risk";
 
 export interface PositionPnlInput {
   /** RAW leg basis (`account.positionSize`, signed). Never pre-scaled by ADL. */
   basisQ: bigint;
   /** The leg's frozen `a_basis` (`account.adlABasis`). */
   aBasis: bigint;
+  /**
+   * The leg's `epoch_snap` (`account.adlEpochSnap`). With the factors' side
+   * epochs/modes it lets us mirror the engine's `effective_abs_quantity_for_leg`
+   * (current epoch scales, a prior-reset obligation owns 0, anything else is invalid).
+   */
+  epochSnap?: bigint;
   /** Live per-side ADL factors for the asset slot; `null` = unknown. */
   adlFactors: AssetAdlFactors | null;
   /**
@@ -68,6 +83,8 @@ export interface PositionPnlInput {
   /** On-chain `account.pnl` (collateral atoms) - only used to back-solve. */
   onChainPnl: bigint;
   initialMarginBps: bigint;
+  /** Maintenance margin bps, for the liquidation price. Omit when not needed. */
+  maintenanceMarginBps?: bigint;
   /** Fallback ROE denominator when no initial margin is computable. */
   capital: bigint;
 }
@@ -90,21 +107,26 @@ export interface PositionPnl {
   unrealizedPnl: bigint | null;
   /** Return on initial margin, percent, or null when unknown. */
   roe: number | null;
+  /**
+   * Engine liquidation price (e6) on EFFECTIVE size - the engine's maintenance
+   * check runs over `effective_abs_q` (v16.rs:13896-13912). 0n = none; `null` =
+   * size unknown (never computed from raw basis) or no maintenance bps supplied.
+   */
+  liquidationPriceE6: bigint | null;
 }
 
 /**
  * The arithmetic core, shared by `computePositionPnl` and any surface that is
  * handed an ALREADY-resolved (effective size, entry) pair - the PnL share card.
  * Everything that turns (size, entry, mark) into PnL/ROE lives here and only
- * here: mark-valued, coin-margined native -> collateral once, ROE on raw-basis
- * initial margin.
+ * here: mark-valued, coin-margined native -> collateral once, ROE on
+ * initial margin on EFFECTIVE size (the engine's risk_notional runs over
+ * effective_abs_q, v16.rs:13896-13912).
  */
 export function valueAtMark(v: {
   effectiveSize: bigint;
   entryE6: bigint;
   markE6: bigint;
-  /** RAW basis the initial margin is denominated in. */
-  basisQ: bigint;
   initialMarginBps: bigint;
   capital: bigint;
 }): { pnlNative: bigint; unrealizedPnl: bigint; roe: number } {
@@ -112,7 +134,7 @@ export function valueAtMark(v: {
   const unrealizedPnl = computeMarkPnlCollateral(pnlNative, v.markE6);
   let roe = 0;
   try {
-    const margin = computePositionInitialMargin(v.basisQ, v.entryE6, v.initialMarginBps);
+    const margin = computePositionInitialMargin(v.effectiveSize, v.entryE6, v.initialMarginBps);
     if (margin > 0n) roe = computePnlPercent(unrealizedPnl, margin);
     else if (v.capital > 0n) roe = computePnlPercent(unrealizedPnl, v.capital);
   } catch {
@@ -128,14 +150,46 @@ export function computePositionPnl(input: PositionPnlInput): PositionPnl {
   const adlApplicable = input.adlApplicable !== false;
   const flat = basisQ === 0n;
 
-  const adlKnown = flat || !adlApplicable || adlFactors !== null;
-  const effectiveSize: bigint | null = flat
-    ? 0n
-    : !adlApplicable
-      ? basisQ
-      : adlFactors
-        ? effectiveExposureQ(basisQ, aBasis, adlSideFactor(adlFactors, basisQ > 0n ? 0 : 1))
-        : null;
+  // Effective exposure, mirroring the engine (see header, rule 5).
+  let effectiveSize: bigint | null;
+  let resetObligation = false;
+  if (flat) {
+    effectiveSize = 0n;
+  } else if (!adlApplicable) {
+    effectiveSize = basisQ;
+  } else if (adlFactors === null) {
+    effectiveSize = null;
+  } else {
+    const long = basisQ > 0n;
+    const hasEpochs =
+      input.epochSnap !== undefined &&
+      adlFactors.epochLong !== undefined &&
+      adlFactors.epochShort !== undefined &&
+      adlFactors.modeLong !== undefined &&
+      adlFactors.modeShort !== undefined;
+    if (hasEpochs) {
+      const leg = effectiveLeg(
+        {
+          aLong: adlFactors.aLong,
+          aShort: adlFactors.aShort,
+          epochLong: adlFactors.epochLong as bigint,
+          epochShort: adlFactors.epochShort as bigint,
+          modeLong: adlFactors.modeLong as number,
+          modeShort: adlFactors.modeShort as number,
+        },
+        { active: true, side: long ? 0 : 1, basisPosQ: basisQ, aBasis, epochSnap: input.epochSnap as bigint },
+      );
+      if (leg.kind === "live") effectiveSize = leg.signedQ;
+      else if (leg.kind === "reset") {
+        effectiveSize = 0n;
+        resetObligation = true;
+      } else effectiveSize = null;
+    } else {
+      const abs = adlEffectiveQuantityCeil(basisQ < 0n ? -basisQ : basisQ, aBasis, (long ? adlFactors.aLong : adlFactors.aShort));
+      effectiveSize = abs === null ? null : long ? abs : -abs;
+    }
+  }
+  const adlKnown = effectiveSize !== null;
 
   const anchorE6 = input.anchorMarkE6 != null && input.anchorMarkE6 > 0n ? input.anchorMarkE6 : markE6;
   const safePnl = isSentinelValue(input.onChainPnl) ? 0n : input.onChainPnl;
@@ -161,6 +215,10 @@ export function computePositionPnl(input: PositionPnlInput): PositionPnl {
     entry: resolved.entry,
     entrySource: resolved.source,
     isEstimate: resolved.source === "derived",
+    liquidationPriceE6:
+      effectiveSize === null || input.maintenanceMarginBps === undefined
+        ? null
+        : computeEngineLiqPrice(resolved.entry, input.capital, effectiveSize, input.maintenanceMarginBps),
   };
   const unknown: PositionPnl = {
     ...base,
@@ -171,14 +229,13 @@ export function computePositionPnl(input: PositionPnlInput): PositionPnl {
   };
 
   if (flat) return { ...base, pnlKnown: true, pnlNative: 0n, unrealizedPnl: 0n, roe: 0 };
-  if (effectiveSize === null) return unknown;
+  if (effectiveSize === null || resetObligation) return unknown;
   if (resolved.source === "unknown" || resolved.entry <= 0n || markE6 <= 0n) return unknown;
 
   const valued = valueAtMark({
     effectiveSize,
     entryE6: resolved.entry,
     markE6,
-    basisQ,
     initialMarginBps: input.initialMarginBps,
     capital: input.capital,
   });
@@ -205,7 +262,7 @@ export function lookupKnownEntries(
 
 /** Structural subset of `PortfolioPosition` the adapter needs (avoids a lib -> hook import cycle). */
 export interface PortfolioPnlSource {
-  account: { positionSize: bigint; adlABasis: bigint; pnl: bigint; capital: bigint } | null;
+  account: { positionSize: bigint; adlABasis: bigint; adlEpochSnap?: bigint; pnl: bigint; capital: bigint } | null;
   adlFactors?: AssetAdlFactors | null;
   /** false on legacy v12.x portfolio rows. */
   adlApplicable?: boolean;
@@ -213,6 +270,7 @@ export interface PortfolioPnlSource {
   effectiveEntryPrice: bigint;
   entryPriceSource: EntryPriceSource;
   initialMarginBps: bigint;
+  maintenanceMarginBps?: bigint;
   oraclePriceE6: bigint;
 }
 
@@ -222,6 +280,7 @@ export function portfolioPositionPnl(pos: PortfolioPnlSource, liveMarkE6: bigint
   return computePositionPnl({
     basisQ: pos.account?.positionSize ?? 0n,
     aBasis: pos.account?.adlABasis ?? 0n,
+    epochSnap: pos.account?.adlEpochSnap,
     adlFactors: pos.adlFactors ?? null,
     adlApplicable: pos.adlApplicable !== false,
     markE6,
@@ -230,6 +289,7 @@ export function portfolioPositionPnl(pos: PortfolioPnlSource, liveMarkE6: bigint
     cachedEntryE6: pos.entryPriceSource === "cache" ? pos.effectiveEntryPrice : 0n,
     onChainPnl: pos.account?.pnl ?? 0n,
     initialMarginBps: pos.initialMarginBps,
+    maintenanceMarginBps: pos.maintenanceMarginBps,
     capital: pos.account?.capital ?? 0n,
   });
 }
@@ -238,6 +298,7 @@ export function portfolioPositionPnl(pos: PortfolioPnlSource, liveMarkE6: bigint
 export interface TerminalPnlAccount {
   positionSize: bigint;
   adlABasis: bigint;
+  adlEpochSnap?: bigint;
   pnl: bigint;
   capital: bigint;
   /** On-chain entry (v12.x only; always 0n on v17/v18). */
@@ -262,14 +323,16 @@ export function terminalPositionPnl(args: {
   /** On-chain mark `account.pnl` was observed at; see PositionPnlInput.anchorMarkE6. */
   anchorMarkE6?: bigint;
   initialMarginBps: bigint;
+  maintenanceMarginBps?: bigint;
 }): PositionPnl {
   const { account } = args;
-  const known = lookupKnownEntries(args.slabAddress, args.accountIdx, account.owner.toBase58());
+  const known = lookupKnownEntries(args.slabAddress, args.accountIdx, account.owner?.toBase58?.() ?? "");
   const onChainEntry = account.entryPrice ?? 0n;
   return computePositionPnl({
     basisQ: account.positionSize,
     // `?? 0n`: a partial/legacy account shape has no frozen factor; 0n means "no scaling".
     aBasis: account.adlABasis ?? 0n,
+    epochSnap: account.adlEpochSnap,
     adlFactors: args.adlFactors,
     adlApplicable: args.adlApplicable,
     markE6: args.markE6,
@@ -278,6 +341,37 @@ export function terminalPositionPnl(args: {
     cachedEntryE6: onChainEntry > 0n ? onChainEntry : known.cachedEntryE6,
     onChainPnl: account.pnl,
     initialMarginBps: args.initialMarginBps,
+    maintenanceMarginBps: args.maintenanceMarginBps,
     capital: account.capital,
   });
+}
+
+/**
+ * The slab's on-chain mark in the engine's price domain.
+ *
+ * On v17/v18 `markEwmaE6` is ALREADY post-inversion: the wrapper applies
+ * `invert` while composing the oracle price (percolator-prog v16_program.rs
+ * compose_price_e6, :6440-6445) and the EWMA/AUTH_MARK modes require
+ * `invert == 0`. Applying the flag again double-inverts (and `usePortfolio`
+ * never did, so surfaces disagreed). Only legacy v12.x stores a raw price that
+ * the flag still applies to (GH#1990).
+ */
+export function onChainMarkE6(
+  config: { lastEffectivePriceE6: bigint; invert?: number } | null | undefined,
+  isV17: boolean,
+): bigint | null {
+  if (!config) return null;
+  const raw = sanitizePriceE6(config.lastEffectivePriceE6);
+  return isV17 ? raw : sanitizePriceE6(applyInvert(config.lastEffectivePriceE6, config.invert));
+}
+
+/**
+ * Calm caveat for any aggregate (hero / dashboard totals) that cannot include
+ * positions whose PnL is unknown. Never sum an unknown as 0 without saying so.
+ */
+export function unknownPnlCaveat(unknownCount: number): string | null {
+  if (!Number.isFinite(unknownCount) || unknownCount <= 0) return null;
+  return unknownCount === 1
+    ? "Excludes 1 position whose PnL isn't available yet"
+    : `Excludes ${unknownCount} positions whose PnL isn't available yet`;
 }

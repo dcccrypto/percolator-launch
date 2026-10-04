@@ -94,6 +94,7 @@ export const CloseFlow: FC<{
   return (
     <ClosePositionModal
       positionSize={posSize}
+      previewUnavailable={!closePnl.adlKnown}
       entryPrice={closePnl.pnlKnown ? closePnl.entry : 0n}
       currentPrice={markE6}
       capital={pos.account?.capital ?? 0n}

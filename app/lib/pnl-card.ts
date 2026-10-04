@@ -12,9 +12,9 @@ import { computePnlPercent } from "@percolatorct/sdk";
 import { computePositionInitialMargin } from "@/lib/trading";
 import { valueAtMark } from "@/lib/position-pnl";
 
-function valueRoe(pnlCollateral: bigint, basisQ: bigint, entryE6: bigint, initialMarginBps: bigint): number {
+function valueRoe(pnlCollateral: bigint, marginSizeQ: bigint, entryE6: bigint, initialMarginBps: bigint): number {
   try {
-    const margin = computePositionInitialMargin(basisQ, entryE6, initialMarginBps);
+    const margin = computePositionInitialMargin(marginSizeQ, entryE6, initialMarginBps);
     const roe = margin > 0n ? computePnlPercent(pnlCollateral, margin) : 0;
     return Number.isFinite(roe) ? roe : 0;
   } catch {
@@ -41,7 +41,7 @@ export interface PnlCardData {
   mainnetCa?: string | null;
   /** Collateral decimals (sim-USDC = 6). */
   decimals: number;
-  /** Nominal basis `account.positionSize` — margin ("spent") is priced on this. */
+  /** Nominal basis `account.positionSize` (display of the ADL reduction only). */
   nominalSizeQ: bigint;
   /** ADL-effective size — PnL moves on this (lib/v17-adl). Equals nominal when never deleveraged. */
   effectiveSizeQ: bigint;
@@ -122,7 +122,6 @@ export function computePnlCardStats(data: PnlCardData, markRawE6: bigint): PnlCa
       effectiveSize: data.effectiveSizeQ,
       entryE6: data.entryE6,
       markE6,
-      basisQ: data.nominalSizeQ,
       initialMarginBps: data.initialMarginBps,
       capital: 0n,
     });
@@ -138,13 +137,13 @@ export function computePnlCardStats(data: PnlCardData, markRawE6: bigint): PnlCa
     tone = pnlCollateral > 0n ? "profit" : pnlCollateral < 0n ? "loss" : "flat";
     // ROE is on the SHOWN pnl (the payable cap can shrink it), same margin base.
     roePct = isCapped
-      ? valueRoe(pnlCollateral, data.nominalSizeQ, data.entryE6, data.initialMarginBps)
+      ? valueRoe(pnlCollateral, data.effectiveSizeQ, data.entryE6, data.initialMarginBps)
       : valued.roe;
   }
 
   const spentRaw =
     data.entryE6 > 0n
-      ? Number(computePositionInitialMargin(data.nominalSizeQ, data.entryE6, data.initialMarginBps)) / div
+      ? Number(computePositionInitialMargin(data.effectiveSizeQ, data.entryE6, data.initialMarginBps)) / div
       : 0;
 
   return {

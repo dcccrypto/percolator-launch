@@ -104,7 +104,7 @@ const pos = (over: Record<string, unknown>) => ({
   effectiveEntryPrice: 100_000_000n,
   entryPriceSource: "cache",
 
-  account: {
+  account: { adlABasis: 1_000_000_000_000_000n,
     positionSize: 1_000_000n,
     capital: 200_000_000n,
     entryPrice: 0n,
@@ -134,7 +134,7 @@ function livePosition() {
     pnlPercent: stale.pnlPercent,
     initialMarginBps: INITIAL_MARGIN_BPS,
     maintenanceMarginBps: 500n,
-    account: {
+    account: { adlABasis: 1_000_000_000_000_000n,
       positionSize: SIZE,
       capital: CAPITAL,
       entryPrice: 0n,
@@ -172,7 +172,7 @@ describe("PositionSummary Liq cell", () => {
     state.positions = [
       pos({
         liquidationPriceE6: 80_000_000n,
-        account: {
+        account: { adlABasis: 1_000_000_000_000_000n,
           positionSize: 1_000_000n,
           capital: 50_000_000n,
           entryPrice: 0n,
@@ -253,7 +253,7 @@ describe("PositionSummary — one card per portfolio, each on its own numbers", 
       effectiveEntryPrice: entryE6,
       entryPriceSource: "cache",
       oraclePriceE6: MARK,
-      account: { positionSize: 1_000_000n, capital: CAPITAL, entryPrice: 0n },
+      account: { adlABasis: 1_000_000_000_000_000n, positionSize: 1_000_000n, capital: CAPITAL, entryPrice: 0n },
     });
   }
 
@@ -284,7 +284,7 @@ describe("PositionSummary — leverage follows the same live mark as PnL", () =>
       pos({
         effectiveSize: SIZE_Q, adlKnown: true, adlFactors: { aLong: 1_000_000_000_000_000n, aShort: 1_000_000_000_000_000n }, adlApplicable: true, pnlKnown: true, isEstimate: false,
         oraclePriceE6: STALE,
-        account: { positionSize: SIZE_Q, capital: CAPITAL, pnl: 0n, entryPrice: 0n },
+        account: { adlABasis: 1_000_000_000_000_000n, positionSize: SIZE_Q, capital: CAPITAL, pnl: 0n, entryPrice: 0n },
       }),
     ];
     state.priceE6 = LIVE;

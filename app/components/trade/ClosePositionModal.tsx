@@ -28,6 +28,8 @@ interface ClosePositionModalProps {
   error?: string | null;
   /** The market's per-fill cap (matcherCaps.maxFillAbs), when known. */
   maxFillAbs?: bigint | null;
+  /** ADL state unknown: withhold the raw-size preview (see ClosePositionFormProps). */
+  previewUnavailable?: boolean;
   onConfirm: (percent: number) => void;
   onCancel: () => void;
 }
@@ -62,6 +64,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   oracleStale = false,
   error = null,
   maxFillAbs = null,
+  previewUnavailable = false,
   onConfirm,
   onCancel,
 }) => {
@@ -167,6 +170,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
           oracleStale={oracleStale}
           error={error}
           maxFillAbs={maxFillAbs}
+          previewUnavailable={previewUnavailable}
           onConfirm={onConfirm}
           onCancel={onCancel}
         />

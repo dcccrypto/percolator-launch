@@ -228,3 +228,27 @@ describe("trade-terminal surfaces feed describeLiqPrice the entry SOURCE, not `e
     expect(src).toMatch(/entryPriceE6=\{existingEntryKnown \? existingEntryPriceE6 : 0n\}/);
   });
 });
+
+describe("hero / aggregate totals never silently sum an unknown PnL as 0 (#3077 item 2)", () => {
+  it("every open position unknown: the hero PnL is '--' with a calm caveat", () => {
+    state.positions = [build("DAC2a44p")];
+    render(<PortfolioPositionsView />);
+    const hero = screen.getByTestId("hero-pnl-unknown");
+    expect(hero.textContent).toContain("--");
+    expect(hero.textContent).toMatch(/Excludes 1 position/);
+  });
+
+  it("one known + one unknown: the number stays, and the caveat says one position is excluded", () => {
+    state.positions = [build("2SewEcvf"), build("DAC2a44p")];
+    render(<PortfolioPositionsView />);
+    expect(screen.queryByTestId("hero-pnl-unknown")).toBeNull();
+    expect(screen.getByTestId("hero-pnl-caveat").textContent).toMatch(/Excludes 1 position /);
+  });
+
+  it("CONTROL: every position known -> neither '--' nor a caveat", () => {
+    state.positions = [build("2SewEcvf")];
+    render(<PortfolioPositionsView />);
+    expect(screen.queryByTestId("hero-pnl-unknown")).toBeNull();
+    expect(screen.queryByTestId("hero-pnl-caveat")).toBeNull();
+  });
+});

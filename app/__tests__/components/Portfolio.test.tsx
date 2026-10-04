@@ -107,7 +107,7 @@ describe("Portfolio Component Tests", () => {
             symbol: "SOL",
             idx: 0,
             collateralMint: mockPublicKey,
-            account: {
+            account: { adlABasis: 1_000_000_000_000_000n,
               kind: AccountKind.User,
               owner: mockPublicKey,
               capital: 1000000n,
@@ -129,6 +129,12 @@ describe("Portfolio Component Tests", () => {
             // displayable when the entry it derives from actually resolved.
             effectiveEntryPrice: 100000000n,
             entryPriceSource: "cache",
+            effectiveSize: 5000000n,
+            adlKnown: true,
+            adlFactors: { aLong: 1_000_000_000_000_000n, aShort: 1_000_000_000_000_000n },
+            adlApplicable: true,
+            pnlKnown: true,
+            isEstimate: false,
             unrealizedPnl: 0n,
             oraclePriceE6: 100000000n,
             pnlPercent: 0,
@@ -166,7 +172,7 @@ describe("Portfolio Component Tests", () => {
             symbol: "USDC",
             idx: 0,
             collateralMint: mockPublicKey,
-            account: {
+            account: { adlABasis: 1_000_000_000_000_000n,
               kind: AccountKind.User,
               owner: mockPublicKey,
               capital: 2000000n,
@@ -188,6 +194,12 @@ describe("Portfolio Component Tests", () => {
             // displayable when the entry it derives from actually resolved.
             effectiveEntryPrice: 100000000n,
             entryPriceSource: "cache",
+            effectiveSize: 5000000n,
+            adlKnown: true,
+            adlFactors: { aLong: 1_000_000_000_000_000n, aShort: 1_000_000_000_000_000n },
+            adlApplicable: true,
+            pnlKnown: true,
+            isEstimate: false,
             unrealizedPnl: 0n,
             oraclePriceE6: 95000000n,
             pnlPercent: 0,
@@ -225,7 +237,7 @@ describe("Portfolio Component Tests", () => {
             symbol: "SOL",
             idx: 0,
             collateralMint: mockPublicKey,
-            account: {
+            account: { adlABasis: 1_000_000_000_000_000n,
               kind: AccountKind.User,
               owner: mockPublicKey,
               capital: 1000000n,
@@ -374,7 +386,7 @@ describe("Portfolio Component Tests", () => {
             symbol: null,
             idx: 0,
             collateralMint: mockPublicKey,
-            account: {
+            account: { adlABasis: 1_000_000_000_000_000n,
               kind: AccountKind.User,
               owner: mockPublicKey,
               capital: 1000000n,
@@ -431,7 +443,7 @@ describe("Portfolio Component Tests", () => {
             symbol: "SOL",
             idx: 0,
             collateralMint: mockPublicKey,
-            account: {
+            account: { adlABasis: 1_000_000_000_000_000n,
               kind: AccountKind.User,
               owner: mockPublicKey,
               capital: 1000000n,
@@ -578,7 +590,7 @@ describe("Portfolio Component Tests", () => {
       symbol: "SOL",
       idx: 0,
       collateralMint: mockPublicKey,
-      account: { kind: AccountKind.User, owner: mockPublicKey, capital, positionSize, pnl, entryPrice: 100000000n },
+      account: { adlABasis: 1_000_000_000_000_000n, kind: AccountKind.User, owner: mockPublicKey, capital, positionSize, pnl, entryPrice: 100000000n },
       market: { slabAddress: mockPublicKey, config: { collateralMint: mockPublicKey }, engine: {} },
       effectiveEntryPrice: 100000000n,
       entryPriceSource: "cache",
@@ -624,7 +636,7 @@ describe("Portfolio Component Tests", () => {
       symbol: "SOL",
       idx: 0,
       collateralMint: mockPublicKey,
-      account: {
+      account: { adlABasis: 1_000_000_000_000_000n,
         kind: AccountKind.User,
         owner: mockPublicKey,
         capital: 10000000n,

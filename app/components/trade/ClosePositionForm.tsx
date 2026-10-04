@@ -42,6 +42,13 @@ export interface ClosePositionFormProps {
   error?: string | null;
   /** Per-fill cap — a close bigger than this executes as several batch legs. */
   maxFillAbs?: bigint | null;
+  /**
+   * The ADL state of this market is unknown, so the size the close will act on
+   * (the leg's EFFECTIVE size) is unknown and `positionSize` is only raw basis.
+   * Withhold the size / PnL / balance preview rather than show raw-size figures;
+   * the close itself still re-reads the leg and acts on its effective size.
+   */
+  previewUnavailable?: boolean;
   onConfirm: (percent: number) => void;
   /** Modal chrome only (title + X + Cancel). Omit for inline. */
   onCancel?: () => void;
@@ -77,6 +84,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
   oracleStale = false,
   error = null,
   maxFillAbs = null,
+  previewUnavailable = false,
   onConfirm,
   onCancel,
   variant = "modal",
@@ -95,7 +103,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
   const closeAbsForFills =
     percent >= 100 ? absPosition : (absPosition * BigInt(clampClosePercent(percent))) / 100n;
   const fillCount =
-    maxFillAbs != null && maxFillAbs > 0n && closeAbsForFills > 0n
+    !previewUnavailable && maxFillAbs != null && maxFillAbs > 0n && closeAbsForFills > 0n
       ? Number((closeAbsForFills + maxFillAbs - 1n) / maxFillAbs)
       : 1;
 
@@ -167,7 +175,11 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
           Closing {isLong ? "Long" : "Short"} Position
         </p>
         <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
-          <span style={{ fontFamily: "var(--font-mono)" }}>{formatTokenAmount(absPosition, decimals)}</span> {symbol} at{" "}
+          {previewUnavailable ? (
+            <span style={{ fontFamily: "var(--font-mono)" }}>--</span>
+          ) : (
+            <span style={{ fontFamily: "var(--font-mono)" }}>{formatTokenAmount(absPosition, decimals)}</span>
+          )}{" "}{symbol} at{" "}
           {entryKnown ? (
             <><span style={{ fontFamily: "var(--font-mono)" }}>{formatUsdPriceE6(entryPrice)}</span> entry</>
           ) : (
@@ -219,6 +231,12 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
       </div>
 
       {/* Preview details */}
+      {previewUnavailable ? (
+        <p className="mb-6 text-[11px] leading-relaxed text-[var(--text-secondary)]" data-testid="close-preview-unavailable">
+          The size and balance preview isn&apos;t available right now. Closing still uses your position&apos;s current size.
+        </p>
+      ) : (
+      <>
       <div className="mb-6 space-y-2 text-xs">
         <div className="flex justify-between">
           <span className="text-[var(--text-dim)]">Close Size:</span>
@@ -266,6 +284,8 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
           </span>
         </div>
       </div>
+      </>
+      )}
 
       {/* A full close moves the freed balance back to the wallet in a second approval (useClosePosition,
           #2831, SWEEP_COPY); a partial close never sweeps, so the funds stay behind the rest of the

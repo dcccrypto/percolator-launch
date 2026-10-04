@@ -138,6 +138,7 @@ const positionHarness = vi.hoisted(() => ({
       positionSize: -10_000_000n,
       capital: 500_000_000n,
       entryPrice: 0n,
+      adlABasis: 1_000_000_000_000_000n,
       pnl: 0n,
       owner: {
         toBase58: () =>

@@ -51,7 +51,7 @@ import type { PnlCardData } from "@/lib/pnl-card";
 const pk = new PublicKey("11111111111111111111111111111111");
 const row = (slab: string, entryPriceSource: "cache" | "derived" | "unknown") => ({
   slabAddress: slab, symbol: "SOL", idx: 0, collateralMint: pk,
-  account: { kind: AccountKind.User, owner: pk, capital: 1_000_000n, positionSize: 5_000_000n, pnl: 0n, entryPrice: 0n },
+  account: { adlABasis: 1_000_000_000_000_000n, kind: AccountKind.User, owner: pk, capital: 1_000_000n, positionSize: 5_000_000n, pnl: 0n, entryPrice: 0n },
   market: { slabAddress: pk, config: { collateralMint: pk }, engine: {} },
   effectiveEntryPrice: 95_000_000n, entryPriceSource, effectiveSize: 5_000_000n, adlKnown: true, adlFactors: { aLong: 1_000_000_000_000_000n, aShort: 1_000_000_000_000_000n }, adlApplicable: true, pnlKnown: true, isEstimate: false,
   unrealizedPnl: 0n, oraclePriceE6: 100_000_000n, pnlPercent: 0, leverage: 5,

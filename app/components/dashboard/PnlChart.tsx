@@ -2,6 +2,7 @@
 
 import { usePortfolio } from "@/hooks/usePortfolio";
 import { useLivePortfolioMetrics } from "@/hooks/useLivePortfolioMetrics";
+import { unknownPnlCaveat } from "@/lib/position-pnl";
 
 /**
  * PnL Chart — shows real portfolio PnL.
@@ -26,6 +27,9 @@ export function PnlChart() {
   const pnlFloat = Number(liveMetrics.totalUnrealizedPnl) / 1e6;
   const isPositive = pnlFloat >= 0;
   const hasData = openPositions.length > 0;
+  // Unknown-PnL positions add 0 to the total: say so, or show "--" when none is known.
+  const allUnknown = hasData && liveMetrics.unknownPnlCount >= openPositions.length;
+  const caveat = unknownPnlCaveat(liveMetrics.unknownPnlCount);
 
   return (
     <div className="border border-[var(--border)] bg-[var(--panel-bg)]">
@@ -55,10 +59,11 @@ export function PnlChart() {
           </div>
         ) : (
           <div className="text-center">
-            <p className={`text-4xl font-bold tabular-nums ${isPositive ? "text-[var(--long)]" : "text-[var(--short)]"}`}
+            <p className={`text-4xl font-bold tabular-nums ${allUnknown ? "text-[var(--text-secondary)]" : isPositive ? "text-[var(--long)]" : "text-[var(--short)]"}`}
                style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
-              {isPositive ? "+" : ""}${Math.abs(pnlFloat).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {allUnknown ? "--" : <>{isPositive ? "+" : ""}${Math.abs(pnlFloat).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</>}
             </p>
+            {caveat && <p className="mt-1 text-[9px] text-[var(--text-secondary)]" data-testid="pnl-caveat">{caveat}</p>}
             <p className="mt-1 text-[9px] text-[var(--text-secondary)]">
               Across {openPositions.length} position{openPositions.length !== 1 ? "s" : ""} • Historical chart coming soon
             </p>

@@ -51,7 +51,6 @@ import {
   formatPercent,
 } from "@/lib/format";
 import {
-  computeLiqPrice,
   UNKNOWN_ENTRY_TOOLTIP,
   computePositionInitialMargin,
 } from "@/lib/trading";
@@ -82,8 +81,7 @@ import { sanitizeSymbol } from "@/lib/symbol-utils";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { usePriceFlash } from "@/hooks/usePriceFlash";
-import { terminalPositionPnl } from "@/lib/position-pnl";
-import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
+import { onChainMarkE6, terminalPositionPnl } from "@/lib/position-pnl";
 import { isSentinelValue } from "@/lib/health";
 import { RenderProfiler } from "@/components/dev/RenderProfiler";
 import { isOracleStaleBlocking } from "@/lib/oracle-stale-gate";
@@ -214,7 +212,8 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const adlRemaining = adlFactors ? adlRemainingBps(account.adlABasis, aSide) : 10000;
   /** Nominal basis, shown only to explain an ADL reduction. */
   const absNominal = abs(account.positionSize);
-  const onChainPriceE6 = config ? sanitizePriceE6(applyInvert(config.lastEffectivePriceE6, config.invert)) : null;
+  // v17 `markEwmaE6` is already post-inversion; only legacy v12 applies `invert` (see onChainMarkE6).
+  const onChainPriceE6 = onChainMarkE6(config, wrapperConfigV17 !== null);
   const currentPriceE6 = livePriceE6 ?? onChainPriceE6 ?? 0n;
   const maintenanceBps = params?.maintenanceMarginBps ?? 500n;
   const initialMarginBps = params?.initialMarginBps ?? 1000n;
@@ -236,6 +235,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
     markE6: currentPriceE6,
     anchorMarkE6: onChainPriceE6 ?? undefined,
     initialMarginBps,
+    maintenanceMarginBps: maintenanceBps,
   });
   const effectiveSize = pnlResult.effectiveSize ?? account.positionSize;
   const absPosition = abs(effectiveSize);
@@ -278,10 +278,13 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
     }),
   );
 
-  const liqPriceE6 = computeLiqPrice(entryPriceE6, account.capital, account.positionSize, maintenanceBps);
+  // Liquidation price on EFFECTIVE size (engine maintenance runs over effective_abs_q,
+  // v16.rs:13896-13912); unknown ADL state => no number (0n), and the row falls back
+  // to margin health because `pnlIsKnown` is false.
+  const liqPriceE6 = pnlResult.liquidationPriceE6 ?? 0n;
   // Long-side clamp: liq at/below $0 with a live position = cannot be
   // liquidated by price (excess collateral) — formatLiqPrice renders "∞".
-  const liqUnliquidatable = liqPriceE6 <= 0n && entryPriceE6 > 0n && account.positionSize !== 0n;
+  const liqUnliquidatable = pnlResult.adlKnown && liqPriceE6 <= 0n && entryPriceE6 > 0n && account.positionSize !== 0n;
   // When there is no liquidation price, "no liquidation price" is not a risk
   // figure. Margin health is: capital/notional, defined without an entry or a
   // liq price, and it crosses its threshold at exactly the collateral level
@@ -553,6 +556,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
           // raw basis over-reports a deleveraged leg (#3077). The close itself
           // re-reads the leg from a fresh scan (see useClosePosition).
           positionSize={effectiveSize}
+          previewUnavailable={!pnlResult.adlKnown}
           entryPrice={pnlIsKnown ? entryPriceE6 : 0n}
           currentPrice={currentPriceE6}
           capital={account.capital}

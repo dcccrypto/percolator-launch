@@ -50,7 +50,7 @@ let zeroPnl = false;
 let sentinelPnl = false;
 /** Leg state for the ADL cases: raw basis + the side factor frozen at open. */
 let positionSize = POSITION_SIZE;
-let adlABasis = 0n;
+let adlABasis = ADL_ONE;
 let adlFactors: { aLong: bigint; aShort: bigint } | null = { aLong: ADL_ONE, aShort: ADL_ONE };
 let onChainPnl = ON_CHAIN_PNL;
 
@@ -116,7 +116,7 @@ describe("ChartPnlBadge resolves its entry like every other position surface", (
     zeroPnl = false;
     sentinelPnl = false;
     positionSize = POSITION_SIZE;
-    adlABasis = 0n;
+    adlABasis = ADL_ONE;
     adlFactors = { aLong: ADL_ONE, aShort: ADL_ONE };
     onChainPnl = ON_CHAIN_PNL;
   });

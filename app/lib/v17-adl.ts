@@ -90,11 +90,33 @@ const ASSET_SLOT_WRAPPER_SIZE = V17_ASSET_SLOT_WRAPPER_LEN;
 /** Byte offsets of `a_long` / `a_short` within `AssetStateV16Account`. */
 const A_LONG_REL = 49;
 const A_SHORT_REL = 65;
+/**
+ * Epoch and side-mode fields at the tail of `AssetStateV16Account`, after
+ * `oi_eff_long_q` (rel 289 = 49 + 15 x 16, verified against a live devnet slab
+ * with open interest): epoch_long u64 @497, epoch_short u64 @505, mode_long u8
+ * @513, mode_short u8 @514. The leg's `epoch_snap` is compared against these
+ * (engine `effective_abs_quantity_for_leg`).
+ */
+const EPOCH_LONG_REL = 497;
+const EPOCH_SHORT_REL = 505;
+const MODE_LONG_REL = 513;
+const MODE_SHORT_REL = 514;
 
 /** Per-side ADL factors for one asset slot. `ADL_ONE` means "never deleveraged". */
 export interface AssetAdlFactors {
   aLong: bigint;
   aShort: bigint;
+  /** Current side epochs / modes (SideModeV16 encoding); absent only on hand-built values. */
+  epochLong?: bigint;
+  epochShort?: bigint;
+  modeLong?: number;
+  modeShort?: number;
+}
+
+function readU64LE(data: Uint8Array, offset: number): bigint {
+  let value = 0n;
+  for (let i = 7; i >= 0; i--) value = (value << 8n) | BigInt(data[offset + i]);
+  return value;
 }
 
 function readU128LE(data: Uint8Array, offset: number): bigint {
@@ -139,7 +161,16 @@ export function parseAssetAdlFactors(
   // are not looking at an AssetStateV16Account at all.
   if (aLong <= 0n || aLong > ADL_ONE) return null;
   if (aShort <= 0n || aShort > ADL_ONE) return null;
-  return { aLong, aShort };
+  const epochBase = slotBase + ASSET_SLOT_WRAPPER_SIZE;
+  if (epochBase + MODE_SHORT_REL + 1 > slabData.length) return { aLong, aShort };
+  return {
+    aLong,
+    aShort,
+    epochLong: readU64LE(slabData, epochBase + EPOCH_LONG_REL),
+    epochShort: readU64LE(slabData, epochBase + EPOCH_SHORT_REL),
+    modeLong: slabData[epochBase + MODE_LONG_REL],
+    modeShort: slabData[epochBase + MODE_SHORT_REL],
+  };
 }
 
 /** Pick the side factor a leg settles against. `side`: 0 = long, 1 = short. */
@@ -150,19 +181,23 @@ export function adlSideFactor(factors: AssetAdlFactors, side: number): bigint {
 /**
  * Convert a leg's stored basis into the exposure it actually carries today.
  *
- * `effective = basis * aSide / aBasis`, computed on the magnitude so the floor
- * rounding is symmetric for longs and shorts, then re-signed. Returns `basis`
- * unchanged when the factors are missing or equal (the overwhelmingly common
- * "never deleveraged" case), so this is a no-op on a healthy market.
+ * `effective = floor(|basis| * aSide / aBasis)`, computed on the magnitude and
+ * re-signed (a DISPLAY quantity; the engine's own is the ceil in
+ * lib/limits/effective-quantity.ts, which `computePositionPnl` uses). Equal factors (the overwhelmingly common "never deleveraged" case)
+ * return `basis` exactly, so this is a no-op on a healthy market. Returns `null`
+ * (never raw basis) when the factors cannot describe a valid leg.
  */
 export function effectiveExposureQ(
   basisPosQ: bigint,
   aBasis: bigint,
   aSide: bigint,
-): bigint {
+): bigint | null {
   if (basisPosQ === 0n) return 0n;
-  if (aBasis <= 0n || aSide <= 0n) return basisPosQ;
-  if (aBasis === aSide) return basisPosQ;
+  // The engine refuses a leg whose factors are not 1 <= a_side <= a_basis
+  // (kernel_adl_effective_quantity_ceil, v16.rs:1677): there is NO raw-size
+  // answer for such a leg. Report "unknown" instead of handing back raw basis,
+  // which is exactly the number that over-reports a deleveraged position.
+  if (aBasis <= 0n || aSide <= 0n || aSide > aBasis) return null;
   const magnitude = (basisPosQ < 0n ? -basisPosQ : basisPosQ) * aSide / aBasis;
   return basisPosQ < 0n ? -magnitude : magnitude;
 }

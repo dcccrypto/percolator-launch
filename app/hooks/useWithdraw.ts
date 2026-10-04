@@ -26,7 +26,8 @@ import {
 import { sendTx } from "@/lib/tx";
 import { getPortfolioRawSnapshot, isLpPortfolio, makePortfolioScanKey } from "@/lib/userAccountScan";
 import { useSlabState } from "@/components/providers/SlabProvider";
-import { detectOracleMode, sanitizePriceE6, applyInvert } from "@/lib/oraclePrice";
+import { detectOracleMode } from "@/lib/oraclePrice";
+import { onChainMarkE6 } from "@/lib/position-pnl";
 import { assertKnownProgram } from "@/lib/programAllowlist";
 import { humanizeError, UserFacingError, userFacingMessage } from "@/lib/errorMessages";
 import { fetchPortfolioIdentity, defaultCrankObservations } from "@/lib/v18-wire";
@@ -303,9 +304,8 @@ export function useWithdraw(slabAddress: string) {
               // then reverts on-chain. If no entry price can be established at
               // all, fail CLOSED (locked = full capital) rather than open.
               const cachedEntryPrice = getEntryPrice(slabAddress, 0, wallet.publicKey.toBase58());
-              const wrapperOracleE6 = mktConfig
-                ? sanitizePriceE6(applyInvert(mktConfig.lastEffectivePriceE6, mktConfig.invert))
-                : 0n;
+              // v17 markEwmaE6 is already post-inversion (wrapper compose_price_e6): no second invert.
+              const wrapperOracleE6 = onChainMarkE6(mktConfig, true) ?? 0n;
               const safePnlForEstimate = isSentinelValue(portfolio.pnl) ? 0n : portfolio.pnl;
               const estimatedEntryPrice = hasActiveLegs && wrapperOracleE6 > 0n
                 ? estimateEntryFromPnl(positionSize, safePnlForEstimate, wrapperOracleE6)

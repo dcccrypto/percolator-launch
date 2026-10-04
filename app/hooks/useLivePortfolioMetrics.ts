@@ -30,6 +30,12 @@ export interface LivePositionMetric {
 }
 
 export interface LivePortfolioMetrics {
+  /**
+   * Open positions whose PnL is unknown (no entry / unknown ADL state). They add 0 to
+   * `totalUnrealizedPnl`; every aggregate must say so (`unknownPnlCaveat`) or show "--"
+   * when ALL open positions are unknown.
+   */
+  unknownPnlCount: number;
   openPositions: PortfolioPosition[];
   /**
    * One entry per OPEN position, in the same order as `openPositions`.
@@ -144,6 +150,7 @@ export function useLivePortfolioMetrics(
     );
 
     return {
+      unknownPnlCount: livePositions.filter((m) => !m.pnlKnown).length,
       openPositions,
       livePositions,
       totalUnrealizedPnl,
