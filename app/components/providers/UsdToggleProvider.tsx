@@ -10,7 +10,9 @@ interface UsdToggleContextValue {
 const UsdToggleContext = createContext<UsdToggleContextValue | null>(null);
 
 export function UsdToggleProvider({ children }: { children: ReactNode }) {
-  const [showUsd, setShowUsd] = useState(false);
+  // USD by default: nothing in the app flips this toggle, and with false the analytics cards
+  // showed open interest as a bare base-token amount while the other cards showed USD.
+  const [showUsd, setShowUsd] = useState(true);
 
   return (
     <UsdToggleContext.Provider value={{ showUsd, setShowUsd }}>
