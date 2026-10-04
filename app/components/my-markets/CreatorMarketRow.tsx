@@ -387,7 +387,7 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
       <button
         type="button"
         onClick={onToggleExpand}
-        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--bg-elevated)]"
+        className="flex w-full flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 text-left transition-colors hover:bg-[var(--bg-elevated)] sm:flex-nowrap"
         aria-expanded={expanded}
       >
         <MarketLogo logoUrl={resolved.logo_url ?? undefined} mainnetCa={resolved.mainnet_ca} symbol={symbol} size="sm" decorative />

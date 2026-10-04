@@ -372,9 +372,9 @@ const MyMarketsPage: FC = () => {
               subColor: needsAttentionCount > 0 ? "text-[var(--short)]" : undefined,
             },
           ].map((stat) => (
-            <div key={stat.label} className="bg-[var(--panel-bg)] p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]">
+            <div key={stat.label} className="min-w-0 bg-[var(--panel-bg)] p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]">
               <p className="mb-2 text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text)]">{stat.label}</p>
-              <p className="text-xl font-bold tabular-nums text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
+              <p className="text-base font-bold tabular-nums text-[var(--text)] sm:text-xl" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                 {stat.value}
               </p>
               {stat.sub && (
