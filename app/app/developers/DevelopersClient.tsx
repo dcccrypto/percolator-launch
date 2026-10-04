@@ -46,7 +46,7 @@ export const DevelopersClient: FC<Props> = ({
       <div className="mx-auto max-w-7xl px-6 py-10 sm:py-16">
         {/* Hero */}
         <header className="mb-12 max-w-2xl">
-          <span className="mb-4 inline-block rounded-full border border-white/[0.10] px-3 py-1 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--text-muted)]">
+          <span className="mb-4 inline-block rounded-full border border-[var(--border)] px-3 py-1 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--text-muted)]">
             Open Source · Solana
           </span>
 
@@ -76,7 +76,7 @@ export const DevelopersClient: FC<Props> = ({
             href="https://github.com/dcccrypto"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 rounded-lg border border-white/[0.15] bg-white/[0.04] px-5 py-2.5 text-sm font-medium text-[var(--text)] transition-all duration-200 hover:bg-white/[0.08]"
+            className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] px-5 py-2.5 text-sm font-medium text-[var(--text)] transition-all duration-200 hover:bg-[var(--border)]"
           >
             <svg
               width="16"
@@ -117,11 +117,11 @@ export const DevelopersClient: FC<Props> = ({
 
           <div className="grid gap-6 sm:grid-cols-2">
             {/* H — Haircut Ratio */}
-            <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-6">
-              <h3 className="mb-1 font-mono text-xs font-semibold uppercase tracking-widest text-violet-400">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] p-6">
+              <h3 className="mb-1 font-mono text-xs font-semibold uppercase tracking-widest text-[var(--accent-text)]">
                 H — Fair Exits (Haircut Ratio)
               </h3>
-              <pre className="mt-3 overflow-x-auto rounded-lg bg-black/40 p-4 font-mono text-[13px] leading-relaxed text-[var(--text-secondary)]">
+              <pre className="mt-3 overflow-x-auto rounded-lg bg-[var(--bg)] p-4 font-mono text-[13px] leading-relaxed text-[var(--text-secondary)]">
 {`Residual = max(0, V − C_tot − I)
 
 h = min(Residual, PNL_matured_pos_tot)
@@ -132,11 +132,11 @@ effective_pnl_i = ⌊max(PNL_i, 0) × h⌋`}
             </div>
 
             {/* A/K — Lazy Side Indices */}
-            <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-6">
-              <h3 className="mb-1 font-mono text-xs font-semibold uppercase tracking-widest text-violet-400">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] p-6">
+              <h3 className="mb-1 font-mono text-xs font-semibold uppercase tracking-widest text-[var(--accent-text)]">
                 A/K — Fair Overhang Clearing
               </h3>
-              <pre className="mt-3 overflow-x-auto rounded-lg bg-black/40 p-4 font-mono text-[13px] leading-relaxed text-[var(--text-secondary)]">
+              <pre className="mt-3 overflow-x-auto rounded-lg bg-[var(--bg)] p-4 font-mono text-[13px] leading-relaxed text-[var(--text-secondary)]">
 {`effective_pos(i) = ⌊basis_i × A / a_basis_i⌋
 
 pnl_delta(i) = ⌊|basis_i|

@@ -35,7 +35,7 @@ export function DevnetV2Deployment() {
         </a>{" "}
         has the addresses for testing.
       </p>
-      <div className="divide-y divide-white/[0.06] rounded-xl border border-white/[0.08] bg-white/[0.02]">
+      <div className="divide-y divide-[var(--border-subtle)] rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)]">
         {ROWS.map((r) => (
           <div key={r.label} className="flex flex-col gap-1 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
             <span className="text-sm text-[var(--text-secondary)]">{r.label}</span>

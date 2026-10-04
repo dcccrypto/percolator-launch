@@ -45,7 +45,7 @@ const REPO_SHORT: Record<string, string> = {
 };
 
 const LEVEL_COLORS = [
-  "rgba(255,255,255,0.05)", // 0 commits
+  "var(--border)", // 0 commits
   "rgba(124,58,237,0.25)", // 1–2
   "rgba(124,58,237,0.45)", // 3–5
   "rgba(124,58,237,0.70)", // 6–10
@@ -155,7 +155,7 @@ export const CommitHeatmap: FC<Props> = ({ commitActivity }) => {
                     key={row}
                     className="h-[13px] w-[13px] animate-pulse rounded-[3px]"
                     style={{
-                      background: "rgba(255,255,255,0.03)",
+                      background: "var(--border-subtle)",
                       animationDelay: `${(col * 7 + row) * 5}ms`,
                     }}
                   />

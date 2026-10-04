@@ -3,6 +3,17 @@
 import { FC } from "react";
 import type { RepoCIStatus } from "@/lib/github";
 
+/** Badge colours from a theme token, so they follow light / dark mode. The text mixes in 20% of
+ *  --text: the plain light-mode --long / --short / --warning are under 4.5:1 at 11px. */
+function tone(color: string) {
+  return {
+    background: `color-mix(in srgb, ${color} 8%, transparent)`,
+    border: `1px solid color-mix(in srgb, ${color} 25%, transparent)`,
+    color: `color-mix(in srgb, ${color} 80%, var(--text))`,
+  };
+}
+const NEUTRAL = { background: "var(--bg-surface)", border: "1px solid var(--border)", color: "var(--text-secondary)" };
+
 interface Props {
   license: { spdx_id: string } | null | undefined;
   pushedAt: string | undefined;
@@ -14,12 +25,7 @@ function LicenceBadge({ license }: { license: { spdx_id: string } | null | undef
     return (
       <span
         className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px]"
-        style={{
-          fontFamily: "var(--font-mono, 'JetBrains Mono')",
-          background: "rgba(74,222,128,0.08)",
-          border: "1px solid rgba(74,222,128,0.20)",
-          color: "#4ade80",
-        }}
+        style={{ fontFamily: "var(--font-mono, 'JetBrains Mono')", ...tone("var(--long)") }}
       >
         ✓ {license.spdx_id}
       </span>
@@ -29,12 +35,7 @@ function LicenceBadge({ license }: { license: { spdx_id: string } | null | undef
   return (
     <span
       className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px]"
-      style={{
-        fontFamily: "var(--font-mono, 'JetBrains Mono')",
-        background: "rgba(255,255,255,0.04)",
-        border: "1px solid rgba(255,255,255,0.08)",
-        color: "var(--text-muted, rgba(255,255,255,0.30))",
-      }}
+      style={{ fontFamily: "var(--font-mono, 'JetBrains Mono')", ...NEUTRAL }}
     >
       No licence
     </span>
@@ -48,46 +49,31 @@ function ActivityBadge({ pushedAt }: { pushedAt: string | undefined }) {
     (Date.now() - new Date(pushedAt).getTime()) / (1000 * 60 * 60 * 24);
 
   let text: string;
-  let bg: string;
-  let border: string;
-  let color: string;
+  let style: { background: string; border: string; color: string };
   let dot: string;
 
   if (daysSince < 7) {
     text = "Active";
     dot = "●";
-    bg = "rgba(34,211,238,0.08)";
-    border = "rgba(34,211,238,0.20)";
-    color = "#22d3ee";
+    style = tone("var(--accent-text)");
   } else if (daysSince < 30) {
     text = "Recent";
     dot = "●";
-    bg = "rgba(251,146,60,0.08)";
-    border = "rgba(251,146,60,0.20)";
-    color = "#fb923c";
+    style = tone("var(--warning)");
   } else if (daysSince < 90) {
     text = "Quiet";
     dot = "○";
-    bg = "rgba(251,146,60,0.08)";
-    border = "rgba(251,146,60,0.20)";
-    color = "#fb923c";
+    style = tone("var(--warning)");
   } else {
     text = "Archived?";
     dot = "○";
-    bg = "rgba(255,255,255,0.04)";
-    border = "rgba(255,255,255,0.08)";
-    color = "var(--text-muted, rgba(255,255,255,0.30))";
+    style = NEUTRAL;
   }
 
   return (
     <span
       className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px]"
-      style={{
-        fontFamily: "var(--font-mono, 'JetBrains Mono')",
-        background: bg,
-        border: `1px solid ${border}`,
-        color,
-      }}
+      style={{ fontFamily: "var(--font-mono, 'JetBrains Mono')", ...style }}
     >
       {dot} {text}
     </span>
@@ -102,16 +88,7 @@ function CIBadge({ ciStatus }: { ciStatus: RepoCIStatus | undefined }) {
   return (
     <span
       className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px]"
-      style={{
-        fontFamily: "var(--font-mono, 'JetBrains Mono')",
-        background: passing
-          ? "rgba(74,222,128,0.08)"
-          : "rgba(248,113,113,0.08)",
-        border: passing
-          ? "1px solid rgba(74,222,128,0.20)"
-          : "1px solid rgba(248,113,113,0.20)",
-        color: passing ? "#4ade80" : "#f87171",
-      }}
+      style={{ fontFamily: "var(--font-mono, 'JetBrains Mono')", ...tone(passing ? "var(--long)" : "var(--short)") }}
     >
       {passing ? "✓ CI passing" : "✗ CI failing"}
     </span>
