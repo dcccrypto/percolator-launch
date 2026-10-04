@@ -205,6 +205,14 @@ describe("runChainBackfill", () => {
     expect(s.listed).toBe(20); // pushes at T0+100..T0+195 (i = 20..39)
   });
 
+  it("sampleSeconds keeps only txs in the first N seconds of each minute; unset keeps all (negative control)", async () => {
+    const many: Array<{ sig: string; tx: RpcTx }> = [];
+    for (let i = 0; i < 120; i++) many.push({ sig: `q${i}`, tx: mkTx(i + 1, T0 + i, [{ slab: A, markE6: 100n }]) }); // T0 is minute-aligned
+    const run = (o: object) => runChainBackfill({ ...baseOpts, dryRun: true, ...o }, { rpc: fakeChain(many).rpc, store: new MemoryCandleStore(), progress: new MemoryProgressStore(), now: NOW });
+    expect((await run({})).listed).toBe(120);
+    expect((await run({ sampleSeconds: 20 })).listed).toBe(40); // 20 of every 60 seconds
+  });
+
   it("pages the signature listing (more than one page)", async () => {
     const many: Array<{ sig: string; tx: RpcTx }> = [];
     for (let i = 0; i < 2500; i++) many.push({ sig: `m${i}`, tx: mkTx(i + 1, T0 + i, [{ slab: A, markE6: 100n }]) });

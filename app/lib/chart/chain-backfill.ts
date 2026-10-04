@@ -165,6 +165,13 @@ export interface BackfillOptions {
   chunk?: number;
   /** Start over instead of resuming (the output is identical either way). */
   restart?: boolean;
+  /**
+   * Fetch only transactions whose block time falls in the first N seconds of each minute (1..59).
+   * Cuts RPC cost to about N/60 of the full run; pushes are spread evenly across every cycle, so every
+   * market is still sampled every minute, but 1m highs/lows then reflect only that part of the minute
+   * (5m and coarser are effectively unaffected). Default: every transaction (full fidelity).
+   */
+  sampleSeconds?: number;
   /** Plan only: list and count, fetch nothing, write nothing. */
   dryRun?: boolean;
   /** Stop after this many chunks (testing / time-boxing); progress is saved so a later run continues. */
@@ -228,6 +235,7 @@ export async function runChainBackfill(opts: BackfillOptions, deps: BackfillDeps
       if (s.blockTime !== null && opts.sinceSec !== undefined && s.blockTime < opts.sinceSec) { reachedFloor = true; continue; }
       if (s.err) continue;
       if (s.blockTime !== null && Number.isFinite(maxCutoff) && s.blockTime >= maxCutoff) continue;
+      if (opts.sampleSeconds !== undefined && s.blockTime !== null && s.blockTime % 60 >= opts.sampleSeconds) continue;
       sigs.push(s);
     }
     before = page[page.length - 1].signature;

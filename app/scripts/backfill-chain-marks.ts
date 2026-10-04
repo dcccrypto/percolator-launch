@@ -23,6 +23,7 @@
  *   --rps <n>            sustained RPC requests/second (default 8)
  *   --chunk <n>          transactions per saved chunk (default 100)
  *   --max-chunks <n>     stop after n chunks; a later run resumes
+ *   --sample-seconds <n> only fetch txs in the first n seconds of each minute (about n/60 of the cost; see chain-backfill.ts)
  *   --restart            ignore saved progress and redo (output is identical)
  *   --dry-run            plan only
  */
@@ -89,6 +90,7 @@ async function main(): Promise<void> {
       slabs, authority, programId, sinceSec,
       chunk: arg("chunk") ? Number(arg("chunk")) : undefined,
       maxChunks: arg("max-chunks") ? Number(arg("max-chunks")) : undefined,
+      sampleSeconds: arg("sample-seconds") ? Number(arg("sample-seconds")) : undefined,
       restart: flag("restart"), dryRun: flag("dry-run"),
     },
     { rpc, store, progress: createPgProgressStore(sql), log: (l) => console.log(`[chain-backfill] ${l}`) },
