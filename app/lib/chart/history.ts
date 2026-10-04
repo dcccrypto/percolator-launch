@@ -14,8 +14,8 @@ export interface HistoryBar {
   c: number;
   /** Always 0 for tick series: they have no volume. Kept so the shape matches the UDF bars. */
   v: number;
-  /** 'live' = our own ticks; 'dex' = GeckoTerminal pool history (pre-launch backfill). */
-  src: "live" | "dex";
+  /** 'live' = our own ticks; 'chain' = mark rebuilt from PushAuthMark txs (a real mark); 'dex' = GeckoTerminal pool history. */
+  src: "live" | "chain" | "dex";
 }
 
 export interface HistoryResult {
@@ -38,7 +38,7 @@ export interface HistoryDeps {
 }
 
 function toBar(c: StoredCandle): HistoryBar {
-  return { t: c.t, o: c.o, h: c.h, l: c.l, c: c.c, v: 0, src: c.src === "gecko" ? "dex" : "live" };
+  return { t: c.t, o: c.o, h: c.h, l: c.l, c: c.c, v: 0, src: c.src === "gecko" ? "dex" : c.src };
 }
 
 async function withBudget<T>(p: Promise<T>, ms: number): Promise<T | null> {

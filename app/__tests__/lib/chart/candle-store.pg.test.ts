@@ -34,10 +34,14 @@ describe.skipIf(!URL && !PGLITE)("createPgCandleStore against Postgres", () => {
       sql = postgres(URL as string, { prepare: false, max: 2, onnotice: () => {} }) as unknown as typeof sql;
     }
     store = createPgCandleStore(sql);
-    const ddl = readFileSync(resolve(__dirname, "../../../../supabase/migrations/20261004000000_chart_candles.sql"), "utf8");
-    await sql.unsafe(`DROP TABLE IF EXISTS chart_candles; DROP TABLE IF EXISTS chart_backfill;`);
+    const dir = resolve(__dirname, "../../../../supabase/migrations");
+    const ddl = readFileSync(resolve(dir, "20261004000000_chart_candles.sql"), "utf8");
+    const ddl2 = readFileSync(resolve(dir, "20261004000100_chart_candles_chain.sql"), "utf8");
+    await sql.unsafe(`DROP TABLE IF EXISTS chart_candles; DROP TABLE IF EXISTS chart_backfill; DROP TABLE IF EXISTS chart_chain_backfill;`);
     await sql.unsafe(ddl);
-    await sql.unsafe(ddl); // idempotent: a second run is a no-op
+    await sql.unsafe(ddl);  // idempotent: a second run is a no-op
+    await sql.unsafe(ddl2);
+    await sql.unsafe(ddl2);
   });
   afterAll(async () => { await sql.end(); });
 
@@ -104,6 +108,47 @@ describe.skipIf(!URL && !PGLITE)("createPgCandleStore against Postgres", () => {
       await store.markBackfilled(S9, 60, T, 5);
       expect(await store.claimBackfill(S9, 60, T + 1_000, 60_000)).toBe(true);
       expect(await store.backfilledAt(S9, 60)).toBe(T);
+    });
+  });
+
+  describe("chain source (one-time mark backfill)", () => {
+    const S2 = "6Y4bfYLWrhabgzU4p3onx9CeW1jCKjGjjSCaoCHf2Q9R";
+    const row = async (res: 1 | 5 | 15, t: number) => (await store.range(S2, "mark", res, t, t + 1, 1))[0];
+    it("accepts src='chain' at the database (negative control: junk is still rejected)", async () => {
+      await store.upsert([{ slab: S2, series: "mark", res: 1, candle: cd(60, 1, 2, 0.5, 1.5, 3), src: "chain" }]);
+      expect(await row(1, 60)).toMatchObject({ src: "chain", o: 1, h: 2 });
+      await expect(sql.unsafe(`INSERT INTO chart_candles (slab,series,res,t,o,h,l,c,src) VALUES ('x','mark',1,1,1,1,1,1,'bogus')`)).rejects.toThrow();
+    });
+    it("a chain re-run replaces the previous chain row outright (idempotent)", async () => {
+      await store.upsert([{ slab: S2, series: "mark", res: 1, candle: cd(120, 1, 9, 1, 5, 4), src: "chain" }]);
+      await store.upsert([{ slab: S2, series: "mark", res: 1, candle: cd(120, 2, 3, 2, 2.5, 4), src: "chain" }]);
+      expect(await row(1, 120)).toMatchObject({ o: 2, h: 3, l: 2, c: 2.5, src: "chain" });
+    });
+    it("chain replaces gecko; gecko never overwrites chain", async () => {
+      await store.upsert([{ slab: S2, series: "mark", res: 5, candle: cd(300, 7), src: "gecko" }]);
+      await store.upsert([{ slab: S2, series: "mark", res: 5, candle: cd(300, 8, 9, 7, 8.5, 2), src: "chain" }]);
+      expect(await row(5, 300)).toMatchObject({ o: 8, src: "chain" });
+      await store.upsert([{ slab: S2, series: "mark", res: 5, candle: cd(300, 99), src: "gecko" }]);
+      expect((await row(5, 300)).o).toBe(8);
+    });
+    it("the straddling bucket merges: chain-then-live and live-then-chain give the same candle", async () => {
+      const chain = cd(900, 10, 12, 9, 11, 5);
+      const live = cd(900, 50, 60, 40, 55, 3);
+      await store.upsert([{ slab: S2, series: "mark", res: 15, candle: chain, src: "chain" }]);
+      await store.upsert([{ slab: S2, series: "mark", res: 15, candle: live }]);
+      const a = await row(15, 900);
+      expect(a).toMatchObject({ src: "live", o: 10, h: 60, l: 9, c: 55, n: 8 });
+      await store.upsert([{ slab: S2, series: "mark", res: 15, candle: cd(1800, 50, 60, 40, 55, 3) }]);
+      await store.upsert([{ slab: S2, series: "mark", res: 15, candle: cd(1800, 10, 12, 9, 11, 5), src: "chain" }]);
+      expect(await row(15, 1800)).toMatchObject({ src: "live", o: 10, h: 60, l: 9, c: 55, n: 8 });
+    });
+    it("firstLiveT is the earliest LIVE 1m candle only (not chain, not coarser buckets)", async () => {
+      const S3 = "4EGvEGdLY2i9JeApJ8cEjkFehuSXpzfo11BBJarB7MTw";
+      expect(await store.firstLiveT(S3, "mark")).toBeNull();
+      await store.upsert([{ slab: S3, series: "mark", res: 1, candle: cd(60, 1), src: "chain" }, { slab: S3, series: "mark", res: 1440, candle: cd(0, 1) }]);
+      expect(await store.firstLiveT(S3, "mark")).toBeNull();
+      await store.upsert([{ slab: S3, series: "mark", res: 1, candle: cd(600, 1) }, { slab: S3, series: "mark", res: 1, candle: cd(660, 1) }]);
+      expect(await store.firstLiveT(S3, "mark")).toBe(600);
     });
   });
 });

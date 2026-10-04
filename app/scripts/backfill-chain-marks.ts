@@ -1,0 +1,96 @@
+#!/usr/bin/env npx tsx
+/**
+ * One-time backfill of MARK candles from on-chain PushAuthMark transactions.
+ * See lib/chart/chain-backfill.ts. Read-only against the chain; writes chart_candles (src='chain').
+ *
+ *   set -a; . ~/.openclaw/credentials/deploy-tokens.env; set +a     # never echo these
+ *   INDEXER_DATABASE_URL=... \
+ *   npx tsx scripts/backfill-chain-marks.ts --dry-run               # list + count, no fetch, no writes
+ *   npx tsx scripts/backfill-chain-marks.ts                         # run (resumes if interrupted)
+ *
+ * Environment:
+ *   INDEXER_DATABASE_URL | CANDLES_DATABASE_URL   Postgres with chart_candles + chart_chain_backfill (apply the migrations first)
+ *   CHAIN_RPC_URL                                 full devnet RPC URL; default built from HELIUS_KEEPER_API_KEY
+ *   (the key is the LIVE KEEPER's: the default rate is deliberately low)
+ *
+ * Flags:
+ *   --slabs a,b,c        markets to rebuild (default: every active devnet market in the markets table)
+ *   --authority <pubkey> keeper wallet that signed the pushes (default: the fee payer of the newest push tx on the first market)
+ *   --program <pubkey>   wrapper program (default: the owner of the first slab)
+ *   --since <unix|iso>   ignore anything older (default: none = from each market's launch)
+ *   --rps <n>            sustained RPC requests/second (default 8)
+ *   --chunk <n>          transactions per saved chunk (default 100)
+ *   --max-chunks <n>     stop after n chunks; a later run resumes
+ *   --restart            ignore saved progress and redo (output is identical)
+ *   --dry-run            plan only
+ */
+import { createPgProgressStore, runChainBackfill, type RpcTx } from "../lib/chart/chain-backfill";
+import { createHttpRpc } from "../lib/chart/chain-rpc";
+import { getPgCandleStore, getPgSql } from "../lib/chart/pg-store";
+
+function arg(name: string): string | undefined {
+  const i = process.argv.indexOf(`--${name}`);
+  return i >= 0 ? process.argv[i + 1] : undefined;
+}
+const flag = (name: string) => process.argv.includes(`--${name}`);
+
+async function main(): Promise<void> {
+  const sql = getPgSql(process.env, 2);
+  const store = getPgCandleStore(process.env, 2);
+  if (!sql || !store) throw new Error("INDEXER_DATABASE_URL (or CANDLES_DATABASE_URL) is not set");
+
+  const url = process.env.CHAIN_RPC_URL?.trim() ||
+    (process.env.HELIUS_KEEPER_API_KEY ? `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_KEEPER_API_KEY}` : "");
+  if (!url) throw new Error("set CHAIN_RPC_URL or HELIUS_KEEPER_API_KEY");
+  const rpc = createHttpRpc({ url, rps: Number(arg("rps") ?? 8) });
+
+  let slabs = (arg("slabs") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (slabs.length === 0) {
+    const rows = await sql.unsafe(`SELECT slab_address FROM markets WHERE network = 'devnet' AND keeper_status = 'active'`);
+    slabs = rows.map((r) => String(r.slab_address));
+  }
+  if (slabs.length === 0) throw new Error("no markets to backfill");
+
+  const call = async <T>(method: string, params: unknown[]): Promise<T> => {
+    const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+    return ((await r.json()) as { result: T }).result;
+  };
+  let programId = arg("program");
+  if (!programId) {
+    const acc = await call<{ value: { owner: string } | null }>("getAccountInfo", [slabs[0], { encoding: "base64", dataSlice: { offset: 0, length: 0 } }]);
+    if (!acc.value) throw new Error(`slab ${slabs[0]} not found`);
+    programId = acc.value.owner;
+  }
+  let authority = arg("authority");
+  if (!authority) {
+    // The signer (fee payer, account 0) of the newest successful tx touching the first market that carries a push.
+    const sigs = await rpc.getSignatures(slabs[0], undefined, 20);
+    const txs = await rpc.getTransactions(sigs.filter((s) => !s.err).map((s) => s.signature));
+    const t = txs.find((x): x is RpcTx => x !== null && x.transaction.message.instructions.some((ix) => x.transaction.message.accountKeys[ix.programIdIndex] === programId && ix.data.length >= 40));
+    authority = t?.transaction.message.accountKeys[0];
+    if (!authority) throw new Error("could not infer the keeper authority; pass --authority");
+  }
+  const since = arg("since");
+  const sinceSec = since === undefined ? undefined : /^\d+$/.test(since) ? Number(since) : Math.floor(Date.parse(since) / 1000);
+
+  console.log(`[chain-backfill] ${slabs.length} markets, program ${programId.slice(0, 8)}…, authority ${authority.slice(0, 8)}…, ${arg("rps") ?? 8} rps`);
+  const t0 = Date.now();
+  const summary = await runChainBackfill(
+    {
+      slabs, authority, programId, sinceSec,
+      chunk: arg("chunk") ? Number(arg("chunk")) : undefined,
+      maxChunks: arg("max-chunks") ? Number(arg("max-chunks")) : undefined,
+      restart: flag("restart"), dryRun: flag("dry-run"),
+    },
+    { rpc, store, progress: createPgProgressStore(sql), log: (l) => console.log(`[chain-backfill] ${l}`) },
+  );
+  const secs = Math.round((Date.now() - t0) / 1000);
+  console.log(`[chain-backfill] ${summary.status}: ${JSON.stringify(summary)} in ${secs}s, ${rpc.requests()} RPC requests`);
+  if (summary.status === "dry-run") {
+    const req = summary.listed + Math.ceil(summary.listed / 1000);
+    console.log(`[chain-backfill] a full run would make about ${req} RPC requests, about ${Math.round(req / Number(arg("rps") ?? 8) / 60)} min at ${arg("rps") ?? 8} rps`);
+  }
+  process.exit(0);
+}
+
+main().catch((e) => { console.error("[chain-backfill] failed:", e instanceof Error ? e.message : e); process.exit(1); });
