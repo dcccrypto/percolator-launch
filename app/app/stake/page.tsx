@@ -1097,9 +1097,13 @@ const STAKE_GRID_COLS =
   "grid grid-cols-[minmax(120px,1.6fr)_84px_84px_92px_64px] items-center gap-x-3";
 
 /**
- * A single selectable insurance-pool row. Clicking (or keyboard-activating)
- * loads this pool into the deposit rail on the right — the "obvious deposit
- * flow." The whole row is the target.
+ * A single selectable insurance-pool row. Selecting it loads this pool into the
+ * deposit rail on the right — the "obvious deposit flow." A mouse click anywhere
+ * on the row selects it. For the keyboard and screen readers the figures are one
+ * real button, kept apart from the symbol link: a link nested in role="button" was
+ * hidden from screen readers, and Enter on it selected the pool instead of opening
+ * the chart. Below md the button's 44px tap-target minimum (globals.css) sets the
+ * row height, so the row drops its vertical padding there.
  */
 function PoolRow({
   pool,
@@ -1118,12 +1122,8 @@ function PoolRow({
 
   return (
     <div
-      role="button"
-      tabIndex={0}
       onClick={() => onSelect(pool.id)}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(pool.id); } }}
-      aria-pressed={selected}
-      className={`${STAKE_GRID_COLS} w-full cursor-pointer border-b border-[var(--border)] border-l-2 px-3 py-2.5 text-left transition-colors duration-100 ${
+      className={`${STAKE_GRID_COLS} w-full cursor-pointer border-b border-[var(--border)] border-l-2 px-3 py-0 text-left transition-colors md:py-2.5 duration-100 ${
         selected
           ? "border-l-[var(--accent)] bg-[var(--accent)]/[0.06]"
           : "border-l-transparent hover:bg-[var(--bg-elevated)]"
@@ -1142,31 +1142,36 @@ function PoolRow({
         </Link>
       </div>
 
-      {/* TVL */}
-      <span className="text-right text-[12px] tabular-nums text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
-        {formatUsd(pool.tvl)}
-      </span>
+      {/* Clicks bubble to the row's onClick. */}
+      <button type="button" aria-pressed={selected} className="col-span-4 grid cursor-pointer grid-cols-subgrid items-center text-right">
+        <span className="sr-only">Select {pool.symbol} pool:</span>
 
-      {/* Cooldown */}
-      <span className="text-right text-[12px] tabular-nums text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
-        {cooldownDuration(pool.cooldownSlots)}
-      </span>
+        {/* TVL */}
+        <span className="text-right text-[12px] tabular-nums text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
+          {formatUsd(pool.tvl)}
+        </span>
 
-      {/* Your stake */}
-      <span
-        className={`text-right text-[12px] tabular-nums ${position ? "text-[var(--accent-text)]" : "text-[var(--text-muted)]"}`}
-        style={{ fontFamily: "var(--font-mono)" }}
-      >
-        {yourStake}
-      </span>
+        {/* Cooldown */}
+        <span className="text-right text-[12px] tabular-nums text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
+          {cooldownDuration(pool.cooldownSlots)}
+        </span>
 
-      {/* APR */}
-      <span
-        className={`text-right text-[12px] tabular-nums ${pool.apr > 0 ? "text-[var(--cyan)]" : "text-[var(--text-muted)]"}`}
-        style={{ fontFamily: "var(--font-mono)" }}
-      >
-        {pool.apr > 0 ? `${pool.apr.toFixed(1)}%` : "0%"}
-      </span>
+        {/* Your stake */}
+        <span
+          className={`text-right text-[12px] tabular-nums ${position ? "text-[var(--accent-text)]" : "text-[var(--text-muted)]"}`}
+          style={{ fontFamily: "var(--font-mono)" }}
+        >
+          {yourStake}
+        </span>
+
+        {/* APR */}
+        <span
+          className={`text-right text-[12px] tabular-nums ${pool.apr > 0 ? "text-[var(--cyan)]" : "text-[var(--text-muted)]"}`}
+          style={{ fontFamily: "var(--font-mono)" }}
+        >
+          {pool.apr > 0 ? `${pool.apr.toFixed(1)}%` : "0%"}
+        </span>
+      </button>
     </div>
   );
 }
