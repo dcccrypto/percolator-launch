@@ -63,6 +63,8 @@ export function usesSharedLiqDisplay(src: string): boolean {
 const EXEMPT: Record<string, string> = {
   "components/trade/TradingChart.tsx":
     "Draws a price LINE only when a real price exists (useLiqPrice is null for the covered case, so there is no '—'/'∞' to explain); its title does not carry health (the line is moved in place per keeper push, #2990). #2634 item 3.",
+  "components/trade/perp/PerpChart.tsx":
+    "The perp-standard chart's Liq line: a LINE drawn only when a real price exists (usePositionLinePrices -> null for the covered case; setLine removes the line for null/<=0), same premise as the TradingChart exemption. It renders no '—'/'∞' text for describeLiqPrice to explain.",
 };
 
 const rel = (abs: string) => path.relative(APP_ROOT, abs).split(path.sep).join("/");

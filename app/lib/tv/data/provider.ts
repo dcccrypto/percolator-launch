@@ -38,8 +38,12 @@ export interface ProviderBar {
   volume: number;
 }
 
-/** Where the bars came from — drives the source badge and the live-tick rule. */
-export type BarSource = "percolator" | "dex" | "oracle" | "external";
+/**
+ * Where the bars came from — drives the source badge and the live-tick rule.
+ * "perp-mark" / "perp-oracle" are the push-fed perp chart series (lib/chart): their live bar is
+ * built from keeper ticks, never from DEX trades.
+ */
+export type BarSource = "percolator" | "dex" | "oracle" | "external" | "perp-mark" | "perp-oracle";
 
 export interface ChartSymbolMeta {
   /** The slab address — the chart's ticker. */
@@ -72,6 +76,16 @@ export interface BarsPage {
   /** True when there is nothing older than what was returned. */
   noMoreHistory: boolean;
   source: BarSource | null;
+  /**
+   * Perp mark series only: bars with timeSec below this are the pool (oracle) price standing in
+   * for a mark that did not exist yet. Lets the UI say so instead of implying they are marks.
+   */
+  proxyBeforeSec?: number | null;
+  /**
+   * Perp series only: bars up to and including this time were sourced from GeckoTerminal / CoinGecko
+   * (pre-launch pool history). CoinGecko's terms require visible attribution wherever that data shows.
+   */
+  dexThroughSec?: number | null;
 }
 
 export interface LiveHandlers {
