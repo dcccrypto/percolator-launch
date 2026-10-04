@@ -258,12 +258,18 @@ export function formatBpsPercent(bps: number): string {
 }
 
 /**
- * A "dead" market: new positions cannot open and nothing in the app can change that (ADL reduce-only
- * after a bankruptcy, no capital on the other side, or recovery mode). Closing and withdrawing still work.
- * Derived from on-chain state only: no hardcoded market list.
+ * A "dead" (v1, close-only) market: ADL reduce-only after a bankruptcy, or recovery mode. Opens stay blocked
+ * until the engine itself recovers; closing and withdrawing still work. Derived from on-chain state only.
+ * An LP-depleted market is NOT dead: a brand-new market waits for its first deposit, and funding it reopens it
+ * (it gets "Needs liquidity" instead).
  */
-export function isDeadMarket(h: Pick<MarketHealth, "lockReasons" | "lpDepleted" | "lpHalted">): boolean {
-  return h.lockReasons.includes("adl-reduce-only") || h.lockReasons.includes("recovery") || h.lpDepleted || h.lpHalted;
+export function isDeadMarket(h: Pick<MarketHealth, "lockReasons">): boolean {
+  return h.lockReasons.includes("adl-reduce-only") || h.lockReasons.includes("recovery");
+}
+
+/** "No room for new positions": LP capital 0 or at the floor. Recoverable by funding, so not "dead". */
+export function needsLiquidity(h: Pick<MarketHealth, "lpDepleted" | "lpHalted">): boolean {
+  return h.lpDepleted || h.lpHalted;
 }
 
 /** The label that marks a market of the first generation that can now only be closed. */
@@ -285,16 +291,18 @@ export function healthBadges(h: MarketHealth, adlSinceMs: number | null = null, 
     // P1: supersedes "LP depleted" (a depleted LP is halted under P1, and closes still work).
     out.push({
       id: "lp-halted",
-      label: "Close-only",
+      label: "Needs liquidity",
       tone: "danger",
       detail: "The market has no room for new positions right now. Closing works normally.",
     });
   } else if (h.lpDepleted) {
     out.push({
       id: "lp-depleted",
-      label: "Close-only",
+      label: "Needs liquidity",
       tone: "danger",
-      detail: `${TICKET_FUNDS_LINE(h.lpIsVault)} Closing works normally.`,
+      detail: h.lpIsVault
+        ? "Needs liquidity: deposit in Earn to reopen new positions. Closing works normally."
+        : `${TICKET_FUNDS_LINE(false)} Closing works normally.`,
     });
   }
   if (h.payoutHaircutBps > 0) {
@@ -338,7 +346,7 @@ export function healthBadges(h: MarketHealth, adlSinceMs: number | null = null, 
       id: "v1",
       label: V1_BADGE_LABEL,
       tone: "info",
-      detail: "This is a v1 market and it is close-only: you can close positions and withdraw, but not open new ones.",
+      detail: "This is a v1 market and it is close-only for now: you can close positions and withdraw, but not open new ones.",
     });
   }
   return out;

@@ -1,7 +1,7 @@
 'use client';
 
 import { vaultWithdrawView } from '@/lib/limits/earn-withdrawable';
-import type { WithdrawStatus } from '@/lib/limits/earn-withdrawable';
+import type { BlockedBy, WithdrawStatus } from '@/lib/limits/earn-withdrawable';
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
 import { PublicKey, type TransactionInstruction } from '@solana/web3.js';
@@ -172,6 +172,7 @@ export interface InsuranceLPState {
     /** The most the whole vault can pay out now (all holders), atoms. */
     vaultMaxNowAtoms: bigint | null;
     withdrawStatus: WithdrawStatus | null;
+    blockedBy: BlockedBy;
   } | null;
 }
 
@@ -558,7 +559,13 @@ export function useInsuranceLP() {
             const plan = planSplitPotRedemption({ own: sp.own, sib: sp.sib, totalShares: sp.totalShares, shares: held, feeShareBps: sp.feeShareBps, navFloor: sp.navFloor });
             if (plan && !plan.payable) maxNowAtoms = (cappedShares(plan.maxShares, held) * v.nav) / sp.totalShares;
           }
-          const w = vaultWithdrawView(sp);
+          // Extra information: a failure here must never blank the vault's own state.
+          let w: ReturnType<typeof vaultWithdrawView> = null;
+          try {
+            w = vaultWithdrawView(sp);
+          } catch {
+            w = null;
+          }
           splitPot = {
             totalShares: sp.totalShares,
             navAtoms: v.nav,
@@ -566,6 +573,7 @@ export function useInsuranceLP() {
             claimAdjustedNavAtoms: w ? w.claimAdjustedNav : null,
             vaultMaxNowAtoms: w ? w.maxWithdrawableNow : null,
             withdrawStatus: w ? w.status : null,
+            blockedBy: w ? w.blockedBy : null,
           };
         }
       }

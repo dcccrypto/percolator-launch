@@ -44,7 +44,7 @@ describe("decodeMarketHealth.lpIsVault", () => {
       "The market has no funds left to take the other side of new trades. Opening resumes once it is funded again; deposits to Earn or staking don't reopen it. Closing works normally.",
     );
     expect(depletedDetail(bound())).toBe(
-      "The market has no funds left to take the other side of new trades. Opening resumes when the Earn vault has funds to back them. Closing works normally.",
+      "Needs liquidity: deposit in Earn to reopen new positions. Closing works normally.",
     );
   });
 });

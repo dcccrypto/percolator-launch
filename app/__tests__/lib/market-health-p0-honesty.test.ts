@@ -10,7 +10,7 @@ import * as C from "@/lib/limits/constants";
 import { decodeMarketHealth, healthBadges, isDeadMarket } from "@/lib/market-health";
 import type { MarketHealthRow } from "@/lib/market-health";
 import { marketHeaderStatus, LIST_BADGE_IDS } from "@/lib/market-header-status";
-import { liveHealthLevel, isCloseOnlyRow } from "@/lib/market-health-overlay";
+import { liveHealthLevel, isCloseOnlyRow, isNeedsLiquidityRow } from "@/lib/market-health-overlay";
 import { resolveUserMessage } from "@/lib/limits/user-message";
 import { TICKET_COPY } from "@/lib/limits/copy";
 import { MSG_LOSS_STALE } from "@/lib/market-error";
@@ -112,48 +112,65 @@ describe("ADL duration", () => {
 });
 
 describe("per-market health reflects ADL and LP capital = 0", () => {
-  it("Agency shape (LP capital 0, not ADL): 'Close-only' from the live read overrides a stats 'healthy'", () => {
+  it("Agency shape (LP capital 0, not ADL): 'Needs liquidity' from the live read overrides a stats 'healthy'; it is not close-only", () => {
     const h = decodeMarketHealth(fixture("pengu-market-v18-healthy"), SLOT, 0n);
     expect(h.lpDepleted).toBe(true);
     const r = row({ lpCapital: "0", lpDepleted: true, badges: healthBadges(h) });
-    expect(isCloseOnlyRow(r)).toBe(true);
-    expect(liveHealthLevel("healthy", r)).toBe("close-only");
-    expect(liveHealthLevel("caution", r)).toBe("close-only");
+    expect(isCloseOnlyRow(r)).toBe(false);
+    expect(isNeedsLiquidityRow(r)).toBe(true);
+    expect(liveHealthLevel("healthy", r)).toBe("needs-liquidity");
+    expect(liveHealthLevel("caution", r)).toBe("needs-liquidity");
   });
 
-  it("SI 8WC8vALs shape (ADL and LP 0): close-only", () => {
+  it("SI 8WC8vALs shape (ADL and LP 0): close-only wins", () => {
     const h = decodeMarketHealth(adlMarket(), SLOT, 0n);
     const r = row({ lpDepleted: true, badges: healthBadges(h, T0, T0) });
     expect(liveHealthLevel("healthy", r)).toBe("close-only");
   });
 
-  it("NEGATIVE CONTROLS: healthy live read, unknown read and oracle-down never become close-only", () => {
+  it("NEGATIVE CONTROLS: healthy live read, unknown read and oracle-down never change the grade", () => {
     const h = decodeMarketHealth(fixture("pengu-market-v18-healthy"), SLOT, 49_000_000_000n);
     expect(liveHealthLevel("healthy", row({ badges: healthBadges(h) }))).toBe("healthy");
     expect(liveHealthLevel("healthy", null)).toBe("healthy");
     expect(liveHealthLevel("healthy", undefined)).toBe("healthy");
-    const dead = row({ lpDepleted: true, badges: [{ id: "lp-depleted", label: "Close-only", tone: "danger", detail: "" }] });
+    const dead = row({ lpDepleted: true, badges: [{ id: "adl-reduce-only", label: "Close-only", tone: "warning", detail: "" }] });
     expect(liveHealthLevel("oracle-down", dead)).toBe("oracle-down");
-    // A payout haircut or a bankruptcy h-lock does not stop opens, so neither is "close-only".
     expect(isCloseOnlyRow(row({ badges: [{ id: "payout-haircut", label: "x", tone: "warning", detail: "" }] }))).toBe(false);
     expect(isCloseOnlyRow(row({ badges: [{ id: "bankruptcy", label: "x", tone: "info", detail: "" }] }))).toBe(false);
   });
 });
 
-describe("v1 / close-only labels on dead markets", () => {
-  it("dead = ADL, recovery, or no LP capital: derived from chain state, no hardcoded list", () => {
+describe("v1 / close-only labels only on markets that are actually dead (review B2)", () => {
+  it("dead = ADL reduce-only or recovery. LP capital 0 is NOT dead: a new market waiting for its first deposit", () => {
     expect(isDeadMarket(decodeMarketHealth(adlMarket(), SLOT, 1n))).toBe(true);
-    expect(isDeadMarket(decodeMarketHealth(fixture("pengu-market-v18-healthy"), SLOT, 0n))).toBe(true);
+    expect(isDeadMarket(decodeMarketHealth(fixture("pengu-market-v18-healthy"), SLOT, 0n))).toBe(false);
     expect(isDeadMarket(decodeMarketHealth(fixture("pengu-market-v18-healthy"), SLOT, 49_000_000_000n))).toBe(false);
   });
 
-  it("a dead market carries 'v1' right after its Close-only badge; the LP badge now reads Close-only", () => {
-    const h = decodeMarketHealth(fixture("pengu-market-v18-healthy"), SLOT, 0n);
-    // (the live PENGU fixture also carries a payout haircut, which sorts after the close-only pair)
-    const badges = healthBadges(h);
-    expect(badges.map((b) => b.id).slice(0, 2)).toEqual(["lp-depleted", "v1"]);
-    expect(badges.map((b) => b.label).slice(0, 2)).toEqual(["Close-only", "v1"]);
+  it("an ADL market carries 'v1' right after its Close-only badge", () => {
+    const badges = healthBadges(decodeMarketHealth(adlMarket(), SLOT, 1n), T0, T0);
+    const i = badges.findIndex((b) => b.id === "adl-reduce-only");
+    expect(badges[i + 1]?.id).toBe("v1");
+    expect(badges[i + 1]?.label).toBe("v1");
     expect(LIST_BADGE_IDS.has("v1")).toBe(true);
+  });
+
+  it("a new market with LP capital 0 gets calm 'Needs liquidity' copy and NO v1 / close-only claim", () => {
+    const h = decodeMarketHealth(fixture("pengu-market-v18-healthy"), SLOT, 0n);
+    const badges = healthBadges(h);
+    expect(badges.some((b) => b.id === "v1")).toBe(false);
+    const lp = badges.find((b) => b.id === "lp-depleted")!;
+    expect(lp.label).toBe("Needs liquidity");
+    // non-vault: Earn does not reopen it, and the copy must not say it does
+    expect(lp.detail).toMatch(/deposits to Earn or staking don't reopen it/);
+    expect(lp.detail).not.toMatch(/v1|can't change|close-only/i);
+  });
+
+  it("an Earn-vault market says to deposit in Earn", () => {
+    const h = { ...decodeMarketHealth(fixture("pengu-market-v18-healthy"), SLOT, 0n), lpIsVault: true };
+    expect(healthBadges(h).find((b) => b.id === "lp-depleted")!.detail).toBe(
+      "Needs liquidity: deposit in Earn to reopen new positions. Closing works normally.",
+    );
   });
 
   it("NEGATIVE CONTROL: a live market has no v1 label", () => {

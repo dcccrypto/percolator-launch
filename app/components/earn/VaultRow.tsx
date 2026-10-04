@@ -40,7 +40,8 @@ export function VaultRow({ vault, selected, userDepositUsd, onSelect }: VaultRow
         `Vault value $${formatCompact(vaultUsd)}.`,
         `After open winner claims $${formatCompact(w.claimAdjustedNavUsd)}.`,
         `Withdrawable now $${formatCompact(w.maxWithdrawableNowUsd)}.`,
-        withdrawFlagLine(w.status),
+        withdrawFlagLine(w.status, w.blockedBy),
+        'Paid out after the redemption cooldown.',
       ]
         .filter(Boolean)
         .join(' ')
@@ -67,7 +68,7 @@ export function VaultRow({ vault, selected, userDepositUsd, onSelect }: VaultRow
           <span
             data-testid="vault-withdraw-chip"
             data-status={w?.status}
-            title={w ? withdrawFlagLine(w.status) ?? undefined : undefined}
+            title={w ? withdrawFlagLine(w.status, w.blockedBy) ?? undefined : undefined}
             className="shrink-0 whitespace-nowrap border border-[var(--warning)]/40 bg-[var(--warning)]/[0.08] px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-[var(--warning)]"
           >
             {chip}

@@ -7,12 +7,18 @@
 import type { HealthLevel } from "@/lib/health";
 import type { MarketHealthRow } from "@/lib/market-health";
 
-/** Badge ids that mean "new positions cannot open and the app cannot change that". */
-const CLOSE_ONLY_BADGES: ReadonlySet<string> = new Set(["adl-reduce-only", "lp-depleted", "lp-halted", "recovery"]);
+/** Badge ids for a market that is close-only until the engine itself recovers (ADL / recovery). */
+const CLOSE_ONLY_BADGES: ReadonlySet<string> = new Set(["adl-reduce-only", "recovery"]);
+/** Badge ids for a market with no funds on the other side: fixed by funding, so NOT "close-only". */
+const NEEDS_LIQUIDITY_BADGES: ReadonlySet<string> = new Set(["lp-depleted", "lp-halted"]);
 
 export function isCloseOnlyRow(row: MarketHealthRow | null | undefined): boolean {
   if (!row) return false;
   return row.badges.some((b) => CLOSE_ONLY_BADGES.has(b.id));
+}
+
+export function isNeedsLiquidityRow(row: MarketHealthRow | null | undefined): boolean {
+  return !!row && row.badges.some((b) => NEEDS_LIQUIDITY_BADGES.has(b.id));
 }
 
 /**
@@ -21,5 +27,6 @@ export function isCloseOnlyRow(row: MarketHealthRow | null | undefined): boolean
  */
 export function liveHealthLevel(base: HealthLevel, row: MarketHealthRow | null | undefined): HealthLevel {
   if (base === "oracle-down") return base;
-  return isCloseOnlyRow(row) ? "close-only" : base;
+  if (isCloseOnlyRow(row)) return "close-only";
+  return isNeedsLiquidityRow(row) ? "needs-liquidity" : base;
 }

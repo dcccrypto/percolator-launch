@@ -41,7 +41,7 @@ import {
   parseLpVaultRegistry,
 } from "@percolatorct/sdk";
 import * as C from "./constants";
-import { decodeLpVaultRegistryBound, decodeMarketEngineView, u128 } from "./decode";
+import { decodeLpVaultRegistryBound, decodeLpVaultRegistryOiThresholdBps, decodeMarketEngineView, decodeResolvedMarket, u128 } from "./decode";
 import { harvestableFeeAtoms } from "./vault-tranche";
 import { earnNavFloorLive } from "@/lib/program-upgrade-detect";
 
@@ -61,6 +61,8 @@ export interface BackingBucket {
   impaired: bigint;
   utilFeeEarnings: bigint;
   status: number;
+  /** `expiry_slot` (read by decodeBackingBucket; optional so hand-built test buckets stay valid). */
+  expirySlot?: bigint;
 }
 
 export interface SourceCredit {
@@ -94,6 +96,10 @@ export interface DomainState {
 const SOURCE_LONG = C.SLOT_BACKING_LONG - 368;
 const SOURCE_SHORT = C.SLOT_BACKING_LONG - 184;
 
+function dv64(d: Uint8Array, off: number): bigint {
+  return new DataView(d.buffer, d.byteOffset, d.byteLength).getBigUint64(off, true);
+}
+
 export function decodeBackingBucket(d: Uint8Array, domain: number): BackingBucket | null {
   const b = C.assetEngineOff(Math.floor(domain / 2)) + (domain % 2 === 0 ? C.SLOT_BACKING_LONG : C.SLOT_BACKING_SHORT);
   if (d.length < b + 97) return null;
@@ -104,6 +110,7 @@ export function decodeBackingBucket(d: Uint8Array, domain: number): BackingBucke
     impaired: u128(d, b + 56),
     utilFeeEarnings: u128(d, b + 72),
     status: d[b + 96],
+    expirySlot: dv64(d, b + 88),
   };
 }
 
@@ -628,6 +635,14 @@ export interface SplitPotState {
    * (bc228e1b :24607-24623). null / absent = unreadable (the program would fail 25 then).
    */
   harvestableAtoms?: bigint | null;
+  /**
+   * Market-level facts tag 77 gates on (7c906e45 handle_execute_redemption): mode (0 Live, 1 Resolved,
+   * 2 Recovery), terminal-flat, the engine clock, and `header.vault` (a payout above it is refused).
+   * Absent = unread: the withdraw view then reports nothing rather than guessing "open".
+   */
+  market?: { mode: number; terminalFlat: boolean; currentSlot: bigint; vaultAtoms: bigint };
+  /** Registry `oi_reservation_threshold_bps` (0 = guard off). */
+  oiReservationThresholdBps?: number;
 }
 
 /**
@@ -733,6 +748,14 @@ export function vaultPotStateFromAccounts(
         const e = decodeMarketEngineView(md, 0);
         return e ? harvestableFeeAtoms(e) : null;
       })(),
+      market: (() => {
+        const e = decodeMarketEngineView(md, 0);
+        const rm = decodeResolvedMarket(md);
+        return e && rm
+          ? { mode: e.mode, terminalFlat: rm.mode === 1 && rm.materializedPortfolioCount === 0n && rm.cTot === 0n, currentSlot: e.currentSlot, vaultAtoms: e.vaultAtoms }
+          : undefined;
+      })(),
+      oiReservationThresholdBps: decodeLpVaultRegistryOiThresholdBps(new Uint8Array(registryData)) ?? undefined,
     };
   } catch {
     return null;

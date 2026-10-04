@@ -431,6 +431,13 @@ export function decodeLpVaultRegistryBound(d: Uint8Array): boolean | "invalid" |
   return f === 0 ? false : f === 1 ? true : "invalid";
 }
 
+/** `oi_reservation_threshold_bps` (registry bytes 130..132 after the 16-byte header); 0 = guard off. */
+export function decodeLpVaultRegistryOiThresholdBps(d: Uint8Array): number | null {
+  if (d.length < C.LP_VAULT_REGISTRY_ACCOUNT_LEN) return null;
+  if (d[C.HEADER_KIND_OFF] !== C.KIND_LP_VAULT_REGISTRY) return null;
+  return u16(d, C.HEADER_LEN + 130);
+}
+
 /** The registry's own domain (its backing pot; the sibling is `domain ^ 1`). */
 export function decodeLpVaultRegistryDomain(d: Uint8Array): number | null {
   if (d.length < C.LP_VAULT_REGISTRY_ACCOUNT_LEN) return null;

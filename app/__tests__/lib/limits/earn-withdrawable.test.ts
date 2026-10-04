@@ -26,10 +26,12 @@ const pot = (freshAtoms: bigint, principal: bigint, claims = 0n, loss = 0n): Dom
   bucket: bucket(freshAtoms), source: source(freshAtoms, claims), ledger: ledger(principal, loss),
 });
 const empty: DomainState = { bucket: { ...bucket(0n), status: 0 }, source: source(0n), ledger: null };
-const vault = (own: DomainState, sib: DomainState, totalShares: bigint, navFloor = true): SplitPotState => ({
+const LIVE = { mode: 0, terminalFlat: false, currentSlot: 1_000n, vaultAtoms: 10n ** 15n };
+const vault = (own: DomainState, sib: DomainState, totalShares: bigint, navFloor = true, extra: Partial<SplitPotState> = {}): SplitPotState => ({
   own, sib, ownDomain: 0, totalShares, feeShareBps: 1000,
-  ownLedger: Keypair.generate().publicKey, sibLedger: Keypair.generate().publicKey, navFloor,
+  ownLedger: Keypair.generate().publicKey, sibLedger: Keypair.generate().publicKey, navFloor, market: LIVE, ...extra,
 });
+const withBucket = (d: DomainState, b: Partial<DomainState["bucket"]>): DomainState => ({ ...d, bucket: { ...d.bucket, ...b } });
 
 describe("vaultWithdrawView", () => {
   it("a healthy vault: nothing owed to winners, everything can leave, no flag", () => {
@@ -118,5 +120,85 @@ describe("vaultWithdrawView", () => {
       expect(line.length).toBeLessThan(110);
       expect(line).not.toMatch(/seconds|minutes|soon/i);
     }
+  });
+
+  // ── 7c906e45 handle_execute_redemption gates the first model did not check (review B1) ──
+  const healthy = () => vault(pot(2_000_000_000n, 2_000_000_000n), empty, 2_000_000_000n);
+
+  it("B1 reviewer probe: own pot bucket not Fresh (status 2) is blocked, never 'open'", () => {
+    const sp = healthy();
+    expect(vaultWithdrawView(sp)!.status).toBe("open");
+    const w = vaultWithdrawView({ ...sp, own: withBucket(sp.own, { status: 2 }) })!;
+    expect(w.status).toBe("blocked");
+    expect(w.blockedBy).toBe("pot-not-fresh");
+    expect(w.maxWithdrawableNow).toBe(0n);
+  });
+
+  it("B1: a lapsed own pot (clock at or past expiry) is blocked; one slot before expiry is open", () => {
+    const sp = healthy();
+    const at = (exp: bigint) => vaultWithdrawView({ ...sp, own: withBucket(sp.own, { expirySlot: exp }) })!;
+    expect(at(1_000n).status).toBe("blocked");
+    expect(at(1_000n).blockedBy).toBe("pot-lapsed");
+    expect(at(1_001n).status).toBe("open");
+  });
+
+  it("B1: market mode - Live ok; Recovery blocked; Resolved only when terminal-flat", () => {
+    const sp = healthy();
+    const mode = (mode: number, terminalFlat: boolean) => vaultWithdrawView({ ...sp, market: { ...LIVE, mode, terminalFlat } })!;
+    expect(mode(0, false).status).toBe("open");
+    expect(mode(2, false).blockedBy).toBe("market");
+    expect(mode(1, false).blockedBy).toBe("market");
+    expect(mode(1, true).status).toBe("open");
+  });
+
+  it("B1: a payout above header.vault is refused: cap the shares to what the market vault holds", () => {
+    const sp = healthy();
+    const w = vaultWithdrawView({ ...sp, market: { ...LIVE, vaultAtoms: 500_000_000n } })!;
+    expect(w.maxWithdrawableNow).toBeLessThanOrEqual(500_000_000n);
+    expect(w.maxWithdrawableNow).toBeGreaterThan(0n);
+    expect(w.status).toBe("limited");
+    const none = vaultWithdrawView({ ...sp, market: { ...LIVE, vaultAtoms: 0n } })!;
+    expect(none.status).toBe("blocked");
+    expect(none.blockedBy).toBe("vault-balance");
+  });
+
+  it("B1: OI reservation guard - inert at threshold 0 or with no valid lien; bites when the lien needs the NAV", () => {
+    const liened = (atoms: bigint): DomainState => {
+      const p = pot(2_000_000_000n, 2_000_000_000n);
+      return { ...p, bucket: { ...p.bucket, validLiened: atoms * BS } };
+    };
+    const base = (thr: number, lien: bigint) => vaultWithdrawView(vault(liened(lien), empty, 2_000_000_000n, true, { oiReservationThresholdBps: thr }))!;
+    expect(base(0, 1_500_000_000n).status).toBe("open");
+    expect(base(5_000, 0n).status).toBe("open");
+    // covered = nav_post * 50%: a 500 lien needs 1,000 of NAV left, so at most 1,000 of 2,000 can leave.
+    const w = base(5_000, 500_000_000n);
+    expect(w.status).toBe("limited");
+    expect(w.maxWithdrawableNow).toBeLessThanOrEqual(1_000_000_000n);
+    expect(w.maxWithdrawableNow).toBeGreaterThan(0n);
+    // a 1,500 lien needs 3,000 of NAV: more than the vault is worth, nothing can leave
+    expect(base(5_000, 1_500_000_000n).blockedBy).toBe("oi-reservation");
+    // a lien so large nothing can leave
+    expect(base(10_000, 5_000_000_000n).blockedBy).toBe("oi-reservation");
+  });
+
+  it("B1: a lapsed or non-Fresh sibling cannot top the payout pot up, so less can leave", () => {
+    const own = pot(1_000_000_000n, 1_000_000_000n);
+    const sibOk = pot(1_000_000_000n, 1_000_000_000n);
+    const a = vaultWithdrawView(vault(own, sibOk, 2_000_000_000n))!;
+    const b = vaultWithdrawView(vault(own, withBucket(sibOk, { expirySlot: 10n }), 2_000_000_000n))!;
+    const c = vaultWithdrawView(vault(own, withBucket(sibOk, { status: 2 }), 2_000_000_000n))!;
+    expect(b.maxWithdrawableNow).toBeLessThan(a.maxWithdrawableNow);
+    expect(c.maxWithdrawableNow).toBe(b.maxWithdrawableNow);
+  });
+
+  it("B1: unread market facts -> no view (never a guessed 'open')", () => {
+    expect(vaultWithdrawView({ ...healthy(), market: undefined })).toBeNull();
+  });
+
+  it("claim-adjusted NAV includes the LP earnings share nav includes (review)", () => {
+    const own: DomainState = { ...pot(2_000_000_000n, 2_000_000_000n), ledger: { ...ledger(2_000_000_000n), totalEarnings: 100_000_000n } };
+    const w = vaultWithdrawView(vault(own, empty, 2_000_000_000n))!;
+    expect(w.nav).toBe(2_010_000_000n); // 10% fee share of 100
+    expect(w.claimAdjustedNav).toBe(2_010_000_000n);
   });
 });

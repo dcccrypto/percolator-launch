@@ -195,9 +195,14 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
             <div className="mt-3 grid grid-cols-2 gap-3 border-t border-[var(--border)]/60 pt-3" data-testid="earn-rail-withdrawable">
               <Figure label="After open claims" loading={!everLoaded} value={`$${formatCompact(Number(state.splitPot.claimAdjustedNavAtoms) / collDivisor)}`} />
               <Figure label="Withdrawable now" loading={!everLoaded} value={`$${formatCompact(Number(state.splitPot.vaultMaxNowAtoms) / collDivisor)}`} />
-              {state.splitPot.withdrawStatus && withdrawFlagLine(state.splitPot.withdrawStatus) && (
+              {state.splitPot.withdrawStatus && withdrawFlagLine(state.splitPot.withdrawStatus, state.splitPot.blockedBy) && (
                 <p data-testid="earn-rail-withdraw-flag" className="col-span-2 text-[11px] text-[var(--text-secondary)]">
-                  {withdrawFlagLine(state.splitPot.withdrawStatus)}
+                  {withdrawFlagLine(state.splitPot.withdrawStatus, state.splitPot.blockedBy)}
+                </p>
+              )}
+              {state.redemptionCooldownSlots > 0n && (
+                <p className="col-span-2 text-[11px] text-[var(--text-muted)]">
+                  Withdrawals are two steps: request, then collect after the redemption cooldown ({slotsToLabel(state.redemptionCooldownSlots)}).
                 </p>
               )}
             </div>
