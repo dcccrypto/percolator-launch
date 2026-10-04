@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import { useHashTab } from "@/hooks/useHashTab";
 import DashboardPage from "@/app/dashboard/page";
 import WalletPage from "@/app/wallet/page";
 import MyMarketsPage from "@/app/my-markets/page";
@@ -29,25 +30,11 @@ function isTabKey(value: string): value is TabKey {
 }
 
 export default function PortfolioHubPage() {
-  const [tab, setTab] = useState<TabKey>("overview");
+  const [tab, selectTab] = useHashTab(isTabKey, "overview");
 
   useEffect(() => {
     document.title = "Portfolio | Percolator";
   }, []);
-
-  // Deep-link the initial tab from the hash on mount. Done in an effect (not
-  // during render) so SSR/hydration never touch `window`, and without
-  // next/navigation's useSearchParams — which would force this page into a
-  // Suspense boundary.
-  useEffect(() => {
-    const hash = window.location.hash.replace(/^#/, "");
-    if (isTabKey(hash)) setTab(hash);
-  }, []);
-
-  const selectTab = (key: TabKey) => {
-    setTab(key);
-    history.replaceState(null, "", "#" + key);
-  };
 
   return (
     <div>
