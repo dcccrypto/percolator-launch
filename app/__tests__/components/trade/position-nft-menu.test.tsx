@@ -46,7 +46,9 @@ describe("PositionNftMenuView", () => {
     // Portaled to <body>: inline, the trade page's animate-fade-in root capped its z-index under
     // the mobile tab bar, which covered Cancel / Wrap.
     expect(container.contains(sheet)).toBe(false);
-    expect(sheet.parentElement).toBe(document.body);
+    // Rendered under <body> (the shared Modal portals its overlay there), outside the row.
+    expect(document.body.contains(sheet)).toBe(true);
+    expect(sheet.closest("[role=\"dialog\"]")).not.toBeNull();
     expect(sheet.textContent).toContain(NFT_MENU_COPY.wrapTitle);
     expect(sheet.textContent).toContain(
       "Your whole trading account on this market (the position and all 120 USDC of its collateral) moves into the NFT. Whoever holds the NFT controls it. Unwrap any time to get it back.",

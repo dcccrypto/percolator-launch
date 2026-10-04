@@ -10,7 +10,7 @@
  * ClosedPositionNftNotice covers the one case the row menu can't: a wrapped position that closed, which has no row.
  */
 import { type FC, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { Modal } from "@/components/ui/Modal";
 import { usePositionNft } from "@/hooks/usePositionNft";
 import { useMintPositionNft } from "@/hooks/useMintPositionNft";
 import { useBurnPositionNft } from "@/hooks/useBurnPositionNft";
@@ -58,19 +58,43 @@ export const PositionNftMenuView: FC<PositionNftMenuViewProps> = ({ canWrap, isW
   const [open, setOpen] = useState(false);
   const [confirmWrap, setConfirmWrap] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
+    // Keyboard: Escape closes and returns focus to the ⋯ button.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      setOpen(false);
+      buttonRef.current?.focus();
+    };
     document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
+    document.addEventListener("keydown", onKey);
+    // Focus the first item so Tab / Enter work inside the menu.
+    menuRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [open]);
   if (!canWrap && !isWrapped) return null;
   const item = "block w-full px-3 py-2 text-left text-[11px] text-[var(--text)] hover:bg-[var(--accent)]/[0.08] disabled:opacity-40 min-h-[44px] md:min-h-0";
   return (
-    <div ref={ref} className="relative inline-block" data-testid="position-nft-menu">
+    <div
+      ref={ref}
+      className="relative inline-block"
+      data-testid="position-nft-menu"
+      // Tabbing out of an open menu closes it, so it can't linger behind other UI.
+      onBlur={(e) => {
+        if (open && !e.currentTarget.contains(e.relatedTarget as Node | null)) setOpen(false);
+      }}
+    >
       <button
+        ref={buttonRef}
         type="button"
         data-testid="position-nft-menu-button"
         aria-label={NFT_MENU_COPY.menuLabel}
@@ -82,9 +106,14 @@ export const PositionNftMenuView: FC<PositionNftMenuViewProps> = ({ canWrap, isW
         ⋯
       </button>
       {open && (
-        <div role="menu" className="absolute right-0 z-30 mt-1 min-w-[160px] border border-[var(--border)] bg-[var(--bg-elevated)] py-1 shadow-lg">
+        <div ref={menuRef} role="menu" className="absolute right-0 z-30 mt-1 min-w-[160px] border border-[var(--border)] bg-[var(--bg-elevated)] py-1 shadow-lg">
           {canWrap && (
-            <button role="menuitem" type="button" data-testid="position-nft-wrap" className={item} disabled={busy !== null} onClick={() => { setOpen(false); setConfirmWrap(true); }}>
+            <button role="menuitem" type="button" data-testid="position-nft-wrap" className={item} disabled={busy !== null} onClick={() => {
+                // Focus ⋯ before the menu unmounts, so the sheet (Modal) restores focus to it on close.
+                buttonRef.current?.focus();
+                setOpen(false);
+                setConfirmWrap(true);
+              }}>
               {NFT_MENU_COPY.wrap}
             </button>
           )}
@@ -100,11 +129,16 @@ export const PositionNftMenuView: FC<PositionNftMenuViewProps> = ({ canWrap, isW
           )}
         </div>
       )}
-      {/* Portaled: inline, the trade page's animate-fade-in root caps its z-[60], so on phones the
-          bottom tab bar (z-50) covered Cancel / Wrap and took their taps. */}
-      {confirmWrap && typeof document !== "undefined" && createPortal(
-        <div role="dialog" aria-modal="true" aria-labelledby="wrap-nft-title" data-testid="position-nft-wrap-sheet" className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60 md:items-center">
-          <div className="w-full max-w-md border border-[var(--border)] bg-[var(--bg)] p-5 text-left">
+      {/* The shared Modal: Escape, focus trap and restore, scroll lock, and a portal above the
+          mobile tab bar (inline, the trade page's animate-fade-in root capped its z-index and
+          the bottom tab bar covered Cancel / Wrap). */}
+      {confirmWrap && (
+        <Modal
+          onClose={() => setConfirmWrap(false)}
+          labelledBy="wrap-nft-title"
+          panelClassName="w-full max-w-md border border-[var(--border)] bg-[var(--bg)] p-5 text-left"
+        >
+          <div data-testid="position-nft-wrap-sheet">
             <h3 id="wrap-nft-title" className="text-[13px] font-semibold text-[var(--text)]">{NFT_MENU_COPY.wrapTitle}</h3>
             <p className="mt-2 text-[12px] leading-relaxed text-[var(--text-secondary)]">{NFT_MENU_COPY.wrapBody(collateralLabel)}</p>
             <div className="mt-4 flex gap-2">
@@ -122,8 +156,7 @@ export const PositionNftMenuView: FC<PositionNftMenuViewProps> = ({ canWrap, isW
               </button>
             </div>
           </div>
-        </div>,
-        document.body,
+        </Modal>
       )}
       {error && (
         <p data-testid="position-nft-error" className="mt-1 max-w-[220px] text-right text-[10px] text-[var(--short)]">

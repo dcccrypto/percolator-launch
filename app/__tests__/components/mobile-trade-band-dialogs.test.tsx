@@ -119,9 +119,12 @@ describe("MobileTradeBand vs dialogs at 375px", () => {
     // Add Margin and the oracle details panel render inline (not portaled), so
     // they must carry aria-modal for the band to see them.
     const root = path.resolve(__dirname, "../..");
-    for (const f of ["components/trade/PositionPanel.tsx", "components/oracle/OracleDetailsPanel.tsx", "components/trade/PositionNftMenu.tsx"]) {
+    for (const f of ["components/trade/PositionPanel.tsx", "components/oracle/OracleDetailsPanel.tsx"]) {
       expect(readFileSync(path.join(root, f), "utf8"), f).toMatch(/aria-modal="true"/);
     }
+    // The NFT Wrap sheet renders through the shared Modal, which carries aria-modal itself.
+    expect(readFileSync(path.join(root, "components/trade/PositionNftMenu.tsx"), "utf8")).toMatch(/<Modal[\s>]/);
+    expect(readFileSync(path.join(root, "components/ui/Modal.tsx"), "utf8")).toMatch(/aria-modal="true"/);
   });
 });
 
