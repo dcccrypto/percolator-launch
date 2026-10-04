@@ -7,20 +7,29 @@ import { MarketLogo } from "@/components/market/MarketLogo";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { formatMarkPrice, formatStatValue } from "@/lib/format";
 import { useAllMarketStats } from "@/hooks/useAllMarketStats";
-import type { TrendingToken, TrendingTokensResult } from "@/lib/trending-tokens";
+import {
+  MIN_LIQUIDITY_USD,
+  type TrendingToken,
+  type TrendingTokensResult,
+} from "@/lib/trending-tokens";
 
-/** Rows shown on the landing page; "All tokens" could later deep-link a full view. */
+/** Rows shown on the landing page. */
 const RAIL_LIMIT = 8;
 
-const LAUNCHPAD_LABEL: Record<TrendingToken["launchpad"], string> = {
-  pumpfun: "Pump.fun",
-};
+/** DEX display names (TrendingToken.dexId is always one of SUPPORTED_DEX_IDS). */
+const DEX_LABEL: Record<string, string> = { pumpswap: "PumpSwap", meteora: "Meteora" };
+const dexLabel = (id: string) => DEX_LABEL[id] ?? id;
+const chartHost = (url: string) => (url.includes("geckoterminal.com") ? "GeckoTerminal" : "DexScreener");
 
-/** The token's page on its launchpad (clicking the token opens this). */
-const launchpadUrl: Record<TrendingToken["launchpad"], (mint: string) => string> = {
-  pumpfun: (mint) => `https://pump.fun/coin/${mint}`,
-};
-const tokenUrl = (t: TrendingToken) => (launchpadUrl[t.launchpad] ?? launchpadUrl.pumpfun)(t.mint);
+/** User-facing copy. Exported so tests assert the exact strings. The table lists
+ *  third-party tokens; nothing here may read as Percolator vetting them. */
+export const TRENDING_COPY = {
+  loading: "Loading trending tokens…",
+  unavailable: "Trending data is unavailable right now.",
+  empty: "No trending tokens match the listing filters right now.",
+  disclaimer: "Third-party tokens, not reviewed by Percolator. Do your own research.",
+  filters: `Shown: PumpSwap or Meteora pools quoted in SOL or USDC, liquidity ≥ $${(MIN_LIQUIDITY_USD / 1000).toFixed(0)}K, with no Percolator market yet. Data: GeckoTerminal, DexScreener.`,
+} as const;
 
 const shortCa = (ca: string) => `${ca.slice(0, 4)}…${ca.slice(-4)}`;
 
@@ -65,12 +74,12 @@ const TrendingRow: FC<{ t: TrendingToken; isLast: boolean }> = ({ t, isLast }) =
       isLast ? "" : "border-b border-[var(--border)]",
     ].join(" ")}
   >
-    {/* Clicking the token opens its launchpad page (pump.fun) in a new tab. */}
+    {/* Clicking the token opens its pool chart (DexScreener / GeckoTerminal) in a new tab. */}
     <a
-      href={tokenUrl(t)}
+      href={t.chartUrl}
       target="_blank"
-      rel="noopener noreferrer"
-      title={`View ${t.symbol} on ${LAUNCHPAD_LABEL[t.launchpad]}`}
+      rel="noopener noreferrer nofollow"
+      title={`View the ${t.symbol} pool on ${chartHost(t.chartUrl)}`}
       className="group/tok flex min-w-0 flex-1 items-center gap-3 focus-visible:outline-none sm:gap-4"
     >
       <MarketLogo logoUrl={t.logoUrl} mainnetCa={t.mint} symbol={t.symbol} size="sm" decorative />
@@ -82,7 +91,7 @@ const TrendingRow: FC<{ t: TrendingToken; isLast: boolean }> = ({ t, isLast }) =
 
     <div className="hidden shrink-0 sm:block" style={{ minWidth: 72 }}>
       <span className="rounded-sm border border-[var(--border)] bg-[var(--accent)]/[0.04] px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">
-        {LAUNCHPAD_LABEL[t.launchpad]}
+        {dexLabel(t.dexId)}
       </span>
     </div>
 
@@ -108,8 +117,10 @@ const TrendingRow: FC<{ t: TrendingToken; isLast: boolean }> = ({ t, isLast }) =
       {formatMarkPrice(t.priceUsd)}
     </div>
 
+    {/* Hands ONLY the mint to the wizard, which runs its own pool search, USD-quote and
+        keeper-floor checks and duplicate-market check — no pool is pre-selected here. */}
     <Link
-      href={`/create?mint=${t.mint}`}
+      href={`/create?mint=${encodeURIComponent(t.mint)}`}
       className="group shrink-0 rounded-sm border border-[var(--accent)]/40 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--accent)] transition-colors hover:bg-[var(--accent)]/10 hover:border-[var(--accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
     >
       <span className="hidden sm:inline">Create Market </span>
@@ -125,7 +136,7 @@ const TrendingHeader: FC = () => (
   >
     <div className="shrink-0" style={{ width: 24 }} />
     <div className="min-w-0 flex-1">Token</div>
-    <div className="hidden shrink-0 sm:block" style={{ minWidth: 72 }}>Launchpad</div>
+    <div className="hidden shrink-0 sm:block" style={{ minWidth: 72 }}>DEX</div>
     <div className="hidden shrink-0 lg:block" style={{ minWidth: 92 }}>Contract</div>
     <div className="hidden shrink-0 text-right sm:block" style={{ minWidth: 68 }}>Market Cap</div>
     <div className="hidden shrink-0 text-right md:block" style={{ minWidth: 68 }}>24h Vol</div>
@@ -136,47 +147,68 @@ const TrendingHeader: FC = () => (
 );
 
 /**
- * Landing-page "Tokens Trending" rail — trending launchpad tokens (pump.fun) that
- * pass the safety screen (lib/trending-tokens) and do NOT yet have a Percolator
- * perp, each with a Create Market CTA that deep-links the wizard prefilled with
- * the token's mint. Data polls /api/trending-tokens every 15s (that route is
- * CDN-cached, so this is cheap regardless of how many visitors are on the page).
+ * Landing-page "Trending on Solana DEXs" rail — third-party tokens trending on
+ * Solana DEXs (lib/trending-tokens) that do NOT yet have a Percolator market, each
+ * with a Create Market CTA that deep-links the wizard prefilled with the mint.
+ * Polls /api/trending-tokens every 60s (CDN-cached for 60s).
+ *
+ * States, each with its own copy: loading; unavailable (our API failed, or every
+ * upstream source failed — `sourceEmpty`); empty (sources answered, nothing
+ * matched the filters); rows.
  */
 export function TrendingTokensRail() {
-  const { data, error, isLoading } = useSWR<TrendingTokensResult>("/api/trending-tokens", fetcher, {
-    refreshInterval: 15_000,
+  const { data, error } = useSWR<TrendingTokensResult>("/api/trending-tokens", fetcher, {
+    refreshInterval: 60_000,
     revalidateOnFocus: false,
-    dedupingInterval: 10_000,
+    dedupingInterval: 30_000,
   });
-  const { statsMap } = useAllMarketStats();
+  const { statsMap, loading: statsLoading, error: statsError } = useAllMarketStats();
 
-  // Exclude tokens that already have a Percolator perp — it's "trending tokens
-  // WITHOUT a perp market". Match on the market's mainnet_ca (the same mainnet
-  // mint a trending token carries).
+  // Exclude tokens that already have a Percolator market (any row /api/markets
+  // returns, zombies included) — matched on the market's mainnet_ca.
   const listedCa = useMemo(() => {
     const set = new Set<string>();
     for (const m of statsMap.values()) if (m.mainnet_ca) set.add(m.mainnet_ca);
     return set;
   }, [statsMap]);
 
+  // Hold rows until the market list has loaded, so an already-listed token never
+  // flashes up with a Create CTA. If the market list fails, the wizard's own
+  // duplicate-market check still stands, so rows are shown rather than hidden forever.
+  const marketsKnown = !statsLoading || statsMap.size > 0 || !!statsError;
+
   const rows = useMemo(
-    () => (data?.tokens ?? []).filter((t) => !listedCa.has(t.mint)).slice(0, RAIL_LIMIT),
-    [data, listedCa],
+    () => (marketsKnown ? (data?.tokens ?? []).filter((t) => !listedCa.has(t.mint)).slice(0, RAIL_LIMIT) : []),
+    [data, listedCa, marketsKnown],
   );
 
+  let message: string | null = null;
+  if (rows.length === 0) {
+    if (error || data?.sourceEmpty) message = TRENDING_COPY.unavailable;
+    else if (!data || !marketsKnown) message = TRENDING_COPY.loading;
+    else message = TRENDING_COPY.empty;
+  }
+
   return (
-    <GlassCard padding="none" elevation="md" className="overflow-hidden" hover={false}>
-      <TrendingHeader />
-      {rows.map((t, i) => (
-        <TrendingRow key={t.mint} t={t} isLast={i === rows.length - 1} />
-      ))}
-      {rows.length === 0 && (error || !isLoading) && (
-        <div className="px-4 py-6 text-center text-[11px] text-[var(--text-secondary)]">
-          {error
-            ? "Couldn't load trending tokens right now."
-            : "No trending tokens clear the safety screen right now — check back soon."}
-        </div>
-      )}
-    </GlassCard>
+    <div>
+      <GlassCard padding="none" elevation="md" className="overflow-hidden" hover={false}>
+        <TrendingHeader />
+        {rows.map((t, i) => (
+          <TrendingRow key={t.mint} t={t} isLast={i === rows.length - 1} />
+        ))}
+        {message && (
+          <div
+            role="status"
+            data-state={message === TRENDING_COPY.unavailable ? "unavailable" : message === TRENDING_COPY.empty ? "empty" : "loading"}
+            className="px-4 py-6 text-center text-[11px] text-[var(--text-secondary)]"
+          >
+            {message}
+          </div>
+        )}
+      </GlassCard>
+      <p className="mt-3 text-[10px] leading-relaxed text-[var(--text-dim)]">
+        {TRENDING_COPY.disclaimer} {TRENDING_COPY.filters}
+      </p>
+    </div>
   );
 }

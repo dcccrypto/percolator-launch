@@ -138,7 +138,7 @@ export default function Home() {
         </ScrollReveal>
       </section>
 
-      {/* ─── Tokens trending (launchpad tokens without a perp yet) ─── */}
+      {/* ─── Trending on Solana DEXs (third-party tokens without a Percolator market yet) ─── */}
       <section className="relative mx-auto mt-28 max-w-[1100px] px-6 pb-20 sm:mt-40 sm:px-8">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
@@ -150,7 +150,7 @@ export default function Home() {
         <ScrollReveal delay={0.05}>
           <div className="mb-4 flex items-baseline justify-between gap-4">
             <h2 className="text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent-text)]">
-              // Tokens Trending
+              // Trending on Solana DEXs
             </h2>
           </div>
         </ScrollReveal>
