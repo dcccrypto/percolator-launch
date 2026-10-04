@@ -5,7 +5,7 @@ import { usePortfolio, liveLiquidationSeverity, liveLiquidationDistancePct, type
 import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { describeLiqPrice } from "@/lib/liq-price-display";
-import { describeEntryPrice } from "@/lib/entry-price-display";
+import { describeEntryPrice, DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL } from "@/lib/entry-price-display";
 import { UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
 import { useLivePortfolioMetrics, type LivePositionMetric } from "@/hooks/useLivePortfolioMetrics";
 import { LiqPriceValue } from "@/components/trade/LiqPriceValue";
@@ -148,6 +148,9 @@ function PositionCard({
                 >
                   {formatPnlPct(live.pnlPercent)}
                 </span>
+                {live.isEstimate && (
+                  <span className="ml-1 text-[9px] text-[var(--text-dim)]" title={DERIVED_ENTRY_TOOLTIP}>{ESTIMATE_LABEL}</span>
+                )}
               </>
             ) : (
               <span

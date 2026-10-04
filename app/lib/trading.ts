@@ -190,6 +190,9 @@ export function computeLivePositionPnl(
 /**
  * How much to trust the entry price a position row is about to display.
  *
+ *   "server"  — the authoritative open price recorded by the indexer
+ *               (percolator-indexer#211). Same trust as "cache", works on every
+ *               device. Not wired yet — see lib/position-pnl.ts `lookupKnownEntries`.
  *   "cache"   — the real mark at open time, saved by OrderTicket. Trustworthy:
  *               entry, unrealized PnL, ROE and liq price are all meaningful.
  *   "derived" — no cache; entry was BACKED OUT of the on-chain `pnl` by
@@ -224,7 +227,7 @@ export function computeLivePositionPnl(
  * every settlement), so the honest answer is "--" plus the realized-loss
  * figure from `residualCrystallizedLossAtomsTotal` — not a fabricated zero.
  */
-export type EntryPriceSource = "cache" | "derived" | "unknown";
+export type EntryPriceSource = "server" | "cache" | "derived" | "unknown";
 
 /**
  * Shared copy for every "--" cell produced by `source === "unknown"`, so the
@@ -259,7 +262,9 @@ export function resolveEntryPrice(
   cachedEntryPrice: bigint,
   onChainPnl: bigint,
   oraclePrice: bigint,
+  serverEntryPrice: bigint = 0n,
 ): ResolvedEntryPrice {
+  if (serverEntryPrice > 0n) return { entry: serverEntryPrice, source: "server" };
   if (cachedEntryPrice > 0n) return { entry: cachedEntryPrice, source: "cache" };
   if (positionSize === 0n || oraclePrice <= 0n) {
     return { entry: oraclePrice, source: "unknown" };

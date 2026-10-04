@@ -241,6 +241,14 @@ describe("Portfolio Component Tests", () => {
               engine: {},
             },
             // Enriched fields from usePortfolio
+            // A real losing leg for the shared PnL helper: 5 tokens from $100.10 at a
+            // $100 mark = -0.5 (the figure is computed, not read from a stub).
+            effectiveSize: 5000000n,
+            adlKnown: true,
+            adlFactors: { aLong: 1_000_000_000_000_000n, aShort: 1_000_000_000_000_000n },
+            adlApplicable: true,
+            pnlKnown: true,
+            isEstimate: false,
             unrealizedPnl: -500000n,
             oraclePriceE6: 100000000n,
             pnlPercent: -50,
@@ -250,7 +258,7 @@ describe("Portfolio Component Tests", () => {
             // #2660: the card reads the RESOLVED entry + its source, never the
             // (always-0n on v17/v18) account.entryPrice. A loss worth showing
             // needs a known entry; with source "unknown" the card shows "--".
-            effectiveEntryPrice: 100000000n,
+            effectiveEntryPrice: 100100000n,
             entryPriceSource: "cache",
           },
         ],
@@ -576,7 +584,7 @@ describe("Portfolio Component Tests", () => {
       entryPriceSource: "cache",
       unrealizedPnl: 0n,
       oraclePriceE6: 100_000_000n, // $100 mark
-      effectiveSize: positionSize,
+      effectiveSize: positionSize, adlKnown: true, adlFactors: { aLong: 1_000_000_000_000_000n, aShort: 1_000_000_000_000_000n }, adlApplicable: true, pnlKnown: true, isEstimate: false,
       pnlPercent: 0,
       leverage: 999, // the stale hook figure must NOT be what is shown
       liquidationPriceE6: 80000000n,
@@ -638,7 +646,7 @@ describe("Portfolio Component Tests", () => {
       oraclePriceE6: 95800000n,
       pnlPercent: -90,
       leverage: 10,
-      effectiveSize: 1000000n,
+      effectiveSize: 1000000n, adlKnown: true, adlFactors: { aLong: 1_000_000_000_000_000n, aShort: 1_000_000_000_000_000n }, adlApplicable: true, pnlKnown: true, isEstimate: false,
       // 10x long at 100 (mm 5% / im 10%) polled at 95.8: engine liquidation 94.7368, so
       // (95.8 - 94.7368) / 95.8 = 1.1%, and three quarters of the margin cushion is gone (danger).
       liquidationPriceE6: 94736843n,

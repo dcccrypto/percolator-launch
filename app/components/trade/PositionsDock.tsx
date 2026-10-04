@@ -51,14 +51,11 @@ import {
   formatPercent,
 } from "@/lib/format";
 import {
-  computeMarkPnl,
   computeLiqPrice,
-  computePnlPercent,
-  resolveEntryPrice,
   UNKNOWN_ENTRY_TOOLTIP,
-  computeMarkPnlCollateral,
   computePositionInitialMargin,
 } from "@/lib/trading";
+import { isEntryKnown, isExactEntrySource, DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL } from "@/lib/entry-price-display";
 import {
   adlSideFactor,
   effectiveExposureQ,
@@ -85,7 +82,7 @@ import { sanitizeSymbol } from "@/lib/symbol-utils";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { usePriceFlash } from "@/hooks/usePriceFlash";
-import { getEntryPrice } from "@/lib/entry-price";
+import { terminalPositionPnl } from "@/lib/position-pnl";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { isSentinelValue } from "@/lib/health";
 import { RenderProfiler } from "@/components/dev/RenderProfiler";
@@ -127,7 +124,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const scanPending = useUserAccountScanPending();
   const accountPending = !mockMode && !userAccount && scanPending;
   const config = useMarketConfig();
-  const { accounts, config: mktConfig, params, adlFactors } = useSlabState();
+  const { accounts, config: mktConfig, params, adlFactors, wrapperConfigV17 } = useSlabState();
   const { engine, insuranceBalance } = useEngineState();
   const { priceE6: livePriceE6, priceUsd } = useLivePrice();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
@@ -213,114 +210,46 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   // exposure or PnL must use the effective figure (lib/v17-adl.ts); closing and
   // margin keep using raw basis, which is what the engine denominates them in.
   const aSide = adlFactors ? adlSideFactor(adlFactors, isLong ? 0 : 1) : 0n;
-  const effectiveSize = adlFactors
-    ? effectiveExposureQ(account.positionSize, account.adlABasis, aSide)
-    : account.positionSize;
   const wasDeleveraged = !!adlFactors && isDeleveraged(account.adlABasis, aSide);
   const adlRemaining = adlFactors ? adlRemainingBps(account.adlABasis, aSide) : 10000;
-  const absPosition = abs(effectiveSize);
   /** Nominal basis, shown only to explain an ADL reduction. */
   const absNominal = abs(account.positionSize);
   const onChainPriceE6 = config ? sanitizePriceE6(applyInvert(config.lastEffectivePriceE6, config.invert)) : null;
   const currentPriceE6 = livePriceE6 ?? onChainPriceE6 ?? 0n;
-  const rawEntryPrice = account.entryPrice;
-  // BUG 10 fix: scope the cache lookup to this account's own wallet (its
-  // on-chain `owner`) — the unscoped key collapsed to one slot per market
-  // shared by every wallet that traded it in this browser (v17 accountIdx is
-  // always 0), so switching wallets showed the previous wallet's entry price.
-  const savedEntryPrice = rawEntryPrice > 0n ? 0n : getEntryPrice(slabAddress, activeInfo.idx, account.owner.toBase58());
-  const resolvedEntryPrice = rawEntryPrice > 0n ? rawEntryPrice : (savedEntryPrice > 0n ? savedEntryPrice : 0n);
-  // No on-chain entry price (v17) and no local cache — this is the ONLY path
-  // a Position NFT received via transfer ever takes (the recipient's browser
-  // never ran the trade that opened it, so getEntryPrice() has nothing
-  // saved). Derive an effective entry from the position's on-chain
-  // unrealized PnL instead of naively substituting the mark price, which
-  // silently implies zero PnL and cascades into a liq price clamped to
-  // "N/A" below. See estimateEntryFromPnl.
-  // E: guard the sentinel BEFORE it feeds estimateEntryFromPnl's math, not
-  // just at display time (the isSentinelValue guard on pnlNative below is a
-  // SEPARATE, later use) — an unguarded u64::MAX-class account.pnl here can
-  // produce an insane `diff` that survives estimateEntryFromPnl's own
-  // entry>0n fallback (e.g. a short's `entry = oraclePrice + diff` stays
-  // positive even when `diff` is astronomically large), poisoning entry/liq/
-  // margin math downstream.
-  //
-  // 2026-07-22: the derivation above only works while `account.pnl` still
-  // CARRIES the loss, and it does not — a realized loss is crystallized out of
-  // `capital` and `pnl` is pushed back to 0 (percolator/src/v16.rs:9382-9437).
-  // A solvent loser therefore reads `pnl == 0`, the derived entry collapses to
-  // the mark, and this row printed a confident "$0.00 / 0.00%" over a position
-  // that is actually deep underwater. `resolveEntryPrice` keeps the same
-  // numeric fallback for the liq/margin math below but reports
-  // source === "unknown" so the PnL, ROE and entry CELLS render "--" instead.
-  const safePnlForEntry = isSentinelValue(account.pnl) ? 0n : account.pnl;
-  // EFFECTIVE, not nominal: the derived-entry back-solve (`diff = pnl / size`)
-  // must use the SAME size the PnL below computes over (`effectiveSize`, line
-  // ~287). With raw `account.positionSize` here, a deleveraged leg with no cached
-  // entry back-solved an entry only `a_side/a_basis` of the way from the mark, and
-  // `computeMarkPnl(effectiveSize, thatEntry, mark)` then showed `pnl * a_side/a_basis`
-  // — understated by the ADL factor (up to 10x) versus ChartPnlBadge/usePortfolio,
-  // which already back-solve over effective size. On a cache hit the size arg is
-  // unused, so this only changes deleveraged + derived-entry positions.
-  const resolvedEntry = resolveEntryPrice(
-    effectiveSize,
-    resolvedEntryPrice,
-    safePnlForEntry,
-    currentPriceE6,
-  );
-  const entryPriceE6 = resolvedEntry.entry;
-  /** False when entry (and therefore PnL/ROE) cannot be honestly displayed. */
-  const pnlIsKnown = resolvedEntry.source !== "unknown";
   const maintenanceBps = params?.maintenanceMarginBps ?? 500n;
   const initialMarginBps = params?.initialMarginBps ?? 1000n;
   const hasValidMark = currentPriceE6 > 0n;
-
-  // Native "coin-margined" scale (see computeMarkPnl's on-chain-formula doc
-  // comment) — NOT yet a collateral/USDC-denominated amount. Converted below
-  // via computeMarkPnlCollateral before it's shown or compared against
-  // anything collateral-scaled (capital, margin, vault balance). The stale
-  // on-chain `account.pnl` fallback (NFT-transfer path, no cached entry) is
-  // in this SAME native scale — estimateEntryFromPnl's whole premise is that
-  // computeMarkPnl(size, derivedEntry, mark) === account.pnl — so one
-  // conversion below covers both branches.
-  // M-6: with no cached entry, `entryPriceE6` is the entry back-solved from the
-  // on-chain `pnl` (collateral atoms) — feed THAT through computeMarkPnl, never
-  // the raw `pnl` itself, which is already collateral-scale and would be scaled
-  // by the mark a second time below (+$5 shown as +$0.018 at a $0.0036 mark).
-  // An "unknown" source resolves to the mark, so this is a 0 placeholder the
-  // cells render as "--" (pnlIsKnown).
-  const pnlNative = hasValidMark
-    // Effective, not nominal: a deleveraged leg gains/loses at
-    // `basis * a_side / a_basis` per unit of price (v16.rs:9547-9576).
-    ? computeMarkPnl(effectiveSize, entryPriceE6, currentPriceE6)
-    : 0n;
-  // Collateral-equivalent PnL — the single number this row's USDC line, USD
-  // line, ROE, and pool-cap check all derive from, so they can't disagree
-  // with each other (or with ChartPnlBadge, which reaches the same figure
-  // via an equivalent float `* priceUsd` conversion).
-  const pnlTokens = hasValidMark ? computeMarkPnlCollateral(pnlNative, currentPriceE6) : 0n;
-  // sim-USDC is $1-pegged collateral (see PLAYGROUND.md) — the collateral
+  // ONE shared computation for every PnL surface (lib/position-pnl.ts, #3077):
+  // ADL-effective size (never raw basis when the factors are unknown), entry
+  // server > cache (this device) > back-solved estimate, valued at the MARK (what
+  // liquidation uses), ROE on the position's own initial margin. The back-solve
+  // runs over EFFECTIVE size - the size the on-chain pnl was earned on - so the
+  // dock, badge, bar and portfolio card cannot disagree. With no entry, or with
+  // the ADL factors unknown, PnL is "--" (a mark-valued placeholder would read a
+  // false $0 on a position that may be deep underwater - see resolveEntryPrice).
+  const pnlResult = terminalPositionPnl({
+    account,
+    slabAddress,
+    accountIdx: activeInfo.idx,
+    adlFactors,
+    adlApplicable: wrapperConfigV17 !== null,
+    markE6: currentPriceE6,
+    anchorMarkE6: onChainPriceE6 ?? undefined,
+    initialMarginBps,
+  });
+  const effectiveSize = pnlResult.effectiveSize ?? account.positionSize;
+  const absPosition = abs(effectiveSize);
+  const entryPriceE6 = pnlResult.entry;
+  /** False when entry (and therefore PnL/ROE) cannot be honestly displayed. */
+  const pnlIsKnown = pnlResult.pnlKnown;
+  const entryKnown = isEntryKnown(pnlResult.entry, pnlResult.entrySource);
+  const pnlTokens = pnlResult.unrealizedPnl ?? 0n;
+  // sim-USDC is $1-pegged collateral (see PLAYGROUND.md) - the collateral
   // amount above already IS the dollar figure, just formatted differently.
   // #2324: null rather than a silently-wrong figure above MAX_SAFE_INTEGER.
-  // The `: null` branch already exists for an invalid mark, so the render path
-  // downstream already handles it.
   const pnlUsdRaw = hasValidMark ? bigintToFloat(pnlTokens, decimals) : null;
   const pnlUsd = pnlUsdRaw !== null && Number.isFinite(pnlUsdRaw) ? pnlUsdRaw : null;
-  // The position's own locked initial margin (its entry notional at the
-  // market's initial-margin requirement) — NOT total account capital — is
-  // the correct ROE basis; a losing position must show a negative ROE, not
-  // a near-zero one from mixing native-scale PnL with collateral-scale
-  // capital. computePnlPercent throws when pnlTokens*10000/margin overflows
-  // MAX_SAFE_INTEGER (extreme dust-margin position); fall back to 0 so an
-  // outlier position can't blank the whole panel (mirrors the
-  // slippageBoundE6 guard in OrderTicket.tsx).
-  const positionInitialMargin = computePositionInitialMargin(account.positionSize, entryPriceE6, initialMarginBps);
-  let roe = 0;
-  try {
-    roe = hasValidMark && positionInitialMargin > 0n ? computePnlPercent(pnlTokens, positionInitialMargin) : 0;
-  } catch {
-    roe = 0;
-  }
+  const roe = pnlResult.roe ?? 0;
 
   // GMX-style pool-capped PnL: the LP vault is the real counterparty (not a
   // matched order book) — a winning position's paper PnL can't exceed what
@@ -389,11 +318,10 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const roeColor = roe === 0 ? "text-[var(--text-muted)]" : roe > 0 ? "text-[var(--long)]" : "text-[var(--short)]";
 
   // "Share PnL" card data — only when we can price the PnL honestly: a live mark
-  // and the entry CACHED at open (resolvedEntryPrice > 0n ⇒ resolveEntryPrice
-  // source "cache"); never a derived/estimated entry. The pool payout capacity
+  // and the entry CACHED at open (server/cache, never an estimate); never a derived/estimated entry. The pool payout capacity
   // rides along so the card caps exactly where this row shows its caveat.
   const pnlCardData: PnlCardData | null =
-    hasValidMark && pnlIsKnown && resolvedEntryPrice > 0n
+    hasValidMark && pnlIsKnown && isExactEntrySource(pnlResult.entrySource) && entryPriceE6 > 0n
       ? {
           slab: slabAddress,
           symbol: marketDisplaySymbol,
@@ -404,7 +332,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
           decimals,
           nominalSizeQ: account.positionSize,
           effectiveSizeQ: effectiveSize,
-          entryE6: resolvedEntryPrice,
+          entryE6: entryPriceE6,
           initialMarginBps,
           initialMarkE6: currentPriceE6,
         }
@@ -503,7 +431,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                 {leverageDisplay.text}
               </td>
               <td className={`whitespace-nowrap px-3 py-2.5 text-right ${pnlIsKnown ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-                {pnlIsKnown ? formatUsdPriceE6(entryPriceE6) : (
+                {entryKnown ? formatUsdPriceE6(entryPriceE6) : (
                   <span className="inline-flex items-center justify-end gap-1">
                     --
                     <InfoIcon tooltip={UNKNOWN_ENTRY_TOOLTIP} />
@@ -537,6 +465,9 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                   <>
                     <div className="flex items-center justify-end gap-1">
                       {formatPnl(pnlTokens, decimals)} {collateralSymbol}
+                      {pnlResult.isEstimate && (
+                        <span className="text-[9px] font-normal text-[var(--text-dim)]" title={DERIVED_ENTRY_TOOLTIP}>{ESTIMATE_LABEL}</span>
+                      )}
                       {pnlIsCapped && (
                         <InfoIcon tooltip={`Vault + insurance can currently pay up to ${formatTokenAmount(payableCapacity, decimals)} ${collateralSymbol} of profit on this market. Your paper PnL exceeds that — payout may be capped at close, same as any pool-backed perp.`} />
                       )}
@@ -618,7 +549,10 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
       )}
       {showCloseModal && (
         <ClosePositionModal
-          positionSize={account.positionSize}
+          // EFFECTIVE exposure: this modal previews size and PnL for the close, and
+          // raw basis over-reports a deleveraged leg (#3077). The close itself
+          // re-reads the leg from a fresh scan (see useClosePosition).
+          positionSize={effectiveSize}
           entryPrice={pnlIsKnown ? entryPriceE6 : 0n}
           currentPrice={currentPriceE6}
           capital={account.capital}

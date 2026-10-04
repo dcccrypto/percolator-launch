@@ -9,6 +9,7 @@
  * hooks/usePortfolio.ts). The entry is reconstructed by `resolveEntryPrice`
  * (lib/trading.ts) and travels with a `source`:
  *
+ *   "server"  — the indexer's authoritative open price (indexer#211): the real entry.
  *   "cache"   — saved at open by OrderTicket on this device: the real entry.
  *   "derived" — back-solved from the portfolio's on-chain `pnl`: an estimate.
  *   "unknown" — neither; `.entry` is the MARK (so risk math keeps a sane
@@ -25,7 +26,15 @@ import { UNKNOWN_ENTRY_TOOLTIP, type EntryPriceSource } from "@/lib/trading";
 
 export const DERIVED_ENTRY_TOOLTIP =
   "Estimated from this position's on-chain PnL — no entry price was saved on this device. " +
-  "Percolator doesn't store entry price on-chain.";
+  "Percolator doesn't store entry price on-chain, so PnL and ROE here are approximate.";
+
+/** The entry is a real recorded open price (not a back-solved estimate). */
+export function isExactEntrySource(source: EntryPriceSource | null | undefined): boolean {
+  return source === "server" || source === "cache";
+}
+
+/** Calm suffix for any figure computed from a back-solved entry. */
+export const ESTIMATE_LABEL = "est.";
 
 /**
  * True when `entryE6` is a real (cached or PnL-derived) entry, not the mark placeholder.
@@ -39,7 +48,7 @@ export function isEntryKnown(
   entryE6: bigint | null | undefined,
   source: EntryPriceSource | null | undefined,
 ): boolean {
-  const trusted = source === "cache" || source === "derived";
+  const trusted = source === "server" || source === "cache" || source === "derived";
   return trusted && entryE6 != null && entryE6 > 0n;
 }
 

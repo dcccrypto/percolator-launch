@@ -32,11 +32,9 @@ import { ChartPnlBadge } from "./ChartPnlBadge";
 import { computeRef24h, computePriceChange, formatPriceChange } from "@/lib/chart-stats";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
-import { getEntryPrice } from "@/lib/entry-price";
 import { displayEntryE6 } from "@/lib/entry-price-display";
-import { isSentinelValue } from "@/lib/health";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
-import { resolveEntryPrice } from "@/lib/trading";
+import { terminalPositionPnl } from "@/lib/position-pnl";
 import { useChartStylePref } from "@/hooks/useChartStylePref";
 import { useChartOverlayPrefs } from "@/hooks/useChartOverlayPrefs";
 import { useChartIndicatorPrefs } from "@/hooks/useChartIndicatorPrefs";
@@ -245,7 +243,7 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
   slabAddress,
   mintAddress,
 }) => {
-  const { config } = useSlabState();
+  const { config, adlFactors, wrapperConfigV17 } = useSlabState();
   // Phase 2 (chart decoupling): TradingChart no longer calls useLivePrice()
   // reactively — it owns the ~1000-line indicator/drawing/series lifecycle,
   // and a per-tick re-render here used to cascade into all of that. Live
@@ -838,17 +836,6 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
     const { account } = ua;
     if (account.positionSize === 0n) return null;
 
-    const rawEntryPrice = account.entryPrice ?? 0n;
-
-    const cachedEntryPrice =
-      rawEntryPrice > 0n
-        ? rawEntryPrice
-        : getEntryPrice(
-            slabAddress,
-            ua.idx,
-            account.owner.toBase58(),
-          );
-
     const oraclePriceE6 = config
       ? sanitizePriceE6(
           applyInvert(
@@ -858,21 +845,23 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
         )
       : 0n;
 
-    const safePnl =
-      account.pnl != null && !isSentinelValue(account.pnl)
-        ? account.pnl
-        : 0n;
-
-    const resolvedEntry = resolveEntryPrice(
-      account.positionSize,
-      cachedEntryPrice,
-      safePnl,
-      oraclePriceE6,
-    );
+    // Same shared resolution as every PnL surface (lib/position-pnl.ts): server >
+    // cache > back-solve over EFFECTIVE size - this line used to back-solve over
+    // raw basis, so on a deleveraged leg it sat at a different price than the
+    // dock's Entry cell.
+    const resolvedEntry = terminalPositionPnl({
+      account,
+      slabAddress,
+      accountIdx: ua.idx,
+      adlFactors,
+      adlApplicable: wrapperConfigV17 !== null,
+      markE6: oraclePriceE6,
+      initialMarginBps: 1000n,
+    });
 
     const displayEntry = displayEntryE6(
       resolvedEntry.entry,
-      resolvedEntry.source,
+      resolvedEntry.entrySource,
     );
 
     return displayEntry > 0n

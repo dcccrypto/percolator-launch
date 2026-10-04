@@ -15,7 +15,7 @@ import {
 } from "@/hooks/usePortfolio";
 import { formatMarkPrice } from "@/lib/format";
 import { describeLiqPrice } from "@/lib/liq-price-display";
-import { describeEntryPrice } from "@/lib/entry-price-display";
+import { describeEntryPrice, isExactEntrySource } from "@/lib/entry-price-display";
 import { LiqPriceValue } from "@/components/trade/LiqPriceValue";
 
 export interface LiquidationRisk {
@@ -39,7 +39,7 @@ export interface LiquidationRisk {
  * close changes the size, which re-arms a hidden warning; that is intended.
  */
 export function riskKey(pos: PortfolioPosition): string {
-  const entry = pos.entryPriceSource === "cache" ? `:${pos.effectiveEntryPrice}` : "";
+  const entry = isExactEntrySource(pos.entryPriceSource) ? `:${pos.effectiveEntryPrice}` : "";
   return `${pos.slabAddress}:${pos.nftWrapped ? "w" : "o"}:${pos.account?.positionSize ?? 0n}${entry}`;
 }
 

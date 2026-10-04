@@ -109,8 +109,9 @@ function readU128LE(data: Uint8Array, offset: number): bigint {
  * @param slabData   Raw v17 market ("slab") account bytes.
  * @param assetIndex Asset slot index (0 for every single-asset playground market).
  * @returns The factors, or `null` when the buffer is too short / not a v17 market
- *          layout. Callers treat `null` as "no ADL information" and fall back to
- *          raw basis, which is the pre-existing behaviour.
+ *          layout / the slot is in the retired 0-0 shape. `null` means "ADL state
+ *          UNKNOWN": callers must NOT assume raw basis is right (see
+ *          lib/position-pnl.ts, which refuses to show a PnL).
  */
 export function parseAssetAdlFactors(
   slabData: Uint8Array,
@@ -124,12 +125,20 @@ export function parseAssetAdlFactors(
   if (aShortOff + 16 > slabData.length) return null;
   const aLong = readU128LE(slabData, aLongOff);
   const aShort = readU128LE(slabData, aShortOff);
-  // A valid factor is in [MIN_A_SIDE, ADL_ONE] = [ADL_ONE/10, ADL_ONE]
-  // (v16.rs:11616). Anything outside that means we are not looking at an
-  // AssetStateV16Account — refuse rather than scale a position by garbage.
-  const MIN_A_SIDE = ADL_ONE / 10n;
-  if (aLong < MIN_A_SIDE || aLong > ADL_ONE) return null;
-  if (aShort < MIN_A_SIDE || aShort > ADL_ONE) return null;
+  // A valid factor is in (0, ADL_ONE]. The engine's MIN_A_SIDE (= ADL_ONE/10)
+  // is a DRAIN threshold, not an invariant: when a bankruptcy ADL drives a
+  // side's `a` below it the engine keeps the value and flips that side to
+  // DrainOnly (v16.rs:17867-17878, `asset.a_long = opp_a_after; if ... <
+  // MIN_A_SIDE { mode_long = DrainOnly }`) — it is the most-deleveraged state
+  // there is. This guard used to reject anything below MIN_A_SIDE, and checked
+  // BOTH sides, so one drained side made the whole slot "unreadable" (null) and
+  // every consumer fell back to RAW basis — over-reporting exactly the
+  // positions that were deleveraged hardest (issue #3077 cause 3). Zero and
+  // > ADL_ONE stay refused: `0/0` is the retired/reset shape (v16.rs:7746),
+  // which carries no factor to scale by, and anything above ADL_ONE means we
+  // are not looking at an AssetStateV16Account at all.
+  if (aLong <= 0n || aLong > ADL_ONE) return null;
+  if (aShort <= 0n || aShort > ADL_ONE) return null;
   return { aLong, aShort };
 }
 

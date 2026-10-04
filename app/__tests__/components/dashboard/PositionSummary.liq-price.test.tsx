@@ -86,7 +86,7 @@ const pos = (over: Record<string, unknown>) => ({
   symbol: "SOL-PERP",
   collateralMint: { toBase58: () => "Mint" },
 
-  effectiveSize: 1_000_000n,
+  effectiveSize: 1_000_000n, adlKnown: true, adlFactors: { aLong: 1_000_000_000_000_000n, aShort: 1_000_000_000_000_000n }, adlApplicable: true, pnlKnown: true, isEstimate: false,
   leverage: 1,
 
   liquidationDistancePct: 100,
@@ -126,7 +126,7 @@ function livePosition() {
 
   return pos({
     symbol: "SOLCAT-PERP",
-    effectiveSize: SIZE,
+    effectiveSize: SIZE, adlKnown: true, adlFactors: { aLong: 1_000_000_000_000_000n, aShort: 1_000_000_000_000_000n }, adlApplicable: true, pnlKnown: true, isEstimate: false,
     effectiveEntryPrice: ENTRY_E6,
     entryPriceSource: "cache",
     oraclePriceE6: STALE_MARK_E6,
@@ -249,7 +249,7 @@ describe("PositionSummary — one card per portfolio, each on its own numbers", 
       slabAddress: SLAB,
       idx,
       symbol: "SOL-PERP",
-      effectiveSize: 1_000_000n,
+      effectiveSize: 1_000_000n, adlKnown: true, adlFactors: { aLong: 1_000_000_000_000_000n, aShort: 1_000_000_000_000_000n }, adlApplicable: true, pnlKnown: true, isEstimate: false,
       effectiveEntryPrice: entryE6,
       entryPriceSource: "cache",
       oraclePriceE6: MARK,
@@ -282,7 +282,7 @@ describe("PositionSummary — leverage follows the same live mark as PnL", () =>
     const LIVE = 150_000_000n;
     state.positions = [
       pos({
-        effectiveSize: SIZE_Q,
+        effectiveSize: SIZE_Q, adlKnown: true, adlFactors: { aLong: 1_000_000_000_000_000n, aShort: 1_000_000_000_000_000n }, adlApplicable: true, pnlKnown: true, isEstimate: false,
         oraclePriceE6: STALE,
         account: { positionSize: SIZE_Q, capital: CAPITAL, pnl: 0n, entryPrice: 0n },
       }),

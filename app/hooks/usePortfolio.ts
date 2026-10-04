@@ -14,20 +14,17 @@ import {
   parseWrapperConfigV17,
   isV17Account,
   AccountKind,
-  computeMarkPnl,
-  computePnlPercent,
   V17_HEADER_LEN,
   type DiscoveredMarket,
   type Account,
 } from "@percolatorct/sdk";
 import { isSentinelValue } from "@/lib/health";
 import { isLpPortfolio } from "@/lib/userAccountScan";
-import { computeLiqPrice, computeMarkPnlCollateral, computePositionInitialMargin, estimateEntryFromPnl, resolveEntryPrice, type EntryPriceSource } from "@/lib/trading";
+import { computeLiqPrice, type EntryPriceSource } from "@/lib/trading";
 import { parseV17RiskParams } from "@/lib/v17-engine-config";
 import {
   parseAssetAdlFactors,
   adlSideFactor,
-  effectiveExposureQ,
   adlRemainingBps,
   isDeleveraged,
   type AssetAdlFactors,
@@ -35,6 +32,7 @@ import {
 import { getAllProgramIds, getNetwork } from "@/lib/config";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { getEntryPrice } from "@/lib/entry-price";
+import { computePositionPnl, lookupKnownEntries } from "@/lib/position-pnl";
 import { computeLiquidationDistancePct } from "@/lib/liquidation-distance";
 import { computeMarginCushion, severityFromCushion } from "@/lib/liquidation-risk";
 import { classifyLiquidation, type LiquidationState } from "@/lib/liquidation-state";
@@ -230,6 +228,24 @@ export interface PortfolioPosition {
    * closing and margin (see `adlRemainingBps`).
    */
   effectiveSize: bigint;
+  /**
+   * False when the per-side ADL factors could not be read for this market, so
+   * `effectiveSize` is only raw basis (SIZE display fallback) and the position's
+   * PnL is unknown (`pnlKnown` false). Never treat that fallback as exposure.
+   */
+  adlKnown: boolean;
+  /** Live ADL factors the position was valued with; null = unknown. */
+  adlFactors: AssetAdlFactors | null;
+  /** false on legacy v12.x rows, which have no ADL concept. */
+  adlApplicable: boolean;
+  /**
+   * `unrealizedPnl` / `pnlPercent` are real numbers. false => render "--" (the
+   * numeric fields hold a 0 PLACEHOLDER, never a "flat" reading). Covers an
+   * unknown entry AND unknown ADL factors.
+   */
+  pnlKnown: boolean;
+  /** Entry is back-solved (`entryPriceSource === "derived"`): label PnL "est.". */
+  isEstimate: boolean;
   /**
    * How much of this leg survived ADL, in basis points (10000 = untouched).
    * 5000 means the position now moves at half its nominal basis.
@@ -444,10 +460,6 @@ export function buildV17Position(
   const aSide =
     activeLeg && adlFactors ? adlSideFactor(adlFactors, activeLeg.side) : 0n;
   const aBasis = activeLeg ? activeLeg.aBasis : 0n;
-  const effectiveSize =
-    activeLeg && adlFactors
-      ? effectiveExposureQ(positionSize, aBasis, aSide)
-      : positionSize;
   const adlRemaining =
     activeLeg && adlFactors ? adlRemainingBps(aBasis, aSide) : 10000;
   const deleveraged =
@@ -494,83 +506,45 @@ export function buildV17Position(
     pendingCreatedSlot: null,
   } as Account;
 
-  const savedEntryPrice = getEntryPrice(slabAddrStr, 0, walletStr);
-  // Cache miss (no on-chain entry_price in v17, and nothing saved under this
-  // wallet's key — e.g. a Position NFT received via transfer, whose recipient
-  // browser never ran the trade that opened it, or the escrow-PDA-keying bug
-  // above before this fix). Falling through to "entry == mark" would silently
-  // imply zero PnL and clamp liq price to "N/A" while a DIFFERENT, unrelated
-  // PnL figure is shown elsewhere — instead derive the effective entry from
-  // the position's own on-chain unrealized PnL, mirroring PositionsDock's
-  // identical fallback (`estimateEntryFromPnl(positionSize, account.pnl,
-  // currentPriceE6)`).
-  // E: guard the sentinel BEFORE it feeds estimateEntryFromPnl's math (the
-  // isSentinelValue guard later in this function, on pnlNative's fallback
-  // branch, is a separate/later use) — see PositionsDock's identical fix for
-  // why an unguarded u64::MAX-class portfolio.pnl here can poison the derived
-  // entry price instead of being caught by estimateEntryFromPnl's own
-  // entry>0n clamp.
-  //
-  // 2026-07-22: that derivation is only sound while the on-chain `pnl` still
-  // CARRIES the loss. It does not: a realized loss is crystallized out of
-  // `capital` and `pnl` is pushed back to 0 (v16.rs:9382-9437), so a solvent
-  // loser reads `pnl == 0` and the derivation collapses to "entry == mark" —
-  // the exact silent-zero-PnL outcome the comment above set out to avoid.
-  // `resolveEntryPrice` keeps the same numeric fallback for risk math but
-  // reports source === "unknown" so display sites can print "--".
-  const safePnlForEntry = isSentinelValue(account.pnl) ? 0n : account.pnl;
-  // Derive against EFFECTIVE exposure: the on-chain `pnl` this back-solves from
-  // was accrued at the deleveraged rate, so `pnl / basis` would understate the
-  // entry offset by the ADL factor. No-op on markets that never deleveraged.
-  const resolvedEntry = resolveEntryPrice(
-    effectiveSize,
-    savedEntryPrice,
-    safePnlForEntry,
-    oraclePriceE6,
-  );
-  const effectiveEntryPrice = resolvedEntry.entry;
-  const entryPriceSource = resolvedEntry.source;
+  // Effective size, entry, mark PnL and ROE all come from the ONE shared helper
+  // (lib/position-pnl.ts) that ChartPnlBadge, PositionsDock, the portfolio card
+  // and the share card also use, so the surfaces cannot disagree (#3077). It
+  // owns the three rules that used to be re-derived here:
+  //  - exposure is ADL-EFFECTIVE; when the ADL factors are unknown it does NOT
+  //    fall back to raw basis (that over-reported a deleveraged leg by the ADL
+  //    factor - bar +104 vs chart +17) - `pnlKnown` is false and display shows "--";
+  //  - entry priority server > cache > derived > unknown, the derived entry
+  //    back-solved over EFFECTIVE size and flagged as an estimate;
+  //  - PnL is valued at the mark, in coin-margined native units converted once
+  //    to collateral; ROE divides by the leg's own initial margin.
+  // `unknown` entry => the placeholder 0 below is NOT a flat reading; display
+  // sites gate on `entryPriceSource` / `pnlKnown`.
+  const knownEntries = lookupKnownEntries(slabAddrStr, 0, walletStr);
+  const pnlResult = computePositionPnl({
+    basisQ: positionSize,
+    aBasis,
+    adlFactors,
+    markE6: oraclePriceE6,
+    serverEntryE6: knownEntries.serverEntryE6,
+    cachedEntryE6: knownEntries.cachedEntryE6,
+    onChainPnl: account.pnl,
+    initialMarginBps,
+    capital: account.capital,
+  });
+  // NOTE: when the ADL state is unknown `effectiveSize` falls back to raw basis
+  // for SIZE display only (`adlKnown` is false so callers can say so); PnL never
+  // reads it - see `pnlKnown`.
+  const effectiveSize = pnlResult.effectiveSize ?? positionSize;
+  const effectiveEntryPrice = pnlResult.entry;
+  const entryPriceSource = pnlResult.entrySource;
   const liquidationPriceE6 = computeLiqPrice(
     effectiveEntryPrice,
     account.capital,
     account.positionSize,
     maintenanceMarginBps,
   );
-  // computeMarkPnl (and the stale account.pnl fallback below, which is in the
-  // SAME native scale — see computeMarkPnlCollateral's doc comment) returns
-  // PnL in coin-margined native units, not collateral/USD. Convert once via
-  // computeMarkPnlCollateral before it's displayed or fed to computePnlPercent
-  // — mirrors PositionsDock's pnlNative/pnlTokens split.
-  // entryPriceSource === "unknown" => effectiveEntryPrice is just the mark, so
-  // this evaluates to 0. That 0 is a PLACEHOLDER, not a "flat" reading — it is
-  // only safe to render because `entryPriceSource` travels with it and display
-  // sites show "--" instead. Never treat it as a real zero.
-  // PnL moves with EFFECTIVE exposure, not raw basis: a deleveraged leg
-  // realizes basis*(k_now-k_snap)/(a_basis*POS_SCALE) and k accrues scaled by
-  // the side's live `a` (v16.rs:9547-9576, :10497-10502), so it gains/loses at
-  // `basis * a_side / a_basis` per unit of price. Feeding raw basis here
-  // overstated a deleveraged position's PnL by the same factor as its size.
-  const pnlNative = oraclePriceE6 > 0n && effectiveEntryPrice > 0n
-    ? computeMarkPnl(effectiveSize, effectiveEntryPrice, oraclePriceE6)
-    : (isSentinelValue(account.pnl) ? 0n : account.pnl);
-  const unrealizedPnl = oraclePriceE6 > 0n ? computeMarkPnlCollateral(pnlNative, oraclePriceE6) : 0n;
-  // ROE: divide by this position's own locked initial margin, matching the
-  // trade terminal (PositionsDock/PositionPanel/ChartPnlBadge/AccountRiskSidebar),
-  // not total account capital — capital can include collateral not backing
-  // this specific position. Falls back to capital when initial margin can't
-  // be computed (e.g. flat position) to preserve prior behavior.
-  const positionInitialMargin = computePositionInitialMargin(account.positionSize, effectiveEntryPrice, initialMarginBps);
-  // computePnlPercent throws when pnl*10000/denominator overflows MAX_SAFE_INTEGER
-  // (dust margin + large PnL). Guard so the throw can't propagate to the per-account
-  // catch and silently drop this position from the portfolio (mirrors PositionsDock).
-  let pnlPercent = 0;
-  try {
-    pnlPercent = positionInitialMargin > 0n
-      ? computePnlPercent(unrealizedPnl, positionInitialMargin)
-      : computePnlPercent(unrealizedPnl, account.capital);
-  } catch {
-    pnlPercent = 0;
-  }
+  const unrealizedPnl = pnlResult.unrealizedPnl ?? 0n;
+  const pnlPercent = pnlResult.roe ?? 0;
 
   const liquidationDistancePct = computeLiquidationDistancePct(
     account.positionSize,
@@ -608,6 +582,11 @@ export function buildV17Position(
     entryPriceSource,
     realizedLoss: portfolio.residualCrystallizedLossAtomsTotal,
     effectiveSize,
+    adlKnown: pnlResult.adlKnown,
+    adlFactors,
+    adlApplicable: true,
+    pnlKnown: pnlResult.pnlKnown,
+    isEstimate: pnlResult.isEstimate,
     adlRemainingBps: adlRemaining,
     deleveraged,
     pnlPercent,
@@ -824,14 +803,22 @@ export async function fetchPortfolioSnapshot(
             // field, or the mark cached at open time), so either counts as a
             // cache hit. When BOTH miss, resolveEntryPrice refuses to invent a
             // number from a crystallized-to-zero `pnl` — see its doc comment.
-            const knownEntryPrice =
+            const cachedV12Entry =
               account.entryPrice > 0n ? account.entryPrice : getEntryPrice(slabAddrStr, idx, account.owner.toBase58());
-            const resolvedEntry = resolveEntryPrice(
-              account.positionSize,
-              knownEntryPrice,
-              isSentinelValue(account.pnl) ? 0n : account.pnl,
-              oraclePriceE6,
-            );
+            // Same shared helper as the v17 path; the v12.x engine has no ADL
+            // factor, so raw basis IS the exposure (adlApplicable: false).
+            const v12Pnl = computePositionPnl({
+              basisQ: account.positionSize,
+              aBasis: 0n,
+              adlFactors: null,
+              adlApplicable: false,
+              markE6: oraclePriceE6,
+              cachedEntryE6: cachedV12Entry,
+              onChainPnl: account.pnl,
+              initialMarginBps,
+              capital: account.capital,
+            });
+            const resolvedEntry = { entry: v12Pnl.entry, source: v12Pnl.entrySource };
             const effectiveEntryPrice = resolvedEntry.entry;
 
             // Compute liquidation price
@@ -842,39 +829,10 @@ export async function fetchPortfolioSnapshot(
               maintenanceMarginBps,
             );
 
-            // Compute unrealized PnL using oracle price.
-            // GH#1331: account.pnl can be u64::MAX sentinel for uninitialized/flat
-            // positions. Guard it with isSentinelValue to prevent billion-dollar
-            // phantom PnL on the dashboard when oracle price is unavailable.
-            // computeMarkPnl (and the account.pnl fallback below, in the
-            // same native scale) returns coin-margined native units, not
-            // collateral/USD — convert via computeMarkPnlCollateral
-            // before display/computePnlPercent (mirrors PositionsDock).
-            const pnlNative = oraclePriceE6 > 0n && effectiveEntryPrice > 0n
-              ? computeMarkPnl(account.positionSize, effectiveEntryPrice, oraclePriceE6)
-              : (isSentinelValue(account.pnl) ? 0n : account.pnl);
-            const unrealizedPnl = oraclePriceE6 > 0n
-              ? computeMarkPnlCollateral(pnlNative, oraclePriceE6)
-              : 0n;
-
-            // PnL percentage (ROE): divide by this position's own locked initial
-            // margin, matching the trade terminal (PositionsDock/PositionPanel/
-            // ChartPnlBadge/AccountRiskSidebar), not total account capital —
-            // capital can include collateral not backing this specific position.
-            // Falls back to capital when initial margin can't be computed (e.g.
-            // flat position) to preserve prior behavior.
-            const positionInitialMargin = computePositionInitialMargin(account.positionSize, effectiveEntryPrice, initialMarginBps);
-            // Guard: computePnlPercent throws on overflow (dust margin + large PnL);
-            // without this the throw drops the whole market's accounts (see the
-            // per-market catch below), mirroring PositionsDock's guard.
-            let pnlPercent = 0;
-            try {
-              pnlPercent = positionInitialMargin > 0n
-                ? computePnlPercent(unrealizedPnl, positionInitialMargin)
-                : computePnlPercent(unrealizedPnl, account.capital);
-            } catch {
-              pnlPercent = 0;
-            }
+            // GH#1331: the helper sentinel-guards account.pnl (u64::MAX on
+            // uninitialized/flat accounts) before it can feed the back-solve.
+            const unrealizedPnl = v12Pnl.unrealizedPnl ?? 0n;
+            const pnlPercent = v12Pnl.roe ?? 0;
 
             // Liquidation distance percentage
             const liquidationDistancePct = computeLiquidationDistancePct(
@@ -931,6 +889,11 @@ export async function fetchPortfolioSnapshot(
               // no frozen `a_basis` on a leg — `positionSize` IS the exposure,
               // so there is nothing to rescale and nothing to disclose.
               effectiveSize: account.positionSize,
+              adlKnown: true,
+              adlFactors: null,
+              adlApplicable: false,
+              pnlKnown: v12Pnl.pnlKnown,
+              isEstimate: v12Pnl.isEstimate,
               adlRemainingBps: 10000,
               deleveraged: false,
               pnlPercent,

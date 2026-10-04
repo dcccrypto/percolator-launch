@@ -84,7 +84,7 @@ function build(name: string): PortfolioPosition {
     config: {},
     configV17: { collateralMint: new PublicKey("DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC") },
   } as never;
-  return buildV17Position(portfolio, MARK, 500n, market, discovered, false, 1000n, "TEST-PERP", WALLET, null);
+  return buildV17Position(portfolio, MARK, 500n, market, discovered, false, 1000n, "TEST-PERP", WALLET, { aLong: 1_000_000_000_000_000n, aShort: 1_000_000_000_000_000n });
 }
 
 const MARK_TEXT = "$1.000000";

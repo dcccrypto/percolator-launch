@@ -51,7 +51,7 @@ let sentinelPnl = false;
 /** Leg state for the ADL cases: raw basis + the side factor frozen at open. */
 let positionSize = POSITION_SIZE;
 let adlABasis = 0n;
-let adlFactors: { aLong: bigint; aShort: bigint } | null = null;
+let adlFactors: { aLong: bigint; aShort: bigint } | null = { aLong: ADL_ONE, aShort: ADL_ONE };
 let onChainPnl = ON_CHAIN_PNL;
 
 const account = {
@@ -117,7 +117,7 @@ describe("ChartPnlBadge resolves its entry like every other position surface", (
     sentinelPnl = false;
     positionSize = POSITION_SIZE;
     adlABasis = 0n;
-    adlFactors = null;
+    adlFactors = { aLong: ADL_ONE, aShort: ADL_ONE };
     onChainPnl = ON_CHAIN_PNL;
   });
 
@@ -194,6 +194,15 @@ describe("ChartPnlBadge resolves its entry like every other position surface", (
     // that is a vast "pnl"; with it the position reads as unknown and hides.
     asSecondDevice();
     sentinelPnl = true;
+    const { container } = render(<ChartPnlBadge slabAddress={SLAB} />);
+    expect(container.textContent ?? "").toBe("");
+  });
+
+  it("unknown ADL factors hide the badge rather than fall back to raw basis (#3077 cause 3)", () => {
+    // Raw basis is exactly the wrong size on a leg that may have been deleveraged;
+    // the badge must say nothing rather than show ADL-factor x the real PnL.
+    asSecondDevice();
+    adlFactors = null;
     const { container } = render(<ChartPnlBadge slabAddress={SLAB} />);
     expect(container.textContent ?? "").toBe("");
   });

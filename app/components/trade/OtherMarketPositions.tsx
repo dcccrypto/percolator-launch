@@ -38,15 +38,9 @@ import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { SlabProvider } from "@/components/providers/SlabProvider";
 import { ClosePositionModal } from "./ClosePositionModal";
-import { getEntryPrice } from "@/lib/entry-price";
-import {
-  computeMarkPnl,
-  computeMarkPnlCollateral,
-  computePnlPercent,
-  computePositionInitialMargin,
-  UNKNOWN_ENTRY_TOOLTIP,
-} from "@/lib/trading";
-import { displayEntryE6, isEntryKnown } from "@/lib/entry-price-display";
+import { UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
+import { isEntryKnown, DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL } from "@/lib/entry-price-display";
+import { portfolioPositionPnl } from "@/lib/position-pnl";
 import {
   formatTokenAmount,
   formatUsdPriceE6,
@@ -92,11 +86,15 @@ export const CloseFlow: FC<{
   const oracleStale =
     !mockExempt &&
     (oracleLevel === "unavailable" || isOracleStaleBlocking(oracleLevel, oracleMode, oracleReady));
-  const posSize = pos.account?.positionSize ?? 0n;
+  // Same shared PnL computation as every other surface: the modal previews size
+  // and PnL for the close, so it gets the ADL-EFFECTIVE size (raw basis over-
+  // reports a deleveraged leg) and an entry only when PnL is honestly known.
+  const closePnl = portfolioPositionPnl(pos, markE6);
+  const posSize = closePnl.effectiveSize ?? pos.account?.positionSize ?? 0n;
   return (
     <ClosePositionModal
       positionSize={posSize}
-      entryPrice={displayEntryE6(pos.effectiveEntryPrice, pos.entryPriceSource)}
+      entryPrice={closePnl.pnlKnown ? closePnl.entry : 0n}
       currentPrice={markE6}
       capital={pos.account?.capital ?? 0n}
       symbol={symbol}
@@ -139,42 +137,21 @@ const OtherMarketRow: FC<{
   // markets that never deleveraged. See lib/v17-adl.ts.
   const posSize = pos.effectiveSize;
   const isLong = posSize > 0n;
-  // Entry: the hook's effectiveEntryPrice already resolves on-chain price →
-  // client cache → PnL-derived estimate; re-check the cache here only as a
-  // defensive fallback for a zero value.
-  const entryE6 = pos.effectiveEntryPrice > 0n
-    ? pos.effectiveEntryPrice
-    : getEntryPrice(pos.slabAddress, pos.idx, account?.owner?.toBase58?.() ?? "");
-  // When the hook could not recover an entry price it hands back the MARK, so
-  // `entryE6 > 0n` is true and the PnL below computes to a confident 0 for a
-  // position that may be deep underwater (a realized loss is settled out of
-  // capital and `pnl` reset to 0 on-chain — see resolveEntryPrice). Gate the
-  // display on the hook's own verdict instead of on `entryE6 > 0n`.
-  const pnlIsKnown = isEntryKnown(pos.effectiveEntryPrice, pos.entryPriceSource);
+  // ONE shared computation for every PnL surface (lib/position-pnl.ts): ADL-
+  // effective size (never raw basis when the factors are unknown), entry
+  // server > cache > derived, valued at the live mark. With no entry, or unknown
+  // ADL factors, PnL is "--" (a realized loss is settled out of capital and `pnl`
+  // reset to 0 on-chain, so a mark-valued placeholder would read a false $0).
+  const live = portfolioPositionPnl(pos, livePriceE6);
+  const entryE6 = live.entry;
+  const pnlIsKnown = live.pnlKnown;
+  const entryKnown = isEntryKnown(live.entry, live.entrySource);
   const markE6 = livePriceE6 != null && livePriceE6 > 0n ? livePriceE6 : pos.oraclePriceE6;
   const hasValidMark = markE6 > 0n;
-
-  // Same collateral-unit PnL chain as PositionRow / usePortfolio.
-  const pnlTokens = (() => {
-    if (!hasValidMark || entryE6 <= 0n) return pos.unrealizedPnl;
-    try {
-      return computeMarkPnlCollateral(computeMarkPnl(posSize, entryE6, markE6), markE6);
-    } catch {
-      return pos.unrealizedPnl;
-    }
-  })();
+  const pnlTokens = live.unrealizedPnl ?? 0n;
   const pnlUsdRaw = Number(pnlTokens) / 10 ** decimals;
   const pnlUsd = Number.isFinite(pnlUsdRaw) ? pnlUsdRaw : null;
-  const roe = (() => {
-    try {
-      const im = computePositionInitialMargin(posSize, entryE6, pos.initialMarginBps);
-      if (im > 0n) return computePnlPercent(pnlTokens, im);
-      const capital = account?.capital ?? 0n;
-      return capital > 0n ? computePnlPercent(pnlTokens, capital) : pos.pnlPercent;
-    } catch {
-      return pos.pnlPercent;
-    }
-  })();
+  const roe = live.roe ?? 0;
 
   const symbol = pos.symbol ?? `${pos.slabAddress.slice(0, 6)}…`;
   const displaySymbol = symbol.replace(/-PERP$/i, "");
@@ -216,8 +193,8 @@ const OtherMarketRow: FC<{
           <span className="text-[var(--text)]">{formatTokenAmount(abs(posSize), decimals)}</span>
           <span className="ml-1 text-[var(--text-secondary)]">{displaySymbol}</span>
         </td>
-        <td className={`whitespace-nowrap px-3 py-2.5 text-right ${pnlIsKnown ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }} title={pnlIsKnown ? undefined : UNKNOWN_ENTRY_TOOLTIP}>
-          {pnlIsKnown && entryE6 > 0n ? formatUsdPriceE6(entryE6) : "--"}
+        <td className={`whitespace-nowrap px-3 py-2.5 text-right ${entryKnown ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }} title={entryKnown ? undefined : UNKNOWN_ENTRY_TOOLTIP}>
+          {entryKnown ? formatUsdPriceE6(entryE6) : "--"}
         </td>
         <td className={`whitespace-nowrap px-3 py-2.5 text-right ${hasValidMark ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
           {hasValidMark ? formatUsdPriceE6(markE6) : "--"}
@@ -233,7 +210,10 @@ const OtherMarketRow: FC<{
             <span>--</span>
           ) : hasValidMark ? (
             <>
-              <div>{formatPnl(pnlTokens, decimals)} USDC</div>
+              <div>
+                {formatPnl(pnlTokens, decimals)} USDC
+                {live.isEstimate && <span className="ml-1 text-[9px] text-[var(--text-dim)]" title={DERIVED_ENTRY_TOOLTIP}>{ESTIMATE_LABEL}</span>}
+              </div>
               {pnlUsd !== null && (
                 <div className="text-[9px]">
                   {pnlTokens > 0n ? "+" : pnlTokens < 0n ? "-" : ""}${Math.abs(pnlUsd).toFixed(2)}

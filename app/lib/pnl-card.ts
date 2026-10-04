@@ -8,12 +8,19 @@
  * the cent. sim-USDC collateral is $1-pegged (PLAYGROUND.md), so a collateral-
  * scale atom count divided by 10^decimals IS the USD figure.
  */
-import {
-  computeMarkPnl,
-  computeMarkPnlCollateral,
-  computePnlPercent,
-  computePositionInitialMargin,
-} from "@/lib/trading";
+import { computePnlPercent } from "@percolatorct/sdk";
+import { computePositionInitialMargin } from "@/lib/trading";
+import { valueAtMark } from "@/lib/position-pnl";
+
+function valueRoe(pnlCollateral: bigint, basisQ: bigint, entryE6: bigint, initialMarginBps: bigint): number {
+  try {
+    const margin = computePositionInitialMargin(basisQ, entryE6, initialMarginBps);
+    const roe = margin > 0n ? computePnlPercent(pnlCollateral, margin) : 0;
+    return Number.isFinite(roe) ? roe : 0;
+  } catch {
+    return 0;
+  }
+}
 
 /** Everything the card needs that is STATIC for the life of the modal. */
 export interface PnlCardData {
@@ -109,8 +116,17 @@ export function computePnlCardStats(data: PnlCardData, markRawE6: bigint): PnlCa
   let isCapped = false;
   let tone: PnlTone = "flat";
   if (hasMark && data.entryE6 > 0n) {
-    const pnlNative = computeMarkPnl(data.effectiveSizeQ, data.entryE6, markE6);
-    const paperCollateral = computeMarkPnlCollateral(pnlNative, markE6);
+    // The shared mark-to-market core (lib/position-pnl.ts), so this card cannot
+    // drift from the bar / badge / dock / portfolio card.
+    const valued = valueAtMark({
+      effectiveSize: data.effectiveSizeQ,
+      entryE6: data.entryE6,
+      markE6,
+      basisQ: data.nominalSizeQ,
+      initialMarginBps: data.initialMarginBps,
+      capital: 0n,
+    });
+    const paperCollateral = valued.unrealizedPnl;
     isCapped = isPnlPoolCapped(paperCollateral, data.payableCapacityAtoms);
     const pnlCollateral = isCapped ? (data.payableCapacityAtoms as bigint) : paperCollateral;
     const toUsd = (atoms: bigint) => {
@@ -120,13 +136,10 @@ export function computePnlCardStats(data: PnlCardData, markRawE6: bigint): PnlCa
     pnlUsd = toUsd(pnlCollateral);
     paperPnlUsd = toUsd(paperCollateral);
     tone = pnlCollateral > 0n ? "profit" : pnlCollateral < 0n ? "loss" : "flat";
-    const margin = computePositionInitialMargin(data.nominalSizeQ, data.entryE6, data.initialMarginBps);
-    try {
-      roePct = margin > 0n ? computePnlPercent(pnlCollateral, margin) : 0;
-    } catch {
-      roePct = 0;
-    }
-    if (!Number.isFinite(roePct)) roePct = 0;
+    // ROE is on the SHOWN pnl (the payable cap can shrink it), same margin base.
+    roePct = isCapped
+      ? valueRoe(pnlCollateral, data.nominalSizeQ, data.entryE6, data.initialMarginBps)
+      : valued.roe;
   }
 
   const spentRaw =

@@ -77,12 +77,29 @@ describe("parseAssetAdlFactors", () => {
     expect(parseAssetAdlFactors(new Uint8Array(SLOTS_BASE + 10), 0)).toBeNull();
   });
 
-  it("refuses out-of-range factors rather than scaling by garbage", () => {
-    // Below MIN_A_SIDE (= ADL_ONE/10) means we are not looking at an
-    // AssetStateV16Account — returning null keeps the caller on raw basis.
-    expect(parseAssetAdlFactors(makeSlab(ADL_ONE, 1n), 0)).toBeNull();
+  it("reads a side deleveraged BELOW MIN_A_SIDE (DrainOnly) instead of reporting unknown (#3077 cause 3)", () => {
+    // v16.rs:17867-17878 keeps `a_side = opp_a_after` and only flips the side to
+    // DrainOnly when it falls under MIN_A_SIDE (= ADL_ONE/10). That is the most
+    // deleveraged state there is, and the old [MIN_A_SIDE, ADL_ONE] guard turned
+    // it into `null`, so the positions bar fell back to RAW basis on exactly the
+    // markets where it overstates PnL most.
+    const drained = ADL_ONE / 20n; // 5% of the position survives
+    const f = parseAssetAdlFactors(makeSlab(ADL_ONE, drained), 0);
+    expect(f).not.toBeNull();
+    expect(f!.aShort).toBe(drained);
+    // The long side is intact: one drained side must not null BOTH sides.
+    expect(f!.aLong).toBe(ADL_ONE);
+    // Smallest representable factor is still a real factor.
+    expect(parseAssetAdlFactors(makeSlab(ADL_ONE, 1n), 0)!.aShort).toBe(1n);
+  });
+
+  it("refuses garbage and the retired 0/0 shape (unknown, never raw basis)", () => {
+    // Above ADL_ONE can only mean this is not an AssetStateV16Account.
     expect(parseAssetAdlFactors(makeSlab(ADL_ONE * 2n, ADL_ONE), 0)).toBeNull();
+    expect(parseAssetAdlFactors(makeSlab(ADL_ONE, ADL_ONE + 1n), 0)).toBeNull();
+    // 0/0 is the retired/reset shape (v16.rs:7746): there is no factor to scale by.
     expect(parseAssetAdlFactors(makeSlab(0n, 0n), 0)).toBeNull();
+    expect(parseAssetAdlFactors(makeSlab(ADL_ONE, 0n), 0)).toBeNull();
   });
 
   it("does not confuse the a-factors with oi_eff_long_q 224 bytes later", () => {

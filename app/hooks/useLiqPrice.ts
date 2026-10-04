@@ -3,9 +3,8 @@
 import { useMemo } from "react";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useSlabState } from "@/components/providers/SlabProvider";
-import { computeLiqPrice, resolveEntryPrice } from "@/lib/trading";
-import { getEntryPrice } from "@/lib/entry-price";
-import { isSentinelValue } from "@/lib/health";
+import { computeLiqPrice } from "@/lib/trading";
+import { terminalPositionPnl } from "@/lib/position-pnl";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 
 /**
@@ -15,7 +14,7 @@ import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
  */
 export function useLiqPrice(): bigint | null {
   const realUserAccount = useUserAccount();
-  const { config, params, slabAddress } = useSlabState();
+  const { config, params, slabAddress, adlFactors, wrapperConfigV17 } = useSlabState();
 
   return useMemo(() => {
     if (!realUserAccount) return null;
@@ -23,23 +22,12 @@ export function useLiqPrice(): bigint | null {
     const { account } = realUserAccount;
     if (account.positionSize === 0n) return null;
 
-    const rawEntryPrice = account.entryPrice ?? 0n;
-
-    const cachedEntryPrice =
-      rawEntryPrice > 0n
-        ? rawEntryPrice
-        : getEntryPrice(
-            slabAddress,
-            realUserAccount.idx,
-            account.owner.toBase58(),
-          );
-
     // v17/v18 does not store entry_price on-chain. A browser-local cache miss
     // therefore must not automatically erase liquidation-risk information.
-    //
-    // Match the resolved-entry contract used by the other position surfaces:
-    // display may treat source==="unknown" as an unknown Entry/PnL, while risk
-    // math continues with resolvedEntry.entry.
+    // The entry comes from the SAME shared resolution as every PnL surface
+    // (lib/position-pnl.ts: server > cache > back-solve over EFFECTIVE size), so
+    // the chart's liq line, the dock and the badge cannot disagree. Risk math
+    // keeps using `.entry` (the mark when unknown), like the other surfaces.
     const oraclePriceE6 = config
       ? sanitizePriceE6(
           applyInvert(
@@ -49,17 +37,15 @@ export function useLiqPrice(): bigint | null {
         )
       : 0n;
 
-    const safePnl =
-      account.pnl != null && !isSentinelValue(account.pnl)
-        ? account.pnl
-        : 0n;
-
-    const resolvedEntry = resolveEntryPrice(
-      account.positionSize,
-      cachedEntryPrice,
-      safePnl,
-      oraclePriceE6,
-    );
+    const resolvedEntry = terminalPositionPnl({
+      account,
+      slabAddress,
+      accountIdx: realUserAccount.idx,
+      adlFactors,
+      adlApplicable: wrapperConfigV17 !== null,
+      markE6: oraclePriceE6,
+      initialMarginBps: params?.initialMarginBps ?? 1000n,
+    });
 
     if (resolvedEntry.entry <= 0n) return null;
 
@@ -75,5 +61,5 @@ export function useLiqPrice(): bigint | null {
 
     // Long-side clamp: liq at/below $0 means there is no real chart line.
     return liq > 0n ? liq : null;
-  }, [realUserAccount, config, params, slabAddress]);
+  }, [realUserAccount, config, params, slabAddress, adlFactors, wrapperConfigV17]);
 }

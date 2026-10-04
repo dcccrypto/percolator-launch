@@ -9,8 +9,7 @@ import {
   subscribeSlab,
   getSnapshot,
 } from "@/lib/priceStore/priceStore";
-import { computeLivePositionPnl } from "@/lib/trading";
-import { displayEntryE6 } from "@/lib/entry-price-display";
+import { portfolioPositionPnl } from "@/lib/position-pnl";
 
 export interface LivePositionMetric {
   position: PortfolioPosition;
@@ -26,6 +25,8 @@ export interface LivePositionMetric {
    * current PnL in that case (#2660/#2671).
    */
   pnlKnown: boolean;
+  /** PnL rests on a back-solved entry: label it "est.". */
+  isEstimate: boolean;
 }
 
 export interface LivePortfolioMetrics {
@@ -121,30 +122,19 @@ export function useLivePortfolioMetrics(
           ? liveMark
           : pos.oraclePriceE6;
 
-      // This is the ONE display-entry gate used elsewhere in the app.
-      // "unknown" resolves numerically to the mark for risk math, but must
-      // become 0 here so current PnL cannot be fabricated from that placeholder.
-      const entryE6 = displayEntryE6(
-        pos.effectiveEntryPrice,
-        pos.entryPriceSource,
-      );
-
-      const live = computeLivePositionPnl(
-        pos.effectiveSize,
-        entryE6,
-        markE6,
-        pos.initialMarginBps,
-        pos.account?.capital ?? 0n,
-        pos.unrealizedPnl,
-        pos.pnlPercent,
-      );
+      // The ONE shared PnL computation (lib/position-pnl.ts): ADL-effective
+      // size, entry server > cache > derived, valued at the live mark. An
+      // unknown entry or unknown ADL factors yields pnlKnown false and a 0
+      // placeholder - never a number derived from the mark placeholder or raw size.
+      const live = portfolioPositionPnl(pos, liveMark);
 
       return {
         position: pos,
         markE6,
-        pnl: live.pnl,
-        pnlPercent: live.pnlPercent,
-        pnlKnown: markE6 > 0n && entryE6 > 0n,
+        pnl: live.unrealizedPnl ?? 0n,
+        pnlPercent: live.roe ?? 0,
+        pnlKnown: live.pnlKnown,
+        isEstimate: live.isEstimate,
       };
     });
 

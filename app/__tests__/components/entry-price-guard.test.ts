@@ -117,7 +117,7 @@ describe("every entry-price readout gates on whether the entry resolved", () => 
     //     {pnlIsKnown ? formatUsdPriceE6(entryPriceE6) : ...}
     const usesHelper = /describeEntryPrice\(/.test(src) && /\{\s*\w*[eE]ntryDisplay\.text\s*\}/.test(src);
     const usesExplicitGate =
-      /pnlIsKnown\s*(&&[^?]*)?\?\s*format\w*\(/.test(src) &&
+      /(pnlIsKnown|\w*[eE]ntryKnown)\s*(&&[^?]*)?\?\s*format\w*\(/.test(src) &&
       /([sS]ource\s*!==\s*"unknown"|isEntryKnown\()/.test(src);
     expect(usesHelper || usesExplicitGate).toBe(true);
   });
@@ -125,7 +125,7 @@ describe("every entry-price readout gates on whether the entry resolved", () => 
 
 describe("the helper is an ALLOWLIST (#2671)", () => {
   const ENTRY = 19_400n;
-  it.each<[EntryPriceSource]>([["cache"], ["derived"]])("%s → known", (source) => {
+  it.each<[EntryPriceSource]>([["server"], ["cache"], ["derived"]])("%s → known", (source) => {
     expect(isEntryKnown(ENTRY, source)).toBe(true);
     expect(displayEntryE6(ENTRY, source)).toBe(ENTRY);
   });
@@ -265,7 +265,7 @@ function jsxPropValues(src: string, component: string, prop: string): string[] {
   return out;
 }
 
-const GATED_ENTRY_EXPR = /^(displayEntryE6\(|(pnlIsKnown|\w*[eE]ntryKnown)\s*\?)/;
+const GATED_ENTRY_EXPR = /^(displayEntryE6\(|(pnlIsKnown|\w*[eE]ntryKnown|\w+\.pnlKnown)\s*\?)/;
 
 describe("#2673: the close dialog is handed a gated entry at EVERY call site", () => {
   // ClosePositionModal is the one entry readout attached to an irreversible
@@ -314,12 +314,12 @@ describe("CONTROL: the per-call scanners are not vacuous", () => {
 });
 
 describe("TradingChart's exempt Entry line still goes through the display allowlist (#2990)", () => {
-  it("derives entryPriceNum from displayEntryE6(resolvedEntry.entry, resolvedEntry.source)", () => {
+  it("derives entryPriceNum from displayEntryE6(resolvedEntry.entry, resolvedEntry.entrySource)", () => {
     const src = fs.readFileSync(path.join(APP_ROOT, "components/trade/TradingChart.tsx"), "utf8");
     const block = src.slice(src.indexOf("const entryPriceNum = (() => {"));
     expect(block.length).toBeGreaterThan(0);
     const body = block.slice(0, block.indexOf("})();"));
-    expect(body).toMatch(/displayEntryE6\(\s*resolvedEntry\.entry,\s*resolvedEntry\.source,?\s*\)/);
+    expect(body).toMatch(/displayEntryE6\(\s*resolvedEntry\.entry,\s*resolvedEntry\.entrySource,?\s*\)/);
     // The returned number comes from the allowlisted value, never resolvedEntry.entry directly.
     expect(body).toMatch(/return displayEntry > 0n\s*\?\s*Number\(displayEntry\)/);
   });

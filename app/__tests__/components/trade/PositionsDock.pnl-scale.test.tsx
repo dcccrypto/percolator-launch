@@ -35,7 +35,7 @@ vi.mock("@/components/providers/SlabProvider", () => ({
     accounts: [],
     config: { collateralMint: OWNER, lastEffectivePriceE6: 100_000_000n, invert: 0 },
     params: { maintenanceMarginBps: 500n, initialMarginBps: 1000n },
-    adlFactors: null,
+    adlFactors: { aLong: 1_000_000_000_000_000n, aShort: 1_000_000_000_000_000n },
   }),
 }));
 vi.mock("@/hooks/useTokenMeta", () => ({ useTokenMeta: () => ({ symbol: "USDC", decimals: 6 }) }));

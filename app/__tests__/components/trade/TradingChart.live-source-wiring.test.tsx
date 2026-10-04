@@ -202,6 +202,7 @@ vi.mock('@/components/providers/SlabProvider', async () => {
     params: {
       maintenanceMarginBps: 500n,
     },
+    adlFactors: { aLong: 1_000_000_000_000_000n, aShort: 1_000_000_000_000_000n },
   };
   },
   };

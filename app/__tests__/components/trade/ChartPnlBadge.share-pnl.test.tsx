@@ -38,7 +38,7 @@ vi.mock("@/components/providers/SlabProvider", () => ({
   useSlabState: () => ({
     config: { collateralMint: OWNER },
     params: { initialMarginBps: 1000n },
-    adlFactors: null,
+    adlFactors: { aLong: 1_000_000_000_000_000n, aShort: 1_000_000_000_000_000n },
   }),
 }));
 vi.mock("@/hooks/useTokenMeta", () => ({ useTokenMeta: () => ({ symbol: "USDC", decimals: 6 }) }));

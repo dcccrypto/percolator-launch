@@ -73,8 +73,26 @@ const CAPITAL = 50_000_000n;
 const INITIAL_MARGIN_BPS = 1_000n;
 
 function defaultPosition() {
+  // A real open leg (1 token long from $100 at a $106.69 mark = +$6.69), with the
+  // ADL state known. The shared PnL helper derives the figure from these inputs;
+  // a bare `{ unrealizedPnl }` stub no longer stands in for a position.
   return {
+    slabAddress: "11111111111111111111111111111111",
+    symbol: "SOLCAT-PERP",
+    account: { positionSize: 1_000_000n, capital: CAPITAL, entryPrice: 0n, adlABasis: 0n, pnl: 0n },
+    effectiveSize: 1_000_000n,
+    adlKnown: true,
+    adlFactors: { aLong: 1_000_000_000_000_000n, aShort: 1_000_000_000_000_000n },
+    adlApplicable: true,
+    pnlKnown: true,
+    isEstimate: false,
+    effectiveEntryPrice: 100_000_000n,
+    entryPriceSource: "cache",
+    oraclePriceE6: 106_690_000n,
     unrealizedPnl: 6_690_000n,
+    pnlPercent: 0,
+    initialMarginBps: INITIAL_MARGIN_BPS,
+    maintenanceMarginBps: 500n,
     market: {
       configV17: {
         tradeFeeBps: 30n,
@@ -108,7 +126,7 @@ function livePosition() {
       entryPrice: 0n,
     },
 
-    effectiveSize: SIZE,
+    effectiveSize: SIZE, adlKnown: true, adlFactors: { aLong: 1_000_000_000_000_000n, aShort: 1_000_000_000_000_000n }, adlApplicable: true, pnlKnown: true, isEstimate: false,
     effectiveEntryPrice: ENTRY_E6,
     entryPriceSource: "cache",
 

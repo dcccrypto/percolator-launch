@@ -17,14 +17,12 @@ import { AccountKind } from "@percolatorct/sdk";
 import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import {
-  computeMarkPnl,
-  computeMarkPnlCollateral,
   computeLiqPrice,
-  computePnlPercent,
-  computePositionInitialMargin,
-  resolveEntryPrice,
   UNKNOWN_ENTRY_TOOLTIP,
 } from "@/lib/trading";
+import { terminalPositionPnl } from "@/lib/position-pnl";
+import { bigintToFloat } from "@/lib/formatters";
+import { DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL, isEntryKnown } from "@/lib/entry-price-display";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import {
   computePositionLeverage,
@@ -206,7 +204,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const userAccount = realUserAccount ?? (mockMode ? getMockUserAccount(slabAddress) : null);
   const config = useMarketConfig();
   const { engine: engineState, fundingRate } = useEngineState();
-  const { accounts, config: mktConfig, params, adlFactors, refresh: refreshSlab } = useSlabState();
+  const { accounts, config: mktConfig, params, adlFactors, wrapperConfigV17, refresh: refreshSlab } = useSlabState();
   const { priceE6: livePriceE6, priceUsd } = useLivePrice();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
@@ -271,12 +269,8 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // exposure actually carried — size, notional-for-display and funding all
   // follow it. See lib/v17-adl.ts.
   const aSide = adlFactors ? adlSideFactor(adlFactors, isLong ? 0 : 1) : 0n;
-  const effectiveSize = adlFactors
-    ? effectiveExposureQ(account.positionSize, account.adlABasis, aSide)
-    : account.positionSize;
   const wasDeleveraged = !!adlFactors && isDeleveraged(account.adlABasis, aSide);
   const adlRemaining = adlFactors ? adlRemainingBps(account.adlABasis, aSide) : 10000;
-  const absPosition = abs(effectiveSize);
   /** Nominal basis — margin and closing are denominated in it, not in exposure. */
   const absNominal = abs(account.positionSize);
   // Apply invert + sanitize on the on-chain fallback so an inverted market
@@ -286,63 +280,38 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     : null;
   const currentPriceE6 = livePriceE6 ?? onChainPriceE6 ?? 0n;
 
-  // V12_1: entry_price removed from on-chain struct. Fall back to saved entry price.
-  // BUG 10 fix: scope the cache lookup to this account's own wallet (its
-  // on-chain `owner`) — the unscoped key collapsed to one slot per market
-  // shared by every wallet that traded it in this browser (v17 accountIdx is
-  // always 0), so switching wallets showed the previous wallet's entry price.
-  const rawEntryPrice = account.entryPrice;
-  const savedEntryPrice = rawEntryPrice > 0n ? 0n : getEntryPrice(slabAddress, userAccount.idx, account.owner.toBase58());
-  const resolvedEntryPrice = rawEntryPrice > 0n ? rawEntryPrice : (savedEntryPrice > 0n ? savedEntryPrice : 0n);
-  // 2026-07-22: substituting the mark when no entry is known implies a flat
-  // position, and on v17 that is exactly the wrong guess — a realized loss is
-  // crystallized out of `capital` and `pnl` is reset to 0
-  // (percolator/src/v16.rs:9382-9437), so a losing account also reads `pnl == 0`.
-  // Keep the mark as the numeric fallback for margin math, but track whether
-  // PnL can be honestly DISPLAYED. See resolveEntryPrice.
-  const resolvedEntry = resolveEntryPrice(
-    account.positionSize,
-    resolvedEntryPrice,
-    isSentinelValue(account.pnl) ? 0n : account.pnl,
-    currentPriceE6,
-  );
-  const entryPriceE6 = resolvedEntry.entry;
-  const pnlIsKnown = resolvedEntry.source !== "unknown";
-
+  const initialMarginBps = params?.initialMarginBps ?? 1000n;
   // PERC-297: Mark price is considered "available" when it's a positive value.
   const hasValidMark = currentPriceE6 > 0n;
-
-  // PnL: prefer mark-to-market from entry price (on-chain or saved),
-  // fall back to on-chain realized PnL if neither is available.
-  // M-6: with no cached entry, `entryPriceE6` is the entry back-solved from the
-  // on-chain `pnl` (collateral atoms). Use it here instead of the raw `pnl`,
-  // which is already collateral-scale and would be scaled by the mark again
-  // below. An "unknown" source resolves to the mark: a 0 placeholder shown as "--".
-  const pnlTokens = hasValidMark
-    // Effective, not nominal — a deleveraged leg moves at the reduced rate.
-    ? computeMarkPnl(effectiveSize, entryPriceE6, currentPriceE6)
-    : 0n;
-  const pnlUsdRaw =
-    priceUsd !== null && hasValidMark ? (Number(pnlTokens) / 10 ** decimals) * priceUsd : null;
+  // ONE shared computation for every PnL surface (lib/position-pnl.ts, #3077).
+  // 2026-07-22: substituting the mark when no entry is known implies a flat
+  // position, and on v17 that is exactly the wrong guess (a realized loss is
+  // crystallized out of `capital` and `pnl` reset to 0, v16.rs:9382-9437) - so an
+  // unknown entry, or unknown ADL factors, is `pnlKnown: false` and renders "--".
+  // The entry is cache/server/back-solved OVER EFFECTIVE SIZE (it used to be raw
+  // basis here), valued at the mark; exposure is ADL-effective, never a raw fallback.
+  const pnlResult = terminalPositionPnl({
+    account,
+    slabAddress,
+    accountIdx: userAccount.idx,
+    adlFactors,
+    adlApplicable: wrapperConfigV17 !== null,
+    markE6: currentPriceE6,
+    anchorMarkE6: onChainPriceE6 ?? undefined,
+    initialMarginBps,
+  });
+  const effectiveSize = pnlResult.effectiveSize ?? account.positionSize;
+  const absPosition = abs(effectiveSize);
+  const entryPriceE6 = pnlResult.entry;
+  const pnlIsKnown = pnlResult.pnlKnown;
+  /** The entry itself is real (server/cache/estimate), even if PnL is withheld. */
+  const entryKnown = isEntryKnown(pnlResult.entry, pnlResult.entrySource);
+  // Native (coin-margined) PnL is what this panel's "<n> SYMBOL" line shows; the
+  // $ figure is the collateral-scale PnL (the same number the dock/bar/badge show).
+  const pnlTokens = pnlResult.pnlNative ?? 0n;
+  const pnlUsdRaw = pnlResult.unrealizedPnl !== null ? bigintToFloat(pnlResult.unrealizedPnl, decimals) : null;
   const pnlUsd = pnlUsdRaw !== null && Number.isFinite(pnlUsdRaw) ? pnlUsdRaw : null;
-  // BUG 14 fix: ROE must compare a collateral-scale PnL against a
-  // collateral-scale denominator. `pnlTokens` above is native/coin-margined
-  // scale (see computeMarkPnl's doc comment) — convert via
-  // computeMarkPnlCollateral first (same conversion PositionsDock/
-  // ChartPnlBadge apply), and standardize the denominator on this position's
-  // OWN locked initial margin (matches PositionsDock/ChartPnlBadge/
-  // AccountRiskSidebar), not `account.capital` — capital includes collateral
-  // not backing this specific position, which produced a DIFFERENT ROE% here
-  // than the positions dock showed for the identical position.
-  const initialMarginBps = params?.initialMarginBps ?? 1000n;
-  const pnlCollateral = hasValidMark ? computeMarkPnlCollateral(pnlTokens, currentPriceE6) : 0n;
-  const positionInitialMargin = computePositionInitialMargin(account.positionSize, entryPriceE6, initialMarginBps);
-  let roe = 0;
-  try {
-    roe = hasValidMark && positionInitialMargin > 0n ? computePnlPercent(pnlCollateral, positionInitialMargin) : 0;
-  } catch {
-    roe = 0;
-  }
+  const roe = pnlResult.roe ?? 0;
 
   const maintenanceBps = params?.maintenanceMarginBps ?? 500n;
   const liqPriceE6 = computeLiqPrice(
@@ -573,6 +542,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               pnlUsd={pnlUsd}
               roe={roe}
               pnlIsKnown={pnlIsKnown}
+              isEstimate={pnlResult.isEstimate}
               pnlColor={pnlColor}
               pnlBarWidth={pnlBarWidth}
               hasValidMark={hasValidMark}
@@ -630,8 +600,8 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               </div>
               <div className="flex items-center justify-between py-1.5">
                 <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Entry Price</span>
-                <span className={`text-[11px] ${pnlIsKnown ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)" }}>
-                  {pnlIsKnown ? formatUsdPriceE6(entryPriceE6) : (
+                <span className={`text-[11px] ${entryKnown ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)" }}>
+                  {entryKnown ? formatUsdPriceE6(entryPriceE6) : (
                     <span className="inline-flex items-center gap-1">
                       --
                       <InfoIcon tooltip={UNKNOWN_ENTRY_TOOLTIP} />
@@ -759,7 +729,8 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {/* Close Position Modal */}
       {showCloseModal && hasPosition && (
         <ClosePositionModal
-          positionSize={account.positionSize}
+          // EFFECTIVE exposure for the close preview (#3077); the close re-reads the leg.
+          positionSize={effectiveSize}
           entryPrice={pnlIsKnown ? entryPriceE6 : 0n}
           currentPrice={currentPriceE6}
           capital={account.capital}
@@ -807,6 +778,8 @@ interface PnlSectionProps {
   /** False when entry price is unrecoverable, so `pnlTokens` is a placeholder
    *  zero rather than a real flat reading — see resolveEntryPrice. */
   pnlIsKnown: boolean;
+  /** PnL rests on a back-solved entry - label it "est.". */
+  isEstimate?: boolean;
   pnlColor: string;
   pnlBarWidth: number;
   hasValidMark: boolean;
@@ -823,6 +796,7 @@ const PnlSection: FC<PnlSectionProps> = ({
   pnlUsd,
   roe,
   pnlIsKnown,
+  isEstimate,
   pnlColor,
   pnlBarWidth,
   hasValidMark,
@@ -895,6 +869,9 @@ const PnlSection: FC<PnlSectionProps> = ({
               >
                 ({roe >= 0 ? "+" : ""}{roe.toFixed(1)}% ROE)
               </span>
+              {isEstimate && (
+                <span className="text-[9px] text-[var(--text-dim)]" title={DERIVED_ENTRY_TOOLTIP}>{ESTIMATE_LABEL}</span>
+              )}
             </div>
           ) : (
             <span

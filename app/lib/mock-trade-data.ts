@@ -496,6 +496,11 @@ export function getMockPortfolioPositions(): PortfolioPosition[] {
       // Mock positions are never deleveraged, so effective exposure IS the
       // nominal size — mock mode keeps exercising the normal (non-ADL) path.
       effectiveSize: posSize,
+      adlKnown: true,
+      adlFactors: null,
+      adlApplicable: false,
+      pnlKnown: true,
+      isEstimate: false,
       adlRemainingBps: 10000,
       deleveraged: false,
       pnlPercent,

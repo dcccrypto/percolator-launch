@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
-import { computeLivePositionPnl, UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
-import { describeEntryPrice, displayEntryE6 } from "@/lib/entry-price-display";
+import { UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
+import { describeEntryPrice, displayEntryE6, isExactEntrySource, DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL } from "@/lib/entry-price-display";
+import { portfolioPositionPnl } from "@/lib/position-pnl";
 import { adlReductionTooltip } from "@/lib/v17-adl";
 import { SlabProvider } from "@/components/providers/SlabProvider";
 import { useClosePosition } from "@/hooks/useClosePosition";
@@ -143,11 +144,15 @@ function PortfolioCloseFlow({
   // SlabProvider (see the call site below), so useEngineFreshness() has the
   // context it needs.
   const { engineStale } = useEngineFreshness();
-  const posSize = pos.account?.positionSize ?? 0n;
+  // Same shared PnL computation as every other surface: the modal previews size
+  // and PnL for the close, so it gets the ADL-EFFECTIVE size (raw basis over-
+  // reports a deleveraged leg) and an entry only when PnL is honestly known.
+  const closePnl = portfolioPositionPnl(pos, markE6);
+  const posSize = closePnl.effectiveSize ?? pos.account?.positionSize ?? 0n;
   return (
     <ClosePositionModal
       positionSize={posSize}
-      entryPrice={displayEntryE6(pos.effectiveEntryPrice, pos.entryPriceSource)}
+      entryPrice={closePnl.pnlKnown ? closePnl.entry : 0n}
       currentPrice={markE6}
       capital={pos.account?.capital ?? 0n}
       symbol={baseSymbol}
@@ -238,15 +243,9 @@ function PositionCard({
   // for the coin-margined-native → collateral conversion + ROE-vs-initial-
   // margin chain. Shared verbatim with PositionsBar's PositionChip and the
   // portfolio hero's live totals below.
-  const { pnl: pnlTokens, pnlPercent: pnlPct } = computeLivePositionPnl(
-    posSize,
-    posEntry,
-    markE6,
-    pos.initialMarginBps,
-    posCapital,
-    pos.unrealizedPnl,
-    pos.pnlPercent,
-  );
+  const livePnl = portfolioPositionPnl(pos, livePriceE6);
+  const pnlTokens = livePnl.unrealizedPnl ?? 0n;
+  const pnlPct = livePnl.roe ?? 0;
   const liquidationDistancePct = liveLiquidationDistancePct(pos, livePriceE6);
   const pnlPositive = pnlTokens >= 0n;
   // Classified from the LIVE mark this row renders with, not the snapshot the
@@ -348,7 +347,7 @@ function PositionCard({
             </div>
             <div className="flex items-center gap-3">
               <div className="text-right">
-                {entryDisplay.known || !hasPosition ? (
+                {livePnl.pnlKnown || !hasPosition ? (
                   <>
                     <span
                       className={`text-sm font-bold ${pnlPositive ? "text-[var(--long)]" : "text-[var(--short)]"}`}
@@ -361,6 +360,9 @@ function PositionCard({
                     >
                       {formatPnlPct(pnlPct)}
                     </span>
+                    {livePnl.isEstimate && (
+                      <span className="ml-1 text-[9px] font-medium text-[var(--text-dim)]" title={DERIVED_ENTRY_TOOLTIP}>{ESTIMATE_LABEL}</span>
+                    )}
                   </>
                 ) : (
                   <span
@@ -380,7 +382,7 @@ function PositionCard({
                 // that gets shared as a fact.
                 liveSlabCapacity
                 data={
-                  hasPosition && pos.entryPriceSource === "cache" && posEntry > 0n && markE6 > 0n
+                  hasPosition && livePnl.pnlKnown && isExactEntrySource(pos.entryPriceSource) && posEntry > 0n && markE6 > 0n
                     ? {
                         slab: pos.slabAddress,
                         symbol: baseSymbol,
@@ -389,7 +391,7 @@ function PositionCard({
                         mainnetCa: mainnetCa ?? null,
                         decimals,
                         nominalSizeQ: pos.account?.positionSize ?? posSize,
-                        effectiveSizeQ: posSize,
+                        effectiveSizeQ: livePnl.effectiveSize ?? posSize,
                         entryE6: posEntry,
                         initialMarginBps: pos.initialMarginBps,
                         initialMarkE6: markE6,
@@ -686,25 +688,11 @@ export function PortfolioPositionsView() {
         for (const pos of activePositions) {
           const decimals = getDecimals(pos);
           const divisor = 10 ** decimals;
-          const posSize = pos.effectiveSize;
           const liveE6 = livePrices.get(pos.slabAddress);
-          const markE6 = liveE6 != null && liveE6 > 0n ? liveE6 : pos.oraclePriceE6;
-          // Same live-mark chain as PositionCard/PositionChip (see
-          // computeLivePositionPnl's doc comment) — flat/idle positions
-          // (posSize === 0n) fall straight through to `pos.unrealizedPnl`
-          // (always 0 for a flat account), so this sum is safe over
-          // `activePositions` (open + idle), not just `openPositions`.
-          // #2660: an unknown entry contributes its polled placeholder (0),
-          // not live-minus-polled mark drift.
-          const { pnl } = computeLivePositionPnl(
-            posSize,
-            displayEntryE6(pos.effectiveEntryPrice, pos.entryPriceSource),
-            markE6,
-            pos.initialMarginBps,
-            pos.account?.capital ?? 0n,
-            pos.unrealizedPnl,
-            pos.pnlPercent,
-          );
+          // Same shared computation as every other PnL surface; an unknown
+          // PnL (no entry / unknown ADL factors) contributes nothing rather
+          // than a wrong number. Flat positions are 0 by construction.
+          const pnl = portfolioPositionPnl(pos, liveE6).unrealizedPnl ?? 0n;
           unrealizedPnlUsd += Number(pnl) / divisor;
         }
         // Deposited total isn't price-dependent — reuse usdTotals' value
