@@ -180,8 +180,8 @@
   /* Text */
   --text:           #0D0E15;
   --text-secondary: #4A4B62;
-  --text-muted:     #8A8BA8;
-  --text-dim:       #B8B9CC;
+  --text-muted:     #6A6B87; /* 4.6:1 on --bg-surface, 4.9:1 on --bg (dark: 4.6:1) */
+  --text-dim:       #9899B1; /* 2.6:1 on --bg, level with dark mode's 2.55:1 */
 
   /* Accent subtle overlays — lighten on white bg */
   --accent-subtle:  rgba(153, 69, 255, 0.08);
