@@ -7,7 +7,7 @@ import { UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
 import { describeEntryPrice, displayEntryE6, isExactEntrySource, DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL } from "@/lib/entry-price-display";
 import { portfolioPositionPnl, unknownPnlCaveat } from "@/lib/position-pnl";
 import { adlReductionTooltip } from "@/lib/v17-adl";
-import { SlabProvider } from "@/components/providers/SlabProvider";
+import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
 import { useClosePosition } from "@/hooks/useClosePosition";
 import { PnlShareButton } from "@/components/share/PnlShareButton";
 import type { PnlCardData } from "@/lib/pnl-card";
@@ -144,6 +144,8 @@ function PortfolioCloseFlow({
   // SlabProvider (see the call site below), so useEngineFreshness() has the
   // context it needs.
   const { engineStale } = useEngineFreshness();
+  // This market's fee, so the preview matches the trade page's dock (#24).
+  const { params } = useSlabState();
   // Same shared PnL computation as every other surface: the modal previews size
   // and PnL for the close, so it gets the ADL-EFFECTIVE size (raw basis over-
   // reports a deleveraged leg) and an entry only when PnL is honestly known.
@@ -163,6 +165,7 @@ function PortfolioCloseFlow({
       isLong={posSize > 0n}
       loading={loading}
       error={error}
+      tradingFeeBps={params?.tradingFeeBps}
       oracleStale={engineStale}
       onConfirm={async (percent) => {
         try {

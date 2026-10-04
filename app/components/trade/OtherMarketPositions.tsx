@@ -36,7 +36,7 @@ import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { useClosePosition } from "@/hooks/useClosePosition";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
-import { SlabProvider } from "@/components/providers/SlabProvider";
+import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
 import { ClosePositionModal } from "./ClosePositionModal";
 import { UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
 import { isEntryKnown, DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL } from "@/lib/entry-price-display";
@@ -73,6 +73,8 @@ export const CloseFlow: FC<{
   // start the fresh position read + tx prewarms now, and the confirm click
   // reaches the wallet popup with zero blocking round-trips.
   useEffect(() => { prewarmClose(); }, [prewarmClose]);
+  // THIS market's fee (from the on-demand provider), so the preview matches the dock's (#24).
+  const { params } = useSlabState();
   // Same H6/H7 staleness protections as the dock's own PositionRow: a close
   // on an oracle-stale or engine-stale market reverts on-chain — block the
   // modal's Confirm instead of letting the user burn a failed tx. Both hooks
@@ -105,6 +107,7 @@ export const CloseFlow: FC<{
       isLong={posSize > 0n}
       loading={loading}
       error={error}
+      tradingFeeBps={params?.tradingFeeBps}
       oracleStale={oracleStale || (!mockExempt && engineStale)}
       onConfirm={async (percent) => {
         try {
