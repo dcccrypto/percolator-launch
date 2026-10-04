@@ -31,11 +31,12 @@ import { getNetwork } from "@/lib/config";
 import { RenderProfiler } from "@/components/dev/RenderProfiler";
 import TradingPageLoading from "./loading";
 
-// Lazy-load the chart so lightweight-charts (~372KB) streams AFTER the order
-// ticket + positions are interactive, instead of blocking the trade page's
-// initial load. ssr:false — the chart is client-only (createChart needs the DOM).
+// Lazy-load the chart so it streams AFTER the order ticket + positions are
+// interactive, instead of blocking the trade page's initial load. ssr:false —
+// the chart is client-only. ChartSwitch is the single seam that picks the chart
+// (see components/trade/ChartSwitch.tsx and lib/chart-engine.ts).
 const TradingChart = dynamic(
-  () => import("@/components/trade/TradingChart").then((m) => m.TradingChart),
+  () => import("@/components/trade/ChartSwitch").then((m) => m.ChartSwitch),
   {
     ssr: false,
     loading: () => (
