@@ -195,17 +195,17 @@ describe("PnlChart", () => {
   });
 });
 
-describe("StatsBar in-profit card", () => {
+describe("StatsBar has no in-profit card", () => {
   it("no longer renders the 'In Profit' block (removed as noise); PnL + Trade Fee remain", () => {
     render(<StatsBar />);
 
     expect(screen.queryByText("Win Rate")).toBeNull();
     expect(screen.queryByText(/No trades yet/i)).toBeNull();
-    expect(screen.getByText("In Profit")).toBeTruthy();
-    expect(screen.getByText("100%")).toBeTruthy();
-    expect(
-      screen.getByText(/1 up \/ 0 down · open positions/),
-    ).toBeTruthy();
+    expect(screen.queryByText("In Profit")).toBeNull();
+    expect(screen.queryByText("100%")).toBeNull();
+    expect(screen.queryByText(/up \/ \d+ down/)).toBeNull();
+    expect(screen.getByText("Unrealized PnL")).toBeTruthy();
+    expect(screen.getByText("Trade Fee")).toBeTruthy();
   });
 });
 
@@ -259,27 +259,21 @@ describe("DashboardHeader live aggregate freshness", () => {
 });
 
 describe("StatsBar live aggregate freshness", () => {
-  it("CONTROL: classifies the portfolio snapshot before the live mark moves", () => {
+  it("CONTROL: shows the portfolio snapshot PnL before the live mark moves", () => {
     state.positions = [livePosition()];
     state.priceE6 = STALE_MARK_E6;
 
     render(<StatsBar />);
 
     const pnlLabel = screen.getByText("Unrealized PnL");
-    const profitLabel = screen.getByText("In Profit");
-
     const pnlCard = pnlLabel.parentElement;
-    const profitCard = profitLabel.parentElement;
 
     expect(pnlCard).not.toBeNull();
-    expect(profitCard).not.toBeNull();
-
     expect(pnlCard!.textContent).toContain("+$20.00");
-    expect(profitCard!.textContent).toContain("100%");
-    expect(profitCard!.textContent).toContain("1 up / 0 down");
+    expect(screen.queryByText("In Profit")).toBeNull();
   });
 
-  it("recomputes Unrealized PnL / In Profit from the shared live mark", async () => {
+  it("recomputes Unrealized PnL from the shared live mark", async () => {
     state.positions = [livePosition()];
     state.priceE6 = STALE_MARK_E6;
 
@@ -291,21 +285,14 @@ describe("StatsBar live aggregate freshness", () => {
 
     await waitFor(() => {
       const pnlLabel = screen.getByText("Unrealized PnL");
-      const profitLabel = screen.getByText("In Profit");
-
       const pnlCard = pnlLabel.parentElement;
-      const profitCard = profitLabel.parentElement;
 
       expect(pnlCard).not.toBeNull();
-      expect(profitCard).not.toBeNull();
 
       // At entry mark the live PnL is exactly zero.
       expect(pnlCard!.textContent).toContain("--");
       expect(pnlCard!.textContent).not.toContain("+$20.00");
-
-      // Exactly flat is neither a winning nor losing open position.
-      expect(profitCard!.textContent).not.toContain("100%");
-      expect(profitCard!.textContent).not.toContain("1 up / 0 down");
+      expect(screen.queryByText("In Profit")).toBeNull();
     });
   });
 });
