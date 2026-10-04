@@ -76,10 +76,14 @@ describe("LpPositionsPanel: Earn rows", () => {
     userSharePct: 0, cooldownSlots: 0, cooldownElapsed: true, apr: 0, poolMode: 1, kind: "earn",
   };
 
-  it("links to /earn, says Earn deposit, and leaves out the stake-pool details", () => {
+  // #2871 split the panel into Vault/Stake sections: an Earn row now deep-links to its own
+  // market's Earn page (/earn/<slab>) and is labelled "Earn vault" under the "Vault" heading.
+  it("links to /earn/<slab>, says Earn vault, and leaves out the stake-pool details", () => {
     render(<LpPositionsPanel loading={false} positions={[earn]} totalRedeemable={251.5} error={null} />);
-    expect(screen.getByRole("link").getAttribute("href")).toBe("/earn");
-    expect(screen.getByText("Earn deposit")).toBeTruthy();
+    expect(screen.getByRole("link").getAttribute("href")).toBe(`/earn/${SLAB_A}`);
+    expect(screen.getByText("Earn vault")).toBeTruthy();
+    expect(screen.getByText("Vault")).toBeTruthy();
+    expect(screen.queryByText("Stake")).toBeNull();
     expect(screen.queryByText("Pool TVL")).toBeNull();
     expect(screen.queryByText("Withdraw")).toBeNull();
   });
@@ -87,7 +91,9 @@ describe("LpPositionsPanel: Earn rows", () => {
   it("keeps the stake row as it was", () => {
     render(<LpPositionsPanel loading={false} positions={[{ ...earn, kind: "stake", poolMode: 0, poolAddress: SLAB_B }]} totalRedeemable={251.5} error={null} />);
     expect(screen.getByRole("link").getAttribute("href")).toBe("/stake");
-    expect(screen.getByText("Insurance stake")).toBeTruthy();
+    // #2871: the per-row "Insurance stake" line became "Insurance pool" under the "Stake" heading.
+    expect(screen.getByText("Insurance pool")).toBeTruthy();
+    expect(screen.getByText("Stake")).toBeTruthy();
     expect(screen.getByText("Pool TVL")).toBeTruthy();
   });
 });

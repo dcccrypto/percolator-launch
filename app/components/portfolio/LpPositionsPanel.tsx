@@ -60,18 +60,20 @@ function slotsToTime(slots: number): string {
   return `~${Math.round(mins / 60)}h`;
 }
 
-// A position is an insurance STAKE when poolMode === 0; anything else is an Earn
-// (trading-LP) VAULT deposit. Centralised so the split, totals, colour and link
-// target can't drift apart.
-type PositionKind = "earn" | "stake";
+// Which product a position belongs to is where it LIVES, which the hook already
+// records as `kind`: "earn" = an Earn (LP vault) deposit in the wrapper's LP Vault
+// Registry, "stake" = a stake-pool position (managed on /stake). Not poolMode: a
+// stake pool can be poolMode 1 (trading LP) and still lives on /stake.
+// Centralised so the split, totals, colour and link target can't drift apart.
+type PositionKind = LpPosition["kind"];
 function kindOf(pos: LpPosition): PositionKind {
-  return pos.poolMode === 0 ? "stake" : "earn";
+  return pos.kind;
 }
 
 /** Per-kind presentation. Earn (Vault) reads cyan; Stake reads violet accent. */
 const KIND = {
   earn: { title: "Vault", subtitle: "Earn deposits", accent: "var(--cyan)" },
-  stake: { title: "Stake", subtitle: "Insurance pools", accent: "var(--accent)" },
+  stake: { title: "Stake", subtitle: "Stake pools", accent: "var(--accent)" },
 } as const;
 
 // ═══════════════════════════════════════════════════════════════
@@ -119,11 +121,17 @@ function LpPositionCard({ position: pos, kind }: { position: LpPosition; kind: P
   const accent = KIND[kind].accent;
   const cooldownLabel = pos.cooldownElapsed ? null : slotsToTime(pos.cooldownSlots);
   const secondary =
-    pos.apr > 0 ? `${formatPct(pos.apr)} APR` : kind === "earn" ? "Earn vault" : "Insurance pool";
+    pos.apr > 0
+      ? `${formatPct(pos.apr)} APR`
+      : kind === "earn"
+        ? "Earn vault"
+        : pos.poolMode === 0
+          ? "Insurance pool"
+          : "Stake pool";
 
   return (
     <Link
-      href={kind === "earn" && pos.slabAddress ? `/earn/${pos.slabAddress}` : "/stake"}
+      href={kind === "earn" ? (pos.slabAddress ? `/earn/${pos.slabAddress}` : "/earn") : "/stake"}
       className="group block rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] transition-all duration-200 hover:bg-[var(--bg-elevated)] hover:translate-y-[-1px]"
       style={{ borderLeft: `2px solid ${accent}` }}
     >
@@ -156,7 +164,7 @@ function LpPositionCard({ position: pos, kind }: { position: LpPosition; kind: P
         </div>
 
         {/* Details grid (stake pools only; an Earn deposit's details are on /earn) */}
-        {pos.kind === "stake" && (
+        {kind === "stake" && (
         <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-4">
           <div>
             <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Shares</p>
