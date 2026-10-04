@@ -63,8 +63,8 @@ import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
-import { AccountKind, computeLiqPrice } from "@percolatorct/sdk";
-import { computeEstimatedEntryPrice, computeTradingFee, computePositionInitialMargin, orderAgainstPosition, resolveEntryPrice } from "@/lib/trading";
+import { AccountKind } from "@percolatorct/sdk";
+import { computeEstimatedEntryPrice, computeLiqPrice, computeTradingFee, computePositionInitialMargin, orderAgainstPosition, resolveEntryPrice } from "@/lib/trading";
 import { TradeConfirmationModal } from "@/components/trade/TradeConfirmationModal";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { usePrivyLogin, usePrivyAvailable } from "@/hooks/usePrivySafe";
@@ -89,6 +89,7 @@ import { invalidatePortfolio } from "@/lib/portfolio-invalidation";
 import { FEE_LEGS, legPercent, splitFeeAtoms } from "@/lib/fee-breakdown";
 import { useMarketLimits } from "@/hooks/useMarketLimits";
 import { closeLimitNotice, deriveTicketLimits, feeFitSizeQ, sizeQToInput, type TicketLimitsInput } from "@/lib/limits/ticket";
+import { sameOwnerRoomQ } from "@/lib/limits/risk-limits";
 import { balanceMaxQ, deriveTicketState, maxInUnit, oneMaxQ, type TicketRow } from "@/lib/limits/ticket-state";
 import { publishTicketRow } from "@/lib/limits/ticket-status-store";
 import { fmtQ } from "@/lib/limits/format";
@@ -372,8 +373,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // /api/markets/health. Blocks OPENS only — a close reduces the LP's risk and
   // is not gated on this (OrderTicketClosePanel keeps the legacy value).
   const marketHealth = useSingleMarketHealth(slabAddress);
-  // Limits UI (P1/P2/P3, flag-gated; returns state "off" and does no RPC when all flags are off).
-  const marketLimits = useMarketLimits(slabAddress);
+  // SameOwnerTrade is unconditional even when the optional limits phases
+  // are OFF (#2976). The hook resolves canonical LP ownership only for a connected
+  // wallet on a market whose asset_admin is renounced (cached per market); normal
+  // markets, visitors without a wallet and mock mode pay for no extra read.
+  const marketLimits = useMarketLimits(slabAddress, 0, mockMode ? null : publicKey?.toBase58() ?? null);
   /** WP-3 row 9: the size was just reduced to the max; the helper turns --warning for 4 s. */
   const [clampedToQ, setClampedToQ] = useState<bigint | null>(null);
   /** WP-3 result line (§3.3): full / partial / zero fill of the last order, in the status slot. */
@@ -389,7 +393,6 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const marketResolved = marketHealth?.lockReasons.includes("resolved") === true;
 
   const { market: marketInfo } = useMarketInfo(slabAddress);
-  const symbol = marketInfo?.symbol ?? collateralSymbol;
   // Base ticker for the size-unit toggle: the registry symbol carries a
   // "-PERP" suffix ("SOL-PERP"), which overflowed the w-16 toggle button into
   // "SOL-PE…". The size unit is the BASE asset, so strip the suffix; fall
@@ -526,6 +529,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setDirection("long");
     setSizeInput("");
     setMarginInput("");
+    // A typed deposit belongs to this market's first trade, not the next market's.
+    setFundInput("");
     setLeverage(1);
     setLeverageText("1");
     setLastSig(null);
@@ -913,7 +918,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
     if (mockMode) {
       setTradePhase("submitting");
-      setTimeout(() => { setTradePhase("confirming"); setMarginInput(""); setSizeInput(""); }, 800);
+      setTimeout(() => { setTradePhase("confirming"); setMarginInput(""); setSizeInput(""); setFundInput(""); }, 800);
       setTimeout(() => setTradePhase("idle"), 2000);
       return;
     }
@@ -1002,6 +1007,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       setEngineLockError(null);
       setMarginInput("");
       setSizeInput("");
+      setFundInput("");
       // A first fund-and-trade runs with no account in this closure (fundingMode allows it), and the
       // portfolio it just created is a v17 one: idx 0, like every v17 account (lib/userAccountScan.ts).
       const entryIdx = userAccount?.idx ?? (fundingMode ? 0 : null);
@@ -1063,7 +1069,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       // still correct for deposit/withdraw/NFT/market-creation call sites).
       // Custom(9) is NOT always slippage — see the #2643 refinement below.
       // P0b: refine 19/21/49 with live market health (LP depleted / resolved /
-      // bankruptcy / repairable) — lib/market-error.ts. Wallet lock and program
+      // ADL reduce-only / repairable) — lib/market-error.ts. Wallet lock and program
       // Unauthorized(8) are never refined into "locked".
       // UX WP-1: one resolver. A mapped refusal (usually caught by sendTx's pre-sign
       // simulation, so the wallet never opened) renders as ONE StatusLine with its next
@@ -1118,8 +1124,16 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     }
   }
 
+  // #2976: while the post-burn LP owner is first being resolved (bounded), hold only an
+  // order that would OPEN / grow / flip this wallet. A close (within the reducing room) is
+  // never held; an unresolved owner never blocks (on-chain 67 + pre-sign simulation refuse).
+  const sameOwnerOpenPending =
+    marketLimits.sameOwnerPending === true &&
+    positionSize > sameOwnerRoomQ(existingPositionSize, direction);
+
   const submitDisabled =
     accountPending ||
+    sameOwnerOpenPending ||
     tradePhase !== "idle" ||
     loading ||
     ticketState.blocks ||
@@ -1296,7 +1310,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             accountPending={accountPending}
             entryPriceE6={existingEntryKnown ? existingEntryPriceE6 : 0n}
             capital={capital}
-            symbol={symbol}
+            symbol={baseTicker}
             collateralSymbol={collateralSymbol}
             decimals={decimals}
             tradingFeeBps={params?.tradingFeeBps}
@@ -1916,7 +1930,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             ? TICKET_COPY.confirmInWallet
             : tradePhase === "waiting"
               ? TICKET_COPY.waitingLatest
-              : accountPending
+              : sameOwnerOpenPending
+                ? "Loading market…"
+                : accountPending
                 ? "Loading account…"
                 : fundOverWallet && !ticketState.blocks
                 ? "Get test funds"
@@ -1984,7 +2000,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           accountEquity={userAccount ? capital : null}
           riskLeverage={confirmSnapshot.riskLeverage}
           depositAmount={confirmSnapshot.depositAtoms}
-          symbol={symbol}
+          symbol={baseTicker}
           collateralSymbol={collateralSymbol}
           decimals={decimals}
           onConfirm={() => {

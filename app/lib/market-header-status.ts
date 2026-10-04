@@ -1,7 +1,10 @@
 /**
  * UX WP-10 (audit §4.3): the ONE status line under the trade page's market header, shown only
- * when the market is not simply live. Priority: settled > close-only (ADL / recovery) > catching
- * up > one side paused > both sides paused. Everything else the old health banner and limits
+ * when the market is not simply live. Priority: settled > close-only (ADL / recovery) > no room for
+ * new positions (LP depleted / halted) > catching up > one side paused > both sides paused. The
+ * bankruptcy h-lock is deliberately NOT a header state: it gates only LP-backing / insurance
+ * withdrawals and admin oracle reconfiguration, never opens, closes, deposits or user withdrawals.
+ * Everything else the old health banner and limits
  * strip showed (OI vs cap, liquidity, band, skew, payout level) lives in "Market details".
  * Copy = the §5.3 lines. Pure.
  */
@@ -31,10 +34,18 @@ export function marketHeaderStatus(row: MarketHealthRow | null | undefined): Hea
   if (has(row, "resolved")) {
     return { kind: "resolved", variant: "info", title: "Market settled", body: "Close any position and withdraw. There's nothing else to do." };
   }
-  if (has(row, "adl-reduce-only") || has(row, "recovery")) {
-    return { kind: "adl-reduce-only", variant: "paused", title: "Close-only for now", body: "Closing works normally; new positions reopen on their own, usually within minutes." };
+  if (has(row, "recovery") && !has(row, "adl-reduce-only")) {
+    return { kind: "adl-reduce-only", variant: "paused", title: "Close-only for now", body: "Closing works normally; new positions reopen once the market recovers." };
   }
-  if (has(row, "bankruptcy") || has(row, "repairable") || has(row, "loss-stale")) {
+  if (has(row, "adl-reduce-only")) {
+    return { kind: "adl-reduce-only", variant: "paused", title: "Close-only for now", body: "Closing works normally. New positions reopen once the positions on one side of the market have closed, which depends on those traders and can take a while." };
+  }
+  // A-3: "no funds to take the other side" is the real reason new positions can't open, and it
+  // does not clear on its own, so it outranks the transient "catching up" state.
+  if (has(row, "lp-halted") || has(row, "lp-depleted")) {
+    return { kind: "lp-halt", variant: "paused", title: "New positions paused", body: "The market has no room for new positions right now. Closing works normally." };
+  }
+  if (has(row, "repairable") || has(row, "loss-stale")) {
     return {
       kind: "engine-catching-up",
       variant: "wait",
@@ -52,7 +63,7 @@ export function marketHeaderStatus(row: MarketHealthRow | null | undefined): Hea
       ? { kind: "side-paused", variant: "paused", title: `New ${plural} paused`, body: `The market has no room for more ${side.replace(/s$/, "")} exposure. ${cap(other)} and closes work.` }
       : { kind: "side-paused", variant: "paused", title: "One side paused", body: "One side of this market only accepts trades that reduce positions right now. Closes work." };
   }
-  if (drain.length > 1 || has(row, "lp-halted") || has(row, "lp-depleted")) {
+  if (drain.length > 1) {
     return { kind: "lp-halt", variant: "paused", title: "New positions paused", body: "The market has no room for new positions right now. Closing works normally." };
   }
   return null;

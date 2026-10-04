@@ -11,8 +11,12 @@
  *     P3: when the asset has a bound vault LP, that key is the LP (no scan).
  *
  * Rules (v17 client gotchas): a request-id guard drops a stale market's reply
- * (#6); a failed read never blanks a good value; every phase is gated by its
- * flag so a flag-off build does no extra RPC at all.
+ * (#6); a failed read never blanks a good value; optional P1/P2/P3 reads remain
+ * flag-gated. The trade ticket may opt into one additional canonical LP-owner
+ * resolution after asset_admin is renounced because SameOwnerTrade is enforced
+ * on-chain independently of those feature flags (#2976). That resolution runs
+ * only for a CONNECTED wallet on a RENOUNCED market, is cached per market and
+ * shared across mounts, and never blocks anything when the profile is unknown.
  */
 import { useEffect, useMemo, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
@@ -41,8 +45,61 @@ import {
 import { deriveVaultLpStatePda, resolveLpAccounts } from "@/lib/limits/lp-discovery";
 import { LP_VAULT_REGISTRY_SEED, VAULT_LP_STATE_SEED } from "@/lib/limits/constants";
 import { effectiveExecBandBps } from "@/lib/limits/risk-limits";
+import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
+import { resolveMarketLp } from "@/lib/market-lp";
 
 const POLL_MS = 20_000;
+/** Background retries after a failed same-owner LP resolution (never blocking). */
+const SAME_OWNER_RETRY_MS = [2_000, 8_000, 30_000] as const;
+/**
+ * Upper bound on the open-blocking window while the first resolution is in flight.
+ * After it, opens fail OPEN: the wrapper refuses SameOwnerTrade (Custom 67) on-chain
+ * and useTrade's pre-sign simulation catches it, so no funds are at risk.
+ */
+const SAME_OWNER_PENDING_CAP_MS = 8_000;
+/**
+ * A resolved LP owner is cached per (program, market). The provenance owner is NOT
+ * immutable: TransferPortfolioOwnership (tag 72, NFT CPI) rewrites p.owner and
+ * p.provenance_header.owner (wrapper 553d76f0 v16_program.rs:30414-30415), so the
+ * cache expires instead of living for the session.
+ */
+const SAME_OWNER_CACHE_TTL_MS = 5 * 60_000;
+
+const sameOwnerCache = new Map<string, { owner: Uint8Array; at: number }>();
+const sameOwnerInflight = new Map<string, Promise<Uint8Array | null>>();
+
+/** Test hook: forget every cached / in-flight same-owner resolution. */
+export function __resetSameOwnerLpCache(): void {
+  sameOwnerCache.clear();
+  sameOwnerInflight.clear();
+}
+
+function cachedSameOwner(key: string): Uint8Array | null {
+  const hit = sameOwnerCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > SAME_OWNER_CACHE_TTL_MS) {
+    sameOwnerCache.delete(key);
+    return null;
+  }
+  return hit.owner;
+}
+
+/** One shared resolution per market: concurrent mounts await the same promise. */
+function resolveSameOwnerOnce(
+  key: string,
+  run: () => Promise<Uint8Array | null>,
+): Promise<Uint8Array | null> {
+  const existing = sameOwnerInflight.get(key);
+  if (existing) return existing;
+  const p = run()
+    .then((owner) => {
+      if (owner) sameOwnerCache.set(key, { owner, at: Date.now() });
+      return owner;
+    })
+    .finally(() => sameOwnerInflight.delete(key));
+  sameOwnerInflight.set(key, p);
+  return p;
+}
 
 export type LimitsState = "off" | "loading" | "ready" | "error";
 
@@ -68,6 +125,24 @@ export interface MarketLimits {
   /** P3: registry `total_lp_shares_outstanding` (the program's share count); null = unread. */
   registryShares: bigint | null;
   assetAdmin: Uint8Array | null;
+  /**
+   * Canonical matcher-LP provenance owner used by the unconditional
+   * SameOwnerTrade gate when the optional limits phases are OFF.
+   */
+  sameOwnerLpOwner?: Uint8Array | null;
+  /**
+   * True only while the FIRST same-owner resolution for a connected wallet on a
+   * renounced market is in flight (capped at SAME_OWNER_PENDING_CAP_MS). The ticket
+   * holds OPENS (never closes) for that window. False for an unknown profile
+   * (mock mode, legacy slab, initial load), for a non-renounced market and with
+   * no wallet connected.
+   */
+  sameOwnerPending?: boolean;
+  /**
+   * Informational: resolution failed and is retrying in the background. Never
+   * blocks: the on-chain rule and the pre-sign simulation still refuse an open.
+   */
+  sameOwnerUnresolved?: boolean;
 }
 
 const OFF = (flags: LimitsFlags): MarketLimits => ({
@@ -84,12 +159,31 @@ const OFF = (flags: LimitsFlags): MarketLimits => ({
   assetAdmin: null,
 });
 
-export function useMarketLimits(slabAddress: string | null | undefined, assetIndex = 0): MarketLimits {
+/**
+ * @param sameOwnerWallet  trade ticket only: the connected wallet (base58), or null.
+ *   When set and the market's asset_admin is renounced, the canonical matcher LP owner
+ *   is resolved (cached) so the post-burn creator stays close-only (#2976). Omitted /
+ *   null: no extra RPC at all.
+ */
+export function useMarketLimits(
+  slabAddress: string | null | undefined,
+  assetIndex = 0,
+  sameOwnerWallet: string | null = null,
+): MarketLimits {
+  const resolveSameOwnerLp = !!sameOwnerWallet;
   const flags = useMemo(() => limitsFlags(), []);
   const anyOn = flags.p1 || flags.p2 || flags.p3;
   const { connection } = useConnectionCompat();
   const { raw, programId, assetProfile } = useSlabState();
   const programIdStr = programId?.toBase58() ?? null;
+  const assetAdminObj = assetProfile?.assetAdmin ?? null;
+  const assetAdminBytes = useMemo(
+    () => (assetAdminObj ? assetAdminObj.toBytes() : null),
+    [assetAdminObj],
+  );
+  // Unknown profile (null) is NOT "renounced": nothing is resolved and nothing blocks.
+  const assetAdminRenounced =
+    assetAdminBytes !== null && assetAdminBytes.every((x) => x === 0);
 
   const [accts, setAccts] = useState<{
     slab: string;
@@ -99,6 +193,81 @@ export function useMarketLimits(slabAddress: string | null | undefined, assetInd
     registryShares: bigint | null;
     error: boolean;
   } | null>(null);
+
+  // SameOwnerTrade is unconditional on-chain (wrapper 553d76f0 v16_program.rs:31882-31906:
+  // `owners_equal` needs no asset_admin). Burn Admin Key removes asset_admin as an identity
+  // but the creator still owns the matcher LP, so it stays close-only. Resolve that owner
+  // only for a connected wallet on a renounced market, cached per market.
+  const sameOwnerKey =
+    resolveSameOwnerLp && assetAdminRenounced && slabAddress && programIdStr
+      ? `${programIdStr}:${slabAddress}`
+      : null;
+  const [sameOwnerLp, setSameOwnerLp] = useState<{ key: string; owner: Uint8Array } | null>(null);
+  /** key whose first attempt has settled (or hit the pending cap). */
+  const [sameOwnerSettled, setSameOwnerSettled] = useState<string | null>(null);
+  const [sameOwnerFailed, setSameOwnerFailed] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (anyOn || !sameOwnerKey || !slabAddress || !programIdStr) return;
+    const key = sameOwnerKey;
+    const cached = cachedSameOwner(key);
+    if (cached) {
+      setSameOwnerLp({ key, owner: cached });
+      setSameOwnerSettled(key);
+      setSameOwnerFailed(null);
+      return;
+    }
+
+    let slabPk: PublicKey;
+    let programPk: PublicKey;
+    try {
+      slabPk = new PublicKey(slabAddress);
+      programPk = new PublicKey(programIdStr);
+    } catch {
+      setSameOwnerSettled(key);
+      return;
+    }
+
+    let alive = true;
+    let attempt = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    // Fail open after the cap even if the first attempt is still hanging.
+    const capTimer = setTimeout(() => {
+      if (alive) setSameOwnerSettled(key);
+    }, SAME_OWNER_PENDING_CAP_MS);
+
+    const run = async () => {
+      let owner: Uint8Array | null = null;
+      try {
+        owner = await resolveSameOwnerOnce(key, async () => {
+          const pinnedAddress = PLAYGROUND_SLAB_META[slabAddress]?.lp_portfolio_address ?? null;
+          const pinned = pinnedAddress ? new PublicKey(pinnedAddress) : null;
+          const lp = await resolveMarketLp(connection, programPk, slabPk, pinned);
+          return lp ? lp.owner.toBytes() : null;
+        });
+      } catch {
+        owner = null;
+      }
+      if (!alive) return;
+      setSameOwnerSettled(key);
+      if (owner) {
+        setSameOwnerLp({ key, owner });
+        setSameOwnerFailed(null);
+        return;
+      }
+      setSameOwnerFailed(key);
+      if (attempt < SAME_OWNER_RETRY_MS.length) {
+        retryTimer = setTimeout(() => void run(), SAME_OWNER_RETRY_MS[attempt++]);
+      }
+    };
+    void run();
+
+    return () => {
+      alive = false;
+      clearTimeout(capTimer);
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
+    };
+  }, [anyOn, sameOwnerKey, slabAddress, programIdStr, connection]);
 
   // Slab-derived parts: pure, recomputed per slab poll.
   const slabPart = useMemo(() => {
@@ -183,10 +352,23 @@ export function useMarketLimits(slabAddress: string | null | undefined, assetInd
   }, [anyOn, slabAddress, programIdStr, connection, boundVaultLpKey, marketId, assetIndex, flags.p3]);
 
   return useMemo((): MarketLimits => {
-    const admin = assetProfile?.assetAdmin ? assetProfile.assetAdmin.toBytes() : null;
-    // The creator (asset_admin) is close-only on-chain regardless of the limits flags
-    // (SameOwnerTrade), so the OFF view still carries it for the ticket's same-owner gate.
-    if (!anyOn) return { ...OFF(flags), assetAdmin: admin };
+    const admin = assetAdminBytes;
+    // SameOwnerTrade is unconditional even when P1/P2/P3 are disabled.
+    // After admin burn, use the canonical matcher-LP provenance owner.
+    if (!anyOn) {
+      // A cached owner applies on the first render of a remount (no pending flash, no RPC).
+      const owner = sameOwnerKey
+        ? (sameOwnerLp?.key === sameOwnerKey ? sameOwnerLp.owner : null) ?? cachedSameOwner(sameOwnerKey)
+        : null;
+      return {
+        ...OFF(flags),
+        assetAdmin: admin,
+        sameOwnerLpOwner: owner,
+        sameOwnerPending: !!sameOwnerKey && !owner && sameOwnerSettled !== sameOwnerKey,
+        sameOwnerUnresolved: !!sameOwnerKey && !owner && sameOwnerFailed === sameOwnerKey,
+      };
+    }
+
     const accPart = accts && accts.slab === slabAddress ? accts : null;
     let state: LimitsState = "loading";
     if (slabPart && accPart) state = accPart.error && !accPart.lp ? "error" : "ready";
@@ -203,6 +385,21 @@ export function useMarketLimits(slabAddress: string | null | undefined, assetInd
       vaultState: accPart?.vaultState ?? null,
       registryShares: accPart?.registryShares ?? null,
       assetAdmin: admin,
+      sameOwnerLpOwner: null,
+      sameOwnerPending: false,
+      sameOwnerUnresolved: false,
     };
-  }, [anyOn, flags, accts, slabAddress, slabPart, raw, assetProfile]);
+  }, [
+    anyOn,
+    flags,
+    accts,
+    slabAddress,
+    slabPart,
+    raw,
+    assetAdminBytes,
+    sameOwnerKey,
+    sameOwnerLp,
+    sameOwnerSettled,
+    sameOwnerFailed,
+  ]);
 }

@@ -82,10 +82,10 @@ export const Modal: FC<ModalProps> = ({
   // Nested-dialog counter, lifted from ClosePositionModal/TradeConfirmationModal/
   // SendPositionNftModal where three copies of it live.
   //
-  // The Position NFT panel opens from inside the mobile order sheet, whose own
-  // document-level Escape handler collapses the sheet. Without this counter one
-  // Escape fired BOTH: the dialog closed AND the sheet collapsed underneath it.
-  // The sheet's handler stands down while this is > 0.
+  // The mobile order sheet (page.tsx MobileOrderSheet) has its own
+  // document-level Escape handler that collapses the sheet. Without this counter
+  // one Escape fired BOTH: a dialog opened over the sheet closed AND the sheet
+  // collapsed underneath it. The sheet's handler stands down while this is > 0.
   useEffect(() => {
     const current = Number(document.body.dataset.percOpenDialogs ?? "0");
     document.body.dataset.percOpenDialogs = String(current + 1);

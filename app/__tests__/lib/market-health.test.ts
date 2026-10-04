@@ -5,6 +5,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
+import { LIST_BADGE_IDS } from "@/lib/market-header-status";
 import { join } from "node:path";
 import {
   BOUND_SCALE,
@@ -118,6 +119,25 @@ describe("decodeMarketHealth", () => {
     const h = decodeMarketHealth(d, SLOT, 1n);
     expect(h.lockReasons).toEqual(["resolved", "bankruptcy", "loss-stale"]);
     expect(healthBadges(h)[0].id).toBe("resolved");
+  });
+
+  it("A-1: the bankruptcy badge is honest (withdrawals only, info tone) and never promises a reopen", () => {
+    const d = fixture("pengu-market-v18-healthy").slice();
+    d[592 + 621] = 1;
+    const h = decodeMarketHealth(d, SLOT, 1n);
+    expect(h.lockReasons).toContain("bankruptcy");
+    const badge = healthBadges(h).find((b) => b.id === "bankruptcy")!;
+    expect(badge.tone).toBe("info");
+    expect(badge.label).not.toBe("Catching up");
+    expect(badge.detail).toBe(
+      "LP and insurance withdrawals are paused until open profits in this market are settled. Trading, closing and your own deposits and withdrawals are not affected.",
+    );
+    expect(badge.detail).not.toMatch(/reopen|within a minute|automatically/i);
+    // It is not a market-list badge and not a header state.
+    expect(LIST_BADGE_IDS.has("bankruptcy")).toBe(false);
+    // NEGATIVE CONTROL: flag off -> no badge.
+    d[592 + 621] = 0;
+    expect(healthBadges(decodeMarketHealth(d, SLOT, 1n)).some((b) => b.id === "bankruptcy")).toBe(false);
   });
 });
 

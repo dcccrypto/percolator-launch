@@ -33,7 +33,7 @@ const row = (slab: string, nftWrapped: boolean) => ({
   market: { slabAddress: pk, config: { collateralMint: pk }, engine: {} },
   effectiveEntryPrice: 100_000_000n, entryPriceSource: "cache", effectiveSize: 5_000_000n,
   unrealizedPnl: 0n, oraclePriceE6: 100_000_000n, pnlPercent: 0, leverage: 5,
-  liquidationPriceE6: 80_000_000n, liquidationDistancePct: 100, nftWrapped,
+  liquidationPriceE6: 40_000_000n, liquidationDistancePct: 60, nftWrapped,
 });
 
 describe("/portfolio wrapped rows", () => {

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePortfolio, getLiquidationSeverity, type PortfolioPosition } from "@/hooks/usePortfolio";
+import { usePortfolio, liveLiquidationSeverity, liveLiquidationDistancePct, type PortfolioPosition } from "@/hooks/usePortfolio";
 import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { describeLiqPrice } from "@/lib/liq-price-display";
@@ -44,8 +44,10 @@ function PositionCard({
   const posSize = pos.effectiveSize;
   const side = posSize > 0n ? "Long" : posSize < 0n ? "Short" : "Flat";
   const sizeAbs = posSize < 0n ? -posSize : posSize;
-  const severity = getLiquidationSeverity(pos.liquidationDistancePct);
   const markE6 = live.markE6;
+  // At the live mark, like /portfolio's cards and strip (the poll's figure lagged them).
+  const liquidationDistancePct = liveLiquidationDistancePct(pos, markE6);
+  const severity = liveLiquidationSeverity(pos, markE6);
   // Current effective leverage: nominal notional / (capital + pnl) at the live mark.
   const leverageDisplay = describePositionLeverage(
     computePositionLeverage({
@@ -100,7 +102,7 @@ function PositionCard({
       {severity === "danger" && hasPosition && (
         <div className="flex items-center gap-2 border-b border-[var(--short)]/20 bg-[var(--short)]/5 px-3 py-1">
           <span className="text-[9px] font-bold uppercase tracking-[0.1em] text-[var(--short)]">
-            ⚠ Liq Risk — {pos.liquidationDistancePct.toFixed(1)}% away
+            ⚠ Liq Risk — {liquidationDistancePct.toFixed(1)}% away
           </span>
         </div>
       )}
@@ -192,7 +194,7 @@ function PositionCard({
         </div>
 
         {/* Margin health bar */}
-        {hasPosition && pos.liquidationDistancePct < 100 && (
+        {hasPosition && liquidationDistancePct < 100 && (
           <div className="mt-2">
             <div className="flex items-center justify-between text-[8px] text-[var(--text-secondary)]">
               <span>Margin Health</span>
@@ -205,14 +207,14 @@ function PositionCard({
                     : "text-[var(--text-secondary)]"
                 }
               >
-                {pos.liquidationDistancePct.toFixed(0)}%
+                {liquidationDistancePct.toFixed(0)}%
               </span>
             </div>
             <div className="mt-0.5 h-1 w-full overflow-hidden rounded-full bg-[var(--border)]">
               <div
                 className="h-full rounded-full transition-all duration-500"
                 style={{
-                  width: `${Math.min(pos.liquidationDistancePct, 100)}%`,
+                  width: `${Math.min(liquidationDistancePct, 100)}%`,
                   backgroundColor:
                     severity === "danger"
                       ? "var(--short)"

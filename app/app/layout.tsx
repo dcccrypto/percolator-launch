@@ -10,6 +10,7 @@ import { Footer } from "@/components/layout/Footer";
 import { MobileBottomNav } from "@/components/layout/MobileBottomNav";
 import { TickerBanner } from "@/components/layout/TickerBanner";
 import { PositionsBar } from "@/components/layout/PositionsBar";
+import { LiquidationAlert } from "@/components/layout/LiquidationAlert";
 import { MusicPlayer } from "@/components/ui/MusicPlayer";
 import { MainnetBetaBanner } from "@/components/layout/MainnetBetaBanner";
 import { MaintenanceBanner } from "@/components/layout/MaintenanceBanner";
@@ -132,6 +133,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </ChromeGate>
             <ChromeGate>
               <PositionsBar />
+              <LiquidationAlert />
             </ChromeGate>
             <main className="flex-1 pb-[60px] md:pb-0">{children}</main>
             <ChromeGate hideOn={["/locked"]}>

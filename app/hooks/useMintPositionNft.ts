@@ -7,6 +7,7 @@ import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { assertKnownProgram } from "@/lib/programAllowlist";
 import { sendTx } from "@/lib/tx";
+import { assertSuccessfulConfirmation } from "@/lib/transaction-confirmation";
 import { humanizeError } from "@/lib/errorMessages";
 import { plainMessage } from "@/lib/limits/user-message";
 import { useToast } from "@/hooks/useToast";
@@ -221,7 +222,11 @@ export function useMintPositionNft(slabAddress: string) {
       });
 
       // Wait for confirmation with blockhash-based expiry
-      await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
+      // skipPreflight: confirmTransaction also resolves for a tx that landed and failed.
+      assertSuccessfulConfirmation(
+        await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed"),
+        "Position NFT mint",
+      );
 
       // Force an immediate slab re-poll so useUserAccount/usePositionNft re-scan
       // and the UI reflects the just-minted NFT without waiting for the next

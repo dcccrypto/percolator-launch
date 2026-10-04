@@ -1,6 +1,6 @@
 import * as Sentry from "@sentry/nextjs";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
-import { readLiveMarketStates } from "@/lib/live-market-state";
+import { readLiveMarketStateResolutions } from "@/lib/live-market-state";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import { getConfig } from "@/lib/config";
 
@@ -123,8 +123,9 @@ async function fetchRegistryRows(
  * chain supplies what only it has (price, OI, insurance, vault, c_tot). Blocked
  * slabs are dropped here so every consumer inherits that filter.
  *
- * A slab missing from the live map keeps its registry values — partial RPC
- * results degrade to the pre-merge behaviour rather than zeroing a market out.
+ * A slab confirmed dead is dropped: an explicit RPC `null`, or the wrapper-owned closed-market
+ * tombstone CloseSlab leaves (CloseSlab shrinks to 16 bytes, it does not delete). Unresolved RPC/parse reads
+ * keep their registry values and preserve the existing fail-open behaviour.
  */
 export async function loadMergedMarketRows(): Promise<MarketRegistryRow[] | null> {
   let supabase: ReturnType<typeof getServiceClient>;
@@ -139,16 +140,27 @@ export async function loadMergedMarketRows(): Promise<MarketRegistryRow[] | null
 
   const registryRows = rows.filter((m) => !BLOCKED_SLAB_ADDRESSES.has(m.slab_address as string));
 
-  const liveStates = await readLiveMarketStates(
+  const liveRead = await readLiveMarketStateResolutions(
     registryRows.map((m) => String(m.slab_address ?? "")).filter(Boolean),
   );
+  const liveStates = liveRead.states;
 
-  // Relaunch (2026-10-01): a registry row whose slab is owned by another program is a market of an
-  // abandoned wrapper — never list it. A row whose slab could not be read keeps the existing
-  // "degrade, don't hide" policy (an RPC gap must not empty the list).
+  // Relaunch (2026-10-01): a registry row whose slab is owned by another
+  // program is a market of an abandoned wrapper — never list it.
+  //
+  // GH#2988: distinguish positive account absence from an unresolved RPC gap.
+  // A successful RPC `null`, or the CloseSlab tombstone (liveRead.missing covers both, and this
+  // applies to curated PLAYGROUND_SLAB_META markets too), means the slab is gone and should no
+  // longer be discoverable. RPC/parse uncertainty keeps the existing fail-open policy.
   const wrapper = getConfig().programId;
   const current = registryRows.filter((m) => {
-    const owner = liveStates.get(String(m.slab_address ?? ""))?.owner;
+    const slab = String(m.slab_address ?? "");
+
+    if (liveRead.missing.has(slab)) {
+      return false;
+    }
+
+    const owner = liveStates.get(slab)?.owner;
     return owner === undefined || owner === wrapper;
   });
 

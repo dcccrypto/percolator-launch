@@ -65,8 +65,9 @@ const EXEMPT: Record<string, string> = {
     "Its 'Entry' DiffRow is the PROJECTED fill for the order about to be placed, not a held position's " +
     "recovered entry. The held entry it passes to the Close panel is checked by the call-site guard below.",
   "components/trade/TradingChart.tsx":
-    "Draws an entry LINE only from a real stored/cached entry and returns null otherwise — an absent " +
-    "line makes no claim and never falls back to the mark.",
+    "Draws an entry LINE (no row/cell) from a cached entry or a PnL-derived one; source 'unknown' draws " +
+    "no line at all — an absent line makes no claim and never falls back to the mark. The call-site check " +
+    "below pins that its line goes through displayEntryE6 (#2990).",
 };
 
 describe("the entry-price surface list is discovered, not hand-maintained", () => {
@@ -309,5 +310,17 @@ describe("CONTROL: the per-call scanners are not vacuous", () => {
     const [expr] = jsxPropValues(`<ClosePositionModal entryPrice={pos.effectiveEntryPrice} onCancel={x} />`, "ClosePositionModal", "entryPrice");
     expect(expr).toBe("pos.effectiveEntryPrice");
     expect(GATED_ENTRY_EXPR.test(expr)).toBe(false);
+  });
+});
+
+describe("TradingChart's exempt Entry line still goes through the display allowlist (#2990)", () => {
+  it("derives entryPriceNum from displayEntryE6(resolvedEntry.entry, resolvedEntry.source)", () => {
+    const src = fs.readFileSync(path.join(APP_ROOT, "components/trade/TradingChart.tsx"), "utf8");
+    const block = src.slice(src.indexOf("const entryPriceNum = (() => {"));
+    expect(block.length).toBeGreaterThan(0);
+    const body = block.slice(0, block.indexOf("})();"));
+    expect(body).toMatch(/displayEntryE6\(\s*resolvedEntry\.entry,\s*resolvedEntry\.source,?\s*\)/);
+    // The returned number comes from the allowlisted value, never resolvedEntry.entry directly.
+    expect(body).toMatch(/return displayEntry > 0n\s*\?\s*Number\(displayEntry\)/);
   });
 });

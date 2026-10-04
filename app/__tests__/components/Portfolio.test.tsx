@@ -11,7 +11,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 // Portfolio's positions view was extracted from app/portfolio/page.tsx into
 // this component when /portfolio became a tabbed hub. These tests exercise the
@@ -619,8 +619,8 @@ describe("Portfolio Component Tests", () => {
       account: {
         kind: AccountKind.User,
         owner: mockPublicKey,
-        capital: 1000000n,
-        positionSize: 5000000n,
+        capital: 10000000n,
+        positionSize: 1000000n,
         pnl: -900000n,
         entryPrice: 100000000n,
       },
@@ -635,13 +635,16 @@ describe("Portfolio Component Tests", () => {
       // always emits one) and is now treated as an unresolved entry.
       entryPriceSource: "cache",
       unrealizedPnl: -900000n,
-      oraclePriceE6: 92000000n,
+      oraclePriceE6: 95800000n,
       pnlPercent: -90,
-      leverage: 5,
-      liquidationPriceE6: 90000000n,
-      // Within "danger" distance (<=10%, see getLiquidationSeverity).
-      liquidationDistancePct: 5,
+      leverage: 10,
+      effectiveSize: 1000000n,
+      // 10x long at 100 (mm 5% / im 10%) polled at 95.8: engine liquidation 94.7368, so
+      // (95.8 - 94.7368) / 95.8 = 1.1%, and three quarters of the margin cushion is gone (danger).
+      liquidationPriceE6: 94736843n,
+      liquidationDistancePct: 1.1,
       initialMarginBps: 1000n,
+      maintenanceMarginBps: 500n,
       ...overrides,
     });
 
@@ -666,12 +669,12 @@ describe("Portfolio Component Tests", () => {
 
       render(<PortfolioPage />);
 
-      // No /i flag: AtRiskBanner's own copy is "Liquidation risk" (lowercase
-      // "risk") — PositionCard's PER-ROW banner is "Liquidation Risk"
-      // (capital R) + a "— X% away" suffix, a deliberately different string
-      // so this assertion targets AtRiskBanner specifically, not both.
-      expect(screen.getByText(/Liquidation risk/)).toBeInTheDocument();
-      expect(screen.getByText(/SOL \(5\.0%\)/)).toBeInTheDocument();
+      // The strip (AtRiskBanner) lists the position with its distance and actions.
+      const strip = screen.getByRole("region", { name: "Positions near liquidation" });
+      expect(within(strip).getByText("Liquidation risk")).toBeInTheDocument();
+      expect(within(strip).getByText("SOL")).toBeInTheDocument();
+      expect(within(strip).getByText("1.1%")).toBeInTheDocument();
+      expect(within(strip).getByRole("link", { name: "Go to market" })).toHaveAttribute("href", "/trade/test-slab-risk");
     });
 
     it("renders nothing (zero height) when no position is at risk", () => {
@@ -685,7 +688,7 @@ describe("Portfolio Component Tests", () => {
         // liquidationDistancePct live from (liquidationPriceE6, markE6) when
         // both are positive, which would otherwise override this "safe"
         // distance regardless of the field set here.
-        positions: [buildPosition({ liquidationDistancePct: 100, liquidationPriceE6: 0n })],
+        positions: [buildPosition({ liquidationDistancePct: 100, liquidationPriceE6: 0n, oraclePriceE6: 100000000n })],
         totalPnl: -900000n,
         totalDeposited: 1000000n,
         atRiskCount: 0,

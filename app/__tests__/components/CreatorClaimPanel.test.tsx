@@ -3,6 +3,8 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
 
 vi.mock("@/hooks/useCreatorClaim", () => ({ useCreatorClaim: vi.fn() }));
+// The all-time claimed row reads chain history; covered by creator-fees-claimed-all-time.test.
+vi.mock("@/hooks/useCreatorFeesClaimed", () => ({ useCreatorFeesClaimed: () => ({ kind: "loading" }) }));
 vi.mock("@/hooks/useTokenMeta", () => ({
   useTokenMeta: vi.fn(() => ({ symbol: "USDC", name: "USDC", decimals: 6 })),
 }));

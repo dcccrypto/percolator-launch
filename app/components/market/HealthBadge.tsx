@@ -18,7 +18,7 @@ const LABELS: Record<HealthLevel, string> = {
   caution: "Caution",
   warning: "Low Liq",
   empty: "Empty",
-  "oracle-down": "No Oracle",
+  "oracle-down": "Awaiting price",
 };
 
 const TOOLTIPS: Record<HealthLevel, string> = {
@@ -27,7 +27,7 @@ const TOOLTIPS: Record<HealthLevel, string> = {
   warning: "Very low liquidity. Large trades may fail or cause high slippage. Trade with caution.",
   empty: "No active positions or liquidity in this market.",
   // GH#1622: no price has been published yet — new positions are blocked on-chain
-  "oracle-down": "No price yet. New positions open once the price updates; this happens automatically.",
+  "oracle-down": "Waiting for this market's first price. New positions open once it lands; closing and withdrawing still work.",
 };
 
 export const HealthBadge: FC<{ level: HealthLevel }> = ({ level }) => (

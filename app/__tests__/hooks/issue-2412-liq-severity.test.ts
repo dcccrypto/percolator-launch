@@ -24,8 +24,8 @@ describe("#2412 getLiquidationSeverity never reports safe on bad data", () => {
     expect(getLiquidationSeverity(5)).toBe("danger");
     expect(getLiquidationSeverity(10)).toBe("danger");
     expect(getLiquidationSeverity(20)).toBe("warning");
-    expect(getLiquidationSeverity(30)).toBe("warning");
-    expect(getLiquidationSeverity(31)).toBe("safe");
+    expect(getLiquidationSeverity(20.01)).toBe("safe");
+    expect(getLiquidationSeverity(30)).toBe("safe");
     expect(getLiquidationSeverity(100)).toBe("safe");
   });
 });

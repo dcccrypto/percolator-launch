@@ -1,7 +1,10 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect } from "vitest";
 import {
   computeRef24h,
   computePriceChange,
+  formatPriceChange,
   type PricePoint,
   type Timeframe,
 } from "../../lib/chart-stats";
@@ -100,5 +103,27 @@ describe("computePriceChange", () => {
 
   it("treats zero delta as up (neutral)", () => {
     expect(computePriceChange(50, 50).isUp).toBe(true);
+  });
+});
+
+describe("formatPriceChange", () => {
+  it("sub-cent markets show the move, not 0.0000", () => {
+    expect(formatPriceChange(0.000118 - 0.00011, 0.000118)).toBe("0.00000800");
+    expect(formatPriceChange(-0.00000012, 0.000118)).toBe("-0.00000012");
+    expect(formatPriceChange(0.0000451, 0.002255)).toBe("0.00004510");
+    expect(formatPriceChange(0.000301, 0.002255)).toBe("0.000301");
+  });
+
+  it("whole-dollar markets use the axis precision, finer only for a smaller move", () => {
+    expect(formatPriceChange(1.23, 84.2)).toBe("1.23");
+    expect(formatPriceChange(0.042, 84.2)).toBe("0.0420");
+    expect(formatPriceChange(-0.0042, 84.2)).toBe("-0.004200");
+    expect(formatPriceChange(0, 84.2)).toBe("0.00");
+  });
+
+  it("the chart header uses it", () => {
+    const src = readFileSync(resolve(process.cwd(), "components/trade/TradingChart.tsx"), "utf8");
+    expect(src).toContain("formatPriceChange(priceChange, currentPrice)");
+    expect(src).not.toContain("priceChange.toFixed(4)");
   });
 });

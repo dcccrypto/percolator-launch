@@ -40,6 +40,6 @@ describe("UserFacingError", () => {
     expect(src("useWithdraw.ts")).toMatch(/setError\(userFacingMessage\(e\) \?\?/);
     expect(src("useDeposit.ts")).toMatch(/setError\(userFacingMessage\(e\) \?\? humanizeError/);
     expect(src("useWithdraw.ts")).toMatch(/throw new UserFacingError\(OPEN_POSITION_WITHDRAW_MESSAGE\)/);
-    expect(src("useClosePosition.ts")).toMatch(/throw new UserFacingError\(\s*`The market can only absorb/);
+    expect(src("useClosePosition.ts")).toMatch(/throw new UserFacingError\(closeCapacityMessage\(/);
   });
 });
