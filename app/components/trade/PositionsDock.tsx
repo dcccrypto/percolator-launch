@@ -450,7 +450,9 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
               <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Liq. Price</th>
               <th className="whitespace-nowrap px-3 py-2 text-right font-medium">PnL</th>
               <th className="whitespace-nowrap px-3 py-2 text-right font-medium">ROE%</th>
-              <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Close</th>
+              {/* Pinned to the right edge so the Share/Close actions stay reachable
+                  when this wide table scrolls horizontally on a phone. */}
+              <th className="sticky right-0 z-20 whitespace-nowrap border-l border-[var(--border)]/30 bg-[var(--panel-bg)] px-3 py-2 text-right font-medium">Close</th>
             </tr>
           </thead>
           <tbody>
@@ -551,7 +553,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
               <td className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${hasValidMark && pnlIsKnown ? roeColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                 {hasValidMark && pnlIsKnown ? formatPercent(roe) : "--"}
               </td>
-              <td className="whitespace-nowrap px-3 py-2.5 text-right">
+              <td className="sticky right-0 z-10 whitespace-nowrap border-l border-[var(--border)]/30 bg-[var(--panel-bg)] px-3 py-2.5 text-right">
                 <span className="inline-flex items-center justify-end gap-1">
                 <PnlShareButton
                   data={pnlCardData}
