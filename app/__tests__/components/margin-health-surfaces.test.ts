@@ -145,7 +145,7 @@ describe("exemptions are explicit and current", () => {
     expect(chart).toMatch(/liqPriceE6 != null && liqPriceE6 > 0n/);
     // TradingView chart: same rule, in the hook that feeds its Liq line (also gated on pnlKnown) and in the line planner.
     const tvHook = fs.readFileSync(path.join(APP_ROOT, "hooks/usePositionLinePrices.ts"), "utf8");
-    expect(tvHook).toMatch(/liqE6 != null && liqE6 > 0n/);
+    expect(tvHook).toMatch(/liq != null && liq > 0n/);
     expect(tvHook).toMatch(/!entry\.pnlKnown/);
     const tvLines = fs.readFileSync(path.join(APP_ROOT, "lib/tv/positionLines.ts"), "utf8");
     expect(tvLines).toMatch(/if \(i\.prefs\.liq && valid\(i\.liqPrice\)\)/);
