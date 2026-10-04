@@ -23,7 +23,8 @@
  * Body: { wallet: string }
  * Response (200): { funded: true, usdc_amount: number, usdc_sig: string,
  *                   sol_airdropped: boolean, sol_sig?: string, sol_source?: "server" | "public",
- *                   nextClaimAt: string }
+ *                   sol_amount: number, sol_pending?: true, nextClaimAt: string }
+ *   sol_pending: the server SOL top-up was broadcast but not confirmed (sol_airdropped is false).
  * No response ever names an env var or echoes raw internal error text (WP-10 AC3).
  * Response (400): { error: string }
  * Response (429): { error: string, nextClaimAt: string }

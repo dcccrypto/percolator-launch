@@ -33,6 +33,8 @@ interface FaucetResult {
   usdc_sig: string;
   sol_airdropped: boolean;
   sol_sig?: string;
+  /** The server's SOL top-up was broadcast but not confirmed yet (sol_airdropped is false). */
+  sol_pending?: boolean;
   nextClaimAt: string;
 }
 
@@ -88,6 +90,7 @@ const FaucetPage: FC = () => {
           usdc_sig: data.usdc_sig as string,
           sol_airdropped: data.sol_airdropped as boolean,
           sol_sig: data.sol_sig as string | undefined,
+          sol_pending: data.sol_pending === true,
           nextClaimAt: data.nextClaimAt as string,
         });
         // Refresh balance display after successful mint
@@ -200,7 +203,25 @@ const FaucetPage: FC = () => {
                   </a>
                 </p>
               )}
-              {!result.sol_airdropped && (
+              {result.sol_pending && (
+                <p className="mt-1 text-[var(--text-muted)] text-[12px]">
+                  Your test SOL is on its way but not confirmed yet. Check your balance in a minute.
+                  {result.sol_sig && (
+                    <>
+                      {" "}
+                      <a
+                        href={explorerUrl(result.sol_sig)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-mono underline hover:text-[var(--accent)]"
+                      >
+                        {result.sol_sig.slice(0, 8)}...
+                      </a>
+                    </>
+                  )}
+                </p>
+              )}
+              {!result.sol_airdropped && !result.sol_pending && (
                 <p className="mt-1 text-[var(--text-muted)] text-[12px]">
                   SOL airdrop skipped (public faucet busy). Try{" "}
                   <a
