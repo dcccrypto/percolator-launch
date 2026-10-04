@@ -1,10 +1,12 @@
 "use client";
 
 import { FC, useState } from "react";
+import Link from "next/link";
 import { explorerTxUrl, explorerAccountUrl } from "@/lib/config";
 import { useStuckSlabs, type StuckSlab } from "@/hooks/useStuckSlabs";
 import { useCloseMarket } from "@/hooks/useCloseMarket";
 import { useReclaimSlabRent } from "@/hooks/useReclaimSlabRent";
+import { WIZARD_STORAGE_KEY } from "@/lib/wizard-storage";
 
 interface RecoverSolBannerProps {
   /**
@@ -142,7 +144,7 @@ const StuckSlabCard: FC<{
           }}
           className="mt-3 border border-[var(--border)] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] hover:border-[var(--accent)]/30 hover:text-[var(--text)] transition-colors"
         >
-          CLEAR &amp; START FRESH
+          {onReset ? <>CLEAR &amp; START FRESH</> : "CLEAR"}
         </button>
       </div>
     );
@@ -224,7 +226,10 @@ const StuckSlabCard: FC<{
           </button>
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
-          {onResume && (
+          {/* /my-markets mounts this card without onResume, but the status
+              text still says Resume/Continue. Send the creator to /create,
+              where the same card has the wired RESUME button. */}
+          {onResume ? (
             <button
               type="button"
               disabled={resuming}
@@ -235,6 +240,13 @@ const StuckSlabCard: FC<{
             >
               {resuming ? "RESUMING…" : "RESUME CREATION →"}
             </button>
+          ) : closeLoading ? null : (
+            <Link
+              href="/create"
+              className="border border-[var(--accent)]/50 bg-[var(--accent)]/[0.08] px-4 py-2 text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--accent)] hover:bg-[var(--accent)]/[0.15] transition-colors"
+            >
+              RESUME ON CREATE PAGE →
+            </Link>
           )}
           {/* #2622: only offer RECLAIM while the market is still empty. Once it
               holds a deposit/account (lastStep >= 3) CloseSlab can't run, so a
@@ -293,7 +305,7 @@ const StuckSlabCard: FC<{
             }}
             className="border border-[var(--border)] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] hover:border-[var(--accent)]/30 hover:text-[var(--text)] transition-colors"
           >
-            DISCARD &amp; START NEW
+            {onReset ? <>DISCARD &amp; START NEW</> : "DISCARD"}
           </button>
         </div>
       </div>
@@ -349,20 +361,40 @@ const UninitialisedSlabBanner: FC<{
             </>
           )}
         </p>
-        <button
-          type="button"
-          onClick={() => {
-            clearStuck();
-            // Notify parent wizard to clear its own persisted state so the user
-            // starts completely fresh (wizard localStorage + form fields reset).
-            onReclaimSuccess?.();
-            onReset?.();
-            setDismissed(true);
-          }}
-          className="border border-[var(--border)] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors"
-        >
-          START NEW MARKET →
-        </button>
+        {onReset ? (
+          <button
+            type="button"
+            onClick={() => {
+              clearStuck();
+              // Notify parent wizard to clear its own persisted state so the user
+              // starts completely fresh (wizard localStorage + form fields reset).
+              onReclaimSuccess?.();
+              onReset();
+              setDismissed(true);
+            }}
+            className="border border-[var(--border)] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors"
+          >
+            START NEW MARKET →
+          </button>
+        ) : (
+          // Without onReset (/my-markets) nothing starts here, so go to /create; the rent
+          // is back, so the record can go, and so can the wizard's saved form from the
+          // failed attempt (as /create's onReclaimSuccess clears it).
+          <Link
+            href="/create"
+            onClick={() => {
+              clearStuck();
+              try {
+                localStorage.removeItem(WIZARD_STORAGE_KEY);
+              } catch {
+                // localStorage unavailable — non-critical
+              }
+            }}
+            className="border border-[var(--border)] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors"
+          >
+            START NEW MARKET →
+          </Link>
+        )}
       </div>
     );
   }
@@ -420,7 +452,7 @@ const UninitialisedSlabBanner: FC<{
             to REUSE this stuck slab's keypair (handed over via restoreSlabKeypair before
             this fires) instead of generating a brand-new one — see useCreateMarket.ts's
             startStep===0 branch. */}
-        {onResume && (
+        {onResume ? (
           <button
             type="button"
             disabled={isSending}
@@ -429,6 +461,13 @@ const UninitialisedSlabBanner: FC<{
           >
             RETRY INITIALIZATION →
           </button>
+        ) : isSending ? null : (
+          <Link
+            href="/create"
+            className="border border-[var(--warning)]/50 bg-[var(--warning)]/[0.08] px-4 py-2 text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--warning)] hover:bg-[var(--warning)]/[0.15] transition-colors"
+          >
+            RETRY ON CREATE PAGE →
+          </Link>
         )}
         <button
           type="button"
@@ -440,7 +479,7 @@ const UninitialisedSlabBanner: FC<{
           }}
           className="border border-[var(--border)] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] hover:border-[var(--accent)]/30 hover:text-[var(--text)] transition-colors disabled:opacity-50"
         >
-          DISCARD &amp; START NEW
+          {onReset ? <>DISCARD &amp; START NEW</> : "DISCARD"}
         </button>
         <a
           href={explorerAccountUrl(stuckSlab.publicKey.toBase58())}
