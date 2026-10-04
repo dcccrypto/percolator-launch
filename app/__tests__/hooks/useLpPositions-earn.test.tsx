@@ -83,7 +83,7 @@ describe("LpPositionsPanel: Earn rows", () => {
     expect(screen.getByRole("link").getAttribute("href")).toBe(`/earn/${SLAB_A}`);
     expect(screen.getByText("Earn vault")).toBeTruthy();
     expect(screen.getByText("Vault")).toBeTruthy();
-    expect(screen.queryByText("Stake")).toBeNull();
+    expect(screen.queryByText("Fee staking")).toBeNull();
     expect(screen.queryByText("Pool TVL")).toBeNull();
     expect(screen.queryByText("Withdraw")).toBeNull();
   });
@@ -93,7 +93,7 @@ describe("LpPositionsPanel: Earn rows", () => {
     expect(screen.getByRole("link").getAttribute("href")).toBe("/stake");
     // #2871: the per-row "Insurance stake" line became "Insurance pool" under the "Stake" heading.
     expect(screen.getByText("Insurance pool")).toBeTruthy();
-    expect(screen.getByText("Stake")).toBeTruthy();
+    expect(screen.getByText("Fee staking")).toBeTruthy();
     expect(screen.getByText("Pool TVL")).toBeTruthy();
   });
 });

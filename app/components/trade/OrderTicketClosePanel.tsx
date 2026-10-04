@@ -128,7 +128,7 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
   const submitTitle = !hasValidMark
     ? "Waiting for price data…"
     : engineStale
-      ? "Prices are catching up. Closing resumes automatically, usually within a minute."
+      ? "Prices are catching up. Closing resumes once the market has caught up."
       : lpUnderfunded
         ? "The LP has no capital, so a close cannot fill."
         : undefined;

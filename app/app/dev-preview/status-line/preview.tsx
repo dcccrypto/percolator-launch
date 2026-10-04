@@ -33,7 +33,7 @@ export function StatusLinePreview() {
       ))}
       <p className="pt-4 text-[11px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">Ticket: catching up beyond the app&apos;s repair (UX WP-2)</p>
       <div data-testid="preview-wp2" className="space-y-2 border border-[var(--border)] p-3">
-        <StatusLine message={{ kind: "engine-catching-up", variant: "wait", title: "Catching up", body: "Prices are catching up. Trading resumes automatically, usually within a minute." }} />
+        <StatusLine message={{ kind: "engine-catching-up", variant: "wait", title: "Catching up", body: "Prices are catching up. Trading resumes once the market has caught up." }} />
         <button disabled className="w-full rounded-none bg-[var(--long)] py-3 text-[12px] font-bold uppercase tracking-[0.12em] text-black opacity-50">Waiting for prices…</button>
         <button disabled className="w-full rounded-none bg-[var(--long)] py-3 text-[12px] font-bold uppercase tracking-[0.12em] text-black opacity-50">Waiting for the latest price…</button>
       </div>

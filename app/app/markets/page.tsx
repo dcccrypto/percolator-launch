@@ -27,6 +27,7 @@ import { MarketLogo } from "@/components/market/MarketLogo";
 import { WatchButton } from "@/components/market/WatchButton";
 import { MarketHealthBadges } from "@/components/market/MarketHealthBadges";
 import { useMarketHealth } from "@/hooks/useMarketHealth";
+import { liveHealthLevel } from "@/lib/market-health-overlay";
 import { MAX_HEALTH_SLABS } from "@/lib/market-health";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { detectOracleMode, resolveMarketPriceE6, priceE6ToUsd, sanitizePriceE6, applyInvert } from "@/lib/oraclePrice";
@@ -950,7 +951,7 @@ function MarketsPageInner() {
                   })();
                   const effectiveHealth = isOracleDown
                     ? { level: "oracle-down" as const, label: "No Oracle", insuranceRatio: 0, capitalRatio: 0 }
-                    : health;
+                    : { ...health, level: liveHealthLevel(health.level, marketHealth[m.slabAddress]) };
                   const rawPrice = m.supabase?.last_price ?? priceE6ToUsd(onChainPriceE6);
                   const lastPrice = rawPrice != null && rawPrice > MAX_SANE_PRICE_USD ? null : rawPrice;
                   

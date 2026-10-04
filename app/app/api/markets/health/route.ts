@@ -7,6 +7,7 @@ import { decodeMarketHealth, healthBadges, MARKET_HEALTH_SLICE_LEN, MAX_HEALTH_S
 import type { MarketHealthRow } from "@/lib/market-health";
 import { createMemoryRateLimiter } from "@/lib/memory-rate-limit";
 import { getClientIp } from "@/lib/get-client-ip";
+import { recordAdlObservations } from "@/lib/adl-since-store";
 
 /**
  * GET /api/markets/health?slabs=<a>,<b>,…  (max 50)
@@ -77,14 +78,32 @@ export async function GET(req: NextRequest) {
     ]);
     const slot = BigInt(res.context.slot);
     const markets: Record<string, MarketHealthRow | null> = {};
+    // Decode first, then look up how long each close-only market has been close-only (one durable read).
+    const decoded: Record<string, ReturnType<typeof decodeMarketHealth> | null> = {};
     slabs.forEach((slab, i) => {
       const info = res.value[i];
       if (!info || info.owner.toBase58() !== programId || info.data.length < MARKET_HEALTH_SLICE_LEN) {
+        decoded[slab] = null;
+        return;
+      }
+      try {
+        decoded[slab] = decodeMarketHealth(new Uint8Array(info.data), slot, lp.get(slab) ?? null);
+      } catch {
+        decoded[slab] = null;
+      }
+    });
+    const adlSince = await recordAdlObservations(
+      slabs.map((slab) => ({ slab, reduceOnly: decoded[slab] ? decoded[slab].lockReasons.includes("adl-reduce-only") : null })),
+    ).catch(() => ({}) as Record<string, number>);
+    const nowMs = Date.now();
+    slabs.forEach((slab) => {
+      const h = decoded[slab];
+      if (!h) {
         markets[slab] = null;
         return;
       }
       try {
-        const h = decodeMarketHealth(new Uint8Array(info.data), slot, lp.get(slab) ?? null);
+        const since = adlSince[slab] ?? null;
         markets[slab] = {
           lpCapital: h.lpCapital === null ? null : h.lpCapital.toString(),
           lpDepleted: h.lpDepleted,
@@ -93,7 +112,8 @@ export async function GET(req: NextRequest) {
           openProfitAtoms: h.openProfitAtoms.toString(),
           realizableProfitAtoms: h.realizableProfitAtoms.toString(),
           lockReasons: h.lockReasons,
-          badges: healthBadges(h),
+          badges: healthBadges(h, since, nowMs),
+          adlSinceMs: since,
         };
       } catch {
         markets[slab] = null;

@@ -38,7 +38,7 @@ export const MSG_REPAIRABLE =
   "Market temporarily locked by an expired backing bucket or a side waiting to reset. " +
   "Try again: your next transaction includes the repair automatically.";
 export const MSG_LOSS_STALE =
-  "Positions on this market are being refreshed after a price move. Try again in a few seconds.";
+  "Positions on this market are being refreshed after a price move. New trades wait until that finishes.";
 export const MSG_ADL_REDUCE_ONLY_OPEN =
   "This market is reduce-only while it recovers from a bankruptcy, so new positions are paused. Closing positions still works. New positions reopen once the positions on one side have closed, which depends on those traders and can take a while.";
 export const MSG_ADL_REDUCE_ONLY_CLOSE =

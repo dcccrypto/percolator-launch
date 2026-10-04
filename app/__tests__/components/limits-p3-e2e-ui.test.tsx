@@ -180,7 +180,7 @@ describe("Your creator stake (96 / 97)", () => {
     ["LP has open positions", { lpFlat: false }, "lp-open", "Locked while traders have open positions on your market. It unlocks as they close."],
     ["at the floor", { vaultValue: C0 + 200_000_000n }, "at-floor", "This is the minimum you must keep while Earn deposits are in the vault."],
     ["backing short of C", { backingCover: C0 - 1n }, "backing-short", "Locked until the market's backing covers Earn deposits again."],
-    ["draw pending", { drawOutstandingAtoms: 5n }, "draw-pending", "Paused while the market settles a loss. It reopens automatically, usually within a minute."],
+    ["draw pending", { drawOutstandingAtoms: 5n }, "draw-pending", "Paused while the market settles a loss. It reopens when that is done."],
   ] as const) {
     it(`fork state "${name}": its reason line, and Withdraw never fires`, async () => {
       const onWithdraw = vi.fn();

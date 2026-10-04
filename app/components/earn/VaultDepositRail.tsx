@@ -20,6 +20,7 @@ import { chargedTradeFeeLabel } from '@/lib/limits/format';
 import { decodeMarketEngineView } from '@/lib/limits/decode';
 import { MarketLogo } from '@/components/market/MarketLogo';
 import { formatCompact } from '@/lib/formatters';
+import { withdrawFlagLine } from '@/lib/limits/earn-withdrawable';
 import type { MarketVaultInfo } from '@/hooks/useEarnStats';
 
 /** Devnet slot time, for rendering the redemption cooldown as an approximate duration. */
@@ -189,6 +190,18 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
               accent={hasPosition}
             />
           </div>
+
+          {state.splitPot && state.splitPot.claimAdjustedNavAtoms !== null && state.splitPot.vaultMaxNowAtoms !== null && (
+            <div className="mt-3 grid grid-cols-2 gap-3 border-t border-[var(--border)]/60 pt-3" data-testid="earn-rail-withdrawable">
+              <Figure label="After open claims" loading={!everLoaded} value={`$${formatCompact(Number(state.splitPot.claimAdjustedNavAtoms) / collDivisor)}`} />
+              <Figure label="Withdrawable now" loading={!everLoaded} value={`$${formatCompact(Number(state.splitPot.vaultMaxNowAtoms) / collDivisor)}`} />
+              {state.splitPot.withdrawStatus && withdrawFlagLine(state.splitPot.withdrawStatus) && (
+                <p data-testid="earn-rail-withdraw-flag" className="col-span-2 text-[11px] text-[var(--text-secondary)]">
+                  {withdrawFlagLine(state.splitPot.withdrawStatus)}
+                </p>
+              )}
+            </div>
+          )}
 
           {hasPosition && (
             <div className="mt-3 flex items-center justify-between border-t border-[var(--border)]/60 pt-3">

@@ -10,6 +10,7 @@
  */
 import type { StatusVariant } from "@/lib/limits/user-message";
 import type { HealthBadge, MarketHealthRow } from "@/lib/market-health";
+import { closeOnlyDurationLine } from "@/lib/adl-since";
 
 export interface HeaderStatus {
   kind: string;
@@ -29,7 +30,7 @@ function drainSides(row: MarketHealthRow): string[] {
   return b.label.replace(/\s*close-only$/i, "").split("&").map((x) => x.trim()).filter(Boolean);
 }
 
-export function marketHeaderStatus(row: MarketHealthRow | null | undefined): HeaderStatus | null {
+export function marketHeaderStatus(row: MarketHealthRow | null | undefined, nowMs: number = Date.now()): HeaderStatus | null {
   if (!row) return null;
   if (has(row, "resolved")) {
     return { kind: "resolved", variant: "info", title: "Market settled", body: "Close any position and withdraw. There's nothing else to do." };
@@ -38,7 +39,16 @@ export function marketHeaderStatus(row: MarketHealthRow | null | undefined): Hea
     return { kind: "adl-reduce-only", variant: "paused", title: "Close-only for now", body: "Closing works normally; new positions reopen once the market recovers." };
   }
   if (has(row, "adl-reduce-only")) {
-    return { kind: "adl-reduce-only", variant: "paused", title: "Close-only for now", body: "Closing works normally. New positions reopen once the positions on one side of the market have closed, which depends on those traders and can take a while." };
+    // "Since when": a lower bound (first seen by the app), so it says "at least". Appended only when known.
+    const duration = closeOnlyDurationLine(row.adlSinceMs, nowMs);
+    return {
+      kind: "adl-reduce-only",
+      variant: "paused",
+      title: "Close-only for now",
+      body:
+        "Closing works normally. New positions reopen once the positions on one side of the market have closed, which depends on those traders and can take a while." +
+        (duration ? ` ${duration}` : ""),
+    };
   }
   // A-3: "no funds to take the other side" is the real reason new positions can't open, and it
   // does not clear on its own, so it outranks the transient "catching up" state.
@@ -50,7 +60,7 @@ export function marketHeaderStatus(row: MarketHealthRow | null | undefined): Hea
       kind: "engine-catching-up",
       variant: "wait",
       title: "Catching up",
-      body: "The market is catching up with the latest prices. Your trade goes through automatically when it's ready.",
+      body: "The market is catching up with the latest prices. New positions wait until it has.",
     };
   }
   const drain = drainSides(row);
@@ -70,4 +80,4 @@ export function marketHeaderStatus(row: MarketHealthRow | null | undefined): Hea
 }
 
 /** Badges a market LIST may show (audit §4.3): only states that change what a user can do. */
-export const LIST_BADGE_IDS: ReadonlySet<HealthBadge["id"]> = new Set(["resolved", "adl-reduce-only", "recovery", "lp-halted", "lp-depleted", "drain-only"]);
+export const LIST_BADGE_IDS: ReadonlySet<HealthBadge["id"]> = new Set(["resolved", "v1", "adl-reduce-only", "recovery", "lp-halted", "lp-depleted", "drain-only"]);

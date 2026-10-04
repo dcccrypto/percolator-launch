@@ -4,6 +4,7 @@ import type { MarketVaultInfo } from '@/hooks/useEarnStats';
 import { formatCompact } from '@/lib/formatters';
 import { MarketLogo } from '@/components/market/MarketLogo';
 import { OiCapMeter } from './OiCapMeter';
+import { withdrawChip, withdrawFlagLine } from '@/lib/limits/earn-withdrawable';
 
 /**
  * Shared CSS-grid column template for the LP-vault table — used by BOTH the
@@ -31,6 +32,19 @@ interface VaultRowProps {
  */
 export function VaultRow({ vault, selected, userDepositUsd, onSelect }: VaultRowProps) {
   const vaultUsd = vault.vaultBalance / 10 ** vault.decimals;
+  const w = vault.earnWithdraw;
+  const chip = w ? withdrawChip(w.status) : null;
+  // One calm line for the tooltip: value, value after open winner claims, and what can leave now.
+  const valueTitle = w
+    ? [
+        `Vault value $${formatCompact(vaultUsd)}.`,
+        `After open winner claims $${formatCompact(w.claimAdjustedNavUsd)}.`,
+        `Withdrawable now $${formatCompact(w.maxWithdrawableNowUsd)}.`,
+        withdrawFlagLine(w.status),
+      ]
+        .filter(Boolean)
+        .join(' ')
+    : undefined;
 
   return (
     <button
@@ -49,12 +63,23 @@ export function VaultRow({ vault, selected, userDepositUsd, onSelect }: VaultRow
         <span className="min-w-0 truncate text-[12px] font-medium text-[var(--text)]">
           {vault.symbol}
         </span>
+        {chip && (
+          <span
+            data-testid="vault-withdraw-chip"
+            data-status={w?.status}
+            title={w ? withdrawFlagLine(w.status) ?? undefined : undefined}
+            className="shrink-0 whitespace-nowrap border border-[var(--warning)]/40 bg-[var(--warning)]/[0.08] px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-[var(--warning)]"
+          >
+            {chip}
+          </span>
+        )}
       </div>
 
       {/* TVL */}
       <span
         className="text-right text-[12px] tabular-nums text-[var(--text)]"
         style={{ fontFamily: 'var(--font-mono)' }}
+        title={valueTitle}
       >
         ${formatCompact(vaultUsd)}
       </span>

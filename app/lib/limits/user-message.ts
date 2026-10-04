@@ -334,7 +334,7 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
           return m("adl-reduce-only", "paused", "Close-only for now", "Closing works normally. New positions reopen once the positions on one side have closed, which depends on those traders and can take a while.");
         if (h.lpDepleted && ctx.surface === "trade")
           return m("lp-depleted", "paused", "New positions paused", `${TICKET_FUNDS_LINE(h.lpIsVault === true)} Closing works normally.`);
-        if (h.lossStale) return m("price-wait", "wait", "Waiting for price", "Updating to the latest price, usually a few seconds.", { autoRetry: true });
+        if (h.lossStale) return m("loss-stale", "wait", "Refreshing positions", "Positions on this market are being refreshed after a price move. New trades wait until that finishes.", { autoRetry: true });
         return ctx.surface === "trade"
           // Only the trade ticket waits through this and resends (sendTxWaiting); nothing reads
           // autoRetry elsewhere, and Earn, close, deposit and withdraw do not resend.
@@ -420,7 +420,7 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
       case W.VaultLpBindRequiresFlatAsset:
         return m("setup-not-allowed", "error", "Not available here", "This market already has open positions, so the Earn vault can't take over its liquidity. Create a new market to use it.");
       case W.VaultLpPausedForSeniorDraw:
-        return m("paused-earn-covers-loss", "paused", "Paused briefly", "Paused while Earn covers a loss. It reopens automatically, usually within a minute.");
+        return m("paused-earn-covers-loss", "paused", "Paused briefly", "Paused while Earn covers a loss. It reopens when that is done.");
       case W.LpVaultCooldownActive:
         return m("earn-cooldown", "wait", "Almost ready", ctx.cooldownSecs !== undefined ? `Ready in ${mmss(ctx.cooldownSecs)}.` : "Ready in a moment.", { autoRetry: true });
       case W.LpVaultOiReservationViolated:

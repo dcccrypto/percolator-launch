@@ -38,7 +38,7 @@ const stakeIns: LpPosition = { ...base, poolAddress: "StakePoolB", slabAddress: 
 function sections() {
   return {
     vault: screen.getByText("Vault").closest("section") as HTMLElement,
-    stake: screen.getByText("Stake").closest("section") as HTMLElement,
+    stake: screen.getByText("Fee staking").closest("section") as HTMLElement,
   };
 }
 const hrefs = (el: HTMLElement) => within(el).getAllByRole("link").map((a) => a.getAttribute("href"));
@@ -88,6 +88,6 @@ describe("LpPositionsPanel Vault/Stake split", () => {
   it("omits an empty section", () => {
     render(<LpPositionsPanel positions={[stakeTrading]} totalRedeemable={5} loading={false} error={null} />);
     expect(screen.queryByText("Vault")).toBeNull();
-    expect(screen.getByText("Stake")).toBeTruthy();
+    expect(screen.getByText("Fee staking")).toBeTruthy();
   });
 });

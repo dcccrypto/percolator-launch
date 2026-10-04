@@ -1370,7 +1370,7 @@ export async function broadcastSignedTx(
 export const WAIT_DELAYS_MS = [1_500, 3_000, 5_000, 8_000, 12_000];
 
 /**
- * Wrapper codes the keeper clears within seconds (engine / oracle catching up) and the P2
+ * Wrapper codes the keeper normally clears quickly (no duration is promised) (engine / oracle catching up) and the P2
  * matcher's stale-mark codes. Only a SimulationRefusal (the wallet was never opened) is waited on.
  */
 const WAITABLE_WRAPPER = new Set<number>([WRAPPER_ERR.EngineStale, WRAPPER_ERR.EngineBStale, WRAPPER_ERR.EngineLockActive, WRAPPER_ERR.OracleStale, WRAPPER_ERR.OracleInvalid]);

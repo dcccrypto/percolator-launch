@@ -1192,7 +1192,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     if (engineLockError) {
       return (
         <div data-testid="trade-error" data-kind="engine-lock">
-          <StatusLine message={{ kind: "engine-lock", variant: "wait", title: "Market busy", body: `${engineLockError} This usually clears within a minute.`, why }} legacyTestId="trade-error" />
+          <StatusLine message={{ kind: "engine-lock", variant: "wait", title: "Market busy", body: engineLockError, why }} legacyTestId="trade-error" />
         </div>
       );
     }

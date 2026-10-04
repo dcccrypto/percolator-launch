@@ -334,7 +334,7 @@ function StakeHeader({
           className="text-2xl font-medium tracking-[-0.01em] text-[var(--text)]"
           style={{ fontFamily: "var(--font-display)" }}
         >
-          <span className="font-normal text-[var(--text-secondary)]">Insurance </span>Staking
+          <span className="font-normal text-[var(--text-secondary)]">Fee </span>staking
         </h1>
         <p className="mt-2 max-w-lg text-[13px] text-[var(--text-secondary)]">
           Stake collateral into a market&apos;s insurance pool to provide first-loss backing —
@@ -359,7 +359,7 @@ function StakeHeader({
         {/* Stats strip */}
         <div
           className="mt-5 grid grid-cols-2 gap-px border border-[var(--border)] bg-[var(--border)] sm:grid-cols-4"
-          aria-label="Staking statistics"
+          aria-label="Fee staking statistics"
         >
           {stats.map((s) => (
             <div key={s.label} className="min-w-0 bg-[var(--panel-bg)] p-4 sm:p-5">
@@ -1361,7 +1361,7 @@ function StakeSidebar() {
         <div className="mb-3 flex items-center gap-2">
           <span aria-hidden="true" className="text-xs">🛡️</span>
           <h3 className="text-[12px] font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
-            What Staking Backs
+            What fee staking backs
           </h3>
         </div>
         <div className="space-y-2">

@@ -43,7 +43,7 @@ describe("deriveTicketState: the §3.3 priority table", () => {
     const rows: Array<[Partial<TicketStateInput>, string, string, string, string]> = [
       [{ marketResolved: true }, "settled", "Market settled", "info", "This market has settled. Close any position and withdraw; there's nothing else to do."],
       [{ adlReduceOnly: true }, "close-only", "Close-only for now", "paused", "Close-only for now after a liquidation. Closing works normally. New positions reopen once the positions on one side have closed, which depends on those traders and can take a while."],
-      [{ engineStale: true }, "catching-up", "Waiting for prices…", "wait", "Prices are catching up. Trading resumes automatically, usually within a minute."],
+      [{ engineStale: true }, "catching-up", "Waiting for prices…", "wait", "Prices are catching up. Trading resumes once the market has caught up."],
       [{ waitingForPrice: true }, "waiting-price", "Waiting for price…", "wait", "Waiting for a fresh price. This usually takes a few seconds."],
       [{ openingPaused: true }, "both-paused", "Opening paused", "paused", "New positions are paused right now. Closing works normally."],
       [{ sameOwner: true }, "same-owner", "Close-only for this wallet", "paused", "You created this market, so this wallet can only close positions here. Use another wallet to trade it."],

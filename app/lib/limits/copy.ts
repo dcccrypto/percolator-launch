@@ -248,7 +248,7 @@ export const TICKET_COPY = {
     body: "Close-only for now after a liquidation. Closing works normally. New positions reopen once the positions on one side have closed, which depends on those traders and can take a while.",
     button: "Close-only for now",
   },
-  catchingUp: { title: "Catching up", body: "Prices are catching up. Trading resumes automatically, usually within a minute.", button: "Waiting for prices…" },
+  catchingUp: { title: "Catching up", body: "Prices are catching up. Trading resumes once the market has caught up.", button: "Waiting for prices…" },
   waitingPrice: { title: "Waiting for price", body: "Waiting for a fresh price. This usually takes a few seconds.", button: "Waiting for price…" },
   sidePaused: {
     title: (sides: string) => `New ${sides} paused`,

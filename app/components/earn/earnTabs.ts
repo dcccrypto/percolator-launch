@@ -10,7 +10,7 @@
 
 export const EARN_TABS = [
   { key: "vault", label: "Vaults" },
-  { key: "stake", label: "Stake" },
+  { key: "stake", label: "Fee staking" },
   // Creator fees are a way of earning here too, so the hub that lists the
   // others lists this one. /my-markets keeps its own route — this is a second
   // entry point, not a move.

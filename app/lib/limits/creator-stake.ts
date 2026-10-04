@@ -76,7 +76,7 @@ export const CREATOR_STAKE_PANEL_COPY = {
     "lp-open": "Locked while traders have open positions on your market. It unlocks as they close.",
     "at-floor": "This is the minimum you must keep while Earn deposits are in the vault.",
     "backing-short": "Locked until the market's backing covers Earn deposits again.",
-    "draw-pending": "Paused while the market settles a loss. It reopens automatically, usually within a minute.",
+    "draw-pending": "Paused while the market settles a loss. It reopens when that is done.",
   } satisfies Record<StakeReason, string>,
   resolvedAvailable: (amount: string) => `Your creator stake: ${amount} available after Earn depositors are paid.`,
   resolvedWithdraw: (amount: string) => `Withdraw ${amount}`,

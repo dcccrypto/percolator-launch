@@ -558,7 +558,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <button
               onClick={() => { prewarmClose(); setShowCloseModal(true); }}
               disabled={closeLoading || lpUnderfunded || !hasValidMark || engineStale}
-              title={!hasValidMark ? "Waiting for price data…" : engineStale ? "Prices are catching up. Closing resumes automatically, usually within a minute." : "Close position"}
+              title={!hasValidMark ? "Waiting for price data…" : engineStale ? "Prices are catching up. Closing resumes once the market has caught up." : "Close position"}
               aria-label="Close position"
               className="text-[11px] text-[var(--short)]/70 transition-colors hover:text-[var(--short)] disabled:cursor-not-allowed disabled:opacity-40"
             >
@@ -725,7 +725,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               <StatusLine
                 className="mt-2"
                 legacyTestId="engine-stale-warning"
-                message={{ kind: "engine-catching-up", variant: "wait", title: "Catching up", body: "Prices are catching up. Closing resumes automatically, usually within a minute." }}
+                message={{ kind: "engine-catching-up", variant: "wait", title: "Catching up", body: "Prices are catching up. Closing resumes once the market has caught up." }}
               />
             )}
 
@@ -740,7 +740,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               <button
                 onClick={() => { prewarmClose(); setShowCloseModal(true); }}
                 disabled={closeLoading || lpUnderfunded || !hasValidMark || engineStale}
-                title={!hasValidMark ? "Waiting for price data…" : engineStale ? "Prices are catching up. Closing resumes automatically, usually within a minute." : undefined}
+                title={!hasValidMark ? "Waiting for price data…" : engineStale ? "Prices are catching up. Closing resumes once the market has caught up." : undefined}
                 className="flex-1 rounded-none border border-[var(--short)]/30 py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-colors duration-150 hover:bg-[var(--short)]/8 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {!hasValidMark ? "Awaiting Price…" : engineStale ? "Waiting for prices…" : "Close Position"}

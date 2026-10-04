@@ -1,5 +1,7 @@
 'use client';
 
+import { vaultWithdrawView } from '@/lib/limits/earn-withdrawable';
+import type { WithdrawStatus } from '@/lib/limits/earn-withdrawable';
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
 import { PublicKey, type TransactionInstruction } from '@solana/web3.js';
@@ -161,7 +163,16 @@ export interface InsuranceLPState {
    * combined NAV 77 pays at), and what the user's whole position (wallet + pending escrow) can be
    * paid right now when that is less than all of it (lib/limits/earn-split-pot.ts).
    */
-  splitPot: { totalShares: bigint; navAtoms: bigint; maxNowAtoms: bigint | null } | null;
+  splitPot: {
+    totalShares: bigint;
+    navAtoms: bigint;
+    maxNowAtoms: bigint | null;
+    /** NAV if every open winner claim were paid now, atoms (lib/limits/earn-withdrawable.ts). */
+    claimAdjustedNavAtoms: bigint | null;
+    /** The most the whole vault can pay out now (all holders), atoms. */
+    vaultMaxNowAtoms: bigint | null;
+    withdrawStatus: WithdrawStatus | null;
+  } | null;
 }
 
 /** P3: refuse (with the reason) before signing when the program would refuse the Earn op. */
@@ -547,7 +558,15 @@ export function useInsuranceLP() {
             const plan = planSplitPotRedemption({ own: sp.own, sib: sp.sib, totalShares: sp.totalShares, shares: held, feeShareBps: sp.feeShareBps, navFloor: sp.navFloor });
             if (plan && !plan.payable) maxNowAtoms = (cappedShares(plan.maxShares, held) * v.nav) / sp.totalShares;
           }
-          splitPot = { totalShares: sp.totalShares, navAtoms: v.nav, maxNowAtoms };
+          const w = vaultWithdrawView(sp);
+          splitPot = {
+            totalShares: sp.totalShares,
+            navAtoms: v.nav,
+            maxNowAtoms,
+            claimAdjustedNavAtoms: w ? w.claimAdjustedNav : null,
+            vaultMaxNowAtoms: w ? w.maxWithdrawableNow : null,
+            withdrawStatus: w ? w.status : null,
+          };
         }
       }
 

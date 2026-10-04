@@ -42,6 +42,7 @@ import { decodeAssetRiskLimits, decodeMarketEngineView } from "@/lib/limits/deco
 import { isAdlReduceOnly } from "@/lib/limits/adl-reduce-only";
 import { limitsFlags } from "@/lib/limits/flags";
 import { COPY } from "@/lib/limits/copy";
+import { closeOnlyDurationLine } from "@/lib/adl-since";
 
 const MARKET_GROUP_OFF = 592;
 const MARKET_GROUP_LEN = 758;
@@ -78,7 +79,7 @@ export type LockReason =
   | "resolved" //       header.mode == Resolved: closes/withdrawals only
   | "recovery" //       header.mode == Recovery
   | "bankruptcy" //     bankruptcy_hlock_active: gates LP-backing/insurance withdrawals only (NOT trading); clears when pnl_pos_tot == 0
-  | "loss-stale" //     loss_stale_active: positioned accounts need a refresh crank (keeper, ~seconds)
+  | "loss-stale" //     loss_stale_active: positioned accounts need a refresh crank (keeper); NO duration is promised: it has run for hours
   | "repairable" //     lapsed backing bucket / ResetPending side — self-heal repairs it in your tx
   | "drain-only" //     a side is DrainOnly: only risk-reducing trades on that side
   | "adl-reduce-only"; // F-3: a_long or a_short != ADL_ONE after a bankruptcy ADL — opens blocked, closes via tag 44
@@ -243,7 +244,7 @@ export function decodeMarketHealth(
 
 export type HealthBadgeTone = "danger" | "warning" | "info";
 export interface HealthBadge {
-  id: "lp-depleted" | "lp-halted" | "adl-reduce-only" | "payout-haircut" | "resolved" | "recovery" | "bankruptcy" | "loss-stale" | "repairable" | "drain-only";
+  id: "v1" | "lp-depleted" | "lp-halted" | "adl-reduce-only" | "payout-haircut" | "resolved" | "recovery" | "bankruptcy" | "loss-stale" | "repairable" | "drain-only";
   label: string;
   tone: HealthBadgeTone;
   detail: string;
@@ -256,8 +257,23 @@ export function formatBpsPercent(bps: number): string {
   return `${s}%`;
 }
 
-/** Badges for market cards / the trade page, most severe first. Pure. */
-export function healthBadges(h: MarketHealth): HealthBadge[] {
+/**
+ * A "dead" market: new positions cannot open and nothing in the app can change that (ADL reduce-only
+ * after a bankruptcy, no capital on the other side, or recovery mode). Closing and withdrawing still work.
+ * Derived from on-chain state only: no hardcoded market list.
+ */
+export function isDeadMarket(h: Pick<MarketHealth, "lockReasons" | "lpDepleted" | "lpHalted">): boolean {
+  return h.lockReasons.includes("adl-reduce-only") || h.lockReasons.includes("recovery") || h.lpDepleted || h.lpHalted;
+}
+
+/** The label that marks a market of the first generation that can now only be closed. */
+export const V1_BADGE_LABEL = "v1";
+
+/**
+ * Badges for market cards / the trade page, most severe first. Pure.
+ * `adlSinceMs` = when this market was first seen close-only (lib/adl-since.ts), `nowMs` the clock for its duration.
+ */
+export function healthBadges(h: MarketHealth, adlSinceMs: number | null = null, nowMs: number = Date.now()): HealthBadge[] {
   const out: HealthBadge[] = [];
   if (h.lockReasons.includes("resolved")) {
     out.push({ id: "resolved", label: "Settled", tone: "danger", detail: "This market has settled. Close any position and withdraw; there's nothing else to do." });
@@ -269,14 +285,14 @@ export function healthBadges(h: MarketHealth): HealthBadge[] {
     // P1: supersedes "LP depleted" (a depleted LP is halted under P1, and closes still work).
     out.push({
       id: "lp-halted",
-      label: "Paused",
+      label: "Close-only",
       tone: "danger",
       detail: "The market has no room for new positions right now. Closing works normally.",
     });
   } else if (h.lpDepleted) {
     out.push({
       id: "lp-depleted",
-      label: "Paused",
+      label: "Close-only",
       tone: "danger",
       detail: `${TICKET_FUNDS_LINE(h.lpIsVault)} Closing works normally.`,
     });
@@ -296,7 +312,7 @@ export function healthBadges(h: MarketHealth): HealthBadge[] {
       id: "adl-reduce-only",
       label: "Close-only",
       tone: "warning",
-      detail: COPY.adlReduceOnly,
+      detail: [COPY.adlReduceOnly, closeOnlyDurationLine(adlSinceMs, nowMs)].filter(Boolean).join(" "),
     });
   }
   if (h.lockReasons.includes("bankruptcy")) {
@@ -313,7 +329,17 @@ export function healthBadges(h: MarketHealth): HealthBadge[] {
     out.push({ id: "repairable", label: "Catching up", tone: "info", detail: "The market is catching up. Your next transaction includes the update automatically." });
   }
   if (h.lockReasons.includes("loss-stale")) {
-    out.push({ id: "loss-stale", label: "Refreshing", tone: "info", detail: "Positions are being refreshed after a price move. This clears within seconds." });
+    out.push({ id: "loss-stale", label: "Refreshing", tone: "info", detail: "Positions are being refreshed after a price move. New positions wait until that finishes." });
+  }
+  if (isDeadMarket(h)) {
+    // Right after the first close-only badge, so a two-badge market card shows "Close-only" and "v1".
+    const first = out.findIndex((b) => b.id === "recovery" || b.id === "lp-halted" || b.id === "lp-depleted" || b.id === "adl-reduce-only");
+    out.splice(first + 1, 0, {
+      id: "v1",
+      label: V1_BADGE_LABEL,
+      tone: "info",
+      detail: "This is a v1 market and it is close-only: you can close positions and withdraw, but not open new ones.",
+    });
   }
   return out;
 }
@@ -333,6 +359,8 @@ export interface MarketHealthRow {
   realizableProfitAtoms: string;
   lockReasons: LockReason[];
   badges: HealthBadge[];
+  /** Unix ms this market was first seen close-only (ADL); null/absent = not close-only or unknown. A lower bound. */
+  adlSinceMs?: number | null;
 }
 
 /** `slabs` query param → distinct canonical base58 keys, or null if invalid / empty / > MAX. */

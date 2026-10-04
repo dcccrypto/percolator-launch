@@ -3,9 +3,9 @@ import type { ReactNode } from "react";
 import { pageMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = pageMetadata({
-  title: "Stake into Percolator Pools",
+  title: "Fee staking",
   description:
-    "Deposit into Percolator pools to earn protocol yield and help backstop permissionless perpetual markets on Solana.",
+    "Fee staking: stake into a Percolator pool to earn a share of trading fees and help backstop permissionless perpetual markets on Solana.",
   path: "/stake",
   keywords: ["staking", "Solana staking", "DeFi pools", "protocol yield"],
 });

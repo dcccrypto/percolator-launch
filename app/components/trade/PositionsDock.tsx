@@ -570,7 +570,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                     onClick={() => { resetPhase(); prewarmClose(); setShowCloseModal(true); }}
                     data-testid="position-close"
                     disabled={closeLoading || lpUnderfunded || !hasValidMark || engineStale}
-                    title={!hasValidMark ? "Waiting for price data…" : engineStale ? "Prices are catching up. Closing resumes automatically, usually within a minute." : undefined}
+                    title={!hasValidMark ? "Waiting for price data…" : engineStale ? "Prices are catching up. Closing resumes once the market has caught up." : undefined}
                     className="rounded-none border border-[var(--short)]/30 px-3 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-colors duration-150 hover:bg-[var(--short)]/8 hover:border-[var(--short)]/50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Close

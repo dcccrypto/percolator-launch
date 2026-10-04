@@ -16,6 +16,8 @@ import { qToUsd, rowVolumeUsd } from '@/lib/q-usd';
 import { pollWhenVisible } from '@/lib/pollWhenVisible';
 import { getMultipleAccountsInfoChunked } from '@/lib/rpc-chunk';
 import { splitPotLedgerKeys, splitPotStateFromAccounts, vaultValue } from '@/lib/limits/earn-split-pot';
+import { atomsToUsd, vaultWithdrawView } from '@/lib/limits/earn-withdrawable';
+import type { WithdrawStatus } from '@/lib/limits/earn-withdrawable';
 
 // ═══════════════════════════════════════════════════════════════
 // Types
@@ -45,6 +47,17 @@ export interface MarketVaultInfo {
   oiUtilPct: number;
   /** Collateral token decimals */
   decimals: number;
+  /**
+   * Two-pot vaults only (undefined on a bound P3 vault or an unreadable one). Derived from the pot ledgers
+   * and source credit on chain by the same functions the withdraw path uses (lib/limits/earn-withdrawable.ts).
+   */
+  earnWithdraw?: {
+    /** What the vault is worth if every open winner claim were paid now (USD). */
+    claimAdjustedNavUsd: number;
+    /** The most the whole vault can pay out right now (USD). */
+    maxWithdrawableNowUsd: number;
+    status: WithdrawStatus;
+  };
   /**
    * Whether this market has a usable on-chain Earn LP vault (registry + mint).
    * Set by buildMarketVaultInfo from `curatedVaults[slab].found`. `undefined`
@@ -199,6 +212,8 @@ export interface CuratedVaultOnChain {
   cooldownSlots: bigint;
   /** Whether an LP Vault Registry account was actually found on-chain for this slab. */
   found: boolean;
+  /** Claim-adjusted NAV, max withdrawable now and the withdraw status (two-pot vaults only), in collateral atoms. */
+  withdraw?: { claimAdjustedNavAtoms: bigint; maxWithdrawableNowAtoms: bigint; status: WithdrawStatus };
 }
 
 /** Minimal shape read from GET /api/playground/registered-markets for Earn-page seeding. */
@@ -396,7 +411,20 @@ export async function fetchCuratedVaultsOnChain(
         const [m, lo, ls] = spInfos.slice(3 * j, 3 * j + 3);
         const sp = splitPotStateFromAccounts(programId, s.market, s.registryData, m?.data ?? null, lo?.data ?? null, ls?.data ?? null, navFloor);
         const v = sp ? vaultValue(sp) : null;
-        if (sp && v && sp.totalShares > 0n) result[s.slab] = { ...result[s.slab], tvlAtoms: v.nav };
+        if (sp && v && sp.totalShares > 0n) {
+          // The withdraw view is extra information: if it cannot be computed the TVL must still show.
+          let w: ReturnType<typeof vaultWithdrawView> = null;
+          try {
+            w = vaultWithdrawView(sp);
+          } catch {
+            w = null;
+          }
+          result[s.slab] = {
+            ...result[s.slab],
+            tvlAtoms: v.nav,
+            ...(w ? { withdraw: { claimAdjustedNavAtoms: w.claimAdjustedNav, maxWithdrawableNowAtoms: w.maxWithdrawableNow, status: w.status } } : {}),
+          };
+        }
       });
     }
   } catch (err) {
@@ -559,6 +587,15 @@ export function buildMarketVaultInfo(
     // Earn LP vault registry present on-chain? Drives the vault grid's
     // "hide markets without a usable vault" filter (VaultGrid).
     hasVault: curatedVaults[slab]?.found === true,
+    ...(curatedVaults[slab]?.withdraw
+      ? {
+          earnWithdraw: {
+            claimAdjustedNavUsd: atomsToUsd(curatedVaults[slab].withdraw.claimAdjustedNavAtoms, decimals),
+            maxWithdrawableNowUsd: atomsToUsd(curatedVaults[slab].withdraw.maxWithdrawableNowAtoms, decimals),
+            status: curatedVaults[slab].withdraw.status,
+          },
+        }
+      : {}),
   } satisfies MarketVaultInfo;
 }
 
