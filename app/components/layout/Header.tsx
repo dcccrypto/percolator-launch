@@ -304,7 +304,7 @@ export const Header: FC = () => {
               {/* Group header — accordion trigger */}
               <button
                 onClick={() => toggleMobileGroup(group.label)}
-                className="flex w-full items-center justify-between px-3 py-2.5 text-[13px] font-bold uppercase tracking-wider text-[#9ca3af]"
+                className="flex w-full items-center justify-between px-3 py-2.5 text-[13px] font-bold uppercase tracking-wider text-[var(--text-secondary)]"
                 aria-expanded={mobileExpanded === group.label}
               >
                 {group.label}
@@ -339,7 +339,7 @@ export const Header: FC = () => {
                       className={[
                         "px-3 py-2 text-[13px] font-medium rounded-sm transition-all",
                         pathname === item.href
-                          ? "text-[#22d3ee] bg-[rgba(34,211,238,0.08)]"
+                          ? "text-[var(--accent-text)] bg-[var(--accent)]/[0.06]"
                           : "text-[var(--text-secondary)] hover:text-[var(--text)] hover:bg-[var(--bg-elevated)]",
                       ].join(" ")}
                     >

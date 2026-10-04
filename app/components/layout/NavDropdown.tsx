@@ -78,7 +78,7 @@ export const NavDropdown: FC<NavDropdownProps> = ({ label, items }) => {
           "flex min-h-10 items-center gap-1 rounded-sm px-3 text-sm font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)]",
           hasActive || open
             ? "text-[var(--text)]"
-            : "text-[#9ca3af] hover:text-[var(--text)]",
+            : "text-[var(--text-secondary)] hover:text-[var(--text)]",
         ].join(" ")}
       >
         {label}
@@ -125,8 +125,8 @@ export const NavDropdown: FC<NavDropdownProps> = ({ label, items }) => {
               className={[
                 "block px-4 py-2.5 text-sm transition-colors duration-150",
                 active
-                  ? "text-[#22d3ee] bg-[rgba(34,211,238,0.08)]"
-                  : "text-[#d1d5db] hover:text-[var(--text)] hover:bg-[var(--bg-surface)]",
+                  ? "text-[var(--accent-text)] bg-[var(--accent)]/[0.06]"
+                  : "text-[var(--text)] hover:bg-[var(--bg-surface)]",
               ].join(" ")}
             >
               {item.label}
