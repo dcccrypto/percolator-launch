@@ -28,4 +28,11 @@ describe("PositionsDock sticky action column", () => {
     expect(SRC.slice(tdIdx, tdIdx + 400)).toContain("PnlShareButton");
     expect(SRC.slice(tdIdx, tdIdx + 400)).toContain("bg-[var(--panel-bg)]");
   });
+
+  it("lifts an open row menu above the next row's pinned cell", () => {
+    // Each pinned cell is its own z-10 stacking context, so the next row's cell
+    // (later in the DOM) would paint over this row's open NFT menu.
+    const tdIdx = SRC.indexOf('<td className="sticky right-0 z-10');
+    expect(SRC.slice(tdIdx, tdIdx + 120)).toContain("has-[[role=menu]]:z-30");
+  });
 });
