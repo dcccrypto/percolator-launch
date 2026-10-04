@@ -17,7 +17,9 @@
  *   --slabs a,b,c        markets to rebuild (default: every active devnet market in the markets table)
  *   --authority <pubkey> keeper wallet that signed the pushes (default: the fee payer of the newest push tx on the first market)
  *   --program <pubkey>   wrapper program (default: the owner of the first slab)
- *   --since <unix|iso>   ignore anything older (default: none = from each market's launch)
+ *   --since <unix|iso>   ignore anything older (default: the earliest created_at of the markets being rebuilt, minus
+ *                        one hour. The keeper wallet also signed for older program deployments, so an
+ *                        unbounded listing would page through all of that history for nothing)
  *   --rps <n>            sustained RPC requests/second (default 8)
  *   --chunk <n>          transactions per saved chunk (default 100)
  *   --max-chunks <n>     stop after n chunks; a later run resumes
@@ -71,7 +73,14 @@ async function main(): Promise<void> {
     if (!authority) throw new Error("could not infer the keeper authority; pass --authority");
   }
   const since = arg("since");
-  const sinceSec = since === undefined ? undefined : /^\d+$/.test(since) ? Number(since) : Math.floor(Date.parse(since) / 1000);
+  let sinceSec: number | undefined = since === undefined ? undefined : /^\d+$/.test(since) ? Number(since) : Math.floor(Date.parse(since) / 1000);
+  if (sinceSec === undefined) {
+    const r = await sql.unsafe(`SELECT MIN(created_at) AS t FROM markets WHERE slab_address = ANY($1::text[])`, [slabs]);
+    const t = r[0]?.t ? new Date(r[0].t as string | Date).getTime() : NaN;
+    if (Number.isFinite(t)) sinceSec = Math.floor(t / 1000) - 3600;
+    else console.log("[chain-backfill] no created_at found: listing the keeper wallet's whole history (pass --since to bound it)");
+  }
+  if (sinceSec !== undefined) console.log(`[chain-backfill] since ${new Date(sinceSec * 1000).toISOString()}`);
 
   console.log(`[chain-backfill] ${slabs.length} markets, program ${programId.slice(0, 8)}…, authority ${authority.slice(0, 8)}…, ${arg("rps") ?? 8} rps`);
   const t0 = Date.now();
