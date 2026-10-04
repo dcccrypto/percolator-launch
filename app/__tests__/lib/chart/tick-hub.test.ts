@@ -22,6 +22,23 @@ describe("TickHub", () => {
     expect(h.ingest(tk(T0 + 1000, "999"), T0 + 6000)).toBeNull();
     expect(h.forming(SLAB, "mark", 1)!.c).toBe(0.0001);
   });
+  it("drops a tick whose slot goes backwards; an equal slot is fine (negative control)", () => {
+    const h = new TickHub("e");
+    const withSlot = (slot: number, landedMs: number, mark = "100"): IngestTick => ({ ...tk(landedMs, mark), slot });
+    expect(h.ingest(withSlot(50, T0), T0)).not.toBeNull();
+    expect(h.ingest(withSlot(50, T0 + 1500), T0 + 1500)).not.toBeNull();
+    expect(h.ingest(withSlot(49, T0 + 3000), T0 + 3000)).toBeNull();
+    expect(h.ingest(withSlot(51, T0 + 4500), T0 + 4500)).not.toBeNull();
+  });
+  it("rejects a mark more than 20x away from the previous one, both ways; 19x passes (negative control)", () => {
+    const h = new TickHub("e");
+    expect(h.ingest(tk(T0, "1000000"), T0)).not.toBeNull();            // $1
+    expect(h.ingest(tk(T0 + 1500, "21000000"), T0 + 1500)).toBeNull();   // 21x up
+    expect(h.ingest(tk(T0 + 3000, "40000"), T0 + 3000)).toBeNull();      // 25x down
+    expect(h.ingest(tk(T0 + 4500, "19000000"), T0 + 4500)).not.toBeNull(); // 19x up still accepted
+    expect(h.forming(SLAB, "mark", 1)!.h).toBe(19); // the rejected ticks never reached the candle
+    expect(h.forming(SLAB, "mark", 1)!.l).toBe(1);
+  });
   it("builds mark and oracle candles independently; a null oracle leaves the oracle series alone", () => {
     const h = new TickHub("e");
     h.ingest(tk(T0, "100", "90"), T0);

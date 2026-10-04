@@ -58,6 +58,17 @@ describe("createPgCandleStore SQL shape", () => {
     expect(p).toHaveLength(2 * 9 + 2);
     expect(p.slice(-2)).toEqual(["live", "gecko"]);
   });
+  it("splits a big batch into statements of at most PG_UPSERT_CHUNK rows (parameter limit); a small batch stays one", async () => {
+    const { store, unsafe } = fake();
+    const rows = Array.from({ length: 2500 }, (_, i) => ({ slab: SLAB, series: "mark" as const, res: 1 as const, candle: cd(60 * (i + 1), 1) }));
+    await store.upsert(rows);
+    expect(unsafe).toHaveBeenCalledTimes(3);
+    for (const c of unsafe.mock.calls) expect((c[1] as unknown[]).length).toBeLessThan(65_535);
+    expect(Math.max(...unsafe.mock.calls.map((c) => (c[1] as unknown[]).length))).toBe(1000 * 10);
+    unsafe.mockClear();
+    await store.upsert(rows.slice(0, 1000));
+    expect(unsafe).toHaveBeenCalledTimes(1);
+  });
   it("does nothing for an empty batch", async () => {
     const { store, unsafe } = fake();
     await store.upsert([]);

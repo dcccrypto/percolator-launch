@@ -34,6 +34,13 @@ export interface CandleStore {
   /** Backfill ledger: when did we last pull Gecko for (slab,res), 0 when never. */
   backfilledAt(slab: string, res: CandleResMinutes): Promise<number>;
   markBackfilled(slab: string, res: CandleResMinutes, atMs: number, bars: number): Promise<void>;
+  /**
+   * Atomically claim the right to pull Gecko for (slab, res) for `holdMs`. False when somebody else
+   * (any instance) holds the claim or a back-off is still running. The claim is the global single-flight.
+   */
+  claimBackfill(slab: string, res: CandleResMinutes, nowMs: number, holdMs: number): Promise<boolean>;
+  /** Negative cache: keep everyone away from (slab, res) until `untilMs` after a failed / no-pool / 429 pull. */
+  backoffBackfill(slab: string, res: CandleResMinutes, untilMs: number): Promise<void>;
   prune(nowMs: number): Promise<number>;
 }
 
@@ -83,8 +90,16 @@ export class MemoryCandleStore implements CandleStore {
     }
     return out;
   }
+  readonly retry = new Map<string, number>();
   async backfilledAt(slab: string, res: CandleResMinutes) { return this.ledger.get(`${slab}|${res}`) ?? 0; }
-  async markBackfilled(slab: string, res: CandleResMinutes, atMs: number) { this.ledger.set(`${slab}|${res}`, atMs); }
+  async markBackfilled(slab: string, res: CandleResMinutes, atMs: number) { this.ledger.set(`${slab}|${res}`, atMs); this.retry.delete(`${slab}|${res}`); }
+  async claimBackfill(slab: string, res: CandleResMinutes, nowMs: number, holdMs: number) {
+    const k = `${slab}|${res}`;
+    if ((this.retry.get(k) ?? 0) > nowMs) return false;
+    this.retry.set(k, nowMs + holdMs);
+    return true;
+  }
+  async backoffBackfill(slab: string, res: CandleResMinutes, untilMs: number) { this.retry.set(`${slab}|${res}`, untilMs); }
   async prune(): Promise<number> { return 0; }
 }
 
@@ -105,10 +120,18 @@ function toStored(r: DbCandle): StoredCandle {
   return { t: Number(r.t), o: Number(r.o), h: Number(r.h), l: Number(r.l), c: Number(r.c), n: Number(r.n), src: r.src };
 }
 
+/** Rows per statement (10 parameters each). */
+export const PG_UPSERT_CHUNK = 1_000;
+
 export function createPgCandleStore(sql: SqlLike): CandleStore {
-  return {
+  const store: CandleStore = {
     async upsert(rows) {
       if (rows.length === 0) return;
+      // Postgres allows 65,535 bind parameters per statement; this uses 10 per row.
+      if (rows.length > PG_UPSERT_CHUNK) {
+        for (let i = 0; i < rows.length; i += PG_UPSERT_CHUNK) await store.upsert(rows.slice(i, i + PG_UPSERT_CHUNK));
+        return;
+      }
       // One multi-row statement. Live data is authoritative: it replaces a gecko row outright,
       // and merges into an existing live row so a restart that lost the in-memory open
       // cannot rewrite the persisted open/high/low. A gecko row never overwrites a live one.
@@ -164,9 +187,28 @@ export function createPgCandleStore(sql: SqlLike): CandleStore {
     },
     async markBackfilled(slab, res, atMs, bars) {
       await sql.unsafe(
-        `INSERT INTO chart_backfill (slab, res, fetched_at, bars) VALUES ($1,$2,$3,$4)
-         ON CONFLICT (slab, res) DO UPDATE SET fetched_at = excluded.fetched_at, bars = excluded.bars`,
+        `INSERT INTO chart_backfill (slab, res, fetched_at, bars, retry_after) VALUES ($1,$2,$3,$4,NULL)
+         ON CONFLICT (slab, res) DO UPDATE SET fetched_at = excluded.fetched_at, bars = excluded.bars, retry_after = NULL`,
         [slab, res, new Date(atMs).toISOString(), bars],
+      );
+    },
+    async claimBackfill(slab, res, nowMs, holdMs) {
+      // One atomic statement: insert a placeholder row, or take over an existing one only when its
+      // claim/back-off has expired. RETURNING is empty when somebody else holds it.
+      const rows = await sql.unsafe(
+        `INSERT INTO chart_backfill (slab, res, fetched_at, bars, retry_after) VALUES ($1,$2,'1970-01-01T00:00:00Z',0,$3)
+         ON CONFLICT (slab, res) DO UPDATE SET retry_after = excluded.retry_after
+           WHERE chart_backfill.retry_after IS NULL OR chart_backfill.retry_after <= $4
+         RETURNING 1`,
+        [slab, res, new Date(nowMs + holdMs).toISOString(), new Date(nowMs).toISOString()],
+      );
+      return rows.length > 0;
+    },
+    async backoffBackfill(slab, res, untilMs) {
+      await sql.unsafe(
+        `INSERT INTO chart_backfill (slab, res, fetched_at, bars, retry_after) VALUES ($1,$2,'1970-01-01T00:00:00Z',0,$3)
+         ON CONFLICT (slab, res) DO UPDATE SET retry_after = excluded.retry_after`,
+        [slab, res, new Date(untilMs).toISOString()],
       );
     },
     async prune(nowMs) {
@@ -180,4 +222,5 @@ export function createPgCandleStore(sql: SqlLike): CandleStore {
       return removed;
     },
   };
+  return store;
 }

@@ -7,8 +7,8 @@ import { MAX_INGEST_TICKS, type IngestBody, type IngestTick } from "./perp-types
 
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const E6_STRING = /^[1-9][0-9]{0,18}$/;
-/** A tick stamped further in the future than this is a bad clock, not data. */
-export const MAX_FUTURE_SKEW_MS = 60_000;
+/** A tick stamped further in the future than this is a bad clock, not data (keeper and server are NTP-synced). */
+export const MAX_FUTURE_SKEW_MS = 5_000;
 /** A tick older than this is not live data (the keeper is replaying or stuck). */
 export const MAX_AGE_MS = 60 * 60_000;
 

@@ -37,6 +37,10 @@ CREATE TABLE IF NOT EXISTS public.chart_backfill (
   res        smallint    NOT NULL,
   fetched_at timestamptz NOT NULL,
   bars       integer     NOT NULL DEFAULT 0,
+  -- Global single-flight + negative cache: a pull is claimed by setting this in the future (claim
+  -- hold while pulling; 10 min back-off after a failed / no-pool / rate-limited pull). Shared by every
+  -- instance through the database, so a new or unlisted market cannot retry-storm the shared IP.
+  retry_after timestamptz,
   PRIMARY KEY (slab, res)
 );
 

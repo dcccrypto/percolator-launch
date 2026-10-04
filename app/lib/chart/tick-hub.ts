@@ -22,7 +22,9 @@ import {
 
 /** Replay horizon: a reconnect shorter than this is repaired from memory. */
 export const REPLAY_WINDOW_MS = 10 * 60_000;
-export const REPLAY_MAX_PER_SLAB = 1_200;
+export const REPLAY_MAX_PER_SLAB = 600;
+/** A mark more than this factor away from the previous one is not a push the keeper's circuit breaker would let through. */
+export const MAX_MARK_JUMP = 20;
 
 export interface DirtyCandle {
   slab: string;
@@ -36,6 +38,8 @@ interface SlabState {
   ring: TickMessage[];
   books: Record<TickSeries, CandleBook>;
   lastLandedMs: number;
+  lastSlot: number;
+  lastMark: number | null;
 }
 
 export class TickHub {
@@ -50,7 +54,7 @@ export class TickHub {
   private state(slab: string): SlabState {
     let s = this.slabs.get(slab);
     if (!s) {
-      s = { seq: 0, ring: [], books: { mark: new CandleBook(), oracle: new CandleBook() }, lastLandedMs: 0 };
+      s = { seq: 0, ring: [], books: { mark: new CandleBook(), oracle: new CandleBook() }, lastLandedMs: 0, lastSlot: 0, lastMark: null };
       this.slabs.set(slab, s);
     }
     return s;
@@ -82,8 +86,15 @@ export class TickHub {
   ingest(t: IngestTick, recvMs: number): TickMessage | null {
     const s = this.state(t.slab);
     if (t.landedMs < s.lastLandedMs) return null;
-    s.lastLandedMs = t.landedMs;
+    // The slot never goes backwards either: a replayed or forged older slot cannot rewrite the chart.
+    if (t.slot < s.lastSlot) return null;
     const mark = e6ToUsd(t.markE6);
+    // A mark that jumps more than MAX_MARK_JUMPx from the previous one is rejected (the keeper's
+    // circuit breaker bounds real moves far below that), so one bad tick cannot wreck the axis.
+    if (s.lastMark !== null && (mark > s.lastMark * MAX_MARK_JUMP || mark < s.lastMark / MAX_MARK_JUMP)) return null;
+    s.lastLandedMs = t.landedMs;
+    s.lastSlot = t.slot;
+    s.lastMark = mark;
     const oracle = t.oracleE6 === null ? null : e6ToUsd(t.oracleE6);
     s.seq += 1;
     const msg: TickMessage = {

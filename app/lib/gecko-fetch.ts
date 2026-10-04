@@ -78,10 +78,12 @@ export function geckoBackoffMs(
  * first usable Response, the last failed Response when out of attempts, or
  * null on a network/timeout error with no attempts left. Never throws.
  */
-export async function geckoFetch(url: string): Promise<Response | null> {
+export async function geckoFetch(url: string, opts: { attempts?: number } = {}): Promise<Response | null> {
   const headers = { ...GECKO_HEADERS, ...getGeckoConfig().authHeaders };
   const startedAt = Date.now();
-  for (let attempt = 0; attempt < GECKO_ATTEMPTS; attempt++) {
+  // `attempts: 1` is for background backfill: a 429 must not be retried into the shared IP's limit.
+  const attempts = Math.max(1, Math.min(opts.attempts ?? GECKO_ATTEMPTS, GECKO_ATTEMPTS));
+  for (let attempt = 0; attempt < attempts; attempt++) {
     // Hard-bound each attempt's timeout by the remaining total budget so the
     // whole call can never exceed ~GECKO_DEADLINE_MS, no matter how the
     // attempts time out. Attempt 0 always gets the full per-attempt timeout
@@ -97,14 +99,14 @@ export async function geckoFetch(url: string): Promise<Response | null> {
       // Success, or a non-retryable 4xx (400/404/…): hand back as-is.
       if (res.ok || (res.status < 500 && res.status !== 429)) return res;
       // 429 / 5xx: back off and retry if we still can, else return the failure.
-      if (attempt < GECKO_ATTEMPTS - 1) {
+      if (attempt < attempts - 1) {
         await sleep(geckoBackoffMs(res, attempt, startedAt));
         continue;
       }
       return res;
     } catch {
       // Network error / timeout — retry if attempts and time budget remain.
-      if (attempt < GECKO_ATTEMPTS - 1 && Date.now() - startedAt < GECKO_DEADLINE_MS) {
+      if (attempt < attempts - 1 && Date.now() - startedAt < GECKO_DEADLINE_MS) {
         await sleep(geckoBackoffMs(null, attempt, startedAt));
         continue;
       }

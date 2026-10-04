@@ -41,6 +41,8 @@ export function createTradeFeed(opts: {
   watched(): Iterable<string>;
   emit(m: TradeMessage): void;
   now?: () => number;
+  /** Most slabs watched in one query (default 64). */
+  maxSlabs?: number;
   /** Safety cap on trades emitted per poll. */
   maxRows?: number;
 }) {
@@ -51,7 +53,8 @@ export function createTradeFeed(opts: {
   return {
     /** One poll. Never throws: a failed query just skips this tick. Returns trades emitted. */
     async poll(): Promise<number> {
-      const slabs = [...new Set(opts.watched())];
+      // Bounded: one query must never grow with the number of distinct slabs clients ask about.
+      const slabs = [...new Set(opts.watched())].slice(0, opts.maxSlabs ?? 64);
       for (const s of [...cursor.keys()]) if (!slabs.includes(s)) { cursor.delete(s); seenAtCursor.delete(s); }
       if (slabs.length === 0) return 0;
       const t = now();

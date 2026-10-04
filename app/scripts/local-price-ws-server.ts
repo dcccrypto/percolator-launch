@@ -53,6 +53,8 @@ import { fetchJupiterSolUsdE6 } from "../lib/jupiter-price";
 import { pickSolUsdE6 } from "../lib/priceStore/solUsd";
 import { isBlockedSlab } from "../lib/blocklist";
 import { createTickService, MAX_BODY_BYTES } from "../lib/chart/tick-service";
+import { bearerMatches } from "../lib/chart/tick-ingest";
+import { MAX_WATCHED_SLABS, RateLimiter, WS_MAX_PAYLOAD_BYTES, checkSubscribe, clientKey, isKnownSlab } from "../lib/chart/ws-guards";
 import { getPgCandleStore, getPgSql } from "../lib/chart/pg-store";
 import { createTradeFeed } from "../lib/chart/trade-feed";
 import type { TickMessage } from "../lib/chart/perp-types";
@@ -203,6 +205,7 @@ async function refreshDbMarkets(): Promise<void> {
       }
     }
     dexMarkets = next;
+    marketsLoaded = true;
   } catch (err) {
     console.warn(
       "[local-price-ws] market refresh failed — keeping the previous list:",
@@ -241,7 +244,19 @@ const clients = new Set<ClientState>();
 const TICK_INGEST_KEY = process.env.TICK_INGEST_KEY;
 const TICK_FLUSH_MS = Number(process.env.TICK_FLUSH_MS ?? 10_000);
 const tickStore = getPgCandleStore(process.env, 2);
-const tickService = createTickService({ key: TICK_INGEST_KEY, store: tickStore, epoch: randomUUID() });
+/** The market set: database-registered active markets (dexMarkets) plus any TICK_EXTRA_SLABS. Until the first
+ *  successful database read the set is "not loaded" and only the address format is enforced. */
+let marketsLoaded = (process.env.TICK_EXTRA_SLABS ?? "").trim().length > 0 && !SUPABASE_URL;
+const knownSlabs = (): ReadonlySet<string> => {
+  const set = new Set(dexMarkets.map((m) => m.slab));
+  for (const x of (process.env.TICK_EXTRA_SLABS ?? "").split(",").map((v) => v.trim()).filter(Boolean)) set.add(x);
+  return set;
+};
+const tickService = createTickService({
+  key: TICK_INGEST_KEY, store: tickStore, epoch: randomUUID(),
+  isKnownSlab: (slab) => isKnownSlab(slab, knownSlabs(), marketsLoaded, isBlockedSlab),
+});
+const ticksLimiter = new RateLimiter(30, 60_000); // GET /ticks: 30 per minute per client
 const tickRequestStartedAt = Date.now();
 
 const CORS = { "Access-Control-Allow-Origin": "*" };
@@ -268,6 +283,9 @@ const httpServer = createServer(async (req, res) => {
   };
   if (req.method === "OPTIONS") { res.writeHead(204, { ...CORS, "Access-Control-Allow-Headers": "content-type" }); res.end(); return; }
   if (req.method === "POST" && url.pathname === "/ingest/ticks") {
+    // Authenticate on the header BEFORE reading a byte of the body.
+    if (!TICK_INGEST_KEY) { json(503, { error: "ingest is not configured" }, { Connection: "close" }); return; }
+    if (!bearerMatches(req.headers.authorization, TICK_INGEST_KEY)) { tickService.stats.ingestUnauthorized++; json(401, { error: "unauthorized" }, { Connection: "close" }); return; }
     const body = await readBody(req);
     if (body === null) { json(413, { error: "body too large" }); return; }
     const out = tickService.ingest(req.headers.authorization, body, (m) => broadcastTick(m));
@@ -280,6 +298,10 @@ const httpServer = createServer(async (req, res) => {
     const slab = url.searchParams.get("slab") ?? "";
     const since = Number(url.searchParams.get("sinceSeq") ?? "0");
     const epoch = url.searchParams.get("epoch");
+    if (!ticksLimiter.allow(clientKey(req.headers["x-forwarded-for"], req.socket.remoteAddress), Date.now())) {
+      json(429, { error: "slow down" }, { ...CORS, "Retry-After": "10" });
+      return;
+    }
     if (!slab || isBlockedSlab(slab)) { json(404, { error: "unknown slab" }, CORS); return; }
     json(200, { epoch: tickService.hub.epoch, ticks: tickService.replay(slab, Number.isFinite(since) ? since : 0, epoch) }, { ...CORS, "Cache-Control": "no-store" });
     return;
@@ -291,7 +313,7 @@ const httpServer = createServer(async (req, res) => {
   json(404, { error: "not found" });
 });
 
-const wss = new WebSocketServer({ server: httpServer });
+const wss = new WebSocketServer({ server: httpServer, maxPayload: WS_MAX_PAYLOAD_BYTES });
 
 function sendPrice(ws: WebSocket, slab: string, priceE6: bigint): void {
   if (ws.readyState !== WebSocket.OPEN) return;
@@ -317,6 +339,7 @@ const TRADE_POLL_MS = Number(process.env.TRADE_POLL_MS ?? 1_000);
 const tradeSql = getPgSql(process.env, 1);
 const tradeFeed = tradeSql
   ? createTradeFeed({
+      maxSlabs: MAX_WATCHED_SLABS,
       watched: () => { const s = new Set<string>(); for (const c of clients) for (const x of c.subscriptions) s.add(x); return s; },
       emit: (m) => {
         const payload = JSON.stringify(m);
@@ -359,6 +382,11 @@ wss.on("connection", (ws) => {
     try {
       const msg = JSON.parse(raw.toString()) as { type?: string; slabAddress?: string };
       if (msg.type === "subscribe" && msg.slabAddress) {
+        const v = checkSubscribe({ slab: msg.slabAddress, current: client.subscriptions, known: knownSlabs(), marketsLoaded, isBlocked: isBlockedSlab });
+        if (!v.ok) {
+          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "error", reason: v.reason }));
+          return;
+        }
         client.subscriptions.add(msg.slabAddress);
         // Send the last-known price immediately (if any) — mirrors
         // production's "send initial data for price channels" so the

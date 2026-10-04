@@ -63,6 +63,16 @@ describe("createTradeFeed", () => {
     expect(await f.poll()).toBe(0);
     expect(out).toEqual([]);
   });
+  it("caps the watched set passed to the ONE query (negative control: under the cap nothing is cut)", async () => {
+    const many = Array.from({ length: 200 }, (_, i) => `${A.slice(0, 38)}${String(100 + i)}`);
+    const calls: string[][] = [];
+    const f = createTradeFeed({ watched: () => many, emit: () => {}, now: () => NOW, maxSlabs: 64, query: async (slabs) => { calls.push(slabs); return []; } });
+    await f.poll();
+    expect(calls[0]).toHaveLength(64);
+    const g = createTradeFeed({ watched: () => many.slice(0, 10), emit: () => {}, now: () => NOW, maxSlabs: 64, query: async (slabs) => { calls.push(slabs); return []; } });
+    await g.poll();
+    expect(calls[1]).toHaveLength(10);
+  });
   it("survives a failing query and keeps its cursors", async () => {
     let fail = true;
     const out: TradeMessage[] = [];

@@ -16,6 +16,7 @@ export interface TickServiceStats {
   ticksAccepted: number;
   ticksRejected: number;
   ticksDroppedBackwards: number;
+  ticksDroppedUnknown: number;
   flushOk: number;
   flushFailed: number;
   lastIngestMs: number;
@@ -35,8 +36,13 @@ export interface TickService {
   replay(slab: string, sinceSeq: number, epoch: string | null): TickMessage[];
 }
 
+/** Rows per upsert statement: 10 parameters each, far below Postgres's 65,535-parameter ceiling. */
+export const FLUSH_CHUNK_ROWS = 500;
+
 export function createTickService(opts: {
   key: string | undefined;
+  /** Only ticks for markets we serve are accepted; omit to accept any well-formed slab. */
+  isKnownSlab?: (slab: string) => boolean;
   store: CandleStore | null;
   epoch: string;
   now?: () => number;
@@ -45,7 +51,7 @@ export function createTickService(opts: {
   const hub = new TickHub(opts.epoch);
   const stats: TickServiceStats = {
     ingestOk: 0, ingestUnauthorized: 0, ingestBad: 0,
-    ticksAccepted: 0, ticksRejected: 0, ticksDroppedBackwards: 0,
+    ticksAccepted: 0, ticksRejected: 0, ticksDroppedBackwards: 0, ticksDroppedUnknown: 0,
     flushOk: 0, flushFailed: 0, lastIngestMs: 0, lastFlushMs: 0,
   };
   let flushing = false;
@@ -79,6 +85,7 @@ export function createTickService(opts: {
       let accepted = 0;
       const recv = now();
       for (const t of parsed.ticks) {
+        if (opts.isKnownSlab && !opts.isKnownSlab(t.slab)) { stats.ticksDroppedUnknown++; continue; }
         const m = hub.ingest(t, recv);
         if (m) {
           accepted++;
@@ -98,13 +105,17 @@ export function createTickService(opts: {
       const rows = hub.drainDirty();
       if (rows.length === 0) return;
       flushing = true;
+      let written = 0;
       try {
-        await opts.store.upsert(rows.map((r) => ({ slab: r.slab, series: r.series, res: r.res, candle: r.candle })));
+        // Chunked: a large dirty set must never become one statement over the parameter limit.
+        for (; written < rows.length; written += FLUSH_CHUNK_ROWS) {
+          await opts.store.upsert(rows.slice(written, written + FLUSH_CHUNK_ROWS).map((r) => ({ slab: r.slab, series: r.series, res: r.res, candle: r.candle })));
+        }
         stats.flushOk++;
         stats.lastFlushMs = now();
       } catch (err) {
         stats.flushFailed++;
-        hub.requeue(rows);
+        hub.requeue(rows.slice(written));
         console.warn("[tick-service] candle flush failed:", err instanceof Error ? err.message : err);
       } finally {
         flushing = false;

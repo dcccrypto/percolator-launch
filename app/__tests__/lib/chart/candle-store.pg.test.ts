@@ -84,4 +84,26 @@ describe.skipIf(!URL && !PGLITE)("createPgCandleStore against Postgres", () => {
     expect(await store.range(SLAB, "mark", 1, old, old + 1, 5)).toEqual([]);
     expect((await store.range(SLAB, "mark", 1440, 0, 4e9, 5)).length).toBe(1);
   });
+
+  describe("backfill claim and negative cache", () => {
+    const S9 = "Ev5DZC5FGav5ZptzoAQqkn4JbYyRk3e7nXKTRznfzd6d";
+    const T = 1_791_000_000_000;
+    it("claims are atomic: the second claimant loses until the hold expires, then wins", async () => {
+      expect(await store.claimBackfill(S9, 1, T, 60_000)).toBe(true);
+      expect(await store.claimBackfill(S9, 1, T + 1_000, 60_000)).toBe(false);
+      expect(await store.claimBackfill(S9, 1, T + 61_000, 60_000)).toBe(true);
+    });
+    it("a different resolution is an independent claim", async () => {
+      expect(await store.claimBackfill(S9, 5, T, 60_000)).toBe(true);
+    });
+    it("backoff blocks claims until it ends; a successful pull clears it", async () => {
+      await store.backoffBackfill(S9, 15, T + 600_000);
+      expect(await store.claimBackfill(S9, 15, T + 1_000, 60_000)).toBe(false);
+      expect(await store.claimBackfill(S9, 15, T + 600_001, 60_000)).toBe(true);
+      await store.backoffBackfill(S9, 60, T + 600_000);
+      await store.markBackfilled(S9, 60, T, 5);
+      expect(await store.claimBackfill(S9, 60, T + 1_000, 60_000)).toBe(true);
+      expect(await store.backfilledAt(S9, 60)).toBe(T);
+    });
+  });
 });

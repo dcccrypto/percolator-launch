@@ -41,6 +41,17 @@ describe("geckoFetch — bounded retry for GeckoTerminal", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("attempts: 1 (background backfill) makes ONE call on a 429 and returns it; the default still retries (negative control)", async () => {
+    fetchMock.mockResolvedValue(res(429));
+    const once = await geckoFetch("https://x/y", { attempts: 1 });
+    expect(once?.status).toBe(429);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fetchMock.mockClear();
+    vi.spyOn(global, "setTimeout").mockImplementation(((fn: () => void) => { fn(); return 0 as never; }) as typeof setTimeout);
+    await geckoFetch("https://x/y");
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
+  });
+
   it("retries a 5xx and returns the eventual success", async () => {
     fetchMock.mockResolvedValueOnce(res(503)).mockResolvedValueOnce(res(200));
     const r = await geckoFetch("https://x/y");

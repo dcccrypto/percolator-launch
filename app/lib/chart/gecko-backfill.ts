@@ -20,6 +20,10 @@ import type { Candle, CandleResMinutes } from "./perp-types";
 export const REFRESH_MS = 20 * 60 * 60_000;
 export const MIN_SPACING_MS = 2_500;
 export const COOLDOWN_AFTER_429_MS = 60_000;
+/** After a failed / no-pool / rate-limited pull nobody (on any instance) retries that (slab, res) for this long. */
+export const NEGATIVE_CACHE_MS = 10 * 60_000;
+/** How long a pull may hold its database claim before another instance may take over. */
+export const CLAIM_HOLD_MS = 2 * 60_000;
 
 const GECKO_FRAME: Record<CandleResMinutes, { timeframe: "minute" | "hour" | "day"; aggregate: number }> = {
   1: { timeframe: "minute", aggregate: 1 },
@@ -38,7 +42,7 @@ export async function fetchGeckoPage(pool: string, res: CandleResMinutes): Promi
   const url =
     `${getGeckoConfig().base}/pools/${encodeURIComponent(pool)}/ohlcv/${timeframe}` +
     `?aggregate=${aggregate}&limit=1000&currency=usd`;
-  const r = await geckoFetch(url);
+  const r = await geckoFetch(url, { attempts: 1 });
   if (!r) return { ok: false, rateLimited: false };
   if (r.status === 429) return { ok: false, rateLimited: true };
   if (!r.ok) return { ok: false, rateLimited: false };
@@ -90,8 +94,14 @@ export function ensureOracleBackfill(slab: string, res: CandleResMinutes, deps: 
     const last = await deps.store.backfilledAt(slab, res);
     if (now() - last < REFRESH_MS) return { status: "fresh", bars: 0 };
     if (now() < cooldownUntil) return { status: "cooldown", bars: 0 };
+    // Global single-flight + negative cache: the claim lives in the database, so every instance
+    // respects both an in-progress pull and the back-off after a failed one.
+    if (!(await deps.store.claimBackfill(slab, res, now(), CLAIM_HOLD_MS))) return { status: "cooldown", bars: 0 };
     const pool = await deps.poolForSlab(slab);
-    if (!pool) return { status: "no-pool", bars: 0 };
+    if (!pool) {
+      await deps.store.backoffBackfill(slab, res, now() + NEGATIVE_CACHE_MS);
+      return { status: "no-pool", bars: 0 };
+    }
 
     // Serialise every upstream call behind one queue with minimum spacing.
     const run = queue.then(async (): Promise<GeckoPage> => {
@@ -104,6 +114,7 @@ export function ensureOracleBackfill(slab: string, res: CandleResMinutes, deps: 
     queue = run.catch(() => undefined);
     const page = await run;
     if (!page.ok) {
+      await deps.store.backoffBackfill(slab, res, now() + NEGATIVE_CACHE_MS);
       if (page.rateLimited) {
         cooldownUntil = now() + COOLDOWN_AFTER_429_MS;
         return { status: "rate-limited", bars: 0 };

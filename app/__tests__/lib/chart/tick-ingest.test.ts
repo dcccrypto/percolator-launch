@@ -32,6 +32,14 @@ describe("e6ToUsd", () => {
   });
 });
 
+describe("future skew", () => {
+  it("is clamped hard (5 s), not a minute", () => {
+    expect(MAX_FUTURE_SKEW_MS).toBe(5_000);
+    expect(parseIngestBody(body([tick({ landedMs: NOW + 4_000 })]), NOW)).toMatchObject({ ok: true, rejected: 0 });
+    expect(parseIngestBody(body([tick({ landedMs: NOW + 6_000 })]), NOW)).toMatchObject({ ok: true, rejected: 1 });
+  });
+});
+
 describe("parseIngestBody", () => {
   it("accepts a well-formed body", () => {
     const r = parseIngestBody(body([tick(), tick({ oracleE6: null })]), NOW);
