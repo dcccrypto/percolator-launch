@@ -254,8 +254,16 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   // numeric fallback for the liq/margin math below but reports
   // source === "unknown" so the PnL, ROE and entry CELLS render "--" instead.
   const safePnlForEntry = isSentinelValue(account.pnl) ? 0n : account.pnl;
+  // EFFECTIVE, not nominal: the derived-entry back-solve (`diff = pnl / size`)
+  // must use the SAME size the PnL below computes over (`effectiveSize`, line
+  // ~287). With raw `account.positionSize` here, a deleveraged leg with no cached
+  // entry back-solved an entry only `a_side/a_basis` of the way from the mark, and
+  // `computeMarkPnl(effectiveSize, thatEntry, mark)` then showed `pnl * a_side/a_basis`
+  // — understated by the ADL factor (up to 10x) versus ChartPnlBadge/usePortfolio,
+  // which already back-solve over effective size. On a cache hit the size arg is
+  // unused, so this only changes deleveraged + derived-entry positions.
   const resolvedEntry = resolveEntryPrice(
-    account.positionSize,
+    effectiveSize,
     resolvedEntryPrice,
     safePnlForEntry,
     currentPriceE6,
