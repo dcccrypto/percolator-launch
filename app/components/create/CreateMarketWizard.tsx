@@ -23,7 +23,7 @@ import { useQuickLaunch } from "@/hooks/useQuickLaunch";
 import { type DexPoolResult, isVerifiedPool } from "@/hooks/useDexPoolSearch";
 import { parseHumanAmount } from "@/lib/parseAmount";
 import { MAX_FUNDABLE_REQUIREMENT } from "@/lib/prefund-requirement";
-import { backingSeedPerDomain, deriveLaunchMarketParams, MIN_LEVERAGE_X } from "@/lib/market-params";
+import { backingSeedPerDomain, deriveLaunchMarketParams, leverageFromMarginBps, MIN_LEVERAGE_X } from "@/lib/market-params";
 import { LP_EXPOSURE_DEFAULT_BPS, clampLpExposureBps } from "@/lib/matcher-params";
 import { getConfig, getNetwork } from "@/lib/config";
 import { toE6, formatMarkPrice } from "@/lib/format";
@@ -323,7 +323,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // via flooredInitialMarginBps / deriveMarketParams — see useCreateMarket.ts;
   // MIN_SAFE_INITIAL_MARGIN_BPS itself is superseded, see GH#2621) so the success
   // screen advertises real leverage, not the raw requested value the dial produced.
-  const maxLeverage = Math.floor(10000 / flooredInitialMarginBps(wizard.initialMarginBps));
+  // leverageFromMarginBps, not floor(10000 / bps): the margin rounds up (6x stores 1667 bps),
+  // so a naive floor showed 6x as 5x. Same derivation create() records (useCreateMarket.ts).
+  const maxLeverage = leverageFromMarginBps(flooredInitialMarginBps(wizard.initialMarginBps));
   // The per-slot price-move cap InitMarket will set for this leverage — the
   // same derivation create() uses (deriveLaunchMarketParams). It sets how small
   // an opening price can be before the mark stops moving under open interest
