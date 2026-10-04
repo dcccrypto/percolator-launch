@@ -43,9 +43,6 @@ export interface LivePortfolioMetrics {
   totalUnrealizedPnl: bigint;
   /** Same definition usePortfolio uses: deposited capital + current unrealized PnL. */
   totalValue: bigint;
-  wins: number;
-  losses: number;
-  inProfitPct: number | null;
 }
 
 /**
@@ -156,34 +153,11 @@ export function useLivePortfolioMetrics(
       0n,
     );
 
-    // Aggregate classification follows the same selected PnL value as the
-    // aggregate itself. When live Entry/Mark derivation is unavailable,
-    // computeLivePositionPnl intentionally falls back to usePortfolio's
-    // on-chain/snapshot PnL; do not discard that valid fallback here.
-    //
-    // `pnlKnown` remains an individual-row display guard (PositionSummary uses
-    // it to avoid presenting a mark-derived number when Entry is unresolved).
-    const wins = livePositions.filter(
-      (metric) => metric.pnl > 0n,
-    ).length;
-
-    const losses = livePositions.filter(
-      (metric) => metric.pnl < 0n,
-    ).length;
-
-    const classified = wins + losses;
-
     return {
       openPositions,
       livePositions,
       totalUnrealizedPnl,
       totalValue: totalDeposited + totalUnrealizedPnl,
-      wins,
-      losses,
-      inProfitPct:
-        classified > 0
-          ? (wins / classified) * 100
-          : null,
     };
   }, [openPositions, totalDeposited, liveVersion]);
 }
