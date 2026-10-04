@@ -284,3 +284,17 @@ describe("createHttpRpc", () => {
     expect(f).toHaveBeenCalledTimes(1);
   });
 });
+
+import { resolveBackfillRpc } from "@/lib/chart/chain-rpc";
+describe("resolveBackfillRpc", () => {
+  it("prefers explicit URL, then the dedicated charts key, then the keeper key (flagged)", () => {
+    expect(resolveBackfillRpc({ CHAIN_RPC_URL: "https://x/y", HELIUS_CHARTS_API_KEY: "c" })).toEqual({ url: "https://x/y", usedKeeperKey: false });
+    expect(resolveBackfillRpc({ HELIUS_CHARTS_API_KEY: "charts", HELIUS_KEEPER_API_KEY: "keeper" })).toEqual({ url: "https://devnet.helius-rpc.com/?api-key=charts", usedKeeperKey: false });
+    expect(resolveBackfillRpc({ CHART_BACKFILL_HELIUS_KEY: "dedicated", HELIUS_CHARTS_API_KEY: "charts" })!.url).toContain("dedicated");
+    expect(resolveBackfillRpc({ HELIUS_KEEPER_API_KEY: "keeper" })).toEqual({ url: "https://devnet.helius-rpc.com/?api-key=keeper", usedKeeperKey: true });
+  });
+  it("is null with nothing configured (negative control), and ignores blank values", () => {
+    expect(resolveBackfillRpc({})).toBeNull();
+    expect(resolveBackfillRpc({ HELIUS_CHARTS_API_KEY: "  ", CHAIN_RPC_URL: "" })).toBeNull();
+  });
+});

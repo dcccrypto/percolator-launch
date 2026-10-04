@@ -84,3 +84,19 @@ export function createHttpRpc(o: HttpRpcOptions): ChainRpc & { requests(): numbe
     },
   };
 }
+
+/**
+ * The devnet RPC URL for the backfill, from the environment only. Preference order: an explicit
+ * CHAIN_RPC_URL; the dedicated charts key (CHART_BACKFILL_HELIUS_KEY, then HELIUS_CHARTS_API_KEY);
+ * and only as a last resort the live keeper's key (HELIUS_KEEPER_API_KEY), which the live keeper shares,
+ * so `usedKeeperKey` is reported and the script runs at the gentle default rate in that case.
+ */
+export function resolveBackfillRpc(env: Record<string, string | undefined>): { url: string; usedKeeperKey: boolean } | null {
+  const explicit = env.CHAIN_RPC_URL?.trim();
+  if (explicit) return { url: explicit, usedKeeperKey: false };
+  const dedicated = (env.CHART_BACKFILL_HELIUS_KEY ?? env.HELIUS_CHARTS_API_KEY)?.trim();
+  if (dedicated) return { url: `https://devnet.helius-rpc.com/?api-key=${dedicated}`, usedKeeperKey: false };
+  const keeper = env.HELIUS_KEEPER_API_KEY?.trim();
+  if (keeper) return { url: `https://devnet.helius-rpc.com/?api-key=${keeper}`, usedKeeperKey: true };
+  return null;
+}

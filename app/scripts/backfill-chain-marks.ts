@@ -10,8 +10,9 @@
  *
  * Environment:
  *   INDEXER_DATABASE_URL | CANDLES_DATABASE_URL   Postgres with chart_candles + chart_chain_backfill (apply the migrations first)
- *   CHAIN_RPC_URL                                 full devnet RPC URL; default built from HELIUS_KEEPER_API_KEY
- *   (the key is the LIVE KEEPER's: the default rate is deliberately low)
+ *   CHAIN_RPC_URL                                 full devnet RPC URL, or
+ *   CHART_BACKFILL_HELIUS_KEY | HELIUS_CHARTS_API_KEY   the dedicated charts key (default 25 rps; use --rps 50 for full speed), or
+ *   HELIUS_KEEPER_API_KEY                         last resort: the LIVE KEEPER's key, so the default is a gentle 8 rps
  *
  * Flags:
  *   --slabs a,b,c        markets to rebuild (default: every active devnet market in the markets table)
@@ -20,7 +21,7 @@
  *   --since <unix|iso>   ignore anything older (default: the earliest created_at of the markets being rebuilt, minus
  *                        one hour. The keeper wallet also signed for older program deployments, so an
  *                        unbounded listing would page through all of that history for nothing)
- *   --rps <n>            sustained RPC requests/second (default 8)
+ *   --rps <n>            sustained RPC requests/second (default 25 on the charts key, 8 on the keeper's key)
  *   --chunk <n>          transactions per saved chunk (default 100)
  *   --max-chunks <n>     stop after n chunks; a later run resumes
  *   --sample-seconds <n> only fetch txs in the first n seconds of each minute (about n/60 of the cost; see chain-backfill.ts)
@@ -28,7 +29,7 @@
  *   --dry-run            plan only
  */
 import { createPgProgressStore, runChainBackfill, type RpcTx } from "../lib/chart/chain-backfill";
-import { createHttpRpc } from "../lib/chart/chain-rpc";
+import { createHttpRpc, resolveBackfillRpc } from "../lib/chart/chain-rpc";
 import { getPgCandleStore, getPgSql } from "../lib/chart/pg-store";
 
 function arg(name: string): string | undefined {
@@ -42,10 +43,12 @@ async function main(): Promise<void> {
   const store = getPgCandleStore(process.env, 2);
   if (!sql || !store) throw new Error("INDEXER_DATABASE_URL (or CANDLES_DATABASE_URL) is not set");
 
-  const url = process.env.CHAIN_RPC_URL?.trim() ||
-    (process.env.HELIUS_KEEPER_API_KEY ? `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_KEEPER_API_KEY}` : "");
-  if (!url) throw new Error("set CHAIN_RPC_URL or HELIUS_KEEPER_API_KEY");
-  const rpc = createHttpRpc({ url, rps: Number(arg("rps") ?? 8) });
+  const resolved = resolveBackfillRpc(process.env);
+  if (!resolved) throw new Error("set CHAIN_RPC_URL, CHART_BACKFILL_HELIUS_KEY or HELIUS_CHARTS_API_KEY");
+  const url = resolved.url;
+  // The dedicated charts key can take 25-50 rps; the live keeper's key stays at the gentle default.
+  const rps = Number(arg("rps") ?? (resolved.usedKeeperKey ? 8 : 25));
+  const rpc = createHttpRpc({ url, rps });
 
   let slabs = (arg("slabs") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   if (slabs.length === 0) {
@@ -83,7 +86,7 @@ async function main(): Promise<void> {
   }
   if (sinceSec !== undefined) console.log(`[chain-backfill] since ${new Date(sinceSec * 1000).toISOString()}`);
 
-  console.log(`[chain-backfill] ${slabs.length} markets, program ${programId.slice(0, 8)}…, authority ${authority.slice(0, 8)}…, ${arg("rps") ?? 8} rps`);
+  console.log(`[chain-backfill] ${slabs.length} markets, program ${programId.slice(0, 8)}…, authority ${authority.slice(0, 8)}…, ${rps} rps${resolved.usedKeeperKey ? " (LIVE KEEPER KEY)" : ""}`);
   const t0 = Date.now();
   const summary = await runChainBackfill(
     {
@@ -99,7 +102,7 @@ async function main(): Promise<void> {
   console.log(`[chain-backfill] ${summary.status}: ${JSON.stringify(summary)} in ${secs}s, ${rpc.requests()} RPC requests`);
   if (summary.status === "dry-run") {
     const req = summary.listed + Math.ceil(summary.listed / 1000);
-    console.log(`[chain-backfill] a full run would make about ${req} RPC requests, about ${Math.round(req / Number(arg("rps") ?? 8) / 60)} min at ${arg("rps") ?? 8} rps`);
+    console.log(`[chain-backfill] a full run would make about ${req} RPC requests, about ${Math.round(req / rps / 60)} min at ${rps} rps`);
   }
   process.exit(0);
 }
