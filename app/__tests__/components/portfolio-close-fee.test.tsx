@@ -35,7 +35,10 @@ vi.mock("@/components/providers/SlabProvider", () => ({
 
 const pk = new PublicKey("11111111111111111111111111111111");
 // 5 SOL long at 100 (notional 500 USDC), capital 1,000 USDC.
+// adlApplicable:false = a market with no ADL layer, so the effective size is the raw basis and the
+// preview is available (#3089/#3090: an unknown ADL state on an ADL market hides the preview instead).
 const row = {
+  adlApplicable: false,
   slabAddress: "SlabPlain1111", symbol: "SOL", idx: 0, collateralMint: pk,
   account: { kind: AccountKind.User, owner: pk, capital: 1_000_000_000n, positionSize: 5_000_000n, pnl: 0n, entryPrice: 100_000_000n },
   market: { slabAddress: pk, config: { collateralMint: pk }, engine: {} },
@@ -44,16 +47,26 @@ const row = {
   liquidationPriceE6: 0n, liquidationDistancePct: 100, nftWrapped: false,
 };
 
+function openClose(r: typeof row) {
+  vi.mocked(useWalletCompat).mockReturnValue({ connected: true, publicKey: pk } as any);
+  vi.mocked(usePortfolio).mockReturnValue({
+    positions: [r], totalPnl: 0n, totalDeposited: 1_000_000_000n, loading: false, refresh: vi.fn(),
+  } as any);
+  vi.mocked(useMultiTokenMeta).mockReturnValue(new Map([[pk.toBase58(), { symbol: "SOL", decimals: 6 }]]) as any);
+  render(<PortfolioPositionsView />);
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  return screen.getByTestId("close-modal");
+}
+
 describe("#24: /portfolio close preview", () => {
+  it("an unknown ADL state keeps the preview unavailable (no fee/balance row on a guessed size)", () => {
+    const modal = openClose({ ...row, adlApplicable: true });
+    expect(within(modal).getByTestId("close-preview-unavailable")).toBeInTheDocument();
+    expect(within(modal).queryByText("Trading Fee:")).toBeNull();
+  });
+
   it("subtracts the market's trading fee", () => {
-    vi.mocked(useWalletCompat).mockReturnValue({ connected: true, publicKey: pk } as any);
-    vi.mocked(usePortfolio).mockReturnValue({
-      positions: [row], totalPnl: 0n, totalDeposited: 1_000_000_000n, loading: false, refresh: vi.fn(),
-    } as any);
-    vi.mocked(useMultiTokenMeta).mockReturnValue(new Map([[pk.toBase58(), { symbol: "SOL", decimals: 6 }]]) as any);
-    render(<PortfolioPositionsView />);
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    const modal = screen.getByTestId("close-modal");
+    const modal = openClose(row);
     // 0.1% of 500 = 0.5
     expect(within(modal).getByText("Trading Fee:").parentElement!.textContent).toMatch(/0\.5\b/);
     // Capital 1000 + PnL 0 - fee 0.5 (1000 before the fix).
