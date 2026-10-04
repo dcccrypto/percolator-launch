@@ -1,5 +1,6 @@
 "use client";
 import { UNSUPPORTED_POOL_COPY } from "@/lib/wizard-copy";
+import { WIZARD_STORAGE_KEY } from "@/lib/wizard-storage";
 
 import { DEFAULT_JUNIOR_FLOOR_BPS, validateP3Wizard, wizardP3Params } from "@/lib/limits/p3-wizard";
 import { COPY as LIMITS_COPY } from "@/lib/limits/copy";
@@ -132,7 +133,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // PERC-516: Persist wizard state to localStorage so form survives page refresh.
   // This fixes the "Continue button does nothing" bug — without persisted state,
   // allValid is false after refresh because all fields are empty.
-  const WIZARD_STORAGE_KEY = "percolator-wizard-state";
+  // WIZARD_STORAGE_KEY lives in lib/wizard-storage so RecoverSolBanner clears the same key.
   // GH#1719: Use sessionStorage to track whether this is a fresh navigation to /create
   // vs. a same-session page refresh. On fresh navigation (new browser tab, link click from
   // another page), always start at step 1 to avoid showing stale Token step as "Complete"

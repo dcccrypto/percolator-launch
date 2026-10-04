@@ -6,6 +6,7 @@ import { explorerTxUrl, explorerAccountUrl } from "@/lib/config";
 import { useStuckSlabs, type StuckSlab } from "@/hooks/useStuckSlabs";
 import { useCloseMarket } from "@/hooks/useCloseMarket";
 import { useReclaimSlabRent } from "@/hooks/useReclaimSlabRent";
+import { WIZARD_STORAGE_KEY } from "@/lib/wizard-storage";
 
 interface RecoverSolBannerProps {
   /**
@@ -384,7 +385,7 @@ const UninitialisedSlabBanner: FC<{
             onClick={() => {
               clearStuck();
               try {
-                localStorage.removeItem("percolator-wizard-state");
+                localStorage.removeItem(WIZARD_STORAGE_KEY);
               } catch {
                 // localStorage unavailable — non-critical
               }

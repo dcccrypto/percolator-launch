@@ -7,6 +7,7 @@ import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import { useCreatedMarkets, type CreatedMarket } from "@/hooks/useCreatedMarkets";
 import { CreatorMarketRow } from "@/components/my-markets/CreatorMarketRow";
 import { CreatorAttentionStrip } from "@/components/my-markets/CreatorAttentionStrip";
+import { RecoverSolBanner } from "@/components/create/RecoverSolBanner";
 import { unitScaleToDecimals, resolveCreatedMarketPriceE6 } from "@/components/my-markets/types";
 import { isKeeperFeedDead, isEngineCrankStale } from "@/components/my-markets/attentionLogic";
 import { useLiveSlabPrices } from "@/hooks/useLiveSlabPrices";
@@ -254,6 +255,12 @@ const MyMarketsPage: FC = () => {
             <span className="font-normal text-[var(--text-muted)]">Your </span>Markets
           </h1>
           <p className="mt-2 mb-8 text-[13px] text-[var(--text-secondary)]">manage the markets you created.</p>
+          {/* #2967: a launch that stopped before InitMarket (or before the market
+              lists under this wallet) never reaches myMarkets, so for a creator
+              whose only launch is stuck this empty state is the whole page. Mount
+              the same recovery card the attention strip shows, or their locked
+              rent has no way back from here. Zero height when nothing is stuck. */}
+          <RecoverSolBanner />
           <div className="border border-[var(--border)]/50 bg-[var(--panel-bg)] p-10 text-center">
             <p className="mb-4 text-[11px] text-[var(--text-secondary)]">
               you haven&apos;t created a market with this wallet yet.
