@@ -136,12 +136,14 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
     resizeRedemption: lpVaultResizeRedemption,
     refreshState,
     lastDrawSummary,
+    readError: lpVaultReadError,
   } = useInsuranceLP();
   // UX WP-10 (UI-2): until the first read lands, figures show "—" (data-state="loading").
   const [loadedOnce, setLoadedOnce] = useState(false);
+  // A failed read is not a load: its zeros stay "—".
   useEffect(() => {
-    if (!lpVaultLoading) setLoadedOnce(true);
-  }, [lpVaultLoading]);
+    if (!lpVaultLoading && !lpVaultReadError) setLoadedOnce(true);
+  }, [lpVaultLoading, lpVaultReadError]);
   const firstLoad = !loadedOnce;
   const earnWallet = useWalletCompat();
   const earnLimits = useMarketLimits(slabAddress);
@@ -240,7 +242,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
   // genuinely bad/unknown slab, distinct from a market that's just excluded
   // from useEarnStats (e.g. non-'active' status) but still has a real vault.
   const marketNotFound =
-    !loading && !marketInfo && !fallbackSymbol && !lpVaultState.registryExists;
+    !loading && !marketInfo && !fallbackSymbol && !lpVaultState.registryExists && !lpVaultReadError;
 
   const symbol = marketInfo?.symbol ?? fallbackSymbol ?? 'UNKNOWN';
   // maxOI is only known once marketInfo resolves — without it we can't tell "no OI
@@ -298,13 +300,25 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
               ⚠ Couldn&apos;t refresh market stats
             </p>
             <p className="text-[11px] text-[var(--text-secondary)] mt-1">
-              {earnStatsError} — volume and insurance figures below may be stale. Vault balance and deposit/withdraw are unaffected.
+              {earnStatsError} — volume and insurance figures below may be stale.{!lpVaultReadError && ' Vault balance and deposit/withdraw are unaffected.'}
+            </p>
+          </div>
+        )}
+
+        {/* Earn vault read failed: unknown, not missing */}
+        {!loading && !vaultAvailable && lpVaultReadError && (
+          <div className="mb-6 border border-[var(--short)]/30 bg-[var(--short)]/5 rounded-sm px-4 py-3">
+            <p className="text-[12px] font-medium text-[var(--short)]">
+              ⚠ Couldn&apos;t load this Earn vault
+            </p>
+            <p className="text-[11px] text-[var(--text-secondary)] mt-1">
+              The network didn&apos;t respond. Retrying every 10 seconds; deposits and withdrawals are off until the vault loads.
             </p>
           </div>
         )}
 
         {/* Earn vault availability warning */}
-        {!loading && !vaultAvailable && (
+        {!loading && !vaultAvailable && !lpVaultReadError && (
           <div className="mb-6 border border-[var(--warning)]/30 bg-[var(--warning)]/5 rounded-sm px-4 py-3">
             <p className="text-[12px] font-medium text-[var(--warning)]">
               Earn Vault Unavailable
@@ -350,7 +364,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
         {/* Stats row */}
         <ScrollReveal>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-px border border-[var(--border)] bg-[var(--border)] mb-6">
-            <StatCell label="Vault Balance" loading={loading}>
+            <StatCell label="Vault Balance" loading={loading || firstLoad}>
               <AnimatedNumber
                 value={vaultUsd}
                 prefix="$"
@@ -358,7 +372,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
                 className="text-sm font-semibold text-[var(--text)]"
               />
             </StatCell>
-            <StatCell label="Earn shares" loading={loading}>
+            <StatCell label="Earn shares" loading={loading || firstLoad}>
               <span className="text-sm font-mono tabular-nums text-[var(--text)]">
                 {formatCompact(Number(lpVaultState.lpSupply) / collDivisor)}
               </span>
@@ -411,7 +425,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
               lpDecimals={lpVaultState.lpDecimals}
               collateralSymbol={collateralSymbol}
               redemptionRateE6={lpVaultState.vaultSharePriceE6}
-              loading={loading}
+              loading={loading || firstLoad}
               pendingWithdrawalLabel={(() => {
                 if (!lpVaultState.hasPendingRedemption) return null;
                 const pr = earnPricing;
