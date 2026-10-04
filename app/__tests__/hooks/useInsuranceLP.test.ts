@@ -1061,4 +1061,35 @@ describe("useInsuranceLP", () => {
       expect(result.current.readError).toBe(true);
     });
   });
+
+  // A pending withdrawal escrows the shares until it pays out; they are still the user's.
+  describe("position with a pending withdrawal", () => {
+    it("share % and value count the escrowed shares, not only the wallet's", async () => {
+      const MINT = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+      const REGISTRY = "7pXnR8Eg2g7YDtPkUeEmcYNpPN5yzGLbNHREeHJMzNhq";
+      const REDEMPTION = "6UwgpB4FBfQpKW8ACFv7EW5vXg1NiHRQijYzGBaXJSHJ";
+      const acct = { data: Buffer.alloc(64), lamports: 1, executable: false, owner: mockProgramId };
+      // Mint, registry and the redemption ticket exist; the wallet's LP account doesn't (all
+      // of the user's shares are in the pending withdrawal).
+      mockConnection.getAccountInfo.mockImplementation(async (pk: PublicKey) =>
+        [MINT, REGISTRY, REDEMPTION].includes(pk.toBase58()) ? acct : null,
+      );
+      vi.mocked(unpackMint).mockReturnValue({ supply: 1_000_000n, decimals: 6, isInitialized: true } as never);
+      const sdk = await import("@percolatorct/sdk");
+      vi.mocked(sdk.parseLpVaultRegistry).mockReturnValue({
+        totalLpSharesOutstanding: 1_000_000n,
+        feeDistributionTotalAtoms: 0n,
+        redemptionCooldownSlots: 0n,
+        domain: 0,
+      } as never);
+      vi.mocked(sdk.parseLpRedemption).mockReturnValue({ shares: 250_000n, requestSlot: 0n } as never);
+
+      const { result } = renderHook(() => useInsuranceLP());
+      await waitFor(() => expect(result.current.state.hasPendingRedemption).toBe(true));
+      expect(result.current.state.userLpBalance).toBe(0n);
+      expect(result.current.state.pendingRedemptionShares).toBe(250_000n);
+      expect(result.current.state.userSharePct).toBe(25);
+      expect(result.current.state.userVaultValueAtoms).toBe(250_000n);
+    });
+  });
 });

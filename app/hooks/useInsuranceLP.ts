@@ -400,10 +400,6 @@ export function useInsuranceLP() {
         ? (insuranceBalance * 1_000_000n) / lpSupply
         : 1_000_000n; // 1:1 if no supply
 
-      const userSharePct = lpSupply > 0n
-        ? Number((userLpBalance * 10000n) / lpSupply) / 100
-        : 0;
-
       const userRedeemableValue = lpSupply > 0n
         ? (userLpBalance * insuranceBalance) / lpSupply
         : 0n;
@@ -494,10 +490,6 @@ export function useInsuranceLP() {
             vaultSharePriceE6 = lpSupply > 0n
               ? (vaultTotalAtoms * 1_000_000n) / lpSupply
               : 1_000_000n;
-            userVaultValueAtoms = lpSupply > 0n
-              ? (userLpBalance * vaultTotalAtoms) / lpSupply
-              : 0n;
-
             // Pending redemption ticket (RequestRedeemLpShares → cooldown → ExecuteRedemption).
             if (registryInfo.redemptionPda) {
               const redemptionAcctInfo = await readAccount(registryInfo.redemptionPda);
@@ -531,6 +523,13 @@ export function useInsuranceLP() {
         console.error('Failed to refresh LP vault registry state:', registryErr);
       }
 
+      // The user's whole position: wallet shares plus shares escrowed by a pending withdrawal
+      // (still theirs until it pays out). Counting only the wallet showed 0% / $0 for the whole
+      // cooldown. The two-pot branch below prices the same `held` on its own NAV.
+      const heldShares = userLpBalance + pendingRedemptionShares;
+      const userSharePct = lpSupply > 0n ? Number((heldShares * 10000n) / lpSupply) / 100 : 0;
+      if (registryExists && lpSupply > 0n) userVaultValueAtoms = (heldShares * vaultTotalAtoms) / lpSupply;
+
       // Non-bound (two-pot) vault: value positions at the program's combined NAV over the
       // registry's shares (what 77 pays), count the escrowed pending shares as the user's, and
       // work out what the whole position can be paid right now (Custom 21 / 25 before signing).
@@ -550,7 +549,7 @@ export function useInsuranceLP() {
         // Wrapper 7a3ac04c+ (navFloor): an over-impaired pot is worth 0 instead of unpriceable.
         const v = sp ? combinedVault(sp.own, sp.sib, sp.feeShareBps, sp.navFloor === true) : null;
         if (sp && v && sp.totalShares > 0n) {
-          const held = userLpBalance + pendingRedemptionShares;
+          const held = heldShares;
           vaultTotalAtoms = v.nav;
           vaultSharePriceE6 = (v.nav * 1_000_000n) / sp.totalShares;
           userVaultValueAtoms = (held * v.nav) / sp.totalShares;
