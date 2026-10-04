@@ -6,6 +6,7 @@ import { GlassCard } from "@/components/ui/GlassCard";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { LiveMarketRail } from "@/components/landing/LiveMarketRail";
 import { MAX_LEVERAGE_X } from "@/lib/market-params";
+import { TrendingTokensRail } from "@/components/landing/TrendingTokensRail";
 
 const ARROW = (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
@@ -106,11 +107,23 @@ export default function Home() {
       </section>
 
       {/* ─── Live market rail ─── */}
-      <section className="mx-auto max-w-[1100px] px-6 pb-20 sm:px-8">
+      <section className="relative mx-auto mt-28 max-w-[1100px] px-6 pb-20 sm:mt-40 sm:px-8">
+        {/* Character banner floats above the whole section (heading + table) so it
+            never overlaps the links or columns. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/landing/char-markets.webp"
+          width={1626}
+          height={369}
+          decoding="async"
+          alt=""
+          aria-hidden="true"
+          className="pointer-events-none z-20 mx-auto -mb-2 block h-auto w-[84%] drop-shadow-[0_14px_26px_rgba(0,0,0,0.55)] sm:absolute sm:bottom-full sm:left-1/2 sm:mx-0 sm:mb-1.5 sm:w-[min(52%,560px)] sm:-translate-x-1/2"
+        />
         <ScrollReveal delay={0.05}>
           <div className="mb-4 flex items-baseline justify-between gap-4">
             <h2 className="text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent-text)]">
-              // live markets
+              // Live Markets on Percolator Trade
             </h2>
             <Link
               href="/markets"
@@ -125,6 +138,31 @@ export default function Home() {
         </ScrollReveal>
         <ScrollReveal delay={0.1}>
           <LiveMarketRail />
+        </ScrollReveal>
+      </section>
+
+      {/* ─── Trending on Solana DEXs (third-party tokens without a Percolator market yet) ─── */}
+      <section className="relative mx-auto mt-28 max-w-[1100px] px-6 pb-20 sm:mt-40 sm:px-8">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/landing/char-trending.webp"
+          width={1672}
+          height={337}
+          loading="lazy"
+          decoding="async"
+          alt=""
+          aria-hidden="true"
+          className="pointer-events-none z-20 mx-auto -mb-2 block h-auto w-[84%] drop-shadow-[0_14px_26px_rgba(0,0,0,0.55)] sm:absolute sm:bottom-full sm:right-[3%] sm:mx-0 sm:mb-1.5 sm:w-[min(52%,560px)]"
+        />
+        <ScrollReveal delay={0.05}>
+          <div className="mb-4 flex items-baseline justify-between gap-4">
+            <h2 className="text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent-text)]">
+              // Trending on Solana DEXs
+            </h2>
+          </div>
+        </ScrollReveal>
+        <ScrollReveal delay={0.1}>
+          <TrendingTokensRail />
         </ScrollReveal>
       </section>
 

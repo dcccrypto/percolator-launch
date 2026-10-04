@@ -17,6 +17,9 @@ vi.mock("@/lib/priceStore/priceStore", () => ({
   getSnapshot: () => ({ priceUsd: null, priceE6: null }),
 }));
 vi.mock("@/components/market/MarketLogo", () => ({ MarketLogo: () => null }));
+// Each row polls /api/prices for the 24h change via SWR — keep it inert so the
+// rows test stays a pure render (no network); the 24h column just reads "—".
+vi.mock("swr", () => ({ default: () => ({ data: undefined, error: undefined, isLoading: false }) }));
 
 import { LiveMarketRail } from "@/components/landing/LiveMarketRail";
 import { HARDCODED_BLOCKED_SLABS } from "@/lib/blocklist-data";
@@ -36,29 +39,35 @@ describe("LiveMarketRail rows", () => {
   it("lists the API's markets after the relaunch, busiest first, without zombies", () => {
     setStats([
       row("9EPm8nB8Fs7WcEZgE1WGFPTGc6rAzD6GhFJyMm4dEFHn", "Percolator", 10),
-      row("8WC8vALsDJhNCUVRmqZBDSg5xgFAhDrgy7zWqF512pDx", "SI", 50),
+      row("Azagguvr111111111111111111111111111111111111", "SOL", 50),
+      // Listing-hidden (lib/listing-hidden DEFAULT_HIDDEN): reachable by URL, never listed.
+      row("8WC8vALsDJhNCUVRmqZBDSg5xgFAhDrgy7zWqF512pDx", "SI", 500),
+      // A-6 orphan (Hm1bapsZ… shape): explicit null price source -> never listed.
+      row("Hm1bapsZ111111111111111111111111111111111111", "ORPHAN", 400, { dex_pool_address: null }),
       // Dead by isZombieMarket (empty vault, no price, no accounts), as /markets judges it.
       row("ZombieSLab1111111111111111111111111111111111", "DEAD", 99, { vault_balance: 0, c_tot: 0, last_price: null, total_accounts: 0 }),
     ]);
     render(<LiveMarketRail />);
     expect(links()).toEqual([
-      "/trade/8WC8vALsDJhNCUVRmqZBDSg5xgFAhDrgy7zWqF512pDx",
+      "/trade/Azagguvr111111111111111111111111111111111111",
       "/trade/9EPm8nB8Fs7WcEZgE1WGFPTGc6rAzD6GhFJyMm4dEFHn",
     ]);
     expect(screen.queryByText("DEAD")).toBeNull();
+    expect(screen.queryByText("SI")).toBeNull();
+    expect(screen.queryByText("ORPHAN")).toBeNull();
   });
 
   it("applies /markets' exact listing rule: blocklist, and string/over-cap coercion", () => {
     const blocked = [...HARDCODED_BLOCKED_SLABS][0];
     setStats([
-      row("8WC8vALsDJhNCUVRmqZBDSg5xgFAhDrgy7zWqF512pDx", "SI", 50),
+      row("Azagguvr111111111111111111111111111111111111", "SOL", 50),
       row(blocked, "BLOCKED", 99),
       // Empty vault as the string "0" and a corrupt over-cap price: /markets
       // sanitises the price away, so this is a zombie there and must be here.
       row("CorruptSlab111111111111111111111111111111111", "CORRUPT", 98, { vault_balance: "0", c_tot: "0", last_price: "7900000000000", total_accounts: "0" }),
     ]);
     render(<LiveMarketRail />);
-    expect(links()).toEqual(["/trade/8WC8vALsDJhNCUVRmqZBDSg5xgFAhDrgy7zWqF512pDx"]);
+    expect(links()).toEqual(["/trade/Azagguvr111111111111111111111111111111111111"]);
   });
 
   it("caps the rail at the six busiest rows, in order", () => {
