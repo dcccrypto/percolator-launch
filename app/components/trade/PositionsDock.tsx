@@ -304,8 +304,10 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
     if (!hasValidMark || currentPriceE6 <= 0n) return "text-[var(--warning)]";
     // Same tiers as the site-wide liquidation warning: the share of this position's
     // margin cushion left (lib/liquidation-risk.ts), not a flat price distance.
-    const cushion = computeMarginCushion({
-      positionSize: account.positionSize,
+    // EFFECTIVE size, like the liquidation line above it (engine margin runs over
+    // effective_abs_q). Unknown ADL state => not measurable (null), never a raw-size tier.
+    const cushion = pnlResult.effectiveSize === null ? null : computeMarginCushion({
+      positionSize: pnlResult.effectiveSize,
       entryPriceE6,
       capital: account.capital,
       markPriceE6: currentPriceE6,

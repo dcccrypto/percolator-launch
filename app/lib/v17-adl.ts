@@ -62,9 +62,10 @@
  * v16.rs:4562-4604) the header is
  *   market_id(8) + retired_slot(8) + lifecycle(1) + raw_oracle_target_price(8)
  *   + effective_price(8) + fund_px_last(8) + slot_last(8) = 49 bytes
- * and `a_long` / `a_short` are the first two u128s that follow. The same 14
- * u128s the SDK counts to reach `oi_eff_long_q` at rel 273 start here, which is
- * how these two offsets are cross-checked (49 + 14*16 = 273).
+ * and `a_long` / `a_short` are the first two u128s that follow. `oi_eff_long_q`
+ * sits 15 x 16 bytes after `a_long` (a x2, k x2, f x2, kf_epoch x2 u64, k/f epoch
+ * start x4, b x2, b epoch start x2), i.e. at rel 289 = 49 + 15*16 - NOT 273 - which
+ * is how these offsets are cross-checked (verified on a live slab with open interest).
  */
 
 import {

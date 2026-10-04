@@ -124,6 +124,8 @@ import { computePnlCardStats } from "@/lib/pnl-card";
 import { onChainMarkE6, portfolioPositionPnl, terminalPositionPnl } from "@/lib/position-pnl";
 import { computeEngineLiqPrice } from "@/lib/liquidation-risk";
 import { parseAssetAdlFactors } from "@/lib/v17-adl";
+import { computeMarginCushion } from "@/lib/liquidation-risk";
+import { liveMarginCushion } from "@/hooks/usePortfolio";
 import { V17_MARKET_GROUP_OFF, V17_MARKET_GROUP_LEN, V17_MARKET_ASSET_SLOT_LEN, V17_ASSET_SLOT_WRAPPER_LEN } from "@percolatorct/sdk";
 import { fireEvent } from "@testing-library/react";
 import { formatUsdPriceE6 } from "@/lib/format";
@@ -536,5 +538,43 @@ describe("ClosePositionModal when the ADL state is unknown (item 3)", () => {
     allFigures({ ...BASE, factors: null });
     openModal();
     expect(h.modalProps?.previewUnavailable).toBe(true);
+  });
+});
+
+describe("risk tier (margin cushion) is on EFFECTIVE size (follow-up)", () => {
+  // Long 80 raw / 40 effective, entry $99.875, mark $91, capital $1,000, mm 5%.
+  //  effective: equity 645 / notional 3,640 = 17.7%  -> ~63% of the cushion left (safe)
+  //  raw:       equity 290 / notional 7,280 =  4.0%  -> below maintenance (danger)
+  const DOWN: Scenario = { ...BASE, mark: 91_000_000n, rawOnChain: 91_000_000n };
+  const liqClass = () => {
+    const { container } = render(<PositionsDock slabAddress={SLAB} />);
+    return container.querySelector('[data-testid="position-liq"]')?.className ?? "";
+  };
+
+  it("the dock tier follows the effective size: not danger on an ADL'd position that is fine", () => {
+    const { pos } = setup(DOWN);
+    const cls = liqClass();
+    expect(cls).not.toContain("--short");
+    expect(cls).not.toContain("--warning");
+    const eff = computeMarginCushion({ positionSize: 40_000_000n, entryPriceE6: 99_875_000n, capital: 1_000_000_000n, markPriceE6: 91_000_000n, maintenanceMarginBps: 500n, initialMarginBps: 1000n });
+    const raw = computeMarginCushion({ positionSize: 80_000_000n, entryPriceE6: 99_875_000n, capital: 1_000_000_000n, markPriceE6: 91_000_000n, maintenanceMarginBps: 500n, initialMarginBps: 1000n });
+    expect(eff!).toBeGreaterThan(0.5);
+    expect(raw!).toBeLessThan(0.25); // control: raw size would have been red
+    // the portfolio-side cushion (bar / alert / card) is the same number
+    expect(liveMarginCushion(pos, DOWN.mark)).toBe(eff);
+  });
+
+  it("NEGATIVE CONTROL: the same move with no ADL (raw == effective) IS danger on the dock", () => {
+    setup({ ...DOWN, factors: { aLong: ADL_ONE, aShort: ADL_ONE } });
+    expect(liqClass()).toContain("--short");
+  });
+
+  it("unknown ADL state: not measurable (null), never a raw-size tier", () => {
+    const { pos } = setup({ ...DOWN, factors: null });
+    expect(liveMarginCushion(pos, DOWN.mark)).toBeNull();
+    const cls = liqClass();
+    expect(cls).not.toContain("--short"); // no raw-size "danger"
+    // CONTROL: with the factors known the cushion is a number
+    expect(liveMarginCushion(setup(DOWN).pos, DOWN.mark)).not.toBeNull();
   });
 });

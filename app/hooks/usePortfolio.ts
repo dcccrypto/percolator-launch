@@ -320,8 +320,12 @@ export function liveLiquidationDistancePct(pos: PortfolioPosition, liveMarkE6: b
  */
 export function liveMarginCushion(pos: PortfolioPosition, liveMarkE6: bigint | null | undefined): number | null {
   const markE6 = liveMarkE6 != null && liveMarkE6 > 0n ? liveMarkE6 : pos.oraclePriceE6;
+  // EFFECTIVE size, like the liquidation price (engine margin runs over effective_abs_q).
+  // An unknown ADL state is not measurable: `effectiveSize` is then only a raw-basis
+  // display fallback and must not feed a risk tier.
+  if (pos.adlKnown === false) return null;
   return computeMarginCushion({
-    positionSize: pos.account?.positionSize ?? 0n,
+    positionSize: pos.effectiveSize ?? pos.account?.positionSize ?? 0n,
     entryPriceE6: pos.effectiveEntryPrice,
     capital: pos.account?.capital ?? 0n,
     markPriceE6: markE6,
@@ -864,7 +868,8 @@ export async function fetchPortfolioSnapshot(
 
             // Track liquidation risk (same margin-relative tiers as the alert)
             const pollCushion = computeMarginCushion({
-              positionSize: account.positionSize,
+              // v12.x has no ADL: effective size IS the position size.
+              positionSize: v12Pnl.effectiveSize ?? account.positionSize,
               entryPriceE6: effectiveEntryPrice,
               capital: account.capital,
               markPriceE6: oraclePriceE6,

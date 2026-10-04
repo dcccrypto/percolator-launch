@@ -2,7 +2,7 @@
 
 import { FC, useState, useEffect, useMemo } from "react";
 import { useSlabState } from "@/components/providers/SlabProvider";
-import { adlSideFactor, effectiveExposureQ } from "@/lib/v17-adl";
+import { computePositionPnl } from "@/lib/position-pnl";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 
 import { useEngineState } from "@/hooks/useEngineState";
@@ -52,7 +52,7 @@ function formatCountdown(slots: number): string {
 }
 
 export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) => {
-  const { params, config, raw, adlFactors } = useSlabState();
+  const { params, config, raw, adlFactors, wrapperConfigV17 } = useSlabState();
   const { engine, fundingRate, isV17 } = useEngineState();
   const userAccount = useUserAccount();
   const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
@@ -188,10 +188,29 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
     // Funding accrues through the same per-side `f` accumulator that `k` does,
     // scaled by the side's live ADL factor (v16.rs:9564-9576), so a deleveraged
     // leg pays/receives funding on its REDUCED exposure, not its nominal basis.
-    const effSize = adlFactors
-      ? (effectiveExposureQ(account.positionSize, account.adlABasis, adlSideFactor(adlFactors, isLong ? 0 : 1)) ?? account.positionSize)
-      : account.positionSize;
-    const absPosition = effSize < 0n ? -effSize : effSize;
+    // Same effective-size rule as every PnL surface (lib/position-pnl.ts mirrors the
+    // engine's effective_abs_quantity_for_leg). When the ADL state is unknown there is
+    // NO raw-size fallback: the line is skipped rather than showing raw-size funding.
+    const effSize = computePositionPnl({
+      basisQ: account.positionSize,
+      aBasis: account.adlABasis ?? 0n,
+      epochSnap: account.adlEpochSnap,
+      adlFactors,
+      adlApplicable: wrapperConfigV17 !== null,
+      markE6: 0n,
+      onChainPnl: 0n,
+      initialMarginBps: 1000n,
+      capital: account.capital,
+    }).effectiveSize;
+    if (hasPosition && effSize === null) {
+      return {
+        positionDirection: null,
+        fundingColor: "text-[var(--text-muted)]",
+        fundingSign: "",
+        estimatedFunding24h: null,
+      };
+    }
+    const absPosition = effSize === null ? 0n : effSize < 0n ? -effSize : effSize;
     
     if (!hasPosition) {
       return {
@@ -221,7 +240,7 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
       fundingSign: userPays ? "-" : "+",
       estimatedFunding24h: Math.abs(estimated24h),
     };
-  }, [userAccount, fundingData]);
+  }, [userAccount, fundingData, adlFactors, wrapperConfigV17]);
 
   if (loading && !fundingData) {
     return (

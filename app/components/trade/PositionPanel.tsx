@@ -320,8 +320,9 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // position's margin cushion left (lib/liquidation-risk.ts), not a flat distance.
   const liqTier = (() => {
     if (account.positionSize === 0n || !hasValidMark) return "safe" as const;
-    const cushion = computeMarginCushion({
-      positionSize: account.positionSize,
+    // EFFECTIVE size (see the liquidation price above); unknown ADL state => not measurable.
+    const cushion = pnlResult.effectiveSize === null ? null : computeMarginCushion({
+      positionSize: pnlResult.effectiveSize,
       entryPriceE6,
       capital: account.capital,
       markPriceE6: currentPriceE6,
