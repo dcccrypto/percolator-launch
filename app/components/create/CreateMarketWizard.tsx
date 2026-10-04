@@ -673,7 +673,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
               : !mockBypass && !hasSufficientSol
                 ? `Need ~${requiredSol.toFixed(3)} SOL`
                 : devnetFaucetCeilingExceeded
-                  ? `Devnet faucet caps a launch at ${(Number(MAX_FUNDABLE_REQUIREMENT) / 10 ** decimals).toLocaleString()} ${symbol} — reduce LP collateral`
+                  ? `Devnet faucet caps a launch at ${(Number(MAX_FUNDABLE_REQUIREMENT) / 10 ** decimals).toLocaleString()} ${collateralSymbol} — reduce LP collateral`
                   : !skipTokenBalanceCheck && (!hasTokens || !hasSufficientTokensForSeed)
                     ? "Insufficient token balance"
                     : undefined;
