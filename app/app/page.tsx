@@ -112,10 +112,13 @@ export default function Home() {
             never overlaps the links or columns. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/landing/char-markets.png"
+          src="/landing/char-markets.webp"
+          width={1626}
+          height={369}
+          decoding="async"
           alt=""
           aria-hidden="true"
-          className="pointer-events-none z-20 mx-auto -mb-2 block w-[84%] drop-shadow-[0_14px_26px_rgba(0,0,0,0.55)] sm:absolute sm:bottom-full sm:left-1/2 sm:mx-0 sm:mb-1.5 sm:w-[min(52%,560px)] sm:-translate-x-1/2"
+          className="pointer-events-none z-20 mx-auto -mb-2 block h-auto w-[84%] drop-shadow-[0_14px_26px_rgba(0,0,0,0.55)] sm:absolute sm:bottom-full sm:left-1/2 sm:mx-0 sm:mb-1.5 sm:w-[min(52%,560px)] sm:-translate-x-1/2"
         />
         <ScrollReveal delay={0.05}>
           <div className="mb-4 flex items-baseline justify-between gap-4">
@@ -142,10 +145,14 @@ export default function Home() {
       <section className="relative mx-auto mt-28 max-w-[1100px] px-6 pb-20 sm:mt-40 sm:px-8">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/landing/char-trending.png"
+          src="/landing/char-trending.webp"
+          width={1672}
+          height={337}
+          loading="lazy"
+          decoding="async"
           alt=""
           aria-hidden="true"
-          className="pointer-events-none z-20 mx-auto -mb-2 block w-[84%] drop-shadow-[0_14px_26px_rgba(0,0,0,0.55)] sm:absolute sm:bottom-full sm:right-[3%] sm:mx-0 sm:mb-1.5 sm:w-[min(52%,560px)]"
+          className="pointer-events-none z-20 mx-auto -mb-2 block h-auto w-[84%] drop-shadow-[0_14px_26px_rgba(0,0,0,0.55)] sm:absolute sm:bottom-full sm:right-[3%] sm:mx-0 sm:mb-1.5 sm:w-[min(52%,560px)]"
         />
         <ScrollReveal delay={0.05}>
           <div className="mb-4 flex items-baseline justify-between gap-4">
