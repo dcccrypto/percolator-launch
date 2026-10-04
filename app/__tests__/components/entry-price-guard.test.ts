@@ -325,12 +325,12 @@ describe("TradingChart's exempt Entry line still goes through the display allowl
   });
 });
 
-describe("the shared chart-line hook draws Entry only through the display allowlist (#2990)", () => {
-  it("usePositionLinePrices derives entry from displayEntryE6(resolvedEntry.entry, resolvedEntry.source)", () => {
+describe("the shared chart-line hook draws Entry only from the shared PnL resolution (#3077)", () => {
+  it("usePositionLinePrices goes through terminalPositionPnl and gates on pnlKnown and a known source", () => {
     const src = fs.readFileSync(path.join(APP_ROOT, "hooks/usePositionLinePrices.ts"), "utf8");
-    expect(src).toMatch(/displayEntryE6\(\s*resolvedEntry\.entry,\s*resolvedEntry\.source,?\s*\)/);
-    expect(src).toMatch(/entry = displayEntry > 0n \? Number\(displayEntry\)/);
-    // control: the raw resolved entry is never what gets drawn
-    expect(src).not.toMatch(/Number\(resolvedEntry\.entry\)/);
+    expect(src).toMatch(/terminalPositionPnl\(/);
+    expect(src).toMatch(/!entry\.pnlKnown \|\| entry\.entrySource === "unknown"/);
+    // control: the hook never reads the raw account entry or the local cache itself
+    expect(src).not.toMatch(/getEntryPrice|account\.entryPrice/);
   });
 });
