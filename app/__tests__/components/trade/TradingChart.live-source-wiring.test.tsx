@@ -19,6 +19,8 @@ const harness = vi.hoisted(() => {
     priceScale: vi.fn(() => seriesPriceScale),
     dataByIndex: vi.fn(),
     coordinateToPrice: vi.fn(),
+    // #3094: the off-screen liq chip asks where the liq line maps; in view here (null = no chip).
+    priceToCoordinate: vi.fn(() => null as number | null),
   };
 
   const chartPriceScale = {
@@ -36,6 +38,7 @@ const harness = vi.hoisted(() => {
     getVisibleLogicalRange: vi.fn(() => null as { from: number; to: number } | null),
     setVisibleLogicalRange: vi.fn(),
     coordinateToLogical: vi.fn(() => null as number | null),
+    height: vi.fn(() => 26),
   };
 
   const pane = {
