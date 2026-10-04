@@ -2,10 +2,8 @@
 
 import { useMemo } from "react";
 import { useUserAccount } from "@/hooks/useUserAccount";
-import { useLiqPrice } from "@/hooks/useLiqPrice";
 import { useSlabState } from "@/components/providers/SlabProvider";
-import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
-import { terminalPositionPnl } from "@/lib/position-pnl";
+import { onChainMarkE6, terminalPositionPnl } from "@/lib/position-pnl";
 
 export interface PositionLinePrices {
   /** Liquidation price (USD), or null: no position, covered position, or PnL not known. */
@@ -29,12 +27,12 @@ const NONE: PositionLinePrices = { liq: null, entry: null, entryIsEstimate: fals
  */
 export function usePositionLinePrices(slabAddress: string): PositionLinePrices {
   const ua = useUserAccount();
-  const liqE6 = useLiqPrice();
   const { config, params, adlFactors, wrapperConfigV17 } = useSlabState();
 
-  const entry = useMemo(() => {
+  const pnl = useMemo(() => {
     if (!ua || ua.account.positionSize === 0n) return null;
-    const markE6 = config ? sanitizePriceE6(applyInvert(config.lastEffectivePriceE6, config.invert)) : 0n;
+    // v17 `markEwmaE6` is already post-inversion: do NOT apply `invert` again.
+    const markE6 = onChainMarkE6(config, wrapperConfigV17 !== null) ?? 0n;
     const r = terminalPositionPnl({
       account: ua.account,
       slabAddress,
@@ -43,14 +41,17 @@ export function usePositionLinePrices(slabAddress: string): PositionLinePrices {
       adlApplicable: wrapperConfigV17 !== null,
       markE6,
       initialMarginBps: params?.initialMarginBps ?? 1000n,
+      maintenanceMarginBps: params?.maintenanceMarginBps ?? 500n,
     });
     return r;
   }, [ua, config, params, adlFactors, wrapperConfigV17, slabAddress]);
 
-  if (!entry || !entry.pnlKnown || entry.entrySource === "unknown" || entry.entry <= 0n) return NONE;
+  if (!pnl || !pnl.pnlKnown || pnl.entrySource === "unknown" || pnl.entry <= 0n) return NONE;
+  // The engine liquidation price on EFFECTIVE size, straight from the shared result (0n = none, null = unknown).
+  const liq = pnl.liquidationPriceE6;
   return {
-    entry: Number(entry.entry) / 1e6,
-    entryIsEstimate: entry.isEstimate,
-    liq: liqE6 != null && liqE6 > 0n ? Number(liqE6) / 1e6 : null,
+    entry: Number(pnl.entry) / 1e6,
+    entryIsEstimate: pnl.isEstimate,
+    liq: liq != null && liq > 0n ? Number(liq) / 1e6 : null,
   };
 }

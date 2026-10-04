@@ -329,7 +329,8 @@ describe("the shared chart-line hook draws Entry only from the shared PnL resolu
   it("usePositionLinePrices goes through terminalPositionPnl and gates on pnlKnown and a known source", () => {
     const src = fs.readFileSync(path.join(APP_ROOT, "hooks/usePositionLinePrices.ts"), "utf8");
     expect(src).toMatch(/terminalPositionPnl\(/);
-    expect(src).toMatch(/!entry\.pnlKnown \|\| entry\.entrySource === "unknown"/);
+    expect(src).toMatch(/!pnl\.pnlKnown \|\| pnl\.entrySource === "unknown"/);
+    expect(src).toMatch(/pnl\.liquidationPriceE6/);
     // control: the hook never reads the raw account entry or the local cache itself
     expect(src).not.toMatch(/getEntryPrice|account\.entryPrice/);
   });
