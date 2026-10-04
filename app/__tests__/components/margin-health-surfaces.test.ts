@@ -63,6 +63,8 @@ export function usesSharedLiqDisplay(src: string): boolean {
 const EXEMPT: Record<string, string> = {
   "components/trade/TradingChart.tsx":
     "Draws a price LINE only when a real price exists (useLiqPrice is null for the covered case, so there is no '—'/'∞' to explain); its title does not carry health (the line is moved in place per keeper push, #2990). #2634 item 3.",
+  "components/trade/tv/TvChart.tsx":
+    "TradingView twin of TradingChart's Liq line: a locked horizontal LINE drawn only when a real price exists AND pnlKnown (usePositionLinePrices -> null for the covered case and for unknown PnL; desiredLines skips null/<=0), same premise as the TradingChart exemption.",
   "components/trade/perp/PerpChart.tsx":
     "The perp-standard chart's Liq line: a LINE drawn only when a real price exists (usePositionLinePrices -> null for the covered case; setLine removes the line for null/<=0), same premise as the TradingChart exemption. It renders no '—'/'∞' text for describeLiqPrice to explain.",
 };
@@ -141,6 +143,12 @@ describe("exemptions are explicit and current", () => {
     expect(hook).toMatch(/return liq > 0n \? liq : null;/);
     const chart = sources.find((s) => s.file === "components/trade/TradingChart.tsx")!.src;
     expect(chart).toMatch(/liqPriceE6 != null && liqPriceE6 > 0n/);
+    // TradingView chart: same rule, in the hook that feeds its Liq line (also gated on pnlKnown) and in the line planner.
+    const tvHook = fs.readFileSync(path.join(APP_ROOT, "hooks/usePositionLinePrices.ts"), "utf8");
+    expect(tvHook).toMatch(/liqE6 != null && liqE6 > 0n/);
+    expect(tvHook).toMatch(/!entry\.pnlKnown/);
+    const tvLines = fs.readFileSync(path.join(APP_ROOT, "lib/tv/positionLines.ts"), "utf8");
+    expect(tvLines).toMatch(/if \(i\.prefs\.liq && valid\(i\.liqPrice\)\)/);
   });
 });
 

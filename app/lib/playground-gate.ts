@@ -13,6 +13,9 @@
  *   /_next/*, /_vercel/*        framework assets, Vercel analytics beacons
  *   /images/*, /icons/*, /audio/*   public/ asset folders
  *   /token-metadata/*           on-chain metadata URIs (wallets/explorers fetch these server-side)
+ *   /charting_library/*, /tv-theme/*   the TradingView chart library's static files and our
+ *                               theme CSS for it (loaded inside the chart iframe). Chart DATA
+ *                               is /api/* and stays gated.
  *   top-level files by extension   e.g. /chart-empty-state.svg. ONLY top-level: a nested
  *                               /trade/x.png would otherwise render the [slab] page shell.
  *   favicon/icon, robots.txt, sitemap.xml, opengraph-image, twitter-image, manifest
@@ -53,7 +56,19 @@ const EXEMPT_EXACT = new Set([
   "/twitter-image",
 ]);
 
-const EXEMPT_PREFIXES = ["/_next/", "/_vercel/", "/.well-known/", "/token-metadata/", "/images/", "/icons/", "/audio/"];
+const EXEMPT_PREFIXES = [
+  "/_next/",
+  "/_vercel/",
+  "/.well-known/",
+  "/token-metadata/",
+  "/images/",
+  "/icons/",
+  "/audio/",
+  // TradingView chart library (static, build-time fetched) + our theme CSS for it.
+  // The chart's same-origin iframe loads these; data stays gated (/api/*).
+  "/charting_library/",
+  "/tv-theme/",
+];
 
 /** Server-to-server API routes, by method. Each authenticates itself (see header). */
 const EXEMPT_API: ReadonlyArray<{ method: string; re: RegExp }> = [

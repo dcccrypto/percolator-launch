@@ -133,3 +133,11 @@ app/.env.local.bak*
 app/.superpowers/
 # brainstorming mockups (local only)
 .superpowers/
+
+# TradingView Advanced Charts library — licence forbids it in public repos.
+# Fetched at build time by app/scripts/fetch-tv-library.mjs. NEVER `git add -f`.
+app/public/charting_library/
+app/public/tv-datafeeds/
+**/charting_library/
+charting_library*.d.ts
+datafeed-api.d.ts

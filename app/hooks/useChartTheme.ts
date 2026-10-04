@@ -17,7 +17,7 @@ export interface ChartTheme {
   entryLine: string;
 }
 
-const DARK_THEME: ChartTheme = {
+export const DARK_THEME: ChartTheme = {
   bg: "#0D0D0F",
   // Bumped 0.45 → 0.60 for legibility — the axis price/time labels read too
   // faint (effective contrast on the chart bg ~4.3 → ~7.1, matching the
@@ -47,7 +47,7 @@ const DARK_THEME: ChartTheme = {
   entryLine: "#22d3ee",
 };
 
-const LIGHT_THEME: ChartTheme = {
+export const LIGHT_THEME: ChartTheme = {
   bg: "#FAFAFD",
   textColor: "rgba(13,14,21,0.65)",
   gridColor: "rgba(0,0,0,0.05)",
