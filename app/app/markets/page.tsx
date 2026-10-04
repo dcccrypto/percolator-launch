@@ -11,7 +11,7 @@ import { setMarketIdentity } from "@/lib/marketIdentityCache";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMarketDiscovery } from "@/hooks/useMarketDiscovery";
 import { computeMarketHealth, computeMarketHealthFromStats, sanitizeOnChainValue } from "@/lib/health";
-import { HealthBadge } from "@/components/market/HealthBadge";
+import { HealthBadge, HEALTH_HEADER_TOOLTIP } from "@/components/market/HealthBadge";
 import { formatTokenAmount } from "@/lib/format";
 import type { Database } from "@/lib/database.types";
 
@@ -877,7 +877,7 @@ function MarketsPageInner() {
                   <div className="hidden sm:block text-right" title="Trading volume over the last 24 hours. Shown in USD or in tokens, per the filter.">vol</div>
                   <div className="hidden sm:block text-right" title="All collateral this market holds: liquidity, trader margin and insurance.">vault</div>
                   <div className="text-right" title="The most leverage a position on this market can use."><span className="sm:hidden">lev</span><span className="hidden sm:inline">max lev</span></div>
-                  <div className="text-right" title="How well the market's insurance fund and collateral cover its open interest: Healthy, Caution or Low Liquidity. No Oracle means it has no live price.">health</div>
+                  <div className="text-right" title={HEALTH_HEADER_TOOLTIP}>health</div>
                 </div>
 
                 {displayedMarkets.map((m, i) => {

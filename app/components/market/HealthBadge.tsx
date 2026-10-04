@@ -13,7 +13,8 @@ const STYLES: Record<HealthLevel, string> = {
   "oracle-down": "bg-[var(--warning)]/10 text-[var(--warning)] ring-1 ring-[var(--warning)]/30 animate-pulse",
 };
 
-const LABELS: Record<HealthLevel, string> = {
+/** The text each badge shows. Exported so the /markets HEALTH header names exactly these. */
+export const HEALTH_LABELS: Record<HealthLevel, string> = {
   healthy: "Healthy",
   caution: "Caution",
   warning: "Low Liq",
@@ -30,10 +31,21 @@ const TOOLTIPS: Record<HealthLevel, string> = {
   "oracle-down": "Waiting for this market's first price. New positions open once it lands; closing and withdrawing still work.",
 };
 
+/**
+ * Hover text for the /markets HEALTH column header. Built from HEALTH_LABELS so it can only name
+ * badges the column actually renders (it used to say "Low Liquidity" / "No Oracle", which no
+ * badge shows, and left out "Empty").
+ */
+export const HEALTH_HEADER_TOOLTIP =
+  `How well the market's insurance fund and collateral cover its open interest: ` +
+  `${HEALTH_LABELS.healthy}, ${HEALTH_LABELS.caution} or ${HEALTH_LABELS.warning}. ` +
+  `${HEALTH_LABELS.empty} means the market has no positions or liquidity. ` +
+  `${HEALTH_LABELS["oracle-down"]} means the market has no price yet.`;
+
 export const HealthBadge: FC<{ level: HealthLevel }> = ({ level }) => (
   <Tooltip text={TOOLTIPS[level]}>
     <span className={`inline-block whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-bold ${STYLES[level]}${level === "caution" || level === "oracle-down" ? " animate-pulse" : ""}`}>
-      {LABELS[level]}
+      {HEALTH_LABELS[level]}
     </span>
   </Tooltip>
 );
