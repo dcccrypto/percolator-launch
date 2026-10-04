@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { useEarnStats } from '@/hooks/useEarnStats';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { VaultGrid } from '@/components/earn/VaultGrid';
 import { VaultDepositRail } from '@/components/earn/VaultDepositRail';
 import { useEarnPositions } from '@/hooks/useEarnPositions';
+import { useWalletCompat } from '@/hooks/useWalletCompat';
 import { formatCompact } from '@/lib/formatters';
 import { limitsFlags } from '@/lib/limits/flags';
 import { COPY } from '@/lib/limits/copy';
@@ -37,7 +38,17 @@ export function EarnVaultView() {
   const { stats, loading, error, refresh } = useEarnStats();
   const [dismissedError, setDismissedError] = useState<string | null>(null);
   const [selectedSlab, setSelectedSlab] = useState<string | null>(null);
-  const [userDeposits, setUserDeposits] = useState<Record<string, number>>({});
+  // Tagged with the wallet they were reported for: after a wallet switch or disconnect the
+  // previous wallet's figures must not show as this one's (or drive the Mine filter).
+  const [railDeposits, setRailDeposits] = useState<{ owner: string | null; bySlab: Record<string, number> }>({
+    owner: null,
+    bySlab: {},
+  });
+  const walletStr = useWalletCompat().publicKey?.toBase58() ?? null;
+  const walletRef = useRef(walletStr);
+  useEffect(() => {
+    walletRef.current = walletStr;
+  }, [walletStr]);
 
   const showError = error && error !== dismissedError;
 
@@ -56,9 +67,18 @@ export function EarnVaultView() {
   // The rail reports the connected wallet's resolved deposit for the selected
   // vault; store it so the table's "Your Deposit" column fills in per row as the
   // user browses. Only writes on an actual value change (no render loop).
+  // Stable identity on purpose: a new callback would re-fire the rail's report effect with the
+  // previous wallet's figure before its re-read lands.
   const handlePositionResolved = useCallback((slab: string, usd: number) => {
-    setUserDeposits((prev) => (prev[slab] === usd ? prev : { ...prev, [slab]: usd }));
+    const owner = walletRef.current;
+    setRailDeposits((prev) => {
+      if (prev.owner === owner) {
+        return prev.bySlab[slab] === usd ? prev : { owner, bySlab: { ...prev.bySlab, [slab]: usd } };
+      }
+      return { owner, bySlab: { [slab]: usd } };
+    });
   }, []);
+  const userDeposits = walletStr && railDeposits.owner === walletStr ? railDeposits.bySlab : null;
 
   // Every row's deposit from chain (wallet LP ATA + pending escrow, incl. a creator's wizard seed),
   // not only the row bound to the rail; the rail's own resolved value wins for the selected row.
