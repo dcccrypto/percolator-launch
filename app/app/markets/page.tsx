@@ -872,12 +872,12 @@ function MarketsPageInner() {
                     Desktop (sm+) is unaffected since the table fits in viewport width. */}
                 <div className="hidden md:grid w-full md:min-w-[700px] md:grid-cols-[minmax(160px,3fr)_minmax(90px,1.2fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(65px,0.8fr)_minmax(80px,0.9fr)] gap-2 sm:gap-4 border-b border-[var(--border)] bg-[var(--bg-surface)] px-3 sm:px-5 py-2.5 text-[9px] sm:text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--text)]">
                   <div>token</div>
-                  <div className="text-right">price</div>
-                  <div className="hidden sm:block text-right">OI</div>
-                  <div className="hidden sm:block text-right">vol</div>
+                  <div className="text-right" title="Latest price of the token, in USD.">price</div>
+                  <div className="hidden sm:block text-right" title="Open interest: the total size of all open long and short positions. Shown in USD or in tokens, per the filter.">OI</div>
+                  <div className="hidden sm:block text-right" title="Trading volume over the last 24 hours. Shown in USD or in tokens, per the filter.">vol</div>
                   <div className="hidden sm:block text-right" title="All collateral this market holds: liquidity, trader margin and insurance.">vault</div>
-                  <div className="text-right"><span className="sm:hidden">lev</span><span className="hidden sm:inline">max lev</span></div>
-                  <div className="text-right">health</div>
+                  <div className="text-right" title="The most leverage a position on this market can use."><span className="sm:hidden">lev</span><span className="hidden sm:inline">max lev</span></div>
+                  <div className="text-right" title="How well the market's insurance fund and collateral cover its open interest: Healthy, Caution or Low Liquidity. No Oracle means it has no live price.">health</div>
                 </div>
 
                 {displayedMarkets.map((m, i) => {
