@@ -34,6 +34,7 @@ import {
 } from "@/lib/tv/data/provider";
 import { getSeriesStore, SERIES_LABEL } from "@/lib/chart/perp-series";
 import { perpPricePrecision } from "@/lib/chart/precision";
+import { ESTIMATE_LABEL } from "@/lib/entry-price-display";
 import type { PerpSeries } from "@/lib/chart/perp-types";
 import { ChartDisplayMenu } from "../ChartDisplayMenu";
 import { ChartPnlBadge } from "../ChartPnlBadge";
@@ -157,7 +158,7 @@ function PerpChartInner({ slabAddress }: Props) {
       if (cur) { s.removePriceLine(cur); delete linesRef.current[key]; }
       return;
     }
-    if (cur) cur.applyOptions({ price, color: opts.color });
+    if (cur) cur.applyOptions({ price, color: opts.color, title: opts.title });
     else linesRef.current[key] = s.createPriceLine({ price, color: opts.color, lineWidth: opts.width, lineStyle: opts.style, axisLabelVisible: true, title: opts.title });
   }, []);
 
@@ -166,8 +167,8 @@ function PerpChartInner({ slabAddress }: Props) {
     setLine("mark", series === "mark" ? null : markPrice, { title: "Mark", color: theme.neutralLine, style: LineStyle.Dashed, width: 1 });
   }, [series, markPrice, theme.neutralLine, setLine, status]);
   useEffect(() => {
-    setLine("entry", overlayPrefs.entry ? lines.entry : null, { title: "Entry", color: theme.entryLine, style: LineStyle.Dashed, width: 1 });
-  }, [lines.entry, overlayPrefs.entry, theme.entryLine, setLine, status]);
+    setLine("entry", overlayPrefs.entry ? lines.entry : null, { title: lines.entryIsEstimate ? `Entry ${ESTIMATE_LABEL}` : "Entry", color: theme.entryLine, style: LineStyle.Dashed, width: 1 });
+  }, [lines.entry, lines.entryIsEstimate, overlayPrefs.entry, theme.entryLine, setLine, status]);
   useEffect(() => {
     setLine("liq", overlayPrefs.liq ? lines.liq : null, { title: "Liq", color: theme.downColor, style: LineStyle.Solid, width: 2 });
   }, [lines.liq, overlayPrefs.liq, theme.downColor, setLine, status]);

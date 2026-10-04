@@ -49,7 +49,8 @@ vi.mock("@/lib/tv/data", () => ({
   getLiveClient: () => ({ subscribe: (_s: string, handlers: { onTick(m: unknown): void }) => { h.tickHandlers = handlers; return () => { h.tickHandlers = null; }; } }),
   perpChartEnabled: () => true,
 }));
-vi.mock("@/hooks/usePositionLinePrices", () => ({ usePositionLinePrices: () => ({ liq: 0.0021, entry: 0.0034 }) }));
+const lineState = vi.hoisted(() => ({ v: { liq: 0.0021 as number | null, entry: 0.0034 as number | null, entryIsEstimate: false } }));
+vi.mock("@/hooks/usePositionLinePrices", () => ({ usePositionLinePrices: () => lineState.v }));
 vi.mock("@/hooks/usePerpHeaderStats", () => ({ usePerpHeaderStats: () => ({ change: null, volume24hUsd: null, oiUsd: null, funding: undefined }) }));
 vi.mock("@/components/trade/ChartPnlBadge", () => ({ ChartPnlBadge: () => null }));
 vi.mock("@/components/trade/ChartBadges", () => ({ DraggableChartBadges: ({ children }: { children: React.ReactNode }) => <>{children}</>, PositionSummary: () => null }));
@@ -125,6 +126,24 @@ describe("PerpChart", () => {
     expect(titles).toContainEqual(["Entry", 0.0034]);
     expect(titles).toContainEqual(["Liq", 0.0021]);
     expect(titles.map((t) => t[0])).not.toContain("Mark"); // on the Mark view the line would sit on the candle
+  });
+
+  it("an ESTIMATED entry is labelled est.; no entry/liq (pnl unknown) draws neither line (negative controls)", async () => {
+    lineState.v = { liq: 0.0021, entry: 0.0034, entryIsEstimate: true };
+    await mount();
+    await waitFor(() => expect(created.series.some((s) => s.createPriceLine.mock.calls.length > 0)).toBe(true));
+    const candle = created.series.find((s) => s.kind === "Candlestick")!;
+    expect(candle.createPriceLine.mock.calls.map((c) => c[0].title)).toContain("Entry est.");
+    expect(candle.createPriceLine.mock.calls.map((c) => c[0].title)).not.toContain("Entry");
+    created.series.length = 0;
+    lineState.v = { liq: null, entry: null, entryIsEstimate: false };
+    await mount();
+    await waitFor(() => expect(h.getBars).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 30));
+    const titles = created.series.flatMap((s) => s.createPriceLine.mock.calls.map((c) => c[0].title));
+    expect(titles).not.toContain("Entry");
+    expect(titles).not.toContain("Liq");
+    lineState.v = { liq: 0.0021, entry: 0.0034, entryIsEstimate: false };
   });
 
   it("on the Oracle view the Mark line appears and follows pushed ticks", async () => {
