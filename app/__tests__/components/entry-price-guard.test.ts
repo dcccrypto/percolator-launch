@@ -324,3 +324,13 @@ describe("TradingChart's exempt Entry line still goes through the display allowl
     expect(body).toMatch(/return displayEntry > 0n\s*\?\s*Number\(displayEntry\)/);
   });
 });
+
+describe("the shared chart-line hook draws Entry only through the display allowlist (#2990)", () => {
+  it("usePositionLinePrices derives entry from displayEntryE6(resolvedEntry.entry, resolvedEntry.source)", () => {
+    const src = fs.readFileSync(path.join(APP_ROOT, "hooks/usePositionLinePrices.ts"), "utf8");
+    expect(src).toMatch(/displayEntryE6\(\s*resolvedEntry\.entry,\s*resolvedEntry\.source,?\s*\)/);
+    expect(src).toMatch(/entry = displayEntry > 0n \? Number\(displayEntry\)/);
+    // control: the raw resolved entry is never what gets drawn
+    expect(src).not.toMatch(/Number\(resolvedEntry\.entry\)/);
+  });
+});
