@@ -211,3 +211,31 @@ describe("first trade, one approval", () => {
     expect(screen.queryByTestId("trade-submit")).toBeNull();
   });
 });
+
+describe("the typed deposit is reset with the rest of the ticket", () => {
+  const depositInput = () => screen.getByTestId("deposit-amount-input") as HTMLInputElement;
+
+  it("switching market clears it, so the new market uses its own computed amount", async () => {
+    const { rerender } = render(<OrderTicket slabAddress={SLAB} />);
+    await waitFor(() => expect(screen.queryByTestId("trade-submit")).not.toBeNull());
+    size("5");
+    fireEvent.change(depositInput(), { target: { value: "9" } });
+    expect(submit().textContent).toBe("Deposit 9.00 USDC & Long");
+    rerender(<OrderTicket slabAddress="ENdXK8k6iiWCAx4Z9XfoKLg9oXsEbPL4hEtmEmUqozDZ" />);
+    size("5");
+    expect(depositInput().value).toBe("");
+    expect(submit().textContent).toBe("Deposit 5.52 USDC & Long");
+  });
+
+  it("a successful first trade clears it", async () => {
+    render(<OrderTicket slabAddress={SLAB} />);
+    await waitFor(() => expect(screen.queryByTestId("trade-submit")).not.toBeNull());
+    size("5");
+    fireEvent.change(depositInput(), { target: { value: "9" } });
+    await place();
+    expect(mocks.fund.mock.calls[0][0]).toMatchObject({ depositAtoms: 9_000_000n });
+    size("5");
+    expect(depositInput().value).toBe("");
+    expect(submit().textContent).toBe("Deposit 5.52 USDC & Long");
+  });
+});

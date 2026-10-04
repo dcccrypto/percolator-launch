@@ -3,8 +3,10 @@
 import { useMemo } from "react";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useSlabState } from "@/components/providers/SlabProvider";
-import { computeLiqPrice } from "@/lib/trading";
+import { computeLiqPrice, resolveEntryPrice } from "@/lib/trading";
 import { getEntryPrice } from "@/lib/entry-price";
+import { isSentinelValue } from "@/lib/health";
+import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 
 /**
  * Phase 2: Returns the liquidation price (as bigint e6) for the current user's
@@ -13,38 +15,65 @@ import { getEntryPrice } from "@/lib/entry-price";
  */
 export function useLiqPrice(): bigint | null {
   const realUserAccount = useUserAccount();
-  const { params, slabAddress } = useSlabState();
+  const { config, params, slabAddress } = useSlabState();
 
   return useMemo(() => {
     if (!realUserAccount) return null;
+
     const { account } = realUserAccount;
     if (account.positionSize === 0n) return null;
 
-    // v17 (and NFT-wrapped v12) accounts do not store an entry price on-chain
-    // (entryPrice === 0n) — every v17 position used to bail out here, so the
-    // chart's "Liquidation Price" display toggle never drew anything. Resolve
-    // the entry the same way ChartPnlBadge does: fall back to the client-side
-    // entry saved at trade-open time (lib/entry-price). Still null when
-    // neither source has it (e.g. a transferred-in position NFT) — the chart
-    // correctly hides the line for null.
     const rawEntryPrice = account.entryPrice ?? 0n;
-    // The client-side entry is saved per-wallet (OrderTicket passes the connected
-    // wallet). Read it with the SAME wallet key (account.owner === the connected
-    // wallet) — omitting it hits the wallet-less legacy key and misses, so the
-    // chart's Liq line silently never drew for v17 positions.
-    const entryPrice =
-      rawEntryPrice > 0n ? rawEntryPrice : getEntryPrice(slabAddress, realUserAccount.idx, account.owner.toBase58());
-    if (entryPrice <= 0n) return null;
 
-    const maintenanceBps = params?.maintenanceMarginBps ?? 500n;
+    const cachedEntryPrice =
+      rawEntryPrice > 0n
+        ? rawEntryPrice
+        : getEntryPrice(
+            slabAddress,
+            realUserAccount.idx,
+            account.owner.toBase58(),
+          );
+
+    // v17/v18 does not store entry_price on-chain. A browser-local cache miss
+    // therefore must not automatically erase liquidation-risk information.
+    //
+    // Match the resolved-entry contract used by the other position surfaces:
+    // display may treat source==="unknown" as an unknown Entry/PnL, while risk
+    // math continues with resolvedEntry.entry.
+    const oraclePriceE6 = config
+      ? sanitizePriceE6(
+          applyInvert(
+            config.lastEffectivePriceE6,
+            config.invert,
+          ),
+        )
+      : 0n;
+
+    const safePnl =
+      account.pnl != null && !isSentinelValue(account.pnl)
+        ? account.pnl
+        : 0n;
+
+    const resolvedEntry = resolveEntryPrice(
+      account.positionSize,
+      cachedEntryPrice,
+      safePnl,
+      oraclePriceE6,
+    );
+
+    if (resolvedEntry.entry <= 0n) return null;
+
+    const maintenanceBps =
+      params?.maintenanceMarginBps ?? 500n;
+
     const liq = computeLiqPrice(
-      entryPrice,
+      resolvedEntry.entry,
       account.capital,
       account.positionSize,
       maintenanceBps,
     );
-    // Long-side clamp (liq at/below $0): the position cannot be liquidated by
-    // price, so there is genuinely no line to draw.
+
+    // Long-side clamp: liq at/below $0 means there is no real chart line.
     return liq > 0n ? liq : null;
-  }, [realUserAccount, params, slabAddress]);
+  }, [realUserAccount, config, params, slabAddress]);
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { computeMarginCushion, severityFromCushion } from "@/lib/liquidation-risk";
 import { FC, useMemo, useState, useRef, useEffect } from "react";
 import { Q_SCALE } from "@/lib/q-usd";
 import { useUserAccount } from "@/hooks/useUserAccount";
@@ -351,8 +352,21 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     maintenanceBps,
   );
 
-  // Liq price danger color: amber when mark is within 15% of liq.
-  // Direction-aware (shared helper): a short whose mark has crossed ABOVE its
+  // Liq price color and banner use the site-wide warning tiers: the share of this
+  // position's margin cushion left (lib/liquidation-risk.ts), not a flat distance.
+  const liqTier = (() => {
+    if (account.positionSize === 0n || !hasValidMark) return "safe" as const;
+    const cushion = computeMarginCushion({
+      positionSize: account.positionSize,
+      entryPriceE6,
+      capital: account.capital,
+      markPriceE6: currentPriceE6,
+      maintenanceMarginBps: maintenanceBps,
+      initialMarginBps,
+    });
+    return cushion == null ? ("safe" as const) : severityFromCushion(cushion);
+  })();
+  // The distance shown in the banner. Direction-aware (shared helper): a short whose mark has crossed ABOVE its
   // liq price is distance 0 (critical), not "safe" — the old
   // Math.abs(cur-liq)/cur showed a crossed position as far from liquidation.
   // Helper returns percent 0-100; thresholds below consume a 0-1 fraction.
@@ -368,13 +382,13 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const liqPriceColor = (() => {
     if (liqUnliquidatable) return "text-[var(--text-secondary)]";
     if (liqPriceE6 <= 0n || !hasValidMark || currentPriceE6 <= 0n) return "text-[var(--warning)]";
-    if (liqDistPct < 0.05) return "text-[var(--short)]";   // <5% — critical red
-    if (liqDistPct < 0.10) return "text-[var(--warning)]"; // <10% — amber
+    if (liqTier === "danger") return "text-[var(--short)]";
+    if (liqTier === "warning") return "text-[var(--warning)]";
     return "text-[var(--text-secondary)]";
   })();
 
-  // 3.5: Liq warning banner at <15%
-  const showLiqWarning = hasValidMark && liqPriceE6 > 0n && liqDistPct < 0.15;
+  const showLiqWarning = hasValidMark && liqPriceE6 > 0n && liqTier !== "safe";
+  const liqWarningTone = liqTier === "danger" ? "var(--short)" : "var(--warning)";
 
   const pnlColor =
     pnlTokens === 0n
@@ -566,13 +580,20 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               decimals={decimals}
             />
 
-            {/* 3.5: Liq warning when <15% away */}
+            {/* Liq warning at the site-wide tiers, in the same tone and words as the site-wide card */}
             {showLiqWarning && (
-              <div className="mb-2 flex items-center gap-1.5 rounded-none border border-[var(--short)]/30 bg-[var(--short)]/5 px-2 py-1.5">
-                <span className="text-[8px] text-[var(--short)] font-medium uppercase tracking-[0.12em]">
-                  ⚠ Liq. Risk
+              <div
+                className="mb-2 flex items-center gap-1.5 rounded-none border px-2 py-1.5"
+                style={{
+                  borderColor: `color-mix(in srgb, ${liqWarningTone} 30%, transparent)`,
+                  background: `color-mix(in srgb, ${liqWarningTone} 5%, transparent)`,
+                }}
+                data-severity={liqTier}
+              >
+                <span className="text-[8px] font-medium uppercase tracking-[0.12em]" style={{ color: liqWarningTone }}>
+                  {liqTier === "danger" ? "Liquidation risk" : "Approaching liquidation"}
                 </span>
-                <span className="text-[9px] text-[var(--short)]/70" style={{ fontFamily: "var(--font-mono)" }}>
+                <span className="text-[9px] opacity-70" style={{ fontFamily: "var(--font-mono)", color: liqWarningTone }}>
                   {(liqDistPct * 100).toFixed(1)}% from liq. price
                 </span>
               </div>

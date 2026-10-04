@@ -14,7 +14,6 @@ import {
   parseWrapperConfigV17,
   isV17Account,
   AccountKind,
-  computeLiqPrice,
   computeMarkPnl,
   computePnlPercent,
   V17_HEADER_LEN,
@@ -23,7 +22,7 @@ import {
 } from "@percolatorct/sdk";
 import { isSentinelValue } from "@/lib/health";
 import { isLpPortfolio } from "@/lib/userAccountScan";
-import { computeMarkPnlCollateral, computePositionInitialMargin, estimateEntryFromPnl, resolveEntryPrice, type EntryPriceSource } from "@/lib/trading";
+import { computeLiqPrice, computeMarkPnlCollateral, computePositionInitialMargin, estimateEntryFromPnl, resolveEntryPrice, type EntryPriceSource } from "@/lib/trading";
 import { parseV17RiskParams } from "@/lib/v17-engine-config";
 import {
   parseAssetAdlFactors,
@@ -37,6 +36,7 @@ import { getAllProgramIds, getNetwork } from "@/lib/config";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { getEntryPrice } from "@/lib/entry-price";
 import { computeLiquidationDistancePct } from "@/lib/liquidation-distance";
+import { computeMarginCushion, severityFromCushion } from "@/lib/liquidation-risk";
 import { classifyLiquidation, type LiquidationState } from "@/lib/liquidation-state";
 import { discoverMarketsViaProgramDirectory } from "@/lib/market-directory-discovery";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
@@ -273,14 +273,71 @@ export type LiquidationSeverity = "safe" | "warning" | "danger";
  */
 export function getLiquidationSeverityForState(
   state: LiquidationState,
+  /** liveMarginCushion for the same position and mark; tiers it by margin, not a flat %. */
+  cushion?: number | null,
 ): LiquidationSeverity {
-  if (state.kind === "liquidatable") return getLiquidationSeverity(state.distancePct);
+  if (state.kind === "liquidatable") {
+    return cushion != null ? severityFromCushion(cushion) : getLiquidationSeverity(state.distancePct);
+  }
   // Collateral covers the position at any price — genuinely safe, and the one
   // case where withholding a liquidation price is the correct answer.
   if (state.kind === "unliquidatable") return "safe";
   // A flat position carries no risk; the other unknowns carry unmeasured risk.
   return state.reason === "no-position" ? "safe" : "danger";
 }
+
+/**
+ * Distance to liquidation at the LIVE mark (the shared WS price store), falling back to the
+ * poll's oracle price until the first tick, then to the poll's own figure. The position card,
+ * the at-risk strip and the at-risk count all read this, so they agree with each other and
+ * move with the price instead of with the 30s poll.
+ */
+export function liveLiquidationDistancePct(pos: PortfolioPosition, liveMarkE6: bigint | null | undefined): number {
+  const markE6 = liveMarkE6 != null && liveMarkE6 > 0n ? liveMarkE6 : pos.oraclePriceE6;
+  return computeLiquidationDistancePct(pos.effectiveSize, markE6, pos.liquidationPriceE6, pos.liquidationDistancePct);
+}
+
+/**
+ * Share of the position's margin cushion left at the LIVE mark (same fallback as
+ * liveLiquidationDistancePct): 1 at entry or at the initial-margin line, 0 where the
+ * engine liquidates. See lib/liquidation-risk.ts. null = not measurable.
+ */
+export function liveMarginCushion(pos: PortfolioPosition, liveMarkE6: bigint | null | undefined): number | null {
+  const markE6 = liveMarkE6 != null && liveMarkE6 > 0n ? liveMarkE6 : pos.oraclePriceE6;
+  return computeMarginCushion({
+    positionSize: pos.account?.positionSize ?? 0n,
+    entryPriceE6: pos.effectiveEntryPrice,
+    capital: pos.account?.capital ?? 0n,
+    markPriceE6: markE6,
+    maintenanceMarginBps: pos.maintenanceMarginBps,
+    initialMarginBps: pos.initialMarginBps,
+  });
+}
+
+/**
+ * The liquidation-alert tier of one open position at the live mark: the site-wide card,
+ * the /portfolio strip and count, the dashboard and the poll's count all use this. Tiers
+ * are relative to the position's own margin (lib/liquidation-risk.ts), so an ordinary
+ * position does not open into an alert. A flat or unmeasurable position (no mark or
+ * entry) reads "safe" here, as the distance did; the position card classifies those
+ * itself via getLiquidationSeverityForState.
+ */
+export function liveLiquidationSeverity(
+  pos: PortfolioPosition,
+  liveMarkE6: bigint | null | undefined,
+): LiquidationSeverity {
+  if ((pos.account?.positionSize ?? 0n) === 0n) return "safe";
+  const cushion = liveMarginCushion(pos, liveMarkE6);
+  return cushion == null ? "safe" : severityFromCushion(cushion);
+}
+
+/**
+ * Flat price-distance tiers, kept only as the fallback for a bare percentage with no
+ * position behind it. Alerts use liveLiquidationSeverity: a flat 20% fired for any
+ * position of about 4.2x or more the moment it opened (#2987).
+ */
+export const LIQ_WARNING_PCT = 20;
+export const LIQ_DANGER_PCT = 10;
 
 export function getLiquidationSeverity(distancePct: number): LiquidationSeverity {
   // #2412: a non-finite distance must NOT read as "safe". Both comparisons below
@@ -298,8 +355,8 @@ export function getLiquidationSeverity(distancePct: number): LiquidationSeverity
   // liquidation) is the only non-finite value that would prefer "safe", and it
   // is not worth a special case against that downside.
   if (!Number.isFinite(distancePct)) return "danger";
-  if (distancePct <= 10) return "danger";
-  if (distancePct <= 30) return "warning";
+  if (distancePct <= LIQ_DANGER_PCT) return "danger";
+  if (distancePct <= LIQ_WARNING_PCT) return "warning";
   return "safe";
 }
 
@@ -840,8 +897,16 @@ export async function fetchPortfolioSnapshot(
               leverage = Number((absPos * oraclePriceE6 / 1_000_000n) * 100n / account.capital) / 100;
             }
 
-            // Track liquidation risk
-            if (liquidationDistancePct <= 30 && account.positionSize !== 0n) {
+            // Track liquidation risk (same margin-relative tiers as the alert)
+            const pollCushion = computeMarginCushion({
+              positionSize: account.positionSize,
+              entryPriceE6: effectiveEntryPrice,
+              capital: account.capital,
+              markPriceE6: oraclePriceE6,
+              maintenanceMarginBps,
+              initialMarginBps,
+            });
+            if (account.positionSize !== 0n && pollCushion != null && severityFromCushion(pollCushion) !== "safe") {
               riskCount++;
             }
 
@@ -974,7 +1039,7 @@ export async function fetchPortfolioSnapshot(
           meta.adlFactors,
         );
 
-        if (pos.liquidationDistancePct <= 30 && pos.account.positionSize !== 0n) {
+        if (liveLiquidationSeverity(pos, null) !== "safe") {
           riskCount++;
         }
 
@@ -1067,7 +1132,7 @@ export async function fetchPortfolioSnapshot(
             meta.adlFactors,
           );
 
-          if (pos.liquidationDistancePct <= 30 && pos.account.positionSize !== 0n) {
+          if (liveLiquidationSeverity(pos, null) !== "safe") {
             riskCount++;
           }
           allPositions.push(pos);
@@ -1098,8 +1163,8 @@ export async function fetchPortfolioSnapshot(
     const bActive = b.account.positionSize !== 0n ? 0 : 1;
     if (aActive !== bActive) return aActive - bActive;
     // Then by liquidation severity
-    const aSev = getLiquidationSeverity(a.liquidationDistancePct);
-    const bSev = getLiquidationSeverity(b.liquidationDistancePct);
+    const aSev = liveLiquidationSeverity(a, null);
+    const bSev = liveLiquidationSeverity(b, null);
     const sevOrder = { danger: 0, warning: 1, safe: 2 };
     if (sevOrder[aSev] !== sevOrder[bSev]) return sevOrder[aSev] - sevOrder[bSev];
     // Then by PnL — bigint compare to avoid Number() precision loss

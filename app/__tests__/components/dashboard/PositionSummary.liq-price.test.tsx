@@ -30,6 +30,8 @@ vi.mock("@/hooks/usePortfolio", () => ({
     loading: false,
   }),
   getLiquidationSeverity: () => "safe",
+  liveLiquidationSeverity: () => "safe",
+  liveLiquidationDistancePct: () => 100,
   isOpenPosition: (p: { account?: { positionSize?: bigint } }) =>
     (p.account?.positionSize ?? 0n) !== 0n,
 }));

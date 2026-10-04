@@ -15,8 +15,8 @@
  * capital-based value, and that the capital-based value is the sane one.
  */
 import { describe, it, expect } from "vitest";
-import { computePreTradeLiqPrice, computeLiqPrice } from "@percolatorct/sdk";
-import { computeEstimatedEntryPrice } from "@/lib/trading";
+// The app's own (engine-consistent, #2987) liquidation math, as OrderTicket imports it.
+import { computePreTradeLiqPrice, computeLiqPrice, computeEstimatedEntryPrice } from "@/lib/trading";
 
 const oracleE6 = 100_000_000n;          // $100
 const capital = 1_000_000_000n;         // 1000 USDC total account capital

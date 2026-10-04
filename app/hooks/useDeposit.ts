@@ -74,9 +74,10 @@ export function useDeposit(slabAddress: string) {
           throw new Error("Wallet not connected or market not loaded");
         // Retired/blocklisted market: the market pages are hidden from
         // discovery, but the trade page still renders on a direct URL — and a
-        // deposit into a retired market can be UNRECOVERABLE (a market in
-        // bankruptcy hlock rejects every withdrawal; that is exactly how CATE
-        // died). Withdrawals stay ungated — money must always be able to
+        // deposit into a retired market can be UNRECOVERABLE (CATE died that
+        // way under an older engine, where the bankruptcy hlock rejected every
+        // withdrawal; on the current engine the hlock only gates LP-backing and
+        // insurance withdrawals, but a retired market can still strand funds). Withdrawals stay ungated — money must always be able to
         // leave — but no new money gets in.
         if (isBlockedSlab(slabAddress)) {
           throw new UserFacingError(

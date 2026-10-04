@@ -507,7 +507,7 @@ export function humanizeError(rawMsg: string, context?: "trade"): string {
     return "Token account has the wrong on-chain owner. This usually means the frontend is pointed at a cluster where this mint was not created.";
   }
   if (rawMsg.includes("TokenInvalidMintError")) {
-    return "Mint account is not a valid SPL Token / Token-2022 mint. Refresh and verify the position NFT panel still shows a valid mint.";
+    return "Mint account is not a valid SPL Token / Token-2022 mint. Refresh, then check the position's ⋯ menu still offers Unwrap.";
   }
   if (rawMsg.includes("TokenTransferHookAccountNotFound")) {
     return "Transfer-hook metadata account missing. This NFT was minted before a recent hook-fix upgrade; open a support ticket so we can run RepairExtraAccountMetas on it.";

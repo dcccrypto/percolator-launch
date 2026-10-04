@@ -21,6 +21,7 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { humanizeError } from "@/lib/errorMessages";
 import { plainMessage } from "@/lib/limits/user-message";
 import { useToast } from "@/hooks/useToast";
+import { assertSuccessfulConfirmation } from "@/lib/transaction-confirmation";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
 
 /**
@@ -346,9 +347,10 @@ export function useTransferPositionNft(slabAddress: string, override?: TransferN
         });
 
         stage = "waiting for confirmation";
-        await connection.confirmTransaction(
-          { signature: sig, blockhash, lastValidBlockHeight },
-          "confirmed",
+        // skipPreflight: confirmTransaction also resolves for a tx that landed and failed.
+        assertSuccessfulConfirmation(
+          await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed"),
+          "Position NFT transfer",
         );
 
         // Force an immediate slab re-poll so useUserAccount/usePositionNft re-scan

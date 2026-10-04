@@ -4,8 +4,6 @@
  */
 export {
   computeMarkPnl,
-  computeLiqPrice,
-  computePreTradeLiqPrice,
   computeTradingFee,
   computePnlPercent,
   computeEstimatedEntryPrice,
@@ -13,6 +11,15 @@ export {
   computeRequiredMargin,
   computeMaxLeverage,
 } from "@percolatorct/sdk";
+/**
+ * NOT the SDK's: its computeLiqPrice divides the capital term by (1 +/- mm), which
+ * puts the price further away than the engine's maintenance check does (#2987).
+ * Same signature, engine-consistent formula — see lib/liquidation-risk.ts.
+ */
+export {
+  computeEngineLiqPrice as computeLiqPrice,
+  computeEnginePreTradeLiqPrice as computePreTradeLiqPrice,
+} from "@/lib/liquidation-risk";
 import {
   computeRequiredMargin as sdkComputeRequiredMargin,
   computeMarkPnl,

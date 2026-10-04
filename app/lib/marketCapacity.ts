@@ -71,3 +71,32 @@ export function wouldExceedInventoryCap(
   if (sizeQ <= 0n) return false;
   return sizeQ > remainingSideCapacityQ(inventoryBase, maxInventoryAbs, side);
 }
+
+/**
+ * The close ticket's explanation when the LP's inventory cap clamps a close.
+ *
+ * WHY: the slider is a percent of the WHOLE position, so the "close up to N%" it offers must be
+ * too. It used to be `capacity / thisCloseSize`: choosing 50% with room for a fifth of the
+ * position said "close up to 40%" (40% of the half), and a 40% retry was refused again. And at
+ * zero room it offered "close up to 0% now" at every slider value (TROLL, 2026-10-03: the LP was
+ * short exactly its cap, so a short's close (a buy, the LP sells) cannot fill at all).
+ *
+ * `capacityQ` = remainingSideCapacityQ for the close's side; `positionAbsQ` = |position|.
+ */
+export function closeCapacityMessage(capacityQ: bigint, positionAbsQ: bigint): string {
+  const room = capacityQ > 0n ? capacityQ : 0n;
+  const pct = positionAbsQ > 0n ? Number((room * 100n) / positionAbsQ) : 0;
+  if (pct <= 0) {
+    return (
+      "This position can't be closed through the market right now: its liquidity provider is " +
+      "already at its exposure limit on your side, so there is nobody to take the other side of " +
+      "your close. Room opens up as other traders trade the opposite way; until then the position " +
+      "stays open and keeps tracking the price."
+    );
+  }
+  return (
+    `The market can take ${pct}% of your position right now: its liquidity provider is at its ` +
+    `exposure limit on your side. Close up to ${pct}% now, or wait for other trades to free capacity.`
+  );
+}
+

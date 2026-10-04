@@ -13,7 +13,12 @@
 
 import { FC, useEffect, useState, useCallback } from "react";
 import { PublicKey, Connection } from "@solana/web3.js";
-import { getAssociatedTokenAddress, getAccount, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import {
+  getAssociatedTokenAddress,
+  getAccount,
+  TOKEN_PROGRAM_ID,
+  TokenAccountNotFoundError,
+} from "@solana/spl-token";
 import { getConfig } from "@/lib/config";
 
 const SIM_USDC_MINT =
@@ -70,8 +75,10 @@ export const SimUsdcBalance: FC<SimUsdcBalanceProps> = ({
         const raw = BigInt(acct.amount.toString());
         setBalance(raw);
         onBalance?.(raw);
-      } catch {
-        // ATA doesn't exist yet — balance is 0
+      } catch (e) {
+        // Only a missing ATA means 0. A failed read (429, network) is not a zero balance:
+        // rethrow so the outer catch shows "Could not fetch balance".
+        if (!(e instanceof TokenAccountNotFoundError)) throw e;
         setBalance(BigInt(0));
         onBalance?.(BigInt(0));
       }

@@ -74,16 +74,24 @@ export const CrankHealthCard: FC = () => {
     lifetimeForceCloses = engine!.lifetimeForceCloses ?? 0n;
   }
 
-  const slotsBehind = currentSlot ? currentSlot - lastCrank : 0;
-  const secondsBehind = (slotsBehind * 0.4).toFixed(1);
-  const stalenessRatio = maxStaleness > 0 ? slotsBehind / maxStaleness : 0;
+  // Until the first cluster-slot read lands (or while it keeps failing from the start) the
+  // lag is unknown — not 0, which read as a green FRESH "0.0s ago" even with updates stopped.
+  // Clamped: an update can land after the last 10s cluster-slot read (slot_last ahead of it).
+  const slotsBehind = currentSlot !== null ? Math.max(0, currentSlot - lastCrank) : null;
+  const secondsBehind = slotsBehind !== null ? (slotsBehind * 0.4).toFixed(1) : null;
+  const stalenessRatio = slotsBehind !== null && maxStaleness > 0 ? slotsBehind / maxStaleness : 0;
   const progressPercent = Math.min(stalenessRatio * 100, 100);
 
   let statusLabel: string;
   let statusColor: string;
   let dotColor: string;
   let barColor: string;
-  if (stalenessRatio < 0.5) {
+  if (slotsBehind === null) {
+    statusLabel = "CHECKING";
+    statusColor = "text-[var(--text-secondary)]";
+    dotColor = "bg-[var(--text-secondary)]";
+    barColor = "bg-[var(--text-secondary)]";
+  } else if (stalenessRatio < 0.5) {
     statusLabel = "FRESH";
     statusColor = "text-[var(--long)]";
     dotColor = "bg-[var(--long)]";
@@ -118,7 +126,7 @@ export const CrankHealthCard: FC = () => {
       {/* Staleness progress bar */}
       <div className="mb-1.5">
         <div className="mb-1 flex items-center justify-between text-[9px] text-[var(--text-secondary)]">
-          <span>Last update: {secondsBehind}s ago</span>
+          <span>Last update: {secondsBehind !== null ? `${secondsBehind}s ago` : "—"}</span>
           <span>Max: about {Math.max(1, Math.round((maxStaleness * 0.4) / 60))} min</span>
         </div>
         <div className="h-1 w-full rounded-none bg-[var(--border)]">

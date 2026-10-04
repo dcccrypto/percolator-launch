@@ -24,6 +24,9 @@ import * as fs from "fs";
 import * as path from "path";
 
 const API_DIR = path.resolve(__dirname, "../../app/api");
+// Client hooks too: the Position NFT mint and transfer hooks sent with skipPreflight and
+// reported success on a confirmation whose result they never checked.
+const HOOKS_DIR = path.resolve(__dirname, "../../hooks");
 
 function routeFiles(dir: string): string[] {
   const out: string[] = [];
@@ -93,14 +96,14 @@ function isChecked(code: string, callIdx: number): boolean {
   return false;
 }
 
-function callSites(): Site[] {
+function callSites(dir = API_DIR, files = routeFiles(API_DIR)): Site[] {
   const sites: Site[] = [];
-  for (const file of routeFiles(API_DIR)) {
+  for (const file of files) {
     const code = stripComments(fs.readFileSync(file, "utf8"));
     for (const m of code.matchAll(/\.confirmTransaction\(/g)) {
       const idx = m.index ?? 0;
       sites.push({
-        file: path.relative(API_DIR, file),
+        file: path.relative(dir, file),
         line: code.slice(0, idx).split("\n").length,
         checked: isChecked(code, idx),
       });
@@ -150,5 +153,26 @@ describe("GH#2517: no API route discards a confirmTransaction result", () => {
         'from "@/lib/transaction-confirmation"',
       );
     }
+  });
+});
+
+describe("no client hook discards a confirmTransaction result", () => {
+  const hookSites = () =>
+    callSites(
+      HOOKS_DIR,
+      fs.readdirSync(HOOKS_DIR).filter((n) => /.tsx?$/.test(n)).map((n) => path.join(HOOKS_DIR, n)),
+    );
+
+  it("finds the call sites at all (guards the scan itself)", () => {
+    // useCreateMarket (3), useReclaimSlabRent, useMintPositionNft, useTransferPositionNft.
+    expect(hookSites().length).toBeGreaterThanOrEqual(6);
+  });
+
+  it("checks every one of them", () => {
+    const bare = hookSites().filter((s) => !s.checked);
+    expect(
+      bare.map((s) => `hooks/${s.file}:${s.line}`),
+      "confirmTransaction() result discarded — wrap it in assertSuccessfulConfirmation()",
+    ).toEqual([]);
   });
 });

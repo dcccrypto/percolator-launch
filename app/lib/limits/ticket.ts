@@ -88,7 +88,7 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
     // The wrapper refuses an opening trade from the market's creator / LP owner (SameOwnerTrade,
     // Custom 67) on EVERY build, limits flags or not. Without this the creator got a normal
     // ticket, signed, and the trade leg was refused on-chain ("Something went wrong").
-    if (!sameOwnerBlocked(i.takerOwner, L.lp?.owner ?? null, L.assetAdmin)) return NONE;
+    if (!sameOwnerBlocked(i.takerOwner, L.lp?.owner ?? L.sameOwnerLpOwner ?? null, L.assetAdmin)) return NONE;
     const sameOwner = sameOwnerRoomQ(i.takerPosQ, i.direction) === 0n;
     return {
       ...NONE,
@@ -122,7 +122,7 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
       });
       // P1 item 2 (2e7f87de): the LP owner / creator may still CLOSE — cap each side at the
       // taker's reducing room instead of blocking the whole ticket.
-      if (sameOwnerBlocked(i.takerOwner, L.lp?.owner ?? null, L.assetAdmin)) {
+      if (sameOwnerBlocked(i.takerOwner, L.lp?.owner ?? L.sameOwnerLpOwner ?? null, L.assetAdmin)) {
         out.sameOwnerCloseOnly = true;
         for (const side of ["long", "short"] as const) {
           const room = sameOwnerRoomQ(i.takerPosQ, side);

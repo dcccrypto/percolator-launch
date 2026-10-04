@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { type Network, getConfig } from "@/lib/config";
+import { MAX_LEVERAGE_X } from "@/lib/market-params";
 
 // Routes where the marketing marquee is suppressed: the trading "workstation"
 // pages, where a scrolling slogan strip reads as unserious and eats vertical
@@ -38,7 +39,7 @@ const MAINNET_ITEMS = [
   "no governance. no gatekeepers.",
   "insurance fund on every market.",
   "deploy in 60 seconds.",
-  "up to 20x leverage.",
+  `up to ${MAX_LEVERAGE_X}x leverage.`,
   "any SPL token.",
   "don't trust, verify.",
   "burn the admin key.",

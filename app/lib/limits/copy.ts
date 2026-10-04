@@ -48,7 +48,7 @@ export const COPY = {
     dir === "flat" ? "Book skew: balanced" : `Book skew: traders net ${dir} ${size} ${sym}`,
   /** UX WP-5 / audit §5.2: "How losses work" — the P3 §0.8 rule in plain words, shown ONCE (Earn card). */
   howLossesWork:
-    "The market creator's stake takes losses first. Only a loss bigger than that stake reaches Earn, and then every Earn depositor loses the same percentage. Winning traders are always paid in full unless Earn's money is used up too. Share value can go down; only deposit what you can afford to lose.",
+    "The market creator's stake takes losses first. Only a loss bigger than that stake reaches Earn, and then every Earn depositor loses the same percentage. Winning traders are paid in full unless Earn's money is used up too, or the losing side's backing falls short. Share value can go down; only deposit what you can afford to lose.",
   howLossesFinePrint:
     "The first deposit into a vault leaves a tiny permanent amount (0.001 USDC) behind, and each withdrawal rounds down by at most 0.000001 USDC.",
   withdrawReceive: (amt: string) => `You receive ≈ ${amt}.`,
@@ -69,7 +69,7 @@ export const COPY = {
   stepDown: (x: string, side: string, crowd: string, base: string) =>
     `Max leverage is ${x}× for new ${side} positions while the book is crowded (${crowd} of the cap). The other side keeps ${base}×.`,
   wizardRequirement: (floor: string) =>
-    `Your creator stake is first-loss capital. The market creator's stake takes losses first. Only a loss bigger than that stake reaches Earn, and then every Earn depositor loses the same percentage. Winning traders are always paid in full unless Earn's money is used up too. It can't be withdrawn while traders have open positions on your market, or below ${floor} of Earn deposits.`,
+    `Your creator stake is first-loss capital. The market creator's stake takes losses first. Only a loss bigger than that stake reaches Earn, and then every Earn depositor loses the same percentage. Winning traders are paid in full unless Earn's money is used up too, or the losing side's backing falls short. It can't be withdrawn while traders have open positions on your market, or below ${floor} of Earn deposits.`,
   wizardAfterLaunch: "Your creator stake is added after launch.",
   closeRebooked: "The market is finishing its last fee sweep. Close again in a minute.",
   closeZeroFill:
@@ -130,14 +130,14 @@ export const COPY = {
     "The vault can't pay this withdrawal right now. Nothing moved and your withdrawal stays pending. Try again later.",
   /** Creator panel notice when the junior is exhausted (senior-impaired flag set on chain). */
   juniorExhausted:
-    "Your creator stake has been used up covering trader profits, so further losses reach Earn: every Earn depositor loses the same percentage. Winning traders are always paid in full unless Earn's money is used up too. New Earn deposits are paused.",
+    "Your creator stake has been used up covering trader profits, so further losses reach Earn: every Earn depositor loses the same percentage. Winning traders are paid in full unless Earn's money is used up too, or the losing side's backing falls short. New Earn deposits are paused.",
   /** Earn risk notice on P3 markets: who bears a loss (user decision 2026-09-30, reversed; wording = P3 doc §0.8). */
   earnRiskP3:
-    "Earn deposits back each market's liquidity and can lose value. The market creator's stake takes losses first. Only a loss bigger than that stake reaches Earn, and then every Earn depositor loses the same percentage. Winning traders are always paid in full unless Earn's money is used up too. Only deposit what you can afford to lose.",
+    "Earn deposits back each market's liquidity and can lose value. The market creator's stake takes losses first. Only a loss bigger than that stake reaches Earn, and then every Earn depositor loses the same percentage. Winning traders are paid in full unless Earn's money is used up too, or the losing side's backing falls short. Only deposit what you can afford to lose.",
   p3Wizard: {
     title: "Your creator stake",
     explain:
-      "Your market's liquidity comes from the Earn vault. You fund its first-loss capital, your creator stake, and trading profit and loss against it is yours. The market creator's stake takes losses first. Only a loss bigger than that stake reaches Earn, and then every Earn depositor loses the same percentage. Winning traders are always paid in full unless Earn's money is used up too.",
+      "Your market's liquidity comes from the Earn vault. You fund its first-loss capital, your creator stake, and trading profit and loss against it is yours. The market creator's stake takes losses first. Only a loss bigger than that stake reaches Earn, and then every Earn depositor loses the same percentage. Winning traders are paid in full unless Earn's money is used up too, or the losing side's backing falls short.",
     floorLabel: "Keep at least",
     floorTooltip:
       "The share of Earn deposits your creator stake must cover. You cannot withdraw below it while Earn depositors are in the vault. 10% to 100%.",

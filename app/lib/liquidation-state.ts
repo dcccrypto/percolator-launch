@@ -87,15 +87,18 @@ export function classifyLiquidation(
 
 /**
  * The collateral at which a LONG stops having a liquidation price, so the UI
- * can explain the relationship instead of just withholding a number: past
- * roughly `notional * (1 + mm)`, capital covers the position at any price.
+ * can explain the relationship instead of just withholding a number: at the
+ * notional (at entry), capital covers the position at any price — the engine's
+ * maintenance check never fires once equity >= notional (lib/liquidation-risk.ts).
+ * The SDK's old formula put it at `notional * (1 + mm)` (#2987). The maintenance
+ * margin argument is kept for callers.
  */
 export function unliquidatableCollateralThreshold(
   positionSize: bigint,
   entryPriceE6: bigint,
-  maintenanceMarginBps: bigint,
+  _maintenanceMarginBps: bigint,
 ): bigint {
   if (positionSize <= 0n || entryPriceE6 <= 0n) return 0n;
-  const notional = (positionSize * entryPriceE6) / 1_000_000n;
-  return (notional * (10_000n + maintenanceMarginBps)) / 10_000n;
+  // Rounded up: one atom below this still leaves a liquidation price.
+  return (positionSize * entryPriceE6 + 999_999n) / 1_000_000n;
 }

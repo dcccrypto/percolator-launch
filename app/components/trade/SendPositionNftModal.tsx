@@ -26,10 +26,12 @@ interface SendPositionNftModalProps {
   onCancel: () => void;
 }
 
-function isValidPubkey(s: string): PublicKey | null {
-  if (!s || s.length < 32 || s.length > 44) return null;
+function isValidPubkey(input: string): PublicKey | null {
+  // Trim before the length check: a pasted address often carries a space or newline.
+  const s = input.trim();
+  if (s.length < 32 || s.length > 44) return null;
   try {
-    return new PublicKey(s.trim());
+    return new PublicKey(s);
   } catch {
     return null;
   }
@@ -50,11 +52,13 @@ export const SendPositionNftModal: FC<SendPositionNftModalProps> = ({
 
   // Mark a dialog as open on the body-level counter for the whole time this
   // modal is mounted — same as ClosePositionModal / TradeConfirmationModal.
-  // The Position NFT panel that opens this modal lives inside the mobile order
-  // sheet (page.tsx MobileOrderSheet → OrderTicketRail → PositionNftPanel),
-  // whose own document-level Escape handler collapses the sheet. Without this
-  // counter a single Escape here fired BOTH: this modal cancelled AND the sheet
-  // collapsed underneath it. The sheet's handler ignores Escape while it's > 0.
+  // This modal opens from the position row's ⋯ menu (PositionNftMenu in
+  // PositionsDock); the old Position NFT panel in the mobile order sheet is gone
+  // (UX WP-9). The counter stays: the mobile order sheet (page.tsx
+  // MobileOrderSheet) has a document-level Escape handler that collapses the
+  // sheet, and without this counter one Escape would close this modal AND
+  // collapse the sheet if it is open. The sheet's handler ignores Escape while
+  // the counter is > 0.
   useEffect(() => {
     const current = Number(document.body.dataset.percOpenDialogs ?? "0");
     document.body.dataset.percOpenDialogs = String(current + 1);

@@ -5,6 +5,8 @@
  * without a DOM or a lightweight-charts instance.
  */
 
+import { chartPricePrecision } from "@/lib/format";
+
 export type Timeframe = "1m" | "5m" | "15m" | "1h" | "4h" | "1d" | "7d" | "30d";
 
 export interface PricePoint {
@@ -66,4 +68,17 @@ export function computePriceChange(
   const priceChange = currentPrice - ref24h;
   const priceChangePercent = ref24h > 0 ? (priceChange / ref24h) * 100 : 0;
   return { priceChange, priceChangePercent, isUp: priceChange >= 0 };
+}
+
+/**
+ * The header's price change, at the chart axis's precision for the market's price, or finer
+ * when the move itself is smaller. A fixed 4dp printed "+0.0000" beside a non-zero % on
+ * sub-cent markets.
+ */
+export function formatPriceChange(priceChange: number, currentPrice: number): string {
+  const digits = Math.max(
+    chartPricePrecision(currentPrice).precision,
+    chartPricePrecision(priceChange).precision,
+  );
+  return priceChange.toFixed(digits);
 }

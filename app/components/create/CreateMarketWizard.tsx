@@ -221,6 +221,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
    * When non-null, handleLaunch skips slab creation and resumes from this step.
    */
   const [resumeFromStep, setResumeFromStep] = useState<number | null>(null);
+  // Which stuck slab is being resumed; only meaningful while resumeFromStep is set.
+  const [resumeSlab, setResumeSlab] = useState<string | null>(null);
 
   // BUG FIX (2026-09-25, tester-reported "RESUME CREATION is a dead button"):
   // clicking RESUME CREATION previously only updated React state — nothing
@@ -1136,6 +1138,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       {/* Stuck slab recovery banner */}
       <RecoverSolBanner
         onReset={handleReset}
+        resumingSlab={resumeFromStep !== null ? resumeSlab : null}
         onResume={(slabAddress, fromStep) => {
           // PERC-513 fix: DO NOT call resetCreate() here — that clears slabKpRef
           // and removes the localStorage keypair, making the Continue button a no-op.
@@ -1156,6 +1159,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
           }
           // Set resumeFromStep so handleLaunch skips slab creation and resumes correctly.
           setResumeFromStep(fromStep);
+          setResumeSlab(slabAddress);
         }}
         onReclaimSuccess={() => {
           // Clear wizard localStorage state so the user starts completely fresh

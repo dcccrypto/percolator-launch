@@ -22,7 +22,10 @@ import { getNetwork, getRpcEndpoint } from "./config";
  * SERVER-ONLY: reads `process.env.DEVNET_RPC_URL` / `RPC_UPSTREAM_ORIGIN`, which
  * are undefined in the browser. Client code must keep using the `/api/rpc` proxy.
  */
-export function getServerConnection(commitment: Commitment = "confirmed"): Connection {
+export function getServerConnection(
+  commitment: Commitment = "confirmed",
+  opts: { disableRetryOnRateLimit?: boolean } = {},
+): Connection {
   const net = getNetwork();
   const override = (
     net === "mainnet" ? process.env.MAINNET_RPC_URL : process.env.DEVNET_RPC_URL
@@ -33,6 +36,9 @@ export function getServerConnection(commitment: Commitment = "confirmed"): Conne
     (net === "devnet" ? "https://trade.padre.gg" : "");
   return new Connection(url, {
     commitment,
+    // Opt-in per call (default unchanged): web3.js otherwise retries HTTP 429 with backoff, which a
+    // latency-sensitive probe must not do.
+    ...(opts.disableRetryOnRateLimit ? { disableRetryOnRateLimit: true } : {}),
     ...(origin ? { httpHeaders: { Origin: origin } } : {}),
   });
 }
