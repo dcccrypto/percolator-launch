@@ -157,6 +157,12 @@ export interface TvChartApi {
   getAllShapes(): { id: TvEntityId; name: string }[];
   getAllStudies(): { id: TvEntityId; name: string }[];
   applyOverrides(overrides: Record<string, string | number | boolean>): void;
+  /** Panes (the first holds the candles); optional so older fakes keep compiling. */
+  getPanes?(): Array<{ getMainSourcePriceScale(): { getVisiblePriceRange(): { from: number; to: number } | null } | null }>;
+  onVisibleRangeChanged?(): {
+    subscribe(obj: object | null, cb: () => void): void;
+    unsubscribe(obj: object | null, cb: () => void): void;
+  };
   onIntervalChanged(): {
     subscribe(obj: object | null, cb: (interval: TvResolution) => void): void;
     unsubscribe(obj: object | null, cb: (interval: TvResolution) => void): void;

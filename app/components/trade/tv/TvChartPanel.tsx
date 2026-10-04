@@ -273,7 +273,7 @@ export function TvChartPanel({ slabAddress, onFailure }: TvChartPanelProps) {
       </div>
 
       {usesDex && (
-        <div className="shrink-0 pt-1 text-right text-[9px] text-[var(--text-dim)]">
+        <div className="shrink-0 pt-1 text-right text-[9px] text-[var(--text-muted)]">
           <a
             href="https://www.coingecko.com/en/api"
             target="_blank"

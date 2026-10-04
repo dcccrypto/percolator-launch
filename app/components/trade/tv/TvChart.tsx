@@ -33,6 +33,8 @@ import { createTvDatafeed } from "@/lib/tv/datafeed";
 import { importLegacyOnce } from "@/lib/tv/legacyImport";
 import { loadTradingView, TvLoadError } from "@/lib/tv/loadLibrary";
 import { PositionLines, desiredLines } from "@/lib/tv/positionLines";
+import { liqEdgeFromRange, type LiqEdge } from "@/lib/tv/liqEdge";
+import { formatPerpPrice } from "@/lib/chart/precision";
 import {
   LocalStorageSaveLoadAdapter,
   createSettingsAdapter,
@@ -124,6 +126,9 @@ export function TvChart({
   const widgetRef = useRef<TvWidget | null>(null);
   const linesRef = useRef<PositionLines | null>(null);
   const [ready, setReady] = useState(false);
+  // Off-screen liquidation chip: which edge of the price pane the liq line hides behind (null = in view / no liq).
+  const [liqEdge, setLiqEdge] = useState<LiqEdge>(null);
+  const liqEdgeRef = useRef<LiqEdge>(null);
 
   const chartTheme = useChartTheme();
   const { liq, entry, entryIsEstimate } = usePositionLinePrices(slabAddress);
@@ -348,6 +353,42 @@ export function TvChart({
     );
   }, []);
 
+  const recomputeLiqEdge = useCallback(() => {
+    const s = lineState.current;
+    const liq = s.prefs.liq ? s.liq : null;
+    let next: LiqEdge = null;
+    if (liq != null) {
+      try {
+        const scale = widgetRef.current?.activeChart().getPanes?.()[0]?.getMainSourcePriceScale() ?? null;
+        next = liqEdgeFromRange(liq, scale?.getVisiblePriceRange() ?? null);
+      } catch {
+        next = null; // chart gone / not laid out yet
+      }
+    }
+    if (next !== liqEdgeRef.current) {
+      liqEdgeRef.current = next;
+      setLiqEdge(next);
+    }
+  }, []);
+
+  // Price-scale pans/zooms have no event in the library, so the range is re-read on a light timer (setState
+  // only when the edge flips), on every line sync, and when the visible TIME range changes.
+  useEffect(() => {
+    if (!ready) return;
+    recomputeLiqEdge();
+    const id = setInterval(recomputeLiqEdge, 400);
+    let sub: { unsubscribe(o: object | null, cb: () => void): void } | null = null;
+    try {
+      const chart = widgetRef.current?.activeChart();
+      const s = chart?.onVisibleRangeChanged?.();
+      if (s) { s.subscribe(null, recomputeLiqEdge); sub = s; }
+    } catch { /* optional */ }
+    return () => {
+      clearInterval(id);
+      try { sub?.unsubscribe(null, recomputeLiqEdge); } catch { /* widget gone */ }
+    };
+  }, [ready, liq, entry, overlayPrefs.liq, series, recomputeLiqEdge]);
+
   useEffect(() => {
     if (ready) syncLines();
   }, [ready, liq, entry, entryIsEstimate, series, overlayPrefs.liq, overlayPrefs.entry, chartTheme, syncLines]);
@@ -422,6 +463,28 @@ export function TvChart({
     w.changeTheme(name).then(apply, apply);
   }, [chartTheme, ready]);
 
-  return <div ref={containerRef} data-testid="tv-chart" className={className} />;
+  const liqShown = overlayPrefs.liq ? liq : null;
+  return (
+    <>
+      <div ref={containerRef} data-testid="tv-chart" className={className} />
+      {liqShown != null && liqEdge && (
+        <div
+          data-testid="liq-edge-chip"
+          className={[
+            "pointer-events-none absolute left-1/2 z-10 flex -translate-x-1/2 items-center gap-1",
+            "whitespace-nowrap rounded-none border border-[var(--short)]/50 bg-[var(--bg)]/90",
+            "px-1.5 py-0.5 font-mono text-[9px] font-semibold shadow-sm backdrop-blur-sm",
+            liqEdge === "above" ? "top-2" : "bottom-8",
+          ].join(" ")}
+          aria-hidden="true"
+          title={`Liquidation price ${formatPerpPrice(liqShown)} is off the ${liqEdge === "above" ? "top" : "bottom"} of the chart — scroll the price axis to see the line`}
+        >
+          <span className="uppercase tracking-[0.1em] text-[var(--short)]">Liq</span>
+          <span className="text-[var(--short)]">{liqEdge === "above" ? "↑" : "↓"}</span>
+          <span className="text-[var(--text)]">{formatPerpPrice(liqShown)}</span>
+        </div>
+      )}
+    </>
+  );
 }
 
