@@ -231,6 +231,9 @@ export function useInsuranceLP() {
   // switch doesn't keep showing the PREVIOUS market's numbers labeled as loaded.
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // The last vault read failed (RPC error), so `state` is the last good read, or the
+  // zero defaults if none has landed. A zero there is unknown, not "no vault".
+  const [readError, setReadError] = useState(false);
 
   // Stabilize wallet.publicKey reference — PublicKey is not referentially stable
   const walletPubkeyStr = wallet.publicKey?.toBase58() ?? null;
@@ -246,6 +249,7 @@ export function useInsuranceLP() {
   // string form is stable across polls and still updates on a real market
   // switch (including the null → defined transition when config first loads).
   const collateralMintStr = slabState.config?.collateralMint.toBase58() ?? null;
+  const slabLoading = slabState.loading;
 
   // ...and the same treatment for `programId`, for the same reason. The note
   // above stabilizes `config`, but `lpMintInfo`/`registryInfo` below are memos
@@ -308,8 +312,15 @@ export function useInsuranceLP() {
   const refreshState = useCallback(async () => {
     if (!slabState || !lpMintInfo || !connection) {
       // Nothing to fetch yet (market/programId not resolved) — don't leave
-      // the UI stuck on a loading skeleton forever.
-      setLoading(false);
+      // the UI stuck on a loading skeleton forever. While the slab itself is
+      // still loading, though, programId is just not known yet: stay loading,
+      // or the zero defaults read as "this market has no Earn vault".
+      if (!slabState?.loading) {
+        setLoading(false);
+        // The slab read itself failed on the network (SlabProvider keeps polling):
+        // unknown, not "no vault". A permanent error (not found, bad address) is not.
+        setReadError(!!slabState?.error?.startsWith("RPC error"));
+      }
       return;
     }
     const requestId = ++requestIdRef.current;
@@ -439,11 +450,19 @@ export function useInsuranceLP() {
       let pendingRedemptionShares = 0n;
       let cooldownRemainingSlots = 0n;
       let cooldownElapsed = true;
+      // A failed READ is not a missing registry: rethrown below so the outer catch
+      // keeps the last good state, instead of publishing "no vault, $0".
+      let registryReadFailed = false;
+      const readAccount = (pk: PublicKey) =>
+        connection.getAccountInfo(pk).catch((e: unknown) => {
+          registryReadFailed = true;
+          throw e;
+        });
 
       try {
         if (registryInfo) {
           registryAddress = registryInfo.registryPda;
-          const registryAcctInfo = await connection.getAccountInfo(registryInfo.registryPda);
+          const registryAcctInfo = await readAccount(registryInfo.registryPda);
           if (stale()) return;
           if (registryAcctInfo && registryAcctInfo.data.length > 0) {
             const registry = parseLpVaultRegistry(new Uint8Array(registryAcctInfo.data));
@@ -469,7 +488,7 @@ export function useInsuranceLP() {
 
             // Pending redemption ticket (RequestRedeemLpShares → cooldown → ExecuteRedemption).
             if (registryInfo.redemptionPda) {
-              const redemptionAcctInfo = await connection.getAccountInfo(registryInfo.redemptionPda);
+              const redemptionAcctInfo = await readAccount(registryInfo.redemptionPda);
               if (stale()) return;
               if (redemptionAcctInfo && redemptionAcctInfo.data.length > 0) {
                 const redemption = parseLpRedemption(new Uint8Array(redemptionAcctInfo.data));
@@ -494,7 +513,8 @@ export function useInsuranceLP() {
           }
         }
       } catch (registryErr) {
-        // Registry not yet created, malformed, or RPC hiccup — leave the safe
+        if (registryReadFailed) throw registryErr;
+        // Registry malformed (or an SDK without this export) — leave the safe
         // defaults above (0 / not-pending) rather than showing garbage.
         console.error('Failed to refresh LP vault registry state:', registryErr);
       }
@@ -561,8 +581,10 @@ export function useInsuranceLP() {
         cooldownElapsed,
         splitPot,
       });
+      setReadError(false);
     } catch (err) {
       console.error('Failed to refresh insurance LP state:', err);
+      if (!stale()) setReadError(true);
     } finally {
       // Covers every path through the try block above — success, each
       // `if (stale()) return;` bail-out, and the catch branch — so loading
@@ -597,7 +619,9 @@ export function useInsuranceLP() {
     // `slabState.config` — the object identity changes every slab poll.
     setLoading(true);
     refreshStateRef.current();
-  }, [lpMintInfo, registryInfo, walletPubkeyStr, collateralMintStr]);
+    // slabLoading: a slab that finishes loading without a programId changes no PDA
+    // above, so re-run here to clear the loading state refreshState held for it.
+  }, [lpMintInfo, registryInfo, walletPubkeyStr, collateralMintStr, slabLoading]);
 
   useEffect(() => {
     // Set up the 10s auto-refresh interval. The initial call now happens via
@@ -1056,6 +1080,7 @@ export function useInsuranceLP() {
     state,
     loading,
     error,
+    readError,
     createMint,
     deposit,
     withdraw,

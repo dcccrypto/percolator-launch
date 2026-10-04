@@ -71,7 +71,7 @@ export function VaultDepositRail({ slab, vault, onTxSuccess, onPositionResolved 
 }
 
 function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }: VaultDepositRailProps & { slab: string }) {
-  const { state, loading, deposit, withdraw, resizeRedemption, refreshState, lastDrawSummary } = useInsuranceLP();
+  const { state, loading, readError, deposit, withdraw, resizeRedemption, refreshState, lastDrawSummary } = useInsuranceLP();
   const { config, raw: slabRaw } = useSlabState();
   const wallet = useWalletCompat();
   const vaultAvailable = state.registryExists && state.mintExists;
@@ -81,9 +81,10 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
   // `loading` flag that toggles on every background revalidation (which made the
   // warning flicker on and off). Resets per vault via the key={slab} remount.
   const [everLoaded, setEverLoaded] = useState(false);
+  // A failed read is not a load: its zeros are unknown, not "no vault" / $0.
   useEffect(() => {
-    if (!loading) setEverLoaded(true);
-  }, [loading]);
+    if (!loading && !readError) setEverLoaded(true);
+  }, [loading, readError]);
 
   const collateralMeta = useTokenMeta(config?.collateralMint ?? null);
   const collateralSymbol = collateralMeta?.symbol ?? 'USDC';
@@ -196,6 +197,12 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
                 {state.userSharePct.toFixed(2)}%
               </span>
             </div>
+          )}
+
+          {!everLoaded && !loading && readError && (
+            <p className="mt-3 border-t border-[var(--border)]/60 pt-3 text-[11px] text-[var(--short)]">
+              Couldn&apos;t load this vault. Retrying every 10 seconds.
+            </p>
           )}
 
           {everLoaded && !vaultAvailable && (
