@@ -73,6 +73,10 @@ export interface FundAndTradeParams {
   amountLabel: string;
   /** The id race happened: the UI labels the extra prompt. */
   onRace?: () => void;
+  /** #2560 isolated margin: open in a NEW portfolio even when the wallet already
+   *  owns one on this market, so the position gets its own isolated collateral.
+   *  Omitted/false → today's behaviour (reuse the existing portfolio if any). */
+  forceNewPortfolio?: boolean;
 }
 
 export interface FundAndTradeResult {
@@ -127,7 +131,9 @@ export function useFirstTrade(slabAddress: string) {
         });
 
         // ── Returning user: the account exists — [Deposit, Trade] in ONE tx (1 prompt). ──
-        const existing = await findV17Portfolio(connection, programId, market, owner);
+        // #2560: an ISOLATED open skips this reuse and always creates a fresh
+        // portfolio below, so the position is margined by its own collateral.
+        const existing = p.forceNewPortfolio ? null : await findV17Portfolio(connection, programId, market, owner);
         if (existing) {
           const id = await fetchPortfolioIdentity(connection, existing);
           const signature = await withPresignWait(() =>
