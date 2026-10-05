@@ -58,8 +58,17 @@ export interface PickedPortfolio {
 
 const toBuffer = (d: Buffer | Uint8Array): Buffer => (Buffer.isBuffer(d) ? d : Buffer.from(d));
 
-/** The deterministic selector (see the module doc). `null` = no owned, non-LP portfolio in `results`. */
-export function pickOwnerPortfolio(results: readonly ScannedAccount[], owner: PublicKey): PickedPortfolio | null {
+/**
+ * ALL of the wallet's own (non-LP) portfolios in `results`, in the deterministic
+ * selection order (lowest base58 pubkey first). Empty when none match.
+ *
+ * This is the full set that `pickOwnerPortfolio` takes the first of — exposed so
+ * multi-portfolio flows (isolated margin, #2560) can enumerate every portfolio a
+ * wallet owns on a market without re-deriving the drop-LP / owner@116 / sort
+ * filter. It applies exactly the selector's filter and ordering, so
+ * `listOwnerPortfolios(...)[0]` is, by construction, `pickOwnerPortfolio(...)`.
+ */
+export function listOwnerPortfolios(results: readonly ScannedAccount[], owner: PublicKey): PickedPortfolio[] {
   const owned: PickedPortfolio[] = [];
   for (const r of results) {
     const data = toBuffer(r.account.data);
@@ -72,9 +81,20 @@ export function pickOwnerPortfolio(results: readonly ScannedAccount[], owner: Pu
     }
     if (ownerMatches) owned.push({ pubkey: r.pubkey, data });
   }
-  if (owned.length === 0) return null;
   owned.sort((a, b) => a.pubkey.toBase58().localeCompare(b.pubkey.toBase58()));
-  return owned[0];
+  return owned;
+}
+
+/**
+ * The deterministic selector (see the module doc). `null` = no owned, non-LP
+ * portfolio in `results`.
+ *
+ * Defined as the head of {@link listOwnerPortfolios} so the single-portfolio
+ * selection every existing flow relies on stays bit-identical while
+ * multi-portfolio callers adopt the list.
+ */
+export function pickOwnerPortfolio(results: readonly ScannedAccount[], owner: PublicKey): PickedPortfolio | null {
+  return listOwnerPortfolios(results, owner)[0] ?? null;
 }
 
 export interface LookupRetry {
