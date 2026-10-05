@@ -280,7 +280,7 @@ export function TvChartPanel({ slabAddress, onFailure }: TvChartPanelProps) {
             <span>Chart data unavailable</span>
             <button
               type="button"
-              onClick={() => { setDataError(null); handleRef.current?.retryData(); }}
+              onClick={() => { setDataError(null); setReady(false); setEmbedEpoch((e) => e + 1); }}
               className="rounded-none border border-[var(--border)] px-3 py-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text)]"
             >
               Retry

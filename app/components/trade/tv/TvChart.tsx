@@ -53,8 +53,6 @@ const MARK_LINE_MIN_INTERVAL_MS = 250;
 
 export interface TvChartHandle {
   setResolution(resolution: TvResolution): void;
-  /** Drop the chart's cached bars and refetch history (the Retry after a data error). */
-  retryData(): void;
 }
 
 export interface TvChartProps {
@@ -314,13 +312,6 @@ export function TvChart({
             chart.setResolution(res).catch(() => {
               /* unsupported */
             });
-          },
-          retryData() {
-            try {
-              chart.resetData();
-            } catch {
-              /* chart gone */
-            }
           },
         };
         cleanups.push(() => {
