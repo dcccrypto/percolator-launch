@@ -34,6 +34,10 @@ import { assertKnownProgram } from '@/lib/programAllowlist';
 import { assertDepositWithinBalance, readTokenBalance } from '@/lib/deposit-guard';
 import { useParams } from 'next/navigation';
 import { pythCrankAccount } from "@/lib/limits/oracle-tail";
+import { isDevnetV21Enabled } from "@/lib/v21/flag";
+import { EXIT_CRANK_CU_CAP, planExitCranks, readOpenPortfolios } from "@/lib/v21/exit-cranks";
+import { crankOracleTail } from "@/lib/limits/vault-lp-repair";
+import { MARKET_MODE_LIVE } from "@/lib/limits/constants";
 import { limitsFlags } from "@/lib/limits/flags";
 import { earnVaultLpRepairOption } from "@/lib/limits/vault-lp-repair";
 import { buildEarnDepositIxs, buildEarnExecuteIxs, buildRequestRedeemIx, earnTxPlan, sendWithHarvestOn84, sendWithUpgradeRetry, withForcedHarvest, type EarnTxPlan } from "@/lib/limits/earn-ixs";
@@ -197,6 +201,8 @@ export function useInsuranceLP() {
         : undefined,
     [slabOracleCfg, slabOracleMode],
   );
+  /** Devnet v2.1: how many exit cranks the last built payout carries (0 = none; the common case). */
+  const exitCranksRef = useRef(0);
   const params = useParams();
   // Prefer the SlabProvider's resolved slab (set from its `slabAddress` prop) so
   // this hook works BOTH on the /earn/[slab] route AND when mounted inside a
@@ -941,10 +947,11 @@ export function useInsuranceLP() {
         // refuses 84 while LP fees are harvestable - bundle tag 78 in front (P3-K1).
         // [12] redeemerRentDest (#461 / GH#412, live in v18.2): the consumed redemption PDA's
         // rent is returned to the RECORDED redeemer - the UI only claims its own redemption.
-        const p3 = withForcedHarvest(earnTxPlan(TAG_EXECUTE_REDEMPTION, await readEarnP3Context(connection, progPk, marketPk)), forceHarvest);
+        const p3Ctx = await readEarnP3Context(connection, progPk, marketPk);
+        const p3 = withForcedHarvest(earnTxPlan(TAG_EXECUTE_REDEMPTION, p3Ctx), forceHarvest);
         assertEarnPlan(p3);
         const prefix = shares !== null && !p3.tail ? await splitPotPrefix(shares) : [];
-        return [...prefix, ...buildEarnExecuteIxs({
+        const executeIxs = [...prefix, ...buildEarnExecuteIxs({
           programId: progPk,
           redeemer: wallet.publicKey!,
           market: marketPk,
@@ -960,6 +967,28 @@ export function useInsuranceLP() {
           domain,
           plan: p3,
         })];
+        // Devnet v2.1, R3-M1: a Live NON-BOUND exit carries cranks of the market's positioned
+        // portfolios in front, so nobody can time the payout against an untouched loser. Flag-gated,
+        // sim-gated (kept only if the whole tx still simulates clean); see lib/v21/exit-cranks.ts.
+        exitCranksRef.current = 0;
+        if (isDevnetV21Enabled() && !p3.tail && p3Ctx.mode === MARKET_MODE_LIVE) {
+          const cranks = await planExitCranks(
+            {
+              read: () => readOpenPortfolios(connection, progPk, marketPk),
+              simulate: (ixs) => simulateForGate(connection, wallet.publicKey!, ixs),
+            },
+            {
+              programId: progPk,
+              cranker: wallet.publicKey!,
+              market: marketPk,
+              core: executeIxs,
+              oracleTail: crankOracleTail(pythCrankAccount(slabState.config, slabState.wrapperConfigV17?.oracleMode)),
+            },
+          );
+          exitCranksRef.current = cranks.length;
+          return [...cranks, ...executeIxs];
+        }
+        return executeIxs;
       };
       // P3 ordering: a resolved close that ran before the vault LP settled left the viewer a
       // PARTIAL payout receipt. Once 101 has closed, its tag-46 top-up rides in front of this tx
@@ -1001,6 +1030,7 @@ export function useInsuranceLP() {
               selfHeal: { programId: progPk, market: marketPk },
               vaultLpRepair: earnRepairFor(progPk, marketPk),
               ...(bundled ? { computeUnitsFromSim: { cap: TOPUP_BUNDLE_CU_CAP } } : {}),
+              ...(exitCranksRef.current > 0 ? { computeUnitsFromSim: { cap: EXIT_CRANK_CU_CAP } } : {}),
             }),
         });
 

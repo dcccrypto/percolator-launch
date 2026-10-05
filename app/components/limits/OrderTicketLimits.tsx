@@ -188,7 +188,11 @@ const QuotePanel: FC<{
             data={{ "signed-bps": ticket.fee.signedFeeBps.toString(), "margin-bps": ticket.fee.marginBps.toString() }}
             label="Max fee you consent to"
             tooltip={COPY.feeCapTooltip}
-            value={`${ticket.fee.signedFeeBps} bps (base + quote ${ticket.fee.requestedBps} + margin ${ticket.fee.marginBps})`}
+            value={
+              ticket.fee.utilFeeBps !== undefined
+                ? `${ticket.fee.signedFeeBps} bps (base + quote ${ticket.fee.requestedBps} + busy-side ${ticket.fee.utilFeeBps} + margin ${ticket.fee.marginBps})`
+                : `${ticket.fee.signedFeeBps} bps (base + quote ${ticket.fee.requestedBps} + margin ${ticket.fee.marginBps})`
+            }
             valueClass="text-[var(--text)]"
           />
           {onFeeMarginChange && (

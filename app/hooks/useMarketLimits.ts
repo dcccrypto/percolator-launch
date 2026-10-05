@@ -49,6 +49,8 @@ import { lpEffectiveSignedQ } from "@/lib/limits/lp-inventory-room";
 import { matcherLpSyncLive } from "@/lib/program-upgrade-detect";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 import { resolveMarketLp } from "@/lib/market-lp";
+import { isDevnetV21Enabled } from "@/lib/v21/flag";
+import { growthMarketView, type GrowthMarketView } from "@/lib/v21/growth-market";
 
 const POLL_MS = 20_000;
 /** Background retries after a failed same-owner LP resolution (never blocking). */
@@ -152,6 +154,11 @@ export interface MarketLimits {
    * blocks: the on-chain rule and the pre-sign simulation still refuse an open.
    */
   sameOwnerUnresolved?: boolean;
+  /**
+   * Devnet v2.1: the asset's growth-v19 view. null on every market of today's programs (the
+   * record reads all-zero) and whenever the v2.1 flag is off.
+   */
+  growth?: GrowthMarketView | null;
 }
 
 const OFF = (flags: LimitsFlags): MarketLimits => ({
@@ -170,6 +177,31 @@ const OFF = (flags: LimitsFlags): MarketLimits => ({
   assetAdmin: null,
 });
 
+/** Devnet v2.1: the growth view from what is already read; null when growth is OFF for the asset. */
+function growthFor(
+  slabPart: { engine: MarketEngineView | null; vaultLp: AssetVaultLp | null } | null,
+  accPart: { lp: LpView | null } | null,
+  lpRealQ: bigint | null,
+  raw: Uint8Array | null,
+  assetIndex: number,
+): GrowthMarketView | null {
+  const engine = slabPart?.engine;
+  const lp = accPart?.lp;
+  if (!engine || !lp || !raw) return null;
+  const vault = slabPart?.vaultLp;
+  const lpKey = lp.address.toBytes();
+  const bound =
+    !!vault?.bound && vault.vaultLpPortfolio.length === lpKey.length && lpKey.every((b, k) => b === vault.vaultLpPortfolio[k]);
+  return growthMarketView({
+    raw,
+    assetIndex,
+    engine,
+    lp: { capital: lp.capital, pnl: lp.pnl, feeCredits: lp.feeCredits },
+    lpEffectiveQ: lpRealQ,
+    bound,
+  });
+}
+
 /**
  * @param sameOwnerWallet  trade ticket only: the connected wallet (base58), or null.
  *   When set and the market's asset_admin is renounced, the canonical matcher LP owner
@@ -183,7 +215,8 @@ export function useMarketLimits(
 ): MarketLimits {
   const resolveSameOwnerLp = !!sameOwnerWallet;
   const flags = useMemo(() => limitsFlags(), []);
-  const anyOn = flags.p1 || flags.p2 || flags.p3;
+  const v21 = isDevnetV21Enabled();
+  const anyOn = flags.p1 || flags.p2 || flags.p3 || v21;
   const { connection } = useConnectionCompat();
   const { raw, programId, assetProfile } = useSlabState();
   const programIdStr = programId?.toBase58() ?? null;
@@ -287,9 +320,9 @@ export function useMarketLimits(
     if (!anyOn || !raw) return null;
     const engine = decodeMarketEngineView(raw, assetIndex);
     const riskLimits = flags.p1 ? decodeAssetRiskLimits(raw, assetIndex) : null;
-    const vaultLp = flags.p3 ? decodeAssetVaultLp(raw, assetIndex) : null;
+    const vaultLp = flags.p3 || v21 ? decodeAssetVaultLp(raw, assetIndex) : null;
     return { engine, riskLimits, vaultLp };
-  }, [anyOn, raw, assetIndex, flags.p1, flags.p3]);
+  }, [anyOn, raw, assetIndex, flags.p1, flags.p3, v21]);
 
   const boundVaultLpKey = slabPart?.vaultLp?.bound ? new PublicKey(slabPart.vaultLp.vaultLpPortfolio).toBase58() : null;
   const marketId = slabPart?.engine?.marketId ?? null;
@@ -393,6 +426,10 @@ export function useMarketLimits(
     let state: LimitsState = "loading";
     if (slabPart && accPart) state = accPart.error && !accPart.lp ? "error" : "ready";
     if (slabPart && flags.p1 && slabPart.riskLimits === null && raw) state = "error";
+    const lpRealQ =
+      accPart?.lpBytes && slabPart?.engine
+        ? lpEffectiveSignedQ(accPart.lpBytes, slabPart.engine, assetIndex, slabPart.engine.marketId)
+        : null;
     return {
       state,
       flags,
@@ -402,10 +439,7 @@ export function useMarketLimits(
       vaultLp: slabPart?.vaultLp ?? null,
       lp: accPart?.lp ?? null,
       matcher: accPart?.matcher ?? null,
-      lpRealQ:
-        accPart?.lpBytes && slabPart?.engine
-          ? lpEffectiveSignedQ(accPart.lpBytes, slabPart.engine, assetIndex, slabPart.engine.marketId)
-          : null,
+      lpRealQ,
       matcherSyncLive: accPart?.matcherSyncLive ?? false,
       vaultState: accPart?.vaultState ?? null,
       registryShares: accPart?.registryShares ?? null,
@@ -413,8 +447,10 @@ export function useMarketLimits(
       sameOwnerLpOwner: null,
       sameOwnerPending: false,
       sameOwnerUnresolved: false,
+      growth: v21 ? growthFor(slabPart, accPart, lpRealQ, raw, assetIndex) : null,
     };
   }, [
+    v21,
     anyOn,
     flags,
     accts,

@@ -11,6 +11,9 @@
  */
 import { WRAPPER_ERR } from "../wrapper-errors";
 import { TICKET_FUNDS_LINE } from "./copy";
+import { V21_COPY } from "../v21/copy";
+import { isDevnetV21Enabled } from "../v21/flag";
+import { WRAPPER_ERR_V21 } from "../v21/wrapper-errors";
 import { resolveDevnetProgramIds } from "../program-ids";
 
 export type StatusVariant = "info" | "wait" | "paused" | "error";
@@ -90,6 +93,7 @@ export interface UserMessage {
   details: UserMessageDetails;
 }
 
+const V21_NAME_BY_CODE: Record<number, string> = Object.fromEntries(Object.entries(WRAPPER_ERR_V21).map(([n, c]) => [c, n]));
 const NAME_BY_CODE: Record<number, string> = Object.fromEntries(Object.entries(WRAPPER_ERR).map(([n, c]) => [c, n]));
 
 /** Matcher (P2 vAMM) error numbers the resolver knows. */
@@ -180,13 +184,61 @@ export function resolveUserMessage(err: unknown, ctx: MessageContext): UserMessa
   return body ? { ...u, autoRetry: false, body } : u;
 }
 
+/**
+ * Devnet v2.1 (flag-gated by the caller): growth-v19 92..99, P2b Earn 100..103, P2b lock exits
+ * 120..122. The live wrapper never raises these; null = not one of them.
+ */
+function v21WrapperMessage(
+  code: number,
+  ctx: MessageContext,
+  m: (kind: string, variant: StatusVariant, title: string, body: string, extra?: Partial<UserMessage>) => UserMessage,
+): UserMessage | null {
+  const V = WRAPPER_ERR_V21;
+  switch (code) {
+    case V.GrowthLeverageExceeded:
+      return m("growth-leverage", "paused", "Leverage too high here", ctx.maxLeverage !== undefined
+        ? `The most available at this size right now is ${ctx.maxLeverage}x. Lower the leverage or the size and try again. Closing is never blocked.`
+        : "That much leverage isn't available at this size right now. Lower the leverage or the size and try again. Closing is never blocked.");
+    case V.GrowthCapacityFull:
+      return m("growth-capacity-full", "paused", "This side is full", V21_COPY.growthClosed(ctx.side ?? "this side", "capacity-full"));
+    case V.GrowthInvalidConfig:
+      return m("growth-invalid-config", "error", "Settings not valid", "This market's growth settings aren't valid, so it can't be set up this way. Check the leverage, risk gap and funding limit and try again. Nothing was sent.");
+    case V.GrowthNeedsLpCounterparty:
+      return m("growth-needs-lp", "paused", "Use a market order", "New positions on this market trade against its liquidity vault. Place a market order instead; closing still works.");
+    case V.GrowthBatchTooManyLegs:
+      return m("growth-batch", "error", "Too many at once", "That's too many positions for one transaction. Send fewer at a time. Nothing was sent.");
+    case V.GrowthRequiresBoundVaultLp:
+      return m("growth-not-ready", "paused", "Not ready yet", V21_COPY.growthClosed(ctx.side ?? "this side", "not-bound"));
+    case V.GrowthUtilisationFeeNotCovered:
+      return m("growth-busy-fee", "wait", "Fee updated", "This side is busy, so a small extra fee applies and the price moved a little. Try again; the new fee is included automatically. Nothing was sent.", { action: { id: "try-again", label: "Try again" } });
+    case V.GrowthUtilisationFeeRequiresTradeCpi:
+      return m("growth-batch-fee", "error", "Place it as one order", "A busy side can't be traded as part of a batch. Place this one as a single order. Nothing was sent.");
+    case V.VaultLpAllocateRefused:
+      return m("earn-allocate-skipped", "info", "Nothing to move", "Earn capital can't be moved into the market right now. Your trade doesn't need it; try again in a moment.");
+    case V.VaultLpCapacityLocked:
+      return m("earn-capital-locked", "paused", "Capital in use", V21_COPY.earn.capitalLocked);
+    case V.VaultLpCreatorFeeVesting:
+      return m("creator-fee-vesting", "paused", "Still vesting", "Creator fees unlock once the market's first-loss cushion reaches its target. Try again later.");
+    case V.VaultLpSeniorCapitalHalt:
+      return m("growth-senior-halt", "paused", "Paused while it rebuilds", "This side is paused while the market's first-loss capital is rebuilt. Closing is always allowed.");
+    case V.EngineAdlReduceOnly:
+      return m("adl-reduce-only", "paused", "Close-only for now", `${V21_COPY.lock.closeOnly} ${V21_COPY.lock.closeOnlySub}`);
+    case V.EngineLossStale:
+      return m("loss-stale", "wait", "Refreshing positions", "Positions are being refreshed after a price move. Opening is paused for a moment; closing still works. Try again shortly.", { autoRetry: ctx.surface === "trade" });
+    case V.EarnExitWouldUnderBackClaims:
+      return m("earn-exit-underbacked", "paused", "Try a smaller amount", "This withdrawal would leave open winning positions under-backed. Try a smaller amount, or try again after they settle. Nothing moved.");
+    default:
+    return null;
+  }
+}
+
 function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage {
   const p = parseFailure(err);
   const origin = originOf(p.programId);
   // A Custom(n) is decoded by the program that RAISED it (error-codes-4b1a5d30.md: CPI callees —
   // SPL Token, the matcher, stake, NFT — reuse the same numbers). No attribution => no guess.
   const wrapperish = origin === "wrapper";
-  const name = p.code !== null && wrapperish ? NAME_BY_CODE[p.code] ?? null : null;
+  const name = p.code !== null && wrapperish ? NAME_BY_CODE[p.code] ?? (isDevnetV21Enabled() ? V21_NAME_BY_CODE[p.code] : undefined) ?? null : null;
   const details: UserMessageDetails = { code: p.code, name, programId: p.programId, logs: p.logs, raw: p.raw };
   const m = (kind: string, variant: StatusVariant, title: string, body: string, extra: Partial<UserMessage> = {}): UserMessage => ({
     kind,
@@ -308,6 +360,10 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
   }
 
   // ── Wrapper codes ───────────────────────────────────────────────────────────
+  if (p.code !== null && wrapperish && isDevnetV21Enabled()) {
+    const v = v21WrapperMessage(p.code, ctx, m);
+    if (v) return v;
+  }
   if (p.code !== null && wrapperish) {
     const W = WRAPPER_ERR;
     switch (p.code) {

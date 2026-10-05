@@ -153,7 +153,8 @@ export function decodeMarketHealth(
   const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const g = MARKET_GROUP_OFF;
   const mode = data[g + H_MODE];
-  const bankruptcyHlock = data[g + H_BANKRUPTCY_HLOCK] === 1;
+  // P2b: the byte is 0 (off), 1 (unattributed) or `1 | mask << 1` (attributed). Active = non-zero.
+  const bankruptcyHlock = data[g + H_BANKRUPTCY_HLOCK] !== 0;
   const thresholdStress = data[g + H_THRESHOLD_STRESS] === 1;
   const lossStale = data[g + H_LOSS_STALE] === 1;
 

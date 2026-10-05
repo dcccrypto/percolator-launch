@@ -23,6 +23,9 @@ import { PORTFOLIO_LOOKUP_COPY } from "@/lib/owner-portfolio";
 // tx module into every hook test that mocks @/lib/tx, breaking them at module load.
 // Keep this in sync with LIGHTHOUSE_PROGRAM_ID in @/lib/tx (same constant, two leaves).
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
+import { isDevnetV21Enabled } from "@/lib/v21/flag";
+import { V21_ERROR_CODE_MAP } from "@/lib/v21/error-copy";
+import { V21_ENGINE_LOCK_CODES } from "@/lib/v21/wrapper-errors";
 const LIGHTHOUSE_PROGRAM_ID_STR = "L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95";
 
 const LIGHTHOUSE_USER_MESSAGE =
@@ -116,10 +119,6 @@ const ERROR_CODE_MAP: Record<number, string> = {
   // "re-seed" — a transient lag clears on its own; a bankrupt/recovery market
   // needs maintainer action. Don't promise either outcome.
   [WRAPPER_ERR.EngineLockActive]: "This market is temporarily locked, or reduce-only while it recovers from a bankruptcy. Closing positions still works (your close is sent as a unilateral exit if needed); new positions may be paused until the market reopens on its own. If a brief lag, try again in a moment.",
-  // P2b E7: the three causes that used to share Custom(21), now with their own codes.
-  [WRAPPER_ERR.EngineAdlReduceOnly]: "This market is close-only while it rebalances. You can reduce or close your position; new positions reopen once it resets.",
-  [WRAPPER_ERR.EngineLossStale]: "Positions are being refreshed after a price move. Opening is paused for a moment; closing still works. Try again shortly.",
-  [WRAPPER_ERR.EarnExitWouldUnderBackClaims]: "This withdrawal would leave open winning positions under-backed. Try a smaller amount, or try again after they settle.",
   [WRAPPER_ERR.EngineNonProgress]: "Crank made no progress - the market may need attention. Try again shortly.",
   [WRAPPER_ERR.EngineRecoveryRequired]: "This market is in recovery mode and must be cranked before trading resumes.",
   [WRAPPER_ERR.EngineCounterOverflow]: "Engine counter overflow.",
@@ -365,10 +364,9 @@ export function isEngineLockError(msg: string): boolean {
   return (
     code === WRAPPER_ERR.EngineLockActive ||
     code === WRAPPER_ERR.EngineStale ||
-    // P2b E7: the codes that split out of 21 (close-only after ADL, refreshing, Earn backed gate).
-    code === WRAPPER_ERR.EngineAdlReduceOnly ||
-    code === WRAPPER_ERR.EngineLossStale ||
-    code === WRAPPER_ERR.EarnExitWouldUnderBackClaims
+    // Devnet v2.1, P2b E7: the codes that split out of 21 (close-only after ADL, refreshing, Earn
+    // backed gate). Flag-gated: the live wrapper never raises them.
+    (code !== null && isDevnetV21Enabled() && V21_ENGINE_LOCK_CODES.includes(code))
   );
 }
 
@@ -490,6 +488,10 @@ export function humanizeError(rawMsg: string, context?: "trade"): string {
     // it. An unattributed code (no "Program X failed" line) or another program's is not guessed.
     if (origin === WRAPPER_PROGRAM_ID && ERROR_CODE_MAP[code]) {
       return ERROR_CODE_MAP[code];
+    }
+    // Devnet v2.1 (flag-gated): growth-v19 92..99, P2b Earn 100..103, P2b lock exits 120..122.
+    if (origin === WRAPPER_PROGRAM_ID && isDevnetV21Enabled() && V21_ERROR_CODE_MAP[code]) {
+      return V21_ERROR_CODE_MAP[code];
     }
   }
   const customIdx = extractCustomIndex(rawMsg);

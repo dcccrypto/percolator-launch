@@ -79,21 +79,35 @@ export function signedFeeForQuote(
   maxTradingFeeBps: bigint,
   legacyBoundBps?: number,
   marginBps = 0,
+  /**
+   * Devnet v2.1 (growth-v19 N-2): the QUOTED utilisation fee of an open into a busy side, on top of
+   * base + the matcher's quote. The ticket signs quote + `marginBps`, never the market maximum.
+   * 0 (the default, and every non-growth market) changes nothing.
+   */
+  utilFeeBps = 0n,
 ): { signedFeeBps: bigint; requestedBps: bigint; marginBps: bigint; verdict: SignedFeeVerdict } {
   const m = BigInt(clampFeeCapMarginBps(marginBps));
   const clampMax = (x: bigint) => (x > maxTradingFeeBps ? maxTradingFeeBps : x);
-  if (!channel.enabled) return { signedFeeBps: baseFeeBps, requestedBps: 0n, marginBps: 0n, verdict: "ok" };
+  if (!channel.enabled) {
+    if (utilFeeBps === 0n) return { signedFeeBps: baseFeeBps, requestedBps: 0n, marginBps: 0n, verdict: "ok" };
+    const raw = baseFeeBps + utilFeeBps + m;
+    return { signedFeeBps: clampMax(raw), requestedBps: 0n, marginBps: m, verdict: baseFeeBps + utilFeeBps > maxTradingFeeBps ? "over-market-max" : "ok" };
+  }
   // Kind 0/1 matchers have no exact client quote: consent to their price bound
   // (max_total, already clamped to the band), capped at the protocol maximum — already
   // the worst case, so no margin is added.
   if (quoteExecE6 === null) {
-    if (legacyBoundBps === undefined) return { signedFeeBps: baseFeeBps, requestedBps: 0n, marginBps: 0n, verdict: "ok" };
+    if (legacyBoundBps === undefined) {
+      if (utilFeeBps === 0n) return { signedFeeBps: baseFeeBps, requestedBps: 0n, marginBps: 0n, verdict: "ok" };
+      // Growth: no exact quote, but the busy-side fee is known exactly. Sign base + it + the margin.
+      return { signedFeeBps: clampMax(baseFeeBps + utilFeeBps + m), requestedBps: 0n, marginBps: m, verdict: baseFeeBps + utilFeeBps > maxTradingFeeBps ? "over-market-max" : "ok" };
+    }
     const b = BigInt(Math.min(legacyBoundBps, channel.protocolMaxBps));
-    const raw = baseFeeBps + b;
+    const raw = baseFeeBps + b + utilFeeBps;
     return { signedFeeBps: clampMax(raw), requestedBps: b, marginBps: 0n, verdict: raw > maxTradingFeeBps ? "over-market-max" : "ok" };
   }
   const req = requestedFeeBps(oracleE6, quoteExecE6);
-  const atQuote = baseFeeBps + req;
+  const atQuote = baseFeeBps + req + utilFeeBps;
   let verdict: SignedFeeVerdict = "ok";
   if (req > BigInt(channel.protocolMaxBps)) verdict = "over-protocol-max";
   else if (atQuote > maxTradingFeeBps) verdict = "over-market-max";

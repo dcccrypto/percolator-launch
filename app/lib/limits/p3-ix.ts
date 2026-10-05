@@ -13,6 +13,7 @@
  * Every tag / tail index comes from `./constants` (never inline).
  */
 import { PublicKey, SystemProgram, TransactionInstruction, type AccountMeta } from "@solana/web3.js";
+import { encodeInitVaultLpV19 } from "@/lib/v21/sdk";
 import {
   BOUND_TAIL_INDEX,
   LP_VAULT_REGISTRY_SEED,
@@ -135,6 +136,12 @@ export interface VaultLpMarket {
   /** The registry's own domain ledger `["lp_backing_ledger", market, domain]` and its sibling (domain ^ 1). */
   ledger: PublicKey;
   siblingLedger: PublicKey;
+  /**
+   * Devnet v2.1 (P2b, #526): the per-market `VaultLpExtV19` PDA, set ONLY when it exists on chain
+   * (lib/v21/vault-ext.ts reads that, flag-gated). Once it exists 97 takes it at [11] and 98 at [8]
+   * (fail closed without it). Undefined on today's programs: every list below is then unchanged.
+   */
+  ext?: PublicKey;
 }
 
 /**
@@ -175,7 +182,11 @@ export function buildLpVaultCrankFeesIx(p: {
   ledger: PublicKey;
   siblingLedger: PublicKey;
   domain: number;
-  bound: { vaultLpState: PublicKey } | null;
+  /**
+   * `ext` + `lpPortfolio` (Devnet v2.1): with the P2b ext present, a bound 78 takes [7] vault_lp_ext (w)
+   * and [8] the vault LP portfolio (the G6 fee waterfall). Absent => today's list.
+   */
+  bound: { vaultLpState: PublicKey; ext?: PublicKey; lpPortfolio?: PublicKey } | null;
 }): TransactionInstruction {
   const base = [
     meta(p.cranker, true, true),
@@ -185,7 +196,11 @@ export function buildLpVaultCrankFeesIx(p: {
     meta(p.siblingLedger, false, true),
     meta(SystemProgram.programId, false, false),
   ];
-  const keys = p.bound ? withBoundVaultLpTail(TAG_LP_VAULT_CRANK_FEES, base, p.bound.vaultLpState) : base;
+  let keys = p.bound ? withBoundVaultLpTail(TAG_LP_VAULT_CRANK_FEES, base, p.bound.vaultLpState) : base;
+  if (p.bound?.ext) {
+    if (!p.bound.lpPortfolio) throw new Error("tag 78 with a vault_lp_ext needs the vault LP portfolio at [8]");
+    keys = [...keys, meta(p.bound.ext, false, true), meta(p.bound.lpPortfolio, false, false)];
+  }
   return new TransactionInstruction({ programId: p.programId, keys, data: Buffer.from(encodeLpVaultCrankFees(p.domain)) });
 }
 
@@ -206,7 +221,7 @@ export function deriveVaultLpMatcherDelegate(programId: PublicKey, market: Publi
  * params + price-derived finite caps itself. No creator input; trading opens right after
  * (+ tag 96). Must run while the creator is still marketauth (before StakeInitPool).
  */
-export function buildInitVaultLpIx(m: VaultLpMarket, marketauth: PublicKey, juniorFloorBps: number, pin: { matcherProgram: PublicKey; matcherCtx: PublicKey }): TransactionInstruction {
+export function buildInitVaultLpIx(m: VaultLpMarket, marketauth: PublicKey, juniorFloorBps: number, pin: { matcherProgram: PublicKey; matcherCtx: PublicKey }, growth?: { lLaunchX100: number }): TransactionInstruction {
   return new TransactionInstruction({
     programId: m.programId,
     keys: [
@@ -222,7 +237,8 @@ export function buildInitVaultLpIx(m: VaultLpMarket, marketauth: PublicKey, juni
       meta(pin.matcherCtx, false, true),
       meta(deriveVaultLpMatcherDelegate(m.programId, m.market, m.lpPortfolio, m.registry, pin.matcherProgram, pin.matcherCtx), false, false),
     ],
-    data: Buffer.from(encodeInitVaultLp(juniorFloorBps)),
+    // Devnet v2.1: a growth market's bind also carries the creator's starting leverage (5-byte form).
+    data: Buffer.from(growth ? encodeInitVaultLpV19(juniorFloorBps, growth.lLaunchX100) : encodeInitVaultLp(juniorFloorBps)),
   });
 }
 
@@ -276,6 +292,7 @@ export function buildWithdrawJuniorTrancheIx(
       meta(vaultToken, false, true),
       meta(vaultAuthority, false, false),
       meta(TOKEN_PROGRAM_ID, false, false),
+      ...(m.ext ? [meta(m.ext, false, true)] : []),
     ],
     data: Buffer.from(encodeWithdrawJuniorTranche(amount)),
   });
@@ -298,6 +315,7 @@ export function buildVaultLpRecallIx(m: VaultLpMarket, cranker: PublicKey, amoun
       meta(m.ledger, false, true),
       meta(m.siblingLedger, false, true),
       meta(SystemProgram.programId, false, false),
+      ...(m.ext ? [meta(m.ext, false, true)] : []),
     ],
     data: Buffer.from(encodeVaultLpRecall(amount, targetDomain)),
   });

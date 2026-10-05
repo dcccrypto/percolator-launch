@@ -159,7 +159,9 @@ describe("Earn assembly (shared by useInsuranceLP and the sim bridge)", () => {
     expect(ixs.map((i) => i.data[0])).toEqual([C.TAG_LP_VAULT_CRANK_FEES, C.TAG_EXECUTE_REDEMPTION]);
     const e = ixs[1];
     expect(e.keys).toHaveLength(15);
-    expect(e.keys[12]).toEqual({ pubkey: u, isSigner: false, isWritable: true });
+    // [12] is the redeemer: it signs (the redeemer is also the fee payer, so one signature on the message).
+    // P2b H-1b needs it flagged on a Live non-bound 77; the legacy program ignores the flag.
+    expect(e.keys[12]).toEqual({ pubkey: u, isSigner: true, isWritable: true });
     expect(e.keys[13].pubkey.equals(m.vaultLpState)).toBe(true);
     expect(e.keys[14].pubkey.equals(m.lpPortfolio)).toBe(true);
   });

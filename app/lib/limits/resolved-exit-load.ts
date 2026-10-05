@@ -18,6 +18,8 @@ import {
   decodeTerminalBacking,
   decodeVaultLpState,
 } from "./decode";
+import { isDevnetV21Enabled } from "@/lib/v21/flag";
+import { deriveVaultLpExt } from "@/lib/v21/sdk";
 import { deriveLpVaultRegistryPda, deriveVaultLpState } from "./p3-ix";
 import { planResolvedExit, type ExitPortfolio, type ExitStep, type ResolvedExitPlan } from "./resolved-exit";
 import { exitStepIxs, type ExitIxContext, type ExitPortfolioRef } from "./resolved-exit-ixs";
@@ -52,7 +54,9 @@ export async function loadResolvedExitSnapshot(p: {
 
   const registry = deriveLpVaultRegistryPda(prog, market);
   const vaultLpState = deriveVaultLpState(prog, market);
-  const [ri, si, nowSlot, pfs] = await Promise.all([
+  // Devnet v2.1: the P2b ext (a bound 78 needs it at [7] once it exists); flag-gated, one extra read.
+  const extKey = isDevnetV21Enabled() ? deriveVaultLpExt(prog, market) : null;
+  const [ri, si, nowSlot, pfs, xi] = await Promise.all([
     connection.getAccountInfo(registry, "confirmed"),
     connection.getAccountInfo(vaultLpState, "confirmed"),
     connection.getSlot("confirmed"),
@@ -60,6 +64,7 @@ export async function loadResolvedExitSnapshot(p: {
       commitment: "confirmed",
       filters: [{ memcmp: { offset: PORTFOLIO_PROVENANCE_MARKET_GROUP_OFF, bytes: market.toBase58() } }],
     }),
+    extKey ? connection.getAccountInfo(extKey, "confirmed") : Promise.resolve(null),
   ]);
   const rd = ri && ri.owner.equals(prog) ? new Uint8Array(ri.data) : null;
   const bound = rd ? decodeLpVaultRegistryBound(rd) === true : false;
@@ -116,6 +121,7 @@ export async function loadResolvedExitSnapshot(p: {
             siblingLedger: deriveLpBackingLedger(prog, market, domain ^ 1)[0],
             juniorOwner: new PublicKey(st.juniorOwner),
             domain,
+            ...(extKey && xi && xi.owner.equals(prog) ? { ext: extKey } : {}),
           }
         : null,
   };

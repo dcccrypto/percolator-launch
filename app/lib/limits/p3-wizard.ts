@@ -69,6 +69,8 @@ export function buildP3BindIxs(p: {
   juniorAtoms: bigint;
   creatorAta: PublicKey;
   vaultToken: PublicKey;
+  /** Devnet v2.1: the growth block; the bind (94) then carries l_launch. Absent = today's bind. */
+  growth?: { lLaunchX100: number };
 }): TransactionInstruction[] {
   if (!p.market.lpPortfolio.equals(p.vaultLpPortfolio)) throw new Error("market.lpPortfolio must be the new vault LP portfolio");
   return [
@@ -86,7 +88,7 @@ export function buildP3BindIxs(p: {
       space: VAULT_LP_MATCHER_CTX_LEN,
       programId: p.matcherProgram,
     }),
-    buildInitVaultLpIx(p.market, p.creator, p.juniorFloorBps, { matcherProgram: p.matcherProgram, matcherCtx: p.matcherCtx }),
+    buildInitVaultLpIx(p.market, p.creator, p.juniorFloorBps, { matcherProgram: p.matcherProgram, matcherCtx: p.matcherCtx }, p.growth),
     buildDepositJuniorTrancheIx(p.market, p.creator, p.creatorAta, p.vaultToken, p.juniorAtoms),
   ];
 }

@@ -5,6 +5,7 @@
  */
 import { v17MarketAccountLen, type InitMarketV17Args } from "@percolatorct/sdk";
 import type { deriveMarketParams } from "@/lib/market-params";
+import { withGrowthInitArgs, type GrowthLaunch } from "@/lib/v21/growth-launch";
 
 // v17: max assets per portfolio (= the market's asset-slot capacity); program cap = 14.
 // The slab MUST be sized to exactly match this capacity or InitMarket reverts (dynamic-len validation).
@@ -32,6 +33,15 @@ export function marketAssetSlotsFor(p: { p3?: unknown }): number {
  * P3 BPF sim builds its market from this same function (bridge `init-market`).
  */
 export function buildV17InitMarketArgs(
+  params: { p3?: unknown; initialPriceE6: bigint; tradingFeeBps: number; growth?: GrowthLaunch },
+  derived: ReturnType<typeof deriveMarketParams>,
+): InitMarketV17Args {
+  // Devnet v2.1: a growth block raises the fee cap to base + 600 and sets a funding ceiling; absent
+  // (every launch today) the args are exactly what they were.
+  return withGrowthInitArgs(baseV17InitMarketArgs(params, derived), params.growth);
+}
+
+function baseV17InitMarketArgs(
   params: { p3?: unknown; initialPriceE6: bigint; tradingFeeBps: number },
   derived: ReturnType<typeof deriveMarketParams>,
 ): InitMarketV17Args {

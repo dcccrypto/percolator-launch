@@ -98,13 +98,6 @@ export const WRAPPER_ERR = {
   VaultLpPausedForSeniorDraw: 89,
   VaultLpBindRequiresFlatAsset: 90,
   LpVaultTargetPotImpaired: 91,
-  // P2b E7 (percolator-prog #525, engine #276): an EXPLICIT-discriminant block 120..=122 in the
-  // wrapper enum (no shift possible). Each was Custom(21) EngineLockActive before. Added by hand
-  // ahead of the generator's next run against the P2b wrapper; growth-v19 92..=99 are mapped by
-  // the growth branch.
-  EngineAdlReduceOnly: 120,
-  EngineLossStale: 121,
-  EarnExitWouldUnderBackClaims: 122,
 } as const;
 
 export type WrapperErrorName = keyof typeof WRAPPER_ERR;
