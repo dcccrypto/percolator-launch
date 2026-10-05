@@ -41,6 +41,14 @@ describe("OrderTicket isolated-margin toggle", () => {
     expect(SRC).toMatch(/\(marginMode === "isolated" && !isolatedOpen\)/);
   });
 
+  it("re-asserts the isolated guard at SUBMIT time (handleTrade), not just modal-open", () => {
+    // Guards against a wallet-balance race while the confirm modal is open.
+    const htIdx = SRC.indexOf("async function handleTrade");
+    expect(htIdx).toBeGreaterThan(-1);
+    const ht = SRC.slice(htIdx, htIdx + 1400);
+    expect(ht).toMatch(/if \(marginMode === "isolated" && !isolatedOpen\) \{/);
+  });
+
   it("writes the entry SCOPED for isolated, LEGACY (undefined) for cross", () => {
     expect(SRC).toMatch(/saveEntryPrice\(slabAddress, entryIdx, livePriceE6, leverage, wallet, isolatedOpen \? openedPortfolio\?\.toBase58\(\) : undefined\)/);
     // isolated forces the "this fill IS the entry" (save) branch

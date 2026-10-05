@@ -952,6 +952,17 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       setHumanError("Wallet disconnected. Please reconnect your wallet.");
       return;
     }
+    // #2560 (review MED): re-assert the Isolated routing intent at SUBMIT time,
+    // not just at modal-open. `submitDisabled` is evaluated when the button
+    // renders, but handleTrade runs on Confirm and reads the CURRENT state — if
+    // isolated can no longer fund a fresh portfolio (e.g. the wallet balance
+    // dropped to 0 while the confirm modal was open), refuse here rather than
+    // falling through to a CROSS trade on the primary with the mode still
+    // showing "Isolated".
+    if (marginMode === "isolated" && !isolatedOpen) {
+      setHumanError("Add sim-USDC to your wallet to open an isolated position.");
+      return;
+    }
 
     setHumanError(null);
     setRefusal(null);
