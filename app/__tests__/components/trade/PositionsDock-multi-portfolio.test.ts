@@ -37,8 +37,8 @@ describe("PositionsDock multi-portfolio rendering", () => {
     expect(SRC).toMatch(/isPrimary \? "Cross" : "Isolated"/);
   });
 
-  it("a per-row Close targets that portfolio's own pubkey", () => {
-    expect(SRC).toMatch(/closePosition\(percent, portfolioPk\)/);
+  it("a per-row Close targets that portfolio's own pubkey, reclaiming rent only for isolated (C7)", () => {
+    expect(SRC).toMatch(/closePosition\(percent, portfolioPk, !isPrimary\)/);
   });
 
   it("reads each portfolio's own entry (scoped by pubkey + isPrimary legacy-fallback control)", () => {

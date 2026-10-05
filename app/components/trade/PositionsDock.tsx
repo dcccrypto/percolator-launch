@@ -770,7 +770,9 @@ const PositionTableRow: FC<{ slabAddress: string; info: UserAccountInfo; isPrima
 
     const handleConfirmClose = async (percent: number) => {
       try {
-        await closePosition(percent, portfolioPk);
+        // #2560 C7: a 100% close of an ISOLATED position reclaims its portfolio's
+        // rent (best-effort, in useClosePosition); never for the primary/cross.
+        await closePosition(percent, portfolioPk, !isPrimary);
         setShowCloseModal(false);
       } catch {
         /* error surfaced via hook state below */

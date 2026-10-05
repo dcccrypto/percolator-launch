@@ -3,7 +3,11 @@
 import { useState, useCallback, useRef } from "react";
 import { useSingleMarketHealth } from "@/hooks/useMarketHealth";
 import { safeExplainMarketTxError } from "@/lib/market-error";
-import { Connection, PublicKey } from "@solana/web3.js";
+import { Buffer } from "buffer";
+import { Connection, PublicKey, TransactionInstruction } from "@solana/web3.js";
+import { sendTx } from "@/lib/tx";
+import { encodeClosePortfolio } from "@/lib/limits/p3-ix";
+import { readPortfolioIdentity } from "@/lib/v18-wire";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { AccountKind, isV17Account, parsePortfolioV17 } from "@percolatorct/sdk";
 import { useTrade, prewarmTradeSubmission } from "@/hooks/useTrade";
@@ -52,7 +56,7 @@ export interface ClosePositionResult {
 }
 
 export interface UseClosePositionReturn {
-  closePosition: (closePercent: number, targetPortfolioPk?: PublicKey) => Promise<ClosePositionResult>;
+  closePosition: (closePercent: number, targetPortfolioPk?: PublicKey, reclaimOnClose?: boolean) => Promise<ClosePositionResult>;
   loading: boolean;
   error: string | null;
   phase: "idle" | "submitting" | "confirming";
@@ -190,7 +194,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
     // Threaded through every resolution point (fresh read, rebalance route,
     // matcher trade, entry-clear, post-close sweep) so a multi-row Close can
     // never act on a DIFFERENT portfolio than the row the user clicked.
-    async (closePercent: number, targetPortfolioPk?: PublicKey): Promise<ClosePositionResult> => {
+    async (closePercent: number, targetPortfolioPk?: PublicKey, reclaimOnClose?: boolean): Promise<ClosePositionResult> => {
       if (inflightRef.current) throw new Error("Close already in progress");
       if (!userAccount) {
         // A fresh SlabProvider (/portfolio, other markets) can still be loading it. Say so; keep the
@@ -568,6 +572,38 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
             try {
               await withdraw({ userIdx: userAccount.idx, amount, portfolioPk: targetPortfolioPk });
               toast(SWEEP_COPY.done(label), "success");
+              // #2560 C7: an isolated full-close leaves its OWN portfolio empty and
+              // still rent-funded. Reclaim that rent (tag 8 ClosePortfolio) so
+              // isolated positions don't strand accounts. Best-effort and
+              // sim-gated (simulateBeforeSign) — a not-yet-empty portfolio, a
+              // declined prompt, or any failure is swallowed and never affects the
+              // already-completed close. Only for the ISOLATED portfolio the user
+              // closed (reclaimOnClose), NEVER the primary/cross account.
+              if (reclaimOnClose && targetPortfolioPk) {
+                try {
+                  const pd = await readFreshPortfolioData(connection, programId, slabAddress, owner, targetPortfolioPk);
+                  if (pd) {
+                    const parsed = parsePortfolioV17(pd);
+                    const isEmpty = parsed.capital === 0n && !parsed.legs.some((l) => l.active);
+                    if (isEmpty) {
+                      const id = readPortfolioIdentity(new Uint8Array(pd));
+                      // Wire (own-portfolio-cleanup.ts): tag 8 [closer(s,w), market(w), portfolio(w)].
+                      const closeIx = new TransactionInstruction({
+                        programId,
+                        keys: [
+                          { pubkey: owner, isSigner: true, isWritable: true },
+                          { pubkey: new PublicKey(slabAddress), isSigner: false, isWritable: true },
+                          { pubkey: targetPortfolioPk, isSigner: false, isWritable: true },
+                        ],
+                        data: Buffer.from(encodeClosePortfolio(id.portfolioId, id.matcherSequence, id.positionEpoch)),
+                      });
+                      await sendTx({ connection, wallet, instructions: [closeIx], simulateBeforeSign: true });
+                    }
+                  }
+                } catch {
+                  /* best-effort rent reclaim: never affects the completed close */
+                }
+              }
             } catch {
               toast(SWEEP_COPY.kept(label), "info");
             }
