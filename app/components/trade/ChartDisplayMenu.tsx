@@ -17,14 +17,18 @@ interface ChartDisplayMenuProps {
 const MENU_GAP = 4;
 const VIEWPORT_MARGIN = 8;
 
-/** Fixed-position style that right-aligns the popup to its trigger (opens leftward) and keeps it inside the
- *  viewport. Pure so it is testable. */
+/** Fixed-position style that right-aligns the popup to its trigger (opens leftward), then clamps it inside the
+ *  viewport (a trigger near the LEFT edge, as on a phone, would otherwise push it off-screen). Pure so it is
+ *  testable. */
 export function displayMenuPosition(
   trigger: { top: number; bottom: number; left: number; right: number },
   viewport: { width: number },
+  menuWidth = 200,
 ): CSSProperties {
-  const right = Math.max(VIEWPORT_MARGIN, viewport.width - trigger.right);
-  return { position: "fixed", top: trigger.bottom + MENU_GAP, right, maxWidth: viewport.width - VIEWPORT_MARGIN * 2 };
+  const maxWidth = viewport.width - VIEWPORT_MARGIN * 2;
+  const w = Math.min(menuWidth, maxWidth);
+  const left = Math.min(Math.max(trigger.right - w, VIEWPORT_MARGIN), viewport.width - w - VIEWPORT_MARGIN);
+  return { position: "fixed", top: trigger.bottom + MENU_GAP, left, maxWidth };
 }
 
 /** Click-driven popup that exposes an ON/OFF toggle for each chart overlay
@@ -56,7 +60,13 @@ export const ChartDisplayMenu: FC<ChartDisplayMenuProps> = ({ prefs, onToggle })
   const place = useCallback(() => {
     const el = ref.current;
     if (!el) return;
-    setStyle(displayMenuPosition(el.getBoundingClientRect(), { width: document.documentElement.clientWidth }));
+    setStyle(
+      displayMenuPosition(
+        el.getBoundingClientRect(),
+        { width: document.documentElement.clientWidth },
+        popupRef.current?.offsetWidth || undefined,
+      ),
+    );
   }, []);
 
   useLayoutEffect(() => {

@@ -55,13 +55,18 @@ describe("badges over the TradingView iframe", () => {
 });
 
 describe("Display menu", () => {
-  it("opens leftward: right-aligned to the trigger, kept inside the viewport", () => {
-    const st = displayMenuPosition({ top: 100, bottom: 124, left: 700, right: 835 }, { width: 1080 });
-    expect(st).toMatchObject({ position: "fixed", top: 128, right: 245 });
-    expect(st).not.toHaveProperty("left");
-    // negative control: a trigger at the very right edge never yields a negative offset
-    expect(displayMenuPosition({ top: 0, bottom: 20, left: 380, right: 400 }, { width: 390 }).right).toBe(8);
-    expect(displayMenuPosition({ top: 0, bottom: 20, left: 300, right: 380 }, { width: 390 }).maxWidth).toBe(374);
+  it("opens leftward: right edge of the popup lines up with the trigger's right edge", () => {
+    const st = displayMenuPosition({ top: 100, bottom: 124, left: 700, right: 835 }, { width: 1080 }, 200);
+    expect(st).toMatchObject({ position: "fixed", top: 128, left: 635 }); // 635 + 200 = 835
+  });
+  it("stays inside the viewport at both edges (negative controls: naive right-align goes off-screen)", () => {
+    // phone: trigger near the left, naive left = 140 - 200 = -60
+    const phone = displayMenuPosition({ top: 0, bottom: 20, left: 90, right: 140 }, { width: 390 }, 200);
+    expect(phone.left).toBe(8);
+    // trigger at the far right edge: popup ends 8px before the viewport edge
+    const edge = displayMenuPosition({ top: 0, bottom: 20, left: 350, right: 392 }, { width: 390 }, 200);
+    expect((edge.left as number) + 200).toBeLessThanOrEqual(390 - 8);
+    expect(displayMenuPosition({ top: 0, bottom: 20, left: 0, right: 40 }, { width: 200 }, 300).maxWidth).toBe(184);
   });
   it("is portaled to document.body, outside clipping ancestors, above the chart but below modals", () => {
     const { container } = render(
