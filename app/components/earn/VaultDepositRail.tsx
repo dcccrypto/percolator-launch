@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { SlabProvider, useSlabState } from '@/components/providers/SlabProvider';
+import { v1BlocksNewFunds, V1_CLOSE_ONLY_REFUSAL } from '@/lib/v21/move/close-only';
+import { isMoveFlowEnabled } from '@/lib/v21/move/flag';
 import { useInsuranceLP } from '@/hooks/useInsuranceLP';
 import { useTokenMeta } from '@/hooks/useTokenMeta';
 import { DepositWithdrawPanel } from '@/components/earn/DepositWithdrawPanel';
@@ -73,7 +75,8 @@ export function VaultDepositRail({ slab, vault, onTxSuccess, onPositionResolved 
 
 function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }: VaultDepositRailProps & { slab: string }) {
   const { state, loading, readError, deposit, withdraw, resizeRedemption, refreshState, lastDrawSummary } = useInsuranceLP();
-  const { config, raw: slabRaw } = useSlabState();
+  const { config, raw: slabRaw, programId: railProgramId } = useSlabState();
+  const slabProgramIdStr = railProgramId?.toBase58() ?? null;
   const wallet = useWalletCompat();
   const vaultAvailable = state.registryExists && state.mintExists;
 
@@ -115,7 +118,8 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
   // UX WP-5 (§3.6): "valuation-stale" is not a block either — the deposit tx self-repairs 85
   // (vault-LP crank bundled by sendTx). Only "covering a loss" pauses deposits.
   const depositBlock = earnDepositPause(rawDepositBlock);
-  const depositBlockedReason = depositBlock === 'senior-impaired' ? COPY.depositsPausedImpaired : null;
+  const v1NoEarnDeposit = v1BlocksNewFunds(slabProgramIdStr, isMoveFlowEnabled());
+  const depositBlockedReason = v1NoEarnDeposit ? V1_CLOSE_ONLY_REFUSAL : depositBlock === 'senior-impaired' ? COPY.depositsPausedImpaired : null;
 
   // Report the resolved deposit up so the table's "Your Deposit" column fills in
   // for this row as the user browses vaults.

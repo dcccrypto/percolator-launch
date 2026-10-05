@@ -13,11 +13,19 @@ describe("move plan", () => {
     expect(step(p, "withdraw")?.line).toMatch(/Close your position first/);
   });
 
-  it("closes are never blocked, even close-only / resolved", () => {
-    for (const resolved of [false, true]) {
-      const p = buildMovePlan(input([market({ resolved, portfolio: { capital: 0n, releasedPnl: 0n, openLegs: 2, closeOnly: true } })]));
-      expect(step(p, "close")?.status).toBe("ready");
-    }
+  it("closes are never blocked on a live close-only market", () => {
+    const p = buildMovePlan(input([market({ resolved: false, portfolio: { capital: 0n, releasedPnl: 0n, openLegs: 2, closeOnly: true } })]));
+    expect(step(p, "close")?.status).toBe("ready");
+  });
+
+  it("L-7: a RESOLVED market with open legs offers settle (hand-off), never a trade close", () => {
+    const p = buildMovePlan(input([market({ resolved: true, portfolio: { capital: 5n, releasedPnl: 0n, openLegs: 2, closeOnly: true } })]));
+    expect(step(p, "close")).toBeUndefined();
+    expect(step(p, "settle-resolved")?.status).toBe("ready");
+    expect(step(p, "settle-resolved")?.line).toMatch(/settled/);
+    expect(step(p, "withdraw")?.status).toBe("blocked");
+    expect(step(p, "withdraw")?.line).toMatch(/settles first/);
+    expect(nextActions(p).every((a) => !a.kinds.includes("close"))).toBe(true);
   });
 
   it("flat with capital and released profit: withdraw ready, copy mentions settled profit", () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { makeMarketExecutors, type MarketBridge } from "@/lib/v21/move/market-exec";
 import { V1_PROGRAM_IDS } from "@/lib/v21/move/ids";
+import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { runMove } from "@/lib/v21/move/run";
 import { safeUserMessage, MOVE_ERR } from "@/lib/v21/move/errors";
 import { input, market, pk, SOL_SLAB } from "./fixtures";
@@ -58,13 +59,34 @@ describe("market executors: guards", () => {
     expect(b.withdraw).toHaveBeenCalledWith({ userIdx: 9, amount: 7n });
   });
   it("withdraw falls back to capital alone if the profit leg loses a race; plain failure still throws", async () => {
-    const w = vi.fn().mockRejectedValueOnce(new Error("lock")).mockResolvedValueOnce("sig2");
+    const w = vi.fn().mockRejectedValueOnce(new Error(`custom program error: Custom(${WRAPPER_ERR.EngineLockActive})`)).mockResolvedValueOnce("sig2");
     const b = bridge({ readPortfolio: vi.fn(async () => ({ capital: 5n, releasedPnl: 2n, openLegs: 0, userIdx: 1 })), withdraw: w });
     expect(await ex(b).withdraw!(act("withdraw"))).toBe("sig2");
     expect(w).toHaveBeenLastCalledWith({ userIdx: 1, amount: 5n });
     const w2 = vi.fn().mockRejectedValue(new Error("boom"));
     await expect(ex(bridge({ withdraw: w2 })).withdraw!(act("withdraw"))).rejects.toThrow("boom");
     expect(w2).toHaveBeenCalledTimes(1);
+  });
+  it("L-5: a wallet decline on the combined withdraw stops; no second prompt for capital alone", async () => {
+    for (const msg of ["User rejected the request.", "WalletSignTransactionError: transaction rejected"]) {
+      const w = vi.fn().mockRejectedValue(new Error(msg));
+      const b = bridge({ readPortfolio: vi.fn(async () => ({ capital: 5n, releasedPnl: 2n, openLegs: 0, userIdx: 1 })), withdraw: w });
+      await expect(ex(b).withdraw!(act("withdraw"))).rejects.toThrow(msg);
+      expect(w).toHaveBeenCalledTimes(1);
+    }
+  });
+  it("L-5: a decline wins even if its text also carries the race code", async () => {
+    const msg = `User rejected the request. (simulated: Custom(${WRAPPER_ERR.EngineLockActive}))`;
+    const w = vi.fn().mockRejectedValue(new Error(msg));
+    const b = bridge({ readPortfolio: vi.fn(async () => ({ capital: 5n, releasedPnl: 2n, openLegs: 0, userIdx: 1 })), withdraw: w });
+    await expect(ex(b).withdraw!(act("withdraw"))).rejects.toThrow(/User rejected/);
+    expect(w).toHaveBeenCalledTimes(1);
+  });
+  it("L-5: an unrelated program error does not retry capital-only either", async () => {
+    const w = vi.fn().mockRejectedValue(new Error("custom program error: Custom(19)"));
+    const b = bridge({ readPortfolio: vi.fn(async () => ({ capital: 5n, releasedPnl: 2n, openLegs: 0, userIdx: 1 })), withdraw: w });
+    await expect(ex(b).withdraw!(act("withdraw"))).rejects.toThrow(/Custom\(19\)/);
+    expect(w).toHaveBeenCalledTimes(1);
   });
   it("withdraw with nothing there sends nothing", async () => {
     const b = bridge({ readPortfolio: vi.fn(async () => ({ capital: 0n, releasedPnl: 0n, openLegs: 0, userIdx: 1 })) });

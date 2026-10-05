@@ -41,12 +41,14 @@ const Bridge: FC<{ slab: string; onBridge: (b: MarketBridge | null) => void }> =
         if (!owner || !programId) return null;
         const found = pickOwnerPortfolio(await scanOwnerPortfolios(connection, new PublicKey(programId), new PublicKey(slab), owner), owner);
         if (!found) return null;
+        // Account index not loaded: refuse rather than guess index 0.
+        if (!userAccount) return null;
         const pf = parsePortfolioV17(found.data);
         return {
           capital: BigInt(pf.capital),
           releasedPnl: releasedPnlFace(pf.pnl, pf.reservedPnl),
           openLegs: decodePortfolioLegs(found.data).length,
-          userIdx: userAccount?.idx ?? 0,
+          userIdx: userAccount.idx,
         };
       },
       readEarn: async () => {

@@ -28,6 +28,7 @@ const RESCAN_MS = 20_000;
 /** Where a handed-off step is done (the market's own flow). */
 export function stepHref(kind: StepKind, slab: string, v21Slab: string | null): string {
   if (kind === "close" || kind === "withdraw") return `/trade/${slab}`;
+  if (kind === "settle-resolved") return `/earn/${slab}`;
   if (kind === "earn-request" || kind === "earn-execute") return `/earn/${slab}`;
   if (kind === "deposit-market") return `/trade/${v21Slab ?? slab}`;
   if (kind === "deposit-earn") return `/earn/${v21Slab ?? slab}`;

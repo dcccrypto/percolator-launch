@@ -13,6 +13,8 @@ import { useWithdraw } from "@/hooks/useWithdraw";
 import { useInitUser } from "@/hooks/useInitUser";
 import { AUTO_DEPOSIT_AMOUNT } from "@/hooks/useAutoDeposit";
 import { useSlabState } from "@/components/providers/SlabProvider";
+import { v1BlocksNewFunds, V1_CLOSE_ONLY_REFUSAL } from "@/lib/v21/move/close-only";
+import { isMoveFlowEnabled } from "@/lib/v21/move/flag";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { parseHumanAmount } from "@/lib/parseAmount";
 import { formatTokenAmount } from "@/lib/format";
@@ -55,7 +57,8 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
   const { deposit, loading: depositLoading, error: depositError } = useDeposit(slabAddress);
   const { withdraw, loading: withdrawLoading, error: withdrawError } = useWithdraw(slabAddress);
   const { initUser, loading: initLoading, error: initError } = useInitUser(slabAddress);
-  const { config: mktConfig, params: slabParams } = useSlabState();
+  const { config: mktConfig, params: slabParams, programId: cardProgramId } = useSlabState();
+  const v1NoDeposit = v1BlocksNewFunds(cardProgramId?.toBase58(), isMoveFlowEnabled());
   const { priceE6: livePriceE6 } = useLivePrice();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const symbol = tokenMeta?.symbol ?? "Token";
@@ -519,10 +522,14 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
         </div>
       )}
 
+      {v1NoDeposit && mode === "deposit" && (
+        <p data-testid="v1-deposit-off" className="mb-2 text-[10px] text-[var(--warning)]">{V1_CLOSE_ONLY_REFUSAL}</p>
+      )}
+
       <button
         onClick={handleSubmit}
         data-testid={`${mode}-submit`}
-        disabled={loading || !amount || !!validationError || isDepositBalanceUnverified}
+        disabled={loading || !amount || !!validationError || isDepositBalanceUnverified || (v1NoDeposit && mode === "deposit")}
         className={`w-full rounded-none py-2 text-[10px] font-medium uppercase tracking-[0.1em] hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:cursor-not-allowed disabled:opacity-50 ${mode === "deposit" ? "bg-[var(--accent)] text-white hover:brightness-110" : "bg-[var(--warning)] text-[var(--bg)] hover:brightness-110"}`}
       >
         {loading ? "Sending..." : validationError ? validationError : mode === "deposit" ? `Deposit ${symbol}` : `Withdraw ${symbol}`}

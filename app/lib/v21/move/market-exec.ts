@@ -17,6 +17,8 @@
  *  - Earn: request when only shares are held, collect when a request is pending, never both blind:
  *    the amount is the fresh share count, 0 sends nothing.
  */
+import { detectWalletError } from "@/lib/errorMessages";
+import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { assertV1Program } from "./ids";
 import type { Executors } from "./run";
 import type { MoveAction } from "./plan";
@@ -64,6 +66,17 @@ async function bridgeOf(bridgeFor: BridgeFor, slab: string): Promise<MarketBridg
   return b;
 }
 
+export function isWalletDecline(e: unknown): boolean {
+  return detectWalletError(e instanceof Error ? e.message : String(e)) === "rejected";
+}
+
+/** The combined withdraw's profit leg lost a race: wrapper EngineLockActive, as useWithdraw reads it. */
+export function isProfitLegRace(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e);
+  const m = msg.match(/Custom\((\d+)\)/) ?? msg.match(/"Custom"\s*:\s*(\d+)/);
+  return m !== null && parseInt(m[1], 10) === WRAPPER_ERR.EngineLockActive;
+}
+
 export function makeMarketExecutors(bridgeFor: BridgeFor): Pick<Executors, "close" | "withdraw" | "earn-request" | "earn-execute"> {
   return {
     close: async (a: MoveAction) => {
@@ -82,7 +95,12 @@ export function makeMarketExecutors(bridgeFor: BridgeFor): Pick<Executors, "clos
       try {
         return await b.withdraw({ userIdx: pf.userIdx, amount: total });
       } catch (e) {
-        if (pf.releasedPnl > 0n && pf.capital > 0n) return b.withdraw({ userIdx: pf.userIdx, amount: pf.capital });
+        // A wallet decline stops here: never a second prompt after "no". Only the one specific
+        // program error (the profit leg lost a race: EngineLockActive) falls back to capital alone.
+        if (isWalletDecline(e)) throw e;
+        if (pf.releasedPnl > 0n && pf.capital > 0n && isProfitLegRace(e)) {
+          return b.withdraw({ userIdx: pf.userIdx, amount: pf.capital });
+        }
         throw e;
       }
     },

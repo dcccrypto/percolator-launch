@@ -19,6 +19,7 @@ import type { SuccessorEntry } from "./successors";
 
 export type StepKind =
   | "close"
+  | "settle-resolved"
   | "withdraw"
   | "earn-request"
   | "earn-execute"
@@ -107,7 +108,12 @@ export function buildMarketPlan(m: V1MarketSnapshot, i: MoveInput): MarketPlan {
   const open = pf ? pf.openLegs > 0 : false;
 
   // 1. close. Always allowed.
-  if (pf && open) {
+  if (pf && open && m.resolved) {
+    // A settled market takes no trades, so there is nothing to close by trading. The position is
+    // paid out by the resolved wind-down (CloseResolved), which the market's Earn page runs
+    // ("Finish now"); a hand-off, never a trade. See lib/limits/resolved-exit.ts.
+    add("settle-resolved", "ready", "This market has settled, so it takes no more trades. Your position is paid out when the market is wound up: open it and choose Finish now.");
+  } else if (pf && open) {
     add("close", "ready", pf.closeOnly
       ? "Close your position. Closing is always open, including while this market winds down."
       : "Close your position. Closing is always open.");
@@ -118,7 +124,7 @@ export function buildMarketPlan(m: V1MarketSnapshot, i: MoveInput): MarketPlan {
   // 2. withdraw (capital and released profit).
   if (pf) {
     const hasFunds = pf.capital > 0n || pf.releasedPnl > 0n;
-    if (open) add("withdraw", "blocked", "Close your position first. Funds backing an open position cannot be withdrawn.");
+    if (open) add("withdraw", "blocked", m.resolved ? "Your position settles first. Funds backing an open position cannot be withdrawn until it does." : "Close your position first. Funds backing an open position cannot be withdrawn.");
     else if (m.resolved && hasFunds) add("withdraw", "ready", "This market is settled. Withdraw what is yours.");
     else if (hasFunds) add("withdraw", "ready", pf.releasedPnl > 0n ? "Withdraw your balance, including settled profit, to your wallet." : "Withdraw your balance to your wallet.");
     else add("withdraw", "done", "Nothing left to withdraw.");

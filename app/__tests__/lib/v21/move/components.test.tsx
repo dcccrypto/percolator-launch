@@ -53,7 +53,7 @@ describe("v1 close-only notice", () => {
   it("badge reads 'v1 · close-only'; banner promises exits and links to /move", () => {
     render(<><V1CloseOnlyBadge /><V1CloseOnlyBanner /></>);
     expect(screen.getByTestId("v1-close-only-badge")).toHaveTextContent("v1 · close-only");
-    expect(screen.getByTestId("v1-close-only-banner")).toHaveTextContent(/close positions and withdraw at any time/);
+    expect(screen.getByTestId("v1-close-only-banner")).toHaveTextContent(/close positions, withdraw, collect Earn withdrawals and claim fees/);
     expect(screen.getByTestId("v1-move-link")).toHaveAttribute("href", "/move");
   });
 });
