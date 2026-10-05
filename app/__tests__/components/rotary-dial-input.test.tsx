@@ -1,6 +1,6 @@
 /**
  * RotaryDial input model. Pointer/touch DRAG was removed (laggy on the live
- * playground); the dial is operated by wheel, keys and tap-able -/+ buttons.
+ * playground); the dial is operated by wheel (while focused), keys and tap-able -/+ buttons.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -29,6 +29,7 @@ describe("RotaryDial ARIA", () => {
 describe("RotaryDial wheel", () => {
   it("scroll up increases, down decreases, by one step", () => {
     const { slider, onChange } = mount();
+    slider.focus();
     fireEvent.wheel(slider, { deltaY: -100 });
     expect(onChange).toHaveBeenLastCalledWith(5.5);
     fireEvent.wheel(slider, { deltaY: 100 });
@@ -36,6 +37,7 @@ describe("RotaryDial wheel", () => {
   });
   it("clamps at the stops (#2621: 10x cap)", () => {
     const { slider, onChange } = mount({ value: 10 });
+    slider.focus();
     fireEvent.wheel(slider, { deltaY: -100 });
     expect(onChange).not.toHaveBeenCalled();
   });
@@ -46,10 +48,31 @@ describe("RotaryDial wheel", () => {
     // a non-passive native listener that preventDefaults. defaultPrevented===true
     // is what a passive handler can't produce, so this fails if the fix regresses.
     const { slider, onChange } = mount();
+    slider.focus();
     const ev = new WheelEvent("wheel", { deltaY: -100, cancelable: true, bubbles: true });
     slider.dispatchEvent(ev);
     expect(onChange).toHaveBeenLastCalledWith(5.5); // still adjusts
     expect(ev.defaultPrevented).toBe(true); // and suppresses the page scroll
+  });
+  it("a page scroll that passes over an unfocused dial scrolls the page and leaves the value alone", () => {
+    // The Liquidity dial sits in the middle column, under the pointer of a user who
+    // scrolls down to HOLD TO LAUNCH. Each notch used to be swallowed and step the
+    // dial down: 1,500 became the 100 minimum without the user touching the dial.
+    const { slider, onChange } = mount({ value: 1500, min: 100, max: 10_000, step: 100 });
+    expect(document.activeElement).not.toBe(slider);
+    const notches = Array.from({ length: 20 }, () => new WheelEvent("wheel", { deltaY: 100, cancelable: true, bubbles: true }));
+    for (const ev of notches) slider.dispatchEvent(ev);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(notches.every((ev) => !ev.defaultPrevented)).toBe(true);
+  });
+  it("stops reacting to the wheel once focus moves away (e.g. to the + button)", () => {
+    const { slider, onChange } = mount();
+    slider.focus();
+    fireEvent.wheel(slider, { deltaY: -100 });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    (screen.getByRole("button", { name: "Increase Leverage" }) as HTMLButtonElement).focus();
+    fireEvent.wheel(slider, { deltaY: 100 });
+    expect(onChange).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -84,6 +107,7 @@ describe("RotaryDial tap step buttons (touch users)", () => {
   });
   it("disabled dial ignores wheel, keys and taps", () => {
     const { slider, onChange } = mount({ disabled: true });
+    slider.focus();
     fireEvent.wheel(slider, { deltaY: -100 });
     fireEvent.keyDown(slider, { key: "ArrowUp" });
     fireEvent.click(screen.getByRole("button", { name: "Increase Leverage" }));
