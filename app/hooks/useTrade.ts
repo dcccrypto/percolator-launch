@@ -53,7 +53,7 @@ import { computeLimitPriceE6, assertFeedAgreesWithChain } from "@/lib/slippage";
 import { fetchPortfolioIdentity, fetchAssetMarketId, defaultCrankObservations } from "@/lib/v18-wire";
 import { buildTradeIxs } from "@/lib/trade-ix";
 import { isPortfolioAccount } from "@/lib/portfolio-account";
-import { findOwnerPortfolio } from "@/lib/owner-portfolio";
+import { findOwnerPortfolio, verifyExplicitPortfolio } from "@/lib/owner-portfolio";
 
 // ---------------------------------------------------------------------------
 // v17 portfolio account layout constants
@@ -210,10 +210,12 @@ export async function resolveV17TradeAccounts(
   if (targetPortfolioPk) {
     try {
       const info = await connection.getAccountInfo(targetPortfolioPk, "confirmed");
-      if (info && parsePortfolioV17(Buffer.from(info.data)).owner.equals(takerPk)) {
+      // Program-owned, decodes, mutable owner == taker AND market_group_id == this
+      // market: a same-wallet portfolio of ANOTHER market must not pass.
+      if (verifyExplicitPortfolio(info, programId, slabPk, takerPk)) {
         accountA = targetPortfolioPk;
       }
-      // owner mismatch / missing / unparseable → fall through to the shared pick
+      // not verified / missing / unparseable → fall through to the shared pick
     } catch {
       /* fall through to the shared resolution */
     }

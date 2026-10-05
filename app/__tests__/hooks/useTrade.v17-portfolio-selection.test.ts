@@ -12,6 +12,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PublicKey } from "@solana/web3.js";
+import { comparePortfolioPubkeys } from "@/lib/owner-portfolio";
 
 const mocks = vi.hoisted(() => ({
   useConnectionCompat: vi.fn(),
@@ -336,13 +337,14 @@ describe("useTrade v17 portfolio selection", () => {
     const targetSubstitutionSlab = new PublicKey(new Uint8Array(32).fill(42)).toBase58();
 
     it("uses an explicit target that verifies as owned as accountA", async () => {
-      const ordered = [portfolioOne, portfolioTwo].sort((a, b) => a.toBase58().localeCompare(b.toBase58()));
+      const ordered = [portfolioOne, portfolioTwo].sort(comparePortfolioPubkeys);
       const canonical = ordered[0];
       const target = ordered[1]; // the NON-canonical one — proves the target wins over the pick
       // The direct read of the target returns an owned account (parsePortfolioV17
       // mock → owner = walletPk), so the verify passes and the target is used.
+      mocks.parsePortfolioV17.mockReturnValue({ owner: walletPk, legs: [], marketGroupId: new PublicKey(targetUsedSlab) });
       connection.getAccountInfo.mockImplementation(async (pk: PublicKey) =>
-        pk.equals(target) ? { data: Buffer.from([9]) } : null,
+        pk.equals(target) ? { owner: programId, data: Buffer.from([9]) } : null,
       );
       connection.getProgramAccounts.mockResolvedValueOnce([
         { pubkey: canonical, account: { data: Buffer.from([1]) } },
@@ -362,7 +364,7 @@ describe("useTrade v17 portfolio selection", () => {
     });
 
     it("REFUSES rather than substituting a different owned portfolio when the target can't be confirmed", async () => {
-      const ordered = [portfolioOne, portfolioTwo].sort((a, b) => a.toBase58().localeCompare(b.toBase58()));
+      const ordered = [portfolioOne, portfolioTwo].sort(comparePortfolioPubkeys);
       const canonical = ordered[0];
       const target = ordered[1]; // non-canonical target
       // The target's direct read lags (null) — getAccountInfo default. The
@@ -384,6 +386,33 @@ describe("useTrade v17 portfolio selection", () => {
       expect(mocks.sendTx).not.toHaveBeenCalled();
       unmount();
     });
+  });
+
+  describe("explicit target must be the program's, this wallet's and THIS market's (#2560 review)", () => {
+    const slabs = [51, 52, 53].map((n) => new PublicKey(new Uint8Array(32).fill(n)).toBase58());
+    const cases: [string, string, (slab: string) => { owner: PublicKey; parsed: Record<string, unknown> }][] = [
+      ["owned by another program", slabs[0], (slab) => ({ owner: matcherProgram, parsed: { owner: walletPk, legs: [], marketGroupId: new PublicKey(slab) } })],
+      ["a portfolio of ANOTHER market", slabs[1], () => ({ owner: programId, parsed: { owner: walletPk, legs: [], marketGroupId: new PublicKey(new Uint8Array(32).fill(99)) } })],
+      ["a portfolio of another wallet", slabs[2], (slab) => ({ owner: programId, parsed: { owner: lpOwner, legs: [], marketGroupId: new PublicKey(slab) } })],
+    ];
+    for (const [name, slab, build] of cases) {
+      it(`REFUSES a target that is ${name} (and would otherwise substitute the canonical pick)`, async () => {
+        const ordered = [portfolioOne, portfolioTwo].sort(comparePortfolioPubkeys);
+        const canonical = ordered[0];
+        const target = ordered[1];
+        const { owner, parsed } = build(slab);
+        // the target's bytes (first byte 9) decode as `parsed`; the canonical pick's decode as the wallet's own
+        mocks.parsePortfolioV17.mockImplementation((d: Uint8Array) => (d[0] === 9 ? parsed : { owner: walletPk, legs: [] }));
+        connection.getAccountInfo.mockImplementation(async (pk: PublicKey) => (pk.equals(target) ? { owner, data: Buffer.from([9]) } : null));
+        connection.getProgramAccounts.mockResolvedValueOnce([{ pubkey: canonical, account: { data: Buffer.from([1]) } }]);
+        const { result, unmount } = renderHook(() => useTrade(slab));
+        await act(async () => {
+          await expect(result.current.trade({ lpIdx: 0, userIdx: 7, size: 1_000_000n, portfolioPk: target })).rejects.toThrow("Couldn't confirm the selected portfolio");
+        });
+        expect(mocks.sendTx).not.toHaveBeenCalled();
+        unmount();
+      });
+    }
   });
 
   describe("LP-portfolio exclusion (GH bug: market creator's LP mistaken for their own trading account)", () => {

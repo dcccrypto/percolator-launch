@@ -25,7 +25,7 @@ import {
 } from "@/lib/sdk-compat";
 import { sendTx } from "@/lib/tx";
 import { getPortfolioRawSnapshot, makePortfolioScanKey } from "@/lib/userAccountScan";
-import { pickOwnerPortfolio } from "@/lib/owner-portfolio";
+import { pickOwnerPortfolio, verifyExplicitPortfolio } from "@/lib/owner-portfolio";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { detectOracleMode } from "@/lib/oraclePrice";
 import { onChainMarkE6 } from "@/lib/position-pnl";
@@ -164,7 +164,29 @@ export function useWithdraw(slabAddress: string) {
           const V17_MAGIC_BYTES = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
           let portfolioPk: PublicKey | null = params.portfolioPk ?? null;
           let portfolioData: Buffer | null = null;
-          if (portfolioPk) {
+          // #2560: an EXPLICIT non-primary target (an isolated portfolio: the dock's
+          // ± Margin, the post-close sweep) is acted on EXACTLY or not at all. The
+          // wallet's primary (cross) account is the one the scan store resolves; a
+          // caller passing that pubkey (the live DepositWithdrawCard passes
+          // userAccount.pubkey) keeps the original fall-back-to-scan behaviour below.
+          const storePrimaryPk = getPortfolioRawSnapshot(
+            makePortfolioScanKey(programId, slabAddress, wallet.publicKey),
+          )?.pubkey ?? null;
+          const strictTarget = !!params.portfolioPk && !!storePrimaryPk && !storePrimaryPk.equals(params.portfolioPk);
+          const COULDNT_CONFIRM = "Couldn't confirm the selected account just now. Nothing was sent — please try again.";
+          if (portfolioPk && strictTarget) {
+            let verified: Buffer | null = null;
+            try {
+              const info = await connection.getAccountInfo(portfolioPk, "confirmed");
+              // program-owned, decodes, mutable owner == wallet AND market_group_id == this market.
+              verified = verifyExplicitPortfolio(info, programId, slabPk, wallet.publicKey);
+            } catch {
+              verified = null;
+            }
+            // Refuse rather than substitute another portfolio: no scan fallback here.
+            if (!verified) throw new UserFacingError(COULDNT_CONFIRM);
+            portfolioData = verified;
+          } else if (portfolioPk) {
             // Fast path: caller supplied the portfolio pubkey (SlabProvider's
             // userAccount). Fetch, parse, and owner-verify it exactly like the
             // scan-store path below. On ANY failure — fetch throw, missing
@@ -247,16 +269,10 @@ export function useWithdraw(slabAddress: string) {
             throw new UserFacingError("No account found for this wallet on this market. Deposit first to create one.");
           }
 
-          // #2560 (F1): when the caller named an EXPLICIT portfolio (a chosen
-          // isolated/cross account, e.g. the post-close sweep or a ± Margin
-          // action), the resolved account MUST be exactly that one. The fast
-          // path above resets params.portfolioPk to null on a transient/owner
-          // failure and falls back to the deterministic pick — which may be a
-          // DIFFERENT owned portfolio. Withdrawing from the wrong account is a
-          // real-funds action, so refuse rather than substitute. (Acceptable
-          // when the fallback IS the target, e.g. the target was the primary.)
-          if (params.portfolioPk && !portfolioPk.equals(params.portfolioPk)) {
-            throw new UserFacingError("Couldn't confirm the selected account just now. Nothing was sent — please try again.");
+          // #2560 (F1): belt and braces for the strict path above — an explicit
+          // non-primary target must have resolved to exactly itself.
+          if (strictTarget && params.portfolioPk && !portfolioPk.equals(params.portfolioPk)) {
+            throw new UserFacingError(COULDNT_CONFIRM);
           }
 
           // Over-withdraw pre-check (defense-in-depth). The DepositWithdrawCard UI
