@@ -80,6 +80,7 @@ describe("Display menu", () => {
     expect(menu.parentElement).toBe(document.body);
     expect(menu.className).toMatch(/z-\[70\]/);
     expect(menu.style.position).toBe("fixed");
+    expect(menu.className).toMatch(/\bw-max\b/); // shrink-to-fit, so the measured width is the real one
   });
   it("closes on outside click but not on a click inside the portaled popup", () => {
     render(<ChartDisplayMenu prefs={{ ...DEFAULT_OVERLAY_PREFS }} onToggle={() => {}} />);

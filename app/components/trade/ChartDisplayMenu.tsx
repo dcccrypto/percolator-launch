@@ -144,7 +144,7 @@ export const ChartDisplayMenu: FC<ChartDisplayMenuProps> = ({ prefs, onToggle })
         ref={popupRef}
         data-testid="chart-display-menu"
         style={style}
-        className="z-[70] min-w-[200px] rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] py-1 shadow-[0_8px_32px_rgba(0,0,0,0.48)]"
+        className="fixed left-0 top-0 z-[70] w-max min-w-[200px] rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] py-1 shadow-[0_8px_32px_rgba(0,0,0,0.48)]"
       >
         {OVERLAY_DISPLAY_ORDER.map((key) => {
           const enabled = prefs[key];
