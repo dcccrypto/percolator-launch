@@ -298,3 +298,52 @@ describe("#2760: reservation deletes check {error}, retry, and log the final fai
     expect(err.mock.calls.some((c) => String(c[0]).includes("could not release reservation"))).toBe(true);
   });
 });
+
+describe("#2760 follow-up: the stale-window cleanup delete checks {error} too", () => {
+  /** fakeDb whose `.delete()...lt("claimed_at", ...)` (the stale cleanup) returns scripted results first. */
+  function flakyStaleDb(script: ({ error: { message: string } } | null)[] | "always-error") {
+    const inner = fakeDb();
+    const realFrom = inner.db.from("faucet_claims");
+    const calls = { stale: 0 };
+    const table = {
+      ...realFrom,
+      delete: () => {
+        const real = realFrom.delete() as unknown as { eq: (k: string, v: unknown) => unknown; lt: (k: string, v: unknown) => unknown; then: (r: (v: unknown) => void) => void };
+        let stale = false;
+        const b: Record<string, unknown> = {};
+        b.eq = (k: string, v: unknown) => (real.eq(k, v), b);
+        b.lt = (k: string, v: unknown) => ((stale = true), real.lt(k, v), b);
+        b.then = (res: (v: unknown) => void) => {
+          if (!stale) return real.then(res);
+          calls.stale++;
+          if (script === "always-error") return res({ error: { message: "db down" } });
+          const next = script.shift();
+          return next ? res(next) : real.then(res);
+        };
+        return b;
+      },
+    };
+    return { db: { from: () => table }, rows: inner.rows, calls };
+  }
+  const T0 = Date.parse("2026-10-03T05:00:00Z");
+  const seedStale = (rows: { id: number | string; wallet: string; fund_type: string; claimed_at: string }[]) =>
+    rows.push({ id: 999, wallet: "W1", fund_type: lib.SERVER_SOL_FUND_TYPE, claimed_at: new Date(T0 - 2 * 24 * 3600 * 1000).toISOString() });
+
+  it("a failed stale cleanup is retried; the stale row goes and the reservation succeeds", async () => {
+    const { db, rows, calls } = flakyStaleDb([{ error: { message: "transient" } }]);
+    seedStale(rows);
+    expect(await lib.reserveServerSol(db, "W1", T0)).toHaveProperty("id");
+    expect(calls.stale).toBe(2);
+    expect(rows.some((r) => r.id === 999)).toBe(false);
+  });
+
+  it("always-error is bounded (<= 3 attempts), logged, and the stale row still blocks (wallet-limit)", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { db, rows, calls } = flakyStaleDb("always-error");
+    seedStale(rows);
+    expect(await lib.reserveServerSol(db, "W1", T0)).toEqual({ reason: "wallet-limit" });
+    expect(calls.stale).toBeGreaterThanOrEqual(2);
+    expect(calls.stale).toBeLessThanOrEqual(3);
+    expect(err.mock.calls.some((c) => String(c[0]).includes("delete stale claims for wallet W1"))).toBe(true);
+  });
+});
