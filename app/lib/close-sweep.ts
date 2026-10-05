@@ -12,7 +12,9 @@
  * withdrawable as before.
  */
 import { parsePortfolioV17 } from "@percolatorct/sdk";
-import type { PublicKey } from "@solana/web3.js";
+import { Buffer } from "buffer";
+import { PublicKey, TransactionInstruction } from "@solana/web3.js";
+import { encodeClosePortfolio } from "@/lib/limits/p3-ix";
 
 export interface SweepRead {
   /** Fresh (uncached) read of the wallet's portfolio on this market; null = none. */
@@ -62,3 +64,62 @@ export const SWEEP_COPY = {
   done: (amount: string) => `${amount} is back in your wallet.`,
   kept: (amount: string) => `${amount} stays on this market. You can withdraw it any time.`,
 };
+
+/** #2560: the isolated portfolio's rent reclaim after a full close (one more approval, said first). */
+export const RECLAIM_COPY = {
+  prompt: "Position closed. Approve once more to close its empty account and get the deposit back.",
+  done: "Empty account closed. The deposit is back in your wallet.",
+  kept: "The empty account is still open. You can close it any time.",
+};
+
+/**
+ * The just-closed ISOLATED portfolio's data, once a fresh read shows it is EMPTY and the wallet's:
+ * no active leg and zero capital. Unlike {@link readSweepableCapital} this is what a fully-lost
+ * position looks like (capital 0 is the point, not "nothing to do"). Retries while the read still
+ * shows a leg or capital (the RPC cache can serve the pre-close account for ~1-2 s). null = not
+ * reclaimable (not owned, still funded after the retries, no account).
+ */
+export async function readReclaimablePortfolio(p: SweepRead): Promise<Uint8Array | null> {
+  const attempts = Math.max(1, p.attempts ?? 6);
+  const sleep = p.sleep ?? defaultSleep;
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await sleep(p.delayMs ?? 1_000);
+    let data: Uint8Array | null;
+    try {
+      data = await p.read();
+    } catch {
+      continue;
+    }
+    if (!data) return null;
+    let pf;
+    try {
+      pf = parsePortfolioV17(data);
+    } catch {
+      return null;
+    }
+    if (!pf.owner.equals(p.owner)) return null;
+    const capital = BigInt(pf.capital as unknown as bigint | number | string);
+    if (pf.legs.some((l) => l.active) || capital > 0n) continue; // stale pre-close read, or still funded
+    return data;
+  }
+  return null;
+}
+
+/** Tag 8 ClosePortfolio, owner-signed. Wire = own-portfolio-cleanup.ts `ownerClosePortfolioIx`: [closer(s,w), market(w), portfolio(w)]. */
+export function buildReclaimIx(
+  programId: PublicKey,
+  owner: PublicKey,
+  market: PublicKey,
+  portfolio: PublicKey,
+  id: { portfolioId: bigint; matcherSequence: bigint; positionEpoch: bigint },
+): TransactionInstruction {
+  return new TransactionInstruction({
+    programId,
+    keys: [
+      { pubkey: owner, isSigner: true, isWritable: true },
+      { pubkey: market, isSigner: false, isWritable: true },
+      { pubkey: portfolio, isSigner: false, isWritable: true },
+    ],
+    data: Buffer.from(encodeClosePortfolio(id.portfolioId, id.matcherSequence, id.positionEpoch)),
+  });
+}

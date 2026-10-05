@@ -4,16 +4,15 @@ import { useState, useCallback, useRef } from "react";
 import { useSingleMarketHealth } from "@/hooks/useMarketHealth";
 import { safeExplainMarketTxError } from "@/lib/market-error";
 import { Buffer } from "buffer";
-import { Connection, PublicKey, TransactionInstruction } from "@solana/web3.js";
+import { Connection, PublicKey } from "@solana/web3.js";
 import { sendTx } from "@/lib/tx";
-import { encodeClosePortfolio } from "@/lib/limits/p3-ix";
 import { readPortfolioIdentity } from "@/lib/v18-wire";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { AccountKind, isV17Account, parsePortfolioV17 } from "@percolatorct/sdk";
 import { useTrade, prewarmTradeSubmission } from "@/hooks/useTrade";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { getPortfolioRawSnapshot, makePortfolioScanKey } from "@/lib/userAccountScan";
-import { pickOwnerPortfolio, scanOwnerPortfolios } from "@/lib/owner-portfolio";
+import { pickOwnerPortfolio, scanOwnerPortfolios, verifyExplicitPortfolio } from "@/lib/owner-portfolio";
 import { effectiveLeg } from "@/lib/limits/effective-quantity";
 import { isPartialLegSendError } from "@/lib/trade-leg-groups";
 import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
@@ -39,7 +38,7 @@ import { isReduceOnlyLock21 } from "@/lib/limits/reduce-only-fallback";
 import { pythCrankAccount } from "@/lib/limits/oracle-tail";
 import { findV17Portfolio } from "@/hooks/useTrade";
 import { useWithdraw } from "@/hooks/useWithdraw";
-import { readSweepableCapital, SWEEP_COPY } from "@/lib/close-sweep";
+import { buildReclaimIx, readReclaimablePortfolio, readSweepableCapital, RECLAIM_COPY, SWEEP_COPY } from "@/lib/close-sweep";
 import { useOptionalToast } from "@/hooks/useToast";
 import { formatTokenAmount } from "@/lib/format";
 import { closeLimitFromEngine } from "@/lib/close-limit";
@@ -55,8 +54,26 @@ export interface ClosePositionResult {
   fill?: FillResult | null;
 }
 
+/**
+ * Options for `closePosition`. One opts object (not positional args) so features
+ * compose without signature churn: `skipSweep` is the v2.1 Move flow's
+ * (#3148: it withdraws itself), `portfolioPk` / `reclaimOnClose` are isolated
+ * margin's (#2560).
+ */
+export interface ClosePositionOpts {
+  /** v2.1 Move flow: the caller does its own withdraw, so skip the post-close sweep. */
+  skipSweep?: boolean;
+  /** Close THIS portfolio (a chosen cross/isolated account). Omitted → the deterministic
+   *  lowest-pubkey pick, i.e. today's behaviour. Verified program-owned, wallet-owned and
+   *  on this market before anything is signed. */
+  portfolioPk?: PublicKey;
+  /** After a full close, close the (now empty) portfolio and reclaim its rent. Only meaningful
+   *  with `portfolioPk`, and only ever for an ISOLATED portfolio, never the cross account. */
+  reclaimOnClose?: boolean;
+}
+
 export interface UseClosePositionReturn {
-  closePosition: (closePercent: number, targetPortfolioPk?: PublicKey, reclaimOnClose?: boolean) => Promise<ClosePositionResult>;
+  closePosition: (closePercent: number, opts?: ClosePositionOpts) => Promise<ClosePositionResult>;
   loading: boolean;
   error: string | null;
   phase: "idle" | "submitting" | "confirming";
@@ -112,7 +129,12 @@ async function readFreshPortfolioData(
   const slabPk = new PublicKey(slabAddress);
   if (targetPortfolioPk) {
     const info = await connection.getAccountInfo(targetPortfolioPk, "confirmed");
-    return info ? Buffer.from(info.data) : null;
+    if (!info) return null;
+    // Program-owned, decodes, mutable owner == wallet AND market_group_id == this
+    // market. A same-wallet portfolio of ANOTHER market must not be closed here.
+    const verified = verifyExplicitPortfolio(info, programId, slabPk, owner);
+    if (!verified) throw new Error("The selected account could not be verified for this market.");
+    return verified;
   }
   const cachedPk = getPortfolioRawSnapshot(
     makePortfolioScanKey(programId, slabAddress, owner),
@@ -194,7 +216,9 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
     // Threaded through every resolution point (fresh read, rebalance route,
     // matcher trade, entry-clear, post-close sweep) so a multi-row Close can
     // never act on a DIFFERENT portfolio than the row the user clicked.
-    async (closePercent: number, targetPortfolioPk?: PublicKey, reclaimOnClose?: boolean): Promise<ClosePositionResult> => {
+    async (closePercent: number, opts?: ClosePositionOpts): Promise<ClosePositionResult> => {
+      const targetPortfolioPk = opts?.portfolioPk;
+      const reclaimOnClose = opts?.reclaimOnClose === true;
       if (inflightRef.current) throw new Error("Close already in progress");
       if (!userAccount) {
         // A fresh SlabProvider (/portfolio, other markets) can still be loading it. Say so; keep the
@@ -558,59 +582,54 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         invalidatePortfolio();
         // Full close: hand the freed collateral back to the wallet (one more approval), in the
         // BACKGROUND so the close resolves now. Never turns a landed close into a failure.
-        if (closePercent === 100 && outcome === "closed" && isV17Market && programId && publicKey) {
+        // #2560: an ISOLATED full close then also closes its own, now empty, portfolio to
+        // reclaim the rent. That is independent of the sweep: a position lost down to 0 capital
+        // has nothing to sweep but its account is still rent-funded.
+        const reclaimIsolated = reclaimOnClose && !!targetPortfolioPk;
+        if (closePercent === 100 && outcome === "closed" && isV17Market && programId && publicKey && (!opts?.skipSweep || reclaimIsolated)) {
           const owner = publicKey;
           const decimals = 6; // playground collateral is sim-USDC (6 decimals) on every market
           void (async () => {
-            const amount = await readSweepableCapital({
-              owner,
-              read: () => readFreshPortfolioData(connection, programId, slabAddress, owner, targetPortfolioPk),
-            }).catch(() => null);
-            if (amount === null) return;
-            const label = `${formatTokenAmount(amount, decimals, 2)} USDC`;
-            toast(SWEEP_COPY.prompt(label), "info");
-            try {
-              await withdraw({ userIdx: userAccount.idx, amount, portfolioPk: targetPortfolioPk });
-              toast(SWEEP_COPY.done(label), "success");
-              // #2560 C7: an isolated full-close leaves its OWN portfolio empty and
-              // still rent-funded. Reclaim that rent (tag 8 ClosePortfolio) so
-              // isolated positions don't strand accounts. Best-effort and
-              // sim-gated (simulateBeforeSign) — a not-yet-empty portfolio, a
-              // declined prompt, or any failure is swallowed and never affects the
-              // already-completed close. Only for the ISOLATED portfolio the user
-              // closed (reclaimOnClose), NEVER the primary/cross account.
-              if (reclaimOnClose && targetPortfolioPk) {
+            const readTarget = () => readFreshPortfolioData(connection, programId, slabAddress, owner, targetPortfolioPk);
+            // A declined / failed sweep leaves the capital on the account: it is not empty, so there
+            // is nothing to reclaim (and no point in a second prompt).
+            let capitalStillThere = false;
+            if (!opts?.skipSweep) {
+              const amount = await readSweepableCapital({ owner, read: readTarget }).catch(() => null);
+              if (amount !== null) {
+                const label = `${formatTokenAmount(amount, decimals, 2)} USDC`;
+                toast(SWEEP_COPY.prompt(label), "info");
                 try {
-                  const pd = await readFreshPortfolioData(connection, programId, slabAddress, owner, targetPortfolioPk);
-                  if (pd) {
-                    const parsed = parsePortfolioV17(pd);
-                    // Defense-in-depth (C7 review): only reclaim an account THIS
-                    // wallet owns AND that is actually empty — mirrors the
-                    // pre-close owner re-verify and the proven resolved-cleanup
-                    // path. (targetPortfolioPk is already pinned, and on-chain
-                    // tag 8 requires signer==owner; this just fails fast.)
-                    const reclaimable = parsed.owner.equals(owner) && parsed.capital === 0n && !parsed.legs.some((l) => l.active);
-                    if (reclaimable) {
-                      const id = readPortfolioIdentity(new Uint8Array(pd));
-                      // Wire (own-portfolio-cleanup.ts): tag 8 [closer(s,w), market(w), portfolio(w)].
-                      const closeIx = new TransactionInstruction({
-                        programId,
-                        keys: [
-                          { pubkey: owner, isSigner: true, isWritable: true },
-                          { pubkey: new PublicKey(slabAddress), isSigner: false, isWritable: true },
-                          { pubkey: targetPortfolioPk, isSigner: false, isWritable: true },
-                        ],
-                        data: Buffer.from(encodeClosePortfolio(id.portfolioId, id.matcherSequence, id.positionEpoch)),
-                      });
-                      await sendTx({ connection, wallet, instructions: [closeIx], simulateBeforeSign: true });
-                    }
-                  }
+                  await withdraw({ userIdx: userAccount.idx, amount, portfolioPk: targetPortfolioPk });
+                  toast(SWEEP_COPY.done(label), "success");
                 } catch {
-                  /* best-effort rent reclaim: never affects the completed close */
+                  capitalStillThere = true;
+                  toast(SWEEP_COPY.kept(label), "info");
                 }
               }
-            } catch {
-              toast(SWEEP_COPY.kept(label), "info");
+            }
+            // #2560 C7: reclaim the isolated portfolio's rent (tag 8 ClosePortfolio). Runs after the
+            // sweep, whether or not it had capital to move (a fully-lost position has none), and
+            // only on an account that is verifiably empty and this wallet's. Best-effort and
+            // sim-gated: a declined prompt or any failure leaves the completed close untouched.
+            if (reclaimIsolated && targetPortfolioPk && !capitalStillThere) {
+              try {
+                const pd = await readReclaimablePortfolio({ owner, read: readTarget });
+                if (pd) {
+                  const id = readPortfolioIdentity(new Uint8Array(pd));
+                  const closeIx = buildReclaimIx(programId, owner, new PublicKey(slabAddress), targetPortfolioPk, id);
+                  // Say so BEFORE the wallet opens: this is one more approval.
+                  toast(RECLAIM_COPY.prompt, "info");
+                  try {
+                    await sendTx({ connection, wallet, instructions: [closeIx], simulateBeforeSign: true });
+                    toast(RECLAIM_COPY.done, "success");
+                  } catch {
+                    toast(RECLAIM_COPY.kept, "info");
+                  }
+                }
+              } catch {
+                /* best-effort rent reclaim: never affects the completed close */
+              }
             }
             invalidatePortfolio();
           })();
@@ -655,6 +674,10 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         // prevent; the cache had defeated the guard it was bolted onto.
         if (programId && publicKey) {
           freshReadCache.delete(freshReadKey(programId, slabAddress, publicKey));
+          // #2560: a target-scoped read is cached under its OWN key (see freshReadKey), so it must be
+          // spent too, or a second close of the same isolated position inside the TTL would read the
+          // PRE-close size (the over-close hazard described above).
+          if (targetPortfolioPk) freshReadCache.delete(freshReadKey(programId, slabAddress, publicKey, targetPortfolioPk));
         }
         inflightRef.current = false;
         setLoading(false);
