@@ -98,12 +98,17 @@ describe("entry-price per-portfolio scoping (#2560 — isolated margin)", () => 
     expect(getEntryPrice(SLAB, 0, WALLET, PF_B)).toBe(555n);
   });
 
-  it("clearing a scoped entry also removes the legacy fallback so it can't linger", () => {
-    saveEntryPrice(SLAB, 0, 777n, 3, WALLET); // legacy
+  it("clearing a scoped entry removes ONLY that slot — never the shared legacy key (F2)", () => {
+    // The write side still writes the legacy key for the primary, so dropping it
+    // while closing a DIFFERENT portfolio would wipe the primary's entry.
+    saveEntryPrice(SLAB, 0, 777n, 3, WALLET); // legacy (primary A's entry lives here)
     saveEntryPrice(SLAB, 0, 888n, 4, WALLET, PF_A); // scoped
     clearEntryPrice(SLAB, 0, WALLET, PF_A);
-    expect(getEntryPrice(SLAB, 0, WALLET, PF_A)).toBe(0n);
-    expect(getEntryPrice(SLAB, 0, WALLET)).toBe(0n); // legacy gone too
+    // the scoped slot is gone; it now falls back to the still-present legacy...
+    expect(getEntryPrice(SLAB, 0, WALLET)).toBe(777n); // legacy UNTOUCHED
+    // ...and a close of an isolated portfolio B must not have wiped the primary.
+    clearEntryPrice(SLAB, 0, WALLET, PF_B);
+    expect(getEntryPrice(SLAB, 0, WALLET)).toBe(777n); // still there
   });
 
   it("callers that pass no portfolio behave exactly as before (byte-identical key)", () => {

@@ -324,6 +324,25 @@ describe("userAccountScan — portfolio LIST snapshot (#2560 multi-portfolio gro
     expect(getPortfolioListSnapshot(key)).toBe(getPortfolioListSnapshot(key));
   });
 
+  it("F3: a reconciling equal-value scan clears the provisional flag on the LIST primary, not just the single snapshot", async () => {
+    const { connection, getProgramAccounts } = makeConnection();
+    getProgramAccounts.mockResolvedValue([{ pubkey: portfolioPubkey, account: { data: Buffer.alloc(1) } }]);
+    mocks.parsePortfolioV17.mockReturnValue(makePortfolio({ legs: [{ active: true, assetIndex: 0, marketId: 1n, side: 0, basisPosQ: 5n }] }));
+
+    const key = makePortfolioScanKey(programId, slabAddress, wallet);
+    await triggerPortfolioScan({ connection, programId, slabAddress, publicKey: wallet, raw: new Uint8Array([1]) });
+
+    applyConfirmedFill(key, 10n); // 15n, provisional on BOTH the single snapshot and list[0]
+    expect(getPortfolioListSnapshot(key)[0].provisional).toBe(true);
+
+    // The real scan reconciles to the SAME 15n the patch guessed.
+    mocks.parsePortfolioV17.mockReturnValue(makePortfolio({ legs: [{ active: true, assetIndex: 0, marketId: 1n, side: 0, basisPosQ: 15n }] }));
+    await triggerPortfolioScan({ connection, programId, slabAddress, publicKey: wallet, raw: new Uint8Array([2]) });
+
+    expect(getPortfolioUserAccountSnapshot(key)?.provisional).toBeUndefined(); // single (pre-existing)
+    expect(getPortfolioListSnapshot(key)[0].provisional).toBeUndefined(); // list too — the F3 fix
+  });
+
   it("applyConfirmedFill mirrors the patch into the list entry (dock stays as snappy as the ticket)", async () => {
     const { connection, getProgramAccounts } = makeConnection();
     getProgramAccounts.mockResolvedValue([{ pubkey: portfolioPubkey, account: { data: Buffer.alloc(1) } }]);

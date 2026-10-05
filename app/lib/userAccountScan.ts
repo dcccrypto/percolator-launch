@@ -340,15 +340,37 @@ function ownPortfolioListsEqual(a: OwnPortfolioScanResult[], b: OwnPortfolioScan
   return true;
 }
 
-/** Publish the full owned-portfolio list from a scan. Equality bail-out keeps
- *  the old array reference (and skips the notify) when nothing meaningful
- *  changed, exactly like `publishPortfolioResult`. The first publish always
- *  goes through (null → array), so subscribers flip from "pending" to
- *  resolved even for an empty list. Does NOT touch `raw`/`userAccount`. */
-function publishPortfolioList(entry: PortfolioEntry, list: OwnPortfolioScanResult[]): void {
-  if (entry.userAccounts !== null && ownPortfolioListsEqual(entry.rawList, list)) return;
+/**
+ * Publish the full owned-portfolio list from a scan. Equality bail-out keeps
+ * the old array reference (and skips the notify) when nothing meaningful
+ * changed, exactly like `publishPortfolioResult`. The first publish always
+ * goes through (null → array), so subscribers flip from "pending" to resolved
+ * even for an empty list. Does NOT touch `raw`/`userAccount`.
+ *
+ * F3: `forcePublish` bypasses the equality bail-out when the entry is
+ * provisional (a confirmed-fill patch is in flight) — the same guard
+ * `publishPortfolioResult` applies to the single snapshot. Without it, an
+ * equal-value reconciling scan would leave a stale `provisional:true` flag on
+ * the list's primary entry and never notify. `runPortfolioScan` samples the
+ * provisional state BEFORE `publishPortfolioResult` clears it and passes it here.
+ *
+ * F4: unchanged rows keep their previous mapped-object identity, so a memoized
+ * multi-row view only re-renders the rows that actually changed. Identity reuse
+ * is disabled on a `forcePublish` so the provisional flag is dropped from a
+ * reconciled primary (the fresh mapped object carries no `provisional`).
+ */
+function publishPortfolioList(entry: PortfolioEntry, list: OwnPortfolioScanResult[], forcePublish = false): void {
+  if (entry.userAccounts !== null && !forcePublish && ownPortfolioListsEqual(entry.rawList, list)) return;
+  const prev = new Map<string, { res: OwnPortfolioScanResult; acct: UserAccountInfo }>();
+  if (entry.userAccounts && !forcePublish) {
+    entry.rawList.forEach((r, i) => prev.set(r.pubkey.toBase58(), { res: r, acct: entry.userAccounts![i] }));
+  }
+  entry.userAccounts = list.map((r) => {
+    const p = prev.get(r.pubkey.toBase58());
+    if (p && ownPortfolioResultsEqual(p.res, r)) return p.acct; // unchanged → stable identity
+    return { idx: 0, account: portfolioV17ToAccount(r.portfolio), pubkey: r.pubkey };
+  });
   entry.rawList = list;
-  entry.userAccounts = list.map((r) => ({ idx: 0, account: portfolioV17ToAccount(r.portfolio), pubkey: r.pubkey }));
   notifyPortfolio(entry);
 }
 
@@ -469,8 +491,11 @@ async function runPortfolioScan(
       portfolio: parsePortfolioV17(p.data),
     }));
     const result: OwnPortfolioScanResult | null = list[0] ?? null;
+    // F3: sample provisional BEFORE publishPortfolioResult clears it, so the
+    // list publish applies the same provisional-bypass the single snapshot does.
+    const wasProvisional = entry.provisionalUntil > 0 && Date.now() < entry.provisionalUntil;
     publishPortfolioResult(entry, result);
-    publishPortfolioList(entry, list);
+    publishPortfolioList(entry, list, wasProvisional);
     return entry.raw;
   } catch (e) {
     // Transient RPC error (429, timeout) — keep-last-good: do NOT publish,

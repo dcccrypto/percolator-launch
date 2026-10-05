@@ -247,6 +247,18 @@ export function useWithdraw(slabAddress: string) {
             throw new UserFacingError("No account found for this wallet on this market. Deposit first to create one.");
           }
 
+          // #2560 (F1): when the caller named an EXPLICIT portfolio (a chosen
+          // isolated/cross account, e.g. the post-close sweep or a ± Margin
+          // action), the resolved account MUST be exactly that one. The fast
+          // path above resets params.portfolioPk to null on a transient/owner
+          // failure and falls back to the deterministic pick — which may be a
+          // DIFFERENT owned portfolio. Withdrawing from the wrong account is a
+          // real-funds action, so refuse rather than substitute. (Acceptable
+          // when the fallback IS the target, e.g. the target was the primary.)
+          if (params.portfolioPk && !portfolioPk.equals(params.portfolioPk)) {
+            throw new UserFacingError("Couldn't confirm the selected account just now. Nothing was sent — please try again.");
+          }
+
           // Over-withdraw pre-check (defense-in-depth). The DepositWithdrawCard UI
           // already blocks amount > freeMargin, but this guards direct/other
           // callers and turns a confusing on-chain failure into a clear message.

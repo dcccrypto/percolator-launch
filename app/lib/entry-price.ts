@@ -123,14 +123,21 @@ export function getEntryLeverage(slab: string, accountIdx: number, wallet?: stri
     : null;
 }
 
-/** Clear saved entry price (call when position is fully closed). Removes the
- *  portfolio-scoped key and, when a portfolio was given, the legacy
- *  portfolio-less key too, so a migrated primary-portfolio entry can't linger
- *  as a stale fallback after its position is gone. */
+/**
+ * Clear saved entry price (call when position is fully closed). Removes ONLY
+ * the exact key addressed — the portfolio-scoped key when a portfolio is given,
+ * else the legacy portfolio-less key.
+ *
+ * #2560 (F2): it must NOT also delete the legacy key on a scoped clear. The
+ * write side (OrderTicket) still writes the legacy key until it is scoped, so
+ * the primary portfolio's entry lives there; dropping the legacy key while
+ * closing a DIFFERENT (isolated) portfolio would wipe the primary's cached
+ * entry. Each portfolio clears exactly its own slot. A stale legacy entry is
+ * harmless — it is only read on a scoped miss, and a scoped write shadows it.
+ */
 export function clearEntryPrice(slab: string, accountIdx: number, wallet?: string, portfolio?: string): void {
   try {
     localStorage.removeItem(key(slab, accountIdx, wallet, portfolio));
-    if (wallet && portfolio) localStorage.removeItem(key(slab, accountIdx, wallet));
   } catch {
     // ignore
   }

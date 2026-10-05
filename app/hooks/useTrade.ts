@@ -235,6 +235,18 @@ export async function resolveV17TradeAccounts(
     );
   }
 
+  // #2560 (F1): an EXPLICIT target must resolve to EXACTLY itself. If the
+  // verify above failed — a transient read error, an RPC node lagging behind a
+  // freshly-created account, or a foreign/NFT-escrowed pubkey — accountA fell
+  // back to the deterministic pick, which may be a DIFFERENT owned portfolio.
+  // Refuse rather than trade the wrong account; the fallback is acceptable ONLY
+  // when it happens to BE the target (e.g. the target was the primary).
+  if (targetPortfolioPk && !accountA.equals(targetPortfolioPk)) {
+    throw new Error(
+      "Couldn't confirm the selected portfolio just now. Nothing was sent — please try again.",
+    );
+  }
+
   return { accountA, ...lp };
 }
 
