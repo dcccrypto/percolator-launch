@@ -308,3 +308,35 @@ describe("#3141: the deposit widget's fields are named by their labels", () => {
     expect(screen.getByLabelText("Amount")).toBe(screen.getByTestId("stake-withdraw-input"));
   });
 });
+
+describe("#2932 follow-up: the Withdraw tab's balance read failing is not 'No staked balance'", () => {
+  it("a failed read shows the error with a retry, and the retry recovers", async () => {
+    h.fetch.mockResolvedValue(okResponse([apiPool(SLAB_BAD, "BBB")]));
+    h.getAccountInfo.mockRejectedValue(new Error("429 Too Many Requests"));
+
+    render(<StakePage />);
+    await screen.findAllByText("BBB");
+    fireEvent.click(screen.getByTestId("stake-tab-withdraw"));
+    const alert = await screen.findByTestId("stake-withdraw-read-error");
+    expect(alert.textContent).toMatch(/Couldn.t read your staked balance in this pool./);
+    expect(screen.queryByText("No staked balance in this pool.")).toBeNull();
+    expect(screen.queryByText("Nothing to Withdraw")).toBeNull();
+    expect(screen.getByText("Balance unavailable")).toBeTruthy();
+
+    h.getAccountInfo.mockResolvedValue(null); // the RPC recovers: a confirmed empty read
+    fireEvent.click(alert.querySelector("button")!);
+    expect(await screen.findByText("No staked balance in this pool.")).toBeTruthy();
+    expect(screen.queryByTestId("stake-withdraw-read-error")).toBeNull();
+  });
+
+  it("a confirmed empty read still says 'No staked balance in this pool.'", async () => {
+    h.fetch.mockResolvedValue(okResponse([apiPool(SLAB_OK, "AAA")]));
+    h.getAccountInfo.mockResolvedValue(null);
+
+    render(<StakePage />);
+    await screen.findAllByText("AAA");
+    fireEvent.click(screen.getByTestId("stake-tab-withdraw"));
+    expect(await screen.findByText("No staked balance in this pool.")).toBeTruthy();
+    expect(screen.queryByTestId("stake-withdraw-read-error")).toBeNull();
+  });
+});

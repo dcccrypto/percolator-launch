@@ -619,6 +619,8 @@ function DepositWidget({
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [withdrawPosition, setWithdrawPosition] = useState<UserPosition | null>(null);
   const [withdrawPositionLoading, setWithdrawPositionLoading] = useState(false);
+  // The selected pool's balance could not be read (#2706): unknown, not "no balance".
+  const [withdrawPositionError, setWithdrawPositionError] = useState(false);
   const [withdrawRefreshKey, setWithdrawRefreshKey] = useState(0);
   // Live countdown for the Withdraw tab; at 0 re-read the position (the chain decides).
   const withdrawCooldown = useStakeCooldown(withdrawPosition, () => setWithdrawRefreshKey((k) => k + 1));
@@ -700,10 +702,12 @@ function DepositWidget({
     if (!connected || !publicKey || !pool?.slabAddress) {
       setWithdrawPosition(null);
       setWithdrawPositionLoading(false);
+      setWithdrawPositionError(false);
       return;
     }
     let cancelled = false;
     setWithdrawPositionLoading(true);
+    setWithdrawPositionError(false);
     (async () => {
       try {
         // Stake pools are owned by this deployment's vault program
@@ -715,8 +719,13 @@ function DepositWidget({
         const found = await fetchPoolPosition(pool, publicKey, connection, stakeProgramId);
         if (!cancelled) setWithdrawPosition(found);
       } catch (err) {
+        // fetchPoolPosition throws only when the pool could not be read; a confirmed
+        // "no position" resolves to null. So this is unknown, not empty.
         console.error("[DepositWidget] Failed to fetch withdraw position:", err);
-        if (!cancelled) setWithdrawPosition(null);
+        if (!cancelled) {
+          setWithdrawPosition(null);
+          setWithdrawPositionError(true);
+        }
       } finally {
         if (!cancelled) setWithdrawPositionLoading(false);
       }
@@ -1038,7 +1047,19 @@ function DepositWidget({
             {withdrawPositionLoading && (
               <p className="text-[11px] text-[var(--text-muted)]">Checking staked balance…</p>
             )}
-            {!withdrawPositionLoading && connected && !withdrawPosition && (
+            {!withdrawPositionLoading && connected && withdrawPositionError && (
+              <p role="alert" data-testid="stake-withdraw-read-error" className="text-[11px] text-[var(--text-secondary)]">
+                Couldn&apos;t read your staked balance in this pool.{" "}
+                <button
+                  type="button"
+                  onClick={() => setWithdrawRefreshKey((k) => k + 1)}
+                  className="text-[var(--accent-text)] transition-colors hover:text-[var(--accent)]"
+                >
+                  Try again
+                </button>
+              </p>
+            )}
+            {!withdrawPositionLoading && connected && !withdrawPositionError && !withdrawPosition && (
               <p className="text-[11px] text-[var(--text-muted)]">No staked balance in this pool.</p>
             )}
 
@@ -1084,7 +1105,7 @@ function DepositWidget({
                 {withdrawLoading
                   ? "Withdrawing…"
                   : !withdrawPosition
-                  ? "Nothing to Withdraw"
+                  ? withdrawPositionError ? "Balance unavailable" : "Nothing to Withdraw"
                   : !withdrawPosition.cooldownElapsed
                   ? withdrawCooldown.label
                   : "Withdraw →"}
