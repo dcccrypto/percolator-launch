@@ -548,6 +548,7 @@ function TradePageInner({ slab }: { slab: string }) {
       {/* UX WP-10 (GL-1, §4.3): the market address and admin status left the page chrome; they sit
           in a collapsed "Market details" disclosure (the "ADMIN ACTIVE" chip is no longer shown by
           default above every market). */}
+      <div className="relative">
       <details data-testid="market-details" className="border-b border-[var(--border)]/30 px-3 py-1 text-[10px] text-[var(--text-secondary)]">
         <summary className="cursor-pointer select-none py-0.5">Market details</summary>
       {/* The health detail lines (payout level etc.) and the limits strip (OI vs cap, liquidity,
@@ -578,6 +579,17 @@ function TradePageInner({ slab }: { slab: string }) {
         )}
       </div>
       </details>
+      {/* Below lg the AnalyticsDock (and its "Full analytics" link) is hidden, so the analytics
+          page gets a link on the Market details line. Outside <summary>, so a tap navigates
+          instead of toggling the disclosure. */}
+      <a
+        href={`/analytics/${slab}`}
+        data-testid="market-analytics-link"
+        className="absolute right-3 top-1 py-0.5 text-[10px] text-[var(--text-muted)] transition-colors hover:text-[var(--accent-text)] lg:hidden"
+      >
+        Full analytics <span aria-hidden="true">↗</span>
+      </a>
+      </div>
 
       {/* ════════════════ DESKTOP (≥ lg) — named grid ════════════════ */}
       {isLargeScreen && (
