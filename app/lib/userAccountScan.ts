@@ -309,7 +309,10 @@ function ownPortfolioResultsEqual(a: OwnPortfolioScanResult | null, b: OwnPortfo
   return true;
 }
 
-function publishPortfolioResult(entry: PortfolioEntry, result: OwnPortfolioScanResult | null): void {
+/** Returns true when the snapshot changed. Does NOT notify: `runPortfolioScan`
+ *  publishes the single snapshot AND the list, then notifies ONCE (a second
+ *  notify would double every subscriber re-render per scan). */
+function publishPortfolioResult(entry: PortfolioEntry, result: OwnPortfolioScanResult | null): boolean {
   // A provisional (locally-patched by applyConfirmedFill) snapshot must
   // never "stick" past the next real scan, even if that scan's data happens
   // to compare equal field-for-field (e.g. the patch guessed the exact same
@@ -322,11 +325,11 @@ function publishPortfolioResult(entry: PortfolioEntry, result: OwnPortfolioScanR
   // is what flips subscribers from "pending" to "resolved: no account".
   const firstResolution = !entry.scanned;
   entry.scanned = true;
-  if (!firstResolution && !bypassEqualityForProvisional && ownPortfolioResultsEqual(entry.raw, result)) return;
+  if (!firstResolution && !bypassEqualityForProvisional && ownPortfolioResultsEqual(entry.raw, result)) return false;
   entry.raw = result;
   entry.userAccount = result ? { idx: 0, account: portfolioV17ToAccount(result.portfolio), pubkey: result.pubkey } : null;
   entry.provisionalUntil = 0;
-  notifyPortfolio(entry);
+  return true;
 }
 
 /** Element-wise `ownPortfolioResultsEqual` over two ordered lists (both are
@@ -343,7 +346,8 @@ function ownPortfolioListsEqual(a: OwnPortfolioScanResult[], b: OwnPortfolioScan
 /**
  * Publish the full owned-portfolio list from a scan. Equality bail-out keeps
  * the old array reference (and skips the notify) when nothing meaningful
- * changed, exactly like `publishPortfolioResult`. The first publish always
+ * changed, exactly like `publishPortfolioResult`. Returns true when it published
+ * (the caller notifies once for the pair). The first publish always
  * goes through (null → array), so subscribers flip from "pending" to resolved
  * even for an empty list. Does NOT touch `raw`/`userAccount`.
  *
@@ -359,8 +363,8 @@ function ownPortfolioListsEqual(a: OwnPortfolioScanResult[], b: OwnPortfolioScan
  * is disabled on a `forcePublish` so the provisional flag is dropped from a
  * reconciled primary (the fresh mapped object carries no `provisional`).
  */
-function publishPortfolioList(entry: PortfolioEntry, list: OwnPortfolioScanResult[], forcePublish = false): void {
-  if (entry.userAccounts !== null && !forcePublish && ownPortfolioListsEqual(entry.rawList, list)) return;
+function publishPortfolioList(entry: PortfolioEntry, list: OwnPortfolioScanResult[], forcePublish = false): boolean {
+  if (entry.userAccounts !== null && !forcePublish && ownPortfolioListsEqual(entry.rawList, list)) return false;
   const prev = new Map<string, { res: OwnPortfolioScanResult; acct: UserAccountInfo }>();
   if (entry.userAccounts && !forcePublish) {
     entry.rawList.forEach((r, i) => prev.set(r.pubkey.toBase58(), { res: r, acct: entry.userAccounts![i] }));
@@ -371,7 +375,7 @@ function publishPortfolioList(entry: PortfolioEntry, list: OwnPortfolioScanResul
     return { idx: 0, account: portfolioV17ToAccount(r.portfolio), pubkey: r.pubkey };
   });
   entry.rawList = list;
-  notifyPortfolio(entry);
+  return true;
 }
 
 export function subscribePortfolioScan(key: string, listener: () => void): () => void {
@@ -494,8 +498,10 @@ async function runPortfolioScan(
     // F3: sample provisional BEFORE publishPortfolioResult clears it, so the
     // list publish applies the same provisional-bypass the single snapshot does.
     const wasProvisional = entry.provisionalUntil > 0 && Date.now() < entry.provisionalUntil;
-    publishPortfolioResult(entry, result);
-    publishPortfolioList(entry, list, wasProvisional);
+    // Publish both (each unconditionally), then notify ONCE.
+    const singleChanged = publishPortfolioResult(entry, result);
+    const listChanged = publishPortfolioList(entry, list, wasProvisional);
+    if (singleChanged || listChanged) notifyPortfolio(entry);
     return entry.raw;
   } catch (e) {
     // Transient RPC error (429, timeout) — keep-last-good: do NOT publish,
