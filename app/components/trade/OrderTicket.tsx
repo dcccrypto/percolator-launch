@@ -100,6 +100,10 @@ import { OrderTicketLimits, reasonCopy } from "@/components/limits/OrderTicketLi
 import { GrowthTicketPanel } from "@/components/trade/GrowthTicketPanel";
 import { CloseOnlyBanner } from "@/components/trade/CloseOnlyBanner";
 import { isDevnetV21Enabled } from "@/lib/v21/flag";
+import { isMoveFlowEnabled } from "@/lib/v21/move/flag";
+import { isV1CloseOnly } from "@/lib/v21/move/ids";
+import { v1BlocksOrder } from "@/lib/v21/move/close-only";
+import { V1CloseOnlyBanner } from "@/components/move/V1CloseOnlyNotice";
 import { StatusLine } from "@/components/ui/StatusLine";
 import { FixPricingAction } from "@/components/trade/FixPricingAction";
 import { resolveUserMessage, type UserMessage, type UserMessageAction } from "@/lib/limits/user-message";
@@ -1159,7 +1163,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     marketLimits.sameOwnerPending === true &&
     positionSize > sameOwnerRoomQ(existingPositionSize, direction);
 
+  // v1 close-only (flagged): no new risk on a v1 market; reducing orders, closes and withdrawals stay open.
+  const v1CloseOnly = isV1CloseOnly(slabProgramId?.toBase58(), isMoveFlowEnabled());
+  const v1Blocked = v1BlocksOrder({ v1CloseOnly, existing: existingPositionSize, direction, size: positionSize });
+
   const submitDisabled =
+    v1Blocked ||
     accountPending ||
     sameOwnerOpenPending ||
     tradePhase !== "idle" ||
@@ -1383,6 +1392,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   return (
     <div className="relative p-3.5" data-testid="order-ticket" data-ticket-row={ticketState.row}>
       {openCloseToggle}
+      {v1CloseOnly && <V1CloseOnlyBanner />}
       {statusSlot && <div className="mb-3" data-testid="ticket-status-slot">{statusSlot}</div>}
       {/* Creator-only, self-hiding: the LP owner can drop the matcher's skew (lib/fix-pricing.ts). */}
       {ticketLimits.sameOwnerCloseOnly && !mockMode && (

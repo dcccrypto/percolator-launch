@@ -1,6 +1,10 @@
 "use client";
 
 import { baseSymbol } from "@/lib/symbol-utils";
+import { getConfig } from "@/lib/config";
+import { isMoveFlowEnabled } from "@/lib/v21/move/flag";
+import { isV1CloseOnly } from "@/lib/v21/move/ids";
+import { V1CloseOnlyBadge } from "@/components/move/V1CloseOnlyNotice";
 import { useEffect, useState, useMemo, useRef, Suspense } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -1016,6 +1020,7 @@ function MarketsPageInner() {
                   // from market metadata, otherwise SOL/USDC perps render as USDC/USD.
                   const displaySymbol = resolveMarketDisplaySymbol(m);
                   const displayName = resolveMarketDisplayName(m);
+                  const v1Label = isV1CloseOnly(getConfig().programId, isMoveFlowEnabled());
                   const logoMintAddress = resolveMarketLogoMintAddress(m);
                   const subtitleAddress = logoMintAddress || m.mintAddress;
 
@@ -1055,6 +1060,7 @@ function MarketsPageInner() {
                         <div className="min-w-0 flex-1">
                           <div className="flex items-baseline justify-between gap-2">
                             <span className="truncate text-sm font-semibold text-[var(--text)]">{displaySymbol ? `${baseSymbol(displaySymbol)}/USD` : shortenAddress(m.slabAddress)}</span>
+                            {v1Label && <V1CloseOnlyBadge />}
                             <span className="shrink-0 text-sm tabular-nums text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
                               <LiveRowPrice slab={m.slabAddress} fallback={lastPrice} />
                             </span>
@@ -1084,6 +1090,7 @@ function MarketsPageInner() {
                           <span className="min-w-0 truncate font-semibold text-[var(--text)] text-sm">
                             {displaySymbol ? `${baseSymbol(displaySymbol)}/USD` : shortenAddress(m.slabAddress)}
                           </span>
+                          {v1Label && <V1CloseOnlyBadge />}
                           {m.isAdminOracle && (
                             <span className="border border-[var(--text-dim)]/30 bg-[var(--text-dim)]/[0.08] px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider text-[var(--text-secondary)]">manual</span>
                           )}
