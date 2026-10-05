@@ -38,6 +38,8 @@ export interface MoveStep {
   line: string;
   /** Slots until a waiting step becomes ready. */
   waitSlots?: bigint;
+  /** settle-resolved only: where the hand-off goes (Earn page when the wallet holds Earn here, else the market page). */
+  handoff?: "earn" | "market";
 }
 
 export interface V1MarketSnapshot {
@@ -46,6 +48,8 @@ export interface V1MarketSnapshot {
   mint: string | null;
   collateralDecimals: number;
   resolved: boolean;
+  /** Slot from which a settled market's positions can be finished (resolved slot + force-close delay); null = unknown, 0 = no wait. */
+  settleOpensAtSlot?: bigint | null;
   /** null = the wallet has no portfolio on this market. */
   portfolio: null | {
     capital: bigint;
@@ -112,7 +116,15 @@ export function buildMarketPlan(m: V1MarketSnapshot, i: MoveInput): MarketPlan {
     // A settled market takes no trades, so there is nothing to close by trading. The position is
     // paid out by the resolved wind-down (CloseResolved), which the market's Earn page runs
     // ("Finish now"); a hand-off, never a trade. See lib/limits/resolved-exit.ts.
-    add("settle-resolved", "ready", "This market has settled, so it takes no more trades. Your position is paid out when the market is wound up: open it and choose Finish now.");
+    const opens = m.settleOpensAtSlot ?? null;
+    if (opens !== null && opens > i.nowSlot) {
+      const wait = opens - i.nowSlot;
+      add("settle-resolved", "waiting", `This market has settled, so it takes no more trades. Your position can be paid out in about ${slotsToDuration(wait)}. We will pick up here when you come back.`, wait);
+    } else if (earn) {
+      add("settle-resolved", "ready", "This market has settled, so it takes no more trades. Your position is paid out when the market is wound up: open its Earn page and choose Finish now.").handoff = "earn";
+    } else {
+      add("settle-resolved", "ready", "This market has settled, so it takes no more trades. You hold no Earn here, so open the market to see its status: once it is wound up, your payout goes to your wallet.").handoff = "market";
+    }
   } else if (pf && open) {
     add("close", "ready", pf.closeOnly
       ? "Close your position. Closing is always open, including while this market winds down."

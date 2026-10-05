@@ -30,6 +30,7 @@ import { humanizeError } from "@/lib/errorMessages";
 import { fetchPortfolioIdentity } from "@/lib/v18-wire";
 import { assertDepositWithinBalance, DepositExceedsBalanceError } from "@/lib/deposit-guard";
 import { readU64LE } from "@/lib/u64le";
+import { assertV1AllowsNewFunds } from "@/lib/v21/move/close-only";
 
 /** Shared discovery (lib/owner-portfolio.ts): `null` only when the scan found
  *  none; an RPC failure throws PortfolioLookupError instead of reading as "no
@@ -76,6 +77,9 @@ export function useInitUser(slabAddress: string) {
         // Defense-in-depth: refuse to build a tx whose programId is not in
         // our deployed allowlist. See SlabProvider.parseSlab for the primary gate.
         assertKnownProgram(slabProgramId);
+        // Move flow: account creation folds in a deposit (and exists only to trade), so on a v1
+        // close-only market the whole setup is refused. Wallets with an account are unaffected.
+        assertV1AllowsNewFunds(slabProgramId, "deposit");
 
         const programId = slabProgramId;
         const slabPk = new PublicKey(slabAddress);

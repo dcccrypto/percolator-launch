@@ -15,6 +15,7 @@ import {
 } from "@percolatorct/sdk";
 import { pickOwnerPortfolio, scanOwnerPortfolios } from "@/lib/owner-portfolio";
 import { decodeMarketEngineView, decodePortfolioLegs, decodeResolvedMarket } from "@/lib/limits/decode";
+import { ownerWindowEnd } from "@/lib/limits/resolved-exit";
 import { MARKET_MODE_RESOLVED } from "@/lib/limits/constants";
 import { releasedPnlFace } from "@/lib/convert-released-pnl";
 import { isCreatorFeeClaimAuthority, readCreatorFeeClaimable } from "@/lib/v17-creator-fee";
@@ -74,7 +75,9 @@ export async function scanMoveInput(a: ScanArgs): Promise<MoveInput> {
     const info = await a.connection.getAccountInfo(market, "confirmed");
     if (!info || !info.owner.equals(v1)) continue; // not a v1 market: never plan against it
     const raw = new Uint8Array(info.data);
-    const resolved = decodeResolvedMarket(raw)?.mode === MARKET_MODE_RESOLVED;
+    const rv = decodeResolvedMarket(raw);
+    const resolved = rv?.mode === MARKET_MODE_RESOLVED;
+    const settleOpensAtSlot = resolved && rv ? ownerWindowEnd(rv) : null;
     const engine = decodeMarketEngineView(raw);
     const closeOnly = deriveCloseOnlyState({ raw, engine, nowSlot, collateralDecimals: ref.collateralDecimals }).closeOnly;
     const p = await readPortfolio(a.connection, v1, market, a.wallet);
@@ -92,6 +95,7 @@ export async function scanMoveInput(a: ScanArgs): Promise<MoveInput> {
     markets.push({
       ...ref,
       resolved,
+      settleOpensAtSlot,
       portfolio: p
         ? { capital: BigInt(p.pf.capital), releasedPnl: releasedPnlFace(p.pf.pnl, p.pf.reservedPnl), openLegs: p.legs, closeOnly }
         : null,

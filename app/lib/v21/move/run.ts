@@ -59,9 +59,15 @@ export async function runMove(deps: RunDeps): Promise<{ stop: RunStop; plan: Mov
   let input = await deps.scan();
   let plan = buildMovePlan(input);
   let lastId: string | null = null;
+  // Hand-off-only steps (no executor) are skipped so later markets still get their close/withdraw;
+  // the first one is reported once nothing else is left to run.
+  const skipped = new Set<string>();
+  let firstHandoff: MoveAction | null = null;
+  const idOf = (a: MoveAction): string => `${a.slab}:${a.kinds.join("+")}`;
   for (let n = 0; n < max; n++) {
-    const action = nextActions(plan).filter((a) => deps.only?.(a) ?? true)[0];
+    const action = nextActions(plan).filter((a) => (deps.only?.(a) ?? true) && !skipped.has(idOf(a)))[0];
     if (!action) {
+      if (firstHandoff) return { stop: { reason: "handoff", action: firstHandoff }, plan, sent };
       const all = plan.markets.flatMap((m) => m.steps);
       const reason = all.length === 0 ? "nothing-to-move" : all.some((s) => s.status === "waiting") ? "waiting" : all.some((s) => s.status === "blocked") ? "blocked" : "complete";
       return { stop: { reason }, plan, sent };
@@ -70,7 +76,11 @@ export async function runMove(deps: RunDeps): Promise<{ stop: RunStop; plan: Mov
     if (id === lastId) return { stop: { reason: "no-progress", action }, plan, sent };
     guardAction(action, deps.v1Wrapper, deps.v21);
     const exec = deps.executors[action.kinds[0]];
-    if (!exec) return { stop: { reason: "handoff", action }, plan, sent };
+    if (!exec) {
+      skipped.add(id);
+      firstHandoff ??= action;
+      continue;
+    }
     try {
       const sig = await exec(action);
       if (sig !== null) {
