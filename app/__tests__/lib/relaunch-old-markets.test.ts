@@ -106,7 +106,7 @@ describe("relaunch: abandoned-wrapper markets are never listed", () => {
 
   it("[slab] route: both its on-chain fallback and its registry path refuse another program's slab", () => {
     const src = readFileSync(join(__dirname, "..", "..", "app", "api", "markets", "[slab]", "route.ts"), "utf8");
-    expect(src).toMatch(/info\.owner\.toBase58\(\) !== getConfig\(\)\.programId/);
+    expect(src).toMatch(/!isAcceptedWrapper\(info\.owner\.toBase58\(\)\)/);
     expect(src).toMatch(/slabOwnerIfReadable\(String\(data\.slab_address/);
   });
 

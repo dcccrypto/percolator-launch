@@ -2,6 +2,7 @@
  * RPC Configuration — uses server-side proxy by default, falls back to direct Helius for SSR.
  * Client-side code should use /api/rpc proxy to avoid exposing API keys.
  */
+import { dualWorldProgramIds } from "@/lib/v21/world-ids";
 import { MAINNET_PROGRAM_IDS, resolveDevnetProgramIds } from "@/lib/program-ids";
 
 export type Network = "mainnet" | "devnet";
@@ -238,6 +239,8 @@ export function getAllProgramIds(): string[] {
     Object.values(byTier).forEach((id) => { if (id) ids.add(id); });
   }
   if (cfg.network === "devnet") DEVNET_KNOWN_PROGRAM_IDS.forEach((id) => ids.add(id));
+  // Move-to-v2.1 (flagged): keep trusting the v1 world and add the v2.1 world after the cutover.
+  if (cfg.network === "devnet") dualWorldProgramIds().forEach((id) => ids.add(id));
   return [...ids];
 }
 

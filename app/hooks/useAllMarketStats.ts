@@ -4,7 +4,8 @@ import useSWR from "swr";
 import { isBlockedSlab } from "@/lib/blocklist";
 import type { Database } from "@/lib/database.types";
 
-export type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'];
+/** `world` is set by /api/markets only when the v2.1 Move flag is on (lib/v21/worlds.ts). */
+export type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'] & { world?: 'v1' | 'v21' };
 type MarketsApiResponse = {
   markets?: MarketWithStats[];
   error?: string;

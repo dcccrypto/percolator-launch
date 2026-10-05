@@ -3,9 +3,9 @@
  * Used by the in-app replacements of the retired percolator-api routes (/api/funding/:slab,
  * /api/insurance/:slab): they read the chain directly instead of proxying to a dead service.
  */
+import { isAcceptedWrapper } from "@/lib/v21/worlds";
 import { PublicKey } from "@solana/web3.js";
 import { isV17Account } from "@percolatorct/sdk";
-import { getConfig } from "@/lib/config";
 import { getServerConnection } from "@/lib/server-rpc";
 
 export type SlabRead =
@@ -22,7 +22,7 @@ export async function readCurrentWrapperSlab(slab: string): Promise<SlabRead> {
   } catch {
     return { ok: false, reason: "rpc" };
   }
-  if (!info || info.owner.toBase58() !== getConfig().programId) return { ok: false, reason: "not-found" };
+  if (!info || !isAcceptedWrapper(info.owner.toBase58())) return { ok: false, reason: "not-found" };
   const data = new Uint8Array(info.data);
   if (!isV17Account(data)) return { ok: false, reason: "not-found" };
   return { ok: true, data };
