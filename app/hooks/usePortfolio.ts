@@ -20,6 +20,7 @@ import {
 } from "@percolatorct/sdk";
 import { isSentinelValue } from "@/lib/health";
 import { isLpPortfolio } from "@/lib/userAccountScan";
+import { compareBase58 } from "@/lib/owner-portfolio";
 import { type EntryPriceSource } from "@/lib/trading";
 import { parseV17RiskParams } from "@/lib/v17-engine-config";
 import {
@@ -1007,7 +1008,8 @@ export async function fetchPortfolioSnapshot(
         if (!slab) continue;
         const pk = pubkey.toBase58();
         const cur = primaryPkByMarket.get(slab);
-        if (!cur || pk < cur) primaryPkByMarket.set(slab, pk);
+        // The SAME code-unit comparator the scan store / dock use (owner-portfolio.ts).
+        if (!cur || compareBase58(pk, cur) < 0) primaryPkByMarket.set(slab, pk);
       } catch {
         /* unparseable account — skip, same isolation as the main loop */
       }
