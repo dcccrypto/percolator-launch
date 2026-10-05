@@ -63,16 +63,27 @@ function readRecord(storageKey: string): EntryRecord | null {
 
 /**
  * Resolve a record for (slab, idx, wallet, portfolio): the portfolio-scoped key
- * first, then — only when a portfolio was requested — the legacy portfolio-less
- * key, so entries written before #2560 still resolve for that wallet's primary
- * portfolio. A portfolio opened after #2560 always has its own scoped record
- * (written at open), so it never falls through to another portfolio's legacy
- * entry.
+ * first, then — only when a portfolio was requested AND `allowLegacyFallback` —
+ * the legacy portfolio-less key, so entries written before #2560 still resolve
+ * for that wallet's PRIMARY portfolio.
+ *
+ * The legacy key holds the primary's entry (the write side is unscoped until
+ * C5), so the fallback is correct ONLY for the primary. A caller reading a
+ * NON-primary (isolated) portfolio must pass `allowLegacyFallback = false`, or
+ * it would read the primary's entry for the isolated position. A portfolio
+ * opened after the write side is scoped has its own scoped record and never
+ * needs the fallback anyway.
  */
-function resolveRecord(slab: string, accountIdx: number, wallet?: string, portfolio?: string): EntryRecord | null {
+function resolveRecord(
+  slab: string,
+  accountIdx: number,
+  wallet?: string,
+  portfolio?: string,
+  allowLegacyFallback = true,
+): EntryRecord | null {
   const scoped = readRecord(key(slab, accountIdx, wallet, portfolio));
   if (scoped) return scoped;
-  if (wallet && portfolio) return readRecord(key(slab, accountIdx, wallet));
+  if (wallet && portfolio && allowLegacyFallback) return readRecord(key(slab, accountIdx, wallet));
   return null;
 }
 
@@ -97,10 +108,17 @@ export function saveEntryPrice(
   }
 }
 
-/** Read saved entry price. Returns 0n if not found. */
-export function getEntryPrice(slab: string, accountIdx: number, wallet?: string, portfolio?: string): bigint {
+/** Read saved entry price. Returns 0n if not found. `allowLegacyFallback` must
+ *  be false when reading a NON-primary (isolated) portfolio — see resolveRecord. */
+export function getEntryPrice(
+  slab: string,
+  accountIdx: number,
+  wallet?: string,
+  portfolio?: string,
+  allowLegacyFallback = true,
+): bigint {
   try {
-    const record = resolveRecord(slab, accountIdx, wallet, portfolio);
+    const record = resolveRecord(slab, accountIdx, wallet, portfolio, allowLegacyFallback);
     if (!record) return 0n;
     const value = BigInt(record.entryPriceE6);
     // Defense-in-depth: a corrupted or hand-edited localStorage entry could
@@ -115,8 +133,14 @@ export function getEntryPrice(slab: string, accountIdx: number, wallet?: string,
 }
 
 /** Read saved UI-selected order leverage. Returns null if not found. */
-export function getEntryLeverage(slab: string, accountIdx: number, wallet?: string, portfolio?: string): number | null {
-  const record = resolveRecord(slab, accountIdx, wallet, portfolio);
+export function getEntryLeverage(
+  slab: string,
+  accountIdx: number,
+  wallet?: string,
+  portfolio?: string,
+  allowLegacyFallback = true,
+): number | null {
+  const record = resolveRecord(slab, accountIdx, wallet, portfolio, allowLegacyFallback);
   if (!record) return null;
   return typeof record.leverage === "number" && Number.isFinite(record.leverage) && record.leverage > 0
     ? record.leverage

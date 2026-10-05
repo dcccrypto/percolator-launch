@@ -111,6 +111,20 @@ describe("entry-price per-portfolio scoping (#2560 — isolated margin)", () => 
     expect(getEntryPrice(SLAB, 0, WALLET)).toBe(777n); // still there
   });
 
+  it("a NON-primary (isolated) read must NOT fall back to the primary's legacy entry (allowLegacyFallback=false)", () => {
+    // Only the primary's entry exists, written the legacy way (as OrderTicket does today).
+    saveEntryPrice(SLAB, 0, 777n, 3, WALLET);
+    // Primary row allows the fallback → reads 777.
+    expect(getEntryPrice(SLAB, 0, WALLET, PF_A, true)).toBe(777n);
+    expect(getEntryLeverage(SLAB, 0, WALLET, PF_A, true)).toBe(3);
+    // Isolated row forbids it → 0n, never the primary's entry.
+    expect(getEntryPrice(SLAB, 0, WALLET, PF_B, false)).toBe(0n);
+    expect(getEntryLeverage(SLAB, 0, WALLET, PF_B, false)).toBeNull();
+    // Its own scoped entry still resolves regardless of the flag.
+    saveEntryPrice(SLAB, 0, 555n, 10, WALLET, PF_B);
+    expect(getEntryPrice(SLAB, 0, WALLET, PF_B, false)).toBe(555n);
+  });
+
   it("callers that pass no portfolio behave exactly as before (byte-identical key)", () => {
     saveEntryPrice(SLAB, 0, 123n, 2, WALLET);
     // Same (slab, idx, wallet) read with no portfolio resolves the legacy key.
