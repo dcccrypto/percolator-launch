@@ -2,7 +2,7 @@
 
 import { STAKE_COPY, cooldownDuration } from "@/lib/stake-copy";
 import { useStakeCooldown } from "@/hooks/useStakeCooldown";
-import { useEffect, useState, useCallback, useSyncExternalStore, type CSSProperties } from "react";
+import { useEffect, useId, useState, useCallback, useSyncExternalStore, type CSSProperties } from "react";
 import { DEVNET_PROGRAM_IDS } from "@/lib/program-ids";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
@@ -609,6 +609,8 @@ function DepositWidget({
 }) {
   const { connected, publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
+  // Label ↔ field ids (the page also renders inside /earn, so no fixed ids).
+  const fieldId = useId();
   const [amount, setAmount] = useState("");
   const [walletBalanceRaw, setWalletBalanceRaw] = useState<bigint | null>(null);
   const [balanceDecimals, setBalanceDecimals] = useState(6);
@@ -827,8 +829,9 @@ function DepositWidget({
 
         {/* Pool selector — shared between Deposit and Withdraw modes */}
         <div>
-          <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Select Pool</label>
+          <label htmlFor={`${fieldId}-pool`} className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Select Pool</label>
           <select
+            id={`${fieldId}-pool`}
             value={selectedPool}
             onChange={(e) => { setSelectedPool(e.target.value); setTxStatus(null); setWithdrawTxStatus(null); }}
             className="w-full border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2.5 text-[13px] text-[var(--text)] outline-none transition-colors focus:border-[var(--accent)]/50"
@@ -845,7 +848,7 @@ function DepositWidget({
             {/* Amount input */}
             <div>
               <div className="mb-1.5 flex items-center justify-between">
-                <label className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Amount</label>
+                <label htmlFor={`${fieldId}-deposit`} className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Amount</label>
                 {connected && walletBalance !== null && (
                   <button
                     type="button"
@@ -860,6 +863,7 @@ function DepositWidget({
               </div>
               <div className="flex gap-2">
                 <input
+                  id={`${fieldId}-deposit`}
                   type="number"
                   data-testid="stake-deposit-input"
                   value={amount}
@@ -973,7 +977,7 @@ function DepositWidget({
             {/* Withdraw amount input */}
             <div>
               <div className="mb-1.5 flex items-center justify-between">
-                <label className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Amount</label>
+                <label htmlFor={`${fieldId}-withdraw`} className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Amount</label>
                 {connected && withdrawPosition && (
                   <button
                     type="button"
@@ -988,6 +992,7 @@ function DepositWidget({
               </div>
               <div className="flex gap-2">
                 <input
+                  id={`${fieldId}-withdraw`}
                   type="number"
                   data-testid="stake-withdraw-input"
                   value={withdrawAmount}

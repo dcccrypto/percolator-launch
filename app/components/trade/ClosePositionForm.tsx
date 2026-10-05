@@ -1,6 +1,6 @@
 "use client";
 
-import { FC, useMemo, useState } from "react";
+import { FC, useId, useMemo, useState } from "react";
 import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
 import { computeMarkPnl, computeMarkPnlCollateral, clampClosePercent, UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
 
@@ -93,6 +93,8 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
   submitTitle,
   onSubmitIntent,
 }) => {
+  // The form can render in the inline close panel and the modal, so no fixed id.
+  const sliderId = useId();
   const [percent, setPercent] = useState(100);
   const updatePercent = (value: number) => setPercent(clampClosePercent(value));
   const isModal = variant === "modal";
@@ -191,10 +193,11 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
       {/* Percentage slider */}
       <div className="mb-4">
         <div className="mb-1.5 flex items-center justify-between">
-          <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Close Amount</label>
+          <label htmlFor={sliderId} className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Close Amount</label>
           <span className="text-[11px] font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{percent}%</span>
         </div>
         <input
+          id={sliderId}
           type="range"
           data-testid="close-percent-input"
           min={1}
