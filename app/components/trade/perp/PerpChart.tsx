@@ -107,6 +107,7 @@ function PerpChartInner({ slabAddress }: Props) {
 
   const [status, setStatus] = useState<"loading" | "ready" | "empty" | "error">("loading");
   const [proxyBefore, setProxyBefore] = useState<number | null>(null);
+  const [proxyFrom, setProxyFrom] = useState<number | null>(null);
   // Any bar on screen sourced from GeckoTerminal / CoinGecko (pre-launch history): attribution is then mandatory.
   const [usesDex, setUsesDex] = useState(false);
   // Off-screen liquidation indicator (same behaviour as TradingChart's, #3102): price lines are not part of
@@ -273,6 +274,7 @@ function PerpChartInner({ slabAddress }: Props) {
         if (cancelled) return;
         noMore = page.noMoreHistory;
         setProxyBefore(series === "mark" ? page.proxyBeforeSec ?? null : null);
+        setProxyFrom(series === "mark" ? page.proxyFromSec ?? null : null);
         if (page.dexThroughSec != null) setUsesDex(true);
         setAll(page.bars);
         setLastPrice(page.bars.length ? page.bars[page.bars.length - 1].close : null);
@@ -409,7 +411,10 @@ function PerpChartInner({ slabAddress }: Props) {
           <div className="absolute bottom-7 left-2 flex max-w-[70%] flex-col gap-0.5 rounded-sm bg-[var(--bg)]/80 px-1.5 py-0.5 text-[9px] text-[var(--text-muted)]">
             {series === "mark" && proxyBefore !== null && (
               <span className="pointer-events-none">
-                Before {new Date(proxyBefore * 1000).toLocaleDateString()}: DEX pool price (no mark existed yet)
+                {proxyFrom !== null
+                  ? `${new Date(proxyFrom * 1000).toLocaleDateString()} to ${new Date(proxyBefore * 1000).toLocaleDateString()}`
+                  : `Before ${new Date(proxyBefore * 1000).toLocaleDateString()}`}
+                : pool price where no mark was recorded
               </span>
             )}
             {usesDex && (

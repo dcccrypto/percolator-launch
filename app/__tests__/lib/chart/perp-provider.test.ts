@@ -32,9 +32,10 @@ const json = (body: unknown, status = 200) => ({ ok: status >= 200 && status < 3
 
 describe("parsePerpHistory", () => {
   it("maps t/o/h/l/c to bars, sorts, drops junk, passes the proxy marker", () => {
-    const r = parsePerpHistory({ bars: [{ t: 120, o: 2, h: 2, l: 2, c: 2 }, { t: 60, o: 1, h: 1, l: 1, c: 1 }, { t: 180, o: 0, h: 1, l: 1, c: 1 }, null], proxyBeforeSec: 120, noMoreHistory: true });
+    const r = parsePerpHistory({ bars: [{ t: 120, o: 2, h: 2, l: 2, c: 2 }, { t: 60, o: 1, h: 1, l: 1, c: 1 }, { t: 180, o: 0, h: 1, l: 1, c: 1 }, null], proxyBeforeSec: 120, proxyFromSec: 60, noMoreHistory: true });
     expect(r.bars.map((b) => b.timeSec)).toEqual([60, 120]);
     expect(r.proxyBeforeSec).toBe(120);
+    expect(r.proxyFromSec).toBe(60);
     expect(r.noMoreHistory).toBe(true);
     expect(() => parsePerpHistory(null)).toThrow();
   });
