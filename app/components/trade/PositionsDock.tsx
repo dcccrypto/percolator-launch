@@ -29,7 +29,9 @@
 
 import { computeMarginCushion, severityFromCushion } from "@/lib/liquidation-risk";
 import { FC, memo, useMemo, useState } from "react";
-import { useUserAccount, useUserAccountScanPending } from "@/hooks/useUserAccount";
+import { useUserAccount, useUserAccountScanPending, useOwnerMarketPortfolios } from "@/hooks/useUserAccount";
+import type { UserAccountInfo } from "@/lib/userAccountScan";
+import { computePositionRowView } from "@/lib/position-row-view";
 import { useNftWrappedPosition } from "@/hooks/useNftWrappedPosition";
 import { PositionNftMenu, ClosedPositionNftNotice, NFT_MENU_COPY } from "@/components/trade/PositionNftMenu";
 import { useClosePosition } from "@/hooks/useClosePosition";
@@ -610,6 +612,275 @@ function DockTabs({ tabs, children }: { tabs: string[]; children: React.ReactNod
 }
 
 /**
+ * #2560 isolated margin: one <tr> per portfolio for the MULTI-portfolio case.
+ * Rendered by MultiPositionTable (2+ portfolios) only — the single-portfolio
+ * path still uses PositionRow above UNCHANGED, so today's UI is byte-identical.
+ * Every number comes from the shared pure helper computePositionRowView (the
+ * SAME derivation PositionRow uses inline), threaded with this portfolio's
+ * pubkey so each row reads its own cached entry.
+ *
+ * Positions listed here are always directly-owned: a wrapped (NFT-escrowed)
+ * portfolio's mutable owner moves to the escrow PDA, so it never matches the
+ * owner scan behind useOwnerMarketPortfolios — hence no NFT-wrap handling here.
+ */
+const PositionTableRow: FC<{ slabAddress: string; info: UserAccountInfo; isPrimary: boolean }> = memo(
+  function PositionTableRow({ slabAddress, info, isPrimary }) {
+    const config = useMarketConfig();
+    const { accounts, config: mktConfig, params, adlFactors, wrapperConfigV17 } = useSlabState();
+    const { engine, insuranceBalance } = useEngineState();
+    const { priceE6: livePriceE6, priceUsd } = useLivePrice();
+    const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
+    const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
+    const collateralSymbol = sanitizeSymbol(tokenMeta?.symbol, mintAddress);
+    const { market: marketInfo } = useMarketInfo(slabAddress);
+    const symbol = marketInfo?.symbol ?? collateralSymbol;
+    const decimals = tokenMeta?.decimals ?? 6;
+    const marketLimits = useMarketLimits(slabAddress);
+    const marketDisplaySymbol = symbol.replace(/-PERP$/i, "");
+    const { closePosition, loading: closeLoading, error: closeError, prewarmClose, resetPhase } = useClosePosition(slabAddress);
+    const fillCaps = useMarketFillCap(slabAddress);
+    const markFlash = usePriceFlash(livePriceE6 ?? null);
+    const { level: oracleLevel, mode: oracleMode, ready: oracleReady } = useOracleFreshness();
+    const oracleUnavailable = oracleLevel === "unavailable";
+    const oracleStale = oracleUnavailable || isOracleStaleBlocking(oracleLevel, oracleMode, oracleReady);
+    const { engineStale } = useEngineFreshness();
+    const closeBlockedByStaleness = oracleStale || engineStale;
+    const [showCloseModal, setShowCloseModal] = useState(false);
+
+    const lpEntry = useMemo(() => accounts.find(({ account }) => account.kind === AccountKind.LP) ?? null, [accounts]);
+    const lpUnderfunded = lpEntry !== null && lpEntry.account.capital === 0n;
+
+    const account = info.account;
+    const portfolioPk = info.pubkey;
+    const view = computePositionRowView({
+      account,
+      accountIdx: info.idx,
+      slabAddress,
+      portfolio: portfolioPk?.toBase58(),
+      isPrimary,
+      config,
+      adlApplicable: wrapperConfigV17 !== null,
+      adlFactors,
+      livePriceE6,
+      maintenanceMarginBps: params?.maintenanceMarginBps,
+      initialMarginBps: params?.initialMarginBps,
+      engineVault: engine?.vault,
+      insuranceBalance,
+      decimals,
+      marketInfo,
+      marketDisplaySymbol,
+    });
+
+    const handleConfirmClose = async (percent: number) => {
+      try {
+        await closePosition(percent, portfolioPk);
+        setShowCloseModal(false);
+      } catch {
+        /* error surfaced via hook state below */
+      }
+    };
+
+    return (
+      <>
+        <tr data-testid="position-row" className="border-b border-[var(--border)]/20 transition-colors hover:bg-[var(--accent)]/[0.03]">
+          <td className="whitespace-nowrap px-4 py-2.5 text-left"><span className="text-[11px] font-medium text-[var(--text)]">{marketDisplaySymbol}/USD</span></td>
+          <td className="whitespace-nowrap px-3 py-2.5 text-left">
+            <span
+              className={`inline-block rounded-sm border px-1.5 py-0.5 text-[8.5px] font-bold uppercase tracking-[0.06em] ${isPrimary ? "border-[var(--border)] text-[var(--text-secondary)]" : "border-[var(--accent)]/40 bg-[var(--accent)]/[0.07] text-[var(--accent)]"}`}
+              title={isPrimary ? "Cross — shares your main account's collateral" : "Isolated — its own portfolio and margin; losses can't touch your other positions"}
+            >
+              {isPrimary ? "Cross" : "Isolated"}
+            </span>
+          </td>
+          <td className="whitespace-nowrap px-3 py-2.5 text-left">
+            <span className={`inline-block rounded-sm px-1.5 py-0.5 text-[9px] font-bold uppercase ${view.isLong ? "bg-[var(--long)]/10 text-[var(--long)]" : "bg-[var(--short)]/10 text-[var(--short)]"}`}>
+              {view.isLong ? "LONG" : "SHORT"}
+            </span>
+          </td>
+          <td className="whitespace-nowrap px-3 py-2.5 text-right" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+            <span className="text-[var(--text)]">{formatTokenAmount(view.absPosition, decimals)}</span>
+            <span className="ml-1 text-[var(--text-secondary)]">{symbol}</span>
+            {view.wasDeleveraged && (
+              <span className="ml-1 inline-block rounded-sm bg-[var(--short)]/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--short)]" title={adlReductionTooltip(view.absNominal, view.absPosition, view.adlRemaining, decimals, symbol)}>ADL</span>
+            )}
+            {info.provisional && (
+              <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)]/60 animate-pulse align-middle" title="Size reflects your confirmed trade — balance is still settling" />
+            )}
+          </td>
+          <td className={`whitespace-nowrap px-3 py-2.5 text-right ${view.leverage.known ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }} title={view.leverage.title} data-testid="position-leverage">
+            {view.leverage.text}
+          </td>
+          <td className={`whitespace-nowrap px-3 py-2.5 text-right ${view.pnlIsKnown ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+            {view.entryKnown ? formatUsdPriceE6(view.entryPriceE6) : (
+              <span className="inline-flex items-center justify-end gap-1">--<InfoIcon tooltip={UNKNOWN_ENTRY_TOOLTIP} /></span>
+            )}
+          </td>
+          <td className={`whitespace-nowrap px-3 py-2.5 text-right transition-colors duration-300 ease-out ${view.hasValidMark ? (markFlash === "up" ? "text-[var(--long)]" : markFlash === "down" ? "text-[var(--short)]" : "text-[var(--text)]") : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+            {view.hasValidMark ? formatUsdPriceE6(view.currentPriceE6) : "--"}
+          </td>
+          <td data-testid="position-liq" className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${view.liqPriceColor}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+            <LiqPriceValue display={view.liqDisplay} />
+          </td>
+          <td className={`whitespace-nowrap px-3 py-2.5 text-right ${view.hasValidMark && view.pnlIsKnown ? view.pnlColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+            {!view.pnlIsKnown ? (
+              <span className="inline-flex items-center justify-end gap-1">--<InfoIcon tooltip={UNKNOWN_ENTRY_TOOLTIP} /></span>
+            ) : view.hasValidMark ? (
+              <>
+                <div className="flex items-center justify-end gap-1">
+                  {formatPnl(view.pnlTokens, decimals)} {collateralSymbol}
+                  {view.isEstimate && <span className="text-[9px] font-normal text-[var(--text-dim)]" title={DERIVED_ENTRY_TOOLTIP}>{ESTIMATE_LABEL}</span>}
+                  {view.pnlIsCapped && (
+                    <InfoIcon tooltip={`Vault + insurance can currently pay up to ${formatTokenAmount(view.payableCapacity, decimals)} ${collateralSymbol} of profit on this market. Your paper PnL exceeds that — payout may be capped at close, same as any pool-backed perp.`} />
+                  )}
+                </div>
+                {view.pnlUsd !== null && (
+                  <div className="text-[9px]">{view.pnlTokens > 0n ? "+" : view.pnlTokens < 0n ? "-" : ""}${Math.abs(view.pnlUsd).toFixed(2)}</div>
+                )}
+              </>
+            ) : (
+              <span>--</span>
+            )}
+          </td>
+          <td className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${view.hasValidMark && view.pnlIsKnown ? view.roeColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+            {view.hasValidMark && view.pnlIsKnown ? formatPercent(view.roe) : "--"}
+          </td>
+          <td className="sticky right-0 z-10 has-[[role=menu]]:z-30 whitespace-nowrap border-l border-[var(--border)]/30 bg-[var(--panel-bg)] px-3 py-2.5 text-right">
+            <span className="inline-flex items-center justify-end gap-1">
+              <PnlShareButton
+                data={view.pnlCardData}
+                label="Share PnL"
+                className="rounded-none border border-[var(--accent)]/30 px-3 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--accent)] transition-colors duration-150 hover:bg-[var(--accent)]/8 hover:border-[var(--accent)]/50"
+              />
+              <button
+                onClick={() => { resetPhase(); prewarmClose(); setShowCloseModal(true); }}
+                data-testid="position-close"
+                disabled={closeLoading || lpUnderfunded || !view.hasValidMark || engineStale}
+                title={!view.hasValidMark ? "Waiting for price data…" : engineStale ? "Prices are catching up. Closing resumes once the market has caught up." : undefined}
+                className="rounded-none border border-[var(--short)]/30 px-3 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-colors duration-150 hover:bg-[var(--short)]/8 hover:border-[var(--short)]/50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Close
+              </button>
+            </span>
+          </td>
+        </tr>
+        {marketLimits.flags.p3 && (
+          <tr data-testid="limits-position-row" className="border-b border-[var(--border)]/20">
+            <td colSpan={99} className="px-4 pb-2">
+              <PositionLimitsRow
+                limits={marketLimits}
+                positionQ={view.effectiveSize}
+                priceE6={view.currentPriceE6}
+                marginAboveMaintAtoms={account.capital - (view.absPosition * view.currentPriceE6 * view.maintenanceBps) / 1_000_000n / 10_000n}
+                decimals={decimals}
+                collateralSymbol={collateralSymbol}
+              />
+            </td>
+          </tr>
+        )}
+        {(closeError || showCloseModal) && (
+          <tr>
+            <td colSpan={99} className="p-0">
+              {closeError && (
+                <div data-testid="position-close-error" className="mx-4 mb-3 mt-2 rounded-none border border-[var(--short)]/20 bg-[var(--short)]/5 px-3 py-2">
+                  <p className="text-[10px] text-[var(--short)]">{closeError}</p>
+                </div>
+              )}
+              {showCloseModal && (
+                <ClosePositionModal
+                  positionSize={view.effectiveSize}
+                  previewUnavailable={!view.adlKnown}
+                  entryPrice={view.pnlIsKnown ? view.entryPriceE6 : 0n}
+                  currentPrice={view.currentPriceE6}
+                  capital={account.capital}
+                  symbol={symbol}
+                  collateralSymbol={collateralSymbol}
+                  decimals={decimals}
+                  priceUsd={priceUsd}
+                  isLong={view.isLong}
+                  loading={closeLoading}
+                  error={closeError}
+                  tradingFeeBps={params?.tradingFeeBps}
+                  oracleStale={closeBlockedByStaleness}
+                  maxFillAbs={fillCaps?.maxFillAbs ?? null}
+                  onConfirm={handleConfirmClose}
+                  onCancel={() => setShowCloseModal(false)}
+                />
+              )}
+            </td>
+          </tr>
+        )}
+      </>
+    );
+  },
+);
+
+/**
+ * #2560: the MULTI-portfolio positions table (2+ portfolios on this market) —
+ * one row per portfolio, Hyperliquid/Phoenix style, with a Cross/Isolated mode
+ * badge. The lowest-pubkey portfolio (infos[0]) is the Cross/main account; the
+ * rest are Isolated. Only mounted when a wallet actually holds 2+ portfolios;
+ * the single-portfolio case renders PositionRow (unchanged) instead.
+ */
+const MultiPositionTable: FC<{ slabAddress: string; infos: readonly UserAccountInfo[] }> = ({ slabAddress, infos }) => {
+  const { accounts } = useSlabState();
+  const { engineStale } = useEngineFreshness();
+  const lpEntry = useMemo(() => accounts.find(({ account }) => account.kind === AccountKind.LP) ?? null, [accounts]);
+  const lpUnderfunded = lpEntry !== null && lpEntry.account.capital === 0n;
+  return (
+    <div>
+      {lpUnderfunded && (
+        <div className="border-b border-[var(--warning)]/20 bg-[var(--warning)]/5 px-4 py-1.5 text-center">
+          <span className="text-[9px] font-medium uppercase tracking-[0.12em] text-[var(--warning)]">Low liquidity</span>
+        </div>
+      )}
+      {engineStale && (
+        <div className="border-b border-[var(--warning)]/20 bg-[var(--warning)]/5 px-4 py-1.5 text-center">
+          <span className="text-[9px] font-medium uppercase tracking-[0.12em] text-[var(--text-secondary)]">Catching up with the latest prices</span>
+        </div>
+      )}
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-[10px]">
+          <thead>
+            <tr className="border-b border-[var(--border)]/30 text-[8px] uppercase tracking-[0.15em] text-[var(--text)]">
+              <th className="whitespace-nowrap px-4 py-2 text-left font-medium">Market</th>
+              <th className="whitespace-nowrap px-3 py-2 text-left font-medium">Mode</th>
+              <th className="whitespace-nowrap px-3 py-2 text-left font-medium">Side</th>
+              <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Size</th>
+              <th className="whitespace-nowrap px-3 py-2 text-right font-medium">
+                <span className="inline-flex items-center justify-end gap-1">{POSITION_LEVERAGE_LABEL}<InfoIcon tooltip={POSITION_LEVERAGE_TITLE} /></span>
+              </th>
+              <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Entry</th>
+              <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Mark</th>
+              <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Liq. Price</th>
+              <th className="whitespace-nowrap px-3 py-2 text-right font-medium">PnL</th>
+              <th className="whitespace-nowrap px-3 py-2 text-right font-medium">ROE%</th>
+              <th className="sticky right-0 z-20 whitespace-nowrap border-l border-[var(--border)]/30 bg-[var(--panel-bg)] px-3 py-2 text-right font-medium">Close</th>
+            </tr>
+          </thead>
+          <tbody>
+            {infos.map((info, i) => (
+              <PositionTableRow key={info.pubkey?.toBase58() ?? `pf-${i}`} slabAddress={slabAddress} info={info} isPrimary={i === 0} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * #2560: chooses the single-portfolio PositionRow (today's UI, untouched) or the
+ * multi-portfolio table based on how many portfolios the wallet owns on this
+ * market. The scan that backs useOwnerMarketPortfolios is the SAME one
+ * PositionRow's useUserAccount already triggers, so this adds no RPC.
+ */
+const ThisMarketPositions: FC<{ slabAddress: string }> = ({ slabAddress }) => {
+  const infos = useOwnerMarketPortfolios();
+  if (infos.length > 1) return <MultiPositionTable slabAddress={slabAddress} infos={infos} />;
+  return <PositionRow slabAddress={slabAddress} />;
+};
+
+/**
  * Phase 5 (trade-terminal rebuild): PositionsDock. Memoized so a parent
  * re-render (TradePageInner) doesn't cascade in — same technique validated
  * on TradingChart in Phase 2. Safe because its only prop is a stable string.
@@ -634,7 +905,7 @@ const PositionsDockInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           </span>
         </div>
         <RenderProfiler id="PositionRow">
-          <PositionRow slabAddress={slabAddress} />
+          <ThisMarketPositions slabAddress={slabAddress} />
         </RenderProfiler>
         <OtherMarketPositions currentSlab={slabAddress} />
       </div>
