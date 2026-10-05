@@ -22,9 +22,10 @@ describe("useClosePosition isolated rent reclaim (C7)", () => {
     expect(SRC).toMatch(/closePercent: number, targetPortfolioPk\?: PublicKey, reclaimOnClose\?: boolean/);
   });
 
-  it("reclaims only when asked, for a named portfolio, and only when it is empty", () => {
+  it("reclaims only when asked, for a named portfolio, and only when THIS wallet owns an empty account", () => {
     expect(SRC).toMatch(/if \(reclaimOnClose && targetPortfolioPk\)/);
-    expect(SRC).toMatch(/parsed\.capital === 0n && !parsed\.legs\.some\(\(l\) => l\.active\)/);
+    // defense-in-depth: owner re-verify AND empty (capital 0, no active leg)
+    expect(SRC).toMatch(/parsed\.owner\.equals\(owner\) && parsed\.capital === 0n && !parsed\.legs\.some\(\(l\) => l\.active\)/);
   });
 
   it("builds the tag-8 ClosePortfolio ix via the shared encoder and sim-gates the send", () => {

@@ -584,8 +584,13 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
                   const pd = await readFreshPortfolioData(connection, programId, slabAddress, owner, targetPortfolioPk);
                   if (pd) {
                     const parsed = parsePortfolioV17(pd);
-                    const isEmpty = parsed.capital === 0n && !parsed.legs.some((l) => l.active);
-                    if (isEmpty) {
+                    // Defense-in-depth (C7 review): only reclaim an account THIS
+                    // wallet owns AND that is actually empty — mirrors the
+                    // pre-close owner re-verify and the proven resolved-cleanup
+                    // path. (targetPortfolioPk is already pinned, and on-chain
+                    // tag 8 requires signer==owner; this just fails fast.)
+                    const reclaimable = parsed.owner.equals(owner) && parsed.capital === 0n && !parsed.legs.some((l) => l.active);
+                    if (reclaimable) {
                       const id = readPortfolioIdentity(new Uint8Array(pd));
                       // Wire (own-portfolio-cleanup.ts): tag 8 [closer(s,w), market(w), portfolio(w)].
                       const closeIx = new TransactionInstruction({
