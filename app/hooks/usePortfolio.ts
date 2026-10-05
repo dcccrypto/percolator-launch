@@ -458,6 +458,14 @@ export function buildV17Position(
    * resolves its legacy entry, while isolated portfolios hit their own scoped key.
    */
   portfolioPubkey?: string,
+  /**
+   * #2560: true only for the CROSS/primary portfolio (the lowest-base58 pubkey
+   * for this wallet+market). Gates the legacy (unscoped) entry fallback, exactly
+   * like the dock's PositionTableRow — so an ISOLATED row never resolves the
+   * cross portfolio's legacy entry on a scoped miss (e.g. a cross-device open),
+   * it shows "unknown" instead. Defaults true → single-portfolio unchanged.
+   */
+  isPrimaryPortfolio = true,
 ): PortfolioPosition {
   // v17 markets return an empty `market.config` from the SDK — the real
   // collateral mint lives in `market.configV17` (see markets/page.tsx's
@@ -537,7 +545,7 @@ export function buildV17Position(
   //    to collateral; ROE divides by the leg's own initial margin.
   // `unknown` entry => the placeholder 0 below is NOT a flat reading; display
   // sites gate on `entryPriceSource` / `pnlKnown`.
-  const knownEntries = lookupKnownEntries(slabAddrStr, 0, walletStr, portfolioPubkey);
+  const knownEntries = lookupKnownEntries(slabAddrStr, 0, walletStr, portfolioPubkey, isPrimaryPortfolio);
   const pnlResult = computePositionPnl({
     basisQ: positionSize,
     aBasis,
@@ -981,6 +989,31 @@ export async function fetchPortfolioSnapshot(
   // not by market: InitPortfolio has no per-(market, owner) uniqueness, so after
   // wrapping a position a wallet can own a fresh portfolio on that same market,
   // and both must be listed.
+  // #2560: the CROSS/primary portfolio per market is the lowest-base58 pubkey.
+  // Only it may use the legacy (unscoped) entry fallback; isolated rows must not
+  // (they'd otherwise resolve the cross entry on a scoped miss, e.g. a position
+  // opened on another device). Computed over the directly-owned portfolios; the
+  // NFT-wrapped pass below keeps the default (fallback on) so a wrapped CROSS
+  // position still resolves its legacy entry.
+  const primaryPkByMarket = new Map<string, string>();
+  for (const portfolioResults of scanResults) {
+    for (const { pubkey, account: portAcct } of portfolioResults) {
+      try {
+        const d = portAcct.data instanceof Buffer ? portAcct.data : Buffer.from(portAcct.data);
+        if (isLpPortfolio(d)) continue;
+        const pf = parsePortfolioV17(d);
+        if (!pf.owner.equals(publicKey)) continue;
+        const slab = pf.marketGroupId?.toBase58();
+        if (!slab) continue;
+        const pk = pubkey.toBase58();
+        const cur = primaryPkByMarket.get(slab);
+        if (!cur || pk < cur) primaryPkByMarket.set(slab, pk);
+      } catch {
+        /* unparseable account — skip, same isolation as the main loop */
+      }
+    }
+  }
+
   const seenPortfolios = new Set<string>();
   for (const portfolioResults of scanResults) {
     for (const { pubkey, account: portAcct } of portfolioResults) {
@@ -1022,6 +1055,7 @@ export async function fetchPortfolioSnapshot(
           pkStr,
           meta.adlFactors,
           pubkey.toBase58(), // #2560: this portfolio's own entry (isolated-aware)
+          pubkey.toBase58() === primaryPkByMarket.get(slabAddrStr), // isPrimary → legacy fallback only for the cross account
         );
 
         if (liveLiquidationSeverity(pos, null) !== "safe") {

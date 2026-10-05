@@ -445,7 +445,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const existingPositionSize = userAccount?.account.positionSize ?? 0n;
   const rawExistingEntryPrice = userAccount?.account.entryPrice ?? 0n;
   const cachedExistingEntryPrice = userAccount && rawExistingEntryPrice === 0n
-    ? getEntryPrice(slabAddress, userAccount.idx, publicKey?.toBase58())
+    // #2560: the displayed (primary) portfolio's own entry; legacy fallback (default) covers a cross primary.
+    ? getEntryPrice(slabAddress, userAccount.idx, publicKey?.toBase58(), userAccount.pubkey?.toBase58())
     : 0n;
   // E: guard the sentinel BEFORE it feeds estimateEntryFromPnl's math — same
   // fix as PositionsDock/usePortfolio's identical call sites (an unguarded
@@ -476,6 +477,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         account: userAccount.account,
         slabAddress,
         accountIdx: userAccount.idx,
+        // #2560: the displayed (primary) portfolio's own entry; legacy fallback (default) covers a cross primary.
+        portfolio: userAccount.pubkey?.toBase58(),
         adlFactors: slabAdlFactors,
         adlApplicable: slabWrapperV17 !== null,
         markE6: livePriceE6 ?? 0n,
