@@ -138,6 +138,22 @@ export function balanceMaxQ(balanceAtoms: bigint, leverage: number, priceE6: big
   return (balanceAtoms * lev100 * 1_000_000n) / (100n * priceE6);
 }
 
+/** One cent in USD atoms (6 dp): the smallest step the ticket's USD size and Max can show. */
+export const MIN_SIDE_ROOM_USD_ATOMS = 10_000n;
+
+/**
+ * The LP's room on a side counts as FULL (the side is paused) when it is 0 or worth less than
+ * one cent at `priceE6`. A sub-cent room is not an order the ticket can express: the USD Max
+ * reads "$0.00" and the clamp floors the size to "0.00". null = unknown room (not full).
+ * Without a price only an exact 0 is full (the ticket is waiting for a price anyway).
+ */
+export function sideRoomIsFull(roomQ: bigint | null, priceE6: bigint | null | undefined): boolean {
+  if (roomQ === null) return false;
+  if (roomQ <= 0n) return true;
+  if (!priceE6 || priceE6 <= 0n) return false;
+  return (roomQ * priceE6) / 1_000_000n < MIN_SIDE_ROOM_USD_ATOMS;
+}
+
 /** The Max figure in the input's unit: "41.88 SOL" (≤ 4 dp) or "$3,750.00" (2 dp, floored). */
 export function maxInUnit(q: bigint, unit: "token" | "usd", priceE6: bigint, baseSymbol: string): string {
   if (unit === "token") {

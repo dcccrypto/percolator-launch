@@ -91,7 +91,7 @@ import { FEE_LEGS, legPercent, splitFeeAtoms } from "@/lib/fee-breakdown";
 import { useMarketLimits } from "@/hooks/useMarketLimits";
 import { closeLimitNotice, deriveTicketLimits, feeFitSizeQ, sizeQToInput, type TicketLimitsInput } from "@/lib/limits/ticket";
 import { sameOwnerRoomQ } from "@/lib/limits/risk-limits";
-import { balanceMaxQ, deriveTicketState, maxInUnit, oneMaxQ, type TicketRow } from "@/lib/limits/ticket-state";
+import { balanceMaxQ, deriveTicketState, maxInUnit, oneMaxQ, sideRoomIsFull, type TicketRow } from "@/lib/limits/ticket-state";
 import { publishTicketRow } from "@/lib/limits/ticket-status-store";
 import { fmtQ } from "@/lib/limits/format";
 import { takeFillResult } from "@/lib/limits/fill-check";
@@ -843,16 +843,20 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const marketMaxQFor = (side: "long" | "short") =>
     oneMaxQ([ticketLimits.sideLimits?.[side]?.maxQ, fillCapQ, legacySideCapQ(side)]);
   const marketMaxQ = marketMaxQFor(direction);
+  // A sub-cent room is full too: it can't be expressed as an order ("Max $0.00"), and clamping
+  // to it rewrote the size to "0.00" on every keystroke instead of saying the side is paused.
   const sidePaused = {
-    long: ticketLimits.halted.long || legacySideCapQ("long") === 0n,
-    short: ticketLimits.halted.short || legacySideCapQ("short") === 0n,
+    long: ticketLimits.halted.long || sideRoomIsFull(legacySideCapQ("long"), livePriceE6),
+    short: ticketLimits.halted.short || sideRoomIsFull(legacySideCapQ("short"), livePriceE6),
   };
   // The Max the trader sees (and the Max chip fills): the market's cap or what the balance can
   // margin at this leverage, whichever is smaller, in the input's unit.
   const displayMaxQ = oneMaxQ([marketMaxQ, balanceMaxQ(tradableBalance, leverage, livePriceE6)]);
 
   // Row 9 (AUTO): over the max, the size is reduced to it and the helper says so for 4 s.
-  const clampTarget = marketMaxQ !== null && marketMaxQ > 0n && positionSize > marketMaxQ ? marketMaxQ : null;
+  // Never on a paused side: there is nothing to reduce to, and the paused label says why.
+  const clampTarget =
+    !sidePaused[direction] && marketMaxQ !== null && marketMaxQ > 0n && positionSize > marketMaxQ ? marketMaxQ : null;
   useEffect(() => {
     if (clampTarget === null || !livePriceE6 || livePriceE6 <= 0n) return;
     applySize(sizeQToInput(clampTarget, sizeUnit, livePriceE6));
