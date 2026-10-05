@@ -18,7 +18,8 @@ import { Keypair, Transaction, VersionedTransaction } from "@solana/web3.js";
 import { ed25519 } from "@noble/curves/ed25519";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 import _bs58 from "bs58";
-import { assertValidatedLaunchMessage, type ValidatedLaunchMessage } from "@/lib/launch-single-tx/cosign-validate";
+// The dependency-free brand module, not the validator: every route holding this signer loads this file.
+import { assertValidatedLaunchMessage, type ValidatedLaunchMessage } from "@/lib/launch-single-tx/validated-launch-message";
 
 const bs58: { encode(buf: Uint8Array): string; decode(str: string): Uint8Array } = _bs58 as any;
 

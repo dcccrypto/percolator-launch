@@ -50,7 +50,7 @@ export function liveSingleTxDeps(a: {
   const { connection } = a;
   return {
     // lib/tx-v1/rpc: a JSON-RPC format rejection keeps its code (V1RpcError); a transport failure never
-    // looks like one (the SDK's default sendV1 goes through sendRawTransaction, which drops the code).
+    // looks like one (V1TransportError; the SDK's default sendV1 passes a network failure through untyped).
     simulate: (wire) => simulateV1ViaProxy(connection, wire),
     keeperSign: (message) => requestKeeperV1Signature(a.cosign, message),
     walletSign: async (wire) => {

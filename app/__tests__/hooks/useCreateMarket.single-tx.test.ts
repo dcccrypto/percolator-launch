@@ -90,6 +90,7 @@ import {
   ValidatedLaunchMessage,
 } from "@/lib/launch-single-tx/cosign-validate";
 import { SINGLE_TX_COMPUTE_UNITS, SINGLE_TX_LOADED_ACCOUNTS_BYTES } from "@/lib/launch-single-tx/run";
+import { claimValidatedLaunchMessageMinter } from "@/lib/launch-single-tx/validated-launch-message";
 import { PRIORITY_FEE_MAX_MICRO_LAMPORTS } from "@/lib/tx";
 import { MAX_PRIORITY_FEE_LAMPORTS, priorityFeeLamportsFromMicroPerCu } from "@/lib/v21/sdk";
 import { requirePlaygroundKeeperSigner } from "@/lib/playground-keeper-signer";
@@ -770,6 +771,8 @@ describe("keeper-cosign route: v1 validation", () => {
     expect(() => signer.signMessageBytes(Object.create(ValidatedLaunchMessage.prototype) as ValidatedLaunchMessage)).toThrow(/not a validated launch message/);
     expect(() => signer.signMessageBytes({ bytes: () => good, nowSlot: 1n, blockhash: "x" } as unknown as ValidatedLaunchMessage)).toThrow(/not a validated launch message/);
     expect(() => new ValidatedLaunchMessage(Symbol("forged") as never, good, 1n, "x")).toThrow(/only be created by/);
+    // the minter is claim-once and the validator already holds it: no other module can mint
+    expect(() => claimValidatedLaunchMessageMinter()).toThrow(/already claimed/);
     // the cosign route still works (positive control) and its signature verifies
     const r = await post(good);
     expect(r.status).toBe(200);

@@ -29,6 +29,7 @@
  */
 import bs58 from "bs58";
 import { decodeV1Message, V1DecodeError } from "./v1-decode";
+import { ValidatedLaunchMessage, assertValidatedLaunchMessage, claimValidatedLaunchMessageMinter } from "./validated-launch-message";
 import {
   classifyLaunchIx,
   configureAuthMarkNowSlot,
@@ -147,38 +148,10 @@ export function validateKeeperCosignV1(i: CosignV1Input): CosignV1Verdict {
 // L-4: the ONLY bytes the keeper signer will sign raw
 // ---------------------------------------------------------------------------
 
-/** Module-private: nothing outside this file can construct or register a ValidatedLaunchMessage. */
-const MINT_TOKEN: unique symbol = Symbol("ValidatedLaunchMessage.mint");
-const MINTED = new WeakSet<object>();
+/** Claimed at load: this module is the only minter (validated-launch-message.ts, claim-once). */
+const mintValidatedLaunchMessage = claimValidatedLaunchMessageMinter();
 
-/**
- * A v1 launch message that passed {@link validateKeeperCosignV1} AND the blockhash freshness check. Holds a
- * private copy of the bytes (a caller mutating its buffer after validation cannot change what is signed).
- * Branded twice: nominally (the `#bytes` private field) and at run time (a module-private WeakSet).
- */
-export class ValidatedLaunchMessage {
-  readonly #bytes: Uint8Array;
-  readonly nowSlot: bigint;
-  readonly blockhash: string;
-  constructor(token: typeof MINT_TOKEN, bytes: Uint8Array, nowSlot: bigint, blockhash: string) {
-    if (token !== MINT_TOKEN) throw new Error("a ValidatedLaunchMessage can only be created by the keeper co-sign validator");
-    this.#bytes = Uint8Array.from(bytes);
-    this.nowSlot = nowSlot;
-    this.blockhash = blockhash;
-    MINTED.add(this);
-  }
-  /** A copy of the validated message bytes. */
-  bytes(): Uint8Array {
-    return Uint8Array.from(this.#bytes);
-  }
-}
-
-/** Throws unless `m` was produced by {@link authorizeKeeperCosignV1} in this process. */
-export function assertValidatedLaunchMessage(m: unknown): asserts m is ValidatedLaunchMessage {
-  if (typeof m !== "object" || m === null || !MINTED.has(m) || !(m instanceof ValidatedLaunchMessage)) {
-    throw new Error("refusing to sign: not a validated launch message");
-  }
-}
+export { ValidatedLaunchMessage, assertValidatedLaunchMessage };
 
 export type CosignV1Authorization = { ok: true; message: ValidatedLaunchMessage } | { ok: false; reason: string };
 
@@ -197,5 +170,5 @@ export async function authorizeKeeperCosignV1(
   if (!(await i.isBlockhashValid(verdict.blockhash))) {
     return { ok: false, reason: `the message lifetime ${verdict.blockhash} is not a recent valid blockhash` };
   }
-  return { ok: true, message: new ValidatedLaunchMessage(MINT_TOKEN, i.message, verdict.nowSlot, verdict.blockhash) };
+  return { ok: true, message: mintValidatedLaunchMessage(i.message, verdict.nowSlot, verdict.blockhash) };
 }
