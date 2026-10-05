@@ -22,6 +22,20 @@ describe("MovePlanView", () => {
     expect(screen.getByTestId("move-countdown")).toHaveTextContent(/remaining/);
     expect(screen.queryByTestId("move-open-earn-execute")).toBeNull();
   });
+  it("in-place steps get a Do it button that runs just that step; deposits stay links; the last error shows", () => {
+    const plan = buildMovePlan(input([market({ portfolio: { capital: 5n, releasedPnl: 0n, openLegs: 1, closeOnly: false } })]));
+    const onRunStep = vi.fn();
+    render(<MovePlanView plan={plan} summary={summarizePlan(plan)} v21Live running={false} hrefFor={() => "/x"} onRun={() => {}} onRunStep={onRunStep} error="Nothing was sent." onRescan={() => {}} />);
+    screen.getByTestId("move-do-close").click();
+    expect(onRunStep).toHaveBeenCalledWith(expect.objectContaining({ kind: "close", slab: SOL_SLAB }));
+    expect(screen.queryByTestId("move-open-close")).toBeNull();
+    expect(screen.getByTestId("move-run-error")).toHaveTextContent("Nothing was sent.");
+  });
+  it("a running run disables the step button", () => {
+    const plan = buildMovePlan(input([market({ portfolio: { capital: 5n, releasedPnl: 0n, openLegs: 1, closeOnly: false } })]));
+    render(<MovePlanView plan={plan} summary={summarizePlan(plan)} v21Live running hrefFor={() => "/x"} onRun={() => {}} onRunStep={() => {}} onRescan={() => {}} />);
+    expect(screen.getByTestId("move-do-close")).toBeDisabled();
+  });
   it("says v2.1 is not open yet when it is not live", () => {
     const plan = buildMovePlan(input([market()], { v21Live: false }));
     render(<MovePlanView plan={plan} summary={summarizePlan(plan)} v21Live={false} running={false} hrefFor={() => "/"} onRun={() => {}} onRescan={() => {}} />);

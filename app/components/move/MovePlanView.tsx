@@ -15,8 +15,14 @@ export interface MovePlanViewProps {
   /** Where the market's own flow lives for a handed-off step. */
   hrefFor: (step: MoveStep) => string;
   onRun: () => void;
+  /** Run just this step in place (close, withdraw, Earn request / collect, creator fees). */
+  onRunStep?: (step: MoveStep) => void;
+  /** Calm reason the last run stopped on an error. */
+  error?: string | null;
   onRescan: () => void;
 }
+
+const IN_PLACE: readonly MoveStep["kind"][] = ["close", "withdraw", "earn-request", "earn-execute", "claim-creator-fee"];
 
 const dot: Record<MoveStep["status"], string> = {
   done: "bg-[var(--long)]",
@@ -27,7 +33,7 @@ const dot: Record<MoveStep["status"], string> = {
   skipped: "bg-[var(--text-dim)]",
 };
 
-export const MovePlanView: FC<MovePlanViewProps> = ({ plan, summary, v21Live, running, hrefFor, onRun, onRescan }) => (
+export const MovePlanView: FC<MovePlanViewProps> = ({ plan, summary, v21Live, running, hrefFor, onRun, onRunStep, error, onRescan }) => (
   <div data-testid="move-plan" className="space-y-4">
     <p className="text-[12px] text-[var(--text-secondary)]" data-testid="move-summary">{MOVE_COPY.summary[summary]}</p>
     {!v21Live && <p className="text-[11px] text-[var(--text-dim)]" data-testid="move-not-live">{MOVE_COPY.notLive}</p>}
@@ -46,7 +52,10 @@ export const MovePlanView: FC<MovePlanViewProps> = ({ plan, summary, v21Live, ru
                   <span className="block text-[var(--text-dim)]" data-testid="move-countdown">{slotsToDuration(s.waitSlots)} remaining. {MOVE_COPY.whyEarnWait}</span>
                 )}
               </span>
-              {s.status === "ready" && (
+              {s.status === "ready" && onRunStep && IN_PLACE.includes(s.kind) && (
+                <button type="button" disabled={running} onClick={() => onRunStep(s)} className="border border-[var(--border)] px-2 py-1 text-[10px] uppercase tracking-[0.1em] hover:border-[var(--accent)] disabled:opacity-50" data-testid={`move-do-${s.kind}`}>{running ? MOVE_COPY.working : MOVE_COPY.doStep}</button>
+              )}
+              {s.status === "ready" && !(onRunStep && IN_PLACE.includes(s.kind)) && (
                 <Link href={hrefFor(s)} className="border border-[var(--border)] px-2 py-1 text-[10px] uppercase tracking-[0.1em] hover:border-[var(--accent)]" data-testid={`move-open-${s.kind}`}>{MOVE_COPY.doIt}</Link>
               )}
             </li>
@@ -54,6 +63,7 @@ export const MovePlanView: FC<MovePlanViewProps> = ({ plan, summary, v21Live, ru
         </ol>
       </section>
     ))}
+    {error && <p role="alert" className="text-[11px] text-[var(--text-secondary)]" data-testid="move-run-error">{error}</p>}
     <div className="flex gap-2">
       <button type="button" onClick={onRun} disabled={running || summary !== "ready"} className="border border-[var(--border)] px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.1em] hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50" data-testid="move-run">{MOVE_COPY.runReady}</button>
       <button type="button" onClick={onRescan} className="px-3 py-1.5 text-[10px] uppercase tracking-[0.1em] text-[var(--text-dim)]" data-testid="move-rescan">{MOVE_COPY.rescan}</button>

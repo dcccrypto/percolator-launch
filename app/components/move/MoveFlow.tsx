@@ -5,6 +5,7 @@ import { MOVE_COPY } from "@/lib/v21/move/copy";
 import { useMoveFlow, stepHref } from "@/hooks/useMoveFlow";
 import { MovePlanView } from "./MovePlanView";
 import { successorFor } from "@/lib/v21/move/successors";
+import { MarketExecutorHost } from "./MarketExecutorHost";
 
 export const MoveFlow: FC = () => {
   const f = useMoveFlow();
@@ -27,6 +28,8 @@ export const MoveFlow: FC = () => {
           return stepHref(s.kind, s.slab, successorFor(f.successors, null, sym)?.v21Slab ?? null);
         }}
         onRun={() => void f.run()}
+        onRunStep={(s) => void f.run({ slab: s.slab, kind: s.kind })}
+        error={f.lastError}
         onRescan={() => void f.rescan()}
       />
     );
@@ -36,6 +39,7 @@ export const MoveFlow: FC = () => {
       <h1 className="text-lg font-medium text-[var(--text)]">{MOVE_COPY.title}</h1>
       <p className="mb-5 mt-1 text-[12px] text-[var(--text-secondary)]">{MOVE_COPY.intro}</p>
       <div className="text-[12px] text-[var(--text-secondary)]">{body}</div>
+      {f.hostSlab && <MarketExecutorHost slab={f.hostSlab} onBridge={f.onBridge} />}
     </main>
   );
 };

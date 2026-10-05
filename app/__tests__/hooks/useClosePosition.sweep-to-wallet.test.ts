@@ -131,6 +131,15 @@ describe("useClosePosition — a FULL close moves the freed USDC back to the wal
     await vi.waitFor(() => expect(mocks.toast).toHaveBeenCalledWith(expect.stringMatching(/back in your wallet/), "success"));
   });
 
+  it("Move flow: skipSweep closes without the background withdraw (the Move withdraw step owns it)", async () => {
+    const { result } = renderHook(() => useClosePosition(slabAddress));
+    let r: Awaited<ReturnType<typeof result.current.closePosition>> | undefined;
+    await act(async () => { r = await result.current.closePosition(100, { skipSweep: true }); });
+    expect(r?.signature).toBe("close-sig");
+    await new Promise((res) => setTimeout(res, 300));
+    expect(mocks.withdraw).not.toHaveBeenCalled();
+  });
+
   it("CONTROL: Close 50% never withdraws", async () => {
     const { result } = renderHook(() => useClosePosition(slabAddress));
     await act(async () => { await result.current.closePosition(50); });

@@ -39,6 +39,8 @@ export const MOVE_COPY = {
     skipped: "Skipped",
   } as Record<StepStatus, string>,
   doIt: "Open",
+  doStep: "Do it",
+  working: "Working...",
   runReady: "Do the next step",
   rescan: "Refresh",
 } as const;
