@@ -1,4 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
+import { LiqEdgeChip } from "@/components/trade/LiqEdgeChip";
+import type { LiqEdge } from "@/lib/tv/liqEdge";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({
@@ -54,7 +57,19 @@ beforeEach(() => {
   m.widgets = 0;
 });
 
-const mount = () => render(<div style={{ position: "relative" }}><TvChart slabAddress="S" mode="desktop" overlayPrefs={m.prefs} onFailure={() => {}} /></div>);
+// The chip is drawn by the CALLER in its chrome strip (a sibling of the chart area), fed by onLiqEdge.
+function Host() {
+  const [o, setO] = useState<{ edge: LiqEdge; price: number | null }>({ edge: null, price: null });
+  return (
+    <div>
+      <div data-testid="chrome"><LiqEdgeChip edge={o.edge} price={o.price} /></div>
+      <div style={{ position: "relative" }}>
+        <TvChart slabAddress="S" mode="desktop" overlayPrefs={m.prefs} onFailure={() => {}} onLiqEdge={(edge, price) => setO({ edge, price })} />
+      </div>
+    </div>
+  );
+}
+const mount = () => render(<Host />);
 const chip = () => screen.queryByTestId("liq-edge-chip");
 const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 450)); });
 
@@ -71,7 +86,11 @@ describe("TradingView off-screen liquidation chip", () => {
     mount();
     await waitFor(() => expect(chip()).not.toBeNull());
     expect(chip()!.textContent).toContain("↑");
-    expect(chip()!.className).toContain("top-2");
+    expect(chip()!.getAttribute("data-edge")).toBe("above");
+    // placed in the chrome strip, never inside / over the iframe's area
+    expect(screen.getByTestId("chrome").contains(chip())).toBe(true);
+    expect(screen.getByTestId("tv-chart").contains(chip())).toBe(false);
+    expect(screen.getByTestId("tv-chart").parentElement!.contains(chip())).toBe(false);
   });
   it("NEGATIVE CONTROLS: liq in view, no liq, overlay off, or no price range yet -> no chip", async () => {
     m.lines.liq = 0.0035;

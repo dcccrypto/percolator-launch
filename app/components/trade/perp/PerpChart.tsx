@@ -37,6 +37,7 @@ import { perpPricePrecision, formatPerpPrice } from "@/lib/chart/precision";
 import { liqEdgeFromCoordinate } from "@/lib/chart-liq-edge";
 import { ESTIMATE_LABEL } from "@/lib/entry-price-display";
 import type { PerpSeries } from "@/lib/chart/perp-types";
+import { LiqEdgeChip } from "../LiqEdgeChip";
 import { ChartDisplayMenu } from "../ChartDisplayMenu";
 import { ChartPnlBadge } from "../ChartPnlBadge";
 import { DraggableChartBadges, PositionSummary } from "../ChartBadges";
@@ -372,10 +373,12 @@ function PerpChartInner({ slabAddress }: Props) {
   const liveState: LiveState = ageMs === null ? "offline" : ageMs > OFFLINE_AFTER_MS ? "offline" : ageMs > DELAYED_AFTER_MS ? "delayed" : "live";
 
   return (
-    <div className="flex h-[clamp(380px,60svh,620px)] w-full flex-col rounded-sm lg:h-full border border-[var(--border)] bg-[var(--panel-bg)]" data-testid="perp-chart">
+    <div className="flex h-[clamp(460px,68svh,700px)] w-full flex-col rounded-sm lg:h-full border border-[var(--border)] bg-[var(--panel-bg)]" data-testid="perp-chart">
       <PerpChartHeader price={lastPrice} stats={stats} live={liveState} ageSec={ageMs === null ? null : ageMs / 1000} seriesLabel={SERIES_LABEL[series]} />
       <div className="flex items-center gap-2 border-y border-[var(--border)] px-2 py-1">
         <PerpSeriesToggle value={series} onChange={(s) => seriesStore.set(s)} />
+        {/* Off-screen liq indicator lives in the chrome strip, not over the chart area. */}
+        <LiqEdgeChip edge={liqEdge} price={overlayPrefs.liq ? liqPriceRef.current : null} />
         <div className="flex min-w-0 flex-1 gap-0.5 overflow-x-auto [scrollbar-width:none]" role="tablist" aria-label="Timeframe">
           {RESOLUTIONS.map((r) => (
             <button
@@ -421,23 +424,6 @@ function PerpChartInner({ slabAddress }: Props) {
                 Powered by CoinGecko
               </a>
             )}
-          </div>
-        )}
-        {liqPriceRef.current != null && liqEdge && (
-          <div
-            data-testid="liq-edge-chip"
-            className={[
-              "pointer-events-none absolute left-1/2 z-10 flex -translate-x-1/2 items-center gap-1",
-              "whitespace-nowrap rounded-none border border-[var(--short)]/50 bg-[var(--bg)]/90",
-              "px-1.5 py-0.5 font-mono text-[9px] font-semibold shadow-sm backdrop-blur-sm",
-              liqEdge === "above" ? "top-2" : "bottom-8",
-            ].join(" ")}
-            aria-hidden="true"
-            title={`Liquidation price ${formatPerpPrice(liqPriceRef.current)} is off the ${liqEdge === "above" ? "top" : "bottom"} of the chart — scroll the price axis to see the line`}
-          >
-            <span className="uppercase tracking-[0.1em] text-[var(--short)]">Liq</span>
-            <span className="text-[var(--short)]">{liqEdge === "above" ? "↑" : "↓"}</span>
-            <span className="text-[var(--text)]">{formatPerpPrice(liqPriceRef.current)}</span>
           </div>
         )}
         <DraggableChartBadges>

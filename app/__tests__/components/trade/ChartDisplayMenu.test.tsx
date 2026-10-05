@@ -114,13 +114,11 @@ describe("ChartDisplayMenu", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("hides the popup container from assistive tech when closed", () => {
-    const { container } = render(<ChartDisplayMenu prefs={allOn} onToggle={() => {}} />);
-    const popup = container.querySelector('div[aria-hidden="true"]');
-    expect(popup).not.toBeNull();
-
+  it("renders no popup at all while closed (nothing exposed to assistive tech), and a portaled one when open", () => {
+    render(<ChartDisplayMenu prefs={allOn} onToggle={() => {}} />);
+    expect(screen.queryByTestId("chart-display-menu")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Display/i }));
-    expect(container.querySelector('div[aria-hidden="true"]')).toBeNull();
+    expect(screen.getByTestId("chart-display-menu")).toBeInTheDocument();
   });
 
   it("flips toggle-row tabIndex between 0 (open) and -1 (closed)", () => {

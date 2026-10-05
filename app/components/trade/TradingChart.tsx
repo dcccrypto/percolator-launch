@@ -1376,9 +1376,9 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
             capped below it. Mobile keeps a fixed 45svh (no grid row to fill
             there — the mobile layout is a stacked flex column). */}
         {/* Mobile height is CLAMPED so the chart can't overrun a small screen
-            or collapse on a short one (min 300px, prefers 45svh, caps at
-            540px); desktop fills the grid's clamped Chart row via lg:h-full. */}
-        <div ref={containerRef} className="w-full h-[clamp(300px,45svh,540px)] lg:h-full" />
+            or collapse on a short one (min 400px, prefers 60svh, caps at
+            640px); desktop fills the grid's clamped Chart row via lg:h-full. */}
+        <div ref={containerRef} className="w-full h-[clamp(400px,60svh,640px)] lg:h-full" />
 
         {/* Box-zoom drag selection: translucent rectangle shown while the
             user drags with "drag to zoom" toggled on (useChartZoomControls

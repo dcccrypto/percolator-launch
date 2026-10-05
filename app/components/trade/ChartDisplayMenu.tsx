@@ -1,6 +1,7 @@
 "use client";
 
-import { FC, useState, useRef, useEffect, useCallback } from "react";
+import { FC, useState, useRef, useEffect, useCallback, useLayoutEffect, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import {
   OVERLAY_LABELS,
   OVERLAY_DISPLAY_ORDER,
@@ -13,9 +14,27 @@ interface ChartDisplayMenuProps {
   onToggle: (key: OverlayKey, value: boolean) => void;
 }
 
+const MENU_GAP = 4;
+const VIEWPORT_MARGIN = 8;
+
+/** Fixed-position style that right-aligns the popup to its trigger (opens leftward) and keeps it inside the
+ *  viewport. Pure so it is testable. */
+export function displayMenuPosition(
+  trigger: { top: number; bottom: number; left: number; right: number },
+  viewport: { width: number },
+): CSSProperties {
+  const right = Math.max(VIEWPORT_MARGIN, viewport.width - trigger.right);
+  return { position: "fixed", top: trigger.bottom + MENU_GAP, right, maxWidth: viewport.width - VIEWPORT_MARGIN * 2 };
+}
+
 /** Click-driven popup that exposes an ON/OFF toggle for each chart overlay
  *  in OVERLAY_DISPLAY_ORDER (Avg Entry price, Liquidation price, Live PnL).
  *  Sits next to ChartStyleMenu in the chart toolbar.
+ *
+ *  The popup is PORTALED to document.body (position: fixed, right-aligned to the trigger) so the chart
+ *  container's `overflow-hidden` / paint containment and the order panel can never clip it, and it opens
+ *  leftward because the trigger sits at the chart's right edge. z-[70]: above the chart chrome, the sticky
+ *  market bar (z-30) and bottom nav (z-50), below the full-screen sheet (z-[100]) and app modals (z-[9999]).
  *
  *  Closes on outside click and Escape. The trigger label is static ("Display")
  *  rather than reflecting state — counting "3 of 3 enabled" in the trigger
@@ -31,6 +50,25 @@ interface ChartDisplayMenuProps {
 export const ChartDisplayMenu: FC<ChartDisplayMenuProps> = ({ prefs, onToggle }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
+  const [style, setStyle] = useState<CSSProperties>({});
+
+  const place = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    setStyle(displayMenuPosition(el.getBoundingClientRect(), { width: document.documentElement.clientWidth }));
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [open, place]);
 
   const handleToggle = useCallback(
     (key: OverlayKey) => {
@@ -51,7 +89,8 @@ export const ChartDisplayMenu: FC<ChartDisplayMenuProps> = ({ prefs, onToggle })
   useEffect(() => {
     if (!open) return;
     const onClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (ref.current && !ref.current.contains(t) && !popupRef.current?.contains(t)) setOpen(false);
     };
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
@@ -90,16 +129,12 @@ export const ChartDisplayMenu: FC<ChartDisplayMenuProps> = ({ prefs, onToggle })
         </svg>
       </button>
 
+      {open && typeof document !== "undefined" && createPortal(
       <div
-        aria-hidden={!open || undefined}
-        className={[
-          // z-[60] so the dropdown sits above the sticky MarketInfoBar (z-30)
-          // and MobileBottomNav (z-50) — matching the sibling ChartIndicatorMenu.
-          // At z-20 it was painting behind the sticky market bar when the chart
-          // header scrolled up beneath it on mobile.
-          "absolute left-0 top-full z-[60] mt-1 min-w-[200px] rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] py-1 shadow-[0_8px_32px_rgba(0,0,0,0.48)] transition-opacity duration-[120ms] ease-out",
-          open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
-        ].join(" ")}
+        ref={popupRef}
+        data-testid="chart-display-menu"
+        style={style}
+        className="z-[70] min-w-[200px] rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] py-1 shadow-[0_8px_32px_rgba(0,0,0,0.48)]"
       >
         {OVERLAY_DISPLAY_ORDER.map((key) => {
           const enabled = prefs[key];
@@ -108,8 +143,7 @@ export const ChartDisplayMenu: FC<ChartDisplayMenuProps> = ({ prefs, onToggle })
               key={key}
               type="button"
               aria-pressed={enabled}
-              tabIndex={open ? 0 : -1}
-              onClick={() => handleToggle(key)}
+                            onClick={() => handleToggle(key)}
               className={[
                 // Row hover bg matches the ChartStyleMenu (Line) options
                 // so every dropdown in the chart toolbar uses the same
@@ -141,7 +175,9 @@ export const ChartDisplayMenu: FC<ChartDisplayMenuProps> = ({ prefs, onToggle })
             </button>
           );
         })}
-      </div>
+      </div>,
+      document.body,
+      )}
     </div>
   );
 };

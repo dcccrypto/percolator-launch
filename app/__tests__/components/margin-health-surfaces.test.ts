@@ -65,6 +65,8 @@ const EXEMPT: Record<string, string> = {
     "Draws a price LINE only when a real price exists (useLiqPrice is null for the covered case, so there is no '—'/'∞' to explain); its title does not carry health (the line is moved in place per keeper push, #2990). #2634 item 3.",
   "components/trade/tv/TvChart.tsx":
     "TradingView twin of TradingChart's Liq line: a locked horizontal LINE drawn only when a real price exists AND pnlKnown (usePositionLinePrices -> null for the covered case and for unknown PnL; desiredLines skips null/<=0), same premise as the TradingChart exemption.",
+  "components/trade/LiqEdgeChip.tsx":
+    "The off-screen 'LIQ up/down x' chip: shown only for a real, positive price that is off the visible range (the callers pass null for the covered / unknown-PnL case), so there is no '—'/'∞' to explain. Same premise as the chart Liq-line exemptions.",
   "components/trade/perp/PerpChart.tsx":
     "The perp-standard chart's Liq line: a LINE drawn only when a real price exists (usePositionLinePrices -> null for the covered case; setLine removes the line for null/<=0), same premise as the TradingChart exemption. It renders no '—'/'∞' text for describeLiqPrice to explain.",
 };

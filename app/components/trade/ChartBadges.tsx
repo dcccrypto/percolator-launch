@@ -47,9 +47,9 @@ export function PositionSummary({ slabAddress }: PositionSummaryProps) {
  *
  *  Pointer events (not mouse) so touch dragging works; the container uses
  *  touch-none while dragging targets it so the browser doesn't hijack the
- *  gesture for scrolling. Children keep their own pointer handlers (none —
+ *  gesture for scrolling. `hidden` hides the stack while a TradingView popup is open. Children keep their own pointer handlers (none —
  *  the badges are display-only), so a drag can start anywhere on the stack. */
-export function DraggableChartBadges({ children }: { children: React.ReactNode }) {
+export function DraggableChartBadges({ children, hidden = false }: { children: React.ReactNode; hidden?: boolean }) {
   const elRef = useRef<HTMLDivElement | null>(null);
   // null → default CSS position (top-right). Set on first drag.
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
@@ -94,7 +94,11 @@ export function DraggableChartBadges({ children }: { children: React.ReactNode }
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
       title="Drag to move"
-      className="absolute z-10 flex cursor-grab touch-none select-none flex-col items-end gap-1 active:cursor-grabbing"
+      data-testid="chart-badges"
+      data-hidden={hidden || undefined}
+      // `hidden`: a TradingView dialog / menu is open inside the iframe, which no z-index of ours can outrank.
+      // invisible keeps the stack mounted (drag position survives) but draws nothing and takes no pointer.
+      className={`absolute z-10 flex cursor-grab touch-none select-none flex-col items-end gap-1 active:cursor-grabbing${hidden ? " invisible pointer-events-none" : ""}`}
       style={pos ? { left: pos.x, top: pos.y } : { top: 8, right: 8 }}
     >
       {children}

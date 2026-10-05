@@ -18,6 +18,8 @@ import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import type { BarSource } from "@/lib/tv/data/provider";
 import type { TvResolution } from "@/lib/tv/types";
 import { ChartDisplayMenu } from "../ChartDisplayMenu";
+import { LiqEdgeChip } from "../LiqEdgeChip";
+import type { LiqEdge } from "@/lib/tv/liqEdge";
 import { ChartPnlBadge } from "../ChartPnlBadge";
 import { DraggableChartBadges, PositionSummary } from "../ChartBadges";
 import { TvChart, type TvChartHandle } from "./TvChart";
@@ -96,6 +98,9 @@ function FullscreenSheet({
   onFailure(reason: string): void;
 }) {
   const showBadges = badgePrefs.position || badgePrefs.pnl;
+  const [liqOff, setLiqOff] = useState<{ edge: LiqEdge; price: number | null }>({ edge: null, price: null });
+  const [tvPopup, setTvPopup] = useState(false);
+  const onLiqEdge = useCallback((edge: LiqEdge, price: number | null) => setLiqOff({ edge, price }), []);
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -117,7 +122,8 @@ function FullscreenSheet({
       className="fixed inset-0 z-[100] flex flex-col bg-[var(--panel-bg)]"
       style={{ height: "100svh" }}
     >
-      <div className="flex shrink-0 items-center justify-end border-b border-[var(--border)] px-2 py-1.5">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border)] px-2 py-1.5">
+        <LiqEdgeChip edge={liqOff.edge} price={liqOff.price} />
         <button
           type="button"
           onClick={onClose}
@@ -133,12 +139,14 @@ function FullscreenSheet({
           slabAddress={slabAddress}
           series={series}
           mode="fullscreen"
+          onLiqEdge={onLiqEdge}
+          onPopupOpen={setTvPopup}
           overlayPrefs={overlayPrefs}
           onFailure={onFailure}
           className="h-full w-full"
         />
         {showBadges && (
-          <DraggableChartBadges>
+          <DraggableChartBadges hidden={tvPopup}>
             {badgePrefs.position && <PositionSummary slabAddress={slabAddress} />}
             {badgePrefs.pnl && <ChartPnlBadge slabAddress={slabAddress} />}
           </DraggableChartBadges>
@@ -166,6 +174,11 @@ export function TvChartPanel({ slabAddress, onFailure }: TvChartPanelProps) {
   // (drawings made in the sheet) the sheet just saved.
   const [embedEpoch, setEmbedEpoch] = useState(0);
   const handleRef = useRef<TvChartHandle | null>(null);
+  // Off-screen liq indicator (drawn in the chrome strip below, never over the iframe) and "a TradingView
+  // dialog / menu is open" (our badges over the iframe hide meanwhile).
+  const [liqOff, setLiqOff] = useState<{ edge: LiqEdge; price: number | null }>({ edge: null, price: null });
+  const [tvPopup, setTvPopup] = useState(false);
+  const onLiqEdge = useCallback((edge: LiqEdge, price: number | null) => setLiqOff({ edge, price }), []);
 
   const closeSheet = useCallback(() => {
     setFullscreen(false);
@@ -196,6 +209,7 @@ export function TvChartPanel({ slabAddress, onFailure }: TvChartPanelProps) {
         <div className="flex min-w-0 items-center gap-2">
           <SourceBadge source={source} />
           {perpOn && <PerpSeriesToggle value={series} onChange={(s) => seriesStore.set(s)} />}
+          <LiqEdgeChip edge={liqOff.edge} price={liqOff.price} />
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ChartDisplayMenu prefs={overlayPrefs} onToggle={setOverlayPref} />
@@ -234,13 +248,15 @@ export function TvChartPanel({ slabAddress, onFailure }: TvChartPanelProps) {
 
       <div className="relative min-h-0 flex-1 overflow-hidden [contain:paint]">
         {fullscreen && mode === "compact" ? (
-          <div className="h-[clamp(340px,50svh,560px)] w-full" />
+          <div className="h-[clamp(420px,62svh,640px)] w-full" />
         ) : (
           <TvChart
             key={`${mode}:${embedEpoch}:${series}`}
             slabAddress={slabAddress}
             series={series}
             onDexData={() => setUsesDex(true)}
+            onLiqEdge={onLiqEdge}
+            onPopupOpen={setTvPopup}
             mode={mode}
             overlayPrefs={linePrefs}
             onFailure={onFailure}
@@ -248,7 +264,7 @@ export function TvChartPanel({ slabAddress, onFailure }: TvChartPanelProps) {
             onSource={setSource}
             onInterval={setIntervalState}
             handleRef={handleRef}
-            className="h-[clamp(340px,50svh,560px)] w-full lg:h-full"
+            className="h-[clamp(420px,62svh,640px)] w-full lg:h-full"
           />
         )}
 
@@ -265,7 +281,7 @@ export function TvChartPanel({ slabAddress, onFailure }: TvChartPanelProps) {
         )}
 
         {ready && (overlayPrefs.position || overlayPrefs.pnl) && (
-          <DraggableChartBadges>
+          <DraggableChartBadges hidden={tvPopup}>
             {overlayPrefs.position && <PositionSummary slabAddress={slabAddress} />}
             {overlayPrefs.pnl && <ChartPnlBadge slabAddress={slabAddress} />}
           </DraggableChartBadges>

@@ -19,14 +19,14 @@ const CHART = fs.readFileSync(
 
 describe("trade chart height clamp", () => {
   it("desktop grid Chart row is clamped, not a bare 1fr; dock takes the rest", () => {
-    expect(PAGE).toContain("clamp(340px, 50dvh, 640px)");
+    expect(PAGE).toContain("clamp(560px, 72dvh, 860px)");
     expect(PAGE).toContain("minmax(220px, 1fr)");
     // the old unbounded chart row is gone
     expect(PAGE).not.toContain('"auto minmax(0,1fr) minmax(220px,340px)"');
   });
 
   it("mobile chart container height is clamped (still fills the grid on desktop)", () => {
-    expect(CHART).toContain("h-[clamp(300px,45svh,540px)] lg:h-full");
+    expect(CHART).toContain("h-[clamp(400px,60svh,640px)] lg:h-full");
     expect(CHART).not.toContain('"w-full h-[45svh] lg:h-full"');
   });
 });

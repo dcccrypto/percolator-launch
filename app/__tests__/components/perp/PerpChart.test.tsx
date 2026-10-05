@@ -217,14 +217,15 @@ describe("PerpChart", () => {
       await waitFor(() => expect(chip()).not.toBeNull());
       expect(chip()!.textContent).toContain("↑");
       expect(chip()!.textContent).toContain("0.002100");
-      expect(chip()!.className).toContain("top-2");
+      expect(chip()!.getAttribute("data-edge")).toBe("above");
+      expect(chip()!.className).not.toMatch(/\babsolute\b/); // chrome strip, not over the chart area
     });
     it("shows a down chip when it maps below the pane (pane = height 420 minus the 20px time axis)", async () => {
       coordState.coord = 401; // > 400
       await mount();
       await waitFor(() => expect(chip()).not.toBeNull());
       expect(chip()!.textContent).toContain("↓");
-      expect(chip()!.className).toContain("bottom-8");
+      expect(chip()!.getAttribute("data-edge")).toBe("below");
     });
     it("NEGATIVE CONTROLS: in view, exactly at the edge, no coordinate yet, or a zero-height pane -> no chip", async () => {
       for (const c of [100, 0, 400, null]) {

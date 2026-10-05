@@ -34,7 +34,7 @@ import { importLegacyOnce } from "@/lib/tv/legacyImport";
 import { loadTradingView, TvLoadError } from "@/lib/tv/loadLibrary";
 import { PositionLines, desiredLines } from "@/lib/tv/positionLines";
 import { liqEdgeFromRange, type LiqEdge } from "@/lib/tv/liqEdge";
-import { formatPerpPrice } from "@/lib/chart/precision";
+import { watchTvPopups } from "@/lib/tv/tvPopup";
 import {
   LocalStorageSaveLoadAdapter,
   createSettingsAdapter,
@@ -65,6 +65,13 @@ export interface TvChartProps {
   onInterval?(resolution: TvResolution): void;
   /** The bars on screen include GeckoTerminal / CoinGecko history: show attribution. */
   onDexData?(): void;
+  /**
+   * The liquidation line is off the top / bottom of the visible price range (null = in view or none), with its
+   * price. The caller draws the chip in ITS chrome: an overlay on the iframe would cover TradingView's dialogs.
+   */
+  onLiqEdge?(edge: LiqEdge, liqPrice: number | null): void;
+  /** A TradingView dialog / menu is open: our overlays over the iframe should get out of its way. */
+  onPopupOpen?(open: boolean): void;
   /** Which perp series the datafeed serves (Mark / Oracle / Last). */
   series?: PerpSeries;
   handleRef?: MutableRefObject<TvChartHandle | null>;
@@ -118,6 +125,8 @@ export function TvChart({
   onSource,
   onInterval,
   onDexData,
+  onLiqEdge,
+  onPopupOpen,
   series = "mark",
   handleRef,
   className,
@@ -126,16 +135,16 @@ export function TvChart({
   const widgetRef = useRef<TvWidget | null>(null);
   const linesRef = useRef<PositionLines | null>(null);
   const [ready, setReady] = useState(false);
-  // Off-screen liquidation chip: which edge of the price pane the liq line hides behind (null = in view / no liq).
-  const [liqEdge, setLiqEdge] = useState<LiqEdge>(null);
+  // Off-screen liquidation indicator: which edge of the price pane the liq line hides behind (null = in view / no liq).
   const liqEdgeRef = useRef<LiqEdge>(null);
+  const liqPriceRef = useRef<number | null>(null);
 
   const chartTheme = useChartTheme();
   const { liq, entry, entryIsEstimate } = usePositionLinePrices(slabAddress);
 
   // Latest values for callbacks registered once per widget.
-  const cb = useRef({ onFailure, onReady, onSource, onInterval, onDexData });
-  cb.current = { onFailure, onReady, onSource, onInterval, onDexData };
+  const cb = useRef({ onFailure, onReady, onSource, onInterval, onDexData, onLiqEdge, onPopupOpen });
+  cb.current = { onFailure, onReady, onSource, onInterval, onDexData, onLiqEdge, onPopupOpen };
   const themeRef = useRef(chartTheme);
   themeRef.current = chartTheme;
   const lineState = useRef({ liq, entry, entryIsEstimate, series, prefs: overlayPrefs, theme: chartTheme });
@@ -329,10 +338,24 @@ export function TvChart({
       if (window.__percTvWidget === widget) delete window.__percTvWidget;
       widgetRef.current = null;
       setReady(false);
+      liqEdgeRef.current = null;
+      liqPriceRef.current = null;
+      cb.current.onLiqEdge?.(null, null);
     };
     // One widget per (market, layout mode). Theme/overlay changes are applied in place below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slabAddress, mode]);
+
+  // ── TradingView popups (Indicators dialog, menus): tell the caller so its overlays can step aside ──
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!ready || !container) return;
+    const stop = watchTvPopups(container, (open) => cb.current.onPopupOpen?.(open));
+    return () => {
+      stop();
+      cb.current.onPopupOpen?.(false);
+    };
+  }, [ready]);
 
   // ── Mark / Liq / Entry lines ──────────────────────────────────────────────
   const syncLines = useCallback(() => {
@@ -365,9 +388,10 @@ export function TvChart({
         next = null; // chart gone / not laid out yet
       }
     }
-    if (next !== liqEdgeRef.current) {
+    if (next !== liqEdgeRef.current || (next && liq !== liqPriceRef.current)) {
       liqEdgeRef.current = next;
-      setLiqEdge(next);
+      liqPriceRef.current = next ? liq : null;
+      cb.current.onLiqEdge?.(next, next ? liq : null);
     }
   }, []);
 
@@ -463,28 +487,5 @@ export function TvChart({
     w.changeTheme(name).then(apply, apply);
   }, [chartTheme, ready]);
 
-  const liqShown = overlayPrefs.liq ? liq : null;
-  return (
-    <>
-      <div ref={containerRef} data-testid="tv-chart" className={className} />
-      {liqShown != null && liqEdge && (
-        <div
-          data-testid="liq-edge-chip"
-          className={[
-            "pointer-events-none absolute left-1/2 z-10 flex -translate-x-1/2 items-center gap-1",
-            "whitespace-nowrap rounded-none border border-[var(--short)]/50 bg-[var(--bg)]/90",
-            "px-1.5 py-0.5 font-mono text-[9px] font-semibold shadow-sm backdrop-blur-sm",
-            liqEdge === "above" ? "top-2" : "bottom-8",
-          ].join(" ")}
-          aria-hidden="true"
-          title={`Liquidation price ${formatPerpPrice(liqShown)} is off the ${liqEdge === "above" ? "top" : "bottom"} of the chart — scroll the price axis to see the line`}
-        >
-          <span className="uppercase tracking-[0.1em] text-[var(--short)]">Liq</span>
-          <span className="text-[var(--short)]">{liqEdge === "above" ? "↑" : "↓"}</span>
-          <span className="text-[var(--text)]">{formatPerpPrice(liqShown)}</span>
-        </div>
-      )}
-    </>
-  );
+  return <div ref={containerRef} data-testid="tv-chart" className={className} />;
 }
-
