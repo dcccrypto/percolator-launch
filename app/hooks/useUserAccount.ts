@@ -7,6 +7,7 @@ import { AccountKind, isV17Account } from "@percolatorct/sdk";
 import {
   makePortfolioScanKey,
   getPortfolioUserAccountSnapshot,
+  getPortfolioListSnapshot,
   getPortfolioScanResolved,
   subscribePortfolioScan,
   triggerPortfolioScan,
@@ -21,6 +22,11 @@ import {
 // a circular import between the two modules.
 export type { UserAccountInfo };
 export { portfolioV17ToAccount };
+
+/** Stable empty list so `useOwnerMarketPortfolios`'s getSnapshot / server
+ *  snapshot / v12-no-account paths keep a constant reference (useSyncExternal-
+ *  Store requires the snapshot identity not to change unless the data did). */
+const EMPTY_USER_ACCOUNT_LIST: readonly UserAccountInfo[] = Object.freeze([]);
 
 // ---------------------------------------------------------------------------
 // v17 portfolio magic + offsets — mirrors findV17Portfolio in useDeposit/useTrade.
@@ -85,6 +91,65 @@ export function useUserAccount(): UserAccountInfo | null {
   const v17Account = useSyncExternalStore(subscribe, getSnapshot, () => null);
 
   return isV17Market ? v17Account : v12Account;
+}
+
+/**
+ * #2560: EVERY portfolio the connected wallet owns on the current market, as
+ * the mapped `Account` shape, base58-sorted — the data behind the multi-
+ * portfolio positions view (isolated + cross shown as separate rows).
+ *
+ * Invariant that keeps the single-portfolio UI unchanged: when the wallet owns
+ * exactly one portfolio this returns a one-element list whose sole entry is
+ * identical to `useUserAccount()` (both resolve to the lowest-pubkey pick, and
+ * the same confirmed-fill patch is mirrored into the list), so a consumer can
+ * render from this list and look byte-identical to today until a second
+ * portfolio actually exists.
+ *
+ * v12 markets have no multi-portfolio model (accounts live in the slab bitmap);
+ * this returns the wallet's single v12 account as a one-element list, or empty.
+ *
+ * Reads the SAME shared scan store as `useUserAccount` (published from one RPC);
+ * it also triggers the scan so it is self-sufficient if mounted alone.
+ */
+export function useOwnerMarketPortfolios(): readonly UserAccountInfo[] {
+  const { publicKey } = useWalletCompat();
+  const { connection } = useConnectionCompat();
+  const { accounts, raw, slabAddress, programId } = useSlabState();
+
+  const isV17Market = raw != null && raw.length > 0 && isV17Account(raw);
+
+  // v12 path: the wallet's single bitmap account (if any), as a one-element list.
+  const v12List = useMemo<readonly UserAccountInfo[]>(() => {
+    if (isV17Market || !publicKey) return EMPTY_USER_ACCOUNT_LIST;
+    const pkStr = publicKey.toBase58();
+    const found = accounts.find(
+      ({ account }) => account.kind === AccountKind.User && account.owner.toBase58() === pkStr,
+    );
+    return found ? [{ idx: found.idx, account: found.account }] : EMPTY_USER_ACCOUNT_LIST;
+  }, [publicKey, accounts, isV17Market]);
+
+  const publicKeyStr = publicKey?.toBase58() ?? null;
+  const programIdStr = programId?.toBase58() ?? null;
+  const scanKey = useMemo(() => {
+    if (!isV17Market || !publicKey || !programId || !slabAddress) return null;
+    return makePortfolioScanKey(programId, slabAddress, publicKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isV17Market, publicKeyStr, programIdStr, slabAddress]);
+
+  useEffect(() => {
+    if (!scanKey || !isV17Market || !publicKey || !programId || !slabAddress || raw == null) return;
+    void triggerPortfolioScan({ connection, programId, slabAddress, publicKey, raw });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanKey, isV17Market, publicKeyStr, programIdStr, slabAddress, raw, connection]);
+
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => (scanKey ? subscribePortfolioScan(scanKey, onStoreChange) : () => {}),
+    [scanKey],
+  );
+  const getSnapshot = useCallback(() => getPortfolioListSnapshot(scanKey), [scanKey]);
+  const v17List = useSyncExternalStore(subscribe, getSnapshot, () => EMPTY_USER_ACCOUNT_LIST);
+
+  return isV17Market ? v17List : v12List;
 }
 
 /**

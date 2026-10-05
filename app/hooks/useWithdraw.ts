@@ -24,7 +24,8 @@ import {
   ACCOUNTS_PUSH_ORACLE_PRICE,
 } from "@/lib/sdk-compat";
 import { sendTx } from "@/lib/tx";
-import { getPortfolioRawSnapshot, isLpPortfolio, makePortfolioScanKey } from "@/lib/userAccountScan";
+import { getPortfolioRawSnapshot, makePortfolioScanKey } from "@/lib/userAccountScan";
+import { pickOwnerPortfolio } from "@/lib/owner-portfolio";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { detectOracleMode } from "@/lib/oraclePrice";
 import { onChainMarkE6 } from "@/lib/position-pnl";
@@ -227,40 +228,35 @@ export function useWithdraw(slabAddress: string) {
                 { memcmp: { offset: 116, bytes: wallet.publicKey.toBase58() } },
               ],
             });
-            // Drop the market's LP portfolio BEFORE the sort/pick below —
-            // withdraw must never target the LP (owner == wallet only when
-            // this wallet is the market's CREATOR). See isLpPortfolio's doc.
-            const nonLpPortfolioAccounts = portfolioAccounts.filter(
-              ({ account }) => !isLpPortfolio(account.data),
-            );
-            if (nonLpPortfolioAccounts.length > 0) {
-              // M10: getProgramAccounts doesn't guarantee stable ordering
-              // across RPC nodes/calls. If more than one account ever matches
-              // this owner+market filter, picking an arbitrary array element
-              // can select a DIFFERENT portfolio than useDeposit.ts /
-              // useUserAccount.ts pick for the exact same wallet+market —
-              // withdraw could silently act on a different account than the
-              // one the UI displays. Sort deterministically by pubkey so
-              // every caller converges on the same account.
-              const sortedPortfolios = [...nonLpPortfolioAccounts].sort((a, b) =>
-                a.pubkey.toBase58().localeCompare(b.pubkey.toBase58()),
-              );
-              const d = sortedPortfolios[0].account.data;
-              const candidateData = d instanceof Buffer ? d : Buffer.from(d);
-              // Defense-in-depth: re-verify the mutable owner actually matches after
-              // fetch — memcmp filters are advisory server-side; don't trust blindly.
-              try {
-                const candidatePf = parsePortfolioV17(candidateData);
-                if (candidatePf.owner.equals(wallet.publicKey)) {
-                  portfolioPk = sortedPortfolios[0].pubkey;
-                  portfolioData = candidateData;
-                }
-              } catch { /* leave portfolioPk/portfolioData unset — falls through below */ }
+            // #2560 / M10: the ONE shared selector (lib/owner-portfolio.ts) —
+            // drop the market's LP portfolio, re-verify the decoded mutable
+            // owner (memcmp is advisory), base58-sort and take the lowest
+            // pubkey. Using it here removes the last inline copy of this pick,
+            // so a withdraw that falls back to the scan can never target a
+            // DIFFERENT portfolio than useUserAccount / useDeposit display and
+            // fund for the same wallet+market. (Explicit multi-portfolio
+            // targeting goes through `params.portfolioPk`, handled above.)
+            const picked = pickOwnerPortfolio(portfolioAccounts, wallet.publicKey);
+            if (picked) {
+              portfolioPk = picked.pubkey;
+              portfolioData = picked.data;
             }
           } catch { /* fall through — portfolio lookup is best-effort */ }
 
           if (!portfolioPk) {
             throw new UserFacingError("No account found for this wallet on this market. Deposit first to create one.");
+          }
+
+          // #2560 (F1): when the caller named an EXPLICIT portfolio (a chosen
+          // isolated/cross account, e.g. the post-close sweep or a ± Margin
+          // action), the resolved account MUST be exactly that one. The fast
+          // path above resets params.portfolioPk to null on a transient/owner
+          // failure and falls back to the deterministic pick — which may be a
+          // DIFFERENT owned portfolio. Withdrawing from the wrong account is a
+          // real-funds action, so refuse rather than substitute. (Acceptable
+          // when the fallback IS the target, e.g. the target was the primary.)
+          if (params.portfolioPk && !portfolioPk.equals(params.portfolioPk)) {
+            throw new UserFacingError("Couldn't confirm the selected account just now. Nothing was sent — please try again.");
           }
 
           // Over-withdraw pre-check (defense-in-depth). The DepositWithdrawCard UI
