@@ -236,6 +236,10 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
     account,
     slabAddress,
     accountIdx: activeInfo.idx,
+    // #2560: read THIS (primary) portfolio's own cached entry — the primary may
+    // be an isolated portfolio (lowest random pubkey). Legacy fallback (default)
+    // still resolves a cross primary's entry; single-portfolio is unchanged.
+    portfolio: activeInfo.pubkey?.toBase58(),
     adlFactors,
     adlApplicable: wrapperConfigV17 !== null,
     markE6: currentPriceE6,

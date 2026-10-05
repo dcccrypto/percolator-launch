@@ -60,6 +60,8 @@ export const ChartPnlBadge: FC<ChartPnlBadgeProps> = ({ slabAddress }) => {
     account,
     slabAddress,
     accountIdx: userAccount.idx,
+    // #2560: the displayed (primary) portfolio's own entry; legacy fallback (default) covers a cross primary.
+    portfolio: userAccount.pubkey?.toBase58(),
     adlFactors,
     adlApplicable: wrapperConfigV17 !== null,
     markE6: livePriceE6,

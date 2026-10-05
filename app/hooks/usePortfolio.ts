@@ -449,6 +449,15 @@ export function buildV17Position(
    * exactly the pre-ADL-fix behaviour.
    */
   adlFactors: AssetAdlFactors | null = null,
+  /**
+   * #2560: the portfolio account's base58 pubkey, so this position reads its OWN
+   * cached entry — the portfolio page / header bar list every portfolio a wallet
+   * owns, including isolated ones. Omitted → the legacy per-wallet key, i.e.
+   * single-portfolio behaviour unchanged. The entry read keeps the default legacy
+   * fallback: a portfolio that never wrote a scoped entry (the lone cross/primary)
+   * resolves its legacy entry, while isolated portfolios hit their own scoped key.
+   */
+  portfolioPubkey?: string,
 ): PortfolioPosition {
   // v17 markets return an empty `market.config` from the SDK — the real
   // collateral mint lives in `market.configV17` (see markets/page.tsx's
@@ -528,7 +537,7 @@ export function buildV17Position(
   //    to collateral; ROE divides by the leg's own initial margin.
   // `unknown` entry => the placeholder 0 below is NOT a flat reading; display
   // sites gate on `entryPriceSource` / `pnlKnown`.
-  const knownEntries = lookupKnownEntries(slabAddrStr, 0, walletStr);
+  const knownEntries = lookupKnownEntries(slabAddrStr, 0, walletStr, portfolioPubkey);
   const pnlResult = computePositionPnl({
     basisQ: positionSize,
     aBasis,
@@ -1012,6 +1021,7 @@ export async function fetchPortfolioSnapshot(
           resolveSymbol(slabAddrStr, symbolBySlab),
           pkStr,
           meta.adlFactors,
+          pubkey.toBase58(), // #2560: this portfolio's own entry (isolated-aware)
         );
 
         if (liveLiquidationSeverity(pos, null) !== "safe") {
@@ -1105,6 +1115,7 @@ export async function fetchPortfolioSnapshot(
             resolveSymbol(slabAddrStr, symbolBySlab),
             pkStr,
             meta.adlFactors,
+            pfKey, // #2560: this portfolio's own entry (isolated-aware)
           );
 
           if (liveLiquidationSeverity(pos, null) !== "safe") {
