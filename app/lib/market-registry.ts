@@ -1,5 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
-import { isAcceptedWrapper } from "@/lib/v21/worlds";
+import { isAcceptedWrapper, marketWorld } from "@/lib/v21/worlds";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { readLiveMarketStateResolutions } from "@/lib/live-market-state";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
@@ -166,8 +166,12 @@ export async function loadMergedMarketRows(): Promise<MarketRegistryRow[] | null
   return current.map((m) => {
     const live = liveStates.get(String(m.slab_address ?? ""));
     if (!live) return m;
+    // Flag on only: tag Supabase-only rows with their world from the slab's own owner (L-8), so the
+    // v1 label survives the cutover. Absent when the flag is off or the owner is foreign/unknown.
+    const world = marketWorld(live.owner);
     return {
       ...m,
+      ...(world ? { world } : {}),
       mark_price: live.markPriceUsd,
       // v17 has no separate index feed — mark is the only on-chain price.
       index_price: m.index_price ?? null,
