@@ -1020,6 +1020,15 @@ export async function sendTx({
           skipPreflight = true;
         }
 
+        // Capture the signature BEFORE broadcasting. A tx's signature is its
+        // fee payer's (first) signature and is fixed once signed, so we know it
+        // before sendRawTransaction. If the send then THROWS (timeout, dropped
+        // connection, blockhash lag on a load-balanced RPC) the tx may still
+        // have landed; without this, `lastSignature` stayed unset on a throw and
+        // the R2-S7 landed check in the catch below was silently skipped.
+        if (signed.signature) {
+          lastSignature = bs58.encode(signed.signature);
+        }
         try {
           lastSignature = await connection.sendRawTransaction(signed.serialize(), {
             skipPreflight: skipPreflight ?? false,

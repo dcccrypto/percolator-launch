@@ -42,7 +42,12 @@ function makeConn(marketFixture: string) {
     }),
     simulateTransaction,
     sendRawTransaction: vi.fn().mockResolvedValue(SIG),
-    getSignatureStatuses: vi.fn().mockResolvedValue({ value: [{ confirmationStatus: "confirmed", err: null }] }),
+    // Only the signature sendRawTransaction returns (SIG) is confirmed. A blanket "confirmed"
+    // would make the R2-S7 landed check treat a send that THREW as landed (sendTx now knows the
+    // signature before broadcasting), hiding the retry these tests exercise.
+    getSignatureStatuses: vi.fn(async (sigs: string[]) => ({
+      value: sigs.map((s) => (s === SIG ? { confirmationStatus: "confirmed", err: null } : null)),
+    })),
   };
   return conn;
 }
