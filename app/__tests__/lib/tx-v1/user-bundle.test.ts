@@ -7,7 +7,7 @@
 import { describe, it, expect, vi } from "vitest";
 import bs58 from "bs58";
 import { ed25519 } from "@noble/curves/ed25519";
-import { Connection, Keypair, PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
+import { Connection, Keypair, PublicKey, Transaction, TransactionInstruction, VersionedTransaction } from "@solana/web3.js";
 import {
   BundleDoesNotFitError,
   PartialBundleError,
@@ -196,6 +196,11 @@ describe("sendUserBundle", () => {
     const { message, signatures } = splitV1Wire(w);
     expect(ed25519.verify(signatures[0]!, message, payer.toBytes())).toBe(true);
     expect(out.signatures).toEqual([bs58.encode(signatures[0]!)]);
+    // Independent reader: web3.js >= 1.99 deserializes what we send (the app can read it back).
+    const back = VersionedTransaction.deserialize(w);
+    expect(back.version).toBe(1);
+    expect(Uint8Array.from(back.signatures[0]!)).toEqual(signatures[0]);
+    expect(back.message.staticAccountKeys[0]!.equals(payer)).toBe(true);
   });
 
   it("v1 with a keypair co-signer: its slot is ours, the payer slot is the wallet's, both verify", async () => {
