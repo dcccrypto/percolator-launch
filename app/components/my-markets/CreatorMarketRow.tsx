@@ -226,7 +226,10 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
   // The burn writes the zero key into asset_admin (useAdminActions.renounceAdmin), which the detail
   // route serves as creator_fee_authority. Burned is then a fact about the market, not a wallet
   // mismatch, so the drawer must not ask the creator to "connect the creator wallet".
-  const adminBurned = detail?.creator_fee_authority === ZERO_PUBKEY.toBase58();
+  // `burnedHere` covers the time until the detail refetch shows the zero key: without it the
+  // button stayed "burn admin key" after a burn and offered the same burn again.
+  const [burnedHere, setBurnedHere] = useState(false);
+  const adminBurned = burnedHere || detail?.creator_fee_authority === ZERO_PUBKEY.toBase58();
   const marketAuthB58 = market.configV17?.marketauth?.toBase58() ?? null;
   const isMarketAuth = !!walletB58AdminGate && !!marketAuthB58 && marketAuthB58 === walletB58AdminGate;
   const rowClaim = useClaimCreatorFees();
@@ -363,6 +366,7 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
   const handleBurnAdmin = useCallback(async () => {
     try {
       await actions.renounceAdmin(market);
+      setBurnedHere(true);
       // The market stays in Your Markets: useCreatedMarkets lists every market whose LP
       // portfolio this wallet owns (owner @116), and burning asset_admin doesn't change that.
       toast("Admin key burned. The market stays in Your Markets because your wallet still owns its liquidity position.", "success");
@@ -530,7 +534,7 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
                 preserved from the flow this replaces (see PR description). */}
             <button
               onClick={() => setShowBurnConfirm(true)}
-              disabled={actions.loading === "renounceAdmin" || !isAssetAdmin}
+              disabled={actions.loading === "renounceAdmin" || !isAssetAdmin || adminBurned}
               title={
                 adminBurned
                   ? "The admin key is already burned."
@@ -557,7 +561,7 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
           {!isMarketAuth && (
             <p className="mt-2 text-[10px] text-[var(--text-secondary)]">
               This market is autonomous — admin control was permanently renounced to the stake-pool
-              program at creation, so it can’t be closed.{isAssetAdmin && " You can still burn your remaining admin key."}
+              program at creation, so it can’t be closed.{isAssetAdmin && !adminBurned && " You can still burn your remaining admin key."}
             </p>
           )}
           {closeMarket.error && (
