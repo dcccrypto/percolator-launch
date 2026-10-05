@@ -1,5 +1,5 @@
 /**
- * #61: /portfolio and /earn read their tab from the URL hash only on mount, so a hash change
+ * #3112: /portfolio and /earn read their tab from the URL hash only on mount, so a hash change
  * (hash link, Back / Forward) or a Next <Link> to the bare hub path from inside the hub changed
  * the URL but not the tab. useHashTab follows the URL on hashchange, popstate and the Navigation
  * API's currententrychange.
@@ -36,7 +36,7 @@ afterEach(() => {
   delete (window as Window & { navigation?: EventTarget }).navigation;
 });
 
-describe("#61: useHashTab", () => {
+describe("#3112: useHashTab", () => {
   it("opens on the hash's tab, and on the fallback for a missing or unknown hash", () => {
     history.replaceState(null, "", "/portfolio#markets");
     render(<Hub />);
