@@ -8,7 +8,7 @@ import {
 
 /**
  * Downloads the in-flight market state as a JSON file the user (or a teammate)
- * can hand to scripts/close-market-reclaim-all.ts to recover funds if the
+ * can keep as a record of the slab to recover funds if the
  * wizard fails or the tab is closed before the market is fully created.
  *
  * Two buttons:
@@ -59,7 +59,7 @@ export function RecoveryExportButton({ className = "" }: { className?: string })
         disabled={busy}
         onClick={() => download(false)}
         className="border border-[var(--border)] bg-transparent px-3 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] hover:border-[var(--accent)]/40 hover:text-[var(--text)] transition-colors disabled:opacity-50"
-        title="Pubkeys only - safe to share. Use with the in-UI recovery banner or the close-market-reclaim-all.ts script (admin-side close)."
+        title="Pubkeys only - safe to share. Use with the in-UI recovery banner."
       >
         ⬇ DOWNLOAD RECOVERY JSON
       </button>

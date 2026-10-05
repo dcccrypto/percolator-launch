@@ -122,8 +122,8 @@ export function loadAllInFlightMarkets(): InFlightMarketState[] {
 }
 
 /**
- * Build the JSON payload that scripts/close-market-reclaim-all.ts (and
- * any future recovery script) expects. Excludes the slab secret key by
+ * Build the JSON payload that recovery tooling (the in-UI recovery
+ * banner, or an operator script) can consume. Excludes the slab secret key by
  * default — that's only persisted in localStorage for the in-UI reclaim
  * path. Set includeSlabSecret=true if you want to bundle the secret in
  * the download (useful for full off-machine recovery; users who choose
@@ -144,9 +144,7 @@ export function buildRecoveryPayload(
     last_step: state.lastStep,
     _instructions: [
       "Save this file as recovery.json.",
-      `Run: SLAB_ADDRESS=${state.slabAddress} pnpm exec tsx scripts/close-market-reclaim-all.ts --dry-run`,
-      "Review the plan, then drop --dry-run to execute.",
-      "Requires admin keypair at ~/.percolator-mainnet/keys/deploy-authority.json (or set ADMIN_KEYPAIR env var).",
+      "Open the app with the admin wallet that created the market; the recovery banner on the create page reclaims the slab rent for slab_address.",
     ],
   };
   if (options.includeSlabSecret) {

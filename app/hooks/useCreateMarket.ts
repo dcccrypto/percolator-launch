@@ -2211,8 +2211,8 @@ export function useCreateMarket() {
           vaultAta = await getAssociatedTokenAddress(params.mint, vaultPda, true);
 
           // Persist recovery state BEFORE sending TX0. Survives tab close so
-          // the user can recover via the in-UI ReclaimSlabRent path or the
-          // close-market-reclaim-all.ts script even if the browser dies.
+          // the user can recover via the in-UI ReclaimSlabRent path even if
+          // the browser dies.
           // 2026-05-12: PERC-8329 superseded for this flow — slab secret IS
           // persisted so the uninitialised-slab reclaim works. See
           // lib/inFlightMarket.ts header for trade-off rationale.
