@@ -77,13 +77,10 @@ export interface BarsPage {
   noMoreHistory: boolean;
   source: BarSource | null;
   /**
-   * Perp mark series only: the end of the newest stretch of bars that are the pool (oracle) price
-   * standing in for a mark that does not exist (before the first mark, in a gap, or not yet
-   * backfilled). Lets the UI say so instead of implying they are marks.
+   * Perp mark series only: bars with timeSec below this are the pool (oracle) price standing in
+   * for a mark that did not exist yet. Lets the UI say so instead of implying they are marks.
    */
   proxyBeforeSec?: number | null;
-  /** Perp mark series only: open time of the oldest stand-in bar (with proxyBeforeSec it brackets them). */
-  proxyFromSec?: number | null;
   /**
    * Perp series only: bars up to and including this time were sourced from GeckoTerminal / CoinGecko
    * (pre-launch pool history). CoinGecko's terms require visible attribution wherever that data shows.

@@ -2,7 +2,7 @@
  * ChartDataProvider #2: the perp-standard chart (Mark / Oracle / Last), push-fed.
  *
  *   mark / oracle  history  GET /api/perp-chart/:slab (our own persisted candles, pool-price
- *                           stand-in for every range with no mark)
+ *                           backfill before the first mark)
  *                  live     keeper ticks over the price-ws socket (lib/chart/live-client.ts),
  *                           folded into the forming candle with the SAME pure code the server uses
  *   last           history  the wrapped base provider (/api/candles/:slab, indexer trades)
@@ -51,11 +51,10 @@ interface HistoryBody {
   s?: unknown;
   bars?: unknown;
   proxyBeforeSec?: unknown;
-  proxyFromSec?: unknown;
   noMoreHistory?: unknown;
 }
 
-export function parsePerpHistory(body: unknown): { bars: ProviderBar[]; proxyBeforeSec: number | null; proxyFromSec: number | null; noMoreHistory: boolean; dexThroughSec: number | null } {
+export function parsePerpHistory(body: unknown): { bars: ProviderBar[]; proxyBeforeSec: number | null; noMoreHistory: boolean; dexThroughSec: number | null } {
   if (typeof body !== "object" || body === null) throw new Error("perp-chart: malformed response");
   const b = body as HistoryBody;
   const raw = Array.isArray(b.bars) ? b.bars : [];
@@ -72,8 +71,7 @@ export function parsePerpHistory(body: unknown): { bars: ProviderBar[]; proxyBef
   }
   bars.sort((a, c) => a.timeSec - c.timeSec);
   const proxy = typeof b.proxyBeforeSec === "number" && Number.isFinite(b.proxyBeforeSec) ? b.proxyBeforeSec : null;
-  const proxyFrom = typeof b.proxyFromSec === "number" && Number.isFinite(b.proxyFromSec) ? b.proxyFromSec : null;
-  return { bars, proxyBeforeSec: proxy, proxyFromSec: proxyFrom, noMoreHistory: b.noMoreHistory === true, dexThroughSec };
+  return { bars, proxyBeforeSec: proxy, noMoreHistory: b.noMoreHistory === true, dexThroughSec };
 }
 
 function toCandle(b: ProviderBar) {
@@ -117,7 +115,7 @@ export function createPerpProvider(deps: PerpProviderDeps): ChartDataProvider {
       }
       const h = parsePerpHistory(await r.json());
       const bars = h.bars.filter((b) => b.timeSec >= req.fromSec - 1 || req.countBack > 0);
-      return { bars, noMoreHistory: h.noMoreHistory, source, proxyBeforeSec: h.proxyBeforeSec, proxyFromSec: h.proxyFromSec, dexThroughSec: h.dexThroughSec };
+      return { bars, noMoreHistory: h.noMoreHistory, source, proxyBeforeSec: h.proxyBeforeSec, dexThroughSec: h.dexThroughSec };
     },
 
     subscribeBars(slab: string, resolution: ProviderResolution, handlers: LiveHandlers, lastBar: ProviderBar | null): () => void {
