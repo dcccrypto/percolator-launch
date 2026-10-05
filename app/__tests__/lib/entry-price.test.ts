@@ -50,3 +50,66 @@ describe("entry-price local storage", () => {
     expect(getEntryPrice(SLAB, IDX)).toBe(0n);
   });
 });
+
+describe("entry-price per-portfolio scoping (#2560 — isolated margin)", () => {
+  const WALLET = "Wa11et1111111111111111111111111111111111111";
+  const PF_A = "PortfoLioAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  const PF_B = "PortfoLioBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+  const store = new Map<string, string>();
+
+  beforeEach(() => {
+    store.clear();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => { store.set(key, value); },
+      removeItem: (key: string) => { store.delete(key); },
+    });
+  });
+
+  it("two portfolios on the same (slab, idx, wallet) do NOT collide", () => {
+    saveEntryPrice(SLAB, 0, 100n, 2, WALLET, PF_A);
+    saveEntryPrice(SLAB, 0, 200n, 5, WALLET, PF_B);
+
+    expect(getEntryPrice(SLAB, 0, WALLET, PF_A)).toBe(100n);
+    expect(getEntryPrice(SLAB, 0, WALLET, PF_B)).toBe(200n);
+    expect(getEntryLeverage(SLAB, 0, WALLET, PF_A)).toBe(2);
+    expect(getEntryLeverage(SLAB, 0, WALLET, PF_B)).toBe(5);
+  });
+
+  it("a portfolio-scoped read falls back to a legacy (pre-#2560) wallet-scoped record", () => {
+    // Written the old way (no portfolio segment), as an existing user would have.
+    saveEntryPrice(SLAB, 0, 777n, 3, WALLET);
+    // The primary portfolio reads it via fallback until its next scoped write.
+    expect(getEntryPrice(SLAB, 0, WALLET, PF_A)).toBe(777n);
+    expect(getEntryLeverage(SLAB, 0, WALLET, PF_A)).toBe(3);
+  });
+
+  it("a scoped record shadows the legacy fallback (scoped wins)", () => {
+    saveEntryPrice(SLAB, 0, 777n, 3, WALLET); // legacy
+    saveEntryPrice(SLAB, 0, 888n, 4, WALLET, PF_A); // scoped
+    expect(getEntryPrice(SLAB, 0, WALLET, PF_A)).toBe(888n);
+    expect(getEntryLeverage(SLAB, 0, WALLET, PF_A)).toBe(4);
+  });
+
+  it("a NEW portfolio with its own scoped record never falls through to another's legacy entry", () => {
+    saveEntryPrice(SLAB, 0, 777n, 3, WALLET); // pre-existing primary (legacy)
+    saveEntryPrice(SLAB, 0, 555n, 10, WALLET, PF_B); // freshly opened isolated
+    // PF_B reads its own, not the legacy primary's.
+    expect(getEntryPrice(SLAB, 0, WALLET, PF_B)).toBe(555n);
+  });
+
+  it("clearing a scoped entry also removes the legacy fallback so it can't linger", () => {
+    saveEntryPrice(SLAB, 0, 777n, 3, WALLET); // legacy
+    saveEntryPrice(SLAB, 0, 888n, 4, WALLET, PF_A); // scoped
+    clearEntryPrice(SLAB, 0, WALLET, PF_A);
+    expect(getEntryPrice(SLAB, 0, WALLET, PF_A)).toBe(0n);
+    expect(getEntryPrice(SLAB, 0, WALLET)).toBe(0n); // legacy gone too
+  });
+
+  it("callers that pass no portfolio behave exactly as before (byte-identical key)", () => {
+    saveEntryPrice(SLAB, 0, 123n, 2, WALLET);
+    // Same (slab, idx, wallet) read with no portfolio resolves the legacy key.
+    expect(getEntryPrice(SLAB, 0, WALLET)).toBe(123n);
+    expect(store.has(`perc:entry:${SLAB}:0:${WALLET}`)).toBe(true);
+  });
+});
