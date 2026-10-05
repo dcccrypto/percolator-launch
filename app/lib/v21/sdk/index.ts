@@ -11,3 +11,4 @@
 export * from "./growth-v19";
 export * from "./p2b-lock-exits";
 export * from "./p2b-earn";
+export * from "./txv1";

@@ -604,7 +604,7 @@ async function checkSufficientBalance(
  * @param onProgress - Optional callback for progress updates (elapsed time in ms)
  * @param abortSignal - Optional AbortSignal to cancel polling
  */
-async function pollConfirmation(
+export async function pollConfirmation(
   connection: Connection,
   signature: string,
   onProgress?: (elapsedMs: number) => void,
