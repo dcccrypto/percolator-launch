@@ -278,7 +278,7 @@ function setCache(key: string, data: unknown, ttlMs: number): void {
 }
 
 /** Methods that mutate state — never cache, never deduplicate */
-const MUTATING_METHODS = new Set<string>();
+const MUTATING_METHODS = new Set<string>(["sendTransaction", "simulateTransaction"]);
 
 /**
  * In-flight request deduplication — if the same read request is already being
