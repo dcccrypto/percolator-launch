@@ -36,7 +36,8 @@ import {
   type TxV1Mode,
   type V1SimulationResult,
 } from "@/lib/v21/sdk";
-import { assembleSignedV1, isUserRejection } from "@/lib/tx-v1";
+import { WalletAlteredMessageError, assembleSignedV1, isUserRejection, isV1WalletSigningFailure } from "@/lib/tx-v1";
+import { V1TransportError } from "@/lib/tx-v1/rpc";
 import { launchBundleViolations, neutralFromInstructions, type LaunchPrograms } from "./shape";
 
 /** Wrapper BumpAllocator needs a 128 KiB heap on every tx (#176); in v1 it is the heap config bit. */
@@ -137,6 +138,12 @@ export type SingleTxOutcome =
 
 /** A preflight refusal: the node simulated the signed tx and did NOT broadcast it (JSON-RPC -32002). */
 export function isPreflightRefusal(err: unknown): boolean {
+  // The JSON-RPC code first (V1RpcError from lib/tx-v1/rpc). A transport failure is never one: the tx may
+  // have been accepted, so it must go to the outcome resolver, whatever its text says.
+  if (err instanceof V1TransportError) return false;
+  if (typeof err === "object" && err !== null && typeof (err as { code?: unknown }).code === "number") {
+    return (err as { code: number }).code === -32002;
+  }
   const m = err instanceof Error ? err.message : String(err);
   return /-32002|Transaction simulation failed/i.test(m);
 }
@@ -211,15 +218,19 @@ export async function attemptSingleTxLaunch(i: SingleTxLaunchInput, d: SingleTxL
     preSigned.set(sig, compiled.message.length + slot * 64);
   }
 
-  // 5. ONE wallet prompt. A decline is final; any other wallet failure happened before anything was
-  //    sent, so the batched path may run.
+  // 5. ONE wallet prompt. A decline is final and always wins (L-5: never re-prompt a user who said no).
+  //    Only a genuine "this wallet cannot read v1" failure, or a wallet that altered the message, falls
+  //    back to the batched path (nothing was sent). Any other wallet error is refused as-is.
   let wire: Uint8Array;
   try {
     const walletSigned = await d.walletSign(preSigned);
     wire = assembleSignedV1(compiled, preSigned, walletSigned);
   } catch (e) {
     if (isUserRejection(e)) return { status: "refused", stage: "wallet", reason: "you declined the launch transaction" };
-    return { status: "fallback", stage: "wallet", reason: `the wallet could not sign the single transaction: ${msgOf(e)}` };
+    if (e instanceof WalletAlteredMessageError || isV1WalletSigningFailure(e)) {
+      return { status: "fallback", stage: "wallet", reason: `the wallet could not sign the single transaction: ${msgOf(e)}` };
+    }
+    return { status: "refused", stage: "wallet", reason: `the wallet failed to sign the launch transaction: ${msgOf(e)}` };
   }
   const signature = v1TransactionSignature(wire);
 

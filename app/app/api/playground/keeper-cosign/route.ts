@@ -59,8 +59,13 @@ import { readAssetMarketId, readAssetControlSeqs } from "@/lib/v18-wire";
 import { MAX_PRICE_E6 } from "@/lib/oraclePrice";
 import { requirePlaygroundKeeperSigner } from "@/lib/playground-keeper-signer";
 import { DEVNET_PROGRAM_IDS } from "@/lib/program-ids";
-import { validateKeeperCosignV1 } from "@/lib/launch-single-tx/cosign-validate";
-import { neutralFromInstructions } from "@/lib/launch-single-tx/shape";
+import { authorizeKeeperCosignV1 } from "@/lib/launch-single-tx/cosign-validate";
+import { launchCreatePins, neutralFromInstructions, type LaunchCreatePins } from "@/lib/launch-single-tx/shape";
+import { cosignV1RateLimited } from "@/lib/launch-single-tx/cosign-rate-limit";
+import { canonicalVaultLpMatcher } from "@/lib/limits/p3-wizard";
+import { getClientIp } from "@/lib/get-client-ip";
+import { WELL_KNOWN } from "@percolatorct/sdk";
+import type { Connection } from "@solana/web3.js";
 
 /**
  * Asset 0's co-sign inputs on a market whose only prior tx is the launch's M1
@@ -128,6 +133,21 @@ function buildCosignPair(a: {
     }),
   });
   return { configureIx, delegateIx };
+}
+
+/**
+ * Rent-exempt minimum per account size, read from the cluster once per instance (a protocol constant for a
+ * given size; the batched launch caches it the same way, hooks/useCreateMarket.ts getCachedRentExemption).
+ */
+const rentCache = new Map<number, bigint>();
+async function rentExemptFor(connection: Connection, pins: LaunchCreatePins): Promise<Map<number, bigint>> {
+  const spaces = [...new Set(Object.values(pins).map((p) => p.space))];
+  await Promise.all(
+    spaces.map(async (n) => {
+      if (!rentCache.has(n)) rentCache.set(n, BigInt(await connection.getMinimumBalanceForRentExemption(n, "confirmed")));
+    }),
+  );
+  return new Map(spaces.map((n) => [n, rentCache.get(n)!]));
 }
 
 /** base64 of a v1 message: <= 4096 bytes. */
@@ -261,6 +281,11 @@ export async function POST(req: NextRequest) {
       if (fresh !== true || assetIdx !== 0) {
         return NextResponse.json({ error: "a v1 co-sign is only valid for a fresh launch of asset 0" }, { status: 400 });
       }
+      // L-3: every v1 request costs RPC reads and a keeper signature; bound it per IP and per deployer.
+      const limited = cosignV1RateLimited(getClientIp(req), deployerPk.toBase58());
+      if (limited) {
+        return NextResponse.json({ error: `Too many v1 co-sign requests (per ${limited}); retry in a minute` }, { status: 429, headers: { "Retry-After": "60" } });
+      }
       const message = new Uint8Array(Buffer.from(v1MessageBase64, "base64"));
       if (Buffer.from(message).toString("base64") !== v1MessageBase64) {
         return NextResponse.json({ error: "Invalid v1MessageBase64 (not canonical base64)" }, { status: 400 });
@@ -273,7 +298,18 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "the slab already exists; a v1 co-sign is only for a launch that creates it" }, { status: 409 });
       }
       const currentSlot = BigInt(await connection.getSlot("confirmed"));
-      const verdict = validateKeeperCosignV1({
+      let createPins: LaunchCreatePins;
+      try {
+        createPins = launchCreatePins({
+          wrapper: wrapperId.toBase58(),
+          matcher: canonicalVaultLpMatcher(cfgV1.matcherProgramId).toBase58(),
+          tokenProgram: WELL_KNOWN.tokenProgram.toBase58(),
+        });
+      } catch (e) {
+        return NextResponse.json({ error: `v1 co-sign unavailable: ${(e as Error).message}` }, { status: 503 });
+      }
+      const rentExemptLamports = await rentExemptFor(connection, createPins);
+      const verdict = await authorizeKeeperCosignV1({
         message,
         keeper: keeperPk.toBase58(),
         deployer: deployerPk.toBase58(),
@@ -288,16 +324,20 @@ export async function POST(req: NextRequest) {
           const [configure, delegate] = neutralFromInstructions(deployerPk, [pair.configureIx, pair.delegateIx]);
           return { configure: configure!, delegate: delegate! };
         },
+        createPins,
+        rentExemptLamports,
+        // L-2: never sign a message whose lifetime cannot land (or that was built on a stale/forged hash).
+        isBlockhashValid: async (bh) => (await connection.isBlockhashValid(bh, { commitment: "confirmed" })).value,
       });
       if (!verdict.ok) {
         console.warn("[playground/keeper-cosign] v1 co-sign refused:", verdict.reason);
         return NextResponse.json({ error: `v1 co-sign refused: ${verdict.reason}` }, { status: 422 });
       }
-      const sig = keeper.signMessageBytes(message);
+      const sig = keeper.signMessageBytes(verdict.message);
       return NextResponse.json({
         keeperSignatureBase64: Buffer.from(sig).toString("base64"),
         keeperPubkey: keeper.publicKey(),
-        nowSlot: verdict.nowSlot.toString(),
+        nowSlot: verdict.message.nowSlot.toString(),
       });
     }
 

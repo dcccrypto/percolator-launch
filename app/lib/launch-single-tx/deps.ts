@@ -3,7 +3,7 @@
  * the orchestrator stays pure and the hook tests can replace this module wholesale.
  */
 import type { Connection, PublicKey } from "@solana/web3.js";
-import { sendV1, simulateV1 } from "@/lib/v21/sdk";
+import { sendV1ViaProxy, simulateV1ViaProxy } from "@/lib/tx-v1/rpc";
 import type { RawTxSigner } from "@/lib/tx-v1";
 import type { LaunchSigStatus, SingleTxLaunchDeps } from "./run";
 
@@ -49,14 +49,16 @@ export function liveSingleTxDeps(a: {
 }): SingleTxLaunchDeps {
   const { connection } = a;
   return {
-    simulate: (wire) => simulateV1(connection, wire),
+    // lib/tx-v1/rpc: a JSON-RPC format rejection keeps its code (V1RpcError); a transport failure never
+    // looks like one (the SDK's default sendV1 goes through sendRawTransaction, which drops the code).
+    simulate: (wire) => simulateV1ViaProxy(connection, wire),
     keeperSign: (message) => requestKeeperV1Signature(a.cosign, message),
     walletSign: async (wire) => {
       const [signed] = await a.rawSigner.signRaw([wire]);
       if (!signed) throw new Error("the wallet returned no signed transaction");
       return signed;
     },
-    send: (wire) => sendV1(connection, wire, { preflightCommitment: "confirmed" }),
+    send: (wire) => sendV1ViaProxy(connection, wire),
     status: async (sig): Promise<LaunchSigStatus> => {
       const s = (await connection.getSignatureStatuses([sig], { searchTransactionHistory: true })).value[0];
       if (!s) return { kind: "not-found" };

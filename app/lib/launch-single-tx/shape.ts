@@ -16,9 +16,11 @@
  *   M4p  system.createAccount(vault-LP portfolio) system.createAccount(matcher ctx) InitVaultLp DepositJuniorTranche
  *   M4b  system.createAccount(stake LP mint) system.createAccount(stake vault) [UpdateFeeSplit] stake.InitPool stake.BindInsuranceAuthority
  */
-import { SystemProgram, type PublicKey, type TransactionInstruction } from "@solana/web3.js";
-import { ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import { IX_TAG, IX_TAG_P3, STAKE_IX } from "@percolatorct/sdk";
+import { PublicKey, SystemProgram, type TransactionInstruction } from "@solana/web3.js";
+import { ACCOUNT_SIZE, ASSOCIATED_TOKEN_PROGRAM_ID, MINT_SIZE } from "@solana/spl-token";
+import { IX_TAG, IX_TAG_P3, STAKE_IX, V17_PORTFOLIO_ACCOUNT_LEN } from "@percolatorct/sdk";
+import { slabSizeFor } from "@/lib/create-market-args";
+import { VAULT_LP_MATCHER_CTX_LEN } from "@/lib/limits/constants";
 import { MEMO_PROGRAM_ID } from "@/lib/keeper-register-memo";
 import { decodeV1Message, v1IsSigner, v1IsWritable, type DecodedV1Message } from "./v1-decode";
 
@@ -345,5 +347,80 @@ export function v1LimitViolations(s: BundleStats): string[] {
   if (s.accounts > V1_LIMITS.accounts) v.push(`${s.accounts} accounts > ${V1_LIMITS.accounts}`);
   if (s.instructions > V1_LIMITS.instructions) v.push(`${s.instructions} instructions > ${V1_LIMITS.instructions}`);
   if (s.signers > V1_LIMITS.signers) v.push(`${s.signers} signers > ${V1_LIMITS.signers}`);
+  return v;
+}
+
+// ---------------------------------------------------------------------------
+// createAccount PARAMETERS (L-1, security review 2026-10-05)
+//
+// launchBundleViolations pins WHO creates WHAT and in which order; this pins the account each create
+// makes: owner program, space and rent. The values are the constants the builders use (hooks/
+// useCreateMarket.ts M1/M4p/M4b, lib/limits/p3-wizard.ts buildP3BindIxs), so the keeper only ever
+// authorises a launch whose accounts have exactly the layout the batched path would create.
+// ---------------------------------------------------------------------------
+
+/** One expected createAccount: owner program and data length. */
+export interface CreatePin {
+  space: number;
+  owner: string;
+}
+
+/** The five creates of a single-tx P3 launch, in message order. */
+export const LAUNCH_CREATE_ORDER = ["slab", "vaultLpPortfolio", "matcherCtx", "stakeLpMint", "stakeVault"] as const;
+export type LaunchCreateName = (typeof LAUNCH_CREATE_ORDER)[number];
+export type LaunchCreatePins = Record<LaunchCreateName, CreatePin>;
+
+/**
+ * The pins, from the builders' own constants.
+ *
+ * @param p - wrapper program, the canonical vault-LP matcher (`canonicalVaultLpMatcher`) and the SPL token program.
+ */
+export function launchCreatePins(p: { wrapper: string; matcher: string; tokenProgram: string }): LaunchCreatePins {
+  return {
+    slab: { space: slabSizeFor({ p3: true }), owner: p.wrapper },
+    vaultLpPortfolio: { space: V17_PORTFOLIO_ACCOUNT_LEN, owner: p.wrapper },
+    matcherCtx: { space: VAULT_LP_MATCHER_CTX_LEN, owner: p.matcher },
+    stakeLpMint: { space: MINT_SIZE, owner: p.tokenProgram },
+    stakeVault: { space: ACCOUNT_SIZE, owner: p.tokenProgram },
+  };
+}
+
+/** SystemInstruction::CreateAccount fields (u32 tag 0, lamports u64, space u64, owner [32]); null if not one. */
+export function decodeCreateAccount(ix: NeutralIx): { lamports: bigint; space: bigint; owner: string } | null {
+  if (ix.programId !== SYSTEM || ix.data.length !== 52 || ix.data[0] !== 0 || ix.data[1] !== 0 || ix.data[2] !== 0 || ix.data[3] !== 0) return null;
+  return {
+    lamports: readU64(ix.data, 4)!,
+    space: readU64(ix.data, 12)!,
+    owner: new PublicKey(ix.data.subarray(20, 52)).toBase58(),
+  };
+}
+
+/**
+ * Every createAccount must match its pin: owner, space, and lamports == the rent-exempt minimum for that
+ * space (exactly what the batched path funds: getMinimumBalanceForRentExemption(space), no top-up).
+ *
+ * @param rentExemptLamports - rent-exempt minimum per pinned space (the route reads it from the cluster).
+ */
+export function createAccountParamViolations(
+  ixs: readonly NeutralIx[],
+  pins: LaunchCreatePins,
+  rentExemptLamports: ReadonlyMap<number, bigint>,
+): string[] {
+  const v: string[] = [];
+  const creates = ixs.map((ix, i) => ({ i, c: decodeCreateAccount(ix) })).filter((x) => x.c !== null);
+  if (creates.length !== LAUNCH_CREATE_ORDER.length) {
+    v.push(`expected ${LAUNCH_CREATE_ORDER.length} createAccount instructions, got ${creates.length}`);
+  }
+  LAUNCH_CREATE_ORDER.forEach((name, n) => {
+    const x = creates[n];
+    if (!x) return;
+    const c = x.c!;
+    const pin = pins[name];
+    if (c.owner !== pin.owner) v.push(`ix ${x.i}: ${name} createAccount owner ${c.owner} (expected ${pin.owner})`);
+    if (c.space !== BigInt(pin.space)) v.push(`ix ${x.i}: ${name} createAccount space ${c.space} (expected ${pin.space})`);
+    const rent = rentExemptLamports.get(pin.space);
+    if (rent === undefined) v.push(`ix ${x.i}: no rent-exempt minimum known for ${pin.space} bytes`);
+    else if (c.lamports !== rent) v.push(`ix ${x.i}: ${name} createAccount lamports ${c.lamports} (expected the rent-exempt ${rent})`);
+  });
   return v;
 }

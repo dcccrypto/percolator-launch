@@ -28,6 +28,8 @@ const h = vi.hoisted(async () => {
     saveInFlightMarket: (await import("vitest")).vi.fn(),
     serverSlot: 5_000,
     serverSlabExists: false,
+    /** Blockhashes the fake cluster reports as still valid (isBlockhashValid). */
+    validBlockhashes: new Set<string>(),
   };
 });
 
@@ -61,6 +63,9 @@ vi.mock("@/lib/server-rpc", async () => {
       getSlot: async () => s.serverSlot,
       getLatestBlockhash: async () => ({ blockhash: "8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR", lastValidBlockHeight: 99 }),
       getAccountInfo: async () => (s.serverSlabExists ? { data: new Uint8Array(10), owner: PublicKey.default, lamports: 1, executable: false } : null),
+      // Same rent formula as the client-side harness connection below (1_000_000 + space).
+      getMinimumBalanceForRentExemption: async (n: number) => 1_000_000 + n,
+      isBlockhashValid: async (bh: string) => ({ context: { slot: s.serverSlot }, value: s.validBlockhashes.has(bh) }),
     }),
   };
 });
@@ -76,6 +81,20 @@ import { launchBundleViolations, neutralFromV1, v1LimitViolations, type NeutralI
 import { splitV1Wire, type RawTxSigner } from "@/lib/tx-v1";
 import { compileV1Message } from "@/lib/v21/sdk";
 import { buildKeeperRegisterMemoIx, verifyKeeperRegisterProofTx } from "@/lib/keeper-register-memo";
+import { COSIGN_V1_LIMIT_PER_DEPLOYER, COSIGN_V1_LIMIT_PER_IP, resetCosignV1RateLimits } from "@/lib/launch-single-tx/cosign-rate-limit";
+import {
+  COSIGN_HEAP_BYTES,
+  COSIGN_MAX_LOADED_ACCOUNTS_BYTES,
+  COSIGN_MAX_PRIORITY_FEE_LAMPORTS,
+  COSIGN_MIN_LOADED_ACCOUNTS_BYTES,
+  ValidatedLaunchMessage,
+} from "@/lib/launch-single-tx/cosign-validate";
+import { SINGLE_TX_COMPUTE_UNITS, SINGLE_TX_LOADED_ACCOUNTS_BYTES } from "@/lib/launch-single-tx/run";
+import { PRIORITY_FEE_MAX_MICRO_LAMPORTS } from "@/lib/tx";
+import { MAX_PRIORITY_FEE_LAMPORTS, priorityFeeLamportsFromMicroPerCu } from "@/lib/v21/sdk";
+import { requirePlaygroundKeeperSigner } from "@/lib/playground-keeper-signer";
+import { V1RpcError } from "@/lib/v21/sdk";
+import { V1TransportError } from "@/lib/tx-v1/rpc";
 
 const S = await h;
 const seed = S.seed;
@@ -221,6 +240,8 @@ beforeEach(() => {
   batches = [];
   S.serverSlot = 5_000;
   S.serverSlabExists = false;
+  S.validBlockhashes = new Set(["GHtXQBpHnMXhoLGsryeDY7i6bGqTC2LGqS11Kf3rKmFS"]);
+  resetCosignV1RateLimits();
   S.signAllCompat.mockImplementation(async (_w: unknown, txs: Transaction[]) => {
     batches.push(txs);
     throw new Error("stop: batch captured before broadcast");
@@ -427,9 +448,43 @@ describe("failure paths", () => {
 
   it("RPC format rejection on send => fallback once (nothing accepted)", async () => {
     let sends = 0;
-    await launch({ singleTx: true, deps: { send: async () => { sends++; throw new Error("RPC sendTransaction failed: -32602 invalid transaction: transaction failed to sanitize"); } } });
+    await launch({ singleTx: true, deps: { send: async () => { sends++; throw new V1RpcError("sendTransaction", -32602, "invalid transaction: transaction failed to sanitize"); } } });
     expect(sends).toBe(1);
     expect(S.signAllCompat).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["a transport failure (fetch failed)", () => new V1TransportError("sendTransaction", new TypeError("Failed to fetch"))],
+    ["an error whose TEXT says -32602 / -32002 but carries no code", () => new Error("RPC sendTransaction failed: -32602 invalid transaction; -32002 Transaction simulation failed")],
+    ["a transport failure whose text says -32002", () => new V1TransportError("sendTransaction", new Error("-32002 Transaction simulation failed"))],
+  ])("send throws %s => never a fallback: the outcome resolver decides (here: landed)", async (_n, mk) => {
+    const textOnly = _n.startsWith("an error whose TEXT");
+    const { outcome } = await launch({ singleTx: true, deps: { send: async (w) => { sent.push(w); throw mk(); } } });
+    expect(sent).toHaveLength(1);
+    expect(S.signAllCompat).not.toHaveBeenCalled(); // no batch, no second prompt
+    // a code-less plain Error mentioning "Transaction simulation failed" is still read as a preflight refusal (legacy text rule)
+    if (textOnly) expect(outcome).toEqual({ status: "aborted" });
+    else expect(outcome).toEqual({ status: "success" }); // the resolver read the (default) confirmed status
+  });
+
+  it.each([
+    ["Phantom 4001", () => ({ code: 4001, message: "User rejected the request." })],
+    ["wallet-adapter wrapping 4001", () => Object.assign(new Error("Unexpected error"), { name: "WalletSignTransactionError", error: { code: 4001, message: "Unexpected error" } })],
+    ["Transaction cancelled", () => new Error("Transaction cancelled")],
+    ["MWA not signed", () => Object.assign(new Error("not signed"), { name: "SolanaMobileWalletAdapterProtocolError", code: -3 })],
+  ])("decline (%s) => refused, ONE prompt, no batch fallback", async (_n, mk) => {
+    const { outcome } = await launch({ singleTx: true, deps: { walletSign: async () => { walletPrompts++; throw mk(); } } });
+    expect(outcome).toEqual({ status: "aborted" });
+    expect(walletPrompts).toBe(1);
+    expect(S.signAllCompat).not.toHaveBeenCalled();
+    expect(stateBox.error).toMatch(/declined/);
+  });
+
+  it("a wallet error that is neither a decline nor a v1 parse failure => refused, no batch re-prompt", async () => {
+    const { outcome } = await launch({ singleTx: true, deps: { walletSign: async () => { walletPrompts++; throw new Error("WalletNotConnectedError"); } } });
+    expect(outcome).toEqual({ status: "aborted" });
+    expect(walletPrompts).toBe(1);
+    expect(S.signAllCompat).not.toHaveBeenCalled();
   });
 
   it("preflight refusal (-32002) => refused, no fallback", async () => {
@@ -499,7 +554,13 @@ describe("keeper-cosign route: v1 validation", () => {
     good = splitV1Wire(sent[0]!).message;
     body = { deployer: WALLET.publicKey.toBase58(), slabAddress: Keypair.fromSeed(seed(77)).publicKey.toBase58(), initialPriceE6: "1000000", assetIndex: 0, fresh: true };
   });
+  /** POST without touching the rate-limit windows (the L-3 test counts requests itself). */
+  const postRaw = async (message: Uint8Array, over: Record<string, unknown> = {}) => {
+    const res = await cosignPOST(new NextRequest("http://localhost/x", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...body, ...over, v1MessageBase64: Buffer.from(message).toString("base64") }) }));
+    return { status: res.status, json: (await res.json()) as { error?: string; keeperSignatureBase64?: string } };
+  };
   const post = async (message: Uint8Array, over: Record<string, unknown> = {}) => {
+    resetCosignV1RateLimits(); // validation probes are not rate-limit probes
     const res = await cosignPOST(new NextRequest("http://localhost/x", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...body, ...over, v1MessageBase64: Buffer.from(message).toString("base64") }) }));
     return { status: res.status, json: (await res.json()) as { error?: string; keeperSignatureBase64?: string } };
   };
@@ -611,6 +672,108 @@ describe("keeper-cosign route: v1 validation", () => {
     expect((await post(encodeV1Message({ ...d, configMask: d.configMask | 0x20 })))).toMatchObject({ status: 422 });
     S.serverSlabExists = true;
     expect((await post(good)).status).toBe(409);
+  });
+
+  // ---- security review 2026-10-05 L-1 / L-2 / L-3 / L-4 (each a negative control against the real route)
+  const createIdx = (d: ReturnType<typeof decodeV1Message>) =>
+    d.instructions.map((ix, i) => ({ ix, i })).filter(({ ix }) => d.accountKeys[ix.programIdIndex]!.equals(SystemProgram.programId)).map(({ i }) => i);
+  /** Rewrite one createAccount field in place (lamports @4, space @12, owner @20). */
+  const withCreate = (m: Uint8Array, n: number, f: (data: Buffer) => void): Uint8Array => {
+    const d = decodeV1Message(m);
+    const ixs = d.instructions.map((ix) => ({ ...ix, data: new Uint8Array(ix.data) }));
+    const i = createIdx(d)[n]!;
+    const b = Buffer.from(ixs[i]!.data);
+    f(b);
+    ixs[i]!.data = new Uint8Array(b);
+    return encodeV1Message({ ...d, instructions: ixs });
+  };
+
+  it("L-1: the five createAccounts are pinned (owner, space, rent-exempt lamports) to the builders' constants", async () => {
+    const d = decodeV1Message(good);
+    const creates = createIdx(d).map((i) => Buffer.from(d.instructions[i]!.data));
+    const tokenProgram = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+    const owners = creates.map((b) => new PublicKey(b.subarray(20, 52)));
+    expect(creates.map((b) => Number(b.readBigUInt64LE(12)))).toEqual([3_675, 9_563, 320, 82, 165]);
+    expect(owners[0]!.equals(PROGRAM) && owners[1]!.equals(PROGRAM) && owners[3]!.equals(tokenProgram) && owners[4]!.equals(tokenProgram)).toBe(true);
+    // rent in this harness = 1_000_000 + space on both the client and the server connection
+    expect(creates.map((b) => Number(b.readBigUInt64LE(4)))).toEqual([3_675, 9_563, 320, 82, 165].map((n) => 1_000_000 + n));
+    for (let n = 0; n < 5; n++) {
+      const plus1 = await post(withCreate(good, n, (b) => b.writeBigUInt64LE(b.readBigUInt64LE(4) + 1n, 4)));
+      expect(plus1.status, `create ${n} lamports+1`).toBe(422);
+      expect(plus1.json.error).toMatch(/lamports/);
+      const space = await post(withCreate(good, n, (b) => b.writeBigUInt64LE(10n * 1024n * 1024n, 12)));
+      expect(space.status, `create ${n} space`).toBe(422);
+      expect(space.json.error).toMatch(/space/);
+      const owner = await post(withCreate(good, n, (b) => b.set(KEEPER.publicKey.toBytes(), 20)));
+      expect(owner.status, `create ${n} owner`).toBe(422);
+      expect(owner.json.error).toMatch(/owner/);
+    }
+    expect((await post(good)).status).toBe(200); // positive control after the mutations
+  });
+
+  it("L-1: priority fee capped, heap only {default, 128 KiB}, loaded-accounts limit in [3 MiB, 64 MiB]", async () => {
+    // the route constants agree with the client's own ceilings (the keeper never refuses an honest launch)
+    expect(COSIGN_MAX_PRIORITY_FEE_LAMPORTS).toBe(priorityFeeLamportsFromMicroPerCu(PRIORITY_FEE_MAX_MICRO_LAMPORTS, SINGLE_TX_COMPUTE_UNITS));
+    expect(COSIGN_MAX_PRIORITY_FEE_LAMPORTS <= MAX_PRIORITY_FEE_LAMPORTS).toBe(true);
+    expect(SINGLE_TX_LOADED_ACCOUNTS_BYTES).toBeGreaterThanOrEqual(COSIGN_MIN_LOADED_ACCOUNTS_BYTES);
+    expect(SINGLE_TX_LOADED_ACCOUNTS_BYTES).toBeLessThanOrEqual(COSIGN_MAX_LOADED_ACCOUNTS_BYTES);
+    expect(SINGLE_TX_COMPUTE_UNITS).toBeLessThanOrEqual(1_400_000);
+    const d = decodeV1Message(good);
+    expect(d.priorityFeeLamports).not.toBeNull();
+    expect(d.heapSizeBytes).toBe(COSIGN_HEAP_BYTES);
+    const at = async (over: Partial<ReturnType<typeof decodeV1Message>>) => (await post(encodeV1Message({ ...d, ...over }))).status;
+    expect(await at({ priorityFeeLamports: 0xffff_ffff_ffff_ffffn })).toBe(422);
+    expect(await at({ priorityFeeLamports: 1_400_001n })).toBe(422);
+    expect(await at({ priorityFeeLamports: 1_400_000n })).toBe(200);
+    expect(await at({ heapSizeBytes: 262_144 })).toBe(422);
+    expect(await at({ heapSizeBytes: 65_536 })).toBe(422);
+    expect(await at({ loadedAccountsDataSizeLimit: 1 })).toBe(422);
+    expect(await at({ loadedAccountsDataSizeLimit: 3 * 1024 * 1024 - 1 })).toBe(422);
+    expect(await at({ loadedAccountsDataSizeLimit: 64 * 1024 * 1024 + 1 })).toBe(422);
+    expect(await at({ loadedAccountsDataSizeLimit: 64 * 1024 * 1024 })).toBe(200);
+  });
+
+  it("L-2: a lifetime that is not a recent valid blockhash is refused (422) before signing", async () => {
+    const d = decodeV1Message(good);
+    const signs = vi.spyOn(ed25519, "sign");
+    const r = await post(encodeV1Message({ ...d, recentBlockhash: new Uint8Array(32).fill(5) }));
+    expect(r.status).toBe(422);
+    expect(r.json.error).toMatch(/not a recent valid blockhash/);
+    expect(signs).not.toHaveBeenCalled();
+    S.validBlockhashes.clear(); // the real blockhash expired
+    expect((await post(good)).status).toBe(422);
+  });
+
+  it("L-3: per-deployer and per-IP limits on the v1 branch (429), legacy branch not counted", async () => {
+    resetCosignV1RateLimits(); // beforeEach's launch already made one v1 request
+    for (let k = 0; k < COSIGN_V1_LIMIT_PER_DEPLOYER; k++) expect((await postRaw(good)).status).toBe(200);
+    const r = await postRaw(good);
+    expect(r.status).toBe(429);
+    expect(r.json.error).toMatch(/per deployer/);
+    // the legacy co-sign (the batch fallback) is not counted and still answers
+    const legacy = await cosignPOST(new NextRequest("http://localhost/x", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
+    expect(legacy.status).toBe(200);
+    resetCosignV1RateLimits();
+    // one IP rotating deployers: the IP limit bounds it (deployer limit never reached)
+    const other = (k: number) => Keypair.fromSeed(seed(150 + k)).publicKey.toBase58();
+    let last = 0;
+    for (let k = 0; k <= COSIGN_V1_LIMIT_PER_IP; k++) {
+      last = (await postRaw(good, { deployer: other(k) })).status;
+      if (k < COSIGN_V1_LIMIT_PER_IP) expect(last).not.toBe(429);
+    }
+    expect(last).toBe(429);
+  });
+
+  it("L-4: the keeper signer signs ONLY a ValidatedLaunchMessage minted by the validator", async () => {
+    const signer = requirePlaygroundKeeperSigner();
+    expect(() => signer.signMessageBytes(good as unknown as ValidatedLaunchMessage)).toThrow(/not a validated launch message/);
+    expect(() => signer.signMessageBytes(Object.create(ValidatedLaunchMessage.prototype) as ValidatedLaunchMessage)).toThrow(/not a validated launch message/);
+    expect(() => signer.signMessageBytes({ bytes: () => good, nowSlot: 1n, blockhash: "x" } as unknown as ValidatedLaunchMessage)).toThrow(/not a validated launch message/);
+    expect(() => new ValidatedLaunchMessage(Symbol("forged") as never, good, 1n, "x")).toThrow(/only be created by/);
+    // the cosign route still works (positive control) and its signature verifies
+    const r = await post(good);
+    expect(r.status).toBe(200);
+    expect(ed25519.verify(Buffer.from(r.json.keeperSignatureBase64!, "base64"), good, KEEPER.publicKey.toBytes())).toBe(true);
   });
 
   it("legacy (non-v1) co-sign behaviour is unchanged", async () => {
