@@ -176,7 +176,7 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
           <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">
             Market controls
           </div>
-          <div className="text-[10px] text-[var(--text-muted)]">scroll · arrow keys · −/+</div>
+          <div className="text-[10px] text-[var(--text-muted)]">click, then scroll · arrow keys · −/+</div>
         </div>
 
         {/* ONE control per row below `sm`, centered on the card. The old
