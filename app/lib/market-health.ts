@@ -43,6 +43,7 @@ import { isAdlReduceOnly } from "@/lib/limits/adl-reduce-only";
 import { limitsFlags } from "@/lib/limits/flags";
 import { COPY } from "@/lib/limits/copy";
 import { closeOnlyDurationLine } from "@/lib/adl-since";
+import { isMoveFlowEnabled } from "@/lib/v21/move/flag";
 
 const MARKET_GROUP_OFF = 592;
 const MARKET_GROUP_LEN = 758;
@@ -347,7 +348,9 @@ export function healthBadges(h: MarketHealth, adlSinceMs: number | null = null, 
       id: "v1",
       label: V1_BADGE_LABEL,
       tone: "info",
-      detail: "This is a v1 market and it is close-only for now: you can close positions and withdraw, but not open new ones.",
+      detail: isMoveFlowEnabled()
+        ? "This is a v1 market and it is close-only: new trades, margin and deposits (including Earn deposits) are paused. Withdraw, close, claim and Earn exit stay open."
+        : "This is a v1 market and it is close-only for now: you can close positions and withdraw, but not open new ones.",
     });
   }
   return out;
