@@ -42,7 +42,7 @@ export function GrowthDashboard() {
     <div className="mx-auto max-w-[1100px] px-4 py-8 lg:px-6">
       <h1 className="text-2xl font-semibold text-[var(--text)]">Growth</h1>
       <p className="mt-1 mb-6 max-w-2xl text-sm text-[var(--text-secondary)]">
-        How much each market can carry, how full each side is, and the leverage it allows right now. Capacity follows the capital behind the market, so it rises as junior and Earn capital grows.
+        How much each market can carry, how full each side is, and the leverage it allows right now. Capacity follows the capital behind the market, so it rises as that capital grows.
       </p>
 
       {error ? (
