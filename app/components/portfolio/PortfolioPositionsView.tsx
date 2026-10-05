@@ -936,9 +936,7 @@ export function PortfolioPositionsView() {
                   ? "Your deposited collateral is listed under Market Deposits below."
                   : "Browse markets to start trading."}
               </p>
-              <Link href="/markets">
-                <GlowButton>Browse Markets</GlowButton>
-              </Link>
+              <GlowButton href="/markets">Browse Markets</GlowButton>
             </div>
           ) : (
             <div className="space-y-3">

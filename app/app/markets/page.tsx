@@ -674,9 +674,7 @@ function MarketsPageInner() {
               </h1>
               <p className="mt-2 text-[13px] text-[var(--text-secondary)]">perpetual futures, pick your poison.</p>
             </div>
-            <Link href="/create" aria-label="Launch a new market">
-              <GlowButton size="sm">+ LAUNCH MARKET</GlowButton>
-            </Link>
+            <GlowButton href="/create" aria-label="Launch a new market" size="sm">+ LAUNCH MARKET</GlowButton>
           </div>
         </ScrollReveal>
 
@@ -844,20 +842,16 @@ function MarketsPageInner() {
                     <GlowButton type="button" onClick={() => window.location.reload()}>
                       reload page
                     </GlowButton>
-                    <Link href="/create">
-                      <GlowButton variant="secondary" size="sm">
-                        launch market
-                      </GlowButton>
-                    </Link>
+                    <GlowButton href="/create" variant="secondary" size="sm">
+                      launch market
+                    </GlowButton>
                   </div>
                 </>
               ) : (
                 <>
                   <h3 data-testid="markets-empty" className="text-2xl font-medium tracking-tight text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>No markets yet — create the first one</h3>
                   <div className="mt-4">
-                    <Link href="/create" data-testid="markets-empty-create">
-                      <GlowButton>Create a market</GlowButton>
-                    </Link>
+                    <GlowButton href="/create" data-testid="markets-empty-create">Create a market</GlowButton>
                   </div>
                 </>
               )}

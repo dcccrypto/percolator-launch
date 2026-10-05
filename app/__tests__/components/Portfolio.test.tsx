@@ -73,7 +73,8 @@ vi.mock("@/components/ui/ScrollReveal", () => ({
   ScrollReveal: ({ children }: any) => <div>{children}</div>,
 }));
 vi.mock("@/components/ui/GlowButton", () => ({
-  GlowButton: ({ children }: any) => <button>{children}</button>,
+  // Mirrors GlowButton: a link when given href (#64), a button otherwise.
+  GlowButton: ({ children, href }: any) => (href ? <a href={href}>{children}</a> : <button>{children}</button>),
 }));
 
 vi.mock("@/lib/mock-mode", () => ({
@@ -526,9 +527,9 @@ describe("Portfolio Component Tests", () => {
 
       render(<PortfolioPage />);
 
-      const browseMarketsButton = screen.getByRole("button", { name: /Browse Markets/i });
-      expect(browseMarketsButton).toBeInTheDocument();
-      expect(browseMarketsButton.closest("a")).toHaveAttribute("href", "/markets");
+      const browseMarkets = screen.getByRole("link", { name: /Browse Markets/i });
+      expect(browseMarkets).toHaveAttribute("href", "/markets");
+      expect(browseMarkets.querySelector("button")).toBeNull();
     });
 
     it("should show wallet connection prompt when not connected", () => {
