@@ -90,6 +90,10 @@ export interface StepControlRoomProps {
   onLpExposureChange?: (bps: number) => void;
   /** P3 launch: the protocol pins the limit, so it is shown read-only. */
   p3?: boolean;
+  /** #2954: false when the wizard cannot register this token's market (no supported pool). Default true. */
+  registrable?: boolean;
+  /** Why it is not registrable (wizard's notRegistrableReason); shown as visible text. */
+  notRegistrableReason?: string | null;
 
   onLaunch: () => void;
   launchDisabled?: boolean;
@@ -98,11 +102,11 @@ export interface StepControlRoomProps {
   onBack: () => void;
 }
 
-const Readout: FC<{ k: string; v: string; tone?: "good" | "plain" }> = ({ k, v, tone = "plain" }) => (
+const Readout: FC<{ k: string; v: string; tone?: "good" | "warn" | "plain" }> = ({ k, v, tone = "plain" }) => (
   <div className="flex items-baseline justify-between border-b border-[var(--border-subtle)] py-[7px] last:border-b-0">
     <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">{k}</span>
     <span
-      className={`text-[11px] ${tone === "good" ? "text-[var(--long)]" : "text-[var(--text)]"}`}
+      className={`text-[11px] ${tone === "good" ? "text-[var(--long)]" : tone === "warn" ? "text-[var(--warning)]" : "text-[var(--text)]"}`}
       style={{ fontVariantNumeric: "tabular-nums" }}
     >
       {v}
@@ -140,6 +144,8 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
   lpExposureBps,
   onLpExposureChange,
   p3,
+  registrable = true,
+  notRegistrableReason,
   onLaunch,
   launchDisabled,
   launchDisabledReason,
@@ -158,7 +164,11 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
   return (
     <div className="space-y-5">
       {/* ── instrument cluster ─────────────────────────────────────────── */}
-      <div className="rounded-[4px] border border-[var(--border)] bg-[var(--panel-bg)] p-5">
+      <div
+        data-testid="control-dials"
+        data-dimmed={String(!registrable)}
+        className={`rounded-[4px] border border-[var(--border)] bg-[var(--panel-bg)] p-5 ${registrable ? "" : "opacity-50"}`}
+      >
         <div className="mb-5 flex items-center justify-between">
           <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">
             Market controls
@@ -247,10 +257,17 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
             Pre-flight
           </div>
           <Readout k="Market" v={symbol} />
-          <Readout k="Price feed" v={oracleLabel} tone="good" />
+          <Readout
+            k="Price feed"
+            v={registrable ? oracleLabel : "No supported pool"}
+            tone={registrable ? "good" : "warn"}
+          />
           <Readout k="Start price" v={startPrice} />
           <Readout k="Market size" v={`${slabBytes.toLocaleString()} B · max capacity`} />
-          <Readout k="Market rent" v={rentSol === null ? "—" : `${rentSol.toFixed(3)} SOL`} />
+          {/* #2954: the cost estimate is dimmed when this market cannot be registered. */}
+          <div data-testid="cost-estimate-rent" data-dimmed={String(!registrable)} className={registrable ? "" : "opacity-50"}>
+            <Readout k="Market rent" v={rentSol === null ? "—" : `${rentSol.toFixed(3)} SOL`} />
+          </div>
           {/* GH#2622: set expectations UP FRONT, before launch — not only after
               a creator gets stuck (RecoverSolBanner's gated RECLAIM handles that
               case). Rent is reclaimable only if setup stops before any deposit
@@ -277,8 +294,10 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
             <FeeBreakdown highlight="creator" feeBps={tradingFeeBps} />
           </div>
           {/* LP + insurance alone understated it ~3x: both backing domains are seeded at 100% of LP. */}
-          <Readout k="You seed" v={`${seedTotal.toLocaleString()} ${collateralSymbol}`} />
-          <Readout k="Incl. counterparty backing" v={`${seedBacking.toLocaleString()} ${collateralSymbol}`} />
+          <div data-testid="cost-estimate" data-dimmed={String(!registrable)} className={registrable ? "" : "opacity-50"}>
+            <Readout k="You seed" v={`${seedTotal.toLocaleString()} ${collateralSymbol}`} />
+            <Readout k="Incl. counterparty backing" v={`${seedBacking.toLocaleString()} ${collateralSymbol}`} />
+          </div>
           <Readout k="Approvals" v="1" />
         </div>
 
@@ -289,6 +308,11 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
             disabledReason={launchDisabledReason}
             instant={instantLaunch}
           />
+          {!registrable && (
+            <p data-testid="not-registrable-reason" role="status" className="mt-3 text-center text-[11px] leading-relaxed text-[var(--warning)]">
+              {notRegistrableReason ?? "This token cannot be priced"}
+            </p>
+          )}
         </div>
       </div>
 

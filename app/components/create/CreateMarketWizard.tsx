@@ -1281,6 +1281,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             lpExposureBps={clampLpExposureBps(wizard.lpExposureBps)}
             onLpExposureChange={(bps) => setWizard((prev) => ({ ...prev, lpExposureBps: clampLpExposureBps(bps) }))}
             p3={p3WizardEnabled()}
+            // While the lookup is still resolving the readout says "Resolving…", not "No supported pool".
+            registrable={registrable || !oracleSettled}
+            notRegistrableReason={notRegistrableReason}
             juniorFloorBps={wizard.juniorFloorBps ?? DEFAULT_JUNIOR_FLOOR_BPS}
             onJuniorFloorChange={(bps) => setWizard((prev) => ({ ...prev, juniorFloorBps: bps }))}
             onLaunch={handleLaunch}
