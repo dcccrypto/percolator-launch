@@ -9,7 +9,7 @@
  * wallet, RPC connection, config, tx hooks and fetch are stubbed.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
 import { ACCOUNT_SIZE, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 
@@ -65,7 +65,7 @@ vi.mock("@solana/spl-token", async (orig) => ({
 }));
 vi.mock("@/lib/config", () => ({ getConfig: () => ({ vaultProgramId: STAKE_PROGRAM.toBase58() }) }));
 vi.mock("@/hooks/useStakeDepositByPool", () => ({ useStakeDepositByPool: () => ({ deposit: vi.fn(), loading: false, error: null }) }));
-vi.mock("@/hooks/useStakeWithdrawByPool", () => ({ useStakeWithdrawByPool: () => ({ withdraw: vi.fn(), loading: false, error: null }) }));
+vi.mock("@/hooks/useStakeWithdrawByPool", () => ({ useStakeWithdrawByPool: () => ({ withdraw: vi.fn(async () => "withdrawSig11111"), loading: false, error: null }) }));
 vi.mock("@/components/market/MarketLogo", () => ({ MarketLogo: () => null }));
 vi.mock("@/components/wallet/ConnectWalletCta", () => ({ ConnectWalletCta: ({ label }: { label: string }) => <button>{label}</button> }));
 
@@ -338,5 +338,59 @@ describe("#2932 follow-up: the Withdraw tab's balance read failing is not 'No st
     fireEvent.click(screen.getByTestId("stake-tab-withdraw"));
     expect(await screen.findByText("No staked balance in this pool.")).toBeTruthy();
     expect(screen.queryByTestId("stake-withdraw-read-error")).toBeNull();
+  });
+});
+
+describe("Withdraw tab: switching pools doesn't keep the previous pool's balance", () => {
+  it("pool A's staked shares disappear while pool B is read", async () => {
+    h.fetch.mockResolvedValue(okResponse([apiPool(SLAB_OK, "AAA"), apiPool(SLAB_BAD, "BBB")]));
+    let releaseB!: () => void;
+    const gateB = new Promise<void>((r) => { releaseB = r; });
+    h.getAccountInfo.mockImplementation(async (pk: PublicKey) => {
+      if (pk.equals(poolPdaBad)) { await gateB; return null; }
+      if (pk.equals(poolPdaOk)) return { data: poolAccountData(), owner: STAKE_PROGRAM, lamports: 1, executable: false };
+      if (pk.equals(lpAta)) return { data: lpTokenAccountData(5_000_000n), owner: TOKEN_PROGRAM_ID, lamports: 1, executable: false };
+      return null;
+    });
+
+    render(<StakePage />);
+    await screen.findAllByText("AAA");
+    fireEvent.click(screen.getByTestId("stake-tab-withdraw"));
+    expect(await screen.findByText(/Staked: .* shares/)).toBeTruthy();
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "pool-BBB" } });
+    expect(screen.queryByText(/Staked: .* shares/)).toBeNull();
+    expect(screen.getByText("Checking staked balance…")).toBeTruthy();
+    expect(screen.queryByText("Nothing to Withdraw")).toBeNull();
+
+    releaseB();
+    expect(await screen.findByText("No staked balance in this pool.")).toBeTruthy();
+  });
+  it("a refresh of the same pool after a withdraw keeps the balance on screen", async () => {
+    h.fetch.mockResolvedValue(okResponse([apiPool(SLAB_OK, "AAA")]));
+    h.getAccountInfo.mockImplementation(async (pk: PublicKey) => {
+      if (pk.equals(poolPdaOk)) return { data: poolAccountData(), owner: STAKE_PROGRAM, lamports: 1, executable: false };
+      if (pk.equals(lpAta)) return { data: lpTokenAccountData(5_000_000n), owner: TOKEN_PROGRAM_ID, lamports: 1, executable: false };
+      return null;
+    });
+
+    render(<StakePage />);
+    await screen.findAllByText("AAA");
+    fireEvent.click(screen.getByTestId("stake-tab-withdraw"));
+    expect(await screen.findByText(/Staked: .* shares/)).toBeTruthy();
+    const fetchesBefore = h.fetch.mock.calls.length;
+    // Hold the re-reads open, so the check below runs while the refresh is in flight.
+    const funded = h.getAccountInfo.getMockImplementation()!;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    h.getAccountInfo.mockImplementation(async (pk: PublicKey) => { await gate; return funded(pk); });
+
+    fireEvent.change(screen.getByTestId("stake-withdraw-input"), { target: { value: "1" } });
+    fireEvent.click(screen.getByTestId("stake-withdraw-submit"));
+    // The tx-success refresh re-fetches the pools (new pool objects, same pool) and re-reads.
+    await waitFor(() => expect(h.fetch.mock.calls.length).toBeGreaterThan(fetchesBefore));
+    await act(async () => {}); // let the refreshed pool list commit (new pool objects, same pool)
+    expect(screen.getByText(/Staked: .* shares/)).toBeTruthy();
+    await act(async () => { release(); });
   });
 });

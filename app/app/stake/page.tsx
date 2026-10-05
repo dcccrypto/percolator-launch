@@ -617,16 +617,27 @@ function DepositWidget({
   const [txStatus, setTxStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
 
   const [withdrawAmount, setWithdrawAmount] = useState("");
-  const [withdrawPosition, setWithdrawPosition] = useState<UserPosition | null>(null);
-  const [withdrawPositionLoading, setWithdrawPositionLoading] = useState(false);
-  // The selected pool's balance could not be read (#2706): unknown, not "no balance".
-  const [withdrawPositionError, setWithdrawPositionError] = useState(false);
+  const pool = pools.find((p) => p.id === selectedPool) ?? pools[0];
+  // Each read result is stored with the wallet + pool it was read for, and only counts
+  // while that pair is still selected. So after a pool or wallet change the previous
+  // position (and its Withdraw button) is never shown, not even for the frame before the
+  // new read starts; a refresh of the same pair keeps it on screen.
+  const withdrawKey =
+    connected && publicKey && pool?.slabAddress ? `${publicKey.toBase58()}:${pool.slabAddress}` : null;
+  const [withdrawRead, setWithdrawRead] = useState<{ key: string; position: UserPosition | null } | null>(null);
+  // The key whose balance could not be read (#2706): unknown, not "no balance".
+  const [withdrawErrorKey, setWithdrawErrorKey] = useState<string | null>(null);
+  const [withdrawReading, setWithdrawReading] = useState(false);
+  const withdrawPosition = withdrawRead !== null && withdrawRead.key === withdrawKey ? withdrawRead.position : null;
+  const withdrawPositionError = withdrawKey !== null && withdrawErrorKey === withdrawKey;
+  // Loading while a read runs, and for a selected pair that hasn't been read yet.
+  const withdrawPositionLoading =
+    withdrawReading || (withdrawKey !== null && withdrawRead?.key !== withdrawKey && !withdrawPositionError);
   const [withdrawRefreshKey, setWithdrawRefreshKey] = useState(0);
   // Live countdown for the Withdraw tab; at 0 re-read the position (the chain decides).
   const withdrawCooldown = useStakeCooldown(withdrawPosition, () => setWithdrawRefreshKey((k) => k + 1));
   const [withdrawTxStatus, setWithdrawTxStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
 
-  const pool = pools.find((p) => p.id === selectedPool) ?? pools[0];
   const amountNum = parseFloat(amount) || 0;
   // Exact deposit amount in base units (null = unparseable / too many decimals)
   // for the wallet-balance check; the float `amountNum` is display-only.
@@ -700,14 +711,15 @@ function DepositWidget({
   // currently-selected pool instead of scanning all pools for the first match.
   useEffect(() => {
     if (!connected || !publicKey || !pool?.slabAddress) {
-      setWithdrawPosition(null);
-      setWithdrawPositionLoading(false);
-      setWithdrawPositionError(false);
+      setWithdrawRead(null);
+      setWithdrawReading(false);
+      setWithdrawErrorKey(null);
       return;
     }
     let cancelled = false;
-    setWithdrawPositionLoading(true);
-    setWithdrawPositionError(false);
+    const readKey = `${publicKey.toBase58()}:${pool.slabAddress}`;
+    setWithdrawReading(true);
+    setWithdrawErrorKey(null);
     (async () => {
       try {
         // Stake pools are owned by this deployment's vault program
@@ -717,17 +729,17 @@ function DepositWidget({
           ?? DEVNET_PROGRAM_IDS.stake
         );
         const found = await fetchPoolPosition(pool, publicKey, connection, stakeProgramId);
-        if (!cancelled) setWithdrawPosition(found);
+        if (!cancelled) setWithdrawRead({ key: readKey, position: found });
       } catch (err) {
         // fetchPoolPosition throws only when the pool could not be read; a confirmed
         // "no position" resolves to null. So this is unknown, not empty.
         console.error("[DepositWidget] Failed to fetch withdraw position:", err);
         if (!cancelled) {
-          setWithdrawPosition(null);
-          setWithdrawPositionError(true);
+          setWithdrawRead(null);
+          setWithdrawErrorKey(readKey);
         }
       } finally {
-        if (!cancelled) setWithdrawPositionLoading(false);
+        if (!cancelled) setWithdrawReading(false);
       }
     })();
     return () => { cancelled = true; };
@@ -1105,7 +1117,9 @@ function DepositWidget({
                 {withdrawLoading
                   ? "Withdrawing…"
                   : !withdrawPosition
-                  ? withdrawPositionError ? "Balance unavailable" : "Nothing to Withdraw"
+                  ? withdrawPositionLoading
+                    ? "Checking…"
+                    : withdrawPositionError ? "Balance unavailable" : "Nothing to Withdraw"
                   : !withdrawPosition.cooldownElapsed
                   ? withdrawCooldown.label
                   : "Withdraw →"}
