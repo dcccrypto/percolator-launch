@@ -26,12 +26,13 @@ if (sha !== lock.blob.tarballSha256) {
   console.error(`refusing: tarball sha256 ${sha} != pinned ${lock.blob.tarballSha256}`);
   process.exit(1);
 }
-const token = process.env.BLOB_READ_WRITE_TOKEN;
-if (!token) throw new Error("BLOB_READ_WRITE_TOKEN is not set");
+const { blobAuthFromEnv } = await import("./fetch-tv-library.mjs");
+const auth = blobAuthFromEnv(process.env);
+if (!auth) throw new Error("set TV_BLOB_STORE_ID (+ VERCEL_OIDC_TOKEN) or BLOB_READ_WRITE_TOKEN");
 const { put } = await import("@vercel/blob");
 const res = await put(lock.blob.pathname, buf, {
   access: "private",
-  token,
+  ...auth,
   addRandomSuffix: false,
   allowOverwrite: false,
   contentType: "application/gzip",

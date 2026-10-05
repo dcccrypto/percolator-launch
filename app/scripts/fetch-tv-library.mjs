@@ -13,7 +13,11 @@
  *      extracted runtime tree digest must both match the lock.
  *   2. GitHub (fallback): TV_LIBRARY_TOKEN with read access to TV_LIBRARY_REPO.
  *
- *   BLOB_READ_WRITE_TOKEN  Vercel Blob read token (already on the Vercel project).
+ *   TV_BLOB_STORE_ID       The PRIVATE Blob store holding the tarball, read with the project's
+ *                          OIDC token (VERCEL_OIDC_TOKEN). Preferred. Deliberately NOT named
+ *                          BLOB_STORE_ID: that name would switch every other @vercel/blob caller
+ *                          in the app (nonces, prefund claims, registered markets) to this store.
+ *   BLOB_READ_WRITE_TOKEN  Legacy: a read-write token for a private store.
  *   TV_LIBRARY_TOKEN     GitHub token with read access to TV_LIBRARY_REPO.
  *                        Neither set (fork PRs, CI, most local dev) -> nothing is
  *                        fetched, the build still succeeds, and the trade page
@@ -167,10 +171,25 @@ async function download(repo, commit, token, file) {
 
 class DigestMismatch extends Error {}
 
+/**
+ * Blob credentials for the TradingView store. TV_BLOB_STORE_ID (OIDC) wins and never falls back to
+ * BLOB_READ_WRITE_TOKEN, which belongs to the app's PUBLIC store. Returns null when neither is set.
+ */
+export function blobAuthFromEnv(env) {
+  const storeId = (env.TV_BLOB_STORE_ID ?? "").trim();
+  if (storeId) {
+    const oidcToken = (env.VERCEL_OIDC_TOKEN ?? "").trim();
+    return oidcToken ? { storeId, oidcToken } : { storeId };
+  }
+  const token = (env.BLOB_READ_WRITE_TOKEN ?? "").trim();
+  return token ? { token } : null;
+}
+
 /** Read the pinned tarball from Vercel Blob (private store) with the project's token. Returns a Buffer or null. */
-export async function downloadFromBlob(lock, token, getImpl) {
+export async function downloadFromBlob(lock, auth, getImpl) {
   const get = getImpl ?? (await import("@vercel/blob")).get;
-  const res = await get(lock.blob.pathname, { access: "private", token, useCache: false });
+  const creds = typeof auth === "string" ? { token: auth } : auth;
+  const res = await get(lock.blob.pathname, { access: "private", ...creds, useCache: false });
   if (!res || res.statusCode !== 200 || !res.stream) return null;
   return Buffer.from(await new Response(res.stream).arrayBuffer());
 }
@@ -189,12 +208,12 @@ export async function main(env = process.env, deps = {}) {
     return 0;
   }
 
-  const blobToken = env.BLOB_READ_WRITE_TOKEN;
+  const blobAuth = blobAuthFromEnv(env);
   const ghToken = env.TV_LIBRARY_TOKEN;
-  if (!(blobToken && lock.blob) && !ghToken) {
+  if (!(blobAuth && lock.blob) && !ghToken) {
     // A stale or partial copy must not be served as if it were the locked one.
     rmSync(destDir, { recursive: true, force: true });
-    log("no BLOB_READ_WRITE_TOKEN / TV_LIBRARY_TOKEN — library not fetched; the trade page will use the fallback chart.");
+    log("no TV_BLOB_STORE_ID / BLOB_READ_WRITE_TOKEN / TV_LIBRARY_TOKEN — library not fetched; the trade page will use the fallback chart.");
     return 0;
   }
 
@@ -206,10 +225,10 @@ export async function main(env = process.env, deps = {}) {
     let libDir = null;
     let source = "";
 
-    if (blobToken && lock.blob) {
+    if (blobAuth && lock.blob) {
       try {
         log(`downloading ${lock.tag} runtime from Vercel Blob…`);
-        const buf = await downloadFromBlob(lock, blobToken, deps.getBlob);
+        const buf = await downloadFromBlob(lock, blobAuth, deps.getBlob);
         if (buf === null) throw new Error("blob not found");
         const got = sha256Hex(buf);
         if (got !== lock.blob.tarballSha256) {
