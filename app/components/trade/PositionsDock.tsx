@@ -32,6 +32,7 @@ import { FC, memo, useMemo, useState } from "react";
 import { useUserAccount, useUserAccountScanPending, useOwnerMarketPortfolios } from "@/hooks/useUserAccount";
 import type { UserAccountInfo } from "@/lib/userAccountScan";
 import { computePositionRowView } from "@/lib/position-row-view";
+import { PublicKey } from "@solana/web3.js";
 import { useNftWrappedPosition } from "@/hooks/useNftWrappedPosition";
 import { PositionNftMenu, ClosedPositionNftNotice, NFT_MENU_COPY } from "@/components/trade/PositionNftMenu";
 import { useClosePosition } from "@/hooks/useClosePosition";
@@ -821,7 +822,7 @@ const PositionTableRow: FC<{ slabAddress: string; info: UserAccountInfo; isPrima
  * rest are Isolated. Only mounted when a wallet actually holds 2+ portfolios;
  * the single-portfolio case renders PositionRow (unchanged) instead.
  */
-const MultiPositionTable: FC<{ slabAddress: string; infos: readonly UserAccountInfo[] }> = ({ slabAddress, infos }) => {
+const MultiPositionTable: FC<{ slabAddress: string; infos: readonly UserAccountInfo[]; primaryPubkey?: PublicKey }> = ({ slabAddress, infos, primaryPubkey }) => {
   const { accounts } = useSlabState();
   const { engineStale } = useEngineFreshness();
   const lpEntry = useMemo(() => accounts.find(({ account }) => account.kind === AccountKind.LP) ?? null, [accounts]);
@@ -859,10 +860,25 @@ const MultiPositionTable: FC<{ slabAddress: string; infos: readonly UserAccountI
           </thead>
           <tbody>
             {infos.map((info, i) => (
-              <PositionTableRow key={info.pubkey?.toBase58() ?? `pf-${i}`} slabAddress={slabAddress} info={info} isPrimary={i === 0} />
+              <PositionTableRow
+                key={info.pubkey?.toBase58() ?? `pf-${i}`}
+                slabAddress={slabAddress}
+                info={info}
+                // Cross = the true primary (lowest-pubkey) account, matched by
+                // pubkey — NOT the filtered-list index, since the primary may be
+                // flat and excluded from `infos` here. Everything else is Isolated.
+                isPrimary={!!primaryPubkey && !!info.pubkey && info.pubkey.equals(primaryPubkey)}
+              />
             ))}
           </tbody>
         </table>
+      </div>
+      {/* #2560 review M2: warmup is keyed by accountIdx (always 0 on v17), so it
+          can't distinguish portfolios — render it once at the market level, the
+          same (slab, 0) warmup the single-row path shows. Per-portfolio warmup
+          needs server-side portfolio keying (same gap as the entry cache, #211). */}
+      <div className="px-4 py-2">
+        <WarmupProgress slabAddress={slabAddress} accountIdx={0} />
       </div>
     </div>
   );
@@ -876,8 +892,23 @@ const MultiPositionTable: FC<{ slabAddress: string; infos: readonly UserAccountI
  */
 const ThisMarketPositions: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const infos = useOwnerMarketPortfolios();
-  if (infos.length > 1) return <MultiPositionTable slabAddress={slabAddress} infos={infos} />;
-  return <PositionRow slabAddress={slabAddress} />;
+  // Only portfolios that actually HOLD a position get a row. A flat (size-0)
+  // account — e.g. a closed isolated leg not yet rent-reclaimed — must not
+  // render a phantom "SHORT 0" row; the single-portfolio path already hides a
+  // flat account behind its empty state, and the multi view matches that by
+  // filtering here. (#2560 review M1.)
+  const active = useMemo(() => infos.filter((i) => i.account.positionSize !== 0n), [infos]);
+  // The true cross/primary account is always the lowest-pubkey portfolio (infos
+  // is base58-sorted), whether or not it currently holds a position.
+  const primaryPk = infos.length > 0 ? infos[0].pubkey : undefined;
+  const soleActiveIsPrimary =
+    active.length === 1 && !!active[0].pubkey && !!primaryPk && active[0].pubkey.equals(primaryPk);
+  // Common case — no position, or the one position is in the primary (cross)
+  // account — keeps today's single-row UI (including the NFT-wrap and empty
+  // states), byte-identical. Otherwise (2+ positions, or a lone position living
+  // in an isolated account) render the multi-row table.
+  if (active.length === 0 || soleActiveIsPrimary) return <PositionRow slabAddress={slabAddress} />;
+  return <MultiPositionTable slabAddress={slabAddress} infos={active} primaryPubkey={primaryPk} />;
 };
 
 /**

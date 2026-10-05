@@ -20,19 +20,20 @@ const SRC = fs.readFileSync(
 );
 
 describe("PositionsDock multi-portfolio rendering", () => {
-  it("chooses single-row vs multi-row by portfolio count; single still uses PositionRow", () => {
+  it("chooses single-row vs multi-row by ACTIVE position count; single still uses PositionRow", () => {
     expect(SRC).toContain("useOwnerMarketPortfolios");
-    expect(SRC).toMatch(/infos\.length > 1/);
-    // the <=1 branch returns the unchanged single-portfolio row
-    expect(SRC).toMatch(/return <PositionRow slabAddress=\{slabAddress\} \/>;/);
+    // flat (size-0) portfolios are filtered so they can't make a phantom row (M1)
+    expect(SRC).toMatch(/\.filter\(\(i\) => i\.account\.positionSize !== 0n\)/);
+    // no position, or the lone position is the primary → the unchanged single row
+    expect(SRC).toMatch(/if \(active\.length === 0 \|\| soleActiveIsPrimary\) return <PositionRow slabAddress=\{slabAddress\} \/>;/);
   });
 
   it("derives every multi-row number from the shared pure helper (single source of truth)", () => {
     expect(SRC).toContain("computePositionRowView");
   });
 
-  it("labels the lowest-pubkey portfolio Cross and the rest Isolated", () => {
-    expect(SRC).toMatch(/isPrimary=\{i === 0\}/);
+  it("labels the TRUE primary (lowest-pubkey) Cross by pubkey match, the rest Isolated", () => {
+    expect(SRC).toMatch(/isPrimary=\{!!primaryPubkey && !!info\.pubkey && info\.pubkey\.equals\(primaryPubkey\)\}/);
     expect(SRC).toMatch(/isPrimary \? "Cross" : "Isolated"/);
   });
 
