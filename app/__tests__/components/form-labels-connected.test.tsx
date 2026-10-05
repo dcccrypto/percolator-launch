@@ -1,5 +1,5 @@
 /**
- * #66: on /stake, /devnet-mint and in the close form, each <label> sat next to its field without
+ * #3141: on /stake, /devnet-mint and in the close form, each <label> sat next to its field without
  * htmlFor / id, so screen readers announced the fields with no name. Labels now point at their
  * field (ids from useId, since the stake page also renders inside /earn and the close form can be
  * open twice).
@@ -15,7 +15,7 @@ afterEach(cleanup);
 
 const FILES = ["app/stake/page.tsx", "app/devnet-mint/devnet-mint-content.tsx", "components/trade/ClosePositionForm.tsx"];
 
-describe("#66: form labels are connected to their fields", () => {
+describe("#3141: form labels are connected to their fields", () => {
   for (const f of FILES) {
     it(`${f}: every <label> has htmlFor, pointing at the field that follows it`, () => {
       const src = fs.readFileSync(path.resolve(__dirname, "../..", f), "utf8");

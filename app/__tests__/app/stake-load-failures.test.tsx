@@ -296,7 +296,7 @@ describe("#2706 item 3: positions are unknown until this wallet's scan finishes"
   });
 });
 
-describe("#66: the deposit widget's fields are named by their labels", () => {
+describe("#3141: the deposit widget's fields are named by their labels", () => {
   it("Select Pool and both Amount fields are found by label", async () => {
     h.fetch.mockResolvedValue(okResponse([apiPool(SLAB_OK, "AAA")]));
     h.getAccountInfo.mockResolvedValue(null);
