@@ -348,14 +348,25 @@ describe("v1 transport through the /api/rpc proxy (SDK-3 port)", () => {
     expect(body.params[1]).toMatchObject({ encoding: "base64", skipPreflight: false });
   });
 
-  it("why the app does not use the SDK default: sendRawTransaction drops the JSON-RPC code (web3.js SendTransactionError)", async () => {
+  it("SDK 0dc68bc default sendV1 keeps the JSON-RPC code (V1RpcError, cause = web3.js SendTransactionError); the proxy agrees", async () => {
     const f = rpcErr(-32602, "invalid transaction: Transaction failed to sanitize accounts offsets correctly");
     const viaConnection = new Connection(PROXY, { fetch: f as unknown as typeof fetch });
     const e = await sdkSendV1(viaConnection, WIRE).catch((x: unknown) => x);
-    expect(e).toBeInstanceOf(SendTransactionError);
-    expect((e as { code?: unknown }).code).toBeUndefined();
-    expect(isTxV1FormatRejection(e)).toBe(false); // code lost: a format rejection would be a hard error
+    expect(e).toBeInstanceOf(V1RpcError);
+    expect((e as { code?: unknown }).code).toBe(-32602);
+    expect((e as { cause?: unknown }).cause).toBeInstanceOf(SendTransactionError);
+    expect(isTxV1FormatRejection(e)).toBe(true);
     expect(isTxV1FormatRejection(await sendV1ViaProxy(viaConnection, WIRE, f).catch((x: unknown) => x))).toBe(true);
+  });
+
+  it("why the app still sends through ./rpc: a network failure on the SDK default is untyped; ./rpc makes it a V1TransportError", async () => {
+    const f = vi.fn(async () => Promise.reject(new TypeError("Failed to fetch")));
+    const viaConnection = new Connection(PROXY, { fetch: f as unknown as typeof fetch });
+    const e = await sdkSendV1(viaConnection, WIRE).catch((x: unknown) => x);
+    expect(e).not.toBeInstanceOf(V1RpcError);
+    expect(e).not.toBeInstanceOf(V1TransportError);
+    expect(isTxV1FormatRejection(e)).toBe(false);
+    expect(await sendV1ViaProxy(viaConnection, WIRE, f as unknown as typeof fetch).catch((x: unknown) => x)).toBeInstanceOf(V1TransportError);
   });
 
   it("sendUserBundle default deps: a proxy format rejection on the first send falls back; a network failure does not", async () => {

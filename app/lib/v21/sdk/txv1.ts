@@ -1,7 +1,7 @@
 /*
- * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/tx-v1 @ 4752e204 (#401 + security
- * review SDK-1..5, src/runtime/txv1.ts), with only the `./tx.js` import retargeted at the installed
- * @percolatorct/sdk root. Delete when @percolatorct/sdk ships it and point ./index.ts at the package.
+ * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/tx-v1 @ 0dc68bc (#401 + security
+ * review SDK-1..5 + sendV1 default-path V1RpcError, src/runtime/txv1.ts), with only the `./tx.js` import retargeted
+ * at the installed @percolatorct/sdk root. Delete when @percolatorct/sdk ships it and point ./index.ts at the package.
  * Do not edit here; fix upstream in percolator-sdk.
  */
 /**
@@ -849,7 +849,10 @@ export async function simulateV1(connection: Connection, wire: Uint8Array, o: Ra
  * @param wire - Serialized, fully signed v1 transaction.
  * @param opts - `skipPreflight` / `maxRetries` plus raw RPC options.
  * @returns Transaction signature.
- * @throws On any JSON-RPC error. Format rejections satisfy {@link isTxV1FormatRejection}.
+ * @throws On any JSON-RPC error. On the raw-fetch path (`fetchImpl`/`headers` given) errors are {@link V1RpcError}s and format
+ *   rejections satisfy {@link isTxV1FormatRejection}. On the default path (`connection.sendRawTransaction`) web3.js 1.x drops
+ *   the node's error code, so it is recorded from the Connection's transport and rethrown as a {@link V1RpcError}. A guard
+ *   refusal or a network failure is rethrown unchanged and is never a format rejection.
  */
 export async function sendV1(
   connection: Connection,
@@ -859,11 +862,33 @@ export async function sendV1(
   if (opts.fetchImpl === undefined && opts.headers === undefined) {
     // web3.js `sendRawTransaction` only base64-encodes the bytes (it never parses them), so it carries v1 fine and,
     // unlike a raw fetch, goes through the Connection's own transport and any send guard (e.g. a dry-run override).
-    return connection.sendRawTransaction(wire, {
-      skipPreflight: opts.skipPreflight ?? false,
-      preflightCommitment: opts.preflightCommitment ?? "confirmed",
-      ...(opts.maxRetries !== undefined ? { maxRetries: opts.maxRetries } : {}),
-    });
+    // It throws a SendTransactionError that DROPS the node's error code, so a per-call view of the Connection records
+    // the code from the transport and rethrows a coded V1RpcError (the guard and a network failure pass through as is).
+    const transport = (connection as unknown as ConnectionTransport)._rpcRequest;
+    const seen: { error?: { code: number; message: string } } = {};
+    const view = Object.create(connection) as Connection;
+    if (typeof transport === "function") {
+      (view as unknown as ConnectionTransport)._rpcRequest = async (method, args) => {
+        const res = await transport.call(connection, method, args);
+        const e = res?.error;
+        if (method === "sendTransaction" && e && typeof e.code === "number") seen.error = { code: e.code, message: String(e.message) };
+        return res;
+      };
+    }
+    try {
+      return await view.sendRawTransaction(wire, {
+        skipPreflight: opts.skipPreflight ?? false,
+        preflightCommitment: opts.preflightCommitment ?? "confirmed",
+        ...(opts.maxRetries !== undefined ? { maxRetries: opts.maxRetries } : {}),
+      });
+    } catch (err) {
+      if (seen.error) {
+        const typed = new V1RpcError("sendTransaction", seen.error.code, seen.error.message);
+        Object.defineProperty(typed, "cause", { value: err, enumerable: false });
+        throw typed;
+      }
+      throw err;
+    }
   }
   return (await rawRpc(
     connection,

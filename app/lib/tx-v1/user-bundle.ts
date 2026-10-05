@@ -394,7 +394,7 @@ function defaultDeps(connection: Connection, wallet: UserBundleWallet): UserBund
     getPriorityFee: () => getPriorityFee(connection),
     simulateLegacy: (tx) => presimulateOrThrow(connection, tx),
     // Through ./rpc so a JSON-RPC format rejection keeps its code (V1RpcError) and a transport failure never
-    // looks like one (the SDK's default sendV1 goes through sendRawTransaction, which drops the code).
+    // looks like one (V1TransportError; the SDK's default sendV1 passes a network failure through untyped).
     simulateV1: (wire) => simulateV1ViaProxy(connection, wire),
     signLegacy: (txs) => signAllCompat(wallet, txs),
     sendLegacy: (tx) => broadcastSignedTx(connection, tx),
