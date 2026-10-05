@@ -34,6 +34,7 @@ import {
   makePortfolioScanKey,
   triggerPortfolioScan,
   getPortfolioUserAccountSnapshot,
+  getPortfolioListSnapshot,
   getPortfolioRawSnapshot,
   subscribePortfolioScan,
   applyConfirmedFill,
@@ -254,6 +255,90 @@ describe("userAccountScan — portfolio scan store", () => {
     await triggerPortfolioScan({ connection, programId, slabAddress, publicKey: wallet, raw: new Uint8Array([1]) });
 
     expect(getPortfolioUserAccountSnapshot(key)).toBeNull();
+  });
+});
+
+describe("userAccountScan — portfolio LIST snapshot (#2560 multi-portfolio groundwork)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("single owned portfolio → one-element list whose entry matches the single snapshot (UI unchanged)", async () => {
+    const { connection, getProgramAccounts } = makeConnection();
+    getProgramAccounts.mockResolvedValue([{ pubkey: portfolioPubkey, account: { data: Buffer.alloc(1) } }]);
+    mocks.parsePortfolioV17.mockReturnValue(makePortfolio());
+
+    const key = makePortfolioScanKey(programId, slabAddress, wallet);
+    await triggerPortfolioScan({ connection, programId, slabAddress, publicKey: wallet, raw: new Uint8Array([1]) });
+
+    const single = getPortfolioUserAccountSnapshot(key);
+    const list = getPortfolioListSnapshot(key);
+    expect(list).toHaveLength(1);
+    expect(list[0].pubkey?.equals(single!.pubkey!)).toBe(true);
+    expect(list[0].account.positionSize).toBe(single!.account.positionSize);
+    expect(list[0].account.capital).toBe(single!.account.capital);
+  });
+
+  it("multiple owned portfolios → every one is listed, base58-sorted, and the single pick is list[0]", async () => {
+    const pkLow = new PublicKey(new Uint8Array(32).fill(1));
+    const pkMid = new PublicKey(new Uint8Array(32).fill(100));
+    const pkHigh = new PublicKey(new Uint8Array(32).fill(200));
+    const sorted = [pkLow, pkMid, pkHigh].sort((a, b) => a.toBase58().localeCompare(b.toBase58()));
+
+    const { connection, getProgramAccounts } = makeConnection();
+    getProgramAccounts.mockResolvedValue([
+      { pubkey: pkHigh, account: { data: Buffer.alloc(1) } },
+      { pubkey: pkLow, account: { data: Buffer.alloc(1) } },
+      { pubkey: pkMid, account: { data: Buffer.alloc(1) } },
+    ]);
+    mocks.parsePortfolioV17.mockReturnValue(makePortfolio());
+
+    const key = makePortfolioScanKey(programId, slabAddress, wallet);
+    const single = await triggerPortfolioScan({ connection, programId, slabAddress, publicKey: wallet, raw: new Uint8Array([1]) });
+
+    const list = getPortfolioListSnapshot(key);
+    expect(list.map((p) => p.pubkey!.toBase58())).toEqual(sorted.map((k) => k.toBase58()));
+    expect(single?.pubkey.equals(sorted[0])).toBe(true); // single pick == list head
+  });
+
+  it("list keeps the SAME reference across an unchanged re-scan (useSyncExternalStore bail-out)", async () => {
+    const { connection, getProgramAccounts } = makeConnection();
+    getProgramAccounts.mockResolvedValue([{ pubkey: portfolioPubkey, account: { data: Buffer.alloc(1) } }]);
+    mocks.parsePortfolioV17.mockReturnValue(makePortfolio());
+
+    const key = makePortfolioScanKey(programId, slabAddress, wallet);
+    await triggerPortfolioScan({ connection, programId, slabAddress, publicKey: wallet, raw: new Uint8Array([1]) });
+    const first = getPortfolioListSnapshot(key);
+
+    mocks.parsePortfolioV17.mockReturnValue(makePortfolio());
+    await triggerPortfolioScan({ connection, programId, slabAddress, publicKey: wallet, raw: new Uint8Array([2]) });
+    expect(getPortfolioListSnapshot(key)).toBe(first);
+  });
+
+  it("no owned portfolio → empty list with a stable reference", async () => {
+    const { connection, getProgramAccounts } = makeConnection();
+    getProgramAccounts.mockResolvedValue([]);
+    const key = makePortfolioScanKey(programId, slabAddress, wallet);
+    await triggerPortfolioScan({ connection, programId, slabAddress, publicKey: wallet, raw: new Uint8Array([1]) });
+    expect(getPortfolioListSnapshot(key)).toEqual([]);
+    expect(getPortfolioListSnapshot(key)).toBe(getPortfolioListSnapshot(key));
+  });
+
+  it("applyConfirmedFill mirrors the patch into the list entry (dock stays as snappy as the ticket)", async () => {
+    const { connection, getProgramAccounts } = makeConnection();
+    getProgramAccounts.mockResolvedValue([{ pubkey: portfolioPubkey, account: { data: Buffer.alloc(1) } }]);
+    mocks.parsePortfolioV17.mockReturnValue(makePortfolio({ legs: [{ active: true, assetIndex: 0, marketId: 1n, side: 0, basisPosQ: 5n }] }));
+
+    const key = makePortfolioScanKey(programId, slabAddress, wallet);
+    await triggerPortfolioScan({ connection, programId, slabAddress, publicKey: wallet, raw: new Uint8Array([1]) });
+
+    expect(applyConfirmedFill(key, 10n)).toBe(true);
+    const list = getPortfolioListSnapshot(key);
+    expect(list).toHaveLength(1);
+    expect(list[0].account.positionSize).toBe(15n);
+    expect(list[0].provisional).toBe(true);
+    // and the single snapshot agrees
+    expect(getPortfolioUserAccountSnapshot(key)?.account.positionSize).toBe(15n);
   });
 });
 
