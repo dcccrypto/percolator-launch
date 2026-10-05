@@ -21,8 +21,8 @@ export const DEFAULT_SUCCESSORS: readonly SuccessorEntry[] = [
   { symbol: "JUP", mint: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", v21Slab: null, v21Earn: true },
   { symbol: "TRUMP", mint: "6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN", v21Slab: null, v21Earn: true },
   { symbol: "PENGU", mint: "2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv", v21Slab: null, v21Earn: true },
-  { symbol: "BURNIE", mint: null, v21Slab: null, v21Earn: true },
-  { symbol: "Percolator", mint: null, v21Slab: null, v21Earn: true },
+  { symbol: "BURNIE", mint: "CGEDT9QZDvvH5GmVkWJH2BXiMJqMJySC9ihWyr7Spump", v21Slab: null, v21Earn: true },
+  { symbol: "Percolator", mint: "8PzFWyLpCVEmbZmVJcaRTU5r69XKJx1rd7YGpWvnpump", v21Slab: null, v21Earn: true },
 ];
 
 const okKey = (v: unknown): v is string => {
