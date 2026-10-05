@@ -58,6 +58,14 @@ import { getServerConnection } from "@/lib/server-rpc";
 import { readAssetMarketId, readAssetControlSeqs } from "@/lib/v18-wire";
 import { MAX_PRICE_E6 } from "@/lib/oraclePrice";
 import { requirePlaygroundKeeperSigner } from "@/lib/playground-keeper-signer";
+import { DEVNET_PROGRAM_IDS } from "@/lib/program-ids";
+import { authorizeKeeperCosignV1 } from "@/lib/launch-single-tx/cosign-validate";
+import { launchCreatePins, neutralFromInstructions, type LaunchCreatePins } from "@/lib/launch-single-tx/shape";
+import { cosignV1RateLimited } from "@/lib/launch-single-tx/cosign-rate-limit";
+import { canonicalVaultLpMatcher } from "@/lib/limits/p3-wizard";
+import { getClientIp } from "@/lib/get-client-ip";
+import { WELL_KNOWN } from "@percolatorct/sdk";
+import type { Connection } from "@solana/web3.js";
 
 /**
  * Asset 0's co-sign inputs on a market whose only prior tx is the launch's M1
@@ -72,6 +80,78 @@ import { requirePlaygroundKeeperSigner } from "@/lib/playground-keeper-signer";
  * wrong, the CAS makes this tx fail on-chain — it can't mis-apply.
  */
 const FRESH_ASSET0 = { marketId: 1n, oracleObservation: 0n, authorityEpoch: 0n } as const;
+
+/**
+ * The co-sign pair, built in ONE place for both the legacy partial tx and the v1 single-transaction
+ * check (the v1 path compares the client's message against exactly these bytes).
+ */
+function buildCosignPair(a: {
+  programId: PublicKey;
+  deployer: PublicKey;
+  slab: PublicKey;
+  keeper: PublicKey;
+  assetIndex: number;
+  marketId: bigint;
+  seqs: { oracleObservation: bigint; authorityEpoch: bigint };
+  nowSlot: bigint;
+  priceE6: bigint;
+}): { configureIx: TransactionInstruction; delegateIx: TransactionInstruction } {
+  // ── Instruction 1: ConfigureAuthMark ──────────────────────────────────────
+  // Sets oracle to AUTH_MARK mode (mode=3) and records initial mark price.
+  // oracle_authority at this point is `deployer` (the market admin set in InitMarket).
+  const configureIx = buildIx({
+    programId: a.programId,
+    keys: buildAccountMetas(ACCOUNTS_CONFIGURE_AUTH_MARK, {
+      oracleAuthority: a.deployer,
+      market: a.slab,
+    }),
+    data: encodeConfigureAuthMark({
+      assetIndex: a.assetIndex,
+      marketId: a.marketId,
+      nowSlot: a.nowSlot,
+      initialMarkE6: a.priceE6,
+      observationSequence: a.seqs.oracleObservation + 1n,
+    }),
+  });
+
+  // ── Instruction 2: UpdateAssetAuthority(Oracle → keeper) ─────────────────
+  // Transfers oracle_authority from creator (deployer) to keeper.
+  // Both current_authority (creator) and new_authority (keeper) must sign.
+  const delegateIx: TransactionInstruction = buildIx({
+    programId: a.programId,
+    keys: buildAccountMetas(ACCOUNTS_UPDATE_AUTHORITY, {
+      currentAuthority: a.deployer,
+      newAuthority: a.keeper,
+      slab: a.slab,
+    }),
+    data: encodeUpdateAssetAuthority({
+      assetIndex: a.assetIndex,
+      marketId: a.marketId,
+      kind: ASSET_AUTH_KIND.Oracle,
+      newPubkey: a.keeper,
+      authorityEpoch: a.seqs.authorityEpoch,
+    }),
+  });
+  return { configureIx, delegateIx };
+}
+
+/**
+ * Rent-exempt minimum per account size, read from the cluster once per instance (a protocol constant for a
+ * given size; the batched launch caches it the same way, hooks/useCreateMarket.ts getCachedRentExemption).
+ */
+const rentCache = new Map<number, bigint>();
+async function rentExemptFor(connection: Connection, pins: LaunchCreatePins): Promise<Map<number, bigint>> {
+  const spaces = [...new Set(Object.values(pins).map((p) => p.space))];
+  await Promise.all(
+    spaces.map(async (n) => {
+      if (!rentCache.has(n)) rentCache.set(n, BigInt(await connection.getMinimumBalanceForRentExemption(n, "confirmed")));
+    }),
+  );
+  return new Map(spaces.map((n) => [n, rentCache.get(n)!]));
+}
+
+/** base64 of a v1 message: <= 4096 bytes. */
+const MAX_V1_MESSAGE_B64 = 5_464;
 
 export const dynamic = "force-dynamic";
 
@@ -115,12 +195,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { deployer, slabAddress, initialPriceE6, assetIndex, fresh } = body as {
+  const { deployer, slabAddress, initialPriceE6, assetIndex, fresh, v1MessageBase64 } = body as {
     deployer?: string;
     slabAddress?: string;
     initialPriceE6?: string;
     assetIndex?: number;
     fresh?: boolean;
+    /** Single-transaction launch (Solana v1): the whole launch message the keeper is asked to sign. */
+    v1MessageBase64?: unknown;
   };
 
   if (!deployer || typeof deployer !== "string") {
@@ -187,6 +269,78 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // ── Single-transaction launch (Solana v1) ────────────────────────────────
+    // The keeper signs the WHOLE launch message, so it is validated first: strict decode, the keeper
+    // only as new_authority of the one UpdateAssetAuthority (read-only signer, never the fee payer, a
+    // program, or a create/transfer source), the co-sign pair byte-identical to what this route
+    // builds, the exact launch shape, v1 limits. See lib/launch-single-tx/cosign-validate.ts.
+    if (v1MessageBase64 !== undefined) {
+      if (typeof v1MessageBase64 !== "string" || v1MessageBase64.length === 0 || v1MessageBase64.length > MAX_V1_MESSAGE_B64) {
+        return NextResponse.json({ error: "Invalid v1MessageBase64" }, { status: 400 });
+      }
+      if (fresh !== true || assetIdx !== 0) {
+        return NextResponse.json({ error: "a v1 co-sign is only valid for a fresh launch of asset 0" }, { status: 400 });
+      }
+      // L-3: every v1 request costs RPC reads and a keeper signature; bound it per IP and per deployer.
+      const limited = cosignV1RateLimited(getClientIp(req), deployerPk.toBase58());
+      if (limited) {
+        return NextResponse.json({ error: `Too many v1 co-sign requests (per ${limited}); retry in a minute` }, { status: 429, headers: { "Retry-After": "60" } });
+      }
+      const message = new Uint8Array(Buffer.from(v1MessageBase64, "base64"));
+      if (Buffer.from(message).toString("base64") !== v1MessageBase64) {
+        return NextResponse.json({ error: "Invalid v1MessageBase64 (not canonical base64)" }, { status: 400 });
+      }
+      const cfgV1 = getConfig();
+      const wrapperId = new PublicKey(cfgV1.programId);
+      const stakeId = (cfgV1 as { vaultProgramId?: string }).vaultProgramId ?? DEVNET_PROGRAM_IDS.stake;
+      // The single transaction CREATES the slab: an existing account means this is not a fresh launch.
+      if (await connection.getAccountInfo(slabPk, "confirmed")) {
+        return NextResponse.json({ error: "the slab already exists; a v1 co-sign is only for a launch that creates it" }, { status: 409 });
+      }
+      const currentSlot = BigInt(await connection.getSlot("confirmed"));
+      let createPins: LaunchCreatePins;
+      try {
+        createPins = launchCreatePins({
+          wrapper: wrapperId.toBase58(),
+          matcher: canonicalVaultLpMatcher(cfgV1.matcherProgramId).toBase58(),
+          tokenProgram: WELL_KNOWN.tokenProgram.toBase58(),
+        });
+      } catch (e) {
+        return NextResponse.json({ error: `v1 co-sign unavailable: ${(e as Error).message}` }, { status: 503 });
+      }
+      const rentExemptLamports = await rentExemptFor(connection, createPins);
+      const verdict = await authorizeKeeperCosignV1({
+        message,
+        keeper: keeperPk.toBase58(),
+        deployer: deployerPk.toBase58(),
+        slab: slabPk.toBase58(),
+        programs: { wrapper: wrapperId.toBase58(), stake: stakeId },
+        currentSlot,
+        expectedCosign: (slot) => {
+          const pair = buildCosignPair({
+            programId: wrapperId, deployer: deployerPk, slab: slabPk, keeper: keeperPk, assetIndex: 0,
+            marketId: FRESH_ASSET0.marketId, seqs: FRESH_ASSET0, nowSlot: slot, priceE6,
+          });
+          const [configure, delegate] = neutralFromInstructions(deployerPk, [pair.configureIx, pair.delegateIx]);
+          return { configure: configure!, delegate: delegate! };
+        },
+        createPins,
+        rentExemptLamports,
+        // L-2: never sign a message whose lifetime cannot land (or that was built on a stale/forged hash).
+        isBlockhashValid: async (bh) => (await connection.isBlockhashValid(bh, { commitment: "confirmed" })).value,
+      });
+      if (!verdict.ok) {
+        console.warn("[playground/keeper-cosign] v1 co-sign refused:", verdict.reason);
+        return NextResponse.json({ error: `v1 co-sign refused: ${verdict.reason}` }, { status: 422 });
+      }
+      const sig = keeper.signMessageBytes(verdict.message);
+      return NextResponse.json({
+        keeperSignatureBase64: Buffer.from(sig).toString("base64"),
+        keeperPubkey: keeper.publicKey(),
+        nowSlot: verdict.message.nowSlot.toString(),
+      });
+    }
+
     // Fetch slot (used as initial mark timestamp in ConfigureAuthMark)
     const nowSlot = BigInt(await connection.getSlot("confirmed"));
 
@@ -220,41 +374,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "market account not found" }, { status: 404 });
     }
 
-    // ── Instruction 1: ConfigureAuthMark ──────────────────────────────────────
-    // Sets oracle to AUTH_MARK mode (mode=3) and records initial mark price.
-    // oracle_authority at this point is `deployer` (the market admin set in InitMarket).
-    const configureIx = buildIx({
-      programId,
-      keys: buildAccountMetas(ACCOUNTS_CONFIGURE_AUTH_MARK, {
-        oracleAuthority: deployerPk,
-        market: slabPk,
-      }),
-      data: encodeConfigureAuthMark({
-        assetIndex: assetIdx,
-        marketId: cosignMarketId,
-        nowSlot,
-        initialMarkE6: priceE6,
-        observationSequence: cosignSeqs.oracleObservation + 1n,
-      }),
-    });
-
-    // ── Instruction 2: UpdateAssetAuthority(Oracle → keeper) ─────────────────
-    // Transfers oracle_authority from creator (deployer) to keeper.
-    // Both current_authority (creator) and new_authority (keeper) must sign.
-    const delegateIx: TransactionInstruction = buildIx({
-      programId,
-      keys: buildAccountMetas(ACCOUNTS_UPDATE_AUTHORITY, {
-        currentAuthority: deployerPk,
-        newAuthority: keeperPk,
-        slab: slabPk,
-      }),
-      data: encodeUpdateAssetAuthority({
-        assetIndex: assetIdx,
-        marketId: cosignMarketId,
-        kind: ASSET_AUTH_KIND.Oracle,
-        newPubkey: keeperPk,
-        authorityEpoch: cosignSeqs.authorityEpoch,
-      }),
+    const { configureIx, delegateIx } = buildCosignPair({
+      programId, deployer: deployerPk, slab: slabPk, keeper: keeperPk, assetIndex: assetIdx,
+      marketId: cosignMarketId, seqs: cosignSeqs, nowSlot, priceE6,
     });
 
     // ── Build transaction ─────────────────────────────────────────────────────

@@ -15,8 +15,11 @@
  */
 
 import { Keypair, Transaction, VersionedTransaction } from "@solana/web3.js";
+import { ed25519 } from "@noble/curves/ed25519";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 import _bs58 from "bs58";
+// The dependency-free brand module, not the validator: every route holding this signer loads this file.
+import { assertValidatedLaunchMessage, type ValidatedLaunchMessage } from "@/lib/launch-single-tx/validated-launch-message";
 
 const bs58: { encode(buf: Uint8Array): string; decode(str: string): Uint8Array } = _bs58 as any;
 
@@ -24,6 +27,14 @@ export interface KeeperSealedSigner {
   publicKey(): string;
   signTransaction(tx: Transaction | VersionedTransaction): Transaction | VersionedTransaction;
   partialSign(tx: Transaction): void;
+  /**
+   * Ed25519 signature over a Solana v1 launch message (web3.js 1.x cannot represent a v1 message, so
+   * there is no transaction object to sign). Takes ONLY a {@link ValidatedLaunchMessage}, which nothing but
+   * `authorizeKeeperCosignV1` (lib/launch-single-tx/cosign-validate.ts) can create; raw bytes, or an
+   * object that merely looks like one, throw (L-4, security review 2026-10-05). So the faucet and every
+   * other route that holds this signer cannot sign arbitrary bytes with the keeper key.
+   */
+  signMessageBytes(message: ValidatedLaunchMessage): Uint8Array;
 }
 
 let _keeperSigner: KeeperSealedSigner | null = null;
@@ -73,6 +84,10 @@ function loadKeeperKeypair(env: NodeJS.ProcessEnv): KeeperSealedSigner | null {
     },
     partialSign(tx: Transaction): void {
       tx.partialSign(keypair);
+    },
+    signMessageBytes(message: ValidatedLaunchMessage): Uint8Array {
+      assertValidatedLaunchMessage(message);
+      return ed25519.sign(message.bytes(), keypair.secretKey.slice(0, 32));
     },
   };
 }

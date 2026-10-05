@@ -214,7 +214,9 @@ describe("B21: never 'launched' without a registered price feed", () => {
 
   it("both create flows set priceFeedRequired, and the wizard passes it", () => {
     const hook = read("hooks/useCreateMarket.ts");
-    expect((hook.match(/priceFeedRequired: !!\(isKeeperOracle && params\.dexPoolAddress\)/g) ?? []).length).toBe(2);
+    // Three create flows: the batched launch, the sequential/resume path, and the single-transaction
+    // (Solana v1) launch's success branch inside attemptFreshBatchedLaunch.
+    expect((hook.match(/priceFeedRequired: !!\(isKeeperOracle && params\.dexPoolAddress\)/g) ?? []).length).toBe(3);
     expect(hook).not.toMatch(/is live on-chain but won't/);
     expect(read("components/create/CreateMarketWizard.tsx")).toContain("priceFeedRequired={createState.priceFeedRequired}");
   });

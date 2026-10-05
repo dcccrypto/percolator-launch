@@ -49,7 +49,7 @@ export function decodePushAuthMark(data: Uint8Array): DecodedPush | null {
   };
 }
 
-/** The slice of `getTransaction` (encoding json, maxSupportedTransactionVersion 0) this module reads. */
+/** The slice of `getTransaction` (encoding json, maxSupportedTransactionVersion 1: legacy, v0 and v1) this module reads. */
 export interface RpcTx {
   slot: number;
   blockTime: number | null;
