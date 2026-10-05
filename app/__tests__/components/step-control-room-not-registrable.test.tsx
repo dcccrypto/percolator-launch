@@ -32,6 +32,7 @@ function renderStep(over: Record<string, unknown> = {}) {
   return render(<StepControlRoom {...(props as never)} />);
 }
 
+const costRows = () => ["Market rent", "You seed", "Incl. counterparty backing"].map((k) => screen.getByText(k).parentElement as HTMLElement);
 const feedValue = () => screen.getByText("Price feed").nextSibling as HTMLElement;
 
 describe("Control Room: unregistrable token (#2954)", () => {
@@ -40,7 +41,7 @@ describe("Control Room: unregistrable token (#2954)", () => {
     expect(feedValue().textContent).toBe("Keeper (Pump.fun)");
     expect(feedValue().className).toContain("--long");
     expect(screen.getByTestId("control-dials").getAttribute("data-dimmed")).toBe("false");
-    expect(screen.getByTestId("cost-estimate").getAttribute("data-dimmed")).toBe("false");
+    expect(costRows().every((r) => r.getAttribute("data-dimmed") === "false")).toBe(true);
     expect(screen.queryByTestId("not-registrable-reason")).toBeNull();
   });
 
@@ -51,20 +52,34 @@ describe("Control Room: unregistrable token (#2954)", () => {
     expect(feedValue().className).not.toContain("--long");
   });
 
-  it("not registrable: dials and cost estimate are dimmed", () => {
+  it("not registrable: dials and each cost row are dimmed (on the row itself, dividers kept)", () => {
     renderStep({ registrable: false, notRegistrableReason: "x" });
     const dials = screen.getByTestId("control-dials");
-    const cost = screen.getByTestId("cost-estimate");
     expect(dials.getAttribute("data-dimmed")).toBe("true");
     expect(dials.className).toContain("opacity-50");
-    expect(cost.getAttribute("data-dimmed")).toBe("true");
-    expect(cost.className).toContain("opacity-50");
-    expect(cost.textContent).toContain("You seed");
-    expect(screen.getByTestId("cost-estimate-rent").getAttribute("data-dimmed")).toBe("true");
+    const rows = costRows();
+    expect(rows).toHaveLength(3);
+    for (const r of rows) {
+      expect(r.getAttribute("data-dimmed")).toBe("true");
+      expect(r.className).toContain("opacity-50");
+      expect(r.className).toContain("border-b");
+    }
   });
 
   it("not registrable: the reason is visible text", () => {
     renderStep({ registrable: false, notRegistrableReason: "No supported pool found for this token." });
     expect(screen.getByTestId("not-registrable-reason").textContent).toContain("No supported pool found for this token.");
+  });
+
+  it("the reason appears exactly once when HoldToLaunch already shows it", () => {
+    const reason = "No supported pool found for this token.";
+    renderStep({ registrable: false, notRegistrableReason: reason, launchDisabled: true, launchDisabledReason: reason });
+    expect(screen.getAllByText(reason)).toHaveLength(1);
+    expect(screen.getAllByRole("status").filter((n) => n.textContent === reason)).toHaveLength(1);
+  });
+
+  it("the reason is still shown (once) when the launch button says something else", () => {
+    renderStep({ registrable: false, notRegistrableReason: "No supported pool.", launchDisabled: true, launchDisabledReason: "Connect wallet" });
+    expect(screen.getAllByText("No supported pool.")).toHaveLength(1);
   });
 });

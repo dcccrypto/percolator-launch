@@ -102,8 +102,11 @@ export interface StepControlRoomProps {
   onBack: () => void;
 }
 
-const Readout: FC<{ k: string; v: string; tone?: "good" | "warn" | "plain" }> = ({ k, v, tone = "plain" }) => (
-  <div className="flex items-baseline justify-between border-b border-[var(--border-subtle)] py-[7px] last:border-b-0">
+const Readout: FC<{ k: string; v: string; tone?: "good" | "warn" | "plain"; dimmed?: boolean }> = ({ k, v, tone = "plain", dimmed = false }) => (
+  <div
+    data-dimmed={String(dimmed)}
+    className={`flex items-baseline justify-between border-b border-[var(--border-subtle)] py-[7px] last:border-b-0 ${dimmed ? "opacity-50" : ""}`}
+  >
     <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">{k}</span>
     <span
       className={`text-[11px] ${tone === "good" ? "text-[var(--long)]" : tone === "warn" ? "text-[var(--warning)]" : "text-[var(--text)]"}`}
@@ -265,9 +268,7 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
           <Readout k="Start price" v={startPrice} />
           <Readout k="Market size" v={`${slabBytes.toLocaleString()} B · max capacity`} />
           {/* #2954: the cost estimate is dimmed when this market cannot be registered. */}
-          <div data-testid="cost-estimate-rent" data-dimmed={String(!registrable)} className={registrable ? "" : "opacity-50"}>
-            <Readout k="Market rent" v={rentSol === null ? "—" : `${rentSol.toFixed(3)} SOL`} />
-          </div>
+          <Readout k="Market rent" v={rentSol === null ? "—" : `${rentSol.toFixed(3)} SOL`} dimmed={!registrable} />
           {/* GH#2622: set expectations UP FRONT, before launch — not only after
               a creator gets stuck (RecoverSolBanner's gated RECLAIM handles that
               case). Rent is reclaimable only if setup stops before any deposit
@@ -294,10 +295,8 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
             <FeeBreakdown highlight="creator" feeBps={tradingFeeBps} />
           </div>
           {/* LP + insurance alone understated it ~3x: both backing domains are seeded at 100% of LP. */}
-          <div data-testid="cost-estimate" data-dimmed={String(!registrable)} className={registrable ? "" : "opacity-50"}>
-            <Readout k="You seed" v={`${seedTotal.toLocaleString()} ${collateralSymbol}`} />
-            <Readout k="Incl. counterparty backing" v={`${seedBacking.toLocaleString()} ${collateralSymbol}`} />
-          </div>
+          <Readout k="You seed" v={`${seedTotal.toLocaleString()} ${collateralSymbol}`} dimmed={!registrable} />
+          <Readout k="Incl. counterparty backing" v={`${seedBacking.toLocaleString()} ${collateralSymbol}`} dimmed={!registrable} />
           <Readout k="Approvals" v="1" />
         </div>
 
@@ -308,7 +307,8 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
             disabledReason={launchDisabledReason}
             instant={instantLaunch}
           />
-          {!registrable && (
+          {/* Skip when HoldToLaunch already shows this exact text (one status region, not two). */}
+          {!registrable && !(launchDisabled && launchDisabledReason === (notRegistrableReason ?? "This token cannot be priced")) && (
             <p data-testid="not-registrable-reason" role="status" className="mt-3 text-center text-[11px] leading-relaxed text-[var(--warning)]">
               {notRegistrableReason ?? "This token cannot be priced"}
             </p>
