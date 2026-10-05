@@ -81,6 +81,25 @@ describe("extractPushes", () => {
     expect(extractPushes(mkTx(1, T0, [{ slab: A, markE6: 1n, tag: 5 }]), PROGRAM)).toEqual([]);
     expect(extractPushes(mkTx(1, null, [{ slab: A, markE6: 1n }]), PROGRAM)).toEqual([]);
   });
+  it("reads a v1 transaction exactly as Helius returns one (verified on devnet slot 507817706): version 1, transactionConfig, no lookup tables, empty loadedAddresses, no ComputeBudget key", () => {
+    // Shape captured from a REAL landed v1 tx via getTransaction {encoding:"json", maxSupportedTransactionVersion:1}:
+    // message = { header, accountKeys, recentBlockhash, instructions, transactionConfig }, meta.loadedAddresses = { writable: [], readonly: [] }.
+    const base = mkTx(507817706, T0, [{ slab: A, markE6: 77n }, { slab: B, markE6: 88n }]);
+    const keys = base.transaction.message.accountKeys.filter((k) => !k.startsWith("ComputeBudget"));
+    const remap = (i: number) => keys.indexOf(base.transaction.message.accountKeys[i]);
+    const v1 = {
+      slot: base.slot, blockTime: base.blockTime, version: 1,
+      meta: { err: null, loadedAddresses: { writable: [], readonly: [] }, computeUnitsConsumed: 40 },
+      transaction: { signatures: ["sig"], message: {
+        header: { numRequiredSignatures: 1, numReadonlySignedAccounts: 0, numReadonlyUnsignedAccounts: 2 },
+        accountKeys: keys, recentBlockhash: "x",
+        instructions: base.transaction.message.instructions.map((ix) => ({ programIdIndex: remap(ix.programIdIndex), accounts: ix.accounts.map(remap), data: ix.data, stackHeight: 1 })),
+        transactionConfig: { priorityFee: 0, computeUnitLimit: 48, loadedAccountsDataSizeLimit: 256000, heapSize: null },
+      } },
+    };
+    const out = extractPushes(v1 as unknown as RpcTx, PROGRAM);
+    expect(out.map((p) => [p.slab, p.markE6])).toEqual([[A, 77n], [B, 88n]]);
+  });
   it("resolves accounts through loaded (lookup-table) addresses", () => {
     const tx = mkTx(1, T0, [{ slab: A, markE6: 5n }]);
     const keys = tx.transaction.message.accountKeys;
