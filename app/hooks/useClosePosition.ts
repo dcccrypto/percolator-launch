@@ -3,7 +3,11 @@
 import { useState, useCallback, useRef } from "react";
 import { useSingleMarketHealth } from "@/hooks/useMarketHealth";
 import { safeExplainMarketTxError } from "@/lib/market-error";
-import { Connection, PublicKey } from "@solana/web3.js";
+import { Buffer } from "buffer";
+import { Connection, PublicKey, TransactionInstruction } from "@solana/web3.js";
+import { sendTx } from "@/lib/tx";
+import { encodeClosePortfolio } from "@/lib/limits/p3-ix";
+import { readPortfolioIdentity } from "@/lib/v18-wire";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { AccountKind, isV17Account, parsePortfolioV17 } from "@percolatorct/sdk";
 import { useTrade, prewarmTradeSubmission } from "@/hooks/useTrade";
@@ -52,7 +56,7 @@ export interface ClosePositionResult {
 }
 
 export interface UseClosePositionReturn {
-  closePosition: (closePercent: number) => Promise<ClosePositionResult>;
+  closePosition: (closePercent: number, targetPortfolioPk?: PublicKey, reclaimOnClose?: boolean) => Promise<ClosePositionResult>;
   loading: boolean;
   error: string | null;
   phase: "idle" | "submitting" | "confirming";
@@ -84,21 +88,32 @@ const FRESH_READ_TTL_MS = 4_000;
 const freshReadCache = new Map<string, { data: Buffer | null; ts: number }>();
 const freshReadInflight = new Map<string, Promise<Buffer | null>>();
 
-function freshReadKey(programId: PublicKey, slab: string, owner: PublicKey): string {
-  return `${programId.toBase58()}|${slab}|${owner.toBase58()}`;
+function freshReadKey(programId: PublicKey, slab: string, owner: PublicKey, targetPortfolioPk?: PublicKey): string {
+  const base = `${programId.toBase58()}|${slab}|${owner.toBase58()}`;
+  return targetPortfolioPk ? `${base}|${targetPortfolioPk.toBase58()}` : base;
 }
 
 /** One direct chain read of the caller's v17 portfolio for this market:
  *  targeted getAccountInfo when the shared scan store knows the pubkey
  *  (address never changes; the DATA read is live either way), full
- *  owner-filtered scan otherwise. `null` = read succeeded, no portfolio. */
+ *  owner-filtered scan otherwise. `null` = read succeeded, no portfolio.
+ *
+ *  #2560: when `targetPortfolioPk` is given (closing a specific cross/isolated
+ *  position), read EXACTLY that account — and if it's gone, return null for
+ *  that portfolio rather than falling back to a DIFFERENT one. The caller
+ *  re-verifies the parsed owner before acting on the data. */
 async function readFreshPortfolioData(
   connection: Connection,
   programId: PublicKey,
   slabAddress: string,
   owner: PublicKey,
+  targetPortfolioPk?: PublicKey,
 ): Promise<Buffer | null> {
   const slabPk = new PublicKey(slabAddress);
+  if (targetPortfolioPk) {
+    const info = await connection.getAccountInfo(targetPortfolioPk, "confirmed");
+    return info ? Buffer.from(info.data) : null;
+  }
   const cachedPk = getPortfolioRawSnapshot(
     makePortfolioScanKey(programId, slabAddress, owner),
   )?.pubkey;
@@ -122,15 +137,16 @@ function getFreshPortfolioData(
   slabAddress: string,
   owner: PublicKey,
   maxAgeMs: number,
+  targetPortfolioPk?: PublicKey,
 ): Promise<Buffer | null> {
-  const key = freshReadKey(programId, slabAddress, owner);
+  const key = freshReadKey(programId, slabAddress, owner, targetPortfolioPk);
   const cached = freshReadCache.get(key);
   if (cached && Date.now() - cached.ts < maxAgeMs) {
     return Promise.resolve(cached.data);
   }
   const inflight = freshReadInflight.get(key);
   if (inflight) return inflight;
-  const p = readFreshPortfolioData(connection, programId, slabAddress, owner)
+  const p = readFreshPortfolioData(connection, programId, slabAddress, owner, targetPortfolioPk)
     .then((data) => {
       freshReadCache.set(key, { data, ts: Date.now() });
       return data;
@@ -173,7 +189,12 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
   }, []);
 
   const closePosition = useCallback(
-    async (closePercent: number): Promise<ClosePositionResult> => {
+    // #2560: `targetPortfolioPk` names the specific cross/isolated portfolio to
+    // close. Omitted → the deterministic lowest-pubkey pick (today's behaviour).
+    // Threaded through every resolution point (fresh read, rebalance route,
+    // matcher trade, entry-clear, post-close sweep) so a multi-row Close can
+    // never act on a DIFFERENT portfolio than the row the user clicked.
+    async (closePercent: number, targetPortfolioPk?: PublicKey, reclaimOnClose?: boolean): Promise<ClosePositionResult> => {
       if (inflightRef.current) throw new Error("Close already in progress");
       if (!userAccount) {
         // A fresh SlabProvider (/portfolio, other markets) can still be loading it. Say so; keep the
@@ -224,14 +245,14 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         // trade-account resolution) so it overlaps this freshness read
         // instead of running serially after it. Usually a no-op: prewarmClose
         // already fired all of this when the close modal opened.
-        prewarmTradeSubmission(connection, programId, slabAddress, publicKey);
+        prewarmTradeSubmission(connection, programId, slabAddress, publicKey, targetPortfolioPk);
 
         // Consume the modal-open prewarmed read when it's ≤FRESH_READ_TTL_MS
         // old (see the cache's doc comment for why that preserves the safety
         // property); otherwise this performs a live read right now, exactly
         // as before the prewarm existed.
         const [freshData, freshSlab] = await Promise.all([
-          getFreshPortfolioData(connection, programId, slabAddress, publicKey, FRESH_READ_TTL_MS),
+          getFreshPortfolioData(connection, programId, slabAddress, publicKey, FRESH_READ_TTL_MS, targetPortfolioPk),
           connection.getAccountInfo(new PublicKey(slabAddress), "confirmed"),
         ]);
         freshEngine = freshSlab ? decodeMarketEngineView(new Uint8Array(freshSlab.data)) : null;
@@ -438,6 +459,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
           const eng = decodeMarketEngineView(marketBytes);
           if (!eng) throw new Error("Could not read the market to route the close.");
           const portfolio =
+            targetPortfolioPk ??
             getPortfolioRawSnapshot(makePortfolioScanKey(programId, slabAddress, publicKey))?.pubkey ??
             (await findV17Portfolio(connection, programId, slabPk, publicKey));
           if (!portfolio) throw new Error("Could not find your portfolio on this market.");
@@ -484,6 +506,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
                   userIdx: userAccount.idx,
                   size: closeSize,
                   sizes: closeLegs,
+                  portfolioPk: targetPortfolioPk,
                   ...(closeLimitPriceE6 !== undefined && { limitPriceE6: closeLimitPriceE6 }),
                 });
               },
@@ -520,7 +543,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         // close surface cleared it on a 100% REQUEST, so a partial fill (LP headroom clipped the
         // close) left the rest of the position with no entry: Entry / PnL / ROE read "--".
         if (closePercent === 100 && outcome === "closed") {
-          clearEntryPrice(slabAddress, userAccount.idx, publicKey?.toBase58());
+          clearEntryPrice(slabAddress, userAccount.idx, publicKey?.toBase58(), targetPortfolioPk?.toBase58());
         }
         setPhase("confirming");
         setTimeout(() => setPhase("idle"), 2000);
@@ -541,14 +564,51 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
           void (async () => {
             const amount = await readSweepableCapital({
               owner,
-              read: () => readFreshPortfolioData(connection, programId, slabAddress, owner),
+              read: () => readFreshPortfolioData(connection, programId, slabAddress, owner, targetPortfolioPk),
             }).catch(() => null);
             if (amount === null) return;
             const label = `${formatTokenAmount(amount, decimals, 2)} USDC`;
             toast(SWEEP_COPY.prompt(label), "info");
             try {
-              await withdraw({ userIdx: userAccount.idx, amount });
+              await withdraw({ userIdx: userAccount.idx, amount, portfolioPk: targetPortfolioPk });
               toast(SWEEP_COPY.done(label), "success");
+              // #2560 C7: an isolated full-close leaves its OWN portfolio empty and
+              // still rent-funded. Reclaim that rent (tag 8 ClosePortfolio) so
+              // isolated positions don't strand accounts. Best-effort and
+              // sim-gated (simulateBeforeSign) — a not-yet-empty portfolio, a
+              // declined prompt, or any failure is swallowed and never affects the
+              // already-completed close. Only for the ISOLATED portfolio the user
+              // closed (reclaimOnClose), NEVER the primary/cross account.
+              if (reclaimOnClose && targetPortfolioPk) {
+                try {
+                  const pd = await readFreshPortfolioData(connection, programId, slabAddress, owner, targetPortfolioPk);
+                  if (pd) {
+                    const parsed = parsePortfolioV17(pd);
+                    // Defense-in-depth (C7 review): only reclaim an account THIS
+                    // wallet owns AND that is actually empty — mirrors the
+                    // pre-close owner re-verify and the proven resolved-cleanup
+                    // path. (targetPortfolioPk is already pinned, and on-chain
+                    // tag 8 requires signer==owner; this just fails fast.)
+                    const reclaimable = parsed.owner.equals(owner) && parsed.capital === 0n && !parsed.legs.some((l) => l.active);
+                    if (reclaimable) {
+                      const id = readPortfolioIdentity(new Uint8Array(pd));
+                      // Wire (own-portfolio-cleanup.ts): tag 8 [closer(s,w), market(w), portfolio(w)].
+                      const closeIx = new TransactionInstruction({
+                        programId,
+                        keys: [
+                          { pubkey: owner, isSigner: true, isWritable: true },
+                          { pubkey: new PublicKey(slabAddress), isSigner: false, isWritable: true },
+                          { pubkey: targetPortfolioPk, isSigner: false, isWritable: true },
+                        ],
+                        data: Buffer.from(encodeClosePortfolio(id.portfolioId, id.matcherSequence, id.positionEpoch)),
+                      });
+                      await sendTx({ connection, wallet, instructions: [closeIx], simulateBeforeSign: true });
+                    }
+                  }
+                } catch {
+                  /* best-effort rent reclaim: never affects the completed close */
+                }
+              }
             } catch {
               toast(SWEEP_COPY.kept(label), "info");
             }

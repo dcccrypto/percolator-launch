@@ -794,6 +794,8 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
       account,
       slabAddress,
       accountIdx: ua.idx,
+      // #2560: the displayed (primary) portfolio's own entry; legacy fallback (default) covers a cross primary.
+      portfolio: ua.pubkey?.toBase58(),
       adlFactors,
       adlApplicable: wrapperConfigV17 !== null,
       markE6: oraclePriceE6,
