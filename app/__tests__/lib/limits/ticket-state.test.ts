@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { balanceMaxQ, deriveTicketState, maxInUnit, oneMaxQ, type TicketStateInput } from "@/lib/limits/ticket-state";
+import { balanceMaxQ, deriveTicketState, maxInUnit, oneMaxQ, sideRoomIsFull, type TicketStateInput } from "@/lib/limits/ticket-state";
 import { ticketRowShortLabel } from "@/lib/limits/ticket-status-store";
 import { deriveTicketLimits, feeFitSizeQ } from "@/lib/limits/ticket";
 import { UNLIMITED_CAPACITY } from "@/lib/marketCapacity";
@@ -184,6 +184,20 @@ describe("one max per side (§4.2, TR-2)", () => {
     expect(maxInUnit(41_883_456n, "token", 89_550_000n, "SOL")).toBe("41.8834 SOL");
     expect(maxInUnit(41_883_456n, "usd", 89_550_000n, "SOL")).toBe("$3,750.66");
     expect(maxInUnit(1_000_000n, "token", 1n, "SOL")).toBe("1 SOL");
+  });
+
+  it("a side room worth under one cent is full (paused), not a $0.00 max", () => {
+    const sol150 = 150_000_000n; // 1 q = $0.00015
+    expect(sideRoomIsFull(0n, sol150)).toBe(true);
+    expect(sideRoomIsFull(3n, sol150)).toBe(true); // $0.00045: the live SOL/USD case
+    expect(sideRoomIsFull(66n, sol150)).toBe(true); // $0.0099
+    expect(sideRoomIsFull(67n, sol150)).toBe(false); // $0.01005 -> "Max $0.01"
+    expect(maxInUnit(67n, "usd", sol150, "SOL")).toBe("$0.01");
+    expect(sideRoomIsFull(1_000_000n, sol150)).toBe(false);
+    // unknown room never pauses; without a price only an exact 0 does
+    expect(sideRoomIsFull(null, sol150)).toBe(false);
+    expect(sideRoomIsFull(3n, null)).toBe(false);
+    expect(sideRoomIsFull(0n, null)).toBe(true);
   });
 });
 
