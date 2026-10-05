@@ -11,11 +11,17 @@ const mocks = vi.hoisted(() => ({
   chunked: vi.fn(),
   ledgerKeys: vi.fn(),
   fromAccounts: vi.fn(),
+  upgrade: vi.fn(),
 }));
 
 vi.mock("@/lib/config", () => ({
   getConfig: () => ({ programId: "ETDLAdiAyWnEUngspYczTXUceT6X8f92eZQvr8nmSkWB" }),
   getRpcEndpoint: () => "http://localhost:8899",
+}));
+vi.mock("@/lib/program-upgrade-detect", () => ({
+  programUpgradeState: mocks.upgrade,
+  // The real helper: "post" -> true, anything else ("unknown" included) -> false.
+  earnNavFloorLive: async () => (await mocks.upgrade()) === "post",
 }));
 vi.mock("@/lib/rpc-chunk", () => ({ getMultipleAccountsInfoChunked: mocks.chunked }));
 vi.mock("@percolatorct/sdk", async (orig) => ({
@@ -40,6 +46,7 @@ describe("fetchCuratedVaultsOnChain: two-pot vaults are valued at NAV", () => {
     mocks.chunked.mockReset();
     mocks.ledgerKeys.mockReset();
     mocks.fromAccounts.mockReset();
+    mocks.upgrade.mockReset().mockResolvedValue("post");
     mocks.chunked.mockResolvedValueOnce([acct]).mockResolvedValueOnce([acct, acct, acct]);
   });
 
@@ -73,5 +80,37 @@ describe("fetchCuratedVaultsOnChain: two-pot vaults are valued at NAV", () => {
     mocks.ledgerKeys.mockReturnValue(ledgers);
     const { ok } = await fetchCuratedVaultsOnChain([SLAB]);
     expect(ok).toBe(false);
+  });
+
+  it("the wrapper version can't be read and the floor changes this vault's value: fails the cycle", async () => {
+    mocks.ledgerKeys.mockReturnValue(ledgers);
+    // An over-impaired pot: unpriceable without the floor (-> shares + fees), worth 4.5 with it.
+    mocks.fromAccounts.mockImplementation((...a: unknown[]) =>
+      a[6] ? { own: { nav: 4_500_000n }, sib: { nav: 0n }, feeShareBps: 0, totalShares: 2_000_000_000n } : null,
+    );
+    mocks.upgrade.mockResolvedValue("unknown");
+    const { ok } = await fetchCuratedVaultsOnChain([SLAB]);
+    expect(ok).toBe(false);
+  });
+
+  it("the wrapper version can't be read but the floor doesn't matter for this vault: priced as usual", async () => {
+    mocks.ledgerKeys.mockReturnValue(ledgers);
+    mocks.fromAccounts.mockReturnValue({ own: { nav: 400_000_000n }, sib: { nav: 87_740_000n }, feeShareBps: 0, totalShares: 2_000_000_000n });
+    mocks.upgrade.mockResolvedValue("unknown");
+    const { data, ok } = await fetchCuratedVaultsOnChain([SLAB]);
+    expect(ok).toBe(true);
+    expect(data[SLAB].tvlAtoms).toBe(487_740_000n);
+  });
+
+  it("passes the NAV floor on (post-upgrade wrapper) and off (pre-upgrade)", async () => {
+    mocks.ledgerKeys.mockReturnValue(ledgers);
+    mocks.fromAccounts.mockReturnValue(null);
+    await fetchCuratedVaultsOnChain([SLAB]);
+    expect(mocks.fromAccounts.mock.calls[0][6]).toBe(true);
+    mocks.chunked.mockResolvedValueOnce([acct]).mockResolvedValueOnce([acct, acct, acct]);
+    mocks.upgrade.mockResolvedValue("pre");
+    const { ok } = await fetchCuratedVaultsOnChain([SLAB]);
+    expect(ok).toBe(true);
+    expect(mocks.fromAccounts.mock.calls[1][6]).toBe(false);
   });
 });

@@ -1,6 +1,6 @@
 'use client';
 
-import { earnNavFloorLive } from "@/lib/program-upgrade-detect";
+import { programUpgradeState } from "@/lib/program-upgrade-detect";
 import { isHiddenFromListing } from "@/lib/listing-hidden";
 import { hasNoPriceSource } from "@/lib/listed-markets";
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -408,11 +408,24 @@ export async function fetchCuratedVaultsOnChain(
         splitPot.flatMap((s) => [s.market, s.ownLedger, s.sibLedger]),
       );
       // Wrapper 7a3ac04c+ per-pot NAV floor (one cached probe for every vault).
-      const navFloor = await earnNavFloorLive(connection, programId).catch(() => false);
+      const upgrade = await programUpgradeState(connection, programId);
+      let unpriced = false;
       splitPot.forEach((s, j) => {
         const [m, lo, ls] = spInfos.slice(3 * j, 3 * j + 3);
-        const sp = splitPotStateFromAccounts(programId, s.market, s.registryData, m?.data ?? null, lo?.data ?? null, ls?.data ?? null, navFloor);
+        const read = (navFloor: boolean) =>
+          splitPotStateFromAccounts(programId, s.market, s.registryData, m?.data ?? null, lo?.data ?? null, ls?.data ?? null, navFloor);
+        const sp = read(upgrade === "post");
         const v = sp ? vaultValue(sp) : null;
+        // Unknown (the probe failed): only an over-impaired pot is valued differently with and
+        // without the floor, and without it would fall back to shares + fees below. Such a vault
+        // can't be priced this cycle - fail it (keep-last-good) rather than publish a guess.
+        if (upgrade === "unknown") {
+          const floored = read(true);
+          if ((v?.nav ?? null) !== ((floored ? vaultValue(floored)?.nav : null) ?? null)) {
+            unpriced = true;
+            return;
+          }
+        }
         if (sp && v && sp.totalShares > 0n) {
           // The withdraw view is extra information: if it cannot be computed the TVL must still show.
           let w: ReturnType<typeof vaultWithdrawView> = null;
@@ -428,6 +441,7 @@ export async function fetchCuratedVaultsOnChain(
           };
         }
       });
+      if (unpriced) return { data: result, ok: false };
     }
   } catch (err) {
     console.error('[useEarnStats] Failed to fetch LP vault registries on-chain:', err);
