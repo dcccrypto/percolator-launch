@@ -125,6 +125,11 @@ import { COPY as LIMITS_COPY } from "@/lib/limits/copy";
 import { buildDepositJuniorTrancheIx, deriveVaultLpState } from "@/lib/limits/p3-ix";
 import { decodeVaultLpState } from "@/lib/limits/decode";
 import { VAULT_LP_MATCHER_CTX_LEN } from "@/lib/limits/constants";
+import { isDevnetV21Enabled } from "@/lib/v21/flag";
+import { detectTxV1Support } from "@/lib/v21/sdk";
+import { resolveRawTxSigner, walletChainForNetwork, type RawTxSigner } from "@/lib/tx-v1";
+import { attemptSingleTxLaunch, launchSingleTxModeFromEnv, singleTxLaunchGate } from "@/lib/launch-single-tx/run";
+import { liveSingleTxDeps } from "@/lib/launch-single-tx/deps";
 
 const P3_WIZARD_ISSUE_COPY = LIMITS_COPY.p3Wizard.issue;
 
@@ -464,6 +469,11 @@ export interface CreateMarketState {
   landingLabels?: string[];
   /** "landing" phase only: total transactions in this batch (4-5 depending on oracle mode). */
   landingTotal: number;
+  /**
+   * Why a single-transaction (Solana v1) launch attempt handed over to the batch, when it did
+   * (diagnosis only; the launch continues). Unset when no single-transaction attempt was made.
+   */
+  singleTxFallbackReason?: string | null;
 }
 
 /**
@@ -616,6 +626,30 @@ interface FreshBatchContext {
    * the user is no longer looking at.
    */
   abortSignal?: AbortSignal;
+  /**
+   * Single-transaction launch (Solana v1). Set by `create()` only when `singleTxLaunchGate` said
+   * "use" (v2.1 flag on, NEXT_PUBLIC_LAUNCH_SINGLE_TX not off, P3, wallet advertises v1, cluster
+   * has v1). Absent/null = the batched path exactly as before. See lib/launch-single-tx/run.ts.
+   */
+  singleTx?: { rawSigner: RawTxSigner } | null;
+}
+
+/**
+ * The single-transaction plan: the batched launch's OWN instruction lists, concatenated in the
+ * order the batch broadcasts them (orderedTxs: M1, the keeper co-sign pair, then M2?/M3a?/M3b/M4a/
+ * M4p/M4b), plus every keypair any of them needs. Nothing is re-encoded, so the two paths cannot
+ * drift: a change to a descriptor changes both.
+ */
+export function singleTxInstructionPlan(
+  tail: readonly { instructions: readonly TransactionInstruction[]; signers: readonly Keypair[] }[],
+  cosignInstructions: readonly TransactionInstruction[],
+): { instructions: TransactionInstruction[]; signers: Keypair[] } {
+  const [m1, ...rest] = tail;
+  if (!m1) throw new Error("singleTxInstructionPlan: empty launch");
+  const ordered = [m1, { instructions: cosignInstructions, signers: [] as Keypair[] }, ...rest];
+  const signers: Keypair[] = [];
+  for (const d of ordered) for (const s of d.signers) if (!signers.some((k) => k.publicKey.equals(s.publicKey))) signers.push(s);
+  return { instructions: ordered.flatMap((d) => [...d.instructions]), signers };
 }
 
 /**
@@ -664,7 +698,13 @@ type FreshBatchOutcome =
    * caller must record it. See #2586.
    */
   | { status: "fallback"; reason: string }
-  | { status: "fatal" };
+  | { status: "fatal" }
+  /**
+   * Single-transaction launch only: nothing exists on chain (simulation refused the bundle, the
+   * atomic tx failed on chain, or the user declined) or the outcome is unknown. state.error is set;
+   * neither the batched nor the sequential path runs (no second launch).
+   */
+  | { status: "aborted" };
 
 // ---- Blockhash-expiry recovery for the batched launch's tail -------------
 //
@@ -789,7 +829,7 @@ function buildMarketRegistrationPayload(args: {
   };
 }
 
-async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshBatchOutcome> {
+export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshBatchOutcome> {
   const { connection, wallet, programId, slabKp, params, isDevnetEnv, isKeeperOracle, isAdminOracle, isHyperpOracle, oracleMode, setState, abortSignal } = ctx;
   const walletPk = wallet.publicKey;
   const slabPk = slabKp.publicKey;
@@ -866,8 +906,10 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
         })
       : Promise.resolve(null);
 
-    const cosignPromise = isKeeperOracle
-      ? fetch("/api/playground/keeper-cosign", {
+    // A function so the single-transaction attempt can re-request a fresh legacy co-sign tx
+    // (its own blockhash) before falling back to this batch (see the single-tx branch below).
+    const requestCosign = (): Promise<Response> =>
+      fetch("/api/playground/keeper-cosign", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -881,8 +923,8 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
             // approvals. With it the route uses asset 0's fixed post-M1 values.
             fresh: true,
           }),
-        })
-      : Promise.resolve(null);
+        });
+    const cosignPromise = isKeeperOracle ? requestCosign() : Promise.resolve(null);
 
     prewarmTxLanding(connection);
 
@@ -913,8 +955,7 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
     // 3. Keeper co-sign (keeper oracle mode only) — fatal, matching the
     //    sequential path's own hard throw for this call.
     let cosignTx: Transaction | null = null;
-    if (isKeeperOracle) {
-      const cosignResp = await cosignPromise;
+    const readCosignTx = async (cosignResp: Response | null): Promise<Transaction> => {
       if (!cosignResp || !cosignResp.ok) {
         const errData = cosignResp ? await cosignResp.json().catch(() => ({ error: "co-sign failed" })) : { error: "network error" };
         throw new Error(
@@ -923,7 +964,10 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
         );
       }
       const { partialTxBase64 } = (await cosignResp.json()) as { partialTxBase64: string };
-      cosignTx = Transaction.from(Buffer.from(partialTxBase64, "base64"));
+      return Transaction.from(Buffer.from(partialTxBase64, "base64"));
+    };
+    if (isKeeperOracle) {
+      cosignTx = await readCosignTx(await cosignPromise);
     }
 
     // Asset 0's authority_epoch as the funding txs below will find it. The
@@ -979,10 +1023,12 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
     }
 
     // ---- Build all txs against ONE fresh blockhash -----------------------
-    const [blockhash, priorityFee] = await Promise.all([
+    const [initialBlockhash, priorityFee] = await Promise.all([
       getFreshBlockhash(connection, true),
       getPriorityFee(connection),
     ]);
+    // `let`: a single-transaction attempt that falls back re-fetches it (see that branch below).
+    let blockhash = initialBlockhash;
 
     // Margin comes from the SAME derivation as the price-move budget below, so
     // the two can never disagree (see lib/market-params.ts).
@@ -1332,6 +1378,89 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
     };
     const buildTailTx = (d: TailTxDescriptor, hash: string): Transaction =>
       buildBatchTx({ instructions: d.instructions, computeUnits: d.computeUnits, priorityFeeMicroLamports: priorityFee, blockhash: hash, feePayer: walletPk });
+
+    // ---- Single-transaction launch (Solana v1), gated in create() --------
+    // The SAME descriptors, concatenated (singleTxInstructionPlan), as ONE atomic v1 tx: one prompt,
+    // and a failure costs only the fee (no in-flight record, no partial market, nothing to resume).
+    // Fallback runs the batch below with the SAME slab keypair, so the two can never both create a
+    // market (createAccount of one address can only succeed once).
+    if (ctx.singleTx) {
+      const keeperPk = cosignTx?.signatures.find((s) => s.signature !== null && !s.publicKey.equals(walletPk))?.publicKey ?? null;
+      if (cosignTx && !keeperPk) throw new Error("Keeper co-sign returned no keeper signature.");
+      const plan = singleTxInstructionPlan(tailDescriptors, cosignTx ? cosignTx.instructions : []);
+      const latest = await connection.getLatestBlockhash("confirmed");
+      setState((s) => ({ ...s, phase: "awaiting-signature", stepLabel: "Approve the launch in your wallet (one transaction)..." }));
+      const single = await attemptSingleTxLaunch(
+        {
+          payer: walletPk,
+          slab: slabPk,
+          instructions: plan.instructions,
+          localSigners: plan.signers,
+          keeper: keeperPk,
+          programs: { wrapper: programId.toBase58(), stake: stakeProgramId.toBase58() },
+          blockhash: latest.blockhash,
+          lastValidBlockHeight: latest.lastValidBlockHeight,
+          priorityMicroLamportsPerCu: priorityFee,
+        },
+        liveSingleTxDeps({
+          connection,
+          rawSigner: ctx.singleTx.rawSigner,
+          cosign: { deployer: walletPk.toBase58(), slabAddress: slabPk.toBase58(), initialPriceE6: params.initialPriceE6.toString(), assetIndex: 0, fresh: true },
+          slab: slabPk,
+          wrapperProgramId: programId,
+        }),
+      );
+      if (single.status === "landed") {
+        const slab = slabPk.toBase58();
+        if (keeperRequestBase) saveProofTx(slab, single.signature);
+        if (keeperRequestBase && keeperPayload) rememberRegistrationPayload(slab, keeperPayload);
+        console.info(`[useCreateMarket] SINGLE-TX launch landed: ${single.signature} (${single.stats.bytes} B, ${single.stats.accounts} accounts, ${single.stats.signers} signers, ${single.stats.unitsConsumed ?? "?"} CU)`);
+        setState((s) => ({
+          ...s,
+          loading: false,
+          step: 6,
+          phase: "done",
+          txSigs: [single.signature],
+          landingIndex: 1,
+          landingTotal: 1,
+          landingLabels: ["Launching the market"],
+          stepLabel: "Market created!",
+          keeperDelegated: false,
+          keeperMessage: keeperRequestBase ? KEEPER_REGISTER_COPY.connecting : s.keeperMessage,
+          keeperProofTx: keeperRequestBase ? single.signature : null,
+          priceFeedRequired: !!(isKeeperOracle && params.dexPoolAddress),
+          slabAddress: slab,
+          ...(isDevnetEnv ? { devnetMint: params.mint.toBase58() } : {}),
+        }));
+        return { status: "success" };
+      }
+      if (single.status === "refused" || single.status === "unknown") {
+        if (single.status === "unknown" && keeperRequestBase) {
+          // If it did land, a later visit registers it (resumePendingRegistrations); if it did not,
+          // keeper-register answers "slab does not exist" (a final 400) and nothing is written.
+          const slab = slabPk.toBase58();
+          saveProofTx(slab, single.signature);
+          if (keeperPayload) rememberRegistrationPayload(slab, keeperPayload);
+          saveRegisterRequest({ slabAddress: slab, mainnetCA: keeperRequestBase.mainnetCA, dexPoolAddress: keeperRequestBase.dexPoolAddress, dexType: keeperRequestBase.dexType, symbol: keeperRequestBase.symbol });
+        }
+        const msg =
+          single.status === "unknown"
+            ? `The launch transaction was sent but could not be confirmed (${single.signature}). Do not launch again: if it landed, the market exists in full. Check your markets in a minute.`
+            : single.stage === "wallet"
+              ? "You declined the launch transaction. Nothing was created."
+              : `The launch was refused before anything was created: ${single.reason}`;
+        console.warn(`[useCreateMarket] SINGLE-TX launch ${single.status}: ${single.status === "unknown" ? single.reason : `${single.stage}: ${single.reason}`}`);
+        setState((s) => ({ ...s, loading: false, phase: "idle", error: msg, step: 0, stepLabel: STEP_LABELS[0] ?? s.stepLabel }));
+        return { status: "aborted" };
+      }
+      // Fallback: nothing landed. Fresh blockhash + a fresh legacy co-sign tx (the first one may have
+      // aged during the attempt), then the batch exactly as before.
+      console.warn(`[useCreateMarket] SINGLE-TX launch fell back to the batch at ${single.stage}: ${single.reason}`);
+      setState((s) => ({ ...s, phase: "preparing", stepLabel: "Preparing market launch...", singleTxFallbackReason: single.reason }));
+      blockhash = await getFreshBlockhash(connection, true);
+      if (cosignTx) cosignTx = await readCosignTx(await requestCosign());
+    }
+
     const builtTail = tailDescriptors.map((d) => buildTailTx(d, blockhash));
     const tailTx = (d: TailTxDescriptor): Transaction => {
       const tx = builtTail[tailIdx(d)];
@@ -2170,6 +2299,21 @@ export function useCreateMarket() {
       if (retryFromStep === undefined && wallet.publicKey) {
         console.info("[useCreateMarket] fresh launch — attempting BATCHED flow (one approval)");
         const batchWalletPk = wallet.publicKey;
+        // Single-transaction launch gate (lib/launch-single-tx/run.ts). With the v2.1 flag or the mode
+        // off it returns before reading the wallet or the RPC, and the batch below runs unchanged.
+        const signerBox: { signer: RawTxSigner | null } = { signer: null };
+        const singleTxGate = await singleTxLaunchGate({
+          v21Enabled: isDevnetV21Enabled(),
+          mode: launchSingleTxModeFromEnv(),
+          p3: !!params.p3,
+          walletSupportsV1: () => {
+            signerBox.signer = resolveRawTxSigner(wallet.wallet, batchWalletPk, walletChainForNetwork());
+            return signerBox.signer?.supportsV1 === true;
+          },
+          clusterSupportsV1: () => detectTxV1Support(connection),
+        });
+        const singleTxSigner: RawTxSigner | null = singleTxGate === "use" ? signerBox.signer : null;
+        if (singleTxGate !== "v21-flag-off") console.info(`[useCreateMarket] single-transaction launch gate: ${singleTxGate}`);
         const outcome = await attemptFreshBatchedLaunch({
           connection,
           wallet: {
@@ -2188,13 +2332,14 @@ export function useCreateMarket() {
           oracleMode,
           setState,
           abortSignal,
+          singleTx: singleTxSigner ? { rawSigner: singleTxSigner } : null,
         });
         if (outcome.status === "success") {
           slabKpRef.current = null;
           if (isKeeperOracle && params.dexPoolAddress) startKeeperLoop(params, slabKp.publicKey.toBase58());
           return;
         }
-        if (outcome.status === "fatal") {
+        if (outcome.status === "fatal" || outcome.status === "aborted") {
           // state.error already set inside attemptFreshBatchedLaunch — do
           // NOT fall through to the sequential path (something already
           // broadcast; resuming happens via the existing RecoverSolBanner /

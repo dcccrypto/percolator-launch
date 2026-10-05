@@ -74,7 +74,7 @@ export function createHttpRpc(o: HttpRpcOptions): ChainRpc & { requests(): numbe
       const out: Array<RpcTx | null> = [];
       for (let i = 0; i < signatures.length; i += batch) {
         const part = signatures.slice(i, i + batch);
-        const reqs = part.map((sig, k) => ({ jsonrpc: "2.0", id: k, method: "getTransaction", params: [sig, { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "confirmed" }] }));
+        const reqs = part.map((sig, k) => ({ jsonrpc: "2.0", id: k, method: "getTransaction", params: [sig, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }] }));
         const res = (await post(reqs, part.length)) as Array<{ id: number; result?: RpcTx | null }>;
         if (!Array.isArray(res)) throw new RpcError("getTransaction batch failed");
         const byId = new Map(res.map((r) => [r.id, r.result ?? null]));

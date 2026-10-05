@@ -235,7 +235,7 @@ export async function POST(req: NextRequest) {
       if (accountInfo.owner.toBase58() !== wrapper || !isV18MarketHeader(new Uint8Array(accountInfo.data))) {
         return NextResponse.json({ error: "Slab account is not a market of this deployment's program" }, { status: 400 });
       }
-      const tx = await connection.getTransaction(proofTx, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
+      const tx = await connection.getTransaction(proofTx, { commitment: "confirmed", maxSupportedTransactionVersion: 1 });
       const verdict = await verifyKeeperRegisterProofTx(
         tx,
         await keeperMemoParams({ slabAddress, dexPoolAddress, mainnetCA, dexType, symbol, label, payload: boundPayload }),

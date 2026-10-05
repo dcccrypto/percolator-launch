@@ -15,6 +15,7 @@
  */
 
 import { Keypair, Transaction, VersionedTransaction } from "@solana/web3.js";
+import { ed25519 } from "@noble/curves/ed25519";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 import _bs58 from "bs58";
 
@@ -24,6 +25,12 @@ export interface KeeperSealedSigner {
   publicKey(): string;
   signTransaction(tx: Transaction | VersionedTransaction): Transaction | VersionedTransaction;
   partialSign(tx: Transaction): void;
+  /**
+   * Ed25519 signature over raw message bytes. ONLY for a Solana v1 launch message that
+   * app/api/playground/keeper-cosign has already validated (lib/launch-single-tx/cosign-validate.ts):
+   * web3.js 1.x cannot represent a v1 message, so there is no transaction object to sign.
+   */
+  signMessageBytes(message: Uint8Array): Uint8Array;
 }
 
 let _keeperSigner: KeeperSealedSigner | null = null;
@@ -73,6 +80,9 @@ function loadKeeperKeypair(env: NodeJS.ProcessEnv): KeeperSealedSigner | null {
     },
     partialSign(tx: Transaction): void {
       tx.partialSign(keypair);
+    },
+    signMessageBytes(message: Uint8Array): Uint8Array {
+      return ed25519.sign(message, keypair.secretKey.slice(0, 32));
     },
   };
 }
