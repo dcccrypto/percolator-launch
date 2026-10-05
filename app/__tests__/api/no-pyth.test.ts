@@ -194,8 +194,9 @@ describe("/api/prices/[slab]: 24h stats from GeckoTerminal, never Pyth Benchmark
       calls.push(url);
       if (url.includes(`/api/markets/${SLAB}`)) return new Response(JSON.stringify({ market: { dex_pool_address: POOL } }), { status: 200 });
       if (url.includes("api.geckoterminal.com")) {
-        // newest first: [ts, o, h, l, c, v]
-        const ohlcv_list = [[2, 110, 120, 105, 115, 1], [1, 100, 112, 95, 110, 1]];
+        // newest first: [ts, o, h, l, c, v], both inside the last 24h
+        const t = Math.floor(Date.now() / 1000);
+        const ohlcv_list = [[t - 3600, 110, 120, 105, 115, 1], [t - 7200, 100, 112, 95, 110, 1]];
         return new Response(JSON.stringify({ data: { attributes: { ohlcv_list } } }), { status: 200 });
       }
       return new Response("unexpected", { status: 599 });
