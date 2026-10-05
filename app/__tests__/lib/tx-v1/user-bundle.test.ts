@@ -24,7 +24,7 @@ import {
 } from "@/lib/tx-v1/user-bundle";
 import type { RawTxSigner } from "@/lib/tx-v1/wallet-raw-signer";
 import { SimulationRefusal, buildBatchTx } from "@/lib/tx";
-import { TX_LEGACY_MAX_BYTES, TX_V1_MAX_BYTES, compileV1Message } from "@/lib/v21/sdk";
+import { TX_LEGACY_MAX_BYTES, TX_V1_MAX_BYTES, V1RpcError, compileV1Message } from "@/lib/v21/sdk";
 
 const walletKp = Keypair.fromSeed(new Uint8Array(32).fill(3));
 const payer = walletKp.publicKey;
@@ -216,12 +216,13 @@ describe("sendUserBundle", () => {
   });
 
   it.each([
-    "Reached end of buffer unexpectedly",
-    "WalletSignTransactionError: Unexpected error",
-    "-32603",
-  ])("wallet v1-signing failure (%s): falls back to legacy EXACTLY once, nothing v1 sent", async (message) => {
+    ["Reached end of buffer unexpectedly", new Error("Reached end of buffer unexpectedly")],
+    // wallet-adapter WalletSignTransactionError keeps the provider error on `.error`.
+    ["WalletSignTransactionError wrapping -32603", Object.assign(new Error("Unexpected error"), { name: "WalletSignTransactionError", error: { code: -32603, message: "Unexpected error" } })],
+    ["-32603", Object.assign(new Error("-32603"), { code: -32603 })],
+  ])("wallet v1-signing failure (%s): falls back to legacy EXACTLY once, nothing v1 sent", async (_label, thrown) => {
     const signRaw = vi.fn(async () => {
-      throw Object.assign(new Error(message), { code: message === "-32603" ? -32603 : undefined });
+      throw thrown;
     });
     const r = recorder(v1Signer({ signRaw }));
     const onFallback = vi.fn();
@@ -278,7 +279,7 @@ describe("sendUserBundle", () => {
     const signer = v1Signer();
     const r = recorder(signer, {
       simulateV1: vi.fn(async () => {
-        throw new Error("RPC simulateTransaction failed: -32602 failed to deserialize transaction");
+        throw new V1RpcError("simulateTransaction", -32602, "failed to deserialize transaction");
       }),
     });
     const out = await sendUserBundle({ connection: conn, wallet, groups: BYTE_BOUND, mode: "auto", deps: r.deps });
@@ -289,7 +290,7 @@ describe("sendUserBundle", () => {
 
   it("format rejection on the FIRST send: falls back once (nothing landed)", async () => {
     const sendV1 = vi.fn(async () => {
-      throw new Error("RPC sendTransaction failed: -32602 invalid transaction: Transaction version (1) is not supported");
+      throw new V1RpcError("sendTransaction", -32602, "invalid transaction: Transaction version (1) is not supported");
     });
     const r = recorder(v1Signer(), { sendV1 });
     const out = await sendUserBundle({ connection: conn, wallet, groups: BYTE_BOUND, mode: "auto", deps: r.deps });
@@ -304,7 +305,7 @@ describe("sendUserBundle", () => {
     let n = 0;
     const sendV1 = vi.fn(async (w: Uint8Array) => {
       if (n++ === 0) return bs58.encode(splitV1Wire(w).signatures[0]!);
-      throw new Error("RPC sendTransaction failed: -32602 failed to deserialize");
+      throw new V1RpcError("sendTransaction", -32602, "failed to deserialize");
     });
     const r = recorder(v1Signer(), { sendV1 });
     const err = await sendUserBundle({ connection: conn, wallet, groups, mode: "auto", deps: r.deps }).catch((e: unknown) => e);
