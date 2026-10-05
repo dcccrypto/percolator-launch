@@ -240,7 +240,28 @@ export async function presimulateOrThrow(
 
 const POLL_INTERVAL_MS = 2000;
 const MAX_POLL_TIME_MS = 90_000;
-const PRIORITY_FEE_FALLBACK = Number(process.env.NEXT_PUBLIC_PRIORITY_FEE ?? 100_000);
+/**
+ * Hard ceiling on the client priority price, micro-lamports per CU (A-1, security review 2026-10-05).
+ * `NEXT_PUBLIC_PRIORITY_FEE` is client-visible config and was the only bound (the 10x spike cap scaled with
+ * it), so a mistyped value could make every user tx overpay. This constant applies whatever the env says:
+ * at the 1.4M CU maximum it is 1,400,000 lamports (0.0014 SOL) per tx, below the v1 encoder's own
+ * MAX_PRIORITY_FEE_LAMPORTS (0.01 SOL), which backs it up on the v1 path.
+ */
+export const PRIORITY_FEE_MAX_MICRO_LAMPORTS = 1_000_000;
+const PRIORITY_FEE_DEFAULT = 100_000;
+
+/** Clamp a priority price to [0, PRIORITY_FEE_MAX_MICRO_LAMPORTS]; non-finite/negative -> `fallback`. */
+export function clampPriorityFee(raw: number, fallback: number = PRIORITY_FEE_DEFAULT): number {
+  const v = Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : fallback;
+  return Math.min(v, PRIORITY_FEE_MAX_MICRO_LAMPORTS);
+}
+
+const PRIORITY_FEE_FALLBACK = clampPriorityFee(Number(process.env.NEXT_PUBLIC_PRIORITY_FEE ?? PRIORITY_FEE_DEFAULT));
+
+/** The (clamped) fallback price; also what a send RETRY uses instead of a fresh estimate. */
+export function priorityFeeFallback(): number {
+  return PRIORITY_FEE_FALLBACK;
+}
 
 /** How long a fetched priority fee stays reusable. Fee conditions move on
  *  the order of minutes, not milliseconds — paying a full RPC round-trip for
@@ -387,7 +408,8 @@ export async function getPriorityFee(connection: Connection): Promise<number> {
   if (cachedPriorityFee && Date.now() - cachedPriorityFee.ts < PRIORITY_FEE_CACHE_MS) {
     return cachedPriorityFee.fee;
   }
-  const fee = await fetchPriorityFee(connection);
+  // Clamp at the boundary so no caller (legacy price or v1 total) ever sees more than the ceiling.
+  const fee = clampPriorityFee(await fetchPriorityFee(connection));
   cachedPriorityFee = { fee, ts: Date.now() };
   return fee;
 }
@@ -604,7 +626,7 @@ async function checkSufficientBalance(
  * @param onProgress - Optional callback for progress updates (elapsed time in ms)
  * @param abortSignal - Optional AbortSignal to cancel polling
  */
-async function pollConfirmation(
+export async function pollConfirmation(
   connection: Connection,
   signature: string,
   onProgress?: (elapsedMs: number) => void,
@@ -878,7 +900,7 @@ export async function sendTx({
       }
 
       // Get dynamic priority fee on first attempt (cached 45s)
-      const priorityFee = attempt === 0 ? await getPriorityFee(connection) : PRIORITY_FEE_FALLBACK;
+      const priorityFee = attempt === 0 ? await getPriorityFee(connection) : priorityFeeFallback();
 
       // Pre-flight fee estimation and balance check (first attempt only).
       // Started here, awaited just before signing — it runs CONCURRENTLY with

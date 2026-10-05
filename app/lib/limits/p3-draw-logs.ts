@@ -72,7 +72,8 @@ export async function readTxDrawSummary(
   signature: string,
 ): Promise<DrawSummary | null> {
   try {
-    const tx = await connection.getTransaction(signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
+    // v1 (SIMD-0385) readable on web3.js >= 1.99; the node returns legacy / v0 / v1 alike.
+    const tx = await connection.getTransaction(signature, { commitment: "confirmed", maxSupportedTransactionVersion: 1 });
     return summarizeDrawEvents(parseP3DrawLogs(tx?.meta?.logMessages));
   } catch {
     return null;

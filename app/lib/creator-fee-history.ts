@@ -185,7 +185,8 @@ export async function fetchCreatorFeesClaimed(
   // One at a time: devnet rate-limits getTransaction hard, and the intersection is small.
   for (const e of window) {
     if (!e.ok || !mine.has(e.signature)) continue;
-    const tx = await connection.getTransaction(e.signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
+    // v1 (SIMD-0385) readable on web3.js >= 1.99; the node returns legacy / v0 / v1 alike.
+    const tx = await connection.getTransaction(e.signature, { maxSupportedTransactionVersion: 1, commitment: "confirmed" });
     // A transaction the RPC can't return yet would be skipped for good once the cache moves
     // past it, so fail the whole read instead and retry next time.
     if (!tx) throw new Error("Transaction history is still loading");
