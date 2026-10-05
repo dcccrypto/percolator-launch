@@ -625,4 +625,29 @@ describe("sendTx — R2-S7 landed check works when sendRawTransaction throws", (
       sendTx({ connection: conn, wallet, instructions: [], maxRetries: 0 }),
     ).rejects.toThrow(/Blockhash not found/i);
   });
+
+  it("a wallet that ALSO exposes signAndSendTransaction still retries a blockhash miss with a fresh blockhash", async () => {
+    // Every real wallet provider exposes signAndSendTransaction. The PERC-8388 no-rebuild SAFETY
+    // branch is only for a tx the WALLET broadcast atomically; knowing the pre-send signature of OUR
+    // sendRawTransaction must not trip it (it would wait 4s and throw instead of retrying).
+    netState.network = "devnet";
+    const SENT = bs58.encode(new Uint8Array(64).fill(9));
+    const { conn, sendRawTransaction } = makeConn(new Error("Blockhash not found"), null);
+    sendRawTransaction.mockReset();
+    sendRawTransaction
+      .mockRejectedValueOnce(new Error("Blockhash not found"))
+      .mockResolvedValueOnce(SENT);
+    conn.getSignatureStatuses.mockImplementation(async (sigs: string[]) => ({
+      value: sigs.map((x) => (x === SENT ? { confirmationStatus: "confirmed", err: null } : null)),
+    }));
+    const { wallet } = makeWallet();
+    const signAndSendTransaction = vi.fn();
+
+    const sig = await sendTx({ connection: conn, wallet: { ...wallet, signAndSendTransaction }, instructions: [] });
+
+    expect(signAndSendTransaction).not.toHaveBeenCalled();
+    expect(sendRawTransaction).toHaveBeenCalledTimes(2);
+    expect(wallet.signTransaction).toHaveBeenCalledTimes(2); // re-signed with a fresh blockhash
+    expect(sig).toBe(SENT);
+  });
 });
