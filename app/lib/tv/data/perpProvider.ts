@@ -2,7 +2,7 @@
  * ChartDataProvider #2: the perp-standard chart (Mark / Oracle / Last), push-fed.
  *
  *   mark / oracle  history  GET /api/perp-chart/:slab (our own persisted candles, pool-price
- *                           backfill before the first mark)
+ *                           stand-in for every range with no mark)
  *                  live     keeper ticks over the price-ws socket (lib/chart/live-client.ts),
  *                           folded into the forming candle with the SAME pure code the server uses
  *   last           history  the wrapped base provider (/api/candles/:slab, indexer trades)
@@ -51,10 +51,11 @@ interface HistoryBody {
   s?: unknown;
   bars?: unknown;
   proxyBeforeSec?: unknown;
+  proxyFromSec?: unknown;
   noMoreHistory?: unknown;
 }
 
-export function parsePerpHistory(body: unknown): { bars: ProviderBar[]; proxyBeforeSec: number | null; noMoreHistory: boolean; dexThroughSec: number | null } {
+export function parsePerpHistory(body: unknown): { bars: ProviderBar[]; proxyBeforeSec: number | null; proxyFromSec: number | null; noMoreHistory: boolean; dexThroughSec: number | null } {
   if (typeof body !== "object" || body === null) throw new Error("perp-chart: malformed response");
   const b = body as HistoryBody;
   const raw = Array.isArray(b.bars) ? b.bars : [];
@@ -71,7 +72,8 @@ export function parsePerpHistory(body: unknown): { bars: ProviderBar[]; proxyBef
   }
   bars.sort((a, c) => a.timeSec - c.timeSec);
   const proxy = typeof b.proxyBeforeSec === "number" && Number.isFinite(b.proxyBeforeSec) ? b.proxyBeforeSec : null;
-  return { bars, proxyBeforeSec: proxy, noMoreHistory: b.noMoreHistory === true, dexThroughSec };
+  const proxyFrom = typeof b.proxyFromSec === "number" && Number.isFinite(b.proxyFromSec) ? b.proxyFromSec : null;
+  return { bars, proxyBeforeSec: proxy, proxyFromSec: proxyFrom, noMoreHistory: b.noMoreHistory === true, dexThroughSec };
 }
 
 function toCandle(b: ProviderBar) {
@@ -101,21 +103,15 @@ export function createPerpProvider(deps: PerpProviderDeps): ChartDataProvider {
         `/api/perp-chart/${encodeURIComponent(req.slab)}?series=${s}&resolution=${req.resolution}` +
         `&to=${Math.floor(req.toSec)}&countBack=${Math.max(300, Math.floor(req.countBack))}`;
       const source = sourceForSeries(s);
-      let r;
-      try {
-        r = await fetchImpl(url);
-      } catch (err) {
-        if (!req.firstRequest) throw err;
-        return { bars: [], noMoreHistory: true, source }; // the live ticks still build the chart
-      }
+      // A failed history fetch is an ERROR the chart must surface (retry), never an empty page: an empty
+      // page is indistinguishable from "no data" and leaves a blank canvas with no explanation.
+      // Only a store that is not configured / a market that is unknown is an honest empty chart.
+      const r = await fetchImpl(url);
       if (r.status === 503 || r.status === 404) return { bars: [], noMoreHistory: true, source };
-      if (!r.ok) {
-        if (!req.firstRequest) throw new Error(`perp-chart HTTP ${r.status}`);
-        return { bars: [], noMoreHistory: true, source };
-      }
+      if (!r.ok) throw new Error(`perp-chart HTTP ${r.status}`);
       const h = parsePerpHistory(await r.json());
       const bars = h.bars.filter((b) => b.timeSec >= req.fromSec - 1 || req.countBack > 0);
-      return { bars, noMoreHistory: h.noMoreHistory, source, proxyBeforeSec: h.proxyBeforeSec, dexThroughSec: h.dexThroughSec };
+      return { bars, noMoreHistory: h.noMoreHistory, source, proxyBeforeSec: h.proxyBeforeSec, proxyFromSec: h.proxyFromSec, dexThroughSec: h.dexThroughSec };
     },
 
     subscribeBars(slab: string, resolution: ProviderResolution, handlers: LiveHandlers, lastBar: ProviderBar | null): () => void {

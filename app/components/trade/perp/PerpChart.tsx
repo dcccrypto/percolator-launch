@@ -106,7 +106,10 @@ function PerpChartInner({ slabAddress }: Props) {
   const barsRef = useRef<ProviderBar[]>([]);
 
   const [status, setStatus] = useState<"loading" | "ready" | "empty" | "error">("loading");
+  // Bumped by the Retry button: re-runs the history load effect.
+  const [retryNonce, setRetryNonce] = useState(0);
   const [proxyBefore, setProxyBefore] = useState<number | null>(null);
+  const [proxyFrom, setProxyFrom] = useState<number | null>(null);
   // Any bar on screen sourced from GeckoTerminal / CoinGecko (pre-launch history): attribution is then mandatory.
   const [usesDex, setUsesDex] = useState(false);
   // Off-screen liquidation indicator (same behaviour as TradingChart's, #3102): price lines are not part of
@@ -273,13 +276,15 @@ function PerpChartInner({ slabAddress }: Props) {
         if (cancelled) return;
         noMore = page.noMoreHistory;
         setProxyBefore(series === "mark" ? page.proxyBeforeSec ?? null : null);
+        setProxyFrom(series === "mark" ? page.proxyFromSec ?? null : null);
         if (page.dexThroughSec != null) setUsesDex(true);
         setAll(page.bars);
         setLastPrice(page.bars.length ? page.bars[page.bars.length - 1].close : null);
         setStatus(page.bars.length ? "ready" : "empty");
         requestAnimationFrame(() => { if (!cancelled) recomputeLiqEdge(); }); // autoscale has settled on the new data
         if (page.bars.length) chart.timeScale().fitContent();
-      } catch {
+      } catch (err) {
+        console.error("[PerpChart] history load failed:", err);
         if (!cancelled) setStatus("error");
       }
       if (cancelled) return;
@@ -339,7 +344,7 @@ function PerpChartInner({ slabAddress }: Props) {
       linesRef.current = {};
       barsRef.current = [];
     };
-  }, [slabAddress, series, res, recomputeLiqEdge]);
+  }, [slabAddress, series, res, recomputeLiqEdge, retryNonce]);
 
   // ── header feed: independent of the candle series (mark line, price, liveness) ──
   useEffect(() => {
@@ -398,18 +403,32 @@ function PerpChartInner({ slabAddress }: Props) {
       <div className="relative min-h-0 flex-1">
         <div ref={containerRef} className="absolute inset-0" />
         {status !== "ready" && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-[var(--text-muted)]">
+          <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 text-xs text-[var(--text-muted)]" role={status === "error" ? "alert" : undefined} data-testid={status === "error" ? "chart-data-error" : undefined}>
             {status === "loading" ? "Loading chart…"
-              : status === "error" ? "Chart history is unavailable right now. Live ticks will still draw."
+              : status === "error" ? (
+                <>
+                  <span>Chart data unavailable</span>
+                  <button
+                    type="button"
+                    onClick={() => { setStatus("loading"); setRetryNonce((n) => n + 1); }}
+                    className="pointer-events-auto rounded-none border border-[var(--border)] px-3 py-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text)]"
+                  >
+                    Retry
+                  </button>
+                </>
+              )
               : series === "last" ? "No trades on this market yet."
               : "Waiting for the first price tick…"}
           </div>
         )}
         {status === "ready" && series !== "last" && ((series === "mark" && proxyBefore !== null) || usesDex) && (
-          <div className="absolute bottom-7 left-2 flex max-w-[70%] flex-col gap-0.5 rounded-sm bg-[var(--bg)]/80 px-1.5 py-0.5 text-[9px] text-[var(--text-muted)]">
+          <div className="absolute bottom-7 left-14 z-10 flex max-w-[70%] flex-col gap-0.5 rounded-sm bg-[var(--bg)]/80 px-1.5 py-0.5 text-[9px] text-[var(--text-muted)]">
             {series === "mark" && proxyBefore !== null && (
               <span className="pointer-events-none">
-                Before {new Date(proxyBefore * 1000).toLocaleDateString()}: DEX pool price (no mark existed yet)
+                {proxyFrom !== null
+                  ? `${new Date(proxyFrom * 1000).toLocaleDateString()} to ${new Date(proxyBefore * 1000).toLocaleDateString()}`
+                  : `Before ${new Date(proxyBefore * 1000).toLocaleDateString()}`}
+                : pool price where no mark was recorded
               </span>
             )}
             {usesDex && (

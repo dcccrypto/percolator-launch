@@ -80,6 +80,8 @@ export interface DatafeedHooks {
   onDexData?(ticker: string): void;
   /** A live bar was just handed to the chart (latency probes hook the next frame here). */
   onBarDelivered?(ticker: string, bar: ProviderBar): void;
+  /** A history page was delivered to the chart (any page, empty or not): any earlier data error is over. */
+  onBarsLoaded?(ticker: string): void;
   /** The provider asked for a history refetch — call activeChart().resetData() after this. */
   onResetRequested?(ticker: string): void;
   /** Errors worth surfacing to telemetry. */
@@ -157,6 +159,7 @@ export function createTvDatafeed(provider: ChartDataProvider, hooks: DatafeedHoo
               }
             }
             if (page.dexThroughSec != null) hooks.onDexData?.(ticker);
+            hooks.onBarsLoaded?.(ticker);
             const bars = page.bars.map(toTvBar);
             later(() => onResult(bars, { noData: bars.length === 0 || page.noMoreHistory }));
           },

@@ -289,8 +289,12 @@ describe("PerpChart", () => {
 
   it("a history failure shows the error state but still wires the live feed", async () => {
     h.getBars.mockRejectedValue(new Error("boom"));
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     await mount();
-    expect(await screen.findByText(/history is unavailable/i)).toBeInTheDocument();
+    expect(await screen.findByText(/chart data unavailable/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(spy).toHaveBeenCalled(); // logged, not swallowed
+    spy.mockRestore();
     await waitFor(() => expect(h.barHandlers).not.toBeNull());
   });
 

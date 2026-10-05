@@ -53,6 +53,8 @@ const MARK_LINE_MIN_INTERVAL_MS = 250;
 
 export interface TvChartHandle {
   setResolution(resolution: TvResolution): void;
+  /** Drop the chart's cached bars and refetch history (the Retry after a data error). */
+  retryData(): void;
 }
 
 export interface TvChartProps {
@@ -65,6 +67,8 @@ export interface TvChartProps {
   onInterval?(resolution: TvResolution): void;
   /** The bars on screen include GeckoTerminal / CoinGecko history: show attribution. */
   onDexData?(): void;
+  /** The datafeed failed to load history (message), or recovered (null). The caller shows a retry state instead of a blank canvas. */
+  onDataError?(message: string | null): void;
   /**
    * The liquidation line is off the top / bottom of the visible price range (null = in view or none), with its
    * price. The caller draws the chip in ITS chrome: an overlay on the iframe would cover TradingView's dialogs.
@@ -125,6 +129,7 @@ export function TvChart({
   onSource,
   onInterval,
   onDexData,
+  onDataError,
   onLiqEdge,
   onPopupOpen,
   series = "mark",
@@ -143,8 +148,8 @@ export function TvChart({
   const { liq, entry, entryIsEstimate } = usePositionLinePrices(slabAddress);
 
   // Latest values for callbacks registered once per widget.
-  const cb = useRef({ onFailure, onReady, onSource, onInterval, onDexData, onLiqEdge, onPopupOpen });
-  cb.current = { onFailure, onReady, onSource, onInterval, onDexData, onLiqEdge, onPopupOpen };
+  const cb = useRef({ onFailure, onReady, onSource, onInterval, onDexData, onDataError, onLiqEdge, onPopupOpen });
+  cb.current = { onFailure, onReady, onSource, onInterval, onDexData, onDataError, onLiqEdge, onPopupOpen };
   const themeRef = useRef(chartTheme);
   themeRef.current = chartTheme;
   const lineState = useRef({ liq, entry, entryIsEstimate, series, prefs: overlayPrefs, theme: chartTheme });
@@ -209,7 +214,11 @@ export function TvChart({
             /* chart gone */
           }
         },
-        onError: (where, err) => console.warn(`[TvChart] datafeed ${where} error:`, err),
+        onBarsLoaded: () => cb.current.onDataError?.(null),
+        onError: (where, err) => {
+          console.error(`[TvChart] datafeed ${where} error:`, err);
+          cb.current.onDataError?.(err instanceof Error ? err.message : String(err));
+        },
       });
 
       try {
@@ -305,6 +314,13 @@ export function TvChart({
             chart.setResolution(res).catch(() => {
               /* unsupported */
             });
+          },
+          retryData() {
+            try {
+              chart.resetData();
+            } catch {
+              /* chart gone */
+            }
           },
         };
         cleanups.push(() => {

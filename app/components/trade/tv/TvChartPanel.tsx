@@ -196,7 +196,9 @@ export function TvChartPanel({ slabAddress, onFailure }: TvChartPanelProps) {
   const headerStats = usePerpHeaderStats(slabAddress, strip.price, series);
   // Pre-launch pool history on screen: CoinGecko attribution is mandatory (the TradingView logo is the library's own and stays visible).
   const [usesDex, setUsesDex] = useState(false);
-  useEffect(() => { setUsesDex(false); }, [slabAddress, series]);
+  // History failed to load: say so, with a Retry, instead of leaving an empty canvas.
+  const [dataError, setDataError] = useState<string | null>(null);
+  useEffect(() => { setUsesDex(false); setDataError(null); }, [slabAddress, series]);
 
   return (
     <div className="flex h-full flex-col rounded-none border border-[var(--border)] bg-[var(--panel-bg)] p-2 lg:p-3">
@@ -255,6 +257,7 @@ export function TvChartPanel({ slabAddress, onFailure }: TvChartPanelProps) {
             slabAddress={slabAddress}
             series={series}
             onDexData={() => setUsesDex(true)}
+            onDataError={setDataError}
             onLiqEdge={onLiqEdge}
             onPopupOpen={setTvPopup}
             mode={mode}
@@ -266,6 +269,23 @@ export function TvChartPanel({ slabAddress, onFailure }: TvChartPanelProps) {
             handleRef={handleRef}
             className="h-[clamp(420px,62svh,640px)] w-full lg:h-full"
           />
+        )}
+
+        {dataError !== null && (
+          <div
+            role="alert"
+            data-testid="chart-data-error"
+            className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-[var(--panel-bg)]/80 text-xs text-[var(--text-muted)]"
+          >
+            <span>Chart data unavailable</span>
+            <button
+              type="button"
+              onClick={() => { setDataError(null); handleRef.current?.retryData(); }}
+              className="rounded-none border border-[var(--border)] px-3 py-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text)]"
+            >
+              Retry
+            </button>
+          </div>
         )}
 
         {!ready && !fullscreen && (

@@ -32,9 +32,10 @@ const json = (body: unknown, status = 200) => ({ ok: status >= 200 && status < 3
 
 describe("parsePerpHistory", () => {
   it("maps t/o/h/l/c to bars, sorts, drops junk, passes the proxy marker", () => {
-    const r = parsePerpHistory({ bars: [{ t: 120, o: 2, h: 2, l: 2, c: 2 }, { t: 60, o: 1, h: 1, l: 1, c: 1 }, { t: 180, o: 0, h: 1, l: 1, c: 1 }, null], proxyBeforeSec: 120, noMoreHistory: true });
+    const r = parsePerpHistory({ bars: [{ t: 120, o: 2, h: 2, l: 2, c: 2 }, { t: 60, o: 1, h: 1, l: 1, c: 1 }, { t: 180, o: 0, h: 1, l: 1, c: 1 }, null], proxyBeforeSec: 120, proxyFromSec: 60, noMoreHistory: true });
     expect(r.bars.map((b) => b.timeSec)).toEqual([60, 120]);
     expect(r.proxyBeforeSec).toBe(120);
+    expect(r.proxyFromSec).toBe(60);
     expect(r.noMoreHistory).toBe(true);
     expect(() => parsePerpHistory(null)).toThrow();
   });
@@ -67,10 +68,14 @@ describe("perp provider history", () => {
     expect(fetchImpl.mock.calls[1][0]).toContain("series=oracle");
     expect(oracle.source).toBe("perp-oracle");
   });
-  it("a missing store (503/404) or a first-request failure still yields a live-only chart, not an error", async () => {
+  it("a missing store (503/404) is an honest empty chart; ANY other failure (first request or not) is an error the chart surfaces", async () => {
     const mk = (f: () => Promise<ReturnType<typeof json>>) => createPerpProvider({ base: base(), live: liveFake().live, fetchImpl: f, series: createSeriesStore(null) });
     expect((await mk(async () => json({}, 503)).getBars(req())).bars).toEqual([]);
-    expect((await mk(async () => { throw new Error("net"); }).getBars(req())).source).toBe("perp-mark");
+    expect((await mk(async () => json({}, 404)).getBars(req())).source).toBe("perp-mark");
+    // a 502/504 (history route timed out) and a network failure must NOT degrade to an empty page: that is a blank canvas
+    await expect(mk(async () => json({}, 504)).getBars(req())).rejects.toThrow("504");
+    await expect(mk(async () => json({}, 502)).getBars(req({ firstRequest: false }))).rejects.toThrow("502");
+    await expect(mk(async () => { throw new Error("net"); }).getBars(req())).rejects.toThrow("net");
     await expect(mk(async () => { throw new Error("net"); }).getBars(req({ firstRequest: false }))).rejects.toThrow();
   });
   it("last-trade series uses the base provider; no trades is an honest empty chart", async () => {
