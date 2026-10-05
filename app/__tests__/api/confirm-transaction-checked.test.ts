@@ -164,9 +164,9 @@ describe("no client hook discards a confirmTransaction result", () => {
     );
 
   it("finds the call sites at all (guards the scan itself)", () => {
-    // useCreateMarket (3), useReclaimSlabRent, useTransferPositionNft. (useMintPositionNft
-    // confirms by polling via broadcastSignedTx, not confirmTransaction.)
-    expect(hookSites().length).toBeGreaterThanOrEqual(5);
+    // useCreateMarket (3). (useMintPositionNft, useTransferPositionNft and useReclaimSlabRent
+    // confirm by polling via broadcastSignedTx, not confirmTransaction.)
+    expect(hookSites().length).toBeGreaterThanOrEqual(3);
   });
 
   it("checks every one of them", () => {

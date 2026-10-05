@@ -21,7 +21,7 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { humanizeError } from "@/lib/errorMessages";
 import { plainMessage } from "@/lib/limits/user-message";
 import { useToast } from "@/hooks/useToast";
-import { assertSuccessfulConfirmation } from "@/lib/transaction-confirmation";
+import { broadcastSignedTx } from "@/lib/tx";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
 
 /**
@@ -316,8 +316,7 @@ export function useTransferPositionNft(slabAddress: string, override?: TransferN
         tx.add(transferIx);
 
         stage = "fetching blockhash";
-        const { blockhash, lastValidBlockHeight } =
-          await connection.getLatestBlockhash("confirmed");
+        const { blockhash } = await connection.getLatestBlockhash("confirmed");
         tx.recentBlockhash = blockhash;
         tx.feePayer = walletPubkey;
 
@@ -341,17 +340,12 @@ export function useTransferPositionNft(slabAddress: string, override?: TransferN
         const signed = await signTransaction(tx);
 
         stage = "submitting transaction";
-        const sig = await connection.sendRawTransaction(signed.serialize(), {
-          skipPreflight: true,
-          maxRetries: 5,
-        });
-
-        stage = "waiting for confirmation";
-        // skipPreflight: confirmTransaction also resolves for a tx that landed and failed.
-        assertSuccessfulConfirmation(
-          await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed"),
-          "Position NFT transfer",
-        );
+        // Send (skipPreflight: simulated above) and confirm by polling the signature status, the
+        // same path sendTx and useMintPositionNft use (#3121/#3122). Blockheight-bound
+        // confirmTransaction() throws "block height exceeded" whenever its subscription misses the
+        // landing, which reads as "Nothing was sent" for a transfer that landed. pollConfirmation
+        // still throws for a tx that landed and failed on-chain.
+        const sig = await broadcastSignedTx(connection, signed, { skipPreflight: true });
 
         // Force an immediate slab re-poll so useUserAccount/usePositionNft re-scan
         // and the UI reflects the transferred-away position without waiting for

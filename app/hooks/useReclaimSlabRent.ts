@@ -11,6 +11,7 @@ import {
 } from "@percolatorct/sdk";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getAllProgramIds } from "@/lib/config";
+import { broadcastSignedTx } from "@/lib/tx";
 
 
 export type ReclaimStatus = "idle" | "sending" | "success" | "error";
@@ -212,19 +213,23 @@ export function useReclaimSlabRent(): UseReclaimSlabRentResult {
           // does not stale the blockhash before broadcast.
           const signedTx = await walletCompat.signTransaction(tx);
 
-          // Step 3: broadcast
+          // Step 3+4: broadcast, then confirm by polling the signature status (the same path
+          // sendTx and useMintPositionNft use; #3121/#3122). Blockheight-bound
+          // confirmTransaction() throws "block height exceeded" whenever its subscription misses
+          // the landing, which would report a reclaim that landed as failed. Success is only
+          // shown AFTER this resolves (GH#1488); a tx that landed and failed on-chain still throws.
           let rawSig: string;
           try {
-            rawSig = await connection.sendRawTransaction(signedTx.serialize(), {
-              skipPreflight: false,
-            });
+            rawSig = await broadcastSignedTx(connection, signedTx, { skipPreflight: false });
           } catch (sendErr: unknown) {
             const sendMsg = sendErr instanceof Error ? sendErr.message : String(sendErr);
+            // A signature on the error means the tx WAS submitted: never rebuild/re-sign it.
+            const submitted = typeof (sendErr as { signature?: unknown } | null)?.signature === "string";
             const isBlockhashErr =
               sendMsg.toLowerCase().includes("blockhash not found") ||
               sendMsg.toLowerCase().includes("blockhash expired");
 
-            if (isBlockhashErr && attempt < MAX_BLOCKHASH_RETRIES - 1) {
+            if (isBlockhashErr && !submitted && attempt < MAX_BLOCKHASH_RETRIES - 1) {
               // Retry immediately with a fresh blockhash (next loop iteration).
               // We don't re-open the Privy modal — the same signedTx cannot be re-used
               // because the blockhash is embedded; we need to re-sign with new hash.
@@ -232,20 +237,6 @@ export function useReclaimSlabRent(): UseReclaimSlabRentResult {
               continue;
             }
             throw sendErr;
-          }
-
-          // Step 4: confirm on-chain — only show success AFTER this resolves.
-          // GH#1488: previously success was inferred from Privy "Transaction signed!" which
-          // fires before broadcast; now we wait for actual on-chain confirmation.
-          const confirmation = await connection.confirmTransaction(
-            { signature: rawSig, blockhash, lastValidBlockHeight },
-            "confirmed"
-          );
-
-          if (confirmation.value.err) {
-            throw new Error(
-              `Transaction landed on-chain but was rejected by the program: ${JSON.stringify(confirmation.value.err)}`
-            );
           }
 
           sig = rawSig;
