@@ -4,9 +4,11 @@
  *
  * Why not the SDK defaults:
  *  - `sendV1(connection, wire)` without options goes through `connection.sendRawTransaction`. web3.js 1.99
- *    turns a JSON-RPC error there into a `SendTransactionError` that keeps only the MESSAGE (no `.code`), so
- *    the code-based classifier (`isTxV1FormatRejection`, SDK-3) can never see a -32602/-32015 and a v1 format
- *    rejection would surface as a hard error instead of the safe pre-acceptance fallback.
+ *    turns a JSON-RPC error there into a `SendTransactionError` that keeps only the MESSAGE (no `.code`). Since
+ *    SDK 0dc68bc the default path records the code from the Connection's transport and rethrows a coded
+ *    `V1RpcError`, so a format rejection IS classified there too; but a network failure still surfaces as
+ *    whatever web3.js threw (no type), while this module wraps it in a `V1TransportError` that the launch
+ *    outcome resolver (lib/launch-single-tx/run.ts isPreflightRefusal) relies on to never read it as a refusal.
  *  - Passing `fetchImpl` selects the SDK's raw JSON-RPC path, which throws `V1RpcError` carrying the node's
  *    code. On the client the Connection's endpoint is the app's `/api/rpc` proxy, and the app's batching
  *    fetch sends `sendTransaction`/`simulateTransaction` straight to `globalThis.fetch` anyway
