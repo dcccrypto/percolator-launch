@@ -1,5 +1,5 @@
 /**
- * #65: on phones /developers was 444px wide at 390px. The Risk Engine formula cards are grid items,
+ * #3130: on phones /developers was 444px wide at 390px. The Risk Engine formula cards are grid items,
  * whose min-width defaults to their content, so the longest formula line widened the card and the
  * page (the code block's own overflow-x-auto never applied). min-w-0 lets the cards shrink and the
  * code blocks scroll. Layout was measured in Chromium; this pins the class.
@@ -10,7 +10,7 @@ import { resolve } from "path";
 
 const src = readFileSync(resolve(process.cwd(), "app/developers/DevelopersClient.tsx"), "utf8");
 
-describe("#65: /developers fits a phone", () => {
+describe("#3130: /developers fits a phone", () => {
   it("both formula cards can shrink below their code's width", () => {
     const cards = [...src.matchAll(/<div className="([^"]*)">\s*<h3[^>]*>\s*(H — Fair Exits|A\/K — Fair Overhang)/g)];
     expect(cards).toHaveLength(2);
