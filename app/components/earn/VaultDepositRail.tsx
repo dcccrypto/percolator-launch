@@ -192,6 +192,13 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
               accent={hasPosition}
             />
           </div>
+          {/* Two-pot vault: 75 prices a deposit on NAV + harvestable LP fees, 77 pays on NAV alone
+              and doesn't harvest first, so a fresh deposit reads below what went in until a 78. */}
+          {everLoaded && state.splitPot && (
+            <p data-testid="earn-rail-pending-fees-note" className="mt-3 border-t border-[var(--border)]/60 pt-3 text-[11px] text-[var(--text-muted)]">
+              Your Deposit can read a little below what you put in until the vault collects its pending trading fees. Withdrawing before then forfeits your share of them.
+            </p>
+          )}
 
           {state.splitPot && state.splitPot.claimAdjustedNavAtoms !== null && state.splitPot.vaultMaxNowAtoms !== null && (
             <div className="mt-3 grid grid-cols-2 gap-3 border-t border-[var(--border)]/60 pt-3" data-testid="earn-rail-withdrawable">
