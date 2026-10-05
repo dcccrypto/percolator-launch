@@ -440,6 +440,49 @@ describe("userAccountScan — applyConfirmedFill (instant reflection of a confir
     expect(listener).toHaveBeenCalledTimes(1); // second (unchanged) scan bailed out, as before
   });
 
+  it("#2560: targets a specific NON-primary portfolio, leaving the primary + single snapshot untouched", async () => {
+    const pkLow = new PublicKey(new Uint8Array(32).fill(1));
+    const pkHigh = new PublicKey(new Uint8Array(32).fill(200));
+    const { connection, getProgramAccounts } = makeConnection();
+    getProgramAccounts.mockResolvedValue([
+      { pubkey: pkHigh, account: { data: Buffer.alloc(1) } },
+      { pubkey: pkLow, account: { data: Buffer.alloc(1) } },
+    ]);
+    mocks.parsePortfolioV17.mockReturnValue(makePortfolio({ legs: [{ active: true, assetIndex: 0, marketId: 1n, side: 0, basisPosQ: 5n }] }));
+
+    const key = makePortfolioScanKey(programId, slabAddress, wallet);
+    await triggerPortfolioScan({ connection, programId, slabAddress, publicKey: wallet, raw: new Uint8Array([1]) });
+
+    expect(applyConfirmedFill(key, 10n, pkHigh)).toBe(true);
+    const list = getPortfolioListSnapshot(key);
+    const byPk = (pk: PublicKey) => list.find((p) => p.pubkey!.equals(pk))!;
+    expect(byPk(pkHigh).account.positionSize).toBe(15n); // the targeted one moved
+    expect(byPk(pkLow).account.positionSize).toBe(5n); // the primary did NOT
+    expect(getPortfolioUserAccountSnapshot(key)?.account.positionSize).toBe(5n); // single snapshot = primary, untouched
+    expect(getPortfolioUserAccountSnapshot(key)?.provisional).toBeUndefined();
+  });
+
+  it("#2560: targeting the primary patches both the single snapshot and its list entry", async () => {
+    const pkLow = new PublicKey(new Uint8Array(32).fill(1));
+    const pkHigh = new PublicKey(new Uint8Array(32).fill(200));
+    const { connection, getProgramAccounts } = makeConnection();
+    getProgramAccounts.mockResolvedValue([
+      { pubkey: pkHigh, account: { data: Buffer.alloc(1) } },
+      { pubkey: pkLow, account: { data: Buffer.alloc(1) } },
+    ]);
+    mocks.parsePortfolioV17.mockReturnValue(makePortfolio({ legs: [{ active: true, assetIndex: 0, marketId: 1n, side: 0, basisPosQ: 5n }] }));
+
+    const key = makePortfolioScanKey(programId, slabAddress, wallet);
+    await triggerPortfolioScan({ connection, programId, slabAddress, publicKey: wallet, raw: new Uint8Array([1]) });
+
+    expect(applyConfirmedFill(key, 10n, pkLow)).toBe(true); // pkLow is the lowest-pubkey primary
+    expect(getPortfolioUserAccountSnapshot(key)?.account.positionSize).toBe(15n);
+    expect(getPortfolioUserAccountSnapshot(key)?.provisional).toBe(true);
+    const list = getPortfolioListSnapshot(key);
+    expect(list.find((p) => p.pubkey!.equals(pkLow))!.account.positionSize).toBe(15n);
+    expect(list.find((p) => p.pubkey!.equals(pkHigh))!.account.positionSize).toBe(5n);
+  });
+
   it("is a no-op for a key with no cached scan result yet", () => {
     const bogusKey = makePortfolioScanKey(uniquePubkey(), uniquePubkey().toBase58(), uniquePubkey());
     expect(() => applyConfirmedFill(bogusKey, 10n)).not.toThrow();

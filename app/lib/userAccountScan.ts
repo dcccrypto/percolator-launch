@@ -536,39 +536,52 @@ const CONFIRMED_FILL_PROVISIONAL_MS = 5_000;
  * truth; this function only shortens how long a confirmed fill's OWN size
  * change takes to reach the screen.
  */
-export function applyConfirmedFill(key: string, signedSizeDeltaQ: bigint): boolean {
+export function applyConfirmedFill(key: string, signedSizeDeltaQ: bigint, targetPortfolioPk?: PublicKey): boolean {
   const entry = portfolioEntries.get(key);
-  if (!entry || !entry.raw) return false;
+  if (!entry) return false;
 
-  const prevPortfolio = entry.raw.portfolio;
+  // #2560: which portfolio did the fill land on? Default (no target) is the
+  // primary (lowest-pubkey) `raw` — today's behaviour. An explicit target (a
+  // chosen cross/isolated account) patches that portfolio's list entry, and
+  // the primary single-snapshot too ONLY when the target IS the primary, so a
+  // trade on a non-primary portfolio never bumps the primary's displayed size.
+  const primaryPk = entry.raw?.pubkey ?? null;
+  const patchesPrimary = !targetPortfolioPk || (primaryPk != null && primaryPk.equals(targetPortfolioPk));
+  const li = targetPortfolioPk
+    ? entry.rawList.findIndex((r) => r.pubkey.equals(targetPortfolioPk))
+    : primaryPk
+      ? entry.rawList.findIndex((r) => r.pubkey.equals(primaryPk))
+      : -1;
+
+  // The portfolio whose active leg we patch: the primary's `raw`, or the list
+  // element for a non-primary target. No cached state → nothing to patch.
+  const base: OwnPortfolioScanResult | null = patchesPrimary ? entry.raw : li !== -1 ? entry.rawList[li] : null;
+  if (!base) return false;
+
+  const prevPortfolio = base.portfolio;
   const legIdx = prevPortfolio.legs.findIndex((l) => l.active);
   if (legIdx === -1) return false;
 
   const prevLeg = prevPortfolio.legs[legIdx];
-  const newBasisPosQ = prevLeg.basisPosQ + signedSizeDeltaQ;
-
   const newLegs = prevPortfolio.legs.slice();
-  newLegs[legIdx] = { ...prevLeg, basisPosQ: newBasisPosQ };
+  newLegs[legIdx] = { ...prevLeg, basisPosQ: prevLeg.basisPosQ + signedSizeDeltaQ };
+  const patched: OwnPortfolioScanResult = { pubkey: base.pubkey, portfolio: { ...prevPortfolio, legs: newLegs } };
+  const patchedAccount: UserAccountInfo = { idx: 0, account: portfolioV17ToAccount(patched.portfolio), pubkey: patched.pubkey, provisional: true };
 
-  const patched: OwnPortfolioScanResult = {
-    pubkey: entry.raw.pubkey,
-    portfolio: { ...prevPortfolio, legs: newLegs },
-  };
-
-  entry.raw = patched;
-  entry.userAccount = { idx: 0, account: portfolioV17ToAccount(patched.portfolio), pubkey: patched.pubkey, provisional: true };
-  // #2560: mirror the same confirmed-fill patch into the multi-portfolio list
-  // (by pubkey) so a consumer rendering from the list gets the identical
-  // provisional snappiness the single path has — otherwise the dock would lag
-  // the ticket by one scan right after a trade. No-op if the patched portfolio
-  // isn't in the list yet (first position still waits for the real scan).
-  const li = entry.rawList.findIndex((r) => r.pubkey.equals(patched.pubkey));
+  // The single snapshot (useUserAccount) only moves when the primary moved.
+  if (patchesPrimary) {
+    entry.raw = patched;
+    entry.userAccount = patchedAccount;
+  }
+  // Mirror into the multi-portfolio list so a consumer rendering from it gets
+  // the same provisional snappiness. No-op if the portfolio isn't listed yet
+  // (a first position still waits for the real scan).
   if (li !== -1 && entry.userAccounts) {
     const newList = entry.rawList.slice();
     newList[li] = patched;
     entry.rawList = newList;
     const newAccts = entry.userAccounts.slice();
-    newAccts[li] = { idx: 0, account: portfolioV17ToAccount(patched.portfolio), pubkey: patched.pubkey, provisional: true };
+    newAccts[li] = patchedAccount;
     entry.userAccounts = newAccts;
   }
   entry.provisionalUntil = Date.now() + CONFIRMED_FILL_PROVISIONAL_MS;
