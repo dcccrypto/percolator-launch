@@ -400,15 +400,15 @@ async function discoverMarketsOnChain(
   try {
     // Flag off: acceptedWrapperIds() is exactly [cfg.programId] (the previous single scan).
     // Flag on: v1 and v2.1 are both scanned so v1 rows survive the cutover.
-    const found: DiscoveredMarket[] = [];
-    for (const wrapperId of acceptedWrapperIds()) {
-      found.push(
-        ...(await discoverMarkets(connection, new PublicKey(wrapperId), {
+    const scans = await Promise.all(
+      acceptedWrapperIds().map((wrapperId) =>
+        discoverMarkets(connection, new PublicKey(wrapperId), {
           sequential: true,
-          maxTierQueries: 0, // Skip v12 tier scans — only the v17 memcmp path runs
-        })),
-      );
-    }
+          maxTierQueries: 0, // Skip v12 tier scans: only the v17 memcmp path runs
+        }),
+      ),
+    );
+    const found: DiscoveredMarket[] = scans.flat();
     if (found.length === 0) return [];
 
     const seen = new Set<string>();

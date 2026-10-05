@@ -1,9 +1,7 @@
 "use client";
 
 import { baseSymbol } from "@/lib/symbol-utils";
-import { getConfig } from "@/lib/config";
-import { isMoveFlowEnabled } from "@/lib/v21/move/flag";
-import { isV1CloseOnly } from "@/lib/v21/move/ids";
+import { isV1Market } from "@/lib/v21/worlds";
 import { V1CloseOnlyBadge } from "@/components/move/V1CloseOnlyNotice";
 import { useEffect, useState, useMemo, useRef, Suspense } from "react";
 import type { Metadata } from "next";
@@ -19,7 +17,7 @@ import { HealthBadge, HEALTH_HEADER_TOOLTIP } from "@/components/market/HealthBa
 import { formatTokenAmount } from "@/lib/format";
 import type { Database } from "@/lib/database.types";
 
-type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'];
+type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'] & { world?: 'v1' | 'v21' };
 import type { DiscoveredMarket } from "@percolatorct/sdk";
 import { PublicKey } from "@solana/web3.js";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
@@ -1020,7 +1018,7 @@ function MarketsPageInner() {
                   // from market metadata, otherwise SOL/USDC perps render as USDC/USD.
                   const displaySymbol = resolveMarketDisplaySymbol(m);
                   const displayName = resolveMarketDisplayName(m);
-                  const v1Label = isV1CloseOnly(m.onChain?.programId?.toBase58?.() ?? getConfig().programId, isMoveFlowEnabled());
+                  const v1Label = isV1Market({ programId: m.onChain?.programId?.toBase58?.() ?? null, world: m.supabase?.world ?? null });
                   const logoMintAddress = resolveMarketLogoMintAddress(m);
                   const subtitleAddress = logoMintAddress || m.mintAddress;
 

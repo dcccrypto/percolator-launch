@@ -1,8 +1,6 @@
 "use client";
 
-import { getConfig } from "@/lib/config";
-import { isMoveFlowEnabled } from "@/lib/v21/move/flag";
-import { isV1CloseOnly } from "@/lib/v21/move/ids";
+import { isV1Market } from "@/lib/v21/worlds";
 import { V1CloseOnlyBadge } from "@/components/move/V1CloseOnlyNotice";
 import { FC, memo, useMemo } from "react";
 import { useLivePrice } from "@/hooks/useLivePrice";
@@ -190,7 +188,7 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
       <div data-testid="market-info-primary" className="flex min-w-0 items-center gap-3 md:shrink-0 md:gap-5">
       {/* Symbol + Logo — now a dropdown market switcher (top markets + search) */}
       <MarketSwitcher slabAddress={slabAddress} symbol={symbol} logoUrl={logoUrl} mintAddress={mintAddress} mainnetCa={mainnetCa} />
-      {isV1CloseOnly(slabProgramId?.toBase58() ?? getConfig().programId, isMoveFlowEnabled()) && <V1CloseOnlyBadge />}
+      {isV1Market({ programId: slabProgramId?.toBase58() ?? null }) && <V1CloseOnlyBadge />}
 
       {/* Watch this market. `label` variant — the info bar has room for a word,
           unlike the dense markets table where the glyph alone is used. */}
