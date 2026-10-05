@@ -25,7 +25,7 @@ export const MoveFlow: FC = () => {
         running={f.running}
         hrefFor={(s) => {
           const sym = plan.markets.find((m) => m.slab === s.slab)?.symbol ?? "";
-          return stepHref(s.kind, s.slab, successorFor(f.successors, null, sym)?.v21Slab ?? null);
+          return stepHref(s.kind, s.slab, successorFor(f.successors, null, sym)?.v21Slab ?? null, s.handoff);
         }}
         onRun={() => void f.run()}
         onRunStep={(s) => void f.run({ slab: s.slab, kind: s.kind })}

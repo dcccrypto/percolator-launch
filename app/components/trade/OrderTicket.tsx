@@ -102,7 +102,7 @@ import { CloseOnlyBanner } from "@/components/trade/CloseOnlyBanner";
 import { isDevnetV21Enabled } from "@/lib/v21/flag";
 import { isMoveFlowEnabled } from "@/lib/v21/move/flag";
 import { isV1CloseOnly } from "@/lib/v21/move/ids";
-import { v1BlocksOrder } from "@/lib/v21/move/close-only";
+import { v1BlocksOrder, V1_CLOSE_ONLY_REFUSAL } from "@/lib/v21/move/close-only";
 import { V1CloseOnlyBanner } from "@/components/move/V1CloseOnlyNotice";
 import { StatusLine } from "@/components/ui/StatusLine";
 import { FixPricingAction } from "@/components/trade/FixPricingAction";
@@ -1839,7 +1839,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             // always names the NEXT unblocking action — "Start Trading" now
             // covers account-creation + deposit in one click (fix #1), so
             // most users only ever see that single state once.
-            const label = initLoading
+            const label = v1CloseOnly
+              ? "Account setup paused on v1"
+              : initLoading
               ? "Setting up your account…"
               : showInlineDeposit
                 ? "Close"
@@ -1889,6 +1891,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                     <span className="text-[10px] text-[var(--text-secondary)]">{collateralSymbol}</span>
                   </div>
                 )}
+                {v1CloseOnly && (
+                  <p data-testid="v1-init-off" className="mb-1.5 text-[10px] text-[var(--warning)]">{V1_CLOSE_ONLY_REFUSAL}</p>
+                )}
                 {starterError && (
                   <p role="alert" data-testid="starter-deposit-error" className="mb-1.5 text-[10px] text-[var(--short)]">
                     {starterError}
@@ -1897,7 +1902,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 <button
                   data-testid="deposit-submit"
                   onClick={canOneClick ? onClickDirect : () => setShowInlineDeposit((v) => !v)}
-                  disabled={initLoading || starterOver}
+                  disabled={initLoading || starterOver || v1CloseOnly}
                   className={`w-full rounded-none py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] transition-[filter] duration-150 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70 ${
                     direction === "long" ? "bg-[var(--long)] text-black" : "bg-[var(--short)] text-white"
                   }`}

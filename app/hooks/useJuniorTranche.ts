@@ -8,6 +8,7 @@
  * are lib/limits/p3-ix.ts (executed on real BPF in scripts/limits-parity/p3-sim).
  */
 import { isDevnetV21Enabled } from '@/lib/v21/flag';
+import { assertV1AllowsNewFunds } from '@/lib/v21/move/close-only';
 import { deriveVaultLpExt } from '@/lib/v21/sdk';
 import { useCallback, useState } from 'react';
 import { PublicKey } from '@solana/web3.js';
@@ -90,6 +91,7 @@ export function useJuniorTranche(slabAddress: string | null) {
       setRefused75(false);
       try {
         if (amount <= 0n) throw new Error('Enter an amount greater than zero.');
+        if (kind === 'deposit') assertV1AllowsNewFunds(programId, 'earn-deposit');
         const c = await context();
         const ixs =
           kind === 'deposit'
