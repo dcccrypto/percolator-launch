@@ -9,7 +9,12 @@
  */
 import type { Candle, CandleResMinutes, TickSeries } from "./perp-types";
 
-export type CandleSrc = "live" | "gecko";
+/**
+ * live  = built from keeper ticks (authoritative);
+ * chain = reconstructed from PushAuthMark transactions (one-time backfill of the Mark series);
+ * gecko = pre-launch pool OHLCV (oracle series only).
+ */
+export type CandleSrc = "live" | "gecko" | "chain";
 
 export interface StoredCandle extends Candle {
   src: CandleSrc;
@@ -31,6 +36,8 @@ export interface CandleStore {
   range(slab: string, series: TickSeries, res: CandleResMinutes, fromSec: number, toSec: number, limit: number): Promise<StoredCandle[]>;
   /** The newest candle per (slab, series, res) — used to seed the hub after a restart. */
   newest(slabs: readonly string[]): Promise<CandleRow[]>;
+  /** Open time of the earliest LIVE 1-minute candle of a series (the finest resolution = the true cutover), or null. */
+  firstLiveT(slab: string, series: TickSeries): Promise<number | null>;
   /** Backfill ledger: when did we last pull Gecko for (slab,res), 0 when never. */
   backfilledAt(slab: string, res: CandleResMinutes): Promise<number>;
   markBackfilled(slab: string, res: CandleResMinutes, atMs: number, bars: number): Promise<void>;
@@ -62,13 +69,25 @@ export class MemoryCandleStore implements CandleStore {
   async upsert(rows: readonly CandleRow[]): Promise<void> {
     for (const r of rows) {
       const k = this.key(r.slab, r.series, r.res, r.candle.t);
-      const cur = this.rows.get(k);
-      const src = r.src ?? "live";
-      if (!cur || (cur.src === "gecko" && src === "live")) {
-        this.rows.set(k, { ...r.candle, src });
-      } else if (src === "live") {
-        this.rows.set(k, { t: cur.t, o: cur.o, h: Math.max(cur.h, r.candle.h), l: Math.min(cur.l, r.candle.l), c: r.candle.c, n: Math.max(cur.n, r.candle.n), src: "live" });
-      } // a gecko row never overwrites a live one
+      const e = this.rows.get(k);
+      const i = r.src ?? "live";
+      const c = r.candle;
+      if (!e) { this.rows.set(k, { ...c, src: i }); continue; }
+      if (i === "gecko" && e.src !== "gecko") continue; // gecko never overwrites chain or live
+      const merge =
+        (e.src === "live" && i === "live") || (e.src === "live" && i === "chain") ||
+        (e.src === "chain" && i === "live") || (e.src === "gecko" && i === "gecko");
+      if (!merge) { this.rows.set(k, { ...c, src: i }); continue; } // replace outright
+      const sumN = (e.src === "live" && i === "chain") || (e.src === "chain" && i === "live");
+      this.rows.set(k, {
+        t: e.t,
+        o: e.src === "live" && i === "chain" ? c.o : e.o,
+        h: Math.max(e.h, c.h),
+        l: Math.min(e.l, c.l),
+        c: e.src === "live" && i === "chain" ? e.c : c.c,
+        n: sumN ? e.n + c.n : Math.max(e.n, c.n),
+        src: e.src === "live" || i === "live" ? "live" : e.src === "chain" || i === "chain" ? "chain" : "gecko",
+      });
     }
   }
   private select(slab: string, series: TickSeries, res: CandleResMinutes): StoredCandle[] {
@@ -91,6 +110,11 @@ export class MemoryCandleStore implements CandleStore {
     return out;
   }
   readonly retry = new Map<string, number>();
+  async firstLiveT(slab: string, series: TickSeries) {
+    let best: number | null = null;
+    for (const [k, v] of this.rows) if (v.src === "live" && k.startsWith(`${slab}|${series}|1|`) && (best === null || v.t < best)) best = v.t;
+    return best;
+  }
   async backfilledAt(slab: string, res: CandleResMinutes) { return this.ledger.get(`${slab}|${res}`) ?? 0; }
   async markBackfilled(slab: string, res: CandleResMinutes, atMs: number) { this.ledger.set(`${slab}|${res}`, atMs); this.retry.delete(`${slab}|${res}`); }
   async claimBackfill(slab: string, res: CandleResMinutes, nowMs: number, holdMs: number) {
@@ -132,9 +156,11 @@ export function createPgCandleStore(sql: SqlLike): CandleStore {
         for (let i = 0; i < rows.length; i += PG_UPSERT_CHUNK) await store.upsert(rows.slice(i, i + PG_UPSERT_CHUNK));
         return;
       }
-      // One multi-row statement. Live data is authoritative: it replaces a gecko row outright,
-      // and merges into an existing live row so a restart that lost the in-memory open
-      // cannot rewrite the persisted open/high/low. A gecko row never overwrites a live one.
+      // One multi-row statement. Source precedence on a collision:
+      //   gecko never overwrites chain or live; live replaces gecko outright; chain replaces gecko
+      //   and a previous chain run outright (idempotent re-run). The straddling bucket where the
+      //   store went live MERGES chain and live (chain open, live close, widened high/low); live-live
+      //   and gecko-gecko keep the original open and widen.
       const params: unknown[] = [];
       const tuples = rows.map((r, i) => {
         const b = i * 9;
@@ -142,17 +168,22 @@ export function createPgCandleStore(sql: SqlLike): CandleStore {
         return `($${b + 1},$${b + 2},$${b + 3}::smallint,$${b + 4}::bigint,$${b + 5},$${b + 6},$${b + 7},$${b + 8},$${b + 9}::int,$${rows.length * 9 + 1 + i})`;
       });
       for (const r of rows) params.push(r.src ?? "live");
+      const E = "chart_candles";
+      const merge = `((${E}.src = 'live' AND excluded.src = 'live') OR (${E}.src = 'live' AND excluded.src = 'chain') OR (${E}.src = 'chain' AND excluded.src = 'live') OR (${E}.src = 'gecko' AND excluded.src = 'gecko'))`;
+      const chainUnderLive = `(${E}.src = 'live' AND excluded.src = 'chain')`;
+      const sumN = `((${E}.src = 'live' AND excluded.src = 'chain') OR (${E}.src = 'chain' AND excluded.src = 'live'))`;
       await sql.unsafe(
         `INSERT INTO chart_candles (slab, series, res, t, o, h, l, c, n, src) VALUES ${tuples.join(",")}
          ON CONFLICT (slab, series, res, t) DO UPDATE SET
-           o = CASE WHEN chart_candles.src = 'gecko' AND excluded.src = 'live' THEN excluded.o ELSE chart_candles.o END,
-           h = CASE WHEN chart_candles.src = 'gecko' AND excluded.src = 'live' THEN excluded.h ELSE GREATEST(chart_candles.h, excluded.h) END,
-           l = CASE WHEN chart_candles.src = 'gecko' AND excluded.src = 'live' THEN excluded.l ELSE LEAST(chart_candles.l, excluded.l) END,
-           c = excluded.c,
-           n = CASE WHEN chart_candles.src = 'gecko' AND excluded.src = 'live' THEN excluded.n ELSE GREATEST(chart_candles.n, excluded.n) END,
-           src = CASE WHEN chart_candles.src = 'live' OR excluded.src = 'live' THEN 'live' ELSE 'gecko' END,
+           o = CASE WHEN ${chainUnderLive} THEN excluded.o WHEN ${merge} THEN ${E}.o ELSE excluded.o END,
+           h = CASE WHEN ${merge} THEN GREATEST(${E}.h, excluded.h) ELSE excluded.h END,
+           l = CASE WHEN ${merge} THEN LEAST(${E}.l, excluded.l) ELSE excluded.l END,
+           c = CASE WHEN ${chainUnderLive} THEN ${E}.c ELSE excluded.c END,
+           n = CASE WHEN ${sumN} THEN ${E}.n + excluded.n WHEN ${merge} THEN GREATEST(${E}.n, excluded.n) ELSE excluded.n END,
+           src = CASE WHEN ${E}.src = 'live' OR excluded.src = 'live' THEN 'live'
+                      WHEN ${E}.src = 'chain' OR excluded.src = 'chain' THEN 'chain' ELSE 'gecko' END,
            updated_at = now()
-         WHERE NOT (chart_candles.src = 'live' AND excluded.src = 'gecko')`,
+         WHERE NOT (excluded.src = 'gecko' AND ${E}.src <> 'gecko')`,
         params,
       );
     },
@@ -179,6 +210,11 @@ export function createPgCandleStore(sql: SqlLike): CandleStore {
         [slabs as string[]],
       )) as unknown as DbCandle[];
       return rows.map((r) => ({ slab: r.slab, series: r.series, res: Number(r.res) as CandleResMinutes, candle: toStored(r), src: r.src }));
+    },
+    async firstLiveT(slab, series) {
+      const rows = await sql.unsafe(`SELECT MIN(t) AS t FROM chart_candles WHERE slab=$1 AND series=$2 AND res=1 AND src='live'`, [slab, series]);
+      const v = rows[0]?.t;
+      return v === null || v === undefined ? null : Number(v);
     },
     async backfilledAt(slab, res) {
       const rows = await sql.unsafe(`SELECT fetched_at FROM chart_backfill WHERE slab=$1 AND res=$2`, [slab, res]);

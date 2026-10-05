@@ -38,6 +38,25 @@ describe("MemoryCandleStore (the contract the Postgres store must match)", () =>
   });
 });
 
+describe("MemoryCandleStore chain source", () => {
+  it("merge rules match the SQL (chain-live straddle both orders, chain idempotent, gecko loses)", async () => {
+    const s = new MemoryCandleStore();
+    await s.upsert([{ slab: SLAB, series: "mark", res: 15, candle: cd(900, 10, 12, 9, 11, 5), src: "chain" }, { slab: SLAB, series: "mark", res: 15, candle: cd(900, 50, 60, 40, 55, 3) }]);
+    expect((await s.range(SLAB, "mark", 15, 0, 4e9, 5))[0]).toMatchObject({ src: "live", o: 10, h: 60, l: 9, c: 55, n: 8 });
+    await s.upsert([{ slab: SLAB, series: "mark", res: 15, candle: cd(1800, 50, 60, 40, 55, 3) }, { slab: SLAB, series: "mark", res: 15, candle: cd(1800, 10, 12, 9, 11, 5), src: "chain" }]);
+    expect((await s.range(SLAB, "mark", 15, 1800, 1801, 5))[0]).toMatchObject({ src: "live", o: 10, h: 60, l: 9, c: 55, n: 8 });
+    await s.upsert([{ slab: SLAB, series: "mark", res: 5, candle: cd(300, 1, 9, 1, 5, 2), src: "chain" }, { slab: SLAB, series: "mark", res: 5, candle: cd(300, 2, 3, 2, 2.5, 2), src: "chain" }, { slab: SLAB, series: "mark", res: 5, candle: cd(300, 99), src: "gecko" }]);
+    expect((await s.range(SLAB, "mark", 5, 300, 301, 5))[0]).toMatchObject({ o: 2, h: 3, src: "chain" });
+  });
+  it("firstLiveT looks at live 1m candles only", async () => {
+    const s = new MemoryCandleStore();
+    await s.upsert([{ slab: SLAB, series: "mark", res: 1, candle: cd(60, 1), src: "chain" }, { slab: SLAB, series: "mark", res: 1440, candle: cd(0, 1) }]);
+    expect(await s.firstLiveT(SLAB, "mark")).toBeNull();
+    await s.upsert([{ slab: SLAB, series: "mark", res: 1, candle: cd(600, 1) }]);
+    expect(await s.firstLiveT(SLAB, "mark")).toBe(600);
+  });
+});
+
 describe("createPgCandleStore SQL shape", () => {
   function fake() {
     const unsafe = vi.fn(async (_q: string, _p?: unknown[]) => [] as Array<Record<string, unknown>>);
@@ -53,7 +72,7 @@ describe("createPgCandleStore SQL shape", () => {
     expect(unsafe).toHaveBeenCalledTimes(1);
     const [q, p] = unsafe.mock.calls[0] as [string, unknown[]];
     expect(q).toContain("ON CONFLICT (slab, series, res, t) DO UPDATE");
-    expect(q).toContain("WHERE NOT (chart_candles.src = 'live' AND excluded.src = 'gecko')");
+    expect(q).toContain("WHERE NOT (excluded.src = 'gecko' AND chart_candles.src <> 'gecko')");
     expect(q).not.toContain(SLAB);
     expect(p).toHaveLength(2 * 9 + 2);
     expect(p.slice(-2)).toEqual(["live", "gecko"]);
