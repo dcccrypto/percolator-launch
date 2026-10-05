@@ -45,4 +45,12 @@ describe("PositionsDock multi-portfolio rendering", () => {
     expect(SRC).toMatch(/portfolio: portfolioPk\?\.toBase58\(\)/);
     expect(SRC).toMatch(/isPrimary,/);
   });
+
+  it("offers ± Margin only on isolated rows, moving funds to/from THAT portfolio", () => {
+    // the button is gated on a non-primary (isolated) row
+    expect(SRC).toMatch(/\{!isPrimary && \([\s\S]*?data-testid="adjust-margin"/);
+    // add → deposit, remove → withdraw, both targeting the row's portfolio pubkey
+    expect(SRC).toMatch(/deposit\(\{ userIdx: 0, amount, accountExists: true, portfolioPk: portfolio \}\)/);
+    expect(SRC).toMatch(/withdraw\(\{ userIdx: 0, amount, portfolioPk: portfolio \}\)/);
+  });
 });

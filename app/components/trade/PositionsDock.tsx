@@ -36,6 +36,9 @@ import { PublicKey } from "@solana/web3.js";
 import { useNftWrappedPosition } from "@/hooks/useNftWrappedPosition";
 import { PositionNftMenu, ClosedPositionNftNotice, NFT_MENU_COPY } from "@/components/trade/PositionNftMenu";
 import { useClosePosition } from "@/hooks/useClosePosition";
+import { useDeposit } from "@/hooks/useDeposit";
+import { useWithdraw } from "@/hooks/useWithdraw";
+import { parseHumanAmount } from "@/lib/parseAmount";
 import { PnlShareButton } from "@/components/share/PnlShareButton";
 import { isPnlPoolCapped, poolPayableCapacity, type PnlCardData } from "@/lib/pnl-card";
 import { useSlabState } from "@/components/providers/SlabProvider";
@@ -613,6 +616,98 @@ function DockTabs({ tabs, children }: { tabs: string[]; children: React.ReactNod
 }
 
 /**
+ * #2560: add / remove collateral on a specific ISOLATED portfolio. Rides the
+ * existing deposit/withdraw hooks, which already take an explicit portfolioPk
+ * (so the funds move to/from exactly this portfolio, not the primary). Add
+ * increases the position's margin (farther liq); Remove withdraws free margin.
+ */
+const AdjustMarginModal: FC<{
+  slabAddress: string;
+  portfolio: PublicKey;
+  symbol: string;
+  collateralSymbol: string;
+  decimals: number;
+  capital: bigint;
+  onClose: () => void;
+  onDone: () => void;
+}> = ({ slabAddress, portfolio, symbol, collateralSymbol, decimals, capital, onClose, onDone }) => {
+  const { deposit, loading: depLoading, error: depError } = useDeposit(slabAddress);
+  const { withdraw, loading: wdLoading, error: wdError } = useWithdraw(slabAddress);
+  const [mode, setMode] = useState<"add" | "remove">("add");
+  const [input, setInput] = useState("");
+  const loading = depLoading || wdLoading;
+  const error = depError || wdError;
+  let amount = 0n;
+  try {
+    amount = input ? parseHumanAmount(input, decimals) : 0n;
+  } catch {
+    amount = 0n;
+  }
+  // Remove is bounded by the portfolio's capital here; the withdraw hook's own
+  // free-margin pre-check (open-position IM floor) is the authoritative gate.
+  const invalid = amount <= 0n || (mode === "remove" && amount > capital);
+  const submit = async () => {
+    if (invalid || loading) return;
+    try {
+      if (mode === "add") {
+        await deposit({ userIdx: 0, amount, accountExists: true, portfolioPk: portfolio });
+      } else {
+        await withdraw({ userIdx: 0, amount, portfolioPk: portfolio });
+      }
+      onDone();
+      onClose();
+    } catch {
+      /* error surfaced via hook state */
+    }
+  };
+  const seg = (on: boolean) =>
+    `flex-1 rounded-none border py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] transition-colors ${
+      on ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]" : "border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text)]"
+    }`;
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-label="Adjust isolated margin"
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-xs border border-[var(--border)] bg-[var(--panel-bg)] p-4"
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-[12px] font-semibold text-[var(--text)]">Adjust margin — {symbol} <span className="text-[var(--accent)]">Isolated</span></h3>
+          <button onClick={onClose} aria-label="Close" className="text-[13px] text-[var(--text-dim)] hover:text-[var(--text)]">✕</button>
+        </div>
+        <div className="mb-3 flex gap-1" role="group" aria-label="Add or remove margin">
+          <button type="button" onClick={() => setMode("add")} aria-pressed={mode === "add"} data-testid="margin-add" className={seg(mode === "add")}>Add</button>
+          <button type="button" onClick={() => setMode("remove")} aria-pressed={mode === "remove"} data-testid="margin-remove" className={seg(mode === "remove")}>Remove</button>
+        </div>
+        <label className="mb-1 block text-[9px] uppercase tracking-[0.12em] text-[var(--text-dim)]">Amount ({collateralSymbol})</label>
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          inputMode="decimal"
+          placeholder="0.00"
+          data-testid="margin-amount"
+          className="w-full rounded-none border border-[var(--border)] bg-[var(--bg-surface)] px-2.5 py-2 text-right font-mono text-[13px] text-[var(--text)] tabular-nums focus:border-[var(--accent)] focus:outline-none"
+        />
+        <div className="mt-1.5 text-[10px] text-[var(--text-secondary)]">
+          This position&apos;s margin: <span className="font-mono tabular-nums text-[var(--text)]">{formatTokenAmount(capital, decimals)} {collateralSymbol}</span>
+        </div>
+        {error && <p className="mt-2 text-[10px] text-[var(--short)]">{error}</p>}
+        <button
+          type="button"
+          onClick={submit}
+          disabled={loading || invalid}
+          data-testid="margin-submit"
+          className="mt-3 w-full rounded-none border border-[var(--accent)]/40 bg-[var(--accent)]/10 py-2 text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--accent)] transition-colors hover:bg-[var(--accent)]/15 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {loading ? "Submitting…" : mode === "add" ? "Add margin" : "Remove margin"}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+/**
  * #2560 isolated margin: one <tr> per portfolio for the MULTI-portfolio case.
  * Rendered by MultiPositionTable (2+ portfolios) only — the single-portfolio
  * path still uses PositionRow above UNCHANGED, so today's UI is byte-identical.
@@ -627,7 +722,7 @@ function DockTabs({ tabs, children }: { tabs: string[]; children: React.ReactNod
 const PositionTableRow: FC<{ slabAddress: string; info: UserAccountInfo; isPrimary: boolean }> = memo(
   function PositionTableRow({ slabAddress, info, isPrimary }) {
     const config = useMarketConfig();
-    const { accounts, config: mktConfig, params, adlFactors, wrapperConfigV17 } = useSlabState();
+    const { accounts, config: mktConfig, params, adlFactors, wrapperConfigV17, refresh: refreshSlab } = useSlabState();
     const { engine, insuranceBalance } = useEngineState();
     const { priceE6: livePriceE6, priceUsd } = useLivePrice();
     const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
@@ -647,6 +742,7 @@ const PositionTableRow: FC<{ slabAddress: string; info: UserAccountInfo; isPrima
     const { engineStale } = useEngineFreshness();
     const closeBlockedByStaleness = oracleStale || engineStale;
     const [showCloseModal, setShowCloseModal] = useState(false);
+    const [showMargin, setShowMargin] = useState(false);
 
     const lpEntry = useMemo(() => accounts.find(({ account }) => account.kind === AccountKind.LP) ?? null, [accounts]);
     const lpUnderfunded = lpEntry !== null && lpEntry.account.capital === 0n;
@@ -747,6 +843,17 @@ const PositionTableRow: FC<{ slabAddress: string; info: UserAccountInfo; isPrima
           </td>
           <td className="sticky right-0 z-10 has-[[role=menu]]:z-30 whitespace-nowrap border-l border-[var(--border)]/30 bg-[var(--panel-bg)] px-3 py-2.5 text-right">
             <span className="inline-flex items-center justify-end gap-1">
+              {!isPrimary && (
+                <button
+                  type="button"
+                  onClick={() => setShowMargin(true)}
+                  data-testid="adjust-margin"
+                  title="Add or remove collateral for this isolated position"
+                  className="rounded-none border border-[var(--border)] px-2.5 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-colors duration-150 hover:border-[var(--accent)]/50 hover:text-[var(--text)]"
+                >
+                  ± Margin
+                </button>
+              )}
               <PnlShareButton
                 data={view.pnlCardData}
                 label="Share PnL"
@@ -778,9 +885,21 @@ const PositionTableRow: FC<{ slabAddress: string; info: UserAccountInfo; isPrima
             </td>
           </tr>
         )}
-        {(closeError || showCloseModal) && (
+        {(closeError || showCloseModal || showMargin) && (
           <tr>
             <td colSpan={99} className="p-0">
+              {showMargin && portfolioPk && (
+                <AdjustMarginModal
+                  slabAddress={slabAddress}
+                  portfolio={portfolioPk}
+                  symbol={symbol}
+                  collateralSymbol={collateralSymbol}
+                  decimals={decimals}
+                  capital={account.capital}
+                  onClose={() => setShowMargin(false)}
+                  onDone={() => refreshSlab()}
+                />
+              )}
               {closeError && (
                 <div data-testid="position-close-error" className="mx-4 mb-3 mt-2 rounded-none border border-[var(--short)]/20 bg-[var(--short)]/5 px-3 py-2">
                   <p className="text-[10px] text-[var(--short)]">{closeError}</p>
