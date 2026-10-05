@@ -1,8 +1,8 @@
 import * as Sentry from "@sentry/nextjs";
+import { isAcceptedWrapper } from "@/lib/v21/worlds";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { readLiveMarketStateResolutions } from "@/lib/live-market-state";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
-import { getConfig } from "@/lib/config";
 
 /**
  * The one place market rows are loaded.
@@ -152,7 +152,6 @@ export async function loadMergedMarketRows(): Promise<MarketRegistryRow[] | null
   // A successful RPC `null`, or the CloseSlab tombstone (liveRead.missing covers both, and this
   // applies to curated PLAYGROUND_SLAB_META markets too), means the slab is gone and should no
   // longer be discoverable. RPC/parse uncertainty keeps the existing fail-open policy.
-  const wrapper = getConfig().programId;
   const current = registryRows.filter((m) => {
     const slab = String(m.slab_address ?? "");
 
@@ -161,7 +160,7 @@ export async function loadMergedMarketRows(): Promise<MarketRegistryRow[] | null
     }
 
     const owner = liveStates.get(slab)?.owner;
-    return owner === undefined || owner === wrapper;
+    return owner === undefined || isAcceptedWrapper(owner);
   });
 
   return current.map((m) => {

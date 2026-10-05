@@ -1,4 +1,5 @@
 import { Connection, PublicKey } from "@solana/web3.js";
+import { isAcceptedWrapper } from "@/lib/v21/worlds";
 import {
   isV17Account,
   parseWrapperConfigV17,
@@ -11,7 +12,6 @@ import { sanitizeOnChainValue } from "@/lib/health";
 import { isMarketauthComplete } from "@/lib/market-completeness";
 import { parseV17RiskParams } from "@/lib/v17-engine-config";
 import { leverageFromMarginBps } from "@/lib/market-params";
-import { getConfig } from "@/lib/config";
 import { isClosedMarketTombstone, TOMBSTONE_PROBE_SLICE_LEN } from "@/lib/closed-market-tombstone";
 
 /**
@@ -358,7 +358,7 @@ async function resolveSlabAccounts(
  * another program).
  */
 function classifyTombstone(data: Uint8Array | null | undefined, owner: PublicKey | null | undefined): boolean {
-  if (!owner || owner.toBase58() !== getConfig().programId) return false;
+  if (!owner || !isAcceptedWrapper(owner.toBase58())) return false;
   return isClosedMarketTombstone(data);
 }
 

@@ -1,7 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
+import { isAcceptedWrapper } from "@/lib/v21/worlds";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { getServerConnection } from "@/lib/server-rpc";
-import { getConfig } from "@/lib/config";
 
 /**
  * GH#2795: slabs of markets that belong to an abandoned wrapper.
@@ -54,7 +54,6 @@ async function compute(): Promise<{ slabs: string[]; complete: boolean }> {
     }
   }
 
-  const wrapper = getConfig().programId;
   const conn = getServerConnection("confirmed");
   const retired: string[] = [];
   let complete = true;
@@ -66,7 +65,7 @@ async function compute(): Promise<{ slabs: string[]; complete: boolean }> {
         { commitment: "confirmed", dataSlice: { offset: 0, length: 0 } },
       );
       infos.forEach((info, j) => {
-        if (info && info.owner.toBase58() !== wrapper) retired.push(chunk[j].slab);
+        if (info && !isAcceptedWrapper(info.owner.toBase58())) retired.push(chunk[j].slab);
       });
     } catch {
       complete = false; // this chunk stays unknown: its slabs are not retired

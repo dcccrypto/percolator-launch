@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { acceptedWrapperIds, isAcceptedWrapper } from "@/lib/v21/worlds";
 import { PublicKey } from "@solana/web3.js";
-import { getConfig } from "@/lib/config";
 import { getServerConnection } from "@/lib/server-rpc";
 import { getKnownMarketLpCapitals, scanEnabledMarketLpCapitals } from "@/lib/lp-portfolio";
 import { decodeMarketHealth, healthBadges, MARKET_HEALTH_SLICE_LEN, MAX_HEALTH_SLABS, parseSlabsParam } from "@/lib/market-health";
@@ -34,9 +34,13 @@ async function lpCapitals(slabs: string[]): Promise<Map<string, bigint>> {
   const known = await getKnownMarketLpCapitals(connection, slabs);
   const missing = slabs.filter((s) => !known.has(s));
   if (missing.length === 0) return known;
-  const programId = getConfig().programId;
+  const programId = acceptedWrapperIds().join(",");
   if (!lpScanCache || lpScanCache.programId !== programId || Date.now() - lpScanCache.at > LP_SCAN_TTL_MS) {
-    lpScanCache = { at: Date.now(), programId, map: await scanEnabledMarketLpCapitals(connection, new PublicKey(programId)) };
+    const map = new Map<string, bigint>();
+    for (const wrapperId of acceptedWrapperIds()) {
+      for (const [k, v] of await scanEnabledMarketLpCapitals(connection, new PublicKey(wrapperId))) if (!map.has(k)) map.set(k, v);
+    }
+    lpScanCache = { at: Date.now(), programId, map };
   }
   for (const s of missing) {
     const c = lpScanCache.map.get(s);
@@ -68,7 +72,6 @@ export async function GET(req: NextRequest) {
   }
   try {
     const connection = getServerConnection("confirmed");
-    const programId = getConfig().programId;
     const [res, lp] = await Promise.all([
       connection.getMultipleAccountsInfoAndContext(
         slabs.map((s) => new PublicKey(s)),
@@ -82,7 +85,7 @@ export async function GET(req: NextRequest) {
     const decoded: Record<string, ReturnType<typeof decodeMarketHealth> | null> = {};
     slabs.forEach((slab, i) => {
       const info = res.value[i];
-      if (!info || info.owner.toBase58() !== programId || info.data.length < MARKET_HEALTH_SLICE_LEN) {
+      if (!info || !isAcceptedWrapper(info.owner.toBase58()) || info.data.length < MARKET_HEALTH_SLICE_LEN) {
         decoded[slab] = null;
         return;
       }

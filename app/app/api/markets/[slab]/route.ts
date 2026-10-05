@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAcceptedWrapper } from "@/lib/v21/worlds";
 import { PublicKey } from "@solana/web3.js";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { validateSlabParam } from "@/lib/route-validators";
@@ -42,7 +43,8 @@ async function withOnChainMarketLp(
   if (!slab) return market;
 
   try {
-    const programId = new PublicKey(getConfig().programId as string);
+    const rowProgram = typeof market.program_id === "string" && isAcceptedWrapper(market.program_id) ? market.program_id : null;
+    const programId = new PublicKey(rowProgram ?? (getConfig().programId as string));
     const connection = getServerConnection("confirmed");
     const capital = await getMarketLpCapital(connection, programId, slab);
     if (capital != null) {
@@ -124,7 +126,7 @@ async function slabOwnerIfReadable(slab: string): Promise<"current" | "other" | 
   try {
     const info = await getServerConnection("confirmed").getAccountInfo(new PublicKey(slab));
     if (!info) return null;
-    return info.owner.toBase58() === getConfig().programId ? "current" : "other";
+    return isAcceptedWrapper(info.owner.toBase58()) ? "current" : "other";
   } catch {
     return null;
   }
@@ -140,7 +142,7 @@ async function onChainSlabFallback(slab: string): Promise<NextResponse> {
       return NextResponse.json({ error: "Market not found" }, { status: 404 });
     }
     // Relaunch: a slab owned by an abandoned wrapper is not a market of this app.
-    if (info.owner.toBase58() !== getConfig().programId) {
+    if (!isAcceptedWrapper(info.owner.toBase58())) {
       return NextResponse.json({ error: "Market not found" }, { status: 404 });
     }
 

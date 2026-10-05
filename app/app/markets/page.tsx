@@ -1020,7 +1020,7 @@ function MarketsPageInner() {
                   // from market metadata, otherwise SOL/USDC perps render as USDC/USD.
                   const displaySymbol = resolveMarketDisplaySymbol(m);
                   const displayName = resolveMarketDisplayName(m);
-                  const v1Label = isV1CloseOnly(getConfig().programId, isMoveFlowEnabled());
+                  const v1Label = isV1CloseOnly(m.onChain?.programId?.toBase58?.() ?? getConfig().programId, isMoveFlowEnabled());
                   const logoMintAddress = resolveMarketLogoMintAddress(m);
                   const subtitleAddress = logoMintAddress || m.mintAddress;
 

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { acceptedWrapperIds, marketWorld } from "@/lib/v21/worlds";
 import { classifyPoolsByOwner } from "@/lib/dex-pool-owner";
 import { NON_USD_QUOTE_REASON } from "@/lib/dex-constants";
 import { buildMarketDirectoryFallback } from "@/lib/markets-fallback";
@@ -397,11 +398,17 @@ async function discoverMarketsOnChain(
   const connection = getServerConnection("confirmed");
 
   try {
-    const programId = new PublicKey(cfg.programId);
-    const found = await discoverMarkets(connection, programId, {
-      sequential: true,
-      maxTierQueries: 0, // Skip v12 tier scans — only the v17 memcmp path runs
-    });
+    // Flag off: acceptedWrapperIds() is exactly [cfg.programId] (the previous single scan).
+    // Flag on: v1 and v2.1 are both scanned so v1 rows survive the cutover.
+    const found: DiscoveredMarket[] = [];
+    for (const wrapperId of acceptedWrapperIds()) {
+      found.push(
+        ...(await discoverMarkets(connection, new PublicKey(wrapperId), {
+          sequential: true,
+          maxTierQueries: 0, // Skip v12 tier scans — only the v17 memcmp path runs
+        })),
+      );
+    }
     if (found.length === 0) return [];
 
     const seen = new Set<string>();
@@ -443,7 +450,10 @@ async function discoverMarketsOnChain(
 
     return unique.map((m) => {
       const slab = m.slabAddress.toBase58();
-      return discoveredToApiRow(m, v17Stats.get(slab), registeredBySlab?.get(slab), v17RiskParams.get(slab));
+      const row = discoveredToApiRow(m, v17Stats.get(slab), registeredBySlab?.get(slab), v17RiskParams.get(slab));
+      // Flag on only: tag the row with its world so clients label v1 after the cutover.
+      const world = marketWorld(String(row.program_id ?? ""));
+      return world ? { ...row, world } : row;
     });
   } catch {
     return [];
@@ -535,10 +545,12 @@ async function onChainOrStaticResponse(request: NextRequest, reason: string): Pr
             // by their marketGroupId (== slab address).
             const stillMissing = candidateSlabs.filter((s) => !knownLpCapitals.has(s));
             if (stillMissing.length > 0) {
-              const scanned = await scanEnabledMarketLpCapitals(lpConnection, new PublicKey(getConfig().programId));
-              for (const slab of stillMissing) {
-                const capital = scanned.get(slab);
-                if (capital != null) knownLpCapitals.set(slab, capital);
+              for (const wrapperId of acceptedWrapperIds()) {
+                const scanned = await scanEnabledMarketLpCapitals(lpConnection, new PublicKey(wrapperId));
+                for (const slab of stillMissing) {
+                  const capital = scanned.get(slab);
+                  if (capital != null && !knownLpCapitals.has(slab)) knownLpCapitals.set(slab, capital);
+                }
               }
             }
 
