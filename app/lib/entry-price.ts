@@ -37,9 +37,11 @@ interface EntryRecord {
  * per-portfolio. It too is appended LAST and is optional, so callers that don't
  * pass one are byte-identical to before; a portfolio-scoped READ that misses
  * falls back to the legacy (portfolio-less) key so entries saved before this
- * change still resolve (see `readRecord`). New trades always WRITE the scoped
- * key, so a freshly-opened portfolio never read-misses into another's legacy
- * entry.
+ * change still resolve (see `resolveRecord`). Who WRITES which key today: an
+ * ISOLATED open (OrderTicket) writes the portfolio-SCOPED key, so it never
+ * read-misses into another portfolio's entry; a CROSS open still writes the
+ * LEGACY (portfolio-less) key, which only the primary/cross portfolio may read
+ * via the legacy fallback (`allowLegacyFallback`).
  */
 function key(slab: string, accountIdx: number, wallet?: string, portfolio?: string): string {
   let k = `${PREFIX}${slab}:${accountIdx}`;

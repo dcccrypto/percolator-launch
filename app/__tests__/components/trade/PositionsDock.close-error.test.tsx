@@ -12,7 +12,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({ account: null as unknown }));
 const OWNER = new PublicKey("11111111111111111111111111111111");
 
-vi.mock("@/hooks/useUserAccount", () => ({ useUserAccount: () => h.account, useUserAccountScanPending: () => false }));
+vi.mock("@/hooks/useUserAccount", () => ({
+  useUserAccount: () => h.account,
+  // #2560: the dock lists every owned portfolio; a single-portfolio wallet is [its account].
+  useOwnerMarketPortfolios: () => (h.account ? [h.account] : []),
+  useUserAccountScanPending: () => false,
+}));
 vi.mock("@/hooks/useNftWrappedPosition", () => ({ useNftWrappedPosition: () => null }));
 // Stateful stand-in for useClosePosition: a failed close sets the mapped
 // error and throws (the real hook's catch contract); resetPhase clears it.

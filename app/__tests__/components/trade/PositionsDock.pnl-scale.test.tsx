@@ -25,7 +25,12 @@ const acct = (over: Record<string, unknown>) => ({
   },
 });
 
-vi.mock("@/hooks/useUserAccount", () => ({ useUserAccount: () => h.account, useUserAccountScanPending: () => false }));
+vi.mock("@/hooks/useUserAccount", () => ({
+  useUserAccount: () => h.account,
+  // #2560: the dock lists every owned portfolio; a single-portfolio wallet is [its account].
+  useOwnerMarketPortfolios: () => (h.account ? [h.account] : []),
+  useUserAccountScanPending: () => false,
+}));
 vi.mock("@/hooks/useNftWrappedPosition", () => ({ useNftWrappedPosition: () => null }));
 vi.mock("@/hooks/useClosePosition", () => ({
   useClosePosition: () => ({ closePosition: vi.fn(), loading: false, error: null, prewarmClose: vi.fn() }),
