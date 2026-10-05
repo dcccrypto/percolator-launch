@@ -121,6 +121,26 @@ describe("LiquidationAlert", () => {
     expect(alertBox()).toBeNull();
   });
 
+  it("on /trade at lg+ the card leaves the chart (left) for the order-ticket rail (right)", () => {
+    h.pathname = "/trade/SlabTrade111";
+    h.positions = [row("SlabA1112", "SOL")];
+    render(<LiquidationAlert />);
+    const cls = alertBox()!.className;
+    expect(cls).not.toContain("lg:left-5");
+    expect(cls).not.toContain("lg:right-auto");
+    expect(cls).toContain("lg:right-5");
+    expect(cls).toContain("lg:bottom-12");
+  });
+
+  it("off /trade the placement is unchanged (no lg override)", () => {
+    h.pathname = "/markets";
+    h.positions = [row("SlabA1113", "SOL")];
+    render(<LiquidationAlert />);
+    const cls = alertBox()!.className;
+    expect(cls).toContain("md:right-5");
+    expect(cls).not.toContain("lg:");
+  });
+
   it("renders nothing with no wallet connected", () => {
     h.positions = [row("SlabA4444", "SOL")];
     h.connected = false;

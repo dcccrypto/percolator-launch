@@ -25,6 +25,18 @@ const MAX_SHOWN = 3;
  *  this, so a price hovering at the warning line doesn't re-alert on every crossing. */
 const FORGET_HIDE_ABOVE_CUSHION = LIQ_FORGET_HIDE_CUSHION;
 
+/**
+ * Placement. Everywhere except the trade page the card sits bottom-right. On /trade at lg+ the
+ * chart owns the left and centre (its drawing toolbar runs down the left edge and the music
+ * player sits bottom-left), so the card goes to the order-ticket rail instead, above the
+ * analytics dock, and never over the chart.
+ */
+export function liquidationAlertPlacement(onTrade: boolean): string {
+  const base =
+    "left-3 right-3 bottom-[calc(124px+env(safe-area-inset-bottom))] md:left-auto md:right-5 md:bottom-20 md:w-[360px]";
+  return onTrade ? `${base} lg:right-5 lg:bottom-12 lg:w-[340px]` : base;
+}
+
 type Tier = Exclude<LiquidationSeverity, "safe">;
 const rank: Record<Tier, number> = { warning: 1, danger: 2 };
 
@@ -116,9 +128,7 @@ export function LiquidationAlert() {
         <aside
           ref={cardRef}
           aria-label="Positions near liquidation"
-          className={`fixed z-[85] left-3 right-3 bottom-[calc(124px+env(safe-area-inset-bottom))] md:left-auto md:right-5 md:bottom-20 md:w-[360px] ${
-            onTrade ? "lg:right-auto lg:left-5" : ""
-          }`}
+          className={`fixed z-[85] ${liquidationAlertPlacement(onTrade)}`}
         >
           {/* Announces the count and tier when they change, not every price tick. */}
           <span className="sr-only" role={danger ? "alert" : "status"}>
