@@ -90,6 +90,10 @@ describe("error classifiers", () => {
     ["Reached end of buffer unexpectedly", true],
     [{ code: -32603, message: "Unexpected error" }, true],
     [new Error("WalletSignTransactionError", { cause: new Error("Reached end of buffer unexpectedly") }), true],
+    // Tightened (A-2): bare wording without the -32603 code / a parse failure is not enough.
+    ["Unexpected error", false],
+    ["Transaction not supported", false],
+    ["invalid transaction", false],
     ["Unsupported transaction version", true],
     [{ code: 4001, message: "User rejected the request." }, false],
     ["User rejected the request.", false],

@@ -41,9 +41,7 @@ import {
   packInstructionGroups,
   parseTxV1Mode,
   priorityFeeLamportsFromMicroPerCu,
-  sendV1 as sdkSendV1,
   signV1Message,
-  simulateV1 as sdkSimulateV1,
   type CompiledV1Message,
   type PackGroup,
   type PackedTx,
@@ -56,6 +54,7 @@ import {
   broadcastSignedTx,
   buildBatchTx,
   getFreshBlockhash,
+  clampPriorityFee,
   getPriorityFee,
   pollConfirmation,
   presimulateOrThrow,
@@ -69,6 +68,7 @@ import {
   type RawTxSigner,
   type SolanaChainId,
 } from "./wallet-raw-signer";
+import { sendV1ViaProxy, simulateV1ViaProxy } from "./rpc";
 
 /** Heap frame every Percolator wrapper transaction requests (#176); matches lib/tx.ts. */
 export const USER_BUNDLE_HEAP_BYTES = 131_072;
@@ -393,10 +393,12 @@ function defaultDeps(connection: Connection, wallet: UserBundleWallet): UserBund
     getBlockhash: () => getFreshBlockhash(connection),
     getPriorityFee: () => getPriorityFee(connection),
     simulateLegacy: (tx) => presimulateOrThrow(connection, tx),
-    simulateV1: (wire) => sdkSimulateV1(connection, wire),
+    // Through ./rpc so a JSON-RPC format rejection keeps its code (V1RpcError) and a transport failure never
+    // looks like one (the SDK's default sendV1 goes through sendRawTransaction, which drops the code).
+    simulateV1: (wire) => simulateV1ViaProxy(connection, wire),
     signLegacy: (txs) => signAllCompat(wallet, txs),
     sendLegacy: (tx) => broadcastSignedTx(connection, tx),
-    sendV1: (wire) => sdkSendV1(connection, wire),
+    sendV1: (wire) => sendV1ViaProxy(connection, wire),
     confirm: (sig) => pollConfirmation(connection, sig),
     rawSigner: resolveRawTxSigner(wallet.wallet, wallet.publicKey, walletChainForNetwork()),
   };
@@ -432,7 +434,8 @@ export async function sendUserBundle<T = unknown>(p: SendUserBundleParams<T>): P
 
   const walletV1 = mode !== "off" && !!d.rawSigner?.supportsV1;
   const clusterV1 = walletV1 ? await d.clusterSupportsV1() : false;
-  const priorityFee = await d.getPriorityFee();
+  // Clamp again here: `deps.getPriorityFee` is injectable, and the v1 total is derived from this price.
+  const priorityFee = clampPriorityFee(await d.getPriorityFee());
   const planInput: PlanUserBundleInput<T> = {
     groups: p.groups,
     payer,
@@ -526,15 +529,17 @@ async function sendV1Plan<T>(txs: readonly PackedTx<T>[], c: SendCtx & { rawSign
   });
   const preSigned = compiled.map((m) => signV1Message(m, signersFor(c.signers, m.accountKeys.slice(0, m.numRequiredSignatures))));
 
-  // Pre-sign simulation: a program error refuses (no wallet prompt, no fallback); an RPC-level
-  // failure (the node / proxy cannot take v1) falls back before anything was signed.
+  // Pre-sign simulation: a program error refuses (no wallet prompt, no fallback); a FORMAT rejection
+  // (JSON-RPC -32602/-32015: the node cannot take v1) falls back before anything was signed. Any other
+  // failure (network, proxy rate limit, upstream down) is thrown as-is: it says nothing about v1.
   for (let k = 0; k < preSigned.length; k++) {
     if (!shouldSimulate(c.simulate, k)) continue;
     let sim: V1SimulationResult;
     try {
       sim = await c.d.simulateV1(preSigned[k]!);
     } catch (e) {
-      throw new V1Fallback("v1-simulation-rpc-failed", e);
+      if (isTxV1FormatRejection(e)) throw new V1Fallback("v1-simulation-rpc-failed", e);
+      throw e;
     }
     if (sim.err) throw new SimulationRefusal(sim.err, sim.logs, txs[k]!.instructions);
   }

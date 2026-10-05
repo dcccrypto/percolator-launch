@@ -1,8 +1,8 @@
 /*
- * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/tx-v1 @ 18f141c (#401,
- * src/runtime/txv1.ts), with only the `./tx.js` import retargeted at the installed @percolatorct/sdk
- * root. Delete when @percolatorct/sdk ships it and point ./index.ts at the package. Do not edit here;
- * fix upstream in percolator-sdk.
+ * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/tx-v1 @ 4752e204 (#401 + security
+ * review SDK-1..5, src/runtime/txv1.ts), with only the `./tx.js` import retargeted at the installed
+ * @percolatorct/sdk root. Delete when @percolatorct/sdk ships it and point ./index.ts at the package.
+ * Do not edit here; fix upstream in percolator-sdk.
  */
 /**
  * Solana v1 transactions (SIMD-0385 message format, SIMD-0296 4,096-byte limit).
@@ -37,7 +37,17 @@
  *   {@link priorityFeeLamportsFromMicroPerCu} to convert.
  * - No address lookup tables. Every account is a 32-byte address in the message.
  * - The Percolator wrapper needs a 128 KiB heap on every transaction (#176). In v1 that is the
- *   heap-size config bit, which this module sets by default for wrapper transactions.
+ *   heap-size config bit. THIS MODULE DOES NOT SET IT FOR YOU: `heapSizeBytes` (or `heapBytes` in a
+ *   {@link BudgetParams}) must be passed explicitly, usually {@link V17_WRAPPER_HEAP_FRAME_BYTES}.
+ *   A wrapper tx without it runs with the 32 KiB default and fails (fail-safe, not silent corruption).
+ *   Use {@link wrapperV1Budget} to get the wrapper-correct budget.
+ * - `priorityFeeLamports` is capped by {@link MAX_PRIORITY_FEE_LAMPORTS} (default 0.01 SOL) in the encoder;
+ *   raising it needs an explicit `maxPriorityFeeLamports`.
+ * - `sendV1` uses `connection.sendRawTransaction`, so the Connection's own fetch middleware, headers and any
+ *   dry-run guard installed on it apply. `simulateV1` goes through the Connection's JSON-RPC transport when it
+ *   exposes one (read-only) and only falls back to a raw `fetch` of `rpcEndpoint` (which does NOT see
+ *   custom headers/middleware) when it does not. Never hand `sendGroupsAdaptive` a connection whose send guard
+ *   you rely on without a `sender` that applies the same guard.
  *
  * @module
  */
@@ -82,6 +92,12 @@ export const TX_V1_MAX_HEAP_BYTES = 256 * 1024;
  * `Some(activation_slot)` once active (verified on devnet and mainnet-beta, 2026-10-05).
  */
 export const TX_V1_FEATURE_ID = new PublicKey("txv1aq4pp281K9um3tnPgkfX8UqtFT6wcVW3hNezGLL");
+/**
+ * Hard ceiling for the v1 priority fee, in TOTAL lamports (0.01 SOL). The fee is a total, not a per-CU price, so
+ * a caller that passes a micro-lamports/CU price as lamports overpays by up to 6 orders of magnitude. The encoder
+ * refuses anything above this unless the caller passes an explicit `maxPriorityFeeLamports`.
+ */
+export const MAX_PRIORITY_FEE_LAMPORTS = 10_000_000n;
 /** Signature length. */
 const SIG_LEN = 64;
 
@@ -116,6 +132,11 @@ export interface V1Config {
    */
   priorityFeeLamports?: bigint | number;
   /**
+   * Ceiling for `priorityFeeLamports`. Default {@link MAX_PRIORITY_FEE_LAMPORTS}. Pass a higher value only
+   * deliberately (an explicit, reviewed override); it is itself bounded by u64.
+   */
+  maxPriorityFeeLamports?: bigint | number;
+  /**
    * Heap size in bytes (multiple of 1024 in [32768, 262144]). Omit for the 32 KiB default.
    * Every Percolator wrapper transaction needs 131072 ({@link V17_WRAPPER_HEAP_FRAME_BYTES}).
    */
@@ -136,6 +157,9 @@ export function priorityFeeLamportsFromMicroPerCu(
   microLamportsPerCu: number | bigint,
   computeUnitLimit: number | bigint,
 ): bigint {
+  for (const [n, v] of [["price", microLamportsPerCu], ["compute unit limit", computeUnitLimit]] as const) {
+    if (typeof v === "number" && (!Number.isFinite(v) || !Number.isInteger(v))) throw new Error(`${n} must be a finite integer`);
+  }
   const price = BigInt(microLamportsPerCu);
   const cu = BigInt(computeUnitLimit);
   if (price < 0n || cu < 0n) throw new Error("price and compute unit limit must be non-negative");
@@ -156,8 +180,19 @@ function validateConfig(cfg: V1Config): {
   if (!Number.isInteger(loaded) || loaded < 1 || loaded > TX_MAX_LOADED_ACCOUNTS_DATA_BYTES) {
     throw new Error(`loadedAccountsDataSizeLimit must be an integer in [1, ${TX_MAX_LOADED_ACCOUNTS_DATA_BYTES}]`);
   }
+  for (const [n, v] of [["priorityFeeLamports", cfg.priorityFeeLamports], ["maxPriorityFeeLamports", cfg.maxPriorityFeeLamports]] as const) {
+    if (typeof v === "number" && (!Number.isFinite(v) || !Number.isInteger(v))) throw new Error(`${n} must be a finite integer`);
+  }
   const fee = BigInt(cfg.priorityFeeLamports ?? 0);
   if (fee < 0n || fee > 0xffff_ffff_ffff_ffffn) throw new Error("priorityFeeLamports must fit u64");
+  const feeCap = BigInt(cfg.maxPriorityFeeLamports ?? MAX_PRIORITY_FEE_LAMPORTS);
+  if (feeCap < 0n || feeCap > 0xffff_ffff_ffff_ffffn) throw new Error("maxPriorityFeeLamports must fit u64");
+  if (fee > feeCap) {
+    throw new Error(
+      `priorityFeeLamports ${fee} exceeds the ceiling ${feeCap} lamports (the v1 fee is a TOTAL, not a per-CU price); ` +
+        "pass an explicit maxPriorityFeeLamports if this is intended",
+    );
+  }
   let heap: number | null = null;
   if (cfg.heapSizeBytes !== undefined && cfg.heapSizeBytes !== 0) {
     const h = cfg.heapSizeBytes;
@@ -256,6 +291,13 @@ export function compileV1Message(params: {
   }
   // Program ids: readonly, non-signer unless already seen with stronger flags.
   for (const ix of instructions) upsert(ix.programId, false, false);
+  // Agave rejects a program at index 0 (the payer) and demotes writable program ids; @solana/kit refuses both.
+  // Match the stricter encoder so the two never disagree.
+  for (const ix of instructions) {
+    const m = metas.get(ix.programId.toBase58())!;
+    if (ix.programId.equals(payer)) throw new Error("v1: a program id may not be the fee payer");
+    if (m.isWritable || m.isSigner) throw new Error(`v1: program id ${ix.programId.toBase58()} is also used as a writable or signer account`);
+  }
 
   const all = [...metas.values()];
   const payerKey = payer.toBase58();
@@ -380,6 +422,21 @@ export interface BudgetParams {
   heapBytes?: number;
   /** v1 only: loaded accounts data size limit. */
   loadedAccountsDataSizeLimit?: number;
+  /** v1 only: override of {@link MAX_PRIORITY_FEE_LAMPORTS}. Leave unset unless a higher fee is deliberate. */
+  maxPriorityFeeLamports?: bigint | number;
+}
+
+/**
+ * Budget for a transaction that touches the Percolator wrapper: the 128 KiB heap is always requested
+ * ({@link V17_WRAPPER_HEAP_FRAME_BYTES}, #176). Everything else is passed through.
+ *
+ * @param b - Budget without the heap.
+ * @returns Budget with `heapBytes` set to the wrapper's heap.
+ * @example
+ * packInstructionGroups(groups, { format: "v1", payer, budget: wrapperV1Budget({}) });
+ */
+export function wrapperV1Budget(b: Omit<BudgetParams, "computeUnitLimit" | "heapBytes"> = {}): Omit<BudgetParams, "computeUnitLimit"> {
+  return { ...b, heapBytes: V17_WRAPPER_HEAP_FRAME_BYTES };
 }
 
 /** Placeholder blockhash used only for size measurement (any 32 bytes). */
@@ -387,12 +444,15 @@ const MEASURE_BLOCKHASH = "11111111111111111111111111111111";
 
 /** v1 config derived from format-neutral budget params. */
 export function v1ConfigFromBudget(b: BudgetParams): V1Config {
-  const fee = b.priorityMicroLamportsPerCu
-    ? priorityFeeLamportsFromMicroPerCu(b.priorityMicroLamportsPerCu, b.computeUnitLimit)
-    : 0n;
+  const price = b.priorityMicroLamportsPerCu;
+  if (price !== undefined && (!Number.isFinite(price) || !Number.isInteger(price) || price < 0)) {
+    throw new Error("priorityMicroLamportsPerCu must be a non-negative finite integer (NaN/fractions are refused, not treated as 0)");
+  }
+  const fee = price ? priorityFeeLamportsFromMicroPerCu(price, b.computeUnitLimit) : 0n;
   return {
     computeUnitLimit: b.computeUnitLimit,
     priorityFeeLamports: fee,
+    ...(b.maxPriorityFeeLamports !== undefined ? { maxPriorityFeeLamports: b.maxPriorityFeeLamports } : {}),
     heapSizeBytes: b.heapBytes ? b.heapBytes : undefined,
     loadedAccountsDataSizeLimit: b.loadedAccountsDataSizeLimit,
   };
@@ -666,18 +726,53 @@ export function resolveTxFormat(mode: TxV1Mode, clusterSupportsV1: boolean, fall
   return fallback;
 }
 
+/** A JSON-RPC level error from {@link sendV1} / {@link simulateV1}, carrying the node's error code. */
+export class V1RpcError extends Error {
+  /** JSON-RPC error code (e.g. -32602 invalid params, -32015 unsupported version, -32002 simulation failed). */
+  readonly code: number;
+  /** RPC method that failed. */
+  readonly method: string;
+  constructor(method: string, code: number, message: string) {
+    super(`RPC ${method} failed: ${code} ${message}`);
+    this.name = "V1RpcError";
+    this.method = method;
+    this.code = code;
+  }
+}
+
+/** JSON-RPC codes that mean "the node could not accept this wire format" (never an on-chain outcome). */
+const FORMAT_REJECTION_CODES: ReadonlySet<number> = new Set([
+  -32602, // invalid params: undecodable / too large / failed to sanitize / bad signature size
+  -32015, // transaction version not supported by the requesting client / node
+]);
+
+function rpcErrorCode(err: unknown): number | undefined {
+  if (typeof err === "object" && err !== null) {
+    const c = (err as { code?: unknown }).code;
+    if (typeof c === "number") return c;
+    // web3.js SolanaJSONRPCError keeps the node's code on `.code`; a wrapped cause may carry it instead.
+    const cause = (err as { cause?: unknown }).cause;
+    if (cause !== undefined && cause !== err) return rpcErrorCode(cause);
+  }
+  return undefined;
+}
+
 /**
- * Classify an RPC send/simulate error as "the node/cluster rejected the v1 FORMAT" (as opposed to the
- * transaction failing on-chain). Only these should trigger a repack-and-retry as v0/legacy; a program
- * error must never cause a resend.
+ * Classify an error from a v1 send/simulate as "the node/cluster rejected the v1 FORMAT" (as opposed to the
+ * transaction failing on-chain, or the transport failing). Only these may trigger a repack-and-retry as
+ * v0/legacy; a program error or a network error must never cause a resend.
  *
- * @param err - Thrown error, JSON-RPC error object or message string.
+ * Classification is by the JSON-RPC error CODE (`V1RpcError.code`, or the `.code` of a web3.js
+ * `SolanaJSONRPCError`): only {@link FORMAT_REJECTION_CODES}. Arbitrary message text is never enough, so a
+ * transport error whose text merely mentions "too large" or "not supported" after the node may already have
+ * accepted the tx cannot cause a double send.
+ *
+ * @param err - Thrown error.
  * @returns true if the failure is a format rejection.
  */
 export function isTxV1FormatRejection(err: unknown): boolean {
-  const msg = typeof err === "string" ? err : err instanceof Error ? err.message : JSON.stringify(err ?? "");
-  return /(-32602|invalid transaction: transaction failed to sanitize|too large|unsupported transaction version|transaction version \(1\) is not supported|failed to deserialize|invalid base64|wire format|bincode|SanitizeFailure|not supported)/i.test(msg)
-    && !/InstructionError|custom program error|Program .* failed|insufficient funds|BlockhashNotFound|AccountNotFound/i.test(msg);
+  const code = rpcErrorCode(err);
+  return code !== undefined && FORMAT_REJECTION_CODES.has(code);
 }
 
 // ---------------------------------------------------------------------------
@@ -706,15 +801,27 @@ export interface RawRpcOptions {
   fetchImpl?: typeof fetch;
 }
 
+/** The Connection's own JSON-RPC transport (web3.js 1.x internal; honours custom fetch/headers/middleware). */
+interface ConnectionTransport {
+  _rpcRequest?: (method: string, args: unknown[]) => Promise<{ result?: unknown; error?: { code: number; message: string } }>;
+}
+
 async function rawRpc(connection: Connection, method: string, params: unknown[], o: RawRpcOptions): Promise<unknown> {
-  const f = o.fetchImpl ?? fetch;
-  const res = await f(connection.rpcEndpoint, {
-    method: "POST",
-    headers: { "content-type": "application/json", ...(o.headers ?? {}) },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
-  const json = (await res.json()) as { result?: unknown; error?: { code: number; message: string } };
-  if (json.error) throw new Error(`RPC ${method} failed: ${json.error.code} ${json.error.message}`);
+  let json: { result?: unknown; error?: { code: number; message: string } };
+  const transport = (connection as unknown as ConnectionTransport)._rpcRequest;
+  if (typeof transport === "function" && o.fetchImpl === undefined && o.headers === undefined) {
+    // Same transport (headers, fetch middleware, agents) as every other call on this Connection.
+    json = await transport.call(connection, method, params);
+  } else {
+    const f = o.fetchImpl ?? fetch;
+    const res = await f(connection.rpcEndpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(o.headers ?? {}) },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    });
+    json = (await res.json()) as typeof json;
+  }
+  if (json.error) throw new V1RpcError(method, json.error.code, json.error.message);
   return json.result;
 }
 
@@ -722,9 +829,9 @@ async function rawRpc(connection: Connection, method: string, params: unknown[],
  * Simulate v1 wire bytes (read-only). `sigVerify` is off so an unsigned/partially signed message can be
  * simulated, and the blockhash is replaced so a stale one does not mask the real result.
  *
- * @param connection - Connection whose `rpcEndpoint` is used.
+ * @param connection - Connection; its own JSON-RPC transport is used when it exposes one, else a raw fetch of `rpcEndpoint`.
  * @param wire - Serialized v1 transaction.
- * @param o - Raw RPC options.
+ * @param o - Raw RPC options (passing `fetchImpl`/`headers` forces the raw fetch path).
  * @returns Simulation outcome.
  * @throws On JSON-RPC level errors (decode/sanitize failures), which {@link isTxV1FormatRejection} classifies.
  */
@@ -738,7 +845,7 @@ export async function simulateV1(connection: Connection, wire: Uint8Array, o: Ra
 /**
  * Send v1 wire bytes. Returns the signature string reported by the node.
  *
- * @param connection - Connection whose `rpcEndpoint` is used.
+ * @param connection - Connection; sent through `connection.sendRawTransaction` (its transport and send guards apply).
  * @param wire - Serialized, fully signed v1 transaction.
  * @param opts - `skipPreflight` / `maxRetries` plus raw RPC options.
  * @returns Transaction signature.
@@ -749,6 +856,15 @@ export async function sendV1(
   wire: Uint8Array,
   opts: RawRpcOptions & { skipPreflight?: boolean; maxRetries?: number; preflightCommitment?: "processed" | "confirmed" | "finalized" } = {},
 ): Promise<string> {
+  if (opts.fetchImpl === undefined && opts.headers === undefined) {
+    // web3.js `sendRawTransaction` only base64-encodes the bytes (it never parses them), so it carries v1 fine and,
+    // unlike a raw fetch, goes through the Connection's own transport and any send guard (e.g. a dry-run override).
+    return connection.sendRawTransaction(wire, {
+      skipPreflight: opts.skipPreflight ?? false,
+      preflightCommitment: opts.preflightCommitment ?? "confirmed",
+      ...(opts.maxRetries !== undefined ? { maxRetries: opts.maxRetries } : {}),
+    });
+  }
   return (await rawRpc(
     connection,
     "sendTransaction",
