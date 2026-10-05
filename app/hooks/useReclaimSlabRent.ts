@@ -252,8 +252,10 @@ export function useReclaimSlabRent(): UseReclaimSlabRentResult {
       } catch (err: unknown) {
         console.error("[useReclaimSlabRent] error:", err);
         // SendTransactionError carries logs — include them for debugging
-        if (err instanceof SendTransactionError) {
-          console.error("[useReclaimSlabRent] logs:", err.logs);
+        // broadcastSignedTx wraps the send failure in a plain Error with the original as `cause`.
+        const sendErr = err instanceof Error && err.cause instanceof SendTransactionError ? err.cause : err;
+        if (sendErr instanceof SendTransactionError) {
+          console.error("[useReclaimSlabRent] logs:", sendErr.logs);
         }
         setError(friendlyReclaimError(err));
         setStatus("error");

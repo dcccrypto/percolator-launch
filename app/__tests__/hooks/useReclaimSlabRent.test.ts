@@ -17,7 +17,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { act } from "react";
-import { Keypair, PublicKey, TransactionExpiredBlockheightExceededError } from "@solana/web3.js";
+import { Keypair, PublicKey, SendTransactionError, TransactionExpiredBlockheightExceededError } from "@solana/web3.js";
 
 // ─── Mock @solana/web3.js Transaction (avoids real serialization in unit tests) ─
 
@@ -374,6 +374,46 @@ describe("useReclaimSlabRent", () => {
 
     expect(result.current.status).toBe("error");
     expect(result.current.error).toMatch(/network error/i);
+  });
+
+  it("GH#1488: a blockhash miss on the first send (wrapped by broadcastSignedTx) retries once with a fresh blockhash", async () => {
+    mockConnection = makeMockConnection();
+    mockConnection.sendRawTransaction = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Blockhash not found"))
+      .mockResolvedValueOnce("test-tx-sig");
+    vi.mocked(useConnectionCompat).mockReturnValue({
+      connection: mockConnection,
+    } as ReturnType<typeof useConnectionCompat>);
+
+    const { result } = renderHook(() => useReclaimSlabRent());
+
+    await act(async () => {
+      await result.current.reclaim(slabKeypair);
+    });
+
+    expect(mockConnection.sendRawTransaction).toHaveBeenCalledTimes(2);
+    expect(mockConnection.getLatestBlockhash).toHaveBeenCalledTimes(2); // fresh blockhash per attempt
+    expect(result.current.status).toBe("success");
+    expect(result.current.txSig).toBe("test-tx-sig");
+  });
+
+  it("logs the SendTransactionError logs carried on the wrapped error's cause", async () => {
+    const sendErr = new SendTransactionError({ action: "send", signature: "s", transactionMessage: "boom", logs: ["Program log: x"] });
+    mockConnection = makeMockConnection();
+    mockConnection.sendRawTransaction = vi.fn().mockRejectedValue(sendErr);
+    vi.mocked(useConnectionCompat).mockReturnValue({
+      connection: mockConnection,
+    } as ReturnType<typeof useConnectionCompat>);
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { result } = renderHook(() => useReclaimSlabRent());
+    await act(async () => {
+      await result.current.reclaim(slabKeypair);
+    });
+
+    expect(spy).toHaveBeenCalledWith("[useReclaimSlabRent] logs:", ["Program log: x"]);
+    spy.mockRestore();
   });
 
   it("shows friendly message for blockhash expiry", async () => {
