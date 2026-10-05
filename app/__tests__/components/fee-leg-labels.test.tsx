@@ -1,5 +1,5 @@
 /**
- * #70: the fee card on /analytics named the fee shares "Protocol / Creator / LP / Insurance" and the
+ * #3143: the fee card on /analytics named the fee shares "Protocol / Creator / LP / Insurance" and the
  * create flow's fee split "Creator / LP vault / Insurance", while the fee breakdown (lib/fee-breakdown
  * FEE_LEGS) says "Earn deposits / Market creator / Insurance fund". "LP" is also a banned term in
  * user-visible copy. Both now take the names from FEE_LEGS.
@@ -32,7 +32,7 @@ import { FeeSplitControl } from "@/components/create/FeeSplitControl";
 
 afterEach(cleanup);
 
-describe("#70: fee shares have one name everywhere", () => {
+describe("#3143: fee shares have one name everywhere", () => {
   it("legLabel returns the FEE_LEGS names", () => {
     expect(FEE_LEGS.map((l) => legLabel(l.id))).toEqual(["Earn deposits", "Protocol", "Market creator", "Insurance fund"]);
   });
