@@ -121,21 +121,37 @@ describe("LiquidationAlert", () => {
     expect(alertBox()).toBeNull();
   });
 
-  it("on /trade at lg+ the card leaves the chart (left) for the order-ticket rail (right)", () => {
+  it("on /trade at lg+ the card is a compact pill in the dock row, not a card over the chart or ticket", () => {
     h.pathname = "/trade/SlabTrade111";
     h.positions = [row("SlabA1112", "SOL")];
     render(<LiquidationAlert />);
     const cls = alertBox()!.className;
+    expect(cls).toContain("lg:hidden"); // collapsed at lg+
     expect(cls).not.toContain("lg:left-5");
-    expect(cls).not.toContain("lg:right-auto");
-    expect(cls).toContain("lg:right-5");
-    expect(cls).toContain("lg:bottom-12");
+    expect(cls).not.toContain("lg:right-5");
+    const pill = screen.getByTestId("liq-alert-pill");
+    expect(pill.className).toContain("bottom-1");
+    expect(pill.className).toContain("lg:flex");
+    expect(pill).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("the pill opens the full card above the dock row, and again closes it", () => {
+    h.pathname = "/trade/SlabTrade111";
+    h.positions = [row("SlabA1113", "SOL")];
+    render(<LiquidationAlert />);
+    fireEvent.click(screen.getByTestId("liq-alert-pill"));
+    expect(screen.getByTestId("liq-alert-pill")).toHaveAttribute("aria-expanded", "true");
+    expect(alertBox()!.className).not.toContain("lg:hidden");
+    expect(alertBox()!.className).toContain("lg:bottom-11");
+    fireEvent.click(screen.getByTestId("liq-alert-pill"));
+    expect(alertBox()!.className).toContain("lg:hidden");
   });
 
   it("off /trade the placement is unchanged (no lg override)", () => {
     h.pathname = "/markets";
-    h.positions = [row("SlabA1113", "SOL")];
+    h.positions = [row("SlabA1114", "SOL")];
     render(<LiquidationAlert />);
+    expect(screen.queryByTestId("liq-alert-pill")).toBeNull();
     const cls = alertBox()!.className;
     expect(cls).toContain("md:right-5");
     expect(cls).not.toContain("lg:");

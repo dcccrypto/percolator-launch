@@ -27,14 +27,19 @@ const FORGET_HIDE_ABOVE_CUSHION = LIQ_FORGET_HIDE_CUSHION;
 
 /**
  * Placement. Everywhere except the trade page the card sits bottom-right. On /trade at lg+ the
- * chart owns the left and centre (its drawing toolbar runs down the left edge and the music
- * player sits bottom-left), so the card goes to the order-ticket rail instead, above the
- * analytics dock, and never over the chart.
+ * chart (drawing toolbar on its left edge) and the order ticket (leverage slider, submit) fill the
+ * viewport, so a card floating anywhere over them hides controls the user needs most when a position
+ * is at risk. There it collapses to a compact pill centred in the analytics-dock row, which is
+ * clear of both; a click opens the full card above the pill (the user's own choice) and Hide or
+ * the pill closes it again.
  */
-export function liquidationAlertPlacement(onTrade: boolean): string {
+export function liquidationAlertPlacement(onTrade: boolean, expanded = false): string {
   const base =
     "left-3 right-3 bottom-[calc(124px+env(safe-area-inset-bottom))] md:left-auto md:right-5 md:bottom-20 md:w-[360px]";
-  return onTrade ? `${base} lg:right-5 lg:bottom-12 lg:w-[340px]` : base;
+  if (!onTrade) return base;
+  return expanded
+    ? `${base} lg:left-1/2 lg:right-auto lg:-translate-x-1/2 lg:bottom-11 lg:w-[340px]`
+    : `${base} lg:hidden`;
 }
 
 type Tier = Exclude<LiquidationSeverity, "safe">;
@@ -83,6 +88,8 @@ export function LiquidationAlert() {
   const [dismissed, setDismissed] = useState<Record<string, Tier>>({});
   const [closing, setClosing] = useState<LiquidationRisk | null>(null);
   const cardRef = useRef<HTMLElement | null>(null);
+  // /trade at lg+: the card is a pill until the user opens it (see liquidationAlertPlacement).
+  const [expanded, setExpanded] = useState(false);
   // The card would sit over the lower part of another dialog (including its own close modal); step aside.
   const otherModalOpen = useOtherModalOpen(cardRef);
 
@@ -128,7 +135,7 @@ export function LiquidationAlert() {
         <aside
           ref={cardRef}
           aria-label="Positions near liquidation"
-          className={`fixed z-[85] ${liquidationAlertPlacement(onTrade)}`}
+          className={`fixed z-[85] ${liquidationAlertPlacement(onTrade, expanded)}`}
         >
           {/* Announces the count and tier when they change, not every price tick. */}
           <span className="sr-only" role={danger ? "alert" : "status"}>
@@ -177,6 +184,23 @@ export function LiquidationAlert() {
             )}
           </div>
         </aside>
+      )}
+      {showCard && onTrade && (
+        <button
+          type="button"
+          data-testid="liq-alert-pill"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((v) => !v)}
+          className="fixed bottom-1 left-1/2 z-[86] hidden h-7 -translate-x-1/2 items-center gap-2 border border-[var(--border)] bg-[var(--bg)]/95 px-3 text-[11px] text-[var(--text)] shadow-[0_4px_16px_rgba(0,0,0,0.4)] backdrop-blur lg:flex"
+        >
+          <span
+            className="inline-block h-1.5 w-1.5 rounded-full"
+            style={{ background: danger ? "var(--short)" : "var(--warning)" }}
+            aria-hidden
+          />
+          <span>{danger ? "Liquidation risk" : "Approaching liquidation"}</span>
+          <span className="text-[10px] text-[var(--text-secondary)]">{count}</span>
+        </button>
       )}
       {closeFlow}
     </>
