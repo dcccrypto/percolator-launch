@@ -52,7 +52,7 @@ export interface ClosePositionResult {
 }
 
 export interface UseClosePositionReturn {
-  closePosition: (closePercent: number) => Promise<ClosePositionResult>;
+  closePosition: (closePercent: number, opts?: { skipSweep?: boolean }) => Promise<ClosePositionResult>;
   loading: boolean;
   error: string | null;
   phase: "idle" | "submitting" | "confirming";
@@ -173,7 +173,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
   }, []);
 
   const closePosition = useCallback(
-    async (closePercent: number): Promise<ClosePositionResult> => {
+    async (closePercent: number, opts?: { skipSweep?: boolean }): Promise<ClosePositionResult> => {
       if (inflightRef.current) throw new Error("Close already in progress");
       if (!userAccount) {
         // A fresh SlabProvider (/portfolio, other markets) can still be loading it. Say so; keep the
@@ -535,7 +535,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         invalidatePortfolio();
         // Full close: hand the freed collateral back to the wallet (one more approval), in the
         // BACKGROUND so the close resolves now. Never turns a landed close into a failure.
-        if (closePercent === 100 && outcome === "closed" && isV17Market && programId && publicKey) {
+        if (closePercent === 100 && outcome === "closed" && isV17Market && programId && publicKey && !opts?.skipSweep) {
           const owner = publicKey;
           const decimals = 6; // playground collateral is sim-USDC (6 decimals) on every market
           void (async () => {

@@ -30,7 +30,8 @@ export function guardAction(action: MoveAction, v1Wrapper: string, v21: ProgramI
   else assertV1Program(v1Wrapper);
 }
 
-export type Executor = (action: MoveAction) => Promise<string>;
+/** Resolves to the signature, or null when the step turned out to be already done (nothing sent). */
+export type Executor = (action: MoveAction) => Promise<string | null>;
 export type Executors = Partial<Record<StepKind, Executor>>;
 
 export type RunStop =
@@ -48,6 +49,8 @@ export interface RunDeps {
   /** Hard cap on transactions per run. */
   maxActions?: number;
   onSent?: (action: MoveAction, signature: string) => void;
+  /** Run only actions this accepts (a per-step button); others are left for the next run. */
+  only?: (action: MoveAction) => boolean;
 }
 
 export async function runMove(deps: RunDeps): Promise<{ stop: RunStop; plan: MovePlan; sent: string[] }> {
@@ -57,7 +60,7 @@ export async function runMove(deps: RunDeps): Promise<{ stop: RunStop; plan: Mov
   let plan = buildMovePlan(input);
   let lastId: string | null = null;
   for (let n = 0; n < max; n++) {
-    const action = nextActions(plan)[0];
+    const action = nextActions(plan).filter((a) => deps.only?.(a) ?? true)[0];
     if (!action) {
       const all = plan.markets.flatMap((m) => m.steps);
       const reason = all.length === 0 ? "nothing-to-move" : all.some((s) => s.status === "waiting") ? "waiting" : all.some((s) => s.status === "blocked") ? "blocked" : "complete";
@@ -70,8 +73,10 @@ export async function runMove(deps: RunDeps): Promise<{ stop: RunStop; plan: Mov
     if (!exec) return { stop: { reason: "handoff", action }, plan, sent };
     try {
       const sig = await exec(action);
-      sent.push(sig);
-      deps.onSent?.(action, sig);
+      if (sig !== null) {
+        sent.push(sig);
+        deps.onSent?.(action, sig);
+      }
     } catch (error) {
       return { stop: { reason: "error", action, error }, plan, sent };
     }

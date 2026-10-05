@@ -1,5 +1,6 @@
 "use client";
 
+import { assertV1AllowsNewFunds } from "@/lib/v21/move/close-only";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Keypair, PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
 import {
@@ -89,6 +90,7 @@ export function useDeposit(slabAddress: string) {
         // (e.g. a future code path mutates programId post-load, or a future
         // page mounts this hook without going through SlabProvider's gate).
         assertKnownProgram(slabProgramId);
+        assertV1AllowsNewFunds(slabProgramId, params.accountExists ? "add-margin" : "deposit");
 
         const programId = slabProgramId;
         const slabPk = new PublicKey(slabAddress);

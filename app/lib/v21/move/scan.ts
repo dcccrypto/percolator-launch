@@ -30,7 +30,7 @@ export interface V1MarketRef {
   collateralDecimals: number;
 }
 
-async function readPortfolio(connection: Connection, programId: PublicKey, market: PublicKey, wallet: PublicKey) {
+export async function readPortfolio(connection: Connection, programId: PublicKey, market: PublicKey, wallet: PublicKey) {
   const found = pickOwnerPortfolio(await scanOwnerPortfolios(connection, programId, market, wallet), wallet);
   if (!found) return null;
   const pf = parsePortfolioV17(found.data);

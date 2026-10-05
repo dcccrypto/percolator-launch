@@ -17,6 +17,7 @@
  *    K/F cohort stale and its follow-up refresh lands ~1-4 s later) is re-checked a few times
  *    before the wallet opens, never signed into a transaction that would fail on chain.
  */
+import { assertV1AllowsNewFunds } from "@/lib/v21/move/close-only";
 import { useCallback, useState } from "react";
 import { Keypair, PublicKey, type TransactionInstruction } from "@solana/web3.js";
 import { V17_PORTFOLIO_ACCOUNT_LEN, deriveVaultAuthority, getAta } from "@percolatorct/sdk";
@@ -92,6 +93,7 @@ export function useFirstTrade(slabAddress: string) {
     async (p: FundAndTradeParams): Promise<FundAndTradeResult> => {
       if (!wallet.publicKey || !mktConfig || !slabProgramId) throw new Error("Wallet not connected or market not loaded");
       assertKnownProgram(slabProgramId);
+      assertV1AllowsNewFunds(slabProgramId, "first-trade");
       const owner = wallet.publicKey;
       const programId = slabProgramId;
       const market = new PublicKey(slabAddress);

@@ -1,5 +1,6 @@
 'use client';
 
+import { assertV1AllowsNewFunds } from "@/lib/v21/move/close-only";
 import { vaultWithdrawView } from '@/lib/limits/earn-withdrawable';
 import type { BlockedBy, WithdrawStatus } from '@/lib/limits/earn-withdrawable';
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
@@ -753,6 +754,7 @@ export function useInsuranceLP() {
       throw new Error('Market not loaded');
     }
     assertKnownProgram(new PublicKey(programId));
+    assertV1AllowsNewFunds(programId.toString(), "earn-deposit");
 
     setLoading(true);
     setError(null);

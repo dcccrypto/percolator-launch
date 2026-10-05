@@ -11,6 +11,8 @@ import { useWalletAtaBalance } from "@/hooks/useWalletAtaBalance";
 import { checkDepositAmount, depositAmountMessage } from "@/lib/deposit-guard";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
+import { v1BlocksNewFunds, V1_CLOSE_ONLY_REFUSAL } from "@/lib/v21/move/close-only";
+import { isMoveFlowEnabled } from "@/lib/v21/move/flag";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { AccountKind } from "@percolatorct/sdk";
@@ -202,7 +204,8 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const userAccount = realUserAccount ?? (mockMode ? getMockUserAccount(slabAddress) : null);
   const config = useMarketConfig();
   const { engine: engineState, fundingRate } = useEngineState();
-  const { accounts, config: mktConfig, params, adlFactors, wrapperConfigV17, refresh: refreshSlab } = useSlabState();
+  const { accounts, config: mktConfig, params, adlFactors, wrapperConfigV17, refresh: refreshSlab, programId: panelProgramId } = useSlabState();
+  const v1NoMargin = v1BlocksNewFunds(panelProgramId?.toBase58(), isMoveFlowEnabled());
   const { priceE6: livePriceE6, priceUsd } = useLivePrice();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
@@ -699,6 +702,9 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <div className="mt-2 flex gap-1.5">
               <button
                 onClick={() => setShowAddMarginModal(true)}
+                disabled={v1NoMargin}
+                title={v1NoMargin ? V1_CLOSE_ONLY_REFUSAL : undefined}
+                data-testid="add-margin-button"
                 className="flex-1 rounded-none border border-[var(--accent)]/30 py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--accent)] transition-colors duration-150 hover:bg-[var(--accent)]/8"
               >
                 + Margin

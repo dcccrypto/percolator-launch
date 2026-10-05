@@ -5,7 +5,8 @@ export const MOVE_COPY = {
   title: "Move to v2.1",
   intro:
     "The first Percolator markets are closing to new trades while v2.1 opens. This page moves what you hold, one step at a time. You can stop and come back: it picks up where you left off.",
-  closeOnlyBanner: "v1 is close-only. You can close positions and withdraw at any time. New trades are off.",
+  closeOnlyBanner:
+    "v1 is close-only. You can close positions, withdraw, collect Earn withdrawals and claim fees at any time. This app takes no new trades, margin or deposits here. That limit is in the app only; the v1 program itself cannot enforce it.",
   closeOnlyLink: "Move to v2.1",
   connect: "Connect your wallet to see what you hold on v1.",
   loading: "Looking at your v1 accounts...",
@@ -23,6 +24,7 @@ export const MOVE_COPY = {
   } as Record<PlanSummary, string>,
   kind: {
     close: "Close position",
+    "settle-resolved": "Settle position",
     withdraw: "Withdraw to wallet",
     "earn-request": "Request Earn withdrawal",
     "earn-execute": "Collect Earn withdrawal",
@@ -39,6 +41,8 @@ export const MOVE_COPY = {
     skipped: "Skipped",
   } as Record<StepStatus, string>,
   doIt: "Open",
+  doStep: "Do it",
+  working: "Working...",
   runReady: "Do the next step",
   rescan: "Refresh",
 } as const;
