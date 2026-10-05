@@ -28,6 +28,8 @@ const LP_ATA = new PublicKey("SysvarRecentB1ockHashes11111111111111111111");
 
 const h = vi.hoisted(() => ({
   connected: true,
+  /** The connected wallet when set; WALLET otherwise. */
+  wallet: null as unknown as PublicKey | null,
   getAccountInfo: vi.fn(),
   fetch: vi.fn(),
   conn: null as unknown as { connection: Record<string, unknown> },
@@ -41,7 +43,7 @@ h.conn = {
 };
 
 vi.mock("@/hooks/useWalletCompat", () => ({
-  useWalletCompat: () => ({ connected: h.connected, publicKey: h.connected ? WALLET : null }),
+  useWalletCompat: () => ({ connected: h.connected, publicKey: h.connected ? (h.wallet ?? WALLET) : null }),
   // Stable object: the page's effects depend on `connection` identity, as with the real hook.
   useConnectionCompat: () => h.conn,
 }));
@@ -122,6 +124,7 @@ const lpAta = LP_ATA;
 
 beforeEach(() => {
   h.connected = true;
+  h.wallet = null;
   h.getAccountInfo.mockReset();
   h.fetch.mockReset();
   vi.stubGlobal("fetch", h.fetch);
@@ -212,5 +215,83 @@ describe("#2706: a per-pool RPC failure is surfaced, never rendered as 'no posit
     // Let the scan settle, then confirm no failure banner appeared.
     await waitFor(() => expect(h.getAccountInfo).toHaveBeenCalled());
     expect(screen.queryByTestId("stake-positions-error")).toBeNull();
+  });
+});
+
+describe("#2706 item 3: positions are unknown until this wallet's scan finishes", () => {
+  const funded = async (pk: PublicKey) => {
+    if (pk.equals(poolPdaOk)) return { data: poolAccountData(), owner: STAKE_PROGRAM, lamports: 1, executable: false };
+    if (pk.equals(lpAta)) return { data: lpTokenAccountData(5_000_000n), owner: TOKEN_PROGRAM_ID, lamports: 1, executable: false };
+    return null;
+  };
+
+  it("while the scan is in flight: 'Checking your positions…', never 'No open positions', and the header shows '…'", async () => {
+    h.fetch.mockResolvedValue(okResponse([apiPool(SLAB_OK, "AAA")]));
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    h.getAccountInfo.mockImplementation(async () => { await gate; return null; });
+
+    render(<StakePage />);
+    await screen.findAllByText("AAA"); // pools are in: the position scan is what's pending now
+    expect(screen.getByTestId("stake-positions-pending")).toBeTruthy();
+    expect(screen.queryByText(/No open positions/)).toBeNull();
+    expect(screen.getByText("Your Deposits").parentElement!.textContent).toContain("…");
+
+    release();
+    expect(await screen.findByText(/No open positions/)).toBeTruthy();
+    expect(screen.queryByTestId("stake-positions-pending")).toBeNull();
+  });
+
+  it("after a wallet switch, the previous wallet's position is not shown while the new wallet is read", async () => {
+    h.fetch.mockResolvedValue(okResponse([apiPool(SLAB_OK, "AAA")]));
+    h.getAccountInfo.mockImplementation(funded);
+    const { rerender } = render(<StakePage />);
+    expect(await screen.findByText("Manage / Withdraw Partial")).toBeTruthy();
+
+    // Switch to another wallet whose reads are still in flight.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    h.getAccountInfo.mockImplementation(async () => { await gate; return null; });
+    h.wallet = new PublicKey("4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T");
+    rerender(<StakePage />);
+
+    expect(screen.queryByText("Manage / Withdraw Partial")).toBeNull();
+    expect(screen.getByTestId("stake-positions-pending")).toBeTruthy();
+    // The pool table's "your stake" column doesn't carry the previous wallet's stake either.
+    expect(screen.getByRole("button", { name: /Select AAA pool/ }).textContent).toContain("…");
+    release();
+    expect(await screen.findByText(/No open positions/)).toBeTruthy();
+  });
+
+  it("disconnecting and reconnecting the same wallet re-checks instead of saying 'No open positions'", async () => {
+    h.fetch.mockResolvedValue(okResponse([apiPool(SLAB_OK, "AAA")]));
+    h.getAccountInfo.mockImplementation(funded);
+    const { rerender } = render(<StakePage />);
+    expect(await screen.findByText("Manage / Withdraw Partial")).toBeTruthy();
+
+    h.connected = false;
+    rerender(<StakePage />);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    h.getAccountInfo.mockImplementation(async (pk: PublicKey) => { await gate; return funded(pk); });
+    h.connected = true;
+    rerender(<StakePage />);
+
+    expect(screen.queryByText(/No open positions/)).toBeNull();
+    expect(screen.getByTestId("stake-positions-pending")).toBeTruthy();
+    release();
+    expect(await screen.findByText("Manage / Withdraw Partial")).toBeTruthy();
+  });
+
+  it("a new PublicKey object for the same wallet keeps its positions on screen (no flash to 'Checking…')", async () => {
+    h.fetch.mockResolvedValue(okResponse([apiPool(SLAB_OK, "AAA")]));
+    h.getAccountInfo.mockImplementation(funded);
+    const { rerender } = render(<StakePage />);
+    expect(await screen.findByText("Manage / Withdraw Partial")).toBeTruthy();
+    // Same wallet, new PublicKey object (as a re-render of the wallet hook can produce).
+    h.wallet = new PublicKey(WALLET.toBase58());
+    rerender(<StakePage />);
+    expect(screen.getByText("Manage / Withdraw Partial")).toBeTruthy();
+    expect(screen.queryByTestId("stake-positions-pending")).toBeNull();
   });
 });

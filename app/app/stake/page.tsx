@@ -521,8 +521,12 @@ function YourPositionPanel({
   onManage,
   unreadable = 0,
   onRetry,
+  pending = false,
 }: {
   positions: UserPosition[];
+  /** The connected wallet's positions haven't been read yet (pools loading or the
+   *  scan in flight): neither "no positions" nor an error is known. */
+  pending?: boolean;
   /** Pools whose position could not be read (#2706) — 0 means every pool was
    *  read, so an empty list really is "no positions". -1 = the pool list
    *  itself failed, so no pool could be checked. */
@@ -548,7 +552,7 @@ function YourPositionPanel({
         )}
       </div>
 
-      {connected && unreadable !== 0 && (
+      {connected && !pending && unreadable !== 0 && (
         <div role="alert" data-testid="stake-positions-error" className="mb-3 border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-3 text-[11px] text-[var(--text-secondary)]">
           {unreadable < 0
             ? "Couldn't load your positions."
@@ -562,6 +566,10 @@ function YourPositionPanel({
       {!connected ? (
         <div className="border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-3 text-[11px] text-[var(--text-secondary)]">
           Connect a wallet to see your staked positions.
+        </div>
+      ) : pending ? (
+        <div data-testid="stake-positions-pending" className="border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-3 text-[11px] text-[var(--text-secondary)]">
+          Checking your positions…
         </div>
       ) : positions.length === 0 && unreadable !== 0 ? null : positions.length === 0 ? (
         <div className="border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-3 text-[11px] text-[var(--text-secondary)]">
@@ -1111,14 +1119,20 @@ function PoolRow({
   connected,
   selected,
   onSelect,
+  positionsPending = false,
 }: {
   pool: StakePool;
   position?: UserPosition;
   connected: boolean;
   selected: boolean;
   onSelect: (poolId: string) => void;
+  positionsPending?: boolean;
 }) {
-  const yourStake = position ? formatUsd(position.estimatedValue) : connected ? "$—" : "—";
+  const yourStake = position
+    ? formatUsd(position.estimatedValue)
+    : connected
+      ? positionsPending ? "…" : "$—"
+      : "—";
 
   return (
     <div
@@ -1187,10 +1201,13 @@ function PoolTable({
   onSelect,
   loadError,
   onRetry,
+  positionsPending = false,
 }: {
   pools: StakePool[];
   loading: boolean;
   positions: UserPosition[];
+  /** The wallet's positions haven't been read yet: show "…", not "$—", per row. */
+  positionsPending?: boolean;
   connected: boolean;
   selectedPool: string;
   onSelect: (poolId: string) => void;
@@ -1313,6 +1330,7 @@ function PoolTable({
                 connected={connected}
                 selected={pool.id === selectedPool}
                 onSelect={onSelect}
+                positionsPending={positionsPending}
               />
             ))}
             {visiblePools.length === 0 && (
@@ -1415,6 +1433,10 @@ export default function StakePage() {
   // S-M1 fix: ALL positions the wallet holds across pools, not just the first
   // one found.
   const [positions, setPositions] = useState<UserPosition[]>([]);
+  // The wallet the last finished scan read. Until it matches the connected wallet,
+  // positions are unknown: shown as "Checking…", never as "No open positions" or as
+  // the previous wallet's positions. A refresh after a tx keeps the shown positions.
+  const [scannedFor, setScannedFor] = useState<string | null>(null);
   const [positionRefreshKey, setPositionRefreshKey] = useState(0);
   const [poolsRefreshKey, setPoolsRefreshKey] = useState(0);
 
@@ -1461,9 +1483,11 @@ export default function StakePage() {
     if (!connected || !publicKey || pools.length === 0) {
       setPositions([]);
       setPositionsUnreadable(0);
+      setScannedFor(null);
       return;
     }
     let cancelled = false;
+    const wallet = publicKey.toBase58();
 
     (async () => {
       try {
@@ -1493,11 +1517,13 @@ export default function StakePage() {
           .filter((p): p is UserPosition => p !== null);
         setPositions(found);
         setPositionsUnreadable(results.filter((r) => r.status === "rejected").length);
+        setScannedFor(wallet);
       } catch (err) {
         console.error("[StakePage] Failed to fetch user positions:", err);
         if (!cancelled) {
           setPositions([]);
           setPositionsUnreadable(pools.length);
+          setScannedFor(wallet);
         }
       }
     })();
@@ -1517,11 +1543,18 @@ export default function StakePage() {
     window.setTimeout(() => setPoolsRefreshKey((k) => k + 1), 2_000);
   }, []);
 
+  // Pools still loading, or a scan for this wallet not finished yet. A genuinely empty
+  // pool list (loaded, nothing to scan) is not pending.
+  const walletKey = publicKey?.toBase58() ?? null;
+  const positionsPending =
+    connected && walletKey !== null && (poolsLoading || (pools.length > 0 && scannedFor !== walletKey));
+  const shownPositions = positionsPending ? [] : positions;
+
   // S-M1 fix: sum across ALL positions, not just a single (possibly-missing) one.
   // #2706: if any pool could not be read (or the pool list failed), the total
   // is unknown — show it as unknown rather than an under-count or "$—".
   const totalUserDeposited =
-    connected && (positionsUnreadable > 0 || (poolsError && pools.length === 0))
+    connected && (positionsPending || positionsUnreadable > 0 || (poolsError && pools.length === 0))
       ? null
       : positions.length > 0
         ? positions.reduce((sum, p) => sum + p.estimatedValue, 0)
@@ -1561,7 +1594,8 @@ export default function StakePage() {
               <PoolTable
                 pools={pools}
                 loading={poolsLoading}
-                positions={positions}
+                positions={shownPositions}
+                positionsPending={positionsPending}
                 connected={connected}
                 selectedPool={selectedPool}
                 onSelect={(poolId) => selectPoolAndScroll(poolId, "deposit")}
@@ -1585,7 +1619,8 @@ export default function StakePage() {
             </ErrorBoundary>
             <ErrorBoundary label="Your Positions">
               <YourPositionPanel
-                positions={positions}
+                positions={shownPositions}
+                pending={positionsPending}
                 onWithdrawSuccess={handleTxSuccess}
                 onManage={(poolId) => selectPoolAndScroll(poolId, "withdraw")}
                 unreadable={poolsError && pools.length === 0 ? -1 : positionsUnreadable}
