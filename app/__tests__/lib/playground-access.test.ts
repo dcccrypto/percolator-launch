@@ -25,6 +25,19 @@ const OTHER = "y".repeat(32);
 const NOW = 1_800_000_000_000; // fixed clock; nothing here may depend on real time
 
 describe("handoff tokens", () => {
+  it("carries the referral code, signed: it round-trips and can't be edited", () => {
+    const t = mintHandoff("row-1", 42, SECRET, NOW, "PERC7Q");
+    expect(readHandoff(t, SECRET, NOW)).toMatchObject({ sub: "row-1", pos: 42, ref: "PERC7Q" });
+    const [body, mac] = t.split(".");
+    const forged = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(body!, "base64url").toString("utf8")), ref: "OTHER1" })).toString("base64url");
+    expect(readHandoff(`${forged}.${mac}`, SECRET, NOW)).toBeNull();
+  });
+
+  it("no referral code: no ref claim (an old-style token)", () => {
+    expect(readHandoff(mintHandoff("row-1", 42, SECRET, NOW), SECRET, NOW)).not.toHaveProperty("ref");
+    expect(readHandoff(mintHandoff("row-1", 42, SECRET, NOW, ""), SECRET, NOW)).not.toHaveProperty("ref");
+  });
+
   it("round-trips the claims it was minted with", () => {
     const t = mintHandoff("row-1", 42, SECRET, NOW);
     const c = readHandoff(t, SECRET, NOW);
@@ -180,5 +193,12 @@ describe("no identifier is carried in a token", () => {
     expect(decoded).toContain("row-abc");
     expect(decoded).not.toMatch(/@/);
     expect(JSON.parse(decoded)).toEqual({ sub: "row-abc", pos: 12, exp: expect.any(Number) });
+  });
+
+  it("the referral code, when given, is the only addition: public by design, still no email or wallet", () => {
+    const t = mintHandoff("row-abc", 12, SECRET, NOW, "PERC7Q");
+    const decoded = Buffer.from(t.split(".")[0]!, "base64url").toString("utf8");
+    expect(decoded).not.toMatch(/@/);
+    expect(JSON.parse(decoded)).toEqual({ sub: "row-abc", pos: 12, exp: expect.any(Number), ref: "PERC7Q" });
   });
 });

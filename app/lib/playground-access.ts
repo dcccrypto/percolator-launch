@@ -51,6 +51,11 @@ export interface AccessClaims {
   pos: number;
   /** Unix seconds after which this is refused. */
   exp: number;
+  /**
+   * The visitor's referral code, so the playground can show it without reading the waitlist DB.
+   * Optional: older tokens lack it, and `open` checks only sub / pos / exp.
+   */
+  ref?: string;
 }
 
 const b64url = (b: Buffer): string => b.toString("base64url");
@@ -112,9 +117,9 @@ function open(token: string | null | undefined, secret: string, now: number): Ac
 const handoffSecret = (base: string): string => `${base}:handoff:v1`;
 const sessionSecret = (base: string): string => `${base}:session:v1`;
 
-export function mintHandoff(sub: string, pos: number, secret: string, nowMs = Date.now()): string {
+export function mintHandoff(sub: string, pos: number, secret: string, nowMs = Date.now(), ref?: string): string {
   const now = Math.floor(nowMs / 1000);
-  return mint({ sub, pos, exp: now + HANDOFF_TTL_SECONDS }, handoffSecret(secret));
+  return mint({ sub, pos, exp: now + HANDOFF_TTL_SECONDS, ...(ref ? { ref } : {}) }, handoffSecret(secret));
 }
 
 export function readHandoff(token: string | null | undefined, secret: string, nowMs = Date.now()): AccessClaims | null {

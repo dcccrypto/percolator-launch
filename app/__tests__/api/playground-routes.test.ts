@@ -186,7 +186,7 @@ describe("POST /api/playground/enter — granted and open", () => {
     expect([...loc.searchParams.keys()]).toEqual(["t"]);
     const t = loc.searchParams.get("t")!;
     const claims = readHandoff(t, SECRET, now);
-    expect(claims).toMatchObject({ sub: "row-me", pos: 11 });
+    expect(claims).toMatchObject({ sub: "row-me", pos: 11, ref: "ME" }); // the referral code, for the playground to show
     // It is a HANDOFF, not a session: it must not open as one.
     expect(readSession(t, SECRET, now)).toBeNull();
     // ...and it carries no identifier.

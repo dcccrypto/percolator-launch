@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
   const verdict = await decidePlaygroundAccess(auth, getWaitlistServiceSupabase);
   if (verdict.kind !== "granted") return back();
 
-  const token = mintHandoff(verdict.rowId, verdict.position, secret);
+  const token = mintHandoff(verdict.rowId, verdict.position, secret, Date.now(), verdict.referralCode ?? undefined);
   console.info(`[playground-enter] handoff minted for ${auth.userId}`);
   return see(playgroundEntryUrl(appUrl, token));
 }
