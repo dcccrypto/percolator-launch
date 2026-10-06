@@ -30,6 +30,7 @@ import { useLiveSlabPrices } from "@/hooks/useLiveSlabPrices";
 import { useLpPositions } from "@/hooks/useLpPositions";
 import { AtRiskBanner } from "@/components/portfolio/AtRiskBanner";
 import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
+import { positionSizeUsdText } from "@/lib/q-usd";
 import dynamic from "next/dynamic";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { GlowButton } from "@/components/ui/GlowButton";
@@ -230,6 +231,8 @@ function PositionCard({
   const hasPosition = posSize !== 0n;
 
   const markE6 = livePriceE6 != null && livePriceE6 > 0n ? livePriceE6 : pos.oraclePriceE6;
+  // "≈ $200.12" under the size: effective size at the live mark; nothing without a mark.
+  const sizeUsd = positionSizeUsdText(posSize, markE6);
   // Current effective leverage on this market's cross-margined portfolio at the
   // LIVE mark: nominal notional / (capital + pnl). Not entry leverage (not on
   // chain). See lib/position-leverage.ts.
@@ -453,6 +456,11 @@ function PositionCard({
                   </span>
                 )}
               </p>
+              {sizeUsd && (
+                <p data-testid="position-size-usd" className="mt-0.5 text-[9px] text-[var(--text-dim)]">
+                  {sizeUsd}
+                </p>
+              )}
             </div>
             <div>
               <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Entry</p>
