@@ -170,7 +170,10 @@ describe("WP-3 AC1/AC2: live ticket", () => {
     expect(screen.queryAllByTestId("limits-max-size")).toHaveLength(0);
     fireEvent.click(screen.getByTestId("ticket-details-toggle"));
     expect(within(screen.getByTestId("ticket-details")).getAllByTestId("limits-max-size")).toHaveLength(2);
-    // the button is the state
+    // the button is the state: with no size it says what is missing, then it names the order
+    expect(submit().textContent).toBe("Enter a size");
+    expect(submit().disabled).toBe(true);
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "5" } });
     expect(submit().textContent).toBe("Long SOL 1×");
   });
 
@@ -221,6 +224,8 @@ describe("WP-3 states: at most one status line, the button names the state", () 
     await snap("catching-up");
     await act(async () => setEngineStale(false));
     expect(lines()).toHaveLength(0);
+    expect(submit().textContent).toBe("Enter a size");
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "5" } });
     expect(submit().textContent).toBe("Long SOL 1×");
   });
 
@@ -234,9 +239,11 @@ describe("WP-3 states: at most one status line, the button names the state", () 
     expect(long.dataset.limitsHalted).toBe("true");
     expect(within(long).getByTestId("trade-side-paused").textContent).toBe("Paused");
     expect(lines()).toHaveLength(0);
-    expect(submit().textContent).toBe("Short SOL 1×");
+    expect(submit().textContent).toBe("Enter a size");
     expect(screen.getByTestId("limits-max-size-inline").dataset.side).toBe("short");
     await snap("side-paused");
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "5" } });
+    expect(submit().textContent).toBe("Short SOL 1×");
   });
 
   it("both sides paused: one 'Opening paused' line, no Max", () => {

@@ -122,6 +122,31 @@ describe("deriveTicketState: the §3.3 priority table", () => {
     expect(s.autoSelect).toBeNull();
   });
 
+  it("row 12 with no size: the button says what is missing, not an order of nothing", () => {
+    const s = deriveTicketState(base({ sizeEntered: false }));
+    expect(s).toMatchObject({ row: "ok", buttonLabel: "Enter a size", blocks: false, status: null, autoSelect: null });
+    expect(deriveTicketState(base({ direction: "short", sizeEntered: false })).buttonLabel).toBe("Enter a size");
+    // CONTROL: a size names the order
+    expect(deriveTicketState(base({ sizeEntered: true })).buttonLabel).toBe("Long SOL 5×");
+  });
+
+  it("no size: every row above 'ok' keeps its own label (paused side, waits, close-only...)", () => {
+    const rows: Array<[Partial<TicketStateInput>, string]> = [
+      [{ marketResolved: true }, "Market settled"],
+      [{ adlReduceOnly: true }, "Close-only for now"],
+      [{ engineStale: true }, "Waiting for prices…"],
+      [{ waitingForPrice: true }, "Waiting for price…"],
+      [{ sidePaused: { long: true, short: false } }, "New longs paused"],
+      [{ openingPaused: true }, "Opening paused"],
+      [{ sameOwner: true }, "Close-only for this wallet"],
+    ];
+    for (const [over, label] of rows) {
+      const s = deriveTicketState(base({ ...over, sizeEntered: false }));
+      expect(s.buttonLabel, label).toBe(label);
+      expect(s.blocks, label).toBe(true);
+    }
+  });
+
   it("row 10: exceeds balance does NOT block; the button says 'Deposit {x} & Long' (one tx, WP-6); no status line", () => {
     const s = deriveTicketState(base({ exceedsBalance: true }));
     expect(s).toMatchObject({ row: "exceeds-balance", buttonLabel: "Deposit 12.50 USDC & Long", blocks: false, status: null });
