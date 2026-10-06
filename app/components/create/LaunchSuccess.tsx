@@ -9,6 +9,8 @@ import { getNetwork, explorerTxUrl, explorerAccountUrl } from "@/lib/config";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { launchPriceFeedStatus } from "@/lib/launch-outcome";
 import { KEEPER_REGISTER_COPY, userFacingRegistrationReason } from "@/lib/keeper-register-client";
+import { TICKET_COPY } from "@/lib/limits/copy";
+import { StatusLine } from "@/components/ui/StatusLine";
 
 interface LaunchSuccessProps {
   tokenSymbol: string;
@@ -396,6 +398,14 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
           </details>
         </div>
       )}
+
+      {/* The creator wallet is the market's asset_admin and its LP's provenance owner, so the
+          program lets it only close positions here (same-owner rule, P1 item 2). Said before the
+          Trade buttons, with the ticket's own notice and words, so the ticket's "Close-only for this
+          wallet" is no surprise. */}
+      <div data-testid="launch-close-only-note" className="mx-auto mb-4 max-w-md text-left">
+        <StatusLine message={{ kind: "same-owner", variant: "info", title: TICKET_COPY.sameOwner.title, body: TICKET_COPY.sameOwner.body }} />
+      </div>
 
       {/* CTAs */}
       <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
