@@ -149,6 +149,9 @@ export function decodeAssetRiskLimits(d: Uint8Array, assetIndex = 0): AssetRiskL
   return r;
 }
 
+/** `AssetVaultLpV18::p2b_flags` bit 0 (percolator-prog #526): creator fees not vested. */
+const P2B_CREATOR_FEE_VESTING = 1;
+
 export interface AssetVaultLp {
   bound: boolean;
   vaultLpPortfolio: Uint8Array;
@@ -161,6 +164,12 @@ export interface AssetVaultLp {
   /** P3-H2 vault-LP exposure cap, bps of conservative equity (0 = default 1x). */
   vaultLpMaxLevBps: number;
   approvedMatcherProgram: Uint8Array;
+  /**
+   * Devnet v2.1 (P2b G6): `p2b_flags` bit 0, creator fees not yet vested (the junior cushion is below
+   * target; tag 90 returns 102). Only set when the byte is non-zero, which no program of today
+   * does, so a record of today's programs decodes to exactly what it did.
+   */
+  creatorFeeVesting?: boolean;
 }
 
 /** P3 `AssetVaultLpV18` (@8d651c45); null when too short or `validate_asset_vault_lp` would refuse. */
@@ -174,7 +183,8 @@ export function decodeAssetVaultLp(d: Uint8Array, assetIndex = 0): AssetVaultLp 
   const vaultLpMaxLevBps = u32(d, b + C.AV_VAULT_LP_MAX_LEV_BPS);
   if (
     (flags & ~C.ASSET_VAULT_LP_FLAG_BOUND) !== 0 ||
-    d[b + C.AV_RESERVED0] !== 0 ||
+    // P2b: the byte (was `_reserved0`, must-be-0) is now `p2b_flags`; only bit 0 is defined.
+    (d[b + C.AV_RESERVED0] & ~P2B_CREATOR_FEE_VESTING) !== 0 ||
     vaultLpMaxLevBps > C.VAULT_LP_MAX_LEV_BPS ||
     levMaxImrBps > 10_000 ||
     bound !== !allZero(key, 0, 32)
@@ -192,6 +202,7 @@ export function decodeAssetVaultLp(d: Uint8Array, assetIndex = 0): AssetVaultLp 
     levMaxImrBps,
     vaultLpMaxLevBps,
     approvedMatcherProgram: d.slice(b + C.AV_APPROVED_MATCHER_PROGRAM, b + C.AV_APPROVED_MATCHER_PROGRAM + 32),
+    ...(d[b + C.AV_RESERVED0] & P2B_CREATOR_FEE_VESTING ? { creatorFeeVesting: true } : {}),
   };
 }
 

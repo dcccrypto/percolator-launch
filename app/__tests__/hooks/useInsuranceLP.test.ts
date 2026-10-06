@@ -735,7 +735,7 @@ describe("useInsuranceLP", () => {
     // wrapper (percolator-prog #461 / GH#412, v18.2) reads a 13th account — the
     // redeemer's rent destination, pinned to redemption.redeemer — and the hook
     // passed 12.
-    it("ExecuteRedemption passes all 13 accounts, [12] = the redeemer as writable rent destination", async () => {
+    it("ExecuteRedemption passes all 13 accounts, [12] = the redeemer as writable, signing rent destination", async () => {
       const sdk = await import("@percolatorct/sdk");
       mockConnection.getAccountInfo.mockResolvedValue({
         data: Buffer.alloc(64),
@@ -757,7 +757,9 @@ describe("useInsuranceLP", () => {
       expect(keys).toHaveLength(13);
       expect(keys[12].pubkey.equals(mockWalletPubkey)).toBe(true);
       expect(keys[12].isWritable).toBe(true);
-      expect(keys[12].isSigner).toBe(false);
+      // Devnet v2.1 (P2b H-1b): a Live non-bound 77 needs [12] to SIGN. It is the same key as the fee
+      // payer at [0], so it is one signature on the message; the flag is stated on the meta itself.
+      expect(keys[12].isSigner).toBe(true);
       // [0] is still the signing cranker (the redeemer themselves).
       expect(keys[0].pubkey.equals(mockWalletPubkey)).toBe(true);
       expect(keys[0].isSigner).toBe(true);

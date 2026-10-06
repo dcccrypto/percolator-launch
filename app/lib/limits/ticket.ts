@@ -11,9 +11,11 @@ import type { MarketLimits } from "@/hooks/useMarketLimits";
 import { maxTradeSizePerSide, sameOwnerBlocked, sameOwnerRoomQ, type Side, type SideLimit } from "./risk-limits";
 import { preTradeQuote, quoteFailsLimit, type PreTradeQuote } from "./matcher-quote";
 import { stepDownMaxLeverage } from "./vault-tranche";
+import { V21_COPY } from "@/lib/v21/copy";
+import { growthTicketDecision, type GrowthMarketView, type GrowthTicketDecision } from "@/lib/v21/growth-market";
 
 export interface TicketIssue {
-  kind: "halted" | "same-owner" | "step-down" | "quote-slippage" | "limits-unavailable" | "fee-over-max";
+  kind: "halted" | "same-owner" | "step-down" | "quote-slippage" | "limits-unavailable" | "fee-over-max" | "growth-closed" | "growth-leverage";
   severity: "error" | "warning";
   title: string;
   message: string;
@@ -36,6 +38,11 @@ export interface TicketLimitsInput {
   markE6?: bigint;
   /** Slippage margin on the signed fee cap (bps). Default `defaultFeeCapMarginBps()`. */
   feeMarginBps?: number;
+  /**
+   * Devnet v2.1: the asset's growth-v19 view (lib/v21/growth-market.ts), or null/undefined when
+   * growth is OFF (every market of today's programs). Absent => nothing here changes.
+   */
+  growth?: GrowthMarketView | null;
 }
 
 export interface TicketLimits {
@@ -56,7 +63,11 @@ export interface TicketLimits {
     marginBps: bigint;
     verdict: SignedFeeVerdict;
     charged: boolean;
+    /** Growth N-2: the utilisation fee inside `signedFeeBps` (set only on a growth open that owes one). */
+    utilFeeBps?: bigint;
   } | null;
+  /** Devnet v2.1 growth decision for this side/size; null when growth is OFF. */
+  growth: GrowthTicketDecision | null;
   stepDown: {
     maxLeverage: number;
     stepped: boolean;
@@ -78,6 +89,7 @@ const NONE: TicketLimits = {
   clampToQ: null,
   quote: null,
   fee: null,
+  growth: null,
   stepDown: null,
   issues: [],
 };
@@ -142,6 +154,21 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
     if (out.sameOwner) out.issues.push({ kind: "same-owner", severity: "error", title: "Can't open from this wallet", message: COPY.sameOwner });
   }
 
+  // ── Devnet v2.1: growth-v19 dynamic leverage (feature-detected; absent on today's programs) ──
+  const growth = i.growth ? growthTicketDecision(i.growth, i.direction, i.takerPosQ, i.sizeQ) : null;
+  out.growth = growth;
+  // Closes are never blocked (growth M-1): a holder of the opposite side may be about to reduce, so
+  // an empty ticket (no size yet) is not "paused" for them.
+  const mayReduce = i.takerPosQ !== 0n && (i.takerPosQ > 0n) !== (i.direction === "long");
+  const growthBlocks = !!growth?.closed && !(mayReduce && i.sizeQ === 0n);
+  if (growth && growthBlocks) {
+    out.halted[i.direction] = true;
+    out.issues.push({ kind: "growth-closed", severity: "error", title: "This side is full", message: V21_COPY.growthClosed(i.direction, growth.quote.closedReason) });
+  } else if (growth && growth.maxLeverage !== null && i.leverage > growth.maxLeverage) {
+    out.issues.push({ kind: "growth-leverage", severity: "error", title: "Leverage adjusted", message: V21_COPY.growthLeverage(String(growth.maxLeverage), i.direction) });
+  }
+  const utilFeeBps = growth?.fee ? BigInt(growth.fee.utilFeeBps) : 0n;
+
   // ── P2 quote ─────────────────────────────────────────────────────────────
   if (L.flags.p2 && L.matcher && i.sizeQ > 0n) {
     // The wrapper hands the matcher the engine's effective_price (not the UI's live tick).
@@ -168,8 +195,9 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
         e.maxTradingFeeBps,
         out.quote.kind === "legacy" ? out.quote.maxTotalBps : undefined,
         i.feeMarginBps ?? defaultFeeCapMarginBps(),
+        utilFeeBps,
       );
-      out.fee = { channel, ...f, charged: channel.enabled || L.flags.p2FeeCharged };
+      out.fee = { channel, ...f, charged: channel.enabled || L.flags.p2FeeCharged, ...(utilFeeBps > 0n ? { utilFeeBps } : {}) };
       if (f.verdict !== "ok") {
         out.issues.push({
           kind: "fee-over-max",

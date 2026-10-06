@@ -34,6 +34,10 @@ import { StepTokenSelect } from "./StepTokenSelect";
 import { StepControlRoom, leverageToMarginBps, marginBpsToLeverage } from "./StepControlRoom";
 import { LaunchProgress } from "./LaunchProgress";
 import { LaunchSuccess } from "./LaunchSuccess";
+import { GrowthLaunchControls, type GrowthLaunchState } from "./GrowthLaunchControls";
+import { isDevnetV21Enabled } from "@/lib/v21/flag";
+import { V21_COPY } from "@/lib/v21/copy";
+import { defaultGrowthLaunch, validateGrowthLaunch, type GrowthLaunch } from "@/lib/v21/growth-launch";
 import { RecoverSolBanner } from "./RecoverSolBanner";
 // W8 fix: share ONE SOL-cost formula with CostEstimate.tsx's own display so the
 // launch gate and the number shown to the user can never drift apart — see that
@@ -62,6 +66,8 @@ interface WizardState {
   lpCollateral: string;
   /** P3 wizard: junior floor, bps of the senior claim (10%..100%). */
   juniorFloorBps?: number;
+  /** Devnet v2.1: the growth-v19 block (flag-gated; absent/off = today's launch). */
+  growth?: GrowthLaunchState;
   /** Largest one-sided position the LP takes on, bps of the LP seed (default 1x). */
   lpExposureBps: number;
   insuranceAmount: string;
@@ -335,6 +341,25 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     lpCollateral: 0n,
     initialPriceE6: 1_000_000n,
   }).maxPriceMoveBpsPerSlot;
+  // Devnet v2.1: the growth block, from the same derivation create() runs. Null unless the flag is
+  // on, the launch is the P3 single-asset shape and the creator turned it on.
+  const growthDerived = deriveLaunchMarketParams({
+    initialMarginBps: wizard.initialMarginBps,
+    lpCollateral: 0n,
+    initialPriceE6: 1_000_000n,
+  });
+  const growthAvailable = isDevnetV21Enabled() && p3WizardEnabled();
+  const growthLaunch: GrowthLaunch | undefined =
+    growthAvailable && wizard.growth?.on
+      ? defaultGrowthLaunch({
+          engineImrBps: growthDerived.initialMarginBps,
+          maintenanceMarginBps: growthDerived.maintenanceMarginBps,
+          maxPriceMoveBpsPerSlot: growthDerived.maxPriceMoveBpsPerSlot,
+          baseFeeBps: wizard.tradingFeeBps,
+          lLaunchX100: wizard.growth.lLaunchX100,
+          rGapBps: wizard.growth.rGapBps,
+        })
+      : undefined;
   const feeConflict = wizard.tradingFeeBps >= wizard.initialMarginBps;
   const hasTokens = wizard.walletBalance !== null && wizard.walletBalance > 0n;
   // Collateral is ALWAYS the universal Sim-USDC mint on devnet (6 decimals) — never the
@@ -653,11 +678,26 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       seedNavAtoms: 2n * backingSeedPerDomain(j),
     });
   }, [wizard.lpCollateral, wizard.juniorFloorBps, wizard.tokenMeta?.decimals]);
-  const launchDisabled = !allValid || !oracleSettled || !publicKey || p3Issue !== null;
+  const growthIssue = growthLaunch
+    ? validateGrowthLaunch({
+        engineImrBps: growthDerived.initialMarginBps,
+        maintenanceMarginBps: growthDerived.maintenanceMarginBps,
+        maxPriceMoveBpsPerSlot: growthDerived.maxPriceMoveBpsPerSlot,
+        baseFeeBps: wizard.tradingFeeBps,
+        lLaunchX100: growthLaunch.lLaunchX100,
+        rGapBps: growthLaunch.rGapBps,
+        juniorAtoms: parseHumanAmount(wizard.lpCollateral || "0", wizard.tokenMeta?.decimals ?? 6),
+        collateralDecimals: 6,
+        singleAsset: true,
+      })
+    : null;
+  const launchDisabled = !allValid || !oracleSettled || !publicKey || p3Issue !== null || growthIssue !== null;
   const launchDisabledReason: string | undefined = !publicKey
     ? "Connect wallet"
     : p3Issue
       ? LIMITS_COPY.p3Wizard.issue[p3Issue]
+    : growthIssue
+      ? V21_COPY.wizard.issue[growthIssue]
     : !oracleSettled
       ? "Resolving price feed"
     : !registrable
@@ -903,6 +943,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       // maxAccounts is deliberately omitted here (create() defaults it).
       slabDataSize: DEFAULT_SLAB_SIZE,
       // P3: vault-owned LP + the creator's junior tranche (= the Liquidity amount).
+      ...(growthLaunch ? { growth: growthLaunch } : {}),
       p3: wizardP3Params(
         p3WizardEnabled(),
         parseHumanAmount(wizard.lpCollateral || "0", decimals),
@@ -976,6 +1017,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       // BUG 1 fix: same rationale as handleLaunch above — always the real v17 slab size.
       slabDataSize: DEFAULT_SLAB_SIZE,
       // P3: vault-owned LP + the creator's junior tranche (= the Liquidity amount).
+      ...(growthLaunch ? { growth: growthLaunch } : {}),
       p3: wizardP3Params(
         p3WizardEnabled(),
         parseHumanAmount(wizard.lpCollateral || "0", decimals),
@@ -1291,6 +1333,20 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             launchDisabledReason={launchDisabledReason}
             instantLaunch={mockBypass}
             onBack={goBack}
+          />
+        )}
+        {/* Devnet v2.1: the growth-v19 block (flag-gated). */}
+        {wizard.step === 2 && growthAvailable && (
+          <GrowthLaunchControls
+            value={wizard.growth ?? { on: false }}
+            onChange={(growth) => setWizard((prev) => ({ ...prev, growth }))}
+            engineImrBps={growthDerived.initialMarginBps}
+            maintenanceMarginBps={growthDerived.maintenanceMarginBps}
+            maxPriceMoveBpsPerSlot={growthDerived.maxPriceMoveBpsPerSlot}
+            baseFeeBps={wizard.tradingFeeBps}
+            juniorAtoms={parseHumanAmount(wizard.lpCollateral || "0", wizard.tokenMeta?.decimals ?? 6)}
+            collateralDecimals={6}
+            collateralSymbol={collateralSymbol}
           />
         )}
       </div>

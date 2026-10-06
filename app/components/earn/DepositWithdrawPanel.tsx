@@ -9,6 +9,8 @@ import { GlowButton } from '@/components/ui/GlowButton';
 import { StatusLine } from '@/components/ui/StatusLine';
 import { EarnPendingWithdrawal } from '@/components/earn/EarnPendingWithdrawal';
 import { EarnPayoutCapError } from '@/lib/limits/earn-split-pot';
+import { isDevnetV21Enabled } from '@/lib/v21/flag';
+import { V21_COPY } from '@/lib/v21/copy';
 import {
   EARN_WITHDRAW_COPY as WC,
   cooldownPhrase,
@@ -638,6 +640,13 @@ export function DepositWithdrawPanel({
               Trading on this market is paused. Deposits here back traders&apos; payouts and don&apos;t reopen trading.
             </p>
           </div>
+        )}
+
+        {/* Devnet v2.1: on a bound vault part of the pool is allocated to the market maker. */}
+        {tab === 'withdraw' && p3Bound && isDevnetV21Enabled() && (
+          <p data-testid="earn-reserve-note" className="mb-2 text-[11px] text-[var(--text-secondary)]" title={V21_COPY.earn.reserveLong}>
+            {V21_COPY.earn.reserve}
+          </p>
         )}
 
         {/* Submit */}

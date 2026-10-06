@@ -97,6 +97,9 @@ import { fmtQ } from "@/lib/limits/format";
 import { takeFillResult } from "@/lib/limits/fill-check";
 import { defaultFeeCapMarginBps } from "@/lib/limits/fee-channel";
 import { OrderTicketLimits, reasonCopy } from "@/components/limits/OrderTicketLimits";
+import { GrowthTicketPanel } from "@/components/trade/GrowthTicketPanel";
+import { CloseOnlyBanner } from "@/components/trade/CloseOnlyBanner";
+import { isDevnetV21Enabled } from "@/lib/v21/flag";
 import { StatusLine } from "@/components/ui/StatusLine";
 import { FixPricingAction } from "@/components/trade/FixPricingAction";
 import { resolveUserMessage, type UserMessage, type UserMessageAction } from "@/lib/limits/user-message";
@@ -420,10 +423,19 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const limitsStepDown = deriveTicketLimits({
     limits: marketLimits, direction, sizeQ: 0n, takerPosQ: 0n, takerOwner: null, leverage: 1, limitPriceE6: 0n,
   }).stepDown;
+  // Devnet v2.1 (growth-v19): the live per-side cap from the growth quote. null on every market of
+  // today's programs, so the min() below is unchanged there.
+  const growthSideCap = (() => {
+    const g = marketLimits.growth;
+    if (!g) return Number.POSITIVE_INFINITY;
+    const q = direction === "long" ? g.long : g.short;
+    return q.closed ? Number.POSITIVE_INFINITY : Math.max(1, q.maxLeverageX100 / 100);
+  })();
   const maxLeverage = Math.min(
     MAX_DISPLAY_LEVERAGE,
     rawMaxLeverage,
     limitsStepDown?.stepped ? Math.max(1, limitsStepDown.maxLeverage) : Number.POSITIVE_INFINITY,
+    growthSideCap,
   );
 
   const availableLeverage = useMemo(() => availableLeverageFor(maxLeverage), [maxLeverage]);
@@ -823,6 +835,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     limitPriceE6: slippageBoundE6,
     markE6: livePriceE6 ?? undefined,
     feeMarginBps,
+    growth: marketLimits.growth ?? null,
   };
   const ticketLimits = deriveTicketLimits(limitsInput);
   // P1 99165722 (F-7): a close that GROWS a halted / capped LP is refused or clipped too.
@@ -1320,6 +1333,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             </div>
           ) : null;
         })()}
+        {/* Devnet v2.1: the close-only countdown + permissionless wind-down (flag-gated). */}
+        {adlReduceOnly && isDevnetV21Enabled() && (
+          <CloseOnlyBanner slabAddress={slabAddress} hasPosition={existingPositionSize !== 0n} collateralDecimals={decimals} />
+        )}
         {needsWallet ? (
           connectCta
         ) : (
@@ -1642,6 +1659,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           <p className="text-[9px] text-[var(--text-dim)] font-mono">{formatLeverageValue(maxLeverage)}x (fixed)</p>
         )}
       </div>
+
+      {marketLimits.growth && ticketLimits.growth && (
+        <GrowthTicketPanel view={marketLimits.growth} decision={ticketLimits.growth} direction={direction} />
+      )}
 
       {stepDownNote && (
         <p

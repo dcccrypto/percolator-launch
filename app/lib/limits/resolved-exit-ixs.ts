@@ -52,7 +52,7 @@ export function exitStepIxs(step: ExitStep, c: ExitIxContext): TransactionInstru
         ledger: c.vault.ledger,
         siblingLedger: c.vault.siblingLedger,
         domain: c.vault.domain,
-        bound: { vaultLpState: c.vault.vaultLpState },
+        bound: { vaultLpState: c.vault.vaultLpState, ...(c.vault.ext ? { ext: c.vault.ext, lpPortfolio: c.vault.lpPortfolio } : {}) },
       }),
     ];
   }

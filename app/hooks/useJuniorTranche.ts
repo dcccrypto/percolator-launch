@@ -7,6 +7,8 @@
  * above `junior_floor_bps` of the senior claim (the panel shows `withdrawable now`). Builders
  * are lib/limits/p3-ix.ts (executed on real BPF in scripts/limits-parity/p3-sim).
  */
+import { isDevnetV21Enabled } from '@/lib/v21/flag';
+import { deriveVaultLpExt } from '@/lib/v21/sdk';
 import { useCallback, useState } from 'react';
 import { PublicKey } from '@solana/web3.js';
 import { deriveLpBackingLedger, deriveVaultAuthority } from '@percolatorct/sdk';
@@ -50,7 +52,9 @@ export function useJuniorTranche(slabAddress: string | null) {
     const market = new PublicKey(slabAddress);
     const registry = deriveLpVaultRegistryPda(prog, market);
     const vaultLpState = deriveVaultLpState(prog, market);
-    const [ri, si, mi] = await connection.getMultipleAccountsInfo([registry, vaultLpState, market], 'confirmed');
+    // Devnet v2.1: the P2b ext (97 takes it at [11] once it exists) rides in the same batched read.
+    const extKey = isDevnetV21Enabled() ? deriveVaultLpExt(prog, market) : null;
+    const [ri, si, mi, xi] = await connection.getMultipleAccountsInfo(extKey ? [registry, vaultLpState, market, extKey] : [registry, vaultLpState, market], 'confirmed');
     const st = si && si.owner.equals(prog) ? decodeVaultLpState(new Uint8Array(si.data)) : null;
     if (!st) throw new Error("This market has no vault-owned LP.");
     if (!new PublicKey(st.juniorOwner).equals(wallet.publicKey)) throw new Error('Only the junior owner can move the junior tranche.');
@@ -63,6 +67,7 @@ export function useJuniorTranche(slabAddress: string | null) {
       lpPortfolio: new PublicKey(st.lpPortfolio),
       ledger: deriveLpBackingLedger(prog, market, domain)[0],
       siblingLedger: deriveLpBackingLedger(prog, market, domain ^ 1)[0],
+      ...(extKey && xi && xi.owner.equals(prog) ? { ext: extKey } : {}),
     };
     const [vaultAuthority] = deriveVaultAuthority(prog, market);
     const mint = config.collateralMint;

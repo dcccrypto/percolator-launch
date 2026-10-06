@@ -118,6 +118,8 @@ import {
   type CreateStepKind,
 } from "@/lib/create-market-v18";
 import { buildInitMatcherCtxArgs } from "@/lib/matcher-params";
+import { encodeInitMarketData, validateGrowthLaunch, type GrowthLaunch } from "@/lib/v21/growth-launch";
+import { V21_COPY } from "@/lib/v21/copy";
 import { buildP3BindIxs, canonicalVaultLpMatcher, p3BindProgress, validateP3Wizard } from "@/lib/limits/p3-wizard";
 import { COPY as LIMITS_COPY } from "@/lib/limits/copy";
 import { buildDepositJuniorTrancheIx, deriveVaultLpState } from "@/lib/limits/p3-ix";
@@ -330,6 +332,12 @@ export interface CreateMarketParams {
    * junior (first-loss) tranche, right after CreateLpVault and BEFORE StakeInitPool rotates
    * marketauth (InitVaultLp path A needs the creator as marketauth). See lib/limits/p3-wizard.ts.
    */
+  /**
+   * Devnet v2.1 (growth-v19): dynamic leverage and capital-derived capacity. Requires `p3` (a growth
+   * market is single-asset and vault-LP bound). Absent = a market exactly as launches create today.
+   * See lib/v21/growth-launch.ts for the rules and the seed order.
+   */
+  growth?: GrowthLaunch;
   p3?: {
     juniorFloorBps: number;
     /** The creator's first-loss capital. Under P3 there is NO creator-owned LP at all (M2 / M3a
@@ -1010,7 +1018,7 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
     // (lib/create-market-m1.ts; 987 B with the memo on the heaviest config, limit 1232).
     const m1Instructions = buildM1Instructions({
       programId, wallet: walletPk, slab: slabPk, mint: params.mint, vaultAta, vaultPda, nftRegistry: nftRegistryPda,
-      slabRent, slabSize: effectiveSlabSize, initArgs: v17InitArgs, memo: keeperMemoIx,
+      slabRent, slabSize: effectiveSlabSize, initArgs: v17InitArgs, growth: params.growth, memo: keeperMemoIx,
     });
     const m1Descriptor: TailTxDescriptor = {
       label: WIZARD_STEP_COPY.createMarket,
@@ -1277,6 +1285,7 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
               juniorAtoms: params.p3.juniorAtoms,
               creatorAta: userAta,
               vaultToken: vaultAta,
+              ...(params.growth ? { growth: { lLaunchX100: params.growth.lLaunchX100 } } : {}),
             }),
             computeUnits: P3_BIND_COMPUTE_UNITS,
             signers: [vaultLpPortfolioKp, vaultLpCtxKp!],
@@ -1977,6 +1986,27 @@ export function useCreateMarket() {
           return;
         }
       }
+      // Devnet v2.1: the growth block's own refusals (leverage / r_gap / funding / fee cap / $1 junior),
+      // before anything is broadcast. A growth market must also be the P3 single-asset shape.
+      if (params.growth) {
+        const gIssue = validateGrowthLaunch({
+          engineImrBps: derived.initialMarginBps,
+          maintenanceMarginBps: derived.maintenanceMarginBps,
+          maxPriceMoveBpsPerSlot: derived.maxPriceMoveBpsPerSlot,
+          baseFeeBps: params.tradingFeeBps,
+          lLaunchX100: params.growth.lLaunchX100,
+          rGapBps: params.growth.rGapBps,
+          maxAbsFundingE9PerSlot: params.growth.maxAbsFundingE9PerSlot,
+          maxTradingFeeBps: params.growth.maxTradingFeeBps,
+          juniorAtoms: params.p3?.juniorAtoms ?? 0n,
+          collateralDecimals: 6,
+          singleAsset: !!params.p3,
+        });
+        if (gIssue) {
+          setState((s) => ({ ...s, error: V21_COPY.wizard.issue[gIssue] }));
+          return;
+        }
+      }
 
       // Select program based on slab tier — each MAX_ACCOUNTS variant is a separate deployment
       const cfg = getConfig();
@@ -2292,7 +2322,7 @@ export function useCreateMarket() {
               // Margin and the price-move budget share one derivation — see
               // lib/market-params.ts.
               const v17InitArgs = buildV17InitMarketArgs(params, derived);
-              const initMarketData = encodeInitMarket(v17InitArgs);
+              const initMarketData = encodeInitMarketData(v17InitArgs, params.growth);
 
               // v18 InitMarket takes exactly 3 accounts [admin, slab, mint] — see the
               // M1 fix note above (~line 987) and ACCOUNTS_INIT_MARKET in the v18 SDK.
@@ -2386,7 +2416,7 @@ export function useCreateMarket() {
             // Margin and the price-move budget share one derivation — see
             // lib/market-params.ts.
             const v17InitArgs = buildV17InitMarketArgs(params, derived);
-            const initMarketData = encodeInitMarket(v17InitArgs);
+            const initMarketData = encodeInitMarketData(v17InitArgs, params.growth);
 
             // v18 InitMarket takes exactly 3 accounts [admin, slab, mint] — see the
             // M1 fix note above (~line 987). The old 9-account array (vault ATA,
@@ -3711,6 +3741,7 @@ export function useCreateMarket() {
                     juniorAtoms: params.p3.juniorAtoms,
                     creatorAta,
                     vaultToken: vaultTokenAta,
+                    ...(params.growth ? { growth: { lLaunchX100: params.growth.lLaunchX100 } } : {}),
                   })
                 : [buildDepositJuniorTrancheIx(p3Market, wallet.publicKey, creatorAta, vaultTokenAta, params.p3.juniorAtoms)];
               setState((s) => ({ ...s, stepLabel: "Binding the vault-owned LP..." }));

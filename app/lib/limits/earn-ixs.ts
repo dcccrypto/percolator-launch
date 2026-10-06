@@ -34,10 +34,15 @@ export interface EarnP3Context {
   terminalFlat?: boolean;
   /** F-14 claim-free residual (decodeTerminalBacking); null = unreadable. */
   terminalResidual?: bigint | null;
+  /**
+   * Devnet v2.1: the P2b `VaultLpExtV19` PDA, present ONLY when it exists on chain (flag-gated read in
+   * earn-p3-read.ts). Once it exists a bound 78 needs it at [7] (+ the LP at [8]). Absent => today's lists.
+   */
+  vaultLpExt?: PublicKey | null;
 }
 
 export type EarnTxPlan =
-  | { ok: true; tail: { vaultLpState: PublicKey; lpPortfolio: PublicKey } | null; prependHarvest: boolean }
+  | { ok: true; tail: { vaultLpState: PublicKey; lpPortfolio: PublicKey; vaultLpExt?: PublicKey } | null; prependHarvest: boolean }
   | { ok: false; reason: "registry-invalid" | "vault-lp-unreadable" };
 
 export function earnTxPlan(op: EarnOp, c: EarnP3Context): EarnTxPlan {
@@ -47,7 +52,7 @@ export function earnTxPlan(op: EarnOp, c: EarnP3Context): EarnTxPlan {
   // (NotEnoughAccountKeys) rather than being priced off backing alone.
   if (c.bound !== true) return { ok: true, tail: null, prependHarvest: false };
   if (!c.lpPortfolio) return { ok: false, reason: "vault-lp-unreadable" };
-  const tail = { vaultLpState: c.vaultLpState, lpPortfolio: c.lpPortfolio };
+  const tail = { vaultLpState: c.vaultLpState, lpPortfolio: c.lpPortfolio, ...(c.vaultLpExt ? { vaultLpExt: c.vaultLpExt } : {}) };
   const pending = c.harvestable !== null && c.harvestable > 0n;
   const live = c.mode === MARKET_MODE_LIVE;
   if (op === TAG_EXECUTE_REDEMPTION) {
@@ -66,7 +71,8 @@ type OkPlan = Extract<EarnTxPlan, { ok: true }>;
 
 function harvestIx(p: { programId: PublicKey; cranker: PublicKey; market: PublicKey; registry: PublicKey; ledger: PublicKey; siblingLedger: PublicKey; domain: number }, plan: OkPlan): TransactionInstruction[] {
   if (!plan.prependHarvest || !plan.tail) return [];
-  return [buildLpVaultCrankFeesIx({ ...p, bound: { vaultLpState: plan.tail.vaultLpState } })];
+  const { vaultLpState, vaultLpExt, lpPortfolio } = plan.tail;
+  return [buildLpVaultCrankFeesIx({ ...p, bound: { vaultLpState, ...(vaultLpExt ? { ext: vaultLpExt, lpPortfolio } : {}) } })];
 }
 
 /**
@@ -144,7 +150,11 @@ export function buildEarnExecuteIxs(p: {
     { pubkey: p.redeemerDest, isSigner: false, isWritable: true },
     { pubkey: WELL_KNOWN.tokenProgram, isSigner: false, isWritable: false },
     { pubkey: p.siblingLedger, isSigner: false, isWritable: true },
-    { pubkey: p.redeemer, isSigner: false, isWritable: true },
+    // [12] redeemerRentDest (the redeemer's own SOL account). Devnet v2.1 (P2b H-1b): a Live non-bound
+    // 77 requires THIS account to sign, so a third party cannot choose when someone else's
+    // redemption executes. The redeemer is also the fee payer ([0] signs), so it is one signature
+    // on the message either way; the flag is stated here so the list is correct on its own.
+    { pubkey: p.redeemer, isSigner: true, isWritable: true },
   ];
   const keys = p.plan.tail ? withBoundVaultLpTail(TAG_EXECUTE_REDEMPTION, base, p.plan.tail.vaultLpState, p.plan.tail.lpPortfolio) : base;
   return [

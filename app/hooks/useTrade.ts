@@ -2,7 +2,7 @@
 
 import { tradeCuCap } from "@/lib/compute-budget";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Connection, PublicKey } from "@solana/web3.js";
+import { Connection, PublicKey, type TransactionInstruction } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import {
   encodeTradeCpi,
@@ -35,6 +35,8 @@ import {
   getPriorityFee,
 } from "@/lib/tx";
 import { planTakerCrank } from "@/lib/taker-crank";
+import { isAllocateRefusal, planAllocatePrefix } from "@/lib/v21/allocate-prefix";
+import { isDevnetV21Enabled } from "@/lib/v21/flag";
 import { getMaintenanceConfig, MaintenanceError } from "@/lib/maintenance";
 import { PartialLegSendError, SINGLE_TX_MAX_LEGS, sendLegGroups } from "@/lib/trade-leg-groups";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
@@ -362,7 +364,7 @@ export function useTrade(slabAddress: string) {
         const feedHex = Array.from(mktConfig.indexFeedId.toBytes()).map(b => b.toString(16).padStart(2, "0")).join("");
         const oracleAccount = useAdminOracle ? slabPk : derivePythPushOraclePDA(feedHex)[0];
 
-        const instructions = [];
+        const instructions: TransactionInstruction[] = [];
 
         // v18 AUTH_MARK markets are priced by the off-chain keeper (which holds the
         // oracle authority and pushes a fresh mark every few seconds). The old flow
@@ -528,12 +530,19 @@ export function useTrade(slabAddress: string) {
         const limitsMarketId =
           isV17Market && limitsFlags().p1 && raw ? decodeMarketEngineView(raw)?.marketId ?? null : null;
         let beforePosQ: bigint | null = null;
+        // Devnet v2.1 only: the taker's signed position on asset 0, read from the same portfolio
+        // read below, so tag 103 rides only with risk-increasing orders (never a close).
+        let v21BeforeQ: bigint | null = null;
         if (isV17Market) {
           try {
             const portInfo = await connection.getAccountInfo(accountA, "confirmed");
             if (portInfo) {
               const pf = parsePortfolioV17(new Uint8Array(portInfo.data));
               hasActiveLegs = pf.legs.some((l) => l.active);
+              if (isDevnetV21Enabled() && raw) {
+                const mid = decodeMarketEngineView(raw)?.marketId ?? null;
+                if (mid !== null) v21BeforeQ = signedPositionForAsset(new Uint8Array(portInfo.data), 0, mid);
+              }
               // P1 zero-fill check: the taker's position BEFORE the trade (same read).
               if (limitsMarketId !== null) {
                 beforePosQ = signedPositionForAsset(new Uint8Array(portInfo.data), 0, limitsMarketId);
@@ -619,13 +628,22 @@ export function useTrade(slabAddress: string) {
           );
           sig = sent.signatures[sent.signatures.length - 1];
         } else {
-          instructions.push(...tradeIxs);
+          // Devnet v2.1 (flag-gated, sim-gated, risk-increasing only): bound markets carry tag 103
+          // in front so the vault LP's capital follows Earn. See lib/v21/allocate-prefix.ts.
+          const allocateIxs =
+            isV17Market && isDevnetV21Enabled()
+              ? await planAllocatePrefix(
+                  { connection, simulate: (ixs) => simulateForGate(connection, wallet.publicKey!, ixs) },
+                  { programId, market: slabPk, cranker: wallet.publicKey, beforeQ: v21BeforeQ, signedSizeQ: params.size },
+                )
+              : [];
+          instructions.push(...allocateIxs, ...tradeIxs);
 
           // Explicit limit sized from a simulation of THIS tx (P1: CPI trades cost ~13k more CU;
           // a single-leg batch on asset 1 is 216k > the 200k default), capped at 400k per leg
           // (lib/compute-budget.ts). Also used by closes (useClosePosition calls trade()).
-          sig = await sendTxWaiting({
-            connection, wallet, instructions,
+          const sendTrade = (ixs: TransactionInstruction[]) => sendTxWaiting({
+            connection, wallet, instructions: ixs,
             onWaiting: params.onWaiting,
             abortSignal: params.abortSignal,
             keepWaiting: params.keepWaiting,
@@ -646,6 +664,14 @@ export function useTrade(slabAddress: string) {
                 }
               : undefined,
           });
+          try {
+            sig = await sendTrade(instructions);
+          } catch (e) {
+            // Devnet v2.1: the allocation refused (Custom 100) after the pre-check passed (state moved).
+            // It is never needed for the trade: send the trade without it, once.
+            if (allocateIxs.length > 0 && isAllocateRefusal(e)) sig = await sendTrade(instructions.filter((ix) => !allocateIxs.includes(ix)));
+            else throw e;
+          }
         }
 
         // Immediate local application of the confirmed fill: sendTx's

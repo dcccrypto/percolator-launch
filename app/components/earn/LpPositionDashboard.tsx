@@ -2,6 +2,8 @@
 
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
 import { bigintRatio } from "@/lib/formatters";
+import { V21_COPY } from "@/lib/v21/copy";
+import type { EntryVsExit } from "@/lib/v21/entry-exit";
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 import type { LpEarned } from '@/lib/lp-earned';
 
@@ -28,6 +30,11 @@ interface LpPositionDashboardProps {
    * LP position" while shares sit in the redemption ticket. The label is "12.50 USDC".
    */
   pendingWithdrawalLabel?: string | null;
+  /**
+   * Devnet v2.1 (security review R3-L1): the position's entry price vs what withdrawing pays now
+   * (lib/v21/entry-exit.ts). Undefined on today's programs: nothing is rendered.
+   */
+  entryVsExit?: EntryVsExit | null;
   /**
    * Exact earnings from the indexer's cost basis (percolator-indexer#207), or
    * why they are unavailable. Omitted -> the row is not rendered.
@@ -56,6 +63,7 @@ export function LpPositionDashboard({
   loading,
   pendingWithdrawalLabel = null,
   earned,
+  entryVsExit = null,
 }: LpPositionDashboardProps) {
   const divisor = 10n ** BigInt(decimals);
   const hasPosition = userLpBalance > 0n;
@@ -160,6 +168,28 @@ export function LpPositionDashboard({
                     —
                   </div>
                 )}
+              </div>
+            )}
+
+            {entryVsExit && (
+              <div className="mb-5" data-testid="lp-entry-vs-exit" data-below={entryVsExit.below ? "1" : "0"}>
+                <div className="flex items-baseline justify-between">
+                  <div className="text-[10px] uppercase tracking-[0.2em] text-[var(--text-secondary)]">
+                    {V21_COPY.earn.entryVsExitTitle}
+                  </div>
+                  <div className="text-[12px] font-mono tabular-nums text-[var(--text)]">
+                    {entryVsExit.entryPerShare !== null ? entryVsExit.entryPerShare.toFixed(4) : '—'} → {entryVsExit.exitPerShare !== null ? entryVsExit.exitPerShare.toFixed(4) : '—'}
+                  </div>
+                </div>
+                <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+                  {entryVsExit.below
+                    ? V21_COPY.earn.entryVsExitBelow
+                    : V21_COPY.earn.entryVsExit(
+                        (entryVsExit.entryPerShare ?? 0).toFixed(4),
+                        (entryVsExit.exitPerShare ?? 0).toFixed(4),
+                        collateralSymbol,
+                      )}
+                </p>
               </div>
             )}
 

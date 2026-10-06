@@ -20,6 +20,8 @@ import { computeBudgetPrefix, parseCustomInstructionError, REPAIR_CU, type SimRe
 import { P3_ERR, TAG_EXECUTE_REDEMPTION } from "./constants";
 import { WRAPPER_ERR } from "../wrapper-errors";
 import { decodeAssetVaultLp, decodeMarketEngineView, decodePortfolioRisk, decodeTerminalBacking, decodeVaultLpState, type VaultLpStateView } from "./decode";
+import { isDevnetV21Enabled } from "@/lib/v21/flag";
+import { deriveVaultLpExt } from "@/lib/v21/sdk";
 import { buildVaultLpRecallIx, type VaultLpMarket } from "./p3-ix";
 import { effectiveSeniorClaim, harvestableFeeAtoms, recallLimit, vaultLpValueAtoms } from "./vault-tranche";
 import { buildVaultLpCrankIx, isVaultLpSelfHealEnabled } from "./vault-lp-repair";
@@ -77,7 +79,7 @@ export function recallCandidates(
 }
 
 /** The 77 account list (buildEarnExecuteIxs + bound tail): the accounts 98 needs. */
-export function recallIxFor77(ix77: TransactionInstruction, cranker: PublicKey, amount: bigint): TransactionInstruction {
+export function recallIxFor77(ix77: TransactionInstruction, cranker: PublicKey, amount: bigint, ext?: PublicKey): TransactionInstruction {
   if (ix77.data[0] !== TAG_EXECUTE_REDEMPTION || ix77.keys.length < 15) throw new Error("not a bound 77");
   const k = (i: number): PublicKey => (ix77.keys[i] as AccountMeta).pubkey;
   const domain = ix77.data.length >= 3 ? ix77.data[1] | (ix77.data[2] << 8) : 0;
@@ -89,6 +91,7 @@ export function recallIxFor77(ix77: TransactionInstruction, cranker: PublicKey, 
     siblingLedger: k(11),
     vaultLpState: k(13),
     lpPortfolio: k(14),
+    ...(ext ? { ext } : {}),
   };
   return buildVaultLpRecallIx(vm, cranker, amount, domain);
 }
@@ -118,20 +121,21 @@ export function redeemRepairVariants(
   at: number,
   cranker: PublicKey,
   recallAmounts: readonly bigint[],
+  ext?: PublicKey,
 ): { kind: "other-pot" | "recall" | "other-pot-recall"; amount?: bigint; ixs: TransactionInstruction[] }[] {
   const other = with77FromOtherPot(ixs, at);
   return [
     { kind: "other-pot" as const, ixs: other },
-    ...recallAmounts.map((amount) => ({ kind: "recall" as const, amount, ixs: withRecallBefore77(ixs, at, cranker, amount) })),
-    ...recallAmounts.map((amount) => ({ kind: "other-pot-recall" as const, amount, ixs: withRecallBefore77(other, at, cranker, amount) })),
+    ...recallAmounts.map((amount) => ({ kind: "recall" as const, amount, ixs: withRecallBefore77(ixs, at, cranker, amount, ext) })),
+    ...recallAmounts.map((amount) => ({ kind: "other-pot-recall" as const, amount, ixs: withRecallBefore77(other, at, cranker, amount, ext) })),
   ];
 }
 
 /** `ixs` with a 98 recall of `amount` inserted right before the 77 at index `at`. */
-export function withRecallBefore77(ixs: readonly TransactionInstruction[], at: number, cranker: PublicKey, amount: bigint): TransactionInstruction[] {
+export function withRecallBefore77(ixs: readonly TransactionInstruction[], at: number, cranker: PublicKey, amount: bigint, ext?: PublicKey): TransactionInstruction[] {
   const ix77 = ixs[at];
   if (!ix77) throw new Error("no 77 at index");
-  return [...ixs.slice(0, at), recallIxFor77(ix77, cranker, amount), ...ixs.slice(at)];
+  return [...ixs.slice(0, at), recallIxFor77(ix77, cranker, amount, ext), ...ixs.slice(at)];
 }
 
 /** Index of the (single) wrapper 77 in `ixs`, or -1. */
@@ -213,7 +217,10 @@ export async function planSeniorDrawRepair(p: SeniorDrawRepairParams, deps: Seni
     const lpVal = eng && risk ? vaultLpValueAtoms(risk, eng) : null;
     const lpValueAtoms = lpVal && lpVal.kind !== "stale" ? lpVal.atoms : null;
     const cu = Math.min(MAX_TX_CU, p.computeUnits + RECALL_CU);
-    for (const v of redeemRepairVariants(p.instructions, at, p.cranker, recallCandidates(m, vs, domain, lpValueAtoms))) {
+    // Devnet v2.1: once the P2b ext exists, 98 takes it at [8] (flag-gated read; undefined otherwise).
+    const extKey = isDevnetV21Enabled() ? deriveVaultLpExt(p.programId, p.market) : null;
+    const ext = extKey && (await deps.read(extKey)) ? extKey : undefined;
+    for (const v of redeemRepairVariants(p.instructions, at, p.cranker, recallCandidates(m, vs, domain, lpValueAtoms), ext)) {
       const r = await deps.simulate([...computeBudgetPrefix(cu), ...v.ixs]);
       if (r.err) continue;
       return v.kind === "other-pot"

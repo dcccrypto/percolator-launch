@@ -23,6 +23,9 @@ import { PORTFOLIO_LOOKUP_COPY } from "@/lib/owner-portfolio";
 // tx module into every hook test that mocks @/lib/tx, breaking them at module load.
 // Keep this in sync with LIGHTHOUSE_PROGRAM_ID in @/lib/tx (same constant, two leaves).
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
+import { isDevnetV21Enabled } from "@/lib/v21/flag";
+import { V21_ERROR_CODE_MAP } from "@/lib/v21/error-copy";
+import { V21_ENGINE_LOCK_CODES } from "@/lib/v21/wrapper-errors";
 const LIGHTHOUSE_PROGRAM_ID_STR = "L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95";
 
 const LIGHTHOUSE_USER_MESSAGE =
@@ -358,7 +361,13 @@ export function isOracleStaleError(msg: string): boolean {
 
 export function isEngineLockError(msg: string): boolean {
   const code = extractErrorCode(msg);
-  return code === WRAPPER_ERR.EngineLockActive || code === WRAPPER_ERR.EngineStale;
+  return (
+    code === WRAPPER_ERR.EngineLockActive ||
+    code === WRAPPER_ERR.EngineStale ||
+    // Devnet v2.1, P2b E7: the codes that split out of 21 (close-only after ADL, refreshing, Earn
+    // backed gate). Flag-gated: the live wrapper never raises them.
+    (code !== null && isDevnetV21Enabled() && V21_ENGINE_LOCK_CODES.includes(code))
+  );
 }
 
 
@@ -479,6 +488,10 @@ export function humanizeError(rawMsg: string, context?: "trade"): string {
     // it. An unattributed code (no "Program X failed" line) or another program's is not guessed.
     if (origin === WRAPPER_PROGRAM_ID && ERROR_CODE_MAP[code]) {
       return ERROR_CODE_MAP[code];
+    }
+    // Devnet v2.1 (flag-gated): growth-v19 92..99, P2b Earn 100..103, P2b lock exits 120..122.
+    if (origin === WRAPPER_PROGRAM_ID && isDevnetV21Enabled() && V21_ERROR_CODE_MAP[code]) {
+      return V21_ERROR_CODE_MAP[code];
     }
   }
   const customIdx = extractCustomIndex(rawMsg);

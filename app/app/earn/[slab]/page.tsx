@@ -11,6 +11,8 @@ import { useInsuranceLP } from '@/hooks/useInsuranceLP';
 import { useLpCostBasis } from '@/hooks/useLpCostBasis';
 import { useWalletCompat } from '@/hooks/useWalletCompat';
 import { computeLpEarnedForVault } from '@/lib/lp-earned';
+import { isDevnetV21Enabled } from '@/lib/v21/flag';
+import { computeEntryVsExit } from '@/lib/v21/entry-exit';
 import { ResolvedExitPanel } from '@/components/limits/ResolvedExitPanel';
 import { earnExitProps } from '@/lib/limits/resolved-finish';
 import { EarnTrancheCardView } from '@/components/limits/EarnTrancheCard';
@@ -435,6 +437,23 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
                   : `${formatTokenAmount(lpVaultState.pendingRedemptionShares, collateralDecimals)} shares`;
               })()}
               earned={lpEarned}
+              entryVsExit={
+                isDevnetV21Enabled()
+                  ? computeEntryVsExit({
+                      earned: lpEarned,
+                      exitAtoms: earnPricing
+                        ? previewWithdrawAtoms(
+                            lpVaultState.userLpBalance + lpVaultState.pendingRedemptionShares,
+                            earnPricing.totalShares,
+                            earnPricing.withdrawSeniorValue,
+                          )
+                        : null,
+                      claimShares: lpVaultState.userLpBalance + lpVaultState.pendingRedemptionShares,
+                      decimals: collateralDecimals,
+                      lpDecimals: lpVaultState.lpDecimals,
+                    })
+                  : null
+              }
             />
           </ScrollReveal>
 

@@ -153,16 +153,22 @@ describe("P3 decoders from Rust-laid-out bytes", () => {
     expect(v.vaultLpMaxLevBps).toBe(20_000);
     expect(v.approvedMatcherProgram.every((b) => b === 0x5a)).toBe(true);
   });
-  it("refuses vault_lp_max_lev_bps above 50000 and a non-zero _reserved0", () => {
+  it("refuses vault_lp_max_lev_bps above 50000 and an undefined p2b_flags bit", () => {
     const d = liveMarket("pengu-market-v18-healthy").slice();
     d.set(hex(layouts.assetVaultLpHex), C.assetWrapperOff(0) + C.ASSET_VAULT_LP_OFF);
     const b = C.assetWrapperOff(0) + C.ASSET_VAULT_LP_OFF;
     const bad = d.slice();
     new DataView(bad.buffer).setUint32(b + C.AV_VAULT_LP_MAX_LEV_BPS, 50_001, true);
     expect(decodeAssetVaultLp(bad)).toBeNull();
+    // P2b (#526): the byte is `p2b_flags` now. Bit 0 (creator fees vesting) is valid and decodes;
+    // any other bit is still refused (validate_asset_vault_lp).
     const bad2 = d.slice();
-    bad2[b + C.AV_RESERVED0] = 1;
+    bad2[b + C.AV_RESERVED0] = 2;
     expect(decodeAssetVaultLp(bad2)).toBeNull();
+    const vesting = d.slice();
+    vesting[b + C.AV_RESERVED0] = 1;
+    expect(decodeAssetVaultLp(vesting)?.creatorFeeVesting).toBe(true);
+    expect(decodeAssetVaultLp(d)?.creatorFeeVesting).toBeUndefined();
   });
   it("refuses bound flag without a key (validate_asset_vault_lp)", () => {
     const d = liveMarket("pengu-market-v18-healthy").slice();

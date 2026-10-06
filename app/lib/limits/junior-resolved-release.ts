@@ -58,7 +58,7 @@ export function buildJuniorResolvedReleaseIxs(
             ledger: c.vm.ledger,
             siblingLedger: c.vm.siblingLedger,
             domain: c.domain,
-            bound: { vaultLpState: c.vm.vaultLpState },
+            bound: { vaultLpState: c.vm.vaultLpState, ...(c.vm.ext ? { ext: c.vm.ext, lpPortfolio: c.vm.lpPortfolio } : {}) },
           }),
         ]
       : []),
