@@ -51,6 +51,12 @@ export interface TicketStateInput {
   feeOverMax: boolean;
   /** A size under which the fee fits, formatted ("2.5 SOL"), or null. */
   feeSuggested: string | null;
+  /**
+   * False while the size is empty or zero: the open button then says what is missing
+   * ("Enter a size") instead of naming an order. Only the "ok" row's label changes; every
+   * row above it keeps its own label. Omitted = a size is entered.
+   */
+  sizeEntered?: boolean;
 }
 
 export interface TicketStatus {
@@ -109,7 +115,7 @@ export function deriveTicketState(i: TicketStateInput): TicketState {
   if (i.feeOverMax) return paused("fee-over-max", "fee-over-max", T.feeOverMax.title, T.feeOverMax.body(i.feeSuggested), T.feeOverMax.button, "error");
   return {
     row: "ok",
-    buttonLabel: `${cap(d)} ${i.baseSymbol} ${i.leverageLabel}×`,
+    buttonLabel: i.sizeEntered === false ? T.enterSize : `${cap(d)} ${i.baseSymbol} ${i.leverageLabel}×`,
     blocks: false,
     waiting: false,
     status: null,

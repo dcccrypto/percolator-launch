@@ -881,6 +881,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const feeFitQ = feeOverMax ? feeFitSizeQ(limitsInput) : null;
   const shortfall = vsPosition ? vsPosition.shortBy : marginNeed > effectiveBalance ? marginNeed - effectiveBalance : 0n;
 
+  // Empty or zero size: the button says "Enter a size" rather than naming an order of nothing
+  // ("Long SOL 1×", "Deposit 0.00 USDC & Long"). Submit is already disabled for it below.
+  const sizeEntered = marginNative > 0n && positionSize > 0n;
   // ── The state machine (audit §3.3): one status slot, one state-labelled button ──
   const ticketState = deriveTicketState({
     direction,
@@ -901,6 +904,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     shortfallLabel: fundingMode ? fundLabel : `${formatTokenAmount(shortfall, decimals)} ${collateralSymbol}`,
     feeOverMax,
     feeSuggested: feeFitQ !== null ? `${fmtQ(feeFitQ)} ${baseTicker}` : null,
+    sizeEntered,
   });
   // Row 5 (LIMIT): the selected side is paused and the other is open => select the open one.
   useEffect(() => {
@@ -1956,7 +1960,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 ? "Loading account…"
                 : fundOverWallet && !ticketState.blocks
                 ? "Get test funds"
-                : fundingMode && ticketState.row === "ok"
+                : fundingMode && ticketState.row === "ok" && sizeEntered
                   ? FIRST_TRADE_COPY.button(fundLabel, direction === "long" ? "Long" : "Short")
                   : ticketState.buttonLabel}
         </button>

@@ -275,6 +275,8 @@ export const TICKET_COPY = {
     button: "Reduce size",
   },
   depositToTrade: (amount: string, side: string) => `Deposit ${amount} & ${side}`,
+  /** The order button while there is no size to trade (it is disabled until there is). */
+  enterSize: "Enter a size",
   stepDownInline: (x: string, sides: string, y: string, others: string) =>
     `Up to ${x}× for new ${sides} right now (busy side). ${others}: up to ${y}×.`,
   clamped: (max: string, sym: string) => `Reduced to the most available now: ${max} ${sym}`,
