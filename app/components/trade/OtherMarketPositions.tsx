@@ -50,7 +50,7 @@ import {
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockPortfolioPositions } from "@/lib/mock-trade-data";
 import { isOracleStaleBlocking } from "@/lib/oracle-stale-gate";
-import { describeLiqPrice } from "@/lib/liq-price-display";
+import { describeLiqDistance, describeLiqPrice } from "@/lib/liq-price-display";
 import { LiqPriceValue } from "./LiqPriceValue";
 
 function abs(n: bigint): bigint {
@@ -171,6 +171,8 @@ const OtherMarketRow: FC<{
     // #2660: `entryE6 > 0n` is always true — on "unknown" it is the mark.
     hasResolvedEntry: pnlIsKnown,
   });
+  // "5.3% to liq" under a real price only, like the current market's row.
+  const liqDistance = describeLiqDistance(liqDisplay, posSize, markE6, liqPriceE6);
   const pnlColor = pnlTokens === 0n ? "text-[var(--text-muted)]" : pnlTokens > 0n ? "text-[var(--long)]" : "text-[var(--short)]";
   const roeColor = roe === 0 ? "text-[var(--text-muted)]" : roe > 0 ? "text-[var(--long)]" : "text-[var(--short)]";
   const livePriceUsd = getSnapshot(pos.slabAddress).priceUsd ?? (hasValidMark ? Number(markE6) / 1e6 : null);
@@ -208,6 +210,11 @@ const OtherMarketRow: FC<{
           style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
         >
           <LiqPriceValue display={liqDisplay} />
+          {liqDistance && (
+            <div data-testid="position-liq-distance" className="text-[9px] font-normal">
+              {liqDistance}
+            </div>
+          )}
         </td>
         <td className={`whitespace-nowrap px-3 py-2.5 text-right ${hasValidMark && pnlIsKnown ? pnlColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }} title={pnlIsKnown ? undefined : UNKNOWN_ENTRY_TOOLTIP}>
           {!pnlIsKnown ? (

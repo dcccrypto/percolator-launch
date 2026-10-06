@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeLiqPrice, type LiqPriceDisplayInput } from "@/lib/liq-price-display";
+import { describeLiqDistance, describeLiqPrice, type LiqPriceDisplayInput } from "@/lib/liq-price-display";
 import { LIQ_PRICE_UNLIQUIDATABLE } from "@/lib/format";
 import { computeMarginHealthPct } from "@/lib/margin-health";
 
@@ -80,5 +80,42 @@ describe("describeLiqPrice", () => {
     expect(() =>
       describeLiqPrice({ ...base, capital: 5 as unknown as bigint, maintenanceMarginBps: 500 }),
     ).not.toThrow();
+  });
+});
+
+describe("describeLiqDistance", () => {
+  const dist = (over: Partial<LiqPriceDisplayInput>) => {
+    const input = { ...base, ...over };
+    return describeLiqDistance(
+      describeLiqPrice(input),
+      BigInt(input.positionSize ?? 0),
+      input.markPriceE6 == null ? null : BigInt(input.markPriceE6),
+      input.liqPriceE6,
+    );
+  };
+
+  it("long: the mark's distance down to the price, over the mark", () => {
+    expect(dist({})).toBe("20.0% to liq"); // (100 - 80) / 100
+  });
+
+  it("short: the mark's distance up to the price, over the price (the shared helper's convention)", () => {
+    expect(dist({ positionSize: -1_000_000n, liqPriceE6: 125_000_000n })).toBe("20.0% to liq"); // (125 - 100) / 125
+  });
+
+  it("a crossed price reads 0.0%, not a distance", () => {
+    expect(dist({ markPriceE6: 79_000_000n })).toBe("0.0% to liq");
+    expect(dist({ positionSize: -1_000_000n, liqPriceE6: 99_000_000n })).toBe("0.0% to liq");
+  });
+
+  it("nothing under a covered '% mgn' cell (long clamp or short sentinel)", () => {
+    expect(dist({ liqPriceE6: 0n, capital: 200_000_000n })).toBeNull();
+    expect(dist({ positionSize: -1_000_000n, liqPriceE6: LIQ_PRICE_UNLIQUIDATABLE, capital: 200_000_000n })).toBeNull();
+  });
+
+  it("nothing when the price or the mark is unknown (never the helper's finite 100 fallback)", () => {
+    expect(dist({ liqPriceE6: null })).toBeNull();
+    expect(dist({ markPriceE6: 0n })).toBeNull();
+    expect(dist({ markPriceE6: null })).toBeNull();
+    expect(dist({ positionSize: 0n })).toBeNull();
   });
 });
