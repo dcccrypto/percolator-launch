@@ -38,6 +38,10 @@ export const NFT_MENU_COPY = {
   closeWrapped: "Unwrap to close this position",
   /** The dock's wrapped-position banner: names the ⋯ button and this menu's Unwrap item. */
   wrappedHint: "Wrapped in Position NFT — Unwrap it from the ⋯ menu to close",
+  /** The order ticket's Close tab when this market's position is wrapped (the ticket can't close it). */
+  closeTabTitle: "Position wrapped as an NFT",
+  closeTabBody: (side: "long" | "short") =>
+    `Your ${side} on this market is held in a Position NFT, so it can't be closed here. Unwrap it from the ⋯ menu on its row in Positions, then close it.`,
   heldElsewhere: "Held as an NFT by another wallet",
   closedTitle: "Your NFT-wrapped position has closed",
   closedBody: "Unwrap the NFT to get back any collateral left in it.",

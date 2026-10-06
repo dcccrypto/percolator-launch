@@ -4,6 +4,10 @@ import { FC, useEffect, useRef } from "react";
 import { useClosePosition } from "@/hooks/useClosePosition";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { ClosePositionForm } from "@/components/trade/ClosePositionForm";
+import { NFT_MENU_COPY } from "@/components/trade/PositionNftMenu";
+import { useNftWrappedPosition } from "@/hooks/useNftWrappedPosition";
+import { isMockMode } from "@/lib/mock-mode";
+import { isMockSlab } from "@/lib/mock-trade-data";
 
 export interface OrderTicketClosePanelProps {
   slabAddress: string;
@@ -76,6 +80,16 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
   const hasPosition = positionSize !== 0n;
   const isLong = positionSize > 0n;
 
+  // `positionSize` comes from useUserAccount, which only sees portfolios the
+  // wallet OWNS. Wrapping a position as a Position NFT moves the portfolio's
+  // owner to the NFT escrow, so a wrapped position reads as 0n here even though
+  // the dock, /portfolio and the header bar all list it. Look for it (same
+  // lookup and gate as PositionsDock) so "No open position" is never shown for
+  // a position the wallet still holds through its NFT.
+  const mockMode = isMockMode() && isMockSlab(slabAddress);
+  const wrapped = useNftWrappedPosition(slabAddress, !hasPosition && !accountPending && !mockMode);
+  const wrappedSize = wrapped?.account.positionSize ?? 0n;
+
   // Warm the fresh-read + trade prewarms once the close form is on screen, so
   // the first "Close" click reaches the wallet popup with no blocking RPC.
   // ONCE per mount/market — not on every `prewarmClose` identity change: its
@@ -108,6 +122,20 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
         className="rounded-none border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-8 text-center"
       >
         <p className="text-[12px] font-medium text-[var(--text-secondary)]">Loading position…</p>
+      </div>
+    );
+  }
+
+  if (!hasPosition && wrappedSize !== 0n) {
+    return (
+      <div
+        data-testid="close-panel-wrapped"
+        className="rounded-none border border-[var(--accent)]/30 bg-[var(--accent)]/5 px-3 py-8 text-center"
+      >
+        <p className="text-[12px] font-medium text-[var(--text)]">{NFT_MENU_COPY.closeTabTitle}</p>
+        <p className="mx-auto mt-1.5 max-w-[240px] text-[11px] leading-relaxed text-[var(--text-secondary)]">
+          {NFT_MENU_COPY.closeTabBody(wrappedSize > 0n ? "long" : "short")}
+        </p>
       </div>
     );
   }
