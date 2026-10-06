@@ -70,7 +70,7 @@ export function EarnVaultView() {
   );
 
   // The rail reports the connected wallet's resolved deposit for the selected
-  // vault; store it so the table's "Your Deposit" column fills in per row as the
+  // vault; store it so the table's "Your Value" column fills in per row as the
   // user browses. Only writes on an actual value change (no render loop).
   // Stable identity on purpose: a new callback would re-fire the rail's report effect with the
   // previous wallet's figure before its re-read lands.
