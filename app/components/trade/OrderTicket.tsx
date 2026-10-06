@@ -104,6 +104,7 @@ import { isMoveFlowEnabled } from "@/lib/v21/move/flag";
 import { isV1CloseOnly } from "@/lib/v21/move/ids";
 import { v1BlocksOrder } from "@/lib/v21/move/close-only";
 import { V1CloseOnlyBanner } from "@/components/move/V1CloseOnlyNotice";
+import { V21_REFRESHING_POSITIONS } from "@/lib/v21/loss-stale-retry";
 import { StatusLine } from "@/components/ui/StatusLine";
 import { FixPricingAction } from "@/components/trade/FixPricingAction";
 import { resolveUserMessage, type UserMessage, type UserMessageAction } from "@/lib/limits/user-message";
@@ -251,6 +252,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const [fundInput, setFundInput] = useState("");
   /** UX WP-6: the portfolio-id race happened; the second prompt is labelled. */
   const [raceNote, setRaceNote] = useState(false);
+  // Devnet v2.1: an order refused Custom(121) waits ~1-2 s and is sent again (lib/v21/loss-stale-retry.ts).
+  const [refreshingPositions, setRefreshingPositions] = useState(false);
   // The market's per-trade size ceiling (immutable, resolved once).
   const fillCaps = useMarketFillCap(slabAddress);
   const { engine, params, insuranceBalance: liveInsuranceBalance, totalOI: liveTotalOI, hasData: engineHasData } = useEngineState();
@@ -965,6 +968,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setEngineLockError(null);
     setWaitingLong(false);
     setRaceNote(false);
+    setRefreshingPositions(false);
     const waitAbort = new AbortController();
     waitAbortRef.current = waitAbort;
     const submitPriceE6 = getLivePriceSnapshot(slabAddress).priceE6 ?? livePriceE6 ?? 0n;
@@ -1002,6 +1006,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 // UX WP-3: it keeps waiting past ~30 s ("We'll keep trying") until Stop.
                 keepWaiting: true,
                 onWaitingLong: () => setWaitingLong(true),
+                onRefreshingPositions: setRefreshingPositions,
                 abortSignal: waitAbort.signal,
               },
               snapshotLimitPriceE6,
@@ -1078,6 +1083,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     } catch (e) {
       setWaitingLong(false);
       setRaceNote(false);
+      setRefreshingPositions(false);
       if (e instanceof FirstTradeDepositError) {
         // §3.2 item 5: the account exists but the deposit didn't land — say so, offer the deposit.
         setRefusal({
@@ -1213,6 +1219,13 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           message={{ kind: "waiting-long", variant: "wait", title: TICKET_COPY.waitingLong.title, body: TICKET_COPY.waitingLong.body, action: { id: "stop", label: TICKET_COPY.waitingLong.stop } }}
           onAction={onSlotAction}
         />
+      );
+    }
+    if (refreshingPositions && tradePhase !== "idle") {
+      return (
+        <div data-testid="trade-refreshing-positions">
+          <StatusLine message={{ kind: "loss-stale-retry", variant: "wait", title: "One moment", body: V21_REFRESHING_POSITIONS }} />
+        </div>
       );
     }
     if (raceNote && tradePhase === "submitting") {
@@ -1973,7 +1986,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           {(ticketState.waiting || tradePhase === "waiting") && (
             <span aria-hidden="true" data-testid="trade-submit-spinner" className="mr-1.5 inline-block h-2 w-2 animate-pulse rounded-full bg-current align-middle" />
           )}
-          {tradePhase === "submitting"
+          {refreshingPositions && tradePhase !== "idle"
+            ? V21_REFRESHING_POSITIONS
+            : tradePhase === "submitting"
             ? TICKET_COPY.confirmInWallet
             : tradePhase === "waiting"
               ? TICKET_COPY.waitingLatest

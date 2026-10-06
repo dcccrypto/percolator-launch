@@ -11,6 +11,8 @@ export interface ConfirmedTradeParams {
   abortSignal?: AbortSignal;
   keepWaiting?: boolean;
   onWaitingLong?: () => void;
+  /** Devnet v2.1: a Custom(121) order waits to be resent ("Refreshing positions…"). */
+  onRefreshingPositions?: (refreshing: boolean) => void;
 }
 
 /**

@@ -37,6 +37,7 @@ import {
 import { planTakerCrank } from "@/lib/taker-crank";
 import { isAllocateRefusal, planAllocatePrefix } from "@/lib/v21/allocate-prefix";
 import { isDevnetV21Enabled } from "@/lib/v21/flag";
+import { withLossStaleRetry } from "@/lib/v21/loss-stale-retry";
 import { getMaintenanceConfig, MaintenanceError } from "@/lib/maintenance";
 import { PartialLegSendError, SINGLE_TX_MAX_LEGS, sendLegGroups } from "@/lib/trade-leg-groups";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
@@ -315,6 +316,11 @@ export function useTrade(slabAddress: string) {
       /** UX WP-3: keep waiting past the schedule (with Stop) and say so after ~30 s. */
       keepWaiting?: boolean;
       onWaitingLong?: () => void;
+      /**
+       * Devnet v2.1: true while an order refused Custom(121) EngineLossStale waits to be sent
+       * again ("Refreshing positions…"), false once it is done either way (lib/v21/loss-stale-retry.ts).
+       */
+      onRefreshingPositions?: (refreshing: boolean) => void;
     }) => {
       if (inflightRef.current) throw new Error("Trade already in progress");
       inflightRef.current = true;
@@ -664,14 +670,28 @@ export function useTrade(slabAddress: string) {
                 }
               : undefined,
           });
-          try {
-            sig = await sendTrade(instructions);
-          } catch (e) {
-            // Devnet v2.1: the allocation refused (Custom 100) after the pre-check passed (state moved).
-            // It is never needed for the trade: send the trade without it, once.
-            if (allocateIxs.length > 0 && isAllocateRefusal(e)) sig = await sendTrade(instructions.filter((ix) => !allocateIxs.includes(ix)));
-            else throw e;
-          }
+          const sendOrder = async (): Promise<string> => {
+            try {
+              return await sendTrade(instructions);
+            } catch (e) {
+              // Devnet v2.1: the allocation refused (Custom 100) after the pre-check passed (state moved).
+              // It is never needed for the trade: send the trade without it, once.
+              if (allocateIxs.length > 0 && isAllocateRefusal(e)) return sendTrade(instructions.filter((ix) => !allocateIxs.includes(ix)));
+              throw e;
+            }
+          };
+          // Devnet v2.1: the order goes ALONE (no push / crank / refresh prefix): TradeCpi accrues
+          // the market itself. A Custom(121) EngineLossStale (insurance does not yet cover the
+          // stale portfolios' hidden-loss bound; the keeper's sweep shrinks it) is retried a few
+          // times ~1-2 s apart, never bundled with refreshes (lib/v21/loss-stale-retry.ts).
+          sig =
+            isV17Market && isDevnetV21Enabled()
+              ? await withLossStaleRetry(sendOrder, {
+                  wrapperProgramId: programId.toBase58(),
+                  onRefreshing: params.onRefreshingPositions,
+                  abortSignal: params.abortSignal,
+                })
+              : await sendOrder();
         }
 
         // Immediate local application of the confirmed fill: sendTx's
