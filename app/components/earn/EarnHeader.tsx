@@ -80,6 +80,11 @@ export function EarnHeader({ stats, loading }: EarnHeaderProps) {
               decimals={0}
               className="text-2xl font-bold text-[var(--text)]"
             />
+            {stats.unvaluedSymbols.length > 0 && (
+              <p data-testid="earn-tvl-excludes" className="mt-1 text-[11px] text-[var(--text-muted)]">
+                {excludesNote(stats.unvaluedSymbols)}
+              </p>
+            )}
           </StatCell>
           <StatCell
             label="Daily Fee Revenue"
@@ -107,6 +112,13 @@ export function EarnHeader({ stats, loading }: EarnHeaderProps) {
       </div>
     </div>
   );
+}
+
+/** "Excludes 1 vault (X) that can't be valued right now." Names up to three, then counts the rest. */
+export function excludesNote(symbols: string[]): string {
+  const n = symbols.length;
+  const shown = n > 3 ? `${symbols.slice(0, 3).join(", ")} and ${n - 3} more` : symbols.join(", ");
+  return `Excludes ${n} vault${n === 1 ? "" : "s"} (${shown}) that can't be valued right now.`;
 }
 
 function StatCell({

@@ -67,6 +67,11 @@ export interface MarketVaultInfo {
    * (a live market with no Earn vault) is hidden from the vault grid.
    */
   hasVault?: boolean;
+  /**
+   * The vault's value can't be determined (its two-pot state can't be read or priced; the program
+   * refuses deposits and withdrawals on it too). Shown as "—" and left out of the TVL, by name.
+   */
+  unvalued?: boolean;
 }
 
 export interface EarnStats {
@@ -84,6 +89,8 @@ export interface EarnStats {
   markets: MarketVaultInfo[];
   /** Total 24h fee revenue estimate (USD) */
   dailyFeeRevenue: number;
+  /** Symbols of the vaults left out of `tvl` because their value can't be determined. */
+  unvaluedSymbols: string[];
 }
 
 const DEFAULT_STATS: EarnStats = {
@@ -94,6 +101,7 @@ const DEFAULT_STATS: EarnStats = {
   totalInsurance: 0,
   markets: [],
   dailyFeeRevenue: 0,
+  unvaluedSymbols: [],
 };
 
 /**
@@ -194,6 +202,7 @@ function generateMockStats(): EarnStats {
     totalInsurance: totalInsurance * 150,
     markets,
     dailyFeeRevenue,
+    unvaluedSymbols: [],
   };
 }
 
@@ -214,6 +223,8 @@ export interface CuratedVaultOnChain {
   cooldownSlots: bigint;
   /** Whether an LP Vault Registry account was actually found on-chain for this slab. */
   found: boolean;
+  /** Two-pot state unreadable or unpriceable: `tvlAtoms` is 0 and means "unknown", not "empty". */
+  unvalued?: boolean;
   /** Claim-adjusted NAV, max withdrawable now and the withdraw status (two-pot vaults only), in collateral atoms. */
   withdraw?: { claimAdjustedNavAtoms: bigint; maxWithdrawableNowAtoms: bigint; status: WithdrawStatus; blockedBy: BlockedBy };
 }
@@ -426,20 +437,31 @@ export async function fetchCuratedVaultsOnChain(
             return;
           }
         }
-        if (sp && v && sp.totalShares > 0n) {
-          // The withdraw view is extra information: if it cannot be computed the TVL must still show.
-          let w: ReturnType<typeof vaultWithdrawView> = null;
-          try {
-            w = vaultWithdrawView(sp);
-          } catch {
-            w = null;
-          }
-          result[s.slab] = {
-            ...result[s.slab],
-            tvlAtoms: v.nav,
-            ...(w ? { withdraw: { claimAdjustedNavAtoms: w.claimAdjustedNav, maxWithdrawableNowAtoms: w.maxWithdrawableNow, status: w.status, blockedBy: w.blockedBy } } : {}),
-          };
+        // Its state can't be read or priced (market account missing or undecodable, or both pots
+        // under water on a pre-floor wrapper - M-1, which no app transaction repairs). The registry's
+        // shares + fees is not its value (live: up to ~4x too high), so it is marked unvalued and left
+        // out of the TVL by name. Per vault, not per cycle: a stuck vault must not freeze the hub.
+        if (!sp || !v) {
+          result[s.slab] = { ...result[s.slab], tvlAtoms: 0n, unvalued: true };
+          return;
         }
+        // No shares outstanding: nobody holds anything, so it adds nothing (not its lifetime fees).
+        if (sp.totalShares === 0n) {
+          result[s.slab] = { ...result[s.slab], tvlAtoms: 0n };
+          return;
+        }
+        // The withdraw view is extra information: if it cannot be computed the TVL must still show.
+        let w: ReturnType<typeof vaultWithdrawView> = null;
+        try {
+          w = vaultWithdrawView(sp);
+        } catch {
+          w = null;
+        }
+        result[s.slab] = {
+          ...result[s.slab],
+          tvlAtoms: v.nav,
+          ...(w ? { withdraw: { claimAdjustedNavAtoms: w.claimAdjustedNav, maxWithdrawableNowAtoms: w.maxWithdrawableNow, status: w.status, blockedBy: w.blockedBy } } : {}),
+        };
       });
       if (unpriced) return { data: result, ok: false };
     }
@@ -603,6 +625,7 @@ export function buildMarketVaultInfo(
     // Earn LP vault registry present on-chain? Drives the vault grid's
     // "hide markets without a usable vault" filter (VaultGrid).
     hasVault: curatedVaults[slab]?.found === true,
+    ...(curatedVaults[slab]?.unvalued ? { unvalued: true } : {}),
     ...(curatedVaults[slab]?.withdraw
       ? {
           earnWithdraw: {
@@ -690,16 +713,18 @@ export function buildLiveMarkets(
  * and the cold-start catch-block fallback below so the three snapshot-building
  * call sites can't silently drift from each other.
  */
-function computeAggregates(markets: MarketVaultInfo[]): Omit<EarnStats, 'markets'> {
+export function computeAggregates(markets: MarketVaultInfo[]): Omit<EarnStats, 'markets'> {
   const tvl = markets.reduce((s, m) => s + m.vaultBalance / (10 ** m.decimals), 0);
   const totalOI = markets.reduce((s, m) => s + m.totalOI, 0);
   const maxOI = markets.reduce((s, m) => s + m.maxOI, 0);
   const totalInsurance = markets.reduce((s, m) => s + m.insuranceFund / (10 ** m.decimals), 0);
+  const unvaluedSymbols = markets.filter((m) => m.unvalued).map((m) => m.symbol);
   const dailyFeeRevenue = markets.reduce(
     (s, m) => s + (m.volume24h * m.tradingFeeBps) / 10_000,
     0,
   );
   return {
+    unvaluedSymbols,
     tvl,
     totalOI,
     maxOI,

@@ -80,9 +80,9 @@ export function VaultRow({ vault, selected, userDepositUsd, onSelect }: VaultRow
       <span
         className="text-right text-[12px] tabular-nums text-[var(--text)]"
         style={{ fontFamily: 'var(--font-mono)' }}
-        title={valueTitle}
+        title={vault.unvalued ? "This vault's value can't be determined right now: it can't take deposits or pay withdrawals until it's repaired. Not counted in the TVL." : valueTitle}
       >
-        ${formatCompact(vaultUsd)}
+        {vault.unvalued ? '—' : `$${formatCompact(vaultUsd)}`}
       </span>
 
       {/* Utilization — thin OI/capacity bar + % */}

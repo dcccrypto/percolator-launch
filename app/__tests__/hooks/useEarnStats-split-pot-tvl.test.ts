@@ -31,7 +31,8 @@ vi.mock("@percolatorct/sdk", async (orig) => ({
 vi.mock("@/lib/limits/earn-split-pot", () => ({
   splitPotLedgerKeys: mocks.ledgerKeys,
   splitPotStateFromAccounts: mocks.fromAccounts,
-  vaultValue: (sp: { own: { nav: bigint }; sib: { nav: bigint } }) => ({ nav: sp.own.nav + sp.sib.nav, available: 0n }),
+  vaultValue: (sp: { own: { nav: bigint }; sib: { nav: bigint }; unpriceable?: boolean }) =>
+    sp.unpriceable ? null : { nav: sp.own.nav + sp.sib.nav, available: 0n },
 }));
 
 import { fetchCuratedVaultsOnChain } from "@/hooks/useEarnStats";
@@ -67,11 +68,26 @@ describe("fetchCuratedVaultsOnChain: two-pot vaults are valued at NAV", () => {
     expect(mocks.chunked).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps shares + fees when the two-pot state cannot be read", async () => {
+  it.each([
+    ["two-pot state can't be read", () => mocks.fromAccounts.mockReturnValue(null)],
+    ["state reads but can't be priced (both pots under water, pre-floor)", () =>
+      mocks.fromAccounts.mockReturnValue({ own: { nav: 1n }, sib: { nav: 1n }, feeShareBps: 0, totalShares: 2_000_000_000n, unpriceable: true })],
+  ])("a vault whose %s is marked unvalued at 0, never shares + fees; the cycle still succeeds", async (_n, setup) => {
     mocks.ledgerKeys.mockReturnValue(ledgers);
-    mocks.fromAccounts.mockReturnValue(null);
-    const { data } = await fetchCuratedVaultsOnChain([SLAB]);
-    expect(data[SLAB].tvlAtoms).toBe(SHARES_PLUS_FEES);
+    setup();
+    const { data, ok } = await fetchCuratedVaultsOnChain([SLAB]);
+    expect(ok).toBe(true);
+    expect(data[SLAB]).toMatchObject({ tvlAtoms: 0n, unvalued: true, found: true });
+    expect(data[SLAB].tvlAtoms).not.toBe(SHARES_PLUS_FEES);
+  });
+
+  it("no shares outstanding: the vault adds 0, not its lifetime fees (and isn't flagged unvalued)", async () => {
+    mocks.ledgerKeys.mockReturnValue(ledgers);
+    mocks.fromAccounts.mockReturnValue({ own: { nav: 350_000n }, sib: { nav: 0n }, feeShareBps: 0, totalShares: 0n });
+    const { data, ok } = await fetchCuratedVaultsOnChain([SLAB]);
+    expect(ok).toBe(true);
+    expect(data[SLAB].tvlAtoms).toBe(0n);
+    expect(data[SLAB].unvalued).toBeUndefined();
   });
 
   it("a failed two-pot read fails the cycle (keep-last-good), not a silent shares + fees", async () => {
