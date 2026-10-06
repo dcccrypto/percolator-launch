@@ -50,6 +50,11 @@ export function EarnVaultView() {
     walletRef.current = walletStr;
   }, [walletStr]);
 
+  // A dismissal covers this run of the error only: once a refresh succeeds, the next failure
+  // (even with the same message) shows again, or the page could sit on stale figures unflagged.
+  useEffect(() => {
+    if (!error) setDismissedError(null);
+  }, [error]);
   const showError = error && error !== dismissedError;
 
   // Auto-select the first vault once markets load so the deposit rail is always
