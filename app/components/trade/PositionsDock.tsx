@@ -85,7 +85,7 @@ import { onChainMarkE6, terminalPositionPnl } from "@/lib/position-pnl";
 import { isSentinelValue } from "@/lib/health";
 import { RenderProfiler } from "@/components/dev/RenderProfiler";
 import { isOracleStaleBlocking } from "@/lib/oracle-stale-gate";
-import { describeLiqPrice } from "@/lib/liq-price-display";
+import { describeLiqDistance, describeLiqPrice } from "@/lib/liq-price-display";
 import { LiqPriceValue } from "./LiqPriceValue";
 import { positionSizeUsdText } from "@/lib/q-usd";
 
@@ -301,6 +301,8 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
     // #2660: `entryPriceE6 > 0n` is always true — on "unknown" it is the mark.
     hasResolvedEntry: pnlIsKnown,
   });
+  // "5.3% to liq" under a real price only; the "% mgn" / unknown cells stay as they are.
+  const liqDistance = describeLiqDistance(liqDisplay, account.positionSize, currentPriceE6, liqPriceE6);
   const liqPriceColor = (() => {
     if (liqUnliquidatable) return "text-[var(--text-secondary)]";
     if (liqPriceE6 <= 0n) return "text-[var(--text-secondary)]";
@@ -467,6 +469,11 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                 style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
               >
                 <LiqPriceValue display={liqDisplay} />
+                {liqDistance && (
+                  <div data-testid="position-liq-distance" className="text-[9px] font-normal">
+                    {liqDistance}
+                  </div>
+                )}
               </td>
               <td className={`whitespace-nowrap px-3 py-2.5 text-right ${hasValidMark && pnlIsKnown ? pnlColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                 {!pnlIsKnown ? (
