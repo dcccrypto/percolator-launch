@@ -1,10 +1,17 @@
 'use client';
 
-import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
 import type { EarnStats } from '@/hooks/useEarnStats';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 import { FeeBreakdown } from "@/components/FeeBreakdown";
 import { FEE_LEGS, legPercent } from "@/lib/fee-breakdown";
+
+/**
+ * The figures as plain text, formatted as AnimatedNumber's final frame. Not animated: a count-up
+ * from $0 (and again on every 15 s poll) meant a glance or a screenshot could catch any value on
+ * the way, reported on Discord as TVL "anywhere from $198K to $415K".
+ */
+const usd = (v: number): string => `$${Math.round(v).toLocaleString()}`;
+const FIGURE = "font-[var(--font-jetbrains-mono)] tabular-nums text-2xl font-bold text-[var(--text)]";
 
 /** Derived, never restated — see lib/fee-breakdown.ts. */
 const LP_SHARE_PCT = legPercent(FEE_LEGS.find((l) => l.id === "lp")!);
@@ -74,12 +81,7 @@ export function EarnHeader({ stats, loading }: EarnHeaderProps) {
             label="Total Value Locked"
             loading={loading}
           >
-            <AnimatedNumber
-              value={stats.tvl}
-              prefix="$"
-              decimals={0}
-              className="text-2xl font-bold text-[var(--text)]"
-            />
+            <span className={FIGURE}>{usd(stats.tvl)}</span>
             {stats.unvaluedSymbols.length > 0 && (
               <p data-testid="earn-tvl-excludes" className="mt-1 text-[11px] text-[var(--text-muted)]">
                 {excludesNote(stats.unvaluedSymbols)}
@@ -90,23 +92,13 @@ export function EarnHeader({ stats, loading }: EarnHeaderProps) {
             label="Daily Fee Revenue"
             loading={loading}
           >
-            <AnimatedNumber
-              value={stats.dailyFeeRevenue}
-              prefix="$"
-              decimals={0}
-              className="text-2xl font-bold text-[var(--text)]"
-            />
+            <span className={FIGURE}>{usd(stats.dailyFeeRevenue)}</span>
           </StatCell>
           <StatCell
             label="Insurance Fund"
             loading={loading}
           >
-            <AnimatedNumber
-              value={stats.totalInsurance}
-              prefix="$"
-              decimals={0}
-              className="text-2xl font-bold text-[var(--text)]"
-            />
+            <span className={FIGURE}>{usd(stats.totalInsurance)}</span>
           </StatCell>
         </div>
       </div>
