@@ -240,19 +240,20 @@ interface RegisteredMarketMeta {
 /**
  * Fetch the playground's dynamically-registered (user-launched) markets from the
  * registration Blob endpoint, so their Earn vaults can be seeded alongside the 5
- * curated markets. Client-side fetch (this hook runs in the browser) — never throws;
- * on any failure returns [] and the Earn page simply shows the curated 5, same as
- * before user-launched markets could carry an Earn vault.
+ * curated markets. Client-side fetch (this hook runs in the browser) — never throws.
+ * `ok` is false when the list may be incomplete (request failed, bad body, or the route's
+ * store read failed: `complete: false`), so the cycle keeps the last good snapshot rather
+ * than publishing a TVL with those vaults silently missing.
  */
-async function fetchRegisteredMarketsMeta(): Promise<RegisteredMarketMeta[]> {
+async function fetchRegisteredMarketsMeta(): Promise<{ data: RegisteredMarketMeta[]; ok: boolean }> {
   try {
     const resp = await fetch('/api/playground/registered-markets', { cache: 'no-store' });
-    if (!resp.ok) return [];
-    const data: unknown = await resp.json();
-    const markets = (data as { markets?: unknown })?.markets;
-    if (!Array.isArray(markets)) return [];
+    if (!resp.ok) return { data: [], ok: false };
+    const body: unknown = await resp.json();
+    const markets = (body as { markets?: unknown })?.markets;
+    if (!Array.isArray(markets)) return { data: [], ok: false };
 
-    return markets.reduce<RegisteredMarketMeta[]>((acc, entry) => {
+    const data = markets.reduce<RegisteredMarketMeta[]>((acc, entry) => {
       if (typeof entry !== 'object' || entry === null) return acc;
       const m = entry as Record<string, unknown>;
       const slabAddress = typeof m.slabAddress === 'string' ? m.slabAddress : null;
@@ -264,8 +265,9 @@ async function fetchRegisteredMarketsMeta(): Promise<RegisteredMarketMeta[]> {
       acc.push({ slabAddress, symbol, name, mainnetCa });
       return acc;
     }, []);
+    return { data, ok: (body as { complete?: unknown }).complete !== false };
   } catch {
-    return [];
+    return { data: [], ok: false };
   }
 }
 
@@ -784,12 +786,13 @@ export function useEarnStats() {
       // the hardcoded, now-stale July-10 keys of PLAYGROUND_SLAB_META. Fetched
       // alongside the registered (user-launched) markets, which remain a
       // supplemental source deduped by slab below. Both never throw.
-      const [liveResult, registeredMarkets] = await Promise.all([
+      const [liveResult, registeredResult] = await Promise.all([
         fetchLiveMarketsMeta(),
         fetchRegisteredMarketsMeta(),
       ]);
       if (stale()) return;
       const liveMarkets = liveResult.data;
+      const registeredMarkets = registeredResult.data;
       const liveSlabSet = new Set(liveMarkets.map((m) => m.slabAddress));
 
       // On-chain LP Vault Registry TVL + max leverage are the accuracy-critical
@@ -825,7 +828,7 @@ export function useEarnStats() {
       // but EMPTY market list is NOT a failure (the indexer legitimately has no
       // rows — expected locally), so it publishes a clean empty state instead.
       const fetchFailed =
-        !liveResult.ok || !curatedVaultsResult.ok || !maxLeverageResult.ok;
+        !liveResult.ok || !registeredResult.ok || !curatedVaultsResult.ok || !maxLeverageResult.ok;
 
       if (fetchFailed && hasGoodStatsRef.current) {
         // Keep-last-good: a real snapshot is already on screen — a transient
