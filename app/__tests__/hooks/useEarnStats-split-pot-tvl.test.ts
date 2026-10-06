@@ -7,6 +7,7 @@
 import { PublicKey } from "@solana/web3.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const sdk = vi.hoisted(() => ({ parseThrows: false }));
 const mocks = vi.hoisted(() => ({
   chunked: vi.fn(),
   ledgerKeys: vi.fn(),
@@ -26,7 +27,10 @@ vi.mock("@/lib/program-upgrade-detect", () => ({
 vi.mock("@/lib/rpc-chunk", () => ({ getMultipleAccountsInfoChunked: mocks.chunked }));
 vi.mock("@percolatorct/sdk", async (orig) => ({
   ...(await orig<typeof import("@percolatorct/sdk")>()),
-  parseLpVaultRegistry: () => ({ totalLpSharesOutstanding: 2_000_000_000n, feeDistributionTotalAtoms: 350_000n, redemptionCooldownSlots: 150n }),
+  parseLpVaultRegistry: () => {
+    if (sdk.parseThrows) throw new Error("layout");
+    return { totalLpSharesOutstanding: 2_000_000_000n, feeDistributionTotalAtoms: 350_000n, redemptionCooldownSlots: 150n };
+  },
 }));
 vi.mock("@/lib/limits/earn-split-pot", () => ({
   splitPotLedgerKeys: mocks.ledgerKeys,
@@ -48,6 +52,7 @@ describe("fetchCuratedVaultsOnChain: two-pot vaults are valued at NAV", () => {
     mocks.ledgerKeys.mockReset();
     mocks.fromAccounts.mockReset();
     mocks.upgrade.mockReset().mockResolvedValue("post");
+    sdk.parseThrows = false;
     mocks.chunked.mockResolvedValueOnce([acct]).mockResolvedValueOnce([acct, acct, acct]);
   });
 
@@ -79,6 +84,15 @@ describe("fetchCuratedVaultsOnChain: two-pot vaults are valued at NAV", () => {
     expect(ok).toBe(true);
     expect(data[SLAB]).toMatchObject({ tvlAtoms: 0n, unvalued: true, found: true });
     expect(data[SLAB].tvlAtoms).not.toBe(SHARES_PLUS_FEES);
+  });
+
+  it("a registry account that doesn't decode is a vault of unknown value (unvalued), not 'no vault' at $0", async () => {
+    sdk.parseThrows = true;
+    mocks.ledgerKeys.mockReturnValue(ledgers);
+    const { data, ok } = await fetchCuratedVaultsOnChain([SLAB]);
+    expect(ok).toBe(true);
+    expect(data[SLAB]).toMatchObject({ tvlAtoms: 0n, found: true, unvalued: true });
+    expect(mocks.chunked).toHaveBeenCalledTimes(1); // not sent on to the two-pot read
   });
 
   it("no shares outstanding: the vault adds 0, not its lifetime fees (and isn't flagged unvalued)", async () => {

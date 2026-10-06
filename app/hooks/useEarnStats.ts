@@ -401,7 +401,11 @@ export async function fetchCuratedVaultsOnChain(
           found: true,
         };
       } catch {
-        // Malformed/unrecognized account for this slab — leave the not-found default.
+        // An account exists at this market's registry PDA (only the program can create one there)
+        // but doesn't decode, e.g. a layout change ahead of the SDK. That is a vault whose value is
+        // unknown, not "no vault": counting it as found:false showed it as $0 and hid it, and a
+        // layout change would have shown the whole TVL as $0. Same handling as an unpriceable vault.
+        result[slab] = { tvlAtoms: 0n, cooldownSlots: 0n, found: true, unvalued: true };
       }
     });
 
@@ -410,7 +414,7 @@ export async function fetchCuratedVaultsOnChain(
     // One batched read of market + both ledgers for every such vault.
     const splitPot = slabs.flatMap((slab, i) => {
       const info = infos[i];
-      if (!result[slab].found || !info) return [];
+      if (!result[slab].found || result[slab].unvalued || !info) return [];
       const market = new PublicKey(slab);
       const keys = splitPotLedgerKeys(programId, market, info.data);
       return keys ? [{ slab, market, registryData: info.data, ...keys }] : [];
