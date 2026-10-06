@@ -629,6 +629,28 @@ interface FreshBatchContext {
  * Never throws: `String(err)` can raise on a null-prototype object, a Proxy,
  * or a throwing `Symbol.toPrimitive`, and this runs outside any try.
  */
+/**
+ * /api/devnet-pre-fund answered 429: the wallet is short of the test token for
+ * this launch AND has already claimed it inside the 24 h window. The sequential
+ * path asks the same route at its deposit step and gets the same answer, so
+ * falling back would create the market, lock its rent, and then stop. This must
+ * end the launch before anything is sent.
+ */
+export class PreFundRateLimitedError extends Error {
+  constructor(public readonly nextClaimAt: string | null) {
+    super("Devnet pre-fund failed: Already pre-funded recently");
+    this.name = "PreFundRateLimitedError";
+  }
+}
+
+export function preFundRateLimitedMessage(nextClaimAt: string | null): string {
+  const at = nextClaimAt ? new Date(nextClaimAt) : null;
+  const when = at && !Number.isNaN(at.getTime())
+    ? ` More arrive after ${at.toLocaleString(undefined, { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" })}.`
+    : "";
+  return `This wallet has used today's test tokens for this token, so the market can't be funded yet. Nothing was sent.${when} A smaller liquidity amount or a different token works now.`;
+}
+
 export function describeBatchFallback(err: unknown): string {
   let raw = "";
   try {
@@ -898,6 +920,7 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
         // left the user with "Already pre-funded recently" and no idea when
         // "recently" stops, which is the single fact they need.
         const when = nextClaimAt ? ` Try again after ${nextClaimAt}.` : "";
+        if (preFundResp.status === 429) throw new PreFundRateLimitedError(nextClaimAt ?? null);
         throw new Error(`Devnet pre-fund failed: ${pfError ?? preFundResp.status}.${when}`);
       }
     }
@@ -1772,6 +1795,11 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
 
     return { status: "success" };
   } catch (err) {
+    if (!broadcastStarted && err instanceof PreFundRateLimitedError) {
+      // Not a fallback case: the sequential path cannot fund this launch either.
+      setState((s) => ({ ...s, loading: false, error: preFundRateLimitedMessage(err.nextClaimAt), step: 0, stepLabel: "" }));
+      return { status: "fatal" };
+    }
     if (!broadcastStarted) {
       // Nothing landed — safe to fall back to the sequential path in the
       // SAME create() call. See the FALLBACK CONTRACT note above.
@@ -2208,6 +2236,36 @@ export function useCreateMarket() {
           runningStep = 0;
           setState((s) => ({ ...s, step: 0, stepLabel: STEP_LABELS[0] }));
 
+          // Fund the deposit BEFORE the market exists. The deposit step used to be the
+          // first place this path asked for test tokens, so a wallet inside the faucet's
+          // 24 h window created the market, locked its rent, and only then was refused.
+          if (isDevnetEnv) {
+            const required0 = fullMarketRequirement(params.lpCollateral, params.insuranceAmount);
+            let balance0 = 0n;
+            try {
+              balance0 = (await getAccount(connection, await getAssociatedTokenAddress(params.mint, wallet.publicKey))).amount;
+            } catch {
+              // ATA doesn't exist — balance stays 0
+            }
+            if (balance0 < required0) {
+              const fundResp0 = await fetch("/api/devnet-pre-fund", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  mintAddress: params.mint.toBase58(),
+                  walletAddress: wallet.publicKey.toBase58(),
+                  lpCollateral: params.lpCollateral.toString(),
+                  insuranceAmount: params.insuranceAmount.toString(),
+                }),
+              });
+              if (fundResp0.status === 429) {
+                const body0 = (await fundResp0.json().catch(() => ({}))) as { nextClaimAt?: string | null };
+                throw new PreFundRateLimitedError(body0.nextClaimAt ?? null);
+              }
+              // Any other failure is left to the deposit step's own check and message.
+            }
+          }
+
           vaultAta = await getAssociatedTokenAddress(params.mint, vaultPda, true);
 
           // Persist recovery state BEFORE sending TX0. Survives tab close so
@@ -2565,15 +2623,11 @@ export function useCreateMarket() {
             const signedTx = await wallet.signTransaction(partialTx);
 
             // Send the fully-signed tx
-            const keeperDelegateSig = await connection.sendRawTransaction(signedTx.serialize(), {
-              skipPreflight: false,
-            });
-            const keeperDelegateConfirm = await connection.confirmTransaction(keeperDelegateSig, "confirmed");
-            if (keeperDelegateConfirm.value.err) {
-              throw new Error(
-                `Keeper delegate tx failed on-chain: ${JSON.stringify(keeperDelegateConfirm.value.err)}`,
-              );
-            }
+            // Confirm by polling signature status, like every other step. This was the
+            // one launch tx still on `connection.confirmTransaction(sig)`, which waits on
+            // a websocket notification and reported a 30 s timeout for a hand-off that
+            // had landed in 4 s (three launches in a row on 2026-10-06), failing the step.
+            const keeperDelegateSig = await broadcastSignedTx(connection, signedTx, { abortSignal });
             setState((s) => ({ ...s, txSigs: [...s.txSigs, keeperDelegateSig] }));
           }
 
@@ -3865,6 +3919,10 @@ export function useCreateMarket() {
         }));
         if (isKeeperOracle && params.dexPoolAddress) startKeeperLoop(params, slabPk.toBase58());
       } catch (e) {
+        if (e instanceof PreFundRateLimitedError) {
+          setState((s) => ({ ...s, loading: false, error: preFundRateLimitedMessage(e.nextClaimAt) }));
+          return;
+        }
         const msg = parseMarketCreationError(e, {
           step: sequentialStepKind(runningStep),
           stepLabel: `Step ${runningStep + 1} (${STEP_LABELS[runningStep]?.replace(/\.\.\.$/, "") ?? "market creation"})`,
