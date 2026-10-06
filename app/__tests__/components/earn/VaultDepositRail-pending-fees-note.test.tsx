@@ -49,7 +49,7 @@ describe("Earn card: pending-fees note", () => {
     h.splitPot = splitPot;
     render(<VaultDepositRail slab={SLAB} vault={null} />);
     expect((await screen.findByTestId("earn-rail-pending-fees-note")).textContent).toBe(
-      "Your Deposit can read a little below what you put in until the vault collects its pending trading fees. Withdrawing before then forfeits your share of them.",
+      "Your Value can read a little below what you put in until the vault collects its pending trading fees. Withdrawing before then forfeits your share of them.",
     );
   });
 

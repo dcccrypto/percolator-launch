@@ -196,7 +196,7 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
               and doesn't harvest first, so a fresh deposit reads below what went in until a 78. */}
           {everLoaded && state.splitPot && (
             <p data-testid="earn-rail-pending-fees-note" className="mt-3 border-t border-[var(--border)]/60 pt-3 text-[11px] text-[var(--text-muted)]">
-              Your Deposit can read a little below what you put in until the vault collects its pending trading fees. Withdrawing before then forfeits your share of them.
+              Your Value can read a little below what you put in until the vault collects its pending trading fees. Withdrawing before then forfeits your share of them.
             </p>
           )}
 
