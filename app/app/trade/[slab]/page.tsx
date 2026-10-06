@@ -24,7 +24,6 @@ import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { useLivePriceHasData, livePriceJsonFetcher } from "@/hooks/useLivePrice";
 import { getMarketIdentity, setMarketIdentity } from "@/lib/marketIdentityCache";
-import { useToast } from "@/hooks/useToast";
 import { isPlaceholderSymbol, SLUG_ALIASES } from "@/lib/symbol-utils";
 // DevnetFaucetModal moved to WalletProvider (PERC-808: global placement on all pages)
 import { getNetwork } from "@/lib/config";
@@ -87,35 +86,6 @@ const TradingChart = dynamic(
  *   this protocol's model, so PositionsDock ships with the two tabs that
  *   actually correspond to real data: Positions, Trades.
  */
-
-/* ── Reusable tiny components ─────────────────────────────── */
-
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  const { toast } = useToast();
-  return (
-    <button
-      onClick={() => {
-        navigator.clipboard.writeText(text);
-        setCopied(true);
-        toast("Address copied to clipboard!", "success");
-        setTimeout(() => setCopied(false), 1500);
-      }}
-      className="inline-flex items-center text-[var(--text-muted)] transition-colors duration-150 hover:text-[var(--accent)]"
-      title="Copy address"
-    >
-      {copied ? (
-        <svg className="h-3 w-3 text-[var(--long)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-        </svg>
-      ) : (
-        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-        </svg>
-      )}
-    </button>
-  );
-}
 
 /* Phase 5: the page-local `Tabs` helper is gone — its only remaining
  * consumer (the old PositionsDockShell) was replaced by
@@ -556,10 +526,6 @@ function TradePageInner({ slab }: { slab: string }) {
       <TradeMarketHealthBanner slab={slab} />
       <MarketLimitsStrip slab={slab} symbol={symbol} />
       <div className="flex items-center gap-3 py-1 overflow-x-auto whitespace-nowrap scrollbar-none">
-        <span className="flex items-center gap-1 text-[10px] text-[var(--text-muted)]" style={{ fontFamily: "var(--font-mono)" }}>
-          {shortAddress}
-          <CopyButton text={slab} />
-        </span>
         {header?.admin && (
           <Tooltip
             text={

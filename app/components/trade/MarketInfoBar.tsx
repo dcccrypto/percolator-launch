@@ -9,6 +9,7 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { usePriceFlash } from "@/hooks/usePriceFlash";
 import { MarketSwitcher } from "@/components/trade/MarketSwitcher";
 import { WatchButton } from "@/components/market/WatchButton";
+import { TokenCopyMenu } from "@/components/trade/TokenCopyMenu";
 import { formatUsdFromNumber, formatMarkPrice } from "@/lib/format";
 import { formatCompactUsd } from "@/lib/formatters";
 import { rowVolumeUsd, Q_SCALE } from "@/lib/q-usd";
@@ -187,11 +188,14 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
       {/* Symbol + Logo — now a dropdown market switcher (top markets + search) */}
       <MarketSwitcher slabAddress={slabAddress} symbol={symbol} logoUrl={logoUrl} mintAddress={mintAddress} mainnetCa={mainnetCa} />
 
-      {/* Watch this market. `label` variant — the info bar has room for a word,
-          unlike the dense markets table where the glyph alone is used. */}
+      {/* Watch this market: the star alone (hover says "Add <symbol> to your watchlist"), so the
+          Copy address menu fits beside it. */}
       <span className="hidden md:inline-flex">
-        <WatchButton slab={slabAddress} symbol={symbol} variant="label" />
+        <WatchButton slab={slabAddress} symbol={symbol} variant="icon" />
       </span>
+
+      {/* Copy the slab address / CA / ticker, or search on X. Below md: the glyph alone. */}
+      <TokenCopyMenu slabAddress={slabAddress} symbol={symbol} mainnetCa={mainnetCa} />
 
       <span className="hidden md:block h-6 w-px bg-[var(--border)] shrink-0" />
 
