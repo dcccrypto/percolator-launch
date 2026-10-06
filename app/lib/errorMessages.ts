@@ -25,6 +25,10 @@ import { PORTFOLIO_LOOKUP_COPY } from "@/lib/owner-portfolio";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { isDevnetV21Enabled } from "@/lib/v21/flag";
 import { V21_ERROR_CODE_MAP } from "@/lib/v21/error-copy";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { V22_ERROR_CODE_MAP, V22_STAKE_ERROR_CODE_MAP } from "@/lib/v22/error-copy";
+import { V22_ENGINE_LOCK_CODES } from "@/lib/v22/wrapper-errors";
+import { stakeProgramIdOrNull } from "@/lib/v22/program-ids";
 import { V21_ENGINE_LOCK_CODES } from "@/lib/v21/wrapper-errors";
 const LIGHTHOUSE_PROGRAM_ID_STR = "L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95";
 
@@ -364,6 +368,8 @@ export function isEngineLockError(msg: string): boolean {
   return (
     code === WRAPPER_ERR.EngineLockActive ||
     code === WRAPPER_ERR.EngineStale ||
+    // Devnet v2.2: 118 (exit needs loss-current) is an engine lock the app retries through.
+    (code !== null && isDevnetV22Enabled() && V22_ENGINE_LOCK_CODES.includes(code)) ||
     // Devnet v2.1, P2b E7: the codes that split out of 21 (close-only after ADL, refreshing, Earn
     // backed gate). Flag-gated: the live wrapper never raises them.
     (code !== null && isDevnetV21Enabled() && V21_ENGINE_LOCK_CODES.includes(code))
@@ -488,6 +494,12 @@ export function humanizeError(rawMsg: string, context?: "trade"): string {
     // it. An unattributed code (no "Program X failed" line) or another program's is not guessed.
     if (origin === WRAPPER_PROGRAM_ID && ERROR_CODE_MAP[code]) {
       return ERROR_CODE_MAP[code];
+    }
+    // Devnet v2.2 (flag-gated): wrapper 104..119 / 123 / 124, stake v5 33..45. Checked before v2.1 / the legacy
+    // table because the stake program reuses low numbers (33..45) that the wrapper table also owns.
+    if (isDevnetV22Enabled()) {
+      if (origin !== null && origin === stakeProgramIdOrNull() && V22_STAKE_ERROR_CODE_MAP[code]) return V22_STAKE_ERROR_CODE_MAP[code];
+      if (origin === WRAPPER_PROGRAM_ID && V22_ERROR_CODE_MAP[code]) return V22_ERROR_CODE_MAP[code];
     }
     // Devnet v2.1 (flag-gated): growth-v19 92..99, P2b Earn 100..103, P2b lock exits 120..122.
     if (origin === WRAPPER_PROGRAM_ID && isDevnetV21Enabled() && V21_ERROR_CODE_MAP[code]) {

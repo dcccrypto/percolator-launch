@@ -14,6 +14,9 @@ import { TICKET_FUNDS_LINE } from "./copy";
 import { V21_COPY } from "../v21/copy";
 import { isDevnetV21Enabled } from "../v21/flag";
 import { WRAPPER_ERR_V21 } from "../v21/wrapper-errors";
+import { isDevnetV22Enabled } from "../v22/flag";
+import { V22_NAME_BY_CODE } from "../v22/wrapper-errors";
+import { v22StakeMessage, v22WrapperMessage } from "../v22/error-message";
 import { resolveDevnetProgramIds } from "../program-ids";
 
 export type StatusVariant = "info" | "wait" | "paused" | "error";
@@ -62,6 +65,8 @@ export interface MessageContext {
    * "lower the size" is the wrong advice: a smaller order is refused the same way.
    */
   imFloorLabel?: string;
+  /** v2.2 band market: the minimum position size, already formatted ("100 TOKEN"), for the 113 line. */
+  minPositionLabel?: string;
 }
 
 export interface UserMessageAction {
@@ -88,6 +93,8 @@ export interface UserMessage {
   action?: UserMessageAction;
   /** The app retries on its own (wait loop / repair); the UI shows a calm waiting state. */
   autoRetry?: boolean;
+  /** v2.2: the quote the user signed against moved (117 / 124); re-quote and show the new minimum. */
+  requote?: boolean;
   /** Nothing to show (the user cancelled): the caller just restores the button. */
   quiet?: boolean;
   details: UserMessageDetails;
@@ -142,12 +149,13 @@ function safeJson(v: unknown): string {
   }
 }
 
-type Origin = "wrapper" | "matcher" | "other" | "unknown";
+type Origin = "wrapper" | "matcher" | "stake" | "other" | "unknown";
 function originOf(programId: string | null): Origin {
   if (!programId) return "unknown";
   const ids = resolveDevnetProgramIds();
   if (programId === ids.wrapper) return "wrapper";
   if (programId === ids.matcher) return "matcher";
+  if (isDevnetV22Enabled() && programId === ids.stake) return "stake";
   return "other";
 }
 
@@ -238,7 +246,7 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
   // A Custom(n) is decoded by the program that RAISED it (error-codes-4b1a5d30.md: CPI callees —
   // SPL Token, the matcher, stake, NFT — reuse the same numbers). No attribution => no guess.
   const wrapperish = origin === "wrapper";
-  const name = p.code !== null && wrapperish ? NAME_BY_CODE[p.code] ?? (isDevnetV21Enabled() ? V21_NAME_BY_CODE[p.code] : undefined) ?? null : null;
+  const name = p.code !== null && wrapperish ? NAME_BY_CODE[p.code] ?? (isDevnetV21Enabled() ? V21_NAME_BY_CODE[p.code] : undefined) ?? (isDevnetV22Enabled() ? V22_NAME_BY_CODE[p.code] : undefined) ?? null : null;
   const details: UserMessageDetails = { code: p.code, name, programId: p.programId, logs: p.logs, raw: p.raw };
   const m = (kind: string, variant: StatusVariant, title: string, body: string, extra: Partial<UserMessage> = {}): UserMessage => ({
     kind,
@@ -357,6 +365,18 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
   }
   if (p.code === MATCHER_UNAVAILABLE && origin === "matcher") {
     return m("market-unavailable", "paused", "Temporarily unavailable", "This market is temporarily unavailable. We've been notified.");
+  }
+
+  // ── Devnet v2.2 (flag-gated): stake v5 33..45, wrapper 104..119 / 123 / 124 ─────────────
+  if (p.code !== null && isDevnetV22Enabled()) {
+    if (origin === "stake") {
+      const sv = v22StakeMessage(p.code, m);
+      if (sv) return sv;
+    }
+    if (wrapperish) {
+      const wv = v22WrapperMessage(p.code, ctx, m);
+      if (wv) return wv;
+    }
   }
 
   // ── Wrapper codes ───────────────────────────────────────────────────────────
