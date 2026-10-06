@@ -145,6 +145,11 @@ export const FIRST_TRADE_COPY = {
   race: "One more approval: someone joined this market at the same moment.",
   /** GH#2959: the user turned the fund-and-trade down in the wallet. */
   cancelled: "Trade cancelled in your wallet.",
+  /** Devnet only: the usual reason a first trade gets turned down is a wallet still on Mainnet. Phantom
+   *  then simulates the devnet transaction against Mainnet, shows "insufficient SOL" and can flag the
+   *  site, so the user rejects it and nothing on our side can tell (no blockhash error reaches us). */
+  cancelledDevnetWhy:
+    "If your wallet said you don't have enough SOL, or warned about this site, it is probably still on Mainnet. In Phantom: Settings > Developer Settings > turn on Testnet Mode and pick Solana Devnet, then try again.",
 } as const;
 
 // ── The instructions (shared by hooks/useFirstTrade.ts and the LiteSVM bridge) ──────────────
