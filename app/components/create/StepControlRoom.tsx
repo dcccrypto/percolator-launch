@@ -4,7 +4,8 @@ import { bpsPct } from "@/lib/format";
 import { FC, useMemo } from "react";
 import { RotaryDial } from "./RotaryDial";
 import { HoldToLaunch } from "./HoldToLaunch";
-import { MAX_LEVERAGE_X, MIN_LEVERAGE_X } from "@/lib/market-params";
+import { MAX_LEVERAGE_X, MIN_LEVERAGE_X, deriveLaunchMarketParams } from "@/lib/market-params";
+import { liqMovePctAtFullLeverage } from "@/lib/liquidation-risk";
 import { LP_EXPOSURE_DEFAULT_BPS } from "@/lib/matcher-params";
 import { FeeBreakdown } from "@/components/FeeBreakdown";
 import { WizardTranchePanel } from "@/components/limits/CreatorLimits";
@@ -159,10 +160,15 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
   const lp = Number(lpCollateral) || 0;
   const ins = Number(insuranceAmount) || 0;
 
-  const liqCaption = useMemo(
-    () => `liq at ${(100 / leverage).toFixed(1)}% move`,
-    [leverage],
-  );
+  // The margins the launch writes (deriveLaunchMarketParams: mm = im / 2), on the engine's
+  // maintenance model. 100 / leverage showed twice the room: "10.0% move" at 10x, where the
+  // engine liquidates a short after 4.76% and a long after 5.26%.
+  const liqCaption = useMemo(() => {
+    const p = deriveLaunchMarketParams({ initialMarginBps, lpCollateral: 0n, initialPriceE6: 1_000_000n });
+    const pct = liqMovePctAtFullLeverage(p.initialMarginBps, p.maintenanceMarginBps);
+    // Floored to 0.1%: never show more room than the engine gives.
+    return pct === null ? undefined : `liq at ${(Math.floor(pct * 10) / 10).toFixed(1)}% move`;
+  }, [initialMarginBps]);
 
   return (
     <div className="space-y-5">
