@@ -52,6 +52,7 @@ import { isMockSlab, getMockPortfolioPositions } from "@/lib/mock-trade-data";
 import { isOracleStaleBlocking } from "@/lib/oracle-stale-gate";
 import { describeLiqPrice } from "@/lib/liq-price-display";
 import { LiqPriceValue } from "./LiqPriceValue";
+import { positionSizeUsdText } from "@/lib/q-usd";
 
 function abs(n: bigint): bigint {
   return n < 0n ? -n : n;
@@ -152,6 +153,7 @@ const OtherMarketRow: FC<{
   const entryKnown = isEntryKnown(live.entry, live.entrySource);
   const markE6 = livePriceE6 != null && livePriceE6 > 0n ? livePriceE6 : pos.oraclePriceE6;
   const hasValidMark = markE6 > 0n;
+  const sizeUsd = positionSizeUsdText(posSize, markE6);
   const pnlTokens = live.unrealizedPnl ?? 0n;
   const pnlUsdRaw = Number(pnlTokens) / 10 ** decimals;
   const pnlUsd = Number.isFinite(pnlUsdRaw) ? pnlUsdRaw : null;
@@ -196,6 +198,11 @@ const OtherMarketRow: FC<{
         <td className="whitespace-nowrap px-3 py-2.5 text-right" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
           <span className="text-[var(--text)]">{formatTokenAmount(abs(posSize), decimals)}</span>
           <span className="ml-1 text-[var(--text-secondary)]">{displaySymbol}</span>
+          {sizeUsd && (
+            <div data-testid="position-size-usd" className="text-[9px] text-[var(--text-secondary)]">
+              {sizeUsd}
+            </div>
+          )}
         </td>
         <td className={`whitespace-nowrap px-3 py-2.5 text-right ${entryKnown ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }} title={entryKnown ? undefined : UNKNOWN_ENTRY_TOOLTIP}>
           {entryKnown ? formatUsdPriceE6(entryE6) : "--"}

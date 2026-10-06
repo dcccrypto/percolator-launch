@@ -87,6 +87,7 @@ import { RenderProfiler } from "@/components/dev/RenderProfiler";
 import { isOracleStaleBlocking } from "@/lib/oracle-stale-gate";
 import { describeLiqPrice } from "@/lib/liq-price-display";
 import { LiqPriceValue } from "./LiqPriceValue";
+import { positionSizeUsdText } from "@/lib/q-usd";
 
 function abs(n: bigint): bigint {
   return n < 0n ? -n : n;
@@ -239,6 +240,8 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   });
   const effectiveSize = pnlResult.effectiveSize ?? account.positionSize;
   const absPosition = abs(effectiveSize);
+  // "≈ $200.12" under the base-unit size: effective size at the mark; nothing without a mark.
+  const sizeUsd = positionSizeUsdText(effectiveSize, currentPriceE6);
   const entryPriceE6 = pnlResult.entry;
   /** False when entry (and therefore PnL/ROE) cannot be honestly displayed. */
   const pnlIsKnown = pnlResult.pnlKnown;
@@ -425,6 +428,11 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                     className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)]/60 animate-pulse align-middle"
                     title="Size reflects your confirmed trade — balance is still settling"
                   />
+                )}
+                {sizeUsd && (
+                  <div data-testid="position-size-usd" className="text-[9px] text-[var(--text-secondary)]">
+                    {sizeUsd}
+                  </div>
                 )}
               </td>
               <td
