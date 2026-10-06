@@ -116,6 +116,10 @@ const ERROR_CODE_MAP: Record<number, string> = {
   // "re-seed" — a transient lag clears on its own; a bankrupt/recovery market
   // needs maintainer action. Don't promise either outcome.
   [WRAPPER_ERR.EngineLockActive]: "This market is temporarily locked, or reduce-only while it recovers from a bankruptcy. Closing positions still works (your close is sent as a unilateral exit if needed); new positions may be paused until the market reopens on its own. If a brief lag, try again in a moment.",
+  // P2b E7: the three causes that used to share Custom(21), now with their own codes.
+  [WRAPPER_ERR.EngineAdlReduceOnly]: "This market is close-only while it rebalances. You can reduce or close your position; new positions reopen once it resets.",
+  [WRAPPER_ERR.EngineLossStale]: "Positions are being refreshed after a price move. Opening is paused for a moment; closing still works. Try again shortly.",
+  [WRAPPER_ERR.EarnExitWouldUnderBackClaims]: "This withdrawal would leave open winning positions under-backed. Try a smaller amount, or try again after they settle.",
   [WRAPPER_ERR.EngineNonProgress]: "Crank made no progress - the market may need attention. Try again shortly.",
   [WRAPPER_ERR.EngineRecoveryRequired]: "This market is in recovery mode and must be cranked before trading resumes.",
   [WRAPPER_ERR.EngineCounterOverflow]: "Engine counter overflow.",
@@ -358,7 +362,14 @@ export function isOracleStaleError(msg: string): boolean {
 
 export function isEngineLockError(msg: string): boolean {
   const code = extractErrorCode(msg);
-  return code === WRAPPER_ERR.EngineLockActive || code === WRAPPER_ERR.EngineStale;
+  return (
+    code === WRAPPER_ERR.EngineLockActive ||
+    code === WRAPPER_ERR.EngineStale ||
+    // P2b E7: the codes that split out of 21 (close-only after ADL, refreshing, Earn backed gate).
+    code === WRAPPER_ERR.EngineAdlReduceOnly ||
+    code === WRAPPER_ERR.EngineLossStale ||
+    code === WRAPPER_ERR.EarnExitWouldUnderBackClaims
+  );
 }
 
 
