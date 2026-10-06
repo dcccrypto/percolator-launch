@@ -741,6 +741,9 @@ export function computeAggregates(markets: MarketVaultInfo[]): Omit<EarnStats, '
 // Hook
 // ═══════════════════════════════════════════════════════════════
 
+/** A failed first load: nothing has been read yet, so nothing is "last known". */
+export const COLD_START_ERROR = "Couldn't load vault data. Retrying every 15 seconds.";
+
 export function useEarnStats() {
   const [stats, setStats] = useState<EarnStats>(DEFAULT_STATS);
   const [loading, setLoading] = useState(true);
@@ -762,6 +765,8 @@ export function useEarnStats() {
   // start where there's nothing good to preserve yet, fall back to a
   // best-effort zeroed snapshot instead.
   const hasGoodStatsRef = useRef(false);
+  // The same fact as state, for consumers: until a cycle succeeds, `stats` holds nothing real.
+  const [hasData, setHasData] = useState(false);
 
   // Start time of the cycle that is still allowed to publish (0 = none). The poll skips
   // its tick while one is running: on a slow (e.g. 429-backoff) RPC a cycle can outlast
@@ -776,6 +781,7 @@ export function useEarnStats() {
     if (mockMode) {
       if (stale()) return;
       setStats(generateMockStats());
+      setHasData(true);
       setLoading(false);
       return;
     }
@@ -852,14 +858,14 @@ export function useEarnStats() {
       setStats({ markets, ...computeAggregates(markets) });
 
       if (fetchFailed) {
-        // Cold start (no good snapshot published yet) — still show the
-        // best-effort (zeroed-where-unread) markets rather than nothing, but
-        // don't mark this as "good": if the NEXT cycle also fails, we want to
-        // keep retrying rather than gate on a snapshot that was never good.
-        setError('Failed to refresh on-chain data — showing last known values');
+        // Cold start (no good snapshot published yet): there are no "last known values", and these
+        // figures are partly unread (a failed batch reads as $0 or as shares + fees). Not marked
+        // good, so `hasData` stays false and the page keeps its loading state; the next poll retries.
+        setError(COLD_START_ERROR);
       } else {
         setError(null);
         hasGoodStatsRef.current = true;
+        setHasData(true);
       }
     } catch (e) {
       if (stale()) return;
@@ -869,7 +875,7 @@ export function useEarnStats() {
         setError(e instanceof Error ? e.message : 'Failed to load earn stats');
         return;
       }
-      setError(e instanceof Error ? e.message : 'Failed to load earn stats');
+      setError(COLD_START_ERROR);
       // Total failure on a cold start (e.g. RPC unreachable before any good
       // snapshot exists) — publish an empty, clean list rather than fabricated
       // mock markets. The next poll retries the live fetch.
@@ -912,5 +918,5 @@ export function useEarnStats() {
     };
   }, []);
 
-  return { stats, loading, error, refresh: fetchStats };
+  return { stats, loading, error, hasData, refresh: fetchStats };
 }

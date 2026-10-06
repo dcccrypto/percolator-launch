@@ -300,7 +300,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
               ⚠ Couldn&apos;t refresh market stats
             </p>
             <p className="text-[11px] text-[var(--text-secondary)] mt-1">
-              {earnStatsError} — volume and insurance figures below may be stale.{!lpVaultReadError && ' Vault balance and deposit/withdraw are unaffected.'}
+              Volume and insurance figures below may be stale.{!lpVaultReadError && ' Vault balance and deposit/withdraw are unaffected.'}
             </p>
           </div>
         )}

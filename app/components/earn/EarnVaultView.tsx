@@ -35,7 +35,10 @@ const EarnHeader = dynamic(
 );
 
 export function EarnVaultView() {
-  const { stats, loading, error, refresh } = useEarnStats();
+  const { stats, loading: statsLoading, error, hasData, refresh } = useEarnStats();
+  // Until a read succeeds the stats are partly unread (a failed first load), so show the loading
+  // state, not their $0 / shares + fees totals.
+  const loading = statsLoading || !hasData;
   const [dismissedError, setDismissedError] = useState<string | null>(null);
   const [selectedSlab, setSelectedSlab] = useState<string | null>(null);
   // Tagged with the wallet they were reported for: after a wallet switch or disconnect the
