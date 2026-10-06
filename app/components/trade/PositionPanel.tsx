@@ -355,10 +355,13 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const showLiqWarning = hasValidMark && liqPriceE6 > 0n && liqTier !== "safe";
   const liqWarningTone = liqTier === "danger" ? "var(--short)" : "var(--warning)";
 
+  // Keyed off the collateral PnL (the $ figure): on a dust position the token-unit PnL can be 0
+  // while the $ PnL and ROE are not.
+  const pnlCollateral = pnlResult.unrealizedPnl ?? 0n;
   const pnlColor =
-    pnlTokens === 0n
+    pnlCollateral === 0n
       ? "text-[var(--text-muted)]"
-      : pnlTokens > 0n
+      : pnlCollateral > 0n
         ? "text-[var(--long)]"
         : "text-[var(--short)]";
 

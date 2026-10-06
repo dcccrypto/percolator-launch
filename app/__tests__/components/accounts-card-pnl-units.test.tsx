@@ -12,7 +12,7 @@ import path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
-import { AccountKind, computeMarkPnl, parsePortfolioV17 } from "@percolatorct/sdk";
+import { AccountKind, parsePortfolioV17 } from "@percolatorct/sdk";
 
 const MARK_E6 = 118_686_275n; // live SOL mark at capture ($118.69)
 
@@ -30,7 +30,7 @@ vi.mock("@/hooks/useLivePrice", () => ({ useLivePrice: () => ({ priceE6: MARK_E6
 
 import { AccountsCard } from "@/components/trade/AccountsCard";
 import { formatPnl } from "@/lib/format";
-import { computeMarkPnlCollateral } from "@/lib/trading";
+import { computeMarkPnlCollateral, computeMarkPnlLinear } from "@/lib/trading";
 
 const f = JSON.parse(
   fs.readFileSync(path.resolve(__dirname, "../fixtures/2SewEcvf.portfolio.json"), "utf8"),
@@ -57,7 +57,7 @@ describe("AccountsCard — on-chain pnl fallback is collateral, not coin-native"
     expect(text).not.toContain(formatPnl(computeMarkPnlCollateral(portfolio.pnl, MARK_E6), 6));
   });
 
-  it("CONTROL: an entry-known row still converts the coin-native mark PnL", () => {
+  it("CONTROL: an entry-known row values the position at the mark (one division, as the engine does)", () => {
     account = {
       kind: AccountKind.User,
       owner: new PublicKey("11111111111111111111111111111111"),
@@ -67,8 +67,8 @@ describe("AccountsCard — on-chain pnl fallback is collateral, not coin-native"
       pnl: 0n,
     };
     const { container } = render(<AccountsCard />);
-    // Unchanged path: computeMarkPnl (native) → computeMarkPnlCollateral.
-    const expected = computeMarkPnlCollateral(computeMarkPnl(1_000_000n, 100_000_000n, MARK_E6), MARK_E6);
+    const expected = computeMarkPnlLinear(1_000_000n, 100_000_000n, MARK_E6);
+    expect(expected).toBe(18_686_275n); // 1 token, $100 -> $118.686275: +$18.686275
     expect(expected).toBeGreaterThan(0n);
     expect(container.textContent).toContain(formatPnl(expected, 6));
   });

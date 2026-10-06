@@ -151,16 +151,17 @@ describe("OrderTicketClosePanel (inline form)", () => {
   });
 
   it("shows Est. PnL in collateral units (mark-to-market), not the raw native figure", () => {
-    // 1 SOL long, entry $100, mark $110 -> ~ +$10. Native coin-margined ~0.09.
+    // 1 SOL long, entry $100, mark $110 -> exactly +$10 (one division, as the engine values it; the old
+    // native-then-collateral path truncated it to +9.99999). Native coin-margined ~0.09.
     render(<OrderTicketClosePanel {...base()} />);
-    expect(screen.getByText(/\+9\.99\d* USDC/)).toBeTruthy();
+    expect(screen.getByText(/^\+10 USDC/)).toBeTruthy();
     expect(screen.queryByText(/\+0\.09/)).toBeNull();
   });
 
   it("shows a loss with a minus sign", () => {
     live = { priceE6: 90_000_000n, priceUsd: 90 };
     render(<OrderTicketClosePanel {...base()} />);
-    expect(screen.getByText(/-\d+\.\d+ USDC/)).toBeTruthy();
+    expect(screen.getByText(/^-10 USDC/)).toBeTruthy();
   });
 });
 
@@ -206,8 +207,8 @@ describe("inline close — where the funds go", () => {
 
   it("labels the row Est. Account Balance After at 50% and 100% (never a payout label)", () => {
     const { container } = render(<OrderTicketClosePanel {...base()} />);
-    // 100%: capital 50 + PnL ~10 (1 SOL, 100 → 110, collateral-unit rounding) − fee 0.33.
-    expect(rowValue(container, "Est. Account Balance After:")).toMatch(/^~59\.66999 USDC/);
+    // 100%: capital 50 + PnL 10 (1 SOL, 100 → 110) − fee 0.33.
+    expect(rowValue(container, "Est. Account Balance After:")).toMatch(/^~59\.67 USDC/);
     fireEvent.click(screen.getByRole("button", { name: "50%" }));
     expect(within(container).getByText("Est. Account Balance After:")).toBeTruthy();
     for (const old of ["Est. Receive:", "Est. Balance After:", "Est. Back to Wallet:"]) {

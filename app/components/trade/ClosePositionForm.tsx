@@ -2,7 +2,7 @@
 
 import { FC, useId, useMemo, useState } from "react";
 import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
-import { computeMarkPnl, computeMarkPnlCollateral, clampClosePercent, UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
+import { computeMarkPnl, computeMarkPnlLinear, clampClosePercent, UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
 
 /**
  * The body of the close-position UI: position banner, close-amount slider + %
@@ -118,7 +118,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
       currentPrice > 0n && entryPrice > 0n
         ? computeMarkPnl(closePositionSigned, entryPrice, currentPrice)
         : 0n;
-    const pnl = currentPrice > 0n ? computeMarkPnlCollateral(pnlNative, currentPrice) : 0n;
+    const pnl = entryPrice > 0n ? computeMarkPnlLinear(closePositionSigned, entryPrice, currentPrice) : 0n;
 
     const closeNotional = currentPrice > 0n ? (closeAbs * currentPrice) / 1_000_000n : 0n;
     const closeFee = tradingFeeBps > 0n ? (closeNotional * tradingFeeBps) / 10_000n : 0n;

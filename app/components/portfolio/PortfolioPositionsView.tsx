@@ -660,8 +660,7 @@ export function PortfolioPositionsView() {
       const capital = Number(pos.account.capital ?? 0n) / divisor;
       depositedUsd += capital;
       realizedLossUsd += Number(pos.realizedLoss ?? 0n) / divisor;
-      // pos.unrealizedPnl is already collateral-scale (usePortfolio.ts converts
-      // the SDK's native computeMarkPnl output via computeMarkPnlCollateral) —
+      // pos.unrealizedPnl is already collateral-scale (valueAtMark, lib/position-pnl.ts) —
       // divide by decimals only, same as PositionsDock's pnlUsdRaw and raw
       // capital above (collateral is sim-USDC dollars, no price factor).
       unrealizedPnlUsd += Number(pos.unrealizedPnl) / divisor;

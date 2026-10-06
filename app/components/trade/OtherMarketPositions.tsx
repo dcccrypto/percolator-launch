@@ -11,7 +11,7 @@
  * Data comes from usePortfolio (wallet-wide scan, 30s poll + refresh on
  * close) with the mark, PnL and ROE re-computed per live tick off the shared
  * WS price store — the same math chain as PositionRow itself:
- * computeMarkPnlCollateral(computeMarkPnl(...)) for collateral-unit PnL and
+ * portfolioPositionPnl (lib/position-pnl.ts) for collateral-unit PnL and
  * computePnlPercent against computePositionInitialMargin for ROE.
  *
  * Close mounts a SlabProvider for THAT market on demand — only while the
