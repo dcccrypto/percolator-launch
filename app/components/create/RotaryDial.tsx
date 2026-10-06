@@ -311,7 +311,7 @@ export const RotaryDial: FC<RotaryDialProps> = ({
           −
         </button>
       <div
-        className="min-w-[74px] rounded-[2px] border border-[var(--border)] bg-[#07080d] px-2 py-1 text-center transition-colors duration-100"
+        className="min-w-[74px] rounded-[2px] border border-[var(--border)] bg-[var(--dial-readout-bg)] px-2 py-1 text-center transition-colors duration-100"
         style={{
           boxShadow: ticking
             ? "inset 0 1px 3px rgba(0,0,0,0.9), 0 0 10px rgba(153,69,255,0.35)"
@@ -319,7 +319,7 @@ export const RotaryDial: FC<RotaryDialProps> = ({
         }}
       >
         <div
-          className="text-[13px] leading-none text-[var(--text)]"
+          className="text-[13px] leading-none text-[var(--dial-readout-text)]"
           style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
         >
           {format(value)}
