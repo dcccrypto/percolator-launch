@@ -9,7 +9,7 @@
  * Bug 6 fix: "Trader dashboard showing stats but zero transactions"
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { explorerTxUrl } from "@/lib/config";
 import { formatUsdFromNumber } from "@/lib/format";
@@ -51,10 +51,26 @@ export function TradeHistory() {
   const [page, setPage] = useState(1);
   const [sideFilter, setSideFilter] = useState<TradeType>("all");
 
+  // A different wallet starts on its own first page. Carrying the old page over
+  // read the new wallet at the old offset: one with fewer trades got an empty
+  // page, "No trades yet", and no pager (it only renders past one page).
+  const [pageWallet, setPageWallet] = useState(wallet);
+  if (pageWallet !== wallet) {
+    setPageWallet(wallet);
+    setPage(1);
+  }
+
   const offset = (page - 1) * PAGE_SIZE;
+
+  // Bumped by every read and by the effect cleanup (wallet or page change,
+  // unmount), so a slower response for the previous wallet or page can't land
+  // over the current one. Same guard as hooks/useTradeHistory.ts.
+  const requestSeqRef = useRef(0);
 
   const fetchTrades = useCallback(async () => {
     if (!wallet) return;
+    const requestSeq = ++requestSeqRef.current;
+    const isCurrent = () => requestSeqRef.current === requestSeq;
     setLoading(true);
     setError(null);
     try {
@@ -66,17 +82,22 @@ export function TradeHistory() {
         throw new Error(body.error ?? `HTTP ${res.status}`);
       }
       const data = await res.json();
+      if (!isCurrent()) return;
       setTrades(data.trades ?? []);
       setTotal(data.total ?? 0);
     } catch (err) {
+      if (!isCurrent()) return;
       setError(err instanceof Error ? err.message : "Failed to load trades");
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [wallet, offset]);
 
   useEffect(() => {
     fetchTrades();
+    return () => {
+      requestSeqRef.current++;
+    };
   }, [fetchTrades]);
 
   const filtered = useMemo(() => {
