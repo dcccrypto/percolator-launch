@@ -2,7 +2,7 @@
 
 import { useTradeHistory } from "@/hooks/useTradeHistory";
 import { formatStatValue, formatTokenAmount, formatUsdFromNumber } from "@/lib/format";
-import { useEffect, useState } from "react";
+import { Q_DECIMALS } from "@/lib/q-usd";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import type { MarketWithStats } from "@/hooks/useAllMarketStats";
 
@@ -39,14 +39,19 @@ function formatFee(feeNum: number): string {
   return formatStatValue(feeNum, "currency");
 }
 
-function formatSize(sizeStr: string, decimals = 6): string {
+/**
+ * `trades.size` is engine Q: a base-asset amount at POS_SCALE 1e6 whatever the
+ * mint's decimals (lib/q-usd.ts), so it always formats with Q_DECIMALS. The
+ * mint's decimals are right only for 6-decimal mints; SOL (9) read 1000x low.
+ */
+function formatSize(sizeStr: string): string {
   try {
     const raw = BigInt(sizeStr.split(".")[0]);
     const abs = raw < 0n ? -raw : raw;
-    return formatTokenAmount(abs, decimals);
+    return formatTokenAmount(abs, Q_DECIMALS);
   } catch {
     const n = Math.abs(parseFloat(sizeStr) || 0);
-    return formatTokenAmount(BigInt(Math.round(n)), decimals);
+    return formatTokenAmount(BigInt(Math.round(n)), Q_DECIMALS);
   }
 }
 
@@ -62,38 +67,6 @@ function shortAddress(addr: string): string {
   return addr.length > 12 ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : addr;
 }
 
-/** Fetch slab → collateral decimals from /api/markets once, cache in module scope. */
-const slabDecimalsCache: Record<string, number> = {};
-let marketsFetchAttempted = false;
-
-async function loadMarketDecimals(): Promise<void> {
-  if (marketsFetchAttempted) return;
-  marketsFetchAttempted = true;
-  try {
-    const res = await fetch("/api/markets?limit=200");
-    if (!res.ok) return;
-    const data = await res.json();
-    for (const m of (data.markets ?? [])) {
-      if (m.slab_address && typeof m.decimals === "number") {
-        slabDecimalsCache[m.slab_address] = m.decimals;
-      }
-    }
-  } catch {
-    // best-effort — fall back to 6
-  }
-}
-
-/** Hook to lazily fetch and return slab → decimals map. */
-function useSlabDecimals(): Record<string, number> {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    if (!marketsFetchAttempted) {
-      loadMarketDecimals().then(() => setTick((t) => t + 1));
-    }
-  }, []);
-  return slabDecimalsCache;
-}
-
 export function TradeHistoryTable({
   wallet,
   slabFilter,
@@ -105,9 +78,6 @@ export function TradeHistoryTable({
     limit: pageSize,
     slabFilter,
   });
-
-  // Slab → collateral decimals map (fetched from /api/markets)
-  const slabDecimals = useSlabDecimals();
 
   if (!wallet) return null;
 
@@ -177,8 +147,6 @@ export function TradeHistoryTable({
           const txLink = trade.tx_signature
             ? `https://solscan.io/tx/${trade.tx_signature}?cluster=devnet`
             : null;
-          // Use per-slab decimals if available; default 6 (USDC) as safe fallback
-          const tradeDecimals = slabDecimals[trade.slab_address] ?? 6;
 
           return (
             <div
@@ -215,7 +183,7 @@ export function TradeHistoryTable({
                   className="text-[11px] text-[var(--text)]"
                   style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
                 >
-                  {formatSize(trade.size, tradeDecimals)}
+                  {formatSize(trade.size)}
                 </p>
               </div>
 
