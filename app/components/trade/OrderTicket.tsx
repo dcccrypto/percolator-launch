@@ -1110,7 +1110,13 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         // with no word (some wallets showed their own warning, so it read as "nothing happened").
         // Say it, calmly. Other cancels (and Stop) stay quiet.
         if (fundingMode && um.kind === "cancelled") {
-          setRefusal({ ...um, quiet: false, title: "Cancelled", body: FIRST_TRADE_COPY.cancelled });
+          setRefusal({
+            ...um,
+            quiet: false,
+            title: "Cancelled",
+            body: FIRST_TRADE_COPY.cancelled,
+            ...(getNetwork() === "devnet" ? { why: FIRST_TRADE_COPY.cancelledDevnetWhy } : {}),
+          });
         }
         setTradePhase("idle");
         return;
