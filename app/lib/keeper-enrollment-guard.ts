@@ -112,9 +112,15 @@ export const GLOBAL_CAP_COPY = "Live prices are full right now. A maintainer can
  * The deployment-wide ceiling. 50 filled on 2026-10-05 20:14 UTC (the 50th active row, PLAGUE) and
  * from then on EVERY new launch was refused with a final 403 for 28+ hours: ~25 markets, 7+
  * deployers, all left "UNKNOWN" with no live price. The playground adds ~10 live markets a day, so
- * the ceiling is sized for weeks, and a refusal for it is retryable (429, below), never final.
+ * a refusal for the ceiling is retryable (429, below), never final.
+ *
+ * 90, and NO HIGHER until the keeper changes: its push loop reads every eligible market in one
+ * getMultipleAccountsInfo call (percolator-oracle-keeper auth-mark-pusher.ts,
+ * fetchPushAuthMarkGenerationFields), which the RPC caps at 100 keys. At 101 priced markets that
+ * read throws every cycle and EVERY market's price stops, not just the new one. 90 leaves room for
+ * the registry and this table to disagree by a few. Raise it only after that read is chunked.
  */
-export const DEFAULT_MAX_ACTIVE_MARKETS = 200;
+export const DEFAULT_MAX_ACTIVE_MARKETS = 90;
 export const DEFAULT_MAX_ACTIVE_PER_CREATOR = 10;
 
 export interface EnrollmentCaps {
