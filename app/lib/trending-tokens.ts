@@ -162,11 +162,31 @@ export type SourceStatus = "ok" | "empty" | "error";
 export interface TrendingTokensResult {
   tokens: TrendingToken[];
   generatedAt: string;
-  /** True when no candidate source produced anything (blocked, down, timed out) —
-   *  the UI must say "unavailable", not "nothing matched". */
+  /** True when the list cannot be trusted as "nothing matched": no candidate source
+   *  produced anything, or the market-data lookup failed and nothing survived it
+   *  (see `isTrendingDataUnavailable`). The UI must say "unavailable". */
   sourceEmpty: boolean;
   /** Per-source outcome, for debugging from the route response. */
   sources: Record<TrendingSource, SourceStatus>;
+  /** DexScreener market-data outcome: "error" when any batch failed. For debugging. */
+  marketData?: SourceStatus;
+}
+
+/**
+ * Is an empty (or failed) trending result a data outage rather than "nothing passed the
+ * filters"? Every pump.fun candidate needs DexScreener's pair data to pass the market gate
+ * (only GeckoTerminal candidates carry a fallback), so a DexScreener failure silently drops
+ * them all, and the rail used to report that as "No trending tokens match the listing
+ * filters". Pure.
+ */
+export function isTrendingDataUnavailable(args: {
+  gecko: SourceStatus;
+  pump: SourceStatus;
+  tokenCount: number;
+  marketDataFailed: boolean;
+}): boolean {
+  if (args.gecko !== "ok" && args.pump !== "ok") return true;
+  return args.tokenCount === 0 && args.marketDataFailed;
 }
 
 // ── pure helpers (unit-tested) ───────────────────────────────────────────────
@@ -605,15 +625,21 @@ export async function fetchDexMarkets(
 export async function getTrendingTokens(limit = TRENDING_RETURN_LIMIT): Promise<TrendingTokensResult> {
   const [gecko, pump] = await Promise.all([fetchGeckoTrending(), fetchPumpFunCoins()]);
   const candidates = mergeCandidates(gecko.candidates, pump.candidates);
-  const sourceEmpty = gecko.status !== "ok" && pump.status !== "ok";
   const { byMint, unavailable } = candidates.length
     ? await fetchDexMarkets(candidates.map((c) => c.mint))
     : { byMint: new Map<string, DexMarket>(), unavailable: new Set<string>() };
   const tokens = screenAndRank(candidates, byMint, limit, unavailable);
+  const marketDataFailed = unavailable.size > 0;
   return {
     tokens,
     generatedAt: new Date().toISOString(),
-    sourceEmpty,
+    sourceEmpty: isTrendingDataUnavailable({
+      gecko: gecko.status,
+      pump: pump.status,
+      tokenCount: tokens.length,
+      marketDataFailed,
+    }),
     sources: { geckoterminal: gecko.status, pumpfun: pump.status },
+    marketData: marketDataFailed ? "error" : "ok",
   };
 }

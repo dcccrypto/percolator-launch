@@ -4,7 +4,8 @@
  * GeckoTerminal is the primary source, pump.fun is best effort (it 403s from
  * geo/bot-blocked egress), DexScreener supplies market data with GeckoTerminal's
  * own pool data standing in when DexScreener is down. `sourceEmpty` must be true
- * only when no candidate source answered.
+ * when no candidate source answered, or when DexScreener failed and nothing survived
+ * (pump.fun candidates have no fallback, so "nothing matched" would be a guess).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -165,6 +166,28 @@ describe("getTrendingTokens — sources", () => {
     expect(r.tokens).toHaveLength(1);
     expect(r.tokens[0].chartUrl).toBe(`https://www.geckoterminal.com/solana/pools/${POOL("aaa")}`);
     expect(r.tokens[0].liquidityUsd).toBeCloseTo(122037.39);
+  });
+
+  it("sourceEmpty (unavailable, not 'nothing matched') when DexScreener fails and every candidate is dropped", async () => {
+    // The reported state: pump.fun answers, GeckoTerminal does not, DexScreener 503s. Every
+    // pump.fun candidate needs DexScreener's pair, so the list empties for lack of data.
+    routes.gecko = () => json({}, 500);
+    routes.pump = () => json([{ mint: M("pump"), symbol: "PUMP", name: "Pump", complete: true }]);
+    routes.dex = () => json({}, 503);
+    const r = await getTrendingTokens();
+    expect(r.tokens).toEqual([]);
+    expect(r.sources.pumpfun).toBe("ok");
+    expect(r.marketData).toBe("error");
+    expect(r.sourceEmpty).toBe(true);
+  }, 20_000);
+
+  it("NOT sourceEmpty when DexScreener fails but the GeckoTerminal fallback still lists tokens", async () => {
+    routes.gecko = () => json(geckoBody(["aaa"]));
+    routes.dex = () => json({}, 503);
+    const r = await getTrendingTokens();
+    expect(r.tokens).toHaveLength(1);
+    expect(r.marketData).toBe("error");
+    expect(r.sourceEmpty).toBe(false);
   });
 
   it("does NOT fall back when DexScreener answered but has no supported pool (fail-closed)", async () => {

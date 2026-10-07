@@ -233,9 +233,9 @@ const TrendingHeader: FC<{ tf: Timeframe }> = ({ tf }) => (
  * Polls /api/trending-tokens every 60s (CDN-cached for 60s). A 1H/24H timeframe
  * re-ranks by that window's momentum; a 5/10/20 control sets how many rows show.
  *
- * States, each with its own copy: loading; unavailable (our API failed, or every
- * upstream source failed — `sourceEmpty`); empty (sources answered, nothing
- * matched the filters); rows.
+ * States, each with its own copy: loading; unavailable (our API failed, every
+ * candidate source failed, or the DexScreener lookup failed and left nothing —
+ * `sourceEmpty`); empty (every lookup answered, nothing matched the filters); rows.
  */
 export function TrendingTokensRail() {
   // Default to 1H: the point of the list is to surface momentum as it builds.

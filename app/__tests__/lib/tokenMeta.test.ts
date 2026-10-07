@@ -349,3 +349,59 @@ describe("fetchTokenMeta", () => {
     expect(result.decimals).toBe(6); // Default when getParsedAccountInfo fails
   });
 });
+
+describe("failed lookups are not remembered as answers", () => {
+  const dexOk = () =>
+    vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ pairs: [{ baseToken: { address: RANDOM_MINT, symbol: "LMEOW", name: "LMEOW" } }] }),
+    });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("fetchTokenMeta looks a mint up again after a failure, and recovers the real name", async () => {
+    vi.resetModules();
+    const mod = await import("@/lib/tokenMeta");
+    const conn = mockConnection({ accountInfo: null });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 503 }));
+    const failed = await mod.fetchTokenMeta(conn, new PublicKey(RANDOM_MINT));
+    expect(failed.symbol).toBe("EPjF...Dt1v");
+    expect(mod.isPlaceholderTokenMeta(failed)).toBe(true);
+
+    vi.stubGlobal("fetch", dexOk());
+    const recovered = await mod.fetchTokenMeta(conn, new PublicKey(RANDOM_MINT));
+    expect(recovered.symbol).toBe("LMEOW");
+    expect(mod.isPlaceholderTokenMeta(recovered)).toBe(false);
+
+    // A real answer IS cached.
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("down")));
+    expect(await mod.fetchTokenMeta(conn, new PublicKey(RANDOM_MINT))).toBe(recovered);
+  });
+
+  it("fetchTokenMetaBatch keeps a placeholder only for PLACEHOLDER_TTL_MS", async () => {
+    vi.resetModules();
+    const mod = await import("@/lib/tokenMeta");
+    vi.useFakeTimers();
+    const conn = {
+      rpcEndpoint: "https://api.devnet.solana.com",
+      getAccountInfo: vi.fn().mockResolvedValue(null),
+      getMultipleAccountsInfo: vi.fn().mockResolvedValue([null]),
+      getMultipleParsedAccounts: vi.fn().mockResolvedValue({ value: [null] }),
+    } as any;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 503 }));
+    const first = (await mod.fetchTokenMetaBatch(conn, [new PublicKey(RANDOM_MINT)])).get(RANDOM_MINT)!;
+    expect(mod.isPlaceholderTokenMeta(first)).toBe(true);
+
+    // Within the TTL the batch path serves the placeholder without asking again.
+    const again = (await mod.fetchTokenMetaBatch(conn, [new PublicKey(RANDOM_MINT)])).get(RANDOM_MINT);
+    expect(again).toBe(first);
+
+    vi.advanceTimersByTime(mod.PLACEHOLDER_TTL_MS);
+    const later = (await mod.fetchTokenMetaBatch(conn, [new PublicKey(RANDOM_MINT)])).get(RANDOM_MINT);
+    expect(later).not.toBe(first);
+  });
+});
