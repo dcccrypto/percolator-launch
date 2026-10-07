@@ -2,7 +2,7 @@
  * Earn hub after a failed first load (useEarnStats hasData false): the partly unread figures are
  * not shown as data. The table and header stay in their loading state; the error says it's retrying.
  */
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 const S = vi.hoisted(() => ({ hasData: false }));
@@ -28,16 +28,21 @@ vi.mock("@/lib/limits/earn-positions", () => ({ readEarnPositions: vi.fn(async (
 import { EarnVaultView } from "@/components/earn/EarnVaultView";
 
 describe("Earn hub: a failed first load", () => {
-  it("keeps the loading state (no unread figures as data) and shows the retrying message", () => {
+  it("keeps the loading state (no unread figures as data) and shows the retrying message", async () => {
+    header.mockClear();
     render(<EarnVaultView />);
+    // EarnHeader is loaded through next/dynamic, so it has not rendered on the first synchronous pass.
+    await waitFor(() => expect(header.mock.calls.length).toBeGreaterThan(0));
     expect(header.mock.calls.at(-1)![0].loading).toBe(true);
     expect(screen.queryByText("PERCOLATOR")).toBeNull();
     expect(screen.getByRole("alert").textContent).toContain("Couldn't load vault data. Retrying every 15 seconds.");
   });
 
-  it("CONTROL: once a read has succeeded the vaults show", () => {
+  it("CONTROL: once a read has succeeded the vaults show", async () => {
     S.hasData = true;
+    header.mockClear();
     render(<EarnVaultView />);
+    await waitFor(() => expect(header.mock.calls.length).toBeGreaterThan(0));
     expect(header.mock.calls.at(-1)![0].loading).toBe(false);
     expect(screen.getAllByText("PERCOLATOR").length).toBeGreaterThan(0);
   });
