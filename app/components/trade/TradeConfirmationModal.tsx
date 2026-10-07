@@ -215,7 +215,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
     <div
       ref={overlayRef}
       onClick={handleOverlayClick}
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4"
+      className="fixed inset-0 z-[9999] flex justify-center overflow-y-auto overscroll-contain bg-black/80 p-4"
     style={{ opacity: 0 }}
     >
       <div
@@ -223,7 +223,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
         role="dialog"
         aria-modal="true"
         aria-labelledby="trade-confirm-title"
-        className="relative w-full max-w-md rounded-none border border-[var(--border)] bg-[var(--bg)] p-6 shadow-2xl"
+        className="relative my-auto w-full max-w-md rounded-none border border-[var(--border)] bg-[var(--bg)] p-6 shadow-2xl"
       style={{ opacity: 0 }}
       >
         {/* Header */}

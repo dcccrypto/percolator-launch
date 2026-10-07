@@ -126,14 +126,14 @@ export const SendPositionNftModal: FC<SendPositionNftModalProps> = ({
       onClick={(e) => {
         if (e.target === e.currentTarget && !loading) onCancel();
       }}
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4"
+      className="fixed inset-0 z-[9999] flex justify-center overflow-y-auto overscroll-contain bg-black/80 p-4"
       aria-modal="true"
       role="dialog"
       aria-label="Send Position NFT"
     >
       <div
         ref={modalRef}
-        className="relative w-full max-w-sm rounded-none border border-[var(--border)] bg-[var(--bg)] shadow-xl"
+        className="relative my-auto w-full max-w-sm rounded-none border border-[var(--border)] bg-[var(--bg)] shadow-xl"
       >
         <div className="flex items-center gap-2 px-4 py-3 border-l-2 border-l-[var(--accent)] bg-[var(--accent)]/[0.06]">
           <span className="text-[13px] leading-none text-[var(--accent)]">◆</span>

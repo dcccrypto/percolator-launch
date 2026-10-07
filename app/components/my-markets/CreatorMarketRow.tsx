@@ -643,8 +643,8 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
           from the flow this replaces; the gate text and disabled-until-exact-
           match behavior are unchanged. */}
       {showBurnConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="mx-4 max-w-md w-full rounded-none border border-[var(--border)]/50 bg-[var(--bg)] p-8">
+        <div className="fixed inset-0 z-50 flex justify-center overflow-y-auto overscroll-contain bg-black/60 py-4">
+          <div className="mx-4 my-auto max-w-md w-full rounded-none border border-[var(--border)]/50 bg-[var(--bg)] p-8">
             <h3 className="text-sm font-semibold uppercase tracking-[0.1em] text-[var(--text)]">burn admin key</h3>
             <p className="mt-2 text-[11px] text-[var(--text-secondary)]">
               This is permanent and irreversible. You will never be able to update config, set oracle, or perform any admin actions on this market again.

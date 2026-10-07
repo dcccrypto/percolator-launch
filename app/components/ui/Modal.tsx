@@ -20,7 +20,8 @@ import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
  * other looks finished; it just means the gap is in all five.
  *
  * Owns:
- *   portal · z-tier + scrim · scroll lock · Escape · overlay-click ·
+ *   portal · z-tier + scrim · scroll lock · scrolling a panel taller than the screen ·
+ *   Escape · overlay-click ·
  *   entrance animation (reduced-motion aware) · focus trap + focus restore
  *
  * Callers own their panel's width, borders and content.
@@ -175,7 +176,7 @@ export const Modal: FC<ModalProps> = ({
   const content = (
     <div
       ref={overlayRef}
-      className={`fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4 ${scrimClassName}`}
+      className={`fixed inset-0 z-[9999] flex justify-center overflow-y-auto overscroll-contain bg-black/80 p-4 ${scrimClassName}`}
       onClick={handleOverlayClick}
       style={{ opacity: 0 }}
     >
@@ -184,7 +185,7 @@ export const Modal: FC<ModalProps> = ({
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
-        className={panelClassName}
+        className={`my-auto ${panelClassName}`}
         style={{ opacity: 0 }}
       >
         {children}
