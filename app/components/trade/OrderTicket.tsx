@@ -78,7 +78,8 @@ import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { formatTokenAmount, formatUsdPriceE6, toE6, normalizeTokenDecimals } from "@/lib/format";
 import { describeLiqPrice, type LiqPriceDisplay } from "@/lib/liq-price-display";
 import { computeRiskLeverage, formatLeverageValue } from "@/lib/leverage-display";
-import { saveEntryPrice, getEntryPrice, clearEntryPrice } from "@/lib/entry-price";
+import { saveEntryPrice, getEntryPrice, clearEntryPrice, entryAfterTrade, getSavedEntry } from "@/lib/entry-price";
+import { takePositionChange } from "@/lib/position-change";
 import { isSentinelValue } from "@/lib/health";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
 import { useInitUser } from "@/hooks/useInitUser";
@@ -1054,24 +1055,40 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       // A first fund-and-trade runs with no account in this closure (fundingMode allows it), and the
       // portfolio it just created is a v17 one: idx 0, like every v17 account (lib/userAccountScan.ts).
       const entryIdx = userAccount?.idx ?? (fundingMode ? 0 : null);
-      if (livePriceE6 && livePriceE6 > 0n && entryIdx !== null) {
+      // The fill's price, read now rather than from this render (which may be minutes old after a
+      // long wait in the wallet). Same source as before: the live mark, as for every saved entry.
+      const fillPriceE6 = getLivePriceSnapshot(slabAddress).priceE6 ?? livePriceE6 ?? 0n;
+      if (fillPriceE6 > 0n && entryIdx !== null) {
         const wallet = publicKey?.toBase58();
-        // BUG 9 fix: this fired unconditionally on every successful open, so
-        // scaling INTO (or reducing/flipping through) an EXISTING position
-        // overwrote the cached entry with this trade's raw fill price — not
-        // a blended cost basis — corrupting Entry/Liq/PnL/ROE everywhere that
-        // reads the cache. Only a genuinely NEW position (flat -> open) has
-        // "this fill IS the entry" be true. When a position already existed
-        // pre-trade, clear the now-stale cache instead: every consumer's
-        // existing `cachedEntry > 0 ? cached : estimateEntryFromPnl(...)`
-        // fallback then recovers the correct basis from the refreshed
-        // on-chain size/pnl (accurate once refreshSlab() below lands)
-        // instead of showing this trade's fill price mislabeled as "Entry".
+        const slab = slabAddress;
+        const orderLeverage = leverage;
+        // #3314: read BEFORE anything below overwrites or clears it.
+        const prior = getSavedEntry(slab, entryIdx, wallet);
+        // Until the position is measured: a new position takes this fill as its entry; a trade on
+        // an existing one clears it (BUG 9: never let this fill's raw price stand in for the
+        // position's entry), so nothing shows an out-of-date entry as exact in the meantime.
         if (existingPositionSize === 0n) {
-          saveEntryPrice(slabAddress, entryIdx, livePriceE6, leverage, wallet);
+          saveEntryPrice(slab, entryIdx, fillPriceE6, orderLeverage, wallet);
         } else {
-          clearEntryPrice(slabAddress, entryIdx, wallet);
+          clearEntryPrice(slab, entryIdx, wallet);
         }
+        // Then decide from the position measured on chain before and after this trade
+        // (ADL-effective, lib/position-change.ts): an add averages the saved entry with this fill,
+        // a reduce keeps it, a flip or new position takes this fill (lib/entry-price.ts
+        // entryAfterTrade). No measurement (read failed, legacy market): the step above stands.
+        void takePositionChange(sig).then((change) => {
+          if (!change) return;
+          const next = entryAfterTrade({ beforeQ: change.beforeQ, afterQ: change.afterQ, saved: prior, fillPriceE6 });
+          if (next === null) {
+            clearEntryPrice(slab, entryIdx, wallet);
+            return;
+          }
+          const opened = change.beforeQ === 0n || (change.beforeQ > 0n) !== (change.afterQ > 0n);
+          // The saved leverage describes the order that opened the position (PositionPanel's
+          // "Order Lev."), so an add or a reduce keeps it.
+          const lev = opened ? orderLeverage : prior?.leverage ?? undefined;
+          saveEntryPrice(slab, entryIdx, next, lev, wallet, change.afterQ);
+        });
       }
       // The site-wide PositionsBar reads usePortfolio, which refreshes its
       // position list on a 30s interval and learns nothing from refreshSlab()
