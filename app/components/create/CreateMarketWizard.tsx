@@ -36,7 +36,7 @@ import { StepControlRoom, leverageToMarginBps, marginBpsToLeverage } from "./Ste
 import { LaunchProgress } from "./LaunchProgress";
 import { LaunchSuccess } from "./LaunchSuccess";
 import { ResumeFromChainCard } from "./ResumeFromChainCard";
-import { applyRecoveredLaunch, atomsToHuman, type RecoveredLaunch } from "@/lib/launch-recovery";
+import { applyRecoveredLaunch, atomsToHuman, canResumeLaunch, type RecoveredLaunch } from "@/lib/launch-recovery";
 import { RecoverSolBanner } from "./RecoverSolBanner";
 // W8 fix: share ONE SOL-cost formula with CostEstimate.tsx's own display so the
 // launch gate and the number shown to the user can never drift apart — see that
@@ -233,6 +233,40 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
   const [chainResume, setChainResume] = useState<RecoveredLaunch | null>(null);
   const chainResumeRef = useRef<RecoveredLaunch | null>(null);
   chainResumeRef.current = chainResume;
+  const [chainResumeError, setChainResumeError] = useState<string | null>(null);
+  // A chain resume belongs to ONE slab and ONE wallet. Switching wallet drops it (and the resume mode it
+  // started), so a verification done for wallet A can never launch for wallet B.
+  const walletB58 = publicKey?.toBase58() ?? null;
+  const resumeWalletRef = useRef<string | null>(walletB58);
+  useEffect(() => {
+    if (resumeWalletRef.current !== walletB58 && chainResumeRef.current) {
+      setChainResume(null);
+      setResumeFromStep(null);
+      setResumeSlab(null);
+      resetCreate();
+    }
+    resumeWalletRef.current = walletB58;
+  }, [walletB58]); // eslint-disable-line react-hooks/exhaustive-deps
+  /**
+   * The chain resume a launch/retry may use, or null when there is none. Refuses (and says why) when it
+   * is for a different slab than the one being resumed, was verified for another wallet, or is a market
+   * this recovery cannot resume.
+   */
+  const gateChainResume = (): { ok: true; resume: RecoveredLaunch | null } | { ok: false } => {
+    const r = chainResume;
+    if (!r) return { ok: true, resume: null };
+    if (r.request.slabAddress !== resumeSlab || r.creator !== walletB58) {
+      setChainResumeError("This resume was verified for a different market or wallet. Cancel it and open the launch again.");
+      return { ok: false };
+    }
+    const can = canResumeLaunch(r);
+    if (!can.ok) {
+      setChainResumeError(can.reason);
+      return { ok: false };
+    }
+    setChainResumeError(null);
+    return { ok: true, resume: r };
+  };
 
   // BUG FIX (2026-09-25, tester-reported "RESUME CREATION is a dead button"):
   // clicking RESUME CREATION previously only updated React state — nothing
@@ -939,7 +973,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
     };
     // PERC-513: If resuming from a stuck slab, skip slab creation (step 0).
     // The existing slab keypair is already in slabKpRef (loaded from localStorage).
-    create(applyRecoveredLaunch(params, chainResume), resumeFromStep ?? undefined);
+    const gate = gateChainResume();
+    if (!gate.ok) return;
+    create(applyRecoveredLaunch(params, gate.resume), resumeFromStep ?? undefined);
   };
 
   // Retry from failed step
@@ -1004,7 +1040,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
         dexType: wizard.dexPool?.dexType,
       } : {}),
     };
-    create(applyRecoveredLaunch(params, chainResume), createState.step);
+    const gate = gateChainResume();
+    if (!gate.ok) return;
+    create(applyRecoveredLaunch(params, gate.resume), createState.step);
   };
 
   // Retry ONLY the keeper-register step for an already-live market (LaunchSuccess's
@@ -1166,6 +1204,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
               marginSetByUser: true,
               lpCollateral: atomsToHuman(launch.lpCollateralAtoms, 6),
               lpSetByUser: true,
+              ...(launch.onChainInsuranceAtoms != null && launch.onChainInsuranceAtoms > 0n
+                ? { insuranceAmount: atomsToHuman(launch.onChainInsuranceAtoms, 6) }
+                : {}),
             }));
             setResumeFromStep(step);
             setResumeSlab(resumeSlabParam);
@@ -1195,6 +1236,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
           if (matched?.keypair && matched.publicKey.toBase58() === slabAddress) {
             restoreSlabKeypair(matched.keypair, slabAddress);
           }
+          // A local resume replaces any chain resume: never apply another market's pinned parameters.
+          setChainResume(null);
+          setChainResumeError(null);
           // Set resumeFromStep so handleLaunch skips slab creation and resumes correctly.
           setResumeFromStep(fromStep);
           setResumeSlab(slabAddress);
@@ -1242,12 +1286,19 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
             onClick={() => {
               setResumeFromStep(null);
               setChainResume(null);
+              setChainResumeError(null);
               resetCreate();
             }}
             className="flex-shrink-0 text-[10px] text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors px-2 py-1 border border-[var(--border)]"
           >
             CANCEL
           </button>
+        </div>
+      )}
+
+      {chainResumeError && (
+        <div data-testid="chain-resume-error" className="border border-[var(--short)]/40 bg-[var(--short)]/[0.06] px-4 py-3 text-[11px] text-[var(--text)]">
+          {chainResumeError}
         </div>
       )}
 

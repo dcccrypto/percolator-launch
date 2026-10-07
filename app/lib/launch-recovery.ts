@@ -35,7 +35,7 @@ import type { KeeperRegisterRequest } from "@/lib/keeper-register-client";
 import { saveProofPayload, saveProofTx, saveRegisterRequest, type KeyStore } from "@/lib/keeper-register-client";
 import { buildMarketRegistrationPayload, flooredInitialMarginBps } from "@/lib/market-registration-payload";
 import { resolveMarketMetadata } from "@/lib/market-metadata";
-import { leverageFromMarginBps } from "@/lib/market-params";
+import { backingSeedPerDomain, leverageFromMarginBps } from "@/lib/market-params";
 import type { DexPoolResult } from "@/hooks/useDexPoolSearch";
 import type { TokenMeta } from "@/lib/tokenMeta";
 
@@ -117,7 +117,11 @@ export async function readCreationFromChain(connection: TxConn, slab: string, wr
     if (launch.length === 0) return { ok: false, reason: "no-creation-tx" };
     const txs: { sig: string; tx: VersionedTransactionResponse | null }[] = [];
     for (const s of launch) {
-      txs.push({ sig: s.signature, tx: await connection.getTransaction(s.signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 }) });
+      const tx = await connection.getTransaction(s.signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
+      // A signature the RPC listed but cannot return is a read problem, not proof that the launch
+      // carries no registration: report it as one rather than as "no memo".
+      if (!tx) return { ok: false, reason: "rpc" };
+      txs.push({ sig: s.signature, tx });
     }
 
     let found: Omit<CreationFacts, "depositAmounts" | "slab"> | null = null;
@@ -158,7 +162,7 @@ export async function readCreationFromChain(connection: TxConn, slab: string, wr
         if (memo && txMemos === 1) found = { proofTx: sig, tx, creator: admin, memo, init, collateralMint: mint };
       }
     }
-    if (!found) return { ok: false, reason: memos > 1 ? "several-memos" : txs.some((t) => t.tx) ? (memos === 0 ? "no-memo" : "no-creation-tx") : "no-creation-tx" };
+    if (!found) return { ok: false, reason: memos > 1 ? "several-memos" : memos === 0 ? "no-memo" : "no-creation-tx" };
     return { ok: true, facts: { slab, ...found, depositAmounts: [...new Set(depositAmounts)] } };
   } catch {
     return { ok: false, reason: "rpc" };
@@ -208,6 +212,8 @@ export interface RecoveredLaunch {
   initialPriceE6: bigint;
   /** InitMarket's maxPortfolioAssets: 1 marks a vault-owned-LP (P3) market. */
   maxPortfolioAssets: number;
+  /** The slab's own insurance balance when this launch was read (atoms), if known: pinned for a resume. */
+  onChainInsuranceAtoms?: bigint | null;
 }
 
 export interface ReconstructInput {
@@ -426,6 +432,7 @@ export interface ResumableParams {
   tradingFeeBps: number;
   initialMarginBps: number;
   lpCollateral: bigint;
+  insuranceAmount?: bigint;
   symbol?: string;
   name?: string;
   mainnetCA?: string;
@@ -436,27 +443,68 @@ export interface ResumableParams {
 }
 
 /**
+ * Whether a recovered launch can be resumed from here. A market created with ONE asset slot is a
+ * vault-owned-LP (P3) market: its later steps sign a junior-tranche floor and amount that neither the
+ * memo binds nor the chain yet records in a form this recovery reads. Resuming it with today's flag or
+ * form default would sign values the creator never chose, so it is refused until those parameters can
+ * be read or proven. (Registration-only recovery of a FINISHED market is unaffected.)
+ */
+export function canResumeLaunch(r: Pick<RecoveredLaunch, "maxPortfolioAssets">): { ok: true } | { ok: false; reason: string } {
+  if (r.maxPortfolioAssets === 1) {
+    return {
+      ok: false,
+      reason:
+        "This launch can't be resumed from here yet: it is a vault-owned-liquidity market, and the parameters its remaining steps would sign aren't recorded on chain. Continue it from the browser that started it.",
+    };
+  }
+  return { ok: true };
+}
+
+/**
  * Pin a resumed launch's parameters to what the market was created with and what the memo bound.
  * InitMarket already fixed price, margin and fee on chain; the memo bound the pool, dex type, symbol,
- * name and LP seed. The live wizard re-detects some of these (a different top pool, a moved price), and
- * letting that through would resume the market with different parameters, or send a registration
- * that can no longer verify. A vault-owned-LP (P3) launch is recognised by InitMarket's slot count
- * (1), never by whether the P3 flag happens to be on today.
+ * name and LP seed; the slab's own insurance balance, when above zero, is what was already funded. The
+ * live wizard re-detects some of these (a different top pool, a moved price), and letting that through
+ * would resume the market with different parameters, or send a registration that can no longer verify.
+ * A one-slot (P3) market never reaches here (canResumeLaunch refuses it), so `p3` is always cleared:
+ * it must not depend on today's flag or form.
  */
 export function applyRecoveredLaunch<T extends ResumableParams>(params: T, r: RecoveredLaunch | null): T {
   if (!r) return params;
+  const ins = r.onChainInsuranceAtoms;
   return {
     ...params,
     initialPriceE6: r.initialPriceE6,
     tradingFeeBps: r.tradingFeeBps,
     initialMarginBps: r.initialMarginBps,
     lpCollateral: r.lpCollateralAtoms,
+    ...(ins != null && ins > 0n ? { insuranceAmount: ins } : {}),
     symbol: r.symbol,
     name: r.name,
     mainnetCA: r.request.mainnetCA ?? params.mainnetCA,
     dexPoolAddress: r.poolAddress,
     dexType: r.dexType,
     oracleMode: "keeper",
-    p3: r.maxPortfolioAssets === 1 ? params.p3 : undefined,
+    p3: undefined,
   };
+}
+
+/**
+ * Every value the resumed steps will make the wallet sign that the registration memo does NOT bind, in
+ * plain words, for the "Verified" summary. The memo binds price, margin, fee, LP seed, token, pool and
+ * symbol/name; these are the rest.
+ */
+export function unboundResumeValues(r: RecoveredLaunch, decimals = 6): string[] {
+  const out: string[] = [];
+  const ins = r.onChainInsuranceAtoms;
+  out.push(
+    ins != null && ins > 0n
+      ? `Insurance: ${atomsToHuman(ins, decimals)}, as already funded on chain.`
+      : "Insurance top-up: the amount in this form (not part of the signed registration); nothing is funded yet.",
+  );
+  out.push(
+    `Earn-vault backing seed: ${atomsToHuman(2n * backingSeedPerDomain(r.lpCollateralAtoms), decimals)} in total across both backing domains (derived from the liquidity seed, not separately signed).`,
+  );
+  out.push("Matcher limits (per-trade and inventory caps): from this form's LP exposure setting, written once at the liquidity step.");
+  return out;
 }

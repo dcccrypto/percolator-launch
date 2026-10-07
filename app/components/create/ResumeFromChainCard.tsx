@@ -3,7 +3,7 @@
 import { FC, useEffect, useState } from "react";
 import Link from "next/link";
 import { PublicKey } from "@solana/web3.js";
-import { isV17Account, parseWrapperConfigV17, V17_HEADER_LEN } from "@percolatorct/sdk";
+import { isV17Account, parseMarketGroupV17OI, parseWrapperConfigV17, V17_HEADER_LEN } from "@percolatorct/sdk";
 import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { searchVerifiedPools } from "@/hooks/useDexPoolSearch";
 import { fetchTokenMeta } from "@/lib/tokenMeta";
@@ -16,7 +16,9 @@ import {
   adoptRecoveredLaunch,
   atomsToHuman,
   CANNOT_RESUME_COPY,
+  canResumeLaunch,
   inferResumeStep,
+  unboundResumeValues,
   recoverLaunchFromChain,
   RECOVERY_COPY,
   type RecoveredLaunch,
@@ -29,7 +31,7 @@ export type ResumeChainState =
   | { kind: "not-a-market" }
   | { kind: "not-yours" }
   | { kind: "finished" }
-  | { kind: "ready"; step: 1 | 2 | 3; funded: boolean };
+  | { kind: "ready"; step: 1 | 2 | 3; funded: boolean; /** The slab's insurance balance, atoms; null when it could not be read. */ insuranceAtoms: bigint | null };
 
 /** Pure: classify a slab's bytes for a resume by `wallet`. Exported for the test. */
 export function classifyResumeSlab(
@@ -46,7 +48,18 @@ export function classifyResumeSlab(
     if (completeFn(cfg.marketauth, slab)) return { kind: "finished" };
     if (!cfg.marketauth.equals(wallet)) return { kind: "not-yours" };
     const h = readMarketGroupHeader(data);
-    return { kind: "ready", step: inferResumeStep({ portfolios: h.materializedPortfolioCount, cTot: h.cTot }), funded: h.cTot > 0n };
+    let insuranceAtoms: bigint | null = null;
+    try {
+      insuranceAtoms = parseMarketGroupV17OI(data).insuranceBalance;
+    } catch {
+      insuranceAtoms = null;
+    }
+    return {
+      kind: "ready",
+      step: inferResumeStep({ portfolios: h.materializedPortfolioCount, cTot: h.cTot }),
+      funded: h.cTot > 0n || (insuranceAtoms ?? 0n) > 0n,
+      insuranceAtoms,
+    };
   } catch {
     return { kind: "unreadable" };
   }
@@ -92,29 +105,52 @@ export const ResumeFromChainCard: FC<{
 
   const verify = async () => {
     if (!wallet.publicKey || chain.kind !== "ready") return;
-    setBusy(true);
     setNote(null);
-    const r = await recoverLaunchFromChain(
-      {
-        connection,
-        wrapperProgramId: getConfig().programId as string,
-        crankWallet: getConfig().crankWallet as string | undefined,
-        isDevnetEnv: getNetwork() === "devnet",
-        searchPools: (m) => searchVerifiedPools(m),
-        fetchMeta: (m) => fetchTokenMeta(connection, m),
-      },
-      { slab, wallet: wallet.publicKey.toBase58(), mainnetCA: ca, lpCandidates: lp.trim() ? [parseHumanAmount(lp, 6)] : undefined },
-    );
-    setBusy(false);
-    if (!r.ok) {
-      setNote(RECOVERY_COPY[r.reason]);
-      return;
+    // The amount the creator typed: refuse anything the wizard could not hold (more than 6 decimals)
+    // before any request, instead of throwing inside the async work and leaving the card stuck.
+    let lpCandidates: bigint[] | undefined;
+    if (lp.trim()) {
+      try {
+        lpCandidates = [parseHumanAmount(lp, 6)];
+      } catch {
+        setNote("Enter the liquidity amount with at most 6 decimals.");
+        return;
+      }
     }
-    // Same files the launching browser would have written, so the registration at the end of the
-    // launch finds the exact proof and payload the memo bound.
-    adoptRecoveredLaunch(r.launch);
-    setVerified(r.launch);
-    onVerified(r.launch, chain.step);
+    setBusy(true);
+    try {
+      const r = await recoverLaunchFromChain(
+        {
+          connection,
+          wrapperProgramId: getConfig().programId as string,
+          crankWallet: getConfig().crankWallet as string | undefined,
+          isDevnetEnv: getNetwork() === "devnet",
+          searchPools: (m) => searchVerifiedPools(m),
+          fetchMeta: (m) => fetchTokenMeta(connection, m),
+        },
+        { slab, wallet: wallet.publicKey.toBase58(), mainnetCA: ca, lpCandidates },
+      );
+      if (!r.ok) {
+        setNote(RECOVERY_COPY[r.reason]);
+        return;
+      }
+      // A vault-owned-liquidity (one-slot) market can't be resumed from here: say so, adopt nothing.
+      const can = canResumeLaunch(r.launch);
+      if (!can.ok) {
+        setNote(can.reason);
+        return;
+      }
+      const launch = { ...r.launch, onChainInsuranceAtoms: chain.insuranceAtoms };
+      // Same files the launching browser would have written, so the registration at the end of the
+      // launch finds the exact proof and payload the memo bound.
+      adoptRecoveredLaunch(launch);
+      setVerified(launch);
+      onVerified(launch, chain.step);
+    } catch {
+      setNote(RECOVERY_COPY.rpc);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const box = "mb-4 border border-[var(--accent)]/30 bg-[var(--accent)]/[0.04] p-4";
@@ -186,8 +222,12 @@ export const ResumeFromChainCard: FC<{
         <div data-testid="resume-chain-summary" className="mt-3 text-[11px] text-[var(--text)]">
           <p>
             Verified: <span className="font-semibold">{verified.symbol}</span> ({verified.name}) on pool {verified.poolAddress.slice(0, 6)}…, {leverageFromMarginBps(verified.initialMarginBps)}x,{" "}
-            {verified.tradingFeeBps} bps fee, {atomsToHuman(verified.lpCollateralAtoms, 6)} liquidity seed.
+            {verified.tradingFeeBps} bps fee, {atomsToHuman(verified.lpCollateralAtoms, 6)} liquidity seed
+            {verified.onChainInsuranceAtoms != null && verified.onChainInsuranceAtoms > 0n ? `, ${atomsToHuman(verified.onChainInsuranceAtoms, 6)} insurance (already funded)` : ""}.
           </p>
+          <ul data-testid="resume-chain-unbound" className="mt-1 list-disc pl-4 text-[var(--text-secondary)]">
+            {unboundResumeValues(verified).map((line) => <li key={line}>{line}</li>)}
+          </ul>
           <p className="mt-1 text-[var(--text-secondary)]">
             It resumes at step {chain.step} and skips whatever already landed. Continue below to review and launch.
           </p>

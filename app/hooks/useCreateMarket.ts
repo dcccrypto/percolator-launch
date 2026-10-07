@@ -1848,6 +1848,13 @@ export function useCreateMarket() {
   // below hydrates it; restoreSlabKeypair lets RecoverSolBanner's onResume hand the
   // keypair back in explicitly (belt-and-suspenders for the same-session resume path).
   const slabKpRef = useRef<Keypair | null>(null);
+  /**
+   * Cross-device resume (#3267): the slab a chain-rebuilt resume was handed (restoreSlabAddress). While
+   * set, create() runs ONLY on this slab: the keypair hydration below and a stale slabKpRef from this
+   * browser's own last launch must never win over it, or the wallet would sign LP init and deposits
+   * against the wrong market with this slab's pinned parameters.
+   */
+  const chainResumeSlabRef = useRef<string | null>(null);
 
   /**
    * GH#2623: a fresh controller per `create()` call — never re-abort a
@@ -1865,6 +1872,7 @@ export function useCreateMarket() {
   }, []);
 
   useEffect(() => {
+    if (chainResumeSlabRef.current) return; // a chain resume owns the slab; never hydrate another launch over it
     if (slabKpRef.current) return; // already have a keypair this session — don't clobber it
     if (!wallet.publicKey) return; // wait for wallet connection so we can verify ownership
     const inFlight = loadLastInFlightMarket();
@@ -1891,6 +1899,7 @@ export function useCreateMarket() {
    * connection on the same render).
    */
   const restoreSlabKeypair = useCallback((keypair: Keypair, slabAddress: string) => {
+    chainResumeSlabRef.current = null; // an explicit local resume replaces any chain resume
     slabKpRef.current = keypair;
     setState((s) => ({ ...s, slabAddress }));
   }, []);
@@ -1901,6 +1910,10 @@ export function useCreateMarket() {
    * never leaves the launching browser. So a resume from another device hands the address in here.
    */
   const restoreSlabAddress = useCallback((slabAddress: string) => {
+    chainResumeSlabRef.current = slabAddress;
+    // A keypair for ANY OTHER slab (this browser's own unfinished launch, hydrated on mount) must not
+    // survive: create() prefers slabKpRef over state.slabAddress.
+    if (slabKpRef.current && slabKpRef.current.publicKey.toBase58() !== slabAddress) slabKpRef.current = null;
     setState((s) => ({ ...s, slabAddress }));
   }, []);
 
@@ -2117,16 +2130,22 @@ export function useCreateMarket() {
         // brand-new "Launch Market" click), where slabKpRef.current could still be
         // hydrated from a stale in-flight entry the user hasn't discarded yet (see the
         // mount effect above).
-        if (retryFromStep === 0 && slabKpRef.current) {
+        if (retryFromStep === 0 && slabKpRef.current && !chainResumeSlabRef.current) {
           slabKp = slabKpRef.current;
           slabPk = slabKp.publicKey;
         } else {
+          chainResumeSlabRef.current = null; // a launch from step 0 is a new market, not a resume
           slabKp = Keypair.generate();
           slabKpRef.current = slabKp;
           slabPk = slabKp.publicKey;
         }
         // PERC-8329: Do NOT persist secret key to localStorage — keep in memory only.
         // If the user refreshes before completing all steps, they must start over.
+      } else if (chainResumeSlabRef.current) {
+        // Chain resume (#3267): only the slab address, the one restoreSlabAddress was given. Never the
+        // slabKpRef of another launch, and not `state` (this closure may predate the call).
+        slabPk = new PublicKey(chainResumeSlabRef.current);
+        slabKp = null as unknown as Keypair;
       } else if (slabKpRef.current) {
         // Retry with persisted keypair — full functionality
         slabKp = slabKpRef.current;
@@ -3907,6 +3926,7 @@ export function useCreateMarket() {
 
         // Done! Clear in-memory keypair ref + in-flight recovery state.
         slabKpRef.current = null;
+        chainResumeSlabRef.current = null;
         clearInFlightMarket(slabPk.toBase58());
         setState((s) => ({
           ...s,
@@ -3938,6 +3958,7 @@ export function useCreateMarket() {
 
   const reset = useCallback(() => {
     slabKpRef.current = null;
+    chainResumeSlabRef.current = null;
     // PERC-8329: Clear any stale key that may have been stored by old code (defensive cleanup).
     try {
       localStorage.removeItem("percolator-pending-slab-keypair");

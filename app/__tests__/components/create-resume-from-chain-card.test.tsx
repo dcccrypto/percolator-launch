@@ -8,12 +8,12 @@ import { PublicKey } from "@solana/web3.js";
 
 const h = vi.hoisted(() => ({
   recover: vi.fn(), adopt: vi.fn(), account: vi.fn(), conn: null as unknown as { connection: unknown }, wallet: null as unknown,
-  isV17: true, marketauth: null as unknown as PublicKey, complete: false, header: { mode: 0, cTot: 0n, materializedPortfolioCount: 0n },
+  oi: { insuranceBalance: 0n } as { insuranceBalance: bigint }, isV17: true, marketauth: null as unknown as PublicKey, complete: false, header: { mode: 0, cTot: 0n, materializedPortfolioCount: 0n },
 }));
 const WALLET = new PublicKey("EXC8LS3YzsbyadhaQPqaeGjb2ttfGgDLno9jeCFWqqyi");
 const OTHER = new PublicKey("DrrDGxiojUPHnLZaNw7DN6JYoEKKqu3bG4PmNjv8P1yG");
 const SLAB = new PublicKey("GrKZUtyeaqbg1Q1J1kPWznui92sbLpX5F62LrBVGkifL");
-vi.mock("@percolatorct/sdk", async (orig) => ({ ...(await orig<object>()), isV17Account: () => h.isV17, parseWrapperConfigV17: () => ({ marketauth: h.marketauth }), V17_HEADER_LEN: 0 }));
+vi.mock("@percolatorct/sdk", async (orig) => ({ ...(await orig<object>()), isV17Account: () => h.isV17, parseWrapperConfigV17: () => ({ marketauth: h.marketauth }), parseMarketGroupV17OI: () => h.oi, V17_HEADER_LEN: 0 }));
 vi.mock("@/lib/v18-wire", () => ({ readMarketGroupHeader: () => h.header }));
 vi.mock("@/lib/market-completeness", () => ({ isMarketauthComplete: () => h.complete }));
 vi.mock("@/hooks/useWalletCompat", () => ({ useWalletCompat: () => h.wallet, useConnectionCompat: () => h.conn }));
@@ -23,13 +23,13 @@ vi.mock("@/lib/launch-recovery", async (orig) => ({ ...(await orig<object>()), r
 
 import { ResumeFromChainCard, classifyResumeSlab } from "@/components/create/ResumeFromChainCard";
 
-const launch = { symbol: "AUTON", name: "auton", poolAddress: "POOL1111", initialMarginBps: 1000, tradingFeeBps: 5, lpCollateralAtoms: 1_000_000_000n, request: { mainnetCA: "CA1" } };
+const launch = { maxPortfolioAssets: 14, onChainInsuranceAtoms: undefined, symbol: "AUTON", name: "auton", poolAddress: "POOL1111", initialMarginBps: 1000, tradingFeeBps: 5, lpCollateralAtoms: 1_000_000_000n, request: { mainnetCA: "CA1" } };
 const bytes = new Uint8Array(8);
 
 beforeEach(() => {
   h.conn = { connection: { getAccountInfo: h.account } };
   h.wallet = { publicKey: WALLET };
-  Object.assign(h, { isV17: true, marketauth: WALLET, complete: false, header: { mode: 0, cTot: 0n, materializedPortfolioCount: 0n } });
+  Object.assign(h, { oi: { insuranceBalance: 0n } as { insuranceBalance: bigint }, isV17: true, marketauth: WALLET, complete: false, header: { mode: 0, cTot: 0n, materializedPortfolioCount: 0n } });
   h.recover.mockReset(); h.adopt.mockReset();
   h.account.mockReset().mockResolvedValue({ data: Buffer.from(bytes) });
 });
@@ -48,11 +48,11 @@ describe("classifying the slab for a resume", () => {
     expect(classifyResumeSlab(bytes, SLAB, WALLET).kind).toBe("not-yours");
   });
   it("the creator's unfinished launch resumes at the step the chain implies", () => {
-    expect(classifyResumeSlab(bytes, SLAB, WALLET)).toEqual({ kind: "ready", step: 1, funded: false });
+    expect(classifyResumeSlab(bytes, SLAB, WALLET)).toEqual({ kind: "ready", step: 1, funded: false, insuranceAtoms: 0n });
     h.header = { mode: 0, cTot: 0n, materializedPortfolioCount: 1n };
-    expect(classifyResumeSlab(bytes, SLAB, WALLET)).toEqual({ kind: "ready", step: 2, funded: false });
+    expect(classifyResumeSlab(bytes, SLAB, WALLET)).toEqual({ kind: "ready", step: 2, funded: false, insuranceAtoms: 0n });
     h.header = { mode: 0, cTot: 5n, materializedPortfolioCount: 2n };
-    expect(classifyResumeSlab(bytes, SLAB, WALLET)).toEqual({ kind: "ready", step: 3, funded: true });
+    expect(classifyResumeSlab(bytes, SLAB, WALLET)).toEqual({ kind: "ready", step: 3, funded: true, insuranceAtoms: 0n });
   });
   it("a bad read is 'unreadable', never a guess", () => {
     h.header = null as never;
@@ -67,8 +67,8 @@ describe("the card", () => {
     render(<ResumeFromChainCard slab={SLAB.toBase58()} onVerified={onVerified} />);
     fireEvent.change(await screen.findByTestId("resume-chain-ca"), { target: { value: "CA1" } });
     fireEvent.click(screen.getByTestId("resume-chain-verify"));
-    await waitFor(() => expect(onVerified).toHaveBeenCalledWith(launch, 1));
-    expect(h.adopt).toHaveBeenCalledWith(launch);
+    await waitFor(() => expect(onVerified).toHaveBeenCalledWith({ ...launch, onChainInsuranceAtoms: 0n }, 1));
+    expect(h.adopt).toHaveBeenCalledWith({ ...launch, onChainInsuranceAtoms: 0n });
     expect(screen.getByTestId("resume-chain-summary").textContent).toMatch(/AUTON.*10x.*5 bps fee.*1000 liquidity seed/);
   });
 
@@ -98,5 +98,55 @@ describe("the card", () => {
     render(<ResumeFromChainCard slab={SLAB.toBase58()} onVerified={vi.fn()} />);
     await waitFor(() => expect(screen.getByTestId("resume-chain-card").dataset.state).toBe("not-yours"));
     expect(screen.queryByTestId("resume-chain-ca")).toBeNull();
+  });
+});
+
+
+describe("security review items on the card", () => {
+  it("more than 6 decimals in the liquidity amount is a note, not a stuck 'checking…' (nothing is sent)", async () => {
+    render(<ResumeFromChainCard slab={SLAB.toBase58()} onVerified={vi.fn()} />);
+    fireEvent.change(await screen.findByTestId("resume-chain-ca"), { target: { value: "CA1" } });
+    fireEvent.change(screen.getByTestId("resume-chain-lp"), { target: { value: "1000.1234567" } });
+    fireEvent.click(screen.getByTestId("resume-chain-verify"));
+    await waitFor(() => expect(screen.getByTestId("resume-chain-note").textContent).toMatch(/at most 6 decimals/));
+    expect(h.recover).not.toHaveBeenCalled();
+    expect((screen.getByTestId("resume-chain-verify") as HTMLButtonElement).textContent).toBe("verify and continue");
+  });
+
+  it("an unexpected throw while verifying frees the button and reports an RPC problem", async () => {
+    h.recover.mockRejectedValue(new Error("boom"));
+    render(<ResumeFromChainCard slab={SLAB.toBase58()} onVerified={vi.fn()} />);
+    fireEvent.change(await screen.findByTestId("resume-chain-ca"), { target: { value: "CA1" } });
+    fireEvent.click(screen.getByTestId("resume-chain-verify"));
+    await waitFor(() => expect(screen.getByTestId("resume-chain-note").textContent).toMatch(/Couldn't read this market's launch/));
+    expect((screen.getByTestId("resume-chain-verify") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("a vault-owned-liquidity (one-slot) launch is refused: nothing adopted, nothing handed to the wizard", async () => {
+    h.recover.mockResolvedValue({ ok: true, launch: { ...launch, maxPortfolioAssets: 1 } });
+    const onVerified = vi.fn();
+    render(<ResumeFromChainCard slab={SLAB.toBase58()} onVerified={onVerified} />);
+    fireEvent.change(await screen.findByTestId("resume-chain-ca"), { target: { value: "CA1" } });
+    fireEvent.click(screen.getByTestId("resume-chain-verify"));
+    await waitFor(() => expect(screen.getByTestId("resume-chain-note").textContent).toMatch(/can't be resumed from here yet/));
+    expect(onVerified).not.toHaveBeenCalled();
+    expect(h.adopt).not.toHaveBeenCalled();
+  });
+
+  it("a funded insurance balance is read from the slab, shown, and handed over; every unbound value is listed", async () => {
+    h.oi = { insuranceBalance: 250_000_000n };
+    h.header = { mode: 0, cTot: 5n, materializedPortfolioCount: 2n };
+    h.recover.mockResolvedValue({ ok: true, launch });
+    const onVerified = vi.fn();
+    render(<ResumeFromChainCard slab={SLAB.toBase58()} onVerified={onVerified} />);
+    fireEvent.change(await screen.findByTestId("resume-chain-ca"), { target: { value: "CA1" } });
+    fireEvent.click(screen.getByTestId("resume-chain-verify"));
+    await waitFor(() => expect(onVerified).toHaveBeenCalled());
+    expect(onVerified.mock.calls[0][0].onChainInsuranceAtoms).toBe(250_000_000n);
+    expect(screen.getByTestId("resume-chain-summary").textContent).toMatch(/250 insurance \(already funded\)/);
+    const unbound = screen.getByTestId("resume-chain-unbound").textContent ?? "";
+    expect(unbound).toMatch(/Insurance: 250, as already funded on chain/);
+    expect(unbound).toMatch(/backing seed/);
+    expect(unbound).toMatch(/Matcher limits/);
   });
 });

@@ -237,7 +237,7 @@ void IX_TAG;
 
 import fs from "fs";
 import path from "path";
-import { applyRecoveredLaunch, type RecoveredLaunch } from "@/lib/launch-recovery";
+import { applyRecoveredLaunch, canResumeLaunch, unboundResumeValues, type RecoveredLaunch } from "@/lib/launch-recovery";
 
 describe("a chain-recovered resume pins the launch's parameters", () => {
   const launch = { initialPriceE6: PRICE, tradingFeeBps: 5, initialMarginBps: 1000, lpCollateralAtoms: LP, symbol: "AUTON", name: "auton", poolAddress: POOL, dexType: "meteora-dlmm", maxPortfolioAssets: 14, request: { mainnetCA: CA } } as unknown as RecoveredLaunch;
@@ -245,17 +245,41 @@ describe("a chain-recovered resume pins the launch's parameters", () => {
   it("overrides whatever the live wizard re-detected", () => {
     expect(applyRecoveredLaunch(live, launch)).toMatchObject({ initialPriceE6: PRICE, tradingFeeBps: 5, initialMarginBps: 1000, lpCollateral: LP, symbol: "AUTON", name: "auton", mainnetCA: CA, dexPoolAddress: POOL, dexType: "meteora-dlmm", oracleMode: "keeper" });
   });
-  it("a 14-slot market is never resumed as vault-owned-LP, whatever the flag says today; a 1-slot one keeps it", () => {
+  it("never carries the P3 flag over from today's form: a resume's p3 does not depend on the flag", () => {
     expect(applyRecoveredLaunch(live, launch).p3).toBeUndefined();
-    expect(applyRecoveredLaunch(live, { ...launch, maxPortfolioAssets: 1 } as RecoveredLaunch).p3).toEqual({ juniorAtoms: 1n });
+    expect(applyRecoveredLaunch(live, { ...launch, maxPortfolioAssets: 1 } as RecoveredLaunch).p3).toBeUndefined();
+  });
+  it("a one-slot (vault-owned-LP) market is refused for resume; a 14-slot one is allowed", () => {
+    const refused = canResumeLaunch({ maxPortfolioAssets: 1 });
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && refused.reason).toMatch(/can't be resumed from here yet/);
+    expect(canResumeLaunch({ maxPortfolioAssets: 14 })).toEqual({ ok: true });
+  });
+  it("pins the insurance to the slab's funded balance when above zero, else leaves the form's", () => {
+    expect(applyRecoveredLaunch({ ...live, insuranceAmount: 5n }, { ...launch, onChainInsuranceAtoms: 250n } as RecoveredLaunch).insuranceAmount).toBe(250n);
+    expect(applyRecoveredLaunch({ ...live, insuranceAmount: 5n }, { ...launch, onChainInsuranceAtoms: 0n } as RecoveredLaunch).insuranceAmount).toBe(5n);
+    expect(applyRecoveredLaunch({ ...live, insuranceAmount: 5n }, { ...launch, onChainInsuranceAtoms: null } as RecoveredLaunch).insuranceAmount).toBe(5n);
+  });
+  it("lists every value the wallet signs that the memo does not bind", () => {
+    const lines = unboundResumeValues({ ...launch, onChainInsuranceAtoms: 0n } as RecoveredLaunch);
+    expect(lines.join("\n")).toMatch(/Insurance top-up: the amount in this form/);
+    expect(lines.join("\n")).toMatch(/backing seed/);
+    expect(lines.join("\n")).toMatch(/Matcher limits/);
+    expect(unboundResumeValues({ ...launch, onChainInsuranceAtoms: 3_000_000n } as RecoveredLaunch)[0]).toBe("Insurance: 3, as already funded on chain.");
   });
   it("with no recovery it changes nothing (the normal launch and the local resume are untouched)", () => {
     expect(applyRecoveredLaunch(live, null)).toBe(live);
   });
   it("the wizard routes every create() call through it", () => {
     const src = fs.readFileSync(path.resolve(__dirname, "../../components/create/CreateMarketWizard.tsx"), "utf8");
-    expect(src).toContain("create(applyRecoveredLaunch(params, chainResume), resumeFromStep ?? undefined);");
-    expect(src).toContain("create(applyRecoveredLaunch(params, chainResume), createState.step);");
+    expect(src).toContain("create(applyRecoveredLaunch(params, gate.resume), resumeFromStep ?? undefined);");
+    expect(src).toContain("create(applyRecoveredLaunch(params, gate.resume), createState.step);");
     expect(src).toContain("restoreSlabAddress(resumeSlabParam);");
+    // security review C: the resume belongs to one slab and one wallet, and is gated before every launch/retry
+    expect(src).toContain("r.request.slabAddress !== resumeSlab || r.creator !== walletB58");
+    expect(src).toContain("if (resumeWalletRef.current !== walletB58 && chainResumeRef.current) {");
+    expect(src.match(/const gate = gateChainResume\(\);\n\s+if \(!gate\.ok\) return;/g)?.length).toBe(2);
+    // a local resume replaces any chain resume
+    expect(src).toMatch(/setChainResume\(null\);\n\s+setChainResumeError\(null\);\n\s+\/\/ Set resumeFromStep so handleLaunch/);
   });
 });

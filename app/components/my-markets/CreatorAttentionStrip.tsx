@@ -52,35 +52,39 @@ const RecoverFromChainForm: FC<{
     if (!wallet.publicKey) return;
     setBusy(true);
     setNote(null);
-    const r = await recoverLaunchFromChain(
-      {
-        connection,
-        wrapperProgramId: getConfig().programId as string,
-        crankWallet: getConfig().crankWallet as string | undefined,
-        isDevnetEnv: getNetwork() === "devnet",
-        searchPools: (m) => searchVerifiedPools(m),
-        fetchMeta: (m) => fetchTokenMeta(connection, m),
-      },
-      { slab, wallet: wallet.publicKey.toBase58(), mainnetCA: ca },
-    );
-    if (!r.ok) {
-      setNote(RECOVERY_COPY[r.reason]);
+    try {
+      const r = await recoverLaunchFromChain(
+        {
+          connection,
+          wrapperProgramId: getConfig().programId as string,
+          crankWallet: getConfig().crankWallet as string | undefined,
+          isDevnetEnv: getNetwork() === "devnet",
+          searchPools: (m) => searchVerifiedPools(m),
+          fetchMeta: (m) => fetchTokenMeta(connection, m),
+        },
+        { slab, wallet: wallet.publicKey.toBase58(), mainnetCA: ca },
+      );
+      if (!r.ok) {
+        setNote(RECOVERY_COPY[r.reason]);
+        return;
+      }
+      // Only a request that matched the on-chain memo gets here. Save what the launching browser
+      // would have, then send it through the same path as the saved retry.
+      adoptRecoveredLaunch(r.launch);
+      const res = await retry({
+        slabAddress: slab,
+        mainnetCA: r.launch.request.mainnetCA ?? null,
+        dexPoolAddress: r.launch.request.dexPoolAddress,
+        dexType: r.launch.request.dexType ?? null,
+        symbol: r.launch.request.symbol ?? null,
+        payload: r.launch.request.payload ?? null,
+      });
+      setNote(res.registered ? null : userFacingRegistrationReason(res.message));
+    } catch {
+      setNote(RECOVERY_COPY.rpc);
+    } finally {
       setBusy(false);
-      return;
     }
-    // Only a request that matched the on-chain memo gets here. Save what the launching browser
-    // would have, then send it through the same path as the saved retry.
-    adoptRecoveredLaunch(r.launch);
-    const res = await retry({
-      slabAddress: slab,
-      mainnetCA: r.launch.request.mainnetCA ?? null,
-      dexPoolAddress: r.launch.request.dexPoolAddress,
-      dexType: r.launch.request.dexType ?? null,
-      symbol: r.launch.request.symbol ?? null,
-      payload: r.launch.request.payload ?? null,
-    });
-    setNote(res.registered ? null : userFacingRegistrationReason(res.message));
-    setBusy(false);
   };
   return (
     <div className="flex shrink-0 flex-col items-end gap-1">
