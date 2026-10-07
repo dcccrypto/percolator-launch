@@ -189,14 +189,36 @@ describe("review M-7: only a finished, keeper-priced market under the ceilings i
     refusedNothingWritten();
   });
 
-  it("the deployment at its ceiling -> 403, nothing written; one below -> enrolled", async () => {
+  it("the deployment at its ceiling -> 429 (retryable, never a final 403), nothing written; one below -> enrolled", async () => {
     h.activeAll = DEFAULT_MAX_ACTIVE_MARKETS;
     const res = await post(REQUEST);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("300");
     expect(((await res.json()) as { error: string }).error).toBe(GLOBAL_CAP_COPY);
     refusedNothingWritten();
     h.activeAll = DEFAULT_MAX_ACTIVE_MARKETS - 1;
     h.activeMine = DEFAULT_MAX_ACTIVE_PER_CREATOR - 1;
     expect((await post(REQUEST)).status).toBe(200);
+  });
+
+  // 2026-10-05 20:14 UTC: the 50th active row (PLAGUE) filled the old ceiling of 50, and every
+  // launch after it (25+ markets, 7+ deployers) got a FINAL 403 and was left "UNKNOWN" for a day.
+  it("regression: a deployment with 50 live markets still enrolls a new one (the old ceiling)", async () => {
+    h.activeAll = 50;
+    h.activeMine = 0;
+    const res = await post(REQUEST);
+    expect(res.status).toBe(200);
+  });
+
+  it("regression: a full deployment's refusal is retryable on the client (not the final 'refused')", async () => {
+    h.activeAll = DEFAULT_MAX_ACTIVE_MARKETS;
+    const res = await post(REQUEST);
+    const { postKeeperRegistration } = await import("@/lib/keeper-register-client");
+    const attempt = await postKeeperRegistration(
+      { slabAddress: SLAB, dexPoolAddress: "x", proofTx: "p" },
+      async () => res,
+    );
+    expect(attempt.registered).toBe(false);
+    expect(attempt.retryable).toBe(true);
   });
 });

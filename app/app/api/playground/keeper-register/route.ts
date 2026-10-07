@@ -97,7 +97,7 @@ import { resolveTokenLogo } from "@/lib/token-logo";
 import { sanitizeLogoUrl } from "@/lib/token-metadata-validators";
 import { upsertRegisteredMarketRow } from "@/lib/market-registration";
 import { checkSymbol, checkName } from "@/lib/market-metadata-validation";
-import { checkKeeperReadiness, enrollmentCapsFromEnv, readinessStatus } from "@/lib/keeper-enrollment-guard";
+import { checkKeeperReadiness, enrollmentCapsFromEnv, GLOBAL_CAP_COPY, readinessStatus } from "@/lib/keeper-enrollment-guard";
 import { getPlaygroundKeeperSigner } from "@/lib/playground-keeper-signer";
 
 export const dynamic = "force-dynamic";
@@ -455,6 +455,19 @@ export async function POST(req: NextRequest) {
       dbResult.error,
       dbResult.detail ?? "(no detail)",
     );
+    // The deployment's live-price ceiling is full: EVERY launch is now refused until it is raised.
+    // 2026-10-05 20:14 UTC this was a silent 403 and 25+ markets went unpriced for a day.
+    if (dbResult.status === 429 && dbResult.error === GLOBAL_CAP_COPY) {
+      Sentry.captureMessage("[playground/keeper-register] keeper enrollment ceiling is full: new markets cannot be priced", {
+        level: "error",
+        tags: { endpoint: "/api/playground/keeper-register", auth: "cap-full" },
+        extra: { slabAddress, deployer: registeredDeployer },
+      });
+      return NextResponse.json(
+        { ok: false, registered: false, error: dbResult.error },
+        { status: 429, headers: { "Retry-After": "300" } },
+      );
+    }
     // Review M-1: the database's own error text stays in the server log (the proof path is
     // reachable by anyone who has the public creation tx).
     return NextResponse.json({ ok: false, registered: false, error: dbResult.error }, { status: dbResult.status });
