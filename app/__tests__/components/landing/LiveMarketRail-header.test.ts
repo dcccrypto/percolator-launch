@@ -51,13 +51,14 @@ describe("LiveMarketRail column header", () => {
       SRC.indexOf("const RailHeader"),
       SRC.indexOf("The landing page's live market rail"),
     );
-    // Breakpoints + minWidths mirror RailRow: Max Lev sm:, 24h Vol md:, OI lg:,
-    // Price always, 24h Change sm:.
-    expect(header).toMatch(/hidden shrink-0 text-right sm:block[^>]*minWidth: 34/s);
-    expect(header).toMatch(/hidden shrink-0 text-right md:block[^>]*minWidth: 64/s);
-    expect(header).toMatch(/hidden shrink-0 text-right lg:block[^>]*minWidth: 72/s);
-    expect(header).toMatch(/shrink-0 text-right[^>]*minWidth: 80/s);
-    expect(header).toMatch(/hidden shrink-0 text-right sm:block[^>]*minWidth: 56/s);
+    // Breakpoints + fixed widths mirror RailRow: Max Lev sm:, 24h Vol md:, OI lg:,
+    // Price always, 24h Change sm:. (Fixed `width`, not `minWidth`, so a long header
+    // label can't grow its cell and push the right-hand columns off their data.)
+    expect(header).toMatch(/hidden shrink-0 text-right sm:block[^>]*width: 56/s);
+    expect(header).toMatch(/hidden shrink-0 text-right md:block[^>]*width: 68/s);
+    expect(header).toMatch(/hidden shrink-0 text-right lg:block[^>]*width: 98/s);
+    expect(header).toMatch(/shrink-0 text-right[^>]*width: 88/s);
+    expect(header).toMatch(/hidden shrink-0 text-right sm:block[^>]*width: 76/s);
   });
 
   it("is aria-hidden — the row links already expose each value", () => {

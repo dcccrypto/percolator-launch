@@ -27,9 +27,11 @@ import {
 /** How often the client re-polls the list; the API response is CDN-cached for the same. */
 const REFRESH_MS = 60_000;
 
-/** Shared column widths (px) + responsive visibility — used by BOTH the header and the
- *  rows so a label can never drift out of line with its data. */
-const W = { dex: 68, ca: 96, mc: 68, vol: 74, chg: 58, trend: 48, price: 84 } as const;
+/** Shared FIXED column widths (px) — used by BOTH the header and the rows. Each is
+ *  sized to fit the widest of {header label, cell data}, and applied as `width` (not
+ *  `minWidth`) so a long uppercase label can't grow the header cell and nudge the
+ *  columns to its right out of line with the data. */
+const W = { dex: 72, ca: 100, mc: 80, vol: 72, chg: 64, trend: 52, price: 92 } as const;
 /** The Create-Market button has a FIXED width, matched by the header's trailing spacer,
  *  so the right-hand columns line up with their labels (not pushed by the button). */
 const CTA_W = "w-[104px] sm:w-[132px]";
@@ -157,36 +159,36 @@ const TrendingRow: FC<{ t: TrendingToken; tf: Timeframe; isLast: boolean }> = ({
         </div>
       </a>
 
-      <div className="hidden shrink-0 sm:block" style={{ minWidth: W.dex }}>
+      <div className="hidden shrink-0 sm:block" style={{ width: W.dex }}>
         <span className="rounded-sm border border-[var(--border)] bg-[var(--accent)]/[0.04] px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">
           {dexLabel(t.dexId)}
         </span>
       </div>
 
-      <div className="hidden shrink-0 lg:block" style={{ minWidth: W.ca }}>
+      <div className="hidden shrink-0 lg:block" style={{ width: W.ca }}>
         <CopyCa ca={t.mint} />
       </div>
 
-      <div className="hidden shrink-0 text-right font-mono text-[11px] text-[var(--text-secondary)] sm:block" style={{ minWidth: W.mc }}>
+      <div className="hidden shrink-0 text-right font-mono text-[11px] text-[var(--text-secondary)] sm:block" style={{ width: W.mc }}>
         {formatStatValue(t.marketCapUsd, "currency")}
       </div>
 
       {/* Volume — swaps with the selected timeframe. */}
-      <div className="hidden shrink-0 text-right font-mono text-[11px] text-[var(--text-secondary)] md:block" style={{ minWidth: W.vol }}>
+      <div className="hidden shrink-0 text-right font-mono text-[11px] text-[var(--text-secondary)] md:block" style={{ width: W.vol }}>
         {formatStatValue(volumeForTimeframe(t, tf), "currency")}
       </div>
 
       {/* Change — swaps with the timeframe, coloured green/red. */}
-      <div className={["hidden shrink-0 text-right font-mono text-[11px] tabular-nums md:block", changeClass].join(" ")} style={{ minWidth: W.chg }}>
+      <div className={["hidden shrink-0 text-right font-mono text-[11px] tabular-nums md:block", changeClass].join(" ")} style={{ width: W.chg }}>
         {formatChangePct(change)}
       </div>
 
       {/* Trend — volume-rate sparkline. */}
-      <div className="hidden shrink-0 lg:flex lg:justify-end" style={{ minWidth: W.trend }}>
+      <div className="hidden shrink-0 lg:flex lg:justify-end" style={{ width: W.trend }}>
         <TrendBars series={t.trend ?? []} />
       </div>
 
-      <div className="shrink-0 text-right font-mono text-[13px] font-semibold tabular-nums text-[var(--text)]" style={{ minWidth: W.price }}>
+      <div className="shrink-0 text-right font-mono text-[13px] font-semibold tabular-nums text-[var(--text)]" style={{ width: W.price }}>
         {formatMarkPrice(t.priceUsd)}
       </div>
 
@@ -212,13 +214,13 @@ const TrendingHeader: FC<{ tf: Timeframe }> = ({ tf }) => (
     className="flex items-center gap-3 border-b border-[var(--border)] bg-[var(--accent)]/[0.02] px-4 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--text-dim)] sm:gap-4"
   >
     <div className="min-w-0 flex-1">Token</div>
-    <div className="hidden shrink-0 sm:block" style={{ minWidth: W.dex }}>DEX</div>
-    <div className="hidden shrink-0 lg:block" style={{ minWidth: W.ca }}>Contract</div>
-    <div className="hidden shrink-0 text-right sm:block" style={{ minWidth: W.mc }}>Market Cap</div>
-    <div className="hidden shrink-0 text-right md:block" style={{ minWidth: W.vol }}>{tf === "1h" ? "1h Vol" : "24h Vol"}</div>
-    <div className="hidden shrink-0 text-right md:block" style={{ minWidth: W.chg }}>{tf === "1h" ? "1h %" : "24h %"}</div>
-    <div className="hidden shrink-0 text-right lg:block" style={{ minWidth: W.trend }}>Trend</div>
-    <div className="shrink-0 text-right" style={{ minWidth: W.price }}>Price</div>
+    <div className="hidden shrink-0 sm:block" style={{ width: W.dex }}>DEX</div>
+    <div className="hidden shrink-0 lg:block" style={{ width: W.ca }}>Contract</div>
+    <div className="hidden shrink-0 text-right sm:block" style={{ width: W.mc }}>Market Cap</div>
+    <div className="hidden shrink-0 text-right md:block" style={{ width: W.vol }}>{tf === "1h" ? "1h Vol" : "24h Vol"}</div>
+    <div className="hidden shrink-0 text-right md:block" style={{ width: W.chg }}>{tf === "1h" ? "1h %" : "24h %"}</div>
+    <div className="hidden shrink-0 text-right lg:block" style={{ width: W.trend }}>Trend</div>
+    <div className="shrink-0 text-right" style={{ width: W.price }}>Price</div>
     {/* trailing spacer = the Create Market button's fixed width, so columns stay aligned */}
     <div className={[CTA_W, "shrink-0"].join(" ")} />
   </div>

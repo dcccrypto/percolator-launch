@@ -104,27 +104,27 @@ const RailRow: FC<RailRowProps> = ({ slab, symbol, name, mainnetCa, fallbackPric
       </div>
 
       {/* Max Lev */}
-      <div className="hidden shrink-0 text-right font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)] sm:block" style={{ minWidth: 34 }}>
+      <div className="hidden shrink-0 text-right font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)] sm:block" style={{ width: 56 }}>
         {maxLeverage != null ? `${maxLeverage}x` : "—"}
       </div>
       {/* 24h Vol */}
-      <div className="hidden shrink-0 text-right font-mono text-[11px] text-[var(--text-secondary)] md:block" style={{ minWidth: 64 }}>
+      <div className="hidden shrink-0 text-right font-mono text-[11px] text-[var(--text-secondary)] md:block" style={{ width: 68 }}>
         {formatStatValue(volume24h, "currency")}
       </div>
       {/* Open Interest */}
-      <div className="hidden shrink-0 text-right font-mono text-[11px] text-[var(--text-secondary)] lg:block" style={{ minWidth: 72 }}>
+      <div className="hidden shrink-0 text-right font-mono text-[11px] text-[var(--text-secondary)] lg:block" style={{ width: 98 }}>
         {formatStatValue(oiUsd, "currency")}
       </div>
       {/* Price (live) */}
-      <div className={["shrink-0 text-right font-mono text-[13px] font-semibold tabular-nums transition-colors duration-300", tintClass].join(" ")} style={{ minWidth: 80 }}>
+      <div className={["shrink-0 text-right font-mono text-[13px] font-semibold tabular-nums transition-colors duration-300", tintClass].join(" ")} style={{ width: 88 }}>
         {priceLabel}
       </div>
       {/* 24h Change */}
-      <div className={["hidden shrink-0 text-right font-mono text-[11px] tabular-nums sm:block", changeClass].join(" ")} style={{ minWidth: 56 }}>
+      <div className={["hidden shrink-0 text-right font-mono text-[11px] tabular-nums sm:block", changeClass].join(" ")} style={{ width: 76 }}>
         {formatChangePct(change24h)}
       </div>
       {/* Trade — visual affordance; the whole row is the link. */}
-      <span className="hidden shrink-0 rounded-sm border border-[var(--accent)]/40 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--accent-text)] transition-colors group-hover:bg-[var(--accent)]/10 group-hover:border-[var(--accent)] sm:inline-flex sm:items-center" style={{ minWidth: 62, justifyContent: "center" }}>
+      <span className="hidden shrink-0 rounded-sm border border-[var(--accent)]/40 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--accent-text)] transition-colors group-hover:bg-[var(--accent)]/10 group-hover:border-[var(--accent)] sm:inline-flex sm:items-center" style={{ width: 70, justifyContent: "center" }}>
         Trade
       </span>
       {ARROW}
@@ -140,12 +140,12 @@ const RailHeader: FC = () => (
   >
     <div className="shrink-0" style={{ width: 24 }} />
     <div className="min-w-0 flex-1">Market</div>
-    <div className="hidden shrink-0 text-right sm:block" style={{ minWidth: 34 }}>Max Lev</div>
-    <div className="hidden shrink-0 text-right md:block" style={{ minWidth: 64 }}>24h Vol</div>
-    <div className="hidden shrink-0 text-right lg:block" style={{ minWidth: 72 }}>Open Interest</div>
-    <div className="shrink-0 text-right" style={{ minWidth: 80 }}>Price</div>
-    <div className="hidden shrink-0 text-right sm:block" style={{ minWidth: 56 }}>24h Change</div>
-    <div className="hidden shrink-0 sm:block" style={{ minWidth: 62 }} />
+    <div className="hidden shrink-0 text-right sm:block" style={{ width: 56 }}>Max Lev</div>
+    <div className="hidden shrink-0 text-right md:block" style={{ width: 68 }}>24h Vol</div>
+    <div className="hidden shrink-0 text-right lg:block" style={{ width: 98 }}>Open Interest</div>
+    <div className="shrink-0 text-right" style={{ width: 88 }}>Price</div>
+    <div className="hidden shrink-0 text-right sm:block" style={{ width: 76 }}>24h Change</div>
+    <div className="hidden shrink-0 sm:block" style={{ width: 70 }} />
     <div className="hidden h-3.5 w-3.5 shrink-0 sm:block" />
   </div>
 );
