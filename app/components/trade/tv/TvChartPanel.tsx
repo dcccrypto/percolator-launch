@@ -30,6 +30,7 @@ import { usePerpLiveStrip } from "@/hooks/usePerpLiveStrip";
 import { getSeriesStore, SERIES_LABEL } from "@/lib/chart/perp-series";
 import { perpChartEnabled } from "@/lib/tv/data";
 import type { PerpSeries } from "@/lib/chart/perp-types";
+import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
 
 /** Pill row on phones: label -> TradingView resolution. */
 export const COMPACT_RESOLUTIONS: ReadonlyArray<{ label: string; res: TvResolution }> = [
@@ -101,17 +102,13 @@ function FullscreenSheet({
   const [liqOff, setLiqOff] = useState<{ edge: LiqEdge; price: number | null }>({ edge: null, price: null });
   const [tvPopup, setTvPopup] = useState(false);
   const onLiqEdge = useCallback((edge: LiqEdge, price: number | null) => setLiqOff({ edge, price }), []);
+  useLockBodyScroll();
   useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
-    return () => {
-      document.body.style.overflow = prev;
-      window.removeEventListener("keydown", onKey);
-    };
+    return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
   return createPortal(
