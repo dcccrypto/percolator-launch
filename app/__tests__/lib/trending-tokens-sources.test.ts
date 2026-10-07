@@ -26,7 +26,7 @@ const gPool = (base: string, opts: { dex?: string; quote?: string; reserve?: str
   attributes: {
     address: POOL(base),
     name: `${base} / SOL`,
-    base_token_price_usd: "0.00033",
+    base_token_price_usd: "0.0033",
     fdv_usd: "190559.38",
     market_cap_usd: opts.mc ?? "196476.73",
     volume_usd: { h24: opts.vol ?? "47551.13" },
@@ -55,8 +55,8 @@ const dPair = (base: string, opts: { dex?: string; quote?: string; liq?: number;
   pairAddress: POOL(base),
   baseToken: { address: M(base), symbol: base.toUpperCase() },
   quoteToken: { address: opts.quote ?? WSOL, symbol: "SOL" },
-  priceNative: "0.0000027",
-  priceUsd: "0.00033", // => quote (SOL) ≈ $122.2
+  priceNative: "0.000027",
+  priceUsd: "0.0033", // => quote (SOL) ≈ $122.2
   liquidity: { usd: opts.liq ?? 122_966, base: 192_569_771, quote: opts.quoteAmt ?? 490.76 },
   volume: { h24: opts.vol ?? 47_000 },
   marketCap: 190_597,

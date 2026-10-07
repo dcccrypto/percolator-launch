@@ -39,7 +39,7 @@ const coin = (over: Partial<PumpFunCoin> = {}): PumpFunCoin => ({
 });
 
 const market = (over: Partial<DexMarket> = {}): DexMarket => ({
-  priceUsd: 0.0005,
+  priceUsd: 0.005,
   marketCapUsd: 500_000,
   liquidityUsd: 50_000,
   volume24hUsd: 120_000,
@@ -119,7 +119,7 @@ describe("toTrendingToken", () => {
     expect(t.source).toBe("pumpfun");
     expect(t.dexId).toBe("pumpswap");
     expect(t.chartUrl).toBe("https://dexscreener.com/solana/Pair11111111111111111111111111111111111111");
-    expect(t.priceUsd).toBe(0.0005);
+    expect(t.priceUsd).toBe(0.005);
     expect(t.marketCapUsd).toBe(500_000);
     expect(t.volume24hUsd).toBe(120_000);
   });
@@ -153,5 +153,25 @@ describe("screenAndRank", () => {
   it("returns empty when nothing passes", () => {
     const coins = [coin({ complete: false })];
     expect(screenAndRank(coins.map(cand), new Map())).toEqual([]);
+  });
+
+  // The wizard refuses a launch under the trackable floor at EVERY leverage; the lowest leverage
+  // it offers (2x) has the lowest floor, $0.000667 (lib/launch-price-floor). Such a token must not
+  // be listed with a "Create market" button that goes nowhere.
+  it("drops a token priced under the wizard's 2x launch floor; keeps one at or above it", () => {
+    const coins = [
+      coin({ mint: M("a"), symbol: "TINY" }),
+      coin({ mint: M("b"), symbol: "EDGE" }),
+      coin({ mint: M("c"), symbol: "OK" }),
+      coin({ mint: M("e"), symbol: "NOPRICE", usd_market_cap: null as unknown as number, total_supply: 0 }),
+    ];
+    const dex = new Map<string, DexMarket>([
+      [M("a"), market({ priceUsd: 0.000666, volume24hUsd: 90_000 })], // one E6 tick under 667
+      [M("b"), market({ priceUsd: 0.000667, volume24hUsd: 80_000 })], // exactly the floor
+      [M("c"), market({ priceUsd: 0.0123, volume24hUsd: 70_000 })],
+      [M("e"), market({ priceUsd: null, volume24hUsd: 60_000 })], // unknown price: fail closed
+    ]);
+    const out = screenAndRank(coins.map(cand), dex);
+    expect(out.map((t) => t.symbol)).toEqual(["EDGE", "OK"]);
   });
 });

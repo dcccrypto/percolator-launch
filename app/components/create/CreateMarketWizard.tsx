@@ -23,7 +23,7 @@ import { useQuickLaunch } from "@/hooks/useQuickLaunch";
 import { type DexPoolResult, isVerifiedPool } from "@/hooks/useDexPoolSearch";
 import { parseHumanAmount } from "@/lib/parseAmount";
 import { MAX_FUNDABLE_REQUIREMENT } from "@/lib/prefund-requirement";
-import { backingSeedPerDomain, deriveLaunchMarketParams, leverageFromMarginBps, MIN_LEVERAGE_X } from "@/lib/market-params";
+import { backingSeedPerDomain, deriveLaunchMarketParams, leverageFromMarginBps } from "@/lib/market-params";
 import { LP_EXPOSURE_DEFAULT_BPS, clampLpExposureBps } from "@/lib/matcher-params";
 import { getConfig, getNetwork } from "@/lib/config";
 import { toE6, formatMarkPrice } from "@/lib/format";
@@ -41,7 +41,8 @@ import { RecoverSolBanner } from "./RecoverSolBanner";
 import { computeCreateMarketSolCost } from "./CostEstimate";
 import { isValidBase58Pubkey } from "@/lib/createWizardUtils";
 import { isMockMode } from "@/lib/mock-mode";
-import { pickInitialPrice, toInitialPriceE6, withTrackableFloor, minTrackablePriceE6 } from "@/lib/initial-price";
+import { lowestLeverageTrackablePriceUsd } from "@/lib/launch-price-floor";
+import { pickInitialPrice, toInitialPriceE6, withTrackableFloor } from "@/lib/initial-price";
 
 type WizardStep = 1 | 2;
 
@@ -543,16 +544,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       : null;
   // The floor at the lowest leverage the dial offers: only suggest lowering
   // leverage when doing so would actually clear the block.
-  const lowestLeverageMinPrice =
-    Number(
-      minTrackablePriceE6(
-        deriveLaunchMarketParams({
-          initialMarginBps: Math.ceil(10_000 / MIN_LEVERAGE_X),
-          lpCollateral: 0n,
-          initialPriceE6: 1_000_000n,
-        }).maxPriceMoveBpsPerSlot,
-      ),
-    ) / 1_000_000;
+  const lowestLeverageMinPrice = lowestLeverageTrackablePriceUsd();
 
   /**
    * Can the keeper actually PRICE this market once it exists?

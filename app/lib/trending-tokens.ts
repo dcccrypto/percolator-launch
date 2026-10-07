@@ -28,6 +28,9 @@
  *   - pool liquidity >= MIN_LIQUIDITY_USD, and for PumpSwap a quote-side depth at
  *     or above the keeper's floor (lib/pool-liquidity, $1000 by default),
  *   - market cap >= MIN_MARKET_CAP_USD,
+ *   - a known price at or above the wizard's launch floor at its LOWEST leverage (2x, about
+ *     $0.000667, lib/launch-price-floor): under it the mark would freeze once positions open, so
+ *     the wizard refuses the launch at every leverage and the row's CTA would be a dead end,
  *   - pump.fun candidates additionally: graduated, not banned/nsfw, no transfer
  *     fee, no transfer hook.
  *
@@ -37,6 +40,7 @@
  */
 import { SUPPORTED_DEX_IDS, USD_PRICEABLE_QUOTE_MINTS } from "@/lib/dex-constants";
 import { geckoFetch, getGeckoConfig } from "@/lib/gecko-fetch";
+import { isLaunchablePriceUsd } from "@/lib/launch-price-floor";
 
 /** pump.fun's public coins API (keyless). Best effort — see header. */
 const PUMPFUN_COINS_URL = "https://frontend-api-v3.pump.fun/coins";
@@ -322,7 +326,10 @@ export function screenAndRank(
     if (c.pumpfun && !passesCoinGate(c.pumpfun)) continue;
     const dex = dexByMint.get(c.mint) ?? (dexUnavailable.has(c.mint) ? c.geckoMarket : undefined);
     if (!passesMarketGate(dex, c.pumpfun?.usd_market_cap ?? null, floorUsd)) continue;
-    out.push(toTrendingToken(c, dex as DexMarket));
+    const token = toTrendingToken(c, dex as DexMarket);
+    // Fail closed on the price too: the same number the row displays decides whether it is launchable.
+    if (!isLaunchablePriceUsd(token.priceUsd)) continue;
+    out.push(token);
   }
   out.sort((a, b) => b.volume24hUsd - a.volume24hUsd);
   return out.slice(0, limit);
