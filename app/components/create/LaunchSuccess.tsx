@@ -11,6 +11,7 @@ import { launchPriceFeedStatus } from "@/lib/launch-outcome";
 import { KEEPER_REGISTER_COPY, userFacingRegistrationReason } from "@/lib/keeper-register-client";
 import { TICKET_COPY } from "@/lib/limits/copy";
 import { StatusLine } from "@/components/ui/StatusLine";
+import { lpShareWalletNote } from "@/lib/lp-share-wallet-note";
 
 interface LaunchSuccessProps {
   tokenSymbol: string;
@@ -359,6 +360,9 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
               <p className="text-[10px] leading-relaxed text-[var(--text-secondary)]">
                 The <strong className="text-[var(--text)]">liquidity you seeded</strong> backs this market as
                 its counterparty — it is not part of your tradeable balance.
+              </p>
+              <p data-testid="launch-lp-wallet-note" className="text-[10px] leading-relaxed text-[var(--text-secondary)]">
+                {lpShareWalletNote()}
               </p>
               {devnetMint && (
                 <div className="flex items-center gap-2 text-[10px]">

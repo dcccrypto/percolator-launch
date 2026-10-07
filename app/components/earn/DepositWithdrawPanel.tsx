@@ -22,6 +22,7 @@ import { checkSignatureLanded, timedOutSignature } from '@/lib/tx';
 import { watchPendingSignature } from '@/lib/pending-signature';
 import { explorerTxUrl } from '@/lib/config';
 import dynamic from 'next/dynamic';
+import { lpShareWalletNote } from '@/lib/lp-share-wallet-note';
 
 const ConnectButton = dynamic(
   () =>
@@ -555,6 +556,9 @@ export function DepositWithdrawPanel({
                 formatShares(previewShares, decimals),
                 formatPercent(shareTotal + previewShares > 0n ? (Number(previewShares) / Number(shareTotal + previewShares)) * 100 : 100),
               )}
+            </p>
+            <p data-testid="earn-lp-wallet-note" className="mt-1.5 text-[10px] leading-relaxed text-[var(--text-dim)]">
+              {lpShareWalletNote(decimals)}
             </p>
           </div>
         )}
