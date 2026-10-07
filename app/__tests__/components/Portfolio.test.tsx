@@ -289,6 +289,8 @@ describe("Portfolio Component Tests", () => {
 
       // Should display -0.5
       expect(screen.getAllByText(/-0\.5/).length).toBeGreaterThanOrEqual(1);
+      // The Unrealized PnL hero tile carries the minus sign, not only the red colour.
+      expect(screen.getAllByText("-$0.50").length).toBeGreaterThanOrEqual(1);
     });
   });
 

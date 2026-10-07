@@ -206,9 +206,7 @@ describe("PnlChart", () => {
     });
 
     await waitFor(() => {
-      expect(
-        screen.getByText(/\+\$0\.00/),
-      ).toBeInTheDocument();
+      expect(screen.getByText("$0.00")).toBeInTheDocument();
     });
   });
 });
@@ -308,9 +306,11 @@ describe("StatsBar live aggregate freshness", () => {
 
       expect(pnlCard).not.toBeNull();
 
-      // At entry mark the live PnL is exactly zero.
-      expect(pnlCard!.textContent).toContain("--");
-      expect(pnlCard!.textContent).not.toContain("+$20.00");
+      // At entry mark the live PnL is exactly zero: a known $0.00, not "--" (that is for
+      // "no position has a known PnL", see the test below) and not "+$0.00".
+      expect(pnlCard!.textContent).toContain("$0.00");
+      expect(pnlCard!.textContent).not.toContain("+$");
+      expect(pnlCard!.textContent).not.toContain("--");
       expect(screen.queryByText("In Profit")).toBeNull();
     });
   });
@@ -344,5 +344,42 @@ describe("dashboard aggregates say when a position's PnL is unknown (#3077 item 
     state.positions = [defaultPosition()];
     render(<StatsBar />);
     expect(screen.queryByText(/Excludes/)).toBeNull();
+  });
+});
+
+describe("a loss carries its minus sign", () => {
+  // Entry $100, size 1: a $80 mark is exactly -$20.00. Before, these surfaces printed "$20.00"
+  // in red (sign only by color): a loss read as a gain in a screenshot or to a colorblind user.
+  const LOSS_MARK_E6 = 80_000_000n;
+
+  it("PnlChart hero shows -$20.00", async () => {
+    state.positions = [livePosition()];
+    state.priceE6 = STALE_MARK_E6;
+    render(<PnlChart />);
+    act(() => { publishLivePrice(LOSS_MARK_E6); });
+    await waitFor(() => {
+      expect(screen.getByText("-$20.00")).toBeInTheDocument();
+    });
+  });
+
+  it("StatsBar with no positions keeps '--', not a green $0.00", () => {
+    state.positions = [];
+    state.totalUnrealizedPnl = 0n;
+    render(<StatsBar />);
+    const card = screen.getByText("Unrealized PnL").parentElement!;
+    expect(card.textContent).toContain("--");
+    expect(card.textContent).not.toContain("$0.00");
+  });
+
+  it("StatsBar Unrealized PnL shows -$20.00", async () => {
+    state.positions = [livePosition()];
+    state.priceE6 = STALE_MARK_E6;
+    render(<StatsBar />);
+    act(() => { publishLivePrice(LOSS_MARK_E6); });
+    await waitFor(() => {
+      const card = screen.getByText("Unrealized PnL").parentElement!;
+      expect(card.textContent).toContain("-$20.00");
+      expect(card.textContent).not.toContain("+$");
+    });
   });
 });

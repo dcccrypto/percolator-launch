@@ -44,6 +44,7 @@ import { isMockMode } from "@/lib/mock-mode";
 import { getMockPortfolioPositions } from "@/lib/mock-trade-data";
 import { useTraderStats } from "@/hooks/useTraderStats";
 import { computePositionLeverage, describePositionLeverage, POSITION_LEVERAGE_LABEL } from "@/lib/position-leverage";
+import { formatSignedUsd } from "@/lib/pnl-card";
 import { InfoIcon } from "@/components/ui/Tooltip";
 
 const ConnectButton = dynamic(
@@ -835,8 +836,7 @@ export function PortfolioPositionsView() {
                   className={`text-sm font-bold sm:text-base ${liveUsdTotals.unrealizedPnlUsd >= 0 ? "text-[var(--long)]" : "text-[var(--short)]"}`}
                   style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
                 >
-                  {liveUsdTotals.unrealizedPnlUsd >= 0 ? "+" : ""}
-                  ${Math.abs(liveUsdTotals.unrealizedPnlUsd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {formatSignedUsd(liveUsdTotals.unrealizedPnlUsd)}
                 </span>
                 <span
                   className={`text-xs font-medium ${liveUsdTotals.unrealizedPnlUsd >= 0 ? "text-[var(--long)]/70" : "text-[var(--short)]/70"}`}
