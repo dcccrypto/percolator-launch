@@ -1026,7 +1026,7 @@ export function PortfolioPositionsView() {
                         </span>
                         {pendingProfit(pos) > 0n && (
                           <span data-testid="pending-profit" className="ml-2 text-[11px] text-[var(--long)]" title={SETTLING_PROFIT_TITLE}>
-                            +{formatTokenAmount(pendingProfit(pos), getDecimals(pos), 3)} profit
+                            up to +{formatTokenAmount(pendingProfit(pos), getDecimals(pos), 3)} profit
                           </span>
                         )}
                       </span>
