@@ -5,6 +5,7 @@
  */
 
 import { P3_ERR } from "@/lib/limits/constants";
+import { isRateLimitedRpcError, RATE_LIMITED_COPY } from "@/lib/rpc-rate-limit";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { keepAppMessage, resolveUserMessage } from "@/lib/limits/user-message";
 import { decodeError } from "@percolatorct/sdk";
@@ -210,6 +211,11 @@ function parseMarketCreationErrorBase(error: unknown, context?: MarketCreationEr
   ) {
     return "Transaction cancelled — you rejected the signing request in your wallet. Click Retry to try again.";
   }
+
+  // A rate-limited RPC read (the LP-portfolio scan at the start of the liquidity step above all). It is
+  // refused before anything is signed or sent, so say that and that Retry is safe, before the generic
+  // fallbacks name it a network or program failure.
+  if (isRateLimitedRpcError(error)) return RATE_LIMITED_COPY;
 
   // Insufficient SPL token balance (token program error 0x1 or transfer failure).
   // Must be checked BEFORE the SOL/lamports branch — Solana simulation errors for

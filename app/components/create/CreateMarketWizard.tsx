@@ -34,6 +34,7 @@ import { WizardProgress } from "./WizardProgress";
 import { StepTokenSelect } from "./StepTokenSelect";
 import { StepControlRoom, leverageToMarginBps, marginBpsToLeverage } from "./StepControlRoom";
 import { LaunchProgress } from "./LaunchProgress";
+import { retryBlockedReason } from "@/lib/retry-blocked";
 import { LaunchSuccess } from "./LaunchSuccess";
 import { RecoverSolBanner } from "./RecoverSolBanner";
 // W8 fix: share ONE SOL-cost formula with CostEstimate.tsx's own display so the
@@ -224,6 +225,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
    * When non-null, handleLaunch skips slab creation and resumes from this step.
    */
   const [resumeFromStep, setResumeFromStep] = useState<number | null>(null);
+  // Why the last Retry click did nothing (null = it ran). Shown above the launch progress.
+  const [retryNote, setRetryNote] = useState<string | null>(null);
   // Which stuck slab is being resumed; only meaningful while resumeFromStep is set.
   const [resumeSlab, setResumeSlab] = useState<string | null>(null);
 
@@ -937,12 +940,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
 
   // Retry from failed step
   const handleRetry = () => {
-    if (!configValid || !publicKey) return;
-    // For step > 0, slab address must be known to resume the transaction chain.
-    // Step 0 generates a fresh keypair, so slabAddress is not required for step 0 retry.
-    // Without this guard, a blockhash-expiry error on step 0 would silently no-op when
-    // the user clicks "Retry Step 1" (slabAddress is null until sendTx succeeds).
-    if (createState.step > 0 && !createState.slabAddress) return;
+    // Never a silent no-op: a Retry that does nothing reads as a hung launch. Say why.
+    const blocked = retryBlockedReason({ hasWallet: !!publicKey, configValid, step: createState.step, hasSlab: !!createState.slabAddress });
+    setRetryNote(blocked);
+    if (blocked) return;
     const { oracleFeed, priceE6 } = getOracleFeedAndPrice();
 
     // PERC-470: Include oracleMode + dexPoolAddress in retry params (fixes #810)
@@ -1090,11 +1091,18 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // Launch progress
   if (createState.loading || createState.step > 0 || createState.error) {
     return (
-      <LaunchProgress
-        state={createState}
-        onReset={handleReset}
-        onRetry={handleRetry}
-      />
+      <>
+        {retryNote && (
+          <div data-testid="retry-blocked-note" role="alert" className="mx-4 mt-4 border border-[var(--warning)]/40 bg-[var(--warning)]/[0.06] px-4 py-3 text-[11px] text-[var(--text)] sm:mx-6">
+            {retryNote}
+          </div>
+        )}
+        <LaunchProgress
+          state={createState}
+          onReset={handleReset}
+          onRetry={handleRetry}
+        />
+      </>
     );
   }
 

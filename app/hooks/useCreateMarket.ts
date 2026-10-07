@@ -74,6 +74,7 @@ import { buildKeeperRegisterMemoIx, keeperMemoParams } from "@/lib/keeper-regist
 import { preflightRegistration, resolveMarketMetadata } from "@/lib/market-metadata";
 import { buildM1Instructions } from "@/lib/create-market-m1";
 import { WIZARD_STEP_COPY } from "@/lib/wizard-copy";
+import { withRateLimitRetry } from "@/lib/rpc-rate-limit";
 import { KEEPER_REGISTER_COPY, loadProofPayload, loadProofTx, markRegistered, postKeeperRegistration, runKeeperRegistration, saveProofPayload, saveProofTx, saveRegisterRequest, type KeeperRegisterPhase } from "@/lib/keeper-register-client";
 import { deriveLaunchMarketParams, deriveMarketParams, MIN_LEVERAGE_X, backingSeedPerDomain, leverageFromMarginBps } from "@/lib/market-params";
 // GH#2592: the step-4 predicate and /api/devnet-pre-fund's funding target must be
@@ -3110,7 +3111,7 @@ export function useCreateMarket() {
             };
 
             const existingLpPortfolios =
-              await connection.getProgramAccounts(programId, {
+              await withRateLimitRetry(() => connection.getProgramAccounts(programId, {
                 filters: [
                   { dataSize: V17_PORTFOLIO_ACCOUNT_LEN },
                   {
@@ -3133,7 +3134,7 @@ export function useCreateMarket() {
                     },
                   },
                 ],
-              });
+              }));
 
             if (existingLpPortfolios.length === 0) {
               // TX A: create and initialize the LP portfolio.
@@ -3340,13 +3341,14 @@ export function useCreateMarket() {
             // Scan for LP portfolio (owner = wallet, market = slabPk) — created in Step 2
             // V17 magic bytes at offset 0: PERCV16\0
             const V17_MAGIC_BYTES = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
-            const portfolioAccounts = await connection.getProgramAccounts(programId, {
+            const depositWalletB58 = wallet.publicKey.toBase58(); // narrowed here; the retry closure below can't see that
+            const portfolioAccounts = await withRateLimitRetry(() => connection.getProgramAccounts(programId, {
               filters: [
                 { memcmp: { offset: 0, bytes: V17_MAGIC_BYTES.toString("base64"), encoding: "base64" } },
                 { memcmp: { offset: 16, bytes: slabPk.toBase58() } },
-                { memcmp: { offset: 80, bytes: wallet.publicKey.toBase58() } },
+                { memcmp: { offset: 80, bytes: depositWalletB58 } },
               ],
-            });
+            }));
             if (portfolioAccounts.length === 0) {
               throw new Error("LP portfolio not found — Step 2 (LP init) may not have completed. Please retry from step 2.");
             }
