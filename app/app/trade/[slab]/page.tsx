@@ -249,7 +249,7 @@ function MobileOrderSheet({ slab }: { slab: string }) {
 
       {/* Backdrop + sheet are portaled to <body> — the same thing every other
           dialog in this codebase already does (components/ui/Modal.tsx,
-          ClosePositionModal, TradeConfirmationModal, InsuranceTopUpModal,
+          ClosePositionModal, TradeConfirmationModal,
           SendPositionNftModal, InsuranceExplainerModal). This sheet was the
           only one left inline, and inline it sits inside the trade page's
           `animate-fade-in` wrapper (see the TradePageInner root). While that

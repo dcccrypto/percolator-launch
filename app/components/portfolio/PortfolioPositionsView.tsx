@@ -595,7 +595,7 @@ export function PortfolioPositionsView() {
   const loadError = mockPositions ? null : portfolio.error;
   const refresh = portfolio.refresh;
 
-  // LP positions (insurance fund deposits)
+  // Earn deposits and stake positions (neither adds to the insurance balance)
   const lpPositions = useLpPositions();
   const isRefreshing = portfolio.isRefreshing || lpPositions.isRefreshing;
 

@@ -331,7 +331,7 @@ export function LpPositionsPanel({
           <div>
             <p className="text-[12px] font-medium text-[var(--text)]">No Earn or stake positions</p>
             <p className="mt-0.5 text-[11px] text-[var(--text-secondary)]">
-              Deposit into insurance pools to earn yield while backing the fund.
+              Deposit into an Earn vault, or stake into a pool, to earn a share of trading fees.
             </p>
           </div>
           <Link

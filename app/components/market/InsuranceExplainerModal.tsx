@@ -7,12 +7,10 @@ import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 
 interface InsuranceExplainerModalProps {
   onClose: () => void;
-  onTopUp?: () => void;
 }
 
 export const InsuranceExplainerModal: FC<InsuranceExplainerModalProps> = ({
   onClose,
-  onTopUp,
 }) => {
   const overlayRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
@@ -151,10 +149,11 @@ export const InsuranceExplainerModal: FC<InsuranceExplainerModalProps> = ({
                 <span className="text-[var(--long)]">✓</span>
                 <div>
                   <div className="text-sm font-medium text-[var(--text)]">
-                    Anyone can contribute, no approval needed
+                    Funded by trading fees and the market&apos;s insurance authority
                   </div>
                   <div className="text-xs text-[var(--text-dim)]">
-                    Community members can top up the insurance fund anytime
+                    Only that authority can add to it directly. On a staked
+                    market the authority is the stake pool
                   </div>
                 </div>
               </div>
@@ -255,41 +254,26 @@ export const InsuranceExplainerModal: FC<InsuranceExplainerModalProps> = ({
             </p>
           </section>
 
-          {/* How to contribute */}
+          {/* Who funds it */}
           <section>
             <h3 className="mb-2 text-sm font-bold text-[var(--text)]">
-              How to contribute
+              Who funds it
             </h3>
             <p className="text-sm leading-relaxed text-[var(--text-secondary)]">
-              Anyone can top up the insurance fund by depositing collateral.
-              <strong>Anyone</strong> can do it — no approvals needed.
+              A share of every trading fee is set aside for the insurance
+              side. On a market with a stake pool that share is paid into the
+              pool, and the pool&apos;s admin can move staked funds into
+              insurance, so staked funds can be used to cover losses. Apart
+              from that, only the market&apos;s insurance authority can add
+              collateral to the insurance balance.
             </p>
             <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
-              Why would you contribute?
+              There is no public deposit into the insurance fund. Depositing
+              into a market&apos;s <strong>Earn</strong> vault is a different
+              thing: it provides counterparty backing, mints vault shares and
+              is exposed to trader profit and loss. It does not add to the
+              insurance balance.
             </p>
-            <ul className="mt-2 space-y-1 text-sm text-[var(--text-secondary)]">
-              <li className="flex items-start gap-2">
-                <span className="text-[var(--accent)]">•</span>
-                <span>
-                  <strong>Protect your Earn deposit:</strong> if you have one,
-                  stronger insurance = safer deposit
-                </span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-[var(--accent)]">•</span>
-                <span>
-                  <strong>Support the ecosystem:</strong> Help Percolator grow
-                  by making markets safer
-                </span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-[var(--accent)]">•</span>
-                <span>
-                  <strong>Community alignment:</strong> Show you believe in the
-                  project
-                </span>
-              </li>
-            </ul>
           </section>
 
           {/* Coverage Ratio */}
@@ -315,8 +299,8 @@ export const InsuranceExplainerModal: FC<InsuranceExplainerModalProps> = ({
               <div className="flex items-start gap-2">
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--short)] mt-0.5" />
                 <span>
-                  <strong>&lt;2x coverage:</strong> Low — risky, consider
-                  topping up
+                  <strong>&lt;2x coverage:</strong> Low — a large liquidation
+                  could exceed the insurance balance
                 </span>
               </div>
             </div>
@@ -330,15 +314,6 @@ export const InsuranceExplainerModal: FC<InsuranceExplainerModalProps> = ({
             className="flex-1 rounded-none border border-[var(--border)]/50 px-4 py-2 text-sm font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--bg)]"
           >
             Close
-          </button>
-          <button
-            onClick={() => {
-              onClose();
-              onTopUp?.();
-            }}
-            className="flex-1 rounded-none border border-[var(--accent)]/30 bg-[var(--accent)]/10 px-4 py-2 text-sm font-medium text-[var(--accent)] transition-colors hover:bg-[var(--accent)]/20"
-          >
-            Top Up Insurance
           </button>
         </div>
       </div>

@@ -13,7 +13,6 @@ const SHARED = [
   "components/create/LaunchProgress.tsx",
   "components/create/LaunchSuccess.tsx",
   "components/create/RecoverSolBanner.tsx",
-  "components/market/InsuranceTopUpModal.tsx",
 ];
 
 describe("explorer links follow the configured network", () => {
