@@ -2,6 +2,7 @@
 
 import { earnNavFloorLive } from "@/lib/program-upgrade-detect";
 import { isHiddenFromListing } from "@/lib/listing-hidden";
+import { hasNoPriceSource } from "@/lib/listed-markets";
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { deriveLpVaultRegistry, parseLpVaultRegistry, isV17Account } from '@percolatorct/sdk';
@@ -639,6 +640,11 @@ export function buildLiveMarkets(
 ): MarketVaultInfo[] {
   const live = liveMarkets
     .filter((m) => !isBlockedSlab(m.slabAddress) && !isHiddenFromListing(m.slabAddress))
+    // A launch whose registration never landed is an indexer placeholder ("UNKNOWN", no price
+    // source): the keeper can never price it, so it is not a vault anyone can usefully deposit
+    // into. /markets already leaves it out (isListedMarketRow); Earn now agrees. 2026-10-06: 30
+    // such rows listed as "UNKNOWN" vaults. Curated markets carry their own identity and stay.
+    .filter((m) => PLAYGROUND_SLAB_META[m.slabAddress] !== undefined || !hasNoPriceSource(m.row))
     .map((m) => {
       const info = buildMarketVaultInfo(m.slabAddress, m.symbol, m.name, m.mainnetCa, curatedVaults, supabaseBySlab, onChainMaxLeverage);
       return vaultsTrusted ? info : { ...info, hasVault: undefined };

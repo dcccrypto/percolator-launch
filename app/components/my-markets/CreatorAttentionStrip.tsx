@@ -1,12 +1,27 @@
 "use client";
 
-import { FC } from "react";
+import { FC, useMemo, useState } from "react";
 import type { CreatedMarket } from "@/hooks/useCreatedMarkets";
 import type { CreatorMarketDetail } from "./types";
 import { RecoverSolBanner } from "@/components/create/RecoverSolBanner";
 import { useCreateMarket, type KeeperRegisterRetryParams } from "@/hooks/useCreateMarket";
 import { isKeeperFeedDead, isEngineCrankStale, summarizeAffectedMarkets } from "./attentionLogic";
 import { resolveIdentity, type ResolvedIdentity } from "@/lib/bulk-identity";
+import { registrationCandidates, userFacingRegistrationReason, type KeeperRegisterRequest } from "@/lib/keeper-register-client";
+
+/** The launch's own registration request, as this browser saved it at launch time (the creation-tx
+ *  proof, plus the pool / CA / symbol / payload the memo bound). Empty when the launch happened on
+ *  another device or the storage is gone. Exported for the test. */
+export function savedRegistrationRequests(slab: string): KeeperRegisterRequest[] {
+  try {
+    return typeof window === "undefined" ? [] : registrationCandidates(slab, window.localStorage);
+  } catch {
+    return [];
+  }
+}
+
+export const NO_SAVED_REGISTRATION_COPY =
+  "this launch never finished connecting its live price, and this browser doesn't have its details to send again. Open My Markets from the browser you launched it on, or ask us to connect it.";
 
 /** One "connect the live price" row. Its own useCreateMarket() instance so
  *  N dead-feed markets in the strip have independent loading/message state
@@ -21,6 +36,12 @@ const KeeperRetryRow: FC<{ market: CreatedMarket; detail: CreatorMarketDetail | 
   // NOT merged: the bulk directory does not carry dex_pool_address, and this
   // value is passed to a real transaction, not rendered. Detail only.
   const dexPoolAddress = detail?.dex_pool_address;
+  // No pool on the markets row = the registration never landed (an "UNKNOWN" placeholder). The
+  // launching browser still holds the creation-tx proof and the exact request the memo bound, so the
+  // creator can retry from here; only a launch from another device has nothing to send.
+  const saved = useMemo(() => (dexPoolAddress ? [] : savedRegistrationRequests(slab)), [dexPoolAddress, slab]);
+  const [savedBusy, setSavedBusy] = useState(false);
+  const [savedNote, setSavedNote] = useState<string | null>(null);
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
@@ -50,10 +71,41 @@ const KeeperRetryRow: FC<{ market: CreatedMarket; detail: CreatorMarketDetail | 
         >
           {state.keeperRegistering ? "registering…" : "connect the live price"}
         </button>
+      ) : saved.length > 0 ? (
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <button
+            type="button"
+            disabled={savedBusy}
+            onClick={async () => {
+              setSavedBusy(true);
+              setSavedNote(null);
+              let last = "";
+              for (const req of saved) {
+                const r = await retryKeeperRegistration({
+                  slabAddress: slab,
+                  mainnetCA: req.mainnetCA ?? null,
+                  dexPoolAddress: req.dexPoolAddress,
+                  dexType: req.dexType ?? null,
+                  symbol: req.symbol ?? null,
+                  payload: req.payload ?? null,
+                });
+                if (r.registered) {
+                  last = "";
+                  break;
+                }
+                last = r.message;
+              }
+              setSavedNote(last ? userFacingRegistrationReason(last) : null);
+              setSavedBusy(false);
+            }}
+            className="border border-[var(--warning)]/50 bg-[var(--warning)]/[0.08] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--warning)] hover:bg-[var(--warning)]/[0.15] transition-colors disabled:opacity-50"
+          >
+            {savedBusy || state.keeperRegistering ? "registering…" : "connect the live price"}
+          </button>
+          {savedNote && <span className="max-w-[28rem] text-right text-[10px] text-[var(--text-dim)]">{savedNote}</span>}
+        </div>
       ) : (
-        <span className="shrink-0 text-[10px] text-[var(--text-dim)]">
-          no DEX pool on record — can&apos;t auto-retry, contact support
-        </span>
+        <span className="max-w-[28rem] shrink-0 text-[10px] text-[var(--text-dim)]">{NO_SAVED_REGISTRATION_COPY}</span>
       )}
     </div>
   );
