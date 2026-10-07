@@ -117,8 +117,11 @@ describe("wiring: a blocked launch ends before anything is sent", () => {
     expect(fatal).toContain('phase: "idle"');
   });
 
-  it("the sequential path asks before it creates the market, on fresh launches only", () => {
-    const gateAt = step0.indexOf("if (isDevnetEnv && retryFromStep === undefined) {");
+  it("the sequential path asks before it creates the market, and only while it is not on chain", () => {
+    // Keyed on the chain, not on retryFromStep: Continue after a refusal re-enters with
+    // step 0 and no market, and must be refused again.
+    expect(step0).not.toContain("retryFromStep === undefined");
+    const gateAt = step0.indexOf("if (isDevnetEnv && !marketOnChain0) {");
     const refuse = step0.indexOf('if (refusal0.kind === "blocked") throw new PreFundRateLimitedError(');
     const persist = step0.indexOf("// Persist recovery state BEFORE sending TX0.");
     expect(gateAt).toBeGreaterThan(-1);

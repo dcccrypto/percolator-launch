@@ -2261,9 +2261,15 @@ export function useCreateMarket() {
           // Fund the deposit BEFORE the market exists. The deposit step used to be the
           // first place this path asked for test tokens, so a wallet inside the faucet's
           // claim window created the market, locked its rent, and only then was refused.
-          // Fresh launches only: a resume of step 0 (a stuck slab, or a market that
-          // already landed) needs no tokens and must not be stopped here.
-          if (isDevnetEnv && retryFromStep === undefined) {
+          // Only while the market account is not on chain: a resume of step 0 with a
+          // stuck slab, or a market that already landed, has rent to recover or finish
+          // and must not be stopped here. (Not keyed on this being a fresh call: Continue
+          // after a refusal re-enters with step 0 and nothing on chain, and must be
+          // refused again rather than create the market.)
+          const marketOnChain0 = isDevnetEnv
+            ? (await connection.getAccountInfo(slabPk, "confirmed").catch(() => null)) !== null
+            : true;
+          if (isDevnetEnv && !marketOnChain0) {
             const balance0 = await collateralBalanceOf(connection, params.mint, wallet.publicKey);
             if (balance0 < fullMarketRequirement(params.lpCollateral, params.insuranceAmount)) {
               let refusal0: ReturnType<typeof classifyPreFundRefusal> = { kind: "proceed" };
