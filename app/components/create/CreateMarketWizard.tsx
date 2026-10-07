@@ -35,6 +35,8 @@ import { StepTokenSelect } from "./StepTokenSelect";
 import { StepControlRoom, leverageToMarginBps, marginBpsToLeverage } from "./StepControlRoom";
 import { LaunchProgress } from "./LaunchProgress";
 import { LaunchSuccess } from "./LaunchSuccess";
+import { ResumeFromChainCard } from "./ResumeFromChainCard";
+import { applyRecoveredLaunch, atomsToHuman, type RecoveredLaunch } from "@/lib/launch-recovery";
 import { RecoverSolBanner } from "./RecoverSolBanner";
 // W8 fix: share ONE SOL-cost formula with CostEstimate.tsx's own display so the
 // launch gate and the number shown to the user can never drift apart — see that
@@ -104,10 +106,10 @@ const DEFAULT_STATE: WizardState = {
  * There is no mode toggle and no slab-tier picker — v17 has exactly one slab
  * size (max capacity) and oracle detection is always automatic.
  */
-export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }) => {
+export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<slab>: continue this unfinished launch from chain (#3267). */ resumeSlabParam?: string }> = ({ initialMint, resumeSlabParam }) => {
   const { publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
-  const { state: createState, create, reset: resetCreate, restoreSlabKeypair, retryKeeperRegistration, cancelInFlightLaunch } = useCreateMarket();
+  const { state: createState, create, reset: resetCreate, restoreSlabKeypair, restoreSlabAddress, retryKeeperRegistration, cancelInFlightLaunch } = useCreateMarket();
   // GH#2623: leaving this page mid-launch must stop the tail-broadcast retry
   // loop from prompting further wallet signatures — without this, a market
   // creation begun here kept re-signing (new popups) "even while out of the
@@ -226,6 +228,11 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   const [resumeFromStep, setResumeFromStep] = useState<number | null>(null);
   // Which stuck slab is being resumed; only meaningful while resumeFromStep is set.
   const [resumeSlab, setResumeSlab] = useState<string | null>(null);
+  // #3267: a resume rebuilt from chain (proven against the creation tx's registration memo). Its
+  // parameters are pinned: the live wizard must not re-detect a different pool or price under it.
+  const [chainResume, setChainResume] = useState<RecoveredLaunch | null>(null);
+  const chainResumeRef = useRef<RecoveredLaunch | null>(null);
+  chainResumeRef.current = chainResume;
 
   // BUG FIX (2026-09-25, tester-reported "RESUME CREATION is a dead button"):
   // clicking RESUME CREATION previously only updated React state — nothing
@@ -294,7 +301,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     if (!quickLaunch.config || launchInFlightRef.current) return;
     setWizard((prev) => ({
       ...prev,
-      tradingFeeBps: quickLaunch.config!.tradingFeeBps,
+      tradingFeeBps: chainResumeRef.current ? chainResumeRef.current.tradingFeeBps : quickLaunch.config!.tradingFeeBps,
       // Normalise through the dial's own quantisation so the number ON the dial is
       // exactly the number written on-chain. quick-launch's "high" tier supplies
       // 1000 bps (10x); GH#2621 raised the dial's ceiling to MAX_LEVERAGE_X (10x)
@@ -303,10 +310,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       // every high-tier default from 10x to 6.5x (1538 bps) — kept generically
       // (rather than special-cased to 10x) because it also protects any FUTURE
       // quick-launch tier from producing a bps the dial's own snap can't display.
-      initialMarginBps: prev.marginSetByUser
+      initialMarginBps: prev.marginSetByUser || chainResumeRef.current
         ? prev.initialMarginBps
         : leverageToMarginBps(marginBpsToLeverage(quickLaunch.config!.initialMarginBps)),
-      lpCollateral: prev.lpSetByUser ? prev.lpCollateral : quickLaunch.config!.lpCollateral,
+      lpCollateral: prev.lpSetByUser || chainResumeRef.current ? prev.lpCollateral : quickLaunch.config!.lpCollateral,
       // Apply detected oracle price as adminPrice (used if oracle ends up admin)
       adminPrice: pickInitialPrice(prev.adminPrice, quickLaunch.adminPrice, quickLaunch.config?.initialPrice),
     }));
@@ -932,7 +939,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     };
     // PERC-513: If resuming from a stuck slab, skip slab creation (step 0).
     // The existing slab keypair is already in slabKpRef (loaded from localStorage).
-    create(params, resumeFromStep ?? undefined);
+    create(applyRecoveredLaunch(params, chainResume), resumeFromStep ?? undefined);
   };
 
   // Retry from failed step
@@ -997,7 +1004,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
         dexType: wizard.dexPool?.dexType,
       } : {}),
     };
-    create(params, createState.step);
+    create(applyRecoveredLaunch(params, chainResume), createState.step);
   };
 
   // Retry ONLY the keeper-register step for an already-live market (LaunchSuccess's
@@ -1141,6 +1148,31 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
+      {/* #3267: continue an unfinished launch started on another device, rebuilt from chain. */}
+      {resumeSlabParam && resumeFromStep === null && (
+        <ResumeFromChainCard
+          slab={resumeSlabParam}
+          onVerified={(launch, step) => {
+            // Only the slab ADDRESS is needed past step 0 (the keypair never left the launching browser).
+            restoreSlabAddress(resumeSlabParam);
+            setChainResume(launch);
+            // Put the verified values in the form the wizard reads, and mark them user-set so detection
+            // does not move them (the pinned params above are the final authority).
+            setWizard((prev) => ({
+              ...prev,
+              mintAddress: launch.request.mainnetCA ?? prev.mintAddress,
+              tradingFeeBps: launch.tradingFeeBps,
+              initialMarginBps: launch.initialMarginBps,
+              marginSetByUser: true,
+              lpCollateral: atomsToHuman(launch.lpCollateralAtoms, 6),
+              lpSetByUser: true,
+            }));
+            setResumeFromStep(step);
+            setResumeSlab(resumeSlabParam);
+          }}
+        />
+      )}
+
       {/* Stuck slab recovery banner */}
       <RecoverSolBanner
         onReset={handleReset}
@@ -1200,13 +1232,16 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
                   past Step 1 (e.g. resuming after LP init or deposit already landed). */}
               {resumeFromStep === 0
                 ? "Re-enter your parameters to retry market initialization."
-                : `The market is set up through step ${resumeFromStep} of 6. Re-enter your parameters to resume from where you left off.`}
+                : chainResume
+                  ? `Rebuilt from the chain and checked against this launch's signed registration. It resumes at step ${resumeFromStep} of 6 and skips what already landed. Continue to review and launch.`
+                  : `The market is set up through step ${resumeFromStep} of 6. Re-enter your parameters to resume from where you left off.`}
             </span>
           </div>
           <button
             type="button"
             onClick={() => {
               setResumeFromStep(null);
+              setChainResume(null);
               resetCreate();
             }}
             className="flex-shrink-0 text-[10px] text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors px-2 py-1 border border-[var(--border)]"

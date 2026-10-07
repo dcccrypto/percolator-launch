@@ -75,7 +75,8 @@ import { preflightRegistration, resolveMarketMetadata } from "@/lib/market-metad
 import { buildM1Instructions } from "@/lib/create-market-m1";
 import { WIZARD_STEP_COPY } from "@/lib/wizard-copy";
 import { KEEPER_REGISTER_COPY, loadProofPayload, loadProofTx, markRegistered, postKeeperRegistration, runKeeperRegistration, saveProofPayload, saveProofTx, saveRegisterRequest, type KeeperRegisterPhase } from "@/lib/keeper-register-client";
-import { deriveLaunchMarketParams, deriveMarketParams, MIN_LEVERAGE_X, backingSeedPerDomain, leverageFromMarginBps } from "@/lib/market-params";
+import { deriveLaunchMarketParams, backingSeedPerDomain } from "@/lib/market-params";
+import { buildMarketRegistrationPayload, flooredInitialMarginBps } from "@/lib/market-registration-payload";
 // GH#2592: the step-4 predicate and /api/devnet-pre-fund's funding target must be
 // the SAME number. They were two hand-copies, and the route's was understated by
 // both backing seeds, so it answered "sufficient" to the very request that said
@@ -277,25 +278,7 @@ export const MIN_INIT_MARKET_SEED = 500_000_000n;
  */
 export const MIN_SAFE_INITIAL_MARGIN_BPS = 1500n;
 
-/**
- * The on-chain initial_margin_bps this request will ACTUALLY be created with.
- *
- * Every leverage display (success screen, StepReview, markets DB `max_leverage`)
- * must go through this rather than the raw bps the user typed. Originally that
- * was BUG 16 (2026-07-06): create() floored the margin at 1500 but the displays
- * read the unfloored value, so a market advertised as 10x was initialized at
- * ~6.67x.
- *
- * The floor is gone (see MIN_SAFE_INITIAL_MARGIN_BPS above), but the reason for
- * this mirror is not: deriveMarketParams clamps leverage to [MIN_LEVERAGE_X,
- * MAX_LEVERAGE_X] and rounds margin UP, so the requested bps and the on-chain
- * bps can still differ. A pure function of the request — no retry/session
- * state — so it is safe to call before submission.
- */
-export function flooredInitialMarginBps(requestedBps: number): number {
-  const lev = requestedBps > 0 ? 10_000 / requestedBps : MIN_LEVERAGE_X;
-  return deriveMarketParams(lev, 0n, 1_000_000n).initialMarginBps;
-}
+export { flooredInitialMarginBps } from "@/lib/market-registration-payload";
 
 export interface VammParams {
   spreadBps: number;
@@ -771,59 +754,6 @@ export function assertRegistrable(symbol: string | null | undefined, payload: Ma
   if (problem) {
     throw new Error(`This launch cannot be registered (${problem}). Nothing was sent; no signature was requested.`);
   }
-}
-
-/**
- * Single source of truth for the market-registration payload.
- *
- * The batched fast path and the sequential fallback both POST this object to
- * /api/markets AND sign a canonical encoding of it (buildMarketRegistrationMessage,
- * #2387). The signed bytes and the POSTed bytes MUST be byte-identical or the
- * server's signature check 401s — so the payload must be built in exactly ONE
- * place. Previously each path hand-wrote its own literal (they had already
- * drifted cosmetically on the oracle_authority fallback); this factory removes
- * any chance of a future field being added to one and forgotten on the other.
- */
-function buildMarketRegistrationPayload(args: {
-  slabAddress: string;
-  params: CreateMarketParams;
-  deployer: string;
-  oracleMode: "pyth" | "hyperp" | "admin" | "keeper";
-  isAdminOracle: boolean;
-  isDevnetEnv: boolean;
-}): MarketRegistrationPayload {
-  const { slabAddress, params, deployer, oracleMode, isAdminOracle, isDevnetEnv } = args;
-  return {
-    slab_address: slabAddress,
-    mint_address: params.mint.toBase58(),
-    symbol: params.symbol ?? "UNKNOWN",
-    name: params.name ?? "Unknown Token",
-    decimals: params.decimals ?? 6,
-    deployer,
-    oracle_mode: oracleMode,
-    dex_pool_address: params.dexPoolAddress ?? null,
-    // Admin-oracle markets on devnet are cranked by the shared crank wallet;
-    // otherwise the deployer is its own oracle authority. (deployer === the
-    // connected wallet, so this matches the former walletPk.toBase58() literal.)
-    //
-    // A "keeper" market counts here. On devnet it is created in AUTH_MARK/admin
-    // mode and its oracle authority is DELEGATED to the keeper — that is what
-    // the mode means. Testing `isAdminOracle` alone (oracleMode === "admin")
-    // excluded exactly those markets, so the row recorded oracle_authority=null
-    // for the ones the keeper actually drives. Fauci's row shows the symptom.
-    oracle_authority: (isAdminOracle || oracleMode === "keeper")
-      ? (isDevnetEnv && getConfig().crankWallet ? getConfig().crankWallet : deployer)
-      : null,
-    initial_price_e6: params.initialPriceE6.toString(),
-    // BUG 16: advertise the FLOORED margin actually enforced on-chain, not the
-    // raw requested bps — see flooredInitialMarginBps.
-    max_leverage: params.initialMarginBps > 0
-      ? leverageFromMarginBps(flooredInitialMarginBps(params.initialMarginBps))
-      : 1,
-    trading_fee_bps: Number(params.tradingFeeBps),
-    lp_collateral: params.lpCollateral.toString(),
-    mainnet_ca: params.mainnetCA ?? null,
-  };
 }
 
 async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshBatchOutcome> {
@@ -1962,6 +1892,15 @@ export function useCreateMarket() {
    */
   const restoreSlabKeypair = useCallback((keypair: Keypair, slabAddress: string) => {
     slabKpRef.current = keypair;
+    setState((s) => ({ ...s, slabAddress }));
+  }, []);
+
+  /**
+   * Cross-device resume (#3267): a launch past step 0 needs only its slab ADDRESS. Every later step
+   * signs with the wallet and reads the chain; only step 0 (slab creation) uses the slab keypair, which
+   * never leaves the launching browser. So a resume from another device hands the address in here.
+   */
+  const restoreSlabAddress = useCallback((slabAddress: string) => {
     setState((s) => ({ ...s, slabAddress }));
   }, []);
 
@@ -4064,5 +4003,5 @@ export function useCreateMarket() {
     [],
   );
 
-  return { state, create, reset, restoreSlabKeypair, retryKeeperRegistration, cancelInFlightLaunch };
+  return { state, create, reset, restoreSlabKeypair, restoreSlabAddress, retryKeeperRegistration, cancelInFlightLaunch };
 }
