@@ -1380,6 +1380,19 @@ export async function broadcastSignedTx(
   return signature;
 }
 
+/**
+ * Confirm a signature someone else broadcast (a devnet airdrop) by polling its
+ * status. `connection.confirmTransaction(sig)` waits on a websocket notification
+ * and reports a timeout for a tx that landed when the notification is missed.
+ */
+export async function confirmSignatureByPolling(
+  connection: Connection,
+  signature: string,
+  abortSignal?: AbortSignal,
+): Promise<void> {
+  await pollConfirmation(connection, signature, undefined, abortSignal);
+}
+
 /** UX WP-2 (principle 3): re-simulation backoff while waiting for the market, before any prompt. */
 export const WAIT_DELAYS_MS = [1_500, 3_000, 5_000, 8_000, 12_000];
 

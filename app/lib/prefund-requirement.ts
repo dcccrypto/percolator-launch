@@ -163,3 +163,36 @@ export function parseAtomicAmount(raw: unknown, fallback: bigint): bigint | null
   if (value > U64_MAX) return null;
   return value;
 }
+
+/** The route's refusal text for its per-wallet claim window (not its per-IP limiter). */
+export const PREFUND_GATE_ERROR = "Already pre-funded recently";
+
+/** Per-wallet-per-mint claim window — the same hour the playground faucet uses. */
+export const PREFUND_WINDOW_MS = 60 * 60 * 1000;
+
+/**
+ * What a non-OK answer from /api/devnet-pre-fund means for THIS launch.
+ *
+ * The route judges the wallet against `fundingRequirement`, which is floored at a
+ * default-size launch, so it can refuse a wallet that already holds everything a
+ * smaller launch needs. And it has three different 429s; only the claim window is
+ * a refusal to fund, the per-IP limiter and the edge limiter are transient.
+ *
+ *  - "proceed": the wallet already covers this launch; the refusal is irrelevant.
+ *  - "blocked": short, and inside the claim window. No path can fund the deposit.
+ *  - "error":   short, refused for another reason. Left to the caller's old handling.
+ */
+export function classifyPreFundRefusal(input: {
+  status: number;
+  body: { error?: unknown; nextClaimAt?: unknown } | null;
+  balance: bigint;
+  lpCollateral: bigint;
+  insuranceAmount: bigint;
+}): { kind: "proceed" } | { kind: "blocked"; nextClaimAt: string | null } | { kind: "error" } {
+  if (input.balance >= fullMarketRequirement(input.lpCollateral, input.insuranceAmount)) return { kind: "proceed" };
+  const nextClaimAt = typeof input.body?.nextClaimAt === "string" ? input.body.nextClaimAt : null;
+  if (input.status === 429 && (input.body?.error === PREFUND_GATE_ERROR || nextClaimAt !== null)) {
+    return { kind: "blocked", nextClaimAt };
+  }
+  return { kind: "error" };
+}
