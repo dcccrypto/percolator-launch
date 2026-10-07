@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useSyncExternalStore, type FC } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore, type FC } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { MarketLogo } from "@/components/market/MarketLogo";
@@ -11,6 +11,13 @@ import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
 import { usePriceFlash } from "@/hooks/usePriceFlash";
 import { useAllMarketStats, type MarketWithStats } from "@/hooks/useAllMarketStats";
 import { isListedMarketRow } from "@/lib/listed-markets";
+import {
+  SegmentedControl,
+  RailControl,
+  COUNT_OPTIONS,
+  DEFAULT_RAIL_COUNT,
+  type RailCount,
+} from "@/components/landing/RailFilter";
 
 /** Decorative right-chevron — same mark the landing page's CTAs use. */
 const ARROW = (
@@ -22,9 +29,6 @@ const ARROW = (
     <path d="M5 12h14M12 5l7 7-7 7" />
   </svg>
 );
-
-/** Rows shown on the landing page; /markets has the full list. */
-const RAIL_LIMIT = 6;
 
 /** 24h change from the SAME source useLivePrice uses (/api/prices stats), on the
  *  same 10s cadence — the price store's change24h isn't seeded on the landing
@@ -149,11 +153,13 @@ const RailHeader: FC = () => (
 /**
  * The landing page's live market rail — real devnet markets, real ticking prices.
  * Rows come from /api/markets (same source as /markets), filtered with
- * isListedMarketRow(), busiest first, top RAIL_LIMIT. Each row subscribes to the
- * price store for its live price and polls /api/prices for the 24h change.
+ * isListedMarketRow(), ranked "trending" by 24h platform volume desc, top `count`
+ * (a 5/10/20 control). Each row subscribes to the price store for its live price
+ * and polls /api/prices for the 24h change.
  */
 export function LiveMarketRail() {
   const { statsMap, loading, error } = useAllMarketStats();
+  const [count, setCount] = useState<RailCount>(DEFAULT_RAIL_COUNT);
 
   const rows = useMemo(
     () =>
@@ -164,8 +170,8 @@ export function LiveMarketRail() {
             (rowVolumeUsd(b) ?? 0) - (rowVolumeUsd(a) ?? 0) ||
             (a.slab_address as string).localeCompare(b.slab_address as string),
         )
-        .slice(0, RAIL_LIMIT),
-    [statsMap],
+        .slice(0, Number(count)),
+    [statsMap, count],
   );
 
   // Prefer the server-enriched OI USD when /api/markets attached it (not on the
@@ -179,6 +185,14 @@ export function LiveMarketRail() {
 
   return (
     <GlassCard padding="none" elevation="md" className="overflow-hidden" hover={false}>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-2.5">
+        <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--text-dim)]">
+          Trending by 24h volume · live prices
+        </span>
+        <RailControl label="Show">
+          <SegmentedControl value={count} onChange={setCount} options={COUNT_OPTIONS} ariaLabel="Rows to show" />
+        </RailControl>
+      </div>
       <RailHeader />
       {rows.map((m, i) => {
         const slab = m.slab_address as string;

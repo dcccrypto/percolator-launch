@@ -3,7 +3,7 @@
  * PLAYGROUND_SLAB_META. The 2026-10-01 relaunch emptied that table, and the
  * rail rendered its header with no rows while /markets listed the live ones.
  */
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
@@ -70,10 +70,19 @@ describe("LiveMarketRail rows", () => {
     expect(links()).toEqual(["/trade/Azagguvr111111111111111111111111111111111111"]);
   });
 
-  it("caps the rail at the six busiest rows, in order", () => {
+  it("shows up to the default 20 busiest rows, in order", () => {
     setStats(Array.from({ length: 9 }, (_, i) => row(`slab${i}`, `M${i}`, i)));
     render(<LiveMarketRail />);
-    expect(links()).toEqual([8, 7, 6, 5, 4, 3].map((i) => `/trade/slab${i}`));
+    // Default "Show 20" — all 9 listed markets, busiest first (the /trade links only;
+    // the error/empty CTA links aren't present here).
+    expect(links()).toEqual([8, 7, 6, 5, 4, 3, 2, 1, 0].map((i) => `/trade/slab${i}`));
+  });
+
+  it("the Show control caps the rail (Show 5 → the five busiest, in order)", () => {
+    setStats(Array.from({ length: 9 }, (_, i) => row(`slab${i}`, `M${i}`, i)));
+    render(<LiveMarketRail />);
+    fireEvent.click(screen.getByRole("radio", { name: "5" }));
+    expect(links()).toEqual([8, 7, 6, 5, 4].map((i) => `/trade/slab${i}`));
   });
 
   it("orders zero-volume markets by slab so a refetch can't reshuffle them", () => {
