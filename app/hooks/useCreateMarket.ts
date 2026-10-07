@@ -76,7 +76,8 @@ import { buildM1Instructions } from "@/lib/create-market-m1";
 import { WIZARD_STEP_COPY } from "@/lib/wizard-copy";
 import { withRateLimitRetry } from "@/lib/rpc-rate-limit";
 import { KEEPER_REGISTER_COPY, loadProofPayload, loadProofTx, markRegistered, postKeeperRegistration, runKeeperRegistration, saveProofPayload, saveProofTx, saveRegisterRequest, type KeeperRegisterPhase } from "@/lib/keeper-register-client";
-import { deriveLaunchMarketParams, deriveMarketParams, MIN_LEVERAGE_X, backingSeedPerDomain, leverageFromMarginBps } from "@/lib/market-params";
+import { deriveLaunchMarketParams, backingSeedPerDomain } from "@/lib/market-params";
+import { buildMarketRegistrationPayload, flooredInitialMarginBps } from "@/lib/market-registration-payload";
 // GH#2592: the step-4 predicate and /api/devnet-pre-fund's funding target must be
 // the SAME number. They were two hand-copies, and the route's was understated by
 // both backing seeds, so it answered "sufficient" to the very request that said
@@ -278,25 +279,7 @@ export const MIN_INIT_MARKET_SEED = 500_000_000n;
  */
 export const MIN_SAFE_INITIAL_MARGIN_BPS = 1500n;
 
-/**
- * The on-chain initial_margin_bps this request will ACTUALLY be created with.
- *
- * Every leverage display (success screen, StepReview, markets DB `max_leverage`)
- * must go through this rather than the raw bps the user typed. Originally that
- * was BUG 16 (2026-07-06): create() floored the margin at 1500 but the displays
- * read the unfloored value, so a market advertised as 10x was initialized at
- * ~6.67x.
- *
- * The floor is gone (see MIN_SAFE_INITIAL_MARGIN_BPS above), but the reason for
- * this mirror is not: deriveMarketParams clamps leverage to [MIN_LEVERAGE_X,
- * MAX_LEVERAGE_X] and rounds margin UP, so the requested bps and the on-chain
- * bps can still differ. A pure function of the request — no retry/session
- * state — so it is safe to call before submission.
- */
-export function flooredInitialMarginBps(requestedBps: number): number {
-  const lev = requestedBps > 0 ? 10_000 / requestedBps : MIN_LEVERAGE_X;
-  return deriveMarketParams(lev, 0n, 1_000_000n).initialMarginBps;
-}
+export { flooredInitialMarginBps } from "@/lib/market-registration-payload";
 
 export interface VammParams {
   spreadBps: number;
@@ -772,59 +755,6 @@ export function assertRegistrable(symbol: string | null | undefined, payload: Ma
   if (problem) {
     throw new Error(`This launch cannot be registered (${problem}). Nothing was sent; no signature was requested.`);
   }
-}
-
-/**
- * Single source of truth for the market-registration payload.
- *
- * The batched fast path and the sequential fallback both POST this object to
- * /api/markets AND sign a canonical encoding of it (buildMarketRegistrationMessage,
- * #2387). The signed bytes and the POSTed bytes MUST be byte-identical or the
- * server's signature check 401s — so the payload must be built in exactly ONE
- * place. Previously each path hand-wrote its own literal (they had already
- * drifted cosmetically on the oracle_authority fallback); this factory removes
- * any chance of a future field being added to one and forgotten on the other.
- */
-function buildMarketRegistrationPayload(args: {
-  slabAddress: string;
-  params: CreateMarketParams;
-  deployer: string;
-  oracleMode: "pyth" | "hyperp" | "admin" | "keeper";
-  isAdminOracle: boolean;
-  isDevnetEnv: boolean;
-}): MarketRegistrationPayload {
-  const { slabAddress, params, deployer, oracleMode, isAdminOracle, isDevnetEnv } = args;
-  return {
-    slab_address: slabAddress,
-    mint_address: params.mint.toBase58(),
-    symbol: params.symbol ?? "UNKNOWN",
-    name: params.name ?? "Unknown Token",
-    decimals: params.decimals ?? 6,
-    deployer,
-    oracle_mode: oracleMode,
-    dex_pool_address: params.dexPoolAddress ?? null,
-    // Admin-oracle markets on devnet are cranked by the shared crank wallet;
-    // otherwise the deployer is its own oracle authority. (deployer === the
-    // connected wallet, so this matches the former walletPk.toBase58() literal.)
-    //
-    // A "keeper" market counts here. On devnet it is created in AUTH_MARK/admin
-    // mode and its oracle authority is DELEGATED to the keeper — that is what
-    // the mode means. Testing `isAdminOracle` alone (oracleMode === "admin")
-    // excluded exactly those markets, so the row recorded oracle_authority=null
-    // for the ones the keeper actually drives. Fauci's row shows the symptom.
-    oracle_authority: (isAdminOracle || oracleMode === "keeper")
-      ? (isDevnetEnv && getConfig().crankWallet ? getConfig().crankWallet : deployer)
-      : null,
-    initial_price_e6: params.initialPriceE6.toString(),
-    // BUG 16: advertise the FLOORED margin actually enforced on-chain, not the
-    // raw requested bps — see flooredInitialMarginBps.
-    max_leverage: params.initialMarginBps > 0
-      ? leverageFromMarginBps(flooredInitialMarginBps(params.initialMarginBps))
-      : 1,
-    trading_fee_bps: Number(params.tradingFeeBps),
-    lp_collateral: params.lpCollateral.toString(),
-    mainnet_ca: params.mainnetCA ?? null,
-  };
 }
 
 async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshBatchOutcome> {
@@ -1919,6 +1849,13 @@ export function useCreateMarket() {
   // below hydrates it; restoreSlabKeypair lets RecoverSolBanner's onResume hand the
   // keypair back in explicitly (belt-and-suspenders for the same-session resume path).
   const slabKpRef = useRef<Keypair | null>(null);
+  /**
+   * Cross-device resume (#3267): the slab a chain-rebuilt resume was handed (restoreSlabAddress). While
+   * set, create() runs ONLY on this slab: the keypair hydration below and a stale slabKpRef from this
+   * browser's own last launch must never win over it, or the wallet would sign LP init and deposits
+   * against the wrong market with this slab's pinned parameters.
+   */
+  const chainResumeSlabRef = useRef<string | null>(null);
 
   /**
    * GH#2623: a fresh controller per `create()` call — never re-abort a
@@ -1936,6 +1873,7 @@ export function useCreateMarket() {
   }, []);
 
   useEffect(() => {
+    if (chainResumeSlabRef.current) return; // a chain resume owns the slab; never hydrate another launch over it
     if (slabKpRef.current) return; // already have a keypair this session — don't clobber it
     if (!wallet.publicKey) return; // wait for wallet connection so we can verify ownership
     const inFlight = loadLastInFlightMarket();
@@ -1962,8 +1900,33 @@ export function useCreateMarket() {
    * connection on the same render).
    */
   const restoreSlabKeypair = useCallback((keypair: Keypair, slabAddress: string) => {
+    chainResumeSlabRef.current = null; // an explicit local resume replaces any chain resume
     slabKpRef.current = keypair;
     setState((s) => ({ ...s, slabAddress }));
+  }, []);
+
+  /**
+   * Cross-device resume (#3267): a launch past step 0 needs only its slab ADDRESS. Every later step
+   * signs with the wallet and reads the chain; only step 0 (slab creation) uses the slab keypair, which
+   * never leaves the launching browser. So a resume from another device hands the address in here.
+   */
+  const restoreSlabAddress = useCallback((slabAddress: string) => {
+    chainResumeSlabRef.current = slabAddress;
+    // A keypair for ANY OTHER slab (this browser's own unfinished launch, hydrated on mount) must not
+    // survive: create() prefers slabKpRef over state.slabAddress.
+    if (slabKpRef.current && slabKpRef.current.publicKey.toBase58() !== slabAddress) slabKpRef.current = null;
+    setState((s) => ({ ...s, slabAddress }));
+  }, []);
+
+  /**
+   * Drop a chain resume (#3267). The wizard calls this unconditionally when a LOCAL resume starts: a
+   * guard left for slab Y must never survive into a resume of slab X, where the keypair hydration it
+   * blocks (or a missing keypair) would otherwise leave create() on Y.
+   */
+  const clearChainResume = useCallback(() => {
+    const was = chainResumeSlabRef.current;
+    chainResumeSlabRef.current = null;
+    if (was) setState((s) => (s.slabAddress === was ? { ...s, slabAddress: null } : s));
   }, []);
 
   // UX WP-7: the background keeper-registration loop (no signature; the proof is the creation tx).
@@ -2179,16 +2142,22 @@ export function useCreateMarket() {
         // brand-new "Launch Market" click), where slabKpRef.current could still be
         // hydrated from a stale in-flight entry the user hasn't discarded yet (see the
         // mount effect above).
-        if (retryFromStep === 0 && slabKpRef.current) {
+        if (retryFromStep === 0 && slabKpRef.current && !chainResumeSlabRef.current) {
           slabKp = slabKpRef.current;
           slabPk = slabKp.publicKey;
         } else {
+          chainResumeSlabRef.current = null; // a launch from step 0 is a new market, not a resume
           slabKp = Keypair.generate();
           slabKpRef.current = slabKp;
           slabPk = slabKp.publicKey;
         }
         // PERC-8329: Do NOT persist secret key to localStorage — keep in memory only.
         // If the user refreshes before completing all steps, they must start over.
+      } else if (chainResumeSlabRef.current) {
+        // Chain resume (#3267): only the slab address, the one restoreSlabAddress was given. Never the
+        // slabKpRef of another launch, and not `state` (this closure may predate the call).
+        slabPk = new PublicKey(chainResumeSlabRef.current);
+        slabKp = null as unknown as Keypair;
       } else if (slabKpRef.current) {
         // Retry with persisted keypair — full functionality
         slabKp = slabKpRef.current;
@@ -3970,6 +3939,7 @@ export function useCreateMarket() {
 
         // Done! Clear in-memory keypair ref + in-flight recovery state.
         slabKpRef.current = null;
+        chainResumeSlabRef.current = null;
         clearInFlightMarket(slabPk.toBase58());
         setState((s) => ({
           ...s,
@@ -4001,6 +3971,7 @@ export function useCreateMarket() {
 
   const reset = useCallback(() => {
     slabKpRef.current = null;
+    chainResumeSlabRef.current = null;
     // PERC-8329: Clear any stale key that may have been stored by old code (defensive cleanup).
     try {
       localStorage.removeItem("percolator-pending-slab-keypair");
@@ -4066,5 +4037,5 @@ export function useCreateMarket() {
     [],
   );
 
-  return { state, create, reset, restoreSlabKeypair, retryKeeperRegistration, cancelInFlightLaunch };
+  return { state, create, reset, restoreSlabKeypair, restoreSlabAddress, clearChainResume, retryKeeperRegistration, cancelInFlightLaunch };
 }

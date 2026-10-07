@@ -66,6 +66,105 @@ export function unverifiedReason(candidates: DexPoolResult[], classes: Record<st
 }
 
 /**
+ * The wizard's pool lookup as a plain async function (the hook below and the cross-device
+ * registration recovery, lib/launch-recovery.ts, both call it, so they see the same pools): DexScreener
+ * pairs for a mint, supported DEXes only, deepest first, each classified by its mainnet OWNER program.
+ * Throws on a failed lookup; `signal` aborts the requests.
+ */
+export async function searchVerifiedPools(
+  mint: string,
+  signal?: AbortSignal,
+): Promise<{ pools: DexPoolResult[]; blockedReason: string | null }> {
+  const url = `https://api.dexscreener.com/latest/dex/tokens/${mint}`;
+  const resp = await fetch(url, {
+    signal,
+    headers: { "User-Agent": "percolator-app/1.0" },
+  });
+
+  if (!resp.ok) {
+    // A 429/500 parses to `json.pairs === undefined` → [] → "no pools",
+    // silently mis-classifying a liquid token into tier "low". Treat
+    // non-2xx as a distinct error instead of falling through.
+    throw new Error(`DexScreener API error: ${resp.status}`);
+  }
+
+  const json: { pairs?: Array<{
+    chainId?: string;
+    dexId?: string;
+    pairAddress: string;
+    baseToken?: { symbol?: string };
+    quoteToken?: { symbol?: string };
+    liquidity?: { usd?: number };
+    priceUsd?: string;
+  }> } = await resp.json();
+  const pairs = json.pairs || [];
+
+  const results: DexPoolResult[] = [];
+  /** A blocked DEX we actually saw real liquidity on — reported only if
+   *  nothing supported turns up, so a token that also trades on Meteora
+   *  is never nagged about its Raydium pool. */
+  let blockedHit: string | null = null;
+  for (const pair of pairs) {
+    if (pair.chainId !== "solana") continue;
+    const dexId = (pair.dexId || "").toLowerCase();
+    const liquidityRaw = pair.liquidity?.usd || 0;
+    if (!SUPPORTED_DEX_IDS.has(dexId)) {
+      if (BLOCKED_DEX_IDS[dexId] && liquidityRaw >= 100) {
+        blockedHit ??= BLOCKED_DEX_IDS[dexId];
+      }
+      continue;
+    }
+
+    const liquidity = liquidityRaw;
+    if (liquidity < 100) continue; // skip tiny pools
+
+    const baseSymbol = pair.baseToken?.symbol || "?";
+    const quoteSymbol = pair.quoteToken?.symbol || "?";
+    results.push({
+      poolAddress: pair.pairAddress,
+      dexId,
+      pairLabel: `${baseSymbol} / ${quoteSymbol}`,
+      baseSymbol,
+      quoteSymbol,
+      liquidityUsd: liquidity,
+      priceUsd: parseFloat(pair.priceUsd ?? "0") || 0,
+    });
+  }
+
+  // Sort by liquidity descending
+  results.sort((a, b) => b.liquidityUsd - a.liquidityUsd);
+  const candidates = results.slice(0, MAX_CLASSIFY_POOLS);
+
+  // E2E B21: classify by mainnet OWNER before offering anything. DexScreener's
+  // "meteora" covers DAMM v1 pools the keeper cannot price.
+  let verified: DexPoolResult[] = [];
+  let classesSeen: Record<string, PoolClass> = {};
+  if (candidates.length > 0) {
+    const cr = await fetch("/api/dex/classify-pools", {
+      method: "POST",
+      signal,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ addresses: candidates.map((c) => c.poolAddress) }),
+    });
+    if (!cr.ok) throw new Error(POOL_VERIFY_FAILED);
+    const { classes } = (await cr.json()) as { classes?: Record<string, PoolClass> };
+    if (!classes) throw new Error(POOL_VERIFY_FAILED);
+    classesSeen = classes;
+    verified = applyPoolClasses(candidates, classes);
+  }
+
+
+  return {
+    pools: verified.slice(0, 10),
+    // Only surface the block when it actually cost this token every option.
+    blockedReason:
+      verified.length === 0
+        ? blockedHit ?? (candidates.length > 0 ? unverifiedReason(candidates, classesSeen) : null)
+        : null,
+  };
+}
+
+/**
  * Search DexScreener for DEX pools containing a given token mint.
  * Filters to supported DEXes (PumpSwap, Meteora) and sorts by liquidity.
  * Raydium is currently withheld — see BLOCKED_DEX_IDS for why.
@@ -119,92 +218,10 @@ export function useDexPoolSearch(mint: string | null): {
 
     (async () => {
       try {
-        const url = `https://api.dexscreener.com/latest/dex/tokens/${trimmed}`;
-        const resp = await fetch(url, {
-          signal: controller.signal,
-          headers: { "User-Agent": "percolator-app/1.0" },
-        });
-
-        if (!resp.ok) {
-          // A 429/500 parses to `json.pairs === undefined` → [] → "no pools",
-          // silently mis-classifying a liquid token into tier "low". Treat
-          // non-2xx as a distinct error instead of falling through.
-          throw new Error(`DexScreener API error: ${resp.status}`);
-        }
-
-        const json: { pairs?: Array<{
-          chainId?: string;
-          dexId?: string;
-          pairAddress: string;
-          baseToken?: { symbol?: string };
-          quoteToken?: { symbol?: string };
-          liquidity?: { usd?: number };
-          priceUsd?: string;
-        }> } = await resp.json();
-        const pairs = json.pairs || [];
-
-        const results: DexPoolResult[] = [];
-        /** A blocked DEX we actually saw real liquidity on — reported only if
-         *  nothing supported turns up, so a token that also trades on Meteora
-         *  is never nagged about its Raydium pool. */
-        let blockedHit: string | null = null;
-        for (const pair of pairs) {
-          if (pair.chainId !== "solana") continue;
-          const dexId = (pair.dexId || "").toLowerCase();
-          const liquidityRaw = pair.liquidity?.usd || 0;
-          if (!SUPPORTED_DEX_IDS.has(dexId)) {
-            if (BLOCKED_DEX_IDS[dexId] && liquidityRaw >= 100) {
-              blockedHit ??= BLOCKED_DEX_IDS[dexId];
-            }
-            continue;
-          }
-
-          const liquidity = liquidityRaw;
-          if (liquidity < 100) continue; // skip tiny pools
-
-          const baseSymbol = pair.baseToken?.symbol || "?";
-          const quoteSymbol = pair.quoteToken?.symbol || "?";
-          results.push({
-            poolAddress: pair.pairAddress,
-            dexId,
-            pairLabel: `${baseSymbol} / ${quoteSymbol}`,
-            baseSymbol,
-            quoteSymbol,
-            liquidityUsd: liquidity,
-            priceUsd: parseFloat(pair.priceUsd ?? "0") || 0,
-          });
-        }
-
-        // Sort by liquidity descending
-        results.sort((a, b) => b.liquidityUsd - a.liquidityUsd);
-        const candidates = results.slice(0, MAX_CLASSIFY_POOLS);
-
-        // E2E B21: classify by mainnet OWNER before offering anything. DexScreener's
-        // "meteora" covers DAMM v1 pools the keeper cannot price.
-        let verified: DexPoolResult[] = [];
-        let classesSeen: Record<string, PoolClass> = {};
-        if (candidates.length > 0) {
-          const cr = await fetch("/api/dex/classify-pools", {
-            method: "POST",
-            signal: controller.signal,
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ addresses: candidates.map((c) => c.poolAddress) }),
-          });
-          if (!cr.ok) throw new Error(POOL_VERIFY_FAILED);
-          const { classes } = (await cr.json()) as { classes?: Record<string, PoolClass> };
-          if (!classes) throw new Error(POOL_VERIFY_FAILED);
-          classesSeen = classes;
-          verified = applyPoolClasses(candidates, classes);
-        }
-
+        const { pools: found, blockedReason: blocked } = await searchVerifiedPools(trimmed, controller.signal);
         if (cancelled) return;
-        setPools(verified.slice(0, 10));
-        // Only surface the block when it actually cost this token every option.
-        setBlockedReason(
-          verified.length === 0
-            ? blockedHit ?? (candidates.length > 0 ? unverifiedReason(candidates, classesSeen) : null)
-            : null,
-        );
+        setPools(found);
+        setBlockedReason(blocked);
       } catch (err) {
         if (cancelled) return;
         if (err instanceof Error && err.name === "AbortError") return; // genuine cancellation, not a real error

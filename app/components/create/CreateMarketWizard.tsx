@@ -36,6 +36,10 @@ import { StepControlRoom, leverageToMarginBps, marginBpsToLeverage } from "./Ste
 import { LaunchProgress } from "./LaunchProgress";
 import { retryBlockedReason } from "@/lib/retry-blocked";
 import { LaunchSuccess } from "./LaunchSuccess";
+import { ResumeFromChainCard } from "./ResumeFromChainCard";
+import { ChainResumeNotice } from "./ChainResumeNotice";
+import { dropChainResume, useChainResumeWalletGuard } from "@/hooks/useChainResumeWalletGuard";
+import { applyRecoveredLaunch, atomsToHuman, chainResumeRefusal, type RecoveredLaunch } from "@/lib/launch-recovery";
 import { RecoverSolBanner } from "./RecoverSolBanner";
 // W8 fix: share ONE SOL-cost formula with CostEstimate.tsx's own display so the
 // launch gate and the number shown to the user can never drift apart — see that
@@ -105,10 +109,10 @@ const DEFAULT_STATE: WizardState = {
  * There is no mode toggle and no slab-tier picker — v17 has exactly one slab
  * size (max capacity) and oracle detection is always automatic.
  */
-export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }) => {
+export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<slab>: continue this unfinished launch from chain (#3267). */ resumeSlabParam?: string }> = ({ initialMint, resumeSlabParam }) => {
   const { publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
-  const { state: createState, create, reset: resetCreate, restoreSlabKeypair, retryKeeperRegistration, cancelInFlightLaunch } = useCreateMarket();
+  const { state: createState, create, reset: resetCreate, restoreSlabKeypair, restoreSlabAddress, clearChainResume, retryKeeperRegistration, cancelInFlightLaunch } = useCreateMarket();
   // GH#2623: leaving this page mid-launch must stop the tail-broadcast retry
   // loop from prompting further wallet signatures — without this, a market
   // creation begun here kept re-signing (new popups) "even while out of the
@@ -229,6 +233,43 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   const [retryNote, setRetryNote] = useState<string | null>(null);
   // Which stuck slab is being resumed; only meaningful while resumeFromStep is set.
   const [resumeSlab, setResumeSlab] = useState<string | null>(null);
+  // #3267: a resume rebuilt from chain (proven against the creation tx's registration memo). Its
+  // parameters are pinned: the live wizard must not re-detect a different pool or price under it.
+  const [chainResume, setChainResume] = useState<RecoveredLaunch | null>(null);
+  const chainResumeRef = useRef<RecoveredLaunch | null>(null);
+  chainResumeRef.current = chainResume;
+  const [chainResumeError, setChainResumeError] = useState<string | null>(null);
+  // A chain resume belongs to ONE slab and ONE wallet. Switching wallet drops it (and the resume mode it
+  // started), so a verification done for wallet A can never launch for wallet B.
+  const walletB58 = publicKey?.toBase58() ?? null;
+  useChainResumeWalletGuard(walletB58, !!chainResume, () =>
+    dropChainResume({
+      cancelInFlightLaunch,
+      forget: () => {
+        setChainResume(null);
+        setChainResumeError(null);
+        setResumeFromStep(null);
+        setResumeSlab(null);
+      },
+      resetCreate,
+    }),
+  );
+  /**
+   * The chain resume a launch/retry may use, or null when there is none. Refuses (and says why) when it
+   * is for a different slab than the one being resumed, was verified for another wallet, or is a market
+   * this recovery cannot resume.
+   */
+  const gateChainResume = (): { ok: true; resume: RecoveredLaunch | null } | { ok: false } => {
+    const r = chainResume;
+    if (!r) return { ok: true, resume: null };
+    const refusal = chainResumeRefusal(r, resumeSlab, walletB58);
+    if (refusal) {
+      setChainResumeError(refusal);
+      return { ok: false };
+    }
+    setChainResumeError(null);
+    return { ok: true, resume: r };
+  };
 
   // BUG FIX (2026-09-25, tester-reported "RESUME CREATION is a dead button"):
   // clicking RESUME CREATION previously only updated React state — nothing
@@ -297,7 +338,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     if (!quickLaunch.config || launchInFlightRef.current) return;
     setWizard((prev) => ({
       ...prev,
-      tradingFeeBps: quickLaunch.config!.tradingFeeBps,
+      tradingFeeBps: chainResumeRef.current ? chainResumeRef.current.tradingFeeBps : quickLaunch.config!.tradingFeeBps,
       // Normalise through the dial's own quantisation so the number ON the dial is
       // exactly the number written on-chain. quick-launch's "high" tier supplies
       // 1000 bps (10x); GH#2621 raised the dial's ceiling to MAX_LEVERAGE_X (10x)
@@ -306,10 +347,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       // every high-tier default from 10x to 6.5x (1538 bps) — kept generically
       // (rather than special-cased to 10x) because it also protects any FUTURE
       // quick-launch tier from producing a bps the dial's own snap can't display.
-      initialMarginBps: prev.marginSetByUser
+      initialMarginBps: prev.marginSetByUser || chainResumeRef.current
         ? prev.initialMarginBps
         : leverageToMarginBps(marginBpsToLeverage(quickLaunch.config!.initialMarginBps)),
-      lpCollateral: prev.lpSetByUser ? prev.lpCollateral : quickLaunch.config!.lpCollateral,
+      lpCollateral: prev.lpSetByUser || chainResumeRef.current ? prev.lpCollateral : quickLaunch.config!.lpCollateral,
       // Apply detected oracle price as adminPrice (used if oracle ends up admin)
       adminPrice: pickInitialPrice(prev.adminPrice, quickLaunch.adminPrice, quickLaunch.config?.initialPrice),
     }));
@@ -935,7 +976,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     };
     // PERC-513: If resuming from a stuck slab, skip slab creation (step 0).
     // The existing slab keypair is already in slabKpRef (loaded from localStorage).
-    create(params, resumeFromStep ?? undefined);
+    const gate = gateChainResume();
+    if (!gate.ok) return;
+    create(applyRecoveredLaunch(params, gate.resume), resumeFromStep ?? undefined);
   };
 
   // Retry from failed step
@@ -998,7 +1041,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
         dexType: wizard.dexPool?.dexType,
       } : {}),
     };
-    create(params, createState.step);
+    const gate = gateChainResume();
+    if (!gate.ok) return;
+    create(applyRecoveredLaunch(params, gate.resume), createState.step);
   };
 
   // Retry ONLY the keeper-register step for an already-live market (LaunchSuccess's
@@ -1097,6 +1142,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             {retryNote}
           </div>
         )}
+        {/* A Retry refused by the chain-resume gate must say why here too: this view replaces the main one. */}
+        <ChainResumeNotice message={chainResumeError} />
         <LaunchProgress
           state={createState}
           onReset={handleReset}
@@ -1149,6 +1196,35 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
+      {/* #3267: continue an unfinished launch started on another device, rebuilt from chain. */}
+      {resumeSlabParam && resumeFromStep === null && (
+        <ResumeFromChainCard
+          slab={resumeSlabParam}
+          onVerified={(launch, step) => {
+            // Only the slab ADDRESS is needed past step 0 (the keypair never left the launching browser).
+            restoreSlabAddress(resumeSlabParam);
+            setChainResume(launch);
+            // Put the verified values in the form the wizard reads, and mark them user-set so detection
+            // does not move them (the pinned params above are the final authority).
+            setWizard((prev) => ({
+              ...prev,
+              mintAddress: launch.request.mainnetCA ?? prev.mintAddress,
+              tradingFeeBps: launch.tradingFeeBps,
+              initialMarginBps: launch.initialMarginBps,
+              marginSetByUser: true,
+              lpCollateral: atomsToHuman(launch.lpCollateralAtoms, 6),
+              lpSetByUser: true,
+              ...(launch.lpExposureBps != null ? { lpExposureBps: launch.lpExposureBps } : {}),
+              ...(launch.onChainInsuranceAtoms != null && launch.onChainInsuranceAtoms > 0n
+                ? { insuranceAmount: atomsToHuman(launch.onChainInsuranceAtoms, 6) }
+                : {}),
+            }));
+            setResumeFromStep(step);
+            setResumeSlab(resumeSlabParam);
+          }}
+        />
+      )}
+
       {/* Stuck slab recovery banner */}
       <RecoverSolBanner
         onReset={handleReset}
@@ -1167,10 +1243,16 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
           // can now surface a RESUME click for ANY of them. Falling back to `stuckSlab`
           // keeps this working even against a test/mocked hook that doesn't supply
           // `stuckSlabs`.
+          // A chain resume's guard for another slab must not survive into this local resume, whether or not
+          // the keypair below is found (#3267 review).
+          clearChainResume?.();
           const matched = stuckSlabs?.find((s) => s.publicKey.toBase58() === slabAddress) ?? stuckSlab;
           if (matched?.keypair && matched.publicKey.toBase58() === slabAddress) {
             restoreSlabKeypair(matched.keypair, slabAddress);
           }
+          // A local resume replaces any chain resume: never apply another market's pinned parameters.
+          setChainResume(null);
+          setChainResumeError(null);
           // Set resumeFromStep so handleLaunch skips slab creation and resumes correctly.
           setResumeFromStep(fromStep);
           setResumeSlab(slabAddress);
@@ -1208,13 +1290,17 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
                   past Step 1 (e.g. resuming after LP init or deposit already landed). */}
               {resumeFromStep === 0
                 ? "Re-enter your parameters to retry market initialization."
-                : `The market is set up through step ${resumeFromStep} of 6. Re-enter your parameters to resume from where you left off.`}
+                : chainResume
+                  ? `Rebuilt from the chain and checked against this launch's signed registration. It resumes at step ${resumeFromStep} of 6 and skips what already landed. Continue to review and launch.`
+                  : `The market is set up through step ${resumeFromStep} of 6. Re-enter your parameters to resume from where you left off.`}
             </span>
           </div>
           <button
             type="button"
             onClick={() => {
               setResumeFromStep(null);
+              setChainResume(null);
+              setChainResumeError(null);
               resetCreate();
             }}
             className="flex-shrink-0 text-[10px] text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors px-2 py-1 border border-[var(--border)]"
@@ -1223,6 +1309,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
           </button>
         </div>
       )}
+
+      <ChainResumeNotice message={chainResumeError} />
 
       {/* Progress indicator */}
       <WizardProgress

@@ -35,6 +35,18 @@ function CreatePageInner() {
     }
   }
 
+  // #3267: /create?resume=<slab> continues an unfinished launch from chain. A malformed value is ignored.
+  const resumeParam = searchParams.get("resume");
+  let resumeSlabParam: string | undefined = undefined;
+  if (resumeParam) {
+    try {
+      const { PublicKey } = require("@solana/web3.js");
+      resumeSlabParam = new PublicKey(resumeParam).toBase58();
+    } catch {
+      // not a public key: ignore
+    }
+  }
+
   return (
     <div className="min-h-[calc(100dvh-48px)] relative">
       {/* Grid background — subtle decorative element */}
@@ -95,7 +107,7 @@ function CreatePageInner() {
         <ErrorBoundary label="Create Market Wizard">
           <ScrollReveal delay={0.1}>
             <div className="border border-[var(--border)] bg-[var(--panel-bg)]">
-              <CreateMarketWizard initialMint={initialMint} />
+              <CreateMarketWizard initialMint={initialMint} resumeSlabParam={resumeSlabParam} />
             </div>
           </ScrollReveal>
         </ErrorBoundary>
