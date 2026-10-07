@@ -268,7 +268,7 @@ describe("a chain-recovered resume pins the launch's parameters", () => {
     const lines = unboundResumeValues({ ...launch, onChainInsuranceAtoms: 0n } as RecoveredLaunch);
     expect(lines.join("\n")).toMatch(/Insurance top-up: the amount in this form/);
     expect(lines.join("\n")).toMatch(/backing seed/);
-    expect(lines.join("\n")).toMatch(/Matcher limits/);
+    expect(lines.join("\n")).toMatch(/Trade limits/);
     expect(unboundResumeValues({ ...launch, onChainInsuranceAtoms: 3_000_000n } as RecoveredLaunch)[0]).toBe("Insurance: 3, as already funded on chain.");
   });
   it("a refused Retry/launch: wrong slab, wrong wallet, or a one-slot market; null only when all agree", () => {

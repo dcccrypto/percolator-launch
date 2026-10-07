@@ -203,8 +203,10 @@ describe("/api/prices/[slab]: 24h stats from GeckoTerminal, never Pyth Benchmark
     }));
     const res = await pricesGET(new NextRequest(`http://localhost/api/prices/${SLAB}`), { params: Promise.resolve({ slab: SLAB }) });
     expect(res.status).toBe(200);
-    const { stats } = (await res.json()) as { stats: { change24h: number; high24h: string; low24h: string } | null };
-    expect(stats).toEqual({ change24h: 15, high24h: "120000000", low24h: "95000000" });
+    const { stats } = (await res.json()) as { stats: { change24h: number; high24h: string; low24h: string; series?: number[] } | null };
+    // `series` = the closes over the stats window, oldest to newest (the landing rail's mini chart):
+    // the 24h-ago reference bar's close (110) then the newer bar's close (115).
+    expect(stats).toEqual({ change24h: 15, high24h: "120000000", low24h: "95000000", series: [110, 115] });
     expect(calls.some((u) => u.includes(`/pools/${POOL}/ohlcv/hour`))).toBe(true);
     expect(calls.some((u) => /pyth/i.test(u))).toBe(false);
   });

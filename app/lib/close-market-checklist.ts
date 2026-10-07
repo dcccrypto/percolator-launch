@@ -47,7 +47,7 @@ export const CLOSE_MARKET_COPY = {
   unfinishedTitle: "Reclaim rent from this unfinished launch",
   unfinishedBody: "Remove this unfinished launch and get back its rent. You can't reopen it.",
   /** Only when the chain read confirms nothing is funded. */
-  unfinishedBodyConfirmedEmpty: "Remove this unfinished launch and get back its rent. No funds, portfolio or backing were found on it. You can't reopen it.",
+  unfinishedBodyConfirmedEmpty: "Remove this unfinished launch and get back its rent. No funds, trading accounts or backing were found on it. You can't reopen it.",
   unfinishedConfirm: "Reclaim rent · 1 approval",
   mark: (s: CheckState) => (s === "ok" ? "✓" : s === "unmet" ? "✗" : "?"),
 } as const;

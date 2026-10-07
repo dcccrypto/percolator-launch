@@ -69,7 +69,7 @@ describe("the card", () => {
     fireEvent.click(screen.getByTestId("resume-chain-verify"));
     await waitFor(() => expect(onVerified).toHaveBeenCalledWith({ ...launch, onChainInsuranceAtoms: 0n, lpExposureBps: 10_000 }, 1));
     expect(h.adopt).toHaveBeenCalledWith({ ...launch, onChainInsuranceAtoms: 0n, lpExposureBps: 10_000 });
-    expect(screen.getByTestId("resume-chain-summary").textContent).toMatch(/AUTON.*10x.*5 bps fee.*1000 liquidity seed/);
+    expect(screen.getByTestId("resume-chain-summary").textContent).toMatch(/AUTON.*10x.*0.05% fee.*1000 liquidity seed/);
   });
 
   it("asks for the liquidity amount only when nothing is deposited, and passes it as a candidate to prove", async () => {
@@ -147,7 +147,7 @@ describe("security review items on the card", () => {
     const unbound = screen.getByTestId("resume-chain-unbound").textContent ?? "";
     expect(unbound).toMatch(/Insurance: 250, as already funded on chain/);
     expect(unbound).toMatch(/backing seed/);
-    expect(unbound).toMatch(/Matcher limits/);
+    expect(unbound).toMatch(/Trade limits/);
   });
 });
 
@@ -165,7 +165,7 @@ describe("matcher limits (LP exposure) are shown, editable and pinned", () => {
     fireEvent.click(screen.getByTestId("resume-chain-verify"));
     await waitFor(() => expect(onVerified).toHaveBeenCalled());
     expect(onVerified.mock.calls[0][0].lpExposureBps).toBe(12_500);
-    expect(screen.getByTestId("resume-chain-unbound").textContent).toMatch(/12500 bps of the liquidity seed, written once at the liquidity step/);
+    expect(screen.getByTestId("resume-chain-unbound").textContent).toMatch(/125.00% of the liquidity seed, written once at the liquidity step/);
   });
   it("an out-of-range value is clamped to the wizard's range; a non-number is refused before any request", async () => {
     h.recover.mockResolvedValue({ ok: true, launch });

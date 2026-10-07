@@ -11,6 +11,7 @@ import { getConfig, getNetwork } from "@/lib/config";
 import { isMarketauthComplete } from "@/lib/market-completeness";
 import { readMarketGroupHeader } from "@/lib/v18-wire";
 import { leverageFromMarginBps } from "@/lib/market-params";
+import { bpsPct } from "@/lib/format";
 import { parseHumanAmount } from "@/lib/parseAmount";
 import { clampLpExposureBps, LP_EXPOSURE_DEFAULT_BPS } from "@/lib/matcher-params";
 import {
@@ -221,7 +222,7 @@ export const ResumeFromChainCard: FC<{
           </button>
           {chain.step < 3 && (
             <label className="flex w-full flex-col gap-1 text-[10px] text-[var(--text-secondary)]">
-              LP exposure (bps of the liquidity seed; 10000 = 1x): not part of the signed registration, written once at the liquidity step. Confirm the value you chose.
+              Liquidity exposure, entered in hundredths of a percent (10000 = 100% of the liquidity seed, i.e. 1x): not part of the signed registration, written once at the liquidity step. Confirm the value you chose.
               <input
                 data-testid="resume-chain-exposure"
                 value={exposure}
@@ -248,7 +249,7 @@ export const ResumeFromChainCard: FC<{
         <div data-testid="resume-chain-summary" className="mt-3 text-[11px] text-[var(--text)]">
           <p>
             Verified: <span className="font-semibold">{verified.symbol}</span> ({verified.name}) on pool {verified.poolAddress.slice(0, 6)}…, {leverageFromMarginBps(verified.initialMarginBps)}x,{" "}
-            {verified.tradingFeeBps} bps fee, {atomsToHuman(verified.lpCollateralAtoms, 6)} liquidity seed
+            {bpsPct(verified.tradingFeeBps)} fee, {atomsToHuman(verified.lpCollateralAtoms, 6)} liquidity seed
             {verified.onChainInsuranceAtoms != null && verified.onChainInsuranceAtoms > 0n ? `, ${atomsToHuman(verified.onChainInsuranceAtoms, 6)} insurance (already funded)` : ""}.
           </p>
           <ul data-testid="resume-chain-unbound" className="mt-1 list-disc pl-4 text-[var(--text-secondary)]">

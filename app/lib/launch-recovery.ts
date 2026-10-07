@@ -23,6 +23,7 @@
  */
 import { PublicKey, type Connection, type VersionedTransactionResponse } from "@solana/web3.js";
 import { IX_TAG } from "@percolatorct/sdk";
+import { bpsPct } from "@/lib/format";
 import {
   INIT_MARKET_TAG,
   KEEPER_REGISTER_MEMO_FAMILY,
@@ -523,8 +524,8 @@ export function unboundResumeValues(r: RecoveredLaunch, decimals = 6): string[] 
   );
   out.push(
     r.lpExposureBps != null
-      ? `Matcher limits (per-trade and inventory caps): from the LP exposure shown, ${r.lpExposureBps} bps of the liquidity seed, written once at the liquidity step. The original value can't be read until the matcher exists.`
-      : "Matcher limits: already written at the liquidity step; this resume does not change them.",
+      ? `Trade limits (per-trade and position caps): from the liquidity exposure shown, ${bpsPct(r.lpExposureBps)} of the liquidity seed, written once at the liquidity step. The original value can't be read until that step has run.`
+      : "Trade limits: already written at the liquidity step; this resume does not change them.",
   );
   return out;
 }

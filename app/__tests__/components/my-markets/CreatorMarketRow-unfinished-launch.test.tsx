@@ -67,7 +67,7 @@ describe("My Markets: an unfinished launch", () => {
     expect(screen.getByText("Reclaim rent from this unfinished launch")).toBeTruthy();
     expect(screen.queryByText(/Close .* market/)).toBeNull();
     // removable: the dialog may say what was found
-    expect(screen.getByText("Remove this unfinished launch and get back its rent. No funds, portfolio or backing were found on it. You can't reopen it.")).toBeTruthy();
+    expect(screen.getByText("Remove this unfinished launch and get back its rent. No funds, trading accounts or backing were found on it. You can't reopen it.")).toBeTruthy();
   });
 
   it("LP initialised (a portfolio, nothing deposited): Continue only, no close, no funds claim", () => {
@@ -103,7 +103,7 @@ describe("My Markets: an unfinished launch", () => {
     // the drawer's own reclaim button still exists while the read is pending: its dialog claims nothing
     fireEvent.click(screen.getByTestId("close-market-button"));
     expect(screen.getByText("Remove this unfinished launch and get back its rent. You can't reopen it.")).toBeTruthy();
-    expect(screen.queryByText(/Nothing was deposited|No funds, portfolio or backing/)).toBeNull();
+    expect(screen.queryByText(/Nothing was deposited|No funds, trading accounts or backing/)).toBeNull();
   });
 });
 
