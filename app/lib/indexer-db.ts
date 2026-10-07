@@ -166,6 +166,29 @@ export async function queryTradesForCandles(
   return rows.reverse();
 }
 
+/**
+ * The price of the last trade strictly before `beforeSec`, or null when there is none. Seeds
+ * `fillCandleGaps` so a history page that starts between trades opens on the price that was in
+ * force, not on a gap. Uses the same (slab_address, network, created_at DESC) index as above.
+ */
+export async function queryLastTradePriceBefore(slabAddress: string, beforeSec: number): Promise<number | null> {
+  const sql = getSql();
+  const beforeIso = new Date(beforeSec * 1000).toISOString();
+  const rows = await sql<{ price: string | null }[]>`
+    SELECT price::text AS price
+    FROM trades
+    WHERE slab_address = ${slabAddress}
+      AND network = ${getServerNetwork()}
+      AND created_at < ${beforeIso}::timestamptz
+      AND price IS NOT NULL
+      AND price > 0
+    ORDER BY created_at DESC
+    LIMIT 1
+  `;
+  const p = Number(rows[0]?.price);
+  return Number.isFinite(p) && p > 0 ? p : null;
+}
+
 // ── OHLCV bucketing (ported from percolator-api/src/routes/candles.ts) ──────
 
 export interface UdfResponse {
@@ -235,6 +258,57 @@ export function bucketCandles(
     out.v.push(b.v);
   }
   return out;
+}
+
+/** Cap on bars a filled response may hold (about 3.5 days of 1-minute bars); the newest are kept. */
+export const MAX_FILLED_BARS = 5_000;
+
+/**
+ * Make a last-trade series continuous: every empty bucket between the start and `toSec` gets a
+ * flat bar at the previous close (o = h = l = c = previous close, v = 0). That is what the last
+ * trade price actually did — it stays put until the next trade — and it stops a quiet market's
+ * chart rendering as scattered dashes with gaps. Real (traded) bars are returned unchanged.
+ *
+ * Start: the bucket of `fromSec` when a `seedClose` (last trade before the window) is known,
+ * otherwise the first traded bucket (never invent a price before the first trade). End: the bucket
+ * of `toSec` (callers cap it at now), never earlier than the last real bar. Pure.
+ */
+export function fillCandleGaps(
+  udf: UdfResponse,
+  bucketSeconds: number,
+  opts: { fromSec: number; toSec: number; seedClose: number | null; maxBars?: number },
+): UdfResponse {
+  if (udf.s === "error" || !(bucketSeconds > 0)) return udf;
+  const maxBars = Math.max(1, Math.floor(opts.maxBars ?? MAX_FILLED_BARS));
+  const seed =
+    opts.seedClose != null && Number.isFinite(opts.seedClose) && opts.seedClose > 0 ? opts.seedClose : null;
+  const hasRows = udf.s === "ok" && udf.t.length > 0;
+  if (!hasRows && seed === null) return udf; // nothing traded, nothing known: stay "no_data"
+
+  const bucketOf = (sec: number) => Math.floor(sec / bucketSeconds) * bucketSeconds;
+  const start = seed !== null ? bucketOf(opts.fromSec) : udf.t[0];
+  const lastReal = hasRows ? udf.t[udf.t.length - 1] : start;
+  const end = Math.max(bucketOf(opts.toSec), lastReal);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return udf;
+  const first = Math.max(start, end - (maxBars - 1) * bucketSeconds);
+
+  const indexOf = new Map<number, number>();
+  udf.t.forEach((t, i) => indexOf.set(t, i));
+  let prev = seed;
+  // When the cap trims old buckets, carry the close of the newest real bar before the window.
+  for (let i = 0; i < udf.t.length && udf.t[i] < first; i++) prev = udf.c[i];
+
+  const out: UdfResponse = { s: "ok", t: [], o: [], h: [], l: [], c: [], v: [] };
+  for (let t = first; t <= end; t += bucketSeconds) {
+    const i = indexOf.get(t);
+    if (i !== undefined) {
+      out.t.push(t); out.o.push(udf.o[i]); out.h.push(udf.h[i]); out.l.push(udf.l[i]); out.c.push(udf.c[i]); out.v.push(udf.v[i]);
+      prev = udf.c[i];
+    } else if (prev !== null) {
+      out.t.push(t); out.o.push(prev); out.h.push(prev); out.l.push(prev); out.c.push(prev); out.v.push(0);
+    }
+  }
+  return out.t.length > 0 ? out : udf;
 }
 
 export const RES_TO_SECONDS: Record<string, number> = {

@@ -376,7 +376,10 @@ export function TvChart({
         liqPrice: s.liq,
         entryPrice: s.entry,
         entryIsEstimate: s.entryIsEstimate,
-        showMark: s.series !== "mark",
+        // The app's Mark line IS the chart's current-price line: TradingView's own series price
+        // line and last-value label are deliberately off (lib/tv/theme.ts). Hiding it on the Mark
+        // series left that tab — the default — with no current-price line or label at all.
+        showMark: true,
         prefs: s.prefs,
         theme: s.theme,
       }),
