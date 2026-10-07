@@ -87,6 +87,8 @@ import { depositAmountMessage } from "@/lib/deposit-guard";
 import { useWalletNetworkGuard } from "@/hooks/useWalletNetworkGuard";
 import { isOracleStaleBlocking } from "@/lib/oracle-stale-gate";
 import { invalidatePortfolio } from "@/lib/portfolio-invalidation";
+import { checkSignatureLanded, timedOutSignature } from "@/lib/tx";
+import { watchPendingSignature } from "@/lib/pending-signature";
 import { FEE_LEGS, legPercent, splitFeeAtoms } from "@/lib/fee-breakdown";
 import { useMarketLimits } from "@/hooks/useMarketLimits";
 import { closeLimitNotice, deriveTicketLimits, feeFitSizeQ, sizeQToInput, type TicketLimitsInput } from "@/lib/limits/ticket";
@@ -313,7 +315,20 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // focus-visible outline invisible too, silently regressing keyboard a11y.
   const [leverageFocused, setLeverageFocused] = useState(false);
   const [lastSig, setLastSig] = useState<string | null>(null);
-  const [tradePhase, setTradePhase] = useState<"idle" | "submitting" | "waiting" | "confirming" | "error">("idle");
+  const [tradePhase, setTradePhase] = useState<"idle" | "submitting" | "waiting" | "confirming" | "pending" | "error">("idle");
+  // A trade whose confirmation timed out: its signature and what the watch found.
+  const [pendingTx, setPendingTx] = useState<{ sig: string; state: "watching" | "landed" | "dropped" | "undetermined" } | null>(null);
+  const pendingWatchRef = useRef<AbortController | null>(null);
+  // The market this ticket shows now, and whether it is still mounted: a trade that times out
+  // after a market switch or unmount must not start a watch on a ticket that isn't its own.
+  const liveSlabRef = useRef<string | null>(null);
+  useEffect(() => {
+    liveSlabRef.current = slabAddress;
+    return () => {
+      liveSlabRef.current = null;
+    };
+  }, [slabAddress]);
+  useEffect(() => () => pendingWatchRef.current?.abort(), []);
   const [humanError, setHumanError] = useState<string | null>(null);
   /** UX WP-1: a refusal the resolver mapped (simulation-gated: the wallet never opened). */
   const [refusal, setRefusal] = useState<UserMessage | null>(null);
@@ -554,6 +569,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setResult(null);
     setClampedToQ(null);
     setEngineLockError(null);
+    pendingWatchRef.current?.abort();
+    setPendingTx(null);
     setTradePhase("idle");
   }, [slabAddress]);
 
@@ -591,6 +608,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       setRefusal(null);
       setResult(null);
       setClampedToQ(null);
+      // A finished timeout outcome was about the old size; a running watch stays on screen.
+      setPendingTx((p) => (p?.state === "watching" ? p : null));
       applySize(val);
     },
     [applySize],
@@ -954,6 +973,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setRefusal(null);
     setResult(null);
     setEngineLockError(null);
+    setPendingTx(null);
     setWaitingLong(false);
     setRaceNote(false);
     const waitAbort = new AbortController();
@@ -1109,6 +1129,36 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         // GH#2959: a 49 on a new position below the market's floor is the floor, not the size.
         ...(belowImFloor ? { imFloorLabel: `$${usd2(imFloor, decimals).replace(/\.00$/, "")}` } : {}),
       });
+      // GH#2804 follow-up: the confirmation poll gave up but the trade may still land. Keep the
+      // submit locked and watch the signature, like Earn's DepositWithdrawPanel, instead of
+      // re-enabling the ticket with the same order filled in. Gated on the resolved kind so
+      // other errors never reach timedOutSignature.
+      const timedOutSig = um.kind === "still-confirming" ? timedOutSignature(e) : null;
+      if (timedOutSig && liveSlabRef.current !== slabAddress) return;
+      if (timedOutSig) {
+        pendingWatchRef.current?.abort();
+        const ctl = new AbortController();
+        pendingWatchRef.current = ctl;
+        const entryIdx = userAccount?.idx ?? (fundingMode ? 0 : null);
+        const wallet = publicKey?.toBase58();
+        setPendingTx({ sig: timedOutSig, state: "watching" });
+        setTradePhase("pending");
+        void watchPendingSignature(() => checkSignatureLanded(connection, timedOutSig), { signal: ctl.signal }).then((outcome) => {
+          if (outcome === "aborted" || ctl.signal.aborted) return;
+          setPendingTx({ sig: timedOutSig, state: outcome });
+          if (outcome === "landed") {
+            setMarginInput("");
+            setSizeInput("");
+            setFundInput("");
+            // The fill price is unknown here, so don't leave a cached entry for the position.
+            if (entryIdx !== null) clearEntryPrice(slabAddress, entryIdx, wallet);
+            invalidatePortfolio();
+          }
+          if (outcome !== "dropped") refreshSlab();
+          setTradePhase("idle");
+        });
+        return;
+      }
       if (um.quiet) {
         // GH#2959: a first fund-and-trade the user turned down in the wallet reset the ticket
         // with no word (some wallets showed their own warning, so it read as "nothing happened").
@@ -1193,7 +1243,22 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     "same-owner": "limits-same-owner-notice",
     "fee-over-max": "limits-quote-fee-over-max",
   };
+  const pendingLine = pendingTx && (
+    <div data-testid="trade-pending" data-state={pendingTx.state}>
+      <StatusLine
+        message={{
+          kind: `pending-${pendingTx.state}`,
+          variant: pendingTx.state === "watching" ? "wait" : pendingTx.state === "dropped" ? "error" : "info",
+          title: TICKET_COPY.pending[pendingTx.state].title,
+          body: TICKET_COPY.pending[pendingTx.state].body,
+        }}
+        txUrl={pendingTx.state === "dropped" ? undefined : explorerTxUrl(pendingTx.sig)}
+      />
+    </div>
+  );
   const statusSlot = (() => {
+    // While a timed-out trade is being watched, nothing replaces this line.
+    if (pendingTx?.state === "watching") return pendingLine;
     if (ticketState.status) {
       const legacy = LEGACY_TESTID[ticketState.row];
       const line = <StatusLine message={ticketState.status} legacyTestId={legacy} />;
@@ -1210,6 +1275,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     if (raceNote && tradePhase === "submitting") {
       return <StatusLine message={{ kind: "first-trade-race", variant: "info", title: "One more approval", body: FIRST_TRADE_COPY.race }} />;
     }
+    if (pendingLine) return pendingLine;
     const why = networkWarning ?? undefined;
     if (refusal) {
       return (
@@ -1958,6 +2024,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           )}
           {tradePhase === "submitting"
             ? TICKET_COPY.confirmInWallet
+            : tradePhase === "pending"
+              ? TICKET_COPY.pending.button
             : tradePhase === "waiting"
               ? TICKET_COPY.waitingLatest
               : sameOwnerOpenPending

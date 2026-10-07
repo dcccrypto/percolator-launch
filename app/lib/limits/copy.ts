@@ -287,6 +287,16 @@ export const TICKET_COPY = {
   },
   confirmInWallet: "Confirm in wallet…",
   waitingLatest: "Waiting for the latest price…",
+  /** GH#2804 follow-up: a trade whose confirmation timed out is watched until it resolves. */
+  pending: {
+    button: "Confirming…",
+    watching: { title: "Still confirming", body: "Checking the network…" },
+    // The fill isn't measured on this path, and a split order's later transactions were never
+    // sent, so never state a size or a full fill.
+    landed: { title: "Confirmed", body: "It went through, possibly only in part. Check your position before trading again." },
+    dropped: { title: "Order not placed", body: "This trade didn't go through. Nothing changed. You can try again." },
+    undetermined: { title: "Couldn't confirm yet", body: "Check your position or the explorer before trying again." },
+  },
   sidePausedSublabel: "Paused",
   result: {
     full: (size: string, sym: string, side: string, price: string) => `Opened ${size} ${sym} ${side} at ${price}`,
