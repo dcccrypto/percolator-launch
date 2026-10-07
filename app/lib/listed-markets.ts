@@ -1,6 +1,7 @@
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import { isHiddenFromListing } from "@/lib/listing-hidden";
 import { isZombieMarket } from "@/lib/activeMarketFilter";
+import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 
 /** Max sane price (USD) for both listed-market filtering and display capping.
  *  Mirrors /api/stats sanitizePrice() cap. Corrupt oracle prices (e.g. $7.9T)
@@ -53,6 +54,35 @@ export interface ListedMarketStatsRow {
   total_accounts?: unknown;
   /** A-6: the keeper's price source. Explicit null/"" = unpriceable orphan; absent = unknown (listed). */
   dex_pool_address?: unknown;
+  /** On-chain launch-completeness (marketauth rotated to the stake-pool PDA). Explicit false = the
+   *  launch provably never finished; absent/undefined = unread (shown). */
+  is_complete?: unknown;
+}
+
+/**
+ * A market whose launch provably never finished: the create wizard's last on-chain step (stake-pool
+ * init, which rotates `marketauth` off the creator) never ran, so `is_complete === false`.
+ * Identifiable on chain, so no per-slab list is needed. Curated seeds are exempt (proven complete
+ * out of band). Only an EXPLICIT false counts; an unread value degrades to "shown".
+ */
+export function isHalfMadeLaunch(slab: string, row: { is_complete?: unknown }): boolean {
+  return row.is_complete === false && !PLAYGROUND_SLAB_META[slab];
+}
+
+/**
+ * Whether a row may appear in a BROWSE / PICKER surface (trade-page market switcher and selector,
+ * the /trade default pick): not listing-hidden, not blocklisted, not a half-made launch, and not an
+ * unpriceable orphan (registry row with an explicit empty pool, i.e. an "UNKNOWN" placeholder).
+ * Deliberately NOT the zombie test: those pickers have always listed empty-but-priced markets.
+ * Browse only: the market stays reachable by direct link, in the creator's My Markets and in
+ * RecoverSolBanner (reclaim), and in /api/markets (portfolio symbol resolution).
+ */
+export function isBrowsableMarketRow(slab: string, row: ListedMarketStatsRow): boolean {
+  if (BLOCKED_SLAB_ADDRESSES.has(slab)) return false;
+  if (isHiddenFromListing(slab)) return false;
+  if (isHalfMadeLaunch(slab, row)) return false;
+  if (hasNoPriceSource(row) && !PLAYGROUND_SLAB_META[slab]) return false;
+  return true;
 }
 
 /**
@@ -65,6 +95,7 @@ export function isListedMarketRow(slab: string, row: ListedMarketStatsRow): bool
   if (BLOCKED_SLAB_ADDRESSES.has(slab)) return false;
   if (isHiddenFromListing(slab)) return false;
   if (hasNoPriceSource(row)) return false;
+  if (isHalfMadeLaunch(slab, row)) return false;
   return !isZombieMarket({
     vault_balance: numericOrNull(row.vault_balance),
     c_tot: numericOrNull(row.c_tot),
