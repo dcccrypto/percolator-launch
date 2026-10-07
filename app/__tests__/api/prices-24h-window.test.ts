@@ -25,11 +25,12 @@ function stubGecko(bars: Bar[]) {
   }));
 }
 
-async function stats(slab: string) {
+async function statsFull(slab: string) {
   const { GET } = await import("@/app/api/prices/[slab]/route");
   const res = await GET(new NextRequest(`https://play.percolator.trade/api/prices/${slab}`), { params: Promise.resolve({ slab }) });
-  return (await res.json()).stats as { change24h: number; high24h: string; low24h: string } | null;
+  return (await res.json()).stats as { change24h: number; high24h: string; low24h: string; series?: number[] } | null;
 }
+const stats = statsFull;
 
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(NOW * 1000); });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.resetModules(); });
@@ -79,3 +80,39 @@ describe("/api/prices/:slab 24h window", () => {
     expect(s?.low24h).toBe("1000000");
   });
 });
+
+// The landing rail's "Chart 24h" mini chart: same window as the stats, so a quiet pool's line
+// can't reach back days and its colour (first->last) always agrees with change24h.
+describe("/api/prices/:slab mini chart series", () => {
+  it("a quiet pool: covers only the last 24h (the reference close + bars newer than now-24h), oldest to newest", async () => {
+    // Bars reach back 5 days. Without the cutoff the series would start at 0.2 (the 100 h-old close)
+    // and read as a rise while the 24h move is a fall.
+    stubGecko([
+      bar(0.5, 1.2, 1.3, 1.0, 1.1),   // newest
+      bar(10, 1.5, 1.6, 1.4, 1.5),
+      bar(30, 1.9, 2.1, 1.8, 2.0),    // price at or before now-24h: the reference
+      bar(60, 0.5, 0.6, 0.4, 0.5),
+      bar(120, 0.1, 0.3, 0.1, 0.2),   // 5 days old
+    ]);
+    const s = await statsFull("4EPm8nB8Fs7WcEZgE1WGFPTGc6rAzD6GhFJyMm4dEFHn");
+    expect(s?.series).toEqual([2.0, 1.5, 1.1]); // reference, then in-window closes oldest->newest
+    expect(s?.change24h).toBeCloseTo(-45); // 2.0 -> 1.1
+    // Direction of the line agrees with the 24h change beside it.
+    const first = s!.series![0];
+    const lastV = s!.series![s!.series!.length - 1];
+    expect(Math.sign(lastV - first)).toBe(Math.sign(s!.change24h));
+  });
+
+  it("a pool with no bar older than 24h: every bar is in the window, oldest to newest", async () => {
+    stubGecko([bar(0.5, 1.8, 2.0, 1.8, 2.0), bar(5, 0.5, 1.2, 0.4, 1.0)]);
+    const s = await statsFull("3EPm8nB8Fs7WcEZgE1WGFPTGc6rAzD6GhFJyMm4dEFHn");
+    expect(s?.series).toEqual([1.0, 2.0]);
+  });
+
+  it("fewer than two points: no series (the row draws nothing)", async () => {
+    stubGecko([bar(30, 0.9, 1.1, 0.9, 1.0), bar(60, 0.5, 0.6, 0.4, 0.5)]);
+    const s = await statsFull("2EPm8nB8Fs7WcEZgE1WGFPTGc6rAzD6GhFJyMm4dEFHn");
+    expect(s?.series).toBeUndefined();
+  });
+});
+

@@ -15,7 +15,7 @@ import {
   SegmentedControl,
   RailControl,
   COUNT_OPTIONS,
-  DEFAULT_RAIL_COUNT,
+  MARKETS_RAIL_DEFAULT_COUNT,
   type RailCount,
 } from "@/components/landing/RailFilter";
 
@@ -192,7 +192,7 @@ const RailHeader: FC = () => (
  */
 export function LiveMarketRail() {
   const { statsMap, loading, error } = useAllMarketStats();
-  const [count, setCount] = useState<RailCount>(DEFAULT_RAIL_COUNT);
+  const [count, setCount] = useState<RailCount>(MARKETS_RAIL_DEFAULT_COUNT);
 
   const rows = useMemo(
     () =>

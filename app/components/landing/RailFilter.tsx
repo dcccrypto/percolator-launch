@@ -62,6 +62,12 @@ export const COUNT_OPTIONS = [
 
 export type RailCount = (typeof COUNT_OPTIONS)[number]["value"];
 export const DEFAULT_RAIL_COUNT: RailCount = "20";
+/**
+ * The markets rail defaults to fewer rows than the tokens rail: every visible row polls
+ * /api/prices/<slab>, which fans out to GeckoTerminal's keyless budget (30 calls/min). 20 rows can
+ * exhaust it and blank the 24h change and mini chart for a minute. 5/10/20 stay selectable.
+ */
+export const MARKETS_RAIL_DEFAULT_COUNT: RailCount = "10";
 
 /** A labelled control (caption + segmented control), right-aligned in the rail's top bar. */
 export const RailControl: FC<{ label: string; children: ReactNode }> = ({ label, children }) => (

@@ -5,6 +5,7 @@
  * above the liquidity / keeper-floor / market-cap thresholds — fail-closed on
  * anything missing — and the list is ranked by 24h volume.
  */
+import { isLaunchablePriceUsd } from "@/lib/launch-price-floor";
 import { describe, it, expect } from "vitest";
 import {
   passesCoinGate,
@@ -280,3 +281,34 @@ describe("screenAndRank", () => {
     expect(out.map((t) => t.symbol)).toEqual(["EDGE", "OK"]);
   });
 });
+
+// The union of the 1H and 24H cuts is what the rail ranks from, so the launch-price floor
+// (#3243) has to hold for every token in it, whichever window put it there.
+describe("screenAndRank: the 1H/24H union never contains a token under the launch floor", () => {
+  it("below-floor tokens that top BOTH scores are absent from the union and from either re-ranked window", () => {
+    const FLOOR_OK = 0.0123;
+    const BELOW = 0.000666; // one E6 tick under the 2x floor ($0.000667)
+    const coins: PumpFunCoin[] = [];
+    const dex = new Map<string, DexMarket>();
+    // Eight below-floor tokens with the biggest 24h AND 1h numbers on the board.
+    for (let i = 0; i < 8; i++) {
+      const mint = M(`x${String.fromCharCode(97 + i)}`);
+      coins.push(coin({ mint, symbol: `LOW${i}` }));
+      dex.set(mint, market({ priceUsd: BELOW, volume24hUsd: 900_000 - i, volume1hUsd: 90_000 - i, volume6hUsd: 60_000, txns1h: 600, txns6h: 600 }));
+    }
+    // Launchable tokens with modest numbers.
+    for (let i = 0; i < 6; i++) {
+      const mint = M(`y${String.fromCharCode(97 + i)}`);
+      coins.push(coin({ mint, symbol: `OK${i}` }));
+      dex.set(mint, market({ priceUsd: FLOOR_OK, volume24hUsd: 10_000 + i, volume1hUsd: 1_000 + i, volume6hUsd: 6_000, txns1h: 60, txns6h: 300 }));
+    }
+    const union = screenAndRank(coins.map(cand), dex, 3);
+    expect(union.length).toBeGreaterThan(0);
+    expect(union.every((t) => t.symbol.startsWith("OK"))).toBe(true);
+    for (const tf of ["1h", "24h"] as const) {
+      const ranked = rankForTimeframe(union, tf);
+      expect(ranked.every((t) => isLaunchablePriceUsd(t.priceUsd))).toBe(true);
+    }
+  });
+});
+

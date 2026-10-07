@@ -105,13 +105,15 @@ async function geckoTerminalStatsFallback(slab: string, origin: string, cookie?:
     if (!Number.isFinite(high) || !Number.isFinite(low)) return setCache(null);
 
     const toE6Str = (v: number) => toE6(v).toString();
-    // Oldest→newest close prices for the landing rail's mini 24h chart. Bars are
-    // newest-first, so reverse; drop any non-finite/≤0 points. No extra request —
-    // these are the same bars the stats above are computed from.
-    const series = bars
-      .map((b) => b[4])
-      .reverse()
-      .filter((v) => Number.isFinite(v) && v > 0);
+    // Oldest→newest close prices for the landing rail's mini 24h chart, over the SAME window as
+    // the stats above: the reference bar (the price 24h ago) plus the bars newer than the cutoff.
+    // GeckoTerminal leaves out hours with no trades, so the 25 bars of a quiet pool can reach days
+    // back; using them all drew more than 24h and let the line's colour disagree with change24h.
+    // Bars are newest-first, so reverse; drop any non-finite/≤0 points. No extra request.
+    const series = [
+      ...(refBar ? [refBar[4]] : []),
+      ...bars.filter((b) => b[0] > cutoff).map((b) => b[4]).reverse(),
+    ].filter((v) => Number.isFinite(v) && v > 0);
     return setCache({
       change24h: change.pct,
       high24h: toE6Str(high),
