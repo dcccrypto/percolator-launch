@@ -143,6 +143,8 @@ describe("keeper-register re-reads a creation tx this RPC node has not seen yet"
     const r = await post({ proofTx: SIG });
     expect(r.status).toBe(409);
     expect(h.txCalls).toBe(4);
+    // the slab is read ONCE (owner + header), only getTransaction repeats: 1 + 4, not 4 full passes
+    expect(h.rpcCalls).toBe(5);
   });
 
   it("a REFUSED proof is never retried: a memo for another pool is a 403 after one read", async () => {
@@ -151,5 +153,28 @@ describe("keeper-register re-reads a creation tx this RPC node has not seen yet"
     expect(r.status).toBe(403);
     expect(h.txCalls).toBe(1);
     expect(blobPut).not.toHaveBeenCalled();
+  });
+});
+
+describe("keeper-register per-IP limiter", () => {
+  it("40 requests a minute from one IP pass through to the RPC checks, the 41st is a retryable 429 with Retry-After; another IP is unaffected", async () => {
+    h.programId = Keypair.generate().publicKey.toBase58();
+    h.tx = null;
+    h.txSeq = [];
+    process.env.KEEPER_REGISTER_PROOF_TRIES = "0";
+    const from = (ip: string) =>
+      POST(new NextRequest("http://localhost/api/playground/keeper-register", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-forwarded-for": ip },
+        body: JSON.stringify({ ...REQ, proofTx: SIG }),
+      }));
+    h.rpcCalls = 0;
+    for (let i = 0; i < 40; i++) expect((await from("203.0.113.9")).status).toBe(409);
+    const callsAfter40 = h.rpcCalls;
+    const limited = await from("203.0.113.9");
+    expect(limited.status).toBe(429);
+    expect(Number(limited.headers.get("Retry-After"))).toBeGreaterThan(0);
+    expect(h.rpcCalls).toBe(callsAfter40); // refused before any RPC
+    expect((await from("203.0.113.10")).status).toBe(409); // CONTROL: the limit is per IP
   });
 });

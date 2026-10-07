@@ -10,6 +10,8 @@ const resume = vi.fn();
 vi.mock("@/lib/config", () => ({ getConfig: () => ({ network: "devnet" }) }));
 vi.mock("@/lib/keeper-register-client", () => ({
   RESUME_REPEAT_MS: 60_000,
+  RESUME_MAX_PASSES: 30,
+  RESUME_MAX_MS: 30 * 60_000,
   resumePendingRegistrations: (d: unknown) => resume(d),
 }));
 
@@ -56,5 +58,23 @@ describe("ResumeKeeperRegistrations", () => {
     await mount();
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(resume).toHaveBeenCalledTimes(1);
+  });
+
+  it("a slab that fails retryably for ever stops after 30 passes (CONTROL: it would otherwise run all day)", async () => {
+    resume.mockResolvedValue({ registered: [], retryLater: ["A"], refused: [] });
+    await mount();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+    expect(resume).toHaveBeenCalledTimes(30);
+  });
+
+  it("stops after 30 minutes even if fewer than 30 passes ran (Retry-After 300 s -> about 6 passes)", async () => {
+    resume.mockResolvedValue({ registered: [], retryLater: ["A"], refused: [], retryAfterMs: 300_000 });
+    await mount();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+    const n = resume.mock.calls.length;
+    expect(n).toBeGreaterThanOrEqual(5);
+    expect(n).toBeLessThanOrEqual(8); // not 30: the 300 s Retry-After is respected, not retried at 60 s
   });
 });

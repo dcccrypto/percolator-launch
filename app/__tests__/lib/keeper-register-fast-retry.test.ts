@@ -109,3 +109,16 @@ describe("a repeat resume pass is limited to what the last pass left as 'try aga
     expect(new Set(posted)).toEqual(new Set(["A", "B"]));
   });
 });
+
+describe("Retry-After is carried through, so a full ceiling (300 s) is not retried at 60 s", () => {
+  it("postKeeperRegistration reads it; resume reports the longest", async () => {
+    const withHeader = { ok: false, status: 429, headers: new Headers({ "Retry-After": "300" }), json: async () => ({ error: "cap" }) } as Response;
+    const a = await postKeeperRegistration(REQ, vi.fn().mockResolvedValue(withHeader) as unknown as typeof fetch);
+    expect(a).toMatchObject({ retryable: true, retryAfterMs: 300_000 });
+    // CONTROL: no header, no value
+    expect((await postKeeperRegistration(REQ, vi.fn().mockResolvedValue(res(429, { error: "cap" })) as unknown as typeof fetch)).retryAfterMs).toBeUndefined();
+    const store = mapStore({ "perc.keeperProofTx.A": "s", "perc.keeperPayload.A": JSON.stringify({ dex_pool_address: "P" }) });
+    const r = await resumePendingRegistrations({ store, post: async () => ({ registered: false, retryable: true, message: "cap", retryAfterMs: 300_000 }) });
+    expect(r.retryAfterMs).toBe(300_000);
+  });
+});

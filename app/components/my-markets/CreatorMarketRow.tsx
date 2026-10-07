@@ -370,9 +370,11 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
   const [showBurnConfirm, setShowBurnConfirm] = useState(false);
   const [burnConfirmText, setBurnConfirmText] = useState("");
   const [showTopUpInput, setShowTopUpInput] = useState(false);
-  // Unknown until the drawer's SlabProvider reads it: leave the action as it was until then.
+  // Unknown (null) until the drawer's SlabProvider reads it: the action stays disabled until the
+  // authority is known, because TopUpInsurance is callable only by that authority.
   const [insuranceAuthority, setInsuranceAuthority] = useState<string | null>(null);
-  const canTopUpInsurance = insuranceAuthority === null || insuranceAuthority === (wallet.publicKey?.toBase58() ?? "");
+  const insuranceAuthorityKnown = insuranceAuthority !== null;
+  const canTopUpInsurance = insuranceAuthorityKnown && insuranceAuthority === (wallet.publicKey?.toBase58() ?? "");
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
 
   async function handleAction(name: string, fn: () => Promise<string>) {
@@ -562,7 +564,7 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
             <button
               onClick={() => setShowTopUpInput(true)}
               disabled={actions.loading === "topUpInsurance" || !canTopUpInsurance}
-              title={canTopUpInsurance ? undefined : "This market's insurance is managed by its stake pool. Add to it from Stake."}
+              title={canTopUpInsurance ? undefined : insuranceAuthorityKnown ? "This market's insurance is managed by its stake pool. Add to it from Stake." : "Checking who can top up this market's insurance…"}
               className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-dim)] hover:text-[var(--text)] transition-colors disabled:opacity-40">
               top up insurance
             </button>

@@ -38,8 +38,10 @@ describe("creator row: top up insurance is gated on insurance_authority", () => 
     expect(SRC).toMatch(/<SlabProvider slabAddress=\{slab\}>[\s\S]*<InsuranceAuthorityReader onRead=\{setInsuranceAuthority\} \/>[\s\S]*<\/SlabProvider>/);
   });
 
-  it("disables top up unless the wallet holds the authority (unknown leaves it as it was), and says why", () => {
-    expect(SRC).toMatch(/const canTopUpInsurance = insuranceAuthority === null \|\| insuranceAuthority === \(wallet\.publicKey\?\.toBase58\(\) \?\? ""\);/);
+  it("disables top up unless the wallet holds the authority, INCLUDING while it is still unread, and says why", () => {
+    expect(SRC).toMatch(/const canTopUpInsurance = insuranceAuthorityKnown && insuranceAuthority === \(wallet\.publicKey\?\.toBase58\(\) \?\? ""\);/);
+    // negative control: the old rule enabled the button for everyone until the read landed
+    expect(SRC).not.toMatch(/insuranceAuthority === null \|\| insuranceAuthority ===/);
     expect(SRC).toMatch(/disabled=\{actions\.loading === "topUpInsurance" \|\| !canTopUpInsurance\}/);
     expect(SRC).toContain("This market's insurance is managed by its stake pool. Add to it from Stake.");
   });

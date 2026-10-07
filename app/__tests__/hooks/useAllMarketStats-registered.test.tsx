@@ -4,9 +4,9 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import { SWRConfig } from "swr";
+import { SWRConfig, useSWRConfig } from "swr";
 import React from "react";
-import { statsMapsEqual, useAllMarketStats } from "@/hooks/useAllMarketStats";
+import { FRESH_AFTER_REGISTRATION_MS, resetFreshWindow, statsMapsEqual, useAllMarketStats } from "@/hooks/useAllMarketStats";
 import { announceMarketRegistered } from "@/lib/keeper-register-client";
 
 const SLAB_OLD = "11111111111111111111111111111112";
@@ -30,6 +30,7 @@ const wrapper = ({ children }: { children: React.ReactNode }) => <SWRConfig valu
 
 afterEach(() => {
   cleanup();
+  resetFreshWindow();
   cache = new Map();
 });
 
@@ -72,5 +73,29 @@ describe("SWR must see a changed markets Map as changed", () => {
     const b = new Map([[SLAB_OLD, row(SLAB_OLD)], [SLAB_NEW, row(SLAB_NEW)]]);
     expect(compare(a, b)).toBe(true); // the bug: a changed list looked unchanged
     expect(statsMapsEqual(a, b)).toBe(false);
+  });
+});
+
+describe("the polls after a registration also skip the CDN, for 30 s", () => {
+  const KEY = "/api/markets?include_zombie=true&limit=500";
+  it("a poll inside the window is fresh; a poll after it is the plain URL again (CONTROL)", async () => {
+    const calls = mockFetch();
+    const real = Date.now();
+    const { result } = renderHook(() => ({ ...useAllMarketStats(), cfg: useSWRConfig() }), { wrapper });
+    await waitFor(() => expect(result.current.statsMap.size).toBe(1));
+    await act(async () => { announceMarketRegistered(SLAB_NEW); });
+    await waitFor(() => expect(result.current.statsMap.has(SLAB_NEW)).toBe(true));
+    const before = calls.length;
+
+    await act(async () => { await result.current.cfg.mutate(KEY); }); // what the 30 s poll does: revalidate
+    expect(calls.length).toBeGreaterThan(before);
+    expect(calls[calls.length - 1].url).toContain("fresh=");
+
+    const spy = vi.spyOn(Date, "now").mockReturnValue(real + FRESH_AFTER_REGISTRATION_MS + 5_000);
+    const n = calls.length;
+    await act(async () => { await result.current.cfg.mutate(KEY); });
+    spy.mockRestore();
+    expect(calls.length).toBeGreaterThan(n);
+    expect(calls[calls.length - 1].url).not.toContain("fresh=");
   });
 });

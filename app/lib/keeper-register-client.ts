@@ -83,6 +83,8 @@ export interface KeeperRegisterAttempt {
   message: string;
   /** HTTP status of the response; absent for a network error. */
   status?: number;
+  /** The response's `Retry-After`, in ms, when it carried one (the full ceiling sends 300 s). */
+  retryAfterMs?: number;
 }
 
 export async function postKeeperRegistration(req: KeeperRegisterRequest, fetchImpl: typeof fetch = fetch): Promise<KeeperRegisterAttempt> {
@@ -106,7 +108,9 @@ export async function postKeeperRegistration(req: KeeperRegisterRequest, fetchIm
     // itself): the visitor's session lapsed. That says nothing about the registration, so it
     // must stay retryable — final would mark the launch "refused" in localStorage forever.
     const retryable = r.status === 401 || r.status === 409 || r.status === 429 || r.status >= 500;
-    return { registered: false, retryable, message: body.error ?? body.message ?? `HTTP ${r.status}`, status: r.status };
+    const ra = Number(r.headers?.get?.("Retry-After"));
+    const retryAfterMs = Number.isFinite(ra) && ra > 0 ? Math.min(ra, 3_600) * 1000 : undefined;
+    return { registered: false, retryable, message: body.error ?? body.message ?? `HTTP ${r.status}`, status: r.status, ...(retryAfterMs ? { retryAfterMs } : {}) };
   } catch (e) {
     return { registered: false, retryable: true, message: e instanceof Error ? e.message : String(e) };
   }
@@ -319,12 +323,19 @@ export interface ResumeResult {
   registered: string[];
   /** Server / network trouble: tried again on the next visit. */
   retryLater: string[];
+  /** The longest `Retry-After` any retryable answer in this pass carried (ms), if any. */
+  retryAfterMs?: number;
   /** Every candidate refused (final). */
   refused: string[];
 }
 
 /** A pass that left slabs as `retryLater` is repeated this often while the page stays open. */
 export const RESUME_REPEAT_MS = 60_000;
+/** ...but never for ever: stop after this many passes or this long from the first, whichever first.
+ *  The next page load resumes as before. A permanently failing retryable status (the full ceiling's
+ *  429, a standing 5xx) must not make every open tab post every pending slab for as long as it lives. */
+export const RESUME_MAX_PASSES = 30;
+export const RESUME_MAX_MS = 30 * 60_000;
 
 /**
  * One pass over this device's unregistered launches. A candidate refused with a final error
@@ -351,6 +362,7 @@ export async function resumePendingRegistrations(d: {
       }
       if (a.retryable) {
         outcome = "later";
+        if (a.retryAfterMs) r.retryAfterMs = Math.max(r.retryAfterMs ?? 0, a.retryAfterMs);
         break;
       }
     }

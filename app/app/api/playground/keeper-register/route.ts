@@ -99,6 +99,8 @@ import { upsertRegisteredMarketRow } from "@/lib/market-registration";
 import { checkSymbol, checkName } from "@/lib/market-metadata-validation";
 import { checkKeeperReadiness, enrollmentCapsFromEnv, GLOBAL_CAP_COPY, readinessStatus } from "@/lib/keeper-enrollment-guard";
 import { getPlaygroundKeeperSigner } from "@/lib/playground-keeper-signer";
+import { getClientIp } from "@/lib/get-client-ip";
+import { checkKeeperRegisterRateLimit } from "@/lib/keeper-register-rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -238,27 +240,38 @@ export async function POST(req: NextRequest) {
     if (!isTxSignature(proofTx)) {
       return NextResponse.json({ error: "Invalid proofTx: expected a transaction signature" }, { status: 400 });
     }
+    // Per-IP bound: each proof-path request costs several RPC reads, and the route is reachable by
+    // anyone holding a public creation tx. A launch's own loop needs about 15 requests in its first
+    // minute, so the ceiling leaves room for several markets behind one NAT.
+    const rl = await checkKeeperRegisterRateLimit(getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: "Too many requests. Try again in a moment." },
+        { status: 429, headers: { "Retry-After": String(rl.retryAfter) } },
+      );
+    }
     try {
       const wrapper = getConfig().programId as string;
       const connection = getServerConnection("confirmed");
       const memoParams = await keeperMemoParams({ slabAddress, dexPoolAddress, mainnetCA, dexType, symbol, label, payload: boundPayload });
 
-      /**
-       * One verification pass. `transient` marks the two refusals that only mean "this RPC node has
-       * not seen the creation transaction (or its final state) yet": the proof tx not found, and a
-       * market that does not read as finished. They are retried inside this request (below) before
-       * the 409 goes back, so the creator does not wait out the client's backoff for what a
-       * second RPC read settles. Every other refusal is returned as before.
-       */
+      // The slab is read and its owner / header checked ONCE. Only the checks that can be RPC lag
+      // are repeated below, and each repeats only its own read: the proof stage re-runs getTransaction,
+      // the readiness stage re-reads the slab bytes. A caller with a real public slab and a made-up
+      // signature costs one slab read plus the bounded getTransaction retries, not full passes.
+      const accountInfo = await connection.getAccountInfo(new PublicKey(slabAddress));
+      if (!accountInfo) {
+        return NextResponse.json({ error: "Slab account does not exist on-chain" }, { status: 400 });
+      }
+      // Review L-1: the slab must be a market account of THIS wrapper (owner + v18 market header).
+      if (accountInfo.owner.toBase58() !== wrapper || !isV18MarketHeader(new Uint8Array(accountInfo.data))) {
+        return NextResponse.json({ error: "Slab account is not a market of this deployment's program" }, { status: 400 });
+      }
+      const { tries, delayMs } = proofWaitFromEnv();
+      const pause = () => new Promise((r) => setTimeout(r, delayMs));
+
+      /** Stage 1. `transient` = "proof transaction not found": this RPC node has not seen it yet. */
       const proofPass = async (): Promise<{ response: NextResponse; transient: boolean; log?: () => void } | null> => {
-        const accountInfo = await connection.getAccountInfo(new PublicKey(slabAddress));
-        if (!accountInfo) {
-          return { response: NextResponse.json({ error: "Slab account does not exist on-chain" }, { status: 400 }), transient: false };
-        }
-        // Review L-1: the slab must be a market account of THIS wrapper (owner + v18 market header).
-        if (accountInfo.owner.toBase58() !== wrapper || !isV18MarketHeader(new Uint8Array(accountInfo.data))) {
-          return { response: NextResponse.json({ error: "Slab account is not a market of this deployment's program" }, { status: 400 }), transient: false };
-        }
         const tx = await connection.getTransaction(proofTx, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
         const verdict = await verifyKeeperRegisterProofTx(tx, memoParams, wrapper);
         if (!verdict.ok) {
@@ -277,43 +290,50 @@ export async function POST(req: NextRequest) {
           };
         }
         slabAdmin = verdict.creator;
+        return null;
+      };
+      let proofOutcome = await proofPass();
+      for (let i = 0; proofOutcome?.transient && i < tries; i++) {
+        await pause();
+        proofOutcome = await proofPass();
+      }
+      if (proofOutcome) {
+        proofOutcome.log?.();
+        return proofOutcome.response;
+      }
 
-        // Review M-7: only a FINISHED market priced by our keeper is enrolled. Read from the bytes
-        // already in hand (no extra RPC). The launch registers after its last step lands, so a
-        // not-yet-finished market is "try again" (409), never a final refusal.
-        const readiness = checkKeeperReadiness(
-          new Uint8Array(accountInfo.data),
+      // Review M-7: only a FINISHED market priced by our keeper is enrolled. The launch registers
+      // after its last step lands, so a not-yet-finished market is "try again" (409), never a final
+      // refusal; the 409 family can be RPC lag, so the slab is re-read a few times before answering.
+      let slabBytes = new Uint8Array(accountInfo.data);
+      let readiness = checkKeeperReadiness(
+        slabBytes,
+        new PublicKey(slabAddress),
+        (getConfig() as { vaultProgramId?: string }).vaultProgramId,
+        getPlaygroundKeeperSigner()?.publicKey(),
+      );
+      for (let i = 0; !readiness.ok && readinessStatus(readiness.reason) === 409 && i < tries; i++) {
+        await pause();
+        const again = await connection.getAccountInfo(new PublicKey(slabAddress));
+        if (!again) break;
+        slabBytes = new Uint8Array(again.data);
+        readiness = checkKeeperReadiness(
+          slabBytes,
           new PublicKey(slabAddress),
           (getConfig() as { vaultProgramId?: string }).vaultProgramId,
           getPlaygroundKeeperSigner()?.publicKey(),
         );
-        if (!readiness.ok) {
-          const status = readinessStatus(readiness.reason);
-          const reason = readiness.reason;
-          return {
-            log: () =>
-              Sentry.captureMessage("[playground/keeper-register] market not ready for the keeper", {
-                level: "warning",
-                tags: { endpoint: "/api/playground/keeper-register", auth: "not-ready" },
-                extra: { slabAddress, reason },
-              }),
-            response: NextResponse.json({ error: `Market is not ready for the live price: ${readiness.reason}` }, { status }),
-            // Only the 409 family can be RPC lag; a 403 / 400 / 503 is a verdict on the market or the deployment.
-            transient: status === 409,
-          };
-        }
-        return null;
-      };
-
-      const { tries, delayMs } = proofWaitFromEnv();
-      let outcome = await proofPass();
-      for (let i = 0; outcome?.transient && i < tries; i++) {
-        await new Promise((r) => setTimeout(r, delayMs));
-        outcome = await proofPass();
       }
-      if (outcome) {
-        outcome.log?.();
-        return outcome.response;
+      if (!readiness.ok) {
+        Sentry.captureMessage("[playground/keeper-register] market not ready for the keeper", {
+          level: "warning",
+          tags: { endpoint: "/api/playground/keeper-register", auth: "not-ready" },
+          extra: { slabAddress, reason: readiness.reason },
+        });
+        return NextResponse.json(
+          { error: `Market is not ready for the live price: ${readiness.reason}` },
+          { status: readinessStatus(readiness.reason) },
+        );
       }
     } catch (err) {
       console.error("[playground/keeper-register] proof check failed:", err instanceof Error ? err.message : String(err));

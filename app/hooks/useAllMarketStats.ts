@@ -52,6 +52,18 @@ export async function fetchMarketStats(fresh = false): Promise<Map<string, Marke
 }
 
 /**
+ * After a registration lands the CDN can still hold a copy made BEFORE it (up to s-maxage +
+ * stale-while-revalidate), so the next ordinary poll could bring the old list back and the new market
+ * would vanish again. For this long after a registration event every fetch of the list is fresh.
+ */
+export const FRESH_AFTER_REGISTRATION_MS = 30_000;
+let freshUntil = 0;
+/** Test hook: end the fresh window. */
+export function resetFreshWindow(): void {
+  freshUntil = 0;
+}
+
+/**
  * SWR's default `compare` is `dequal/lite`, which has no Map support: it compares own enumerable
  * keys, and a Map has none, so ANY two Maps compared equal and SWR silently kept the first fetch's
  * data forever (the 30 s poll and any mutate fetched, then discarded the result). A markets list
@@ -93,7 +105,7 @@ export function useAllMarketStats(options?: UseAllMarketStatsOptions) {
   const enabled = options?.enabled ?? true;
   const { data, error, isLoading, mutate } = useSWR<Map<string, MarketWithStats>, Error>(
     enabled ? SWR_KEY : null,
-    () => fetchMarketStats(),
+    () => fetchMarketStats(Date.now() < freshUntil),
     {
       // Collapse all concurrent hook instances to 1 request per 30 s.
       dedupingInterval: 30_000,
@@ -110,6 +122,7 @@ export function useAllMarketStats(options?: UseAllMarketStatsOptions) {
   useEffect(() => {
     if (!enabled || typeof window === "undefined") return;
     const onRegistered = () => {
+      freshUntil = Date.now() + FRESH_AFTER_REGISTRATION_MS;
       void mutate(fetchMarketStats(true), { revalidate: false }).catch(() => undefined);
     };
     window.addEventListener(MARKET_REGISTERED_EVENT, onRegistered);

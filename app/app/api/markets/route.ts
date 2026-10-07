@@ -556,7 +556,7 @@ async function onChainOrStaticResponse(request: NextRequest, reason: string): Pr
 
         return NextResponse.json(
           { total: filteredWithLp.length, activeTotal: filteredWithLp.length, marketsWithPrice, zombieCount: 0, markets: filteredWithLp },
-          { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=60", "X-Percolator-Data-Source": "on-chain-discovery" } },
+          { headers: { "Cache-Control": "public, s-maxage=5, stale-while-revalidate=20", "X-Percolator-Data-Source": "on-chain-discovery" } },
         );
       }
     }
@@ -653,7 +653,7 @@ function fallbackMarketsResponse(request: NextRequest, reason: string): NextResp
     { total: filtered.length, activeTotal, marketsWithPrice, zombieCount: 0, markets: limited },
     {
       headers: {
-        "Cache-Control": "public, s-maxage=10, stale-while-revalidate=60",
+        "Cache-Control": "public, s-maxage=5, stale-while-revalidate=20",
         "X-Percolator-Data-Source": "static-directory-fallback",
       },
     },

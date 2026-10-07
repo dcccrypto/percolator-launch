@@ -150,7 +150,7 @@ export function useAdminActions() {
         }
 
         const userAta = await getAssociatedTokenAddress(collateralMint, wallet.publicKey);
-        // v18: TopUpInsurance (tag 55) binds asset 0's market_id + authority_epoch
+        // v18: TopUpInsurance (tag 9; the SDK's encodeTopUpInsurance emits IX_TAG.TopUpInsurance = 9) binds asset 0's market_id + authority_epoch
         // (CAS, current value) + a strictly-increasing one-shot intentId on the
         // shared insurance_top_up lane. The lane watermark is not exposed by the
         // SDK parsers, so on an EXISTING market we use the current slot as a

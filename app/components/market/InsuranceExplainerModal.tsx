@@ -130,7 +130,7 @@ export const InsuranceExplainerModal: FC<InsuranceExplainerModalProps> = ({
                     Accumulates from trading fees
                   </div>
                   <div className="text-xs text-[var(--text-dim)]">
-                    A portion of every trade goes to the insurance fund
+                    A share of every trade fee is set aside for the insurance side (paid into the stake pool where the market has one)
                   </div>
                 </div>
               </div>
