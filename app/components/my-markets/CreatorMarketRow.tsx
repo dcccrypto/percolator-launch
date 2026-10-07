@@ -1,6 +1,6 @@
 "use client";
 
-import { FC, useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { FC, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { PublicKey } from "@solana/web3.js";
 import type { CreatedMarket } from "@/hooks/useCreatedMarkets";
@@ -19,7 +19,10 @@ import { ZERO_PUBKEY } from "@/lib/update-asset-authority-keys";
 import { computeMarketHealthFromStats } from "@/lib/health";
 import { HealthBadge } from "@/components/market/HealthBadge";
 import { MarketLogo } from "@/components/market/MarketLogo";
-import { resolveIdentity, type ResolvedIdentity } from "@/lib/bulk-identity";
+import { resolveIdentity, sawPlaceholderTicker, type ResolvedIdentity } from "@/lib/bulk-identity";
+import { isMarketauthComplete } from "@/lib/market-completeness";
+import { classifyLaunchStage, launchRowTitle, savedLaunchIdentity, LAUNCH_UNFINISHED_TITLE } from "@/lib/unfinished-launch";
+import { UnfinishedLaunchPanel } from "./UnfinishedLaunchPanel";
 import { classifyClaimable } from "@/lib/creator-fee-summary";
 import { useClaimCreatorFees } from "@/hooks/useClaimCreatorFees";
 import { LogoUpload } from "@/components/create/LogoUpload";
@@ -33,6 +36,15 @@ import { CreatorTranchePanel } from "@/components/limits/CreatorLimits";
  *  asset's accrue slot (advances only via crank/trade) vs the current
  *  on-chain slot. Distinct signal from HealthBadge's liquidity ratio. */
 const V17_STALE_THRESHOLD_SLOTS = 500;
+
+/** localStorage, or null where it is blocked or absent (private mode, SSR). */
+function safeLocalStorage(): Storage | null {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
 
 function shortAddr(addr: string): string {
   return addr.slice(0, 6) + "..." + addr.slice(-4);
@@ -327,13 +339,30 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
   // key at all for any market absent from PLAYGROUND_SLAB_META and the
   // registration blob, so the row painted its real ticker and then DEGRADED to
   // `market.label` a second later. Per field, identity only ever sharpens.
-  const resolved = resolveIdentity(detail, identity);
-  const symbol = resolved.symbol ?? market.label;
+  //
+  // The indexer's "UNKNOWN" placeholder is no ticker (resolveIdentity drops it), and what the
+  // launching browser saved about the token (symbol/name) is the last, lowest-precedence source
+  // (#3266).
+  const savedIdentity = useMemo(() => savedLaunchIdentity(slab, safeLocalStorage()), [slab]);
+  const resolved = resolveIdentity(detail, identity, savedIdentity);
+  // An unfinished launch is a chain fact: marketauth is still the creator's wallet until the final
+  // step rotates it to the stake-pool PDA (lib/market-completeness.ts).
+  const unfinished = isV17 && !!market.configV17?.marketauth && !isMarketauthComplete(market.configV17.marketauth, market.slabAddress);
+  const launchStage = unfinished ? classifyLaunchStage(v17Stats?.launch, insuranceAtoms ?? null) : null;
+  // A committed launch can only be finished: no close button, no dead-end checklist.
+  const removalImpossible = launchStage?.kind === "committed";
+  const symbol = launchRowTitle({
+    symbol: resolved.symbol,
+    unfinished,
+    sawPlaceholder: sawPlaceholderTicker(detail, identity),
+    fallbackLabel: market.label,
+  });
   const closeChecks = closeMarketChecklist({
     claimableFeeAtoms: claimState.kind === "claimable" ? claimState.atoms : claimState.kind === "none" ? 0n : null,
     // The wallet's own accounts are closed inside the close itself; others are not decodable here.
     otherOpenAccounts: null,
     insuranceAtoms: insuranceAtoms ?? null,
+    unfinished,
   });
   const closeBlocker = firstUnmet(closeChecks);
   const name = resolved.name ?? undefined;
@@ -397,6 +426,9 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
         <MarketLogo logoUrl={resolved.logo_url ?? undefined} mainnetCa={resolved.mainnet_ca} symbol={symbol} size="sm" decorative />
         <div className="min-w-[92px]">
           <p className="text-[13px] font-semibold text-[var(--text)]">{symbol}</p>
+          {unfinished && symbol !== LAUNCH_UNFINISHED_TITLE && (
+            <p data-testid="unfinished-pill" className="text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--warning)]">launch unfinished</p>
+          )}
           <p className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>{shortAddr(slab)}</p>
           {hasClaimableFees && claimState.kind === "claimable" && (
             // Not inside the row's expand <button>: nesting a button in a button
@@ -515,6 +547,17 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
             </SlabProvider>
           </div>
 
+          {launchStage && (
+            <UnfinishedLaunchPanel
+              stage={launchStage}
+              continueHref="/create"
+              onReclaim={() => setShowCloseConfirm(true)}
+              reclaiming={closeMarket.loading}
+              reclaimBlockedReason={!isMarketAuth ? "Connect the wallet that launched this market to reclaim its rent." : closeBlocker?.unmetLine ?? null}
+              error={closeMarket.error}
+            />
+          )}
+
           <div className="flex flex-wrap items-center gap-3 border-t border-[var(--border)]/30 pt-3">
             <button
               onClick={() => setShowTopUpInput(true)}
@@ -546,18 +589,23 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
             >
               {adminBurned ? "admin key burned" : "burn admin key"}
             </button>
-            <button
-              data-testid="close-market-button"
-              onClick={() => setShowCloseConfirm(true)}
-              disabled={closeMarket.loading || closeBlocker !== null || !isMarketAuth}
-              title={isMarketAuth ? undefined : "This market is autonomous — admin was renounced to the stake-pool program at creation, so it can't be closed."}
-              className="text-[10px] uppercase tracking-[0.1em] text-[var(--short)]/70 hover:text-[var(--short)] transition-colors disabled:opacity-40"
-            >
-              {closeMarket.loading ? "closing…" : "close market"}
-            </button>
+            {/* An unfinished launch that already holds a portfolio or funds can never be closed
+                (CloseSlab refuses it), so it gets no close button; the panel above says why and
+                offers Continue (#3266). */}
+            {!removalImpossible && (
+              <button
+                data-testid="close-market-button"
+                onClick={() => setShowCloseConfirm(true)}
+                disabled={closeMarket.loading || closeBlocker !== null || !isMarketAuth}
+                title={isMarketAuth ? undefined : "This market is autonomous — admin was renounced to the stake-pool program at creation, so it can't be closed."}
+                className="text-[10px] uppercase tracking-[0.1em] text-[var(--short)]/70 hover:text-[var(--short)] transition-colors disabled:opacity-40"
+              >
+                {closeMarket.loading ? "closing…" : unfinished ? "reclaim rent" : "close market"}
+              </button>
+            )}
           </div>
           {/* UX WP-9 (§3.11): the preconditions BEFORE the button, never "closeSlab will tell you". */}
-          <CloseMarketChecklistView checks={closeChecks} />
+          {!removalImpossible && <CloseMarketChecklistView checks={closeChecks} />}
           {!isMarketAuth && (
             <p className="mt-2 text-[10px] text-[var(--text-secondary)]">
               This market is autonomous — admin control was permanently renounced to the stake-pool
@@ -646,9 +694,9 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
       {/* Close market (CloseSlab) — irreversible + rent-reclaiming. */}
       <ConfirmDialog
         open={showCloseConfirm}
-        title={CLOSE_MARKET_COPY.title(symbol)}
-        description={CLOSE_MARKET_COPY.body(symbol, null)}
-        confirmLabel={CLOSE_MARKET_COPY.confirm}
+        title={unfinished ? CLOSE_MARKET_COPY.unfinishedTitle : CLOSE_MARKET_COPY.title(symbol)}
+        description={unfinished ? CLOSE_MARKET_COPY.unfinishedBody : CLOSE_MARKET_COPY.body(symbol, null)}
+        confirmLabel={unfinished ? CLOSE_MARKET_COPY.unfinishedConfirm : CLOSE_MARKET_COPY.confirm}
         danger
         onConfirm={handleClose}
         onCancel={() => setShowCloseConfirm(false)}

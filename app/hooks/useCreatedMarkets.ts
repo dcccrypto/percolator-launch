@@ -14,6 +14,7 @@ import {
 import { fetchTokenMeta } from "@/lib/tokenMeta";
 import { isLpPortfolio } from "@/lib/userAccountScan";
 import { readV17AssetSlotLast } from "@/lib/v17-engine-clock";
+import { readLaunchFootprint, type LaunchFootprint } from "@/lib/unfinished-launch";
 
 /** v17 portfolio account magic (PERCV16\0), base64 for the memcmp filter. */
 const V17_PORTFOLIO_MAGIC_B64 = Buffer.from([
@@ -54,6 +55,8 @@ export interface CreatedMarket extends DiscoveredMarket {
   v17Stats?: {
     oi: V17MarketGroupOI;
     assetSlotLast: bigint | null;
+    /** Header facts that decide whether an unfinished launch can still be removed (#3266). */
+    launch?: LaunchFootprint;
   };
 }
 
@@ -358,7 +361,7 @@ export function useCreatedMarkets() {
   // successful fetch.
   const [v17Enrichment, setV17Enrichment] = useState<{
     currentSlot: bigint | null;
-    stats: Record<string, { oi: V17MarketGroupOI; assetSlotLast: bigint | null }>;
+    stats: Record<string, { oi: V17MarketGroupOI; assetSlotLast: bigint | null; launch?: LaunchFootprint }>;
   }>({ currentSlot: null, stats: {} });
 
   const v17SlabsKey = useMemo(
@@ -381,7 +384,7 @@ export function useCreatedMarkets() {
           connection.getMultipleAccountsInfo(v17Slabs),
         ]);
         if (cancelled) return;
-        const stats: Record<string, { oi: V17MarketGroupOI; assetSlotLast: bigint | null }> = {};
+        const stats: Record<string, { oi: V17MarketGroupOI; assetSlotLast: bigint | null; launch?: LaunchFootprint }> = {};
         infos.forEach((info, i) => {
           if (!info?.data) return;
           const bytes = new Uint8Array(info.data);
@@ -390,6 +393,7 @@ export function useCreatedMarkets() {
             stats[v17Slabs[i].toBase58()] = {
               oi: parseMarketGroupV17OI(bytes),
               assetSlotLast: readV17AssetSlotLast(bytes),
+              launch: readLaunchFootprint(bytes) ?? undefined,
             };
           } catch {
             // Unparseable slab — this market keeps no v17Stats (page shows "—")
