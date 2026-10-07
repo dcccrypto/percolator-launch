@@ -116,7 +116,7 @@ function EmptyState({ subtitle, title = "No open positions" }: { subtitle: strin
  * reason (Phase 0/3's documented TradePageInner cascade) skips this row
  * unless its own props (slabAddress, a stable string) actually change.
  */
-const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ slabAddress }) {
+const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(function PositionRow({ slabAddress, wrappedRow }) {
   const realUserAccount = useUserAccount();
   const mockMode = isMockMode() && isMockSlab(slabAddress);
   const userAccount = realUserAccount ?? (mockMode ? getMockUserAccount(slabAddress) : null);
@@ -144,7 +144,10 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
 
   const { closePosition, loading: closeLoading, error: closeError, prewarmClose, resetPhase } = useClosePosition(slabAddress);
   // Per-trade fill cap — the close modal uses it to explain multi-fill closes.
-  const fillCaps = useMarketFillCap(slabAddress);
+  // Only the close modal reads this, and the wrapped-extra instance never opens
+  // one — an empty slab disables the hook's per-instance inventory poll there,
+  // so the common no-wrapped case pays no second poll.
+  const fillCaps = useMarketFillCap(wrappedRow ? "" : slabAddress);
   // Called unconditionally, before the `!activeInfo` early return below, per
   // rules of hooks — mirrors MarketInfoBar's MarkPrice / MarketBookCard's
   // Oracle cell (same shared hook, see hooks/usePriceFlash.ts).
@@ -173,7 +176,12 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   // the NFT program's PDA, so useUserAccount can no longer see it and the
   // position would otherwise vanish from the dock. Only scan for it in that
   // case (zero extra RPC in the common path).
-  const hasNormalPosition = !!userAccount && userAccount.account.positionSize !== 0n;
+  const ownHasPosition = !!userAccount && userAccount.account.positionSize !== 0n;
+  // Audit #40: a wallet can hold BOTH (wrap, then open a fresh position on the
+  // same market — or receive a transferred Position NFT). The dock renders a
+  // second PositionRow with `wrappedRow` for that case; the scan is shared
+  // (lib/userAccountScan), so both instances join one RPC query.
+  const hasNormalPosition = !wrappedRow && ownHasPosition;
   const wrapped = useNftWrappedPosition(slabAddress, !hasNormalPosition && !mockMode);
   const activeInfo = hasNormalPosition ? userAccount : wrapped;
   const isNftWrapped = !hasNormalPosition && !!wrapped;
@@ -184,6 +192,11 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   // real scan (already in flight) reconciles them. Subtle affordance only;
   // never blocks interaction.
   const isSettling = hasNormalPosition && !!realUserAccount?.provisional;
+
+  // The wrapped-extra row only exists to show a wrapped position ALONGSIDE an
+  // owned one; with no owned position the primary row already shows the wrapped
+  // position (and the empty state belongs to the primary row alone).
+  if (wrappedRow && (!ownHasPosition || !wrapped)) return null;
 
   if (!activeInfo) {
     // A position closed while wrapped as an NFT has no row (useNftWrappedPosition skips size-0 legs), so its
@@ -360,13 +373,23 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
 
   return (
     <div>
-      {lpUnderfunded && (
+      {/* The wrapped-extra row reads as its own labeled section, the same grammar
+          as "// other markets"; market-level banners and warmup stay on the
+          primary instance so they never render twice. */}
+      {wrappedRow && (
+        <div className="flex items-center gap-2 border-t border-[var(--border)]/40 px-4 pb-1 pt-3">
+          <span className="text-[9px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/80">
+            // wrapped as nft
+          </span>
+        </div>
+      )}
+      {!wrappedRow && lpUnderfunded && (
         <div className="border-b border-[var(--warning)]/20 bg-[var(--warning)]/5 px-4 py-1.5 text-center">
           <span className="text-[9px] font-medium uppercase tracking-[0.12em] text-[var(--warning)]">Low liquidity</span>
         </div>
       )}
       {/* UX WP-2 (SH-3): the engine is catching up beyond the app's own repair; calm, clears itself. */}
-      {engineStale && !oracleStale && (
+      {!wrappedRow && engineStale && !oracleStale && (
         <div className="border-b border-[var(--warning)]/20 bg-[var(--warning)]/5 px-4 py-1.5 text-center">
           <span className="text-[9px] font-medium uppercase tracking-[0.12em] text-[var(--text-secondary)]">Catching up with the latest prices</span>
         </div>
@@ -539,7 +562,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                   </button>
                 )}
                 {/* UX WP-9 (§3.13): Wrap / Send / Unwrap live in this row's "⋯" menu. */}
-                <PositionNftMenu slabAddress={slabAddress} />
+                <PositionNftMenu slabAddress={slabAddress} row={isNftWrapped ? "wrapped" : "own"} />
                 </span>
               </td>
             </tr>
@@ -560,9 +583,11 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
           </tbody>
         </table>
       </div>
-      <div className="px-4 py-2">
-        <WarmupProgress slabAddress={slabAddress} accountIdx={activeInfo.idx} />
-      </div>
+      {!wrappedRow && (
+        <div className="px-4 py-2">
+          <WarmupProgress slabAddress={slabAddress} accountIdx={activeInfo.idx} />
+        </div>
+      )}
       {closeError && (
         <div data-testid="position-close-error" className="mx-4 mb-3 rounded-none border border-[var(--short)]/20 bg-[var(--short)]/5 px-3 py-2">
           <p className="text-[10px] text-[var(--short)]">{closeError}</p>
@@ -651,6 +676,12 @@ const PositionsDockInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         </div>
         <RenderProfiler id="PositionRow">
           <PositionRow slabAddress={slabAddress} />
+        </RenderProfiler>
+        {/* Audit #40: wrap, then open a fresh position on the same market (or
+            receive a transferred Position NFT) — the wallet holds both; this
+            instance shows the wrapped one. Renders null unless both exist. */}
+        <RenderProfiler id="PositionRowWrapped">
+          <PositionRow slabAddress={slabAddress} wrappedRow />
         </RenderProfiler>
         <OtherMarketPositions currentSlab={slabAddress} />
       </div>

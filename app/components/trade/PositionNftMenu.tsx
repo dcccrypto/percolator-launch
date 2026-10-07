@@ -171,13 +171,20 @@ export const PositionNftMenuView: FC<PositionNftMenuViewProps> = ({ canWrap, isW
   );
 };
 
-/** The container: PositionNftPanel's hooks and eligibility, behind the row menu. */
-export const PositionNftMenu: FC<{ slabAddress: string }> = ({ slabAddress }) => {
+/** The container: PositionNftPanel's hooks and eligibility, behind the row menu.
+ *  Audit #40: `row` binds the menu to the row it sits on when the wallet holds
+ *  BOTH an owned and a wrapped position on one market — "own" offers only Wrap
+ *  (never Send/Unwrap aimed at the hidden wrapped position), "wrapped" offers
+ *  only Send/Unwrap. Omitted = the legacy merged behavior. */
+export const PositionNftMenu: FC<{ slabAddress: string; row?: "own" | "wrapped" }> = ({ slabAddress, row }) => {
   const userAccount = useUserAccount();
   const { hasMintedNft, nftMint, nftPdaAddress } = usePositionNft(slabAddress);
   const { mint: mintNft, loading: mintLoading, error: mintError } = useMintPositionNft(slabAddress);
-  const wrapped = useNftWrappedPosition(slabAddress, true);
-  const isNftPresent = hasMintedNft || wrapped !== null;
+  const wrappedScan = useNftWrappedPosition(slabAddress, true);
+  const wrapped = row === "own" ? null : wrappedScan;
+  // Unscoped on purpose: it also clears `pendingMint` below, and a mint's NFT
+  // may first surface via either source regardless of which row this menu is on.
+  const isNftPresent = hasMintedNft || wrappedScan !== null;
   const effectiveNftMint = wrapped?.nftMint ?? nftMint;
   const effectiveNftPdaAddress = wrapped?.nftPda.toBase58() ?? nftPdaAddress;
   const nftOverride = effectiveNftMint && effectiveNftPdaAddress ? { nftMint: effectiveNftMint, nftPdaAddress: effectiveNftPdaAddress } : undefined;
@@ -195,7 +202,7 @@ export const PositionNftMenu: FC<{ slabAddress: string }> = ({ slabAddress }) =>
     if (isNftPresent) setPendingMint(false);
   }, [isNftPresent]);
 
-  const own = userAccount !== null && userAccount.account.positionSize !== 0n ? userAccount : null;
+  const own = row !== "wrapped" && userAccount !== null && userAccount.account.positionSize !== 0n ? userAccount : null;
   const effective = wrapped ?? own;
   const mintAddress = effectiveNftMint?.toBase58() ?? null;
   const summary =
@@ -209,7 +216,7 @@ export const PositionNftMenu: FC<{ slabAddress: string }> = ({ slabAddress }) =>
     <>
       <PositionNftMenuView
         canWrap={own !== null && !pendingMint}
-        isWrapped={isNftPresent}
+        isWrapped={row === "own" ? false : isNftPresent}
         collateralLabel={collateralLabel}
         busy={busy}
         error={mintError || burnError || transferError}
