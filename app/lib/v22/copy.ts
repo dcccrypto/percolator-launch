@@ -53,6 +53,7 @@ export const V22_COPY = {
     bondAtomic: "Created in the same transaction as the market.",
     priceFloor: (floor: string) => `Launch price must be at least ${floor} per lot. Pick a higher launch price.`,
     priceCeiling: (ceil: string) => `Launch price can be at most ${ceil} per lot.`,
+    lotsNotReady: "Tokens priced under $10 can't be launched here yet. Pick a token worth $10 or more, or check back soon.",
     priceFloorNoLot: "A token priced under $10 needs a keeper-priced market to use dynamic leverage.",
     priceUnknown: "Enter the token's price to continue.",
     recovery: (minutes: number) => `If the price feed stops, the market recovers on its own after about ${minutes} minutes.`,

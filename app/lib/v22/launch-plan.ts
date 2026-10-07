@@ -10,6 +10,7 @@
  * (`growth(4) [lot(1)] [rent(6) [band(18)]]`), so they exist only on a growth (P3, single-asset)
  * market priced by an AUTH_MARK oracle (a lot on Hybrid / EWMA is refused with 119).
  */
+import { lotMarketsEnabled } from "./lot";
 import {
   BAND_MIN_LEG_NOTIONAL_TOKENS_V22,
   LOT_EXP_MAX_V22,
@@ -142,6 +143,12 @@ export function planLaunchV22(i: LaunchPlanInput): LaunchPlanV22 {
   const k = lotExpForTokenPriceV22(i.tokenPriceE6);
   if (k === null) {
     issues.push({ code: "price-floor", message: V22_COPY.wizard.priceFloor(usd(LOT_PRICE_FLOOR_E6_V22)) });
+    return { ...none, available: true, protection, holdingFee, bond, issues };
+  }
+  if (k > 0 && !lotMarketsEnabled()) {
+    // A lot market is created only once EVERY trade surface converts tokens <-> lots through lib/v22/lot.ts
+    // (security review F3): until then a typed size would be encoded 1:1 as lots, 10^k off. Refuse, calmly.
+    issues.push({ code: "price-floor", message: V22_COPY.wizard.lotsNotReady });
     return { ...none, available: true, protection, holdingFee, bond, issues };
   }
   const perLot = i.tokenPriceE6 * 10n ** BigInt(k);

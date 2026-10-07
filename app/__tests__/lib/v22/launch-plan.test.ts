@@ -23,6 +23,9 @@ import {
   IX_TAG_V22,
 } from "@/lib/v22/sdk";
 import { V22_COPY } from "@/lib/v22/copy";
+import { __setLotMarketsEnabledForTest } from "@/lib/v22/lot";
+// Lot markets are only creatable once every trade surface is lot-aware (review F3); these tests exercise the lot path itself.
+__setLotMarketsEnabledForTest(true);
 
 const base = (over: Partial<LaunchPlanInput> = {}): LaunchPlanInput => ({
   tokenPriceE6: 400n,
@@ -171,5 +174,20 @@ describe("capacity bond at launch", () => {
     expect(() =>
       buildLaunchBundleV22({ payer, createAccounts: [SystemProgram.transfer({ fromPubkey: payer, toPubkey: k(), lamports: 1 })], createVaultLp: big(74), initVaultLp: big(94), initBondTranche: big(107), supportsV1: false }),
     ).toThrow(LaunchBundleTooLargeError);
+  });
+});
+
+describe("F3: lot markets are refused until every surface is lot-aware", () => {
+  it("a sub-$10 token is refused with the calm line while lot markets are disabled; a $10+ token is untouched", () => {
+    __setLotMarketsEnabledForTest(false);
+    try {
+      const small = planLaunchV22({ tokenPriceE6: 400n, collateralDecimals: 6, oracleMode: "keeper", growthOn: true });
+      expect(small.issues[0]?.message).toMatch(/under \$10/);
+      expect(small.lotExp).toBe(0);
+      const big = planLaunchV22({ tokenPriceE6: 25_000_000n, collateralDecimals: 6, oracleMode: "keeper", growthOn: true });
+      expect(big.issues).toEqual([]);
+    } finally {
+      __setLotMarketsEnabledForTest(true);
+    }
   });
 });

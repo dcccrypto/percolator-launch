@@ -102,6 +102,9 @@ import { MAX_PRIORITY_FEE_LAMPORTS, priorityFeeLamportsFromMicroPerCu } from "@/
 import { requirePlaygroundKeeperSigner } from "@/lib/playground-keeper-signer";
 import { V1RpcError } from "@/lib/v21/sdk";
 import { V1TransportError } from "@/lib/tx-v1/rpc";
+import { __setLotMarketsEnabledForTest } from "@/lib/v22/lot";
+// Lot markets are only creatable once every trade surface is lot-aware (review F3); these tests exercise the lot path itself.
+__setLotMarketsEnabledForTest(true);
 
 const S = await h;
 const seed = S.seed;

@@ -4,6 +4,9 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { V22LaunchOptions } from "@/components/create/V22LaunchOptions";
 import { planLaunchV22, type LaunchPlanInput } from "@/lib/v22/launch-plan";
 import { V22_COPY } from "@/lib/v22/copy";
+import { __setLotMarketsEnabledForTest } from "@/lib/v22/lot";
+// Lot markets are only creatable once every trade surface is lot-aware (review F3); these tests exercise the lot path itself.
+__setLotMarketsEnabledForTest(true);
 
 afterEach(cleanup);
 
