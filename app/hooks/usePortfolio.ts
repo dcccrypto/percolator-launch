@@ -1,5 +1,6 @@
 "use client";
 
+import { lotExpOf } from "@/lib/v22/lot";
 import { useEffect, useRef, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
@@ -273,6 +274,12 @@ export interface PortfolioPosition {
    * owner-scan can't find it — it's recovered via the NFT last_holder scan.
    */
   nftWrapped?: boolean;
+  /**
+   * v2.2 lot exponent of this position's market (0 = no lots, the default for v2.1 and flag off). `positionSize` /
+   * `effectiveSize` are in LOTS and every price here is per LOT; display sites convert through lib/v22/lot.ts
+   * (formatLotQ / formatLotPriceE6) with this value. PnL, margin and liquidation maths are lot-invariant.
+   */
+  lotExp?: number;
 }
 
 export type LiquidationSeverity = "safe" | "warning" | "danger";
@@ -448,6 +455,7 @@ export function buildV17Position(
    * exactly the pre-ADL-fix behaviour.
    */
   adlFactors: AssetAdlFactors | null = null,
+  lotExp = 0,
 ): PortfolioPosition {
   // v17 markets return an empty `market.config` from the SDK — the real
   // collateral mint lives in `market.configV17` (see markets/page.tsx's
@@ -603,6 +611,7 @@ export function buildV17Position(
     maintenanceMarginBps,
     initialMarginBps,
     nftWrapped,
+    lotExp,
   };
 }
 
@@ -686,6 +695,7 @@ export async function fetchPortfolioSnapshot(
       /** Live per-side ADL factors, so both the owner-scan and the NFT-wrapped
        *  recovery scan resolve effective exposure the same way. */
       adlFactors: AssetAdlFactors | null;
+      lotExp?: number;
     }
   >();
   // Distinct v17 wrapper program ids actually seen while scanning slabs
@@ -776,7 +786,7 @@ export async function fetchPortfolioSnapshot(
         // Remember this v17 market's context so both the batched
         // owner-scan phase below AND the NFT-wrapped recovery scan can
         // enrich portfolios/escrows the same way.
-        marketMetaBySlab.set(slabAddrStr, { market, oraclePriceE6, maintenanceMarginBps, initialMarginBps, adlFactors });
+        marketMetaBySlab.set(slabAddrStr, { market, oraclePriceE6, maintenanceMarginBps, initialMarginBps, adlFactors, lotExp: lotExpOf(slabData) });
         v17ProgramIdsSeen.set(v17ProgramId.toBase58(), v17ProgramId);
       } else {
         // ── v12.x legacy path ──────────────────────────────────────────
@@ -1011,6 +1021,7 @@ export async function fetchPortfolioSnapshot(
           resolveSymbol(slabAddrStr, symbolBySlab),
           pkStr,
           meta.adlFactors,
+          meta.lotExp ?? 0,
         );
 
         if (liveLiquidationSeverity(pos, null) !== "safe") {
@@ -1104,6 +1115,7 @@ export async function fetchPortfolioSnapshot(
             resolveSymbol(slabAddrStr, symbolBySlab),
             pkStr,
             meta.adlFactors,
+            meta.lotExp ?? 0,
           );
 
           if (liveLiquidationSeverity(pos, null) !== "safe") {

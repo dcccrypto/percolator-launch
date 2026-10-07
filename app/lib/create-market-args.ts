@@ -4,6 +4,7 @@
  * (scripts/limits-parity/p3-app-ixs.ts `init-market`). Plain module: no React, no wallet.
  */
 import { v17MarketAccountLen, type InitMarketV17Args } from "@percolatorct/sdk";
+import { marketAccountLen } from "@/lib/v22/layout";
 import type { deriveMarketParams } from "@/lib/market-params";
 import { withGrowthInitArgs, type GrowthLaunch } from "@/lib/v21/growth-launch";
 
@@ -14,7 +15,11 @@ export const V17_MAX_PORTFOLIO_ASSETS = 14;
 // slab + rent estimate against the actual v17 requirement instead of the stale v12.19
 // tier.dataSize concept (96784/376432/1495024 bytes), which never equals this value for any
 // tier and made every InitMarket revert with InvalidSlabLen while over-charging ~0.67 SOL rent.
-export const DEFAULT_SLAB_SIZE = v17MarketAccountLen(V17_MAX_PORTFOLIO_ASSETS); // 33_900 bytes (cap-14; rust-p3-final.json marketAccountLen14)
+export const DEFAULT_SLAB_SIZE = v17MarketAccountLen(V17_MAX_PORTFOLIO_ASSETS); // 33_900 bytes (cap-14; rust-p3-final.json marketAccountLen14) — the v2.1 value; use defaultSlabSize() at call time (layout-aware).
+/** Legacy (cap-14) slab length of the ACTIVE layout: DEFAULT_SLAB_SIZE flag off, 592 + 806 + 14 x 2,629 flag on. */
+export function defaultSlabSize(): number {
+  return marketAccountLen(V17_MAX_PORTFOLIO_ASSETS);
+}
 /**
  * P3 (next FINAL, F14-Q2): a vault-owned-LP market is strictly SINGLE-asset. Tag 94 refuses any
  * market whose configured asset slots != 1 (VaultLpMultiAssetMarket, 86), so the P3 wizard
@@ -76,8 +81,8 @@ function baseV17InitMarketArgs(
 
 /** Slab bytes the wizard will allocate (and rent) for a P3 or legacy market. */
 export function wizardSlabBytes(p3: boolean): number {
-  return p3 ? v17MarketAccountLen(P3_MARKET_ASSET_SLOTS) : DEFAULT_SLAB_SIZE;
+  return p3 ? marketAccountLen(P3_MARKET_ASSET_SLOTS) : defaultSlabSize();
 }
 export function slabSizeFor(p: { p3?: unknown; slabDataSize?: number }): number {
-  return p.p3 ? v17MarketAccountLen(P3_MARKET_ASSET_SLOTS) : (p.slabDataSize ?? DEFAULT_SLAB_SIZE);
+  return p.p3 ? marketAccountLen(P3_MARKET_ASSET_SLOTS) : (p.slabDataSize ?? defaultSlabSize());
 }

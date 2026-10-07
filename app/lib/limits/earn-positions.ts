@@ -8,9 +8,10 @@
  * and values them like the rail (useInsuranceLP): the program's combined NAV over registry shares
  * on a two-pot vault (lib/limits/earn-split-pot.ts), else registry shares + distributed fees.
  */
+import { parseLpVaultRegistry, parseLpRedemption } from "@/lib/v22/records";
 import { PublicKey, type Connection } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync, unpackAccount } from "@solana/spl-token";
-import { deriveInsuranceLpMint, deriveLpRedemption, deriveLpVaultRegistry, parseLpRedemption, parseLpVaultRegistry } from "@percolatorct/sdk";
+import { deriveInsuranceLpMint, deriveLpRedemption, deriveLpVaultRegistry } from "@percolatorct/sdk";
 import { readSplitPotState, vaultValue } from "./earn-split-pot";
 
 export interface EarnPosition {

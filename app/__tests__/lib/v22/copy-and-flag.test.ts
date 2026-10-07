@@ -1,24 +1,33 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { STAKE_CONSENT_TEXT_V2, V22_COPY } from "@/lib/v22/copy";
+import { STAKE_CONSENT_TEXT_V2, V22_COPY, consentDisplay } from "@/lib/v22/copy";
 import { __setDevnetV22ForTest, isDevnetV22Enabled } from "@/lib/v22/flag";
 import { CONSENT_VERSION_FIRST_LOSS_V5 } from "@/lib/v22/sdk";
 
 /**
- * The doc comment on `CONSENT_VERSION_FIRST_LOSS` in percolator-stake feat/v22-stake-v5 @ 480fe29 src/state.rs, lines
- * 307-319, copied byte for byte (the Rust `///` markers included). The program enforces version 2; the app shows this.
+ * The consent text is read from the stake program SOURCE (percolator-stake `src/state.rs`, the doc comment on
+ * `CONSENT_VERSION_FIRST_LOSS`), never from a literal pasted here (review F11). Refs tried in order; if the repo is
+ * absent the test is SKIPPED with a loud warning (it never silently passes on a literal).
  */
-const STATE_RS_CONSENT_DOC = `/// * Up to \`deploy_target_bps\` of the pool (the target signed in the consent, including a
-///   pending raise) is deployed into the market's insurance fund and absorbs trading losses pro
-///   rata with every other insurance unit (stake and creator class alike).
-/// * The insurance backstop (wrapper tag 111, G9) can lend insurance to the market's vault LP
-///   once its Earn seniors are exhausted, **up to the seniors' own loss that is still
-///   outstanding**, and never more than 50% of the fund (at most 20% per ~day). It is announced on
-///   chain at least 9,000 slots (~1 hour) before it can execute. On mainnet builds it runs only
-///   on a market priced by an external oracle (an authenticated Hybrid whose legs are Chainlink
-///   or allowlisted Switchboard feeds); on devnet any market can use it for testing. The loan is
-///   repaid first from any vault-LP recovery, but repayment is not guaranteed.
-/// * Withdrawals are paid only from the liquid part of the pool, first come first served; the
-///   deployed part returns over successive syncs while the market is healthy.`;
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+
+const STAKE_REPO = `${homedir()}/percolator-stake`;
+const STATE_RS: string | null = (() => {
+  if (!existsSync(STAKE_REPO)) return null;
+  for (const ref of ["origin/release/v22-stake", "origin/feat/v22-stake-v5"]) {
+    try {
+      const src = execFileSync("git", ["-C", STAKE_REPO, "show", `${ref}:src/state.rs`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+      if (src.includes("pub const CONSENT_VERSION_FIRST_LOSS: u8")) return src;
+    } catch { /* try next ref */ }
+  }
+  return null;
+})();
+if (!STATE_RS) console.warn("WARNING: percolator-stake state.rs not found: the consent-text-vs-Rust test is SKIPPED");
+
+const STATE_RS_CONSENT_DOC: string = STATE_RS
+  ? STATE_RS.slice(STATE_RS.indexOf("/// * Up to `deploy_target_bps`"), STATE_RS.indexOf("pub const CONSENT_VERSION_FIRST_LOSS: u8")).trimEnd()
+  : "";
 
 const paragraphs = (doc: string): string[] =>
   doc
@@ -26,7 +35,7 @@ const paragraphs = (doc: string): string[] =>
     .map((p) => p.replace(/^\/\/\/ \* /, "").replace(/\n\/\/\/\s*/g, " ").replace(/\*\*/g, "").trim());
 
 describe("consent text v2", () => {
-  it("is the stake program's text verbatim, paragraph by paragraph", () => {
+  (STATE_RS ? it : it.skip)("is the stake program's text verbatim (read from the Rust source), paragraph by paragraph", () => {
     expect([...STAKE_CONSENT_TEXT_V2]).toEqual(paragraphs(STATE_RS_CONSENT_DOC));
   });
   it("is version 2, the version the app must send", () => {
@@ -37,6 +46,15 @@ describe("consent text v2", () => {
     expect(all).toContain("up to the seniors' own loss that is still outstanding");
     expect(all).toContain("On mainnet builds it runs only on a market priced by an external oracle");
     expect(all).not.toContain("up to 50% of the deployed share can be lost to it");
+  });
+});
+
+describe("consent display layer", () => {
+  it("the transform is the ONLY difference between what is shown and the verbatim text", () => {
+    const shown = STAKE_CONSENT_TEXT_V2.map(consentDisplay);
+    expect(shown[0]).toBe(STAKE_CONSENT_TEXT_V2[0].replace("`deploy_target_bps`", "the deployment target"));
+    expect(shown.slice(1)).toEqual(STAKE_CONSENT_TEXT_V2.slice(1));
+    expect(shown.join(" ")).not.toContain("`");
   });
 });
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { tokenUsdOfLotUsd } from "@/lib/v22/lot";
 import { useCallback, useMemo, useSyncExternalStore, type FC } from "react";
 import Link from "next/link";
 import useSWR from "swr";
@@ -64,7 +65,9 @@ const RailRow: FC<RailRowProps> = ({ slab, symbol, name, mainnetCa, fallbackPric
   const subscribe = useCallback((cb: () => void) => subscribeSlab(slab, cb), [slab]);
   const getPriceUsd = useCallback(() => getSnapshot(slab).priceUsd, [slab]);
   const getPriceE6 = useCallback(() => getSnapshot(slab).priceE6, [slab]);
-  const livePriceUsd = useSyncExternalStore(subscribe, getPriceUsd, RETURN_NULL);
+  const livePriceLotUsd = useSyncExternalStore(subscribe, getPriceUsd, RETURN_NULL);
+  const liveLotExp = useSyncExternalStore(subscribe, useCallback(() => getSnapshot(slab).lotExp ?? 0, [slab]), () => 0);
+  const livePriceUsd = livePriceLotUsd == null ? null : tokenUsdOfLotUsd(livePriceLotUsd, liveLotExp);
   const livePriceE6 = useSyncExternalStore(subscribe, getPriceE6, RETURN_NULL);
 
   const { data: pricesJson } = useSWR(`/api/prices/${slab}`, statsFetcher, STATS_SWR);

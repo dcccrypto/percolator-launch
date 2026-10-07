@@ -1,5 +1,6 @@
 'use client';
 
+import { parseLpVaultRegistry, parseLpRedemption } from "@/lib/v22/records";
 import { vaultWithdrawView } from '@/lib/limits/earn-withdrawable';
 import type { BlockedBy, WithdrawStatus } from '@/lib/limits/earn-withdrawable';
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
@@ -24,8 +25,6 @@ import {
   WELL_KNOWN,
   deriveVaultAuthority,
   deriveLpBackingLedger,
-  parseLpVaultRegistry,
-  parseLpRedemption,
 } from '@percolatorct/sdk';
 import { sendTx, broadcastSignedTx, buildBatchTx, getFreshBlockhash, getPriorityFee, signAllCompat, simulateForGate } from '@/lib/tx';
 import { sizeComputeUnitLimit } from '@/lib/compute-budget';

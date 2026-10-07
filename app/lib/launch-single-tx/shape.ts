@@ -277,6 +277,26 @@ export function launchBundleViolations(ixs: readonly NeutralIx[], ctx: LaunchBun
   const bindLp = first("wrapper.InitVaultLp");
   if (createLp < 0 || bindLp < 0 || bindLp < createLp) v.push("InitVaultLp must follow CreateLpVault");
 
+  // F2 (security review of #3235): an Earn seed (tag 75) sent BEFORE InitVaultLp runs on an unbound vault and takes the
+  // plain 11 accounts; one sent AFTER it (the bond launch) runs on a BOUND vault and REQUIRES the tail [11] vault_lp_state
+  // and [12] the vault LP portfolio, exactly the two accounts InitVaultLp (accounts [3] and [4]) bound. Nothing else.
+  if (bindLp >= 0) {
+    const bindIx = ixs[bindLp]!;
+    const lpState = bindIx.accounts[3]?.key;
+    const lpPortfolio = bindIx.accounts[4]?.key;
+    kinds.forEach((k, i) => {
+      if (k !== "wrapper.DepositToLpVault") return;
+      const a = ixs[i]!.accounts;
+      if (i > bindLp) {
+        if (a.length !== 13 || a[11]?.key !== lpState || a[12]?.key !== lpPortfolio || !a[11]?.writable) {
+          v.push(`ix ${i}: DepositToLpVault after InitVaultLp (a bound vault) must carry the vault_lp_state and LP portfolio tail`);
+        }
+      } else if (a.length !== 11) {
+        v.push(`ix ${i}: DepositToLpVault before InitVaultLp must have exactly 11 accounts, got ${a.length}`);
+      }
+    });
+  }
+
   // Accounts are created before anything references them; every create is funded by the payer and
   // its new account is a signer (a fresh keypair) that is neither the payer nor the keeper.
   const created = new Set<string>();

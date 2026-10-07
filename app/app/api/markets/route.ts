@@ -1,3 +1,5 @@
+import { lotExpOf } from "@/lib/v22/lot";
+import { lotMarketNumbers } from "@/lib/v22/lot-view";
 import { NextRequest, NextResponse } from "next/server";
 import { classifyPoolsByOwner } from "@/lib/dex-pool-owner";
 import { NON_USD_QUOTE_REASON } from "@/lib/dex-constants";
@@ -274,6 +276,7 @@ function discoveredToApiRow(
   v17Oi?: V17MarketGroupOI,
   registered?: RegisteredMarket,
   riskParams?: RiskParams | null,
+  lotExp = 0,
 ): Record<string, unknown> {
   const slabAddress = m.slabAddress.toBase58();
   const programId = m.programId.toBase58();
@@ -281,14 +284,17 @@ function discoveredToApiRow(
   if (m.configV17) {
     const cfg = m.configV17;
     const markPriceRaw = cfg.markEwmaE6;
-    const markPriceUsd = markPriceRaw > 0n ? Number(markPriceRaw) / 1_000_000 : null;
+    // v2.2 lot markets: the mark is per LOT and OI is in lots; show per-token price and token-scaled OI
+    // (lib/v22/lot-view.ts, identity when lotExp = 0).
+    const lotNums = lotMarketNumbers({ markE6: markPriceRaw, oiLongQ: v17Oi?.totalLongOiQ ?? 0n, oiShortQ: v17Oi?.totalShortOiQ ?? 0n }, lotExp);
+    const markPriceUsd = lotNums.priceUsd;
     const playgroundMeta = PLAYGROUND_SLAB_META[slabAddress];
     // Live engine stats parsed from the raw market-group bytes (see the extra
     // getMultipleAccountsInfo read in discoverMarketsOnChain). undefined when
     // that read failed — fields then keep the previous zeroed placeholders.
-    const oiLong = v17Oi ? Number(v17Oi.totalLongOiQ) : 0;
-    const oiShort = v17Oi ? Number(v17Oi.totalShortOiQ) : 0;
-    const totalOi = oiLong + oiShort;
+    const oiLong = lotNums.oiLong;
+    const oiShort = lotNums.oiShort;
+    const totalOi = lotNums.totalOi;
     const insurance = v17Oi ? Number(v17Oi.insuranceBalance) : 0;
     return {
       slab_address: slabAddress,
@@ -322,13 +328,15 @@ function discoveredToApiRow(
       is_complete: isMarketauthComplete(cfg.marketauth, m.slabAddress),
       last_price: markPriceUsd,
       mark_price: markPriceUsd,
+      // v2.2 lot market only (absent otherwise): tokens per lot = 10^lot_exp. last_price / OI above are already per token.
+      ...(lotExp > 0 ? { lot_exp: lotExp } : {}),
       index_price: null,
       volume_24h: 0,
       trade_count_24h: 0,
       open_interest_long: oiLong,
       open_interest_short: oiShort,
       total_open_interest: totalOi,
-      total_open_interest_usd: markPriceUsd != null ? (totalOi / 1_000_000) * markPriceUsd : 0,
+      total_open_interest_usd: markPriceUsd != null ? lotNums.totalOiUsd : 0,
       insurance_fund: insurance,
       insurance_balance: insurance,
       total_accounts: 0,
@@ -421,6 +429,7 @@ async function discoverMarketsOnChain(
     // Degrades gracefully: on failure the rows keep zeroed stats / fall back to
     // the default max_leverage, which is exactly the pre-enrichment behavior.
     const v17Stats = new Map<string, V17MarketGroupOI>();
+    const v17Lot = new Map<string, number>();
     const v17RiskParams = new Map<string, RiskParams | null>();
     const v17Markets = unique.filter((m) => m.configV17);
     // getMultipleAccountsInfo caps at 100 accounts per call — chunk the reads.
@@ -435,6 +444,7 @@ async function discoverMarketsOnChain(
           if (!isWrapperAccount(data)) return;
           const slab = chunk[i].slabAddress.toBase58();
           v17Stats.set(slab, parseMarketOI(data));
+          v17Lot.set(slab, lotExpOf(data));
           v17RiskParams.set(slab, parseV17RiskParams(data, chunk[i].configV17!.tradeFeeBps));
         });
       } catch {
@@ -444,7 +454,7 @@ async function discoverMarketsOnChain(
 
     return unique.map((m) => {
       const slab = m.slabAddress.toBase58();
-      return discoveredToApiRow(m, v17Stats.get(slab), registeredBySlab?.get(slab), v17RiskParams.get(slab));
+      return discoveredToApiRow(m, v17Stats.get(slab), registeredBySlab?.get(slab), v17RiskParams.get(slab), v17Lot.get(slab) ?? 0);
     });
   } catch {
     return [];

@@ -8,6 +8,7 @@ import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
 import { formatLeverage, ORDER_LEVERAGE_LABEL, ORDER_LEVERAGE_TITLE, RISK_LEVERAGE_LABEL, RISK_LEVERAGE_TITLE } from "@/lib/leverage-display";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { formatTokenAmount } from "@/lib/format";
+import { formatLotPriceE6, formatLotQ } from "@/lib/v22/lot";
 import { computeNotionalNative } from "@/lib/notional";
 import { describeLiqPrice, type LiqPriceDisplay } from "@/lib/liq-price-display";
 import { LiqPriceValue } from "./LiqPriceValue";
@@ -18,6 +19,8 @@ interface TradeConfirmationModalProps {
   /** Signed size of the account's open position on this market (omitted: none). */
   existingPositionSize?: bigint;
   positionSize: bigint;
+  /** v2.2 lot exponent (sizes in lots, prices per lot); 0 / omitted = no lots. */
+  lotExp?: number;
   margin: bigint;
   leverage: number;
   estimatedLiqPrice: bigint;
@@ -68,6 +71,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   direction,
   existingPositionSize = 0n,
   positionSize,
+  lotExp = 0,
   margin,
   leverage,
   estimatedLiqPrice,
@@ -108,7 +112,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
       markPriceE6: null,
       maintenanceMarginBps: 500n,
       hasResolvedEntry: true,
-      formatPrice: (e6) => `$${formatTokenAmount(e6, 6)}`,
+      formatPrice: (e6) => (lotExp > 0 ? formatLotPriceE6(e6, lotExp) : `$${formatTokenAmount(e6, 6)}`),
     });
   const riskLeverage =
     riskLeverageAfter !== undefined
@@ -261,7 +265,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
           <div className="flex justify-between">
             <span className="text-[var(--text-secondary)]">Position Size:</span>
             <span className="font-mono font-medium text-[var(--text)]">
-              {formatTokenAmount(positionSize, decimals)} {symbol}
+              {formatLotQ(positionSize, decimals, lotExp)} {symbol}
             </span>
           </div>
           <div className="flex justify-between">
@@ -307,7 +311,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
                 {direction === "long" ? "Max Fill Price:" : "Min Fill Price:"}
               </span>
               <span className="font-mono font-medium text-[var(--text)]">
-                ${formatTokenAmount(worstFillPriceE6, 6)}
+                {lotExp > 0 ? formatLotPriceE6(worstFillPriceE6, lotExp) : `$${formatTokenAmount(worstFillPriceE6, 6)}`}
               </span>
             </div>
           )}

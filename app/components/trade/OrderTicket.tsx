@@ -93,7 +93,7 @@ import { closeLimitNotice, deriveTicketLimits, feeFitSizeQ, sizeQToInput, type T
 import { sameOwnerRoomQ } from "@/lib/limits/risk-limits";
 import { balanceMaxQ, deriveTicketState, maxInUnit, oneMaxQ, type TicketRow } from "@/lib/limits/ticket-state";
 import { publishTicketRow } from "@/lib/limits/ticket-status-store";
-import { fmtQ } from "@/lib/limits/format";
+import { fmtQ as fmtQLots } from "@/lib/limits/format";
 import { takeFillResult } from "@/lib/limits/fill-check";
 import { defaultFeeCapMarginBps } from "@/lib/limits/fee-channel";
 import { OrderTicketLimits, reasonCopy } from "@/components/limits/OrderTicketLimits";
@@ -106,6 +106,8 @@ import { v1BlocksOrder } from "@/lib/v21/move/close-only";
 import { V1CloseOnlyBanner } from "@/components/move/V1CloseOnlyNotice";
 import { V21_REFRESHING_POSITIONS } from "@/lib/v21/loss-stale-retry";
 import { StatusLine } from "@/components/ui/StatusLine";
+import { V22_COPY } from "@/lib/v22/copy";
+import { POS_SCALE_V22, formatLotPriceE6, lotExpOf, quantizeQToLots, tokenUsdOfLotUsd } from "@/lib/v22/lot";
 import { BandMarketNotice } from "@/components/v22/BandMarketNotice";
 import { useBandRentView } from "@/hooks/useBandRentView";
 import { FixPricingAction } from "@/components/trade/FixPricingAction";
@@ -281,6 +283,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
   const collateralSymbol = sanitizeSymbol(tokenMeta?.symbol, mintAddress);
   const bandView = useBandRentView();
+  // v2.2 lot markets (lib/v22/lot.ts): the mark, entry and every position q are PER LOT. The size box is in TOKENS, so
+  // typed sizes convert at the per-TOKEN price; Q is still derived from the per-lot mark below. lotExp 0 = identity.
+  const lotExp = lotExpOf(slabRaw);
+  const typedPrice = priceUsd ? tokenUsdOfLotUsd(priceUsd, lotExp) : priceUsd;
+  /** Sizes shown to the user are TOKENS: a Q in lots is scaled by 10^lotExp (identity without lots). */
+  const fmtQ = (q: bigint): string => fmtQLots(lotExp > 0 ? q * 10n ** BigInt(lotExp) : q);
 
   const [onChainDecimals, setOnChainDecimals] = useState<number | null>(null);
   const decimals = onChainDecimals ?? tokenMeta?.decimals ?? 6;
@@ -585,17 +593,17 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const recomputeFromSize = useCallback(
     (raw: string, unit: "token" | "usd", lev: number) => {
       const n = parseFloat(raw);
-      if (isNaN(n) || !priceUsd || priceUsd <= 0) {
+      if (isNaN(n) || !typedPrice || typedPrice <= 0) {
         setMarginInput("");
         return;
       }
-      const notionalUsd = unit === "token" ? n * priceUsd : n;
+      const notionalUsd = unit === "token" ? n * typedPrice : n;
       const marginAmt = notionalUsd / lev;
       // Truncate rather than round to prevent fractional float-overshoot
       // from generating a marginNative slightly larger than the user's actual balance.
       setMarginInput(truncateToDecimals(marginAmt, decimals));
     },
-    [priceUsd, decimals],
+    [typedPrice, decimals],
   );
 
   /** Set the size WITHOUT clearing the status slot (the ticket's own clamp). */
@@ -622,15 +630,15 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setSizeUnit((prev) => {
       const next = prev === "token" ? "usd" : "token";
       const n = parseFloat(sizeInput);
-      if (!isNaN(n) && priceUsd && priceUsd > 0) {
-        const converted = prev === "token" ? n * priceUsd : n / priceUsd;
+      if (!isNaN(n) && typedPrice && typedPrice > 0) {
+        const converted = prev === "token" ? n * typedPrice : n / typedPrice;
         const nextStr = truncateToDecimals(converted, next === "token" ? 6 : 2);
         setSizeInput(nextStr);
         recomputeFromSize(nextStr, next, leverage);
       }
       return next;
     });
-  }, [sizeInput, priceUsd, leverage, recomputeFromSize]);
+  }, [sizeInput, typedPrice, leverage, recomputeFromSize]);
 
   const updateLeverage = useCallback(
     (newLev: number) => {
@@ -667,12 +675,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       setMarginInput(marginStr);
       const marginNum = Number(marginAmount) / Math.pow(10, decimals);
       const notionalUsd = marginNum * leverage;
-      if (priceUsd && priceUsd > 0) {
-        const nextSize = sizeUnit === "token" ? notionalUsd / priceUsd : notionalUsd;
+      if (typedPrice && typedPrice > 0) {
+        const nextSize = sizeUnit === "token" ? notionalUsd / typedPrice : notionalUsd;
         setSizeInput(truncateToDecimals(nextSize, sizeUnit === "token" ? 6 : 2));
       }
     },
-    [tradableBalance, decimals, leverage, priceUsd, sizeUnit],
+    [tradableBalance, decimals, leverage, typedPrice, sizeUnit],
   );
 
   const marginNative = marginInput ? parsePercToNative(marginInput, decimals) : 0n;
@@ -681,7 +689,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // the fractional-safe fix, so it threw on any fractional leverage.
   const notionalNative = computeNotionalNative(marginNative, leverage);
   const rawPositionSize = livePriceE6 && livePriceE6 > 0n ? (notionalNative * 1_000_000n) / livePriceE6 : 0n;
-  const positionSize = rawPositionSize < 0n ? 0n : rawPositionSize;
+  // v2.2 lots: whole lots only (the typed token size rounds DOWN to a lot multiple; the remainder is shown, never sent).
+  const lotQuantised = quantizeQToLots(rawPositionSize < 0n ? 0n : rawPositionSize, lotExp);
+  const positionSize = lotQuantised.q;
+  const lotRemainderQ = lotQuantised.remainderQ;
   // GH#2953: the engine's initial margin is max(notional x IM bps, min_nonzero_im_req) (engine
   // v16.rs:23050 margin_requirement), so a NEW position needs at least the market's floor ($2 on
   // the wizard markets) however small it is: a $1 first trade deposited $1.11 and was refused
@@ -793,7 +804,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     hasResolvedEntry:
       combinedEntryPriceE6 > 0n &&
       (existingPositionSize === 0n || existingEntryKnown || (!sameDirection && positionSize >= existingAbsSize)),
-    formatPrice: formatUsdPriceE6,
+    formatPrice: (e6: bigint) => formatLotPriceE6(e6, lotExp),
     unknownText: "—",
   });
   const beforeLiqDisplay = describeLiqPrice({
@@ -803,7 +814,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     markPriceE6: livePriceE6 ?? 0n,
     maintenanceMarginBps,
     hasResolvedEntry: existingEntryKnown,
-    formatPrice: formatUsdPriceE6,
+    formatPrice: (e6: bigint) => formatLotPriceE6(e6, lotExp),
     unknownText: "—",
   });
   // BUG 9 fix + copy clarity: opening a position RESERVES margin from
@@ -878,7 +889,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const clampTarget = marketMaxQ !== null && marketMaxQ > 0n && positionSize > marketMaxQ ? marketMaxQ : null;
   useEffect(() => {
     if (clampTarget === null || !livePriceE6 || livePriceE6 <= 0n) return;
-    applySize(sizeQToInput(clampTarget, sizeUnit, livePriceE6));
+    applySize(sizeQToInput(clampTarget, sizeUnit, livePriceE6, lotExp));
     setClampedToQ(clampTarget);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fire only when a new clamp is required
   }, [clampTarget]);
@@ -951,6 +962,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   ) {
     const effectiveSize = snapshotSize ?? positionSize;
     if (!marginInput || effectiveSize <= 0n) return;
+    // v2.2 lots: an order is whole lots (the ticket quantises); never sign a fractional lot or a size not derived in lots.
+    if (lotExp > 0 && effectiveSize % POS_SCALE_V22 !== 0n) {
+      setHumanError("That size isn't a whole number of lots here. Adjust it and try again. Nothing was sent.");
+      return;
+    }
     if (accountPending) return;
     if ((!userAccount || exceedsBalance) && !fundingMode) return;
 
@@ -1037,7 +1053,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           ? { kind: "partial", body: TICKET_COPY.result.partial(fmtQ(limitsFillResult.filledQ ?? 0n), fmtQ(effectiveSize), baseTicker), sig: sig ?? null, tryQ: null }
           : {
               kind: "full",
-              body: TICKET_COPY.result.full(fmtQ(effectiveSize), baseTicker, sideWord, formatUsdPriceE6(submitPriceE6)),
+              body: TICKET_COPY.result.full(fmtQ(effectiveSize), baseTicker, sideWord, formatLotPriceE6(submitPriceE6, lotExp)),
               sig: sig ?? null,
               tryQ: null,
             },
@@ -1202,7 +1218,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       return;
     }
     const q = a.id === "try-size" ? result?.tryQ ?? null : a.id === "use-max" ? ticketLimits.sideLimits?.[direction]?.maxQ ?? null : null;
-    if (q && q > 0n && livePriceE6 && livePriceE6 > 0n) handleSizeChange(sizeQToInput(q, sizeUnit, livePriceE6));
+    if (q && q > 0n && livePriceE6 && livePriceE6 > 0n) handleSizeChange(sizeQToInput(q, sizeUnit, livePriceE6, lotExp));
   };
   const LEGACY_TESTID: Partial<Record<TicketRow, string>> = {
     "close-only": "limits-adl-reduce-only",
@@ -1355,6 +1371,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           ) : null;
         })()}
         {/* Devnet v2.2 band markets (flag-gated; renders nothing otherwise): mark vs target, minimum position. */}
+        {lotExp > 0 && lotRemainderQ > 0n && (
+          <p data-testid="lot-remainder" className="mb-2 text-[10px] text-[var(--text-secondary)]">
+            {V22_COPY.lot.remainder(fmtQLots(lotRemainderQ * 10n ** BigInt(lotExp)), baseTicker)}
+          </p>
+        )}
         <BandMarketNotice view={bandView} collateralDecimals={decimals} collateralSymbol={collateralSymbol} />
         {/* Devnet v2.1: the close-only countdown + permissionless wind-down (flag-gated). */}
         {adlReduceOnly && isDevnetV21Enabled() && (
@@ -1366,6 +1387,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           <OrderTicketClosePanel
             slabAddress={slabAddress}
             positionSize={closeView?.effectiveSize ?? existingPositionSize}
+            lotExp={lotExp}
             previewUnavailable={closeView != null && !closeView.adlKnown}
             accountPending={accountPending}
             entryPriceE6={existingEntryKnown ? existingEntryPriceE6 : 0n}
@@ -1397,10 +1419,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       : null;
   // One Max per side (§4.2): in the input's unit, tap = fill. Hidden while the ticket can't open.
   const showMax = displayMaxQ !== null && displayMaxQ > 0n && !!livePriceE6 && livePriceE6 > 0n && !ticketState.blocks;
-  const maxLabel = showMax ? maxInUnit(displayMaxQ!, sizeUnit, livePriceE6!, baseTicker) : null;
+  const maxLabel = showMax ? maxInUnit(displayMaxQ!, sizeUnit, livePriceE6!, baseTicker, lotExp) : null;
   const fillFraction = (pct: number) => {
     if (displayMaxQ !== null && displayMaxQ > 0n && livePriceE6 && livePriceE6 > 0n) {
-      handleSizeChange(sizeQToInput((displayMaxQ * BigInt(pct)) / 100n, sizeUnit, livePriceE6));
+      handleSizeChange(sizeQToInput((displayMaxQ * BigInt(pct)) / 100n, sizeUnit, livePriceE6, lotExp));
       return;
     }
     setSizePercent(pct);
@@ -1513,7 +1535,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             className="mt-1 text-[11px] text-[var(--warning)]"
             style={{ fontFamily: "var(--font-mono)" }}
           >
-            {TICKET_COPY.clamped(livePriceE6 && livePriceE6 > 0n ? maxInUnit(clampedToQ, sizeUnit, livePriceE6, baseTicker).replace(` ${baseTicker}`, "") : fmtQ(clampedToQ), sizeUnit === "token" ? baseTicker : "USD")}
+            {TICKET_COPY.clamped(livePriceE6 && livePriceE6 > 0n ? maxInUnit(clampedToQ, sizeUnit, livePriceE6, baseTicker, lotExp).replace(` ${baseTicker}`, "") : fmtQ(clampedToQ), sizeUnit === "token" ? baseTicker : "USD")}
           </p>
         ) : (
           <div
@@ -1808,6 +1830,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               ticket={ticketLimits}
               direction={direction}
               symbol={baseTicker}
+              lotExp={lotExp}
               feeMarginBps={feeMarginBps}
               onFeeMarginChange={setFeeMarginBps}
             />
@@ -2070,6 +2093,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           symbol={baseTicker}
           collateralSymbol={collateralSymbol}
           decimals={decimals}
+          lotExp={lotExp}
           onConfirm={() => {
             const snapshot = confirmSnapshot;
             setShowConfirmModal(false);

@@ -48,3 +48,14 @@ describe("EarnExitQuote", () => {
     expect(document.querySelector('[data-variant="error"]')).toBeNull();
   });
 });
+
+describe("F9 estimate note", () => {
+  it("a request-time floor (estimate) says it is fixed at request; a simulated quote does not", () => {
+    mk(st({ phase: "quoted", quote: quote({ estimate: true }) }));
+    expect(screen.getByTestId("earn-exit-estimate").textContent).toMatch(/fixed when you request/);
+  });
+  it("CONTROL: no note on a simulated quote", () => {
+    mk(st({ phase: "quoted", quote: quote({ estimate: false }) }));
+    expect(screen.queryByTestId("earn-exit-estimate")).toBeNull();
+  });
+});

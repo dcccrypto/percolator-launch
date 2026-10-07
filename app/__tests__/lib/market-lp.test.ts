@@ -14,7 +14,7 @@ const MARKET_LEN = 33_900;
 function marketData(admin: PublicKey | null): Uint8Array {
   const d = new Uint8Array(MARKET_LEN);
   d[10] = 1; // kind = market
-  if (admin) d.set(admin.toBytes(), assetProfileOff(0) + 368);
+  if (admin) d.set(admin.toBytes(), assetProfileOff(0, new Uint8Array(0)) + 368);
   return d;
 }
 

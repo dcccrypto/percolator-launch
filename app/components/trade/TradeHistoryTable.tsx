@@ -1,5 +1,6 @@
 "use client";
 
+import { formatLotQ, tokenUsdOfLotUsd } from "@/lib/v22/lot";
 import { useTradeHistory } from "@/hooks/useTradeHistory";
 import { formatStatValue, formatTokenAmount, formatUsdFromNumber } from "@/lib/format";
 import { useEffect, useState } from "react";
@@ -28,9 +29,9 @@ function marketLabel(slabAddress: string, statsMap?: Map<string, MarketWithStats
   return symbol ? `${symbol}/USD` : `${shortAddress(slabAddress)}/USD`;
 }
 
-function formatPrice(priceNum: number): string {
+export function formatPrice(priceNum: number, lotExp = 0): string {
   if (!priceNum) return "—";
-  return formatUsdFromNumber(priceNum);
+  return formatUsdFromNumber(tokenUsdOfLotUsd(priceNum, lotExp));
 }
 
 function formatFee(feeNum: number): string {
@@ -39,14 +40,15 @@ function formatFee(feeNum: number): string {
   return formatStatValue(feeNum, "currency");
 }
 
-function formatSize(sizeStr: string, decimals = 6): string {
+/** `lotExp` (v2.2 lot markets, 0 otherwise): the indexer records sizes in LOTS and prices per LOT; show tokens / per-token. */
+export function formatSize(sizeStr: string, decimals = 6, lotExp = 0): string {
   try {
     const raw = BigInt(sizeStr.split(".")[0]);
     const abs = raw < 0n ? -raw : raw;
-    return formatTokenAmount(abs, decimals);
+    return formatLotQ(abs, decimals, lotExp);
   } catch {
     const n = Math.abs(parseFloat(sizeStr) || 0);
-    return formatTokenAmount(BigInt(Math.round(n)), decimals);
+    return formatLotQ(BigInt(Math.round(n)), decimals, lotExp);
   }
 }
 
@@ -64,6 +66,8 @@ function shortAddress(addr: string): string {
 
 /** Fetch slab → collateral decimals from /api/markets once, cache in module scope. */
 const slabDecimalsCache: Record<string, number> = {};
+/** slab -> lot exponent (v2.2 lot markets only; /api/markets adds `lot_exp` when > 0). */
+const slabLotCache: Record<string, number> = {};
 let marketsFetchAttempted = false;
 
 async function loadMarketDecimals(): Promise<void> {
@@ -76,6 +80,7 @@ async function loadMarketDecimals(): Promise<void> {
     for (const m of (data.markets ?? [])) {
       if (m.slab_address && typeof m.decimals === "number") {
         slabDecimalsCache[m.slab_address] = m.decimals;
+        if (typeof m.lot_exp === "number" && m.lot_exp > 0) slabLotCache[m.slab_address] = m.lot_exp;
       }
     }
   } catch {
@@ -93,6 +98,9 @@ function useSlabDecimals(): Record<string, number> {
   }, []);
   return slabDecimalsCache;
 }
+
+/** Lot exponent for a slab (0 until /api/markets has answered, and for any market without lots). */
+export const lotExpForSlab = (slab: string): number => slabLotCache[slab] ?? 0;
 
 export function TradeHistoryTable({
   wallet,
@@ -215,7 +223,7 @@ export function TradeHistoryTable({
                   className="text-[11px] text-[var(--text)]"
                   style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
                 >
-                  {formatSize(trade.size, tradeDecimals)}
+                  {formatSize(trade.size, tradeDecimals, lotExpForSlab(trade.slab_address))}
                 </p>
               </div>
 
@@ -225,7 +233,7 @@ export function TradeHistoryTable({
                   className="text-[11px] text-[var(--text-secondary)]"
                   style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
                 >
-                  {formatPrice(trade.price)}
+                  {formatPrice(trade.price, lotExpForSlab(trade.slab_address))}
                 </p>
               </div>
 

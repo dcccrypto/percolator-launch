@@ -28,15 +28,14 @@ import {
   type CrankObservationHint,
 } from "@percolatorct/sdk";
 import { marketGeometry, parsePortfolio } from "@/lib/v22/layout";
-import { isDevnetV22Enabled } from "@/lib/v22/flag";
 
-/** Absolute byte offset where asset `assetIndex`'s wrapper slot starts. */
-export function assetProfileOff(assetIndex: number, slabData?: Uint8Array): number {
-  // Geometry by the account's VERSION when the bytes are at hand (v2.2: slot 2,629 B after an 806 B group);
-  // without bytes it is the v2.1 geometry (what every caller used before v2.2).
-  if (slabData) return marketGeometry(slabData, "assetProfileOff").slotOff(assetIndex);
-  if (isDevnetV22Enabled()) throw new Error("assetProfileOff: pass the market account bytes (v2.2 geometry is chosen by VERSION)");
-  return marketGeometry(new Uint8Array(0), "assetProfileOff").slotOff(assetIndex);
+/**
+ * Absolute byte offset where asset `assetIndex`'s wrapper slot starts. The market account BYTES are REQUIRED: the geometry
+ * is chosen by the account's VERSION (v2.2: 2,629 B slots after an 806 B group; v2.1: 2,325 B after 758 B). A byte-less
+ * form cannot know the layout, so it does not exist (review F4). Flag off the bytes are ignored (v2.1 constants).
+ */
+export function assetProfileOff(assetIndex: number, slabData: Uint8Array): number {
+  return marketGeometry(slabData, "assetProfileOff").slotOff(assetIndex);
 }
 
 function readU64LE(data: Uint8Array, off: number): bigint {
@@ -130,7 +129,7 @@ export function readAssetMarketId(slabData: Uint8Array, assetIndex = 0): bigint 
  * (burning the admin key). Zero pubkey once renounced.
  */
 export function readAssetAdmin(slabData: Uint8Array, assetIndex = 0): PublicKey {
-  const off = assetProfileOff(assetIndex) + 368;
+  const off = assetProfileOff(assetIndex, slabData) + 368;
   if (slabData.length < off + 32) {
     throw new Error(`slab too short for AssetOracleProfileV17.asset_admin @ ${off}`);
   }
@@ -139,12 +138,12 @@ export function readAssetAdmin(slabData: Uint8Array, assetIndex = 0): PublicKey 
 
 /** Live AssetControlSequencesV16 (oracle-observation nonce + authority-epoch CAS). */
 export function readAssetControlSeqs(slabData: Uint8Array, assetIndex = 0): AssetControlSequencesV17 {
-  return parseAssetControlSequencesV17(slabData, assetProfileOff(assetIndex));
+  return parseAssetControlSequencesV17(slabData, assetProfileOff(assetIndex, slabData));
 }
 
 /** Market-wide `protocol_fee_authority_epoch` (only for WithdrawProtocolFee). */
 export function readProtocolFeeAuthorityEpoch(slabData: Uint8Array): bigint {
-  return parseProtocolFeeAuthorityEpoch(slabData, assetProfileOff(0));
+  return parseProtocolFeeAuthorityEpoch(slabData, assetProfileOff(0, slabData));
 }
 
 /**

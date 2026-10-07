@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { Keypair } from "@solana/web3.js";
 import { ConsentChangedError, consentViewOf } from "@/lib/v22/stake-v5";
-import { STAKE_CONSENT_TEXT_V2, V22_COPY } from "@/lib/v22/copy";
+import { STAKE_CONSENT_TEXT_V2, V22_COPY, consentDisplay } from "@/lib/v22/copy";
 import type { StakePoolV5 } from "@/lib/v22/sdk";
 
 const hook = vi.hoisted(() => ({ state: { pool: null as unknown, deposit: vi.fn(), loading: false, error: null as string | null } }));
@@ -34,8 +34,17 @@ describe("FirstLossDeposit", () => {
     expect(screen.getByTestId("fl-buffer").textContent).toBe("30%");
     expect(screen.getByTestId("fl-hysteresis").textContent).toBe("5%");
     const paras = screen.getAllByTestId("consent-para").map((p) => p.textContent);
-    expect(paras).toEqual([...STAKE_CONSENT_TEXT_V2]);
+    expect(paras).toEqual(STAKE_CONSENT_TEXT_V2.map(consentDisplay));
+    expect(paras.join(' ')).not.toMatch(/deploy_target_bps|`/);
     expect(screen.getByTestId("first-loss-withdraw-note").textContent).toBe(V22_COPY.stake.withdraw);
+  });
+
+  it("F11: a pool on another consent version shows no consent text and no deposit", () => {
+    hook.state = { ...hook.state, pool: pool({ consentVersion: 3 }) };
+    render(<FirstLossDeposit {...props} />);
+    expect(screen.getByTestId("first-loss-unavailable")).toBeTruthy();
+    expect(screen.queryByTestId("consent-para")).toBeNull();
+    expect(screen.queryByTestId("first-loss-submit")).toBeNull();
   });
 
   it("Deposit stays disabled until the checkbox is ticked (and an amount entered)", () => {

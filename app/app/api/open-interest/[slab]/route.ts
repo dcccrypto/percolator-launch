@@ -1,3 +1,4 @@
+import { lotExpOf } from "@/lib/v22/lot";
 import { type NextRequest, NextResponse } from "next/server";
 import { validateSlabParam } from "@/lib/route-validators";
 import { isBlockedSlab } from "@/lib/blocklist";
@@ -62,6 +63,9 @@ export async function GET(
         historicalOi: [],
         // H12: OI above is base-asset Q (scale 1e6); the client multiplies by the live price.
         isV17: true,
+        // v2.2 lot market: OI above is in LOTS (the client prices it with the per-LOT live price, so USD is exact).
+        // Tokens = lots * 10^lotExp. Absent on a market without lots (flag off / v2.1): the response is unchanged.
+        ...(lotExpOf(read.data) > 0 ? { lotExp: lotExpOf(read.data) } : {}),
       },
       { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30" } },
     );

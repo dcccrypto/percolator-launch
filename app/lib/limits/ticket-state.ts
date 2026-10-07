@@ -139,8 +139,9 @@ export function balanceMaxQ(balanceAtoms: bigint, leverage: number, priceE6: big
 }
 
 /** The Max figure in the input's unit: "41.88 SOL" (≤ 4 dp) or "$3,750.00" (2 dp, floored). */
-export function maxInUnit(q: bigint, unit: "token" | "usd", priceE6: bigint, baseSymbol: string): string {
+export function maxInUnit(q: bigint, unit: "token" | "usd", priceE6: bigint, baseSymbol: string, lotExp = 0): string {
   if (unit === "token") {
+    if (lotExp > 0) q = q * 10n ** BigInt(lotExp);
     const whole = q / 1_000_000n;
     const frac = (q % 1_000_000n).toString().padStart(6, "0").slice(0, 4).replace(/0+$/, "");
     return `${whole.toLocaleString("en-US")}${frac ? `.${frac}` : ""} ${baseSymbol}`;

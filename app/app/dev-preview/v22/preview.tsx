@@ -14,7 +14,7 @@ const band: BandRentView = {
   assetIndex: 0,
   lotExp: 3,
   band: { enabled: true, bandBps: 130, epochSlots: 600n, pinSlots: 9000n, maxPositionsPerSide: 256n, minLegNotionalAtoms: 100_000_000n, recoveryMinutes: 64 },
-  price: { markE6: 60_000_000n, targetE6: 50_000_000n, lagging: true, favourableCloseSide: "long" },
+  price: { markE6: 60_000_000n, targetE6: 50_000_000n, lagging: true, floorStuck: false, favourableCloseSide: "long" },
   rent: { enabled: true, maxE9PerSlot: 1000n, kinkBps: 5000, rateLongE9: 10n, rateShortE9: 0n },
 };
 

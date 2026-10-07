@@ -3,14 +3,13 @@
  * v2.1 successor, as a MoveInput. RPC failures THROW (never read as "nothing here": a transient
  * 429 must not tell a user their funds are gone). Reuses the app's own decoders and scanners.
  */
+import { parseLpVaultRegistry, parseLpRedemption } from "@/lib/v22/records";
 import { PublicKey, type Connection } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync, unpackAccount } from "@solana/spl-token";
 import {
   deriveInsuranceLpMint,
   deriveLpRedemption,
   deriveLpVaultRegistry,
-  parseLpRedemption,
-  parseLpVaultRegistry,
 } from "@percolatorct/sdk";
 import { pickOwnerPortfolio, scanOwnerPortfolios } from "@/lib/owner-portfolio";
 import { decodeMarketEngineView, decodePortfolioLegs, decodeResolvedMarket } from "@/lib/limits/decode";

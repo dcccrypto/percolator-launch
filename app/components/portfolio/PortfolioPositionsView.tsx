@@ -1,5 +1,6 @@
 "use client";
 
+import { formatLotPriceE6, formatLotQ } from "@/lib/v22/lot";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
@@ -222,7 +223,7 @@ function PositionCard({
   // must not be shown as the entry, nor feed the live PnL (live mark − polled
   // mark is drift, not PnL) — `displayEntryE6` returns 0n there, which
   // computeLivePositionPnl already treats as "no entry".
-  const entryDisplay = describeEntryPrice({ entryE6: pos.effectiveEntryPrice, source: pos.entryPriceSource });
+  const entryDisplay = describeEntryPrice({ entryE6: pos.effectiveEntryPrice, source: pos.entryPriceSource, formatPrice: (p) => formatLotPriceE6(p, pos.lotExp ?? 0) });
   const posEntry = displayEntryE6(pos.effectiveEntryPrice, pos.entryPriceSource);
   const side = posSize > 0n ? "Long" : posSize < 0n ? "Short" : "Flat";
   const sizeAbs = posSize < 0n ? -posSize : posSize;
@@ -276,7 +277,7 @@ function PositionCard({
     maintenanceMarginBps: pos.maintenanceMarginBps,
     // Same verdict as the Entry cell, so the two cannot contradict (#2671).
     hasResolvedEntry: entryDisplay.known,
-    formatPrice: formatUsdPriceE6,
+    formatPrice: (p) => formatLotPriceE6(p, pos.lotExp ?? 0),
     unknownText: "—",
   });
   const livePriceUsd = getSnapshot(pos.slabAddress).priceUsd ?? (markE6 > 0n ? Number(markE6) / 1e6 : null);
@@ -397,6 +398,7 @@ function PositionCard({
                         nominalSizeQ: pos.account?.positionSize ?? posSize,
                         effectiveSizeQ: livePnl.effectiveSize ?? posSize,
                         entryE6: posEntry,
+                        lotExp: pos.lotExp ?? 0,
                         initialMarginBps: pos.initialMarginBps,
                         initialMarkE6: markE6,
                       } satisfies PnlCardData
@@ -437,7 +439,7 @@ function PositionCard({
             <div>
               <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Size</p>
               <p className="text-[12px] text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
-                {formatTokenAmount(sizeAbs, decimals)}
+                {formatLotQ(sizeAbs, decimals, pos.lotExp ?? 0)}
                 {pos.deleveraged && (
                   <span
                     className="ml-1 inline-block rounded-sm bg-[var(--short)]/10 px-1 py-0.5 text-[8px] font-bold uppercase text-[var(--short)]"
@@ -463,7 +465,7 @@ function PositionCard({
             <div>
               <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Mark Price</p>
               <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
-                {markE6 > 0n ? formatUsdPriceE6(markE6) : "—"}
+                {markE6 > 0n ? formatLotPriceE6(markE6, pos.lotExp ?? 0) : "—"}
               </p>
             </div>
             <div>

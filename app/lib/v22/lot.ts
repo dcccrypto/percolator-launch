@@ -79,3 +79,58 @@ export function tokenQToQ(tokenQ: bigint, lotExp: number): { q: bigint; remainde
 
 /** A value per unit of Q (a per-lot PnL / notional input) cannot be rescaled: only q and price carry the lot. */
 export const LOT_NOTE = "1 lot = 10^lotExp tokens";
+
+// ── Trade-surface helpers (G3) ───────────────────────────────────────────
+import { formatMarkPrice, formatTokenAmount, formatUsdPriceE6 } from "../format";
+
+/** Q-units of float / atom-truncation slack when quantising a typed size to lots (see quantizeQToLots). */
+export const QUANTISE_TOLERANCE_Q = 2n;
+
+/** Whole lots only: a typed size is quantised DOWN to a lot multiple (Q is POS_SCALE per lot). Identity when lotExp = 0. */
+export function quantizeQToLots(q: bigint, lotExp: number): { q: bigint; remainderQ: bigint } {
+  if (lotExp === 0) return { q, remainderQ: 0n };
+  const neg = q < 0n;
+  const abs = neg ? -q : q;
+  let whole = (abs / POS_SCALE_V22) * POS_SCALE_V22;
+  let rem = abs - whole;
+  // The ticket derives Q from a margin truncated to collateral atoms, so an EXACT whole-lot size typed in tokens can land
+  // a hair under the lot (e.g. 999,999 of 1,000,000 Q). Within QUANTISE_TOLERANCE_Q of the next lot counts as that lot
+  // (2e-6 of a lot; far below one atom of margin at the $10 per-lot floor), never more.
+  if (POS_SCALE_V22 - rem <= QUANTISE_TOLERANCE_Q && rem !== 0n) {
+    whole += POS_SCALE_V22;
+    rem = 0n;
+  }
+  return { q: neg ? -whole : whole, remainderQ: neg ? -rem : rem };
+}
+
+/** The tokens a Q (in lots) is worth, as a Q-scaled bigint (POS_SCALE per token). Same as qToTokenQ. */
+export const lotQToTokenQ = qToTokenQ;
+
+/** USD price per TOKEN from the per-lot USD price (a float, for display / typed-size maths). Identity at lotExp = 0. */
+export function tokenUsdOfLotUsd(perLotUsd: number, lotExp: number): number {
+  return lotExp === 0 ? perLotUsd : perLotUsd / 10 ** lotExp;
+}
+
+/** Display a per-lot e6 mark/entry/liquidation price per token. Byte-identical to formatUsdPriceE6 at lotExp = 0. */
+export function formatLotPriceE6(perLotE6: bigint | null | undefined, lotExp: number, fallback = "—"): string {
+  if (lotExp === 0 || perLotE6 == null) return formatUsdPriceE6(perLotE6, fallback);
+  if (perLotE6 <= 0n) return fallback;
+  return formatMarkPrice(tokenUsdOfLotUsd(Number(perLotE6) / 1e6, lotExp), fallback);
+}
+
+/** Display a position size (engine Q in lots) in TOKENS. Byte-identical to formatTokenAmount at lotExp = 0. */
+export function formatLotQ(q: bigint | null | undefined, decimals: number, lotExp: number, maxDisplayDecimals?: number): string {
+  if (q == null || lotExp === 0) return formatTokenAmount(q, decimals, maxDisplayDecimals);
+  return formatTokenAmount(qToTokenQ(q, lotExp), decimals, maxDisplayDecimals);
+}
+
+/*
+ * UNIT CONTRACT (set by fork G4, relied on by every surface):
+ *  - Everything INSIDE the app's price/size plumbing stays in the engine's unit: price per LOT (e6), size in LOTS (Q,
+ *    POS_SCALE per lot). PnL, margin, liquidation maths and the price store therefore need no conversion.
+ *  - priceStore (lib/priceStore) stores per-LOT prices: feeds that quote per TOKEN (WS ticks, the DB / API `last_price`)
+ *    are scaled by 10^lotExp on ingestion (`setLotExp`, driven by useLivePrice from the slab bytes).
+ *  - CONVERSION HAPPENS ONLY AT THE EDGES: display (formatLotPriceE6 / formatLotQ / tokenUsdOfLotUsd), typed input
+ *    (tokenQToQ / quantizeQToLots) and API output (lib/v22/lot-view.ts). The /api/markets, /api/markets/[slab] and
+ *    /api/open-interest routes OUTPUT per-token prices and token-scaled OI (what external consumers expect).
+ */

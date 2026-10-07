@@ -36,7 +36,8 @@ export interface ConsentView extends StakeDeployParamsV5 {
 }
 
 export function consentViewOf(pool: StakePoolV5): ConsentView {
-  return { ...consentParamsForPoolV5(pool), version: CONSENT_VERSION_FIRST_LOSS_V5 };
+  // F11: the version is the POOL's (the program refuses a byte that differs from `pool.consent_version`), never a constant.
+  return { ...consentParamsForPoolV5(pool), version: pool.consentVersion };
 }
 
 /** Stable key of the numbers the consent covers; a changed key invalidates the checkbox. */
@@ -45,6 +46,9 @@ export function consentKey(c: ConsentView): string {
 }
 
 export const pctOfBps = (bps: number): string => `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 2)}%`;
+
+/** The consent text this app ships is for exactly this version; any other pool version gets no consent UI and no deposit. */
+export const consentTextMatches = (c: Pick<ConsentView, 'version'>): boolean => c.version === CONSENT_VERSION_FIRST_LOSS_V5;
 
 /** Thrown by the hook when the pool's numbers changed after the user consented. */
 export class ConsentChangedError extends Error {
@@ -68,7 +72,7 @@ export interface BuildStakeDepositV5 {
 
 /** The first-loss deposit instruction: 16-byte data, 14 accounts (`ACCOUNTS_STAKE_DEPOSIT_V5`). */
 export function buildStakeDepositV5Ix(p: BuildStakeDepositV5): TransactionInstruction {
-  const data = encodeStakeDepositWithConsentV5(p.amount, consentParamsForPoolV5(p.poolState), CONSENT_VERSION_FIRST_LOSS_V5);
+  const data = encodeStakeDepositWithConsentV5(p.amount, consentParamsForPoolV5(p.poolState), p.poolState.consentVersion);
   const keys = stakeMetasV5(ACCOUNTS_STAKE_DEPOSIT_V5, {
     user: p.user,
     pool: p.pool,

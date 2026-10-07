@@ -1,10 +1,11 @@
 'use client';
 
+import { parseLpVaultRegistry } from "@/lib/v22/records";
 import { earnNavFloorLive } from "@/lib/program-upgrade-detect";
 import { isHiddenFromListing } from "@/lib/listing-hidden";
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Connection, PublicKey } from '@solana/web3.js';
-import { deriveLpVaultRegistry, parseLpVaultRegistry, isV17Account } from '@percolatorct/sdk';
+import { deriveLpVaultRegistry, isV17Account } from '@percolatorct/sdk';
 import { getConfig, getRpcEndpoint } from '@/lib/config';
 import { isMockMode } from '@/lib/mock-mode';
 import { isBlockedSlab } from '@/lib/blocklist';

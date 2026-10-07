@@ -29,6 +29,7 @@
  *   - handle_execute_redemption (+ vault_pot_free_backing_num and both sibling top-ups)
  * Pure; the hook reads the accounts.
  */
+import { parseLpVaultRegistry } from "@/lib/v22/records";
 import { SystemProgram, type Connection, type PublicKey, type TransactionInstruction } from "@solana/web3.js";
 import {
   ACCOUNTS_REBALANCE_LP_VAULT_BACKING,
@@ -38,7 +39,6 @@ import {
   deriveLpBackingLedger,
   deriveLpVaultRegistry,
   encodeRebalanceLpVaultBacking,
-  parseLpVaultRegistry,
 } from "@percolatorct/sdk";
 import { marketOffsetsOrNull } from "@/lib/v22/market-offsets";
 import * as C from "./constants";

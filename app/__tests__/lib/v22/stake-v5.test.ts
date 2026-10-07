@@ -110,3 +110,15 @@ describe("consent text v2", () => {
     expect(mine).toBe(text);
   });
 });
+
+
+describe("F11: the byte sent is the pool's consent version", () => {
+  it("consentViewOf and the deposit data carry pool.consentVersion, and the UI text matches only version 2", async () => {
+    const { consentViewOf, consentTextMatches } = await import("@/lib/v22/stake-v5");
+    const pool = (v: number) => ({ consentVersion: v, deployTargetBps: 5000, liquidBufferBps: 3000, hysteresisBps: 500, pendingTargetBps: 0 }) as never;
+    expect(consentViewOf(pool(2)).version).toBe(2);
+    expect(consentViewOf(pool(3)).version).toBe(3);
+    expect(consentTextMatches(consentViewOf(pool(3)))).toBe(false);
+    expect(consentTextMatches(consentViewOf(pool(2)))).toBe(true);
+  });
+});

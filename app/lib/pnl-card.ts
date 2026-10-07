@@ -8,6 +8,7 @@
  * the cent. sim-USDC collateral is $1-pegged (PLAYGROUND.md), so a collateral-
  * scale atom count divided by 10^decimals IS the USD figure.
  */
+import { tokenUsdOfLotUsd } from "@/lib/v22/lot";
 import { computePnlPercent } from "@percolatorct/sdk";
 import { computePositionInitialMargin } from "@/lib/trading";
 import { valueAtMark } from "@/lib/position-pnl";
@@ -45,8 +46,10 @@ export interface PnlCardData {
   nominalSizeQ: bigint;
   /** ADL-effective size — PnL moves on this (lib/v17-adl). Equals nominal when never deleveraged. */
   effectiveSizeQ: bigint;
-  /** Entry price (E6). */
+  /** Entry price (E6; per LOT on a v2.2 lot market). */
   entryE6: bigint;
+  /** v2.2 lot exponent of the market (0 / omitted = no lots). The card SHOWS per-token prices (lib/v22/lot.ts). */
+  lotExp?: number;
   /** Initial-margin bps for this market. */
   initialMarginBps: bigint;
   /** Mark to use until the live store publishes a tick (keeps the card non-blank). */
@@ -154,8 +157,8 @@ export function computePnlCardStats(data: PnlCardData, markRawE6: bigint): PnlCa
     isCapped,
     tone,
     spentUsd: Number.isFinite(spentRaw) ? spentRaw : 0,
-    avgEntryUsd: e6ToUsd(data.entryE6),
-    avgExitUsd: e6ToUsd(markE6),
+    avgEntryUsd: tokenUsdOfLotUsd(e6ToUsd(data.entryE6), data.lotExp ?? 0),
+    avgExitUsd: tokenUsdOfLotUsd(e6ToUsd(markE6), data.lotExp ?? 0),
     isProfit: pnlUsd >= 0,
     hasMark,
   };

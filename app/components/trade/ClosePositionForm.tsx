@@ -1,7 +1,8 @@
 "use client";
 
 import { FC, useMemo, useState } from "react";
-import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
+import { formatTokenAmount } from "@/lib/format";
+import { formatLotPriceE6, formatLotQ } from "@/lib/v22/lot";
 import { computeMarkPnl, computeMarkPnlCollateral, clampClosePercent, UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
 
 /**
@@ -34,6 +35,8 @@ export interface ClosePositionFormProps {
   collateralSymbol?: string;
   decimals: number;
   priceUsd: number | null;
+  /** v2.2 lot exponent (position in lots, prices per lot); omitted = no lots. */
+  lotExp?: number;
   isLong: boolean;
   loading: boolean;
   tradingFeeBps?: bigint;
@@ -78,6 +81,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
   collateralSymbol,
   decimals,
   priceUsd,
+  lotExp = 0,
   isLong,
   loading,
   tradingFeeBps = 0n,
@@ -178,10 +182,10 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
           {previewUnavailable ? (
             <span style={{ fontFamily: "var(--font-mono)" }}>--</span>
           ) : (
-            <span style={{ fontFamily: "var(--font-mono)" }}>{formatTokenAmount(absPosition, decimals)}</span>
+            <span style={{ fontFamily: "var(--font-mono)" }}>{formatLotQ(absPosition, decimals, lotExp)}</span>
           )}{" "}{symbol} at{" "}
           {entryKnown ? (
-            <><span style={{ fontFamily: "var(--font-mono)" }}>{formatUsdPriceE6(entryPrice)}</span> entry</>
+            <><span style={{ fontFamily: "var(--font-mono)" }}>{formatLotPriceE6(entryPrice, lotExp)}</span> entry</>
           ) : (
             <span title={UNKNOWN_ENTRY_TOOLTIP}>unknown entry</span>
           )}
@@ -241,13 +245,13 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
         <div className="flex justify-between">
           <span className="text-[var(--text-dim)]">Close Size:</span>
           <span className="font-mono font-medium text-[var(--text)]">
-            {formatTokenAmount(preview.closeAbs, decimals)} {symbol}
+            {formatLotQ(preview.closeAbs, decimals, lotExp)} {symbol}
           </span>
         </div>
         <div className="flex justify-between">
           <span className="text-[var(--text-dim)]">Remaining:</span>
           <span className="font-mono font-medium text-[var(--text)]">
-            {formatTokenAmount(preview.remainingAbs, decimals)} {symbol}
+            {formatLotQ(preview.remainingAbs, decimals, lotExp)} {symbol}
           </span>
         </div>
         <div className="flex justify-between border-t border-[var(--border)]/30 pt-2">

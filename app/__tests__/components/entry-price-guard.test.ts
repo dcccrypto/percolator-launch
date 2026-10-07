@@ -205,7 +205,8 @@ function enclosingConditions(src: string, at: number): string[] {
 }
 
 /** Every formatter call on an entry-named value, anywhere in the tree. */
-const ENTRY_FORMAT = /format\w*\(\s*([\w?.]*[eE]ntry[\w?.]*)\s*\)/g;
+// v2.2: lot-aware formatters take the lot exponent as a 2nd argument (formatLotPriceE6(entryE6, lotExp)); still a readout.
+const ENTRY_FORMAT = /format\w*\(\s*([\w?.]*[eE]ntry[\w?.]*)\s*(?:,[^()]*(?:\([^()]*\)[^()]*)*)?\)/g;
 const FORMAT_EXEMPT: Record<string, string> = {
   "components/trade/OrderTicket.tsx|estEntry": "projected fill for the order being placed, not a held entry",
   "components/trade/AccountsCard.tsx|row.entryPrice": "pre-v17 accounts only; entry_price decoded from chain there",

@@ -9,6 +9,7 @@
  * unwrapped leg; send / unwrap act on the NFT actually held, self-minted or received).
  * ClosedPositionNftNotice covers the one case the row menu can't: a wrapped position that closed, which has no row.
  */
+import { formatLotQ, lotExpOf } from "@/lib/v22/lot";
 import { type FC, useEffect, useRef, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { usePositionNft } from "@/hooks/usePositionNft";
@@ -179,7 +180,7 @@ export const PositionNftMenu: FC<{ slabAddress: string }> = ({ slabAddress }) =>
   const nftOverride = effectiveNftMint && effectiveNftPdaAddress ? { nftMint: effectiveNftMint, nftPdaAddress: effectiveNftPdaAddress } : undefined;
   const { burn, loading: burnLoading, error: burnError } = useBurnPositionNft(slabAddress, nftOverride);
   const { transfer, loading: transferLoading, error: transferError } = useTransferPositionNft(slabAddress, nftOverride && { nftMint: nftOverride.nftMint });
-  const { config } = useSlabState();
+  const { config, raw: slabRaw } = useSlabState();
   const meta = useTokenMeta(config?.collateralMint ?? null);
   const decimals = meta?.decimals ?? 6;
   const collateralSymbol = meta?.symbol ?? "USDC";
@@ -196,7 +197,7 @@ export const PositionNftMenu: FC<{ slabAddress: string }> = ({ slabAddress }) =>
   const mintAddress = effectiveNftMint?.toBase58() ?? null;
   const summary =
     effective && effective.account.positionSize !== 0n
-      ? `${effective.account.positionSize > 0n ? "LONG" : "SHORT"} ${formatTokenAmount(effective.account.positionSize < 0n ? -effective.account.positionSize : effective.account.positionSize, decimals)} ${assetSymbol}`
+      ? `${effective.account.positionSize > 0n ? "LONG" : "SHORT"} ${formatLotQ(effective.account.positionSize < 0n ? -effective.account.positionSize : effective.account.positionSize, decimals, lotExpOf(slabRaw))} ${assetSymbol}`
       : "No open position";
   const collateralLabel = own ? `${formatTokenAmount(own.account.capital, decimals)} ${collateralSymbol}` : `the ${collateralSymbol}`;
   const busy = mintLoading || pendingMint ? "wrap" : transferLoading ? "send" : burnLoading ? "unwrap" : null;

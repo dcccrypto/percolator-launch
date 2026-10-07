@@ -20,6 +20,8 @@ import {
   decodeVaultLpStateP3 as oldDecodeVaultLpStateP3,
   listOpenResolvedReceiptsP3 as oldListOpenResolvedReceiptsP3,
   parseBackingBucketsV17 as oldParseBackingBucketsV17,
+  parseLpRedemption as oldParseLpRedemption,
+  parseLpVaultRegistry as oldParseLpVaultRegistry,
   readAssetPricesP3 as oldReadAssetPricesP3,
 } from "@percolatorct/sdk";
 import { assetGrowthAccountOffsetV19 as oldAssetGrowthAccountOffsetV19, decodeAssetGrowthV19 as oldDecodeAssetGrowthV19, decodeAdlEpisode as oldDecodeAdlEpisode } from "../v21/sdk";
@@ -31,6 +33,7 @@ import * as Earn from "./sdk/records/p2b-earn";
 import * as P3 from "./sdk/records/p3-vault-lp";
 import * as Bucket from "./sdk/records/backing-bucket";
 import * as Wind from "./sdk/records/stake-wind-down";
+import * as Slab from "./sdk/slab";
 
 export { UnknownLayoutError } from "./sdk";
 export const v22Records = Object.freeze({
@@ -57,3 +60,13 @@ export const listOpenResolvedReceiptsP3: typeof P3.listOpenResolvedReceiptsP3 = 
   on() ? P3.listOpenResolvedReceiptsP3(c, p, m, layout ?? undefined) : oldListOpenResolvedReceiptsP3(c, p, m);
 export const parseBackingBucketsV17: typeof Bucket.parseBackingBucketsV17 = (d) => (on() ? Bucket.parseBackingBucketsV17(d) : oldParseBackingBucketsV17(d));
 export const decodeTerminalInsuranceCapacity: typeof Wind.decodeTerminalInsuranceCapacity = (d, i) => (on() ? Wind.decodeTerminalInsuranceCapacity(d, i) : oldDecodeTerminalInsuranceCapacity(d, i));
+
+/**
+ * Review F5: the installed SDK 8.0.0 `parseLpVaultRegistry` / `parseLpRedemption` assert wrapper VERSION 18, but a v2.2
+ * program stamps 19 on every account kind, so the Earn rail could not read its own vault. Flag on: the vendored port
+ * (VERSION-keyed via `resolveLayout`: 18 and 19 accepted, anything else a typed `UnknownLayoutError`; the redemption
+ * body is the same first 112 bytes, 128 B on a v2.2-form request). Flag off: the installed function, unchanged.
+ * Return types are the installed ones (the ports return the same shape).
+ */
+export const parseLpVaultRegistry: typeof oldParseLpVaultRegistry = (d) => (on() ? Slab.parseLpVaultRegistry(d) : oldParseLpVaultRegistry(d));
+export const parseLpRedemption: typeof oldParseLpRedemption = (d) => (on() ? Slab.parseLpRedemption(d) : oldParseLpRedemption(d));

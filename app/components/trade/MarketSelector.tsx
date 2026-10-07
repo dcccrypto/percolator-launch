@@ -1,5 +1,6 @@
 "use client";
 
+import { formatLotPriceE6 } from "@/lib/v22/lot";
 import { isHiddenFromListing } from "@/lib/listing-hidden";
 import { FC, useState, useRef, useEffect, useMemo } from "react";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
@@ -48,7 +49,7 @@ export const MarketSelector: FC<MarketSelectorProps> = ({
   const searchRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const { statsMap, loading } = useAllMarketStats();
-  const { priceE6: livePriceE6, change24h: change24hPct } = useLivePrice();
+  const { priceE6: livePriceE6, change24h: change24hPct, lotExp: liveLotExp } = useLivePrice();
 
   // Close on outside click
   useEffect(() => {
@@ -110,7 +111,7 @@ export const MarketSelector: FC<MarketSelectorProps> = ({
 
   // Format live price for trigger display
   const livePriceDisplay = livePriceE6 != null && livePriceE6 > 0n
-    ? formatUsdPriceE6(livePriceE6)
+    ? formatLotPriceE6(livePriceE6, liveLotExp ?? 0)
     : currentMarket?.last_price != null
       ? formatUsdFromNumber(currentMarket.last_price)
       : null;

@@ -6,8 +6,8 @@
  */
 import { useEffect, useState } from 'react';
 import { useStakeFirstLoss } from '@/hooks/useStakeFirstLoss';
-import { ConsentChangedError, consentKey, consentViewOf, pctOfBps } from '@/lib/v22/stake-v5';
-import { STAKE_CONSENT_TEXT_V2, V22_COPY } from '@/lib/v22/copy';
+import { ConsentChangedError, consentKey, consentTextMatches, consentViewOf, pctOfBps } from '@/lib/v22/stake-v5';
+import { STAKE_CONSENT_TEXT_V2, V22_COPY, consentDisplay } from '@/lib/v22/copy';
 import { parseHumanAmount } from '@/lib/parseAmount';
 
 export function FirstLossDeposit({ slabAddress, collateralMint, decimals = 6, onDone }: { slabAddress: string; collateralMint: string; decimals?: number; onDone?: () => void }) {
@@ -24,6 +24,8 @@ export function FirstLossDeposit({ slabAddress, collateralMint, decimals = 6, on
   }, [key]);
 
   if (!view) return null;
+  // F11: the text below is consent text v2; a pool on another consent version gets no deposit UI at all.
+  if (!consentTextMatches(view)) return <p data-testid="first-loss-unavailable" className="text-[11px] text-[var(--text-secondary)]">{V22_COPY.stake.consentUnavailable}</p>;
   let atoms: bigint | null = null;
   try { atoms = amount ? parseHumanAmount(amount, decimals) : null; } catch { atoms = null; }
   const ok = accepted === key && !!atoms && atoms > 0n && !loading;
@@ -50,7 +52,7 @@ export function FirstLossDeposit({ slabAddress, collateralMint, decimals = 6, on
         <div><dt className="text-[var(--text-secondary)]">Rebalance band</dt><dd className="tabular-nums text-[var(--text)]" data-testid="fl-hysteresis">{pctOfBps(view.hysteresisBps)}</dd></div>
       </dl>
       <div data-testid="consent-text" className="max-h-48 space-y-2 overflow-y-auto border border-[var(--border)] bg-[var(--bg-surface)] p-3 text-[11px] leading-relaxed text-[var(--text-secondary)]">
-        {STAKE_CONSENT_TEXT_V2.map((para, i) => <p key={i} data-testid="consent-para">{para}</p>)}
+        {STAKE_CONSENT_TEXT_V2.map((para, i) => <p key={i} data-testid="consent-para">{consentDisplay(para)}</p>)}
         <p className="text-[var(--text-muted)]">{V22_COPY.stake.consentVersion(view.version)}</p>
       </div>
       <label className="flex items-start gap-2 text-[11px] text-[var(--text)]">

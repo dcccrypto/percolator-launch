@@ -1,5 +1,6 @@
 "use client";
 
+import { lotExpOf, qToTokenQ } from "@/lib/v22/lot";
 import { FC } from "react";
 import { Q_SCALE } from "@/lib/q-usd";
 import { useEngineState } from "@/hooks/useEngineState";
@@ -24,7 +25,8 @@ export const SystemCapitalCard: FC = () => {
   // engine-only fields (vault, cTot, pnlPosTot, numUsedAccounts, LP aggregates)
   // are null on v17 → those rows render "—".
   const { engine, loading, hasData, insuranceBalance, totalOI, oiLong, oiShort } = useEngineState();
-  const { config } = useSlabState();
+  const { config, raw: slabRaw } = useSlabState();
+  const lotExp = lotExpOf(slabRaw);
   const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
   const decimals = tokenMeta?.decimals ?? 6;
   const divisor = 10 ** decimals;
@@ -51,7 +53,7 @@ export const SystemCapitalCard: FC = () => {
   // v17 OI is engine Q (POS_SCALE 1e6), not collateral atoms — dividing by the
   // collateral mint's decimals is right only when those happen to be 6.
   const fmtOiAtoms = (v: bigint | null): string =>
-    v == null ? "—" : fmtCompact(Number(sanitizeOnChainValue(v)) / (engine ? divisor : Q_SCALE));
+    v == null ? "—" : fmtCompact(Number(engine ? sanitizeOnChainValue(v) : qToTokenQ(sanitizeOnChainValue(v), lotExp)) / (engine ? divisor : Q_SCALE));
   const totalOIStr = fmtOiAtoms(totalOI);
   const oiLongStr = fmtOiAtoms(oiLong);
   const oiShortStr = fmtOiAtoms(oiShort);

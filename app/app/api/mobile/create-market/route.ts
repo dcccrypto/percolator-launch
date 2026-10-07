@@ -26,6 +26,7 @@
  * NEXT_PUBLIC_SOLANA_NETWORK) === "devnet" is accepted; all other values (mainnet,
  * staging, unset) return 403 (GH#1950).
  */
+import { marketAccountLen } from "@/lib/v22/layout";
 import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -58,7 +59,6 @@ import {
   deriveNftRegistry,
   MATCHER_CONTEXT_LEN,
   MAX_BACKING_BUCKET_EXPIRY_SLOT,
-  v17MarketAccountLen,
   type SlabTierKey,
 } from "@percolatorct/sdk";
 import { portfolioAccountLen } from "@/lib/v22/layout";
@@ -236,7 +236,7 @@ export async function POST(req: NextRequest) {
     // those fail InitMarket's (len-592-758)%1797==0 check and revert; 592 = header+config after the
     // 576-byte fee-split config). `tier` still selects the program ID above; the slab account length
     // is computed from the asset-slot capacity via the SDK's v17MarketAccountLen (SDK-derived offsets).
-    const slabDataSize = v17MarketAccountLen(14);
+    const slabDataSize = marketAccountLen(14);
 
     // Default margin/leverage params — conservative for new markets
     const initialMarginBps = 2000n; // 50% margin = 5× leverage

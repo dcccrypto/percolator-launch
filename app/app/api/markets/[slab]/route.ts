@@ -1,3 +1,5 @@
+import { lotExpOf } from "@/lib/v22/lot";
+import { lotMarketNumbers } from "@/lib/v22/lot-view";
 import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
@@ -153,7 +155,9 @@ async function onChainSlabFallback(slab: string): Promise<NextResponse> {
 
     const cfg = parseWrapperConfigV17(data, V17_HEADER_LEN);
     const markPriceRaw = cfg.markEwmaE6;
-    const markPriceUsd = markPriceRaw > 0n ? Number(markPriceRaw) / 1_000_000 : null;
+    // v2.2 lot market: per-LOT mark and lot-denominated OI -> per-token price and token-scaled OI (identity at lotExp 0).
+    const lotExp = lotExpOf(data);
+    const markPriceUsd = lotMarketNumbers({ markE6: markPriceRaw, oiLongQ: 0n, oiShortQ: 0n }, lotExp).priceUsd;
     // Creator fee claim (tag 90): the accrued balance + the wallet that may claim
     // it (asset 0's asset_admin). Surfaced so My Markets can show creators their
     // claimable fees without a separate on-chain read. Cheap — reuses `data`.
@@ -172,8 +176,9 @@ async function onChainSlabFallback(slab: string): Promise<NextResponse> {
     let oiLong = 0, oiShort = 0, insurance = 0;
     try {
       const oi = parseMarketOI(data);
-      oiLong = Number(oi.totalLongOiQ);
-      oiShort = Number(oi.totalShortOiQ);
+      const lotNums = lotMarketNumbers({ markE6: markPriceRaw, oiLongQ: oi.totalLongOiQ, oiShortQ: oi.totalShortOiQ }, lotExp);
+      oiLong = lotNums.oiLong;
+      oiShort = lotNums.oiShort;
       insurance = Number(oi.insuranceBalance);
     } catch { /* stats stay zeroed */ }
 
@@ -198,6 +203,8 @@ async function onChainSlabFallback(slab: string): Promise<NextResponse> {
       is_zombie: false,
       last_price: markPriceUsd,
       mark_price: markPriceUsd,
+      // v2.2 lot market only (absent otherwise): tokens per lot = 10^lot_exp. last_price / OI are already per token.
+      ...(lotExp > 0 ? { lot_exp: lotExp } : {}),
       index_price: null,
       // Volume needs the trade-tape indexer — null ("no data"), NOT 0.
       // MarketInfoBar renders null as "—"; a hard $0 reads as "market is dead".

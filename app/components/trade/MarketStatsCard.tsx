@@ -1,5 +1,6 @@
 "use client";
 
+import { lotExpOf, qToTokenQ } from "@/lib/v22/lot";
 import { FC, useMemo } from "react";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useMarketConfig } from "@/hooks/useMarketConfig";
@@ -37,7 +38,8 @@ function fundingRateBpsTo8h(rateBps: bigint): number {
 export const MarketStatsCard: FC = () => {
   // totalOI/oiLong/oiShort work on BOTH v12 and v17; vault is engine-only (null on v17).
   const { engine, params, fundingRate, loading, totalOI: totalOIField, oiLong, oiShort, vault: vaultField } = useEngineState();
-  const { config: mktConfig, slabAddress, wrapperConfigV17 } = useSlabState();
+  const { config: mktConfig, slabAddress, wrapperConfigV17, raw: slabRaw } = useSlabState();
+  const lotExp = lotExpOf(slabRaw); // v2.2: OI is in LOTS; token amounts below show tokens (USD uses the per-lot price: invariant)
   const config = useMarketConfig();
   const { market: marketInfo } = useMarketInfo(slabAddress);
   const { priceE6: livePriceE6, priceUsd } = useLivePrice();
@@ -92,11 +94,11 @@ export const MarketStatsCard: FC = () => {
   const fmtOI = (atoms: bigint): string =>
     showUsd && priceUsd != null
       ? formatNum((Number(atoms) / Q_SCALE) * priceUsd)
-      : formatCompactTokenAmount(atoms, Q_DECIMALS);
+      : formatCompactTokenAmount(qToTokenQ(atoms, lotExp), Q_DECIMALS);
   const fmtOIFull = (atoms: bigint): string =>
     showUsd && priceUsd != null
       ? formatNum((Number(atoms) / Q_SCALE) * priceUsd)
-      : formatTokenAmount(atoms, Q_DECIMALS);
+      : formatTokenAmount(qToTokenQ(atoms, lotExp), Q_DECIMALS);
   const oiDisplay = fmtOI(totalOI);
   const oiFullDisplay = fmtOIFull(totalOI);
   // A: "Market LP" is COLLATERAL (sim-USDC) atoms — already USD-denominated —

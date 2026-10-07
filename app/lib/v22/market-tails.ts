@@ -23,6 +23,22 @@ import {
   withInsuranceUnitsTailV22,
 } from "./sdk";
 
+/**
+ * Review (F12 follow-up): an app builder whose account count does not match the SDK's tail index would silently skip the tail
+ * and the program would refuse. In development and tests that is a LOUD error; production keeps the visible on-chain refusal.
+ */
+export class MarketTailMismatchError extends Error {
+  readonly name = "MarketTailMismatchError";
+  constructor(readonly tag: number, readonly got: number, readonly want: string) {
+    super(`market tail: tag ${tag} has ${got} accounts, the SDK tail index needs ${want}`);
+  }
+}
+const loud = (): boolean => process.env.NODE_ENV !== "production";
+/** Tags whose bond-tail form is unambiguous. 102 also has a live (7-account) form, so only its two known lengths pass. */
+const BOND_LOUD_TAGS = new Set([78, 97, 102, 103]);
+/** 101 is ExecuteAdl in the installed SDK (it only sometimes takes units), so it is never loud. */
+const UNITS_LOUD_TAGS = new Set([9, 56, 57, 41]);
+
 export interface MarketTailsV22 {
   bondTranche: PublicKey | null;
   insuranceUnits: PublicKey | null;
@@ -75,6 +91,11 @@ export function applyMarketTailsV22(ix: TransactionInstruction, tails: MarketTai
   const tag = ix.data[0];
   let out = ix;
   const bondAt = (BOND_TAIL_INDEX_V22 as Record<number, number>)[tag];
+  if (loud() && tails.bondTranche && bondAt !== undefined && BOND_LOUD_TAGS.has(tag)) {
+    const has = out.keys.some((k) => k.pubkey.equals(tails.bondTranche!));
+    const okLen = out.keys.length === bondAt || (has && out.keys.length === bondAt + 1) || (tag === 102 && out.keys.length === 7);
+    if (!okLen) throw new MarketTailMismatchError(tag, out.keys.length, `${bondAt}${tag === 102 ? " (or 7 for a live market)" : ""}`);
+  }
   if (tails.bondTranche && bondAt !== undefined && out.keys.length === bondAt && !out.keys.some((k) => k.pubkey.equals(tails.bondTranche!))) {
     // Tag 78 re-certifies the vault LP before valuing the bonds (N-1): the vault LP at [8] must be WRITABLE. The app's
     // 78 builder may leave it read-only, so rebuild that meta writable before appending the tranche.
@@ -85,6 +106,9 @@ export function applyMarketTailsV22(ix: TransactionInstruction, tails: MarketTai
     out = withBondTailV22(out, tails.bondTranche);
   }
   const unitsFrom = (INSURANCE_UNITS_TAIL_FROM_V22 as Record<number, number>)[tag];
+  if (loud() && tails.insuranceUnits && unitsFrom !== undefined && UNITS_LOUD_TAGS.has(tag) && out.keys.length < unitsFrom) {
+    throw new MarketTailMismatchError(tag, out.keys.length, `at least ${unitsFrom}`);
+  }
   if (tails.insuranceUnits && unitsFrom !== undefined && out.keys.length >= unitsFrom && !out.keys.some((k) => k.pubkey.equals(tails.insuranceUnits!))) {
     out = withInsuranceUnitsTailV22(out, tails.insuranceUnits);
   }
@@ -106,7 +130,8 @@ export async function withMarketTailsV22(connection: Pick<Connection, "getMultip
     }
     try {
       out.push(applyMarketTailsV22(ix, await fetchMarketTailsV22(connection, wrapper, ix.keys[1].pubkey)));
-    } catch {
+    } catch (e) {
+      if (e instanceof MarketTailMismatchError && loud()) throw e;
       out.push(ix);
     }
   }

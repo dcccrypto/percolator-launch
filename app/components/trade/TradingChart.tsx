@@ -1,5 +1,6 @@
 "use client";
 
+import { lotExpOf, tokenUsdOfLotUsd } from "@/lib/v22/lot";
 import { FC, memo, useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   createChart,
@@ -126,8 +127,9 @@ function aggregateCandles(prices: PricePoint[], intervalMs: number) {
  * page-level [component] re-render."
  */
 function LiveMarkPriceLabel() {
-  const { priceUsd } = useLivePrice();
-  if (priceUsd == null || priceUsd <= 0) return null;
+  const { priceUsd: lotUsd, lotExp } = useLivePrice();
+  if (lotUsd == null || lotUsd <= 0) return null;
+  const priceUsd = tokenUsdOfLotUsd(lotUsd, lotExp ?? 0); // store is per LOT; the label shows per TOKEN
   return (
     <div className="text-2xl font-bold text-[var(--text)] drop-shadow-sm" style={{ fontFamily: "var(--font-mono)" }}>
       {formatUsdFromNumber(priceUsd)}
@@ -194,7 +196,7 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
   // Phase 2: liq price overlay
   const realUserAccount = useUserAccount();
   const marketConfig = useMarketConfig();
-  const { params } = useSlabState();
+  const { params, raw: slabRaw } = useSlabState();
   const liqPriceE6 = useLiqPrice();
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -431,7 +433,7 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
     return subscribeSlab(slabAddress, () => {
       const snap = getSnapshot(slabAddress);
       if (snap.priceUsd == null) return;
-      const usd = snap.priceUsd;
+      const usd = tokenUsdOfLotUsd(snap.priceUsd, snap.lotExp ?? 0);
       const now = Date.now();
       setOraclePrices((prev) => {
         const last = prev[prev.length - 1];
@@ -840,7 +842,7 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
     const referencePriceUsd =
       candleData[candleData.length - 1]?.close ??
       lineData[lineData.length - 1]?.price ??
-      getSnapshot(slabAddress).priceUsd ??
+      (() => { const sn = getSnapshot(slabAddress); return sn.priceUsd == null ? null : tokenUsdOfLotUsd(sn.priceUsd, sn.lotExp ?? 0); })() ??
       null;
     const priceFormat = { type: "price" as const, ...chartPricePrecision(referencePriceUsd) };
 
@@ -862,7 +864,7 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
       // Mark price line — initial value read non-reactively from the store
       // (this effect no longer depends on priceUsd; the "Live tick -> chart"
       // effect keeps this line fresh via applyOptions() afterward).
-      const initialPriceUsd = getSnapshot(slabAddress).priceUsd;
+      const initialPriceUsd = (() => { const sn = getSnapshot(slabAddress); return sn.priceUsd == null ? null : tokenUsdOfLotUsd(sn.priceUsd, sn.lotExp ?? 0); })();
       // Finite-guard mirrors the Liq/Entry lines below: a NaN mark price would
       // pass `!= null` yet feed a non-finite price into createPriceLine.
       if (initialPriceUsd != null && Number.isFinite(initialPriceUsd)) {
@@ -1142,12 +1144,12 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
   // they can therefore differ from PositionPanel/PositionsDock (which prefer
   // the live price) by (live − on-chain mark).
   const liqLinePrice = (() => {
-    const n = liqPriceE6 != null && liqPriceE6 > 0n ? Number(liqPriceE6) / 1e6 : null;
+    const n = liqPriceE6 != null && liqPriceE6 > 0n ? tokenUsdOfLotUsd(Number(liqPriceE6) / 1e6, lotExpOf(slabRaw)) : null;
     return overlayPrefs.liq && n != null && Number.isFinite(n) && n > 0 ? n : null;
   })();
   const entryLinePrice =
     overlayPrefs.entry && entryPriceNum != null && Number.isFinite(entryPriceNum) && entryPriceNum > 0
-      ? entryPriceNum
+      ? tokenUsdOfLotUsd(entryPriceNum, lotExpOf(slabRaw))
       : null;
 
   // Mirror the current liq line price so the ref-based recomputeLiqEdge
@@ -1194,7 +1196,7 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
       // crash after the initial safe paint.
       if (snap.priceUsd == null || !Number.isFinite(snap.priceUsd)) return;
       const finishSpan = startPerfSpan("chart-tick-to-paint");
-      const usd = snap.priceUsd;
+      const usd = tokenUsdOfLotUsd(snap.priceUsd, snap.lotExp ?? 0);
 
       if (priceLineRef.current) {
         // Hyperliquid-style: the mark price tag on the right axis tints
@@ -1260,7 +1262,7 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
   // loaded) — read non-reactively rather than subscribing TradingChart to
   // live price just for this rare edge case. See the top-of-component
   // comment for the full Phase 2 rationale.
-  const currentPrice = activeData[activeData.length - 1]?.price ?? getSnapshot(slabAddress).priceUsd ?? 0;
+  const currentPrice = activeData[activeData.length - 1]?.price ?? tokenUsdOfLotUsd(getSnapshot(slabAddress).priceUsd ?? 0, getSnapshot(slabAddress).lotExp ?? 0);
   const ref24h = computeRef24h(activeData, timeframe, currentPrice);
   const { priceChange, priceChangePercent, isUp } = computePriceChange(currentPrice, ref24h);
 

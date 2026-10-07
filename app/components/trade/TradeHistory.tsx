@@ -1,5 +1,6 @@
 "use client";
 
+import { formatLotQ, lotExpOf, tokenUsdOfLotUsd } from "@/lib/v22/lot";
 import { FC, useEffect, useRef, useState, useCallback } from "react";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 
@@ -30,7 +31,8 @@ function toBigInt(val: number | string | bigint): bigint {
 }
 
 export const TradeHistory: FC<{ slabAddress: string }> = ({ slabAddress }) => {
-  const { config: mktConfig } = useSlabState();
+  const { config: mktConfig, raw: slabRaw } = useSlabState();
+  const lotExp = lotExpOf(slabRaw);
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   // Use on-chain decimals — size from API is in raw token units (i128 on-chain)
   const decimals = tokenMeta?.decimals ?? 6;
@@ -176,10 +178,10 @@ export const TradeHistory: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                   </span>
                 </div>
                 <div className="text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
-                  {trade.size != null ? formatTokenAmount(toBigInt(Math.abs(typeof trade.size === "number" ? trade.size : parseFloat(trade.size))), decimals) : "—"}
+                  {trade.size != null ? formatLotQ(toBigInt(Math.abs(typeof trade.size === "number" ? trade.size : parseFloat(trade.size))), decimals, lotExp) : "—"}
                 </div>
                 <div className="text-right text-[var(--text-muted)]" style={{ fontFamily: "var(--font-mono)" }}>
-                  {trade.price != null ? formatUsdFromNumber(Number(trade.price)) : "—"}
+                  {trade.price != null ? formatUsdFromNumber(tokenUsdOfLotUsd(Number(trade.price), lotExp)) : "—"}
                 </div>
               </a>
             ))}

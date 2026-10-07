@@ -16,6 +16,7 @@ import { PublicKey, SystemProgram, type TransactionInstruction } from "@solana/w
 import { deriveVaultLpExt } from "@/lib/v21/sdk";
 import { encodeInitMarketData, type GrowthLaunch } from "@/lib/v21/growth-launch";
 import type { InitMarketV17Args } from "@percolatorct/sdk";
+import { withBoundVaultLpTailP3 } from "./sdk/records/p3-vault-lp";
 import { buildInitBondTrancheIxV22, encodeInitMarketV22, IX_TAG_V22, type InitBondTrancheArgs } from "./sdk";
 import type { V22LaunchParams } from "./launch-plan";
 
@@ -58,7 +59,14 @@ export function placeBondTranche(instructions: readonly TransactionInstruction[]
   const a = instructions[i94 - 1];
   const b = instructions[i94 - 2];
   if (!a || !b || !isCreate(a) || !isCreate(b) || i94 - 2 <= i74) throw new Error("placeBondTranche: InitVaultLp is not preceded by its two createAccounts");
-  const seed = instructions.slice(i74 + 1, i94 - 2);
+  // F2: after 94 the vault is BOUND, so each Earn seed (tag 75) needs the tail [11] vault_lp_state (w) and [12] the vault LP
+  // portfolio, which are exactly accounts [3] and [4] of the InitVaultLp that precedes it. Anything else in the segment
+  // (the LP-share ATA create) passes through unchanged.
+  const bind = instructions[i94]!;
+  const lpState = bind.keys[3]?.pubkey;
+  const lpPortfolio = bind.keys[4]?.pubkey;
+  if (!lpState || !lpPortfolio) throw new Error("placeBondTranche: InitVaultLp has no vault_lp_state / LP portfolio accounts");
+  const seed = instructions.slice(i74 + 1, i94 - 2).map((x) => (x.programId.equals(wrapper) && x.data[0] === 75 ? withBoundVaultLpTailP3(x, lpState, lpPortfolio) : x));
   return [...instructions.slice(0, i74 + 1), b, a, instructions[i94]!, bondIx, ...seed, ...instructions.slice(i94 + 1)];
 }
 

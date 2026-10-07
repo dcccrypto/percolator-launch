@@ -15,6 +15,7 @@
 import { SystemProgram, type PublicKey, type TransactionInstruction } from "@solana/web3.js";
 import {
   V17_PORTFOLIO_ACCOUNT_LEN,
+  v17MarketAccountLen,
   V17_MARKET_GROUP_OFF,
   V17_MARKET_GROUP_LEN,
   V17_MARKET_ASSET_SLOT_LEN,
@@ -64,6 +65,17 @@ export function portfolioAccountLen(): number {
 export function createPortfolioAccountIx(payer: PublicKey, portfolio: PublicKey, lamports: number, programId: PublicKey): TransactionInstruction {
   if (isDevnetV22Enabled()) return buildCreatePortfolioAccountIxV22(payer, portfolio, lamports, programId, LAYOUT_V22);
   return SystemProgram.createAccount({ fromPubkey: payer, newAccountPubkey: portfolio, lamports, space: V17_PORTFOLIO_ACCOUNT_LEN, programId });
+}
+
+/**
+ * Exact market-account (slab) length for `n` asset slots in the ACTIVE layout:
+ * `marketGroupOff + marketGroupLen + n * assetSlotStride` (v2.2: 592 + 806 + n * 2,629; 4,027 for one slot). The wrapper
+ * derives the slot capacity from the exact length, so a v2.1-sized slab (3,675 B) is not a whole number of v2.2 strides
+ * and InitMarket reverts. Flag off this is the SDK's `v17MarketAccountLen(n)` (3,675 for one slot), unchanged.
+ */
+export function marketAccountLen(n: number): number {
+  if (isDevnetV22Enabled()) return LAYOUT_V22.marketGroupOff + LAYOUT_V22.marketGroupLen + n * LAYOUT_V22.assetSlotStride;
+  return v17MarketAccountLen(n);
 }
 
 /** `getProgramAccounts` size + VERSION filters for portfolios of the active layout. */

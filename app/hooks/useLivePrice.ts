@@ -39,6 +39,7 @@ import { useCallback, useEffect, useSyncExternalStore } from "react";
 import useSWR from "swr";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { resolveMarketPriceE6 } from "@/lib/oraclePrice";
+import { lotExpOf } from "@/lib/v22/lot";
 import {
   subscribeSlab,
   getSnapshot,
@@ -46,6 +47,7 @@ import {
   seedFromDbIfEmpty,
   seedFromOnChain,
   setInvertFlag,
+  setLotExp,
   setStats24h,
   type PriceState,
 } from "@/lib/priceStore/priceStore";
@@ -117,6 +119,14 @@ export function useLivePrice(): PriceState {
       low24h: pricesJson.stats?.low24h ? Number(pricesJson.stats.low24h) / 1_000_000 : null,
     });
   }, [slabAddr, pricesJson]);
+
+  // v2.2: the store's unit is per LOT; tell it this market's lot exponent BEFORE any per-token feed is ingested.
+  // lotExpOf is 0 (a no-op) with the flag off, on v2.1 markets and while the slab is unread.
+  const { raw: slabRaw } = useSlabState();
+  const lotExp = lotExpOf(slabRaw);
+  useEffect(() => {
+    if (slabAddr) setLotExp(slabAddr, lotExp);
+  }, [slabAddr, lotExp]);
 
   // DB last_price — cold-start seed only (fetched once; store enforces only-if-empty).
   const marketKey = slabAddr ? `/api/markets/${slabAddr}` : null;

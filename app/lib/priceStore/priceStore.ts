@@ -49,6 +49,8 @@ export interface PriceState {
   high24h: number | null;
   low24h: number | null;
   loading: boolean;
+  /** v2.2 lot exponent of the slab (0 = no lots). `priceUsd` / `priceE6` are per LOT; display with lib/v22/lot.ts. */
+  lotExp?: number;
 }
 
 /** Shared frozen empty state — same object reference every time, so
@@ -104,6 +106,9 @@ interface SlabEntry {
   /** perf-span finish callback for the currently-buffered tick batch (Phase 0 harness). */
   pendingSpanFinish: (() => void) | null;
   invert: number | undefined;
+  /** v2.2 lot exponent of this slab (0 = no lots). The store's price unit is the engine's: per LOT; feeds that quote a
+   *  per-TOKEN price (WS ticks, the DB last_price) are scaled by 10^lotExp on the way in (lib/v22/lot.ts). */
+  lotExp: number;
   source: SeedSource;
   /** Raw (pre-invert) e6 from the last DB seed — kept so a later invert-flag
    *  arrival can retroactively correct an out-of-order DB seed (see
@@ -155,6 +160,7 @@ function getOrCreateEntry(slab: string): SlabEntry {
       flushScheduled: false,
       pendingSpanFinish: null,
       invert: undefined,
+      lotExp: 0,
       source: null,
       lastDbRawE6: null,
       lastLiveTickAt: 0,
@@ -267,7 +273,7 @@ function handleRawMessage(slab: string, entry: SlabEntry, data: unknown): void {
   }
   if (rawE6 === null) return;
 
-  const e6 = sanitizePriceE6(applyInvert(rawE6, entry.invert));
+  const e6 = sanitizePriceE6(tokenToLotE6(applyInvert(rawE6, entry.invert), entry.lotExp));
   if (e6 === 0n) return; // reject corrupt/out-of-band WS prices, same guard as pre-refactor
   const usd = Number(e6) / 1_000_000;
 
@@ -351,7 +357,28 @@ export function setInvertFlag(slab: string, invert: number | undefined): void {
   const changed = entry.invert !== invert;
   entry.invert = invert;
   if (changed && entry.source === "seed-db" && entry.lastDbRawE6 !== null) {
-    const e6 = applyInvert(entry.lastDbRawE6, invert);
+    const e6 = tokenToLotE6(applyInvert(entry.lastDbRawE6, invert), entry.lotExp);
+    const usd = e6 > 0n ? Number(e6) / 1_000_000 : entry.snapshot.priceUsd ?? 0;
+    applyPatch(entry, { price: usd, priceUsd: usd, priceE6: e6 });
+  }
+}
+
+/** Per-token e6 -> the store's per-lot e6 (identity at lotExp 0). */
+function tokenToLotE6(e6: bigint, lotExp: number): bigint {
+  return lotExp === 0 ? e6 : e6 * 10n ** BigInt(lotExp);
+}
+
+/**
+ * v2.2: tell the store this slab's lot exponent (from the market account; 0 when there are no lots). Retro-corrects a
+ * DB seed applied before the exponent was known, exactly like `setInvertFlag` does for the invert flag.
+ */
+export function setLotExp(slab: string, lotExp: number): void {
+  const entry = getOrCreateEntry(slab);
+  const changed = entry.lotExp !== lotExp;
+  entry.lotExp = lotExp;
+  if (changed && entry.snapshot.lotExp !== lotExp) applyPatch(entry, { lotExp });
+  if (changed && entry.source === "seed-db" && entry.lastDbRawE6 !== null) {
+    const e6 = tokenToLotE6(applyInvert(entry.lastDbRawE6, entry.invert), lotExp);
     const usd = e6 > 0n ? Number(e6) / 1_000_000 : entry.snapshot.priceUsd ?? 0;
     applyPatch(entry, { price: usd, priceUsd: usd, priceE6: e6 });
   }
@@ -373,7 +400,7 @@ export function seedFromDbIfEmpty(slab: string, dbPrice: number, invert: number 
   const rawE6 = toE6(dbPrice);
   entry.lastDbRawE6 = rawE6;
   if (entry.snapshot.price !== null) return; // real data already present — never clobber it
-  const e6 = applyInvert(rawE6, invert);
+  const e6 = tokenToLotE6(applyInvert(rawE6, invert), entry.lotExp);
   const usd = e6 > 0n ? Number(e6) / 1_000_000 : dbPrice;
   entry.source = "seed-db";
   applyPatch(entry, { price: usd, priceUsd: usd, priceE6: e6, loading: false });

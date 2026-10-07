@@ -1,5 +1,6 @@
 "use client";
 
+import { tokenUsdOfLotUsd } from "@/lib/v22/lot";
 import { FC, useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { PublicKey } from "@solana/web3.js";
@@ -43,7 +44,11 @@ function shortAddr(addr: string): string {
 const LiveRowPrice: FC<{ slab: string; fallback: number | null }> = ({ slab, fallback }) => {
   const subscribe = useCallback((cb: () => void) => subscribeSlab(slab, cb), [slab]);
   const getSnap = useCallback(() => getSnapshot(slab).priceUsd, [slab]);
-  const live = useSyncExternalStore(subscribe, getSnap, () => null);
+  const getLot = useCallback(() => getSnapshot(slab).lotExp ?? 0, [slab]);
+  const liveLot = useSyncExternalStore(subscribe, getSnap, () => null);
+  const lotExp = useSyncExternalStore(subscribe, getLot, () => 0);
+  // The store is per LOT (v2.2); the row shows per TOKEN. Identity at lotExp = 0.
+  const live = liveLot == null ? null : tokenUsdOfLotUsd(liveLot, lotExp);
   return <>{formatUsdFromNumber(live ?? fallback)}</>;
 };
 
@@ -300,7 +305,9 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
   // only refreshes every 30s via useCreatedMarkets' enrichment interval, so
   // tying this specific figure to a per-tick re-render isn't worth it);
   // falls back to the oracle price above when the feed hasn't ticked yet.
-  const priceUsdForOi = getSnapshot(slab).priceUsd ?? fallbackPriceUsd;
+  // Per-LOT unit (OI is in lots): the store is per lot; the per-token fallback is scaled up by 10^lotExp.
+  const snapForOi = getSnapshot(slab);
+  const priceUsdForOi = snapForOi.priceUsd ?? (fallbackPriceUsd == null ? null : fallbackPriceUsd * 10 ** (snapForOi.lotExp ?? 0));
   const oiUsd = oiAtoms != null && priceUsdForOi != null && priceUsdForOi > 0
     // v17 OI is engine Q (1e6), not the collateral mint's decimals
     ? (Number(oiAtoms) / (isV17 ? Q_SCALE : 10 ** decimals)) * priceUsdForOi

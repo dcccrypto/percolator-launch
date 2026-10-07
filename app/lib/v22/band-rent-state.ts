@@ -25,12 +25,16 @@ import {
   SLOTS_PER_YEAR_V22,
   UnknownLayoutError,
   forcedRecoveryMinutesV22,
+  bandWidthOkV22,
   resolveMarketGeometry,
   type LayoutTable,
 } from "./sdk";
 
 /** Config-relative offsets of the v2.2 band / rent words (see the module header). */
 export const CONFIG_V22_OFF = Object.freeze({
+  /** v2.1 fields the floor-stuck test needs (packed offsets, unchanged since v2.1). */
+  maxAccrualDtSlots: 118,
+  maxPriceMoveBpsPerSlot: 142,
   bandBps: 249,
   bandMaxEpochSlots: 257,
   bandMaxPinSlots: 265,
@@ -120,6 +124,12 @@ export interface BandRentView {
     /** Mark and oracle target differ: the band is stepping the mark toward the target. */
     lagging: boolean;
     /**
+     * Mirror of the wrapper's `band_floor_stuck_view` (review F7): the cap law's dead zone (max step 0), or the pin clock
+     * is running and the band at the mark is too narrow. While stuck the wrapper does NOT refuse the favourable close,
+     * so the UI must not either. `true` also when the inputs cannot be evaluated (let the chain decide).
+     */
+    floorStuck: boolean;
+    /**
      * The side whose CLOSE is refused while lagging (104): the side that would exit at a stale price that favours
      * it. Mark above target (price fell): longs; mark below target (price rose): shorts. null when not lagging.
      */
@@ -162,7 +172,12 @@ export function readBandRentView(data: Uint8Array | null | undefined, assetIndex
 
     const markE6 = u64(data, eng + L.assetState.effectivePrice);
     const targetE6 = u64(data, eng + L.assetState.rawOracleTargetPrice);
-    const lagging = bandEnabled && targetE6 !== 0n && markE6 !== targetE6;
+    // Wrapper `asset_price_lagged_view`: any difference between the mark and the target on a band market.
+    const lagging = bandEnabled && markE6 !== targetE6;
+    const maxStep = (markE6 * u64(data, cfg + CONFIG_V22_OFF.maxPriceMoveBpsPerSlot) * u64(data, cfg + CONFIG_V22_OFF.maxAccrualDtSlots)) / 10_000n;
+    const pinSince = u64(data, eng + ASSET_STATE_V22_OFF.bandPinSinceSlot);
+    const widthOk = bandEnabled ? bandWidthOkV22(markE6, bandBps) : true;
+    const floorStuck = bandEnabled && (maxStep === 0n || (pinSince !== 0n && (widthOk === null || widthOk === false)));
 
     const kinkBps = u16(data, slot + GROWTH_REL.slotOff + GROWTH_REL.rentKinkBps);
     const nCap = u64(data, slot + GROWTH_REL.slotOff + GROWTH_REL.rentNCapQ);
@@ -193,6 +208,7 @@ export function readBandRentView(data: Uint8Array | null | undefined, assetIndex
         markE6,
         targetE6,
         lagging,
+        floorStuck,
         favourableCloseSide: !lagging ? null : markE6 > targetE6 ? "long" : "short",
       },
       rent: { enabled: rentEnabled, maxE9PerSlot: rentMax, kinkBps, rateLongE9: rateLong, rateShortE9: rateShort },
@@ -205,17 +221,17 @@ export function readBandRentView(data: Uint8Array | null | undefined, assetIndex
 
 /** Is this side's close refused right now by the band (104)? */
 export function closeBlockedByBand(view: BandRentView | null, positionSide: "long" | "short"): boolean {
-  return !!view && view.price.lagging && view.price.favourableCloseSide === positionSide;
+  return !!view && view.price.lagging && !view.price.floorStuck && view.price.favourableCloseSide === positionSide;
 }
 
 /**
  * A leg whose notional is below HALF the market minimum can be closed by anyone (tag 118 sweep). `absQ` is the
- * position in engine Q (POS_SCALE per lot), `markE6` the per-lot mark; notional is in collateral atoms at the
- * engine's e6 price convention (collateral with 6 decimals reads 1:1; other decimals scale by 10^(decimals-6)).
+ * position in engine Q (POS_SCALE per lot), `markE6` the per-lot mark; the engine compares q*price/POS_SCALE raw.
  */
-export function legBelowHalfMin(absQ: bigint, markE6: bigint, minLegNotionalAtoms: bigint, collateralDecimals: number): boolean {
+export function legBelowHalfMin(absQ: bigint, markE6: bigint, minLegNotionalAtoms: bigint): boolean {
   if (minLegNotionalAtoms === 0n) return false;
-  const notionalE6 = (absQ * markE6) / 1_000_000n; // Q (1e6 per lot) x price e6 / 1e6 = quote e6
-  const atoms = collateralDecimals >= 6 ? notionalE6 * 10n ** BigInt(collateralDecimals - 6) : notionalE6 / 10n ** BigInt(6 - collateralDecimals);
-  return atoms * 2n < minLegNotionalAtoms;
+  // Engine `band_leg_is_dust`: notional = q * effective_price / POS_SCALE, compared RAW to band_min_leg_notional (atoms).
+  // No decimals scaling (review F8).
+  const notional = (absQ * markE6) / 1_000_000n;
+  return notional * 2n < minLegNotionalAtoms;
 }

@@ -14,7 +14,8 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { AccountKind } from "@percolatorct/sdk";
-import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
+import { formatTokenAmount } from "@/lib/format";
+import { formatLotPriceE6, formatLotQ, lotExpOf } from "@/lib/v22/lot";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import {
   UNKNOWN_ENTRY_TOOLTIP,
@@ -202,7 +203,9 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const userAccount = realUserAccount ?? (mockMode ? getMockUserAccount(slabAddress) : null);
   const config = useMarketConfig();
   const { engine: engineState, fundingRate } = useEngineState();
-  const { accounts, config: mktConfig, params, adlFactors, wrapperConfigV17, refresh: refreshSlab } = useSlabState();
+  const { accounts, config: mktConfig, params, adlFactors, wrapperConfigV17, refresh: refreshSlab, raw: slabRawForLot } = useSlabState();
+  // v2.2 lot markets: positions in LOTS, prices per LOT; shown as tokens / per-token prices (lib/v22/lot.ts).
+  const lotExp = lotExpOf(slabRawForLot);
   const { priceE6: livePriceE6, priceUsd } = useLivePrice();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
@@ -572,7 +575,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Size</span>
                 <div className="flex flex-col items-end gap-0.5">
                   <span className="text-[11px] text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
-                    {formatTokenAmount(absPosition, decimals)} {symbol}
+                    {formatLotQ(absPosition, decimals, lotExp)} {symbol}
                     {wasDeleveraged && (
                       <span
                         className="ml-1 inline-block rounded-sm bg-[var(--short)]/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--short)]"
@@ -584,7 +587,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                   </span>
                   {wasDeleveraged && (
                     <span className="text-[10px] text-[var(--short)]">
-                      reduced from {formatTokenAmount(absNominal, decimals)} {symbol}
+                      reduced from {formatLotQ(absNominal, decimals, lotExp)} {symbol}
                     </span>
                   )}
                   {priceUsd != null && priceUsd > 0 && (
@@ -597,7 +600,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               <div className="flex items-center justify-between py-1.5">
                 <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Entry Price</span>
                 <span className={`text-[11px] ${entryKnown ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)" }}>
-                  {entryKnown ? formatUsdPriceE6(entryPriceE6) : (
+                  {entryKnown ? formatLotPriceE6(entryPriceE6, lotExp) : (
                     <span className="inline-flex items-center gap-1">
                       --
                       <InfoIcon tooltip={UNKNOWN_ENTRY_TOOLTIP} />
@@ -622,7 +625,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               <div className="flex items-center justify-between py-1.5">
                 <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Market Price</span>
                 <span className={`text-[11px] ${hasValidMark ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)" }}>
-                  {hasValidMark ? formatUsdPriceE6(currentPriceE6) : "--"}
+                  {hasValidMark ? formatLotPriceE6(currentPriceE6, lotExp) : "--"}
                 </span>
               </div>
               <div className="flex items-center justify-between py-1.5">

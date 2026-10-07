@@ -11,6 +11,7 @@
  *     confirmed (the user's consent is "at least X"); 117 at send time: RE-QUOTE and hand the new minimum back for one confirm.
  *  5. A compute overrun is never reported as 118.
  */
+import { V22_COPY } from "./copy";
 import { type TransactionInstruction } from "@solana/web3.js";
 import {
   COMPUTE_PRESETS_V22,
@@ -181,7 +182,10 @@ export async function quoteExit(input: ExitRunInput, deps: ExitRunDeps): Promise
       }
       setRefreshing(false);
       if (step.action === "wait-for-sweep") return { status: "wait-for-sweep", staleCount: stale.length };
-      if (step.action === "ask-user") return { status: "failed", error: new Error("The exit price keeps moving. Try again shortly.") };
+      if (step.action === "ask-user") {
+        // F9: on a claim (execute) the floor was stored at request time and cannot be lowered: say what happened.
+        return { status: "failed", error: new Error(mode === "execute" ? V22_COPY.earnExit.floorStuck : "The exit price keeps moving. Try again shortly.") };
+      }
       return { status: "failed", error: step.action === "fail" ? step.error : undefined };
     }
   } finally {

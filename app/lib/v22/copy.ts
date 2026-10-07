@@ -23,10 +23,18 @@ export const STAKE_CONSENT_TEXT_V2: readonly string[] = Object.freeze([
   "Withdrawals are paid only from the liquid part of the pool, first come first served; the deployed part returns over successive syncs while the market is healthy.",
 ]);
 
+/**
+ * Display layer ONLY (review F10): the verbatim text names a program field in backticks; the user sees "the deployment
+ * target". `STAKE_CONSENT_TEXT_V2` stays the verbatim source of truth (and is what the tests compare to the Rust file);
+ * this transform is the one and only difference, and it is tested.
+ */
+export const consentDisplay = (para: string): string => para.replace("`deploy_target_bps`", "the deployment target");
+
 export const V22_COPY = {
   // ── Band markets ("price protection") ────────────────────────────────────
   band: {
     catchingUp: "Price is catching up; closing reopens shortly.",
+    catchingUpWhy: "After a sharp move the market price walks toward the new price in small steps. That usually takes a few minutes and can take up to about an hour. Closing opens again as soon as it has caught up.",
     /** Mark versus the oracle target, shown only when they differ. */
     markVsTarget: (mark: string, target: string) => `Mark ${mark} · catching up to ${target}`,
     minPosition: (min: string, sym: string) => `Minimum position ${min} ${sym}`,
@@ -35,6 +43,10 @@ export const V22_COPY = {
       `Positions under half the minimum (${min} ${sym}) can be closed by anyone at the market price.`,
     fullSide: "This market is full on this side; try again shortly.",
     closeOnlyAtPrice: "This market is close-only at this price.",
+  },
+  // ── Lot markets (sizes are whole lots; the box is in tokens) ───────────────
+  lot: {
+    remainder: (tokens: string, sym: string) => `Sizes are rounded down to whole lots here: ${tokens} ${sym} of what you typed is not included.`,
   },
   // ── Holding fee ──────────────────────────────────────────────────────────
   rent: {
@@ -65,6 +77,8 @@ export const V22_COPY = {
     quoting: "Getting your exit price…",
     requote: "The exit price moved. Here is the new minimum.",
     refreshing: "Refreshing positions…",
+    estimateNote: "Based on today's price. This minimum is fixed when you request the withdrawal.",
+    floorStuck: "The minimum set when you requested this withdrawal can't be lowered, and the pool is worth a little less now. Your shares are still held. You can wait for it to recover, or start a new withdrawal at today's price.",
     dipTolerance: "May pay up to 0.25% below par while positions refresh.",
     wait: "Positions are refreshing. Try again in a moment.",
   },
@@ -97,6 +111,7 @@ export const V22_COPY = {
     target: (pct: string) => `Deployment target ${pct}`,
     buffer: (pct: string) => `Liquid buffer ${pct}`,
     hysteresis: (pct: string) => `Rebalance band ${pct}`,
+    consentUnavailable: "First-loss deposits aren't available for this pool right now.",
     consentLabel: "I have read and accept this risk text.",
     consentVersion: (v: number) => `Risk text version ${v}`,
     withdraw: "Withdrawals are paid only from the liquid part of the pool. The rest returns over time while the market is healthy.",

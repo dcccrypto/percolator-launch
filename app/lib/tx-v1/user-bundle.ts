@@ -61,6 +61,9 @@ import {
   signAllCompat,
 } from "@/lib/tx";
 import { getNetwork } from "@/lib/config";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { withMarketTailsV22 } from "@/lib/v22/market-tails";
+import { resolveDevnetProgramIds } from "@/lib/program-ids";
 import {
   isUserRejection,
   isV1WalletSigningFailure,
@@ -436,8 +439,13 @@ export async function sendUserBundle<T = unknown>(p: SendUserBundleParams<T>): P
   const clusterV1 = walletV1 ? await d.clusterSupportsV1() : false;
   // Clamp again here: `deps.getPriorityFee` is injectable, and the v1 total is derived from this price.
   const priorityFee = clampPriorityFee(await d.getPriorityFee());
+  // v2.2 (flag on only): the bond / insurance-units tails the wrapper requires on a market that has them, same as sendTx.
+  // Flag off: the same groups, no RPC.
+  const groups: readonly PackGroup<T>[] = isDevnetV22Enabled()
+    ? await Promise.all(p.groups.map(async (g) => ({ ...g, instructions: await withMarketTailsV22(p.connection, new PublicKey(resolveDevnetProgramIds().wrapper), [...g.instructions]) })))
+    : p.groups;
   const planInput: PlanUserBundleInput<T> = {
-    groups: p.groups,
+    groups,
     payer,
     mode,
     walletV1,

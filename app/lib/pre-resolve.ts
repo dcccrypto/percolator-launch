@@ -20,6 +20,7 @@
  * account lists checked against wrapper 6377376a :17071 and stake e62aa4a
  * :2761), which use the SDK encoders + account specs.
  */
+import { parseLpVaultRegistry } from "@/lib/v22/records";
 import {
   PublicKey,
   SystemProgram,
@@ -39,7 +40,6 @@ import {
   encodeLpVaultCrankFees,
   encodeStakeAccrueFees,
   encodeWithdrawInsuranceReserveToStake,
-  parseLpVaultRegistry,
   parseWrapperConfigV17,
 } from "@percolatorct/sdk";
 import { readCreatorFeeClaimable } from "@/lib/v17-creator-fee";

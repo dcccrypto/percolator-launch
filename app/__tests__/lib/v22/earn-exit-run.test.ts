@@ -139,3 +139,18 @@ describe("v22 earn exit runner", () => {
     }
   });
 });
+
+describe("F9: a stored floor that can no longer be met says so", () => {
+  it("claim (execute) refused 117 on every simulation: the honest 'floor can't be lowered' line, not 'price keeps moving'", async () => {
+    const { d } = deps({ sims: [prog(117)] });
+    const r = await quoteExit(input("execute"), d);
+    expect(r.status).toBe("failed");
+    expect((r as { error?: Error }).error?.message).toMatch(/can't be lowered/);
+    expect((r as { error?: Error }).error?.message).not.toMatch(/keeps moving/);
+  });
+  it("CONTROL: the same on a fresh pair exit keeps the plain retry line", async () => {
+    const { d } = deps({ sims: [prog(117)] });
+    const r = await quoteExit(input("pair"), d);
+    expect((r as { error?: Error }).error?.message).toMatch(/keeps moving/);
+  });
+});

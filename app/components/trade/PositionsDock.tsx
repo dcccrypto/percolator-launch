@@ -40,6 +40,7 @@ import { useBandRentView } from "@/hooks/useBandRentView";
 import { HoldingFeeChip } from "@/components/v22/HoldingFeeChip";
 import { closeBlockedByBand, legBelowHalfMin } from "@/lib/v22/band-rent-state";
 import { V22_COPY } from "@/lib/v22/copy";
+import { formatLotPriceE6, formatLotQ, lotExpOf } from "@/lib/v22/lot";
 import { useMarketLimits } from "@/hooks/useMarketLimits";
 import { PositionLimitsRow } from "@/components/limits/PositionLimitsRow";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
@@ -126,7 +127,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const scanPending = useUserAccountScanPending();
   const accountPending = !mockMode && !userAccount && scanPending;
   const config = useMarketConfig();
-  const { accounts, config: mktConfig, params, adlFactors, wrapperConfigV17 } = useSlabState();
+  const { accounts, config: mktConfig, params, adlFactors, wrapperConfigV17, raw: slabRawForLot } = useSlabState();
   const { engine, insuranceBalance } = useEngineState();
   const { priceE6: livePriceE6, priceUsd } = useLivePrice();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
@@ -165,6 +166,8 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const { engineStale } = useEngineFreshness();
   // Devnet v2.2 (flag-gated; null otherwise): band lag + holding fee for this market.
   const bandView = useBandRentView();
+  // v2.2 lot markets: positions are in LOTS and marks per LOT; the table shows tokens and per-token prices (lib/v22/lot.ts).
+  const lotExp = lotExpOf(slabRawForLot);
   const closeBlockedByStaleness = !mockMode && (oracleStale || engineStale);
 
   const [showCloseModal, setShowCloseModal] = useState(false);
@@ -305,6 +308,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
     maintenanceMarginBps: maintenanceBps,
     // #2660: `entryPriceE6 > 0n` is always true — on "unknown" it is the mark.
     hasResolvedEntry: pnlIsKnown,
+    ...(lotExp > 0 ? { formatPrice: (e6: bigint) => formatLotPriceE6(e6, lotExp) } : {}),
   });
   const liqPriceColor = (() => {
     if (liqUnliquidatable) return "text-[var(--text-secondary)]";
@@ -348,6 +352,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
           entryE6: entryPriceE6,
           initialMarginBps,
           initialMarkE6: currentPriceE6,
+          lotExp,
         }
       : null;
 
@@ -418,7 +423,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                 )}
               </td>
               <td className="whitespace-nowrap px-3 py-2.5 text-right" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-                <span className="text-[var(--text)]">{formatTokenAmount(absPosition, decimals)}</span>
+                <span className="text-[var(--text)]">{formatLotQ(absPosition, decimals, lotExp)}</span>
                 <span className="ml-1 text-[var(--text-secondary)]">{symbol}</span>
                 {wasDeleveraged && (
                   <span
@@ -429,7 +434,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                   </span>
                 )}
                 <HoldingFeeChip view={bandView} side={isLong ? "long" : "short"} />
-                {bandView?.band.enabled && legBelowHalfMin(account.positionSize < 0n ? -account.positionSize : account.positionSize, bandView.price.markE6, bandView.band.minLegNotionalAtoms, decimals) && (
+                {bandView?.band.enabled && legBelowHalfMin(account.positionSize < 0n ? -account.positionSize : account.positionSize, bandView.price.markE6, bandView.band.minLegNotionalAtoms) && (
                   <div data-testid="band-small-position" className="mt-0.5 text-[9px] text-[var(--text-dim)]">
                     {V22_COPY.band.smallPositionWarn(String(Number(bandView.band.minLegNotionalAtoms) / 10 ** decimals / 2), collateralSymbol)}
                   </div>
@@ -450,7 +455,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                 {leverageDisplay.text}
               </td>
               <td className={`whitespace-nowrap px-3 py-2.5 text-right ${pnlIsKnown ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-                {entryKnown ? formatUsdPriceE6(entryPriceE6) : (
+                {entryKnown ? formatLotPriceE6(entryPriceE6, lotExp) : (
                   <span className="inline-flex items-center justify-end gap-1">
                     --
                     <InfoIcon tooltip={UNKNOWN_ENTRY_TOOLTIP} />
@@ -465,7 +470,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                 }`}
                 style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
               >
-                {hasValidMark ? formatUsdPriceE6(currentPriceE6) : "--"}
+                {hasValidMark ? formatLotPriceE6(currentPriceE6, lotExp) : "--"}
               </td>
               <td
                 data-testid="position-liq"
@@ -551,6 +556,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                     marginAboveMaintAtoms={account.capital - (absPosition * currentPriceE6 * maintenanceBps) / 1_000_000n / 10_000n}
                     decimals={decimals}
                     collateralSymbol={collateralSymbol}
+                    lotExp={lotExp}
                   />
                 </td>
               </tr>
@@ -580,6 +586,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
           collateralSymbol={collateralSymbol}
           decimals={decimals}
           priceUsd={priceUsd}
+          lotExp={lotExp}
           isLong={isLong}
           loading={closeLoading}
           error={closeError}

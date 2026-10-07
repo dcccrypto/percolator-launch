@@ -34,7 +34,7 @@ function putI128(d: Uint8Array, o: number, x: bigint) {
   v.setBigInt64(o + 8, x >> 64n, true);
 }
 
-interface Opts { bandBps?: number; epoch?: number; pin?: number; rentMax?: number; minLeg?: bigint; mark?: bigint; target?: bigint; lotExp?: number; kink?: number; nCap?: bigint; bound?: boolean; lpNet?: bigint; oiLong?: bigint; oiShort?: bigint }
+interface Opts { maxStepBps?: number; maxDt?: number; pinSince?: bigint; bandBps?: number; epoch?: number; pin?: number; rentMax?: number; minLeg?: bigint; mark?: bigint; target?: bigint; lotExp?: number; kink?: number; nCap?: bigint; bound?: boolean; lpNet?: bigint; oiLong?: bigint; oiShort?: bigint }
 function build(o: Opts): Uint8Array {
   const d = market();
   const cfg = L.marketGroupOff + L.group.config;
@@ -43,10 +43,13 @@ function build(o: Opts): Uint8Array {
   put64(d, cfg + CONFIG_V22_OFF.bandMaxPinSlots, BigInt(o.pin ?? 9000));
   put64(d, cfg + CONFIG_V22_OFF.rentMaxE9PerSlot, BigInt(o.rentMax ?? 0));
   put64(d, cfg + CONFIG_V22_OFF.bandMinLegNotional, o.minLeg ?? 0n);
+  put64(d, cfg + CONFIG_V22_OFF.maxPriceMoveBpsPerSlot, BigInt(o.maxStepBps ?? 4));
+  put64(d, cfg + CONFIG_V22_OFF.maxAccrualDtSlots, BigInt(o.maxDt ?? 100));
   const slot = L.marketGroupOff + L.marketGroupLen;
   const eng = slot + L.wrapperSlotLen;
   put64(d, eng + L.assetState.effectivePrice, o.mark ?? 50_000_000n);
   put64(d, eng + L.assetState.rawOracleTargetPrice, o.target ?? 50_000_000n);
+  put64(d, eng + ASSET_STATE_V22_OFF.bandPinSinceSlot, o.pinSince ?? 0n);
   putI128(d, eng + L.assetState.oiEffLongQ, o.oiLong ?? 0n);
   putI128(d, eng + L.assetState.oiEffShortQ, o.oiShort ?? 0n);
   d[slot + L.wrapperSlot.profileLotExp] = o.lotExp ?? 0;
@@ -143,8 +146,45 @@ describe("rentRateE9 (port of growth_v19::rent_rate_e9)", () => {
 describe("legBelowHalfMin", () => {
   it("a leg under half the market minimum can be closed by anyone", () => {
     // 6-decimal collateral, min 100 tokens = 100_000_000 atoms; leg of 40 lots at $1 = $40 < $50
-    expect(legBelowHalfMin(40_000_000n, 1_000_000n, 100_000_000n, 6)).toBe(true);
-    expect(legBelowHalfMin(60_000_000n, 1_000_000n, 100_000_000n, 6)).toBe(false);
-    expect(legBelowHalfMin(1n, 1n, 0n, 6)).toBe(false);
+    expect(legBelowHalfMin(40_000_000n, 1_000_000n, 100_000_000n)).toBe(true);
+    expect(legBelowHalfMin(60_000_000n, 1_000_000n, 100_000_000n)).toBe(false);
+    expect(legBelowHalfMin(1n, 1n, 0n)).toBe(false);
+  });
+});
+
+
+describe("F8: no decimals scaling (engine band_leg_is_dust compares q*price/POS_SCALE raw)", () => {
+  it("the verdict does not depend on collateral decimals", () => {
+    // 40 lots at $1: notional 40_000_000 raw; half-min = 50_000_000 -> dust. With a 9-decimal scaling it would read 1000x bigger.
+    expect(legBelowHalfMin(40_000_000n, 1_000_000n, 100_000_000n)).toBe(true);
+    expect(legBelowHalfMin.length).toBe(3); // no decimals parameter any more
+  });
+});
+
+describe("F7: the wrapper's floor-stuck exemption", () => {
+  const lag = { bandBps: 130, mark: 60_000_000n, target: 50_000_000n };
+  it("normal lag: long close blocked, floorStuck false", () => {
+    const v = readBandRentView(build(lag))!;
+    expect(v.price.floorStuck).toBe(false);
+    expect(closeBlockedByBand(v, "long")).toBe(true);
+  });
+  it("cap dead zone (max step 0): not blocked, the chain would accept the close", () => {
+    const v = readBandRentView(build({ ...lag, maxStepBps: 0 }))!;
+    expect(v.price.floorStuck).toBe(true);
+    expect(closeBlockedByBand(v, "long")).toBe(false);
+  });
+  it("pin clock running AND band too narrow at the mark: not blocked; pin running but band wide: still blocked", () => {
+    const narrow = readBandRentView(build({ bandBps: 130, mark: 1_000n, target: 500n, pinSince: 5n }))!;
+    expect(narrow.price.floorStuck).toBe(true);
+    expect(closeBlockedByBand(narrow, "long")).toBe(false);
+    const wide = readBandRentView(build({ ...lag, pinSince: 5n }))!;
+    expect(wide.price.floorStuck).toBe(false);
+    expect(closeBlockedByBand(wide, "long")).toBe(true);
+    // narrow band but pin clock NOT running: refusal is not lifted
+    expect(closeBlockedByBand(readBandRentView(build({ bandBps: 130, mark: 1_000n, target: 500n, pinSince: 0n }))!, "long")).toBe(true);
+  });
+  it("any mark/target difference counts as lag (wrapper has no target != 0 condition)", () => {
+    const v = readBandRentView(build({ bandBps: 130, mark: 60_000_000n, target: 0n }))!;
+    expect(v.price.lagging).toBe(true);
   });
 });

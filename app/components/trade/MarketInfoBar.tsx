@@ -10,6 +10,7 @@ import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { useSlabState } from "@/components/providers/SlabProvider";
+import { lotExpOf, tokenUsdOfLotUsd } from "@/lib/v22/lot";
 import { usePriceFlash } from "@/hooks/usePriceFlash";
 import { MarketSwitcher } from "@/components/trade/MarketSwitcher";
 import { WatchButton } from "@/components/market/WatchButton";
@@ -79,7 +80,7 @@ const MarketHealthBadge = memo(function MarketHealthBadge({ oracleDown, vaultEmp
  * reads clearly (the 24h direction is carried by the change badge, not this
  * number). No layout shift.
  */
-function MarkPrice({ priceUsd, priceE6 }: { priceUsd: number | null; priceE6: bigint | null }) {
+function MarkPrice({ priceUsd, priceE6, lotExp = 0 }: { priceUsd: number | null; priceE6: bigint | null; lotExp?: number }) {
   const flash = usePriceFlash(priceE6);
   const flashColor =
     flash === "up" ? "text-[var(--long)]" : flash === "down" ? "text-[var(--short)]" : "text-[var(--text)]";
@@ -90,7 +91,7 @@ function MarkPrice({ priceUsd, priceE6 }: { priceUsd: number | null; priceE6: bi
       className={`text-base md:text-2xl font-bold tabular-nums shrink-0 whitespace-nowrap transition-colors duration-300 ease-out ${flashColor}`}
       style={{ fontFamily: "var(--font-mono)" }}
     >
-      {formatMarkPrice(priceUsd)}
+      {formatMarkPrice(priceUsd != null ? tokenUsdOfLotUsd(priceUsd, lotExp) : priceUsd)}
     </span>
   );
 }
@@ -100,7 +101,9 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
   const { market } = useMarketInfo(slabAddress);
   const { fundingRate, engine, totalOI, insuranceBalance, hasData: engineHasData } = useEngineState();
   const { level: oracleLevel } = useOracleFreshness();
-  const { config: mktConfig, wrapperConfigV17 } = useSlabState();
+  const { config: mktConfig, wrapperConfigV17, raw: slabRawForLot } = useSlabState();
+  // v2.2 lot markets: the store price is per LOT; the header shows per TOKEN (lib/v22/lot.ts).
+  const lotExp = lotExpOf(slabRawForLot);
 
   const change24hDisplay = change24h ?? 0;
   const isUp = change24hDisplay >= 0;
@@ -201,7 +204,7 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
       <span className="hidden md:block h-6 w-px bg-[var(--border)] shrink-0" />
 
       {/* Mark Price — large; flashes long/short on each tick (see MarkPrice) */}
-      <MarkPrice priceUsd={priceUsd} priceE6={priceE6} />
+      <MarkPrice priceUsd={priceUsd} priceE6={priceE6} lotExp={lotExp} />
 
       {/* 24h change badge — semantic long/short tokens, same as the rest of
           the terminal (was hardcoded Tailwind green/red before). */}

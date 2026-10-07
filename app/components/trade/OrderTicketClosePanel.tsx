@@ -9,6 +9,8 @@ export interface OrderTicketClosePanelProps {
   slabAddress: string;
   /** Signed position size (base units); 0n = nothing to close. */
   positionSize: bigint;
+  /** v2.2 lot exponent (position in lots, prices per lot); omitted = no lots. */
+  lotExp?: number;
   /** GH#2707: the wallet's portfolio scan has not answered yet, so a 0n
    *  `positionSize` is "unknown", not "no position" — render loading. */
   accountPending?: boolean;
@@ -54,6 +56,7 @@ export interface OrderTicketClosePanelProps {
 export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
   slabAddress,
   positionSize,
+  lotExp = 0,
   accountPending = false,
   entryPriceE6,
   capital,
@@ -141,6 +144,7 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
       <ClosePositionForm
         variant="inline"
         positionSize={positionSize}
+        lotExp={lotExp}
         entryPrice={entryPriceE6}
         currentPrice={currentPriceE6}
         capital={capital}

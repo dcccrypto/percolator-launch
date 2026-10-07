@@ -12,6 +12,7 @@
  * Replaced later by a hosted OHLCV provider via ./index.ts — chart code does
  * not change.
  */
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import {
   RESOLUTION_SECONDS,
   applyMarkTick,
@@ -95,9 +96,33 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
   const now = deps.now ?? Date.now;
   /** Set on a definitive 404: this deployment has no indexer — skip the call for the session. */
   let candlesUnavailable = false;
+  /**
+   * v2.2 lot markets: the indexer stores per-LOT marks and trades in LOTS (wrapper doc v22-wave-a-wire.md:46: "candles in
+   * per-token price" is the app's job), and the app's mark store is per lot too. The chart shows per TOKEN, so every
+   * price from those sources is divided by 10^lot_exp and every size multiplied by it (lib/v22/lot.ts). 0 = no lots.
+   */
+  const lotBySlab = new Map<string, number>();
+  const lotOf = (slab: string): number => lotBySlab.get(slab) ?? 0;
+  async function ensureLot(slab: string): Promise<void> {
+    if (!isDevnetV22Enabled() || lotBySlab.has(slab)) return; // flag off: no extra request, behaviour unchanged
+    
+    try {
+      const r = await fetchImpl(`/api/markets/${encodeURIComponent(slab)}`);
+      if (r.ok) {
+        const body = (await r.json()) as { market?: { lot_exp?: unknown } };
+        const k = Number(body.market?.lot_exp ?? 0);
+        lotBySlab.set(slab, Number.isInteger(k) && k > 0 && k <= 15 ? k : 0);
+      }
+    } catch {
+      /* unknown: leave unset, retried on the next call */
+    }
+  }
+  const px = (v: number, k: number): number => (k === 0 ? v : v / 10 ** k);
+  const qty = (v: number, k: number): number => (k === 0 ? v : v * 10 ** k);
 
   async function fetchWindow(slab: string, res: ProviderResolution, fromSec: number, toSec: number): Promise<ProviderBar[]> {
     if (candlesUnavailable) return [];
+    await ensureLot(slab);
     const url = `/api/candles/${encodeURIComponent(slab)}?resolution=${res}&from=${Math.floor(fromSec)}&to=${Math.floor(toSec)}`;
     const r = await fetchImpl(url);
     if (r.status === 404) {
@@ -105,7 +130,9 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
       return [];
     }
     if (!r.ok) throw new Error(`candles HTTP ${r.status}`);
-    return parseUdf(await r.json());
+    const k = lotOf(slab);
+    const bars = parseUdf(await r.json());
+    return k === 0 ? bars : bars.map((b) => ({ ...b, open: px(b.open, k), high: px(b.high, k), low: px(b.low, k), close: px(b.close, k), volume: qty(b.volume, k) }));
   }
 
   return {
@@ -123,6 +150,8 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
           if (m) {
             symbol = typeof m.symbol === "string" && m.symbol.trim() ? m.symbol.trim() : null;
             name = typeof m.name === "string" && m.name.trim() ? m.name.trim() : null;
+            const lk = Number((m as { lot_exp?: unknown }).lot_exp ?? 0);
+            lotBySlab.set(slab, Number.isInteger(lk) && lk > 0 && lk <= 15 ? lk : 0);
             const p = Number(m.mark_price ?? m.last_price);
             price = Number.isFinite(p) && p > 0 ? p : null;
           }
@@ -136,7 +165,7 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
         slab,
         symbol: display,
         description: name ?? `${display} perpetual`,
-        referencePrice: price ?? marks.latest(slab),
+        referencePrice: price ?? (() => { const l = marks.latest(slab); return l == null ? null : px(l, lotOf(slab)); })(),
         hasVolume: true,
       };
     },
@@ -185,7 +214,8 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
           }
           return;
         }
-        const bar = applyTrade(last, t, resolution);
+        const k = lotOf(slab);
+        const bar = applyTrade(last, k === 0 ? t : { ...t, price: px(t.price, k), size: qty(t.size, k) }, resolution);
         if (bar) {
           last = bar;
           handlers.onBar(bar);
@@ -194,7 +224,7 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
       const offMarks =
         source === "oracle"
           ? marks.subscribe(slab, (priceUsd, tsSec) => {
-              const bar = applyMarkTick(source, last, { price: priceUsd, tsSec }, resolution);
+              const bar = applyMarkTick(source, last, { price: px(priceUsd, lotOf(slab)), tsSec }, resolution);
               if (bar) {
                 last = bar;
                 handlers.onBar(bar);

@@ -107,3 +107,26 @@ describe("flag off: none of this is used (parity)", () => {
     expect(resolveUserMessage(fail(33, ids.stake), { surface: "stake" }).body).not.toBe(V22_STAKE_ERROR_CODE_MAP[33]);
   });
 });
+
+describe("F10 honest copy", () => {
+  beforeEach(() => {
+    __setDevnetV21ForTest(true);
+    __setDevnetV22ForTest(true);
+  });
+  afterEach(() => {
+    __setDevnetV21ForTest(null);
+    __setDevnetV22ForTest(null);
+  });
+  it("114 makes no retry promise; 116 and 110 claim nothing untrue", () => {
+    expect(resolveUserMessage(fail(114), { surface: "any" }).body).not.toMatch(/try again|refreshed/i);
+    expect(V22_ERROR_CODE_MAP[114]).not.toMatch(/try again|refreshed/i);
+    expect(resolveUserMessage(fail(116), { surface: "any" }).body).not.toMatch(/isn't available/i);
+    expect(resolveUserMessage(fail(110), { surface: "any" }).body).not.toMatch(/settings aren't valid/i);
+  });
+  it("104 keeps the founder's line, adds the honest 'up to about an hour' only in Details (why), and does not auto-retry", () => {
+    const m = resolveUserMessage(fail(104), { surface: "close" });
+    expect(m.body).toBe("Price is catching up; closing reopens shortly.");
+    expect(m.why).toMatch(/up to about an hour/);
+    expect(m.autoRetry).toBeFalsy();
+  });
+});

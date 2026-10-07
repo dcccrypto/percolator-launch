@@ -1,5 +1,6 @@
 "use client";
 
+import { parseLpVaultRegistry } from "@/lib/v22/records";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DEVNET_PROGRAM_IDS } from "@/lib/program-ids";
 import {
@@ -62,7 +63,6 @@ import {
   // `capital` so Step 3 can detect an already-landed deposit/top-up before
   // resending it — see the Step 3 block below.
   parseAssetOracleProfileV17,
-  parseLpVaultRegistry,
 } from "@percolatorct/sdk";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
 import { toE6 } from "@/lib/format";
@@ -153,6 +153,7 @@ import {
 export {
   V17_MAX_PORTFOLIO_ASSETS,
   DEFAULT_SLAB_SIZE,
+  defaultSlabSize,
   P3_MARKET_ASSET_SLOTS,
   marketAssetSlotsFor,
   buildV17InitMarketArgs,

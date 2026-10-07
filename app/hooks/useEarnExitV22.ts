@@ -5,7 +5,7 @@
  * (components/earn/EarnExitQuote). The orchestration is lib/v22/earn-exit-run.ts; this hook wires the app's
  * connection, wallet and send path (sendUserBundle, one group, explicit compute budget).
  */
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PublicKey, Transaction, VersionedTransaction, type Connection, type TransactionInstruction } from '@solana/web3.js';
 import { getAssociatedTokenAddress } from '@solana/spl-token';
 import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
@@ -26,6 +26,8 @@ import {
   type SimResult,
 } from '@/lib/v22/earn-exit-run';
 import { V22_COPY } from '@/lib/v22/copy';
+import { makeStaleReader } from '@/lib/v22/stale-scan';
+import { EXIT_QUOTE_MAX_AGE_MS, StaleExitQuoteError, exitQuoteKey, quoteUsable, type BoundQuote } from '@/lib/v22/exit-quote-binding';
 
 export interface EarnExitParams {
   market: PublicKey | null;
@@ -48,9 +50,13 @@ export interface EarnExitState {
   requoted: boolean;
   message: string | null;
   signature: string | null;
+  /** F6: the inputs + time the quote was made for (null with no quote). */
+  bound?: BoundQuote | null;
 }
 
-const IDLE: EarnExitState = { phase: 'idle', quote: null, requoted: false, message: null, signature: null };
+const IDLE: EarnExitState = { phase: 'idle', quote: null, requoted: false, message: null, signature: null, bound: null };
+
+export const __clock = { now: () => Date.now() };
 
 function tokenAmountOf(data: Uint8Array | Buffer | null | undefined): bigint | null {
   if (!data || data.length < 72) return null;
@@ -80,6 +86,12 @@ export function useEarnExitV22(p: EarnExitParams) {
   const wallet = useWalletCompat();
   const [state, setState] = useState<EarnExitState>(IDLE);
   const runId = useRef(0);
+  const newExit = useRef(true);
+  const readerKey = useRef<string | null>(null);
+  const staleReader = useRef<ReturnType<typeof makeStaleReader<{ key: PublicKey; legs: number }>>>(makeStaleReader({ scan: async () => [], fetchMany: async () => [], toCandidates: () => [] }));
+  const currentKey = exitQuoteKey({ market: p.market?.toBase58() ?? null, programId: p.programId?.toBase58() ?? null, collateralMint: p.collateralMint?.toBase58() ?? null, sourceDomain: p.sourceDomain, shares: p.shares, mode: p.mode, redeemer: wallet.publicKey?.toBase58() ?? null });
+  const keyRef = useRef(currentKey);
+  keyRef.current = currentKey;
 
   const build = useCallback(async (): Promise<{ input: ExitRunInput; deps: ExitRunDeps } | null> => {
     const payer = wallet.publicKey;
@@ -105,8 +117,12 @@ export function useEarnExitV22(p: EarnExitParams) {
       shares: p.shares,
       boundLpPortfolio: bound,
     };
-    const deps: ExitRunDeps = {
-      readStale: async () => {
+    // F14: one scan per exit; retries re-read only the scanned accounts.
+    if (newExit.current || readerKey.current !== keyRef.current) {
+      newExit.current = false;
+      readerKey.current = keyRef.current;
+    staleReader.current = makeStaleReader({
+      scan: async () => {
         const f = portfolioScanFilters();
         const rows = await connection.getProgramAccounts(programId, {
           commitment: 'confirmed',
@@ -116,8 +132,17 @@ export function useEarnExitV22(p: EarnExitParams) {
             { memcmp: { offset: 16, bytes: market.toBase58() } },
           ],
         });
-        return staleCandidatesFromAccounts(rows.map((r) => ({ pubkey: r.pubkey, data: new Uint8Array(r.account.data) })), market);
+        return rows.map((r) => ({ pubkey: r.pubkey, data: new Uint8Array(r.account.data) }));
       },
+      fetchMany: async (keys) => {
+        const infos = await connection.getMultipleAccountsInfo(keys, 'confirmed');
+        return infos.flatMap((a, i) => (a ? [{ pubkey: keys[i], data: new Uint8Array(a.data) }] : []));
+      },
+      toCandidates: (rows) => staleCandidatesFromAccounts(rows, market),
+    });
+    }
+    const deps: ExitRunDeps = {
+      readStale: () => staleReader.current.read(),
       readDestBalance: async () => {
         try {
           return BigInt((await connection.getTokenAccountBalance(redeemerDest, 'confirmed')).value.amount);
@@ -143,6 +168,8 @@ export function useEarnExitV22(p: EarnExitParams) {
 
   const getQuote = useCallback(async () => {
     const id = ++runId.current;
+    const keyAtStart = keyRef.current;
+    newExit.current = true; // a new exit: scan once, then re-read only those accounts
     setState({ ...IDLE, phase: 'quoting' });
     try {
       const b = await build();
@@ -152,7 +179,7 @@ export function useEarnExitV22(p: EarnExitParams) {
       }
       const r = await quoteExit(b.input, b.deps);
       if (id !== runId.current) return;
-      if (r.status === 'quoted') setState({ phase: 'quoted', quote: r.quote, requoted: false, message: null, signature: null });
+      if (r.status === 'quoted') setState({ phase: 'quoted', quote: r.quote, requoted: false, message: null, signature: null, bound: { key: keyAtStart, at: __clock.now() } });
       else if (r.status === 'wait-for-sweep') setState({ ...IDLE, phase: 'wait', message: V22_COPY.earnExit.wait });
       else setState({ ...IDLE, phase: 'error', message: failMessage(r.error) });
     } catch (e) {
@@ -163,6 +190,13 @@ export function useEarnExitV22(p: EarnExitParams) {
   const confirm = useCallback(async () => {
     const quote = state.quote;
     if (!quote || state.phase !== 'quoted') return;
+    // F6: never sign a floor made for other inputs or an old moment.
+    if (!quoteUsable(state.bound ?? null, keyRef.current, __clock.now())) {
+      runId.current++;
+      setState(IDLE);
+      throw new StaleExitQuoteError();
+    }
+    const keyAtStart = keyRef.current;
     const id = ++runId.current;
     setState((s) => ({ ...s, phase: 'sending' }));
     try {
@@ -171,7 +205,7 @@ export function useEarnExitV22(p: EarnExitParams) {
       const r = await sendExit(b.input, quote, b.deps);
       if (id !== runId.current) return;
       if (r.status === 'sent') setState({ phase: 'sent', quote: r.quote, requoted: false, message: null, signature: r.signature });
-      else if (r.status === 'requoted') setState({ phase: 'quoted', quote: r.quote, requoted: true, message: V22_COPY.earnExit.requote, signature: null });
+      else if (r.status === 'requoted') setState({ phase: 'quoted', quote: r.quote, requoted: true, message: V22_COPY.earnExit.requote, signature: null, bound: { key: keyAtStart, at: __clock.now() } });
       else if (r.status === 'wait-for-sweep') setState({ ...IDLE, phase: 'wait', message: V22_COPY.earnExit.wait });
       else setState({ ...IDLE, phase: 'error', message: failMessage(r.error) });
     } catch (e) {
@@ -184,7 +218,29 @@ export function useEarnExitV22(p: EarnExitParams) {
     setState(IDLE);
   }, []);
 
-  return useMemo(() => ({ state, getQuote, confirm, reset }), [state, getQuote, confirm, reset]);
+  // F6: any input change drops the quote (and anything in flight); a quote also expires on its own.
+  const prevKey = useRef(currentKey);
+  useEffect(() => {
+    if (prevKey.current === currentKey) return;
+    prevKey.current = currentKey;
+    runId.current++;
+    setState((s) => (s.phase === 'sent' ? s : IDLE));
+  }, [currentKey]);
+  const boundAt = state.bound?.at ?? null;
+  useEffect(() => {
+    if (boundAt === null || state.phase !== 'quoted') return;
+    const left = Math.max(0, EXIT_QUOTE_MAX_AGE_MS - (__clock.now() - boundAt));
+    const t = setTimeout(() => {
+      runId.current++;
+      setState((s) => (s.phase === 'quoted' ? IDLE : s));
+    }, left + 5);
+    return () => clearTimeout(t);
+  }, [boundAt, state.phase]);
+
+  // Synchronous guard for the render in which an input changed (before the effect above has run): a quote for other
+  // inputs is never exposed, so the Withdraw button cannot appear for it.
+  const view = state.quote && state.phase === 'quoted' && state.bound?.key !== currentKey ? IDLE : state;
+  return useMemo(() => ({ state: view, getQuote, confirm, reset }), [view, getQuote, confirm, reset]);
 }
 
 export type EarnExitApi = ReturnType<typeof useEarnExitV22>;

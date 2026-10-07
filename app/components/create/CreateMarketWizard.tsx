@@ -12,7 +12,7 @@ import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSolBalance } from "@/hooks/useSolBalance";
 import {
   useCreateMarket,
-  DEFAULT_SLAB_SIZE,
+  defaultSlabSize,
   wizardSlabBytes,
   flooredInitialMarginBps,
   type CreateMarketParams,
@@ -965,7 +965,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       // regardless of anything the wizard used to let the user pick, or InitMarket reverts
       // with InvalidSlabLen (and over-charges rent in the process). v17 has no slab tiers —
       // maxAccounts is deliberately omitted here (create() defaults it).
-      slabDataSize: DEFAULT_SLAB_SIZE,
+      slabDataSize: defaultSlabSize(),
       // P3: vault-owned LP + the creator's junior tranche (= the Liquidity amount).
       ...(growthLaunch ? { growth: growthLaunch } : {}),
       ...(v22Params ? { v22: v22Params } : {}),
@@ -1040,7 +1040,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       initialMarginBps: wizard.initialMarginBps,
       lpExposureBps: clampLpExposureBps(wizard.lpExposureBps),
       // BUG 1 fix: same rationale as handleLaunch above — always the real v17 slab size.
-      slabDataSize: DEFAULT_SLAB_SIZE,
+      slabDataSize: defaultSlabSize(),
       // P3: vault-owned LP + the creator's junior tranche (= the Liquidity amount).
       ...(growthLaunch ? { growth: growthLaunch } : {}),
       ...(v22Params ? { v22: v22Params } : {}),

@@ -18,6 +18,8 @@ interface ClosePositionModalProps {
   collateralSymbol?: string;
   decimals: number;
   priceUsd: number | null;
+  /** v2.2 lot exponent (position in lots, prices per lot); omitted = no lots. */
+  lotExp?: number;
   isLong: boolean;
   loading: boolean;
   /** B-3: Trading fee basis points — subtracted from Est. Account Balance After so the preview matches on-chain. */
@@ -58,6 +60,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   collateralSymbol,
   decimals,
   priceUsd,
+  lotExp = 0,
   isLong,
   loading,
   tradingFeeBps,
@@ -164,6 +167,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
           collateralSymbol={collateralSymbol}
           decimals={decimals}
           priceUsd={priceUsd}
+          lotExp={lotExp}
           isLong={isLong}
           loading={loading}
           tradingFeeBps={tradingFeeBps}

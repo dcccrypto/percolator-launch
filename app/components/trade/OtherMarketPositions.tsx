@@ -27,6 +27,7 @@
  * dock's scan coalesces with the strip's rather than duplicating it.
  */
 
+import { formatLotPriceE6, formatLotQ } from "@/lib/v22/lot";
 import { FC, memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
@@ -194,14 +195,14 @@ const OtherMarketRow: FC<{
           </span>
         </td>
         <td className="whitespace-nowrap px-3 py-2.5 text-right" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-          <span className="text-[var(--text)]">{formatTokenAmount(abs(posSize), decimals)}</span>
+          <span className="text-[var(--text)]">{formatLotQ(abs(posSize), decimals, pos.lotExp ?? 0)}</span>
           <span className="ml-1 text-[var(--text-secondary)]">{displaySymbol}</span>
         </td>
         <td className={`whitespace-nowrap px-3 py-2.5 text-right ${entryKnown ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }} title={entryKnown ? undefined : UNKNOWN_ENTRY_TOOLTIP}>
-          {entryKnown ? formatUsdPriceE6(entryE6) : "--"}
+          {entryKnown ? formatLotPriceE6(entryE6, pos.lotExp ?? 0) : "--"}
         </td>
         <td className={`whitespace-nowrap px-3 py-2.5 text-right ${hasValidMark ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-          {hasValidMark ? formatUsdPriceE6(markE6) : "--"}
+          {hasValidMark ? formatLotPriceE6(markE6, pos.lotExp ?? 0) : "--"}
         </td>
         <td
           className="whitespace-nowrap px-3 py-2.5 text-right font-medium text-[var(--text-secondary)]"

@@ -19,7 +19,9 @@ export function v22WrapperMessage(code: number, ctx: MessageContext & { minPosit
   const V = WRAPPER_ERR_V22;
   switch (code) {
     case V.PriceBandPinned:
-      return m("band-catching-up", "wait", "Price catching up", V22_COPY.band.catchingUp, { autoRetry: ctx.surface === "close" });
+      // No autoRetry: nothing consumes it for a close, and a pin can last about an hour (band_max_pin_slots), so the line stays
+      // calm and short and the honest part sits in Details.
+      return m("band-catching-up", "wait", "Price catching up", V22_COPY.band.catchingUp, { why: V22_COPY.band.catchingUpWhy });
     case V.PriceBandConfigInvalid:
       return m("band-config", "error", "Price protection not valid", "These price-protection settings aren't valid for this market. Adjust them and try again. Nothing was sent.");
     case V.HoldingRentConfigInvalid:
@@ -31,7 +33,7 @@ export function v22WrapperMessage(code: number, ctx: MessageContext & { minPosit
     case V.BondWithdrawCooldown:
       return m("bond-cooldown", "wait", "Still cooling down", "Your withdrawal is still cooling down. Try again after it ends. Nothing moved.");
     case V.BondConfigInvalid:
-      return m("bond-config", "error", "Bond settings not valid", "These bond settings aren't valid for this market. Nothing was sent.");
+      return m("bond-config", "error", "Bond settings not valid", "These bond details don't fit this market or your position. Nothing was sent.");
     case V.PriceBandPositionCap:
       return m("band-side-full", "paused", "Side is full", V22_COPY.band.fullSide);
     case V.PriceBandTooNarrow:
@@ -46,11 +48,11 @@ export function v22WrapperMessage(code: number, ctx: MessageContext & { minPosit
           : "Below the minimum position size: trade at least the market minimum, or close fully.",
       );
     case V.RescueRefused:
-      return m("rescue-refused", "paused", "Not right now", "This market can't take new capital right now. Try again once it has refreshed. Nothing moved.");
+      return m("rescue-refused", "paused", "Not right now", "This market can't take new capital right now. Nothing moved.");
     case V.RescueNavFloor:
       return m("rescue-floor", "info", "Winding down", V22_COPY.rescue.wound);
     case V.InsuranceBackstopRefused:
-      return m("backstop-refused", "info", "Not available", "The insurance fund isn't available for that right now. Nothing moved.");
+      return m("backstop-refused", "info", "Not available", "That insurance move didn't go through. Nothing moved.");
     case V.RedemptionBelowMinPayout:
       return m("exit-requote", "wait", "Price moved", "The exit price moved below your minimum. Getting a new quote.", { requote: true, autoRetry: true });
     case V.ExitRequiresLossCurrent:

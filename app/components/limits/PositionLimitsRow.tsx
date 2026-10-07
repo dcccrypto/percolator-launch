@@ -10,7 +10,8 @@ import { type FC } from "react";
 import type { MarketLimits } from "@/hooks/useMarketLimits";
 import { COPY } from "@/lib/limits/copy";
 import { fundingPerHourAtoms, projectLiqDrift, vaultSkewRateE9 } from "@/lib/limits/vault-tranche";
-import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
+import { formatTokenAmount } from "@/lib/format";
+import { formatLotPriceE6 } from "@/lib/v22/lot";
 
 export interface PositionLimitsRowProps {
   limits: MarketLimits;
@@ -21,9 +22,11 @@ export interface PositionLimitsRowProps {
   marginAboveMaintAtoms: bigint;
   decimals: number;
   collateralSymbol: string;
+  /** v2.2 lot exponent: prices are per lot; the liquidation drift is shown per token. */
+  lotExp?: number;
 }
 
-export const PositionLimitsRow: FC<PositionLimitsRowProps> = ({ limits, positionQ, priceE6, marginAboveMaintAtoms, decimals, collateralSymbol }) => {
+export const PositionLimitsRow: FC<PositionLimitsRowProps> = ({ limits, positionQ, priceE6, marginAboveMaintAtoms, decimals, collateralSymbol, lotExp = 0 }) => {
   if (!limits.flags.p3 || limits.state === "off" || !limits.engine || positionQ === 0n || priceE6 <= 0n) return null;
   const rate = vaultSkewRateE9(limits.vaultLp, limits.engine.oiEffLongQ, limits.engine.oiEffShortQ);
   if (rate === 0n) return null;
@@ -42,7 +45,7 @@ export const PositionLimitsRow: FC<PositionLimitsRowProps> = ({ limits, position
       </span>
       {drift.warn && (
         <span data-testid="limits-liq-drift" className="text-[var(--warning)]">
-          {COPY.liqDrift(formatUsdPriceE6(drift.liqMoveE6))}
+          {COPY.liqDrift(formatLotPriceE6(drift.liqMoveE6, lotExp))}
         </span>
       )}
     </div>

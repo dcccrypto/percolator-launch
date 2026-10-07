@@ -1,3 +1,5 @@
+import { lotExpOf } from "@/lib/v22/lot";
+import { lotMarketNumbers, markToTokenUsd } from "@/lib/v22/lot-view";
 import { Connection, PublicKey } from "@solana/web3.js";
 import {
   parseWrapperConfigV17,
@@ -142,6 +144,9 @@ function parseLiveState(data: Uint8Array, slabKey: PublicKey): LiveMarketState |
   if (!isWrapperAccount(data)) return null;
 
   let markPriceUsd: number | null = null;
+  // v2.2 lot market: the mark is per LOT and OI is in lots; the live row (merged into /api/markets) is per TOKEN.
+  let markE6ForLot = 0n;
+  const lotExp = lotExpOf(data);
   // Default to complete: no stake program pinned for this network (mainnet
   // today) means the stake step doesn't gate anything here — see the
   // isComplete doc comment above. Only devnet, where the stake program IS
@@ -154,7 +159,10 @@ function parseLiveState(data: Uint8Array, slabKey: PublicKey): LiveMarketState |
   try {
     const cfg = parseWrapperConfigV17(data, V17_HEADER_LEN);
     const e6 = cfg.markEwmaE6;
-    if (e6 > 0n && e6 < MAX_SANE_PRICE_E6) markPriceUsd = Number(e6) / 1_000_000;
+    if (e6 > 0n && e6 < MAX_SANE_PRICE_E6) {
+      markE6ForLot = e6;
+      markPriceUsd = markToTokenUsd(e6, lotExp);
+    }
 
     // Same signal the discovery path uses; no stake program pinned (mainnet
     // today) => complete, PDA derivation failure => fail closed.
@@ -220,13 +228,15 @@ function parseLiveState(data: Uint8Array, slabKey: PublicKey): LiveMarketState |
     }
   }
 
-  const totalOiQ = oiLongQ + oiShortQ;
+  const lotNums = lotMarketNumbers({ markE6: markE6ForLot, oiLongQ: BigInt(Math.trunc(oiLongQ)), oiShortQ: BigInt(Math.trunc(oiShortQ)) }, lotExp);
+  // lotExp 0 (flag off, v2.1, no lots): the exact pre-v2.2 expressions, bit for bit.
+  const totalOiQ = lotNums.totalOi;
   return {
     markPriceUsd,
-    oiLongQ,
-    oiShortQ,
+    oiLongQ: lotExp === 0 ? oiLongQ : lotNums.oiLong,
+    oiShortQ: lotExp === 0 ? oiShortQ : lotNums.oiShort,
     totalOiQ,
-    totalOiUsd: markPriceUsd != null ? (totalOiQ / 1_000_000) * markPriceUsd : null,
+    totalOiUsd: markPriceUsd != null ? (lotExp === 0 ? (totalOiQ / 1_000_000) * markPriceUsd : lotNums.totalOiUsd) : null,
     insurance,
     vault,
     cTot,

@@ -48,6 +48,9 @@ export function EarnExitQuote({ exit, decimals, symbol, canQuote }: EarnExitQuot
           <p data-testid="earn-exit-min" className="text-[13px] font-medium text-[var(--text)]">
             {quoteLine(state.quote.minPayout, decimals, symbol)}
           </p>
+          {state.quote.estimate && (
+            <p data-testid="earn-exit-estimate" className="mt-1 text-[11px] text-[var(--text-secondary)]">{V22_COPY.earnExit.estimateNote}</p>
+          )}
           {showDipNote(state.quote.staleCount) && (
             <p data-testid="earn-exit-dip" className="mt-1 text-[11px] text-[var(--text-secondary)]">{V22_COPY.earnExit.dipTolerance}</p>
           )}

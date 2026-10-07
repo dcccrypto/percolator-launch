@@ -331,6 +331,58 @@ describe("v2.2 launch", () => {
     expect(S.broadcastSignedTx).not.toHaveBeenCalled();
   });
 
+  it("F2: in the bond launch each Earn seed (75) carries the bound-vault tail [11] vault_lp_state (w), [12] LP portfolio; the plain launch does not", async () => {
+    __setDevnetV22ForTest(true);
+    await launch({ singleTx: true, params: bondParams() });
+    const d = decodeV1Message(splitV1Wire(sent[0]!).message);
+    const key = (ix: (typeof d.instructions)[number], j: number) => d.accountKeys[ix.accountIndexes[j]!]!;
+    const ix94 = d.instructions[findIx(d, PROGRAM, 94)[0]!]!;
+    const seeds = findIx(d, PROGRAM, 75).map((i) => d.instructions[i]!);
+    expect(seeds).toHaveLength(2);
+    for (const ix of seeds) {
+      expect(ix.accountIndexes).toHaveLength(13);
+      expect(key(ix, 11).equals(key(ix94, 3))).toBe(true);
+      expect(key(ix, 12).equals(key(ix94, 4))).toBe(true);
+    }
+    // no bond: the seeds stay the plain 11 accounts (the vault is not bound yet when they run)
+    sent = [];
+    await launch({ singleTx: true, params: params({ growth: GROWTH, v22: { lotExp: 0, rent: { ...DEFAULT_RENT }, band: bandDefaultsV22(6) } }) });
+    const d2 = decodeV1Message(splitV1Wire(sent[0]!).message);
+    for (const i of findIx(d2, PROGRAM, 75)) expect(d2.instructions[i]!.accountIndexes).toHaveLength(11);
+  });
+
+  it("F2 shape rule: the real bond bundle is valid; the same bundle with the seeds' tail stripped (or the tail on an unbound seed) is refused", async () => {
+    __setDevnetV22ForTest(true);
+    await launch({ singleTx: true, params: bondParams() });
+    const d = decodeV1Message(splitV1Wire(sent[0]!).message);
+    const ctx = { programs: { wrapper: PROGRAM.toBase58(), stake: STAKE.toBase58() }, payer: WALLET.publicKey.toBase58(), slab: Keypair.fromSeed(seed(77)).publicKey.toBase58(), keeper: KEEPER.publicKey.toBase58() };
+    const good = neutralFromV1(d);
+    expect(launchBundleViolations(good, ctx).filter((x) => /DepositToLpVault/.test(x))).toEqual([]);
+    const stripped = good.map((x) => (x.programId === ctx.programs.wrapper && x.data[0] === 75 ? { ...x, accounts: x.accounts.slice(0, 11) } : x));
+    expect(launchBundleViolations(stripped, ctx).some((x) => /bound vault must carry the vault_lp_state/.test(x) || /must carry the vault_lp_state/.test(x))).toBe(true);
+    const wrongKey = good.map((x) => (x.programId === ctx.programs.wrapper && x.data[0] === 75 ? { ...x, accounts: x.accounts.map((a, i) => (i === 12 ? { ...a, key: ctx.payer } : a)) } : x));
+    expect(launchBundleViolations(wrongKey, ctx).some((x) => /must carry the vault_lp_state/.test(x))).toBe(true);
+  });
+
+  // Dump of the REAL bond launch the app builds, for the LiteSVM replay against the real wrapper binary
+  // (scripts are outside the repo: the replay harness lives in the session scratchpad). Only runs when V22_BOND_DUMP is set.
+  it.runIf(!!process.env.V22_BOND_DUMP)("dump: the bond launch instructions as JSON", async () => {
+    __setDevnetV22ForTest(true);
+    const { outcome } = await launch({ singleTx: true, params: params({ initialPriceE6: 10_000_000n, growth: GROWTH, v22: { lotExp: 0, rent: { ...DEFAULT_RENT }, band: bandDefaultsV22(6), bond: BOND } }) });
+    expect(outcome).toEqual({ status: "success" });
+    const d = decodeV1Message(splitV1Wire(sent[0]!).message);
+    const out = {
+      wrapper: PROGRAM.toBase58(), stake: STAKE.toBase58(), payer: WALLET.publicKey.toBase58(), keeper: KEEPER.publicKey.toBase58(), mint: MINT.toBase58(),
+      computeUnitLimit: d.computeUnitLimit, heap: d.heapSizeBytes,
+      instructions: d.instructions.map((ix) => ({
+        program: d.accountKeys[ix.programIdIndex]!.toBase58(),
+        keys: ix.accountIndexes.map((i) => ({ pubkey: d.accountKeys[i]!.toBase58(), signer: i < d.numRequiredSignatures, writable: v1IsWritable(d, i) })),
+        data: Buffer.from(ix.data).toString("hex"),
+      })),
+    };
+    writeFileSync(process.env.V22_BOND_DUMP!, JSON.stringify(out, null, 1));
+  });
+
   it("NEGATIVE CONTROL: the same bond list in the v2.1 order (107 after the seeds) is refused by the shape", () => {
     __setDevnetV22ForTest(true);
     const shape = expectedLaunchShape({ memo: true, cosign: true, feeSplit: false, bond: true });
@@ -385,12 +437,27 @@ describe("v2.2 launch", () => {
 
 describe("placeBondTranche (pure)", () => {
   const w = PROGRAM;
-  const ix = (tag: number, program = w) => new TransactionInstruction({ programId: program, keys: [], data: Buffer.from([tag]) });
+  const dummy = (n: number) => Array.from({ length: n }, (_, i) => ({ pubkey: Keypair.fromSeed(seed(150 + i)).publicKey, isSigner: false, isWritable: true }));
+  const ix = (tag: number, program = w) => new TransactionInstruction({ programId: program, keys: tag === 75 ? dummy(11) : tag === 94 ? dummy(11) : [], data: Buffer.from([tag]) });
   const create = () => new TransactionInstruction({ programId: SystemProgram.programId, keys: [], data: Buffer.alloc(52) });
   const list = () => [ix(0), ix(74), ix(1, new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")), ix(75), ix(75), create(), create(), ix(94), ix(96)];
   it("moves the seed segment after 107 and keeps everything else in order", () => {
     const out = placeBondTranche(list(), ix(107), w).map((i) => (i.programId.equals(SystemProgram.programId) ? "c" : i.data[0]));
     expect(out).toEqual([0, 74, "c", "c", 94, 107, 1, 75, 75, 96]);
+  });
+  it("F2: the moved seeds gain exactly [11] = the 94's vault_lp_state and [12] = its LP portfolio; the 94 itself is untouched", () => {
+    const l = list();
+    const out = placeBondTranche(l, ix(107), w);
+    const i94 = out.find((x) => x.data[0] === 94)!;
+    const seeds = out.filter((x) => x.data[0] === 75);
+    expect(seeds).toHaveLength(2);
+    for (const sx of seeds) {
+      expect(sx.keys).toHaveLength(13);
+      expect(sx.keys[11]!.pubkey.equals(i94.keys[3]!.pubkey)).toBe(true);
+      expect(sx.keys[11]!.isWritable).toBe(true);
+      expect(sx.keys[12]!.pubkey.equals(i94.keys[4]!.pubkey)).toBe(true);
+    }
+    expect(i94.keys).toHaveLength(11);
   });
   it("NEGATIVE CONTROL: refuses a list that is not a 74 ... create create 94 launch, and a second bond", () => {
     expect(() => placeBondTranche([ix(0), ix(74)], ix(107), w)).toThrow();
