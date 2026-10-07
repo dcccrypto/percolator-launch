@@ -681,7 +681,8 @@ export function buildLiveMarkets(
     // source): the keeper can never price it, so it is not a vault anyone can usefully deposit
     // into. /markets already leaves it out (isListedMarketRow); Earn now agrees. 2026-10-06: 30
     // such rows listed as "UNKNOWN" vaults. Curated markets carry their own identity and stay.
-    .filter((m) => PLAYGROUND_SLAB_META[m.slabAddress] !== undefined || !hasNoPriceSource(m.row))
+    // An entry with no row at all is unknown, not unpriced: it stays listed (and must not throw).
+    .filter((m) => PLAYGROUND_SLAB_META[m.slabAddress] !== undefined || !m.row || !hasNoPriceSource(m.row))
     .map((m) => {
       const info = buildMarketVaultInfo(m.slabAddress, m.symbol, m.name, m.mainnetCa, curatedVaults, supabaseBySlab, onChainMaxLeverage);
       return vaultsTrusted ? info : { ...info, hasVault: undefined };
