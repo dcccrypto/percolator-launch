@@ -42,6 +42,8 @@ import type { TokenMeta } from "@/lib/tokenMeta";
 // ── The creation transaction, read from chain ────────────────────────────────────────────────────
 
 export const INIT_MARKET_DATA_LEN = 219;
+/** Wrapper DepositJuniorTranche (lib/limits/constants.ts P3_TAG). */
+const DEPOSIT_JUNIOR_TRANCHE_TAG = 96;
 
 /** The InitMarket arguments the launch's payload and resume depend on (layout: SDK encodeInitMarket). */
 export interface InitMarketFacts {
@@ -80,7 +82,7 @@ export interface CreationFacts {
   memo: string;
   init: InitMarketFacts;
   collateralMint: string;
-  /** Amounts of the wrapper DepositCollateral instructions in the launch's first transactions. */
+  /** Amounts of the wrapper DepositCollateral / DepositJuniorTranche instructions in the launch's first transactions (LP-seed candidates; the memo picks). */
   depositAmounts: bigint[];
 }
 
@@ -151,6 +153,11 @@ export async function readCreationFromChain(connection: TxConn, slab: string, wr
             init = decodeInitMarketData(data);
             admin = accts[0] ?? null;
             mint = accts[2] ?? null;
+          } else if (data[0] === DEPOSIT_JUNIOR_TRANCHE_TAG && data.length === 17 && accts.includes(slab)) {
+            // A vault-owned-LP (P3) launch seeds liquidity as the creator's junior tranche (tag 96, u128 amount)
+            // instead of a DepositCollateral: that amount IS the LP seed the memo binds (juniorAtoms = lpCollateral).
+            const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+            depositAmounts.push(view.getBigUint64(1, true) | (view.getBigUint64(9, true) << 64n));
           } else if (data[0] === IX_TAG.DepositCollateral && data.length === 33 && accts.includes(slab)) {
             const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
             depositAmounts.push(view.getBigUint64(17, true) | (view.getBigUint64(25, true) << 64n));
@@ -214,6 +221,13 @@ export interface RecoveredLaunch {
   maxPortfolioAssets: number;
   /** The slab's own insurance balance when this launch was read (atoms), if known: pinned for a resume. */
   onChainInsuranceAtoms?: bigint | null;
+  /**
+   * The LP-exposure setting (bps of the seed) the matcher limits will be written with, when the liquidity
+   * step has not run yet. It is NOT bound by the memo and not readable from chain before the matcher
+   * exists, so the creator confirms it; once the matcher exists (step 3) it is already written and this
+   * stays undefined.
+   */
+  lpExposureBps?: number;
 }
 
 export interface ReconstructInput {
@@ -433,6 +447,7 @@ export interface ResumableParams {
   initialMarginBps: number;
   lpCollateral: bigint;
   insuranceAmount?: bigint;
+  lpExposureBps?: number;
   symbol?: string;
   name?: string;
   mainnetCA?: string;
@@ -479,6 +494,7 @@ export function applyRecoveredLaunch<T extends ResumableParams>(params: T, r: Re
     initialMarginBps: r.initialMarginBps,
     lpCollateral: r.lpCollateralAtoms,
     ...(ins != null && ins > 0n ? { insuranceAmount: ins } : {}),
+    ...(r.lpExposureBps != null ? { lpExposureBps: r.lpExposureBps } : {}),
     symbol: r.symbol,
     name: r.name,
     mainnetCA: r.request.mainnetCA ?? params.mainnetCA,
@@ -505,6 +521,26 @@ export function unboundResumeValues(r: RecoveredLaunch, decimals = 6): string[] 
   out.push(
     `Earn-vault backing seed: ${atomsToHuman(2n * backingSeedPerDomain(r.lpCollateralAtoms), decimals)} in total across both backing domains (derived from the liquidity seed, not separately signed).`,
   );
-  out.push("Matcher limits (per-trade and inventory caps): from this form's LP exposure setting, written once at the liquidity step.");
+  out.push(
+    r.lpExposureBps != null
+      ? `Matcher limits (per-trade and inventory caps): from the LP exposure shown, ${r.lpExposureBps} bps of the liquidity seed, written once at the liquidity step. The original value can't be read until the matcher exists.`
+      : "Matcher limits: already written at the liquidity step; this resume does not change them.",
+  );
   return out;
+}
+
+export const CHAIN_RESUME_MISMATCH_COPY = "This resume was verified for a different market or wallet. Cancel it and open the launch again.";
+
+/**
+ * Why a chain resume may not be used for a launch or Retry right now, or null when it may: it must be for
+ * the slab being resumed and for the connected wallet, and be a market this recovery can resume.
+ */
+export function chainResumeRefusal(
+  r: Pick<RecoveredLaunch, "creator" | "maxPortfolioAssets"> & { request: Pick<RecoveredLaunch["request"], "slabAddress"> },
+  resumeSlab: string | null,
+  walletB58: string | null,
+): string | null {
+  if (r.request.slabAddress !== resumeSlab || r.creator !== walletB58) return CHAIN_RESUME_MISMATCH_COPY;
+  const can = canResumeLaunch(r);
+  return can.ok ? null : can.reason;
 }

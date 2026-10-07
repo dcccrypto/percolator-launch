@@ -237,7 +237,7 @@ void IX_TAG;
 
 import fs from "fs";
 import path from "path";
-import { applyRecoveredLaunch, canResumeLaunch, unboundResumeValues, type RecoveredLaunch } from "@/lib/launch-recovery";
+import { applyRecoveredLaunch, canResumeLaunch, chainResumeRefusal, CHAIN_RESUME_MISMATCH_COPY, unboundResumeValues, type RecoveredLaunch } from "@/lib/launch-recovery";
 
 describe("a chain-recovered resume pins the launch's parameters", () => {
   const launch = { initialPriceE6: PRICE, tradingFeeBps: 5, initialMarginBps: 1000, lpCollateralAtoms: LP, symbol: "AUTON", name: "auton", poolAddress: POOL, dexType: "meteora-dlmm", maxPortfolioAssets: 14, request: { mainnetCA: CA } } as unknown as RecoveredLaunch;
@@ -260,12 +260,24 @@ describe("a chain-recovered resume pins the launch's parameters", () => {
     expect(applyRecoveredLaunch({ ...live, insuranceAmount: 5n }, { ...launch, onChainInsuranceAtoms: 0n } as RecoveredLaunch).insuranceAmount).toBe(5n);
     expect(applyRecoveredLaunch({ ...live, insuranceAmount: 5n }, { ...launch, onChainInsuranceAtoms: null } as RecoveredLaunch).insuranceAmount).toBe(5n);
   });
+  it("pins the LP exposure the creator confirmed; leaves the form's alone once the matcher exists", () => {
+    expect(applyRecoveredLaunch({ ...live, lpExposureBps: 10_000 }, { ...launch, lpExposureBps: 12_500 } as RecoveredLaunch).lpExposureBps).toBe(12_500);
+    expect(applyRecoveredLaunch({ ...live, lpExposureBps: 10_000 }, launch).lpExposureBps).toBe(10_000);
+  });
   it("lists every value the wallet signs that the memo does not bind", () => {
     const lines = unboundResumeValues({ ...launch, onChainInsuranceAtoms: 0n } as RecoveredLaunch);
     expect(lines.join("\n")).toMatch(/Insurance top-up: the amount in this form/);
     expect(lines.join("\n")).toMatch(/backing seed/);
     expect(lines.join("\n")).toMatch(/Matcher limits/);
     expect(unboundResumeValues({ ...launch, onChainInsuranceAtoms: 3_000_000n } as RecoveredLaunch)[0]).toBe("Insurance: 3, as already funded on chain.");
+  });
+  it("a refused Retry/launch: wrong slab, wrong wallet, or a one-slot market; null only when all agree", () => {
+    const r = { creator: "A", maxPortfolioAssets: 14, request: { slabAddress: "Y" } };
+    expect(chainResumeRefusal(r, "Y", "A")).toBeNull();
+    expect(chainResumeRefusal(r, "X", "A")).toBe(CHAIN_RESUME_MISMATCH_COPY);
+    expect(chainResumeRefusal(r, "Y", "B")).toBe(CHAIN_RESUME_MISMATCH_COPY);
+    expect(chainResumeRefusal(r, "Y", null)).toBe(CHAIN_RESUME_MISMATCH_COPY);
+    expect(chainResumeRefusal({ ...r, maxPortfolioAssets: 1 }, "Y", "A")).toMatch(/can't be resumed from here yet/);
   });
   it("with no recovery it changes nothing (the normal launch and the local resume are untouched)", () => {
     expect(applyRecoveredLaunch(live, null)).toBe(live);
@@ -276,10 +288,43 @@ describe("a chain-recovered resume pins the launch's parameters", () => {
     expect(src).toContain("create(applyRecoveredLaunch(params, gate.resume), createState.step);");
     expect(src).toContain("restoreSlabAddress(resumeSlabParam);");
     // security review C: the resume belongs to one slab and one wallet, and is gated before every launch/retry
-    expect(src).toContain("r.request.slabAddress !== resumeSlab || r.creator !== walletB58");
-    expect(src).toContain("if (resumeWalletRef.current !== walletB58 && chainResumeRef.current) {");
+    expect(src).toContain("chainResumeRefusal(r, resumeSlab, walletB58)");
+    expect(src).toContain("useChainResumeWalletGuard(walletB58, !!chainResume");
     expect(src.match(/const gate = gateChainResume\(\);\n\s+if \(!gate\.ok\) return;/g)?.length).toBe(2);
     // a local resume replaces any chain resume
     expect(src).toMatch(/setChainResume\(null\);\n\s+setChainResumeError\(null\);\n\s+\/\/ Set resumeFromStep so handleLaunch/);
+  });
+});
+
+
+describe("registration-only recovery of a FINISHED vault-owned-LP (one-slot) market", () => {
+  it("is proven from the junior-tranche deposit, while a resume of the same market is refused", async () => {
+    const lp = 5_000_000_000n;
+    const md = resolveMarketMetadata({ symbol: "AUTON", name: "auton", mint: CA });
+    const derived = deriveLaunchMarketParams({ initialMarginBps: 1000, lpCollateral: lp, initialPriceE6: PRICE });
+    const initData = encodeInitMarket(buildV17InitMarketArgs({ initialPriceE6: PRICE, tradingFeeBps: 5, p3: { juniorFloorBps: 1 } }, derived));
+    expect(decodeInitMarketData(initData)?.maxPortfolioAssets).toBe(1);
+    const payload = buildMarketRegistrationPayload({
+      slabAddress: SLAB.toBase58(),
+      params: { mint: COLLATERAL, symbol: md.symbol, name: md.name, decimals: 6, dexPoolAddress: POOL, initialPriceE6: PRICE, initialMarginBps: 1000, tradingFeeBps: 5, lpCollateral: lp, mainnetCA: CA },
+      deployer: CREATOR.toBase58(), oracleMode: "keeper", isAdminOracle: false, isDevnetEnv: true, crankWallet: CRANK,
+    });
+    const memo = await keeperRegisterMemoText(await keeperMemoParams({ slabAddress: SLAB.toBase58(), mainnetCA: CA, dexPoolAddress: POOL, dexType: "meteora-dlmm", symbol: md.symbol, payload }));
+    const junior = Buffer.alloc(17);
+    junior[0] = 96;
+    junior.writeBigUInt64LE(lp & 0xffffffffffffffffn, 1);
+    const txs = [
+      { sig: PROOF_SIG, tx: fakeTx(CREATOR, [initIx(initData), memoIx(memo)]) },
+      { sig: "junior", tx: fakeTx(CREATOR, [{ programId: WRAPPER, keys: [CREATOR, SLAB], data: junior }]) },
+    ];
+    const r = await recoverLaunchFromChain(deps(txs, [pool(POOL)]), input());
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.launch.maxPortfolioAssets).toBe(1);
+    expect(r.launch.lpCollateralAtoms).toBe(lp);
+    expect(r.launch.request.payload).toEqual(payload);
+    expect(canResumeLaunch(r.launch).ok).toBe(false); // registration yes, resume no
+    // CONTROL: without the junior deposit there is nothing to prove the seed from
+    expect(await recoverLaunchFromChain(deps([txs[0]], [pool(POOL)]), input())).toEqual({ ok: false, reason: "no-deposit" });
   });
 });

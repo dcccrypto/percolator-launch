@@ -67,8 +67,8 @@ describe("the card", () => {
     render(<ResumeFromChainCard slab={SLAB.toBase58()} onVerified={onVerified} />);
     fireEvent.change(await screen.findByTestId("resume-chain-ca"), { target: { value: "CA1" } });
     fireEvent.click(screen.getByTestId("resume-chain-verify"));
-    await waitFor(() => expect(onVerified).toHaveBeenCalledWith({ ...launch, onChainInsuranceAtoms: 0n }, 1));
-    expect(h.adopt).toHaveBeenCalledWith({ ...launch, onChainInsuranceAtoms: 0n });
+    await waitFor(() => expect(onVerified).toHaveBeenCalledWith({ ...launch, onChainInsuranceAtoms: 0n, lpExposureBps: 10_000 }, 1));
+    expect(h.adopt).toHaveBeenCalledWith({ ...launch, onChainInsuranceAtoms: 0n, lpExposureBps: 10_000 });
     expect(screen.getByTestId("resume-chain-summary").textContent).toMatch(/AUTON.*10x.*5 bps fee.*1000 liquidity seed/);
   });
 
@@ -148,5 +148,59 @@ describe("security review items on the card", () => {
     expect(unbound).toMatch(/Insurance: 250, as already funded on chain/);
     expect(unbound).toMatch(/backing seed/);
     expect(unbound).toMatch(/Matcher limits/);
+  });
+});
+
+
+describe("matcher limits (LP exposure) are shown, editable and pinned", () => {
+  it("before the matcher exists: a labelled field (default 1x), the confirmed value goes to the wizard", async () => {
+    h.recover.mockResolvedValue({ ok: true, launch });
+    const onVerified = vi.fn();
+    render(<ResumeFromChainCard slab={SLAB.toBase58()} onVerified={onVerified} />);
+    const f = (await screen.findByTestId("resume-chain-exposure")) as HTMLInputElement;
+    expect(f.value).toBe("10000");
+    expect(screen.getByTestId("resume-chain-card").textContent).toMatch(/not part of the signed registration, written once at the liquidity step/);
+    fireEvent.change(f, { target: { value: "12500" } });
+    fireEvent.change(screen.getByTestId("resume-chain-ca"), { target: { value: "CA1" } });
+    fireEvent.click(screen.getByTestId("resume-chain-verify"));
+    await waitFor(() => expect(onVerified).toHaveBeenCalled());
+    expect(onVerified.mock.calls[0][0].lpExposureBps).toBe(12_500);
+    expect(screen.getByTestId("resume-chain-unbound").textContent).toMatch(/12500 bps of the liquidity seed, written once at the liquidity step/);
+  });
+  it("an out-of-range value is clamped to the wizard's range; a non-number is refused before any request", async () => {
+    h.recover.mockResolvedValue({ ok: true, launch });
+    const onVerified = vi.fn();
+    render(<ResumeFromChainCard slab={SLAB.toBase58()} onVerified={onVerified} />);
+    const f = await screen.findByTestId("resume-chain-exposure");
+    fireEvent.change(screen.getByTestId("resume-chain-ca"), { target: { value: "CA1" } });
+    fireEvent.change(f, { target: { value: "abc" } });
+    fireEvent.click(screen.getByTestId("resume-chain-verify"));
+    await waitFor(() => expect(screen.getByTestId("resume-chain-note").textContent).toMatch(/whole number of bps/));
+    expect(h.recover).not.toHaveBeenCalled();
+    fireEvent.change(f, { target: { value: "99999" } });
+    fireEvent.click(screen.getByTestId("resume-chain-verify"));
+    await waitFor(() => expect(onVerified).toHaveBeenCalled());
+    expect(onVerified.mock.calls[0][0].lpExposureBps).toBe(20_000);
+  });
+  it("once the matcher exists (capital deposited) there is no field and nothing is pinned: it is already written", async () => {
+    h.header = { mode: 0, cTot: 5n, materializedPortfolioCount: 2n };
+    h.recover.mockResolvedValue({ ok: true, launch });
+    const onVerified = vi.fn();
+    render(<ResumeFromChainCard slab={SLAB.toBase58()} onVerified={onVerified} />);
+    await screen.findByTestId("resume-chain-ca");
+    expect(screen.queryByTestId("resume-chain-exposure")).toBeNull();
+    fireEvent.change(screen.getByTestId("resume-chain-ca"), { target: { value: "CA1" } });
+    fireEvent.click(screen.getByTestId("resume-chain-verify"));
+    await waitFor(() => expect(onVerified).toHaveBeenCalled());
+    expect(onVerified.mock.calls[0][0].lpExposureBps).toBeUndefined();
+    expect(screen.getByTestId("resume-chain-unbound").textContent).toMatch(/already written at the liquidity step/);
+  });
+  it("nothing funded yet: the insurance line says the amount comes from the form and nothing is funded", async () => {
+    h.recover.mockResolvedValue({ ok: true, launch });
+    render(<ResumeFromChainCard slab={SLAB.toBase58()} onVerified={vi.fn()} />);
+    fireEvent.change(await screen.findByTestId("resume-chain-ca"), { target: { value: "CA1" } });
+    fireEvent.click(screen.getByTestId("resume-chain-verify"));
+    await waitFor(() => expect(screen.getByTestId("resume-chain-unbound")).toBeTruthy());
+    expect(screen.getByTestId("resume-chain-unbound").textContent).toMatch(/Insurance top-up: the amount in this form \(not part of the signed registration\); nothing is funded yet\./);
   });
 });

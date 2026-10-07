@@ -1917,6 +1917,17 @@ export function useCreateMarket() {
     setState((s) => ({ ...s, slabAddress }));
   }, []);
 
+  /**
+   * Drop a chain resume (#3267). The wizard calls this unconditionally when a LOCAL resume starts: a
+   * guard left for slab Y must never survive into a resume of slab X, where the keypair hydration it
+   * blocks (or a missing keypair) would otherwise leave create() on Y.
+   */
+  const clearChainResume = useCallback(() => {
+    const was = chainResumeSlabRef.current;
+    chainResumeSlabRef.current = null;
+    if (was) setState((s) => (s.slabAddress === was ? { ...s, slabAddress: null } : s));
+  }, []);
+
   // UX WP-7: the background keeper-registration loop (no signature; the proof is the creation tx).
   const keeperLoopRef = useRef<AbortController | null>(null);
   useEffect(() => () => keeperLoopRef.current?.abort(), []);
@@ -4024,5 +4035,5 @@ export function useCreateMarket() {
     [],
   );
 
-  return { state, create, reset, restoreSlabKeypair, restoreSlabAddress, retryKeeperRegistration, cancelInFlightLaunch };
+  return { state, create, reset, restoreSlabKeypair, restoreSlabAddress, clearChainResume, retryKeeperRegistration, cancelInFlightLaunch };
 }

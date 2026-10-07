@@ -36,7 +36,9 @@ import { StepControlRoom, leverageToMarginBps, marginBpsToLeverage } from "./Ste
 import { LaunchProgress } from "./LaunchProgress";
 import { LaunchSuccess } from "./LaunchSuccess";
 import { ResumeFromChainCard } from "./ResumeFromChainCard";
-import { applyRecoveredLaunch, atomsToHuman, canResumeLaunch, type RecoveredLaunch } from "@/lib/launch-recovery";
+import { ChainResumeNotice } from "./ChainResumeNotice";
+import { dropChainResume, useChainResumeWalletGuard } from "@/hooks/useChainResumeWalletGuard";
+import { applyRecoveredLaunch, atomsToHuman, chainResumeRefusal, type RecoveredLaunch } from "@/lib/launch-recovery";
 import { RecoverSolBanner } from "./RecoverSolBanner";
 // W8 fix: share ONE SOL-cost formula with CostEstimate.tsx's own display so the
 // launch gate and the number shown to the user can never drift apart — see that
@@ -109,7 +111,7 @@ const DEFAULT_STATE: WizardState = {
 export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<slab>: continue this unfinished launch from chain (#3267). */ resumeSlabParam?: string }> = ({ initialMint, resumeSlabParam }) => {
   const { publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
-  const { state: createState, create, reset: resetCreate, restoreSlabKeypair, restoreSlabAddress, retryKeeperRegistration, cancelInFlightLaunch } = useCreateMarket();
+  const { state: createState, create, reset: resetCreate, restoreSlabKeypair, restoreSlabAddress, clearChainResume, retryKeeperRegistration, cancelInFlightLaunch } = useCreateMarket();
   // GH#2623: leaving this page mid-launch must stop the tail-broadcast retry
   // loop from prompting further wallet signatures — without this, a market
   // creation begun here kept re-signing (new popups) "even while out of the
@@ -237,16 +239,18 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
   // A chain resume belongs to ONE slab and ONE wallet. Switching wallet drops it (and the resume mode it
   // started), so a verification done for wallet A can never launch for wallet B.
   const walletB58 = publicKey?.toBase58() ?? null;
-  const resumeWalletRef = useRef<string | null>(walletB58);
-  useEffect(() => {
-    if (resumeWalletRef.current !== walletB58 && chainResumeRef.current) {
-      setChainResume(null);
-      setResumeFromStep(null);
-      setResumeSlab(null);
-      resetCreate();
-    }
-    resumeWalletRef.current = walletB58;
-  }, [walletB58]); // eslint-disable-line react-hooks/exhaustive-deps
+  useChainResumeWalletGuard(walletB58, !!chainResume, () =>
+    dropChainResume({
+      cancelInFlightLaunch,
+      forget: () => {
+        setChainResume(null);
+        setChainResumeError(null);
+        setResumeFromStep(null);
+        setResumeSlab(null);
+      },
+      resetCreate,
+    }),
+  );
   /**
    * The chain resume a launch/retry may use, or null when there is none. Refuses (and says why) when it
    * is for a different slab than the one being resumed, was verified for another wallet, or is a market
@@ -255,13 +259,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
   const gateChainResume = (): { ok: true; resume: RecoveredLaunch | null } | { ok: false } => {
     const r = chainResume;
     if (!r) return { ok: true, resume: null };
-    if (r.request.slabAddress !== resumeSlab || r.creator !== walletB58) {
-      setChainResumeError("This resume was verified for a different market or wallet. Cancel it and open the launch again.");
-      return { ok: false };
-    }
-    const can = canResumeLaunch(r);
-    if (!can.ok) {
-      setChainResumeError(can.reason);
+    const refusal = chainResumeRefusal(r, resumeSlab, walletB58);
+    if (refusal) {
+      setChainResumeError(refusal);
       return { ok: false };
     }
     setChainResumeError(null);
@@ -1135,11 +1135,15 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
   // Launch progress
   if (createState.loading || createState.step > 0 || createState.error) {
     return (
-      <LaunchProgress
-        state={createState}
-        onReset={handleReset}
-        onRetry={handleRetry}
-      />
+      <>
+        {/* A Retry refused by the chain-resume gate must say why here too: this view replaces the main one. */}
+        <ChainResumeNotice message={chainResumeError} />
+        <LaunchProgress
+          state={createState}
+          onReset={handleReset}
+          onRetry={handleRetry}
+        />
+      </>
     );
   }
 
@@ -1204,6 +1208,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
               marginSetByUser: true,
               lpCollateral: atomsToHuman(launch.lpCollateralAtoms, 6),
               lpSetByUser: true,
+              ...(launch.lpExposureBps != null ? { lpExposureBps: launch.lpExposureBps } : {}),
               ...(launch.onChainInsuranceAtoms != null && launch.onChainInsuranceAtoms > 0n
                 ? { insuranceAmount: atomsToHuman(launch.onChainInsuranceAtoms, 6) }
                 : {}),
@@ -1232,6 +1237,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
           // can now surface a RESUME click for ANY of them. Falling back to `stuckSlab`
           // keeps this working even against a test/mocked hook that doesn't supply
           // `stuckSlabs`.
+          // A chain resume's guard for another slab must not survive into this local resume, whether or not
+          // the keypair below is found (#3267 review).
+          clearChainResume?.();
           const matched = stuckSlabs?.find((s) => s.publicKey.toBase58() === slabAddress) ?? stuckSlab;
           if (matched?.keypair && matched.publicKey.toBase58() === slabAddress) {
             restoreSlabKeypair(matched.keypair, slabAddress);
@@ -1296,11 +1304,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
         </div>
       )}
 
-      {chainResumeError && (
-        <div data-testid="chain-resume-error" className="border border-[var(--short)]/40 bg-[var(--short)]/[0.06] px-4 py-3 text-[11px] text-[var(--text)]">
-          {chainResumeError}
-        </div>
-      )}
+      <ChainResumeNotice message={chainResumeError} />
 
       {/* Progress indicator */}
       <WizardProgress

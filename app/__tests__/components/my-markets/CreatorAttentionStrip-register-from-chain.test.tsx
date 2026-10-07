@@ -49,6 +49,17 @@ describe("register from another device", () => {
     expect(h.retry.mock.calls[0][0]).toEqual({ slabAddress: SLAB.toBase58(), mainnetCA: "CA1", dexPoolAddress: "POOL", dexType: "meteora-dlmm", symbol: "AUTON", payload: { symbol: "AUTON" } });
   });
 
+  it("a FINISHED vault-owned-LP (one-slot) market can still be registered from here: only resume is refused", async () => {
+    const p3 = { request: { ...verified.request }, maxPortfolioAssets: 1 };
+    h.recover.mockResolvedValue({ ok: true, launch: p3 });
+    h.retry.mockResolvedValue({ registered: true, message: "ok" });
+    renderStrip();
+    fireEvent.change(screen.getByTestId("register-from-chain-ca"), { target: { value: "CA1" } });
+    fireEvent.click(screen.getByTestId("register-from-chain-submit"));
+    await waitFor(() => expect(h.retry).toHaveBeenCalledTimes(1));
+    expect(h.adopt).toHaveBeenCalledWith(p3);
+  });
+
   it("a launch that does not match the memo: says so, saves nothing, sends nothing", async () => {
     h.recover.mockResolvedValue({ ok: false, reason: "no-match" });
     renderStrip();

@@ -12,6 +12,7 @@ import { isMarketauthComplete } from "@/lib/market-completeness";
 import { readMarketGroupHeader } from "@/lib/v18-wire";
 import { leverageFromMarginBps } from "@/lib/market-params";
 import { parseHumanAmount } from "@/lib/parseAmount";
+import { clampLpExposureBps, LP_EXPOSURE_DEFAULT_BPS } from "@/lib/matcher-params";
 import {
   adoptRecoveredLaunch,
   atomsToHuman,
@@ -80,6 +81,7 @@ export const ResumeFromChainCard: FC<{
   const [chain, setChain] = useState<ResumeChainState>({ kind: "loading" });
   const [ca, setCa] = useState("");
   const [lp, setLp] = useState("");
+  const [exposure, setExposure] = useState(String(LP_EXPOSURE_DEFAULT_BPS));
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [verified, setVerified] = useState<RecoveredLaunch | null>(null);
@@ -117,6 +119,17 @@ export const ResumeFromChainCard: FC<{
         return;
       }
     }
+    // Matcher limits are written once at the liquidity step (step 2) and not bound by the memo: until the
+    // matcher exists the value is the creator's to confirm. From step 3 on it is already written.
+    let lpExposureBps: number | undefined;
+    if (chain.step < 3) {
+      const n = Number(exposure);
+      if (!Number.isInteger(n) || n <= 0) {
+        setNote("Enter the LP exposure as a whole number of bps (10000 = 1x).");
+        return;
+      }
+      lpExposureBps = clampLpExposureBps(n);
+    }
     setBusy(true);
     try {
       const r = await recoverLaunchFromChain(
@@ -140,7 +153,7 @@ export const ResumeFromChainCard: FC<{
         setNote(can.reason);
         return;
       }
-      const launch = { ...r.launch, onChainInsuranceAtoms: chain.insuranceAtoms };
+      const launch = { ...r.launch, onChainInsuranceAtoms: chain.insuranceAtoms, lpExposureBps };
       // Same files the launching browser would have written, so the registration at the end of the
       // launch finds the exact proof and payload the memo bound.
       adoptRecoveredLaunch(launch);
@@ -206,6 +219,19 @@ export const ResumeFromChainCard: FC<{
           >
             {busy ? "checking…" : "verify and continue"}
           </button>
+          {chain.step < 3 && (
+            <label className="flex w-full flex-col gap-1 text-[10px] text-[var(--text-secondary)]">
+              LP exposure (bps of the liquidity seed; 10000 = 1x): not part of the signed registration, written once at the liquidity step. Confirm the value you chose.
+              <input
+                data-testid="resume-chain-exposure"
+                value={exposure}
+                onChange={(e) => setExposure(e.target.value)}
+                inputMode="numeric"
+                className="w-40 border border-[var(--border)]/50 bg-transparent px-3 py-2 text-[11px] text-[var(--text)] outline-none focus:border-[var(--accent)]/40"
+                style={{ fontFamily: "var(--font-mono)" }}
+              />
+            </label>
+          )}
           {!chain.funded && (
             <input
               data-testid="resume-chain-lp"
