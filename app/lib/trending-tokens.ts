@@ -452,8 +452,11 @@ export function mergeCandidates(...lists: TrendingCandidate[][]): TrendingCandid
  * The filter+rank pipeline over already-fetched inputs — pure. Market data per mint
  * comes from DexScreener; when DexScreener could not be reached for a mint
  * (`dexUnavailable`), the candidate's own GeckoTerminal pool data stands in. Keeps
- * candidates that pass both gates, ranks by the 24h momentum score desc (the default
- * order; the client re-ranks by the selected timeframe), returns the top `limit`.
+ * candidates that pass both gates, then returns the UNION of the top `limit` by the
+ * 24h momentum score and the top `limit` by the 1h score (deduped, 24h order first,
+ * so up to 2×limit rows). The union matters because the client re-ranks by the
+ * selected window: a token surging in the last hour (high `score1h`, modest
+ * `score24h`) would be sliced off a pure 24h cut and never reach the 1H view.
  */
 export function screenAndRank(
   candidates: TrendingCandidate[],
@@ -472,8 +475,13 @@ export function screenAndRank(
     if (!isLaunchablePriceUsd(token.priceUsd)) continue;
     out.push(token);
   }
-  out.sort((a, b) => b.score24h - a.score24h);
-  return out.slice(0, limit);
+  const topBy = (key: "score1h" | "score24h"): TrendingToken[] =>
+    [...out].sort((a, b) => b[key] - a[key]).slice(0, limit);
+  const top24 = topBy("score24h");
+  const seen = new Set(top24.map((t) => t.mint));
+  const union = [...top24];
+  for (const t of topBy("score1h")) if (!seen.has(t.mint)) { seen.add(t.mint); union.push(t); }
+  return union;
 }
 
 // ── network (fail-soft) ──────────────────────────────────────────────────────

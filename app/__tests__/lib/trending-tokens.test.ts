@@ -216,7 +216,7 @@ describe("momentum helpers", () => {
 });
 
 describe("screenAndRank", () => {
-  it("keeps only passers, ranks by 24h volume desc, and caps the list", () => {
+  it("keeps only passers and ranks by 24h momentum (equal liquidity → by 24h volume)", () => {
     const coins: PumpFunCoin[] = [
       coin({ mint: M("a"), symbol: "A" }), // vol 10k
       coin({ mint: M("b"), symbol: "B" }), // vol 90k → first
@@ -224,6 +224,9 @@ describe("screenAndRank", () => {
       coin({ mint: M("d"), symbol: "D" }), // excluded: no pair
       coin({ mint: M("e"), symbol: "E" }), // vol 50k → second
     ];
+    // all markets use the default liquidity (= LIQ_REF) so the dampener is 1 and the
+    // 24h score tracks 24h volume. No 1h volume → score1h ties at 0, so the 1h-union
+    // adds nothing new here.
     const dex = new Map<string, DexMarket>([
       [M("a"), market({ volume24hUsd: 10_000 })],
       [M("b"), market({ volume24hUsd: 90_000 })],
@@ -232,8 +235,24 @@ describe("screenAndRank", () => {
       // M("d") intentionally absent → fails the market gate
     ]);
     // candidateFromPumpFun keeps the raw coin, so screenAndRank re-applies its flag gate.
-    const out = screenAndRank(coins.map(cand), dex, 2);
-    expect(out.map((t) => t.symbol)).toEqual(["B", "E"]); // top-2 by volume, C and D excluded
+    const out = screenAndRank(coins.map(cand), dex, 5);
+    expect(out.map((t) => t.symbol)).toEqual(["B", "E", "A"]); // B>E>A by 24h; C and D excluded
+  });
+
+  it("unions in the top 1h movers so a fresh surge isn't sliced off a 24h-only cut", () => {
+    // X: tiny 24h volume but a big 1h surge (accel = 600/(600/6)=6, clamped to 2.5).
+    // With limit=1 a pure 24h cut returns only B; the union must also surface X.
+    const coins: PumpFunCoin[] = [
+      coin({ mint: M("b"), symbol: "B" }),
+      coin({ mint: M("x"), symbol: "X" }),
+    ];
+    const dex = new Map<string, DexMarket>([
+      [M("b"), market({ volume24hUsd: 90_000 })], // top by 24h, no 1h volume
+      [M("x"), market({ volume24hUsd: 5_000, volume1hUsd: 5_000, volume6hUsd: 5_000, txns1h: 600, txns6h: 600 })],
+    ]);
+    const syms = screenAndRank(coins.map(cand), dex, 1).map((t) => t.symbol);
+    expect(syms).toContain("B"); // top by 24h momentum
+    expect(syms).toContain("X"); // top by 1h momentum, unioned in despite tiny 24h
   });
 
   it("returns empty when nothing passes", () => {
