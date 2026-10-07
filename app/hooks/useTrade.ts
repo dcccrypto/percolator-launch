@@ -622,7 +622,7 @@ export function useTrade(slabAddress: string) {
               buildTx: (ixs, computeUnits) =>
                 buildBatchTx({ instructions: ixs, computeUnits, priorityFeeMicroLamports: priorityFee, blockhash, feePayer: owner }),
               signAll: (txs) => signAllCompat(wallet, txs),
-              broadcast: (tx) => broadcastSignedTx(connection, tx, { abortSignal: params.abortSignal }),
+              broadcast: (tx) => broadcastSignedTx(connection, tx),
             },
           );
           sig = sent.signatures[sent.signatures.length - 1];

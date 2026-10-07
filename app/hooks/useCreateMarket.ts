@@ -2623,6 +2623,10 @@ export function useCreateMarket() {
           }
 
           if (isKeeperOracle && isV17Slab && !oracleDelegationDone) {
+            // The page was left or the wallet switched while step 0 was confirming: the next prompt
+            // is this raw signTransaction, which no sendTx entry check guards. Stop here, before the
+            // cosign call, instead of opening a wallet popup for an abandoned launch (GH#2623).
+            if (abortSignal.aborted) throw new TxCancelledError();
             setState((s) => ({ ...s, stepLabel: "Delegating oracle authority to keeper..." }));
             const cosignResp = await fetch("/api/playground/keeper-cosign", {
               method: "POST",
@@ -2661,7 +2665,7 @@ export function useCreateMarket() {
             // one launch tx still on `connection.confirmTransaction(sig)`, which waits on
             // a websocket notification and reported a 30 s timeout for a hand-off that
             // had landed in 4 s (three launches in a row on 2026-10-06), failing the step.
-            const keeperDelegateSig = await broadcastSignedTx(connection, signedTx, { abortSignal });
+            const keeperDelegateSig = await broadcastSignedTx(connection, signedTx);
             setState((s) => ({ ...s, txSigs: [...s.txSigs, keeperDelegateSig] }));
           }
 

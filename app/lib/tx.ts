@@ -53,7 +53,10 @@ export interface SendTxParams {
   maxRetries?: number;
   /** Optional callback for confirmation progress (elapsed time in ms) */
   onProgress?: (elapsedMs: number) => void;
-  /** Optional AbortSignal to cancel confirmation polling */
+  /**
+   * Stops a tx that has NOT been signed yet: checked at entry (before anything is built or signed)
+   * and before a blockhash retry. A tx already broadcast is always followed to confirmation.
+   */
   abortSignal?: AbortSignal;
   /**
    * Skip preflight simulation on the RPC node. Use as a fallback when wallet
@@ -602,7 +605,9 @@ async function checkSufficientBalance(
  * More reliable than confirmTransaction which can falsely report expiry.
  * 
  * @param onProgress - Optional callback for progress updates (elapsed time in ms)
- * @param abortSignal - Optional AbortSignal to cancel polling
+ * @param abortSignal - Optional AbortSignal to cancel polling. Only confirmSignatureByPolling (the
+ *   devnet airdrop) passes one: sendTx and broadcastSignedTx never do, since their tx is already
+ *   broadcast and a cancelled poll cannot stop it.
  */
 async function pollConfirmation(
   connection: Connection,
@@ -752,8 +757,8 @@ export async function sendTx({
   // had already unmounted — a wallet popup for a market the user had already
   // navigated away from. Checked before any tx is built or signed; a step
   // already broadcast when the signal fires is left to confirm normally (see
-  // the retry-loop check below and pollConfirmation's own abort check — both
-  // stop FUTURE signatures, never an already-submitted one).
+  // the retry-loop check below — it stops FUTURE signatures, never an
+  // already-submitted one; the confirmation poll ignores the signal).
   if (abortSignal?.aborted) {
     throw new TxCancelledError();
   }
@@ -1062,7 +1067,9 @@ export async function sendTx({
 
       // Poll for confirmation instead of using confirmTransaction
       // (confirmTransaction falsely reports "block height exceeded" on devnet)
-      await pollConfirmation(connection, lastSignature, onProgress, abortSignal);
+      // No abortSignal here: the tx is already broadcast, so aborting the poll cannot stop it. It
+      // only turned a trade that still fills into an error the ticket read as "nothing was sent".
+      await pollConfirmation(connection, lastSignature, onProgress);
 
       return lastSignature;
     } catch (e) {
@@ -1348,7 +1355,7 @@ export async function signAllCompat(
 export async function broadcastSignedTx(
   connection: Connection,
   signedTx: Transaction,
-  opts: { skipPreflight?: boolean; onProgress?: (elapsedMs: number) => void; abortSignal?: AbortSignal } = {},
+  opts: { skipPreflight?: boolean; onProgress?: (elapsedMs: number) => void } = {},
 ): Promise<string> {
   let signature: string;
   try {
@@ -1362,7 +1369,7 @@ export async function broadcastSignedTx(
     throw new Error(await buildSendErrorMessage(connection, sendErr), { cause: sendErr });
   }
   try {
-    await pollConfirmation(connection, signature, opts.onProgress, opts.abortSignal);
+    await pollConfirmation(connection, signature, opts.onProgress); // already broadcast: never aborted
   } catch (confirmErr) {
     // The tx WAS submitted (we have its signature) but confirmation failed —
     // attach the signature so a caller (the batch pipeline) can status-check it
