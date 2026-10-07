@@ -164,15 +164,16 @@ describe("capacity bond at launch", () => {
         data: Buffer.from([tag, ...encodeInitBondTrancheV22(DEFAULT_BOND).slice(1)]),
       });
     const portfolio = buildCreateLpPortfolioIxV22(payer, k(), 1, prog);
-    const plan = buildLaunchBundleV22({ payer, createAccounts: [portfolio], createVaultLp: wix(74), initVaultLp: wix(94), initBondTranche: wix(IX_TAG_V22.InitBondTranche), supportsV1: true });
-    expect(plan.instructions.slice(-3).map((i) => i.data[0])).toEqual([74, 94, 107]);
+    const market = { programId: prog, market: k(), registryDomain: 0, lpPortfolio: k() };
+    const plan = buildLaunchBundleV22({ payer, market, createAccounts: [portfolio], createVaultLp: wix(74), initVaultLp: wix(94), initBondTranche: wix(IX_TAG_V22.InitBondTranche), supportsV1: true });
+    expect(plan.instructions.filter((i) => i.programId.equals(prog)).map((i) => i.data[0])).toEqual([74, 94, 107]);
     expect(plan.bytes).toBeLessThanOrEqual(plan.limit);
     // NEGATIVE CONTROL: the wrong tag in the 107 slot is refused
-    expect(() => buildLaunchBundleV22({ payer, createAccounts: [portfolio], createVaultLp: wix(74), initVaultLp: wix(94), initBondTranche: wix(94), supportsV1: true })).toThrow(/tag 107/);
+    expect(() => buildLaunchBundleV22({ payer, market, createAccounts: [portfolio], createVaultLp: wix(74), initVaultLp: wix(94), initBondTranche: wix(94), supportsV1: true })).toThrow(/tag 107/);
     // Oversize -> LaunchBundleTooLargeError (never a split)
     const big = (tag: number) => wix(tag, 40);
     expect(() =>
-      buildLaunchBundleV22({ payer, createAccounts: [SystemProgram.transfer({ fromPubkey: payer, toPubkey: k(), lamports: 1 })], createVaultLp: big(74), initVaultLp: big(94), initBondTranche: big(107), supportsV1: false }),
+      buildLaunchBundleV22({ payer, market, createAccounts: [SystemProgram.transfer({ fromPubkey: payer, toPubkey: k(), lamports: 1 })], createVaultLp: big(74), initVaultLp: big(94), initBondTranche: big(107), supportsV1: false }),
     ).toThrow(LaunchBundleTooLargeError);
   });
 });

@@ -71,14 +71,14 @@ describe("a builder that does NOT match is loud in development (negative control
     expect(ix.keys).toHaveLength(7);
     expect(() => applyMarketTailsV22(ix, tails)).toThrow(MarketTailMismatchError);
   });
-  it("a 97 without the ext (11 accounts) is loud too, and production keeps the quiet visible-refusal behaviour", () => {
+  it("a 97 without the ext (11 accounts) is loud too, in production as well (no silent skip any more)", () => {
     const noExt = buildWithdrawJuniorTrancheIx({ ...m, ext: undefined }, k(), k(), k(), k(), 1n);
     expect(noExt.keys).toHaveLength(11);
     expect(() => applyMarketTailsV22(noExt, tails)).toThrow(MarketTailMismatchError);
     const prev = process.env.NODE_ENV;
     (process.env as Record<string, string>).NODE_ENV = "production";
     try {
-      expect(applyMarketTailsV22(noExt, tails)).toBe(noExt);
+      expect(() => applyMarketTailsV22(noExt, tails)).toThrow(MarketTailMismatchError);
     } finally {
       (process.env as Record<string, string>).NODE_ENV = prev ?? "development";
     }

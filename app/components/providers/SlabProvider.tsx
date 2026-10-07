@@ -1,5 +1,6 @@
 "use client";
 
+import { observeLotExp } from "@/lib/v22/lot-registry";
 import {
   FC,
   ReactNode,
@@ -382,6 +383,7 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
           // leverage, required margin) use the true on-chain values instead of
           // hardcoded ?? 500n/1000n fallbacks. See lib/v17-engine-config.ts.
           const v17Params = parseV17RiskParams(data, wrapperConfigV17.tradeFeeBps);
+          observeLotExp(slabAddress, data); // N1: the exponent is a property of the market (no-op flag off)
           lastHadError = false;
           setState((s) => ({
             slabAddress,

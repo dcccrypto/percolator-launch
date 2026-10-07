@@ -1,5 +1,6 @@
 "use client";
 
+import { observeLotExp } from "@/lib/v22/lot-registry";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { PublicKey } from "@solana/web3.js";
@@ -173,6 +174,7 @@ export function PositionsBar() {
         if (cancelled) return;
         infos.forEach((info, i) => {
           if (!info?.data || !isWrapperAccount(info.data)) return;
+          observeLotExp(slabAddrs[i], new Uint8Array(info.data)); // N1: the exponent is a property of the market
           try {
             const e6 = sanitizePriceE6(parseWrapperConfigV17(info.data, V17_HEADER_LEN).markEwmaE6);
             if (e6 > 0n) applyOnChainPoll(slabAddrs[i], e6);

@@ -59,3 +59,36 @@ describe("F9 estimate note", () => {
     expect(screen.queryByTestId("earn-exit-estimate")).toBeNull();
   });
 });
+
+describe("N4: an expired quote is a calm line, not an unhandled rejection", () => {
+  it("Withdraw on an expired quote shows the line, sends nothing more, and 'See exit price' stays available", async () => {
+    const { StaleExitQuoteError } = await import("@/lib/v22/exit-quote-binding");
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    const getQuote = vi.fn();
+    const confirm = vi.fn(async () => {
+      throw new StaleExitQuoteError();
+    });
+    const { rerender } = render(<EarnExitQuote exit={{ state: st({ phase: "quoted", quote: quote() }), getQuote, confirm }} decimals={6} symbol="USDC" canQuote />);
+    fireEvent.click(screen.getByTestId("earn-exit-confirm"));
+    await new Promise((r) => setTimeout(r, 0));
+    // the hook has reset the state to idle by then
+    rerender(<EarnExitQuote exit={{ state: st({}), getQuote, confirm }} decimals={6} symbol="USDC" canQuote />);
+    expect(screen.getByTestId("earn-exit-expired").textContent).toBe("Your quote expired. See the exit price again.");
+    expect(screen.getByTestId("earn-exit-get-quote")).toBeTruthy();
+    expect(screen.queryByTestId("earn-exit-confirm")).toBeNull();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(unhandled).not.toHaveBeenCalled();
+    process.off("unhandledRejection", unhandled);
+  });
+  it("CONTROL: a confirm that succeeds shows no expiry line", async () => {
+    const confirm = vi.fn(async () => undefined);
+    mk2(confirm);
+    fireEvent.click(screen.getByTestId("earn-exit-confirm"));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(screen.queryByTestId("earn-exit-expired")).toBeNull();
+  });
+});
+function mk2(confirm: () => Promise<void>) {
+  render(<EarnExitQuote exit={{ state: st({ phase: "quoted", quote: quote() }), getQuote: vi.fn(), confirm }} decimals={6} symbol="USDC" canQuote />);
+}

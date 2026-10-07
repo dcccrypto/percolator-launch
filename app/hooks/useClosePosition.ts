@@ -1,5 +1,7 @@
 "use client";
 
+import { lotTradingRefusal } from "@/lib/v22/lot-coverage";
+import { ensureLotExp, getLotExp } from "@/lib/v22/lot-registry";
 import { useState, useCallback, useRef } from "react";
 import { useSingleMarketHealth } from "@/hooks/useMarketHealth";
 import { safeExplainMarketTxError } from "@/lib/market-error";
@@ -183,6 +185,15 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         throw new Error("No user account");
       }
       if (closePercent < 1 || closePercent > 100) throw new Error("Close percent must be 1-100");
+      // v2.2 (N2): a market with lots is not traded (closes included) until every surface is lot-aware.
+      {
+        const refusal = lotTradingRefusal(getLotExp(slabAddress));
+        if (refusal) {
+          ensureLotExp(slabAddress);
+          setError(refusal);
+          throw new UserFacingError(refusal);
+        }
+      }
 
       inflightRef.current = true;
       setLoading(true);

@@ -39,6 +39,8 @@ import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { toE6 } from "@/lib/format";
 import { startPerfSpan } from "@/lib/perf/perfTiming";
 import { getWsManager } from "./wsManager";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { ensureLotExp, getLotExp, onLotExp } from "@/lib/v22/lot-registry";
 
 export interface PriceState {
   price: number | null;
@@ -109,6 +111,8 @@ interface SlabEntry {
   /** v2.2 lot exponent of this slab (0 = no lots). The store's price unit is the engine's: per LOT; feeds that quote a
    *  per-TOKEN price (WS ticks, the DB last_price) are scaled by 10^lotExp on the way in (lib/v22/lot.ts). */
   lotExp: number;
+  /** The exponent is known. Flag off: always. Flag on: until it is, per-token feeds are NOT ingested and the snapshot is withheld (review N1). */
+  lotKnown: boolean;
   source: SeedSource;
   /** Raw (pre-invert) e6 from the last DB seed — kept so a later invert-flag
    *  arrival can retroactively correct an out-of-order DB seed (see
@@ -151,8 +155,9 @@ function evictIdleEntriesIfNeeded(): void {
 function getOrCreateEntry(slab: string): SlabEntry {
   let entry = entries.get(slab);
   if (!entry) {
+    const k0 = getLotExp(slab);
     entry = {
-      snapshot: EMPTY_PRICE_STATE,
+      snapshot: k0 !== null && k0 > 0 ? { ...EMPTY_PRICE_STATE, lotExp: k0 } : EMPTY_PRICE_STATE,
       listeners: new Set(),
       releaseWs: null,
       releaseMsg: null,
@@ -160,7 +165,8 @@ function getOrCreateEntry(slab: string): SlabEntry {
       flushScheduled: false,
       pendingSpanFinish: null,
       invert: undefined,
-      lotExp: 0,
+      lotExp: k0 ?? 0,
+      lotKnown: k0 !== null,
       source: null,
       lastDbRawE6: null,
       lastLiveTickAt: 0,
@@ -272,6 +278,11 @@ function handleRawMessage(slab: string, entry: SlabEntry, data: unknown): void {
     }
   }
   if (rawE6 === null) return;
+  // N1: a per-TOKEN tick of a slab whose lot exponent is unknown cannot be put in the per-LOT store.
+  if (!entry.lotKnown) {
+    ensureLotExp(slab);
+    return;
+  }
 
   const e6 = sanitizePriceE6(tokenToLotE6(applyInvert(rawE6, entry.invert), entry.lotExp));
   if (e6 === 0n) return; // reject corrupt/out-of-band WS prices, same guard as pre-refactor
@@ -296,6 +307,7 @@ function handleRawMessage(slab: string, entry: SlabEntry, data: unknown): void {
 export function subscribeSlab(slab: string, onStoreChange: () => void): () => void {
   const entry = getOrCreateEntry(slab);
   entry.listeners.add(onStoreChange);
+  if (!entry.lotKnown) ensureLotExp(slab);
 
   if (!entry.releaseWs) {
     if (!WS_URL && typeof window !== "undefined" && !warnedNoUrl) {
@@ -327,7 +339,18 @@ export function subscribeSlab(slab: string, onStoreChange: () => void): () => vo
 
 export function getSnapshot(slab: string | null): PriceState {
   if (!slab) return EMPTY_PRICE_STATE;
-  return entries.get(slab)?.snapshot ?? EMPTY_PRICE_STATE;
+  const e = entries.get(slab);
+  if (!e) return EMPTY_PRICE_STATE;
+  // N1: withhold a price whose units cannot be proven (flag on, exponent unknown): nothing may turn it into USD / PnL /
+  // liquidation figures or a limit price.
+  return e.lotKnown ? e.snapshot : EMPTY_PRICE_STATE;
+}
+
+/** True when `slab`'s price units are proven (always with the flag off). */
+export function isLotKnown(slab: string | null): boolean {
+  if (!slab) return false;
+  if (!isDevnetV22Enabled()) return true;
+  return entries.get(slab)?.lotKnown ?? getLotExp(slab) !== null;
 }
 
 export function getServerSnapshot(): PriceState {
@@ -375,14 +398,26 @@ function tokenToLotE6(e6: bigint, lotExp: number): bigint {
 export function setLotExp(slab: string, lotExp: number): void {
   const entry = getOrCreateEntry(slab);
   const changed = entry.lotExp !== lotExp;
+  const becameKnown = !entry.lotKnown;
   entry.lotExp = lotExp;
+  entry.lotKnown = true;
   if (changed && entry.snapshot.lotExp !== lotExp) applyPatch(entry, { lotExp });
-  if (changed && entry.source === "seed-db" && entry.lastDbRawE6 !== null) {
+  // A DB seed that arrived before the exponent was known was held back (lastDbRawE6): apply or retro-correct it now.
+  const deferredSeed = becameKnown && entry.source === null && entry.snapshot.price === null && entry.lastDbRawE6 !== null;
+  if ((changed || deferredSeed) && (entry.source === "seed-db" || deferredSeed) && entry.lastDbRawE6 !== null) {
     const e6 = tokenToLotE6(applyInvert(entry.lastDbRawE6, entry.invert), lotExp);
     const usd = e6 > 0n ? Number(e6) / 1_000_000 : entry.snapshot.priceUsd ?? 0;
-    applyPatch(entry, { price: usd, priceUsd: usd, priceE6: e6 });
+    if (deferredSeed) entry.source = "seed-db";
+    applyPatch(entry, { price: usd, priceUsd: usd, priceE6: e6, loading: false });
   }
+  // Consumers hold EMPTY_PRICE_STATE while the exponent is unknown: tell them the real snapshot is now visible.
+  if (becameKnown) notify(entry);
 }
+
+/** The registry is the source of truth: when a slab's exponent becomes known anywhere, the store learns it. */
+onLotExp((slab, k) => {
+  if (entries.has(slab)) setLotExp(slab, k);
+});
 
 /**
  * DB `last_price` cold-start fallback. Unlike the pre-refactor version
@@ -399,6 +434,11 @@ export function seedFromDbIfEmpty(slab: string, dbPrice: number, invert: number 
   const entry = getOrCreateEntry(slab);
   const rawE6 = toE6(dbPrice);
   entry.lastDbRawE6 = rawE6;
+  if (!entry.lotKnown) {
+    // N1: the DB price is per TOKEN; hold it until the exponent is known (setLotExp applies it).
+    ensureLotExp(slab);
+    return;
+  }
   if (entry.snapshot.price !== null) return; // real data already present — never clobber it
   const e6 = tokenToLotE6(applyInvert(rawE6, invert), entry.lotExp);
   const usd = e6 > 0n ? Number(e6) / 1_000_000 : dbPrice;

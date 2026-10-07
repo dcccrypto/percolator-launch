@@ -79,7 +79,7 @@ describe("product copy is calm, one line, and has no protocol mechanics", () => 
     }
   });
   it("the founder's band line is exact", () => {
-    expect(V22_COPY.band.catchingUp).toBe("Price is catching up; closing reopens shortly.");
+    expect(V22_COPY.band.catchingUp).toBe("Price is catching up. Closing reopens when it has.");
   });
   it("bond copy is honest about order, coupon and exit", () => {
     expect(V22_COPY.bond.absorbs).toMatch(/after .*first-loss.* before Earn/i);

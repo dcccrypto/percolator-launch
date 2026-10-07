@@ -270,6 +270,10 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
   if ((err as { name?: string } | null)?.name === "EarnDepositsPausedError") {
     return m("earn-pot-impaired", "paused", "Deposits paused", EARN_DEPOSITS_PAUSED_BODY);
   }
+  // v2.2: a builder and the wrapper's tail layout disagree (lib/v22/market-tails.ts); raised before the wallet prompt.
+  if ((err as { name?: string } | null)?.name === "MarketTailMismatchError") {
+    return m("market-tail", "paused", "Not available yet", "This action isn't available for this market yet. Nothing was sent.");
+  }
   // UX WP-3: the user pressed Stop on a long wait (lib/tx.ts WaitStoppedError): nothing was sent.
   if ((err as { name?: string } | null)?.name === "WaitStoppedError") {
     return m("stopped", "info", "Stopped", "Stopped. Nothing was sent.", { quiet: true });

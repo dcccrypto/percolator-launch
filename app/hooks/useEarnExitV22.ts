@@ -143,6 +143,7 @@ export function useEarnExitV22(p: EarnExitParams) {
     }
     const deps: ExitRunDeps = {
       readStale: () => staleReader.current.read(),
+      rescanStale: () => staleReader.current.rescan(),
       readDestBalance: async () => {
         try {
           return BigInt((await connection.getTokenAccountBalance(redeemerDest, 'confirmed')).value.amount);

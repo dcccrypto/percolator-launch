@@ -29,10 +29,10 @@ describe("v22 exit error mapping (flag on)", () => {
     expect(m.requote).toBe(true);
     expect(m.variant).not.toBe("error");
   });
-  it("104 -> 'Price is catching up; closing reopens shortly.', not red", () => {
+  it("104 -> 'Price is catching up. Closing reopens when it has.', not red", () => {
     __setDevnetV22ForTest(true);
     const m = resolveUserMessage(refusal(104), { surface: "close" });
-    expect(m.body).toBe("Price is catching up; closing reopens shortly.");
+    expect(m.body).toBe("Price is catching up. Closing reopens when it has.");
     expect(m.variant).toBe("wait");
   });
   it("flag OFF: 117/118 are not interpreted by the v2.2 table", () => {

@@ -35,11 +35,11 @@
  *      store is.)
  */
 
+import { observeLotExp } from "@/lib/v22/lot-registry";
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import useSWR from "swr";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { resolveMarketPriceE6 } from "@/lib/oraclePrice";
-import { lotExpOf } from "@/lib/v22/lot";
 import {
   subscribeSlab,
   getSnapshot,
@@ -47,7 +47,6 @@ import {
   seedFromDbIfEmpty,
   seedFromOnChain,
   setInvertFlag,
-  setLotExp,
   setStats24h,
   type PriceState,
 } from "@/lib/priceStore/priceStore";
@@ -120,13 +119,12 @@ export function useLivePrice(): PriceState {
     });
   }, [slabAddr, pricesJson]);
 
-  // v2.2: the store's unit is per LOT; tell it this market's lot exponent BEFORE any per-token feed is ingested.
-  // lotExpOf is 0 (a no-op) with the flag off, on v2.1 markets and while the slab is unread.
+  // v2.2 (N1): the lot exponent is a property of the MARKET, owned by lib/v22/lot-registry; the price store reads it from
+  // there for every slab. This hook only reports the slab bytes it already holds (a no-op with the flag off).
   const { raw: slabRaw } = useSlabState();
-  const lotExp = lotExpOf(slabRaw);
   useEffect(() => {
-    if (slabAddr) setLotExp(slabAddr, lotExp);
-  }, [slabAddr, lotExp]);
+    observeLotExp(slabAddr, slabRaw);
+  }, [slabAddr, slabRaw]);
 
   // DB last_price — cold-start seed only (fetched once; store enforces only-if-empty).
   const marketKey = slabAddr ? `/api/markets/${slabAddr}` : null;

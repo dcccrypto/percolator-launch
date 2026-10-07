@@ -50,6 +50,9 @@ import { detectOracleMode, resolveMarketPriceE6 } from "@/lib/oraclePrice";
 import { assertKnownProgram, assertCanonicalMatcher } from "@/lib/programAllowlist";
 import { invalidateMatcherCaps } from "@/lib/matcherCaps";
 import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
+import { lotTradingRefusal } from "@/lib/v22/lot-coverage";
+import { ensureLotExp, getLotExp } from "@/lib/v22/lot-registry";
+import { UserFacingError } from "@/lib/errorMessages";
 import { computeLimitPriceE6, assertFeedAgreesWithChain } from "@/lib/slippage";
 import { fetchPortfolioIdentity, fetchAssetMarketId, defaultCrankObservations } from "@/lib/v18-wire";
 import { buildTradeIxs } from "@/lib/trade-ix";
@@ -331,6 +334,14 @@ export function useTrade(slabAddress: string) {
         // our deployed allowlist. See SlabProvider.parseSlab for the primary
         // gate.
         assertKnownProgram(slabProgramId);
+        // v2.2 (N2): a market with lots is not traded until every surface is lot-aware; an unknown exponent is refused too.
+        {
+          const refusal = lotTradingRefusal(getLotExp(slabAddress));
+          if (refusal) {
+            ensureLotExp(slabAddress);
+            throw new UserFacingError(refusal);
+          }
+        }
 
         const programId = slabProgramId;
         const slabPk = new PublicKey(slabAddress);
@@ -347,7 +358,6 @@ export function useTrade(slabAddress: string) {
         // render cost. This changes only *where* the price value is read
         // from, not the tx-building logic below.
         const { priceE6: livePriceE6 } = getLivePriceSnapshot(slabAddress);
-
         // Slippage protection. The on-chain handler treats limit_price_e6 == 0
         // as a "no limit" sentinel and skips the slippage check entirely
         // (percolator.rs::handle_trade_cpi). Without a real limit, the only

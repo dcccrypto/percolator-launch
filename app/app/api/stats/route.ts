@@ -5,7 +5,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
-import { parseEngine, discoverMarkets } from "@percolatorct/sdk";
+import { parseEngine } from "@percolatorct/sdk";
+import { discoverMarkets } from "@/lib/v22/discovery";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { isActiveMarket, isSaneMarketValue, isZombieMarket } from "@/lib/activeMarketFilter";
 import { isListedMarket } from "@/lib/market-visibility";

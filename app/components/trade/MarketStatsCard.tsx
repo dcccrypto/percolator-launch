@@ -1,6 +1,6 @@
 "use client";
 
-import { lotExpOf, qToTokenQ } from "@/lib/v22/lot";
+import { lotExpOf, lotPriceToTokenE6, qToTokenQ } from "@/lib/v22/lot";
 import { FC, useMemo } from "react";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useMarketConfig } from "@/hooks/useMarketConfig";
@@ -135,7 +135,7 @@ export const MarketStatsCard: FC = () => {
   // Spread display: "+$0.06 (+0.03%)" or "—" for pyth-pinned / unavailable
   const showSpread = oracleMode !== "pyth-pinned" && markPriceE6 !== null && indexPriceE6 !== null;
   const spreadAbs = showSpread && markPriceE6 !== null && indexPriceE6 !== null
-    ? markPriceE6 - indexPriceE6
+    ? lotPriceToTokenE6(markPriceE6 - indexPriceE6, lotExp) // v2.2: per lot -> per token (identity at lotExp 0)
     : null;
   const spreadDisplayValue = (() => {
     if (!showSpread || spreadAbs === null || spreadBps === null) return "—";
@@ -176,12 +176,12 @@ export const MarketStatsCard: FC = () => {
     // Row 1 — Pricing signals
     {
       label: "Mark",
-      value: markPriceE6 !== null ? formatUsdPriceE6(markPriceE6) : formatUsdPriceE6(livePriceE6 ?? (mktConfig ? resolveMarketPriceE6(mktConfig) : 0n)),
+      value: markPriceE6 !== null ? formatUsdPriceE6(lotPriceToTokenE6(markPriceE6, lotExp)) : formatUsdPriceE6(lotPriceToTokenE6(livePriceE6 ?? (mktConfig ? resolveMarketPriceE6(mktConfig) : 0n), lotExp)),
       tooltip: "EMA mark price used for liquidations and PnL",
     },
     {
       label: "Index",
-      value: indexPriceE6 !== null ? formatUsdPriceE6(indexPriceE6) : "—",
+      value: indexPriceE6 !== null ? formatUsdPriceE6(lotPriceToTokenE6(indexPriceE6, lotExp)) : "—",
       tooltip: "On-chain oracle index price",
     },
     {

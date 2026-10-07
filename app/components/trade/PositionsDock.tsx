@@ -37,6 +37,7 @@ import { PnlShareButton } from "@/components/share/PnlShareButton";
 import { isPnlPoolCapped, poolPayableCapacity, type PnlCardData } from "@/lib/pnl-card";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useBandRentView } from "@/hooks/useBandRentView";
+import { useLotTradingGuard } from "@/hooks/useLotTradingGuard";
 import { HoldingFeeChip } from "@/components/v22/HoldingFeeChip";
 import { closeBlockedByBand, legBelowHalfMin } from "@/lib/v22/band-rent-state";
 import { V22_COPY } from "@/lib/v22/copy";
@@ -166,6 +167,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const { engineStale } = useEngineFreshness();
   // Devnet v2.2 (flag-gated; null otherwise): band lag + holding fee for this market.
   const bandView = useBandRentView();
+  const lotGuard = useLotTradingGuard(slabAddress); // v2.2 (N2)
   // v2.2 lot markets: positions are in LOTS and marks per LOT; the table shows tokens and per-token prices (lib/v22/lot.ts).
   const lotExp = lotExpOf(slabRawForLot);
   const closeBlockedByStaleness = !mockMode && (oracleStale || engineStale);
@@ -534,8 +536,8 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                     // the wallet popup with zero blocking round-trips.
                     onClick={() => { resetPhase(); prewarmClose(); setShowCloseModal(true); }}
                     data-testid="position-close"
-                    disabled={closeLoading || lpUnderfunded || !hasValidMark || engineStale || bandCloseBlocked}
-                    title={!hasValidMark ? "Waiting for price data…" : engineStale ? "Prices are catching up. Closing resumes once the market has caught up." : bandCloseBlocked ? V22_COPY.band.catchingUp : undefined}
+                    disabled={closeLoading || lpUnderfunded || !hasValidMark || engineStale || bandCloseBlocked || lotGuard !== null}
+                    title={!hasValidMark ? "Waiting for price data…" : engineStale ? "Prices are catching up. Closing resumes once the market has caught up." : bandCloseBlocked ? V22_COPY.band.catchingUp : lotGuard ?? undefined}
                     className="rounded-none border border-[var(--short)]/30 px-3 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-colors duration-150 hover:bg-[var(--short)]/8 hover:border-[var(--short)]/50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Close

@@ -1,5 +1,6 @@
 "use client";
 
+import { observeLotExp } from "@/lib/v22/lot-registry";
 import { lotExpOf } from "@/lib/v22/lot";
 import { useEffect, useRef, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
@@ -786,6 +787,7 @@ export async function fetchPortfolioSnapshot(
         // Remember this v17 market's context so both the batched
         // owner-scan phase below AND the NFT-wrapped recovery scan can
         // enrich portfolios/escrows the same way.
+        observeLotExp(slabAddrStr, slabData); // N1
         marketMetaBySlab.set(slabAddrStr, { market, oraclePriceE6, maintenanceMarginBps, initialMarginBps, adlFactors, lotExp: lotExpOf(slabData) });
         v17ProgramIdsSeen.set(v17ProgramId.toBase58(), v17ProgramId);
       } else {

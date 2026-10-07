@@ -1,5 +1,9 @@
 "use client";
 
+import { resolveDiscoveredPriceE6 } from "@/lib/discovered-price";
+import { useMarketLotExps } from "@/hooks/useMarketLotExp";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { lotPriceToTokenE6 } from "@/lib/v22/lot";
 import { baseSymbol } from "@/lib/symbol-utils";
 import { getConfig } from "@/lib/config";
 import { isMoveFlowEnabled } from "@/lib/v21/move/flag";
@@ -73,19 +77,6 @@ interface MergedMarket {
   isAdminOracle: boolean;
   onChain: DiscoveredMarket | null;  // null for Supabase-only markets not yet discovered on-chain
   supabase: MarketWithStats | null;
-}
-
-/** Resolve the display price (E6) for a discovered market, oracle-mode aware.
- *  v17 market group accounts carry no v12 config — the keeper-updated mark
- *  (configV17.markEwmaE6) is the price source, the same mapping SlabProvider
- *  uses for lastEffectivePriceE6 on v17 markets. Returns 0n when no on-chain
- *  price source exists (e.g. partial mock objects). */
-function resolveDiscoveredPriceE6(oc: DiscoveredMarket): bigint {
-  if (oc.configV17) {
-    return applyInvert(sanitizePriceE6(oc.configV17.markEwmaE6), oc.configV17.invert);
-  }
-  if (!oc.config?.indexFeedId) return 0n;
-  return resolveMarketPriceE6(oc.config);
 }
 
 function isPlaceholderMarketSymbol(sym: string | null | undefined, addresses: Array<string | null | undefined>): boolean {
@@ -183,6 +174,8 @@ function MarketsPageInner() {
   const searchParams = useSearchParams();
   const { connection } = useConnectionCompat();
   const { markets: discovered, loading: discoveryLoading, error: discoveryError } = useMarketDiscovery();
+  const lotExps = useMarketLotExps(useMemo(() => discovered.map((d) => d.slabAddress.toBase58()), [discovered]));
+  const lotOf = (oc: DiscoveredMarket): number | null => (lotExps.has(oc.slabAddress.toBase58()) ? lotExps.get(oc.slabAddress.toBase58()) ?? null : isDevnetV22Enabled() ? null : 0);
   const { statsMap, loading: statsLoading, error: statsError } = useAllMarketStats();
 
   const loadErrorMessage = useMemo(() => {
@@ -457,7 +450,7 @@ function MarketsPageInner() {
     // Markets with no valid price return 0 so they sort to the bottom in USD mode.
     // Fixes #1327: no-price markets with huge raw token OI were floating above real USD markets.
     const getOIUsdSortKey = (m: MergedMarket): number => {
-      const onChainPriceE6 = m.onChain ? resolveDiscoveredPriceE6(m.onChain) : 0n;
+      const onChainPriceE6 = m.onChain ? resolveDiscoveredPriceE6(m.onChain, lotOf(m.onChain)) : 0n;
       const rawPrice = m.supabase?.last_price ?? priceE6ToUsd(onChainPriceE6);
       const price = rawPrice != null && rawPrice > 0 && rawPrice <= MAX_SANE_PRICE_USD ? rawPrice : null;
       if (price == null) return 0; // no price → sort to bottom
@@ -536,7 +529,7 @@ function MarketsPageInner() {
               return false;
             }
             if (m.onChain) {
-              const priceE6 = resolveDiscoveredPriceE6(m.onChain);
+              const priceE6 = resolveDiscoveredPriceE6(m.onChain, lotOf(m.onChain));
               // Primary: on-chain price is 0 → keeper not cranking
               if (priceE6 === 0n) return true;
               // GH#1646: Secondary: Supabase shows no mark_price + no index_price.
@@ -588,7 +581,7 @@ function MarketsPageInner() {
       }
     });
     return list;
-  }, [effectiveMarkets, debouncedSearch, sortBy, showUsd, tokenMetaMap]);
+  }, [effectiveMarkets, debouncedSearch, sortBy, showUsd, tokenMetaMap, lotExps]);
 
   // P-MED-3: Progressive reveal + intersection observer backup
   // Auto-load items in batches via requestAnimationFrame for instant display.
@@ -896,7 +889,7 @@ function MarketsPageInner() {
 
                   // Price: prefer Supabase, fall back to oracle-mode-aware on-chain price
                   // Cap bogus prices (corrupted on-chain data can produce $4.2T values)
-                  const onChainPriceE6 = m.onChain ? resolveDiscoveredPriceE6(m.onChain) : 0n;
+                  const onChainPriceE6 = m.onChain ? resolveDiscoveredPriceE6(m.onChain, lotOf(m.onChain)) : 0n;
 
                   // GH#1631: Override health to "oracle-down" for ALL markets without a valid
                   // oracle price — regardless of whether we have on-chain capital/insurance data.

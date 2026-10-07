@@ -4,8 +4,6 @@
  */
 import { describe, expect, it } from "vitest";
 import {
-  ASSET_STATE_V22_OFF,
-  CONFIG_V22_OFF,
   closeBlockedByBand,
   legBelowHalfMin,
   readBandRentView,
@@ -16,6 +14,7 @@ import {
 import { LAYOUT_V21, LAYOUT_V22, WRAPPER_ACCOUNT_MAGIC, ACCOUNT_KIND } from "@/lib/v22/sdk";
 
 const L = LAYOUT_V22;
+const B = L.bandRent!; // the SDK candidate's band/rent offsets (no app-derived copy any more)
 
 function market(layout = L, slots = 1): Uint8Array {
   const len = layout.marketGroupOff + layout.marketGroupLen + slots * layout.assetSlotStride;
@@ -38,19 +37,19 @@ interface Opts { maxStepBps?: number; maxDt?: number; pinSince?: bigint; bandBps
 function build(o: Opts): Uint8Array {
   const d = market();
   const cfg = L.marketGroupOff + L.group.config;
-  put64(d, cfg + CONFIG_V22_OFF.bandBps, BigInt(o.bandBps ?? 0));
-  put64(d, cfg + CONFIG_V22_OFF.bandMaxEpochSlots, BigInt(o.epoch ?? 600));
-  put64(d, cfg + CONFIG_V22_OFF.bandMaxPinSlots, BigInt(o.pin ?? 9000));
-  put64(d, cfg + CONFIG_V22_OFF.rentMaxE9PerSlot, BigInt(o.rentMax ?? 0));
-  put64(d, cfg + CONFIG_V22_OFF.bandMinLegNotional, o.minLeg ?? 0n);
-  put64(d, cfg + CONFIG_V22_OFF.maxPriceMoveBpsPerSlot, BigInt(o.maxStepBps ?? 4));
-  put64(d, cfg + CONFIG_V22_OFF.maxAccrualDtSlots, BigInt(o.maxDt ?? 100));
+  put64(d, cfg + B.config.bandBps, BigInt(o.bandBps ?? 0));
+  put64(d, cfg + B.config.bandMaxEpochSlots, BigInt(o.epoch ?? 600));
+  put64(d, cfg + B.config.bandMaxPinSlots, BigInt(o.pin ?? 9000));
+  put64(d, cfg + B.config.rentMaxE9PerSlot, BigInt(o.rentMax ?? 0));
+  put64(d, cfg + B.config.bandMinLegNotional, o.minLeg ?? 0n);
+  put64(d, cfg + B.config.maxPriceMoveBpsPerSlot, BigInt(o.maxStepBps ?? 4));
+  put64(d, cfg + B.config.maxAccrualDtSlots, BigInt(o.maxDt ?? 100));
   const slot = L.marketGroupOff + L.marketGroupLen;
   const eng = slot + L.wrapperSlotLen;
   put64(d, eng + L.assetState.effectivePrice, o.mark ?? 50_000_000n);
   put64(d, eng + L.assetState.rawOracleTargetPrice, o.target ?? 50_000_000n);
-  put64(d, eng + ASSET_STATE_V22_OFF.bandPinSinceSlot, o.pinSince ?? 0n);
-  putI128(d, eng + L.assetState.oiEffLongQ, o.oiLong ?? 0n);
+  put64(d, eng + B.assetState.bandPinSinceSlot, o.pinSince ?? 0n);
+  putI128(d, eng + L.assetState.oiEffLongQ, o.oiLong ?? 1_000_000n);
   putI128(d, eng + L.assetState.oiEffShortQ, o.oiShort ?? 0n);
   d[slot + L.wrapperSlot.profileLotExp] = o.lotExp ?? 0;
   put16(d, slot + L.wrapperSlot.growth + 42, o.kink ?? 5000);
@@ -60,22 +59,26 @@ function build(o: Opts): Uint8Array {
   return d;
 }
 
-describe("derived offsets are pinned to the SDK layout row", () => {
-  it("the v2.2 config is 297 B = assetSlotCapacity - config; v2.1 config ended at 249", () => {
-    expect(L.group.assetSlotCapacity - L.group.config).toBe(CONFIG_V22_OFF.end);
-    expect(LAYOUT_V21.group.assetSlotCapacity - LAYOUT_V21.group.config).toBe(CONFIG_V22_OFF.bandBps);
+describe("the SDK layout row carries the band / rent offsets", () => {
+  it("v2.2 has them (config 297 B = assetSlotCapacity - config), v2.1 has none", () => {
+    expect(B.configLen).toBe(L.group.assetSlotCapacity - L.group.config);
+    expect(LAYOUT_V21.bandRent).toBeNull();
   });
-  it("the v2.2 asset state is 627 B; v2.1 ended at 515 where the band words start", () => {
-    expect(L.assetStateLen).toBe(ASSET_STATE_V22_OFF.end);
-    expect(LAYOUT_V21.assetStateLen).toBe(ASSET_STATE_V22_OFF.bandAnchorPrice);
-  });
-  it("fields are contiguous (six u64 config words; asset words u64 x8, u128 x3)", () => {
-    expect(CONFIG_V22_OFF.bandMinLegNotional + 8).toBe(CONFIG_V22_OFF.end);
-    expect(ASSET_STATE_V22_OFF.rentUnroutedAtoms + 16).toBe(ASSET_STATE_V22_OFF.end);
+  it("the asset-state words end at the v2.2 asset-state length and start at the v2.1 one", () => {
+    expect(B.assetState.rentUnroutedAtoms + 16).toBe(L.assetStateLen);
+    expect(B.assetState.bandAnchorPrice).toBe(LAYOUT_V21.assetStateLen);
   });
 });
 
 describe("readBandRentView", () => {
+  it("SDK lag predicate: a mark != target with ZERO open interest on both sides is NOT lagging (no warning, close not blocked)", () => {
+    const v = readBandRentView(build({ bandBps: 130, mark: 60_000_000n, target: 50_000_000n, oiLong: 0n, oiShort: 0n }))!;
+    expect(v.price.lagging).toBe(false);
+    expect(v.price.favourableCloseSide).toBeNull();
+    expect(closeBlockedByBand(v, "long")).toBe(false);
+    // exposure on EITHER side makes it lag
+    expect(readBandRentView(build({ bandBps: 130, mark: 60_000_000n, target: 50_000_000n, oiLong: 0n, oiShort: 5n }))!.price.lagging).toBe(true);
+  });
   it("a band market: lagging mark vs target, favourable close side, minimum position, recovery minutes", () => {
     const v = readBandRentView(build({ bandBps: 130, minLeg: 100_000_000n, mark: 60_000_000n, target: 50_000_000n, lotExp: 3 }))!;
     expect(v.band.enabled).toBe(true);

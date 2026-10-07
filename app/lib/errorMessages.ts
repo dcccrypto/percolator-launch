@@ -388,6 +388,7 @@ export const NO_SOL_FOR_FEES_MESSAGE =
   "Your wallet needs a little devnet SOL to pay network fees. Use Get test funds (the faucet) to add some, then try again.";
 
 export function humanizeError(rawMsg: string, context?: "trade"): string {
+  if (rawMsg.includes("This action isn't available for this market yet. Nothing was sent.")) return rawMsg; // v2.2 tail mismatch: already the calm line
   // Log for debugging (only in browser)
   if (typeof window !== "undefined") {
     console.warn("[humanizeError] raw:", rawMsg);

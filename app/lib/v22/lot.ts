@@ -11,7 +11,15 @@
  * a market without lots is untouched).
  */
 import { isDevnetV22Enabled } from "./flag";
-import { LAYOUT_V22, UnknownLayoutError, displayPriceV22, resolveMarketGeometry, tokensToLotsV22 } from "./sdk";
+import {
+  displayPriceV22,
+  lotExpOfMarketV22,
+  lotPriceToTokenE6V22,
+  qToTokenQV22,
+  quantizeQToLotsV22,
+  tokenPriceToLotE6V22,
+  tokenQToQV22,
+} from "./sdk";
 
 /** Engine position scale: Q units per lot (or per token when lotExp = 0). */
 export const POS_SCALE_V22 = 1_000_000n;
@@ -29,52 +37,33 @@ export function lotMarketsEnabled(): boolean {
 }
 export const LOT_MARKETS_ENABLED = false;
 
-/** The market's lot exponent for asset `assetIndex`; 0 when there is none or the account is not a v2.2 market. */
+/** The market's lot exponent for asset `assetIndex` (SDK `lotExpOfMarketV22`); 0 when flag off / not a v2.2 market / unreadable. */
 export function lotExpOf(raw: Uint8Array | null | undefined, assetIndex = 0): number {
   if (!raw || !isDevnetV22Enabled()) return 0;
   try {
-    const g = resolveMarketGeometry(raw, { parser: "lotExpOf", strictLength: false });
-    if (assetIndex < 0 || assetIndex >= g.slotCount || g.layout.version !== LAYOUT_V22.version) return 0;
-    return raw[g.slotOff(assetIndex) + g.layout.wrapperSlot.profileLotExp] ?? 0;
-  } catch (e) {
-    if (e instanceof UnknownLayoutError) return 0;
+    return lotExpOfMarketV22(raw, assetIndex);
+  } catch {
     return 0;
   }
 }
 
-const TEN = 10n;
-const pow10 = (k: number): bigint => TEN ** BigInt(k);
+/** Per-lot e6 price to the per-TOKEN e6 price (SDK, integer, rounded down). lotExp 0 returns the input. */
+export const lotPriceToTokenE6 = (perLotE6: bigint, lotExp: number): bigint => (lotExp === 0 ? perLotE6 : lotPriceToTokenE6V22(perLotE6, lotExp));
 
-/** Per-lot e6 price to the per-TOKEN e6 price (integer, rounded down). lotExp 0 returns the input. */
-export function lotPriceToTokenE6(perLotE6: bigint, lotExp: number): bigint {
-  return lotExp === 0 ? perLotE6 : perLotE6 / pow10(lotExp);
-}
-
-/** Per-token e6 price to the per-lot e6 price. */
-export function tokenPriceToLotE6(perTokenE6: bigint, lotExp: number): bigint {
-  return perTokenE6 * pow10(lotExp);
-}
+/** Per-token e6 price to the per-lot e6 price (SDK). */
+export const tokenPriceToLotE6 = (perTokenE6: bigint, lotExp: number): bigint => (lotExp === 0 ? perTokenE6 : tokenPriceToLotE6V22(perTokenE6, lotExp));
 
 /** Exact decimal string of the per-token price (SDK `displayPriceV22`). */
 export function displayTokenPrice(perLotE6: bigint, lotExp: number): string {
   return lotExp === 0 ? (Number(perLotE6) / 1e6).toString() : displayPriceV22(perLotE6, lotExp);
 }
 
-/** Engine Q (signed or not) to whole-token-scaled Q: `q * 10^lotExp` keeps POS_SCALE as the unit, now per TOKEN. */
-export function qToTokenQ(q: bigint, lotExp: number): bigint {
-  return lotExp === 0 ? q : q * pow10(lotExp);
-}
+/** Engine Q in lots to Q per TOKEN (`q * 10^lotExp`, SDK). */
+export const qToTokenQ = (q: bigint, lotExp: number): bigint => (lotExp === 0 ? q : qToTokenQV22(q, lotExp));
 
-/**
- * A size typed in tokens (as Q units per token, POS_SCALE = 1e6) to the engine Q in lots, rounding toward zero.
- * `remainderTokenQ` is the part that cannot be expressed in lots (show it; never send it).
- */
+/** A size typed in tokens (Q units per token) to the engine Q in lots, truncating toward zero; the remainder is shown, never sent (SDK). */
 export function tokenQToQ(tokenQ: bigint, lotExp: number): { q: bigint; remainderTokenQ: bigint } {
-  if (lotExp === 0) return { q: tokenQ, remainderTokenQ: 0n };
-  const neg = tokenQ < 0n;
-  const abs = neg ? -tokenQ : tokenQ;
-  const { lots, remainderTokens } = tokensToLotsV22(abs, lotExp);
-  return { q: neg ? -lots : lots, remainderTokenQ: neg ? -remainderTokens : remainderTokens };
+  return lotExp === 0 ? { q: tokenQ, remainderTokenQ: 0n } : tokenQToQV22(tokenQ, lotExp);
 }
 
 /** A value per unit of Q (a per-lot PnL / notional input) cannot be rescaled: only q and price carry the lot. */
@@ -83,24 +72,13 @@ export const LOT_NOTE = "1 lot = 10^lotExp tokens";
 // ── Trade-surface helpers (G3) ───────────────────────────────────────────
 import { formatMarkPrice, formatTokenAmount, formatUsdPriceE6 } from "../format";
 
-/** Q-units of float / atom-truncation slack when quantising a typed size to lots (see quantizeQToLots). */
-export const QUANTISE_TOLERANCE_Q = 2n;
-
-/** Whole lots only: a typed size is quantised DOWN to a lot multiple (Q is POS_SCALE per lot). Identity when lotExp = 0. */
+/**
+ * Whole lots only: a Q is truncated toward zero to a lot multiple (SDK `quantizeQToLotsV22`) and the remainder is
+ * reported. It NEVER rounds up (the old 2-Q tolerance is gone): an exact whole-lot size is made exact by deriving Q
+ * from the typed token size in the ticket, not by rounding a margin-derived Q up. Identity when lotExp = 0.
+ */
 export function quantizeQToLots(q: bigint, lotExp: number): { q: bigint; remainderQ: bigint } {
-  if (lotExp === 0) return { q, remainderQ: 0n };
-  const neg = q < 0n;
-  const abs = neg ? -q : q;
-  let whole = (abs / POS_SCALE_V22) * POS_SCALE_V22;
-  let rem = abs - whole;
-  // The ticket derives Q from a margin truncated to collateral atoms, so an EXACT whole-lot size typed in tokens can land
-  // a hair under the lot (e.g. 999,999 of 1,000,000 Q). Within QUANTISE_TOLERANCE_Q of the next lot counts as that lot
-  // (2e-6 of a lot; far below one atom of margin at the $10 per-lot floor), never more.
-  if (POS_SCALE_V22 - rem <= QUANTISE_TOLERANCE_Q && rem !== 0n) {
-    whole += POS_SCALE_V22;
-    rem = 0n;
-  }
-  return { q: neg ? -whole : whole, remainderQ: neg ? -rem : rem };
+  return lotExp === 0 ? { q, remainderQ: 0n } : quantizeQToLotsV22(q);
 }
 
 /** The tokens a Q (in lots) is worth, as a Q-scaled bigint (POS_SCALE per token). Same as qToTokenQ. */
@@ -134,3 +112,21 @@ export function formatLotQ(q: bigint | null | undefined, decimals: number, lotEx
  *    (tokenQToQ / quantizeQToLots) and API output (lib/v22/lot-view.ts). The /api/markets, /api/markets/[slab] and
  *    /api/open-interest routes OUTPUT per-token prices and token-scaled OI (what external consumers expect).
  */
+
+/**
+ * The Q (in lots) an order carries: the margin-derived Q truncated to whole lots, EXCEPT that an exact whole-lot size typed
+ * in tokens stays exact. The ticket derives Q from a margin truncated to collateral atoms, which can land a hair under the
+ * lot (999,999 of 1,000,000 Q); instead of rounding that up we take the typed token size when it agrees with the
+ * margin-derived Q to within one lot. `typedTokenQ` is the typed size as Q per token (POS_SCALE), or null.
+ */
+export function lotOrderQ(marginDerivedQ: bigint, typedTokenQ: bigint | null, lotExp: number): { q: bigint; remainderQ: bigint } {
+  const base = marginDerivedQ < 0n ? 0n : marginDerivedQ;
+  if (lotExp === 0) return { q: base, remainderQ: 0n };
+  let source = base;
+  if (typedTokenQ !== null && typedTokenQ > 0n) {
+    const typedQ = tokenQToQ(typedTokenQ, lotExp).q;
+    const diff = typedQ > base ? typedQ - base : base - typedQ;
+    if (typedQ > 0n && diff <= POS_SCALE_V22) source = typedQ;
+  }
+  return quantizeQToLots(source, lotExp);
+}

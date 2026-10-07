@@ -67,7 +67,7 @@ describe("special handling", () => {
     const m = resolveUserMessage(fail(WRAPPER_ERR_V22.PriceBandPinned), { surface: "close" });
     expect(m.variant).toBe("wait");
     expect(m.variant).not.toBe("error");
-    expect(m.body).toBe("Price is catching up; closing reopens shortly.");
+    expect(m.body).toBe("Price is catching up. Closing reopens when it has.");
     expect(m.kind).toBe("band-catching-up");
   });
   it("117 re-quotes (and does not stop the user)", () => {
@@ -125,7 +125,7 @@ describe("F10 honest copy", () => {
   });
   it("104 keeps the founder's line, adds the honest 'up to about an hour' only in Details (why), and does not auto-retry", () => {
     const m = resolveUserMessage(fail(104), { surface: "close" });
-    expect(m.body).toBe("Price is catching up; closing reopens shortly.");
+    expect(m.body).toBe("Price is catching up. Closing reopens when it has.");
     expect(m.why).toMatch(/up to about an hour/);
     expect(m.autoRetry).toBeFalsy();
   });

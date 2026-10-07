@@ -2,7 +2,7 @@
  * Calm one-line messages for the Devnet v2.2 wrapper codes 104..=119, 123, 124 and the stake v5 codes 33..=45.
  * Used by `lib/limits/user-message.ts` ONLY when `NEXT_PUBLIC_DEVNET_V22` is on (flag off the resolver never
  * calls this). Special handling:
- *  - 104 (band pinned) is NOT an error: variant "wait", "Price is catching up; closing reopens shortly."
+ *  - 104 (band pinned) is NOT an error: variant "wait", "Price is catching up. Closing reopens when it has."
  *  - 117 (below min payout) and 124 (bond slippage): `requote` = re-quote and show the new minimum.
  *  - 118 (exit requires loss-current): `autoRetry`; the Earn exit adds inline refresh accounts and retries in
  *    the same user action (lib/v22/earn-exit-run.ts), never asking the user to do anything.

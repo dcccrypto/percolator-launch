@@ -52,8 +52,8 @@ export function V22Preview() {
         <p className="text-[11px] text-[var(--text)]">
           Position 12 TOK <HoldingFeeChip view={band} side="long" />
         </p>
-        <button disabled title="Price is catching up; closing reopens shortly." className="w-full border border-[var(--short)]/30 py-1 text-[9px] uppercase text-[var(--short)] opacity-50">Close</button>
-        <p className="text-[10px] text-[var(--text-secondary)]">Price is catching up; closing reopens shortly.</p>
+        <button disabled title="Price is catching up. Closing reopens when it has." className="w-full border border-[var(--short)]/30 py-1 text-[9px] uppercase text-[var(--short)] opacity-50">Close</button>
+        <p className="text-[10px] text-[var(--text-secondary)]">Price is catching up. Closing reopens when it has.</p>
       </Section>
       <Section title="Unsupported layout">
         <UnsupportedLayoutNotice />

@@ -20,7 +20,10 @@
  * account lists checked against wrapper 6377376a :17071 and stake e62aa4a
  * :2761), which use the SDK encoders + account specs.
  */
-import { parseLpVaultRegistry } from "@/lib/v22/records";
+import { decodeAssetVaultLpP3, parseLpVaultRegistry } from "@/lib/v22/records";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { fetchMarketTailsV22 } from "@/lib/v22/market-tails";
+import { buildLpVaultCrankFeesIxBoundV22 } from "@/lib/v22/sdk";
 import {
   PublicKey,
   SystemProgram,
@@ -111,6 +114,11 @@ export interface PreResolveRegistry {
   sharesOutstanding: bigint;
   /** P3: a vault-owned LP is bound (registry `_reserved[0] == 1`). */
   bound?: boolean;
+  /**
+   * Devnet v2.2 (flag on, bound vault): the vault LP portfolio and the tail accounts the wrapper requires on tag 78 once the
+   * market has a P2b ext and / or a bond tranche. Absent = the plain bound 78 (7 accounts).
+   */
+  v22?: { lpPortfolio: PublicKey; vaultLpExt?: PublicKey; bond: boolean };
 }
 
 export function decideLpLeg(owed: bigint, registry: PreResolveRegistry | null): LpLegPlan {
@@ -129,7 +137,19 @@ export function decideLpLeg(owed: bigint, registry: PreResolveRegistry | null): 
  * VaultLpHarvestPending (84) while fees are harvestable, so fees left at resolution lock every
  * Earn senior (reproduced on P3 424fe7e4 BPF; see plan section 9).
  */
-export function buildLpCrankIx(programId: PublicKey, cranker: PublicKey, market: PublicKey, domain: number, bound = false): TransactionInstruction {
+export function buildLpCrankIx(
+  programId: PublicKey,
+  cranker: PublicKey,
+  market: PublicKey,
+  domain: number,
+  bound = false,
+  v22?: PreResolveRegistry["v22"],
+): TransactionInstruction {
+  if (bound && v22 && isDevnetV22Enabled() && (v22.vaultLpExt || v22.bond)) {
+    // v2.2: SDK builder (tail-aware): [6] vault_lp_state, [7] ext, [8] vault LP (writable), [9] bond tranche.
+    // On a bond market 78 re-certifies the vault LP before valuing the bonds; the keeper's refresh crank keeps it current.
+    return buildLpVaultCrankFeesIxBoundV22({ programId, market, registryDomain: domain, lpPortfolio: v22.lpPortfolio, vaultLpExt: v22.vaultLpExt }, cranker, domain, { bond: v22.bond });
+  }
   const [registry] = deriveLpVaultRegistry(programId, market);
   const [ledger] = deriveLpBackingLedger(programId, market, domain);
   const [siblingLedger] = deriveLpBackingLedger(programId, market, domain ^ 1);
@@ -214,7 +234,7 @@ export function planPreResolve(p: {
   const blockers: string[] = [];
   const warnings: string[] = [];
   const lp = decideLpLeg(legs.lpOwed, p.registry);
-  if (lp.action === "crank") cranks.push(buildLpCrankIx(p.programId, p.cranker, p.market, lp.domain, p.registry?.bound === true));
+  if (lp.action === "crank") cranks.push(buildLpCrankIx(p.programId, p.cranker, p.market, lp.domain, p.registry?.bound === true, p.registry?.v22));
   if (lp.action === "stuck") blockers.push(`${atoms(legs.lpOwed)} of LP fees can only be paid out while the market is live, and ${lp.reason}. Resolving now would burn them.`);
   const st = decideStakeLeg(legs.stakeOwed, p.market, p.programId, p.pool);
   if (st.action === "push" && p.pool) {
@@ -255,6 +275,17 @@ export async function readAndPlanPreResolve(
       registry = { domain: Number(r.domain), sharesOutstanding: r.totalLpSharesOutstanding, bound: decodeLpVaultRegistryBound(raw) === true };
     } catch {
       registry = null;
+    }
+  }
+  if (registry?.bound && isDevnetV22Enabled()) {
+    // v2.2: a bonded / ext market needs the vault LP portfolio + ext + tranche on tag 78 (security review N: closing a
+    // bonded market was blocked at this step). Read failures leave the plain builder; the tail guard then refuses loudly.
+    try {
+      const lp = decodeAssetVaultLpP3(p.marketData, 0).vaultLpPortfolio;
+      const tails = await fetchMarketTailsV22(connection, p.programId, p.market);
+      if (lp && (tails.vaultLpExt || tails.bondTranche)) registry = { ...registry, v22: { lpPortfolio: lp, vaultLpExt: tails.vaultLpExt ?? undefined, bond: !!tails.bondTranche } };
+    } catch {
+      /* keep the plain builder */
     }
   }
   let pool: PoolState | null = null;

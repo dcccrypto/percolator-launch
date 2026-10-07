@@ -107,9 +107,11 @@ import { V1CloseOnlyBanner } from "@/components/move/V1CloseOnlyNotice";
 import { V21_REFRESHING_POSITIONS } from "@/lib/v21/loss-stale-retry";
 import { StatusLine } from "@/components/ui/StatusLine";
 import { V22_COPY } from "@/lib/v22/copy";
-import { POS_SCALE_V22, formatLotPriceE6, lotExpOf, quantizeQToLots, tokenUsdOfLotUsd } from "@/lib/v22/lot";
+import { parseHumanAmount } from "@/lib/parseAmount";
+import { POS_SCALE_V22, formatLotPriceE6, lotExpOf, lotOrderQ, tokenUsdOfLotUsd } from "@/lib/v22/lot";
 import { BandMarketNotice } from "@/components/v22/BandMarketNotice";
 import { useBandRentView } from "@/hooks/useBandRentView";
+import { useLotTradingGuard } from "@/hooks/useLotTradingGuard";
 import { FixPricingAction } from "@/components/trade/FixPricingAction";
 import { resolveUserMessage, type UserMessage, type UserMessageAction } from "@/lib/limits/user-message";
 import { TICKET_COPY } from "@/lib/limits/copy";
@@ -283,6 +285,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
   const collateralSymbol = sanitizeSymbol(tokenMeta?.symbol, mintAddress);
   const bandView = useBandRentView();
+  // v2.2 (N2): a market with lots is not traded until every surface is lot-aware (null with the flag off).
+  const lotGuard = useLotTradingGuard(slabAddress);
   // v2.2 lot markets (lib/v22/lot.ts): the mark, entry and every position q are PER LOT. The size box is in TOKENS, so
   // typed sizes convert at the per-TOKEN price; Q is still derived from the per-lot mark below. lotExp 0 = identity.
   const lotExp = lotExpOf(slabRaw);
@@ -690,7 +694,15 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const notionalNative = computeNotionalNative(marginNative, leverage);
   const rawPositionSize = livePriceE6 && livePriceE6 > 0n ? (notionalNative * 1_000_000n) / livePriceE6 : 0n;
   // v2.2 lots: whole lots only (the typed token size rounds DOWN to a lot multiple; the remainder is shown, never sent).
-  const lotQuantised = quantizeQToLots(rawPositionSize < 0n ? 0n : rawPositionSize, lotExp);
+  let typedTokenQ: bigint | null = null;
+  if (lotExp > 0 && sizeUnit === "token" && sizeInput) {
+    try {
+      typedTokenQ = parseHumanAmount(sizeInput, 6);
+    } catch {
+      typedTokenQ = null; // an unparsable typed size keeps the margin-derived Q
+    }
+  }
+  const lotQuantised = lotOrderQ(rawPositionSize, typedTokenQ, lotExp);
   const positionSize = lotQuantised.q;
   const lotRemainderQ = lotQuantised.remainderQ;
   // GH#2953: the engine's initial margin is max(notional x IM bps, min_nonzero_im_req) (engine
@@ -954,7 +966,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // below can only compose an order that cannot be submitted — the CTA at the bottom (Connect /
   // Get Tokens) is the only real action. With tokens in the wallet the ticket is fully usable:
   // the button funds and trades in one approval (UX WP-6).
-  const ticketLocked = needsWallet || accountPending || ((needsAccount || needsDeposit) && !walletHasTokens);
+  const ticketLocked = needsWallet || accountPending || ((needsAccount || needsDeposit) && !walletHasTokens) || lotGuard !== null;
 
   async function handleTrade(
     snapshotSize?: bigint,
@@ -1375,6 +1387,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           <p data-testid="lot-remainder" className="mb-2 text-[10px] text-[var(--text-secondary)]">
             {V22_COPY.lot.remainder(fmtQLots(lotRemainderQ * 10n ** BigInt(lotExp)), baseTicker)}
           </p>
+        )}
+        {lotGuard && (
+          <p data-testid="lot-trading-guard" role="status" className="mb-2 text-[11px] text-[var(--text-secondary)]">{lotGuard}</p>
         )}
         <BandMarketNotice view={bandView} collateralDecimals={decimals} collateralSymbol={collateralSymbol} />
         {/* Devnet v2.1: the close-only countdown + permissionless wind-down (flag-gated). */}

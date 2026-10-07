@@ -154,3 +154,56 @@ describe("F9: a stored floor that can no longer be met says so", () => {
     expect((r as { error?: Error }).error?.message).toMatch(/keeps moving/);
   });
 });
+
+describe("N3: one fresh scan per 118 retry round", () => {
+  it("a portfolio that goes stale after the quote is refreshed on the first 118 retry (scans = 1 + rounds)", async () => {
+    const first = stale(1);
+    const late = stale(1); // becomes stale after the quote; only a fresh scan sees it
+    const scans: string[] = [];
+    const { d } = deps({ sims: [ok(1_000_000n)], sendErrors: [err(118)] });
+    d.readStale = vi.fn(async () => first); // cheap re-read of the scanned keys: never sees `late`
+    d.rescanStale = vi.fn(async () => {
+      scans.push("scan");
+      return [...first, ...late];
+    });
+    const keysOf = (ixs: TransactionInstruction[]) => exec77(ixs).keys.map((x) => x.pubkey.toBase58());
+    const sent: string[][] = [];
+    (d.send as ReturnType<typeof vi.fn>).mockImplementation(async (ixs: TransactionInstruction[]) => {
+      sent.push(keysOf(ixs));
+      if (sent.length === 1) throw err(118);
+      return "SIG";
+    });
+    const q = await quoteExit(input(), d);
+    if (q.status !== "quoted") throw new Error("expected a quote");
+    const r = await sendExit(input(), q.quote, d);
+    expect(r.status).toBe("sent");
+    expect(sent[0]).not.toContain(late[0].key.toBase58());
+    expect(sent[1]).toContain(late[0].key.toBase58()); // added on the retry
+    expect(scans.length).toBe(1); // one scan for the one 118 round
+  });
+  it("NEGATIVE CONTROL: without rescanStale the retry only re-reads the frozen set and never includes the late portfolio", async () => {
+    const first = stale(1);
+    const late = stale(1);
+    const { d } = deps({ sims: [ok(1_000_000n)] });
+    d.readStale = vi.fn(async () => first);
+    const sent: string[][] = [];
+    (d.send as ReturnType<typeof vi.fn>).mockImplementation(async (ixs: TransactionInstruction[]) => {
+      sent.push(exec77(ixs).keys.map((x) => x.pubkey.toBase58()));
+      if (sent.length === 1) throw err(118);
+      return "SIG";
+    });
+    const q = await quoteExit(input(), d);
+    if (q.status !== "quoted") throw new Error("expected a quote");
+    await sendExit(input(), q.quote, d);
+    expect(sent[1]).not.toContain(late[0].key.toBase58());
+  });
+  it("118 while quoting also rescans once per round", async () => {
+    const { d } = deps({ sims: [prog(118), prog(118), ok(1_000_000n)] });
+    d.readStale = vi.fn(async () => stale(1));
+    d.rescanStale = vi.fn(async () => stale(2));
+    const q = await quoteExit(input(), d);
+    expect(q.status).toBe("quoted");
+    expect((d.readStale as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+    expect((d.rescanStale as ReturnType<typeof vi.fn>).mock.calls.length).toBe(2);
+  });
+});

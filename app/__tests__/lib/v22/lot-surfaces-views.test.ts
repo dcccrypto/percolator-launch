@@ -115,13 +115,14 @@ describe("surface: price store (the app's price unit is per LOT)", () => {
     expect(getSnapshot(a).priceE6).toBe(60_000_000n);
     expect(getSnapshot(a).lotExp).toBe(3);
     const b = "LotSlabBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
-    seedFromDbIfEmpty(b, 0.06, undefined); // seeded before the exponent is known
-    expect(getSnapshot(b).priceE6).toBe(60_000n);
-    setLotExp(b, 3); // retro-corrected
+    seedFromDbIfEmpty(b, 0.06, undefined); // seeded before the exponent is known: held back (review N1), never stored per token
+    expect(getSnapshot(b).priceE6).toBeNull();
+    setLotExp(b, 3); // applied per lot once known
     expect(getSnapshot(b).priceE6).toBe(60_000_000n);
   });
   it("lotExp 0 control: untouched; an on-chain poll is already per lot and is never scaled", () => {
     const c = "LotSlabCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
+    setLotExp(c, 0);
     seedFromDbIfEmpty(c, 0.06, undefined);
     expect(getSnapshot(c).priceE6).toBe(60_000n);
     const d = "LotSlabDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD";
@@ -224,7 +225,7 @@ describe("source guards: every display site converts through lib/v22/lot.ts", ()
     ["components/my-markets/CreatorMarketRow.tsx", /tokenUsdOfLotUsd\(liveLot[\s\S]*10 \*\* \(snapForOi\.lotExp/],
     ["hooks/usePositionLinePrices.ts", /tokenUsdOfLotUsd\(Number\(pnl\.entry\)[\s\S]*tokenUsdOfLotUsd\(Number\(liq\)/],
     ["hooks/usePortfolio.ts", /lotExp: lotExpOf\(slabData\)[\s\S]*meta\.lotExp \?\? 0/],
-    ["hooks/useLivePrice.ts", /setLotExp\(slabAddr, lotExp\)/],
+    ["hooks/useLivePrice.ts", /observeLotExp\(slabAddr, slabRaw\)/],
   ];
   it.each(sites)("%s", (file, re) => {
     expect(src(file)).toMatch(re);

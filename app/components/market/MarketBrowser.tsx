@@ -1,5 +1,6 @@
 "use client";
 
+import { LotOpenInterest } from "@/components/market/LotOpenInterest";
 import { FC, useMemo } from "react";
 import Link from "next/link";
 import { PublicKey } from "@solana/web3.js";
@@ -118,7 +119,7 @@ export const MarketBrowser: FC = () => {
                     <OracleBadge mode={detectOracleMode({ ...m.config, oracleModeByte: m.configV17?.oracleMode })} pulse={false} />
                   </td>
                   <td className="px-4 py-3 text-right text-[var(--text)]">
-                    {formatTokenAmount(m.engine.totalOpenInterest, decimals)} {symbol}
+                    <LotOpenInterest slab={slab} oiQ={m.engine.totalOpenInterest} decimals={decimals} /> {symbol}
                   </td>
                   <td className="px-4 py-3 text-right text-[var(--text)]">
                     {formatTokenAmount(m.engine.insuranceFund.balance, decimals)} {symbol}
@@ -181,7 +182,7 @@ export const MarketBrowser: FC = () => {
                 <div>
                   <div className="text-[var(--text-secondary)] uppercase tracking-wider text-[9px] mb-0.5">OI</div>
                   <div className="text-[var(--text)] font-mono tabular-nums truncate">
-                    {formatTokenAmount(m.engine.totalOpenInterest, decimals)}
+                    <LotOpenInterest slab={slab} oiQ={m.engine.totalOpenInterest} decimals={decimals} />
                   </div>
                 </div>
                 <div>

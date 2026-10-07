@@ -44,6 +44,8 @@ export interface SimResult {
 
 export interface ExitRunDeps {
   readStale: () => Promise<RefreshCandidateV22[]>;
+  /** One fresh scan, called once per 118 retry round so a portfolio that went stale after the quote is included (N3). Falls back to readStale. */
+  rescanStale?: () => Promise<RefreshCandidateV22[]>;
   readDestBalance: () => Promise<bigint>;
   /** Simulate [computeBudgetPrelude(units), ...ixs] as the redeemer (use {@link withExitBudget}). Never throws for a program error: returns it in `err`. */
   simulate: (ixs: TransactionInstruction[], computeUnits: number) => Promise<SimResult>;
@@ -140,9 +142,11 @@ export async function quoteExit(input: ExitRunInput, deps: ExitRunDeps): Promise
       deps.onRefreshing?.(on);
     }
   };
+  let rescan = false; // N3: after a 118 round the next read is ONE fresh scan, not a re-read of the old set
   try {
     for (;;) {
-      const stale = ctx.boundLpPortfolio ? [] : await deps.readStale();
+      const stale = ctx.boundLpPortfolio ? [] : await (rescan ? deps.rescanStale ?? deps.readStale : deps.readStale)();
+      rescan = false;
       const plan = buildExitPlan(ctx, stale);
       const u = units ?? plan.computeUnits;
       const { outcome, payout } = await simulateOnce(input, deps, plan, u);
@@ -167,6 +171,7 @@ export async function quoteExit(input: ExitRunInput, deps: ExitRunDeps): Promise
       if (step.action === "refresh-and-retry") {
         setRefreshing(true);
         state = step.state;
+        rescan = true;
         await sleep(step.delayMs);
         continue;
       }
@@ -234,7 +239,7 @@ export async function sendExit(input: ExitRunInput, confirmed: ExitQuote, deps: 
           setRefreshing(true);
           state = step.state;
           await sleep(step.delayMs);
-          stale = await deps.readStale();
+          stale = await (deps.rescanStale ?? deps.readStale)();
           continue;
         }
         if (step.action === "raise-units") {

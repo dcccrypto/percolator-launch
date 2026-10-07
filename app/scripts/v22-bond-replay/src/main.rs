@@ -29,6 +29,7 @@ fn main() {
 
     let mut svm = LiteSVM::new().with_sigverify(false).with_spl_programs();
     svm.add_program(wrapper, &std::fs::read(wrapper_so).unwrap());
+    if let Some(stake_so) = args.get(5) { svm.add_program(stake, &std::fs::read(stake_so).unwrap()); }
     // clock: the app's harness slot
     let mut clock = svm.get_sysvar::<solana_sdk::clock::Clock>();
     clock.slot = 5_000;
@@ -50,7 +51,7 @@ fn main() {
     let mut raw: Vec<(Pubkey, Vec<AccountMeta>, Vec<u8>)> = vec![];
     for ix in dump["instructions"].as_array().unwrap() {
         let program = pk(&ix["program"]);
-        if program == stake { continue; } // the stake program is not under test here
+        if program == stake && args.get(5).is_none() { continue; } // the stake program is skipped unless a stake .so is given as argv[5]
         let keys: Vec<AccountMeta> = ix["keys"].as_array().unwrap().iter().map(|k| {
             let key = pk(&k["pubkey"]);
             let s = k["signer"].as_bool().unwrap();
@@ -70,6 +71,13 @@ fn main() {
             let ata = raw.remove(i107 + 1); // the ATA create that follows 107
             raw.insert(i107, ata);
             raw.insert(i107 + 1, seed);
+        }
+        "short-portfolio" => { // negative control (wrapper f199054a): a portfolio created shorter than PORTFOLIO_ACCOUNT_LEN (10,603) must be refused
+            for r in raw.iter_mut() {
+                if r.0 == solana_sdk::system_program::id() && r.2.len() == 52 && r.2[..4] == [0, 0, 0, 0] && u64::from_le_bytes(r.2[12..20].try_into().unwrap()) == 10_603 {
+                    r.2[12..20].copy_from_slice(&10_240u64.to_le_bytes());
+                }
+            }
         }
         _ => {}
     }
@@ -114,8 +122,10 @@ fn main() {
             println!("LANDED compute_units_consumed={}", m.compute_units_consumed);
             for l in m.logs.iter().filter(|l| l.contains("failed") || l.contains("consumed")).take(40) { println!("  {}", l); }
             // state
-            let market = pk(&dump["instructions"].as_array().unwrap().iter().find(|i| i["data"].as_str().unwrap().starts_with("6b")).unwrap()["keys"][1]["pubkey"]);
+            let market = pk(&dump["instructions"].as_array().unwrap().iter().find(|i| i["data"].as_str().unwrap().starts_with("6b") || i["data"].as_str().unwrap().starts_with("5e")).unwrap()["keys"][1]["pubkey"]);
             let (tranche, _) = Pubkey::find_program_address(&[b"bond_tranche", market.as_ref()], &wrapper);
+            let has_bond = dump["instructions"].as_array().unwrap().iter().any(|i| i["data"].as_str().unwrap().starts_with("6b"));
+            if !has_bond { println!("no bond tranche in this bundle"); println!("JSON_OK"); return; }
             let a = svm.get_account(&tranche).expect("tranche account missing");
             println!("tranche {} owner_ok={} len={} version={} kind={}", tranche, a.owner == wrapper, a.data.len(), u16::from_le_bytes([a.data[8], a.data[9]]), a.data[10]);
             // tranche record (v22-state BOND_TRANCHE_FIELD_OFF_V22, body at +16): dials as the wizard sent them, C_b = B = 0 (nothing deposited)
@@ -136,6 +146,12 @@ fn main() {
             println!("LP mint supply after the two seeds = {}", supply);
             let m = svm.get_account(&market).unwrap();
             println!("market len={} version={}", m.data.len(), u16::from_le_bytes([m.data[8], m.data[9]]));
+            // lot pricing: profile byte +19 (lot_exp) of asset 0 (slot 0 starts at 592 + 806) and the per-lot effective price (engine slot = slot + 1024, +25)
+            let slot0 = 592 + 806;
+            println!("market profile lot_exp={} effective_price_e6_per_lot={}", m.data[slot0 + 19], u64::from_le_bytes(m.data[slot0 + 1024 + 25..slot0 + 1024 + 33].try_into().unwrap()));
+            let init = dump["instructions"].as_array().unwrap().iter().find(|i| i["data"].as_str().unwrap().starts_with("00") && i["program"].as_str().unwrap() == dump["wrapper"].as_str().unwrap()).unwrap();
+            let idata = hex::decode(init["data"].as_str().unwrap()).unwrap();
+            println!("InitMarket data len={} (trailer tail bytes: {})", idata.len(), hex::encode(&idata[idata.len().saturating_sub(40)..]));
             println!("JSON_OK");
         }
         Err(e) => {

@@ -9,7 +9,7 @@ the v2.2 programs, together with `NEXT_PUBLIC_DEVNET_V21=1`.
 `@percolatorct/sdk` 9.0.0-candidate is not published. The app pins the candidate the way the v2.1 stack did (verbatim local
 ports + one adapter), see `app/lib/v22/sdk/index.ts`:
 
-- percolator-sdk draft PR #406, branch `feat/v22-sdk`, commit `ecb6215` (LAYOUT_V22 variant B default, VERSION-keyed guard,
+- percolator-sdk draft PR #406, branch `feat/v22-sdk`, commit `adf8fd0` (files unchanged since `ecb6215` keep that header: records/*, v22-wire/state/math/stake) (LAYOUT_V22 variant B default, VERSION-keyed guard,
   builders, quotes, error tables, `planEarnExitV22`, `buildLaunchBundleV22`, `buildCreatePortfolioAccountIxV22`).
 - Ported files: `layout.ts`, `v22-wire.ts`, `v22-state.ts`, `v22-math.ts`, `v22-stake.ts`, `v22.ts`, `slab.ts`, `errors-v22.ts`
   (the v2.2 rows of `PERCOLATOR_ERRORS`), and `records/*` (the layout-aware record decoders). Only imports are retargeted
@@ -34,3 +34,6 @@ band anchor, `rent_max`) and the rent rate port (`growth_v19::rent_rate_e9`). Th
 9. Band markets and 10. holding fee: `band-rent-state.ts`, `BandMarketNotice`, `HoldingFeeChip`, favourable-side close disabled while lagging.
 Bond / insurance-units account tails are appended centrally in `sendTx` (`market-tails.ts`).
 Visual check: `/dev-preview/v22` with `NEXT_PUBLIC_DEV_PREVIEW=1 NEXT_PUBLIC_DEVNET_V22=1`.
+
+
+Discovery: `lib/v22/sdk/discovery.ts` (verbatim port) behind `lib/v22/discovery.ts` (flag off = installed SDK). Lot markets stay refused in the wizard (`LOT_MARKETS_ENABLED=false`); `lib/v22/lot-coverage.ts` guards trading on lot markets until every surface is covered. Bond-launch replay: `app/scripts/v22-bond-replay/RESULTS.md`.

@@ -33,7 +33,7 @@ export const consentDisplay = (para: string): string => para.replace("`deploy_ta
 export const V22_COPY = {
   // ── Band markets ("price protection") ────────────────────────────────────
   band: {
-    catchingUp: "Price is catching up; closing reopens shortly.",
+    catchingUp: "Price is catching up. Closing reopens when it has.",
     catchingUpWhy: "After a sharp move the market price walks toward the new price in small steps. That usually takes a few minutes and can take up to about an hour. Closing opens again as soon as it has caught up.",
     /** Mark versus the oracle target, shown only when they differ. */
     markVsTarget: (mark: string, target: string) => `Mark ${mark} · catching up to ${target}`,
@@ -46,6 +46,8 @@ export const V22_COPY = {
   },
   // ── Lot markets (sizes are whole lots; the box is in tokens) ───────────────
   lot: {
+    unitsUnknown: "Checking this market's price. Try again in a moment.",
+    tradingUnavailable: "Trading this market isn't available in the app yet.",
     remainder: (tokens: string, sym: string) => `Sizes are rounded down to whole lots here: ${tokens} ${sym} of what you typed is not included.`,
   },
   // ── Holding fee ──────────────────────────────────────────────────────────
@@ -75,6 +77,7 @@ export const V22_COPY = {
   earnExit: {
     atLeast: (usd: string) => `You'll receive at least ${usd}`,
     quoting: "Getting your exit price…",
+    quoteExpired: "Your quote expired. See the exit price again.",
     requote: "The exit price moved. Here is the new minimum.",
     refreshing: "Refreshing positions…",
     estimateNote: "Based on today's price. This minimum is fixed when you request the withdrawal.",

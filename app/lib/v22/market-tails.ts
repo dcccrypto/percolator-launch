@@ -11,7 +11,9 @@
  *   TOPUP_INSURANCE / WITHDRAW_INSURANCE ...); a wrong guess is harmless because the PDA of a non-market is absent.
  */
 import { PublicKey, TransactionInstruction, type Connection } from "@solana/web3.js";
+import * as Sentry from "@sentry/nextjs";
 import { isDevnetV22Enabled } from "./flag";
+import { deriveVaultLpExtP2b } from "./sdk/records/p2b-earn";
 import {
   ACCOUNT_KIND,
   BOND_TAIL_INDEX_V22,
@@ -23,17 +25,24 @@ import {
   withInsuranceUnitsTailV22,
 } from "./sdk";
 
+/** The one calm line the user sees when a builder and the wrapper's tail layout disagree. Nothing was sent. */
+export const MARKET_TAIL_CALM_LINE = "This action isn't available for this market yet. Nothing was sent.";
+
 /**
- * Review (F12 follow-up): an app builder whose account count does not match the SDK's tail index would silently skip the tail
- * and the program would refuse. In development and tests that is a LOUD error; production keeps the visible on-chain refusal.
+ * An app builder whose account count does not match the SDK's tail index would send an instruction the program refuses
+ * (or, worse, mis-reads). In EVERY environment that is now an error raised BEFORE the wallet prompt: `message` is the calm
+ * line for the user, the numbers live in `tag` / `got` / `want` and are logged.
  */
 export class MarketTailMismatchError extends Error {
   readonly name = "MarketTailMismatchError";
   constructor(readonly tag: number, readonly got: number, readonly want: string) {
-    super(`market tail: tag ${tag} has ${got} accounts, the SDK tail index needs ${want}`);
+    super(MARKET_TAIL_CALM_LINE);
+  }
+  get detail(): string {
+    return `market tail: tag ${this.tag} has ${this.got} accounts, the SDK tail index needs ${this.want}`;
   }
 }
-const loud = (): boolean => process.env.NODE_ENV !== "production";
+const loud = (): boolean => true;
 /** Tags whose bond-tail form is unambiguous. 102 also has a live (7-account) form, so only its two known lengths pass. */
 const BOND_LOUD_TAGS = new Set([78, 97, 102, 103]);
 /** 101 is ExecuteAdl in the installed SDK (it only sometimes takes units), so it is never loud. */
@@ -42,9 +51,11 @@ const UNITS_LOUD_TAGS = new Set([9, 56, 57, 41]);
 export interface MarketTailsV22 {
   bondTranche: PublicKey | null;
   insuranceUnits: PublicKey | null;
+  /** The P2b `vault_lp_ext` PDA when it exists (kind 10); tags 78 / 97 / 98 / 103 take it. */
+  vaultLpExt?: PublicKey | null;
 }
 
-export const NO_TAILS: MarketTailsV22 = Object.freeze({ bondTranche: null, insuranceUnits: null });
+export const NO_TAILS: MarketTailsV22 = Object.freeze({ bondTranche: null, insuranceUnits: null, vaultLpExt: null });
 export const TAILS_TTL_MS = 15_000;
 
 let now: () => number = () => Date.now();
@@ -71,10 +82,12 @@ export async function fetchMarketTailsV22(connection: Pick<Connection, "getMulti
   if (hit && now() - hit.at < TAILS_TTL_MS) return hit.tails;
   const tranche = deriveBondTrancheV22(programId, market)[0];
   const units = deriveInsuranceUnitsV22(programId, market)[0];
-  const [t, u] = await connection.getMultipleAccountsInfo([tranche, units], "confirmed");
+  const ext = deriveVaultLpExtP2b(programId, market)[0];
+  const [t, u, x] = await connection.getMultipleAccountsInfo([tranche, units, ext], "confirmed");
   const tails: MarketTailsV22 = {
     bondTranche: validAs(t, programId, ACCOUNT_KIND.BondTranche) ? tranche : null,
     insuranceUnits: validAs(u, programId, ACCOUNT_KIND.InsuranceUnits) ? units : null,
+    vaultLpExt: validAs(x ?? null, programId, ACCOUNT_KIND.VaultLpExt) ? ext : null,
   };
   cache.set(key, { at: now(), tails });
   return tails;
@@ -131,7 +144,16 @@ export async function withMarketTailsV22(connection: Pick<Connection, "getMultip
     try {
       out.push(applyMarketTailsV22(ix, await fetchMarketTailsV22(connection, wrapper, ix.keys[1].pubkey)));
     } catch (e) {
-      if (e instanceof MarketTailMismatchError && loud()) throw e;
+      if (e instanceof MarketTailMismatchError) {
+        // Loud in EVERY environment, before the wallet prompt: log with the numbers, show the calm line.
+        console.error(`[v22 tails] ${e.detail}`);
+        try {
+          Sentry.captureException(e, { tags: { area: "v22-market-tails", tag: String(e.tag) }, extra: { got: e.got, want: e.want } });
+        } catch {
+          /* telemetry must never mask the refusal */
+        }
+        throw e;
+      }
       out.push(ix);
     }
   }

@@ -383,6 +383,33 @@ describe("v2.2 launch", () => {
     writeFileSync(process.env.V22_BOND_DUMP!, JSON.stringify(out, null, 1));
   });
 
+  // Same dump for a lot launch (lot_exp 3 at $10 per lot = $0.01 per token) and for the 119 control (lot form BELOW the $10-per-lot floor,
+  // built straight through useCreateMarket: the wizard would refuse it). Only run when the env var is set.
+  const dumpLaunch = async (path: string, over: { initialPriceE6: bigint; lotExp: number; bond: boolean }) => {
+    __setDevnetV22ForTest(true);
+    const { outcome } = await launch({
+      singleTx: true,
+      params: params({ initialPriceE6: over.initialPriceE6, growth: GROWTH, v22: { lotExp: over.lotExp, rent: { ...DEFAULT_RENT }, band: bandDefaultsV22(6), ...(over.bond ? { bond: BOND } : {}) } }),
+    });
+    expect(outcome).toEqual({ status: "success" });
+    const d = decodeV1Message(splitV1Wire(sent[0]!).message);
+    writeFileSync(path, JSON.stringify({
+      wrapper: PROGRAM.toBase58(), stake: STAKE.toBase58(), payer: WALLET.publicKey.toBase58(), keeper: KEEPER.publicKey.toBase58(), mint: MINT.toBase58(),
+      computeUnitLimit: d.computeUnitLimit, heap: d.heapSizeBytes,
+      instructions: d.instructions.map((ix) => ({
+        program: d.accountKeys[ix.programIdIndex]!.toBase58(),
+        keys: ix.accountIndexes.map((i) => ({ pubkey: d.accountKeys[i]!.toBase58(), signer: i < d.numRequiredSignatures, writable: v1IsWritable(d, i) })),
+        data: Buffer.from(ix.data).toString("hex"),
+      })),
+    }, null, 1));
+  };
+  it.runIf(!!process.env.V22_LOT_DUMP)("dump: a lot_exp 3 bond launch at $10 per lot", async () => {
+    await dumpLaunch(process.env.V22_LOT_DUMP!, { initialPriceE6: 10_000_000n, lotExp: 3, bond: true });
+  });
+  it.runIf(!!process.env.V22_LOT_FLOOR_DUMP)("dump: lot form below the $10-per-lot floor (expect 119 on chain)", async () => {
+    await dumpLaunch(process.env.V22_LOT_FLOOR_DUMP!, { initialPriceE6: 5_000_000n, lotExp: 3, bond: false });
+  });
+
   it("NEGATIVE CONTROL: the same bond list in the v2.1 order (107 after the seeds) is refused by the shape", () => {
     __setDevnetV22ForTest(true);
     const shape = expectedLaunchShape({ memo: true, cosign: true, feeSplit: false, bond: true });

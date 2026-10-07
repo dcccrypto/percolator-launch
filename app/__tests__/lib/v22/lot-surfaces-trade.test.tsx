@@ -17,7 +17,7 @@ import { ClosePositionForm } from "@/components/trade/ClosePositionForm";
 import { sizeQToInput } from "@/lib/limits/ticket";
 import { maxInUnit } from "@/lib/limits/ticket-state";
 import { fmtQ } from "@/components/limits/OrderTicketLimits";
-import { POS_SCALE_V22, formatLotPriceE6, formatLotQ, quantizeQToLots, tokenUsdOfLotUsd } from "@/lib/v22/lot";
+import { POS_SCALE_V22, formatLotPriceE6, formatLotQ, lotOrderQ, quantizeQToLots, tokenUsdOfLotUsd } from "@/lib/v22/lot";
 
 const K = 3; // 1 lot = 1,000 tokens
 const LOT = POS_SCALE_V22;
@@ -46,9 +46,20 @@ describe("order entry: typed tokens become LOTS", () => {
     expect(ticketQ(1.5, 12, 0).q).toBe(1_500_000n);
     expect(quantizeQToLots(1_500_000n, 0)).toEqual({ q: 1_500_000n, remainderQ: 0n });
   });
-  it("an exact lot never collapses to 0 lots through margin-atom truncation", () => {
-    expect(quantizeQToLots(999_999n, K).q).toBe(LOT);
-    expect(quantizeQToLots(999_990n, K).q).toBe(0n);
+  it("quantising TRUNCATES toward zero and shows the remainder; it never rounds a size up (SDK semantics)", () => {
+    expect(quantizeQToLots(999_999n, K)).toEqual({ q: 0n, remainderQ: 999_999n });
+    expect(quantizeQToLots(1_999_999n, K)).toEqual({ q: LOT, remainderQ: 999_999n });
+    expect(quantizeQToLots(-1_500_000n, K)).toEqual({ q: -LOT, remainderQ: -500_000n });
+  });
+  it("an EXACT whole-lot size typed in tokens stays exact (the ticket takes the typed size, it does not round a margin-truncated Q up)", () => {
+    // 1,000 tokens at lotExp 3 = 1 lot; the margin-derived Q landed one Q short
+    expect(lotOrderQ(999_999n, 1_000n * 1_000_000n, K)).toEqual({ q: LOT, remainderQ: 0n });
+    // without a typed size (USD entry) the short Q is NOT rounded up
+    expect(lotOrderQ(999_999n, null, K).q).toBe(0n);
+    // a typed size far from the margin-derived Q is ignored (margin edited by hand)
+    expect(lotOrderQ(5_500_000n, 1_000n * 1_000_000n, K).q).toBe(5n * LOT);
+    // lotExp 0: untouched
+    expect(lotOrderQ(1_234_567n, 1_000_000n, 0)).toEqual({ q: 1_234_567n, remainderQ: 0n });
   });
 });
 
@@ -139,7 +150,7 @@ describe("close form (and the close modal / ticket close panel that mount it)", 
  */
 const src = (p: string): string => readFileSync(join(__dirname, "../../..", p), "utf8");
 const GUARDS: Array<[string, string, RegExp[]]> = [
-  ["order ticket: typed size converts at the per-token price, Q is quantised to whole lots, remainder shown, sign guard", "components/trade/OrderTicket.tsx", [/lotExpOf\(slabRaw\)/, /tokenUsdOfLotUsd\(priceUsd, lotExp\)/, /quantizeQToLots\(/, /lot-remainder/, /% POS_SCALE_V22 !== 0n/, /sizeQToInput\(q, sizeUnit, livePriceE6, lotExp\)/, /maxInUnit\(displayMaxQ!, sizeUnit, livePriceE6!, baseTicker, lotExp\)/, /formatLotPriceE6\(e6, lotExp\)/]],
+  ["order ticket: typed size converts at the per-token price, Q is quantised to whole lots, remainder shown, sign guard", "components/trade/OrderTicket.tsx", [/lotExpOf\(slabRaw\)/, /tokenUsdOfLotUsd\(priceUsd, lotExp\)/, /lotOrderQ\(/, /lot-remainder/, /% POS_SCALE_V22 !== 0n/, /sizeQToInput\(q, sizeUnit, livePriceE6, lotExp\)/, /maxInUnit\(displayMaxQ!, sizeUnit, livePriceE6!, baseTicker, lotExp\)/, /formatLotPriceE6\(e6, lotExp\)/]],
   ["order ticket limits row: sizes and mark/band/quote prices", "components/limits/OrderTicketLimits.tsx", [/fmtQ\(lim\.maxQ, lotExp\)/, /formatLotPriceE6\(mark, lotExp\)/, /formatLotPriceE6\(q\.quotePriceE6, lotExp\)/]],
   ["positions dock: size, entry, mark, liquidation price, share card", "components/trade/PositionsDock.tsx", [/lotExpOf\(slabRawForLot\)/, /formatLotQ\(absPosition, decimals, lotExp\)/, /formatLotPriceE6\(entryPriceE6, lotExp\)/, /formatLotPriceE6\(currentPriceE6, lotExp\)/, /formatPrice: \(e6: bigint\) => formatLotPriceE6\(e6, lotExp\)/, /\n\s+lotExp,\n\s+}/]],
   ["position panel: size, entry, mark", "components/trade/PositionPanel.tsx", [/formatLotQ\(absPosition, decimals, lotExp\)/, /formatLotPriceE6\(entryPriceE6, lotExp\)/, /formatLotPriceE6\(currentPriceE6, lotExp\)/]],

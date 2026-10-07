@@ -5,9 +5,11 @@
  * withdraw button. Rendered by DepositWithdrawPanel under NEXT_PUBLIC_DEVNET_V22 in place of the one-step button.
  * Presentational: the hook (hooks/useEarnExitV22) is injected so the component is testable without a wallet.
  */
+import { useState } from 'react';
 import { GlowButton } from '@/components/ui/GlowButton';
 import { StatusLine } from '@/components/ui/StatusLine';
 import { V22_COPY } from '@/lib/v22/copy';
+import { StaleExitQuoteError } from '@/lib/v22/exit-quote-binding';
 import { quoteLine, showDipNote } from '@/lib/v22/earn-exit';
 import type { EarnExitApi } from '@/hooks/useEarnExitV22';
 import type { UserMessage } from '@/lib/limits/user-message';
@@ -30,6 +32,21 @@ export interface EarnExitQuoteProps {
 
 export function EarnExitQuote({ exit, decimals, symbol, canQuote }: EarnExitQuoteProps) {
   const { state, getQuote, confirm } = exit;
+  // N4: confirm() rejects with StaleExitQuoteError when the quote expired or no longer matches; say so calmly.
+  const [expired, setExpired] = useState(false);
+  const onConfirm = async () => {
+    setExpired(false);
+    try {
+      await confirm();
+    } catch (e) {
+      if (e instanceof StaleExitQuoteError) setExpired(true);
+      else throw e;
+    }
+  };
+  const onGetQuote = async () => {
+    setExpired(false);
+    await getQuote();
+  };
   const busy = state.phase === 'quoting' || state.phase === 'refreshing' || state.phase === 'sending';
   const quoted = state.phase === 'quoted' && state.quote !== null;
   return (
@@ -56,6 +73,9 @@ export function EarnExitQuote({ exit, decimals, symbol, canQuote }: EarnExitQuot
           )}
         </div>
       )}
+      {expired && !quoted && (
+        <p data-testid="earn-exit-expired" className="mb-2 text-[11px] text-[var(--text-secondary)]">{V22_COPY.earnExit.quoteExpired}</p>
+      )}
       {state.phase === 'wait' && state.message && <StatusLine message={calm('exit-wait', 'wait', 'Refreshing positions', state.message)} />}
       {state.phase === 'error' && state.message && <StatusLine message={calm('exit-note', 'info', 'Not yet', state.message)} />}
       {state.phase === 'sent' && (
@@ -63,11 +83,11 @@ export function EarnExitQuote({ exit, decimals, symbol, canQuote }: EarnExitQuot
       )}
       <div className="flex gap-2">
         {quoted ? (
-          <GlowButton data-testid="earn-exit-confirm" onClick={() => void confirm()} disabled={busy} variant="primary" size="lg" className="flex-1">
+          <GlowButton data-testid="earn-exit-confirm" onClick={() => void onConfirm()} disabled={busy} variant="primary" size="lg" className="flex-1">
             Withdraw
           </GlowButton>
         ) : (
-          <GlowButton data-testid="earn-exit-get-quote" onClick={() => void getQuote()} disabled={!canQuote || busy} variant="primary" size="lg" className="flex-1">
+          <GlowButton data-testid="earn-exit-get-quote" onClick={() => void onGetQuote()} disabled={!canQuote || busy} variant="primary" size="lg" className="flex-1">
             {busy ? 'Working…' : 'See exit price'}
           </GlowButton>
         )}

@@ -127,3 +127,18 @@ describe("F14 through the real hook", () => {
     expect(conn.getProgramAccounts).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("N3 reader: rescan is one fresh scan that replaces the remembered keys", () => {
+  it("scans = 1 + rescans; read() after a rescan re-reads the NEW key set", async () => {
+    const scan = vi.fn()
+      .mockResolvedValueOnce([{ pubkey: pk(1), data: new Uint8Array() }])
+      .mockResolvedValueOnce([{ pubkey: pk(1), data: new Uint8Array() }, { pubkey: pk(2), data: new Uint8Array() }]);
+    const fetchMany = vi.fn(async (keys: PublicKey[]) => keys.map((k) => ({ pubkey: k, data: new Uint8Array() })));
+    const r = makeStaleReader({ scan, fetchMany, toCandidates: (rows) => rows.map((x) => ({ key: x.pubkey })) });
+    expect((await r.read()).length).toBe(1);
+    expect((await r.rescan()).length).toBe(2);
+    expect((await r.read()).length).toBe(2);
+    expect(scan).toHaveBeenCalledTimes(2);
+    expect(fetchMany.mock.calls[0][0].length).toBe(2);
+  });
+});
