@@ -486,16 +486,17 @@ export function useTrade(slabAddress: string) {
           throw new Error("Multi-leg trades are only supported on v17 markets");
         }
 
-        // v18 wire: live-read BOTH portfolios' identity + the asset marketId right
-        // before building the trade — these anti-replay/CAS fields are rejected
-        // on-chain if stale. accountA = taker, accountB = LP maker. TradeCpi reads
-        // accountB's matcher-sequence but does NOT advance it (gate test/03).
-        // Ported from newmarkets.ts buildTradeCpiIx.
         // #3314: the taker's effective position before the trade, for the saved entry. Started
         // here so it runs alongside the identity reads; awaited only after confirmation.
         const beforeEffectiveQ: Promise<bigint | null> = isV17Market
           ? readBeforeTrade(connection, accountA, slabPk)
           : Promise.resolve(null);
+
+        // v18 wire: live-read BOTH portfolios' identity + the asset marketId right
+        // before building the trade — these anti-replay/CAS fields are rejected
+        // on-chain if stale. accountA = taker, accountB = LP maker. TradeCpi reads
+        // accountB's matcher-sequence but does NOT advance it (gate test/03).
+        // Ported from newmarkets.ts buildTradeCpiIx.
         const [takerId, lpId, tradeMarketId] = await Promise.all([
           fetchPortfolioIdentity(connection, accountA),
           fetchPortfolioIdentity(connection, accountB),
@@ -662,6 +663,16 @@ export function useTrade(slabAddress: string) {
           });
         }
 
+        // #3314: measure the position change for the saved entry. Not awaited: the caller that
+        // saves the entry (OrderTicket) waits for it via takePositionChange(sig); closes don't.
+        if (isV17Market) {
+          const portfolio = accountA;
+          recordPositionChange(
+            sig,
+            beforeEffectiveQ.then((beforeQ) => measurePositionChange(connection, portfolio, slabPk, sig, beforeQ)),
+          );
+        }
+
         // Immediate local application of the confirmed fill: sendTx's
         // pollConfirmation has ALREADY verified this tx landed on-chain by
         // this point, so params.size's effect on position size is a known
@@ -673,16 +684,6 @@ export function useTrade(slabAddress: string) {
         // the burst. Capital/pnl/fees are intentionally left untouched (not
         // deterministic client-side) — those fields still wait on the
         // refresh burst exactly as before. See applyConfirmedFill's doc.
-        // #3314: measure the position change for the saved entry. Not awaited: the caller that
-        // saves the entry (OrderTicket) waits for it via takePositionChange(sig); closes don't.
-        if (isV17Market) {
-          const portfolio = accountA;
-          recordPositionChange(
-            sig,
-            beforeEffectiveQ.then((beforeQ) => measurePositionChange(connection, portfolio, slabPk, sig, beforeQ)),
-          );
-        }
-
         if (isV17Market && limitsMarketId !== null) {
           // P1: patch only by the MEASURED delta. A zero fill changes nothing; an
           // unknown result waits for the refresh burst (never assumes params.size).
