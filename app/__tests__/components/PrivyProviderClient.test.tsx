@@ -223,4 +223,60 @@ describe("PrivyProviderClient", () => {
       expect(Sentry.captureMessage).not.toHaveBeenCalled();
     });
   });
+
+  describe("embedded-wallet batch = one approval", () => {
+    /** A connected wallet whose standardWallet answers `solana:signTransaction`.
+     *  `privy: true` builds Privy's embedded wallet (isPrivyWallet + "privy:"
+     *  feature); otherwise an external wallet like Phantom. */
+    function mockStandardWallet(privy: boolean) {
+      const address = Keypair.generate().publicKey.toBase58();
+      const featureSign = vi.fn(async (...inputs: Array<{ transaction: Uint8Array }>) =>
+        inputs.map((i) => ({ signedTransaction: i.transaction })),
+      );
+      const features: Record<string, unknown> = { "solana:signTransaction": { signTransaction: featureSign } };
+      if (privy) features["privy:"] = { privy: {} };
+      mockUseWallets.mockReturnValue({
+        wallets: [{
+          address,
+          standardWallet: { isPrivyWallet: privy || undefined, features, accounts: [{ address }] },
+        }],
+      });
+      return featureSign;
+    }
+
+    async function getApi(): Promise<WalletApi> {
+      let captured: WalletApi | undefined;
+      render(
+        <PrivyProviderClient appId="test">
+          <ApiCapture onApi={(api) => { captured = api; }} />
+        </PrivyProviderClient>
+      );
+      await waitFor(() => expect(typeof captured?.signAllTransactions).toBe("function"));
+      return captured!;
+    }
+
+    it("shows Privy's modal on the first tx only and signs the rest without one", async () => {
+      const featureSign = mockStandardWallet(true);
+      const api = await getApi();
+      const signed = await api.signAllTransactions!([makeTx("a"), makeTx("b"), makeTx("c")]);
+
+      expect(signed).toHaveLength(3);
+      expect(featureSign).toHaveBeenCalledTimes(1);
+      const inputs = featureSign.mock.calls[0] as Array<{ options?: { uiOptions?: { showWalletUIs?: boolean; buttonText?: string } } }>;
+      expect(inputs[0].options?.uiOptions?.showWalletUIs).not.toBe(false);
+      expect(inputs[0].options?.uiOptions?.buttonText).toBe("Approve all 3");
+      expect(inputs[1].options?.uiOptions?.showWalletUIs).toBe(false);
+      expect(inputs[2].options?.uiOptions?.showWalletUIs).toBe(false);
+      expect(mockPrivySignTransaction).not.toHaveBeenCalled();
+    });
+
+    it("passes no UI options to an external wallet (it already approves the batch once)", async () => {
+      const featureSign = mockStandardWallet(false);
+      const api = await getApi();
+      await api.signAllTransactions!([makeTx("a"), makeTx("b")]);
+
+      const inputs = featureSign.mock.calls[0] as Array<{ options?: unknown }>;
+      expect(inputs.every((i) => i.options === undefined)).toBe(true);
+    });
+  });
 });

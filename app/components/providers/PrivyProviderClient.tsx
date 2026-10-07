@@ -24,6 +24,7 @@ import { WalletApiContext, type WalletApi } from "@/hooks/walletApiContext";
 import { usePreferredWallet, resolveActiveWallet } from "@/hooks/usePreferredWallet";
 import { getNetwork } from "@/lib/config";
 import { purgeLegacyPrivyState } from "@/lib/privy-legacy-purge";
+import { embeddedBatchSignOptions, isPrivyEmbeddedStandardWallet } from "@/lib/privy-batch-sign";
 
 // Drop legacy pre-cookie Privy tokens at module-evaluation time. This chunk is
 // loaded via next/dynamic (ssr:false) before PrivyProvider is ever rendered, and
@@ -225,9 +226,18 @@ const PrivyWalletApiBridge: FC<{ children: ReactNode }> = ({ children }) => {
           | undefined;
         const account =
           std?.accounts?.find((a) => a.address === connected.address) ?? std?.accounts?.[0];
+        // Privy's EMBEDDED wallet answers this feature too, but loops one modal per
+        // tx. Its modal shows once, on tx 0, as the approval for the whole batch;
+        // the rest are signed without one (lib/privy-batch-sign.ts).
+        const embedded = isPrivyEmbeddedStandardWallet(std);
         if (typeof feature?.signTransaction === "function" && account) {
           const outputs = await feature.signTransaction(
-            ...serialized.map((bytes) => ({ transaction: bytes, account, chain })),
+            ...serialized.map((bytes, i) => ({
+              transaction: bytes,
+              account,
+              chain,
+              ...(embedded ? { options: embeddedBatchSignOptions(i, txs.length) } : {}),
+            })),
           );
           if (Array.isArray(outputs) && outputs.length === txs.length) {
             console.info(`[PrivyProviderClient] batch-signed ${txs.length} txs via wallet-standard feature (ONE approval)`);
@@ -275,10 +285,14 @@ const PrivyWalletApiBridge: FC<{ children: ReactNode }> = ({ children }) => {
         );
       }
 
-      const inputs = serialized.map((bytes) => ({
+      const embedded = isPrivyEmbeddedStandardWallet(
+        (activeWallet as unknown as { standardWallet?: unknown }).standardWallet,
+      );
+      const inputs = serialized.map((bytes, i) => ({
         transaction: bytes,
         wallet: activeWallet,
         chain: chain as any,
+        ...(embedded ? { options: embeddedBatchSignOptions(i, txs.length) } : {}),
       }));
       const results = await privySignTransaction(...inputs);
       return results.map((result) => Transaction.from(Buffer.from(result.signedTransaction)));
