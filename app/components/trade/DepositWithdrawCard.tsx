@@ -322,7 +322,8 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
   // `freeMargin > 0n` below, simply doesn't render) rather than open.
   const rawEntryPrice = userAccount.account.entryPrice ?? 0n;
   const cachedEntryPrice = hasOpenPosition && publicKey
-    ? getEntryPrice(slabAddress, userAccount.idx, publicKey.toBase58())
+    // #2560: the displayed (primary) portfolio's own entry; legacy fallback (default) covers a cross primary.
+    ? getEntryPrice(slabAddress, userAccount.idx, publicKey.toBase58(), userAccount.pubkey?.toBase58())
     : 0n;
   const safePnlForEstimate = isSentinelValue(userAccount.account.pnl) ? 0n : userAccount.account.pnl;
   const estimatedEntryPrice = hasOpenPosition && livePriceE6 != null && livePriceE6 > 0n

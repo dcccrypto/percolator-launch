@@ -24,7 +24,8 @@ import {
   ACCOUNTS_PUSH_ORACLE_PRICE,
 } from "@/lib/sdk-compat";
 import { sendTx } from "@/lib/tx";
-import { getPortfolioRawSnapshot, isLpPortfolio, makePortfolioScanKey } from "@/lib/userAccountScan";
+import { getPortfolioRawSnapshot, makePortfolioScanKey } from "@/lib/userAccountScan";
+import { pickOwnerPortfolio, verifyExplicitPortfolio } from "@/lib/owner-portfolio";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { detectOracleMode } from "@/lib/oraclePrice";
 import { onChainMarkE6 } from "@/lib/position-pnl";
@@ -163,7 +164,29 @@ export function useWithdraw(slabAddress: string) {
           const V17_MAGIC_BYTES = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
           let portfolioPk: PublicKey | null = params.portfolioPk ?? null;
           let portfolioData: Buffer | null = null;
-          if (portfolioPk) {
+          // #2560: an EXPLICIT non-primary target (an isolated portfolio: the dock's
+          // ± Margin, the post-close sweep) is acted on EXACTLY or not at all. The
+          // wallet's primary (cross) account is the one the scan store resolves; a
+          // caller passing that pubkey (the live DepositWithdrawCard passes
+          // userAccount.pubkey) keeps the original fall-back-to-scan behaviour below.
+          const storePrimaryPk = getPortfolioRawSnapshot(
+            makePortfolioScanKey(programId, slabAddress, wallet.publicKey),
+          )?.pubkey ?? null;
+          const strictTarget = !!params.portfolioPk && !!storePrimaryPk && !storePrimaryPk.equals(params.portfolioPk);
+          const COULDNT_CONFIRM = "Couldn't confirm the selected account just now. Nothing was sent — please try again.";
+          if (portfolioPk && strictTarget) {
+            let verified: Buffer | null = null;
+            try {
+              const info = await connection.getAccountInfo(portfolioPk, "confirmed");
+              // program-owned, decodes, mutable owner == wallet AND market_group_id == this market.
+              verified = verifyExplicitPortfolio(info, programId, slabPk, wallet.publicKey);
+            } catch {
+              verified = null;
+            }
+            // Refuse rather than substitute another portfolio: no scan fallback here.
+            if (!verified) throw new UserFacingError(COULDNT_CONFIRM);
+            portfolioData = verified;
+          } else if (portfolioPk) {
             // Fast path: caller supplied the portfolio pubkey (SlabProvider's
             // userAccount). Fetch, parse, and owner-verify it exactly like the
             // scan-store path below. On ANY failure — fetch throw, missing
@@ -227,40 +250,29 @@ export function useWithdraw(slabAddress: string) {
                 { memcmp: { offset: 116, bytes: wallet.publicKey.toBase58() } },
               ],
             });
-            // Drop the market's LP portfolio BEFORE the sort/pick below —
-            // withdraw must never target the LP (owner == wallet only when
-            // this wallet is the market's CREATOR). See isLpPortfolio's doc.
-            const nonLpPortfolioAccounts = portfolioAccounts.filter(
-              ({ account }) => !isLpPortfolio(account.data),
-            );
-            if (nonLpPortfolioAccounts.length > 0) {
-              // M10: getProgramAccounts doesn't guarantee stable ordering
-              // across RPC nodes/calls. If more than one account ever matches
-              // this owner+market filter, picking an arbitrary array element
-              // can select a DIFFERENT portfolio than useDeposit.ts /
-              // useUserAccount.ts pick for the exact same wallet+market —
-              // withdraw could silently act on a different account than the
-              // one the UI displays. Sort deterministically by pubkey so
-              // every caller converges on the same account.
-              const sortedPortfolios = [...nonLpPortfolioAccounts].sort((a, b) =>
-                a.pubkey.toBase58().localeCompare(b.pubkey.toBase58()),
-              );
-              const d = sortedPortfolios[0].account.data;
-              const candidateData = d instanceof Buffer ? d : Buffer.from(d);
-              // Defense-in-depth: re-verify the mutable owner actually matches after
-              // fetch — memcmp filters are advisory server-side; don't trust blindly.
-              try {
-                const candidatePf = parsePortfolioV17(candidateData);
-                if (candidatePf.owner.equals(wallet.publicKey)) {
-                  portfolioPk = sortedPortfolios[0].pubkey;
-                  portfolioData = candidateData;
-                }
-              } catch { /* leave portfolioPk/portfolioData unset — falls through below */ }
+            // #2560 / M10: the ONE shared selector (lib/owner-portfolio.ts) —
+            // drop the market's LP portfolio, re-verify the decoded mutable
+            // owner (memcmp is advisory), base58-sort and take the lowest
+            // pubkey. Using it here removes the last inline copy of this pick,
+            // so a withdraw that falls back to the scan can never target a
+            // DIFFERENT portfolio than useUserAccount / useDeposit display and
+            // fund for the same wallet+market. (Explicit multi-portfolio
+            // targeting goes through `params.portfolioPk`, handled above.)
+            const picked = pickOwnerPortfolio(portfolioAccounts, wallet.publicKey);
+            if (picked) {
+              portfolioPk = picked.pubkey;
+              portfolioData = picked.data;
             }
           } catch { /* fall through — portfolio lookup is best-effort */ }
 
           if (!portfolioPk) {
             throw new UserFacingError("No account found for this wallet on this market. Deposit first to create one.");
+          }
+
+          // #2560 (F1): belt and braces for the strict path above — an explicit
+          // non-primary target must have resolved to exactly itself.
+          if (strictTarget && params.portfolioPk && !portfolioPk.equals(params.portfolioPk)) {
+            throw new UserFacingError(COULDNT_CONFIRM);
           }
 
           // Over-withdraw pre-check (defense-in-depth). The DepositWithdrawCard UI

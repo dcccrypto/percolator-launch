@@ -224,7 +224,9 @@ describe("trade-terminal surfaces feed describeLiqPrice the entry SOURCE, not `e
   });
   it("OrderTicket tracks the existing entry's source", () => {
     const src = read("OrderTicket.tsx");
-    expect(src).toMatch(/hasResolvedEntry: existingEntryKnown,/);
+    // #2560: the isolated preview basis is `isolatedMode ? false : existingEntryKnown`
+    expect(src).toMatch(/const previewExistingEntryKnown = isolatedMode \? false : existingEntryKnown;/);
+    expect(src).toMatch(/hasResolvedEntry: previewExistingEntryKnown,/);
     expect(src).toMatch(/entryPriceE6=\{existingEntryKnown \? existingEntryPriceE6 : 0n\}/);
   });
 });

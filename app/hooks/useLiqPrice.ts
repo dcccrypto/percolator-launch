@@ -34,6 +34,8 @@ export function useLiqPrice(): bigint | null {
       account,
       slabAddress,
       accountIdx: realUserAccount.idx,
+      // #2560: the displayed (primary) portfolio's own entry; legacy fallback (default) covers a cross primary.
+      portfolio: realUserAccount.pubkey?.toBase58(),
       adlFactors,
       adlApplicable: wrapperConfigV17 !== null,
       markE6: oraclePriceE6,

@@ -16,9 +16,14 @@
  *   `PortfolioLookupError` (calm copy). Callers must never create on an error.
  * - `pickOwnerPortfolio` is the single deterministic selector: drop the market's
  *   LP portfolio, keep only accounts whose decoded mutable owner IS the wallet
- *   (memcmp filters are advisory), then take the lowest pubkey (base58 order).
+ *   (memcmp filters are advisory), then take the lowest pubkey (base58 string,
+ *   UTF-16 code-unit order — see {@link comparePortfolioPubkeys}).
+ *
+ * #2560 (isolated margin): the lowest pubkey is the wallet's CROSS / primary
+ * portfolio. Isolated portfolios must therefore always sort AFTER it — see
+ * {@link generateIsolatedKeypair}, which grinds a keypair that does.
  */
-import type { Connection, PublicKey } from "@solana/web3.js";
+import { Keypair, type Connection, type PublicKey } from "@solana/web3.js";
 import { parsePortfolioV17 } from "@percolatorct/sdk";
 import { isLpPortfolio } from "@/lib/lpPortfolio";
 
@@ -56,10 +61,96 @@ export interface PickedPortfolio {
   data: Buffer;
 }
 
+/**
+ * THE ONE ordering for "which of a wallet's portfolios is primary (cross)": plain
+ * UTF-16 code-unit comparison of the base58 strings. NOT `localeCompare` — that
+ * is locale-dependent and case-folding, so on mixed-case base58 it disagrees
+ * with `<` ("aX.." sorts before "BX.." under localeCompare, after it by code
+ * unit) and two surfaces could pick different primaries. Every caller that
+ * chooses, sorts or tests the primary must use this.
+ */
+export function compareBase58(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+export function comparePortfolioPubkeys(a: PublicKey, b: PublicKey): number {
+  return compareBase58(a.toBase58(), b.toBase58());
+}
+
+/** Max keypairs tried to land after the primary (see generateIsolatedKeypair). */
+export const ISOLATED_KEYPAIR_MAX_ATTEMPTS = 5_000;
+
+export class IsolatedKeypairError extends Error {
+  constructor() {
+    super("We couldn't set up an isolated position for this account just now. Nothing was sent. Try again.");
+    this.name = "IsolatedKeypairError";
+  }
+}
+
+/**
+ * A fresh portfolio keypair whose base58 pubkey sorts AFTER `primary`, so the new
+ * (isolated) portfolio can never become the wallet's primary/cross account.
+ *
+ * A random keypair sorts below `primary` about half the time; if that happened
+ * the new isolated portfolio would become "primary" and every plain cross trade,
+ * deposit and dock badge would silently move into it (#2560 review, blocking).
+ * Grinding is stateless and cross-device safe (no stored "which is cross"
+ * record to lose). The median is 2 tries (~2 ms each in the browser); the cap
+ * (5,000, a few seconds) bounds the pathological case of a primary near the top
+ * of the alphabet (about 1 wallet in 5,000), which fails closed with a calm line.
+ */
+export function generateIsolatedKeypair(
+  primary: PublicKey,
+  opts: { generate?: () => Keypair; maxAttempts?: number } = {},
+): Keypair {
+  const generate = opts.generate ?? (() => Keypair.generate());
+  const max = opts.maxAttempts ?? ISOLATED_KEYPAIR_MAX_ATTEMPTS;
+  for (let i = 0; i < max; i++) {
+    const kp = generate();
+    if (comparePortfolioPubkeys(kp.publicKey, primary) > 0) return kp;
+  }
+  throw new IsolatedKeypairError();
+}
+
+/**
+ * Strict verification of an account fetched for an EXPLICIT portfolio target:
+ * owned by the program, decodes as a portfolio, mutable owner is `owner`, and it
+ * belongs to `market` (market_group_id). Returns the buffer, or null. A decoded
+ * owner alone is not enough: a same-wallet portfolio of ANOTHER market decodes
+ * fine and would only be rejected on chain.
+ */
+export function verifyExplicitPortfolio(
+  info: { owner: PublicKey; data: Buffer | Uint8Array } | null | undefined,
+  programId: PublicKey,
+  market: PublicKey,
+  owner: PublicKey,
+): Buffer | null {
+  if (!info) return null;
+  if (!info.owner || !info.owner.equals(programId)) return null;
+  const data = toBuffer(info.data);
+  try {
+    const pf = parsePortfolioV17(data);
+    if (!pf.owner.equals(owner)) return null;
+    if (!pf.marketGroupId || !pf.marketGroupId.equals(market)) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 const toBuffer = (d: Buffer | Uint8Array): Buffer => (Buffer.isBuffer(d) ? d : Buffer.from(d));
 
-/** The deterministic selector (see the module doc). `null` = no owned, non-LP portfolio in `results`. */
-export function pickOwnerPortfolio(results: readonly ScannedAccount[], owner: PublicKey): PickedPortfolio | null {
+/**
+ * ALL of the wallet's own (non-LP) portfolios in `results`, in the deterministic
+ * selection order (lowest base58 pubkey first, code-unit order). Empty when none match.
+ *
+ * This is the full set that `pickOwnerPortfolio` takes the first of — exposed so
+ * multi-portfolio flows (isolated margin, #2560) can enumerate every portfolio a
+ * wallet owns on a market without re-deriving the drop-LP / owner@116 / sort
+ * filter. It applies exactly the selector's filter and ordering, so
+ * `listOwnerPortfolios(...)[0]` is, by construction, `pickOwnerPortfolio(...)`.
+ */
+export function listOwnerPortfolios(results: readonly ScannedAccount[], owner: PublicKey): PickedPortfolio[] {
   const owned: PickedPortfolio[] = [];
   for (const r of results) {
     const data = toBuffer(r.account.data);
@@ -72,9 +163,20 @@ export function pickOwnerPortfolio(results: readonly ScannedAccount[], owner: Pu
     }
     if (ownerMatches) owned.push({ pubkey: r.pubkey, data });
   }
-  if (owned.length === 0) return null;
-  owned.sort((a, b) => a.pubkey.toBase58().localeCompare(b.pubkey.toBase58()));
-  return owned[0];
+  owned.sort((a, b) => comparePortfolioPubkeys(a.pubkey, b.pubkey));
+  return owned;
+}
+
+/**
+ * The deterministic selector (see the module doc). `null` = no owned, non-LP
+ * portfolio in `results`.
+ *
+ * Defined as the head of {@link listOwnerPortfolios} so the single-portfolio
+ * selection every existing flow relies on stays bit-identical while
+ * multi-portfolio callers adopt the list.
+ */
+export function pickOwnerPortfolio(results: readonly ScannedAccount[], owner: PublicKey): PickedPortfolio | null {
+  return listOwnerPortfolios(results, owner)[0] ?? null;
 }
 
 export interface LookupRetry {

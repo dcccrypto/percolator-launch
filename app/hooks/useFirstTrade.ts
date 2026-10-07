@@ -36,6 +36,7 @@ import {
   predictPortfolioId,
   readNextPortfolioId,
 } from "@/lib/first-trade";
+import { generateIsolatedKeypair } from "@/lib/owner-portfolio";
 import { invalidatePortfolio } from "@/lib/portfolio-invalidation";
 import { measureFill, recordFillResult } from "@/lib/limits/fill-check";
 import { signedPositionForAsset } from "@/lib/limits/decode";
@@ -65,6 +66,10 @@ export function isPresignWaitable(e: unknown, programId: PublicKey): boolean {
   );
 }
 
+/** Shown when an isolated open is requested before the wallet has a main (cross) account. */
+export const ISOLATED_NEEDS_MAIN_ACCOUNT_COPY =
+  "Isolated positions open next to your main account. Make a Cross trade or a deposit first. Nothing was sent.";
+
 export interface FundAndTradeParams {
   /** Signed size (base q). */
   size: bigint;
@@ -75,6 +80,13 @@ export interface FundAndTradeParams {
   amountLabel: string;
   /** The id race happened: the UI labels the extra prompt. */
   onRace?: () => void;
+  /** #2560 isolated margin: open in a NEW portfolio even when the wallet already
+   *  owns one on this market, so the position gets its own isolated collateral.
+   *  Omitted/false → today's behaviour (reuse the existing portfolio if any).
+   *  Requires the wallet to already own its main (cross) portfolio on this
+   *  market; the new keypair is ground to sort AFTER it (generateIsolatedKeypair)
+   *  so the isolated portfolio can never become the wallet's primary/cross. */
+  forceNewPortfolio?: boolean;
 }
 
 export interface FundAndTradeResult {
@@ -137,7 +149,13 @@ export function useFirstTrade(slabAddress: string) {
           recordFillResult(signature, await measureFill(connection, portfolio, signature, beforeQ, p.size, marketId));
 
         // ── Returning user: the account exists — [Deposit, Trade] in ONE tx (1 prompt). ──
-        const existing = await findV17Portfolio(connection, programId, market, owner);
+        // #2560: an ISOLATED open skips this reuse and always creates a fresh
+        // portfolio below, so the position is margined by its own collateral.
+        const primary = await findV17Portfolio(connection, programId, market, owner);
+        // An isolated open is only defined next to an existing cross portfolio: with none,
+        // the new account would BECOME the cross account (the lowest pubkey is primary).
+        if (p.forceNewPortfolio && !primary) throw new Error(ISOLATED_NEEDS_MAIN_ACCOUNT_COPY);
+        const existing = p.forceNewPortfolio ? null : primary;
         if (existing) {
           const id = await fetchPortfolioIdentity(connection, existing);
           // The position BEFORE the trade, for the fill measurement (null = unread -> "unknown").
@@ -167,7 +185,8 @@ export function useFirstTrade(slabAddress: string) {
           const marketInfo = await connection.getAccountInfo(market, "confirmed");
           const next = marketInfo ? readNextPortfolioId(new Uint8Array(marketInfo.data)) : null;
           if (next === null) throw new Error("Market not loaded");
-          const kp = Keypair.generate();
+          // Isolated: grind a keypair that sorts after the cross/primary (never becomes primary).
+          const kp = p.forceNewPortfolio && primary ? generateIsolatedKeypair(primary) : Keypair.generate();
           const ixs: TransactionInstruction[] = [
             ...buildFirstTradeInitIxs({ programId, owner, market, portfolio: kp.publicKey }, rent),
             ...buildFundAndTradeIxs(ixp(kp.publicKey), { portfolioId: predictPortfolioId(next), sequence: 0n, positionEpoch: 0n }),

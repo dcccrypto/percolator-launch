@@ -253,10 +253,16 @@ export function lookupKnownEntries(
   slab: string,
   accountIdx: number,
   wallet: string,
+  /** #2560: the portfolio pubkey, so multiple portfolios on one market read
+   *  their OWN cached entry instead of colliding on `{slab}:0:{wallet}`. */
+  portfolio?: string,
+  /** false for a NON-primary (isolated) portfolio, so it can't read the
+   *  primary's entry via the legacy fallback (see lib/entry-price.ts). */
+  allowLegacyFallback = true,
 ): { serverEntryE6: bigint | null; cachedEntryE6: bigint } {
   return {
     serverEntryE6: null, // TODO(indexer#211): server-authoritative entry slots in here
-    cachedEntryE6: getEntryPrice(slab, accountIdx, wallet),
+    cachedEntryE6: getEntryPrice(slab, accountIdx, wallet, portfolio, allowLegacyFallback),
   };
 }
 
@@ -324,9 +330,21 @@ export function terminalPositionPnl(args: {
   anchorMarkE6?: bigint;
   initialMarginBps: bigint;
   maintenanceMarginBps?: bigint;
+  /** #2560: the portfolio pubkey, so a specific portfolio reads its own cached
+   *  entry. Omitted → today's `{slab}:0:{wallet}` key (single-portfolio). */
+  portfolio?: string;
+  /** false when `portfolio` is a NON-primary (isolated) account, so the entry
+   *  read can't fall back to the primary's legacy entry. */
+  allowLegacyEntryFallback?: boolean;
 }): PositionPnl {
   const { account } = args;
-  const known = lookupKnownEntries(args.slabAddress, args.accountIdx, account.owner?.toBase58?.() ?? "");
+  const known = lookupKnownEntries(
+    args.slabAddress,
+    args.accountIdx,
+    account.owner?.toBase58?.() ?? "",
+    args.portfolio,
+    args.allowLegacyEntryFallback ?? true,
+  );
   const onChainEntry = account.entryPrice ?? 0n;
   return computePositionPnl({
     basisQ: account.positionSize,

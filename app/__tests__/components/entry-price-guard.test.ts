@@ -182,7 +182,9 @@ const ZERO_CONVENTION = new Set([
   "components/trade/OrderTicketClosePanel.tsx",
 ]);
 
-const KNOWN_FLAG = /^\s*(pnlIsKnown|\w*[eE]ntryKnown|isEntryKnown\(|[\w.]*\.known)\b/;
+// #2560: the multi-portfolio dock reads its flags off the shared row view (`view.entryKnown`,
+// `view.pnlIsKnown`, from computePositionRowView), so a member access is the same gate.
+const KNOWN_FLAG = /^\s*([\w.]*pnlIsKnown|[\w.]*[eE]ntryKnown|isEntryKnown\(|[\w.]*\.known)\b/;
 const ZERO_GATE = /^\s*[\w.]*[eE]ntry\w*\s*>\s*0n\s*$/;
 
 /** The condition of the nearest enclosing `{cond ? … }` JSX/TS expression, up to 3 levels out. */
@@ -233,6 +235,8 @@ describe("#2673: every formatted entry sits under a resolved-entry gate (per cal
       "components/trade/OtherMarketPositions.tsx|entryE6",
       "components/trade/PositionPanel.tsx|entryPriceE6",
       "components/trade/PositionsDock.tsx|entryPriceE6",
+      // #2560 (reviewed): the per-portfolio row of the multi-portfolio table, gated by view.entryKnown.
+      "components/trade/PositionsDock.tsx|view.entryPriceE6",
     ]);
   });
 
@@ -270,7 +274,7 @@ function jsxPropValues(src: string, component: string, prop: string): string[] {
   return out;
 }
 
-const GATED_ENTRY_EXPR = /^(displayEntryE6\(|(pnlIsKnown|\w*[eE]ntryKnown|\w+\.pnlKnown)\s*\?)/;
+const GATED_ENTRY_EXPR = /^(displayEntryE6\(|([\w.]*pnlIsKnown|[\w.]*[eE]ntryKnown|\w+\.pnlKnown)\s*\?)/;
 
 describe("#2673: the close dialog is handed a gated entry at EVERY call site", () => {
   // ClosePositionModal is the one entry readout attached to an irreversible
@@ -291,6 +295,8 @@ describe("#2673: the close dialog is handed a gated entry at EVERY call site", (
       "components/trade/OrderTicketClosePanel.tsx",
       "components/trade/OtherMarketPositions.tsx",
       "components/trade/PositionPanel.tsx",
+      "components/trade/PositionsDock.tsx",
+      // #2560 (reviewed): the multi-portfolio row's close dialog, handed `view.pnlIsKnown ? view.entryPriceE6 : 0n`.
       "components/trade/PositionsDock.tsx",
     ]);
   });

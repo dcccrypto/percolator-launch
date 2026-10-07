@@ -297,6 +297,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       : false;
 
   const [direction, setDirection] = useState<"long" | "short">("long");
+  // #2560: Cross (shares the main account's collateral — today's behaviour) vs
+  // Isolated (opens in its own portfolio funded with only this trade's margin).
+  // Chosen per trade; defaults to Cross.
+  const [marginMode, setMarginMode] = useState<"cross" | "isolated">("cross");
   // Open/Close mode (GH#2651). "Close" swaps the order form for
   // OrderTicketClosePanel, which reuses useClosePosition + ClosePositionModal.
   // That panel is a separate component so this ticket stays non-reactive to the
@@ -456,7 +460,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const existingPositionSize = userAccount?.account.positionSize ?? 0n;
   const rawExistingEntryPrice = userAccount?.account.entryPrice ?? 0n;
   const cachedExistingEntryPrice = userAccount && rawExistingEntryPrice === 0n
-    ? getEntryPrice(slabAddress, userAccount.idx, publicKey?.toBase58())
+    // #2560: the displayed (primary) portfolio's own entry; legacy fallback (default) covers a cross primary.
+    ? getEntryPrice(slabAddress, userAccount.idx, publicKey?.toBase58(), userAccount.pubkey?.toBase58())
     : 0n;
   // E: guard the sentinel BEFORE it feeds estimateEntryFromPnl's math — same
   // fix as PositionsDock/usePortfolio's identical call sites (an unguarded
@@ -487,6 +492,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         account: userAccount.account,
         slabAddress,
         accountIdx: userAccount.idx,
+        // #2560: the displayed (primary) portfolio's own entry; legacy fallback (default) covers a cross primary.
+        portfolio: userAccount.pubkey?.toBase58(),
         adlFactors: slabAdlFactors,
         adlApplicable: slabWrapperV17 !== null,
         markE6: livePriceE6 ?? 0n,
@@ -494,9 +501,24 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       })
     : null;
   const existingEntryKnown = existingResolved != null && existingResolved.source !== "unknown" && existingEntryPriceE6 > 0n;
+  // #2560: an ISOLATED open lands in a brand-new, empty portfolio, so its receipt,
+  // liquidation preview and limits must price against NOTHING existing: not the
+  // primary's size, entry, capital or pnl (the merged cross figure can look far
+  // safer than the real isolated liquidation price). Cross keeps pricing against
+  // the account it trades in. `existing*` below stays the primary's, for the
+  // account strip and the Close tab; `preview*` is what the ORDER acts on.
+  const isolatedMode = marginMode === "isolated";
+  const previewExistingSize = isolatedMode ? 0n : existingPositionSize;
+  const previewExistingEntryE6 = isolatedMode ? 0n : existingEntryPriceE6;
+  const previewExistingEntryKnown = isolatedMode ? false : existingEntryKnown;
+  const previewCapital = isolatedMode ? 0n : capital;
+  const previewPnl = isolatedMode ? 0n : safeExistingPnl;
   const lockedMargin = computePositionInitialMargin(existingPositionSize, existingEntryPriceE6, initialMarginBps);
   const availableBalance = userAccount ? (capital > lockedMargin ? capital - lockedMargin : 0n) : 0n;
-  const effectiveBalance = userAccount ? availableBalance : (walletAtaBalance ?? 0n);
+  // Isolated is funded from the WALLET only (a brand-new portfolio), never from the
+  // primary's free collateral.
+  const effectiveBalance = userAccount && !isolatedMode ? availableBalance : (walletAtaBalance ?? 0n);
+  const inMarketAvailableForOrder = userAccount && !isolatedMode ? availableBalance : 0n;
   // What the ticket can OFFER: in-market available plus what the wallet can deposit in the same
   // approval (fund-and-trade), net of the deposit buffer and fee. `effectiveBalance` stays the
   // in-market figure that decides whether a deposit is bundled at all.
@@ -504,11 +526,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // report: it showed the wallet / 1.1, so it never matched Solflare). Max / % use tradableBalance.
   const displayAvailable = mockMode
     ? effectiveBalance
-    : (userAccount ? availableBalance : 0n) + (walletAtaBalance ?? 0n);
+    : inMarketAvailableForOrder + (walletAtaBalance ?? 0n);
   const tradableBalance = mockMode
     ? effectiveBalance
     : tradableMarginAtoms({
-        inMarketAvailable: userAccount ? availableBalance : 0n,
+        inMarketAvailable: inMarketAvailableForOrder,
         walletAtoms: walletAtaBalance ?? 0n,
         leverage100: leverage * 100,
         feeBps: tradingFeeBps,
@@ -687,11 +709,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // $1.50 placing a $1 first trade must bundle a top-up, not be refused 49.
   // The floor only applies with no open position, where vsPosition is always null.
   const imFloor = params?.minNonzeroImReq ?? 0n;
-  const belowImFloor = existingPositionSize === 0n && marginNative > 0n && marginNative < imFloor;
+  const belowImFloor = previewExistingSize === 0n && marginNative > 0n && marginNative < imFloor;
   const marginNeed = belowImFloor ? imFloor : marginNative;
   // An order on the other side of the open position cuts it instead of adding exposure:
   // it releases margin, and only a flip that ends larger can need any.
-  const vsPosition = userAccount
+  const vsPosition = userAccount && !isolatedMode
     ? orderAgainstPosition(marginNative, positionSize, direction, existingPositionSize, lockedMargin, capital)
     : null;
   const exceedsBalance = marginNative > 0n && (vsPosition ? vsPosition.shortBy > 0n : marginNeed > effectiveBalance);
@@ -700,9 +722,17 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const needsAccount = connected && !userAccount && !accountPending;
   const needsDeposit = connected && !!userAccount && capital === 0n;
   const walletHasTokens = (walletAtaBalance ?? 0n) > 0n;
+  // #2560: an Isolated open always funds a fresh portfolio from the wallet — it
+  // behaves like a first trade (create + deposit the full margin + trade) even
+  // when the wallet already owns a portfolio on this market. Requires wallet
+  // tokens to fund; gated the same as fundingMode otherwise.
+  // It also needs the main (cross) account to exist: the new portfolio must sort AFTER it
+  // (useFirstTrade grinds the keypair), and with no main account the "isolated" portfolio
+  // would itself become the cross account.
+  const isolatedOpen = isolatedMode && !mockMode && connected && !accountPending && walletHasTokens && !!userAccount;
   // UX WP-6 (§3.2): with sim-USDC in the wallet, "fund and trade" is ONE approval — no account
   // yet: [InitUser] + [Deposit, Trade] signed together; account short of margin: [Deposit, Trade].
-  const fundingMode = !mockMode && connected && !accountPending && walletHasTokens && (needsAccount || needsDeposit || exceedsBalance);
+  const fundingMode = !mockMode && connected && !accountPending && walletHasTokens && (needsAccount || needsDeposit || exceedsBalance || isolatedOpen);
 
   // ── Receipt (before -> after) ──
   const oracleE6 = priceUsd ? toE6(priceUsd) : 0n;
@@ -711,7 +741,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const fee = hasOrder ? computeTradingFee((positionSize * oracleE6) / 1_000_000n, tradingFeeBps) : 0n;
   // The deposit this order needs (margin + fee + 10%), editable; never more than the wallet holds.
   // GH#2953: the bundled deposit covers the IM floor (marginNeed, above).
-  const marginShort = needsAccount
+  const marginShort = (needsAccount || isolatedOpen)
+    // #2560: an isolated open funds the FULL margin into a brand-new portfolio,
+    // exactly like a first trade — never netted against an existing position.
     ? marginNeed
     : vsPosition
       ? vsPosition.shortBy
@@ -726,7 +758,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const fundTooSmall = fundingMode && hasOrder && fundAtoms < fundMinAtoms;
   const fundLabel = `${usd2(fundAtoms, decimals)} ${collateralSymbol}`;
   // The liquidation preview prices the account as it will be AFTER the bundled deposit.
-  const capitalAfterFund = capital + (fundingMode && hasOrder ? fundAtoms : 0n);
+  // Isolated: the new portfolio holds ONLY the deposit, less the trading fee the trade charges
+  // against it; Cross: the account's capital plus the bundled deposit.
+  const capitalAfterFund = isolatedMode
+    ? (fundingMode && hasOrder && fundAtoms > fee ? fundAtoms - fee : 0n)
+    : capital + (fundingMode && hasOrder ? fundAtoms : 0n);
   // Where that fee lands. Same split on every market (the RATE varies, the
   // division does not), so this is a constant string per fee amount. #2565.
   const feeDestinationTitle = (() => {
@@ -752,16 +788,16 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   //     basis for a same-direction add, unchanged for a partial reduce, or
   //     this trade's own fill price for a flip/fresh-open residual.
   const newSignedSize = direction === "short" ? -positionSize : positionSize;
-  const combinedSignedSize = existingPositionSize + newSignedSize;
-  const existingAbsSize = existingPositionSize < 0n ? -existingPositionSize : existingPositionSize;
-  const sameDirection = existingPositionSize === 0n || (existingPositionSize > 0n) === (newSignedSize > 0n);
+  const combinedSignedSize = previewExistingSize + newSignedSize;
+  const existingAbsSize = previewExistingSize < 0n ? -previewExistingSize : previewExistingSize;
+  const sameDirection = previewExistingSize === 0n || (previewExistingSize > 0n) === (newSignedSize > 0n);
   const combinedEntryPriceE6 = sameDirection
     ? (existingAbsSize + positionSize > 0n
-        ? (existingEntryPriceE6 * existingAbsSize + estEntry * positionSize) / (existingAbsSize + positionSize)
+        ? (previewExistingEntryE6 * existingAbsSize + estEntry * positionSize) / (existingAbsSize + positionSize)
         : 0n)
     // Opposite direction: a partial reduce keeps the original cost basis; a
     // flip's residual position takes on this trade's fill price as its entry.
-    : (positionSize < existingAbsSize ? existingEntryPriceE6 : estEntry);
+    : (positionSize < existingAbsSize ? previewExistingEntryE6 : estEntry);
   // Cross-margin: the full account capital backs the position — including a fresh
   // open (withdraw is blocked while any leg is open). Price both the fresh-open and
   // scale-in cases with the same capital-based computeLiqPrice as PositionsDock /
@@ -773,8 +809,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const afterLiqPrice = hasOrder && combinedSignedSize !== 0n && combinedEntryPriceE6 > 0n
     ? computeLiqPrice(combinedEntryPriceE6, capitalAfterFund, combinedSignedSize, maintenanceMarginBps)
     : 0n;
-  const beforeLiqPrice = userAccount && userAccount.account.positionSize !== 0n && existingEntryPriceE6 > 0n
-    ? computeLiqPrice(existingEntryPriceE6, capital, userAccount.account.positionSize, maintenanceMarginBps)
+  const beforeLiqPrice = userAccount && previewExistingSize !== 0n && previewExistingEntryE6 > 0n
+    ? computeLiqPrice(previewExistingEntryE6, previewCapital, previewExistingSize, maintenanceMarginBps)
     : 0n;
   // Cross-margin: where the account's collateral covers the resulting position
   // there is no liquidation price, and a "—" is not a risk number. The shared
@@ -789,17 +825,17 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     // this order flips through it (the residual takes this fill's price).
     hasResolvedEntry:
       combinedEntryPriceE6 > 0n &&
-      (existingPositionSize === 0n || existingEntryKnown || (!sameDirection && positionSize >= existingAbsSize)),
+      (previewExistingSize === 0n || previewExistingEntryKnown || (!sameDirection && positionSize >= existingAbsSize)),
     formatPrice: formatUsdPriceE6,
     unknownText: "—",
   });
   const beforeLiqDisplay = describeLiqPrice({
     liqPriceE6: beforeLiqPrice,
-    positionSize: existingPositionSize,
-    capital,
+    positionSize: previewExistingSize,
+    capital: previewCapital,
     markPriceE6: livePriceE6 ?? 0n,
     maintenanceMarginBps,
-    hasResolvedEntry: existingEntryKnown,
+    hasResolvedEntry: previewExistingEntryKnown,
     formatPrice: formatUsdPriceE6,
     unknownText: "—",
   });
@@ -836,7 +872,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     limits: marketLimits,
     direction,
     sizeQ: positionSize,
-    takerPosQ: existingPositionSize,
+    takerPosQ: previewExistingSize,
     takerOwner: publicKey ? publicKey.toBytes() : null,
     leverage,
     limitPriceE6: slippageBoundE6,
@@ -845,7 +881,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   };
   const ticketLimits = deriveTicketLimits(limitsInput);
   // P1 99165722 (F-7): a close that GROWS a halted / capped LP is refused or clipped too.
-  const limitsCloseNotice = closeLimitNotice(existingPositionSize, ticketLimits.sideLimits);
+  const limitsCloseNotice = closeLimitNotice(previewExistingSize, ticketLimits.sideLimits);
 
   // ── ONE max per side (UX WP-3, TR-2) ──
   // The tightest of every cap the market enforces: P1 maxTradeSizePerSide, the matcher's
@@ -968,6 +1004,17 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       setHumanError("Wallet disconnected. Please reconnect your wallet.");
       return;
     }
+    // #2560 (review MED): re-assert the Isolated routing intent at SUBMIT time,
+    // not just at modal-open. `submitDisabled` is evaluated when the button
+    // renders, but handleTrade runs on Confirm and reads the CURRENT state — if
+    // isolated can no longer fund a fresh portfolio (e.g. the wallet balance
+    // dropped to 0 while the confirm modal was open), refuse here rather than
+    // falling through to a CROSS trade on the primary with the mode still
+    // showing "Isolated".
+    if (marginMode === "isolated" && !isolatedOpen) {
+      setHumanError(userAccount ? "Add sim-USDC to your wallet to open an isolated position." : "Isolated positions open next to your main account. Make a Cross trade or a deposit first.");
+      return;
+    }
 
     setHumanError(null);
     setRefusal(null);
@@ -984,42 +1031,52 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       const size = direction === "short" ? -effectiveSize : effectiveSize;
       // Confirmed submissions carry the exact worst-fill bound reviewed
       // in the modal. Other callers retain useTrade's live-mark fallback.
-      const sig = fundingMode
-        ? (
-            await fundAndTrade({
-              size,
-              depositAtoms: fundAtoms,
-              limitPriceE6:
-                snapshotLimitPriceE6 ??
-                computeLimitPriceE6({ markE6: getLivePriceSnapshot(slabAddress).priceE6 ?? livePriceE6 ?? 0n, size }),
-              ...(ticketLimits.fee?.channel.enabled ? { feeBps: ticketLimits.fee.signedFeeBps } : {}),
-              amountLabel: fundLabel,
-              onRace: () => setRaceNote(true),
-            })
-          ).signature
-        : await withTransientRetry(
-        async () =>
-          trade(
-            bindConfirmedLimitPrice(
-              {
-                lpIdx,
-                userIdx: userAccount?.idx ?? 0,
-                size,
-                // P2 fee channel: sign base + the quote's fee (the taker's consent cap); only when
-                // the protocol enabled the channel for this asset — else the base fee as before.
-                ...(ticketLimits.fee?.channel.enabled ? { feeBps: ticketLimits.fee.signedFeeBps } : {}),
-                // UX WP-2: the app waits for the market (no prompt) instead of failing.
-                onWaiting: (w: boolean) => setTradePhase(w ? "waiting" : "submitting"),
-                // UX WP-3: it keeps waiting past ~30 s ("We'll keep trying") until Stop.
-                keepWaiting: true,
-                onWaitingLong: () => setWaitingLong(true),
-                abortSignal: waitAbort.signal,
-              },
-              snapshotLimitPriceE6,
+      // #2560: capture WHICH portfolio the open landed in, so the entry cache is
+      // written for that exact portfolio (an isolated open creates a new one).
+      let openedPortfolio: PublicKey | undefined;
+      let sig: string | null | undefined;
+      if (fundingMode) {
+        const r = await fundAndTrade({
+          size,
+          depositAtoms: fundAtoms,
+          limitPriceE6:
+            snapshotLimitPriceE6 ??
+            computeLimitPriceE6({ markE6: getLivePriceSnapshot(slabAddress).priceE6 ?? livePriceE6 ?? 0n, size }),
+          ...(ticketLimits.fee?.channel.enabled ? { feeBps: ticketLimits.fee.signedFeeBps } : {}),
+          amountLabel: fundLabel,
+          onRace: () => setRaceNote(true),
+          // Isolated opens a brand-new portfolio even if the wallet already owns one.
+          forceNewPortfolio: isolatedOpen,
+        });
+        sig = r.signature;
+        openedPortfolio = r.portfolio;
+      } else {
+        sig = await withTransientRetry(
+          async () =>
+            trade(
+              bindConfirmedLimitPrice(
+                {
+                  lpIdx,
+                  userIdx: userAccount?.idx ?? 0,
+                  size,
+                  // P2 fee channel: sign base + the quote's fee (the taker's consent cap); only when
+                  // the protocol enabled the channel for this asset — else the base fee as before.
+                  ...(ticketLimits.fee?.channel.enabled ? { feeBps: ticketLimits.fee.signedFeeBps } : {}),
+                  // UX WP-2: the app waits for the market (no prompt) instead of failing.
+                  onWaiting: (w: boolean) => setTradePhase(w ? "waiting" : "submitting"),
+                  // UX WP-3: it keeps waiting past ~30 s ("We'll keep trying") until Stop.
+                  keepWaiting: true,
+                  onWaitingLong: () => setWaitingLong(true),
+                  abortSignal: waitAbort.signal,
+                },
+                snapshotLimitPriceE6,
+              ),
             ),
-          ),
-        { maxRetries: 2, delayMs: 3000 },
-      );
+          { maxRetries: 2, delayMs: 3000 },
+        );
+        // A cross trade acts on the existing primary portfolio (if any).
+        openedPortfolio = userAccount?.pubkey;
+      }
       setWaitingLong(false);
       // P1: a confirmed TradeCpi can be a partial or ZERO fill (lib/limits/fill-check.ts).
       const limitsFillResult = takeFillResult(sig);
@@ -1067,8 +1124,13 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         // fallback then recovers the correct basis from the refreshed
         // on-chain size/pnl (accurate once refreshSlab() below lands)
         // instead of showing this trade's fill price mislabeled as "Entry".
-        if (existingPositionSize === 0n) {
-          saveEntryPrice(slabAddress, entryIdx, livePriceE6, leverage, wallet);
+        if (existingPositionSize === 0n || isolatedOpen) {
+          // #2560: an isolated open always writes its own portfolio-SCOPED entry
+          // (a brand-new, flat portfolio — this fill IS its entry). A cross open
+          // keeps writing the legacy (unscoped) key, so the untouched single-row
+          // path (no portfolio arg → legacy) and the multi view's primary
+          // legacy-fallback both resolve it.
+          saveEntryPrice(slabAddress, entryIdx, livePriceE6, leverage, wallet, isolatedOpen ? openedPortfolio?.toBase58() : undefined);
         } else {
           clearEntryPrice(slabAddress, entryIdx, wallet);
         }
@@ -1208,7 +1270,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // never held; an unresolved owner never blocks (on-chain 67 + pre-sign simulation refuse).
   const sameOwnerOpenPending =
     marketLimits.sameOwnerPending === true &&
-    positionSize > sameOwnerRoomQ(existingPositionSize, direction);
+    positionSize > sameOwnerRoomQ(previewExistingSize, direction);
 
   const submitDisabled =
     accountPending ||
@@ -1220,6 +1282,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     fundTooSmall ||
     !marginInput ||
     positionSize <= 0n ||
+    // #2560: Isolated requires funding a NEW portfolio from the wallet — if that
+    // isn't possible (no sim-USDC in the wallet, not connected, etc.) block the
+    // open rather than silently routing it to a cross trade on the primary.
+    (marginMode === "isolated" && !isolatedOpen) ||
     (exceedsBalance && !fundingMode && ticketState.row !== "exceeds-balance");
 
   // ── The ONE status slot (audit §3.3 / §4.1) ──────────────────────────────
@@ -1462,6 +1528,50 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         aria-disabled={ticketLocked}
         className={`min-w-0 transition-opacity duration-150 ${ticketLocked ? "pointer-events-none select-none opacity-40" : ""}`}
       >
+
+      {/* #2560: Cross / Isolated margin — per trade, above Long/Short. Isolated
+          opens in its own portfolio funded with only this trade's margin (its own
+          liquidation price); Cross shares the main account's collateral (default). */}
+      <div className="mb-3">
+        <div className="mb-1.5 text-[9px] font-medium uppercase tracking-[0.14em] text-[var(--text-dim)]">Margin</div>
+        <div className="flex gap-1" role="group" aria-label="Margin mode">
+          <button
+            type="button"
+            onClick={() => setMarginMode("cross")}
+            data-testid="margin-mode-cross"
+            aria-pressed={marginMode === "cross"}
+            title="Cross — shares your main account's collateral across positions (today's behaviour)"
+            className={`flex flex-1 items-center justify-center rounded-none border py-2 text-[10px] font-bold uppercase tracking-[0.1em] transition-colors duration-150 ${
+              marginMode === "cross"
+                ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]"
+                : "border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:border-[var(--accent)]/40 hover:text-[var(--text)]"
+            }`}
+          >
+            Cross
+          </button>
+          <button
+            type="button"
+            onClick={() => setMarginMode("isolated")}
+            data-testid="margin-mode-isolated"
+            aria-pressed={marginMode === "isolated"}
+            title="Isolated — opens in its own portfolio with only this trade's margin; losses can't touch your other positions"
+            className={`flex flex-1 items-center justify-center rounded-none border py-2 text-[10px] font-bold uppercase tracking-[0.1em] transition-colors duration-150 ${
+              marginMode === "isolated"
+                ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]"
+                : "border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:border-[var(--accent)]/40 hover:text-[var(--text)]"
+            }`}
+          >
+            Isolated
+          </button>
+        </div>
+        {marginMode === "isolated" && !isolatedOpen && connected && !mockMode && !accountPending && (
+          <p className="mt-1.5 text-[10px] leading-relaxed text-[var(--warning)]" data-testid="isolated-unavailable">
+            {!userAccount
+              ? "Isolated positions open next to your main account. Make a Cross trade or a deposit first."
+              : "Add sim-USDC to your wallet to fund an isolated position."}
+          </p>
+        )}
+      </div>
 
       {/* Long / Short segmented. A paused side (no room for new exposure) carries a "Paused"
           sublabel, 40% opacity and can't be selected; the ticket selects the open side. */}
@@ -2002,7 +2112,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               worstFillPriceE6,
               // The account after this trade: the resulting position and the bundled deposit, as
               // the liq row uses, over capital + deposit + pnl, as the position panel's Lev.
-              riskLeverage: computeRiskLeverage(combinedSignedSize, livePriceE6 ?? 0n, capitalAfterFund + safeExistingPnl),
+              riskLeverage: computeRiskLeverage(combinedSignedSize, livePriceE6 ?? 0n, capitalAfterFund + previewPnl),
               depositAtoms: fundingMode && hasOrder ? fundAtoms : 0n,
             });
             setShowConfirmModal(true);
@@ -2087,7 +2197,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {showConfirmModal && confirmSnapshot && (
         <TradeConfirmationModal
           direction={direction}
-          existingPositionSize={existingPositionSize}
+          existingPositionSize={previewExistingSize}
           positionSize={confirmSnapshot.positionSize}
           margin={confirmSnapshot.marginNative}
           leverage={leverage}
@@ -2095,7 +2205,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           estimatedLiqDisplay={confirmSnapshot.estimatedLiqDisplay}
           tradingFee={confirmSnapshot.tradingFee}
           worstFillPriceE6={confirmSnapshot.worstFillPriceE6}
-          accountEquity={userAccount ? capital : null}
+          accountEquity={userAccount && !isolatedMode ? capital : null}
           riskLeverage={confirmSnapshot.riskLeverage}
           depositAmount={confirmSnapshot.depositAtoms}
           symbol={baseTicker}

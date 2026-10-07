@@ -8,6 +8,7 @@ import { Keypair, PublicKey } from "@solana/web3.js";
 import { V17_PORTFOLIO_ACCOUNT_LEN } from "@percolatorct/sdk";
 import {
   findOwnerPortfolio,
+  listOwnerPortfolios,
   pickOwnerPortfolio,
   scanOwnerPortfolios,
   PortfolioLookupError,
@@ -63,6 +64,42 @@ describe("pickOwnerPortfolio — the single deterministic selector", () => {
   });
   it("only foreign / LP accounts → null", () => {
     expect(pickOwnerPortfolio([{ pubkey: A, account: { data: pf(owner, true) } }, { pubkey: B, account: { data: pf(other) } }], owner)).toBeNull();
+  });
+});
+
+describe("listOwnerPortfolios — the full owned set the selector chooses from (#2560 groundwork)", () => {
+  it("returns every owned, non-LP portfolio sorted by base58, regardless of RPC order", () => {
+    const list = listOwnerPortfolios(
+      [{ pubkey: C, account: { data: pf(owner) } }, { pubkey: A, account: { data: pf(owner) } }, { pubkey: B, account: { data: pf(owner) } }],
+      owner,
+    );
+    expect(list.map((p) => p.pubkey.toBase58())).toEqual([A, B, C].map((k) => k.toBase58()));
+  });
+
+  it("drops the LP portfolio and any account whose decoded owner is not the wallet", () => {
+    const list = listOwnerPortfolios(
+      [{ pubkey: A, account: { data: pf(owner, true) } }, { pubkey: B, account: { data: pf(other) } }, { pubkey: C, account: { data: pf(owner) } }],
+      owner,
+    );
+    expect(list.map((p) => p.pubkey.equals(C))).toEqual([true]);
+  });
+
+  it("no owned, non-LP portfolio → empty array", () => {
+    expect(listOwnerPortfolios([{ pubkey: A, account: { data: pf(owner, true) } }, { pubkey: B, account: { data: pf(other) } }], owner)).toEqual([]);
+  });
+
+  it("pickOwnerPortfolio is EXACTLY the head of listOwnerPortfolios (bit-identical refactor)", () => {
+    const cases: { pubkey: PublicKey; account: { data: Buffer } }[][] = [
+      [{ pubkey: C, account: { data: pf(owner) } }, { pubkey: A, account: { data: pf(owner) } }, { pubkey: B, account: { data: pf(owner) } }],
+      [{ pubkey: A, account: { data: pf(owner, true) } }, { pubkey: B, account: { data: pf(other) } }, { pubkey: C, account: { data: pf(owner) } }],
+      [{ pubkey: A, account: { data: pf(owner, true) } }, { pubkey: B, account: { data: pf(other) } }],
+      [],
+    ];
+    for (const r of cases) {
+      const head = listOwnerPortfolios(r, owner)[0] ?? null;
+      const picked = pickOwnerPortfolio(r, owner);
+      expect(picked?.pubkey.toBase58() ?? null).toBe(head?.pubkey.toBase58() ?? null);
+    }
   });
 });
 

@@ -291,6 +291,9 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     account,
     slabAddress,
     accountIdx: userAccount.idx,
+    // #2560: read the displayed (primary) portfolio's own entry — it may be an
+    // isolated portfolio. Legacy fallback (default) covers a cross primary.
+    portfolio: userAccount.pubkey?.toBase58(),
     adlFactors,
     adlApplicable: wrapperConfigV17 !== null,
     markE6: currentPriceE6,
@@ -385,7 +388,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   );
   // The order-ticket slider value is a local-only memory of what the user
   // picked, shown separately and labelled as such.
-  const savedOrderLeverage = getEntryLeverage(slabAddress, userAccount.idx, account.owner.toBase58());
+  const savedOrderLeverage = getEntryLeverage(slabAddress, userAccount.idx, account.owner.toBase58(), userAccount.pubkey?.toBase58());
 
   // Shared with the other four surfaces that show a liquidation price — this
   // was the only one computing it. Nominal size, not ADL-reduced exposure:

@@ -54,7 +54,7 @@ import { computeLimitPriceE6, assertFeedAgreesWithChain } from "@/lib/slippage";
 import { fetchPortfolioIdentity, fetchAssetMarketId, defaultCrankObservations } from "@/lib/v18-wire";
 import { buildTradeIxs } from "@/lib/trade-ix";
 import { isPortfolioAccount } from "@/lib/portfolio-account";
-import { findOwnerPortfolio } from "@/lib/owner-portfolio";
+import { findOwnerPortfolio, verifyExplicitPortfolio } from "@/lib/owner-portfolio";
 
 // ---------------------------------------------------------------------------
 // v17 portfolio account layout constants
@@ -128,14 +128,18 @@ const V17_TRADE_ACCOUNTS_TTL_MS = 60_000;
 const v17TradeAccountsCache = new Map<string, { value: V17TradeAccounts; ts: number }>();
 const v17TradeAccountsInflight = new Map<string, Promise<V17TradeAccounts>>();
 
-function tradeAccountsKey(programId: PublicKey, slabPk: PublicKey, takerPk: PublicKey): string {
-  return `${programId.toBase58()}|${slabPk.toBase58()}|${takerPk.toBase58()}`;
+// #2560: the cache key includes the explicit target portfolio when one is
+// given, so a prewarm/resolve for an isolated portfolio can never serve (or be
+// served by) the cross portfolio's cached accountA for the same wallet+market.
+function tradeAccountsKey(programId: PublicKey, slabPk: PublicKey, takerPk: PublicKey, targetPortfolioPk?: PublicKey): string {
+  const base = `${programId.toBase58()}|${slabPk.toBase58()}|${takerPk.toBase58()}`;
+  return targetPortfolioPk ? `${base}|${targetPortfolioPk.toBase58()}` : base;
 }
 
 /** Drop a cached resolution (called when a trade fails — the failure may be a
  *  rotated matcher config or a migrated portfolio, so re-resolve next time). */
-function invalidateV17TradeAccounts(programId: PublicKey, slabPk: PublicKey, takerPk: PublicKey): void {
-  v17TradeAccountsCache.delete(tradeAccountsKey(programId, slabPk, takerPk));
+function invalidateV17TradeAccounts(programId: PublicKey, slabPk: PublicKey, takerPk: PublicKey, targetPortfolioPk?: PublicKey): void {
+  v17TradeAccountsCache.delete(tradeAccountsKey(programId, slabPk, takerPk, targetPortfolioPk));
 }
 
 /** The LP side of a trade (accountB + its matcher), without the taker (UX WP-6 first trade). */
@@ -192,26 +196,57 @@ export async function resolveV17TradeAccounts(
   programId: PublicKey,
   slabPk: PublicKey,
   takerPk: PublicKey,
+  targetPortfolioPk?: PublicKey,
 ): Promise<V17TradeAccounts> {
   const lp = await resolveLpTradeAccounts(connection, programId, slabPk);
 
   // ── accountA: the taker's own portfolio ──────────────────────────────────
-  // The shared scan store (useUserAccount and friends) almost always already
-  // knows it — its pubkey never changes for a (wallet, market) pair, so any
-  // cached snapshot is authoritative. Fall back to the owner-filtered scan.
+  // #2560: when the caller names an explicit target portfolio (a chosen cross
+  // or isolated account), use it — but only after verifying this wallet owns
+  // it, so a stale/foreign pubkey can never be traded against. Otherwise the
+  // shared scan store (useUserAccount and friends) almost always already knows
+  // the deterministic pick — its pubkey never changes for a (wallet, market)
+  // pair, so any cached snapshot is authoritative. Fall back to the scan.
   let accountA: PublicKey | null = null;
-  const snapshot = getPortfolioRawSnapshot(
-    makePortfolioScanKey(programId, slabPk.toBase58(), takerPk),
-  );
-  if (snapshot && snapshot.portfolio.owner.equals(takerPk)) {
-    accountA = snapshot.pubkey;
-  } else {
-    accountA = await findV17Portfolio(connection, programId, slabPk, takerPk);
+  if (targetPortfolioPk) {
+    try {
+      const info = await connection.getAccountInfo(targetPortfolioPk, "confirmed");
+      // Program-owned, decodes, mutable owner == taker AND market_group_id == this
+      // market: a same-wallet portfolio of ANOTHER market must not pass.
+      if (verifyExplicitPortfolio(info, programId, slabPk, takerPk)) {
+        accountA = targetPortfolioPk;
+      }
+      // not verified / missing / unparseable → fall through to the shared pick
+    } catch {
+      /* fall through to the shared resolution */
+    }
+  }
+  if (!accountA) {
+    const snapshot = getPortfolioRawSnapshot(
+      makePortfolioScanKey(programId, slabPk.toBase58(), takerPk),
+    );
+    if (snapshot && snapshot.portfolio.owner.equals(takerPk)) {
+      accountA = snapshot.pubkey;
+    } else {
+      accountA = await findV17Portfolio(connection, programId, slabPk, takerPk);
+    }
   }
   if (!accountA) {
     throw new Error(
       "No portfolio account found for your wallet on this market. " +
       "Please deposit collateral first to create a portfolio.",
+    );
+  }
+
+  // #2560 (F1): an EXPLICIT target must resolve to EXACTLY itself. If the
+  // verify above failed — a transient read error, an RPC node lagging behind a
+  // freshly-created account, or a foreign/NFT-escrowed pubkey — accountA fell
+  // back to the deterministic pick, which may be a DIFFERENT owned portfolio.
+  // Refuse rather than trade the wrong account; the fallback is acceptable ONLY
+  // when it happens to BE the target (e.g. the target was the primary).
+  if (targetPortfolioPk && !accountA.equals(targetPortfolioPk)) {
+    throw new Error(
+      "Couldn't confirm the selected portfolio just now. Nothing was sent — please try again.",
     );
   }
 
@@ -224,15 +259,16 @@ function getOrResolveV17TradeAccounts(
   programId: PublicKey,
   slabPk: PublicKey,
   takerPk: PublicKey,
+  targetPortfolioPk?: PublicKey,
 ): Promise<V17TradeAccounts> {
-  const key = tradeAccountsKey(programId, slabPk, takerPk);
+  const key = tradeAccountsKey(programId, slabPk, takerPk, targetPortfolioPk);
   const cached = v17TradeAccountsCache.get(key);
   if (cached && Date.now() - cached.ts < V17_TRADE_ACCOUNTS_TTL_MS) {
     return Promise.resolve(cached.value);
   }
   const inflight = v17TradeAccountsInflight.get(key);
   if (inflight) return inflight;
-  const p = resolveV17TradeAccounts(connection, programId, slabPk, takerPk)
+  const p = resolveV17TradeAccounts(connection, programId, slabPk, takerPk, targetPortfolioPk)
     .then((value) => {
       v17TradeAccountsCache.set(key, { value, ts: Date.now() });
       return value;
@@ -255,12 +291,13 @@ export function prewarmTradeSubmission(
   programId: PublicKey | null,
   slabAddress: string,
   takerPk: PublicKey | null,
+  targetPortfolioPk?: PublicKey,
 ): void {
   prewarmTxLanding(connection);
   if (!programId || !takerPk) return;
   try {
     const slabPk = new PublicKey(slabAddress);
-    void getOrResolveV17TradeAccounts(connection, programId, slabPk, takerPk).catch(() => {});
+    void getOrResolveV17TradeAccounts(connection, programId, slabPk, takerPk, targetPortfolioPk).catch(() => {});
   } catch {
     /* malformed address — nothing to prewarm */
   }
@@ -314,6 +351,10 @@ export function useTrade(slabAddress: string) {
       /** UX WP-3: keep waiting past the schedule (with Stop) and say so after ~30 s. */
       keepWaiting?: boolean;
       onWaitingLong?: () => void;
+      /** #2560: the specific portfolio to trade against (a chosen cross/isolated
+       *  account). Omitted → the deterministic lowest-pubkey pick, i.e. today's
+       *  behaviour. Verified owned before use (resolveV17TradeAccounts). */
+      portfolioPk?: PublicKey;
     }) => {
       if (inflightRef.current) throw new Error("Trade already in progress");
       inflightRef.current = true;
@@ -461,7 +502,7 @@ export function useTrade(slabAddress: string) {
           // 60s and prewarmed when the confirmation modal opens, so this is
           // normally an instant cache hit instead of two program scans
           // between the confirm click and the wallet popup.
-          const resolved = await getOrResolveV17TradeAccounts(connection, programId, slabPk, wallet.publicKey);
+          const resolved = await getOrResolveV17TradeAccounts(connection, programId, slabPk, wallet.publicKey, params.portfolioPk);
           accountA = resolved.accountA;
           accountB = resolved.accountB;
           matcherProg = resolved.matcherProg;
@@ -673,10 +714,10 @@ export function useTrade(slabAddress: string) {
           const fill = await measureFill(connection, accountA, sig, beforePosQ, params.size, limitsMarketId);
           recordFillResult(sig, fill);
           if ((fill.kind === "full" || fill.kind === "partial") && fill.filledQ !== null) {
-            applyConfirmedFill(makePortfolioScanKey(programId, slabAddress, wallet.publicKey), fill.filledQ);
+            applyConfirmedFill(makePortfolioScanKey(programId, slabAddress, wallet.publicKey), fill.filledQ, accountA);
           }
         } else if (isV17Market) {
-          applyConfirmedFill(makePortfolioScanKey(programId, slabAddress, wallet.publicKey), params.size);
+          applyConfirmedFill(makePortfolioScanKey(programId, slabAddress, wallet.publicKey), params.size, accountA);
         }
 
         // Re-fetch the slab so useUserAccount re-scans: a trade opens/closes a
@@ -697,7 +738,7 @@ export function useTrade(slabAddress: string) {
         // next attempt) re-resolves fresh instead of re-failing off the cache.
         if (wallet.publicKey && slabProgramId) {
           try {
-            invalidateV17TradeAccounts(slabProgramId, new PublicKey(slabAddress), wallet.publicKey);
+            invalidateV17TradeAccounts(slabProgramId, new PublicKey(slabAddress), wallet.publicKey, params.portfolioPk);
             // Same reasoning for the caps/ctx cache: the failure may be a
             // re-pointed matcher config, and a stale cap re-fails every
             // retry with the same wrong leg split.

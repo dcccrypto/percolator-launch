@@ -66,7 +66,7 @@
  * `s.config ? s : { ...s, error }` keep-last-good guard.
  */
 
-import { pickOwnerPortfolio } from "@/lib/owner-portfolio";
+import { listOwnerPortfolios } from "@/lib/owner-portfolio";
 import { Buffer } from "buffer";
 import { PublicKey, type Connection } from "@solana/web3.js";
 import {
@@ -199,7 +199,11 @@ export interface OwnPortfolioScanResult {
 }
 
 interface PortfolioEntry {
-  /** Raw parsed result, or null if the wallet owns no matching portfolio. */
+  /** Raw parsed result, or null if the wallet owns no matching portfolio.
+   *  This is the SINGLE deterministic pick (lowest base58 pubkey) — it is
+   *  `rawList[0]` by construction — and remains the sole thing every existing
+   *  single-portfolio consumer (useUserAccount, deposit/withdraw default, the
+   *  ticket) reads, so their behaviour is unchanged. */
   raw: OwnPortfolioScanResult | null;
   /** `raw` mapped through `portfolioV17ToAccount`, cached so
    *  `getPortfolioUserAccountSnapshot` returns a referentially STABLE object
@@ -207,6 +211,17 @@ interface PortfolioEntry {
    *  behaviour — recomputing a fresh object on every read would defeat the
    *  whole point of the equality bail-out). */
   userAccount: UserAccountInfo | null;
+  /** #2560: ALL of the wallet's portfolios on this market (the full set `raw`
+   *  is the head of), sorted by base58 pubkey. Published from the SAME scan —
+   *  no extra RPC. Empty when the wallet owns none. Consumers that render one
+   *  row per portfolio (the multi-portfolio positions view) read this; with a
+   *  single portfolio it holds exactly `[raw]`, so nothing about the one-
+   *  portfolio UI changes. `null` = not yet scanned (distinct from `[]`). */
+  rawList: OwnPortfolioScanResult[];
+  /** `rawList` mapped through `portfolioV17ToAccount`, cached for a stable
+   *  `useSyncExternalStore` reference (same discipline as `userAccount`).
+   *  `null` until the first scan publishes. */
+  userAccounts: UserAccountInfo[] | null;
   listeners: Set<() => void>;
   /** Identity of the `raw` (SlabProvider) Uint8Array that triggered the scan
    *  currently cached/in-flight. Every hook instance in the same React commit
@@ -247,6 +262,8 @@ function getOrCreatePortfolioEntry(key: string): PortfolioEntry {
     entry = {
       raw: null,
       userAccount: null,
+      rawList: [],
+      userAccounts: null,
       listeners: new Set(),
       lastTriggerRaw: null,
       inFlight: null,
@@ -292,7 +309,10 @@ function ownPortfolioResultsEqual(a: OwnPortfolioScanResult | null, b: OwnPortfo
   return true;
 }
 
-function publishPortfolioResult(entry: PortfolioEntry, result: OwnPortfolioScanResult | null): void {
+/** Returns true when the snapshot changed. Does NOT notify: `runPortfolioScan`
+ *  publishes the single snapshot AND the list, then notifies ONCE (a second
+ *  notify would double every subscriber re-render per scan). */
+function publishPortfolioResult(entry: PortfolioEntry, result: OwnPortfolioScanResult | null): boolean {
   // A provisional (locally-patched by applyConfirmedFill) snapshot must
   // never "stick" past the next real scan, even if that scan's data happens
   // to compare equal field-for-field (e.g. the patch guessed the exact same
@@ -305,11 +325,57 @@ function publishPortfolioResult(entry: PortfolioEntry, result: OwnPortfolioScanR
   // is what flips subscribers from "pending" to "resolved: no account".
   const firstResolution = !entry.scanned;
   entry.scanned = true;
-  if (!firstResolution && !bypassEqualityForProvisional && ownPortfolioResultsEqual(entry.raw, result)) return;
+  if (!firstResolution && !bypassEqualityForProvisional && ownPortfolioResultsEqual(entry.raw, result)) return false;
   entry.raw = result;
   entry.userAccount = result ? { idx: 0, account: portfolioV17ToAccount(result.portfolio), pubkey: result.pubkey } : null;
   entry.provisionalUntil = 0;
-  notifyPortfolio(entry);
+  return true;
+}
+
+/** Element-wise `ownPortfolioResultsEqual` over two ordered lists (both are
+ *  always base58-sorted by `listOwnerPortfolios`, so position is meaningful). */
+function ownPortfolioListsEqual(a: OwnPortfolioScanResult[], b: OwnPortfolioScanResult[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (!ownPortfolioResultsEqual(a[i], b[i])) return false;
+  }
+  return true;
+}
+
+/**
+ * Publish the full owned-portfolio list from a scan. Equality bail-out keeps
+ * the old array reference (and skips the notify) when nothing meaningful
+ * changed, exactly like `publishPortfolioResult`. Returns true when it published
+ * (the caller notifies once for the pair). The first publish always
+ * goes through (null → array), so subscribers flip from "pending" to resolved
+ * even for an empty list. Does NOT touch `raw`/`userAccount`.
+ *
+ * F3: `forcePublish` bypasses the equality bail-out when the entry is
+ * provisional (a confirmed-fill patch is in flight) — the same guard
+ * `publishPortfolioResult` applies to the single snapshot. Without it, an
+ * equal-value reconciling scan would leave a stale `provisional:true` flag on
+ * the list's primary entry and never notify. `runPortfolioScan` samples the
+ * provisional state BEFORE `publishPortfolioResult` clears it and passes it here.
+ *
+ * F4: unchanged rows keep their previous mapped-object identity, so a memoized
+ * multi-row view only re-renders the rows that actually changed. Identity reuse
+ * is disabled on a `forcePublish` so the provisional flag is dropped from a
+ * reconciled primary (the fresh mapped object carries no `provisional`).
+ */
+function publishPortfolioList(entry: PortfolioEntry, list: OwnPortfolioScanResult[], forcePublish = false): boolean {
+  if (entry.userAccounts !== null && !forcePublish && ownPortfolioListsEqual(entry.rawList, list)) return false;
+  const prev = new Map<string, { res: OwnPortfolioScanResult; acct: UserAccountInfo }>();
+  if (entry.userAccounts && !forcePublish) {
+    entry.rawList.forEach((r, i) => prev.set(r.pubkey.toBase58(), { res: r, acct: entry.userAccounts![i] }));
+  }
+  entry.userAccounts = list.map((r) => {
+    const p = prev.get(r.pubkey.toBase58());
+    if (p && ownPortfolioResultsEqual(p.res, r)) return p.acct; // unchanged → stable identity
+    return { idx: 0, account: portfolioV17ToAccount(r.portfolio), pubkey: r.pubkey };
+  });
+  entry.rawList = list;
+  return true;
 }
 
 export function subscribePortfolioScan(key: string, listener: () => void): () => void {
@@ -327,6 +393,20 @@ export function subscribePortfolioScan(key: string, listener: () => void): () =>
 export function getPortfolioUserAccountSnapshot(key: string | null): UserAccountInfo | null {
   if (!key) return null;
   return portfolioEntries.get(key)?.userAccount ?? null;
+}
+
+/** A stable empty list so `getPortfolioListSnapshot` returns a referentially
+ *  constant value before the first scan — `useSyncExternalStore` requires the
+ *  getSnapshot result not to change identity unless the data did. */
+const EMPTY_PORTFOLIO_LIST: readonly UserAccountInfo[] = Object.freeze([]);
+
+/** #2560: reactive read of ALL the wallet's portfolios on this market (mapped
+ *  `Account` shape, one per portfolio, base58-sorted). Empty array before the
+ *  first scan or when the wallet owns none. For the common single-portfolio
+ *  case this is `[getPortfolioUserAccountSnapshot(...)]`. */
+export function getPortfolioListSnapshot(key: string | null): readonly UserAccountInfo[] {
+  if (!key) return EMPTY_PORTFOLIO_LIST;
+  return portfolioEntries.get(key)?.userAccounts ?? EMPTY_PORTFOLIO_LIST;
 }
 
 /**
@@ -403,14 +483,25 @@ async function runPortfolioScan(
       ],
     });
 
-    // M-4: the ONE selector every flow uses (lib/owner-portfolio.ts): LP dropped,
-    // decoded mutable owner verified, lowest pubkey — so the displayed account is
-    // the one trade / close / deposit act on.
-    const picked = pickOwnerPortfolio(results, params.publicKey);
-    const result: OwnPortfolioScanResult | null = picked
-      ? { pubkey: picked.pubkey, portfolio: parsePortfolioV17(picked.data) }
-      : null;
-    publishPortfolioResult(entry, result);
+    // M-4 / #2560: the ONE selector every flow uses (lib/owner-portfolio.ts):
+    // LP dropped, decoded mutable owner verified, base58-sorted. `listOwner-
+    // Portfolios` returns the full owned set; the single deterministic pick the
+    // existing flows act on is its head (`list[0]`), so `result` below is
+    // byte-for-byte what `pickOwnerPortfolio` returned before — nothing about
+    // the single-portfolio path changes.
+    const owned = listOwnerPortfolios(results, params.publicKey);
+    const list: OwnPortfolioScanResult[] = owned.map((p) => ({
+      pubkey: p.pubkey,
+      portfolio: parsePortfolioV17(p.data),
+    }));
+    const result: OwnPortfolioScanResult | null = list[0] ?? null;
+    // F3: sample provisional BEFORE publishPortfolioResult clears it, so the
+    // list publish applies the same provisional-bypass the single snapshot does.
+    const wasProvisional = entry.provisionalUntil > 0 && Date.now() < entry.provisionalUntil;
+    // Publish both (each unconditionally), then notify ONCE.
+    const singleChanged = publishPortfolioResult(entry, result);
+    const listChanged = publishPortfolioList(entry, list, wasProvisional);
+    if (singleChanged || listChanged) notifyPortfolio(entry);
     return entry.raw;
   } catch (e) {
     // Transient RPC error (429, timeout) — keep-last-good: do NOT publish,
@@ -476,27 +567,54 @@ const CONFIRMED_FILL_PROVISIONAL_MS = 5_000;
  * truth; this function only shortens how long a confirmed fill's OWN size
  * change takes to reach the screen.
  */
-export function applyConfirmedFill(key: string, signedSizeDeltaQ: bigint): boolean {
+export function applyConfirmedFill(key: string, signedSizeDeltaQ: bigint, targetPortfolioPk?: PublicKey): boolean {
   const entry = portfolioEntries.get(key);
-  if (!entry || !entry.raw) return false;
+  if (!entry) return false;
 
-  const prevPortfolio = entry.raw.portfolio;
+  // #2560: which portfolio did the fill land on? Default (no target) is the
+  // primary (lowest-pubkey) `raw` — today's behaviour. An explicit target (a
+  // chosen cross/isolated account) patches that portfolio's list entry, and
+  // the primary single-snapshot too ONLY when the target IS the primary, so a
+  // trade on a non-primary portfolio never bumps the primary's displayed size.
+  const primaryPk = entry.raw?.pubkey ?? null;
+  const patchesPrimary = !targetPortfolioPk || (primaryPk != null && primaryPk.equals(targetPortfolioPk));
+  const li = targetPortfolioPk
+    ? entry.rawList.findIndex((r) => r.pubkey.equals(targetPortfolioPk))
+    : primaryPk
+      ? entry.rawList.findIndex((r) => r.pubkey.equals(primaryPk))
+      : -1;
+
+  // The portfolio whose active leg we patch: the primary's `raw`, or the list
+  // element for a non-primary target. No cached state → nothing to patch.
+  const base: OwnPortfolioScanResult | null = patchesPrimary ? entry.raw : li !== -1 ? entry.rawList[li] : null;
+  if (!base) return false;
+
+  const prevPortfolio = base.portfolio;
   const legIdx = prevPortfolio.legs.findIndex((l) => l.active);
   if (legIdx === -1) return false;
 
   const prevLeg = prevPortfolio.legs[legIdx];
-  const newBasisPosQ = prevLeg.basisPosQ + signedSizeDeltaQ;
-
   const newLegs = prevPortfolio.legs.slice();
-  newLegs[legIdx] = { ...prevLeg, basisPosQ: newBasisPosQ };
+  newLegs[legIdx] = { ...prevLeg, basisPosQ: prevLeg.basisPosQ + signedSizeDeltaQ };
+  const patched: OwnPortfolioScanResult = { pubkey: base.pubkey, portfolio: { ...prevPortfolio, legs: newLegs } };
+  const patchedAccount: UserAccountInfo = { idx: 0, account: portfolioV17ToAccount(patched.portfolio), pubkey: patched.pubkey, provisional: true };
 
-  const patched: OwnPortfolioScanResult = {
-    pubkey: entry.raw.pubkey,
-    portfolio: { ...prevPortfolio, legs: newLegs },
-  };
-
-  entry.raw = patched;
-  entry.userAccount = { idx: 0, account: portfolioV17ToAccount(patched.portfolio), pubkey: patched.pubkey, provisional: true };
+  // The single snapshot (useUserAccount) only moves when the primary moved.
+  if (patchesPrimary) {
+    entry.raw = patched;
+    entry.userAccount = patchedAccount;
+  }
+  // Mirror into the multi-portfolio list so a consumer rendering from it gets
+  // the same provisional snappiness. No-op if the portfolio isn't listed yet
+  // (a first position still waits for the real scan).
+  if (li !== -1 && entry.userAccounts) {
+    const newList = entry.rawList.slice();
+    newList[li] = patched;
+    entry.rawList = newList;
+    const newAccts = entry.userAccounts.slice();
+    newAccts[li] = patchedAccount;
+    entry.userAccounts = newAccts;
+  }
   entry.provisionalUntil = Date.now() + CONFIRMED_FILL_PROVISIONAL_MS;
   notifyPortfolio(entry);
   return true;
