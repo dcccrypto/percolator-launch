@@ -20,12 +20,13 @@ vi.mock("@/lib/tx", () => ({ sendTx: mocks.sendTx }));
 vi.mock("@/lib/config", () => ({ getConfig: () => mocks.config, getNetwork: () => "mainnet" }));
 vi.mock("@/lib/inFlightMarket", () => ({ saveInFlightMarket: vi.fn(), updateInFlightStep: vi.fn(), clearInFlightMarket: vi.fn(), loadLastInFlightMarket: vi.fn(() => null) }));
 vi.mock("@solana/spl-token", async () => ({ ...(await vi.importActual<object>("@solana/spl-token")), getAccount: mocks.getAccount, getAssociatedTokenAddress: mocks.getAssociatedTokenAddress }));
-vi.mock("@percolatorct/sdk", async () => ({ ...(await vi.importActual<object>("@percolatorct/sdk")), deriveVaultAuthority: mocks.deriveVaultAuthority }));
+vi.mock("@percolatorct/sdk", async () => ({ ...(await vi.importActual<object>("@percolatorct/sdk")), deriveVaultAuthority: mocks.deriveVaultAuthority, deriveMatcherDelegate: () => [new PublicKey(new Uint8Array(32).fill(29)), 254] }));
 
 import { useCreateMarket } from "@/hooks/useCreateMarket";
-import { RATE_LIMITED_COPY } from "@/lib/rpc-rate-limit";
+import { RATE_LIMITED_COPY, RATE_LIMITED_NEUTRAL_COPY } from "@/lib/rpc-rate-limit";
 
 const SLAB = Keypair.generate();
+let slabInfo: unknown;
 const params = { mint: Keypair.generate().publicKey, initialPriceE6: 100_000_000n, lpCollateral: 1_000_000n, insuranceAmount: 100_000n, oracleFeed: "0".repeat(64), invert: false, tradingFeeBps: 10, initialMarginBps: 1_500, maxAccounts: 4_096, decimals: 6, symbol: "TEST", name: "Test Market", oracleMode: "admin" as const };
 
 beforeEach(async () => {
@@ -43,7 +44,8 @@ beforeEach(async () => {
   const slabData = Buffer.alloc(26_364);
   Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]).copy(slabData, 0);
   slabData.writeUInt16LE(sdk.V17_EXPECTED_VERSION, 8);
-  mocks.getAccountInfo.mockResolvedValue({ data: slabData, executable: false, lamports: 1, owner: programId, rentEpoch: 0 });
+  slabInfo = { data: slabData, executable: false, lamports: 1, owner: programId, rentEpoch: 0 };
+  mocks.getAccountInfo.mockResolvedValue(slabInfo);
   mocks.sendTx.mockRejectedValue(new Error("stop after the first transaction"));
 });
 afterEach(() => vi.useRealTimers());
@@ -75,6 +77,21 @@ describe("the LP-portfolio scan at the start of the liquidity step", () => {
     expect(mocks.getProgramAccounts).toHaveBeenCalledTimes(4);
     expect(mocks.sendTx).not.toHaveBeenCalled();
     expect(result.current.state.error).toContain(RATE_LIMITED_COPY);
+  });
+
+  it("a rate limit AFTER a landed transaction (the read that follows TX A) is NOT 'Nothing was sent'", async () => {
+    mocks.getProgramAccounts.mockResolvedValue([]);
+    mocks.sendTx.mockResolvedValue("sig-TX-A"); // TX A lands
+    const slabKey = SLAB.publicKey.toBase58();
+    // the next read (the new LP portfolio's identity) is rate-limited, on every try
+    mocks.getAccountInfo.mockImplementation(async (k: PublicKey) => {
+      if (k.toBase58() === slabKey) return slabInfo;
+      throw new Error("Server responded with 429 Too Many Requests");
+    });
+    const result = await runStep2();
+    expect(mocks.sendTx).toHaveBeenCalled();
+    expect(result.current.state.error).toContain(RATE_LIMITED_NEUTRAL_COPY);
+    expect(result.current.state.error).not.toMatch(/Nothing was sent/);
   });
 
   it("a non-rate-limit failure is not retried", async () => {
