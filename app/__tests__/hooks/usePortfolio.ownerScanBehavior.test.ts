@@ -16,6 +16,7 @@ vi.mock('@/lib/market-directory-discovery', () => ({
 
 vi.mock('@/lib/config', () => ({
   getAllProgramIds: vi.fn(() => []),
+  getMarketDiscoveryProgramIds: vi.fn(() => []),
   getNetwork: mocks.getNetwork,
 }));
 

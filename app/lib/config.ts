@@ -241,6 +241,37 @@ export function getAllProgramIds(): string[] {
   return [...ids];
 }
 
+/**
+ * Program IDs that can actually own/discover market slabs.
+ *
+ * This is intentionally narrower than getAllProgramIds(), which is the
+ * security/known-program allowlist and also contains matcher, NFT and stake
+ * programs on devnet.
+ *
+ * v17+ devnet markets are owned by the wrapper program exposed through
+ * programsBySlabTier. Mainnet currently has no tier map, so preserve the
+ * existing wrapper + matcher discovery scope there for backward compatibility.
+ */
+export function getMarketDiscoveryProgramIds(): string[] {
+  const cfg = getConfig();
+  const ids = new Set<string>();
+
+  if (cfg.programId) ids.add(cfg.programId);
+
+  const byTier = cfg.programsBySlabTier;
+  if (byTier) {
+    Object.values(byTier).forEach((id) => {
+      if (id) ids.add(id);
+    });
+  } else if (cfg.matcherProgramId) {
+    // Preserve the existing mainnet/legacy discovery scope when no explicit
+    // market-program tier map exists.
+    ids.add(cfg.matcherProgramId);
+  }
+
+  return [...ids];
+}
+
 export function setNetwork(network: Network) {
   if (typeof window !== "undefined") {
     try {

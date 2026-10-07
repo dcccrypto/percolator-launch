@@ -13,7 +13,12 @@ vi.mock('@/hooks/useWalletCompat', () => ({
   useConnectionCompat: () => ({ connection }),
   useWalletCompat: () => ({ publicKey: pk, connected: true }),
 }));
-vi.mock('@/lib/config', async (orig) => ({ ...(await orig<any>()), getAllProgramIds: () => [], getNetwork: () => 'devnet' }));
+vi.mock('@/lib/config', async (orig) => ({
+  ...(await orig<any>()),
+  getAllProgramIds: () => [],
+  getMarketDiscoveryProgramIds: () => [],
+  getNetwork: () => 'devnet',
+}));
 vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
 
 import { usePortfolio } from '@/hooks/usePortfolio';
