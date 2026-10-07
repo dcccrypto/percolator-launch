@@ -1829,7 +1829,7 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       // funds (nothing broadcast, the launch still completes) but it was also
       // silent for diagnosis, which is a different thing and not a feature:
       // the batch has several unrelated ways to throw before broadcast — a
-      // 429 from /api/devnet-pre-fund's 24h faucet gate, a keeper co-sign
+      // 429 from /api/devnet-pre-fund's 1h faucet gate, a keeper co-sign
       // failure, an airdrop that did not confirm — and they are
       // indistinguishable from the outside.
       const reason = describeBatchFallback(err);
