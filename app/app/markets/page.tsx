@@ -4,7 +4,7 @@ import { baseSymbol } from "@/lib/symbol-utils";
 import { useEffect, useState, useMemo, useRef, Suspense } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { useConnectionCompat } from "@/hooks/useWalletCompat";
+import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { prefetchSlab, prefetchSlabsBatch } from "@/lib/slabCache";
 import { numericToBigInt, openInterestOf, isSupabaseSentinel } from "@/lib/supabase-numeric";
 import { setMarketIdentity } from "@/lib/marketIdentityCache";
@@ -35,7 +35,7 @@ import { LiveRowPrice } from "@/components/market/LiveRowPrice";
 import { formatStatValue } from "@/lib/format";
 import { qToUsd, Q_DECIMALS, rowVolumeUsd } from "@/lib/q-usd";
 import { MIN_VAULT_FOR_OI } from "@/lib/phantom-oi";
-import { isListedMarketRow, MAX_SANE_PRICE_USD } from "@/lib/listed-markets";
+import { isListedMarketRow, isOwnAwaitingPriceRow, MAX_SANE_PRICE_USD } from "@/lib/listed-markets";
 
 
 /** GH#1483: Upper bound for UI leverage display. The Solana program enforces margin
@@ -178,6 +178,7 @@ function MarketsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { connection } = useConnectionCompat();
+  const walletBase58 = useWalletCompat().publicKey?.toBase58() ?? null;
   const { markets: discovered, loading: discoveryLoading, error: discoveryError } = useMarketDiscovery();
   const { statsMap, loading: statsLoading, error: statsError } = useAllMarketStats();
 
@@ -394,13 +395,26 @@ function MarketsPageInner() {
       // but not the API total, causing a 2-market discrepancy (170 vs 168).
       // GH#1531: Show all non-zombie Supabase markets — counter matches /api/markets total.
       // isListedMarketRow is shared with the landing rail (blocklist + zombie, coerced).
-      if (m.supabase) return isListedMarketRow(m.slabAddress, m.supabase);
+      if (m.supabase) {
+        // The creator's own market whose live price is not connected yet is shown to the creator
+        // only (lib/listed-markets.ts isOwnAwaitingPriceRow); everyone else still never sees it.
+        return isListedMarketRow(m.slabAddress, m.supabase) || isOwnAwaitingPriceRow(m.slabAddress, m.supabase, walletBase58);
+      }
 
       // GH#1346: On-chain-only markets (no Supabase stats) are NOT shown —
       // /api/markets only sees Supabase data, so including them inflates the count.
       return false;
     });
-  }, [effectiveMarkets]);
+  }, [effectiveMarkets, walletBase58]);
+
+  // Slabs shown only because the viewer launched them and their price is not connected yet.
+  const awaitingOwnPrice = useMemo(() => {
+    const out = new Set<string>();
+    for (const m of activeMarkets) {
+      if (m.supabase && isOwnAwaitingPriceRow(m.slabAddress, m.supabase, walletBase58)) out.add(m.slabAddress);
+    }
+    return out;
+  }, [activeMarkets, walletBase58]);
 
   // Cap bogus prices: if a resolved price is above $1M per unit it's almost certainly
   // a display error from corrupted on-chain data. We clamp in the display layer.
@@ -1048,7 +1062,7 @@ function MarketsPageInner() {
                         <MarketLogo logoUrl={m.supabase?.logo_url} mintAddress={logoMintAddress} mainnetCa={m.supabase?.mainnet_ca ?? null} symbol={displaySymbol ?? undefined} size="sm" />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-baseline justify-between gap-2">
-                            <span className="truncate text-sm font-semibold text-[var(--text)]">{displaySymbol ? `${baseSymbol(displaySymbol)}/USD` : shortenAddress(m.slabAddress)}</span>
+                            <span className="truncate text-sm font-semibold text-[var(--text)]">{displaySymbol ? `${baseSymbol(displaySymbol)}/USD` : shortenAddress(m.slabAddress)}{awaitingOwnPrice.has(m.slabAddress) && <span className="ml-1.5 text-[9px] font-medium uppercase tracking-wider text-[var(--warning)]">awaiting live price</span>}</span>
                             <span className="shrink-0 text-sm tabular-nums text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
                               <LiveRowPrice slab={m.slabAddress} fallback={lastPrice} />
                             </span>
@@ -1078,6 +1092,9 @@ function MarketsPageInner() {
                           <span className="min-w-0 truncate font-semibold text-[var(--text)] text-sm">
                             {displaySymbol ? `${baseSymbol(displaySymbol)}/USD` : shortenAddress(m.slabAddress)}
                           </span>
+                          {awaitingOwnPrice.has(m.slabAddress) && (
+                            <span data-testid="awaiting-live-price" className="shrink-0 border border-[var(--warning)]/30 bg-[var(--warning)]/[0.08] px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider text-[var(--warning)]">awaiting live price</span>
+                          )}
                           {m.isAdminOracle && (
                             <span className="border border-[var(--text-dim)]/30 bg-[var(--text-dim)]/[0.08] px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider text-[var(--text-secondary)]">manual</span>
                           )}

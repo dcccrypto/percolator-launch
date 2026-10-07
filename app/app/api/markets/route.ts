@@ -1231,8 +1231,11 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ total: sorted.length, activeTotal, marketsWithPrice, zombieCount, markets: limited }, {
       headers: {
-        // See the cache-policy note above readLiveMarketStates usage.
-        "Cache-Control": "public, s-maxage=10, stale-while-revalidate=60",
+        // Kept short on purpose: a newly registered market is listed only once this response
+        // carries it, so the window a visitor can be served the pre-registration list is
+        // s-maxage + stale-while-revalidate (was 10 + 60 s, now 5 + 20 s). The creator's own
+        // browser skips this cache entirely right after registering (hooks/useAllMarketStats.ts).
+        "Cache-Control": "public, s-maxage=5, stale-while-revalidate=20",
       },
     });
   } catch (error) {

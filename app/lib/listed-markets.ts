@@ -105,3 +105,24 @@ export function isListedMarketRow(slab: string, row: ListedMarketStatsRow): bool
     total_accounts: numericOrNull(row.total_accounts),
   });
 }
+
+/**
+ * The creator's OWN just-launched market, before its live price is connected: the registry row
+ * exists (the indexer inserted it, or the registration wrote it) but carries no price source, so
+ * isListedMarketRow hides it from everyone. The wallet that deployed it still sees it in the
+ * markets list, marked "awaiting live price", instead of nothing while the registration lands. It
+ * is shown only to that wallet, and only if every other listing rule passes (not blocked, not
+ * hidden, not a half-made launch, not a zombie): an unpriced or half-made market stays hidden from
+ * every other visitor and from every picker.
+ */
+export function isOwnAwaitingPriceRow(
+  slab: string,
+  row: ListedMarketStatsRow & { deployer?: unknown },
+  wallet: string | null | undefined,
+): boolean {
+  if (!wallet || typeof row.deployer !== "string" || row.deployer !== wallet) return false;
+  if (!hasNoPriceSource(row)) return false;
+  if (PLAYGROUND_SLAB_META[slab]) return false;
+  // Every rule except the missing price source: an undefined pool reads as "unknown", i.e. listed.
+  return isListedMarketRow(slab, { ...row, dex_pool_address: undefined });
+}

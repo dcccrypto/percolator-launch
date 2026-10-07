@@ -102,6 +102,20 @@ import { getPlaygroundKeeperSigner } from "@/lib/playground-keeper-signer";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * In-request grace for "the creation tx / the finished market is not visible to this RPC node yet":
+ * `tries` extra reads, `delayMs` apart (default 3 x 800 ms, well inside the function budget). The
+ * client launches the registration the moment its last transaction confirms, often against a
+ * different RPC node than the one this route reads, so the first read can be a slot or two behind.
+ */
+function proofWaitFromEnv(): { tries: number; delayMs: number } {
+  const n = (v: string | undefined, d: number): number => {
+    const x = Number(v);
+    return v !== undefined && v.trim() !== "" && Number.isFinite(x) && x >= 0 ? Math.floor(x) : d;
+  };
+  return { tries: Math.min(n(process.env.KEEPER_REGISTER_PROOF_TRIES, 3), 6), delayMs: Math.min(n(process.env.KEEPER_REGISTER_PROOF_POLL_MS, 800), 2_000) };
+}
+
 /** Timing-safe admin-bypass check (H1b) — same secret/header convention as
  *  /api/oracle/set-price-cap. Empty/unset ADMIN_API_SECRET always denies. */
 function isAdminBypass(req: NextRequest): boolean {
@@ -227,51 +241,79 @@ export async function POST(req: NextRequest) {
     try {
       const wrapper = getConfig().programId as string;
       const connection = getServerConnection("confirmed");
-      const accountInfo = await connection.getAccountInfo(new PublicKey(slabAddress));
-      if (!accountInfo) {
-        return NextResponse.json({ error: "Slab account does not exist on-chain" }, { status: 400 });
-      }
-      // Review L-1: the slab must be a market account of THIS wrapper (owner + v18 market header).
-      if (accountInfo.owner.toBase58() !== wrapper || !isV18MarketHeader(new Uint8Array(accountInfo.data))) {
-        return NextResponse.json({ error: "Slab account is not a market of this deployment's program" }, { status: 400 });
-      }
-      const tx = await connection.getTransaction(proofTx, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
-      const verdict = await verifyKeeperRegisterProofTx(
-        tx,
-        await keeperMemoParams({ slabAddress, dexPoolAddress, mainnetCA, dexType, symbol, label, payload: boundPayload }),
-        wrapper,
-      );
-      if (!verdict.ok) {
-        Sentry.captureMessage("[playground/keeper-register] creation-tx proof refused", {
-          level: "warning",
-          tags: { endpoint: "/api/playground/keeper-register", auth: "memo-fail" },
-          extra: { slabAddress, reason: verdict.reason },
-        });
-        // Not landed yet reads as "not found": the client retries with backoff.
-        const status = verdict.reason === "proof transaction not found" ? 409 : 403;
-        return NextResponse.json({ error: `Registration proof refused: ${verdict.reason}` }, { status });
-      }
-      slabAdmin = verdict.creator;
+      const memoParams = await keeperMemoParams({ slabAddress, dexPoolAddress, mainnetCA, dexType, symbol, label, payload: boundPayload });
 
-      // Review M-7: only a FINISHED market priced by our keeper is enrolled. Read from the bytes
-      // already in hand (no extra RPC). The launch registers after its last step lands, so a
-      // not-yet-finished market is "try again" (409), never a final refusal.
-      const readiness = checkKeeperReadiness(
-        new Uint8Array(accountInfo.data),
-        new PublicKey(slabAddress),
-        (getConfig() as { vaultProgramId?: string }).vaultProgramId,
-        getPlaygroundKeeperSigner()?.publicKey(),
-      );
-      if (!readiness.ok) {
-        Sentry.captureMessage("[playground/keeper-register] market not ready for the keeper", {
-          level: "warning",
-          tags: { endpoint: "/api/playground/keeper-register", auth: "not-ready" },
-          extra: { slabAddress, reason: readiness.reason },
-        });
-        return NextResponse.json(
-          { error: `Market is not ready for the live price: ${readiness.reason}` },
-          { status: readinessStatus(readiness.reason) },
+      /**
+       * One verification pass. `transient` marks the two refusals that only mean "this RPC node has
+       * not seen the creation transaction (or its final state) yet": the proof tx not found, and a
+       * market that does not read as finished. They are retried inside this request (below) before
+       * the 409 goes back, so the creator does not wait out the client's backoff for what a
+       * second RPC read settles. Every other refusal is returned as before.
+       */
+      const proofPass = async (): Promise<{ response: NextResponse; transient: boolean; log?: () => void } | null> => {
+        const accountInfo = await connection.getAccountInfo(new PublicKey(slabAddress));
+        if (!accountInfo) {
+          return { response: NextResponse.json({ error: "Slab account does not exist on-chain" }, { status: 400 }), transient: false };
+        }
+        // Review L-1: the slab must be a market account of THIS wrapper (owner + v18 market header).
+        if (accountInfo.owner.toBase58() !== wrapper || !isV18MarketHeader(new Uint8Array(accountInfo.data))) {
+          return { response: NextResponse.json({ error: "Slab account is not a market of this deployment's program" }, { status: 400 }), transient: false };
+        }
+        const tx = await connection.getTransaction(proofTx, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
+        const verdict = await verifyKeeperRegisterProofTx(tx, memoParams, wrapper);
+        if (!verdict.ok) {
+          // Not landed yet reads as "not found": retried here, then by the client with backoff.
+          const notFound = verdict.reason === "proof transaction not found";
+          const reason = verdict.reason;
+          return {
+            log: () =>
+              Sentry.captureMessage("[playground/keeper-register] creation-tx proof refused", {
+                level: "warning",
+                tags: { endpoint: "/api/playground/keeper-register", auth: "memo-fail" },
+                extra: { slabAddress, reason },
+              }),
+            response: NextResponse.json({ error: `Registration proof refused: ${verdict.reason}` }, { status: notFound ? 409 : 403 }),
+            transient: notFound,
+          };
+        }
+        slabAdmin = verdict.creator;
+
+        // Review M-7: only a FINISHED market priced by our keeper is enrolled. Read from the bytes
+        // already in hand (no extra RPC). The launch registers after its last step lands, so a
+        // not-yet-finished market is "try again" (409), never a final refusal.
+        const readiness = checkKeeperReadiness(
+          new Uint8Array(accountInfo.data),
+          new PublicKey(slabAddress),
+          (getConfig() as { vaultProgramId?: string }).vaultProgramId,
+          getPlaygroundKeeperSigner()?.publicKey(),
         );
+        if (!readiness.ok) {
+          const status = readinessStatus(readiness.reason);
+          const reason = readiness.reason;
+          return {
+            log: () =>
+              Sentry.captureMessage("[playground/keeper-register] market not ready for the keeper", {
+                level: "warning",
+                tags: { endpoint: "/api/playground/keeper-register", auth: "not-ready" },
+                extra: { slabAddress, reason },
+              }),
+            response: NextResponse.json({ error: `Market is not ready for the live price: ${readiness.reason}` }, { status }),
+            // Only the 409 family can be RPC lag; a 403 / 400 / 503 is a verdict on the market or the deployment.
+            transient: status === 409,
+          };
+        }
+        return null;
+      };
+
+      const { tries, delayMs } = proofWaitFromEnv();
+      let outcome = await proofPass();
+      for (let i = 0; outcome?.transient && i < tries; i++) {
+        await new Promise((r) => setTimeout(r, delayMs));
+        outcome = await proofPass();
+      }
+      if (outcome) {
+        outcome.log?.();
+        return outcome.response;
       }
     } catch (err) {
       console.error("[playground/keeper-register] proof check failed:", err instanceof Error ? err.message : String(err));
