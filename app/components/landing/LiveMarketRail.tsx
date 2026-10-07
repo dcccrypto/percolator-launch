@@ -35,7 +35,9 @@ const ARROW = (
  *  page, and the markets row's price_change_pct is unpopulated. Price itself stays
  *  per-tick live via the store (below); this is only the slower 24h aggregate. */
 const STATS_SWR = { dedupingInterval: 10_000, refreshInterval: 10_000, revalidateOnFocus: false, shouldRetryOnError: false } as const;
-const statsFetcher = (url: string): Promise<{ stats?: { change24h?: number | null } | null }> =>
+const statsFetcher = (
+  url: string,
+): Promise<{ stats?: { change24h?: number | null; series?: number[] | null } | null }> =>
   fetch(url).then((r) => (r.ok ? r.json() : { stats: null }));
 
 function formatChangePct(pct: number | null): string {
@@ -43,6 +45,31 @@ function formatChangePct(pct: number | null): string {
   if (pct === 0) return "0.0%";
   return `${pct > 0 ? "+" : ""}${pct.toFixed(1)}%`;
 }
+
+/**
+ * Mini 24h price line for the rail — drawn from the oldest→newest close series the
+ * /api/prices/[slab] stats response now carries (same request as the 24h change, no
+ * extra fetch). Green if the window ended up, red if down. "—" until a series loads.
+ */
+const MiniChart: FC<{ series: number[] | null | undefined }> = ({ series }) => {
+  if (!series || series.length < 2) return <span className="text-[10px] text-[var(--text-dim)]">—</span>;
+  const w = 64, h = 20, n = series.length;
+  const max = Math.max(...series);
+  const min = Math.min(...series);
+  const flat = max === min;
+  const rng = flat ? 1 : max - min;
+  const color = series[n - 1] >= series[0] ? "var(--long)" : "var(--short)";
+  const y = (v: number) => (flat ? h / 2 : h - 1 - ((v - min) / rng) * (h - 2));
+  const line = series
+    .map((v, i) => `${((i / (n - 1)) * (w - 2) + 1).toFixed(1)},${y(v).toFixed(1)}`)
+    .join(" ");
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true" className="block">
+      <polygon points={`1,${h - 1} ${line} ${w - 1},${h - 1}`} fill={color} opacity={0.12} />
+      <polyline points={line} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+};
 
 /** Stable getServerSnapshot (SSR/first paint) — null price until the store ticks. */
 const RETURN_NULL = () => null;
@@ -73,6 +100,7 @@ const RailRow: FC<RailRowProps> = ({ slab, symbol, name, mainnetCa, fallbackPric
 
   const { data: pricesJson } = useSWR(`/api/prices/${slab}`, statsFetcher, STATS_SWR);
   const change24h = pricesJson?.stats?.change24h ?? null;
+  const series = pricesJson?.stats?.series ?? null;
 
   const flash = usePriceFlash(livePriceE6);
   const tintClass = flash === "up" ? "text-[var(--long)]" : flash === "down" ? "text-[var(--short)]" : "text-[var(--text)]";
@@ -123,6 +151,10 @@ const RailRow: FC<RailRowProps> = ({ slab, symbol, name, mainnetCa, fallbackPric
       <div className={["hidden shrink-0 text-right font-mono text-[11px] tabular-nums sm:block", changeClass].join(" ")} style={{ width: 76 }}>
         {formatChangePct(change24h)}
       </div>
+      {/* Chart (24h) — mini price line from the stats series */}
+      <div className="hidden shrink-0 lg:flex lg:justify-end" style={{ width: 72 }}>
+        <MiniChart series={series} />
+      </div>
       {/* Trade — visual affordance; the whole row is the link. */}
       <span className="hidden shrink-0 rounded-sm border border-[var(--accent)]/40 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--accent-text)] transition-colors group-hover:bg-[var(--accent)]/10 group-hover:border-[var(--accent)] sm:inline-flex sm:items-center" style={{ width: 70, justifyContent: "center" }}>
         Trade
@@ -145,6 +177,7 @@ const RailHeader: FC = () => (
     <div className="hidden shrink-0 text-right lg:block" style={{ width: 98 }}>Open Interest</div>
     <div className="shrink-0 text-right" style={{ width: 88 }}>Price</div>
     <div className="hidden shrink-0 text-right sm:block" style={{ width: 76 }}>24h Change</div>
+    <div className="hidden shrink-0 text-right lg:block" style={{ width: 72 }}>Chart 24h</div>
     <div className="hidden shrink-0 sm:block" style={{ width: 70 }} />
     <div className="hidden h-3.5 w-3.5 shrink-0 sm:block" />
   </div>

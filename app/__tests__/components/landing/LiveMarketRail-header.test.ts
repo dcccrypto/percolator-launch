@@ -44,6 +44,7 @@ describe("LiveMarketRail column header", () => {
     expect(SRC).toMatch(/>\s*Open Interest\s*</);
     expect(SRC).toMatch(/>\s*Price\s*</);
     expect(SRC).toMatch(/>\s*24h Change\s*</);
+    expect(SRC).toMatch(/>\s*Chart 24h\s*</);
   });
 
   it("reveals each stat label at the same breakpoint + width as its data column", () => {
@@ -59,6 +60,8 @@ describe("LiveMarketRail column header", () => {
     expect(header).toMatch(/hidden shrink-0 text-right lg:block[^>]*width: 98/s);
     expect(header).toMatch(/shrink-0 text-right[^>]*width: 88/s);
     expect(header).toMatch(/hidden shrink-0 text-right sm:block[^>]*width: 76/s);
+    // Chart (24h) mini-line column: lg: like Open Interest, fixed width 72.
+    expect(header).toMatch(/hidden shrink-0 text-right lg:block[^>]*width: 72/s);
   });
 
   it("is aria-hidden — the row links already expose each value", () => {
