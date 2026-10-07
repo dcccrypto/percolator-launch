@@ -30,6 +30,8 @@ import { useLiveSlabPrices } from "@/hooks/useLiveSlabPrices";
 import { useLpPositions } from "@/hooks/useLpPositions";
 import { AtRiskBanner } from "@/components/portfolio/AtRiskBanner";
 import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
+import { isSentinelValue } from "@/lib/health";
+import { releasedPnlFace } from "@/lib/convert-released-pnl";
 import { positionSizeUsdText } from "@/lib/q-usd";
 import dynamic from "next/dynamic";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
@@ -48,6 +50,10 @@ const ConnectButton = dynamic(
   () => import("@/components/wallet/ConnectButton").then((m) => m.ConnectButton),
   { ssr: false }
 );
+
+/** Same mechanics wording as the trade page's withdraw card (settlingProfitMessage). */
+const SETTLING_PROFIT_TITLE =
+  "Your profit becomes withdrawable once the other side of your trade settles, which happens automatically. Convert and withdraw it on this market's Withdraw tab.";
 
 // PERF PLAN #4: below-the-fold sections lazy-loaded exactly like
 // app/app/dashboard/page.tsx's widgets — ssr:false + a fixed-height
@@ -623,9 +629,21 @@ export function PortfolioPositionsView() {
   // Formula: depositedUsd = rawCapital / 10^decimals
   // Matches PositionsDock's pnlUsdRaw convention (divide by decimals only) and
   // this hook's own usePortfolio totals (which never multiply capital by price).
-  // Filter out empty/closed accounts (FLAT with zero capital) — they clutter the list
+  // Realized profit the engine can still convert on a flat account (pnl minus the
+  // reserved part, the exact ConvertReleasedPnl cap). A full close sweeps capital to
+  // the wallet but leaves this in `pnl` until the user converts it from the market's
+  // Withdraw tab — so a flat account can hold money with capital 0. Sentinel first:
+  // v12 flat accounts carry u64::MAX pnl, and MAX minus reserved is still "profit".
+  const pendingProfit = (pos: PortfolioPosition): bigint => {
+    const pnl = pos.account?.pnl ?? 0n;
+    if ((pos.account?.positionSize ?? 0n) !== 0n || isSentinelValue(pnl)) return 0n;
+    return releasedPnlFace(pnl, pos.account?.reservedPnl ?? 0n);
+  };
+
+  // Filter out empty/closed accounts (FLAT with zero capital and no pending
+  // profit) — they clutter the list
   const activePositions = positions.filter(
-    (pos) => pos.account.positionSize !== 0n || pos.account.capital > 0n
+    (pos) => pos.account.positionSize !== 0n || pos.account.capital > 0n || pendingProfit(pos) > 0n
   );
 
   // Split real trades from idle deposits. A funded-but-flat account is the
@@ -662,24 +680,28 @@ export function PortfolioPositionsView() {
     // so without this line a drained balance has NO explanation anywhere in the
     // UI — unrealized PnL reads flat while the deposit total quietly shrinks.
     let realizedLossUsd = 0;
+    // Realized-but-unconverted profit on flat accounts (the swept-close case).
+    // Part of the portfolio's value, NOT of "Total Deposited" — it never was a deposit.
+    let pendingProfitUsd = 0;
     for (const pos of activePositions) {
       const decimals = getDecimals(pos);
       const divisor = 10 ** decimals;
       const capital = Number(pos.account.capital ?? 0n) / divisor;
       depositedUsd += capital;
       realizedLossUsd += Number(pos.realizedLoss ?? 0n) / divisor;
+      pendingProfitUsd += Number(pendingProfit(pos)) / divisor;
       // pos.unrealizedPnl is already collateral-scale (valueAtMark, lib/position-pnl.ts) —
       // divide by decimals only, same as PositionsDock's pnlUsdRaw and raw
       // capital above (collateral is sim-USDC dollars, no price factor).
       unrealizedPnlUsd += Number(pos.unrealizedPnl) / divisor;
     }
-    return { depositedUsd, unrealizedPnlUsd, realizedLossUsd, valueUsd: depositedUsd + unrealizedPnlUsd };
+    return { depositedUsd, pendingProfitUsd, unrealizedPnlUsd, realizedLossUsd, valueUsd: depositedUsd + pendingProfitUsd + unrealizedPnlUsd };
   };
   // Don't compute USD totals until token metadata (decimals) has loaded —
   // using the default 6 decimals for a 9-decimal token inflates values 1000x
   const usdTotals = activePositions.length > 0 && !tokenMetasLoading
     ? computeUsdTotals()
-    : { depositedUsd: 0, unrealizedPnlUsd: 0, realizedLossUsd: 0, valueUsd: 0 };
+    : { depositedUsd: 0, pendingProfitUsd: 0, unrealizedPnlUsd: 0, realizedLossUsd: 0, valueUsd: 0 };
 
   // PERF PLAN #3: the hero tiles (Portfolio Value / Unrealized PnL) tick
   // LIVE off the shared WS price store, instead of only refreshing on
@@ -708,16 +730,19 @@ export function PortfolioPositionsView() {
           if (!livePnl.pnlKnown) unknownPnlCount++;
           unrealizedPnlUsd += Number(livePnl.unrealizedPnl ?? 0n) / divisor;
         }
-        // Deposited total isn't price-dependent — reuse usdTotals' value
-        // rather than re-summing capital a second time.
-        return { unrealizedPnlUsd, unknownPnlCount, valueUsd: usdTotals.depositedUsd + unrealizedPnlUsd };
+        // Deposited and pending-profit totals aren't price-dependent — reuse
+        // usdTotals' values rather than re-summing them a second time.
+        return { unrealizedPnlUsd, unknownPnlCount, valueUsd: usdTotals.depositedUsd + usdTotals.pendingProfitUsd + unrealizedPnlUsd };
       })()
     : { unrealizedPnlUsd: 0, unknownPnlCount: 0, valueUsd: 0 };
 
   // Idle (parked, non-position) collateral value — its own Tier-2 tile now
   // that "Positions" no longer conflates open positions with idle deposits.
   const idleDepositsUsd = !tokenMetasLoading
-    ? idleDeposits.reduce((sum, pos) => sum + Number(pos.account?.capital ?? 0n) / (10 ** getDecimals(pos)), 0)
+    ? idleDeposits.reduce(
+        (sum, pos) => sum + Number((pos.account?.capital ?? 0n) + pendingProfit(pos)) / (10 ** getDecimals(pos)),
+        0,
+      )
     : 0;
 
   if (!connected) {
@@ -986,8 +1011,11 @@ export function PortfolioPositionsView() {
                       <span className="text-[13px] font-semibold text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                         {marketLabel(pos)}
                       </span>
-                      <span className="rounded bg-[var(--bg-elevated)] px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)]">
-                        idle collateral
+                      <span
+                        className="rounded bg-[var(--bg-elevated)] px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)]"
+                        title={pendingProfit(pos) > 0n ? SETTLING_PROFIT_TITLE : undefined}
+                      >
+                        {pendingProfit(pos) > 0n ? "profit settling" : "idle collateral"}
                       </span>
                     </div>
                     <div className="flex items-center gap-4">
@@ -996,8 +1024,15 @@ export function PortfolioPositionsView() {
                         <span className="text-[10px] text-[var(--text-secondary)]">
                           {tokenMetaMap.get(pos.collateralMint.toBase58())?.symbol ?? "USDC"}
                         </span>
+                        {pendingProfit(pos) > 0n && (
+                          <span data-testid="pending-profit" className="ml-2 text-[11px] text-[var(--long)]" title={SETTLING_PROFIT_TITLE}>
+                            +{formatTokenAmount(pendingProfit(pos), getDecimals(pos), 3)} profit
+                          </span>
+                        )}
                       </span>
-                      <span className="text-[10px] uppercase tracking-[0.1em] text-[var(--accent)]">Trade →</span>
+                      <span className="text-[10px] uppercase tracking-[0.1em] text-[var(--accent)]">
+                        {pendingProfit(pos) > 0n ? "Withdraw →" : "Trade →"}
+                      </span>
                     </div>
                   </Link>
                 ))}
