@@ -197,8 +197,10 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
     if (walletBalance == null) return; // wait for a real balance read
     const capitalNow = userAccount?.account.capital ?? 0n;
     if (capitalNow !== 0n) return; // only for never-funded accounts
+    // Nothing to prefill yet. Don't latch: an empty wallet funded from the faucet should
+    // still get the starter amount once the balance arrives.
+    if (walletBalance <= 0n) return;
     prefilledRef.current = true;
-    if (walletBalance <= 0n) return; // nothing to prefill
     const prefillAmt = walletBalance < AUTO_DEPOSIT_AMOUNT ? walletBalance : AUTO_DEPOSIT_AMOUNT;
     setAmount(formatTokenAmount(prefillAmt, decimals));
   }, [mode, amount, walletBalance, userAccount, decimals]);
@@ -260,20 +262,14 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
         {hasTokens ? (
           <>
             <p className="mb-2 text-[10px] text-[var(--text-secondary)]">
-              Create your trading account on this market to start trading.
+              Create your trading account on this market, then deposit to trade.
             </p>
             <button
               onClick={async () => {
                 try {
-                  // min(wallet balance, the same starter cap useAutoDeposit
-                  // uses) lets useInitUser fold Deposit into the same
-                  // account-creation transaction when possible — one click
-                  // can end in a tradeable, funded account instead of always
-                  // needing a second manual deposit afterward.
-                  const depositAmt = walletBalance != null && walletBalance < AUTO_DEPOSIT_AMOUNT
-                    ? walletBalance
-                    : AUTO_DEPOSIT_AMOUNT;
-                  const result = await initUser(depositAmt);
+                  // Account only (#2424: the starter deposit is user-chosen). The deposit
+                  // form this card shows next is prefilled, editable and balance-checked.
+                  const result = await initUser(0n);
                   setLastSig(result?.sig ?? null);
                 } catch {
                   // initError state is set by the hook and shown below

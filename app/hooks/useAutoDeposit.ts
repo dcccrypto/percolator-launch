@@ -54,9 +54,9 @@ import { useFaucetComplete } from "@/hooks/useDevnetFaucet";
 // PERC-808: useFaucetComplete returns true within 30s of faucet modal completion
 
 // Exported: OrderTicket's one-click "Initialize Account" CTA and
-// DepositWithdrawCard's "Create Trading Account" button reuse this same
-// starter-deposit cap so every first-time-setup entry point converges on
-// the same "reasonable starter" amount instead of each guessing its own.
+// DepositWithdrawCard's deposit prefill reuse this same starter-deposit cap
+// as the default they show, so every first-time-setup entry point suggests
+// the same "reasonable starter" amount (the user can edit it, #2424).
 export const AUTO_DEPOSIT_AMOUNT = 500_000_000n; // 500 USDC (6 decimals) — reasonable starter
 const MIN_WALLET_BALANCE = 10_000_000n; // 10 USDC minimum to bother depositing
 
