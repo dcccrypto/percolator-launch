@@ -26,7 +26,7 @@ import { CreatorMarketRow } from "@/components/my-markets/CreatorMarketRow";
 
 const SLAB = new PublicKey("GrKZUtyeaqbg1Q1J1kPWznui92sbLpX5F62LrBVGkifL");
 const slab = SLAB.toBase58();
-const mkt = (launch?: { mode: number; cTot: bigint; portfolios: bigint }, insurance = 0n) =>
+const mkt = (launch?: { mode: number; cTot: bigint; portfolios: bigint; backingFunded?: boolean }, insurance = 0n) =>
   ({
     slabAddress: SLAB,
     programId: PublicKey.default,
@@ -62,10 +62,12 @@ describe("My Markets: an unfinished launch", () => {
   it("created only / oracle handed off: Continue + Reclaim rent, and a reclaim dialog that never says 'close UNKNOWN market'", () => {
     renderRow(mkt({ mode: 0, cTot: 0n, portfolios: 0n }));
     expect(screen.getByTestId("unfinished-launch-panel").dataset.stage).toBe("removable");
-    expect(screen.getByTestId("unfinished-continue").getAttribute("href")).toBe("/create");
+    expect(screen.getByTestId("unfinished-continue").getAttribute("href")).toBe(`/create?resume=${slab}`);
     fireEvent.click(screen.getByTestId("unfinished-reclaim"));
     expect(screen.getByText("Reclaim rent from this unfinished launch")).toBeTruthy();
     expect(screen.queryByText(/Close .* market/)).toBeNull();
+    // removable: the dialog may say what was found
+    expect(screen.getByText("Remove this unfinished launch and get back its rent. No funds, portfolio or backing were found on it. You can't reopen it.")).toBeTruthy();
   });
 
   it("LP initialised (a portfolio, nothing deposited): Continue only, no close, no funds claim", () => {
@@ -79,7 +81,7 @@ describe("My Markets: an unfinished launch", () => {
   it("funded / vault created: told it can't be removed and to finish it; no close button, no dead-end checklist", () => {
     renderRow(mkt({ mode: 0, cTot: 1_000_000_000n, portfolios: 2n }, 50_000_000n));
     expect(screen.getByTestId("unfinished-launch-copy").textContent).toBe(
-      "It stopped after its funds went in, so it can't be removed. The only way forward is to finish it from Create Market. Nothing about your funds has changed, and they are not lost.",
+      "It stopped after its funds went in, so it can't be removed from here. The only way forward from here is to finish it from Create Market. Nothing about your funds has changed, and they are not lost.",
     );
     expect(screen.queryByTestId("unfinished-reclaim")).toBeNull();
     expect(screen.queryByTestId("close-market-button")).toBeNull();
@@ -88,10 +90,20 @@ describe("My Markets: an unfinished launch", () => {
     expect(screen.getByTestId("unfinished-continue")).toBeTruthy();
   });
 
-  it("not read yet: Continue only and no promise of a removal", () => {
+  it("backing funded, everything else zero: Continue only (it would otherwise look removable)", () => {
+    renderRow(mkt({ mode: 0, cTot: 0n, portfolios: 0n, backingFunded: true }));
+    expect(screen.getByTestId("unfinished-launch-panel").dataset.stage).toBe("committed");
+    expect(screen.queryByTestId("unfinished-reclaim")).toBeNull();
+  });
+
+  it("not read yet: Continue only; the dialog never claims nothing was deposited", () => {
     renderRow(mkt(undefined));
     expect(screen.getByTestId("unfinished-launch-panel").dataset.stage).toBe("unknown");
     expect(screen.queryByTestId("unfinished-reclaim")).toBeNull();
+    // the drawer's own reclaim button still exists while the read is pending: its dialog claims nothing
+    fireEvent.click(screen.getByTestId("close-market-button"));
+    expect(screen.getByText("Remove this unfinished launch and get back its rent. You can't reopen it.")).toBeTruthy();
+    expect(screen.queryByText(/Nothing was deposited|No funds, portfolio or backing/)).toBeNull();
   });
 });
 

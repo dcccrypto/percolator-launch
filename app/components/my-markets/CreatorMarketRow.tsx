@@ -550,7 +550,7 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
           {launchStage && (
             <UnfinishedLaunchPanel
               stage={launchStage}
-              continueHref="/create"
+              continueHref={`/create?resume=${slab}`}
               onReclaim={() => setShowCloseConfirm(true)}
               reclaiming={closeMarket.loading}
               reclaimBlockedReason={!isMarketAuth ? "Connect the wallet that launched this market to reclaim its rent." : closeBlocker?.unmetLine ?? null}
@@ -695,7 +695,7 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
       <ConfirmDialog
         open={showCloseConfirm}
         title={unfinished ? CLOSE_MARKET_COPY.unfinishedTitle : CLOSE_MARKET_COPY.title(symbol)}
-        description={unfinished ? CLOSE_MARKET_COPY.unfinishedBody : CLOSE_MARKET_COPY.body(symbol, null)}
+        description={unfinished ? (launchStage?.kind === "removable" ? CLOSE_MARKET_COPY.unfinishedBodyConfirmedEmpty : CLOSE_MARKET_COPY.unfinishedBody) : CLOSE_MARKET_COPY.body(symbol, null)}
         confirmLabel={unfinished ? CLOSE_MARKET_COPY.unfinishedConfirm : CLOSE_MARKET_COPY.confirm}
         danger
         onConfirm={handleClose}

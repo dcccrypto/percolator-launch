@@ -3,6 +3,8 @@
  * removable / committed decision comes from the chain facts the close actually depends on.
  */
 import { describe, expect, it } from "vitest";
+import { liveSlab, FINISHED_SLAB, UNFINISHED_SLAB, C_TOT_OFF, INSURANCE_OFF } from "../fixtures/relaunch/m7-slabs";
+import { V17_MARKET_GROUP_OFF, V17_MARKET_GROUP_LEN, V17_MARKET_ASSET_SLOT_LEN, V17_ASSET_SLOT_WRAPPER_LEN, V17_ENGINE_BACKING_LONG_REL, V17_ENGINE_BACKING_SHORT_REL } from "@percolatorct/sdk";
 import { resolveIdentity, sawPlaceholderTicker } from "@/lib/bulk-identity";
 import { closeMarketChecklist, firstUnmet } from "@/lib/close-market-checklist";
 import {
@@ -56,7 +58,7 @@ describe("the row's name", () => {
 });
 
 describe("what the launch stopped at (chain facts the close depends on)", () => {
-  const fp = (o: Partial<{ mode: number; cTot: bigint; portfolios: bigint }> = {}) => ({ mode: 0, cTot: 0n, portfolios: 0n, ...o });
+  const fp = (o: Partial<{ mode: number; cTot: bigint; portfolios: bigint; backingFunded: boolean }> = {}) => ({ mode: 0, cTot: 0n, portfolios: 0n, backingFunded: false, ...o });
   it("created only / oracle handed off (no portfolio, no funds): removable", () => {
     expect(classifyLaunchStage(fp(), 0n)).toEqual({ kind: "removable" });
   });
@@ -70,6 +72,9 @@ describe("what the launch stopped at (chain facts the close depends on)", () => 
   it("vault created is funded by construction (step 4 follows the step-3 deposit)", () => {
     expect(classifyLaunchStage(fp({ portfolios: 2n, cTot: 1_000_000_000n }), 100n)).toEqual({ kind: "committed", funded: true });
   });
+  it("LP-vault backing alone (c_tot, insurance and portfolios read zero) is committed: CloseSlab refuses it", () => {
+    expect(classifyLaunchStage(fp({ backingFunded: true }), 0n)).toEqual({ kind: "committed", funded: true });
+  });
   it("nothing read yet: unknown, and no claim either way", () => {
     expect(classifyLaunchStage(null, 0n)).toEqual({ kind: "unknown" });
     expect(classifyLaunchStage(fp(), null)).toEqual({ kind: "unknown" });
@@ -79,10 +84,33 @@ describe("what the launch stopped at (chain facts the close depends on)", () => 
     expect(UNFINISHED_COPY.committedFunded).toMatch(/can't be removed/);
     expect(UNFINISHED_COPY.committedFunded).toMatch(/finish it from Create Market/);
     expect(unfinishedStageCopy({ kind: "removable" })).toMatch(/reclaim its rent/);
+    // the app has no flow for the program's resolve -> close own LP -> withdraw insurance -> close route
+    expect(UNFINISHED_COPY.committedFunded).toMatch(/can't be removed from here/);
+    expect(UNFINISHED_COPY.insuranceBlocked).toMatch(/can't be removed from here/);
+    expect(UNFINISHED_COPY.committedPortfolio).toMatch(/can't be removed from here/);
     // the unfunded-portfolio case must not claim funds went in
     expect(unfinishedStageCopy({ kind: "committed", funded: false })).not.toMatch(/funds went in/);
     // the unread case must not promise a removal
     expect(unfinishedStageCopy({ kind: "unknown" })).not.toMatch(/reclaim|removed/i);
+  });
+  it("reads REAL slabs: a finished market has backing funded; an unfinished launch with nothing deposited does not", () => {
+    const fin = readLaunchFootprint(new Uint8Array(liveSlab(FINISHED_SLAB)));
+    expect(fin).toMatchObject({ mode: 0, cTot: 1_000_000_000n, portfolios: 1n, backingFunded: true });
+    const unf = readLaunchFootprint(new Uint8Array(liveSlab(UNFINISHED_SLAB)));
+    expect(unf).toMatchObject({ cTot: 0n, backingFunded: false });
+  });
+  it("a slab whose only funds are LP-vault backing is read as committed (it would otherwise look removable and the Reclaim would revert)", () => {
+    const b = Buffer.from(liveSlab(FINISHED_SLAB));
+    b.fill(0, C_TOT_OFF, C_TOT_OFF + 16); // c_tot 0
+    b.fill(0, INSURANCE_OFF, INSURANCE_OFF + 16); // insurance 0
+    b.fill(0, 16 + 576 + 517, 16 + 576 + 517 + 8); // no materialised portfolio
+    const f = readLaunchFootprint(new Uint8Array(b));
+    expect(f).toMatchObject({ cTot: 0n, portfolios: 0n, backingFunded: true });
+    expect(classifyLaunchStage(f, 0n)).toEqual({ kind: "committed", funded: true });
+    // CONTROL: the same slab with backing zeroed too is removable
+    const bb = Buffer.from(b);
+    for (const off of backingOffsets(bb)) bb.fill(0, off, off + 104);
+    expect(classifyLaunchStage(readLaunchFootprint(new Uint8Array(bb)), 0n)).toEqual({ kind: "removable" });
   });
   it("readLaunchFootprint is null for bytes too short to be a market (never a guess)", () => {
     expect(readLaunchFootprint(new Uint8Array(10))).toBeNull();
@@ -119,3 +147,15 @@ describe("what the launching browser knows about the token", () => {
     expect(savedLaunchIdentity(SLAB, null)).toBeNull();
   });
 });
+
+/** Absolute offsets of every backing bucket of the (14-slot) fixture slab, from the SDK's own layout constants. */
+function backingOffsets(data: Uint8Array): number[] {
+  const out: number[] = [];
+  const slotsBase = V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN;
+  const slots = Math.floor((data.length - slotsBase) / V17_MARKET_ASSET_SLOT_LEN);
+  for (let i = 0; i < slots; i++) {
+    const engine = slotsBase + i * V17_MARKET_ASSET_SLOT_LEN + V17_ASSET_SLOT_WRAPPER_LEN;
+    out.push(engine + V17_ENGINE_BACKING_LONG_REL, engine + V17_ENGINE_BACKING_SHORT_REL);
+  }
+  return out;
+}
