@@ -22,20 +22,21 @@
  */
 import { Connection, PublicKey } from "@solana/web3.js";
 import {
-  parsePortfolioV17,
   parseAssetControlSequencesV17,
   parseProtocolFeeAuthorityEpoch,
   type AssetControlSequencesV17,
   type CrankObservationHint,
-  V17_MARKET_GROUP_OFF,
-  V17_MARKET_GROUP_LEN,
-  V17_MARKET_ASSET_SLOT_LEN,
-  V17_ASSET_ORACLE_WRAPPER_LEN,
 } from "@percolatorct/sdk";
+import { marketGeometry, parsePortfolio } from "@/lib/v22/layout";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 
 /** Absolute byte offset where asset `assetIndex`'s wrapper slot starts. */
-export function assetProfileOff(assetIndex: number): number {
-  return V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN + assetIndex * V17_MARKET_ASSET_SLOT_LEN;
+export function assetProfileOff(assetIndex: number, slabData?: Uint8Array): number {
+  // Geometry by the account's VERSION when the bytes are at hand (v2.2: slot 2,629 B after an 806 B group);
+  // without bytes it is the v2.1 geometry (what every caller used before v2.2).
+  if (slabData) return marketGeometry(slabData, "assetProfileOff").slotOff(assetIndex);
+  if (isDevnetV22Enabled()) throw new Error("assetProfileOff: pass the market account bytes (v2.2 geometry is chosen by VERSION)");
+  return marketGeometry(new Uint8Array(0), "assetProfileOff").slotOff(assetIndex);
 }
 
 function readU64LE(data: Uint8Array, off: number): bigint {
@@ -72,15 +73,18 @@ export interface MarketGroupHeaderState {
 }
 
 export function readMarketGroupHeader(slabData: Uint8Array): MarketGroupHeaderState {
-  const g = V17_MARKET_GROUP_OFF;
-  if (slabData.length < g + V17_MARKET_GROUP_LEN) {
+  const geo = marketGeometry(slabData, "readMarketGroupHeader");
+  const g = geo.groupOff;
+  const L = geo.layout.group;
+  if (slabData.length < geo.slotsBase) {
     throw new Error(`slab too short for the market-group header @ ${g}`);
   }
   return {
-    mode: slabData[g + HDR_MODE],
-    nextMarketId: readU64LE(slabData, g + HDR_NEXT_MARKET_ID),
-    cTot: readU64LE(slabData, g + HDR_C_TOT) | (readU64LE(slabData, g + HDR_C_TOT + 8) << 64n),
-    materializedPortfolioCount: readU64LE(slabData, g + HDR_MATERIALIZED_PORTFOLIO_COUNT),
+    mode: slabData[g + L.mode],
+    // next_market_id is not a column of the SDK table; it sits at a fixed distance after c_tot in both layouts.
+    nextMarketId: readU64LE(slabData, g + L.cTot + (HDR_NEXT_MARKET_ID - HDR_C_TOT)),
+    cTot: readU64LE(slabData, g + L.cTot) | (readU64LE(slabData, g + L.cTot + 8) << 64n),
+    materializedPortfolioCount: readU64LE(slabData, g + L.materializedPortfolioCount),
   };
 }
 
@@ -96,7 +100,7 @@ export interface PortfolioIdentity {
 
 /** Parse the v18 identity trailer from raw portfolio account bytes. */
 export function readPortfolioIdentity(portfolioData: Uint8Array): PortfolioIdentity {
-  const p = parsePortfolioV17(portfolioData);
+  const p = parsePortfolio(portfolioData);
   return {
     portfolioId: p.portfolioId,
     matcherSequence: p.matcherSequence,
@@ -110,7 +114,7 @@ export function readPortfolioIdentity(portfolioData: Uint8Array): PortfolioIdent
  * assume (fail-closed).
  */
 export function readAssetMarketId(slabData: Uint8Array, assetIndex = 0): bigint {
-  const off = assetProfileOff(assetIndex) + V17_ASSET_ORACLE_WRAPPER_LEN;
+  const off = marketGeometry(slabData, "readAssetMarketId").engineOff(assetIndex);
   if (slabData.length < off + 8) {
     throw new Error(`slab too short for AssetStateV16.market_id @ ${off}`);
   }

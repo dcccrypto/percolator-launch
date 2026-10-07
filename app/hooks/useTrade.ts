@@ -14,8 +14,6 @@ import {
   deriveLpPda,
   derivePythPushOraclePDA,
   deriveMatcherDelegate,
-  isV17Account,
-  parsePortfolioV17,
 } from "@percolatorct/sdk";
 // TODO(oracle-migration): encodePushOraclePrice/ACCOUNTS_PUSH_ORACLE_PRICE removed in beta.29.
 // The DEX oracle inline push path needs to migrate to /api/oracle/advance-phase.
@@ -57,6 +55,7 @@ import { fetchPortfolioIdentity, fetchAssetMarketId, defaultCrankObservations } 
 import { buildTradeIxs } from "@/lib/trade-ix";
 import { isPortfolioAccount } from "@/lib/portfolio-account";
 import { findOwnerPortfolio } from "@/lib/owner-portfolio";
+import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 
 // ---------------------------------------------------------------------------
 // v17 portfolio account layout constants
@@ -429,7 +428,7 @@ export function useTrade(slabAddress: string) {
         // B-6: Detect v17 using the same SDK isV17Account check as useClosePosition,
         // rather than the `accounts.length === 0` heuristic which misidentifies v12
         // markets with no LP yet (empty bitmap) as v17 markets.
-        const isV17Market = raw != null && raw.length > 0 && isV17Account(raw);
+        const isV17Market = raw != null && raw.length > 0 && isWrapperAccount(raw);
 
         let accountA: PublicKey;
         let accountB: PublicKey;
@@ -543,7 +542,7 @@ export function useTrade(slabAddress: string) {
           try {
             const portInfo = await connection.getAccountInfo(accountA, "confirmed");
             if (portInfo) {
-              const pf = parsePortfolioV17(new Uint8Array(portInfo.data));
+              const pf = parsePortfolio(new Uint8Array(portInfo.data));
               hasActiveLegs = pf.legs.some((l) => l.active);
               if (isDevnetV21Enabled() && raw) {
                 const mid = decodeMarketEngineView(raw)?.marketId ?? null;

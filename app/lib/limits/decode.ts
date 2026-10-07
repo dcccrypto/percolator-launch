@@ -6,6 +6,10 @@
  * "limits unavailable" instead of a guessed number.
  */
 import * as C from "./constants";
+import { portfolioLegGeometry } from "@/lib/v22/layout";
+import { marketOffsets, marketOffsetsOrNull } from "@/lib/v22/market-offsets";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { LAYOUT_V22 } from "@/lib/v22/sdk";
 
 function dv(d: Uint8Array): DataView {
   return new DataView(d.buffer, d.byteOffset, d.byteLength);
@@ -63,26 +67,34 @@ export interface MarketEngineView {
 }
 
 /** Bytes needed to decode asset `i`'s engine view and wrapper-slot records. */
-export const marketLimitsSliceLen = (i = 0): number => C.assetEngineOff(i) + 1301;
+export const marketLimitsSliceLen = (i = 0): number =>
+  // Flag on: the larger (v2.2) geometry covers both VERSIONs; flag off: the v2.1 value, unchanged.
+  isDevnetV22Enabled()
+    ? LAYOUT_V22.marketGroupOff + LAYOUT_V22.marketGroupLen + i * LAYOUT_V22.assetSlotStride + LAYOUT_V22.wrapperSlotLen + LAYOUT_V22.engineSlotLen
+    : C.assetEngineOff(i) + 1301;
 
 /** A v18 wrapper MARKET account header (magic, version 18, kind 1). v17 slabs have another layout. */
 export function isV18MarketHeader(d: Uint8Array): boolean {
   if (d.length < C.HEADER_LEN) return false;
+  // Flag on: any KNOWN market VERSION (18 = v2.1, 19 = v2.2); the geometry is then resolved from it, never from the length.
+  if (isDevnetV22Enabled()) return marketOffsetsOrNull(d, "isV18MarketHeader") !== null;
   const v = dv(d);
   return v.getBigUint64(0, true) === C.WRAPPER_MAGIC && v.getUint16(8, true) === C.WRAPPER_VERSION_V18 && d[C.HEADER_KIND_OFF] === C.KIND_MARKET_ACCOUNT;
 }
 
 export function decodeMarketEngineView(d: Uint8Array, assetIndex = 0): MarketEngineView | null {
-  const e = C.assetEngineOff(assetIndex);
+  const M = marketOffsetsOrNull(d, "decodeMarketEngineView");
+  if (!M) return null;
+  const e = M.engineOff(assetIndex);
   if (d.length < e + C.A_MODE_SHORT + 1) return null;
   // Never read these offsets off a non-v18 account (a v17 slab reads a_long = a_short = 0,
   // which would look like the ADL reduce-only state).
   if (!isV18MarketHeader(d)) return null;
-  const g = C.MARKET_GROUP_OFF;
+  const g = M.g;
   const cfg = g + C.H_CONFIG;
   return {
-    currentSlot: u64(d, g + C.H_CURRENT_SLOT),
-    mode: d[g + C.H_MODE],
+    currentSlot: u64(d, M.hdr(C.H_CURRENT_SLOT)),
+    mode: d[M.hdr(C.H_MODE)],
     initialMarginBps: u64(d, cfg + C.CFG_INITIAL_MARGIN_BPS),
     maintenanceMarginBps: u64(d, cfg + C.CFG_MAINTENANCE_MARGIN_BPS),
     maxTradingFeeBps: u64(d, cfg + C.CFG_MAX_TRADING_FEE_BPS),
@@ -99,16 +111,16 @@ export function decodeMarketEngineView(d: Uint8Array, assetIndex = 0): MarketEng
     modeShort: d[e + C.A_MODE_SHORT],
     epochLong: u64(d, e + C.A_EPOCH_LONG),
     epochShort: u64(d, e + C.A_EPOCH_SHORT),
-    vaultAtoms: u128(d, g + C.H_VAULT),
-    insuranceAtoms: u128(d, g + C.H_INSURANCE),
-    sourceInsuranceCreditReservedTotal: u128(d, g + C.H_SOURCE_INSURANCE_CREDIT_RESERVED_TOTAL),
-    insuranceDomainBudgetRemainingTotal: u128(d, g + C.H_INSURANCE_DOMAIN_BUDGET_REMAINING_TOTAL),
+    vaultAtoms: u128(d, M.hdr(C.H_VAULT)),
+    insuranceAtoms: u128(d, M.hdr(C.H_INSURANCE)),
+    sourceInsuranceCreditReservedTotal: u128(d, M.hdr(C.H_SOURCE_INSURANCE_CREDIT_RESERVED_TOTAL)),
+    insuranceDomainBudgetRemainingTotal: u128(d, M.hdr(C.H_INSURANCE_DOMAIN_BUDGET_REMAINING_TOTAL)),
     lpFeeAccruedAtoms: u128(d, C.HEADER_LEN + C.WCFG_LP_FEE_ACCRUED_ATOMS),
     lpFeeWithdrawnAtoms: u128(d, C.HEADER_LEN + C.WCFG_LP_FEE_WITHDRAWN_ATOMS),
-    riskEpoch: u64(d, g + C.H_RISK_EPOCH),
-    assetSetEpoch: u64(d, g + C.H_ASSET_SET_EPOCH),
-    oracleEpoch: u64(d, g + C.H_ORACLE_EPOCH),
-    fundingEpoch: u64(d, g + C.H_FUNDING_EPOCH),
+    riskEpoch: u64(d, M.hdr(C.H_RISK_EPOCH)),
+    assetSetEpoch: u64(d, M.hdr(C.H_ASSET_SET_EPOCH)),
+    oracleEpoch: u64(d, M.hdr(C.H_ORACLE_EPOCH)),
+    fundingEpoch: u64(d, M.hdr(C.H_FUNDING_EPOCH)),
   };
 }
 
@@ -126,7 +138,9 @@ export interface AssetRiskLimits {
 
 /** P1 `AssetRiskLimitsV17`; null when too short or when `validate_asset_risk_limits` would refuse. */
 export function decodeAssetRiskLimits(d: Uint8Array, assetIndex = 0): AssetRiskLimits | null {
-  const b = C.assetWrapperOff(assetIndex) + C.ASSET_RISK_LIMITS_OFF;
+  const M = marketOffsetsOrNull(d, "decodeAssetRiskLimits");
+  if (!M) return null;
+  const b = M.wrapperOff(assetIndex) + C.ASSET_RISK_LIMITS_OFF;
   if (d.length < b + C.ASSET_RISK_LIMITS_LEN) return null;
   if (d[b + C.RL_RESERVED0] !== 0 || !allZero(d, b + C.RL_RESERVED, C.RL_RESERVED_LEN)) return null;
   const r: AssetRiskLimits = {
@@ -174,7 +188,9 @@ export interface AssetVaultLp {
 
 /** P3 `AssetVaultLpV18` (@8d651c45); null when too short or `validate_asset_vault_lp` would refuse. */
 export function decodeAssetVaultLp(d: Uint8Array, assetIndex = 0): AssetVaultLp | null {
-  const b = C.assetWrapperOff(assetIndex) + C.ASSET_VAULT_LP_OFF;
+  const M = marketOffsetsOrNull(d, "decodeAssetVaultLp");
+  if (!M) return null;
+  const b = M.wrapperOff(assetIndex) + C.ASSET_VAULT_LP_OFF;
   if (d.length < b + C.ASSET_VAULT_LP_LEN) return null;
   const flags = d[b + C.AV_FLAGS];
   const key = d.slice(b + C.AV_VAULT_LP_PORTFOLIO, b + C.AV_VAULT_LP_PORTFOLIO + 32);
@@ -231,23 +247,27 @@ export interface PortfolioRiskView {
 }
 
 export function decodePortfolioRisk(d: Uint8Array): PortfolioRiskView | null {
-  if (d.length < C.PF_B_STALE_STATE + 1) return null;
+  // Fields after the legs move with the leg stride (v2.2: 217 B legs); geometry comes from the account's VERSION.
+  const geo = portfolioLegGeometry(d);
+  if (!geo) return null;
+  const sh = geo.afterLegsShift;
+  if (d.length < C.PF_B_STALE_STATE + sh + 1) return null;
   return {
     owner: d.slice(C.PF_OWNER, C.PF_OWNER + 32),
     capital: u128(d, C.PF_CAPITAL),
     pnl: i128(d, C.PF_PNL),
     feeCredits: i128(d, C.PF_FEE_CREDITS),
     activeBitmap: u64(d, C.PF_ACTIVE_BITMAP),
-    staleState: d[C.PF_STALE_STATE],
-    bStaleState: d[C.PF_B_STALE_STATE],
+    staleState: d[C.PF_STALE_STATE + sh],
+    bStaleState: d[C.PF_B_STALE_STATE + sh],
     cert: {
-      certifiedEquity: i128(d, C.PF_HEALTH_CERT + C.CERT_EQUITY),
-      oracleEpoch: u64(d, C.PF_HEALTH_CERT + C.CERT_ORACLE_EPOCH),
-      fundingEpoch: u64(d, C.PF_HEALTH_CERT + C.CERT_FUNDING_EPOCH),
-      riskEpoch: u64(d, C.PF_HEALTH_CERT + C.CERT_RISK_EPOCH),
-      assetSetEpoch: u64(d, C.PF_HEALTH_CERT + C.CERT_ASSET_SET_EPOCH),
-      activeBitmapAtCert: u64(d, C.PF_HEALTH_CERT + C.CERT_ACTIVE_BITMAP),
-      validByte: d[C.PF_HEALTH_CERT + C.CERT_VALID],
+      certifiedEquity: i128(d, C.PF_HEALTH_CERT + sh + C.CERT_EQUITY),
+      oracleEpoch: u64(d, C.PF_HEALTH_CERT + sh + C.CERT_ORACLE_EPOCH),
+      fundingEpoch: u64(d, C.PF_HEALTH_CERT + sh + C.CERT_FUNDING_EPOCH),
+      riskEpoch: u64(d, C.PF_HEALTH_CERT + sh + C.CERT_RISK_EPOCH),
+      assetSetEpoch: u64(d, C.PF_HEALTH_CERT + sh + C.CERT_ASSET_SET_EPOCH),
+      activeBitmapAtCert: u64(d, C.PF_HEALTH_CERT + sh + C.CERT_ACTIVE_BITMAP),
+      validByte: d[C.PF_HEALTH_CERT + sh + C.CERT_VALID],
     },
   };
 }
@@ -263,11 +283,12 @@ export interface PortfolioLegView {
 
 /** Every ACTIVE leg (slot order), as the wrapper iterates `lp.legs` (UX WP-4 worse-of bounds). */
 export function decodePortfolioLegs(d: Uint8Array): PortfolioLegView[] {
-  if (d.length < C.PF_LEGS + C.PF_MAX_LEGS * C.PF_LEG_LEN) return [];
+  const geo = portfolioLegGeometry(d);
+  if (!geo || d.length < geo.legsOff + geo.legCount * geo.legStride) return [];
   const v = dv(d);
   const out: PortfolioLegView[] = [];
-  for (let s = 0; s < C.PF_MAX_LEGS; s++) {
-    const l = C.PF_LEGS + s * C.PF_LEG_LEN;
+  for (let s = 0; s < geo.legCount; s++) {
+    const l = geo.legsOff + s * geo.legStride;
     if (d[l + C.LEG_ACTIVE] !== 1) continue;
     out.push({ slot: s, assetIndex: v.getUint32(l + C.LEG_ASSET_INDEX, true), side: d[l + C.LEG_SIDE], basisPosQ: i128(d, l + C.LEG_BASIS_POS_Q) });
   }
@@ -280,10 +301,11 @@ export function decodePortfolioLegs(d: Uint8Array): PortfolioLegView[] {
  * ADL-scaled — exactly what P1's caps use.
  */
 export function signedPositionForAsset(d: Uint8Array, assetIndex: number, marketId: bigint): bigint {
-  if (d.length < C.PF_LEGS + C.PF_MAX_LEGS * C.PF_LEG_LEN) return 0n;
+  const geo = portfolioLegGeometry(d);
+  if (!geo || d.length < geo.legsOff + geo.legCount * geo.legStride) return 0n;
   const v = dv(d);
-  for (let s = 0; s < C.PF_MAX_LEGS; s++) {
-    const l = C.PF_LEGS + s * C.PF_LEG_LEN;
+  for (let s = 0; s < geo.legCount; s++) {
+    const l = geo.legsOff + s * geo.legStride;
     if (d[l + C.LEG_ACTIVE] !== 1) continue;
     if (v.getUint32(l + C.LEG_ASSET_INDEX, true) !== assetIndex) continue;
     if (v.getBigUint64(l + C.LEG_MARKET_ID, true) !== marketId) continue;
@@ -469,16 +491,18 @@ export interface ResolvedMarketView {
 }
 
 export function decodeResolvedMarket(d: Uint8Array): ResolvedMarketView | null {
-  const g = C.MARKET_GROUP_OFF;
-  if (d.length < g + C.MARKET_GROUP_LEN) return null;
+  const M = marketOffsetsOrNull(d, "decodeResolvedMarket");
+  if (!M) return null;
+  const g = M.g;
+  if (d.length < g + M.layout.marketGroupLen) return null;
   if (!isV18MarketHeader(d)) return null;
   return {
-    mode: d[g + C.H_MODE],
-    currentSlot: u64(d, g + C.H_CURRENT_SLOT),
-    resolvedSlot: u64(d, g + C.H_RESOLVED_SLOT),
+    mode: d[M.hdr(C.H_MODE)],
+    currentSlot: u64(d, M.hdr(C.H_CURRENT_SLOT)),
+    resolvedSlot: u64(d, M.hdr(C.H_RESOLVED_SLOT)),
     forceCloseDelaySlots: u64(d, C.HEADER_LEN + C.WCFG_FORCE_CLOSE_DELAY_SLOTS),
-    cTot: u128(d, g + C.H_C_TOT),
-    materializedPortfolioCount: u64(d, g + C.H_MATERIALIZED_PORTFOLIO_COUNT),
+    cTot: u128(d, M.hdr(C.H_C_TOT)),
+    materializedPortfolioCount: u64(d, M.hdr(C.H_MATERIALIZED_PORTFOLIO_COUNT)),
     marketauth: d.slice(C.HEADER_LEN, C.HEADER_LEN + 32),
   };
 }
@@ -500,7 +524,10 @@ export interface ResolvedPortfolioView {
 }
 
 export function decodeResolvedPortfolio(d: Uint8Array): ResolvedPortfolioView | null {
-  const r = C.PF_RESOLVED_PAYOUT_RECEIPT;
+  const geo = portfolioLegGeometry(d);
+  if (!geo) return null;
+  const sh = geo.afterLegsShift;
+  const r = C.PF_RESOLVED_PAYOUT_RECEIPT + sh;
   if (d.length < r + C.RECEIPT_FINALIZED + 1) return null;
   if (d[C.HEADER_KIND_OFF] !== C.KIND_PORTFOLIO) return null;
   return {
@@ -511,10 +538,10 @@ export function decodeResolvedPortfolio(d: Uint8Array): ResolvedPortfolioView | 
     feeCredits: i128(d, C.PF_FEE_CREDITS),
     cancelDepositEscrow: u128(d, C.PF_CANCEL_DEPOSIT_ESCROW),
     activeBitmap: u64(d, C.PF_ACTIVE_BITMAP),
-    stale: d[C.PF_STALE_STATE] !== 0,
-    bStale: d[C.PF_B_STALE_STATE] !== 0,
-    rebalanceLock: d[C.PF_REBALANCE_LOCK] !== 0,
-    liquidationLock: d[C.PF_LIQUIDATION_LOCK] !== 0,
+    stale: d[C.PF_STALE_STATE + sh] !== 0,
+    bStale: d[C.PF_B_STALE_STATE + sh] !== 0,
+    rebalanceLock: d[C.PF_REBALANCE_LOCK + sh] !== 0,
+    liquidationLock: d[C.PF_LIQUIDATION_LOCK + sh] !== 0,
     receiptPresent: d[r + C.RECEIPT_PRESENT] !== 0,
     receiptFinalized: d[r + C.RECEIPT_FINALIZED] !== 0,
   };
@@ -531,18 +558,20 @@ export function decodeResolvedPortfolio(d: Uint8Array): ResolvedPortfolioView | 
  *    what Resolved seniors are paid from (min(physical, C)); the junior's 102 takes physical - C.
  */
 export function decodeTerminalBacking(d: Uint8Array, registryDomain: number): { residual: bigint; physical: bigint } | null {
-  const g = C.MARKET_GROUP_OFF;
-  if (!isV18MarketHeader(d) || d.length < g + C.MARKET_GROUP_LEN) return null;
+  const M = marketOffsetsOrNull(d, "decodeTerminalBacking");
+  if (!M) return null;
+  const g = M.g;
+  if (!isV18MarketHeader(d) || d.length < g + M.layout.marketGroupLen) return null;
   const owned =
-    u128(d, g + C.H_C_TOT) +
-    u128(d, g + C.H_INSURANCE) +
-    u128(d, g + C.H_BACKING_PROVIDER_EARNINGS_TOTAL) +
-    u128(d, g + C.H_SOURCE_FRESH_BACKING_TOTAL_NUM) / C.BOUND_SCALE;
-  const vault = u128(d, g + C.H_VAULT);
+    u128(d, M.hdr(C.H_C_TOT)) +
+    u128(d, M.hdr(C.H_INSURANCE)) +
+    u128(d, M.hdr(C.H_BACKING_PROVIDER_EARNINGS_TOTAL)) +
+    u128(d, M.hdr(C.H_SOURCE_FRESH_BACKING_TOTAL_NUM)) / C.BOUND_SCALE;
+  const vault = u128(d, M.hdr(C.H_VAULT));
   const residual = vault > owned ? vault - owned : 0n;
   let physical = 0n;
   for (const dom of [registryDomain, registryDomain ^ 1]) {
-    const off = C.assetEngineOff(Math.floor(dom / 2)) + (dom % 2 === 0 ? C.SLOT_BACKING_LONG : C.SLOT_BACKING_SHORT) + C.BUCKET_FRESH_UNLIENED_BACKING_NUM;
+    const off = M.engineOff(Math.floor(dom / 2)) + M.slotRel(dom % 2 === 0 ? C.SLOT_BACKING_LONG : C.SLOT_BACKING_SHORT) + C.BUCKET_FRESH_UNLIENED_BACKING_NUM;
     if (d.length < off + 16) return null;
     physical += u128(d, off) / C.BOUND_SCALE;
   }

@@ -9,7 +9,6 @@
  * reads the network and nothing here throws on short or foreign bytes.
  */
 import {
-  decodeAssetGrowthV19,
   isBankruptcyHlockActive,
   previewGrowthOpenFee,
   quoteMaxLeverage,
@@ -18,9 +17,22 @@ import {
   type MaxLeverageQuote,
   type QuoteMaxLeverageInput,
 } from "./sdk";
+import { decodeAssetGrowthV19 } from "../v22/records";
+import { layoutOf } from "../v22/layout";
 
-const MARKET_GROUP_OFF = 592;
-const H_BANKRUPTCY_HLOCK = 621;
+/**
+ * Absolute offset of the bankruptcy h-lock byte: `groupOff + (layout.group.mode - 5)`. 592 + 621 = 1213 on v2.1
+ * (VERSION 18); the layout row moves it with the 48 B config growth on v2.2. Null when the account is not a
+ * market of a known VERSION (flag on) so nothing is claimed.
+ */
+function hlockOffset(raw: Uint8Array): number | null {
+  try {
+    const L = layoutOf(raw, "readBankruptcyHlockActive");
+    return L.marketGroupOff + (L.group.mode - 5);
+  } catch {
+    return null;
+  }
+}
 
 /** The record, or null when growth is OFF / the bytes are not a market account. Never throws. */
 export function decodeGrowthRecord(raw: Uint8Array | null | undefined, assetIndex = 0): AssetGrowthV19 | null {
@@ -34,8 +46,10 @@ export function decodeGrowthRecord(raw: Uint8Array | null | undefined, assetInde
 
 /** The market's bankruptcy h-lock is latched (the byte is non-zero; it is not only 0/1 any more). */
 export function readBankruptcyHlockActive(raw: Uint8Array | null | undefined): boolean {
-  if (!raw || raw.length <= MARKET_GROUP_OFF + H_BANKRUPTCY_HLOCK) return false;
-  return isBankruptcyHlockActive(raw[MARKET_GROUP_OFF + H_BANKRUPTCY_HLOCK] as number);
+  if (!raw) return false;
+  const off = hlockOffset(raw);
+  if (off === null || raw.length <= off) return false;
+  return isBankruptcyHlockActive(raw[off] as number);
 }
 
 export interface GrowthMarketInput {

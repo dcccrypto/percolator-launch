@@ -11,6 +11,9 @@ import { EarnPendingWithdrawal } from '@/components/earn/EarnPendingWithdrawal';
 import { EarnPayoutCapError } from '@/lib/limits/earn-split-pot';
 import { isDevnetV21Enabled } from '@/lib/v21/flag';
 import { V21_COPY } from '@/lib/v21/copy';
+import { isDevnetV22Enabled } from '@/lib/v22/flag';
+import { EarnExitQuote } from '@/components/earn/EarnExitQuote';
+import { useEarnExitV22, type EarnExitParams } from '@/hooks/useEarnExitV22';
 import {
   EARN_WITHDRAW_COPY as WC,
   cooldownPhrase,
@@ -125,6 +128,30 @@ interface DepositWithdrawPanelProps {
    * `shares` (cancel + request in one transaction); the payout then collects by itself.
    */
   onResizeRedemption?: (shares: bigint) => Promise<void>;
+  /**
+   * Devnet v2.2 (flag): market / program / mint / pot for the quote-first exit. Absent or flag off: the
+   * existing one-step withdraw button is rendered, untouched.
+   */
+  exitV22?: Pick<EarnExitParams, 'market' | 'programId' | 'collateralMint' | 'sourceDomain'>;
+}
+
+/** v2.2 quote-first exit (own component so the v2.1 render path has no extra hook). */
+function ExitV22Step({ ex, shares, estimate, flow, decimals, symbol, valid }: { ex: NonNullable<DepositWithdrawPanelProps['exitV22']>; shares: bigint; estimate: bigint; flow: 'one-tx' | 'two-step'; decimals: number; symbol: string; valid: boolean }) {
+  const exit = useEarnExitV22({ ...ex, shares, mode: flow === 'one-tx' ? 'pair' : 'request', estimateAtoms: estimate });
+  return <EarnExitQuote exit={exit} decimals={decimals} symbol={symbol} canQuote={valid && shares > 0n} />;
+}
+
+/**
+ * v2.2: collecting a pending redemption is tag 77 too, so it needs the same floor, the inline refresh and the quote
+ * shown first (the legacy one-step claim sends a bare 77 that a v2.2 vault answers with 118 on a book that is not loss-current).
+ */
+function PendingClaimV22({ ex, shares, decimals, symbol }: { ex: NonNullable<DepositWithdrawPanelProps['exitV22']>; shares: bigint; decimals: number; symbol: string }) {
+  const exit = useEarnExitV22({ ...ex, shares, mode: 'execute', estimateAtoms: 0n });
+  return (
+    <div data-testid="earn-pending-claim-v22" className="mx-5 mt-3">
+      <EarnExitQuote exit={exit} decimals={decimals} symbol={symbol} canQuote={shares > 0n} />
+    </div>
+  );
 }
 
 export function DepositWithdrawPanel({
@@ -151,6 +178,7 @@ export function DepositWithdrawPanel({
   pricing = null,
   onRefresh,
   onResizeRedemption,
+  exitV22,
 }: DepositWithdrawPanelProps) {
   const { connected } = useWalletCompat();
   const { connection } = useConnectionCompat();
@@ -440,7 +468,9 @@ export function DepositWithdrawPanel({
 
       {/* UX WP-4: the pending withdrawal card (both tabs). A full request escrows every share, so
           this is also what keeps the payout reachable (S1). It counts as an active position. */}
-      {hasPendingRedemption && (
+      {hasPendingRedemption && isDevnetV22Enabled() && exitV22 && cooldownElapsed ? (
+        <PendingClaimV22 ex={exitV22} shares={pendingRedemptionShares} decimals={decimals} symbol={collateralSymbol} />
+      ) : hasPendingRedemption && (
         <EarnPendingWithdrawal
           amountLabel={pendingAtoms !== null ? `${formatUsdc(pendingAtoms, decimals)} ${collateralSymbol}` : `${formatRaw(pendingRedemptionShares, decimals)} shares`}
           cooldownElapsed={cooldownElapsed}
@@ -655,6 +685,9 @@ export function DepositWithdrawPanel({
             {WC.requestLine(flow === 'one-tx' ? 'one transaction' : cooldownPhrase(cooldownSlots ?? 0n), flow === 'one-tx' ? 1 : 2)}
           </p>
         )}
+        {tab === 'withdraw' && isDevnetV22Enabled() && exitV22 ? (
+          <ExitV22Step ex={exitV22} shares={withdrawShares} estimate={previewCollateral} flow={flow} decimals={decimals} symbol={collateralSymbol} valid={isValid} />
+        ) : (
         <div className="flex gap-2">
           <GlowButton
             data-testid={tab === 'deposit' ? 'earn-deposit-submit' : 'earn-withdraw-request'}
@@ -673,6 +706,7 @@ export function DepositWithdrawPanel({
                 : WC.requestButton(rawAmount > 0n ? `${formatUsdc(previewCollateral, decimals)} ${collateralSymbol}` : collateralSymbol)}
           </GlowButton>
         </div>
+        )}
         </>
         )}
       </div>

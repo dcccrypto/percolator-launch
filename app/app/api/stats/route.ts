@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
-import { parseEngine, isV17Account, discoverMarkets, parseMarketGroupV17OI } from "@percolatorct/sdk";
+import { parseEngine, discoverMarkets } from "@percolatorct/sdk";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { isActiveMarket, isSaneMarketValue, isZombieMarket } from "@/lib/activeMarketFilter";
 import { isListedMarket } from "@/lib/market-visibility";
@@ -25,6 +25,7 @@ import {
 } from "@/lib/indexer-db";
 import { getMultipleAccountsInfoChunked } from "@/lib/rpc-chunk";
 import type { Database } from "@/lib/database.types";
+import { parseMarketOI, isWrapperAccount } from "@/lib/v22/layout";
 
 /** $1M ceiling — mirrors /api/markets sanitizePrice. */
 const MAX_SANE_PRICE_FOR_ACTIVE = 1_000_000;
@@ -223,9 +224,9 @@ async function computeStatsFromOnChainDiscovery(): Promise<(ReturnType<typeof ze
       infos.forEach((info, i) => {
         if (!info?.data) return;
         const bytes = new Uint8Array(info.data);
-        if (!isV17Account(bytes)) return;
+        if (!isWrapperAccount(bytes)) return;
         try {
-          const oi = parseMarketGroupV17OI(bytes);
+          const oi = parseMarketOI(bytes);
           const markPriceRaw = chunk[i].configV17?.markEwmaE6 ?? 0n;
           const markPriceUsd = markPriceRaw > 0n ? Number(markPriceRaw) / 1_000_000 : 0;
           // No valid mark price → USD value of this market's OI is indeterminate;
@@ -297,7 +298,7 @@ async function computeStatsFromIndexer(): Promise<ReturnType<typeof zeroStats>> 
           const bytes = new Uint8Array(info.data);
           // v17 accounts (PERCV16\0 magic) don't embed a v12-style engine block;
           // their aggregate OI is not yet parsed server-side.  Skip them.
-          if (isV17Account(bytes)) continue;
+          if (isWrapperAccount(bytes)) continue;
           const engine = parseEngine(bytes);
           const rawOi = engine.longOi + engine.shortOi;
           // Guard against overflow when converting bigint to Number

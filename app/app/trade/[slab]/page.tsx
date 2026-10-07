@@ -1,5 +1,6 @@
 "use client";
 
+import { UnsupportedLayoutNotice } from "@/components/v22/UnsupportedLayoutNotice";
 import { use, useState, useEffect, useRef, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { MobileTradeBand } from "@/components/trade/MobileTradeBand";
@@ -344,7 +345,7 @@ const MARKET_META_SWR_OPTS = { dedupingInterval: 10_000, refreshInterval: 0, rev
 function TradePageInner({ slab }: { slab: string }) {
   const isLargeScreen = useIsLargeScreen();
 
-  const { engine, config, header, loading: slabLoading, error: slabError } = useSlabState();
+  const { engine, config, header, loading: slabLoading, error: slabError, layoutUnsupported } = useSlabState();
   useAdvanceOraclePhase(slab);
   // Boolean presence subscription, NOT the full live-price state: this keeps the
   // trade-page shell OFF the ~4-5/sec price-tick re-render path (it only needs to
@@ -415,6 +416,14 @@ function TradePageInner({ slab }: { slab: string }) {
 
   if (slabLoading && !engine) {
     return <TradingPageLoading />;
+  }
+
+  if (layoutUnsupported) {
+    return (
+      <div className="min-h-[calc(100dvh-48px)] flex items-center justify-center px-4">
+        <UnsupportedLayoutNotice className="max-w-sm w-full" />
+      </div>
+    );
   }
 
   if (slabError && !config) {

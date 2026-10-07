@@ -5,7 +5,8 @@ import { BACKING_SEED_PCT_OF_LP } from "@/lib/market-params";
 import { wizardSlabBytes } from "@/lib/create-market-args";
 import { p3WizardEnabled } from "@/lib/limits/flags";
 import { VAULT_LP_MATCHER_CTX_LEN } from "@/lib/limits/constants";
-import { V17_PORTFOLIO_ACCOUNT_LEN, MATCHER_CONTEXT_LEN } from "@percolatorct/sdk";
+import { MATCHER_CONTEXT_LEN } from "@percolatorct/sdk";
+import { portfolioAccountLen } from "@/lib/v22/layout";
 
 interface CostEstimateProps {
   lpCollateral: string;
@@ -62,8 +63,9 @@ const EARN_VAULT_AND_STAKE_ACCOUNT_BYTES = [176, 82, 82, 165, 352];
  * P3 launches also create the vault-owned LP portfolio + its matcher context
  * client-side (buildP3BindIxs in lib/limits/p3-wizard.ts).
  */
-const LP_PORTFOLIO_AND_MATCHER_ACCOUNT_BYTES = [V17_PORTFOLIO_ACCOUNT_LEN, MATCHER_CONTEXT_LEN];
-const P3_VAULT_LP_ACCOUNT_BYTES = [V17_PORTFOLIO_ACCOUNT_LEN, VAULT_LP_MATCHER_CTX_LEN];
+// Functions, not module constants: the portfolio length depends on the layout flag (9,563 v2.1 / 10,603 v2.2).
+const lpPortfolioAndMatcherAccountBytes = (): number[] => [portfolioAccountLen(), MATCHER_CONTEXT_LEN];
+const p3VaultLpAccountBytes = (): number[] => [portfolioAccountLen(), VAULT_LP_MATCHER_CTX_LEN];
 
 export interface CreateMarketSolCostBreakdown {
   slabRentSol: number;
@@ -99,10 +101,10 @@ export function computeCreateMarketSolCost(
   const tokenAccountRentSol = rentSol(165, 165, 165, 82, 82);
 
   // Rent for the Step 2 LP portfolio + matcher context accounts — see
-  // LP_PORTFOLIO_AND_MATCHER_ACCOUNT_BYTES doc comment above.
+  // lpPortfolioAndMatcherAccountBytes() doc comment above.
   const lpPortfolioMatcherRentSol = rentSol(
-    ...LP_PORTFOLIO_AND_MATCHER_ACCOUNT_BYTES,
-    ...(opts.p3 === true ? P3_VAULT_LP_ACCOUNT_BYTES : []),
+    ...lpPortfolioAndMatcherAccountBytes(),
+    ...(opts.p3 === true ? p3VaultLpAccountBytes() : []),
   );
 
   // Rent for the Earn vault (Step 4) + stake pool (Step 5) accounts — see

@@ -5,7 +5,7 @@ import { buildMarketDirectoryFallback } from "@/lib/markets-fallback";
 import { resolveDevnetProgramIds } from "@/lib/program-ids";
 import { PublicKey } from "@solana/web3.js";
 import { validateNumericParam } from "@/lib/route-validators";
-import { parseHeader, parseConfig, discoverMarkets, type DiscoveredMarket, isV17Account, parseWrapperConfigV17, parseAssetOracleProfileV17, parseMarketGroupV17OI, type V17MarketGroupOI, type RiskParams, V17_HEADER_LEN, V17_MARKET_GROUP_OFF, V17_MARKET_GROUP_LEN } from "@percolatorct/sdk";
+import { parseHeader, parseConfig, discoverMarkets, type DiscoveredMarket, parseWrapperConfigV17, parseAssetOracleProfileV17, type V17MarketGroupOI, type RiskParams, V17_HEADER_LEN } from "@percolatorct/sdk";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { getConfig } from "@/lib/config";
 import { getServerConnection } from "@/lib/server-rpc";
@@ -38,6 +38,7 @@ import {
   buildMarketRegistrationMessage,
   type MarketRegistrationPayload,
 } from "@/lib/market-registration-auth";
+import { parseMarketOI, isWrapperAccount, isUnknownWrapperVersion, marketGeometry, unsupportedLayoutBody } from "@/lib/v22/layout";
 
 /**
  * GH#1526: Map frontend oracle_mode filter values to DB-stored values.
@@ -431,9 +432,9 @@ async function discoverMarketsOnChain(
         infos.forEach((info, i) => {
           if (!info?.data) return;
           const data = new Uint8Array(info.data);
-          if (!isV17Account(data)) return;
+          if (!isWrapperAccount(data)) return;
           const slab = chunk[i].slabAddress.toBase58();
-          v17Stats.set(slab, parseMarketGroupV17OI(data));
+          v17Stats.set(slab, parseMarketOI(data));
           v17RiskParams.set(slab, parseV17RiskParams(data, chunk[i].configV17!.tradeFeeBps));
         });
       } catch {
@@ -1609,6 +1610,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Slab account not owned by a known percolator program" }, { status: 400 });
     }
 
+    // v2.2 flag on: a wrapper account of a VERSION this build does not decode is refused (422), never read with another layout's offsets.
+    if (isUnknownWrapperVersion(new Uint8Array(accountInfo.data))) {
+      return NextResponse.json(unsupportedLayoutBody(null), { status: 422 });
+    }
+
     // R2-S8: Verify deployer matches the on-chain admin.
     // BUG FIX (devnet flow-test 2026-07-01, flowtest/14-create-market.ts): this used to call
     // parseHeader() unconditionally, which only understands the legacy v12 "PERCOLAT" magic
@@ -1620,7 +1626,7 @@ export async function POST(req: NextRequest) {
     // and hooks/useCreateMarket.ts (admin = v17 wrapperConfig.marketauth).
     try {
       const dataBytes = new Uint8Array(accountInfo.data);
-      const admin = isV17Account(dataBytes)
+      const admin = isWrapperAccount(dataBytes)
         ? parseWrapperConfigV17(dataBytes, V17_HEADER_LEN).marketauth
         : parseHeader(accountInfo.data).admin;
       if (admin.toBase58() !== deployer) {
@@ -1649,7 +1655,7 @@ export async function POST(req: NextRequest) {
     // returned a garbage oracleAuthority. Mirrors SlabProvider.tsx's corrected offset.
     try {
       const dataBytes = new Uint8Array(accountInfo.data);
-      const isV17 = isV17Account(dataBytes);
+      const isV17 = isWrapperAccount(dataBytes);
       const onChainMint = isV17
         ? parseWrapperConfigV17(dataBytes, V17_HEADER_LEN).collateralMint.toBase58()
         : parseConfig(accountInfo.data).collateralMint.toBase58();
@@ -1680,7 +1686,7 @@ export async function POST(req: NextRequest) {
       // mode is unaffected — it DOES set a real, predictable on-chain oracle_authority via
       // UpdateAssetAuthority, so this check stays fully enforced there.
       const onChainOracleAuth = isV17
-        ? parseAssetOracleProfileV17(dataBytes, V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN).oracleAuthority.toBase58()
+        ? parseAssetOracleProfileV17(dataBytes, marketGeometry(dataBytes, "markets.register").slotsBase).oracleAuthority.toBase58()
         : parseConfig(accountInfo.data).oracleAuthority.toBase58();
       const resolvedOracleAuth = oracle_authority || deployer;
       const SYSTEM_PROGRAM = "11111111111111111111111111111111";

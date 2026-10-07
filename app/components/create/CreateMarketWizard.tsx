@@ -38,6 +38,9 @@ import { GrowthLaunchControls, type GrowthLaunchState } from "./GrowthLaunchCont
 import { isDevnetV21Enabled } from "@/lib/v21/flag";
 import { V21_COPY } from "@/lib/v21/copy";
 import { defaultGrowthLaunch, validateGrowthLaunch, type GrowthLaunch } from "@/lib/v21/growth-launch";
+import { V22LaunchOptions, type V22OptionsState } from "./V22LaunchOptions";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { planLaunchV22, toLaunchParams } from "@/lib/v22/launch-plan";
 import { RecoverSolBanner } from "./RecoverSolBanner";
 // W8 fix: share ONE SOL-cost formula with CostEstimate.tsx's own display so the
 // launch gate and the number shown to the user can never drift apart — see that
@@ -68,6 +71,8 @@ interface WizardState {
   juniorFloorBps?: number;
   /** Devnet v2.1: the growth-v19 block (flag-gated; absent/off = today's launch). */
   growth?: GrowthLaunchState;
+  /** Devnet v2.2: price protection / holding fee / bond toggles (flag-gated; undefined = oracle-mode defaults). */
+  v22?: V22OptionsState;
   /** Largest one-sided position the LP takes on, bps of the LP seed (default 1x). */
   lpExposureBps: number;
   insuranceAmount: string;
@@ -691,13 +696,32 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
         singleAsset: true,
       })
     : null;
-  const launchDisabled = !allValid || !oracleSettled || !publicKey || p3Issue !== null || growthIssue !== null;
+  // Devnet v2.2: lot size (automatic), price protection, holding fee, bond. Null unless the v2.2 flag and the growth
+  // block are on; flag off nothing below changes.
+  const v22Plan =
+    isDevnetV22Enabled() && growthLaunch
+      ? planLaunchV22({
+          tokenPriceE6: currentPriceE6,
+          collateralDecimals: decimals,
+          collateralSymbol,
+          oracleMode: wizard.oracleType === "hyperp_ema" ? "hyperp" : wizard.oracleType,
+          growthOn: true,
+          ...wizard.v22,
+        })
+      : null;
+  const v22Params = v22Plan ? toLaunchParams(v22Plan) : undefined;
+  const v22Issue = v22Plan?.issues[0] ?? null;
+  /** The launch price: per LOT when a v2.2 lot applies, else the per-token price as before. */
+  const launchPriceE6 = (tokenE6: bigint): bigint => (v22Params ? tokenE6 * 10n ** BigInt(v22Params.lotExp) : tokenE6);
+  const launchDisabled = !allValid || !oracleSettled || !publicKey || p3Issue !== null || growthIssue !== null || v22Issue !== null;
   const launchDisabledReason: string | undefined = !publicKey
     ? "Connect wallet"
     : p3Issue
       ? LIMITS_COPY.p3Wizard.issue[p3Issue]
     : growthIssue
       ? V21_COPY.wizard.issue[growthIssue]
+    : v22Issue
+      ? v22Issue.message
     : !oracleSettled
       ? "Resolving price feed"
     : !registrable
@@ -928,7 +952,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
 
     const params: CreateMarketParams = {
       mint: new PublicKey(collateralMintAddress),
-      initialPriceE6: priceE6,
+      initialPriceE6: launchPriceE6(priceE6),
       lpCollateral: parseHumanAmount(wizard.lpCollateral || "0", decimals),
       insuranceAmount: parseHumanAmount(wizard.insuranceAmount, decimals),
       oracleFeed,
@@ -944,6 +968,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       slabDataSize: DEFAULT_SLAB_SIZE,
       // P3: vault-owned LP + the creator's junior tranche (= the Liquidity amount).
       ...(growthLaunch ? { growth: growthLaunch } : {}),
+      ...(v22Params ? { v22: v22Params } : {}),
       p3: wizardP3Params(
         p3WizardEnabled(),
         parseHumanAmount(wizard.lpCollateral || "0", decimals),
@@ -1006,7 +1031,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
 
     const params: CreateMarketParams = {
       mint: new PublicKey(collateralMintAddress),
-      initialPriceE6: priceE6,
+      initialPriceE6: launchPriceE6(priceE6),
       lpCollateral: parseHumanAmount(wizard.lpCollateral || "0", decimals),
       insuranceAmount: parseHumanAmount(wizard.insuranceAmount, decimals),
       oracleFeed,
@@ -1018,6 +1043,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       slabDataSize: DEFAULT_SLAB_SIZE,
       // P3: vault-owned LP + the creator's junior tranche (= the Liquidity amount).
       ...(growthLaunch ? { growth: growthLaunch } : {}),
+      ...(v22Params ? { v22: v22Params } : {}),
       p3: wizardP3Params(
         p3WizardEnabled(),
         parseHumanAmount(wizard.lpCollateral || "0", decimals),
@@ -1344,6 +1370,15 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             juniorAtoms={parseHumanAmount(wizard.lpCollateral || "0", wizard.tokenMeta?.decimals ?? 6)}
             collateralDecimals={6}
             collateralSymbol={collateralSymbol}
+          />
+        )}
+        {/* Devnet v2.2: price protection / holding fee / bond (flag-gated, needs the growth block). */}
+        {wizard.step === 2 && v22Plan?.available && (
+          <V22LaunchOptions
+            value={wizard.v22 ?? {}}
+            onChange={(v22) => setWizard((prev) => ({ ...prev, v22 }))}
+            plan={v22Plan}
+            symbol={wizard.tokenMeta?.symbol ?? "token"}
           />
         )}
       </div>

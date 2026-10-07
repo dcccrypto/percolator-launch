@@ -18,6 +18,7 @@
  * `room(x)` is `remainingSideCapacityQ(x, maxInventoryAbs, side)` (lib/marketCapacity.ts).
  */
 import { remainingSideCapacityQ, type TradeSide } from "@/lib/marketCapacity";
+import { portfolioLegGeometry } from "@/lib/v22/layout";
 import { effectiveLeg, type EffectiveAssetSides } from "./effective-quantity";
 import * as C from "./constants";
 
@@ -43,10 +44,11 @@ export function lpEffectiveSignedQ(
   assetIndex: number,
   marketId: bigint,
 ): bigint | null {
-  if (portfolio.length < C.PF_LEGS + C.PF_MAX_LEGS * C.PF_LEG_LEN) return null;
+  const geo = portfolioLegGeometry(portfolio);
+  if (!geo || portfolio.length < geo.legsOff + geo.legCount * geo.legStride) return null;
   const v = dv(portfolio);
-  for (let s = 0; s < C.PF_MAX_LEGS; s++) {
-    const l = C.PF_LEGS + s * C.PF_LEG_LEN;
+  for (let s = 0; s < geo.legCount; s++) {
+    const l = geo.legsOff + s * geo.legStride;
     if (portfolio[l + C.LEG_ACTIVE] !== 1) continue;
     if (v.getUint32(l + C.LEG_ASSET_INDEX, true) !== assetIndex) continue;
     if (v.getBigUint64(l + C.LEG_MARKET_ID, true) !== marketId) continue;
@@ -54,8 +56,8 @@ export function lpEffectiveSignedQ(
       active: true,
       side: portfolio[l + C.LEG_SIDE],
       basisPosQ: i128(portfolio, l + C.LEG_BASIS_POS_Q),
-      aBasis: u128(portfolio, l + C.LEG_A_BASIS),
-      epochSnap: v.getBigUint64(l + C.LEG_EPOCH_SNAP, true),
+      aBasis: u128(portfolio, l + geo.leg.aBasis),
+      epochSnap: v.getBigUint64(l + geo.leg.epochSnap, true),
     });
     return eff.kind === "invalid" ? null : eff.signedQ;
   }

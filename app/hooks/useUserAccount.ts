@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
-import { AccountKind, isV17Account } from "@percolatorct/sdk";
+import { AccountKind } from "@percolatorct/sdk";
 import {
   makePortfolioScanKey,
   getPortfolioUserAccountSnapshot,
@@ -13,6 +13,7 @@ import {
   portfolioV17ToAccount,
   type UserAccountInfo,
 } from "@/lib/userAccountScan";
+import { isWrapperAccount } from "@/lib/v22/layout";
 
 // Re-exported for existing/legacy call sites (e.g. useNftWrappedPosition.ts
 // historically imported both from this file). The canonical definitions now
@@ -39,7 +40,7 @@ export function useUserAccount(): UserAccountInfo | null {
   const { connection } = useConnectionCompat();
   const { accounts, raw, slabAddress, programId } = useSlabState();
 
-  const isV17Market = raw != null && raw.length > 0 && isV17Account(raw);
+  const isV17Market = raw != null && raw.length > 0 && isWrapperAccount(raw);
 
   // v12 path: synchronous lookup in the slab bitmap accounts list.
   const v12Account = useMemo<UserAccountInfo | null>(() => {
@@ -105,7 +106,7 @@ export function useUserAccount(): UserAccountInfo | null {
 export function useUserAccountScanPending(): boolean {
   const { publicKey } = useWalletCompat();
   const { raw, slabAddress, programId } = useSlabState();
-  const isV17Market = raw != null && raw.length > 0 && isV17Account(raw);
+  const isV17Market = raw != null && raw.length > 0 && isWrapperAccount(raw);
   const publicKeyStr = publicKey?.toBase58() ?? null;
   const programIdStr = programId?.toBase58() ?? null;
   const scanKey = useMemo(() => {

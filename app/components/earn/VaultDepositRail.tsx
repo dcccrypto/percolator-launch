@@ -22,6 +22,11 @@ import { MarketLogo } from '@/components/market/MarketLogo';
 import { formatCompact } from '@/lib/formatters';
 import { withdrawFlagLine } from '@/lib/limits/earn-withdrawable';
 import type { MarketVaultInfo } from '@/hooks/useEarnStats';
+import { PublicKey } from '@solana/web3.js';
+import { isDevnetV22Enabled } from '@/lib/v22/flag';
+import { BondCard } from '@/components/earn/BondCard';
+import { RescueAction } from '@/components/earn/RescueAction';
+import type { EarnV22Context } from '@/lib/v22/earn-context';
 
 /** Devnet slot time, for rendering the redemption cooldown as an approximate duration. */
 const SLOT_SECONDS = 0.4;
@@ -73,7 +78,7 @@ export function VaultDepositRail({ slab, vault, onTxSuccess, onPositionResolved 
 
 function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }: VaultDepositRailProps & { slab: string }) {
   const { state, loading, readError, deposit, withdraw, resizeRedemption, refreshState, lastDrawSummary } = useInsuranceLP();
-  const { config, raw: slabRaw } = useSlabState();
+  const { config, raw: slabRaw, programId: slabProgramId } = useSlabState();
   const wallet = useWalletCompat();
   const vaultAvailable = state.registryExists && state.mintExists;
 
@@ -116,6 +121,26 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
   // (vault-LP crank bundled by sendTx). Only "covering a loss" pauses deposits.
   const depositBlock = earnDepositPause(rawDepositBlock);
   const depositBlockedReason = depositBlock === 'senior-impaired' ? COPY.depositsPausedImpaired : null;
+
+  // Devnet v2.2 (flag-gated): the bond card and the rescue action read what the rail already has.
+  const v22Ctx: EarnV22Context | null =
+    isDevnetV22Enabled() && slabProgramId && config?.collateralMint
+      ? {
+          market: new PublicKey(slab),
+          programId: slabProgramId,
+          collateralMint: config.collateralMint,
+          decimals: collateralDecimals,
+          symbol,
+          registryDomain: state.lpVaultDomain,
+          lpPortfolio: marketLimits.vaultState ? new PublicKey(marketLimits.vaultState.lpPortfolio) : null,
+          view: trancheView,
+          registryShares: marketLimits.registryShares,
+          oiLongQ: marketLimits.engine?.oiEffLongQ ?? 0n,
+          oiShortQ: marketLimits.engine?.oiEffShortQ ?? 0n,
+          lpEffAbsQ: marketLimits.lpRealQ === null ? 0n : marketLimits.lpRealQ < 0n ? -marketLimits.lpRealQ : marketLimits.lpRealQ,
+          onDone: refreshState,
+        }
+      : null;
 
   // Report the resolved deposit up so the table's "Your Deposit" column fills in
   // for this row as the user browses vaults.
@@ -230,6 +255,9 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
           )}
         </div>
       </div>
+
+      {v22Ctx && <RescueAction ctx={v22Ctx} />}
+      {v22Ctx && <BondCard ctx={v22Ctx} />}
 
       {/* Deposit / Withdraw — reused unchanged */}
       <DepositWithdrawPanel

@@ -11,7 +11,6 @@ import {
   deriveLpVaultRegistry,
   parseLpRedemption,
   parseLpVaultRegistry,
-  parsePortfolioV17,
 } from "@percolatorct/sdk";
 import { pickOwnerPortfolio, scanOwnerPortfolios } from "@/lib/owner-portfolio";
 import { decodeMarketEngineView, decodePortfolioLegs, decodeResolvedMarket } from "@/lib/limits/decode";
@@ -22,6 +21,7 @@ import { deriveCloseOnlyState } from "../lock-episode";
 import type { ProgramIdSet } from "@/lib/program-ids";
 import { type MoveInput, type V1MarketSnapshot } from "./plan";
 import { successorFor, type SuccessorEntry } from "./successors";
+import { parsePortfolio } from "@/lib/v22/layout";
 
 export interface V1MarketRef {
   slab: string;
@@ -33,7 +33,7 @@ export interface V1MarketRef {
 export async function readPortfolio(connection: Connection, programId: PublicKey, market: PublicKey, wallet: PublicKey) {
   const found = pickOwnerPortfolio(await scanOwnerPortfolios(connection, programId, market, wallet), wallet);
   if (!found) return null;
-  const pf = parsePortfolioV17(found.data);
+  const pf = parsePortfolio(found.data);
   return { pf, legs: decodePortfolioLegs(found.data).length };
 }
 

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { PublicKey } from "@solana/web3.js";
-import { parseWrapperConfigV17, isV17Account, V17_HEADER_LEN } from "@percolatorct/sdk";
+import { parseWrapperConfigV17, V17_HEADER_LEN } from "@percolatorct/sdk";
 import { subscribeSlab, getSnapshot, applyOnChainPoll } from "@/lib/priceStore/priceStore";
 import { sanitizePriceE6 } from "@/lib/oraclePrice";
 import { UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
@@ -16,6 +16,7 @@ import { formatTokenAmount } from "@/lib/format";
 import { isMockMode } from "@/lib/mock-mode";
 import { pollWhenVisible } from "@/lib/pollWhenVisible";
 import { getMockPortfolioPositions } from "@/lib/mock-trade-data";
+import { isWrapperAccount } from "@/lib/v22/layout";
 
 /** On-chain freshness floor for chips the WS feed isn't ticking: one batched
  *  getMultipleAccountsInfo across every position slab per interval. */
@@ -171,7 +172,7 @@ export function PositionsBar() {
         const infos = await connection.getMultipleAccountsInfo(keys);
         if (cancelled) return;
         infos.forEach((info, i) => {
-          if (!info?.data || !isV17Account(info.data)) return;
+          if (!info?.data || !isWrapperAccount(info.data)) return;
           try {
             const e6 = sanitizePriceE6(parseWrapperConfigV17(info.data, V17_HEADER_LEN).markEwmaE6);
             if (e6 > 0n) applyOnChainPoll(slabAddrs[i], e6);

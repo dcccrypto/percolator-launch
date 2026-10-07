@@ -1,10 +1,7 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import {
-  isV17Account,
   parseWrapperConfigV17,
-  parseMarketGroupV17OI,
   V17_HEADER_LEN,
-  V17_MARKET_GROUP_OFF,
 } from "@percolatorct/sdk";
 import { getServerConnection } from "@/lib/server-rpc";
 import { sanitizeOnChainValue } from "@/lib/health";
@@ -13,6 +10,7 @@ import { parseV17RiskParams } from "@/lib/v17-engine-config";
 import { leverageFromMarginBps } from "@/lib/market-params";
 import { getConfig } from "@/lib/config";
 import { isClosedMarketTombstone, TOMBSTONE_PROBE_SLICE_LEN } from "@/lib/closed-market-tombstone";
+import { marketGeometry, parseMarketOI, isWrapperAccount } from "@/lib/v22/layout";
 
 /**
  * Live per-market state, read straight from the slab account.
@@ -121,10 +119,6 @@ export { isMarketauthComplete };
  * The SDK exposes no reader for vault/c_tot (parseMarketGroupV17OI covers
  * insurance and OI only), hence the manual reads.
  */
-const MG_VAULT_OFF = 285;
-const MG_C_TOT_OFF = 317;
-/** Must cover the c_tot read at +317 (317 + 16 bytes). */
-const MG_MIN_BYTES = 333;
 
 /**
  * Upper bound for a sane price in micro-USD (1e6).
@@ -145,7 +139,7 @@ function readU128LE(data: Uint8Array, offset: number): bigint {
 
 /** Parse one slab's live state. Returns null if the account isn't a v17 slab. */
 function parseLiveState(data: Uint8Array, slabKey: PublicKey): LiveMarketState | null {
-  if (!isV17Account(data)) return null;
+  if (!isWrapperAccount(data)) return null;
 
   let markPriceUsd: number | null = null;
   // Default to complete: no stake program pinned for this network (mainnet
@@ -197,7 +191,7 @@ function parseLiveState(data: Uint8Array, slabKey: PublicKey): LiveMarketState |
   let oiShortQ = 0;
   let insurance = 0;
   try {
-    const oi = parseMarketGroupV17OI(data);
+    const oi = parseMarketOI(data);
     // Sanitize sentinel/negative on-chain values (u64::MAX from an uninitialized
     // slab) to 0 before Number() — otherwise they become astronomical OI/insurance
     // that poisons total_open_interest_usd downstream. Same treatment markPrice gets.
@@ -210,10 +204,16 @@ function parseLiveState(data: Uint8Array, slabKey: PublicKey): LiveMarketState |
 
   let vault = 0;
   let cTot = 0;
-  if (data.length >= V17_MARKET_GROUP_OFF + MG_MIN_BYTES) {
+  let geo: ReturnType<typeof marketGeometry> | null = null;
+  try {
+    geo = marketGeometry(data, "readLiveMarketState");
+  } catch {
+    geo = null; // unknown VERSION: vault / c_tot stay 0 (unreadable), never read with another layout's offsets
+  }
+  if (geo && data.length >= geo.groupOff + geo.layout.group.cTot + 16) {
     try {
-      vault = Number(readU128LE(data, V17_MARKET_GROUP_OFF + MG_VAULT_OFF));
-      cTot = Number(readU128LE(data, V17_MARKET_GROUP_OFF + MG_C_TOT_OFF));
+      vault = Number(readU128LE(data, geo.groupOff + geo.layout.group.vault));
+      cTot = Number(readU128LE(data, geo.groupOff + geo.layout.group.cTot));
     } catch {
       // Leave both at 0 — callers treat 0 vault as a liveness signal, and a
       // failed read here is indistinguishable from a genuinely empty market.

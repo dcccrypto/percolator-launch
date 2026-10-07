@@ -36,6 +36,10 @@ import { useClosePosition } from "@/hooks/useClosePosition";
 import { PnlShareButton } from "@/components/share/PnlShareButton";
 import { isPnlPoolCapped, poolPayableCapacity, type PnlCardData } from "@/lib/pnl-card";
 import { useSlabState } from "@/components/providers/SlabProvider";
+import { useBandRentView } from "@/hooks/useBandRentView";
+import { HoldingFeeChip } from "@/components/v22/HoldingFeeChip";
+import { closeBlockedByBand, legBelowHalfMin } from "@/lib/v22/band-rent-state";
+import { V22_COPY } from "@/lib/v22/copy";
 import { useMarketLimits } from "@/hooks/useMarketLimits";
 import { PositionLimitsRow } from "@/components/limits/PositionLimitsRow";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
@@ -159,6 +163,8 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   // permanently reverting every close (UX WP-2: only beyond the app's own catch-up). See
   // useEngineFreshness's file header.
   const { engineStale } = useEngineFreshness();
+  // Devnet v2.2 (flag-gated; null otherwise): band lag + holding fee for this market.
+  const bandView = useBandRentView();
   const closeBlockedByStaleness = !mockMode && (oracleStale || engineStale);
 
   const [showCloseModal, setShowCloseModal] = useState(false);
@@ -202,6 +208,8 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const { account } = activeInfo;
 
   const isLong = account.positionSize > 0n;
+  // v2.2 band: the favourable-side close is refused while the mark lags the oracle (104); say so instead of failing.
+  const bandCloseBlocked = closeBlockedByBand(bandView, isLong ? "long" : "short");
   // Auto-deleveraging scales the asset's shared per-side factor and leaves the
   // leg's stored basis alone, so `account.positionSize` is the NOMINAL basis,
   // not what the position is worth today. Everything the trader reads as size,
@@ -420,6 +428,12 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                     ADL
                   </span>
                 )}
+                <HoldingFeeChip view={bandView} side={isLong ? "long" : "short"} />
+                {bandView?.band.enabled && legBelowHalfMin(account.positionSize < 0n ? -account.positionSize : account.positionSize, bandView.price.markE6, bandView.band.minLegNotionalAtoms, decimals) && (
+                  <div data-testid="band-small-position" className="mt-0.5 text-[9px] text-[var(--text-dim)]">
+                    {V22_COPY.band.smallPositionWarn(String(Number(bandView.band.minLegNotionalAtoms) / 10 ** decimals / 2), collateralSymbol)}
+                  </div>
+                )}
                 {isSettling && (
                   <span
                     className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)]/60 animate-pulse align-middle"
@@ -515,8 +529,8 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                     // the wallet popup with zero blocking round-trips.
                     onClick={() => { resetPhase(); prewarmClose(); setShowCloseModal(true); }}
                     data-testid="position-close"
-                    disabled={closeLoading || lpUnderfunded || !hasValidMark || engineStale}
-                    title={!hasValidMark ? "Waiting for price data…" : engineStale ? "Prices are catching up. Closing resumes once the market has caught up." : undefined}
+                    disabled={closeLoading || lpUnderfunded || !hasValidMark || engineStale || bandCloseBlocked}
+                    title={!hasValidMark ? "Waiting for price data…" : engineStale ? "Prices are catching up. Closing resumes once the market has caught up." : bandCloseBlocked ? V22_COPY.band.catchingUp : undefined}
                     className="rounded-none border border-[var(--short)]/30 px-3 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-colors duration-150 hover:bg-[var(--short)]/8 hover:border-[var(--short)]/50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Close

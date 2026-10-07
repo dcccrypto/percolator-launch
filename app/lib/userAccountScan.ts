@@ -71,11 +71,11 @@ import { Buffer } from "buffer";
 import { PublicKey, type Connection } from "@solana/web3.js";
 import {
   AccountKind,
-  parsePortfolioV17,
   type Account,
   type PortfolioLegV17,
   type PortfolioV17,
 } from "@percolatorct/sdk";
+import { parsePortfolio } from "@/lib/v22/layout";
 
 // ---------------------------------------------------------------------------
 // Shared UserAccountInfo shape + v17→legacy Account mapper.
@@ -408,7 +408,7 @@ async function runPortfolioScan(
     // the one trade / close / deposit act on.
     const picked = pickOwnerPortfolio(results, params.publicKey);
     const result: OwnPortfolioScanResult | null = picked
-      ? { pubkey: picked.pubkey, portfolio: parsePortfolioV17(picked.data) }
+      ? { pubkey: picked.pubkey, portfolio: parsePortfolio(picked.data) }
       : null;
     publishPortfolioResult(entry, result);
     return entry.raw;

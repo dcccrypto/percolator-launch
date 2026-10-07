@@ -33,10 +33,11 @@
  *   - otherwise                   -> undetermined: keep the honest generic text.
  */
 import { PublicKey, type Connection } from "@solana/web3.js";
-import { isV17Account, parseWrapperConfigV17, V17_HEADER_LEN } from "@percolatorct/sdk";
+import { parseWrapperConfigV17, V17_HEADER_LEN } from "@percolatorct/sdk";
 import { isMarketauthComplete } from "@/lib/market-completeness";
 import { readMatcherContextReadiness } from "@/lib/matcherCaps";
 import { getConfig } from "@/lib/config";
+import { isWrapperAccount } from "@/lib/v22/layout";
 
 export interface PreTradeState {
   /** marketauth rotated to the stake-pool PDA; null = could not be read. */
@@ -94,7 +95,7 @@ export async function readPreTradeState(
     const info = await connection.getAccountInfo(slabPk, "confirmed");
     if (info) {
       const data = new Uint8Array(info.data);
-      if (isV17Account(data)) {
+      if (isWrapperAccount(data)) {
         const cfg = parseWrapperConfigV17(data, V17_HEADER_LEN);
         complete = isMarketauthComplete(cfg.marketauth, slabPk);
       }

@@ -14,8 +14,6 @@ import {
   getAta,
   deriveVaultAuthority,
   derivePythPushOraclePDA,
-  isV17Account,
-  parsePortfolioV17,
 } from "@percolatorct/sdk";
 // TODO(oracle-migration): encodePushOraclePrice/ACCOUNTS_PUSH_ORACLE_PRICE removed in beta.29.
 // The DEX oracle inline push path needs to migrate to /api/oracle/advance-phase.
@@ -42,6 +40,7 @@ import {
 } from "@/lib/convert-released-pnl";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import type { TransactionInstruction } from "@solana/web3.js";
+import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 
 // M7: withdraw's own EngineStale(19) surface. Unlike a trade (which can be
 // auto-retried after the next keeper crank via withTransientRetry — see
@@ -149,7 +148,7 @@ export function useWithdraw(slabAddress: string) {
         if (!isV17) {
           try {
             const slabInfo = await connection.getAccountInfo(slabPk);
-            if (slabInfo?.data) isV17 = isV17Account(new Uint8Array(slabInfo.data));
+            if (slabInfo?.data) isV17 = isWrapperAccount(new Uint8Array(slabInfo.data));
           } catch { /* fall through — layout detection best-effort */ }
         }
         if (isV17) {
@@ -177,7 +176,7 @@ export function useWithdraw(slabAddress: string) {
               const info = await connection.getAccountInfo(portfolioPk, "confirmed");
               if (info) {
                 const candidateData = Buffer.from(info.data);
-                const candidatePf = parsePortfolioV17(candidateData);
+                const candidatePf = parsePortfolio(candidateData);
                 if (candidatePf.owner.equals(wallet.publicKey)) {
                   portfolioData = candidateData;
                 } else {
@@ -205,7 +204,7 @@ export function useWithdraw(slabAddress: string) {
                 const info = await connection.getAccountInfo(storePk, "confirmed");
                 if (info) {
                   const candidateData = Buffer.from(info.data);
-                  const candidatePf = parsePortfolioV17(candidateData);
+                  const candidatePf = parsePortfolio(candidateData);
                   if (candidatePf.owner.equals(wallet.publicKey)) {
                     portfolioPk = storePk;
                     portfolioData = candidateData;
@@ -250,7 +249,7 @@ export function useWithdraw(slabAddress: string) {
               // Defense-in-depth: re-verify the mutable owner actually matches after
               // fetch — memcmp filters are advisory server-side; don't trust blindly.
               try {
-                const candidatePf = parsePortfolioV17(candidateData);
+                const candidatePf = parsePortfolio(candidateData);
                 if (candidatePf.owner.equals(wallet.publicKey)) {
                   portfolioPk = sortedPortfolios[0].pubkey;
                   portfolioData = candidateData;
@@ -284,7 +283,7 @@ export function useWithdraw(slabAddress: string) {
           let convertPrefix: TransactionInstruction[] = [];
           if (portfolioData) {
             try {
-              const portfolio = parsePortfolioV17(portfolioData);
+              const portfolio = parsePortfolio(portfolioData);
               const activeLeg = portfolio.legs.find((l) => l.active);
               hasActiveLegs = activeLeg !== undefined;
               // The engine forbids ANY withdrawal while a position is open

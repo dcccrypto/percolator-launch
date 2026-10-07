@@ -74,16 +74,14 @@
 
 import { PublicKey } from "@solana/web3.js";
 import {
-  isV17MarketAccount,
   parseAssetOracleProfileV17,
   parseWrapperConfigV17,
   V17_ASSET_ORACLE_PROFILE_LEN,
   V17_CREATOR_FEE_CLAIMABLE_OFF,
   V17_HEADER_LEN,
-  V17_MARKET_GROUP_LEN,
-  V17_MARKET_GROUP_OFF,
   V17_WRAPPER_CONFIG_LEN,
 } from "@percolatorct/sdk";
+import { marketGeometry, isUnsupportedLayout, isWrapperMarketAccount } from "@/lib/v22/layout";
 
 /**
  * Absolute byte offset of the LEGACY market-wide `creator_fee_claimable_atoms`
@@ -109,7 +107,6 @@ export const V17_CREATOR_FEE_CLAIMABLE_IS_CONFIG_TAIL =
   V17_CREATOR_FEE_CLAIMABLE_OFF + 8 === V17_WRAPPER_CONFIG_LEN;
 
 /** Byte offset of the first asset's `AssetOracleProfileV16` in a v17 market. */
-const V17_ASSET_PROFILE_OFF = V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN; // 1350
 
 /** The creator's unclaimed fee revenue on one v17 market. */
 export interface CreatorFeeClaimable {
@@ -161,8 +158,16 @@ export interface CreatorFeeClaimable {
 export function readCreatorFeeClaimable(
   data: Uint8Array,
 ): CreatorFeeClaimable | null {
-  if (!isV17MarketAccount(data)) return null;
-  if (data.length < V17_MARKET_GROUP_OFF) return null;
+  if (!isWrapperMarketAccount(data)) return null;
+  let profileOff: number;
+  try {
+    const geo = marketGeometry(data, "readCreatorFeeClaimable");
+    if (data.length < geo.groupOff) return null;
+    profileOff = geo.slotsBase; // 1350 on v2.1, 1398 on v2.2
+  } catch (e) {
+    if (isUnsupportedLayout(e)) return null;
+    throw e;
+  }
 
   const cfg = parseWrapperConfigV17(data, V17_HEADER_LEN);
 
@@ -172,14 +177,14 @@ export function readCreatorFeeClaimable(
   // still returned in that case: it is real money that does not depend on the
   // profile being readable.
   let assetClaimableAtoms = 0n;
-  if (data.length >= V17_ASSET_PROFILE_OFF + V17_ASSET_ORACLE_PROFILE_LEN) {
+  if (data.length >= profileOff + V17_ASSET_ORACLE_PROFILE_LEN) {
     // Single parse serves both fields — asset_admin (profile-relative offset
     // 368, the field the on-chain tag-90 handler gates on) and
     // creator_fee_claimable_atoms (profile-relative offset 400, GH#420's
     // per-asset accrual). Read through the SDK's parser so neither byte offset
     // is a hand-rolled literal here. See `claimAuthority` above for why the
     // authority is asset_admin and not insurance_operator/marketauth.
-    const profile = parseAssetOracleProfileV17(data, V17_ASSET_PROFILE_OFF);
+    const profile = parseAssetOracleProfileV17(data, profileOff);
     claimAuthority = profile.assetAdmin;
     assetClaimableAtoms = profile.creatorFeeClaimableAtoms;
   }

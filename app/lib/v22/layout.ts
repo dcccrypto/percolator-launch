@@ -21,6 +21,8 @@ import {
   V17_ASSET_ORACLE_WRAPPER_LEN,
   parsePortfolioV17,
   parseMarketGroupV17OI,
+  isV17Account,
+  isV17MarketAccount,
   type V17MarketGroupOI,
 } from "@percolatorct/sdk";
 import { isDevnetV22Enabled } from "./flag";
@@ -29,6 +31,9 @@ import {
   LAYOUT_V21,
   LAYOUT_V22,
   UnknownLayoutError,
+  LAYOUTS_BY_VERSION,
+  WRAPPER_ACCOUNT_MAGIC,
+  readWrapperHeader,
   buildCreatePortfolioAccountIxV22,
   portfolioFilterForLayout,
   resolveLayout,
@@ -136,7 +141,71 @@ export function unsupportedLayoutMessage(): { title: string; body: string } {
 }
 
 /** JSON body for API routes that meet an unsupported layout (HTTP 422, never a 500 with partial numbers). */
-export function unsupportedLayoutBody(e: unknown): { error: "unsupported_layout"; message: string; version: number | null } {
-  const version = isUnsupportedLayout(e) && typeof (e as UnknownLayoutError).version === "number" ? (e as UnknownLayoutError).version ?? null : null;
+export function unsupportedLayoutBody(e: unknown, foundVersion?: number): { error: "unsupported_layout"; message: string; version: number | null } {
+  const version = typeof foundVersion === "number" ? foundVersion : isUnsupportedLayout(e) && typeof (e as UnknownLayoutError).version === "number" ? (e as UnknownLayoutError).version ?? null : null;
   return { error: "unsupported_layout", message: V22_COPY.layout.body, version };
+}
+
+/**
+ * Is this a wrapper account (any account kind) of a layout this build decodes? Flag off: the installed SDK's
+ * `isV17Account` (VERSION 18 only). Flag on: VERSION 18 (v2.1) or 19 (v2.2), by the table registry.
+ */
+export function isWrapperAccount(data: Uint8Array): boolean {
+  if (!isDevnetV22Enabled()) return isV17Account(data);
+  if (data.length < 16) return false;
+  const h = readWrapperHeader(data);
+  return h.magic === WRAPPER_ACCOUNT_MAGIC && LAYOUTS_BY_VERSION.has(h.version);
+}
+
+/** As {@link isWrapperAccount}, and the kind byte is MARKET. */
+export function isWrapperMarketAccount(data: Uint8Array): boolean {
+  if (!isDevnetV22Enabled()) return isV17MarketAccount(data);
+  return isWrapperAccount(data) && data[10] === ACCOUNT_KIND.Market;
+}
+
+/**
+ * Flag on only: the bytes carry the wrapper magic but a VERSION this build does not decode (a newer or older
+ * wrapper). Callers render the calm fallback / answer 422 instead of treating it as a legacy slab.
+ */
+export function isUnknownWrapperVersion(data: Uint8Array): boolean {
+  if (!isDevnetV22Enabled() || data.length < 16) return false;
+  const h = readWrapperHeader(data);
+  return h.magic === WRAPPER_ACCOUNT_MAGIC && !LAYOUTS_BY_VERSION.has(h.version);
+}
+
+/** Portfolio leg geometry resolved from an account's VERSION (or the v2.1 constants when the flag is off). */
+export interface PortfolioLegGeometry {
+  legsOff: number;
+  legStride: number;
+  legCount: number;
+  /** Offsets inside one leg. */
+  leg: LayoutTable["portfolio"]["leg"];
+  /**
+   * Bytes by which every field AFTER the legs (source domains, health cert, stale states, receipt) moved
+   * relative to v2.1: `legCount * (legStride - 152)`. 0 on v2.1, 1,040 on v2.2 variant B.
+   */
+  afterLegsShift: number;
+  layout: LayoutTable;
+}
+
+/** `null` for an unknown VERSION / discriminator (flag on): callers treat the portfolio as unreadable, never guess. */
+export function portfolioLegGeometry(data: Uint8Array): PortfolioLegGeometry | null {
+  let L: LayoutTable;
+  if (!isDevnetV22Enabled()) L = LAYOUT_V21;
+  else {
+    try {
+      L = resolveLayout(data, { parser: "portfolioLegGeometry", kind: ACCOUNT_KIND.Portfolio });
+    } catch (e) {
+      if (isUnsupportedLayout(e)) return null;
+      throw e;
+    }
+  }
+  const g = L.portfolio;
+  return { legsOff: g.legsOff, legStride: g.legStride, legCount: g.legCount, leg: g.leg, afterLegsShift: g.legCount * (g.legStride - LAYOUT_V21.portfolio.legStride), layout: L };
+}
+
+/** `getProgramAccounts` filters selecting portfolios of the active layout: the exact length, plus the VERSION when the flag is on. */
+export function portfolioGpaFilters(): Array<{ dataSize: number } | { memcmp: { offset: number; bytes: string } }> {
+  const f = portfolioScanFilters();
+  return f.versionMemcmp ? [{ dataSize: f.dataSize }, { memcmp: f.versionMemcmp }] : [{ dataSize: f.dataSize }];
 }

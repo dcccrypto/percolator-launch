@@ -11,7 +11,8 @@
  * once. Closing yourself (tag 44) always works and is never gated by any of this.
  */
 import { isAdlReduceOnly } from "@/lib/limits/adl-reduce-only";
-import { adlEpisodeSlotsRemaining, adlWindDownDustNotionalAtoms, decodeAdlEpisode, type AdlEpisode } from "./sdk";
+import { adlEpisodeSlotsRemaining, adlWindDownDustNotionalAtoms, type AdlEpisode } from "./sdk";
+import { decodeAdlEpisode } from "../v22/records";
 
 /** Solana's target slot time. Only used to say "about N minutes". */
 export const SLOT_MS = 400;

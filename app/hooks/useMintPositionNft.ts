@@ -19,9 +19,8 @@ import {
   deriveExtraAccountMetas,
   deriveNftRegistry,
   encodeNftMint,
-  parsePortfolioV17,
-  isV17Account,
 } from "@percolatorct/sdk";
+import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 
 export function useMintPositionNft(slabAddress: string) {
   const { publicKey: walletPubkey } = useWalletCompat();
@@ -52,7 +51,7 @@ export function useMintPositionNft(slabAddress: string) {
 
       const slabPk = new PublicKey(slabAddress);
       const nftProgId = PERCOLATOR_NFT_PROGRAM_ID;
-      const isV17 = raw != null && raw.length > 0 && isV17Account(raw);
+      const isV17 = raw != null && raw.length > 0 && isWrapperAccount(raw);
 
       // ── Find the user's portfolio and active leg ──────────────────────────
       // v17: portfolio is a standalone account; we need the marketId from the
@@ -94,7 +93,7 @@ export function useMintPositionNft(slabAddress: string) {
         // Defense-in-depth: re-verify the mutable owner actually matches after
         // fetch — memcmp filters are advisory server-side; don't trust them
         // blindly (mirrors useDeposit/usePositionNft's re-verify).
-        const pf = parsePortfolioV17(new Uint8Array(nonLpPortfolios[0].account.data));
+        const pf = parsePortfolio(new Uint8Array(nonLpPortfolios[0].account.data));
         if (!pf.owner.equals(walletPubkey)) {
           throw new Error("No portfolio found for your wallet on this market. Deposit collateral first.");
         }

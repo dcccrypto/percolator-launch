@@ -18,6 +18,7 @@ import { getMultipleAccountsInfoChunked } from '@/lib/rpc-chunk';
 import { splitPotLedgerKeys, splitPotStateFromAccounts, vaultValue } from '@/lib/limits/earn-split-pot';
 import { atomsToUsd, vaultWithdrawView } from '@/lib/limits/earn-withdrawable';
 import type { BlockedBy, WithdrawStatus } from '@/lib/limits/earn-withdrawable';
+import { isWrapperAccount } from "@/lib/v22/layout";
 
 // ═══════════════════════════════════════════════════════════════
 // Types
@@ -483,7 +484,7 @@ async function fetchOnChainMaxLeverage(
     infos.forEach((info, i) => {
       if (!info?.data) return;
       const data = new Uint8Array(info.data);
-      if (!isV17Account(data)) return;
+      if (!isWrapperAccount(data)) return;
       // tradeFeeBps is unused for the leverage derivation (initialMarginBps
       // only) — 0n is a safe placeholder here, unlike the RiskParams consumers
       // elsewhere that also need the real trading fee.

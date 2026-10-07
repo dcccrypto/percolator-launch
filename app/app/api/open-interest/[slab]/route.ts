@@ -1,8 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { parseMarketGroupV17OI, isV17MarketAccount } from "@percolatorct/sdk";
 import { validateSlabParam } from "@/lib/route-validators";
 import { isBlockedSlab } from "@/lib/blocklist";
 import { readCurrentWrapperSlab } from "@/lib/current-wrapper-slab";
+import { isUnsupportedLayout, isWrapperMarketAccount, parseMarketOI, unsupportedLayoutBody } from "@/lib/v22/layout";
 
 export const dynamic = "force-dynamic";
 
@@ -39,16 +39,17 @@ export async function GET(
 
   const read = await readCurrentWrapperSlab(validSlab);
   if (!read.ok) {
+    if (read.reason === "unsupported-layout") return NextResponse.json(unsupportedLayoutBody(null, read.version), { status: 422 });
     return read.reason === "rpc"
       ? degraded(validSlab, "chain read")
       : NextResponse.json({ error: "Market not found" }, { status: 404 });
   }
-  if (!isV17MarketAccount(read.data)) {
+  if (!isWrapperMarketAccount(read.data)) {
     return NextResponse.json({ error: "Market not found" }, { status: 404 });
   }
 
   try {
-    const oi = parseMarketGroupV17OI(read.data);
+    const oi = parseMarketOI(read.data);
     const totalOi = oi.totalLongOiQ + oi.totalShortOiQ;
     return NextResponse.json(
       {
@@ -65,6 +66,7 @@ export async function GET(
       { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30" } },
     );
   } catch (err) {
+    if (isUnsupportedLayout(err)) return NextResponse.json(unsupportedLayoutBody(err), { status: 422 });
     console.warn(`[/api/open-interest/${validSlab}] v17 OI parse failed:`, err);
     return degraded(validSlab, "OI parse");
   }

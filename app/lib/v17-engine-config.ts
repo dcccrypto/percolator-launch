@@ -50,6 +50,7 @@
 
 import type { RiskParams } from "@percolatorct/sdk";
 import { V17_MARKET_GROUP_OFF } from "@percolatorct/sdk";
+import { layoutOf, isUnsupportedLayout } from "@/lib/v22/layout";
 
 /** Bytes of market-group header preceding the embedded V16ConfigAccount. */
 const V17_MARKET_GROUP_HEADER_LEN = 32;
@@ -101,12 +102,29 @@ function u128(dv: DataView, off: number): bigint {
  * @returns the parsed RiskParams, or `null` if the account is too short
  *          (caller keeps the old `params: null` fallback behavior).
  */
+/**
+ * Absolute offset of the engine config for THIS account: `marketGroupOff + group.config` of the table of the
+ * account's VERSION (624 on both v2.1 and v2.2). `null` for an unknown VERSION (flag on), so no field is read with
+ * another layout's offsets. NOTE: the SDK table pins where the config STARTS, not the offsets of the fields inside
+ * it; the v2.2 config is 48 B longer than v2.1 (group.assetSlotCapacity 281 -> 329), and the fields read below
+ * (offsets 0..142) are assumed unmoved (the growth is appended). Pin them against the real crate when the v2.2 SDK ships them.
+ */
+export function engineConfigOff(data: Uint8Array): number | null {
+  try {
+    const L = layoutOf(data, "engineConfigOff");
+    return L.marketGroupOff + L.group.config;
+  } catch (e) {
+    if (isUnsupportedLayout(e)) return null;
+    throw e;
+  }
+}
+
 export function parseV17RiskParams(
   data: Uint8Array,
   tradeFeeBps: bigint,
 ): RiskParams | null {
-  const base = V17_ENGINE_CONFIG_OFF;
-  if (data.length < base + CONFIG_READ_LEN) return null;
+  const base = engineConfigOff(data);
+  if (base === null || data.length < base + CONFIG_READ_LEN) return null;
 
   const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
 
@@ -157,7 +175,9 @@ export function parseV17RiskParams(
 export const V17_MAX_ABS_FUNDING_REL = 126;
 
 export function readV17MaxAbsFunding(data: Uint8Array): bigint | null {
-  const off = V17_ENGINE_CONFIG_OFF + V17_MAX_ABS_FUNDING_REL;
+  const cfgOff = engineConfigOff(data);
+  if (cfgOff === null) return null;
+  const off = cfgOff + V17_MAX_ABS_FUNDING_REL;
   if (off + 8 > data.length) return null;
   const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
   return dv.getBigUint64(off, true);

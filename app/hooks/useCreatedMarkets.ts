@@ -6,14 +6,13 @@ import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useMarketDiscovery } from "./useMarketDiscovery";
 import {
-  isV17MarketAccount,
-  parseMarketGroupV17OI,
   type DiscoveredMarket,
   type V17MarketGroupOI,
 } from "@percolatorct/sdk";
 import { fetchTokenMeta } from "@/lib/tokenMeta";
 import { isLpPortfolio } from "@/lib/userAccountScan";
 import { readV17AssetSlotLast } from "@/lib/v17-engine-clock";
+import { parseMarketOI, isWrapperMarketAccount } from "@/lib/v22/layout";
 
 /** v17 portfolio account magic (PERCV16\0), base64 for the memcmp filter. */
 const V17_PORTFOLIO_MAGIC_B64 = Buffer.from([
@@ -385,10 +384,10 @@ export function useCreatedMarkets() {
         infos.forEach((info, i) => {
           if (!info?.data) return;
           const bytes = new Uint8Array(info.data);
-          if (!isV17MarketAccount(bytes)) return;
+          if (!isWrapperMarketAccount(bytes)) return;
           try {
             stats[v17Slabs[i].toBase58()] = {
-              oi: parseMarketGroupV17OI(bytes),
+              oi: parseMarketOI(bytes),
               assetSlotLast: readV17AssetSlotLast(bytes),
             };
           } catch {

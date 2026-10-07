@@ -7,8 +7,6 @@ import { isBlockedSlab } from "@/lib/blocklist";
 import * as Sentry from "@sentry/nextjs";
 import {
   parseWrapperConfigV17,
-  parseMarketGroupV17OI,
-  isV17Account,
   V17_HEADER_LEN,
 } from "@percolatorct/sdk";
 import { getConfig } from "@/lib/config";
@@ -21,6 +19,7 @@ import { readRegisteredMarkets } from "@/lib/playground-registered-markets";
 import { getMarketLpCapital } from "@/lib/lp-portfolio";
 import { verifyKeeperSignature } from "@/lib/keeper-hmac";
 import { sanitizeLogoUrl } from "@/lib/token-metadata-validators";
+import { parseMarketOI, isWrapperAccount, isUnknownWrapperVersion, unsupportedLayoutBody } from "@/lib/v22/layout";
 
 /**
  * GH#2334 follow-up: `vault_balance`/`c_tot` are NULL for every v17 market in
@@ -145,7 +144,10 @@ async function onChainSlabFallback(slab: string): Promise<NextResponse> {
     }
 
     const data = new Uint8Array(info.data);
-    if (!isV17Account(data)) {
+    if (isUnknownWrapperVersion(data)) {
+      return NextResponse.json(unsupportedLayoutBody(null, new DataView(data.buffer, data.byteOffset, data.byteLength).getUint16(8, true)), { status: 422 });
+    }
+    if (!isWrapperAccount(data)) {
       return NextResponse.json({ error: "Market not found" }, { status: 404 });
     }
 
@@ -169,7 +171,7 @@ async function onChainSlabFallback(slab: string): Promise<NextResponse> {
     // v17 enrichment). Degrades to zeros if the parse throws.
     let oiLong = 0, oiShort = 0, insurance = 0;
     try {
-      const oi = parseMarketGroupV17OI(data);
+      const oi = parseMarketOI(data);
       oiLong = Number(oi.totalLongOiQ);
       oiShort = Number(oi.totalShortOiQ);
       insurance = Number(oi.insuranceBalance);

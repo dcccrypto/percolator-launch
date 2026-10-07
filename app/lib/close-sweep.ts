@@ -13,6 +13,7 @@
  */
 import { parsePortfolioV17 } from "@percolatorct/sdk";
 import type { PublicKey } from "@solana/web3.js";
+import { parsePortfolio } from "@/lib/v22/layout";
 
 export interface SweepRead {
   /** Fresh (uncached) read of the wallet's portfolio on this market; null = none. */
@@ -44,7 +45,7 @@ export async function readSweepableCapital(p: SweepRead): Promise<bigint | null>
     if (!data) return null;
     let pf;
     try {
-      pf = parsePortfolioV17(data);
+      pf = parsePortfolio(data);
     } catch {
       return null;
     }

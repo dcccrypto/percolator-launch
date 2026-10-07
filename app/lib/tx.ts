@@ -1,4 +1,4 @@
-import { Connection, Transaction, TransactionInstruction, ComputeBudgetProgram, SendTransactionError, SystemProgram, TransactionExpiredBlockheightExceededError, VersionedTransaction } from "@solana/web3.js";
+import { Connection, PublicKey as PublicKeyCtor, Transaction, TransactionInstruction, ComputeBudgetProgram, SendTransactionError, SystemProgram, TransactionExpiredBlockheightExceededError, VersionedTransaction } from "@solana/web3.js";
 import { MAX_TX_COMPUTE_UNITS, sizeComputeUnitLimit, type CuSizing } from "@/lib/compute-budget";
 import bs58 from "bs58";
 import type { PublicKey, Signer } from "@solana/web3.js";
@@ -18,6 +18,8 @@ import {
 import type { AccountMeta } from "@solana/web3.js";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { resolveDevnetProgramIds } from "@/lib/program-ids";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { withMarketTailsV22 } from "@/lib/v22/market-tails";
 import type { SelfHealResult } from "@/lib/self-heal";
 import { getMaintenanceConfig, MaintenanceError } from "@/lib/maintenance";
 import { readU64LE } from "@/lib/u64le";
@@ -749,7 +751,7 @@ export function isTxCancelledError(err: unknown): boolean {
 export async function sendTx({
   connection,
   wallet,
-  instructions,
+  instructions: instructionsIn,
   computeUnits = 200_000,
   signers = [],
   maxRetries = 2,
@@ -789,6 +791,11 @@ export async function sendTx({
   // on the first submission of a session before the wallet popup could
   // appear). It self-caches for 5min; the warning below reads whatever the
   // last completed check found.
+  // Devnet v2.2 (flag-gated, no-op and no RPC otherwise): append the bond-tranche / insurance-units account the wrapper
+  // requires on tags 78 / 97 / 102 / 103 and 9 / 56 / 57 / 41 / 101 once the market has them (lib/v22/market-tails.ts).
+  const instructions = isDevnetV22Enabled()
+    ? await withMarketTailsV22(connection, new PublicKeyCtor(resolveDevnetProgramIds().wrapper), instructionsIn)
+    : instructionsIn;
   void checkClockDrift(connection).catch(() => {});
   const driftWarning = getClockDriftWarning();
   if (driftWarning) {

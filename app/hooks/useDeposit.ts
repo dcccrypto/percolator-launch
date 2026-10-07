@@ -18,8 +18,6 @@ import {
   getAta,
   parseAllAccounts,
   AccountKind,
-  isV17Account,
-  V17_PORTFOLIO_ACCOUNT_LEN,
   deriveVaultAuthority,
 } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
@@ -31,11 +29,9 @@ import { assertKnownProgram } from "@/lib/programAllowlist";
 import { humanizeError, UserFacingError, userFacingMessage } from "@/lib/errorMessages";
 import { fetchPortfolioIdentity } from "@/lib/v18-wire";
 import { assertDepositWithinBalance, readTokenBalance } from "@/lib/deposit-guard";
+import { isWrapperAccount, createPortfolioAccountIx, portfolioAccountLen } from "@/lib/v22/layout";
 
-// v17 portfolio account size = SDK V17_PORTFOLIO_ACCOUNT_LEN (9347). MUST be the full length:
-// InitPortfolio reallocs up to 9347 and adds NO lamports, so funding rent for a smaller size
-// leaves the account below rent-exempt and InitPortfolio fails with InsufficientFundsForRent.
-const V17_PORTFOLIO_ACCOUNT_SIZE = V17_PORTFOLIO_ACCOUNT_LEN;
+// Portfolio length comes from lib/v22/layout (portfolioAccountLen): exact for the active layout.
 
 /**
  * The user's v17 portfolio on this market (lib/owner-portfolio.ts). `null` ONLY
@@ -159,7 +155,7 @@ export function useDeposit(slabAddress: string) {
         // encoding) against a v17 slab. Only fall back to detecting from
         // `slabData` when SlabProvider hasn't parsed a v17 config for this slab
         // (e.g. the very first render, before SlabProvider's initial load).
-        const isV17 = wrapperConfigV17 != null || (slabData ? isV17Account(slabData) : false);
+        const isV17 = wrapperConfigV17 != null || (slabData ? isWrapperAccount(slabData) : false);
 
         if (isV17) {
           // v17: derive vault authority PDA to build the vault token ATA.
@@ -211,14 +207,8 @@ export function useDeposit(slabAddress: string) {
             const portfolioKp = Keypair.generate();
             portfolioPk = portfolioKp.publicKey;
 
-            const portfolioRent = await connection.getMinimumBalanceForRentExemption(V17_PORTFOLIO_ACCOUNT_SIZE);
-            const createPortfolioIx = SystemProgram.createAccount({
-              fromPubkey: wallet.publicKey,
-              newAccountPubkey: portfolioPk,
-              lamports: portfolioRent,
-              space: V17_PORTFOLIO_ACCOUNT_SIZE,
-              programId,
-            });
+            const portfolioRent = await connection.getMinimumBalanceForRentExemption(portfolioAccountLen());
+            const createPortfolioIx = createPortfolioAccountIx(wallet.publicKey, portfolioPk, portfolioRent, programId);
             const initPortfolioIx = buildIx({
               programId,
               keys: buildAccountMetas(ACCOUNTS_INIT_USER, [

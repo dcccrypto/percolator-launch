@@ -5,7 +5,7 @@ import { useSingleMarketHealth } from "@/hooks/useMarketHealth";
 import { safeExplainMarketTxError } from "@/lib/market-error";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
-import { AccountKind, isV17Account, parsePortfolioV17 } from "@percolatorct/sdk";
+import { AccountKind } from "@percolatorct/sdk";
 import { useTrade, prewarmTradeSubmission } from "@/hooks/useTrade";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { getPortfolioRawSnapshot, makePortfolioScanKey } from "@/lib/userAccountScan";
@@ -40,6 +40,7 @@ import { useOptionalToast } from "@/hooks/useToast";
 import { formatTokenAmount } from "@/lib/format";
 import { closeLimitFromEngine } from "@/lib/close-limit";
 import { clearEntryPrice } from "@/lib/entry-price";
+import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 
 /** M-3: the leg is a prior-reset obligation (owns 0 effective quantity). */
 export const COPY_RESET_LEG =
@@ -165,7 +166,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
   // because useTrade v17 path discovers the LP via getProgramAccounts independently.
   const lpIdx = accounts.find(({ account }) => account.kind === AccountKind.LP)?.idx ?? 0;
 
-  const isV17Market = raw != null && raw.length > 0 && isV17Account(raw);
+  const isV17Market = raw != null && raw.length > 0 && isWrapperAccount(raw);
 
   const resetPhase = useCallback(() => {
     setPhase("idle");
@@ -241,7 +242,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
           // portfolio for this wallet and market.
           freshPositionSize = 0n;
         } else {
-          const portfolio = parsePortfolioV17(freshData);
+          const portfolio = parsePortfolio(freshData);
 
           // Re-check the mutable owner after the read — covers both the
           // RPC-side memcmp filter AND the cached-pubkey shortcut (a wrapped

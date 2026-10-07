@@ -16,14 +16,13 @@ import {
 import {
   deriveNftPda as deriveNftPdaV17,
   parsePositionNftAccount as parsePositionNftAccountSdk,
-  parsePortfolioV17,
-  isV17Account,
 } from "@percolatorct/sdk";
 import {
   triggerPortfolioScan,
   triggerHeldNftScan,
   type OwnPortfolioScanResult,
 } from "@/lib/userAccountScan";
+import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 
 // Minimum byte length accepted by the v17 (SDK) NFT account parser.
 const POSITION_NFT_STATE_LEN_V17 = 199;
@@ -74,7 +73,7 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
   const userIdx = userAccount?.idx ?? null;
   const programIdStr = slabProgramId?.toBase58() ?? null;
   const walletPubkeyStr = walletPubkey?.toBase58() ?? null;
-  const isV17 = raw != null && raw.length > 0 && isV17Account(raw);
+  const isV17 = raw != null && raw.length > 0 && isWrapperAccount(raw);
 
   useEffect(() => {
     // For v17 we need wallet pubkey; for v12 we need userIdx.
@@ -156,7 +155,7 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
           // Minted / Burn disabled" for a wallet that also has its own open
           // position on the same market.
           let ownPortfolioPk: PublicKey | null = null;
-          let ownActiveLeg: ReturnType<typeof parsePortfolioV17>["legs"][number] | null = null;
+          let ownActiveLeg: ReturnType<typeof parsePortfolio>["legs"][number] | null = null;
           if (scanResult) {
             // The shared scan already re-verified owner==wallet (a null result
             // means either no match or a failed re-verify), so only the
@@ -260,7 +259,7 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
               if (!wrappedPfInfo) continue;
               let wrappedPf;
               try {
-                wrappedPf = parsePortfolioV17(new Uint8Array(wrappedPfInfo.data));
+                wrappedPf = parsePortfolio(new Uint8Array(wrappedPfInfo.data));
               } catch {
                 continue;
               }

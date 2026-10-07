@@ -9,10 +9,8 @@ import {
   parseAllAccounts,
   parseConfig,
   parseParams,
-  parsePortfolioV17,
   parsePositionNftAccount,
   parseWrapperConfigV17,
-  isV17Account,
   AccountKind,
   V17_HEADER_LEN,
   type DiscoveredMarket,
@@ -43,6 +41,7 @@ import {
   PORTFOLIO_RECONCILE_MS,
   subscribePortfolioInvalidation,
 } from "@/lib/portfolio-invalidation";
+import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 
 const MAINNET_STATIC_MARKETS = [
   {
@@ -423,7 +422,7 @@ export function positionRowKeys(positions: PortfolioPosition[]): string[] {
  * both surface identical rows. `nftWrapped` flags escrowed positions for the UI.
  */
 export function buildV17Position(
-  portfolio: ReturnType<typeof parsePortfolioV17>,
+  portfolio: ReturnType<typeof parsePortfolio>,
   oraclePriceE6: bigint,
   maintenanceMarginBps: bigint,
   slabAddrStr: string,
@@ -737,7 +736,7 @@ export async function fetchPortfolioSnapshot(
       const slabData = accountInfo.data;
       const slabAddrStr = market.slabAddress.toBase58();
 
-      if (isV17Account(slabData)) {
+      if (isWrapperAccount(slabData)) {
         // ── v17 market path ────────────────────────────────────────────
         // Portfolios are standalone program-owned accounts, one wallet ==
         // one portfolio per market. This pass only computes each v17
@@ -987,7 +986,7 @@ export async function fetchPortfolioSnapshot(
         // must not list the market's seeded LP liquidity as their position.
         // See isLpPortfolio's doc comment.
         if (isLpPortfolio(portData)) continue;
-        const portfolio = parsePortfolioV17(portData);
+        const portfolio = parsePortfolio(portData);
         // Defense-in-depth: re-verify the mutable owner actually matches after
         // fetch — memcmp filters are advisory server-side; don't trust them
         // blindly (same re-verify as useUserAccount.ts / useDeposit.ts).
@@ -1078,7 +1077,7 @@ export async function fetchPortfolioSnapshot(
         try {
           const pfInfo = pfInfos[i];
           if (!pfInfo || !pfInfo.data) continue;
-          const portfolio = parsePortfolioV17(new Uint8Array(pfInfo.data));
+          const portfolio = parsePortfolio(new Uint8Array(pfInfo.data));
           // Only surface a wrapped position that still has an active leg
           // (a closed-but-unburned NFT wraps a size-0 leg).
           const activeLeg = portfolio.legs.find((l) => l.active);

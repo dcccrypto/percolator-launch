@@ -3,12 +3,11 @@
 import { useMemo } from "react";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import {
-  isV17Account,
-  parseMarketGroupV17OI,
   type EngineState,
   type RiskParams,
   type InsuranceFund,
 } from "@percolatorct/sdk";
+import { parseMarketOI, isWrapperAccount } from "@/lib/v22/layout";
 
 export interface DerivedEngineState {
   engine: EngineState | null;
@@ -45,14 +44,14 @@ export function useEngineState(): DerivedEngineState {
   return useMemo(() => {
     const rawBytes = raw ?? null;
     const isV17 =
-      !engine && rawBytes != null && rawBytes.length > 0 && isV17Account(rawBytes);
+      !engine && rawBytes != null && rawBytes.length > 0 && isWrapperAccount(rawBytes);
 
     let v17Insurance: bigint | null = null;
     let v17OiLong: bigint | null = null;
     let v17OiShort: bigint | null = null;
     if (isV17) {
       try {
-        const oi = parseMarketGroupV17OI(rawBytes!);
+        const oi = parseMarketOI(rawBytes!);
         v17Insurance = oi.insuranceBalance ?? null;
         v17OiLong = oi.totalLongOiQ ?? null;
         v17OiShort = oi.totalShortOiQ ?? null;

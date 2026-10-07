@@ -19,7 +19,8 @@
  */
 import { useCallback, useState } from "react";
 import { Keypair, PublicKey, type TransactionInstruction } from "@solana/web3.js";
-import { V17_PORTFOLIO_ACCOUNT_LEN, deriveVaultAuthority, getAta } from "@percolatorct/sdk";
+import { deriveVaultAuthority, getAta } from "@percolatorct/sdk";
+import { portfolioAccountLen } from "@/lib/v22/layout";
 import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { assertKnownProgram } from "@/lib/programAllowlist";
@@ -147,7 +148,7 @@ export function useFirstTrade(slabAddress: string) {
         // sendTx simulates the whole list before the wallet opens (its CU-sizing simulation is
         // the pre-sign verdict), so a refusal of any leg is caught there and mapped to its line;
         // the portfolio keypair signs AFTER the wallet (embedded wallets strip earlier signatures).
-        const rent = await connection.getMinimumBalanceForRentExemption(V17_PORTFOLIO_ACCOUNT_LEN);
+        const rent = await connection.getMinimumBalanceForRentExemption(portfolioAccountLen());
         let prompts: 1 | 2 = 1;
         for (let raceRetry = 0; ; raceRetry++) {
           const marketInfo = await connection.getAccountInfo(market, "confirmed");

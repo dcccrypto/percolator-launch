@@ -59,9 +59,9 @@ import {
   MATCHER_CONTEXT_LEN,
   MAX_BACKING_BUCKET_EXPIRY_SLOT,
   v17MarketAccountLen,
-  V17_PORTFOLIO_ACCOUNT_LEN,
   type SlabTierKey,
 } from "@percolatorct/sdk";
+import { portfolioAccountLen } from "@/lib/v22/layout";
 import { getConfig } from "@/lib/config";
 import { getServerConnection } from "@/lib/server-rpc";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
@@ -392,7 +392,7 @@ export async function POST(req: NextRequest) {
     // ═══════════════════════════════════════════════════════════════════════════
     // Full portfolio length (9347): InitPortfolio reallocs up to it and adds no lamports, so an
     // undersized createAccount leaves the account below rent-exempt → InsufficientFundsForRent.
-    const portfolioRent = await connection.getMinimumBalanceForRentExemption(V17_PORTFOLIO_ACCOUNT_LEN);
+    const portfolioRent = await connection.getMinimumBalanceForRentExemption(portfolioAccountLen());
 
   const createPortfolioIx = SystemProgram.createAccountWithSeed({
     fromPubkey: deployerPk,
@@ -400,7 +400,7 @@ export async function POST(req: NextRequest) {
     seed: lpPortfolioSeed,
     newAccountPubkey: lpPortfolioPk,
       lamports: portfolioRent,
-      space: V17_PORTFOLIO_ACCOUNT_LEN,
+      space: portfolioAccountLen(),
       programId,
     });
     const initPortfolioIx = buildIx({

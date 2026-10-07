@@ -34,7 +34,10 @@
  * lib/lp-portfolio.ts). Live 2026-09-29: COLLECT/TEXTIT/Murphy opens revert
  * Custom(49) at the trade once the lock is repaired — this is that state.
  */
-import { decodeAssetVaultLpP3 } from "@percolatorct/sdk";
+import { decodeAssetVaultLpP3 } from "@/lib/v22/records";
+import { layoutOf } from "@/lib/v22/layout";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { ACCOUNT_KIND, LAYOUT_V21, LAYOUT_V22 } from "@/lib/v22/sdk";
 import { decodeMarketLiveness, planLivenessRepairs } from "@/lib/self-heal";
 import type { LivenessRepair } from "@/lib/self-heal";
 import { TICKET_FUNDS_LINE } from "@/lib/limits/copy";
@@ -44,14 +47,11 @@ import { limitsFlags } from "@/lib/limits/flags";
 import { COPY } from "@/lib/limits/copy";
 import { closeOnlyDurationLine } from "@/lib/adl-since";
 
+// Geometry comes from the layout table of the account's VERSION (lib/v22/layout.ts): the group / slot numbers below are the
+// v2.1 row (592 / 758 / 1024 / 2325, h-lock bytes at mode-5..mode-3, source credit 595/779, backing 963/1060) and
+// are kept only for the flag-off slice length. v2.2 (VERSION 19) moves every one of them.
 const MARKET_GROUP_OFF = 592;
 const MARKET_GROUP_LEN = 758;
-const H_BANKRUPTCY_HLOCK = 621;
-const H_THRESHOLD_STRESS = 622;
-const H_LOSS_STALE = 623;
-const H_MODE = 626;
-const ASSET_WRAPPER_LEN = 1024;
-const SLOT_SOURCE_CREDIT = [595, 779] as const;
 // SourceCreditStateV16Account (184 B, packed V16PodU128 x 11 + u64).
 const SC_POSITIVE_CLAIM_BOUND = 0;
 const SC_FRESH_RESERVED = 32;
@@ -61,11 +61,9 @@ const SC_INSURANCE_RESERVED = 112;
 const SC_VALID_LIENED_INSURANCE = 128;
 const SC_IMPAIRED_LIENED_INSURANCE = 144;
 const SC_CREDIT_RATE = 160;
-// BackingBucketV16Account inside the engine slot (see self-heal.ts).
-const SLOT_BACKING = [963, 1060] as const;
+// BackingBucketV16Account inside the engine slot (see self-heal.ts); the slot offsets are layout.engineSlot.backing*.
 const BK_EXPIRY = 88;
 const BK_STATUS = 96;
-const H_CURRENT_SLOT = 613;
 export const CREDIT_RATE_SCALE = 1_000_000_000_000n;
 /** engine lib.rs:25 — every `_num` field is atoms * BOUND_SCALE. */
 export const BOUND_SCALE = 1_000_000_000_000n;
@@ -73,7 +71,9 @@ export const BOUND_SCALE = 1_000_000_000_000n;
 export const MIN_HAIRCUT_CLAIM_ATOMS = 1_000_000n;
 
 /** Bytes needed for header + asset slot 0: RPC `dataSlice` length for cheap reads. */
-export const MARKET_HEALTH_SLICE_LEN = MARKET_GROUP_OFF + MARKET_GROUP_LEN + 2325;
+export const MARKET_HEALTH_SLICE_LEN = isDevnetV22Enabled()
+  ? Math.max(LAYOUT_V21.marketGroupOff + LAYOUT_V21.marketGroupLen + LAYOUT_V21.assetSlotStride, LAYOUT_V22.marketGroupOff + LAYOUT_V22.marketGroupLen + LAYOUT_V22.assetSlotStride)
+  : MARKET_GROUP_OFF + MARKET_GROUP_LEN + 2325;
 
 export type LockReason =
   | "resolved" //       header.mode == Resolved: closes/withdrawals only
@@ -151,14 +151,23 @@ export function decodeMarketHealth(
     throw new Error(`decodeMarketHealth: need ${MARKET_HEALTH_SLICE_LEN} bytes, got ${data.length}`);
   }
   const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  const g = MARKET_GROUP_OFF;
+  // VERSION-keyed geometry; an unknown VERSION throws the typed UnknownLayoutError (flag on).
+  const L = layoutOf(data, "decodeMarketHealth", ACCOUNT_KIND.Market);
+  const g = L.marketGroupOff;
+  const H_MODE = L.group.mode;
+  const H_BANKRUPTCY_HLOCK = H_MODE - 5;
+  const H_THRESHOLD_STRESS = H_MODE - 4;
+  const H_LOSS_STALE = H_MODE - 3;
+  const H_CURRENT_SLOT = L.group.currentSlot;
+  const SLOT_SOURCE_CREDIT = [L.engineSlot.sourceCreditLong, L.engineSlot.sourceCreditShort] as const;
+  const SLOT_BACKING = [L.engineSlot.backingLong, L.engineSlot.backingShort] as const;
   const mode = data[g + H_MODE];
   // P2b: the byte is 0 (off), 1 (unattributed) or `1 | mask << 1` (attributed). Active = non-zero.
   const bankruptcyHlock = data[g + H_BANKRUPTCY_HLOCK] !== 0;
   const thresholdStress = data[g + H_THRESHOLD_STRESS] === 1;
   const lossStale = data[g + H_LOSS_STALE] === 1;
 
-  const engine = g + MARKET_GROUP_LEN + ASSET_WRAPPER_LEN;
+  const engine = g + L.marketGroupLen + L.wrapperSlotLen;
   const currentSlot = dv.getBigUint64(g + H_CURRENT_SLOT, true);
   const domains: DomainPayout[] = ([0, 1] as const).map((s) => {
     const sc = engine + SLOT_SOURCE_CREDIT[s];

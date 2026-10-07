@@ -18,10 +18,12 @@
  */
 import { PublicKey, SystemProgram, type TransactionInstruction } from "@solana/web3.js";
 import { ACCOUNT_SIZE, ASSOCIATED_TOKEN_PROGRAM_ID, MINT_SIZE } from "@solana/spl-token";
-import { IX_TAG, IX_TAG_P3, STAKE_IX, V17_PORTFOLIO_ACCOUNT_LEN } from "@percolatorct/sdk";
+import { IX_TAG, IX_TAG_P3, STAKE_IX } from "@percolatorct/sdk";
+import { portfolioAccountLen } from "@/lib/v22/layout";
 import { slabSizeFor } from "@/lib/create-market-args";
 import { VAULT_LP_MATCHER_CTX_LEN } from "@/lib/limits/constants";
 import { MEMO_PROGRAM_ID } from "@/lib/keeper-register-memo";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { decodeV1Message, v1IsSigner, v1IsWritable, type DecodedV1Message } from "./v1-decode";
 
 /** One instruction with MESSAGE-level account flags (what the runtime enforces). */
@@ -36,6 +38,9 @@ export interface LaunchPrograms {
   wrapper: string;
   stake: string;
 }
+
+/** Wrapper tag 107 (v2.2 InitBondTranche); same number as IX_TAG_V22.InitBondTranche, kept literal so this module stays dependency-light. */
+const V22_INIT_BOND_TRANCHE_TAG = 107;
 
 const WRAPPER_TAGS = {
   InitMarket: IX_TAG.InitMarket,
@@ -60,6 +65,7 @@ export type LaunchIxKind =
   | "ata.other"
   | "memo"
   | `wrapper.${WrapperName}`
+  | "wrapper.InitBondTranche"
   | "wrapper.other"
   | "stake.InitPool"
   | "stake.BindInsuranceAuthority"
@@ -76,6 +82,7 @@ export const MARKETAUTH_GATED: readonly LaunchIxKind[] = [
   "wrapper.CreateLpVault",
   "wrapper.InitVaultLp",
   "wrapper.UpdateFeeSplit",
+  "wrapper.InitBondTranche",
 ];
 
 export function classifyLaunchIx(ix: NeutralIx, p: LaunchPrograms): LaunchIxKind {
@@ -96,6 +103,8 @@ export function classifyLaunchIx(ix: NeutralIx, p: LaunchPrograms): LaunchIxKind
     for (const [name, t] of Object.entries(WRAPPER_TAGS) as [WrapperName, number][]) {
       if (tag === t) return `wrapper.${name}`;
     }
+    // v2.2 (flag-gated, so a v2.1 deployment still treats tag 107 as foreign): the capacity bond.
+    if (isDevnetV22Enabled() && tag === V22_INIT_BOND_TRANCHE_TAG) return "wrapper.InitBondTranche";
     return "wrapper.other";
   }
   if (ix.programId === p.stake) {
@@ -113,10 +122,16 @@ export interface LaunchShapeOptions {
   cosign: boolean;
   /** A non-default fee split (UpdateFeeSplit before InitPool). */
   feeSplit: boolean;
+  /**
+   * v2.2 capacity bond: InitBondTranche (107) right after InitVaultLp (94), and the Earn seeds (ata + 2 x 75) after it,
+   * because 107 is refused once the vault has any Earn deposit. Absent = the v2.1 shape.
+   */
+  bond?: boolean;
 }
 
 /** The exact kind sequence of a single-transaction P3 launch. */
 export function expectedLaunchShape(o: LaunchShapeOptions): LaunchIxKind[] {
+  if (o.bond) return expectedBondLaunchShape(o);
   return [
     "system.createAccount",
     "ata.create",
@@ -138,6 +153,20 @@ export function expectedLaunchShape(o: LaunchShapeOptions): LaunchIxKind[] {
     ...(o.feeSplit ? (["wrapper.UpdateFeeSplit"] as const) : []),
     "stake.InitPool",
     "stake.BindInsuranceAuthority",
+  ];
+}
+
+/** The bond launch: 74, the two creates, 94, 107, then the Earn seeds, then the junior deposit (see lib/v22/launch-wire.ts). */
+function expectedBondLaunchShape(o: LaunchShapeOptions): LaunchIxKind[] {
+  const v21 = expectedLaunchShape({ ...o, bond: false });
+  const i74 = v21.indexOf("wrapper.CreateLpVault");
+  const i94 = v21.indexOf("wrapper.InitVaultLp");
+  return [
+    ...v21.slice(0, i74 + 1),
+    ...v21.slice(i94 - 2, i94 + 1),
+    "wrapper.InitBondTranche",
+    ...v21.slice(i74 + 1, i94 - 2),
+    ...v21.slice(i94 + 1),
   ];
 }
 
@@ -223,6 +252,7 @@ export function launchBundleViolations(ixs: readonly NeutralIx[], ctx: LaunchBun
     memo: kinds.includes("memo"),
     cosign: ctx.keeper !== null,
     feeSplit: kinds.includes("wrapper.UpdateFeeSplit"),
+    bond: kinds.includes("wrapper.InitBondTranche"),
   };
   const expected = expectedLaunchShape(opts);
   if (kinds.length !== expected.length || kinds.some((k, i) => k !== expected[i])) {
@@ -378,7 +408,7 @@ export type LaunchCreatePins = Record<LaunchCreateName, CreatePin>;
 export function launchCreatePins(p: { wrapper: string; matcher: string; tokenProgram: string }): LaunchCreatePins {
   return {
     slab: { space: slabSizeFor({ p3: true }), owner: p.wrapper },
-    vaultLpPortfolio: { space: V17_PORTFOLIO_ACCOUNT_LEN, owner: p.wrapper },
+    vaultLpPortfolio: { space: portfolioAccountLen(), owner: p.wrapper },
     matcherCtx: { space: VAULT_LP_MATCHER_CTX_LEN, owner: p.matcher },
     stakeLpMint: { space: MINT_SIZE, owner: p.tokenProgram },
     stakeVault: { space: ACCOUNT_SIZE, owner: p.tokenProgram },

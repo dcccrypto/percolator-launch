@@ -25,18 +25,17 @@ import { PublicKey } from "@solana/web3.js";
 import {
   deriveStakePool,
   parseAssetOracleProfileV17,
-  parseMarketGroupV17OI,
   parseWrapperConfigV17,
   V17_HEADER_LEN,
-  V17_MARKET_GROUP_OFF,
 } from "@percolatorct/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { assetProfileOff } from "@/lib/v18-wire";
+import { marketGeometry, parseMarketOI } from "@/lib/v22/layout";
 
 /** AUTH_MARK: the keeper pushes the mark (wrapper ORACLE_MODE_AUTH_MARK). */
 export const ORACLE_MODE_AUTH_MARK = 3;
 /** `MarketGroupV16HeaderAccount.c_tot` (u128), relative to V17_MARKET_GROUP_OFF (lib/v18-wire.ts). */
-const MG_C_TOT_OFF = 317;
+const MG_C_TOT_OFF = 317; // v2.1; v2.2 value comes from the layout table (marketGeometry(..).layout.group.cTot)
 
 export type ReadinessFailure = "unconfigured" | "unreadable" | "incomplete" | "no-insurance" | "no-liquidity" | "oracle-not-keeper";
 export type ReadinessVerdict = { ok: true } | { ok: false; reason: ReadinessFailure };
@@ -64,10 +63,12 @@ export function checkKeeperReadiness(
   let oracleAuthority: PublicKey;
   try {
     marketauth = parseWrapperConfigV17(data, V17_HEADER_LEN).marketauth;
-    insurance = parseMarketGroupV17OI(data).insuranceBalance;
-    if (data.length < V17_MARKET_GROUP_OFF + MG_C_TOT_OFF + 16) return { ok: false, reason: "unreadable" };
-    cTot = readU128LE(data, V17_MARKET_GROUP_OFF + MG_C_TOT_OFF);
-    const profile = parseAssetOracleProfileV17(data, assetProfileOff(0));
+    insurance = parseMarketOI(data).insuranceBalance;
+    const geo = marketGeometry(data, "checkKeeperReadiness");
+    const cTotOff = geo.groupOff + geo.layout.group.cTot;
+    if (data.length < cTotOff + 16) return { ok: false, reason: "unreadable" };
+    cTot = readU128LE(data, cTotOff);
+    const profile = parseAssetOracleProfileV17(data, assetProfileOff(0, data));
     oracleMode = profile.oracleMode;
     oracleAuthority = profile.oracleAuthority;
   } catch {

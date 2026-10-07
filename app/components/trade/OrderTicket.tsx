@@ -106,6 +106,8 @@ import { v1BlocksOrder } from "@/lib/v21/move/close-only";
 import { V1CloseOnlyBanner } from "@/components/move/V1CloseOnlyNotice";
 import { V21_REFRESHING_POSITIONS } from "@/lib/v21/loss-stale-retry";
 import { StatusLine } from "@/components/ui/StatusLine";
+import { BandMarketNotice } from "@/components/v22/BandMarketNotice";
+import { useBandRentView } from "@/hooks/useBandRentView";
 import { FixPricingAction } from "@/components/trade/FixPricingAction";
 import { resolveUserMessage, type UserMessage, type UserMessageAction } from "@/lib/limits/user-message";
 import { TICKET_COPY } from "@/lib/limits/copy";
@@ -278,6 +280,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const adapterAvailable = useWalletAdapterAvailable();
   const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
   const collateralSymbol = sanitizeSymbol(tokenMeta?.symbol, mintAddress);
+  const bandView = useBandRentView();
 
   const [onChainDecimals, setOnChainDecimals] = useState<number | null>(null);
   const decimals = onChainDecimals ?? tokenMeta?.decimals ?? 6;
@@ -1351,6 +1354,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             </div>
           ) : null;
         })()}
+        {/* Devnet v2.2 band markets (flag-gated; renders nothing otherwise): mark vs target, minimum position. */}
+        <BandMarketNotice view={bandView} collateralDecimals={decimals} collateralSymbol={collateralSymbol} />
         {/* Devnet v2.1: the close-only countdown + permissionless wind-down (flag-gated). */}
         {adlReduceOnly && isDevnetV21Enabled() && (
           <CloseOnlyBanner slabAddress={slabAddress} hasPosition={existingPositionSize !== 0n} collateralDecimals={decimals} />

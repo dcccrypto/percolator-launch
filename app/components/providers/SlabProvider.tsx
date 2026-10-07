@@ -21,13 +21,10 @@ import {
   parseEngine,
   parseAllAccounts,
   parseParams,
-  isV17Account,
   parseWrapperConfigV17,
   parseAssetOracleProfileV17,
   V17_HEADER_LEN,
   V17_WRAPPER_CONFIG_LEN,
-  V17_MARKET_GROUP_OFF,
-  V17_MARKET_GROUP_LEN,
   type SlabHeader,
   type MarketConfig,
   type EngineState,
@@ -41,6 +38,7 @@ import { isMockMode } from "@/lib/mock-mode";
 import { isKnownProgram } from "@/lib/programAllowlist";
 import { parseV17RiskParams } from "@/lib/v17-engine-config";
 import { parseAssetAdlFactors, type AssetAdlFactors } from "@/lib/v17-adl";
+import { isWrapperAccount, isUnknownWrapperVersion, marketGeometry, unsupportedLayoutMessage } from "@/lib/v22/layout";
 
 export interface SlabState {
   /** The slab account address this provider is tracking */
@@ -53,6 +51,8 @@ export interface SlabState {
   accounts: { idx: number; account: Account }[];
   loading: boolean;
   error: string | null;
+  /** v2.2 flag on only: the account carries the wrapper magic but a VERSION this build does not decode (calm fallback, no numbers). */
+  layoutUnsupported?: boolean;
   /** The on-chain program that owns this slab account */
   programId: PublicKey | null;
   /**
@@ -270,6 +270,12 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
         }));
         return;
       }
+      if (isUnknownWrapperVersion(data)) {
+        // Never read a market with another layout's offsets: show the calm fallback instead of numbers.
+        lastHadError = true;
+        setState((s) => ({ ...defaultSlabState, slabAddress: s.slabAddress, programId: s.programId, loading: false, error: unsupportedLayoutMessage().body, layoutUnsupported: true }));
+        return;
+      }
       try {
         // ── v17 parse path ──────────────────────────────────────────────────
         // v17 market group accounts use a completely different layout:
@@ -282,7 +288,7 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
         // v17 slabs use a different magic (PERCV16\0 vs PERCOLAT) — parseHeader() THROWS on v17 data.
         // parseConfig(), parseEngine(), and parseParams() are v12.x functions that read from
         // different offsets and will return garbage on v17 data.
-        if (isV17Account(data)) {
+        if (isWrapperAccount(data)) {
           // v17: do NOT call parseHeader — v17 magic differs from v12 and parseHeader throws.
           // Build a minimal SlabHeader shim from v17 fields (admin = cfg.marketauth).
           // parseWrapperConfigV17 reads the 576-byte config block at offset V17_HEADER_LEN (16).
@@ -304,7 +310,7 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
           // market-group header region (bug: was parsing the header as an asset profile,
           // producing garbage oracleAuthority/authorityPriceE6/authorityTimestamp). Constants
           // are imported from the SDK, so this offset tracks the 576-byte config automatically.
-          const assetProfileOffset = V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN; // = 592 + 758 = 1350
+          const assetProfileOffset = marketGeometry(data, "SlabProvider").slotsBase; // VERSION-keyed: 1350 on v2.1, 1398 on v2.2
           const assetProfile = parseAssetOracleProfileV17(data, assetProfileOffset);
           // Live ADL factors for asset slot 0, from the same bytes (no extra RPC).
           const adlFactors = parseAssetAdlFactors(data, 0);

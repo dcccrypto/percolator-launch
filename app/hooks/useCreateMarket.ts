@@ -57,14 +57,10 @@ import {
   deriveStakeVaultAuth,
   initPoolAccounts,
   parseHeader,
-  isV17Account,
-  V17_PORTFOLIO_ACCOUNT_LEN,
   MATCHER_CONTEXT_LEN,
   // W2/W3 fix (2026-07-08): parsePortfolioV17 reads the LP portfolio's on-chain
   // `capital` so Step 3 can detect an already-landed deposit/top-up before
   // resending it — see the Step 3 block below.
-  parsePortfolioV17,
-  parseMarketGroupV17OI,
   parseAssetOracleProfileV17,
   parseLpVaultRegistry,
 } from "@percolatorct/sdk";
@@ -118,7 +114,9 @@ import {
   type CreateStepKind,
 } from "@/lib/create-market-v18";
 import { buildInitMatcherCtxArgs } from "@/lib/matcher-params";
-import { encodeInitMarketData, validateGrowthLaunch, type GrowthLaunch } from "@/lib/v21/growth-launch";
+import { validateGrowthLaunch, type GrowthLaunch } from "@/lib/v21/growth-launch";
+import { buildLaunchBondIx, bondBundleTooLargeMessage, bondNeedsSingleTxMessage, encodeInitMarketDataWithV22, placeBondTranche } from "@/lib/v22/launch-wire";
+import type { V22LaunchParams } from "@/lib/v22/launch-plan";
 import { V21_COPY } from "@/lib/v21/copy";
 import { buildP3BindIxs, canonicalVaultLpMatcher, p3BindProgress, validateP3Wizard } from "@/lib/limits/p3-wizard";
 import { COPY as LIMITS_COPY } from "@/lib/limits/copy";
@@ -166,6 +164,7 @@ import {
   buildV17InitMarketArgs,
   slabSizeFor,
 } from "@/lib/create-market-args";
+import { parsePortfolio, parseMarketOI, isWrapperAccount, createPortfolioAccountIx, portfolioAccountLen, portfolioGpaFilters } from "@/lib/v22/layout";
 const ALL_ZEROS_FEED = "0".repeat(64);
 
 /**
@@ -343,6 +342,12 @@ export interface CreateMarketParams {
    * See lib/v21/growth-launch.ts for the rules and the seed order.
    */
   growth?: GrowthLaunch;
+  /**
+   * Devnet v2.2 (flag-gated by the wizard): the lot size (chosen from the token price), the optional
+   * holding fee / price protection, and an optional capacity bond built into the atomic launch.
+   * `initialPriceE6` is then PER LOT. Absent = today's launch.
+   */
+  v22?: V22LaunchParams;
   p3?: {
     juniorFloorBps: number;
     /** The creator's first-loss capital. Under P3 there is NO creator-owned LP at all (M2 / M3a
@@ -643,13 +648,16 @@ interface FreshBatchContext {
 export function singleTxInstructionPlan(
   tail: readonly { instructions: readonly TransactionInstruction[]; signers: readonly Keypair[] }[],
   cosignInstructions: readonly TransactionInstruction[],
+  /** Devnet v2.2: a capacity bond rides in the SAME transaction (tag 107 after 94; the Earn seeds move after it). */
+  bond?: { ix: TransactionInstruction; wrapper: PublicKey },
 ): { instructions: TransactionInstruction[]; signers: Keypair[] } {
   const [m1, ...rest] = tail;
   if (!m1) throw new Error("singleTxInstructionPlan: empty launch");
   const ordered = [m1, { instructions: cosignInstructions, signers: [] as Keypair[] }, ...rest];
   const signers: Keypair[] = [];
   for (const d of ordered) for (const s of d.signers) if (!signers.some((k) => k.publicKey.equals(s.publicKey))) signers.push(s);
-  return { instructions: ordered.flatMap((d) => [...d.instructions]), signers };
+  const flat = ordered.flatMap((d) => [...d.instructions]);
+  return { instructions: bond ? placeBondTranche(flat, bond.ix, bond.wrapper) : flat, signers };
 }
 
 /**
@@ -930,7 +938,7 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
 
     const rentPromise = Promise.all([
       getCachedRentExemption(connection, slabSizeFor(params)),
-      getCachedRentExemption(connection, V17_PORTFOLIO_ACCOUNT_LEN),
+      getCachedRentExemption(connection, portfolioAccountLen()),
       getCachedRentExemption(connection, MATCHER_CONTEXT_LEN),
       getCachedRentExemption(connection, MINT_SIZE),
       getCachedRentExemption(connection, ACCOUNT_SIZE),
@@ -1064,7 +1072,7 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
     // (lib/create-market-m1.ts; 987 B with the memo on the heaviest config, limit 1232).
     const m1Instructions = buildM1Instructions({
       programId, wallet: walletPk, slab: slabPk, mint: params.mint, vaultAta, vaultPda, nftRegistry: nftRegistryPda,
-      slabRent, slabSize: effectiveSlabSize, initArgs: v17InitArgs, growth: params.growth, memo: keeperMemoIx,
+      slabRent, slabSize: effectiveSlabSize, initArgs: v17InitArgs, growth: params.growth, v22: params.v22, memo: keeperMemoIx,
     });
     const m1Descriptor: TailTxDescriptor = {
       label: WIZARD_STEP_COPY.createMarket,
@@ -1074,10 +1082,7 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
     };
 
     // M2: createAccount(portfolio)+InitUser + createAccount(ctx)+SetMatcherConfig+InitMatcherCtx
-    const createPortfolioIx = SystemProgram.createAccount({
-      fromPubkey: walletPk, newAccountPubkey: lpPortfolioKp.publicKey,
-      lamports: portfolioRent, space: V17_PORTFOLIO_ACCOUNT_LEN, programId,
-    });
+    const createPortfolioIx = createPortfolioAccountIx(walletPk, lpPortfolioKp.publicKey, portfolioRent, programId);
     const initPortfolioIx = buildIx({
       programId,
       keys: buildAccountMetas(ACCOUNTS_INIT_USER, {
@@ -1322,7 +1327,7 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
               },
               creator: walletPk,
               vaultLpPortfolio: vaultLpPortfolioKp.publicKey,
-              portfolioLen: V17_PORTFOLIO_ACCOUNT_LEN,
+              portfolioLen: portfolioAccountLen(),
               portfolioRentLamports: portfolioRent,
               matcherProgram: canonicalVaultLpMatcher(matcherProgramId.toBase58()),
               matcherCtx: vaultLpCtxKp!.publicKey,
@@ -1384,10 +1389,19 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
     // and a failure costs only the fee (no in-flight record, no partial market, nothing to resume).
     // Fallback runs the batch below with the SAME slab keypair, so the two can never both create a
     // market (createAccount of one address can only succeed once).
+    // v2.2: the bond launch exists only as ONE transaction. Without the single-transaction path nothing is sent.
+    if (params.v22?.bond && !ctx.singleTx) {
+      setState((s) => ({ ...s, loading: false, phase: "idle", error: bondNeedsSingleTxMessage, step: 0, stepLabel: STEP_LABELS[0] ?? s.stepLabel }));
+      return { status: "aborted" };
+    }
     if (ctx.singleTx) {
       const keeperPk = cosignTx?.signatures.find((s) => s.signature !== null && !s.publicKey.equals(walletPk))?.publicKey ?? null;
       if (cosignTx && !keeperPk) throw new Error("Keeper co-sign returned no keeper signature.");
-      const plan = singleTxInstructionPlan(tailDescriptors, cosignTx ? cosignTx.instructions : []);
+      const plan = singleTxInstructionPlan(
+        tailDescriptors,
+        cosignTx ? cosignTx.instructions : [],
+        params.v22?.bond ? { ix: buildLaunchBondIx(programId, slabPk, walletPk, params.v22.bond), wrapper: programId } : undefined,
+      );
       const latest = await connection.getLatestBlockhash("confirmed");
       setState((s) => ({ ...s, phase: "awaiting-signature", stepLabel: "Approve the launch in your wallet (one transaction)..." }));
       const single = await attemptSingleTxLaunch(
@@ -1451,6 +1465,13 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
               : `The launch was refused before anything was created: ${single.reason}`;
         console.warn(`[useCreateMarket] SINGLE-TX launch ${single.status}: ${single.status === "unknown" ? single.reason : `${single.stage}: ${single.reason}`}`);
         setState((s) => ({ ...s, loading: false, phase: "idle", error: msg, step: 0, stepLabel: STEP_LABELS[0] ?? s.stepLabel }));
+        return { status: "aborted" };
+      }
+      // v2.2: a launch with a bond is never split (Wave C N-2: a minimum-size Earn deposit between the steps
+      // disables bonds for good). Nothing landed, so say so and stop; the batch below would drop the bond silently.
+      if (params.v22?.bond) {
+        console.warn(`[useCreateMarket] SINGLE-TX bond launch could not run as one transaction at ${single.stage}: ${single.reason}`);
+        setState((s) => ({ ...s, loading: false, phase: "idle", error: single.stage === "compile" ? bondBundleTooLargeMessage : bondNeedsSingleTxMessage, step: 0, stepLabel: STEP_LABELS[0] ?? s.stepLabel }));
         return { status: "aborted" };
       }
       // Fallback: nothing landed. Fresh blockhash + a fresh legacy co-sign tx (the first one may have
@@ -1826,7 +1847,7 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
       try {
         const slabInfo = await connection.getAccountInfo(slabPk);
         if (slabInfo?.data) {
-          insuranceOnChain = parseMarketGroupV17OI(new Uint8Array(slabInfo.data)).insuranceBalance;
+          insuranceOnChain = parseMarketOI(new Uint8Array(slabInfo.data)).insuranceBalance;
         }
       } catch {
         // Fall through — an unverifiable seed is treated as a failed one.
@@ -2431,7 +2452,7 @@ export function useCreateMarket() {
             let isInitialized: boolean;
             try {
               const existingData = new Uint8Array(existingAccount.data);
-              if (isV17Account(existingData)) {
+              if (isWrapperAccount(existingData)) {
                 isInitialized = true;
               } else {
                 parseHeader(existingAccount.data);
@@ -2467,7 +2488,7 @@ export function useCreateMarket() {
               // Margin and the price-move budget share one derivation — see
               // lib/market-params.ts.
               const v17InitArgs = buildV17InitMarketArgs(params, derived);
-              const initMarketData = encodeInitMarketData(v17InitArgs, params.growth);
+              const initMarketData = encodeInitMarketDataWithV22(v17InitArgs, params.growth, params.v22);
 
               // v18 InitMarket takes exactly 3 accounts [admin, slab, mint] — see the
               // M1 fix note above (~line 987) and ACCOUNTS_INIT_MARKET in the v18 SDK.
@@ -2561,7 +2582,7 @@ export function useCreateMarket() {
             // Margin and the price-move budget share one derivation — see
             // lib/market-params.ts.
             const v17InitArgs = buildV17InitMarketArgs(params, derived);
-            const initMarketData = encodeInitMarketData(v17InitArgs, params.growth);
+            const initMarketData = encodeInitMarketDataWithV22(v17InitArgs, params.growth, params.v22);
 
             // v18 InitMarket takes exactly 3 accounts [admin, slab, mint] — see the
             // M1 fix note above (~line 987). The old 9-account array (vault ATA,
@@ -2631,7 +2652,7 @@ export function useCreateMarket() {
             try {
               const newSlabInfo = await connection.getAccountInfo(slabPk, "confirmed");
               if (newSlabInfo?.data) {
-                isV17Slab = isV17Account(new Uint8Array(newSlabInfo.data));
+                isV17Slab = isWrapperAccount(new Uint8Array(newSlabInfo.data));
                 break;
               }
             } catch (e) {
@@ -2695,7 +2716,7 @@ export function useCreateMarket() {
           if (isKeeperOracle && isV17Slab) {
             const profileInfo = await connection.getAccountInfo(slabPk, "confirmed");
             if (profileInfo?.data) {
-              const profile = parseAssetOracleProfileV17(new Uint8Array(profileInfo.data), assetProfileOff(0));
+              const profile = parseAssetOracleProfileV17(new Uint8Array(profileInfo.data), assetProfileOff(0, new Uint8Array(profileInfo.data)));
               oracleDelegationDone = isOracleDelegationApplied(profile, wallet.publicKey);
               if (oracleDelegationDone) {
                 console.log(
@@ -2869,7 +2890,7 @@ export function useCreateMarket() {
           // Check if a v17 slab — LP init path differs between v17 and v12.
           const slabInfoForStep2 = await connection.getAccountInfo(slabPk);
           const isV17SlabStep2 = slabInfoForStep2?.data
-            ? isV17Account(new Uint8Array(slabInfoForStep2.data))
+            ? isWrapperAccount(new Uint8Array(slabInfoForStep2.data))
             : false;
 
           if (isV17SlabStep2) {
@@ -3052,7 +3073,7 @@ export function useCreateMarket() {
 
               if (
                 freshPortfolioInfo.data.length !==
-                V17_PORTFOLIO_ACCOUNT_LEN
+                portfolioAccountLen()
               ) {
                 throw new Error(
                   "Matcher recovery could not be verified: the LP portfolio " +
@@ -3169,7 +3190,7 @@ export function useCreateMarket() {
             const existingLpPortfolios =
               await connection.getProgramAccounts(programId, {
                 filters: [
-                  { dataSize: V17_PORTFOLIO_ACCOUNT_LEN },
+                  ...portfolioGpaFilters(),
                   {
                     memcmp: {
                       offset: 0,
@@ -3199,16 +3220,10 @@ export function useCreateMarket() {
 
               const portfolioRent =
                 await connection.getMinimumBalanceForRentExemption(
-                  V17_PORTFOLIO_ACCOUNT_LEN,
+                  portfolioAccountLen(),
                 );
 
-              const createPortfolioIx = SystemProgram.createAccount({
-                fromPubkey: walletPublicKeyStep2,
-                newAccountPubkey: lpPortfolioPk,
-                lamports: portfolioRent,
-                space: V17_PORTFOLIO_ACCOUNT_LEN,
-                programId,
-              });
+              const createPortfolioIx = createPortfolioAccountIx(walletPublicKeyStep2, lpPortfolioPk, portfolioRent, programId);
 
               const initPortfolioIx = buildIx({
                 programId,
@@ -3389,7 +3404,7 @@ export function useCreateMarket() {
           // For v12, fall back to the vault ATA as the portfolio placeholder (v12 layout had no portfolio).
           const slabInfoForDeposit = await connection.getAccountInfo(slabPk);
           const isV17SlabDeposit = slabInfoForDeposit?.data
-            ? isV17Account(new Uint8Array(slabInfoForDeposit.data))
+            ? isWrapperAccount(new Uint8Array(slabInfoForDeposit.data))
             : false;
 
           let depositPortfolioPk: PublicKey;
@@ -3477,7 +3492,7 @@ export function useCreateMarket() {
             try {
               const portInfo = await connection.getAccountInfo(depositPortfolioPk);
               if (portInfo?.data) {
-                alreadyDepositedCapital = parsePortfolioV17(new Uint8Array(portInfo.data)).capital;
+                alreadyDepositedCapital = parsePortfolio(new Uint8Array(portInfo.data)).capital;
               }
             } catch {
               // Treat as not-yet-deposited — fall through to deposit.
@@ -3552,7 +3567,7 @@ export function useCreateMarket() {
               try {
                 const slabInfo = await connection.getAccountInfo(slabPk);
                 if (slabInfo?.data) {
-                  alreadyToppedUp = parseMarketGroupV17OI(new Uint8Array(slabInfo.data)).insuranceBalance;
+                  alreadyToppedUp = parseMarketOI(new Uint8Array(slabInfo.data)).insuranceBalance;
                 }
               } catch {
                 // Unreadable — treat as not-yet-topped-up and send the deposit.
@@ -3649,7 +3664,7 @@ export function useCreateMarket() {
             try {
               const slabInfoFinal = await connection.getAccountInfo(slabPk);
               if (slabInfoFinal?.data) {
-                insuranceOnChain = parseMarketGroupV17OI(
+                insuranceOnChain = parseMarketOI(
                   new Uint8Array(slabInfoFinal.data),
                 ).insuranceBalance;
               }
@@ -3877,8 +3892,8 @@ export function useCreateMarket() {
                     market: p3Market,
                     creator: wallet.publicKey,
                     vaultLpPortfolio: vaultLpKp.publicKey,
-                    portfolioLen: V17_PORTFOLIO_ACCOUNT_LEN,
-                    portfolioRentLamports: await connection.getMinimumBalanceForRentExemption(V17_PORTFOLIO_ACCOUNT_LEN),
+                    portfolioLen: portfolioAccountLen(),
+                    portfolioRentLamports: await connection.getMinimumBalanceForRentExemption(portfolioAccountLen()),
                     matcherProgram: canonicalVaultLpMatcher(getConfig().matcherProgramId),
                     matcherCtx: vaultLpCtxKp!.publicKey,
                     matcherCtxRentLamports: await connection.getMinimumBalanceForRentExemption(VAULT_LP_MATCHER_CTX_LEN),

@@ -16,6 +16,9 @@ import { getConfig } from "@/lib/config";
 import { unpackAccount, getMint } from "@solana/spl-token";
 import { readPoolTotalLpSupply, stakeWithdrawChipAmount, valueStakePosition, withdrawAmountError } from "@/lib/stake-position";
 import { useStakeDepositByPool } from "@/hooks/useStakeDepositByPool";
+import { useStakeFirstLoss } from "@/hooks/useStakeFirstLoss";
+import { FirstLossDeposit } from "@/components/stake/FirstLossDeposit";
+import { V22_COPY } from "@/lib/v22/copy";
 import { useStakeWithdrawByPool } from "@/hooks/useStakeWithdrawByPool";
 import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
 import { formatTokenAmount } from "@/lib/format";
@@ -640,6 +643,10 @@ function DepositWidget({
     collateralMint: pool?.collateralMint ?? "",
   });
 
+  // Devnet v2.2 (flag-gated): a stake-v5 first-loss pool gets the consent deposit instead of the plain form.
+  // `firstLoss.pool` is null with the flag off and for every other pool, so nothing changes there.
+  const firstLoss = useStakeFirstLoss(pool?.slabAddress ?? "", pool?.collateralMint ?? "");
+
   // Withdraw for the currently SELECTED pool — same tx builder YourPositionPanel
   // uses, just parameterized by whichever pool is picked in the dropdown here
   // instead of the single globally-detected "first pool with a balance" position.
@@ -832,7 +839,14 @@ function DepositWidget({
           </select>
         </div>
 
-        {mode === "deposit" ? (
+        {mode === "deposit" && firstLoss.pool ? (
+          <FirstLossDeposit
+            slabAddress={pool?.slabAddress ?? ""}
+            collateralMint={pool?.collateralMint ?? ""}
+            decimals={balanceDecimals}
+            onDone={() => { setWithdrawRefreshKey((k) => k + 1); onTxSuccess?.(); }}
+          />
+        ) : mode === "deposit" ? (
           <>
             {/* Amount input */}
             <div>
@@ -1042,6 +1056,10 @@ function DepositWidget({
                   ? "Cooldown complete — ready to withdraw."
                   : `${withdrawCooldown.label}.`}
               </p>
+            )}
+
+            {firstLoss.pool && (
+              <p data-testid="first-loss-withdraw-note" className="text-[11px] text-[var(--text-muted)]">{V22_COPY.stake.withdraw}</p>
             )}
 
             {/* Tx feedback */}
