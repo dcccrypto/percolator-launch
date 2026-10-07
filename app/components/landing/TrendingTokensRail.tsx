@@ -236,7 +236,8 @@ const TrendingHeader: FC<{ tf: Timeframe }> = ({ tf }) => (
  * matched the filters); rows.
  */
 export function TrendingTokensRail() {
-  const [tf, setTf] = useState<Timeframe>("24h");
+  // Default to 1H: the point of the list is to surface momentum as it builds.
+  const [tf, setTf] = useState<Timeframe>("1h");
   const [count, setCount] = useState<RailCount>(DEFAULT_RAIL_COUNT);
 
   const { data, error } = useSWR<TrendingTokensResult>("/api/trending-tokens", fetcher, {

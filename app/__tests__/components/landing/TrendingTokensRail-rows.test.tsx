@@ -141,17 +141,17 @@ describe("TrendingTokensRail copy", () => {
 });
 
 describe("TrendingTokensRail filters", () => {
-  it("defaults to the 24h window and swaps the Vol / Change column when 1H is chosen", () => {
+  it("defaults to the 1H window and swaps the Vol / Change column when 24H is chosen", () => {
     h.swr.data = ok([tok("MintAAA", "AAA")]);
     render(<TrendingTokensRail />);
-    // Default 24h: 24h column label + the 24h change value.
-    expect(screen.getByText("24h Vol")).toBeTruthy();
-    expect(screen.getByText("-3.2%")).toBeTruthy();
-    // Switch to 1H: the column header + value follow the window.
-    fireEvent.click(screen.getByRole("radio", { name: "1H" }));
+    // Default 1h: 1h column label + the 1h change value.
     expect(screen.getByText("1h Vol")).toBeTruthy();
     expect(screen.getByText("+12.5%")).toBeTruthy();
-    expect(screen.queryByText("24h Vol")).toBeNull();
+    // Switch to 24H: the column header + value follow the window.
+    fireEvent.click(screen.getByRole("radio", { name: "24H" }));
+    expect(screen.getByText("24h Vol")).toBeTruthy();
+    expect(screen.getByText("-3.2%")).toBeTruthy();
+    expect(screen.queryByText("1h Vol")).toBeNull();
   });
 
   it("re-ranks by the selected window's momentum score", () => {
@@ -162,9 +162,9 @@ describe("TrendingTokensRail filters", () => {
     ]);
     render(<TrendingTokensRail />);
     const order = () => screen.queryAllByText(/^(AAA|BBB)$/).map((n) => n.textContent);
-    expect(order()).toEqual(["AAA", "BBB"]); // 24h default
-    fireEvent.click(screen.getByRole("radio", { name: "1H" }));
-    expect(order()).toEqual(["BBB", "AAA"]); // 1h re-rank
+    expect(order()).toEqual(["BBB", "AAA"]); // 1h default
+    fireEvent.click(screen.getByRole("radio", { name: "24H" }));
+    expect(order()).toEqual(["AAA", "BBB"]); // 24h re-rank
   });
 
   it("the Show control caps how many rows render (Show 5)", () => {
