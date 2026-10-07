@@ -44,6 +44,7 @@ import { applyConfirmedFill, getPortfolioRawSnapshot, makePortfolioScanKey } fro
 import { limitsFlags } from "@/lib/limits/flags";
 import { decodeMarketEngineView, signedPositionForAsset } from "@/lib/limits/decode";
 import { measureFill, recordFillResult } from "@/lib/limits/fill-check";
+import { measurePositionChange, readBeforeTrade, recordPositionChange } from "@/lib/position-change";
 import { tradeFeeBpsToSign } from "@/lib/limits/fee-channel";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { detectOracleMode, resolveMarketPriceE6 } from "@/lib/oraclePrice";
@@ -490,6 +491,11 @@ export function useTrade(slabAddress: string) {
         // on-chain if stale. accountA = taker, accountB = LP maker. TradeCpi reads
         // accountB's matcher-sequence but does NOT advance it (gate test/03).
         // Ported from newmarkets.ts buildTradeCpiIx.
+        // #3314: the taker's effective position before the trade, for the saved entry. Started
+        // here so it runs alongside the identity reads; awaited only after confirmation.
+        const beforeEffectiveQ: Promise<bigint | null> = isV17Market
+          ? readBeforeTrade(connection, accountA, slabPk)
+          : Promise.resolve(null);
         const [takerId, lpId, tradeMarketId] = await Promise.all([
           fetchPortfolioIdentity(connection, accountA),
           fetchPortfolioIdentity(connection, accountB),
@@ -667,6 +673,16 @@ export function useTrade(slabAddress: string) {
         // the burst. Capital/pnl/fees are intentionally left untouched (not
         // deterministic client-side) — those fields still wait on the
         // refresh burst exactly as before. See applyConfirmedFill's doc.
+        // #3314: measure the position change for the saved entry. Not awaited: the caller that
+        // saves the entry (OrderTicket) waits for it via takePositionChange(sig); closes don't.
+        if (isV17Market) {
+          const portfolio = accountA;
+          recordPositionChange(
+            sig,
+            beforeEffectiveQ.then((beforeQ) => measurePositionChange(connection, portfolio, slabPk, sig, beforeQ)),
+          );
+        }
+
         if (isV17Market && limitsMarketId !== null) {
           // P1: patch only by the MEASURED delta. A zero fill changes nothing; an
           // unknown result waits for the refresh burst (never assumes params.size).
