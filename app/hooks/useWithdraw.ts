@@ -264,7 +264,7 @@ export function useWithdraw(slabAddress: string) {
           }
 
           // Over-withdraw pre-check (defense-in-depth). The DepositWithdrawCard UI
-          // already blocks amount > freeMargin, but this guards direct/other
+          // blocks any amount with a position open and above capital when flat; this guards direct/other
           // callers and turns a confusing on-chain failure into a clear message.
           //
           // M7: gate on FREE margin — capital minus the open position's OWN

@@ -18,9 +18,6 @@ import { parseHumanAmount } from "@/lib/parseAmount";
 import { formatTokenAmount } from "@/lib/format";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
-import { computePositionInitialMargin, estimateEntryFromPnl } from "@/lib/trading";
-import { getEntryPrice } from "@/lib/entry-price";
-import { useLivePrice } from "@/hooks/useLivePrice";
 import { isSentinelValue } from "@/lib/health";
 import { useConvertibleProfit } from "@/hooks/useConvertibleProfit";
 import { settlingProfitMessage } from "@/lib/convert-released-pnl";
@@ -55,8 +52,7 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
   const { deposit, loading: depositLoading, error: depositError } = useDeposit(slabAddress);
   const { withdraw, loading: withdrawLoading, error: withdrawError } = useWithdraw(slabAddress);
   const { initUser, loading: initLoading, error: initError } = useInitUser(slabAddress);
-  const { config: mktConfig, params: slabParams } = useSlabState();
-  const { priceE6: livePriceE6 } = useLivePrice();
+  const { config: mktConfig } = useSlabState();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const symbol = tokenMeta?.symbol ?? "Token";
 
@@ -303,47 +299,15 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
   const capital = userAccount.account.capital;
   const positionSize = userAccount.account.positionSize ?? 0n;
   const hasOpenPosition = positionSize !== 0n;
-  // M7 / D: gate withdraw on FREE margin (capital minus the open position's
-  // own locked initial margin), not total capital — total capital includes
-  // margin backing an open position that the on-chain program refuses to
-  // release. v17 doesn't store entry_price on-chain, so recover it the same
-  // 3-step fallback OrderTicket already uses: on-chain entry_price -> the
-  // locally-cached entry from this trade's open (lib/entry-price.ts) -> the
-  // on-chain-pnl-implied entry (estimateEntryFromPnl) for a cache miss (2nd
-  // device, cleared storage, or a Position NFT received via transfer).
-  //
-  // D: the previous version used ONLY getEntryPrice(), so a cache miss
-  // silently returned 0n -> computePositionInitialMargin(pos, 0n, bps) is
-  // guarded to return 0n -> lockedMargin=0 -> "Max" offered the FULL account
-  // capital of an account with an OPEN position, and the resulting withdrawal
-  // tx reverted on-chain. If even estimateEntryFromPnl can't establish an
-  // entry (no live oracle price yet), fail CLOSED: treat the WHOLE capital as
-  // locked (lockedMargin=capital -> freeMargin=0 -> the Max button, gated on
-  // `freeMargin > 0n` below, simply doesn't render) rather than open.
-  const rawEntryPrice = userAccount.account.entryPrice ?? 0n;
-  const cachedEntryPrice = hasOpenPosition && publicKey
-    ? getEntryPrice(slabAddress, userAccount.idx, publicKey.toBase58())
-    : 0n;
-  const safePnlForEstimate = isSentinelValue(userAccount.account.pnl) ? 0n : userAccount.account.pnl;
-  const estimatedEntryPrice = hasOpenPosition && livePriceE6 != null && livePriceE6 > 0n
-    ? estimateEntryFromPnl(positionSize, safePnlForEstimate, livePriceE6)
-    : 0n;
-  const effectiveEntryPrice = rawEntryPrice > 0n
-    ? rawEntryPrice
-    : cachedEntryPrice > 0n
-      ? cachedEntryPrice
-      : estimatedEntryPrice;
-  const initialMarginBps = slabParams?.initialMarginBps ?? 1000n;
-  const lockedMargin = !hasOpenPosition
-    ? 0n
-    : effectiveEntryPrice > 0n
-      ? computePositionInitialMargin(positionSize, effectiveEntryPrice, initialMarginBps)
-      : capital; // fail closed: no entry price could be established at all
-  const freeMargin = capital > lockedMargin ? capital - lockedMargin : 0n;
+  // The engine refuses EVERY withdrawal while a position is open, and useWithdraw
+  // blocks it up front (OPEN_POSITION_WITHDRAW_MESSAGE), so nothing is withdrawable
+  // until the position is closed: no Max, and any amount reads as blocked.
   // Flat: capital plus the released profit tag 28 would convert in the same tx.
-  const withdrawable = !hasOpenPosition && convertQuote?.status === "ready" && convertQuote.postCapital > freeMargin
-    ? convertQuote.postCapital
-    : freeMargin;
+  const withdrawable = hasOpenPosition
+    ? 0n
+    : convertQuote?.status === "ready" && convertQuote.postCapital > capital
+      ? convertQuote.postCapital
+      : capital;
   const settlingProfitLine = !hasOpenPosition && convertQuote?.status === "settling"
     ? settlingProfitMessage(convertQuote.code)
     : null;
@@ -368,7 +332,7 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
   const validationError = parseError
     ? parseError
     : isOverWithdraw
-    ? (hasOpenPosition ? "Exceeds free margin (position open)" : "Insufficient capital")
+    ? (hasOpenPosition ? "Close your position to withdraw" : "Insufficient capital")
     : isOverDeposit
     ? "Insufficient wallet balance"
     : null;
@@ -475,10 +439,9 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
           {mode === "withdraw" && withdrawable > 0n && (
             <button
               type="button"
-              // M7: Max = FREE margin, not total capital — total capital
-              // includes margin locked by an open position, which the
-              // on-chain program refuses to release. Flat: plus the released
-              // profit that converts to capital in the same transaction.
+              // Only rendered flat (withdrawable is 0 with a position open):
+              // capital plus the released profit that converts to capital
+              // in the same transaction.
               onClick={() => { maxRawRef.current = withdrawable; setAmount(formatTokenAmount(withdrawable, decimals)); }}
               className="absolute right-2 top-1/2 -translate-y-1/2 rounded-none px-2 py-0.5 text-[9px] font-semibold uppercase text-[var(--accent)] hover:bg-[var(--accent)]/10"
             >
@@ -505,12 +468,10 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
 
       {mode === "withdraw" && hasOpenPosition && (
         <div className="mb-2 border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] p-2 space-y-1">
-          <p className="text-[10px] text-[var(--warning)]">⚠ Withdrawing margin with an open position may trigger liquidation</p>
+          <p data-testid="withdraw-position-open" className="text-[10px] text-[var(--warning)]">Close your position to withdraw.</p>
           <p className="text-[10px] text-[var(--text-secondary)]">
-            Part of your balance is locked as margin backing the position — the
-            program rejects withdrawals that would under-collateralize it, so
-            MAX only offers your free (unlocked) margin, not your full account
-            balance, until the position is closed.
+            Your balance backs the open position, and this market can&apos;t release any of it
+            until the position is fully closed. Then the whole balance is withdrawable.
           </p>
         </div>
       )}
