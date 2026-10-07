@@ -12,10 +12,19 @@ import {
   toTrendingToken,
   screenAndRank,
   candidateFromPumpFun,
+  liqDampener,
+  accelMultiplier,
+  momentumScores,
+  trendSeries,
+  volumeForTimeframe,
+  changeForTimeframe,
+  rankForTimeframe,
+  LIQ_REF_USD,
   MIN_MARKET_CAP_USD,
   MIN_LIQUIDITY_USD,
   type PumpFunCoin,
   type DexMarket,
+  type TrendingToken,
 } from "@/lib/trending-tokens";
 
 const WSOL = "So11111111111111111111111111111111111111112";
@@ -126,6 +135,83 @@ describe("toTrendingToken", () => {
   it("derives price from market cap / supply when DexScreener has no price", () => {
     const t = toTrendingToken(cand(coin({ usd_market_cap: 1_000_000, total_supply: 2_000_000 })), market({ priceUsd: null }));
     expect(t.priceUsd).toBe(0.5);
+  });
+
+  it("carries the momentum fields: 1h volume, per-window change, trend series and scores", () => {
+    const t = toTrendingToken(
+      cand(coin()),
+      market({
+        volume24hUsd: 120_000,
+        volume6hUsd: 40_000,
+        volume1hUsd: 10_000,
+        volume5mUsd: 1_000,
+        priceChange1hPct: 5,
+        priceChange24hPct: -2,
+        txns1h: 120,
+        txns6h: 360,
+        liquidityUsd: LIQ_REF_USD, // dampener = 1
+      }),
+    );
+    expect(t.volume1hUsd).toBe(10_000);
+    expect(t.priceChange1hPct).toBe(5);
+    expect(t.priceChange24hPct).toBe(-2);
+    // trend = avg $/h over [24h, 6h, 1h, 5m].
+    expect(t.trend[0]).toBeCloseTo(5_000, 5);
+    expect(t.trend[2]).toBeCloseTo(10_000, 5);
+    expect(t.trend[3]).toBeCloseTo(12_000, 5);
+    // accel = 120 / (360/6) = 2; score1h = 10k × 2 × 1; score24h = 120k × 1.
+    expect(t.score1h).toBeCloseTo(20_000, 5);
+    expect(t.score24h).toBeCloseTo(120_000, 5);
+  });
+});
+
+describe("momentum helpers", () => {
+  it("liqDampener: 1 at/above the reference, floored at 0.3, penalises thin pools", () => {
+    expect(liqDampener(LIQ_REF_USD)).toBe(1);
+    expect(liqDampener(LIQ_REF_USD * 4)).toBe(1); // capped, never a boost
+    expect(liqDampener(0)).toBe(0.3); // floor
+    expect(liqDampener(null)).toBe(0.3);
+    expect(liqDampener(LIQ_REF_USD / 4)).toBeCloseTo(0.5, 5); // sqrt(0.25)
+  });
+
+  it("accelMultiplier: this hour vs the 6h hourly average, clamped [0.5, 2.5]", () => {
+    expect(accelMultiplier(120, 360)).toBe(2); // 120 / (360/6=60)
+    expect(accelMultiplier(1000, 60)).toBe(2.5); // clamped up
+    expect(accelMultiplier(5, 600)).toBe(0.5); // clamped down
+    expect(accelMultiplier(null, 360)).toBe(1); // no data → neutral
+    expect(accelMultiplier(10, 0)).toBe(1); // no baseline → neutral
+  });
+
+  it("momentumScores: 1h = vol1h × accel × liq; 24h = vol24h × liq", () => {
+    expect(momentumScores({ volume1hUsd: 10_000, volume24hUsd: 120_000, liquidityUsd: LIQ_REF_USD, txns1h: 120, txns6h: 360 }))
+      .toEqual({ score1h: 20_000, score24h: 120_000 });
+    // thin liquidity dampens both equally.
+    const thin = momentumScores({ volume1hUsd: 10_000, volume24hUsd: 120_000, liquidityUsd: LIQ_REF_USD / 4, txns1h: null, txns6h: null });
+    expect(thin.score1h).toBeCloseTo(5_000, 5); // 10k × 1 × 0.5
+    expect(thin.score24h).toBeCloseTo(60_000, 5); // 120k × 0.5
+  });
+
+  it("trendSeries: avg $/h over [24h, 6h, 1h, 5m]; missing windows read 0", () => {
+    expect(trendSeries({ volume24hUsd: 120_000, volume6hUsd: 60_000, volume1hUsd: 10_000, volume5mUsd: 1_000 }))
+      .toEqual([5_000, 10_000, 10_000, 12_000]);
+    expect(trendSeries({ volume24hUsd: null, volume6hUsd: undefined, volume1hUsd: null, volume5mUsd: null }))
+      .toEqual([0, 0, 0, 0]);
+  });
+
+  it("volumeForTimeframe / changeForTimeframe pick the selected window", () => {
+    const t = { volume1hUsd: 7, volume24hUsd: 70, priceChange1hPct: 1.5, priceChange24hPct: null };
+    expect(volumeForTimeframe(t, "1h")).toBe(7);
+    expect(volumeForTimeframe(t, "24h")).toBe(70);
+    expect(changeForTimeframe(t, "1h")).toBe(1.5);
+    expect(changeForTimeframe(t, "24h")).toBeNull();
+  });
+
+  it("rankForTimeframe sorts by the window's score, without mutating the input", () => {
+    const mk = (symbol: string, s1: number, s24: number) => ({ symbol, score1h: s1, score24h: s24 } as unknown as TrendingToken);
+    const input = [mk("A", 1, 999), mk("B", 999, 1)];
+    expect(rankForTimeframe(input, "24h").map((t) => t.symbol)).toEqual(["A", "B"]);
+    expect(rankForTimeframe(input, "1h").map((t) => t.symbol)).toEqual(["B", "A"]);
+    expect(input.map((t) => t.symbol)).toEqual(["A", "B"]); // input untouched
   });
 });
 

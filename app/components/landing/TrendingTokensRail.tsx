@@ -9,12 +9,35 @@ import { formatMarkPrice, formatStatValue } from "@/lib/format";
 import { useAllMarketStats } from "@/hooks/useAllMarketStats";
 import {
   MIN_LIQUIDITY_USD,
+  rankForTimeframe,
+  volumeForTimeframe,
+  changeForTimeframe,
+  type Timeframe,
   type TrendingToken,
   type TrendingTokensResult,
 } from "@/lib/trending-tokens";
+import {
+  SegmentedControl,
+  RailControl,
+  COUNT_OPTIONS,
+  DEFAULT_RAIL_COUNT,
+  type RailCount,
+} from "@/components/landing/RailFilter";
 
-/** Rows shown on the landing page. */
-const RAIL_LIMIT = 8;
+/** How often the client re-polls the list; the API response is CDN-cached for the same. */
+const REFRESH_MS = 60_000;
+
+/** Shared column widths (px) + responsive visibility — used by BOTH the header and the
+ *  rows so a label can never drift out of line with its data. */
+const W = { dex: 68, ca: 96, mc: 68, vol: 74, chg: 58, trend: 48, price: 84 } as const;
+/** The Create-Market button has a FIXED width, matched by the header's trailing spacer,
+ *  so the right-hand columns line up with their labels (not pushed by the button). */
+const CTA_W = "w-[104px] sm:w-[132px]";
+
+const TF_OPTIONS = [
+  { value: "1h", label: "1H" },
+  { value: "24h", label: "24H" },
+] as const;
 
 /** DEX display names (TrendingToken.dexId is always one of SUPPORTED_DEX_IDS). */
 const DEX_LABEL: Record<string, string> = { pumpswap: "PumpSwap", meteora: "Meteora" };
@@ -32,6 +55,12 @@ export const TRENDING_COPY = {
 } as const;
 
 const shortCa = (ca: string) => `${ca.slice(0, 4)}…${ca.slice(-4)}`;
+
+function formatChangePct(pct: number | null): string {
+  if (pct == null || !Number.isFinite(pct)) return "—";
+  if (pct === 0) return "0.0%";
+  return `${pct > 0 ? "+" : ""}${pct.toFixed(1)}%`;
+}
 
 const fetcher = (url: string): Promise<TrendingTokensResult> =>
   fetch(url).then((r) => {
@@ -67,82 +96,131 @@ const CopyCa: FC<{ ca: string }> = ({ ca }) => {
   );
 };
 
-const TrendingRow: FC<{ t: TrendingToken; isLast: boolean }> = ({ t, isLast }) => (
-  <div
-    className={[
-      "flex items-center gap-3 px-4 py-3.5 sm:gap-4",
-      isLast ? "" : "border-b border-[var(--border)]",
-    ].join(" ")}
-  >
-    {/* Clicking the token opens its pool chart (DexScreener / GeckoTerminal) in a new tab. */}
-    <a
-      href={t.chartUrl}
-      target="_blank"
-      rel="noopener noreferrer nofollow"
-      title={`View the ${t.symbol} pool on ${chartHost(t.chartUrl)}`}
-      className="group/tok flex min-w-0 flex-1 items-center gap-3 focus-visible:outline-none sm:gap-4"
+/** Tiny volume-rate sparkline: avg hourly $ volume over [24h, 6h, 1h, 5m]. Rising bars
+ *  = activity accelerating. Coloured by overall direction; the newest bar is solid. */
+const TrendBars: FC<{ series: number[] }> = ({ series }) => {
+  const s = series.length ? series : [0, 0, 0, 0];
+  const max = Math.max(...s, Number.EPSILON);
+  const up = s[s.length - 1] >= s[0];
+  const color = up ? "var(--long)" : "var(--short)";
+  const bw = 7;
+  const gap = 4;
+  const H = 18;
+  return (
+    <svg width={(bw + gap) * s.length - gap} height={H} viewBox={`0 0 ${(bw + gap) * s.length - gap} ${H}`} aria-hidden="true" className="block">
+      {s.map((v, i) => {
+        const h = Math.max(2, (v / max) * (H - 2));
+        return (
+          <rect
+            key={i}
+            x={i * (bw + gap)}
+            y={H - h}
+            width={bw}
+            height={h}
+            rx={1.5}
+            fill={color}
+            opacity={i === s.length - 1 ? 1 : 0.3 + 0.15 * i}
+          />
+        );
+      })}
+    </svg>
+  );
+};
+
+const TrendingRow: FC<{ t: TrendingToken; tf: Timeframe; isLast: boolean }> = ({ t, tf, isLast }) => {
+  const change = changeForTimeframe(t, tf);
+  const changeClass =
+    change == null || change === 0
+      ? "text-[var(--text-dim)]"
+      : change > 0
+        ? "text-[var(--long)]"
+        : "text-[var(--short)]";
+  return (
+    <div
+      className={[
+        "flex items-center gap-3 px-4 py-3.5 sm:gap-4",
+        isLast ? "" : "border-b border-[var(--border)]",
+      ].join(" ")}
     >
-      <MarketLogo logoUrl={t.logoUrl} mainnetCa={t.mint} symbol={t.symbol} size="sm" decorative />
-      <div className="min-w-0">
-        <div className="truncate text-[13px] font-semibold text-[var(--text)] transition-colors group-hover/tok:text-[var(--accent-text)]">{t.symbol}</div>
-        <div className="hidden truncate text-[11px] text-[var(--text-secondary)] sm:block">{t.name}</div>
+      {/* Clicking the token opens its pool chart (DexScreener / GeckoTerminal) in a new tab. */}
+      <a
+        href={t.chartUrl}
+        target="_blank"
+        rel="noopener noreferrer nofollow"
+        title={`View the ${t.symbol} pool on ${chartHost(t.chartUrl)}`}
+        className="group/tok flex min-w-0 flex-1 items-center gap-3 focus-visible:outline-none sm:gap-4"
+      >
+        <MarketLogo logoUrl={t.logoUrl} mainnetCa={t.mint} symbol={t.symbol} size="sm" decorative />
+        <div className="min-w-0">
+          <div className="truncate text-[13px] font-semibold text-[var(--text)] transition-colors group-hover/tok:text-[var(--accent-text)]">{t.symbol}</div>
+          <div className="hidden truncate text-[11px] text-[var(--text-secondary)] sm:block">{t.name}</div>
+        </div>
+      </a>
+
+      <div className="hidden shrink-0 sm:block" style={{ minWidth: W.dex }}>
+        <span className="rounded-sm border border-[var(--border)] bg-[var(--accent)]/[0.04] px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">
+          {dexLabel(t.dexId)}
+        </span>
       </div>
-    </a>
 
-    <div className="hidden shrink-0 sm:block" style={{ minWidth: 72 }}>
-      <span className="rounded-sm border border-[var(--border)] bg-[var(--accent)]/[0.04] px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">
-        {dexLabel(t.dexId)}
-      </span>
+      <div className="hidden shrink-0 lg:block" style={{ minWidth: W.ca }}>
+        <CopyCa ca={t.mint} />
+      </div>
+
+      <div className="hidden shrink-0 text-right font-mono text-[11px] text-[var(--text-secondary)] sm:block" style={{ minWidth: W.mc }}>
+        {formatStatValue(t.marketCapUsd, "currency")}
+      </div>
+
+      {/* Volume — swaps with the selected timeframe. */}
+      <div className="hidden shrink-0 text-right font-mono text-[11px] text-[var(--text-secondary)] md:block" style={{ minWidth: W.vol }}>
+        {formatStatValue(volumeForTimeframe(t, tf), "currency")}
+      </div>
+
+      {/* Change — swaps with the timeframe, coloured green/red. */}
+      <div className={["hidden shrink-0 text-right font-mono text-[11px] tabular-nums md:block", changeClass].join(" ")} style={{ minWidth: W.chg }}>
+        {formatChangePct(change)}
+      </div>
+
+      {/* Trend — volume-rate sparkline. */}
+      <div className="hidden shrink-0 lg:flex lg:justify-end" style={{ minWidth: W.trend }}>
+        <TrendBars series={t.trend ?? []} />
+      </div>
+
+      <div className="shrink-0 text-right font-mono text-[13px] font-semibold tabular-nums text-[var(--text)]" style={{ minWidth: W.price }}>
+        {formatMarkPrice(t.priceUsd)}
+      </div>
+
+      {/* Hands ONLY the mint to the wizard, which runs its own pool search, USD-quote and
+          keeper-floor checks and duplicate-market check — no pool is pre-selected here. */}
+      <Link
+        href={`/create?mint=${encodeURIComponent(t.mint)}`}
+        className={[
+          CTA_W,
+          "group inline-flex shrink-0 items-center justify-center rounded-sm border border-[var(--accent)]/40 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--accent)] transition-colors hover:bg-[var(--accent)]/10 hover:border-[var(--accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
+        ].join(" ")}
+      >
+        <span className="hidden sm:inline">Create Market&nbsp;</span>
+        <span className="sm:hidden">Create&nbsp;</span>→
+      </Link>
     </div>
+  );
+};
 
-    <div className="hidden shrink-0 lg:block" style={{ minWidth: 92 }}>
-      <CopyCa ca={t.mint} />
-    </div>
-
-    <div
-      className="hidden shrink-0 text-right font-mono text-[11px] text-[var(--text-secondary)] sm:block"
-      style={{ minWidth: 68 }}
-    >
-      {formatStatValue(t.marketCapUsd, "currency")}
-    </div>
-
-    <div
-      className="hidden shrink-0 text-right font-mono text-[11px] text-[var(--text-secondary)] md:block"
-      style={{ minWidth: 68 }}
-    >
-      {formatStatValue(t.volume24hUsd, "currency")}
-    </div>
-
-    <div className="shrink-0 text-right font-mono text-[13px] font-semibold tabular-nums text-[var(--text)]" style={{ minWidth: 84 }}>
-      {formatMarkPrice(t.priceUsd)}
-    </div>
-
-    {/* Hands ONLY the mint to the wizard, which runs its own pool search, USD-quote and
-        keeper-floor checks and duplicate-market check — no pool is pre-selected here. */}
-    <Link
-      href={`/create?mint=${encodeURIComponent(t.mint)}`}
-      className="group shrink-0 rounded-sm border border-[var(--accent)]/40 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--accent)] transition-colors hover:bg-[var(--accent)]/10 hover:border-[var(--accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
-    >
-      <span className="hidden sm:inline">Create Market </span>
-      <span className="sm:hidden">Create </span>→
-    </Link>
-  </div>
-);
-
-const TrendingHeader: FC = () => (
+const TrendingHeader: FC<{ tf: Timeframe }> = ({ tf }) => (
   <div
     aria-hidden="true"
     className="flex items-center gap-3 border-b border-[var(--border)] bg-[var(--accent)]/[0.02] px-4 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--text-dim)] sm:gap-4"
   >
-    <div className="shrink-0" style={{ width: 24 }} />
     <div className="min-w-0 flex-1">Token</div>
-    <div className="hidden shrink-0 sm:block" style={{ minWidth: 72 }}>DEX</div>
-    <div className="hidden shrink-0 lg:block" style={{ minWidth: 92 }}>Contract</div>
-    <div className="hidden shrink-0 text-right sm:block" style={{ minWidth: 68 }}>Market Cap</div>
-    <div className="hidden shrink-0 text-right md:block" style={{ minWidth: 68 }}>24h Vol</div>
-    <div className="shrink-0 text-right" style={{ minWidth: 84 }}>Price</div>
-    {/* trailing spacer ~ the Create Market button */}
-    <div className="shrink-0" style={{ width: 92 }} />
+    <div className="hidden shrink-0 sm:block" style={{ minWidth: W.dex }}>DEX</div>
+    <div className="hidden shrink-0 lg:block" style={{ minWidth: W.ca }}>Contract</div>
+    <div className="hidden shrink-0 text-right sm:block" style={{ minWidth: W.mc }}>Market Cap</div>
+    <div className="hidden shrink-0 text-right md:block" style={{ minWidth: W.vol }}>{tf === "1h" ? "1h Vol" : "24h Vol"}</div>
+    <div className="hidden shrink-0 text-right md:block" style={{ minWidth: W.chg }}>{tf === "1h" ? "1h %" : "24h %"}</div>
+    <div className="hidden shrink-0 text-right lg:block" style={{ minWidth: W.trend }}>Trend</div>
+    <div className="shrink-0 text-right" style={{ minWidth: W.price }}>Price</div>
+    {/* trailing spacer = the Create Market button's fixed width, so columns stay aligned */}
+    <div className={[CTA_W, "shrink-0"].join(" ")} />
   </div>
 );
 
@@ -150,15 +228,19 @@ const TrendingHeader: FC = () => (
  * Landing-page "Trending on Solana DEXs" rail — third-party tokens trending on
  * Solana DEXs (lib/trending-tokens) that do NOT yet have a Percolator market, each
  * with a Create Market CTA that deep-links the wizard prefilled with the mint.
- * Polls /api/trending-tokens every 60s (CDN-cached for 60s).
+ * Polls /api/trending-tokens every 60s (CDN-cached for 60s). A 1H/24H timeframe
+ * re-ranks by that window's momentum; a 5/10/20 control sets how many rows show.
  *
  * States, each with its own copy: loading; unavailable (our API failed, or every
  * upstream source failed — `sourceEmpty`); empty (sources answered, nothing
  * matched the filters); rows.
  */
 export function TrendingTokensRail() {
+  const [tf, setTf] = useState<Timeframe>("24h");
+  const [count, setCount] = useState<RailCount>(DEFAULT_RAIL_COUNT);
+
   const { data, error } = useSWR<TrendingTokensResult>("/api/trending-tokens", fetcher, {
-    refreshInterval: 60_000,
+    refreshInterval: REFRESH_MS,
     revalidateOnFocus: false,
     dedupingInterval: 30_000,
   });
@@ -177,10 +259,11 @@ export function TrendingTokensRail() {
   // duplicate-market check still stands, so rows are shown rather than hidden forever.
   const marketsKnown = !statsLoading || statsMap.size > 0 || !!statsError;
 
-  const rows = useMemo(
-    () => (marketsKnown ? (data?.tokens ?? []).filter((t) => !listedCa.has(t.mint)).slice(0, RAIL_LIMIT) : []),
-    [data, listedCa, marketsKnown],
-  );
+  const rows = useMemo(() => {
+    if (!marketsKnown) return [];
+    const unlisted = (data?.tokens ?? []).filter((t) => !listedCa.has(t.mint));
+    return rankForTimeframe(unlisted, tf).slice(0, Number(count));
+  }, [data, listedCa, marketsKnown, tf, count]);
 
   let message: string | null = null;
   if (rows.length === 0) {
@@ -192,9 +275,22 @@ export function TrendingTokensRail() {
   return (
     <div>
       <GlassCard padding="none" elevation="md" className="overflow-hidden" hover={false}>
-        <TrendingHeader />
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-2.5">
+          <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--text-dim)]">
+            Live · updates every 60s
+          </span>
+          <div className="flex items-center gap-3">
+            <RailControl label="Window">
+              <SegmentedControl value={tf} onChange={setTf} options={TF_OPTIONS} ariaLabel="Trending timeframe" />
+            </RailControl>
+            <RailControl label="Show">
+              <SegmentedControl value={count} onChange={setCount} options={COUNT_OPTIONS} ariaLabel="Rows to show" />
+            </RailControl>
+          </div>
+        </div>
+        <TrendingHeader tf={tf} />
         {rows.map((t, i) => (
-          <TrendingRow key={t.mint} t={t} isLast={i === rows.length - 1} />
+          <TrendingRow key={t.mint} t={t} tf={tf} isLast={i === rows.length - 1} />
         ))}
         {message && (
           <div
