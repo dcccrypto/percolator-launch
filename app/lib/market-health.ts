@@ -30,9 +30,10 @@
  * All `_num` fields share BOUND_SCALE. This is the market-wide expected rate;
  * an individual account's mix of liened/unliened claim can differ.
  *
- * LP depleted: the matcher LP portfolio's `capital` is 0 (read separately —
- * lib/lp-portfolio.ts). Live 2026-09-29: COLLECT/TEXTIT/Murphy opens revert
- * Custom(49) at the trade once the lock is repaired — this is that state.
+ * LP depleted: the matcher LP portfolio's `capital` (read separately — lib/lp-portfolio.ts)
+ * is below the engine's IM floor `min_nonzero_im_req`, or 0. The engine runs the initial-margin
+ * gate on the LP side of every fill that does not reduce its leg, so below the floor EVERY open reverts Custom(49)
+ * (STONK 2026-10-07 at 0.84 USDC; COLLECT/TEXTIT/Murphy 2026-09-29 at 0).
  */
 import { decodeAssetVaultLpP3 } from "@percolatorct/sdk";
 import { decodeMarketLiveness, planLivenessRepairs } from "@/lib/self-heal";
@@ -204,7 +205,19 @@ export function decodeMarketHealth(
     .filter((x) => x.assetIndex === 0 && x.mode === 1)
     .map((x): "long" | "short" => (x.side === 0 ? "long" : "short"));
 
-  const lpDepleted = lpCapital !== null && lpCapital === 0n;
+  // Engine v16.rs margin_requirement: IM(q) = max(ceil(q·p·im_bps/1e4), min_nonzero_im_req), checked on
+  // BOTH accounts of a fill. The deployed wrapper clips every fill to the LP's exposure cap (equity x
+  // 1e4/im_bps), so the LP's proportional IM never exceeds its equity and the one LP-side failure left
+  // is the floor: measured on STONK, LP 1.999999 USDC -> Custom(49) on every open, 2.000000 -> fills.
+  // The route serves `capital`, which bounds the engine equity from above unless the LP holds realizable
+  // positive pnl (v16.rs account_haircut_equity): a sub-floor LP reads as paused even in the rare case a
+  // winning leg would let it fill, and an LP dragged under the floor by losses or fee debt alone is missed.
+  // Read here, not via lib/v17-engine-config (its module-scope SDK import breaks tests that mock the SDK
+  // partially): V16ConfigAccount sits at MARKET_GROUP_OFF + 32 (group header), min_nonzero_im_req at
+  // +22 (u128), the same offsets v17-engine-config.ts documents. A floor of 0 keeps the exact-zero rule.
+  const LP_IM_FLOOR_OFF = MARKET_GROUP_OFF + 32 + 22;
+  const lpImFloor = data.length >= LP_IM_FLOOR_OFF + 16 ? u128(dv, LP_IM_FLOOR_OFF) : 0n;
+  const lpDepleted = lpCapital !== null && (lpCapital === 0n || lpCapital < lpImFloor);
   let lpIsVault = false;
   try {
     lpIsVault = decodeAssetVaultLpP3(data, 0).bound === true;

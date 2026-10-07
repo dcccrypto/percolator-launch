@@ -68,14 +68,14 @@ describe("deriveTicketState: the §3.3 priority table", () => {
       expect(s.row).toBe("both-paused");
       expect(s.status?.kind).toBe("lp-depleted");
       expect(s.status?.body).toBe(
-        "The market has no funds left to take the other side of new trades. Opening resumes once it is funded again; deposits to Earn or staking don't reopen it. Closing works normally.",
+        "The market doesn't have enough funds to take the other side of new trades. Opening resumes once it is funded again; deposits to Earn or staking don't reopen it. Closing works normally.",
       );
     });
 
     it("a P3 vault-LP market points at the Earn vault instead", () => {
       const s = deriveTicketState(base({ lpDepleted: true, lpIsVault: true, openingPaused: true }));
       expect(s.status?.body).toBe(
-        "The market has no funds left to take the other side of new trades. Opening resumes when the Earn vault has funds to back them. Closing works normally.",
+        "The market doesn't have enough funds to take the other side of new trades. Opening resumes when the Earn vault has funds to back them. Closing works normally.",
       );
     });
 

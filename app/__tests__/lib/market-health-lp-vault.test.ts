@@ -41,7 +41,7 @@ describe("decodeMarketHealth.lpIsVault", () => {
 
   it("the depleted badge says what refills it, by market type, and promises nothing else", () => {
     expect(depletedDetail(real())).toBe(
-      "The market has no funds left to take the other side of new trades. Opening resumes once it is funded again; deposits to Earn or staking don't reopen it. Closing works normally.",
+      "The market doesn't have enough funds to take the other side of new trades. Opening resumes once it is funded again; deposits to Earn or staking don't reopen it. Closing works normally.",
     );
     expect(depletedDetail(bound())).toBe(
       "Needs liquidity: deposit in Earn to reopen new positions. Closing works normally.",

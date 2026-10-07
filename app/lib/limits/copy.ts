@@ -225,14 +225,14 @@ export function p3ErrorCopyByCode(): Record<number, string> {
 }
 
 /**
- * The market has no funds left to take the other side of new trades (LP capital 0). Where the funds
+ * The market can't take the other side of new trades (LP capital below its IM floor). Where the funds
  * come back from depends on the market: a P3 vault-LP market is funded from its Earn vault, any other
  * market only by a deposit into its own counterparty, which Earn and staking deposits never reach.
  */
 export function TICKET_FUNDS_LINE(vault: boolean): string {
   return vault
-    ? "The market has no funds left to take the other side of new trades. Opening resumes when the Earn vault has funds to back them."
-    : "The market has no funds left to take the other side of new trades. Opening resumes once it is funded again; deposits to Earn or staking don't reopen it.";
+    ? "The market doesn't have enough funds to take the other side of new trades. Opening resumes when the Earn vault has funds to back them."
+    : "The market doesn't have enough funds to take the other side of new trades. Opening resumes once it is funded again; deposits to Earn or staking don't reopen it.";
 }
 
 /**
@@ -257,7 +257,7 @@ export const TICKET_COPY = {
     button: (sides: string) => `New ${sides} paused`,
   },
   bothPaused: { title: "Opening paused", body: "New positions are paused right now. Closing works normally.", button: "Opening paused" },
-  /** No funds left to take the other side of new trades. What refills it depends on the market type. */
+  /** Not enough funds to take the other side of new trades. What refills it depends on the market type. */
   lpDepleted: {
     title: "Opening paused",
     body: (vault: boolean) => `${TICKET_FUNDS_LINE(vault)} Closing works normally.`,

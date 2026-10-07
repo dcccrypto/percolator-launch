@@ -148,7 +148,9 @@ describe("v1 / close-only labels only on markets that are actually dead (review 
   });
 
   it("an ADL market carries 'v1' right after its Close-only badge", () => {
-    const badges = healthBadges(decodeMarketHealth(adlMarket(), SLOT, 1n), T0, T0);
+    // A funded LP: 1 atom now reads as depleted (below the IM floor), which would put "Needs liquidity"
+    // first and move "v1" next to it instead of next to Close-only.
+    const badges = healthBadges(decodeMarketHealth(adlMarket(), SLOT, 49_000_000_000n), T0, T0);
     const i = badges.findIndex((b) => b.id === "adl-reduce-only");
     expect(badges[i + 1]?.id).toBe("v1");
     expect(badges[i + 1]?.label).toBe("v1");
