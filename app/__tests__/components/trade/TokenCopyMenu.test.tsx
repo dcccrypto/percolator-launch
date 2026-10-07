@@ -88,4 +88,35 @@ describe("TokenCopyMenu", () => {
     fireEvent.mouseDown(document.body);
     expect(screen.queryByRole("menu")).toBeNull();
   });
+
+  // Unresolved identity: the trade page passes the truncated slab ("3YcJ…YSfw") as the symbol.
+  describe("placeholder symbol (identity unresolved)", () => {
+    const SHORT = `${SLAB.slice(0, 4)}…${SLAB.slice(-4)}`;
+    const renderPlaceholder = (ca: string | null = CA) => render(<TokenCopyMenu slabAddress={SLAB} symbol={SHORT} mainnetCa={ca} />);
+
+    it("offers no Ticker row and no X ticker search, keeps the slab address and CA rows", () => {
+      renderPlaceholder();
+      const items = openMenu().getAllByRole("menuitem").map((i) => i.textContent);
+      expect(items).toEqual(["Slab address3YcJ…YSfw", "CA7GCi…W2hr", "Search CA on X"]);
+    });
+
+    it("with no CA either: only the slab address row remains", () => {
+      renderPlaceholder(null);
+      const items = openMenu().getAllByRole("menuitem").map((i) => i.textContent);
+      expect(items).toEqual(["Slab address3YcJ…YSfw"]);
+    });
+
+    it("treats an isPlaceholderSymbol-style placeholder (hex / address prefix) the same way", () => {
+      render(<TokenCopyMenu slabAddress={SLAB} symbol="3YcJ8vQe" mainnetCa={CA} />);
+      expect(openMenu().queryByRole("menuitem", { name: "Copy Ticker" })).toBeNull();
+    });
+
+    it("a real ticker still gets both rows", () => {
+      renderMenu();
+      const menu = openMenu();
+      expect(menu.getByRole("menuitem", { name: "Copy Ticker" })).toBeTruthy();
+      expect(menu.getByRole("menuitem", { name: /Search \$cbBTC on X/ })).toBeTruthy();
+    });
+  });
 });
+

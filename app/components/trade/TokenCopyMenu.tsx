@@ -2,7 +2,7 @@
 
 import { FC, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { baseSymbol } from "@/lib/symbol-utils";
+import { baseSymbol, isPlaceholderSymbol } from "@/lib/symbol-utils";
 
 /** X's live search for `q`. */
 export const xSearchUrl = (q: string): string => `https://x.com/search?q=${encodeURIComponent(q)}&f=live`;
@@ -46,6 +46,9 @@ export const TokenCopyMenu: FC<{
   };
   const setOpen = (v: boolean) => setPos(v ? anchor() : null);
   const ticker = baseSymbol(symbol);
+  // While the market's identity is unresolved the trade page passes the truncated slab ("AbCd…wxyz")
+  // as the symbol. That is not a ticker: copying it or searching "$AbCd…wxyz" on X is useless.
+  const hasTicker = !(symbol === short(slabAddress) || ticker === short(slabAddress) || isPlaceholderSymbol(ticker, slabAddress));
 
   useEffect(() => {
     if (!open) return;
@@ -83,7 +86,7 @@ export const TokenCopyMenu: FC<{
   const copyRows: { what: Copied; value: string; shown: string }[] = [
     { what: "Slab address", value: slabAddress, shown: short(slabAddress) },
     ...(mainnetCa ? [{ what: "CA" as const, value: mainnetCa, shown: short(mainnetCa) }] : []),
-    { what: "Ticker", value: ticker, shown: ticker },
+    ...(hasTicker ? [{ what: "Ticker" as const, value: ticker, shown: ticker }] : []),
   ];
 
   return (
@@ -123,10 +126,12 @@ export const TokenCopyMenu: FC<{
               Search CA on X
             </button>
           )}
-          <button type="button" role="menuitem" className={ITEM} onClick={() => search(`$${ticker}`)}>
-            <XIcon />
-            Search ${ticker} on X
-          </button>
+          {hasTicker && (
+            <button type="button" role="menuitem" className={ITEM} onClick={() => search(`$${ticker}`)}>
+              <XIcon />
+              Search ${ticker} on X
+            </button>
+          )}
         </div>,
         document.body,
       )}
