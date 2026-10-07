@@ -13,6 +13,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { explorerTxUrl } from "@/lib/config";
 import { formatUsdFromNumber } from "@/lib/format";
+import { fillSide, fillSideColor, fillSideLabel } from "@/lib/fill-side";
 import type { TraderTradeEntry } from "@/app/api/trader/[wallet]/trades/route";
 
 type TradeType = "all" | "long" | "short";
@@ -108,11 +109,11 @@ export function TradeHistory() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const handleExportCsv = () => {
-    const headers = ["Time", "Market", "Side", "Size", "Entry/Exit Price", "Fee", "Tx"];
+    const headers = ["Time", "Market", "Side", "Size", "Price", "Fee", "Tx"];
     const rows = filtered.map((t) => [
       t.created_at,
       t.slab_address,
-      t.side,
+      fillSide(t.side) ?? "",
       t.size,
       t.price,
       t.fee,
@@ -169,8 +170,8 @@ export function TradeHistory() {
           className="rounded-sm border border-[var(--border)] bg-[var(--bg)] px-3 py-1.5 text-[11px] text-[var(--text-secondary)] outline-none focus:border-[var(--accent)]/30"
         >
           <option value="all">All Sides</option>
-          <option value="long">Long</option>
-          <option value="short">Short</option>
+          <option value="long">Buy</option>
+          <option value="short">Sell</option>
         </select>
       </div>
 
@@ -210,10 +211,9 @@ export function TradeHistory() {
                 <th className="px-3 py-3 text-left">Market</th>
                 <th className="px-3 py-3 text-left">Side</th>
                 <th className="px-3 py-3 text-right">Size</th>
-                {/* Each row is a fill — a trade's entry or a close's exit — so the column is the
-                    execution price of THAT fill, not the token's current market price. Label it
-                    accordingly so the number isn't misread as a live quote. */}
-                <th className="px-3 py-3 text-right">Entry/Exit</th>
+                {/* Each row is one fill: the execution price of THAT fill, not the token's
+                    current market price, and not knowably an entry or an exit (#3314). */}
+                <th className="px-3 py-3 text-right">Price</th>
                 <th className="px-3 py-3 text-right">Fee</th>
                 <th className="px-3 py-3 text-center">Tx</th>
               </tr>
@@ -236,14 +236,8 @@ export function TradeHistory() {
                     </span>
                   </td>
                   <td className="px-3 py-2.5">
-                    <span
-                      className={`text-[10px] font-bold ${
-                        trade.side === "long"
-                          ? "text-[var(--long)]"
-                          : "text-[var(--short)]"
-                      }`}
-                    >
-                      {trade.side.toUpperCase()}
+                    <span className={`text-[10px] font-bold ${fillSideColor(trade.side)}`}>
+                      {fillSideLabel(trade.side)}
                     </span>
                   </td>
                   <td

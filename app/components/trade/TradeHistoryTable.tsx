@@ -3,6 +3,7 @@
 import { useTradeHistory } from "@/hooks/useTradeHistory";
 import { formatStatValue, formatTokenAmount, formatUsdFromNumber } from "@/lib/format";
 import { Q_DECIMALS } from "@/lib/q-usd";
+import { fillSide, fillSideColor, fillSideLabel } from "@/lib/fill-side";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import type { MarketWithStats } from "@/hooks/useAllMarketStats";
 
@@ -129,8 +130,8 @@ export function TradeHistoryTable({
     <div>
       {/* Header row */}
       <div className="hidden sm:grid sm:grid-cols-[1fr_80px_110px_110px_90px_110px_32px] gap-x-4 border-b border-[var(--border)] bg-[var(--bg-elevated)]/50 px-4 py-2">
-        {/* "Entry/Exit" — each row is a fill's execution price, not the token's live price. */}
-        {["Market", "Side", "Size", "Entry/Exit", "Fee", "Time", "Tx"].map((h) => (
+        {/* "Price": each row is one fill's execution price, not the token's live price (#3314). */}
+        {["Market", "Side", "Size", "Price", "Fee", "Time", "Tx"].map((h) => (
           <p
             key={h}
             className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text)]"
@@ -143,7 +144,7 @@ export function TradeHistoryTable({
       {/* Trade rows */}
       <div className="divide-y divide-[var(--border)] border border-t-0 border-[var(--border)]">
         {trades.map((trade) => {
-          const isLong = trade.side === "long";
+          const side = fillSide(trade.side);
           const txLink = trade.tx_signature
             ? `https://solscan.io/tx/${trade.tx_signature}?cluster=devnet`
             : null;
@@ -167,13 +168,11 @@ export function TradeHistoryTable({
               {/* Side */}
               <div>
                 <span
-                  className={`inline-flex items-center rounded px-2 py-0.5 text-[10px] font-bold ${
-                    isLong
-                      ? "bg-[var(--long)]/10 text-[var(--long)]"
-                      : "bg-[var(--short)]/10 text-[var(--short)]"
+                  className={`inline-flex items-center rounded px-2 py-0.5 text-[10px] font-bold ${fillSideColor(trade.side)} ${
+                    side === "buy" ? "bg-[var(--long)]/10" : side === "sell" ? "bg-[var(--short)]/10" : ""
                   }`}
                 >
-                  {isLong ? "LONG" : "SHORT"}
+                  {fillSideLabel(trade.side)}
                 </span>
               </div>
 
