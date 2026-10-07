@@ -1,4 +1,5 @@
 "use client";
+import { resolveMarketMetadata } from "@/lib/market-metadata";
 import { UNSUPPORTED_POOL_COPY } from "@/lib/wizard-copy";
 import { WIZARD_STORAGE_KEY } from "@/lib/wizard-storage";
 
@@ -871,12 +872,15 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     // not the collateral mint (e.g. USDC). Use baseSymbol/quoteSymbol from the pool
     // result to build a proper symbol ("SOL") and name ("SOL/USDC Perpetual").
     // Fall back to tokenMeta for non-hyperp (Pyth / admin oracle) markets.
-    const marketSymbol = oracleMode === "hyperp" && wizard.dexPool
-      ? wizard.dexPool.baseSymbol
-      : (wizard.tokenMeta?.symbol ?? "UNKNOWN");
-    const marketName = oracleMode === "hyperp" && wizard.dexPool
-      ? `${wizard.dexPool.baseSymbol}/${wizard.dexPool.quoteSymbol} Perpetual`
-      : (wizard.tokenMeta?.name ?? "Unknown Token");
+    // resolveMarketMetadata: the value the memo and the registration payload both carry; a name
+    // with no Latin characters falls back to the symbol, a non-ASCII symbol to the mint's short form.
+    const { symbol: marketSymbol, name: marketName } = resolveMarketMetadata({
+      symbol: oracleMode === "hyperp" && wizard.dexPool ? wizard.dexPool.baseSymbol : wizard.tokenMeta?.symbol,
+      name: oracleMode === "hyperp" && wizard.dexPool
+        ? `${wizard.dexPool.baseSymbol}/${wizard.dexPool.quoteSymbol} Perpetual`
+        : wizard.tokenMeta?.name,
+      mint: wizard.mintAddress,
+    });
 
     const params: CreateMarketParams = {
       mint: new PublicKey(collateralMintAddress),
@@ -948,12 +952,13 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       : "admin" as const;
 
     // Same symbol/name derivation as handleLaunch — hyperp uses DEX base/quote symbols.
-    const retryMarketSymbol = oracleMode === "hyperp" && wizard.dexPool
-      ? wizard.dexPool.baseSymbol
-      : (wizard.tokenMeta?.symbol ?? "UNKNOWN");
-    const retryMarketName = oracleMode === "hyperp" && wizard.dexPool
-      ? `${wizard.dexPool.baseSymbol}/${wizard.dexPool.quoteSymbol} Perpetual`
-      : (wizard.tokenMeta?.name ?? "Unknown Token");
+    const { symbol: retryMarketSymbol, name: retryMarketName } = resolveMarketMetadata({
+      symbol: oracleMode === "hyperp" && wizard.dexPool ? wizard.dexPool.baseSymbol : wizard.tokenMeta?.symbol,
+      name: oracleMode === "hyperp" && wizard.dexPool
+        ? `${wizard.dexPool.baseSymbol}/${wizard.dexPool.quoteSymbol} Perpetual`
+        : wizard.tokenMeta?.name,
+      mint: wizard.mintAddress,
+    });
 
     const params: CreateMarketParams = {
       mint: new PublicKey(collateralMintAddress),
@@ -1011,7 +1016,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       mainnetCA: wizard.mintAddress,
       dexPoolAddress,
       dexType: wizard.dexPool?.dexType ?? null,
-      symbol: wizard.tokenMeta?.symbol ?? "UNKNOWN",
+      symbol: resolveMarketMetadata({ symbol: wizard.tokenMeta?.symbol, mint: wizard.mintAddress }).symbol,
     });
   }, [createState.slabAddress, wizard.dexPool, wizard.oracleFeed, wizard.mintAddress, wizard.tokenMeta, retryKeeperRegistration]);
 

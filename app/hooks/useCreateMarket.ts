@@ -71,6 +71,7 @@ import {
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
 import { toE6 } from "@/lib/format";
 import { buildKeeperRegisterMemoIx, keeperMemoParams } from "@/lib/keeper-register-memo";
+import { preflightRegistration, resolveMarketMetadata } from "@/lib/market-metadata";
 import { buildM1Instructions } from "@/lib/create-market-m1";
 import { WIZARD_STEP_COPY } from "@/lib/wizard-copy";
 import { KEEPER_REGISTER_COPY, loadProofPayload, loadProofTx, markRegistered, postKeeperRegistration, runKeeperRegistration, saveProofPayload, saveProofTx, saveRegisterRequest, type KeeperRegisterPhase } from "@/lib/keeper-register-client";
@@ -760,6 +761,19 @@ export const NO_BATCH_SIGNING_REASON =
   "this wallet signs one transaction at a time, so the steps are approved one by one as they land";
 
 /**
+ * Refuse, BEFORE the first signature, a registration the route's validators would refuse for
+ * ever (the memo binds the payload digest, so an unregistrable payload cannot be repaired once
+ * the launch has landed). Runs the same checkName / checkSymbol / validateRegistrationPayload
+ * the route runs (lib/market-metadata.ts).
+ */
+export function assertRegistrable(symbol: string | null | undefined, payload: MarketRegistrationPayload | null): void {
+  const problem = preflightRegistration({ symbol, label: null, payload });
+  if (problem) {
+    throw new Error(`This launch cannot be registered (${problem}). Nothing was sent; no signature was requested.`);
+  }
+}
+
+/**
  * Single source of truth for the market-registration payload.
  *
  * The batched fast path and the sequential fallback both POST this object to
@@ -985,6 +999,7 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
     const keeperPayload = keeperRequestBase
       ? buildMarketRegistrationPayload({ slabAddress: slabPk.toBase58(), params, deployer: walletPk.toBase58(), oracleMode, isAdminOracle, isDevnetEnv })
       : null;
+    if (keeperRequestBase) assertRegistrable(keeperRequestBase.symbol, keeperPayload);
     const keeperMemoIx = keeperRequestBase
       ? await buildKeeperRegisterMemoIx(walletPk, await keeperMemoParams({ ...keeperRequestBase, payload: keeperPayload }))
       : null;
@@ -2001,6 +2016,23 @@ export function useCreateMarket() {
       abortControllerRef.current = abortController;
       const abortSignal = abortController.signal;
 
+      // Idempotent: the wizard already resolved these; any other caller gets the same rule, so the
+      // memo-bound symbol and the payload's symbol/name always agree and pass the route.
+      params = {
+        ...params,
+        ...resolveMarketMetadata({ symbol: params.symbol, name: params.name, mint: params.mainnetCA ?? params.mint.toBase58() }),
+      };
+      // Refuse before any wallet prompt or RPC write if the registration could never be accepted.
+      try {
+        assertRegistrable(params.symbol, buildMarketRegistrationPayload({
+          slabAddress: PublicKey.default.toBase58(), params, deployer: wallet.publicKey.toBase58(),
+          oracleMode: params.oracleMode ?? "admin", isAdminOracle: params.oracleMode === "admin", isDevnetEnv: false,
+        }));
+      } catch (e) {
+        setState((s) => ({ ...s, error: e instanceof Error ? e.message : String(e) }));
+        return;
+      }
+
       // Every risk parameter for this market, derived from the creator's
       // leverage and LP seed (see lib/market-params.ts). Shared by the
       // sequential path's InitMarket + InitMatcherCtx sites below, exactly as
@@ -2069,6 +2101,7 @@ export function useCreateMarket() {
       const seqKeeperMemo = async (creator: PublicKey, slab: PublicKey): Promise<TransactionInstruction[]> => {
         if (!isKeeperOracle || !params.dexPoolAddress) return [];
         const payload = buildMarketRegistrationPayload({ slabAddress: slab.toBase58(), params, deployer: creator.toBase58(), oracleMode, isAdminOracle, isDevnetEnv });
+        assertRegistrable(params.symbol, payload);
         rememberRegistrationPayload(slab.toBase58(), payload);
         return [
           await buildKeeperRegisterMemoIx(

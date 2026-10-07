@@ -1,4 +1,5 @@
 import { Connection, PublicKey } from "@solana/web3.js";
+import { sanitizeDisplayName } from "@/lib/market-metadata";
 
 export interface TokenMeta {
   decimals: number;
@@ -11,11 +12,19 @@ const cache = new Map<string, TokenMeta>();
 /** Max mints per Helius DAS getAssetBatch call */
 const DAS_BATCH_SIZE = 100;
 
-/** Strip unsafe characters from token metadata strings */
+/**
+ * Strip unsafe characters from token metadata strings. Symbols stay on the conservative ASCII-ish
+ * set; names keep Unicode letters / numbers / emoji (a token named "ちいかわ" used to sanitise to
+ * "" and could never register its market) via the shared rule in lib/market-metadata.ts.
+ */
 function sanitizeTokenString(input: string, maxLen: number): string {
   // M6: Allow alphanumeric, spaces, dashes, dots, underscores, parentheses, $, #, &, and emoji
   // Use \p{Emoji} to preserve Unicode emoji properly
   return input.replace(/[^a-zA-Z0-9 \-._()$#&\p{Emoji}]/gu, "").trim().slice(0, maxLen);
+}
+
+function sanitizeTokenName(input: string, maxLen: number): string {
+  return sanitizeDisplayName(input, maxLen);
 }
 
 /** Well-known tokens that don't need a Jupiter lookup. */
@@ -283,7 +292,7 @@ export async function fetchTokenMetaBatch(
       const meta: TokenMeta = {
         decimals: das.decimals,
         symbol: sanitizeTokenString(das.symbol, 16),
-        name: sanitizeTokenString(das.name, 32),
+        name: sanitizeTokenName(das.name, 32),
       };
       cache.set(key, meta);
       resultMap.set(key, meta);
@@ -351,7 +360,7 @@ export async function fetchTokenMetaBatch(
               const meta: TokenMeta = {
                 decimals: 6, // Will be overridden below
                 symbol: sanitizeTokenString(symRaw, 16),
-                name: sanitizeTokenString(nameRaw, 32),
+                name: sanitizeTokenName(nameRaw, 32),
               };
               cache.set(mintKey, meta);
               resultMap.set(mintKey, meta);
@@ -393,7 +402,7 @@ export async function fetchTokenMetaBatch(
             const meta: TokenMeta = {
               decimals,
               symbol: sanitizeTokenString(shortenMint(mintKey), 16),
-              name: sanitizeTokenString(shortenMint(mintKey), 32),
+              name: sanitizeTokenName(shortenMint(mintKey), 32),
             };
             cache.set(mintKey, meta);
             resultMap.set(mintKey, meta);
@@ -403,7 +412,7 @@ export async function fetchTokenMetaBatch(
           const meta: TokenMeta = {
             decimals: 6,
             symbol: sanitizeTokenString(shortenMint(mintKey), 16),
-            name: sanitizeTokenString(shortenMint(mintKey), 32),
+            name: sanitizeTokenName(shortenMint(mintKey), 32),
           };
           cache.set(mintKey, meta);
           resultMap.set(mintKey, meta);
@@ -416,7 +425,7 @@ export async function fetchTokenMetaBatch(
           const meta: TokenMeta = {
             decimals: 6,
             symbol: sanitizeTokenString(shortenMint(key), 16),
-            name: sanitizeTokenString(shortenMint(key), 32),
+            name: sanitizeTokenName(shortenMint(key), 32),
           };
           cache.set(key, meta);
           resultMap.set(key, meta);
