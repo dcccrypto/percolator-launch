@@ -45,12 +45,12 @@ describe("TokenCopyMenu", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it("searches the CA, and the ticker as a cashtag, on X's latest posts in a new tab", () => {
+  it("searches the CA, and the ticker as a cashtag, on X in a new tab", () => {
     renderMenu();
     fireEvent.click(openMenu().getByRole("menuitem", { name: "Search CA on X" }));
-    expect(openWin).toHaveBeenLastCalledWith(`https://x.com/search?q=${CA}&f=live`, "_blank", "noopener,noreferrer");
+    expect(openWin).toHaveBeenLastCalledWith(`https://x.com/search?q=${CA}&src=typed_query&f=top`, "_blank", "noopener,noreferrer");
     fireEvent.click(openMenu().getByRole("menuitem", { name: "Search $cbBTC on X" }));
-    expect(openWin).toHaveBeenLastCalledWith("https://x.com/search?q=%24cbBTC&f=live", "_blank", "noopener,noreferrer");
+    expect(openWin).toHaveBeenLastCalledWith("https://x.com/search?q=%24cbBTC&src=typed_query&f=top", "_blank", "noopener,noreferrer");
   });
 
   it("small screens: the words hide, the glyph opens the same menu, so the slab address and the CA are both there", () => {

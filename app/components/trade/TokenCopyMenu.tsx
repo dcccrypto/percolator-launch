@@ -4,8 +4,8 @@ import { FC, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { baseSymbol, isPlaceholderSymbol } from "@/lib/symbol-utils";
 
-/** X's live search for `q`. */
-export const xSearchUrl = (q: string): string => `https://x.com/search?q=${encodeURIComponent(q)}&f=live`;
+/** X search for `q`, in the shape X builds for a typed query (a bare `f=live` link lands on X without the query). */
+export const xSearchUrl = (q: string): string => `https://x.com/search?q=${encodeURIComponent(q)}&src=typed_query&f=top`;
 
 const short = (a: string): string => `${a.slice(0, 4)}…${a.slice(-4)}`;
 
