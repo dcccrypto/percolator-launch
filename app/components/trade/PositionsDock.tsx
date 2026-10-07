@@ -47,6 +47,7 @@ import { AccountKind } from "@percolatorct/sdk";
 import {
   formatTokenAmount,
   formatUsdPriceE6,
+  formatUsdAmount,
   formatPnl,
   formatPercent,
 } from "@/lib/format";
@@ -486,7 +487,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                         float. */}
                     {pnlUsd !== null && (
                       <div className="text-[9px]">
-                        {pnlTokens > 0n ? "+" : pnlTokens < 0n ? "-" : ""}${Math.abs(pnlUsd).toFixed(2)}
+                        {formatUsdAmount(pnlUsd, pnlTokens > 0n ? "+" : pnlTokens < 0n ? "-" : "")}
                       </div>
                     )}
                   </>

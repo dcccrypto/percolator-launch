@@ -44,6 +44,7 @@ import { portfolioPositionPnl } from "@/lib/position-pnl";
 import {
   formatTokenAmount,
   formatUsdPriceE6,
+  formatUsdAmount,
   formatPnl,
   formatPercent,
 } from "@/lib/format";
@@ -220,7 +221,7 @@ const OtherMarketRow: FC<{
               </div>
               {pnlUsd !== null && (
                 <div className="text-[9px]">
-                  {pnlTokens > 0n ? "+" : pnlTokens < 0n ? "-" : ""}${Math.abs(pnlUsd).toFixed(2)}
+                  {formatUsdAmount(pnlUsd, pnlTokens > 0n ? "+" : pnlTokens < 0n ? "-" : "")}
                 </div>
               )}
             </>
