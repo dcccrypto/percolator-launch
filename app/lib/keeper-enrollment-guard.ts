@@ -137,7 +137,7 @@ export function enrollmentCapsFromEnv(env: NodeJS.ProcessEnv = process.env): Enr
 
 export type CapVerdict =
   | { ok: true }
-  | { ok: false; status: number; error: string; detail?: string; capFull?: boolean };
+  | { ok: false; status: number; error: string; detail?: string };
 
 /**
  * Would enrolling `slab` for `deployer` exceed a ceiling? Counts the OTHER active rows on this
@@ -171,6 +171,6 @@ export async function checkEnrollmentCaps(
   // retires dead markets), not a verdict on this market. The launch screen and the resume pass
   // keep retrying a 429 and never write the "refused" tombstone for it. The route reports it to
   // Sentry at error level: the previous silent 403 hid a total outage for a day.
-  if (all.count >= caps.maxActive) return { ok: false, status: 429, error: GLOBAL_CAP_COPY, capFull: true };
+  if (all.count >= caps.maxActive) return { ok: false, status: 429, error: GLOBAL_CAP_COPY };
   return { ok: true };
 }
