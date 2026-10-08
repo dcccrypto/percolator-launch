@@ -5,6 +5,8 @@ import { useLivePrice } from "@/hooks/useLivePrice";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
+import { useSingleMarketHealth } from "@/hooks/useMarketHealth";
+import { marketHeaderStatus, type HeaderStatus } from "@/lib/market-header-status";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { usePriceFlash } from "@/hooks/usePriceFlash";
 import { MarketSwitcher } from "@/components/trade/MarketSwitcher";
@@ -38,20 +40,38 @@ function fundingRateBpsTo8h(rateBps: bigint): number {
 }
 
 /** P3-3: Market health badge — surfaces oracle/liquidity status in the ticker bar */
-type HealthBadgeState = "live" | "no-oracle" | "no-liquidity" | "inactive";
+type HealthBadgeState = "live" | "no-oracle" | "no-liquidity" | "inactive" | "settled" | "close-only" | "paused" | "catching-up";
 
-const MarketHealthBadge = memo(function MarketHealthBadge({ oracleDown, vaultEmpty }: { oracleDown: boolean; vaultEmpty: boolean }) {
-  let state: HealthBadgeState;
-  if (oracleDown && vaultEmpty) state = "inactive";
-  else if (vaultEmpty) state = "no-liquidity";
-  else if (oracleDown) state = "no-oracle";
-  else state = "live";
+/**
+ * The badge follows the status line rendered under this bar (MarketHeaderStatus, the same
+ * marketHeaderStatus(row)): a settled, close-only, paused or catching-up market must not read
+ * green "LIVE" above a line saying new positions are refused. A settled market says so first: it
+ * is terminal, so "no oracle" or "no liquidity" would point at a fix that will never come. The
+ * oracle/vault states then keep their place ahead of the other statuses.
+ */
+export function healthBadgeState(oracleDown: boolean, vaultEmpty: boolean, status: HeaderStatus | null): HealthBadgeState {
+  if (status?.kind === "resolved") return "settled";
+  if (oracleDown && vaultEmpty) return "inactive";
+  if (vaultEmpty) return "no-liquidity";
+  if (oracleDown) return "no-oracle";
+  if (status?.kind === "adl-reduce-only") return "close-only";
+  if (status?.kind === "engine-catching-up") return "catching-up";
+  if (status) return "paused";
+  return "live";
+}
+
+export const MarketHealthBadge = memo(function MarketHealthBadge({ oracleDown, vaultEmpty, status }: { oracleDown: boolean; vaultEmpty: boolean; status: HeaderStatus | null }) {
+  const state = healthBadgeState(oracleDown, vaultEmpty, status);
 
   const cfg: Record<HealthBadgeState, { label: string; icon: string; cls: string; pulse: boolean; tooltip: string }> = {
     live:          { label: "LIVE",         icon: "●",  cls: "text-[var(--long)] bg-[var(--long)]/10 border-[var(--long)]/20",       pulse: false, tooltip: "Oracle healthy - market is live" },
     "no-oracle":   { label: "NO ORACLE",    icon: "◉",  cls: "text-[var(--warning)] bg-[var(--warning)]/10 border-[var(--warning)]/20", pulse: true,  tooltip: "Oracle not cranked - market paused. Trades are blocked." },
     "no-liquidity":{ label: "NO LIQUIDITY", icon: "⚠",  cls: "text-[var(--short)] bg-[var(--short)]/10 border-[var(--short)]/20",     pulse: false, tooltip: "No vault liquidity - trades cannot execute until this market is funded." },
     inactive:      { label: "INACTIVE",     icon: "⚠",  cls: "text-[var(--short)] bg-[var(--short)]/10 border-[var(--short)]/20",     pulse: false, tooltip: "Oracle unavailable and no vault liquidity." },
+    settled:       { label: "SETTLED",      icon: "■",  cls: "text-[var(--text-secondary)] bg-[var(--bg-surface)] border-[var(--border)]", pulse: false, tooltip: status?.body ?? "" },
+    "close-only":  { label: "CLOSE-ONLY",   icon: "◉",  cls: "text-[var(--warning)] bg-[var(--warning)]/10 border-[var(--warning)]/20", pulse: false, tooltip: status?.body ?? "" },
+    paused:        { label: "PAUSED",       icon: "◉",  cls: "text-[var(--warning)] bg-[var(--warning)]/10 border-[var(--warning)]/20", pulse: false, tooltip: status?.body ?? "" },
+    "catching-up": { label: "CATCHING UP",  icon: "◉",  cls: "text-[var(--warning)] bg-[var(--warning)]/10 border-[var(--warning)]/20", pulse: true,  tooltip: status?.body ?? "" },
   };
 
   const { label, icon, cls, pulse, tooltip } = cfg[state];
@@ -146,6 +166,9 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
     : engineHasData && insuranceBalance != null && totalOI != null
       ? insuranceBalance === 0n && totalOI === 0n
       : false;
+  // Same row and same derivation as the MarketHeaderStatus line the trade page renders under this bar.
+  const healthRow = useSingleMarketHealth(slabAddress);
+  const headerStatus = useMemo(() => marketHeaderStatus(healthRow), [healthRow]);
 
   // volume_24h is the indexer's SUM(ABS(size)) in engine Q units (base-asset
   // amount, POS_SCALE 1e6) — NOT dollars. It used to be formatted as USD
@@ -279,7 +302,7 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
 
         {/* P3-3: Market health badge — ml-auto pushes to far right within flex-1 group */}
         <span className="ml-auto h-6 w-px bg-[var(--border)] shrink-0" />
-        <MarketHealthBadge oracleDown={oracleDown} vaultEmpty={vaultEmpty} />
+        <MarketHealthBadge oracleDown={oracleDown} vaultEmpty={vaultEmpty} status={headerStatus} />
       </div>
     </div>
   );
