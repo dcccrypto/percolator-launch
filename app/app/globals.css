@@ -1308,3 +1308,21 @@ input[type="range"].leverage-slider:focus-visible::-moz-range-thumb {
     min-height: 44px;
   }
 }
+
+/* #3305: iOS Safari zooms the page when a text field under 16px takes focus. On touch devices every
+   text field, select and textarea is 16px. Zoom stays enabled (no maximum-scale / user-scalable in the
+   viewport): that would break pinch-zoom. Desktop (fine pointer) is unchanged.
+   Deliberately UNLAYERED: Tailwind's text-sm / text-[13px] utilities live in @layer utilities, and any
+   unlayered rule beats every layered one, so no !important is needed. A single font-size cannot be
+   "at least the field's own size" (em here is the parent's), so fields that already set a size of
+   text-lg or larger (the Earn amount is text-2xl) are left out by class, and never shrink. */
+@media (pointer: coarse) {
+  input:not(
+      [type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="button"],
+      [type="submit"], [type="reset"], [type="image"], [type="hidden"], [type="color"]
+    ):not([class*="text-lg"], [class*="text-xl"], [class*="text-2xl"], [class*="text-3xl"], [class*="text-4xl"]),
+  select:not([class*="text-lg"], [class*="text-xl"], [class*="text-2xl"], [class*="text-3xl"], [class*="text-4xl"]),
+  textarea:not([class*="text-lg"], [class*="text-xl"], [class*="text-2xl"], [class*="text-3xl"], [class*="text-4xl"]) {
+    font-size: 16px;
+  }
+}

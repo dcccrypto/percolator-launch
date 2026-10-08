@@ -704,7 +704,7 @@ function MarketsPageInner() {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="search token, address, or mint..."
+                placeholder="search token or address..."
                 className="w-full rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] py-2.5 pl-10 pr-4 text-sm text-[var(--text)] placeholder-[var(--text-dim)] focus:border-[var(--accent)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/20"
                 aria-label="Search markets"
               />
@@ -724,7 +724,7 @@ function MarketsPageInner() {
             {/* Sort tabs + market count (mobile) on same row */}
             <div className="flex items-center gap-3 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
               {/* UX WP-10 (§4.8): on phones the sort is one "Sort ▾" select; tabs from md up. */}
-              <label className="md:hidden flex shrink-0 items-center gap-2 text-[11px] text-[var(--text-secondary)]">
+              <label className="md:hidden flex shrink-0 items-center gap-2 text-[11px] pointer-coarse:text-base text-[var(--text-secondary)]">
                 <span>Sort</span>
                 <select
                   data-testid="markets-sort-select"

@@ -1641,9 +1641,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               }}
               onBlur={() => setLeverageText(formatLeverageValue(leverage))}
               style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
-              className="w-12 rounded-none border border-[var(--border)]/50 bg-[var(--bg)] px-1.5 py-0.5 text-right text-[11px] text-[var(--text)] focus:border-[var(--accent)]/50 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]/20"
+              className="w-12 pointer-coarse:w-16 rounded-none border border-[var(--border)]/50 bg-[var(--bg)] px-1.5 py-0.5 text-right text-[11px] text-[var(--text)] focus:border-[var(--accent)]/50 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]/20"
             />
-            <span className="text-[11px] font-medium text-[var(--text)]">x</span>
+            <span className="text-[11px] pointer-coarse:text-base font-medium text-[var(--text)]">x</span>
           </div>
         </div>
         {maxLeverage > 1 ? (() => {
