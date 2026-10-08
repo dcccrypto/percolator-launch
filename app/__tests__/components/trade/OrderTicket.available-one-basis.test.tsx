@@ -1,10 +1,8 @@
 /**
- * Finding #2: an Open-tab order on the other side of the open position was charged its full
- * margin as new exposure, so a reduce or close with little free margin asked for a deposit
- * ("Deposit X & Short") and showed "Available to trade" falling. The program only checks
- * initial margin when the trade leaves the position at least as large as before, so a reduce,
- * a close and a flip that ends smaller need no deposit; a flip that ends larger is charged on
- * the part past the old position.
+ * #57: the ticket showed two different "Available" figures. The strip under the size input counts
+ * free in-market USDC plus the wallet; the Details row "Available to trade" counted the market only,
+ * so a trader with money in the wallet saw e.g. "Available 12 USDC" above "Available to trade 0 → 0".
+ * Both now read the same basis.
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
@@ -82,71 +80,25 @@ async function ticket(account: unknown) {
   render(<OrderTicket slabAddress={SLAB} />);
   await waitFor(() => expect(screen.queryByTestId("trade-submit")).not.toBeNull());
 }
-// #57: "Available to trade" counts the 12 USDC wallet too, like the Available strip.
-function available() {
+const strip = () => screen.getByTestId("ticket-available").textContent?.match(/Available (.*) USDC/)?.[1];
+function receipt() {
   fireEvent.click(screen.getByTestId("ticket-details-toggle"));
-  return screen.getByTestId("ticket-details").textContent?.match(/Available to trade(.*?USDC.*?USDC)/)?.[1];
+  const m = screen.getByTestId("ticket-details").textContent?.match(/Available to trade(.*?) USDC→(.*?) USDC/);
+  return m ? { before: m[1], after: m[2] } : null;
 }
 
-describe("Open-tab order against the open position", () => {
-  it("a partial reduce asks for no deposit and frees margin", async () => {
-    await ticket(LONG_10);
-    short();
-    size("5");
-    expect(submit().textContent).toBe("Short SOL 1×");
-    expect(available()).toBe("13 USDC→13.5 USDC");
+describe("one Available basis (#57)", () => {
+  it("no account yet: the receipt starts from the wallet the strip shows and takes the order's margin", async () => {
+    await ticket(null); // 12 USDC in the wallet, nothing on the market
+    await waitFor(() => expect(strip()).toBe("12"));
+    size("5"); // 5 SOL @ $1 at 1x: 5 USDC margin, deposited from the wallet in the same approval
+    expect(receipt()).toEqual({ before: "12", after: "7" });
   });
 
-  it("a full close through the Open tab asks for no deposit", async () => {
-    await ticket(LONG_10);
-    short();
-    size("10");
-    expect(submit().textContent).toBe("Short SOL 1×");
-    expect(available()).toBe("13 USDC→14 USDC");
-  });
-
-  it("is symmetric for a short position", async () => {
-    await ticket(acct(2_000_000n, -10_000_000n));
-    size("5");
-    expect(submit().textContent).toBe("Long SOL 1×");
-  });
-
-  it("a flip that ends smaller than the position asks for no deposit", async () => {
-    await ticket(LONG_10);
-    short();
-    size("15");
-    expect(submit().textContent).toBe("Short SOL 1×");
-  });
-
-  it("a flip that ends as large as the position is charged on the part past it", async () => {
-    await ticket(LONG_10);
-    short();
-    size("20"); // short 10 after: |next| = |current| keeps the check; 10 USDC at 1x vs 2 USDC of capital
-    expect(submit().textContent).toMatch(/^Deposit [0-9.]+ USDC & Short$/);
-  });
-
-  it("a reduce on an account under its locked margin asks for no deposit", async () => {
-    await ticket(acct(500_000n, 10_000_000n)); // capital 0.5 < 1 USDC locked
-    short();
-    size("5");
-    expect(submit().textContent).toBe("Short SOL 1×");
-  });
-
-  it("CONTROL: a same-side add is unchanged and still asks for a deposit", async () => {
-    await ticket(LONG_10);
-    size("5");
-    expect(submit().textContent).toMatch(/^Deposit [0-9.]+ USDC & Long$/);
-  });
-
-  it("CONTROL: same-side receipt is unchanged", async () => {
-    await ticket(LONG_10);
+  it("with an account: the receipt's before equals the strip (market + wallet)", async () => {
+    await ticket(LONG_10); // 1 USDC free on the market + 12 in the wallet
+    await waitFor(() => expect(strip()).toBe("13"));
     size("0.5");
-    expect(available()).toBe("13 USDC→12.5 USDC");
-  });
-
-  it("CONTROL: flat-account receipt is unchanged", async () => {
-    await ticket(acct(2_000_000n, 0n));
-    size("0.5");
-    expect(available()).toBe("14 USDC→13.5 USDC");
+    expect(receipt()?.before).toBe(strip());
   });
 });

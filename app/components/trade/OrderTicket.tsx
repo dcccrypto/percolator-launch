@@ -814,16 +814,20 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // "Margin req." but actually showed capital -> capital-minus-margin (a
   // balance readout), so the actual requirement never appeared as a number
   // and the label lied about the row. The receipt now shows BOTH, on the
-  // same "available" basis as the account strip above (capital minus margin
-  // already locked by an open position) so the two readouts can't disagree:
+  // same "available" basis as the account strip above (displayAvailable: free
+  // in-market margin plus the wallet, #57), so its before-value matches the strip:
   //   Margin            — what THIS order reserves (the requirement)
   //   Available to trade — before -> after reserving it
-  const beforeAvailable = availableBalance;
-  const afterAvailable = vsPosition
-    ? vsPosition.afterAvailable
-    : beforeAvailable > marginNative
-      ? beforeAvailable - marginNative
-      : 0n;
+  // The order only changes the in-market part (a deposit moves wallet money in, it
+  // doesn't add any), so after = before + the in-market change, unclamped until the end.
+  // The after-value is an estimate: it takes the order's margin at the chosen leverage
+  // (the engine locks notional x IM) and leaves out the fee.
+  const inMarketAfter = vsPosition
+    ? vsPosition.afterAvailable - vsPosition.shortBy
+    : availableBalance - marginNative;
+  const beforeAvailable = displayAvailable;
+  const afterUnclamped = displayAvailable - availableBalance + inMarketAfter;
+  const afterAvailable = afterUnclamped > 0n ? afterUnclamped : 0n;
   // Slippage: distance between the mark and the worst acceptable fill
   // (same computeLimitPriceE6 useTrade itself uses to derive the on-chain
   // limit when the caller doesn't supply one explicitly).
