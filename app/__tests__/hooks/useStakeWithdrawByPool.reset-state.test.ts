@@ -31,7 +31,7 @@ describe("useStakeWithdrawByPool reset state", () => {
     });
 
     await waitFor(() => {
-      expect(result.current.error).toBe("Wallet not connected");
+      expect(result.current.error).toBe("Unlock your wallet and try again."); // #26: the plain line, not the raw message
       expect(result.current.loading).toBe(false);
     });
 
