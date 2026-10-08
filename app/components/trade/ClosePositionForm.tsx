@@ -176,7 +176,8 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
           </h2>
           <button
             onClick={onCancel}
-            className="text-[var(--text-muted)] transition-colors hover:text-[var(--text)]"
+            disabled={loading}
+            className="text-[var(--text-muted)] transition-colors hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-40"
             aria-label="Close"
           >
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
