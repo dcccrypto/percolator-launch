@@ -33,6 +33,7 @@ import { useUserAccount, useUserAccountScanPending } from "@/hooks/useUserAccoun
 import { useNftWrappedPosition } from "@/hooks/useNftWrappedPosition";
 import { PositionNftMenu, ClosedPositionNftNotice, NFT_MENU_COPY } from "@/components/trade/PositionNftMenu";
 import { useClosePosition } from "@/hooks/useClosePosition";
+import { AddMarginModal } from "@/components/trade/AddMarginModal";
 import { PnlShareButton } from "@/components/share/PnlShareButton";
 import { isPnlPoolCapped, poolPayableCapacity, type PnlCardData } from "@/lib/pnl-card";
 import { useSlabState } from "@/components/providers/SlabProvider";
@@ -124,7 +125,7 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
   const scanPending = useUserAccountScanPending();
   const accountPending = !mockMode && !userAccount && scanPending;
   const config = useMarketConfig();
-  const { accounts, config: mktConfig, params, adlFactors, wrapperConfigV17 } = useSlabState();
+  const { accounts, config: mktConfig, params, adlFactors, wrapperConfigV17, refresh: refreshSlab } = useSlabState();
   const { engine, insuranceBalance } = useEngineState();
   const { priceE6: livePriceE6, priceUsd } = useLivePrice();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
@@ -167,6 +168,7 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
   const closeBlockedByStaleness = !mockMode && (oracleStale || engineStale);
 
   const [showCloseModal, setShowCloseModal] = useState(false);
+  const [showMarginModal, setShowMarginModal] = useState(false);
 
   const lpEntry = useMemo(() => accounts.find(({ account }) => account.kind === AccountKind.LP) ?? null, [accounts]);
   const lpUnderfunded = lpEntry !== null && lpEntry.account.capital === 0n;
@@ -548,6 +550,18 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
                     {NFT_MENU_COPY.closeWrapped}
                   </span>
                 ) : (
+                  <>
+                  {/* #3304: add margin to THIS row's own account. Owned row only: collateral cannot back a
+                      position held in an NFT. The modal deposits into the account the row shows. */}
+                  {!mockMode && (
+                    <button
+                      onClick={() => setShowMarginModal(true)}
+                      data-testid="position-add-margin"
+                      className="rounded-none border border-[var(--accent)]/30 px-3 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--accent)] transition-colors duration-150 hover:bg-[var(--accent)]/8 hover:border-[var(--accent)]/50"
+                    >
+                      + Margin
+                    </button>
+                  )}
                   <button
                     // prewarmClose: start the fresh position read + tx prewarms
                     // the moment the modal opens, so the confirm click reaches
@@ -560,6 +574,7 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
                   >
                     Close
                   </button>
+                  </>
                 )}
                 {/* UX WP-9 (§3.13): Wrap / Send / Unwrap live in this row's "⋯" menu. */}
                 <PositionNftMenu slabAddress={slabAddress} row={isNftWrapped ? "wrapped" : "own"} />
@@ -592,6 +607,17 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
         <div data-testid="position-close-error" className="mx-4 mb-3 rounded-none border border-[var(--short)]/20 bg-[var(--short)]/5 px-3 py-2">
           <p className="text-[10px] text-[var(--short)]">{closeError}</p>
         </div>
+      )}
+      {showMarginModal && !isNftWrapped && (
+        <AddMarginModal
+          slabAddress={slabAddress}
+          userIdx={activeInfo.idx}
+          symbol={collateralSymbol}
+          decimals={decimals}
+          portfolioPk={activeInfo.pubkey}
+          onClose={() => setShowMarginModal(false)}
+          onSuccess={refreshSlab}
+        />
       )}
       {showCloseModal && (
         <ClosePositionModal
