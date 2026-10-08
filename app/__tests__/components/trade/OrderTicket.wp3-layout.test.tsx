@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   engineStale: false,
   adl: false,
   fill: null as null | { kind: "full" | "partial" | "zero" | "unknown"; filledQ: bigint | null },
+  /** The measured position change (lib/position-change.ts); null = none / unmeasured. */
+  change: null as null | { beforeQ: bigint; afterQ: bigint },
   sideLimits: null as null | { long: SideLimit; short: SideLimit },
   sameOwner: false,
   limits: null as unknown,
@@ -67,6 +69,7 @@ vi.mock("@/lib/tx", () => ({ prewarmTxLanding: vi.fn() }));
 vi.mock("@/lib/limits/adl-reduce-only", () => ({ isAdlReduceOnly: () => mocks.adl }));
 vi.mock("@/lib/limits/decode", async (orig) => ({ ...(await orig<object>()), decodeMarketEngineView: () => ({}) }));
 vi.mock("@/hooks/useMarketLimits", () => ({ useMarketLimits: () => mocks.limits }));
+vi.mock("@/lib/position-change", async (orig) => ({ ...(await orig<object>()), takePositionChange: async () => mocks.change }));
 vi.mock("@/lib/limits/fill-check", () => ({ takeFillResult: () => mocks.fill }));
 vi.mock("@/components/trade/DepositWithdrawCard", () => ({ DepositWithdrawCard: () => <div data-testid="deposit-card" /> }));
 vi.mock("@/components/trade/OrderTicketClosePanel", () => ({ OrderTicketClosePanel: () => <div data-testid="close-panel" /> }));
@@ -107,6 +110,7 @@ beforeEach(() => {
   mocks.engineStale = false;
   mocks.adl = false;
   mocks.fill = null;
+  mocks.change = null;
   mocks.sameOwner = false;
   mocks.limits = marketLimits({ state: "off" });
   // P1: long room 41.8834 SOL, short room 100 SOL (1e6 scale). $2 per SOL.
@@ -306,6 +310,7 @@ describe("WP-3 result lines", () => {
   it("AC5 partial: data-variant=info, 'Opened X of Y SOL'", async () => {
     mocks.trade.mockResolvedValueOnce("sigPartial");
     mocks.fill = { kind: "partial", filledQ: 2_000_000n };
+    mocks.change = { beforeQ: 0n, afterQ: 2_000_000n }; // worded from the measured change
     render(<OrderTicket slabAddress={SLAB} />);
     await placeOrder("10"); // $10 at $2 = 5 SOL
     expect(lines()).toHaveLength(1);
@@ -318,6 +323,7 @@ describe("WP-3 result lines", () => {
 
   it("full fill: 'Opened 5 SOL long at $2.00'", async () => {
     mocks.trade.mockResolvedValueOnce("sigFull");
+    mocks.change = { beforeQ: 0n, afterQ: 5_000_000n };
     render(<OrderTicket slabAddress={SLAB} />);
     await placeOrder("10");
     expect(lines()).toHaveLength(1);
@@ -325,35 +331,72 @@ describe("WP-3 result lines", () => {
     expect(screen.getByTestId("status-line-body").textContent).toMatch(/^Opened 5 SOL long at \$2\.0+$/);
   });
 
-  // An Open-tab order on the other side of an 8 SOL long cuts it first: the line says so.
+  // The line is worded from the MEASURED change (before/after, ADL-effective), not the request or
+  // the raw position. `raw` = the position the account shows (heading only); `before`/`after` = measured.
   const withLong = (q: bigint) =>
     mocks.useUserAccount.mockReturnValue({ account: { capital: 10_000_000_000n, positionSize: q, entryPrice: 2_000_000n, pnl: 0n }, idx: 0 });
   const placeShort = async (size: string) => {
     fireEvent.click(screen.getByTestId("trade-side-short"));
     await placeOrder(size);
   };
+  const body = () => screen.getByTestId("status-line-body").textContent;
 
   it.each([
-    ["8000000", "10", /^Reduced your long by 5 SOL at \$2\.0+$/], // 5 SOL against an 8 SOL long
-    ["5000000", "10", /^Closed your 5 SOL long at \$2\.0+$/],
-    ["3000000", "10", /^Closed your 3 SOL long and opened 2 SOL short at \$2\.0+$/],
-  ])("against a %s long, a $%s short reads as what it did", async (pos, size, want) => {
-    withLong(BigInt(pos));
+    ["reduce", 8_000_000n, 8_000_000n, 3_000_000n, "Reduced your long by 5 SOL at $2.000000", "filled"],
+    ["close", 5_000_000n, 5_000_000n, 0n, "Closed your 5 SOL long at $2.000000", "filled"],
+    ["flip", 3_000_000n, 3_000_000n, -2_000_000n, "Closed your 3 SOL long and opened 2 SOL short at $2.000000", "filled"],
+    // ADL scaled a raw 8 long to an effective 3: selling 5 flips it (the PR said "Reduced your long by 5").
+    ["ADL flip", 8_000_000n, 3_000_000n, -2_000_000n, "Closed your 3 SOL long and opened 2 SOL short at $2.000000", "filled"],
+    // The fill was clipped: 2 of the 5 SOL reduced the long; nothing here says "Opened".
+    ["partial reduce", 8_000_000n, 8_000_000n, 6_000_000n, "Reduced your long by 2 SOL. The market had room for part of your order.", "partial-fill"],
+  ])("%s: a 10 USD short reads as what was measured", async (_n, raw, before, after, want, kind) => {
+    withLong(raw);
     mocks.trade.mockResolvedValueOnce("sigCut");
+    mocks.change = { beforeQ: before, afterQ: after };
     render(<OrderTicket slabAddress={SLAB} />);
-    await placeShort(size);
-    expect(screen.getByTestId("status-line-body").textContent).toMatch(want);
+    await placeShort("10");
+    expect(body()).toBe(want);
+    expect(lines()[0].dataset.kind).toBe(kind);
+    expect(body()).not.toMatch(/Opened \d+(\.\d+)? of/);
   });
 
-  it("an unmeasured fill never claims the full size opened", async () => {
+  it("an unmeasured fill (flag OFF, nothing measured) never claims a size or direction", async () => {
     mocks.trade.mockResolvedValueOnce("sigUnknown");
-    mocks.fill = { kind: "unknown", filledQ: null };
+    mocks.fill = null; // P1 off: takeFillResult has nothing
+    mocks.change = null;
     render(<OrderTicket slabAddress={SLAB} />);
     await placeOrder("10");
-    expect(screen.getByTestId("status-line-body").textContent).toBe("Order went through. Your position updates in a moment.");
+    expect(body()).toBe("Your order went through. Your position is updating.");
     expect(lines()[0].dataset.kind).toBe("sent");
-    expect(lines()[0].textContent).toMatch(/Order sent/);
-    expect(lines()[0].textContent).not.toMatch(/Order filled/);
+    expect(lines()[0].textContent).not.toMatch(/Order filled|Opened/);
+  });
+
+  it("an unmeasured fill (flag ON, unknown) says the same neutral line", async () => {
+    mocks.trade.mockResolvedValueOnce("sigUnknown2");
+    mocks.fill = { kind: "unknown", filledQ: null };
+    mocks.change = null;
+    render(<OrderTicket slabAddress={SLAB} />);
+    await placeOrder("10");
+    expect(body()).toBe("Your order went through. Your position is updating.");
+    expect(lines()[0].dataset.kind).toBe("sent");
+  });
+
+  it("a measurement that contradicts the order (bought, position shrank) is unmeasured", async () => {
+    withLong(8_000_000n);
+    mocks.trade.mockResolvedValueOnce("sigOdd");
+    mocks.change = { beforeQ: 8_000_000n, afterQ: 3_000_000n }; // a LONG order cannot reduce a long
+    render(<OrderTicket slabAddress={SLAB} />);
+    await placeOrder("10");
+    expect(body()).toBe("Your order went through. Your position is updating.");
+  });
+
+  it("a measured zero change reads as Not filled", async () => {
+    mocks.trade.mockResolvedValueOnce("sigNoop");
+    mocks.change = { beforeQ: 0n, afterQ: 0n };
+    render(<OrderTicket slabAddress={SLAB} />);
+    await placeOrder("10");
+    expect(lines()[0].dataset.kind).toBe("zero-fill");
+    expect(body()).toMatch(/^Not filled: the market had no room/);
   });
 });
 

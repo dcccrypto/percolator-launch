@@ -65,7 +65,7 @@ import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { AccountKind } from "@percolatorct/sdk";
-import { computeEstimatedEntryPrice, computeLiqPrice, computeTradingFee, computePositionInitialMargin, orderAgainstPosition, orderEffect, resolveEntryPrice } from "@/lib/trading";
+import { computeEstimatedEntryPrice, computeLiqPrice, computeTradingFee, computePositionInitialMargin, orderAgainstPosition, resolveEntryPrice } from "@/lib/trading";
 import { TradeConfirmationModal } from "@/components/trade/TradeConfirmationModal";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { usePrivyLogin, usePrivyAvailable } from "@/hooks/usePrivySafe";
@@ -79,7 +79,8 @@ import { formatTokenAmount, formatUsdPriceE6, toE6, normalizeTokenDecimals } fro
 import { describeLiqPrice, type LiqPriceDisplay } from "@/lib/liq-price-display";
 import { computeRiskLeverage, formatLeverageValue } from "@/lib/leverage-display";
 import { saveEntryPrice, getEntryPrice, clearEntryPrice, entryAfterTrade, getSavedEntry } from "@/lib/entry-price";
-import { takePositionChange } from "@/lib/position-change";
+import { takePositionChange, type PositionChange } from "@/lib/position-change";
+import { classifyOrderChange, orderResultBody } from "@/lib/order-result";
 import { isSentinelValue } from "@/lib/health";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
 import { useInitUser } from "@/hooks/useInitUser";
@@ -1025,7 +1026,6 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       // P1: a confirmed TradeCpi can be a partial or ZERO fill (lib/limits/fill-check.ts).
       const limitsFillResult = takeFillResult(sig);
       setClampedToQ(null);
-      const sideWord = direction === "long" ? "long" : "short";
       if (limitsFillResult?.kind === "zero") {
         // Never "Confirmed!" for a no-op: nothing filled, nothing to save. Offer a smaller size.
         const room = marketMaxQFor(direction);
@@ -1036,31 +1036,39 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         refreshSlab();
         return;
       }
-      // What the order did to the position (the same rule as the confirm heading), and no
-      // full-size claim when the post-trade read could not measure the fill.
-      const resultLine = () => {
-        const price = formatUsdPriceE6(submitPriceE6);
-        const held = existingPositionSize > 0n ? "long" : "short";
-        const existingAbs = existingPositionSize < 0n ? -existingPositionSize : existingPositionSize;
-        switch (orderEffect(direction, effectiveSize, existingPositionSize)) {
-          case "reduce": return TICKET_COPY.result.reduced(fmtQ(effectiveSize), baseTicker, held, price);
-          case "close": return TICKET_COPY.result.closed(fmtQ(existingAbs), baseTicker, held, price);
-          case "flip": return TICKET_COPY.result.flipped(fmtQ(existingAbs), fmtQ(effectiveSize - existingAbs), baseTicker, held, sideWord, price);
-          default: return TICKET_COPY.result.full(fmtQ(effectiveSize), baseTicker, sideWord, price);
+      // The result line is worded from the MEASURED position change (ADL-effective before/after,
+      // lib/position-change.ts), never from the request or the raw pre-trade position
+      // (lib/order-result.ts). `orderHeading` (the pre-trade heading) stays request-based on
+      // purpose: before the trade there is nothing measured. takePositionChange consumes its
+      // entry, so it is awaited ONCE and shared with the saved-entry step below. Until it
+      // resolves the line is the neutral "went through" (true for any order).
+      const sigKey = sig ?? null;
+      const price = formatUsdPriceE6(submitPriceE6);
+      const measured = takePositionChange(sig).then((change): PositionChange | null => {
+        if (change) return change;
+        // Fund-and-trade records no position change, only the fill it measured itself. For a
+        // first trade (no position in this ticket) that fill is an open of the measured size.
+        if (fundingMode && existingPositionSize === 0n && limitsFillResult?.filledQ != null && limitsFillResult.filledQ !== 0n && (limitsFillResult.kind === "full" || limitsFillResult.kind === "partial")) {
+          return { beforeQ: 0n, afterQ: limitsFillResult.filledQ };
         }
-      };
-      setResult(
-        limitsFillResult?.kind === "partial"
-          ? { kind: "partial", body: TICKET_COPY.result.partial(fmtQ(limitsFillResult.filledQ ?? 0n), fmtQ(effectiveSize), baseTicker), sig: sig ?? null, tryQ: null }
-          : limitsFillResult?.kind === "unknown"
-          ? { kind: "sent", body: TICKET_COPY.result.unmeasured, sig: sig ?? null, tryQ: null }
-          : {
-              kind: "full",
-              body: resultLine(),
-              sig: sig ?? null,
-              tryQ: null,
-            },
-      );
+        return null;
+      });
+      setResult({ kind: "sent", body: TICKET_COPY.result.unmeasured, sig: sigKey, tryQ: null });
+      void measured.then((change) => {
+        const outcome = classifyOrderChange(direction, effectiveSize, change);
+        let next: NonNullable<typeof result>;
+        if (outcome.effect === "zero") {
+          const room = marketMaxQFor(direction);
+          const tryQ = room !== null && room > 0n && room < effectiveSize ? room : effectiveSize / 2n;
+          next = { kind: "zero", body: TICKET_COPY.result.zero, sig: sigKey, tryQ: tryQ > 0n ? tryQ : null };
+        } else if (outcome.effect === "unmeasured") {
+          next = { kind: "sent", body: TICKET_COPY.result.unmeasured, sig: sigKey, tryQ: null };
+        } else {
+          next = { kind: outcome.partial ? "partial" : "full", body: orderResultBody(outcome, fmtQ, baseTicker, price), sig: sigKey, tryQ: null };
+        }
+        // Only if the ticket still shows this order's line (a newer order clears or replaces it).
+        setResult((prev) => (prev && prev.sig === sigKey ? next : prev));
+      });
       setTradePhase("confirming");
       setLastSig(sig ?? null);
       setEngineLockError(null);
@@ -1091,7 +1099,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         // (ADL-effective, lib/position-change.ts): an add averages the saved entry with this fill,
         // a reduce keeps it, a flip or new position takes this fill (lib/entry-price.ts
         // entryAfterTrade). No measurement (read failed, legacy market): the step above stands.
-        void takePositionChange(sig).then((change) => {
+        void measured.then((change) => {
           if (!change) return;
           const next = entryAfterTrade({ beforeQ: change.beforeQ, afterQ: change.afterQ, saved: prior, fillPriceE6 });
           if (next === null) {

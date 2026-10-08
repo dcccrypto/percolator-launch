@@ -166,7 +166,7 @@ describe("useClosePosition — a FULL close moves the freed USDC back to the wal
     const { result } = renderHook(() => useClosePosition(slabAddress));
     await act(async () => { await result.current.closePosition(100); });
     expect(mocks.toast).not.toHaveBeenCalledWith("Position closed.", "success");
-    expect(mocks.toast).toHaveBeenCalledWith("Your close went through. Your position is updating.", "info");
+    expect(mocks.toast).toHaveBeenCalledWith("Your order went through. Your position is updating.", "info");
   });
 
   it("a zero fill throws and toasts no success", async () => {
