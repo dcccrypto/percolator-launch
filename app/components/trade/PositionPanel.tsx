@@ -48,7 +48,7 @@ import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { StatusLine } from "@/components/ui/StatusLine";
 import { getEntryPrice, getEntryLeverage } from "@/lib/entry-price";
-import { isOracleStaleBlocking } from "@/lib/oracle-stale-gate";
+import { oracleCloseGate } from "@/lib/oracle-stale-gate";
 import { computeMarginHealthPct } from "@/lib/margin-health";
 import { describeLiqPrice } from "@/lib/liq-price-display";
 import { LiqPriceValue } from "./LiqPriceValue";
@@ -95,9 +95,12 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // H7: "keeper" added to the mode set — this gate previously only fired for
   // admin/hyperp markets, so a stale keeper-priced market (all 5 live
   // playground markets) never blocked closing.
-  const { level: oracleLevel, mode: oracleMode, ready: oracleReady } = useOracleFreshness();
+  const { level: oracleLevel, mode: oracleMode, ready: oracleReady, elapsedSecs: oracleElapsed, closeFacts } = useOracleFreshness();
   const oracleUnavailable = oracleLevel === "unavailable";
-  const oracleStale = !mockMode && (oracleUnavailable || isOracleStaleBlocking(oracleLevel, oracleMode, oracleReady));
+  // Closing is gated on what the chain would refuse, not on the 60 s display rule (lib/oracle-stale-gate).
+  const closeGate = oracleCloseGate({ level: oracleLevel, mode: oracleMode, ready: oracleReady, elapsedSecs: oracleElapsed, facts: closeFacts });
+  const oracleStale = !mockMode && closeGate.blocked;
+  const oraclePriceBehind = !mockMode && closeGate.behind;
   // H6: engine accrue-staleness — distinct from the oracle-push freshness
   // above. A market can look perfectly fresh here (keeper still pushing
   // prices) while the ENGINE hasn't accrued in ~500 slots, cliff-dead and
@@ -618,6 +621,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           // but if the modal is somehow already open when engine-staleness
           // is detected, keep its Confirm button blocked too.
           oracleStale={oracleStale}
+          oraclePriceBehind={oraclePriceBehind}
           engineCatchingUp={!mockMode && engineStale}
           maxFillAbs={fillCaps?.maxFillAbs ?? null}
           onConfirm={handleConfirmClose}

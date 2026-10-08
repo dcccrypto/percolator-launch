@@ -32,6 +32,8 @@ export interface OrderTicketClosePanelProps {
   engineStale: boolean;
   /** Oracle unavailable/stale (already mock-mode aware) — blocks the close. */
   oracleBlocked: boolean;
+  /** Price older than 60 s but the chain would still accept the close: show a calm note, do not block. */
+  oraclePriceBehind?: boolean;
   /** ADL state unknown: withhold the raw-size preview (see ClosePositionFormProps). */
   previewUnavailable?: boolean;
   /** The portfolio account `positionSize` was read from; Close acts on exactly this one (#3301). */
@@ -72,6 +74,7 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
   lpUnderfunded,
   engineStale,
   oracleBlocked,
+  oraclePriceBehind = false,
   previewUnavailable = false,
   portfolioPk,
   onClosed,
@@ -187,6 +190,7 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
         loading={loading}
         tradingFeeBps={tradingFeeBps}
         oracleStale={oracleBlocked}
+        oraclePriceBehind={oraclePriceBehind}
         error={error}
         maxFillAbs={maxFillAbs}
         previewUnavailable={previewUnavailable}

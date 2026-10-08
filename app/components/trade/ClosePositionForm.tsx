@@ -37,8 +37,10 @@ export interface ClosePositionFormProps {
   isLong: boolean;
   loading: boolean;
   tradingFeeBps?: bigint;
-  /** Blocks close + shows the oracle-stale warning. */
+  /** Blocks close + shows the oracle-stale warning (matured oracle / no price — what the chain refuses). */
   oracleStale?: boolean;
+  /** Price older than 60 s but the chain would accept the close — shows one calm line, never blocks. */
+  oraclePriceBehind?: boolean;
   /** Blocks close + says the market is catching up (engine lag, not the oracle). */
   engineCatchingUp?: boolean;
   error?: string | null;
@@ -84,6 +86,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
   loading,
   tradingFeeBps = 0n,
   oracleStale = false,
+  oraclePriceBehind = false,
   engineCatchingUp = false,
   error = null,
   maxFillAbs = null,
@@ -321,6 +324,10 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
             Prices are catching up. Closing resumes once the market has caught up.
           </p>
         </div>
+      ) : oraclePriceBehind ? (
+        <p data-testid="close-price-behind" className="mb-4 text-[9px] text-[var(--text-dim)] leading-relaxed">
+          The price shown may be a little behind.
+        </p>
       ) : null}
 
       {fillCount > 1 && (

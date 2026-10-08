@@ -14,7 +14,7 @@ import { PnlShareButton } from "@/components/share/PnlShareButton";
 import type { PnlCardData } from "@/lib/pnl-card";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
-import { isOracleStaleBlocking } from "@/lib/oracle-stale-gate";
+import { oracleCloseGate } from "@/lib/oracle-stale-gate";
 import { ClosePositionModal } from "@/components/trade/ClosePositionModal";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import {
@@ -158,12 +158,13 @@ function PortfolioCloseFlow({
   // SlabProvider (see the call site below), so useEngineFreshness() has the
   // context it needs.
   const { engineStale } = useEngineFreshness();
-  // The same oracle gate as the dock and the other-markets rows (#24): a stale oracle reverts
-  // the close on-chain, so block Confirm here too instead of letting the user try.
-  const { level: oracleLevel, mode: oracleMode, ready: oracleReady } = useOracleFreshness();
+  // The same oracle gate as the dock and the other-markets rows (#24): a matured oracle reverts
+  // the close on-chain (a price merely older than 60 s does not), so block Confirm here too.
+  const { level: oracleLevel, mode: oracleMode, ready: oracleReady, elapsedSecs: oracleElapsed, closeFacts } = useOracleFreshness();
   const mockExempt = isMockMode() && isMockSlab(pos.slabAddress);
-  const oracleStale =
-    !mockExempt && (oracleLevel === "unavailable" || isOracleStaleBlocking(oracleLevel, oracleMode, oracleReady));
+  const closeGate = oracleCloseGate({ level: oracleLevel, mode: oracleMode, ready: oracleReady, elapsedSecs: oracleElapsed, facts: closeFacts });
+  const oracleStale = !mockExempt && closeGate.blocked;
+  const oraclePriceBehind = !mockExempt && closeGate.behind;
   // This market's fee, so the preview matches the trade page's dock (#24).
   const { params } = useSlabState();
   // Same shared PnL computation as every other surface: the modal previews size
@@ -187,6 +188,7 @@ function PortfolioCloseFlow({
       error={error}
       tradingFeeBps={params?.tradingFeeBps}
       oracleStale={oracleStale}
+      oraclePriceBehind={oraclePriceBehind}
       engineCatchingUp={!mockExempt && engineStale}
       onConfirm={async (percent) => {
         try {

@@ -24,6 +24,8 @@ interface ClosePositionModalProps {
   tradingFeeBps?: bigint;
   /** GH#1842: Block submission when oracle price is stale or unavailable */
   oracleStale?: boolean;
+  /** Price older than 60 s but the chain would accept the close — note only, never blocks. */
+  oraclePriceBehind?: boolean;
   /** Engine lag (not the oracle): blocks the close with its own "Catching up" note. */
   engineCatchingUp?: boolean;
   /** PERC-2312: Surfaced close-tx failure (from useClosePosition's `error`). */
@@ -64,6 +66,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   loading,
   tradingFeeBps,
   oracleStale = false,
+  oraclePriceBehind = false,
   engineCatchingUp = false,
   error = null,
   maxFillAbs = null,
@@ -171,6 +174,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
           loading={loading}
           tradingFeeBps={tradingFeeBps}
           oracleStale={oracleStale}
+          oraclePriceBehind={oraclePriceBehind}
           engineCatchingUp={engineCatchingUp}
           error={error}
           maxFillAbs={maxFillAbs}
