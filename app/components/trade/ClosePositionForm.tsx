@@ -1,5 +1,6 @@
 "use client";
 
+import { priceBehindLine } from "@/lib/oracle-stale-gate";
 import { FC, useId, useMemo, useState } from "react";
 import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
 import { computeMarkPnl, computeMarkPnlLinear, clampClosePercent, UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
@@ -37,8 +38,14 @@ export interface ClosePositionFormProps {
   isLong: boolean;
   loading: boolean;
   tradingFeeBps?: bigint;
-  /** Blocks close + shows the oracle-stale warning. */
+  /** Blocks close + shows the oracle-stale warning (matured oracle / no price — what the chain refuses). */
   oracleStale?: boolean;
+  /** Price older than 60 s but the chain would accept the close — shows one calm line, never blocks. */
+  oraclePriceBehind?: boolean;
+  /** Seconds since the last price push (note text). */
+  priceAgeSecs?: number;
+  /** The stored mark the chain settles at. When the price is behind, the preview is computed from it, not from `currentPrice`. */
+  settleMarkE6?: bigint | null;
   /** Blocks close + says the market is catching up (engine lag, not the oracle). */
   engineCatchingUp?: boolean;
   error?: string | null;
@@ -74,16 +81,19 @@ const PRESETS = [25, 50, 75, 100];
 export const ClosePositionForm: FC<ClosePositionFormProps> = ({
   positionSize,
   entryPrice,
-  currentPrice,
+  currentPrice: liveCurrentPrice,
   capital,
   symbol,
   collateralSymbol,
   decimals,
-  priceUsd,
+  priceUsd: livePriceUsd,
   isLong,
   loading,
   tradingFeeBps = 0n,
   oracleStale = false,
+  oraclePriceBehind = false,
+  priceAgeSecs = 0,
+  settleMarkE6 = null,
   engineCatchingUp = false,
   error = null,
   maxFillAbs = null,
@@ -111,6 +121,12 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
     !previewUnavailable && maxFillAbs != null && maxFillAbs > 0n && closeAbsForFills > 0n
       ? Number((closeAbsForFills + maxFillAbs - 1n) / maxFillAbs)
       : 1;
+
+  // The chain settles a close at the STORED mark. While the live price is behind, the two can differ by
+  // the whole move, so the preview follows the stored one.
+  const useStored = oraclePriceBehind && settleMarkE6 != null && settleMarkE6 > 0n;
+  const currentPrice = useStored ? settleMarkE6 : liveCurrentPrice;
+  const priceUsd = useStored ? Number(settleMarkE6) / 1e6 : livePriceUsd;
 
   const preview = useMemo(() => {
     const closeAbs = percent >= 100 ? absPosition : (absPosition * BigInt(percent)) / 100n;
@@ -321,6 +337,10 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
             Prices are catching up. Closing resumes once the market has caught up.
           </p>
         </div>
+      ) : oraclePriceBehind ? (
+        <p data-testid="close-price-behind" className="mb-4 text-[9px] text-[var(--text-dim)] leading-relaxed">
+          {priceBehindLine(priceAgeSecs)}
+        </p>
       ) : null}
 
       {fillCount > 1 && (

@@ -79,14 +79,15 @@ import { formatTokenAmount, formatUsdPriceE6, toE6, normalizeTokenDecimals } fro
 import { describeLiqPrice, type LiqPriceDisplay } from "@/lib/liq-price-display";
 import { computeRiskLeverage, formatLeverageValue } from "@/lib/leverage-display";
 import { saveEntryPrice, getEntryPrice, clearEntryPrice, entryAfterTrade, getSavedEntry } from "@/lib/entry-price";
-import { takePositionChange } from "@/lib/position-change";
+import { takePositionChange, type PositionChange } from "@/lib/position-change";
+import { classifyOrderChange, orderResultBody } from "@/lib/order-result";
 import { isSentinelValue } from "@/lib/health";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
 import { useInitUser } from "@/hooks/useInitUser";
 import { AUTO_DEPOSIT_AMOUNT } from "@/hooks/useAutoDeposit";
 import { depositAmountMessage } from "@/lib/deposit-guard";
 import { useWalletNetworkGuard } from "@/hooks/useWalletNetworkGuard";
-import { isOracleStaleBlocking } from "@/lib/oracle-stale-gate";
+import { isOracleStaleBlocking, oracleAgeSecs, oracleCloseGate } from "@/lib/oracle-stale-gate";
 import { invalidatePortfolio } from "@/lib/portfolio-invalidation";
 import { checkSignatureLanded, timedOutSignature } from "@/lib/tx";
 import { watchPendingSignature } from "@/lib/pending-signature";
@@ -256,7 +257,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   // Non-reactive — see file-header comment. NOT `useLivePrice()`.
   const { priceUsd, priceE6: livePriceE6 } = getLivePriceSnapshot(slabAddress);
-  const { level: oracleLevel, mode: oracleMode, ready: oracleReady } = useOracleFreshness();
+  const { level: oracleLevel, mode: oracleMode, ready: oracleReady, elapsedSecs: oracleElapsed, lastUpdateMs: oracleLastMs, closeFacts } = useOracleFreshness();
   const oracleUnavailable = oracleLevel === "unavailable";
   // GH#2484: this was an inline ALLOWLIST of oracle modes, and it leaked twice —
   // first "keeper" (H7: a stale keeper-priced market never blocked trading,
@@ -264,6 +265,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // lib/oracle-stale-gate and blocks every recognised mode by default, so the
   // next mode added to the union cannot silently trade on a stale price.
   const oracleStale = !oracleUnavailable && isOracleStaleBlocking(oracleLevel, oracleMode, oracleReady);
+  // The Close tab is a reducing action: it blocks only when the chain would refuse
+  // (matured oracle / feed past its own max staleness / no price), not on the 60 s
+  // rule above, which stays for opening. See oracleCloseGate.
+  const closeGate = oracleCloseGate({ level: oracleLevel, mode: oracleMode, ready: oracleReady, facts: closeFacts });
   // H6: engine accrue-staleness — see useEngineFreshness's file header.
   const { engineStale } = useEngineFreshness();
   const openWalletModal = usePrivyLogin();
@@ -398,7 +403,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   /** WP-3 row 9: the size was just reduced to the max; the helper turns --warning for 4 s. */
   const [clampedToQ, setClampedToQ] = useState<bigint | null>(null);
   /** WP-3 result line (§3.3): full / partial / zero fill of the last order, in the status slot. */
-  const [result, setResult] = useState<{ kind: "full" | "partial" | "zero"; body: string; sig: string | null; tryQ: bigint | null } | null>(null);
+  const [result, setResult] = useState<{ kind: "full" | "partial" | "zero" | "sent"; body: string; sig: string | null; tryQ: bigint | null } | null>(null);
   /** WP-3: the wait loop passed ~30 s; "We'll keep trying" + Stop. */
   const [waitingLong, setWaitingLong] = useState(false);
   const waitAbortRef = useRef<AbortController | null>(null);
@@ -1025,7 +1030,6 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       // P1: a confirmed TradeCpi can be a partial or ZERO fill (lib/limits/fill-check.ts).
       const limitsFillResult = takeFillResult(sig);
       setClampedToQ(null);
-      const sideWord = direction === "long" ? "long" : "short";
       if (limitsFillResult?.kind === "zero") {
         // Never "Confirmed!" for a no-op: nothing filled, nothing to save. Offer a smaller size.
         const room = marketMaxQFor(direction);
@@ -1036,16 +1040,39 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         refreshSlab();
         return;
       }
-      setResult(
-        limitsFillResult?.kind === "partial"
-          ? { kind: "partial", body: TICKET_COPY.result.partial(fmtQ(limitsFillResult.filledQ ?? 0n), fmtQ(effectiveSize), baseTicker), sig: sig ?? null, tryQ: null }
-          : {
-              kind: "full",
-              body: TICKET_COPY.result.full(fmtQ(effectiveSize), baseTicker, sideWord, formatUsdPriceE6(submitPriceE6)),
-              sig: sig ?? null,
-              tryQ: null,
-            },
-      );
+      // The result line is worded from the MEASURED position change (ADL-effective before/after,
+      // lib/position-change.ts), never from the request or the raw pre-trade position
+      // (lib/order-result.ts). `orderHeading` (the pre-trade heading) stays request-based on
+      // purpose: before the trade there is nothing measured. takePositionChange consumes its
+      // entry, so it is awaited ONCE and shared with the saved-entry step below. Until it
+      // resolves the line is the neutral "went through" (true for any order).
+      const sigKey = sig ?? null;
+      const price = formatUsdPriceE6(submitPriceE6);
+      const measured = takePositionChange(sig).then((change): PositionChange | null => {
+        if (change) return change;
+        // Fund-and-trade records no position change, only the fill it measured itself. For a
+        // first trade (no position in this ticket) that fill is an open of the measured size.
+        if (fundingMode && existingPositionSize === 0n && limitsFillResult?.filledQ != null && limitsFillResult.filledQ !== 0n && (limitsFillResult.kind === "full" || limitsFillResult.kind === "partial")) {
+          return { beforeQ: 0n, afterQ: limitsFillResult.filledQ };
+        }
+        return null;
+      });
+      setResult({ kind: "sent", body: TICKET_COPY.result.unmeasured, sig: sigKey, tryQ: null });
+      void measured.then((change) => {
+        const outcome = classifyOrderChange(direction, effectiveSize, change);
+        let next: NonNullable<typeof result>;
+        if (outcome.effect === "zero") {
+          const room = marketMaxQFor(direction);
+          const tryQ = room !== null && room > 0n && room < effectiveSize ? room : effectiveSize / 2n;
+          next = { kind: "zero", body: TICKET_COPY.result.zero, sig: sigKey, tryQ: tryQ > 0n ? tryQ : null };
+        } else if (outcome.effect === "unmeasured") {
+          next = { kind: "sent", body: TICKET_COPY.result.unmeasured, sig: sigKey, tryQ: null };
+        } else {
+          next = { kind: outcome.partial ? "partial" : "full", body: orderResultBody(outcome, fmtQ, baseTicker, price), sig: sigKey, tryQ: null };
+        }
+        // Only if the ticket still shows this order's line (a newer order clears or replaces it).
+        setResult((prev) => (prev && prev.sig === sigKey ? next : prev));
+      });
       setTradePhase("confirming");
       setLastSig(sig ?? null);
       setEngineLockError(null);
@@ -1076,7 +1103,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         // (ADL-effective, lib/position-change.ts): an add averages the saved entry with this fill,
         // a reduce keeps it, a flip or new position takes this fill (lib/entry-price.ts
         // entryAfterTrade). No measurement (read failed, legacy market): the step above stands.
-        void takePositionChange(sig).then((change) => {
+        void measured.then((change) => {
           if (!change) return;
           const next = entryAfterTrade({ beforeQ: change.beforeQ, afterQ: change.afterQ, saved: prior, fillPriceE6 });
           if (next === null) {
@@ -1316,8 +1343,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       );
     }
     if (result) {
-      const kind = result.kind === "zero" ? "zero-fill" : result.kind === "partial" ? "partial-fill" : "filled";
-      const title = result.kind === "zero" ? "Not filled" : result.kind === "partial" ? "Partly filled" : "Order filled";
+      const kind = result.kind === "zero" ? "zero-fill" : result.kind === "partial" ? "partial-fill" : result.kind === "sent" ? "sent" : "filled";
+      const title = result.kind === "zero" ? "Not filled" : result.kind === "partial" ? "Partly filled" : result.kind === "sent" ? "Order sent" : "Order filled";
       const line = (
         <StatusLine
           message={{
@@ -1431,7 +1458,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             maxFillAbs={fillCaps?.maxFillAbs ?? null}
             lpUnderfunded={lpUnderfunded}
             engineStale={engineStale}
-            oracleBlocked={!mockMode && (oracleUnavailable || oracleStale)}
+            oracleBlocked={!mockMode && closeGate.blocked}
+            oraclePriceBehind={!mockMode && closeGate.behind}
+            priceAgeSecs={oracleAgeSecs(oracleLastMs, oracleElapsed)}
             onClosed={handleClosed}
           />
         )}

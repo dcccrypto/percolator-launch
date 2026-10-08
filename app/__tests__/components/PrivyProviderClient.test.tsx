@@ -93,6 +93,8 @@ vi.mock("@privy-io/react-auth/solana", () => ({
 import PrivyProviderClient from "@/components/providers/PrivyProviderClient";
 import { WalletApiContext, type WalletApi } from "@/hooks/walletApiContext";
 import { PreferredWalletContext } from "@/hooks/usePreferredWallet";
+import { EmbeddedBatchSignError } from "@/lib/privy-batch-sign";
+import { detectWalletError, humanizeError, userFacingMessage } from "@/lib/errorMessages";
 
 /** Reads the WalletApi injected by PrivyProviderClient's inner bridge and
  *  reports it back to the test via a plain callback (no state needed —
@@ -267,6 +269,84 @@ describe("PrivyProviderClient", () => {
       expect(inputs[0].options?.uiOptions?.buttonText).toBe("Approve all 3");
       expect(inputs[1].options?.uiOptions?.showWalletUIs).toBe(false);
       expect(inputs[2].options?.uiOptions?.showWalletUIs).toBe(false);
+      expect(mockPrivySignTransaction).not.toHaveBeenCalled();
+    });
+
+    // ── Cancelling the one prompt ends the sign; nothing falls through to more prompts ──
+    const rejection = () => Object.assign(new Error("User rejected request"), { code: 4001 });
+
+    it("embedded: rejecting the single 'Approve all N' prompt shows exactly one prompt and uses no signature", async () => {
+      const featureSign = mockStandardWallet(true);
+      featureSign.mockRejectedValueOnce(rejection());
+      const variadic = vi.fn();
+      mockUseWallets().wallets[0].signTransaction = variadic;
+      const api = await getApi();
+
+      const err = await api.signAllTransactions!([makeTx("a"), makeTx("b"), makeTx("c")]).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(Error);
+      expect(detectWalletError((err as Error).message)).toBe("rejected");
+      expect(humanizeError((err as Error).message)).toBe("Transaction cancelled.");
+      expect(featureSign).toHaveBeenCalledTimes(1); // the one batch prompt, never repeated
+      expect(variadic).not.toHaveBeenCalled(); // attempt 2 (per-tx prompts) never ran
+      expect(mockPrivySignTransaction).not.toHaveBeenCalled(); // attempt 3 (batch prompt again) never ran
+      expect(Sentry.captureMessage).not.toHaveBeenCalled();
+    });
+
+    it("embedded: a headless failure on tx 3 of 5 stops with a plain error, no second prompt, nothing returned", async () => {
+      const featureSign = mockStandardWallet(true);
+      const signedSoFar: string[] = [];
+      featureSign.mockImplementationOnce(async (...inputs: Array<{ transaction: Uint8Array }>) => {
+        for (let i = 0; i < inputs.length; i++) {
+          if (i === 2) throw new Error("rpc exploded while signing");
+          signedSoFar.push(new TextDecoder().decode(inputs[i].transaction));
+        }
+        return [];
+      });
+      const variadic = vi.fn();
+      mockUseWallets().wallets[0].signTransaction = variadic;
+      const api = await getApi();
+
+      const err = await api
+        .signAllTransactions!(["a", "b", "c", "d", "e"].map(makeTx))
+        .then(() => null, (e: unknown) => e);
+      expect(signedSoFar).toEqual(["a", "b"]); // two were signed inside Privy...
+      expect(err).toBeInstanceOf(EmbeddedBatchSignError); // ...and the caller gets an error, never a partial array
+      expect(userFacingMessage(err)).toBe("Signing didn't finish, so nothing was sent. Please try again.");
+      expect(featureSign).toHaveBeenCalledTimes(1);
+      expect(variadic).not.toHaveBeenCalled();
+      expect(mockPrivySignTransaction).not.toHaveBeenCalled();
+    });
+
+    it("external wallet: a non-rejection failure still falls through exactly as before (byte-for-byte inputs)", async () => {
+      const featureSign = mockStandardWallet(false);
+      featureSign.mockRejectedValueOnce(new Error("feature blew up"));
+      const variadic = vi.fn(async (...inputs: Array<{ transaction: Uint8Array }>) =>
+        inputs.map((i) => ({ signedTransaction: i.transaction })),
+      );
+      mockUseWallets().wallets[0].signTransaction = variadic;
+      const api = await getApi();
+
+      const signed = await api.signAllTransactions!([makeTx("a"), makeTx("b")]);
+      expect(signed).toHaveLength(2);
+      expect(featureSign).toHaveBeenCalledTimes(1);
+      expect(variadic).toHaveBeenCalledTimes(1);
+      const inputs = variadic.mock.calls[0] as Array<Record<string, unknown>>;
+      expect(inputs.map((i) => Object.keys(i).sort())).toEqual([["chain", "transaction"], ["chain", "transaction"]]);
+    });
+
+    it("external wallet: a rejection also ends the sign (no per-tx or repeat batch prompt)", async () => {
+      const featureSign = mockStandardWallet(false);
+      featureSign.mockRejectedValueOnce(rejection());
+      const variadic = vi.fn();
+      mockUseWallets().wallets[0].signTransaction = variadic;
+      const api = await getApi();
+
+      await expect(api.signAllTransactions!([makeTx("a"), makeTx("b")])).rejects.toThrow(/rejected/i);
+      expect(featureSign).toHaveBeenCalledTimes(1);
+      expect(variadic).not.toHaveBeenCalled();
       expect(mockPrivySignTransaction).not.toHaveBeenCalled();
     });
 

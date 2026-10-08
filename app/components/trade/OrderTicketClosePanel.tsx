@@ -1,5 +1,7 @@
 "use client";
 
+import { useSlabState } from "@/components/providers/SlabProvider";
+import { onChainMarkE6 } from "@/lib/position-pnl";
 import { FC, useEffect, useRef } from "react";
 import type { PublicKey } from "@solana/web3.js";
 import { useClosePosition } from "@/hooks/useClosePosition";
@@ -32,6 +34,10 @@ export interface OrderTicketClosePanelProps {
   engineStale: boolean;
   /** Oracle unavailable/stale (already mock-mode aware) — blocks the close. */
   oracleBlocked: boolean;
+  /** Price older than 60 s but the chain would still accept the close: show a calm note, do not block. */
+  oraclePriceBehind?: boolean;
+  /** Seconds since the last price push, for the note shown with `oraclePriceBehind`. */
+  priceAgeSecs?: number;
   /** ADL state unknown: withhold the raw-size preview (see ClosePositionFormProps). */
   previewUnavailable?: boolean;
   /** The portfolio account `positionSize` was read from; Close acts on exactly this one (#3301). */
@@ -72,6 +78,8 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
   lpUnderfunded,
   engineStale,
   oracleBlocked,
+  oraclePriceBehind = false,
+  priceAgeSecs = 0,
   previewUnavailable = false,
   portfolioPk,
   onClosed,
@@ -80,6 +88,9 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
   // #3301: the account the ticket's position size was read from.
   const closeTarget = portfolioPk ? { portfolioPk } : undefined;
   const { priceE6, priceUsd } = useLivePrice();
+  // What the chain settles a close at: the stored mark, not the live-store price (matters when the price is behind).
+  const { config: slabConfig, wrapperConfigV17 } = useSlabState();
+  const settleMarkE6 = onChainMarkE6(slabConfig, wrapperConfigV17 !== null);
 
   const currentPriceE6 = priceE6 ?? 0n;
   const hasValidMark = currentPriceE6 > 0n;
@@ -187,6 +198,9 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
         loading={loading}
         tradingFeeBps={tradingFeeBps}
         oracleStale={oracleBlocked}
+        oraclePriceBehind={oraclePriceBehind}
+        priceAgeSecs={priceAgeSecs}
+        settleMarkE6={settleMarkE6}
         error={error}
         maxFillAbs={maxFillAbs}
         previewUnavailable={previewUnavailable}

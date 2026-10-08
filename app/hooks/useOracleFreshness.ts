@@ -5,6 +5,7 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { useClusterSlotObservation } from "@/hooks/useClusterSlot";
 import { detectOracleMode, type OracleMode } from "@/lib/oraclePrice";
 import { oraclePushSlotV17 } from "@/lib/v17-engine-clock";
+import { deriveCloseChainFacts, type CloseChainFacts } from "@/lib/oracle-stale-gate";
 
 // GH#1338: "unavailable" = oracle has never been cranked (no valid price exists on-chain).
 // Distinct from "stale" (had a price, but it's old). Unavailable → hard block on trading.
@@ -29,6 +30,13 @@ export interface OracleFreshnessState {
   ready: boolean;
   /** Last update timestamp (ms) */
   lastUpdateMs: number | null;
+  /**
+   * What the chain's own staleness rules say about this market (matured past
+   * `permissionless_resolve_stale_slots`). Used by
+   * `oracleCloseGate` so a close is blocked only when the chain would refuse
+   * it — see lib/oracle-stale-gate.ts. Opening trades ignore it.
+   */
+  closeFacts: CloseChainFacts;
 }
 
 /** Freshness thresholds in seconds.
@@ -132,7 +140,7 @@ export interface UseOracleFreshnessOptions {
  */
 export function useOracleFreshness(options?: UseOracleFreshnessOptions): OracleFreshnessState {
   const trackSeconds = options?.trackSeconds ?? false;
-  const { config, engine, wrapperConfigV17 } = useSlabState();
+  const { config, engine, wrapperConfigV17, assetProfile } = useSlabState();
   const clusterSlotObservation = useClusterSlotObservation();
   const [elapsedSecs, setElapsedSecs] = useState(0);
   const [lastUpdateMs, setLastUpdateMs] = useState<number | null>(null);
@@ -156,6 +164,12 @@ export function useOracleFreshness(options?: UseOracleFreshnessOptions): OracleF
       ? detectOracleMode({ ...config, oracleModeByte: wrapperConfigV17?.oracleMode })
       : null,
     [config, hasOracleKeys, wrapperConfigV17?.oracleMode],
+  );
+
+  const chainSlot = clusterSlotObservation?.slot ?? null;
+  const closeFacts = useMemo(
+    () => deriveCloseChainFacts(wrapperConfigV17, assetProfile, chainSlot),
+    [wrapperConfigV17, assetProfile, chainSlot],
   );
 
   // Track price changes to detect updates
@@ -326,5 +340,6 @@ export function useOracleFreshness(options?: UseOracleFreshnessOptions): OracleF
     publisherTotal: null,
     ready: mode !== null && lastUpdateMs !== null,
     lastUpdateMs,
+    closeFacts,
   };
 }

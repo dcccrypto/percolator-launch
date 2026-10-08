@@ -46,6 +46,6 @@ describe("OrderTicket — Open/Close toggle", () => {
   it("gates the panel like PositionsDock: engine staleness, LP underfunded, oracle", () => {
     expect(SRC).toMatch(/lpUnderfunded=\{lpUnderfunded\}/);
     expect(SRC).toMatch(/engineStale=\{engineStale\}/);
-    expect(SRC).toMatch(/oracleBlocked=\{!mockMode && \(oracleUnavailable \|\| oracleStale\)\}/);
+    expect(SRC).toMatch(/oracleBlocked=\{!mockMode && closeGate\.blocked\}/);
   });
 });

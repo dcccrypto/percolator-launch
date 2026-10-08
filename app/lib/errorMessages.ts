@@ -260,16 +260,26 @@ const SPL_TOKEN_INSUFFICIENT_FUNDS_MESSAGE =
 //   Phantom  : {code: 4100, message: "The requested method and/or account has not been authorized by the user."}
 //              {code: 4001, message: "User rejected the request."}
 //   Solflare : "Wallet is locked" / "WalletNotConnectedError" / "User rejected the request"
+//   Privy    : "User rejected request" / "User exited the modal before submitting the transaction"
 //   adapters : WalletNotConnectedError, WalletSignTransactionError: "Wallet not connected"
 export const WALLET_LOCKED_MESSAGE =
   "Your wallet is locked or hasn't authorised this site. Unlock Phantom / Solflare, reconnect it from the header, and try again. Nothing was sent.";
 export type WalletErrorKind = "locked" | "rejected";
 
+/**
+ * Text that means the USER declined a wallet prompt. Deliberately narrow: it does not match a policy or
+ * rate-limit refusal ("Transaction rejected by policy", "429 ... request rejected") or a bare "4001"
+ * inside another message ("Custom(4001)"); the numeric `code === 4001` is checked on the error object
+ * by `isWalletRejection` (lib/privy-batch-sign.ts) instead. 0x6985 is a Ledger "denied by the user".
+ */
+export const USER_DECLINED_RE =
+  /user rejected|rejected the request|rejected by the user|user declined|user denied|user disapproved|request declined|signing cancell?ed by user|transaction cancell?ed|user exited the modal|\b0x6985\b/i;
+
 export function detectWalletError(msg: string): WalletErrorKind | null {
   if (/has not been authori[sz]ed by the user|\b4100\b.*authori[sz]|wallet is locked|locked wallet|WalletNotConnected|wallet not connected|please unlock/i.test(msg)) {
     return "locked";
   }
-  if (/user rejected|rejected the request|user declined|transaction rejected|request rejected|\b4001\b/i.test(msg)) {
+  if (USER_DECLINED_RE.test(msg) || /transaction rejected|request rejected|\b4001\b/i.test(msg)) {
     return "rejected";
   }
   return null;

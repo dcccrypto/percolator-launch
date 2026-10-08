@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import {
+  detectWalletError,
   humanizeError,
   isTransientError,
   isOracleStaleError,
@@ -48,6 +49,11 @@ describe("humanizeError", () => {
     expect(humanizeError("User rejected the request")).toBe(
       "Transaction cancelled."
     );
+  });
+
+  it("treats Privy's 'User exited the modal' as a cancel (its own alternative)", () => {
+    expect(detectWalletError("User exited the modal before submitting the transaction")).toBe("rejected");
+    expect(humanizeError("User exited the modal before submitting the transaction")).toBe("Transaction cancelled.");
   });
 
   it("handles insufficient funds", () => {

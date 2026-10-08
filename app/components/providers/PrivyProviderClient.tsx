@@ -24,7 +24,7 @@ import { WalletApiContext, type WalletApi } from "@/hooks/walletApiContext";
 import { usePreferredWallet, resolveActiveWallet } from "@/hooks/usePreferredWallet";
 import { getNetwork } from "@/lib/config";
 import { purgeLegacyPrivyState } from "@/lib/privy-legacy-purge";
-import { embeddedBatchSignOptions, isPrivyEmbeddedStandardWallet } from "@/lib/privy-batch-sign";
+import { EmbeddedBatchSignError, embeddedBatchSignOptions, isPrivyEmbeddedStandardWallet, isWalletRejection } from "@/lib/privy-batch-sign";
 
 // Drop legacy pre-cookie Privy tokens at module-evaluation time. This chunk is
 // loaded via next/dynamic (ssr:false) before PrivyProvider is ever rendered, and
@@ -212,6 +212,12 @@ const PrivyWalletApiBridge: FC<{ children: ReactNode }> = ({ children }) => {
       // "I still signed 8 times" report on Solflare). Verified against
       // @privy-io/js-sdk-core's ConnectedStandardSolanaWallet class:
       // `get standardWallet(): SolanaStandardWallet`.
+      // Set when the embedded wallet's batch sign has been handed to Privy. Any
+      // non-rejection failure after that point (partway through headless signing,
+      // OR before a prompt even shows: unsupported chain, an instant feature
+      // rejection) ends the sign instead of trying a signer that would prompt
+      // again (see EmbeddedBatchSignError).
+      let embeddedBatchStarted = false;
       try {
         const connected = activeWallet as unknown as {
           address: string;
@@ -231,6 +237,7 @@ const PrivyWalletApiBridge: FC<{ children: ReactNode }> = ({ children }) => {
         // the rest are signed without one (lib/privy-batch-sign.ts).
         const embedded = isPrivyEmbeddedStandardWallet(std);
         if (typeof feature?.signTransaction === "function" && account) {
+          embeddedBatchStarted = embedded;
           const outputs = await feature.signTransaction(
             ...serialized.map((bytes, i) => ({
               transaction: bytes,
@@ -243,8 +250,18 @@ const PrivyWalletApiBridge: FC<{ children: ReactNode }> = ({ children }) => {
             console.info(`[PrivyProviderClient] batch-signed ${txs.length} txs via wallet-standard feature (ONE approval)`);
             return outputs.map((o) => Transaction.from(Buffer.from(o.signedTransaction)));
           }
+          if (embeddedBatchStarted) throw new Error("embedded batch returned the wrong number of signatures");
         }
       } catch (e) {
+        // A user rejection ends the sign. Falling through would open per-tx prompts
+        // (attempt 2) and then the batch prompt again (attempt 3) for one cancel.
+        if (isWalletRejection(e)) throw e;
+        // Embedded wallet, failed once the batch was handed to Privy: do not prompt
+        // through another signer. Nothing was signed for broadcast; say so and stop.
+        if (embeddedBatchStarted) {
+          console.warn("[PrivyProviderClient] embedded batch sign failed — not retrying through a prompting signer:", e);
+          throw new EmbeddedBatchSignError(txs.length, { cause: e });
+        }
         console.warn("[PrivyProviderClient] wallet-standard batch sign failed — trying the connected wallet's own signer:", e);
       }
 
@@ -266,6 +283,7 @@ const PrivyWalletApiBridge: FC<{ children: ReactNode }> = ({ children }) => {
           }
         }
       } catch (e) {
+        if (isWalletRejection(e)) throw e; // see attempt 1: one cancel, one prompt
         console.warn("[PrivyProviderClient] connected-wallet variadic sign failed — using Privy signer (may prompt per tx):", e);
       }
 

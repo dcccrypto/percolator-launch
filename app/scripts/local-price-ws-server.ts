@@ -49,6 +49,7 @@ import { createServer, type IncomingMessage } from "node:http";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { readPoolPriceE6, type DecimalsCache, type PoolReadEntry } from "../lib/priceStore/dexPoolReader";
+import { createBatchPoolReader } from "../lib/priceStore/dexPoolBatchReader";
 import { fetchJupiterSolUsdE6 } from "../lib/jupiter-price";
 import { pickSolUsdE6 } from "../lib/priceStore/solUsd";
 import { isBlockedSlab } from "../lib/blocklist";
@@ -223,6 +224,9 @@ const SOL_FALLBACK_ENTRY: PoolReadEntry = {
 
 const mainnetConn = new Connection(MAINNET_RPC_URL ?? "https://api.mainnet-beta.solana.com", "confirmed");
 const decimalsCache: DecimalsCache = new Map();
+// Batched reads: static pool facts resolved once per minute, every changing account of every market
+// read per cycle with getMultipleAccountsInfo (<=100 per call). See lib/priceStore/dexPoolBatchReader.ts.
+const batchReader = createBatchPoolReader(mainnetConn, decimalsCache);
 
 /** Latest SOL/USD (e6) from Jupiter and when it arrived: the WSOL-quoted pools' USD conversion. */
 let jupiterSol: { e6: bigint; at: number } | null = null;
@@ -444,10 +448,9 @@ function logSkip(label: string, key: string, reason: string | undefined): void {
 }
 
 /**
- * One DEX-poll cycle: read the 2 pump.fun pools and broadcast fresh prices.
- * Per-market errors are caught individually so one bad pool read (RPC
- * hiccup, transient 429, etc.) never kills the loop or blocks the other
- * market.
+ * One DEX-poll cycle: read every market's changing accounts in one batch and broadcast fresh
+ * prices. Errors are isolated per market (a missing/invalid account skips only that market; a
+ * failed RPC chunk fails only the markets in it), so a bad read never kills the loop.
  *
  * WSOL-quoted pools need a SOL/USD price to convert to USD: Jupiter's (fresh), else a one-off
  * DEX read of the SOL/USDC pool (lib/priceStore/solUsd.ts pickSolUsdE6).
@@ -471,28 +474,39 @@ async function pollOnce(): Promise<void> {
     },
   });
 
-  await Promise.all(
-    dexMarkets.map(async (entry) => {
-      try {
-        const result = await readPoolPriceE6(mainnetConn, entry, decimalsCache, solPriceE6);
-        if (result.skipped) {
-          logSkip(entry.label, entry.slab, result.skipReason);
-          return;
-        }
-        skipStreak.delete(entry.slab);
-        lastPriceE6.set(entry.slab, result.priceE6);
-        broadcast(entry.slab, result.priceE6);
-      } catch (err) {
-        console.warn(`[local-price-ws] ${entry.label} read error:`, err instanceof Error ? err.message : err);
-      }
-    }),
-  );
+  const markets = dexMarkets;
+  let outcomes: Awaited<ReturnType<typeof batchReader.readAll>>;
+  try {
+    outcomes = await batchReader.readAll(markets, solPriceE6);
+  } catch (err) {
+    console.warn("[local-price-ws] batch read failed:", err instanceof Error ? err.message : err);
+    return;
+  }
+  for (const entry of markets) {
+    const outcome = outcomes.get(entry.poolAddress);
+    if (!outcome) continue;
+    if (outcome.kind === "error") {
+      console.warn(`[local-price-ws] ${entry.label} read error:`, outcome.error);
+      continue;
+    }
+    const result = outcome.result;
+    if (result.skipped) {
+      logSkip(entry.label, entry.slab, result.skipReason);
+      continue;
+    }
+    skipStreak.delete(entry.slab);
+    lastPriceE6.set(entry.slab, result.priceE6);
+    broadcast(entry.slab, result.priceE6);
+  }
 }
 
 async function pollLoop(): Promise<void> {
   for (;;) {
+    const started = Date.now();
     await pollOnce();
-    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    // Fixed cadence: the interval is start-to-start (it used to be sleep AFTER the cycle, so the
+    // period was POLL_INTERVAL_MS + cycle time). A 25 ms floor stops a slow cycle from spinning.
+    await new Promise((r) => setTimeout(r, Math.max(25, POLL_INTERVAL_MS - (Date.now() - started))));
   }
 }
 
