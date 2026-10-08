@@ -4,6 +4,7 @@ import { use, useState, useEffect, useRef, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { MobileTradeBand } from "@/components/trade/MobileTradeBand";
 import { isInsideModalSurface } from "@/hooks/useOtherModalOpen";
+import { lockPageScroll } from "@/hooks/useLockBodyScroll";
 import useSWR from "swr";
 import { useRouter } from "next/navigation";
 import { PublicKey } from "@solana/web3.js";
@@ -166,15 +167,11 @@ function MobileOrderSheet({ slab }: { slab: string }) {
   // cleanup (and whenever `open` flips back to false).
   useEffect(() => {
     if (!open) return;
-    const prevOverflow = document.body.style.overflow;
-    const prevHtmlOverflow = document.documentElement.style.overflow;
-    // Lock BOTH elements: `globals.css` sets `html { overflow-x: hidden }`, which
-    // makes <html> itself the viewport scroller (overflow-y computes to `auto`).
-    // The UA propagates <html>'s overflow to the viewport and only falls back to
-    // <body>'s when <html> itself is `visible` — so locking body alone locked
-    // nothing and the page behind the sheet kept scrolling under a 40% backdrop.
-    document.body.style.overflow = "hidden";
-    document.documentElement.style.overflow = "hidden";
+    // Shared, ref-counted lock (hooks/useLockBodyScroll): it locks BOTH <html> and <body> (globals.css
+    // makes <html> the viewport scroller). A private save/restore here would put the page back to
+    // "unlocked" when the sheet closes while a dialog opened over it is still up, and that dialog's
+    // later release would then restore the stale "hidden" and leave the page locked for good.
+    const unlockPage = lockPageScroll();
 
     // iOS Safari ignores overflow:hidden on the viewport scroller entirely, so a
     // touch outside the sheet still drags the page behind it. Block those moves
@@ -227,8 +224,7 @@ function MobileOrderSheet({ slab }: { slab: string }) {
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => {
-      document.body.style.overflow = prevOverflow;
-      document.documentElement.style.overflow = prevHtmlOverflow;
+      unlockPage();
       document.removeEventListener("touchmove", handleTouchMove);
       document.removeEventListener("keydown", handleKeyDown);
     };
