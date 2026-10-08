@@ -11,6 +11,8 @@ export interface ConfirmedTradeParams {
   abortSignal?: AbortSignal;
   keepWaiting?: boolean;
   onWaitingLong?: () => void;
+  /** #49: broadcast, waiting for confirmation (useTrade -> sendTx onProgress). */
+  onConfirming?: () => void;
 }
 
 /**

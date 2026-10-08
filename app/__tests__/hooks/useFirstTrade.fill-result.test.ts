@@ -143,6 +143,22 @@ describe("useFirstTrade records the MEASURED fill for the ticket", () => {
     expect(takeFillResult(sig)).toEqual({ kind: "partial", filledQ: 72n });
   });
 
+  it("#49: both sends report the broadcast through onProgress", async () => {
+    const onConfirming = vi.fn();
+    const run = async () => {
+      const { result } = renderHook(() => useFirstTrade(Keypair.generate().publicKey.toBase58()));
+      await act(async () => {
+        await result.current.fundAndTrade({ size: 822_500n, depositAtoms: 55_060_000n, limitPriceE6: 127_659_537n, amountLabel: "55.06 USDC", onConfirming });
+      });
+    };
+    sendTx.mockResolvedValue("sigFirst");
+    await run(); // new account: [create, init, deposit, trade]
+    findV17Portfolio.mockResolvedValue(Keypair.generate().publicKey);
+    await run(); // returning user: [deposit, trade]
+    expect(sendTx).toHaveBeenCalledTimes(2);
+    for (const [arg] of sendTx.mock.calls) expect(arg).toEqual(expect.objectContaining({ onProgress: onConfirming }));
+  });
+
   it("a full fill is still reported as full", async () => {
     sendTx.mockResolvedValue("sigFull");
     chain.afterQ = 822_500n;

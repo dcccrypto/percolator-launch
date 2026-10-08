@@ -321,6 +321,11 @@ export function useTrade(slabAddress: string) {
       /** UX WP-3: keep waiting past the schedule (with Stop) and say so after ~30 s. */
       keepWaiting?: boolean;
       onWaitingLong?: () => void;
+      /**
+       * #49: called once the tx is broadcast and the app is waiting for confirmation (no wallet
+       * prompt is open any more). May be called repeatedly while it waits.
+       */
+      onConfirming?: () => void;
     }) => {
       if (inflightRef.current) throw new Error("Trade already in progress");
       inflightRef.current = true;
@@ -636,7 +641,8 @@ export function useTrade(slabAddress: string) {
               buildTx: (ixs, computeUnits) =>
                 buildBatchTx({ instructions: ixs, computeUnits, priorityFeeMicroLamports: priorityFee, blockhash, feePayer: owner }),
               signAll: (txs) => signAllCompat(wallet, txs),
-              broadcast: (tx) => broadcastSignedTx(connection, tx),
+              // Every group is signed up front (one approval), so the first broadcast ends the prompts.
+              broadcast: (tx) => broadcastSignedTx(connection, tx, { onProgress: params.onConfirming }),
             },
           );
           sig = sent.signatures[sent.signatures.length - 1];
@@ -652,6 +658,7 @@ export function useTrade(slabAddress: string) {
             abortSignal: params.abortSignal,
             keepWaiting: params.keepWaiting,
             onWaitingLong: params.onWaitingLong,
+            onProgress: params.onConfirming,
             computeUnitsFromSim: { cap: tradeCuCap(legs.length) },
             // P0b: prepend ExpireBackingBucket / FinalizeResetSide only if this
             // trade/close would otherwise revert 19/21 on them (lib/self-heal.ts).

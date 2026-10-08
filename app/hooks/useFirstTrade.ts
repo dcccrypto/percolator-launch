@@ -75,6 +75,11 @@ export interface FundAndTradeParams {
   amountLabel: string;
   /** The id race happened: the UI labels the extra prompt. */
   onRace?: () => void;
+  /**
+   * #49: called once the tx is broadcast and the app is waiting for confirmation (no wallet
+   * prompt is open any more). May be called repeatedly while it waits.
+   */
+  onConfirming?: () => void;
 }
 
 export interface FundAndTradeResult {
@@ -149,6 +154,7 @@ export function useFirstTrade(slabAddress: string) {
               wallet,
               instructions: buildFundAndTradeIxs(ixp(existing), { portfolioId: id.portfolioId, sequence: id.matcherSequence, positionEpoch: id.positionEpoch }),
               computeUnitsFromSim: { cap: FUND_AND_TRADE_CU_CAP },
+              onProgress: p.onConfirming,
             }),
           );
           await recordFill(signature, existing, beforeQ);
@@ -174,7 +180,7 @@ export function useFirstTrade(slabAddress: string) {
           ];
           try {
             const signature = await withPresignWait(() =>
-              sendTx({ connection, wallet, instructions: ixs, signers: [kp], computeUnitsFromSim: { cap: FIRST_TRADE_CU_CAP } }),
+              sendTx({ connection, wallet, instructions: ixs, signers: [kp], computeUnitsFromSim: { cap: FIRST_TRADE_CU_CAP }, onProgress: p.onConfirming }),
             );
             // A brand-new portfolio holds no position before this transaction.
             await recordFill(signature, kp.publicKey, 0n);
