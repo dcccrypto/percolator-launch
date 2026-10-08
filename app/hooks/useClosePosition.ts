@@ -557,7 +557,11 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         // said what filled (setError above), so it gets no success line.
         if (outcome !== "partial") {
           const closedAbs = closeSize < 0n ? -closeSize : closeSize;
-          toast(closePercent >= 100 ? COPY.closeDone : COPY.closeDonePart(fmtQ(closedAbs), fmtQ(freshAbs)), "success");
+          // The tx is confirmed (sendTx returns only after confirmation; a timeout throws above), but a
+          // fill the app could not measure (post-trade read failed, or the position moved the other
+          // way) does not prove the position is closed: say only what is known.
+          if (fill?.kind === "unknown") toast(COPY.closeConfirmedUnmeasured, "info");
+          else toast(closePercent >= 100 ? COPY.closeDone : COPY.closeDonePart(fmtQ(closedAbs), fmtQ(freshAbs)), "success");
         }
         setPhase("confirming");
         setTimeout(() => setPhase("idle"), 2000);

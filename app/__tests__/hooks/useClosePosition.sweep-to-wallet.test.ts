@@ -161,6 +161,21 @@ describe("useClosePosition — a FULL close moves the freed USDC back to the wal
     expect(mocks.toast).toHaveBeenCalledWith(expect.stringMatching(/^Closed .+ of .+. The rest of your position is still open.$/), "success");
   });
 
+  it("an unmeasured fill (post-trade read failed / position moved the other way) never claims a close", async () => {
+    mocks.takeFillResult.mockReturnValue({ kind: "unknown", filledQ: null });
+    const { result } = renderHook(() => useClosePosition(slabAddress));
+    await act(async () => { await result.current.closePosition(100); });
+    expect(mocks.toast).not.toHaveBeenCalledWith("Position closed.", "success");
+    expect(mocks.toast).toHaveBeenCalledWith("Your close went through. Your position is updating.", "info");
+  });
+
+  it("a zero fill throws and toasts no success", async () => {
+    mocks.takeFillResult.mockReturnValue({ kind: "zero", filledQ: 0n });
+    const { result } = renderHook(() => useClosePosition(slabAddress));
+    await act(async () => { await result.current.closePosition(100).catch(() => undefined); });
+    expect(mocks.toast).not.toHaveBeenCalledWith("Position closed.", "success");
+  });
+
   it("CONTROL: a clipped (partial) fill gets its own message, not a success toast", async () => {
     mocks.takeFillResult.mockReturnValue({ kind: "partial", filledQ: -1n });
     const { result } = renderHook(() => useClosePosition(slabAddress));
