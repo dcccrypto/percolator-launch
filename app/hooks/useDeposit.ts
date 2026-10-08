@@ -70,8 +70,10 @@ export function useDeposit(slabAddress: string) {
       setLoading(true);
       setError(null);
       try {
-        if (!wallet.publicKey || !mktConfig || !slabProgramId)
-          throw new Error("Wallet not connected or market not loaded");
+        // Two errors, not one: the message resolver maps "Wallet not connected" to "Wallet locked", so the old
+        // combined string told a connected user to unlock their wallet while the market was still loading.
+        if (!wallet.publicKey) throw new Error("Wallet not connected");
+        if (!mktConfig || !slabProgramId) throw new Error("Market not loaded");
         // Retired/blocklisted market: the market pages are hidden from
         // discovery, but the trade page still renders on a direct URL — and a
         // deposit into a retired market can be UNRECOVERABLE (CATE died that

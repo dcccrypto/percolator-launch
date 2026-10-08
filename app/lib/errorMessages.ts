@@ -378,6 +378,9 @@ export function isEngineLockError(msg: string): boolean {
  *   TX1 below). Omit for the generic case; pass "trade" from a trade()-CPI
  *   submit path (open or close).
  */
+/** The market's config hasn't loaded yet; nothing was sent. */
+export const MARKET_LOADING_MESSAGE = "The market is still loading. Try again in a moment. Nothing was sent.";
+
 /** Shown when the wallet has no SOL to pay network fees (top-level AccountNotFound). */
 export const NO_SOL_FOR_FEES_MESSAGE =
   "Your wallet needs a little devnet SOL to pay network fees. Use Get test funds (the faucet) to add some, then try again.";
@@ -405,6 +408,9 @@ export function humanizeError(rawMsg: string, context?: "trade"): string {
   const walletErr = detectWalletError(rawMsg);
   if (walletErr === "locked") return WALLET_LOCKED_MESSAGE;
   if (walletErr === "rejected") return "Transaction cancelled.";
+  // The trade/deposit/withdraw/init hooks' guard when the market config hasn't loaded yet:
+  // nothing was sent, and trying again in a moment works (same words as the ticket's resolver).
+  if (/market not loaded/i.test(rawMsg)) return MARKET_LOADING_MESSAGE;
 
   // Handle Solana system errors BEFORE custom code extraction.
   // These are string-form errors like "InvalidAccountData", "AccountAlreadyInitialized" etc.

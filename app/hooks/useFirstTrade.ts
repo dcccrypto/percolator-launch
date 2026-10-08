@@ -92,7 +92,10 @@ export function useFirstTrade(slabAddress: string) {
 
   const fundAndTrade = useCallback(
     async (p: FundAndTradeParams): Promise<FundAndTradeResult> => {
-      if (!wallet.publicKey || !mktConfig || !slabProgramId) throw new Error("Wallet not connected or market not loaded");
+      // Two errors, not one: the message resolver maps "Wallet not connected" to "Wallet locked", so the old
+      // combined string told a connected user to unlock their wallet while the market was still loading.
+      if (!wallet.publicKey) throw new Error("Wallet not connected");
+      if (!mktConfig || !slabProgramId) throw new Error("Market not loaded");
       assertKnownProgram(slabProgramId);
       const owner = wallet.publicKey;
       const programId = slabProgramId;
