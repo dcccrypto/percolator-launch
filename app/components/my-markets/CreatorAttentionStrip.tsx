@@ -16,7 +16,7 @@ import { RecoverSolBanner } from "@/components/create/RecoverSolBanner";
 import { useCreateMarket, type KeeperRegisterRetryParams } from "@/hooks/useCreateMarket";
 import { isKeeperFeedDead, isEngineCrankStale, summarizeAffectedMarkets } from "./attentionLogic";
 import { resolveIdentity, type ResolvedIdentity } from "@/lib/bulk-identity";
-import { registrationCandidates, userFacingRegistrationReason, type KeeperRegisterRequest } from "@/lib/keeper-register-client";
+import { PER_CREATOR_LIMIT_ROW_COPY, isPerCreatorCapRefusal, registrationCandidates, userFacingRegistrationReason, type KeeperRegisterRequest } from "@/lib/keeper-register-client";
 
 /** The launch's own registration request, as this browser saved it at launch time (the creation-tx
  *  proof, plus the pool / CA / symbol / payload the memo bound). Empty when the launch happened on
@@ -27,6 +27,22 @@ export function savedRegistrationRequests(slab: string): KeeperRegisterRequest[]
   } catch {
     return [];
   }
+}
+
+/** The name a market goes by in this strip: the identity ticker, else the ticker in this browser's saved
+ *  registration request for the launch, else the address label. An "UNKNOWN" placeholder is not a ticker. */
+export function attentionMarketName(
+  slab: string,
+  label: string,
+  resolvedSymbol: string | null | undefined,
+  saved: readonly KeeperRegisterRequest[] = savedRegistrationRequests(slab),
+): string {
+  if (resolvedSymbol) return resolvedSymbol;
+  for (const req of saved) {
+    const sym = req.symbol?.trim();
+    if (sym && sym.toUpperCase() !== "UNKNOWN") return sym;
+  }
+  return label;
 }
 
 export const NO_SAVED_REGISTRATION_COPY =
@@ -40,7 +56,7 @@ export const NO_SAVED_REGISTRATION_COPY =
  */
 const RecoverFromChainForm: FC<{
   slab: string;
-  retry: (p: KeeperRegisterRetryParams) => Promise<{ registered: boolean; message: string }>;
+  retry: (p: KeeperRegisterRetryParams) => Promise<{ registered: boolean; message: string; code?: string }>;
   registering: boolean;
 }> = ({ slab, retry, registering }) => {
   const { connection } = useConnectionCompat();
@@ -48,6 +64,7 @@ const RecoverFromChainForm: FC<{
   const [ca, setCa] = useState("");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [limit, setLimit] = useState(false);
   const submit = async () => {
     if (!wallet.publicKey) return;
     setBusy(true);
@@ -79,6 +96,7 @@ const RecoverFromChainForm: FC<{
         symbol: r.launch.request.symbol ?? null,
         payload: r.launch.request.payload ?? null,
       });
+      if (!res.registered && isPerCreatorCapRefusal(res)) setLimit(true);
       setNote(res.registered ? null : userFacingRegistrationReason(res.message));
     } catch {
       setNote(RECOVERY_COPY.rpc);
@@ -86,6 +104,13 @@ const RecoverFromChainForm: FC<{
       setBusy(false);
     }
   };
+  if (limit) {
+    return (
+      <span data-testid="per-creator-limit-note" className="max-w-[28rem] text-right text-[10px] text-[var(--text-dim)]">
+        {PER_CREATOR_LIMIT_ROW_COPY}
+      </span>
+    );
+  }
   return (
     <div className="flex shrink-0 flex-col items-end gap-1">
       <div className="flex flex-wrap items-center justify-end gap-2">
@@ -121,14 +146,17 @@ const KeeperRetryRow: FC<{ market: CreatedMarket; detail: CreatorMarketDetail | 
   // Same field-level merge the row uses, so the alert names the market by
   // its real ticker even before the per-market detail lands.
   const resolved = resolveIdentity(detail, identity);
-  const symbol = resolved.symbol ?? market.label;
   // NOT merged: the bulk directory does not carry dex_pool_address, and this
   // value is passed to a real transaction, not rendered. Detail only.
   const dexPoolAddress = detail?.dex_pool_address;
   // No pool on the markets row = the registration never landed (an "UNKNOWN" placeholder). The
   // launching browser still holds the creation-tx proof and the exact request the memo bound, so the
   // creator can retry from here; only a launch from another device has nothing to send.
-  const saved = useMemo(() => (dexPoolAddress ? [] : savedRegistrationRequests(slab)), [dexPoolAddress, slab]);
+  const savedAll = useMemo(() => savedRegistrationRequests(slab), [slab]);
+  const saved = dexPoolAddress ? [] : savedAll;
+  const symbol = attentionMarketName(slab, market.label, resolved.symbol, savedAll);
+  // The per-wallet limit is final; once the route says so, the button is replaced.
+  const [limitReached, setLimitReached] = useState(false);
   const [savedBusy, setSavedBusy] = useState(false);
   const [savedNote, setSavedNote] = useState<string | null>(null);
 
@@ -160,6 +188,10 @@ const KeeperRetryRow: FC<{ market: CreatedMarket; detail: CreatorMarketDetail | 
         >
           {state.keeperRegistering ? "registering…" : "connect the live price"}
         </button>
+      ) : saved.length > 0 && limitReached ? (
+        <span data-testid="per-creator-limit-note" className="max-w-[28rem] text-right text-[10px] text-[var(--text-dim)]">
+          {PER_CREATOR_LIMIT_ROW_COPY}
+        </span>
       ) : saved.length > 0 ? (
         <div className="flex shrink-0 flex-col items-end gap-1">
           <button
@@ -169,6 +201,7 @@ const KeeperRetryRow: FC<{ market: CreatedMarket; detail: CreatorMarketDetail | 
               setSavedBusy(true);
               setSavedNote(null);
               let last = "";
+              let limit = false;
               for (const req of saved) {
                 const r = await retryKeeperRegistration({
                   slabAddress: slab,
@@ -183,7 +216,12 @@ const KeeperRetryRow: FC<{ market: CreatedMarket; detail: CreatorMarketDetail | 
                   break;
                 }
                 last = r.message;
+                if (isPerCreatorCapRefusal(r)) {
+                  limit = true;
+                  break;
+                }
               }
+              if (limit) setLimitReached(true);
               setSavedNote(last ? userFacingRegistrationReason(last) : null);
               setSavedBusy(false);
             }}
@@ -278,7 +316,7 @@ export const CreatorAttentionStrip: FC<CreatorAttentionStripProps> = ({ markets,
   const crankStaleLabel = summarizeAffectedMarkets(
     crankStale.map((m) => {
       const slab = m.slabAddress.toBase58();
-      return resolveIdentity(details[slab] ?? null, identities[slab] ?? null).symbol ?? m.label;
+      return attentionMarketName(slab, m.label, resolveIdentity(details[slab] ?? null, identities[slab] ?? null).symbol);
     }),
   );
 

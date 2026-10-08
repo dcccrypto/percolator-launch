@@ -526,13 +526,16 @@ export async function POST(req: NextRequest) {
         extra: { slabAddress, deployer: registeredDeployer },
       });
       return NextResponse.json(
-        { ok: false, registered: false, error: dbResult.error },
+        { ok: false, registered: false, error: dbResult.error, ...(dbResult.code ? { code: dbResult.code } : {}) },
         { status: 429, headers: { "Retry-After": "300" } },
       );
     }
     // Review M-1: the database's own error text stays in the server log (the proof path is
     // reachable by anyone who has the public creation tx).
-    return NextResponse.json({ ok: false, registered: false, error: dbResult.error }, { status: dbResult.status });
+    return NextResponse.json(
+      { ok: false, registered: false, error: dbResult.error, ...(dbResult.code ? { code: dbResult.code } : {}) },
+      { status: dbResult.status },
+    );
   }
   // A maintainer retired this (creator-registered) market: the proof path cannot re-enroll it,
   // and the blob is not re-written for it either. Final (not retryable).

@@ -162,14 +162,14 @@ describe("enrollment caps", () => {
   it("creator at their ceiling -> 403 with the per-creator copy", async () => {
     const db = fakeDb({ active: mine(2) });
     expect(await checkEnrollmentCaps(db.client, { slab: "new", deployer: CREATOR, network: "devnet" }, CAPS)).toEqual({
-      ok: false, status: 403, error: PER_CREATOR_CAP_COPY,
+      ok: false, status: 403, error: PER_CREATOR_CAP_COPY, code: "per-creator-cap",
     });
   });
 
   it("deployment at its ceiling (other creators) -> retryable 429 with the global copy", async () => {
     const db = fakeDb({ active: [...mine(3, "A"), ...mine(2, "B")] });
     expect(await checkEnrollmentCaps(db.client, { slab: "new", deployer: CREATOR, network: "devnet" }, CAPS)).toEqual({
-      ok: false, status: 429, error: GLOBAL_CAP_COPY,
+      ok: false, status: 429, error: GLOBAL_CAP_COPY, code: "global-cap",
     });
   });
 

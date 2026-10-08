@@ -58,6 +58,16 @@ export const USER_FACING_REGISTRATION_REASONS: readonly string[] = [
   GLOBAL_CAP_COPY,
 ];
 
+/** The one calm line shown on a My Markets row in place of the button once the per-wallet limit refuses
+ *  (final: another click cannot help). Lives here, with the other server-facing copy. */
+export const PER_CREATOR_LIMIT_ROW_COPY = "This wallet has reached its limit of live-priced markets. Ask the team to connect more.";
+
+/** True when a refusal is the final per-creator limit: nothing the creator can do clears it. Prefers the
+ *  route's `code`; the exact copy still counts so an older response is read the same way. */
+export function isPerCreatorCapRefusal(r: { code?: string | null; message?: string | null }): boolean {
+  return r.code === "per-creator-cap" || (r.message ?? "").trim() === PER_CREATOR_CAP_COPY;
+}
+
 /** The line a creator sees for a failed registration: the reason itself if it is user copy. */
 export function userFacingRegistrationReason(message: string | null | undefined): string {
   const m = (message ?? "").trim();
@@ -81,6 +91,8 @@ export interface KeeperRegisterAttempt {
   /** Worth retrying (not landed yet, RPC or server trouble). A 400 / 403 is final. */
   retryable: boolean;
   message: string;
+  /** The route's machine-readable refusal reason (`per-creator-cap` is final), when it sent one. */
+  code?: string;
   /** HTTP status of the response; absent for a network error. */
   status?: number;
   /** The response's `Retry-After`, in ms, when it carried one (the full ceiling sends 300 s). */
@@ -102,7 +114,7 @@ export async function postKeeperRegistration(req: KeeperRegisterRequest, fetchIm
         proofTx: req.proofTx,
       }),
     });
-    const body = (await r.json().catch(() => ({}))) as { registered?: boolean; error?: string; message?: string };
+    const body = (await r.json().catch(() => ({}))) as { registered?: boolean; error?: string; message?: string; code?: string };
     if (r.ok && body.registered) return { registered: true, retryable: false, message: KEEPER_REGISTER_COPY.ready, status: r.status };
     // 401 comes only from the devnet v2 waitlist gate (middleware.ts; this route never 401s
     // itself): the visitor's session lapsed. That says nothing about the registration, so it
@@ -110,7 +122,7 @@ export async function postKeeperRegistration(req: KeeperRegisterRequest, fetchIm
     const retryable = r.status === 401 || r.status === 409 || r.status === 429 || r.status >= 500;
     const ra = Number(r.headers?.get?.("Retry-After"));
     const retryAfterMs = Number.isFinite(ra) && ra > 0 ? Math.min(ra, 3_600) * 1000 : undefined;
-    return { registered: false, retryable, message: body.error ?? body.message ?? `HTTP ${r.status}`, status: r.status, ...(retryAfterMs ? { retryAfterMs } : {}) };
+    return { registered: false, retryable, message: body.error ?? body.message ?? `HTTP ${r.status}`, ...(typeof body.code === "string" ? { code: body.code } : {}), status: r.status, ...(retryAfterMs ? { retryAfterMs } : {}) };
   } catch (e) {
     return { registered: false, retryable: true, message: e instanceof Error ? e.message : String(e) };
   }

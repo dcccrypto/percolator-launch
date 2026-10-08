@@ -141,9 +141,12 @@ export function enrollmentCapsFromEnv(env: NodeJS.ProcessEnv = process.env): Enr
   };
 }
 
+/** Machine-readable cap refusals, sent as `code` so a client never has to match the copy. */
+export type CapRefusalCode = "per-creator-cap" | "global-cap";
+
 export type CapVerdict =
   | { ok: true }
-  | { ok: false; status: number; error: string; detail?: string };
+  | { ok: false; status: number; error: string; detail?: string; code?: CapRefusalCode };
 
 /**
  * Would enrolling `slab` for `deployer` exceed a ceiling? Counts the OTHER active rows on this
@@ -172,11 +175,11 @@ export async function checkEnrollmentCaps(
       detail: err ? `${err.code ?? ""} ${err.message ?? ""}`.trim() : "count unavailable",
     };
   }
-  if (mine.count >= caps.maxActivePerCreator) return { ok: false, status: 403, error: PER_CREATOR_CAP_COPY };
+  if (mine.count >= caps.maxActivePerCreator) return { ok: false, status: 403, error: PER_CREATOR_CAP_COPY, code: "per-creator-cap" };
   // 429, not 403: a full deployment is a state that clears (a maintainer raises the ceiling or
   // retires dead markets), not a verdict on this market. The launch screen and the resume pass
   // keep retrying a 429 and never write the "refused" tombstone for it. The route reports it to
   // Sentry at error level: the previous silent 403 hid a total outage for a day.
-  if (all.count >= caps.maxActive) return { ok: false, status: 429, error: GLOBAL_CAP_COPY };
+  if (all.count >= caps.maxActive) return { ok: false, status: 429, error: GLOBAL_CAP_COPY, code: "global-cap" };
   return { ok: true };
 }

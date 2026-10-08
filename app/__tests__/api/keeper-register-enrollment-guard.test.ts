@@ -185,7 +185,7 @@ describe("review M-7: only a finished, keeper-priced market under the ceilings i
     h.activeAll = DEFAULT_MAX_ACTIVE_PER_CREATOR;
     const res = await post(REQUEST);
     expect(res.status).toBe(403);
-    expect(((await res.json()) as { error: string }).error).toBe(PER_CREATOR_CAP_COPY);
+    expect(await res.json()).toMatchObject({ error: PER_CREATOR_CAP_COPY, code: "per-creator-cap" });
     refusedNothingWritten();
   });
 
@@ -194,7 +194,7 @@ describe("review M-7: only a finished, keeper-priced market under the ceilings i
     const res = await post(REQUEST);
     expect(res.status).toBe(429);
     expect(res.headers.get("Retry-After")).toBe("300");
-    expect(((await res.json()) as { error: string }).error).toBe(GLOBAL_CAP_COPY);
+    expect(await res.json()).toMatchObject({ error: GLOBAL_CAP_COPY, code: "global-cap" });
     refusedNothingWritten();
     h.activeAll = DEFAULT_MAX_ACTIVE_MARKETS - 1;
     h.activeMine = DEFAULT_MAX_ACTIVE_PER_CREATOR - 1;

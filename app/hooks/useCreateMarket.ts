@@ -4036,7 +4036,7 @@ export function useCreateMarket() {
         markRegistered(params.slabAddress);
         keeperLoopRef.current?.abort();
       }
-      return { registered: r.registered, message: r.message };
+      return { registered: r.registered, message: r.message, ...(r.code ? { code: r.code } : {}) };
     },
     [],
   );
