@@ -137,11 +137,14 @@ export async function queryTrades(
  * Raw trades (price + size + created_at) for a slab in a time window.
  * Used by the /api/candles route to build OHLCV bars in-process.
  */
+/** Row ceiling of one candle query; a result this long may have lost its oldest trades. */
+export const CANDLE_TRADE_ROW_LIMIT = 50_000;
+
 export async function queryTradesForCandles(
   slabAddress: string,
   fromSec: number,
   toSec: number,
-  maxRows = 50_000,
+  maxRows = CANDLE_TRADE_ROW_LIMIT,
 ): Promise<RawCandleRow[]> {
   const sql = getSql();
   const fromIso = new Date(fromSec * 1000).toISOString();

@@ -5,6 +5,7 @@ import {
   hasIndexerDb,
   queryTradesForCandles,
   queryLastTradePriceBefore,
+  CANDLE_TRADE_ROW_LIMIT,
   bucketCandles,
   fillCandleGaps,
   emptyUdf,
@@ -72,7 +73,10 @@ export async function GET(
     const rows = await queryTradesForCandles(validSlab, fromSec, toSec);
     let udf    = bucketCandles(rows, bucketSeconds);
     if (q.get("fill") === "1") {
-      const seedClose = await queryLastTradePriceBefore(validSlab, fromSec);
+      // A result at the row ceiling has lost its OLDEST trades: seeding from before `from` would draw
+      // the old price flat across that lost stretch, a level that was not in force. Start at the first
+      // trade we do hold instead.
+      const seedClose = rows.length >= CANDLE_TRADE_ROW_LIMIT ? null : await queryLastTradePriceBefore(validSlab, fromSec);
       udf = fillCandleGaps(udf, bucketSeconds, {
         fromSec,
         toSec: Math.min(toSec, Math.floor(Date.now() / 1000)),

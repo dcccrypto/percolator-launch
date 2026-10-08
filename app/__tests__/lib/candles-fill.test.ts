@@ -96,4 +96,9 @@ describe("wiring", () => {
     expect(tv).toMatch(/showMark: true,/);
     expect(tv).not.toMatch(/showMark: s\.series !== "mark"/);
   });
+
+  it("does not seed the fill when the trade query hit its row ceiling (oldest trades were dropped)", () => {
+    const route = fs.readFileSync(path.resolve(__dirname, "../../app/api/candles/[slab]/route.ts"), "utf8");
+    expect(route).toMatch(/rows\.length >= CANDLE_TRADE_ROW_LIMIT \? null : await queryLastTradePriceBefore/);
+  });
 });
