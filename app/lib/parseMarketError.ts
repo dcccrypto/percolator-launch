@@ -4,6 +4,7 @@
  * and Percolator program-specific error codes.
  */
 
+import { EmbeddedBatchSignError } from "@/lib/privy-batch-sign";
 import { P3_ERR } from "@/lib/limits/constants";
 import { isRateLimitedBeforeSend, isRateLimitedRpcError, RATE_LIMITED_COPY, RATE_LIMITED_NEUTRAL_COPY } from "@/lib/rpc-rate-limit";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
@@ -184,6 +185,8 @@ function isTokenProgramInsufficientFunds(msg: string): boolean {
 }
 
 export function parseMarketCreationError(error: unknown, context?: MarketCreationErrorContext): string {
+  // Written for the user (and already says what happened to the launch): shown as is, no step prefix.
+  if (error instanceof EmbeddedBatchSignError) return error.message;
   const base = parseMarketCreationErrorBase(error, context);
   return context?.stepLabel ? `${context.stepLabel} failed: ${base}` : base;
 }

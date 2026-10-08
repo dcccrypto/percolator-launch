@@ -30,18 +30,33 @@ describe("embeddedBatchSignOptions", () => {
 });
 
 describe("isWalletRejection (the app's own wallet-rejection classification)", () => {
-  it("recognises the shapes wallets and Privy throw when the user declines", () => {
-    expect(isWalletRejection(new Error("User rejected the request."))).toBe(true);
-    expect(isWalletRejection(new Error("User rejected request"))).toBe(true);
-    expect(isWalletRejection(new Error("User exited the modal before submitting the transaction"))).toBe(true);
-    expect(isWalletRejection(Object.assign(new Error(""), { code: 4001 }))).toBe(true);
-    expect(isWalletRejection({ code: 4001 })).toBe(true);
-    expect(isWalletRejection("WalletSignTransactionError: User rejected the request")).toBe(true);
-  });
-  it("does not treat other failures as a rejection", () => {
-    expect(isWalletRejection(new Error("rpc exploded"))).toBe(false);
-    expect(isWalletRejection(new Error("Wallet is locked"))).toBe(false);
-    expect(isWalletRejection(null)).toBe(false);
-    expect(isWalletRejection(undefined)).toBe(false);
-  });
+  const DECLINES: Array<[string, unknown]> = [
+    ["User rejected the request.", new Error("User rejected the request.")],
+    ["Privy: User rejected request", new Error("User rejected request")],
+    ["Privy: user exited the modal", new Error("User exited the modal before submitting the transaction")],
+    ["User denied transaction signature", new Error("User denied transaction signature")],
+    ["Transaction cancelled", new Error("Transaction cancelled")],
+    ["Transaction canceled", new Error("Transaction canceled")],
+    ["Signing cancelled by user", new Error("Signing cancelled by user")],
+    ["User disapproved requested methods", new Error("User disapproved requested methods")],
+    ["Request declined", new Error("Request declined")],
+    ["The request was rejected by the user", new Error("The request was rejected by the user")],
+    ["Ledger 0x6985", new Error("Ledger device: Condition of use not satisfied (0x6985)")],
+    ["Ledger statusCode", Object.assign(new Error("denied"), { statusCode: 0x6985 })],
+    ["code 4001 on an Error", Object.assign(new Error(""), { code: 4001 })],
+    ["code 4001 on a plain object", { code: 4001 }],
+    ["string form", "WalletSignTransactionError: User rejected the request"],
+  ];
+  const NOT_DECLINES: Array<[string, unknown]> = [
+    ["policy rejection", new Error("Transaction rejected by policy")],
+    ["rate limit", new Error("429 Too Many Requests: request rejected")],
+    ["bare 4001 inside another message", new Error("Custom(4001)")],
+    ["bare 4001 text", new Error("program error 4001")],
+    ["generic failure", new Error("rpc exploded")],
+    ["locked wallet", new Error("Wallet is locked")],
+    ["null", null],
+    ["undefined", undefined],
+  ];
+  it.each(DECLINES)("declines: %s", (_n, e) => expect(isWalletRejection(e)).toBe(true));
+  it.each(NOT_DECLINES)("not a decline: %s", (_n, e) => expect(isWalletRejection(e)).toBe(false));
 });

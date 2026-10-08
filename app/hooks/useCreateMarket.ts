@@ -1,5 +1,6 @@
 "use client";
 
+import { EmbeddedBatchSignError, isWalletRejection } from "@/lib/privy-batch-sign";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DEVNET_PROGRAM_IDS } from "@/lib/program-ids";
 import {
@@ -643,6 +644,22 @@ export function preFundRateLimitedMessage(nextClaimAt: string | null): string {
     ? ` More arrive after ${at.toLocaleString(undefined, { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" })}.`
     : "";
   return `This wallet is out of test tokens for a market this size, so it can't be funded yet. Nothing was sent.${when} Start over with a smaller liquidity amount to launch now.`;
+}
+
+export const LAUNCH_CANCELLED_MESSAGE = "Transaction cancelled. Nothing was sent. Press Retry to try again.";
+
+/** True (after setting the idle/error state) when a pre-broadcast failure is the user declining the prompt. */
+export function endLaunchOnRejection(
+  err: unknown,
+  broadcastStarted: boolean,
+  setState: (fn: (s: CreateMarketState) => CreateMarketState) => void,
+): boolean {
+  if (broadcastStarted || !isWalletRejection(err)) return false;
+  setState((s) => ({
+    ...s, loading: false, error: LAUNCH_CANCELLED_MESSAGE,
+    step: 0, stepLabel: "", phase: "idle", landingIndex: 0, landingTotal: 0,
+  }));
+  return true;
 }
 
 export function describeBatchFallback(err: unknown): string {
@@ -1452,7 +1469,14 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       const rebuiltDescriptors = tailDescriptors.slice(startIdx);
       const rebuiltTxs = rebuiltDescriptors.map((d) => buildTailTx(d, freshBlockhash));
       const resignStartedAt = Date.now();
-      const resigned = await signAllCompat(wallet, rebuiltTxs);
+      let resigned: Transaction[];
+      try {
+        resigned = await signAllCompat(wallet, rebuiltTxs);
+      } catch (e) {
+        // Earlier steps of this launch have already landed, so "nothing was sent" would be false.
+        if (e instanceof EmbeddedBatchSignError) throw new EmbeddedBatchSignError(e.total, { cause: e.cause, sentBefore: true });
+        throw e;
+      }
       lastSignMs = Date.now() - resignStartedAt;
       for (let j = 0; j < rebuiltDescriptors.length; j++) {
         const descriptor = rebuiltDescriptors[j];
@@ -1767,6 +1791,9 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       }));
       return { status: "fatal" };
     }
+    // A user cancel before anything was sent ends the launch. The six-step sequential path would
+    // re-prompt for every step of a launch they just declined. Retry starts a fresh launch (step 0).
+    if (endLaunchOnRejection(err, broadcastStarted, setState)) return { status: "fatal" };
     if (!broadcastStarted) {
       // Nothing landed — safe to fall back to the sequential path in the
       // SAME create() call. See the FALLBACK CONTRACT note above.
