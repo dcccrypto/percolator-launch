@@ -165,7 +165,6 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
   // permanently reverting every close (UX WP-2: only beyond the app's own catch-up). See
   // useEngineFreshness's file header.
   const { engineStale } = useEngineFreshness();
-  const closeBlockedByStaleness = !mockMode && (oracleStale || engineStale);
 
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [showMarginModal, setShowMarginModal] = useState(false);
@@ -643,7 +642,8 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
           // disabled on engineStale (with its own correctly-labeled title),
           // but if the modal is somehow already open when engine-staleness
           // is detected, keep its Confirm button blocked too.
-          oracleStale={closeBlockedByStaleness}
+          oracleStale={oracleStale}
+          engineCatchingUp={!mockMode && engineStale}
           maxFillAbs={fillCaps?.maxFillAbs ?? null}
           onConfirm={handleConfirmClose}
           onCancel={() => setShowCloseModal(false)}

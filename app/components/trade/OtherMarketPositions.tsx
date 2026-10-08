@@ -114,7 +114,8 @@ export const CloseFlow: FC<{
       loading={loading}
       error={error}
       tradingFeeBps={params?.tradingFeeBps}
-      oracleStale={oracleStale || (!mockExempt && engineStale)}
+      oracleStale={oracleStale}
+      engineCatchingUp={!mockExempt && engineStale}
       onConfirm={async (percent) => {
         try {
           await closePosition(percent, target);

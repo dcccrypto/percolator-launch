@@ -39,6 +39,8 @@ export interface ClosePositionFormProps {
   tradingFeeBps?: bigint;
   /** Blocks close + shows the oracle-stale warning. */
   oracleStale?: boolean;
+  /** Blocks close + says the market is catching up (engine lag, not the oracle). */
+  engineCatchingUp?: boolean;
   error?: string | null;
   /** Per-fill cap — a close bigger than this executes as several batch legs. */
   maxFillAbs?: bigint | null;
@@ -82,6 +84,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
   loading,
   tradingFeeBps = 0n,
   oracleStale = false,
+  engineCatchingUp = false,
   error = null,
   maxFillAbs = null,
   previewUnavailable = false,
@@ -146,7 +149,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
         ? "text-[var(--long)]"
         : "text-[var(--short)]";
 
-  const closeBlocked = loading || oracleStale || submitDisabled;
+  const closeBlocked = loading || oracleStale || engineCatchingUp || submitDisabled;
 
   return (
     <>
@@ -304,14 +307,21 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
         </p>
       )}
 
-      {oracleStale && (
+      {oracleStale ? (
         <div className="mb-4 rounded-none border border-[var(--warning)]/30 bg-[var(--warning)]/[0.07] p-2.5">
           <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--warning)]">⚠ Oracle Stale</p>
           <p className="mt-1 text-[9px] text-[var(--text-secondary)] leading-relaxed">
             The oracle price has not been updated recently. Closing is temporarily disabled to prevent failed transactions.
           </p>
         </div>
-      )}
+      ) : engineCatchingUp ? (
+        <div data-testid="close-catching-up" className="mb-4 rounded-none border border-[var(--warning)]/30 bg-[var(--warning)]/[0.07] p-2.5">
+          <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--warning)]">Catching up</p>
+          <p className="mt-1 text-[9px] text-[var(--text-secondary)] leading-relaxed">
+            Prices are catching up. Closing resumes once the market has caught up.
+          </p>
+        </div>
+      ) : null}
 
       {fillCount > 1 && (
         <div className="mb-4 rounded-none border border-[var(--border)] bg-[var(--bg)] p-2.5">

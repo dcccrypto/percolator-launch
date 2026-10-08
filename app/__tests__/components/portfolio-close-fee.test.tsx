@@ -27,7 +27,9 @@ vi.mock("@/lib/mock-mode", () => ({ isMockMode: () => false }));
 vi.mock("@/hooks/useClosePosition", () => ({
   useClosePosition: () => ({ closePosition: vi.fn(), loading: false, error: null, prewarmClose: () => {} }),
 }));
-vi.mock("@/hooks/useEngineFreshness", () => ({ useEngineFreshness: () => ({ engineStale: false }) }));
+const fresh = vi.hoisted(() => ({ oracle: "fresh" as string, engineStale: false }));
+vi.mock("@/hooks/useEngineFreshness", () => ({ useEngineFreshness: () => ({ engineStale: fresh.engineStale }) }));
+vi.mock("@/hooks/useOracleFreshness", () => ({ useOracleFreshness: () => ({ level: fresh.oracle, mode: "keeper", ready: true }) }));
 vi.mock("@/components/providers/SlabProvider", () => ({
   SlabProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useSlabState: () => ({ params: { tradingFeeBps: 10n } }),
@@ -71,5 +73,31 @@ describe("#24: /portfolio close preview", () => {
     expect(within(modal).getByText("Trading Fee:").parentElement!.textContent).toMatch(/0\.5\b/);
     // Capital 1000 + PnL 0 - fee 0.5 (1000 before the fix).
     expect(within(modal).getByText("Est. Account Balance After:").parentElement!.textContent).toMatch(/999\.5\b/);
+  });
+
+  it.each(["unavailable", "stale"])("a %s oracle blocks the /portfolio close like the dock does, labelled as the oracle", (level) => {
+    fresh.oracle = level;
+    try {
+      const modal = openClose(row);
+      expect(within(modal).getByText(/Oracle Stale/)).toBeInTheDocument();
+      expect(within(modal).queryByTestId("close-catching-up")).toBeNull();
+      const confirm = within(modal).getByTestId("close-confirm");
+      expect(confirm).toBeDisabled();
+    } finally {
+      fresh.oracle = "fresh";
+    }
+  });
+
+  it("engine catch-up is labelled as catching up, not as a stale oracle, and still blocks", () => {
+    fresh.engineStale = true;
+    try {
+      const modal = openClose(row);
+      expect(within(modal).getByTestId("close-catching-up")).toHaveTextContent("Prices are catching up");
+      expect(within(modal).queryByText(/Oracle Stale/)).toBeNull();
+      const confirm = within(modal).getByTestId("close-confirm");
+      expect(confirm).toBeDisabled();
+    } finally {
+      fresh.engineStale = false;
+    }
   });
 });

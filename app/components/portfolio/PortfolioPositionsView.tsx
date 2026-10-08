@@ -13,6 +13,8 @@ import { closeTargetFor } from "@/lib/portfolio-target";
 import { PnlShareButton } from "@/components/share/PnlShareButton";
 import type { PnlCardData } from "@/lib/pnl-card";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
+import { useOracleFreshness } from "@/hooks/useOracleFreshness";
+import { isOracleStaleBlocking } from "@/lib/oracle-stale-gate";
 import { ClosePositionModal } from "@/components/trade/ClosePositionModal";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import {
@@ -42,7 +44,7 @@ import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { useAllMarketStats } from "@/hooks/useAllMarketStats";
 import { PublicKey } from "@solana/web3.js";
 import { isMockMode } from "@/lib/mock-mode";
-import { getMockPortfolioPositions } from "@/lib/mock-trade-data";
+import { getMockPortfolioPositions, isMockSlab } from "@/lib/mock-trade-data";
 import { useTraderStats } from "@/hooks/useTraderStats";
 import { computePositionLeverage, describePositionLeverage, POSITION_LEVERAGE_LABEL } from "@/lib/position-leverage";
 import { formatSignedUsd } from "@/lib/pnl-card";
@@ -156,6 +158,12 @@ function PortfolioCloseFlow({
   // SlabProvider (see the call site below), so useEngineFreshness() has the
   // context it needs.
   const { engineStale } = useEngineFreshness();
+  // The same oracle gate as the dock and the other-markets rows (#24): a stale oracle reverts
+  // the close on-chain, so block Confirm here too instead of letting the user try.
+  const { level: oracleLevel, mode: oracleMode, ready: oracleReady } = useOracleFreshness();
+  const mockExempt = isMockMode() && isMockSlab(pos.slabAddress);
+  const oracleStale =
+    !mockExempt && (oracleLevel === "unavailable" || isOracleStaleBlocking(oracleLevel, oracleMode, oracleReady));
   // This market's fee, so the preview matches the trade page's dock (#24).
   const { params } = useSlabState();
   // Same shared PnL computation as every other surface: the modal previews size
@@ -178,7 +186,8 @@ function PortfolioCloseFlow({
       loading={loading}
       error={error}
       tradingFeeBps={params?.tradingFeeBps}
-      oracleStale={engineStale}
+      oracleStale={oracleStale}
+      engineCatchingUp={!mockExempt && engineStale}
       onConfirm={async (percent) => {
         try {
           await closePosition(percent, target);
