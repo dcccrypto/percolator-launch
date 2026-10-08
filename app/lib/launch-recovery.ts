@@ -89,9 +89,9 @@ export interface CreationFacts {
    * How the launch's liquidity was seeded, as the launch's own transactions show it: a legacy launch
    * deposits collateral for the creator's LP (DepositCollateral); a vault-owned-LP (P3) launch seeds
    * a junior tranche instead (DepositJuniorTranche, tag 96). Both launches now create a ONE-slot
-   * market, so this, not the slot count, is what tells them apart. `none` = neither landed yet.
+   * market, so this, not the slot count, is what tells them apart. `creator-m2` = no deposit yet but the creator signed the legacy-only M2 instructions (1, 68, 83); `none` = neither landed yet.
    */
-  seedKind: "creator-lp" | "junior-tranche" | "none";
+  seedKind: "creator-lp" | "creator-m2" | "junior-tranche" | "none";
 }
 
 export type CreationRead =
@@ -137,7 +137,14 @@ export async function readCreationFromChain(connection: TxConn, slab: string, wr
     let found: Omit<CreationFacts, "depositAmounts" | "seedKind" | "slab"> | null = null;
     let memos = 0;
     const depositAmounts: bigint[] = [];
-    let sawCollateralDeposit = false;
+    // A DepositCollateral counts as the creator's LP seed only when the creator signed it (accounts[0] is the
+    // signing owner in the wrapper): any wallet can deposit into a public market, and a foreign deposit must
+    // not turn a vault-owned-LP launch into a "legacy" one.
+    const collateralDeposits: { owner: string | undefined; amount: bigint }[] = [];
+    // The legacy launch's M2 instructions (1 InitPortfolio, 68 SetMatcherConfig, 83 InitMatcherCtx) and who
+    // signed each (accounts[0], a required signer in the wrapper; 68 and 83 also require it to be the LP
+    // portfolio's owner). The vault-LP path skips M2, so all three signed by the creator prove a legacy launch.
+    const m2Signers: Record<number, Set<string>> = { 1: new Set(), 68: new Set(), 83: new Set() };
     let sawJuniorDeposit = false;
     for (const { sig, tx } of txs) {
       if (!tx?.meta || tx.meta.err !== null) continue;
@@ -171,8 +178,9 @@ export async function readCreationFromChain(connection: TxConn, slab: string, wr
             sawJuniorDeposit = true;
           } else if (data[0] === IX_TAG.DepositCollateral && data.length === 33 && accts.includes(slab)) {
             const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-            depositAmounts.push(view.getBigUint64(17, true) | (view.getBigUint64(25, true) << 64n));
-            sawCollateralDeposit = true;
+            collateralDeposits.push({ owner: accts[0], amount: view.getBigUint64(17, true) | (view.getBigUint64(25, true) << 64n) });
+          } else if ((data[0] === 1 || data[0] === 68 || data[0] === 83) && accts[1] === slab && accts[0]) {
+            m2Signers[data[0]].add(accts[0]);
           }
         }
       }
@@ -182,7 +190,16 @@ export async function readCreationFromChain(connection: TxConn, slab: string, wr
       }
     }
     if (!found) return { ok: false, reason: memos > 1 ? "several-memos" : memos === 0 ? "no-memo" : "no-creation-tx" };
-    const seedKind: CreationFacts["seedKind"] = sawJuniorDeposit ? "junior-tranche" : sawCollateralDeposit ? "creator-lp" : "none";
+    const creatorDeposits = collateralDeposits.filter((d) => d.owner === found!.creator);
+    for (const d of creatorDeposits) depositAmounts.push(d.amount);
+    const creatorM2 = [1, 68, 83].every((t) => m2Signers[t].has(found!.creator));
+    const seedKind: CreationFacts["seedKind"] = sawJuniorDeposit
+      ? "junior-tranche"
+      : creatorDeposits.length > 0
+        ? "creator-lp"
+        : creatorM2
+          ? "creator-m2"
+          : "none";
     return { ok: true, facts: { slab, ...found, depositAmounts: [...new Set(depositAmounts)], seedKind } };
   } catch {
     return { ok: false, reason: "rpc" };
@@ -482,14 +499,14 @@ export interface ResumableParams {
  *
  * A P3 market has ONE asset slot, and since the one-slot change so does every legacy launch, so the slot
  * count alone can no longer tell them apart. A one-slot market is resumable only when its own launch shows
- * a creator-LP seed (DepositCollateral, never a junior tranche); a one-slot market whose seed has not
+ * a creator-signed LP seed (DepositCollateral) or the creator-signed legacy M2 instructions (never a junior tranche); a one-slot market whose seed has not
  * landed, or is a junior tranche, stays refused: from chain it is indistinguishable from a P3 launch.
  * Markets with more slots (launched before the change) were always legacy and are unaffected.
  */
 export function canResumeLaunch(
   r: Pick<RecoveredLaunch, "maxPortfolioAssets"> & { seedKind?: RecoveredLaunch["seedKind"] },
 ): { ok: true } | { ok: false; reason: string } {
-  if (r.maxPortfolioAssets === 1 && r.seedKind !== "creator-lp") {
+  if (r.maxPortfolioAssets === 1 && r.seedKind !== "creator-lp" && r.seedKind !== "creator-m2") {
     return {
       ok: false,
       reason:
