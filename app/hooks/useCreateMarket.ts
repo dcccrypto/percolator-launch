@@ -151,6 +151,7 @@ import {
 // P3 BPF sim bridge can build the market from the same code). Re-exported for existing callers.
 export {
   V17_MAX_PORTFOLIO_ASSETS,
+  LAUNCH_ASSET_SLOTS,
   DEFAULT_SLAB_SIZE,
   P3_MARKET_ASSET_SLOTS,
   marketAssetSlotsFor,
@@ -160,6 +161,8 @@ export {
 } from "@/lib/create-market-args";
 import {
   marketAssetSlotsFor,
+  assetSlotsForSlabLen,
+  initialAssetGenerationFrontier,
   buildV17InitMarketArgs,
   slabSizeFor,
 } from "@/lib/create-market-args";
@@ -335,8 +338,13 @@ export interface CreateMarketParams {
    *  IMPORTANT: Must match the compiled MAX_ACCOUNTS of the target program binary.
    *  The default devnet program is compiled for 4096 accounts. */
   maxAccounts?: number;
-  /** Slab data size in bytes. Calculated from maxAccounts if omitted. */
-  slabDataSize?: number;
+  /**
+   * Asset slots of a market that ALREADY exists (a resume, or a stuck slab): read off the slab, never
+   * set for a new launch. A new launch gets LAUNCH_ASSET_SLOTS (1); a pre-change 14-slot launch still
+   * in flight keeps its 14 here, so the resumed steps agree with the slab (lib/create-market-args.ts).
+   * The slab size and the matcher frontier both derive from it.
+   */
+  assetSlots?: number;
   /** Token symbol for dashboard */
   symbol?: string;
   /** Token name for dashboard */
@@ -1031,12 +1039,12 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
       // brand-new market, so its program-assigned portfolioId is 1 and its
       // matcher-sequence is 0 (InitUser just ran in this same tx, no prior ops).
       // assetGenerationFrontier = header.next_market_id = max_market_slots + 1
-      // (V17_MAX_PORTFOLIO_ASSETS + 1); tradeFeeCapBps 10000 = no practical LP cap;
+      // (slots + 1, initialAssetGenerationFrontier); tradeFeeCapBps 10000 = no practical LP cap;
       // expirySlot = born-immortal non-lapsing grant.
       data: encodeSetMatcherConfig({
         portfolioId: 1n,
         expectedSequence: 0n,
-        assetGenerationFrontier: BigInt(marketAssetSlotsFor(params)) + 1n,
+        assetGenerationFrontier: initialAssetGenerationFrontier(marketAssetSlotsFor(params)),
         enabled: 1,
         tradeFeeCapBps: 10_000,
         expirySlot: MAX_BACKING_BUCKET_EXPIRY_SLOT,
@@ -2175,6 +2183,23 @@ export function useCreateMarket() {
         return;
       }
 
+      // A market that already exists keeps the asset-slot capacity it was created with. New launches
+      // allocate one slot (LAUNCH_ASSET_SLOTS); a launch started before that change holds 14, and its
+      // later steps (the matcher config's frontier = slots + 1) must agree with the slab, not with
+      // today's default. P3 is always 1. If the slab can't be read, stop: guessing would send a
+      // frontier the program refuses.
+      if (startStep > 0 && !params.p3) {
+        let info: Awaited<ReturnType<typeof connection.getAccountInfo>>;
+        try {
+          info = await connection.getAccountInfo(slabPk, "confirmed");
+        } catch {
+          setState((s) => ({ ...s, loading: false, error: "Couldn't read this market just now. Try again in a moment." }));
+          return;
+        }
+        const existing = info ? assetSlotsForSlabLen(info.data.length) : null;
+        if (existing !== null) params = { ...params, assetSlots: existing };
+      }
+
       let [vaultPda] = deriveVaultAuthority(programId, slabPk);
 
       // v17: PushOraclePrice (tag 16) and SetOracleAuthority (tag 17) do not exist.
@@ -2328,8 +2353,17 @@ export function useCreateMarket() {
           // orphan from old SDK — e.g. 65352-byte account created before ENGINE_OFF fix).
           // Without this check, retries always call InitMarket on the wrong-sized slab and
           // fail with InvalidSlabLen (error 0x4) even after the SDK size was corrected.
-          const expectedSlabSize = slabSizeFor(params);
+          let expectedSlabSize = slabSizeFor(params);
           let existingAccount = await connection.getAccountInfo(slabKp.publicKey);
+          // A stuck slab created before the one-slot change is a valid 14-slot market account: adopt its
+          // capacity (InitMarket must name exactly the slots the account holds) rather than abandon it.
+          if (existingAccount && existingAccount.data.length !== expectedSlabSize && !params.p3) {
+            const adopted = assetSlotsForSlabLen(existingAccount.data.length);
+            if (adopted !== null) {
+              params = { ...params, assetSlots: adopted };
+              expectedSlabSize = slabSizeFor(params);
+            }
+          }
           if (existingAccount && existingAccount.data.length !== expectedSlabSize) {
             console.warn(
               `[useCreateMarket] PERC-1094: stale slab ${slabKp.publicKey.toBase58()} ` +
@@ -3037,7 +3071,7 @@ export function useCreateMarket() {
               // TX C: commit the context and delegate to the LP portfolio.
               // v18: live-read the LP portfolio identity (recovery path — the
               // matcher-sequence reflects any prior InitUser/Deposit). assetGenFrontier
-              // = max_market_slots + 1 (V17_MAX_PORTFOLIO_ASSETS + 1).
+              // = max_market_slots + 1 (initialAssetGenerationFrontier).
               const smInfo = await connection.getAccountInfo(lpPortfolioPk);
               if (!smInfo?.data) throw new Error("LP portfolio not found for SetMatcherConfig");
               const smId = readPortfolioIdentity(new Uint8Array(smInfo.data));
@@ -3054,7 +3088,7 @@ export function useCreateMarket() {
                 data: encodeSetMatcherConfig({
                   portfolioId: smId.portfolioId,
                   expectedSequence: smId.matcherSequence,
-                  assetGenerationFrontier: BigInt(marketAssetSlotsFor(params)) + 1n,
+                  assetGenerationFrontier: initialAssetGenerationFrontier(marketAssetSlotsFor(params)),
                   enabled: 1,
                   tradeFeeCapBps: 10_000,
                   expirySlot: MAX_BACKING_BUCKET_EXPIRY_SLOT,

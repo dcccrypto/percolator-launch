@@ -86,9 +86,9 @@ export function computeCreateMarketSolCost(
   opts: { p3?: boolean } = {},
 ): CreateMarketSolCostBreakdown {
   // BUG 1 fix: the v17 slab account length is fixed per market kind, never per tier.
-  // Legacy markets encode maxPortfolioAssets:14 (DEFAULT_SLAB_SIZE); P3 markets are
-  // single-asset (tag 94 refuses anything but one slot), so they encode 1 and the
-  // slab is v17MarketAccountLen(1). wizardSlabBytes is the same helper create() uses.
+  // Every new launch, legacy and P3, encodes maxPortfolioAssets:1 (P3 because tag 94 refuses
+  // anything but one slot; legacy because only slot 0 is ever used), so the slab is
+  // v17MarketAccountLen(1). wizardSlabBytes is the same helper create() uses.
   const dataSize = wizardSlabBytes(opts.p3 === true);
 
   // Rent-exempt minimum for the slab account
@@ -187,9 +187,9 @@ export const CostEstimate: FC<CostEstimateProps> = ({
       <div className="px-4 py-3 space-y-2 border-b border-[var(--border)]">
         <div className="flex items-center justify-between text-[11px]">
           {/* v17 slabs are always sized to max capacity — there is no tier to
-              display here (see DEFAULT_SLAB_SIZE doc comment above). */}
+              display here (see LAUNCH_ASSET_SLOTS in lib/create-market-args.ts). */}
           <span className="text-[var(--text-secondary)]">
-            Market account rent (max capacity)
+            Market account rent
           </span>
           <span className="font-mono text-[var(--text)]">{estimate.slabRentSol} SOL</span>
         </div>

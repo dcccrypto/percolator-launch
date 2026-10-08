@@ -271,10 +271,6 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
               <span className="text-[9px] text-[var(--text-secondary)]">Fee: {bpsPct(tradingFeeBps)}</span>
               <span className="text-[9px] text-[var(--text-secondary)]">·</span>
               <span className="text-[9px] text-[var(--text-secondary)]">Leverage: {maxLeverage}x</span>
-              <span className="text-[9px] text-[var(--text-secondary)]">·</span>
-              {/* v17 slabs are always sized to max capacity — there is no tier to
-                  report here anymore (see StepControlRoom's "Slab" pre-flight readout). */}
-              <span className="text-[9px] text-[var(--text-secondary)]">Market size: max capacity</span>
             </div>
           </div>
         </div>

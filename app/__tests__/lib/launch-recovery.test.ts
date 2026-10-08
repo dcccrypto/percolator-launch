@@ -102,7 +102,11 @@ describe("InitMarket decoding agrees with the SDK encoder", () => {
   it("round-trips price, margin, fee and slot count", () => {
     const derived = deriveLaunchMarketParams({ initialMarginBps: 1000, lpCollateral: LP, initialPriceE6: PRICE });
     const data = encodeInitMarket(buildV17InitMarketArgs({ initialPriceE6: PRICE, tradingFeeBps: 5 }, derived));
-    expect(decodeInitMarketData(data)).toEqual({ maxPortfolioAssets: 14, initialPriceE6: PRICE, initialMarginBps: 1000n, maxTradingFeeBps: 5n, tradeFeeBaseBps: 5n });
+    // A launch now creates a one-slot market.
+    expect(decodeInitMarketData(data)).toEqual({ maxPortfolioAssets: 1, initialPriceE6: PRICE, initialMarginBps: 1000n, maxTradingFeeBps: 5n, tradeFeeBaseBps: 5n });
+    // A market launched before the change (14 slots) still decodes with its own count.
+    const old = encodeInitMarket(buildV17InitMarketArgs({ initialPriceE6: PRICE, tradingFeeBps: 5, assetSlots: 14 }, derived));
+    expect(decodeInitMarketData(old)).toEqual({ maxPortfolioAssets: 14, initialPriceE6: PRICE, initialMarginBps: 1000n, maxTradingFeeBps: 5n, tradeFeeBaseBps: 5n });
   });
   it("refuses anything that is not a 219-byte InitMarket", () => {
     expect(decodeInitMarketData(new Uint8Array(10))).toBeNull();
@@ -326,5 +330,44 @@ describe("registration-only recovery of a FINISHED vault-owned-LP (one-slot) mar
     expect(canResumeLaunch(r.launch).ok).toBe(false); // registration yes, resume no
     // CONTROL: without the junior deposit there is nothing to prove the seed from
     expect(await recoverLaunchFromChain(deps([txs[0]], [pool(POOL)]), input())).toEqual({ ok: false, reason: "no-deposit" });
+  });
+});
+
+describe("one-slot legacy launches are told apart from vault-owned-LP (P3) launches by their seed, not their slot count", () => {
+  it("a new legacy launch (1 slot, creator-LP DepositCollateral) recovers and IS resumable", async () => {
+    const { f, txs } = await standardChain();
+    expect(decodeInitMarketData(f.initData)?.maxPortfolioAssets).toBe(1);
+    const r = await recoverLaunchFromChain(deps(txs, [pool(POOL)]), input());
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.launch.maxPortfolioAssets).toBe(1);
+    expect(r.launch.seedKind).toBe("creator-lp");
+    expect(canResumeLaunch(r.launch)).toEqual({ ok: true });
+    expect(chainResumeRefusal({ ...r.launch, request: { slabAddress: SLAB.toBase58() } }, SLAB.toBase58(), CREATOR.toBase58())).toBeNull();
+  });
+
+  it("NEGATIVE CONTROL: a one-slot launch seeded as a junior tranche (P3) stays refused, and so does one with no seed yet", async () => {
+    const { f, txs } = await standardChain();
+    const junior = Buffer.alloc(17);
+    junior[0] = 96;
+    junior.writeBigUInt64LE(LP, 1);
+    const p3 = [txs[0], { sig: "junior", tx: fakeTx(CREATOR, [{ programId: WRAPPER, keys: [CREATOR, SLAB], data: junior }]) }];
+    const rp3 = await recoverLaunchFromChain(deps(p3, [pool(POOL)]), input());
+    expect(rp3.ok && rp3.launch.seedKind).toBe("junior-tranche");
+    expect(rp3.ok && canResumeLaunch(rp3.launch).ok).toBe(false);
+    // Mixed evidence (both kinds) is also treated as P3.
+    const both = [...p3, txs[2]];
+    const rboth = await recoverLaunchFromChain(deps(both, [pool(POOL)]), input());
+    expect(rboth.ok && rboth.launch.seedKind).toBe("junior-tranche");
+    // No seed on chain yet: indistinguishable from P3, so refused from here.
+    expect(canResumeLaunch({ maxPortfolioAssets: 1, seedKind: "none" }).ok).toBe(false);
+    expect(canResumeLaunch({ maxPortfolioAssets: 1 }).ok).toBe(false);
+    void f;
+  });
+
+  it("a market launched before the change (14 slots) resumes as before, whatever its seed evidence", () => {
+    for (const seedKind of ["creator-lp", "junior-tranche", "none", undefined] as const) {
+      expect(canResumeLaunch({ maxPortfolioAssets: 14, seedKind })).toEqual({ ok: true });
+    }
   });
 });

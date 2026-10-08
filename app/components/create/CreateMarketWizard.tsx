@@ -13,7 +13,6 @@ import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSolBalance } from "@/hooks/useSolBalance";
 import {
   useCreateMarket,
-  DEFAULT_SLAB_SIZE,
   wizardSlabBytes,
   flooredInitialMarginBps,
   type CreateMarketParams,
@@ -460,8 +459,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
     parseFloat(wizard.insuranceAmount) >= 100;
 
   // BUG 1 fix: rent estimate must be sized off the actual v17 slab length
-  // (DEFAULT_SLAB_SIZE = v17MarketAccountLen(14)) — v17 has no slab tiers, the slab is
-  // always this fixed size.
+  // (wizardSlabBytes = v17MarketAccountLen(1): every new launch allocates one asset slot) — v17
+  // has no slab tiers, the slab is always this fixed size.
   //
   // W8 fix (2026-07-08): this used to hand-roll its own formula that omitted the LP-portfolio
   // (9347 bytes) + matcher-ctx (320 bytes) rent entirely — under-counting required SOL by
@@ -936,12 +935,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
       tradingFeeBps: wizard.tradingFeeBps,
       initialMarginBps: wizard.initialMarginBps,
       lpExposureBps: clampLpExposureBps(wizard.lpExposureBps),
-      // BUG 1 fix: don't override the DEFAULT_SLAB_SIZE fallback — InitMarket always
-      // encodes maxPortfolioAssets:14, so the slab MUST be exactly v17MarketAccountLen(14)
-      // regardless of anything the wizard used to let the user pick, or InitMarket reverts
-      // with InvalidSlabLen (and over-charges rent in the process). v17 has no slab tiers —
-      // maxAccounts is deliberately omitted here (create() defaults it).
-      slabDataSize: DEFAULT_SLAB_SIZE,
+      // The slab size and InitMarket's maxPortfolioAssets both derive from the market's asset-slot
+      // count (lib/create-market-args.ts marketAssetSlotsFor: one slot for every new launch), so the
+      // wizard passes neither: they cannot disagree, which is what makes InitMarket revert with
+      // InvalidSlabLen. v17 has no slab tiers; maxAccounts is deliberately omitted too.
       // P3: vault-owned LP + the creator's junior tranche (= the Liquidity amount).
       p3: wizardP3Params(
         p3WizardEnabled(),
@@ -1014,8 +1011,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
       tradingFeeBps: wizard.tradingFeeBps,
       initialMarginBps: wizard.initialMarginBps,
       lpExposureBps: clampLpExposureBps(wizard.lpExposureBps),
-      // BUG 1 fix: same rationale as handleLaunch above — always the real v17 slab size.
-      slabDataSize: DEFAULT_SLAB_SIZE,
+      // Slab size and slot count derive from marketAssetSlotsFor, as in handleLaunch above.
       // P3: vault-owned LP + the creator's junior tranche (= the Liquidity amount).
       p3: wizardP3Params(
         p3WizardEnabled(),

@@ -62,7 +62,7 @@ export interface StepControlRoomProps {
   /** Auto-detected, not user-set — shown as a pre-flight readout. */
   oracleLabel: string;
   startPrice: string;
-  /** Slab is always max capacity in v17 — there is no tier to pick. */
+  /** The market account size: one fixed size per launch in v17 (one asset slot) — there is no tier to pick. */
   slabBytes: number;
   rentSol: number | null;
 
@@ -272,7 +272,7 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
             tone={registrable ? "good" : "warn"}
           />
           <Readout k="Start price" v={startPrice} />
-          <Readout k="Market size" v={`${slabBytes.toLocaleString()} B · max capacity`} />
+          <Readout k="Market size" v={`${slabBytes.toLocaleString()} B`} />
           {/* #2954: the cost estimate is dimmed when this market cannot be registered. */}
           <Readout k="Market rent" v={rentSol === null ? "—" : `${rentSol.toFixed(3)} SOL`} dimmed={!registrable} />
           {/* GH#2622: set expectations UP FRONT, before launch — not only after

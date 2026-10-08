@@ -72,6 +72,7 @@ import {
 } from "@/lib/create-market-rate-limit";
 import * as Sentry from "@sentry/nextjs";
 import { deriveMarketParams, leverageFromMarginBps } from "@/lib/market-params";
+import { LAUNCH_ASSET_SLOTS, initialAssetGenerationFrontier } from "@/lib/create-market-args";
 import { buildInitMatcherCtxArgs } from "@/lib/matcher-params";
 import {
   buildMobileFundingIxs,
@@ -236,7 +237,10 @@ export async function POST(req: NextRequest) {
     // those fail InitMarket's (len-592-758)%1797==0 check and revert; 592 = header+config after the
     // 576-byte fee-split config). `tier` still selects the program ID above; the slab account length
     // is computed from the asset-slot capacity via the SDK's v17MarketAccountLen (SDK-derived offsets).
-    const slabDataSize = v17MarketAccountLen(14);
+    // ONE slot capacity feeds all three places that must agree: the account length (here), InitMarket's
+    // maxPortfolioAssets, and SetMatcherConfig's frontier (slots + 1). Same count the wizard launches with.
+    const assetSlots = LAUNCH_ASSET_SLOTS;
+    const slabDataSize = v17MarketAccountLen(assetSlots);
 
     // Default margin/leverage params — conservative for new markets
     const initialMarginBps = 2000n; // 50% margin = 5× leverage
@@ -320,7 +324,7 @@ export async function POST(req: NextRequest) {
     );
 
     const v17InitArgs: InitMarketV17Args = {
-      maxPortfolioAssets: 14,
+      maxPortfolioAssets: assetSlots,
       hMin: "100",
       hMax: "86400",
       initialPrice: priceE6.toString(),
@@ -459,12 +463,12 @@ export async function POST(req: NextRequest) {
         matcherDelegate: delegatePk,
       }),
       // v18 fresh-market: LP is the first portfolio (portfolioId 1), matcher-seq 0
-      // (InitUser just ran in TX1). assetGenerationFrontier = maxPortfolioAssets(14)
-      // + 1 = 15; tradeFeeCapBps 10000 = no practical cap; expirySlot born-immortal.
+      // (InitUser just ran in TX1). assetGenerationFrontier = maxPortfolioAssets + 1
+      // (initialAssetGenerationFrontier); tradeFeeCapBps 10000 = no practical cap; expirySlot born-immortal.
       data: encodeSetMatcherConfig({
         portfolioId: 1n,
         expectedSequence: 0n,
-        assetGenerationFrontier: 15n,
+        assetGenerationFrontier: initialAssetGenerationFrontier(assetSlots),
         enabled: 1,
         tradeFeeCapBps: 10_000,
         expirySlot: MAX_BACKING_BUCKET_EXPIRY_SLOT,
