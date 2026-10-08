@@ -32,7 +32,7 @@ export interface OracleFreshnessState {
   lastUpdateMs: number | null;
   /**
    * What the chain's own staleness rules say about this market (matured past
-   * `permissionless_resolve_stale_slots`, feed max staleness). Used by
+   * `permissionless_resolve_stale_slots`). Used by
    * `oracleCloseGate` so a close is blocked only when the chain would refuse
    * it — see lib/oracle-stale-gate.ts. Opening trades ignore it.
    */
@@ -297,8 +297,6 @@ export function useOracleFreshness(options?: UseOracleFreshnessOptions): OracleF
     }
   }, [config, engine, wrapperConfigV17, clusterSlotObservation]);
 
-  const feedMaxSecs = closeFacts.feedMaxStalenessSecs ?? 0;
-
   // Tick every second to update elapsed time — subscribes to the single
   // shared ticker (see subscribeSharedTick above) instead of running its own
   // setInterval per hook instance.
@@ -318,18 +316,13 @@ export function useOracleFreshness(options?: UseOracleFreshnessOptions): OracleF
         setElapsedSecs(elapsed);
         return;
       }
-      // Also re-render when a feed-mode market crosses its own max staleness:
-      // that, not the 60 s level, is when a close becomes refusable on chain.
       setElapsedSecs((prev) =>
-        getFreshnessLevel(prev) === getFreshnessLevel(elapsed) &&
-        (feedMaxSecs <= 0 || prev > feedMaxSecs === elapsed > feedMaxSecs)
-          ? prev
-          : elapsed
+        getFreshnessLevel(prev) === getFreshnessLevel(elapsed) ? prev : elapsed
       );
     };
     tick();
     return subscribeSharedTick(tick);
-  }, [lastUpdateMs, trackSeconds, feedMaxSecs]);
+  }, [lastUpdateMs, trackSeconds]);
 
   // GH#1338: If mode is detected but we never got a lastUpdateMs, the oracle is unavailable
   // (e.g. hyperp market never cranked). This is distinct from stale (had a price but it's old).

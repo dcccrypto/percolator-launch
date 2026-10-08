@@ -87,7 +87,7 @@ import { useInitUser } from "@/hooks/useInitUser";
 import { AUTO_DEPOSIT_AMOUNT } from "@/hooks/useAutoDeposit";
 import { depositAmountMessage } from "@/lib/deposit-guard";
 import { useWalletNetworkGuard } from "@/hooks/useWalletNetworkGuard";
-import { isOracleStaleBlocking, oracleCloseGate } from "@/lib/oracle-stale-gate";
+import { isOracleStaleBlocking, oracleAgeSecs, oracleCloseGate } from "@/lib/oracle-stale-gate";
 import { invalidatePortfolio } from "@/lib/portfolio-invalidation";
 import { checkSignatureLanded, timedOutSignature } from "@/lib/tx";
 import { watchPendingSignature } from "@/lib/pending-signature";
@@ -257,7 +257,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   // Non-reactive — see file-header comment. NOT `useLivePrice()`.
   const { priceUsd, priceE6: livePriceE6 } = getLivePriceSnapshot(slabAddress);
-  const { level: oracleLevel, mode: oracleMode, ready: oracleReady, elapsedSecs: oracleElapsed, closeFacts } = useOracleFreshness();
+  const { level: oracleLevel, mode: oracleMode, ready: oracleReady, elapsedSecs: oracleElapsed, lastUpdateMs: oracleLastMs, closeFacts } = useOracleFreshness();
   const oracleUnavailable = oracleLevel === "unavailable";
   // GH#2484: this was an inline ALLOWLIST of oracle modes, and it leaked twice —
   // first "keeper" (H7: a stale keeper-priced market never blocked trading,
@@ -268,7 +268,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // The Close tab is a reducing action: it blocks only when the chain would refuse
   // (matured oracle / feed past its own max staleness / no price), not on the 60 s
   // rule above, which stays for opening. See oracleCloseGate.
-  const closeGate = oracleCloseGate({ level: oracleLevel, mode: oracleMode, ready: oracleReady, elapsedSecs: oracleElapsed, facts: closeFacts });
+  const closeGate = oracleCloseGate({ level: oracleLevel, mode: oracleMode, ready: oracleReady, facts: closeFacts });
   // H6: engine accrue-staleness — see useEngineFreshness's file header.
   const { engineStale } = useEngineFreshness();
   const openWalletModal = usePrivyLogin();
@@ -1460,6 +1460,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             engineStale={engineStale}
             oracleBlocked={!mockMode && closeGate.blocked}
             oraclePriceBehind={!mockMode && closeGate.behind}
+            priceAgeSecs={oracleAgeSecs(oracleLastMs, oracleElapsed)}
             onClosed={handleClosed}
           />
         )}

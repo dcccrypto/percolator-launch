@@ -41,7 +41,7 @@ import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider"
 import { ClosePositionModal } from "./ClosePositionModal";
 import { UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
 import { isEntryKnown, DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL } from "@/lib/entry-price-display";
-import { portfolioPositionPnl } from "@/lib/position-pnl";
+import { onChainMarkE6, portfolioPositionPnl } from "@/lib/position-pnl";
 import {
   formatTokenAmount,
   formatUsdPriceE6,
@@ -51,7 +51,7 @@ import {
 } from "@/lib/format";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockPortfolioPositions } from "@/lib/mock-trade-data";
-import { oracleCloseGate } from "@/lib/oracle-stale-gate";
+import { oracleAgeSecs, oracleCloseGate } from "@/lib/oracle-stale-gate";
 import { describeLiqDistance, describeLiqPrice } from "@/lib/liq-price-display";
 import { LiqPriceValue } from "./LiqPriceValue";
 import { positionSizeUsdText } from "@/lib/q-usd";
@@ -80,21 +80,22 @@ export const CloseFlow: FC<{
   const targetKey = pos.portfolioPk?.toBase58();
   useEffect(() => { prewarmClose(target); }, [prewarmClose, targetKey]); // eslint-disable-line react-hooks/exhaustive-deps
   // THIS market's fee (from the on-demand provider), so the preview matches the dock's (#24).
-  const { params } = useSlabState();
+  const { params, config: slabConfig, wrapperConfigV17 } = useSlabState();
   // Same H6/H7 staleness protections as the dock's own PositionRow: a close
   // on a matured-oracle or engine-stale market reverts on-chain — block the
   // modal's Confirm instead of letting the user burn a failed tx. A price merely
   // older than 60 s is accepted by the chain, so it only gets a note. Both hooks
   // read THIS market's freshness via the on-demand SlabProvider above.
-  const { level: oracleLevel, mode: oracleMode, ready: oracleReady, elapsedSecs: oracleElapsed, closeFacts } = useOracleFreshness();
+  const { level: oracleLevel, mode: oracleMode, ready: oracleReady, elapsedSecs: oracleElapsed, lastUpdateMs: oracleLastMs, closeFacts } = useOracleFreshness();
   const { engineStale } = useEngineFreshness();
   // Mock slabs have no real oracle/engine to be "fresh" — exempt them like
   // PositionRow's own `!mockMode &&` prefix, so local mock testing isn't
   // permanently blocked.
   const mockExempt = isMockMode() && isMockSlab(pos.slabAddress);
-  const closeGate = oracleCloseGate({ level: oracleLevel, mode: oracleMode, ready: oracleReady, elapsedSecs: oracleElapsed, facts: closeFacts });
+  const closeGate = oracleCloseGate({ level: oracleLevel, mode: oracleMode, ready: oracleReady, facts: closeFacts });
   const oracleStale = !mockExempt && closeGate.blocked;
   const oraclePriceBehind = !mockExempt && closeGate.behind;
+  const priceAgeSecs = oracleAgeSecs(oracleLastMs, oracleElapsed);
   // Same shared PnL computation as every other surface: the modal previews size
   // and PnL for the close, so it gets the ADL-EFFECTIVE size (raw basis over-
   // reports a deleveraged leg) and an entry only when PnL is honestly known.
@@ -117,6 +118,8 @@ export const CloseFlow: FC<{
       tradingFeeBps={params?.tradingFeeBps}
       oracleStale={oracleStale}
       oraclePriceBehind={oraclePriceBehind}
+      priceAgeSecs={priceAgeSecs}
+      settleMarkE6={onChainMarkE6(slabConfig, wrapperConfigV17 !== null)}
       engineCatchingUp={!mockExempt && engineStale}
       onConfirm={async (percent) => {
         try {

@@ -17,7 +17,7 @@ const h = vi.hoisted(() => ({
   engineStale: false,
 }));
 const OWNER = new PublicKey("11111111111111111111111111111111");
-const PUSH_MANAGED = { chainRuleKnown: true, resolveMatured: false, feedMaxStalenessSecs: null };
+const PUSH_MANAGED = { chainRuleKnown: true, resolveMatured: false };
 
 vi.mock("@/hooks/useUserAccount", () => ({ useUserAccount: () => h.account, useUserAccountScanPending: () => false }));
 vi.mock("@/hooks/useNftWrappedPosition", () => ({ useNftWrappedPosition: () => null }));
@@ -28,6 +28,7 @@ vi.mock("@/components/providers/SlabProvider", () => ({
   useSlabState: () => ({
     accounts: [],
     config: { collateralMint: OWNER, lastEffectivePriceE6: 100_000_000n, invert: 0 },
+    wrapperConfigV17: null,
     params: { maintenanceMarginBps: 500n, initialMarginBps: 1000n },
     adlFactors: { aLong: 1_000_000_000_000_000n, aShort: 1_000_000_000_000_000n },
   }),
@@ -71,7 +72,7 @@ describe("Close Confirm (dock)", () => {
   it("stale 5 minutes on an AUTH_MARK market: Confirm enabled, one calm note", () => {
     const confirm = openClose();
     expect(confirm).toBeEnabled();
-    expect(screen.getByTestId("close-price-behind")).toHaveTextContent("The price shown may be a little behind.");
+    expect(screen.getByTestId("close-price-behind")).toHaveTextContent("This market's price was last updated 5 min ago. Your close settles at that price.");
     expect(screen.queryByText(/Oracle Stale/)).toBeNull();
   });
   it("matured: Confirm blocked", () => {
@@ -109,6 +110,7 @@ describe("every Close entry point uses the chain-aware gate", () => {
     const src = read(rel);
     expect(src).toContain("oracleCloseGate(");
     expect(src).toContain("oraclePriceBehind={oraclePriceBehind}");
+    expect(src).toContain("settleMarkE6=");
     expect(src).not.toContain("isOracleStaleBlocking");
   });
   it("order ticket: Close tab uses the close gate, opening keeps the 60 s rule", () => {
@@ -121,6 +123,7 @@ describe("every Close entry point uses the chain-aware gate", () => {
   });
   it("close panel and modal forward the note to the shared form", () => {
     expect(read("components/trade/OrderTicketClosePanel.tsx")).toContain("oraclePriceBehind={oraclePriceBehind}");
+    expect(read("components/trade/OrderTicketClosePanel.tsx")).toContain("settleMarkE6={settleMarkE6}");
     expect(read("components/trade/ClosePositionModal.tsx")).toContain("oraclePriceBehind={oraclePriceBehind}");
   });
 });
@@ -138,5 +141,30 @@ describe("ClosePositionForm (shared by every entry point)", () => {
     expect(screen.getByTestId("close-confirm")).toBeDisabled();
     expect(screen.getByTestId("close-catching-up")).toBeInTheDocument();
     expect(screen.queryByTestId("close-price-behind")).toBeNull();
+  });
+});
+
+describe("preview follows the stored mark while the price is behind", () => {
+  const base = {
+    positionSize: 40_000_000n, entryPrice: 90_000_000n, capital: 1_000_000_000n, symbol: "SOL", decimals: 6,
+    isLong: true, loading: false, tradingFeeBps: 10n, onConfirm: () => {},
+  };
+  const text = async (props: Record<string, unknown>) => {
+    const { ClosePositionForm } = await import("@/components/trade/ClosePositionForm");
+    const { container, unmount } = render(<ClosePositionForm {...base} {...(props as object)} currentPrice={props.currentPrice as bigint} priceUsd={props.priceUsd as number} />);
+    const t = (container.textContent ?? "").replace(container.querySelector('[data-testid="close-price-behind"]')?.textContent ?? "", "");
+    unmount();
+    return t;
+  };
+  it("behind=true: figures equal the stored-mark computation, not the live-store one", async () => {
+    const behind = await text({ currentPrice: 120_000_000n, priceUsd: 120, oraclePriceBehind: true, settleMarkE6: 100_000_000n, priceAgeSecs: 300 });
+    const storedOnly = await text({ currentPrice: 100_000_000n, priceUsd: 100 });
+    const liveOnly = await text({ currentPrice: 120_000_000n, priceUsd: 120 });
+    expect(behind).toBe(storedOnly);
+    expect(behind).not.toBe(liveOnly);
+  });
+  it("not behind: the live price still drives the preview", async () => {
+    const live = await text({ currentPrice: 120_000_000n, priceUsd: 120, settleMarkE6: 100_000_000n });
+    expect(live).toBe(await text({ currentPrice: 120_000_000n, priceUsd: 120 }));
   });
 });

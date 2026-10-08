@@ -26,6 +26,10 @@ interface ClosePositionModalProps {
   oracleStale?: boolean;
   /** Price older than 60 s but the chain would accept the close — note only, never blocks. */
   oraclePriceBehind?: boolean;
+  /** Seconds since the last price push (note text). */
+  priceAgeSecs?: number;
+  /** The stored mark the chain settles at; the preview uses it when the price is behind. */
+  settleMarkE6?: bigint | null;
   /** Engine lag (not the oracle): blocks the close with its own "Catching up" note. */
   engineCatchingUp?: boolean;
   /** PERC-2312: Surfaced close-tx failure (from useClosePosition's `error`). */
@@ -67,6 +71,8 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   tradingFeeBps,
   oracleStale = false,
   oraclePriceBehind = false,
+  priceAgeSecs = 0,
+  settleMarkE6 = null,
   engineCatchingUp = false,
   error = null,
   maxFillAbs = null,
@@ -175,6 +181,8 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
           tradingFeeBps={tradingFeeBps}
           oracleStale={oracleStale}
           oraclePriceBehind={oraclePriceBehind}
+          priceAgeSecs={priceAgeSecs}
+          settleMarkE6={settleMarkE6}
           engineCatchingUp={engineCatchingUp}
           error={error}
           maxFillAbs={maxFillAbs}

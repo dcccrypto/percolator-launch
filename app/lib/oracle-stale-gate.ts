@@ -70,47 +70,39 @@ export function isOracleStaleBlocking(
  *
  * The 60-second rule above exists to stop OPENING on a price the user can no
  * longer trust. It is not an on-chain rule. TradeCpi / BatchTradeCpi (wrapper
- * 7c906e45, src/v16_program.rs) return OracleStale only when
+ * 7c906e45, src/v16_program.rs) take 7 fixed accounts with NO oracle account and
+ * trade on the STORED price; they return OracleStale only when
  * `global_or_profile_resolve_matured_at_slot` is true (def. ~10498; checked at
  * ~15037 and ~16034): the last good oracle slot is older than
- * `permissionless_resolve_stale_slots` (hour-scale). Pyth / Switchboard /
- * Chainlink reads also enforce the feed's own `max_staleness_secs`
- * (~8915 / ~9046 / ~9096); AUTH_MARK and EWMA_MARK are validated with
- * `max_staleness_secs == 0` (~3678) and have no push-age check at all.
+ * `permissionless_resolve_stale_slots`. A feed's own `max_staleness_secs` is
+ * enforced only inside `read_external_price_e6[_profile]` (the hybrid
+ * configure/crank path), never on the trade path, so it is not a close rule for
+ * ANY mode.
  *
  * So a close on a price older than 60 s is accepted by the chain unless the
- * market has matured, a feed mode is past its own max staleness, or the engine
- * is lagging (EngineStale, handled separately by the engine-catching-up flag).
- * Blocking it in the app only strands the user in a position — worse than a
- * refused transaction. `oracleCloseGate` therefore blocks a close only when
- * the chain would.
+ * market has matured, or the engine is lagging (EngineStale, handled separately
+ * by the engine-catching-up flag). Blocking it in the app only strands the user
+ * in a position — worse than a refused transaction. `oracleCloseGate` therefore
+ * blocks a close only when the chain would. Because the chain settles at the
+ * STORED price, the close preview uses that price when the live one is behind.
  * ───────────────────────────────────────────────────────────────────────── */
 
-/** `WrapperConfigV16.oracle_mode` bytes that are price-managed (no feed read). */
 const MODE_HYBRID = 1;
 const MODE_EWMA_MARK = 2;
 const MODE_AUTH_MARK = 3;
 
-/** What the chain's own staleness rules say about this market, read from the slab the app already loads. */
+/** What the chain's own staleness rule says about this market, read from the slab the app already loads. */
 export interface CloseChainFacts {
-  /** The market is a v17/v18 slab, so the on-chain rules below are known. False → keep the 60 s block. */
+  /** The market is a v17/v18 slab, so the rule below is known. False → keep the 60 s block. */
   chainRuleKnown: boolean;
   /** `global_or_profile_resolve_matured_at_slot` would be true at the current cluster slot. */
   resolveMatured: boolean;
-  /**
-   * The feed's own `max_staleness_secs` when the mode reads an external feed
-   * (a push older than this is refused); null when the mode is push-managed
-   * (AUTH_MARK / EWMA_MARK) and the chain applies no push-age check. 0 means
-   * "a feed mode with no readable limit" and is treated as unknown (blocks).
-   */
-  feedMaxStalenessSecs: number | null;
 }
 
 interface MaturityConfig {
   permissionlessResolveStaleSlots?: bigint;
   lastGoodOracleSlot?: bigint;
   oracleMode?: number;
-  maxStalenessSecs?: bigint;
 }
 interface MaturityProfile {
   oracleMode?: number;
@@ -146,21 +138,14 @@ export function deriveCloseChainFacts(
   profile: MaturityProfile | null | undefined,
   chainSlot: bigint | null,
 ): CloseChainFacts {
-  if (cfg == null || cfg.oracleMode === undefined) {
-    return { chainRuleKnown: false, resolveMatured: false, feedMaxStalenessSecs: 0 };
-  }
-  const pushManaged = cfg.oracleMode === MODE_AUTH_MARK || cfg.oracleMode === MODE_EWMA_MARK;
-  return {
-    chainRuleKnown: true,
-    resolveMatured: isResolveMatured(cfg, profile, chainSlot),
-    feedMaxStalenessSecs: pushManaged ? null : Number(cfg.maxStalenessSecs ?? 0n),
-  };
+  if (cfg == null || cfg.oracleMode === undefined) return { chainRuleKnown: false, resolveMatured: false };
+  return { chainRuleKnown: true, resolveMatured: isResolveMatured(cfg, profile, chainSlot) };
 }
 
 export interface CloseOracleGate {
   /** Confirm must be disabled: the chain would refuse, or there is no price. */
   blocked: boolean;
-  /** Allowed, but the price shown is older than the 60 s rule — show the calm "may be behind" line. */
+  /** Allowed, but the price is older than the 60 s rule — say so and preview at the stored price. */
   behind: boolean;
 }
 
@@ -172,7 +157,6 @@ export function oracleCloseGate(input: {
   level: FreshnessLevel;
   mode: OracleMode | null;
   ready: boolean;
-  elapsedSecs?: number;
   facts?: CloseChainFacts;
 }): CloseOracleGate {
   const { level, mode, ready, facts } = input;
@@ -181,8 +165,17 @@ export function oracleCloseGate(input: {
   if (!isOracleStaleBlocking(level, mode, ready)) return { blocked: false, behind: false };
   // Older than 60 s from here on.
   if (!facts || !facts.chainRuleKnown) return { blocked: true, behind: false };
-  if (facts.feedMaxStalenessSecs === null) return { blocked: false, behind: true };
-  const max = facts.feedMaxStalenessSecs;
-  if (max > 0 && (input.elapsedSecs ?? Number.POSITIVE_INFINITY) <= max) return { blocked: false, behind: true };
-  return { blocked: true, behind: false };
+  return { blocked: false, behind: true };
+}
+
+/** Age of the last price push: from the timestamp when known (the hook's own seconds only move on level changes). */
+export function oracleAgeSecs(lastUpdateMs: number | null | undefined, elapsedSecs: number | undefined, nowMs = Date.now()): number {
+  if (typeof lastUpdateMs === "number") return Math.max(0, Math.floor((nowMs - lastUpdateMs) / 1000));
+  return Math.max(0, elapsedSecs ?? 0);
+}
+
+/** One calm line for a close on a price that is behind. Seconds under a minute, minutes above. */
+export function priceBehindLine(ageSecs: number): string {
+  const age = ageSecs < 60 ? `${Math.max(1, Math.floor(ageSecs))} sec ago` : `${Math.floor(ageSecs / 60)} min ago`;
+  return `This market's price was last updated ${age}. Your close settles at that price.`;
 }

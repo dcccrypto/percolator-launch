@@ -13,6 +13,8 @@ import { PublicKey } from "@solana/web3.js";
 import { parseWrapperConfigV17, type WrapperConfigV17 } from "@percolatorct/sdk";
 import {
   deriveCloseChainFacts,
+  oracleAgeSecs,
+  priceBehindLine,
   isOracleStaleBlocking,
   isResolveMatured,
   oracleCloseGate,
@@ -27,8 +29,8 @@ vi.mock("@/hooks/useWalletCompat", () => ({
 }));
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 
-const PUSH_MANAGED: CloseChainFacts = { chainRuleKnown: true, resolveMatured: false, feedMaxStalenessSecs: null };
-const stale = { level: "stale" as const, mode: "keeper" as const, ready: true, elapsedSecs: 300 };
+const PUSH_MANAGED: CloseChainFacts = { chainRuleKnown: true, resolveMatured: false };
+const stale = { level: "stale" as const, mode: "keeper" as const, ready: true };
 
 describe("oracleCloseGate", () => {
   it("AUTH_MARK stale 5 minutes, not matured: close allowed, with the note", () => {
@@ -47,19 +49,31 @@ describe("oracleCloseGate", () => {
       expect(oracleCloseGate({ level, mode: "keeper", ready: true, facts: PUSH_MANAGED })).toEqual({ blocked: false, behind: false });
     }
   });
-  it("feed mode: within its own max staleness allowed, past it blocked", () => {
-    const feed: CloseChainFacts = { chainRuleKnown: true, resolveMatured: false, feedMaxStalenessSecs: 120 };
-    expect(oracleCloseGate({ level: "stale", mode: "pyth-pinned", ready: true, elapsedSecs: 90, facts: feed })).toEqual({ blocked: false, behind: true });
-    expect(oracleCloseGate({ level: "stale", mode: "pyth-pinned", ready: true, elapsedSecs: 121, facts: feed }).blocked).toBe(true);
-    // a feed mode with no readable limit is not guessed at
-    expect(oracleCloseGate({ level: "stale", mode: "pyth-pinned", ready: true, elapsedSecs: 90, facts: { ...feed, feedMaxStalenessSecs: 0 } }).blocked).toBe(true);
-  });
+  it.each(["pyth-pinned", "hyperp", "admin"] as const)(
+    "%s market past its own feed max staleness but NOT matured: close allowed with the note (the trade path never reads the feed)",
+    (mode) => {
+      expect(oracleCloseGate({ level: "stale", mode, ready: true, facts: PUSH_MANAGED })).toEqual({ blocked: false, behind: true });
+      expect(oracleCloseGate({ level: "stale", mode, ready: true, facts: { chainRuleKnown: true, resolveMatured: true } }).blocked).toBe(true);
+    },
+  );
   it("unknown chain rules (legacy slab / no facts): keeps the old 60 s block", () => {
     expect(oracleCloseGate({ ...stale }).blocked).toBe(true);
     expect(oracleCloseGate({ ...stale, facts: deriveCloseChainFacts(null, null, 1n) }).blocked).toBe(true);
   });
   it("opening trades keep the 60 s rule", () => {
     expect(isOracleStaleBlocking("stale", "keeper", true)).toBe(true); // 61 s+ still blocks opening
+  });
+});
+
+describe("price-behind note", () => {
+  it("states the age in seconds under a minute and minutes above", () => {
+    expect(priceBehindLine(75)).toBe("This market's price was last updated 1 min ago. Your close settles at that price.");
+    expect(priceBehindLine(300)).toBe("This market's price was last updated 5 min ago. Your close settles at that price.");
+    expect(priceBehindLine(42)).toContain("42 sec ago");
+  });
+  it("ages from the push timestamp when known (the hook's own seconds only move on level changes)", () => {
+    expect(oracleAgeSecs(1_000_000, 61, 1_000_000 + 300_000)).toBe(300);
+    expect(oracleAgeSecs(null, 61, 5)).toBe(61);
   });
 });
 

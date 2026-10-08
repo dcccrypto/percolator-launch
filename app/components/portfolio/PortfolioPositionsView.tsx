@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
 import { UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
 import { describeEntryPrice, displayEntryE6, isExactEntrySource, DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL } from "@/lib/entry-price-display";
-import { portfolioPositionPnl, unknownPnlCaveat } from "@/lib/position-pnl";
+import { onChainMarkE6, portfolioPositionPnl, unknownPnlCaveat } from "@/lib/position-pnl";
 import { adlReductionTooltip } from "@/lib/v17-adl";
 import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
 import { useClosePosition } from "@/hooks/useClosePosition";
@@ -14,7 +14,7 @@ import { PnlShareButton } from "@/components/share/PnlShareButton";
 import type { PnlCardData } from "@/lib/pnl-card";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
-import { oracleCloseGate } from "@/lib/oracle-stale-gate";
+import { oracleAgeSecs, oracleCloseGate } from "@/lib/oracle-stale-gate";
 import { ClosePositionModal } from "@/components/trade/ClosePositionModal";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import {
@@ -160,13 +160,14 @@ function PortfolioCloseFlow({
   const { engineStale } = useEngineFreshness();
   // The same oracle gate as the dock and the other-markets rows (#24): a matured oracle reverts
   // the close on-chain (a price merely older than 60 s does not), so block Confirm here too.
-  const { level: oracleLevel, mode: oracleMode, ready: oracleReady, elapsedSecs: oracleElapsed, closeFacts } = useOracleFreshness();
+  const { level: oracleLevel, mode: oracleMode, ready: oracleReady, elapsedSecs: oracleElapsed, lastUpdateMs: oracleLastMs, closeFacts } = useOracleFreshness();
   const mockExempt = isMockMode() && isMockSlab(pos.slabAddress);
-  const closeGate = oracleCloseGate({ level: oracleLevel, mode: oracleMode, ready: oracleReady, elapsedSecs: oracleElapsed, facts: closeFacts });
+  const closeGate = oracleCloseGate({ level: oracleLevel, mode: oracleMode, ready: oracleReady, facts: closeFacts });
   const oracleStale = !mockExempt && closeGate.blocked;
   const oraclePriceBehind = !mockExempt && closeGate.behind;
+  const priceAgeSecs = oracleAgeSecs(oracleLastMs, oracleElapsed);
   // This market's fee, so the preview matches the trade page's dock (#24).
-  const { params } = useSlabState();
+  const { params, config: slabConfig, wrapperConfigV17 } = useSlabState();
   // Same shared PnL computation as every other surface: the modal previews size
   // and PnL for the close, so it gets the ADL-EFFECTIVE size (raw basis over-
   // reports a deleveraged leg) and an entry only when PnL is honestly known.
@@ -189,6 +190,8 @@ function PortfolioCloseFlow({
       tradingFeeBps={params?.tradingFeeBps}
       oracleStale={oracleStale}
       oraclePriceBehind={oraclePriceBehind}
+      priceAgeSecs={priceAgeSecs}
+      settleMarkE6={onChainMarkE6(slabConfig, wrapperConfigV17 !== null)}
       engineCatchingUp={!mockExempt && engineStale}
       onConfirm={async (percent) => {
         try {
