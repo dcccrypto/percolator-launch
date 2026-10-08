@@ -283,6 +283,13 @@ export interface PortfolioPosition {
    * owner-scan can't find it — it's recovered via the NFT last_holder scan.
    */
   nftWrapped?: boolean;
+  /**
+   * The on-chain address of the portfolio account this row was read from. A wallet can own several
+   * portfolios on one market, so the market alone does not say which one a row is: every action on
+   * the row (Close, and the sweep after it) must name this account (#3301). `null` only for a row
+   * built without an account (test fixtures); nothing in the app produces one.
+   */
+  portfolioPk: PublicKey | null;
 }
 
 export type LiquidationSeverity = "safe" | "warning" | "danger";
@@ -458,6 +465,8 @@ export function buildV17Position(
    * exactly the pre-ADL-fix behaviour.
    */
   adlFactors: AssetAdlFactors | null = null,
+  /** The portfolio account `portfolio` was decoded from (see `PortfolioPosition.portfolioPk`). */
+  portfolioPk: PublicKey | null = null,
 ): PortfolioPosition {
   // v17 markets return an empty `market.config` from the SDK — the real
   // collateral mint lives in `market.configV17` (see markets/page.tsx's
@@ -613,6 +622,7 @@ export function buildV17Position(
     maintenanceMarginBps,
     initialMarginBps,
     nftWrapped,
+    portfolioPk,
   };
 }
 
@@ -891,6 +901,7 @@ export async function fetchPortfolioSnapshot(
 
             allPositions.push({
               liquidationState,
+              portfolioPk: null, // legacy v12 slab account: no portfolio account to name
               slabAddress: slabAddrStr,
               symbol: resolveSymbol(slabAddrStr, symbolBySlab),
               account,
@@ -1021,6 +1032,7 @@ export async function fetchPortfolioSnapshot(
           resolveSymbol(slabAddrStr, symbolBySlab),
           pkStr,
           meta.adlFactors,
+          pubkey,
         );
 
         if (liveLiquidationSeverity(pos, null) !== "safe") {
@@ -1114,6 +1126,7 @@ export async function fetchPortfolioSnapshot(
             resolveSymbol(slabAddrStr, symbolBySlab),
             pkStr,
             meta.adlFactors,
+            portfolioPks[i],
           );
 
           if (liveLiquidationSeverity(pos, null) !== "safe") {

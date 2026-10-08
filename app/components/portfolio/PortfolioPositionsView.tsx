@@ -9,6 +9,7 @@ import { portfolioPositionPnl, unknownPnlCaveat } from "@/lib/position-pnl";
 import { adlReductionTooltip } from "@/lib/v17-adl";
 import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
 import { useClosePosition } from "@/hooks/useClosePosition";
+import { closeTargetFor } from "@/lib/portfolio-target";
 import { PnlShareButton } from "@/components/share/PnlShareButton";
 import type { PnlCardData } from "@/lib/pnl-card";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
@@ -144,7 +145,10 @@ function PortfolioCloseFlow({
   // prewarm the fresh position read + tx caches. Without this, /portfolio was
   // the ONE close path that never prewarmed (the dock and the cross-market list
   // both do), so it consumed whatever the shared read cache happened to hold.
-  useEffect(() => { prewarmClose(); }, [prewarmClose]);
+  // #3301: Close acts on THIS row's own account, not on whichever portfolio the wallet resolves to.
+  const target = closeTargetFor(pos);
+  const targetKey = pos.portfolioPk?.toBase58();
+  useEffect(() => { prewarmClose(target); }, [prewarmClose, targetKey]); // eslint-disable-line react-hooks/exhaustive-deps
   // Reviewer blocker fix: PortfolioCloseFlow previously dropped `error` from
   // useClosePosition, so a failed close just silently re-enabled the modal
   // with no feedback. Also mirror the trade-page's engine-staleness guard
@@ -177,7 +181,7 @@ function PortfolioCloseFlow({
       oracleStale={engineStale}
       onConfirm={async (percent) => {
         try {
-          await closePosition(percent);
+          await closePosition(percent, target);
           onDone(true);
         } catch {
           /* keep the modal open; the tx error is logged by the hook */

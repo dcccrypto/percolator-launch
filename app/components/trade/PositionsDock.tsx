@@ -362,9 +362,11 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
         }
       : null;
 
+  const closeTarget = hasNormalPosition && activeInfo.pubkey ? { portfolioPk: activeInfo.pubkey } : undefined;
   const handleConfirmClose = async (percent: number) => {
     try {
-      await closePosition(percent);
+      // #3301: close the account this row shows (same pubkey it was drawn from), not a re-resolved one.
+      await closePosition(percent, closeTarget);
       setShowCloseModal(false);
     } catch {
       // error surfaced via hook state below
@@ -552,7 +554,7 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
                     // prewarmClose: start the fresh position read + tx prewarms
                     // the moment the modal opens, so the confirm click reaches
                     // the wallet popup with zero blocking round-trips.
-                    onClick={() => { resetPhase(); prewarmClose(); setShowCloseModal(true); }}
+                    onClick={() => { resetPhase(); prewarmClose(closeTarget); setShowCloseModal(true); }}
                     data-testid="position-close"
                     disabled={closeLoading || lpUnderfunded || !hasValidMark || engineStale}
                     title={!hasValidMark ? "Waiting for price data…" : engineStale ? "Prices are catching up. Closing resumes once the market has caught up." : undefined}

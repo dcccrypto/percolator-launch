@@ -11,6 +11,7 @@
  * assertions exercise the actual inline UI.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PublicKey } from "@solana/web3.js";
 import { cleanup, fireEvent, render, screen, act, within } from "@testing-library/react";
 
 const closePosition = vi.fn();
@@ -94,6 +95,14 @@ describe("OrderTicketClosePanel (inline form)", () => {
     expect(closePosition).toHaveBeenCalledTimes(1);
     expect(closePosition).toHaveBeenCalledWith(100);
     expect(p.onClosed).toHaveBeenCalledWith(100);
+  });
+
+  it("#3301: closes (and prewarms) exactly the account the position size was read from", async () => {
+    const acct = new PublicKey("SysvarC1ock11111111111111111111111111111111");
+    render(<OrderTicketClosePanel {...base({ portfolioPk: acct })} />);
+    expect(prewarmClose).toHaveBeenCalledWith({ portfolioPk: acct });
+    await act(async () => fireEvent.click(closeBtn()));
+    expect(closePosition).toHaveBeenCalledWith(100, { portfolioPk: acct });
   });
 
   it("respects a chosen preset percent", async () => {

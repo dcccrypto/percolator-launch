@@ -34,6 +34,7 @@ import { positionRowKeys, usePortfolio, type PortfolioPosition } from "@/hooks/u
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { useClosePosition } from "@/hooks/useClosePosition";
+import { closeTargetFor } from "@/lib/portfolio-target";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
@@ -74,7 +75,10 @@ export const CloseFlow: FC<{
   // CloseFlow only mounts when the close modal opens, so mount === modal-open:
   // start the fresh position read + tx prewarms now, and the confirm click
   // reaches the wallet popup with zero blocking round-trips.
-  useEffect(() => { prewarmClose(); }, [prewarmClose]);
+  // #3301: this row's own account. The same flow serves the at-risk strip and the site-wide alert.
+  const target = closeTargetFor(pos);
+  const targetKey = pos.portfolioPk?.toBase58();
+  useEffect(() => { prewarmClose(target); }, [prewarmClose, targetKey]); // eslint-disable-line react-hooks/exhaustive-deps
   // THIS market's fee (from the on-demand provider), so the preview matches the dock's (#24).
   const { params } = useSlabState();
   // Same H6/H7 staleness protections as the dock's own PositionRow: a close
@@ -113,7 +117,7 @@ export const CloseFlow: FC<{
       oracleStale={oracleStale || (!mockExempt && engineStale)}
       onConfirm={async (percent) => {
         try {
-          await closePosition(percent);
+          await closePosition(percent, target);
           onDone(true);
         } catch {
           /* keep the modal open; the hook's `error` shows inside it */

@@ -301,6 +301,12 @@ export function useTrade(slabAddress: string) {
        * matcher's per-fill clamp individually, one signature for the lot.
        */
       sizes?: bigint[];
+      /**
+       * #3301: trade from EXACTLY this taker portfolio (v17/v18 only). The caller has already
+       * verified it (owner, market, program) against a fresh read; it replaces the resolved
+       * "wallet portfolio" as accountA and nothing falls back to another one.
+       */
+      portfolioPk?: PublicKey;
       limitPriceE6?: bigint;
       /**
        * P2 fee channel (lib/limits/fee-channel.ts): the taker-SIGNED fee cap, base +
@@ -436,6 +442,7 @@ export function useTrade(slabAddress: string) {
           // LP account data comes from the parsed slab bitmap.
           // accountB = deriveLpPda (the LP's portfolio PDA in v12)
           // matcherProg/matcherCtx from the parsed LP account entry
+          if (params.portfolioPk) throw new Error("A specific portfolio can only be targeted on a v17 market");
           const lpAccount = accounts.find((a) => a.idx === params.lpIdx);
           if (!lpAccount) throw new Error(`LP at index ${params.lpIdx} not found`);
 
@@ -463,7 +470,7 @@ export function useTrade(slabAddress: string) {
           // normally an instant cache hit instead of two program scans
           // between the confirm click and the wallet popup.
           const resolved = await getOrResolveV17TradeAccounts(connection, programId, slabPk, wallet.publicKey);
-          accountA = resolved.accountA;
+          accountA = params.portfolioPk ?? resolved.accountA;
           accountB = resolved.accountB;
           matcherProg = resolved.matcherProg;
           matcherCtx = resolved.matcherCtx;
@@ -684,15 +691,19 @@ export function useTrade(slabAddress: string) {
         // the burst. Capital/pnl/fees are intentionally left untouched (not
         // deterministic client-side) — those fields still wait on the
         // refresh burst exactly as before. See applyConfirmedFill's doc.
+        // The scan store holds ONE portfolio per wallet+market (the default pick). A fill on any other
+        // account must not be patched into it (#3301).
+        const scanned = getPortfolioRawSnapshot(makePortfolioScanKey(programId, slabAddress, wallet.publicKey))?.pubkey;
+        const patchesScanStore = !params.portfolioPk || (scanned !== undefined && scanned.equals(accountA));
         if (isV17Market && limitsMarketId !== null) {
           // P1: patch only by the MEASURED delta. A zero fill changes nothing; an
           // unknown result waits for the refresh burst (never assumes params.size).
           const fill = await measureFill(connection, accountA, sig, beforePosQ, params.size, limitsMarketId);
           recordFillResult(sig, fill);
           if ((fill.kind === "full" || fill.kind === "partial") && fill.filledQ !== null) {
-            applyConfirmedFill(makePortfolioScanKey(programId, slabAddress, wallet.publicKey), fill.filledQ);
+            if (patchesScanStore) applyConfirmedFill(makePortfolioScanKey(programId, slabAddress, wallet.publicKey), fill.filledQ);
           }
-        } else if (isV17Market) {
+        } else if (isV17Market && patchesScanStore) {
           applyConfirmedFill(makePortfolioScanKey(programId, slabAddress, wallet.publicKey), params.size);
         }
 

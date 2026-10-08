@@ -1,6 +1,7 @@
 "use client";
 
 import { FC, useEffect, useRef } from "react";
+import type { PublicKey } from "@solana/web3.js";
 import { useClosePosition } from "@/hooks/useClosePosition";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { ClosePositionForm } from "@/components/trade/ClosePositionForm";
@@ -33,6 +34,8 @@ export interface OrderTicketClosePanelProps {
   oracleBlocked: boolean;
   /** ADL state unknown: withhold the raw-size preview (see ClosePositionFormProps). */
   previewUnavailable?: boolean;
+  /** The portfolio account `positionSize` was read from; Close acts on exactly this one (#3301). */
+  portfolioPk?: PublicKey;
   /** Called after a SUCCESSFUL close with the percent that was closed. */
   onClosed: (percent: number) => void;
 }
@@ -70,9 +73,12 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
   engineStale,
   oracleBlocked,
   previewUnavailable = false,
+  portfolioPk,
   onClosed,
 }) => {
   const { closePosition, loading, error, prewarmClose } = useClosePosition(slabAddress);
+  // #3301: the account the ticket's position size was read from.
+  const closeTarget = portfolioPk ? { portfolioPk } : undefined;
   const { priceE6, priceUsd } = useLivePrice();
 
   const currentPriceE6 = priceE6 ?? 0n;
@@ -102,12 +108,13 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
   const prewarmRef = useRef(prewarmClose);
   prewarmRef.current = prewarmClose;
   useEffect(() => {
-    if (hasPosition) prewarmRef.current();
+    if (hasPosition) prewarmRef.current(closeTarget);
   }, [hasPosition, slabAddress]);
 
   const handleConfirm = async (percent: number) => {
     try {
-      await closePosition(percent);
+      // With no bound account the call keeps its one-argument shape (percent only).
+      await (closeTarget ? closePosition(percent, closeTarget) : closePosition(percent));
       onClosed(percent);
     } catch {
       // Surfaced through `error`, rendered inside the form.
@@ -187,7 +194,7 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
         submitDisabled={submitDisabled}
         submitDisabledLabel={submitDisabledLabel}
         submitTitle={submitTitle}
-        onSubmitIntent={() => prewarmRef.current()}
+        onSubmitIntent={() => prewarmRef.current(closeTarget)}
       />
     </div>
   );

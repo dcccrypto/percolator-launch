@@ -1420,6 +1420,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             slabAddress={slabAddress}
             positionSize={closeView?.effectiveSize ?? existingPositionSize}
             previewUnavailable={closeView != null && !closeView.adlKnown}
+            portfolioPk={userAccount?.pubkey}
             accountPending={accountPending}
             entryPriceE6={existingEntryKnown ? existingEntryPriceE6 : 0n}
             capital={capital}
