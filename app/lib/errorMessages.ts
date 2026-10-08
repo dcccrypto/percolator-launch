@@ -260,6 +260,7 @@ const SPL_TOKEN_INSUFFICIENT_FUNDS_MESSAGE =
 //   Phantom  : {code: 4100, message: "The requested method and/or account has not been authorized by the user."}
 //              {code: 4001, message: "User rejected the request."}
 //   Solflare : "Wallet is locked" / "WalletNotConnectedError" / "User rejected the request"
+//   Privy    : "User rejected request" / "User exited the modal before submitting the transaction"
 //   adapters : WalletNotConnectedError, WalletSignTransactionError: "Wallet not connected"
 export const WALLET_LOCKED_MESSAGE =
   "Your wallet is locked or hasn't authorised this site. Unlock Phantom / Solflare, reconnect it from the header, and try again. Nothing was sent.";
@@ -269,7 +270,7 @@ export function detectWalletError(msg: string): WalletErrorKind | null {
   if (/has not been authori[sz]ed by the user|\b4100\b.*authori[sz]|wallet is locked|locked wallet|WalletNotConnected|wallet not connected|please unlock/i.test(msg)) {
     return "locked";
   }
-  if (/user rejected|rejected the request|user declined|transaction rejected|request rejected|\b4001\b/i.test(msg)) {
+  if (/user rejected|rejected the request|user declined|transaction rejected|request rejected|user exited the modal|\b4001\b/i.test(msg)) {
     return "rejected";
   }
   return null;

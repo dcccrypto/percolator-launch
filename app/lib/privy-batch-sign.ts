@@ -16,7 +16,47 @@
  * for the whole batch, and signs the rest of the SAME batch without a modal.
  * Rejecting that modal throws before anything else is signed, so the user still
  * approves every batch exactly once, the same as Phantom or Solflare.
+ *
+ * A rejection ends the sign: PrivyProviderClient rethrows it from every attempt
+ * (`isWalletRejection`) instead of trying the next signer, so one cancel is one
+ * prompt. And a headless failure partway through an embedded batch is NOT
+ * retried through a signer that would prompt again (`EmbeddedBatchSignError`).
+ * `signAllTransactions` only ever returns when EVERY transaction is signed, so
+ * a partially signed batch can never reach a broadcast.
  */
+import { detectWalletError, UserFacingError } from "@/lib/errorMessages";
+
+/**
+ * True when the error is the user declining a wallet prompt, classified the way
+ * the rest of the app does it (`detectWalletError` in lib/errorMessages, which
+ * also drives humanizeError's "Transaction cancelled."), plus the EIP-1193
+ * `code: 4001` some wallets throw without a message.
+ */
+export function isWalletRejection(e: unknown): boolean {
+  if (typeof e === "object" && e !== null && (e as { code?: unknown }).code === 4001) return true;
+  let msg = "";
+  try {
+    msg = e instanceof Error ? `${e.name} ${e.message}` : typeof e === "string" ? e : String((e as { message?: unknown } | null)?.message ?? "");
+  } catch {
+    msg = "";
+  }
+  return detectWalletError(msg) === "rejected";
+}
+
+/**
+ * An embedded wallet failed (not a rejection) while signing a batch. The user
+ * already saw the one "Approve all N" prompt, so retrying through a signer that
+ * prompts per transaction, or showing the batch prompt again, would ask them to
+ * approve the same thing a second time without saying why. Nothing was sent;
+ * the caller shows this line and the user chooses to try again.
+ */
+export class EmbeddedBatchSignError extends UserFacingError {
+  constructor(public readonly total: number, options?: { cause?: unknown }) {
+    super("Signing didn't finish, so nothing was sent. Please try again.");
+    this.name = "EmbeddedBatchSignError";
+    if (options?.cause !== undefined) (this as { cause?: unknown }).cause = options.cause;
+  }
+}
 
 /** Options shape Privy's embedded `signTransaction` reads (`options.uiOptions`). */
 export interface PrivyBatchSignOptions {
