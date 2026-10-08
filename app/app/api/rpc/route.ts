@@ -3,6 +3,9 @@ import { getRpcEndpoint, getAllProgramIds, getConfig } from "@/lib/config";
 import { createHash, timingSafeEqual } from "crypto";
 import { getClientIp } from "@/lib/get-client-ip";
 import { createUpstashRateLimiter } from "@/lib/upstash-rate-limit";
+import { checkAdminSecret } from "@/lib/admin-secret";
+import { createAccountInfoCoalescer, parseAccountInfoParams, type Sender, type JsonRpcResponse } from "@/lib/rpc-coalesce";
+import { recordAccountRead, recordRpcRequest, recordUpstreamCall, getRpcMetricsSnapshot } from "@/lib/rpc-metrics";
 
 export const dynamic = "force-dynamic";
 
@@ -384,6 +387,34 @@ function validateRequest(req: Record<string, unknown>): { jsonrpc: string; error
  */
 const RPC_UPSTREAM_TIMEOUT_MS = 15_000;
 
+/**
+ * One coalescer per upstream (network). Concurrent getAccountInfo reads with the same config are
+ * merged into a single getMultipleAccounts upstream call (1 credit for up to 100 accounts).
+ * Kill switch: RPC_COALESCE_ACCOUNT_INFO=0 restores one upstream call per read.
+ */
+const coalescers = new Map<string, ReturnType<typeof createAccountInfoCoalescer>>();
+function coalescerFor(networkOverride?: "mainnet" | "devnet") {
+  const k = networkOverride ?? "default";
+  let c = coalescers.get(k);
+  if (!c) {
+    const send: Sender = async (body) => {
+      const upstream = resolveUpstream(networkOverride);
+      // Upstream calls actually billed; the browser-facing `in` count is recorded per request.
+      recordUpstreamCall(body.method);
+      const response = await fetch(upstream.url, {
+        method: "POST",
+        headers: upstream.headers,
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(RPC_UPSTREAM_TIMEOUT_MS),
+      });
+      return (await response.json()) as JsonRpcResponse;
+    };
+    c = createAccountInfoCoalescer(send);
+    coalescers.set(k, c);
+  }
+  return c;
+}
+
 async function processSingleRequest(
   req: JsonRpcRequest,
   networkOverride?: "mainnet" | "devnet",
@@ -400,6 +431,8 @@ async function processSingleRequest(
   if (ttl && !isMutating) {
     const cached = getCached(cacheKey);
     if (cached !== undefined) {
+      recordRpcRequest(method, "hit");
+      recordAccountRead(method, req.params);
       // Return cached response with the correct request id
       return { ...(cached as Record<string, unknown>), id: req.id };
     }
@@ -407,6 +440,8 @@ async function processSingleRequest(
 
   // Deduplicate in-flight requests for read-only methods
   if (!isMutating && inflightRequests.has(cacheKey)) {
+    recordRpcRequest(method, "coalesced");
+    recordAccountRead(method, req.params);
     // #2522: this await is OUTSIDE the try/catch below, so a rejection here
     // bypasses BUG 14's batch protection and fails the whole batch. That was
     // rare while the upstream fetch had no timeout (it hung rather than
@@ -425,7 +460,15 @@ async function processSingleRequest(
     }
   }
 
-  const fetchPromise = (async () => {
+  const coalescible =
+    method === "getAccountInfo" && process.env.RPC_COALESCE_ACCOUNT_INFO !== "0"
+      ? parseAccountInfoParams(req.params)
+      : null;
+  recordRpcRequest(method, "miss");
+  recordAccountRead(method, req.params);
+  const fetchPromise = coalescible
+    ? coalescerFor(networkOverride).read(coalescible.pubkey, coalescible.config, req.id)
+    : (async () => {
     // #2522: bound the upstream call. Without a signal this fetch inherits the
     // platform default (effectively none), so one unresponsive RPC holds the
     // route open until the function times out. That is worse than it looks here:
@@ -433,6 +476,7 @@ async function processSingleRequest(
     // for the same method awaits the SAME hung promise (`:335-337`) rather than
     // issuing its own — one slow upstream call stalls all of them together.
     const upstream = resolveUpstream(networkOverride);
+    recordUpstreamCall(method);
     const response = await fetch(upstream.url, {
       method: "POST",
       headers: upstream.headers,
@@ -691,7 +735,13 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  // Admin-only live counters (per serverless instance): ?stats=1 + x-admin-secret.
+  // Fails closed when ADMIN_API_SECRET is unset. The same numbers are logged once a minute
+  // per instance as `[rpc-metrics]`, so verification does not depend on this route.
+  if (req.nextUrl.searchParams.get("stats") === "1" && checkAdminSecret(req, "rpc_stats")) {
+    return NextResponse.json(getRpcMetricsSnapshot(), { headers: { "Cache-Control": "no-store" } });
+  }
   return NextResponse.json(
     { error: "RPC proxy only accepts POST requests" },
     { status: 405 }
