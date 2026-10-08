@@ -11,6 +11,12 @@ import { withGrowthInitArgs, type GrowthLaunch } from "@/lib/v21/growth-launch";
 // v17: max assets per portfolio (= the market's asset-slot capacity); program cap = 14.
 // The slab MUST be sized to exactly match this capacity or InitMarket reverts (dynamic-len validation).
 export const V17_MAX_PORTFOLIO_ASSETS = 14;
+/**
+ * v2.2 (wrapper VERSION 19): the program caps a portfolio at 4 legs (percolator-prog#546; founder-confirmed 2026-10-08, FINAL).
+ * InitMarket refuses `max_portfolio_assets` of 0 or above 4 (error 14). The v2.2 wizard / mobile route / defaultSlabSize()
+ * must use this instead of V17_MAX_PORTFOLIO_ASSETS when the v2.2 layout is active; capacity-4 slab = 592 + 806 + 4 x 2,661 = 12,042 B.
+ */
+export const V22_MAX_PORTFOLIO_ASSETS = 4;
 // BUG 1 fix (2026-07-06): exported so callers (CreateMarketWizard, CostEstimate) size the
 // slab + rent estimate against the actual v17 requirement instead of the stale v12.19
 // tier.dataSize concept (96784/376432/1495024 bytes), which never equals this value for any

@@ -15,6 +15,7 @@ import {
   DEFAULT_SLAB_SIZE,
   P3_MARKET_ASSET_SLOTS,
   V17_MAX_PORTFOLIO_ASSETS,
+  V22_MAX_PORTFOLIO_ASSETS,
   marketAssetSlotsFor,
   slabSizeFor,
   wizardSlabBytes,
@@ -34,6 +35,7 @@ describe("P3 wizard creates single-asset markets", () => {
     expect(marketAssetSlotsFor(p3Params)).toBe(1);
     expect(marketAssetSlotsFor(legacyParams)).toBe(14);
     expect(V17_MAX_PORTFOLIO_ASSETS).toBe(14);
+    expect(V22_MAX_PORTFOLIO_ASSETS).toBe(4); // v2.2 cap (percolator-prog#546)
   });
 
   it("the InitMarket args create() sends carry 1 slot on P3 and 14 on legacy (encoded bytes)", () => {

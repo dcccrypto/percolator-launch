@@ -152,6 +152,7 @@ import {
 // P3 BPF sim bridge can build the market from the same code). Re-exported for existing callers.
 export {
   V17_MAX_PORTFOLIO_ASSETS,
+  V22_MAX_PORTFOLIO_ASSETS,
   DEFAULT_SLAB_SIZE,
   defaultSlabSize,
   P3_MARKET_ASSET_SLOTS,
