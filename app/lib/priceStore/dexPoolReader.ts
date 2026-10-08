@@ -89,7 +89,7 @@ function is429(err: unknown): boolean {
   return msg.includes("429") || msg.includes("too many requests");
 }
 
-async function withRpcBackoff<T>(fn: () => Promise<T>): Promise<T> {
+export async function withRpcBackoff<T>(fn: () => Promise<T>): Promise<T> {
   let delayMs = 500;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
@@ -109,6 +109,16 @@ async function withRpcBackoff<T>(fn: () => Promise<T>): Promise<T> {
   throw new Error("unreachable");
 }
 
+/** Minimal account shape the price math needs (a web3.js AccountInfo satisfies it). */
+export interface AccountData {
+  data: Buffer | Uint8Array;
+  owner: PublicKey;
+}
+
+/** Supplies an account's bytes (null = not found). Lets the same price code run over a
+ *  single-account RPC read (readPoolPriceE6) or over prefetched getMultipleAccountsInfo results. */
+export type AccountReader = (pk: PublicKey) => Promise<AccountData | null>;
+
 /**
  * Read the spot price (in e6) from a mainnet DEX pool. Identical behaviour
  * to `percolator-oracle-keeper`'s `readPoolPriceE6` — see file header.
@@ -126,11 +136,33 @@ export async function readPoolPriceE6(
   decimalsCache: DecimalsCache,
   solPriceE6?: bigint,
 ): Promise<PriceReadResult> {
+  return priceFromAccounts(
+    mainnetConn,
+    entry,
+    decimalsCache,
+    solPriceE6,
+    (pk) => withRpcBackoff(() => mainnetConn.getAccountInfo(pk, "confirmed")),
+  );
+}
+
+/**
+ * The price dispatch behind readPoolPriceE6, with the account reads injected. The batched reader
+ * (dexPoolBatchReader.ts) feeds it accounts prefetched with getMultipleAccountsInfo, so there is
+ * exactly one copy of the pricing logic. `mainnetConn` is only used for the one-time mint-decimals
+ * fetch (cached in `decimalsCache`).
+ */
+export async function priceFromAccounts(
+  mainnetConn: Connection,
+  entry: PoolReadEntry,
+  decimalsCache: DecimalsCache,
+  solPriceE6: bigint | undefined,
+  readAccount: AccountReader,
+): Promise<PriceReadResult> {
   const poolPk = new PublicKey(entry.poolAddress);
   const shortPool = entry.poolAddress.slice(0, 8) + "…";
   const source = `${entry.dexType}:${shortPool}`;
 
-  const poolInfo = await withRpcBackoff(() => mainnetConn.getAccountInfo(poolPk, "confirmed"));
+  const poolInfo = await readAccount(poolPk);
   if (!poolInfo) {
     return { priceE6: 0n, source, skipped: true, skipReason: "pool account not found on mainnet" };
   }
@@ -221,8 +253,8 @@ export async function readPoolPriceE6(
       return { priceE6: 0n, source, skipped: true, skipReason: "PumpSwap: vault addresses missing from pool data" };
     }
     const [baseVaultInfo, quoteVaultInfo] = await Promise.all([
-      withRpcBackoff(() => mainnetConn.getAccountInfo(poolParsed.baseVault!, "confirmed")),
-      withRpcBackoff(() => mainnetConn.getAccountInfo(poolParsed.quoteVault!, "confirmed")),
+      readAccount(poolParsed.baseVault!),
+      readAccount(poolParsed.quoteVault!),
     ]);
     if (!baseVaultInfo || !quoteVaultInfo) {
       return { priceE6: 0n, source, skipped: true, skipReason: "PumpSwap: vault account(s) not found on mainnet" };
