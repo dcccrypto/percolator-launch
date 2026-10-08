@@ -11,7 +11,7 @@ import {
   type DiscoveredMarket,
   type V17MarketGroupOI,
 } from "@percolatorct/sdk";
-import { fetchTokenMeta } from "@/lib/tokenMeta";
+import { fetchTokenMeta, isPlaceholderTokenMeta } from "@/lib/tokenMeta";
 import { isLpPortfolio } from "@/lib/userAccountScan";
 import { readV17AssetSlotLast } from "@/lib/v17-engine-clock";
 import { readLaunchFootprint, type LaunchFootprint } from "@/lib/unfinished-launch";
@@ -84,7 +84,8 @@ export function useCreatedMarkets() {
     try {
       const meta = await fetchTokenMeta(connection, mint);
       const label = meta.symbol || meta.name || mintStr.slice(0, 8) + "…";
-      tokenLabelCache.current.set(mintStr, label);
+      // A truncated-address placeholder is a failed lookup: show it, but do not remember it.
+      if (!isPlaceholderTokenMeta(meta)) tokenLabelCache.current.set(mintStr, label);
       return label;
     } catch {
       return mintStr.slice(0, 8) + "…";
