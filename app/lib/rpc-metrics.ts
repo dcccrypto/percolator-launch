@@ -22,6 +22,8 @@
  * pubkeys of reads (all public on-chain addresses).
  */
 
+import { isValidPubkey } from "@/lib/rpc-coalesce";
+
 export interface MethodCounts {
   in: number;
   hit: number;
@@ -76,6 +78,7 @@ export function recordAccountRead(method: string, params: unknown): void {
         ? first.filter((k): k is string => typeof k === "string")
         : [];
   for (const k of keys) {
+    if (!isValidPubkey(k)) continue; // bounds key length/content: only real addresses are retained
     if (!accountReads.has(k) && accountReads.size >= MAX_TRACKED_KEYS) continue;
     accountReads.set(k, (accountReads.get(k) ?? 0) + 1);
   }

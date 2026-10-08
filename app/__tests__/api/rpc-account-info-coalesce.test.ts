@@ -4,7 +4,12 @@ import { POST } from "../../app/api/rpc/route";
 import { createAccountInfoCoalescer, parseAccountInfoParams } from "../../lib/rpc-coalesce";
 import { getRpcMetricsSnapshot, resetRpcMetricsForTest } from "../../lib/rpc-metrics";
 
-const K = (n: number) => String(n).padStart(44, "A"); // 44-char stand-ins for base58 keys
+const KEYS = ["So11111111111111111111111111111111111111112", "11111111111111111111111111111111", "AzagguvrWmRgcBpsKuqomW7Yb1YUUd6UzcrkiRsqdhr"];
+// Real base58 32-byte addresses (cycled with a counter-derived variant for larger sets).
+import { Keypair } from "@solana/web3.js";
+const keyCache = new Map<number, string>();
+const K = (n: number) => { let k = keyCache.get(n); if (!k) { k = Keypair.fromSeed(new Uint8Array(32).fill(0).map((_, i) => (i === 0 ? n & 255 : i === 1 ? n >> 8 : 7))).publicKey.toBase58(); keyCache.set(n, k); } return k; };
+void KEYS;
 const CFG = { encoding: "base64", commitment: "confirmed" };
 
 type Body = { id: number; method: string; params: unknown[] };
@@ -95,6 +100,8 @@ describe("parseAccountInfoParams", () => {
     expect(parseAccountInfoParams([K(1), CFG])).toEqual({ pubkey: K(1), config: CFG });
     expect(parseAccountInfoParams([K(1), CFG, 3])).toBeNull();
     expect(parseAccountInfoParams(["short"])).toBeNull();
+    expect(parseAccountInfoParams(["0".repeat(44)])).toBeNull(); // 44 chars, not base58
+    expect(parseAccountInfoParams(["1".repeat(40)])).toBeNull(); // base58 but not 32 bytes
     expect(parseAccountInfoParams([K(1), "x"])).toBeNull();
     expect(parseAccountInfoParams(undefined)).toBeNull();
   });
@@ -135,5 +142,46 @@ describe("/api/rpc getAccountInfo coalescing end-to-end", () => {
     expect(snap.methods.getAccountInfo.in).toBe(12);
     expect(snap.methods.getMultipleAccounts.upstream).toBe(1);
     expect(snap.methods.getAccountInfo.upstream ?? 0).toBe(0);
+  });
+
+  it("an invalid key in the batch fails ALONE; the good callers in the same batch still succeed", async () => {
+    // Upstream behaves like the real RPC: any invalid key rejects the whole getMultipleAccounts.
+    global.fetch = vi.fn().mockImplementation(async (_u: string, init: { body: string }) => {
+      const b = JSON.parse(init.body) as Body;
+      upstreamBodies.push(b);
+      const keys = b.method === "getMultipleAccounts" ? (b.params[0] as string[]) : [b.params[0] as string];
+      if (keys.some((k) => /[0OIl]/.test(k))) {
+        return { json: async () => ({ jsonrpc: "2.0", id: b.id, error: { code: -32602, message: "Invalid param: Invalid" } }) } as Response;
+      }
+      const vals = keys.map((k) => ({ lamports: 5, data: [k, "base64"] }));
+      const result = b.method === "getMultipleAccounts" ? { context: { slot: 3 }, value: vals } : { context: { slot: 3 }, value: vals[0] };
+      return { json: async () => ({ jsonrpc: "2.0", id: b.id, result }) } as Response;
+    }) as typeof fetch;
+    const bad = "0".repeat(44);
+    const batch = [
+      { jsonrpc: "2.0", id: 1, method: "getAccountInfo", params: [K(900), CFG] },
+      { jsonrpc: "2.0", id: 2, method: "getAccountInfo", params: [bad, CFG] },
+      { jsonrpc: "2.0", id: 3, method: "getAccountInfo", params: [K(901), CFG] },
+    ];
+    const res = await POST(new NextRequest("http://localhost/api/rpc", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://api.percolatorlaunch.com" },
+      body: JSON.stringify(batch),
+    }));
+    const out = (await res.json()) as Array<{ id: number; result?: { value: { data: string[] } }; error?: unknown }>;
+    const byId = new Map(out.map((r) => [r.id, r]));
+    expect(byId.get(1)?.result?.value.data[0]).toBe(K(900));
+    expect(byId.get(3)?.result?.value.data[0]).toBe(K(901));
+    expect(byId.get(2)?.error).toBeTruthy();
+  });
+});
+
+describe("rpc-metrics key tracking", () => {
+  it("retains only valid addresses (a 2,000,000-char key is not stored)", async () => {
+    const { recordAccountRead, getRpcMetricsSnapshot: snap, resetRpcMetricsForTest: reset } = await import("../../lib/rpc-metrics");
+    reset();
+    recordAccountRead("getAccountInfo", ["x".repeat(2_000_000)]);
+    recordAccountRead("getMultipleAccounts", [[K(1), "y".repeat(100)]]);
+    expect(snap().topAccounts.map((a) => a.account)).toEqual([K(1)]);
   });
 });

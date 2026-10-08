@@ -17,11 +17,28 @@
  *     (`{ context, value }`), with the caller's own JSON-RPC id.
  *   - Duplicate keys inside a group are sent once and fanned out.
  *   - Upstream errors (RPC error object or transport failure) are delivered to every member.
- *   - Latency: a request waits at most `windowMs` (default 5 ms) for company. The browser's own
+ *   - Latency: every getAccountInfo waits the full `windowMs` (default 5 ms) for company, even a lone one. The browser's own
  *     batching window is 50 ms, so this is not user-visible.
  */
 
+import { PublicKey } from "@solana/web3.js";
+
 const MAX_KEYS_PER_CALL = 100;
+const BASE58_KEY_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+/**
+ * True only for a real 32-byte base58 address. Upstream rejects a whole getMultipleAccounts when any
+ * key is invalid, so an invalid key must never join a merge group (it takes the single-call path and
+ * fails alone).
+ */
+export function isValidPubkey(k: unknown): k is string {
+  if (typeof k !== "string" || !BASE58_KEY_RE.test(k)) return false;
+  try {
+    return new PublicKey(k).toBytes().length === 32;
+  } catch {
+    return false;
+  }
+}
 
 export interface JsonRpcResponse {
   jsonrpc?: string;
@@ -136,7 +153,7 @@ export function parseAccountInfoParams(
 ): { pubkey: string; config: Record<string, unknown> | undefined } | null {
   if (!Array.isArray(params) || params.length < 1 || params.length > 2) return null;
   const [pubkey, config] = params;
-  if (typeof pubkey !== "string" || pubkey.length < 32 || pubkey.length > 44) return null;
+  if (!isValidPubkey(pubkey)) return null;
   if (config === undefined) return { pubkey, config: undefined };
   if (config === null || typeof config !== "object" || Array.isArray(config)) return null;
   return { pubkey, config: config as Record<string, unknown> };
