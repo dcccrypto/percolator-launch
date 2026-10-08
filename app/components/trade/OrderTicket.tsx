@@ -1783,11 +1783,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           <SummaryCell
             label="Liq. price"
             value={beforeLiqDisplay.text !== "—" && beforeLiqDisplay.text !== afterLiqDisplay.text ? `${beforeLiqDisplay.text} → ${afterLiqDisplay.text}` : afterLiqDisplay.text}
-            valueClass={
-              afterLiqDisplay.kind !== "price"
-                ? "text-[var(--text-secondary)]"
-                : direction === "long" ? "text-[var(--short)]" : "text-[var(--long)]"
-            }
+            // Neutral, like the dock/panel for a safe position: a new order always opens at tier
+            // "safe" (#3019), and green/red here read as profit/loss, not risk.
+            valueClass="text-[var(--text-secondary)]"
             tooltip={`Estimated liquidation price if this order fills at the estimated entry.${afterLiqDisplay.title ? ` ${afterLiqDisplay.title}` : ""}`}
           />
           <SummaryCell

@@ -298,7 +298,9 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
             <span className="text-[var(--text-secondary)]">Est. Liquidation Price:</span>
             <LiqPriceValue
               display={liqDisplay}
-              className={`font-mono font-medium ${liqDisplay.kind === "price" ? "text-[var(--short)]" : "text-[var(--text-secondary)]"}`}
+              // Neutral, same as the ticket: a new order opens at tier "safe" (#3019), so red here
+              // was an alarm that turned grey in the dock once the order filled.
+              className="font-mono font-medium text-[var(--text-secondary)]"
             />
           </div>
           {worstFillPriceE6 != null && worstFillPriceE6 > 0n && (
