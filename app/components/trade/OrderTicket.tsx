@@ -36,6 +36,7 @@
  */
 
 import { FC, memo, useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { balanceKey, NO_BALANCE_KNOWN, resolveTokenBalance, type KnownBalance, type TokenRead } from "@/lib/token-balance";
 import { useWalletBalanceRefreshKey } from "@/lib/wallet-balance-invalidation";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
@@ -280,6 +281,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const [onChainDecimals, setOnChainDecimals] = useState<number | null>(null);
   const decimals = onChainDecimals ?? tokenMeta?.decimals ?? 6;
   const [walletAtaBalance, setWalletAtaBalance] = useState<bigint | null>(null);
+  // Last successful wallet-balance read, keyed by owner+mint (lib/token-balance.ts): a failed
+  // read keeps it instead of turning a funded wallet into "empty".
+  const knownWalletRef = useRef<KnownBalance>(NO_BALANCE_KNOWN);
 
   const riskThreshold = params?.riskReductionThreshold ?? 0n;
   const vaultBalance = engine?.vault ?? 0n;
@@ -535,19 +539,37 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       return;
     }
     let cancelled = false;
-    (async () => {
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    const mint = mktConfig.collateralMint;
+    const owner = publicKey;
+    const key = balanceKey(owner.toBase58(), mint.toBase58());
+    const ata = getAssociatedTokenAddressSync(mint, owner);
+    // A different wallet or mint: the previous token decimals do not apply until this account is read.
+    if (knownWalletRef.current.key !== key) setOnChainDecimals(null);
+    // A failed read is not a zero balance: keep the last known one for this wallet+mint and
+    // retry, instead of showing "Get Tokens to Trade" and Max 0 until something else re-runs
+    // this effect. A missing token account IS a real zero.
+    const RETRY_MS = [2_000, 5_000, 10_000];
+    const read = async (attempt: number) => {
+      let r: TokenRead;
       try {
-        const ata = getAssociatedTokenAddressSync(mktConfig.collateralMint, publicKey);
         const info = await connection.getTokenAccountBalance(ata);
-        if (!cancelled) {
-          if (info.value.decimals !== undefined) setOnChainDecimals(info.value.decimals);
-          if (info.value.amount) setWalletAtaBalance(BigInt(info.value.amount));
-        }
+        if (cancelled) return;
+        if (info.value.decimals !== undefined) setOnChainDecimals(info.value.decimals);
+        r = { ok: true, amount: BigInt(info.value.amount || "0") };
       } catch {
-        if (!cancelled) { setOnChainDecimals(null); setWalletAtaBalance(null); }
+        // getTokenAccountBalance throws for a missing account too; ask whether it exists.
+        const acct = await Promise.resolve().then(() => connection.getAccountInfo(ata)).catch(() => undefined);
+        if (cancelled) return;
+        r = acct === null ? { ok: true, absent: true } : { ok: false };
       }
-    })();
-    return () => { cancelled = true; };
+      const known = resolveTokenBalance(knownWalletRef.current, key, r);
+      knownWalletRef.current = known;
+      setWalletAtaBalance(known.amount);
+      if (!r.ok && attempt < RETRY_MS.length) retryTimer = setTimeout(() => void read(attempt + 1), RETRY_MS[attempt]);
+    };
+    void read(0);
+    return () => { cancelled = true; if (retryTimer) clearTimeout(retryTimer); };
     // BUG 10 fix: `capital` and `showInlineDeposit` are lastSig-style refresh
     // triggers (mirrors DepositWithdrawCard's own `lastSig` dependency on its
     // twin wallet-balance effect, DepositWithdrawCard.tsx:69) — without them this
