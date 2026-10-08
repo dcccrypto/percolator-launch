@@ -58,7 +58,8 @@ export async function readSweepableCapital(p: SweepRead): Promise<bigint | null>
 
 /** Calm one-liners for the sweep (UX: protocol mechanics stay invisible). */
 export const SWEEP_COPY = {
-  prompt: (amount: string) => `Position closed. Approve once more to move ${amount} back to your wallet.`,
+  // useClosePosition already toasted "Position closed." for this close.
+  prompt: (amount: string) => `Approve once more to move ${amount} back to your wallet.`,
   done: (amount: string) => `${amount} is back in your wallet.`,
   kept: (amount: string) => `${amount} stays on this market. You can withdraw it any time.`,
 };
