@@ -48,6 +48,47 @@ export function subscribePortfolioInvalidation(listener: Listener): () => void {
 }
 
 /**
+ * Follow-up offsets for reads served by the indexer (trade history, trader
+ * stats). The indexer lags the chain by a few seconds (lib/chart/trade-feed.ts
+ * looks back 15s for the same reason), and unlike usePortfolio these readers
+ * have no 30s poll to fall back on, so the tail runs longer.
+ */
+export const INDEXER_RECONCILE_MS: readonly number[] = [...PORTFOLIO_RECONCILE_MS, 8_000, 15_000];
+
+/**
+ * Run `reload` on every invalidation: once immediately, then at each offset.
+ * A new invalidation restarts the schedule instead of stacking a second one
+ * (a full close can fire two). The returned unsubscriber also cancels any
+ * follow-ups still pending, so an unmounted or wallet-switched consumer is not
+ * reloaded afterwards.
+ */
+export function subscribePortfolioReload(
+  reload: () => void,
+  offsets: readonly number[] = PORTFOLIO_RECONCILE_MS,
+): () => void {
+  const timers = new Set<ReturnType<typeof setTimeout>>();
+  const cancel = () => {
+    timers.forEach(clearTimeout);
+    timers.clear();
+  };
+  const unsubscribe = subscribePortfolioInvalidation(() => {
+    cancel();
+    reload();
+    for (const ms of offsets) {
+      const t = setTimeout(() => {
+        timers.delete(t);
+        reload();
+      }, ms);
+      timers.add(t);
+    }
+  });
+  return () => {
+    unsubscribe();
+    cancel();
+  };
+}
+
+/**
  * Announce that the connected wallet's portfolio changed on chain.
  *
  * Safe to call with no subscribers (the trade page may be the only mounted

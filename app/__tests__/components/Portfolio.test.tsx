@@ -21,6 +21,7 @@ import { PortfolioPositionsView as PortfolioPage } from "@/components/portfolio/
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { usePortfolio } from "@/hooks/usePortfolio";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
+import { subscribePortfolioInvalidation } from "@/lib/portfolio-invalidation";
 import { PublicKey } from "@solana/web3.js";
 import { AccountKind } from "@percolatorct/sdk";
 import { computeLivePositionPnl } from "@/lib/trading";
@@ -295,8 +296,12 @@ describe("Portfolio Component Tests", () => {
   });
 
   describe("PORT-002: Manual refresh button", () => {
-    it("should call refresh function when refresh button is clicked", async () => {
+    // #41: Refresh goes through invalidatePortfolio(), which usePortfolio subscribes to (the same
+    // burst as refresh()) along with the trade history and stats, which it used to skip.
+    it("should invalidate the portfolio when refresh button is clicked", async () => {
       const mockRefresh = vi.fn();
+      const invalidated = vi.fn();
+      const unsubscribe = subscribePortfolioInvalidation(invalidated);
 
       vi.mocked(useWalletCompat).mockReturnValue({
         connected: true,
@@ -316,9 +321,12 @@ describe("Portfolio Component Tests", () => {
       render(<PortfolioPage />);
 
       const refreshButton = screen.getByRole("button", { name: /Refresh/i });
-      fireEvent.click(refreshButton);
-
-      expect(mockRefresh).toHaveBeenCalledTimes(1);
+      try {
+        fireEvent.click(refreshButton);
+        expect(invalidated).toHaveBeenCalledTimes(1);
+      } finally {
+        unsubscribe();
+      }
     });
 
     it("should disable refresh button while loading", () => {

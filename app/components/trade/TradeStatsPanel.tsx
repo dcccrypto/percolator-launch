@@ -105,7 +105,8 @@ export const TradeStatsPanel: FC<TradeStatsPanelProps> = ({
   error,
   onRetry,
 }) => {
-  if (loading) {
+  // A reload keeps the last stats on screen; the skeleton is for the first load only.
+  if (loading && !stats) {
     return (
       <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-4">
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -120,7 +121,8 @@ export const TradeStatsPanel: FC<TradeStatsPanelProps> = ({
     );
   }
 
-  if (error || !stats || stats.totalTrades === 0) {
+  // An error with stats already on screen keeps them (a failed background reload).
+  if (!stats || stats.totalTrades === 0) {
     // If no trades yet, skip rendering (table will show empty state)
     if (!error && (!stats || stats.totalTrades === 0)) return null;
     return (
@@ -221,6 +223,17 @@ export const TradeStatsPanel: FC<TradeStatsPanelProps> = ({
           {longShortBar(stats.longTrades, stats.shortTrades)}
         </div>
       </div>
+      {/* A background reload failed: the numbers above are the last good ones, so say so. */}
+      {error && (
+        <div className="flex items-center justify-between border-t border-[var(--border)] px-4 py-2">
+          <p className="text-[10px] text-[var(--text-muted)]">Couldn&apos;t refresh stats; showing the last loaded numbers.</p>
+          {onRetry && (
+            <button onClick={onRetry} className="text-[10px] text-[var(--accent)] hover:underline">
+              Retry
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 };

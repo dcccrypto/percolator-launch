@@ -82,7 +82,8 @@ export function TradeHistoryTable({
 
   if (!wallet) return null;
 
-  if (error) {
+  // A failed background reload keeps the rows already shown.
+  if (error && trades.length === 0) {
     return (
       <div className="border border-dashed border-[var(--short)]/30 bg-[var(--panel-bg)]/50 p-6 text-center">
         <p className="text-[12px] text-[var(--short)]/80">Failed to load trade history: {error}</p>

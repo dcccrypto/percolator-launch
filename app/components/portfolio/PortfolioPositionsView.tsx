@@ -46,6 +46,7 @@ import { PublicKey } from "@solana/web3.js";
 import { isMockMode } from "@/lib/mock-mode";
 import { getMockPortfolioPositions, isMockSlab } from "@/lib/mock-trade-data";
 import { useTraderStats } from "@/hooks/useTraderStats";
+import { invalidatePortfolio } from "@/lib/portfolio-invalidation";
 import { computePositionLeverage, describePositionLeverage, POSITION_LEVERAGE_LABEL } from "@/lib/position-leverage";
 import { formatSignedUsd } from "@/lib/pnl-card";
 import { InfoIcon } from "@/components/ui/Tooltip";
@@ -810,15 +811,15 @@ export function PortfolioPositionsView() {
                 )}
               </p>
             </div>
-            {refresh && (
-              <button
-                onClick={() => { refresh(); lpPositions.refresh(); }}
-                disabled={loading || lpPositions.loading || isRefreshing}
-                className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] px-4 py-2 text-xs text-[var(--text-secondary)] transition-all hover:border-[var(--accent)]/40 hover:text-[var(--text)] disabled:opacity-40"
-              >
-                Refresh
-              </button>
-            )}
+            <button
+              // invalidatePortfolio() reaches usePortfolio (the same burst as refresh()), and the
+              // trade history and stats below, which hold no handle this component can call.
+              onClick={() => { invalidatePortfolio(); lpPositions.refresh(); }}
+              disabled={loading || lpPositions.loading || isRefreshing}
+              className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] px-4 py-2 text-xs text-[var(--text-secondary)] transition-all hover:border-[var(--accent)]/40 hover:text-[var(--text)] disabled:opacity-40"
+            >
+              Refresh
+            </button>
           </div>
         </ScrollReveal>
 
