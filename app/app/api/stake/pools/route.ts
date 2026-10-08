@@ -3,7 +3,7 @@
  *
  * Returns all initialized StakePool accounts from the percolator-stake
  * devnet program, enriched with market name/symbol from Supabase,
- * vault token balance from RPC, and trailing APR from insurance snapshots.
+ * and vault token balance from RPC. `apr` is null: not tracked (the snapshot history was dropped).
  *
  * Response shape matches the StakePool interface used on the /stake page.
  */
@@ -19,28 +19,6 @@ import { readRegisteredMarkets, type RegisteredMarket } from "@/lib/playground-r
 import { isBlockedSlab } from "@/lib/blocklist";
 import { getMultipleAccountsInfoChunked } from "@/lib/rpc-chunk";
 import * as Sentry from "@sentry/nextjs";
-
-// ── APR helpers ───────────────────────────────────────────────────────────────
-
-/**
- * Compute trailing APR (%) for a set of slab addresses.
- *
- * REDUCED SCHEMA (2026-07): the indexer was cut down to history-only and the
- * `insurance_snapshots` table (previously written by the indexer's
- * InsuranceLPService) was dropped from the new Supabase project — querying it
- * would 500. There is no longer a redemption-rate history to annualise, so
- * this always returns 0 for every slab (graceful degrade, matches the
- * pre-existing "insufficient history" 0% path below). The `supabase` param is
- * kept so callers don't need to change; it is intentionally unused now.
- */
-async function computeAprs(
-  slabAddresses: string[],
-  _supabase: ReturnType<typeof getServiceClient>
-): Promise<Record<string, number>> {
-  const result: Record<string, number> = {};
-  for (const slab of slabAddresses) result[slab] = 0;
-  return result;
-}
 
 export const dynamic = "force-dynamic";
 
@@ -284,7 +262,7 @@ export async function GET() {
       }
     }
 
-    // 4. Cross-reference slab addresses with Supabase market data + APR (guarded)
+    // 4. Cross-reference slab addresses with Supabase market data (guarded)
     const slabAddresses = parsed.map((p) => p.pool.slab);
     // REDUCED SCHEMA (2026-07): insurance_balance/vault_balance no longer exist on
     // markets_with_stats (dropped market_stats columns) — dropped from this row
@@ -292,7 +270,6 @@ export async function GET() {
     // RPC token-balance read a few lines below instead.
     type _MarketRow = { slab_address: string | null; symbol: string; name: string; logo_url: string | null };
     let markets: _MarketRow[] | null = null;
-    let aprBySlab: Record<string, number> = {};
 
     let supabase: ReturnType<typeof getServiceClient> | null = null;
     try {
@@ -303,14 +280,11 @@ export async function GET() {
 
     if (supabase) {
       try {
-        const [marketsResult, aprResult] = await Promise.all([
-          supabase
-            .from("markets_with_stats")
-            .select("slab_address,symbol,name,logo_url")
-            .in("slab_address", slabAddresses)
-            .eq("network", getServerNetwork()),
-          computeAprs(slabAddresses, supabase),
-        ]);
+        const marketsResult = await supabase
+          .from("markets_with_stats")
+          .select("slab_address,symbol,name,logo_url")
+          .in("slab_address", slabAddresses)
+          .eq("network", getServerNetwork());
 
         let marketsData = marketsResult.data;
         if (marketsResult.error && marketsResult.error.message?.includes("network")) {
@@ -321,7 +295,6 @@ export async function GET() {
           marketsData = fallback.data;
         }
         markets = marketsData as _MarketRow[] | null;
-        aprBySlab = aprResult;
       } catch (sbErr) {
         console.warn("[/api/stake/pools] supabase query failed (non-fatal):", sbErr instanceof Error ? sbErr.message : String(sbErr));
       }
@@ -352,10 +325,10 @@ export async function GET() {
       const vaultBalRaw = vaultBalances[pool.vault] ?? 0n;
       const poolValueRaw = calcPoolValue(pool);
 
-      // APR: was a trailing annualised rate from insurance_snapshots (7d/30d
-      // window) — that table is gone (REDUCED SCHEMA 2026-07), so computeAprs()
-      // always returns 0 now. See its doc comment above.
-      const apr = aprBySlab[pool.slab] ?? 0;
+      // APR: was a trailing annualised rate from insurance_snapshots (7d/30d window). That table
+      // is gone (REDUCED SCHEMA 2026-07), so there is no history to annualise: the APR is UNKNOWN,
+      // sent as null. It used to be sent as 0, which the page showed as a real "0%" (#25).
+      const apr: number | null = null;
 
       const capUsedRaw = vaultBalRaw; // real deposits in vault
       const capTotalRaw = pool.depositCap > 0n ? pool.depositCap : 0n; // 0 = uncapped
@@ -390,7 +363,7 @@ export async function GET() {
         tvlRaw: vaultBalRaw.toString(),
         /** Pool value (deposited - withdrawn - flushed + returned) */
         poolValue: toUsdcFloat(poolValueRaw),
-        /** Trailing APR % — always 0 now; insurance_snapshots history was dropped (see computeAprs) */
+        /** Trailing APR %; null = not tracked (insurance_snapshots history was dropped) */
         apr,
         /** Deposit cap in USDC (0 = uncapped) */
         capTotal: toUsdcFloat(capTotalRaw),

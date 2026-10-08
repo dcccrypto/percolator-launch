@@ -34,7 +34,8 @@ interface ApiPool {
   tvlRaw: string;
   totalLpSupply: number;
   cooldownSlots: number;
-  apr: number;
+  /** null = not tracked (GET /api/stake/pools has no fee history). */
+  apr: number | null;
   poolMode: number;
 }
 
@@ -397,7 +398,7 @@ export function useLpPositions(): LpPositionsState & { refresh: () => void } {
           userSharePct,
           cooldownSlots: pool.cooldownSlots,
           cooldownElapsed,
-          apr: pool.apr,
+          apr: pool.apr ?? 0, // 0 = no APR line on the card (LpPositionsPanel shows it only when > 0)
           poolMode: pool.poolMode,
           kind: 'stake',
         });
