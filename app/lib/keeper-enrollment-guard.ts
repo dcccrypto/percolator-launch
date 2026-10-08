@@ -149,6 +149,41 @@ export type CapVerdict =
   | { ok: false; status: number; error: string; detail?: string; code?: CapRefusalCode };
 
 /**
+ * The rows that count against a ceiling: priced (keeper_status='active') on `network`. The guard
+ * below and `readCreatorAtLimit` both count through this one filter so they cannot drift (#3320).
+ */
+function activeEnrollmentCount(supabase: SupabaseClient, network: string) {
+  return supabase
+    .from("markets")
+    .select("slab_address", { count: "exact", head: true })
+    .eq("network", network)
+    .eq("keeper_status", "active");
+}
+
+/** Is this deployer at the per-creator ceiling? `{ ok: false }` = could not be read (unknown). */
+export type CreatorLimitRead = { ok: true; atLimit: boolean } | { ok: false };
+
+/**
+ * Would a NEW enrollment by `deployer` be refused by the per-creator ceiling? Same filter and same
+ * cap as `checkEnrollmentCaps` (for a slab not yet enrolled, `atLimit` is exactly its
+ * "per-creator-cap" refusal). Returns a verdict only, never rows or a count: callers expose it to
+ * the deployer themselves and to nobody else. A read that fails is unknown, never a verdict.
+ */
+export async function readCreatorAtLimit(
+  supabase: SupabaseClient,
+  args: { deployer: string; network: string },
+  caps: EnrollmentCaps,
+): Promise<CreatorLimitRead> {
+  try {
+    const mine = await activeEnrollmentCount(supabase, args.network).eq("deployer", args.deployer);
+    if (mine.error || typeof mine.count !== "number") return { ok: false };
+    return { ok: true, atLimit: mine.count >= caps.maxActivePerCreator };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/**
  * Would enrolling `slab` for `deployer` exceed a ceiling? Counts the OTHER active rows on this
  * network (the slab itself never counts against its own registration). A count that cannot be
  * read refuses (503, retryable): an unbounded enrollment is the failure this exists to stop.
@@ -158,13 +193,7 @@ export async function checkEnrollmentCaps(
   args: { slab: string; deployer: string; network: string },
   caps: EnrollmentCaps,
 ): Promise<CapVerdict> {
-  const base = () =>
-    supabase
-      .from("markets")
-      .select("slab_address", { count: "exact", head: true })
-      .eq("network", args.network)
-      .eq("keeper_status", "active")
-      .neq("slab_address", args.slab);
+  const base = () => activeEnrollmentCount(supabase, args.network).neq("slab_address", args.slab);
   const [all, mine] = await Promise.all([base(), base().eq("deployer", args.deployer)]);
   const err = all.error ?? mine.error;
   if (err || typeof all.count !== "number" || typeof mine.count !== "number") {

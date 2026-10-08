@@ -1,6 +1,7 @@
 "use client";
 import { resolveMarketMetadata } from "@/lib/market-metadata";
-import { UNSUPPORTED_POOL_COPY } from "@/lib/wizard-copy";
+import { LIVE_PRICE_LIMIT_COPY, UNSUPPORTED_POOL_COPY } from "@/lib/wizard-copy";
+import { blocksNewLaunch, useLivePriceLimit } from "@/hooks/useLivePriceLimit";
 import { WIZARD_STORAGE_KEY } from "@/lib/wizard-storage";
 
 import { DEFAULT_JUNIOR_FLOOR_BPS, validateP3Wizard, wizardP3Params } from "@/lib/limits/p3-wizard";
@@ -690,7 +691,15 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
       seedNavAtoms: 2n * backingSeedPerDomain(j),
     });
   }, [wizard.lpCollateral, wizard.juniorFloorBps, wizard.tokenMeta?.decimals]);
-  const launchDisabled = !allValid || !oracleSettled || !publicKey || p3Issue !== null;
+  // #3320: a wallet already at its per-creator live-price ceiling would launch a market keeper-register
+  // refuses for good: it would list and sit with no live price (the outcome the unsupported-pool gate
+  // above prevents), after spending its rent, LP and insurance. Block it before anything is built or
+  // signed. Only a KNOWN limit blocks: an unread or failed pre-check never does. Never blocks continuing
+  // a launch that already started (its market exists; finishing it is the creator's call).
+  const resumingLaunch = resumeFromStep !== null || chainResume !== null;
+  const livePriceLimit = useLivePriceLimit(walletB58, isDevnet && resolvedOracleType === "keeper" && !resumingLaunch);
+  const atLivePriceLimit = blocksNewLaunch(livePriceLimit, { keeperPriced: resolvedOracleType === "keeper", resuming: resumingLaunch });
+  const launchDisabled = !allValid || !oracleSettled || !publicKey || p3Issue !== null || atLivePriceLimit;
   const launchDisabledReason: string | undefined = !publicKey
     ? "Connect wallet"
     : p3Issue
@@ -699,6 +708,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
       ? "Resolving price feed"
     : !registrable
       ? (notRegistrableReason ?? "This token cannot be priced")
+    : atLivePriceLimit
+      ? LIVE_PRICE_LIMIT_COPY
     : !step1Valid
       ? "Resolve a token first"
       : duplicateCheck.duplicates.length > 0
@@ -892,6 +903,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
   // Launch market (or resume from a stuck slab when resumeFromStep is set)
   const handleLaunch = () => {
     if (!allValid || !oracleSettled || !publicKey) return;
+    // #3320: the button is disabled at a known limit; this keeps any other caller of handleLaunch
+    // from building a transaction for a market that would be refused a live price.
+    if (atLivePriceLimit) return;
     const { oracleFeed, priceE6 } = getOracleFeedAndPrice();
     // PERC-470 security: block hyperp launch without valid DEX price
     if (wizard.oracleType === "hyperp_ema" && priceE6 === 0n) {

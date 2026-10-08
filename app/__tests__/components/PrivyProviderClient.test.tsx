@@ -69,6 +69,7 @@ vi.mock("@privy-io/react-auth", () => ({
     </div>
   ),
   usePrivy: () => mockUsePrivy(),
+  useIdentityToken: () => ({ identityToken: null }),
   useLogin: (callbacks: any) => {
     mockUseLogin(callbacks);
     return { login: mockLogin };

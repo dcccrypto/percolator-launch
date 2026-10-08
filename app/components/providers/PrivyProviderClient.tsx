@@ -1,9 +1,10 @@
 "use client";
 
-import { FC, ReactNode, useCallback, useMemo } from "react";
+import { FC, ReactNode, useCallback, useMemo, useRef } from "react";
 import {
   PrivyProvider,
   useConnectWallet,
+  useIdentityToken,
   useLogin,
   usePrivy,
   type WalletListEntry,
@@ -19,7 +20,7 @@ import { createSolanaRpc, createSolanaRpcSubscriptions } from "@solana/kit";
 import { PublicKey, Transaction } from "@solana/web3.js";
 import * as Sentry from "@sentry/nextjs";
 import { SentryUserContext } from "@/components/providers/SentryUserContext";
-import { PrivyLoginContext } from "@/hooks/usePrivySafe";
+import { PrivyLoginContext, PrivySessionHeadersContext, type PrivySessionHeaders } from "@/hooks/usePrivySafe";
 import { WalletApiContext, type WalletApi } from "@/hooks/walletApiContext";
 import { usePreferredWallet, resolveActiveWallet } from "@/hooks/usePreferredWallet";
 import { getNetwork } from "@/lib/config";
@@ -357,7 +358,22 @@ const PrivyWalletApiBridge: FC<{ children: ReactNode }> = ({ children }) => {
  */
 const PrivyLoginBridge: FC<{ children: ReactNode }> = ({ children }) => {
   const { setPreferredAddress } = usePreferredWallet();
-  const { authenticated } = usePrivy();
+  const { authenticated, getAccessToken } = usePrivy();
+  const { identityToken } = useIdentityToken();
+
+  // The Privy session headers, read at call time through refs so the getter's identity never
+  // changes (same reason as useAdminFetch): consumers key effects on it.
+  const sessionRef = useRef({ authenticated, getAccessToken, identityToken });
+  sessionRef.current = { authenticated, getAccessToken, identityToken };
+  const sessionHeaders = useCallback<PrivySessionHeaders>(async () => {
+    const s = sessionRef.current;
+    if (!s.authenticated) return null;
+    const accessToken = await s.getAccessToken();
+    if (!accessToken) return null;
+    const headers: Record<string, string> = { Authorization: `Bearer ${accessToken}` };
+    if (s.identityToken) headers["x-privy-id-token"] = s.identityToken;
+    return headers;
+  }, []);
 
   const { login } = useLogin({
     onComplete: ({ loginAccount }) => {
@@ -392,7 +408,7 @@ const PrivyLoginBridge: FC<{ children: ReactNode }> = ({ children }) => {
 
   return (
     <PrivyLoginContext.Provider value={connect}>
-      {children}
+      <PrivySessionHeadersContext.Provider value={sessionHeaders}>{children}</PrivySessionHeadersContext.Provider>
     </PrivyLoginContext.Provider>
   );
 };
