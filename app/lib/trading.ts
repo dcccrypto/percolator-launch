@@ -379,6 +379,17 @@ export function clampClosePercent(value: number): number {
   return rounded;
 }
 
+export type OrderEffect = "open" | "reduce" | "close" | "flip";
+
+/** What an Open-tab order does to the account's position; the rule orderHeading below words. */
+export function orderEffect(direction: "long" | "short", orderSize: bigint, existingSize: bigint): OrderEffect {
+  const existingAbs = existingSize < 0n ? -existingSize : existingSize;
+  if (existingSize === 0n || (existingSize > 0n) === (direction === "long")) return "open";
+  if (orderSize < existingAbs) return "reduce";
+  if (orderSize === existingAbs) return "close";
+  return "flip";
+}
+
 /**
  * Confirm-modal heading for an Open-tab order. An order on the other side of the
  * account's open position (`existingSize`, signed, same units as `orderSize`) cuts that
@@ -389,9 +400,10 @@ export function clampClosePercent(value: number): number {
 export function orderHeading(direction: "long" | "short", orderSize: bigint, existingSize: bigint): string {
   const side = direction === "long" ? "Long" : "Short";
   const held = direction === "long" ? "Short" : "Long";
-  const existingAbs = existingSize < 0n ? -existingSize : existingSize;
-  if (existingSize === 0n || (existingSize > 0n) === (direction === "long")) return `Opening ${side} Position`;
-  if (orderSize < existingAbs) return `Reducing ${held} Position`;
-  if (orderSize === existingAbs) return `Closing ${held} Position`;
-  return `Closing ${held}, Opening ${side}`;
+  switch (orderEffect(direction, orderSize, existingSize)) {
+    case "open": return `Opening ${side} Position`;
+    case "reduce": return `Reducing ${held} Position`;
+    case "close": return `Closing ${held} Position`;
+    default: return `Closing ${held}, Opening ${side}`;
+  }
 }

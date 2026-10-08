@@ -22,7 +22,7 @@ const mocks = vi.hoisted(() => ({
   trade: vi.fn(),
   engineStale: false,
   adl: false,
-  fill: null as null | { kind: "full" | "partial" | "zero"; filledQ: bigint | null },
+  fill: null as null | { kind: "full" | "partial" | "zero" | "unknown"; filledQ: bigint | null },
   sideLimits: null as null | { long: SideLimit; short: SideLimit },
   sameOwner: false,
   limits: null as unknown,
@@ -323,6 +323,37 @@ describe("WP-3 result lines", () => {
     expect(lines()).toHaveLength(1);
     expect(lines()[0].dataset.kind).toBe("filled");
     expect(screen.getByTestId("status-line-body").textContent).toMatch(/^Opened 5 SOL long at \$2\.0+$/);
+  });
+
+  // An Open-tab order on the other side of an 8 SOL long cuts it first: the line says so.
+  const withLong = (q: bigint) =>
+    mocks.useUserAccount.mockReturnValue({ account: { capital: 10_000_000_000n, positionSize: q, entryPrice: 2_000_000n, pnl: 0n }, idx: 0 });
+  const placeShort = async (size: string) => {
+    fireEvent.click(screen.getByTestId("trade-side-short"));
+    await placeOrder(size);
+  };
+
+  it.each([
+    ["8000000", "10", /^Reduced your long by 5 SOL at \$2\.0+$/], // 5 SOL against an 8 SOL long
+    ["5000000", "10", /^Closed your 5 SOL long at \$2\.0+$/],
+    ["3000000", "10", /^Closed your 3 SOL long and opened 2 SOL short at \$2\.0+$/],
+  ])("against a %s long, a $%s short reads as what it did", async (pos, size, want) => {
+    withLong(BigInt(pos));
+    mocks.trade.mockResolvedValueOnce("sigCut");
+    render(<OrderTicket slabAddress={SLAB} />);
+    await placeShort(size);
+    expect(screen.getByTestId("status-line-body").textContent).toMatch(want);
+  });
+
+  it("an unmeasured fill never claims the full size opened", async () => {
+    mocks.trade.mockResolvedValueOnce("sigUnknown");
+    mocks.fill = { kind: "unknown", filledQ: null };
+    render(<OrderTicket slabAddress={SLAB} />);
+    await placeOrder("10");
+    expect(screen.getByTestId("status-line-body").textContent).toBe("Order went through. Your position updates in a moment.");
+    expect(lines()[0].dataset.kind).toBe("sent");
+    expect(lines()[0].textContent).toMatch(/Order sent/);
+    expect(lines()[0].textContent).not.toMatch(/Order filled/);
   });
 });
 

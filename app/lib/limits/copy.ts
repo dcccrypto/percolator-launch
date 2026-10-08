@@ -305,6 +305,13 @@ export const TICKET_COPY = {
   sidePausedSublabel: "Paused",
   result: {
     full: (size: string, sym: string, side: string, price: string) => `Opened ${size} ${sym} ${side} at ${price}`,
+    /** An Open-tab order against the open position (lib/trading.ts orderEffect). `held` = the side it cut. */
+    reduced: (size: string, sym: string, held: string, price: string) => `Reduced your ${held} by ${size} ${sym} at ${price}`,
+    closed: (size: string, sym: string, held: string, price: string) => `Closed your ${size} ${sym} ${held} at ${price}`,
+    flipped: (closed: string, opened: string, sym: string, held: string, side: string, price: string) =>
+      `Closed your ${closed} ${sym} ${held} and opened ${opened} ${sym} ${side} at ${price}`,
+    /** The post-trade read could not measure the fill: the trade landed, its size is not known yet. */
+    unmeasured: "Order went through. Your position updates in a moment.",
     partial: (filled: string, requested: string, sym: string) =>
       `Opened ${filled} of ${requested} ${sym}. The market had room for part of your order.`,
     zero: "Not filled: the market had no room for this trade when it landed. Nothing changed and no fee was charged.",

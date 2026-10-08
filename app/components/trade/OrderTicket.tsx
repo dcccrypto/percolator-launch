@@ -65,7 +65,7 @@ import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { AccountKind } from "@percolatorct/sdk";
-import { computeEstimatedEntryPrice, computeLiqPrice, computeTradingFee, computePositionInitialMargin, orderAgainstPosition, resolveEntryPrice } from "@/lib/trading";
+import { computeEstimatedEntryPrice, computeLiqPrice, computeTradingFee, computePositionInitialMargin, orderAgainstPosition, orderEffect, resolveEntryPrice } from "@/lib/trading";
 import { TradeConfirmationModal } from "@/components/trade/TradeConfirmationModal";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { usePrivyLogin, usePrivyAvailable } from "@/hooks/usePrivySafe";
@@ -398,7 +398,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   /** WP-3 row 9: the size was just reduced to the max; the helper turns --warning for 4 s. */
   const [clampedToQ, setClampedToQ] = useState<bigint | null>(null);
   /** WP-3 result line (§3.3): full / partial / zero fill of the last order, in the status slot. */
-  const [result, setResult] = useState<{ kind: "full" | "partial" | "zero"; body: string; sig: string | null; tryQ: bigint | null } | null>(null);
+  const [result, setResult] = useState<{ kind: "full" | "partial" | "zero" | "sent"; body: string; sig: string | null; tryQ: bigint | null } | null>(null);
   /** WP-3: the wait loop passed ~30 s; "We'll keep trying" + Stop. */
   const [waitingLong, setWaitingLong] = useState(false);
   const waitAbortRef = useRef<AbortController | null>(null);
@@ -1036,12 +1036,27 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         refreshSlab();
         return;
       }
+      // What the order did to the position (the same rule as the confirm heading), and no
+      // full-size claim when the post-trade read could not measure the fill.
+      const resultLine = () => {
+        const price = formatUsdPriceE6(submitPriceE6);
+        const held = existingPositionSize > 0n ? "long" : "short";
+        const existingAbs = existingPositionSize < 0n ? -existingPositionSize : existingPositionSize;
+        switch (orderEffect(direction, effectiveSize, existingPositionSize)) {
+          case "reduce": return TICKET_COPY.result.reduced(fmtQ(effectiveSize), baseTicker, held, price);
+          case "close": return TICKET_COPY.result.closed(fmtQ(existingAbs), baseTicker, held, price);
+          case "flip": return TICKET_COPY.result.flipped(fmtQ(existingAbs), fmtQ(effectiveSize - existingAbs), baseTicker, held, sideWord, price);
+          default: return TICKET_COPY.result.full(fmtQ(effectiveSize), baseTicker, sideWord, price);
+        }
+      };
       setResult(
         limitsFillResult?.kind === "partial"
           ? { kind: "partial", body: TICKET_COPY.result.partial(fmtQ(limitsFillResult.filledQ ?? 0n), fmtQ(effectiveSize), baseTicker), sig: sig ?? null, tryQ: null }
+          : limitsFillResult?.kind === "unknown"
+          ? { kind: "sent", body: TICKET_COPY.result.unmeasured, sig: sig ?? null, tryQ: null }
           : {
               kind: "full",
-              body: TICKET_COPY.result.full(fmtQ(effectiveSize), baseTicker, sideWord, formatUsdPriceE6(submitPriceE6)),
+              body: resultLine(),
               sig: sig ?? null,
               tryQ: null,
             },
@@ -1316,8 +1331,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       );
     }
     if (result) {
-      const kind = result.kind === "zero" ? "zero-fill" : result.kind === "partial" ? "partial-fill" : "filled";
-      const title = result.kind === "zero" ? "Not filled" : result.kind === "partial" ? "Partly filled" : "Order filled";
+      const kind = result.kind === "zero" ? "zero-fill" : result.kind === "partial" ? "partial-fill" : result.kind === "sent" ? "sent" : "filled";
+      const title = result.kind === "zero" ? "Not filled" : result.kind === "partial" ? "Partly filled" : result.kind === "sent" ? "Order sent" : "Order filled";
       const line = (
         <StatusLine
           message={{
