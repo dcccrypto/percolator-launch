@@ -53,7 +53,12 @@ export interface AccessClaims {
   pos: number;
   /** Unix seconds after which this is refused. */
   exp: number;
+  /** The visitor's referral code, when the gate sent one (older handoffs don't). */
+  ref?: string;
 }
+
+/** A referral code as the waitlist issues them: short, URL-safe. Anything else is dropped. */
+const REF_RE = /^[A-Za-z0-9_-]{1,32}$/;
 
 const enc = new TextEncoder();
 const dec = new TextDecoder("utf-8", { fatal: true });
@@ -136,7 +141,9 @@ async function open(
   if (typeof claims.pos !== "number" || !Number.isFinite(claims.pos)) return null;
   if (typeof claims.exp !== "number" || !Number.isFinite(claims.exp)) return null;
   if (nowSec >= claims.exp) return null;
-  return claims;
+  // Optional and never a reason to refuse: an odd value is dropped, the token still opens.
+  const { ref, ...rest } = claims;
+  return typeof ref === "string" && REF_RE.test(ref) ? { ...rest, ref } : rest;
 }
 
 // Same derivations as the gate. Changing either string here (or there) breaks
@@ -154,8 +161,8 @@ export function readHandoff(
   return open(token, handoffSecret(secret), toSec(nowMs));
 }
 
-export function mintSession(sub: string, pos: number, secret: string, nowMs = Date.now()): Promise<string> {
-  return mint({ sub, pos, exp: toSec(nowMs) + SESSION_TTL_SECONDS }, sessionSecret(secret));
+export function mintSession(sub: string, pos: number, secret: string, nowMs = Date.now(), ref?: string): Promise<string> {
+  return mint({ sub, pos, exp: toSec(nowMs) + SESSION_TTL_SECONDS, ...(ref ? { ref } : {}) }, sessionSecret(secret));
 }
 
 export function readSession(

@@ -56,6 +56,8 @@ vi.mock("@privy-io/react-auth", () => ({
     login: mockLogin,
   }),
   usePrivy: () => privyState,
+  useLinkAccount: () => ({ linkTwitter: vi.fn() }),
+  useUnlinkOAuth: () => ({ unlink: vi.fn() }),
 }));
 
 vi.mock("@privy-io/react-auth/solana", () => ({
@@ -92,6 +94,29 @@ describe("ConnectButton", () => {
     fireEvent.click(getByRole("button", { name: /wallet:/i }));
     expect(getByText("Manage Wallet")).toBeTruthy();
     expect(getByText("Disconnect")).toBeTruthy();
+  });
+
+  it("Account and Security opens its window and closes the menu", () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ref: null }))));
+    const { getByRole, getByText, queryByText } = render(<ConnectButton />);
+    fireEvent.click(getByRole("button", { name: /wallet:/i }));
+    fireEvent.click(getByText("Account and Security"));
+    expect(getByRole("dialog", { name: "Account and Security" })).toBeTruthy();
+    expect(queryByText("Manage Wallet")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("a sign-out closes the window; signing back in doesn't reopen it", () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ref: null }))));
+    const { getByRole, getByText, queryByRole, rerender } = render(<ConnectButton />);
+    fireEvent.click(getByRole("button", { name: /wallet:/i }));
+    fireEvent.click(getByText("Account and Security"));
+    privyState = { ...privyState, authenticated: false };
+    rerender(<ConnectButton />);
+    privyState = { ...privyState, authenticated: true };
+    rerender(<ConnectButton />);
+    expect(queryByRole("dialog")).toBeNull();
+    vi.unstubAllGlobals();
   });
 
   // Privy funding is mainnet-only, so on devnet "Add funds" was always disabled and the Privy menu

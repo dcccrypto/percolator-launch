@@ -86,7 +86,7 @@ export async function decideEnter(
   const remaining = Math.max(1, Math.min(HANDOFF_TTL_SECONDS, claims.exp - Math.floor(nowMs / 1000)));
   if (!(await replayGuard(mac, remaining))) return { ok: false };
 
-  return { ok: true, kind: "handoff", cookie: await mintSession(claims.sub, claims.pos, secret, nowMs) };
+  return { ok: true, kind: "handoff", cookie: await mintSession(claims.sub, claims.pos, secret, nowMs, claims.ref) };
 }
 
 /** Cookie attributes for the session. Host-only (no Domain) on purpose. */
