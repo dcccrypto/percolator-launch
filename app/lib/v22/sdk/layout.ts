@@ -1,5 +1,5 @@
 /*
- * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ adf8fd0 (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate),
+ * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ cb444db for the layout rows ONLY (slot 2,661, G9 body 2,064) (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate),
  * src/abi/layout.ts. Only the imports are retargeted (the installed @percolatorct/sdk 8.0.0 root, the v2.1 txv1 port, and the sibling v22 ports).
  * Delete when @percolatorct/sdk >= 9.0.0 ships and point ./index.ts at the package. Do not edit here; fix upstream in percolator-sdk.
  */
@@ -19,7 +19,7 @@
  *
  * - {@link LAYOUT_V21}: wrapper VERSION 18, engine discriminator 18. FROZEN. Every value equals the constant the v2.1
  *   decoders have always used (pinned by `test/layout-guard.test.ts`).
- * - {@link LAYOUT_V22_VARIANT_B}: wrapper VERSION 19, the v2.2 LAUNCH CANDIDATE (`release/v22-wrapper-rem` c8501d15 on
+ * - {@link LAYOUT_V22_VARIANT_B}: wrapper VERSION 19, the v2.2 LAUNCH CANDIDATE (`release/v22-wrapper-rem` 8fac24e8 (slot 2,661 after engine #287) on
  *   `release/v22-engine-rem`: per-leg K/F remainders + the 32 B slot tail): leg 217, portfolio 10,603, slot 2,629.
  *   **PROVISIONAL**, pinned against the real crate by `test/fixtures/v22-parity.json` (rustc `offset_of!`).
  * - {@link LAYOUT_V22_STAGE_A}: the earlier stage-A numbers (leg 185, portfolio 10,091, slot 2,597), kept as a named row.
@@ -259,7 +259,7 @@ const STANDALONE_V22: StandaloneAccountLens = Object.freeze({
   bondTrancheBody: 128,
   bondPositionBody: 96,
   insuranceUnitsBody: 192,
-  g9FeedAllowlistBody: 520,
+  g9FeedAllowlistBody: 2064,
   g9FeedAllowlistCap: 16,
 });
 
@@ -421,7 +421,7 @@ export const LAYOUT_V22_STAGE_A: LayoutTable = v22Row({
 export const LAYOUT_V22_VARIANT_B: LayoutTable = v22Row({
   name: "v2.2 variant B (PROVISIONAL, launch candidate)",
   source: "percolator-prog release/v22-wrapper-rem on engine release/v22-engine-rem; numbers from the coordinator table",
-  slotStride: 2629, engineSlotLen: 1605, portfolioLen: 10603, legStride: 217, receiptOff: 10409,
+  slotStride: 2661, engineSlotLen: 1637, portfolioLen: 10603, legStride: 217, receiptOff: 10409,
   leg: {
     ...LEG_V21_PREFIX, kfEpochSnap: 110, epochSnap: 118, lossWeight: 126, bSnap: 142, bRem: 158, bEpochSnap: 174, bStale: 182, stale: 183,
     bandEpochSnap: 184, bandLiqPending: 192, rentSnap: 193, rentCarry: 209,

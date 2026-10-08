@@ -69,7 +69,7 @@ export function createPortfolioAccountIx(payer: PublicKey, portfolio: PublicKey,
 
 /**
  * Exact market-account (slab) length for `n` asset slots in the ACTIVE layout:
- * `marketGroupOff + marketGroupLen + n * assetSlotStride` (v2.2: 592 + 806 + n * 2,629; 4,027 for one slot). The wrapper
+ * `marketGroupOff + marketGroupLen + n * assetSlotStride` (v2.2: 592 + 806 + n * 2,661; 4,059 for one slot). The wrapper
  * derives the slot capacity from the exact length, so a v2.1-sized slab (3,675 B) is not a whole number of v2.2 strides
  * and InitMarket reverts. Flag off this is the SDK's `v17MarketAccountLen(n)` (3,675 for one slot), unchanged.
  */

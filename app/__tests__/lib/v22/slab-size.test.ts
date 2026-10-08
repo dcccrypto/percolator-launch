@@ -1,6 +1,6 @@
 /**
  * Review F1: the market account (slab) is sized from the ACTIVE layout everywhere. v2.2 one-slot market =
- * 592 + 806 + 2629 = 4,027 B (the wrapper derives capacity from the exact length); v2.1 stays 3,675 B.
+ * 592 + 806 + 2661 = 4,059 B (the wrapper derives capacity from the exact length); v2.1 stays 3,675 B.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -14,7 +14,7 @@ import { launchCreatePins } from "@/lib/launch-single-tx/shape";
 import { computeCreateMarketSolCost } from "@/components/create/CostEstimate";
 
 afterEach(() => __setDevnetV22ForTest(null));
-const V22_ONE = 592 + 806 + 2629;
+const V22_ONE = 592 + 806 + 2661;
 const pins = () => launchCreatePins({ wrapper: "W", matcher: "M", tokenProgram: "T" }).slab.space;
 
 describe("flag off: byte-identical to the SDK (v2.1)", () => {
@@ -29,13 +29,13 @@ describe("flag off: byte-identical to the SDK (v2.1)", () => {
 });
 
 describe("flag on: v2.2 geometry", () => {
-  it("one slot is 4,027 B, fourteen is 592 + 806 + 14 x 2,629", () => {
+  it("one slot is 4,059 B, fourteen is 592 + 806 + 14 x 2,661", () => {
     __setDevnetV22ForTest(true);
-    expect(V22_ONE).toBe(4027);
-    expect(slabSizeFor({ p3: true })).toBe(4027);
-    expect(wizardSlabBytes(true)).toBe(4027);
-    expect(marketAccountLen(14)).toBe(592 + 806 + 14 * 2629);
-    expect(defaultSlabSize()).toBe(592 + 806 + 14 * 2629);
+    expect(V22_ONE).toBe(4059);
+    expect(slabSizeFor({ p3: true })).toBe(4059);
+    expect(wizardSlabBytes(true)).toBe(4059);
+    expect(marketAccountLen(14)).toBe(592 + 806 + 14 * 2661);
+    expect(defaultSlabSize()).toBe(592 + 806 + 14 * 2661);
     expect(slabSizeFor({})).toBe(defaultSlabSize());
     expect(slabSizeFor({ slabDataSize: 12345 })).toBe(12345); // an explicit caller size is respected
   });
@@ -47,7 +47,7 @@ describe("flag on: v2.2 geometry", () => {
   });
   it("the keeper-cosign pin equals the wizard's slab", () => {
     __setDevnetV22ForTest(true);
-    expect(pins()).toBe(4027);
+    expect(pins()).toBe(4059);
     expect(pins()).toBe(slabSizeFor({ p3: true }));
   });
   it("CostEstimate rent follows the layout (flag on > flag off)", () => {

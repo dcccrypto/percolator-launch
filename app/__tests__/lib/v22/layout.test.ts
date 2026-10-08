@@ -86,7 +86,7 @@ describe("flag ON: VERSION-keyed geometry", () => {
   });
   it("decodes by VERSION, not length: a v2.1 buffer sized like a v2.2 market is read as v2.1", () => {
     __setDevnetV22ForTest(true);
-    // 1 v2.2 slot + group is 592+806+2629 = 4027 bytes; make a v2.1-stamped buffer of exactly that length.
+    // 1 v2.2 slot + group is 592+806+2661 = 4059 bytes; make a v2.1-stamped buffer of exactly that length.
     const len = LAYOUT_V22.marketGroupOff + LAYOUT_V22.marketGroupLen + LAYOUT_V22.assetSlotStride;
     const d = stampHeader(new Uint8Array(len), 1, 18);
     expect(marketGeometry(d).layout.version).toBe(18);

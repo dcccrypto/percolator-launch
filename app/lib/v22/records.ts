@@ -1,7 +1,7 @@
 /**
  * Flag-gated adapter for the market / portfolio RECORD decoders whose geometry the SDK candidate (percolator-sdk#406 @ ecb6215)
  * made VERSION-keyed. The installed @percolatorct/sdk 8.0.0 and the v2.1 ports in ../v21/sdk bake in v2.1 numbers
- * (592 + 758 + 2325 * i ...), which silently misread a v2.2 market (group 806, stride 2629, portfolio 10,603).
+ * (592 + 758 + 2325 * i ...), which silently misread a v2.2 market (group 806, stride 2661, portfolio 10,603).
  *
  *  - Flag OFF (`NEXT_PUBLIC_DEVNET_V22` unset): every export is the function the app used before (installed SDK or v2.1 port).
  *  - Flag ON: every export is the layout-aware vendored port (./sdk/records/*): the layout comes from the account's VERSION,

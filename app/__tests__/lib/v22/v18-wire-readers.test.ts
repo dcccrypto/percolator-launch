@@ -27,7 +27,7 @@ describe("flag on, v2.2 market", () => {
     const d = build(LAYOUT_V22);
     expect(readAssetAdmin(d, 1).toBase58()).toBe(admin.toBase58());
     expect(readAssetControlSeqs(d, 1).oracleObservation).toBe(4242n);
-    expect(assetProfileOff(1, d)).toBe(592 + 806 + 2629);
+    expect(assetProfileOff(1, d)).toBe(592 + 806 + 2661);
     expect(() => readProtocolFeeAuthorityEpoch(d)).not.toThrow();
   });
   it("NEGATIVE CONTROL: the v2.1 stride would read the wrong bytes", () => {
