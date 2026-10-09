@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({
   account: null as unknown,
   pending: false,
+  connected: false,
   priceE6: 100_000_000n as bigint | null,
 }));
 
@@ -23,6 +24,10 @@ const acct = (over: Record<string, unknown>) => ({
   },
 });
 
+vi.mock("@/hooks/useWalletCompat", async (orig) => ({
+  ...(await orig<object>()),
+  useWalletCompat: () => ({ connected: h.connected, publicKey: null }),
+}));
 vi.mock("@/hooks/useUserAccount", () => ({ useUserAccount: () => h.account, useUserAccountScanPending: () => h.pending }));
 vi.mock("@/hooks/useNftWrappedPosition", () => ({ useNftWrappedPosition: () => null }));
 vi.mock("@/hooks/useClosePosition", () => ({
@@ -61,6 +66,7 @@ beforeEach(() => {
   h.priceE6 = 100_000_000n;
   h.account = null;
   h.pending = false;
+  h.connected = false;
 });
 
 describe("PositionsDock while the portfolio scan is pending (GH#2707)", () => {
@@ -77,6 +83,15 @@ describe("PositionsDock while the portfolio scan is pending (GH#2707)", () => {
     render(<PositionsDock slabAddress="s" />);
     expect(screen.getByText("No open positions")).toBeInTheDocument();
     expect(screen.getByText(/Connect your wallet and deposit collateral/)).toBeInTheDocument();
+  });
+
+  // #61: a connected wallet with no account here was told to "Connect your wallet".
+  it("a connected wallet with no account on this market is pointed at the ticket, not told to connect", () => {
+    h.connected = true;
+    render(<PositionsDock slabAddress="s" />);
+    expect(screen.getByText("No open positions")).toBeInTheDocument();
+    expect(screen.queryByText(/Connect your wallet/)).toBeNull();
+    expect(screen.getByText(/Your first trade sets up your account here/)).toBeInTheDocument();
   });
 
   it("a known position renders normally even if the pending flag were still set", () => {

@@ -30,6 +30,7 @@
 import { computeMarginCushion, severityFromCushion } from "@/lib/liquidation-risk";
 import { FC, memo, useMemo, useState } from "react";
 import { useUserAccount, useUserAccountScanPending } from "@/hooks/useUserAccount";
+import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useNftWrappedPosition } from "@/hooks/useNftWrappedPosition";
 import { PositionNftMenu, ClosedPositionNftNotice, NFT_MENU_COPY } from "@/components/trade/PositionNftMenu";
 import { useClosePosition } from "@/hooks/useClosePosition";
@@ -124,6 +125,7 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
   // GH#2707: while the portfolio scan is in flight a null account is unknown, not absent.
   const scanPending = useUserAccountScanPending();
   const accountPending = !mockMode && !userAccount && scanPending;
+  const { connected } = useWalletCompat();
   const config = useMarketConfig();
   const { accounts, config: mktConfig, params, adlFactors, wrapperConfigV17, refresh: refreshSlab } = useSlabState();
   const { engine, insuranceBalance } = useEngineState();
@@ -211,7 +213,10 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
       ? "Checking this market for your account."
       : userAccount
         ? "Use the order ticket to open a position."
-        : "Connect your wallet and deposit collateral to start trading.";
+        : connected
+          // Connected, no account on this market yet: the first trade sets it up (fund-and-trade).
+          ? "Use the order ticket to open a position. Your first trade sets up your account here."
+          : "Connect your wallet and deposit collateral to start trading.";
     return (
       <>
         <EmptyState title={accountPending ? "Loading positions…" : undefined} subtitle={subtitle} />
