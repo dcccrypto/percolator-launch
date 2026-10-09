@@ -472,7 +472,6 @@ export function buildV17Position(
    * exactly the pre-ADL-fix behaviour.
    */
   adlFactors: AssetAdlFactors | null = null,
-  lotExp = 0,
   /** The portfolio account `portfolio` was decoded from (see `PortfolioPosition.portfolioPk`). */
   portfolioPk: PublicKey | null = null,
 ): PortfolioPosition {
@@ -630,7 +629,6 @@ export function buildV17Position(
     maintenanceMarginBps,
     initialMarginBps,
     nftWrapped,
-    lotExp,
     portfolioPk,
   };
 }
@@ -1043,9 +1041,10 @@ export async function fetchPortfolioSnapshot(
           resolveSymbol(slabAddrStr, symbolBySlab),
           pkStr,
           meta.adlFactors,
-          meta.lotExp ?? 0,
           pubkey,
         );
+        // v2.2 lot exponent of this market (0 = no lots / flag off), stamped after the build so the v2.1 positional signature is unchanged.
+        pos.lotExp = meta.lotExp ?? 0;
 
         if (liveLiquidationSeverity(pos, null) !== "safe") {
           riskCount++;
@@ -1138,9 +1137,9 @@ export async function fetchPortfolioSnapshot(
             resolveSymbol(slabAddrStr, symbolBySlab),
             pkStr,
             meta.adlFactors,
-            meta.lotExp ?? 0,
             portfolioPks[i],
           );
+          pos.lotExp = meta.lotExp ?? 0;
 
           if (liveLiquidationSeverity(pos, null) !== "safe") {
             riskCount++;

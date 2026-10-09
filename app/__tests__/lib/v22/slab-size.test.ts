@@ -9,7 +9,11 @@ import { v17MarketAccountLen } from "@percolatorct/sdk";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { LAYOUT_V22 } from "@/lib/v22/sdk";
 import { marketAccountLen } from "@/lib/v22/layout";
-import { DEFAULT_SLAB_SIZE, defaultSlabSize, slabSizeFor, wizardSlabBytes } from "@/lib/create-market-args";
+import {
+  DEFAULT_SLAB_SIZE, LAUNCH_ASSET_SLOTS, V17_MAX_PORTFOLIO_ASSETS, V22_MAX_PORTFOLIO_ASSETS, assetSlotsForSlabLen, buildV17InitMarketArgs, defaultSlabSize,
+  marketAssetSlotsFor, maxPortfolioAssets, slabSizeFor, wizardSlabBytes,
+} from "@/lib/create-market-args";
+import { deriveMarketParams } from "@/lib/market-params";
 import { launchCreatePins } from "@/lib/launch-single-tx/shape";
 import { computeCreateMarketSolCost } from "@/components/create/CostEstimate";
 
@@ -18,26 +22,53 @@ const V22_ONE = 592 + 806 + 2661;
 const pins = () => launchCreatePins({ wrapper: "W", matcher: "M", tokenProgram: "T" }).slab.space;
 
 describe("flag off: byte-identical to the SDK (v2.1)", () => {
-  it("3,675 B for one slot, 33,900 B for fourteen", () => {
+  it("3,675 B for one slot (every launch, #3357), 33,900 B for fourteen (an old market's size)", () => {
     expect(slabSizeFor({ p3: true })).toBe(3675);
     expect(wizardSlabBytes(true)).toBe(3675);
+    expect(wizardSlabBytes(false)).toBe(3675);
     expect(defaultSlabSize()).toBe(DEFAULT_SLAB_SIZE);
-    expect(DEFAULT_SLAB_SIZE).toBe(33_900);
+    expect(DEFAULT_SLAB_SIZE).toBe(3_675);
+    expect(slabSizeFor({})).toBe(3_675);
     expect(marketAccountLen(14)).toBe(v17MarketAccountLen(14));
+    expect(v17MarketAccountLen(14)).toBe(33_900);
     expect(pins()).toBe(3675);
+  });
+  it("the slot cap and the slot lookup are the v2.1 ones: 14, and 1..14 resolve", () => {
+    expect(maxPortfolioAssets()).toBe(V17_MAX_PORTFOLIO_ASSETS);
+    for (let n = 1; n <= 14; n++) expect(assetSlotsForSlabLen(v17MarketAccountLen(n))).toBe(n);
+    expect(assetSlotsForSlabLen(4_059)).toBeNull(); // a v2.2 length is not a v2.1 market
+    expect(buildV17InitMarketArgs({ initialPriceE6: 1_000_000n, tradingFeeBps: 10 }, deriveMarketParams(5, 1_000_000_000n, 1_000_000n)).maxPortfolioAssets).toBe(1);
   });
 });
 
 describe("flag on: v2.2 geometry", () => {
-  it("one slot is 4,059 B, fourteen is 592 + 806 + 14 x 2,661", () => {
+  it("a launch is ONE slot, 4,059 B; the cap is 4 slots = 12,042 B (final: percolator-prog#546)", () => {
     __setDevnetV22ForTest(true);
     expect(V22_ONE).toBe(4059);
+    expect(LAUNCH_ASSET_SLOTS).toBe(1);
     expect(slabSizeFor({ p3: true })).toBe(4059);
     expect(wizardSlabBytes(true)).toBe(4059);
-    expect(marketAccountLen(14)).toBe(592 + 806 + 14 * 2661);
-    expect(defaultSlabSize()).toBe(592 + 806 + 14 * 2661);
-    expect(slabSizeFor({})).toBe(defaultSlabSize());
-    expect(slabSizeFor({ slabDataSize: 12345 })).toBe(12345); // an explicit caller size is respected
+    expect(wizardSlabBytes(false)).toBe(4059);
+    expect(defaultSlabSize()).toBe(4059);
+    expect(slabSizeFor({})).toBe(4059);
+    expect(marketAccountLen(V22_MAX_PORTFOLIO_ASSETS)).toBe(592 + 806 + 4 * 2661);
+    expect(marketAccountLen(4)).toBe(12_042);
+    expect(slabSizeFor({ assetSlots: 4 })).toBe(12_042); // a resumed 4-slot market keeps its capacity
+  });
+  it("InitMarket never asks for more than the program's cap of 4 (error 14 above it); slot lookup is the v2.2 stride", () => {
+    __setDevnetV22ForTest(true);
+    expect(V22_MAX_PORTFOLIO_ASSETS).toBe(4);
+    expect(maxPortfolioAssets()).toBe(4);
+    const args = buildV17InitMarketArgs({ initialPriceE6: 1_000_000n, tradingFeeBps: 10 }, deriveMarketParams(5, 1_000_000_000n, 1_000_000n));
+    expect(args.maxPortfolioAssets).toBe(1);
+    expect(args.maxPortfolioAssets).toBeLessThanOrEqual(V22_MAX_PORTFOLIO_ASSETS);
+    expect(marketAssetSlotsFor({ p3: true })).toBe(1);
+    for (const [n, len] of [[1, 4_059], [2, 6_720], [3, 9_381], [4, 12_042]] as const) {
+      expect(marketAccountLen(n)).toBe(len);
+      expect(assetSlotsForSlabLen(len)).toBe(n);
+    }
+    expect(assetSlotsForSlabLen(marketAccountLen(5))).toBeNull(); // not a market the program accepts
+    expect(assetSlotsForSlabLen(3_675)).toBeNull(); // NEGATIVE CONTROL: a v2.1 length is not a v2.2 market
   });
   it("the size is a whole number of v2.2 strides past the group (the wrapper requires it)", () => {
     __setDevnetV22ForTest(true);
@@ -67,7 +98,9 @@ describe("source guard: no flow names a slab size of its own", () => {
     "components/create/CostEstimate.tsx", "components/create/CreateMarketWizard.tsx", "lib/create-market-bridge.ts",
   ];
   const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
-  const offends = (src: string) => /\bv17MarketAccountLen\b|\bDEFAULT_SLAB_SIZE\b|\b(3675|33_?900|4027)\b/.test(strip(src));
+  // An import specifier line is allowed (the flag-off arm below needs it). The one allowed call form: the layout-aware ternary whose flag-off arm is the v2.1 call (a playground source guard pins that literal).
+  const layoutAware = (s: string) => s.replace(/isDevnetV22Enabled\(\)\s*\?\s*marketAccountLen\((\w+)\)\s*:\s*v17MarketAccountLen\(\1\)/g, "marketAccountLen($1)");
+  const offends = (src: string) => /\bv17MarketAccountLen\b|\bDEFAULT_SLAB_SIZE\b|\b(3675|33_?900|4027)\b/.test(layoutAware(strip(src)).replace(/^\s*v17MarketAccountLen,\s*$/m, ""));
   it.each(FILES)("%s", (f) => {
     let src: string;
     try { src = readFileSync(join(__dirname, "../../..", f), "utf8"); } catch { return; }
@@ -78,5 +111,8 @@ describe("source guard: no flow names a slab size of its own", () => {
     expect(offends("space: 3675")).toBe(true);
     expect(offends("const n = v17MarketAccountLen(1)")).toBe(true);
     expect(offends("space: slabSizeFor(params)")).toBe(false);
+    expect(offends("const n = isDevnetV22Enabled() ? marketAccountLen(k) : v17MarketAccountLen(k)")).toBe(false);
+    expect(offends("const n = isDevnetV22Enabled() ? marketAccountLen(k) : v17MarketAccountLen(j)")).toBe(true);
+    expect(offends("const n = cond ? marketAccountLen(k) : v17MarketAccountLen(k)")).toBe(true);
   });
 });

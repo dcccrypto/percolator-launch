@@ -59,8 +59,10 @@ import {
   deriveNftRegistry,
   MATCHER_CONTEXT_LEN,
   MAX_BACKING_BUCKET_EXPIRY_SLOT,
+  v17MarketAccountLen,
   type SlabTierKey,
 } from "@percolatorct/sdk";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { portfolioAccountLen } from "@/lib/v22/layout";
 import { getConfig } from "@/lib/config";
 import { getServerConnection } from "@/lib/server-rpc";
@@ -240,7 +242,8 @@ export async function POST(req: NextRequest) {
     // ONE slot capacity feeds all three places that must agree: the account length (here), InitMarket's
     // maxPortfolioAssets, and SetMatcherConfig's frontier (slots + 1). Same count the wizard launches with.
     const assetSlots = LAUNCH_ASSET_SLOTS;
-    const slabDataSize = marketAccountLen(assetSlots);
+    // Layout-aware: v2.2 (flag on) sizes by the v2.2 stride; flag off this is exactly v17MarketAccountLen(assetSlots).
+    const slabDataSize = isDevnetV22Enabled() ? marketAccountLen(assetSlots) : v17MarketAccountLen(assetSlots);
 
     // Default margin/leverage params — conservative for new markets
     const initialMarginBps = 2000n; // 50% margin = 5× leverage

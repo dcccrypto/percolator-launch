@@ -26,15 +26,21 @@ import {
   parseProtocolFeeAuthorityEpoch,
   type AssetControlSequencesV17,
   type CrankObservationHint,
+  V17_MARKET_GROUP_OFF,
+  V17_MARKET_GROUP_LEN,
+  V17_MARKET_ASSET_SLOT_LEN,
 } from "@percolatorct/sdk";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { marketGeometry, parsePortfolio } from "@/lib/v22/layout";
 
 /**
  * Absolute byte offset where asset `assetIndex`'s wrapper slot starts. The market account BYTES are REQUIRED: the geometry
  * is chosen by the account's VERSION (v2.2: 2,629 B slots after an 806 B group; v2.1: 2,325 B after 758 B). A byte-less
- * form cannot know the layout, so it does not exist (review F4). Flag off the bytes are ignored (v2.1 constants).
+ * form cannot know the layout, so with the v2.2 flag on the bytes are required (review F4). Flag off the bytes are ignored (v2.1 constants, as before).
  */
-export function assetProfileOff(assetIndex: number, slabData: Uint8Array): number {
+export function assetProfileOff(assetIndex: number, slabData?: Uint8Array): number {
+  if (!isDevnetV22Enabled()) return V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN + assetIndex * V17_MARKET_ASSET_SLOT_LEN;
+  if (!slabData) throw new Error("assetProfileOff: the market account bytes are required when v2.2 is enabled (the layout comes from the account VERSION)");
   return marketGeometry(slabData, "assetProfileOff").slotOff(assetIndex);
 }
 
