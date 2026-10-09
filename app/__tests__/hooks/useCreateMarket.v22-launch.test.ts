@@ -13,7 +13,7 @@ import { bandDefaultsV22, encodeInitMarketTrailerV22, IX_TAG_V22 } from "@/lib/v
 import { placeBondTranche } from "@/lib/v22/launch-wire";
 import { DEFAULT_BOND, DEFAULT_RENT } from "@/lib/v22/launch-plan";
 import { expectedLaunchShape } from "@/lib/launch-single-tx/shape";
-import { writeFileSync } from "node:fs";
+import { appendFileSync, writeFileSync } from "node:fs";
 import { ed25519 } from "@noble/curves/ed25519";
 import { ComputeBudgetProgram, Keypair, MessageV1, PublicKey, SystemProgram, Transaction, TransactionInstruction } from "@solana/web3.js";
 import { IX_TAG, IX_TAG_P3, STAKE_IX } from "@percolatorct/sdk";
@@ -362,6 +362,143 @@ describe("v2.2 launch", () => {
     expect(launchBundleViolations(stripped, ctx).some((x) => /bound vault must carry the vault_lp_state/.test(x) || /must carry the vault_lp_state/.test(x))).toBe(true);
     const wrongKey = good.map((x) => (x.programId === ctx.programs.wrapper && x.data[0] === 75 ? { ...x, accounts: x.accounts.map((a, i) => (i === 12 ? { ...a, key: ctx.payer } : a)) } : x));
     expect(launchBundleViolations(wrongKey, ctx).some((x) => /must carry the vault_lp_state/.test(x))).toBe(true);
+  });
+
+  // ------------------------------------------------------------------ share-token naming (tag 122) + tag 74's 7th account
+  describe("Earn share token naming and tag 74's collateral-mint account", () => {
+    const SLAB = () => Keypair.fromSeed(seed(77)).publicKey;
+    const ctxOf = () => ({ programs: { wrapper: PROGRAM.toBase58(), stake: STAKE.toBase58() }, payer: WALLET.publicKey.toBase58(), slab: SLAB().toBase58(), keeper: KEEPER.publicKey.toBase58() });
+    const keysOf = (d: ReturnType<typeof decodeV1Message>, i: number) => d.instructions[i]!.accountIndexes.map((j) => d.accountKeys[j]!);
+    const plainParams = () => params({ growth: GROWTH, v22: { lotExp: 0, rent: { ...DEFAULT_RENT }, band: bandDefaultsV22(6) } });
+
+    it("plain v2.2 launch: 74 has 7 accounts ([6] = the market's collateral mint), 122 follows it (ticker from the symbol, wallet = payer = marketauth), ONE tx, keeper route co-signs, under 4,096 B", async () => {
+      __setDevnetV22ForTest(true);
+      const { outcome } = await launch({ singleTx: true, params: plainParams() });
+      expect(outcome).toEqual({ status: "success" });
+      expect(sent).toHaveLength(1);
+      expect(routeCalls).toEqual([{ v1: false, status: 200 }, { v1: true, status: 200 }]);
+      const wire = sent[0]!;
+      expect(wire.length).toBeLessThanOrEqual(4096);
+      const d = decodeV1Message(splitV1Wire(wire).message);
+      const k = kindsOf(d);
+      const i74 = k.indexOf("w74"), i122 = k.indexOf("w122");
+      expect(i122).toBe(i74 + 1);
+      expect(k.filter((x) => x === "w122")).toHaveLength(1);
+      expect(k.indexOf("s" + STAKE_IX.InitPool)).toBeGreaterThan(i122); // BEFORE the marketauth handoff (StakeInitPool)
+      const k74 = keysOf(d, i74);
+      expect(k74).toHaveLength(7);
+      expect(k74[6].equals(MINT)).toBe(true);
+      expect(v1IsWritable(d, d.instructions[i74]!.accountIndexes[6]!)).toBe(false); // read-only in the message itself
+      const n = d.instructions[i122]!;
+      expect(Buffer.from(n.data).toString("hex")).toBe("7a03" + Buffer.from("TST").toString("hex"));
+      const k122 = keysOf(d, i122);
+      expect(k122).toHaveLength(9);
+      expect(k122[0].equals(WALLET.publicKey)).toBe(true);
+      expect(k122[7].equals(SLAB())).toBe(true);
+      expect(k122[8].equals(WALLET.publicKey)).toBe(true);
+      // the shape validator (the keeper route's rule set) accepts it
+      expect(launchBundleViolations(neutralFromV1(d), ctxOf())).toEqual([]);
+      if (process.env.V22_SIZE_LOG) appendFileSync(process.env.V22_SIZE_LOG, `plain v2.2 single-tx launch with naming: ${wire.length} bytes\n`);
+    });
+
+    it("bond launch: 122 travels with the Earn-seed segment (after 107), still before StakeInitPool; ONE tx under 4,096 B; valid shape", async () => {
+      __setDevnetV22ForTest(true);
+      const { outcome } = await launch({ singleTx: true, params: bondParams() });
+      expect(outcome).toEqual({ status: "success" });
+      const wire = sent[0]!;
+      expect(wire.length).toBeLessThanOrEqual(4096);
+      const d = decodeV1Message(splitV1Wire(wire).message);
+      const k = kindsOf(d);
+      expect(k.indexOf("w122")).toBeGreaterThan(k.indexOf("w107"));
+      expect(k.indexOf("w122")).toBeLessThan(k.indexOf("s" + STAKE_IX.InitPool));
+      expect(launchBundleViolations(neutralFromV1(d), ctxOf())).toEqual([]);
+      if (process.env.V22_SIZE_LOG) appendFileSync(process.env.V22_SIZE_LOG, `bond v2.2 single-tx launch with naming: ${wire.length} bytes\n`);
+    });
+
+    it("no usable symbol: the generic form (7 accounts); the kill switch drops 122 but 74 keeps its 7 accounts", async () => {
+      __setDevnetV22ForTest(true);
+      await launch({ singleTx: true, params: { ...plainParams(), symbol: "._-" } }); // passes registration, nothing A-Z0-9 left: the generic form
+      let d = decodeV1Message(splitV1Wire(sent[0]!).message);
+      const g = d.instructions[findIx(d, PROGRAM, 122)[0]!]!;
+      expect([...g.data]).toEqual([122, 0]);
+      expect(g.accountIndexes).toHaveLength(7);
+      expect(launchBundleViolations(neutralFromV1(d), ctxOf())).toEqual([]);
+      sent = []; resetCosignV1RateLimits(); generated = 0;
+      process.env.NEXT_PUBLIC_DEVNET_V22_SHARE_NAMING = "0";
+      try {
+        await launch({ singleTx: true, params: plainParams() });
+        d = decodeV1Message(splitV1Wire(sent[0]!).message);
+        expect(findIx(d, PROGRAM, 122)).toHaveLength(0);
+        expect(keysOf(d, findIx(d, PROGRAM, IX_TAG.CreateLpVault)[0]!)).toHaveLength(7);
+        expect(launchBundleViolations(neutralFromV1(d), ctxOf())).toEqual([]);
+      } finally {
+        delete process.env.NEXT_PUBLIC_DEVNET_V22_SHARE_NAMING;
+      }
+    });
+
+    it("flag OFF: the launch is the v2.1 one: 74 with 6 accounts and no tag 122", async () => {
+      __setDevnetV22ForTest(false);
+      await launch({ singleTx: true, params: params({ growth: GROWTH }) });
+      const d = decodeV1Message(splitV1Wire(sent[0]!).message);
+      expect(findIx(d, PROGRAM, 122)).toHaveLength(0);
+      expect(keysOf(d, findIx(d, PROGRAM, IX_TAG.CreateLpVault)[0]!)).toHaveLength(6);
+    });
+
+    describe("NEGATIVE CONTROLS: the shape validator (the keeper co-sign route's rules) refuses a tampered naming", () => {
+      const tamper = async (mut: (ixs: NeutralIx[]) => NeutralIx[]) => {
+        __setDevnetV22ForTest(true);
+        await launch({ singleTx: true, params: plainParams() });
+        const d = decodeV1Message(splitV1Wire(sent[0]!).message);
+        return launchBundleViolations(mut(neutralFromV1(d)), ctxOf());
+      };
+      const is122 = (x: NeutralIx) => x.programId === PROGRAM.toBase58() && x.data[0] === 122;
+      const patch = (f: (x: NeutralIx) => NeutralIx) => (ixs: NeutralIx[]) => ixs.map((x) => (is122(x) ? f(x) : x));
+      const rekey = (pos: number, key: string) => (x: NeutralIx): NeutralIx => ({ ...x, accounts: x.accounts.map((a, i) => (i === pos ? { ...a, key } : a)) });
+
+      it("baseline is clean", async () => {
+        expect(await tamper((x) => x)).toEqual([]);
+      });
+      it("another registry / mint / metadata / fee-payer PDA", async () => {
+        for (const pos of [1, 2, 3, 6]) {
+          const v = await tamper(patch(rekey(pos, Keypair.generate().publicKey.toBase58())));
+          expect(v.some((m) => /account \[\d\] is not the one derived from this market/.test(m)), `pos ${pos}`).toBe(true);
+        }
+      });
+      it("a payer or marketauth other than the creator", async () => {
+        const other = Keypair.generate().publicKey.toBase58();
+        expect((await tamper(patch(rekey(0, other)))).length).toBeGreaterThan(0);
+        expect((await tamper(patch(rekey(8, other)))).some((m) => /marketauth \[8\] must be the creator/.test(m))).toBe(true);
+        expect((await tamper(patch(rekey(7, other)))).some((m) => /\[7\] must be this market/.test(m))).toBe(true);
+      });
+      it("a ticker the program would refuse, a wrong length byte, trailing bytes", async () => {
+        const data = (b: number[]) => (x: NeutralIx): NeutralIx => ({ ...x, data: Uint8Array.from(b) });
+        expect((await tamper(patch(data([122, 3, 0x61, 0x62, 0x63])))).some((m) => /ticker is not A-Z0-9/.test(m))).toBe(true);
+        expect((await tamper(patch(data([122, 9, 65, 65, 65, 65, 65, 65, 65, 65, 65])))).some((m) => /not \[122\]\[n <= 8\]/.test(m))).toBe(true);
+        expect((await tamper(patch(data([122, 3, 65, 66])))).some((m) => /not \[122\]\[n <= 8\]/.test(m))).toBe(true);
+        expect((await tamper(patch(data([122])))).some((m) => /not \[122\]\[n <= 8\]/.test(m))).toBe(true);
+      });
+      it("naming after the marketauth handoff (StakeInitPool) is refused", async () => {
+        const v = await tamper((ixs) => {
+          const i = ixs.findIndex(is122);
+          const naming = ixs[i]!;
+          const rest = ixs.filter((_, j) => j !== i);
+          const pool = rest.findIndex((x) => x.programId === STAKE.toBase58() && x.data[0] === STAKE_IX.InitPool);
+          return [...rest.slice(0, pool + 1), naming, ...rest.slice(pool + 1)];
+        });
+        expect(v.some((m) => /InitLpShareMetadata after stake.InitPool/.test(m))).toBe(true);
+      });
+      it("a second naming, or naming before the vault exists, is not the launch shape", async () => {
+        expect((await tamper((ixs) => { const i = ixs.findIndex(is122); return [...ixs.slice(0, i + 1), ixs[i]!, ...ixs.slice(i + 1)]; })).some((m) => /not the launch shape/.test(m))).toBe(true);
+        expect((await tamper((ixs) => { const i = ixs.findIndex(is122); const n = ixs[i]!; const rest = ixs.filter((_, j) => j !== i); return [...rest.slice(0, 2), n, ...rest.slice(2)]; })).some((m) => /not the launch shape/.test(m))).toBe(true);
+      });
+      it("flag OFF: tag 122 is not an allowed instruction at all", async () => {
+        __setDevnetV22ForTest(true);
+        await launch({ singleTx: true, params: plainParams() });
+        const d = decodeV1Message(splitV1Wire(sent[0]!).message);
+        __setDevnetV22ForTest(false);
+        expect(launchBundleViolations(neutralFromV1(d), ctxOf()).some((m) => /not allowed/.test(m))).toBe(true);
+      });
+    });
   });
 
   // Dump of the REAL bond launch the app builds, for the LiteSVM replay against the real wrapper binary

@@ -70,6 +70,16 @@ describe("flag on: v2.2 geometry", () => {
     expect(assetSlotsForSlabLen(marketAccountLen(5))).toBeNull(); // not a market the program accepts
     expect(assetSlotsForSlabLen(3_675)).toBeNull(); // NEGATIVE CONTROL: a v2.1 length is not a v2.2 market
   });
+  it("a 5-slot (or v2.1 14-slot) InitMarket is refused client-side with the flag on, allowed with it off", () => {
+    const d = deriveMarketParams(5, 1_000_000_000n, 1_000_000n);
+    const p = (assetSlots: number) => ({ initialPriceE6: 1_000_000n, tradingFeeBps: 10, assetSlots });
+    __setDevnetV22ForTest(true);
+    expect(buildV17InitMarketArgs(p(4), d).maxPortfolioAssets).toBe(4);
+    expect(() => buildV17InitMarketArgs(p(5), d)).toThrow(/cap of 4/);
+    expect(() => buildV17InitMarketArgs(p(14), d)).toThrow(/cap of 4/);
+    __setDevnetV22ForTest(false);
+    expect(buildV17InitMarketArgs(p(14), d).maxPortfolioAssets).toBe(14); // v2.1 unchanged
+  });
   it("the size is a whole number of v2.2 strides past the group (the wrapper requires it)", () => {
     __setDevnetV22ForTest(true);
     for (const n of [1, 2, 14]) expect((marketAccountLen(n) - LAYOUT_V22.marketGroupOff - LAYOUT_V22.marketGroupLen) % LAYOUT_V22.assetSlotStride).toBe(0);

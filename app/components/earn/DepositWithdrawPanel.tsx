@@ -27,7 +27,7 @@ import { checkSignatureLanded, timedOutSignature } from '@/lib/tx';
 import { watchPendingSignature } from '@/lib/pending-signature';
 import { explorerTxUrl } from '@/lib/config';
 import dynamic from 'next/dynamic';
-import { lpShareWalletNote } from '@/lib/lp-share-wallet-note';
+import { lpShareWalletNote, lpShareWalletNoteV22 } from '@/lib/lp-share-wallet-note';
 
 const ConnectButton = dynamic(
   () =>
@@ -69,6 +69,13 @@ interface DepositWithdrawPanelProps {
   vaultAvailable: boolean;
   /** Collateral decimals */
   decimals: number;
+  /**
+   * v2.2 (flag on): the LP share mint's OWN decimals (a vault created by an earlier build keeps 0 for good; a new one is created with the
+   * collateral's). Shares are shown and typed in this scale; collateral amounts keep `decimals`. Absent / flag off: shares use `decimals`, as before.
+   */
+  lpDecimals?: number;
+  /** v2.2: whether the share token has its Metaplex name on chain (tag 122); decides the wording of the wallet note. `null` = not read. */
+  lpMetadataPresent?: boolean | null;
   /** Collateral symbol (e.g. USDC) */
   collateralSymbol: string;
   /** Loading state */
@@ -162,6 +169,8 @@ export function DepositWithdrawPanel({
   lpSupply,
   vaultAvailable,
   decimals,
+  lpDecimals,
+  lpMetadataPresent = null,
   collateralSymbol,
   loading,
   cooldownElapsed,
@@ -203,7 +212,11 @@ export function DepositWithdrawPanel({
   const watchAbort = useRef<AbortController | null>(null);
   useEffect(() => () => watchAbort.current?.abort(), []);
 
-  const divisor = 10n ** BigInt(decimals);
+  // v2.2: shares are counted in the share mint's own decimals (what the wallet shows); flag off this is `decimals`.
+  const shareDecimals = isDevnetV22Enabled() ? lpDecimals ?? decimals : decimals;
+  // The amount field is in collateral decimals, except when the withdrawal is asked for in shares.
+  const inputDecimals = tab === 'withdraw' && withdrawUnit === 'shares' ? shareDecimals : decimals;
+  const divisor = 10n ** BigInt(inputDecimals);
 
   // Parse amount to raw bigint
   const rawAmount = useMemo(() => {
@@ -213,14 +226,14 @@ export function DepositWithdrawPanel({
       const whole = BigInt(parts[0] || '0');
       let frac = 0n;
       if (parts[1]) {
-        const fracStr = parts[1].slice(0, decimals).padEnd(decimals, '0');
+        const fracStr = parts[1].slice(0, inputDecimals).padEnd(inputDecimals, '0');
         frac = BigInt(fracStr);
       }
       return whole * divisor + frac;
     } catch {
       return 0n;
     }
-  }, [amount, decimals, divisor]);
+  }, [amount, inputDecimals, divisor]);
 
   // The program's own pricing when known (P3: registry shares + worse-of senior value).
   const shareTotal = pricing?.totalShares ?? lpSupply;
@@ -264,12 +277,17 @@ export function DepositWithdrawPanel({
   const maxNow = pricing?.maxNowAtoms ?? null;
   const overMaxNow = tab === 'withdraw' && maxNow !== null && previewCollateral > maxNow;
   const flow = withdrawFlow(cooldownSlots ?? 0n);
+  // v2.2: shares are printed in the mint's own decimals, so the count matches the wallet's; the note survives only as the chain says it should
+  // (lib/lp-share-wallet-note.ts lpShareWalletNoteV22).
+  const v22WalletNote = isDevnetV22Enabled()
+    ? lpShareWalletNoteV22({ appDecimals: shareDecimals, lpDecimals, metadataPresent: lpMetadataPresent })
+    : null;
 
   const withdrawMaxRaw = withdrawUnit === 'shares' ? userLpBalance : userWithdrawableAtoms;
   const maxAmount = useMemo(() => {
     const raw = tab === 'deposit' ? userBalance : withdrawMaxRaw;
-    return formatRaw(raw, decimals);
-  }, [tab, userBalance, withdrawMaxRaw, decimals]);
+    return formatRaw(raw, inputDecimals);
+  }, [tab, userBalance, withdrawMaxRaw, inputDecimals]);
   const unitLabel = tab === 'deposit' ? collateralSymbol : withdrawUnit === 'shares' ? 'shares' : collateralSymbol;
 
   const displayMaxAmount = loading || !vaultAvailable ? '—' : maxAmount;
@@ -285,9 +303,9 @@ export function DepositWithdrawPanel({
 
       const raw = tab === 'deposit' ? userBalance : withdrawMaxRaw;
       const partial = (raw * BigInt(pct)) / 100n;
-      setAmount(formatRaw(partial, decimals));
+      setAmount(formatRaw(partial, inputDecimals));
     },
-    [loading, vaultAvailable, tab, userBalance, withdrawMaxRaw, decimals],
+    [loading, vaultAvailable, tab, userBalance, withdrawMaxRaw, inputDecimals],
   );
 
   // GH#2804: after a confirmation timeout, watch the signature until it lands, is dropped, or the
@@ -479,7 +497,7 @@ export function DepositWithdrawPanel({
         <PendingClaimV22 ex={exitV22} shares={pendingRedemptionShares} decimals={decimals} symbol={collateralSymbol} />
       ) : hasPendingRedemption && (
         <EarnPendingWithdrawal
-          amountLabel={pendingAtoms !== null ? `${formatUsdc(pendingAtoms, decimals)} ${collateralSymbol}` : `${formatRaw(pendingRedemptionShares, decimals)} shares`}
+          amountLabel={pendingAtoms !== null ? `${formatUsdc(pendingAtoms, decimals)} ${collateralSymbol}` : `${formatRaw(pendingRedemptionShares, shareDecimals)} shares`}
           cooldownElapsed={cooldownElapsed}
           cooldownRemainingSlots={cooldownRemainingSlots}
           armed={armed}
@@ -585,13 +603,22 @@ export function DepositWithdrawPanel({
           <div className="mb-4 p-3 bg-[var(--bg)] border border-[var(--border)] rounded-sm">
             <p data-testid="earn-deposit-preview" className="text-[12px] font-mono tabular-nums text-[var(--text)]">
               {WC.depositPreview(
-                formatShares(previewShares, decimals),
+                formatShares(previewShares, shareDecimals),
                 formatPercent(shareTotal + previewShares > 0n ? (Number(previewShares) / Number(shareTotal + previewShares)) * 100 : 100),
               )}
             </p>
-            <p data-testid="earn-lp-wallet-note" className="mt-1.5 text-[10px] leading-relaxed text-[var(--text-dim)]">
-              {lpShareWalletNote(decimals)}
-            </p>
+            {isDevnetV22Enabled() ? (
+              // v2.2: the note only where the wallet's count differs from the one shown here, and without "unnamed" once the token has its name.
+              v22WalletNote && (
+                <p data-testid="earn-lp-wallet-note" className="mt-1.5 text-[10px] leading-relaxed text-[var(--text-dim)]">
+                  {v22WalletNote}
+                </p>
+              )
+            ) : (
+              <p data-testid="earn-lp-wallet-note" className="mt-1.5 text-[10px] leading-relaxed text-[var(--text-dim)]">
+                {lpShareWalletNote(decimals)}
+              </p>
+            )}
           </div>
         )}
 
@@ -600,7 +627,7 @@ export function DepositWithdrawPanel({
         {vaultAvailable && rawAmount > 0n && tab === 'withdraw' && (
           <div className="mb-4 space-y-2">
             <p data-testid="earn-withdraw-receive" className="text-[12px] font-mono tabular-nums text-[var(--text)]">
-              {WC.receive(`${formatUsdc(previewCollateral, decimals)} ${collateralSymbol}`, formatShares(withdrawShares, decimals))}
+              {WC.receive(`${formatUsdc(previewCollateral, decimals)} ${collateralSymbol}`, formatShares(withdrawShares, shareDecimals))}
             </p>
             {overMaxNow && maxNow !== null && (
               <StatusLine

@@ -1,5 +1,5 @@
 /*
- * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ cb444db for the layout rows ONLY (slot 2,661, G9 body 2,064) (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate),
+ * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ d98488b (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate),
  * src/abi/layout.ts. Only the imports are retargeted (the installed @percolatorct/sdk 8.0.0 root, the v2.1 txv1 port, and the sibling v22 ports).
  * Delete when @percolatorct/sdk >= 9.0.0 ships and point ./index.ts at the package. Do not edit here; fix upstream in percolator-sdk.
  */
@@ -19,8 +19,8 @@
  *
  * - {@link LAYOUT_V21}: wrapper VERSION 18, engine discriminator 18. FROZEN. Every value equals the constant the v2.1
  *   decoders have always used (pinned by `test/layout-guard.test.ts`).
- * - {@link LAYOUT_V22_VARIANT_B}: wrapper VERSION 19, the v2.2 LAUNCH CANDIDATE (`release/v22-wrapper-rem` 8fac24e8 (slot 2,661 after engine #287) on
- *   `release/v22-engine-rem`: per-leg K/F remainders + the 32 B slot tail): leg 217, portfolio 10,603, slot 2,629.
+ * - {@link LAYOUT_V22_VARIANT_B}: wrapper VERSION 19, the v2.2 LAUNCH CANDIDATE (`release/v22-wrapper-rem` c8501d15 on
+ *   `release/v22-engine-rem`: per-leg K/F remainders + the 32 B slot tail): leg 217, portfolio 10,603, slot 2,661 (engine #287 +32: `provider_principal_{long,short}` at slot offsets 1605 / 1621).
  *   **PROVISIONAL**, pinned against the real crate by `test/fixtures/v22-parity.json` (rustc `offset_of!`).
  * - {@link LAYOUT_V22_STAGE_A}: the earlier stage-A numbers (leg 185, portfolio 10,091, slot 2,597), kept as a named row.
  * - {@link LAYOUT_V22} is the alias every default uses (variant B). Another stacked engine fix may still move numbers:
@@ -412,7 +412,7 @@ export const LAYOUT_V22_STAGE_A: LayoutTable = v22Row({
 /**
  * Wrapper VERSION 19, VARIANT B: the v2.2 LAUNCH CANDIDATE (branches release/v22-engine-rem and
  * release/v22-wrapper-rem, coordinator report 2026-10-06): per-leg K/F remainders (`k_rem_num` @78, `f_rem_num` @94,
- * every later leg field +32) and a second 32 B slot tail. Leg 217, portfolio 10,603, slot 2,629.
+ * every later leg field +32), a second 32 B slot tail, and (fold 2026-10-08, engine #287) a third: provider-principal mirror. Leg 217, portfolio 10,603, slot 2,661.
  *
  * The in-slot ENGINE offsets below assume the extra 32 B slot tail sits after the existing fields (so no offset moves);
  * `test/layout-guard.test.ts` verifies the whole row against `layout-v22.json` when that file is present. PROVISIONAL:

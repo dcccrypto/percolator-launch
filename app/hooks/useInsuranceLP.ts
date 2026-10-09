@@ -19,16 +19,14 @@ import {
   deriveLpEscrow,
   encodeCreateLpVaultV17,
   encodeRequestRedeemLpShares,
-  ACCOUNTS_CREATE_LP_VAULT,
-  buildAccountMetas,
   buildIx,
-  WELL_KNOWN,
   deriveVaultAuthority,
   deriveLpBackingLedger,
 } from '@percolatorct/sdk';
 import { sendTx, broadcastSignedTx, buildBatchTx, getFreshBlockhash, getPriorityFee, signAllCompat, simulateForGate } from '@/lib/tx';
 import { sizeComputeUnitLimit } from '@/lib/compute-budget';
 import { useSlabState } from '../components/providers/SlabProvider';
+import { createLpVaultKeys } from '@/lib/v22/create-lp-vault';
 import { assertKnownProgram } from '@/lib/programAllowlist';
 import { assertDepositWithinBalance, readTokenBalance } from '@/lib/deposit-guard';
 import { useParams } from 'next/navigation';
@@ -678,6 +676,7 @@ export function useInsuranceLP() {
    *   [3] lpMint (writable, PDA: ["lp_vault_mint", market])
    *   [4] systemProgram
    *   [5] tokenProgram
+   *   [6] collateralMint (readonly) — v2.2 only
    */
   const createMint = useCallback(async () => {
     if (!wallet.publicKey || !wallet.signTransaction) {
@@ -696,14 +695,14 @@ export function useInsuranceLP() {
       const [registryPda] = deriveLpVaultRegistry(progPk, marketPk);
       const [lpMintPda] = deriveInsuranceLpMint(progPk, marketPk);
 
-      const keys = buildAccountMetas(ACCOUNTS_CREATE_LP_VAULT, [
-        wallet.publicKey,
-        marketPk,
-        registryPda,
-        lpMintPda,
-        WELL_KNOWN.systemProgram,
-        WELL_KNOWN.tokenProgram,
-      ]);
+      // v2.2: account [6] is the market's collateral mint (the six-account form is refused on chain); flag off: the six accounts as before.
+      const keys = createLpVaultKeys({
+        admin: wallet.publicKey,
+        market: marketPk,
+        registry: registryPda,
+        lpMint: lpMintPda,
+        collateralMint: slabState.config?.collateralMint ?? null,
+      });
       const data = encodeCreateLpVaultV17({
         feeShareBps: 2000,          // 20% of insurance earnings to LP providers
         oiReservationThresholdBps: 5000, // 50% OI reservation threshold

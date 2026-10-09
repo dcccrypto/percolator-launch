@@ -1246,6 +1246,7 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
     const earnVaultIxs = buildEarnVaultSeedInstructions({
       programId, wallet: walletPk, market: slabPk, registry: lpVaultRegistry, lpMint: lpVaultMint,
       userAta, vaultAta, seedPerDomain: backingSeed, includeCreate: true,
+      collateralMint: params.mint, shareSymbol: params.symbol, // v2.2 only: tag 74's account [6] and tag 122's ticker
     });
     const createLpMintIx = SystemProgram.createAccount({
       fromPubkey: walletPk, newAccountPubkey: stakeLpMintKp.publicKey,
@@ -3928,6 +3929,8 @@ export function useCreateMarket() {
               vaultAta: seedVaultAta,
               seedPerDomain: backingSeed,
               includeCreate: !existingRegistry,
+              collateralMint: params.mint, // v2.2 only: tag 74's account [6]
+              shareSymbol: params.symbol, // v2.2 only: tag 122's ticker
             });
             try {
               const sigLpVault = await sendTx({

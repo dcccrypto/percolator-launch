@@ -9,15 +9,17 @@ the v2.2 programs, together with `NEXT_PUBLIC_DEVNET_V21=1`.
 `@percolatorct/sdk` 9.0.0-candidate is not published. The app pins the candidate the way the v2.1 stack did (verbatim local
 ports + one adapter), see `app/lib/v22/sdk/index.ts`:
 
-- percolator-sdk draft PR #406, branch `feat/v22-sdk`, commit `adf8fd0` (files unchanged since `ecb6215` keep that header: records/*, v22-wire/state/math/stake) (LAYOUT_V22 variant B default, VERSION-keyed guard,
-  builders, quotes, error tables, `planEarnExitV22`, `buildLaunchBundleV22`, `buildCreatePortfolioAccountIxV22`).
+- percolator-sdk draft PR #406, branch `feat/v22-sdk`, commit `d98488b`, against the re-cut release candidate (wrapper
+  `release/v22-wrapper-rem` c6ee0b6e, engine bfa3d037; layout JSON and per-tag CU in
+  `~/percolator-ops/artifacts/v22-combination-2026-10-08/`). Files unchanged since an earlier pin keep that commit in their header (records/*, v22-math/stake, v22,
+  slab, v22-band/lot, discovery).
 - Ported files: `layout.ts`, `v22-wire.ts`, `v22-state.ts`, `v22-math.ts`, `v22-stake.ts`, `v22.ts`, `slab.ts`, `errors-v22.ts`
-  (the v2.2 rows of `PERCOLATOR_ERRORS`), and `records/*` (the layout-aware record decoders). Only imports are retargeted
-  (installed `@percolatorct/sdk` 8.0.0, the v2.1 txv1 port). Do not edit them here; fix upstream.
-- To re-pin: copy the same files from the new SDK commit, update the commit in each header and in `index.ts`. When 9.0.0 ships:
+  (the v2.2 rows of `PERCOLATOR_ERRORS`), `records/*` (the layout-aware record decoders), and, new at d98488b, `v22-lp-share.ts` + `v22-lp-share-ix.ts` (share token
+  identity, tag 122 builder, Metaplex record reader) and `v22-fill-events.ts` (FILL / REDUCE / MOVE decoders and the strict log attribution rule; vendored, no app surface
+  shows events yet). Only imports are retargeted (installed `@percolatorct/sdk` 8.0.0, the v2.1 txv1 port). Do not edit them here; fix upstream.
+- To re-pin: copy the same files from the new SDK commit (the retargeting is the import lines only), update the commit in each header and in `index.ts`. When 9.0.0 ships:
   bump the dependency, replace `lib/v22/sdk/index.ts` with `export * from "@percolatorct/sdk"`, delete the siblings.
-- The layout row is PROVISIONAL (ledger `v22-combination-2026-10-06.md`: variant B, leg 217 B, portfolio 10,603 B, slot 2,629 B).
-  If the final bytes move a number, edit the SDK row and re-port `layout.ts`; no app code holds a layout number.
+- The layout row is the fold of 2026-10-08 (slot 2,661 B, G9 body 2,064 B, portfolio 10,603 B, leg 217 B, `WRAPPER_MAX_PORTFOLIO_ASSETS` = 4 FINAL).
 
 Two things the SDK candidate does not provide, derived here from the engine / wrapper structs and pinned by tests against the
 SDK layout row (`lib/v22/band-rent-state.ts`): the band / rent STATE words (config `band_bps` ... `band_min_leg_notional`, asset
@@ -37,3 +39,15 @@ Visual check: `/dev-preview/v22` with `NEXT_PUBLIC_DEV_PREVIEW=1 NEXT_PUBLIC_DEV
 
 
 Discovery: `lib/v22/sdk/discovery.ts` (verbatim port) behind `lib/v22/discovery.ts` (flag off = installed SDK). Lot markets stay refused in the wizard (`LOT_MARKETS_ENABLED=false`); `lib/v22/lot-coverage.ts` guards trading on lot markets until every surface is covered. Bond-launch replay: `app/scripts/v22-bond-replay/RESULTS.md`.
+
+## 2026-10-09: consumer behaviour on the re-cut candidate (all behind the flag; flag off = playground)
+
+- **One slot per launch on v2.2 too** (`lib/create-market-args.ts`: `LAUNCH_ASSET_SLOTS = 1`, #3357). The app only uses asset index 0, the v2.2 seed kit's markets use 1 slot, and each extra slot is 2,661 B of rent for a tradable index nobody watches;
+  the 4-leg cap bounds a PORTFOLIO, not what a launch allocates. Slab 4,059 B (flag on) / 3,675 B (off); `V22_MAX_PORTFOLIO_ASSETS = 4` is the cap `buildV17InitMarketArgs` enforces client-side (error 14 on chain). Wizard, mobile route, CostEstimate and the keeper co-sign pin all go through `slabSizeFor` / `wizardSlabBytes`.
+- **Tag 74 carries the collateral mint as account [6]** at every call site through `lib/v22/create-lp-vault.ts` (earn-vault-seed and both `useCreateMarket` calls through it, `mobile-market-funding-ixs` and its route, `useInsuranceLP`).
+- **Tag 122 names the Earn share token in the launch**, right after tag 74 in the same transaction (single-tx, batched M4a, sequential Step 4 and mobile TX4 all share `buildEarnVaultSeedInstructions`), ticker from the market symbol, generic form when empty, signed by marketauth
+  (the creator wallet, which is also the instruction's payer: the wrapper pays Metaplex from its own transient fee-payer PDA, so no privileged signer reaches a Metaplex CPI) and always before `StakeInitPool` rotates marketauth. Cost ~0.0151 SOL net (the wallet must hold 0.03 SOL at that instruction),
+  shown in CostEstimate and in the SOL gate. Kill switch: `NEXT_PUBLIC_DEVNET_V22_SHARE_NAMING=0`. The keeper co-sign shape validator knows the instruction (`shareNameViolations`).
+- **`GET /api/earn-share/[market]` and `/image`** (`lib/v22/earn-share-*.ts`): chain state only, canonical key + wrapper-owned registry or 404, v2.2 only; the logo is fetched through an allowlist and re-encoded.
+- **Share counts use the share mint's own decimals** (`DepositWithdrawPanel` `lpDecimals`); the #3276 wallet note is gated on the chain (`lpShareWalletNoteV22`, `hooks/useLpShareToken.ts`).
+- **Leg cap**: `planLegGroups` never puts more than 4 trade legs in one transaction (`lib/trade-leg-groups.ts`). The app builds multi-leg orders as single-leg TradeCpi instructions on asset 0 (it never emits BatchTradeCpi, tag 67).

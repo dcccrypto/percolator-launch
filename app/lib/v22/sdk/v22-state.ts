@@ -1,5 +1,5 @@
 /*
- * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ ecb6215 (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate),
+ * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ d98488b (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate),
  * src/abi/v22-state.ts. Only the imports are retargeted (the installed @percolatorct/sdk 8.0.0 root, the v2.1 txv1 port, and the sibling v22 ports).
  * Delete when @percolatorct/sdk >= 9.0.0 ships and point ./index.ts at the package. Do not edit here; fix upstream in percolator-sdk.
  */
@@ -247,30 +247,37 @@ export function decodeInsuranceUnitsV20(data: Uint8Array, table: LayoutTable = L
 }
 
 // ============================================================================
-// G9FeedAllowlistV22 (kind 15, ["g9_feeds"], 16 + 520)
+// G9FeedAllowlistV22 (kind 15, ["g9_feeds"], 16 + 2,064; #539 R-10/R-12 layout)
 // ============================================================================
 
-/** Decoded `G9FeedAllowlistV22` (`v16_program.rs:7149..7200`). */
+/** Decoded `G9FeedAllowlistV22` (`v16_program.rs`, #539: owner-pinned entries plus one timelocked pending proposal). */
 export interface G9FeedAllowlistV22 {
   count: number;
   version: number;
   bump: number;
-  /** The first `count` keys. */
+  /** The first `count` listed feeds. */
   keys: PublicKey[];
+  /** The owner pinned for each listed feed (same order as `keys`). */
+  owners: PublicKey[];
+  /** Entries of the open proposal (0 = none). */
+  pendingCount: number;
+  /** Slot of the open proposal (0 = none); a commit needs `now >= pendingSlot + G9_ALLOWLIST_TIMELOCK_SLOTS` (216,000). */
+  pendingSlot: bigint;
+  pendingKeys: PublicKey[];
+  pendingOwners: PublicKey[];
 }
 
 /**
- * Decode the G9 Switchboard feed allowlist.
+ * Decode the G9 feed allowlist (feed + pinned owner per entry, plus the pending proposal).
  *
- * @param data   Raw account bytes (`16 + 520`).
+ * Body (2,064 B, align 1): count u8, version u8, bump u8, pending_count u8, pad[4], pending_slot u64 LE, keys[16][32],
+ * owners[16][32], pending_keys[16][32], pending_owners[16][32].
+ *
+ * @param data   Raw account bytes (`16 + 2064`).
  * @param table  Layout table (default {@link LAYOUT_V22}).
  * @returns The allowlist.
- * @throws {@link UnknownLayoutError} on a wrong header, short data, `count > 16`, a zero or duplicate listed
- *   key, a non-zero unlisted slot or non-zero padding.
- * @example
- * ```ts
- * const list = decodeG9FeedAllowlistV22(info.data);
- * ```
+ * @throws {@link UnknownLayoutError} on a wrong header, short data, `count`/`pending_count` > 16, non-zero padding, a
+ *   zero or duplicate listed key, or a non-zero unlisted slot (keys or owners).
  */
 export function decodeG9FeedAllowlistV22(data: Uint8Array, table: LayoutTable = LAYOUT_V22): G9FeedAllowlistV22 {
   const parser = "decodeG9FeedAllowlistV22";
@@ -278,23 +285,39 @@ export function decodeG9FeedAllowlistV22(data: Uint8Array, table: LayoutTable = 
   const count = data[b];
   const version = data[b + 1];
   const bump = data[b + 2];
+  const pendingCount = data[b + 3];
   const cap = table.accounts.g9FeedAllowlistCap;
-  if (version !== 1 || count > cap || !isZero(data.subarray(b + 3, b + 8))) throw bad(parser, "allowlist header invalid", ACCOUNT_KIND.G9FeedAllowlist);
-  const slot = (i: number) => data.subarray(b + 8 + 32 * i, b + 8 + 32 * (i + 1));
-  const seen = new Set<string>();
-  const keys: PublicKey[] = [];
-  for (let i = 0; i < cap; i++) {
-    const k = slot(i);
-    if (i < count) {
-      const h = Buffer.from(k).toString("hex");
-      if (isZero(k) || seen.has(h)) throw bad(parser, `listed key ${i} is zero or duplicated`, ACCOUNT_KIND.G9FeedAllowlist);
-      seen.add(h);
-      keys.push(new PublicKey(k));
-    } else if (!isZero(k)) {
-      throw bad(parser, `unlisted slot ${i} is not zero`, ACCOUNT_KIND.G9FeedAllowlist);
-    }
+  if (version !== 1 || count > cap || pendingCount > cap || !isZero(data.subarray(b + 4, b + 8))) {
+    throw bad(parser, "allowlist header invalid", ACCOUNT_KIND.G9FeedAllowlist);
   }
-  return { count, version, bump, keys };
+  const pendingSlot = new DataView(data.buffer, data.byteOffset + b + 8, 8).getBigUint64(0, true);
+  const base = b + 16;
+  const arr = (idx: number, n: number, listed: boolean, name: string): PublicKey[] => {
+    const out: PublicKey[] = [];
+    const seen = new Set<string>();
+    for (let i = 0; i < cap; i++) {
+      const k = data.subarray(base + 32 * (idx * cap + i), base + 32 * (idx * cap + i + 1));
+      if (i < n) {
+        if (listed) {
+          const h = Buffer.from(k).toString("hex");
+          if (isZero(k) || seen.has(h)) throw bad(parser, `listed ${name} ${i} is zero or duplicated`, ACCOUNT_KIND.G9FeedAllowlist);
+          seen.add(h);
+        }
+        out.push(new PublicKey(k));
+      } else if (!isZero(k)) {
+        throw bad(parser, `unlisted ${name} slot ${i} is not zero`, ACCOUNT_KIND.G9FeedAllowlist);
+      }
+    }
+    return out;
+  };
+  return {
+    count, version, bump,
+    keys: arr(0, count, true, "key"),
+    owners: arr(1, count, false, "owner"),
+    pendingCount, pendingSlot,
+    pendingKeys: arr(2, pendingCount, false, "pending key"),
+    pendingOwners: arr(3, pendingCount, false, "pending owner"),
+  };
 }
 
 // ============================================================================

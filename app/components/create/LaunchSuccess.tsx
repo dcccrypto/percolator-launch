@@ -5,13 +5,15 @@ import { FC, useState, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { LogoUpload } from "./LogoUpload";
-import { getNetwork, explorerTxUrl, explorerAccountUrl } from "@/lib/config";
+import { getNetwork, getConfig, explorerTxUrl, explorerAccountUrl } from "@/lib/config";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { launchPriceFeedStatus } from "@/lib/launch-outcome";
 import { KEEPER_REGISTER_COPY, userFacingRegistrationReason } from "@/lib/keeper-register-client";
 import { TICKET_COPY } from "@/lib/limits/copy";
 import { StatusLine } from "@/components/ui/StatusLine";
-import { lpShareWalletNote } from "@/lib/lp-share-wallet-note";
+import { lpShareWalletNote, lpShareWalletNoteV22 } from "@/lib/lp-share-wallet-note";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { useLpShareToken } from "@/hooks/useLpShareToken";
 
 interface LaunchSuccessProps {
   tokenSymbol: string;
@@ -95,6 +97,11 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
   keeperPhase = null,
 }) => {
   const feed = launchPriceFeedStatus({ priceFeedRequired, keeperDelegated: !!keeperDelegated });
+  // v2.2 (flag on; off = no request): what the chain says about this market's share token (decimals, name) gates the wallet note below.
+  const shareToken = useLpShareToken(marketAddress, isDevnetV22Enabled() ? getConfig().programId : null);
+  const v22WalletNote = isDevnetV22Enabled()
+    ? lpShareWalletNoteV22({ appDecimals: shareToken.decimals ?? undefined, lpDecimals: shareToken.decimals, metadataPresent: shareToken.metadataPresent })
+    : null;
   const [copied, setCopied] = useState(false);
   const [copiedDevnet, setCopiedDevnet] = useState(false);
   const [mintLoading, setMintLoading] = useState(false);
@@ -357,9 +364,18 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
                 The <strong className="text-[var(--text)]">liquidity you seeded</strong> backs this market as
                 its counterparty — it is not part of your tradeable balance.
               </p>
-              <p data-testid="launch-lp-wallet-note" className="text-[10px] leading-relaxed text-[var(--text-secondary)]">
-                {lpShareWalletNote()}
-              </p>
+              {isDevnetV22Enabled() ? (
+                // v2.2: the share token is created with the collateral's decimals and named in the launch; the note only where the chain says it applies.
+                v22WalletNote && (
+                  <p data-testid="launch-lp-wallet-note" className="text-[10px] leading-relaxed text-[var(--text-secondary)]">
+                    {v22WalletNote}
+                  </p>
+                )
+              ) : (
+                <p data-testid="launch-lp-wallet-note" className="text-[10px] leading-relaxed text-[var(--text-secondary)]">
+                  {lpShareWalletNote()}
+                </p>
+              )}
               {devnetMint && (
                 <div className="flex items-center gap-2 text-[10px]">
                   <span className="flex-shrink-0 font-medium text-[var(--text-dim)]">Sim-USDC mint</span>

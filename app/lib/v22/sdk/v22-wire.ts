@@ -1,5 +1,5 @@
 /*
- * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ ecb6215 (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate),
+ * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ d98488b (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate),
  * src/abi/v22-wire.ts. Only the imports are retargeted (the installed @percolatorct/sdk 8.0.0 root, the v2.1 txv1 port, and the sibling v22 ports).
  * Delete when @percolatorct/sdk >= 9.0.0 ships and point ./index.ts at the package. Do not edit here; fix upstream in percolator-sdk.
  */
@@ -54,6 +54,12 @@ export const IX_TAG_V22 = Object.freeze({
   SweepBandDustLeg: 118,
   /** Wave B, evict-and-trade (`TradeCpi` body behind tag 119). */
   EvictAndTradeCpi: 119,
+  /** Wave D mainnet #539 (R-10): upgrade-authority, timelocked propose of the G9 feed allowlist ({feed, owner} pairs). */
+  ProposeG9FeedAllowlist: 120,
+  /** Wave D mainnet #539 (R-10): commit the open proposal after G9_ALLOWLIST_TIMELOCK_SLOTS (216,000). */
+  CommitG9FeedAllowlist: 121,
+  /** #545: LP share mint name / symbol / uri (Metaplex), generic or ticker form. */
+  InitLpShareMetadata: 122,
 } as const);
 
 /** Existing tags whose WIRE or ACCOUNT LIST the v2.2 stack extends. */
@@ -141,6 +147,24 @@ export const BOND_COOLDOWN_MAX_SLOTS_V22 = 1_512_000;
 export const BOND_CAP_MAX_BPS_V22 = 5_000;
 /** Coupon ceiling per crank, bps of the harvested LP fee leg (review M-2). */
 export const BOND_COUPON_MAX_LEG_BPS_V22 = 5_000;
+/**
+ * `WRAPPER_MAX_PORTFOLIO_ASSETS` = 4 (percolator-prog#546, founder-confirmed FINAL 2026-10-08): a portfolio holds at most 4 legs and
+ * InitMarket refuses `max_portfolio_assets` above it (error 14).
+ */
+export const WRAPPER_MAX_PORTFOLIO_ASSETS_V22 = 4;
+/**
+ * `MATCHER_BATCH_MAX_LEGS` = min(11, {@link WRAPPER_MAX_PORTFOLIO_ASSETS_V22}) = 4: legs per BatchTradeCpi (5+ fail InvalidInstruction), and the
+ * most trade legs a client should pack into one transaction (4 legs measured 689,000 CU; 714,967 with the growth ext).
+ */
+export const BATCH_MAX_LEGS_V22 = 4;
+
+/**
+ * Client guard for the v2.2 leg cap: a batch (or one transaction's trade legs) of `n` legs must be 1..={@link BATCH_MAX_LEGS_V22}.
+ * @throws a plain `Error` naming the cap (the wrapper would answer InvalidInstruction, Custom 9).
+ */
+export function assertBatchLegsV22(n: number): void {
+  if (!Number.isInteger(n) || n < 1 || n > BATCH_MAX_LEGS_V22) throw new Error(`a v2.2 batch carries 1..=${BATCH_MAX_LEGS_V22} legs, got ${n}`);
+}
 /** `bond_v20::SLOTS_PER_YEAR` (400 ms slots). */
 export const SLOTS_PER_YEAR_V22 = 78_840_000n;
 
@@ -673,6 +697,22 @@ export function encodeSetG9FeedAllowlistV22(keys: readonly (PublicKey | Uint8Arr
 // ============================================================================
 
 /**
+ * Tag 74 CreateLpVault on the v2.2 wrapper (7): the six v2.1 accounts plus `[6]` the market's primary collateral mint (read-only; must
+ * equal `config.collateral_mint`, a classic SPL mint). The six-account form is REFUSED (`NotEnoughAccountKeys`); the share mint is
+ * created with the collateral mint's decimals. Instruction data is unchanged ({@link encodeCreateLpVaultV17}). Equal to
+ * `ACCOUNTS_CREATE_LP_VAULT` of this SDK; kept here so an app that vendors only the v2.2 files has the 7-account list.
+ */
+export const ACCOUNTS_CREATE_LP_VAULT_V22: readonly AccountSpec[] = [
+  { name: "admin", signer: true, writable: true },
+  { name: "market", signer: false, writable: true },
+  { name: "registry", signer: false, writable: true },
+  { name: "lpMint", signer: false, writable: true },
+  { name: "systemProgram", signer: false, writable: false },
+  { name: "tokenProgram", signer: false, writable: false },
+  { name: "collateralMint", signer: false, writable: false },
+] as const;
+
+/**
  * Tag 76 RequestRedeemLpShares (8): `v16_program.rs:28751..28770`. The request PDA `[5]` is
  * `["lp_redemption", registry, redeemer]`; with the v2.2 wire it is created 128 bytes long.
  */
@@ -926,4 +966,31 @@ export function deriveInsuranceUnitsV22(programId: PublicKey, market: PublicKey)
  */
 export function deriveG9FeedAllowlistV22(programId: PublicKey): [PublicKey, number] {
   return PublicKey.findProgramAddressSync([Buffer.from(SEEDS_V22.g9Feeds)], programId);
+}
+
+/**
+ * ProposeG9FeedAllowlist (tag 120): `[120][n u8 <= 16]` then n x `{feed[32], owner[32]}`.
+ * @param entries  Up to 16 `{ feed, owner }` pairs.
+ * @returns `2 + 64 n` bytes.
+ */
+export function encodeProposeG9FeedAllowlistV22(entries: { feed: PublicKey; owner: PublicKey }[]): Uint8Array {
+  if (entries.length > G9_FEED_ALLOWLIST_CAP_V22) throw new Error(`at most ${G9_FEED_ALLOWLIST_CAP_V22} entries`);
+  return concatBytes(encU8(IX_TAG_V22.ProposeG9FeedAllowlist), encU8(entries.length), ...entries.flatMap((e) => [e.feed.toBytes(), e.owner.toBytes()]));
+}
+
+/** CommitG9FeedAllowlist (tag 121): `[121]`, no payload. */
+export function encodeCommitG9FeedAllowlistV22(): Uint8Array {
+  return encU8(IX_TAG_V22.CommitG9FeedAllowlist);
+}
+
+/**
+ * InitLpShareMetadata (tag 122): `[122][n u8 0..=8][n ticker bytes]`. `n == 0` is the generic form (anyone pays); `n > 0`
+ * is the ticker form (marketauth signs; the name is frozen). The ticker must be ASCII, the program's own check decides
+ * which characters it accepts (`lp_share_meta_v22.rs`).
+ * @param ticker  Empty or 1..=8 ASCII bytes.
+ */
+export function encodeInitLpShareMetadataV22(ticker = ""): Uint8Array {
+  const t = new TextEncoder().encode(ticker);
+  if (t.length > 8) throw new Error("ticker is at most 8 bytes");
+  return concatBytes(encU8(IX_TAG_V22.InitLpShareMetadata), encU8(t.length), t);
 }

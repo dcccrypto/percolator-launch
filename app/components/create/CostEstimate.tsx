@@ -7,6 +7,7 @@ import { p3WizardEnabled } from "@/lib/limits/flags";
 import { VAULT_LP_MATCHER_CTX_LEN } from "@/lib/limits/constants";
 import { MATCHER_CONTEXT_LEN } from "@percolatorct/sdk";
 import { portfolioAccountLen } from "@/lib/v22/layout";
+import { SHARE_NAMING_NET_LAMPORTS, isShareNamingEnabled } from "@/lib/v22/share-naming";
 
 interface CostEstimateProps {
   lpCollateral: string;
@@ -73,6 +74,11 @@ export interface CreateMarketSolCostBreakdown {
   lpPortfolioMatcherRentSol: number;
   earnVaultStakeRentSol: number;
   txFeeSol: number;
+  /**
+   * v2.2 only (absent otherwise, so the flag-off breakdown is byte-identical): the Earn share token's Metaplex record, ~0.0151 SOL net
+   * (the wallet briefly holds 0.03 SOL for it; the rest comes back in the same instruction).
+   */
+  shareNamingSol?: number;
   totalSolCost: number;
 }
 
@@ -111,8 +117,11 @@ export function computeCreateMarketSolCost(
   // EARN_VAULT_AND_STAKE_ACCOUNT_BYTES doc comment above.
   const earnVaultStakeRentSol = rentSol(...EARN_VAULT_AND_STAKE_ACCOUNT_BYTES);
 
+  // v2.2: naming the Earn share token (tag 122) costs the Metaplex record's rent + create fee.
+  const shareNamingSol = isShareNamingEnabled() ? SHARE_NAMING_NET_LAMPORTS / LAMPORTS_PER_SOL : null;
+
   const totalSolCost =
-    slabRentSol + tokenAccountRentSol + lpPortfolioMatcherRentSol + earnVaultStakeRentSol + TX_FEE_ESTIMATE_SOL;
+    slabRentSol + tokenAccountRentSol + lpPortfolioMatcherRentSol + earnVaultStakeRentSol + TX_FEE_ESTIMATE_SOL + (shareNamingSol ?? 0);
 
   return {
     slabRentSol,
@@ -120,6 +129,7 @@ export function computeCreateMarketSolCost(
     lpPortfolioMatcherRentSol,
     earnVaultStakeRentSol,
     txFeeSol: TX_FEE_ESTIMATE_SOL,
+    ...(shareNamingSol !== null ? { shareNamingSol } : {}),
     totalSolCost,
   };
 }
@@ -166,6 +176,7 @@ export const CostEstimate: FC<CostEstimateProps> = ({
       lpPortfolioMatcherRentSol: sol.lpPortfolioMatcherRentSol.toFixed(4),
       earnVaultStakeRentSol: sol.earnVaultStakeRentSol.toFixed(4),
       txFeeSol: sol.txFeeSol.toFixed(4),
+      shareNamingSol: sol.shareNamingSol === undefined ? null : sol.shareNamingSol.toFixed(4),
       totalSolCost: sol.totalSolCost.toFixed(4),
       lpTokens: lpNum,
       insTokens: insNum,
@@ -207,6 +218,12 @@ export const CostEstimate: FC<CostEstimateProps> = ({
           <span className="text-[var(--text-secondary)]">Earn vault & stake pool</span>
           <span className="font-mono text-[var(--text)]">{estimate.earnVaultStakeRentSol} SOL</span>
         </div>
+        {estimate.shareNamingSol !== null && (
+          <div className="flex items-center justify-between text-[11px]" data-testid="cost-share-naming">
+            <span className="text-[var(--text-secondary)]">Earn share token name</span>
+            <span className="font-mono text-[var(--text)]">{estimate.shareNamingSol} SOL</span>
+          </div>
+        )}
         <div className="flex items-center justify-between text-[11px]">
           <span className="text-[var(--text-secondary)]">Transaction fees (~9 txs)</span>
           <span className="font-mono text-[var(--text)]">{estimate.txFeeSol} SOL</span>

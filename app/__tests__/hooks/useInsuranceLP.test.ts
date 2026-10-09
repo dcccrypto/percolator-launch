@@ -120,6 +120,8 @@ import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useParams } from "next/navigation";
 import { sendTx } from "@/lib/tx";
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
+import { buildAccountMetas, buildIx } from "@percolatorct/sdk";
 import { getAssociatedTokenAddress, unpackMint, unpackAccount } from "@solana/spl-token";
 
 describe("useInsuranceLP", () => {
@@ -585,6 +587,48 @@ describe("useInsuranceLP", () => {
       await act(async () => {
         await expect(result.current.createMint()).rejects.toThrow("Wallet not connected");
       });
+    });
+  });
+
+  describe("Create Mint on v2.2 (tag 74 needs the 7th account: the market's collateral mint)", () => {
+    const realMetas = (spec: ReadonlyArray<{ name: string; signer: boolean; writable: boolean }>, keys: Record<string, PublicKey>) =>
+      spec.map((a) => ({ pubkey: keys[a.name], isSigner: a.signer, isWritable: a.writable }));
+    afterEach(() => __setDevnetV22ForTest(null));
+
+    it("flag on: CreateLpVault carries [6] = config.collateralMint, read-only", async () => {
+      __setDevnetV22ForTest(true);
+      mockConnection.getAccountInfo.mockResolvedValue(null);
+      vi.mocked(buildAccountMetas).mockImplementation(realMetas as never);
+      const { result } = renderHook(() => useInsuranceLP());
+      await waitFor(() => expect(result.current.state.mintExists).toBe(false));
+      await act(async () => { await result.current.createMint(); });
+      const call = vi.mocked(buildIx).mock.calls.at(-1)![0] as { keys: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[] };
+      expect(call.keys).toHaveLength(7);
+      expect(call.keys[6].pubkey.equals(mockCollateralMint)).toBe(true);
+      expect(call.keys[6]).toMatchObject({ isSigner: false, isWritable: false });
+      expect(call.keys[0].pubkey.equals(mockWalletPubkey)).toBe(true);
+    });
+
+    it("flag on but the market's config has not loaded: refuses to send the six-account form", async () => {
+      __setDevnetV22ForTest(true);
+      mockConnection.getAccountInfo.mockResolvedValue(null);
+      vi.mocked(buildAccountMetas).mockImplementation(realMetas as never);
+      vi.mocked(useSlabState).mockReturnValue({ ...mockSlabState, config: null });
+      const { result } = renderHook(() => useInsuranceLP());
+      await act(async () => {
+        await expect(result.current.createMint()).rejects.toThrow();
+      });
+      expect(sendTx).not.toHaveBeenCalled();
+    });
+
+    it("flag off: exactly the six accounts, as before", async () => {
+      __setDevnetV22ForTest(false);
+      mockConnection.getAccountInfo.mockResolvedValue(null);
+      vi.mocked(buildAccountMetas).mockImplementation(realMetas as never);
+      const { result } = renderHook(() => useInsuranceLP());
+      await waitFor(() => expect(result.current.state.mintExists).toBe(false));
+      await act(async () => { await result.current.createMint(); });
+      expect(vi.mocked(buildAccountMetas).mock.calls.at(-1)![0]).toHaveLength(0); // the mocked 6-account spec ([]) is what the old code passed
     });
   });
 

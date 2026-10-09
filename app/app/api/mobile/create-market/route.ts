@@ -102,6 +102,8 @@ interface MobileCreateMarketBody {
   tier?: SlabTierKey;
   /** Human-readable market name. */
   name?: string;
+  /** Token symbol (<= 20 chars). v2.2 only: the Earn share token's ticker derives from it (tag 122); absent = the generic share name. */
+  symbol?: string;
   /** Oracle mode. Only "admin" is implemented — "hyperp"/"pyth" are rejected (GH#1989). */
   oracle_mode?: string;
   /** DEX pool address (base58). Reserved for future hyperp mode; currently unused. */
@@ -154,6 +156,7 @@ export async function POST(req: NextRequest) {
       mint,
       tier = "small",
       name: rawName = "Mobile Market",
+      symbol,
       oracle_mode = "admin",
       initial_price_e6 = "1000000",
     } = body;
@@ -165,6 +168,10 @@ export async function POST(req: NextRequest) {
         { error: "name must be 64 characters or fewer" },
         { status: 400 },
       );
+    }
+
+    if (symbol !== undefined && (typeof symbol !== "string" || symbol.length > 20)) {
+      return NextResponse.json({ error: "symbol must be a string of 20 characters or fewer" }, { status: 400 });
     }
 
     // ── Input validation ─────────────────────────────────────────────────────
@@ -528,6 +535,8 @@ export async function POST(req: NextRequest) {
       deployer: deployerPk,
       userAta,
       vaultAta,
+      collateralMint: mintPk, // v2.2 only: tag 74's account [6]
+      shareSymbol: typeof symbol === "string" ? symbol : null, // v2.2 only: the share token's ticker (tag 122)
     });
 
     const tx3 = new Transaction({ recentBlockhash: blockhash, feePayer: deployerPk });

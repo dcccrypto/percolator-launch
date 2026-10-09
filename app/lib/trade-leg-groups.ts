@@ -20,6 +20,8 @@
  */
 import type { Transaction, TransactionInstruction } from "@solana/web3.js";
 import { MAX_TX_COMPUTE_UNITS, sizeComputeUnitLimit } from "@/lib/compute-budget";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { BATCH_MAX_LEGS_V22, assertBatchLegsV22 } from "@/lib/v22/sdk";
 
 /** Conservative per-leg CU estimate for planning (measured ≤ ~420k incl. settlement). */
 export const CU_PER_TRADE_LEG_ESTIMATE = 420_000;
@@ -28,6 +30,14 @@ export const CU_TX_RESERVE = 140_000;
 
 /** Legs that always fit one transaction (2 legs measured ≤ 733k CU): the single-tx path. */
 export const SINGLE_TX_MAX_LEGS = 2;
+
+/**
+ * Most trade legs one transaction may carry. v2.2 (flag on): 4 (percolator-prog#546: `MATCHER_BATCH_MAX_LEGS` = 4, measured 689,000 CU for
+ * a 4-leg batch; the portfolio itself holds at most 4 legs). Flag off: unbounded here (the simulation decides, as before).
+ */
+export function maxLegsPerTx(): number {
+  return isDevnetV22Enabled() ? BATCH_MAX_LEGS_V22 : Number.POSITIVE_INFINITY;
+}
 
 /** Static plan bound: legs that fit one transaction by the estimate (≥ 1). */
 export function legsPerTxForBudget(
@@ -110,9 +120,10 @@ export async function planLegGroups<L>(
 ): Promise<{ perTx: number; groups: L[][]; ixs: TransactionInstruction[][]; units: number[] }> {
   // Start from ALL legs in one tx (4 legs measured ≤1.16M CU on devnet, #2731) and let the
   // simulation decide: compute exhaustion drops one leg per tx and re-plans.
-  let perTx = Math.max(1, Math.min(p.initialPerTx ?? p.legs.length, p.legs.length || 1));
+  let perTx = Math.max(1, Math.min(p.initialPerTx ?? p.legs.length, p.legs.length || 1, maxLegsPerTx()));
   for (;;) {
     const groups = groupLegs(p.legs, perTx);
+    if (isDevnetV22Enabled()) for (const g of groups) assertBatchLegsV22(g.length);
     const ixs = groups.map((g, i) => p.buildGroupIxs(g, i));
     const sims = await Promise.all(ixs.map((x) => deps.simulate(x)));
     let replan = false;

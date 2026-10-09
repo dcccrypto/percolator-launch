@@ -96,6 +96,9 @@ export function buildV17InitMarketArgs(
   params: { p3?: unknown; assetSlots?: number; initialPriceE6: bigint; tradingFeeBps: number; growth?: GrowthLaunch },
   derived: ReturnType<typeof deriveMarketParams>,
 ): InitMarketV17Args {
+  // v2.2: InitMarket refuses more than 4 slots (error 14). Fail here, before a transaction is built, never on chain.
+  const slots = marketAssetSlotsFor(params);
+  if (slots > maxPortfolioAssets()) throw new Error(`InitMarket maxPortfolioAssets ${slots} exceeds the program cap of ${maxPortfolioAssets()}`);
   // Devnet v2.1: a growth block raises the fee cap to base + 600 and sets a funding ceiling; absent
   // (every launch today) the args are exactly what they were.
   return withGrowthInitArgs(baseV17InitMarketArgs(params, derived), params.growth);

@@ -24,6 +24,7 @@ import { withdrawFlagLine } from '@/lib/limits/earn-withdrawable';
 import type { MarketVaultInfo } from '@/hooks/useEarnStats';
 import { PublicKey } from '@solana/web3.js';
 import { isDevnetV22Enabled } from '@/lib/v22/flag';
+import { useLpShareToken } from '@/hooks/useLpShareToken';
 import { BondCard } from '@/components/earn/BondCard';
 import { RescueAction } from '@/components/earn/RescueAction';
 import type { EarnV22Context } from '@/lib/v22/earn-context';
@@ -96,6 +97,8 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
   const collateralSymbol = collateralMeta?.symbol ?? 'USDC';
   const collateralDecimals = collateralMeta?.decimals ?? 6;
   const collDivisor = 10 ** collateralDecimals;
+  // v2.2 (flag on; off = no request): the share token's own decimals and whether it has its name on chain.
+  const shareToken = useLpShareToken(slab, slabProgramId ?? null);
 
   const vaultUsd = Number(state.vaultTotalAtoms) / collDivisor;
   const positionUsd = Number(state.userVaultValueAtoms) / collDivisor;
@@ -276,6 +279,8 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
         lpSupply={state.lpSupply}
         vaultAvailable={vaultAvailable}
         decimals={collateralDecimals}
+        lpDecimals={isDevnetV22Enabled() ? shareToken.decimals ?? state.lpDecimals : undefined}
+        lpMetadataPresent={shareToken.metadataPresent}
         collateralSymbol={collateralSymbol}
         loading={loading}
         cooldownElapsed={state.cooldownElapsed}
