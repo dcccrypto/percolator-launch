@@ -14,7 +14,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 
 const args = process.argv.slice(2);
 const flag = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
@@ -28,18 +28,20 @@ function run(dir) {
   if (!existsSync(out)) { console.error(`vitest produced no report in ${dir} (exit ${r.status})`); process.exit(2); }
   return out;
 }
-function load(file) {
+function load(file, appDir) {
   const d = JSON.parse(readFileSync(file, "utf8"));
   const st = new Map();
   for (const f of d.testResults) {
-    const name = f.name.includes("/app/") ? f.name.split("/app/").pop() : f.name;
+    const name = relative(appDir, f.name); // relative to THIS side's app dir (a path may itself contain /app/)
     if (f.status === "failed" && f.assertionResults.length === 0) st.set(`${name} [file failed to load]`, "failed");
     for (const t of f.assertionResults) st.set(`${name} > ${t.fullName}`, t.status);
   }
   return st;
 }
-const head = load(jsonHead ?? run(resolve(process.cwd())));
-const baseRes = load(jsonBase ?? run(resolve(base)));
+const headDir = resolve(process.cwd());
+const baseDir = base ? resolve(base) : headDir;
+const head = load(jsonHead ?? run(headDir), headDir);
+const baseRes = load(jsonBase ?? run(baseDir), baseDir);
 const fails = (m) => new Set([...m].filter(([, s]) => s === "failed").map(([k]) => k));
 const hf = fails(head), bf = fails(baseRes);
 const added = [...hf].filter((k) => !bf.has(k)).sort();
