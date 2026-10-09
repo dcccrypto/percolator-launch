@@ -4,7 +4,8 @@
  * wizard's payload builder, InitMarket encoder and memo), so the recovery has to reproduce what the
  * launch signed, byte for byte.
  */
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { IX_TAG, encodeInitMarket, encodeDepositCollateral } from "@percolatorct/sdk";
 import { buildV17InitMarketArgs } from "@/lib/create-market-args";
@@ -100,6 +101,9 @@ async function standardChain(o: Parameters<typeof forward>[0] = {}, withDeposit 
 const input = (o: Partial<{ wallet: string; mainnetCA: string }> = {}) => ({ slab: SLAB.toBase58(), wallet: CREATOR.toBase58(), mainnetCA: CA, ...o });
 
 describe("InitMarket decoding agrees with the SDK encoder", () => {
+  // v2.1 numbers (a 14-slot InitMarket is refused client-side on v2.2: cap 4); pinned off regardless of the env flag.
+  beforeEach(() => __setDevnetV22ForTest(false));
+  afterEach(() => __setDevnetV22ForTest(null));
   it("round-trips price, margin, fee and slot count", () => {
     const derived = deriveLaunchMarketParams({ initialMarginBps: 1000, lpCollateral: LP, initialPriceE6: PRICE });
     const data = encodeInitMarket(buildV17InitMarketArgs({ initialPriceE6: PRICE, tradingFeeBps: 5 }, derived));
