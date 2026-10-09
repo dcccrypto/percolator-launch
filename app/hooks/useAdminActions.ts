@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, type Connection } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import {
   encodeTopUpInsurance,
@@ -67,6 +67,32 @@ function requireOracleAuthority(
   }
 }
 
+/** Wait before the second on-chain re-read after a failed burn (lets a just-landed burn show up). */
+const BURN_RECHECK_DELAY_MS = 1_500;
+
+/**
+ * True when asset 0's `asset_admin` reads as the zero key. Only the current
+ * asset_admin can burn it, so a zero key after this wallet's burn attempt means
+ * the burn is done. `reads` reads, BURN_RECHECK_DELAY_MS apart. A failed read is
+ * indeterminate and counts as "not burned", so the caller keeps its own error.
+ */
+async function adminKeyBurnedOnChain(
+  connection: Pick<Connection, "getAccountInfo">,
+  slab: PublicKey,
+  reads: number,
+): Promise<boolean> {
+  for (let i = 0; i < reads; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, BURN_RECHECK_DELAY_MS));
+    try {
+      const info = await connection.getAccountInfo(slab, "confirmed");
+      if (info?.data && readAssetAdmin(new Uint8Array(info.data), 0).equals(ZERO_PUBKEY)) return true;
+    } catch {
+      // RPC hiccup: indeterminate, keep the original error.
+    }
+  }
+  return false;
+}
+
 export function useAdminActions() {
   const { connection } = useConnectionCompat();
   const wallet = useWalletCompat();
@@ -124,7 +150,7 @@ export function useAdminActions() {
         }
 
         const userAta = await getAssociatedTokenAddress(collateralMint, wallet.publicKey);
-        // v18: TopUpInsurance (tag 55) binds asset 0's market_id + authority_epoch
+        // v18: TopUpInsurance (tag 9; the SDK's encodeTopUpInsurance emits IX_TAG.TopUpInsurance = 9) binds asset 0's market_id + authority_epoch
         // (CAS, current value) + a strictly-increasing one-shot intentId on the
         // shared insurance_top_up lane. The lane watermark is not exposed by the
         // SDK parsers, so on an EXISTING market we use the current slot as a
@@ -189,6 +215,9 @@ export function useAdminActions() {
         // doomed signature (the on-chain program is the final gate).
         const assetAdmin = readAssetAdmin(slabData, 0).toBase58();
         const walletB58 = wallet.publicKey.toBase58();
+        if (assetAdmin === zeroPk.toBase58()) {
+          throw new Error("The admin key is already burned.");
+        }
         if (assetAdmin !== walletB58) {
           throw new Error(
             `[renounceAdmin] Connected wallet (${walletB58.slice(0, 8)}…) is not the market admin ` +
@@ -211,7 +240,19 @@ export function useAdminActions() {
         // along read-only (see lib/update-asset-authority-keys.ts).
         const keys = updateAssetAuthorityKeys(wallet.publicKey, zeroPk, market.slabAddress);
         const ix = buildIx({ programId: market.programId, keys, data });
-        return await sendTx({ connection, wallet, instructions: [ix] });
+        try {
+          return await sendTx({ connection, wallet, instructions: [ix] });
+        } catch (err) {
+          // A burn that LANDED can still come back as an error from the send path
+          // (seen on devnet: Phantom approved, the tx landed with SUCCESS, and the
+          // drawer toasted "User rejected the request."). The burn is idempotent in
+          // its end state, so ask the chain before reporting a failure: a zero
+          // asset_admin means it is done (null = burned, signature unknown). A
+          // pre-sign refusal never opened the wallet, so it gets one read, no wait.
+          const preSign = (err as { name?: unknown } | null)?.name === "SimulationRefusal";
+          if (await adminKeyBurnedOnChain(connection, market.slabAddress, preSign ? 1 : 2)) return null;
+          throw err;
+        }
       } finally {
         setLoading(null);
       }

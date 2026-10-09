@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import { useHashTab } from "@/hooks/useHashTab";
 import { EarnVaultView } from "@/components/earn/EarnVaultView";
 import StakePage from "@/app/stake/page";
 import MyMarketsPage from "@/app/my-markets/page";
@@ -8,7 +9,6 @@ import {
   EARN_TABS,
   DEFAULT_EARN_TAB,
   isEarnTabKey,
-  type EarnTabKey,
 } from "@/components/earn/earnTabs";
 
 /**
@@ -22,23 +22,11 @@ import {
  * bar sits above them with no extra max-width/padding wrapper.
  */
 export default function EarnHubPage() {
-  const [tab, setTab] = useState<EarnTabKey>(DEFAULT_EARN_TAB);
+  const [tab, selectTab] = useHashTab(isEarnTabKey, DEFAULT_EARN_TAB);
 
   useEffect(() => {
     document.title = "Earn | Percolator";
   }, []);
-
-  // Deep-link the initial tab from the hash on mount (client-only, no
-  // next/navigation Suspense requirement). Default is the first tab.
-  useEffect(() => {
-    const hash = window.location.hash.replace(/^#/, "");
-    if (isEarnTabKey(hash)) setTab(hash);
-  }, []);
-
-  const selectTab = (key: EarnTabKey) => {
-    setTab(key);
-    history.replaceState(null, "", "#" + key);
-  };
 
   return (
     <div>

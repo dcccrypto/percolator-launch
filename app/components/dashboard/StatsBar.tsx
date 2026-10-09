@@ -3,12 +3,7 @@
 import { usePortfolio } from "@/hooks/usePortfolio";
 import { useLivePortfolioMetrics } from "@/hooks/useLivePortfolioMetrics";
 import { unknownPnlCaveat } from "@/lib/position-pnl";
-
-function formatUsd(val: number): string {
-  if (val === 0) return "--";
-  const sign = val >= 0 ? "+" : "";
-  return `${sign}$${Math.abs(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+import { formatSignedUsd } from "@/lib/pnl-card";
 
 /** M15: real per-market trade fee (bps → %) — not a fabricated maker/taker split. */
 function formatTradeFeeBps(bps: bigint): string {
@@ -30,6 +25,8 @@ export function StatsBar() {
   // DashboardHeader, PositionsBar and the trade terminal.
   const totalPnl = Number(liveMetrics.totalUnrealizedPnl) / 1e6;
   const allPnlUnknown = positions.length > 0 && liveMetrics.unknownPnlCount >= positions.length;
+  // No position, or none with a known PnL: there is no total to show. A known $0.00 is a total.
+  const noPnlTotal = positions.length === 0 || allPnlUnknown;
 
   // M15: v17 has no maker/taker fee split — "Fee Tier" used to fabricate one
   // (a hardcoded "Maker 0.02% / Taker 0.06%" that doesn't exist in the
@@ -65,9 +62,9 @@ export function StatsBar() {
       // equity-snapshot source exists (see the issue for the plan).
       label: "Unrealized PnL",
       // Unknown-PnL positions add 0 to the total: "--" when none is known, a caveat otherwise.
-      value: loading ? "..." : allPnlUnknown ? "--" : formatUsd(totalPnl),
+      value: loading ? "..." : noPnlTotal ? "--" : formatSignedUsd(totalPnl),
       sub: unknownPnlCaveat(liveMetrics.unknownPnlCount) ?? "Open positions",
-      color: allPnlUnknown ? "text-[var(--text-secondary)]" : totalPnl >= 0 ? "text-[var(--long)]" : "text-[var(--short)]",
+      color: noPnlTotal ? "text-[var(--text-secondary)]" : totalPnl >= 0 ? "text-[var(--long)]" : "text-[var(--short)]",
     },
     {
       label: "Trade Fee",

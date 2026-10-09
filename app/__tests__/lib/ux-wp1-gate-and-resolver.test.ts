@@ -184,6 +184,19 @@ describe("resolveUserMessage (§5.3): every code, both wallet shapes, plain word
     expect(resolveUserMessage(e, { surface: "trade", health: { lossStale: true } }).variant).toBe("wait");
     expect(resolveUserMessage(e, { surface: "earn-withdraw", p3Bound: true }).kind).toBe("earn-payout-wait");
   });
+  it("49 on an open with the counterparty below the IM floor is the market's state, not the trader's margin", () => {
+    // STONK 2026-10-07: LP at 0.84 USDC against a 2 USDC floor; every open is 49 whatever the trader deposits.
+    const e = shapes(W.EngineInsufficientInitialMargin).solflare;
+    const u = resolveUserMessage(e, { surface: "trade", side: "long", health: { lpDepleted: true }, imFloorLabel: "$2" });
+    expect(u.kind).toBe("lp-depleted");
+    expect(u.variant).toBe("paused");
+    expect(u.body).not.toMatch(/margin|collateral/i);
+    expect(resolveUserMessage(e, { surface: "trade", health: { lpDepleted: true, lpIsVault: true } }).body).toMatch(/Earn vault/);
+    // NEGATIVE CONTROLS: a funded counterparty keeps the margin message; a close is never the LP's fault.
+    expect(resolveUserMessage(e, { surface: "trade", health: { lpDepleted: false }, imFloorLabel: "$2" }).kind).toBe("insufficient-margin");
+    expect(resolveUserMessage(e, { surface: "close", health: { lpDepleted: true } }).kind).toBe("insufficient-margin");
+  });
+
   it("matcher codes are the matcher's: 8002/8003 wait, 8004 unavailable; a wrapper 66 is never read as matcher", () => {
     const m = (n: number) => new Error(`Program ${MATCHER} failed: custom program error: 0x${n.toString(16)}`);
     expect(resolveUserMessage(m(8002), { surface: "trade" }).kind).toBe("price-wait");

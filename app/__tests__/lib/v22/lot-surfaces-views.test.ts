@@ -187,12 +187,12 @@ describe("surface: chart data provider (history, trades, marks)", () => {
 
 describe("surface: trade history rows (indexer size in lots, price per lot)", () => {
   it("lotExp 3: size in tokens and price per token", () => {
-    expect(formatSize("2000000", 6, 3)).toBe(formatLotQ(2_000_000n, 6, 3));
-    expect(formatSize("2000000", 6, 3)).not.toBe(formatSize("2000000", 6, 0));
+    expect(formatSize("2000000", 3)).toBe(formatLotQ(2_000_000n, 6, 3));
+    expect(formatSize("2000000", 3)).not.toBe(formatSize("2000000", 0));
     expect(formatPrice(60, 3)).toBe(formatPrice(0.06, 0));
   });
   it("lotExp 0 control: identical to the legacy output", () => {
-    expect(formatSize("2000000", 6)).toBe(formatLotQ(2_000_000n, 6, 0));
+    expect(formatSize("2000000")).toBe(formatLotQ(2_000_000n, 6, 0));
     expect(formatPrice(60)).toBe(formatPrice(60, 0));
   });
 });

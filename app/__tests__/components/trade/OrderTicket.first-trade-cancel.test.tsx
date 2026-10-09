@@ -103,6 +103,43 @@ describe("GH#2959 wallet rejection on the first trade", () => {
     expect(screen.queryByTestId("status-line")).toBeNull();
   });
 
+  it("devnet: 'Why?' explains the usual cause, a wallet still on Mainnet", async () => {
+    vi.stubEnv("NEXT_PUBLIC_DEFAULT_NETWORK", "devnet");
+    try {
+      mocks.fund.mockRejectedValueOnce(rejected());
+      render(<OrderTicket slabAddress={SLAB} />);
+      await waitFor(() => expect(screen.queryByTestId("trade-submit")).not.toBeNull());
+      size("5");
+      await place();
+      await waitFor(() => expect(screen.queryByTestId("status-line")).not.toBeNull());
+      const why = screen.getByTestId("status-line-why");
+      expect(why.textContent).toContain("Why?");
+      await act(async () => fireEvent.click(why));
+      const details = screen.getByTestId("status-line-details").textContent ?? "";
+      expect(details).toContain("probably still on Mainnet");
+      expect(details).toContain("Testnet Mode");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("NEGATIVE CONTROL: mainnet never shows the devnet wallet hint", async () => {
+    vi.stubEnv("NEXT_PUBLIC_DEFAULT_NETWORK", "mainnet");
+    try {
+      mocks.fund.mockRejectedValueOnce(rejected());
+      render(<OrderTicket slabAddress={SLAB} />);
+      await waitFor(() => expect(screen.queryByTestId("trade-submit")).not.toBeNull());
+      size("5");
+      await place();
+      await waitFor(() => expect(screen.queryByTestId("status-line")).not.toBeNull());
+      const why = screen.queryByTestId("status-line-why");
+      if (why) await act(async () => fireEvent.click(why));
+      expect(screen.queryByText(/Testnet Mode/)).toBeNull();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("the line clears on the next submit", async () => {
     mocks.fund.mockRejectedValueOnce(rejected());
     render(<OrderTicket slabAddress={SLAB} />);

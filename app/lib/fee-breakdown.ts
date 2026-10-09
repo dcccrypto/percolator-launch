@@ -82,6 +82,11 @@ export const FEE_LEGS: readonly FeeLeg[] = [
   },
 ];
 
+/** A fee leg's user-facing name, the same on every surface (fee breakdown, fee card, fee split). */
+export function legLabel(id: FeeLeg["id"]): string {
+  return FEE_LEGS.find((l) => l.id === id)!.label;
+}
+
 /** Share of the whole fee, as a percentage. */
 export function legPercent(leg: FeeLeg): number {
   return leg.bps / 100;

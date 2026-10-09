@@ -1,4 +1,5 @@
 import { Connection, PublicKey } from "@solana/web3.js";
+import { sanitizeDisplayName } from "@/lib/market-metadata";
 
 export interface TokenMeta {
   decimals: number;
@@ -8,14 +9,65 @@ export interface TokenMeta {
 
 const cache = new Map<string, TokenMeta>();
 
+/**
+ * Truncated-address placeholders ("55WC...meme") stand in for a lookup that FAILED. They
+ * used to be cached like real metadata, so one blip (Helius, DexScreener and the RPC all
+ * down or rate-limited for a moment) showed the placeholder for the rest of the session.
+ * Now a placeholder is cached only for PLACEHOLDER_TTL_MS, so the batch path (portfolio
+ * polling) does not hammer the sources for a mint with no metadata, and fetchTokenMeta
+ * never serves one from cache.
+ */
+export const PLACEHOLDER_TTL_MS = 60_000;
+const placeholders = new WeakSet<TokenMeta>();
+const placeholderExpiry = new Map<string, number>();
+
+/** True when `meta` is a truncated-address placeholder from a failed lookup. */
+export function isPlaceholderTokenMeta(meta: TokenMeta | null | undefined): boolean {
+  return !!meta && placeholders.has(meta);
+}
+
+function cacheGet(key: string): TokenMeta | undefined {
+  const expiry = placeholderExpiry.get(key);
+  if (expiry !== undefined && Date.now() >= expiry) {
+    cache.delete(key);
+    placeholderExpiry.delete(key);
+    return undefined;
+  }
+  return cache.get(key);
+}
+
+function cacheSet(key: string, meta: TokenMeta): void {
+  cache.set(key, meta);
+  if (placeholders.has(meta)) placeholderExpiry.set(key, Date.now() + PLACEHOLDER_TTL_MS);
+  else placeholderExpiry.delete(key);
+}
+
+function placeholderMeta(mint: string, decimals: number): TokenMeta {
+  const meta: TokenMeta = {
+    decimals,
+    symbol: sanitizeTokenString(shortenMint(mint), 16),
+    name: sanitizeTokenName(shortenMint(mint), 32),
+  };
+  placeholders.add(meta);
+  return meta;
+}
+
 /** Max mints per Helius DAS getAssetBatch call */
 const DAS_BATCH_SIZE = 100;
 
-/** Strip unsafe characters from token metadata strings */
+/**
+ * Strip unsafe characters from token metadata strings. Symbols stay on the conservative ASCII-ish
+ * set; names keep Unicode letters / numbers / emoji (a token named "ちいかわ" used to sanitise to
+ * "" and could never register its market) via the shared rule in lib/market-metadata.ts.
+ */
 function sanitizeTokenString(input: string, maxLen: number): string {
   // M6: Allow alphanumeric, spaces, dashes, dots, underscores, parentheses, $, #, &, and emoji
   // Use \p{Emoji} to preserve Unicode emoji properly
   return input.replace(/[^a-zA-Z0-9 \-._()$#&\p{Emoji}]/gu, "").trim().slice(0, maxLen);
+}
+
+function sanitizeTokenName(input: string, maxLen: number): string {
+  return sanitizeDisplayName(input, maxLen);
 }
 
 /** Well-known tokens that don't need a Jupiter lookup. */
@@ -250,7 +302,7 @@ export async function fetchTokenMetaBatch(
   // Return cached entries immediately; track what still needs resolution
   const uncached: string[] = [];
   for (const key of unique) {
-    const cached = cache.get(key);
+    const cached = cacheGet(key);
     if (cached) {
       resultMap.set(key, cached);
     } else {
@@ -258,7 +310,7 @@ export async function fetchTokenMetaBatch(
       const known = KNOWN_TOKENS[key];
       if (known) {
         const meta: TokenMeta = { decimals: 6, symbol: known.symbol, name: known.name };
-        cache.set(key, meta);
+        cacheSet(key, meta);
         resultMap.set(key, meta);
       } else {
         uncached.push(key);
@@ -283,9 +335,9 @@ export async function fetchTokenMetaBatch(
       const meta: TokenMeta = {
         decimals: das.decimals,
         symbol: sanitizeTokenString(das.symbol, 16),
-        name: sanitizeTokenString(das.name, 32),
+        name: sanitizeTokenName(das.name, 32),
       };
-      cache.set(key, meta);
+      cacheSet(key, meta);
       resultMap.set(key, meta);
     } else {
       unresolved.push(key);
@@ -351,9 +403,9 @@ export async function fetchTokenMetaBatch(
               const meta: TokenMeta = {
                 decimals: 6, // Will be overridden below
                 symbol: sanitizeTokenString(symRaw, 16),
-                name: sanitizeTokenString(nameRaw, 32),
+                name: sanitizeTokenName(nameRaw, 32),
               };
-              cache.set(mintKey, meta);
+              cacheSet(mintKey, meta);
               resultMap.set(mintKey, meta);
             }
           } catch {
@@ -385,27 +437,19 @@ export async function fetchTokenMetaBatch(
         const info = allMintInfos[i];
         if (info?.data && "parsed" in info.data) {
           const decimals = info.data.parsed?.info?.decimals ?? 6;
-          const existing = resultMap.get(mintKey) || cache.get(mintKey);
+          const existing = resultMap.get(mintKey) || cacheGet(mintKey);
           if (existing) {
             existing.decimals = decimals;
           } else {
             // Completely unresolved — use truncated address
-            const meta: TokenMeta = {
-              decimals,
-              symbol: sanitizeTokenString(shortenMint(mintKey), 16),
-              name: sanitizeTokenString(shortenMint(mintKey), 32),
-            };
-            cache.set(mintKey, meta);
+            const meta = placeholderMeta(mintKey, decimals);
+            cacheSet(mintKey, meta);
             resultMap.set(mintKey, meta);
           }
         } else if (!resultMap.has(mintKey)) {
           // No info at all — pure fallback
-          const meta: TokenMeta = {
-            decimals: 6,
-            symbol: sanitizeTokenString(shortenMint(mintKey), 16),
-            name: sanitizeTokenString(shortenMint(mintKey), 32),
-          };
-          cache.set(mintKey, meta);
+          const meta = placeholderMeta(mintKey, 6);
+          cacheSet(mintKey, meta);
           resultMap.set(mintKey, meta);
         }
       }
@@ -413,12 +457,8 @@ export async function fetchTokenMetaBatch(
       // Decimals batch fetch failed — fill remaining with defaults
       for (const key of unresolved) {
         if (!resultMap.has(key)) {
-          const meta: TokenMeta = {
-            decimals: 6,
-            symbol: sanitizeTokenString(shortenMint(key), 16),
-            name: sanitizeTokenString(shortenMint(key), 32),
-          };
-          cache.set(key, meta);
+          const meta = placeholderMeta(key, 6);
+          cacheSet(key, meta);
           resultMap.set(key, meta);
         }
       }
@@ -444,8 +484,9 @@ export async function fetchTokenMeta(
   mint: PublicKey,
 ): Promise<TokenMeta> {
   const key = mint.toBase58();
-  const cached = cache.get(key);
-  if (cached) return cached;
+  // A cached placeholder is a past failure, not an answer: look the mint up again.
+  const cached = cacheGet(key);
+  if (cached && !isPlaceholderTokenMeta(cached)) return cached;
 
   // Get decimals from on-chain mint account
   let decimals = 6;
@@ -535,10 +576,12 @@ export async function fetchTokenMeta(
     }
   }
 
-  // 4. Fallback — truncated mint address (never blank, never "UNKNOWN-PERP")
+  // 4. Fallback — truncated mint address (never blank, never "UNKNOWN-PERP"). Marked as a
+  // placeholder so the caller can retry it and the cache keeps it only briefly.
   if (!resolved) {
-    symbol = shortenMint(key);
-    name = shortenMint(key);
+    const meta = placeholderMeta(key, decimals);
+    cacheSet(key, meta);
+    return meta;
   }
 
   // R2-S14: Sanitize metadata — strip unsafe characters, limit length
@@ -546,6 +589,6 @@ export async function fetchTokenMeta(
   name = sanitizeTokenString(name, 32);
 
   const meta: TokenMeta = { decimals, symbol, name };
-  cache.set(key, meta);
+  cacheSet(key, meta);
   return meta;
 }

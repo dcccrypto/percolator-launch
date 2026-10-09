@@ -304,9 +304,7 @@ export function PositionSummary() {
             <div className="mb-3 text-2xl opacity-30">📊</div>
             <p className="text-[13px] font-medium text-[var(--text-secondary)]">No open positions</p>
             <p className="mt-1 text-[11px] text-[var(--text-secondary)]">Start trading →</p>
-            <Link href="/markets" className="mt-3">
-              <GlowButton>Browse Markets</GlowButton>
-            </Link>
+            <GlowButton href="/markets" className="mt-3">Browse Markets</GlowButton>
           </div>
         ) : (
           <div className="space-y-2">

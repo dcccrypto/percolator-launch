@@ -54,6 +54,7 @@ function PositionChip({ pos, decimals }: { pos: PortfolioPosition; decimals: num
   return (
     <Link
       href={`/trade/${pos.slabAddress}`}
+      title="Unrealized PnL and return on margin"
       className="group flex shrink-0 items-center gap-1.5 px-3 py-1 transition-colors hover:bg-[var(--bg-elevated)]"
       style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
     >
@@ -67,7 +68,8 @@ function PositionChip({ pos, decimals }: { pos: PortfolioPosition; decimals: num
       {entryKnown ? (
         <>
           <span className={`text-[11px] font-bold ${colorClass}`}>
-            {sign}{formatTokenAmount(abs, decimals)}
+            {/* #865: a known zero is "0.00", never a bare "0" (which read as the position size). */}
+            {abs === 0n ? "0.00" : `${sign}${formatTokenAmount(abs, decimals)}`}
           </span>
           {live.isEstimate && (
             <span className="text-[9px] font-medium text-[var(--text-dim)]" title={DERIVED_ENTRY_TOOLTIP}>{ESTIMATE_LABEL}</span>

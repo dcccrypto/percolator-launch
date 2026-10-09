@@ -1,7 +1,7 @@
 "use client";
 
 import { formatLotPriceE6 } from "@/lib/v22/lot";
-import { isHiddenFromListing } from "@/lib/listing-hidden";
+import { isBrowsableMarketRow } from "@/lib/listed-markets";
 import { FC, useState, useRef, useEffect, useMemo } from "react";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 
@@ -86,7 +86,7 @@ export const MarketSelector: FC<MarketSelectorProps> = ({
 
   const markets = useMemo(() => {
     const all = Array.from(statsMap.values())
-      .filter((m) => m.slab_address && m.slab_address !== currentSlabAddress && !isHiddenFromListing(m.slab_address))
+      .filter((m) => m.slab_address && m.slab_address !== currentSlabAddress && isBrowsableMarketRow(m.slab_address, m))
       .sort((a, b) => (b.volume_24h ?? 0) - (a.volume_24h ?? 0));
 
     if (!search.trim()) return all;

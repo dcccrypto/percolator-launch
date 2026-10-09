@@ -37,7 +37,7 @@ export interface LineInputs {
   entryPrice: number | null;
   /** The entry is a back-solve, not a recorded price (computePositionPnl `isEstimate`): label it "est.". */
   entryIsEstimate?: boolean;
-  /** False on the Mark series: the Mark line would sit on the last candle. Default true. */
+  /** Draw the Mark line (default true). It is the chart's current-price line on every series, Mark included: TradingView's own price line is off (lib/tv/theme.ts). */
   showMark?: boolean;
   prefs: Pick<OverlayPrefs, "liq" | "entry">;
   theme: ChartTheme;

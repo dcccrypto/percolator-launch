@@ -123,7 +123,9 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
   async function fetchWindow(slab: string, res: ProviderResolution, fromSec: number, toSec: number): Promise<ProviderBar[]> {
     if (candlesUnavailable) return [];
     await ensureLot(slab);
-    const url = `/api/candles/${encodeURIComponent(slab)}?resolution=${res}&from=${Math.floor(fromSec)}&to=${Math.floor(toSec)}`;
+    // fill=1: empty buckets carry the previous close, so a quiet market's last-trade chart is a
+    // continuous line, not scattered dashes with gaps (see /api/candles fillCandleGaps).
+    const url = `/api/candles/${encodeURIComponent(slab)}?resolution=${res}&from=${Math.floor(fromSec)}&to=${Math.floor(toSec)}&fill=1`;
     const r = await fetchImpl(url);
     if (r.status === 404) {
       candlesUnavailable = true;

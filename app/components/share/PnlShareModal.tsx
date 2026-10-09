@@ -12,6 +12,7 @@ import {
 import { PnlShareCard, PNL_CARD_SIZE } from "@/components/share/PnlShareCard";
 import { captureCardToBlob, downloadBlob, writeImageToClipboard } from "@/lib/capture-node";
 import { useTokenLogo } from "@/hooks/useTokenLogo";
+import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
 
 /** Live market mark for a slab from the shared price store; falls back to the given snapshot. */
 function useLiveMarkE6(slab: string, fallbackE6: bigint): bigint {
@@ -63,6 +64,9 @@ export function PnlShareModal({ data, onClose }: { data: PnlCardData; onClose: (
   const cardRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The overlay scrolls itself (short screens); the page behind it must not, or
+  // both scrollbars show and the wheel scrolls the page under the card.
+  useLockBodyScroll();
   const markE6 = useLiveMarkE6(data.slab, data.initialMarkE6);
   const stats = computePnlCardStats(data, markE6);
   // Smoothed polarity picks ONLY the background artwork set (so a breakeven PnL
@@ -206,7 +210,7 @@ export function PnlShareModal({ data, onClose }: { data: PnlCardData; onClose: (
         e.stopPropagation();
         onClose();
       }}
-      style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(3,2,10,0.94)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}
+      style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(3,2,10,0.94)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto", overscrollBehavior: "contain" }}
     >
       <style>{`@keyframes pnlFlipShake{10%,90%{transform:translateX(-2px)}20%,80%{transform:translateX(3px)}30%,50%,70%{transform:translateX(-5px)}40%,60%{transform:translateX(5px)}}`}</style>
       {/* margin:auto centers vertically when there's room and lets the top scroll into

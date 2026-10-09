@@ -20,7 +20,8 @@ const m = vi.hoisted(() => ({ getMultipleAccountsInfoAndContext: vi.fn(), ipCoun
 vi.mock("@/lib/server-rpc", () => ({ getServerConnection: () => ({ getMultipleAccountsInfoAndContext: m.getMultipleAccountsInfoAndContext }) }));
 vi.mock("@/lib/lp-portfolio", () => ({
   getKnownMarketLpCapitals: async () => new Map([["ENdXK8k6iiWCAx4Z9XfoKLg9oXsEbPL4hEtmEmUqozDZ", 49_000_000_000n]]),
-  scanEnabledMarketLpCapitals: async () => new Map([["7h3wNxjzPo6pTfWQ7uiTjDSsprGEeMNh696efmYrpAX2", 0n]]),
+  // Sub-floor, not zero (STONK-shaped): depleted all the same.
+  scanEnabledMarketLpCapitals: async () => new Map([["7h3wNxjzPo6pTfWQ7uiTjDSsprGEeMNh696efmYrpAX2", 841_748n]]),
 }));
 vi.mock("@/lib/get-client-ip", () => ({ getClientIp: () => `10.0.0.${m.ipCounter}` }));
 
@@ -45,6 +46,7 @@ describe("/api/markets/health", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.markets[MURPHY].lpDepleted).toBe(true);
+    expect(body.markets[MURPHY].lpCapital).toBe("841748");
     expect(body.markets[MURPHY].lockReasons).toContain("repairable");
     expect(body.markets[MURPHY].badges[0].id).toBe("lp-depleted");
     expect(body.markets[PENGU].lpDepleted).toBe(false);

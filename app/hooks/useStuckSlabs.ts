@@ -42,8 +42,7 @@ export interface StuckSlab {
  *
  * Reads the persisted in-flight state written by useCreateMarket via
  * lib/inFlightMarket.ts (NEVER stores the slab secret key — recovery uses
- * the admin keypair the user already has on disk and runs
- * scripts/close-market-reclaim-all.ts).
+ * the admin wallet the user already has).
  *
  * Only returns stuck-slab records whose persisted adminAddress matches the
  * currently-connected wallet. That prevents the banner from showing entries

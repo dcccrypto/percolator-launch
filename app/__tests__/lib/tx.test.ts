@@ -561,3 +561,93 @@ describe("TxCancelledError / isTxCancelledError (GH#2623)", () => {
     expect(new TxCancelledError("custom reason").message).toBe("custom reason");
   });
 });
+
+describe("sendTx — R2-S7 landed check works when sendRawTransaction throws", () => {
+  // The signature is known from the signed tx BEFORE broadcast. If the send then
+  // throws a blockhash-expiry-shaped error but the tx actually landed, sendTx must
+  // return that signature instead of throwing (callers report a landed tx as failed).
+  const makeConn = (sendErr: Error, status: unknown) => {
+    const sendRawTransaction = vi.fn().mockRejectedValue(sendErr);
+    const getSignatureStatuses = vi.fn().mockResolvedValue({ value: [status] });
+    const conn = {
+      rpcEndpoint: "https://api.devnet.solana.com",
+      getRecentPrioritizationFees: vi.fn().mockResolvedValue([]),
+      getBalance: vi.fn().mockResolvedValue(1_000_000_000),
+      getLatestBlockhash: vi.fn().mockResolvedValue({
+        blockhash: "11111111111111111111111111111111",
+        lastValidBlockHeight: 10_000_000,
+      }),
+      getBlockHeight: vi.fn().mockResolvedValue(1),
+      simulateTransaction: vi.fn().mockResolvedValue({ value: { err: null, logs: [] } }),
+      sendRawTransaction,
+      getSignatureStatuses,
+    } as any;
+    return { conn, sendRawTransaction, getSignatureStatuses };
+  };
+
+  const makeWallet = () => {
+    const kp = Keypair.generate();
+    const signed: { sig: string | null } = { sig: null };
+    return {
+      signed,
+      wallet: {
+        publicKey: kp.publicKey,
+        signTransaction: vi.fn(async (tx: Transaction) => {
+          tx.partialSign(kp);
+          signed.sig = bs58.encode(tx.signature as Buffer);
+          return tx;
+        }),
+      },
+    };
+  };
+
+  it("returns the pre-broadcast signature when the send throws but the tx landed", async () => {
+    netState.network = "devnet";
+    const { conn, sendRawTransaction, getSignatureStatuses } = makeConn(
+      new Error("Blockhash not found"),
+      { confirmationStatus: "confirmed", err: null },
+    );
+    const { wallet, signed } = makeWallet();
+
+    const sig = await sendTx({ connection: conn, wallet, instructions: [] });
+
+    expect(sendRawTransaction).toHaveBeenCalledTimes(1); // no rebuild/resend
+    expect(getSignatureStatuses).toHaveBeenCalledWith([signed.sig], { searchTransactionHistory: true });
+    expect(sig).toBe(signed.sig);
+  });
+
+  it("still throws when the send threw and the tx did NOT land (no false success)", async () => {
+    netState.network = "devnet";
+    const { conn } = makeConn(new Error("Blockhash not found"), null);
+    const { wallet } = makeWallet();
+
+    await expect(
+      sendTx({ connection: conn, wallet, instructions: [], maxRetries: 0 }),
+    ).rejects.toThrow(/Blockhash not found/i);
+  });
+
+  it("a wallet that ALSO exposes signAndSendTransaction still retries a blockhash miss with a fresh blockhash", async () => {
+    // Every real wallet provider exposes signAndSendTransaction. The PERC-8388 no-rebuild SAFETY
+    // branch is only for a tx the WALLET broadcast atomically; knowing the pre-send signature of OUR
+    // sendRawTransaction must not trip it (it would wait 4s and throw instead of retrying).
+    netState.network = "devnet";
+    const SENT = bs58.encode(new Uint8Array(64).fill(9));
+    const { conn, sendRawTransaction } = makeConn(new Error("Blockhash not found"), null);
+    sendRawTransaction.mockReset();
+    sendRawTransaction
+      .mockRejectedValueOnce(new Error("Blockhash not found"))
+      .mockResolvedValueOnce(SENT);
+    conn.getSignatureStatuses.mockImplementation(async (sigs: string[]) => ({
+      value: sigs.map((x) => (x === SENT ? { confirmationStatus: "confirmed", err: null } : null)),
+    }));
+    const { wallet } = makeWallet();
+    const signAndSendTransaction = vi.fn();
+
+    const sig = await sendTx({ connection: conn, wallet: { ...wallet, signAndSendTransaction }, instructions: [] });
+
+    expect(signAndSendTransaction).not.toHaveBeenCalled();
+    expect(sendRawTransaction).toHaveBeenCalledTimes(2);
+    expect(wallet.signTransaction).toHaveBeenCalledTimes(2); // re-signed with a fresh blockhash
+    expect(sig).toBe(SENT);
+  });
+});

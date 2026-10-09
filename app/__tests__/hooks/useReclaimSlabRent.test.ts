@@ -17,7 +17,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { act } from "react";
-import { Keypair, PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey, SendTransactionError, TransactionExpiredBlockheightExceededError } from "@solana/web3.js";
 
 // ─── Mock @solana/web3.js Transaction (avoids real serialization in unit tests) ─
 
@@ -121,9 +121,13 @@ function makeMockConnection(overrides: ConnectionOverrides = {}) {
       lastValidBlockHeight: 999999,
     }),
     sendRawTransaction: vi.fn().mockResolvedValue("test-tx-sig"),
-    confirmTransaction: vi.fn().mockResolvedValue({
-      value: { err: confirmError },
-      context: { slot: 1 },
+    // What web3.js does when its subscription misses a tx that landed: the expiry race wins.
+    // The hook must NOT depend on this (#3121); it confirms by polling getSignatureStatuses.
+    confirmTransaction: vi.fn(async () => {
+      throw new TransactionExpiredBlockheightExceededError("test-tx-sig");
+    }),
+    getSignatureStatuses: vi.fn().mockResolvedValue({
+      value: [{ err: confirmError, confirmationStatus: "confirmed" }],
     }),
   };
 }
@@ -163,7 +167,7 @@ describe("useReclaimSlabRent", () => {
 
   // ── Happy path ───────────────────────────────────────────────────────────
 
-  it("sets status to success when confirmTransaction returns no error", async () => {
+  it("sets status to success when the polled signature status has no error", async () => {
     const { result } = renderHook(() => useReclaimSlabRent());
     expect(result.current.status).toBe("idle");
 
@@ -174,12 +178,26 @@ describe("useReclaimSlabRent", () => {
     expect(result.current.status).toBe("success");
     expect(result.current.txSig).toBe("test-tx-sig");
     expect(result.current.error).toBeNull();
-    expect(mockConnection.confirmTransaction).toHaveBeenCalledOnce();
+    expect(mockConnection.getSignatureStatuses).toHaveBeenCalled();
+  });
+
+  // ── #3121 follow-up: a reclaim that landed is never reported as failed ──
+
+  it("a landed reclaim is success even when blockheight-bound confirmation would throw 'expired'", async () => {
+    const { result } = renderHook(() => useReclaimSlabRent());
+
+    await act(async () => {
+      await result.current.reclaim(slabKeypair);
+    });
+
+    expect(result.current.status).toBe("success");
+    expect(result.current.txSig).toBe("test-tx-sig");
+    expect(result.current.error).toBeNull();
   });
 
   // ── PERC-515: on-chain rejection check ───────────────────────────────────
 
-  it("sets status to error when confirmTransaction returns value.err (on-chain rejection)", async () => {
+  it("sets status to error when the signature status has err (on-chain rejection)", async () => {
     const onChainError = { InstructionError: [0, { Custom: 42 }] };
     mockConnection = makeMockConnection({ confirmError: onChainError });
     vi.mocked(useConnectionCompat).mockReturnValue({
@@ -193,7 +211,7 @@ describe("useReclaimSlabRent", () => {
     });
 
     expect(result.current.status).toBe("error");
-    expect(result.current.error).toMatch(/Transaction landed on-chain but was rejected/i);
+    expect(result.current.error).toMatch(/Transaction failed/i);
     expect(result.current.error).toContain("InstructionError");
     // txSig must NOT be set — caller should not treat this as success
     expect(result.current.txSig).toBeNull();
@@ -356,6 +374,46 @@ describe("useReclaimSlabRent", () => {
 
     expect(result.current.status).toBe("error");
     expect(result.current.error).toMatch(/network error/i);
+  });
+
+  it("GH#1488: a blockhash miss on the first send (wrapped by broadcastSignedTx) retries once with a fresh blockhash", async () => {
+    mockConnection = makeMockConnection();
+    mockConnection.sendRawTransaction = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Blockhash not found"))
+      .mockResolvedValueOnce("test-tx-sig");
+    vi.mocked(useConnectionCompat).mockReturnValue({
+      connection: mockConnection,
+    } as ReturnType<typeof useConnectionCompat>);
+
+    const { result } = renderHook(() => useReclaimSlabRent());
+
+    await act(async () => {
+      await result.current.reclaim(slabKeypair);
+    });
+
+    expect(mockConnection.sendRawTransaction).toHaveBeenCalledTimes(2);
+    expect(mockConnection.getLatestBlockhash).toHaveBeenCalledTimes(2); // fresh blockhash per attempt
+    expect(result.current.status).toBe("success");
+    expect(result.current.txSig).toBe("test-tx-sig");
+  });
+
+  it("logs the SendTransactionError logs carried on the wrapped error's cause", async () => {
+    const sendErr = new SendTransactionError({ action: "send", signature: "s", transactionMessage: "boom", logs: ["Program log: x"] });
+    mockConnection = makeMockConnection();
+    mockConnection.sendRawTransaction = vi.fn().mockRejectedValue(sendErr);
+    vi.mocked(useConnectionCompat).mockReturnValue({
+      connection: mockConnection,
+    } as ReturnType<typeof useConnectionCompat>);
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { result } = renderHook(() => useReclaimSlabRent());
+    await act(async () => {
+      await result.current.reclaim(slabKeypair);
+    });
+
+    expect(spy).toHaveBeenCalledWith("[useReclaimSlabRent] logs:", ["Program log: x"]);
+    spy.mockRestore();
   });
 
   it("shows friendly message for blockhash expiry", async () => {

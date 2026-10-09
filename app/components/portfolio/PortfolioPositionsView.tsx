@@ -6,13 +6,16 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
 import { UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
 import { describeEntryPrice, displayEntryE6, isExactEntrySource, DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL } from "@/lib/entry-price-display";
-import { portfolioPositionPnl, unknownPnlCaveat } from "@/lib/position-pnl";
+import { onChainMarkE6, portfolioPositionPnl, unknownPnlCaveat } from "@/lib/position-pnl";
 import { adlReductionTooltip } from "@/lib/v17-adl";
 import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
 import { useClosePosition } from "@/hooks/useClosePosition";
+import { closeTargetFor } from "@/lib/portfolio-target";
 import { PnlShareButton } from "@/components/share/PnlShareButton";
 import type { PnlCardData } from "@/lib/pnl-card";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
+import { useOracleFreshness } from "@/hooks/useOracleFreshness";
+import { oracleAgeSecs, oracleCloseGate } from "@/lib/oracle-stale-gate";
 import { ClosePositionModal } from "@/components/trade/ClosePositionModal";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import {
@@ -31,6 +34,9 @@ import { useLiveSlabPrices } from "@/hooks/useLiveSlabPrices";
 import { useLpPositions } from "@/hooks/useLpPositions";
 import { AtRiskBanner } from "@/components/portfolio/AtRiskBanner";
 import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
+import { isSentinelValue } from "@/lib/health";
+import { releasedPnlFace } from "@/lib/convert-released-pnl";
+import { positionSizeUsdText } from "@/lib/q-usd";
 import dynamic from "next/dynamic";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { GlowButton } from "@/components/ui/GlowButton";
@@ -39,15 +45,20 @@ import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { useAllMarketStats } from "@/hooks/useAllMarketStats";
 import { PublicKey } from "@solana/web3.js";
 import { isMockMode } from "@/lib/mock-mode";
-import { getMockPortfolioPositions } from "@/lib/mock-trade-data";
+import { getMockPortfolioPositions, isMockSlab } from "@/lib/mock-trade-data";
 import { useTraderStats } from "@/hooks/useTraderStats";
 import { computePositionLeverage, describePositionLeverage, POSITION_LEVERAGE_LABEL } from "@/lib/position-leverage";
+import { formatSignedUsd } from "@/lib/pnl-card";
 import { InfoIcon } from "@/components/ui/Tooltip";
 
 const ConnectButton = dynamic(
   () => import("@/components/wallet/ConnectButton").then((m) => m.ConnectButton),
   { ssr: false }
 );
+
+/** Same mechanics wording as the trade page's withdraw card (settlingProfitMessage). */
+const SETTLING_PROFIT_TITLE =
+  "Your profit becomes withdrawable once the other side of your trade settles, which happens automatically. Convert and withdraw it on this market's Withdraw tab.";
 
 // PERF PLAN #4: below-the-fold sections lazy-loaded exactly like
 // app/app/dashboard/page.tsx's widgets — ssr:false + a fixed-height
@@ -137,7 +148,10 @@ function PortfolioCloseFlow({
   // prewarm the fresh position read + tx caches. Without this, /portfolio was
   // the ONE close path that never prewarmed (the dock and the cross-market list
   // both do), so it consumed whatever the shared read cache happened to hold.
-  useEffect(() => { prewarmClose(); }, [prewarmClose]);
+  // #3301: Close acts on THIS row's own account, not on whichever portfolio the wallet resolves to.
+  const target = closeTargetFor(pos);
+  const targetKey = pos.portfolioPk?.toBase58();
+  useEffect(() => { prewarmClose(target); }, [prewarmClose, targetKey]); // eslint-disable-line react-hooks/exhaustive-deps
   // Reviewer blocker fix: PortfolioCloseFlow previously dropped `error` from
   // useClosePosition, so a failed close just silently re-enabled the modal
   // with no feedback. Also mirror the trade-page's engine-staleness guard
@@ -145,8 +159,16 @@ function PortfolioCloseFlow({
   // SlabProvider (see the call site below), so useEngineFreshness() has the
   // context it needs.
   const { engineStale } = useEngineFreshness();
+  // The same oracle gate as the dock and the other-markets rows (#24): a matured oracle reverts
+  // the close on-chain (a price merely older than 60 s does not), so block Confirm here too.
+  const { level: oracleLevel, mode: oracleMode, ready: oracleReady, elapsedSecs: oracleElapsed, lastUpdateMs: oracleLastMs, closeFacts } = useOracleFreshness();
+  const mockExempt = isMockMode() && isMockSlab(pos.slabAddress);
+  const closeGate = oracleCloseGate({ level: oracleLevel, mode: oracleMode, ready: oracleReady, facts: closeFacts });
+  const oracleStale = !mockExempt && closeGate.blocked;
+  const oraclePriceBehind = !mockExempt && closeGate.behind;
+  const priceAgeSecs = oracleAgeSecs(oracleLastMs, oracleElapsed);
   // This market's fee, so the preview matches the trade page's dock (#24).
-  const { params } = useSlabState();
+  const { params, config: slabConfig, wrapperConfigV17 } = useSlabState();
   // Same shared PnL computation as every other surface: the modal previews size
   // and PnL for the close, so it gets the ADL-EFFECTIVE size (raw basis over-
   // reports a deleveraged leg) and an entry only when PnL is honestly known.
@@ -167,10 +189,14 @@ function PortfolioCloseFlow({
       loading={loading}
       error={error}
       tradingFeeBps={params?.tradingFeeBps}
-      oracleStale={engineStale}
+      oracleStale={oracleStale}
+      oraclePriceBehind={oraclePriceBehind}
+      priceAgeSecs={priceAgeSecs}
+      settleMarkE6={onChainMarkE6(slabConfig, wrapperConfigV17 !== null)}
+      engineCatchingUp={!mockExempt && engineStale}
       onConfirm={async (percent) => {
         try {
-          await closePosition(percent);
+          await closePosition(percent, target);
           onDone(true);
         } catch {
           /* keep the modal open; the tx error is logged by the hook */
@@ -231,6 +257,8 @@ function PositionCard({
   const hasPosition = posSize !== 0n;
 
   const markE6 = livePriceE6 != null && livePriceE6 > 0n ? livePriceE6 : pos.oraclePriceE6;
+  // "≈ $200.12" under the size: effective size at the live mark; nothing without a mark.
+  const sizeUsd = positionSizeUsdText(posSize, markE6);
   // Current effective leverage on this market's cross-margined portfolio at the
   // LIVE mark: nominal notional / (capital + pnl). Not entry leverage (not on
   // chain). See lib/position-leverage.ts.
@@ -455,6 +483,11 @@ function PositionCard({
                   </span>
                 )}
               </p>
+              {sizeUsd && (
+                <p data-testid="position-size-usd" className="mt-0.5 text-[9px] text-[var(--text-dim)]">
+                  {sizeUsd}
+                </p>
+              )}
             </div>
             <div>
               <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Entry</p>
@@ -589,7 +622,7 @@ export function PortfolioPositionsView() {
   const loadError = mockPositions ? null : portfolio.error;
   const refresh = portfolio.refresh;
 
-  // LP positions (insurance fund deposits)
+  // Earn deposits and stake positions (neither adds to the insurance balance)
   const lpPositions = useLpPositions();
   const isRefreshing = portfolio.isRefreshing || lpPositions.isRefreshing;
 
@@ -617,9 +650,21 @@ export function PortfolioPositionsView() {
   // Formula: depositedUsd = rawCapital / 10^decimals
   // Matches PositionsDock's pnlUsdRaw convention (divide by decimals only) and
   // this hook's own usePortfolio totals (which never multiply capital by price).
-  // Filter out empty/closed accounts (FLAT with zero capital) — they clutter the list
+  // Realized profit the engine can still convert on a flat account (pnl minus the
+  // reserved part, the exact ConvertReleasedPnl cap). A full close sweeps capital to
+  // the wallet but leaves this in `pnl` until the user converts it from the market's
+  // Withdraw tab — so a flat account can hold money with capital 0. Sentinel first:
+  // v12 flat accounts carry u64::MAX pnl, and MAX minus reserved is still "profit".
+  const pendingProfit = (pos: PortfolioPosition): bigint => {
+    const pnl = pos.account?.pnl ?? 0n;
+    if ((pos.account?.positionSize ?? 0n) !== 0n || isSentinelValue(pnl)) return 0n;
+    return releasedPnlFace(pnl, pos.account?.reservedPnl ?? 0n);
+  };
+
+  // Filter out empty/closed accounts (FLAT with zero capital and no pending
+  // profit) — they clutter the list
   const activePositions = positions.filter(
-    (pos) => pos.account.positionSize !== 0n || pos.account.capital > 0n
+    (pos) => pos.account.positionSize !== 0n || pos.account.capital > 0n || pendingProfit(pos) > 0n
   );
 
   // Split real trades from idle deposits. A funded-but-flat account is the
@@ -656,25 +701,28 @@ export function PortfolioPositionsView() {
     // so without this line a drained balance has NO explanation anywhere in the
     // UI — unrealized PnL reads flat while the deposit total quietly shrinks.
     let realizedLossUsd = 0;
+    // Realized-but-unconverted profit on flat accounts (the swept-close case).
+    // Part of the portfolio's value, NOT of "Total Deposited" — it never was a deposit.
+    let pendingProfitUsd = 0;
     for (const pos of activePositions) {
       const decimals = getDecimals(pos);
       const divisor = 10 ** decimals;
       const capital = Number(pos.account.capital ?? 0n) / divisor;
       depositedUsd += capital;
       realizedLossUsd += Number(pos.realizedLoss ?? 0n) / divisor;
-      // pos.unrealizedPnl is already collateral-scale (usePortfolio.ts converts
-      // the SDK's native computeMarkPnl output via computeMarkPnlCollateral) —
+      pendingProfitUsd += Number(pendingProfit(pos)) / divisor;
+      // pos.unrealizedPnl is already collateral-scale (valueAtMark, lib/position-pnl.ts) —
       // divide by decimals only, same as PositionsDock's pnlUsdRaw and raw
       // capital above (collateral is sim-USDC dollars, no price factor).
       unrealizedPnlUsd += Number(pos.unrealizedPnl) / divisor;
     }
-    return { depositedUsd, unrealizedPnlUsd, realizedLossUsd, valueUsd: depositedUsd + unrealizedPnlUsd };
+    return { depositedUsd, pendingProfitUsd, unrealizedPnlUsd, realizedLossUsd, valueUsd: depositedUsd + pendingProfitUsd + unrealizedPnlUsd };
   };
   // Don't compute USD totals until token metadata (decimals) has loaded —
   // using the default 6 decimals for a 9-decimal token inflates values 1000x
   const usdTotals = activePositions.length > 0 && !tokenMetasLoading
     ? computeUsdTotals()
-    : { depositedUsd: 0, unrealizedPnlUsd: 0, realizedLossUsd: 0, valueUsd: 0 };
+    : { depositedUsd: 0, pendingProfitUsd: 0, unrealizedPnlUsd: 0, realizedLossUsd: 0, valueUsd: 0 };
 
   // PERF PLAN #3: the hero tiles (Portfolio Value / Unrealized PnL) tick
   // LIVE off the shared WS price store, instead of only refreshing on
@@ -703,16 +751,19 @@ export function PortfolioPositionsView() {
           if (!livePnl.pnlKnown) unknownPnlCount++;
           unrealizedPnlUsd += Number(livePnl.unrealizedPnl ?? 0n) / divisor;
         }
-        // Deposited total isn't price-dependent — reuse usdTotals' value
-        // rather than re-summing capital a second time.
-        return { unrealizedPnlUsd, unknownPnlCount, valueUsd: usdTotals.depositedUsd + unrealizedPnlUsd };
+        // Deposited and pending-profit totals aren't price-dependent — reuse
+        // usdTotals' values rather than re-summing them a second time.
+        return { unrealizedPnlUsd, unknownPnlCount, valueUsd: usdTotals.depositedUsd + usdTotals.pendingProfitUsd + unrealizedPnlUsd };
       })()
     : { unrealizedPnlUsd: 0, unknownPnlCount: 0, valueUsd: 0 };
 
   // Idle (parked, non-position) collateral value — its own Tier-2 tile now
   // that "Positions" no longer conflates open positions with idle deposits.
   const idleDepositsUsd = !tokenMetasLoading
-    ? idleDeposits.reduce((sum, pos) => sum + Number(pos.account?.capital ?? 0n) / (10 ** getDecimals(pos)), 0)
+    ? idleDeposits.reduce(
+        (sum, pos) => sum + Number((pos.account?.capital ?? 0n) + pendingProfit(pos)) / (10 ** getDecimals(pos)),
+        0,
+      )
     : 0;
 
   if (!connected) {
@@ -805,8 +856,7 @@ export function PortfolioPositionsView() {
                   className={`text-sm font-bold sm:text-base ${liveUsdTotals.unrealizedPnlUsd >= 0 ? "text-[var(--long)]" : "text-[var(--short)]"}`}
                   style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
                 >
-                  {liveUsdTotals.unrealizedPnlUsd >= 0 ? "+" : ""}
-                  ${Math.abs(liveUsdTotals.unrealizedPnlUsd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {formatSignedUsd(liveUsdTotals.unrealizedPnlUsd)}
                 </span>
                 <span
                   className={`text-xs font-medium ${liveUsdTotals.unrealizedPnlUsd >= 0 ? "text-[var(--long)]/70" : "text-[var(--short)]/70"}`}
@@ -938,9 +988,7 @@ export function PortfolioPositionsView() {
                   ? "Your deposited collateral is listed under Market Deposits below."
                   : "Browse markets to start trading."}
               </p>
-              <Link href="/markets">
-                <GlowButton>Browse Markets</GlowButton>
-              </Link>
+              <GlowButton href="/markets">Browse Markets</GlowButton>
             </div>
           ) : (
             <div className="space-y-3">
@@ -983,8 +1031,11 @@ export function PortfolioPositionsView() {
                       <span className="text-[13px] font-semibold text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                         {marketLabel(pos)}
                       </span>
-                      <span className="rounded bg-[var(--bg-elevated)] px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)]">
-                        idle collateral
+                      <span
+                        className="rounded bg-[var(--bg-elevated)] px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)]"
+                        title={pendingProfit(pos) > 0n ? SETTLING_PROFIT_TITLE : undefined}
+                      >
+                        {pendingProfit(pos) > 0n ? "profit settling" : "idle collateral"}
                       </span>
                     </div>
                     <div className="flex items-center gap-4">
@@ -993,8 +1044,15 @@ export function PortfolioPositionsView() {
                         <span className="text-[10px] text-[var(--text-secondary)]">
                           {tokenMetaMap.get(pos.collateralMint.toBase58())?.symbol ?? "USDC"}
                         </span>
+                        {pendingProfit(pos) > 0n && (
+                          <span data-testid="pending-profit" className="ml-2 text-[11px] text-[var(--long)]" title={SETTLING_PROFIT_TITLE}>
+                            up to +{formatTokenAmount(pendingProfit(pos), getDecimals(pos), 3)} profit
+                          </span>
+                        )}
                       </span>
-                      <span className="text-[10px] uppercase tracking-[0.1em] text-[var(--accent)]">Trade →</span>
+                      <span className="text-[10px] uppercase tracking-[0.1em] text-[var(--accent)]">
+                        {pendingProfit(pos) > 0n ? "Withdraw →" : "Trade →"}
+                      </span>
                     </div>
                   </Link>
                 ))}

@@ -1,6 +1,7 @@
 "use client";
 
 import { parseLpVaultRegistry } from "@/lib/v22/records";
+import { EmbeddedBatchSignError, isWalletRejection } from "@/lib/privy-batch-sign";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DEVNET_PROGRAM_IDS } from "@/lib/program-ids";
 import {
@@ -67,15 +68,18 @@ import {
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
 import { toE6 } from "@/lib/format";
 import { buildKeeperRegisterMemoIx, keeperMemoParams } from "@/lib/keeper-register-memo";
+import { preflightRegistration, resolveMarketMetadata } from "@/lib/market-metadata";
 import { buildM1Instructions } from "@/lib/create-market-m1";
 import { WIZARD_STEP_COPY } from "@/lib/wizard-copy";
+import { withRateLimitRetry } from "@/lib/rpc-rate-limit";
 import { KEEPER_REGISTER_COPY, loadProofPayload, loadProofTx, markRegistered, postKeeperRegistration, runKeeperRegistration, saveProofPayload, saveProofTx, saveRegisterRequest, type KeeperRegisterPhase } from "@/lib/keeper-register-client";
-import { deriveLaunchMarketParams, deriveMarketParams, MIN_LEVERAGE_X, backingSeedPerDomain, leverageFromMarginBps } from "@/lib/market-params";
+import { deriveLaunchMarketParams, backingSeedPerDomain } from "@/lib/market-params";
+import { buildMarketRegistrationPayload, flooredInitialMarginBps } from "@/lib/market-registration-payload";
 // GH#2592: the step-4 predicate and /api/devnet-pre-fund's funding target must be
 // the SAME number. They were two hand-copies, and the route's was understated by
 // both backing seeds, so it answered "sufficient" to the very request that said
 // the wallet was short.
-import { fullMarketRequirement } from "@/lib/prefund-requirement";
+import { fullMarketRequirement, classifyPreFundRefusal } from "@/lib/prefund-requirement";
 import { defaultCrankObservations, readPortfolioIdentity, readAssetMarketId, readAssetControlSeqs, assetProfileOff } from "@/lib/v18-wire";
 // v17: SetOracleAuthority (tag 17), PushOraclePrice (tag 16), SetOraclePriceCap (tag 16),
 // and UpdateConfig (tag 14) do not exist in v17. All oracle + risk params are embedded
@@ -95,6 +99,7 @@ import {
   TxCancelledError,
   isTxCancelledError,
   presimulateOrThrow,
+  confirmSignatureByPolling,
 } from "@/lib/tx";
 import { getConfig, getNetwork } from "@/lib/config";
 import { resolveMarketOracleMode } from "@/lib/resolveMarketOracleMode";
@@ -153,6 +158,8 @@ import {
 export {
   V17_MAX_PORTFOLIO_ASSETS,
   V22_MAX_PORTFOLIO_ASSETS,
+  maxPortfolioAssets,
+  LAUNCH_ASSET_SLOTS,
   DEFAULT_SLAB_SIZE,
   defaultSlabSize,
   P3_MARKET_ASSET_SLOTS,
@@ -163,6 +170,8 @@ export {
 } from "@/lib/create-market-args";
 import {
   marketAssetSlotsFor,
+  assetSlotsForSlabLen,
+  initialAssetGenerationFrontier,
   buildV17InitMarketArgs,
   slabSizeFor,
 } from "@/lib/create-market-args";
@@ -283,25 +292,7 @@ export const MIN_INIT_MARKET_SEED = 500_000_000n;
  */
 export const MIN_SAFE_INITIAL_MARGIN_BPS = 1500n;
 
-/**
- * The on-chain initial_margin_bps this request will ACTUALLY be created with.
- *
- * Every leverage display (success screen, StepReview, markets DB `max_leverage`)
- * must go through this rather than the raw bps the user typed. Originally that
- * was BUG 16 (2026-07-06): create() floored the margin at 1500 but the displays
- * read the unfloored value, so a market advertised as 10x was initialized at
- * ~6.67x.
- *
- * The floor is gone (see MIN_SAFE_INITIAL_MARGIN_BPS above), but the reason for
- * this mirror is not: deriveMarketParams clamps leverage to [MIN_LEVERAGE_X,
- * MAX_LEVERAGE_X] and rounds margin UP, so the requested bps and the on-chain
- * bps can still differ. A pure function of the request — no retry/session
- * state — so it is safe to call before submission.
- */
-export function flooredInitialMarginBps(requestedBps: number): number {
-  const lev = requestedBps > 0 ? 10_000 / requestedBps : MIN_LEVERAGE_X;
-  return deriveMarketParams(lev, 0n, 1_000_000n).initialMarginBps;
-}
+export { flooredInitialMarginBps } from "@/lib/market-registration-payload";
 
 export interface VammParams {
   spreadBps: number;
@@ -369,8 +360,13 @@ export interface CreateMarketParams {
    *  IMPORTANT: Must match the compiled MAX_ACCOUNTS of the target program binary.
    *  The default devnet program is compiled for 4096 accounts. */
   maxAccounts?: number;
-  /** Slab data size in bytes. Calculated from maxAccounts if omitted. */
-  slabDataSize?: number;
+  /**
+   * Asset slots of a market that ALREADY exists (a resume, or a stuck slab): read off the slab, never
+   * set for a new launch. A new launch gets LAUNCH_ASSET_SLOTS (1); a pre-change 14-slot launch still
+   * in flight keeps its 14 here, so the resumed steps agree with the slab (lib/create-market-args.ts).
+   * The slab size and the matcher frontier both derive from it.
+   */
+  assetSlots?: number;
   /** Token symbol for dashboard */
   symbol?: string;
   /** Token name for dashboard */
@@ -681,6 +677,52 @@ export function singleTxInstructionPlan(
  * Never throws: `String(err)` can raise on a null-prototype object, a Proxy,
  * or a throwing `Symbol.toPrimitive`, and this runs outside any try.
  */
+/**
+ * The wallet is short of the test token for THIS launch and /api/devnet-pre-fund
+ * refused it for its claim window (see classifyPreFundRefusal). The sequential
+ * path's deposit step asks the same route and gets the same answer, so falling
+ * back would create the market, lock its rent, and then stop. This must end the
+ * launch before anything is sent.
+ */
+async function collateralBalanceOf(connection: Connection, mint: PublicKey, owner: PublicKey): Promise<bigint> {
+  try {
+    return (await getAccount(connection, await getAssociatedTokenAddress(mint, owner))).amount;
+  } catch {
+    return 0n; // no token account yet
+  }
+}
+
+export class PreFundRateLimitedError extends Error {
+  constructor(public readonly nextClaimAt: string | null) {
+    super("Devnet pre-fund failed: Already pre-funded recently");
+    this.name = "PreFundRateLimitedError";
+  }
+}
+
+export function preFundRateLimitedMessage(nextClaimAt: string | null): string {
+  const at = nextClaimAt ? new Date(nextClaimAt) : null;
+  const when = at && !Number.isNaN(at.getTime())
+    ? ` More arrive after ${at.toLocaleString(undefined, { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" })}.`
+    : "";
+  return `This wallet is out of test tokens for a market this size, so it can't be funded yet. Nothing was sent.${when} Start over with a smaller liquidity amount to launch now.`;
+}
+
+export const LAUNCH_CANCELLED_MESSAGE = "Transaction cancelled. Nothing was sent. Press Retry to try again.";
+
+/** True (after setting the idle/error state) when a pre-broadcast failure is the user declining the prompt. */
+export function endLaunchOnRejection(
+  err: unknown,
+  broadcastStarted: boolean,
+  setState: (fn: (s: CreateMarketState) => CreateMarketState) => void,
+): boolean {
+  if (broadcastStarted || !isWalletRejection(err)) return false;
+  setState((s) => ({
+    ...s, loading: false, error: LAUNCH_CANCELLED_MESSAGE,
+    step: 0, stepLabel: "", phase: "idle", landingIndex: 0, landingTotal: 0,
+  }));
+  return true;
+}
+
 export function describeBatchFallback(err: unknown): string {
   let raw = "";
   try {
@@ -787,56 +829,16 @@ export const NO_BATCH_SIGNING_REASON =
   "this wallet signs one transaction at a time, so the steps are approved one by one as they land";
 
 /**
- * Single source of truth for the market-registration payload.
- *
- * The batched fast path and the sequential fallback both POST this object to
- * /api/markets AND sign a canonical encoding of it (buildMarketRegistrationMessage,
- * #2387). The signed bytes and the POSTed bytes MUST be byte-identical or the
- * server's signature check 401s — so the payload must be built in exactly ONE
- * place. Previously each path hand-wrote its own literal (they had already
- * drifted cosmetically on the oracle_authority fallback); this factory removes
- * any chance of a future field being added to one and forgotten on the other.
+ * Refuse, BEFORE the first signature, a registration the route's validators would refuse for
+ * ever (the memo binds the payload digest, so an unregistrable payload cannot be repaired once
+ * the launch has landed). Runs the same checkName / checkSymbol / validateRegistrationPayload
+ * the route runs (lib/market-metadata.ts).
  */
-function buildMarketRegistrationPayload(args: {
-  slabAddress: string;
-  params: CreateMarketParams;
-  deployer: string;
-  oracleMode: "pyth" | "hyperp" | "admin" | "keeper";
-  isAdminOracle: boolean;
-  isDevnetEnv: boolean;
-}): MarketRegistrationPayload {
-  const { slabAddress, params, deployer, oracleMode, isAdminOracle, isDevnetEnv } = args;
-  return {
-    slab_address: slabAddress,
-    mint_address: params.mint.toBase58(),
-    symbol: params.symbol ?? "UNKNOWN",
-    name: params.name ?? "Unknown Token",
-    decimals: params.decimals ?? 6,
-    deployer,
-    oracle_mode: oracleMode,
-    dex_pool_address: params.dexPoolAddress ?? null,
-    // Admin-oracle markets on devnet are cranked by the shared crank wallet;
-    // otherwise the deployer is its own oracle authority. (deployer === the
-    // connected wallet, so this matches the former walletPk.toBase58() literal.)
-    //
-    // A "keeper" market counts here. On devnet it is created in AUTH_MARK/admin
-    // mode and its oracle authority is DELEGATED to the keeper — that is what
-    // the mode means. Testing `isAdminOracle` alone (oracleMode === "admin")
-    // excluded exactly those markets, so the row recorded oracle_authority=null
-    // for the ones the keeper actually drives. Fauci's row shows the symptom.
-    oracle_authority: (isAdminOracle || oracleMode === "keeper")
-      ? (isDevnetEnv && getConfig().crankWallet ? getConfig().crankWallet : deployer)
-      : null,
-    initial_price_e6: params.initialPriceE6.toString(),
-    // BUG 16: advertise the FLOORED margin actually enforced on-chain, not the
-    // raw requested bps — see flooredInitialMarginBps.
-    max_leverage: params.initialMarginBps > 0
-      ? leverageFromMarginBps(flooredInitialMarginBps(params.initialMarginBps))
-      : 1,
-    trading_fee_bps: Number(params.tradingFeeBps),
-    lp_collateral: params.lpCollateral.toString(),
-    mainnet_ca: params.mainnetCA ?? null,
-  };
+export function assertRegistrable(symbol: string | null | undefined, payload: MarketRegistrationPayload | null): void {
+  const problem = preflightRegistration({ symbol, label: null, payload });
+  if (problem) {
+    throw new Error(`This launch cannot be registered (${problem}). Nothing was sent; no signature was requested.`);
+  }
 }
 
 export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshBatchOutcome> {
@@ -958,7 +960,19 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
         // left the user with "Already pre-funded recently" and no idea when
         // "recently" stops, which is the single fact they need.
         const when = nextClaimAt ? ` Try again after ${nextClaimAt}.` : "";
-        throw new Error(`Devnet pre-fund failed: ${pfError ?? preFundResp.status}.${when}`);
+        // A refusal only matters if the wallet is actually short for THIS launch.
+        const refusal = classifyPreFundRefusal({
+          status: preFundResp.status,
+          body: err as { error?: unknown; nextClaimAt?: unknown },
+          balance: await collateralBalanceOf(connection, params.mint, walletPk),
+          lpCollateral: params.lpCollateral,
+          insuranceAmount: params.insuranceAmount,
+        });
+        if (refusal.kind === "blocked") throw new PreFundRateLimitedError(refusal.nextClaimAt);
+        if (refusal.kind === "error") {
+          throw new Error(`Devnet pre-fund failed: ${pfError ?? preFundResp.status}.${when}`);
+        }
+        console.info("[useCreateMarket] pre-fund refused, but the wallet already covers this launch — continuing");
       }
     }
 
@@ -1004,6 +1018,7 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
     const keeperPayload = keeperRequestBase
       ? buildMarketRegistrationPayload({ slabAddress: slabPk.toBase58(), params, deployer: walletPk.toBase58(), oracleMode, isAdminOracle, isDevnetEnv })
       : null;
+    if (keeperRequestBase) assertRegistrable(keeperRequestBase.symbol, keeperPayload);
     const keeperMemoIx = keeperRequestBase
       ? await buildKeeperRegisterMemoIx(walletPk, await keeperMemoParams({ ...keeperRequestBase, payload: keeperPayload }))
       : null;
@@ -1020,10 +1035,7 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
           walletPk,
           Math.max(2_000_000_000, minSolRequired - solBalance + 500_000_000),
         );
-        const airdropConfirm = await connection.confirmTransaction(airdropSig, "confirmed");
-        if (airdropConfirm.value.err) {
-          throw new Error(`Airdrop transaction failed on-chain: ${JSON.stringify(airdropConfirm.value.err)}`);
-        }
+        await confirmSignatureByPolling(connection, airdropSig);
       } else {
         throw new Error(
           `Insufficient SOL. You need ~${(minSolRequired / 1e9).toFixed(3)} SOL but your wallet has ` +
@@ -1106,12 +1118,12 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
       // brand-new market, so its program-assigned portfolioId is 1 and its
       // matcher-sequence is 0 (InitUser just ran in this same tx, no prior ops).
       // assetGenerationFrontier = header.next_market_id = max_market_slots + 1
-      // (V17_MAX_PORTFOLIO_ASSETS + 1); tradeFeeCapBps 10000 = no practical LP cap;
+      // (slots + 1, initialAssetGenerationFrontier); tradeFeeCapBps 10000 = no practical LP cap;
       // expirySlot = born-immortal non-lapsing grant.
       data: encodeSetMatcherConfig({
         portfolioId: 1n,
         expectedSequence: 0n,
-        assetGenerationFrontier: BigInt(marketAssetSlotsFor(params)) + 1n,
+        assetGenerationFrontier: initialAssetGenerationFrontier(marketAssetSlotsFor(params)),
         enabled: 1,
         tradeFeeCapBps: 10_000,
         expirySlot: MAX_BACKING_BUCKET_EXPIRY_SLOT,
@@ -1627,7 +1639,14 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
       const rebuiltDescriptors = tailDescriptors.slice(startIdx);
       const rebuiltTxs = rebuiltDescriptors.map((d) => buildTailTx(d, freshBlockhash));
       const resignStartedAt = Date.now();
-      const resigned = await signAllCompat(wallet, rebuiltTxs);
+      let resigned: Transaction[];
+      try {
+        resigned = await signAllCompat(wallet, rebuiltTxs);
+      } catch (e) {
+        // Earlier steps of this launch have already landed, so "nothing was sent" would be false.
+        if (e instanceof EmbeddedBatchSignError) throw new EmbeddedBatchSignError(e.total, { cause: e.cause, sentBefore: true });
+        throw e;
+      }
       lastSignMs = Date.now() - resignStartedAt;
       for (let j = 0; j < rebuiltDescriptors.length; j++) {
         const descriptor = rebuiltDescriptors[j];
@@ -1933,6 +1952,18 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
 
     return { status: "success" };
   } catch (err) {
+    if (!broadcastStarted && err instanceof PreFundRateLimitedError) {
+      // Not a fallback case: the sequential path cannot fund this launch either.
+      // Nothing was broadcast, so also drop the batch phase UI.
+      setState((s) => ({
+        ...s, loading: false, error: preFundRateLimitedMessage(err.nextClaimAt),
+        step: 0, stepLabel: "", phase: "idle", landingIndex: 0, landingTotal: 0,
+      }));
+      return { status: "fatal" };
+    }
+    // A user cancel before anything was sent ends the launch. The six-step sequential path would
+    // re-prompt for every step of a launch they just declined. Retry starts a fresh launch (step 0).
+    if (endLaunchOnRejection(err, broadcastStarted, setState)) return { status: "fatal" };
     if (!broadcastStarted) {
       // Nothing landed — safe to fall back to the sequential path in the
       // SAME create() call. See the FALLBACK CONTRACT note above.
@@ -1941,7 +1972,7 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
       // funds (nothing broadcast, the launch still completes) but it was also
       // silent for diagnosis, which is a different thing and not a feature:
       // the batch has several unrelated ways to throw before broadcast — a
-      // 429 from /api/devnet-pre-fund's 24h faucet gate, a keeper co-sign
+      // 429 from /api/devnet-pre-fund's 1h faucet gate, a keeper co-sign
       // failure, an airdrop that did not confirm — and they are
       // indistinguishable from the outside.
       const reason = describeBatchFallback(err);
@@ -2015,6 +2046,13 @@ export function useCreateMarket() {
   // below hydrates it; restoreSlabKeypair lets RecoverSolBanner's onResume hand the
   // keypair back in explicitly (belt-and-suspenders for the same-session resume path).
   const slabKpRef = useRef<Keypair | null>(null);
+  /**
+   * Cross-device resume (#3267): the slab a chain-rebuilt resume was handed (restoreSlabAddress). While
+   * set, create() runs ONLY on this slab: the keypair hydration below and a stale slabKpRef from this
+   * browser's own last launch must never win over it, or the wallet would sign LP init and deposits
+   * against the wrong market with this slab's pinned parameters.
+   */
+  const chainResumeSlabRef = useRef<string | null>(null);
 
   /**
    * GH#2623: a fresh controller per `create()` call — never re-abort a
@@ -2032,6 +2070,7 @@ export function useCreateMarket() {
   }, []);
 
   useEffect(() => {
+    if (chainResumeSlabRef.current) return; // a chain resume owns the slab; never hydrate another launch over it
     if (slabKpRef.current) return; // already have a keypair this session — don't clobber it
     if (!wallet.publicKey) return; // wait for wallet connection so we can verify ownership
     const inFlight = loadLastInFlightMarket();
@@ -2058,8 +2097,33 @@ export function useCreateMarket() {
    * connection on the same render).
    */
   const restoreSlabKeypair = useCallback((keypair: Keypair, slabAddress: string) => {
+    chainResumeSlabRef.current = null; // an explicit local resume replaces any chain resume
     slabKpRef.current = keypair;
     setState((s) => ({ ...s, slabAddress }));
+  }, []);
+
+  /**
+   * Cross-device resume (#3267): a launch past step 0 needs only its slab ADDRESS. Every later step
+   * signs with the wallet and reads the chain; only step 0 (slab creation) uses the slab keypair, which
+   * never leaves the launching browser. So a resume from another device hands the address in here.
+   */
+  const restoreSlabAddress = useCallback((slabAddress: string) => {
+    chainResumeSlabRef.current = slabAddress;
+    // A keypair for ANY OTHER slab (this browser's own unfinished launch, hydrated on mount) must not
+    // survive: create() prefers slabKpRef over state.slabAddress.
+    if (slabKpRef.current && slabKpRef.current.publicKey.toBase58() !== slabAddress) slabKpRef.current = null;
+    setState((s) => ({ ...s, slabAddress }));
+  }, []);
+
+  /**
+   * Drop a chain resume (#3267). The wizard calls this unconditionally when a LOCAL resume starts: a
+   * guard left for slab Y must never survive into a resume of slab X, where the keypair hydration it
+   * blocks (or a missing keypair) would otherwise leave create() on Y.
+   */
+  const clearChainResume = useCallback(() => {
+    const was = chainResumeSlabRef.current;
+    chainResumeSlabRef.current = null;
+    if (was) setState((s) => (s.slabAddress === was ? { ...s, slabAddress: null } : s));
   }, []);
 
   // UX WP-7: the background keeper-registration loop (no signature; the proof is the creation tx).
@@ -2112,6 +2176,23 @@ export function useCreateMarket() {
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
       const abortSignal = abortController.signal;
+
+      // Idempotent: the wizard already resolved these; any other caller gets the same rule, so the
+      // memo-bound symbol and the payload's symbol/name always agree and pass the route.
+      params = {
+        ...params,
+        ...resolveMarketMetadata({ symbol: params.symbol, name: params.name, mint: params.mainnetCA ?? params.mint.toBase58() }),
+      };
+      // Refuse before any wallet prompt or RPC write if the registration could never be accepted.
+      try {
+        assertRegistrable(params.symbol, buildMarketRegistrationPayload({
+          slabAddress: PublicKey.default.toBase58(), params, deployer: wallet.publicKey.toBase58(),
+          oracleMode: params.oracleMode ?? "admin", isAdminOracle: params.oracleMode === "admin", isDevnetEnv: false,
+        }));
+      } catch (e) {
+        setState((s) => ({ ...s, error: e instanceof Error ? e.message : String(e) }));
+        return;
+      }
 
       // Every risk parameter for this market, derived from the creator's
       // leverage and LP seed (see lib/market-params.ts). Shared by the
@@ -2202,6 +2283,7 @@ export function useCreateMarket() {
       const seqKeeperMemo = async (creator: PublicKey, slab: PublicKey): Promise<TransactionInstruction[]> => {
         if (!isKeeperOracle || !params.dexPoolAddress) return [];
         const payload = buildMarketRegistrationPayload({ slabAddress: slab.toBase58(), params, deployer: creator.toBase58(), oracleMode, isAdminOracle, isDevnetEnv });
+        assertRegistrable(params.symbol, payload);
         rememberRegistrationPayload(slab.toBase58(), payload);
         return [
           await buildKeeperRegisterMemoIx(
@@ -2278,16 +2360,22 @@ export function useCreateMarket() {
         // brand-new "Launch Market" click), where slabKpRef.current could still be
         // hydrated from a stale in-flight entry the user hasn't discarded yet (see the
         // mount effect above).
-        if (retryFromStep === 0 && slabKpRef.current) {
+        if (retryFromStep === 0 && slabKpRef.current && !chainResumeSlabRef.current) {
           slabKp = slabKpRef.current;
           slabPk = slabKp.publicKey;
         } else {
+          chainResumeSlabRef.current = null; // a launch from step 0 is a new market, not a resume
           slabKp = Keypair.generate();
           slabKpRef.current = slabKp;
           slabPk = slabKp.publicKey;
         }
         // PERC-8329: Do NOT persist secret key to localStorage — keep in memory only.
         // If the user refreshes before completing all steps, they must start over.
+      } else if (chainResumeSlabRef.current) {
+        // Chain resume (#3267): only the slab address, the one restoreSlabAddress was given. Never the
+        // slabKpRef of another launch, and not `state` (this closure may predate the call).
+        slabPk = new PublicKey(chainResumeSlabRef.current);
+        slabKp = null as unknown as Keypair;
       } else if (slabKpRef.current) {
         // Retry with persisted keypair — full functionality
         slabKp = slabKpRef.current;
@@ -2303,6 +2391,23 @@ export function useCreateMarket() {
           error: "Cannot retry: slab keypair lost. Please start over.",
         }));
         return;
+      }
+
+      // A market that already exists keeps the asset-slot capacity it was created with. New launches
+      // allocate one slot (LAUNCH_ASSET_SLOTS); a launch started before that change holds 14, and its
+      // later steps (the matcher config's frontier = slots + 1) must agree with the slab, not with
+      // today's default. P3 is always 1. If the slab can't be read, stop: guessing would send a
+      // frontier the program refuses.
+      if (startStep > 0 && !params.p3) {
+        let info: Awaited<ReturnType<typeof connection.getAccountInfo>>;
+        try {
+          info = await connection.getAccountInfo(slabPk, "confirmed");
+        } catch {
+          setState((s) => ({ ...s, loading: false, error: "Couldn't read this market just now. Try again in a moment." }));
+          return;
+        }
+        const existing = info ? assetSlotsForSlabLen(info.data.length) : null;
+        if (existing !== null) params = { ...params, assetSlots: existing };
       }
 
       let [vaultPda] = deriveVaultAuthority(programId, slabPk);
@@ -2365,7 +2470,8 @@ export function useCreateMarket() {
         if (outcome.status === "fatal" || outcome.status === "aborted") {
           // state.error already set inside attemptFreshBatchedLaunch — do
           // NOT fall through to the sequential path (something already
-          // broadcast; resuming happens via the existing RecoverSolBanner /
+          // broadcast, or the wallet cannot fund this launch on any path;
+          // resuming happens via the existing RecoverSolBanner /
           // handleRetry flow, which passes an explicit step and therefore
           // uses the sequential code below on its own next call).
           return;
@@ -2406,11 +2512,53 @@ export function useCreateMarket() {
           runningStep = 0;
           setState((s) => ({ ...s, step: 0, stepLabel: STEP_LABELS[0] }));
 
+          // Fund the deposit BEFORE the market exists. The deposit step used to be the
+          // first place this path asked for test tokens, so a wallet inside the faucet's
+          // claim window created the market, locked its rent, and only then was refused.
+          // Only while the market account is not on chain: a resume of step 0 with a
+          // stuck slab, or a market that already landed, has rent to recover or finish
+          // and must not be stopped here. (Not keyed on this being a fresh call: Continue
+          // after a refusal re-enters with step 0 and nothing on chain, and must be
+          // refused again rather than create the market.)
+          const marketOnChain0 = isDevnetEnv
+            ? (await connection.getAccountInfo(slabPk, "confirmed").catch(() => null)) !== null
+            : true;
+          if (isDevnetEnv && !marketOnChain0) {
+            const balance0 = await collateralBalanceOf(connection, params.mint, wallet.publicKey);
+            if (balance0 < fullMarketRequirement(params.lpCollateral, params.insuranceAmount)) {
+              let refusal0: ReturnType<typeof classifyPreFundRefusal> = { kind: "proceed" };
+              try {
+                const fundResp0 = await fetch("/api/devnet-pre-fund", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    mintAddress: params.mint.toBase58(),
+                    walletAddress: wallet.publicKey.toBase58(),
+                    lpCollateral: params.lpCollateral.toString(),
+                    insuranceAmount: params.insuranceAmount.toString(),
+                  }),
+                });
+                if (!fundResp0.ok) {
+                  refusal0 = classifyPreFundRefusal({
+                    status: fundResp0.status,
+                    body: await fundResp0.json().catch(() => null),
+                    balance: balance0,
+                    lpCollateral: params.lpCollateral,
+                    insuranceAmount: params.insuranceAmount,
+                  });
+                }
+              } catch {
+                // Network error: left to the deposit step's own check and message.
+              }
+              if (refusal0.kind === "blocked") throw new PreFundRateLimitedError(refusal0.nextClaimAt);
+            }
+          }
+
           vaultAta = await getAssociatedTokenAddress(params.mint, vaultPda, true);
 
           // Persist recovery state BEFORE sending TX0. Survives tab close so
-          // the user can recover via the in-UI ReclaimSlabRent path or the
-          // close-market-reclaim-all.ts script even if the browser dies.
+          // the user can recover via the in-UI ReclaimSlabRent path even if
+          // the browser dies.
           // 2026-05-12: PERC-8329 superseded for this flow — slab secret IS
           // persisted so the uninitialised-slab reclaim works. See
           // lib/inFlightMarket.ts header for trade-off rationale.
@@ -2431,8 +2579,17 @@ export function useCreateMarket() {
           // orphan from old SDK — e.g. 65352-byte account created before ENGINE_OFF fix).
           // Without this check, retries always call InitMarket on the wrong-sized slab and
           // fail with InvalidSlabLen (error 0x4) even after the SDK size was corrected.
-          const expectedSlabSize = slabSizeFor(params);
+          let expectedSlabSize = slabSizeFor(params);
           let existingAccount = await connection.getAccountInfo(slabKp.publicKey);
+          // A stuck slab created before the one-slot change is a valid 14-slot market account: adopt its
+          // capacity (InitMarket must name exactly the slots the account holds) rather than abandon it.
+          if (existingAccount && existingAccount.data.length !== expectedSlabSize && !params.p3) {
+            const adopted = assetSlotsForSlabLen(existingAccount.data.length);
+            if (adopted !== null) {
+              params = { ...params, assetSlots: adopted };
+              expectedSlabSize = slabSizeFor(params);
+            }
+          }
           if (existingAccount && existingAccount.data.length !== expectedSlabSize) {
             console.warn(
               `[useCreateMarket] PERC-1094: stale slab ${slabKp.publicKey.toBase58()} ` +
@@ -2550,10 +2707,7 @@ export function useCreateMarket() {
                     wallet.publicKey,
                     Math.max(2_000_000_000, minSolRequired - solBalance + 500_000_000),
                   );
-                  const airdropConfirm = await connection.confirmTransaction(airdropSig, "confirmed");
-                  if (airdropConfirm.value.err) {
-                    throw new Error(`Airdrop transaction failed on-chain: ${JSON.stringify(airdropConfirm.value.err)}`);
-                  }
+                  await confirmSignatureByPolling(connection, airdropSig, abortSignal);
                   setState((s) => ({ ...s, stepLabel: STEP_LABELS[0] }));
                 } catch (airdropErr) {
                   throw new Error(
@@ -2729,6 +2883,10 @@ export function useCreateMarket() {
           }
 
           if (isKeeperOracle && isV17Slab && !oracleDelegationDone) {
+            // The page was left or the wallet switched while step 0 was confirming: the next prompt
+            // is this raw signTransaction, which no sendTx entry check guards. Stop here, before the
+            // cosign call, instead of opening a wallet popup for an abandoned launch (GH#2623).
+            if (abortSignal.aborted) throw new TxCancelledError();
             setState((s) => ({ ...s, stepLabel: "Delegating oracle authority to keeper..." }));
             const cosignResp = await fetch("/api/playground/keeper-cosign", {
               method: "POST",
@@ -2763,15 +2921,11 @@ export function useCreateMarket() {
             const signedTx = await wallet.signTransaction(partialTx);
 
             // Send the fully-signed tx
-            const keeperDelegateSig = await connection.sendRawTransaction(signedTx.serialize(), {
-              skipPreflight: false,
-            });
-            const keeperDelegateConfirm = await connection.confirmTransaction(keeperDelegateSig, "confirmed");
-            if (keeperDelegateConfirm.value.err) {
-              throw new Error(
-                `Keeper delegate tx failed on-chain: ${JSON.stringify(keeperDelegateConfirm.value.err)}`,
-              );
-            }
+            // Confirm by polling signature status, like every other step. This was the
+            // one launch tx still on `connection.confirmTransaction(sig)`, which waits on
+            // a websocket notification and reported a 30 s timeout for a hand-off that
+            // had landed in 4 s (three launches in a row on 2026-10-06), failing the step.
+            const keeperDelegateSig = await broadcastSignedTx(connection, signedTx);
             setState((s) => ({ ...s, txSigs: [...s.txSigs, keeperDelegateSig] }));
           }
 
@@ -3143,7 +3297,7 @@ export function useCreateMarket() {
               // TX C: commit the context and delegate to the LP portfolio.
               // v18: live-read the LP portfolio identity (recovery path — the
               // matcher-sequence reflects any prior InitUser/Deposit). assetGenFrontier
-              // = max_market_slots + 1 (V17_MAX_PORTFOLIO_ASSETS + 1).
+              // = max_market_slots + 1 (initialAssetGenerationFrontier).
               const smInfo = await connection.getAccountInfo(lpPortfolioPk);
               if (!smInfo?.data) throw new Error("LP portfolio not found for SetMatcherConfig");
               const smId = readPortfolioIdentity(new Uint8Array(smInfo.data));
@@ -3160,7 +3314,7 @@ export function useCreateMarket() {
                 data: encodeSetMatcherConfig({
                   portfolioId: smId.portfolioId,
                   expectedSequence: smId.matcherSequence,
-                  assetGenerationFrontier: BigInt(marketAssetSlotsFor(params)) + 1n,
+                  assetGenerationFrontier: initialAssetGenerationFrontier(marketAssetSlotsFor(params)),
                   enabled: 1,
                   tradeFeeCapBps: 10_000,
                   expirySlot: MAX_BACKING_BUCKET_EXPIRY_SLOT,
@@ -3190,7 +3344,7 @@ export function useCreateMarket() {
             };
 
             const existingLpPortfolios =
-              await connection.getProgramAccounts(programId, {
+              await withRateLimitRetry(() => connection.getProgramAccounts(programId, {
                 filters: [
                   ...portfolioGpaFilters(),
                   {
@@ -3213,7 +3367,7 @@ export function useCreateMarket() {
                     },
                   },
                 ],
-              });
+              }));
 
             if (existingLpPortfolios.length === 0) {
               // TX A: create and initialize the LP portfolio.
@@ -3414,13 +3568,14 @@ export function useCreateMarket() {
             // Scan for LP portfolio (owner = wallet, market = slabPk) — created in Step 2
             // V17 magic bytes at offset 0: PERCV16\0
             const V17_MAGIC_BYTES = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
-            const portfolioAccounts = await connection.getProgramAccounts(programId, {
+            const depositWalletB58 = wallet.publicKey.toBase58(); // narrowed here; the retry closure below can't see that
+            const portfolioAccounts = await withRateLimitRetry(() => connection.getProgramAccounts(programId, {
               filters: [
                 { memcmp: { offset: 0, bytes: V17_MAGIC_BYTES.toString("base64"), encoding: "base64" } },
                 { memcmp: { offset: 16, bytes: slabPk.toBase58() } },
-                { memcmp: { offset: 80, bytes: wallet.publicKey.toBase58() } },
+                { memcmp: { offset: 80, bytes: depositWalletB58 } },
               ],
-            });
+            }));
             if (portfolioAccounts.length === 0) {
               throw new Error("LP portfolio not found — Step 2 (LP init) may not have completed. Please retry from step 2.");
             }
@@ -4043,6 +4198,7 @@ export function useCreateMarket() {
 
         // Done! Clear in-memory keypair ref + in-flight recovery state.
         slabKpRef.current = null;
+        chainResumeSlabRef.current = null;
         clearInFlightMarket(slabPk.toBase58());
         setState((s) => ({
           ...s,
@@ -4058,6 +4214,10 @@ export function useCreateMarket() {
         }));
         if (isKeeperOracle && params.dexPoolAddress) startKeeperLoop(params, slabPk.toBase58());
       } catch (e) {
+        if (e instanceof PreFundRateLimitedError) {
+          setState((s) => ({ ...s, loading: false, error: preFundRateLimitedMessage(e.nextClaimAt) }));
+          return;
+        }
         const msg = parseMarketCreationError(e, {
           step: sequentialStepKind(runningStep),
           stepLabel: `Step ${runningStep + 1} (${STEP_LABELS[runningStep]?.replace(/\.\.\.$/, "") ?? "market creation"})`,
@@ -4070,6 +4230,7 @@ export function useCreateMarket() {
 
   const reset = useCallback(() => {
     slabKpRef.current = null;
+    chainResumeSlabRef.current = null;
     // PERC-8329: Clear any stale key that may have been stored by old code (defensive cleanup).
     try {
       localStorage.removeItem("percolator-pending-slab-keypair");
@@ -4130,10 +4291,10 @@ export function useCreateMarket() {
         markRegistered(params.slabAddress);
         keeperLoopRef.current?.abort();
       }
-      return { registered: r.registered, message: r.message };
+      return { registered: r.registered, message: r.message, ...(r.code ? { code: r.code } : {}) };
     },
     [],
   );
 
-  return { state, create, reset, restoreSlabKeypair, retryKeeperRegistration, cancelInFlightLaunch };
+  return { state, create, reset, restoreSlabKeypair, restoreSlabAddress, clearChainResume, retryKeeperRegistration, cancelInFlightLaunch };
 }

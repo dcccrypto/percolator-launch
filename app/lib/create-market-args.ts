@@ -5,46 +5,95 @@
  */
 import { v17MarketAccountLen, type InitMarketV17Args } from "@percolatorct/sdk";
 import { marketAccountLen } from "@/lib/v22/layout";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import type { deriveMarketParams } from "@/lib/market-params";
 import { withGrowthInitArgs, type GrowthLaunch } from "@/lib/v21/growth-launch";
 
-// v17: max assets per portfolio (= the market's asset-slot capacity); program cap = 14.
-// The slab MUST be sized to exactly match this capacity or InitMarket reverts (dynamic-len validation).
+/**
+ * The program's cap on a market's asset slots (the wrapper's WRAPPER_MAX_PORTFOLIO_ASSETS, 14). It is
+ * NOT what a launch allocates: markets created before the one-slot change hold 14, and an existing
+ * market keeps whatever it was created with (see `assetSlotsForSlabLen`). Only the upper bound of
+ * "which slot counts can an existing slab have".
+ */
 export const V17_MAX_PORTFOLIO_ASSETS = 14;
 /**
- * v2.2 (wrapper VERSION 19): the program caps a portfolio at 4 legs (percolator-prog#546; founder-confirmed 2026-10-08, FINAL).
- * InitMarket refuses `max_portfolio_assets` of 0 or above 4 (error 14). The v2.2 wizard / mobile route / defaultSlabSize()
- * must use this instead of V17_MAX_PORTFOLIO_ASSETS when the v2.2 layout is active; capacity-4 slab = 592 + 806 + 4 x 2,661 = 12,042 B.
+ * v2.2 (wrapper VERSION 19): the program caps a portfolio, and therefore a market's asset slots, at 4
+ * (percolator-prog#546; founder-confirmed 2026-10-08, FINAL). InitMarket refuses `max_portfolio_assets` of 0 or
+ * above 4 (error 14). Capacity-4 slab = 592 + 806 + 4 x 2,661 = 12,042 B. Only the upper bound of "which slot
+ * counts can an existing v2.2 slab have"; a launch allocates {@link LAUNCH_ASSET_SLOTS}.
  */
 export const V22_MAX_PORTFOLIO_ASSETS = 4;
-// BUG 1 fix (2026-07-06): exported so callers (CreateMarketWizard, CostEstimate) size the
-// slab + rent estimate against the actual v17 requirement instead of the stale v12.19
-// tier.dataSize concept (96784/376432/1495024 bytes), which never equals this value for any
-// tier and made every InitMarket revert with InvalidSlabLen while over-charging ~0.67 SOL rent.
-export const DEFAULT_SLAB_SIZE = v17MarketAccountLen(V17_MAX_PORTFOLIO_ASSETS); // 33_900 bytes (cap-14; rust-p3-final.json marketAccountLen14) — the v2.1 value; use defaultSlabSize() at call time (layout-aware).
-/** Legacy (cap-14) slab length of the ACTIVE layout: DEFAULT_SLAB_SIZE flag off, 592 + 806 + 14 x 2,629 flag on. */
+
+/** The program's cap on asset slots in the ACTIVE layout: 14 on v2.1 (flag off), 4 on v2.2 (flag on). */
+export function maxPortfolioAssets(): number {
+  return isDevnetV22Enabled() ? V22_MAX_PORTFOLIO_ASSETS : V17_MAX_PORTFOLIO_ASSETS;
+}
+
+/**
+ * Asset slots EVERY new launch allocates, legacy and vault-LP alike. The app only ever uses slot 0
+ * (asset index 0 in the keeper, indexer, trade, close and fee flows). The other 13 slots on a 14-slot
+ * market cost rent, and on the deployed wrapper they are tradable asset indexes nobody watches: an
+ * account holding many legs in one market can become impossible to settle or liquidate within the
+ * compute limit (security review 2026-10-08, "Deployed v1"). The slab MUST be sized to exactly match
+ * this capacity or InitMarket reverts (dynamic-length validation).
+ */
+export const LAUNCH_ASSET_SLOTS = 1;
+
+/** The slab a fresh launch allocates: `v17MarketAccountLen(LAUNCH_ASSET_SLOTS)` (3_675 bytes). */
+export const DEFAULT_SLAB_SIZE = v17MarketAccountLen(LAUNCH_ASSET_SLOTS);
+
+/**
+ * The slab a fresh launch allocates in the ACTIVE layout: `DEFAULT_SLAB_SIZE` (3,675 B) flag off, 592 + 806 + 1 x 2,661
+ * = 4,059 B flag on. ONE slot on v2.2 too: the app only ever uses asset index 0, the v2.2 seed kit's markets use 1 slot,
+ * and every extra slot costs 2,661 B of rent (0.0185 SOL) while being a tradable asset index nobody watches. Nothing in
+ * the v2.2 design needs more: the 4-leg cap bounds a PORTFOLIO, and a multi-asset market is created by growth after the
+ * fact, not at launch.
+ */
 export function defaultSlabSize(): number {
-  return marketAccountLen(V17_MAX_PORTFOLIO_ASSETS);
+  return marketAccountLen(LAUNCH_ASSET_SLOTS);
 }
 /**
  * P3 (next FINAL, F14-Q2): a vault-owned-LP market is strictly SINGLE-asset. Tag 94 refuses any
- * market whose configured asset slots != 1 (VaultLpMultiAssetMarket, 86), so the P3 wizard
- * creates the market with maxPortfolioAssets = 1 and a slab sized for one asset. Legacy
- * (non-P3) launches keep 14.
+ * market whose configured asset slots != 1 (VaultLpMultiAssetMarket, 86), so a P3 market must have
+ * exactly one slot; legacy launches now allocate the same single slot.
  */
 export const P3_MARKET_ASSET_SLOTS = 1;
-export function marketAssetSlotsFor(p: { p3?: unknown }): number {
-  return p.p3 ? P3_MARKET_ASSET_SLOTS : V17_MAX_PORTFOLIO_ASSETS;
+
+/**
+ * The asset-slot capacity of a market this launch is working on: a P3 market is 1; a market that
+ * already exists (a resume, a stuck slab) carries `assetSlots`, read off the slab it was created
+ * with (`assetSlotsForSlabLen`); otherwise a fresh launch gets LAUNCH_ASSET_SLOTS.
+ */
+export function marketAssetSlotsFor(p: { p3?: unknown; assetSlots?: number }): number {
+  if (p.p3) return P3_MARKET_ASSET_SLOTS;
+  return p.assetSlots ?? LAUNCH_ASSET_SLOTS;
 }
+
+/**
+ * The asset-slot count of a market account of `len` bytes, or null when `len` is not the exact size
+ * of any 1..14-slot market. Lets a resumed launch keep the capacity its slab was created with
+ * (a pre-change 14-slot launch still in flight) instead of assuming today's default.
+ */
+export function assetSlotsForSlabLen(len: number): number | null {
+  for (let n = 1; n <= maxPortfolioAssets(); n++) if (marketAccountLen(n) === len) return n;
+  return null;
+}
+
+/** The asset-generation frontier of a market just created with `slots` slots (wrapper: `next_market_id = slots + 1`). */
+export function initialAssetGenerationFrontier(slots: number): bigint {
+  return BigInt(slots) + 1n;
+}
+
 /**
  * The InitMarket args every create path sends (fresh batch, sequential, recovery).
  * One builder so the paths cannot drift: `maxPortfolioAssets` is
- * `marketAssetSlotsFor(params)` = 1 on the P3 path (tag 94 refuses any other
- * slot count with 86 VaultLpMultiAssetMarket) and 14 on the legacy path. The
- * P3 BPF sim builds its market from this same function (bridge `init-market`).
+ * `marketAssetSlotsFor(params)`: 1 for every new launch (a P3 market must be 1:
+ * tag 94 refuses any other slot count with 86 VaultLpMultiAssetMarket), or the
+ * capacity of the slab a resumed launch already holds. The P3 BPF sim builds its
+ * market from this same function (bridge `init-market`).
  */
 export function buildV17InitMarketArgs(
-  params: { p3?: unknown; initialPriceE6: bigint; tradingFeeBps: number; growth?: GrowthLaunch },
+  params: { p3?: unknown; assetSlots?: number; initialPriceE6: bigint; tradingFeeBps: number; growth?: GrowthLaunch },
   derived: ReturnType<typeof deriveMarketParams>,
 ): InitMarketV17Args {
   // Devnet v2.1: a growth block raises the fee cap to base + 600 and sets a funding ceiling; absent
@@ -53,7 +102,7 @@ export function buildV17InitMarketArgs(
 }
 
 function baseV17InitMarketArgs(
-  params: { p3?: unknown; initialPriceE6: bigint; tradingFeeBps: number },
+  params: { p3?: unknown; assetSlots?: number; initialPriceE6: bigint; tradingFeeBps: number },
   derived: ReturnType<typeof deriveMarketParams>,
 ): InitMarketV17Args {
   return {
@@ -85,10 +134,12 @@ function baseV17InitMarketArgs(
   };
 }
 
-/** Slab bytes the wizard will allocate (and rent) for a P3 or legacy market. */
-export function wizardSlabBytes(p3: boolean): number {
-  return p3 ? marketAccountLen(P3_MARKET_ASSET_SLOTS) : defaultSlabSize();
+/** Slab bytes the wizard will allocate (and rent) for a new launch. One slot for every launch. */
+export function wizardSlabBytes(_p3?: boolean): number {
+  return defaultSlabSize();
 }
-export function slabSizeFor(p: { p3?: unknown; slabDataSize?: number }): number {
-  return p.p3 ? marketAccountLen(P3_MARKET_ASSET_SLOTS) : (p.slabDataSize ?? defaultSlabSize());
+/** The slab size for the market `p` describes: always `v17MarketAccountLen(marketAssetSlotsFor(p))`, so the
+ *  account and InitMarket's `maxPortfolioAssets` cannot disagree. */
+export function slabSizeFor(p: { p3?: unknown; assetSlots?: number }): number {
+  return marketAccountLen(marketAssetSlotsFor(p));
 }

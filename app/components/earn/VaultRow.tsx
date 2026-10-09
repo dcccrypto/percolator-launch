@@ -12,7 +12,7 @@ import { withdrawChip, withdrawFlagLine } from '@/lib/limits/earn-withdrawable';
  * cells always line up. Mirrors the terminal-table idiom in
  * components/trade/TradeHistoryTable.tsx.
  *
- * Columns: Market · TVL · Utilization · Fee · Your Deposit.
+ * Columns: Market · TVL · Utilization · Fee · Your Value.
  */
 export const VAULT_GRID_COLS =
   'grid grid-cols-[minmax(120px,1.6fr)_84px_minmax(104px,1.2fr)_64px_92px] items-center gap-x-3';
@@ -80,9 +80,9 @@ export function VaultRow({ vault, selected, userDepositUsd, onSelect }: VaultRow
       <span
         className="text-right text-[12px] tabular-nums text-[var(--text)]"
         style={{ fontFamily: 'var(--font-mono)' }}
-        title={valueTitle}
+        title={vault.unvalued ? "This vault's value can't be determined right now: it can't take deposits or pay withdrawals until it's repaired. Not counted in the TVL." : valueTitle}
       >
-        ${formatCompact(vaultUsd)}
+        {vault.unvalued ? '—' : `$${formatCompact(vaultUsd)}`}
       </span>
 
       {/* Utilization — thin OI/capacity bar + % */}
@@ -96,7 +96,7 @@ export function VaultRow({ vault, selected, userDepositUsd, onSelect }: VaultRow
         {(vault.tradingFeeBps / 100).toFixed(2)}%
       </span>
 
-      {/* Your Deposit */}
+      {/* Your Value */}
       <span
         className={`text-right text-[12px] tabular-nums ${
           userDepositUsd && userDepositUsd > 0 ? 'text-[var(--accent-text)]' : 'text-[var(--text-muted)]'

@@ -1,6 +1,7 @@
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import { isHiddenFromListing } from "@/lib/listing-hidden";
 import { isZombieMarket } from "@/lib/activeMarketFilter";
+import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 
 /** Max sane price (USD) for both listed-market filtering and display capping.
  *  Mirrors /api/stats sanitizePrice() cap. Corrupt oracle prices (e.g. $7.9T)
@@ -53,6 +54,35 @@ export interface ListedMarketStatsRow {
   total_accounts?: unknown;
   /** A-6: the keeper's price source. Explicit null/"" = unpriceable orphan; absent = unknown (listed). */
   dex_pool_address?: unknown;
+  /** On-chain launch-completeness (marketauth rotated to the stake-pool PDA). Explicit false = the
+   *  launch provably never finished; absent/undefined = unread (shown). */
+  is_complete?: unknown;
+}
+
+/**
+ * A market whose launch provably never finished: the create wizard's last on-chain step (stake-pool
+ * init, which rotates `marketauth` off the creator) never ran, so `is_complete === false`.
+ * Identifiable on chain, so no per-slab list is needed. Curated seeds are exempt (proven complete
+ * out of band). Only an EXPLICIT false counts; an unread value degrades to "shown".
+ */
+export function isHalfMadeLaunch(slab: string, row: { is_complete?: unknown }): boolean {
+  return row.is_complete === false && !PLAYGROUND_SLAB_META[slab];
+}
+
+/**
+ * Whether a row may appear in a BROWSE / PICKER surface (trade-page market switcher and selector,
+ * the /trade default pick): not listing-hidden, not blocklisted, not a half-made launch, and not an
+ * unpriceable orphan (registry row with an explicit empty pool, i.e. an "UNKNOWN" placeholder).
+ * Deliberately NOT the zombie test: those pickers have always listed empty-but-priced markets.
+ * Browse only: the market stays reachable by direct link, in the creator's My Markets and in
+ * RecoverSolBanner (reclaim), and in /api/markets (portfolio symbol resolution).
+ */
+export function isBrowsableMarketRow(slab: string, row: ListedMarketStatsRow): boolean {
+  if (BLOCKED_SLAB_ADDRESSES.has(slab)) return false;
+  if (isHiddenFromListing(slab)) return false;
+  if (isHalfMadeLaunch(slab, row)) return false;
+  if (hasNoPriceSource(row) && !PLAYGROUND_SLAB_META[slab]) return false;
+  return true;
 }
 
 /**
@@ -65,6 +95,7 @@ export function isListedMarketRow(slab: string, row: ListedMarketStatsRow): bool
   if (BLOCKED_SLAB_ADDRESSES.has(slab)) return false;
   if (isHiddenFromListing(slab)) return false;
   if (hasNoPriceSource(row)) return false;
+  if (isHalfMadeLaunch(slab, row)) return false;
   return !isZombieMarket({
     vault_balance: numericOrNull(row.vault_balance),
     c_tot: numericOrNull(row.c_tot),
@@ -73,4 +104,25 @@ export function isListedMarketRow(slab: string, row: ListedMarketStatsRow): bool
     total_open_interest: numericOrNull(row.total_open_interest),
     total_accounts: numericOrNull(row.total_accounts),
   });
+}
+
+/**
+ * The creator's OWN just-launched market, before its live price is connected: the registry row
+ * exists (the indexer inserted it, or the registration wrote it) but carries no price source, so
+ * isListedMarketRow hides it from everyone. The wallet that deployed it still sees it in the
+ * markets list, marked "awaiting live price", instead of nothing while the registration lands. It
+ * is shown only to that wallet, and only if every other listing rule passes (not blocked, not
+ * hidden, not a half-made launch, not a zombie): an unpriced or half-made market stays hidden from
+ * every other visitor and from every picker.
+ */
+export function isOwnAwaitingPriceRow(
+  slab: string,
+  row: ListedMarketStatsRow & { deployer?: unknown },
+  wallet: string | null | undefined,
+): boolean {
+  if (!wallet || typeof row.deployer !== "string" || row.deployer !== wallet) return false;
+  if (!hasNoPriceSource(row)) return false;
+  if (PLAYGROUND_SLAB_META[slab]) return false;
+  // Every rule except the missing price source: an undefined pool reads as "unknown", i.e. listed.
+  return isListedMarketRow(slab, { ...row, dex_pool_address: undefined });
 }

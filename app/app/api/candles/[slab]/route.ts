@@ -4,7 +4,10 @@ import * as Sentry from "@sentry/nextjs";
 import {
   hasIndexerDb,
   queryTradesForCandles,
+  queryLastTradePriceBefore,
+  CANDLE_TRADE_ROW_LIMIT,
   bucketCandles,
+  fillCandleGaps,
   emptyUdf,
   RES_TO_SECONDS,
 } from "@/lib/indexer-db";
@@ -27,6 +30,12 @@ const SWR_CACHE = { "Cache-Control": "public, max-age=10, stale-while-revalidate
  *
  * When the direct path returns < 10 bars, TradingChart falls back to the DEX
  * (GeckoTerminal) series automatically — no empty-state handling needed here.
+ *
+ * `&fill=1` (the chart's "Last" series only): a quiet market has minutes with no trade, and a
+ * last-trade chart built from trades alone renders as scattered dashes with gaps. With fill, each
+ * empty bucket carries the previous close (the last trade price IS unchanged until the next
+ * trade), seeded from the last trade before `from` and extended to now. Other callers omit it
+ * and get the trade buckets exactly as before.
  */
 export async function GET(
   req: NextRequest,
@@ -62,7 +71,18 @@ export async function GET(
 
   try {
     const rows = await queryTradesForCandles(validSlab, fromSec, toSec);
-    const udf  = bucketCandles(rows, bucketSeconds);
+    let udf    = bucketCandles(rows, bucketSeconds);
+    if (q.get("fill") === "1") {
+      // A result at the row ceiling has lost its OLDEST trades: seeding from before `from` would draw
+      // the old price flat across that lost stretch, a level that was not in force. Start at the first
+      // trade we do hold instead.
+      const seedClose = rows.length >= CANDLE_TRADE_ROW_LIMIT ? null : await queryLastTradePriceBefore(validSlab, fromSec);
+      udf = fillCandleGaps(udf, bucketSeconds, {
+        fromSec,
+        toSec: Math.min(toSec, Math.floor(Date.now() / 1000)),
+        seedClose,
+      });
+    }
     return NextResponse.json(udf, {
       headers: udf.s === "ok" ? SWR_CACHE : NO_STORE,
     });

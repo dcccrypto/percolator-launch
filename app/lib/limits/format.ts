@@ -7,6 +7,9 @@ export function fmtQ(q: bigint): string {
   const a = neg ? -q : q;
   const whole = a / 1_000_000n;
   const frac = (a % 1_000_000n).toString().padStart(6, "0").slice(0, 4).replace(/0+$/, "");
+  // A non-zero size below the 4 dp shown must not read as "0": a 72 q partial fill is
+  // "Opened <0.0001 of 0.8225 SOL", not "Opened 0 of 0.8225 SOL".
+  if (whole === 0n && !frac && a > 0n) return `${neg ? "−" : ""}<0.0001`;
   return `${neg ? "−" : ""}${whole.toLocaleString()}${frac ? `.${frac}` : ""}`;
 }
 

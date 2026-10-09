@@ -51,6 +51,12 @@ export interface TicketStateInput {
   feeOverMax: boolean;
   /** A size under which the fee fits, formatted ("2.5 SOL"), or null. */
   feeSuggested: string | null;
+  /**
+   * False while the size is empty or zero: the open button then says what is missing
+   * ("Enter a size") instead of naming an order. Only the "ok" row's label changes; every
+   * row above it keeps its own label. Omitted = a size is entered.
+   */
+  sizeEntered?: boolean;
 }
 
 export interface TicketStatus {
@@ -109,7 +115,7 @@ export function deriveTicketState(i: TicketStateInput): TicketState {
   if (i.feeOverMax) return paused("fee-over-max", "fee-over-max", T.feeOverMax.title, T.feeOverMax.body(i.feeSuggested), T.feeOverMax.button, "error");
   return {
     row: "ok",
-    buttonLabel: `${cap(d)} ${i.baseSymbol} ${i.leverageLabel}×`,
+    buttonLabel: i.sizeEntered === false ? T.enterSize : `${cap(d)} ${i.baseSymbol} ${i.leverageLabel}×`,
     blocks: false,
     waiting: false,
     status: null,
@@ -136,6 +142,22 @@ export function balanceMaxQ(balanceAtoms: bigint, leverage: number, priceE6: big
   if (!priceE6 || priceE6 <= 0n || balanceAtoms <= 0n || !(leverage > 0)) return null;
   const lev100 = BigInt(Math.max(1, Math.floor(leverage * 100)));
   return (balanceAtoms * lev100 * 1_000_000n) / (100n * priceE6);
+}
+
+/** One cent in USD atoms (6 dp): the smallest step the ticket's USD size and Max can show. */
+export const MIN_SIDE_ROOM_USD_ATOMS = 10_000n;
+
+/**
+ * The LP's room on a side counts as FULL (the side is paused) when it is 0 or worth less than
+ * one cent at `priceE6`. A sub-cent room is not an order the ticket can express: the USD Max
+ * reads "$0.00" and the clamp floors the size to "0.00". null = unknown room (not full).
+ * Without a price only an exact 0 is full (the ticket is waiting for a price anyway).
+ */
+export function sideRoomIsFull(roomQ: bigint | null, priceE6: bigint | null | undefined): boolean {
+  if (roomQ === null) return false;
+  if (roomQ <= 0n) return true;
+  if (!priceE6 || priceE6 <= 0n) return false;
+  return (roomQ * priceE6) / 1_000_000n < MIN_SIDE_ROOM_USD_ATOMS;
 }
 
 /** The Max figure in the input's unit: "41.88 SOL" (≤ 4 dp) or "$3,750.00" (2 dp, floored). */

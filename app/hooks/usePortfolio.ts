@@ -29,7 +29,7 @@ import {
   isDeleveraged,
   type AssetAdlFactors,
 } from "@/lib/v17-adl";
-import { getAllProgramIds, getNetwork } from "@/lib/config";
+import { getMarketDiscoveryProgramIds, getNetwork } from "@/lib/config";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { getEntryPrice } from "@/lib/entry-price";
 import { computePositionPnl, lookupKnownEntries } from "@/lib/position-pnl";
@@ -69,6 +69,12 @@ function getApiBaseUrl(): string | undefined {
  * The mainnet static bundle keeps its existing role as a fallback when the
  * API directory fails or comes back empty.
  */
+// Portfolio discovery can legitimately take longer than the generic market
+// browser path on a cold devnet scan. Preserve the existing mainnet timeout,
+// while giving devnet enough headroom for an otherwise healthy directory load.
+const PORTFOLIO_MARKET_DISCOVERY_TIMEOUT_MS = 8_000;
+const PORTFOLIO_DEVNET_MARKET_DISCOVERY_TIMEOUT_MS = 15_000;
+
 async function discoverPortfolioMarkets(
   connection: ReturnType<typeof useConnectionCompat>["connection"],
   programId: PublicKey,
@@ -82,7 +88,10 @@ async function discoverPortfolioMarkets(
   if (apiBaseUrl) {
     try {
       const viaApi = await discoverMarketsViaProgramDirectory(connection, programId, apiBaseUrl, {
-        timeoutMs: 8_000,
+        timeoutMs:
+        network === "devnet"
+          ? PORTFOLIO_DEVNET_MARKET_DISCOVERY_TIMEOUT_MS
+          : PORTFOLIO_MARKET_DISCOVERY_TIMEOUT_MS,
       });
       if (viaApi.length > 0) return viaApi;
       anySourceSucceeded = true;
@@ -281,6 +290,13 @@ export interface PortfolioPosition {
    * (formatLotQ / formatLotPriceE6) with this value. PnL, margin and liquidation maths are lot-invariant.
    */
   lotExp?: number;
+  /**
+   * The on-chain address of the portfolio account this row was read from. A wallet can own several
+   * portfolios on one market, so the market alone does not say which one a row is: every action on
+   * the row (Close, and the sweep after it) must name this account (#3301). `null` only for a row
+   * built without an account (test fixtures); nothing in the app produces one.
+   */
+  portfolioPk: PublicKey | null;
 }
 
 export type LiquidationSeverity = "safe" | "warning" | "danger";
@@ -457,6 +473,8 @@ export function buildV17Position(
    */
   adlFactors: AssetAdlFactors | null = null,
   lotExp = 0,
+  /** The portfolio account `portfolio` was decoded from (see `PortfolioPosition.portfolioPk`). */
+  portfolioPk: PublicKey | null = null,
 ): PortfolioPosition {
   // v17 markets return an empty `market.config` from the SDK — the real
   // collateral mint lives in `market.configV17` (see markets/page.tsx's
@@ -613,6 +631,7 @@ export function buildV17Position(
     initialMarginBps,
     nftWrapped,
     lotExp,
+    portfolioPk,
   };
 }
 
@@ -893,6 +912,7 @@ export async function fetchPortfolioSnapshot(
 
             allPositions.push({
               liquidationState,
+              portfolioPk: null, // legacy v12 slab account: no portfolio account to name
               slabAddress: slabAddrStr,
               symbol: resolveSymbol(slabAddrStr, symbolBySlab),
               account,
@@ -1024,6 +1044,7 @@ export async function fetchPortfolioSnapshot(
           pkStr,
           meta.adlFactors,
           meta.lotExp ?? 0,
+          pubkey,
         );
 
         if (liveLiquidationSeverity(pos, null) !== "safe") {
@@ -1118,6 +1139,7 @@ export async function fetchPortfolioSnapshot(
             pkStr,
             meta.adlFactors,
             meta.lotExp ?? 0,
+            portfolioPks[i],
           );
 
           if (liveLiquidationSeverity(pos, null) !== "safe") {
@@ -1379,7 +1401,7 @@ export function usePortfolio(enabled: boolean = true): PortfolioData {
     }
 
     let cancelled = false;
-    const programIds = getAllProgramIds();
+    const programIds = getMarketDiscoveryProgramIds();
     const cacheKey = portfolioCacheKey(publicKey.toBase58(), getNetwork());
     // Consume-and-reset: a `refresh()` call sets this before bumping
     // refreshCounter, so THIS run bypasses the shared TTL cache, while the

@@ -6,8 +6,7 @@ import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync, ASSOCIATED_TOKEN_
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { assertKnownProgram } from "@/lib/programAllowlist";
-import { sendTx } from "@/lib/tx";
-import { assertSuccessfulConfirmation } from "@/lib/transaction-confirmation";
+import { broadcastSignedTx } from "@/lib/tx";
 import { humanizeError } from "@/lib/errorMessages";
 import { plainMessage } from "@/lib/limits/user-message";
 import { useToast } from "@/hooks/useToast";
@@ -181,7 +180,7 @@ export function useMintPositionNft(slabAddress: string) {
       tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100_000 }));
       tx.add(ix);
 
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+      const { blockhash } = await connection.getLatestBlockhash("confirmed");
       tx.recentBlockhash = blockhash;
       tx.feePayer = walletPubkey;
 
@@ -214,18 +213,12 @@ export function useMintPositionNft(slabAddress: string) {
       // Privy may have stripped the keypair sig — re-add it
       signed.partialSign(nftMintKeypair);
 
-      // Send — skipPreflight since we already simulated above
-      const sig = await connection.sendRawTransaction(signed.serialize(), {
-        skipPreflight: true,
-        maxRetries: 5,
-      });
-
-      // Wait for confirmation with blockhash-based expiry
-      // skipPreflight: confirmTransaction also resolves for a tx that landed and failed.
-      assertSuccessfulConfirmation(
-        await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed"),
-        "Position NFT mint",
-      );
+      // Send (skipPreflight: simulated above) and confirm by polling the signature status, the
+      // same path sendTx uses. Blockheight-bound confirmTransaction() throws "block height
+      // exceeded" whenever its subscription misses the landing, with no final status check, and
+      // that reads as "The network was slow. Nothing was sent." for a wrap that landed.
+      // pollConfirmation still throws for a tx that landed and failed on-chain (#2994).
+      const sig = await broadcastSignedTx(connection, signed, { skipPreflight: true });
 
       // Force an immediate slab re-poll so useUserAccount/usePositionNft re-scan
       // and the UI reflects the just-minted NFT without waiting for the next

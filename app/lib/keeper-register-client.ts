@@ -14,6 +14,14 @@ import { GLOBAL_CAP_COPY, PER_CREATOR_CAP_COPY } from "@/lib/keeper-enrollment-g
 
 export const KEEPER_REGISTER_BACKOFF_MS = [5_000, 10_000, 20_000, 40_000, 60_000, 60_000] as const;
 export const KEEPER_REGISTER_STEADY_MS = 120_000;
+/**
+ * A 409 means "not visible yet" (the creation tx or the finished market has not reached the
+ * server's RPC node). It clears in seconds, so it is retried on a short ladder instead of the 5 s
+ * first step: 1.5, 2.5, 4, 6, 10, 15, 20, 30, 45 s (about 2.2 minutes in all), after which the
+ * ordinary schedule above takes over. Only a 409 uses it; 5xx / 429 / network keep the schedule
+ * above, so a struggling server or a full ceiling is not hammered.
+ */
+export const KEEPER_REGISTER_NOT_YET_BACKOFF_MS = [1_500, 2_500, 4_000, 6_000, 10_000, 15_000, 20_000, 30_000, 45_000] as const;
 export const KEEPER_REGISTER_SLOW_AFTER_MS = 5 * 60_000;
 /**
  * A server error (5xx) is retried with the normal backoff this many times, then surfaced as a
@@ -50,6 +58,16 @@ export const USER_FACING_REGISTRATION_REASONS: readonly string[] = [
   GLOBAL_CAP_COPY,
 ];
 
+/** The one calm line shown on a My Markets row in place of the button once the per-wallet limit refuses
+ *  (final: another click cannot help). Lives here, with the other server-facing copy. */
+export const PER_CREATOR_LIMIT_ROW_COPY = "This wallet has reached its limit of live-priced markets. Ask the team to connect more.";
+
+/** True when a refusal is the final per-creator limit: nothing the creator can do clears it. Prefers the
+ *  route's `code`; the exact copy still counts so an older response is read the same way. */
+export function isPerCreatorCapRefusal(r: { code?: string | null; message?: string | null }): boolean {
+  return r.code === "per-creator-cap" || (r.message ?? "").trim() === PER_CREATOR_CAP_COPY;
+}
+
 /** The line a creator sees for a failed registration: the reason itself if it is user copy. */
 export function userFacingRegistrationReason(message: string | null | undefined): string {
   const m = (message ?? "").trim();
@@ -73,8 +91,12 @@ export interface KeeperRegisterAttempt {
   /** Worth retrying (not landed yet, RPC or server trouble). A 400 / 403 is final. */
   retryable: boolean;
   message: string;
+  /** The route's machine-readable refusal reason (`per-creator-cap` is final), when it sent one. */
+  code?: string;
   /** HTTP status of the response; absent for a network error. */
   status?: number;
+  /** The response's `Retry-After`, in ms, when it carried one (the full ceiling sends 300 s). */
+  retryAfterMs?: number;
 }
 
 export async function postKeeperRegistration(req: KeeperRegisterRequest, fetchImpl: typeof fetch = fetch): Promise<KeeperRegisterAttempt> {
@@ -92,13 +114,15 @@ export async function postKeeperRegistration(req: KeeperRegisterRequest, fetchIm
         proofTx: req.proofTx,
       }),
     });
-    const body = (await r.json().catch(() => ({}))) as { registered?: boolean; error?: string; message?: string };
+    const body = (await r.json().catch(() => ({}))) as { registered?: boolean; error?: string; message?: string; code?: string };
     if (r.ok && body.registered) return { registered: true, retryable: false, message: KEEPER_REGISTER_COPY.ready, status: r.status };
     // 401 comes only from the devnet v2 waitlist gate (middleware.ts; this route never 401s
     // itself): the visitor's session lapsed. That says nothing about the registration, so it
     // must stay retryable — final would mark the launch "refused" in localStorage forever.
     const retryable = r.status === 401 || r.status === 409 || r.status === 429 || r.status >= 500;
-    return { registered: false, retryable, message: body.error ?? body.message ?? `HTTP ${r.status}`, status: r.status };
+    const ra = Number(r.headers?.get?.("Retry-After"));
+    const retryAfterMs = Number.isFinite(ra) && ra > 0 ? Math.min(ra, 3_600) * 1000 : undefined;
+    return { registered: false, retryable, message: body.error ?? body.message ?? `HTTP ${r.status}`, ...(typeof body.code === "string" ? { code: body.code } : {}), status: r.status, ...(retryAfterMs ? { retryAfterMs } : {}) };
   } catch (e) {
     return { registered: false, retryable: true, message: e instanceof Error ? e.message : String(e) };
   }
@@ -130,6 +154,7 @@ export async function runKeeperRegistration(d: KeeperRegisterLoopDeps): Promise<
   const maxServerRetries = d.maxServerRetries ?? KEEPER_REGISTER_MAX_SERVER_RETRIES;
   let phase: KeeperRegisterPhase = "connecting";
   let serverErrors = 0;
+  let notYet = 0;
   for (let i = 0; ; i++) {
     if (d.signal?.aborted) return phase;
     const r = await d.attempt();
@@ -148,7 +173,14 @@ export async function runKeeperRegistration(d: KeeperRegisterLoopDeps): Promise<
     }
     phase = now() - t0 >= KEEPER_REGISTER_SLOW_AFTER_MS ? "slow" : "connecting";
     d.onStatus({ phase, message: phase === "slow" ? KEEPER_REGISTER_COPY.slow : KEEPER_REGISTER_COPY.connecting, attempts: i + 1 });
-    await sleep(i < KEEPER_REGISTER_BACKOFF_MS.length ? KEEPER_REGISTER_BACKOFF_MS[i] : KEEPER_REGISTER_STEADY_MS, d.signal);
+    notYet = r.status === 409 ? notYet + 1 : 0;
+    const wait =
+      r.status === 409 && notYet <= KEEPER_REGISTER_NOT_YET_BACKOFF_MS.length
+        ? KEEPER_REGISTER_NOT_YET_BACKOFF_MS[notYet - 1]
+        : i < KEEPER_REGISTER_BACKOFF_MS.length
+          ? KEEPER_REGISTER_BACKOFF_MS[i]
+          : KEEPER_REGISTER_STEADY_MS;
+    await sleep(wait, d.signal);
   }
 }
 
@@ -234,6 +266,21 @@ export function markRegistered(slab: string, store: KeyStore | null = browserSto
   } catch {
     /* private mode */
   }
+  announceMarketRegistered(slab);
+}
+
+/**
+ * Fired on `window` the moment a registration lands, so every list on this page (the markets page,
+ * the landing rail) refetches past the CDN's 10 s + 60 s stale window instead of showing the market
+ * a poll or two late (hooks/useAllMarketStats.ts). Other visitors still see it on their next poll.
+ */
+export const MARKET_REGISTERED_EVENT = "perc:market-registered";
+export function announceMarketRegistered(slab: string): void {
+  try {
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(MARKET_REGISTERED_EVENT, { detail: { slab } }));
+  } catch {
+    /* no window / no CustomEvent: the next poll picks it up */
+  }
 }
 
 const KEEPER_DEX_TYPE_CANDIDATES: readonly (string | null)[] = ["raydium-clmm", "meteora-dlmm", "pumpswap", null];
@@ -288,9 +335,19 @@ export interface ResumeResult {
   registered: string[];
   /** Server / network trouble: tried again on the next visit. */
   retryLater: string[];
+  /** The longest `Retry-After` any retryable answer in this pass carried (ms), if any. */
+  retryAfterMs?: number;
   /** Every candidate refused (final). */
   refused: string[];
 }
+
+/** A pass that left slabs as `retryLater` is repeated this often while the page stays open. */
+export const RESUME_REPEAT_MS = 60_000;
+/** ...but never for ever: stop after this many passes or this long from the first, whichever first.
+ *  The next page load resumes as before. A permanently failing retryable status (the full ceiling's
+ *  429, a standing 5xx) must not make every open tab post every pending slab for as long as it lives. */
+export const RESUME_MAX_PASSES = 30;
+export const RESUME_MAX_MS = 30 * 60_000;
 
 /**
  * One pass over this device's unregistered launches. A candidate refused with a final error
@@ -299,10 +356,13 @@ export interface ResumeResult {
 export async function resumePendingRegistrations(d: {
   store: KeyStore;
   post?: (req: KeeperRegisterRequest) => Promise<KeeperRegisterAttempt>;
+  /** Only these slabs (a repeat pass over what a previous pass left as `retryLater`). */
+  only?: readonly string[];
 }): Promise<ResumeResult> {
   const post = d.post ?? ((req: KeeperRegisterRequest) => postKeeperRegistration(req));
   const r: ResumeResult = { registered: [], retryLater: [], refused: [] };
-  for (const slab of pendingRegistrationSlabs(d.store)) {
+  const slabs = pendingRegistrationSlabs(d.store).filter((slab) => !d.only || d.only.includes(slab));
+  for (const slab of slabs) {
     let outcome: "registered" | "later" | "refused" = "refused";
     for (const req of registrationCandidates(slab, d.store)) {
       const a = await post(req);
@@ -314,6 +374,7 @@ export async function resumePendingRegistrations(d: {
       }
       if (a.retryable) {
         outcome = "later";
+        if (a.retryAfterMs) r.retryAfterMs = Math.max(r.retryAfterMs ?? 0, a.retryAfterMs);
         break;
       }
     }

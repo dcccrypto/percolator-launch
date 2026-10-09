@@ -142,3 +142,39 @@ describe('DepositWithdrawCard: realized profit is withdrawable', () => {
     expect(screen.getByTestId('account-balance').textContent).toContain('49.975');
   });
 });
+
+describe('DepositWithdrawCard: withdraw with an open position', () => {
+  const wallet = new PublicKey('3pae8qvc8wimpETqPkxYTYMciUiRNJ5Mpu8gGvBWqLxZ');
+  const portfolio = new PublicKey('4yjoGo9NWMv8XCfV2CZgaP6RyjwxxV6XbvMzmR7Z8b3i');
+  const collateralMint = new PublicKey('DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC');
+  // 0.1 long at $150 against ~50 USDC: plenty of capital above initial margin, which the
+  // old free-margin Max offered even though useWithdraw refuses any withdrawal here.
+  const account = { capital: 49_975_111n, pnl: 0n, positionSize: 100_000n, entryPrice: 150_000_000n };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.useWalletCompat.mockReturnValue({ connected: true, publicKey: wallet });
+    mocks.useConnectionCompat.mockReturnValue({ connection: { getTokenAccountBalance: mocks.getTokenAccountBalance } });
+    mocks.getTokenAccountBalance.mockResolvedValue({ value: { amount: '0', decimals: 6 } });
+    mocks.getAssociatedTokenAddressSync.mockReturnValue(collateralMint);
+    mocks.useUserAccount.mockReturnValue({ idx: 0, account, pubkey: portfolio });
+    mocks.useSlabState.mockReturnValue({ config: { collateralMint }, params: null });
+    mocks.useTokenMeta.mockReturnValue({ symbol: 'USDC', decimals: 6 });
+    mocks.useConvertibleProfit.mockReturnValue({ status: 'none' });
+  });
+
+  it('offers no Max, says to close first, and never sends a withdrawal', async () => {
+    render(<DepositWithdrawCard slabAddress="8WC8vALsDJhNCUVRmqZBDSg5xgFAhDrgy7zWqF512pDx" initialMode="withdraw" />);
+    expect(screen.queryByText('Max')).toBeNull();
+    expect(screen.getByTestId('withdraw-position-open').textContent).toBe('Close your position to withdraw.');
+    expect(screen.queryByText(/may trigger liquidation/)).toBeNull();
+    fireEvent.change(screen.getByTestId('withdraw-amount-input'), { target: { value: '1' } });
+    const submit = screen.getByTestId('withdraw-submit') as HTMLButtonElement;
+    expect(submit.textContent).toBe('Close your position to withdraw');
+    expect(submit.disabled).toBe(true);
+    await act(async () => { fireEvent.click(submit); });
+    expect(mocks.withdraw).not.toHaveBeenCalled();
+    // The balance still shows what the account holds.
+    expect(screen.getByTestId('account-balance').textContent).toContain('49.975');
+  });
+});

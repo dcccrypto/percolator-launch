@@ -50,9 +50,25 @@ describe("decodeMarketHealth", () => {
     expect(ids).toContain("repairable");
   });
 
-  it("NEGATIVE CONTROL: unknown LP capital (null) is never 'depleted'; positive capital is not either", () => {
-    expect(decodeMarketHealth(fixture("murphy-market-v18-lapsed"), SLOT, null).lpDepleted).toBe(false);
-    expect(decodeMarketHealth(fixture("murphy-market-v18-lapsed"), SLOT, 1n).lpDepleted).toBe(false);
+  it("LP capital below the market's IM floor (min_nonzero_im_req) is depleted: the engine refuses the LP side of every open with Custom(49)", () => {
+    // Every v18 fixture carries min_nonzero_im_req = 2_000_000 (V17_ENGINE_CONFIG_OFF 624 + 22). Measured on
+    // STONK 2026-10-07: LP 0.841748 USDC -> 49 at every size; 1.999999 -> 49; 2.000000 -> fills. This flips
+    // the old "positive capital is not depleted" pin (1 atom): 1 atom cannot post the LP's margin either.
+    const d = fixture("murphy-market-v18-lapsed");
+    expect(decodeMarketHealth(d, SLOT, 1n).lpDepleted).toBe(true);
+    expect(decodeMarketHealth(d, SLOT, 841_748n).lpDepleted).toBe(true);
+    expect(decodeMarketHealth(d, SLOT, 1_999_999n).lpDepleted).toBe(true);
+    expect(decodeMarketHealth(d, SLOT, 2_000_000n).lpDepleted).toBe(false);
+    expect(healthBadges(decodeMarketHealth(d, SLOT, 841_748n)).map((b) => b.id)).toContain("lp-depleted");
+  });
+
+  it("NEGATIVE CONTROL: unknown LP capital (null) is never 'depleted'; a zero floor falls back to capital == 0", () => {
+    const d = fixture("murphy-market-v18-lapsed");
+    expect(decodeMarketHealth(d, SLOT, null).lpDepleted).toBe(false);
+    const noFloor = d.slice();
+    writeU128(noFloor, 624 + 22, 0n); // V17_ENGINE_CONFIG_OFF + minNonzeroImReq
+    expect(decodeMarketHealth(noFloor, SLOT, 1n).lpDepleted).toBe(false);
+    expect(decodeMarketHealth(noFloor, SLOT, 0n).lpDepleted).toBe(true);
   });
 
   it("NEGATIVE CONTROL healthy PENGU (capital > 0): no LP / lock badges", () => {

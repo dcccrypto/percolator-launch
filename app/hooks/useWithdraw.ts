@@ -39,6 +39,7 @@ import {
   settlingProfitMessage,
 } from "@/lib/convert-released-pnl";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
+import { verifyPortfolioTarget } from "@/lib/portfolio-target";
 import type { TransactionInstruction } from "@solana/web3.js";
 import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 
@@ -86,7 +87,13 @@ export function useWithdraw(slabAddress: string) {
   const inflightRef = useRef(false);
 
   const withdraw = useCallback(
-    async (params: { userIdx: number; amount: bigint; portfolioPk?: PublicKey }) => {
+    async (params: {
+      userIdx: number;
+      amount: bigint;
+      portfolioPk?: PublicKey;
+      /** #3301: act on `portfolioPk` or fail. No fallback to another owned account (a close's sweep). */
+      strictPortfolio?: boolean;
+    }) => {
       if (inflightRef.current) throw new Error("Withdrawal already in progress");
       inflightRef.current = true;
       // True once a ConvertReleasedPnl prefix rides in this withdraw (error copy below).
@@ -162,7 +169,12 @@ export function useWithdraw(slabAddress: string) {
           const V17_MAGIC_BYTES = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
           let portfolioPk: PublicKey | null = params.portfolioPk ?? null;
           let portfolioData: Buffer | null = null;
-          if (portfolioPk) {
+          if (portfolioPk && params.strictPortfolio) {
+            // Exactly the named account, verified (program, owner, market); any miss is an error the
+            // caller shows. Reaching the scan below could withdraw ANOTHER account's capital.
+            const info = await connection.getAccountInfo(portfolioPk, "confirmed");
+            portfolioData = verifyPortfolioTarget(info, programId, slabPk, wallet.publicKey);
+          } else if (portfolioPk) {
             // Fast path: caller supplied the portfolio pubkey (SlabProvider's
             // userAccount). Fetch, parse, and owner-verify it exactly like the
             // scan-store path below. On ANY failure — fetch throw, missing
@@ -263,7 +275,7 @@ export function useWithdraw(slabAddress: string) {
           }
 
           // Over-withdraw pre-check (defense-in-depth). The DepositWithdrawCard UI
-          // already blocks amount > freeMargin, but this guards direct/other
+          // blocks any amount with a position open and above capital when flat; this guards direct/other
           // callers and turns a confusing on-chain failure into a clear message.
           //
           // M7: gate on FREE margin — capital minus the open position's OWN

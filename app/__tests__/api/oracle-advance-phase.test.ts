@@ -30,6 +30,10 @@ vi.mock("@/lib/config", () => ({
   }),
 }));
 
+// The route builds its connection with getServerConnection() (lib/server-rpc: DEVNET_RPC_URL + Origin).
+// Unmocked, that returns a REAL Connection and the mocked RPC methods below are never called.
+vi.mock("@/lib/server-rpc", () => ({ getServerConnection: () => ({}) }));
+
 vi.mock("@sentry/nextjs", () => ({
   captureException: vi.fn(),
 }));

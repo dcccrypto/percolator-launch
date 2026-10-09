@@ -11,6 +11,7 @@ import { isMockSlab, getMockTrades } from "@/lib/mock-trade-data";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { pollWhenVisible } from "@/lib/pollWhenVisible";
+import { fillSideColor, fillSideLabel } from "@/lib/fill-side";
 
 interface Trade {
   id: string;
@@ -157,8 +158,8 @@ export const TradeHistory: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <div>Time</div>
             <div>Side</div>
             <div className="text-right">Size</div>
-            {/* Each row is a fill — the trade's entry or the close's exit price, not the live price. */}
-            <div className="text-right">Entry/Exit</div>
+            {/* Each row is one fill: its execution price, not the live price. */}
+            <div className="text-right">Price</div>
           </div>
           <div className="divide-y divide-[var(--border)]/15">
             {trades.map((trade) => (
@@ -173,9 +174,7 @@ export const TradeHistory: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                   {formatTime(trade.created_at)}
                 </div>
                 <div>
-                  <span className={trade.side === "long" ? "text-[var(--long)]" : "text-[var(--short)]"}>
-                    {trade.side?.toUpperCase() ?? "—"}
-                  </span>
+                  <span className={fillSideColor(trade.side)}>{fillSideLabel(trade.side)}</span>
                 </div>
                 <div className="text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
                   {trade.size != null ? formatLotQ(toBigInt(Math.abs(typeof trade.size === "number" ? trade.size : parseFloat(trade.size))), decimals, lotExp) : "—"}

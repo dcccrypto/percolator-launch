@@ -13,8 +13,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { FC, ReactNode } from "react";
 import { PublicKey } from "@solana/web3.js";
+import { getConfig } from "@/lib/config";
 
-const ALLOWED_PROGRAM = "DhSkE7uTb8HBUYYWF1xkxMYBGtLYJEoDq1tfBD7SnHcj"; // v17 devnet default (fresh fee-split wrapper)
+// The wrapper this deployment is configured for (it is in getAllProgramIds()). Read from config, not
+// hardcoded: the old pinned v17 devnet id went stale at the v18 redeploy and the legitimate-path test
+// failed because the guard (correctly) refused it.
+const ALLOWED_PROGRAM = getConfig().programId;
 const ATTACKER_PROGRAM = "11111111111111111111111111111112";
 const SLAB_ADDRESS = "So11111111111111111111111111111111111111112";
 
@@ -22,7 +26,10 @@ const SLAB_ADDRESS = "So11111111111111111111111111111111111111112";
 // The gate runs BEFORE parseHeader, so legitimate parses succeed and
 // attacker slabs are rejected on the owner check regardless of bytes.
 // v17: EXPECTED_SLAB_VERSION = 16 — mock must return version=16 to pass the version check.
-vi.mock("@percolatorct/sdk", () => ({
+// Partial mock: SlabProvider transitively imports lib/v17-adl, which reads further SDK constants
+// (V17_ASSET_SLOT_WRAPPER_LEN, ...) at module load; a full replacement breaks on every new one.
+vi.mock("@percolatorct/sdk", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@percolatorct/sdk")>()),
   parseHeader: () => ({ version: 16 }),
   parseConfig: () => ({
     collateralMint: new PublicKey("11111111111111111111111111111111"),

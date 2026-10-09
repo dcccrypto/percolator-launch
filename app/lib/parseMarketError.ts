@@ -4,7 +4,9 @@
  * and Percolator program-specific error codes.
  */
 
+import { EmbeddedBatchSignError } from "@/lib/privy-batch-sign";
 import { P3_ERR } from "@/lib/limits/constants";
+import { isRateLimitedBeforeSend, isRateLimitedRpcError, RATE_LIMITED_COPY, RATE_LIMITED_NEUTRAL_COPY } from "@/lib/rpc-rate-limit";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { keepAppMessage, resolveUserMessage } from "@/lib/limits/user-message";
 import { decodeError } from "@percolatorct/sdk";
@@ -183,6 +185,8 @@ function isTokenProgramInsufficientFunds(msg: string): boolean {
 }
 
 export function parseMarketCreationError(error: unknown, context?: MarketCreationErrorContext): string {
+  // Written for the user (and already says what happened to the launch): shown as is, no step prefix.
+  if (error instanceof EmbeddedBatchSignError) return error.message;
   const base = parseMarketCreationErrorBase(error, context);
   return context?.stepLabel ? `${context.stepLabel} failed: ${base}` : base;
 }
@@ -210,6 +214,14 @@ function parseMarketCreationErrorBase(error: unknown, context?: MarketCreationEr
   ) {
     return "Transaction cancelled — you rejected the signing request in your wallet. Click Retry to try again.";
   }
+
+  // A rate-limited RPC read (the LP-portfolio scan at the start of the liquidity step above all). It is
+  // refused before anything is signed or sent, so say that and that Retry is safe, before the generic
+  // fallbacks name it a network or program failure.
+  // "Nothing was sent" only for a pre-send read that withRateLimitRetry gave up on; any other rate limit may
+  // follow landed transactions (e.g. step 2's matcher-readiness read), so it gets the neutral copy.
+  if (isRateLimitedBeforeSend(error)) return RATE_LIMITED_COPY;
+  if (isRateLimitedRpcError(error)) return RATE_LIMITED_NEUTRAL_COPY;
 
   // Insufficient SPL token balance (token program error 0x1 or transfer failure).
   // Must be checked BEFORE the SOL/lamports branch — Solana simulation errors for

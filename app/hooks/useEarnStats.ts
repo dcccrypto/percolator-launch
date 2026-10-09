@@ -1,8 +1,9 @@
 'use client';
 
 import { parseLpVaultRegistry } from "@/lib/v22/records";
-import { earnNavFloorLive } from "@/lib/program-upgrade-detect";
+import { programUpgradeState } from "@/lib/program-upgrade-detect";
 import { isHiddenFromListing } from "@/lib/listing-hidden";
+import { hasNoPriceSource } from "@/lib/listed-markets";
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { deriveLpVaultRegistry, isV17Account } from '@percolatorct/sdk';
@@ -68,6 +69,11 @@ export interface MarketVaultInfo {
    * (a live market with no Earn vault) is hidden from the vault grid.
    */
   hasVault?: boolean;
+  /**
+   * The vault's value can't be determined (its two-pot state can't be read or priced; the program
+   * refuses deposits and withdrawals on it too). Shown as "—" and left out of the TVL, by name.
+   */
+  unvalued?: boolean;
 }
 
 export interface EarnStats {
@@ -85,6 +91,8 @@ export interface EarnStats {
   markets: MarketVaultInfo[];
   /** Total 24h fee revenue estimate (USD) */
   dailyFeeRevenue: number;
+  /** Symbols of the vaults left out of `tvl` because their value can't be determined. */
+  unvaluedSymbols: string[];
 }
 
 const DEFAULT_STATS: EarnStats = {
@@ -95,6 +103,7 @@ const DEFAULT_STATS: EarnStats = {
   totalInsurance: 0,
   markets: [],
   dailyFeeRevenue: 0,
+  unvaluedSymbols: [],
 };
 
 /**
@@ -195,6 +204,7 @@ function generateMockStats(): EarnStats {
     totalInsurance: totalInsurance * 150,
     markets,
     dailyFeeRevenue,
+    unvaluedSymbols: [],
   };
 }
 
@@ -215,6 +225,8 @@ export interface CuratedVaultOnChain {
   cooldownSlots: bigint;
   /** Whether an LP Vault Registry account was actually found on-chain for this slab. */
   found: boolean;
+  /** Two-pot state unreadable or unpriceable: `tvlAtoms` is 0 and means "unknown", not "empty". */
+  unvalued?: boolean;
   /** Claim-adjusted NAV, max withdrawable now and the withdraw status (two-pot vaults only), in collateral atoms. */
   withdraw?: { claimAdjustedNavAtoms: bigint; maxWithdrawableNowAtoms: bigint; status: WithdrawStatus; blockedBy: BlockedBy };
 }
@@ -230,19 +242,20 @@ interface RegisteredMarketMeta {
 /**
  * Fetch the playground's dynamically-registered (user-launched) markets from the
  * registration Blob endpoint, so their Earn vaults can be seeded alongside the 5
- * curated markets. Client-side fetch (this hook runs in the browser) — never throws;
- * on any failure returns [] and the Earn page simply shows the curated 5, same as
- * before user-launched markets could carry an Earn vault.
+ * curated markets. Client-side fetch (this hook runs in the browser) — never throws.
+ * `ok` is false when the list may be incomplete (request failed, bad body, or the route's
+ * store read failed: `complete: false`), so the cycle keeps the last good snapshot rather
+ * than publishing a TVL with those vaults silently missing.
  */
-async function fetchRegisteredMarketsMeta(): Promise<RegisteredMarketMeta[]> {
+async function fetchRegisteredMarketsMeta(): Promise<{ data: RegisteredMarketMeta[]; ok: boolean }> {
   try {
     const resp = await fetch('/api/playground/registered-markets', { cache: 'no-store' });
-    if (!resp.ok) return [];
-    const data: unknown = await resp.json();
-    const markets = (data as { markets?: unknown })?.markets;
-    if (!Array.isArray(markets)) return [];
+    if (!resp.ok) return { data: [], ok: false };
+    const body: unknown = await resp.json();
+    const markets = (body as { markets?: unknown })?.markets;
+    if (!Array.isArray(markets)) return { data: [], ok: false };
 
-    return markets.reduce<RegisteredMarketMeta[]>((acc, entry) => {
+    const data = markets.reduce<RegisteredMarketMeta[]>((acc, entry) => {
       if (typeof entry !== 'object' || entry === null) return acc;
       const m = entry as Record<string, unknown>;
       const slabAddress = typeof m.slabAddress === 'string' ? m.slabAddress : null;
@@ -254,8 +267,9 @@ async function fetchRegisteredMarketsMeta(): Promise<RegisteredMarketMeta[]> {
       acc.push({ slabAddress, symbol, name, mainnetCa });
       return acc;
     }, []);
+    return { data, ok: (body as { complete?: unknown }).complete !== false };
   } catch {
-    return [];
+    return { data: [], ok: false };
   }
 }
 
@@ -389,7 +403,11 @@ export async function fetchCuratedVaultsOnChain(
           found: true,
         };
       } catch {
-        // Malformed/unrecognized account for this slab — leave the not-found default.
+        // An account exists at this market's registry PDA (only the program can create one there)
+        // but doesn't decode, e.g. a layout change ahead of the SDK. That is a vault whose value is
+        // unknown, not "no vault": counting it as found:false showed it as $0 and hid it, and a
+        // layout change would have shown the whole TVL as $0. Same handling as an unpriceable vault.
+        result[slab] = { tvlAtoms: 0n, cooldownSlots: 0n, found: true, unvalued: true };
       }
     });
 
@@ -398,7 +416,7 @@ export async function fetchCuratedVaultsOnChain(
     // One batched read of market + both ledgers for every such vault.
     const splitPot = slabs.flatMap((slab, i) => {
       const info = infos[i];
-      if (!result[slab].found || !info) return [];
+      if (!result[slab].found || result[slab].unvalued || !info) return [];
       const market = new PublicKey(slab);
       const keys = splitPotLedgerKeys(programId, market, info.data);
       return keys ? [{ slab, market, registryData: info.data, ...keys }] : [];
@@ -409,26 +427,51 @@ export async function fetchCuratedVaultsOnChain(
         splitPot.flatMap((s) => [s.market, s.ownLedger, s.sibLedger]),
       );
       // Wrapper 7a3ac04c+ per-pot NAV floor (one cached probe for every vault).
-      const navFloor = await earnNavFloorLive(connection, programId).catch(() => false);
+      const upgrade = await programUpgradeState(connection, programId);
+      let unpriced = false;
       splitPot.forEach((s, j) => {
         const [m, lo, ls] = spInfos.slice(3 * j, 3 * j + 3);
-        const sp = splitPotStateFromAccounts(programId, s.market, s.registryData, m?.data ?? null, lo?.data ?? null, ls?.data ?? null, navFloor);
+        const read = (navFloor: boolean) =>
+          splitPotStateFromAccounts(programId, s.market, s.registryData, m?.data ?? null, lo?.data ?? null, ls?.data ?? null, navFloor);
+        const sp = read(upgrade === "post");
         const v = sp ? vaultValue(sp) : null;
-        if (sp && v && sp.totalShares > 0n) {
-          // The withdraw view is extra information: if it cannot be computed the TVL must still show.
-          let w: ReturnType<typeof vaultWithdrawView> = null;
-          try {
-            w = vaultWithdrawView(sp);
-          } catch {
-            w = null;
+        // Unknown (the probe failed): only an over-impaired pot is valued differently with and
+        // without the floor, and without it would fall back to shares + fees below. Such a vault
+        // can't be priced this cycle - fail it (keep-last-good) rather than publish a guess.
+        if (upgrade === "unknown") {
+          const floored = read(true);
+          if ((v?.nav ?? null) !== ((floored ? vaultValue(floored)?.nav : null) ?? null)) {
+            unpriced = true;
+            return;
           }
-          result[s.slab] = {
-            ...result[s.slab],
-            tvlAtoms: v.nav,
-            ...(w ? { withdraw: { claimAdjustedNavAtoms: w.claimAdjustedNav, maxWithdrawableNowAtoms: w.maxWithdrawableNow, status: w.status, blockedBy: w.blockedBy } } : {}),
-          };
         }
+        // Its state can't be read or priced (market account missing or undecodable, or both pots
+        // under water on a pre-floor wrapper - M-1, which no app transaction repairs). The registry's
+        // shares + fees is not its value (live: up to ~4x too high), so it is marked unvalued and left
+        // out of the TVL by name. Per vault, not per cycle: a stuck vault must not freeze the hub.
+        if (!sp || !v) {
+          result[s.slab] = { ...result[s.slab], tvlAtoms: 0n, unvalued: true };
+          return;
+        }
+        // No shares outstanding: nobody holds anything, so it adds nothing (not its lifetime fees).
+        if (sp.totalShares === 0n) {
+          result[s.slab] = { ...result[s.slab], tvlAtoms: 0n };
+          return;
+        }
+        // The withdraw view is extra information: if it cannot be computed the TVL must still show.
+        let w: ReturnType<typeof vaultWithdrawView> = null;
+        try {
+          w = vaultWithdrawView(sp);
+        } catch {
+          w = null;
+        }
+        result[s.slab] = {
+          ...result[s.slab],
+          tvlAtoms: v.nav,
+          ...(w ? { withdraw: { claimAdjustedNavAtoms: w.claimAdjustedNav, maxWithdrawableNowAtoms: w.maxWithdrawableNow, status: w.status, blockedBy: w.blockedBy } } : {}),
+        };
       });
+      if (unpriced) return { data: result, ok: false };
     }
   } catch (err) {
     console.error('[useEarnStats] Failed to fetch LP vault registries on-chain:', err);
@@ -590,6 +633,7 @@ export function buildMarketVaultInfo(
     // Earn LP vault registry present on-chain? Drives the vault grid's
     // "hide markets without a usable vault" filter (VaultGrid).
     hasVault: curatedVaults[slab]?.found === true,
+    ...(curatedVaults[slab]?.unvalued ? { unvalued: true } : {}),
     ...(curatedVaults[slab]?.withdraw
       ? {
           earnWithdraw: {
@@ -641,6 +685,12 @@ export function buildLiveMarkets(
 ): MarketVaultInfo[] {
   const live = liveMarkets
     .filter((m) => !isBlockedSlab(m.slabAddress) && !isHiddenFromListing(m.slabAddress))
+    // A launch whose registration never landed is an indexer placeholder ("UNKNOWN", no price
+    // source): the keeper can never price it, so it is not a vault anyone can usefully deposit
+    // into. /markets already leaves it out (isListedMarketRow); Earn now agrees. 2026-10-06: 30
+    // such rows listed as "UNKNOWN" vaults. Curated markets carry their own identity and stay.
+    // An entry with no row at all is unknown, not unpriced: it stays listed (and must not throw).
+    .filter((m) => PLAYGROUND_SLAB_META[m.slabAddress] !== undefined || !m.row || !hasNoPriceSource(m.row))
     .map((m) => {
       const info = buildMarketVaultInfo(m.slabAddress, m.symbol, m.name, m.mainnetCa, curatedVaults, supabaseBySlab, onChainMaxLeverage);
       return vaultsTrusted ? info : { ...info, hasVault: undefined };
@@ -672,16 +722,18 @@ export function buildLiveMarkets(
  * and the cold-start catch-block fallback below so the three snapshot-building
  * call sites can't silently drift from each other.
  */
-function computeAggregates(markets: MarketVaultInfo[]): Omit<EarnStats, 'markets'> {
+export function computeAggregates(markets: MarketVaultInfo[]): Omit<EarnStats, 'markets'> {
   const tvl = markets.reduce((s, m) => s + m.vaultBalance / (10 ** m.decimals), 0);
   const totalOI = markets.reduce((s, m) => s + m.totalOI, 0);
   const maxOI = markets.reduce((s, m) => s + m.maxOI, 0);
   const totalInsurance = markets.reduce((s, m) => s + m.insuranceFund / (10 ** m.decimals), 0);
+  const unvaluedSymbols = markets.filter((m) => m.unvalued).map((m) => m.symbol);
   const dailyFeeRevenue = markets.reduce(
     (s, m) => s + (m.volume24h * m.tradingFeeBps) / 10_000,
     0,
   );
   return {
+    unvaluedSymbols,
     tvl,
     totalOI,
     maxOI,
@@ -694,6 +746,9 @@ function computeAggregates(markets: MarketVaultInfo[]): Omit<EarnStats, 'markets
 // ═══════════════════════════════════════════════════════════════
 // Hook
 // ═══════════════════════════════════════════════════════════════
+
+/** A failed first load: nothing has been read yet, so nothing is "last known". */
+export const COLD_START_ERROR = "Couldn't load vault data. Retrying every 15 seconds.";
 
 export function useEarnStats() {
   const [stats, setStats] = useState<EarnStats>(DEFAULT_STATS);
@@ -716,6 +771,8 @@ export function useEarnStats() {
   // start where there's nothing good to preserve yet, fall back to a
   // best-effort zeroed snapshot instead.
   const hasGoodStatsRef = useRef(false);
+  // The same fact as state, for consumers: until a cycle succeeds, `stats` holds nothing real.
+  const [hasData, setHasData] = useState(false);
 
   // Start time of the cycle that is still allowed to publish (0 = none). The poll skips
   // its tick while one is running: on a slow (e.g. 429-backoff) RPC a cycle can outlast
@@ -730,6 +787,7 @@ export function useEarnStats() {
     if (mockMode) {
       if (stale()) return;
       setStats(generateMockStats());
+      setHasData(true);
       setLoading(false);
       return;
     }
@@ -741,12 +799,13 @@ export function useEarnStats() {
       // the hardcoded, now-stale July-10 keys of PLAYGROUND_SLAB_META. Fetched
       // alongside the registered (user-launched) markets, which remain a
       // supplemental source deduped by slab below. Both never throw.
-      const [liveResult, registeredMarkets] = await Promise.all([
+      const [liveResult, registeredResult] = await Promise.all([
         fetchLiveMarketsMeta(),
         fetchRegisteredMarketsMeta(),
       ]);
       if (stale()) return;
       const liveMarkets = liveResult.data;
+      const registeredMarkets = registeredResult.data;
       const liveSlabSet = new Set(liveMarkets.map((m) => m.slabAddress));
 
       // On-chain LP Vault Registry TVL + max leverage are the accuracy-critical
@@ -782,7 +841,7 @@ export function useEarnStats() {
       // but EMPTY market list is NOT a failure (the indexer legitimately has no
       // rows — expected locally), so it publishes a clean empty state instead.
       const fetchFailed =
-        !liveResult.ok || !curatedVaultsResult.ok || !maxLeverageResult.ok;
+        !liveResult.ok || !registeredResult.ok || !curatedVaultsResult.ok || !maxLeverageResult.ok;
 
       if (fetchFailed && hasGoodStatsRef.current) {
         // Keep-last-good: a real snapshot is already on screen — a transient
@@ -805,14 +864,14 @@ export function useEarnStats() {
       setStats({ markets, ...computeAggregates(markets) });
 
       if (fetchFailed) {
-        // Cold start (no good snapshot published yet) — still show the
-        // best-effort (zeroed-where-unread) markets rather than nothing, but
-        // don't mark this as "good": if the NEXT cycle also fails, we want to
-        // keep retrying rather than gate on a snapshot that was never good.
-        setError('Failed to refresh on-chain data — showing last known values');
+        // Cold start (no good snapshot published yet): there are no "last known values", and these
+        // figures are partly unread (a failed batch reads as $0 or as shares + fees). Not marked
+        // good, so `hasData` stays false and the page keeps its loading state; the next poll retries.
+        setError(COLD_START_ERROR);
       } else {
         setError(null);
         hasGoodStatsRef.current = true;
+        setHasData(true);
       }
     } catch (e) {
       if (stale()) return;
@@ -822,7 +881,7 @@ export function useEarnStats() {
         setError(e instanceof Error ? e.message : 'Failed to load earn stats');
         return;
       }
-      setError(e instanceof Error ? e.message : 'Failed to load earn stats');
+      setError(COLD_START_ERROR);
       // Total failure on a cold start (e.g. RPC unreachable before any good
       // snapshot exists) — publish an empty, clean list rather than fabricated
       // mock markets. The next poll retries the live fetch.
@@ -865,5 +924,5 @@ export function useEarnStats() {
     };
   }, []);
 
-  return { stats, loading, error, refresh: fetchStats };
+  return { stats, loading, error, hasData, refresh: fetchStats };
 }

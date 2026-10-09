@@ -27,6 +27,7 @@ import { checkSignatureLanded, timedOutSignature } from '@/lib/tx';
 import { watchPendingSignature } from '@/lib/pending-signature';
 import { explorerTxUrl } from '@/lib/config';
 import dynamic from 'next/dynamic';
+import { lpShareWalletNote } from '@/lib/lp-share-wallet-note';
 
 const ConnectButton = dynamic(
   () =>
@@ -233,22 +234,28 @@ export function DepositWithdrawPanel({
     return previewDepositShares(rawAmount, shareTotal, depositValue) ?? 0n;
   }, [vaultAvailable, rawAmount, shareTotal, depositValue]);
 
+  // What the whole position redeems for: the Max / 100% amount in USDC.
+  const userWithdrawableAtoms = useMemo(
+    () => (userLpBalance > 0n && shareTotal > 0n ? previewWithdrawAtoms(userLpBalance, shareTotal, withdrawValue) ?? 0n : 0n),
+    [userLpBalance, shareTotal, withdrawValue],
+  );
+
   // Withdraw: the shares this request burns (USDC input -> shares at the withdraw-side value).
+  // The whole position's value (Max / 100%) or more burns every share: shares -> USDC -> shares
+  // floors twice, so converting the max back came out a share short and left that dust share
+  // behind as a $0.00 position that never closes.
   const withdrawShares = useMemo(() => {
     if (!vaultAvailable || rawAmount <= 0n) return 0n;
     if (withdrawUnit === 'shares') return rawAmount;
+    if (userWithdrawableAtoms > 0n && rawAmount >= userWithdrawableAtoms) return userLpBalance;
     return sharesForUsdc(rawAmount, shareTotal, withdrawValue, userLpBalance) ?? 0n;
-  }, [vaultAvailable, rawAmount, withdrawUnit, shareTotal, withdrawValue, userLpBalance]);
+  }, [vaultAvailable, rawAmount, withdrawUnit, shareTotal, withdrawValue, userLpBalance, userWithdrawableAtoms]);
 
   // Preview collateral for withdrawal
   const previewCollateral = useMemo(() => {
     if (withdrawShares <= 0n || shareTotal === 0n) return 0n;
     return previewWithdrawAtoms(withdrawShares, shareTotal, withdrawValue) ?? 0n;
   }, [withdrawShares, shareTotal, withdrawValue]);
-  const userWithdrawableAtoms = useMemo(
-    () => (userLpBalance > 0n && shareTotal > 0n ? previewWithdrawAtoms(userLpBalance, shareTotal, withdrawValue) ?? 0n : 0n),
-    [userLpBalance, shareTotal, withdrawValue],
-  );
   const pendingAtoms = useMemo(
     () => (pendingRedemptionShares > 0n && shareTotal > 0n ? previewWithdrawAtoms(pendingRedemptionShares, shareTotal, withdrawValue) : null),
     [pendingRedemptionShares, shareTotal, withdrawValue],
@@ -581,6 +588,9 @@ export function DepositWithdrawPanel({
                 formatShares(previewShares, decimals),
                 formatPercent(shareTotal + previewShares > 0n ? (Number(previewShares) / Number(shareTotal + previewShares)) * 100 : 100),
               )}
+            </p>
+            <p data-testid="earn-lp-wallet-note" className="mt-1.5 text-[10px] leading-relaxed text-[var(--text-dim)]">
+              {lpShareWalletNote(decimals)}
             </p>
           </div>
         )}

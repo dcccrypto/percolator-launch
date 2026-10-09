@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateSlabParam } from "@/lib/route-validators";
 import { toE6 } from "@/lib/format";
 import { boundedSet } from "@/lib/bounded-map";
+import { change24h } from "@/lib/chart/header-stats";
 import * as Sentry from "@sentry/nextjs";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +16,7 @@ const NO_STORE = { "Cache-Control": "private, no-store" } as const;
 // window reuse one upstream fetch instead of re-hitting it per viewer per poll.
 const FALLBACK_CACHE_HEADERS = { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120" } as const;
 
-type Stats24h = { change24h: number; high24h: string; low24h: string };
+type Stats24h = { change24h: number; high24h: string; low24h: string; series?: number[] };
 
 /** Short in-memory TTL cache for the GeckoTerminal fallback, keyed by slab.
  *  Belt-and-suspenders alongside FALLBACK_CACHE_HEADERS: on a warm serverless
@@ -72,7 +73,10 @@ async function geckoTerminalStatsFallback(slab: string, origin: string, cookie?:
     const pool = marketJson.market?.dex_pool_address;
     if (!pool) return setCache(null);
 
-    const url = `${GECKOTERMINAL_OHLCV_BASE}/${encodeURIComponent(pool)}/ohlcv/hour?aggregate=1&limit=24`;
+    // GeckoTerminal leaves out hours with no trades, so 24 bars of a quiet pool can reach days
+    // back. 25 bars always reach past now-24h (unless the pool is younger); the window below is
+    // cut by timestamp.
+    const url = `${GECKOTERMINAL_OHLCV_BASE}/${encodeURIComponent(pool)}/ohlcv/hour?aggregate=1&limit=25`;
     const res = await fetch(url, {
       headers: { "User-Agent": "percolator-prices-proxy/1.0" },
       signal: AbortSignal.timeout(10_000),
@@ -85,19 +89,36 @@ async function geckoTerminalStatsFallback(slab: string, origin: string, cookie?:
     if (bars.length === 0) return setCache(null);
 
     // Newest-first per GeckoTerminal's API contract.
-    const high = Math.max(...bars.map((b) => b[2]));
-    const low = Math.min(...bars.map((b) => b[3]));
-    const last = bars[0][4];                 // newest close
-    const first = bars[bars.length - 1][1];  // oldest open
-    if (!Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(first) || first <= 0) {
-      return setCache(null);
-    }
+    const last = bars[0][4]; // newest close
+    const nowSec = Math.floor(Date.now() / 1000);
+    const cutoff = nowSec - 86_400;
+    // Reference: the price at now-24h (the close of the last bar at or before it); with less
+    // history, the first bar's open.
+    const change = change24h(bars.map((b) => ({ timeSec: b[0], open: b[1], close: b[4] })).reverse(), last, nowSec);
+    if (!change) return setCache(null);
+    // High/low over the last 24h only, counting the price it opened at (the reference bar's
+    // close) and the newest close.
+    const refBar = bars.find((b) => b[0] <= cutoff);
+    const seen = [last, ...(refBar ? [refBar[4]] : []), ...bars.filter((b) => b[0] > cutoff).flatMap((b) => [b[2], b[3]])];
+    const high = Math.max(...seen);
+    const low = Math.min(...seen);
+    if (!Number.isFinite(high) || !Number.isFinite(low)) return setCache(null);
 
     const toE6Str = (v: number) => toE6(v).toString();
+    // Oldest→newest close prices for the landing rail's mini 24h chart, over the SAME window as
+    // the stats above: the reference bar (the price 24h ago) plus the bars newer than the cutoff.
+    // GeckoTerminal leaves out hours with no trades, so the 25 bars of a quiet pool can reach days
+    // back; using them all drew more than 24h and let the line's colour disagree with change24h.
+    // Bars are newest-first, so reverse; drop any non-finite/≤0 points. No extra request.
+    const series = [
+      ...(refBar ? [refBar[4]] : []),
+      ...bars.filter((b) => b[0] > cutoff).map((b) => b[4]).reverse(),
+    ].filter((v) => Number.isFinite(v) && v > 0);
     return setCache({
-      change24h: ((last - first) / first) * 100,
+      change24h: change.pct,
       high24h: toE6Str(high),
       low24h: toE6Str(low),
+      ...(series.length >= 2 ? { series } : {}),
     });
   } catch {
     return setCache(null);

@@ -27,6 +27,7 @@ vi.mock("@/components/create/LogoUpload", () => ({ LogoUpload: () => null }));
 
 import { LaunchSuccess, LAUNCH_PRICE_WAIT_MS } from "@/components/create/LaunchSuccess";
 import { PRICE_SOURCE_LOCKED } from "@/lib/market-registration";
+import { TICKET_COPY } from "@/lib/limits/copy";
 import {
   KEEPER_REGISTER_COPY,
   postKeeperRegistration,
@@ -222,5 +223,15 @@ describe("a final refusal shows only reasons written for creators", () => {
     render(<LaunchSuccess {...base({ keeperPhase: "failed", keeperMessage: KEEPER_REGISTER_COPY.noProof })} />);
     expect(screen.getByTestId("launch-price-status-line").textContent).toBe(KEEPER_REGISTER_COPY.noProof);
     expect(screen.queryByTestId("launch-price-retry")).toBeNull();
+  });
+});
+
+describe("launch success: the creator wallet is close-only on its own market", () => {
+  it("says so next to the Trade buttons, in the same words the trade ticket uses", () => {
+    render(<LaunchSuccess {...base({ keeperPhase: "ready", keeperMessage: KEEPER_REGISTER_COPY.ready })} />);
+    expect(screen.getByTestId("launch-go-to-market")).toBeTruthy();
+    expect(screen.getByTestId("launch-close-only-note").textContent).toContain(TICKET_COPY.sameOwner.body);
+    expect(screen.getByTestId("launch-close-only-note").textContent).toContain(TICKET_COPY.sameOwner.title);
+    expect(TICKET_COPY.sameOwner.body).toMatch(/can only close positions here/);
   });
 });

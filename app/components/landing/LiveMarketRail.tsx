@@ -1,7 +1,7 @@
 "use client";
 
 import { tokenUsdOfLotUsd } from "@/lib/v22/lot";
-import { useCallback, useMemo, useSyncExternalStore, type FC } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore, type FC } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { MarketLogo } from "@/components/market/MarketLogo";
@@ -12,6 +12,13 @@ import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
 import { usePriceFlash } from "@/hooks/usePriceFlash";
 import { useAllMarketStats, type MarketWithStats } from "@/hooks/useAllMarketStats";
 import { isListedMarketRow } from "@/lib/listed-markets";
+import {
+  SegmentedControl,
+  RailControl,
+  COUNT_OPTIONS,
+  MARKETS_RAIL_DEFAULT_COUNT,
+  type RailCount,
+} from "@/components/landing/RailFilter";
 
 /** Decorative right-chevron — same mark the landing page's CTAs use. */
 const ARROW = (
@@ -24,15 +31,14 @@ const ARROW = (
   </svg>
 );
 
-/** Rows shown on the landing page; /markets has the full list. */
-const RAIL_LIMIT = 6;
-
 /** 24h change from the SAME source useLivePrice uses (/api/prices stats), on the
  *  same 10s cadence — the price store's change24h isn't seeded on the landing
  *  page, and the markets row's price_change_pct is unpopulated. Price itself stays
  *  per-tick live via the store (below); this is only the slower 24h aggregate. */
 const STATS_SWR = { dedupingInterval: 10_000, refreshInterval: 10_000, revalidateOnFocus: false, shouldRetryOnError: false } as const;
-const statsFetcher = (url: string): Promise<{ stats?: { change24h?: number | null } | null }> =>
+const statsFetcher = (
+  url: string,
+): Promise<{ stats?: { change24h?: number | null; series?: number[] | null } | null }> =>
   fetch(url).then((r) => (r.ok ? r.json() : { stats: null }));
 
 function formatChangePct(pct: number | null): string {
@@ -40,6 +46,31 @@ function formatChangePct(pct: number | null): string {
   if (pct === 0) return "0.0%";
   return `${pct > 0 ? "+" : ""}${pct.toFixed(1)}%`;
 }
+
+/**
+ * Mini 24h price line for the rail — drawn from the oldest→newest close series the
+ * /api/prices/[slab] stats response now carries (same request as the 24h change, no
+ * extra fetch). Green if the window ended up, red if down. "—" until a series loads.
+ */
+const MiniChart: FC<{ series: number[] | null | undefined }> = ({ series }) => {
+  if (!series || series.length < 2) return <span className="text-[10px] text-[var(--text-dim)]">—</span>;
+  const w = 64, h = 20, n = series.length;
+  const max = Math.max(...series);
+  const min = Math.min(...series);
+  const flat = max === min;
+  const rng = flat ? 1 : max - min;
+  const color = series[n - 1] >= series[0] ? "var(--long)" : "var(--short)";
+  const y = (v: number) => (flat ? h / 2 : h - 1 - ((v - min) / rng) * (h - 2));
+  const line = series
+    .map((v, i) => `${((i / (n - 1)) * (w - 2) + 1).toFixed(1)},${y(v).toFixed(1)}`)
+    .join(" ");
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true" className="block">
+      <polygon points={`1,${h - 1} ${line} ${w - 1},${h - 1}`} fill={color} opacity={0.12} />
+      <polyline points={line} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+};
 
 /** Stable getServerSnapshot (SSR/first paint) — null price until the store ticks. */
 const RETURN_NULL = () => null;
@@ -72,6 +103,7 @@ const RailRow: FC<RailRowProps> = ({ slab, symbol, name, mainnetCa, fallbackPric
 
   const { data: pricesJson } = useSWR(`/api/prices/${slab}`, statsFetcher, STATS_SWR);
   const change24h = pricesJson?.stats?.change24h ?? null;
+  const series = pricesJson?.stats?.series ?? null;
 
   const flash = usePriceFlash(livePriceE6);
   const tintClass = flash === "up" ? "text-[var(--long)]" : flash === "down" ? "text-[var(--short)]" : "text-[var(--text)]";
@@ -103,27 +135,31 @@ const RailRow: FC<RailRowProps> = ({ slab, symbol, name, mainnetCa, fallbackPric
       </div>
 
       {/* Max Lev */}
-      <div className="hidden shrink-0 text-right font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)] sm:block" style={{ minWidth: 34 }}>
+      <div className="hidden shrink-0 text-right font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)] sm:block" style={{ width: 56 }}>
         {maxLeverage != null ? `${maxLeverage}x` : "—"}
       </div>
       {/* 24h Vol */}
-      <div className="hidden shrink-0 text-right font-mono text-[11px] text-[var(--text-secondary)] md:block" style={{ minWidth: 64 }}>
+      <div className="hidden shrink-0 text-right font-mono text-[11px] text-[var(--text-secondary)] md:block" style={{ width: 68 }}>
         {formatStatValue(volume24h, "currency")}
       </div>
       {/* Open Interest */}
-      <div className="hidden shrink-0 text-right font-mono text-[11px] text-[var(--text-secondary)] lg:block" style={{ minWidth: 72 }}>
+      <div className="hidden shrink-0 text-right font-mono text-[11px] text-[var(--text-secondary)] lg:block" style={{ width: 98 }}>
         {formatStatValue(oiUsd, "currency")}
       </div>
       {/* Price (live) */}
-      <div className={["shrink-0 text-right font-mono text-[13px] font-semibold tabular-nums transition-colors duration-300", tintClass].join(" ")} style={{ minWidth: 80 }}>
+      <div className={["shrink-0 text-right font-mono text-[13px] font-semibold tabular-nums transition-colors duration-300", tintClass].join(" ")} style={{ width: 88 }}>
         {priceLabel}
       </div>
       {/* 24h Change */}
-      <div className={["hidden shrink-0 text-right font-mono text-[11px] tabular-nums sm:block", changeClass].join(" ")} style={{ minWidth: 56 }}>
+      <div className={["hidden shrink-0 text-right font-mono text-[11px] tabular-nums sm:block", changeClass].join(" ")} style={{ width: 76 }}>
         {formatChangePct(change24h)}
       </div>
+      {/* Chart (24h) — mini price line from the stats series */}
+      <div className="hidden shrink-0 lg:flex lg:justify-end" style={{ width: 72 }}>
+        <MiniChart series={series} />
+      </div>
       {/* Trade — visual affordance; the whole row is the link. */}
-      <span className="hidden shrink-0 rounded-sm border border-[var(--accent)]/40 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--accent-text)] transition-colors group-hover:bg-[var(--accent)]/10 group-hover:border-[var(--accent)] sm:inline-flex sm:items-center" style={{ minWidth: 62, justifyContent: "center" }}>
+      <span className="hidden shrink-0 rounded-sm border border-[var(--accent)]/40 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--accent-text)] transition-colors group-hover:bg-[var(--accent)]/10 group-hover:border-[var(--accent)] sm:inline-flex sm:items-center" style={{ width: 70, justifyContent: "center" }}>
         Trade
       </span>
       {ARROW}
@@ -139,12 +175,13 @@ const RailHeader: FC = () => (
   >
     <div className="shrink-0" style={{ width: 24 }} />
     <div className="min-w-0 flex-1">Market</div>
-    <div className="hidden shrink-0 text-right sm:block" style={{ minWidth: 34 }}>Max Lev</div>
-    <div className="hidden shrink-0 text-right md:block" style={{ minWidth: 64 }}>24h Vol</div>
-    <div className="hidden shrink-0 text-right lg:block" style={{ minWidth: 72 }}>Open Interest</div>
-    <div className="shrink-0 text-right" style={{ minWidth: 80 }}>Price</div>
-    <div className="hidden shrink-0 text-right sm:block" style={{ minWidth: 56 }}>24h Change</div>
-    <div className="hidden shrink-0 sm:block" style={{ minWidth: 62 }} />
+    <div className="hidden shrink-0 text-right sm:block" style={{ width: 56 }}>Max Lev</div>
+    <div className="hidden shrink-0 text-right md:block" style={{ width: 68 }}>24h Vol</div>
+    <div className="hidden shrink-0 text-right lg:block" style={{ width: 98 }}>Open Interest</div>
+    <div className="shrink-0 text-right" style={{ width: 88 }}>Price</div>
+    <div className="hidden shrink-0 text-right sm:block" style={{ width: 76 }}>24h Change</div>
+    <div className="hidden shrink-0 text-right lg:block" style={{ width: 72 }}>Chart 24h</div>
+    <div className="hidden shrink-0 sm:block" style={{ width: 70 }} />
     <div className="hidden h-3.5 w-3.5 shrink-0 sm:block" />
   </div>
 );
@@ -152,11 +189,13 @@ const RailHeader: FC = () => (
 /**
  * The landing page's live market rail — real devnet markets, real ticking prices.
  * Rows come from /api/markets (same source as /markets), filtered with
- * isListedMarketRow(), busiest first, top RAIL_LIMIT. Each row subscribes to the
- * price store for its live price and polls /api/prices for the 24h change.
+ * isListedMarketRow(), ranked "trending" by 24h platform volume desc, top `count`
+ * (a 5/10/20 control). Each row subscribes to the price store for its live price
+ * and polls /api/prices for the 24h change.
  */
 export function LiveMarketRail() {
   const { statsMap, loading, error } = useAllMarketStats();
+  const [count, setCount] = useState<RailCount>(MARKETS_RAIL_DEFAULT_COUNT);
 
   const rows = useMemo(
     () =>
@@ -167,8 +206,8 @@ export function LiveMarketRail() {
             (rowVolumeUsd(b) ?? 0) - (rowVolumeUsd(a) ?? 0) ||
             (a.slab_address as string).localeCompare(b.slab_address as string),
         )
-        .slice(0, RAIL_LIMIT),
-    [statsMap],
+        .slice(0, Number(count)),
+    [statsMap, count],
   );
 
   // Prefer the server-enriched OI USD when /api/markets attached it (not on the
@@ -182,6 +221,14 @@ export function LiveMarketRail() {
 
   return (
     <GlassCard padding="none" elevation="md" className="overflow-hidden" hover={false}>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-2.5">
+        <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--text-dim)]">
+          Trending by 24h volume · live prices
+        </span>
+        <RailControl label="Show">
+          <SegmentedControl value={count} onChange={setCount} options={COUNT_OPTIONS} ariaLabel="Rows to show" />
+        </RailControl>
+      </div>
       <RailHeader />
       {rows.map((m, i) => {
         const slab = m.slab_address as string;

@@ -142,7 +142,7 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
         }
       : null;
 
-  // Report the resolved deposit up so the table's "Your Deposit" column fills in
+  // Report the resolved deposit up so the table's "Your Value" column fills in
   // for this row as the user browses vaults.
   // Only once this vault's first read has landed: reporting the pre-load 0 would overwrite the
   // table's chain-read position (incl. a creator's seed) with "$—".
@@ -209,12 +209,21 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
             <Figure label="Fee" loading={!everLoaded} value={chargedTradeFeeLabel(slabRaw ? decodeMarketEngineView(slabRaw)?.tradeFeeBaseBps : null) ?? '—'} />
             <Figure label="Cooldown" loading={!everLoaded} value={slotsToLabel(state.redemptionCooldownSlots)} />
             <Figure
-              label="Your Deposit"
+              // What the position is worth now, not what went in: "Your Deposit" read a $500 deposit
+              // valued at $491.72 as money gone (Discord). The vault page calls it "Value" too.
+              label="Your Value"
               loading={!everLoaded}
               value={hasPosition ? `$${formatCompact(positionUsd)}` : '$—'}
               accent={hasPosition}
             />
           </div>
+          {/* Two-pot vault: 75 prices a deposit on NAV + harvestable LP fees, 77 pays on NAV alone
+              and doesn't harvest first, so a fresh deposit reads below what went in until a 78. */}
+          {everLoaded && state.splitPot && (
+            <p data-testid="earn-rail-pending-fees-note" className="mt-3 border-t border-[var(--border)]/60 pt-3 text-[11px] text-[var(--text-muted)]">
+              Your Value can read a little below what you put in until the vault collects its pending trading fees. Withdrawing before then forfeits your share of them.
+            </p>
+          )}
 
           {state.splitPot && state.splitPot.claimAdjustedNavAtoms !== null && state.splitPot.vaultMaxNowAtoms !== null && (
             <div className="mt-3 grid grid-cols-2 gap-3 border-t border-[var(--border)]/60 pt-3" data-testid="earn-rail-withdrawable">

@@ -35,7 +35,10 @@ const EarnHeader = dynamic(
 );
 
 export function EarnVaultView() {
-  const { stats, loading, error, refresh } = useEarnStats();
+  const { stats, loading: statsLoading, error, hasData, refresh } = useEarnStats();
+  // Until a read succeeds the stats are partly unread (a failed first load), so show the loading
+  // state, not their $0 / shares + fees totals.
+  const loading = statsLoading || !hasData;
   const [dismissedError, setDismissedError] = useState<string | null>(null);
   const [selectedSlab, setSelectedSlab] = useState<string | null>(null);
   // Tagged with the wallet they were reported for: after a wallet switch or disconnect the
@@ -50,6 +53,11 @@ export function EarnVaultView() {
     walletRef.current = walletStr;
   }, [walletStr]);
 
+  // A dismissal covers this run of the error only: once a refresh succeeds, the next failure
+  // (even with the same message) shows again, or the page could sit on stale figures unflagged.
+  useEffect(() => {
+    if (!error) setDismissedError(null);
+  }, [error]);
   const showError = error && error !== dismissedError;
 
   // Auto-select the first vault once markets load so the deposit rail is always
@@ -65,7 +73,7 @@ export function EarnVaultView() {
   );
 
   // The rail reports the connected wallet's resolved deposit for the selected
-  // vault; store it so the table's "Your Deposit" column fills in per row as the
+  // vault; store it so the table's "Your Value" column fills in per row as the
   // user browses. Only writes on an actual value change (no render loop).
   // Stable identity on purpose: a new callback would re-fire the rail's report effect with the
   // previous wallet's figure before its re-read lands.

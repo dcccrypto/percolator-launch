@@ -25,7 +25,6 @@ vi.mock("@/hooks/useWalletCompat", async (orig) => {
 
 import { WalletApiContext, type WalletApi } from "@/hooks/walletApiContext";
 import { useCreateMarket, type CreateMarketParams } from "@/hooks/useCreateMarket";
-import { DEFAULT_SLAB_SIZE } from "@/lib/create-market-args";
 
 const ORIGIN = "https://play.percolator.trade";
 const cookie = (() => {
@@ -120,7 +119,6 @@ describe.skipIf(!RPC)("LIVE: useCreateMarket launches a market", () => {
       invert: false,
       tradingFeeBps: 10,
       initialMarginBps: 1000,
-      slabDataSize: DEFAULT_SLAB_SIZE,
       symbol: "LIVETEST",
       name: "Live Test",
       decimals: 6,

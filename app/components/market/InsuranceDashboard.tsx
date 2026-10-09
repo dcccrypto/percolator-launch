@@ -8,7 +8,6 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { InsuranceExplainerModal } from "./InsuranceExplainerModal";
-import { InsuranceTopUpModal } from "./InsuranceTopUpModal";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
 import { pollWhenVisible } from "@/lib/pollWhenVisible";
@@ -66,7 +65,6 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
   const [loading, setLoading] = useState(!mockMode);
   const [error, setError] = useState<string | null>(null);
   const [showExplainer, setShowExplainer] = useState(false);
-  const [showTopUp, setShowTopUp] = useState(false);
 
   // Fetch insurance data from API.
   // GH#1832: AbortController prevents stale responses from a previous market
@@ -306,19 +304,10 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
         )}
       </div>
 
-      {/* Modals */}
+      {/* Explainer only: the insurance balance has no public deposit. Only the market's
+          insurance authority (the stake pool on staked markets) can add to it (wrapper tag 9). */}
       {showExplainer && (
-        <InsuranceExplainerModal
-          onClose={() => setShowExplainer(false)}
-          onTopUp={() => setShowTopUp(true)}
-        />
-      )}
-      {showTopUp && (
-        <InsuranceTopUpModal
-          slabAddress={slabAddress}
-          currentBalance={insuranceData.balance}
-          onClose={() => setShowTopUp(false)}
-        />
+        <InsuranceExplainerModal onClose={() => setShowExplainer(false)} />
       )}
     </>
   );

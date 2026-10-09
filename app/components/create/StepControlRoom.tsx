@@ -4,7 +4,8 @@ import { bpsPct } from "@/lib/format";
 import { FC, useMemo } from "react";
 import { RotaryDial } from "./RotaryDial";
 import { HoldToLaunch } from "./HoldToLaunch";
-import { MAX_LEVERAGE_X, MIN_LEVERAGE_X } from "@/lib/market-params";
+import { MAX_LEVERAGE_X, MIN_LEVERAGE_X, deriveLaunchMarketParams } from "@/lib/market-params";
+import { liqMovePctAtFullLeverage } from "@/lib/liquidation-risk";
 import { LP_EXPOSURE_DEFAULT_BPS } from "@/lib/matcher-params";
 import { FeeBreakdown } from "@/components/FeeBreakdown";
 import { WizardTranchePanel } from "@/components/limits/CreatorLimits";
@@ -61,7 +62,7 @@ export interface StepControlRoomProps {
   /** Auto-detected, not user-set — shown as a pre-flight readout. */
   oracleLabel: string;
   startPrice: string;
-  /** Slab is always max capacity in v17 — there is no tier to pick. */
+  /** The market account size: one fixed size per launch in v17 (one asset slot) — there is no tier to pick. */
   slabBytes: number;
   rentSol: number | null;
 
@@ -90,6 +91,10 @@ export interface StepControlRoomProps {
   onLpExposureChange?: (bps: number) => void;
   /** P3 launch: the protocol pins the limit, so it is shown read-only. */
   p3?: boolean;
+  /** #2954: false when the wizard cannot register this token's market (no supported pool). Default true. */
+  registrable?: boolean;
+  /** Why it is not registrable (wizard's notRegistrableReason); shown as visible text. */
+  notRegistrableReason?: string | null;
 
   onLaunch: () => void;
   launchDisabled?: boolean;
@@ -98,11 +103,14 @@ export interface StepControlRoomProps {
   onBack: () => void;
 }
 
-const Readout: FC<{ k: string; v: string; tone?: "good" | "plain" }> = ({ k, v, tone = "plain" }) => (
-  <div className="flex items-baseline justify-between border-b border-[var(--border-subtle)] py-[7px] last:border-b-0">
+const Readout: FC<{ k: string; v: string; tone?: "good" | "warn" | "plain"; dimmed?: boolean }> = ({ k, v, tone = "plain", dimmed = false }) => (
+  <div
+    data-dimmed={String(dimmed)}
+    className={`flex items-baseline justify-between border-b border-[var(--border-subtle)] py-[7px] last:border-b-0 ${dimmed ? "opacity-50" : ""}`}
+  >
     <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">{k}</span>
     <span
-      className={`text-[11px] ${tone === "good" ? "text-[var(--long)]" : "text-[var(--text)]"}`}
+      className={`text-[11px] ${tone === "good" ? "text-[var(--long)]" : tone === "warn" ? "text-[var(--warning)]" : "text-[var(--text)]"}`}
       style={{ fontVariantNumeric: "tabular-nums" }}
     >
       {v}
@@ -140,6 +148,8 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
   lpExposureBps,
   onLpExposureChange,
   p3,
+  registrable = true,
+  notRegistrableReason,
   onLaunch,
   launchDisabled,
   launchDisabledReason,
@@ -150,20 +160,29 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
   const lp = Number(lpCollateral) || 0;
   const ins = Number(insuranceAmount) || 0;
 
-  const liqCaption = useMemo(
-    () => `liq at ${(100 / leverage).toFixed(1)}% move`,
-    [leverage],
-  );
+  // The margins the launch writes (deriveLaunchMarketParams: mm = im / 2), on the engine's
+  // maintenance model. 100 / leverage showed twice the room: "10.0% move" at 10x, where the
+  // engine liquidates a short after 4.76% and a long after 5.26%.
+  const liqCaption = useMemo(() => {
+    const p = deriveLaunchMarketParams({ initialMarginBps, lpCollateral: 0n, initialPriceE6: 1_000_000n });
+    const pct = liqMovePctAtFullLeverage(p.initialMarginBps, p.maintenanceMarginBps);
+    // Floored to 0.1%: never show more room than the engine gives.
+    return pct === null ? undefined : `liq at ${(Math.floor(pct * 10) / 10).toFixed(1)}% move`;
+  }, [initialMarginBps]);
 
   return (
     <div className="space-y-5">
       {/* ── instrument cluster ─────────────────────────────────────────── */}
-      <div className="rounded-[4px] border border-[var(--border)] bg-[var(--panel-bg)] p-5">
+      <div
+        data-testid="control-dials"
+        data-dimmed={String(!registrable)}
+        className={`rounded-[4px] border border-[var(--border)] bg-[var(--panel-bg)] p-5 ${registrable ? "" : "opacity-50"}`}
+      >
         <div className="mb-5 flex items-center justify-between">
           <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">
             Market controls
           </div>
-          <div className="text-[10px] text-[var(--text-muted)]">scroll · arrow keys · −/+</div>
+          <div className="text-[10px] text-[var(--text-muted)]">click, then scroll · arrow keys · −/+</div>
         </div>
 
         {/* ONE control per row below `sm`, centered on the card. The old
@@ -247,10 +266,15 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
             Pre-flight
           </div>
           <Readout k="Market" v={symbol} />
-          <Readout k="Price feed" v={oracleLabel} tone="good" />
+          <Readout
+            k="Price feed"
+            v={registrable ? oracleLabel : "No supported pool"}
+            tone={registrable ? "good" : "warn"}
+          />
           <Readout k="Start price" v={startPrice} />
-          <Readout k="Market size" v={`${slabBytes.toLocaleString()} B · max capacity`} />
-          <Readout k="Market rent" v={rentSol === null ? "—" : `${rentSol.toFixed(3)} SOL`} />
+          <Readout k="Market size" v={`${slabBytes.toLocaleString()} B`} />
+          {/* #2954: the cost estimate is dimmed when this market cannot be registered. */}
+          <Readout k="Market rent" v={rentSol === null ? "—" : `${rentSol.toFixed(3)} SOL`} dimmed={!registrable} />
           {/* GH#2622: set expectations UP FRONT, before launch — not only after
               a creator gets stuck (RecoverSolBanner's gated RECLAIM handles that
               case). Rent is reclaimable only if setup stops before any deposit
@@ -277,8 +301,8 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
             <FeeBreakdown highlight="creator" feeBps={tradingFeeBps} />
           </div>
           {/* LP + insurance alone understated it ~3x: both backing domains are seeded at 100% of LP. */}
-          <Readout k="You seed" v={`${seedTotal.toLocaleString()} ${collateralSymbol}`} />
-          <Readout k="Incl. counterparty backing" v={`${seedBacking.toLocaleString()} ${collateralSymbol}`} />
+          <Readout k="You seed" v={`${seedTotal.toLocaleString()} ${collateralSymbol}`} dimmed={!registrable} />
+          <Readout k="Incl. counterparty backing" v={`${seedBacking.toLocaleString()} ${collateralSymbol}`} dimmed={!registrable} />
           <Readout k="Approvals" v="1" />
         </div>
 
@@ -289,6 +313,12 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
             disabledReason={launchDisabledReason}
             instant={instantLaunch}
           />
+          {/* Skip when HoldToLaunch already shows this exact text (one status region, not two). */}
+          {!registrable && !(launchDisabled && launchDisabledReason === (notRegistrableReason ?? "This token cannot be priced")) && (
+            <p data-testid="not-registrable-reason" role="status" className="mt-3 text-center text-[11px] leading-relaxed text-[var(--warning)]">
+              {notRegistrableReason ?? "This token cannot be priced"}
+            </p>
+          )}
         </div>
       </div>
 

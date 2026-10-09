@@ -31,6 +31,7 @@ import {
   signAllCompat,
   broadcastSignedTx,
   getPriorityFee,
+  timedOutSignature,
 } from "@/lib/tx";
 import { planTakerCrank } from "@/lib/taker-crank";
 import { isAllocateRefusal, planAllocatePrefix } from "@/lib/v21/allocate-prefix";
@@ -44,6 +45,7 @@ import { applyConfirmedFill, getPortfolioRawSnapshot, makePortfolioScanKey } fro
 import { limitsFlags } from "@/lib/limits/flags";
 import { decodeMarketEngineView, signedPositionForAsset } from "@/lib/limits/decode";
 import { measureFill, recordFillResult } from "@/lib/limits/fill-check";
+import { measurePositionChange, readBeforeTrade, recordPositionChange } from "@/lib/position-change";
 import { tradeFeeBpsToSign } from "@/lib/limits/fee-channel";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { detectOracleMode, resolveMarketPriceE6 } from "@/lib/oraclePrice";
@@ -304,6 +306,12 @@ export function useTrade(slabAddress: string) {
        * matcher's per-fill clamp individually, one signature for the lot.
        */
       sizes?: bigint[];
+      /**
+       * #3301: trade from EXACTLY this taker portfolio (v17/v18 only). The caller has already
+       * verified it (owner, market, program) against a fresh read; it replaces the resolved
+       * "wallet portfolio" as accountA and nothing falls back to another one.
+       */
+      portfolioPk?: PublicKey;
       limitPriceE6?: bigint;
       /**
        * P2 fee channel (lib/limits/fee-channel.ts): the taker-SIGNED fee cap, base +
@@ -451,6 +459,7 @@ export function useTrade(slabAddress: string) {
           // LP account data comes from the parsed slab bitmap.
           // accountB = deriveLpPda (the LP's portfolio PDA in v12)
           // matcherProg/matcherCtx from the parsed LP account entry
+          if (params.portfolioPk) throw new Error("A specific portfolio can only be targeted on a v17 market");
           const lpAccount = accounts.find((a) => a.idx === params.lpIdx);
           if (!lpAccount) throw new Error(`LP at index ${params.lpIdx} not found`);
 
@@ -478,7 +487,7 @@ export function useTrade(slabAddress: string) {
           // normally an instant cache hit instead of two program scans
           // between the confirm click and the wallet popup.
           const resolved = await getOrResolveV17TradeAccounts(connection, programId, slabPk, wallet.publicKey);
-          accountA = resolved.accountA;
+          accountA = params.portfolioPk ?? resolved.accountA;
           accountB = resolved.accountB;
           matcherProg = resolved.matcherProg;
           matcherCtx = resolved.matcherCtx;
@@ -500,6 +509,12 @@ export function useTrade(slabAddress: string) {
         if (legs.length > 1 && !isV17Market) {
           throw new Error("Multi-leg trades are only supported on v17 markets");
         }
+
+        // #3314: the taker's effective position before the trade, for the saved entry. Started
+        // here so it runs alongside the identity reads; awaited only after confirmation.
+        const beforeEffectiveQ: Promise<bigint | null> = isV17Market
+          ? readBeforeTrade(connection, accountA, slabPk)
+          : Promise.resolve(null);
 
         // v18 wire: live-read BOTH portfolios' identity + the asset marketId right
         // before building the trade — these anti-replay/CAS fields are rejected
@@ -594,7 +609,14 @@ export function useTrade(slabAddress: string) {
           );
           if (plan === "separate-tx") {
             console.info("[useTrade] taker portfolio needs a maintenance crank first; sending it as its own tx");
-            await sendTx({ connection, wallet, instructions: [crankIx], computeUnitsFromSim: { cap: 200_000 } });
+            await sendTx({ connection, wallet, instructions: [crankIx], computeUnitsFromSim: { cap: 200_000 } }).catch((err) => {
+              // The trade below was never sent. Don't let the ticket watch the crank's signature
+              // and report the trade as landed (timedOutSignature reads the timeout message).
+              if (timedOutSignature(err)) {
+                throw new Error("Maintenance crank did not confirm in time; the trade was not sent.", { cause: err });
+              }
+              throw err;
+            });
           }
         } else if (!isV17Market) {
           // v12: the crank is on the slab, not the portfolio (legacy path, unchanged).
@@ -638,7 +660,7 @@ export function useTrade(slabAddress: string) {
               buildTx: (ixs, computeUnits) =>
                 buildBatchTx({ instructions: ixs, computeUnits, priorityFeeMicroLamports: priorityFee, blockhash, feePayer: owner }),
               signAll: (txs) => signAllCompat(wallet, txs),
-              broadcast: (tx) => broadcastSignedTx(connection, tx, { abortSignal: params.abortSignal }),
+              broadcast: (tx) => broadcastSignedTx(connection, tx),
             },
           );
           sig = sent.signatures[sent.signatures.length - 1];
@@ -703,6 +725,16 @@ export function useTrade(slabAddress: string) {
               : await sendOrder();
         }
 
+        // #3314: measure the position change for the saved entry. Not awaited: the caller that
+        // saves the entry (OrderTicket) waits for it via takePositionChange(sig); closes don't.
+        if (isV17Market) {
+          const portfolio = accountA;
+          recordPositionChange(
+            sig,
+            beforeEffectiveQ.then((beforeQ) => measurePositionChange(connection, portfolio, slabPk, sig, beforeQ)),
+          );
+        }
+
         // Immediate local application of the confirmed fill: sendTx's
         // pollConfirmation has ALREADY verified this tx landed on-chain by
         // this point, so params.size's effect on position size is a known
@@ -714,15 +746,19 @@ export function useTrade(slabAddress: string) {
         // the burst. Capital/pnl/fees are intentionally left untouched (not
         // deterministic client-side) — those fields still wait on the
         // refresh burst exactly as before. See applyConfirmedFill's doc.
+        // The scan store holds ONE portfolio per wallet+market (the default pick). A fill on any other
+        // account must not be patched into it (#3301).
+        const scanned = getPortfolioRawSnapshot(makePortfolioScanKey(programId, slabAddress, wallet.publicKey))?.pubkey;
+        const patchesScanStore = !params.portfolioPk || (scanned !== undefined && scanned.equals(accountA));
         if (isV17Market && limitsMarketId !== null) {
           // P1: patch only by the MEASURED delta. A zero fill changes nothing; an
           // unknown result waits for the refresh burst (never assumes params.size).
           const fill = await measureFill(connection, accountA, sig, beforePosQ, params.size, limitsMarketId);
           recordFillResult(sig, fill);
           if ((fill.kind === "full" || fill.kind === "partial") && fill.filledQ !== null) {
-            applyConfirmedFill(makePortfolioScanKey(programId, slabAddress, wallet.publicKey), fill.filledQ);
+            if (patchesScanStore) applyConfirmedFill(makePortfolioScanKey(programId, slabAddress, wallet.publicKey), fill.filledQ);
           }
-        } else if (isV17Market) {
+        } else if (isV17Market && patchesScanStore) {
           applyConfirmedFill(makePortfolioScanKey(programId, slabAddress, wallet.publicKey), params.size);
         }
 

@@ -256,6 +256,8 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
     details,
     ...extra,
   });
+  const lpDepletedMsg = (vault?: boolean) =>
+    m("lp-depleted", "paused", "New positions paused", `${TICKET_FUNDS_LINE(vault === true)} Closing works normally.`);
   const sym = ctx.symbol ?? "";
   const s = sides(ctx.side);
   const useMax = ctx.maxNow ? { action: { id: "use-max" as const, label: `Use ${ctx.maxNow}` } } : {};
@@ -412,8 +414,7 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
           return m("earn-deposit-wait", "wait", "Vault updating", "This vault is updating after a market move. Nothing was deposited. Try again in a moment.");
         if (h.adlReduceOnly && ctx.surface === "trade")
           return m("adl-reduce-only", "paused", "Close-only for now", "Closing works normally. New positions reopen once the positions on one side have closed, which depends on those traders and can take a while.");
-        if (h.lpDepleted && ctx.surface === "trade")
-          return m("lp-depleted", "paused", "New positions paused", `${TICKET_FUNDS_LINE(h.lpIsVault === true)} Closing works normally.`);
+        if (h.lpDepleted && ctx.surface === "trade") return lpDepletedMsg(h.lpIsVault);
         if (h.lossStale) return m("loss-stale", "wait", "Refreshing positions", "Positions on this market are being refreshed after a price move. New trades wait until that finishes.", { autoRetry: true });
         return ctx.surface === "trade"
           // Only the trade ticket waits through this and resends (sendTxWaiting); nothing reads
@@ -422,6 +423,11 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
           : m("engine-catching-up", "wait", "Catching up", "The market is catching up with the latest prices. Try again in a moment.");
       }
       case W.EngineInsufficientInitialMargin:
+        // The IM gate runs on the LP side of the fill too: with the counterparty below the floor every
+        // open is 49 whatever the trader deposits (STONK 2026-10-07), so "add collateral" is the wrong
+        // advice. Outranks the trader's own floor label, which the trader can act on. OrderTicket resolves
+        // here before safeExplainMarketTxError, so market-error's refinement never sees a 49.
+        if (ctx.health?.lpDepleted && ctx.surface === "trade") return lpDepletedMsg(ctx.health.lpIsVault);
         if (ctx.imFloorLabel) {
           return m("insufficient-margin", "error", "Not enough margin", `New positions on this market need at least ${ctx.imFloorLabel} of margin.`);
         }

@@ -517,6 +517,15 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
     function schedulePoll() {
       if (cancelled) return;
       timer = setTimeout(() => {
+        // Hidden tab: nobody is looking, so don't spend an RPC read on it. The
+        // visibilitychange handler below re-polls the instant the tab is shown again
+        // (and the WS subscription keeps delivering meanwhile), so a user never sees
+        // older data than before. The timer keeps ticking so the cadence resumes
+        // without any extra state.
+        if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+          schedulePoll();
+          return;
+        }
         poll().then(schedulePoll);
       }, WS_BACKUP_POLL_MS);
     }

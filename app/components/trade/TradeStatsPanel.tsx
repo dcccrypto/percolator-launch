@@ -205,10 +205,10 @@ export const TradeStatsPanel: FC<TradeStatsPanelProps> = ({
           />
         </div>
 
-        {/* Long / short split */}
+        {/* Buy / sell split: fills, not positions (closing a long is a sell, #3314) */}
         <div className="bg-[var(--panel-bg)] p-3.5">
           <StatCell
-            label="Long / Short Split"
+            label="Buy / Sell Split"
             value={
               <span>
                 <span className="text-[var(--long)]">{stats.longTrades.toLocaleString()}</span>
@@ -216,7 +216,7 @@ export const TradeStatsPanel: FC<TradeStatsPanelProps> = ({
                 <span className="text-[var(--short)]">{stats.shortTrades.toLocaleString()}</span>
               </span>
             }
-            sub={`${longPct}% long bias`}
+            sub={`${longPct}% buys`}
           />
           {longShortBar(stats.longTrades, stats.shortTrades)}
         </div>

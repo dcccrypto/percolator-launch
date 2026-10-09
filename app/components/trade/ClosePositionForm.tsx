@@ -1,9 +1,10 @@
 "use client";
 
-import { FC, useMemo, useState } from "react";
+import { priceBehindLine } from "@/lib/oracle-stale-gate";
+import { FC, useId, useMemo, useState } from "react";
 import { formatTokenAmount } from "@/lib/format";
 import { formatLotPriceE6, formatLotQ } from "@/lib/v22/lot";
-import { computeMarkPnl, computeMarkPnlCollateral, clampClosePercent, UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
+import { computeMarkPnl, computeMarkPnlLinear, clampClosePercent, UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
 
 /**
  * The body of the close-position UI: position banner, close-amount slider + %
@@ -40,8 +41,16 @@ export interface ClosePositionFormProps {
   isLong: boolean;
   loading: boolean;
   tradingFeeBps?: bigint;
-  /** Blocks close + shows the oracle-stale warning. */
+  /** Blocks close + shows the oracle-stale warning (matured oracle / no price — what the chain refuses). */
   oracleStale?: boolean;
+  /** Price older than 60 s but the chain would accept the close — shows one calm line, never blocks. */
+  oraclePriceBehind?: boolean;
+  /** Seconds since the last price push (note text). */
+  priceAgeSecs?: number;
+  /** The stored mark the chain settles at. When the price is behind, the preview is computed from it, not from `currentPrice`. */
+  settleMarkE6?: bigint | null;
+  /** Blocks close + says the market is catching up (engine lag, not the oracle). */
+  engineCatchingUp?: boolean;
   error?: string | null;
   /** Per-fill cap — a close bigger than this executes as several batch legs. */
   maxFillAbs?: bigint | null;
@@ -75,17 +84,21 @@ const PRESETS = [25, 50, 75, 100];
 export const ClosePositionForm: FC<ClosePositionFormProps> = ({
   positionSize,
   entryPrice,
-  currentPrice,
+  currentPrice: liveCurrentPrice,
   capital,
   symbol,
   collateralSymbol,
   decimals,
-  priceUsd,
+  priceUsd: livePriceUsd,
   lotExp = 0,
   isLong,
   loading,
   tradingFeeBps = 0n,
   oracleStale = false,
+  oraclePriceBehind = false,
+  priceAgeSecs = 0,
+  settleMarkE6 = null,
+  engineCatchingUp = false,
   error = null,
   maxFillAbs = null,
   previewUnavailable = false,
@@ -97,6 +110,8 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
   submitTitle,
   onSubmitIntent,
 }) => {
+  // The form can render in the inline close panel and the modal, so no fixed id.
+  const sliderId = useId();
   const [percent, setPercent] = useState(100);
   const updatePercent = (value: number) => setPercent(clampClosePercent(value));
   const isModal = variant === "modal";
@@ -111,6 +126,12 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
       ? Number((closeAbsForFills + maxFillAbs - 1n) / maxFillAbs)
       : 1;
 
+  // The chain settles a close at the STORED mark. While the live price is behind, the two can differ by
+  // the whole move, so the preview follows the stored one.
+  const useStored = oraclePriceBehind && settleMarkE6 != null && settleMarkE6 > 0n;
+  const currentPrice = useStored ? settleMarkE6 : liveCurrentPrice;
+  const priceUsd = useStored ? Number(settleMarkE6) / 1e6 : livePriceUsd;
+
   const preview = useMemo(() => {
     const closeAbs = percent >= 100 ? absPosition : (absPosition * BigInt(percent)) / 100n;
     const remainingAbs = absPosition - closeAbs;
@@ -120,7 +141,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
       currentPrice > 0n && entryPrice > 0n
         ? computeMarkPnl(closePositionSigned, entryPrice, currentPrice)
         : 0n;
-    const pnl = currentPrice > 0n ? computeMarkPnlCollateral(pnlNative, currentPrice) : 0n;
+    const pnl = entryPrice > 0n ? computeMarkPnlLinear(closePositionSigned, entryPrice, currentPrice) : 0n;
 
     const closeNotional = currentPrice > 0n ? (closeAbs * currentPrice) / 1_000_000n : 0n;
     const closeFee = tradingFeeBps > 0n ? (closeNotional * tradingFeeBps) / 10_000n : 0n;
@@ -148,7 +169,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
         ? "text-[var(--long)]"
         : "text-[var(--short)]";
 
-  const closeBlocked = loading || oracleStale || submitDisabled;
+  const closeBlocked = loading || oracleStale || engineCatchingUp || submitDisabled;
 
   return (
     <>
@@ -195,10 +216,11 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
       {/* Percentage slider */}
       <div className="mb-4">
         <div className="mb-1.5 flex items-center justify-between">
-          <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Close Amount</label>
+          <label htmlFor={sliderId} className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Close Amount</label>
           <span className="text-[11px] font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{percent}%</span>
         </div>
         <input
+          id={sliderId}
           type="range"
           data-testid="close-percent-input"
           min={1}
@@ -305,14 +327,25 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
         </p>
       )}
 
-      {oracleStale && (
+      {oracleStale ? (
         <div className="mb-4 rounded-none border border-[var(--warning)]/30 bg-[var(--warning)]/[0.07] p-2.5">
           <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--warning)]">⚠ Oracle Stale</p>
           <p className="mt-1 text-[9px] text-[var(--text-secondary)] leading-relaxed">
             The oracle price has not been updated recently. Closing is temporarily disabled to prevent failed transactions.
           </p>
         </div>
-      )}
+      ) : engineCatchingUp ? (
+        <div data-testid="close-catching-up" className="mb-4 rounded-none border border-[var(--warning)]/30 bg-[var(--warning)]/[0.07] p-2.5">
+          <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--warning)]">Catching up</p>
+          <p className="mt-1 text-[9px] text-[var(--text-secondary)] leading-relaxed">
+            Prices are catching up. Closing resumes once the market has caught up.
+          </p>
+        </div>
+      ) : oraclePriceBehind ? (
+        <p data-testid="close-price-behind" className="mb-4 text-[9px] text-[var(--text-dim)] leading-relaxed">
+          {priceBehindLine(priceAgeSecs)}
+        </p>
+      ) : null}
 
       {fillCount > 1 && (
         <div className="mb-4 rounded-none border border-[var(--border)] bg-[var(--bg)] p-2.5">

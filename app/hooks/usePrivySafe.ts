@@ -17,6 +17,15 @@ export const PrivyAvailableContext = createContext<boolean>(false);
 export const PrivyLoginContext = createContext<(() => void) | null>(null);
 
 /**
+ * Context holding a getter for the Privy session headers (access token + identity token), for
+ * calling server routes that verify the caller's Privy session (lib/privy-auth.ts). Resolves to
+ * null when there is no signed-in Privy session. No wallet prompt: both tokens are the SDK's own.
+ * Provided by PrivyLoginBridge; null when Privy is not mounted (plain wallet adapter).
+ */
+export type PrivySessionHeaders = () => Promise<Record<string, string> | null>;
+export const PrivySessionHeadersContext = createContext<PrivySessionHeaders | null>(null);
+
+/**
  * Returns true if PrivyProvider is in the component tree.
  * Components should check this before calling usePrivy() or useWallets().
  */
@@ -39,4 +48,9 @@ export function usePrivyLogin(): () => void {
       console.warn("[Privy] Wallet connection unavailable");
     }
   }, [login]);
+}
+
+/** The Privy session headers getter, or null when Privy is not mounted. */
+export function usePrivySessionHeaders(): PrivySessionHeaders | null {
+  return useContext(PrivySessionHeadersContext);
 }

@@ -13,6 +13,7 @@ vi.mock("@privy-io/react-auth", () => ({
     return <>{children}</>;
   },
   usePrivy: () => ({ ready: true, authenticated: false, logout: vi.fn() }),
+  useIdentityToken: () => ({ identityToken: null }),
   useLogin: () => ({ login: vi.fn() }),
   useConnectWallet: () => ({ connectWallet: vi.fn() }),
 }));

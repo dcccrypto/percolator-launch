@@ -34,7 +34,7 @@ export interface ProgramIdSet {
 
 /** Deployed devnet programs (deployments.md). The wrapper line is the repoint. */
 export const DEVNET_PROGRAM_IDS: Readonly<ProgramIdSet> = Object.freeze({
-  // ALL-FRESH relaunch (2026-10, wrapper 592286b4 / SDK 8.0.0): every program at a new address.
+  // ALL-FRESH relaunch (2026-10, wrapper 7c906e45 / SDK 8.0.0; 592286b4, the 2026-09-30 in-place upgrade, is its ancestor): every program at a new address.
   wrapper: "ETDLAdiAyWnEUngspYczTXUceT6X8f92eZQvr8nmSkWB",
   matcher: "EDKKgRaVHna6FCxiY1kgMzegD9rpaN1nwJNSzAzeBUBX",
   nft: "EMYT15LZWaP7Mmmm245kQPbrTyVjG16yZiU9kfNTF3GZ",

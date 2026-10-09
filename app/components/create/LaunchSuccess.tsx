@@ -9,6 +9,9 @@ import { getNetwork, explorerTxUrl, explorerAccountUrl } from "@/lib/config";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { launchPriceFeedStatus } from "@/lib/launch-outcome";
 import { KEEPER_REGISTER_COPY, userFacingRegistrationReason } from "@/lib/keeper-register-client";
+import { TICKET_COPY } from "@/lib/limits/copy";
+import { StatusLine } from "@/components/ui/StatusLine";
+import { lpShareWalletNote } from "@/lib/lp-share-wallet-note";
 
 interface LaunchSuccessProps {
   tokenSymbol: string;
@@ -268,10 +271,6 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
               <span className="text-[9px] text-[var(--text-secondary)]">Fee: {bpsPct(tradingFeeBps)}</span>
               <span className="text-[9px] text-[var(--text-secondary)]">·</span>
               <span className="text-[9px] text-[var(--text-secondary)]">Leverage: {maxLeverage}x</span>
-              <span className="text-[9px] text-[var(--text-secondary)]">·</span>
-              {/* v17 slabs are always sized to max capacity — there is no tier to
-                  report here anymore (see StepControlRoom's "Slab" pre-flight readout). */}
-              <span className="text-[9px] text-[var(--text-secondary)]">Market size: max capacity</span>
             </div>
           </div>
         </div>
@@ -358,6 +357,9 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
                 The <strong className="text-[var(--text)]">liquidity you seeded</strong> backs this market as
                 its counterparty — it is not part of your tradeable balance.
               </p>
+              <p data-testid="launch-lp-wallet-note" className="text-[10px] leading-relaxed text-[var(--text-secondary)]">
+                {lpShareWalletNote()}
+              </p>
               {devnetMint && (
                 <div className="flex items-center gap-2 text-[10px]">
                   <span className="flex-shrink-0 font-medium text-[var(--text-dim)]">Sim-USDC mint</span>
@@ -396,6 +398,14 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
           </details>
         </div>
       )}
+
+      {/* The creator wallet is the market's asset_admin and its LP's provenance owner, so the
+          program lets it only close positions here (same-owner rule, P1 item 2). Said before the
+          Trade buttons, with the ticket's own notice and words, so the ticket's "Close-only for this
+          wallet" is no surprise. */}
+      <div data-testid="launch-close-only-note" className="mx-auto mb-4 max-w-md text-left">
+        <StatusLine message={{ kind: "same-owner", variant: "info", title: TICKET_COPY.sameOwner.title, body: TICKET_COPY.sameOwner.body }} />
+      </div>
 
       {/* CTAs */}
       <div className="flex flex-col sm:flex-row items-center justify-center gap-3">

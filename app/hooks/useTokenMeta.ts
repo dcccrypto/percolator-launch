@@ -3,8 +3,11 @@
 import { useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
-import { fetchTokenMeta, type TokenMeta } from "@/lib/tokenMeta";
+import { fetchTokenMeta, isPlaceholderTokenMeta, type TokenMeta } from "@/lib/tokenMeta";
 import { getMockSymbol } from "@/lib/mock-trade-data";
+
+/** Backoff between re-lookups of a mint whose metadata came back as a placeholder. */
+export const TOKEN_META_RETRY_DELAYS_MS = [3_000, 10_000, 30_000] as const;
 
 /**
  * Playground sim-USDC mint. It carries no on-chain symbol metadata, so a normal
@@ -47,13 +50,27 @@ export function useTokenMeta(mint: PublicKey | null): TokenMeta | null {
       return;
     }
 
+    // A truncated-address placeholder means every metadata source failed this time (a
+    // DexScreener/Helius blip). Show it, but look again on a backoff so the real name
+    // replaces it once the source recovers, instead of sticking for the session.
     let cancelled = false;
-    fetchTokenMeta(connection, mint).then((m) => {
-      if (!cancelled) setMeta(m);
-    }).catch(() => {
-      // keep null
-    });
-    return () => { cancelled = true; };
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const attempt = (n: number) => {
+      fetchTokenMeta(connection, mint).then((m) => {
+        if (cancelled) return;
+        setMeta(m);
+        if (isPlaceholderTokenMeta(m) && n < TOKEN_META_RETRY_DELAYS_MS.length) {
+          timer = setTimeout(() => attempt(n + 1), TOKEN_META_RETRY_DELAYS_MS[n]);
+        }
+      }).catch(() => {
+        // keep null
+      });
+    };
+    attempt(0);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [connection, mint?.toBase58()]);
 
   return meta;

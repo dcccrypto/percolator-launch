@@ -11,7 +11,7 @@
  * Data comes from usePortfolio (wallet-wide scan, 30s poll + refresh on
  * close) with the mark, PnL and ROE re-computed per live tick off the shared
  * WS price store — the same math chain as PositionRow itself:
- * computeMarkPnlCollateral(computeMarkPnl(...)) for collateral-unit PnL and
+ * portfolioPositionPnl (lib/position-pnl.ts) for collateral-unit PnL and
  * computePnlPercent against computePositionInitialMargin for ROE.
  *
  * Close mounts a SlabProvider for THAT market on demand — only while the
@@ -35,24 +35,27 @@ import { positionRowKeys, usePortfolio, type PortfolioPosition } from "@/hooks/u
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { useClosePosition } from "@/hooks/useClosePosition";
+import { closeTargetFor } from "@/lib/portfolio-target";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
 import { ClosePositionModal } from "./ClosePositionModal";
 import { UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
 import { isEntryKnown, DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL } from "@/lib/entry-price-display";
-import { portfolioPositionPnl } from "@/lib/position-pnl";
+import { onChainMarkE6, portfolioPositionPnl } from "@/lib/position-pnl";
 import {
   formatTokenAmount,
   formatUsdPriceE6,
+  formatUsdAmount,
   formatPnl,
   formatPercent,
 } from "@/lib/format";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockPortfolioPositions } from "@/lib/mock-trade-data";
-import { isOracleStaleBlocking } from "@/lib/oracle-stale-gate";
-import { describeLiqPrice } from "@/lib/liq-price-display";
+import { oracleAgeSecs, oracleCloseGate } from "@/lib/oracle-stale-gate";
+import { describeLiqDistance, describeLiqPrice } from "@/lib/liq-price-display";
 import { LiqPriceValue } from "./LiqPriceValue";
+import { positionSizeUsdText } from "@/lib/q-usd";
 
 function abs(n: bigint): bigint {
   return n < 0n ? -n : n;
@@ -73,22 +76,27 @@ export const CloseFlow: FC<{
   // CloseFlow only mounts when the close modal opens, so mount === modal-open:
   // start the fresh position read + tx prewarms now, and the confirm click
   // reaches the wallet popup with zero blocking round-trips.
-  useEffect(() => { prewarmClose(); }, [prewarmClose]);
+  // #3301: this row's own account. The same flow serves the at-risk strip and the site-wide alert.
+  const target = closeTargetFor(pos);
+  const targetKey = pos.portfolioPk?.toBase58();
+  useEffect(() => { prewarmClose(target); }, [prewarmClose, targetKey]); // eslint-disable-line react-hooks/exhaustive-deps
   // THIS market's fee (from the on-demand provider), so the preview matches the dock's (#24).
-  const { params } = useSlabState();
+  const { params, config: slabConfig, wrapperConfigV17 } = useSlabState();
   // Same H6/H7 staleness protections as the dock's own PositionRow: a close
-  // on an oracle-stale or engine-stale market reverts on-chain — block the
-  // modal's Confirm instead of letting the user burn a failed tx. Both hooks
+  // on a matured-oracle or engine-stale market reverts on-chain — block the
+  // modal's Confirm instead of letting the user burn a failed tx. A price merely
+  // older than 60 s is accepted by the chain, so it only gets a note. Both hooks
   // read THIS market's freshness via the on-demand SlabProvider above.
-  const { level: oracleLevel, mode: oracleMode, ready: oracleReady } = useOracleFreshness();
+  const { level: oracleLevel, mode: oracleMode, ready: oracleReady, elapsedSecs: oracleElapsed, lastUpdateMs: oracleLastMs, closeFacts } = useOracleFreshness();
   const { engineStale } = useEngineFreshness();
   // Mock slabs have no real oracle/engine to be "fresh" — exempt them like
   // PositionRow's own `!mockMode &&` prefix, so local mock testing isn't
   // permanently blocked.
   const mockExempt = isMockMode() && isMockSlab(pos.slabAddress);
-  const oracleStale =
-    !mockExempt &&
-    (oracleLevel === "unavailable" || isOracleStaleBlocking(oracleLevel, oracleMode, oracleReady));
+  const closeGate = oracleCloseGate({ level: oracleLevel, mode: oracleMode, ready: oracleReady, facts: closeFacts });
+  const oracleStale = !mockExempt && closeGate.blocked;
+  const oraclePriceBehind = !mockExempt && closeGate.behind;
+  const priceAgeSecs = oracleAgeSecs(oracleLastMs, oracleElapsed);
   // Same shared PnL computation as every other surface: the modal previews size
   // and PnL for the close, so it gets the ADL-EFFECTIVE size (raw basis over-
   // reports a deleveraged leg) and an entry only when PnL is honestly known.
@@ -109,10 +117,14 @@ export const CloseFlow: FC<{
       loading={loading}
       error={error}
       tradingFeeBps={params?.tradingFeeBps}
-      oracleStale={oracleStale || (!mockExempt && engineStale)}
+      oracleStale={oracleStale}
+      oraclePriceBehind={oraclePriceBehind}
+      priceAgeSecs={priceAgeSecs}
+      settleMarkE6={onChainMarkE6(slabConfig, wrapperConfigV17 !== null)}
+      engineCatchingUp={!mockExempt && engineStale}
       onConfirm={async (percent) => {
         try {
-          await closePosition(percent);
+          await closePosition(percent, target);
           onDone(true);
         } catch {
           /* keep the modal open; the hook's `error` shows inside it */
@@ -153,6 +165,7 @@ const OtherMarketRow: FC<{
   const entryKnown = isEntryKnown(live.entry, live.entrySource);
   const markE6 = livePriceE6 != null && livePriceE6 > 0n ? livePriceE6 : pos.oraclePriceE6;
   const hasValidMark = markE6 > 0n;
+  const sizeUsd = positionSizeUsdText(posSize, markE6);
   const pnlTokens = live.unrealizedPnl ?? 0n;
   const pnlUsdRaw = Number(pnlTokens) / 10 ** decimals;
   const pnlUsd = Number.isFinite(pnlUsdRaw) ? pnlUsdRaw : null;
@@ -172,6 +185,8 @@ const OtherMarketRow: FC<{
     // #2660: `entryE6 > 0n` is always true — on "unknown" it is the mark.
     hasResolvedEntry: pnlIsKnown,
   });
+  // "5.3% to liq" under a real price only, like the current market's row.
+  const liqDistance = describeLiqDistance(liqDisplay, posSize, markE6, liqPriceE6);
   const pnlColor = pnlTokens === 0n ? "text-[var(--text-muted)]" : pnlTokens > 0n ? "text-[var(--long)]" : "text-[var(--short)]";
   const roeColor = roe === 0 ? "text-[var(--text-muted)]" : roe > 0 ? "text-[var(--long)]" : "text-[var(--short)]";
   const livePriceUsd = getSnapshot(pos.slabAddress).priceUsd ?? (hasValidMark ? Number(markE6) / 1e6 : null);
@@ -197,6 +212,11 @@ const OtherMarketRow: FC<{
         <td className="whitespace-nowrap px-3 py-2.5 text-right" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
           <span className="text-[var(--text)]">{formatLotQ(abs(posSize), decimals, pos.lotExp ?? 0)}</span>
           <span className="ml-1 text-[var(--text-secondary)]">{displaySymbol}</span>
+          {sizeUsd && (
+            <div data-testid="position-size-usd" className="text-[9px] text-[var(--text-secondary)]">
+              {sizeUsd}
+            </div>
+          )}
         </td>
         <td className={`whitespace-nowrap px-3 py-2.5 text-right ${entryKnown ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }} title={entryKnown ? undefined : UNKNOWN_ENTRY_TOOLTIP}>
           {entryKnown ? formatLotPriceE6(entryE6, pos.lotExp ?? 0) : "--"}
@@ -209,6 +229,11 @@ const OtherMarketRow: FC<{
           style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
         >
           <LiqPriceValue display={liqDisplay} />
+          {liqDistance && (
+            <div data-testid="position-liq-distance" className="text-[9px] font-normal">
+              {liqDistance}
+            </div>
+          )}
         </td>
         <td className={`whitespace-nowrap px-3 py-2.5 text-right ${hasValidMark && pnlIsKnown ? pnlColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }} title={pnlIsKnown ? undefined : UNKNOWN_ENTRY_TOOLTIP}>
           {!pnlIsKnown ? (
@@ -221,7 +246,7 @@ const OtherMarketRow: FC<{
               </div>
               {pnlUsd !== null && (
                 <div className="text-[9px]">
-                  {pnlTokens > 0n ? "+" : pnlTokens < 0n ? "-" : ""}${Math.abs(pnlUsd).toFixed(2)}
+                  {formatUsdAmount(pnlUsd, pnlTokens > 0n ? "+" : pnlTokens < 0n ? "-" : "")}
                 </div>
               )}
             </>

@@ -270,11 +270,9 @@ function WalletPageInner() {
                 Add funds
               </GlowButton>
               {network === "devnet" && (
-                <Link href="/faucet">
-                  <GlowButton variant="secondary" size="sm">
-                    Open faucet
-                  </GlowButton>
-                </Link>
+                <GlowButton href="/faucet" variant="secondary" size="sm">
+                  Open faucet
+                </GlowButton>
               )}
             </div>
             {network === "devnet" && (

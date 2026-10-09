@@ -52,6 +52,21 @@ export function computeMarkPnlCollateral(pnlNative: bigint, oraclePriceE6: bigin
 }
 
 /**
+ * Collateral-scale PnL at the mark in one floor division, as the engine credits it
+ * (|basis| × ΔK / (a_basis × POS_SCALE), floored toward −∞: percolator v16.rs settlement via
+ * floor_div_signed_conservative). Going through native units first
+ * (computeMarkPnl, then computeMarkPnlCollateral) is the same quantity but truncates
+ * to whole base atoms in between: a dust position read exactly 0 PnL and 0.0% ROE until
+ * the move was large enough to cross one atom, then jumped.
+ */
+export function computeMarkPnlLinear(signedSize: bigint, entryE6: bigint, markE6: bigint): bigint {
+  if (entryE6 <= 0n || markE6 <= 0n) return 0n;
+  const n = signedSize * (markE6 - entryE6);
+  const q = n / 1_000_000n; // BigInt truncates toward zero; the engine floors
+  return n < 0n && n % 1_000_000n !== 0n ? q - 1n : q;
+}
+
+/**
  * Initial margin an open position "locks", computed from the position's
  * OWN entry price and size — never a pending order's inputs. Reuses the
  * same notional-conversion pattern OrderTicket already uses for its
@@ -136,14 +151,10 @@ export function orderAgainstPosition(
  * `PositionCard`, `PositionsBar`'s `PositionChip`, and the portfolio hero's
  * live-total roll-up — so a fix to the math only needs to happen once.
  *
- * The chain is VERBATIM what `usePortfolio.ts`'s `buildV17Position` computes
- * with the POLLED oracle price, just re-run with a fresher mark:
- *   1. `computeMarkPnl` — the SDK's coin-margined formula. Its bigint result
- *      is scaled in NATIVE units (same scale as `positionSize`), NOT
- *      collateral/USD — see `computeMarkPnlCollateral`'s own doc comment.
- *   2. `computeMarkPnlCollateral` — converts that native PnL into
- *      collateral-scale raw units using the same mark price.
- *   3. ROE (`pnlPercent`) divides by the position's OWN locked initial
+ * The same math as `valueAtMark` (lib/position-pnl.ts), re-run with a fresher mark:
+ *   1. `computeMarkPnlLinear` — collateral-scale PnL in one floor division, as the
+ *      engine credits it (no truncation to whole base atoms in between).
+ *   2. ROE (`pnlPercent`) divides by the position's OWN locked initial
  *      margin (`computePositionInitialMargin`), not total account capital —
  *      capital can include collateral not backing this specific position.
  *      Falls back to `capitalFallback` (typically account capital) when the
@@ -168,7 +179,7 @@ export function computeLivePositionPnl(
   const pnl = (() => {
     if (positionSize === 0n || entryPriceE6 <= 0n || markPriceE6 <= 0n) return unrealizedPnlFallback;
     try {
-      return computeMarkPnlCollateral(computeMarkPnl(positionSize, entryPriceE6, markPriceE6), markPriceE6);
+      return computeMarkPnlLinear(positionSize, entryPriceE6, markPriceE6);
     } catch {
       return unrealizedPnlFallback;
     }
@@ -368,6 +379,17 @@ export function clampClosePercent(value: number): number {
   return rounded;
 }
 
+export type OrderEffect = "open" | "reduce" | "close" | "flip";
+
+/** What an Open-tab order does to the account's position; the rule orderHeading below words. */
+export function orderEffect(direction: "long" | "short", orderSize: bigint, existingSize: bigint): OrderEffect {
+  const existingAbs = existingSize < 0n ? -existingSize : existingSize;
+  if (existingSize === 0n || (existingSize > 0n) === (direction === "long")) return "open";
+  if (orderSize < existingAbs) return "reduce";
+  if (orderSize === existingAbs) return "close";
+  return "flip";
+}
+
 /**
  * Confirm-modal heading for an Open-tab order. An order on the other side of the
  * account's open position (`existingSize`, signed, same units as `orderSize`) cuts that
@@ -378,9 +400,10 @@ export function clampClosePercent(value: number): number {
 export function orderHeading(direction: "long" | "short", orderSize: bigint, existingSize: bigint): string {
   const side = direction === "long" ? "Long" : "Short";
   const held = direction === "long" ? "Short" : "Long";
-  const existingAbs = existingSize < 0n ? -existingSize : existingSize;
-  if (existingSize === 0n || (existingSize > 0n) === (direction === "long")) return `Opening ${side} Position`;
-  if (orderSize < existingAbs) return `Reducing ${held} Position`;
-  if (orderSize === existingAbs) return `Closing ${held} Position`;
-  return `Closing ${held}, Opening ${side}`;
+  switch (orderEffect(direction, orderSize, existingSize)) {
+    case "open": return `Opening ${side} Position`;
+    case "reduce": return `Reducing ${held} Position`;
+    case "close": return `Closing ${held} Position`;
+    default: return `Closing ${held}, Opening ${side}`;
+  }
 }

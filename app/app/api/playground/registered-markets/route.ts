@@ -48,7 +48,7 @@
  * degrading to "slightly stale" rather than "keeper prices nothing".
  */
 import { NextResponse } from "next/server";
-import { readRegisteredMarkets } from "@/lib/playground-registered-markets";
+import { readRegisteredMarketsChecked } from "@/lib/playground-registered-markets";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { readSlabExistence } from "@/lib/live-market-state";
@@ -78,7 +78,10 @@ async function liveSlabAddresses(): Promise<Set<string> | null> {
 }
 
 export async function GET() {
-  const all = await readRegisteredMarkets();
+  // A failed store read still answers 200 with what it has (the previous snapshot, or none), but
+  // says so: `complete: false` lets a reader that sums over the list (the Earn TVL) not treat a
+  // partial list as the whole one. Readers that ignore the field are unaffected.
+  const { markets: all, ok: readOk } = await readRegisteredMarketsChecked();
   const notBlocked = all.filter((m) => !BLOCKED_SLAB_ADDRESSES.has(m.slabAddress));
 
   const live = await liveSlabAddresses();
@@ -91,7 +94,7 @@ export async function GET() {
   const markets = dbFiltered.filter((m) => !chain.missing.has(m.slabAddress));
 
   return NextResponse.json(
-    { markets },
+    readOk ? { markets } : { markets, complete: false },
     {
       headers: {
         // NO CACHE. This is a liveness feed, not a page.

@@ -36,7 +36,7 @@
  */
 import { computeMarkPnl, computePnlPercent } from "@percolatorct/sdk";
 import {
-  computeMarkPnlCollateral,
+  computeMarkPnlLinear,
   computePositionInitialMargin,
   resolveEntryPrice,
   type EntryPriceSource,
@@ -131,7 +131,7 @@ export function valueAtMark(v: {
   capital: bigint;
 }): { pnlNative: bigint; unrealizedPnl: bigint; roe: number } {
   const pnlNative = computeMarkPnl(v.effectiveSize, v.entryE6, v.markE6);
-  const unrealizedPnl = computeMarkPnlCollateral(pnlNative, v.markE6);
+  const unrealizedPnl = computeMarkPnlLinear(v.effectiveSize, v.entryE6, v.markE6);
   let roe = 0;
   try {
     const margin = computePositionInitialMargin(v.effectiveSize, v.entryE6, v.initialMarginBps);

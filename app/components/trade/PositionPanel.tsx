@@ -6,9 +6,6 @@ import { Q_SCALE } from "@/lib/q-usd";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useMarketConfig } from "@/hooks/useMarketConfig";
 import { useClosePosition } from "@/hooks/useClosePosition";
-import { useDeposit } from "@/hooks/useDeposit";
-import { useWalletAtaBalance } from "@/hooks/useWalletAtaBalance";
-import { checkDepositAmount, depositAmountMessage } from "@/lib/deposit-guard";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
@@ -40,6 +37,10 @@ import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { computeLiquidationDistancePct } from "@/lib/liquidation-distance";
 import { WarmupProgress } from "./WarmupProgress";
+import { AddMarginModal } from "./AddMarginModal";
+
+// The modal now lives in its own file (the dock mounts it too); kept exported here for existing imports.
+export { AddMarginModal };
 import { useMarketFillCap } from "@/hooks/useMarketFillCap";
 import { ClosePositionModal } from "./ClosePositionModal";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
@@ -48,8 +49,7 @@ import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { StatusLine } from "@/components/ui/StatusLine";
 import { getEntryPrice, getEntryLeverage } from "@/lib/entry-price";
-import { parseHumanAmount } from "@/lib/parseAmount";
-import { isOracleStaleBlocking } from "@/lib/oracle-stale-gate";
+import { oracleAgeSecs, oracleCloseGate } from "@/lib/oracle-stale-gate";
 import { computeMarginHealthPct } from "@/lib/margin-health";
 import { describeLiqPrice } from "@/lib/liq-price-display";
 import { LiqPriceValue } from "./LiqPriceValue";
@@ -61,132 +61,6 @@ import {
 function abs(n: bigint): bigint {
   return n < 0n ? -n : n;
 }
-
-// ─── 5.9: Add Margin modal ────────────────────────────────────────────────────
-
-interface AddMarginModalProps {
-  slabAddress: string;
-  userIdx: number;
-  symbol: string;
-  decimals: number;
-  portfolioPk?: import("@solana/web3.js").PublicKey;
-  onClose: () => void;
-  onSuccess?: () => void;
-}
-
-export const AddMarginModal: FC<AddMarginModalProps> = ({ slabAddress, userIdx, symbol, decimals, portfolioPk, onClose, onSuccess}) => {
-  const [amount, setAmount] = useState("");
-  const [lastSig, setLastSig] = useState<string | null>(null);
-  const { deposit, loading, error } = useDeposit(slabAddress);
-  const { config: marginMktConfig } = useSlabState();
-  const { balance: walletBalance } = useWalletAtaBalance(marginMktConfig?.collateralMint, lastSig);
-
-  let parsedAmount: bigint = 0n;
-  let parseError: string | null = null;
-  if (amount) {
-    try {
-      parsedAmount = parseHumanAmount(amount, decimals);
-    } catch {
-      parseError = `Too many decimal places (max ${decimals})`;
-    }
-  }
-
-  // An amount above the wallet's collateral balance is rejected inline (same
-  // treatment as Withdraw) instead of being left for the chain to revert.
-  const amountStatus = parseError ? "empty" : checkDepositAmount(parsedAmount, walletBalance);
-  const amountError = depositAmountMessage(amountStatus, walletBalance, decimals, symbol);
-  const canSubmit = !loading && amount.length > 0 && !parseError && parsedAmount > 0n && amountStatus === "ok";
-
-  async function handleDeposit() {
-    if (!canSubmit) return;
-    try {
-      const sig = await deposit({ userIdx, amount: parsedAmount, accountExists: true, portfolioPk });
-      setLastSig(sig ?? null);
-      setAmount("");
-
-    // Add margin mutates the slab account. Refresh immediately so capital,
-    // liquidation risk, and position health do not stay stale until polling.
-    onSuccess?.();
-    } catch {
-      // error shown via hook
-    }
-  }
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Add margin"
-    >
-      <div className="w-full max-w-sm rounded-none border border-[var(--border)]/60 bg-[var(--bg)] p-4 shadow-2xl">
-        <div className="mb-3 flex items-center justify-between">
-          <span className="text-[11px] font-bold uppercase tracking-[0.15em] text-[var(--text)]">Add Margin</span>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors"
-          >
-            ×
-          </button>
-        </div>
-
-        <p className="mb-3 text-[10px] text-[var(--text-secondary)] leading-relaxed">
-          Deposit additional collateral to increase your margin and reduce liquidation risk.
-        </p>
-
-        <div className="mb-2 flex flex-col gap-1">
-          <label className="text-[9px] uppercase tracking-[0.12em] text-[var(--text)]">
-            Amount ({symbol})
-          </label>
-          <input
-            type="text"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
-            placeholder={`0.00 ${symbol}`}
-            style={{ fontFamily: "var(--font-mono)" }}
-            className="w-full rounded-none border border-[var(--border)]/50 bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)] placeholder-[var(--text-muted)] focus:border-[var(--accent)]/40 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]/20"
-          />
-          {parseError && (
-            <p className="text-[10px] text-[var(--short)]">{parseError}</p>
-          )}
-          {!parseError && amountError && (
-            <p role="alert" data-testid="add-margin-amount-error" className={`text-[10px] ${amountStatus === "exceeds" ? "text-[var(--short)]" : "text-[var(--text-secondary)]"}`}>
-              {amountError}
-            </p>
-          )}
-          {walletBalance !== null && walletBalance > 0n && (
-            <button
-              type="button"
-              onClick={() => setAmount(formatTokenAmount(walletBalance, decimals))}
-              className="self-start text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--accent)] hover:underline"
-            >
-              Max: {formatTokenAmount(walletBalance, decimals, 3)} {symbol}
-            </button>
-          )}
-        </div>
-
-        <button
-          onClick={handleDeposit}
-          disabled={!canSubmit}
-          className="w-full rounded-none bg-[var(--accent)] py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-white transition-[filter,opacity] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {loading ? "Depositing…" : "Deposit Margin"}
-        </button>
-
-        {error && (
-          <p className="mt-2 text-[10px] text-[var(--short)]">{error}</p>
-        )}
-        {lastSig && (
-          <p className="mt-2 text-[10px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
-            Tx: {lastSig.slice(0, 16)}…
-          </p>
-        )}
-      </div>
-    </div>
-  );
-};
 
 /** Format seconds into "Xh Ym" countdown string. */
 function formatCountdown(seconds: number): string {
@@ -224,16 +98,19 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // H7: "keeper" added to the mode set — this gate previously only fired for
   // admin/hyperp markets, so a stale keeper-priced market (all 5 live
   // playground markets) never blocked closing.
-  const { level: oracleLevel, mode: oracleMode, ready: oracleReady } = useOracleFreshness();
+  const { level: oracleLevel, mode: oracleMode, ready: oracleReady, elapsedSecs: oracleElapsed, lastUpdateMs: oracleLastMs, closeFacts } = useOracleFreshness();
   const oracleUnavailable = oracleLevel === "unavailable";
-  const oracleStale = !mockMode && (oracleUnavailable || isOracleStaleBlocking(oracleLevel, oracleMode, oracleReady));
+  // Closing is gated on what the chain would refuse, not on the 60 s display rule (lib/oracle-stale-gate).
+  const closeGate = oracleCloseGate({ level: oracleLevel, mode: oracleMode, ready: oracleReady, facts: closeFacts });
+  const oracleStale = !mockMode && closeGate.blocked;
+  const oraclePriceBehind = !mockMode && closeGate.behind;
+  const priceAgeSecs = oracleAgeSecs(oracleLastMs, oracleElapsed);
   // H6: engine accrue-staleness — distinct from the oracle-push freshness
   // above. A market can look perfectly fresh here (keeper still pushing
   // prices) while the ENGINE hasn't accrued in ~500 slots, cliff-dead and
   // permanently reverting every close (UX WP-2: only beyond the app's own catch-up). See
   // useEngineFreshness's file header.
   const { engineStale } = useEngineFreshness();
-  const closeBlockedByStaleness = !mockMode && (oracleStale || engineStale);
 
   const lpEntry = useMemo(() => {
     return accounts.find(({ account }) => account.kind === AccountKind.LP) ?? null;
@@ -358,10 +235,13 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const showLiqWarning = hasValidMark && liqPriceE6 > 0n && liqTier !== "safe";
   const liqWarningTone = liqTier === "danger" ? "var(--short)" : "var(--warning)";
 
+  // Keyed off the collateral PnL (the $ figure): on a dust position the token-unit PnL can be 0
+  // while the $ PnL and ROE are not.
+  const pnlCollateral = pnlResult.unrealizedPnl ?? 0n;
   const pnlColor =
-    pnlTokens === 0n
+    pnlCollateral === 0n
       ? "text-[var(--text-muted)]"
-      : pnlTokens > 0n
+      : pnlCollateral > 0n
         ? "text-[var(--long)]"
         : "text-[var(--short)]";
 
@@ -744,7 +624,11 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           // disabled on engineStale (with its own correctly-labeled title),
           // but if the modal is somehow already open when engine-staleness
           // is detected, keep its Confirm button blocked too.
-          oracleStale={closeBlockedByStaleness}
+          oracleStale={oracleStale}
+          oraclePriceBehind={oraclePriceBehind}
+          priceAgeSecs={priceAgeSecs}
+          settleMarkE6={onChainPriceE6}
+          engineCatchingUp={!mockMode && engineStale}
           maxFillAbs={fillCaps?.maxFillAbs ?? null}
           onConfirm={handleConfirmClose}
           onCancel={() => setShowCloseModal(false)}

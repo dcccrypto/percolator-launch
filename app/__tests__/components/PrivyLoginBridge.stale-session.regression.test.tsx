@@ -44,6 +44,7 @@ const {
 vi.mock("@privy-io/react-auth", () => ({
   PrivyProvider: ({ children }: any) => <>{children}</>,
   usePrivy: () => mockUsePrivy(),
+  useIdentityToken: () => ({ identityToken: null }),
   useLogin: () => ({ login: mockLogin }),
   useConnectWallet: (callbacks: any) => {
     connectWalletCallbacks.current = callbacks;

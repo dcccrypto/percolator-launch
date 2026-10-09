@@ -85,9 +85,13 @@ describe("keeper-market oracle wiring", () => {
     // authority DELEGATED to the keeper. Gating on isAdminOracle alone
     // (oracleMode === "admin") excluded exactly those markets, writing
     // oracle_authority=null for the ones the keeper drives.
-    expect(hookSource).toMatch(
+    // The payload builder moved to lib/market-registration-payload.ts (shared with the cross-device
+    // registration recovery, #3267); the rule is unchanged.
+    const builderSource = readFileSync(resolve(process.cwd(), "lib/market-registration-payload.ts"), "utf8");
+    expect(builderSource).toMatch(
       /oracle_authority: \(isAdminOracle \|\| oracleMode === "keeper"\)/,
     );
+    expect(hookSource).toContain('import { buildMarketRegistrationPayload, flooredInitialMarginBps } from "@/lib/market-registration-payload";');
   });
 });
 
