@@ -497,5 +497,6 @@ export function TvChart({
     w.changeTheme(name).then(apply, apply);
   }, [chartTheme, ready]);
 
-  return <div ref={containerRef} data-testid="tv-chart" className={className} />;
+  // Themed backdrop under the iframe, which paints before the library applies loading_screen.
+  return <div ref={containerRef} data-testid="tv-chart" className={className} style={{ background: "var(--panel-bg)" }} />;
 }
