@@ -54,6 +54,31 @@ import { computeBudgetPrefix, connectionSelfHealDeps, parseCustomInstructionErro
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 /** percolator-stake `state::MINIMUM_LIQUIDITY` (dead shares), e62aa4a state.rs:25. */
 export const STAKE_MINIMUM_LIQUIDITY = 1_000n;
+
+/**
+ * Per-sub-pool dead-share floors (percolator-stake R-1, fix/v22-stake-last-junior-residual @ aebbff6; mirrors state.rs `dead_lp` /
+ * `real_lp_supply`). A tranche pool can hold 0, 1,000 or 2,000 dead shares, recorded in `StakePool._reserved[61]` (FLOOR_SENIOR 0x01,
+ * FLOOR_JUNIOR 0x02). A byte of 0 is a LEGACY pool (every pool on the currently deployed stake program): `total - 1,000`, saturating.
+ * `_reserved` starts at 320 on v2+ pools (state.rs `offset_of!(_reserved) == 320`), so the flags byte is at absolute 381.
+ * TODO(repin): swap for the SDK helpers (`stakeRealLpSupply`, percolator-sdk#406) once the app pins the v2.2 SDK.
+ */
+export const STAKE_FLOOR_SENIOR = 0x01;
+export const STAKE_FLOOR_JUNIOR = 0x02;
+const STAKE_FLOOR_FLAGS_OFFSET = 320 + 61;
+
+/** Raw floor-flags byte of a pool account (0 when absent / legacy). */
+export function readStakeFloorFlags(data: Uint8Array): number {
+  return data.length >= 384 ? data[STAKE_FLOOR_FLAGS_OFFSET] : 0;
+}
+
+/** `real_lp_supply()`: total minus the dead floors the flags record (legacy 0: minus one 1,000 floor), saturating. */
+export function stakeRealLpSupply(totalLpSupply: bigint, floorFlags: number): bigint {
+  const sat = (a: bigint, b: bigint): bigint => (a > b ? a - b : 0n);
+  if (floorFlags === 0) return sat(totalLpSupply, STAKE_MINIMUM_LIQUIDITY);
+  const sd = (floorFlags & STAKE_FLOOR_SENIOR) !== 0 ? STAKE_MINIMUM_LIQUIDITY : 0n;
+  const jd = (floorFlags & STAKE_FLOOR_JUNIOR) !== 0 ? STAKE_MINIMUM_LIQUIDITY : 0n;
+  return sat(sat(totalLpSupply, sd), jd);
+}
 /** Keeper K-1 gate: dead shares may take at most this share of a push. */
 export const STAKE_MAX_DEAD_SHARE_BPS = 100n;
 export const PRE_RESOLVE_CRANK_CU = 250_000;
@@ -85,6 +110,8 @@ export interface PoolState {
   slab: PublicKey;
   poolMode: number;
   totalLpSupply: bigint;
+  /** Raw `_reserved[61]` floor flags; omitted / 0 = legacy pool (total - 1,000). */
+  floorFlags?: number;
   isInitialized: boolean;
   percolatorProgram: PublicKey;
   vault: PublicKey;
@@ -101,9 +128,10 @@ export function decideStakeLeg(owed: bigint, market: PublicKey, wrapper: PublicK
     return { action: "stuck", reason: "the stake pool is not bound to this market" };
   }
   if (pool.poolMode !== 0) return { action: "stuck", reason: "the stake pool is not an insurance pool" };
-  const real = pool.totalLpSupply > STAKE_MINIMUM_LIQUIDITY ? pool.totalLpSupply - STAKE_MINIMUM_LIQUIDITY : 0n;
+  const real = stakeRealLpSupply(pool.totalLpSupply, pool.floorFlags ?? 0);
   if (real === 0n) return { action: "stuck", reason: "the stake pool has no stakers" };
-  if (STAKE_MINIMUM_LIQUIDITY * 10_000n > STAKE_MAX_DEAD_SHARE_BPS * pool.totalLpSupply) {
+  const dead = pool.totalLpSupply - real; // 1,000 legacy / non-tranche; up to 2,000 on a tranche pool
+  if (dead * 10_000n > STAKE_MAX_DEAD_SHARE_BPS * pool.totalLpSupply) {
     return { action: "stuck", reason: "the stake pool has too few stakers (the push would mostly go to dead shares)" };
   }
   return { action: "push" };
@@ -296,6 +324,7 @@ export async function readAndPlanPreResolve(
         slab: d.slab,
         poolMode: d.poolMode,
         totalLpSupply: d.totalLpSupply,
+        floorFlags: readStakeFloorFlags(new Uint8Array(pi.data)),
         isInitialized: d.isInitialized,
         percolatorProgram: d.percolatorProgram,
         vault: d.vault,

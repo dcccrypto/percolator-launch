@@ -10,7 +10,17 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Keypair, PublicKey, SYSVAR_CLOCK_PUBKEY } from "@solana/web3.js";
 import { IX_TAG } from "@percolatorct/sdk";
-import { decideLpLeg, decideStakeLeg, planPreResolve, readFeeLegs, STAKE_MINIMUM_LIQUIDITY } from "@/lib/pre-resolve";
+import {
+  decideLpLeg,
+  decideStakeLeg,
+  planPreResolve,
+  readFeeLegs,
+  readStakeFloorFlags,
+  STAKE_FLOOR_JUNIOR,
+  STAKE_FLOOR_SENIOR,
+  STAKE_MINIMUM_LIQUIDITY,
+  stakeRealLpSupply,
+} from "@/lib/pre-resolve";
 import type { PoolState } from "@/lib/pre-resolve";
 
 const fixture = JSON.parse(readFileSync(join(__dirname, "..", "fixtures", "CaS8oiDW.market.json"), "utf-8")) as { dataBase64: string };
@@ -110,5 +120,51 @@ describe("pure deciders mirror the keeper (incl. K-1 dead-share ratio)", () => {
   it("LP leg", () => {
     expect(decideLpLeg(0n, null)).toEqual({ action: "none" });
     expect(decideLpLeg(9n, { domain: 1, sharesOutstanding: 1n })).toEqual({ action: "crank", domain: 1 });
+  });
+});
+
+// percolator-stake R-1 (fix/v22-stake-last-junior-residual @ aebbff6): a tranche pool can hold 2,000 dead shares.
+describe("stake leg vs per-sub-pool dead floors", () => {
+  const BOTH = STAKE_FLOOR_SENIOR | STAKE_FLOOR_JUNIOR;
+  const leg = (total: bigint, floorFlags?: number) => decideStakeLeg(5n, MARKET, WRAPPER, pool({ totalLpSupply: total, floorFlags })).action;
+
+  it("stakeRealLpSupply mirrors state.rs real_lp_supply (legacy / senior-only / junior-only / both)", () => {
+    expect(stakeRealLpSupply(5000n, 0)).toBe(4000n);
+    expect(stakeRealLpSupply(1000n, 0)).toBe(0n);
+    expect(stakeRealLpSupply(0n, 0)).toBe(0n);
+    expect(stakeRealLpSupply(5000n, STAKE_FLOOR_SENIOR)).toBe(4000n);
+    expect(stakeRealLpSupply(5000n, STAKE_FLOOR_JUNIOR)).toBe(4000n);
+    expect(stakeRealLpSupply(5000n, BOTH)).toBe(3000n);
+    expect(stakeRealLpSupply(1500n, BOTH)).toBe(0n);
+  });
+  it("reads the flags byte at absolute 381 of a v2+ pool account", () => {
+    const d = new Uint8Array(408);
+    d[381] = 3;
+    d[380] = 0xff;
+    d[382] = 0xff;
+    expect(readStakeFloorFlags(d)).toBe(3);
+    expect(readStakeFloorFlags(new Uint8Array(352))).toBe(0);
+  });
+  it("a pool holding only 2,000 dead shares has no stakers: never a push", () => {
+    expect(leg(2000n, BOTH)).toBe("stuck");
+    expect(plan(withLegs(0n, 5n), null, pool({ totalLpSupply: 2000n, floorFlags: BOTH })).blockers[0]).toMatch(/no stakers/);
+    expect(leg(1000n, STAKE_FLOOR_JUNIOR)).toBe("stuck");
+  });
+  it("K-1 counts both floors: 100,000 total pushes with one floor, not with two; 200,000 pushes with two", () => {
+    expect(leg(100_000n, STAKE_FLOOR_SENIOR)).toBe("push");
+    expect(leg(100_000n, BOTH)).toBe("stuck");
+    expect(leg(200_000n, BOTH)).toBe("push");
+    expect(leg(199_999n, BOTH)).toBe("stuck");
+  });
+  it("LIVE pre-fix program (flags byte 0 / omitted): identical to the old total - 1,000 rule", () => {
+    const old = (t: bigint): string => {
+      const real = t > STAKE_MINIMUM_LIQUIDITY ? t - STAKE_MINIMUM_LIQUIDITY : 0n;
+      if (real === 0n) return "stuck";
+      return STAKE_MINIMUM_LIQUIDITY * 10_000n > 100n * t ? "stuck" : "push";
+    };
+    for (const t of [0n, 1n, 999n, 1000n, 1001n, 2000n, 2001n, 50_000n, 99_999n, 100_000n, 100_001n, 1_000_000n]) {
+      expect(leg(t, 0)).toBe(old(t));
+      expect(leg(t, undefined)).toBe(old(t));
+    }
   });
 });

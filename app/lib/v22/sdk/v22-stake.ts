@@ -403,7 +403,7 @@ export function commitSlotForPendingTargetV5(pool: Pick<StakePoolV5, "pendingTar
 }
 
 // ============================================================================
-// Errors 33..45 (stable names from percolator-stake src/error.rs, one calm line each)
+// Errors 33..45, plus 28 (stable names from percolator-stake src/error.rs, one calm line each)
 // ============================================================================
 
 /**
@@ -412,6 +412,9 @@ export function commitSlotForPendingTargetV5(pool: Pick<StakePoolV5, "pendingTar
  * `STAKE_ERRORS[32]` still says "VERSION 18": on a v2.2 stake it pins VERSION 19 (see the PR notes).
  */
 export const STAKE_ERRORS_V5: Readonly<Record<number, ErrorInfo>> = Object.freeze({
+  // Not a v5 code: the stake-side refusal the v2.2 deposit UI can reach. A first deposit of 1,000 atoms or less into an EMPTY
+  // pool / senior / junior sub-pool cannot lock its dead-share floor (percolator-stake R-1, aebbff6). Nothing is locked.
+  28: { name: "DepositBelowMinimumLiquidity", hint: "First deposit into this pool must be more than 1,000 units." },
   33: { name: "ConsentRequired", hint: "Please review and accept the current risk text, then try again." },
   34: { name: "DeprecatedV5", hint: "This action was removed in stake v5; deployment now happens through the automatic sync." },
   35: { name: "InsuranceUnitsInvalid", hint: "The market's insurance record is not available right now; try again in a moment." },

@@ -10,7 +10,7 @@
  */
 import type { MessageContext, StatusVariant, UserMessage } from "@/lib/limits/user-message";
 import { STAKE_ERRORS_V5 } from "./sdk";
-import { STAKE_ERR_V5, WRAPPER_ERR_V22 } from "./wrapper-errors";
+import { STAKE_ERR_DEPOSIT_BELOW_MIN_LIQUIDITY, STAKE_ERR_V5, WRAPPER_ERR_V22 } from "./wrapper-errors";
 import { V22_COPY } from "./copy";
 
 type Build = (kind: string, variant: StatusVariant, title: string, body: string, extra?: Partial<UserMessage>) => UserMessage;
@@ -68,11 +68,13 @@ export function v22WrapperMessage(code: number, ctx: MessageContext & { minPosit
   }
 }
 
-/** Stake v5 codes 33..=45. Only call for an error attributed to the stake program. */
+/** Stake v5 codes 33..=45, plus 28 (first deposit too small). Only call for an error attributed to the stake program. */
 export function v22StakeMessage(code: number, m: Build): UserMessage | null {
   const info = STAKE_ERRORS_V5[code];
   if (!info) return null;
   switch (code) {
+    case STAKE_ERR_DEPOSIT_BELOW_MIN_LIQUIDITY:
+      return m("stake-min-first-deposit", "info", "Deposit a little more", info.hint);
     case STAKE_ERR_V5.ConsentRequired:
       return m("stake-consent", "wait", "Review the risk text", info.hint, { action: { id: "refresh", label: "Review" } });
     case STAKE_ERR_V5.LiquidityBufferExhausted:

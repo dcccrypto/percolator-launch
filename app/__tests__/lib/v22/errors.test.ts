@@ -9,7 +9,7 @@ import { resolveUserMessage } from "@/lib/limits/user-message";
 import { humanizeError } from "@/lib/errorMessages";
 import { resolveDevnetProgramIds } from "@/lib/program-ids";
 import { V22_ERROR_CODE_MAP, V22_STAKE_ERROR_CODE_MAP } from "@/lib/v22/error-copy";
-import { WRAPPER_ERR_V22, STAKE_ERR_V5 } from "@/lib/v22/wrapper-errors";
+import { WRAPPER_ERR_V22, STAKE_ERR_V5, STAKE_ERR_DEPOSIT_BELOW_MIN_LIQUIDITY } from "@/lib/v22/wrapper-errors";
 
 const ids = resolveDevnetProgramIds();
 const fail = (code: number, programId: string | null = ids.wrapper): Error & { programId: string | null } => {
@@ -53,6 +53,31 @@ describe("every new code has a calm one-line message", () => {
     expect(m.body).not.toMatch(/\n/);
     // The same number from the wrapper keeps its own meaning (33..45 are wrapper codes too).
     expect(resolveUserMessage(fail(code, ids.wrapper), { surface: "stake" }).body).not.toBe(V22_STAKE_ERROR_CODE_MAP[code]);
+  });
+});
+
+describe("stake error 28: first deposit into an empty pool / senior / junior sub-pool", () => {
+  const COPY = "First deposit into this pool must be more than 1,000 units.";
+  it("is code 28 and maps to one calm line", () => {
+    expect(STAKE_ERR_DEPOSIT_BELOW_MIN_LIQUIDITY).toBe(28);
+    expect(V22_STAKE_ERROR_CODE_MAP[28]).toBe(COPY);
+    expect(V22_STAKE_ERROR_CODE_MAP[28]).not.toMatch(JARGON);
+  });
+  it("structured message from the stake program, not the generic fallback", () => {
+    const m = resolveUserMessage(fail(28, ids.stake), { surface: "stake" });
+    expect(m.body).toBe(COPY);
+    expect(m.variant).toBe("info");
+    expect(m.kind).toBe("stake-min-first-deposit");
+    expect(m.title).toBe("Deposit a little more");
+    expect(m.body).not.toMatch(/\n/);
+  });
+  it("humanizeError on a stake-attributed 28 uses the same line; a wrapper 28 does not", () => {
+    expect(humanizeError(raw(28, ids.stake))).toBe(COPY);
+    expect(resolveUserMessage(fail(28, ids.wrapper), { surface: "stake" }).body).not.toBe(COPY);
+  });
+  it("flag off: not attributed", () => {
+    __setDevnetV22ForTest(false);
+    expect(resolveUserMessage(fail(28, ids.stake), { surface: "stake" }).body).not.toBe(COPY);
   });
 });
 

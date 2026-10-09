@@ -48,6 +48,13 @@ export const STAKE_ERR_V5 = {
   InsuranceUnitsMismatch: 45,
 } as const;
 
+/**
+ * Stake error 28 (`DepositBelowMinimumLiquidity`): a first deposit of 1,000 atoms or less into an EMPTY pool, senior tranche or
+ * junior tranche. Since percolator-stake R-1 each sub-pool locks its own 1,000 dead shares, so this is no longer only the pool's
+ * first-ever deposit. Kept apart from {@link STAKE_ERR_V5} (the v5-only 33..=45 block).
+ */
+export const STAKE_ERR_DEPOSIT_BELOW_MIN_LIQUIDITY = 28;
+
 /** Codes the app treats as "the exit/trade can be retried automatically in the same action". */
 export const V22_AUTO_RETRY_CODES: readonly number[] = [WRAPPER_ERR_V22.ExitRequiresLossCurrent];
 /** Codes that mean "re-quote and show the new minimum". */
