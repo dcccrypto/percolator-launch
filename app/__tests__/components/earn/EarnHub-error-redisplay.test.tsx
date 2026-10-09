@@ -23,6 +23,16 @@ import { EarnVaultView } from "@/components/earn/EarnVaultView";
 const STALE = "Failed to refresh on-chain data — showing last known values";
 
 describe("Earn error toast", () => {
+  // #50: on a phone the fixed tab bar (3.5rem + safe area, below md) covered a bottom-4 toast.
+  it("sits above the mobile tab bar below md, and at bottom-4 from md up", () => {
+    S.error = STALE;
+    render(<EarnVaultView />);
+    const cls = screen.getByTestId("earn-error").className.split(/\s+/);
+    expect(cls).toContain("bottom-[calc(3.5rem+1rem+env(safe-area-inset-bottom,0px))]");
+    expect(cls).toContain("md:bottom-4");
+    expect(cls).not.toContain("bottom-4");
+  });
+
   it("shows the same failure again after a good refresh, even though it was dismissed before", () => {
     S.error = STALE;
     const { rerender } = render(<EarnVaultView />);
