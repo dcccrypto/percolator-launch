@@ -436,6 +436,23 @@ describe("v2.2 launch", () => {
       }
     });
 
+    it("wallet without v1 (the 6-tx batch): the vault-create tx carries 74 (7 accounts) then 122 and every batched tx still fits a legacy transaction (<= 1,232 B)", async () => {
+      __setDevnetV22ForTest(true);
+      await launch({ singleTx: false, params: plainParams() });
+      expect(batches).toHaveLength(1);
+      const txs = batches[0]!;
+      expect(txs).toHaveLength(6);
+      const withNaming = txs.filter((t) => t.instructions.some((i) => i.programId.equals(PROGRAM) && i.data[0] === 122));
+      expect(withNaming).toHaveLength(1);
+      const m4a = withNaming[0]!;
+      const order = m4a.instructions.filter((i) => i.programId.equals(PROGRAM)).map((i) => i.data[0]);
+      expect(order.slice(0, 2)).toEqual([IX_TAG.CreateLpVault, 122]);
+      expect(m4a.instructions.find((i) => i.data[0] === IX_TAG.CreateLpVault && i.programId.equals(PROGRAM))!.keys).toHaveLength(7);
+      const sizes = txs.map((t) => t.serialize({ requireAllSignatures: false, verifySignatures: false }).length);
+      for (const n of sizes) expect(n).toBeLessThanOrEqual(1232);
+      if (process.env.V22_SIZE_LOG) appendFileSync(process.env.V22_SIZE_LOG, `batched legacy txs with naming: ${sizes.join(", ")} bytes\n`);
+    });
+
     it("flag OFF: the launch is the v2.1 one: 74 with 6 accounts and no tag 122", async () => {
       __setDevnetV22ForTest(false);
       await launch({ singleTx: true, params: params({ growth: GROWTH }) });
