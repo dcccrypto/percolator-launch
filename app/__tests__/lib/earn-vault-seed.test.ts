@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { Keypair } from "@solana/web3.js";
@@ -11,6 +11,11 @@ import {
   LP_VAULT_BACKING_BUCKET_NOT_EMPTY_CODE,
 } from "@/lib/earn-vault-seed";
 import { parseMarketCreationError } from "@/lib/parseMarketError";
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
+
+// This file pins the v2.1 step list; the v2.2 list (tag 74 with account [6], then 122) is pinned in __tests__/lib/v22/create-lp-vault-and-naming.test.ts.
+beforeEach(() => __setDevnetV22ForTest(false));
+afterEach(() => __setDevnetV22ForTest(null));
 
 const k = () => Keypair.generate().publicKey;
 const args = () => ({
