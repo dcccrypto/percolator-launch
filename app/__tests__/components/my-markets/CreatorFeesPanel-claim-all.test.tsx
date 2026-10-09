@@ -51,6 +51,18 @@ const details = Object.fromEntries(
   h.slabs.map((s, i) => [s, { creator_fee_claimable_atoms: i === 0 ? "283668" : "941717", creator_fee_authority: PAYER.toBase58() }]),
 ) as unknown as Props["details"];
 
+// #69: the Unclaimed Fees total was a bare number.
+describe("unclaimed fees total", () => {
+  it("shows the collateral's symbol after the total", async () => {
+    render(<CreatorFeesPanel markets={markets} details={details} identities={{}} />);
+    // 0.283668 + 0.941717, sim-USDC (resolved from the local known-token table, no RPC)
+    expect(await screen.findByText("USDC")).toBeTruthy();
+    const unit = screen.getByText("USDC");
+    expect(unit.parentElement!.textContent).toMatch(/^1[.,]225385\s*USDC$/); // locale-tolerant
+    expect(unit.getAttribute("title")).toBe("DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC");
+  });
+});
+
 describe("claim all: one lands, one fails", () => {
   it("re-reads after the landed claim, ends with a calm partial line, and gives the button back", async () => {
     const onClaimed = vi.fn();

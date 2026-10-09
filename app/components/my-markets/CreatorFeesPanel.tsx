@@ -24,6 +24,8 @@
  */
 
 import { FC, useMemo } from "react";
+import { PublicKey } from "@solana/web3.js";
+import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import type { CreatedMarket } from "@/hooks/useCreatedMarkets";
 import type { CreatorMarketDetail } from "./types";
 import { unitScaleToDecimals } from "./types";
@@ -84,6 +86,21 @@ export const CreatorFeesPanel: FC<CreatorFeesPanelProps> = ({
   );
 
   const summary = useMemo(() => summarizeCreatorFees(entries), [entries]);
+  // #69: every total gets its unit. The collateral's symbol (sim-USDC resolves locally to "USDC"),
+  // else the shortened mint, as before for a multi-mint list.
+  const totalMints = useMemo(
+    () =>
+      summary.totalsByMint.flatMap((t) => {
+        try {
+          return [new PublicKey(t.collateralMint)];
+        } catch {
+          return []; // not a valid mint: it keeps the shortened-address label
+        }
+      }),
+    [summary],
+  );
+  const mintMeta = useMultiTokenMeta(totalMints);
+  const unitFor = (mint: string) => mintMeta.get(mint)?.symbol ?? `${mint.slice(0, 4)}…`;
   const targets = useMemo(() => claimAllTargets(entries), [entries]);
   const labelFor = (slab: string) =>
     entries.find((e) => e.slab === slab)?.label ?? slab.slice(0, 8);
@@ -137,11 +154,9 @@ export const CreatorFeesPanel: FC<CreatorFeesPanelProps> = ({
                 style={{ fontFamily: "var(--font-mono)" }}
               >
                 {fmt(t.total)}
-                {summary.totalsByMint.length > 1 && (
-                  <span className="ml-1 text-[10px] font-normal text-[var(--text-dim)]">
-                    {t.collateralMint.slice(0, 4)}…
-                  </span>
-                )}
+                <span className="ml-1 text-[10px] font-normal text-[var(--text-dim)]" title={t.collateralMint}>
+                  {unitFor(t.collateralMint)}
+                </span>
               </p>
             ))
           )}
