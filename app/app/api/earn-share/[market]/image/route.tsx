@@ -16,6 +16,7 @@ import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { parseMarketParam } from "@/lib/v22/earn-share-meta";
 import { loadEarnShareChainState } from "@/lib/v22/earn-share-chain";
 import { fetchLogoDataUrl, ownStorageHosts } from "@/lib/v22/earn-share-image";
+import { cachePng, cachedPng, earnShareRateLimit, hasQuery, marketIsKnown, rememberUnknown } from "@/lib/v22/earn-share-guard";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -39,14 +40,27 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ mar
   if (!isDevnetV22Enabled()) return notFound();
   const { market: raw } = await params;
   const market = parseMarketParam(raw);
-  if (!market) return notFound();
+  if (!market || hasQuery(_req)) return notFound(); // a query string is not part of the contract (it would bypass URL-keyed caches)
+  const limited = await earnShareRateLimit(_req, "image", CORS);
+  if (limited) return limited;
+  const key = market.toBase58();
+  const hit = cachedPng(key);
+  const pngHeaders = { "Content-Type": "image/png", "Cache-Control": "public, max-age=3600, s-maxage=3600", "Access-Control-Allow-Origin": "*" };
+  if (hit) return new Response(new Uint8Array(hit), { status: 200, headers: pngHeaders });
+  // The market must be one of ours BEFORE any RPC read, logo fetch or render.
+  const known = await marketIsKnown(key);
+  if (known === "unavailable") return NextResponse.json({ error: "temporarily unavailable" }, { status: 503, headers: { ...CORS, "Cache-Control": "no-store" } });
+  if (known === "unknown") return notFound();
   let state;
   try {
     state = await loadEarnShareChainState(getServerConnection(), new PublicKey(getConfig().programId), market);
   } catch {
     return NextResponse.json({ error: "temporarily unavailable" }, { status: 503, headers: { ...CORS, "Cache-Control": "no-store" } });
   }
-  if (state.kind !== "ok") return notFound();
+  if (state.kind !== "ok") {
+    rememberUnknown(key);
+    return notFound();
+  }
 
   const logo = await fetchLogoDataUrl(await logoUrlOf(market.toBase58()), ownStorageHosts());
   const badge = (size: number) => (
@@ -75,8 +89,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ mar
     ),
     { width: SIZE, height: SIZE },
   );
-  const headers = new Headers(img.headers);
-  headers.set("Cache-Control", "public, max-age=3600, s-maxage=3600");
-  headers.set("Access-Control-Allow-Origin", "*");
-  return new Response(img.body, { status: 200, headers });
+  const png = new Uint8Array(await img.arrayBuffer());
+  cachePng(key, png);
+  return new Response(png, { status: 200, headers: pngHeaders });
 }

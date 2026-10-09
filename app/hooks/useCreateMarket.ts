@@ -100,7 +100,9 @@ import {
   isTxCancelledError,
   presimulateOrThrow,
   confirmSignatureByPolling,
+  SimulationRefusal,
 } from "@/lib/tx";
+import { evidenceFromPlan, isShareNamingFailure, sendWithShareNamingFallback, shareNamingAffordable, withoutShareNaming } from "@/lib/v22/share-naming-fallback";
 import { getConfig, getNetwork } from "@/lib/config";
 import { resolveMarketOracleMode } from "@/lib/resolveMarketOracleMode";
 import { normalizeDexType } from "@/lib/dex-type";
@@ -1243,10 +1245,12 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
     // CreateLpVault(domain 0) + DepositToLpVault into domain 0 AND 1, atomically. Both
     // buckets are still Empty here (M3a no longer touches them), which is exactly what
     // CreateLpVault requires; the deposits then stamp LP_VAULT_BACKING_EXPIRY_SLOT.
+    // v2.2 only: name the share token (tag 122) only when the wallet can hold the 0.03 SOL it needs (flag off: no RPC, no naming).
+    const nameShare = await shareNamingAffordable(connection, walletPk);
     const earnVaultIxs = buildEarnVaultSeedInstructions({
       programId, wallet: walletPk, market: slabPk, registry: lpVaultRegistry, lpMint: lpVaultMint,
       userAta, vaultAta, seedPerDomain: backingSeed, includeCreate: true,
-      collateralMint: params.mint, shareSymbol: params.symbol, // v2.2 only: tag 74's account [6] and tag 122's ticker
+      collateralMint: params.mint, shareSymbol: params.symbol, nameShare, // v2.2 only: tag 74's account [6] and tag 122's ticker
     });
     const createLpMintIx = SystemProgram.createAccount({
       fromPubkey: walletPk, newAccountPubkey: stakeLpMintKp.publicKey,
@@ -1412,14 +1416,17 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
     if (ctx.singleTx) {
       const keeperPk = cosignTx?.signatures.find((s) => s.signature !== null && !s.publicKey.equals(walletPk))?.publicKey ?? null;
       if (cosignTx && !keeperPk) throw new Error("Keeper co-sign returned no keeper signature.");
-      const plan = singleTxInstructionPlan(
+      const buildPlan = () => singleTxInstructionPlan(
         tailDescriptors,
         cosignTx ? cosignTx.instructions : [],
         params.v22?.bond ? { ix: buildLaunchBondIx(programId, slabPk, walletPk, params.v22.bond), wrapper: programId } : undefined,
       );
+      let plan = buildPlan();
+      const singleTxCtx = ctx.singleTx;
+      const runSingle = async () => {
       const latest = await connection.getLatestBlockhash("confirmed");
       setState((s) => ({ ...s, phase: "awaiting-signature", stepLabel: "Approve the launch in your wallet (one transaction)..." }));
-      const single = await attemptSingleTxLaunch(
+      return attemptSingleTxLaunch(
         {
           payer: walletPk,
           slab: slabPk,
@@ -1433,12 +1440,22 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
         },
         liveSingleTxDeps({
           connection,
-          rawSigner: ctx.singleTx.rawSigner,
+          rawSigner: singleTxCtx.rawSigner,
           cosign: { deployer: walletPk.toBase58(), slabAddress: slabPk.toBase58(), initialPriceE6: params.initialPriceE6.toString(), assetIndex: 0, fresh: true },
           slab: slabPk,
           wrapperProgramId: programId,
         }),
       );
+      };
+      let single = await runSingle();
+      // v2.2: naming the share token must never stop a launch. If the simulation refused it at tag 122 (Metaplex, or the 0.03 SOL hold),
+      // leave 122 out and run the SAME launch once more; the share can be named later (generic form, or by the creator).
+      if (nameShare && single.status === "refused" && single.stage === "simulate" && isShareNamingFailure(evidenceFromPlan(single.reason, single.logs, plan.instructions), programId)) {
+        console.warn(`[useCreateMarket] share naming (tag 122) refused in simulation; retrying the launch without it: ${single.reason}`);
+        m4aDescriptor.instructions = withoutShareNaming(m4aDescriptor.instructions, programId);
+        plan = buildPlan();
+        single = await runSingle();
+      }
       if (single.status === "landed") {
         const slab = slabPk.toBase58();
         if (keeperRequestBase) saveProofTx(slab, single.signature);
@@ -3919,9 +3936,12 @@ export function useCreateMarket() {
           if (vaultNeedsSeed) {
             const seedUserAta = await getAssociatedTokenAddress(params.mint, wallet.publicKey);
             const seedVaultAta = await getAssociatedTokenAddress(params.mint, vaultPda, true);
-            const earnVaultIxs = buildEarnVaultSeedInstructions({
+            // v2.2 only (flag off: false, no RPC): name the share token only if the wallet can hold the 0.03 SOL it needs.
+            const seedWallet = wallet.publicKey;
+            const nameShareSeq = await shareNamingAffordable(connection, seedWallet);
+            const buildSeed = (nameShare: boolean) => buildEarnVaultSeedInstructions({
               programId,
-              wallet: wallet.publicKey,
+              wallet: seedWallet,
               market: slabPk,
               registry: lpVaultRegistry,
               lpMint: lpVaultMint,
@@ -3931,16 +3951,26 @@ export function useCreateMarket() {
               includeCreate: !existingRegistry,
               collateralMint: params.mint, // v2.2 only: tag 74's account [6]
               shareSymbol: params.symbol, // v2.2 only: tag 122's ticker
+              nameShare,
+            });
+            const sendSeed = (nameShare: boolean) => sendTx({
+              simulateBeforeSign: true,
+              connection,
+              wallet,
+              abortSignal,
+              instructions: buildSeed(nameShare),
+              computeUnits: EARN_VAULT_SEED_COMPUTE_UNITS,
             });
             try {
-              const sigLpVault = await sendTx({
-                simulateBeforeSign: true,
-                connection,
-                wallet,
-                abortSignal,
-                instructions: earnVaultIxs,
-                computeUnits: EARN_VAULT_SEED_COMPUTE_UNITS,
-              });
+              // v2.2: a refusal at tag 122 (Metaplex down or changed, the 0.03 SOL hold) must not wedge a half-launched market: simulate-first
+              // means nothing was signed, so the same seed is sent without the naming (it can be named later).
+              const { signature: sigLpVault } = await sendWithShareNamingFallback(
+                sendSeed,
+                nameShareSeq,
+                programId,
+                (e) => (e instanceof SimulationRefusal ? { failingProgram: e.failingInstructionProgram, failingTag: e.failingInstructionTag, logs: e.logs } : null),
+                (e) => console.warn(`[useCreateMarket] share naming (tag 122) refused in simulation; retrying the Earn seed without it: ${e instanceof Error ? e.message : String(e)}`),
+              );
               setState((s) => ({ ...s, txSigs: [...s.txSigs, sigLpVault] }));
             } catch (earnErr) {
               // Old-flow market (MAX-1 buckets present): CreateLpVault can NEVER succeed.

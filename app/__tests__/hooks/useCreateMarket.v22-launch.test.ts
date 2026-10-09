@@ -205,7 +205,7 @@ function freshState(): CreateMarketState {
   return { batchFallbackReason: null, step: 0, stepLabel: "", txSigs: [], slabAddress: null, error: null, loading: false, devnetMint: null, insuranceMintFailed: false, backingSeedFailed: false, keeperDelegated: false, keeperMessage: null, keeperRegistering: false, priceFeedRequired: false, phase: "idle", landingIndex: 0, landingTotal: 0 };
 }
 
-async function launch(o: { singleTx: boolean; params?: CreateMarketParams; deps?: Partial<SingleTxLaunchDeps> }) {
+async function launch(o: { singleTx: boolean; params?: CreateMarketParams; deps?: Partial<SingleTxLaunchDeps>; balance?: number }) {
   generated = 0;
   const slabKp = Keypair.fromSeed(seed(77));
   S.depsFactory = (a) => deps(a.cosign, o.deps ?? {});
@@ -214,7 +214,7 @@ async function launch(o: { singleTx: boolean; params?: CreateMarketParams; deps?
       rpcEndpoint: "http://127.0.0.1:1",
       getAccountInfo: vi.fn(async () => null),
       getMinimumBalanceForRentExemption: vi.fn(async (n: number) => 1_000_000 + n),
-      getBalance: vi.fn(async () => 50_000_000_000),
+      getBalance: vi.fn(async () => o.balance ?? 50_000_000_000),
       getLatestBlockhash: vi.fn(async () => ({ blockhash: "GHtXQBpHnMXhoLGsryeDY7i6bGqTC2LGqS11Kf3rKmFS", lastValidBlockHeight: 1_000 })),
     } as unknown as import("@solana/web3.js").Connection,
     wallet: { publicKey: WALLET.publicKey, signTransaction: async (tx: Transaction) => tx, signAllTransactions: async (txs: Transaction[]) => txs },
@@ -451,6 +451,78 @@ describe("v2.2 launch", () => {
       const sizes = txs.map((t) => t.serialize({ requireAllSignatures: false, verifySignatures: false }).length);
       for (const n of sizes) expect(n).toBeLessThanOrEqual(1232);
       if (process.env.V22_SIZE_LOG) appendFileSync(process.env.V22_SIZE_LOG, `batched legacy txs with naming: ${sizes.join(", ")} bytes\n`);
+    });
+
+    describe("F4: naming never stops a launch", () => {
+      const idxOfTag = (wire: Uint8Array, tag: number) => {
+        const d = decodeV1Message(splitV1Wire(wire).message);
+        return d.instructions.findIndex((ix) => d.accountKeys[ix.programIdIndex]!.equals(PROGRAM) && ix.data[0] === tag);
+      };
+      const failAt = (tag: number) => {
+        let first = true;
+        const calls: number[] = [];
+        return {
+          calls,
+          simulate: async (wire: Uint8Array) => {
+            simulated.push(wire);
+            calls.push(idxOfTag(wire, 122));
+            if (first) {
+              first = false;
+              return { err: { InstructionError: [idxOfTag(wire, tag), { Custom: 1 }] }, logs: ["Program log: boom"], unitsConsumed: 1, loadedAccountsDataSize: 1 };
+            }
+            return { err: null, logs: [], unitsConsumed: 477_473, loadedAccountsDataSize: 2_770_000 };
+          },
+        };
+      };
+      it("a simulation refusal AT tag 122: the same launch is re-run once without 122 and lands (one transaction, no batch)", async () => {
+        __setDevnetV22ForTest(true);
+        const f = failAt(122);
+        const { outcome } = await launch({ singleTx: true, params: plainParams(), deps: { simulate: f.simulate } });
+        expect(outcome).toEqual({ status: "success" });
+        expect(f.calls[0]).toBeGreaterThan(0); // the first attempt carried 122
+        expect(f.calls[1]).toBe(-1); // the retry did not
+        expect(sent).toHaveLength(1);
+        const d = decodeV1Message(splitV1Wire(sent[0]!).message);
+        expect(findIx(d, PROGRAM, 122)).toHaveLength(0);
+        expect(keysOf(d, findIx(d, PROGRAM, IX_TAG.CreateLpVault)[0]!)).toHaveLength(7); // 74 keeps its collateral mint
+        expect(launchBundleViolations(neutralFromV1(d), ctxOf())).toEqual([]);
+        expect(S.signAllCompat).not.toHaveBeenCalled();
+      });
+      it("bond launch too: retried without 122, still ONE transaction", async () => {
+        __setDevnetV22ForTest(true);
+        const f = failAt(122);
+        const { outcome } = await launch({ singleTx: true, params: bondParams(), deps: { simulate: f.simulate } });
+        expect(outcome).toEqual({ status: "success" });
+        const d = decodeV1Message(splitV1Wire(sent[0]!).message);
+        expect(findIx(d, PROGRAM, 122)).toHaveLength(0);
+        expect(findIx(d, PROGRAM, IX_TAG_V22.InitBondTranche)).toHaveLength(1);
+      });
+      it("NEGATIVE CONTROL: a refusal at another instruction (the vault create, tag 74) is NOT retried without 122", async () => {
+        __setDevnetV22ForTest(true);
+        const f = failAt(IX_TAG.CreateLpVault);
+        const { outcome } = await launch({ singleTx: true, params: bondParams(), deps: { simulate: f.simulate } });
+        expect(outcome).toEqual({ status: "aborted" });
+        expect(f.calls).toHaveLength(1);
+        expect(sent).toHaveLength(0);
+      });
+      it("balance preflight: a wallet that cannot hold the 0.03 SOL launches WITHOUT 122 (74 still has 7 accounts); at the threshold it is named", async () => {
+        __setDevnetV22ForTest(true);
+        await launch({ singleTx: true, params: plainParams(), balance: 34_999_999 });
+        let d = decodeV1Message(splitV1Wire(sent[0]!).message);
+        expect(findIx(d, PROGRAM, 122)).toHaveLength(0);
+        expect(keysOf(d, findIx(d, PROGRAM, IX_TAG.CreateLpVault)[0]!)).toHaveLength(7);
+        expect(launchBundleViolations(neutralFromV1(d), ctxOf())).toEqual([]);
+        sent = []; generated = 0; resetCosignV1RateLimits();
+        await launch({ singleTx: true, params: plainParams(), balance: 35_000_000 });
+        d = decodeV1Message(splitV1Wire(sent[0]!).message);
+        expect(findIx(d, PROGRAM, 122)).toHaveLength(1);
+      });
+      it("flag OFF: no 122, whatever the balance preflight would say", async () => {
+        __setDevnetV22ForTest(false);
+        await launch({ singleTx: true, params: params({ growth: GROWTH }) });
+        const d = decodeV1Message(splitV1Wire(sent[0]!).message);
+        expect(findIx(d, PROGRAM, 122)).toHaveLength(0);
+      });
     });
 
     it("flag OFF: the launch is the v2.1 one: 74 with 6 accounts and no tag 122", async () => {

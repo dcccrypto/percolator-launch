@@ -9,7 +9,7 @@ the v2.2 programs, together with `NEXT_PUBLIC_DEVNET_V21=1`.
 `@percolatorct/sdk` 9.0.0-candidate is not published. The app pins the candidate the way the v2.1 stack did (verbatim local
 ports + one adapter), see `app/lib/v22/sdk/index.ts`:
 
-- percolator-sdk draft PR #406, branch `feat/v22-sdk`, commit `d98488b`, against the re-cut release candidate (wrapper
+- percolator-sdk draft PR #406, branch `feat/v22-sdk`, commit `9f828ba` (vendored files as of `d98488b`), against the re-cut release candidate (wrapper
   `release/v22-wrapper-rem` c6ee0b6e, engine bfa3d037; layout JSON and per-tag CU in
   `~/percolator-ops/artifacts/v22-combination-2026-10-08/`). Files unchanged since an earlier pin keep that commit in their header (records/*, v22-math/stake, v22,
   slab, v22-band/lot, discovery).
@@ -52,3 +52,8 @@ Discovery: `lib/v22/sdk/discovery.ts` (verbatim port) behind `lib/v22/discovery.
 - **`GET /api/earn-share/[market]` and `/image`** (`lib/v22/earn-share-*.ts`): chain state only, canonical key + wrapper-owned registry or 404, v2.2 only; the logo is fetched through an allowlist and re-encoded.
 - **Share counts use the share mint's own decimals** (`DepositWithdrawPanel` `lpDecimals`); the #3276 wallet note is gated on the chain (`lpShareWalletNoteV22`, `hooks/useLpShareToken.ts`).
 - **Leg cap**: `planLegGroups` never puts more than 4 trade legs in one transaction (`lib/trade-leg-groups.ts`). The app builds multi-leg orders as single-leg TradeCpi instructions on asset 0 (it never emits BatchTradeCpi, tag 67).
+
+## Reading a flag-on suite (by-name delta)
+`NEXT_PUBLIC_DEVNET_V22=1 npx vitest run` is not a usable signal on its own: ~300 v2.1-fixture tests fail by design. Use the delta:
+`cd app && node scripts/flag-on-delta.mjs <base-worktree>/app` runs the suite with the flag on in both checkouts (`vitest --reporter=json`) and lists only the tests that fail here and not in the base (exit 1 if any). Choose the base that isolates your change (a worktree of the previous head, or the playground-merge-only commit). `--json-base` / `--json-head` reuse saved reports.
+Flag off, the whole suite is the gate (it must match playground by name).

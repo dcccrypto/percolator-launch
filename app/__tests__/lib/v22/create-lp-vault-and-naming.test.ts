@@ -7,8 +7,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
 import { ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { ACCOUNTS_CREATE_LP_VAULT, IX_TAG, deriveInsuranceLpMint, deriveLpVaultRegistry } from "@percolatorct/sdk";
+import { ACCOUNTS_CREATE_LP_VAULT_V22 } from "@/lib/v22/sdk";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
-import { createLpVaultKeys } from "@/lib/v22/create-lp-vault";
+import { ACCOUNTS_CREATE_LP_VAULT_V21, createLpVaultKeys } from "@/lib/v22/create-lp-vault";
 import { isShareNamingEnabled, shareTickerFor } from "@/lib/v22/share-naming";
 import { METAPLEX_TOKEN_METADATA_PROGRAM_ID_V22, deriveLpShareMetaPayerPdaV22, deriveLpShareMetadataPdaV22 } from "@/lib/v22/sdk";
 import { buildEarnVaultSeedInstructions } from "@/lib/earn-vault-seed";
@@ -170,5 +171,19 @@ describe("CostEstimate", () => {
     const noName = computeCreateMarketSolCost({ p3: true });
     expect("shareNamingSol" in noName).toBe(false);
     expect(on.totalSolCost - noName.totalSolCost).toBeCloseTo(0.0151156, 7);
+  });
+});
+
+describe("F5: the flag-off tag 74 list does not depend on the installed SDK", () => {
+  it("the local v2.1 spec is six entries and is the first six of the v2.2 spec, and of the installed SDK's list in either shape (6 in 8.0.0, 7 in 9.0.0)", () => {
+    expect(ACCOUNTS_CREATE_LP_VAULT_V21).toHaveLength(6);
+    expect(ACCOUNTS_CREATE_LP_VAULT_V21).toEqual(ACCOUNTS_CREATE_LP_VAULT_V22.slice(0, 6));
+    expect(ACCOUNTS_CREATE_LP_VAULT.slice(0, 6)).toEqual(ACCOUNTS_CREATE_LP_VAULT_V21);
+    expect([6, 7]).toContain(ACCOUNTS_CREATE_LP_VAULT.length);
+  });
+  it("flag off builds six accounts whatever the SDK list's length", () => {
+    __setDevnetV22ForTest(false);
+    const a = { admin: k(), market: k(), registry: k(), lpMint: k() };
+    expect(createLpVaultKeys(a).map((m) => [m.isSigner, m.isWritable])).toEqual(ACCOUNTS_CREATE_LP_VAULT_V21.map((x) => [x.signer, x.writable]));
   });
 });

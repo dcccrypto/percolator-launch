@@ -628,7 +628,7 @@ describe("useInsuranceLP", () => {
       const { result } = renderHook(() => useInsuranceLP());
       await waitFor(() => expect(result.current.state.mintExists).toBe(false));
       await act(async () => { await result.current.createMint(); });
-      expect(vi.mocked(buildAccountMetas).mock.calls.at(-1)![0]).toHaveLength(0); // the mocked 6-account spec ([]) is what the old code passed
+      expect(vi.mocked(buildAccountMetas).mock.calls.at(-1)![0]).toHaveLength(6); // the app\'s own six-entry v2.1 spec, independent of the SDK
     });
   });
 

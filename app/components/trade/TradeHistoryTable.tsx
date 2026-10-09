@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { formatLotQ, tokenUsdOfLotUsd } from "@/lib/v22/lot";
 import { useTradeHistory } from "@/hooks/useTradeHistory";
 import { formatStatValue, formatUsdFromNumber } from "@/lib/format";
@@ -107,7 +108,8 @@ export function TradeHistoryTable({
 
   const [, setLotTick] = useState(0);
   useEffect(() => {
-    if (!marketsFetchAttempted) loadMarketLots().then(() => setLotTick((t) => t + 1));
+    // v2.2 only: the lot exponents are the only thing this request is for. Flag off: no request at all (v2.1 behaviour).
+    if (isDevnetV22Enabled() && !marketsFetchAttempted) loadMarketLots().then(() => setLotTick((t) => t + 1));
   }, []);
 
   if (!wallet) return null;

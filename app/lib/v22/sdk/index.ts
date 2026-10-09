@@ -1,7 +1,7 @@
 /**
  * THE v2.2 adapter: the only module the app imports Devnet-v2.2 client ABI from.
  *
- * Pin: percolator-sdk draft PR #406 (branch `feat/v22-sdk`) @ d98488b (`@percolatorct/sdk` 9.0.0-candidate, NOT published), against the re-cut release candidate
+ * Pin: percolator-sdk draft PR #406 (branch `feat/v22-sdk`) @ 9f828ba (`@percolatorct/sdk` 9.0.0-candidate, NOT published; the vendored files are unchanged since d98488b, 9f828ba only adds `ACCOUNTS_CREATE_LP_VAULT_V21`, a changelog entry and tests), against the re-cut release candidate
  * (wrapper `release/v22-wrapper-rem` c6ee0b6e, engine bfa3d037). The files next to this one are verbatim local ports of that commit (layout.ts, v22-wire.ts,
  * v22-state.ts, v22-math.ts, v22-stake.ts, v22.ts, slab.ts, v22-lp-share.ts, v22-lp-share-ix.ts, v22-fill-events.ts and the v22 error rows; records/* keep the
  * header of the commit they last changed in: unchanged since ecb6215), with only the imports retargeted at the installed `@percolatorct/sdk` 8.0.0 and the v2.1

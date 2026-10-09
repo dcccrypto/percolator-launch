@@ -9,9 +9,22 @@
  * useInsuranceLP) cannot drift.
  */
 import type { AccountMeta, PublicKey } from "@solana/web3.js";
-import { ACCOUNTS_CREATE_LP_VAULT, WELL_KNOWN, buildAccountMetas } from "@percolatorct/sdk";
+import { WELL_KNOWN, buildAccountMetas } from "@percolatorct/sdk";
 import { isDevnetV22Enabled } from "./flag";
 import { ACCOUNTS_CREATE_LP_VAULT_V22 } from "./sdk";
+
+/**
+ * Tag 74 on the DEPLOYED v2.1 wrapper: six accounts. Kept here, not read from the SDK: `ACCOUNTS_CREATE_LP_VAULT` is the six-entry list in SDK 8.0.0
+ * but the seven-entry v2.2 list in SDK 9.0.0, so the v2.1 path must not depend on which SDK is installed.
+ */
+export const ACCOUNTS_CREATE_LP_VAULT_V21: readonly { name: string; signer: boolean; writable: boolean }[] = [
+  { name: "admin", signer: true, writable: true },
+  { name: "market", signer: false, writable: true },
+  { name: "registry", signer: false, writable: true },
+  { name: "lpMint", signer: false, writable: true },
+  { name: "systemProgram", signer: false, writable: false },
+  { name: "tokenProgram", signer: false, writable: false },
+] as const;
 
 export interface CreateLpVaultKeysArgs {
   /** marketauth (signer). */
@@ -29,7 +42,7 @@ export function createLpVaultKeys(a: CreateLpVaultKeysArgs): AccountMeta[] {
     admin: a.admin, market: a.market, registry: a.registry, lpMint: a.lpMint,
     systemProgram: WELL_KNOWN.systemProgram, tokenProgram: WELL_KNOWN.tokenProgram,
   };
-  if (!isDevnetV22Enabled()) return buildAccountMetas(ACCOUNTS_CREATE_LP_VAULT, six);
+  if (!isDevnetV22Enabled()) return buildAccountMetas(ACCOUNTS_CREATE_LP_VAULT_V21, six);
   if (!a.collateralMint) throw new Error("CreateLpVault on v2.2 needs the market's collateral mint as account [6] (the six-account form is refused on chain)");
   return buildAccountMetas(ACCOUNTS_CREATE_LP_VAULT_V22, { ...six, collateralMint: a.collateralMint });
 }

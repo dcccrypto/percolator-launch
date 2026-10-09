@@ -71,10 +71,12 @@ export function shareIdentityFromChain(
   const { name, symbol } = record;
   if (name.length === 0 || name.length > NAME_MAX || symbol.length === 0 || symbol.length > SYMBOL_MAX) return fallback;
   if (!printable(name) || !printable(symbol)) return fallback;
-  if (symbol === LP_SHARE_GENERIC_SYMBOL_V22) return { name, symbol, ticker: "" };
+  // Exact equality with what the program writes for this market, for BOTH forms: anything else is not its record.
+  if (symbol === LP_SHARE_GENERIC_SYMBOL_V22) return name === generic.name ? { name, symbol, ticker: "" } : fallback;
   const m = /^pe([A-Z0-9]{1,8})$/.exec(symbol);
-  if (!m || !name.startsWith("Percolator Earn ")) return fallback;
-  return { name, symbol, ticker: m[1] };
+  if (!m) return fallback;
+  const want = lpShareIdentityV22(market, m[1], uriBase);
+  return name === want.name && symbol === want.symbol ? { name, symbol, ticker: m[1] } : fallback;
 }
 
 /** The JSON body of `GET /api/earn-share/<market>` (spec in the wrapper's docs): from chain state only. */

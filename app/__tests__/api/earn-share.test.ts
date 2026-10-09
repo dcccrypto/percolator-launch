@@ -3,7 +3,7 @@
  * GET /api/earn-share/<market> (+ /image): the metadata the Earn share token's Metaplex `uri` points at (percolator-prog docs/v22-lp-share-mint.md;
  * security review R10). Built from chain state only; the path parameter is validated; v2.2 only.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { NextRequest } from "next/server";
 import { writeFileSync } from "node:fs";
@@ -11,14 +11,34 @@ import { deriveInsuranceLpMint, deriveLpVaultRegistry } from "@percolatorct/sdk"
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { METAPLEX_TOKEN_METADATA_PROGRAM_ID_V22, deriveLpShareMetadataPdaV22, lpShareIdentityV22 } from "@/lib/v22/sdk";
 import { __clearEarnShareCacheForTest } from "@/lib/v22/earn-share-chain";
+import { __clearEarnShareGuardForTest } from "@/lib/v22/earn-share-guard";
 
 const h = vi.hoisted(() => ({
   getMultiple: vi.fn(),
   logoUrl: null as string | null,
+  /** the markets table: "known" row, "none" (PGRST116), or a read failure */
+  db: "known" as "known" | "none" | "down",
+  dbCalls: 0,
+  allowed: true,
+}));
+vi.mock("@/lib/upstash-rate-limit", () => ({
+  createUpstashRateLimiter: () => ({ check: async () => ({ allowed: h.allowed, remaining: 1, retryAfterSecs: 7 }) }),
 }));
 vi.mock("@/lib/server-rpc", () => ({ getServerConnection: () => ({ getMultipleAccountsInfo: h.getMultiple }) }));
 vi.mock("@/lib/supabase", () => ({
-  getServiceClient: () => ({ from: () => ({ select: () => ({ eq: () => ({ single: async () => ({ data: { logo_url: h.logoUrl }, error: null }) }) }) }) }),
+  getServiceClient: () => ({
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          single: async () => {
+            h.dbCalls++;
+            if (h.db === "down") throw new Error("db down");
+            return h.db === "none" ? { data: null, error: { code: "PGRST116" } } : { data: { logo_url: h.logoUrl, slab_address: "x" }, error: null };
+          },
+        }),
+      }),
+    }),
+  }),
 }));
 
 import { GET, OPTIONS } from "@/app/api/earn-share/[market]/route";
@@ -42,11 +62,22 @@ const call = (raw: string) => GET(new NextRequest(`http://localhost/api/earn-sha
 const callImage = (raw: string) => GET_IMAGE(new NextRequest("http://localhost/x"), { params: Promise.resolve({ market: raw }) });
 const chain = (reg: ReturnType<typeof acct> | null, rec: ReturnType<typeof acct> | null) => h.getMultiple.mockResolvedValue([reg, rec]);
 
+// The renderer loads its wasm through the global fetch on first use: warm it before any test stubs fetch.
+beforeAll(async () => {
+  __setDevnetV22ForTest(true);
+  chain(acct(PROGRAM), null);
+  await callImage(Keypair.generate().publicKey.toBase58());
+}, 60_000);
+
 beforeEach(() => {
   __setDevnetV22ForTest(true);
   __clearEarnShareCacheForTest();
+  __clearEarnShareGuardForTest();
   h.getMultiple.mockReset();
   h.logoUrl = null;
+  h.db = "known";
+  h.dbCalls = 0;
+  h.allowed = true;
 });
 afterEach(() => __setDevnetV22ForTest(null));
 
@@ -162,6 +193,19 @@ describe("the JSON", () => {
         __clearEarnShareCacheForTest();
       }
     });
+    it("F2: right framing but not THIS market's name (other market fragment, other ticker, arbitrary generic-symbol name) is not served", async () => {
+      const other = Keypair.generate().publicKey.toBase58();
+      for (const [n, sy] of [
+        [`Percolator Earn ABC ${other.slice(0, 6)}`, "peABC"], // another market's fragment
+        [`Percolator Earn XYZ ${M.slice(0, 6)}`, "peABC"], // another ticker
+        ["Percolator Earn Share evil.io/x", "pEARN"], // generic symbol, arbitrary printable name
+        [`Percolator Earn Share ${other.slice(0, 8)}`, "pEARN"],
+      ] as const) {
+        evil(record(registry, mint, n, sy));
+        expect(await (await call(M)).json(), `${n}/${sy}`).toMatchObject(generic);
+        __clearEarnShareCacheForTest();
+      }
+    });
     it("the response is the same shape whatever the record says (no field is passed through)", async () => {
       evil(record(registry, mint, "Percolator Earn ABC 4vJ9JU", "peABC"));
       const j = await (await call(M)).json();
@@ -189,6 +233,79 @@ describe("the JSON", () => {
   });
 });
 
+describe("F1: cost guards (nothing reaches the chain for a market that is not ours)", () => {
+  it("an unknown market makes ZERO RPC calls (JSON and image), and is remembered: a repeat does not even query the table", async () => {
+    h.db = "none";
+    chain(acct(PROGRAM), null);
+    for (const fn of [call, callImage]) {
+      const r = await fn(M);
+      expect(r.status).toBe(404);
+    }
+    expect(h.getMultiple).not.toHaveBeenCalled();
+    const before = h.dbCalls;
+    expect((await call(M)).status).toBe(404);
+    expect((await callImage(M)).status).toBe(404);
+    expect(h.dbCalls).toBe(before);
+  });
+  it("many distinct random keys: zero RPC calls", async () => {
+    h.db = "none";
+    chain(acct(PROGRAM), null);
+    for (let i = 0; i < 25; i++) expect((await call(Keypair.generate().publicKey.toBase58())).status).toBe(404);
+    expect(h.getMultiple).not.toHaveBeenCalled();
+  });
+  it("a market that is in the table but has no vault on chain is remembered after one RPC read", async () => {
+    chain(null, null);
+    expect((await call(M)).status).toBe(404);
+    expect((await call(M)).status).toBe(404);
+    expect(h.getMultiple).toHaveBeenCalledTimes(1);
+  });
+  it("the table cannot be read: 503 and NO RPC read (never falls through)", async () => {
+    h.db = "down";
+    chain(acct(PROGRAM), null);
+    expect((await call(M)).status).toBe(503);
+    expect((await callImage(M)).status).toBe(503);
+    expect(h.getMultiple).not.toHaveBeenCalled();
+  });
+  it("any query string is refused before anything else (it would bypass URL-keyed caches): 404, no table read, no RPC", async () => {
+    chain(acct(PROGRAM), null);
+    for (const fn of [
+      () => GET(new NextRequest(`http://localhost/api/earn-share/${M}?x=1`), { params: Promise.resolve({ market: M }) }),
+      () => GET_IMAGE(new NextRequest(`http://localhost/api/earn-share/${M}/image?x=2`), { params: Promise.resolve({ market: M }) }),
+    ]) expect((await fn()).status).toBe(404);
+    expect(h.getMultiple).not.toHaveBeenCalled();
+    expect(h.dbCalls).toBe(0);
+  });
+  it("over the limiter's bucket: 429 with Retry-After, before any table read or RPC", async () => {
+    h.allowed = false;
+    chain(acct(PROGRAM), null);
+    for (const fn of [call, callImage]) {
+      const r = await fn(M);
+      expect(r.status).toBe(429);
+      expect(r.headers.get("retry-after")).toBe("7");
+    }
+    expect(h.dbCalls).toBe(0);
+    expect(h.getMultiple).not.toHaveBeenCalled();
+  });
+  it("repeated image requests render ONCE: one table read, one RPC read, one logo fetch, identical bytes", async () => {
+    chain(acct(PROGRAM), null);
+    const PNG16 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR4nGM4oaFBEmIY1TCqYfhqAAB8MxgQ+Pjr0gAAAABJRU5ErkJggg==", "base64");
+    const f = vi.fn(async () => new Response(new Uint8Array(PNG16), { status: 200 }));
+    vi.stubGlobal("fetch", f);
+    h.logoUrl = "https://assets.coingecko.com/x.png";
+    const bodies: Buffer[] = [];
+    for (let i = 0; i < 4; i++) {
+      const r = await callImage(M);
+      expect(r.status).toBe(200);
+      bodies.push(Buffer.from(await r.arrayBuffer()));
+    }
+    vi.unstubAllGlobals();
+    expect(f).toHaveBeenCalledTimes(1);
+    expect(h.getMultiple).toHaveBeenCalledTimes(1);
+    expect(h.dbCalls).toBe(2); // known-market check + logo url, once
+    for (const b of bodies.slice(1)) expect(b.equals(bodies[0]!)).toBe(true);
+  }, 60_000);
+});
+
 describe("the image", () => {
   const isPng = (b: Uint8Array) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
   const dims = (b: Buffer) => ({ w: b.readUInt32BE(16), h: b.readUInt32BE(20) });
@@ -207,7 +324,8 @@ describe("the image", () => {
   }, 30_000);
   describe("with a creator-supplied logo (re-encoded here, never redirected to)", () => {
     const PNG16 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR4nGM4oaFBEmIY1TCqYfhqAAB8MxgQ+Pjr0gAAAABJRU5ErkJggg==", "base64");
-    const render = async () => Buffer.from(await (await callImage(M)).arrayBuffer());
+    // the rendered PNG is cached per market (F1): every step here starts from an empty cache
+    const render = async () => { __clearEarnShareGuardForTest(); return Buffer.from(await (await callImage(M)).arrayBuffer()); };
     afterEach(() => vi.unstubAllGlobals());
     it("an allowlisted logo is fetched with redirects refused and drawn into the same 512 x 512 PNG; a disallowed host is never contacted", async () => {
       chain(acct(PROGRAM), null);

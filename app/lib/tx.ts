@@ -129,6 +129,9 @@ export class SimulationRefusal extends Error {
   readonly instructionIndex: number | null;
   /** Program id of the failing instruction (from the list, else the "Program X failed" log). */
   readonly programId: string | null;
+  /** Program and first data byte of the failing TOP-LEVEL instruction (not the innermost callee), when it is in the simulated list. */
+  readonly failingInstructionProgram: string | null;
+  readonly failingInstructionTag: number | null;
   constructor(err: unknown, logs: readonly string[] = [], instructions: readonly TransactionInstruction[] = []) {
     const failing = logs.filter((l) => l.includes("Error") || l.includes("failed") || l.includes("Program log:")).slice(-3).join("\n");
     super(`Transaction simulation failed: ${JSON.stringify(err)}` + (failing ? `\n${failing}` : ""));
@@ -154,6 +157,9 @@ export class SimulationRefusal extends Error {
     }
     if (!pid && index !== null && instructions[index]) pid = instructions[index].programId.toBase58();
     this.programId = pid;
+    const top = index !== null ? instructions[index] : undefined;
+    this.failingInstructionProgram = top ? top.programId.toBase58() : null;
+    this.failingInstructionTag = top ? top.data[0] ?? null : null;
   }
 }
 

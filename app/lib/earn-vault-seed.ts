@@ -91,6 +91,8 @@ export interface EarnVaultSeedArgs {
    * Tag 122 follows tag 74 in the same transaction, signed by marketauth (`wallet`), before any marketauth handoff. Flag off: ignored.
    */
   shareSymbol?: string | null;
+  /** `false` leaves tag 122 out (balance preflight failed, or the retry after a naming failure). Default: named whenever naming is enabled. */
+  nameShare?: boolean;
 }
 
 /** Ordered instructions; never contains a direct TopUpBackingBucket. */
@@ -114,7 +116,7 @@ export function buildEarnVaultSeedInstructions(a: EarnVaultSeedArgs): Transactio
     );
     // v2.2: name the share token right after the vault exists (registry + mint are initialised), while `wallet` is still marketauth.
     // The wallet pays the record (it must hold 0.03 SOL for the instruction; ~0.0151 SOL is the net cost) and signs as marketauth.
-    if (isShareNamingEnabled()) {
+    if (isShareNamingEnabled() && a.nameShare !== false) {
       ixs.push(
         buildInitLpShareMetadataIxV22({
           programId: a.programId, market: a.market, payer: a.wallet, ticker: shareTickerFor(a.shareSymbol), marketauth: a.wallet,
