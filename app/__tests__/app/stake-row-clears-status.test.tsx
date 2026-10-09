@@ -1,13 +1,10 @@
 /**
- * #38: each stake pool row was a role="button" div with the market's symbol link inside it. A
- * link inside role="button" is hidden from screen readers (its children are presentational), and
- * the row's Enter handler called preventDefault on the link's keydown, so Enter on the symbol
- * selected the pool instead of opening the chart. The figures are now one real button and the
- * link sits beside it.
+ * #63: a pool-row click now keeps the widget's tab, so the last result line (a withdrawal on pool A)
+ * must not stay up under pool B. Amounts already reset on a pool/tab change; the result lines do too.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
+import { ACCOUNT_SIZE, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 
 const STAKE_PROGRAM = new PublicKey("Stake11111111111111111111111111111111111111");
 const WALLET = new PublicKey("9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin");
@@ -24,9 +21,12 @@ const LP_ATA = new PublicKey("SysvarRecentB1ockHashes11111111111111111111");
 
 const h = vi.hoisted(() => ({
   connected: true,
+  /** The connected wallet when set; WALLET otherwise. */
+  wallet: null as unknown as PublicKey | null,
   getAccountInfo: vi.fn(),
   fetch: vi.fn(),
   conn: null as unknown as { connection: Record<string, unknown> },
+  withdraw: vi.fn(async () => "withdrawSig11111"),
 }));
 h.conn = {
   connection: {
@@ -37,13 +37,13 @@ h.conn = {
 };
 
 vi.mock("@/hooks/useWalletCompat", () => ({
-  useWalletCompat: () => ({ connected: h.connected, publicKey: h.connected ? WALLET : null }),
+  useWalletCompat: () => ({ connected: h.connected, publicKey: h.connected ? (h.wallet ?? WALLET) : null }),
   // Stable object: the page's effects depend on `connection` identity, as with the real hook.
   useConnectionCompat: () => h.conn,
 }));
 vi.mock("@percolatorct/sdk", async (orig) => ({
   ...(await orig<typeof import("@percolatorct/sdk")>()),
-  deriveStakePool: (slab: PublicKey) => [slab.equals(SLAB_OK) ? POOL_PDA_OK : POOL_PDA_BAD, 255],
+  deriveStakePool: () => [POOL_PDA_OK, 255],
   deriveDepositPda: () => [PublicKey.default, 255],
 }));
 vi.mock("@solana/spl-token", async (orig) => ({
@@ -59,7 +59,7 @@ vi.mock("@solana/spl-token", async (orig) => ({
 }));
 vi.mock("@/lib/config", () => ({ getConfig: () => ({ vaultProgramId: STAKE_PROGRAM.toBase58() }) }));
 vi.mock("@/hooks/useStakeDepositByPool", () => ({ useStakeDepositByPool: () => ({ deposit: vi.fn(), loading: false, error: null }) }));
-vi.mock("@/hooks/useStakeWithdrawByPool", () => ({ useStakeWithdrawByPool: () => ({ withdraw: vi.fn(), loading: false, error: null }) }));
+vi.mock("@/hooks/useStakeWithdrawByPool", () => ({ useStakeWithdrawByPool: () => ({ withdraw: h.withdraw, loading: false, error: null }) }));
 vi.mock("@/components/market/MarketLogo", () => ({ MarketLogo: () => null }));
 vi.mock("@/components/wallet/ConnectWalletCta", () => ({ ConnectWalletCta: ({ label }: { label: string }) => <button>{label}</button> }));
 
@@ -92,62 +92,67 @@ function apiPool(slab: PublicKey, name: string) {
 }
 
 const okResponse = (pools: unknown[]) => ({ ok: true, status: 200, json: async () => ({ pools }) });
+const failResponse = () => ({ ok: false, status: 500, json: async () => ({ error: "Failed to fetch stake pools", pools: [] }) });
+
+/** 352-byte StakePool V1 with lpMint at offset 104 (decodeStakePoolV1 layout). */
+function poolAccountData(): Buffer {
+  const d = Buffer.alloc(352);
+  d[0] = 1;
+  LP_MINT.toBuffer().copy(d, 104);
+  return d;
+}
+function lpTokenAccountData(amount: bigint): Buffer {
+  // SPL token Account layout written by hand (AccountLayout.encode trips jsdom's realm-split
+  // Uint8Array check): mint 0..32, owner 32..64, amount u64 @64, state u8 @108 (1 = initialized).
+  const d = Buffer.alloc(ACCOUNT_SIZE);
+  LP_MINT.toBuffer().copy(d, 0);
+  WALLET.toBuffer().copy(d, 32);
+  d.writeBigUInt64LE(amount, 64);
+  d[108] = 1;
+  return d;
+}
+
+const poolPdaOk = POOL_PDA_OK;
+const poolPdaBad = POOL_PDA_BAD;
+const lpAta = LP_ATA;
 
 beforeEach(() => {
-  h.connected = false;
+  h.connected = true;
+  h.wallet = null;
   h.getAccountInfo.mockReset();
-  h.getAccountInfo.mockResolvedValue(null);
   h.fetch.mockReset();
-  h.fetch.mockResolvedValue(okResponse([apiPool(SLAB_OK, "AAA"), apiPool(SLAB_BAD, "BBB")]));
   vi.stubGlobal("fetch", h.fetch);
+  vi.spyOn(console, "error").mockImplementation(() => {});
   Element.prototype.scrollIntoView = () => {}; // selecting a pool scrolls the rail into view; jsdom has none
 });
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
-async function renderRows() {
-  render(<StakePage />);
-  return screen.findByRole("link", { name: "BBB" });
-}
 const poolButton = (symbol: string) => screen.getByRole("button", { name: new RegExp(`Select ${symbol} pool`) });
 
-describe("#38: stake pool rows", () => {
-  it("the symbol link is not inside a button, so screen readers see it", async () => {
-    const link = await renderRows();
-    expect(link.closest('button, [role="button"]')).toBeNull();
-  });
-
-  it("Enter on the symbol link is left to the link and doesn't select the pool", async () => {
-    const link = await renderRows();
-    // fireEvent returns false when a handler called preventDefault, which blocked the navigation.
-    expect(fireEvent.keyDown(link, { key: "Enter" })).toBe(true);
-    expect(poolButton("BBB").getAttribute("aria-pressed")).toBe("false");
-  });
-
-  it("the pool button selects the pool", async () => {
-    await renderRows();
-    fireEvent.click(poolButton("BBB"));
-    expect(poolButton("BBB").getAttribute("aria-pressed")).toBe("true");
-    expect(poolButton("AAA").getAttribute("aria-pressed")).toBe("false");
-  });
-
-  it("a click elsewhere on the row still selects it", async () => {
-    const link = await renderRows();
-    fireEvent.click(link.parentElement!);
-    expect(poolButton("BBB").getAttribute("aria-pressed")).toBe("true");
-  });
-
-  // #63: picking a pool while on the Withdraw tab flipped the widget back to Deposit.
-  it("picking another pool keeps the Withdraw tab", async () => {
-    await renderRows();
+describe("#63: switching pools clears the last result line", () => {
+  it("pool A's 'Withdrawal confirmed' doesn't stay up under pool B", async () => {
+    h.fetch.mockResolvedValue(okResponse([apiPool(SLAB_OK, "AAA"), apiPool(SLAB_BAD, "BBB")]));
+    h.getAccountInfo.mockImplementation(async (pk: PublicKey) => {
+      if (pk.equals(poolPdaOk)) return { data: poolAccountData(), owner: STAKE_PROGRAM, lamports: 1, executable: false };
+      if (pk.equals(lpAta)) return { data: lpTokenAccountData(5_000_000n), owner: TOKEN_PROGRAM_ID, lamports: 1, executable: false };
+      return null;
+    });
+    render(<StakePage />);
+    await screen.findAllByText("AAA");
     fireEvent.click(poolButton("AAA"));
-    fireEvent.click(await screen.findByTestId("stake-tab-withdraw"));
-    expect(screen.getByTestId("stake-tab-withdraw").className).toContain("var(--cyan)");
+    fireEvent.click(screen.getByTestId("stake-tab-withdraw"));
+    const input = await screen.findByTestId("stake-withdraw-input");
+    await waitFor(() => expect((input as HTMLInputElement).disabled).toBe(false));
+    fireEvent.change(input, { target: { value: "1" } });
+    await act(async () => { fireEvent.click(screen.getByTestId("stake-withdraw-submit")); });
+    expect(await screen.findByText(/Withdrawal confirmed/)).toBeTruthy();
+
     fireEvent.click(poolButton("BBB"));
-    expect(poolButton("BBB").getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByTestId("stake-tab-withdraw").className).toContain("var(--cyan)");
-    expect(screen.getByTestId("stake-tab-deposit").className).not.toContain("var(--accent)");
+    expect(screen.getByTestId("stake-tab-withdraw").className).toContain("var(--cyan)"); // still on Withdraw
+    expect(screen.queryByText(/Withdrawal confirmed/)).toBeNull();
   });
 });

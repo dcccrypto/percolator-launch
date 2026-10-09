@@ -682,9 +682,12 @@ function DepositWidget({
   // now that selectedPool/mode are lifted to the parent (so PositionCard's
   // "Manage" button can jump here), a stale amount from a previous pool/tab
   // must not silently carry over into a different pool's deposit/withdraw.
+  // Same for the last result line: pool A's "Withdrawal confirmed" must not show under pool B (#63).
   useEffect(() => {
     setAmount("");
     setWithdrawAmount("");
+    setTxStatus(null);
+    setWithdrawTxStatus(null);
   }, [selectedPool, mode]);
 
   // Fetch real SPL token balance for the selected pool's collateral mint
@@ -1606,9 +1609,11 @@ export default function StakePage() {
   }, []);
   const retryPositions = useCallback(() => setPositionRefreshKey((k) => k + 1), []);
 
-  const selectPoolAndScroll = useCallback((poolId: string, mode: "deposit" | "withdraw") => {
+  // `mode` only when the caller means a tab (Manage → Withdraw). Picking a pool row keeps the tab the
+  // user is on: switching pools while on Withdraw used to flip the widget back to Deposit.
+  const selectPoolAndScroll = useCallback((poolId: string, mode?: "deposit" | "withdraw") => {
     setSelectedPool(poolId);
-    setWidgetMode(mode);
+    if (mode) setWidgetMode(mode);
     document.getElementById("deposit")?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, []);
 
@@ -1638,7 +1643,7 @@ export default function StakePage() {
                 positionsPending={positionsPending}
                 connected={connected}
                 selectedPool={selectedPool}
-                onSelect={(poolId) => selectPoolAndScroll(poolId, "deposit")}
+                onSelect={(poolId) => selectPoolAndScroll(poolId)}
                 loadError={poolsError}
                 onRetry={retryPools}
               />
