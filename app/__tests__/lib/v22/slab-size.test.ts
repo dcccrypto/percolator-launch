@@ -4,7 +4,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { v17MarketAccountLen } from "@percolatorct/sdk";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { LAYOUT_V22 } from "@/lib/v22/sdk";
@@ -22,6 +22,7 @@ const V22_ONE = 592 + 806 + 2661;
 const pins = () => launchCreatePins({ wrapper: "W", matcher: "M", tokenProgram: "T" }).slab.space;
 
 describe("flag off: byte-identical to the SDK (v2.1)", () => {
+  beforeEach(() => __setDevnetV22ForTest(false)); // the override beats NEXT_PUBLIC_DEVNET_V22, so a flag-on run still pins the v2.1 numbers here
   it("3,675 B for one slot (every launch, #3357), 33,900 B for fourteen (an old market's size)", () => {
     expect(slabSizeFor({ p3: true })).toBe(3675);
     expect(wizardSlabBytes(true)).toBe(3675);
@@ -92,6 +93,7 @@ describe("flag on: v2.2 geometry", () => {
     expect(pins()).toBe(slabSizeFor({ p3: true }));
   });
   it("CostEstimate rent follows the layout (flag on > flag off)", () => {
+    __setDevnetV22ForTest(false);
     const off = computeCreateMarketSolCost({ p3: true });
     __setDevnetV22ForTest(true);
     const on = computeCreateMarketSolCost({ p3: true });

@@ -32,6 +32,8 @@ vi.mock("@/hooks/useWalletCompat", () => ({
     signMessage: undefined,
     disconnect: async () => {},
   }),
+  // v2.2 only (LaunchSuccess reads the share token through it); never called with the flag off.
+  useConnectionCompat: () => ({ connection: {} }),
 }));
 
 // Mock next/navigation — LaunchSuccess calls useRouter() for post-mint navigation.

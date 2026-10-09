@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { NextRequest } from "next/server";
+import { writeFileSync } from "node:fs";
 import { deriveInsuranceLpMint, deriveLpVaultRegistry } from "@percolatorct/sdk";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { METAPLEX_TOKEN_METADATA_PROGRAM_ID_V22, deriveLpShareMetadataPdaV22, lpShareIdentityV22 } from "@/lib/v22/sdk";
@@ -202,6 +203,7 @@ describe("the image", () => {
     const buf = Buffer.from(await res.arrayBuffer());
     expect(isPng(buf)).toBe(true);
     expect(dims(buf)).toEqual({ w: 512, h: 512 });
+    if (process.env.V22_SHARE_PNG_DIR) writeFileSync(`${process.env.V22_SHARE_PNG_DIR}/share-nologo.png`, buf); // visual check (not CI)
   }, 30_000);
   describe("with a creator-supplied logo (re-encoded here, never redirected to)", () => {
     const PNG16 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR4nGM4oaFBEmIY1TCqYfhqAAB8MxgQ+Pjr0gAAAABJRU5ErkJggg==", "base64");
@@ -221,6 +223,7 @@ describe("the image", () => {
       expect(withLogo.readUInt32BE(16)).toBe(512);
       expect(withLogo.readUInt32BE(20)).toBe(512);
       expect(withLogo.equals(none)).toBe(false); // the logo changed the picture
+      if (process.env.V22_SHARE_PNG_DIR) writeFileSync(`${process.env.V22_SHARE_PNG_DIR}/share-logo.png`, withLogo); // visual check (not CI)
       // the same market with a logo on a host that is not allowed: no request, the mark-only picture
       f.mockClear();
       h.logoUrl = "https://evil.example/x.png";

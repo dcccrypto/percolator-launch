@@ -5,7 +5,7 @@ import { FC, useState, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { LogoUpload } from "./LogoUpload";
-import { getNetwork, getConfig, explorerTxUrl, explorerAccountUrl } from "@/lib/config";
+import { getNetwork, explorerTxUrl, explorerAccountUrl } from "@/lib/config";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { launchPriceFeedStatus } from "@/lib/launch-outcome";
 import { KEEPER_REGISTER_COPY, userFacingRegistrationReason } from "@/lib/keeper-register-client";
@@ -14,6 +14,7 @@ import { StatusLine } from "@/components/ui/StatusLine";
 import { lpShareWalletNote, lpShareWalletNoteV22 } from "@/lib/lp-share-wallet-note";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { useLpShareToken } from "@/hooks/useLpShareToken";
+import { resolveDevnetProgramIds } from "@/lib/program-ids";
 
 interface LaunchSuccessProps {
   tokenSymbol: string;
@@ -98,7 +99,7 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
 }) => {
   const feed = launchPriceFeedStatus({ priceFeedRequired, keeperDelegated: !!keeperDelegated });
   // v2.2 (flag on; off = no request): what the chain says about this market's share token (decimals, name) gates the wallet note below.
-  const shareToken = useLpShareToken(marketAddress, isDevnetV22Enabled() ? getConfig().programId : null);
+  const shareToken = useLpShareToken(marketAddress, isDevnetV22Enabled() ? resolveDevnetProgramIds().wrapper : null);
   const v22WalletNote = isDevnetV22Enabled()
     ? lpShareWalletNoteV22({ appDecimals: shareToken.decimals ?? undefined, lpDecimals: shareToken.decimals, metadataPresent: shareToken.metadataPresent })
     : null;

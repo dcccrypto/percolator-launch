@@ -22,7 +22,7 @@ vi.mock("@/lib/config", () => ({
   explorerAccountUrl: (addr: string) => `https://explorer.solana.com/account/${addr}?cluster=devnet`,
 }));
 const WALLET = new PublicKey("11111111111111111111111111111112");
-vi.mock("@/hooks/useWalletCompat", () => ({ useWalletCompat: () => ({ publicKey: WALLET, connected: true }) }));
+vi.mock("@/hooks/useWalletCompat", () => ({ useWalletCompat: () => ({ publicKey: WALLET, connected: true }), useConnectionCompat: () => ({ connection: {} }) }));
 vi.mock("@/components/create/LogoUpload", () => ({ LogoUpload: () => null }));
 
 import { LaunchSuccess, LAUNCH_PRICE_WAIT_MS } from "@/components/create/LaunchSuccess";
