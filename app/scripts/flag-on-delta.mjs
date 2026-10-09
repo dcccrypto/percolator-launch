@@ -24,7 +24,7 @@ if (!base && !jsonBase) { console.error("usage: flag-on-delta.mjs <base-app-dir>
 
 function run(dir) {
   const out = join(mkdtempSync(join(tmpdir(), "flagdelta-")), "r.json");
-  const r = spawnSync("npx", ["vitest", "run", "--reporter=json", `--outputFile=${out}`], { cwd: dir, env: { ...process.env, NEXT_PUBLIC_DEVNET_V22: "1" }, stdio: ["ignore", "ignore", "inherit"] });
+  const r = spawnSync("npx", ["vitest", "run", "--reporter=json", `--outputFile=${out}`], { cwd: dir, env: { ...process.env, NEXT_PUBLIC_DEVNET_V22: "1" }, stdio: "ignore" });
   if (!existsSync(out)) { console.error(`vitest produced no report in ${dir} (exit ${r.status})`); process.exit(2); }
   return out;
 }
