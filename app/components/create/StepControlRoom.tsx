@@ -100,6 +100,8 @@ export interface StepControlRoomProps {
   launchDisabled?: boolean;
   launchDisabledReason?: string;
   instantLaunch?: boolean;
+  /** Resuming an unfinished launch: it runs step by step (never the one-approval batch). */
+  resuming?: boolean;
   onBack: () => void;
 }
 
@@ -154,6 +156,7 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
   launchDisabled,
   launchDisabledReason,
   instantLaunch,
+  resuming = false,
   onBack,
 }) => {
   const leverage = marginBpsToLeverage(initialMarginBps);
@@ -303,7 +306,8 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
           {/* LP + insurance alone understated it ~3x: both backing domains are seeded at 100% of LP. */}
           <Readout k="You seed" v={`${seedTotal.toLocaleString()} ${collateralSymbol}`} dimmed={!registrable} />
           <Readout k="Incl. counterparty backing" v={`${seedBacking.toLocaleString()} ${collateralSymbol}`} dimmed={!registrable} />
-          <Readout k="Approvals" v="1" />
+          {/* A fresh launch signs its batch in one approval; a resume runs the remaining steps one by one (#67). */}
+          <Readout k="Approvals" v={resuming ? "One per transaction" : "1"} />
         </div>
 
         <div className="flex flex-col items-center justify-center rounded-[4px] border border-[var(--border)] bg-[var(--panel-bg)] p-4">
