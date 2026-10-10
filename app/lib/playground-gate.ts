@@ -110,7 +110,7 @@ export async function gateDecision(
     warnedNoSecret = true;
     console.error(
       "[playground-gate] PLAYGROUND_GATE_ENABLED=true but PLAYGROUND_ACCESS_SECRET is unset or < 32 chars — " +
-        "the gate is refusing EVERYONE (team bypass included).",
+        "the gate is refusing EVERYONE (team bypass and judge door included).",
     );
   }
   return pathname.startsWith("/api/") || pathname === "/api" ? "unauthorized" : "redirect-locked";
