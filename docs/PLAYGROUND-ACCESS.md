@@ -51,6 +51,8 @@ Team sessions carry a fingerprint of the team secret, so **rotating or unsetting
 browser history and request logs — use it from your own browser, and rotate it if it is shared.
 There are no wallet or email allowlists in code.
 
+Hackathon judges have their own revocable door (`/enter?judge=…`) — see [PLAYGROUND-JUDGE-ACCESS.md](./PLAYGROUND-JUDGE-ACCESS.md).
+
 ## What stays reachable without a session
 
 `/enter`, `/locked`, `/_next/*`, `/_vercel/*`, `/.well-known/*`, `/images/*`, `/icons/*`, `/audio/*`,

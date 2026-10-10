@@ -7,6 +7,7 @@
  *   GET  /enter?token=<handoff>                     (also accepts ?h=)
  *   POST /enter   form field `token` (or `h`)       (keeps the token out of URLs/logs)
  *   GET  /enter?team=<PLAYGROUND_TEAM_BYPASS_SECRET> (team only — see docs/PLAYGROUND-ACCESS.md)
+ *   GET  /enter?judge=<PLAYGROUND_JUDGE_ACCESS_CODE> (hackathon judges — see docs/PLAYGROUND-JUDGE-ACCESS.md)
  *
  * Success → 303 to "/" with Set-Cookie pg_access (HttpOnly; Secure; SameSite=Lax;
  * Path=/; Max-Age=86400). Anything else → 303 to "/locked", with no reason given
@@ -17,9 +18,12 @@ import {
   SESSION_TTL_SECONDS,
   HANDOFF_TTL_SECONDS,
   TEAM_SUB_PREFIX,
+  JUDGE_SUB_PREFIX,
   accessSecret,
   cohortCutoff,
   isWithinCohort,
+  judgeAccessCode,
+  judgeFingerprint,
   mintSession,
   readHandoff,
   teamBypassSecret,
@@ -32,10 +36,12 @@ export interface EnterInput {
   token: string | null;
   /** Team bypass secret presented, if any. */
   team: string | null;
+  /** Judge access code presented, if any. */
+  judge?: string | null;
 }
 
 export type EnterResult =
-  | { ok: true; cookie: string; kind: "handoff" | "team" }
+  | { ok: true; cookie: string; kind: "handoff" | "team" | "judge" }
   | { ok: false };
 
 /**
@@ -74,10 +80,17 @@ export async function decideEnter(
     return { ok: true, kind: "team", cookie: await mintSession(sub, 1, secret, nowMs) };
   }
 
+  if (input.judge) {
+    const judge = judgeAccessCode(env, nowMs);
+    if (!judge || !(await teamSecretMatches(input.judge, judge))) return { ok: false };
+    const sub = JUDGE_SUB_PREFIX + (await judgeFingerprint(judge));
+    return { ok: true, kind: "judge", cookie: await mintSession(sub, 1, secret, nowMs) };
+  }
+
   const claims = await readHandoff(input.token, secret, nowMs);
   if (!claims) return { ok: false };
-  // A handoff can never mint a team session.
-  if (claims.sub.startsWith(TEAM_SUB_PREFIX)) return { ok: false };
+  // A handoff can never mint a team or judge session.
+  if (claims.sub.startsWith(TEAM_SUB_PREFIX) || claims.sub.startsWith(JUDGE_SUB_PREFIX)) return { ok: false };
   if (!isWithinCohort(claims.pos, cohortCutoff(env.PLAYGROUND_COHORT_CUTOFF))) return { ok: false };
 
   // One-time use: the MAC half uniquely identifies the token. TTL = the most a
