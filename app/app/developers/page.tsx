@@ -8,19 +8,16 @@ import {
   REPOS,
   type CommitActivityMap,
 } from "@/lib/github";
+import { pageMetadata } from "@/lib/seo";
 import { DevelopersClient } from "./DevelopersClient";
 
-export const metadata: Metadata = {
-  title: "Developers - Percolator",
+// A bare title: the root layout's template adds " | Percolator" (it read "Developers - Percolator | Percolator").
+export const metadata: Metadata = pageMetadata({
+  title: "Developers",
   description:
     "Open-source repos powering Percolator permissionless perpetuals on Solana. Browse, fork, and contribute.",
-  openGraph: {
-    title: "Developers - Percolator",
-    description:
-      "Open-source repos powering Percolator permissionless perpetuals on Solana.",
-    type: "website",
-  },
-};
+  path: "/developers",
+});
 
 export default async function DevelopersPage() {
   // Fetch all data in parallel — allSettled ensures one failure never breaks the page
