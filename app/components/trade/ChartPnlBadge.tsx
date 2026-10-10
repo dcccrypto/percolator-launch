@@ -1,5 +1,6 @@
 "use client";
 
+import { lotExpOf } from "@/lib/v22/lot";
 import { FC } from "react";
 import { bigintToFloat } from "@/lib/formatters";
 import { isExactEntrySource, DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL } from "@/lib/entry-price-display";
@@ -36,7 +37,8 @@ export const ChartPnlBadge: FC<ChartPnlBadgeProps> = ({ slabAddress }) => {
   const mockMode = isMockMode() && isMockSlab(slabAddress);
   const userAccount = realUserAccount ?? (mockMode ? getMockUserAccount(slabAddress) : null);
   const { priceE6: livePriceE6 } = useLivePrice();
-  const { config: marketConfig, params, adlFactors, wrapperConfigV17 } = useSlabState();
+  const { config: marketConfig, params, adlFactors, wrapperConfigV17, raw: slabRawForLot } = useSlabState();
+  const lotExp = lotExpOf(slabRawForLot); // v2.2: the share card shows the price per TOKEN (0 = no lots / flag off)
   const tokenMeta = useTokenMeta(marketConfig?.collateralMint ?? null);
   const decimals = tokenMeta?.decimals ?? 6;
   // For the Share-PnL card: market identity + the pool's payout capacity (same
@@ -103,6 +105,7 @@ export const ChartPnlBadge: FC<ChartPnlBadgeProps> = ({ slabAddress }) => {
     entryE6: recordedEntryE6,
     initialMarginBps,
     initialMarkE6: livePriceE6,
+    ...(lotExp > 0 ? { lotExp } : {}),
   };
 
   // Positioning is owned by DraggableChartBadges in TradingChart — the PnL chip

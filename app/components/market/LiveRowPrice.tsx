@@ -1,5 +1,6 @@
 "use client";
 
+import { tokenUsdOfLotUsd } from "@/lib/v22/lot";
 import { useCallback, useSyncExternalStore, type FC } from "react";
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
 import { usePriceFlash } from "@/hooks/usePriceFlash";
@@ -21,7 +22,11 @@ export const LiveRowPrice: FC<{ slab: string; fallback: number | null }> = ({ sl
   const subscribe = useCallback((cb: () => void) => subscribeSlab(slab, cb), [slab]);
   const getUsd = useCallback(() => getSnapshot(slab).priceUsd, [slab]);
   const getE6 = useCallback(() => getSnapshot(slab).priceE6, [slab]);
-  const live = useSyncExternalStore(subscribe, getUsd, () => null);
+  const getLot = useCallback(() => getSnapshot(slab).lotExp ?? 0, [slab]);
+  const lotExp = useSyncExternalStore(subscribe, getLot, () => 0);
+  const liveLot = useSyncExternalStore(subscribe, getUsd, () => null);
+  // The store is per LOT (v2.2); a row shows the per-TOKEN price. Identity when lotExp = 0.
+  const live = liveLot == null ? null : tokenUsdOfLotUsd(liveLot, lotExp);
   const liveE6 = useSyncExternalStore(subscribe, getE6, () => null);
   const flash = usePriceFlash(liveE6);
   const flashColor = flash === "up" ? "text-[var(--long)]" : flash === "down" ? "text-[var(--short)]" : "";

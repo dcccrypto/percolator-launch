@@ -97,10 +97,26 @@ import { resolveTokenLogo } from "@/lib/token-logo";
 import { sanitizeLogoUrl } from "@/lib/token-metadata-validators";
 import { upsertRegisteredMarketRow } from "@/lib/market-registration";
 import { checkSymbol, checkName } from "@/lib/market-metadata-validation";
-import { checkKeeperReadiness, enrollmentCapsFromEnv, readinessStatus } from "@/lib/keeper-enrollment-guard";
+import { checkKeeperReadiness, enrollmentCapsFromEnv, GLOBAL_CAP_COPY, readinessStatus } from "@/lib/keeper-enrollment-guard";
 import { getPlaygroundKeeperSigner } from "@/lib/playground-keeper-signer";
+import { getClientIp } from "@/lib/get-client-ip";
+import { checkKeeperRegisterRateLimit } from "@/lib/keeper-register-rate-limit";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * In-request grace for "the creation tx / the finished market is not visible to this RPC node yet":
+ * `tries` extra reads, `delayMs` apart (default 3 x 800 ms, well inside the function budget). The
+ * client launches the registration the moment its last transaction confirms, often against a
+ * different RPC node than the one this route reads, so the first read can be a slot or two behind.
+ */
+function proofWaitFromEnv(): { tries: number; delayMs: number } {
+  const n = (v: string | undefined, d: number): number => {
+    const x = Number(v);
+    return v !== undefined && v.trim() !== "" && Number.isFinite(x) && x >= 0 ? Math.floor(x) : d;
+  };
+  return { tries: Math.min(n(process.env.KEEPER_REGISTER_PROOF_TRIES, 3), 6), delayMs: Math.min(n(process.env.KEEPER_REGISTER_PROOF_POLL_MS, 800), 2_000) };
+}
 
 /** Timing-safe admin-bypass check (H1b) — same secret/header convention as
  *  /api/oracle/set-price-cap. Empty/unset ADMIN_API_SECRET always denies. */
@@ -125,7 +141,8 @@ const NETWORK = process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim() ?? process.env.N
 // failures as non-fatal.
 
 /** sim-USDC — the single collateral mint shared by every playground market. */
-const PLAYGROUND_COLLATERAL_MINT = "DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC";
+const PLAYGROUND_COLLATERAL_MINT =
+  process.env.NEXT_PUBLIC_TEST_USDC_MINT?.trim() || "DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC";
 
 export async function POST(req: NextRequest) {
   if (NETWORK !== "devnet") {
@@ -224,9 +241,25 @@ export async function POST(req: NextRequest) {
     if (!isTxSignature(proofTx)) {
       return NextResponse.json({ error: "Invalid proofTx: expected a transaction signature" }, { status: 400 });
     }
+    // Per-IP bound: each proof-path request costs several RPC reads, and the route is reachable by
+    // anyone holding a public creation tx. A launch's own loop needs about 15 requests in its first
+    // minute, so the ceiling leaves room for several markets behind one NAT.
+    const rl = await checkKeeperRegisterRateLimit(getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: "Too many requests. Try again in a moment." },
+        { status: 429, headers: { "Retry-After": String(rl.retryAfter) } },
+      );
+    }
     try {
       const wrapper = getConfig().programId as string;
       const connection = getServerConnection("confirmed");
+      const memoParams = await keeperMemoParams({ slabAddress, dexPoolAddress, mainnetCA, dexType, symbol, label, payload: boundPayload });
+
+      // The slab is read and its owner / header checked ONCE. Only the checks that can be RPC lag
+      // are repeated below, and each repeats only its own read: the proof stage re-runs getTransaction,
+      // the readiness stage re-reads the slab bytes. A caller with a real public slab and a made-up
+      // signature costs one slab read plus the bounded getTransaction retries, not full passes.
       const accountInfo = await connection.getAccountInfo(new PublicKey(slabAddress));
       if (!accountInfo) {
         return NextResponse.json({ error: "Slab account does not exist on-chain" }, { status: 400 });
@@ -235,33 +268,63 @@ export async function POST(req: NextRequest) {
       if (accountInfo.owner.toBase58() !== wrapper || !isV18MarketHeader(new Uint8Array(accountInfo.data))) {
         return NextResponse.json({ error: "Slab account is not a market of this deployment's program" }, { status: 400 });
       }
-      const tx = await connection.getTransaction(proofTx, { commitment: "confirmed", maxSupportedTransactionVersion: 1 });
-      const verdict = await verifyKeeperRegisterProofTx(
-        tx,
-        await keeperMemoParams({ slabAddress, dexPoolAddress, mainnetCA, dexType, symbol, label, payload: boundPayload }),
-        wrapper,
-      );
-      if (!verdict.ok) {
-        Sentry.captureMessage("[playground/keeper-register] creation-tx proof refused", {
-          level: "warning",
-          tags: { endpoint: "/api/playground/keeper-register", auth: "memo-fail" },
-          extra: { slabAddress, reason: verdict.reason },
-        });
-        // Not landed yet reads as "not found": the client retries with backoff.
-        const status = verdict.reason === "proof transaction not found" ? 409 : 403;
-        return NextResponse.json({ error: `Registration proof refused: ${verdict.reason}` }, { status });
-      }
-      slabAdmin = verdict.creator;
+      const { tries, delayMs } = proofWaitFromEnv();
+      const pause = () => new Promise((r) => setTimeout(r, delayMs));
 
-      // Review M-7: only a FINISHED market priced by our keeper is enrolled. Read from the bytes
-      // already in hand (no extra RPC). The launch registers after its last step lands, so a
-      // not-yet-finished market is "try again" (409), never a final refusal.
-      const readiness = checkKeeperReadiness(
-        new Uint8Array(accountInfo.data),
+      /** Stage 1. `transient` = "proof transaction not found": this RPC node has not seen it yet. */
+      const proofPass = async (): Promise<{ response: NextResponse; transient: boolean; log?: () => void } | null> => {
+        const tx = await connection.getTransaction(proofTx, { commitment: "confirmed", maxSupportedTransactionVersion: 1 });
+        const verdict = await verifyKeeperRegisterProofTx(tx, memoParams, wrapper);
+        if (!verdict.ok) {
+          // Not landed yet reads as "not found": retried here, then by the client with backoff.
+          const notFound = verdict.reason === "proof transaction not found";
+          const reason = verdict.reason;
+          return {
+            log: () =>
+              Sentry.captureMessage("[playground/keeper-register] creation-tx proof refused", {
+                level: "warning",
+                tags: { endpoint: "/api/playground/keeper-register", auth: "memo-fail" },
+                extra: { slabAddress, reason },
+              }),
+            response: NextResponse.json({ error: `Registration proof refused: ${verdict.reason}` }, { status: notFound ? 409 : 403 }),
+            transient: notFound,
+          };
+        }
+        slabAdmin = verdict.creator;
+        return null;
+      };
+      let proofOutcome = await proofPass();
+      for (let i = 0; proofOutcome?.transient && i < tries; i++) {
+        await pause();
+        proofOutcome = await proofPass();
+      }
+      if (proofOutcome) {
+        proofOutcome.log?.();
+        return proofOutcome.response;
+      }
+
+      // Review M-7: only a FINISHED market priced by our keeper is enrolled. The launch registers
+      // after its last step lands, so a not-yet-finished market is "try again" (409), never a final
+      // refusal; the 409 family can be RPC lag, so the slab is re-read a few times before answering.
+      let slabBytes = new Uint8Array(accountInfo.data);
+      let readiness = checkKeeperReadiness(
+        slabBytes,
         new PublicKey(slabAddress),
         (getConfig() as { vaultProgramId?: string }).vaultProgramId,
         getPlaygroundKeeperSigner()?.publicKey(),
       );
+      for (let i = 0; !readiness.ok && readinessStatus(readiness.reason) === 409 && i < tries; i++) {
+        await pause();
+        const again = await connection.getAccountInfo(new PublicKey(slabAddress));
+        if (!again) break;
+        slabBytes = new Uint8Array(again.data);
+        readiness = checkKeeperReadiness(
+          slabBytes,
+          new PublicKey(slabAddress),
+          (getConfig() as { vaultProgramId?: string }).vaultProgramId,
+          getPlaygroundKeeperSigner()?.publicKey(),
+        );
+      }
       if (!readiness.ok) {
         Sentry.captureMessage("[playground/keeper-register] market not ready for the keeper", {
           level: "warning",
@@ -455,9 +518,25 @@ export async function POST(req: NextRequest) {
       dbResult.error,
       dbResult.detail ?? "(no detail)",
     );
+    // The deployment's live-price ceiling is full: EVERY launch is now refused until it is raised.
+    // 2026-10-05 20:14 UTC this was a silent 403 and 25+ markets went unpriced for a day.
+    if (dbResult.status === 429 && dbResult.error === GLOBAL_CAP_COPY) {
+      Sentry.captureMessage("[playground/keeper-register] keeper enrollment ceiling is full: new markets cannot be priced", {
+        level: "error",
+        tags: { endpoint: "/api/playground/keeper-register", auth: "cap-full" },
+        extra: { slabAddress, deployer: registeredDeployer },
+      });
+      return NextResponse.json(
+        { ok: false, registered: false, error: dbResult.error, ...(dbResult.code ? { code: dbResult.code } : {}) },
+        { status: 429, headers: { "Retry-After": "300" } },
+      );
+    }
     // Review M-1: the database's own error text stays in the server log (the proof path is
     // reachable by anyone who has the public creation tx).
-    return NextResponse.json({ ok: false, registered: false, error: dbResult.error }, { status: dbResult.status });
+    return NextResponse.json(
+      { ok: false, registered: false, error: dbResult.error, ...(dbResult.code ? { code: dbResult.code } : {}) },
+      { status: dbResult.status },
+    );
   }
   // A maintainer retired this (creator-registered) market: the proof path cannot re-enroll it,
   // and the blob is not re-written for it either. Final (not retryable).

@@ -13,6 +13,7 @@
  * creators, curious traders — who do want this view).
  */
 
+import { UnsupportedLayoutNotice } from "@/components/v22/UnsupportedLayoutNotice";
 import { use } from "react";
 import dynamic from "next/dynamic";
 import { PublicKey } from "@solana/web3.js";
@@ -61,7 +62,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 function AnalyticsPageInner({ slab }: { slab: string }) {
-  const { loading, error, wrapperConfigV17 } = useSlabState();
+  const { loading, error, wrapperConfigV17, layoutUnsupported } = useSlabState();
   // v17 slabs carry no legacy engine block (SlabProvider always sets engine:
   // null there) — wrapperConfigV17 is non-null exactly on v17 slabs, so it's
   // the canonical gate for cards that only make sense on the v12 engine path.
@@ -94,6 +95,13 @@ function AnalyticsPageInner({ slab }: { slab: string }) {
             </div>
           ))}
         </div>
+      </div>
+    );
+  }
+  if (layoutUnsupported) {
+    return (
+      <div className="flex min-h-[calc(100dvh-48px)] items-center justify-center px-4">
+        <UnsupportedLayoutNotice className="max-w-sm w-full" />
       </div>
     );
   }

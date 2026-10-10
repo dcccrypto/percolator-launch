@@ -19,13 +19,27 @@ describe("program-ids: the single repoint point", () => {
 
   it("config reads program-ids: programId, every slab tier, and the allowlist move together", async () => {
     vi.stubEnv("NEXT_PUBLIC_DEFAULT_NETWORK", "devnet");
-    const { getConfig, getAllProgramIds } = await import("@/lib/config");
+    const {
+      getConfig,
+      getAllProgramIds,
+      getMarketDiscoveryProgramIds,
+    } = await import("@/lib/config");
     const cfg = getConfig();
     expect(cfg.programId).toBe(DEVNET_PROGRAM_IDS.wrapper);
     expect(Object.values(cfg.programsBySlabTier ?? {})).toEqual([
       DEVNET_PROGRAM_IDS.wrapper, DEVNET_PROGRAM_IDS.wrapper, DEVNET_PROGRAM_IDS.wrapper,
     ]);
-    expect(new Set(getAllProgramIds())).toEqual(new Set(Object.values(DEVNET_PROGRAM_IDS)));
+
+    // Security allowlist keeps every deployed Percolator program.
+    expect(new Set(getAllProgramIds())).toEqual(
+      new Set(Object.values(DEVNET_PROGRAM_IDS)),
+    );
+
+    // Market discovery is deliberately narrower: matcher/NFT/stake do not
+    // own v17 market accounts and must not be queried as market directories.
+    expect(getMarketDiscoveryProgramIds()).toEqual([
+      DEVNET_PROGRAM_IDS.wrapper,
+    ]);
   });
 
   it("env override repoints the wrapper everywhere on a devnet build (E2E / local fork)", async () => {

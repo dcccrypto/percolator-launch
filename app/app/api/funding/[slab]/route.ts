@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { validateSlabParam } from "@/lib/route-validators";
 import { isBlockedSlab } from "@/lib/blocklist";
 import { readCurrentWrapperSlab } from "@/lib/current-wrapper-slab";
+import { unsupportedLayoutBody } from "@/lib/v22/layout";
 import { readV17MaxAbsFunding } from "@/lib/v17-engine-config";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +28,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slab: s
 
   const read = await readCurrentWrapperSlab(v.slab);
   if (!read.ok) {
+    if (read.reason === "unsupported-layout") return NextResponse.json(unsupportedLayoutBody(null, read.version), { status: 422 });
     return read.reason === "rpc"
       ? NextResponse.json({ error: "Could not read the market right now" }, { status: 503, headers: { "Retry-After": "5" } })
       : NextResponse.json({ error: "Market not found" }, { status: 404 });

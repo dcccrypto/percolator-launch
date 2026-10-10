@@ -1,10 +1,9 @@
+import { lotExpOf } from "@/lib/v22/lot";
+import { lotMarketNumbers, markToTokenUsd } from "@/lib/v22/lot-view";
 import { Connection, PublicKey } from "@solana/web3.js";
 import {
-  isV17Account,
   parseWrapperConfigV17,
-  parseMarketGroupV17OI,
   V17_HEADER_LEN,
-  V17_MARKET_GROUP_OFF,
 } from "@percolatorct/sdk";
 import { getServerConnection } from "@/lib/server-rpc";
 import { sanitizeOnChainValue } from "@/lib/health";
@@ -13,6 +12,7 @@ import { parseV17RiskParams } from "@/lib/v17-engine-config";
 import { leverageFromMarginBps } from "@/lib/market-params";
 import { getConfig } from "@/lib/config";
 import { isClosedMarketTombstone, TOMBSTONE_PROBE_SLICE_LEN } from "@/lib/closed-market-tombstone";
+import { marketGeometry, parseMarketOI, isWrapperAccount } from "@/lib/v22/layout";
 
 /**
  * Live per-market state, read straight from the slab account.
@@ -121,10 +121,6 @@ export { isMarketauthComplete };
  * The SDK exposes no reader for vault/c_tot (parseMarketGroupV17OI covers
  * insurance and OI only), hence the manual reads.
  */
-const MG_VAULT_OFF = 285;
-const MG_C_TOT_OFF = 317;
-/** Must cover the c_tot read at +317 (317 + 16 bytes). */
-const MG_MIN_BYTES = 333;
 
 /**
  * Upper bound for a sane price in micro-USD (1e6).
@@ -145,9 +141,12 @@ function readU128LE(data: Uint8Array, offset: number): bigint {
 
 /** Parse one slab's live state. Returns null if the account isn't a v17 slab. */
 function parseLiveState(data: Uint8Array, slabKey: PublicKey): LiveMarketState | null {
-  if (!isV17Account(data)) return null;
+  if (!isWrapperAccount(data)) return null;
 
   let markPriceUsd: number | null = null;
+  // v2.2 lot market: the mark is per LOT and OI is in lots; the live row (merged into /api/markets) is per TOKEN.
+  let markE6ForLot = 0n;
+  const lotExp = lotExpOf(data);
   // Default to complete: no stake program pinned for this network (mainnet
   // today) means the stake step doesn't gate anything here — see the
   // isComplete doc comment above. Only devnet, where the stake program IS
@@ -160,7 +159,10 @@ function parseLiveState(data: Uint8Array, slabKey: PublicKey): LiveMarketState |
   try {
     const cfg = parseWrapperConfigV17(data, V17_HEADER_LEN);
     const e6 = cfg.markEwmaE6;
-    if (e6 > 0n && e6 < MAX_SANE_PRICE_E6) markPriceUsd = Number(e6) / 1_000_000;
+    if (e6 > 0n && e6 < MAX_SANE_PRICE_E6) {
+      markE6ForLot = e6;
+      markPriceUsd = markToTokenUsd(e6, lotExp);
+    }
 
     // Same signal the discovery path uses; no stake program pinned (mainnet
     // today) => complete, PDA derivation failure => fail closed.
@@ -197,7 +199,7 @@ function parseLiveState(data: Uint8Array, slabKey: PublicKey): LiveMarketState |
   let oiShortQ = 0;
   let insurance = 0;
   try {
-    const oi = parseMarketGroupV17OI(data);
+    const oi = parseMarketOI(data);
     // Sanitize sentinel/negative on-chain values (u64::MAX from an uninitialized
     // slab) to 0 before Number() — otherwise they become astronomical OI/insurance
     // that poisons total_open_interest_usd downstream. Same treatment markPrice gets.
@@ -210,23 +212,31 @@ function parseLiveState(data: Uint8Array, slabKey: PublicKey): LiveMarketState |
 
   let vault = 0;
   let cTot = 0;
-  if (data.length >= V17_MARKET_GROUP_OFF + MG_MIN_BYTES) {
+  let geo: ReturnType<typeof marketGeometry> | null = null;
+  try {
+    geo = marketGeometry(data, "readLiveMarketState");
+  } catch {
+    geo = null; // unknown VERSION: vault / c_tot stay 0 (unreadable), never read with another layout's offsets
+  }
+  if (geo && data.length >= geo.groupOff + geo.layout.group.cTot + 16) {
     try {
-      vault = Number(readU128LE(data, V17_MARKET_GROUP_OFF + MG_VAULT_OFF));
-      cTot = Number(readU128LE(data, V17_MARKET_GROUP_OFF + MG_C_TOT_OFF));
+      vault = Number(readU128LE(data, geo.groupOff + geo.layout.group.vault));
+      cTot = Number(readU128LE(data, geo.groupOff + geo.layout.group.cTot));
     } catch {
       // Leave both at 0 — callers treat 0 vault as a liveness signal, and a
       // failed read here is indistinguishable from a genuinely empty market.
     }
   }
 
-  const totalOiQ = oiLongQ + oiShortQ;
+  const lotNums = lotMarketNumbers({ markE6: markE6ForLot, oiLongQ: BigInt(Math.trunc(oiLongQ)), oiShortQ: BigInt(Math.trunc(oiShortQ)) }, lotExp);
+  // lotExp 0 (flag off, v2.1, no lots): the exact pre-v2.2 expressions, bit for bit.
+  const totalOiQ = lotNums.totalOi;
   return {
     markPriceUsd,
-    oiLongQ,
-    oiShortQ,
+    oiLongQ: lotExp === 0 ? oiLongQ : lotNums.oiLong,
+    oiShortQ: lotExp === 0 ? oiShortQ : lotNums.oiShort,
     totalOiQ,
-    totalOiUsd: markPriceUsd != null ? (totalOiQ / 1_000_000) * markPriceUsd : null,
+    totalOiUsd: markPriceUsd != null ? (lotExp === 0 ? (totalOiQ / 1_000_000) * markPriceUsd : lotNums.totalOiUsd) : null,
     insurance,
     vault,
     cTot,

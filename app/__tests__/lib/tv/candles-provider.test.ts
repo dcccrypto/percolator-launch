@@ -112,7 +112,7 @@ describe("candles-api provider", () => {
   it("widens `from` to cover countBack, returns percolator bars", async () => {
     const h = harness(() => json(udf([b(3600 * 15, 1), b(3600 * 16, 2)])));
     const page = await h.provider.getBars(req({ fromSec: 70_000, countBack: 10 }));
-    expect(h.urls[0]).toBe(`/api/candles/${SLAB}?resolution=60&from=${72_000 - 36_000}&to=72000`);
+    expect(h.urls[0]).toBe(`/api/candles/${SLAB}?resolution=60&from=${72_000 - 36_000}&to=72000&fill=1`);
     expect(page.source).toBe("percolator");
     expect(page.noMoreHistory).toBe(false);
     expect(page.bars).toHaveLength(2);

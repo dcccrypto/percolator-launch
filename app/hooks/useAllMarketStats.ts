@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect } from "react";
 import useSWR from "swr";
+import { MARKET_REGISTERED_EVENT } from "@/lib/keeper-register-client";
 import { isBlockedSlab } from "@/lib/blocklist";
 import type { Database } from "@/lib/database.types";
 
@@ -23,9 +25,15 @@ const SWR_KEY = "/api/markets?include_zombie=true&limit=500";
  */
 const EMPTY_STATS_MAP: Map<string, MarketWithStats> = new Map();
 
-async function fetchMarketStats(): Promise<Map<string, MarketWithStats>> {
-  const res = await fetch(SWR_KEY, {
+/**
+ * `fresh` goes around the CDN copy (s-maxage 10 + stale-while-revalidate 60): a distinct URL is a
+ * distinct cache key, and no-store skips the browser's copy. Used once, right after a registration
+ * lands on this device, so the creator's own lists show the market without waiting out the cache.
+ */
+export async function fetchMarketStats(fresh = false): Promise<Map<string, MarketWithStats>> {
+  const res = await fetch(fresh ? `${SWR_KEY}&fresh=${Date.now()}` : SWR_KEY, {
     headers: { Accept: "application/json" },
+    ...(fresh ? { cache: "no-store" as const } : {}),
   });
   if (!res.ok) {
     throw new Error(`Markets API returned ${res.status}`);
@@ -41,6 +49,34 @@ async function fetchMarketStats(): Promise<Map<string, MarketWithStats>> {
     }
   });
   return map;
+}
+
+/**
+ * After a registration lands the CDN can still hold a copy made BEFORE it (up to s-maxage +
+ * stale-while-revalidate), so the next ordinary poll could bring the old list back and the new market
+ * would vanish again. For this long after a registration event every fetch of the list is fresh.
+ */
+export const FRESH_AFTER_REGISTRATION_MS = 30_000;
+let freshUntil = 0;
+/** Test hook: end the fresh window. */
+export function resetFreshWindow(): void {
+  freshUntil = 0;
+}
+
+/**
+ * SWR's default `compare` is `dequal/lite`, which has no Map support: it compares own enumerable
+ * keys, and a Map has none, so ANY two Maps compared equal and SWR silently kept the first fetch's
+ * data forever (the 30 s poll and any mutate fetched, then discarded the result). A markets list
+ * that never changes after the first load is why a new market stayed missing until a full reload.
+ */
+export function statsMapsEqual(a: Map<string, MarketWithStats> | undefined, b: Map<string, MarketWithStats> | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.size !== b.size) return false;
+  for (const [k, v] of a) {
+    const w = b.get(k);
+    if (w === undefined || JSON.stringify(v) !== JSON.stringify(w)) return false;
+  }
+  return true;
 }
 
 export interface UseAllMarketStatsOptions {
@@ -67,17 +103,31 @@ export interface UseAllMarketStatsOptions {
  */
 export function useAllMarketStats(options?: UseAllMarketStatsOptions) {
   const enabled = options?.enabled ?? true;
-  const { data, error, isLoading } = useSWR<Map<string, MarketWithStats>, Error>(
+  const { data, error, isLoading, mutate } = useSWR<Map<string, MarketWithStats>, Error>(
     enabled ? SWR_KEY : null,
-    fetchMarketStats,
+    () => fetchMarketStats(Date.now() < freshUntil),
     {
       // Collapse all concurrent hook instances to 1 request per 30 s.
       dedupingInterval: 30_000,
       // Replace the manual setInterval — SWR refetches in the background.
       refreshInterval: 30_000,
       revalidateOnFocus: false,
+      // See statsMapsEqual: the default compare treats every pair of Maps as equal.
+      compare: statsMapsEqual,
     },
   );
+
+  // A registration just landed on this device (lib/keeper-register-client.ts markRegistered):
+  // refetch past the CDN so the new market is in the list now, not on the next poll.
+  useEffect(() => {
+    if (!enabled || typeof window === "undefined") return;
+    const onRegistered = () => {
+      freshUntil = Date.now() + FRESH_AFTER_REGISTRATION_MS;
+      void mutate(fetchMarketStats(true), { revalidate: false }).catch(() => undefined);
+    };
+    window.addEventListener(MARKET_REGISTERED_EVENT, onRegistered);
+    return () => window.removeEventListener(MARKET_REGISTERED_EVENT, onRegistered);
+  }, [enabled, mutate]);
 
   return {
     statsMap: data ?? EMPTY_STATS_MAP,

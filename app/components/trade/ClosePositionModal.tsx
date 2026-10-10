@@ -18,12 +18,22 @@ interface ClosePositionModalProps {
   collateralSymbol?: string;
   decimals: number;
   priceUsd: number | null;
+  /** v2.2 lot exponent (position in lots, prices per lot); omitted = no lots. */
+  lotExp?: number;
   isLong: boolean;
   loading: boolean;
   /** B-3: Trading fee basis points — subtracted from Est. Account Balance After so the preview matches on-chain. */
   tradingFeeBps?: bigint;
   /** GH#1842: Block submission when oracle price is stale or unavailable */
   oracleStale?: boolean;
+  /** Price older than 60 s but the chain would accept the close — note only, never blocks. */
+  oraclePriceBehind?: boolean;
+  /** Seconds since the last price push (note text). */
+  priceAgeSecs?: number;
+  /** The stored mark the chain settles at; the preview uses it when the price is behind. */
+  settleMarkE6?: bigint | null;
+  /** Engine lag (not the oracle): blocks the close with its own "Catching up" note. */
+  engineCatchingUp?: boolean;
   /** PERC-2312: Surfaced close-tx failure (from useClosePosition's `error`). */
   error?: string | null;
   /** The market's per-fill cap (matcherCaps.maxFillAbs), when known. */
@@ -58,10 +68,15 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   collateralSymbol,
   decimals,
   priceUsd,
+  lotExp = 0,
   isLong,
   loading,
   tradingFeeBps,
   oracleStale = false,
+  oraclePriceBehind = false,
+  priceAgeSecs = 0,
+  settleMarkE6 = null,
+  engineCatchingUp = false,
   error = null,
   maxFillAbs = null,
   previewUnavailable = false,
@@ -142,7 +157,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
     <div
       ref={overlayRef}
       onClick={handleOverlayClick}
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4"
+      className="fixed inset-0 z-[9999] flex justify-center overflow-y-auto overscroll-contain bg-black/80 p-4"
       style={{ opacity: 0 }}
     >
       <div
@@ -151,7 +166,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
         data-testid="close-modal"
         aria-modal="true"
         aria-labelledby="close-position-title"
-        className="relative w-full max-w-md rounded-none border border-[var(--border)] bg-[var(--bg)] p-6 shadow-2xl"
+        className="relative my-auto w-full max-w-md rounded-none border border-[var(--border)] bg-[var(--bg)] p-6 shadow-2xl"
         style={{ opacity: 0 }}
       >
         <ClosePositionForm
@@ -164,10 +179,15 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
           collateralSymbol={collateralSymbol}
           decimals={decimals}
           priceUsd={priceUsd}
+          lotExp={lotExp}
           isLong={isLong}
           loading={loading}
           tradingFeeBps={tradingFeeBps}
           oracleStale={oracleStale}
+          oraclePriceBehind={oraclePriceBehind}
+          priceAgeSecs={priceAgeSecs}
+          settleMarkE6={settleMarkE6}
+          engineCatchingUp={engineCatchingUp}
           error={error}
           maxFillAbs={maxFillAbs}
           previewUnavailable={previewUnavailable}

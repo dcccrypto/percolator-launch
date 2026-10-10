@@ -32,7 +32,6 @@ import {
   getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
 import {
-  ACCOUNTS_CREATE_LP_VAULT,
   ACCOUNTS_LP_VAULT_DEPOSIT,
   WELL_KNOWN,
   buildAccountMetas,
@@ -41,6 +40,9 @@ import {
   encodeCreateLpVaultV17,
   encodeDepositToLpVault,
 } from "@percolatorct/sdk";
+import { createLpVaultKeys } from "@/lib/v22/create-lp-vault";
+import { isShareNamingEnabled, shareTickerFor } from "@/lib/v22/share-naming";
+import { buildInitLpShareMetadataIxV22 } from "@/lib/v22/sdk";
 
 /** Wrapper PercolatorError::LpVaultBackingBucketNotEmpty (v16_program.rs:1066). */
 export const LP_VAULT_BACKING_BUCKET_NOT_EMPTY_CODE = 63;
@@ -79,6 +81,18 @@ export interface EarnVaultSeedArgs {
   seedPerDomain: bigint;
   /** false when the registry already exists (resume) — then only ATA + deposits. */
   includeCreate: boolean;
+  /**
+   * The market's primary collateral mint (`config.collateralMint`). v2.2 (flag on): tag 74's required account `[6]`; flag off: ignored.
+   * Required with the flag on whenever `includeCreate` (the six-account form is refused on chain).
+   */
+  collateralMint?: PublicKey | null;
+  /**
+   * v2.2 (flag on): the market's symbol, reduced to the share token's ticker (tag 122, `A-Z0-9` up to 8; the generic form when empty).
+   * Tag 122 follows tag 74 in the same transaction, signed by marketauth (`wallet`), before any marketauth handoff. Flag off: ignored.
+   */
+  shareSymbol?: string | null;
+  /** `false` leaves tag 122 out (balance preflight failed, or the retry after a naming failure). Default: named whenever naming is enabled. */
+  nameShare?: boolean;
 }
 
 /** Ordered instructions; never contains a direct TopUpBackingBucket. */
@@ -89,9 +103,8 @@ export function buildEarnVaultSeedInstructions(a: EarnVaultSeedArgs): Transactio
     ixs.push(
       buildIx({
         programId: a.programId,
-        keys: buildAccountMetas(ACCOUNTS_CREATE_LP_VAULT, {
-          admin: a.wallet, market: a.market, registry: a.registry, lpMint: a.lpMint,
-          systemProgram: WELL_KNOWN.systemProgram, tokenProgram: WELL_KNOWN.tokenProgram,
+        keys: createLpVaultKeys({
+          admin: a.wallet, market: a.market, registry: a.registry, lpMint: a.lpMint, collateralMint: a.collateralMint,
         }),
         data: encodeCreateLpVaultV17({
           feeShareBps: EARN_VAULT_FEE_SHARE_BPS,
@@ -101,6 +114,15 @@ export function buildEarnVaultSeedInstructions(a: EarnVaultSeedArgs): Transactio
         }),
       }),
     );
+    // v2.2: name the share token right after the vault exists (registry + mint are initialised), while `wallet` is still marketauth.
+    // The wallet pays the record (it must hold 0.03 SOL for the instruction; ~0.0151 SOL is the net cost) and signs as marketauth.
+    if (isShareNamingEnabled() && a.nameShare !== false) {
+      ixs.push(
+        buildInitLpShareMetadataIxV22({
+          programId: a.programId, market: a.market, payer: a.wallet, ticker: shareTickerFor(a.shareSymbol), marketauth: a.wallet,
+        }),
+      );
+    }
   }
   const lpAta = getAssociatedTokenAddressSync(a.lpMint, a.wallet, false, WELL_KNOWN.tokenProgram);
   ixs.push(

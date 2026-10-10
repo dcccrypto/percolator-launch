@@ -22,6 +22,12 @@ import { MarketLogo } from '@/components/market/MarketLogo';
 import { formatCompact } from '@/lib/formatters';
 import { withdrawFlagLine } from '@/lib/limits/earn-withdrawable';
 import type { MarketVaultInfo } from '@/hooks/useEarnStats';
+import { PublicKey } from '@solana/web3.js';
+import { isDevnetV22Enabled } from '@/lib/v22/flag';
+import { useLpShareToken } from '@/hooks/useLpShareToken';
+import { BondCard } from '@/components/earn/BondCard';
+import { RescueAction } from '@/components/earn/RescueAction';
+import type { EarnV22Context } from '@/lib/v22/earn-context';
 
 /** Devnet slot time, for rendering the redemption cooldown as an approximate duration. */
 const SLOT_SECONDS = 0.4;
@@ -73,7 +79,7 @@ export function VaultDepositRail({ slab, vault, onTxSuccess, onPositionResolved 
 
 function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }: VaultDepositRailProps & { slab: string }) {
   const { state, loading, readError, deposit, withdraw, resizeRedemption, refreshState, lastDrawSummary } = useInsuranceLP();
-  const { config, raw: slabRaw } = useSlabState();
+  const { config, raw: slabRaw, programId: slabProgramId } = useSlabState();
   const wallet = useWalletCompat();
   const vaultAvailable = state.registryExists && state.mintExists;
 
@@ -91,6 +97,8 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
   const collateralSymbol = collateralMeta?.symbol ?? 'USDC';
   const collateralDecimals = collateralMeta?.decimals ?? 6;
   const collDivisor = 10 ** collateralDecimals;
+  // v2.2 (flag on; off = no request): the share token's own decimals and whether it has its name on chain.
+  const shareToken = useLpShareToken(slab, slabProgramId ?? null);
 
   const vaultUsd = Number(state.vaultTotalAtoms) / collDivisor;
   const positionUsd = Number(state.userVaultValueAtoms) / collDivisor;
@@ -117,7 +125,27 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
   const depositBlock = earnDepositPause(rawDepositBlock);
   const depositBlockedReason = depositBlock === 'senior-impaired' ? COPY.depositsPausedImpaired : null;
 
-  // Report the resolved deposit up so the table's "Your Deposit" column fills in
+  // Devnet v2.2 (flag-gated): the bond card and the rescue action read what the rail already has.
+  const v22Ctx: EarnV22Context | null =
+    isDevnetV22Enabled() && slabProgramId && config?.collateralMint
+      ? {
+          market: new PublicKey(slab),
+          programId: slabProgramId,
+          collateralMint: config.collateralMint,
+          decimals: collateralDecimals,
+          symbol,
+          registryDomain: state.lpVaultDomain,
+          lpPortfolio: marketLimits.vaultState ? new PublicKey(marketLimits.vaultState.lpPortfolio) : null,
+          view: trancheView,
+          registryShares: marketLimits.registryShares,
+          oiLongQ: marketLimits.engine?.oiEffLongQ ?? 0n,
+          oiShortQ: marketLimits.engine?.oiEffShortQ ?? 0n,
+          lpEffAbsQ: marketLimits.lpRealQ === null ? 0n : marketLimits.lpRealQ < 0n ? -marketLimits.lpRealQ : marketLimits.lpRealQ,
+          onDone: refreshState,
+        }
+      : null;
+
+  // Report the resolved deposit up so the table's "Your Value" column fills in
   // for this row as the user browses vaults.
   // Only once this vault's first read has landed: reporting the pre-load 0 would overwrite the
   // table's chain-read position (incl. a creator's seed) with "$—".
@@ -184,12 +212,21 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
             <Figure label="Fee" loading={!everLoaded} value={chargedTradeFeeLabel(slabRaw ? decodeMarketEngineView(slabRaw)?.tradeFeeBaseBps : null) ?? '—'} />
             <Figure label="Cooldown" loading={!everLoaded} value={slotsToLabel(state.redemptionCooldownSlots)} />
             <Figure
-              label="Your Deposit"
+              // What the position is worth now, not what went in: "Your Deposit" read a $500 deposit
+              // valued at $491.72 as money gone (Discord). The vault page calls it "Value" too.
+              label="Your Value"
               loading={!everLoaded}
               value={hasPosition ? `$${formatCompact(positionUsd)}` : '$—'}
               accent={hasPosition}
             />
           </div>
+          {/* Two-pot vault: 75 prices a deposit on NAV + harvestable LP fees, 77 pays on NAV alone
+              and doesn't harvest first, so a fresh deposit reads below what went in until a 78. */}
+          {everLoaded && state.splitPot && (
+            <p data-testid="earn-rail-pending-fees-note" className="mt-3 border-t border-[var(--border)]/60 pt-3 text-[11px] text-[var(--text-muted)]">
+              Your Value can read a little below what you put in until the vault collects its pending trading fees. Withdrawing before then forfeits your share of them.
+            </p>
+          )}
 
           {state.splitPot && state.splitPot.claimAdjustedNavAtoms !== null && state.splitPot.vaultMaxNowAtoms !== null && (
             <div className="mt-3 grid grid-cols-2 gap-3 border-t border-[var(--border)]/60 pt-3" data-testid="earn-rail-withdrawable">
@@ -231,6 +268,9 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
         </div>
       </div>
 
+      {v22Ctx && <RescueAction ctx={v22Ctx} />}
+      {v22Ctx && <BondCard ctx={v22Ctx} />}
+
       {/* Deposit / Withdraw — reused unchanged */}
       <DepositWithdrawPanel
         userBalance={state.userCollateralBalance}
@@ -239,6 +279,8 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
         lpSupply={state.lpSupply}
         vaultAvailable={vaultAvailable}
         decimals={collateralDecimals}
+        lpDecimals={isDevnetV22Enabled() ? shareToken.decimals ?? state.lpDecimals : undefined}
+        lpMetadataPresent={shareToken.metadataPresent}
         collateralSymbol={collateralSymbol}
         loading={loading}
         cooldownElapsed={state.cooldownElapsed}

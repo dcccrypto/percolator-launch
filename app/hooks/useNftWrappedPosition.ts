@@ -5,8 +5,9 @@ import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
-import { parsePositionNftAccount, parsePortfolioV17, isV17Account } from "@percolatorct/sdk";
+import { parsePositionNftAccount } from "@percolatorct/sdk";
 import { portfolioV17ToAccount, triggerHeldNftScan, type UserAccountInfo } from "@/lib/userAccountScan";
+import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 
 export interface NftWrappedPosition extends UserAccountInfo {
   /** The Token-2022 NFT mint that now escrows this position. */
@@ -43,7 +44,7 @@ export function useNftWrappedPosition(
   const { raw } = useSlabState();
   const [wrapped, setWrapped] = useState<NftWrappedPosition | null>(null);
 
-  const isV17Market = raw != null && raw.length > 0 && isV17Account(raw);
+  const isV17Market = raw != null && raw.length > 0 && isWrapperAccount(raw);
 
   useEffect(() => {
     if (!enabled || !isV17Market || !publicKey || !slabAddress) {
@@ -111,7 +112,7 @@ export function useNftWrappedPosition(
           if (!pfInfo) continue;
           let pf;
           try {
-            pf = parsePortfolioV17(new Uint8Array(pfInfo.data));
+            pf = parsePortfolio(new Uint8Array(pfInfo.data));
           } catch {
             continue;
           }

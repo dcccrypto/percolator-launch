@@ -59,3 +59,22 @@ export function rowVolumeUsd(
   if (typeof usd === "number" && Number.isFinite(usd)) return usd;
   return qToUsd(row.volume_24h, row.last_price);
 }
+
+/**
+ * "≈ $200.12": a position's size (Q, signed) valued at the mark, for the small
+ * line under a size shown in base units. Q, so Q_SCALE via qToUsd — never the
+ * mint's or the collateral's decimals.
+ *
+ * null when there is no position or no usable mark: an unknown price is not a
+ * $0.00 position.
+ */
+export function positionSizeUsdText(
+  sizeQ: bigint,
+  markPriceE6: bigint | null | undefined,
+): string | null {
+  if (sizeQ === 0n || markPriceE6 == null || markPriceE6 <= 0n) return null;
+  const absQ = sizeQ < 0n ? -sizeQ : sizeQ;
+  const usd = qToUsd(Number(absQ), Number(markPriceE6) / 1_000_000);
+  if (usd == null) return null;
+  return `≈ $${usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}

@@ -1,4 +1,4 @@
-import { Connection, Transaction, TransactionInstruction, ComputeBudgetProgram, SendTransactionError, SystemProgram, TransactionExpiredBlockheightExceededError, VersionedTransaction } from "@solana/web3.js";
+import { Connection, PublicKey as PublicKeyCtor, Transaction, TransactionInstruction, ComputeBudgetProgram, SendTransactionError, SystemProgram, TransactionExpiredBlockheightExceededError, VersionedTransaction } from "@solana/web3.js";
 import { MAX_TX_COMPUTE_UNITS, sizeComputeUnitLimit, type CuSizing } from "@/lib/compute-budget";
 import bs58 from "bs58";
 import type { PublicKey, Signer } from "@solana/web3.js";
@@ -18,6 +18,8 @@ import {
 import type { AccountMeta } from "@solana/web3.js";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { resolveDevnetProgramIds } from "@/lib/program-ids";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { withMarketTailsV22 } from "@/lib/v22/market-tails";
 import type { SelfHealResult } from "@/lib/self-heal";
 import { getMaintenanceConfig, MaintenanceError } from "@/lib/maintenance";
 import { readU64LE } from "@/lib/u64le";
@@ -53,7 +55,10 @@ export interface SendTxParams {
   maxRetries?: number;
   /** Optional callback for confirmation progress (elapsed time in ms) */
   onProgress?: (elapsedMs: number) => void;
-  /** Optional AbortSignal to cancel confirmation polling */
+  /**
+   * Stops a tx that has NOT been signed yet: checked at entry (before anything is built or signed)
+   * and before a blockhash retry. A tx already broadcast is always followed to confirmation.
+   */
   abortSignal?: AbortSignal;
   /**
    * Skip preflight simulation on the RPC node. Use as a fallback when wallet
@@ -124,6 +129,9 @@ export class SimulationRefusal extends Error {
   readonly instructionIndex: number | null;
   /** Program id of the failing instruction (from the list, else the "Program X failed" log). */
   readonly programId: string | null;
+  /** Program and first data byte of the failing TOP-LEVEL instruction (not the innermost callee), when it is in the simulated list. */
+  readonly failingInstructionProgram: string | null;
+  readonly failingInstructionTag: number | null;
   constructor(err: unknown, logs: readonly string[] = [], instructions: readonly TransactionInstruction[] = []) {
     const failing = logs.filter((l) => l.includes("Error") || l.includes("failed") || l.includes("Program log:")).slice(-3).join("\n");
     super(`Transaction simulation failed: ${JSON.stringify(err)}` + (failing ? `\n${failing}` : ""));
@@ -149,6 +157,9 @@ export class SimulationRefusal extends Error {
     }
     if (!pid && index !== null && instructions[index]) pid = instructions[index].programId.toBase58();
     this.programId = pid;
+    const top = index !== null ? instructions[index] : undefined;
+    this.failingInstructionProgram = top ? top.programId.toBase58() : null;
+    this.failingInstructionTag = top ? top.data[0] ?? null : null;
   }
 }
 
@@ -624,7 +635,9 @@ async function checkSufficientBalance(
  * More reliable than confirmTransaction which can falsely report expiry.
  * 
  * @param onProgress - Optional callback for progress updates (elapsed time in ms)
- * @param abortSignal - Optional AbortSignal to cancel polling
+ * @param abortSignal - Optional AbortSignal to cancel polling. Only confirmSignatureByPolling (the
+ *   devnet airdrop) passes one: sendTx and broadcastSignedTx never do, since their tx is already
+ *   broadcast and a cancelled poll cannot stop it.
  */
 export async function pollConfirmation(
   connection: Connection,
@@ -749,7 +762,7 @@ export function isTxCancelledError(err: unknown): boolean {
 export async function sendTx({
   connection,
   wallet,
-  instructions,
+  instructions: instructionsIn,
   computeUnits = 200_000,
   signers = [],
   maxRetries = 2,
@@ -774,8 +787,8 @@ export async function sendTx({
   // had already unmounted — a wallet popup for a market the user had already
   // navigated away from. Checked before any tx is built or signed; a step
   // already broadcast when the signal fires is left to confirm normally (see
-  // the retry-loop check below and pollConfirmation's own abort check — both
-  // stop FUTURE signatures, never an already-submitted one).
+  // the retry-loop check below — it stops FUTURE signatures, never an
+  // already-submitted one; the confirmation poll ignores the signal).
   if (abortSignal?.aborted) {
     throw new TxCancelledError();
   }
@@ -789,6 +802,11 @@ export async function sendTx({
   // on the first submission of a session before the wallet popup could
   // appear). It self-caches for 5min; the warning below reads whatever the
   // last completed check found.
+  // Devnet v2.2 (flag-gated, no-op and no RPC otherwise): append the bond-tranche / insurance-units account the wrapper
+  // requires on tags 78 / 97 / 102 / 103 and 9 / 56 / 57 / 41 / 101 once the market has them (lib/v22/market-tails.ts).
+  const instructions = isDevnetV22Enabled()
+    ? await withMarketTailsV22(connection, new PublicKeyCtor(resolveDevnetProgramIds().wrapper), instructionsIn)
+    : instructionsIn;
   void checkClockDrift(connection).catch(() => {});
   const driftWarning = getClockDriftWarning();
   if (driftWarning) {
@@ -798,6 +816,10 @@ export async function sendTx({
 
   let lastError: Error | null = null;
   let lastSignature: string | undefined;
+  // Signature of the tx signed by THIS attempt's legacy path, known before it is broadcast. Used ONLY
+  // by the R2-S7 landed check; kept apart from `lastSignature` ("was sent atomically by the wallet"),
+  // which gates the PERC-8388 no-rebuild SAFETY branch below.
+  let preSendSignature: string | undefined;
 
   // P0b self-heal. Planned from the ORIGINAL instructions on EVERY attempt:
   // a repair that someone else (the keeper) landed meanwhile makes its engine
@@ -1042,6 +1064,15 @@ export async function sendTx({
           skipPreflight = true;
         }
 
+        // Capture the signature BEFORE broadcasting. A tx's signature is its
+        // fee payer's (first) signature and is fixed once signed, so we know it
+        // before sendRawTransaction. If the send then THROWS (timeout, dropped
+        // connection, blockhash lag on a load-balanced RPC) the tx may still
+        // have landed; without this, `lastSignature` stayed unset on a throw and
+        // the R2-S7 landed check in the catch below was silently skipped.
+        if (signed.signature) {
+          preSendSignature = bs58.encode(signed.signature);
+        }
         try {
           lastSignature = await connection.sendRawTransaction(signed.serialize(), {
             skipPreflight: skipPreflight ?? false,
@@ -1071,7 +1102,9 @@ export async function sendTx({
 
       // Poll for confirmation instead of using confirmTransaction
       // (confirmTransaction falsely reports "block height exceeded" on devnet)
-      await pollConfirmation(connection, lastSignature, onProgress, abortSignal);
+      // No abortSignal here: the tx is already broadcast, so aborting the poll cannot stop it. It
+      // only turned a trade that still fills into an error the ticket read as "nothing was sent".
+      await pollConfirmation(connection, lastSignature, onProgress);
 
       return lastSignature;
     } catch (e) {
@@ -1095,9 +1128,10 @@ export async function sendTx({
 
       if (isBlockhashExpired && attempt < maxRetries) {
         // R2-S7: Before retrying, check if the original tx actually landed
-        if (lastSignature) {
+        const landedCheckSig = preSendSignature ?? lastSignature;
+        if (landedCheckSig) {
           try {
-            const statusResp = await connection.getSignatureStatuses([lastSignature], {
+            const statusResp = await connection.getSignatureStatuses([landedCheckSig], {
               searchTransactionHistory: true,
             });
             const prevStatus = statusResp.value[0];
@@ -1107,7 +1141,7 @@ export async function sendTx({
               (prevStatus.confirmationStatus === "confirmed" ||
                 prevStatus.confirmationStatus === "finalized")
             ) {
-              return lastSignature; // Already landed — no retry needed
+              return landedCheckSig; // Already landed — no retry needed
             }
           } catch {
             // RPC error checking status — proceed with retry
@@ -1356,7 +1390,7 @@ export async function signAllCompat(
 export async function broadcastSignedTx(
   connection: Connection,
   signedTx: Transaction,
-  opts: { skipPreflight?: boolean; onProgress?: (elapsedMs: number) => void; abortSignal?: AbortSignal } = {},
+  opts: { skipPreflight?: boolean; onProgress?: (elapsedMs: number) => void } = {},
 ): Promise<string> {
   let signature: string;
   try {
@@ -1370,7 +1404,7 @@ export async function broadcastSignedTx(
     throw new Error(await buildSendErrorMessage(connection, sendErr), { cause: sendErr });
   }
   try {
-    await pollConfirmation(connection, signature, opts.onProgress, opts.abortSignal);
+    await pollConfirmation(connection, signature, opts.onProgress); // already broadcast: never aborted
   } catch (confirmErr) {
     // The tx WAS submitted (we have its signature) but confirmation failed —
     // attach the signature so a caller (the batch pipeline) can status-check it
@@ -1386,6 +1420,19 @@ export async function broadcastSignedTx(
     throw confirmErr;
   }
   return signature;
+}
+
+/**
+ * Confirm a signature someone else broadcast (a devnet airdrop) by polling its
+ * status. `connection.confirmTransaction(sig)` waits on a websocket notification
+ * and reports a timeout for a tx that landed when the notification is missed.
+ */
+export async function confirmSignatureByPolling(
+  connection: Connection,
+  signature: string,
+  abortSignal?: AbortSignal,
+): Promise<void> {
+  await pollConfirmation(connection, signature, undefined, abortSignal);
 }
 
 /** UX WP-2 (principle 3): re-simulation backoff while waiting for the market, before any prompt. */

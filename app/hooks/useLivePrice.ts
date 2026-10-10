@@ -35,6 +35,7 @@
  *      store is.)
  */
 
+import { observeLotExp } from "@/lib/v22/lot-registry";
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import useSWR from "swr";
 import { useSlabState } from "@/components/providers/SlabProvider";
@@ -117,6 +118,13 @@ export function useLivePrice(): PriceState {
       low24h: pricesJson.stats?.low24h ? Number(pricesJson.stats.low24h) / 1_000_000 : null,
     });
   }, [slabAddr, pricesJson]);
+
+  // v2.2 (N1): the lot exponent is a property of the MARKET, owned by lib/v22/lot-registry; the price store reads it from
+  // there for every slab. This hook only reports the slab bytes it already holds (a no-op with the flag off).
+  const { raw: slabRaw } = useSlabState();
+  useEffect(() => {
+    observeLotExp(slabAddr, slabRaw);
+  }, [slabAddr, slabRaw]);
 
   // DB last_price — cold-start seed only (fetched once; store enforces only-if-empty).
   const marketKey = slabAddr ? `/api/markets/${slabAddr}` : null;

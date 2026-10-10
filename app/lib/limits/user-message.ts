@@ -14,6 +14,9 @@ import { TICKET_FUNDS_LINE } from "./copy";
 import { V21_COPY } from "../v21/copy";
 import { isDevnetV21Enabled } from "../v21/flag";
 import { WRAPPER_ERR_V21 } from "../v21/wrapper-errors";
+import { isDevnetV22Enabled } from "../v22/flag";
+import { V22_NAME_BY_CODE } from "../v22/wrapper-errors";
+import { v22StakeMessage, v22WrapperMessage } from "../v22/error-message";
 import { resolveDevnetProgramIds } from "../program-ids";
 
 export type StatusVariant = "info" | "wait" | "paused" | "error";
@@ -62,6 +65,8 @@ export interface MessageContext {
    * "lower the size" is the wrong advice: a smaller order is refused the same way.
    */
   imFloorLabel?: string;
+  /** v2.2 band market: the minimum position size, already formatted ("100 TOKEN"), for the 113 line. */
+  minPositionLabel?: string;
 }
 
 export interface UserMessageAction {
@@ -88,6 +93,8 @@ export interface UserMessage {
   action?: UserMessageAction;
   /** The app retries on its own (wait loop / repair); the UI shows a calm waiting state. */
   autoRetry?: boolean;
+  /** v2.2: the quote the user signed against moved (117 / 124); re-quote and show the new minimum. */
+  requote?: boolean;
   /** Nothing to show (the user cancelled): the caller just restores the button. */
   quiet?: boolean;
   details: UserMessageDetails;
@@ -142,12 +149,13 @@ function safeJson(v: unknown): string {
   }
 }
 
-type Origin = "wrapper" | "matcher" | "other" | "unknown";
+type Origin = "wrapper" | "matcher" | "stake" | "other" | "unknown";
 function originOf(programId: string | null): Origin {
   if (!programId) return "unknown";
   const ids = resolveDevnetProgramIds();
   if (programId === ids.wrapper) return "wrapper";
   if (programId === ids.matcher) return "matcher";
+  if (isDevnetV22Enabled() && programId === ids.stake) return "stake";
   return "other";
 }
 
@@ -238,7 +246,7 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
   // A Custom(n) is decoded by the program that RAISED it (error-codes-4b1a5d30.md: CPI callees —
   // SPL Token, the matcher, stake, NFT — reuse the same numbers). No attribution => no guess.
   const wrapperish = origin === "wrapper";
-  const name = p.code !== null && wrapperish ? NAME_BY_CODE[p.code] ?? (isDevnetV21Enabled() ? V21_NAME_BY_CODE[p.code] : undefined) ?? null : null;
+  const name = p.code !== null && wrapperish ? NAME_BY_CODE[p.code] ?? (isDevnetV21Enabled() ? V21_NAME_BY_CODE[p.code] : undefined) ?? (isDevnetV22Enabled() ? V22_NAME_BY_CODE[p.code] : undefined) ?? null : null;
   const details: UserMessageDetails = { code: p.code, name, programId: p.programId, logs: p.logs, raw: p.raw };
   const m = (kind: string, variant: StatusVariant, title: string, body: string, extra: Partial<UserMessage> = {}): UserMessage => ({
     kind,
@@ -248,6 +256,8 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
     details,
     ...extra,
   });
+  const lpDepletedMsg = (vault?: boolean) =>
+    m("lp-depleted", "paused", "New positions paused", `${TICKET_FUNDS_LINE(vault === true)} Closing works normally.`);
   const sym = ctx.symbol ?? "";
   const s = sides(ctx.side);
   const useMax = ctx.maxNow ? { action: { id: "use-max" as const, label: `Use ${ctx.maxNow}` } } : {};
@@ -261,6 +271,10 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
   // over-impaired or the share price collapsed. Same line the program's Custom 91 gets.
   if ((err as { name?: string } | null)?.name === "EarnDepositsPausedError") {
     return m("earn-pot-impaired", "paused", "Deposits paused", EARN_DEPOSITS_PAUSED_BODY);
+  }
+  // v2.2: a builder and the wrapper's tail layout disagree (lib/v22/market-tails.ts); raised before the wallet prompt.
+  if ((err as { name?: string } | null)?.name === "MarketTailMismatchError") {
+    return m("market-tail", "paused", "Not available yet", "This action isn't available for this market yet. Nothing was sent.");
   }
   // UX WP-3: the user pressed Stop on a long wait (lib/tx.ts WaitStoppedError): nothing was sent.
   if ((err as { name?: string } | null)?.name === "WaitStoppedError") {
@@ -359,6 +373,18 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
     return m("market-unavailable", "paused", "Temporarily unavailable", "This market is temporarily unavailable. We've been notified.");
   }
 
+  // ── Devnet v2.2 (flag-gated): stake v5 33..45, wrapper 104..119 / 123 / 124 ─────────────
+  if (p.code !== null && isDevnetV22Enabled()) {
+    if (origin === "stake") {
+      const sv = v22StakeMessage(p.code, m);
+      if (sv) return sv;
+    }
+    if (wrapperish) {
+      const wv = v22WrapperMessage(p.code, ctx, m);
+      if (wv) return wv;
+    }
+  }
+
   // ── Wrapper codes ───────────────────────────────────────────────────────────
   if (p.code !== null && wrapperish && isDevnetV21Enabled()) {
     const v = v21WrapperMessage(p.code, ctx, m);
@@ -388,8 +414,7 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
           return m("earn-deposit-wait", "wait", "Vault updating", "This vault is updating after a market move. Nothing was deposited. Try again in a moment.");
         if (h.adlReduceOnly && ctx.surface === "trade")
           return m("adl-reduce-only", "paused", "Close-only for now", "Closing works normally. New positions reopen once the positions on one side have closed, which depends on those traders and can take a while.");
-        if (h.lpDepleted && ctx.surface === "trade")
-          return m("lp-depleted", "paused", "New positions paused", `${TICKET_FUNDS_LINE(h.lpIsVault === true)} Closing works normally.`);
+        if (h.lpDepleted && ctx.surface === "trade") return lpDepletedMsg(h.lpIsVault);
         if (h.lossStale) return m("loss-stale", "wait", "Refreshing positions", "Positions on this market are being refreshed after a price move. New trades wait until that finishes.", { autoRetry: true });
         return ctx.surface === "trade"
           // Only the trade ticket waits through this and resends (sendTxWaiting); nothing reads
@@ -398,6 +423,11 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
           : m("engine-catching-up", "wait", "Catching up", "The market is catching up with the latest prices. Try again in a moment.");
       }
       case W.EngineInsufficientInitialMargin:
+        // The IM gate runs on the LP side of the fill too: with the counterparty below the floor every
+        // open is 49 whatever the trader deposits (STONK 2026-10-07), so "add collateral" is the wrong
+        // advice. Outranks the trader's own floor label, which the trader can act on. OrderTicket resolves
+        // here before safeExplainMarketTxError, so market-error's refinement never sees a 49.
+        if (ctx.health?.lpDepleted && ctx.surface === "trade") return lpDepletedMsg(ctx.health.lpIsVault);
         if (ctx.imFloorLabel) {
           return m("insufficient-margin", "error", "Not enough margin", `New positions on this market need at least ${ctx.imFloorLabel} of margin.`);
         }

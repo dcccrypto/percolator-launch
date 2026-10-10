@@ -3,6 +3,7 @@
 import { usePortfolio } from "@/hooks/usePortfolio";
 import { useLivePortfolioMetrics } from "@/hooks/useLivePortfolioMetrics";
 import { unknownPnlCaveat } from "@/lib/position-pnl";
+import { formatSignedUsd } from "@/lib/pnl-card";
 
 /**
  * PnL Chart — shows real portfolio PnL.
@@ -61,7 +62,7 @@ export function PnlChart() {
           <div className="text-center">
             <p className={`text-4xl font-bold tabular-nums ${allUnknown ? "text-[var(--text-secondary)]" : isPositive ? "text-[var(--long)]" : "text-[var(--short)]"}`}
                style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
-              {allUnknown ? "--" : <>{isPositive ? "+" : ""}${Math.abs(pnlFloat).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</>}
+              {allUnknown ? "--" : formatSignedUsd(pnlFloat)}
             </p>
             {caveat && <p className="mt-1 text-[9px] text-[var(--text-secondary)]" data-testid="pnl-caveat">{caveat}</p>}
             <p className="mt-1 text-[9px] text-[var(--text-secondary)]">

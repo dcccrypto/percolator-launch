@@ -24,6 +24,7 @@ import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { getConfig } from "@/lib/config";
 import { isBlockedSlab } from "@/lib/blocklist";
 import { isLpPortfolio } from "@/lib/userAccountScan";
+import { parsePortfolio } from "@/lib/v22/layout";
 
 /** v17 portfolio magic + offsets — same constants useTrade/useClosePosition pin. */
 const V17_PORTFOLIO_MAGIC = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
@@ -70,7 +71,7 @@ export function useRetiredHoldings(): { holdings: RetiredHolding[]; loading: boo
           ).toBase58();
           if (!isBlockedSlab(slabAddress)) continue;
           try {
-            const pf = parsePortfolioV17(new Uint8Array(data));
+            const pf = parsePortfolio(new Uint8Array(data));
             const leg = pf.legs.find((l) => l.active);
             const positionSizeQ = leg ? BigInt(leg.basisPosQ) : 0n;
             if (pf.capital > 0n || positionSizeQ !== 0n) {

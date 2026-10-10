@@ -57,12 +57,12 @@ import {
   buildIx,
   encodeConvertReleasedPnl,
   encodePermissionlessCrank,
-  parsePortfolioV17,
 } from "@percolatorct/sdk";
 import type { PortfolioLegV17, PortfolioSourceDomainV17, PortfolioV17 } from "@percolatorct/sdk";
 import { defaultCrankObservations } from "@/lib/v18-wire";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { parseCustomInstructionError } from "@/lib/self-heal";
+import { parsePortfolio } from "@/lib/v22/layout";
 
 export const CONVERT_RELEASED_PNL_TAG = 28;
 /** percolator src/lib.rs:25-26. */
@@ -332,7 +332,7 @@ export interface QuoteParams {
  * that do it. Tries tag 28 alone, then with the recertify crank in front on Stale(19).
  */
 export async function quoteConvertible(p: QuoteParams, deps: QuoteDeps): Promise<ConvertQuote> {
-  const pf = parsePortfolioV17(p.portfolioData);
+  const pf = parsePortfolio(p.portfolioData);
   if (pf.legs.some((l) => l.active)) return { status: "none" }; // withdraw is flat-only (v16.rs:20416-20418)
   const gate = convertGate(pf);
   if (gate.kind === "nothing") return { status: "none" };
@@ -355,7 +355,7 @@ export async function quoteConvertible(p: QuoteParams, deps: QuoteDeps): Promise
     const r = await deps.simulate(prefix, p.portfolio);
     if (r.rpcFailed) return { status: "settling", released: gate.released, code: null };
     if (!r.err && r.postData) {
-      const post = parsePortfolioV17(r.postData);
+      const post = parsePortfolio(r.postData);
       // Read the program's own result: what tag 28 moved (and anything the recertify
       // crank settled) is exactly post.capital − capital.
       const convertible = post.capital - pf.capital;
@@ -390,7 +390,7 @@ export async function convertPrefixForWithdraw(
   p: QuoteParams & { amount: bigint },
   deps: QuoteDeps,
 ): Promise<TransactionInstruction[]> {
-  const pf = parsePortfolioV17(p.portfolioData);
+  const pf = parsePortfolio(p.portfolioData);
   if (p.amount <= pf.capital || pf.legs.some((l) => l.active)) return [];
   if (pf.pnl <= 0n) throw new WithdrawRefusal(WITHDRAW_EXCEEDS_BALANCE_MESSAGE);
   const quote = await quoteConvertible(p, deps);

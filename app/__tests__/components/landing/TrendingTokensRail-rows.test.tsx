@@ -6,7 +6,7 @@
  * unavailable / nothing matched. Its copy must never imply Percolator vetted the
  * tokens.
  */
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
@@ -28,10 +28,14 @@ vi.mock("@/components/market/MarketLogo", () => ({ MarketLogo: () => null }));
 
 import { TrendingTokensRail, TRENDING_COPY } from "@/components/landing/TrendingTokensRail";
 
-const tok = (mint: string, symbol: string) => ({
+const tok = (mint: string, symbol: string, over: Record<string, unknown> = {}) => ({
   mint, symbol, name: `${symbol} name`, logoUrl: null, dexId: "pumpswap", source: "geckoterminal",
   chartUrl: `https://dexscreener.com/solana/Pool${mint}`,
-  priceUsd: 0.5, marketCapUsd: 1_000_000, volume24hUsd: 100_000, liquidityUsd: 50_000,
+  priceUsd: 0.5, marketCapUsd: 1_000_000,
+  volume24hUsd: 100_000, volume1hUsd: 5_000, liquidityUsd: 50_000,
+  priceChange1hPct: 12.5, priceChange24hPct: -3.2,
+  trend: [1, 2, 3, 4], score1h: 5_000, score24h: 100_000,
+  ...over,
 });
 const ok = (tokens: unknown[]) => ({ tokens, generatedAt: "", sourceEmpty: false });
 const hrefs = () => screen.queryAllByRole("link").map((a) => a.getAttribute("href"));
@@ -133,5 +137,42 @@ describe("TrendingTokensRail copy", () => {
     h.swr.data = { tokens: [], generatedAt: "", sourceEmpty: true };
     const { container } = render(<TrendingTokensRail />);
     expect(container.textContent).not.toMatch(/safety screen|vetted|verified/i);
+  });
+});
+
+describe("TrendingTokensRail filters", () => {
+  it("defaults to the 1H window and swaps the Vol / Change column when 24H is chosen", () => {
+    h.swr.data = ok([tok("MintAAA", "AAA")]);
+    render(<TrendingTokensRail />);
+    // Default 1h: 1h column label + the 1h change value.
+    expect(screen.getByText("1h Vol")).toBeTruthy();
+    expect(screen.getByText("+12.5%")).toBeTruthy();
+    // Switch to 24H: the column header + value follow the window.
+    fireEvent.click(screen.getByRole("radio", { name: "24H" }));
+    expect(screen.getByText("24h Vol")).toBeTruthy();
+    expect(screen.getByText("-3.2%")).toBeTruthy();
+    expect(screen.queryByText("1h Vol")).toBeNull();
+  });
+
+  it("re-ranks by the selected window's momentum score", () => {
+    // AAA leads on 24h; BBB leads on 1h. The order must follow the active window.
+    h.swr.data = ok([
+      tok("MintAAA", "AAA", { score24h: 999, score1h: 1 }),
+      tok("MintBBB", "BBB", { score24h: 1, score1h: 999 }),
+    ]);
+    render(<TrendingTokensRail />);
+    const order = () => screen.queryAllByText(/^(AAA|BBB)$/).map((n) => n.textContent);
+    expect(order()).toEqual(["BBB", "AAA"]); // 1h default
+    fireEvent.click(screen.getByRole("radio", { name: "24H" }));
+    expect(order()).toEqual(["AAA", "BBB"]); // 24h re-rank
+  });
+
+  it("the Show control caps how many rows render (Show 5)", () => {
+    h.swr.data = ok(Array.from({ length: 8 }, (_, i) => tok(`Mint${i}`, `T${i}`, { score24h: 100 - i })));
+    render(<TrendingTokensRail />);
+    const createLinks = () => hrefs().filter((u) => u?.startsWith("/create")).length;
+    expect(createLinks()).toBe(8); // default 20 → all 8
+    fireEvent.click(screen.getByRole("radio", { name: "5" }));
+    expect(createLinks()).toBe(5);
   });
 });

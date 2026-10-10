@@ -163,9 +163,12 @@ describe("no client hook discards a confirmTransaction result", () => {
       fs.readdirSync(HOOKS_DIR).filter((n) => /.tsx?$/.test(n)).map((n) => path.join(HOOKS_DIR, n)),
     );
 
-  it("finds the call sites at all (guards the scan itself)", () => {
-    // useCreateMarket (3), useReclaimSlabRent, useMintPositionNft, useTransferPositionNft.
-    expect(hookSites().length).toBeGreaterThanOrEqual(6);
+  it("no client hook calls confirmTransaction at all", () => {
+    // Every hook confirms by polling (broadcastSignedTx / confirmSignatureByPolling). The last
+    // three sites, in useCreateMarket, waited on a websocket notification and reported a
+    // timeout for transactions that had landed (2026-10-06). The scan itself is guarded by
+    // the server-route block above, which uses the same callSites().
+    expect(hookSites().map((s) => `hooks/${s.file}:${s.line}`)).toEqual([]);
   });
 
   it("checks every one of them", () => {

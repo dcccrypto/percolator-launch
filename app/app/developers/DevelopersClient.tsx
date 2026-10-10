@@ -117,7 +117,7 @@ export const DevelopersClient: FC<Props> = ({
 
           <div className="grid gap-6 sm:grid-cols-2">
             {/* H — Haircut Ratio */}
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] p-6">
+            <div className="min-w-0 rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] p-6">
               <h3 className="mb-1 font-mono text-xs font-semibold uppercase tracking-widest text-[var(--accent-text)]">
                 H — Fair Exits (Haircut Ratio)
               </h3>
@@ -132,7 +132,7 @@ effective_pnl_i = ⌊max(PNL_i, 0) × h⌋`}
             </div>
 
             {/* A/K — Lazy Side Indices */}
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] p-6">
+            <div className="min-w-0 rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] p-6">
               <h3 className="mb-1 font-mono text-xs font-semibold uppercase tracking-widest text-[var(--accent-text)]">
                 A/K — Fair Overhang Clearing
               </h3>

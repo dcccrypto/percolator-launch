@@ -43,12 +43,15 @@ const originalEnv = {
   NEXT_PUBLIC_SOLANA_NETWORK: process.env.NEXT_PUBLIC_SOLANA_NETWORK,
   ADMIN_API_SECRET: process.env.ADMIN_API_SECRET,
   MAINNET_RPC_URL: process.env.MAINNET_RPC_URL,
+  BLOB_READ_WRITE_TOKEN: process.env.BLOB_READ_WRITE_TOKEN,
 };
 
 process.env.NEXT_PUBLIC_DEFAULT_NETWORK = 'devnet';
 delete process.env.NEXT_PUBLIC_SOLANA_NETWORK;
 process.env.ADMIN_API_SECRET = state.adminSecret;
 process.env.MAINNET_RPC_URL = 'https://mainnet.test';
+// The Blob store is mocked below; a configured store also has a token (no token = no store).
+process.env.BLOB_READ_WRITE_TOKEN = 'vercel_blob_rw_test';
 
 vi.mock('@/lib/config', () => ({
   getConfig: vi.fn(() => ({
@@ -330,6 +333,12 @@ beforeEach(() => {
 });
 
 afterAll(() => {
+  if (originalEnv.BLOB_READ_WRITE_TOKEN === undefined) {
+    delete process.env.BLOB_READ_WRITE_TOKEN;
+  } else {
+    process.env.BLOB_READ_WRITE_TOKEN = originalEnv.BLOB_READ_WRITE_TOKEN;
+  }
+
   if (originalEnv.NEXT_PUBLIC_DEFAULT_NETWORK === undefined) {
     delete process.env.NEXT_PUBLIC_DEFAULT_NETWORK;
   } else {

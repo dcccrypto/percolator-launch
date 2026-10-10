@@ -1,6 +1,7 @@
 "use client";
 
-import { FC, useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { tokenUsdOfLotUsd } from "@/lib/v22/lot";
+import { FC, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { PublicKey } from "@solana/web3.js";
 import type { CreatedMarket } from "@/hooks/useCreatedMarkets";
@@ -19,7 +20,10 @@ import { ZERO_PUBKEY } from "@/lib/update-asset-authority-keys";
 import { computeMarketHealthFromStats } from "@/lib/health";
 import { HealthBadge } from "@/components/market/HealthBadge";
 import { MarketLogo } from "@/components/market/MarketLogo";
-import { resolveIdentity, type ResolvedIdentity } from "@/lib/bulk-identity";
+import { resolveIdentity, sawPlaceholderTicker, type ResolvedIdentity } from "@/lib/bulk-identity";
+import { isMarketauthComplete } from "@/lib/market-completeness";
+import { classifyLaunchStage, launchRowTitle, savedLaunchIdentity, LAUNCH_UNFINISHED_TITLE } from "@/lib/unfinished-launch";
+import { UnfinishedLaunchPanel } from "./UnfinishedLaunchPanel";
 import { classifyClaimable } from "@/lib/creator-fee-summary";
 import { useClaimCreatorFees } from "@/hooks/useClaimCreatorFees";
 import { LogoUpload } from "@/components/create/LogoUpload";
@@ -34,6 +38,15 @@ import { CreatorTranchePanel } from "@/components/limits/CreatorLimits";
  *  on-chain slot. Distinct signal from HealthBadge's liquidity ratio. */
 const V17_STALE_THRESHOLD_SLOTS = 500;
 
+/** localStorage, or null where it is blocked or absent (private mode, SSR). */
+function safeLocalStorage(): Storage | null {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
 function shortAddr(addr: string): string {
   return addr.slice(0, 6) + "..." + addr.slice(-4);
 }
@@ -43,7 +56,11 @@ function shortAddr(addr: string): string {
 const LiveRowPrice: FC<{ slab: string; fallback: number | null }> = ({ slab, fallback }) => {
   const subscribe = useCallback((cb: () => void) => subscribeSlab(slab, cb), [slab]);
   const getSnap = useCallback(() => getSnapshot(slab).priceUsd, [slab]);
-  const live = useSyncExternalStore(subscribe, getSnap, () => null);
+  const getLot = useCallback(() => getSnapshot(slab).lotExp ?? 0, [slab]);
+  const liveLot = useSyncExternalStore(subscribe, getSnap, () => null);
+  const lotExp = useSyncExternalStore(subscribe, getLot, () => 0);
+  // The store is per LOT (v2.2); the row shows per TOKEN. Identity at lotExp = 0.
+  const live = liveLot == null ? null : tokenUsdOfLotUsd(liveLot, lotExp);
   return <>{formatUsdFromNumber(live ?? fallback)}</>;
 };
 
@@ -226,7 +243,10 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
   // The burn writes the zero key into asset_admin (useAdminActions.renounceAdmin), which the detail
   // route serves as creator_fee_authority. Burned is then a fact about the market, not a wallet
   // mismatch, so the drawer must not ask the creator to "connect the creator wallet".
-  const adminBurned = detail?.creator_fee_authority === ZERO_PUBKEY.toBase58();
+  // `burnedHere` covers the time until the detail refetch shows the zero key: without it the
+  // button stayed "burn admin key" after a burn and offered the same burn again.
+  const [burnedHere, setBurnedHere] = useState(false);
+  const adminBurned = burnedHere || detail?.creator_fee_authority === ZERO_PUBKEY.toBase58();
   const marketAuthB58 = market.configV17?.marketauth?.toBase58() ?? null;
   const isMarketAuth = !!walletB58AdminGate && !!marketAuthB58 && marketAuthB58 === walletB58AdminGate;
   const rowClaim = useClaimCreatorFees();
@@ -300,7 +320,9 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
   // only refreshes every 30s via useCreatedMarkets' enrichment interval, so
   // tying this specific figure to a per-tick re-render isn't worth it);
   // falls back to the oracle price above when the feed hasn't ticked yet.
-  const priceUsdForOi = getSnapshot(slab).priceUsd ?? fallbackPriceUsd;
+  // Per-LOT unit (OI is in lots): the store is per lot; the per-token fallback is scaled up by 10^lotExp.
+  const snapForOi = getSnapshot(slab);
+  const priceUsdForOi = snapForOi.priceUsd ?? (fallbackPriceUsd == null ? null : fallbackPriceUsd * 10 ** (snapForOi.lotExp ?? 0));
   const oiUsd = oiAtoms != null && priceUsdForOi != null && priceUsdForOi > 0
     // v17 OI is engine Q (1e6), not the collateral mint's decimals
     ? (Number(oiAtoms) / (isV17 ? Q_SCALE : 10 ** decimals)) * priceUsdForOi
@@ -324,13 +346,30 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
   // key at all for any market absent from PLAYGROUND_SLAB_META and the
   // registration blob, so the row painted its real ticker and then DEGRADED to
   // `market.label` a second later. Per field, identity only ever sharpens.
-  const resolved = resolveIdentity(detail, identity);
-  const symbol = resolved.symbol ?? market.label;
+  //
+  // The indexer's "UNKNOWN" placeholder is no ticker (resolveIdentity drops it), and what the
+  // launching browser saved about the token (symbol/name) is the last, lowest-precedence source
+  // (#3266).
+  const savedIdentity = useMemo(() => savedLaunchIdentity(slab, safeLocalStorage()), [slab]);
+  const resolved = resolveIdentity(detail, identity, savedIdentity);
+  // An unfinished launch is a chain fact: marketauth is still the creator's wallet until the final
+  // step rotates it to the stake-pool PDA (lib/market-completeness.ts).
+  const unfinished = isV17 && !!market.configV17?.marketauth && !isMarketauthComplete(market.configV17.marketauth, market.slabAddress);
+  const launchStage = unfinished ? classifyLaunchStage(v17Stats?.launch, insuranceAtoms ?? null) : null;
+  // A committed launch can only be finished: no close button, no dead-end checklist.
+  const removalImpossible = launchStage?.kind === "committed";
+  const symbol = launchRowTitle({
+    symbol: resolved.symbol,
+    unfinished,
+    sawPlaceholder: sawPlaceholderTicker(detail, identity),
+    fallbackLabel: market.label,
+  });
   const closeChecks = closeMarketChecklist({
     claimableFeeAtoms: claimState.kind === "claimable" ? claimState.atoms : claimState.kind === "none" ? 0n : null,
     // The wallet's own accounts are closed inside the close itself; others are not decodable here.
     otherOpenAccounts: null,
     insuranceAtoms: insuranceAtoms ?? null,
+    unfinished,
   });
   const closeBlocker = firstUnmet(closeChecks);
   const name = resolved.name ?? undefined;
@@ -338,9 +377,11 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
   const [showBurnConfirm, setShowBurnConfirm] = useState(false);
   const [burnConfirmText, setBurnConfirmText] = useState("");
   const [showTopUpInput, setShowTopUpInput] = useState(false);
-  // Unknown until the drawer's SlabProvider reads it: leave the action as it was until then.
+  // Unknown (null) until the drawer's SlabProvider reads it: the action stays disabled until the
+  // authority is known, because TopUpInsurance is callable only by that authority.
   const [insuranceAuthority, setInsuranceAuthority] = useState<string | null>(null);
-  const canTopUpInsurance = insuranceAuthority === null || insuranceAuthority === (wallet.publicKey?.toBase58() ?? "");
+  const insuranceAuthorityKnown = insuranceAuthority !== null;
+  const canTopUpInsurance = insuranceAuthorityKnown && insuranceAuthority === (wallet.publicKey?.toBase58() ?? "");
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
 
   async function handleAction(name: string, fn: () => Promise<string>) {
@@ -363,6 +404,7 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
   const handleBurnAdmin = useCallback(async () => {
     try {
       await actions.renounceAdmin(market);
+      setBurnedHere(true);
       // The market stays in Your Markets: useCreatedMarkets lists every market whose LP
       // portfolio this wallet owns (owner @116), and burning asset_admin doesn't change that.
       toast("Admin key burned. The market stays in Your Markets because your wallet still owns its liquidity position.", "success");
@@ -393,6 +435,9 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
         <MarketLogo logoUrl={resolved.logo_url ?? undefined} mainnetCa={resolved.mainnet_ca} symbol={symbol} size="sm" decorative />
         <div className="min-w-[92px]">
           <p className="text-[13px] font-semibold text-[var(--text)]">{symbol}</p>
+          {unfinished && symbol !== LAUNCH_UNFINISHED_TITLE && (
+            <p data-testid="unfinished-pill" className="text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--warning)]">launch unfinished</p>
+          )}
           <p className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>{shortAddr(slab)}</p>
           {hasClaimableFees && claimState.kind === "claimable" && (
             // Not inside the row's expand <button>: nesting a button in a button
@@ -511,11 +556,22 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
             </SlabProvider>
           </div>
 
+          {launchStage && (
+            <UnfinishedLaunchPanel
+              stage={launchStage}
+              continueHref={`/create?resume=${slab}`}
+              onReclaim={() => setShowCloseConfirm(true)}
+              reclaiming={closeMarket.loading}
+              reclaimBlockedReason={!isMarketAuth ? "Connect the wallet that launched this market to reclaim its rent." : closeBlocker?.unmetLine ?? null}
+              error={closeMarket.error}
+            />
+          )}
+
           <div className="flex flex-wrap items-center gap-3 border-t border-[var(--border)]/30 pt-3">
             <button
               onClick={() => setShowTopUpInput(true)}
               disabled={actions.loading === "topUpInsurance" || !canTopUpInsurance}
-              title={canTopUpInsurance ? undefined : "This market's insurance is managed by its stake pool. Add to it from Stake."}
+              title={canTopUpInsurance ? undefined : insuranceAuthorityKnown ? "This market's insurance is managed by its stake pool. Add to it from Stake." : "Checking who can top up this market's insurance…"}
               className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-dim)] hover:text-[var(--text)] transition-colors disabled:opacity-40">
               top up insurance
             </button>
@@ -530,7 +586,7 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
                 preserved from the flow this replaces (see PR description). */}
             <button
               onClick={() => setShowBurnConfirm(true)}
-              disabled={actions.loading === "renounceAdmin" || !isAssetAdmin}
+              disabled={actions.loading === "renounceAdmin" || !isAssetAdmin || adminBurned}
               title={
                 adminBurned
                   ? "The admin key is already burned."
@@ -542,22 +598,27 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
             >
               {adminBurned ? "admin key burned" : "burn admin key"}
             </button>
-            <button
-              data-testid="close-market-button"
-              onClick={() => setShowCloseConfirm(true)}
-              disabled={closeMarket.loading || closeBlocker !== null || !isMarketAuth}
-              title={isMarketAuth ? undefined : "This market is autonomous — admin was renounced to the stake-pool program at creation, so it can't be closed."}
-              className="text-[10px] uppercase tracking-[0.1em] text-[var(--short)]/70 hover:text-[var(--short)] transition-colors disabled:opacity-40"
-            >
-              {closeMarket.loading ? "closing…" : "close market"}
-            </button>
+            {/* An unfinished launch that already holds a portfolio or funds can never be closed
+                (CloseSlab refuses it), so it gets no close button; the panel above says why and
+                offers Continue (#3266). */}
+            {!removalImpossible && (
+              <button
+                data-testid="close-market-button"
+                onClick={() => setShowCloseConfirm(true)}
+                disabled={closeMarket.loading || closeBlocker !== null || !isMarketAuth}
+                title={isMarketAuth ? undefined : "This market is autonomous — admin was renounced to the stake-pool program at creation, so it can't be closed."}
+                className="text-[10px] uppercase tracking-[0.1em] text-[var(--short)]/70 hover:text-[var(--short)] transition-colors disabled:opacity-40"
+              >
+                {closeMarket.loading ? "closing…" : unfinished ? "reclaim rent" : "close market"}
+              </button>
+            )}
           </div>
           {/* UX WP-9 (§3.11): the preconditions BEFORE the button, never "closeSlab will tell you". */}
-          <CloseMarketChecklistView checks={closeChecks} />
+          {!removalImpossible && <CloseMarketChecklistView checks={closeChecks} />}
           {!isMarketAuth && (
             <p className="mt-2 text-[10px] text-[var(--text-secondary)]">
               This market is autonomous — admin control was permanently renounced to the stake-pool
-              program at creation, so it can’t be closed.{isAssetAdmin && " You can still burn your remaining admin key."}
+              program at creation, so it can’t be closed.{isAssetAdmin && !adminBurned && " You can still burn your remaining admin key."}
             </p>
           )}
           {closeMarket.error && (
@@ -589,8 +650,8 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
           from the flow this replaces; the gate text and disabled-until-exact-
           match behavior are unchanged. */}
       {showBurnConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="mx-4 max-w-md w-full rounded-none border border-[var(--border)]/50 bg-[var(--bg)] p-8">
+        <div className="fixed inset-0 z-50 flex justify-center overflow-y-auto overscroll-contain bg-black/60 py-4">
+          <div className="mx-4 my-auto max-w-md w-full rounded-none border border-[var(--border)]/50 bg-[var(--bg)] p-8">
             <h3 className="text-sm font-semibold uppercase tracking-[0.1em] text-[var(--text)]">burn admin key</h3>
             <p className="mt-2 text-[11px] text-[var(--text-secondary)]">
               This is permanent and irreversible. You will never be able to update config, set oracle, or perform any admin actions on this market again.
@@ -642,9 +703,9 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
       {/* Close market (CloseSlab) — irreversible + rent-reclaiming. */}
       <ConfirmDialog
         open={showCloseConfirm}
-        title={CLOSE_MARKET_COPY.title(symbol)}
-        description={CLOSE_MARKET_COPY.body(symbol, null)}
-        confirmLabel={CLOSE_MARKET_COPY.confirm}
+        title={unfinished ? CLOSE_MARKET_COPY.unfinishedTitle : CLOSE_MARKET_COPY.title(symbol)}
+        description={unfinished ? (launchStage?.kind === "removable" ? CLOSE_MARKET_COPY.unfinishedBodyConfirmedEmpty : CLOSE_MARKET_COPY.unfinishedBody) : CLOSE_MARKET_COPY.body(symbol, null)}
+        confirmLabel={unfinished ? CLOSE_MARKET_COPY.unfinishedConfirm : CLOSE_MARKET_COPY.confirm}
         danger
         onConfirm={handleClose}
         onCancel={() => setShowCloseConfirm(false)}

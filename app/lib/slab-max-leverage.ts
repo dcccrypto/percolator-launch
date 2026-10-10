@@ -1,6 +1,7 @@
-import { parseWrapperConfigV17, isV17Account, V17_HEADER_LEN } from "@percolatorct/sdk";
+import { parseWrapperConfigV17, V17_HEADER_LEN } from "@percolatorct/sdk";
 import { parseV17RiskParams } from "@/lib/v17-engine-config";
 import { leverageFromMarginBps } from "@/lib/market-params";
+import { isWrapperAccount } from "@/lib/v22/layout";
 
 /**
  * Max leverage from the slab's REAL on-chain initial_margin_bps, via the same
@@ -15,7 +16,7 @@ import { leverageFromMarginBps } from "@/lib/market-params";
  */
 export function maxLeverageFromSlab(data: Uint8Array): number | null {
   try {
-    if (!isV17Account(data)) return null;
+    if (!isWrapperAccount(data)) return null;
     const cfg = parseWrapperConfigV17(data, V17_HEADER_LEN);
     const risk = parseV17RiskParams(data, cfg.tradeFeeBps);
     if (!risk || risk.initialMarginBps <= 0n) return null;

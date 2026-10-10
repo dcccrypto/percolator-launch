@@ -2,7 +2,7 @@
 
 import { STAKE_COPY, cooldownDuration } from "@/lib/stake-copy";
 import { useStakeCooldown } from "@/hooks/useStakeCooldown";
-import { useEffect, useState, useCallback, useSyncExternalStore, type CSSProperties } from "react";
+import { useEffect, useId, useState, useCallback, useSyncExternalStore, type CSSProperties } from "react";
 import { DEVNET_PROGRAM_IDS } from "@/lib/program-ids";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
@@ -16,6 +16,9 @@ import { getConfig } from "@/lib/config";
 import { unpackAccount, getMint } from "@solana/spl-token";
 import { readPoolTotalLpSupply, stakeWithdrawChipAmount, valueStakePosition, withdrawAmountError } from "@/lib/stake-position";
 import { useStakeDepositByPool } from "@/hooks/useStakeDepositByPool";
+import { useStakeFirstLoss } from "@/hooks/useStakeFirstLoss";
+import { FirstLossDeposit } from "@/components/stake/FirstLossDeposit";
+import { V22_COPY } from "@/lib/v22/copy";
 import { useStakeWithdrawByPool } from "@/hooks/useStakeWithdrawByPool";
 import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
 import { formatTokenAmount } from "@/lib/format";
@@ -521,8 +524,12 @@ function YourPositionPanel({
   onManage,
   unreadable = 0,
   onRetry,
+  pending = false,
 }: {
   positions: UserPosition[];
+  /** The connected wallet's positions haven't been read yet (pools loading or the
+   *  scan in flight): neither "no positions" nor an error is known. */
+  pending?: boolean;
   /** Pools whose position could not be read (#2706) — 0 means every pool was
    *  read, so an empty list really is "no positions". -1 = the pool list
    *  itself failed, so no pool could be checked. */
@@ -548,7 +555,7 @@ function YourPositionPanel({
         )}
       </div>
 
-      {connected && unreadable !== 0 && (
+      {connected && !pending && unreadable !== 0 && (
         <div role="alert" data-testid="stake-positions-error" className="mb-3 border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-3 text-[11px] text-[var(--text-secondary)]">
           {unreadable < 0
             ? "Couldn't load your positions."
@@ -562,6 +569,10 @@ function YourPositionPanel({
       {!connected ? (
         <div className="border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-3 text-[11px] text-[var(--text-secondary)]">
           Connect a wallet to see your staked positions.
+        </div>
+      ) : pending ? (
+        <div data-testid="stake-positions-pending" className="border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-3 text-[11px] text-[var(--text-secondary)]">
+          Checking your positions…
         </div>
       ) : positions.length === 0 && unreadable !== 0 ? null : positions.length === 0 ? (
         <div className="border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-3 text-[11px] text-[var(--text-secondary)]">
@@ -601,20 +612,35 @@ function DepositWidget({
 }) {
   const { connected, publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
+  // Label ↔ field ids (the page also renders inside /earn, so no fixed ids).
+  const fieldId = useId();
   const [amount, setAmount] = useState("");
   const [walletBalanceRaw, setWalletBalanceRaw] = useState<bigint | null>(null);
   const [balanceDecimals, setBalanceDecimals] = useState(6);
   const [txStatus, setTxStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
 
   const [withdrawAmount, setWithdrawAmount] = useState("");
-  const [withdrawPosition, setWithdrawPosition] = useState<UserPosition | null>(null);
-  const [withdrawPositionLoading, setWithdrawPositionLoading] = useState(false);
+  const pool = pools.find((p) => p.id === selectedPool) ?? pools[0];
+  // Each read result is stored with the wallet + pool it was read for, and only counts
+  // while that pair is still selected. So after a pool or wallet change the previous
+  // position (and its Withdraw button) is never shown, not even for the frame before the
+  // new read starts; a refresh of the same pair keeps it on screen.
+  const withdrawKey =
+    connected && publicKey && pool?.slabAddress ? `${publicKey.toBase58()}:${pool.slabAddress}` : null;
+  const [withdrawRead, setWithdrawRead] = useState<{ key: string; position: UserPosition | null } | null>(null);
+  // The key whose balance could not be read (#2706): unknown, not "no balance".
+  const [withdrawErrorKey, setWithdrawErrorKey] = useState<string | null>(null);
+  const [withdrawReading, setWithdrawReading] = useState(false);
+  const withdrawPosition = withdrawRead !== null && withdrawRead.key === withdrawKey ? withdrawRead.position : null;
+  const withdrawPositionError = withdrawKey !== null && withdrawErrorKey === withdrawKey;
+  // Loading while a read runs, and for a selected pair that hasn't been read yet.
+  const withdrawPositionLoading =
+    withdrawReading || (withdrawKey !== null && withdrawRead?.key !== withdrawKey && !withdrawPositionError);
   const [withdrawRefreshKey, setWithdrawRefreshKey] = useState(0);
   // Live countdown for the Withdraw tab; at 0 re-read the position (the chain decides).
   const withdrawCooldown = useStakeCooldown(withdrawPosition, () => setWithdrawRefreshKey((k) => k + 1));
   const [withdrawTxStatus, setWithdrawTxStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
 
-  const pool = pools.find((p) => p.id === selectedPool) ?? pools[0];
   const amountNum = parseFloat(amount) || 0;
   // Exact deposit amount in base units (null = unparseable / too many decimals)
   // for the wallet-balance check; the float `amountNum` is display-only.
@@ -639,6 +665,10 @@ function DepositWidget({
     slabAddress: pool?.slabAddress ?? "",
     collateralMint: pool?.collateralMint ?? "",
   });
+
+  // Devnet v2.2 (flag-gated): a stake-v5 first-loss pool gets the consent deposit instead of the plain form.
+  // `firstLoss.pool` is null with the flag off and for every other pool, so nothing changes there.
+  const firstLoss = useStakeFirstLoss(pool?.slabAddress ?? "", pool?.collateralMint ?? "");
 
   // Withdraw for the currently SELECTED pool — same tx builder YourPositionPanel
   // uses, just parameterized by whichever pool is picked in the dropdown here
@@ -688,12 +718,15 @@ function DepositWidget({
   // currently-selected pool instead of scanning all pools for the first match.
   useEffect(() => {
     if (!connected || !publicKey || !pool?.slabAddress) {
-      setWithdrawPosition(null);
-      setWithdrawPositionLoading(false);
+      setWithdrawRead(null);
+      setWithdrawReading(false);
+      setWithdrawErrorKey(null);
       return;
     }
     let cancelled = false;
-    setWithdrawPositionLoading(true);
+    const readKey = `${publicKey.toBase58()}:${pool.slabAddress}`;
+    setWithdrawReading(true);
+    setWithdrawErrorKey(null);
     (async () => {
       try {
         // Stake pools are owned by this deployment's vault program
@@ -703,12 +736,17 @@ function DepositWidget({
           ?? DEVNET_PROGRAM_IDS.stake
         );
         const found = await fetchPoolPosition(pool, publicKey, connection, stakeProgramId);
-        if (!cancelled) setWithdrawPosition(found);
+        if (!cancelled) setWithdrawRead({ key: readKey, position: found });
       } catch (err) {
+        // fetchPoolPosition throws only when the pool could not be read; a confirmed
+        // "no position" resolves to null. So this is unknown, not empty.
         console.error("[DepositWidget] Failed to fetch withdraw position:", err);
-        if (!cancelled) setWithdrawPosition(null);
+        if (!cancelled) {
+          setWithdrawRead(null);
+          setWithdrawErrorKey(readKey);
+        }
       } finally {
-        if (!cancelled) setWithdrawPositionLoading(false);
+        if (!cancelled) setWithdrawReading(false);
       }
     })();
     return () => { cancelled = true; };
@@ -819,8 +857,9 @@ function DepositWidget({
 
         {/* Pool selector — shared between Deposit and Withdraw modes */}
         <div>
-          <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Select Pool</label>
+          <label htmlFor={`${fieldId}-pool`} className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Select Pool</label>
           <select
+            id={`${fieldId}-pool`}
             value={selectedPool}
             onChange={(e) => { setSelectedPool(e.target.value); setTxStatus(null); setWithdrawTxStatus(null); }}
             className="w-full border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2.5 text-[13px] text-[var(--text)] outline-none transition-colors focus:border-[var(--accent)]/50"
@@ -832,12 +871,19 @@ function DepositWidget({
           </select>
         </div>
 
-        {mode === "deposit" ? (
+        {mode === "deposit" && firstLoss.pool ? (
+          <FirstLossDeposit
+            slabAddress={pool?.slabAddress ?? ""}
+            collateralMint={pool?.collateralMint ?? ""}
+            decimals={balanceDecimals}
+            onDone={() => { setWithdrawRefreshKey((k) => k + 1); onTxSuccess?.(); }}
+          />
+        ) : mode === "deposit" ? (
           <>
             {/* Amount input */}
             <div>
               <div className="mb-1.5 flex items-center justify-between">
-                <label className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Amount</label>
+                <label htmlFor={`${fieldId}-deposit`} className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Amount</label>
                 {connected && walletBalance !== null && (
                   <button
                     type="button"
@@ -852,6 +898,7 @@ function DepositWidget({
               </div>
               <div className="flex gap-2">
                 <input
+                  id={`${fieldId}-deposit`}
                   type="number"
                   data-testid="stake-deposit-input"
                   value={amount}
@@ -965,7 +1012,7 @@ function DepositWidget({
             {/* Withdraw amount input */}
             <div>
               <div className="mb-1.5 flex items-center justify-between">
-                <label className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Amount</label>
+                <label htmlFor={`${fieldId}-withdraw`} className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Amount</label>
                 {connected && withdrawPosition && (
                   <button
                     type="button"
@@ -980,6 +1027,7 @@ function DepositWidget({
               </div>
               <div className="flex gap-2">
                 <input
+                  id={`${fieldId}-withdraw`}
                   type="number"
                   data-testid="stake-withdraw-input"
                   value={withdrawAmount}
@@ -1025,7 +1073,19 @@ function DepositWidget({
             {withdrawPositionLoading && (
               <p className="text-[11px] text-[var(--text-muted)]">Checking staked balance…</p>
             )}
-            {!withdrawPositionLoading && connected && !withdrawPosition && (
+            {!withdrawPositionLoading && connected && withdrawPositionError && (
+              <p role="alert" data-testid="stake-withdraw-read-error" className="text-[11px] text-[var(--text-secondary)]">
+                Couldn&apos;t read your staked balance in this pool.{" "}
+                <button
+                  type="button"
+                  onClick={() => setWithdrawRefreshKey((k) => k + 1)}
+                  className="text-[var(--accent-text)] transition-colors hover:text-[var(--accent)]"
+                >
+                  Try again
+                </button>
+              </p>
+            )}
+            {!withdrawPositionLoading && connected && !withdrawPositionError && !withdrawPosition && (
               <p className="text-[11px] text-[var(--text-muted)]">No staked balance in this pool.</p>
             )}
 
@@ -1042,6 +1102,10 @@ function DepositWidget({
                   ? "Cooldown complete — ready to withdraw."
                   : `${withdrawCooldown.label}.`}
               </p>
+            )}
+
+            {firstLoss.pool && (
+              <p data-testid="first-loss-withdraw-note" className="text-[11px] text-[var(--text-muted)]">{V22_COPY.stake.withdraw}</p>
             )}
 
             {/* Tx feedback */}
@@ -1071,7 +1135,9 @@ function DepositWidget({
                 {withdrawLoading
                   ? "Withdrawing…"
                   : !withdrawPosition
-                  ? "Nothing to Withdraw"
+                  ? withdrawPositionLoading
+                    ? "Checking…"
+                    : withdrawPositionError ? "Balance unavailable" : "Nothing to Withdraw"
                   : !withdrawPosition.cooldownElapsed
                   ? withdrawCooldown.label
                   : "Withdraw →"}
@@ -1111,14 +1177,20 @@ function PoolRow({
   connected,
   selected,
   onSelect,
+  positionsPending = false,
 }: {
   pool: StakePool;
   position?: UserPosition;
   connected: boolean;
   selected: boolean;
   onSelect: (poolId: string) => void;
+  positionsPending?: boolean;
 }) {
-  const yourStake = position ? formatUsd(position.estimatedValue) : connected ? "$—" : "—";
+  const yourStake = position
+    ? formatUsd(position.estimatedValue)
+    : connected
+      ? positionsPending ? "…" : "$—"
+      : "—";
 
   return (
     <div
@@ -1187,10 +1259,13 @@ function PoolTable({
   onSelect,
   loadError,
   onRetry,
+  positionsPending = false,
 }: {
   pools: StakePool[];
   loading: boolean;
   positions: UserPosition[];
+  /** The wallet's positions haven't been read yet: show "…", not "$—", per row. */
+  positionsPending?: boolean;
   connected: boolean;
   selectedPool: string;
   onSelect: (poolId: string) => void;
@@ -1313,6 +1388,7 @@ function PoolTable({
                 connected={connected}
                 selected={pool.id === selectedPool}
                 onSelect={onSelect}
+                positionsPending={positionsPending}
               />
             ))}
             {visiblePools.length === 0 && (
@@ -1415,6 +1491,10 @@ export default function StakePage() {
   // S-M1 fix: ALL positions the wallet holds across pools, not just the first
   // one found.
   const [positions, setPositions] = useState<UserPosition[]>([]);
+  // The wallet the last finished scan read. Until it matches the connected wallet,
+  // positions are unknown: shown as "Checking…", never as "No open positions" or as
+  // the previous wallet's positions. A refresh after a tx keeps the shown positions.
+  const [scannedFor, setScannedFor] = useState<string | null>(null);
   const [positionRefreshKey, setPositionRefreshKey] = useState(0);
   const [poolsRefreshKey, setPoolsRefreshKey] = useState(0);
 
@@ -1461,9 +1541,11 @@ export default function StakePage() {
     if (!connected || !publicKey || pools.length === 0) {
       setPositions([]);
       setPositionsUnreadable(0);
+      setScannedFor(null);
       return;
     }
     let cancelled = false;
+    const wallet = publicKey.toBase58();
 
     (async () => {
       try {
@@ -1493,11 +1575,13 @@ export default function StakePage() {
           .filter((p): p is UserPosition => p !== null);
         setPositions(found);
         setPositionsUnreadable(results.filter((r) => r.status === "rejected").length);
+        setScannedFor(wallet);
       } catch (err) {
         console.error("[StakePage] Failed to fetch user positions:", err);
         if (!cancelled) {
           setPositions([]);
           setPositionsUnreadable(pools.length);
+          setScannedFor(wallet);
         }
       }
     })();
@@ -1517,11 +1601,18 @@ export default function StakePage() {
     window.setTimeout(() => setPoolsRefreshKey((k) => k + 1), 2_000);
   }, []);
 
+  // Pools still loading, or a scan for this wallet not finished yet. A genuinely empty
+  // pool list (loaded, nothing to scan) is not pending.
+  const walletKey = publicKey?.toBase58() ?? null;
+  const positionsPending =
+    connected && walletKey !== null && (poolsLoading || (pools.length > 0 && scannedFor !== walletKey));
+  const shownPositions = positionsPending ? [] : positions;
+
   // S-M1 fix: sum across ALL positions, not just a single (possibly-missing) one.
   // #2706: if any pool could not be read (or the pool list failed), the total
   // is unknown — show it as unknown rather than an under-count or "$—".
   const totalUserDeposited =
-    connected && (positionsUnreadable > 0 || (poolsError && pools.length === 0))
+    connected && (positionsPending || positionsUnreadable > 0 || (poolsError && pools.length === 0))
       ? null
       : positions.length > 0
         ? positions.reduce((sum, p) => sum + p.estimatedValue, 0)
@@ -1561,7 +1652,8 @@ export default function StakePage() {
               <PoolTable
                 pools={pools}
                 loading={poolsLoading}
-                positions={positions}
+                positions={shownPositions}
+                positionsPending={positionsPending}
                 connected={connected}
                 selectedPool={selectedPool}
                 onSelect={(poolId) => selectPoolAndScroll(poolId, "deposit")}
@@ -1585,7 +1677,8 @@ export default function StakePage() {
             </ErrorBoundary>
             <ErrorBoundary label="Your Positions">
               <YourPositionPanel
-                positions={positions}
+                positions={shownPositions}
+                pending={positionsPending}
                 onWithdrawSuccess={handleTxSuccess}
                 onManage={(poolId) => selectPoolAndScroll(poolId, "withdraw")}
                 unreadable={poolsError && pools.length === 0 ? -1 : positionsUnreadable}

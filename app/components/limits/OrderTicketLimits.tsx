@@ -13,9 +13,9 @@ import type { TicketLimits } from "@/lib/limits/ticket";
 import type { MarketLimits } from "@/hooks/useMarketLimits";
 import { bandEdgesE6, effectiveLpExposureKBps } from "@/lib/limits/risk-limits";
 import type { Side } from "@/lib/limits/risk-limits";
-import { formatUsdPriceE6 } from "@/lib/format";
+import { formatLotPriceE6 } from "@/lib/v22/lot";
 import { LimitsRow, fmtBandPct, fmtBps } from "./LimitsRow";
-import { fmtQ } from "@/lib/limits/format";
+import { fmtQ as fmtQRaw } from "@/lib/limits/format";
 import { clampFeeCapMarginBps } from "@/lib/limits/fee-channel";
 
 export interface OrderTicketLimitsProps {
@@ -23,12 +23,15 @@ export interface OrderTicketLimitsProps {
   ticket: TicketLimits;
   direction: Side;
   symbol: string;
+  /** v2.2 lot exponent: sizes in lots / prices per lot are shown as tokens / per-token prices. */
+  lotExp?: number;
   /** Fee-cap slippage margin (bps) and its setter (P2 fee channel). */
   feeMarginBps?: number;
   onFeeMarginChange?: (bps: number) => void;
 }
 
-export { fmtQ };
+/** Sizes are shown in TOKENS: a Q in lots is scaled by 10^lotExp (lib/v22/lot.ts); the default lotExp 0 is the identity. */
+export const fmtQ = (q: bigint, lotExp = 0): string => fmtQRaw(lotExp > 0 ? q * 10n ** BigInt(lotExp) : q);
 
 export function reasonCopy(t: TicketLimits, limits: MarketLimits, side: Side): string {
   const lim = t.sideLimits?.[side];
@@ -62,6 +65,7 @@ export const OrderTicketLimits: FC<OrderTicketLimitsProps> = ({
   ticket,
   direction,
   symbol,
+  lotExp = 0,
   feeMarginBps,
   onFeeMarginChange,
 }) => {
@@ -83,7 +87,7 @@ export const OrderTicketLimits: FC<OrderTicketLimitsProps> = ({
                 data={{ side, "max-q": lim ? lim.maxQ.toString() : "", state: loading ? "loading" : lim ? "ready" : "error" }}
                 label={`Max ${side}`}
                 tooltip="Largest size that fills in full right now: the market's liquidity cap, the protocol open-interest cap and the market's per-trade limit, whichever is tightest. Updates live."
-                value={loading || !lim ? "—" : lim.halted ? "Paused" : `${fmtQ(lim.maxQ)} ${symbol}`}
+                value={loading || !lim ? "—" : lim.halted ? "Paused" : `${fmtQ(lim.maxQ, lotExp)} ${symbol}`}
                 valueClass={lim?.halted ? "text-[var(--short)]" : side === direction ? "text-[var(--text)]" : "text-[var(--text-secondary)]"}
               />
             );
@@ -105,7 +109,7 @@ export const OrderTicketLimits: FC<OrderTicketLimitsProps> = ({
               tooltip={COPY.bandTooltip}
               value={(() => {
                 const { lo, hi } = bandEdgesE6(limits.engine.effectivePriceE6, limits.bandBps);
-                return `${fmtBandPct(limits.bandBps)} (${formatUsdPriceE6(lo)} – ${formatUsdPriceE6(hi)})`;
+                return `${fmtBandPct(limits.bandBps)} (${formatLotPriceE6(lo, lotExp)} – ${formatLotPriceE6(hi, lotExp)})`;
               })()}
             />
           )}
@@ -113,7 +117,7 @@ export const OrderTicketLimits: FC<OrderTicketLimitsProps> = ({
       )}
 
       {limits.flags.p2 && ticket.quote && (
-        <QuotePanel limits={limits} ticket={ticket} symbol={symbol} feeMarginBps={feeMarginBps} onFeeMarginChange={onFeeMarginChange} />
+        <QuotePanel limits={limits} ticket={ticket} symbol={symbol} lotExp={lotExp} feeMarginBps={feeMarginBps} onFeeMarginChange={onFeeMarginChange} />
       )}
     </div>
   );
@@ -123,9 +127,10 @@ const QuotePanel: FC<{
   limits: MarketLimits;
   ticket: TicketLimits;
   symbol: string;
+  lotExp?: number;
   feeMarginBps?: number;
   onFeeMarginChange?: (bps: number) => void;
-}> = ({ limits, ticket, symbol, feeMarginBps, onFeeMarginChange }) => {
+}> = ({ limits, ticket, symbol, lotExp = 0, feeMarginBps, onFeeMarginChange }) => {
   const q = ticket.quote!;
   const mark = limits.engine?.effectivePriceE6 ?? 0n;
   // Charged when the protocol enabled the fee channel on-chain (or the manual override flag).
@@ -139,14 +144,14 @@ const QuotePanel: FC<{
       data-state={limits.state}
     >
       <p className="mb-1 text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--text-muted)]">Pre-trade quote</p>
-      <LimitsRow testId="limits-quote-row" data={{ row: "mark" }} label="Mark" value={formatUsdPriceE6(mark)} />
+      <LimitsRow testId="limits-quote-row" data={{ row: "mark" }} label="Mark" value={formatLotPriceE6(mark, lotExp)} />
       {q.kind === "adaptive" ? (
         <>
           <LimitsRow
             testId="limits-quote-row"
             data={{ row: "quote" }}
             label="Price quote"
-            value={q.quotePriceE6 === null ? "No fill" : `${formatUsdPriceE6(q.quotePriceE6)} (${fmtBps(q.totalBps ?? 0n)})`}
+            value={q.quotePriceE6 === null ? "No fill" : `${formatLotPriceE6(q.quotePriceE6, lotExp)} (${fmtBps(q.totalBps ?? 0n)})`}
           />
           <LimitsRow testId="limits-quote-row" data={{ row: "base" }} label="Base spread" value={fmtBps(q.baseSpreadBps)} />
           <LimitsRow
@@ -165,7 +170,7 @@ const QuotePanel: FC<{
             valueClass={(q.skewBps ?? 0n) < 0n ? "text-[var(--long)]" : (q.skewBps ?? 0n) > 0n ? "text-[var(--short)]" : undefined}
           />
           {q.clippedByTotal && (
-            <p className="text-[9px] text-[var(--warning)]">{COPY.quoteClipped(`${fmtQ(q.fillQ)} ${symbol}`)}</p>
+            <p className="text-[9px] text-[var(--warning)]">{COPY.quoteClipped(`${fmtQ(q.fillQ, lotExp)} ${symbol}`)}</p>
           )}
         </>
       ) : (

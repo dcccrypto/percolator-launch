@@ -14,8 +14,6 @@ import {
   deriveLpPda,
   derivePythPushOraclePDA,
   deriveMatcherDelegate,
-  isV17Account,
-  parsePortfolioV17,
 } from "@percolatorct/sdk";
 // TODO(oracle-migration): encodePushOraclePrice/ACCOUNTS_PUSH_ORACLE_PRICE removed in beta.29.
 // The DEX oracle inline push path needs to migrate to /api/oracle/advance-phase.
@@ -33,10 +31,12 @@ import {
   signAllCompat,
   broadcastSignedTx,
   getPriorityFee,
+  timedOutSignature,
 } from "@/lib/tx";
 import { planTakerCrank } from "@/lib/taker-crank";
 import { isAllocateRefusal, planAllocatePrefix } from "@/lib/v21/allocate-prefix";
 import { isDevnetV21Enabled } from "@/lib/v21/flag";
+import { withLossStaleRetry } from "@/lib/v21/loss-stale-retry";
 import { getMaintenanceConfig, MaintenanceError } from "@/lib/maintenance";
 import { PartialLegSendError, SINGLE_TX_MAX_LEGS, sendLegGroups } from "@/lib/trade-leg-groups";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
@@ -45,17 +45,22 @@ import { applyConfirmedFill, getPortfolioRawSnapshot, makePortfolioScanKey } fro
 import { limitsFlags } from "@/lib/limits/flags";
 import { decodeMarketEngineView, signedPositionForAsset } from "@/lib/limits/decode";
 import { measureFill, recordFillResult } from "@/lib/limits/fill-check";
+import { measurePositionChange, readBeforeTrade, recordPositionChange } from "@/lib/position-change";
 import { tradeFeeBpsToSign } from "@/lib/limits/fee-channel";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { detectOracleMode, resolveMarketPriceE6 } from "@/lib/oraclePrice";
 import { assertKnownProgram, assertCanonicalMatcher } from "@/lib/programAllowlist";
 import { invalidateMatcherCaps } from "@/lib/matcherCaps";
 import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
+import { lotTradingRefusal } from "@/lib/v22/lot-coverage";
+import { ensureLotExp, getLotExp } from "@/lib/v22/lot-registry";
+import { UserFacingError } from "@/lib/errorMessages";
 import { computeLimitPriceE6, assertFeedAgreesWithChain } from "@/lib/slippage";
 import { fetchPortfolioIdentity, fetchAssetMarketId, defaultCrankObservations } from "@/lib/v18-wire";
 import { buildTradeIxs } from "@/lib/trade-ix";
 import { isPortfolioAccount } from "@/lib/portfolio-account";
 import { findOwnerPortfolio } from "@/lib/owner-portfolio";
+import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 
 // ---------------------------------------------------------------------------
 // v17 portfolio account layout constants
@@ -301,6 +306,12 @@ export function useTrade(slabAddress: string) {
        * matcher's per-fill clamp individually, one signature for the lot.
        */
       sizes?: bigint[];
+      /**
+       * #3301: trade from EXACTLY this taker portfolio (v17/v18 only). The caller has already
+       * verified it (owner, market, program) against a fresh read; it replaces the resolved
+       * "wallet portfolio" as accountA and nothing falls back to another one.
+       */
+      portfolioPk?: PublicKey;
       limitPriceE6?: bigint;
       /**
        * P2 fee channel (lib/limits/fee-channel.ts): the taker-SIGNED fee cap, base +
@@ -315,6 +326,11 @@ export function useTrade(slabAddress: string) {
       /** UX WP-3: keep waiting past the schedule (with Stop) and say so after ~30 s. */
       keepWaiting?: boolean;
       onWaitingLong?: () => void;
+      /**
+       * Devnet v2.1: true while an order refused Custom(121) EngineLossStale waits to be sent
+       * again ("Refreshing positions…"), false once it is done either way (lib/v21/loss-stale-retry.ts).
+       */
+      onRefreshingPositions?: (refreshing: boolean) => void;
     }) => {
       if (inflightRef.current) throw new Error("Trade already in progress");
       inflightRef.current = true;
@@ -326,6 +342,14 @@ export function useTrade(slabAddress: string) {
         // our deployed allowlist. See SlabProvider.parseSlab for the primary
         // gate.
         assertKnownProgram(slabProgramId);
+        // v2.2 (N2): a market with lots is not traded until every surface is lot-aware; an unknown exponent is refused too.
+        {
+          const refusal = lotTradingRefusal(getLotExp(slabAddress));
+          if (refusal) {
+            ensureLotExp(slabAddress);
+            throw new UserFacingError(refusal);
+          }
+        }
 
         const programId = slabProgramId;
         const slabPk = new PublicKey(slabAddress);
@@ -342,7 +366,6 @@ export function useTrade(slabAddress: string) {
         // render cost. This changes only *where* the price value is read
         // from, not the tx-building logic below.
         const { priceE6: livePriceE6 } = getLivePriceSnapshot(slabAddress);
-
         // Slippage protection. The on-chain handler treats limit_price_e6 == 0
         // as a "no limit" sentinel and skips the slippage check entirely
         // (percolator.rs::handle_trade_cpi). Without a real limit, the only
@@ -423,7 +446,7 @@ export function useTrade(slabAddress: string) {
         // B-6: Detect v17 using the same SDK isV17Account check as useClosePosition,
         // rather than the `accounts.length === 0` heuristic which misidentifies v12
         // markets with no LP yet (empty bitmap) as v17 markets.
-        const isV17Market = raw != null && raw.length > 0 && isV17Account(raw);
+        const isV17Market = raw != null && raw.length > 0 && isWrapperAccount(raw);
 
         let accountA: PublicKey;
         let accountB: PublicKey;
@@ -436,6 +459,7 @@ export function useTrade(slabAddress: string) {
           // LP account data comes from the parsed slab bitmap.
           // accountB = deriveLpPda (the LP's portfolio PDA in v12)
           // matcherProg/matcherCtx from the parsed LP account entry
+          if (params.portfolioPk) throw new Error("A specific portfolio can only be targeted on a v17 market");
           const lpAccount = accounts.find((a) => a.idx === params.lpIdx);
           if (!lpAccount) throw new Error(`LP at index ${params.lpIdx} not found`);
 
@@ -463,7 +487,7 @@ export function useTrade(slabAddress: string) {
           // normally an instant cache hit instead of two program scans
           // between the confirm click and the wallet popup.
           const resolved = await getOrResolveV17TradeAccounts(connection, programId, slabPk, wallet.publicKey);
-          accountA = resolved.accountA;
+          accountA = params.portfolioPk ?? resolved.accountA;
           accountB = resolved.accountB;
           matcherProg = resolved.matcherProg;
           matcherCtx = resolved.matcherCtx;
@@ -485,6 +509,12 @@ export function useTrade(slabAddress: string) {
         if (legs.length > 1 && !isV17Market) {
           throw new Error("Multi-leg trades are only supported on v17 markets");
         }
+
+        // #3314: the taker's effective position before the trade, for the saved entry. Started
+        // here so it runs alongside the identity reads; awaited only after confirmation.
+        const beforeEffectiveQ: Promise<bigint | null> = isV17Market
+          ? readBeforeTrade(connection, accountA, slabPk)
+          : Promise.resolve(null);
 
         // v18 wire: live-read BOTH portfolios' identity + the asset marketId right
         // before building the trade — these anti-replay/CAS fields are rejected
@@ -537,7 +567,7 @@ export function useTrade(slabAddress: string) {
           try {
             const portInfo = await connection.getAccountInfo(accountA, "confirmed");
             if (portInfo) {
-              const pf = parsePortfolioV17(new Uint8Array(portInfo.data));
+              const pf = parsePortfolio(new Uint8Array(portInfo.data));
               hasActiveLegs = pf.legs.some((l) => l.active);
               if (isDevnetV21Enabled() && raw) {
                 const mid = decodeMarketEngineView(raw)?.marketId ?? null;
@@ -579,7 +609,14 @@ export function useTrade(slabAddress: string) {
           );
           if (plan === "separate-tx") {
             console.info("[useTrade] taker portfolio needs a maintenance crank first; sending it as its own tx");
-            await sendTx({ connection, wallet, instructions: [crankIx], computeUnitsFromSim: { cap: 200_000 } });
+            await sendTx({ connection, wallet, instructions: [crankIx], computeUnitsFromSim: { cap: 200_000 } }).catch((err) => {
+              // The trade below was never sent. Don't let the ticket watch the crank's signature
+              // and report the trade as landed (timedOutSignature reads the timeout message).
+              if (timedOutSignature(err)) {
+                throw new Error("Maintenance crank did not confirm in time; the trade was not sent.", { cause: err });
+              }
+              throw err;
+            });
           }
         } else if (!isV17Market) {
           // v12: the crank is on the slab, not the portfolio (legacy path, unchanged).
@@ -623,7 +660,7 @@ export function useTrade(slabAddress: string) {
               buildTx: (ixs, computeUnits) =>
                 buildBatchTx({ instructions: ixs, computeUnits, priorityFeeMicroLamports: priorityFee, blockhash, feePayer: owner }),
               signAll: (txs) => signAllCompat(wallet, txs),
-              broadcast: (tx) => broadcastSignedTx(connection, tx, { abortSignal: params.abortSignal }),
+              broadcast: (tx) => broadcastSignedTx(connection, tx),
             },
           );
           sig = sent.signatures[sent.signatures.length - 1];
@@ -664,14 +701,38 @@ export function useTrade(slabAddress: string) {
                 }
               : undefined,
           });
-          try {
-            sig = await sendTrade(instructions);
-          } catch (e) {
-            // Devnet v2.1: the allocation refused (Custom 100) after the pre-check passed (state moved).
-            // It is never needed for the trade: send the trade without it, once.
-            if (allocateIxs.length > 0 && isAllocateRefusal(e)) sig = await sendTrade(instructions.filter((ix) => !allocateIxs.includes(ix)));
-            else throw e;
-          }
+          const sendOrder = async (): Promise<string> => {
+            try {
+              return await sendTrade(instructions);
+            } catch (e) {
+              // Devnet v2.1: the allocation refused (Custom 100) after the pre-check passed (state moved).
+              // It is never needed for the trade: send the trade without it, once.
+              if (allocateIxs.length > 0 && isAllocateRefusal(e)) return sendTrade(instructions.filter((ix) => !allocateIxs.includes(ix)));
+              throw e;
+            }
+          };
+          // Devnet v2.1: the order goes ALONE (no push / crank / refresh prefix): TradeCpi accrues
+          // the market itself. A Custom(121) EngineLossStale (insurance does not yet cover the
+          // stale portfolios' hidden-loss bound; the keeper's sweep shrinks it) is retried a few
+          // times ~1-2 s apart, never bundled with refreshes (lib/v21/loss-stale-retry.ts).
+          sig =
+            isV17Market && isDevnetV21Enabled()
+              ? await withLossStaleRetry(sendOrder, {
+                  wrapperProgramId: programId.toBase58(),
+                  onRefreshing: params.onRefreshingPositions,
+                  abortSignal: params.abortSignal,
+                })
+              : await sendOrder();
+        }
+
+        // #3314: measure the position change for the saved entry. Not awaited: the caller that
+        // saves the entry (OrderTicket) waits for it via takePositionChange(sig); closes don't.
+        if (isV17Market) {
+          const portfolio = accountA;
+          recordPositionChange(
+            sig,
+            beforeEffectiveQ.then((beforeQ) => measurePositionChange(connection, portfolio, slabPk, sig, beforeQ)),
+          );
         }
 
         // Immediate local application of the confirmed fill: sendTx's
@@ -685,15 +746,19 @@ export function useTrade(slabAddress: string) {
         // the burst. Capital/pnl/fees are intentionally left untouched (not
         // deterministic client-side) — those fields still wait on the
         // refresh burst exactly as before. See applyConfirmedFill's doc.
+        // The scan store holds ONE portfolio per wallet+market (the default pick). A fill on any other
+        // account must not be patched into it (#3301).
+        const scanned = getPortfolioRawSnapshot(makePortfolioScanKey(programId, slabAddress, wallet.publicKey))?.pubkey;
+        const patchesScanStore = !params.portfolioPk || (scanned !== undefined && scanned.equals(accountA));
         if (isV17Market && limitsMarketId !== null) {
           // P1: patch only by the MEASURED delta. A zero fill changes nothing; an
           // unknown result waits for the refresh burst (never assumes params.size).
           const fill = await measureFill(connection, accountA, sig, beforePosQ, params.size, limitsMarketId);
           recordFillResult(sig, fill);
           if ((fill.kind === "full" || fill.kind === "partial") && fill.filledQ !== null) {
-            applyConfirmedFill(makePortfolioScanKey(programId, slabAddress, wallet.publicKey), fill.filledQ);
+            if (patchesScanStore) applyConfirmedFill(makePortfolioScanKey(programId, slabAddress, wallet.publicKey), fill.filledQ);
           }
-        } else if (isV17Market) {
+        } else if (isV17Market && patchesScanStore) {
           applyConfirmedFill(makePortfolioScanKey(programId, slabAddress, wallet.publicKey), params.size);
         }
 

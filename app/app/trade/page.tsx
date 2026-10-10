@@ -1,6 +1,6 @@
 "use client";
 
-import { isHiddenFromListing } from "@/lib/listing-hidden";
+import { isBrowsableMarketRow } from "@/lib/listed-markets";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -57,7 +57,7 @@ export default function TradeRedirectPage() {
         }
 
         // Filter to markets with a sane last_price (active markets)
-        const listed = markets.filter((m) => !isHiddenFromListing(m.slab_address));
+        const listed = markets.filter((m) => isBrowsableMarketRow(m.slab_address, m));
         const active = listed.filter(
           (m) => m.last_price != null && m.last_price > 0 && m.last_price < 1e18
         );

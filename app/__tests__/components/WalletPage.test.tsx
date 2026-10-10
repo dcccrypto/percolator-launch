@@ -94,8 +94,10 @@ describe("WalletPage", () => {
   // playground faucet that funds trading is /faucet.
   it("devnet: Open faucet goes to the Sim-USDC faucet, not the token factory", () => {
     render(<WalletPage />);
-    const link = screen.getByRole("button", { name: /Open faucet/i }).closest("a");
-    expect(link?.getAttribute("href")).toBe("/faucet");
+    // One link (GlowButton href), not a button inside a link (#64).
+    const link = screen.getByRole("link", { name: /Open faucet/i });
+    expect(link.getAttribute("href")).toBe("/faucet");
+    expect(link.querySelector("button")).toBeNull();
     expect(screen.getByText("On devnet, use the faucet to get Sim-USDC and a little test SOL.")).toBeTruthy();
   });
 

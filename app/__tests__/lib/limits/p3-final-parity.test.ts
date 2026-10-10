@@ -144,11 +144,14 @@ describe("P3 final head: layout (rustc offset_of!) and errors (by name)", () => 
     expect(C.BUCKET_FRESH_UNLIENED_BACKING_NUM).toBe(L["bucket.fresh_unliened_backing_num"]);
     expect(C.BOUND_SCALE).toBe(10n ** BigInt(L.boundScaleLog10));
   });
-  it("F14-Q2: the wizard's P3 slab is the program's ONE-slot length; legacy is its 14-slot length", () => {
+  it("F14-Q2: every wizard launch (P3 and legacy) is the program's ONE-slot length; the 14-slot length stays the program's for existing markets", () => {
     expect(slabSizeFor({ p3: {} })).toBe(L.marketAccountLen1);
+    expect(slabSizeFor({})).toBe(L.marketAccountLen1);
     expect(wizardSlabBytes(true)).toBe(L.marketAccountLen1);
+    expect(wizardSlabBytes(false)).toBe(L.marketAccountLen1);
     expect(v17MarketAccountLen(1)).toBe(L.marketAccountLen1);
-    expect(DEFAULT_SLAB_SIZE).toBe(L.marketAccountLen14);
+    expect(DEFAULT_SLAB_SIZE).toBe(L.marketAccountLen1);
+    expect(v17MarketAccountLen(14)).toBe(L.marketAccountLen14);
     expect(V17_PORTFOLIO_ACCOUNT_LEN).toBe(L.portfolioAccountLen);
   });
   it("portfolio fields (emptiness subset + payout receipt)", () => {

@@ -479,6 +479,7 @@ export function getMockPortfolioPositions(): PortfolioPosition[] {
     const liquidationState = classifyLiquidation(posSize, priceE6, liquidationPriceE6, true);
 
     positions.push({
+      portfolioPk: null, // mock rows have no on-chain account
       slabAddress: slabAddr,
       symbol: m.symbol,
       idx: 2,

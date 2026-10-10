@@ -89,6 +89,13 @@ vi.mock("@solana/spl-token", () => ({
     vi.fn(),
 }));
 
+// The route builds its connection with getServerConnection() (lib/server-rpc: DEVNET_RPC_URL + Origin).
+// Unmocked, that returns a REAL Connection and the mocked RPC methods below are never called.
+vi.mock("@/lib/server-rpc", async () => {
+  const { Connection } = await import("@solana/web3.js");
+  return { getServerConnection: () => new Connection() };
+});
+
 vi.mock("@/lib/config", () => ({
   getConfig: () => ({
     rpcUrl:

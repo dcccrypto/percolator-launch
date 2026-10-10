@@ -28,6 +28,9 @@
  *   - pool liquidity >= MIN_LIQUIDITY_USD, and for PumpSwap a quote-side depth at
  *     or above the keeper's floor (lib/pool-liquidity, $1000 by default),
  *   - market cap >= MIN_MARKET_CAP_USD,
+ *   - a known price at or above the wizard's launch floor at its LOWEST leverage (2x, about
+ *     $0.000667, lib/launch-price-floor): under it the mark would freeze once positions open, so
+ *     the wizard refuses the launch at every leverage and the row's CTA would be a dead end,
  *   - pump.fun candidates additionally: graduated, not banned/nsfw, no transfer
  *     fee, no transfer hook.
  *
@@ -37,6 +40,7 @@
  */
 import { SUPPORTED_DEX_IDS, USD_PRICEABLE_QUOTE_MINTS } from "@/lib/dex-constants";
 import { geckoFetch, getGeckoConfig } from "@/lib/gecko-fetch";
+import { isLaunchablePriceUsd } from "@/lib/launch-price-floor";
 
 /** pump.fun's public coins API (keyless). Best effort — see header. */
 const PUMPFUN_COINS_URL = "https://frontend-api-v3.pump.fun/coins";
@@ -45,8 +49,9 @@ const DEXSCREENER_TOKENS_URL = "https://api.dexscreener.com/latest/dex/tokens";
 
 /** How many pump.fun coins to pull as the candidate pool before filtering + ranking. */
 export const TRENDING_CANDIDATE_POOL = 100;
-/** How many filtered tokens to return. */
-export const TRENDING_RETURN_LIMIT = 24;
+/** How many filtered tokens to return. Headroom over the rail's 20 so the list stays
+ *  full after already-listed tokens are excluded client-side. */
+export const TRENDING_RETURN_LIMIT = 40;
 
 /** Listing thresholds (USD). Tunable. */
 export const MIN_MARKET_CAP_USD = 20_000;
@@ -90,6 +95,16 @@ export interface DexMarket {
   /** USD value of the pool's QUOTE side (what the keeper floors for PumpSwap). */
   quoteDepthUsd: number | null;
   volume24hUsd: number | null;
+  /** Shorter-window volumes (USD) + tx counts + price moves, used by the momentum
+   *  ranking and the trend sparkline. Optional: a source that omits a window = null. */
+  volume1hUsd?: number | null;
+  volume6hUsd?: number | null;
+  volume5mUsd?: number | null;
+  priceChange1hPct?: number | null;
+  priceChange24hPct?: number | null;
+  /** buys + sells in the window (acceleration = this hour vs the 6h hourly average). */
+  txns1h?: number | null;
+  txns6h?: number | null;
   pairAddress: string | null;
   /** dexId of the chosen pool — always one of SUPPORTED_DEX_IDS once it passes. */
   dexId: string | null;
@@ -126,19 +141,52 @@ export interface TrendingToken {
   priceUsd: number | null;
   marketCapUsd: number;
   volume24hUsd: number;
+  /** 1h volume (USD) — the column shown when the 1H timeframe is selected. */
+  volume1hUsd: number;
   liquidityUsd: number;
+  /** Price move over the window; null when the source didn't report it. */
+  priceChange1hPct: number | null;
+  priceChange24hPct: number | null;
+  /** Avg hourly volume rate over [24h, 6h, 1h, 5m] — the trend sparkline (oldest→newest). */
+  trend: number[];
+  /** Momentum scores precomputed per timeframe so the client only has to pick one. */
+  score1h: number;
+  score24h: number;
 }
+
+/** The two selectable timeframes (7d has no shorter-window source on DexScreener/GeckoTerminal). */
+export type Timeframe = "1h" | "24h";
 
 export type SourceStatus = "ok" | "empty" | "error";
 
 export interface TrendingTokensResult {
   tokens: TrendingToken[];
   generatedAt: string;
-  /** True when no candidate source produced anything (blocked, down, timed out) —
-   *  the UI must say "unavailable", not "nothing matched". */
+  /** True when the list cannot be trusted as "nothing matched": no candidate source
+   *  produced anything, or the market-data lookup failed and nothing survived it
+   *  (see `isTrendingDataUnavailable`). The UI must say "unavailable". */
   sourceEmpty: boolean;
   /** Per-source outcome, for debugging from the route response. */
   sources: Record<TrendingSource, SourceStatus>;
+  /** DexScreener market-data outcome: "error" when any batch failed. For debugging. */
+  marketData?: SourceStatus;
+}
+
+/**
+ * Is an empty (or failed) trending result a data outage rather than "nothing passed the
+ * filters"? Every pump.fun candidate needs DexScreener's pair data to pass the market gate
+ * (only GeckoTerminal candidates carry a fallback), so a DexScreener failure silently drops
+ * them all, and the rail used to report that as "No trending tokens match the listing
+ * filters". Pure.
+ */
+export function isTrendingDataUnavailable(args: {
+  gecko: SourceStatus;
+  pump: SourceStatus;
+  tokenCount: number;
+  marketDataFailed: boolean;
+}): boolean {
+  if (args.gecko !== "ok" && args.pump !== "ok") return true;
+  return args.tokenCount === 0 && args.marketDataFailed;
 }
 
 // ── pure helpers (unit-tested) ───────────────────────────────────────────────
@@ -146,6 +194,15 @@ export interface TrendingTokensResult {
 const num = (v: unknown): number | null => {
   const n = typeof v === "string" && v.trim() !== "" ? Number(v) : typeof v === "number" ? v : NaN;
   return Number.isFinite(n) ? n : null;
+};
+
+/** buys + sells from a `{ buys, sells }` window object (DexScreener `txns.*`,
+ *  GeckoTerminal `transactions.*`); null when neither side is present. */
+const txCount = (w: unknown): number | null => {
+  const o = (w ?? {}) as { buys?: unknown; sells?: unknown };
+  const b = num(o.buys);
+  const s = num(o.sells);
+  return b == null && s == null ? null : (b ?? 0) + (s ?? 0);
 };
 
 /** Base58 mint sanity — the upstreams are semi-trusted, so never interpolate a mint
@@ -165,6 +222,85 @@ export function safeLogoUrl(u: unknown): string | null {
 
 const clean = (s: unknown, max = 32): string =>
   typeof s === "string" ? s.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, max) : "";
+
+// ── momentum ranking (pure, unit-tested) ─────────────────────────────────────
+//
+// The list is ranked to catch tokens WHILE momentum is building, not just by raw
+// 24h size. Per the feedback: lead with short-window volume, boosted by how much
+// trading is ACCELERATING right now, and dampened for thin pools so a single wash
+// trade on a near-empty pool can't top the list. The hard liquidity/market-cap
+// gates still run first (passesMarketGate); this only orders what already passed.
+
+/** Liquidity above this neither helps nor hurts the rank — it only keeps thin
+ *  pools from being over-ranked on one trade. Below it, the score is damped. */
+export const LIQ_REF_USD = 50_000;
+
+/** Soft liquidity weight in [0.3, 1]: sqrt(liq / ref), capped at 1. Deep pools are
+ *  neutral (1); thin pools are penalised, never rewarded (we rank by activity, not TVL). */
+export function liqDampener(liquidityUsd: number | null | undefined): number {
+  const liq = Math.max(0, liquidityUsd ?? 0);
+  return Math.min(1, Math.max(0.3, Math.sqrt(liq / LIQ_REF_USD)));
+}
+
+/** Tx acceleration in [0.5, 2.5]: this hour's trade count vs the trailing 6h hourly
+ *  average. >1 = speeding up (the "momentum building" signal). Neutral (1) without data. */
+export function accelMultiplier(txns1h: number | null | undefined, txns6h: number | null | undefined): number {
+  const t1 = txns1h ?? null;
+  const t6 = txns6h ?? null;
+  if (t1 == null || t6 == null || t6 <= 0) return 1;
+  const baselinePerHour = t6 / 6;
+  if (baselinePerHour <= 0) return 1;
+  return Math.min(2.5, Math.max(0.5, t1 / baselinePerHour));
+}
+
+/** Per-timeframe momentum scores. 1h leads with 1h volume × acceleration × liquidity
+ *  weight; 24h is 24h volume × liquidity weight (acceleration isn't meaningful over a day). */
+export function momentumScores(v: {
+  volume1hUsd: number | null | undefined;
+  volume24hUsd: number | null | undefined;
+  liquidityUsd: number | null | undefined;
+  txns1h: number | null | undefined;
+  txns6h: number | null | undefined;
+}): { score1h: number; score24h: number } {
+  const liq = liqDampener(v.liquidityUsd);
+  const accel = accelMultiplier(v.txns1h, v.txns6h);
+  return {
+    score1h: Math.max(0, v.volume1hUsd ?? 0) * accel * liq,
+    score24h: Math.max(0, v.volume24hUsd ?? 0) * liq,
+  };
+}
+
+/** Avg hourly volume rate ($/h) over [24h, 6h, 1h, 5m] — the trend sparkline, oldest→newest.
+ *  Rising bars = activity speeding up. Missing windows read 0. */
+export function trendSeries(v: {
+  volume24hUsd: number | null | undefined;
+  volume6hUsd: number | null | undefined;
+  volume1hUsd: number | null | undefined;
+  volume5mUsd: number | null | undefined;
+}): number[] {
+  const rate = (vol: number | null | undefined, hours: number): number =>
+    vol != null && vol > 0 && hours > 0 ? vol / hours : 0;
+  return [rate(v.volume24hUsd, 24), rate(v.volume6hUsd, 6), rate(v.volume1hUsd, 1), rate(v.volume5mUsd, 5 / 60)];
+}
+
+/** The volume to show for the selected timeframe. */
+export function volumeForTimeframe(t: Pick<TrendingToken, "volume1hUsd" | "volume24hUsd">, tf: Timeframe): number {
+  return tf === "1h" ? (t.volume1hUsd ?? 0) : (t.volume24hUsd ?? 0);
+}
+
+/** The price-change % to show for the selected timeframe (null when unreported). */
+export function changeForTimeframe(
+  t: Pick<TrendingToken, "priceChange1hPct" | "priceChange24hPct">,
+  tf: Timeframe,
+): number | null {
+  return tf === "1h" ? (t.priceChange1hPct ?? null) : (t.priceChange24hPct ?? null);
+}
+
+/** Re-order a token list by the selected timeframe's momentum score (pure; new array). */
+export function rankForTimeframe(tokens: TrendingToken[], tf: Timeframe): TrendingToken[] {
+  const key = tf === "1h" ? "score1h" : "score24h";
+  return [...tokens].sort((a, b) => (b[key] ?? 0) - (a[key] ?? 0));
+}
 
 /**
  * pump.fun-only flag gate: graduated, not banned/nsfw, no transfer fee or hook.
@@ -213,6 +349,13 @@ export function toTrendingToken(c: TrendingCandidate, dex: DexMarket): TrendingT
   const mc = dex.marketCapUsd ?? coin?.usd_market_cap ?? 0;
   const priceFromMc =
     coin?.usd_market_cap != null && coin.total_supply ? coin.usd_market_cap / coin.total_supply : null;
+  const { score1h, score24h } = momentumScores({
+    volume1hUsd: dex.volume1hUsd,
+    volume24hUsd: dex.volume24hUsd,
+    liquidityUsd: dex.liquidityUsd,
+    txns1h: dex.txns1h,
+    txns6h: dex.txns6h,
+  });
   return {
     mint: c.mint,
     symbol: c.symbol || c.mint.slice(0, 4),
@@ -224,7 +367,18 @@ export function toTrendingToken(c: TrendingCandidate, dex: DexMarket): TrendingT
     priceUsd: dex.priceUsd ?? priceFromMc,
     marketCapUsd: mc,
     volume24hUsd: dex.volume24hUsd ?? 0,
+    volume1hUsd: dex.volume1hUsd ?? 0,
     liquidityUsd: dex.liquidityUsd ?? 0,
+    priceChange1hPct: dex.priceChange1hPct ?? null,
+    priceChange24hPct: dex.priceChange24hPct ?? null,
+    trend: trendSeries({
+      volume24hUsd: dex.volume24hUsd,
+      volume6hUsd: dex.volume6hUsd,
+      volume1hUsd: dex.volume1hUsd,
+      volume5mUsd: dex.volume5mUsd,
+    }),
+    score1h,
+    score24h,
   };
 }
 
@@ -271,6 +425,9 @@ export function parseGeckoTrending(body: unknown): TrendingCandidate[] {
     const dexId = clean((rel.dex as { data?: { id?: string } } | undefined)?.data?.id, 40).toLowerCase() || null;
     const liq = num(a.reserve_in_usd);
     const meta = tokens.get(mint);
+    const vol = (a.volume_usd ?? {}) as Record<string, unknown>;
+    const pc = (a.price_change_percentage ?? {}) as Record<string, unknown>;
+    const tx = (a.transactions ?? {}) as Record<string, unknown>;
     seen.add(mint);
     out.push({
       mint,
@@ -285,7 +442,14 @@ export function parseGeckoTrending(body: unknown): TrendingCandidate[] {
         // PumpSwap is a constant-product AMM: the two sides are worth the same, so
         // the quote side is half the reserve. Meteora DLMM is not floored.
         quoteDepthUsd: liq != null ? liq / 2 : null,
-        volume24hUsd: num((a.volume_usd as { h24?: unknown } | undefined)?.h24),
+        volume24hUsd: num(vol.h24),
+        volume1hUsd: num(vol.h1),
+        volume6hUsd: num(vol.h6),
+        volume5mUsd: num(vol.m5),
+        priceChange1hPct: num(pc.h1),
+        priceChange24hPct: num(pc.h24),
+        txns1h: txCount(tx.h1),
+        txns6h: txCount(tx.h6),
         pairAddress: typeof a.address === "string" ? a.address : null,
         dexId,
         quoteMint: idMint(rel.quote_token),
@@ -308,7 +472,11 @@ export function mergeCandidates(...lists: TrendingCandidate[][]): TrendingCandid
  * The filter+rank pipeline over already-fetched inputs — pure. Market data per mint
  * comes from DexScreener; when DexScreener could not be reached for a mint
  * (`dexUnavailable`), the candidate's own GeckoTerminal pool data stands in. Keeps
- * candidates that pass both gates, ranks by 24h volume desc, returns the top `limit`.
+ * candidates that pass both gates, then returns the UNION of the top `limit` by the
+ * 24h momentum score and the top `limit` by the 1h score (deduped, 24h order first,
+ * so up to 2×limit rows). The union matters because the client re-ranks by the
+ * selected window: a token surging in the last hour (high `score1h`, modest
+ * `score24h`) would be sliced off a pure 24h cut and never reach the 1H view.
  */
 export function screenAndRank(
   candidates: TrendingCandidate[],
@@ -322,10 +490,18 @@ export function screenAndRank(
     if (c.pumpfun && !passesCoinGate(c.pumpfun)) continue;
     const dex = dexByMint.get(c.mint) ?? (dexUnavailable.has(c.mint) ? c.geckoMarket : undefined);
     if (!passesMarketGate(dex, c.pumpfun?.usd_market_cap ?? null, floorUsd)) continue;
-    out.push(toTrendingToken(c, dex as DexMarket));
+    const token = toTrendingToken(c, dex as DexMarket);
+    // Fail closed on the price too: the same number the row displays decides whether it is launchable.
+    if (!isLaunchablePriceUsd(token.priceUsd)) continue;
+    out.push(token);
   }
-  out.sort((a, b) => b.volume24hUsd - a.volume24hUsd);
-  return out.slice(0, limit);
+  const topBy = (key: "score1h" | "score24h"): TrendingToken[] =>
+    [...out].sort((a, b) => b[key] - a[key]).slice(0, limit);
+  const top24 = topBy("score24h");
+  const seen = new Set(top24.map((t) => t.mint));
+  const union = [...top24];
+  for (const t of topBy("score1h")) if (!seen.has(t.mint)) { seen.add(t.mint); union.push(t); }
+  return union;
 }
 
 // ── network (fail-soft) ──────────────────────────────────────────────────────
@@ -415,12 +591,22 @@ export async function fetchDexMarkets(
               : null;
           const prev = byMint.get(mint);
           if (prev && (prev.liquidityUsd ?? 0) >= (liq ?? 0)) continue;
+          const vol = (p.volume ?? {}) as Record<string, unknown>;
+          const pc = (p.priceChange ?? {}) as Record<string, unknown>;
+          const tx = (p.txns ?? {}) as Record<string, unknown>;
           byMint.set(mint, {
             priceUsd,
             marketCapUsd: num(p.marketCap) ?? num(p.fdv),
             liquidityUsd: liq,
             quoteDepthUsd,
-            volume24hUsd: num((p.volume as { h24?: unknown } | undefined)?.h24),
+            volume24hUsd: num(vol.h24),
+            volume1hUsd: num(vol.h1),
+            volume6hUsd: num(vol.h6),
+            volume5mUsd: num(vol.m5),
+            priceChange1hPct: num(pc.h1),
+            priceChange24hPct: num(pc.h24),
+            txns1h: txCount(tx.h1),
+            txns6h: txCount(tx.h6),
             pairAddress: typeof p.pairAddress === "string" ? p.pairAddress : null,
             dexId,
             quoteMint,
@@ -439,15 +625,21 @@ export async function fetchDexMarkets(
 export async function getTrendingTokens(limit = TRENDING_RETURN_LIMIT): Promise<TrendingTokensResult> {
   const [gecko, pump] = await Promise.all([fetchGeckoTrending(), fetchPumpFunCoins()]);
   const candidates = mergeCandidates(gecko.candidates, pump.candidates);
-  const sourceEmpty = gecko.status !== "ok" && pump.status !== "ok";
   const { byMint, unavailable } = candidates.length
     ? await fetchDexMarkets(candidates.map((c) => c.mint))
     : { byMint: new Map<string, DexMarket>(), unavailable: new Set<string>() };
   const tokens = screenAndRank(candidates, byMint, limit, unavailable);
+  const marketDataFailed = unavailable.size > 0;
   return {
     tokens,
     generatedAt: new Date().toISOString(),
-    sourceEmpty,
+    sourceEmpty: isTrendingDataUnavailable({
+      gecko: gecko.status,
+      pump: pump.status,
+      tokenCount: tokens.length,
+      marketDataFailed,
+    }),
     sources: { geckoterminal: gecko.status, pumpfun: pump.status },
+    marketData: marketDataFailed ? "error" : "ok",
   };
 }

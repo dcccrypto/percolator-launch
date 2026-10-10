@@ -19,7 +19,8 @@
  */
 import { useCallback, useState } from "react";
 import { Keypair, PublicKey, type TransactionInstruction } from "@solana/web3.js";
-import { V17_PORTFOLIO_ACCOUNT_LEN, deriveVaultAuthority, getAta } from "@percolatorct/sdk";
+import { deriveVaultAuthority, getAta } from "@percolatorct/sdk";
+import { portfolioAccountLen } from "@/lib/v22/layout";
 import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { assertKnownProgram } from "@/lib/programAllowlist";
@@ -37,6 +38,8 @@ import {
   readNextPortfolioId,
 } from "@/lib/first-trade";
 import { invalidatePortfolio } from "@/lib/portfolio-invalidation";
+import { measureFill, recordFillResult } from "@/lib/limits/fill-check";
+import { signedPositionForAsset } from "@/lib/limits/decode";
 import { readU64LE } from "@/lib/u64le";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 
@@ -125,11 +128,22 @@ export function useFirstTrade(slabAddress: string) {
           programId, owner, market, portfolio, userAta, vaultTokenAta, depositAtoms: p.depositAtoms,
           lp, lpId, marketId, size: p.size, limitPriceE6: p.limitPriceE6, feeBps: p.feeBps, marketTradeFeeBps: wrapperConfigV17?.tradeFeeBps,
         });
+        // A confirmed TradeCpi is not proof the requested size filled: the matcher clips an
+        // order to the LP's inventory room and the trade still returns Ok (a $100 order into a
+        // market with 72 q of room landed as 0.000072 SOL). Measure the position delta with the
+        // same slot-pinned read useTrade uses and hand it to the ticket (takeFillResult), so it
+        // reports what filled instead of the requested size. measureFill never throws; a read
+        // it cannot pin is "unknown", which leaves the ticket's legacy behaviour unchanged.
+        const recordFill = async (signature: string, portfolio: PublicKey, beforeQ: bigint | null) =>
+          recordFillResult(signature, await measureFill(connection, portfolio, signature, beforeQ, p.size, marketId));
 
         // ── Returning user: the account exists — [Deposit, Trade] in ONE tx (1 prompt). ──
         const existing = await findV17Portfolio(connection, programId, market, owner);
         if (existing) {
           const id = await fetchPortfolioIdentity(connection, existing);
+          // The position BEFORE the trade, for the fill measurement (null = unread -> "unknown").
+          const beforeInfo = await connection.getAccountInfo(existing, "confirmed").catch(() => null);
+          const beforeQ = beforeInfo ? signedPositionForAsset(new Uint8Array(beforeInfo.data), 0, marketId) : null;
           const signature = await withPresignWait(() =>
             sendTx({
               connection,
@@ -138,6 +152,7 @@ export function useFirstTrade(slabAddress: string) {
               computeUnitsFromSim: { cap: FUND_AND_TRADE_CU_CAP },
             }),
           );
+          await recordFill(signature, existing, beforeQ);
           invalidatePortfolio();
           refreshSlab();
           return { signature, portfolio: existing, prompts: 1, created: false };
@@ -147,7 +162,7 @@ export function useFirstTrade(slabAddress: string) {
         // sendTx simulates the whole list before the wallet opens (its CU-sizing simulation is
         // the pre-sign verdict), so a refusal of any leg is caught there and mapped to its line;
         // the portfolio keypair signs AFTER the wallet (embedded wallets strip earlier signatures).
-        const rent = await connection.getMinimumBalanceForRentExemption(V17_PORTFOLIO_ACCOUNT_LEN);
+        const rent = await connection.getMinimumBalanceForRentExemption(portfolioAccountLen());
         let prompts: 1 | 2 = 1;
         for (let raceRetry = 0; ; raceRetry++) {
           const marketInfo = await connection.getAccountInfo(market, "confirmed");
@@ -162,6 +177,8 @@ export function useFirstTrade(slabAddress: string) {
             const signature = await withPresignWait(() =>
               sendTx({ connection, wallet, instructions: ixs, signers: [kp], computeUnitsFromSim: { cap: FIRST_TRADE_CU_CAP } }),
             );
+            // A brand-new portfolio holds no position before this transaction.
+            await recordFill(signature, kp.publicKey, 0n);
             invalidatePortfolio();
             refreshSlab();
             return { signature, portfolio: kp.publicKey, prompts, created: true };

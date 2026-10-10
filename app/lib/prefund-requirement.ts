@@ -38,7 +38,7 @@ import { backingSeedPerDomain } from "@/lib/market-params";
  *
  * Charging it would over-state the requirement by 500 tokens, which is not
  * harmless: a balance between the real cost and the inflated one would stop
- * short-circuiting at the balance check and fall through to the 24h gate, where
+ * short-circuiting at the balance check and fall through to the 1h gate, where
  * a still-open claim 429s and aborts the launch mid-flight — the same class of
  * failure this module exists to prevent, just at a different balance.
  *
@@ -70,7 +70,7 @@ export const DEFAULT_INSURANCE_AMOUNT = 100_000_000n;
  *
  * NOTE this route has no per-IP fund limiter, unlike /api/playground/faucet,
  * /api/auto-fund and /api/devnet-airdrop (see lib/fund-ip-rate-limit.ts). Only
- * the per-wallet 24h gate and middleware's general 120 req/min/IP apply, and
+ * the per-wallet 1h gate and middleware's general 120 req/min/IP apply, and
  * fresh keypairs defeat the former. Adding one is a separate decision.
  */
 export const MAX_FUNDABLE_REQUIREMENT = 10_000_000_000n; // 10,000 tokens
@@ -105,7 +105,7 @@ export function fullMarketRequirement(
  *
  * 2× for retry headroom (#757) — and, load-bearing, so a SECOND
  * pre-fund call in a single launch still sees a sufficient balance and
- * short-circuits before the 24h per-wallet gate is consulted. (There are two
+ * short-circuits before the 1h per-wallet gate is consulted. (There are two
  * call sites, not the three the older comments claim — W11 deleted the
  * vault-seed call.) That property (H3,
  * GH#2335) only holds while the requirement is correct: understating it is what
@@ -115,8 +115,8 @@ export function fullMarketRequirement(
  * The requirement actually used to fund, given what the caller asked for.
  *
  * SECURITY: the caller supplies the amounts and does NOT prove ownership of
- * `walletAddress`, and the 24h gate key is derived from public values. Letting a
- * request lower the target created an unauthenticated 24h launch-denial: POST a
+ * `walletAddress`, and the 1h gate key is derived from public values. Letting a
+ * request lower the target created an unauthenticated 1h launch-denial: POST a
  * victim's wallet with `lpCollateral: "0"`, the requirement collapses to the
  * backing floor, the gate is consumed, a token mint far too small to launch with
  * lands, and the victim's own launch then 429s for a full day. Before the amounts
@@ -162,4 +162,37 @@ export function parseAtomicAmount(raw: unknown, fallback: bigint): bigint | null
   // policy limit somebody may later raise.
   if (value > U64_MAX) return null;
   return value;
+}
+
+/** The route's refusal text for its per-wallet claim window (not its per-IP limiter). */
+export const PREFUND_GATE_ERROR = "Already pre-funded recently";
+
+/** Per-wallet-per-mint claim window — the same hour the playground faucet uses. */
+export const PREFUND_WINDOW_MS = 60 * 60 * 1000;
+
+/**
+ * What a non-OK answer from /api/devnet-pre-fund means for THIS launch.
+ *
+ * The route judges the wallet against `fundingRequirement`, which is floored at a
+ * default-size launch, so it can refuse a wallet that already holds everything a
+ * smaller launch needs. And it has three different 429s; only the claim window is
+ * a refusal to fund, the per-IP limiter and the edge limiter are transient.
+ *
+ *  - "proceed": the wallet already covers this launch; the refusal is irrelevant.
+ *  - "blocked": short, and inside the claim window. No path can fund the deposit.
+ *  - "error":   short, refused for another reason. Left to the caller's old handling.
+ */
+export function classifyPreFundRefusal(input: {
+  status: number;
+  body: { error?: unknown; nextClaimAt?: unknown } | null;
+  balance: bigint;
+  lpCollateral: bigint;
+  insuranceAmount: bigint;
+}): { kind: "proceed" } | { kind: "blocked"; nextClaimAt: string | null } | { kind: "error" } {
+  if (input.balance >= fullMarketRequirement(input.lpCollateral, input.insuranceAmount)) return { kind: "proceed" };
+  const nextClaimAt = typeof input.body?.nextClaimAt === "string" ? input.body.nextClaimAt : null;
+  if (input.status === 429 && (input.body?.error === PREFUND_GATE_ERROR || nextClaimAt !== null)) {
+    return { kind: "blocked", nextClaimAt };
+  }
+  return { kind: "error" };
 }

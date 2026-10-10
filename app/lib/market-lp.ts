@@ -29,14 +29,14 @@
 import { PublicKey, type AccountInfo, type Connection } from "@solana/web3.js";
 import {
   V17_PORTFOLIO_IDENTITY_TRAILER_LEN,
-  decodeAssetVaultLpP3,
   decodePortfolioMatcherControl,
   deriveMatcherDelegate,
-  parsePortfolioV17,
 } from "@percolatorct/sdk";
 import { isPortfolioAccount } from "@/lib/portfolio-account";
 import { readAssetAdmin } from "@/lib/v18-wire";
 import { getMultipleAccountsInfoChunked } from "@/lib/rpc-chunk";
+import { parsePortfolio } from "@/lib/v22/layout";
+import { decodeAssetVaultLpP3 } from "@/lib/v22/records";
 
 /** v17 portfolio account magic (first 8 bytes): PERCV16\0 */
 const V17_PORTFOLIO_MAGIC = new Uint8Array([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
@@ -114,7 +114,7 @@ function parseRow(row: PortfolioRow, market: PublicKey): Parsed | null {
   if (!bytesEq(d.subarray(PORTFOLIO_ACCOUNT_ID_OFF, PORTFOLIO_ACCOUNT_ID_OFF + 32), row.pubkey.toBytes())) return null;
   let portfolioId: bigint;
   try {
-    portfolioId = parsePortfolioV17(d).portfolioId;
+    portfolioId = parsePortfolio(d).portfolioId;
   } catch {
     return null;
   }

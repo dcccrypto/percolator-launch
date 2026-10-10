@@ -1,5 +1,6 @@
 "use client";
 
+import { formatLotQ, lotExpOf, tokenUsdOfLotUsd } from "@/lib/v22/lot";
 import { FC, useEffect, useRef, useState, useCallback } from "react";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 
@@ -10,6 +11,7 @@ import { isMockSlab, getMockTrades } from "@/lib/mock-trade-data";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { pollWhenVisible } from "@/lib/pollWhenVisible";
+import { fillSideColor, fillSideLabel } from "@/lib/fill-side";
 
 interface Trade {
   id: string;
@@ -30,7 +32,8 @@ function toBigInt(val: number | string | bigint): bigint {
 }
 
 export const TradeHistory: FC<{ slabAddress: string }> = ({ slabAddress }) => {
-  const { config: mktConfig } = useSlabState();
+  const { config: mktConfig, raw: slabRaw } = useSlabState();
+  const lotExp = lotExpOf(slabRaw);
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   // Use on-chain decimals — size from API is in raw token units (i128 on-chain)
   const decimals = tokenMeta?.decimals ?? 6;
@@ -155,8 +158,8 @@ export const TradeHistory: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <div>Time</div>
             <div>Side</div>
             <div className="text-right">Size</div>
-            {/* Each row is a fill — the trade's entry or the close's exit price, not the live price. */}
-            <div className="text-right">Entry/Exit</div>
+            {/* Each row is one fill: its execution price, not the live price. */}
+            <div className="text-right">Price</div>
           </div>
           <div className="divide-y divide-[var(--border)]/15">
             {trades.map((trade) => (
@@ -171,15 +174,13 @@ export const TradeHistory: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                   {formatTime(trade.created_at)}
                 </div>
                 <div>
-                  <span className={trade.side === "long" ? "text-[var(--long)]" : "text-[var(--short)]"}>
-                    {trade.side?.toUpperCase() ?? "—"}
-                  </span>
+                  <span className={fillSideColor(trade.side)}>{fillSideLabel(trade.side)}</span>
                 </div>
                 <div className="text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
-                  {trade.size != null ? formatTokenAmount(toBigInt(Math.abs(typeof trade.size === "number" ? trade.size : parseFloat(trade.size))), decimals) : "—"}
+                  {trade.size != null ? formatLotQ(toBigInt(Math.abs(typeof trade.size === "number" ? trade.size : parseFloat(trade.size))), decimals, lotExp) : "—"}
                 </div>
                 <div className="text-right text-[var(--text-muted)]" style={{ fontFamily: "var(--font-mono)" }}>
-                  {trade.price != null ? formatUsdFromNumber(Number(trade.price)) : "—"}
+                  {trade.price != null ? formatUsdFromNumber(tokenUsdOfLotUsd(Number(trade.price), lotExp)) : "—"}
                 </div>
               </a>
             ))}

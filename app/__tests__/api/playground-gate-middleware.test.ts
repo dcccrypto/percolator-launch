@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { mintSession, teamFingerprint } from "@/lib/playground-access";
 import { isExempt } from "@/lib/playground-gate";
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 
 vi.mock("@upstash/redis", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -42,7 +43,10 @@ beforeEach(async () => {
   vi.stubEnv("PLAYGROUND_GATE_ENABLED", "true");
   middleware = (await import("@/middleware")).middleware as Mw;
 });
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  __setDevnetV22ForTest(null);
+});
 
 describe("gate ON", () => {
   it.each(["/", "/trade/Azagguvr", "/markets", "/earn", "/portfolio", "/create", "/trade/x.png", "/LOCKED"])(
@@ -133,6 +137,33 @@ describe("gate ON", () => {
   });
 });
 
+describe("v2.2 Earn share token metadata (wallets fetch it from the Metaplex record's uri)", () => {
+  // A wallet or explorer holds no pg_access cookie: with the gate on and no exemption it would get 401 and show an unnamed token with no icon.
+  const paths = [`/api/earn-share/${SLAB}`, `/api/earn-share/${SLAB}/image`, `/api/earn-share/${SLAB}/`];
+  it.each(paths)("flag ON: GET %s passes without a cookie (HEAD too)", async (p) => {
+    vi.stubEnv("NEXT_PUBLIC_DEVNET_V22", "1"); // read per call; the middleware module is re-imported per test
+    for (const method of ["GET", "HEAD"]) {
+      const r = await middleware(req(p, { method }));
+      expect(r.status, `${method} ${p}`).not.toBe(401);
+      expect(r.status).not.toBe(307);
+    }
+  });
+  it.each(paths)("NEGATIVE CONTROL: flag OFF: %s stays gated (401)", async (p) => {
+    vi.stubEnv("NEXT_PUBLIC_DEVNET_V22", "");
+    expect((await middleware(req(p))).status).toBe(401);
+  });
+  it("flag ON: only that shape is exempt (other methods, other paths, malformed keys, extra segments stay gated)", async () => {
+    vi.stubEnv("NEXT_PUBLIC_DEVNET_V22", "1"); // read per call; the middleware module is re-imported per test
+    for (const [method, p] of [
+      ["POST", `/api/earn-share/${SLAB}`], ["PATCH", `/api/earn-share/${SLAB}`], ["DELETE", `/api/earn-share/${SLAB}/image`],
+      ["GET", "/api/earn-share"], ["GET", "/api/earn-share/"], ["GET", "/api/earn-share/abc"], ["GET", "/api/earn-share/0OIl0OIl0OIl0OIl0OIl0OIl0OIl0OIl0OIl"],
+      ["GET", `/api/earn-share/${SLAB}/other`], ["GET", `/api/earn-share/${SLAB}/image/x`], ["GET", `/api/earn-share-x/${SLAB}`], ["GET", `/api/markets/${SLAB}`],
+    ] as const) {
+      expect((await middleware(req(p, { method }))).status, `${method} ${p}`).toBe(401);
+    }
+  });
+});
+
 describe("gate OFF (kill switch)", () => {
   it.each(["", "false", "TRUE", "1"])("PLAYGROUND_GATE_ENABLED=%j → passthrough, no lock", async (v) => {
     vi.stubEnv("PLAYGROUND_GATE_ENABLED", v);
@@ -166,6 +197,7 @@ describe("every API route is classified", () => {
   }
 
   it("matches the documented exempt set exactly", () => {
+    __setDevnetV22ForTest(false); // the v2.1 deployment: nothing new is exempt
     const all = routes(path.resolve(__dirname, "../../app/api"));
     expect(all.length).toBeGreaterThan(40);
     const exempt: string[] = [];
@@ -174,6 +206,17 @@ describe("every API route is classified", () => {
       for (const m of ["GET", "POST", "PATCH", "PUT", "DELETE"]) if (isExempt(sample, m)) exempt.push(`${m} ${r}`);
     }
     expect(new Set(exempt)).toEqual(EXPECTED_EXEMPT);
+  });
+
+  it("flag ON adds exactly one documented exemption: GET /api/earn-share/[market] (the /image route is route.tsx, pinned above)", () => {
+    __setDevnetV22ForTest(true);
+    const all = routes(path.resolve(__dirname, "../../app/api"));
+    const exempt: string[] = [];
+    for (const r of all) {
+      const sample = r.replace(/\[[^\]]+\]/g, SLAB);
+      for (const m of ["GET", "POST", "PATCH", "PUT", "DELETE"]) if (isExempt(sample, m)) exempt.push(`${m} ${r}`);
+    }
+    expect(new Set(exempt)).toEqual(new Set([...EXPECTED_EXEMPT, "GET /api/earn-share/[market]"]));
   });
 });
 

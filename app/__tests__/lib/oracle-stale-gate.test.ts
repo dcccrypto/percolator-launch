@@ -72,9 +72,11 @@ describe("the trade surfaces use the shared gate, not their own allowlist", () =
     "components/trade/OtherMarketPositions.tsx",
   ];
 
-  it.each(FILES)("%s calls isOracleStaleBlocking", (rel) => {
+  // OrderTicket gates OPENING with isOracleStaleBlocking; the close surfaces use
+  // oracleCloseGate, which composes it (see oracle-close-gate.test.ts).
+  it.each(FILES)("%s calls the shared gate", (rel) => {
     const src = readFileSync(resolve(__dirname, "../..", rel), "utf8");
-    expect(src).toContain("isOracleStaleBlocking(");
+    expect(src).toContain(rel.endsWith("OrderTicket.tsx") ? "isOracleStaleBlocking(" : "oracleCloseGate(");
   });
 
   it.each(FILES)("%s has no inline oracle-mode allowlist", (rel) => {

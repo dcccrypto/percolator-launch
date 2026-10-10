@@ -18,8 +18,8 @@ import {
   deriveExtraAccountMetas,
   deriveNftRegistry,
   encodeNftBurn,
-  isV17Account,
 } from "@percolatorct/sdk";
+import { isWrapperAccount } from "@/lib/v22/layout";
 
 // H8: NFT-program error code 22 = LegNotActive (percolator-nft/src/error.rs) —
 // the leg BurnPositionNft's verify_bound_leg gate expects is no longer active
@@ -94,7 +94,7 @@ export function useBurnPositionNft(slabAddress: string, override?: PositionNftOv
       return;
     }
 
-    const isV17 = raw != null && raw.length > 0 && isV17Account(raw);
+    const isV17 = raw != null && raw.length > 0 && isWrapperAccount(raw);
     if (!isV17) {
       setError("Position NFT burn is only supported on v17 markets.");
       return;

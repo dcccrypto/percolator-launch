@@ -78,22 +78,26 @@ import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { formatTokenAmount, formatUsdPriceE6, toE6, normalizeTokenDecimals } from "@/lib/format";
 import { describeLiqPrice, type LiqPriceDisplay } from "@/lib/liq-price-display";
 import { computeRiskLeverage, formatLeverageValue } from "@/lib/leverage-display";
-import { saveEntryPrice, getEntryPrice, clearEntryPrice } from "@/lib/entry-price";
+import { saveEntryPrice, getEntryPrice, clearEntryPrice, entryAfterTrade, getSavedEntry } from "@/lib/entry-price";
+import { takePositionChange, type PositionChange } from "@/lib/position-change";
+import { classifyOrderChange, orderResultBody } from "@/lib/order-result";
 import { isSentinelValue } from "@/lib/health";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
 import { useInitUser } from "@/hooks/useInitUser";
 import { AUTO_DEPOSIT_AMOUNT } from "@/hooks/useAutoDeposit";
 import { depositAmountMessage } from "@/lib/deposit-guard";
 import { useWalletNetworkGuard } from "@/hooks/useWalletNetworkGuard";
-import { isOracleStaleBlocking } from "@/lib/oracle-stale-gate";
+import { isOracleStaleBlocking, oracleAgeSecs, oracleCloseGate } from "@/lib/oracle-stale-gate";
 import { invalidatePortfolio } from "@/lib/portfolio-invalidation";
+import { checkSignatureLanded, timedOutSignature } from "@/lib/tx";
+import { watchPendingSignature } from "@/lib/pending-signature";
 import { FEE_LEGS, legPercent, splitFeeAtoms } from "@/lib/fee-breakdown";
 import { useMarketLimits } from "@/hooks/useMarketLimits";
 import { closeLimitNotice, deriveTicketLimits, feeFitSizeQ, sizeQToInput, type TicketLimitsInput } from "@/lib/limits/ticket";
 import { sameOwnerRoomQ } from "@/lib/limits/risk-limits";
-import { balanceMaxQ, deriveTicketState, maxInUnit, oneMaxQ, type TicketRow } from "@/lib/limits/ticket-state";
+import { balanceMaxQ, deriveTicketState, maxInUnit, oneMaxQ, sideRoomIsFull, type TicketRow } from "@/lib/limits/ticket-state";
 import { publishTicketRow } from "@/lib/limits/ticket-status-store";
-import { fmtQ } from "@/lib/limits/format";
+import { fmtQ as fmtQLots } from "@/lib/limits/format";
 import { takeFillResult } from "@/lib/limits/fill-check";
 import { defaultFeeCapMarginBps } from "@/lib/limits/fee-channel";
 import { OrderTicketLimits, reasonCopy } from "@/components/limits/OrderTicketLimits";
@@ -104,7 +108,14 @@ import { isMoveFlowEnabled } from "@/lib/v21/move/flag";
 import { isV1CloseOnly } from "@/lib/v21/move/ids";
 import { v1BlocksOrder } from "@/lib/v21/move/close-only";
 import { V1CloseOnlyBanner } from "@/components/move/V1CloseOnlyNotice";
+import { V21_REFRESHING_POSITIONS } from "@/lib/v21/loss-stale-retry";
 import { StatusLine } from "@/components/ui/StatusLine";
+import { V22_COPY } from "@/lib/v22/copy";
+import { parseHumanAmount } from "@/lib/parseAmount";
+import { POS_SCALE_V22, formatLotPriceE6, lotExpOf, lotOrderQ, tokenUsdOfLotUsd } from "@/lib/v22/lot";
+import { BandMarketNotice } from "@/components/v22/BandMarketNotice";
+import { useBandRentView } from "@/hooks/useBandRentView";
+import { useLotTradingGuard } from "@/hooks/useLotTradingGuard";
 import { FixPricingAction } from "@/components/trade/FixPricingAction";
 import { resolveUserMessage, type UserMessage, type UserMessageAction } from "@/lib/limits/user-message";
 import { TICKET_COPY } from "@/lib/limits/copy";
@@ -251,6 +262,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const [fundInput, setFundInput] = useState("");
   /** UX WP-6: the portfolio-id race happened; the second prompt is labelled. */
   const [raceNote, setRaceNote] = useState(false);
+  // Devnet v2.1: an order refused Custom(121) waits ~1-2 s and is sent again (lib/v21/loss-stale-retry.ts).
+  const [refreshingPositions, setRefreshingPositions] = useState(false);
   // The market's per-trade size ceiling (immutable, resolved once).
   const fillCaps = useMarketFillCap(slabAddress);
   const { engine, params, insuranceBalance: liveInsuranceBalance, totalOI: liveTotalOI, hasData: engineHasData } = useEngineState();
@@ -260,7 +273,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   // Non-reactive — see file-header comment. NOT `useLivePrice()`.
   const { priceUsd, priceE6: livePriceE6 } = getLivePriceSnapshot(slabAddress);
-  const { level: oracleLevel, mode: oracleMode, ready: oracleReady } = useOracleFreshness();
+  const { level: oracleLevel, mode: oracleMode, ready: oracleReady, elapsedSecs: oracleElapsed, lastUpdateMs: oracleLastMs, closeFacts } = useOracleFreshness();
   const oracleUnavailable = oracleLevel === "unavailable";
   // GH#2484: this was an inline ALLOWLIST of oracle modes, and it leaked twice —
   // first "keeper" (H7: a stale keeper-priced market never blocked trading,
@@ -268,6 +281,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // lib/oracle-stale-gate and blocks every recognised mode by default, so the
   // next mode added to the union cannot silently trade on a stale price.
   const oracleStale = !oracleUnavailable && isOracleStaleBlocking(oracleLevel, oracleMode, oracleReady);
+  // The Close tab is a reducing action: it blocks only when the chain would refuse
+  // (matured oracle / feed past its own max staleness / no price), not on the 60 s
+  // rule above, which stays for opening. See oracleCloseGate.
+  const closeGate = oracleCloseGate({ level: oracleLevel, mode: oracleMode, ready: oracleReady, facts: closeFacts });
   // H6: engine accrue-staleness — see useEngineFreshness's file header.
   const { engineStale } = useEngineFreshness();
   const openWalletModal = usePrivyLogin();
@@ -275,6 +292,15 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const adapterAvailable = useWalletAdapterAvailable();
   const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
   const collateralSymbol = sanitizeSymbol(tokenMeta?.symbol, mintAddress);
+  const bandView = useBandRentView();
+  // v2.2 (N2): a market with lots is not traded until every surface is lot-aware (null with the flag off).
+  const lotGuard = useLotTradingGuard(slabAddress);
+  // v2.2 lot markets (lib/v22/lot.ts): the mark, entry and every position q are PER LOT. The size box is in TOKENS, so
+  // typed sizes convert at the per-TOKEN price; Q is still derived from the per-lot mark below. lotExp 0 = identity.
+  const lotExp = lotExpOf(slabRaw);
+  const typedPrice = priceUsd ? tokenUsdOfLotUsd(priceUsd, lotExp) : priceUsd;
+  /** Sizes shown to the user are TOKENS: a Q in lots is scaled by 10^lotExp (identity without lots). */
+  const fmtQ = (q: bigint): string => fmtQLots(lotExp > 0 ? q * 10n ** BigInt(lotExp) : q);
 
   const [onChainDecimals, setOnChainDecimals] = useState<number | null>(null);
   const decimals = onChainDecimals ?? tokenMeta?.decimals ?? 6;
@@ -320,7 +346,20 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // focus-visible outline invisible too, silently regressing keyboard a11y.
   const [leverageFocused, setLeverageFocused] = useState(false);
   const [lastSig, setLastSig] = useState<string | null>(null);
-  const [tradePhase, setTradePhase] = useState<"idle" | "submitting" | "waiting" | "confirming" | "error">("idle");
+  const [tradePhase, setTradePhase] = useState<"idle" | "submitting" | "waiting" | "confirming" | "pending" | "error">("idle");
+  // A trade whose confirmation timed out: its signature and what the watch found.
+  const [pendingTx, setPendingTx] = useState<{ sig: string; state: "watching" | "landed" | "dropped" | "undetermined" } | null>(null);
+  const pendingWatchRef = useRef<AbortController | null>(null);
+  // The market this ticket shows now, and whether it is still mounted: a trade that times out
+  // after a market switch or unmount must not start a watch on a ticket that isn't its own.
+  const liveSlabRef = useRef<string | null>(null);
+  useEffect(() => {
+    liveSlabRef.current = slabAddress;
+    return () => {
+      liveSlabRef.current = null;
+    };
+  }, [slabAddress]);
+  useEffect(() => () => pendingWatchRef.current?.abort(), []);
   const [humanError, setHumanError] = useState<string | null>(null);
   /** UX WP-1: a refusal the resolver mapped (simulation-gated: the wallet never opened). */
   const [refusal, setRefusal] = useState<UserMessage | null>(null);
@@ -389,7 +428,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   /** WP-3 row 9: the size was just reduced to the max; the helper turns --warning for 4 s. */
   const [clampedToQ, setClampedToQ] = useState<bigint | null>(null);
   /** WP-3 result line (§3.3): full / partial / zero fill of the last order, in the status slot. */
-  const [result, setResult] = useState<{ kind: "full" | "partial" | "zero"; body: string; sig: string | null; tryQ: bigint | null } | null>(null);
+  const [result, setResult] = useState<{ kind: "full" | "partial" | "zero" | "sent"; body: string; sig: string | null; tryQ: bigint | null } | null>(null);
   /** WP-3: the wait loop passed ~30 s; "We'll keep trying" + Stop. */
   const [waitingLong, setWaitingLong] = useState(false);
   const waitAbortRef = useRef<AbortController | null>(null);
@@ -570,6 +609,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setResult(null);
     setClampedToQ(null);
     setEngineLockError(null);
+    pendingWatchRef.current?.abort();
+    setPendingTx(null);
     setTradePhase("idle");
   }, [slabAddress]);
 
@@ -579,17 +620,17 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const recomputeFromSize = useCallback(
     (raw: string, unit: "token" | "usd", lev: number) => {
       const n = parseFloat(raw);
-      if (isNaN(n) || !priceUsd || priceUsd <= 0) {
+      if (isNaN(n) || !typedPrice || typedPrice <= 0) {
         setMarginInput("");
         return;
       }
-      const notionalUsd = unit === "token" ? n * priceUsd : n;
+      const notionalUsd = unit === "token" ? n * typedPrice : n;
       const marginAmt = notionalUsd / lev;
       // Truncate rather than round to prevent fractional float-overshoot
       // from generating a marginNative slightly larger than the user's actual balance.
       setMarginInput(truncateToDecimals(marginAmt, decimals));
     },
-    [priceUsd, decimals],
+    [typedPrice, decimals],
   );
 
   /** Set the size WITHOUT clearing the status slot (the ticket's own clamp). */
@@ -607,6 +648,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       setRefusal(null);
       setResult(null);
       setClampedToQ(null);
+      // A finished timeout outcome was about the old size; a running watch stays on screen.
+      setPendingTx((p) => (p?.state === "watching" ? p : null));
       applySize(val);
     },
     [applySize],
@@ -616,15 +659,15 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setSizeUnit((prev) => {
       const next = prev === "token" ? "usd" : "token";
       const n = parseFloat(sizeInput);
-      if (!isNaN(n) && priceUsd && priceUsd > 0) {
-        const converted = prev === "token" ? n * priceUsd : n / priceUsd;
+      if (!isNaN(n) && typedPrice && typedPrice > 0) {
+        const converted = prev === "token" ? n * typedPrice : n / typedPrice;
         const nextStr = truncateToDecimals(converted, next === "token" ? 6 : 2);
         setSizeInput(nextStr);
         recomputeFromSize(nextStr, next, leverage);
       }
       return next;
     });
-  }, [sizeInput, priceUsd, leverage, recomputeFromSize]);
+  }, [sizeInput, typedPrice, leverage, recomputeFromSize]);
 
   const updateLeverage = useCallback(
     (newLev: number) => {
@@ -661,12 +704,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       setMarginInput(marginStr);
       const marginNum = Number(marginAmount) / Math.pow(10, decimals);
       const notionalUsd = marginNum * leverage;
-      if (priceUsd && priceUsd > 0) {
-        const nextSize = sizeUnit === "token" ? notionalUsd / priceUsd : notionalUsd;
+      if (typedPrice && typedPrice > 0) {
+        const nextSize = sizeUnit === "token" ? notionalUsd / typedPrice : notionalUsd;
         setSizeInput(truncateToDecimals(nextSize, sizeUnit === "token" ? 6 : 2));
       }
     },
-    [tradableBalance, decimals, leverage, priceUsd, sizeUnit],
+    [tradableBalance, decimals, leverage, typedPrice, sizeUnit],
   );
 
   const marginNative = marginInput ? parsePercToNative(marginInput, decimals) : 0n;
@@ -675,7 +718,18 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // the fractional-safe fix, so it threw on any fractional leverage.
   const notionalNative = computeNotionalNative(marginNative, leverage);
   const rawPositionSize = livePriceE6 && livePriceE6 > 0n ? (notionalNative * 1_000_000n) / livePriceE6 : 0n;
-  const positionSize = rawPositionSize < 0n ? 0n : rawPositionSize;
+  // v2.2 lots: whole lots only (the typed token size rounds DOWN to a lot multiple; the remainder is shown, never sent).
+  let typedTokenQ: bigint | null = null;
+  if (lotExp > 0 && sizeUnit === "token" && sizeInput) {
+    try {
+      typedTokenQ = parseHumanAmount(sizeInput, 6);
+    } catch {
+      typedTokenQ = null; // an unparsable typed size keeps the margin-derived Q
+    }
+  }
+  const lotQuantised = lotOrderQ(rawPositionSize, typedTokenQ, lotExp);
+  const positionSize = lotQuantised.q;
+  const lotRemainderQ = lotQuantised.remainderQ;
   // GH#2953: the engine's initial margin is max(notional x IM bps, min_nonzero_im_req) (engine
   // v16.rs:23050 margin_requirement), so a NEW position needs at least the market's floor ($2 on
   // the wizard markets) however small it is: a $1 first trade deposited $1.11 and was refused
@@ -787,7 +841,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     hasResolvedEntry:
       combinedEntryPriceE6 > 0n &&
       (existingPositionSize === 0n || existingEntryKnown || (!sameDirection && positionSize >= existingAbsSize)),
-    formatPrice: formatUsdPriceE6,
+    formatPrice: (e6: bigint) => formatLotPriceE6(e6, lotExp),
     unknownText: "—",
   });
   const beforeLiqDisplay = describeLiqPrice({
@@ -797,7 +851,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     markPriceE6: livePriceE6 ?? 0n,
     maintenanceMarginBps,
     hasResolvedEntry: existingEntryKnown,
-    formatPrice: formatUsdPriceE6,
+    formatPrice: (e6: bigint) => formatLotPriceE6(e6, lotExp),
     unknownText: "—",
   });
   // BUG 9 fix + copy clarity: opening a position RESERVES margin from
@@ -860,19 +914,23 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const marketMaxQFor = (side: "long" | "short") =>
     oneMaxQ([ticketLimits.sideLimits?.[side]?.maxQ, fillCapQ, legacySideCapQ(side)]);
   const marketMaxQ = marketMaxQFor(direction);
+  // A sub-cent room is full too: it can't be expressed as an order ("Max $0.00"), and clamping
+  // to it rewrote the size to "0.00" on every keystroke instead of saying the side is paused.
   const sidePaused = {
-    long: ticketLimits.halted.long || legacySideCapQ("long") === 0n,
-    short: ticketLimits.halted.short || legacySideCapQ("short") === 0n,
+    long: ticketLimits.halted.long || sideRoomIsFull(legacySideCapQ("long"), livePriceE6),
+    short: ticketLimits.halted.short || sideRoomIsFull(legacySideCapQ("short"), livePriceE6),
   };
   // The Max the trader sees (and the Max chip fills): the market's cap or what the balance can
   // margin at this leverage, whichever is smaller, in the input's unit.
   const displayMaxQ = oneMaxQ([marketMaxQ, balanceMaxQ(tradableBalance, leverage, livePriceE6)]);
 
   // Row 9 (AUTO): over the max, the size is reduced to it and the helper says so for 4 s.
-  const clampTarget = marketMaxQ !== null && marketMaxQ > 0n && positionSize > marketMaxQ ? marketMaxQ : null;
+  // Never on a paused side: there is nothing to reduce to, and the paused label says why.
+  const clampTarget =
+    !sidePaused[direction] && marketMaxQ !== null && marketMaxQ > 0n && positionSize > marketMaxQ ? marketMaxQ : null;
   useEffect(() => {
     if (clampTarget === null || !livePriceE6 || livePriceE6 <= 0n) return;
-    applySize(sizeQToInput(clampTarget, sizeUnit, livePriceE6));
+    applySize(sizeQToInput(clampTarget, sizeUnit, livePriceE6, lotExp));
     setClampedToQ(clampTarget);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fire only when a new clamp is required
   }, [clampTarget]);
@@ -894,6 +952,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const feeFitQ = feeOverMax ? feeFitSizeQ(limitsInput) : null;
   const shortfall = vsPosition ? vsPosition.shortBy : marginNeed > effectiveBalance ? marginNeed - effectiveBalance : 0n;
 
+  // Empty or zero size: the button says "Enter a size" rather than naming an order of nothing
+  // ("Long SOL 1×", "Deposit 0.00 USDC & Long"). Submit is already disabled for it below.
+  const sizeEntered = marginNative > 0n && positionSize > 0n;
   // ── The state machine (audit §3.3): one status slot, one state-labelled button ──
   const ticketState = deriveTicketState({
     direction,
@@ -914,6 +975,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     shortfallLabel: fundingMode ? fundLabel : `${formatTokenAmount(shortfall, decimals)} ${collateralSymbol}`,
     feeOverMax,
     feeSuggested: feeFitQ !== null ? `${fmtQ(feeFitQ)} ${baseTicker}` : null,
+    sizeEntered,
   });
   // Row 5 (LIMIT): the selected side is paused and the other is open => select the open one.
   useEffect(() => {
@@ -937,7 +999,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // below can only compose an order that cannot be submitted — the CTA at the bottom (Connect /
   // Get Tokens) is the only real action. With tokens in the wallet the ticket is fully usable:
   // the button funds and trades in one approval (UX WP-6).
-  const ticketLocked = needsWallet || accountPending || ((needsAccount || needsDeposit) && !walletHasTokens);
+  const ticketLocked = needsWallet || accountPending || ((needsAccount || needsDeposit) && !walletHasTokens) || lotGuard !== null;
 
   async function handleTrade(
     snapshotSize?: bigint,
@@ -945,6 +1007,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   ) {
     const effectiveSize = snapshotSize ?? positionSize;
     if (!marginInput || effectiveSize <= 0n) return;
+    // v2.2 lots: an order is whole lots (the ticket quantises); never sign a fractional lot or a size not derived in lots.
+    if (lotExp > 0 && effectiveSize % POS_SCALE_V22 !== 0n) {
+      setHumanError("That size isn't a whole number of lots here. Adjust it and try again. Nothing was sent.");
+      return;
+    }
     if (accountPending) return;
     if ((!userAccount || exceedsBalance) && !fundingMode) return;
 
@@ -963,8 +1030,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setRefusal(null);
     setResult(null);
     setEngineLockError(null);
+    setPendingTx(null);
     setWaitingLong(false);
     setRaceNote(false);
+    setRefreshingPositions(false);
     const waitAbort = new AbortController();
     waitAbortRef.current = waitAbort;
     const submitPriceE6 = getLivePriceSnapshot(slabAddress).priceE6 ?? livePriceE6 ?? 0n;
@@ -1002,6 +1071,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 // UX WP-3: it keeps waiting past ~30 s ("We'll keep trying") until Stop.
                 keepWaiting: true,
                 onWaitingLong: () => setWaitingLong(true),
+                onRefreshingPositions: setRefreshingPositions,
                 abortSignal: waitAbort.signal,
               },
               snapshotLimitPriceE6,
@@ -1013,7 +1083,6 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       // P1: a confirmed TradeCpi can be a partial or ZERO fill (lib/limits/fill-check.ts).
       const limitsFillResult = takeFillResult(sig);
       setClampedToQ(null);
-      const sideWord = direction === "long" ? "long" : "short";
       if (limitsFillResult?.kind === "zero") {
         // Never "Confirmed!" for a no-op: nothing filled, nothing to save. Offer a smaller size.
         const room = marketMaxQFor(direction);
@@ -1024,16 +1093,39 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         refreshSlab();
         return;
       }
-      setResult(
-        limitsFillResult?.kind === "partial"
-          ? { kind: "partial", body: TICKET_COPY.result.partial(fmtQ(limitsFillResult.filledQ ?? 0n), fmtQ(effectiveSize), baseTicker), sig: sig ?? null, tryQ: null }
-          : {
-              kind: "full",
-              body: TICKET_COPY.result.full(fmtQ(effectiveSize), baseTicker, sideWord, formatUsdPriceE6(submitPriceE6)),
-              sig: sig ?? null,
-              tryQ: null,
-            },
-      );
+      // The result line is worded from the MEASURED position change (ADL-effective before/after,
+      // lib/position-change.ts), never from the request or the raw pre-trade position
+      // (lib/order-result.ts). `orderHeading` (the pre-trade heading) stays request-based on
+      // purpose: before the trade there is nothing measured. takePositionChange consumes its
+      // entry, so it is awaited ONCE and shared with the saved-entry step below. Until it
+      // resolves the line is the neutral "went through" (true for any order).
+      const sigKey = sig ?? null;
+      const price = formatLotPriceE6(submitPriceE6, lotExp);
+      const measured = takePositionChange(sig).then((change): PositionChange | null => {
+        if (change) return change;
+        // Fund-and-trade records no position change, only the fill it measured itself. For a
+        // first trade (no position in this ticket) that fill is an open of the measured size.
+        if (fundingMode && existingPositionSize === 0n && limitsFillResult?.filledQ != null && limitsFillResult.filledQ !== 0n && (limitsFillResult.kind === "full" || limitsFillResult.kind === "partial")) {
+          return { beforeQ: 0n, afterQ: limitsFillResult.filledQ };
+        }
+        return null;
+      });
+      setResult({ kind: "sent", body: TICKET_COPY.result.unmeasured, sig: sigKey, tryQ: null });
+      void measured.then((change) => {
+        const outcome = classifyOrderChange(direction, effectiveSize, change);
+        let next: NonNullable<typeof result>;
+        if (outcome.effect === "zero") {
+          const room = marketMaxQFor(direction);
+          const tryQ = room !== null && room > 0n && room < effectiveSize ? room : effectiveSize / 2n;
+          next = { kind: "zero", body: TICKET_COPY.result.zero, sig: sigKey, tryQ: tryQ > 0n ? tryQ : null };
+        } else if (outcome.effect === "unmeasured") {
+          next = { kind: "sent", body: TICKET_COPY.result.unmeasured, sig: sigKey, tryQ: null };
+        } else {
+          next = { kind: outcome.partial ? "partial" : "full", body: orderResultBody(outcome, fmtQ, baseTicker, price), sig: sigKey, tryQ: null };
+        }
+        // Only if the ticket still shows this order's line (a newer order clears or replaces it).
+        setResult((prev) => (prev && prev.sig === sigKey ? next : prev));
+      });
       setTradePhase("confirming");
       setLastSig(sig ?? null);
       setEngineLockError(null);
@@ -1043,24 +1135,40 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       // A first fund-and-trade runs with no account in this closure (fundingMode allows it), and the
       // portfolio it just created is a v17 one: idx 0, like every v17 account (lib/userAccountScan.ts).
       const entryIdx = userAccount?.idx ?? (fundingMode ? 0 : null);
-      if (livePriceE6 && livePriceE6 > 0n && entryIdx !== null) {
+      // The fill's price, read now rather than from this render (which may be minutes old after a
+      // long wait in the wallet). Same source as before: the live mark, as for every saved entry.
+      const fillPriceE6 = getLivePriceSnapshot(slabAddress).priceE6 ?? livePriceE6 ?? 0n;
+      if (fillPriceE6 > 0n && entryIdx !== null) {
         const wallet = publicKey?.toBase58();
-        // BUG 9 fix: this fired unconditionally on every successful open, so
-        // scaling INTO (or reducing/flipping through) an EXISTING position
-        // overwrote the cached entry with this trade's raw fill price — not
-        // a blended cost basis — corrupting Entry/Liq/PnL/ROE everywhere that
-        // reads the cache. Only a genuinely NEW position (flat -> open) has
-        // "this fill IS the entry" be true. When a position already existed
-        // pre-trade, clear the now-stale cache instead: every consumer's
-        // existing `cachedEntry > 0 ? cached : estimateEntryFromPnl(...)`
-        // fallback then recovers the correct basis from the refreshed
-        // on-chain size/pnl (accurate once refreshSlab() below lands)
-        // instead of showing this trade's fill price mislabeled as "Entry".
+        const slab = slabAddress;
+        const orderLeverage = leverage;
+        // #3314: read BEFORE anything below overwrites or clears it.
+        const prior = getSavedEntry(slab, entryIdx, wallet);
+        // Until the position is measured: a new position takes this fill as its entry; a trade on
+        // an existing one clears it (BUG 9: never let this fill's raw price stand in for the
+        // position's entry), so nothing shows an out-of-date entry as exact in the meantime.
         if (existingPositionSize === 0n) {
-          saveEntryPrice(slabAddress, entryIdx, livePriceE6, leverage, wallet);
+          saveEntryPrice(slab, entryIdx, fillPriceE6, orderLeverage, wallet);
         } else {
-          clearEntryPrice(slabAddress, entryIdx, wallet);
+          clearEntryPrice(slab, entryIdx, wallet);
         }
+        // Then decide from the position measured on chain before and after this trade
+        // (ADL-effective, lib/position-change.ts): an add averages the saved entry with this fill,
+        // a reduce keeps it, a flip or new position takes this fill (lib/entry-price.ts
+        // entryAfterTrade). No measurement (read failed, legacy market): the step above stands.
+        void measured.then((change) => {
+          if (!change) return;
+          const next = entryAfterTrade({ beforeQ: change.beforeQ, afterQ: change.afterQ, saved: prior, fillPriceE6 });
+          if (next === null) {
+            clearEntryPrice(slab, entryIdx, wallet);
+            return;
+          }
+          const opened = change.beforeQ === 0n || (change.beforeQ > 0n) !== (change.afterQ > 0n);
+          // The saved leverage describes the order that opened the position (PositionPanel's
+          // "Order Lev."), so an add or a reduce keeps it.
+          const lev = opened ? orderLeverage : prior?.leverage ?? undefined;
+          saveEntryPrice(slab, entryIdx, next, lev, wallet, change.afterQ);
+        });
       }
       // The site-wide PositionsBar reads usePortfolio, which refreshes its
       // position list on a 30s interval and learns nothing from refreshSlab()
@@ -1078,6 +1186,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     } catch (e) {
       setWaitingLong(false);
       setRaceNote(false);
+      setRefreshingPositions(false);
       if (e instanceof FirstTradeDepositError) {
         // §3.2 item 5: the account exists but the deposit didn't land — say so, offer the deposit.
         setRefusal({
@@ -1118,12 +1227,48 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         // GH#2959: a 49 on a new position below the market's floor is the floor, not the size.
         ...(belowImFloor ? { imFloorLabel: `$${usd2(imFloor, decimals).replace(/\.00$/, "")}` } : {}),
       });
+      // GH#2804 follow-up: the confirmation poll gave up but the trade may still land. Keep the
+      // submit locked and watch the signature, like Earn's DepositWithdrawPanel, instead of
+      // re-enabling the ticket with the same order filled in. Gated on the resolved kind so
+      // other errors never reach timedOutSignature.
+      const timedOutSig = um.kind === "still-confirming" ? timedOutSignature(e) : null;
+      if (timedOutSig && liveSlabRef.current !== slabAddress) return;
+      if (timedOutSig) {
+        pendingWatchRef.current?.abort();
+        const ctl = new AbortController();
+        pendingWatchRef.current = ctl;
+        const entryIdx = userAccount?.idx ?? (fundingMode ? 0 : null);
+        const wallet = publicKey?.toBase58();
+        setPendingTx({ sig: timedOutSig, state: "watching" });
+        setTradePhase("pending");
+        void watchPendingSignature(() => checkSignatureLanded(connection, timedOutSig), { signal: ctl.signal }).then((outcome) => {
+          if (outcome === "aborted" || ctl.signal.aborted) return;
+          setPendingTx({ sig: timedOutSig, state: outcome });
+          if (outcome === "landed") {
+            setMarginInput("");
+            setSizeInput("");
+            setFundInput("");
+            // The fill price is unknown here, so don't leave a cached entry for the position.
+            if (entryIdx !== null) clearEntryPrice(slabAddress, entryIdx, wallet);
+            invalidatePortfolio();
+          }
+          if (outcome !== "dropped") refreshSlab();
+          setTradePhase("idle");
+        });
+        return;
+      }
       if (um.quiet) {
         // GH#2959: a first fund-and-trade the user turned down in the wallet reset the ticket
         // with no word (some wallets showed their own warning, so it read as "nothing happened").
         // Say it, calmly. Other cancels (and Stop) stay quiet.
         if (fundingMode && um.kind === "cancelled") {
-          setRefusal({ ...um, quiet: false, title: "Cancelled", body: FIRST_TRADE_COPY.cancelled });
+          setRefusal({
+            ...um,
+            quiet: false,
+            title: "Cancelled",
+            body: FIRST_TRADE_COPY.cancelled,
+            ...(getNetwork() === "devnet" ? { why: FIRST_TRADE_COPY.cancelledDevnetWhy } : {}),
+          });
         }
         setTradePhase("idle");
         return;
@@ -1193,7 +1338,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       return;
     }
     const q = a.id === "try-size" ? result?.tryQ ?? null : a.id === "use-max" ? ticketLimits.sideLimits?.[direction]?.maxQ ?? null : null;
-    if (q && q > 0n && livePriceE6 && livePriceE6 > 0n) handleSizeChange(sizeQToInput(q, sizeUnit, livePriceE6));
+    if (q && q > 0n && livePriceE6 && livePriceE6 > 0n) handleSizeChange(sizeQToInput(q, sizeUnit, livePriceE6, lotExp));
   };
   const LEGACY_TESTID: Partial<Record<TicketRow, string>> = {
     "close-only": "limits-adl-reduce-only",
@@ -1201,7 +1346,22 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     "same-owner": "limits-same-owner-notice",
     "fee-over-max": "limits-quote-fee-over-max",
   };
+  const pendingLine = pendingTx && (
+    <div data-testid="trade-pending" data-state={pendingTx.state}>
+      <StatusLine
+        message={{
+          kind: `pending-${pendingTx.state}`,
+          variant: pendingTx.state === "watching" ? "wait" : pendingTx.state === "dropped" ? "error" : "info",
+          title: TICKET_COPY.pending[pendingTx.state].title,
+          body: TICKET_COPY.pending[pendingTx.state].body,
+        }}
+        txUrl={pendingTx.state === "dropped" ? undefined : explorerTxUrl(pendingTx.sig)}
+      />
+    </div>
+  );
   const statusSlot = (() => {
+    // While a timed-out trade is being watched, nothing replaces this line.
+    if (pendingTx?.state === "watching") return pendingLine;
     if (ticketState.status) {
       const legacy = LEGACY_TESTID[ticketState.row];
       const line = <StatusLine message={ticketState.status} legacyTestId={legacy} />;
@@ -1215,9 +1375,17 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         />
       );
     }
+    if (refreshingPositions && tradePhase !== "idle") {
+      return (
+        <div data-testid="trade-refreshing-positions">
+          <StatusLine message={{ kind: "loss-stale-retry", variant: "wait", title: "One moment", body: V21_REFRESHING_POSITIONS }} />
+        </div>
+      );
+    }
     if (raceNote && tradePhase === "submitting") {
       return <StatusLine message={{ kind: "first-trade-race", variant: "info", title: "One more approval", body: FIRST_TRADE_COPY.race }} />;
     }
+    if (pendingLine) return pendingLine;
     const why = networkWarning ?? undefined;
     if (refusal) {
       return (
@@ -1241,8 +1409,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       );
     }
     if (result) {
-      const kind = result.kind === "zero" ? "zero-fill" : result.kind === "partial" ? "partial-fill" : "filled";
-      const title = result.kind === "zero" ? "Not filled" : result.kind === "partial" ? "Partly filled" : "Order filled";
+      const kind = result.kind === "zero" ? "zero-fill" : result.kind === "partial" ? "partial-fill" : result.kind === "sent" ? "sent" : "filled";
+      const title = result.kind === "zero" ? "Not filled" : result.kind === "partial" ? "Partly filled" : result.kind === "sent" ? "Order sent" : "Order filled";
       const line = (
         <StatusLine
           message={{
@@ -1338,6 +1506,16 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             </div>
           ) : null;
         })()}
+        {/* Devnet v2.2 band markets (flag-gated; renders nothing otherwise): mark vs target, minimum position. */}
+        {lotExp > 0 && lotRemainderQ > 0n && (
+          <p data-testid="lot-remainder" className="mb-2 text-[10px] text-[var(--text-secondary)]">
+            {V22_COPY.lot.remainder(fmtQLots(lotRemainderQ * 10n ** BigInt(lotExp)), baseTicker)}
+          </p>
+        )}
+        {lotGuard && (
+          <p data-testid="lot-trading-guard" role="status" className="mb-2 text-[11px] text-[var(--text-secondary)]">{lotGuard}</p>
+        )}
+        <BandMarketNotice view={bandView} collateralDecimals={decimals} collateralSymbol={collateralSymbol} />
         {/* Devnet v2.1: the close-only countdown + permissionless wind-down (flag-gated). */}
         {adlReduceOnly && isDevnetV21Enabled() && (
           <CloseOnlyBanner slabAddress={slabAddress} hasPosition={existingPositionSize !== 0n} collateralDecimals={decimals} />
@@ -1348,7 +1526,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           <OrderTicketClosePanel
             slabAddress={slabAddress}
             positionSize={closeView?.effectiveSize ?? existingPositionSize}
+            lotExp={lotExp}
             previewUnavailable={closeView != null && !closeView.adlKnown}
+            portfolioPk={userAccount?.pubkey}
             accountPending={accountPending}
             entryPriceE6={existingEntryKnown ? existingEntryPriceE6 : 0n}
             capital={capital}
@@ -1359,7 +1539,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             maxFillAbs={fillCaps?.maxFillAbs ?? null}
             lpUnderfunded={lpUnderfunded}
             engineStale={engineStale}
-            oracleBlocked={!mockMode && (oracleUnavailable || oracleStale)}
+            oracleBlocked={!mockMode && closeGate.blocked}
+            oraclePriceBehind={!mockMode && closeGate.behind}
+            priceAgeSecs={oracleAgeSecs(oracleLastMs, oracleElapsed)}
             onClosed={handleClosed}
           />
         )}
@@ -1379,10 +1561,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       : null;
   // One Max per side (§4.2): in the input's unit, tap = fill. Hidden while the ticket can't open.
   const showMax = displayMaxQ !== null && displayMaxQ > 0n && !!livePriceE6 && livePriceE6 > 0n && !ticketState.blocks;
-  const maxLabel = showMax ? maxInUnit(displayMaxQ!, sizeUnit, livePriceE6!, baseTicker) : null;
+  const maxLabel = showMax ? maxInUnit(displayMaxQ!, sizeUnit, livePriceE6!, baseTicker, lotExp) : null;
   const fillFraction = (pct: number) => {
     if (displayMaxQ !== null && displayMaxQ > 0n && livePriceE6 && livePriceE6 > 0n) {
-      handleSizeChange(sizeQToInput((displayMaxQ * BigInt(pct)) / 100n, sizeUnit, livePriceE6));
+      handleSizeChange(sizeQToInput((displayMaxQ * BigInt(pct)) / 100n, sizeUnit, livePriceE6, lotExp));
       return;
     }
     setSizePercent(pct);
@@ -1495,7 +1677,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             className="mt-1 text-[11px] text-[var(--warning)]"
             style={{ fontFamily: "var(--font-mono)" }}
           >
-            {TICKET_COPY.clamped(livePriceE6 && livePriceE6 > 0n ? maxInUnit(clampedToQ, sizeUnit, livePriceE6, baseTicker).replace(` ${baseTicker}`, "") : fmtQ(clampedToQ), sizeUnit === "token" ? baseTicker : "USD")}
+            {TICKET_COPY.clamped(livePriceE6 && livePriceE6 > 0n ? maxInUnit(clampedToQ, sizeUnit, livePriceE6, baseTicker, lotExp).replace(` ${baseTicker}`, "") : fmtQ(clampedToQ), sizeUnit === "token" ? baseTicker : "USD")}
           </p>
         ) : (
           <div
@@ -1571,9 +1753,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               }}
               onBlur={() => setLeverageText(formatLeverageValue(leverage))}
               style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
-              className="w-12 rounded-none border border-[var(--border)]/50 bg-[var(--bg)] px-1.5 py-0.5 text-right text-[11px] text-[var(--text)] focus:border-[var(--accent)]/50 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]/20"
+              className="w-12 pointer-coarse:w-16 rounded-none border border-[var(--border)]/50 bg-[var(--bg)] px-1.5 py-0.5 text-right text-[11px] text-[var(--text)] focus:border-[var(--accent)]/50 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]/20"
             />
-            <span className="text-[11px] font-medium text-[var(--text)]">x</span>
+            <span className="text-[11px] pointer-coarse:text-base font-medium text-[var(--text)]">x</span>
           </div>
         </div>
         {maxLeverage > 1 ? (() => {
@@ -1790,6 +1972,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               ticket={ticketLimits}
               direction={direction}
               symbol={baseTicker}
+              lotExp={lotExp}
               feeMarginBps={feeMarginBps}
               onFeeMarginChange={setFeeMarginBps}
             />
@@ -1973,8 +2156,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           {(ticketState.waiting || tradePhase === "waiting") && (
             <span aria-hidden="true" data-testid="trade-submit-spinner" className="mr-1.5 inline-block h-2 w-2 animate-pulse rounded-full bg-current align-middle" />
           )}
-          {tradePhase === "submitting"
+          {refreshingPositions && tradePhase !== "idle"
+            ? V21_REFRESHING_POSITIONS
+            : tradePhase === "submitting"
             ? TICKET_COPY.confirmInWallet
+            : tradePhase === "pending"
+              ? TICKET_COPY.pending.button
             : tradePhase === "waiting"
               ? TICKET_COPY.waitingLatest
               : sameOwnerOpenPending
@@ -1983,7 +2170,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 ? "Loading account…"
                 : fundOverWallet && !ticketState.blocks
                 ? "Get test funds"
-                : fundingMode && ticketState.row === "ok"
+                : fundingMode && ticketState.row === "ok" && sizeEntered
                   ? FIRST_TRADE_COPY.button(fundLabel, direction === "long" ? "Long" : "Short")
                   : ticketState.buttonLabel}
         </button>
@@ -2050,6 +2237,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           symbol={baseTicker}
           collateralSymbol={collateralSymbol}
           decimals={decimals}
+          lotExp={lotExp}
           onConfirm={() => {
             const snapshot = confirmSnapshot;
             setShowConfirmModal(false);

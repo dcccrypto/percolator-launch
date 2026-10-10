@@ -56,6 +56,29 @@ export function computeEngineLiqPrice(
   return (numerator * BPS) / (absQ * (BPS + mm));
 }
 
+/**
+ * How far, in percent of the entry price, the price can move against a position opened at the
+ * market's full leverage (capital = initial margin) before the engine can liquidate it. The nearer
+ * side is returned: at the same margins a short is liquidated sooner than a long (10x, mm 5%: long
+ * 5.26%, short 4.76%). It is not 1 / leverage, which ignores the maintenance requirement and
+ * shows twice the room at mm = im / 2. Fees and the per-leg floor are not modelled (they only
+ * bring liquidation closer). null when the margins do not describe a liquidatable position.
+ */
+export function liqMovePctAtFullLeverage(initialMarginBps: number, maintenanceMarginBps: number): number | null {
+  if (!Number.isFinite(initialMarginBps) || !Number.isFinite(maintenanceMarginBps)) return null;
+  const im = BigInt(Math.round(initialMarginBps));
+  const mm = BigInt(Math.round(maintenanceMarginBps));
+  if (im <= 0n || mm < 0n || im <= mm || im >= BPS) return null;
+  const entry = E6; // $1, so the position's notional in atoms equals its size
+  const q = 1_000_000_000_000n;
+  const capital = (q * im) / BPS;
+  const longLiq = computeEngineLiqPrice(entry, capital, q, mm);
+  const shortLiq = computeEngineLiqPrice(entry, capital, -q, mm);
+  if (longLiq <= 0n || shortLiq <= entry) return null;
+  const nearer = entry - longLiq < shortLiq - entry ? entry - longLiq : shortLiq - entry;
+  return Number((nearer * 1_000_000n) / entry) / 10_000;
+}
+
 /** computePreTradeLiqPrice (SDK signature) on the engine model. */
 export function computeEnginePreTradeLiqPrice(
   oracleE6: bigint,

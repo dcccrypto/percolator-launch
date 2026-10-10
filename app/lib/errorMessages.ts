@@ -25,6 +25,10 @@ import { PORTFOLIO_LOOKUP_COPY } from "@/lib/owner-portfolio";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { isDevnetV21Enabled } from "@/lib/v21/flag";
 import { V21_ERROR_CODE_MAP } from "@/lib/v21/error-copy";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { V22_ERROR_CODE_MAP, V22_STAKE_ERROR_CODE_MAP } from "@/lib/v22/error-copy";
+import { V22_ENGINE_LOCK_CODES } from "@/lib/v22/wrapper-errors";
+import { stakeProgramIdOrNull } from "@/lib/v22/program-ids";
 import { V21_ENGINE_LOCK_CODES } from "@/lib/v21/wrapper-errors";
 const LIGHTHOUSE_PROGRAM_ID_STR = "L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95";
 
@@ -263,16 +267,26 @@ const SPL_TOKEN_INSUFFICIENT_FUNDS_MESSAGE =
 //   Phantom  : {code: 4100, message: "The requested method and/or account has not been authorized by the user."}
 //              {code: 4001, message: "User rejected the request."}
 //   Solflare : "Wallet is locked" / "WalletNotConnectedError" / "User rejected the request"
+//   Privy    : "User rejected request" / "User exited the modal before submitting the transaction"
 //   adapters : WalletNotConnectedError, WalletSignTransactionError: "Wallet not connected"
 export const WALLET_LOCKED_MESSAGE =
   "Your wallet is locked or hasn't authorised this site. Unlock Phantom / Solflare, reconnect it from the header, and try again. Nothing was sent.";
 export type WalletErrorKind = "locked" | "rejected";
 
+/**
+ * Text that means the USER declined a wallet prompt. Deliberately narrow: it does not match a policy or
+ * rate-limit refusal ("Transaction rejected by policy", "429 ... request rejected") or a bare "4001"
+ * inside another message ("Custom(4001)"); the numeric `code === 4001` is checked on the error object
+ * by `isWalletRejection` (lib/privy-batch-sign.ts) instead. 0x6985 is a Ledger "denied by the user".
+ */
+export const USER_DECLINED_RE =
+  /user rejected|rejected the request|rejected by the user|user declined|user denied|user disapproved|request declined|signing cancell?ed by user|transaction cancell?ed|user exited the modal|\b0x6985\b/i;
+
 export function detectWalletError(msg: string): WalletErrorKind | null {
   if (/has not been authori[sz]ed by the user|\b4100\b.*authori[sz]|wallet is locked|locked wallet|WalletNotConnected|wallet not connected|please unlock/i.test(msg)) {
     return "locked";
   }
-  if (/user rejected|rejected the request|user declined|transaction rejected|request rejected|\b4001\b/i.test(msg)) {
+  if (USER_DECLINED_RE.test(msg) || /transaction rejected|request rejected|\b4001\b/i.test(msg)) {
     return "rejected";
   }
   return null;
@@ -364,6 +378,8 @@ export function isEngineLockError(msg: string): boolean {
   return (
     code === WRAPPER_ERR.EngineLockActive ||
     code === WRAPPER_ERR.EngineStale ||
+    // Devnet v2.2: 118 (exit needs loss-current) is an engine lock the app retries through.
+    (code !== null && isDevnetV22Enabled() && V22_ENGINE_LOCK_CODES.includes(code)) ||
     // Devnet v2.1, P2b E7: the codes that split out of 21 (close-only after ADL, refreshing, Earn
     // backed gate). Flag-gated: the live wrapper never raises them.
     (code !== null && isDevnetV21Enabled() && V21_ENGINE_LOCK_CODES.includes(code))
@@ -382,6 +398,7 @@ export const NO_SOL_FOR_FEES_MESSAGE =
   "Your wallet needs a little devnet SOL to pay network fees. Use Get test funds (the faucet) to add some, then try again.";
 
 export function humanizeError(rawMsg: string, context?: "trade"): string {
+  if (rawMsg.includes("This action isn't available for this market yet. Nothing was sent.")) return rawMsg; // v2.2 tail mismatch: already the calm line
   // Log for debugging (only in browser)
   if (typeof window !== "undefined") {
     console.warn("[humanizeError] raw:", rawMsg);
@@ -488,6 +505,12 @@ export function humanizeError(rawMsg: string, context?: "trade"): string {
     // it. An unattributed code (no "Program X failed" line) or another program's is not guessed.
     if (origin === WRAPPER_PROGRAM_ID && ERROR_CODE_MAP[code]) {
       return ERROR_CODE_MAP[code];
+    }
+    // Devnet v2.2 (flag-gated): wrapper 104..119 / 123 / 124, stake v5 33..45. Checked before v2.1 / the legacy
+    // table because the stake program reuses low numbers (33..45) that the wrapper table also owns.
+    if (isDevnetV22Enabled()) {
+      if (origin !== null && origin === stakeProgramIdOrNull() && V22_STAKE_ERROR_CODE_MAP[code]) return V22_STAKE_ERROR_CODE_MAP[code];
+      if (origin === WRAPPER_PROGRAM_ID && V22_ERROR_CODE_MAP[code]) return V22_ERROR_CODE_MAP[code];
     }
     // Devnet v2.1 (flag-gated): growth-v19 92..99, P2b Earn 100..103, P2b lock exits 120..122.
     if (origin === WRAPPER_PROGRAM_ID && isDevnetV21Enabled() && V21_ERROR_CODE_MAP[code]) {

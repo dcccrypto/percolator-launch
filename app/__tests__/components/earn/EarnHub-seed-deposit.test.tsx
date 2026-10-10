@@ -17,7 +17,7 @@ const market = (slabAddress: string, symbol: string) => ({
 vi.mock("@/hooks/useEarnStats", () => ({
   useEarnStats: () => ({
     stats: { markets: [market(FIRST, "PERCOLATOR"), market(SEEDED, "TRENDS")], tvl: 0, totalOI: 0, maxOI: 0, totalInsurance: 0 },
-    loading: false, error: null, refresh: vi.fn(),
+    loading: false, error: null, hasData: true, refresh: vi.fn(),
   }),
 }));
 // The rail is bound to the FIRST row (auto-selected) and has not reported anything.

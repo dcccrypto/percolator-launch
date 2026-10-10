@@ -12,7 +12,7 @@
  * Only callable on devnet. Global rate limiting (120 req/min/IP) is handled
  * by middleware.ts. mintAddress must be in DEVNET_ALLOWED_MINTS env var.
  *
- * H3: balance is checked BEFORE the 24h per-wallet-per-mint rate gate is consulted.
+ * H3: balance is checked BEFORE the 1h per-wallet-per-mint rate gate is consulted.
  * A single wizard launch calls this endpoint up to 3× (vault seed, LP collateral,
  * insurance top-up) for the SAME wallet + SAME shared sim-USDC mint, so they'd
  * otherwise collide on one gate claim. Sufficient-balance is a 200 no-op that never
@@ -32,6 +32,7 @@ import {
   fundAmountFor,
   fundingRequirement,
   parseAtomicAmount,
+  PREFUND_WINDOW_MS,
 } from "@/lib/prefund-requirement";
 import { getClientIp } from "@/lib/get-client-ip";
 import { checkFundRateLimit } from "@/lib/fund-ip-rate-limit";
@@ -342,12 +343,12 @@ export async function POST(req: NextRequest) {
 
     const connection = getServerConnection("confirmed");
 
-    // H3: read the on-chain balance FIRST — before touching the 24h rate gate.
+    // H3: read the on-chain balance FIRST — before touching the 1h rate gate.
     // All three devnet-pre-fund calls inside a single wizard launch (vault seed,
     // LP collateral, insurance top-up — see hooks/useCreateMarket.ts) target the
     // SAME shared sim-USDC collateral mint for the SAME wallet, so they all hash to
     // one gate key (`rateKey` below). Checking the gate before the balance meant the
-    // 2nd/3rd call in one flow always hit the 1st call's still-open 24h claim and
+    // 2nd/3rd call in one flow always hit the 1st call's still-open 1h claim and
     // 429'd, throwing mid-launch. The mint tops up to 2× the full
     // three-step requirement, so once the first call funds the wallet the remaining
     // calls in the same flow see a sufficient balance here and return a 200 no-op —
@@ -377,7 +378,7 @@ export async function POST(req: NextRequest) {
     // This endpoint was the only one of the five without it (GH#2471's vector),
     // and the mint amount is now request-derived, so the per-request ceiling alone
     // is not a sufficient bound. Placed AFTER the sufficient-balance short-circuit
-    // so the second in-launch call spends no IP budget, and BEFORE the 24h gate.
+    // so the second in-launch call spends no IP budget, and BEFORE the 1h gate.
     const fundRl = await checkFundRateLimit(getClientIp(req));
     if (!fundRl.allowed) {
       return NextResponse.json(
@@ -409,7 +410,7 @@ export async function POST(req: NextRequest) {
       const sbMod = await import("@/lib/supabase");
       const gateMod = await import("@/lib/faucet-rate-gate");
       supabaseForGate = sbMod.getServiceClient();
-      gate = await gateMod.tryFaucetGate(supabaseForGate, walletAddress, fundType);
+      gate = await gateMod.tryFaucetGate(supabaseForGate, walletAddress, fundType, PREFUND_WINDOW_MS);
     } catch {
       usingFallbackGate = true;
       // Read-only pre-check (mirrors the Supabase pre-check SELECT in
@@ -423,7 +424,7 @@ export async function POST(req: NextRequest) {
     // GH#2597: the Supabase gate is check-AND-reserve, so from here the claim is
     // already spent. Three server-misconfiguration paths below used to `return` a
     // 500 without giving it back, so a deployment problem cost the caller their
-    // 24h window and funded nothing — and because they `return` rather than throw,
+    // 1h window and funded nothing — and because they `return` rather than throw,
     // the outer catch that releases the Blob fallback claim never ran either.
     //
     // Armed here, disarmed only once a mint has CONFIRMED, and called from the
@@ -552,7 +553,7 @@ export async function POST(req: NextRequest) {
     // Need to fund: top up to 2× the requirement for THIS launch. Because the
     // requirement now includes both backing seeds, one mint covers the whole
     // launch and the later calls short-circuit at the balance check above
-    // instead of reaching the 24h gate.
+    // instead of reaching the 1h gate.
     const toMint = fundAmountFor(fullRequirement) - currentBalance;
 
     // Reserve the durable fallback claim immediately before mint work.
@@ -638,7 +639,7 @@ export async function POST(req: NextRequest) {
       }
 
       // TX failed after reserving the durable fallback claim.
-      // Release it so a failed mint does not lock the wallet/mint pair for 24h.
+      // Release it so a failed mint does not lock the wallet/mint pair for 1h.
       await releaseFallbackClaim();
 
       throw txErr;
@@ -659,7 +660,7 @@ export async function POST(req: NextRequest) {
     // GH#2597: the claim was SPENT on a mint that CONFIRMED, so it must not be
     // given back. Without this, a throw anywhere after here — building the
     // response, or any code added later — would reach the outer catch and release
-    // a claim that was legitimately used, handing back a 24h window that had been
+    // a claim that was legitimately used, handing back a 1h window that had been
     // consumed. That is a rate-limit bypass, i.e. worse than the leak this change
     // fixes, so it is the one disarm that has to exist.
     releaseGateClaimOnExit = null;

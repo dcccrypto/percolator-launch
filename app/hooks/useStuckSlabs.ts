@@ -3,12 +3,12 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
-import { isV17Account } from "@percolatorct/sdk";
 import {
   loadAllInFlightMarkets,
   clearInFlightMarket,
   type InFlightMarketState,
 } from "@/lib/inFlightMarket";
+import { isWrapperAccount } from "@/lib/v22/layout";
 
 // v17: isV17Account() from SDK handles magic detection for both v17 and v12 slabs.
 // PERCOLAT_MAGIC (v12) is no longer checked directly here.
@@ -42,8 +42,7 @@ export interface StuckSlab {
  *
  * Reads the persisted in-flight state written by useCreateMarket via
  * lib/inFlightMarket.ts (NEVER stores the slab secret key — recovery uses
- * the admin keypair the user already has on disk and runs
- * scripts/close-market-reclaim-all.ts).
+ * the admin wallet the user already has).
  *
  * Only returns stuck-slab records whose persisted adminAddress matches the
  * currently-connected wallet. That prevents the banner from showing entries
@@ -109,7 +108,7 @@ export function useStuckSlabs() {
       // isV17Account() checks the v17 magic bytes at offset 0; also detect v12 via PERCOLAT magic fallback.
       const PERCOLAT_MAGIC_V12 = 0x504552434f4c4154n; // "PERCOLAT" as u64 LE
       const data = new Uint8Array(accountInfo.data);
-      const isV17 = isV17Account(data);
+      const isV17 = isWrapperAccount(data);
       const isV12 = accountInfo.data.length >= 8 &&
         new DataView(
           accountInfo.data.buffer,

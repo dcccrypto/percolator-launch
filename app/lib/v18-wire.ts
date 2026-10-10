@@ -22,7 +22,6 @@
  */
 import { Connection, PublicKey } from "@solana/web3.js";
 import {
-  parsePortfolioV17,
   parseAssetControlSequencesV17,
   parseProtocolFeeAuthorityEpoch,
   type AssetControlSequencesV17,
@@ -30,12 +29,19 @@ import {
   V17_MARKET_GROUP_OFF,
   V17_MARKET_GROUP_LEN,
   V17_MARKET_ASSET_SLOT_LEN,
-  V17_ASSET_ORACLE_WRAPPER_LEN,
 } from "@percolatorct/sdk";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { marketGeometry, parsePortfolio } from "@/lib/v22/layout";
 
-/** Absolute byte offset where asset `assetIndex`'s wrapper slot starts. */
-export function assetProfileOff(assetIndex: number): number {
-  return V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN + assetIndex * V17_MARKET_ASSET_SLOT_LEN;
+/**
+ * Absolute byte offset where asset `assetIndex`'s wrapper slot starts. The market account BYTES are REQUIRED: the geometry
+ * is chosen by the account's VERSION (v2.2: 2,629 B slots after an 806 B group; v2.1: 2,325 B after 758 B). A byte-less
+ * form cannot know the layout, so with the v2.2 flag on the bytes are required (review F4). Flag off the bytes are ignored (v2.1 constants, as before).
+ */
+export function assetProfileOff(assetIndex: number, slabData?: Uint8Array): number {
+  if (!isDevnetV22Enabled()) return V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN + assetIndex * V17_MARKET_ASSET_SLOT_LEN;
+  if (!slabData) throw new Error("assetProfileOff: the market account bytes are required when v2.2 is enabled (the layout comes from the account VERSION)");
+  return marketGeometry(slabData, "assetProfileOff").slotOff(assetIndex);
 }
 
 function readU64LE(data: Uint8Array, off: number): bigint {
@@ -72,15 +78,18 @@ export interface MarketGroupHeaderState {
 }
 
 export function readMarketGroupHeader(slabData: Uint8Array): MarketGroupHeaderState {
-  const g = V17_MARKET_GROUP_OFF;
-  if (slabData.length < g + V17_MARKET_GROUP_LEN) {
+  const geo = marketGeometry(slabData, "readMarketGroupHeader");
+  const g = geo.groupOff;
+  const L = geo.layout.group;
+  if (slabData.length < geo.slotsBase) {
     throw new Error(`slab too short for the market-group header @ ${g}`);
   }
   return {
-    mode: slabData[g + HDR_MODE],
-    nextMarketId: readU64LE(slabData, g + HDR_NEXT_MARKET_ID),
-    cTot: readU64LE(slabData, g + HDR_C_TOT) | (readU64LE(slabData, g + HDR_C_TOT + 8) << 64n),
-    materializedPortfolioCount: readU64LE(slabData, g + HDR_MATERIALIZED_PORTFOLIO_COUNT),
+    mode: slabData[g + L.mode],
+    // next_market_id is not a column of the SDK table; it sits at a fixed distance after c_tot in both layouts.
+    nextMarketId: readU64LE(slabData, g + L.cTot + (HDR_NEXT_MARKET_ID - HDR_C_TOT)),
+    cTot: readU64LE(slabData, g + L.cTot) | (readU64LE(slabData, g + L.cTot + 8) << 64n),
+    materializedPortfolioCount: readU64LE(slabData, g + L.materializedPortfolioCount),
   };
 }
 
@@ -96,7 +105,7 @@ export interface PortfolioIdentity {
 
 /** Parse the v18 identity trailer from raw portfolio account bytes. */
 export function readPortfolioIdentity(portfolioData: Uint8Array): PortfolioIdentity {
-  const p = parsePortfolioV17(portfolioData);
+  const p = parsePortfolio(portfolioData);
   return {
     portfolioId: p.portfolioId,
     matcherSequence: p.matcherSequence,
@@ -110,7 +119,7 @@ export function readPortfolioIdentity(portfolioData: Uint8Array): PortfolioIdent
  * assume (fail-closed).
  */
 export function readAssetMarketId(slabData: Uint8Array, assetIndex = 0): bigint {
-  const off = assetProfileOff(assetIndex) + V17_ASSET_ORACLE_WRAPPER_LEN;
+  const off = marketGeometry(slabData, "readAssetMarketId").engineOff(assetIndex);
   if (slabData.length < off + 8) {
     throw new Error(`slab too short for AssetStateV16.market_id @ ${off}`);
   }
@@ -126,7 +135,7 @@ export function readAssetMarketId(slabData: Uint8Array, assetIndex = 0): bigint 
  * (burning the admin key). Zero pubkey once renounced.
  */
 export function readAssetAdmin(slabData: Uint8Array, assetIndex = 0): PublicKey {
-  const off = assetProfileOff(assetIndex) + 368;
+  const off = assetProfileOff(assetIndex, slabData) + 368;
   if (slabData.length < off + 32) {
     throw new Error(`slab too short for AssetOracleProfileV17.asset_admin @ ${off}`);
   }
@@ -135,12 +144,12 @@ export function readAssetAdmin(slabData: Uint8Array, assetIndex = 0): PublicKey 
 
 /** Live AssetControlSequencesV16 (oracle-observation nonce + authority-epoch CAS). */
 export function readAssetControlSeqs(slabData: Uint8Array, assetIndex = 0): AssetControlSequencesV17 {
-  return parseAssetControlSequencesV17(slabData, assetProfileOff(assetIndex));
+  return parseAssetControlSequencesV17(slabData, assetProfileOff(assetIndex, slabData));
 }
 
 /** Market-wide `protocol_fee_authority_epoch` (only for WithdrawProtocolFee). */
 export function readProtocolFeeAuthorityEpoch(slabData: Uint8Array): bigint {
-  return parseProtocolFeeAuthorityEpoch(slabData, assetProfileOff(0));
+  return parseProtocolFeeAuthorityEpoch(slabData, assetProfileOff(0, slabData));
 }
 
 /**

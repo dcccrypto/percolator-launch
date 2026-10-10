@@ -1,3 +1,5 @@
+import { lotExpOf } from "@/lib/v22/lot";
+import { lotMarketNumbers } from "@/lib/v22/lot-view";
 import { NextRequest, NextResponse } from "next/server";
 import { classifyPoolsByOwner } from "@/lib/dex-pool-owner";
 import { NON_USD_QUOTE_REASON } from "@/lib/dex-constants";
@@ -5,7 +7,8 @@ import { buildMarketDirectoryFallback } from "@/lib/markets-fallback";
 import { resolveDevnetProgramIds } from "@/lib/program-ids";
 import { PublicKey } from "@solana/web3.js";
 import { validateNumericParam } from "@/lib/route-validators";
-import { parseHeader, parseConfig, discoverMarkets, type DiscoveredMarket, isV17Account, parseWrapperConfigV17, parseAssetOracleProfileV17, parseMarketGroupV17OI, type V17MarketGroupOI, type RiskParams, V17_HEADER_LEN, V17_MARKET_GROUP_OFF, V17_MARKET_GROUP_LEN } from "@percolatorct/sdk";
+import { parseHeader, parseConfig, type DiscoveredMarket, parseWrapperConfigV17, parseAssetOracleProfileV17, type V17MarketGroupOI, type RiskParams, V17_HEADER_LEN } from "@percolatorct/sdk";
+import { discoverMarkets } from "@/lib/v22/discovery";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { getConfig } from "@/lib/config";
 import { getServerConnection } from "@/lib/server-rpc";
@@ -38,6 +41,7 @@ import {
   buildMarketRegistrationMessage,
   type MarketRegistrationPayload,
 } from "@/lib/market-registration-auth";
+import { parseMarketOI, isWrapperAccount, isUnknownWrapperVersion, marketGeometry, unsupportedLayoutBody } from "@/lib/v22/layout";
 
 /**
  * GH#1526: Map frontend oracle_mode filter values to DB-stored values.
@@ -107,7 +111,9 @@ const MAINNET_MARKET_DIRECTORY_FALLBACK: Record<string, unknown>[] = [
 // repoints) and the CONFIGURED wrapper id, never from a hard-coded slab that goes stale on a
 // re-seed (it returned the old SOL slab `Azaggu…` with the new program id).
 const DEVNET_ROW_TEMPLATE: Record<string, unknown> = {
-  mint_address: "DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC",
+  // The configured collateral mint (NEXT_PUBLIC_TEST_USDC_MINT, default Sim-USDC DJ54k4…), so a deployment on a
+  // different collateral (the v2.2 preview) does not list its fallback rows in the playground's mint.
+  mint_address: process.env.NEXT_PUBLIC_TEST_USDC_MINT?.trim() || "DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC",
   decimals: 6,
   deployer: null,
   oracle_authority: null,
@@ -273,6 +279,7 @@ function discoveredToApiRow(
   v17Oi?: V17MarketGroupOI,
   registered?: RegisteredMarket,
   riskParams?: RiskParams | null,
+  lotExp = 0,
 ): Record<string, unknown> {
   const slabAddress = m.slabAddress.toBase58();
   const programId = m.programId.toBase58();
@@ -280,14 +287,17 @@ function discoveredToApiRow(
   if (m.configV17) {
     const cfg = m.configV17;
     const markPriceRaw = cfg.markEwmaE6;
-    const markPriceUsd = markPriceRaw > 0n ? Number(markPriceRaw) / 1_000_000 : null;
+    // v2.2 lot markets: the mark is per LOT and OI is in lots; show per-token price and token-scaled OI
+    // (lib/v22/lot-view.ts, identity when lotExp = 0).
+    const lotNums = lotMarketNumbers({ markE6: markPriceRaw, oiLongQ: v17Oi?.totalLongOiQ ?? 0n, oiShortQ: v17Oi?.totalShortOiQ ?? 0n }, lotExp);
+    const markPriceUsd = lotNums.priceUsd;
     const playgroundMeta = PLAYGROUND_SLAB_META[slabAddress];
     // Live engine stats parsed from the raw market-group bytes (see the extra
     // getMultipleAccountsInfo read in discoverMarketsOnChain). undefined when
     // that read failed — fields then keep the previous zeroed placeholders.
-    const oiLong = v17Oi ? Number(v17Oi.totalLongOiQ) : 0;
-    const oiShort = v17Oi ? Number(v17Oi.totalShortOiQ) : 0;
-    const totalOi = oiLong + oiShort;
+    const oiLong = lotNums.oiLong;
+    const oiShort = lotNums.oiShort;
+    const totalOi = lotNums.totalOi;
     const insurance = v17Oi ? Number(v17Oi.insuranceBalance) : 0;
     return {
       slab_address: slabAddress,
@@ -321,13 +331,15 @@ function discoveredToApiRow(
       is_complete: isMarketauthComplete(cfg.marketauth, m.slabAddress),
       last_price: markPriceUsd,
       mark_price: markPriceUsd,
+      // v2.2 lot market only (absent otherwise): tokens per lot = 10^lot_exp. last_price / OI above are already per token.
+      ...(lotExp > 0 ? { lot_exp: lotExp } : {}),
       index_price: null,
       volume_24h: 0,
       trade_count_24h: 0,
       open_interest_long: oiLong,
       open_interest_short: oiShort,
       total_open_interest: totalOi,
-      total_open_interest_usd: markPriceUsd != null ? (totalOi / 1_000_000) * markPriceUsd : 0,
+      total_open_interest_usd: markPriceUsd != null ? lotNums.totalOiUsd : 0,
       insurance_fund: insurance,
       insurance_balance: insurance,
       total_accounts: 0,
@@ -420,6 +432,7 @@ async function discoverMarketsOnChain(
     // Degrades gracefully: on failure the rows keep zeroed stats / fall back to
     // the default max_leverage, which is exactly the pre-enrichment behavior.
     const v17Stats = new Map<string, V17MarketGroupOI>();
+    const v17Lot = new Map<string, number>();
     const v17RiskParams = new Map<string, RiskParams | null>();
     const v17Markets = unique.filter((m) => m.configV17);
     // getMultipleAccountsInfo caps at 100 accounts per call — chunk the reads.
@@ -431,9 +444,10 @@ async function discoverMarketsOnChain(
         infos.forEach((info, i) => {
           if (!info?.data) return;
           const data = new Uint8Array(info.data);
-          if (!isV17Account(data)) return;
+          if (!isWrapperAccount(data)) return;
           const slab = chunk[i].slabAddress.toBase58();
-          v17Stats.set(slab, parseMarketGroupV17OI(data));
+          v17Stats.set(slab, parseMarketOI(data));
+          v17Lot.set(slab, lotExpOf(data));
           v17RiskParams.set(slab, parseV17RiskParams(data, chunk[i].configV17!.tradeFeeBps));
         });
       } catch {
@@ -443,7 +457,7 @@ async function discoverMarketsOnChain(
 
     return unique.map((m) => {
       const slab = m.slabAddress.toBase58();
-      return discoveredToApiRow(m, v17Stats.get(slab), registeredBySlab?.get(slab), v17RiskParams.get(slab));
+      return discoveredToApiRow(m, v17Stats.get(slab), registeredBySlab?.get(slab), v17RiskParams.get(slab), v17Lot.get(slab) ?? 0);
     });
   } catch {
     return [];
@@ -556,7 +570,7 @@ async function onChainOrStaticResponse(request: NextRequest, reason: string): Pr
 
         return NextResponse.json(
           { total: filteredWithLp.length, activeTotal: filteredWithLp.length, marketsWithPrice, zombieCount: 0, markets: filteredWithLp },
-          { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=60", "X-Percolator-Data-Source": "on-chain-discovery" } },
+          { headers: { "Cache-Control": "public, s-maxage=5, stale-while-revalidate=20", "X-Percolator-Data-Source": "on-chain-discovery" } },
         );
       }
     }
@@ -653,7 +667,7 @@ function fallbackMarketsResponse(request: NextRequest, reason: string): NextResp
     { total: filtered.length, activeTotal, marketsWithPrice, zombieCount: 0, markets: limited },
     {
       headers: {
-        "Cache-Control": "public, s-maxage=10, stale-while-revalidate=60",
+        "Cache-Control": "public, s-maxage=5, stale-while-revalidate=20",
         "X-Percolator-Data-Source": "static-directory-fallback",
       },
     },
@@ -1231,8 +1245,11 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ total: sorted.length, activeTotal, marketsWithPrice, zombieCount, markets: limited }, {
       headers: {
-        // See the cache-policy note above readLiveMarketStates usage.
-        "Cache-Control": "public, s-maxage=10, stale-while-revalidate=60",
+        // Kept short on purpose: a newly registered market is listed only once this response
+        // carries it, so the window a visitor can be served the pre-registration list is
+        // s-maxage + stale-while-revalidate (was 10 + 60 s, now 5 + 20 s). The creator's own
+        // browser skips this cache entirely right after registering (hooks/useAllMarketStats.ts).
+        "Cache-Control": "public, s-maxage=5, stale-while-revalidate=20",
       },
     });
   } catch (error) {
@@ -1609,6 +1626,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Slab account not owned by a known percolator program" }, { status: 400 });
     }
 
+    // v2.2 flag on: a wrapper account of a VERSION this build does not decode is refused (422), never read with another layout's offsets.
+    if (isUnknownWrapperVersion(new Uint8Array(accountInfo.data))) {
+      return NextResponse.json(unsupportedLayoutBody(null), { status: 422 });
+    }
+
     // R2-S8: Verify deployer matches the on-chain admin.
     // BUG FIX (devnet flow-test 2026-07-01, flowtest/14-create-market.ts): this used to call
     // parseHeader() unconditionally, which only understands the legacy v12 "PERCOLAT" magic
@@ -1620,7 +1642,7 @@ export async function POST(req: NextRequest) {
     // and hooks/useCreateMarket.ts (admin = v17 wrapperConfig.marketauth).
     try {
       const dataBytes = new Uint8Array(accountInfo.data);
-      const admin = isV17Account(dataBytes)
+      const admin = isWrapperAccount(dataBytes)
         ? parseWrapperConfigV17(dataBytes, V17_HEADER_LEN).marketauth
         : parseHeader(accountInfo.data).admin;
       if (admin.toBase58() !== deployer) {
@@ -1649,7 +1671,7 @@ export async function POST(req: NextRequest) {
     // returned a garbage oracleAuthority. Mirrors SlabProvider.tsx's corrected offset.
     try {
       const dataBytes = new Uint8Array(accountInfo.data);
-      const isV17 = isV17Account(dataBytes);
+      const isV17 = isWrapperAccount(dataBytes);
       const onChainMint = isV17
         ? parseWrapperConfigV17(dataBytes, V17_HEADER_LEN).collateralMint.toBase58()
         : parseConfig(accountInfo.data).collateralMint.toBase58();
@@ -1680,7 +1702,7 @@ export async function POST(req: NextRequest) {
       // mode is unaffected — it DOES set a real, predictable on-chain oracle_authority via
       // UpdateAssetAuthority, so this check stays fully enforced there.
       const onChainOracleAuth = isV17
-        ? parseAssetOracleProfileV17(dataBytes, V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN).oracleAuthority.toBase58()
+        ? parseAssetOracleProfileV17(dataBytes, marketGeometry(dataBytes, "markets.register").slotsBase).oracleAuthority.toBase58()
         : parseConfig(accountInfo.data).oracleAuthority.toBase58();
       const resolvedOracleAuth = oracle_authority || deployer;
       const SYSTEM_PROGRAM = "11111111111111111111111111111111";

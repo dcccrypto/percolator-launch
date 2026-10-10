@@ -22,7 +22,7 @@ interface VaultGridProps {
 /**
  * Dense, scannable LP-vault table — the "hero" of the Earn tab, mirroring the
  * trade terminal's main content area (and the vault/pool lists on Hyperliquid /
- * GMX / Drift). Columns: Market · TVL · Utilization · Fee · Your Deposit. The
+ * GMX / Drift). Columns: Market · TVL · Utilization · Fee · Your Value. The
  * whole row is selectable and loads that vault into the deposit rail.
  */
 export function VaultGrid({
@@ -138,8 +138,11 @@ export function VaultGrid({
             <span className="text-right text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">
               Fee
             </span>
-            <span className="text-right text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">
-              Your Deposit
+            <span
+              className="text-right text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]"
+              title="What your share of the vault is worth now"
+            >
+              Your Value
             </span>
           </div>
 

@@ -252,8 +252,10 @@ export function boundVaultLpCap(L: MarketLimits): { levBps: number } | null {
 }
 
 /** base-q -> the ticket's size-input string (token units = q / 1e6, or USD at `priceE6`). */
-export function sizeQToInput(q: bigint, unit: "token" | "usd", priceE6: bigint): string {
+export function sizeQToInput(q: bigint, unit: "token" | "usd", priceE6: bigint, lotExp = 0): string {
   if (unit === "token") {
+    // v2.2 lot markets: q is in LOTS; the box is in TOKENS (lib/v22/lot.ts). lotExp 0 is the identity.
+    if (lotExp > 0) q = q * 10n ** BigInt(lotExp);
     const whole = q / 1_000_000n;
     const frac = (q % 1_000_000n).toString().padStart(6, "0").replace(/0+$/, "");
     return frac ? `${whole}.${frac}` : `${whole}`;

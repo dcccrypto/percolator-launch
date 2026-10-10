@@ -1,12 +1,11 @@
 import { Buffer } from "node:buffer";
 import { Connection, PublicKey } from "@solana/web3.js";
 import {
-  parsePortfolioV17,
-  V17_PORTFOLIO_ACCOUNT_LEN,
 } from "@percolatorct/sdk";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 import { getMultipleAccountsInfoChunked } from "@/lib/rpc-chunk";
 import { resolveMarketLp, selectMarketLpsFromScan } from "@/lib/market-lp";
+import { parsePortfolio, portfolioGpaFilters } from "@/lib/v22/layout";
 
 /**
  * On-chain "Market LP" (the v17 LP-portfolio account that backs a market as
@@ -36,7 +35,7 @@ const V17_PORTFOLIO_MAGIC = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x4
 /** Parse `capital` (collateral atoms, u128) from a v17 portfolio account. Null on any parse failure. */
 function readCapitalSafe(data: Buffer): bigint | null {
   try {
-    return parsePortfolioV17(new Uint8Array(data)).capital;
+    return parsePortfolio(new Uint8Array(data)).capital;
   } catch {
     return null;
   }
@@ -110,7 +109,7 @@ export async function scanEnabledMarketLpCapitals(
     const accounts = await connection.getProgramAccounts(programId, {
       filters: [
         { memcmp: { offset: 0, bytes: V17_PORTFOLIO_MAGIC.toString("base64"), encoding: "base64" } },
-        { dataSize: V17_PORTFOLIO_ACCOUNT_LEN },
+        ...portfolioGpaFilters(),
       ],
     });
     // The market's LP by on-chain identity (lib/market-lp.ts) — never "an enabled matcher

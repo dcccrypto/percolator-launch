@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { parseMarketGroupV17OI, parseWrapperConfigV17, V17_HEADER_LEN } from "@percolatorct/sdk";
+import { parseWrapperConfigV17, V17_HEADER_LEN } from "@percolatorct/sdk";
 import { validateSlabParam } from "@/lib/route-validators";
 import { isBlockedSlab } from "@/lib/blocklist";
 import { readCurrentWrapperSlab } from "@/lib/current-wrapper-slab";
 import { sanitizeOnChainValue } from "@/lib/health";
+import { isUnsupportedLayout, parseMarketOI, unsupportedLayoutBody } from "@/lib/v22/layout";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slab: s
 
   const read = await readCurrentWrapperSlab(v.slab);
   if (!read.ok) {
+    if (read.reason === "unsupported-layout") return NextResponse.json(unsupportedLayoutBody(null, read.version), { status: 422 });
     return read.reason === "rpc"
       ? NextResponse.json({ error: "Could not read the market right now" }, { status: 503, headers: { "Retry-After": "5" } })
       : NextResponse.json({ error: "Market not found" }, { status: 404 });
@@ -36,10 +38,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slab: s
   let balance: bigint;
   let oiQ: bigint;
   try {
-    const oi = parseMarketGroupV17OI(read.data);
+    const oi = parseMarketOI(read.data);
     balance = sanitizeOnChainValue(oi.insuranceBalance);
     oiQ = sanitizeOnChainValue(oi.totalLongOiQ) + sanitizeOnChainValue(oi.totalShortOiQ);
-  } catch {
+  } catch (e) {
+    if (isUnsupportedLayout(e)) return NextResponse.json(unsupportedLayoutBody(e), { status: 422 });
     return NextResponse.json({ error: "Market data unreadable" }, { status: 404 });
   }
   let markE6 = 0n;

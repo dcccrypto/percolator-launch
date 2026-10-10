@@ -1,5 +1,6 @@
 "use client";
 
+import { lotExpOf, qToTokenQ } from "@/lib/v22/lot";
 import { FC } from "react";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
@@ -67,7 +68,8 @@ function computeV17Health(
 
 export const EngineHealthCard: FC = () => {
   const { engine, loading, hasData, insuranceBalance, totalOI, oiLong, oiShort } = useEngineState();
-  const { accounts, config } = useSlabState();
+  const { accounts, config, raw: slabRaw } = useSlabState();
+  const lotExp = lotExpOf(slabRaw);
   const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
   const decimals = tokenMeta?.decimals ?? 6;
   const { showUsd } = useUsdToggle();
@@ -120,7 +122,7 @@ export const EngineHealthCard: FC = () => {
     const s = sanitizeOnChainValue(v);
     return showUsd && priceUsd != null
       ? formatNum((Number(s) / 1_000_000) * priceUsd)
-      : formatTokenAmount(s, decimals);
+      : formatTokenAmount(qToTokenQ(s, lotExp), decimals);
   };
 
   let metrics: Array<{ label: string; value: string }>;

@@ -138,7 +138,12 @@ export function dailyBudgetLamports(env: NodeJS.ProcessEnv = process.env): numbe
 export async function reserveServerSol(db: Db, wallet: string, now = Date.now(), env: NodeJS.ProcessEnv = process.env): Promise<{ id: number | string } | { reason: "no-db" | "wallet-limit" | "budget" }> {
   const windowStart = new Date(now - DAY_MS).toISOString();
   try {
-    await db.from("faucet_claims").delete().eq("wallet", wallet).eq("fund_type", SERVER_SOL_FUND_TYPE).lt("claimed_at", windowStart);
+    // #2760 follow-up: this cleanup's {error} was ignored too; a stale row that survives it makes the
+    // insert below hit the UNIQUE(wallet, fund_type) and report a false "wallet-limit".
+    await deleteWithRetry(
+      () => db.from("faucet_claims").delete().eq("wallet", wallet).eq("fund_type", SERVER_SOL_FUND_TYPE).lt("claimed_at", windowStart),
+      `delete stale claims for wallet ${wallet}`,
+    );
     const { data, error } = await db
       .from("faucet_claims")
       .insert({ wallet, fund_type: SERVER_SOL_FUND_TYPE, claimed_at: new Date(now).toISOString() })
@@ -161,7 +166,7 @@ export async function reserveServerSol(db: Db, wallet: string, now = Date.now(),
       .lte("claimed_at", claimedAt);
     const maxSends = Math.floor(dailyBudgetLamports(env) / SERVER_SOL_TARGET_LAMPORTS);
     if (cErr || typeof count !== "number" || count > maxSends) {
-      await db.from("faucet_claims").delete().eq("id", id);
+      await deleteReservation(db, id);
       return { reason: cErr || typeof count !== "number" ? "no-db" : "budget" };
     }
     return { id };
@@ -170,12 +175,40 @@ export async function reserveServerSol(db: Db, wallet: string, now = Date.now(),
   }
 }
 
-async function releaseReservation(db: Db, id: number | string): Promise<void> {
-  try {
-    await db.from("faucet_claims").delete().eq("id", id);
-  } catch {
-    /* best-effort */
+/** #2760: total attempts (1 + 2 retries) and the short backoff between them. */
+const RELEASE_MAX_ATTEMPTS = 3;
+const RELEASE_BACKOFF_MS = 50;
+
+/**
+ * Run a faucet_claims delete, for real. PostgREST reports a failed delete as a RETURNED `{ error }`
+ * (it does not throw), so the old best-effort `await ...delete()` silently kept the row on any DB
+ * error: the wallet then sat on its 24h wallet-limit (or the budget count stayed inflated) with no
+ * SOL sent and no trace in the logs (#2760). Check the result, retry with a short backoff, and log
+ * the final failure. Never throws. Returns whether the delete went through.
+ */
+async function deleteWithRetry(run: () => PromiseLike<unknown>, what: string): Promise<boolean> {
+  let lastErr: unknown = null;
+  for (let attempt = 1; attempt <= RELEASE_MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = (await run()) as { error?: unknown } | null | undefined;
+      if (!res?.error) return true;
+      lastErr = res.error;
+    } catch (e) {
+      lastErr = e;
+    }
+    if (attempt < RELEASE_MAX_ATTEMPTS) await new Promise((r) => setTimeout(r, RELEASE_BACKOFF_MS * attempt));
   }
+  const msg = lastErr instanceof Error ? lastErr.message : typeof (lastErr as { message?: unknown } | null)?.message === "string" ? (lastErr as { message: string }).message : "unknown error";
+  console.error(`[server-sol-faucet] could not ${what} after ${RELEASE_MAX_ATTEMPTS} attempts: ${msg}`);
+  return false;
+}
+
+function deleteReservation(db: Db, id: number | string): Promise<boolean> {
+  return deleteWithRetry(() => db.from("faucet_claims").delete().eq("id", id), `release reservation ${String(id)}`);
+}
+
+async function releaseReservation(db: Db, id: number | string): Promise<void> {
+  await deleteReservation(db, id);
 }
 
 /**

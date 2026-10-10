@@ -9,10 +9,14 @@ import { useLivePrice } from "@/hooks/useLivePrice";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
+import { useSingleMarketHealth } from "@/hooks/useMarketHealth";
+import { marketHeaderStatus, type HeaderStatus } from "@/lib/market-header-status";
 import { useSlabState } from "@/components/providers/SlabProvider";
+import { lotExpOf, tokenUsdOfLotUsd } from "@/lib/v22/lot";
 import { usePriceFlash } from "@/hooks/usePriceFlash";
 import { MarketSwitcher } from "@/components/trade/MarketSwitcher";
 import { WatchButton } from "@/components/market/WatchButton";
+import { TokenCopyMenu } from "@/components/trade/TokenCopyMenu";
 import { formatUsdFromNumber, formatMarkPrice } from "@/lib/format";
 import { formatCompactUsd } from "@/lib/formatters";
 import { rowVolumeUsd, Q_SCALE } from "@/lib/q-usd";
@@ -41,20 +45,38 @@ function fundingRateBpsTo8h(rateBps: bigint): number {
 }
 
 /** P3-3: Market health badge — surfaces oracle/liquidity status in the ticker bar */
-type HealthBadgeState = "live" | "no-oracle" | "no-liquidity" | "inactive";
+type HealthBadgeState = "live" | "no-oracle" | "no-liquidity" | "inactive" | "settled" | "close-only" | "paused" | "catching-up";
 
-const MarketHealthBadge = memo(function MarketHealthBadge({ oracleDown, vaultEmpty }: { oracleDown: boolean; vaultEmpty: boolean }) {
-  let state: HealthBadgeState;
-  if (oracleDown && vaultEmpty) state = "inactive";
-  else if (vaultEmpty) state = "no-liquidity";
-  else if (oracleDown) state = "no-oracle";
-  else state = "live";
+/**
+ * The badge follows the status line rendered under this bar (MarketHeaderStatus, the same
+ * marketHeaderStatus(row)): a settled, close-only, paused or catching-up market must not read
+ * green "LIVE" above a line saying new positions are refused. A settled market says so first: it
+ * is terminal, so "no oracle" or "no liquidity" would point at a fix that will never come. The
+ * oracle/vault states then keep their place ahead of the other statuses.
+ */
+export function healthBadgeState(oracleDown: boolean, vaultEmpty: boolean, status: HeaderStatus | null): HealthBadgeState {
+  if (status?.kind === "resolved") return "settled";
+  if (oracleDown && vaultEmpty) return "inactive";
+  if (vaultEmpty) return "no-liquidity";
+  if (oracleDown) return "no-oracle";
+  if (status?.kind === "adl-reduce-only") return "close-only";
+  if (status?.kind === "engine-catching-up") return "catching-up";
+  if (status) return "paused";
+  return "live";
+}
+
+export const MarketHealthBadge = memo(function MarketHealthBadge({ oracleDown, vaultEmpty, status }: { oracleDown: boolean; vaultEmpty: boolean; status: HeaderStatus | null }) {
+  const state = healthBadgeState(oracleDown, vaultEmpty, status);
 
   const cfg: Record<HealthBadgeState, { label: string; icon: string; cls: string; pulse: boolean; tooltip: string }> = {
     live:          { label: "LIVE",         icon: "●",  cls: "text-[var(--long)] bg-[var(--long)]/10 border-[var(--long)]/20",       pulse: false, tooltip: "Oracle healthy - market is live" },
     "no-oracle":   { label: "NO ORACLE",    icon: "◉",  cls: "text-[var(--warning)] bg-[var(--warning)]/10 border-[var(--warning)]/20", pulse: true,  tooltip: "Oracle not cranked - market paused. Trades are blocked." },
     "no-liquidity":{ label: "NO LIQUIDITY", icon: "⚠",  cls: "text-[var(--short)] bg-[var(--short)]/10 border-[var(--short)]/20",     pulse: false, tooltip: "No vault liquidity - trades cannot execute until this market is funded." },
     inactive:      { label: "INACTIVE",     icon: "⚠",  cls: "text-[var(--short)] bg-[var(--short)]/10 border-[var(--short)]/20",     pulse: false, tooltip: "Oracle unavailable and no vault liquidity." },
+    settled:       { label: "SETTLED",      icon: "■",  cls: "text-[var(--text-secondary)] bg-[var(--bg-surface)] border-[var(--border)]", pulse: false, tooltip: status?.body ?? "" },
+    "close-only":  { label: "CLOSE-ONLY",   icon: "◉",  cls: "text-[var(--warning)] bg-[var(--warning)]/10 border-[var(--warning)]/20", pulse: false, tooltip: status?.body ?? "" },
+    paused:        { label: "PAUSED",       icon: "◉",  cls: "text-[var(--warning)] bg-[var(--warning)]/10 border-[var(--warning)]/20", pulse: false, tooltip: status?.body ?? "" },
+    "catching-up": { label: "CATCHING UP",  icon: "◉",  cls: "text-[var(--warning)] bg-[var(--warning)]/10 border-[var(--warning)]/20", pulse: true,  tooltip: status?.body ?? "" },
   };
 
   const { label, icon, cls, pulse, tooltip } = cfg[state];
@@ -79,7 +101,7 @@ const MarketHealthBadge = memo(function MarketHealthBadge({ oracleDown, vaultEmp
  * reads clearly (the 24h direction is carried by the change badge, not this
  * number). No layout shift.
  */
-function MarkPrice({ priceUsd, priceE6 }: { priceUsd: number | null; priceE6: bigint | null }) {
+function MarkPrice({ priceUsd, priceE6, lotExp = 0 }: { priceUsd: number | null; priceE6: bigint | null; lotExp?: number }) {
   const flash = usePriceFlash(priceE6);
   const flashColor =
     flash === "up" ? "text-[var(--long)]" : flash === "down" ? "text-[var(--short)]" : "text-[var(--text)]";
@@ -90,7 +112,7 @@ function MarkPrice({ priceUsd, priceE6 }: { priceUsd: number | null; priceE6: bi
       className={`text-base md:text-2xl font-bold tabular-nums shrink-0 whitespace-nowrap transition-colors duration-300 ease-out ${flashColor}`}
       style={{ fontFamily: "var(--font-mono)" }}
     >
-      {formatMarkPrice(priceUsd)}
+      {formatMarkPrice(priceUsd != null ? tokenUsdOfLotUsd(priceUsd, lotExp) : priceUsd)}
     </span>
   );
 }
@@ -100,7 +122,9 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
   const { market } = useMarketInfo(slabAddress);
   const { fundingRate, engine, totalOI, insuranceBalance, hasData: engineHasData } = useEngineState();
   const { level: oracleLevel } = useOracleFreshness();
-  const { config: mktConfig, wrapperConfigV17 } = useSlabState();
+  const { config: mktConfig, wrapperConfigV17, raw: slabRawForLot } = useSlabState();
+  // v2.2 lot markets: the store price is per LOT; the header shows per TOKEN (lib/v22/lot.ts).
+  const lotExp = lotExpOf(slabRawForLot);
 
   const change24hDisplay = change24h ?? 0;
   const isUp = change24hDisplay >= 0;
@@ -149,6 +173,9 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
     : engineHasData && insuranceBalance != null && totalOI != null
       ? insuranceBalance === 0n && totalOI === 0n
       : false;
+  // Same row and same derivation as the MarketHeaderStatus line the trade page renders under this bar.
+  const healthRow = useSingleMarketHealth(slabAddress);
+  const headerStatus = useMemo(() => marketHeaderStatus(healthRow), [healthRow]);
 
   // volume_24h is the indexer's SUM(ABS(size)) in engine Q units (base-asset
   // amount, POS_SCALE 1e6) — NOT dollars. It used to be formatted as USD
@@ -192,16 +219,19 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
       <MarketSwitcher slabAddress={slabAddress} symbol={symbol} logoUrl={logoUrl} mintAddress={mintAddress} mainnetCa={mainnetCa} />
       {isV1CloseOnly(getConfig().programId, isMoveFlowEnabled()) && <V1CloseOnlyBadge />}
 
-      {/* Watch this market. `label` variant — the info bar has room for a word,
-          unlike the dense markets table where the glyph alone is used. */}
+      {/* Watch this market: the star alone (hover says "Add <symbol> to your watchlist"), so the
+          Copy address menu fits beside it. */}
       <span className="hidden md:inline-flex">
-        <WatchButton slab={slabAddress} symbol={symbol} variant="label" />
+        <WatchButton slab={slabAddress} symbol={symbol} variant="icon" />
       </span>
+
+      {/* Copy the slab address / CA / ticker, or search on X. Below md: the glyph alone. */}
+      <TokenCopyMenu slabAddress={slabAddress} symbol={symbol} mainnetCa={mainnetCa} />
 
       <span className="hidden md:block h-6 w-px bg-[var(--border)] shrink-0" />
 
       {/* Mark Price — large; flashes long/short on each tick (see MarkPrice) */}
-      <MarkPrice priceUsd={priceUsd} priceE6={priceE6} />
+      <MarkPrice priceUsd={priceUsd} priceE6={priceE6} lotExp={lotExp} />
 
       {/* 24h change badge — semantic long/short tokens, same as the rest of
           the terminal (was hardcoded Tailwind green/red before). */}
@@ -280,7 +310,7 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
 
         {/* P3-3: Market health badge — ml-auto pushes to far right within flex-1 group */}
         <span className="ml-auto h-6 w-px bg-[var(--border)] shrink-0" />
-        <MarketHealthBadge oracleDown={oracleDown} vaultEmpty={vaultEmpty} />
+        <MarketHealthBadge oracleDown={oracleDown} vaultEmpty={vaultEmpty} status={headerStatus} />
       </div>
     </div>
   );

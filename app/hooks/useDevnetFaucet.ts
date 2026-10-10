@@ -125,6 +125,11 @@ export function useDevnetFaucet(): DevnetFaucetState {
   const lastOpFailedRef = useRef(false);
   // The SOL step's message: fundAll's USDC step clears the shared error, which erased it.
   const solErrorRef = useRef<string | null>(null);
+  // An airdrop this modal just made, not yet visible in a balance read (the RPC can lag the
+  // airdrop by a few seconds). Keeps the step done until a read shows the funds, then the step
+  // follows the balance again.
+  const solAirdropPendingRef = useRef(false);
+  const usdcAirdropPendingRef = useRef(false);
 
   // Check if previously dismissed for this wallet
   useEffect(() => {
@@ -143,6 +148,12 @@ export function useDevnetFaucet(): DevnetFaucetState {
     }
   }, [publicKey]);
 
+  // The wallet's address, not the PublicKey object: a refreshed wallet list hands back a new
+  // object for the same wallet, which is not a wallet change.
+  const walletAddress = publicKey?.toBase58() ?? null;
+  const walletAddressRef = useRef(walletAddress);
+  walletAddressRef.current = walletAddress;
+
   // Bug #34: reset per-wallet check/balance state when the connected wallet
   // changes. Without this, switching from wallet A (already `checked`) to
   // wallet B left `checked` (and solDone/usdcDone/balances) at wallet A's
@@ -152,16 +163,23 @@ export function useDevnetFaucet(): DevnetFaucetState {
     setChecked(false);
     setSolDone(false);
     setUsdcDone(false);
+    solAirdropPendingRef.current = false;
+    usdcAirdropPendingRef.current = false;
     setSolBalance(null);
     setUsdcBalance(null);
-  }, [publicKey]);
+  }, [walletAddress]);
 
   const refreshBalances = useCallback(async () => {
     if (!publicKey) return;
+    // A read that resolves after the wallet changed belongs to the previous wallet: drop it.
+    const forWallet = publicKey.toBase58();
+    const stale = () => walletAddressRef.current !== forWallet;
     try {
       const bal = await connection.getBalance(publicKey);
+      if (stale()) return;
       setSolBalance(bal / LAMPORTS_PER_SOL);
-      if (bal >= SOL_THRESHOLD) setSolDone(true);
+      if (bal >= SOL_THRESHOLD) solAirdropPendingRef.current = false;
+      setSolDone(bal >= SOL_THRESHOLD || solAirdropPendingRef.current);
     } catch {
       // non-fatal
     }
@@ -170,9 +188,11 @@ export function useDevnetFaucet(): DevnetFaucetState {
       try {
         const ata = getAssociatedTokenAddressSync(usdcMintPk, publicKey);
         const info = await connection.getTokenAccountBalance(ata);
+        if (stale()) return;
         const amount = BigInt(info.value.amount);
         setUsdcBalance(Number(amount) / 1_000_000);
-        if (amount >= USDC_THRESHOLD) setUsdcDone(true);
+        if (amount >= USDC_THRESHOLD) usdcAirdropPendingRef.current = false;
+        setUsdcDone(amount >= USDC_THRESHOLD || usdcAirdropPendingRef.current);
       } catch (e) {
         // Distinguish "no ATA yet" (definitive — this wallet has never
         // received USDC, so 0 is correct) from a transient RPC hiccup.
@@ -181,8 +201,10 @@ export function useDevnetFaucet(): DevnetFaucetState {
         // the balance to 0 — that would pop the faucet modal over an
         // already-funded wallet.
         const msg = e instanceof Error ? e.message : String(e);
+        if (stale()) return;
         if (/could not find account/i.test(msg)) {
           setUsdcBalance(0);
+          setUsdcDone(usdcAirdropPendingRef.current);
         } else {
           console.warn("[useDevnetFaucet] transient USDC balance fetch error, keeping previous balance:", msg);
         }
@@ -315,6 +337,7 @@ export function useDevnetFaucet(): DevnetFaucetState {
         if (!confirmed) throw new Error("SOL airdrop not confirmed");
       }
 
+      solAirdropPendingRef.current = true;
       setSolDone(true);
       await refreshBalances();
     } catch (e) {
@@ -355,6 +378,7 @@ export function useDevnetFaucet(): DevnetFaucetState {
       if (!resp.ok) {
         throw new Error(data.error ?? "USDC airdrop failed");
       }
+      usdcAirdropPendingRef.current = true;
       setUsdcDone(true);
       invalidateWalletBalance();
       await refreshBalances();

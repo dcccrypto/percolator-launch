@@ -206,6 +206,19 @@ export async function readRegisteredMarkets(): Promise<RegisteredMarket[]> {
   return markets;
 }
 
+/**
+ * The lenient read plus whether it was a real read: `ok: false` when the newest snapshot couldn't
+ * be read (the markets are then the previous snapshot, or none). For callers that must not present
+ * a partial list as complete; never throws.
+ */
+export async function readRegisteredMarketsChecked(): Promise<{ markets: RegisteredMarket[]; ok: boolean }> {
+  // No store configured (local dev, a preview without the token): nothing is registered, which is a
+  // complete answer, not a failed read. Without this every request would read as failed.
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return { markets: [], ok: true };
+  const { markets, ok } = await readSnapshot();
+  return { markets, ok };
+}
+
 /** Create snapshot `seq` (create-only: throws if it already exists). */
 async function createSnapshot(seq: number, markets: RegisteredMarket[]): Promise<void> {
   await put(registeredMarketsVersionPath(seq), JSON.stringify(markets), {

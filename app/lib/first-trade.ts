@@ -15,11 +15,10 @@
  * nothing lands) and is rebuilt with the real id: the one 2-prompt case ("someone joined this
  * market at the same moment").
  */
-import { PublicKey as PublicKey, SystemProgram, type TransactionInstruction } from "@solana/web3.js";
+import { PublicKey as PublicKey, type TransactionInstruction } from "@solana/web3.js";
 import {
   ACCOUNTS_DEPOSIT_COLLATERAL,
   ACCOUNTS_INIT_USER,
-  V17_PORTFOLIO_ACCOUNT_LEN,
   WELL_KNOWN,
   buildAccountMetas,
   buildIx,
@@ -29,17 +28,22 @@ import {
 import { buildTradeCpiIx, type TradeIdentity } from "@/lib/trade-ix";
 import { assetWrapperOff } from "@/lib/limits/constants";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
+import { createPortfolioAccountIx } from "@/lib/v22/layout";
+import { marketOffsetsOrNull } from "@/lib/v22/market-offsets";
 
 /** offset_of!(AssetOracleProfileV16, next_portfolio_id); the profile opens the asset wrapper. */
 export const OP_NEXT_PORTFOLIO_ID = 480;
 
-/** Absolute offset of asset 0's next_portfolio_id in the market account. */
+/** Absolute offset of asset 0's next_portfolio_id in the v2.1 market account (v2.2: `marketOffsets(...).wrapperOff(0) + OP_NEXT_PORTFOLIO_ID`). */
 export const NEXT_PORTFOLIO_ID_OFF = assetWrapperOff(0) + OP_NEXT_PORTFOLIO_ID;
 
 /** The market's portfolio-id counter (u64 LE). null when the account is too short. */
 export function readNextPortfolioId(market: Uint8Array): bigint | null {
-  if (market.length < NEXT_PORTFOLIO_ID_OFF + 8) return null;
-  return new DataView(market.buffer, market.byteOffset, market.byteLength).getBigUint64(NEXT_PORTFOLIO_ID_OFF, true);
+  const M = marketOffsetsOrNull(market, "readNextPortfolioId");
+  if (!M) return null;
+  const off = M.wrapperOff(0) + OP_NEXT_PORTFOLIO_ID;
+  if (market.length < off + 8) return null;
+  return new DataView(market.buffer, market.byteOffset, market.byteLength).getBigUint64(off, true);
 }
 
 /** Port of `state::allocate_portfolio_id`: 0 (pre-counter sentinel) is normalised to 1. */
@@ -145,6 +149,11 @@ export const FIRST_TRADE_COPY = {
   race: "One more approval: someone joined this market at the same moment.",
   /** GH#2959: the user turned the fund-and-trade down in the wallet. */
   cancelled: "Trade cancelled in your wallet.",
+  /** Devnet only: the usual reason a first trade gets turned down is a wallet still on Mainnet. Phantom
+   *  then simulates the devnet transaction against Mainnet, shows "insufficient SOL" and can flag the
+   *  site, so the user rejects it and nothing on our side can tell (no blockhash error reaches us). */
+  cancelledDevnetWhy:
+    "If your wallet said you don't have enough SOL, or warned about this site, it is probably still on Mainnet. In Phantom: Settings > Developer Settings > turn on Testnet Mode and pick Solana Devnet, then try again.",
 } as const;
 
 // ── The instructions (shared by hooks/useFirstTrade.ts and the LiteSVM bridge) ──────────────
@@ -169,7 +178,7 @@ export interface FirstTradeIxParams {
 /** The first trade's set-up legs: [CreateAccount(portfolio, full length), InitPortfolio]. */
 export function buildFirstTradeInitIxs(p: Pick<FirstTradeIxParams, "programId" | "owner" | "market" | "portfolio">, rentLamports: number): TransactionInstruction[] {
   return [
-    SystemProgram.createAccount({ fromPubkey: p.owner, newAccountPubkey: p.portfolio, lamports: rentLamports, space: V17_PORTFOLIO_ACCOUNT_LEN, programId: p.programId }),
+    createPortfolioAccountIx(p.owner, p.portfolio, rentLamports, p.programId),
     buildIx({ programId: p.programId, keys: buildAccountMetas(ACCOUNTS_INIT_USER, [p.owner, p.market, p.portfolio]), data: encodeInitUser({}) }),
   ];
 }

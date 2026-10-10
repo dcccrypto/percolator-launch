@@ -74,6 +74,7 @@ import { defaultCrankObservations } from "@/lib/v18-wire";
 
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { decodeAssetVaultLp } from "@/lib/limits/decode";
+import { marketOffsets } from "@/lib/v22/market-offsets";
 // ── Wire tags (deployed wrapper decode arms) ─────────────────────────────────
 export const EXPIRE_BACKING_BUCKET_TAG = 89;
 export const FINALIZE_RESET_SIDE_TAG = 45;
@@ -147,24 +148,30 @@ function view(d: Uint8Array): DataView {
  * `readSlot` is the context slot the account was read at.
  */
 export function decodeMarketLiveness(data: Uint8Array, readSlot: bigint): MarketLiveness {
-  const slotsBase = MARKET_GROUP_OFF + MARKET_GROUP_LEN;
-  if (data.length < slotsBase + ASSET_WRAPPER_LEN + SLOT_BACKING[1] + BACKING_BUCKET_LEN) {
+  // VERSION-keyed geometry (flag on; unknown VERSION throws the typed UnknownLayoutError). Flag off: the v2.1 constants.
+  const M = marketOffsets(data, "decodeMarketLiveness");
+  const L = M.layout;
+  const slotsBase = L.marketGroupOff + L.marketGroupLen;
+  const strideLen = L.assetSlotStride;
+  const SLOT_BACKING_X = [M.slotRel(SLOT_BACKING[0]), M.slotRel(SLOT_BACKING[1])] as const;
+  const SLOT_BARRIER_X = [M.slotRel(SLOT_BARRIER[0]), M.slotRel(SLOT_BARRIER[1])] as const;
+  if (data.length < slotsBase + L.wrapperSlotLen + SLOT_BACKING_X[1] + BACKING_BUCKET_LEN) {
     throw new Error(`decodeMarketLiveness: market account too short (${data.length} bytes)`);
   }
   const dv = view(data);
-  const mode = data[MARKET_GROUP_OFF + GROUP_MODE_REL];
-  const headerSlot = dv.getBigUint64(MARKET_GROUP_OFF + GROUP_CURRENT_SLOT_REL, true);
-  const maxMarketSlots = dv.getUint32(MARKET_GROUP_OFF + GROUP_CONFIG_REL + CONFIG_MAX_MARKET_SLOTS_REL, true);
-  const physical = Math.floor((data.length - slotsBase) / MARKET_ASSET_SLOT_LEN);
+  const mode = data[M.g + L.group.mode];
+  const headerSlot = dv.getBigUint64(M.g + L.group.currentSlot, true);
+  const maxMarketSlots = dv.getUint32(M.g + L.group.config + L.group.maxMarketSlotsInConfig, true);
+  const physical = Math.floor((data.length - slotsBase) / strideLen);
   const assets = Math.min(maxMarketSlots, physical);
   const nowSlot = readSlot > headerSlot ? readSlot : headerSlot;
   const buckets: BucketLiveness[] = [];
   const sides: SideLiveness[] = [];
   for (let assetIndex = 0; assetIndex < assets; assetIndex++) {
-    const e = slotsBase + assetIndex * MARKET_ASSET_SLOT_LEN + ASSET_WRAPPER_LEN;
-    if (e + SLOT_BACKING[1] + BACKING_BUCKET_LEN > data.length) break;
+    const e = M.engineOff(assetIndex);
+    if (e + SLOT_BACKING_X[1] + BACKING_BUCKET_LEN > data.length) break;
     for (const s of [0, 1] as const) {
-      const b = e + SLOT_BACKING[s];
+      const b = e + SLOT_BACKING_X[s];
       buckets.push({
         domain: assetIndex * 2 + s,
         status: data[b + BK_STATUS],
@@ -177,7 +184,7 @@ export function decodeMarketLiveness(data: Uint8Array, readSlot: bigint): Market
         storedPos: dv.getBigUint64(e + AS_STORED_POS[s], true),
         stale: dv.getBigUint64(e + AS_STALE[s], true),
         pendingObligations: dv.getBigUint64(e + AS_PENDING_OBL[s], true),
-        pendingDomainLossBarrier: dv.getBigUint64(e + SLOT_BARRIER[s], true),
+        pendingDomainLossBarrier: dv.getBigUint64(e + SLOT_BARRIER_X[s], true),
       });
     }
   }

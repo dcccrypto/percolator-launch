@@ -1,5 +1,7 @@
 "use client";
 
+import { observeLotExp } from "@/lib/v22/lot-registry";
+import { lotExpOf } from "@/lib/v22/lot";
 import { useEffect, useRef, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
@@ -9,10 +11,8 @@ import {
   parseAllAccounts,
   parseConfig,
   parseParams,
-  parsePortfolioV17,
   parsePositionNftAccount,
   parseWrapperConfigV17,
-  isV17Account,
   AccountKind,
   V17_HEADER_LEN,
   type DiscoveredMarket,
@@ -29,7 +29,7 @@ import {
   isDeleveraged,
   type AssetAdlFactors,
 } from "@/lib/v17-adl";
-import { getAllProgramIds, getNetwork } from "@/lib/config";
+import { getMarketDiscoveryProgramIds, getNetwork } from "@/lib/config";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { getEntryPrice } from "@/lib/entry-price";
 import { computePositionPnl, lookupKnownEntries } from "@/lib/position-pnl";
@@ -43,6 +43,7 @@ import {
   PORTFOLIO_RECONCILE_MS,
   subscribePortfolioInvalidation,
 } from "@/lib/portfolio-invalidation";
+import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 
 const MAINNET_STATIC_MARKETS = [
   {
@@ -68,6 +69,12 @@ function getApiBaseUrl(): string | undefined {
  * The mainnet static bundle keeps its existing role as a fallback when the
  * API directory fails or comes back empty.
  */
+// Portfolio discovery can legitimately take longer than the generic market
+// browser path on a cold devnet scan. Preserve the existing mainnet timeout,
+// while giving devnet enough headroom for an otherwise healthy directory load.
+const PORTFOLIO_MARKET_DISCOVERY_TIMEOUT_MS = 8_000;
+const PORTFOLIO_DEVNET_MARKET_DISCOVERY_TIMEOUT_MS = 15_000;
+
 async function discoverPortfolioMarkets(
   connection: ReturnType<typeof useConnectionCompat>["connection"],
   programId: PublicKey,
@@ -81,7 +88,10 @@ async function discoverPortfolioMarkets(
   if (apiBaseUrl) {
     try {
       const viaApi = await discoverMarketsViaProgramDirectory(connection, programId, apiBaseUrl, {
-        timeoutMs: 8_000,
+        timeoutMs:
+        network === "devnet"
+          ? PORTFOLIO_DEVNET_MARKET_DISCOVERY_TIMEOUT_MS
+          : PORTFOLIO_MARKET_DISCOVERY_TIMEOUT_MS,
       });
       if (viaApi.length > 0) return viaApi;
       anySourceSucceeded = true;
@@ -274,6 +284,19 @@ export interface PortfolioPosition {
    * owner-scan can't find it — it's recovered via the NFT last_holder scan.
    */
   nftWrapped?: boolean;
+  /**
+   * v2.2 lot exponent of this position's market (0 = no lots, the default for v2.1 and flag off). `positionSize` /
+   * `effectiveSize` are in LOTS and every price here is per LOT; display sites convert through lib/v22/lot.ts
+   * (formatLotQ / formatLotPriceE6) with this value. PnL, margin and liquidation maths are lot-invariant.
+   */
+  lotExp?: number;
+  /**
+   * The on-chain address of the portfolio account this row was read from. A wallet can own several
+   * portfolios on one market, so the market alone does not say which one a row is: every action on
+   * the row (Close, and the sweep after it) must name this account (#3301). `null` only for a row
+   * built without an account (test fixtures); nothing in the app produces one.
+   */
+  portfolioPk: PublicKey | null;
 }
 
 export type LiquidationSeverity = "safe" | "warning" | "danger";
@@ -423,7 +446,7 @@ export function positionRowKeys(positions: PortfolioPosition[]): string[] {
  * both surface identical rows. `nftWrapped` flags escrowed positions for the UI.
  */
 export function buildV17Position(
-  portfolio: ReturnType<typeof parsePortfolioV17>,
+  portfolio: ReturnType<typeof parsePortfolio>,
   oraclePriceE6: bigint,
   maintenanceMarginBps: bigint,
   slabAddrStr: string,
@@ -449,6 +472,8 @@ export function buildV17Position(
    * exactly the pre-ADL-fix behaviour.
    */
   adlFactors: AssetAdlFactors | null = null,
+  /** The portfolio account `portfolio` was decoded from (see `PortfolioPosition.portfolioPk`). */
+  portfolioPk: PublicKey | null = null,
 ): PortfolioPosition {
   // v17 markets return an empty `market.config` from the SDK — the real
   // collateral mint lives in `market.configV17` (see markets/page.tsx's
@@ -604,6 +629,7 @@ export function buildV17Position(
     maintenanceMarginBps,
     initialMarginBps,
     nftWrapped,
+    portfolioPk,
   };
 }
 
@@ -687,6 +713,7 @@ export async function fetchPortfolioSnapshot(
       /** Live per-side ADL factors, so both the owner-scan and the NFT-wrapped
        *  recovery scan resolve effective exposure the same way. */
       adlFactors: AssetAdlFactors | null;
+      lotExp?: number;
     }
   >();
   // Distinct v17 wrapper program ids actually seen while scanning slabs
@@ -737,7 +764,7 @@ export async function fetchPortfolioSnapshot(
       const slabData = accountInfo.data;
       const slabAddrStr = market.slabAddress.toBase58();
 
-      if (isV17Account(slabData)) {
+      if (isWrapperAccount(slabData)) {
         // ── v17 market path ────────────────────────────────────────────
         // Portfolios are standalone program-owned accounts, one wallet ==
         // one portfolio per market. This pass only computes each v17
@@ -777,7 +804,8 @@ export async function fetchPortfolioSnapshot(
         // Remember this v17 market's context so both the batched
         // owner-scan phase below AND the NFT-wrapped recovery scan can
         // enrich portfolios/escrows the same way.
-        marketMetaBySlab.set(slabAddrStr, { market, oraclePriceE6, maintenanceMarginBps, initialMarginBps, adlFactors });
+        observeLotExp(slabAddrStr, slabData); // N1
+        marketMetaBySlab.set(slabAddrStr, { market, oraclePriceE6, maintenanceMarginBps, initialMarginBps, adlFactors, lotExp: lotExpOf(slabData) });
         v17ProgramIdsSeen.set(v17ProgramId.toBase58(), v17ProgramId);
       } else {
         // ── v12.x legacy path ──────────────────────────────────────────
@@ -882,6 +910,7 @@ export async function fetchPortfolioSnapshot(
 
             allPositions.push({
               liquidationState,
+              portfolioPk: null, // legacy v12 slab account: no portfolio account to name
               slabAddress: slabAddrStr,
               symbol: resolveSymbol(slabAddrStr, symbolBySlab),
               account,
@@ -987,7 +1016,7 @@ export async function fetchPortfolioSnapshot(
         // must not list the market's seeded LP liquidity as their position.
         // See isLpPortfolio's doc comment.
         if (isLpPortfolio(portData)) continue;
-        const portfolio = parsePortfolioV17(portData);
+        const portfolio = parsePortfolio(portData);
         // Defense-in-depth: re-verify the mutable owner actually matches after
         // fetch — memcmp filters are advisory server-side; don't trust them
         // blindly (same re-verify as useUserAccount.ts / useDeposit.ts).
@@ -1012,7 +1041,10 @@ export async function fetchPortfolioSnapshot(
           resolveSymbol(slabAddrStr, symbolBySlab),
           pkStr,
           meta.adlFactors,
+          pubkey,
         );
+        // v2.2 lot exponent of this market (0 = no lots / flag off), stamped after the build so the v2.1 positional signature is unchanged.
+        pos.lotExp = meta.lotExp ?? 0;
 
         if (liveLiquidationSeverity(pos, null) !== "safe") {
           riskCount++;
@@ -1078,7 +1110,7 @@ export async function fetchPortfolioSnapshot(
         try {
           const pfInfo = pfInfos[i];
           if (!pfInfo || !pfInfo.data) continue;
-          const portfolio = parsePortfolioV17(new Uint8Array(pfInfo.data));
+          const portfolio = parsePortfolio(new Uint8Array(pfInfo.data));
           // Only surface a wrapped position that still has an active leg
           // (a closed-but-unburned NFT wraps a size-0 leg).
           const activeLeg = portfolio.legs.find((l) => l.active);
@@ -1105,7 +1137,9 @@ export async function fetchPortfolioSnapshot(
             resolveSymbol(slabAddrStr, symbolBySlab),
             pkStr,
             meta.adlFactors,
+            portfolioPks[i],
           );
+          pos.lotExp = meta.lotExp ?? 0;
 
           if (liveLiquidationSeverity(pos, null) !== "safe") {
             riskCount++;
@@ -1366,7 +1400,7 @@ export function usePortfolio(enabled: boolean = true): PortfolioData {
     }
 
     let cancelled = false;
-    const programIds = getAllProgramIds();
+    const programIds = getMarketDiscoveryProgramIds();
     const cacheKey = portfolioCacheKey(publicKey.toBase58(), getNetwork());
     // Consume-and-reset: a `refresh()` call sets this before bumping
     // refreshCounter, so THIS run bypasses the shared TTL cache, while the

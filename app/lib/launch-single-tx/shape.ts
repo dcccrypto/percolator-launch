@@ -18,10 +18,13 @@
  */
 import { PublicKey, SystemProgram, type TransactionInstruction } from "@solana/web3.js";
 import { ACCOUNT_SIZE, ASSOCIATED_TOKEN_PROGRAM_ID, MINT_SIZE } from "@solana/spl-token";
-import { IX_TAG, IX_TAG_P3, STAKE_IX, V17_PORTFOLIO_ACCOUNT_LEN } from "@percolatorct/sdk";
+import { IX_TAG, IX_TAG_P3, STAKE_IX, deriveInsuranceLpMint, deriveLpVaultRegistry } from "@percolatorct/sdk";
+import { portfolioAccountLen } from "@/lib/v22/layout";
 import { slabSizeFor } from "@/lib/create-market-args";
 import { VAULT_LP_MATCHER_CTX_LEN } from "@/lib/limits/constants";
 import { MEMO_PROGRAM_ID } from "@/lib/keeper-register-memo";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { METAPLEX_TOKEN_METADATA_PROGRAM_ID_V22, deriveLpShareMetaPayerPdaV22, deriveLpShareMetadataPdaV22, isLpShareTickerV22 } from "@/lib/v22/sdk";
 import { decodeV1Message, v1IsSigner, v1IsWritable, type DecodedV1Message } from "./v1-decode";
 
 /** One instruction with MESSAGE-level account flags (what the runtime enforces). */
@@ -36,6 +39,12 @@ export interface LaunchPrograms {
   wrapper: string;
   stake: string;
 }
+
+/** Wrapper tag 107 (v2.2 InitBondTranche); same number as IX_TAG_V22.InitBondTranche, kept literal so this module stays dependency-light. */
+const V22_INIT_BOND_TRANCHE_TAG = 107;
+
+/** Wrapper tag 122 (v2.2 InitLpShareMetadata, the Earn share token's name); same number as IX_TAG_V22.InitLpShareMetadata. */
+const V22_INIT_LP_SHARE_METADATA_TAG = 122;
 
 const WRAPPER_TAGS = {
   InitMarket: IX_TAG.InitMarket,
@@ -60,6 +69,8 @@ export type LaunchIxKind =
   | "ata.other"
   | "memo"
   | `wrapper.${WrapperName}`
+  | "wrapper.InitBondTranche"
+  | "wrapper.InitLpShareMetadata"
   | "wrapper.other"
   | "stake.InitPool"
   | "stake.BindInsuranceAuthority"
@@ -76,6 +87,9 @@ export const MARKETAUTH_GATED: readonly LaunchIxKind[] = [
   "wrapper.CreateLpVault",
   "wrapper.InitVaultLp",
   "wrapper.UpdateFeeSplit",
+  "wrapper.InitBondTranche",
+  // Only the ticker form is marketauth-gated, but the launch never sends either form after the rotation.
+  "wrapper.InitLpShareMetadata",
 ];
 
 export function classifyLaunchIx(ix: NeutralIx, p: LaunchPrograms): LaunchIxKind {
@@ -96,6 +110,10 @@ export function classifyLaunchIx(ix: NeutralIx, p: LaunchPrograms): LaunchIxKind
     for (const [name, t] of Object.entries(WRAPPER_TAGS) as [WrapperName, number][]) {
       if (tag === t) return `wrapper.${name}`;
     }
+    // v2.2 (flag-gated, so a v2.1 deployment still treats tag 107 as foreign): the capacity bond.
+    if (isDevnetV22Enabled() && tag === V22_INIT_BOND_TRANCHE_TAG) return "wrapper.InitBondTranche";
+    // v2.2 (flag-gated): naming the Earn share token, right after CreateLpVault.
+    if (isDevnetV22Enabled() && tag === V22_INIT_LP_SHARE_METADATA_TAG) return "wrapper.InitLpShareMetadata";
     return "wrapper.other";
   }
   if (ix.programId === p.stake) {
@@ -113,10 +131,21 @@ export interface LaunchShapeOptions {
   cosign: boolean;
   /** A non-default fee split (UpdateFeeSplit before InitPool). */
   feeSplit: boolean;
+  /**
+   * v2.2 capacity bond: InitBondTranche (107) right after InitVaultLp (94), and the Earn seeds (ata + 2 x 75) after it,
+   * because 107 is refused once the vault has any Earn deposit. Absent = the v2.1 shape.
+   */
+  bond?: boolean;
+  /**
+   * v2.2 share-token naming (tag 122) right after CreateLpVault, while the creator is still marketauth. In the bond launch it travels with the
+   * Earn-seed segment (after 107), exactly where the segment is moved to (see lib/v22/launch-wire.ts). Absent = the v2.1 shape.
+   */
+  shareName?: boolean;
 }
 
 /** The exact kind sequence of a single-transaction P3 launch. */
 export function expectedLaunchShape(o: LaunchShapeOptions): LaunchIxKind[] {
+  if (o.bond) return expectedBondLaunchShape(o);
   return [
     "system.createAccount",
     "ata.create",
@@ -126,6 +155,7 @@ export function expectedLaunchShape(o: LaunchShapeOptions): LaunchIxKind[] {
     ...(o.cosign ? (["wrapper.ConfigureAuthMark", "wrapper.UpdateAssetAuthority"] as const) : []),
     "wrapper.TopUpInsurance",
     "wrapper.CreateLpVault",
+    ...(o.shareName ? (["wrapper.InitLpShareMetadata"] as const) : []),
     "ata.createIdempotent",
     "wrapper.DepositToLpVault",
     "wrapper.DepositToLpVault",
@@ -138,6 +168,20 @@ export function expectedLaunchShape(o: LaunchShapeOptions): LaunchIxKind[] {
     ...(o.feeSplit ? (["wrapper.UpdateFeeSplit"] as const) : []),
     "stake.InitPool",
     "stake.BindInsuranceAuthority",
+  ];
+}
+
+/** The bond launch: 74, the two creates, 94, 107, then the Earn seeds, then the junior deposit (see lib/v22/launch-wire.ts). */
+function expectedBondLaunchShape(o: LaunchShapeOptions): LaunchIxKind[] {
+  const v21 = expectedLaunchShape({ ...o, bond: false });
+  const i74 = v21.indexOf("wrapper.CreateLpVault");
+  const i94 = v21.indexOf("wrapper.InitVaultLp");
+  return [
+    ...v21.slice(0, i74 + 1),
+    ...v21.slice(i94 - 2, i94 + 1),
+    "wrapper.InitBondTranche",
+    ...v21.slice(i74 + 1, i94 - 2),
+    ...v21.slice(i94 + 1),
   ];
 }
 
@@ -223,6 +267,8 @@ export function launchBundleViolations(ixs: readonly NeutralIx[], ctx: LaunchBun
     memo: kinds.includes("memo"),
     cosign: ctx.keeper !== null,
     feeSplit: kinds.includes("wrapper.UpdateFeeSplit"),
+    bond: kinds.includes("wrapper.InitBondTranche"),
+    shareName: kinds.includes("wrapper.InitLpShareMetadata"),
   };
   const expected = expectedLaunchShape(opts);
   if (kinds.length !== expected.length || kinds.some((k, i) => k !== expected[i])) {
@@ -246,6 +292,31 @@ export function launchBundleViolations(ixs: readonly NeutralIx[], ctx: LaunchBun
   const createLp = first("wrapper.CreateLpVault");
   const bindLp = first("wrapper.InitVaultLp");
   if (createLp < 0 || bindLp < 0 || bindLp < createLp) v.push("InitVaultLp must follow CreateLpVault");
+
+  // v2.2: the share-token naming is bound to THIS market, funded and signed only by the creator, and carries a ticker the program accepts.
+  kinds.forEach((k, i) => {
+    if (k === "wrapper.InitLpShareMetadata") v.push(...shareNameViolations(ixs[i]!, i, ctx));
+  });
+
+  // F2 (security review of #3235): an Earn seed (tag 75) sent BEFORE InitVaultLp runs on an unbound vault and takes the
+  // plain 11 accounts; one sent AFTER it (the bond launch) runs on a BOUND vault and REQUIRES the tail [11] vault_lp_state
+  // and [12] the vault LP portfolio, exactly the two accounts InitVaultLp (accounts [3] and [4]) bound. Nothing else.
+  if (bindLp >= 0) {
+    const bindIx = ixs[bindLp]!;
+    const lpState = bindIx.accounts[3]?.key;
+    const lpPortfolio = bindIx.accounts[4]?.key;
+    kinds.forEach((k, i) => {
+      if (k !== "wrapper.DepositToLpVault") return;
+      const a = ixs[i]!.accounts;
+      if (i > bindLp) {
+        if (a.length !== 13 || a[11]?.key !== lpState || a[12]?.key !== lpPortfolio || !a[11]?.writable) {
+          v.push(`ix ${i}: DepositToLpVault after InitVaultLp (a bound vault) must carry the vault_lp_state and LP portfolio tail`);
+        }
+      } else if (a.length !== 11) {
+        v.push(`ix ${i}: DepositToLpVault before InitVaultLp must have exactly 11 accounts, got ${a.length}`);
+      }
+    });
+  }
 
   // Accounts are created before anything references them; every create is funded by the payer and
   // its new account is a signer (a fresh keypair) that is neither the payer nor the keeper.
@@ -331,6 +402,45 @@ export function launchBundleViolations(ixs: readonly NeutralIx[], ctx: LaunchBun
   return v;
 }
 
+/**
+ * Tag 122 inside a launch. Everything the instruction names is derived from THIS launch's slab and wrapper (registry, share mint, the
+ * Metaplex metadata PDA, the wrapper's fee-payer PDA), the payer and marketauth are the creator (fee payer) and nobody else, and the data is
+ * `[122][n][ticker]` with a program-valid ticker (`A-Z0-9`, n <= 8; n = 0 is the generic form, which carries no market / marketauth accounts).
+ */
+export function shareNameViolations(ix: NeutralIx, i: number, ctx: LaunchBundleContext): string[] {
+  const v: string[] = [];
+  const wrapper = new PublicKey(ctx.programs.wrapper);
+  const market = new PublicKey(ctx.slab);
+  const registry = deriveLpVaultRegistry(wrapper, market)[0];
+  const mint = deriveInsuranceLpMint(wrapper, market)[0];
+  const want = [
+    ctx.payer, registry.toBase58(), mint.toBase58(), deriveLpShareMetadataPdaV22(mint)[0].toBase58(),
+    METAPLEX_TOKEN_METADATA_PROGRAM_ID_V22.toBase58(), SYSTEM, deriveLpShareMetaPayerPdaV22(wrapper, mint)[0].toBase58(),
+  ];
+  const n = ix.data[1];
+  if (ix.data.length < 2 || n === undefined || n > 8 || ix.data.length !== 2 + n) {
+    v.push(`ix ${i}: InitLpShareMetadata data is not [122][n <= 8][n ticker bytes]`);
+    return v;
+  }
+  const ticker = new TextDecoder().decode(ix.data.subarray(2));
+  if (n > 0 && !isLpShareTickerV22(ticker)) v.push(`ix ${i}: InitLpShareMetadata ticker is not A-Z0-9`);
+  const expectedAccounts = n > 0 ? 9 : 7;
+  if (ix.accounts.length !== expectedAccounts) {
+    v.push(`ix ${i}: InitLpShareMetadata has ${ix.accounts.length} accounts (expected ${expectedAccounts})`);
+    return v;
+  }
+  want.forEach((key, pos) => {
+    if (ix.accounts[pos]!.key !== key) v.push(`ix ${i}: InitLpShareMetadata account [${pos}] is not the one derived from this market`);
+  });
+  if (!ix.accounts[0]!.signer || !ix.accounts[0]!.writable) v.push(`ix ${i}: InitLpShareMetadata payer must be a writable signer`);
+  if (n > 0) {
+    // Flags here are MESSAGE-level (the slab is writable elsewhere in the bundle), so only the identity is checked.
+    if (ix.accounts[7]!.key !== ctx.slab) v.push(`ix ${i}: InitLpShareMetadata [7] must be this market`);
+    if (ix.accounts[8]!.key !== ctx.payer || !ix.accounts[8]!.signer) v.push(`ix ${i}: InitLpShareMetadata marketauth [8] must be the creator and sign`);
+  }
+  return v;
+}
+
 /** Wire-level limits of a v1 transaction (SIMD-0385 / SIMD-0296). */
 export const V1_LIMITS = { bytes: 4096, accounts: 64, instructions: 64, signers: 12 } as const;
 
@@ -378,7 +488,7 @@ export type LaunchCreatePins = Record<LaunchCreateName, CreatePin>;
 export function launchCreatePins(p: { wrapper: string; matcher: string; tokenProgram: string }): LaunchCreatePins {
   return {
     slab: { space: slabSizeFor({ p3: true }), owner: p.wrapper },
-    vaultLpPortfolio: { space: V17_PORTFOLIO_ACCOUNT_LEN, owner: p.wrapper },
+    vaultLpPortfolio: { space: portfolioAccountLen(), owner: p.wrapper },
     matcherCtx: { space: VAULT_LP_MATCHER_CTX_LEN, owner: p.matcher },
     stakeLpMint: { space: MINT_SIZE, owner: p.tokenProgram },
     stakeVault: { space: ACCOUNT_SIZE, owner: p.tokenProgram },

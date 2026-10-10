@@ -1,9 +1,7 @@
 import { Connection, PublicKey } from "@solana/web3.js";
-import {
-  getMarketsByAddress,
-  type DiscoveredMarket,
-  type GetMarketsByAddressOptions,
-} from "@percolatorct/sdk";
+import { type DiscoveredMarket, type GetMarketsByAddressOptions } from "@percolatorct/sdk";
+// VERSION-aware (18 + 19) with the v2.2 flag on, the installed SDK function otherwise.
+import { getMarketsByAddress } from "@/lib/v22/discovery";
 
 interface ApiMarketEntry {
   slab_address?: unknown;

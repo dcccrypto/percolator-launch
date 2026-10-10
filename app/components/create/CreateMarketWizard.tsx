@@ -1,5 +1,7 @@
 "use client";
-import { UNSUPPORTED_POOL_COPY } from "@/lib/wizard-copy";
+import { resolveMarketMetadata } from "@/lib/market-metadata";
+import { LIVE_PRICE_LIMIT_COPY, UNSUPPORTED_POOL_COPY } from "@/lib/wizard-copy";
+import { blocksNewLaunch, useLivePriceLimit } from "@/hooks/useLivePriceLimit";
 import { WIZARD_STORAGE_KEY } from "@/lib/wizard-storage";
 
 import { DEFAULT_JUNIOR_FLOOR_BPS, validateP3Wizard, wizardP3Params } from "@/lib/limits/p3-wizard";
@@ -12,7 +14,6 @@ import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSolBalance } from "@/hooks/useSolBalance";
 import {
   useCreateMarket,
-  DEFAULT_SLAB_SIZE,
   wizardSlabBytes,
   flooredInitialMarginBps,
   type CreateMarketParams,
@@ -23,7 +24,7 @@ import { useQuickLaunch } from "@/hooks/useQuickLaunch";
 import { type DexPoolResult, isVerifiedPool } from "@/hooks/useDexPoolSearch";
 import { parseHumanAmount } from "@/lib/parseAmount";
 import { MAX_FUNDABLE_REQUIREMENT } from "@/lib/prefund-requirement";
-import { backingSeedPerDomain, deriveLaunchMarketParams, leverageFromMarginBps, MIN_LEVERAGE_X } from "@/lib/market-params";
+import { backingSeedPerDomain, deriveLaunchMarketParams, leverageFromMarginBps } from "@/lib/market-params";
 import { LP_EXPOSURE_DEFAULT_BPS, clampLpExposureBps } from "@/lib/matcher-params";
 import { getConfig, getNetwork } from "@/lib/config";
 import { toE6, formatMarkPrice } from "@/lib/format";
@@ -33,11 +34,19 @@ import { WizardProgress } from "./WizardProgress";
 import { StepTokenSelect } from "./StepTokenSelect";
 import { StepControlRoom, leverageToMarginBps, marginBpsToLeverage } from "./StepControlRoom";
 import { LaunchProgress } from "./LaunchProgress";
+import { retryBlockedReason } from "@/lib/retry-blocked";
 import { LaunchSuccess } from "./LaunchSuccess";
 import { GrowthLaunchControls, type GrowthLaunchState } from "./GrowthLaunchControls";
 import { isDevnetV21Enabled } from "@/lib/v21/flag";
 import { V21_COPY } from "@/lib/v21/copy";
 import { defaultGrowthLaunch, validateGrowthLaunch, type GrowthLaunch } from "@/lib/v21/growth-launch";
+import { V22LaunchOptions, type V22OptionsState } from "./V22LaunchOptions";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { planLaunchV22, toLaunchParams } from "@/lib/v22/launch-plan";
+import { ResumeFromChainCard } from "./ResumeFromChainCard";
+import { ChainResumeNotice } from "./ChainResumeNotice";
+import { dropChainResume, useChainResumeWalletGuard } from "@/hooks/useChainResumeWalletGuard";
+import { applyRecoveredLaunch, atomsToHuman, chainResumeRefusal, type RecoveredLaunch } from "@/lib/launch-recovery";
 import { RecoverSolBanner } from "./RecoverSolBanner";
 // W8 fix: share ONE SOL-cost formula with CostEstimate.tsx's own display so the
 // launch gate and the number shown to the user can never drift apart — see that
@@ -45,7 +54,8 @@ import { RecoverSolBanner } from "./RecoverSolBanner";
 import { computeCreateMarketSolCost } from "./CostEstimate";
 import { isValidBase58Pubkey } from "@/lib/createWizardUtils";
 import { isMockMode } from "@/lib/mock-mode";
-import { pickInitialPrice, toInitialPriceE6, withTrackableFloor, minTrackablePriceE6 } from "@/lib/initial-price";
+import { lowestLeverageTrackablePriceUsd } from "@/lib/launch-price-floor";
+import { pickInitialPrice, toInitialPriceE6, withTrackableFloor } from "@/lib/initial-price";
 
 type WizardStep = 1 | 2;
 
@@ -68,6 +78,8 @@ interface WizardState {
   juniorFloorBps?: number;
   /** Devnet v2.1: the growth-v19 block (flag-gated; absent/off = today's launch). */
   growth?: GrowthLaunchState;
+  /** Devnet v2.2: price protection / holding fee / bond toggles (flag-gated; undefined = oracle-mode defaults). */
+  v22?: V22OptionsState;
   /** Largest one-sided position the LP takes on, bps of the LP seed (default 1x). */
   lpExposureBps: number;
   insuranceAmount: string;
@@ -108,10 +120,10 @@ const DEFAULT_STATE: WizardState = {
  * There is no mode toggle and no slab-tier picker — v17 has exactly one slab
  * size (max capacity) and oracle detection is always automatic.
  */
-export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }) => {
+export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<slab>: continue this unfinished launch from chain (#3267). */ resumeSlabParam?: string }> = ({ initialMint, resumeSlabParam }) => {
   const { publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
-  const { state: createState, create, reset: resetCreate, restoreSlabKeypair, retryKeeperRegistration, cancelInFlightLaunch } = useCreateMarket();
+  const { state: createState, create, reset: resetCreate, restoreSlabKeypair, restoreSlabAddress, clearChainResume, retryKeeperRegistration, cancelInFlightLaunch } = useCreateMarket();
   // GH#2623: leaving this page mid-launch must stop the tail-broadcast retry
   // loop from prompting further wallet signatures — without this, a market
   // creation begun here kept re-signing (new popups) "even while out of the
@@ -228,8 +240,47 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
    * When non-null, handleLaunch skips slab creation and resumes from this step.
    */
   const [resumeFromStep, setResumeFromStep] = useState<number | null>(null);
+  // Why the last Retry click did nothing (null = it ran). Shown above the launch progress.
+  const [retryNote, setRetryNote] = useState<string | null>(null);
   // Which stuck slab is being resumed; only meaningful while resumeFromStep is set.
   const [resumeSlab, setResumeSlab] = useState<string | null>(null);
+  // #3267: a resume rebuilt from chain (proven against the creation tx's registration memo). Its
+  // parameters are pinned: the live wizard must not re-detect a different pool or price under it.
+  const [chainResume, setChainResume] = useState<RecoveredLaunch | null>(null);
+  const chainResumeRef = useRef<RecoveredLaunch | null>(null);
+  chainResumeRef.current = chainResume;
+  const [chainResumeError, setChainResumeError] = useState<string | null>(null);
+  // A chain resume belongs to ONE slab and ONE wallet. Switching wallet drops it (and the resume mode it
+  // started), so a verification done for wallet A can never launch for wallet B.
+  const walletB58 = publicKey?.toBase58() ?? null;
+  useChainResumeWalletGuard(walletB58, !!chainResume, () =>
+    dropChainResume({
+      cancelInFlightLaunch,
+      forget: () => {
+        setChainResume(null);
+        setChainResumeError(null);
+        setResumeFromStep(null);
+        setResumeSlab(null);
+      },
+      resetCreate,
+    }),
+  );
+  /**
+   * The chain resume a launch/retry may use, or null when there is none. Refuses (and says why) when it
+   * is for a different slab than the one being resumed, was verified for another wallet, or is a market
+   * this recovery cannot resume.
+   */
+  const gateChainResume = (): { ok: true; resume: RecoveredLaunch | null } | { ok: false } => {
+    const r = chainResume;
+    if (!r) return { ok: true, resume: null };
+    const refusal = chainResumeRefusal(r, resumeSlab, walletB58);
+    if (refusal) {
+      setChainResumeError(refusal);
+      return { ok: false };
+    }
+    setChainResumeError(null);
+    return { ok: true, resume: r };
+  };
 
   // BUG FIX (2026-09-25, tester-reported "RESUME CREATION is a dead button"):
   // clicking RESUME CREATION previously only updated React state — nothing
@@ -298,7 +349,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     if (!quickLaunch.config || launchInFlightRef.current) return;
     setWizard((prev) => ({
       ...prev,
-      tradingFeeBps: quickLaunch.config!.tradingFeeBps,
+      tradingFeeBps: chainResumeRef.current ? chainResumeRef.current.tradingFeeBps : quickLaunch.config!.tradingFeeBps,
       // Normalise through the dial's own quantisation so the number ON the dial is
       // exactly the number written on-chain. quick-launch's "high" tier supplies
       // 1000 bps (10x); GH#2621 raised the dial's ceiling to MAX_LEVERAGE_X (10x)
@@ -307,10 +358,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       // every high-tier default from 10x to 6.5x (1538 bps) — kept generically
       // (rather than special-cased to 10x) because it also protects any FUTURE
       // quick-launch tier from producing a bps the dial's own snap can't display.
-      initialMarginBps: prev.marginSetByUser
+      initialMarginBps: prev.marginSetByUser || chainResumeRef.current
         ? prev.initialMarginBps
         : leverageToMarginBps(marginBpsToLeverage(quickLaunch.config!.initialMarginBps)),
-      lpCollateral: prev.lpSetByUser ? prev.lpCollateral : quickLaunch.config!.lpCollateral,
+      lpCollateral: prev.lpSetByUser || chainResumeRef.current ? prev.lpCollateral : quickLaunch.config!.lpCollateral,
       // Apply detected oracle price as adminPrice (used if oracle ends up admin)
       adminPrice: pickInitialPrice(prev.adminPrice, quickLaunch.adminPrice, quickLaunch.config?.initialPrice),
     }));
@@ -439,8 +490,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     parseFloat(wizard.insuranceAmount) >= 100;
 
   // BUG 1 fix: rent estimate must be sized off the actual v17 slab length
-  // (DEFAULT_SLAB_SIZE = v17MarketAccountLen(14)) — v17 has no slab tiers, the slab is
-  // always this fixed size.
+  // (wizardSlabBytes = v17MarketAccountLen(1): every new launch allocates one asset slot) — v17
+  // has no slab tiers, the slab is always this fixed size.
   //
   // W8 fix (2026-07-08): this used to hand-roll its own formula that omitted the LP-portfolio
   // (9347 bytes) + matcher-ctx (320 bytes) rent entirely — under-counting required SOL by
@@ -568,16 +619,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       : null;
   // The floor at the lowest leverage the dial offers: only suggest lowering
   // leverage when doing so would actually clear the block.
-  const lowestLeverageMinPrice =
-    Number(
-      minTrackablePriceE6(
-        deriveLaunchMarketParams({
-          initialMarginBps: Math.ceil(10_000 / MIN_LEVERAGE_X),
-          lpCollateral: 0n,
-          initialPriceE6: 1_000_000n,
-        }).maxPriceMoveBpsPerSlot,
-      ),
-    ) / 1_000_000;
+  const lowestLeverageMinPrice = lowestLeverageTrackablePriceUsd();
 
   /**
    * Can the keeper actually PRICE this market once it exists?
@@ -691,17 +733,46 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
         singleAsset: true,
       })
     : null;
-  const launchDisabled = !allValid || !oracleSettled || !publicKey || p3Issue !== null || growthIssue !== null;
+  // Devnet v2.2: lot size (automatic), price protection, holding fee, bond. Null unless the v2.2 flag and the growth
+  // block are on; flag off nothing below changes.
+  const v22Plan =
+    isDevnetV22Enabled() && growthLaunch
+      ? planLaunchV22({
+          tokenPriceE6: currentPriceE6,
+          collateralDecimals: decimals,
+          collateralSymbol,
+          oracleMode: wizard.oracleType === "hyperp_ema" ? "hyperp" : wizard.oracleType,
+          growthOn: true,
+          ...wizard.v22,
+        })
+      : null;
+  const v22Params = v22Plan ? toLaunchParams(v22Plan) : undefined;
+  const v22Issue = v22Plan?.issues[0] ?? null;
+  /** The launch price: per LOT when a v2.2 lot applies, else the per-token price as before. */
+  const launchPriceE6 = (tokenE6: bigint): bigint => (v22Params ? tokenE6 * 10n ** BigInt(v22Params.lotExp) : tokenE6);
+  // #3320: a wallet already at its per-creator live-price ceiling would launch a market keeper-register
+  // refuses for good: it would list and sit with no live price (the outcome the unsupported-pool gate
+  // above prevents), after spending its rent, LP and insurance. Block it before anything is built or
+  // signed. Only a KNOWN limit blocks: an unread or failed pre-check never does. Never blocks continuing
+  // a launch that already started (its market exists; finishing it is the creator's call).
+  const resumingLaunch = resumeFromStep !== null || chainResume !== null;
+  const livePriceLimit = useLivePriceLimit(walletB58, isDevnet && resolvedOracleType === "keeper" && !resumingLaunch);
+  const atLivePriceLimit = blocksNewLaunch(livePriceLimit, { keeperPriced: resolvedOracleType === "keeper", resuming: resumingLaunch });
+  const launchDisabled = !allValid || !oracleSettled || !publicKey || p3Issue !== null || growthIssue !== null || v22Issue !== null || atLivePriceLimit;
   const launchDisabledReason: string | undefined = !publicKey
     ? "Connect wallet"
     : p3Issue
       ? LIMITS_COPY.p3Wizard.issue[p3Issue]
     : growthIssue
       ? V21_COPY.wizard.issue[growthIssue]
+    : v22Issue
+      ? v22Issue.message
     : !oracleSettled
       ? "Resolving price feed"
     : !registrable
       ? (notRegistrableReason ?? "This token cannot be priced")
+    : atLivePriceLimit
+      ? LIVE_PRICE_LIMIT_COPY
     : !step1Valid
       ? "Resolve a token first"
       : duplicateCheck.duplicates.length > 0
@@ -895,6 +966,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // Launch market (or resume from a stuck slab when resumeFromStep is set)
   const handleLaunch = () => {
     if (!allValid || !oracleSettled || !publicKey) return;
+    // #3320: the button is disabled at a known limit; this keeps any other caller of handleLaunch
+    // from building a transaction for a market that would be refused a live price.
+    if (atLivePriceLimit) return;
     const { oracleFeed, priceE6 } = getOracleFeedAndPrice();
     // PERC-470 security: block hyperp launch without valid DEX price
     if (wizard.oracleType === "hyperp_ema" && priceE6 === 0n) {
@@ -919,16 +993,19 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     // not the collateral mint (e.g. USDC). Use baseSymbol/quoteSymbol from the pool
     // result to build a proper symbol ("SOL") and name ("SOL/USDC Perpetual").
     // Fall back to tokenMeta for non-hyperp (Pyth / admin oracle) markets.
-    const marketSymbol = oracleMode === "hyperp" && wizard.dexPool
-      ? wizard.dexPool.baseSymbol
-      : (wizard.tokenMeta?.symbol ?? "UNKNOWN");
-    const marketName = oracleMode === "hyperp" && wizard.dexPool
-      ? `${wizard.dexPool.baseSymbol}/${wizard.dexPool.quoteSymbol} Perpetual`
-      : (wizard.tokenMeta?.name ?? "Unknown Token");
+    // resolveMarketMetadata: the value the memo and the registration payload both carry; a name
+    // with no Latin characters falls back to the symbol, a non-ASCII symbol to the mint's short form.
+    const { symbol: marketSymbol, name: marketName } = resolveMarketMetadata({
+      symbol: oracleMode === "hyperp" && wizard.dexPool ? wizard.dexPool.baseSymbol : wizard.tokenMeta?.symbol,
+      name: oracleMode === "hyperp" && wizard.dexPool
+        ? `${wizard.dexPool.baseSymbol}/${wizard.dexPool.quoteSymbol} Perpetual`
+        : wizard.tokenMeta?.name,
+      mint: wizard.mintAddress,
+    });
 
     const params: CreateMarketParams = {
       mint: new PublicKey(collateralMintAddress),
-      initialPriceE6: priceE6,
+      initialPriceE6: launchPriceE6(priceE6),
       lpCollateral: parseHumanAmount(wizard.lpCollateral || "0", decimals),
       insuranceAmount: parseHumanAmount(wizard.insuranceAmount, decimals),
       oracleFeed,
@@ -936,14 +1013,13 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       tradingFeeBps: wizard.tradingFeeBps,
       initialMarginBps: wizard.initialMarginBps,
       lpExposureBps: clampLpExposureBps(wizard.lpExposureBps),
-      // BUG 1 fix: don't override the DEFAULT_SLAB_SIZE fallback — InitMarket always
-      // encodes maxPortfolioAssets:14, so the slab MUST be exactly v17MarketAccountLen(14)
-      // regardless of anything the wizard used to let the user pick, or InitMarket reverts
-      // with InvalidSlabLen (and over-charges rent in the process). v17 has no slab tiers —
-      // maxAccounts is deliberately omitted here (create() defaults it).
-      slabDataSize: DEFAULT_SLAB_SIZE,
+      // The slab size and InitMarket's maxPortfolioAssets both derive from the market's asset-slot
+      // count (lib/create-market-args.ts marketAssetSlotsFor: one slot for every new launch), so the
+      // wizard passes neither: they cannot disagree, which is what makes InitMarket revert with
+      // InvalidSlabLen. v17 has no slab tiers; maxAccounts is deliberately omitted too.
       // P3: vault-owned LP + the creator's junior tranche (= the Liquidity amount).
       ...(growthLaunch ? { growth: growthLaunch } : {}),
+      ...(v22Params ? { v22: v22Params } : {}),
       p3: wizardP3Params(
         p3WizardEnabled(),
         parseHumanAmount(wizard.lpCollateral || "0", decimals),
@@ -977,17 +1053,17 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     };
     // PERC-513: If resuming from a stuck slab, skip slab creation (step 0).
     // The existing slab keypair is already in slabKpRef (loaded from localStorage).
-    create(params, resumeFromStep ?? undefined);
+    const gate = gateChainResume();
+    if (!gate.ok) return;
+    create(applyRecoveredLaunch(params, gate.resume), resumeFromStep ?? undefined);
   };
 
   // Retry from failed step
   const handleRetry = () => {
-    if (!configValid || !publicKey) return;
-    // For step > 0, slab address must be known to resume the transaction chain.
-    // Step 0 generates a fresh keypair, so slabAddress is not required for step 0 retry.
-    // Without this guard, a blockhash-expiry error on step 0 would silently no-op when
-    // the user clicks "Retry Step 1" (slabAddress is null until sendTx succeeds).
-    if (createState.step > 0 && !createState.slabAddress) return;
+    // Never a silent no-op: a Retry that does nothing reads as a hung launch. Say why.
+    const blocked = retryBlockedReason({ hasWallet: !!publicKey, configValid, step: createState.step, hasSlab: !!createState.slabAddress });
+    setRetryNote(blocked);
+    if (blocked) return;
     const { oracleFeed, priceE6 } = getOracleFeedAndPrice();
 
     // PERC-470: Include oracleMode + dexPoolAddress in retry params (fixes #810)
@@ -997,16 +1073,17 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       : "admin" as const;
 
     // Same symbol/name derivation as handleLaunch — hyperp uses DEX base/quote symbols.
-    const retryMarketSymbol = oracleMode === "hyperp" && wizard.dexPool
-      ? wizard.dexPool.baseSymbol
-      : (wizard.tokenMeta?.symbol ?? "UNKNOWN");
-    const retryMarketName = oracleMode === "hyperp" && wizard.dexPool
-      ? `${wizard.dexPool.baseSymbol}/${wizard.dexPool.quoteSymbol} Perpetual`
-      : (wizard.tokenMeta?.name ?? "Unknown Token");
+    const { symbol: retryMarketSymbol, name: retryMarketName } = resolveMarketMetadata({
+      symbol: oracleMode === "hyperp" && wizard.dexPool ? wizard.dexPool.baseSymbol : wizard.tokenMeta?.symbol,
+      name: oracleMode === "hyperp" && wizard.dexPool
+        ? `${wizard.dexPool.baseSymbol}/${wizard.dexPool.quoteSymbol} Perpetual`
+        : wizard.tokenMeta?.name,
+      mint: wizard.mintAddress,
+    });
 
     const params: CreateMarketParams = {
       mint: new PublicKey(collateralMintAddress),
-      initialPriceE6: priceE6,
+      initialPriceE6: launchPriceE6(priceE6),
       lpCollateral: parseHumanAmount(wizard.lpCollateral || "0", decimals),
       insuranceAmount: parseHumanAmount(wizard.insuranceAmount, decimals),
       oracleFeed,
@@ -1014,10 +1091,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       tradingFeeBps: wizard.tradingFeeBps,
       initialMarginBps: wizard.initialMarginBps,
       lpExposureBps: clampLpExposureBps(wizard.lpExposureBps),
-      // BUG 1 fix: same rationale as handleLaunch above — always the real v17 slab size.
-      slabDataSize: DEFAULT_SLAB_SIZE,
+      // Slab size and slot count derive from marketAssetSlotsFor, as in handleLaunch above.
       // P3: vault-owned LP + the creator's junior tranche (= the Liquidity amount).
       ...(growthLaunch ? { growth: growthLaunch } : {}),
+      ...(v22Params ? { v22: v22Params } : {}),
       p3: wizardP3Params(
         p3WizardEnabled(),
         parseHumanAmount(wizard.lpCollateral || "0", decimals),
@@ -1042,7 +1119,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
         dexType: wizard.dexPool?.dexType,
       } : {}),
     };
-    create(params, createState.step);
+    const gate = gateChainResume();
+    if (!gate.ok) return;
+    create(applyRecoveredLaunch(params, gate.resume), createState.step);
   };
 
   // Retry ONLY the keeper-register step for an already-live market (LaunchSuccess's
@@ -1061,7 +1140,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       mainnetCA: wizard.mintAddress,
       dexPoolAddress,
       dexType: wizard.dexPool?.dexType ?? null,
-      symbol: wizard.tokenMeta?.symbol ?? "UNKNOWN",
+      symbol: resolveMarketMetadata({ symbol: wizard.tokenMeta?.symbol, mint: wizard.mintAddress }).symbol,
     });
   }, [createState.slabAddress, wizard.dexPool, wizard.oracleFeed, wizard.mintAddress, wizard.tokenMeta, retryKeeperRegistration]);
 
@@ -1135,11 +1214,20 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // Launch progress
   if (createState.loading || createState.step > 0 || createState.error) {
     return (
-      <LaunchProgress
-        state={createState}
-        onReset={handleReset}
-        onRetry={handleRetry}
-      />
+      <>
+        {retryNote && (
+          <div data-testid="retry-blocked-note" role="alert" className="mx-4 mt-4 border border-[var(--warning)]/40 bg-[var(--warning)]/[0.06] px-4 py-3 text-[11px] text-[var(--text)] sm:mx-6">
+            {retryNote}
+          </div>
+        )}
+        {/* A Retry refused by the chain-resume gate must say why here too: this view replaces the main one. */}
+        <ChainResumeNotice message={chainResumeError} />
+        <LaunchProgress
+          state={createState}
+          onReset={handleReset}
+          onRetry={handleRetry}
+        />
+      </>
     );
   }
 
@@ -1186,6 +1274,35 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
+      {/* #3267: continue an unfinished launch started on another device, rebuilt from chain. */}
+      {resumeSlabParam && resumeFromStep === null && (
+        <ResumeFromChainCard
+          slab={resumeSlabParam}
+          onVerified={(launch, step) => {
+            // Only the slab ADDRESS is needed past step 0 (the keypair never left the launching browser).
+            restoreSlabAddress(resumeSlabParam);
+            setChainResume(launch);
+            // Put the verified values in the form the wizard reads, and mark them user-set so detection
+            // does not move them (the pinned params above are the final authority).
+            setWizard((prev) => ({
+              ...prev,
+              mintAddress: launch.request.mainnetCA ?? prev.mintAddress,
+              tradingFeeBps: launch.tradingFeeBps,
+              initialMarginBps: launch.initialMarginBps,
+              marginSetByUser: true,
+              lpCollateral: atomsToHuman(launch.lpCollateralAtoms, 6),
+              lpSetByUser: true,
+              ...(launch.lpExposureBps != null ? { lpExposureBps: launch.lpExposureBps } : {}),
+              ...(launch.onChainInsuranceAtoms != null && launch.onChainInsuranceAtoms > 0n
+                ? { insuranceAmount: atomsToHuman(launch.onChainInsuranceAtoms, 6) }
+                : {}),
+            }));
+            setResumeFromStep(step);
+            setResumeSlab(resumeSlabParam);
+          }}
+        />
+      )}
+
       {/* Stuck slab recovery banner */}
       <RecoverSolBanner
         onReset={handleReset}
@@ -1204,10 +1321,16 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
           // can now surface a RESUME click for ANY of them. Falling back to `stuckSlab`
           // keeps this working even against a test/mocked hook that doesn't supply
           // `stuckSlabs`.
+          // A chain resume's guard for another slab must not survive into this local resume, whether or not
+          // the keypair below is found (#3267 review).
+          clearChainResume?.();
           const matched = stuckSlabs?.find((s) => s.publicKey.toBase58() === slabAddress) ?? stuckSlab;
           if (matched?.keypair && matched.publicKey.toBase58() === slabAddress) {
             restoreSlabKeypair(matched.keypair, slabAddress);
           }
+          // A local resume replaces any chain resume: never apply another market's pinned parameters.
+          setChainResume(null);
+          setChainResumeError(null);
           // Set resumeFromStep so handleLaunch skips slab creation and resumes correctly.
           setResumeFromStep(fromStep);
           setResumeSlab(slabAddress);
@@ -1245,13 +1368,17 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
                   past Step 1 (e.g. resuming after LP init or deposit already landed). */}
               {resumeFromStep === 0
                 ? "Re-enter your parameters to retry market initialization."
-                : `The market is set up through step ${resumeFromStep} of 6. Re-enter your parameters to resume from where you left off.`}
+                : chainResume
+                  ? `Rebuilt from the chain and checked against this launch's signed registration. It resumes at step ${resumeFromStep} of 6 and skips what already landed. Continue to review and launch.`
+                  : `The market is set up through step ${resumeFromStep} of 6. Re-enter your parameters to resume from where you left off.`}
             </span>
           </div>
           <button
             type="button"
             onClick={() => {
               setResumeFromStep(null);
+              setChainResume(null);
+              setChainResumeError(null);
               resetCreate();
             }}
             className="flex-shrink-0 text-[10px] text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors px-2 py-1 border border-[var(--border)]"
@@ -1260,6 +1387,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
           </button>
         </div>
       )}
+
+      <ChainResumeNotice message={chainResumeError} />
 
       {/* Progress indicator */}
       <WizardProgress
@@ -1323,6 +1452,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             lpExposureBps={clampLpExposureBps(wizard.lpExposureBps)}
             onLpExposureChange={(bps) => setWizard((prev) => ({ ...prev, lpExposureBps: clampLpExposureBps(bps) }))}
             p3={p3WizardEnabled()}
+            // While the lookup is still resolving the readout says "Resolving…", not "No supported pool".
+            registrable={registrable || !oracleSettled}
+            notRegistrableReason={notRegistrableReason}
             juniorFloorBps={wizard.juniorFloorBps ?? DEFAULT_JUNIOR_FLOOR_BPS}
             onJuniorFloorChange={(bps) => setWizard((prev) => ({ ...prev, juniorFloorBps: bps }))}
             onLaunch={handleLaunch}
@@ -1344,6 +1476,15 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             juniorAtoms={parseHumanAmount(wizard.lpCollateral || "0", wizard.tokenMeta?.decimals ?? 6)}
             collateralDecimals={6}
             collateralSymbol={collateralSymbol}
+          />
+        )}
+        {/* Devnet v2.2: price protection / holding fee / bond (flag-gated, needs the growth block). */}
+        {wizard.step === 2 && v22Plan?.available && (
+          <V22LaunchOptions
+            value={wizard.v22 ?? {}}
+            onChange={(v22) => setWizard((prev) => ({ ...prev, v22 }))}
+            plan={v22Plan}
+            symbol={wizard.tokenMeta?.symbol ?? "token"}
           />
         )}
       </div>

@@ -6,6 +6,7 @@ import { parsePortfolioV17 } from "@percolatorct/sdk";
 import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { connectionQuoteDeps, quoteConvertible, type ConvertQuote } from "@/lib/convert-released-pnl";
+import { parsePortfolio } from "@/lib/v22/layout";
 
 /**
  * Released profit the program would move into capital right now (ConvertReleasedPnl, tag 28),
@@ -39,7 +40,7 @@ export function useConvertibleProfit(
         const info = await connection.getAccountInfo(portfolioPk, "confirmed");
         if (!info || cancelled) return;
         const data = new Uint8Array(info.data);
-        if (!parsePortfolioV17(data).owner.equals(publicKey)) return;
+        if (!parsePortfolio(data).owner.equals(publicKey)) return;
         const q = await quoteConvertible(
           { programId, owner: publicKey, market: new PublicKey(slabAddress), portfolio: portfolioPk, portfolioData: data },
           connectionQuoteDeps(connection, publicKey),

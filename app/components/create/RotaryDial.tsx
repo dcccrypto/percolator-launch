@@ -30,7 +30,7 @@ const A1 = Math.PI * 2.25;
  * A machined rotary dial — the Control Room's primary control.
  *
  * There is deliberately NO pointer/touch drag: it was laggy and is gone. Input
- * is scroll (wheel/trackpad), arrow keys / Home / End, and tap-able − / +
+ * is scroll (wheel/trackpad, once the dial is focused), arrow keys / Home / End, and tap-able − / +
  * step buttons (so touch devices with no wheel or keyboard stay operable).
  * Values snap to `step` detents, and each detent crossed fires a short tick
  * pulse so the control feels notched rather than continuous.
@@ -237,6 +237,12 @@ export const RotaryDial: FC<RotaryDialProps> = ({
   // adjusts the dial and the page holds still while the pointer is over it. The
   // handler reads the latest value/step/commit from a ref so it subscribes once
   // instead of re-adding the listener on every detent.
+  //
+  // Only while the dial has focus (a click or Tab puts it there). A wheel event
+  // that merely passes over the dial while the user scrolls the page must scroll
+  // the page and leave the value alone: the unfocused version stopped the page
+  // under the pointer and stepped the dial down once per notch, so scrolling down
+  // to HOLD TO LAUNCH could take Liquidity from 1,500 to its 100 minimum unseen.
   const wheelLatest = useRef({ value, step, disabled, commit });
   wheelLatest.current = { value, step, disabled, commit };
   useEffect(() => {
@@ -245,6 +251,7 @@ export const RotaryDial: FC<RotaryDialProps> = ({
     const onWheel = (e: WheelEvent) => {
       const s = wheelLatest.current;
       if (s.disabled) return;
+      if (el.ownerDocument.activeElement !== el) return;
       e.preventDefault();
       s.commit(s.value + (e.deltaY < 0 ? s.step : -s.step));
     };
@@ -304,7 +311,7 @@ export const RotaryDial: FC<RotaryDialProps> = ({
           −
         </button>
       <div
-        className="min-w-[74px] rounded-[2px] border border-[var(--border)] bg-[#07080d] px-2 py-1 text-center transition-colors duration-100"
+        className="min-w-[74px] rounded-[2px] border border-[var(--border)] bg-[var(--dial-readout-bg)] px-2 py-1 text-center transition-colors duration-100"
         style={{
           boxShadow: ticking
             ? "inset 0 1px 3px rgba(0,0,0,0.9), 0 0 10px rgba(153,69,255,0.35)"
@@ -312,7 +319,7 @@ export const RotaryDial: FC<RotaryDialProps> = ({
         }}
       >
         <div
-          className="text-[13px] leading-none text-[var(--text)]"
+          className="text-[13px] leading-none text-[var(--dial-readout-text)]"
           style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
         >
           {format(value)}

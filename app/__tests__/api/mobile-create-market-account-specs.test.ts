@@ -27,6 +27,8 @@
  * and that survives the round trip intact.
  */
 
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { ACCOUNTS_CREATE_LP_VAULT_V22 } from "@/lib/v22/sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Connection, Keypair, PublicKey, Transaction } from '@solana/web3.js';
 import { getAssociatedTokenAddress } from '@solana/spl-token';
@@ -106,7 +108,8 @@ const SPEC_BY_TAG: Record<number, { spec: AccountSpecEntry[]; label: string }> =
   [IX_TAG.DepositCollateral]: { spec: ACCOUNTS_DEPOSIT_COLLATERAL, label: 'DepositCollateral' },
   [IX_TAG.PermissionlessCrank]: { spec: ACCOUNTS_PERMISSIONLESS_CRANK_BASE, label: 'PermissionlessCrank' },
   [IX_TAG.TopUpInsurance]: { spec: ACCOUNTS_TOPUP_INSURANCE, label: 'TopUpInsurance' },
-  [IX_TAG.CreateLpVault]: { spec: ACCOUNTS_CREATE_LP_VAULT, label: 'CreateLpVault' },
+  // v2.2 (flag on): the seven-account form (the collateral mint at [6]); flag off the installed SDK's six.
+  [IX_TAG.CreateLpVault]: { spec: isDevnetV22Enabled() ? ACCOUNTS_CREATE_LP_VAULT_V22 : ACCOUNTS_CREATE_LP_VAULT, label: 'CreateLpVault' },
   [IX_TAG.DepositToLpVault]: { spec: ACCOUNTS_LP_VAULT_DEPOSIT, label: 'DepositToLpVault' },
   [IX_TAG.SetMatcherConfig]: { spec: ACCOUNTS_SET_MATCHER_CONFIG, label: 'SetMatcherConfig' },
   [IX_TAG.InitMatcherCtx]: { spec: ACCOUNTS_INIT_MATCHER_CTX, label: 'InitMatcherCtx' },

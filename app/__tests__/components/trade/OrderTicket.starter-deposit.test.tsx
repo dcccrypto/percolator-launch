@@ -51,6 +51,7 @@ vi.mock("@/components/ConnectButton", () => ({ ConnectButton: () => null }));
 
 import { OrderTicket } from "@/components/trade/OrderTicket";
 import { FirstTradeDepositError } from "@/lib/first-trade";
+import { recordFillResult } from "@/lib/limits/fill-check";
 
 const SLAB = "CjdnH8fTmxNMsuUevBt9VjSi87E3ESTcuWuoSrjUjvXE";
 const MINT = new PublicKey("So11111111111111111111111111111111111111112");
@@ -133,6 +134,19 @@ describe("first trade, one approval", () => {
     fireEvent.change(screen.getByTestId("deposit-amount-input"), { target: { value: "1" } });
     expect(screen.getByTestId("first-trade-deposit-too-small")).toBeTruthy();
     expect(submit().disabled).toBe(true);
+  });
+
+  // fund-and-trade records the fill it measured (useFirstTrade -> recordFillResult), not a position
+  // change: a first trade (no position) reads as an open of the MEASURED size, not the requested one.
+  it("the first fund-and-trade says what filled: an open of the measured size", async () => {
+    mocks.fund.mockResolvedValueOnce({ signature: "sigFirst" });
+    recordFillResult("sigFirst", { kind: "partial", filledQ: 2_000_000n });
+    render(<OrderTicket slabAddress={SLAB} />);
+    await waitFor(() => expect(screen.queryByTestId("trade-submit")).not.toBeNull());
+    size("5");
+    await place();
+    await waitFor(() => expect(screen.getByTestId("status-line-body").textContent).toMatch(/^Opened 2 of 5 /));
+    expect(screen.getByTestId("status-line-body").textContent).toMatch(/The market had room for part of your order\.$/);
   });
 
   it("a failed deposit leg is shown, with the next step (never swallowed)", async () => {

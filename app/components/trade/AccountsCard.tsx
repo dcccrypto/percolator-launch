@@ -6,8 +6,9 @@ import { useEngineState } from "@/hooks/useEngineState";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { formatTokenAmount, formatUsdPriceE6, formatPnl, shortenAddress } from "@/lib/format";
-import { AccountKind, computeMarkPnl } from "@percolatorct/sdk";
-import { computeLiqPrice, computeMarkPnlCollateral } from "@/lib/trading";
+import { formatLotPriceE6, formatLotQ, lotExpOf } from "@/lib/v22/lot";
+import { AccountKind } from "@percolatorct/sdk";
+import { computeLiqPrice, computeMarkPnlLinear } from "@/lib/trading";
 import { LIQ_PRICE_UNLIQUIDATABLE } from "@/lib/format";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { isSentinelValue } from "@/lib/health";
@@ -35,7 +36,9 @@ interface AccountRow {
 }
 
 export const AccountsCard: FC = () => {
-  const { accounts, config: mktConfig, loading } = useSlabState();
+  const { accounts, config: mktConfig, loading, raw: slabRawForLot } = useSlabState();
+  // v2.2 lot markets: positions in LOTS, prices per LOT; shown as tokens / per-token prices (lib/v22/lot.ts).
+  const lotExp = lotExpOf(slabRawForLot);
   const { params } = useEngineState();
   const { priceE6: livePriceE6 } = useLivePrice();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
@@ -76,9 +79,8 @@ export const AccountsCard: FC = () => {
       const safePnl = account.pnl !== undefined && !isSentinelValue(account.pnl) ? account.pnl : 0n;
       const hasValidMark = oraclePrice > 0n;
       // Two sources, two units:
-      //  - computeMarkPnl (entry known) returns the "coin-margined" native
-      //    scale — NOT collateral — so it goes through computeMarkPnlCollateral
-      //    (mirrors PositionsDock / AccountRiskSidebar / ClosePositionModal).
+      //  - entry known: collateral PnL in one floor division (computeMarkPnlLinear, as
+      //    the engine credits it; native-then-collateral truncated dust to 0).
       //  - the on-chain account.pnl fallback (no entry) is ALREADY collateral
       //    atoms: the engine adds it straight to capital
       //    (`account_haircut_equity`: capital + pnl), the SDK types it "P&L in
@@ -86,7 +88,7 @@ export const AccountsCard: FC = () => {
       //    collateral. Converting it again multiplied it by the mark (a $5 PnL
       //    on a $118 market rendered as $590 and sorted the leaderboard on it).
       const computedPnl = account.positionSize !== 0n && hasValidMark && account.entryPrice > 0n
-        ? computeMarkPnlCollateral(computeMarkPnl(account.positionSize, account.entryPrice, oraclePrice), oraclePrice)
+        ? computeMarkPnlLinear(account.positionSize, account.entryPrice, oraclePrice)
         : safePnl;
       const liqDisplay = describeLiqPrice({
         liqPriceE6: liqPrice,
@@ -95,6 +97,7 @@ export const AccountsCard: FC = () => {
         markPriceE6: oraclePrice,
         maintenanceMarginBps: maintBps,
         hasResolvedEntry: (account.entryPrice ?? 0n) > 0n,
+        ...(lotExp > 0 ? { formatPrice: (e6: bigint) => formatLotPriceE6(e6, lotExp) } : {}),
       });
       // liqHealthPct is a DISTANCE-to-liquidation figure and defaults to 100 when
       // there is no liquidation price to be distant from. Beside a "20% mgn" cell
@@ -108,7 +111,7 @@ export const AccountsCard: FC = () => {
           : liqHealthPct;
       return { idx, kind: account.kind, owner: account.owner.toBase58(), direction, positionSize: account.positionSize ?? 0n, entryPrice: account.entryPrice ?? 0n, liqPrice, liqHealthPct, liqDisplay, pnl: computedPnl, capital: account.capital ?? 0n, marginPct };
     });
-  }, [accounts, maintBps, oraclePrice]);
+  }, [accounts, maintBps, oraclePrice, lotExp]);
 
   // Filter out LP accounts from user-facing lists — LPs are internal counterparties,
   // not user positions. Showing them confuses users (e.g., "7JVQ SHORT $606 liq price").
@@ -218,10 +221,10 @@ export const AccountsCard: FC = () => {
                     )}
                     {isOpenLike && (
                       <td className={`whitespace-nowrap px-2 py-1.5 text-right ${row.positionSize > 0n ? "text-[var(--long)]" : row.positionSize < 0n ? "text-[var(--short)]" : "text-[var(--text-secondary)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-                        {row.positionSize !== 0n ? formatTokenAmount(absPos, decimals) : "-"}
+                        {row.positionSize !== 0n ? formatLotQ(absPos, decimals, lotExp) : "-"}
                       </td>
                     )}
-                    {isOpenLike && <td className="whitespace-nowrap px-2 py-1.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{row.entryPrice > 0n ? formatUsdPriceE6(row.entryPrice) : "-"}</td>}
+                    {isOpenLike && <td className="whitespace-nowrap px-2 py-1.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{row.entryPrice > 0n ? formatLotPriceE6(row.entryPrice, lotExp) : "-"}</td>}
                     {isOpenLike && (
                       <td className="whitespace-nowrap px-2 py-1.5 text-right">
                         {row.positionSize !== 0n ? (

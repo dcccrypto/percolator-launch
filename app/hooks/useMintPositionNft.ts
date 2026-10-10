@@ -6,8 +6,7 @@ import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync, ASSOCIATED_TOKEN_
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { assertKnownProgram } from "@/lib/programAllowlist";
-import { sendTx } from "@/lib/tx";
-import { assertSuccessfulConfirmation } from "@/lib/transaction-confirmation";
+import { broadcastSignedTx } from "@/lib/tx";
 import { humanizeError } from "@/lib/errorMessages";
 import { plainMessage } from "@/lib/limits/user-message";
 import { useToast } from "@/hooks/useToast";
@@ -19,9 +18,8 @@ import {
   deriveExtraAccountMetas,
   deriveNftRegistry,
   encodeNftMint,
-  parsePortfolioV17,
-  isV17Account,
 } from "@percolatorct/sdk";
+import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 
 export function useMintPositionNft(slabAddress: string) {
   const { publicKey: walletPubkey } = useWalletCompat();
@@ -52,7 +50,7 @@ export function useMintPositionNft(slabAddress: string) {
 
       const slabPk = new PublicKey(slabAddress);
       const nftProgId = PERCOLATOR_NFT_PROGRAM_ID;
-      const isV17 = raw != null && raw.length > 0 && isV17Account(raw);
+      const isV17 = raw != null && raw.length > 0 && isWrapperAccount(raw);
 
       // ── Find the user's portfolio and active leg ──────────────────────────
       // v17: portfolio is a standalone account; we need the marketId from the
@@ -94,7 +92,7 @@ export function useMintPositionNft(slabAddress: string) {
         // Defense-in-depth: re-verify the mutable owner actually matches after
         // fetch — memcmp filters are advisory server-side; don't trust them
         // blindly (mirrors useDeposit/usePositionNft's re-verify).
-        const pf = parsePortfolioV17(new Uint8Array(nonLpPortfolios[0].account.data));
+        const pf = parsePortfolio(new Uint8Array(nonLpPortfolios[0].account.data));
         if (!pf.owner.equals(walletPubkey)) {
           throw new Error("No portfolio found for your wallet on this market. Deposit collateral first.");
         }
@@ -182,7 +180,7 @@ export function useMintPositionNft(slabAddress: string) {
       tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100_000 }));
       tx.add(ix);
 
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+      const { blockhash } = await connection.getLatestBlockhash("confirmed");
       tx.recentBlockhash = blockhash;
       tx.feePayer = walletPubkey;
 
@@ -215,18 +213,12 @@ export function useMintPositionNft(slabAddress: string) {
       // Privy may have stripped the keypair sig — re-add it
       signed.partialSign(nftMintKeypair);
 
-      // Send — skipPreflight since we already simulated above
-      const sig = await connection.sendRawTransaction(signed.serialize(), {
-        skipPreflight: true,
-        maxRetries: 5,
-      });
-
-      // Wait for confirmation with blockhash-based expiry
-      // skipPreflight: confirmTransaction also resolves for a tx that landed and failed.
-      assertSuccessfulConfirmation(
-        await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed"),
-        "Position NFT mint",
-      );
+      // Send (skipPreflight: simulated above) and confirm by polling the signature status, the
+      // same path sendTx uses. Blockheight-bound confirmTransaction() throws "block height
+      // exceeded" whenever its subscription misses the landing, with no final status check, and
+      // that reads as "The network was slow. Nothing was sent." for a wrap that landed.
+      // pollConfirmation still throws for a tx that landed and failed on-chain (#2994).
+      const sig = await broadcastSignedTx(connection, signed, { skipPreflight: true });
 
       // Force an immediate slab re-poll so useUserAccount/usePositionNft re-scan
       // and the UI reflects the just-minted NFT without waiting for the next

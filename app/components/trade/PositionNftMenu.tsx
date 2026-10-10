@@ -9,6 +9,7 @@
  * unwrapped leg; send / unwrap act on the NFT actually held, self-minted or received).
  * ClosedPositionNftNotice covers the one case the row menu can't: a wrapped position that closed, which has no row.
  */
+import { formatLotQ, lotExpOf } from "@/lib/v22/lot";
 import { type FC, useEffect, useRef, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { usePositionNft } from "@/hooks/usePositionNft";
@@ -38,6 +39,10 @@ export const NFT_MENU_COPY = {
   closeWrapped: "Unwrap to close this position",
   /** The dock's wrapped-position banner: names the ⋯ button and this menu's Unwrap item. */
   wrappedHint: "Wrapped in Position NFT — Unwrap it from the ⋯ menu to close",
+  /** The order ticket's Close tab when this market's position is wrapped (the ticket can't close it). */
+  closeTabTitle: "Position wrapped as an NFT",
+  closeTabBody: (side: "long" | "short") =>
+    `Your ${side} on this market is held in a Position NFT, so it can't be closed here. Unwrap it from the ⋯ menu on its row in Positions, then close it.`,
   heldElsewhere: "Held as an NFT by another wallet",
   closedTitle: "Your NFT-wrapped position has closed",
   closedBody: "Unwrap the NFT to get back any collateral left in it.",
@@ -167,19 +172,26 @@ export const PositionNftMenuView: FC<PositionNftMenuViewProps> = ({ canWrap, isW
   );
 };
 
-/** The container: PositionNftPanel's hooks and eligibility, behind the row menu. */
-export const PositionNftMenu: FC<{ slabAddress: string }> = ({ slabAddress }) => {
+/** The container: PositionNftPanel's hooks and eligibility, behind the row menu.
+ *  Audit #40: `row` binds the menu to the row it sits on when the wallet holds
+ *  BOTH an owned and a wrapped position on one market — "own" offers only Wrap
+ *  (never Send/Unwrap aimed at the hidden wrapped position), "wrapped" offers
+ *  only Send/Unwrap. Omitted = the legacy merged behavior. */
+export const PositionNftMenu: FC<{ slabAddress: string; row?: "own" | "wrapped" }> = ({ slabAddress, row }) => {
   const userAccount = useUserAccount();
   const { hasMintedNft, nftMint, nftPdaAddress } = usePositionNft(slabAddress);
   const { mint: mintNft, loading: mintLoading, error: mintError } = useMintPositionNft(slabAddress);
-  const wrapped = useNftWrappedPosition(slabAddress, true);
-  const isNftPresent = hasMintedNft || wrapped !== null;
+  const wrappedScan = useNftWrappedPosition(slabAddress, true);
+  const wrapped = row === "own" ? null : wrappedScan;
+  // Unscoped on purpose: it also clears `pendingMint` below, and a mint's NFT
+  // may first surface via either source regardless of which row this menu is on.
+  const isNftPresent = hasMintedNft || wrappedScan !== null;
   const effectiveNftMint = wrapped?.nftMint ?? nftMint;
   const effectiveNftPdaAddress = wrapped?.nftPda.toBase58() ?? nftPdaAddress;
   const nftOverride = effectiveNftMint && effectiveNftPdaAddress ? { nftMint: effectiveNftMint, nftPdaAddress: effectiveNftPdaAddress } : undefined;
   const { burn, loading: burnLoading, error: burnError } = useBurnPositionNft(slabAddress, nftOverride);
   const { transfer, loading: transferLoading, error: transferError } = useTransferPositionNft(slabAddress, nftOverride && { nftMint: nftOverride.nftMint });
-  const { config } = useSlabState();
+  const { config, raw: slabRaw } = useSlabState();
   const meta = useTokenMeta(config?.collateralMint ?? null);
   const decimals = meta?.decimals ?? 6;
   const collateralSymbol = meta?.symbol ?? "USDC";
@@ -191,12 +203,12 @@ export const PositionNftMenu: FC<{ slabAddress: string }> = ({ slabAddress }) =>
     if (isNftPresent) setPendingMint(false);
   }, [isNftPresent]);
 
-  const own = userAccount !== null && userAccount.account.positionSize !== 0n ? userAccount : null;
+  const own = row !== "wrapped" && userAccount !== null && userAccount.account.positionSize !== 0n ? userAccount : null;
   const effective = wrapped ?? own;
   const mintAddress = effectiveNftMint?.toBase58() ?? null;
   const summary =
     effective && effective.account.positionSize !== 0n
-      ? `${effective.account.positionSize > 0n ? "LONG" : "SHORT"} ${formatTokenAmount(effective.account.positionSize < 0n ? -effective.account.positionSize : effective.account.positionSize, decimals)} ${assetSymbol}`
+      ? `${effective.account.positionSize > 0n ? "LONG" : "SHORT"} ${formatLotQ(effective.account.positionSize < 0n ? -effective.account.positionSize : effective.account.positionSize, decimals, lotExpOf(slabRaw))} ${assetSymbol}`
       : "No open position";
   const collateralLabel = own ? `${formatTokenAmount(own.account.capital, decimals)} ${collateralSymbol}` : `the ${collateralSymbol}`;
   const busy = mintLoading || pendingMint ? "wrap" : transferLoading ? "send" : burnLoading ? "unwrap" : null;
@@ -205,7 +217,7 @@ export const PositionNftMenu: FC<{ slabAddress: string }> = ({ slabAddress }) =>
     <>
       <PositionNftMenuView
         canWrap={own !== null && !pendingMint}
-        isWrapped={isNftPresent}
+        isWrapped={row === "own" ? false : isNftPresent}
         collateralLabel={collateralLabel}
         busy={busy}
         error={mintError || burnError || transferError}

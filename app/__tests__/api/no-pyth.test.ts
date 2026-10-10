@@ -194,16 +194,19 @@ describe("/api/prices/[slab]: 24h stats from GeckoTerminal, never Pyth Benchmark
       calls.push(url);
       if (url.includes(`/api/markets/${SLAB}`)) return new Response(JSON.stringify({ market: { dex_pool_address: POOL } }), { status: 200 });
       if (url.includes("api.geckoterminal.com")) {
-        // newest first: [ts, o, h, l, c, v]
-        const ohlcv_list = [[2, 110, 120, 105, 115, 1], [1, 100, 112, 95, 110, 1]];
+        // newest first: [ts, o, h, l, c, v], both inside the last 24h
+        const t = Math.floor(Date.now() / 1000);
+        const ohlcv_list = [[t - 3600, 110, 120, 105, 115, 1], [t - 7200, 100, 112, 95, 110, 1]];
         return new Response(JSON.stringify({ data: { attributes: { ohlcv_list } } }), { status: 200 });
       }
       return new Response("unexpected", { status: 599 });
     }));
     const res = await pricesGET(new NextRequest(`http://localhost/api/prices/${SLAB}`), { params: Promise.resolve({ slab: SLAB }) });
     expect(res.status).toBe(200);
-    const { stats } = (await res.json()) as { stats: { change24h: number; high24h: string; low24h: string } | null };
-    expect(stats).toEqual({ change24h: 15, high24h: "120000000", low24h: "95000000" });
+    const { stats } = (await res.json()) as { stats: { change24h: number; high24h: string; low24h: string; series?: number[] } | null };
+    // `series` = the closes over the stats window, oldest to newest (the landing rail's mini chart):
+    // the 24h-ago reference bar's close (110) then the newer bar's close (115).
+    expect(stats).toEqual({ change24h: 15, high24h: "120000000", low24h: "95000000", series: [110, 115] });
     expect(calls.some((u) => u.includes(`/pools/${POOL}/ohlcv/hour`))).toBe(true);
     expect(calls.some((u) => /pyth/i.test(u))).toBe(false);
   });

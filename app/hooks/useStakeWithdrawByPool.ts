@@ -17,6 +17,9 @@ import {
   createAssociatedTokenAccountInstruction,
 } from '@solana/spl-token';
 import { sendTx } from '@/lib/tx';
+import { isDevnetV22Enabled } from '@/lib/v22/flag';
+import { readFirstLossPool } from '@/lib/v22/stake-v5';
+import { ACCOUNTS_STAKE_WITHDRAW_V5, deriveInsuranceUnitsV22, stakeMetasV5 } from '@/lib/v22/sdk';
 import { getConfig } from '@/lib/config';
 
 export interface StakeWithdrawPoolParams {
@@ -146,7 +149,24 @@ export function useStakeWithdrawByPool({ slabAddress, collateralMint }: StakeWit
 
         // Build stake withdraw instruction
         const data = Buffer.from(encodeStakeWithdraw(lpAmount));
-        const keys = withdrawAccounts({
+        // Devnet v2.2 (flag-gated): a first-loss v5 pool takes the 14-account withdraw (market + insurance units +
+        // wrapper program). Pays only from the pool's liquid part; the program refuses more with 36.
+        const v5 = isDevnetV22Enabled() ? readFirstLossPool(new Uint8Array(poolInfo.data)) : null;
+        const keys = v5
+          ? stakeMetasV5(ACCOUNTS_STAKE_WITHDRAW_V5, {
+              user: wallet.publicKey,
+              pool,
+              userLp: userLpAta,
+              lpMint,
+              vault,
+              userCollateral: userCollateralAta,
+              vaultAuthority: vaultAuth,
+              deposit: depositPda,
+              market: v5.slab,
+              insuranceUnits: deriveInsuranceUnitsV22(v5.percolatorProgram, v5.slab)[0],
+              wrapperProgram: v5.percolatorProgram,
+            })
+          : withdrawAccounts({
           user: wallet.publicKey,
           pool,
           userLpAta,

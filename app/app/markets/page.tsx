@@ -1,5 +1,9 @@
 "use client";
 
+import { resolveDiscoveredPriceE6 } from "@/lib/discovered-price";
+import { useMarketLotExps } from "@/hooks/useMarketLotExp";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { lotPriceToTokenE6 } from "@/lib/v22/lot";
 import { baseSymbol } from "@/lib/symbol-utils";
 import { getConfig } from "@/lib/config";
 import { isMoveFlowEnabled } from "@/lib/v21/move/flag";
@@ -8,7 +12,7 @@ import { V1CloseOnlyBadge } from "@/components/move/V1CloseOnlyNotice";
 import { useEffect, useState, useMemo, useRef, Suspense } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { useConnectionCompat } from "@/hooks/useWalletCompat";
+import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { prefetchSlab, prefetchSlabsBatch } from "@/lib/slabCache";
 import { numericToBigInt, openInterestOf, isSupabaseSentinel } from "@/lib/supabase-numeric";
 import { setMarketIdentity } from "@/lib/marketIdentityCache";
@@ -39,7 +43,7 @@ import { LiveRowPrice } from "@/components/market/LiveRowPrice";
 import { formatStatValue } from "@/lib/format";
 import { qToUsd, Q_DECIMALS, rowVolumeUsd } from "@/lib/q-usd";
 import { MIN_VAULT_FOR_OI } from "@/lib/phantom-oi";
-import { isListedMarketRow, MAX_SANE_PRICE_USD } from "@/lib/listed-markets";
+import { isListedMarketRow, isOwnAwaitingPriceRow, MAX_SANE_PRICE_USD } from "@/lib/listed-markets";
 
 
 /** GH#1483: Upper bound for UI leverage display. The Solana program enforces margin
@@ -73,19 +77,6 @@ interface MergedMarket {
   isAdminOracle: boolean;
   onChain: DiscoveredMarket | null;  // null for Supabase-only markets not yet discovered on-chain
   supabase: MarketWithStats | null;
-}
-
-/** Resolve the display price (E6) for a discovered market, oracle-mode aware.
- *  v17 market group accounts carry no v12 config — the keeper-updated mark
- *  (configV17.markEwmaE6) is the price source, the same mapping SlabProvider
- *  uses for lastEffectivePriceE6 on v17 markets. Returns 0n when no on-chain
- *  price source exists (e.g. partial mock objects). */
-function resolveDiscoveredPriceE6(oc: DiscoveredMarket): bigint {
-  if (oc.configV17) {
-    return applyInvert(sanitizePriceE6(oc.configV17.markEwmaE6), oc.configV17.invert);
-  }
-  if (!oc.config?.indexFeedId) return 0n;
-  return resolveMarketPriceE6(oc.config);
 }
 
 function isPlaceholderMarketSymbol(sym: string | null | undefined, addresses: Array<string | null | undefined>): boolean {
@@ -182,7 +173,10 @@ function MarketsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { connection } = useConnectionCompat();
+  const walletBase58 = useWalletCompat().publicKey?.toBase58() ?? null;
   const { markets: discovered, loading: discoveryLoading, error: discoveryError } = useMarketDiscovery();
+  const lotExps = useMarketLotExps(useMemo(() => discovered.map((d) => d.slabAddress.toBase58()), [discovered]));
+  const lotOf = (oc: DiscoveredMarket): number | null => (lotExps.has(oc.slabAddress.toBase58()) ? lotExps.get(oc.slabAddress.toBase58()) ?? null : isDevnetV22Enabled() ? null : 0);
   const { statsMap, loading: statsLoading, error: statsError } = useAllMarketStats();
 
   const loadErrorMessage = useMemo(() => {
@@ -398,13 +392,26 @@ function MarketsPageInner() {
       // but not the API total, causing a 2-market discrepancy (170 vs 168).
       // GH#1531: Show all non-zombie Supabase markets — counter matches /api/markets total.
       // isListedMarketRow is shared with the landing rail (blocklist + zombie, coerced).
-      if (m.supabase) return isListedMarketRow(m.slabAddress, m.supabase);
+      if (m.supabase) {
+        // The creator's own market whose live price is not connected yet is shown to the creator
+        // only (lib/listed-markets.ts isOwnAwaitingPriceRow); everyone else still never sees it.
+        return isListedMarketRow(m.slabAddress, m.supabase) || isOwnAwaitingPriceRow(m.slabAddress, m.supabase, walletBase58);
+      }
 
       // GH#1346: On-chain-only markets (no Supabase stats) are NOT shown —
       // /api/markets only sees Supabase data, so including them inflates the count.
       return false;
     });
-  }, [effectiveMarkets]);
+  }, [effectiveMarkets, walletBase58]);
+
+  // Slabs shown only because the viewer launched them and their price is not connected yet.
+  const awaitingOwnPrice = useMemo(() => {
+    const out = new Set<string>();
+    for (const m of activeMarkets) {
+      if (m.supabase && isOwnAwaitingPriceRow(m.slabAddress, m.supabase, walletBase58)) out.add(m.slabAddress);
+    }
+    return out;
+  }, [activeMarkets, walletBase58]);
 
   // Cap bogus prices: if a resolved price is above $1M per unit it's almost certainly
   // a display error from corrupted on-chain data. We clamp in the display layer.
@@ -457,7 +464,7 @@ function MarketsPageInner() {
     // Markets with no valid price return 0 so they sort to the bottom in USD mode.
     // Fixes #1327: no-price markets with huge raw token OI were floating above real USD markets.
     const getOIUsdSortKey = (m: MergedMarket): number => {
-      const onChainPriceE6 = m.onChain ? resolveDiscoveredPriceE6(m.onChain) : 0n;
+      const onChainPriceE6 = m.onChain ? resolveDiscoveredPriceE6(m.onChain, lotOf(m.onChain)) : 0n;
       const rawPrice = m.supabase?.last_price ?? priceE6ToUsd(onChainPriceE6);
       const price = rawPrice != null && rawPrice > 0 && rawPrice <= MAX_SANE_PRICE_USD ? rawPrice : null;
       if (price == null) return 0; // no price → sort to bottom
@@ -536,7 +543,7 @@ function MarketsPageInner() {
               return false;
             }
             if (m.onChain) {
-              const priceE6 = resolveDiscoveredPriceE6(m.onChain);
+              const priceE6 = resolveDiscoveredPriceE6(m.onChain, lotOf(m.onChain));
               // Primary: on-chain price is 0 → keeper not cranking
               if (priceE6 === 0n) return true;
               // GH#1646: Secondary: Supabase shows no mark_price + no index_price.
@@ -588,7 +595,7 @@ function MarketsPageInner() {
       }
     });
     return list;
-  }, [effectiveMarkets, debouncedSearch, sortBy, showUsd, tokenMetaMap]);
+  }, [effectiveMarkets, debouncedSearch, sortBy, showUsd, tokenMetaMap, lotExps]);
 
   // P-MED-3: Progressive reveal + intersection observer backup
   // Auto-load items in batches via requestAnimationFrame for instant display.
@@ -678,9 +685,7 @@ function MarketsPageInner() {
               </h1>
               <p className="mt-2 text-[13px] text-[var(--text-secondary)]">perpetual futures, pick your poison.</p>
             </div>
-            <Link href="/create" aria-label="Launch a new market">
-              <GlowButton size="sm">+ LAUNCH MARKET</GlowButton>
-            </Link>
+            <GlowButton href="/create" aria-label="Launch a new market" size="sm">+ LAUNCH MARKET</GlowButton>
           </div>
         </ScrollReveal>
 
@@ -696,7 +701,7 @@ function MarketsPageInner() {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="search token, address, or mint..."
+                placeholder="search token or address..."
                 className="w-full rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] py-2.5 pl-10 pr-4 text-sm text-[var(--text)] placeholder-[var(--text-dim)] focus:border-[var(--accent)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/20"
                 aria-label="Search markets"
               />
@@ -716,7 +721,7 @@ function MarketsPageInner() {
             {/* Sort tabs + market count (mobile) on same row */}
             <div className="flex items-center gap-3 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
               {/* UX WP-10 (§4.8): on phones the sort is one "Sort ▾" select; tabs from md up. */}
-              <label className="md:hidden flex shrink-0 items-center gap-2 text-[11px] text-[var(--text-secondary)]">
+              <label className="md:hidden flex shrink-0 items-center gap-2 text-[11px] pointer-coarse:text-base text-[var(--text-secondary)]">
                 <span>Sort</span>
                 <select
                   data-testid="markets-sort-select"
@@ -848,20 +853,16 @@ function MarketsPageInner() {
                     <GlowButton type="button" onClick={() => window.location.reload()}>
                       reload page
                     </GlowButton>
-                    <Link href="/create">
-                      <GlowButton variant="secondary" size="sm">
-                        launch market
-                      </GlowButton>
-                    </Link>
+                    <GlowButton href="/create" variant="secondary" size="sm">
+                      launch market
+                    </GlowButton>
                   </div>
                 </>
               ) : (
                 <>
                   <h3 data-testid="markets-empty" className="text-2xl font-medium tracking-tight text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>No markets yet — create the first one</h3>
                   <div className="mt-4">
-                    <Link href="/create" data-testid="markets-empty-create">
-                      <GlowButton>Create a market</GlowButton>
-                    </Link>
+                    <GlowButton href="/create" data-testid="markets-empty-create">Create a market</GlowButton>
                   </div>
                 </>
               )}
@@ -896,7 +897,7 @@ function MarketsPageInner() {
 
                   // Price: prefer Supabase, fall back to oracle-mode-aware on-chain price
                   // Cap bogus prices (corrupted on-chain data can produce $4.2T values)
-                  const onChainPriceE6 = m.onChain ? resolveDiscoveredPriceE6(m.onChain) : 0n;
+                  const onChainPriceE6 = m.onChain ? resolveDiscoveredPriceE6(m.onChain, lotOf(m.onChain)) : 0n;
 
                   // GH#1631: Override health to "oracle-down" for ALL markets without a valid
                   // oracle price — regardless of whether we have on-chain capital/insurance data.
@@ -1059,7 +1060,7 @@ function MarketsPageInner() {
                         <MarketLogo logoUrl={m.supabase?.logo_url} mintAddress={logoMintAddress} mainnetCa={m.supabase?.mainnet_ca ?? null} symbol={displaySymbol ?? undefined} size="sm" />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-baseline justify-between gap-2">
-                            <span className="truncate text-sm font-semibold text-[var(--text)]">{displaySymbol ? `${baseSymbol(displaySymbol)}/USD` : shortenAddress(m.slabAddress)}</span>
+                            <span className="truncate text-sm font-semibold text-[var(--text)]">{displaySymbol ? `${baseSymbol(displaySymbol)}/USD` : shortenAddress(m.slabAddress)}{awaitingOwnPrice.has(m.slabAddress) && <span className="ml-1.5 text-[9px] font-medium uppercase tracking-wider text-[var(--warning)]">awaiting live price</span>}</span>
                             {v1Label && <V1CloseOnlyBadge />}
                             <span className="shrink-0 text-sm tabular-nums text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
                               <LiveRowPrice slab={m.slabAddress} fallback={lastPrice} />
@@ -1091,6 +1092,9 @@ function MarketsPageInner() {
                             {displaySymbol ? `${baseSymbol(displaySymbol)}/USD` : shortenAddress(m.slabAddress)}
                           </span>
                           {v1Label && <V1CloseOnlyBadge />}
+                          {awaitingOwnPrice.has(m.slabAddress) && (
+                            <span data-testid="awaiting-live-price" className="shrink-0 border border-[var(--warning)]/30 bg-[var(--warning)]/[0.08] px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider text-[var(--warning)]">awaiting live price</span>
+                          )}
                           {m.isAdminOracle && (
                             <span className="border border-[var(--text-dim)]/30 bg-[var(--text-dim)]/[0.08] px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider text-[var(--text-secondary)]">manual</span>
                           )}
