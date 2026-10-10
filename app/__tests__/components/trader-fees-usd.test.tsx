@@ -30,6 +30,13 @@ describe("trader fees are dollars", () => {
     expect(screen.queryByText("0.000006")).toBeNull();
   });
 
+  // #76: totalVolume is micro-USD too (|size| x USD price), but it rendered as a bare 6-dp number.
+  it("Volume Traded shows the micro-USD total as dollars, like Fees Paid", () => {
+    render(<TradeStatsPanel stats={stats("7030000") as never} loading={false} error={null} />);
+    expect(screen.getByText("$7.7K")).toBeTruthy(); // 7,664.41 USD
+    expect(screen.queryByText(/7664\.4138/)).toBeNull(); // the old bare render, "7664.41383"
+  });
+
   it("the per-fill Fee column shows the USD fee", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ markets: [] }))));
     h.trades = [{
