@@ -111,7 +111,9 @@ const MAINNET_MARKET_DIRECTORY_FALLBACK: Record<string, unknown>[] = [
 // repoints) and the CONFIGURED wrapper id, never from a hard-coded slab that goes stale on a
 // re-seed (it returned the old SOL slab `Azaggu…` with the new program id).
 const DEVNET_ROW_TEMPLATE: Record<string, unknown> = {
-  mint_address: "DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC",
+  // The configured collateral mint (NEXT_PUBLIC_TEST_USDC_MINT, default Sim-USDC DJ54k4…), so a deployment on a
+  // different collateral (the v2.2 preview) does not list its fallback rows in the playground's mint.
+  mint_address: process.env.NEXT_PUBLIC_TEST_USDC_MINT?.trim() || "DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC",
   decimals: 6,
   deployer: null,
   oracle_authority: null,

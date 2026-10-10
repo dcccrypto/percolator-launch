@@ -141,7 +141,8 @@ const NETWORK = process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim() ?? process.env.N
 // failures as non-fatal.
 
 /** sim-USDC — the single collateral mint shared by every playground market. */
-const PLAYGROUND_COLLATERAL_MINT = "DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC";
+const PLAYGROUND_COLLATERAL_MINT =
+  process.env.NEXT_PUBLIC_TEST_USDC_MINT?.trim() || "DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC";
 
 export async function POST(req: NextRequest) {
   if (NETWORK !== "devnet") {

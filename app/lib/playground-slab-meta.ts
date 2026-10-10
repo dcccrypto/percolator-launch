@@ -12,8 +12,13 @@
  * one proven trade+stake. Both backing-bucket domains (asset 0) are seeded to a
  * non-lapsing expiry (u64::MAX/2 = 9223372036854775807) via TopUpBackingBucket at
  * creation. The 2026-07-10 v17 markets on the old wrapper are ABANDONED.
+ *
+ * v2.2 preview: the env-configured market list (NEXT_PUBLIC_V22_MARKETS_JSON, lib/v22/market-meta.ts) is merged in
+ * when the v2.2 flag is on. Flag off it adds nothing, so this table is exactly the static one below.
  */
-export const PLAYGROUND_SLAB_META: Record<string, {
+import { v22MarketMetaFromEnv } from "@/lib/v22/market-meta";
+
+const STATIC_PLAYGROUND_SLAB_META: Record<string, {
   symbol: string;
   name: string;
   mainnet_ca: string;
@@ -33,4 +38,10 @@ export const PLAYGROUND_SLAB_META: Record<string, {
   // wrapper (GnwdeQr...), so listing them showed dead markets. Markets on the fresh wrapper are
   // created in the wizard and listed through on-chain discovery + the registration Blob; add a
   // curated entry here only for a slab OWNED BY THE CURRENT WRAPPER (lib/program-ids.ts).
+};
+
+export const PLAYGROUND_SLAB_META: typeof STATIC_PLAYGROUND_SLAB_META = {
+  ...v22MarketMetaFromEnv(),
+  // Static entries win over an env entry for the same slab.
+  ...STATIC_PLAYGROUND_SLAB_META,
 };
