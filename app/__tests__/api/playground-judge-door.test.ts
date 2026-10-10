@@ -39,8 +39,19 @@ describe("judgeAccessCode", () => {
     ["past its UNTIL", { ...ENV, PLAYGROUND_JUDGE_ACCESS_UNTIL: new Date(NOW - 1).toISOString() }],
     ["exactly at its UNTIL", { ...ENV, PLAYGROUND_JUDGE_ACCESS_UNTIL: new Date(NOW).toISOString() }],
     ["unparseable UNTIL (fail closed)", { ...ENV, PLAYGROUND_JUDGE_ACCESS_UNTIL: "next tuesday" }],
+    ["a bare number UNTIL (Date.parse would read year 99999)", { ...ENV, PLAYGROUND_JUDGE_ACCESS_UNTIL: "99999" }],
+    ["a date-only UNTIL (ambiguous cut-off)", { ...ENV, PLAYGROUND_JUDGE_ACCESS_UNTIL: "2027-12-31" }],
+    ["a zoneless UNTIL (runtime-local time)", { ...ENV, PLAYGROUND_JUDGE_ACCESS_UNTIL: "2027-12-31T23:59:59" }],
   ])("closed when %s", (_n, env) => {
     expect(judgeAccessCode(env as Record<string, string>, NOW)).toBeNull();
+  });
+
+  it("trims the code (a pasted trailing newline must not close the door)", () => {
+    expect(judgeAccessCode({ PLAYGROUND_JUDGE_ACCESS_CODE: JUDGE + "\n" }, NOW)).toBe(JUDGE);
+  });
+
+  it("open before an offset-zoned UNTIL", () => {
+    expect(judgeAccessCode({ ...ENV, PLAYGROUND_JUDGE_ACCESS_UNTIL: "2027-12-31T23:59:59-05:00" }, NOW)).toBe(JUDGE);
   });
 
   it("open before its UNTIL", () => {
@@ -100,12 +111,13 @@ describe("sessionGrantsAccess — judge sessions", () => {
     expect(await sessionGrantsAccess(await judgeSession(), ENV, NOW + SESSION_TTL_SECONDS * 1000)).toBe(false);
   });
 
-  it("do not fall through to the cohort check (pos 1) when the door is closed", async () => {
+  it("do not fall through to the cohort check (pos 1): wrong fingerprint, or the door closed", async () => {
     const forged = await mintSession(JUDGE_SUB_PREFIX + "whatever", 1, SECRET, NOW);
     expect(await sessionGrantsAccess(forged, ENV, NOW)).toBe(false);
+    expect(await sessionGrantsAccess(forged, { PLAYGROUND_ACCESS_SECRET: SECRET }, NOW)).toBe(false);
   });
 
-  it("judge and team fingerprints are domain-separated", async () => {
+  it("a judge-derived fingerprint never passes as a team session", async () => {
     expect(await judgeFingerprint(TEAM)).not.toBe(await teamFingerprint(TEAM));
     const asTeam = await mintSession(TEAM_SUB_PREFIX + (await judgeFingerprint(TEAM)), 1, SECRET, NOW);
     expect(await sessionGrantsAccess(asTeam, ENV, NOW)).toBe(false);

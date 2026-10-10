@@ -431,7 +431,7 @@ export async function middleware(request: NextRequest) {
   // Off unless PLAYGROUND_GATE_ENABLED === "true" (kill switch: unset → this
   // block is a no-op and everything below behaves exactly as before). On: no
   // valid pg_access session cookie (minted by /enter from a percolator.trade
-  // handoff or the team bypass) → pages 307 to /locked, /api/* 401 JSON.
+  // handoff, the team bypass or the judge door) → pages 307 to /locked, /api/* 401 JSON.
   // Exemptions and why each is safe: lib/playground-gate.ts.
   {
     const decision = await gateDecision(

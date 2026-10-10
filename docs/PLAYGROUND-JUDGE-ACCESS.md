@@ -15,7 +15,7 @@ https://<playground host>/enter?judge=<PLAYGROUND_JUDGE_ACCESS_CODE>
 | var | meaning |
 |---|---|
 | `PLAYGROUND_JUDGE_ACCESS_CODE` | ≥ 24 chars. Unset or short = no judge door. Generate with `openssl rand -base64 24 \| tr '+/' '-_' \| tr -d '='`. |
-| `PLAYGROUND_JUDGE_ACCESS_UNTIL` | optional ISO date/time (e.g. `2026-12-31T23:59:59Z`). After it, the door closes **and** every judge session stops working. Unparseable = closed (fail closed). |
+| `PLAYGROUND_JUDGE_ACCESS_UNTIL` | optional full ISO date-time **with a zone** (e.g. `2026-12-31T23:59:59Z`); date-only, zoneless or bare-number values close the door. After it, the door closes **and** every judge session stops working. Unparseable = closed (fail closed). |
 
 ## Properties
 

@@ -200,17 +200,23 @@ export function teamBypassSecret(env: Record<string, string | undefined> = proce
 /**
  * The judge door's code, or null when the door is closed. Closed when the code
  * is unset/short, or when PLAYGROUND_JUDGE_ACCESS_UNTIL (an ISO date/time) is
- * set and has passed — so a hackathon link expires on its own. An unparseable
- * UNTIL also closes it (fail closed, never "open forever" by typo).
+ * set and has passed — so a hackathon link expires on its own. UNTIL must be a
+ * full ISO date-time with an explicit zone (e.g. 2026-12-31T23:59:59Z); anything
+ * else closes the door (fail closed — Date.parse alone would read "99999" as
+ * the year 99999 and a date-only value as 00:00 UTC).
  */
+const ISO_WITH_ZONE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
+
 export function judgeAccessCode(
   env: Record<string, string | undefined> = process.env,
   nowMs = Date.now(),
 ): string | null {
-  const s = env.PLAYGROUND_JUDGE_ACCESS_CODE;
-  if (typeof s !== "string" || s.length < JUDGE_CODE_MIN_LENGTH) return null;
+  // Trimmed: a newline pasted into the dashboard must not silently close the door.
+  const s = env.PLAYGROUND_JUDGE_ACCESS_CODE?.trim();
+  if (!s || s.length < JUDGE_CODE_MIN_LENGTH) return null;
   const until = (env.PLAYGROUND_JUDGE_ACCESS_UNTIL ?? "").trim();
   if (until) {
+    if (!ISO_WITH_ZONE_RE.test(until)) return null;
     const t = Date.parse(until);
     if (!Number.isFinite(t) || nowMs >= t) return null;
   }
