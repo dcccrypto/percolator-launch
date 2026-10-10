@@ -187,6 +187,7 @@ describe('AUDIT: Redis fail-closed security policy', () => {
 
     expect(accepted(res)).toBe(false);
     expect(new URL(res.headers.get('location')!).pathname).toBe('/locked');
+    expect(res.headers.get('set-cookie')).toBeNull();
   });
 
   it('RED-02: missing Redis config must deny handoff', async () => {
@@ -201,5 +202,6 @@ describe('AUDIT: Redis fail-closed security policy', () => {
 
     expect(accepted(res)).toBe(false);
     expect(new URL(res.headers.get('location')!).pathname).toBe('/locked');
+    expect(res.headers.get('set-cookie')).toBeNull();
   });
 });
