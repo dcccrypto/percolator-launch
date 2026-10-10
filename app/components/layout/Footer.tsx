@@ -1,6 +1,6 @@
 "use client";
 
-import { FC, useState } from "react";
+import { FC, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
@@ -8,7 +8,8 @@ import { usePathname } from "next/navigation";
 const CA = "8PzFWyLpCVEmbZmVJcaRTU5r69XKJx1rd7YGpWvnpump";
 
 export const Footer: FC = () => {
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const pathname = usePathname();
   // Mobile overlap fix (375px repro): <Footer> is rendered once, globally,
   // right after <main> (app/layout.tsx) — it's the last normal-flow content
@@ -26,10 +27,17 @@ export const Footer: FC = () => {
   // for the identical stack (keeps the two clearances numerically in sync).
   const isTradePage = pathname?.startsWith("/trade") ?? false;
 
+  // "copied" only once the clipboard write resolves (#81): a refused or missing clipboard said
+  // "copied" too, and the user pasted whatever they had before.
   const copyCA = () => {
-    navigator.clipboard.writeText(CA);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    const show = (s: "copied" | "failed") => {
+      // One timer: a second click's message gets its full 2 s.
+      clearTimeout(resetTimer.current);
+      setCopyState(s);
+      resetTimer.current = setTimeout(() => setCopyState("idle"), 2000);
+    };
+    if (!navigator.clipboard?.writeText) return show("failed");
+    navigator.clipboard.writeText(CA).then(() => show("copied"), () => show("failed"));
   };
 
   return (
@@ -64,15 +72,24 @@ export const Footer: FC = () => {
           <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-5 text-[11px] text-[var(--text-secondary)]">
             <button
               onClick={copyCA}
+              aria-label="Percolator CA: copy the token contract address"
+              title={CA}
               className="group flex items-center gap-1.5 transition-colors hover:text-[var(--text-secondary)]"
             >
+              <span className="text-[10px] text-[var(--text-muted)]">Percolator CA</span>
               <span className="font-mono text-[10px]">
                 {CA.slice(0, 6)}...{CA.slice(-4)}
               </span>
-              <span className="text-[9px] uppercase tracking-wider opacity-60 group-hover:opacity-100">
-                {copied ? "copied" : "copy"}
+              <span
+                className={`text-[9px] uppercase tracking-wider ${copyState === "failed" ? "text-[var(--short)]" : "opacity-60 group-hover:opacity-100"}`}
+              >
+                {copyState === "copied" ? "copied" : copyState === "failed" ? "copy failed" : "copy"}
               </span>
             </button>
+            {/* Outside the button and empty when idle, so only a real result is announced. */}
+            <span className="sr-only" aria-live="polite">
+              {copyState === "copied" ? "Address copied" : copyState === "failed" ? "Copy failed" : ""}
+            </span>
             <span className="h-3 w-px bg-[var(--border)]" />
             <a
               href="https://github.com/dcccrypto/percolator-launch"
