@@ -599,7 +599,9 @@ function TradePageInner({ slab }: { slab: string }) {
             </RenderProfiler>
           </ErrorBoundary>
 
-          <div className="h-[45vh] min-h-[280px] border border-[var(--border)] bg-[var(--panel-bg)]">
+          {/* Height follows the content (was a fixed 45vh: mostly empty with one position, and a second
+              scrollbar inside the page with several). The page scrolls instead; Trades pages at 25 rows. */}
+          <div className="min-h-[160px] border border-[var(--border)] bg-[var(--panel-bg)]">
             <ErrorBoundary label="PositionsDock"><PositionsDock slabAddress={slab} /></ErrorBoundary>
           </div>
 

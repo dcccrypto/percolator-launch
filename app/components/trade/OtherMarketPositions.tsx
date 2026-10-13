@@ -39,6 +39,7 @@ import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
 import { ClosePositionModal } from "./ClosePositionModal";
+import { MOBILE_CARD_ACTIONS, MOBILE_CARD_CELL, MOBILE_CARD_ROW } from "./positionCardClasses";
 import { UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
 import { isEntryKnown, DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL } from "@/lib/entry-price-display";
 import { onChainMarkE6, portfolioPositionPnl } from "@/lib/position-pnl";
@@ -194,8 +195,8 @@ const OtherMarketRow: FC<{
 
   return (
     <>
-      <tr className="border-b border-[var(--border)]/20 transition-colors hover:bg-[var(--accent)]/[0.03]">
-        <td className="whitespace-nowrap px-4 py-2.5 text-left">
+      <tr className={`border-b border-[var(--border)]/20 transition-colors hover:bg-[var(--accent)]/[0.03] ${MOBILE_CARD_ROW}`}>
+        <td className="whitespace-nowrap px-4 py-2.5 text-left max-lg:col-span-2 max-lg:p-0">
           {/* Market cell links to the market — the rest of the row stays
               inert so Close never triggers a navigation. */}
           <Link
@@ -205,12 +206,12 @@ const OtherMarketRow: FC<{
             {displaySymbol}/USD ↗
           </Link>
         </td>
-        <td className="whitespace-nowrap px-3 py-2.5 text-left">
+        <td className="whitespace-nowrap px-3 py-2.5 text-left max-lg:p-0 max-lg:text-right">
           <span className={`inline-block rounded-sm px-1.5 py-0.5 text-[9px] font-bold uppercase ${isLong ? "bg-[var(--long)]/10 text-[var(--long)]" : "bg-[var(--short)]/10 text-[var(--short)]"}`}>
             {isLong ? "LONG" : "SHORT"}
           </span>
         </td>
-        <td className="whitespace-nowrap px-3 py-2.5 text-right" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+        <td data-label="Size" className={`whitespace-nowrap px-3 py-2.5 text-right ${MOBILE_CARD_CELL}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
           <span className="text-[var(--text)]">{formatTokenAmount(abs(posSize), decimals)}</span>
           <span className="ml-1 text-[var(--text-secondary)]">{displaySymbol}</span>
           {sizeUsd && (
@@ -219,14 +220,15 @@ const OtherMarketRow: FC<{
             </div>
           )}
         </td>
-        <td className={`whitespace-nowrap px-3 py-2.5 text-right ${entryKnown ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }} title={entryKnown ? undefined : UNKNOWN_ENTRY_TOOLTIP}>
+        <td data-label="Entry" className={`whitespace-nowrap px-3 py-2.5 text-right ${entryKnown ? "text-[var(--text)]" : "text-[var(--text-dim)]"} ${MOBILE_CARD_CELL}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }} title={entryKnown ? undefined : UNKNOWN_ENTRY_TOOLTIP}>
           {entryKnown ? formatUsdPriceE6(entryE6) : "--"}
         </td>
-        <td className={`whitespace-nowrap px-3 py-2.5 text-right ${hasValidMark ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+        <td data-label="Mark" className={`whitespace-nowrap px-3 py-2.5 text-right ${hasValidMark ? "text-[var(--text)]" : "text-[var(--text-dim)]"} ${MOBILE_CARD_CELL}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
           {hasValidMark ? formatUsdPriceE6(markE6) : "--"}
         </td>
         <td
-          className="whitespace-nowrap px-3 py-2.5 text-right font-medium text-[var(--text-secondary)]"
+          data-label="Liq. Price"
+          className={`whitespace-nowrap px-3 py-2.5 text-right font-medium text-[var(--text-secondary)] ${MOBILE_CARD_CELL}`}
           style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
         >
           <LiqPriceValue display={liqDisplay} />
@@ -236,7 +238,7 @@ const OtherMarketRow: FC<{
             </div>
           )}
         </td>
-        <td className={`whitespace-nowrap px-3 py-2.5 text-right ${hasValidMark && pnlIsKnown ? pnlColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }} title={pnlIsKnown ? undefined : UNKNOWN_ENTRY_TOOLTIP}>
+        <td data-label="PnL" className={`whitespace-nowrap px-3 py-2.5 text-right ${hasValidMark && pnlIsKnown ? pnlColor : "text-[var(--text-dim)]"} ${MOBILE_CARD_CELL}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }} title={pnlIsKnown ? undefined : UNKNOWN_ENTRY_TOOLTIP}>
           {!pnlIsKnown ? (
             <span>--</span>
           ) : hasValidMark ? (
@@ -255,10 +257,10 @@ const OtherMarketRow: FC<{
             <span>--</span>
           )}
         </td>
-        <td className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${hasValidMark && pnlIsKnown ? roeColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+        <td data-label="ROE%" className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${hasValidMark && pnlIsKnown ? roeColor : "text-[var(--text-dim)]"} ${MOBILE_CARD_CELL}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
           {hasValidMark && pnlIsKnown ? formatPercent(roe) : "--"}
         </td>
-        <td className="whitespace-nowrap px-3 py-2.5 text-right">
+        <td className={`whitespace-nowrap px-3 py-2.5 text-right ${MOBILE_CARD_ACTIONS}`}>
           {pos.nftWrapped ? (
             <span
               title="This position is wrapped in a Position NFT. Burn the NFT on its market's trade page to unwrap it, then close."
@@ -279,8 +281,8 @@ const OtherMarketRow: FC<{
         </td>
       </tr>
       {showClose && (
-        <tr>
-          <td colSpan={9} className="p-0">
+        <tr className="max-lg:block">
+          <td colSpan={9} className="p-0 max-lg:block">
             <SlabProvider slabAddress={pos.slabAddress}>
               <CloseFlow
                 pos={pos}
@@ -346,9 +348,9 @@ const OtherMarketPositionsInner: FC<{ currentSlab: string }> = ({ currentSlab })
           {others.length} open position{others.length === 1 ? "" : "s"}
         </span>
       </div>
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-[10px]">
-          <thead>
+      <div className="lg:overflow-x-auto">
+        <table className="min-w-full text-[10px] max-lg:block">
+          <thead className="max-lg:hidden">
             <tr className="border-b border-[var(--border)]/30 text-[8px] uppercase tracking-[0.15em] text-[var(--text)]">
               <th className="whitespace-nowrap px-4 py-2 text-left font-medium">Market</th>
               <th className="whitespace-nowrap px-3 py-2 text-left font-medium">Side</th>
@@ -361,7 +363,7 @@ const OtherMarketPositionsInner: FC<{ currentSlab: string }> = ({ currentSlab })
               <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Close</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="max-lg:block">
             {others.map((pos, i) => (
               <OtherMarketRow
                 key={otherKeys[i]}
