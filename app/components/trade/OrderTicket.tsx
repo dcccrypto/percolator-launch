@@ -56,7 +56,7 @@ import { explorerTxUrl, getNetwork } from "@/lib/config";
 import { useUserAccount, useUserAccountScanPending } from "@/hooks/useUserAccount";
 import { OrderTicketClosePanel } from "@/components/trade/OrderTicketClosePanel";
 import { terminalPositionPnl } from "@/lib/position-pnl";
-import { computeLimitPriceE6, assertFeedAgreesWithChain, SlippageError, FEED_DISAGREES_TICKET_COPY } from "@/lib/slippage";
+import { computeLimitPriceE6, assertFeedAgreesWithChain, FeedDisagreementError, FEED_DISAGREES_TICKET_COPY } from "@/lib/slippage";
 import { resolveMarketPriceE6 } from "@/lib/oraclePrice";
 import { bindConfirmedLimitPrice } from "@/lib/confirmedTrade";
 import { useEngineState } from "@/hooks/useEngineState";
@@ -1158,6 +1158,16 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       }
       const msg = e instanceof Error ? e.message : String(e);
       console.error("[OrderTicket] raw error:", msg);
+      // #3459: useTrade / useFirstTrade refused at send time because the feed the limit was built
+      // from no longer agrees with the chain (nothing was sent, the wallet never opened). Say the
+      // same line as the submit press. Left to the resolver below, the word "slippage" in the
+      // thrown text reads as "Price moved ... confirm again", which is not what happened.
+      if (e instanceof FeedDisagreementError) {
+        setHumanError(FEED_DISAGREES_TICKET_COPY);
+        setTradePhase("error");
+        setTimeout(() => setTradePhase("idle"), 1200);
+        return;
+      }
       // PERC-onboarding-5: advisory-only wrong-network-wallet check on the
       // raw (pre-humanization) message — see useWalletNetworkGuard's header.
       reportTxError(msg);
@@ -2054,7 +2064,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               } catch (e) {
                 // Only a real disagreement stops the order. An on-chain price that can't be read
                 // here is the guard's documented no-op, not a reason to block the ticket.
-                if (e instanceof SlippageError) {
+                if (e instanceof FeedDisagreementError) {
                   setRefusal(null);
                   setHumanError(FEED_DISAGREES_TICKET_COPY);
                   return;

@@ -122,6 +122,13 @@ export const MAX_FEED_DEVIATION_BPS = 200n;
  * price-integrity class. What it removes is the property that a bad feed silently
  * degrades a protection the user thinks they have.
  */
+/**
+ * What `assertFeedAgreesWithChain` throws. A SlippageError, so existing handlers keep
+ * working; its own class so a caller can tell "the feed disagrees with the chain" from
+ * computeLimitPriceE6's "no live price" and say the right thing (#3459).
+ */
+export class FeedDisagreementError extends SlippageError {}
+
 export function assertFeedAgreesWithChain(args: {
   /** The off-chain feed price the limit would be derived from. */
   feedE6: bigint;
@@ -140,7 +147,7 @@ export function assertFeedAgreesWithChain(args: {
   const deviationBps = (diff * 10_000n) / onChainE6;
   if (deviationBps <= MAX_FEED_DEVIATION_BPS) return;
 
-  throw new SlippageError(
+  throw new FeedDisagreementError(
     `Price feed disagrees with the on-chain oracle by ${deviationBps} bps ` +
       `(limit is ${MAX_FEED_DEVIATION_BPS}). Refusing to derive a slippage limit ` +
       `from it — the limit would not mean what the screen says. Wait for the feed ` +

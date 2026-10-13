@@ -7,7 +7,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { computeLimitPriceE6, FEED_DISAGREES_TICKET_COPY } from "@/lib/slippage";
+import { computeLimitPriceE6, FEED_DISAGREES_TICKET_COPY, FeedDisagreementError } from "@/lib/slippage";
 
 const mocks = vi.hoisted(() => ({
   useWalletCompat: vi.fn(),
@@ -140,5 +140,22 @@ describe("#3459: the ticket checks the feed its worst price is built from", () =
     mocks.feedE6 = 900_000n;
     await pressOrder("5");
     expect(await screen.findByTestId("confirm-trade")).toBeTruthy();
+  });
+
+  it("a send-time refusal (the chain moved after the press) reads the same line, not 'Price moved'", async () => {
+    // The press passes (feed 1% off). useTrade then refuses with the message it really throws.
+    mocks.feedE6 = 1_010_000n;
+    mocks.trade.mockRejectedValue(
+      new FeedDisagreementError(
+        "Price feed disagrees with the on-chain oracle by 300 bps (limit is 200). Refusing to derive a slippage limit " +
+          "from it — the limit would not mean what the screen says. Wait for the feed to reconverge, or set an explicit limit price.",
+      ),
+    );
+    await pressOrder("5");
+    fireEvent.click(await screen.findByTestId("confirm-trade"));
+    expect(await screen.findByText(FEED_DISAGREES_TICKET_COPY)).toBeTruthy();
+    expect(screen.queryByText(/set an explicit limit price/)).toBeNull();
+    expect(screen.queryByText(/The price moved while you were confirming/)).toBeNull();
+    expect(mocks.trade).toHaveBeenCalledTimes(1); // not retried: the wallet never opened
   });
 });
