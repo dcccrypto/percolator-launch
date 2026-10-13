@@ -69,7 +69,7 @@ export function volumeDisplay(
 
 /** Why a figure is missing, in words a trader can act on. */
 export const FEES_UNRECORDED_NOTE =
-  "Not recorded — the indexer does not capture the fee amount, so this is unknown rather than zero. You were charged the market's trading fee on every fill.";
+  "Not recorded — the indexer does not capture the fee amount, so this is unknown rather than zero. The market's trading fee was still charged on every fill.";
 
 export function volumeNote(v: VolumeDisplay): string | undefined {
   if (v.kind === "partial") {

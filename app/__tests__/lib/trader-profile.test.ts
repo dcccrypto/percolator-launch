@@ -13,7 +13,7 @@ describe("parseTraderWallet", () => {
   });
 
   it("rejects anything else before it can reach an RPC filter or an API path", () => {
-    for (const bad of [undefined, "", "0x1234", "../../api/admin", `${W}0`, "O".repeat(44), "%2e%2e%2f", "<script>"]) {
+    for (const bad of [undefined, "", "0x1234", "../../api/admin", `${W}0`, "O".repeat(44), "%2e%2e%2f", "<script>", "%E0", "%"]) {
       expect(parseTraderWallet(bad)).toBeNull();
     }
   });

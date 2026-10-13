@@ -66,7 +66,12 @@ export function useTraderPositions(wallet: string | null): {
     let cancelled = false;
     const isCancelled = () => cancelled;
     void load(isCancelled);
-    const t = setInterval(() => void load(isCancelled), REFRESH_MS);
+    // Background tabs don't refresh: each read runs market discovery + an owner scan, and this
+    // page (unlike /portfolio) has no shared cache to absorb repeat viewers.
+    const t = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      void load(isCancelled);
+    }, REFRESH_MS);
     return () => {
       cancelled = true;
       clearInterval(t);

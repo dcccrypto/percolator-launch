@@ -187,7 +187,7 @@ export default function TraderProfilePage() {
       {/* ── Trade history ────────────────────────────────────── */}
       <section className="mt-10">
         <SectionLabel>trade history</SectionLabel>
-        <TradeHistoryTable wallet={wallet} pageSize={20} statsMap={statsMap} />
+        <TradeHistoryTable wallet={wallet} pageSize={20} statsMap={statsMap} emptyHint="This wallet's executed trades will appear here." />
       </section>
     </div>
   );

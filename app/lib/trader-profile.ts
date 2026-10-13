@@ -16,7 +16,12 @@ const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 export function parseTraderWallet(raw: string | string[] | undefined): string | null {
   const s = Array.isArray(raw) ? raw[0] : raw;
   if (typeof s !== "string") return null;
-  const trimmed = decodeURIComponent(s).trim();
+  let trimmed: string;
+  try {
+    trimmed = decodeURIComponent(s).trim();
+  } catch {
+    return null; // malformed %-escape: not an address (and never a crash)
+  }
   if (!BASE58.test(trimmed)) return null;
   try {
     return new PublicKey(trimmed).toBase58();
