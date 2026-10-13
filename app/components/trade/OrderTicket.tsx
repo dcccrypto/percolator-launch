@@ -56,7 +56,8 @@ import { explorerTxUrl, getNetwork } from "@/lib/config";
 import { useUserAccount, useUserAccountScanPending } from "@/hooks/useUserAccount";
 import { OrderTicketClosePanel } from "@/components/trade/OrderTicketClosePanel";
 import { terminalPositionPnl } from "@/lib/position-pnl";
-import { computeLimitPriceE6 } from "@/lib/slippage";
+import { computeLimitPriceE6, assertFeedAgreesWithChain, SlippageError, FEED_DISAGREES_TICKET_COPY } from "@/lib/slippage";
+import { resolveMarketPriceE6 } from "@/lib/oraclePrice";
 import { bindConfirmedLimitPrice } from "@/lib/confirmedTrade";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
@@ -347,6 +348,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     estimatedLiqDisplay: LiqPriceDisplay;
     tradingFee: bigint;
     worstFillPriceE6: bigint;
+    /** #3459: the feed price `worstFillPriceE6` was built from (0n when there was none). */
+    feedPriceE6: bigint;
     riskLeverage: number | null;
     depositAtoms: bigint;
     createsAccount: boolean;
@@ -959,6 +962,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   async function handleTrade(
     snapshotSize?: bigint,
     snapshotLimitPriceE6?: bigint,
+    snapshotFeedE6?: bigint,
   ) {
     const effectiveSize = snapshotSize ?? positionSize;
     if (!marginInput || effectiveSize <= 0n) return;
@@ -991,6 +995,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       const size = direction === "short" ? -effectiveSize : effectiveSize;
       // Confirmed submissions carry the exact worst-fill bound reviewed
       // in the modal. Other callers retain useTrade's live-mark fallback.
+      // #3459: the fallback limit is built from the feed read here, so that is the price to check.
+      const fallbackFeedE6 = getLivePriceSnapshot(slabAddress).priceE6 ?? livePriceE6 ?? 0n;
+      const fundLimitFeedE6 = snapshotLimitPriceE6 !== undefined ? snapshotFeedE6 : fallbackFeedE6;
       const sig = fundingMode
         ? (
             await fundAndTrade({
@@ -998,7 +1005,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               depositAtoms: fundAtoms,
               limitPriceE6:
                 snapshotLimitPriceE6 ??
-                computeLimitPriceE6({ markE6: getLivePriceSnapshot(slabAddress).priceE6 ?? livePriceE6 ?? 0n, size }),
+                computeLimitPriceE6({ markE6: fallbackFeedE6, size }),
+              ...(fundLimitFeedE6 !== undefined && fundLimitFeedE6 > 0n ? { limitFeedE6: fundLimitFeedE6 } : {}),
               ...(ticketLimits.fee?.channel.enabled ? { feeBps: ticketLimits.fee.signedFeeBps } : {}),
               amountLabel: fundLabel,
               onRace: () => setRaceNote(true),
@@ -1023,6 +1031,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 abortSignal: waitAbort.signal,
               },
               snapshotLimitPriceE6,
+              snapshotFeedE6,
             ),
           ),
         { maxRetries: 2, delayMs: 3000 },
@@ -2035,6 +2044,23 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             // where "read via getLivePriceSnapshot at submit" needs to mean
             // literally at this instant, not merely non-reactive.
             const freshPriceE6 = getLivePriceSnapshot(slabAddress).priceE6;
+            // #3459: this feed price becomes the order's binding limit, so check it against the
+            // on-chain price here, before the confirm screen shows a worst price built from it.
+            // useTrade / useFirstTrade re-check the same number at send time.
+            if (!mockMode && mktConfig && freshPriceE6 && freshPriceE6 > 0n) {
+              try {
+                const onChainRefE6 = resolveMarketPriceE6({ ...mktConfig, oracleModeByte: slabWrapperV17?.oracleMode });
+                assertFeedAgreesWithChain({ feedE6: freshPriceE6, onChainE6: onChainRefE6 > 0n ? onChainRefE6 : null });
+              } catch (e) {
+                // Only a real disagreement stops the order. An on-chain price that can't be read
+                // here is the guard's documented no-op, not a reason to block the ticket.
+                if (e instanceof SlippageError) {
+                  setRefusal(null);
+                  setHumanError(FEED_DISAGREES_TICKET_COPY);
+                  return;
+                }
+              }
+            }
             let worstFillPriceE6 = 0n;
             try {
               worstFillPriceE6 = freshPriceE6 && freshPriceE6 > 0n ? computeLimitPriceE6({ markE6: freshPriceE6, size: signedSize }) : 0n;
@@ -2048,6 +2074,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               estimatedLiqDisplay: afterLiqDisplay,
               tradingFee: fee,
               worstFillPriceE6,
+              feedPriceE6: worstFillPriceE6 > 0n && freshPriceE6 ? freshPriceE6 : 0n,
               // The account after this trade: the resulting position and the bundled deposit, as
               // the liq row uses, over capital + deposit + pnl, as the position panel's Lev.
               riskLeverage: computeRiskLeverage(combinedSignedSize, livePriceE6 ?? 0n, capitalAfterFund + safeExistingPnl),
@@ -2159,6 +2186,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             void handleTrade(
               snapshot.positionSize,
               snapshot.worstFillPriceE6,
+              snapshot.feedPriceE6,
             );
           }}
           onCancel={() => { setShowConfirmModal(false); setConfirmSnapshot(null); }}

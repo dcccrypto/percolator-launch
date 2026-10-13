@@ -3,6 +3,8 @@ export interface ConfirmedTradeParams {
   userIdx: number;
   size: bigint;
   limitPriceE6?: bigint;
+  /** #3459: the feed price the confirmed limit was built from (useTrade checks it against the chain). */
+  limitFeedE6?: bigint;
   /** P2 fee channel: taker-signed fee cap (lib/limits/fee-channel.ts). */
   feeBps?: bigint;
   /** UX WP-2: the app is waiting for the market before any prompt (useTrade -> sendTxWaiting). */
@@ -21,8 +23,9 @@ export interface ConfirmedTradeParams {
  * fallback, which derives a limit from the latest live mark.
  */
 export function bindConfirmedLimitPrice(
-  params: Omit<ConfirmedTradeParams, "limitPriceE6">,
+  params: Omit<ConfirmedTradeParams, "limitPriceE6" | "limitFeedE6">,
   confirmedLimitPriceE6?: bigint,
+  confirmedFeedE6?: bigint,
 ): ConfirmedTradeParams {
   if (
     confirmedLimitPriceE6 === undefined ||
@@ -34,5 +37,6 @@ export function bindConfirmedLimitPrice(
   return {
     ...params,
     limitPriceE6: confirmedLimitPriceE6,
+    ...(confirmedFeedE6 !== undefined && confirmedFeedE6 > 0n ? { limitFeedE6: confirmedFeedE6 } : {}),
   };
 }

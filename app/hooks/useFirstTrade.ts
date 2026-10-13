@@ -24,6 +24,8 @@ import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { assertKnownProgram } from "@/lib/programAllowlist";
 import { assertDepositWithinBalance } from "@/lib/deposit-guard";
+import { assertFeedAgreesWithChain } from "@/lib/slippage";
+import { resolveMarketPriceE6 } from "@/lib/oraclePrice";
 import { SimulationRefusal, sendTx } from "@/lib/tx";
 import { tradeCuCap } from "@/lib/compute-budget";
 import { fetchAssetMarketId, fetchPortfolioIdentity } from "@/lib/v18-wire";
@@ -72,6 +74,11 @@ export interface FundAndTradeParams {
   size: bigint;
   depositAtoms: bigint;
   limitPriceE6: bigint;
+  /**
+   * #3459: the feed price `limitPriceE6` was built from. Checked against the on-chain price
+   * before anything is sent, as useTrade does (assertFeedAgreesWithChain).
+   */
+  limitFeedE6?: bigint;
   feeBps?: bigint;
   /** "12.50 USDC" for the deposit-failure line. */
   amountLabel: string;
@@ -96,6 +103,11 @@ export function useFirstTrade(slabAddress: string) {
     async (p: FundAndTradeParams): Promise<FundAndTradeResult> => {
       if (!wallet.publicKey || !mktConfig || !slabProgramId) throw new Error("Wallet not connected or market not loaded");
       assertKnownProgram(slabProgramId);
+      // #3459: the same feed-vs-chain check a normal trade gets. Before any read or prompt.
+      if (p.limitFeedE6 !== undefined) {
+        const onChainRefE6 = resolveMarketPriceE6({ ...mktConfig, oracleModeByte: wrapperConfigV17?.oracleMode });
+        assertFeedAgreesWithChain({ feedE6: p.limitFeedE6, onChainE6: onChainRefE6 > 0n ? onChainRefE6 : null });
+      }
       const owner = wallet.publicKey;
       const programId = slabProgramId;
       const market = new PublicKey(slabAddress);

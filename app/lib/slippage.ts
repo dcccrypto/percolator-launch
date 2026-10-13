@@ -148,6 +148,17 @@ export function assertFeedAgreesWithChain(args: {
   );
 }
 
+/**
+ * #3459: what the order ticket says when it stops an open before the confirm
+ * screen because the feed its worst price is built from fails
+ * `assertFeedAgreesWithChain`. The thrown message above is written for logs; this
+ * is the same refusal in the ticket's voice, and it does not offer "set an
+ * explicit limit price" because the ticket has no such control.
+ */
+export const FEED_DISAGREES_TICKET_COPY =
+  "The live price and the on-chain price are more than 2% apart, so this order's " +
+  "worst price can't be trusted right now. Nothing was sent. Try again in a moment.";
+
 export function computeLimitPriceE6(args: ComputeLimitArgs): bigint {
   const { markE6, size } = args;
   const slippageBps =

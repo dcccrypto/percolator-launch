@@ -25,6 +25,8 @@ vi.mock("@/hooks/useWalletCompat", () => ({
     },
   }),
 }));
+// #3459: the market reads 1.000000 on chain for the feed-vs-chain check.
+vi.mock("@/lib/oraclePrice", async (orig) => ({ ...(await orig<object>()), resolveMarketPriceE6: () => 1_000_000n }));
 vi.mock("@/components/providers/SlabProvider", () => ({
   useSlabState: () => ({
     config: { collateralMint: Keypair.generate().publicKey },
@@ -222,5 +224,33 @@ describe("GH#2959 useFirstTrade: the first trade is ONE transaction", () => {
   it("'No portfolio account found' maps to a plain line, not 'Something went wrong'", () => {
     const u = resolveUserMessage(new Error("No portfolio account found for your wallet on this market. Please deposit collateral first to create a portfolio."), { surface: "trade" });
     expect(u.kind).toBe("no-account");
+  });
+
+  // ── #3459: the feed the ticket's limit was built from is checked against the chain ──
+  async function runWithFeed(limitPriceE6: bigint, limitFeedE6?: bigint) {
+    const { result } = renderHook(() => useFirstTrade(Keypair.generate().publicKey.toBase58()));
+    let err: unknown = null;
+    await act(async () => {
+      try {
+        await result.current.fundAndTrade({ size: 1_000n, depositAtoms: 5_520_000n, limitPriceE6, limitFeedE6, amountLabel: "5.52 USDC" });
+      } catch (e) {
+        err = e;
+      }
+    });
+    return err;
+  }
+
+  it("#3459: a limit built from a feed 10% off the chain is refused before anything is sent", async () => {
+    sendTx.mockResolvedValue("sig");
+    const err = await runWithFeed(945_000n, 900_000n);
+    expect(String(err)).toMatch(/Price feed disagrees with the on-chain oracle by 1000 bps/);
+    expect(sendTx).not.toHaveBeenCalled();
+  });
+
+  it("#3459 NEGATIVE CONTROL: a limit built from an agreeing feed goes through", async () => {
+    sendTx.mockResolvedValue("sig");
+    const err = await runWithFeed(1_060_500n, 1_010_000n);
+    expect(err).toBeNull();
+    expect(sendTx).toHaveBeenCalledTimes(1);
   });
 });

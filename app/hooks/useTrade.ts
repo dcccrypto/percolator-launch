@@ -309,6 +309,13 @@ export function useTrade(slabAddress: string) {
       portfolioPk?: PublicKey;
       limitPriceE6?: bigint;
       /**
+       * #3459: the feed price an explicit `limitPriceE6` was built from. The order ticket
+       * computes its worst-fill bound from the live feed and passes it as an explicit limit,
+       * so the feed-vs-chain guard below has to be told which feed price to check. Omit it
+       * when the limit does not come from the feed (a close's engine-derived limit).
+       */
+      limitFeedE6?: bigint;
+      /**
        * P2 fee channel (lib/limits/fee-channel.ts): the taker-SIGNED fee cap, base +
        * the quote's requested fee, when the protocol enabled the channel for this asset.
        * Omitted => the market's base trade fee (the only value accepted without it).
@@ -400,15 +407,22 @@ export function useTrade(slabAddress: string) {
         // surface as a price-disagreement message instead, which is a worse
         // diagnosis for the same underlying misconfiguration.
         //
-        // Only guards the DERIVED limit. An explicit `limitPriceE6` is the user's
-        // own number and passes through untouched.
-        if (params.limitPriceE6 === undefined) {
+        // Guards every limit that comes from the feed: the one derived above, and
+        // an explicit one whose caller names the feed price it was built from
+        // (`limitFeedE6`). #3459: the order ticket passes its feed-built worst
+        // fill as an explicit limit, so guarding only the derived case meant no
+        // open from the ticket was ever checked. An explicit limit with no
+        // `limitFeedE6` is not feed-derived (a close's engine-priced limit) and
+        // passes through untouched.
+        const guardedFeedE6 =
+          params.limitPriceE6 === undefined ? (livePriceE6 ?? 0n) : params.limitFeedE6;
+        if (guardedFeedE6 !== undefined) {
           const onChainRefE6 = resolveMarketPriceE6({
             ...mktConfig,
             oracleModeByte: wrapperConfigV17?.oracleMode,
           });
           assertFeedAgreesWithChain({
-            feedE6: livePriceE6 ?? 0n,
+            feedE6: guardedFeedE6,
             onChainE6: onChainRefE6 > 0n ? onChainRefE6 : null,
           });
         }

@@ -415,4 +415,65 @@ describe("useTrade v17 portfolio selection", () => {
       unmount();
     });
   });
+
+  // ── #3459: the feed-vs-chain guard (#2525 / #2538) covers a feed-built EXPLICIT limit ──────
+  // On chain the market reads 1.000000 (the oraclePrice stub above). The feed reads 0.900000:
+  // 10% off, 5x the guard's 200 bps bound. The order ticket builds its worst-fill bound from
+  // that feed and passes it as an explicit `limitPriceE6`, naming the feed in `limitFeedE6`.
+  describe("#3459: feed-vs-chain guard on an explicit, feed-built limit", () => {
+    const SIZE = 1_000_000n; // a long
+
+    async function submit(feedE6: bigint, extra: { limitPriceE6?: bigint; limitFeedE6?: bigint }) {
+      mocks.getLivePriceSnapshot.mockReturnValue({
+        priceUsd: Number(feedE6) / 1e6, priceE6: feedE6, price: Number(feedE6) / 1e6,
+        change24h: null, high24h: null, low24h: null, loading: false,
+      });
+      connection.getProgramAccounts.mockResolvedValueOnce([
+        { pubkey: portfolioOne, account: { data: Buffer.from([1]) } },
+      ]);
+      mocks.sendTx.mockClear();
+      const { result, unmount } = renderHook(() => useTrade(slabAddress));
+      let error: unknown = null;
+      await act(async () => {
+        try {
+          await result.current.trade({ lpIdx: 0, userIdx: 7, size: SIZE, ...extra });
+        } catch (e) {
+          error = e;
+        }
+      });
+      unmount();
+      return { error, sent: mocks.sendTx.mock.calls.length > 0 };
+    }
+
+    it("control: a derived limit over a 10%-off feed is refused before signing", async () => {
+      const { error, sent } = await submit(900_000n, {});
+      expect(String(error)).toMatch(/Price feed disagrees with the on-chain oracle by 1000 bps/);
+      expect(sent).toBe(false);
+    });
+
+    it("the ticket's explicit limit over the same feed is refused too, when it names the feed", async () => {
+      const { error, sent } = await submit(900_000n, { limitPriceE6: 945_000n, limitFeedE6: 900_000n });
+      expect(String(error)).toMatch(/Price feed disagrees with the on-chain oracle by 1000 bps/);
+      expect(sent).toBe(false);
+    });
+
+    it("checks the feed the limit was BUILT from, not the feed at send time", async () => {
+      // The store has since recovered to 1.000000; the confirmed limit still came from 0.900000.
+      const { error, sent } = await submit(1_000_000n, { limitPriceE6: 945_000n, limitFeedE6: 900_000n });
+      expect(String(error)).toMatch(/disagrees with the on-chain oracle/);
+      expect(sent).toBe(false);
+    });
+
+    it("an explicit limit built from an agreeing feed is sent", async () => {
+      const { error, sent } = await submit(1_010_000n, { limitPriceE6: 1_060_500n, limitFeedE6: 1_010_000n });
+      expect(error).toBeNull();
+      expect(sent).toBe(true);
+    });
+
+    it("an explicit limit that names no feed (a close's engine-priced limit) is not feed-checked", async () => {
+      const { error, sent } = await submit(900_000n, { limitPriceE6: 945_000n });
+      expect(error).toBeNull();
+      expect(sent).toBe(true);
+    });
+  });
 });
