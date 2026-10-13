@@ -47,7 +47,7 @@ import { FIRST_TRADE_COPY, FirstTradeDepositError, fundDepositAtoms, tradableMar
 import { useMarketFillCap } from "@/hooks/useMarketFillCap";
 import { UNLIMITED_CAPACITY } from "@/lib/marketCapacity";
 import { isBlockedSlab } from "@/lib/blocklist";
-import { humanizeError, isEngineLockError, withTransientRetry } from "@/lib/errorMessages";
+import { humanizeError, isEngineLockError, UserFacingError, withTransientRetry } from "@/lib/errorMessages";
 import { useSingleMarketHealth } from "@/hooks/useMarketHealth";
 import { safeExplainMarketTxError } from "@/lib/market-error";
 import { PublicKey } from "@solana/web3.js";
@@ -57,6 +57,8 @@ import { useUserAccount, useUserAccountScanPending } from "@/hooks/useUserAccoun
 import { OrderTicketClosePanel } from "@/components/trade/OrderTicketClosePanel";
 import { terminalPositionPnl } from "@/lib/position-pnl";
 import { computeLimitPriceE6 } from "@/lib/slippage";
+import { openLimitE6 } from "@/lib/open-limit";
+import { resolveMarketPriceE6 } from "@/lib/oraclePrice";
 import { bindConfirmedLimitPrice } from "@/lib/confirmedTrade";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
@@ -104,7 +106,7 @@ import { OrderTicketLimits, reasonCopy } from "@/components/limits/OrderTicketLi
 import { StatusLine } from "@/components/ui/StatusLine";
 import { FixPricingAction } from "@/components/trade/FixPricingAction";
 import { resolveUserMessage, type UserMessage, type UserMessageAction } from "@/lib/limits/user-message";
-import { TICKET_COPY } from "@/lib/limits/copy";
+import { PRICES_OUT_OF_SYNC_COPY, TICKET_COPY } from "@/lib/limits/copy";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
 import { isAdlReduceOnly } from "@/lib/limits/adl-reduce-only";
 
@@ -253,7 +255,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const { engine, params, insuranceBalance: liveInsuranceBalance, totalOI: liveTotalOI, hasData: engineHasData } = useEngineState();
   const { accounts, config: mktConfig, header, refresh: refreshSlab, programId: slabProgramId, raw: slabRaw, adlFactors: slabAdlFactors, wrapperConfigV17: slabWrapperV17 } = useSlabState();
   // F-3 / R1 (not flag-gated — deployed engine behaviour): ADL reduce-only after a bankruptcy.
-  const adlReduceOnly = useMemo(() => (slabRaw ? isAdlReduceOnly(decodeMarketEngineView(slabRaw)) : false), [slabRaw]);
+  // The slab's engine view, decoded once per slab update (ADL reduce-only below, and #3459's open limit).
+  const engineView = useMemo(() => (slabRaw ? decodeMarketEngineView(slabRaw) : null), [slabRaw]);
+  const adlReduceOnly = useMemo(() => isAdlReduceOnly(engineView), [engineView]);
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   // Non-reactive — see file-header comment. NOT `useLivePrice()`.
   const { priceUsd, priceE6: livePriceE6 } = getLivePriceSnapshot(slabAddress);
@@ -825,15 +829,36 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     : beforeAvailable > marginNative
       ? beforeAvailable - marginNative
       : 0n;
-  // Slippage: distance between the mark and the worst acceptable fill
-  // (same computeLimitPriceE6 useTrade itself uses to derive the on-chain
-  // limit when the caller doesn't supply one explicitly).
+  // #3459: an open's worst-fill limit. v17/v18: around the engine's effective price (the price the
+  // fill is priced and settled at), as a close's is; legacy: the live price, checked against the
+  // on-chain reference. Throws UserFacingError (price unreadable) or FeedDisagreementError.
+  const buildOpenLimitE6 = (signedSize: bigint): bigint =>
+    openLimitE6({
+      isV17: slabWrapperV17 != null,
+      engine: engineView,
+      feedE6: getLivePriceSnapshot(slabAddress).priceE6 ?? livePriceE6,
+      onChainRefE6: () => (mktConfig ? resolveMarketPriceE6({ ...mktConfig, oracleModeByte: slabWrapperV17?.oracleMode }) : null),
+      size: signedSize,
+    });
+  /** The ticket's line for a limit it could not build: nothing was signed or sent. */
+  const openLimitRefusal = (e: unknown): UserMessage | null => {
+    const details = { code: null, name: null, programId: null, logs: [], raw: e instanceof Error ? e.message : String(e) };
+    if ((e as { name?: string } | null)?.name === "FeedDisagreementError") {
+      return { kind: "prices-out-of-sync", variant: "wait", title: PRICES_OUT_OF_SYNC_COPY.title, body: PRICES_OUT_OF_SYNC_COPY.body, details };
+    }
+    if (e instanceof UserFacingError) {
+      return { kind: "price-unreadable", variant: "error", title: "Couldn't read the price", body: e.message, details };
+    }
+    return null;
+  };
+
+  // Slippage: the worst acceptable fill this order would be sent with (#3459: the same limit
+  // the confirm screen binds, from the engine's effective price on v17/v18). 0 when it can't be
+  // built; submit then refuses with the reason.
   const signedSizeForSlippage = direction === "short" ? -positionSize : positionSize;
   let slippageBoundE6 = 0n;
   try {
-    slippageBoundE6 = hasOrder && livePriceE6 && livePriceE6 > 0n
-      ? computeLimitPriceE6({ markE6: livePriceE6, size: signedSizeForSlippage })
-      : 0n;
+    slippageBoundE6 = hasOrder ? (mockMode ? computeLimitPriceE6({ markE6: livePriceE6 ?? 0n, size: signedSizeForSlippage }) : buildOpenLimitE6(signedSizeForSlippage)) : 0n;
   } catch {
     slippageBoundE6 = 0n;
   }
@@ -996,9 +1021,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             await fundAndTrade({
               size,
               depositAtoms: fundAtoms,
+              // The confirmed worst fill; else built the same way. `> 0n`, not `??`: a 0n here was
+              // sent as limit 0, i.e. no slippage limit at all (#3459).
               limitPriceE6:
-                snapshotLimitPriceE6 ??
-                computeLimitPriceE6({ markE6: getLivePriceSnapshot(slabAddress).priceE6 ?? livePriceE6 ?? 0n, size }),
+                snapshotLimitPriceE6 !== undefined && snapshotLimitPriceE6 > 0n
+                  ? snapshotLimitPriceE6
+                  : buildOpenLimitE6(direction === "short" ? -size : size),
               ...(ticketLimits.fee?.channel.enabled ? { feeBps: ticketLimits.fee.signedFeeBps } : {}),
               amountLabel: fundLabel,
               onRace: () => setRaceNote(true),
@@ -2037,8 +2065,18 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             const freshPriceE6 = getLivePriceSnapshot(slabAddress).priceE6;
             let worstFillPriceE6 = 0n;
             try {
-              worstFillPriceE6 = freshPriceE6 && freshPriceE6 > 0n ? computeLimitPriceE6({ markE6: freshPriceE6, size: signedSize }) : 0n;
-            } catch {
+              // #3459: the limit this order is sent with, built now so the confirm screen shows it.
+              // v17/v18: the engine's effective price; legacy: the live price, checked against the
+              // chain. A limit that can't be built honestly is refused here, before anything opens.
+              worstFillPriceE6 = mockMode
+                ? (freshPriceE6 && freshPriceE6 > 0n ? computeLimitPriceE6({ markE6: freshPriceE6, size: signedSize }) : 0n)
+                : buildOpenLimitE6(signedSize);
+            } catch (e) {
+              const why = openLimitRefusal(e);
+              if (why) {
+                setRefusal(why);
+                return;
+              }
               worstFillPriceE6 = 0n;
             }
             setConfirmSnapshot({

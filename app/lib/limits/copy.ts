@@ -339,3 +339,13 @@ export const TICKET_COPY = {
     halted: "Closing this side is paused for a moment while the market rebalances. It reopens as other positions close.",
   },
 } as const;
+
+/**
+ * #3459: an order refused before signing because the site's live price and the market's trading
+ * price disagree by more than the guard allows (lib/slippage.ts FeedDisagreementError). Only legacy
+ * markets still build a limit from the live price; v17/v18 opens use the trading price itself.
+ */
+export const PRICES_OUT_OF_SYNC_COPY = {
+  title: "Prices out of sync",
+  body: "This market's live price and its trading price don't match right now, so the order wasn't placed. Nothing was sent. Try again in a moment.",
+} as const;
