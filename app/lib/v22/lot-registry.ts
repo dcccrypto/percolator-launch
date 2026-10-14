@@ -11,7 +11,9 @@
  * of that slab into USD / PnL / liquidation figures or a limit price.
  */
 import { isDevnetV22Enabled } from "./flag";
-import { lotExpOfMarketV22 } from "./sdk";
+// Direct module, not the ./sdk barrel: this registry is on every page (price store, positions bar),
+// and the barrel drags the whole v2.2 SDK port + spl-token into the shared first-load bundle.
+import { lotExpOfMarketV22 } from "./sdk/v22-lot";
 
 const known = new Map<string, number>();
 const listeners = new Set<(slab: string, lotExp: number) => void>();

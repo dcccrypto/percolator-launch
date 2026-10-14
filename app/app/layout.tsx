@@ -9,9 +9,7 @@ import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { MobileBottomNav } from "@/components/layout/MobileBottomNav";
 import { TickerBanner } from "@/components/layout/TickerBanner";
-import { PositionsBar } from "@/components/layout/PositionsBar";
-import { LiquidationAlert } from "@/components/layout/LiquidationAlert";
-import { ClosedPositionNotice } from "@/components/layout/ClosedPositionNotice";
+import { WalletChrome } from "@/components/layout/WalletChrome";
 import { MusicPlayer } from "@/components/ui/MusicPlayer";
 import { MainnetBetaBanner } from "@/components/layout/MainnetBetaBanner";
 import { MaintenanceBanner } from "@/components/layout/MaintenanceBanner";
@@ -22,7 +20,7 @@ import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { Analytics } from "@vercel/analytics/next";
 import { GoogleAnalytics } from "@/components/analytics/GoogleAnalytics";
 import { CloudflareAnalytics } from "@/components/analytics/CloudflareAnalytics";
-import { SignGuardLine } from "@/components/v22/SignGuardLine";
+import { SignGuardLine } from "@/components/v22/SignGuardLineLazy";
 import { BuildTag } from "@/components/v22/BuildTag";
 
 // Geist (sans), Inter Tight, Geist Mono, and Space Grotesk removed — they were
@@ -139,9 +137,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <ConnectionBar />
             </ChromeGate>
             <ChromeGate>
-              <PositionsBar />
-              <LiquidationAlert />
-              <ClosedPositionNotice />
+              {/* PositionsBar + LiquidationAlert + ClosedPositionNotice, loaded once a wallet connects. */}
+              <WalletChrome />
             </ChromeGate>
             <main className="flex-1 pb-[60px] md:pb-0">{children}</main>
             <ChromeGate hideOn={["/locked"]}>

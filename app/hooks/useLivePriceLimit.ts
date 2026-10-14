@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { MARKET_REGISTERED_EVENT } from "@/lib/keeper-register-client";
+import { MARKET_REGISTERED_EVENT } from "@/lib/market-registered-event";
 import { usePrivySessionHeaders, type PrivySessionHeaders } from "@/hooks/usePrivySafe";
 
 /**

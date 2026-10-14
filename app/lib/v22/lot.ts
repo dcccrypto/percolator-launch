@@ -11,15 +11,17 @@
  * a market without lots is untouched).
  */
 import { isDevnetV22Enabled } from "./flag";
+// The two source modules, not the ./sdk barrel: this file is on the landing page and every market
+// surface, and the barrel pulls the whole v2.2 port (slab decoders, stake, spl-token) in with it.
 import {
-  displayPriceV22,
   lotExpOfMarketV22,
   lotPriceToTokenE6V22,
   qToTokenQV22,
   quantizeQToLotsV22,
   tokenPriceToLotE6V22,
   tokenQToQV22,
-} from "./sdk";
+} from "./sdk/v22-lot";
+import { displayPriceV22 } from "./sdk/v22-math";
 
 /** Engine position scale: Q units per lot (or per token when lotExp = 0). */
 export const POS_SCALE_V22 = 1_000_000n;

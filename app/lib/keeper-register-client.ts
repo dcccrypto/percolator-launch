@@ -269,12 +269,9 @@ export function markRegistered(slab: string, store: KeyStore | null = browserSto
   announceMarketRegistered(slab);
 }
 
-/**
- * Fired on `window` the moment a registration lands, so every list on this page (the markets page,
- * the landing rail) refetches past the CDN's 10 s + 60 s stale window instead of showing the market
- * a poll or two late (hooks/useAllMarketStats.ts). Other visitors still see it on their next poll.
- */
-export const MARKET_REGISTERED_EVENT = "perc:market-registered";
+// Defined in a leaf module so listeners need not import this client (see that file).
+import { MARKET_REGISTERED_EVENT } from "./market-registered-event";
+export { MARKET_REGISTERED_EVENT };
 export function announceMarketRegistered(slab: string): void {
   try {
     if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(MARKET_REGISTERED_EVENT, { detail: { slab } }));

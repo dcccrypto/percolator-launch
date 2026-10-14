@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { AutoFundProvider } from "./AutoFundProvider";
 import { PrivyAvailableContext } from "@/hooks/usePrivySafe";
 import { WalletAdapterAvailableContext } from "@/hooks/useWalletAdapterAvailable";
-import { DevnetFaucetModal } from "@/components/devnet/DevnetFaucetModal";
+import { DevnetFaucetModal } from "@/components/devnet/DevnetFaucetModalLazy";
 import {
   PreferredWalletContext,
   usePreferredWalletState,
