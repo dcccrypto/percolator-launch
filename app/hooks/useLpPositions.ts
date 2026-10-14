@@ -14,6 +14,7 @@ import { readPoolTotalLpSupply, stakeValueAtoms } from '@/lib/stake-position';
 import { readEarnPositions } from '@/lib/limits/earn-positions';
 import { isBlockedSlab } from '@/lib/blocklist';
 import { CURATED_COLLATERAL_DECIMALS } from '@/hooks/useEarnStats';
+import { MarketsListHttpError, fetchMarketsList, listedMarketRows } from '@/lib/markets-list-client';
 
 
 // ═══════════════════════════════════════════════════════════════
@@ -97,10 +98,14 @@ export interface LpPositionsState {
  * (GET /api/markets) and valued like the Earn table (lib/limits/earn-positions.ts).
  */
 async function readEarnRows(connection: Connection, wallet: PublicKey): Promise<LpPosition[]> {
-  const res = await fetch('/api/markets?limit=500', { headers: { Accept: 'application/json' }, cache: 'no-store' });
-  if (!res.ok) throw new Error(`Failed to fetch markets: ${res.status}`);
-  const rows = ((await res.json()) as { markets?: unknown }).markets;
-  if (!Array.isArray(rows)) throw new Error('Failed to fetch markets');
+  // The canonical list, shared with every other list caller (lib/markets-list-client.ts). The old
+  // `cache: 'no-store'` is gone: the edge copy is at most 15 s (+60 s stale) old, and the wallet's
+  // positions themselves are read on chain below.
+  const body = await fetchMarketsList().catch((err: unknown) => {
+    throw new Error(err instanceof MarketsListHttpError ? `Failed to fetch markets: ${err.status}` : 'Failed to fetch markets');
+  });
+  const rows = listedMarketRows(body);
+  if (rows === null) throw new Error('Failed to fetch markets');
   const markets = rows.flatMap((m: Record<string, unknown>) => {
     const slab = typeof m?.slab_address === 'string' ? m.slab_address : null;
     if (!slab || isBlockedSlab(slab)) return [];

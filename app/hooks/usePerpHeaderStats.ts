@@ -13,6 +13,7 @@ import {
 import { parsePerpHistory } from "@/lib/tv/data/perpProvider";
 import { parseUdf } from "@/lib/tv/data/candlesApiProvider";
 import type { PerpSeries } from "@/lib/chart/perp-types";
+import { fetchMarketsList, listedMarketRows } from "@/lib/markets-list-client";
 
 /** The hourly-history request for the series the user is looking at, so the 24h change shares the price's baseline. */
 export function hourlyHistoryUrl(slab: string, series: PerpSeries, nowSec: number): string {
@@ -64,9 +65,16 @@ export function usePerpHeaderStats(slab: string, price: number | null, series: P
       } catch { /* keep the previous */ }
     };
     const loadRow = async () => {
-      const r = await get("/api/markets");
-      if (!alive || !r?.body) return;
-      const s = marketRowStats(r.body, slab);
+      // The canonical list, shared with every other list caller; the zombie-free rows are what the
+      // bare /api/markets returned here before.
+      let rows: Record<string, unknown>[] | null;
+      try {
+        rows = listedMarketRows(await fetchMarketsList());
+      } catch {
+        return;
+      }
+      if (!alive || !rows) return;
+      const s = marketRowStats({ markets: rows }, slab);
       if (s) setRow(s);
     };
     const loadFunding = async () => {
