@@ -57,7 +57,7 @@ import { createTickService, MAX_BODY_BYTES } from "../lib/chart/tick-service";
 import { bearerMatches } from "../lib/chart/tick-ingest";
 import { MAX_WATCHED_SLABS, RateLimiter, WS_MAX_PAYLOAD_BYTES, checkSubscribe, clientKey, isKnownSlab } from "../lib/chart/ws-guards";
 import { getPgCandleStore, getPgSql } from "../lib/chart/pg-store";
-import { createTradeFeed } from "../lib/chart/trade-feed";
+import { createTradeFeed, pgTradeQuery } from "../lib/chart/trade-feed";
 import type { TickMessage } from "../lib/chart/perp-types";
 
 // Railway (and most PaaS) inject PORT and route the public domain to it, so
@@ -338,7 +338,8 @@ function broadcast(slab: string, priceE6: bigint): void {
 }
 
 // ── Last-trade feed: indexer trades -> subscribed browsers ─────────────────
-// One indexed query per second for every slab somebody is watching (never per viewer).
+// One indexed query per poll for every slab somebody is watching (never per viewer). Each slab
+// carries its own cursor, so a poll reads only trades no earlier poll returned.
 const TRADE_POLL_MS = Number(process.env.TRADE_POLL_MS ?? 1_000);
 const tradeSql = getPgSql(process.env, 1);
 const tradeFeed = tradeSql
@@ -351,13 +352,9 @@ const tradeFeed = tradeSql
           if (c.subscriptions.has(m.slab) && c.ws.readyState === WebSocket.OPEN && c.ws.bufferedAmount <= 512 * 1024) c.ws.send(payload);
         }
       },
-      query: (slabs, sinceIso) =>
-        tradeSql.unsafe(
-          `SELECT id::text AS id, slab_address, price::text AS price, size::text AS size, side, created_at
-             FROM trades WHERE slab_address = ANY($1::text[]) AND network = $2 AND created_at >= $3::timestamptz
-            ORDER BY created_at ASC LIMIT 500`,
-          [slabs, process.env.NEXT_PUBLIC_DEFAULT_NETWORK ?? "devnet", sinceIso],
-        ) as never,
+      // Per-slab cursors in the SQL (lib/chart/trade-feed.ts TRADE_FEED_SQL): an idle slab costs an
+      // empty index probe, and a poll returns only rows no poll has returned before.
+      query: pgTradeQuery(tradeSql, process.env.NEXT_PUBLIC_DEFAULT_NETWORK ?? "devnet"),
     })
   : null;
 if (tradeFeed) {
