@@ -25,11 +25,18 @@ describe("#2513 indexer-db reads are network-scoped", () => {
       // the predicate may be on this line (single-line form) or within the
       // next few lines of the same statement
       const window = [line, ...lines.slice(i + 1, i + 5)].join("\n");
-      if (!/network\s*=\s*\$\{getServerNetwork\(\)\}/.test(window)) {
+      // Tagged-template form, or a positional `$N` param (CANDLE_AGG_SQL, run with sql.unsafe;
+      // the binding of that param to getServerNetwork() is asserted below).
+      if (!/network\s*=\s*(\$\{getServerNetwork\(\)\}|\$\d+\b)/.test(window)) {
         offenders.push(`line ${i + 1}: ${line.trim()}`);
       }
     });
     expect(offenders).toEqual([]);
+  });
+
+  it("the positional-param query (CANDLE_AGG_SQL) binds the server network", () => {
+    expect(src).toMatch(/AND network = \$2\n/);
+    expect(src).toMatch(/sql\.unsafe\(CANDLE_AGG_SQL, \[\s*slabAddress,\s*opts\.network \?\? getServerNetwork\(\),/);
   });
 
   it("actually found query sites — the scan cannot pass vacuously", () => {
