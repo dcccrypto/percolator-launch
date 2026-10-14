@@ -4,15 +4,12 @@
 
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
+import { ConnectButton } from "@/components/wallet/ConnectButtonLazy";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { isMockMode } from "@/lib/mock-mode";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 
-const ConnectButton = dynamic(
-  () => import("@/components/wallet/ConnectButton").then((m) => m.ConnectButton),
-  { ssr: false }
-);
 
 // Lazy load heavy components
 const DashboardHeader = dynamic(

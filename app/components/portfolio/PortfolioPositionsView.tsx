@@ -38,6 +38,7 @@ import { isSentinelValue } from "@/lib/health";
 import { releasedPnlFace } from "@/lib/convert-released-pnl";
 import { positionSizeUsdText } from "@/lib/q-usd";
 import dynamic from "next/dynamic";
+import { ConnectButton } from "@/components/wallet/ConnectButtonLazy";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { GlowButton } from "@/components/ui/GlowButton";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
@@ -52,10 +53,6 @@ import { computePositionLeverage, describePositionLeverage, POSITION_LEVERAGE_LA
 import { formatSignedUsd } from "@/lib/pnl-card";
 import { InfoIcon } from "@/components/ui/Tooltip";
 
-const ConnectButton = dynamic(
-  () => import("@/components/wallet/ConnectButton").then((m) => m.ConnectButton),
-  { ssr: false }
-);
 
 /** Same mechanics wording as the trade page's withdraw card (settlingProfitMessage). */
 const SETTLING_PROFIT_TITLE =
