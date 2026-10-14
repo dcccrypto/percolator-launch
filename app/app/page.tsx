@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { ButtonLink } from "@/components/ui/Button";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
@@ -111,12 +112,14 @@ export default function Home() {
       <section className="relative mx-auto mt-28 max-w-[1100px] px-6 pb-20 sm:mt-40 sm:px-8">
         {/* Character banner floats above the whole section (heading + table) so it
             never overlaps the links or columns. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        {/* next/image + priority: on mobile this is the page's LCP element. A 1626 px source shown at
+            ~84% of a phone's width; the srcset serves a right-sized copy and priority preloads it. */}
+        <Image
           src="/landing/char-markets.webp"
           width={1626}
           height={369}
-          decoding="async"
+          priority
+          sizes="(min-width: 640px) min(52vw, 560px), 84vw"
           alt=""
           aria-hidden="true"
           className="pointer-events-none z-20 mx-auto -mb-2 block h-auto w-[84%] drop-shadow-[0_14px_26px_rgba(0,0,0,0.55)] sm:absolute sm:bottom-full sm:left-1/2 sm:mx-0 sm:mb-1.5 sm:w-[min(52%,560px)] sm:-translate-x-1/2"
@@ -144,13 +147,11 @@ export default function Home() {
 
       {/* ─── Trending on Solana DEXs (third-party tokens without a Percolator market yet) ─── */}
       <section className="relative mx-auto mt-28 max-w-[1100px] px-6 pb-20 sm:mt-40 sm:px-8">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        <Image
           src="/landing/char-trending.webp"
           width={1672}
           height={337}
-          loading="lazy"
-          decoding="async"
+          sizes="(min-width: 640px) min(52vw, 560px), 84vw"
           alt=""
           aria-hidden="true"
           className="pointer-events-none z-20 mx-auto -mb-2 block h-auto w-[84%] drop-shadow-[0_14px_26px_rgba(0,0,0,0.55)] sm:absolute sm:bottom-full sm:right-[3%] sm:mx-0 sm:mb-1.5 sm:w-[min(52%,560px)]"
