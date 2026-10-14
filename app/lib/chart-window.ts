@@ -69,10 +69,10 @@ export const MIN_WINDOW_SEC = DAY;
  * payload the chart cannot draw. Asserted over every entry below by
  * __tests__/lib/chart-window.test.ts.
  *
- * NOTE what this does NOT bound: the ROWS the server reads.
- * queryTradesForCandles caps at 50k trades, and a single daily bucket can be
- * backed by millions of them, so a bar ceiling says nothing about the row cap.
- * Those are separate limits and this is only the first.
+ * NOTE what this does NOT bound: the ROWS the server reads. /api/candles now
+ * aggregates in Postgres (queryCandlesAggregated, CANDLE_MAX_BARS bars out),
+ * and a single daily bucket can be backed by millions of trades, so a bar
+ * ceiling says nothing about the rows scanned. Separate limits.
  */
 export const MAX_BARS_PER_REQUEST = 4000;
 
