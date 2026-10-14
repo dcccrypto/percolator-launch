@@ -18,6 +18,9 @@ export default defineConfig({
       NEXT_PUBLIC_DEFAULT_NETWORK: 'devnet',
       // Valid program ID for tests (module-level consts evaluated at load time need a real pubkey)
       NEXT_PUBLIC_PROGRAM_ID: '5BZWY6XWPxuWFxs2nPCLLsVaKRWZVnzZh3FkJDLJBkJf',
+      // lib/market-registry.ts memoizes the market rows per instance; tests read fresh rows each
+      // call unless they opt in (see __tests__/lib/market-registry-memo.test.ts).
+      MARKET_ROWS_MEMO_MS: '0',
     },
     coverage: {
       provider: 'v8',
