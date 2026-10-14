@@ -21,6 +21,7 @@ export default defineConfig({
       // lib/market-registry.ts memoizes the market rows per instance; tests read fresh rows each
       // call unless they opt in (see __tests__/lib/market-registry-memo.test.ts).
       MARKET_ROWS_MEMO_MS: '0',
+      REGISTERED_MARKETS_DB_MEMO_MS: '0',
     },
     coverage: {
       provider: 'v8',
