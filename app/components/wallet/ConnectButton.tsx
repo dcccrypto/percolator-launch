@@ -72,8 +72,8 @@ const noopSubscribe = () => () => {};
  * Pages are server-rendered, but which wallets this browser has (and so whether the button reads
  * "Connect Solflare", "Connect Wallet" or "Install Phantom") is only known in the browser, and the
  * server pass has no wallet-adapter provider at all. So the server pass and the hydration pass both
- * render the plain "Connect Wallet" button, and the real one takes over right after hydration
- * (useSyncExternalStore: server snapshot false, client snapshot true, no hydration mismatch).
+ * render an invisible placeholder of the button's size, and the real one takes over right after
+ * hydration (useSyncExternalStore: server snapshot false, client snapshot true, no mismatch).
  */
 const ConnectButtonAdapterGate: FC = () => {
   const hydrated = useSyncExternalStore(noopSubscribe, () => true, () => false);
