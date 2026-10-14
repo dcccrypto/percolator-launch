@@ -83,12 +83,14 @@ describe("wiring", () => {
 
   it("/api/candles fills only when asked (fill=1), seeded and capped at now", () => {
     const route = read("../../app/api/candles/[slab]/route.ts");
-    expect(route).toMatch(/if \(q\.get\("fill"\) === "1"\) \{[\s\S]*?queryLastTradePriceBefore\(validSlab, fromSec\)[\s\S]*?fillCandleGaps\(/);
-    expect(route).toMatch(/toSec: Math\.min\(toSec, Math\.floor\(Date\.now\(\) \/ 1000\)\)/);
+    // Seeded at the bucket-aligned window start (review E3 rounds from/to to the bucket).
+    expect(route).toMatch(/if \(q\.get\("fill"\) === "1"\) \{[\s\S]*?queryLastTradePriceBefore\(validSlab, win\.firstBucket\)[\s\S]*?fillCandleGaps\(/);
+    expect(route).toMatch(/const nowSec = Math\.floor\(Date\.now\(\) \/ 1000\);/);
+    expect(route).toMatch(/toSec: Math\.min\(toSec, nowSec\)/);
   });
 
   it("the chart's Last series asks for the filled series", () => {
-    expect(read("../../lib/tv/data/candlesApiProvider.ts")).toMatch(/&to=\$\{Math\.floor\(toSec\)\}&fill=1`/);
+    expect(read("../../lib/tv/data/candlesApiProvider.ts")).toMatch(/&to=\$\{win\.to\}&fill=1`/);
   });
 
   it("the Mark line is drawn on every series, including Mark (it is the current-price line)", () => {
@@ -97,8 +99,8 @@ describe("wiring", () => {
     expect(tv).not.toMatch(/showMark: s\.series !== "mark"/);
   });
 
-  it("does not seed the fill when the trade query hit its row ceiling (oldest trades were dropped)", () => {
+  it("does not seed the fill when the aggregate hit its bar ceiling (oldest buckets were dropped)", () => {
     const route = fs.readFileSync(path.resolve(__dirname, "../../app/api/candles/[slab]/route.ts"), "utf8");
-    expect(route).toMatch(/rows\.length >= CANDLE_TRADE_ROW_LIMIT \? null : await queryLastTradePriceBefore/);
+    expect(route).toMatch(/agg\.truncated \? null : await queryLastTradePriceBefore/);
   });
 });

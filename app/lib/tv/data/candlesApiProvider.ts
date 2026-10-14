@@ -91,6 +91,16 @@ export function parseUdf(body: unknown): ProviderBar[] {
   return normalizeBars(bars);
 }
 
+/**
+ * `from` and `to` down to their bucket starts. The server answers whole buckets from the bucket of
+ * `from` through the bucket of `to` (inclusive), so this asks for exactly the buckets the raw window
+ * touched, and every raw `now` inside one bucket maps to one URL.
+ */
+export function alignCandleWindow(fromSec: number, toSec: number, bucketSec: number): { from: number; to: number } {
+  if (!(bucketSec > 0)) return { from: Math.floor(fromSec), to: Math.floor(toSec) };
+  return { from: Math.floor(fromSec / bucketSec) * bucketSec, to: Math.floor(toSec / bucketSec) * bucketSec };
+}
+
 export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDataProvider {
   const { fetchImpl, trades, marks } = deps;
   const now = deps.now ?? Date.now;
@@ -101,7 +111,10 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
     if (candlesUnavailable) return [];
     // fill=1: empty buckets carry the previous close, so a quiet market's last-trade chart is a
     // continuous line, not scattered dashes with gaps (see /api/candles fillCandleGaps).
-    const url = `/api/candles/${encodeURIComponent(slab)}?resolution=${res}&from=${Math.floor(fromSec)}&to=${Math.floor(toSec)}&fill=1`;
+    // Bucket-aligned from/to (review E3): the server answers per whole bucket anyway, and an aligned
+    // URL repeats across viewers and polls, so the edge cache can serve it.
+    const win = alignCandleWindow(fromSec, toSec, RESOLUTION_SECONDS[res]);
+    const url = `/api/candles/${encodeURIComponent(slab)}?resolution=${res}&from=${win.from}&to=${win.to}&fill=1`;
     const r = await fetchImpl(url);
     if (r.status === 404) {
       candlesUnavailable = true;

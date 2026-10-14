@@ -19,7 +19,9 @@ import { fetchMarketsList, listedMarketRows } from "@/lib/markets-list-client";
 export function hourlyHistoryUrl(slab: string, series: PerpSeries, nowSec: number): string {
   const s = encodeURIComponent(slab);
   return series === "last"
-    ? `/api/candles/${s}?resolution=60&from=${nowSec - 30 * 3600}&to=${nowSec}`
+    // Hour-aligned (review E3): the URL changes once an hour instead of every poll, so the edge
+    // cache serves it; the server includes the whole bucket of `to`, so the window still reaches now.
+    ? `/api/candles/${s}?resolution=60&from=${Math.floor((nowSec - 30 * 3600) / 3600) * 3600}&to=${Math.floor(nowSec / 3600) * 3600}`
     : `/api/perp-chart/${s}?series=${series}&resolution=60&countBack=30`;
 }
 

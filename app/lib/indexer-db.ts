@@ -135,7 +135,8 @@ export async function queryTrades(
 
 /**
  * Raw trades (price + size + created_at) for a slab in a time window.
- * Used by the /api/candles route to build OHLCV bars in-process.
+ * The /api/candles route no longer uses this (it aggregates in SQL: queryCandlesAggregated); it is
+ * kept as the reference the SQL aggregate is tested against (with bucketCandles).
  */
 /** Row ceiling of one candle query; a result this long may have lost its oldest trades. */
 export const CANDLE_TRADE_ROW_LIMIT = 50_000;
@@ -167,6 +168,104 @@ export async function queryTradesForCandles(
     LIMIT ${maxRows}
   `;
   return rows.reverse();
+}
+
+// ── OHLCV aggregated in SQL (review E3, 2026-10-14) ─────────────────────────
+//
+// /api/candles used to pull up to 50,000 raw trade rows per call (about 3 MB on a busy market) and
+// bucket them in Node. The same buckets are now built in Postgres and only the bars cross the wire
+// (one row per traded bucket). bucketCandles() stays as the reference implementation: the
+// aggregation is tested against it on the same rows (__tests__/lib/candles-sql-aggregate.test.ts).
+
+/** Most bars one aggregated query returns; the NEWEST are kept (like the old row ceiling). */
+export const CANDLE_MAX_BARS = 10_000;
+
+/**
+ * The bucket-aligned window for a request. `firstBucket` is the bucket holding `fromSec`,
+ * `endExclusive` the end of the bucket holding `toSec`: the same buckets the raw path produced,
+ * but each one complete, so the answer depends only on the rounded window (cacheable).
+ */
+export function candleWindow(fromSec: number, toSec: number, bucketSeconds: number): { firstBucket: number; lastBucket: number; endExclusive: number } {
+  const firstBucket = Math.floor(fromSec / bucketSeconds) * bucketSeconds;
+  const lastBucket = Math.floor(toSec / bucketSeconds) * bucketSeconds;
+  return { firstBucket, lastBucket, endExclusive: lastBucket + bucketSeconds };
+}
+
+/**
+ * Params: $1 slab, $2 network, $3 bucket seconds, $4 first bucket (unix s, inclusive),
+ * $5 window end (unix s, exclusive), $6 max bars.
+ *
+ * Mirrors bucketCandles exactly: a row counts only with a positive, finite price and a finite (or
+ * NULL) size; bucket = floor(epoch seconds) floored to the bucket; open/close = first/last price by
+ * (created_at, id); v = sum(|size|). Prices and volume go out as numeric text so the JS side parses
+ * them with the same Number() the raw path used.
+ */
+export const CANDLE_AGG_SQL = `
+SELECT t, o, h, l, c, v FROM (
+  SELECT (floor(extract(epoch FROM created_at))::bigint / $3::bigint) * $3::bigint AS t,
+         ((array_agg(price ORDER BY created_at, id))[1])::text AS o,
+         max(price)::text AS h,
+         min(price)::text AS l,
+         ((array_agg(price ORDER BY created_at DESC, id DESC))[1])::text AS c,
+         coalesce(sum(abs(size)), 0)::text AS v
+    FROM trades
+   WHERE slab_address = $1
+     AND network = $2
+     AND created_at >= to_timestamp($4::bigint)
+     AND created_at <  to_timestamp($5::bigint)
+     AND price IS NOT NULL AND price > 0 AND price < 'Infinity'::numeric
+     AND (size IS NULL OR abs(size) < 'Infinity'::numeric)
+   GROUP BY 1
+   ORDER BY 1 DESC
+   LIMIT $6
+) b ORDER BY t`;
+
+interface AggCandleRow { t: string | number; o: string; h: string; l: string; c: string; v: string }
+
+/** Aggregated rows -> UDF. Pure (exported for the equivalence test). */
+export function aggRowsToUdf(rows: readonly AggCandleRow[]): UdfResponse {
+  if (rows.length === 0) return emptyUdf("no_data");
+  const out: UdfResponse = { s: "ok", t: [], o: [], h: [], l: [], c: [], v: [] };
+  for (const r of rows) {
+    out.t.push(Number(r.t));
+    out.o.push(Number(r.o));
+    out.h.push(Number(r.h));
+    out.l.push(Number(r.l));
+    out.c.push(Number(r.c));
+    out.v.push(Number(r.v));
+  }
+  return out;
+}
+
+/** Minimal client surface (the postgres.js instance, or a test double). */
+export interface CandleSql {
+  unsafe(query: string, params?: unknown[]): PromiseLike<ArrayLike<unknown>> | Promise<ArrayLike<unknown>>;
+}
+
+/**
+ * OHLCV for one slab, aggregated in Postgres. `truncated` = the bar ceiling was hit (the oldest
+ * buckets are missing), which callers treat like the old row ceiling.
+ */
+export async function queryCandlesAggregated(
+  slabAddress: string,
+  bucketSeconds: number,
+  firstBucket: number,
+  endExclusive: number,
+  opts: { maxBars?: number; sql?: CandleSql; network?: string } = {},
+): Promise<{ udf: UdfResponse; truncated: boolean }> {
+  const sql: CandleSql = opts.sql ?? (getSql() as unknown as CandleSql);
+  const maxBars = opts.maxBars ?? CANDLE_MAX_BARS;
+  const rows = Array.from(
+    (await sql.unsafe(CANDLE_AGG_SQL, [
+      slabAddress,
+      opts.network ?? getServerNetwork(),
+      bucketSeconds,
+      firstBucket,
+      endExclusive,
+      maxBars,
+    ])) as ArrayLike<AggCandleRow>,
+  );
+  return { udf: aggRowsToUdf(rows), truncated: rows.length >= maxBars };
 }
 
 /**
