@@ -29,6 +29,7 @@ import {
   type ProviderResolution,
 } from "./provider";
 import type { TradeStream } from "./tradeStream";
+import { MARKETS_LIST_URL, listedMarketRows, type MarketsListBody } from "@/lib/markets-list-client";
 
 type FetchLike = (input: string, init?: { signal?: AbortSignal }) => Promise<{
   ok: boolean;
@@ -265,10 +266,11 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
     async searchSymbols(query: string): Promise<ChartSymbolMeta[]> {
       const q = query.trim().toUpperCase();
       try {
-        const r = await fetchImpl("/api/markets");
+        // The canonical list URL (lib/markets-list-client.ts), so this shares the edge copy with
+        // every other caller; listedMarketRows() is what the bare /api/markets returned.
+        const r = await fetchImpl(MARKETS_LIST_URL);
         if (!r.ok) return [];
-        const body = (await r.json()) as { markets?: unknown };
-        const list = Array.isArray(body.markets) ? body.markets : [];
+        const list = listedMarketRows((await r.json()) as MarketsListBody) ?? [];
         const out: ChartSymbolMeta[] = [];
         for (const raw of list) {
           if (typeof raw !== "object" || raw === null) continue;

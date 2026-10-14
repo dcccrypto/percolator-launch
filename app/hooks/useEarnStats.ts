@@ -21,6 +21,7 @@ import { splitPotLedgerKeys, splitPotStateFromAccounts, vaultValue } from '@/lib
 import { atomsToUsd, vaultWithdrawView } from '@/lib/limits/earn-withdrawable';
 import type { BlockedBy, WithdrawStatus } from '@/lib/limits/earn-withdrawable';
 import { isWrapperAccount } from "@/lib/v22/layout";
+import { fetchMarketsList, listedMarketRows } from '@/lib/markets-list-client';
 
 // ═══════════════════════════════════════════════════════════════
 // Types
@@ -308,15 +309,10 @@ interface LiveMarketMeta {
  */
 async function fetchLiveMarketsMeta(): Promise<{ data: LiveMarketMeta[]; ok: boolean }> {
   try {
-    // Mirror useAllMarketStats.ts's fetch: same endpoint + generous limit, Accept JSON.
-    const resp = await fetch('/api/markets?limit=500', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-    });
-    if (!resp.ok) return { data: [], ok: false };
-    const body: unknown = await resp.json();
-    const rows = (body as { markets?: unknown })?.markets;
-    if (!Array.isArray(rows)) return { data: [], ok: false };
+    // The canonical list (lib/markets-list-client.ts), shared with every other list caller;
+    // listedMarketRows() is exactly what the old `?limit=500` (zombies excluded) returned.
+    const rows = listedMarketRows(await fetchMarketsList());
+    if (rows === null) return { data: [], ok: false };
 
     const data = rows.reduce<LiveMarketMeta[]>((acc, entry) => {
       if (typeof entry !== 'object' || entry === null) return acc;

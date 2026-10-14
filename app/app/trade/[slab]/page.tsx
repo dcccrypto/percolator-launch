@@ -34,6 +34,7 @@ import TradingPageLoading from "./loading";
 import { ADMIN_BURN_COPY } from "@/lib/admin-burn-copy";
 import { MultiAssetNotice } from "@/components/trade/MultiAssetNotice";
 import { isMultiAssetMarket } from "@/lib/v22/market-cap";
+import { fetchMarketsList, listedMarketRows } from "@/lib/markets-list-client";
 
 // Lazy-load the chart so it streams AFTER the order ticket + positions are
 // interactive, instead of blocking the trade page's initial load. ssr:false —
@@ -672,11 +673,12 @@ function SlugResolvePage({ slug }: { slug: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/markets")
-      .then((r) => r.json())
+    // The canonical list (lib/markets-list-client.ts); listedMarketRows() is what the bare
+    // /api/markets returned (zombies excluded).
+    fetchMarketsList()
       .then((data) => {
         if (cancelled) return;
-        const markets: Array<{ slab_address: string; symbol?: string; mint_address?: string; volume_24h?: number | null; total_open_interest?: number | null; created_at?: string }> = data.markets ?? [];
+        const markets = (listedMarketRows(data) ?? []) as unknown as Array<{ slab_address: string; symbol?: string; mint_address?: string; volume_24h?: number | null; total_open_interest?: number | null; created_at?: string }>;
         const slugNorm = slug.toUpperCase().replace(/-PERP$/, "");
 
         const sorted = [...markets].sort((a, b) => {
