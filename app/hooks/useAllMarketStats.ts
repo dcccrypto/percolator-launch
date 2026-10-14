@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import useSWR from "swr";
-import { MARKET_REGISTERED_EVENT } from "@/lib/keeper-register-client";
+import { MARKET_REGISTERED_EVENT } from "@/lib/market-registered-event";
 import { isBlockedSlab } from "@/lib/blocklist";
 import type { Database } from "@/lib/database.types";
 
