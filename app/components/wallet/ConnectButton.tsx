@@ -1,6 +1,6 @@
 "use client";
 
-import { FC, useCallback, useMemo, useState, useRef, useEffect } from "react";
+import { FC, useCallback, useMemo, useState, useRef, useEffect, useSyncExternalStore } from "react";
 import { useToast } from "@/hooks/useToast";
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -8,6 +8,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletReadyState } from "@solana/wallet-adapter-base";
 import { usePrivyAvailable } from "@/hooks/usePrivySafe";
 import { useWalletAdapterAvailable } from "@/hooks/useWalletAdapterAvailable";
+import { ConnectButtonPlaceholder } from "./ConnectButtonPlaceholder";
 
 /**
  * Privy-backed button is loaded on demand — its @privy-io/react-auth import (and
@@ -48,7 +49,7 @@ export const ConnectButton: FC = () => {
   }
 
   if (adapterAvailable) {
-    return <ConnectButtonAdapterInner />;
+    return <ConnectButtonAdapterGate />;
   }
 
   // Neither Privy nor wallet-adapter — read-only mode
@@ -61,6 +62,21 @@ export const ConnectButton: FC = () => {
       Connect
     </button>
   );
+};
+
+const noopSubscribe = () => () => {};
+
+/**
+ * Pages are server-rendered, but which wallets this browser has (and so whether the button reads
+ * "Connect Solflare", "Connect Wallet" or "Install Phantom") is only known in the browser, and the
+ * server pass has no wallet-adapter provider at all. So the server pass and the hydration pass both
+ * render the plain "Connect Wallet" button, and the real one takes over right after hydration
+ * (useSyncExternalStore: server snapshot false, client snapshot true, no hydration mismatch).
+ */
+const ConnectButtonAdapterGate: FC = () => {
+  const hydrated = useSyncExternalStore(noopSubscribe, () => true, () => false);
+  if (!hydrated) return <ConnectButtonPlaceholder />;
+  return <ConnectButtonAdapterInner />;
 };
 
 /**

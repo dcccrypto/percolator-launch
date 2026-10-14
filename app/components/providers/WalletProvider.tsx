@@ -1,6 +1,6 @@
 "use client";
 
-import { Component, FC, ReactNode, useMemo, useState, useEffect } from "react";
+import { Component, FC, ReactNode, Suspense, lazy, useEffect, type ComponentType } from "react";
 import dynamic from "next/dynamic";
 import { AutoFundProvider } from "./AutoFundProvider";
 import { PrivyAvailableContext } from "@/hooks/usePrivySafe";
@@ -48,6 +48,12 @@ class PrivyErrorBoundary extends Component<
  * Dynamically import the Privy wrapper with SSR disabled.
  * This prevents Privy SDK from being evaluated during server-side rendering,
  * which crashes because Privy accesses browser-only APIs (window, localStorage).
+ *
+ * Privy deployments still bail the page out of server rendering (the server HTML body is empty
+ * until this chunk runs). Rendering the children on the server without Privy is not an option
+ * here: PrivyProvider's internal tree shifts every descendant's React useId, so the server and
+ * client markup would disagree (measured 2026-10-14: label/input ids on /stake). The
+ * wallet-adapter path below has no such problem and is server-rendered.
  */
 const PrivyProviderClient = dynamic(
   () => import("./PrivyProviderClient").then((mod) => mod.default),
@@ -55,15 +61,31 @@ const PrivyProviderClient = dynamic(
 );
 
 /**
- * Dynamically import the wallet-adapter provider with SSR disabled.
- * Used as the fallback when NEXT_PUBLIC_PRIVY_APP_ID is not set, so any user can
- * connect Phantom / Solflare / Backpack (or any Wallet Standard wallet) without
- * needing a Privy account.
+ * The wallet-adapter provider, used when NEXT_PUBLIC_PRIVY_APP_ID is not set so any user can
+ * connect Phantom / Solflare / Backpack (or any Wallet Standard wallet) without a Privy account.
+ *
+ * It used to be mounted with `next/dynamic({ ssr: false })` AROUND the whole app, which made every
+ * page bail out of server rendering: the server HTML body was empty and nothing painted until the
+ * wallet chunk had downloaded and run (measured 2026-10-14: landing LCP 11.5 s on Lighthouse mobile,
+ * the whole <body> = BAILOUT_TO_CLIENT_SIDE_RENDERING).
+ *
+ * Now the server renders the children directly (no wallet SDK, never evaluated on the server), so
+ * the page HTML is real content. On the client the provider is a React.lazy component inside a
+ * <Suspense>: during hydration the chunk suspends, React keeps the server HTML on screen and hydrates
+ * it in place once the chunk arrives (no remount, no blank page, no flash). The provider renders
+ * exactly its children, one child per level, so the server and client markup (and useIds) agree.
+ * Components whose output depends on the browser's wallets render a stable placeholder for the
+ * hydration pass (ConnectButtonAdapterGate).
  */
-const WalletAdapterProviderClient = dynamic(
-  () => import("./WalletAdapterProviderClient").then((mod) => mod.default),
-  { ssr: false }
-);
+function clientOnlyProvider<P extends { children?: ReactNode }>(LazyProvider: ComponentType<P>): FC<P> {
+  const ClientOnlyProvider: FC<P> = (props) => {
+    if (typeof window === "undefined") return <>{props.children}</>;
+    return <LazyProvider {...props} />;
+  };
+  return ClientOnlyProvider;
+}
+
+const WalletAdapterProviderClient = clientOnlyProvider(lazy(() => import("./WalletAdapterProviderClient")));
 
 export const WalletProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
@@ -103,11 +125,13 @@ export const WalletProvider: FC<{ children: ReactNode }> = ({ children }) => {
       <PrivyAvailableContext.Provider value={false}>
         <WalletAdapterAvailableContext.Provider value={true}>
           <PreferredWalletContext.Provider value={preferredWallet}>
-            <WalletAdapterProviderClient>
-              {children}
-              {/* UX WP-10 (FA-2): the faucet modal is mounted in BOTH provider branches. */}
-              <DevnetFaucetModal />
-            </WalletAdapterProviderClient>
+            <Suspense fallback={null}>
+              <WalletAdapterProviderClient>
+                {children}
+                {/* UX WP-10 (FA-2): the faucet modal is mounted in BOTH provider branches. */}
+                <DevnetFaucetModal />
+              </WalletAdapterProviderClient>
+            </Suspense>
           </PreferredWalletContext.Provider>
         </WalletAdapterAvailableContext.Provider>
       </PrivyAvailableContext.Provider>

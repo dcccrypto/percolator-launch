@@ -59,15 +59,15 @@ const HOW_IT_WORKS = [
 export default function Home() {
   return (
     <div className="relative">
-      {/* ─── Hero ─── */}
+      {/* ─── Hero ─── (CSS reveal, not ScrollReveal: it paints from the server HTML; see .reveal-up) */}
       <section className="mx-auto flex min-h-[calc(72dvh-3.5rem)] max-w-[1100px] flex-col justify-center px-6 py-20 sm:px-8">
-        <ScrollReveal>
+        <div className="reveal-up">
           <div className="mb-5 text-[11px] font-medium uppercase tracking-[0.25em] text-[var(--accent-text)]">
             // v17 · solana devnet
           </div>
-        </ScrollReveal>
+        </div>
 
-        <ScrollReveal delay={0.06}>
+        <div className="reveal-up" style={{ animationDelay: "0.06s" }}>
           <h1
             className="max-w-[16ch] text-balance text-[var(--text)]"
             style={{
@@ -80,16 +80,16 @@ export default function Home() {
           >
             Perpetual futures that can&apos;t rug you.
           </h1>
-        </ScrollReveal>
+        </div>
 
-        <ScrollReveal delay={0.12}>
+        <div className="reveal-up" style={{ animationDelay: "0.12s" }}>
           <p className="mt-6 max-w-[52ch] text-[15px] leading-relaxed text-[var(--text-secondary)]">
             Every market carries its own insurance fund, prices off live Solana DEX pools, and
             can burn its own admin key. Fully on-chain, open to anyone, and open to any token.
           </p>
-        </ScrollReveal>
+        </div>
 
-        <ScrollReveal delay={0.18}>
+        <div className="reveal-up" style={{ animationDelay: "0.18s" }}>
           <div className="mt-10 flex flex-wrap items-center gap-6">
             <ButtonLink href="/markets" variant="primary" size="lg" iconRight={ARROW}>
               Start trading
@@ -104,7 +104,7 @@ export default function Home() {
               </span>
             </Link>
           </div>
-        </ScrollReveal>
+        </div>
       </section>
 
       {/* ─── Live market rail ─── */}
