@@ -147,6 +147,14 @@ const nextConfig = {
         source: "/charting_library/bundles/:path*",
         headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
       },
+      // Unhashed public/ assets (art, icons, audio, PnL card art): next start / Vercel serve them
+      // with max-age=0, so every page view revalidated each one (a 304 round trip apiece). An hour
+      // of browser cache plus a day of stale-while-revalidate; a replaced file shows within the hour.
+      // Not token-metadata/ (read by wallets/explorers) or tv-theme/ (own rule below).
+      ...["/landing/:path*", "/images/:path*", "/icons/:path*", "/audio/:path*", "/pnl-cards/:path*"].map((source) => ({
+        source,
+        headers: [{ key: "Cache-Control", value: "public, max-age=3600, stale-while-revalidate=86400" }],
+      })),
       {
         source: "/tv-theme/:path*",
         headers: [{ key: "Cache-Control", value: "public, max-age=300, must-revalidate" }],
