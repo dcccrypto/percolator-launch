@@ -1,10 +1,18 @@
 "use client";
 
 import { useEffect } from "react";
+import dynamic from "next/dynamic";
 import { useHashTab } from "@/hooks/useHashTab";
 import { EarnVaultView } from "@/components/earn/EarnVaultView";
-import StakePage from "@/app/stake/page";
-import MyMarketsPage from "@/app/my-markets/page";
+import { prefetchOnIdle } from "@/lib/prefetch-on-idle";
+
+// Only the default tab (Vaults) is in this page's first-load bundle; the others are split out and
+// warmed at idle so switching to one is still instant (see app/portfolio/page.tsx).
+const loadStake = () => import("@/app/stake/page");
+const loadMyMarkets = () => import("@/app/my-markets/page");
+const tabLoading = () => <div className="min-h-[60vh]" aria-busy="true" />;
+const StakePage = dynamic(loadStake, { ssr: false, loading: tabLoading });
+const MyMarketsPage = dynamic(loadMyMarkets, { ssr: false, loading: tabLoading });
 import {
   EARN_TABS,
   DEFAULT_EARN_TAB,
@@ -27,6 +35,8 @@ export default function EarnHubPage() {
   useEffect(() => {
     document.title = "Earn | Percolator";
   }, []);
+
+  useEffect(() => prefetchOnIdle([loadStake, loadMyMarkets]), []);
 
   return (
     <div>

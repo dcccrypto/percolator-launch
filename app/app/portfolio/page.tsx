@@ -1,12 +1,23 @@
 "use client";
 
 import { useEffect } from "react";
+import dynamic from "next/dynamic";
 import { useHashTab } from "@/hooks/useHashTab";
 import DashboardPage from "@/app/dashboard/page";
-import WalletPage from "@/app/wallet/page";
-import MyMarketsPage from "@/app/my-markets/page";
-import { PortfolioPositionsView } from "@/components/portfolio/PortfolioPositionsView";
-import { RetiredHoldings } from "@/components/portfolio/RetiredHoldings";
+import { prefetchOnIdle } from "@/lib/prefetch-on-idle";
+
+// Only the default tab (Overview) is in this page's first-load bundle. The other tabs are split
+// out (the Wallet tab alone imports the whole Privy SDK) and warmed at idle, so switching to
+// one is still instant; a deep link (/portfolio#wallet) loads its tab straight away.
+const loadPositions = () => import("@/components/portfolio/PortfolioPositionsView");
+const loadRetired = () => import("@/components/portfolio/RetiredHoldings");
+const loadWallet = () => import("@/app/wallet/page");
+const loadMyMarkets = () => import("@/app/my-markets/page");
+const tabLoading = () => <div className="min-h-[60vh]" aria-busy="true" />;
+const PortfolioPositionsView = dynamic(() => loadPositions().then((m) => m.PortfolioPositionsView), { ssr: false, loading: tabLoading });
+const RetiredHoldings = dynamic(() => loadRetired().then((m) => m.RetiredHoldings), { ssr: false });
+const WalletPage = dynamic(loadWallet, { ssr: false, loading: tabLoading });
+const MyMarketsPage = dynamic(loadMyMarkets, { ssr: false, loading: tabLoading });
 
 /**
  * Portfolio hub. Consolidates the four account surfaces (Overview / Positions
@@ -35,6 +46,8 @@ export default function PortfolioHubPage() {
   useEffect(() => {
     document.title = "Portfolio | Percolator";
   }, []);
+
+  useEffect(() => prefetchOnIdle([loadPositions, loadRetired, loadWallet, loadMyMarkets]), []);
 
   return (
     <div>
