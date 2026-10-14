@@ -10,10 +10,14 @@ import { type Network, getConfig, setNetwork } from "@/lib/config";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { NavDropdown, type NavItem } from "./NavDropdown";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import { ConnectButtonPlaceholder } from "@/components/wallet/ConnectButtonPlaceholder";
 
+// Without Privy the server renders the disconnected button, so the header's connect control paints
+// from the HTML (it was the trade page's LCP element, ~8 s on mobile, when it waited for this chunk).
+// With Privy the whole tree is client-rendered and its button looks different: no placeholder.
 const ConnectButton = dynamic(
   () => import("@/components/wallet/ConnectButton").then((m) => m.ConnectButton),
-  { ssr: false }
+  { ssr: false, loading: () => (process.env.NEXT_PUBLIC_PRIVY_APP_ID ? null : <ConnectButtonPlaceholder />) }
 );
 
 /* ── Navigation groups ── */

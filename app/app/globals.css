@@ -433,6 +433,17 @@ body::before {
 .gsap-fade { opacity: 0; animation: gsap-fade-fallback 0.3s ease-out 0.5s forwards; }
 @keyframes gsap-fade-fallback { to { opacity: 1; } }
 
+/* Above-the-fold reveal that needs no JS: the same fade-up ScrollReveal plays (20px, 0.7s,
+   power3.out), but it starts at first paint from the server HTML instead of after hydration,
+   so the hero is the LCP element straight from the document. Delay via inline animation-delay. */
+.reveal-up { animation: reveal-up 0.7s cubic-bezier(0.215, 0.61, 0.355, 1) both; }
+@keyframes reveal-up { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .reveal-up { animation: none; } }
+
+/* Server-rendered "Connect Wallet" placeholder (components/wallet/ConnectButtonPlaceholder.tsx): kept
+   invisible, space reserved, for a visitor whose remembered wallet is about to auto-connect. */
+html[data-wallet-remembered] .wallet-connect-placeholder { visibility: hidden; }
+
 .delay-100 { animation-delay: 100ms; }
 .delay-200 { animation-delay: 200ms; }
 .delay-300 { animation-delay: 300ms; }

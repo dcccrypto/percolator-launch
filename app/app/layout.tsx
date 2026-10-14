@@ -105,6 +105,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               } catch(e) {
                 document.documentElement.setAttribute('data-theme', 'dark');
               }
+              try {
+                if (localStorage.getItem('walletName')) document.documentElement.setAttribute('data-wallet-remembered', '');
+              } catch(e) {}
             `,
           }}
         />
