@@ -21,14 +21,9 @@ import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
 import { checkSignatureLanded, timedOutSignature } from '@/lib/tx';
 import { watchPendingSignature } from '@/lib/pending-signature';
 import { explorerTxUrl } from '@/lib/config';
-import dynamic from 'next/dynamic';
+import { ConnectButton } from "@/components/wallet/ConnectButtonLazy";
 import { lpShareWalletNote } from '@/lib/lp-share-wallet-note';
 
-const ConnectButton = dynamic(
-  () =>
-    import('@/components/wallet/ConnectButton').then((m) => m.ConnectButton),
-  { ssr: false },
-);
 
 type Tab = 'deposit' | 'withdraw';
 

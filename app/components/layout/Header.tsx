@@ -4,20 +4,13 @@ import { FC, useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import dynamic from "next/dynamic";
+import { ConnectButton } from "@/components/wallet/ConnectButtonLazy";
 import gsap from "gsap";
 import { type Network, getConfig, setNetwork } from "@/lib/config";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { NavDropdown, type NavItem } from "./NavDropdown";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
-import { ConnectButtonPlaceholder } from "@/components/wallet/ConnectButtonPlaceholder";
 
-// Without Privy the server renders an invisible, button-sized placeholder so the header doesn't shift
-// when the button arrives. With Privy the whole tree is client-rendered: no placeholder, as before.
-const ConnectButton = dynamic(
-  () => import("@/components/wallet/ConnectButton").then((m) => m.ConnectButton),
-  { ssr: false, loading: () => (process.env.NEXT_PUBLIC_PRIVY_APP_ID ? null : <ConnectButtonPlaceholder />) }
-);
 
 /* ── Navigation groups ── */
 /** Pages hidden on mainnet beta — devnet-only faucets and internal pages */
