@@ -39,7 +39,7 @@ import { LaunchSuccess } from "./LaunchSuccess";
 import { ResumeFromChainCard } from "./ResumeFromChainCard";
 import { ChainResumeNotice } from "./ChainResumeNotice";
 import { dropChainResume, useChainResumeWalletGuard } from "@/hooks/useChainResumeWalletGuard";
-import { applyRecoveredLaunch, applySameBrowserPin, atomsToHuman, chainResumeRefusal, pinSameBrowserResume, type RecoveredLaunch, type SameBrowserPin } from "@/lib/launch-recovery";
+import { applyRecoveredLaunch, applySameBrowserPin, atomsToHuman, chainResumeRefusal, pinSameBrowserResume, readInitialMarginBps, SAME_BROWSER_READING_COPY, type RecoveredLaunch, type SameBrowserPin } from "@/lib/launch-recovery";
 import { loadProofPayload, loadProofTx, loadRegisterRequest } from "@/lib/keeper-register-client";
 import { RecoverSolBanner } from "./RecoverSolBanner";
 // W8 fix: share ONE SOL-cost formula with CostEstimate.tsx's own display so the
@@ -246,6 +246,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
   const [sameBrowserPin, setSameBrowserPin] = useState<SameBrowserPin | null>(null);
   const [sameBrowserRefusal, setSameBrowserRefusal] = useState<string | null>(null);
   const activeSameBrowserPin = resumeFromStep !== null && sameBrowserPin && sameBrowserPin.slab === resumeSlab ? sameBrowserPin : null;
+  const pinRunRef = useRef(0);
   const pinnedResumeRef = useRef(false);
   pinnedResumeRef.current = !!activeSameBrowserPin;
   // A chain resume belongs to ONE slab and ONE wallet. Switching wallet drops it (and the resume mode it
@@ -1279,8 +1280,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
           // Set resumeFromStep so handleLaunch skips slab creation and resumes correctly.
           setResumeFromStep(fromStep);
           setResumeSlab(slabAddress);
-          // #3377: pin this browser's own resume to the launch's saved proof payload (step 1+).
-          const pinned = pinSameBrowserResume({
+          // #3377: pin this browser's own resume to the launch's saved proof payload (step 1+), with the
+          // margin read from chain. Until that read lands the resume refuses to launch.
+          const run = ++pinRunRef.current;
+          const pinInput = {
             slab: slabAddress,
             fromStep,
             payload: loadProofPayload(slabAddress),
@@ -1289,26 +1292,32 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
             live: { poolAddress: wizard.dexPool?.poolAddress, dexType: wizard.dexPool?.dexType },
             liveIsKeeper: wizard.oracleType === "keeper",
             wallet: walletB58,
-          });
-          if (pinned.ok && pinned.pin) {
-            const pin = pinned.pin;
-            setSameBrowserPin(pin);
-            setSameBrowserRefusal(null);
-            // Show the pinned values in the form and mark them user-set, so detection leaves them alone.
-            setWizard((prev) => ({
-              ...prev,
-              mintAddress: pin.mainnetCA,
-              tradingFeeBps: pin.tradingFeeBps,
-              initialMarginBps: pin.initialMarginBps,
-              marginSetByUser: true,
-              lpCollateral: atomsToHuman(pin.lpCollateralAtoms, 6),
-              lpSetByUser: true,
-            }));
-          } else {
-            setSameBrowserPin(null);
-            setSameBrowserRefusal(pinned.ok ? null : pinned.message);
-            if (!pinned.ok) setChainResumeError(pinned.message);
-          }
+          };
+          setSameBrowserPin(null);
+          setSameBrowserRefusal(fromStep > 0 ? SAME_BROWSER_READING_COPY : null);
+          void (async () => {
+            const chainMarginBps =
+              fromStep > 0 ? await readInitialMarginBps(connection, slabAddress, getConfig().programId as string).catch(() => null) : null;
+            if (run !== pinRunRef.current) return;
+            const pinned = pinSameBrowserResume({ ...pinInput, chainMarginBps });
+            if (pinned.ok && pinned.pin) {
+              const pin = pinned.pin;
+              setSameBrowserPin(pin);
+              setSameBrowserRefusal(null);
+              // Show the pinned values in the form and mark them user-set, so detection leaves them alone.
+              setWizard((prev) => ({
+                ...prev,
+                mintAddress: pin.mainnetCA,
+                tradingFeeBps: pin.tradingFeeBps,
+                initialMarginBps: pin.initialMarginBps,
+                marginSetByUser: true,
+                lpCollateral: atomsToHuman(pin.lpCollateralAtoms, 6),
+                lpSetByUser: true,
+              }));
+            } else {
+              setSameBrowserRefusal(pinned.ok ? null : pinned.message);
+            }
+          })();
         }}
         onReclaimSuccess={() => {
           // Clear wizard localStorage state so the user starts completely fresh

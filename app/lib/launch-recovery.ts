@@ -565,6 +565,8 @@ export interface SameBrowserPin {
 export const SAME_BROWSER_RESUME_REFUSAL =
   "This browser no longer holds the details this launch started with, so it can't be resumed safely from here. Open it from My Markets to continue.";
 
+export const SAME_BROWSER_READING_COPY = "Still reading this launch from the chain. Try again in a moment.";
+
 export type SameBrowserPinResult = { ok: true; pin: SameBrowserPin | null } | { ok: false; message: string };
 
 const asBigInt = (v: unknown): bigint | null => {
@@ -581,9 +583,10 @@ const asBigInt = (v: unknown): bigint | null => {
  * is left to the live form exactly like a fresh launch (`pin: null`). From step 1 on, InitMarket has
  * landed: fee, price, LP seed, pool, symbol and CA come from the creation's proof payload that
  * this browser saved (the memo binds its digest), and the dex type from the saved registration
- * request, or from the live detection only when it still names the same pool. Margin comes from the
- * payload's max_leverage (the launch derived it with ceil(10000 / leverage)); after InitMarket nothing
- * signs it. If any of it is missing, refuse rather than sign or register with drifted values.
+ * request, or from the live detection only when it still names the same pool. Margin comes from chain
+ * (InitMarket's initial_margin_bps): resumed step 2 derives the matcher limits from it and signs them
+ * permanently, and the payload's max_leverage cannot give it back for fractional leverage (1538 bps = 6.5x).
+ * If any of it is missing, refuse rather than sign or register with drifted values.
  */
 export function pinSameBrowserResume(input: {
   slab: string;
@@ -596,6 +599,8 @@ export function pinSameBrowserResume(input: {
   proofTx?: string | null;
   /** The form currently describes a keeper-priced launch. */
   liveIsKeeper?: boolean;
+  /** The slab's on-chain initial_margin_bps (InitMarket); null = the read failed. Required to pin from step 1. */
+  chainMarginBps?: number | null;
 }): SameBrowserPinResult {
   if (input.fromStep <= 0) return { ok: true, pin: null };
   // A launch that never bound a keeper registration (no payload, proof or request saved, and the form is
@@ -608,13 +613,14 @@ export function pinSameBrowserResume(input: {
   const price = asBigInt(p.initial_price_e6);
   const lp = asBigInt(p.lp_collateral);
   const fee = typeof p.trading_fee_bps === "number" ? p.trading_fee_bps : Number.NaN;
-  const lev = typeof p.max_leverage === "number" ? p.max_leverage : Number.NaN;
   const pool = typeof p.dex_pool_address === "string" ? p.dex_pool_address : null;
   const symbol = typeof p.symbol === "string" ? p.symbol : null;
   const name = typeof p.name === "string" ? p.name : null;
   const ca = typeof p.mainnet_ca === "string" ? p.mainnet_ca : null;
+  const margin = input.chainMarginBps;
+  if (typeof margin !== "number" || !Number.isInteger(margin) || margin <= 0) return refuse;
   if (price === null || price <= 0n || lp === null || lp < 0n) return refuse;
-  if (!Number.isFinite(fee) || fee < 0 || !Number.isFinite(lev) || lev <= 0) return refuse;
+  if (!Number.isFinite(fee) || fee < 0) return refuse;
   if (!pool || !symbol || !name || !ca) return refuse;
   const saved = input.savedRequest;
   const dexType =
@@ -630,7 +636,7 @@ export function pinSameBrowserResume(input: {
       slab: input.slab,
       initialPriceE6: price,
       tradingFeeBps: fee,
-      initialMarginBps: Math.ceil(10_000 / lev),
+      initialMarginBps: margin,
       lpCollateralAtoms: lp,
       poolAddress: pool,
       dexType,
@@ -639,6 +645,14 @@ export function pinSameBrowserResume(input: {
       mainnetCA: ca,
     },
   };
+}
+
+/** The slab's on-chain initial_margin_bps from its InitMarket transaction, or null when it can't be read. */
+export async function readInitialMarginBps(connection: TxConn, slab: string, wrapperProgramId: string): Promise<number | null> {
+  const read = await readCreationFromChain(connection, slab, wrapperProgramId);
+  if (!read.ok) return null;
+  const bps = Number(read.facts.init.initialMarginBps);
+  return Number.isSafeInteger(bps) && bps > 0 ? bps : null;
 }
 
 /** Apply a same-browser pin to the launch params; a null pin leaves them untouched (a non-resumed launch). */
