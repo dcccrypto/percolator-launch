@@ -213,7 +213,10 @@ describe("same-browser resume pins the launch's parameters (#3377)", () => {
     await act(async () => { fireEvent.mouseDown(launchBtn()); });
     await flush();
     expect(lastParams()).toMatchObject({ tradingFeeBps: 77, lpCollateral: 1_500_000_000n, dexPoolAddress: PIN_POOL });
-    expect(document.body.textContent).toMatch(/1,500\+?Liquidity/);
+    // #3488 moved each dial's readout into a typed <input>, so its value is no longer part of
+    // document.textContent. Read the control itself: more precise than a whole-body match, and
+    // it asserts the exact value the user sees rather than a substring next to the label.
+    expect((screen.getByLabelText("Liquidity value") as HTMLInputElement).value).toBe("1,500");
   });
 
   it("Retry after a failed resumed step keeps the pinned values", async () => {
