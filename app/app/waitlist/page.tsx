@@ -8,6 +8,7 @@ import { usePrivyAvailable } from "@/hooks/usePrivySafe";
 import { resolveActiveWallet, usePreferredWallet } from "@/hooks/usePreferredWallet";
 import { useWaitlistWhoami } from "@/hooks/useWaitlistWhoami";
 import { TurnstileGate } from "@/components/waitlist/TurnstileGate";
+import { InfoTabs } from "@/components/waitlist/InfoTabs";
 import bs58 from "bs58";
 import { track } from "@/lib/analytics";
 import { ANALYTICS_EVENTS } from "@/lib/analytics-config";
@@ -127,19 +128,15 @@ export default function WaitlistPage() {
       <BackdropArt />
 
       <main className="relative mx-auto max-w-[1100px] px-6 pt-16 pb-24 sm:pt-20">
-        <Hero />
-        <SeparatorMono label="Architecture" />
-        <ArchitectureSection />
-        <SeparatorMono label="Mainnet status" />
-        <StatusReadout />
-        <SeparatorMono label="Origin" />
-        <OriginSection />
-        <SeparatorMono label="Reserve your spot" />
-        <SignupSection />
-        <SeparatorMono label="How we'll reach you" />
-        <NotifySection />
-        <SeparatorMono label="FAQ" />
-        <FAQSection />
+        <section className="grid items-start gap-x-12 gap-y-12 lg:grid-cols-[1.1fr_1fr]">
+          <Hero />
+          {/* id="reserve": share links (/r/[code]) land on /waitlist?referrer=…#reserve. */}
+          <div id="reserve" className="flex scroll-mt-20 justify-start lg:justify-end lg:pt-2">
+            <SignupCard />
+          </div>
+        </section>
+        <SeparatorMono label="More about Percolator" />
+        <MoreInfo />
         <Footer />
       </main>
     </div>
@@ -209,22 +206,20 @@ function SeparatorMono({ label }: { label: string }) {
 
 function Hero() {
   return (
-    <section className="max-w-[820px]">
+    <div className="max-w-[600px]">
       {/* Top status row */}
-      <div className="mb-8 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+      <div className="mb-8 flex flex-wrap items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
         <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--cyan)]" />
-        <span className="text-[var(--cyan)]">live on mainnet</span>
+        <span className="text-[var(--cyan)]">devnet v2 live</span>
         <span className="text-[var(--text-dim)]">/</span>
-        <span>audit Q3 · public open after</span>
+        <span>mainnet: no date yet</span>
       </div>
 
       <h1
-        className="text-[44px] font-bold leading-[1.02] tracking-[-0.025em] text-[var(--text)] sm:text-[60px] md:text-[76px]"
+        className="text-[40px] font-bold leading-[1.04] tracking-[-0.025em] text-[var(--text)] sm:text-[54px] md:text-[64px]"
         style={{ fontFamily: "var(--font-heading)" }}
       >
-        Perp futures
-        <br />
-        for{" "}
+        Perps for Solana tokens,{" "}
         <span
           className="bg-clip-text text-transparent"
           style={{
@@ -232,64 +227,24 @@ function Hero() {
               "linear-gradient(110deg, #B97AFF 0%, #9945FF 35%, #14F195 100%)",
           }}
         >
-          every Solana token
+          listed by anyone
         </span>
         .
       </h1>
 
-      <p className="mt-6 max-w-[640px] text-[16px] leading-[1.6] text-[var(--text-secondary)] sm:text-[17px]">
-        A creator launches a leveraged market on any SPL token in 60 seconds — no team approval, no auction. Forked from{" "}
-        <span className="text-[var(--text)]">Anatoly Yakovenko&apos;s</span> open-source reference program and extended on chain with LP vault, transferable Token-2022 NFT positions, dispute resolution, and audit-crank invariants.
+      <p className="mt-6 max-w-[540px] text-[16px] leading-[1.6] text-[var(--text-secondary)] sm:text-[17px]">
+        Any Solana token with an active pool on a supported DEX can have a leveraged market, with no listing
+        approval. Trade it long or short, or provide liquidity and earn its fees.
       </p>
 
-      {/* Specs row — looks like a struct field block, not a trust-badge row */}
-      <div className="mt-9 grid max-w-[640px] grid-cols-2 gap-x-6 gap-y-2.5 sm:grid-cols-4">
-        <SpecField k="status" v="lab mode" highlight="cyan" />
-        <SpecField k="proofs" v="422 / 422 ✓" highlight="cyan" />
-        <SpecField k="repos" v="17 · Apache 2.0" />
-        <SpecField k="markets" v="220 on devnet" />
-      </div>
+      <p className="mt-6 font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--text-secondary)]">
+        Open source · Built on{" "}
+        <span className="text-[var(--text)]">Anatoly Yakovenko&apos;s</span> Percolator · External audit before mainnet
+      </p>
 
-      {/* Hero CTA — clean, confident, no theatrics */}
-      <div className="mt-12 flex flex-wrap items-center gap-5">
-        <a
-          href="#reserve"
-          className="inline-flex items-center gap-2.5 rounded-md bg-[var(--accent)] px-6 py-3 text-[14px] font-semibold text-white shadow-[0_4px_14px_-4px_rgba(153,69,255,0.4)] transition-all duration-200 hover:bg-[var(--accent-muted)] hover:shadow-[0_8px_24px_-6px_rgba(153,69,255,0.55)]"
-        >
-          Reserve your spot
-          <span aria-hidden className="text-[15px] leading-none">↓</span>
-        </a>
-        <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">
-          invite-only · referral code required
-        </span>
-      </div>
-    </section>
-  );
-}
-
-function SpecField({
-  k,
-  v,
-  highlight,
-}: {
-  k: string;
-  v: string;
-  highlight?: "cyan" | "purple";
-}) {
-  const color =
-    highlight === "cyan"
-      ? "text-[var(--cyan)]"
-      : highlight === "purple"
-        ? "text-[var(--accent)]"
-        : "text-[var(--text)]";
-  return (
-    <div className="flex flex-col gap-0.5 border-l border-[var(--border)] pl-3">
-      <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
-        {k}
-      </span>
-      <span className={`font-mono text-[12.5px] ${color}`} style={{ fontVariantNumeric: "tabular-nums" }}>
-        {v}
-      </span>
+      <p className="mt-8 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+        Invite-only · referral code required
+      </p>
     </div>
   );
 }
@@ -1044,7 +999,7 @@ function SignupFlow({
           >
             @percolatortrade
           </a>{" "}
-          when mainnet opens.
+          when there&apos;s major news.
         </>
       );
     return (
@@ -1493,487 +1448,228 @@ const swrFetcher = (url: string) =>
   fetch(url).then((r) => (r.ok ? r.json() : Promise.reject(r.status)));
 
 // ============================================================================
-// SIGNUP SECTION — anchored card, the actual reservation step
+// MORE INFO — everything beyond the hero, behind one-at-a-time tabs
 // ============================================================================
 
-function SignupSection() {
+/**
+ * Every claim here is checked against the code or the team's stated timeline
+ * (2026-10-13). Things that change, re-check before editing:
+ *  - Roadmap: no dates on the page until the team commits to them.
+ *  - Oracle: no Pyth. Live markets price from the token's DEX pool (oracle keeper).
+ *  - Supported DEXes: lib/dex-constants.ts SUPPORTED_DEX_IDS.
+ *  - Program features: percolator-prog v18 (LP vault, Token-2022 position NFTs,
+ *    insurance fund). v12-era features (dispute resolution, audit crank) are
+ *    NOT in the current program — don't reintroduce them.
+ *  - No proof counts until the current Kani run publishes its final summary.
+ */
+function MoreInfo() {
   return (
-    <section
-      id="reserve"
-      className="scroll-mt-20 grid gap-x-12 gap-y-10 lg:grid-cols-[1fr_1.1fr]"
-    >
-      <div>
-        <h2
-          className="text-[28px] font-semibold leading-[1.1] tracking-[-0.015em] text-[var(--text)]"
-          style={{ fontFamily: "var(--font-heading)" }}
-        >
-          Invite-only.
-          <br />
-          Code required.
-        </h2>
-        <p className="mt-4 max-w-[420px] text-[14px] leading-[1.65] text-[var(--text-secondary)]">
-          The waitlist is gated. Bring a referral code from an existing member — paste it in, the form unlocks, you finish in under a minute on wallet or email.
-        </p>
-        <div className="mt-6 space-y-3 font-mono text-[12px] text-[var(--text-secondary)]">
-          <SignupBullet color="cyan">Got a code from someone? Paste it. Form unlocks. Pick wallet or email.</SignupBullet>
-          <SignupBullet color="cyan">Landed via a share link? Code is already pre-filled — just finish.</SignupBullet>
-          <SignupBullet color="cyan">No code yet? Follow @percolatortrade — we drop codes on tweets every so often.</SignupBullet>
-        </div>
-      </div>
-      <div className="flex justify-start lg:justify-end">
-        <SignupCard />
-      </div>
-    </section>
+    <InfoTabs
+      tabs={[
+        { id: "how", label: "How it works", content: <HowItWorks /> },
+        { id: "roadmap", label: "Roadmap", content: <Roadmap /> },
+        { id: "security", label: "Security", content: <Security /> },
+        { id: "origin", label: "Origin", content: <Origin /> },
+        { id: "updates", label: "Updates", content: <Updates /> },
+        { id: "faq", label: "FAQ", content: <FAQ /> },
+      ]}
+    />
   );
 }
 
-function SignupBullet({
-  children,
-  color,
-}: {
-  children: React.ReactNode;
-  color: "cyan" | "purple";
-}) {
-  const c = color === "cyan" ? "var(--cyan)" : "var(--accent)";
+function InfoRow({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-start gap-2.5">
-      <span
-        aria-hidden
-        className="mt-[7px] inline-block h-1 w-3 shrink-0 rounded-sm"
-        style={{ background: c, opacity: 0.85 }}
-      />
-      <span>{children}</span>
+    <div className="grid gap-1 border-b border-[var(--border)] py-3.5 first:pt-0 last:border-b-0 last:pb-0 sm:grid-cols-[180px_1fr] sm:gap-6">
+      <div className="text-[14px] font-semibold leading-snug text-[var(--text)]">{title}</div>
+      <div className="text-[13.5px] leading-[1.65] text-[var(--text-secondary)]">{children}</div>
     </div>
   );
 }
 
-// ============================================================================
-// NOTIFY — how we actually reach you when mainnet opens
-// ============================================================================
+function ExtLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="text-[var(--accent)] hover:underline">
+      {children}
+    </a>
+  );
+}
 
-function NotifySection() {
-  const channels: { tag: string; t: string; d: string; accent?: "cyan" }[] = [
-    {
-      tag: "every signup",
-      t: "Automatic dApp gating",
-      d: "When the same wallet reconnects to percolator.trade after mainnet opens, the page unlocks priority access for that pubkey. Email signups get this too — Privy creates a Solana embedded wallet under your email at signup, so the dApp recognises you when you come back.",
-      accent: "cyan",
-    },
-    {
-      tag: "wallet signups",
-      t: "On-chain memo from our project wallet",
-      d: "Your wallet receives a memo-only transaction from our project wallet when mainnet opens — visible in Phantom, Solflare, Backpack, or Solscan as an incoming tx with a short message and a claim link. No payload, no value, no token-approval prompt.",
-    },
-    {
-      tag: "email signups",
-      t: "Transactional email at the milestone",
-      d: "Confirmation lands instantly at signup. The next email is the mainnet-open milestone. No drips, no marketing campaigns. One email per major milestone, max.",
-      accent: "cyan",
-    },
-    {
-      tag: "if provided",
-      t: "X DM to your handle",
-      d: "Optional on either path. If you dropped your @handle, we'll DM you on X as a backup channel.",
-    },
+function HowItWorks() {
+  return (
+    <div>
+      <InfoRow title="Launch a market">
+        Anyone can open a perpetual futures market for an SPL token that trades on PumpSwap, Raydium or Meteora. It
+        needs no listing approval.
+      </InfoRow>
+      <InfoRow title="Trade">
+        Go long or short with leverage. Each market&apos;s price comes from the token&apos;s own DEX pool, read on chain
+        and smoothed before it is used.
+      </InfoRow>
+      <InfoRow title="Earn">
+        Deposit into a market&apos;s LP vault to take the other side of its trades and earn a share of its fees. Each
+        vault belongs to one market, so its risk stays with that market.
+      </InfoRow>
+      <InfoRow title="Insurance fund">
+        Every market has its own insurance fund to cover losses a liquidated position can&apos;t pay.
+      </InfoRow>
+      <InfoRow title="Transferable positions">
+        An open position can be wrapped as a Token-2022 NFT and moved to another wallet.
+      </InfoRow>
+    </div>
+  );
+}
+
+function Roadmap() {
+  const steps: [string, string, boolean][] = [
+    ["Devnet v2", "Live for early waitlist members", true],
+    ["External audit", "Before mainnet", false],
+    ["Mainnet beta", "No date yet", false],
+    ["Mainnet v1", "After the beta", false],
   ];
   return (
-    <section className="grid gap-x-12 gap-y-10 lg:grid-cols-[1fr_2fr]">
-      <div>
-        <h2
-          className="text-[28px] font-semibold leading-[1.1] tracking-[-0.015em] text-[var(--text)]"
-          style={{ fontFamily: "var(--font-heading)" }}
-        >
-          Both paths reach you.
-          <br />
-          Pick your inbox.
-        </h2>
-        <p className="mt-4 max-w-[330px] text-[13.5px] leading-relaxed text-[var(--text-secondary)]">
-          Email signups get an embedded Solana wallet from Privy automatically — so they get the dApp gate too, not just the email. Wallet signups also get the on-chain memo.
-        </p>
-      </div>
-      <div className="space-y-3">
-        {channels.map((c) => (
-          <div
-            key={c.tag}
-            className="grid grid-cols-[110px_1fr] items-baseline gap-5 border-b border-[var(--border)] py-3 last:border-b-0"
-          >
+    <ol className="grid gap-3 sm:grid-cols-4">
+      {steps.map(([name, when, live]) => (
+        <li key={name} className="rounded-md border border-[var(--border)] p-4">
+          <div className="flex items-center gap-2">
             <span
-              className={`font-mono text-[11px] uppercase tracking-[0.05em] ${c.accent === "cyan" ? "text-[var(--cyan)]" : "text-[var(--accent)]"}`}
-            >
-              {c.tag}
-            </span>
-            <div>
-              <div className="text-[14px] font-semibold leading-tight text-[var(--text)]">
-                {c.t}
-              </div>
-              <p className="mt-1.5 max-w-[600px] text-[13px] leading-[1.6] text-[var(--text-secondary)]">
-                {c.d}
-              </p>
-            </div>
+              aria-hidden
+              className={`inline-block h-1.5 w-1.5 rounded-full ${live ? "animate-pulse bg-[var(--cyan)]" : "bg-[var(--text-dim)]"}`}
+            />
+            <span className="text-[14px] font-semibold text-[var(--text)]">{name}</span>
           </div>
-        ))}
-      </div>
-    </section>
+          <div className={`mt-1.5 font-mono text-[12px] ${live ? "text-[var(--cyan)]" : "text-[var(--text-secondary)]"}`}>
+            {when}
+          </div>
+        </li>
+      ))}
+    </ol>
   );
 }
 
-// ============================================================================
-// STATUS READOUT — the "marketing dashboard". Real on-chain numbers.
-// ============================================================================
-
-function StatusReadout() {
+function Security() {
   return (
-    <section
-      className="rounded-md border border-[var(--border)] bg-[var(--panel-bg)]"
-      style={{ backgroundImage: "linear-gradient(180deg, rgba(153,69,255,0.025), transparent 60%)" }}
-    >
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-5 py-3">
-        <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
-          [readout] mainnet · devnet · audit
-        </div>
-        <span className="font-mono text-[11px] text-[var(--text-dim)]">
-          updated 2026-05
-        </span>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-        <ReadoutCell
-          label="Mainnet"
-          value="lab mode"
-          sub="1 active market · audit pending"
-          accent="purple"
-        />
-        <ReadoutCell
-          label="Devnet markets"
-          value="220"
-          sub="across 3 program versions"
-        />
-        <ReadoutCell
-          label="Kani proofs"
-          value="422 / 422"
-          sub="risk engine + wrapper"
-          accent="cyan"
-        />
-        <ReadoutCell
-          label="Open-source repos"
-          value="17"
-          sub="Apache 2.0 · github.com/dcccrypto"
-        />
-      </div>
-    </section>
-  );
-}
-
-function ReadoutCell({
-  label,
-  value,
-  sub,
-  accent,
-}: {
-  label: string;
-  value: string;
-  sub: string;
-  accent?: "purple" | "cyan";
-}) {
-  const colorClass =
-    accent === "purple"
-      ? "text-[var(--accent)]"
-      : accent === "cyan"
-        ? "text-[var(--cyan)]"
-        : "text-[var(--text)]";
-  const isLive = accent === "cyan" || accent === "purple";
-  return (
-    <div className="flex flex-col gap-2 border-b border-[var(--border)] p-5 transition-colors last:border-b-0 hover:bg-[var(--bg-elevated)]/40 sm:border-b-0 sm:border-r sm:[&:nth-child(2n)]:border-r-0 lg:[&:nth-child(2n)]:border-r lg:[&:nth-child(4n)]:border-r-0">
-      <div className="flex items-center gap-1.5">
-        {isLive && (
-          <span
-            aria-hidden
-            className={`inline-block h-1.5 w-1.5 animate-pulse rounded-full ${accent === "cyan" ? "bg-[var(--cyan)]" : "bg-[var(--accent)]"}`}
-          />
-        )}
-        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
-          {label}
-        </span>
-      </div>
-      <span
-        className={`font-mono text-[26px] font-bold leading-none tracking-[-0.01em] ${colorClass}`}
-        style={{ fontVariantNumeric: "tabular-nums" }}
-      >
-        {value}
-      </span>
-      <span className="font-mono text-[11px] leading-tight text-[var(--text-secondary)]">
-        {sub}
-      </span>
+    <div>
+      <InfoRow title="Open source">
+        The trading program, risk engine, SDK, indexer and this app are public under Apache 2.0 at{" "}
+        <ExtLink href="https://github.com/dcccrypto">github.com/dcccrypto</ExtLink>.
+      </InfoRow>
+      <InfoRow title="Formal verification">
+        The risk engine and program are checked with Kani, a model checker that proves a property holds for every
+        possible input rather than only the cases a test happens to try.
+      </InfoRow>
+      <InfoRow title="External audit">Planned before mainnet; no date yet.</InfoRow>
+      <InfoRow title="Signing up is safe">
+        The wallet path asks you to sign a short message, never a transaction. No gas, no token approvals, and we
+        never see your private key.
+      </InfoRow>
     </div>
   );
 }
 
-// ============================================================================
-// ARCHITECTURE — instruction-tag callouts, terminal-styled list
-// ============================================================================
-
-function ArchitectureSection() {
+function Origin() {
   return (
-    <section className="grid gap-x-12 gap-y-10 lg:grid-cols-[1fr_2fr]">
-      <div>
-        <h2
-          className="text-[28px] font-semibold leading-[1.1] tracking-[-0.015em] text-[var(--text)]"
-          style={{ fontFamily: "var(--font-heading)" }}
-        >
-          Not an order book.
-          <br />
-          Not a traditional AMM.
-        </h2>
-        <p className="mt-3 max-w-[300px] text-[13.5px] leading-relaxed text-[var(--text-secondary)]">
-          Trades execute against an on-chain LP vault using oracle-derived pricing. Two matcher modes per market — passive LP{" "}
-          <span className="font-mono text-[var(--text)]">(oracle ± spread)</span>{" "}
-          or vAMM{" "}
-          <span className="font-mono text-[var(--text)]">(virtual constant-impact)</span>. Same engine, different pricing knob.
-        </p>
-      </div>
-      <div className="space-y-3">
-        <ArchRow tag="ix 37–40" t="LP vault" d="Per-market liquidity pool — anyone deposits USDC, becomes a passive maker, earns spread + fee share. Risk isolated per market." />
-        <ArchRow tag="ix 64–69" t="Token-2022 NFT positions" d="Open positions wrap as NFTs with a transfer hook. First transferable perpetual positions on Solana." accent="cyan" />
-        <ArchRow tag="ix 43–44" t="Dispute resolution" d="Resolved markets have a challenge window with a bond. Bad settlements get caught before users get drained." />
-        <ArchRow tag="ix 53" t="Audit-crank invariants" d="Anyone can crank an on-chain invariant check. If something doesn't balance, the market auto-pauses before the bug compounds." />
-        <ArchRow tag="DEX EWMA" t="Hyperp markets" d="For tokens without Pyth coverage, the oracle reads a pinned Raydium CLMM pool's EWMA on chain. No external dependency." />
-        <ArchRow tag="kani · 422" t="Formally verified" d="422 model-checking proofs cover the H + A/K risk engine — haircut conservation, ADL fairness, funding zero-sum." accent="cyan" />
-      </div>
-    </section>
-  );
-}
-
-function ArchRow({
-  tag,
-  t,
-  d,
-  accent,
-}: {
-  tag: string;
-  t: string;
-  d: string;
-  accent?: "cyan";
-}) {
-  const tagColor = accent === "cyan" ? "text-[var(--cyan)]" : "text-[var(--accent)]";
-  return (
-    <div className="group relative grid grid-cols-[120px_1fr] items-baseline gap-5 border-b border-[var(--border)] py-4 transition-all last:border-b-0 hover:border-[var(--border-hover)]">
-      {/* Hover left-edge indicator — subtle bar on the left when hovered */}
-      <span
-        aria-hidden
-        className="absolute -left-2 top-4 bottom-4 w-px scale-y-0 bg-[var(--accent)] transition-transform duration-200 group-hover:scale-y-100"
-      />
-      <span className={`font-mono text-[11px] uppercase tracking-[0.08em] ${tagColor}`}>
-        {tag}
-      </span>
-      <div>
-        <div className="text-[14.5px] font-semibold leading-tight tracking-[-0.005em] text-[var(--text)] transition-colors group-hover:text-[var(--text)]">
-          {t}
-        </div>
-        <p className="mt-1.5 max-w-[600px] text-[13px] leading-[1.6] text-[var(--text-secondary)]">
-          {d}
-        </p>
-      </div>
+    <div className="space-y-3 text-[13.5px] leading-[1.7]">
+      <p>
+        Percolator began as an open-source perpetual futures risk engine and reference program by{" "}
+        <span className="text-[var(--text)]">Anatoly Yakovenko</span>, co-founder of Solana (
+        <ExtLink href="https://github.com/aeyakovenko/percolator-prog">aeyakovenko/percolator-prog</ExtLink>).
+      </p>
+      <p>
+        We forked it and built it into a product: per-market LP vaults and transferable NFT positions, plus the
+        SDK, indexer, keepers and this app around it.
+      </p>
+      <p className="text-[var(--text)]">
+        Our co-founders won 6 of the 7 public bounties he posted for Percolator.
+      </p>
     </div>
   );
 }
 
-// ============================================================================
-// ORIGIN — single block with the lineage callout
-// ============================================================================
-
-function OriginSection() {
+function Updates() {
   return (
-    <section className="grid gap-x-12 gap-y-10 lg:grid-cols-[1fr_2fr]">
-      <div>
-        <h2
-          className="text-[28px] font-semibold leading-[1.1] tracking-[-0.015em] text-[var(--text)]"
-          style={{ fontFamily: "var(--font-heading)" }}
-        >
-          Toly&apos;s math.
-          <br />
-          Forked &amp; extended.
-        </h2>
-        <p className="mt-3 max-w-[300px] text-[13.5px] leading-relaxed text-[var(--text-secondary)]">
-          Anatoly Yakovenko authored the H + A/K risk-engine math and an open-source reference program. We forked the program and extended it on chain — without the work below it&apos;d still be a reference, not a product.
-        </p>
-      </div>
-      <div>
-        {/* Visual fork delta: toly → us */}
-        <div className="rounded-md border border-[var(--border)] bg-[var(--panel-bg)] p-5 sm:p-6">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 font-mono text-[11.5px]">
-            <span className="text-[var(--text-secondary)]">github.com/</span>
-            <span className="text-[var(--text)]">aeyakovenko/percolator-prog</span>
-            <span className="text-[var(--text-dim)]">→</span>
-            <span className="rounded bg-[var(--accent)]/[0.12] px-2 py-0.5 text-[var(--accent)]">
-              dcccrypto
-            </span>
-            <span className="ml-auto text-[var(--text-dim)]">+134 commits past divergence</span>
-          </div>
-
-          <div className="mt-5 grid grid-cols-3 gap-px overflow-hidden rounded border border-[var(--border)] bg-[var(--border)]">
-            <ForkStat n="49" label="fork-only handlers" />
-            <ForkStat n="51" label="fork-only instructions" />
-            <ForkStat n="22" label="fork-only error variants" />
-          </div>
-
-          <p className="mt-5 text-[13px] leading-[1.6] text-[var(--text-secondary)]">
-            Net new in the fork: LP vault, dispute resolution, transferable Token-2022 NFT positions, a withdrawal queue, audit-crank invariant checks, two-step admin handover, DEX-pool oracle pinning — none of which exist in Toly&apos;s reference. Plus the SDK, indexer, keeper fleet, and frontend that wrap the program. Mainnet is deployed in lab mode; public trading opens after the external audit.{" "}
-            <span className="text-[var(--text)]">
-              Both co-founders won one of his public bounties.
-            </span>
-          </p>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function ForkStat({ n, label }: { n: string; label: string }) {
-  return (
-    <div className="group flex flex-col gap-1.5 bg-[var(--panel-bg)] px-4 py-5 transition-colors hover:bg-[var(--bg-elevated)] sm:px-5">
-      <span
-        className="bg-clip-text font-mono text-[32px] font-bold leading-none text-transparent"
-        style={{
-          fontVariantNumeric: "tabular-nums",
-          backgroundImage:
-            "linear-gradient(135deg, #B97AFF 0%, #9945FF 50%, #14F195 110%)",
-        }}
-      >
-        {n}
-      </span>
-      <span className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">
-        {label}
-      </span>
+    <div>
+      <InfoRow title="Automatic access">
+        Come back to percolator.trade with the wallet you signed up with and your access is recognised. Email
+        signups get a Solana wallet created under their email, so this works for them too.
+      </InfoRow>
+      <InfoRow title="Wallet signups">
+        We may send a memo-only transaction from our project wallet for major news. It carries a short message and
+        a link, no value and no approval request.
+      </InfoRow>
+      <InfoRow title="Email signups">
+        A confirmation now, then an email when there is major news. No marketing campaigns.
+      </InfoRow>
+      <InfoRow title="X (optional)">If you add your @handle, we can also DM you on X.</InfoRow>
     </div>
   );
 }
 
-// ============================================================================
-// FAQ — denser, bolder Q/A typography
-// ============================================================================
-
-function FAQSection() {
+function FAQ() {
   const items: [string, React.ReactNode][] = [
     [
       "When does mainnet open?",
-      <>
-        After the external audit clears — targeting Q3 2026. The mainnet program is already deployed and running in OSS-contributor closed beta with the first SOL/USDC Hyperp market.
-      </>,
+      <>There is no date yet. An external audit comes first, and we&apos;ll announce mainnet on X and to the waitlist.</>,
     ],
     [
-      "Why a waitlist instead of letting me trade now?",
-      <>
-        Pre-audit, public trading puts user funds at risk. We won&apos;t do that. The waitlist is how we line up early adopters and creators so they get priority access the moment audit clears.
-      </>,
+      "What do waitlist members get?",
+      <>Early members can use devnet v2 now, and everyone on the list hears about new releases.</>,
     ],
     [
       "Why do I need a referral code?",
       <>
-        The waitlist is invite-only. We&apos;re keeping it tight while we&apos;re pre-audit — fewer, higher-intent people, less noise. Every member who joins gets a unique code they can share. If you don&apos;t have one yet, follow{" "}
-        <a
-          href="https://x.com/percolatortrade"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[var(--accent)] hover:underline"
-        >
-          @percolatortrade
-        </a>{" "}
-        — we drop codes on tweets every so often.
+        The waitlist is invite-only. Every member gets a code to share. If you don&apos;t have one, follow{" "}
+        <ExtLink href="https://x.com/percolatortrade">@percolatortrade</ExtLink>; we post codes there.
       </>,
     ],
     [
-      "Wallet vs email — which should I pick?",
+      "Wallet or email?",
       <>
-        Either works. Wallet path: connect your existing Solana wallet, sign once. Email path: drop your email, verify with a 6-digit code; Privy creates an embedded Solana wallet under your email so you also get the on-chain dApp gate when mainnet opens — not just the email confirmation. Email path is the lower-friction option if you don&apos;t already have a Solana wallet.
+        Either works. Wallet: connect a Solana wallet and sign once. Email: enter your email and a 6-digit code. If
+        you don&apos;t have a Solana wallet yet, email is simpler.
       </>,
     ],
     [
-      "How will I actually be notified when mainnet opens?",
+      "Does signing up cost anything?",
+      <>No. Signing a message is free and sends nothing on chain.</>,
+    ],
+    [
+      "How is this different from other perp exchanges?",
       <>
-        Both paths get automatic dApp gating — when you come back to percolator.trade, the page recognises your wallet (yours or the embedded one) and unlocks priority access. Wallet path additionally gets an on-chain memo from our project wallet (visible in Phantom / Solflare / Backpack / Solscan). Email path gets a one-shot transactional email at the milestone. Optional X DM on either path if you dropped a handle.
+        On most perp venues, the venue decides which markets exist. On Percolator, anyone can launch a market for
+        any SPL token with a supported DEX pool.
       </>,
     ],
     [
-      "Does signing cost gas?",
+      "How do I leave the waitlist?",
       <>
-        No. Signing produces an offline ed25519 signature over a short message proving you control the wallet. We never send a transaction, never request token approvals, never see your private key. Server-side we verify with{" "}
-        <code className="rounded bg-[var(--bg-elevated)] px-1.5 py-0.5 font-mono text-[12px] text-[var(--accent)]">
-          tweetnacl
-        </code>{" "}
-        before adding you to the list.
-      </>,
-    ],
-    [
-      "How is this different from Hyperliquid or Drift?",
-      <>
-        Hyperliquid HIP-1 is permissionless but auction-gated (historically up to $19M+ per market, on its own L1). Drift is curated and Solana-native. Percolator is permissionless and Solana-native — anyone launches a market on any SPL token in 60 seconds. Long-tail tokens get perp access for the first time.
-      </>,
-    ],
-    [
-      "Is the code open source?",
-      <>
-        Apache 2.0 across 17 public repos at{" "}
-        <a
-          href="https://github.com/dcccrypto"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[var(--accent)] hover:underline"
-        >
-          github.com/dcccrypto
+        Message <ExtLink href="https://x.com/percolatortrade">@percolatortrade</ExtLink> on X or email{" "}
+        <a href="mailto:contact@percolator.trade" className="text-[var(--accent)] hover:underline">
+          contact@percolator.trade
         </a>
-        . Wrapper, engine, matcher, NFT contract, SDK, indexer, keeper, frontend — all public. Fork it tomorrow.
-      </>,
-    ],
-    [
-      "Will my LP get drained?",
-      <>
-        Pre-audit, no LP deposits. Mainnet is in lab mode with first-party capital only. After audit, LP risk is per-market — each LP vault is isolated, and the insurance reserve sits between user PnL and LP equity.
-      </>,
-    ],
-    [
-      "Can I unsubscribe?",
-      <>
-        We don&apos;t have an email list to unsubscribe from. If you want your wallet removed, DM{" "}
-        <a
-          href="https://x.com/percolatortrade"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[var(--accent)] hover:underline"
-        >
-          @percolatortrade
-        </a>{" "}
-        on X with the same wallet that signed up.
+        .
       </>,
     ],
   ];
   return (
-    <section className="grid gap-x-12 gap-y-10 lg:grid-cols-[1fr_2fr]">
-      <div>
-        <h2
-          className="text-[28px] font-semibold leading-[1.1] tracking-[-0.015em] text-[var(--text)]"
-          style={{ fontFamily: "var(--font-heading)" }}
+    <div>
+      {items.map(([q, a]) => (
+        <details
+          key={q}
+          className="group border-b border-[var(--border)] py-3.5 first:pt-0 last:border-b-0 last:pb-0 [&_summary::-webkit-details-marker]:hidden"
         >
-          What you&apos;re probably wondering.
-        </h2>
-      </div>
-      <div className="border-t border-[var(--border)]">
-        {items.map(([q, a], i) => (
-          <details
-            key={i}
-            className="group border-b border-[var(--border)] py-5 [&_summary::-webkit-details-marker]:hidden"
-          >
-            <summary className="flex cursor-pointer items-start justify-between gap-4 text-[15px] font-semibold leading-tight text-[var(--text)] transition-colors hover:text-[var(--accent)]">
-              <span>{q}</span>
-              <span className="mt-0.5 shrink-0 font-mono text-[16px] leading-none text-[var(--accent)] transition-transform group-open:rotate-45">
-                +
-              </span>
-            </summary>
-            <div className="mt-3 max-w-3xl text-[13.5px] leading-[1.7] text-[var(--text-secondary)]">
-              {a}
-            </div>
-          </details>
-        ))}
-      </div>
-    </section>
+          <summary className="flex cursor-pointer items-start justify-between gap-4 text-[14px] font-semibold leading-snug text-[var(--text)] transition-colors hover:text-[var(--accent)]">
+            <span>{q}</span>
+            <span
+              aria-hidden
+              className="mt-0.5 shrink-0 font-mono text-[15px] leading-none text-[var(--accent)] transition-transform group-open:rotate-45"
+            >
+              +
+            </span>
+          </summary>
+          <div className="mt-2.5 max-w-3xl text-[13.5px] leading-[1.65] text-[var(--text-secondary)]">{a}</div>
+        </details>
+      ))}
+    </div>
   );
 }
 
@@ -1988,7 +1684,7 @@ function Footer() {
       <div className="flex items-center gap-3 font-mono">
         <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--cyan)]" />
         <span className="text-[10.5px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
-          live · pre-audit · audit Q3
+          devnet v2 live · mainnet: no date yet
         </span>
       </div>
       <div className="font-mono text-[11.5px]">
