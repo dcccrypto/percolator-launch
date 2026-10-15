@@ -598,7 +598,9 @@ function MarketsPageInner() {
       }
     });
     return list;
-  }, [effectiveMarkets, debouncedSearch, sortBy, showUsd, tokenMetaMap]);
+  // activeMarkets, not effectiveMarkets: it is what the list reads, and it also changes with the
+  // wallet (a creator's own awaiting-price market), which effectiveMarkets does not.
+  }, [activeMarkets, debouncedSearch, sortBy, showUsd, tokenMetaMap]);
 
   // P-MED-3: Progressive reveal + intersection observer backup
   // Auto-load items in batches via requestAnimationFrame for instant display.
