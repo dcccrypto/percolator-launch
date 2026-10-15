@@ -7,19 +7,13 @@ export const alt = "Percolator — Permissionless Perpetuals on Solana";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
-// Load a Google font as a TTF for Satori. Wrapped by the caller in try/catch so
-// a network hiccup degrades to the embedded default font rather than 500ing the
+// Load a bundled (self-hosted, OFL) TTF for Satori: static instances cut from the
+// same variable fonts next/font serves. Wrapped by the caller in try/catch so a
+// read failure degrades to the embedded default font rather than 500ing the
 // route (crawlers must always get a valid image).
-async function loadGoogleFont(family: string, weight: number): Promise<ArrayBuffer> {
-  const url = `https://fonts.googleapis.com/css2?family=${family}:wght@${weight}`;
-  const css = await (
-    await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } })
-  ).text();
-  const src = css.match(/src: url\((.+?)\) format\('(?:opentype|truetype)'\)/);
-  if (!src) throw new Error("font src not found");
-  const res = await fetch(src[1]!);
-  if (!res.ok) throw new Error("font fetch failed");
-  return res.arrayBuffer();
+async function loadFont(file: string): Promise<ArrayBuffer> {
+  const buf = await readFile(join(process.cwd(), "app/fonts/og", file));
+  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
 }
 
 export default async function OpengraphImage() {
@@ -36,9 +30,9 @@ export default async function OpengraphImage() {
     | undefined;
   try {
     const [outfit700, mono400, mono700] = await Promise.all([
-      loadGoogleFont("Outfit", 700),
-      loadGoogleFont("JetBrains+Mono", 400),
-      loadGoogleFont("JetBrains+Mono", 700),
+      loadFont("Outfit-Bold.ttf"),
+      loadFont("JetBrainsMono-Regular.ttf"),
+      loadFont("JetBrainsMono-Bold.ttf"),
     ]);
     fonts = [
       { name: "Outfit", data: outfit700, weight: 700, style: "normal" },

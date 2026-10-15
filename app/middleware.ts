@@ -621,8 +621,8 @@ function addSecurityHeaders(response: NextResponse, nonce?: string) {
     // static.cloudflareinsights.com loads the Cloudflare Web Analytics beacon.
     // Vercel Web Analytics loads from same-origin /_vercel/* (covered by 'self').
     `script-src 'self' ${scriptNonce}${devEval}'unsafe-inline' https://cdn.vercel-insights.com https://challenges.cloudflare.com https://www.googletagmanager.com https://static.cloudflareinsights.com`,
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "font-src 'self' https://fonts.gstatic.com",
+    "style-src 'self' 'unsafe-inline'",
+    "font-src 'self'",
     "img-src 'self' data: https: blob:",
     // GH#1283: Added https://lite.jup.ag — used by useCreateMarket to fetch token price
     // via /v6/price endpoint for HYPERP/Pump.fun oracle markets during deposit flow.
