@@ -39,7 +39,8 @@ import { LaunchSuccess } from "./LaunchSuccess";
 import { ResumeFromChainCard } from "./ResumeFromChainCard";
 import { ChainResumeNotice } from "./ChainResumeNotice";
 import { dropChainResume, useChainResumeWalletGuard } from "@/hooks/useChainResumeWalletGuard";
-import { applyRecoveredLaunch, atomsToHuman, chainResumeRefusal, type RecoveredLaunch } from "@/lib/launch-recovery";
+import { applyRecoveredLaunch, applySameBrowserPin, atomsToHuman, chainResumeRefusal, pinSameBrowserResume, type RecoveredLaunch, type SameBrowserPin } from "@/lib/launch-recovery";
+import { loadProofPayload, loadProofTx, loadRegisterRequest } from "@/lib/keeper-register-client";
 import { RecoverSolBanner } from "./RecoverSolBanner";
 // W8 fix: share ONE SOL-cost formula with CostEstimate.tsx's own display so the
 // launch gate and the number shown to the user can never drift apart — see that
@@ -239,6 +240,14 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
   const chainResumeRef = useRef<RecoveredLaunch | null>(null);
   chainResumeRef.current = chainResume;
   const [chainResumeError, setChainResumeError] = useState<string | null>(null);
+  // #3377: a same-browser resume (RecoverSolBanner) is pinned to what this browser's own launch signed
+  // (its saved proof payload), not to the live form, which a reload or a fresh tab has re-detected.
+  // `sameBrowserRefusal` = the pin could not be built, so the resume must not sign or register.
+  const [sameBrowserPin, setSameBrowserPin] = useState<SameBrowserPin | null>(null);
+  const [sameBrowserRefusal, setSameBrowserRefusal] = useState<string | null>(null);
+  const activeSameBrowserPin = resumeFromStep !== null && sameBrowserPin && sameBrowserPin.slab === resumeSlab ? sameBrowserPin : null;
+  const pinnedResumeRef = useRef(false);
+  pinnedResumeRef.current = !!activeSameBrowserPin;
   // A chain resume belongs to ONE slab and ONE wallet. Switching wallet drops it (and the resume mode it
   // started), so a verification done for wallet A can never launch for wallet B.
   const walletB58 = publicKey?.toBase58() ?? null;
@@ -261,6 +270,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
    */
   const gateChainResume = (): { ok: true; resume: RecoveredLaunch | null } | { ok: false } => {
     const r = chainResume;
+    if (!r && resumeFromStep !== null && sameBrowserRefusal) {
+      setChainResumeError(sameBrowserRefusal);
+      return { ok: false };
+    }
     if (!r) return { ok: true, resume: null };
     const refusal = chainResumeRefusal(r, resumeSlab, walletB58);
     if (refusal) {
@@ -335,7 +348,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
 
   // Apply auto-detected defaults to the dials (fee, margin, collateral, price)
   useEffect(() => {
-    if (!quickLaunch.config || launchInFlightRef.current) return;
+    if (!quickLaunch.config || launchInFlightRef.current || pinnedResumeRef.current) return;
     setWizard((prev) => ({
       ...prev,
       tradingFeeBps: chainResumeRef.current ? chainResumeRef.current.tradingFeeBps : quickLaunch.config!.tradingFeeBps,
@@ -989,7 +1002,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
     // The existing slab keypair is already in slabKpRef (loaded from localStorage).
     const gate = gateChainResume();
     if (!gate.ok) return;
-    create(applyRecoveredLaunch(params, gate.resume), resumeFromStep ?? undefined);
+    create(applySameBrowserPin(applyRecoveredLaunch(params, gate.resume), activeSameBrowserPin), resumeFromStep ?? undefined);
   };
 
   // Retry from failed step
@@ -1053,7 +1066,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
     };
     const gate = gateChainResume();
     if (!gate.ok) return;
-    create(applyRecoveredLaunch(params, gate.resume), createState.step);
+    create(applySameBrowserPin(applyRecoveredLaunch(params, gate.resume), activeSameBrowserPin), createState.step);
   };
 
   // Retry ONLY the keeper-register step for an already-live market (LaunchSuccess's
@@ -1266,6 +1279,36 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
           // Set resumeFromStep so handleLaunch skips slab creation and resumes correctly.
           setResumeFromStep(fromStep);
           setResumeSlab(slabAddress);
+          // #3377: pin this browser's own resume to the launch's saved proof payload (step 1+).
+          const pinned = pinSameBrowserResume({
+            slab: slabAddress,
+            fromStep,
+            payload: loadProofPayload(slabAddress),
+            savedRequest: loadRegisterRequest(slabAddress),
+            proofTx: loadProofTx(slabAddress),
+            live: { poolAddress: wizard.dexPool?.poolAddress, dexType: wizard.dexPool?.dexType },
+            liveIsKeeper: wizard.oracleType === "keeper",
+            wallet: walletB58,
+          });
+          if (pinned.ok && pinned.pin) {
+            const pin = pinned.pin;
+            setSameBrowserPin(pin);
+            setSameBrowserRefusal(null);
+            // Show the pinned values in the form and mark them user-set, so detection leaves them alone.
+            setWizard((prev) => ({
+              ...prev,
+              mintAddress: pin.mainnetCA,
+              tradingFeeBps: pin.tradingFeeBps,
+              initialMarginBps: pin.initialMarginBps,
+              marginSetByUser: true,
+              lpCollateral: atomsToHuman(pin.lpCollateralAtoms, 6),
+              lpSetByUser: true,
+            }));
+          } else {
+            setSameBrowserPin(null);
+            setSameBrowserRefusal(pinned.ok ? null : pinned.message);
+            if (!pinned.ok) setChainResumeError(pinned.message);
+          }
         }}
         onReclaimSuccess={() => {
           // Clear wizard localStorage state so the user starts completely fresh
