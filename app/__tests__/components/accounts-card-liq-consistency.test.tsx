@@ -58,3 +58,23 @@ describe("AccountsCard — liq cell, distance bar and Margin column agree", () =
     expect(container.querySelector(".h-1.w-8")).not.toBeNull();
   });
 });
+
+// S7: on v17 there is no entry (0n), so the Margin column is margin health, and it read
+// capital alone. A loss still sitting in on-chain `pnl` (not yet settled out of capital)
+// coloured a nearly liquidatable account green.
+describe("AccountsCard — Margin column counts the unsettled loss (S7)", () => {
+  it("v17 account with a loss in pnl: equity over notional, coloured red", () => {
+    account = {
+      kind: AccountKind.User,
+      owner: new PublicKey("11111111111111111111111111111111"),
+      positionSize: 1_000_000n, // $100 notional at the $100 mark
+      entryPrice: 0n, // v17: not on-chain
+      capital: 80_000_000n,
+      pnl: -60_000_000n, // equity $20
+    };
+    const { container } = render(<AccountsCard />);
+    const margin = Array.from(container.querySelectorAll("td")).find((td) => /^\d+\.\d%$/.test(td.textContent ?? ""));
+    expect(margin?.textContent).toBe("20.0%"); // was 80.0%, capital alone
+    expect(margin?.className).toContain("text-[var(--short)]"); // was green
+  });
+});

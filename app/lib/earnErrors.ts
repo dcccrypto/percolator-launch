@@ -1,4 +1,4 @@
-import { resolveUserMessage, type MessageContext, type UserMessage } from "@/lib/limits/user-message";
+import { keepAppMessage, plainMessage, resolveUserMessage, type MessageContext, type UserMessage } from "@/lib/limits/user-message";
 
 /**
  * User-facing copy for a failed Earn (LP vault) action.
@@ -48,4 +48,17 @@ export function earnUserMessage(err: unknown, action: EarnAction, ctx: EarnError
  */
 export function earnErrorMessage(err: unknown, action: EarnAction, ctx: EarnErrorContext = {}): string {
   return earnUserMessage(err, action, ctx).body;
+}
+
+/** /stake's line for a timed-out deposit or withdraw: nothing there watches the signature. */
+export const STAKE_STILL_CONFIRMING = "Still confirming. It may still land, so check your balance before trying again.";
+
+/**
+ * #26: the one line for a failed /stake (insurance LP) deposit or withdraw: the resolver's plain
+ * line, the app's own plain messages kept, never the raw simulation text or program logs. The
+ * resolver's timeout line ("We'll update this when it lands") is replaced, since /stake doesn't watch.
+ */
+export function stakeErrorMessage(err: unknown): string {
+  if (resolveUserMessage(err, { surface: "stake" }).kind === "still-confirming") return STAKE_STILL_CONFIRMING;
+  return plainMessage(err, { surface: "stake" }, keepAppMessage);
 }

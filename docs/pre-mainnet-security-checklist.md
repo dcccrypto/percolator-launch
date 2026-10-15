@@ -63,7 +63,7 @@
 | CORS | ✅ PASS | No CORS headers set on API routes (Next.js default: same-origin only). No `Access-Control-Allow-Origin: *` found. |
 | Security headers (next.config.ts) | ✅ PASS | `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`, `Permissions-Policy: camera=(), microphone=(), geolocation=(), usb=(), bluetooth=()`. |
 | CSP | ✅ PASS | Per-request nonce-based CSP generated in middleware.ts. Nonce generation uses `crypto.randomUUID()` (Edge Runtime compatible). |
-| Admin routes auth | ✅ PASS | `/api/admin/*`: `requireAdminSession()` (Supabase JWT + admin_users table check). `/api/oracle/set-price-cap`: `x-admin-secret` header matching `ADMIN_API_SECRET`. |
+| Admin routes auth | ✅ PASS | `/api/admin/*`: `requireAdminSession()` (Supabase JWT + admin_users table check). |
 | `/api/airdrop` rate limiting | ✅ PASS | `tryAirdropClaimGate()` — 24-hour per-wallet claim gate via DB. |
 | `/api/launch` rate limiting | ✅ PASS | PR#1880 (PERC-8237): rate limit on POST /api/launch — 60 req/IP/min. |
 | `/api/oracle/advance-phase` rate limiting | ✅ PASS | PR#1127: 60 req/IP/min sliding window (Upstash Redis + in-memory fallback). |

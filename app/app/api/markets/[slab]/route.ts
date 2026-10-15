@@ -362,14 +362,25 @@ export async function GET(
       // Slug resolution: strip "-PERP" suffix and match symbol case-insensitively
       const slugNorm = slab.toUpperCase().replace(/-PERP$/, "");
 
-      // Fetch all markets and filter in JS to avoid needing ilike + function indexes
+      // Review E5: narrow in SQL to the rows that can match (symbol equal to the slug, with or
+      // without "-PERP", case-insensitive; or the slug's well-known mint), instead of reading every
+      // row on the network; the exact match and the ranking below still run in JS. Only a plain
+      // [A-Z0-9-] slug goes into the PostgREST filter string; anything else keeps the full read.
+      const aliasMintForFilter = SLUG_ALIASES[slugNorm];
+      const sqlNarrowable = /^[A-Z0-9-]{1,10}$/.test(slugNorm) && (!aliasMintForFilter || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(aliasMintForFilter));
+      const slugFilter = [
+        `symbol.ilike.${slugNorm}`,
+        `symbol.ilike.${slugNorm}-PERP`,
+        ...(aliasMintForFilter ? [`mint_address.eq.${aliasMintForFilter}`] : []),
+      ].join(",");
       // PERC-8225: Graceful fallback — if the network column is missing (migration not yet
       // applied), retry without the filter to restore service. Mirrors the pattern in
       // /api/markets/route.ts (PERC-8215).
-      let { data: rows, error } = await supabase
+      const base = supabase
         .from("markets_with_stats")
         .select("*")
         .eq("network", network);
+      let { data: rows, error } = await (sqlNarrowable ? base.or(slugFilter) : base);
 
       if (error && error.message?.includes("network")) {
         Sentry.captureMessage(

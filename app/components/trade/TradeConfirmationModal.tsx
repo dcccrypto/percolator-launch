@@ -109,6 +109,9 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
       liqPriceE6: estimatedLiqPrice,
       positionSize,
       capital: accountEquity,
+      // No mark here, so no health is computed; nothing to value PnL with.
+      entryPriceE6: null,
+      effectiveSize: null,
       markPriceE6: null,
       maintenanceMarginBps: 500n,
       hasResolvedEntry: true,

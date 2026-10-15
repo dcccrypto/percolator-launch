@@ -289,8 +289,8 @@ describe("a chain-recovered resume pins the launch's parameters", () => {
   });
   it("the wizard routes every create() call through it", () => {
     const src = fs.readFileSync(path.resolve(__dirname, "../../components/create/CreateMarketWizard.tsx"), "utf8");
-    expect(src).toContain("create(applyRecoveredLaunch(params, gate.resume), resumeFromStep ?? undefined);");
-    expect(src).toContain("create(applyRecoveredLaunch(params, gate.resume), createState.step);");
+    expect(src).toContain("create(applySameBrowserPin(applyRecoveredLaunch(params, gate.resume), activeSameBrowserPin), resumeFromStep ?? undefined);");
+    expect(src).toContain("create(applySameBrowserPin(applyRecoveredLaunch(params, gate.resume), activeSameBrowserPin), createState.step);");
     expect(src).toContain("restoreSlabAddress(resumeSlabParam);");
     // security review C: the resume belongs to one slab and one wallet, and is gated before every launch/retry
     expect(src).toContain("chainResumeRefusal(r, resumeSlab, walletB58)");

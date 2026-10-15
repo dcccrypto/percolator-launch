@@ -69,13 +69,11 @@ const RATE_LIMIT_MS = 30_000; // 1 upload per 30s per slab
  * record and are reachable only via the admin bypass.
  *
  * Admin bypass: header `x-admin-secret` matching ADMIN_API_SECRET (same
- * convention as keeper-register / /api/oracle/set-price-cap), timing-safe,
- * fails closed when unset.
+ * convention as keeper-register), timing-safe, fails closed when unset.
  */
 
 /** Timing-safe admin-bypass check — same secret/header convention as
- *  /api/playground/keeper-register and /api/oracle/set-price-cap. Empty/unset
- *  ADMIN_API_SECRET always denies. */
+ *  /api/playground/keeper-register. Empty/unset ADMIN_API_SECRET always denies. */
 function isAdminBypass(req: NextRequest): boolean {
   return checkAdminSecret(req, "logo");
 }

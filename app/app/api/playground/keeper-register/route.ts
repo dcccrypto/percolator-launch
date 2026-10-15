@@ -118,8 +118,8 @@ function proofWaitFromEnv(): { tries: number; delayMs: number } {
   return { tries: Math.min(n(process.env.KEEPER_REGISTER_PROOF_TRIES, 3), 6), delayMs: Math.min(n(process.env.KEEPER_REGISTER_PROOF_POLL_MS, 800), 2_000) };
 }
 
-/** Timing-safe admin-bypass check (H1b) — same secret/header convention as
- *  /api/oracle/set-price-cap. Empty/unset ADMIN_API_SECRET always denies. */
+/** Timing-safe admin-bypass check (H1b) — x-admin-secret vs ADMIN_API_SECRET
+ *  (lib/admin-secret.ts). Empty/unset ADMIN_API_SECRET always denies. */
 function isAdminBypass(req: NextRequest): boolean {
   return checkAdminSecret(req, "register");
 }

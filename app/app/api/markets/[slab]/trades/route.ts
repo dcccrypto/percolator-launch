@@ -52,7 +52,9 @@ export async function GET(
 
   try {
     const trades = await queryTrades(validSlab, limit);
-    return NextResponse.json({ trades }, { headers: { "Cache-Control": "no-store" } });
+    // Review E5: TradeHistory polls this every 15 s per open tab; a 2 s edge copy collapses the
+    // viewers of one market onto one indexer read without delaying a fill noticeably.
+    return NextResponse.json({ trades }, { headers: { "Cache-Control": "public, s-maxage=2, stale-while-revalidate=10" } });
   } catch (err) {
     console.error("[trades] indexer DB query failed:", err);
     return NextResponse.json(

@@ -49,7 +49,6 @@ import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { StatusLine } from "@/components/ui/StatusLine";
 import { getEntryPrice, getEntryLeverage } from "@/lib/entry-price";
 import { oracleAgeSecs, oracleCloseGate } from "@/lib/oracle-stale-gate";
-import { computeMarginHealthPct } from "@/lib/margin-health";
 import { describeLiqPrice } from "@/lib/liq-price-display";
 import { LiqPriceValue } from "./LiqPriceValue";
 import {
@@ -264,20 +263,21 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // picked, shown separately and labelled as such.
   const savedOrderLeverage = getEntryLeverage(slabAddress, userAccount.idx, account.owner.toBase58());
 
-  // Shared with the other four surfaces that show a liquidation price — this
-  // was the only one computing it. Nominal size, not ADL-reduced exposure:
-  // see the note above notionalE6 and lib/margin-health.ts.
-  const marginHealthPct = computeMarginHealthPct(account.capital, absNominal, currentPriceE6);
-  const marginHealthStr = marginHealthPct == null ? "N/A" : `${marginHealthPct.toFixed(1)}%`;
   const liqDisplay = describeLiqPrice({
     liqPriceE6,
     positionSize: account.positionSize,
     capital: account.capital,
+    entryPriceE6,
+    effectiveSize: pnlResult.effectiveSize,
     markPriceE6: currentPriceE6,
     maintenanceMarginBps: maintenanceBps,
     // #2660: `entryPriceE6 > 0n` is always true — on "unknown" it is the mark.
     hasResolvedEntry: pnlIsKnown,
   });
+  // The row reads the same equity-based figure as the liq cell (lib/margin-health.ts), so
+  // the two cannot disagree. Nominal notional, not ADL-reduced exposure.
+  const marginHealthPct = liqDisplay.marginHealthPct;
+  const marginHealthStr = marginHealthPct == null ? "N/A" : `${marginHealthPct.toFixed(1)}%`;
 
   // 3.4: Funding rate /8h + countdown
   const SLOTS_PER_8H = 72_000n; // 9000 slots/hr * 8

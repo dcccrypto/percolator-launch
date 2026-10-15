@@ -76,7 +76,13 @@ export function classifyResumeSlab(
 export const ResumeFromChainCard: FC<{
   slab: string;
   onVerified: (launch: RecoveredLaunch, step: 1 | 2 | 3) => void;
-}> = ({ slab, onVerified }) => {
+  /**
+   * The launch the wizard is resuming (its `chainResume`). Drives the verified summary, so the
+   * summary and its list of values the chain doesn't prove stay up for the whole resume and go
+   * when the wizard cancels it. Omitted: the card keeps its own verified state.
+   */
+  verified?: RecoveredLaunch | null;
+}> = ({ slab, onVerified, verified: verifiedProp }) => {
   const { connection } = useConnectionCompat();
   const wallet = useWalletCompat();
   const [chain, setChain] = useState<ResumeChainState>({ kind: "loading" });
@@ -85,7 +91,8 @@ export const ResumeFromChainCard: FC<{
   const [exposure, setExposure] = useState(String(LP_EXPOSURE_DEFAULT_BPS));
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
-  const [verified, setVerified] = useState<RecoveredLaunch | null>(null);
+  const [localVerified, setVerified] = useState<RecoveredLaunch | null>(null);
+  const verified = verifiedProp !== undefined ? verifiedProp : localVerified;
   const walletB58 = wallet.publicKey?.toBase58() ?? null;
 
   useEffect(() => {

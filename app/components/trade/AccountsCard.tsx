@@ -91,6 +91,10 @@ export const AccountsCard: FC = () => {
         liqPriceE6: liqPrice,
         positionSize: account.positionSize,
         capital: account.capital,
+        entryPriceE6: account.entryPrice,
+        effectiveSize: account.positionSize,
+        // v17 has no entry here (0n): health is then capital + the on-chain pnl.
+        onChainPnl: safePnl,
         markPriceE6: oraclePrice,
         maintenanceMarginBps: maintBps,
         hasResolvedEntry: (account.entryPrice ?? 0n) > 0n,

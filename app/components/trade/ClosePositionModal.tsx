@@ -88,6 +88,10 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   // Ref-based callback to prevent WS price ticks from replaying the GSAP animation
   const onCancelRef = useRef(onCancel);
   onCancelRef.current = onCancel;
+  // Mid-close the modal stays open: dismissing it unmounted the /portfolio flow and lost the
+  // result (an error had nowhere to show). Cancel is already disabled while loading.
+  const loadingRef = useRef(loading);
+  loadingRef.current = loading;
 
   // BUG 22 fix: mark a dialog as open on a body-level counter for the whole
   // time this modal is mounted — see the matching comment in
@@ -124,7 +128,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        onCancelRef.current();
+        if (!loadingRef.current) onCancelRef.current();
         return;
       }
       if (e.key === "Tab") {
@@ -147,7 +151,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   }, [prefersReduced]);
 
   const handleOverlayClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) onCancel();
+    if (e.target === e.currentTarget && !loading) onCancel();
   };
 
   const content = (

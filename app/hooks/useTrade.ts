@@ -17,12 +17,6 @@ import {
   isV17Account,
   parsePortfolioV17,
 } from "@percolatorct/sdk";
-// TODO(oracle-migration): encodePushOraclePrice/ACCOUNTS_PUSH_ORACLE_PRICE removed in beta.29.
-// The DEX oracle inline push path needs to migrate to /api/oracle/advance-phase.
-import {
-  encodePushOraclePrice,
-  ACCOUNTS_PUSH_ORACLE_PRICE,
-} from "@/lib/sdk-compat";
 import {
   sendTx,
   sendTxWaiting,
@@ -34,6 +28,8 @@ import {
   broadcastSignedTx,
   getPriorityFee,
   timedOutSignature,
+  isTxCancelledError,
+  WaitStoppedError,
 } from "@/lib/tx";
 import { planTakerCrank } from "@/lib/taker-crank";
 import { getMaintenanceConfig, MaintenanceError } from "@/lib/maintenance";
@@ -327,7 +323,10 @@ export function useTrade(slabAddress: string) {
       setLoading(true);
       setError(null);
       try {
-        if (!wallet.publicKey || !mktConfig || !slabProgramId) throw new Error("Wallet not connected or market not loaded");
+        // Two errors, not one: the message resolver maps "Wallet not connected" to "Wallet locked", so the old
+        // combined string told a connected user to unlock their wallet while the market was still loading.
+        if (!wallet.publicKey) throw new Error("Wallet not connected");
+        if (!mktConfig || !slabProgramId) throw new Error("Market not loaded");
         // Defense-in-depth: refuse to build a tx whose programId is not in
         // our deployed allowlist. See SlabProvider.parseSlab for the primary
         // gate.
@@ -585,12 +584,14 @@ export function useTrade(slabAddress: string) {
           );
           if (plan === "separate-tx") {
             console.info("[useTrade] taker portfolio needs a maintenance crank first; sending it as its own tx");
-            await sendTx({ connection, wallet, instructions: [crankIx], computeUnitsFromSim: { cap: 200_000 } }).catch((err) => {
+            await sendTx({ connection, wallet, instructions: [crankIx], computeUnitsFromSim: { cap: 200_000 }, abortSignal: params.abortSignal }).catch((err) => {
               // The trade below was never sent. Don't let the ticket watch the crank's signature
               // and report the trade as landed (timedOutSignature reads the timeout message).
               if (timedOutSignature(err)) {
                 throw new Error("Maintenance crank did not confirm in time; the trade was not sent.", { cause: err });
               }
+              // Stopped (or left) before the crank was signed: the same quiet stop as the order's own wait.
+              if (params.abortSignal?.aborted && isTxCancelledError(err)) throw new WaitStoppedError();
               throw err;
             });
           }

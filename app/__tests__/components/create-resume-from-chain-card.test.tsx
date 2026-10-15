@@ -204,3 +204,18 @@ describe("matcher limits (LP exposure) are shown, editable and pinned", () => {
     expect(screen.getByTestId("resume-chain-unbound").textContent).toMatch(/Insurance top-up: the amount in this form \(not part of the signed registration\); nothing is funded yet\./);
   });
 });
+
+// S15: the wizard keeps the card mounted for the resume it verified and drives the summary from its
+// chainResume, so the summary (and the list of values the chain doesn't prove) shows during the
+// resume and goes when the wizard cancels it.
+describe("verified summary driven by the wizard (S15)", () => {
+  it("shows the summary and the unbound list for the launch the wizard is resuming; back to the form when it clears", async () => {
+    const { rerender } = render(<ResumeFromChainCard slab={SLAB.toBase58()} onVerified={vi.fn()} verified={launch as never} />);
+    await waitFor(() => expect(screen.getByTestId("resume-chain-summary")).toBeTruthy());
+    expect(screen.getByTestId("resume-chain-summary").textContent).toContain("AUTON");
+    expect(screen.getByTestId("resume-chain-unbound").querySelectorAll("li").length).toBeGreaterThan(0);
+    rerender(<ResumeFromChainCard slab={SLAB.toBase58()} onVerified={vi.fn()} verified={null} />);
+    expect(screen.queryByTestId("resume-chain-summary")).toBeNull();
+    expect(screen.getByTestId("resume-chain-ca")).toBeTruthy();
+  });
+});

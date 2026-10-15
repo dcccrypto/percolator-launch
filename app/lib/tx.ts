@@ -987,6 +987,12 @@ export async function sendTx({
       if (wantSimulation) {
         await runSimulation();
       }
+      // GH#2623: re-checked after this attempt's last await (planning, CU gate, simulation): the
+      // signal can fire while those ran, and a green simulation must not then open the wallet.
+      // Nothing has been signed yet.
+      if (abortSignal?.aborted) {
+        throw new TxCancelledError();
+      }
       // ================================================================
       // PERC-8388: Use signAndSendTransaction when available.
       // This is the definitive fix for Lighthouse/Blowfish injection.
@@ -1466,7 +1472,8 @@ export async function sendTxWaiting(
       const exhausted = i >= waitDelaysMs.length && !(keepWaiting && waitDelaysMs.length > 0);
       if (!isWaitableRefusal(e) || exhausted || rest.abortSignal?.aborted) {
         if (i > 0) onWaiting?.(false);
-        if (rest.abortSignal?.aborted && isWaitableRefusal(e)) throw new WaitStoppedError();
+        // An abort that stopped sendTx before signing is the same stop, not an error.
+        if (rest.abortSignal?.aborted && (isWaitableRefusal(e) || isTxCancelledError(e))) throw new WaitStoppedError();
         throw e;
       }
       onWaiting?.(true);

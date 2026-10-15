@@ -8,6 +8,7 @@
  *  AC5 partial fill: data-variant=info.
  * Plus: side paused auto-selects the open side, the clamp helper, the long wait + Stop.
  */
+import { StrictMode } from "react";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -425,5 +426,59 @@ describe("WP-3 long wait: 'We'll keep trying' + Stop, never 'try again'", () => 
     });
     expect(lines()).toHaveLength(0);
     expect(submit().textContent).toBe("Long SOL 1×");
+  });
+
+  // S1: before the Stop chip appears (~41 s) nothing ended the wait when the user left, so the
+  // loop kept retrying and could open the wallet for the old market's order (GH#2623 rule).
+  const waitingTrade = (signals: AbortSignal[]) =>
+    (p: { onWaiting?: (w: boolean) => void; abortSignal?: AbortSignal }) =>
+      new Promise((_res, rej) => {
+        signals.push(p.abortSignal!);
+        p.onWaiting?.(true);
+        p.abortSignal?.addEventListener("abort", () =>
+          rej(Object.assign(new Error("Stopped waiting for the market; nothing was sent."), { name: "WaitStoppedError" })),
+        );
+      });
+
+  it("leaving the page (unmount) ends the wait", async () => {
+    const signals: AbortSignal[] = [];
+    mocks.trade.mockImplementationOnce(waitingTrade(signals));
+    const { unmount } = render(<OrderTicket slabAddress={SLAB} />);
+    await placeOrder("10");
+    expect(signals[0].aborted).toBe(false);
+    unmount();
+    expect(signals[0].aborted).toBe(true);
+  });
+
+  it("switching market (the page's key={slab} remount) ends the old wait; the new ticket's trade is not aborted", async () => {
+    const OTHER = "8WC8vALsDJhNCUVRmqZBDSg5xgFAhDrgy7zWqF512pDx";
+    const signals: AbortSignal[] = [];
+    mocks.trade.mockImplementation(waitingTrade(signals));
+    const { rerender } = render(<OrderTicket key={SLAB} slabAddress={SLAB} />);
+    await placeOrder("10");
+    rerender(<OrderTicket key={OTHER} slabAddress={OTHER} />);
+    expect(signals[0].aborted).toBe(true);
+    await placeOrder("10");
+    expect(signals).toHaveLength(2);
+    expect(signals[1].aborted).toBe(false);
+  });
+
+  it("an in-place market change (no remount) also ends the old wait", async () => {
+    const signals: AbortSignal[] = [];
+    mocks.trade.mockImplementationOnce(waitingTrade(signals));
+    const { rerender } = render(<OrderTicket slabAddress={SLAB} />);
+    await placeOrder("10");
+    rerender(<OrderTicket slabAddress="8WC8vALsDJhNCUVRmqZBDSg5xgFAhDrgy7zWqF512pDx" />);
+    expect(signals[0].aborted).toBe(true);
+  });
+
+  it("CONTROL: StrictMode's dev double-mount doesn't abort a live wait", async () => {
+    const signals: AbortSignal[] = [];
+    mocks.trade.mockImplementationOnce(waitingTrade(signals));
+    const { unmount } = render(<StrictMode><OrderTicket slabAddress={SLAB} /></StrictMode>);
+    await placeOrder("10");
+    expect(signals[0].aborted).toBe(false);
+    unmount();
+    expect(signals[0].aborted).toBe(true);
   });
 });

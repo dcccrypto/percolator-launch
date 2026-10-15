@@ -14,6 +14,9 @@ const WALLET_A = "8WC8vALsDJhNCUVRmqZBDSg5xgFAhDrgy7zWqF512pDx";
 const WALLET_B = "3t67LQPdgiSqGvXsYff3Pzv2uHtM1zZ7f29HsnEzb6vJ";
 
 const h = vi.hoisted(() => ({ wallet: "" }));
+// The Market cell resolves symbols from the shared market stats; keep that fetch out of this
+// test's fetch queue (it reads the last request as the trades call).
+vi.mock("@/hooks/useAllMarketStats", () => ({ useAllMarketStats: () => ({ statsMap: new Map() }) }));
 vi.mock("@/hooks/useWalletCompat", () => ({
   useWalletCompat: () => ({ publicKey: h.wallet ? { toBase58: () => h.wallet } : null, connected: !!h.wallet }),
 }));

@@ -27,11 +27,11 @@ import { useEffect, useMemo, useState } from "react";
 import { getMarketIdentity, setMarketIdentity } from "@/lib/marketIdentityCache";
 import { parseBulkIdentities, resolveIdentity, hasAnyIdentity, type ResolvedIdentity } from "@/lib/bulk-identity";
 import { seedFromCache } from "@/lib/incremental-details";
+import { fetchMarketsList, withTimeout } from "@/lib/markets-list-client";
 
 /** Directory page size. The creator dashboard needs identity for markets the
  *  wallet owns, which are a subset of the directory — the same limit the
  *  portfolio snapshot uses for the same lookup (hooks/usePortfolio.ts). */
-const DIRECTORY_LIMIT = 500;
 
 /** The bulk call is a nice-to-have on top of the cache seed: if it is slow the
  *  per-market details will answer anyway, so give up rather than hold a
@@ -61,12 +61,9 @@ export function useMarketIdentities(slabs: string[]): Record<string, ResolvedIde
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch(`/api/markets?limit=${DIRECTORY_LIMIT}`, {
-          headers: { Accept: "application/json" },
-          signal: AbortSignal.timeout(DIRECTORY_TIMEOUT_MS),
-        });
-        if (!res.ok) return;
-        const body = (await res.json()) as { markets?: unknown };
+        // The canonical list (zombie rows included: identity is wanted for every slab asked about),
+        // shared with every other list caller. The timeout bounds THIS wait only.
+        const body = await withTimeout(fetchMarketsList(), DIRECTORY_TIMEOUT_MS);
         const fromDirectory = parseBulkIdentities(body.markets, list);
         if (cancelled) return;
 

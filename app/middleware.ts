@@ -26,6 +26,7 @@ import { Ratelimit } from "@upstash/ratelimit";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist-edge";
 import { parseBlocklist, isIpBlocked } from "@/lib/ip-blocklist";
 import { gateDecision, LOCKED_PATH, SESSION_COOKIE } from "@/lib/playground-gate";
+import { trustedProxyDepth } from "@/lib/trusted-proxy-depth";
 
 // ── Rate limiter configuration ───────────────────────────────────────────────
 // Two tiers: RPC proxy gets a higher limit since Solana web3.js generates many calls per page load.
@@ -197,6 +198,11 @@ const _rawBlocklist = (process.env.IP_BLOCKLIST ?? "")
 const _blocklist = parseBlocklist(_rawBlocklist, (entry, reason) => {
   console.warn(`[middleware] IP_BLOCKLIST: ignoring "${entry}" — ${reason}`);
 });
+// #3483: at depth 0 (no proxy) the client IP resolves to "unknown", which matches no entry,
+// so a configured blocklist cannot apply. Say so instead of looking protected.
+if (_blocklist.length > 0 && trustedProxyDepth() === 0) {
+  console.warn("[middleware] IP_BLOCKLIST is set but TRUSTED_PROXY_DEPTH=0: the blocklist cannot match any request.");
+}
 
 // ── Slab blocklist (GH#1363, GH#1390) ────────────────────────────────────────
 // next.config.ts rewrites /api/funding/:slab, /api/open-interest/:slab, and
@@ -284,7 +290,6 @@ const OLD_HOST_PASSTHROUGH_API: ReadonlyArray<{ method: string; re: RegExp }> = 
   { method: "GET", re: /^\/api\/playground\/registered-markets\/?$/ },
   { method: "PATCH", re: /^\/api\/markets\/[1-9A-HJ-NP-Za-km-z]{32,44}\/?$/ },
   { method: "POST", re: /^\/api\/oracle-keeper\/register\/?$/ },
-  { method: "POST", re: /^\/api\/oracle\/set-price-cap\/?$/ },
 ];
 function isOldHostPassthrough(pathname: string, method: string): boolean {
   if (OLD_HOST_PASSTHROUGH_PREFIXES.some((p) => pathname.startsWith(p))) return true;
@@ -406,12 +411,11 @@ export async function middleware(request: NextRequest) {
   // ── IP Blocklist check ─────────────────────────────────────────────────────
   // Resolve client IP using the same proxy-depth logic as the rate limiter.
   if (_blocklist.length > 0) {
-    const _proxyDepth = Math.max(0, Number(process.env.TRUSTED_PROXY_DEPTH ?? 1));
+    const _proxyDepth = trustedProxyDepth();
     let _clientIp = "unknown";
     // NOTE: depth=0 means "no proxy" — _clientIp stays "unknown" and
-    // isIpBlocked("unknown", ...) returns false, effectively disabling the
-    // Edge Runtime blocklist. The Hono ip-blocklist.ts middleware
-    // handles depth=0 correctly for the API server path.
+    // isIpBlocked("unknown", ...) returns false, so the blocklist cannot apply
+    // (warned once at module load, above).
     if (_proxyDepth > 0) {
       const _fwd = request.headers.get("x-forwarded-for");
       if (_fwd) {
@@ -519,7 +523,7 @@ export async function middleware(request: NextRequest) {
   // - TRUSTED_PROXY_DEPTH=1: One proxy layer (Vercel, Cloudflare) — use last IP
   // - TRUSTED_PROXY_DEPTH=2: Two proxy layers — use second-to-last IP
   // This prevents IP spoofing attacks via forged X-Forwarded-For headers.
-  const PROXY_DEPTH = Math.max(0, Number(process.env.TRUSTED_PROXY_DEPTH ?? 1));
+  const PROXY_DEPTH = trustedProxyDepth();
   let ip = "unknown";
   if (PROXY_DEPTH > 0) {
     const forwarded = request.headers.get("x-forwarded-for");

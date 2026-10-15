@@ -63,6 +63,8 @@ describe("My Markets: an unfinished launch", () => {
     renderRow(mkt({ mode: 0, cTot: 0n, portfolios: 0n }));
     expect(screen.getByTestId("unfinished-launch-panel").dataset.stage).toBe("removable");
     expect(screen.getByTestId("unfinished-continue").getAttribute("href")).toBe(`/create?resume=${slab}`);
+    // The creator still holds marketauth here, so the reclaim checklist shows (#43 gates it on that).
+    expect(screen.getByTestId("close-market-checklist")).toBeTruthy();
     fireEvent.click(screen.getByTestId("unfinished-reclaim"));
     expect(screen.getByText("Reclaim rent from this unfinished launch")).toBeTruthy();
     expect(screen.queryByText(/Close .* market/)).toBeNull();
@@ -123,5 +125,23 @@ describe("My Markets: a finished market", () => {
     expect(screen.queryByText("UNKNOWN")).toBeNull();
     expect(screen.queryByText("USDC")).toBeNull();
     expect(screen.queryByTestId("unfinished-pill")).toBeNull();
+  });
+});
+
+describe("My Markets: a market this wallet can't close (#43)", () => {
+  it("an autonomous market (marketauth handed to the stake pool) shows the can't-close note, not the close checklist", () => {
+    h.complete = true;
+    const STAKE_PDA = new PublicKey("SysvarC1ock11111111111111111111111111111111");
+    const base = mkt({ mode: 0, cTot: 1n, portfolios: 2n }, 5n) as { configV17: object };
+    renderRow({ ...base, configV17: { ...base.configV17, marketauth: STAKE_PDA } } as never, { ...(placeholderDetail as object), symbol: "AUTON" });
+    expect(screen.getByText(/This market is autonomous/)).toBeTruthy();
+    expect(screen.queryByTestId("close-market-checklist")).toBeNull();
+  });
+
+  it("CONTROL: the wallet holding marketauth still sees the checklist", () => {
+    h.complete = true;
+    renderRow(mkt({ mode: 0, cTot: 1n, portfolios: 2n }, 5n), { ...(placeholderDetail as object), symbol: "AUTON" });
+    expect(screen.getByTestId("close-market-checklist")).toBeTruthy();
+    expect(screen.queryByText(/This market is autonomous/)).toBeNull();
   });
 });

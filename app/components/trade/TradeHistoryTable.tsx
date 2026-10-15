@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useTradeHistory } from "@/hooks/useTradeHistory";
 import { formatStatValue, formatTokenAmount, formatUsdFromNumber } from "@/lib/format";
 import { Q_DECIMALS } from "@/lib/q-usd";
@@ -82,7 +83,8 @@ export function TradeHistoryTable({
 
   if (!wallet) return null;
 
-  if (error) {
+  // A failed background reload keeps the rows already shown.
+  if (error && trades.length === 0) {
     return (
       <div className="border border-dashed border-[var(--short)]/30 bg-[var(--panel-bg)]/50 p-6 text-center">
         <p className="text-[12px] text-[var(--short)]/80">Failed to load trade history: {error}</p>
@@ -156,13 +158,14 @@ export function TradeHistoryTable({
             >
               {/* Market — resolved symbol via statsMap, truncated slab address fallback */}
               <div className="sm:truncate">
-                <p
-                  className="text-[11px] font-medium text-[var(--text)]"
+                <Link
+                  href={`/trade/${trade.slab_address}`}
+                  className="text-[11px] font-medium text-[var(--text)] underline-offset-4 transition-colors hover:text-[var(--accent)] hover:underline"
                   style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
-                  title={trade.slab_address}
+                  title={`${trade.slab_address} — open market`}
                 >
                   {marketLabel(trade.slab_address, statsMap)}
-                </p>
+                </Link>
               </div>
 
               {/* Side */}

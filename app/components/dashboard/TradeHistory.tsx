@@ -10,22 +10,16 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import Link from "next/link";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
+import { useAllMarketStats } from "@/hooks/useAllMarketStats";
+import { fillTimeParts } from "@/lib/fill-time";
 import { explorerTxUrl } from "@/lib/config";
 import { formatUsdFromNumber } from "@/lib/format";
 import { fillSide, fillSideColor, fillSideLabel } from "@/lib/fill-side";
 import type { TraderTradeEntry } from "@/app/api/trader/[wallet]/trades/route";
 
 type TradeType = "all" | "long" | "short";
-
-function formatTime(ts: string): string {
-  const d = new Date(ts);
-  return (
-    d.toLocaleDateString([], { month: "short", day: "numeric" }) +
-    ", " +
-    d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-  );
-}
 
 function formatUsd(val: number, showSign = false): string {
   const sign = showSign ? (val >= 0 ? "+" : "") : "";
@@ -44,6 +38,8 @@ const PAGE_SIZE = 25;
 export function TradeHistory() {
   const { publicKey } = useWalletCompat();
   const wallet = publicKey?.toBase58() ?? null;
+  // slab -> market symbol, for the Market cell (shared, deduped SWR with the rest of the app).
+  const { statsMap } = useAllMarketStats();
 
   const [trades, setTrades] = useState<TraderTradeEntry[]>([]);
   const [total, setTotal] = useState(0);
@@ -229,13 +225,29 @@ export function TradeHistory() {
                   <td
                     className="px-4 py-2.5 text-[var(--text-secondary)]"
                     style={{ fontFamily: "var(--font-jetbrains-mono)" }}
+                    title={new Date(trade.created_at).toLocaleString()}
                   >
-                    {formatTime(trade.created_at)}
+                    {/* Two short lines ("5 Oct" / "18:38") that never wrap mid-date on a phone. */}
+                    {(() => {
+                      const t = fillTimeParts(trade.created_at);
+                      return t ? (
+                        <>
+                          <span className="block whitespace-nowrap">{t.date}</span>
+                          <span className="block whitespace-nowrap text-[10px] text-[var(--text-dim)]">{t.time}</span>
+                        </>
+                      ) : (
+                        "—"
+                      );
+                    })()}
                   </td>
                   <td className="px-3 py-2.5">
-                    <span className="rounded border border-[var(--accent)]/20 bg-[var(--accent)]/5 px-1.5 py-0.5 text-[10px] font-bold text-[var(--accent)]">
-                      {shortAddr(trade.slab_address)}
-                    </span>
+                    <Link
+                      href={`/trade/${trade.slab_address}`}
+                      title={`${trade.slab_address} — open market`}
+                      className="whitespace-nowrap rounded border border-[var(--accent)]/20 bg-[var(--accent)]/5 px-1.5 py-0.5 text-[10px] font-bold text-[var(--accent)] transition-colors hover:border-[var(--accent)]/50 hover:bg-[var(--accent)]/10"
+                    >
+                      {statsMap.get(trade.slab_address)?.symbol ?? shortAddr(trade.slab_address)}
+                    </Link>
                   </td>
                   <td className="px-3 py-2.5">
                     <span className={`text-[10px] font-bold ${fillSideColor(trade.side)}`}>

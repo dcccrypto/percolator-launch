@@ -69,6 +69,8 @@ export function LiquidationRiskItem({
     liqPriceE6: pos.liquidationPriceE6,
     positionSize: pos.account?.positionSize ?? 0n,
     capital: pos.account?.capital ?? 0n,
+    entryPriceE6: pos.effectiveEntryPrice,
+    effectiveSize: pos.adlKnown ? pos.effectiveSize : null,
     markPriceE6: markE6,
     maintenanceMarginBps: pos.maintenanceMarginBps,
     hasResolvedEntry: describeEntryPrice({ entryE6: pos.effectiveEntryPrice, source: pos.entryPriceSource }).known,

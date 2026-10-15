@@ -78,6 +78,8 @@ function PositionCard({
     liqPriceE6: pos.liquidationPriceE6,
     positionSize: pos.account?.positionSize ?? 0n,
     capital: pos.account?.capital ?? 0n,
+    entryPriceE6: pos.effectiveEntryPrice,
+    effectiveSize: pos.adlKnown ? pos.effectiveSize : null,
     markPriceE6: pos.oraclePriceE6,
     maintenanceMarginBps: pos.maintenanceMarginBps,
     // Same verdict as the Entry cell, so the two cannot contradict (#2671).

@@ -17,6 +17,7 @@ import {
   createAssociatedTokenAccountInstruction,
 } from '@solana/spl-token';
 import { sendTx } from '@/lib/tx';
+import { stakeErrorMessage } from '@/lib/earnErrors';
 import { getConfig } from '@/lib/config';
 import { assertDepositWithinBalance, readTokenBalance } from '@/lib/deposit-guard';
 
@@ -186,8 +187,9 @@ export function useStakeDepositByPool({ slabAddress, collateralMint }: StakeDepo
         const sig = await sendTx({ connection, wallet, instructions });
         return sig;
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        setError(msg);
+        // #26: the plain line, never the raw simulation JSON / program logs (kept in the console).
+        console.warn('[stake] transaction failed:', e);
+        setError(stakeErrorMessage(e));
         throw e;
       } finally {
         inflightRef.current = false;

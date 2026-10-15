@@ -8,6 +8,9 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const WALLET = "8WC8vALsDJhNCUVRmqZBDSg5xgFAhDrgy7zWqF512pDx";
+// The Market cell resolves symbols from the shared market stats; keep that fetch out of this
+// test's fetch queue (it reads the last request as the trades call).
+vi.mock("@/hooks/useAllMarketStats", () => ({ useAllMarketStats: () => ({ statsMap: new Map() }) }));
 vi.mock("@/hooks/useWalletCompat", () => ({
   useWalletCompat: () => ({ publicKey: { toBase58: () => WALLET }, connected: true }),
 }));

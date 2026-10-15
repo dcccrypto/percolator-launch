@@ -106,7 +106,7 @@ function createDevnetSealedSigner(keypair: Keypair, auditEnabled: boolean): Devn
       // Use partialSign (not sign) for Transaction so that other required signers'
       // partial signatures already present in the signatures array are preserved.
       // tx.sign() wipes all existing signatures before re-signing, which breaks
-      // multi-signer flows (e.g. devnet-mint-token where mintKeypair also signs).
+      // multi-signer flows (e.g. a new mint account whose keypair also signs).
       if (tx instanceof VersionedTransaction) {
         tx.sign([keypair]);
       } else {

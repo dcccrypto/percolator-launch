@@ -32,6 +32,8 @@ vi.mock("@/lib/taker-crank", () => ({ planTakerCrank: vi.fn(async () => "separat
 
 vi.mock("@/lib/tx", async (orig) => ({
   timedOutSignature: (await orig<typeof import("@/lib/tx")>()).timedOutSignature,
+  isTxCancelledError: (await orig<typeof import("@/lib/tx")>()).isTxCancelledError,
+  WaitStoppedError: (await orig<typeof import("@/lib/tx")>()).WaitStoppedError,
   sendTx: mocks.sendTx,
   sendTxWaiting: mocks.sendTx,
   prewarmTxLanding: vi.fn(),
@@ -263,6 +265,49 @@ describe("useTrade v17 portfolio selection", () => {
     expect(mocks.sendTx).toHaveBeenCalledTimes(1); // the crank only; the trade never went out
     expect(err).toBeInstanceOf(Error);
     expect(timedOutSignature(err)).toBeNull();
+    unmount();
+  });
+
+  // GH#2623: the crank is a wallet prompt too. Without the order's signal, a transient-error retry
+  // of an order the user had already stopped (or left) could open the wallet for the crank.
+  it("the separate maintenance crank carries the order's abort signal", async () => {
+    connection.getProgramAccounts.mockResolvedValueOnce([
+      { pubkey: portfolioOne, account: { data: Buffer.from([1]) } },
+    ]);
+    connection.getAccountInfo.mockResolvedValue({ data: Buffer.from([1]) });
+    mocks.parsePortfolioV17.mockReturnValue({ owner: walletPk, legs: [{ active: true }] });
+    mocks.sendTx.mockRejectedValueOnce(Object.assign(new Error("cancelled"), { name: "TxCancelledError" }));
+    const ac = new AbortController();
+
+    const { result, unmount } = renderHook(() => useTrade(new PublicKey(new Uint8Array(32).fill(41)).toBase58()));
+    await act(async () => {
+      await result.current.trade({ lpIdx: 0, userIdx: 7, size: 1_000_000n, abortSignal: ac.signal }).catch(() => null);
+    });
+
+    expect(mocks.sendTx).toHaveBeenCalledTimes(1); // the crank; the order never went out
+    expect(mocks.sendTx.mock.calls[0][0].abortSignal).toBe(ac.signal);
+    unmount();
+  });
+
+  it("a crank stopped before signing ends as the quiet WaitStoppedError, not an error line", async () => {
+    const { TxCancelledError } = await vi.importActual<typeof import("@/lib/tx")>("@/lib/tx");
+    connection.getProgramAccounts.mockResolvedValueOnce([
+      { pubkey: portfolioOne, account: { data: Buffer.from([1]) } },
+    ]);
+    connection.getAccountInfo.mockResolvedValue({ data: Buffer.from([1]) });
+    mocks.parsePortfolioV17.mockReturnValue({ owner: walletPk, legs: [{ active: true }] });
+    mocks.sendTx.mockRejectedValueOnce(new TxCancelledError());
+    const ac = new AbortController();
+    ac.abort();
+
+    const { result, unmount } = renderHook(() => useTrade(new PublicKey(new Uint8Array(32).fill(41)).toBase58()));
+    let err: unknown;
+    await act(async () => {
+      err = await result.current.trade({ lpIdx: 0, userIdx: 7, size: 1_000_000n, abortSignal: ac.signal }).then(() => null, (e) => e);
+    });
+
+    expect((err as Error).name).toBe("WaitStoppedError");
+    expect(mocks.sendTx).toHaveBeenCalledTimes(1);
     unmount();
   });
 });

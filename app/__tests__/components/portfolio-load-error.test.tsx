@@ -3,12 +3,12 @@
  * /portfolio and the dashboard. With usePortfolio().error set, those surfaces say the load
  * failed and offer Retry; without it, the real empty state is unchanged.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
 
-const state = vi.hoisted(() => ({ portfolio: {} as any }));
+const state = vi.hoisted(() => ({ portfolio: {} as any, lpError: null as string | null }));
 
 vi.mock("next/link", () => ({ default: ({ children, href }: any) => <a href={href}>{children}</a> }));
 vi.mock("next/dynamic", () => ({ default: () => () => <button>ConnectButton</button> }));
@@ -21,7 +21,7 @@ vi.mock("@/hooks/usePortfolio", async (importOriginal) => ({
 }));
 vi.mock("@/hooks/useMultiTokenMeta", () => ({ useMultiTokenMeta: () => new Map() }));
 vi.mock("@/hooks/useLpPositions", () => ({
-  useLpPositions: () => ({ positions: [], totalRedeemable: 0, loading: false, isRefreshing: false, error: null, refresh: vi.fn() }),
+  useLpPositions: () => ({ positions: [], totalRedeemable: 0, loading: false, isRefreshing: false, error: state.lpError, refresh: vi.fn() }),
 }));
 vi.mock("@/components/portfolio/LpPositionsPanel", () => ({ LpPositionsPanel: () => <div /> }));
 vi.mock("@/hooks/useTraderStats", () => ({ useTraderStats: () => ({ stats: null, loading: false, error: null, refresh: vi.fn() }) }));
@@ -94,4 +94,27 @@ describe("failed first position scan", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
+});
+
+// S25: the LP Value tile read only loading, so a failed Earn read (only `error` is set) showed "$0.00"
+// while the tiles beside it say "—" for their own failed read.
+describe("LP Value tile after a failed Earn read", () => {
+  beforeEach(() => {
+    state.portfolio = {
+      positions: [], totalPnl: 0n, totalDeposited: 0n, totalValue: 0n, totalUnrealizedPnl: 0n,
+      atRiskCount: 0, loading: false, isRefreshing: false, error: undefined, refresh: vi.fn(),
+    };
+  });
+  afterEach(() => { state.lpError = null; });
+
+  it("reads '—', not $0.00", () => {
+    state.lpError = "Failed to load LP positions";
+    render(<PortfolioPositionsView />);
+    expect(screen.getByText("LP Value").nextElementSibling?.textContent).toBe("—");
+  });
+
+  it("CONTROL: a successful empty read is $0.00", () => {
+    render(<PortfolioPositionsView />);
+    expect(screen.getByText("LP Value").nextElementSibling?.textContent).toBe("$0.00");
+  });
 });

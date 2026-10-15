@@ -30,6 +30,7 @@
 import { computeMarginCushion, severityFromCushion } from "@/lib/liquidation-risk";
 import { FC, memo, useMemo, useState } from "react";
 import { useUserAccount, useUserAccountScanPending } from "@/hooks/useUserAccount";
+import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useNftWrappedPosition } from "@/hooks/useNftWrappedPosition";
 import { PositionNftMenu, ClosedPositionNftNotice, NFT_MENU_COPY } from "@/components/trade/PositionNftMenu";
 import { useClosePosition } from "@/hooks/useClosePosition";
@@ -69,6 +70,7 @@ import { bigintToFloat } from "@/lib/formatters";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { ClosePositionModal } from "./ClosePositionModal";
 import { OtherMarketPositions } from "./OtherMarketPositions";
+import { MOBILE_CARD_ACTIONS, MOBILE_CARD_CELL, MOBILE_CARD_ROW } from "./positionCardClasses";
 import { WarmupProgress } from "./WarmupProgress";
 import { useMarketFillCap } from "@/hooks/useMarketFillCap";
 import { TradeHistory } from "./TradeHistory";
@@ -124,6 +126,7 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
   // GH#2707: while the portfolio scan is in flight a null account is unknown, not absent.
   const scanPending = useUserAccountScanPending();
   const accountPending = !mockMode && !userAccount && scanPending;
+  const { connected } = useWalletCompat();
   const config = useMarketConfig();
   const { accounts, config: mktConfig, params, adlFactors, wrapperConfigV17, refresh: refreshSlab } = useSlabState();
   const { engine, insuranceBalance } = useEngineState();
@@ -211,7 +214,10 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
       ? "Checking this market for your account."
       : userAccount
         ? "Use the order ticket to open a position."
-        : "Connect your wallet and deposit collateral to start trading.";
+        : connected
+          // Connected, no account on this market yet: the first trade sets it up (fund-and-trade).
+          ? "Use the order ticket to open a position. Your first trade sets up your account here."
+          : "Connect your wallet and deposit collateral to start trading.";
     return (
       <>
         <EmptyState title={accountPending ? "Loading positions…" : undefined} subtitle={subtitle} />
@@ -307,13 +313,15 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
   // liquidated by price (excess collateral) — formatLiqPrice renders "∞".
   const liqUnliquidatable = pnlResult.adlKnown && liqPriceE6 <= 0n && entryPriceE6 > 0n && account.positionSize !== 0n;
   // When there is no liquidation price, "no liquidation price" is not a risk
-  // figure. Margin health is: capital/notional, defined without an entry or a
+  // figure. Margin health is: equity/notional, valued with the same entry as the
   // liq price, and it crosses its threshold at exactly the collateral level
   // where the liq price disappears. See lib/margin-health.ts and #2558.
   const liqDisplay = describeLiqPrice({
     liqPriceE6,
     positionSize: account.positionSize,
     capital: account.capital,
+    entryPriceE6,
+    effectiveSize: pnlResult.effectiveSize,
     markPriceE6: currentPriceE6,
     maintenanceMarginBps: maintenanceBps,
     // #2660: `entryPriceE6 > 0n` is always true — on "unknown" it is the mark.
@@ -408,9 +416,10 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
           </span>
         </div>
       )}
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-[10px]">
-          <thead>
+      {/* Scrolls sideways on desktop only; on phones the row is a card (MOBILE_CARD_*). */}
+      <div className="lg:overflow-x-auto">
+        <table className="min-w-full text-[10px] max-lg:block">
+          <thead className="max-lg:hidden">
             <tr className="border-b border-[var(--border)]/30 text-[8px] uppercase tracking-[0.15em] text-[var(--text)]">
               <th className="whitespace-nowrap px-4 py-2 text-left font-medium">Market</th>
               <th className="whitespace-nowrap px-3 py-2 text-left font-medium">Side</th>
@@ -428,13 +437,13 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
               <th className="whitespace-nowrap px-3 py-2 text-right font-medium">ROE%</th>
               {/* Pinned to the right edge so the Share/Close actions stay reachable
                   when this wide table scrolls horizontally on a phone. */}
-              <th className="sticky right-0 z-20 whitespace-nowrap border-l border-[var(--border)]/30 bg-[var(--panel-bg)] px-3 py-2 text-right font-medium">Close</th>
+              <th className="lg:sticky right-0 z-20 whitespace-nowrap border-l border-[var(--border)]/30 bg-[var(--panel-bg)] px-3 py-2 text-right font-medium">Close</th>
             </tr>
           </thead>
-          <tbody>
-            <tr data-testid="position-row" className="border-b border-[var(--border)]/20 transition-colors hover:bg-[var(--accent)]/[0.03]">
-              <td className="whitespace-nowrap px-4 py-2.5 text-left"><span className="text-[11px] font-medium text-[var(--text)]">{marketDisplaySymbol}/USD</span></td>
-              <td className="whitespace-nowrap px-3 py-2.5 text-left">
+          <tbody className="max-lg:block">
+            <tr data-testid="position-row" className={`border-b border-[var(--border)]/20 transition-colors hover:bg-[var(--accent)]/[0.03] ${MOBILE_CARD_ROW}`}>
+              <td className="whitespace-nowrap px-4 py-2.5 text-left max-lg:col-span-2 max-lg:p-0"><span className="text-[11px] font-medium text-[var(--text)]">{marketDisplaySymbol}/USD</span></td>
+              <td className="whitespace-nowrap px-3 py-2.5 text-left max-lg:p-0 max-lg:text-right">
                 <span className={`inline-block rounded-sm px-1.5 py-0.5 text-[9px] font-bold uppercase ${isLong ? "bg-[var(--long)]/10 text-[var(--long)]" : "bg-[var(--short)]/10 text-[var(--short)]"}`}>
                   {isLong ? "LONG" : "SHORT"}
                 </span>
@@ -444,7 +453,7 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
                   </span>
                 )}
               </td>
-              <td className="whitespace-nowrap px-3 py-2.5 text-right" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+              <td data-label="Size" className={`whitespace-nowrap px-3 py-2.5 text-right ${MOBILE_CARD_CELL}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                 <span className="text-[var(--text)]">{formatTokenAmount(absPosition, decimals)}</span>
                 <span className="ml-1 text-[var(--text-secondary)]">{symbol}</span>
                 {wasDeleveraged && (
@@ -468,14 +477,15 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
                 )}
               </td>
               <td
-                className={`whitespace-nowrap px-3 py-2.5 text-right ${leverageDisplay.known ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`}
+                data-label={POSITION_LEVERAGE_LABEL}
+                className={`whitespace-nowrap px-3 py-2.5 text-right ${leverageDisplay.known ? "text-[var(--text)]" : "text-[var(--text-dim)]"} ${MOBILE_CARD_CELL}`}
                 style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
                 title={leverageDisplay.title}
                 data-testid="position-leverage"
               >
                 {leverageDisplay.text}
               </td>
-              <td className={`whitespace-nowrap px-3 py-2.5 text-right ${pnlIsKnown ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+              <td data-label="Entry" className={`whitespace-nowrap px-3 py-2.5 text-right ${pnlIsKnown ? "text-[var(--text)]" : "text-[var(--text-dim)]"} ${MOBILE_CARD_CELL}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                 {entryKnown ? formatUsdPriceE6(entryPriceE6) : (
                   <span className="inline-flex items-center justify-end gap-1">
                     --
@@ -484,7 +494,8 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
                 )}
               </td>
               <td
-                className={`whitespace-nowrap px-3 py-2.5 text-right transition-colors duration-300 ease-out ${
+                data-label="Mark"
+                className={`whitespace-nowrap px-3 py-2.5 text-right transition-colors duration-300 ease-out ${MOBILE_CARD_CELL} ${
                   hasValidMark
                     ? markFlash === "up" ? "text-[var(--long)]" : markFlash === "down" ? "text-[var(--short)]" : "text-[var(--text)]"
                     : "text-[var(--text-dim)]"
@@ -495,7 +506,8 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
               </td>
               <td
                 data-testid="position-liq"
-                className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${liqPriceColor}`}
+                data-label="Liq. Price"
+                className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${liqPriceColor} ${MOBILE_CARD_CELL}`}
                 style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
               >
                 <LiqPriceValue display={liqDisplay} />
@@ -505,7 +517,7 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
                   </div>
                 )}
               </td>
-              <td className={`whitespace-nowrap px-3 py-2.5 text-right ${hasValidMark && pnlIsKnown ? pnlColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+              <td data-label="PnL" className={`whitespace-nowrap px-3 py-2.5 text-right ${hasValidMark && pnlIsKnown ? pnlColor : "text-[var(--text-dim)]"} ${MOBILE_CARD_CELL}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                 {!pnlIsKnown ? (
                   <span className="inline-flex items-center justify-end gap-1">
                     --
@@ -513,7 +525,7 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
                   </span>
                 ) : hasValidMark ? (
                   <>
-                    <div className="flex items-center justify-end gap-1">
+                    <div className="flex items-center justify-end gap-1 max-lg:justify-start">
                       {formatPnl(pnlTokens, decimals)} {collateralSymbol}
                       {pnlResult.isEstimate && (
                         <span className="text-[9px] font-normal text-[var(--text-dim)]" title={DERIVED_ENTRY_TOOLTIP}>{ESTIMATE_LABEL}</span>
@@ -539,11 +551,11 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
                   <span>--</span>
                 )}
               </td>
-              <td className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${hasValidMark && pnlIsKnown ? roeColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+              <td data-label="ROE%" className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${hasValidMark && pnlIsKnown ? roeColor : "text-[var(--text-dim)]"} ${MOBILE_CARD_CELL}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                 {hasValidMark && pnlIsKnown ? formatPercent(roe) : "--"}
               </td>
-              <td className="sticky right-0 z-10 has-[[role=menu]]:z-30 whitespace-nowrap border-l border-[var(--border)]/30 bg-[var(--panel-bg)] px-3 py-2.5 text-right">
-                <span className="inline-flex items-center justify-end gap-1">
+              <td className={`lg:sticky right-0 z-10 has-[[role=menu]]:z-30 whitespace-nowrap border-l border-[var(--border)]/30 bg-[var(--panel-bg)] px-3 py-2.5 text-right ${MOBILE_CARD_ACTIONS}`}>
+                <span className="inline-flex items-center justify-end gap-1 max-lg:flex max-lg:flex-wrap max-lg:justify-start max-lg:gap-2">
                 <PnlShareButton
                   data={pnlCardData}
                   label="Share PnL"
@@ -586,8 +598,8 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
               </td>
             </tr>
             {marketLimits.flags.p3 && (
-              <tr data-testid="limits-position-row" className="border-b border-[var(--border)]/20">
-                <td colSpan={99} className="px-4 pb-2">
+              <tr data-testid="limits-position-row" className="border-b border-[var(--border)]/20 max-lg:block">
+                <td colSpan={99} className="px-4 pb-2 max-lg:block">
                   <PositionLimitsRow
                     limits={marketLimits}
                     positionQ={effectiveSize}

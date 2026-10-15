@@ -23,6 +23,7 @@ import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getConfig } from "@/lib/config";
 import { invalidateWalletBalance } from "@/lib/wallet-balance-invalidation";
 import { keepAppMessage, plainMessage } from "@/lib/limits/user-message";
+import { shortRateLimitMessage } from "@/lib/faucet-429";
 
 export type FaucetStep = "idle" | "sol" | "usdc" | "deposit" | "done" | "error";
 
@@ -167,6 +168,12 @@ export function useDevnetFaucet(): DevnetFaucetState {
     usdcAirdropPendingRef.current = false;
     setSolBalance(null);
     setUsdcBalance(null);
+    // The 24h claim gate is per wallet: the previous wallet's "Rate limited" / next-claim time
+    // and its error must not disable or explain this one's claim.
+    setRateLimited(false);
+    setNextClaimAt(null);
+    setError(null);
+    setStep("idle");
   }, [walletAddress]);
 
   const refreshBalances = useCallback(async () => {
@@ -277,16 +284,30 @@ export function useDevnetFaucet(): DevnetFaucetState {
       // UX WP-10 (FA-1): the server faucet first — it sends from the playground's server wallet
       // when that is configured (the public airdrop below is usually rate-limited).
       let sig: string | null = null;
+      let pendingMsg: string | null = null;
       try {
         const resp = await fetch("/api/faucet", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet: publicKey.toBase58(), type: "sol" }),
         });
-        const data = (await resp.json().catch(() => ({}))) as { signature?: string };
+        const data = (await resp.json().catch(() => ({}))) as { signature?: string; pending?: boolean; error?: string };
         if (resp.ok && data.signature) sig = data.signature;
+        // The server sent the SOL but couldn't confirm it in time (503 `pending`). It counts that as
+        // the claim and never re-sends, so the fallbacks below would be a second airdrop, and their
+        // failure read "SOL airdrop failed" while this one was landing (as /faucet's sol_pending).
+        else if (resp.status === 503 && data.pending === true)
+          pendingMsg = data.error ?? "Your test SOL is on its way but not confirmed yet. Check your balance in a minute before trying again.";
       } catch {
         sig = null;
+      }
+      if (pendingMsg) {
+        // Not done until the balance shows it: refreshBalances marks SOL done once it lands.
+        lastOpFailedRef.current = true;
+        solErrorRef.current = pendingMsg;
+        setError(pendingMsg);
+        void refreshBalances();
+        return;
       }
       // PERC-808: Try Helius devnet faucet next (more reliable, higher limits)
       if (!sig && HELIUS_DEVNET_RPC) {
@@ -352,6 +373,7 @@ export function useDevnetFaucet(): DevnetFaucetState {
 
   const airdropUsdc = useCallback(async () => {
     if (!publicKey) return;
+    const forWallet = publicKey.toBase58();
     setStep("usdc");
     setLoading(true);
     setError(null);
@@ -360,9 +382,18 @@ export function useDevnetFaucet(): DevnetFaucetState {
       const resp = await fetch("/api/faucet", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet: publicKey.toBase58(), type: "usdc" }),
+        body: JSON.stringify({ wallet: forWallet, type: "usdc" }),
       });
       const data = await resp.json();
+      // A reply for the previous wallet must not mark this one rate limited or funded (as refreshBalances).
+      if (walletAddressRef.current !== forWallet) return;
+      // The short per-IP / middleware limit: say so, and don't latch "Rate limited" (lib/faucet-429).
+      const shortLimit = shortRateLimitMessage(resp, data);
+      if (shortLimit) {
+        lastOpFailedRef.current = true;
+        setError(shortLimit);
+        return;
+      }
       if (resp.status === 429) {
         lastOpFailedRef.current = true;
         setRateLimited(true);

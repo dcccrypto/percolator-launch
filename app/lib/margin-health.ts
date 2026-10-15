@@ -10,15 +10,22 @@
  * the surfaces that lead with a liquidation price then have nothing to say
  * precisely when the trader asks "how close am I?".
  *
- * Margin health is `capital / notional`, and it is defined whenever there is a
- * position and a mark. It needs no entry price and no liquidation price, so it
- * survives every case that makes the liquidation price unavailable. The two are
- * the same fact expressed differently:
+ * Margin health is `equity / notional` at the mark, equity being capital plus the
+ * position's unrealized PnL: the ratio the engine's maintenance check runs on. It
+ * is defined whenever there is a position and a mark, so it survives every case
+ * that makes the liquidation price unavailable. Measured with the same entry the
+ * liquidation price uses, the two are the same fact expressed differently:
  *
  *      health >= 100 %      <=>      no liquidation price
  *
  * at every mm: with equity >= notional, equity stays >= mm x notional at any price
- * (the engine's maintenance check). The SDK's old formula put the line at (100 + mm)%,
+ * (the engine's maintenance check). Capital alone is not enough: a loss stays in
+ * `pnl` until settlement moves it out of capital, so capital / notional read a
+ * losing position as far safer than it was, and a covered winner as under 100%.
+ * Exact for a leg ADL has not touched; under ADL the PnL is on the effective size
+ * and the notional nominal, which errs toward risky. Like the liquidation price,
+ * it ignores what accrued since the account was last touched (funding, fees) and
+ * the haircut on positive PnL. The SDK's old formula put the line at (100 + mm)%,
  * 105% at mm = 500 (#2987). Below it a liquidation price exists and the usual
  * distance-based colouring applies; at or above it, the position is covered at
  * any price. Surfacing the number lets the UI say which side of that line the
@@ -62,8 +69,11 @@ export function computeMarginHealthPct(
   capital: bigint | number | null | undefined,
   nominalPositionSize: bigint | number | null | undefined,
   markPriceE6: bigint | number | null | undefined,
+  /** Unrealized PnL at the mark, collateral atoms. Missing = 0 (capital alone). */
+  pnlAtoms?: bigint | number | null,
 ): number | null {
   const cap = toBig(capital);
+  const pnl = toBig(pnlAtoms) ?? 0n;
   const size = toBig(nominalPositionSize);
   const mark = toBig(markPriceE6);
   if (cap == null || size == null || mark == null) return null;
@@ -72,8 +82,11 @@ export function computeMarginHealthPct(
   if (absNominal === 0n || mark <= 0n) return null;
   const notionalE6 = absNominal * mark;
   if (notionalE6 <= 0n) return null;
-  // capital is collateral atoms (e6); notionalE6 is size(e6) * price(e6).
-  return Number((cap * 1_000_000n * 100n) / notionalE6);
+  // Equity is collateral atoms (e6); notionalE6 is size(e6) * price(e6). Floored at
+  // 0: below that the position is already past liquidation.
+  const equity = cap + pnl;
+  if (equity <= 0n) return 0;
+  return Number((equity * 1_000_000n * 100n) / notionalE6);
 }
 
 /**

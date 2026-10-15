@@ -9,11 +9,11 @@ import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const wallet = new PublicKey("9sM73A4MvS2ye2Fuvpr1tmkj68iA61eebuRKz1rnGUWa");
-const mocks = vi.hoisted(() => ({ connection: {} as Record<string, unknown> }));
+const mocks = vi.hoisted(() => ({ connection: {} as Record<string, unknown>, wallet: null as unknown }));
 
 vi.mock("@/hooks/useWalletCompat", () => ({
   useConnectionCompat: () => ({ connection: mocks.connection }),
-  useWalletCompat: () => ({ publicKey: wallet }),
+  useWalletCompat: () => ({ publicKey: mocks.wallet ?? wallet }),
 }));
 // spl-token's layout decoders and PDA derivation reject jsdom-realm buffers, so the three helpers
 // the hook uses are replaced by byte-offset reads of the same layout; this is the real ATA
@@ -59,6 +59,7 @@ function poolAccount(totalLpSupply: bigint) {
 
 describe("useLpPositions valuation freshness", () => {
   beforeEach(() => {
+    mocks.wallet = wallet;
     const ata = new PublicKey(REAL_ATA);
     const accounts = new Map<string, unknown>([
       [lpMint.toBase58(), mintAccount(6)],
@@ -86,5 +87,18 @@ describe("useLpPositions valuation freshness", () => {
     expect(result.current.error).toBeNull(); expect(result.current.positions).toHaveLength(1);
     expect(result.current.positions[0].redeemable).toBeCloseTo(399.999, 3);
     expect(result.current.totalRedeemable).toBeCloseTo(399.999, 3);
+  });
+
+  // S25: the wallet-change effect re-fetched but kept the previous wallet's rows and total, and a failed
+  // read only sets `error`, so a new wallet whose first read failed showed the old wallet's LP Value.
+  it("S25: drops the previous wallet's rows and total; a failed first read leaves nothing to show", async () => {
+    const { result, rerender } = renderHook(() => useLpPositions());
+    await waitFor(() => expect(result.current.totalRedeemable).toBeGreaterThan(0));
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("rate limited"); }));
+    mocks.wallet = new PublicKey("DrrDGxiojUPHnLZaNw7DN6JYoEKKqu3bG4PmNjv8P1yG");
+    rerender();
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect(result.current.positions).toHaveLength(0);
+    expect(result.current.totalRedeemable).toBe(0);
   });
 });

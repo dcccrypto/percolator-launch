@@ -606,8 +606,10 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
               </button>
             )}
           </div>
-          {/* UX WP-9 (§3.11): the preconditions BEFORE the button, never "closeSlab will tell you". */}
-          {!removalImpossible && <CloseMarketChecklistView checks={closeChecks} />}
+          {/* UX WP-9 (§3.11): the preconditions BEFORE the button, never "closeSlab will tell you".
+              Only for a wallet that can close it: without marketauth (every finished market) the note
+              below says it can't be closed, and a checklist would list steps that lead nowhere (#43). */}
+          {!removalImpossible && isMarketAuth && <CloseMarketChecklistView checks={closeChecks} />}
           {!isMarketAuth && (
             <p className="mt-2 text-[10px] text-[var(--text-secondary)]">
               This market is autonomous — admin control was permanently renounced to the stake-pool

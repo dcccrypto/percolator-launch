@@ -686,7 +686,7 @@ function MarketsPageInner() {
               <h1 className="text-2xl font-medium tracking-[-0.01em] text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
                 <span className="font-normal text-[var(--text)]">All </span>Markets
               </h1>
-              <p className="mt-2 text-[13px] text-[var(--text-secondary)]">perpetual futures, pick your poison.</p>
+              <p className="mt-2 text-[13px] text-[var(--text-secondary)]">Pick a market to trade long or short, or launch your own.</p>
             </div>
             <GlowButton href="/create" aria-label="Launch a new market" size="sm">+ LAUNCH MARKET</GlowButton>
           </div>
@@ -809,9 +809,12 @@ function MarketsPageInner() {
 
             {/* Results count — desktop only, in filter row */}
             <span className="hidden md:inline-block ml-auto text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text)] shrink-0 whitespace-nowrap tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
-              {(hasSearch) && filtered.length !== activeMarkets.length
-                ? `${filtered.length} / ${activeMarkets.length} MARKETS`
-                : `${activeMarkets.length} ${activeMarkets.length !== 1 ? "MARKETS" : "MARKET"}`}
+              {/* Same as the mobile count: activeMarkets is empty until stats load, so not "0 MARKETS". */}
+              {loading
+                ? "… MARKETS"
+                : (hasSearch) && filtered.length !== activeMarkets.length
+                  ? `${filtered.length} / ${activeMarkets.length} MARKETS`
+                  : `${activeMarkets.length} ${activeMarkets.length !== 1 ? "MARKETS" : "MARKET"}`}
             </span>
           </div>
         </ScrollReveal>

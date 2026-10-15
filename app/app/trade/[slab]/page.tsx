@@ -21,7 +21,6 @@ import { MarketLimitsStrip } from "@/components/limits/MarketLimitsStrip";
 import { MarketHeaderStatus, TradeMarketHealthBanner } from "@/components/market/MarketHealthBadges";
 import { AnalyticsDock } from "@/components/trade/AnalyticsDock";
 import { useIsLargeScreen } from "@/hooks/useIsLargeScreen";
-import { useAdvanceOraclePhase } from "@/hooks/useAdvanceOraclePhase";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { useLivePriceHasData, livePriceJsonFetcher } from "@/hooks/useLivePrice";
@@ -31,6 +30,7 @@ import { isPlaceholderSymbol, SLUG_ALIASES } from "@/lib/symbol-utils";
 import { getNetwork } from "@/lib/config";
 import { RenderProfiler } from "@/components/dev/RenderProfiler";
 import TradingPageLoading from "./loading";
+import { fetchMarketsList, listedMarketRows } from "@/lib/markets-list-client";
 
 // Lazy-load the chart so it streams AFTER the order ticket + positions are
 // interactive, instead of blocking the trade page's initial load. ssr:false —
@@ -322,7 +322,6 @@ function TradePageInner({ slab }: { slab: string }) {
   const isLargeScreen = useIsLargeScreen();
 
   const { engine, config, header, loading: slabLoading, error: slabError } = useSlabState();
-  useAdvanceOraclePhase(slab);
   // Boolean presence subscription, NOT the full live-price state: this keeps the
   // trade-page shell OFF the ~4-5/sec price-tick re-render path (it only needs to
   // know whether a price exists, for the no-data gate below). See useLivePriceHasData.
@@ -611,7 +610,9 @@ function TradePageInner({ slab }: { slab: string }) {
             </RenderProfiler>
           </ErrorBoundary>
 
-          <div className="h-[45vh] min-h-[280px] border border-[var(--border)] bg-[var(--panel-bg)]">
+          {/* Height follows the content (was a fixed 45vh: mostly empty with one position, and a second
+              scrollbar inside the page with several). The page scrolls instead; Trades pages at 25 rows. */}
+          <div className="min-h-[160px] border border-[var(--border)] bg-[var(--panel-bg)]">
             <ErrorBoundary label="PositionsDock"><PositionsDock slabAddress={slab} /></ErrorBoundary>
           </div>
 
@@ -668,11 +669,12 @@ function SlugResolvePage({ slug }: { slug: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/markets")
-      .then((r) => r.json())
+    // The canonical list (lib/markets-list-client.ts); listedMarketRows() is what the bare
+    // /api/markets returned (zombies excluded).
+    fetchMarketsList()
       .then((data) => {
         if (cancelled) return;
-        const markets: Array<{ slab_address: string; symbol?: string; mint_address?: string; volume_24h?: number | null; total_open_interest?: number | null; created_at?: string }> = data.markets ?? [];
+        const markets = (listedMarketRows(data) ?? []) as unknown as Array<{ slab_address: string; symbol?: string; mint_address?: string; volume_24h?: number | null; total_open_interest?: number | null; created_at?: string }>;
         const slugNorm = slug.toUpperCase().replace(/-PERP$/, "");
 
         const sorted = [...markets].sort((a, b) => {

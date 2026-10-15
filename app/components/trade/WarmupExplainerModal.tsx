@@ -13,15 +13,18 @@ export const WarmupExplainerModal: FC<WarmupExplainerModalProps> = ({
   return (
     <Modal
       onClose={onClose}
+      labelledBy="warmup-explainer-title"
       panelClassName="w-full max-w-sm border border-[var(--border)] bg-[var(--bg)] shadow-2xl shadow-black/30"
     >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[var(--border)]/50 px-4 py-2">
-          <span className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">
+          <span id="warmup-explainer-title" className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">
             PnL Warmup
           </span>
           <button
+            type="button"
             onClick={onClose}
+            aria-label="Close"
             className="flex h-5 w-5 items-center justify-center text-[var(--text-dim)] transition-colors hover:text-[var(--text)]"
           >
             <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

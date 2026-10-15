@@ -152,9 +152,13 @@ export function usePercolatorCandles(
       return;
     }
 
-    const { resolution, lookbackSec } = RESOLUTION_MAP[tf];
+    const { resolution, lookbackSec, bucketSec } = RESOLUTION_MAP[tf];
     const nowSec = Math.floor(Date.now() / 1000);
-    const to = Math.floor(nowSec / QUANTIZE_SEC) * QUANTIZE_SEC;
+    // Bucket-aligned (review E3): the server answers whole buckets through the bucket of `to`, so
+    // the window still reaches now, and the URL repeats across viewers for a whole bucket (it used
+    // to change every QUANTIZE_SEC).
+    const step = Math.max(bucketSec, QUANTIZE_SEC);
+    const to = Math.floor(nowSec / step) * step;
     const from = to - lookbackSec;
 
     try {

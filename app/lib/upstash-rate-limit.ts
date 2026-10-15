@@ -8,7 +8,7 @@
  * Fallback: in-memory sliding window (dev / CI / when Redis is unconfigured).
  *           Per-serverless-instance — not suitable for horizontal mainnet scaling.
  *
- * Replaces duplicated code in advance-phase-rate-limit.ts and create-market-rate-limit.ts.
+ * Replaces code that was duplicated across per-route limiter modules.
  *
  * Usage:
  *   const limiter = createUpstashRateLimiter({ limit: 60, windowMs: 60_000, prefix: "rl:my-route" });
@@ -27,7 +27,7 @@ export interface UpstashRateLimiterOptions {
   limit: number;
   /** Window duration in milliseconds. */
   windowMs: number;
-  /** Redis key prefix (e.g. "rl:advance-phase"). Must be unique per limiter. */
+  /** Redis key prefix (e.g. "rl:devnet-fund"). Must be unique per limiter. */
   prefix: string;
 }
 

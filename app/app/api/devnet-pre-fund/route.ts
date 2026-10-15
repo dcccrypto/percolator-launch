@@ -65,8 +65,8 @@ import { reserveClaim, releaseClaim, peekClaim, PREFUND_CLAIM_TTL_MS } from "@/l
 export const dynamic = "force-dynamic";
 
 // Canonical env var first, legacy fallback; undefined = non-devnet (fail-closed).
-// The real devnet guard is the devnet_mints DB lookup below — only mirror mints
-// (created by our /api/devnet-mirror-mint endpoint) can be funded.
+// The real devnet guard is the devnet_mints DB lookup below — only server-owned mints
+// recorded in devnet_mints can be funded.
 const NETWORK =
   process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim() ??
   process.env.NEXT_PUBLIC_SOLANA_NETWORK?.trim();
@@ -215,8 +215,8 @@ export async function POST(req: NextRequest) {
     // Validate mintAddress: check static allowlist OR dynamic devnet_mints table.
     // #873 fix: ALWAYS check DB when no static allowlist is configured.
     // Previously, DEVNET_ALLOWED_MINTS.size === 0 short-circuited to mintPermitted=true,
-    // skipping the DB lookup entirely. The DB is the real security gate — only mirror mints
-    // (created by our /api/devnet-mirror-mint endpoint) should be fundable.
+    // skipping the DB lookup entirely. The DB is the real security gate — only server-owned
+    // mints recorded in devnet_mints should be fundable.
     // On-chain getMint authority check remains the final gate; on-chain checks below
     // also catch any DB-level bypass (our keypair can only mint its own authority mints).
     let finallyPermitted: boolean;

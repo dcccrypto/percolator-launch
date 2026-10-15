@@ -546,6 +546,138 @@ export function applyRecoveredLaunch<T extends ResumableParams>(params: T, r: Re
   };
 }
 
+// ── Same-browser resume (#3377) ──────────────────────────────────────────────────────────────────
+
+/** What a same-browser resume is pinned to: the values this browser's own launch signed. */
+export interface SameBrowserPin {
+  slab: string;
+  initialPriceE6: bigint;
+  tradingFeeBps: number;
+  initialMarginBps: number;
+  lpCollateralAtoms: bigint;
+  poolAddress: string;
+  dexType: string;
+  symbol: string;
+  name: string;
+  mainnetCA: string;
+}
+
+export const SAME_BROWSER_RESUME_REFUSAL =
+  "This browser no longer holds the details this launch started with, so it can't be resumed safely from here. Open it from My Markets to continue.";
+
+export const SAME_BROWSER_READING_COPY = "Still reading this launch from the chain. Try again in a moment.";
+
+export type SameBrowserPinResult = { ok: true; pin: SameBrowserPin | null } | { ok: false; message: string };
+
+const asBigInt = (v: unknown): bigint | null => {
+  try {
+    return typeof v === "string" || typeof v === "number" || typeof v === "bigint" ? BigInt(v) : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Pin a RESUME taken from this browser's own RecoverSolBanner (the cross-device path is
+ * applyRecoveredLaunch). Resuming from step 0 signs nothing that a launch has not yet signed, so it
+ * is left to the live form exactly like a fresh launch (`pin: null`). From step 1 on, InitMarket has
+ * landed: fee, price, LP seed, pool, symbol and CA come from the creation's proof payload that
+ * this browser saved (the memo binds its digest), and the dex type from the saved registration
+ * request, or from the live detection only when it still names the same pool. Margin comes from chain
+ * (InitMarket's initial_margin_bps): resumed step 2 derives the matcher limits from it and signs them
+ * permanently, and the payload's max_leverage cannot give it back for fractional leverage (1538 bps = 6.5x).
+ * If any of it is missing, refuse rather than sign or register with drifted values.
+ */
+export function pinSameBrowserResume(input: {
+  slab: string;
+  fromStep: number;
+  payload: Record<string, unknown> | null;
+  savedRequest?: { dexPoolAddress?: string | null; dexType?: string | null } | null;
+  live?: { poolAddress?: string | null; dexType?: string | null };
+  wallet?: string | null;
+  /** The creation proof tx signature this browser saved, if any. */
+  proofTx?: string | null;
+  /** The form currently describes a keeper-priced launch. */
+  liveIsKeeper?: boolean;
+  /** The slab's on-chain initial_margin_bps (InitMarket); null = the read failed. Required to pin from step 1. */
+  chainMarginBps?: number | null;
+}): SameBrowserPinResult {
+  if (input.fromStep <= 0) return { ok: true, pin: null };
+  // A launch that never bound a keeper registration (no payload, proof or request saved, and the form is
+  // not keeper-priced) has nothing to pin: it resumes exactly as before.
+  if (!input.payload && !input.proofTx && !input.savedRequest && !input.liveIsKeeper) return { ok: true, pin: null };
+  const refuse: SameBrowserPinResult = { ok: false, message: SAME_BROWSER_RESUME_REFUSAL };
+  const p = input.payload;
+  if (!p || p.slab_address !== input.slab) return refuse;
+  if (input.wallet && typeof p.deployer === "string" && p.deployer !== input.wallet) return refuse;
+  const price = asBigInt(p.initial_price_e6);
+  const lp = asBigInt(p.lp_collateral);
+  const fee = typeof p.trading_fee_bps === "number" ? p.trading_fee_bps : Number.NaN;
+  const pool = typeof p.dex_pool_address === "string" ? p.dex_pool_address : null;
+  const symbol = typeof p.symbol === "string" ? p.symbol : null;
+  const name = typeof p.name === "string" ? p.name : null;
+  const ca = typeof p.mainnet_ca === "string" ? p.mainnet_ca : null;
+  const margin = input.chainMarginBps;
+  if (typeof margin !== "number" || !Number.isInteger(margin) || margin <= 0) return refuse;
+  if (price === null || price <= 0n || lp === null || lp < 0n) return refuse;
+  if (!Number.isFinite(fee) || fee < 0) return refuse;
+  if (!pool || !symbol || !name || !ca) return refuse;
+  const saved = input.savedRequest;
+  const dexType =
+    saved && saved.dexType && (!saved.dexPoolAddress || saved.dexPoolAddress === pool)
+      ? saved.dexType
+      : input.live?.poolAddress === pool
+        ? (input.live.dexType ?? null)
+        : null;
+  if (!dexType) return refuse;
+  return {
+    ok: true,
+    pin: {
+      slab: input.slab,
+      initialPriceE6: price,
+      tradingFeeBps: fee,
+      initialMarginBps: margin,
+      lpCollateralAtoms: lp,
+      poolAddress: pool,
+      dexType,
+      symbol,
+      name,
+      mainnetCA: ca,
+    },
+  };
+}
+
+/** The slab's on-chain initial_margin_bps from its InitMarket transaction, or null when it can't be read. */
+export async function readInitialMarginBps(connection: TxConn, slab: string, wrapperProgramId: string): Promise<number | null> {
+  const read = await readCreationFromChain(connection, slab, wrapperProgramId);
+  if (!read.ok) return null;
+  const bps = Number(read.facts.init.initialMarginBps);
+  return Number.isSafeInteger(bps) && bps > 0 ? bps : null;
+}
+
+/** Apply a same-browser pin to the launch params; a null pin leaves them untouched (a non-resumed launch). */
+export function applySameBrowserPin<T extends ResumableParams>(params: T, pin: SameBrowserPin | null): T {
+  if (!pin) return params;
+  return {
+    ...params,
+    initialPriceE6: pin.initialPriceE6,
+    tradingFeeBps: pin.tradingFeeBps,
+    initialMarginBps: pin.initialMarginBps,
+    lpCollateral: pin.lpCollateralAtoms,
+    symbol: pin.symbol,
+    name: pin.name,
+    mainnetCA: pin.mainnetCA,
+    dexPoolAddress: pin.poolAddress,
+    dexType: pin.dexType,
+    oracleMode: "keeper",
+    ...(isJuniorParams(params.p3) ? { p3: { ...params.p3, juniorAtoms: pin.lpCollateralAtoms } } : {}),
+  };
+}
+
+function isJuniorParams(v: unknown): v is { juniorAtoms: bigint } {
+  return typeof v === "object" && v !== null && "juniorAtoms" in v;
+}
+
 /**
  * Every value the resumed steps will make the wallet sign that the registration memo does NOT bind, in
  * plain words, for the "Verified" summary. The memo binds price, margin, fee, LP seed, token, pool and

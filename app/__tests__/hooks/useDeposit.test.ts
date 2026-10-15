@@ -385,7 +385,7 @@ describe("useDeposit", () => {
             userIdx: 1,
             amount: 1000000n,
           })
-        ).rejects.toThrow("market not loaded");
+        ).rejects.toThrow("Market not loaded");
       });
     });
 

@@ -36,6 +36,7 @@
  */
 
 import { FC, memo, useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { balanceKey, NO_BALANCE_KNOWN, resolveTokenBalance, type KnownBalance, type TokenRead } from "@/lib/token-balance";
 import { useWalletBalanceRefreshKey } from "@/lib/wallet-balance-invalidation";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
@@ -280,6 +281,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const [onChainDecimals, setOnChainDecimals] = useState<number | null>(null);
   const decimals = onChainDecimals ?? tokenMeta?.decimals ?? 6;
   const [walletAtaBalance, setWalletAtaBalance] = useState<bigint | null>(null);
+  // Last successful wallet-balance read, keyed by owner+mint (lib/token-balance.ts): a failed
+  // read keeps it instead of turning a funded wallet into "empty".
+  const knownWalletRef = useRef<KnownBalance>(NO_BALANCE_KNOWN);
 
   const riskThreshold = params?.riskReductionThreshold ?? 0n;
   const vaultBalance = engine?.vault ?? 0n;
@@ -408,6 +412,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   /** WP-3: the wait loop passed ~30 s; "We'll keep trying" + Stop. */
   const [waitingLong, setWaitingLong] = useState(false);
   const waitAbortRef = useRef<AbortController | null>(null);
+  // Leaving the market (switch or unmount) ends its wait, as Stop does: otherwise the loop keeps
+  // retrying and can open the wallet for a market that is gone (GH#2623 rule in lib/tx.ts sendTx).
+  useEffect(() => () => waitAbortRef.current?.abort(), [slabAddress]);
   const [showDetails, setShowDetails] = useState(false);
   // P2 fee channel: slippage margin on the signed fee cap (default NEXT_PUBLIC_FEE_CAP_MARGIN_BPS or +2).
   const [feeMarginBps, setFeeMarginBps] = useState<number>(() => defaultFeeCapMarginBps());
@@ -536,19 +543,37 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       return;
     }
     let cancelled = false;
-    (async () => {
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    const mint = mktConfig.collateralMint;
+    const owner = publicKey;
+    const key = balanceKey(owner.toBase58(), mint.toBase58());
+    const ata = getAssociatedTokenAddressSync(mint, owner);
+    // A different wallet or mint: the previous token decimals do not apply until this account is read.
+    if (knownWalletRef.current.key !== key) setOnChainDecimals(null);
+    // A failed read is not a zero balance: keep the last known one for this wallet+mint and
+    // retry, instead of showing "Get Tokens to Trade" and Max 0 until something else re-runs
+    // this effect. A missing token account IS a real zero.
+    const RETRY_MS = [2_000, 5_000, 10_000];
+    const read = async (attempt: number) => {
+      let r: TokenRead;
       try {
-        const ata = getAssociatedTokenAddressSync(mktConfig.collateralMint, publicKey);
         const info = await connection.getTokenAccountBalance(ata);
-        if (!cancelled) {
-          if (info.value.decimals !== undefined) setOnChainDecimals(info.value.decimals);
-          if (info.value.amount) setWalletAtaBalance(BigInt(info.value.amount));
-        }
+        if (cancelled) return;
+        if (info.value.decimals !== undefined) setOnChainDecimals(info.value.decimals);
+        r = { ok: true, amount: BigInt(info.value.amount || "0") };
       } catch {
-        if (!cancelled) { setOnChainDecimals(null); setWalletAtaBalance(null); }
+        // getTokenAccountBalance throws for a missing account too; ask whether it exists.
+        const acct = await Promise.resolve().then(() => connection.getAccountInfo(ata)).catch(() => undefined);
+        if (cancelled) return;
+        r = acct === null ? { ok: true, absent: true } : { ok: false };
       }
-    })();
-    return () => { cancelled = true; };
+      const known = resolveTokenBalance(knownWalletRef.current, key, r);
+      knownWalletRef.current = known;
+      setWalletAtaBalance(known.amount);
+      if (!r.ok && attempt < RETRY_MS.length) retryTimer = setTimeout(() => void read(attempt + 1), RETRY_MS[attempt]);
+    };
+    void read(0);
+    return () => { cancelled = true; if (retryTimer) clearTimeout(retryTimer); };
     // BUG 10 fix: `capital` and `showInlineDeposit` are lastSig-style refresh
     // triggers (mirrors DepositWithdrawCard's own `lastSig` dependency on its
     // twin wallet-balance effect, DepositWithdrawCard.tsx:69) — without them this
@@ -790,6 +815,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     liqPriceE6: afterLiqPrice,
     positionSize: hasOrder ? combinedSignedSize : 0n,
     capital: capitalAfterFund,
+    entryPriceE6: combinedEntryPriceE6,
+    effectiveSize: hasOrder ? combinedSignedSize : 0n,
     markPriceE6: livePriceE6 ?? 0n,
     maintenanceMarginBps,
     // The combined entry inherits the existing one unless there is none, or
@@ -804,6 +831,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     liqPriceE6: beforeLiqPrice,
     positionSize: existingPositionSize,
     capital,
+    entryPriceE6: existingEntryPriceE6,
+    effectiveSize: existingPositionSize,
     markPriceE6: livePriceE6 ?? 0n,
     maintenanceMarginBps,
     hasResolvedEntry: existingEntryKnown,
@@ -815,16 +844,20 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // "Margin req." but actually showed capital -> capital-minus-margin (a
   // balance readout), so the actual requirement never appeared as a number
   // and the label lied about the row. The receipt now shows BOTH, on the
-  // same "available" basis as the account strip above (capital minus margin
-  // already locked by an open position) so the two readouts can't disagree:
+  // same "available" basis as the account strip above (displayAvailable: free
+  // in-market margin plus the wallet, #57), so its before-value matches the strip:
   //   Margin            — what THIS order reserves (the requirement)
   //   Available to trade — before -> after reserving it
-  const beforeAvailable = availableBalance;
-  const afterAvailable = vsPosition
-    ? vsPosition.afterAvailable
-    : beforeAvailable > marginNative
-      ? beforeAvailable - marginNative
-      : 0n;
+  // The order only changes the in-market part (a deposit moves wallet money in, it
+  // doesn't add any), so after = before + the in-market change, unclamped until the end.
+  // The after-value is an estimate: it takes the order's margin at the chosen leverage
+  // (the engine locks notional x IM) and leaves out the fee.
+  const inMarketAfter = vsPosition
+    ? vsPosition.afterAvailable - vsPosition.shortBy
+    : availableBalance - marginNative;
+  const beforeAvailable = displayAvailable;
+  const afterUnclamped = displayAvailable - availableBalance + inMarketAfter;
+  const afterAvailable = afterUnclamped > 0n ? afterUnclamped : 0n;
   // Slippage: distance between the mark and the worst acceptable fill
   // (same computeLimitPriceE6 useTrade itself uses to derive the on-chain
   // limit when the caller doesn't supply one explicitly).

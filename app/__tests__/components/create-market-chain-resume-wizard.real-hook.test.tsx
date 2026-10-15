@@ -106,8 +106,8 @@ const SLAB_Y = "GrKZUtyeaqbg1Q1J1kPWznui92sbLpX5F62LrBVGkifL";
 // the card is covered by its own test; here it only hands a verified launch to the wizard
 let verifiedCreator = SystemProgram.programId.toBase58();
 vi.mock("@/components/create/ResumeFromChainCard", () => ({
-  ResumeFromChainCard: ({ onVerified }: { onVerified: (l: unknown, step: number) => void }) => (
-    <button data-testid="stub-verify" onClick={() => onVerified({ creator: verifiedCreator, request: { slabAddress: SLAB_Y, mainnetCA: MINT }, tradingFeeBps: 5, initialMarginBps: 1000, lpCollateralAtoms: 100_000_000n, maxPortfolioAssets: 14, symbol: "T", name: "t", poolAddress: "P", dexType: "meteora-dlmm", initialPriceE6: 1n }, 2)}>verify</button>
+  ResumeFromChainCard: ({ onVerified, verified }: { onVerified: (l: unknown, step: number) => void; verified?: { symbol?: string } | null }) => (
+    <button data-testid="stub-verify" data-verified={verified?.symbol ?? "none"} onClick={() => onVerified({ creator: verifiedCreator, request: { slabAddress: SLAB_Y, mainnetCA: MINT }, tradingFeeBps: 5, initialMarginBps: 1000, lpCollateralAtoms: 100_000_000n, maxPortfolioAssets: 14, symbol: "T", name: "t", poolAddress: "P", dexType: "meteora-dlmm", initialPriceE6: 1n }, 2)}>verify</button>
   ),
 }));
 vi.mock("@/hooks/useStuckSlabs", () => ({ useStuckSlabs: () => ({ stuckSlab: null, stuckSlabs: [] }) }));
@@ -188,5 +188,48 @@ describe("chain resume lifecycle in the wizard", () => {
     rerender(<CreateMarketWizard />);
     await flush();
     expect(cancelInFlightLaunch).not.toHaveBeenCalled();
+  });
+});
+
+// S15: the card used to mount only while resumeFromStep was null, and verifying sets it, so the card's
+// "Verified…" summary and its list of values the chain doesn't prove could never render.
+describe("the chain-resume card stays up for the resume it verified (S15)", () => {
+  beforeEach(() => {
+    localStorage.clear(); sessionStorage.clear(); createState = IDLE;
+    (globalThis as { __wallet?: unknown }).__wallet = WALLET_A;
+    verifiedCreator = SystemProgram.programId.toBase58();
+  });
+  it("after verifying, the card is still mounted and holds the verified launch; CANCEL takes it back to the form", async () => {
+    render(<CreateMarketWizard resumeSlabParam={SLAB_Y} />);
+    await flush();
+    expect(screen.getByTestId("stub-verify").getAttribute("data-verified")).toBe("none");
+    fireEvent.click(screen.getByTestId("stub-verify"));
+    await flush();
+    expect(screen.getByTestId("stub-verify").getAttribute("data-verified")).toBe("T");
+    fireEvent.click(screen.getByText("CANCEL"));
+    await flush();
+    expect(screen.getByTestId("stub-verify").getAttribute("data-verified")).toBe("none");
+  });
+});
+
+describe("Start Over ends a verified chain resume (S15 review)", () => {
+  beforeEach(() => {
+    localStorage.clear(); sessionStorage.clear(); createState = IDLE;
+    (globalThis as { __wallet?: unknown }).__wallet = WALLET_A;
+    verifiedCreator = SystemProgram.programId.toBase58();
+  });
+  it("after a failed resumed launch, Start Over brings the card back to its form, not a stale 'Verified' summary", async () => {
+    const { rerender } = render(<CreateMarketWizard resumeSlabParam={SLAB_Y} />);
+    await flush();
+    fireEvent.click(screen.getByTestId("stub-verify"));
+    await flush();
+    createState = { ...IDLE, step: 2, error: "boom" }; // the resumed launch failed at a step
+    rerender(<CreateMarketWizard resumeSlabParam={SLAB_Y} />);
+    await flush();
+    fireEvent.click(screen.getByTestId("wizard-reset"));
+    createState = IDLE; // what resetCreate() does to the hook's state
+    rerender(<CreateMarketWizard resumeSlabParam={SLAB_Y} />);
+    await flush();
+    expect(screen.getByTestId("stub-verify").getAttribute("data-verified")).toBe("none");
   });
 });

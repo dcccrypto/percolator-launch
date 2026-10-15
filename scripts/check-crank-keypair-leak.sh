@@ -74,13 +74,17 @@ fi
 
 echo ""
 echo "=== Summary ==="
+# #3487: on v17/v18 CRANK_KEYPAIR is not an on-chain oracle authority (PushOraclePrice and
+# SetOraclePriceCap no longer exist). The AUTH_MARK oracle key is PLAYGROUND_KEEPER_KEYPAIR
+# (falling back to DEVNET_MINT_AUTHORITY_KEYPAIR) - see lib/playground-keeper-signer.ts.
+echo "Note: on v17/v18 CRANK_KEYPAIR is not an on-chain oracle authority; the AUTH_MARK oracle key is PLAYGROUND_KEEPER_KEYPAIR (or DEVNET_MINT_AUTHORITY_KEYPAIR)."
+echo ""
 if $CLEAN; then
   echo "✅ CLEAN — no CRANK_KEYPAIR leaks detected"
   echo ""
-  echo "Next steps (GH#1691):"
+  echo "Next steps:"
   echo "  1. Verify Railway env vars are set correctly (not in source)"
-  echo "  2. Run POST /api/oracle/set-price-cap to enable circuit breakers on all admin-oracle markets"
-  echo "  3. Rotate CRANK_KEYPAIR if there is any doubt about past exposure"
+  echo "  2. Rotate CRANK_KEYPAIR if there is any doubt about past exposure"
   exit 0
 else
   echo "❌ POTENTIAL LEAKS FOUND:"
@@ -91,7 +95,6 @@ else
   echo "REQUIRED ACTIONS:"
   echo "  1. Rotate CRANK_KEYPAIR immediately (generate new keypair, update Railway env var)"
   echo "  2. If leaked in git history: rewrite history (git filter-repo) AND revoke the key"
-  echo "  3. Check Railway logs for any unauthorized oracle price pushes"
-  echo "  4. Apply SetOraclePriceCap to all admin-oracle markets as circuit breaker"
+  echo "  3. Check Railway logs for any unauthorized use of the key"
   exit 1
 fi

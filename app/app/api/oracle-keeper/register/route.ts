@@ -32,7 +32,7 @@ if (!_isLoopback && !_rawKeeperUrl.startsWith("https://")) {
   );
 }
 const KEEPER_URL = _rawKeeperUrl;
-/** Trimmed — whitespace-only env counts as unset (same idea as set-price-cap / ADMIN_API_SECRET). */
+/** Trimmed — whitespace-only env counts as unset (same idea as ADMIN_API_SECRET in lib/admin-secret.ts). */
 const REGISTER_SECRET = (process.env.KEEPER_REGISTER_SECRET ?? "").trim();
 
 export async function POST(req: NextRequest) {
