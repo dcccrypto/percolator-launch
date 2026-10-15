@@ -14,11 +14,11 @@
  *
  * QA instrumentation for the preview: remove (or put behind a debug switch) before any release.
  */
-import { PublicKey, type Connection, type Transaction } from "@solana/web3.js";
+import { PublicKey, SystemInstruction, SystemProgram, type Connection, type Transaction } from "@solana/web3.js";
 import { assertDevnetConnection, WrongClusterError } from "./devnet-guard";
 import { isDevnetV22Enabled } from "./flag";
 import { detectWalletError, isTransientError, UserFacingError } from "@/lib/errorMessages";
-import { WALLET_REQUEST_CLOSED_COPY } from "@/lib/wallet-request-copy";
+import { WALLET_BUSY_COPY, WALLET_REQUEST_CLOSED_COPY } from "@/lib/wallet-request-copy";
 
 export const SIGN_CHAIN_DEVNET = "solana:devnet";
 /** A blockhash older than this at the moment the wallet opens is reported (not refused). */
@@ -59,6 +59,13 @@ export interface SignLogEntry {
    * in `absentOnDevnet`, so a mainnet-only account is not buried among them.
    */
   absentPdas?: string[];
+  /**
+   * Create step 1 (2026-10-15): absent accounts that a System createAccount in this same transaction creates (the new
+   * slab, a portfolio, ...). They cannot exist before the transaction lands, so they are not suspects either.
+   */
+  absentCreated?: string[];
+  /** Another wallet request from this app was still open when this one was handed to the wallet. */
+  overlapping?: boolean;
   /** What the wallet did with it. */
   wallet: "pending" | "signed" | "declined" | "not-asked";
   walletError?: string;
@@ -77,6 +84,8 @@ const listeners = new Set<() => void>();
 let lastProblem: SignLogEntry | null = null;
 /** When the previous wallet request ended (signed or declined): the next entry reports the gap (NB-2: "within ~60 s of the previous tx?"). */
 let lastEndedAt: number | null = null;
+/** Wallet requests handed to the wallet and not yet answered. */
+let inFlight = 0;
 
 /** Record where a blockhash came from. Call right after every `getLatestBlockhash` whose result is signed. */
 export function noteBlockhash(
@@ -145,13 +154,15 @@ export function __resetSignGuardForTest(): void {
   log.length = 0;
   lastProblem = null;
   lastEndedAt = null;
+  inFlight = 0;
 }
 
 export function formatSignEntry(e: SignLogEntry): string {
   const age = e.blockhashAgeMs === null ? "unknown" : `${(e.blockhashAgeMs / 1000).toFixed(1)}s`;
   const absent = e.absentOnDevnet === null ? "accounts not checked" : e.absentOnDevnet.length === 0 ? "all accounts on devnet" : `not on devnet: ${e.absentOnDevnet.join(" ")}`;
   const pdas = e.absentPdas && e.absentPdas.length > 0 ? ` (+${e.absentPdas.length} program-derived address${e.absentPdas.length === 1 ? "" : "es"} with no account by design)` : "";
-  return `${e.verdict} | wallet ${e.wallet} | built by ${e.path} | ${e.via} | tx ${e.shape} | blockhash ${e.blockhash.slice(0, 8)} age ${age} fetched@${e.fetchCommitment ?? "?"} lvbh ${e.lastValidBlockHeight ?? "?"} valid@handoff ${e.validAtHandoff ?? "?"} | chain ${e.chain}${e.signer ? ` | signer ${e.signer}` : ""}${e.sinceLastMs != null ? ` | ${(e.sinceLastMs / 1000).toFixed(1)}s since the previous request` : ""} | ${absent}${pdas} | ${e.at}${e.classified ? ` | open ${((e.elapsedMs ?? 0) / 1000).toFixed(1)}s | raw ${e.rawError} | => ${e.classified}` : ""}`;
+  const created = e.absentCreated && e.absentCreated.length > 0 ? ` (+${e.absentCreated.length} new account${e.absentCreated.length === 1 ? "" : "s"} this tx creates)` : "";
+  return `${e.verdict} | wallet ${e.wallet} | built by ${e.path} | ${e.via} | tx ${e.shape} | blockhash ${e.blockhash.slice(0, 8)} age ${age} fetched@${e.fetchCommitment ?? "?"} lvbh ${e.lastValidBlockHeight ?? "?"} valid@handoff ${e.validAtHandoff ?? "?"} | chain ${e.chain}${e.signer ? ` | signer ${e.signer}` : ""}${e.sinceLastMs != null ? ` | ${(e.sinceLastMs / 1000).toFixed(1)}s since the previous request` : ""}${e.overlapping ? " | another wallet request from this app was still open" : ""} | ${absent}${pdas}${created} | ${e.at}${e.classified ? ` | open ${((e.elapsedMs ?? 0) / 1000).toFixed(1)}s | raw ${e.rawError} | => ${e.classified}` : ""}`;
 }
 
 function record(e: SignLogEntry): void {
@@ -186,6 +197,29 @@ export class WalletRequestClosedError extends Error {
     (this as { cause?: unknown }).cause = cause;
   }
 }
+/**
+ * Create step 1 (QA 2026-10-15, Solflare 2.40.1): Solflare opens ONE confirm window at a time. A request that arrives
+ * while its window is registered as open is never shown: the background focuses the existing window
+ * (`showPopup` -> `focus()`), that resolves at once, and the request is refused as `{code: 4001, message: "Cancelled"}`
+ * in ~0.1 s. A person declining or closing the window takes longer and reads "Transaction cancelled". Not a decline:
+ * nothing was shown, and asking again changes nothing until that window is finished or closed.
+ */
+export { WALLET_BUSY_COPY };
+export class WalletBusyError extends Error {
+  // Recognised by name in lib/errorMessages (same reason as WalletRequestClosedError below).
+  constructor(cause: unknown) {
+    super(WALLET_BUSY_COPY);
+    this.name = "WalletBusyError";
+    (this as { cause?: unknown }).cause = cause;
+  }
+}
+/** A refusal faster than this, with the bare "Cancelled" text, was never shown to the person. */
+export const WALLET_BUSY_MAX_MS = 1_500;
+export function isWalletBusyRejection(err: unknown, elapsedMs: number): boolean {
+  if (!(elapsedMs < WALLET_BUSY_MAX_MS)) return false;
+  return errorLayers(err).some((o) => o.code === 4001 && typeof o.message === "string" && o.message.trim() === "Cancelled");
+}
+
 /** A declined prompt, a locked wallet and the app's own explained errors keep their meaning; the rest is "closed". */
 export function asWalletRequestError(err: unknown): unknown {
   // 4001 = declined (EIP-1193 style), 0x6985 = denied on a Ledger: the same two codes lib/privy-batch-sign.ts checks.
@@ -292,8 +326,23 @@ function within<T>(p: Promise<T>, ms: number): Promise<T | "timeout"> {
   });
 }
 
+/** Accounts a System createAccount / createAccountWithSeed in this transaction creates (base58). */
+export function accountsCreatedIn(tx: Pick<Transaction, "instructions">): Set<string> {
+  const out = new Set<string>();
+  for (const ix of tx.instructions ?? []) {
+    if (!ix.programId.equals(SystemProgram.programId)) continue;
+    try {
+      const kind = SystemInstruction.decodeInstructionType(ix);
+      if ((kind === "Create" || kind === "CreateWithSeed") && ix.keys[1]) out.add(ix.keys[1].pubkey.toBase58());
+    } catch {
+      // not a System instruction this can decode: nothing created
+    }
+  }
+  return out;
+}
+
 /** Every account key of the transaction that the devnet connection does not have. null = could not check. */
-async function absentAccounts(tx: Transaction, connection: GuardConnection, timeoutMs: number): Promise<{ suspect: string[]; pdas: string[] } | null> {
+async function absentAccounts(tx: Transaction, connection: GuardConnection, timeoutMs: number): Promise<{ suspect: string[]; pdas: string[]; created: string[] } | null> {
   try {
     if (typeof connection.getMultipleAccountsInfo !== "function") return null;
     const writable = new Map<string, boolean>();
@@ -306,12 +355,18 @@ async function absentAccounts(tx: Transaction, connection: GuardConnection, time
       }
     }
     const list = [...keys.values()];
-    if (list.length === 0) return { suspect: [], pdas: [] };
+    if (list.length === 0) return { suspect: [], pdas: [], created: [] };
     const infos = await within(connection.getMultipleAccountsInfo(list), timeoutMs);
     if (infos === "timeout") return null;
+    const created = accountsCreatedIn(tx);
     const absent = list.filter((_, n) => infos[n] === null);
+    const isCreated = (k: PublicKey) => created.has(k.toBase58());
     const label = (k: PublicKey) => `${writable.get(k.toBase58()) ? "w" : "r"}:${k.toBase58()}`;
-    return { suspect: absent.filter((k) => isOnCurve(k)).map(label), pdas: absent.filter((k) => !isOnCurve(k)).map(label) };
+    return {
+      suspect: absent.filter((k) => !isCreated(k) && isOnCurve(k)).map(label),
+      pdas: absent.filter((k) => !isCreated(k) && !isOnCurve(k)).map(label),
+      created: absent.filter(isCreated).map(label),
+    };
   } catch {
     return null;
   }
@@ -353,6 +408,7 @@ export async function guardSign<T>(p: GuardSignParams<T>): Promise<T> {
     ]);
     e.absentOnDevnet = absent === null ? null : absent.suspect;
     if (absent && absent.pdas.length > 0) e.absentPdas = absent.pdas;
+    if (absent && absent.created.length > 0) e.absentCreated = absent.created;
     e.validAtHandoff = valid;
     try {
       await within(assertDevnetConnection(origin?.connection ?? p.connection), timeoutMs);
@@ -390,6 +446,8 @@ export async function guardSign<T>(p: GuardSignParams<T>): Promise<T> {
     if (e.verdict !== "ok") flag(e);
   }
   const openedAt = now();
+  if (inFlight > 0) for (const e of entries) e.overlapping = true;
+  inFlight += 1;
   try {
     const out = await p.sign();
     for (const e of entries) e.wallet = "signed";
@@ -403,13 +461,18 @@ export async function guardSign<T>(p: GuardSignParams<T>): Promise<T> {
       e.walletError = msg.slice(0, 160);
     }
     const elapsed = now() - openedAt;
-    const decline = isDeclineClass(err);
+    const busy = isWalletBusyRejection(err, elapsed);
+    const decline = !busy && isDeclineClass(err);
     const branch = decline ? await expiredWhileOpen(p, entries[0], openedAt, now, timeoutMs) : null;
-    const thrown = branch ? new WalletRequestClosedError(err) : asWalletRequestError(err);
-    const classified = branch ? `timeout copy (expired: ${branch})` : decline ? "cancelled (decline-class, not expired)" : thrown instanceof WalletRequestClosedError ? "timeout copy (non-decline wallet error)" : "passed through unchanged";
+    const thrown = busy ? new WalletBusyError(err) : branch ? new WalletRequestClosedError(err) : asWalletRequestError(err);
+    const classified = busy
+      ? "wallet busy (refused unshown: one of its own request windows is already open)"
+      : branch ? `timeout copy (expired: ${branch})` : decline ? "cancelled (decline-class, not expired)" : thrown instanceof WalletRequestClosedError ? "timeout copy (non-decline wallet error)" : "passed through unchanged";
     for (const e of entries) { e.elapsedMs = elapsed; e.rawError = describeError(err); e.classified = classified; }
     // A declined request is how a wallet-side "Network mismatch" reaches us: show which path built that transaction.
     flag(entries[0]);
     throw thrown;
+  } finally {
+    inFlight -= 1;
   }
 }

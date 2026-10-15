@@ -5,7 +5,18 @@
 import type { Connection, PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { simulateForGate, SimulationRefusal } from "@/lib/tx";
 import { parsePortfolio, portfolioScanFilters } from "./layout";
-import { planV22TradeRefresh, type TradeRefreshDeps, type TradeRefreshInput, type TradeRefreshPlan } from "./trade-refresh";
+import {
+  executeV22MultiAssetOrder,
+  isRefreshRace,
+  planV22TradeRefresh,
+  type MultiAssetOrderResult,
+  type MultiAssetSendKind,
+  type TradeRefreshDeps,
+  type TradeRefreshInput,
+  type TradeRefreshPlan,
+} from "./trade-refresh";
+
+export { isRefreshRace };
 
 /**
  * Refresh candidates for a 121, from raw portfolio rows of ONE market: every POSITIONED portfolio, flagged-stale legs
@@ -51,7 +62,7 @@ export function tradeRefreshDeps(connection: Connection, programId: PublicKey, m
   return {
     simulate: async (ixs: TransactionInstruction[]) => {
       const g = await simulateForGate(connection, cranker, ixs);
-      return { err: g.err, logs: g.logs, simulated: g.simulated };
+      return { err: g.err, logs: g.logs, simulated: g.simulated, consumed: g.consumed };
     },
     simPrefix: 2, // simulateForGate: heap frame + compute-unit limit
     readStalePeers: () => scanStalePeers(connection, programId, market),
@@ -73,15 +84,24 @@ export async function planTradeRefresh(
   return planV22TradeRefresh({ ...i, takerData, lpData }, tradeRefreshDeps(connection, i.programId, i.market, i.cranker), opts);
 }
 
+/**
+ * An order on a MULTI-ASSET market (asset slots > 1): the body alone, else the refresh flow of
+ * `executeV22MultiAssetOrder` (one tx under 1.2M CU, otherwise the cranks as their own tx then the body alone).
+ * `takerPortfolio` null = a first trade that creates the account in the body.
+ */
+export async function sendMultiAssetOrder(
+  connection: Connection,
+  i: Omit<TradeRefreshInput, "takerData" | "lpData">,
+  send: (ixs: TransactionInstruction[], kind: MultiAssetSendKind) => Promise<string>,
+  opts: { onTwoTx?: (txCount: number) => void } = {},
+): Promise<MultiAssetOrderResult> {
+  const takerInfo = i.takerPortfolio ? await connection.getAccountInfo(i.takerPortfolio, "confirmed").catch(() => null) : null;
+  const takerData = takerInfo ? new Uint8Array(takerInfo.data) : null;
+  return executeV22MultiAssetOrder({ ...i, takerData }, { ...tradeRefreshDeps(connection, i.programId, i.market, i.cranker), send, ...(opts.onTwoTx ? { onTwoTx: opts.onTwoTx } : {}) });
+}
+
 /** Re-plans after a refresh crank lost the same-slot race (22 at send time): at most this many extra attempts. */
 export const REFRESH_RACE_RETRIES = 2;
-
-/** Custom(22) anywhere in the error text: a crank of the refresh prefix was already current when the tx ran. */
-export function isRefreshRace(e: unknown): boolean {
-  const msg = e instanceof Error ? e.message : typeof e === "string" ? e : "";
-  const logs = Array.isArray((e as { logs?: unknown } | null)?.logs) ? ((e as { logs: unknown[] }).logs).map(String).join("\n") : "";
-  return /custom program error: 0x16\b|"Custom":22\b|Custom\(22\)/.test(msg + "\n" + logs);
-}
 
 /**
  * Plan the refresh prefix and send; when the SEND loses the same-slot race (the observing crank is refused 22 because

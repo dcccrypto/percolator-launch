@@ -202,7 +202,7 @@ export interface StakeAccountSpecV5 {
  * market at `[11]` is read-only there); a FIRST_LOSS pool needs `[11]` writable plus `[12]` units and `[13]` the wrapper.
  */
 export const ACCOUNTS_STAKE_DEPOSIT_V5: readonly StakeAccountSpecV5[] = [
-  { name: "user", signer: true, writable: false },
+  { name: "user", signer: true, writable: true },
   { name: "pool", signer: false, writable: true },
   { name: "userCollateral", signer: false, writable: true },
   { name: "vault", signer: false, writable: true },
@@ -220,7 +220,7 @@ export const ACCOUNTS_STAKE_DEPOSIT_V5: readonly StakeAccountSpecV5[] = [
 
 /** Stake Withdraw v5, FIRST_LOSS (14): `instruction.rs:150..172`. `[10]` market is REQUIRED and writable on first-loss pools. */
 export const ACCOUNTS_STAKE_WITHDRAW_V5: readonly StakeAccountSpecV5[] = [
-  { name: "user", signer: true, writable: false },
+  { name: "user", signer: true, writable: true },
   { name: "pool", signer: false, writable: true },
   { name: "userLp", signer: false, writable: true },
   { name: "lpMint", signer: false, writable: true },

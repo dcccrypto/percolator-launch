@@ -260,6 +260,19 @@ export function saveRegisterRequest(req: Omit<KeeperRegisterRequest, "proofTx" |
   }
 }
 
+/** The registration request this browser saved for a slab (without proof/payload), or null. */
+export function loadRegisterRequest(slab: string, store: KeyStore | null = browserStore()): Omit<KeeperRegisterRequest, "proofTx" | "payload"> | null {
+  try {
+    const raw = store?.getItem(REQUEST_KEY(slab));
+    const v: unknown = raw ? JSON.parse(raw) : null;
+    return v && typeof v === "object" && !Array.isArray(v) && (v as { slabAddress?: unknown }).slabAddress === slab
+      ? (v as Omit<KeeperRegisterRequest, "proofTx" | "payload">)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export function markRegistered(slab: string, store: KeyStore | null = browserStore()): void {
   try {
     store?.setItem(REGISTERED_KEY(slab), "1");

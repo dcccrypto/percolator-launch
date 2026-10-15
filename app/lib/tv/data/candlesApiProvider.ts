@@ -29,6 +29,7 @@ import {
   type ProviderResolution,
 } from "./provider";
 import type { TradeStream } from "./tradeStream";
+import { MARKETS_LIST_URL, listedMarketRows, type MarketsListBody } from "@/lib/markets-list-client";
 
 type FetchLike = (input: string, init?: { signal?: AbortSignal }) => Promise<{
   ok: boolean;
@@ -92,6 +93,16 @@ export function parseUdf(body: unknown): ProviderBar[] {
   return normalizeBars(bars);
 }
 
+/**
+ * `from` and `to` down to their bucket starts. The server answers whole buckets from the bucket of
+ * `from` through the bucket of `to` (inclusive), so this asks for exactly the buckets the raw window
+ * touched, and every raw `now` inside one bucket maps to one URL.
+ */
+export function alignCandleWindow(fromSec: number, toSec: number, bucketSec: number): { from: number; to: number } {
+  if (!(bucketSec > 0)) return { from: Math.floor(fromSec), to: Math.floor(toSec) };
+  return { from: Math.floor(fromSec / bucketSec) * bucketSec, to: Math.floor(toSec / bucketSec) * bucketSec };
+}
+
 export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDataProvider {
   const { fetchImpl, trades, marks } = deps;
   const now = deps.now ?? Date.now;
@@ -126,7 +137,10 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
     await ensureLot(slab);
     // fill=1: empty buckets carry the previous close, so a quiet market's last-trade chart is a
     // continuous line, not scattered dashes with gaps (see /api/candles fillCandleGaps).
-    const url = `/api/candles/${encodeURIComponent(slab)}?resolution=${res}&from=${Math.floor(fromSec)}&to=${Math.floor(toSec)}&fill=1`;
+    // Bucket-aligned from/to (review E3): the server answers per whole bucket anyway, and an aligned
+    // URL repeats across viewers and polls, so the edge cache can serve it.
+    const win = alignCandleWindow(fromSec, toSec, RESOLUTION_SECONDS[res]);
+    const url = `/api/candles/${encodeURIComponent(slab)}?resolution=${res}&from=${win.from}&to=${win.to}&fill=1`;
     const r = await fetchImpl(url);
     if (r.status === 404) {
       candlesUnavailable = true;
@@ -265,10 +279,11 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
     async searchSymbols(query: string): Promise<ChartSymbolMeta[]> {
       const q = query.trim().toUpperCase();
       try {
-        const r = await fetchImpl("/api/markets");
+        // The canonical list URL (lib/markets-list-client.ts), so this shares the edge copy with
+        // every other caller; listedMarketRows() is what the bare /api/markets returned.
+        const r = await fetchImpl(MARKETS_LIST_URL);
         if (!r.ok) return [];
-        const body = (await r.json()) as { markets?: unknown };
-        const list = Array.isArray(body.markets) ? body.markets : [];
+        const list = listedMarketRows((await r.json()) as MarketsListBody) ?? [];
         const out: ChartSymbolMeta[] = [];
         for (const raw of list) {
           if (typeof raw !== "object" || raw === null) continue;

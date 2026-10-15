@@ -17,6 +17,8 @@ export interface ConfirmedTradeParams {
   maxWaitMs?: number;
   /** Devnet v2.1: a Custom(121) order waits to be resent ("Refreshing positions…"). */
   onRefreshingPositions?: (refreshing: boolean) => void;
+  /** Multi-asset market: the order needs its refresh cranks as their own transaction first (the wallet may open twice). */
+  onTwoTx?: (txCount: number) => void;
   /** #49: broadcast, waiting for confirmation (useTrade -> sendTx onProgress). */
   onConfirming?: () => void;
 }

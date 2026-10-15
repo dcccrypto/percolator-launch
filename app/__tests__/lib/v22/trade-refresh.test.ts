@@ -8,7 +8,7 @@ import { buildRefreshCrankIxV22 } from "@/lib/v22/sdk";
 import { isRefreshRace, refreshCandidatesFromAccounts, REFRESH_RACE_RETRIES, sendWithRefreshRetry } from "@/lib/v22/trade-refresh-wire";
 import { resolveUserMessage } from "@/lib/limits/user-message";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
-import { HealthCheckStaleError, MAX_PEER_CRANKS, marketAssetSlots, needsMultiAssetShape, planV22TradeRefresh, type RefreshSim, type TradeRefreshDeps, type TradeRefreshInput } from "@/lib/v22/trade-refresh";
+import { executeV22MultiAssetOrder, HealthCheckStaleError, MAX_PEER_CRANKS, MAX_TWO_TX_REPEATS, marketAssetSlots, needsMultiAssetShape, planV22TradeRefresh, type MultiAssetOrderDeps, type MultiAssetOrderInput, type MultiAssetSendKind, type RefreshSim, type TradeRefreshDeps, type TradeRefreshInput } from "@/lib/v22/trade-refresh";
 
 interface Ser { programId: string; keys: string[]; data: string }
 const FX = JSON.parse(readFileSync(path.join(__dirname, "../../fixtures/v22-q7-devnet-2026-10-12.json"), "utf8")) as {
@@ -99,39 +99,166 @@ describe("U-1 / R-1: a 121 on a single-asset market gets the stale peers' refres
   });
 });
 
-describe("Q-7b: >= 3 legs on a multi-asset market", () => {
-  it("[LP observe, taker, LP, trade]: the SDK plan's own instructions (reference script bytes), without its budget", async () => {
-    const d = deps([ok]);
-    const plan = await planV22TradeRefresh(multi(), d);
-    expect(plan.path).toBe("multiAsset");
-    expect(plan.cranks.map((c) => c.role)).toEqual(["lpObserve", "taker", "lp"]);
-    const script = FX.cases[3].scriptIxs.slice(2).map(unser); // the script's first two are the budget
-    expect(plan.instructions.map((ix) => Buffer.from(ix.data).toString("hex"))).toEqual(script.map((ix) => Buffer.from(ix.data).toString("hex")));
-    expect(plan.instructions.slice(0, 3).map(crankTarget)).toEqual([LP, P, LP].map((p) => p.toBase58()));
+describe("single-asset behaviour is pinned; a multi-asset peer crank observes EVERY slot (no hard-coded [0])", () => {
+  it("single-asset: the first peer crank observes [0], the rest are hint-less (unchanged)", async () => {
+    const [a, b] = [k(), k()];
+    const plan = await planV22TradeRefresh(single(), deps([ok], [a, b]), { withPeers: true });
+    expect(plan.instructions.slice(0, 2).map((ix) => Buffer.from(ix.data).toString("hex"))).toEqual([
+      Buffer.from(buildRefreshCrankIxV22(W, MKT, OWNER, a, [0]).data).toString("hex"),
+      Buffer.from(buildRefreshCrankIxV22(W, MKT, OWNER, b, []).data).toString("hex"),
+    ]);
   });
-  it("a refresh refused 22 is dropped; a trade still 19 gets one more refresh; the observing crank's 22 waits a slot", async () => {
-    const d = deps([at(1, 22), at(2, 19), at(0, 22), ok]);
-    const plan = await planV22TradeRefresh(multi(), d);
-    expect(plan.cranks.map((c) => c.role)).toEqual(["lpObserve", "lp", "taker"]);
-    expect(plan.rounds).toBe(4);
+  it("multi-asset market: the first crank observes every asset slot [0..4]", async () => {
+    const a = k();
+    const plan = await planV22TradeRefresh(multi(), deps([ok], [a]), { withPeers: true });
+    expect(Buffer.from(plan.instructions[0].data).equals(Buffer.from(buildRefreshCrankIxV22(W, MKT, OWNER, a, [0, 1, 2, 3, 4]).data))).toBe(true);
   });
-  it("a 121 on the open reads the stale peers once and refreshes them between the LP observe crank and the taker", async () => {
-    const peer = k();
-    const d = deps([at(3, 121), ok], [peer]);
-    const plan = await planV22TradeRefresh(multi(), d);
-    expect(plan.cranks.map((c) => c.role)).toEqual(["lpObserve", "peer", "taker", "lp"]);
-    expect(d.readStalePeers).toHaveBeenCalledTimes(1);
+});
+
+describe("multi-asset order flow (fresh-taker fix): the body alone, cranks only after a 121 / 19", () => {
+  const SLOTS = [0, 1, 2, 3, 4];
+  const obsData = (p: PublicKey, o: number[]) => Buffer.from(buildRefreshCrankIxV22(W, MKT, OWNER, p, o).data).toString("hex");
+  const isCrank = (ix: TransactionInstruction) => ix.data[0] === 5;
+  const cranksOf = (ixs: readonly TransactionInstruction[]) => ixs.filter(isCrank);
+  const tradeRefused = (ixs: readonly TransactionInstruction[], code = 121): RefreshSim => at(ixs.length - 1, code);
+  const input = (over: Partial<MultiAssetOrderInput> = {}): MultiAssetOrderInput => ({
+    programId: W, market: MKT, marketData: b64(FX.accounts.market), cranker: OWNER, takerPortfolio: P, takerData: b64(FX.accounts.taker), lpPortfolio: LP, body: [deposit, trade], ...over,
   });
-  it("19 after every refinement: HealthCheckStaleError (never the 'goes through automatically' wait)", async () => {
-    const d = deps([{ err: { InstructionError: [0, { Custom: 0 }] }, logs: [] }]);
-    d.simulate.mockImplementation(async (ixs: TransactionInstruction[]) => at(ixs.length - 1, 19));
-    await expect(planV22TradeRefresh(multi(), d)).rejects.toBeInstanceOf(HealthCheckStaleError);
+  type Send = (ixs: TransactionInstruction[], kind: MultiAssetSendKind) => Promise<string>;
+  function mk(simulate: (ixs: TransactionInstruction[]) => RefreshSim, peers: PublicKey[] = []) {
+    const sent: { ixs: TransactionInstruction[]; kind: MultiAssetSendKind }[] = [];
+    const sleeps: number[] = [];
+    const d: MultiAssetOrderDeps = {
+      simulate: vi.fn(async (ixs: TransactionInstruction[]) => simulate(ixs)),
+      simPrefix: PREFIX,
+      readStalePeers: vi.fn(async () => peers),
+      refusal: (sim) => Object.assign(new Error("refused " + JSON.stringify(sim.err)), { name: "SimulationRefusal" }),
+      sleep: async (ms) => { sleeps.push(ms); },
+      send: vi.fn<Send>(async (ixs, kind) => { sent.push({ ixs, kind }); return `sig${sent.length}`; }),
+      onTwoTx: vi.fn(),
+    };
+    return { d, sent, sleeps };
+  }
+  const bodyOnly = (ixs: readonly TransactionInstruction[]) => cranksOf(ixs).length === 0;
+
+  it("fast path: the body simulates OK and goes ALONE; no peers read, no crank", async () => {
+    const { d, sent } = mk(() => ok);
+    const r = await executeV22MultiAssetOrder(input(), d);
+    expect(r).toMatchObject({ signature: "sig1", path: "bodyAlone", cycles: 0 });
+    expect(sent).toEqual([{ ixs: [deposit, trade], kind: "order" }]);
+    expect(d.readStalePeers).not.toHaveBeenCalled();
+    expect(d.onTwoTx).not.toHaveBeenCalled();
   });
-  it("a deposit in front of the trade keeps its place after the cranks; another refusal is the caller's", async () => {
-    const plan = await planV22TradeRefresh(multi({ body: [deposit, trade] }), deps([ok]));
-    expect(plan.instructions.slice(3)).toEqual([deposit, trade]);
-    expect(plan.instructions.slice(0, 3).map(tagOf)).toEqual([5, 5, 5]);
-    await expect(planV22TradeRefresh(multi(), deps([at(3, 49)]))).rejects.toThrow(/refused .*49/);
+
+  it("121 -> ONE tx [peers (first observes every slot), taker, LP last, body] when it simulates under 1.2M CU; no observing crank in the body", async () => {
+    const [a, b] = [k(), k()];
+    const { d, sent } = mk((ixs) => (bodyOnly(ixs) ? tradeRefused(ixs) : { ...ok, consumed: 900_000 }), [a, b, P, LP]);
+    const r = await executeV22MultiAssetOrder(input(), d);
+    expect(r.path).toBe("oneTx");
+    expect(sent).toHaveLength(1);
+    expect(sent[0].kind).toBe("orderWithRefresh");
+    const cr = cranksOf(sent[0].ixs);
+    expect(cr.map((ix) => Buffer.from(ix.data).toString("hex"))).toEqual([obsData(a, SLOTS), obsData(b, []), obsData(P, []), obsData(LP, [])]);
+    expect(cr.map(crankTarget)).toEqual([a, b, P, LP].map((x) => x.toBase58())); // taker and LP never as peers; LP LAST
+    expect(sent[0].ixs.slice(4)).toEqual([deposit, trade]); // the body is exactly the order, nothing observing in it
+  });
+
+  it("19 is handled like 121; a taker below 3 legs is not cranked; with no other portfolio the LP crank itself observes every slot", async () => {
+    const { d, sent } = mk((ixs) => (bodyOnly(ixs) ? tradeRefused(ixs, 19) : { ...ok, consumed: 500_000 }), []);
+    await executeV22MultiAssetOrder(input({ takerPortfolio: k(), takerData: b64(FX.accounts.flatPortfolio) }), d);
+    expect(cranksOf(sent[0].ixs).map((ix) => Buffer.from(ix.data).toString("hex"))).toEqual([obsData(LP, SLOTS)]);
+  });
+
+  it("a first trade (no taker portfolio yet) refreshes peers + LP only", async () => {
+    const a = k();
+    const { d, sent } = mk((ixs) => (bodyOnly(ixs) ? tradeRefused(ixs) : { ...ok, consumed: 800_000 }), [a]);
+    await executeV22MultiAssetOrder(input({ takerPortfolio: null, takerData: null }), d);
+    expect(cranksOf(sent[0].ixs).map(crankTarget)).toEqual([a, LP].map((x) => x.toBase58()));
+  });
+
+  it("over 1.2M CU (or out of compute) -> 2 txs: the cranks alone, THEN the body alone with no crank; onTwoTx says 2", async () => {
+    const a = k();
+    for (const heavy of [{ ...ok, consumed: 1_340_000 }, { err: { InstructionError: [PREFIX + 2, "ProgramFailedToComplete"] }, logs: [] } as RefreshSim]) {
+      let refreshed = false;
+      const { d, sent } = mk((ixs) => {
+        if (bodyOnly(ixs)) return refreshed ? ok : tradeRefused(ixs);
+        if (ixs.some((ix) => !isCrank(ix))) return heavy; // cranks + body together
+        return { ...ok, consumed: 936_000 }; // cranks alone
+      }, [a]);
+      (d.send as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (ixs: TransactionInstruction[], kind: MultiAssetSendKind) => { sent.push({ ixs, kind }); if (kind === "refresh") refreshed = true; return `sig${sent.length}`; });
+      const r = await executeV22MultiAssetOrder(input(), d);
+      expect(r.path).toBe("twoTx");
+      expect(sent.map((s) => s.kind)).toEqual(["refresh", "order"]);
+      expect(cranksOf(sent[0].ixs).map((ix) => Buffer.from(ix.data).toString("hex"))).toEqual([obsData(a, SLOTS), obsData(P, []), obsData(LP, [])]);
+      expect(sent[0].ixs).toHaveLength(3);
+      expect(sent[1].ixs).toEqual([deposit, trade]); // tx 2: the order alone
+      expect(d.onTwoTx).toHaveBeenCalledWith(2);
+      expect(r.refreshSignatures).toEqual(["sig1"]);
+    }
+  });
+
+  it("cranks that alone exceed the limit are split: the first of EACH tx observes every slot, the LP is last in the LAST", async () => {
+    const peers = Array.from({ length: 6 }, k);
+    let refreshed = false;
+    const { d, sent } = mk((ixs) => {
+      if (bodyOnly(ixs)) return refreshed ? ok : tradeRefused(ixs);
+      if (ixs.some((ix) => !isCrank(ix))) return { ...ok, consumed: 1_650_000 };
+      return cranksOf(ixs).length > 5 ? { err: { InstructionError: [PREFIX + 1, "ProgramFailedToComplete"] }, logs: [] } : { ...ok, consumed: 900_000 };
+    }, peers);
+    (d.send as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (ixs: TransactionInstruction[], kind: MultiAssetSendKind) => { sent.push({ ixs, kind }); if (sent.filter((x) => x.kind === "refresh").length === 2) refreshed = true; return `sig${sent.length}`; });
+    await executeV22MultiAssetOrder(input(), d);
+    expect(sent.map((s) => s.kind)).toEqual(["refresh", "refresh", "order"]);
+    expect(d.onTwoTx).toHaveBeenCalledWith(3);
+    const [t1, t2] = [sent[0], sent[1]].map((s) => cranksOf(s.ixs));
+    expect(t1[0].data.equals(buildRefreshCrankIxV22(W, MKT, OWNER, peers[0], SLOTS).data)).toBe(true);
+    expect(t2[0].data.length).toBe(t1[0].data.length); // observing, too
+    expect(t1.map(crankTarget)).not.toContain(LP.toBase58());
+    expect(crankTarget(t2[t2.length - 1])).toBe(LP.toBase58());
+    expect(Buffer.from(t2[t2.length - 1].data).toString("hex")).toBe(obsData(LP, []));
+    expect(t1.length + t2.length).toBe(8); // 6 peers + taker + LP, each once
+  });
+
+  it("a crank refused 22 is dropped; the FIRST (observing) crank refused 22 waits a slot and retries", async () => {
+    const [a, b] = [k(), k()];
+    let n = 0;
+    const { d, sent, sleeps } = mk((ixs) => {
+      if (bodyOnly(ixs)) return tradeRefused(ixs);
+      n++;
+      if (n === 1) return at(1, 22); // peer b already current
+      if (n === 2) return at(0, 22); // the observing crank lost the slot
+      return { ...ok, consumed: 700_000 };
+    }, [a, b]);
+    await executeV22MultiAssetOrder(input(), d);
+    expect(sleeps).toContain(700);
+    expect(cranksOf(sent[0].ixs).map(crankTarget)).toEqual([a, P, LP].map((x) => x.toBase58()));
+    expect(Buffer.from(cranksOf(sent[0].ixs)[0].data).toString("hex")).toBe(obsData(a, SLOTS));
+  });
+
+  it("a refusal that is not 121 / 19 on the body is thrown as is; the same on the combined tx", async () => {
+    await expect(executeV22MultiAssetOrder(input(), mk((ixs) => tradeRefused(ixs, 49)).d)).rejects.toThrow(/refused .*49/);
+    const c = mk((ixs) => (bodyOnly(ixs) ? tradeRefused(ixs) : tradeRefused(ixs, 49)), [k()]);
+    await expect(executeV22MultiAssetOrder(input(), c.d)).rejects.toThrow(/refused .*49/);
+    expect(c.sent).toEqual([]);
+  });
+
+  it("retry bound: a body still 121 after the refresh repeats at most 2 more times, then HealthCheckStaleError (never an order sent)", async () => {
+    const { d, sent } = mk((ixs) => (bodyOnly(ixs) ? tradeRefused(ixs) : { ...ok, consumed: 1_300_000 }), [k()]);
+    await expect(executeV22MultiAssetOrder(input(), d)).rejects.toBeInstanceOf(HealthCheckStaleError);
+    expect(sent.map((s) => s.kind)).toEqual(["refresh", "refresh", "refresh"]); // 1 + MAX_TWO_TX_REPEATS
+    expect(MAX_TWO_TX_REPEATS).toBe(2);
+  });
+
+  it("a same-slot race (22) when the combined tx is sent goes back to the body alone from fresh state", async () => {
+    let raced = false;
+    const { d, sent } = mk((ixs) => (bodyOnly(ixs) ? (raced ? ok : tradeRefused(ixs)) : { ...ok, consumed: 800_000 }), []);
+    (d.send as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (ixs: TransactionInstruction[], kind: MultiAssetSendKind) => {
+      if (kind === "orderWithRefresh") { raced = true; throw new Error("custom program error: 0x16"); }
+      sent.push({ ixs, kind });
+      return "SIG";
+    });
+    const r = await executeV22MultiAssetOrder(input(), d);
+    expect(r.signature).toBe("SIG");
+    expect(sent).toEqual([{ ixs: [deposit, trade], kind: "order" }]);
   });
 });
 
@@ -156,6 +283,14 @@ describe("refresh candidates and copy", () => {
     expect(m.body).toBe("These positions needed more refreshing than fits in one go, so nothing was sent. Try again in a moment.");
     expect(m.body).not.toMatch(/automatically/);
     expect(m.autoRetry).toBeFalsy();
+  });
+});
+
+describe("two-transaction copy", () => {
+  it("says one approval may cover two transactions; promises nothing automatic", async () => {
+    const { FIRST_TRADE_COPY } = await import("@/lib/first-trade");
+    expect(FIRST_TRADE_COPY.twoTx).toMatch(/one approval may cover two transactions/);
+    expect(FIRST_TRADE_COPY.twoTx).not.toMatch(/automatically/);
   });
 });
 

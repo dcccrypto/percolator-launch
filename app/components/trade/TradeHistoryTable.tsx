@@ -9,6 +9,7 @@ import { Q_DECIMALS } from "@/lib/q-usd";
 import { fillSide, fillSideColor, fillSideLabel } from "@/lib/fill-side";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import type { MarketWithStats } from "@/hooks/useAllMarketStats";
+import { allMarketRows, fetchMarketsList } from "@/lib/markets-list-client";
 
 interface TradeHistoryTableProps {
   wallet: string | null | undefined;
@@ -68,10 +69,9 @@ async function loadMarketLots(): Promise<void> {
   if (marketsFetchAttempted) return;
   marketsFetchAttempted = true;
   try {
-    const res = await fetch("/api/markets?limit=200");
-    if (!res.ok) return;
-    const data = await res.json();
-    for (const m of (data.markets ?? [])) {
+    // The canonical list, shared with every other list caller (lib/markets-list-client.ts).
+    const data = await fetchMarketsList();
+    for (const m of (allMarketRows(data) ?? []) as Array<{ slab_address?: string; lot_exp?: unknown }>) {
       if (m.slab_address && typeof m.lot_exp === "number" && m.lot_exp > 0) slabLotCache[m.slab_address] = m.lot_exp;
     }
   } catch {

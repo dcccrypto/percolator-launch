@@ -5,15 +5,11 @@ import useSWR from "swr";
 import { MARKET_REGISTERED_EVENT } from "@/lib/market-registered-event";
 import { isBlockedSlab } from "@/lib/blocklist";
 import type { Database } from "@/lib/database.types";
+import { MARKETS_LIST_URL, fetchMarketsList } from "@/lib/markets-list-client";
 
 export type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'];
-type MarketsApiResponse = {
-  markets?: MarketWithStats[];
-  error?: string;
-};
-
-/** Stable SWR cache key — shared across all mounting hook instances. */
-const SWR_KEY = "/api/markets?include_zombie=true&limit=500";
+/** Stable SWR cache key — shared across all mounting hook instances (the canonical list URL). */
+const SWR_KEY = MARKETS_LIST_URL;
 
 /**
  * Stable identity fallback so downstream memos don't churn while loading.
@@ -26,24 +22,19 @@ const SWR_KEY = "/api/markets?include_zombie=true&limit=500";
 const EMPTY_STATS_MAP: Map<string, MarketWithStats> = new Map();
 
 /**
- * `fresh` goes around the CDN copy (s-maxage 10 + stale-while-revalidate 60): a distinct URL is a
- * distinct cache key, and no-store skips the browser's copy. Used once, right after a registration
- * lands on this device, so the creator's own lists show the market without waiting out the cache.
+ * `fresh` goes around the CDN copy (s-maxage 15 + stale-while-revalidate 60) and the server's
+ * shared row copy (it accepts one at most 3 s old): a distinct URL is a distinct cache key, and
+ * no-store skips the browser's copy. This is the one place `&fresh=` is still sent: right after a
+ * registration lands on this device, so the creator's own lists show the market without waiting
+ * out the cache. Ordinary polls share one in-flight request (lib/markets-list-client.ts).
  */
 export async function fetchMarketStats(fresh = false): Promise<Map<string, MarketWithStats>> {
-  const res = await fetch(fresh ? `${SWR_KEY}&fresh=${Date.now()}` : SWR_KEY, {
-    headers: { Accept: "application/json" },
-    ...(fresh ? { cache: "no-store" as const } : {}),
-  });
-  if (!res.ok) {
-    throw new Error(`Markets API returned ${res.status}`);
-  }
-  const body = (await res.json()) as MarketsApiResponse;
+  const body = await fetchMarketsList({ fresh });
   if (!Array.isArray(body.markets)) {
     throw new Error(body.error ?? "Markets API returned no markets array");
   }
   const map = new Map<string, MarketWithStats>();
-  body.markets.forEach((market) => {
+  (body.markets as MarketWithStats[]).forEach((market) => {
     if (market.slab_address && !isBlockedSlab(market.slab_address)) {
       map.set(market.slab_address, market);
     }

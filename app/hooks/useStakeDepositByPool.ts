@@ -17,6 +17,7 @@ import {
   createAssociatedTokenAccountInstruction,
 } from '@solana/spl-token';
 import { sendTx } from '@/lib/tx';
+import { withWritableStaker } from '@/lib/stake-staker-meta';
 import { stakeErrorMessage } from '@/lib/earnErrors';
 import { getConfig } from '@/lib/config';
 import { assertDepositWithinBalance, readTokenBalance } from '@/lib/deposit-guard';
@@ -164,7 +165,7 @@ export function useStakeDepositByPool({ slabAddress, collateralMint }: StakeDepo
 
         // Build stake deposit instruction
         const data = Buffer.from(encodeStakeDeposit(amount));
-        const keys = depositAccounts({
+        const keys = withWritableStaker(depositAccounts({
           user: wallet.publicKey,
           pool,
           userCollateralAta,
@@ -174,7 +175,7 @@ export function useStakeDepositByPool({ slabAddress, collateralMint }: StakeDepo
           vaultAuth,
           depositPda,
           slab: poolSlab,
-        });
+        }));
 
         instructions.push(
           new TransactionInstruction({

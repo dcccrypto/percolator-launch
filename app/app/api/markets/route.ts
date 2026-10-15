@@ -744,6 +744,11 @@ function sanitizePrice(v: number | null | undefined, field?: string, slabAddress
 
 export const dynamic = "force-dynamic";
 
+/** Shared with /api/stats (review E2): 15 s at the edge, then served stale while it refreshes. */
+const MARKETS_CACHE_CONTROL = "public, s-maxage=15, stale-while-revalidate=60";
+/** ?fresh= (post-registration) accepts a shared row copy at most this old. */
+const FRESH_MAX_AGE_MS = 3_000;
+
 // GET /api/markets — list all active markets with stats
 export async function GET(request: NextRequest) {
   try {
@@ -762,7 +767,24 @@ export async function GET(request: NextRequest) {
     // the JS-layer zombie/blocklist guards don't catch them (Set.has(null) → false).
     // Registry + live on-chain state, from the shared loader that /api/stats
     // also uses — see lib/market-registry.ts for why these two must not drift.
-    const mergedRows = await loadMergedMarketRows();
+    // ?program_id= (review E2): every row this path serves belongs to the configured wrapper —
+    // loadMergedMarketRows drops slabs owned by any other program — so a different program id
+    // is an empty list, answered without touching the database.
+    const programIdParam = request?.nextUrl?.searchParams?.get("program_id") ?? null;
+    if (programIdParam && programIdParam !== getConfig().programId) {
+      return NextResponse.json(
+        { total: 0, activeTotal: 0, marketsWithPrice: 0, zombieCount: 0, markets: [] },
+        { headers: { "Cache-Control": MARKETS_CACHE_CONTROL } },
+      );
+    }
+    // ?fresh= is sent only right after a registration lands on this device
+    // (hooks/useAllMarketStats.ts): accept a shared copy at most FRESH_MAX_AGE_MS old, and keep the
+    // one-off URL out of the CDN.
+    const fresh = request?.nextUrl?.searchParams?.has("fresh") ?? false;
+    // limit/offset stay in JS on purpose: total/activeTotal/zombieCount are counted over the whole
+    // list and the sort keys are on-chain values merged after the read, so a SQL LIMIT would change
+    // the answer. The memo in loadMergedMarketRows makes the full read once per instance per TTL.
+    const mergedRows = await loadMergedMarketRows(fresh ? { maxAgeMs: FRESH_MAX_AGE_MS } : {});
     if (mergedRows === null) {
       return fallbackMarketsResponse(request, "supabase-query-error");
     }
@@ -1257,11 +1279,10 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ total: sorted.length, activeTotal, marketsWithPrice, zombieCount, markets: limited }, {
       headers: {
-        // Kept short on purpose: a newly registered market is listed only once this response
-        // carries it, so the window a visitor can be served the pre-registration list is
-        // s-maxage + stale-while-revalidate (was 10 + 60 s, now 5 + 20 s). The creator's own
-        // browser skips this cache entirely right after registering (hooks/useAllMarketStats.ts).
-        "Cache-Control": "public, s-maxage=5, stale-while-revalidate=20",
+        // A newly registered market reaches other visitors within s-maxage + stale-while-revalidate
+        // (+ the server memo). The creator's own browser skips both right after registering
+        // (hooks/useAllMarketStats.ts sends ?fresh=, answered from a <= 3 s copy, no-store).
+        "Cache-Control": fresh ? "private, no-store" : MARKETS_CACHE_CONTROL,
       },
     });
   } catch (error) {

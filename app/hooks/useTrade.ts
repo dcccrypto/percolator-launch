@@ -51,7 +51,9 @@ import { tradeFeeBpsToSign } from "@/lib/limits/fee-channel";
 import { fetchTradeFeeBps, sendWithUtilFeeRetry } from "@/lib/limits/trade-fee-resolve";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { marketAssetSlots } from "@/lib/v22/trade-refresh";
-import { planTradeRefresh, sendWithRefreshRetry } from "@/lib/v22/trade-refresh-wire";
+import { planTradeRefresh, sendMultiAssetOrder, sendWithRefreshRetry } from "@/lib/v22/trade-refresh-wire";
+import { MAX_TX_COMPUTE_UNITS } from "@/lib/compute-budget";
+import type { MultiAssetSendKind } from "@/lib/v22/trade-refresh";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { detectOracleMode, resolveMarketPriceE6 } from "@/lib/oraclePrice";
 import { assertKnownProgram, assertCanonicalMatcher } from "@/lib/programAllowlist";
@@ -341,6 +343,11 @@ export function useTrade(slabAddress: string) {
        * again ("Refreshing positions…"), false once it is done either way (lib/v21/loss-stale-retry.ts).
        */
       onRefreshingPositions?: (refreshing: boolean) => void;
+      /**
+       * Multi-asset market: the order needs its refresh cranks as their own transaction first, so the wallet may open
+       * more than once. Called with the transaction count (2+) before the first one is sent.
+       */
+      onTwoTx?: (txCount: number) => void;
       /**
        * #49: called once the tx is broadcast and the app is waiting for confirmation (no wallet
        * prompt is open any more). May be called repeatedly while it waits.
@@ -709,7 +716,7 @@ export function useTrade(slabAddress: string) {
           // Explicit limit sized from a simulation of THIS tx (P1: CPI trades cost ~13k more CU;
           // a single-leg batch on asset 1 is 216k > the 200k default), capped at 400k per leg
           // (lib/compute-budget.ts). Also used by closes (useClosePosition calls trade()).
-          const sendTrade = (ixs: TransactionInstruction[]) => sendTxWaiting({
+          const sendTrade = (ixs: TransactionInstruction[], kind: MultiAssetSendKind = "order") => sendTxWaiting({
             connection, wallet, instructions: ixs,
             onWaiting: params.onWaiting,
             abortSignal: params.abortSignal,
@@ -719,11 +726,13 @@ export function useTrade(slabAddress: string) {
             maxWaitMs: params.maxWaitMs,
             onProgress: params.onConfirming,
             computeUnitsFromSim: { cap: tradeCuCap(legs.length) },
+            // A refresh tx / an order carrying cranks (multi-asset market) can need up to the 1.4M transaction maximum.
+            ...(kind !== "order" ? { computeUnitsFromSim: { cap: MAX_TX_COMPUTE_UNITS } } : {}),
             // P0b: prepend ExpireBackingBucket / FinalizeResetSide only if this
             // trade/close would otherwise revert 19/21 on them (lib/self-heal.ts).
             // UX WP-2 (SH-2): a lagging engine clock is caught up by cranking the market's LP
             // (accountB; the vault LP on P3) inside THIS tx — never "ask a maintainer".
-            selfHeal: isV17Market
+            selfHeal: isV17Market && kind === "order" // never an extra crank in front of the refresh cranks
               ? {
                   programId,
                   market: slabPk,
@@ -754,15 +763,15 @@ export function useTrade(slabAddress: string) {
             const instructions = instructions0;
             try {
               if (v22Refresh && multiAsset) {
-                return await sendWithRefreshRetry(async () => {
-                  const plan = await planTradeRefresh(connection, v22Refresh);
-                  if (plan.cranks.length > 0) console.info(`[useTrade] v2.2 refresh shape: ${plan.cranks.map((c) => c.role).join(", ")}`);
-                  return plan.instructions;
-                }, sendTrade);
+                // Multi-asset market (fresh-taker fix): the order goes ALONE; on a 121 / 19 the refresh cranks go in the
+                // same tx under 1.2M CU, otherwise as their own tx first. Never an observing crank in the order's tx.
+                const r = await sendMultiAssetOrder(connection, v22Refresh, sendTrade, { onTwoTx: params.onTwoTx });
+                console.info(`[useTrade] multi-asset order: ${r.path}, ${r.cycles} refresh cycle(s)`);
+                return r.signature;
               }
               return await sendTrade(instructions);
             } catch (e) {
-              if (v22Refresh && isLossStaleError(e, programId.toBase58())) {
+              if (v22Refresh && !multiAsset && isLossStaleError(e, programId.toBase58())) {
                 // 121: refresh the stale positioned peers in this transaction instead of waiting for the keeper.
                 const first = await planTradeRefresh(connection, v22Refresh, { withPeers: true });
                 if (first.cranks.some((c) => c.role === "peer")) {

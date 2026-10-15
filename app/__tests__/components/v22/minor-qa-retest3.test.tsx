@@ -50,6 +50,8 @@ describe("no indexer on the v2.2 preview", () => {
     expect(th).toContain("v22HasNoIndexer() ? NO_HISTORY_COPY.title");
     expect(th).toContain("{!v22HasNoIndexer() && (process.env.NEXT_PUBLIC_DEFAULT_NETWORK");
     expect(NO_HISTORY_COPY.title).toBe("No trade history on this test build");
-    expect(src("app/layout.tsx")).toContain("{!isDevnetV22Enabled() && <Analytics />}");
+    // #2826: the script is opt-in via NEXT_PUBLIC_VERCEL_ANALYTICS (unset on the preview), not tied to the v2.2 flag.
+    expect(src("app/layout.tsx")).toContain("<VercelAnalytics />");
+    expect(src("components/analytics/VercelAnalytics.tsx")).toContain("if (!vercelAnalyticsEnabled()) return null;");
   });
 });

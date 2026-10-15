@@ -281,6 +281,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const [fundInput, setFundInput] = useState("");
   /** UX WP-6: the portfolio-id race happened; the second prompt is labelled. */
   const [raceNote, setRaceNote] = useState(false);
+  // Multi-asset market: the order needs its refresh cranks as their own transaction first (two approvals possible).
+  const [twoTxNote, setTwoTxNote] = useState(false);
   // Devnet v2.1: an order refused Custom(121) waits ~1-2 s and is sent again (lib/v21/loss-stale-retry.ts).
   const [refreshingPositions, setRefreshingPositions] = useState(false);
   // The market's per-trade size ceiling (immutable, resolved once).
@@ -1137,6 +1139,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setPendingTx(null);
     setWaitingLong(false);
     setRaceNote(false);
+    setTwoTxNote(false);
     setRefreshingPositions(false);
     const waitAbort = new AbortController();
     waitAbortRef.current = waitAbort;
@@ -1177,6 +1180,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               // The race re-opens the wallet, so the button goes back to "Confirm in wallet…".
               onRace: () => { setRaceNote(true); setTradePhase("submitting"); },
               onConfirming: () => setTradePhase("pending"),
+              onTwoTx: () => setTwoTxNote(true),
               // v2.2 QA RT5b: the same waiting as the plain trade below (was three re-checks in 4.5 s, then a failure).
               ...(isDevnetV22Enabled()
                 ? {
@@ -1217,6 +1221,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 abortSignal: waitAbort.signal,
                 // #49: signed and sent. "pending" is the ticket's "Confirming…" label.
                 onConfirming: () => setTradePhase("pending"),
+                onTwoTx: () => setTwoTxNote(true),
               },
               snapshotLimitPriceE6,
             ),
@@ -1346,6 +1351,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     } catch (e) {
       setWaitingLong(false);
       setRaceNote(false);
+      setTwoTxNote(false);
       setRefreshingPositions(false);
       if (e instanceof FirstTradeDepositError) {
         // §3.2 item 5: the account exists but the deposit didn't land — say so, offer the deposit.
@@ -1595,6 +1601,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           <StatusLine message={{ kind: "loss-stale-retry", variant: "wait", title: "One moment", body: V21_REFRESHING_POSITIONS }} />
         </div>
       );
+    }
+    if (twoTxNote && (tradePhase === "submitting" || tradePhase === "pending")) {
+      return <StatusLine message={{ kind: "two-tx-order", variant: "info", title: "Two transactions", body: FIRST_TRADE_COPY.twoTx }} />;
     }
     if (raceNote && tradePhase === "submitting") {
       return <StatusLine message={{ kind: "first-trade-race", variant: "info", title: "One more approval", body: FIRST_TRADE_COPY.race }} />;

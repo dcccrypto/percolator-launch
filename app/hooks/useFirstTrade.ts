@@ -47,7 +47,9 @@ import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { fetchTradeFeeBps, sendWithUtilFeeRetry } from "@/lib/limits/trade-fee-resolve";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { marketAssetSlots } from "@/lib/v22/trade-refresh";
-import { planTradeRefresh, sendWithRefreshRetry } from "@/lib/v22/trade-refresh-wire";
+import { planTradeRefresh, sendMultiAssetOrder, sendWithRefreshRetry } from "@/lib/v22/trade-refresh-wire";
+import type { MultiAssetSendKind } from "@/lib/v22/trade-refresh";
+import { MAX_TX_COMPUTE_UNITS } from "@/lib/compute-budget";
 import { isLossStaleError } from "@/lib/v21/loss-stale-retry";
 import { presignWait } from "@/lib/first-trade-wait";
 import { pythCrankAccount } from "@/lib/limits/oracle-tail";
@@ -86,6 +88,11 @@ export interface FundAndTradeParams {
   amountLabel: string;
   /** The id race happened: the UI labels the extra prompt. */
   onRace?: () => void;
+  /**
+   * Multi-asset market: the order needs its refresh cranks as their own transaction first, so the wallet may open
+   * more than once. Called with the transaction count (2+) before the first one is sent.
+   */
+  onTwoTx?: (txCount: number) => void;
   /**
    * #49: called once the tx is broadcast and the app is waiting for confirmation (no wallet
    * prompt is open any more). May be called repeatedly while it waits.
@@ -189,15 +196,31 @@ export function useFirstTrade(slabAddress: string) {
         // v2.2 QA U-1 / R-1 / Q-7b (lib/v22/trade-refresh.ts): the multi-asset refresh shape when the LP or the taker
         // holds >= 3 legs, and the stale peers' refresh cranks in the SAME tx when the order is refused 121.
         const sendRefreshed = async (body: TransactionInstruction[], takerPortfolio: PublicKey | null, o: { signers?: Keypair[]; cap: number }): Promise<string> => {
-          const send = (ixs: TransactionInstruction[]) =>
-            sendTx({ connection, wallet, instructions: ixs, ...(o.signers ? { signers: o.signers } : {}), computeUnitsFromSim: { cap: o.cap }, onProgress: p.onConfirming, selfHeal });
+          // `kind` (multi-asset markets): a refresh tx or an order carrying cranks may need up to the 1.4M maximum and
+          // never gets the self-heal catch-up crank in front; the order alone keeps today's cap and self-heal. Only the
+          // order carries the new portfolio's keypair signer (a refresh tx has no account to create).
+          const send = (ixs: TransactionInstruction[], kind: MultiAssetSendKind = "order") =>
+            sendTx({
+              connection, wallet, instructions: ixs,
+              ...(o.signers && kind !== "refresh" ? { signers: o.signers } : {}),
+              computeUnitsFromSim: { cap: kind === "order" ? o.cap : MAX_TX_COMPUTE_UNITS },
+              onProgress: p.onConfirming,
+              ...(kind === "order" ? { selfHeal } : {}),
+            });
           if (!isDevnetV22Enabled() || !slabRaw) return send(body);
+          const multiAsset = (marketAssetSlots(slabRaw) ?? 1) > 1;
           const input = { programId, market, marketData: slabRaw, cranker: owner, takerPortfolio, lpPortfolio: lp.accountB, body };
           try {
-            if ((marketAssetSlots(slabRaw) ?? 1) > 1) return await sendWithRefreshRetry(async () => (await planTradeRefresh(connection, input)).instructions, send);
+            if (multiAsset) {
+              // Multi-asset market (fresh-taker fix): the order goes ALONE; on a 121 / 19 the refresh cranks go in the
+              // same tx under 1.2M CU, otherwise as their own tx first. Never an observing crank in the order's tx.
+              const r = await sendMultiAssetOrder(connection, input, send, { onTwoTx: p.onTwoTx });
+              console.info(`[first-trade] multi-asset order: ${r.path}, ${r.cycles} refresh cycle(s)`);
+              return r.signature;
+            }
             return await send(body);
           } catch (e) {
-            if (isLossStaleError(e, programId.toBase58())) {
+            if (!multiAsset && isLossStaleError(e, programId.toBase58())) {
               const first = await planTradeRefresh(connection, input, { withPeers: true });
               if (first.cranks.some((c) => c.role === "peer")) {
                 console.info(`[first-trade] 121: refreshing ${first.cranks.filter((c) => c.role === "peer").length} stale peer(s) in the same tx`);

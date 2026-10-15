@@ -155,6 +155,8 @@ export const FIRST_TRADE_COPY = {
   rentRow: { label: "Account setup (one-time)", value: rentLabel },
   button: (amount: string, side: string) => `Deposit ${amount} & ${side}`,
   race: "One more approval: someone joined this market at the same moment.",
+  /** Multi-asset market: the positions are refreshed in their own transaction before the order (shown for a ticket trade too). */
+  twoTx: "This order refreshes positions first, so one approval may cover two transactions, or your wallet may ask twice.",
   /** GH#2959: the user turned the fund-and-trade down in the wallet. */
   cancelled: "Trade cancelled in your wallet.",
   /** Devnet only: the usual reason a first trade gets turned down is a wallet still on Mainnet. Phantom
