@@ -213,11 +213,25 @@ export const RotaryDial: FC<RotaryDialProps> = ({
   }, [painted, min, max]);
 
   // ── input ──────────────────────────────────────────────────────────────
+  // The tick glow clears itself 90ms later. Keep the timer so a newer detent
+  // restarts it and an unmount cancels it — a timer left running set state on
+  // an unmounted dial (and, under jsdom, after the window was torn down).
+  const tickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (tickTimer.current !== null) clearTimeout(tickTimer.current);
+    },
+    [],
+  );
   const pulse = useCallback((v: number) => {
     if (v !== lastDetent.current) {
       lastDetent.current = v;
       setTicking(true);
-      window.setTimeout(() => setTicking(false), 90);
+      if (tickTimer.current !== null) clearTimeout(tickTimer.current);
+      tickTimer.current = setTimeout(() => {
+        tickTimer.current = null;
+        setTicking(false);
+      }, 90);
     }
   }, []);
 

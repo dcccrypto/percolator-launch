@@ -129,3 +129,32 @@ describe("RotaryDial has no drag", () => {
     add.mockRestore();
   });
 });
+
+describe("RotaryDial tick timer", () => {
+  it("cancels the pending tick-glow timer on unmount", () => {
+    vi.useFakeTimers();
+    const setSpy = vi.spyOn(globalThis, "setTimeout");
+    const clearSpy = vi.spyOn(globalThis, "clearTimeout");
+    try {
+      const onChange = vi.fn();
+      const { unmount } = render(
+        <RotaryDial label="Leverage" value={5} min={2} max={10} step={0.5} format={(v) => `${v}x`} onChange={onChange} />,
+      );
+      const slider = screen.getByRole("slider", { name: "Leverage" });
+      slider.focus();
+      fireEvent.wheel(slider, { deltaY: -100 });
+      expect(onChange).toHaveBeenLastCalledWith(5.5);
+      const glow = setSpy.mock.calls.findIndex(([, ms]) => ms === 90);
+      expect(glow).toBeGreaterThanOrEqual(0);
+      const glowTimer = setSpy.mock.results[glow].value;
+      unmount();
+      // A tick timer left running set state on the unmounted dial — in CI that
+      // fired after jsdom tore the window down and failed the run.
+      expect(clearSpy).toHaveBeenCalledWith(glowTimer);
+    } finally {
+      setSpy.mockRestore();
+      clearSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+});
