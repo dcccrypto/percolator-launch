@@ -54,3 +54,15 @@ describe("B1: an embedded signing failure reads true in every flow", () => {
     expect(src).toContain("throw new EmbeddedBatchSignError(e.total, { cause: e.cause, sentBefore: true })");
   });
 });
+
+describe("create step 1 (QA 2026-10-15): a busy wallet ends the batched launch instead of falling back", () => {
+  it("the catch returns fatal for a WalletBusyError BEFORE the sequential-fallback return, with its own line", () => {
+    const catchStart = src.indexOf("if (!broadcastStarted && err instanceof PreFundRateLimitedError)");
+    const end = src.indexOf('return { status: "fallback", reason };', catchStart);
+    const busy = src.indexOf("if (!broadcastStarted && err instanceof WalletBusyError) {", catchStart);
+    expect(busy).toBeGreaterThan(catchStart);
+    expect(busy).toBeLessThan(end);
+    expect(src.slice(busy, end)).toContain("error: err.message");
+    expect(src.slice(busy, end)).toContain('return { status: "fatal" };');
+  });
+});

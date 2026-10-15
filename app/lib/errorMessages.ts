@@ -31,7 +31,7 @@ import { V22_ENGINE_LOCK_CODES } from "@/lib/v22/wrapper-errors";
 import { stakeProgramIdOrNull } from "@/lib/v22/program-ids";
 import { V21_ENGINE_LOCK_CODES } from "@/lib/v21/wrapper-errors";
 import { V22_CUSTOM9_GENERIC, V22_CUSTOM9_OFF_TICKET } from "@/lib/v22/trade-refusal-9-copy";
-import { WALLET_REQUEST_CLOSED_COPY } from "./wallet-request-copy";
+import { WALLET_BUSY_COPY, WALLET_REQUEST_CLOSED_COPY } from "./wallet-request-copy";
 const LIGHTHOUSE_PROGRAM_ID_STR = "L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95";
 
 const LIGHTHOUSE_USER_MESSAGE =
@@ -404,6 +404,7 @@ export const NO_SOL_FOR_FEES_MESSAGE =
 
 export function humanizeError(rawMsg: string, context?: "trade"): string {
   if (rawMsg.includes(WALLET_REQUEST_CLOSED_COPY)) return WALLET_REQUEST_CLOSED_COPY; // v2.2 QA RT5-2: already the calm line
+  if (rawMsg.includes(WALLET_BUSY_COPY)) return WALLET_BUSY_COPY; // v2.2 create step 1: already the calm line
   if (rawMsg.includes("This action isn't available for this market yet. Nothing was sent.")) return rawMsg; // v2.2 tail mismatch: already the calm line
   // Log for debugging (only in browser)
   if (typeof window !== "undefined") {
@@ -595,8 +596,9 @@ export class UserFacingError extends Error {
 /** The message of a UserFacingError, else null (the caller then humanizes as before). */
 export function userFacingMessage(e: unknown): string | null {
   if (e instanceof UserFacingError) return e.message;
-  // v2.2 QA RT5-2: the wallet-request-closed line (lib/v22/sign-guard.ts) is written for the user too.
-  return (e as { name?: unknown } | null)?.name === "WalletRequestClosedError" ? WALLET_REQUEST_CLOSED_COPY : null;
+  // v2.2 QA RT5-2 / create step 1: the wallet-request-closed and wallet-busy lines (lib/v22/sign-guard.ts) are written for the user too.
+  const name = (e as { name?: unknown } | null)?.name;
+  return name === "WalletRequestClosedError" ? WALLET_REQUEST_CLOSED_COPY : name === "WalletBusyError" ? WALLET_BUSY_COPY : null;
 }
 /** §5.3 "confirmation timeout" (never "check your wallet"). */
 export const CONFIRMING_MESSAGE = "Still confirming. We'll update this when it lands.";

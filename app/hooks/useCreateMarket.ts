@@ -2,6 +2,7 @@
 
 import { parseLpVaultRegistry } from "@/lib/v22/records";
 import { EmbeddedBatchSignError, isWalletRejection } from "@/lib/privy-batch-sign";
+import { WalletBusyError } from "@/lib/v22/sign-guard";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DEVNET_PROGRAM_IDS } from "@/lib/program-ids";
 import {
@@ -1982,6 +1983,15 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
     // A user cancel before anything was sent ends the launch. The six-step sequential path would
     // re-prompt for every step of a launch they just declined. Retry starts a fresh launch (step 0).
     if (endLaunchOnRejection(err, broadcastStarted, setState)) return { status: "fatal" };
+    // The wallet refused without showing the batch (one of its own windows is still open). The sequential path would
+    // ask the same busy wallet straight away and be refused the same way, so stop here with the reason.
+    if (!broadcastStarted && err instanceof WalletBusyError) {
+      setState((s) => ({
+        ...s, loading: false, error: err.message,
+        step: 0, stepLabel: "", phase: "idle", landingIndex: 0, landingTotal: 0,
+      }));
+      return { status: "fatal" };
+    }
     if (!broadcastStarted) {
       // Nothing landed — safe to fall back to the sequential path in the
       // SAME create() call. See the FALLBACK CONTRACT note above.

@@ -3,7 +3,7 @@
 import { FC } from "react";
 import { explorerTxUrl } from "@/lib/config";
 import { RecoveryExportButton } from "./RecoveryExportButton";
-import { loadAllInFlightMarkets } from "@/lib/inFlightMarket";
+import { useInFlightSlabOnChain } from "@/hooks/useInFlightSlabOnChain";
 
 interface LaunchProgressProps {
   state: {
@@ -88,7 +88,11 @@ export const LaunchProgress: FC<LaunchProgressProps> = ({ state, onReset, onRetr
   // read that directly instead so the panel (and its "download recovery JSON" button)
   // is available for exactly that "timed out but landed" case, not just once `state`
   // catches up.
-  const hasInFlightRecovery = loadAllInFlightMarkets().length > 0;
+  // QA 2026-10-15: the entry is saved before step 0 is even signed, so its presence is not "on chain". The panel now
+  // shows only once the exported market account is seen on chain (re-checked as the launch moves, and every 15 s).
+  const hasInFlightRecovery = useInFlightSlabOnChain(
+    `${state.step}|${state.phase ?? ""}|${state.txSigs.length}|${state.error ?? ""}|${state.loading}|${state.slabAddress ?? ""}`,
+  );
   // Batch-launch phase view: only rendered when the fresh quick-launch fast
   // path is active (phase set to something other than "idle"/undefined).
   // Resume/retry/demo flows fall straight through to the original per-step
@@ -344,9 +348,10 @@ export const LaunchProgress: FC<LaunchProgressProps> = ({ state, onReset, onRetr
         </div>
       )}
 
-      {/* Recovery export — shown whenever a persisted in-flight entry exists (W10 fix:
-           was gated on component-local `state`, which could lag or never catch up to
-           what's actually on-chain — see hasInFlightRecovery above), so the user can
+      {/* Recovery export — shown once the persisted in-flight market's account is on chain
+           (W10 fix: was gated on component-local `state`, which could lag or never catch up
+           to what's actually on-chain; QA 2026-10-15: not on the entry alone, which exists
+           before step 0 is signed — see hasInFlightRecovery above), so the user can
            download a recovery JSON if anything goes wrong. Survives tab close. */}
       {hasInFlightRecovery && (
         <div className="mt-5 border border-[var(--border)] bg-[var(--bg-surface)] p-4">
