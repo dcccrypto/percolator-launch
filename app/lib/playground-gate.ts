@@ -16,6 +16,7 @@
  *   /charting_library/*, /tv-theme/*   the TradingView chart library's static files and our
  *                               theme CSS for it (loaded inside the chart iframe). Chart DATA
  *                               is /api/* and stays gated.
+ *   GET/HEAD /<16 hex>/script.js   the hashed Vercel Web Analytics script (#2826); that exact shape only
  *   top-level files by extension   e.g. /chart-empty-state.svg. ONLY top-level: a nested
  *                               /trade/x.png would otherwise render the [slab] page shell.
  *   favicon/icon, robots.txt, sitemap.xml, opengraph-image, twitter-image, manifest
@@ -41,6 +42,9 @@ export type GateDecision = "pass" | "redirect-locked" | "unauthorized";
 /** A single top-level segment ending in a static extension (public/ root files). */
 const TOP_LEVEL_STATIC_RE =
   /^\/[^/]+\.(?:svg|png|jpg|jpeg|gif|webp|avif|ico|css|js|mjs|map|woff2?|ttf|otf|eot|mp3|ogg|wav|webm|mp4|txt|xml|webmanifest)$/i;
+
+/** Vercel Web Analytics' hashed first-party script path (#2826). Exactly one 16-hex segment. */
+const VERCEL_ANALYTICS_SCRIPT_RE = /^\/[0-9a-f]{16}\/script\.js$/;
 
 const EXEMPT_EXACT = new Set([
   ENTER_PATH,
@@ -87,6 +91,8 @@ export function isExempt(pathname: string, method: string): boolean {
     // HEAD rides on GET's exemption (uptime monitors often send HEAD).
     return EXEMPT_API.some((e) => (e.method === m || (m === "HEAD" && e.method === "GET")) && e.re.test(pathname));
   }
+  // Hashed Vercel Analytics script: read-only methods, exact shape, nothing else nested.
+  if ((m === "GET" || m === "HEAD") && VERCEL_ANALYTICS_SCRIPT_RE.test(pathname)) return true;
   // Top-level static files only — never nested, never under /api.
   return TOP_LEVEL_STATIC_RE.test(pathname);
 }

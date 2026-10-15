@@ -198,3 +198,38 @@ describe("middleware matcher (compiled by Next's own getMiddlewareMatchers)", ()
     },
   );
 });
+
+describe("Vercel Web Analytics hashed script (#2826)", () => {
+  const HASH = "40edd7cba7ec8748";
+  it.each(["GET", "HEAD"])("%s /<16hex>/script.js passes without a session (no 307, no 401)", async (method) => {
+    const r = await middleware(req(`/${HASH}/script.js`, { method }));
+    expect(isPassThrough(r)).toBe(true);
+  });
+
+  it.each([
+    ["POST", `/${HASH}/script.js`],
+    ["PUT", `/${HASH}/script.js`],
+    ["DELETE", `/${HASH}/script.js`],
+    ["GET", `/${HASH}/script.js/x`],
+    ["GET", `/${HASH.slice(1)}/script.js`], // 15 hex
+    ["GET", `/${HASH}0/script.js`], // 17 hex
+    ["GET", `/${HASH.toUpperCase()}/script.js`], // not lowercase hex
+    ["GET", `/${HASH}/other.js`],
+    ["GET", `/${HASH}/script.json`],
+    ["GET", `/x/${HASH}/script.js`],
+    ["GET", `/${HASH}/view`],
+    ["GET", `/${HASH}/event`],
+    ["GET", `/trade/script.js`],
+    ["GET", `/api/${HASH}/script.js`],
+  ] as const)("%s %s without a session stays gated", async (method, p) => {
+    const r = await middleware(req(p, { method }));
+    expect(isPassThrough(r), `${method} ${p}`).toBe(false);
+    expect([307, 401]).toContain(r.status);
+  });
+
+  it("isExempt agrees", () => {
+    expect(isExempt(`/${HASH}/script.js`, "GET")).toBe(true);
+    expect(isExempt(`/${HASH}/script.js`, "POST")).toBe(false);
+    expect(isExempt(`/${HASH}/script.js/x`, "GET")).toBe(false);
+  });
+});
