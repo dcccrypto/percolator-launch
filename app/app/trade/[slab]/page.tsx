@@ -15,6 +15,7 @@ import { OrderTicket } from "@/components/trade/OrderTicket";
 import { useTicketRow, ticketRowShortLabel } from "@/lib/limits/ticket-status-store";
 import { PositionsDock } from "@/components/trade/PositionsDock";
 import dynamic from "next/dynamic";
+import { selectChartEngine, tvLibraryVersion } from "@/lib/tv/config";
 import { MarketInfoBar } from "@/components/trade/MarketInfoBar";
 import { MarketLimitsStrip } from "@/components/limits/MarketLimitsStrip";
 import { MarketHeaderStatus, TradeMarketHealthBanner } from "@/components/market/MarketHealthBadges";
@@ -35,12 +36,22 @@ import TradingPageLoading from "./loading";
 // interactive, instead of blocking the trade page's initial load. ssr:false —
 // the chart is client-only. ChartSwitch is the single seam that picks the chart
 // (see components/trade/ChartSwitch.tsx and lib/chart-engine.ts).
+// The skeleton holds the mobile height of the chart that will mount (below lg the chart sets its own
+// height; the positions dock sits right under it). With `h-full` in an auto-height wrapper it was 0 px
+// tall, so the dock jumped ~560 px down when the chart chunk arrived after the dock had painted
+// (Lighthouse mobile, 2 of 6 runs: a 0.26 layout shift). Engine per build (no ?chart= override, which
+// only exists in the browser): the TradingView body, or the built-in perp chart's exact height.
+const CHART_SKELETON_MOBILE_HEIGHT =
+  selectChartEngine({ libraryVersion: tvLibraryVersion(), envEngine: process.env.NEXT_PUBLIC_CHART_ENGINE, query: null }) === "tv"
+    ? "h-[clamp(420px,62svh,640px)]"
+    : "h-[clamp(460px,68svh,700px)]";
+
 const TradingChart = dynamic(
   () => import("@/components/trade/ChartSwitch").then((m) => m.ChartSwitch),
   {
     ssr: false,
     loading: () => (
-      <div className="h-full w-full animate-pulse rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]" />
+      <div className={`${CHART_SKELETON_MOBILE_HEIGHT} lg:h-full w-full animate-pulse rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]`} />
     ),
   },
 );
