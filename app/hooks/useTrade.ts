@@ -399,8 +399,10 @@ export function useTrade(slabAddress: string) {
         // surface as a price-disagreement message instead, which is a worse
         // diagnosis for the same underlying misconfiguration.
         //
-        // Only guards the DERIVED limit. An explicit `limitPriceE6` is the user's
-        // own number and passes through untouched.
+        // Only guards the limit derived here. An explicit `limitPriceE6` is not checked:
+        // a caller that derives one from the feed checks it itself (the order ticket does,
+        // when its confirm opens), the v17 close limit comes from the engine's price
+        // (lib/close-limit.ts) and must not be refused on a bad feed, and keepers pass 0n.
         if (params.limitPriceE6 === undefined) {
           const onChainRefE6 = resolveMarketPriceE6({
             ...mktConfig,

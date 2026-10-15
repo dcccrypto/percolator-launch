@@ -57,7 +57,8 @@ import { explorerTxUrl, getNetwork } from "@/lib/config";
 import { useUserAccount, useUserAccountScanPending } from "@/hooks/useUserAccount";
 import { OrderTicketClosePanel } from "@/components/trade/OrderTicketClosePanel";
 import { terminalPositionPnl } from "@/lib/position-pnl";
-import { computeLimitPriceE6 } from "@/lib/slippage";
+import { assertFeedAgreesWithChain, computeLimitPriceE6 } from "@/lib/slippage";
+import { resolveMarketPriceE6 } from "@/lib/oraclePrice";
 import { bindConfirmedLimitPrice } from "@/lib/confirmedTrade";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
@@ -2068,6 +2069,32 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             // where "read via getLivePriceSnapshot at submit" needs to mean
             // literally at this instant, not merely non-reactive.
             const freshPriceE6 = getLivePriceSnapshot(slabAddress).priceE6;
+            // GH#2525 at the point the feed becomes this order's limit: the worst fill below is
+            // derived from it and passed to trade()/fundAndTrade() as an explicit limit, which
+            // useTrade's own check skips. A chain price that can't be read means no check (as there).
+            // Demo markets have no chain to compare with.
+            if (!mockMode) {
+              let chainE6: bigint | null = null;
+              try {
+                const r = mktConfig ? resolveMarketPriceE6({ ...mktConfig, oracleModeByte: slabWrapperV17?.oracleMode }) : 0n;
+                chainE6 = r > 0n ? r : null;
+              } catch {
+                chainE6 = null;
+              }
+              try {
+                assertFeedAgreesWithChain({ feedE6: freshPriceE6 ?? 0n, onChainE6: chainE6 });
+              } catch (e) {
+                // The status slot shows an earlier refusal or lock ahead of humanError: clear them
+                // (as handleTrade does), or this click would show a stale reason and nothing else.
+                setRefusal(null);
+                setEngineLockError(null);
+                setResult(null);
+                setHumanError(e instanceof Error ? e.message : String(e));
+                refreshSlab(); // a stale chain read is the likeliest false refusal: the next click compares fresh
+                return; // nothing to review or sign
+              }
+            }
+            setHumanError(null); // a refusal banner from an earlier click must not sit under the modal
             let worstFillPriceE6 = 0n;
             try {
               worstFillPriceE6 = freshPriceE6 && freshPriceE6 > 0n ? computeLimitPriceE6({ markE6: freshPriceE6, size: signedSize }) : 0n;

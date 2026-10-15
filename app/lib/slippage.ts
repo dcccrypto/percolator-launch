@@ -143,8 +143,8 @@ export function assertFeedAgreesWithChain(args: {
   throw new SlippageError(
     `Price feed disagrees with the on-chain oracle by ${deviationBps} bps ` +
       `(limit is ${MAX_FEED_DEVIATION_BPS}). Refusing to derive a slippage limit ` +
-      `from it — the limit would not mean what the screen says. Wait for the feed ` +
-      `to reconverge, or set an explicit limit price.`,
+      `from it — the limit would not mean what the screen says. Wait a few seconds ` +
+      `for prices to catch up, then try again.`,
   );
 }
 
