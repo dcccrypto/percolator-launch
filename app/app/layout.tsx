@@ -2,7 +2,7 @@ import "@/lib/polyfills";
 import { AutoSignIn } from "@/components/wallet/AutoSignIn";
 import { ConnectionBar } from "@/components/layout/ConnectionBar";
 import type { Metadata } from "next";
-import { JetBrains_Mono, Outfit } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { Providers } from "./providers";
 import { Header } from "@/components/layout/Header";
@@ -27,8 +27,10 @@ import { CloudflareAnalytics } from "@/components/analytics/CloudflareAnalytics"
 // the 2 families actually painted on screen:
 //   JetBrains Mono  → --font-sans, --font-mono (the body/data font)
 //   Outfit          → --font-display (headings, OG image wordmark)
-const jetbrainsMono = JetBrains_Mono({ variable: "--font-jetbrains-mono", subsets: ["latin"], weight: ["400", "500", "600", "700"], display: "swap" });
-const outfit = Outfit({ variable: "--font-outfit", subsets: ["latin"], weight: ["400", "500", "600", "700"], display: "swap" });
+// Self-hosted (next/font/local), full glyph sets, one variable WOFF2 per family
+// (OFL; see app/fonts/OFL-*.txt). No build-time or runtime fetch of Google Fonts.
+const jetbrainsMono = localFont({ src: "./fonts/JetBrainsMono-VF.woff2", variable: "--font-jetbrains-mono", weight: "100 800", style: "normal", display: "swap" });
+const outfit = localFont({ src: "./fonts/Outfit-VF.woff2", variable: "--font-outfit", weight: "100 900", style: "normal", display: "swap" });
 
 // globals.css's font stacks still reference --font-geist-mono / --font-space-grotesk
 // as the (now-dropped) fallback link before the final generic keyword — alias them
