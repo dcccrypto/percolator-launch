@@ -95,6 +95,11 @@ vi.mock("@/hooks/useCreateMarket", async (orig) => ({
     create, reset: vi.fn(), restoreSlabKeypair: vi.fn(), retryKeeperRegistration: vi.fn(),
   }),
 }));
+vi.mock("@/lib/launch-recovery", async (orig) => ({
+  ...(await orig<object>()),
+  // The chain read of InitMarket's initial_margin_bps (null = unreadable); the pin logic itself is real.
+  readInitialMarginBps: vi.fn(async () => (globalThis as { __chainMargin?: number | null }).__chainMargin ?? null),
+}));
 vi.mock("@/components/create/RecoverSolBanner", () => ({
   RecoverSolBanner: (p: { onResume?: (slab: string, step: number) => void }) => (
     <button data-testid="resume-btn" onClick={() => p.onResume?.((globalThis as { __slab?: string }).__slab ?? "", (globalThis as { __fromStep?: number }).__fromStep ?? 2)}>RESUME</button>
@@ -150,7 +155,7 @@ const seedLaunch = (o: { payload?: boolean; request?: boolean } = {}) => {
   if (o.payload !== false) {
     localStorage.setItem(`perc.keeperPayload.${SLAB}`, JSON.stringify({
       slab_address: SLAB, deployer: SystemProgram.programId.toBase58(), symbol: "PINNED", name: "pinned token", dex_pool_address: PIN_POOL,
-      mainnet_ca: PIN_CA, initial_price_e6: "123456", max_leverage: 5, trading_fee_bps: 77, lp_collateral: "1500000000",
+      mainnet_ca: PIN_CA, initial_price_e6: "123456", max_leverage: 6.5, trading_fee_bps: 77, lp_collateral: "1500000000",
     }));
   }
   if (o.request !== false) {
@@ -166,7 +171,7 @@ describe("same-browser resume pins the launch's parameters (#3377)", () => {
     fetchLog.length = 0; gateResolve = deferred(); gateDex = deferred();
     g0.__lamports = 100e9; createState = IDLE;
     const g = globalThis as { __slab?: string; __fromStep?: number; __noWallet?: boolean };
-    g.__slab = SLAB; g.__fromStep = 2; g.__noWallet = false;
+    g.__slab = SLAB; g.__fromStep = 2; (globalThis as { __chainMargin?: number | null }).__chainMargin = 1538; g.__noWallet = false;
     (window.matchMedia as unknown as ReturnType<typeof vi.fn>).mockImplementation((q: string) => ({
       matches: q.includes("reduce"), media: q, addListener() {}, removeListener() {},
       addEventListener() {}, removeEventListener() {}, dispatchEvent: () => false, onchange: null,
@@ -178,13 +183,14 @@ describe("same-browser resume pins the launch's parameters (#3377)", () => {
     await launchOnce();
     await act(async () => { fireEvent.click(screen.getByTestId("resume-btn")); });
     await flush();
+    await flush();
     await act(async () => { fireEvent.mouseDown(launchBtn()); });
     await flush();
     expect(create).toHaveBeenCalledTimes(1);
     const p = lastParams();
     expect(create.mock.calls[0][1]).toBe(2);
     expect(p).toMatchObject({
-      initialPriceE6: 123456n, tradingFeeBps: 77, lpCollateral: 1_500_000_000n, dexPoolAddress: PIN_POOL, dexType: "raydium-clmm",
+      initialPriceE6: 123456n, initialMarginBps: 1538, tradingFeeBps: 77, lpCollateral: 1_500_000_000n, dexPoolAddress: PIN_POOL, dexType: "raydium-clmm",
       symbol: "PINNED", name: "pinned token", mainnetCA: PIN_CA, oracleMode: "keeper",
     });
   });
@@ -196,6 +202,7 @@ describe("same-browser resume pins the launch's parameters (#3377)", () => {
     render(<CreateMarketWizard />);
     // Resume BEFORE detection lands; detection then resolves under the resumed wizard.
     await act(async () => { fireEvent.click(screen.getByTestId("resume-btn")); });
+    await flush();
     fireEvent.change(screen.getByPlaceholderText("Paste mint address..."), { target: { value: MINT } });
     await act(async () => { await new Promise((r) => setTimeout(r, 450)); });
     g.__gateMeta.release(); await flush();
@@ -213,6 +220,7 @@ describe("same-browser resume pins the launch's parameters (#3377)", () => {
     seedLaunch();
     const { rerender } = await launchOnce();
     await act(async () => { fireEvent.click(screen.getByTestId("resume-btn")); });
+    await flush();
     await act(async () => { fireEvent.mouseDown(launchBtn()); });
     await flush();
     createState = { ...IDLE, step: 2, error: "Transaction failed", slabAddress: SLAB };
@@ -225,6 +233,19 @@ describe("same-browser resume pins the launch's parameters (#3377)", () => {
 
   it("FAIL SAFE: no proof payload on this browser -> refuses with a one-line message, signs nothing", async () => {
     seedLaunch({ payload: false });
+    await launchOnce();
+    await act(async () => { fireEvent.click(screen.getByTestId("resume-btn")); });
+    await flush();
+    await flush();
+    await act(async () => { fireEvent.mouseDown(launchBtn()); });
+    await flush();
+    expect(create).not.toHaveBeenCalled();
+    expect(document.body.textContent).toMatch(/can't be resumed safely from here/);
+  });
+
+  it("FAIL SAFE: an unreadable on-chain margin refuses and signs nothing", async () => {
+    seedLaunch();
+    (globalThis as { __chainMargin?: number | null }).__chainMargin = null;
     await launchOnce();
     await act(async () => { fireEvent.click(screen.getByTestId("resume-btn")); });
     await flush();
@@ -252,6 +273,7 @@ describe("same-browser resume pins the launch's parameters (#3377)", () => {
     (globalThis as { __fromStep?: number }).__fromStep = 0;
     await launchOnce();
     await act(async () => { fireEvent.click(screen.getByTestId("resume-btn")); });
+    await flush();
     await act(async () => { fireEvent.mouseDown(launchBtn()); });
     await flush();
     expect(create).toHaveBeenCalledTimes(1);
