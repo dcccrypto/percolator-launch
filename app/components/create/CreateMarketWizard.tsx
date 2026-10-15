@@ -45,7 +45,7 @@ import { RecoverSolBanner } from "./RecoverSolBanner";
 // W8 fix: share ONE SOL-cost formula with CostEstimate.tsx's own display so the
 // launch gate and the number shown to the user can never drift apart — see that
 // file's computeCreateMarketSolCost doc comment.
-import { computeCreateMarketSolCost } from "./CostEstimate";
+import { computeCreateMarketSolCost, remainingCreateMarketSolCost } from "./CostEstimate";
 import { isValidBase58Pubkey } from "@/lib/createWizardUtils";
 import { isMockMode } from "@/lib/mock-mode";
 import { lowestLeverageTrackablePriceUsd } from "@/lib/launch-price-floor";
@@ -487,12 +487,13 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
     () => computeCreateMarketSolCost({ p3: p3WizardEnabled() }),
     [],
   );
-  // Resuming a stuck launch from the recovery banner: its slab account (the bulk of the cost)
-  // already exists, so only the remaining steps' SOL is required. Still a real check: with too
-  // little SOL a resume could land the LP step (past the reclaim window) and stall after it.
+  // Resuming a stuck launch: only the steps still to run need SOL (the slab is about a sixth of the
+  // total, not the bulk; the LP accounts are the largest part once step 2 has landed). Still a
+  // real check: with too little SOL a resume could land the LP step (past the reclaim window) and
+  // stall after it.
   const requiredSol =
     resumeFromStep !== null
-      ? solCostBreakdown.totalSolCost - solCostBreakdown.slabRentSol
+      ? remainingCreateMarketSolCost(solCostBreakdown, resumeFromStep, { p3: p3WizardEnabled() })
       : solCostBreakdown.totalSolCost;
   const hasSufficientSol = solBalance !== null && solBalance >= requiredSol;
   const isDevnet = getNetwork() === "devnet";

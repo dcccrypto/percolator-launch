@@ -60,6 +60,24 @@ export interface CreateMarketSolCostBreakdown {
 }
 
 /**
+ * SOL a resumed launch still needs, starting at create()'s `startStep` (the steps before it have
+ * landed; useCreateMarket.ts skips them). Only the rent of a step that has certainly run comes
+ * off: the slab (step 0, it exists on any resume), the LP portfolio + matcher context (step 2,
+ * legacy launches; P3 creates its LP accounts elsewhere) and the Earn vault + stake pool (steps
+ * 4-5, once both ran). Token accounts and the fee headroom stay in: the check stays conservative.
+ */
+export function remainingCreateMarketSolCost(
+  cost: CreateMarketSolCostBreakdown,
+  startStep: number,
+  opts: { p3?: boolean } = {},
+): number {
+  let remaining = cost.totalSolCost - cost.slabRentSol;
+  if (startStep > 2 && opts.p3 !== true) remaining -= cost.lpPortfolioMatcherRentSol;
+  if (startStep > 5) remaining -= cost.earnVaultStakeRentSol;
+  return remaining;
+}
+
+/**
  * W8 fix: single source of truth for the market-creation SOL cost estimate,
  * shared by this component's own display AND CreateMarketWizard's launch-gate
  * check (`requiredSol`) — see that file's BUG W8 comment. Keeping one formula
