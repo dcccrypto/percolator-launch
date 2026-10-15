@@ -86,7 +86,9 @@ export function computeMarginHealthPct(
   // 0: below that the position is already past liquidation.
   const equity = cap + pnl;
   if (equity <= 0n) return 0;
-  return Number((equity * 1_000_000n * 100n) / notionalE6);
+  // To a tenth of a point, floored (never rounds a risk figure up): the surfaces print it with one
+  // decimal, and whole-percent bigint division showed every value as "NN.0%".
+  return Number((equity * 1_000_000n * 1_000n) / notionalE6) / 10;
 }
 
 /**

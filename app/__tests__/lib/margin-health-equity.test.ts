@@ -29,10 +29,10 @@ function view(capital: bigint, size: bigint, entry: bigint, mark: bigint) {
 describe("computeMarginHealthPct counts unrealized PnL", () => {
   it("adds the PnL to capital", () => {
     // $50 capital, 1 unit, mark $60, loss $40: equity $10 of $60.
-    expect(computeMarginHealthPct(50n * E6, 1n * E6, 60n * E6, -40n * E6)).toBe(16);
+    expect(computeMarginHealthPct(50n * E6, 1n * E6, 60n * E6, -40n * E6)).toBe(16.6);
   });
   it("without PnL it is capital alone, as before", () => {
-    expect(computeMarginHealthPct(50n * E6, 1n * E6, 60n * E6)).toBe(83);
+    expect(computeMarginHealthPct(50n * E6, 1n * E6, 60n * E6)).toBe(83.3);
   });
   it("negative equity floors at 0", () => {
     expect(computeMarginHealthPct(10n * E6, 1n * E6, 60n * E6, -40n * E6)).toBe(0);
@@ -43,12 +43,12 @@ describe("describeLiqPrice health agrees with the liquidation price", () => {
   it("losing long: a real liq price, and health shows the loss (was 83%)", () => {
     const d = view(50n * E6, 1n * E6, 100n * E6, 60n * E6);
     expect(d.kind).toBe("price");
-    expect(d.marginHealthPct).toBe(16);
+    expect(d.marginHealthPct).toBe(16.6);
   });
 
   it("losing short (was 35%)", () => {
     const d = view(50n * E6, -1n * E6, 100n * E6, 140n * E6);
-    expect(d.marginHealthPct).toBe(7);
+    expect(d.marginHealthPct).toBe(7.1);
   });
 
   it("covered winner reads past the 100% line, not under it (was 66% mgn)", () => {
@@ -84,7 +84,7 @@ describe("describeLiqPrice health agrees with the liquidation price", () => {
       liqPriceE6: 0n, positionSize: 1n * E6, capital: 50n * E6, entryPriceE6: 100n * E6, effectiveSize: null,
       markPriceE6: 60n * E6, maintenanceMarginBps: MM, hasResolvedEntry: false,
     });
-    expect(d.marginHealthPct).toBe(83);
+    expect(d.marginHealthPct).toBe(83.3);
   });
 });
 
@@ -100,5 +100,29 @@ describe("covered tooltip under ADL", () => {
     expect(d.marginHealthPct).toBe(60);
     expect(d.title).not.toContain("past the");
     expect(d.title).toContain("ADL-reduced");
+  });
+});
+
+describe("one decimal (S8)", () => {
+  it("is computed to a tenth, floored, so the surfaces' one-decimal display is real", () => {
+    // $2 of $3 notional: 66.66…% -> 66.6 (it was a whole-percent 66, shown as "66.0%")
+    expect(computeMarginHealthPct(2n * E6, 3n * E6, 1n * E6)).toBe(66.6);
+    // just under the line stays under it: 99.99…% -> 99.9, never rounded up to 100
+    expect(computeMarginHealthPct(999_999n, 1n * E6, 1n * E6)).toBe(99.9);
+    expect(computeMarginHealthPct(1n * E6, 1n * E6, 1n * E6)).toBe(100);
+  });
+});
+
+describe("the '% mgn' cell is floored (S8 review)", () => {
+  it("a deleveraged covered leg just under 100% reads 99%, not 100%", () => {
+    // Liq price solved on the reduced size (0.5) is clamped; health over the nominal 1 is 99.9.
+    const d = describeLiqPrice({
+      liqPriceE6: computeEngineLiqPrice(1n * E6, 999_000n, 500_000n, MM),
+      positionSize: 1n * E6, capital: 999_000n, entryPriceE6: 1n * E6, effectiveSize: 500_000n,
+      markPriceE6: 1n * E6, maintenanceMarginBps: MM, hasResolvedEntry: true,
+    });
+    expect(d.kind).toBe("covered");
+    expect(d.marginHealthPct).toBe(99.9);
+    expect(d.text).toBe("99% mgn");
   });
 });

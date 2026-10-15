@@ -144,7 +144,9 @@ export function describeLiqPrice(input: LiqPriceDisplayInput): LiqPriceDisplay {
 
   return {
     kind: "covered",
-    text: `${marginHealthPct.toFixed(0)}% mgn`,
+    // Floored, not rounded: under ADL a covered leg can sit just under 100 (see the title), and
+    // 99.5 must not read "100% mgn".
+    text: `${Math.floor(marginHealthPct)}% mgn`,
     // Under ADL the price is solved on the reduced size while health divides by the
     // nominal one, so a covered leg can read under the line: do not claim it is past it.
     title:
