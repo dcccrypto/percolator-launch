@@ -32,7 +32,14 @@ function fakeProvider(page: Partial<BarsPage> = {}) {
   return { provider, calls, subs };
 }
 
-const flush = () => new Promise((r) => setTimeout(r, 5));
+// Let the provider's promise chain settle first (the adapter schedules its setTimeout(0)
+// callback from inside a .then), then wait past that timer. A bare 5ms timer started
+// before those microtasks ran could fire first when a GC pause or a loaded suite stalled
+// them, and the test read onResult before the adapter had called it.
+const flush = async () => {
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setTimeout(r, 5));
+};
 const symbolInfo = (): TvSymbolInfo => toSymbolInfo({ slab: SLAB, symbol: "SOL", description: "d", referencePrice: 150, hasVolume: true });
 
 describe("tv datafeed adapter", () => {
