@@ -1055,8 +1055,13 @@ function MarketsPageInner() {
                       // scrollbar doesn't jump. Ignored gracefully where unsupported.
                       style={{ contentVisibility: "auto", containIntrinsicSize: "auto 56px" }}
                       className={[
-                        "flex flex-col md:grid w-full md:min-w-[700px] md:grid-cols-[minmax(160px,3fr)_minmax(90px,1.2fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(65px,0.8fr)_minmax(80px,0.9fr)] gap-2 sm:gap-4 md:items-center px-3 sm:px-5 py-3 transition-all duration-200 hover:bg-[var(--accent)]/[0.06] border-l-2 border-l-transparent hover:border-l-[var(--accent)]/40",
-                        i > 0 ? "border-t border-[var(--border)]" : "",
+                        "flex flex-col md:grid w-full md:min-w-[700px] md:grid-cols-[minmax(160px,3fr)_minmax(90px,1.2fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(65px,0.8fr)_minmax(80px,0.9fr)] gap-2 sm:gap-4 md:items-center px-3 sm:px-5 py-3 transition-colors duration-200 hover:bg-[var(--accent)]/[0.06] border-l-2 border-l-transparent hover:border-l-[var(--accent)]/40",
+                        // Top-border colour on every row, width only past the first: with the colour tied
+                        // to i > 0, a re-sort moving a row into or out of first place dropped it to Tailwind
+                        // v4's default (currentColor) and transition-all faded a white line in under the header.
+                        // transition-colors (hover only changes colours) also keeps the width from animating.
+                        "border-t-[color:var(--border)]",
+                        i > 0 ? "border-t" : "",
                         i % 2 === 1 ? "bg-[var(--bg-elevated)]/[0.05]" : "",
                       ].join(" ")}
                     >
