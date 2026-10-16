@@ -1820,7 +1820,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             valueClass={
               afterLiqDisplay.kind !== "price"
                 ? "text-[var(--text-secondary)]"
-                : direction === "long" ? "text-[var(--short)]" : "text-[var(--long)]"
+                // The side of the position the order leaves, not of the order: a sell that only
+                // reduces a long still leaves a long, whose liquidation is a fall.
+                : combinedSignedSize > 0n ? "text-[var(--short)]" : "text-[var(--long)]"
             }
             tooltip={`Estimated liquidation price if this order fills at the estimated entry.${afterLiqDisplay.title ? ` ${afterLiqDisplay.title}` : ""}`}
           />
