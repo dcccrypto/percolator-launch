@@ -45,9 +45,16 @@ export const ConnectButton: FC = () => {
 
 const noopSubscribe = () => () => {};
 
+/** The wallets the fallback picker always offers: connect when present, install link when not. */
+const SUPPORTED_WALLETS = [
+  { name: "Phantom", installUrl: "https://phantom.com/download" },
+  { name: "Solflare", installUrl: "https://solflare.com/download" },
+  { name: "Backpack", installUrl: "https://backpack.app/download" },
+] as const;
+
 /**
- * Pages are server-rendered, but which wallets this browser has (and so whether the button reads
- * "Connect Solflare", "Connect Wallet" or "Install Phantom") is only known in the browser, and the
+ * Pages are server-rendered, but which wallets this browser has (and whether a remembered one
+ * auto-connects, so the button shows an address) is only known in the browser, and the
  * server pass has no wallet-adapter provider at all. So the server pass and the hydration pass both
  * render an invisible placeholder of the button's size, and the real one takes over right after
  * hydration (useSyncExternalStore: server snapshot false, client snapshot true, no mismatch).
@@ -61,8 +68,8 @@ const ConnectButtonAdapterGate: FC = () => {
 /**
  * Wallet-adapter backed connect button (no Privy).
  * Detects installed Wallet Standard extensions (Phantom, Solflare, Backpack, etc.)
- * and presents a minimal selection dropdown. Degrades gracefully to an
- * "Install Phantom" link when no extension is detected.
+ * and presents a minimal selection dropdown, with install links for the supported
+ * wallets this browser does not have.
  */
 const ConnectButtonAdapterInner: FC = () => {
   const { wallets, wallet, select, connect, disconnect, connected, publicKey, connecting } =
@@ -182,34 +189,13 @@ const ConnectButtonAdapterInner: FC = () => {
     );
   }
 
-  // Not connected — show wallet picker if extensions are available
-  if (readyWallets.length === 0) {
-    return (
-      <a
-        href="https://phantom.app"
-        target="_blank"
-        rel="noreferrer"
-        className="min-h-10 inline-flex items-center rounded-sm border border-[var(--accent)] bg-[var(--accent)]/20 px-4 text-[13px] font-medium text-[var(--text)] transition-all hover:bg-[var(--accent)]/30"
-      >
-        Install Phantom
-      </a>
-    );
-  }
-
-  if (readyWallets.length === 1) {
-    return (
-      <button
-        onClick={() => void handleConnect(readyWallets[0].adapter.name)}
-        data-testid="wallet-connect"
-        data-state="disconnected"
-        className="min-h-10 rounded-sm border border-[var(--accent)] bg-[var(--accent)]/20 px-4 text-[13px] font-medium text-[var(--text)] transition-all hover:bg-[var(--accent)]/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
-      >
-        Connect {readyWallets[0].adapter.name}
-      </button>
-    );
-  }
-
-  // Multiple wallets available — picker dropdown
+  // Not connected: always the picker. With no extension the only ready wallet is the
+  // always-Loadable Solflare adapter, and a lone "Connect Solflare" button left Phantom and
+  // Backpack unreachable (v2.2 QA 2026-10-16). Supported wallets missing from this browser are
+  // listed as install links.
+  const missingWallets = SUPPORTED_WALLETS.filter(
+    (s) => !readyWallets.some((w) => w.adapter.name === s.name),
+  );
   return (
     <div className="relative" ref={menuRef}>
       <button
@@ -234,6 +220,21 @@ const ConnectButtonAdapterInner: FC = () => {
               ) : null}
               {w.adapter.name}
             </button>
+          ))}
+          {readyWallets.length > 0 && missingWallets.length > 0 ? (
+            <div className="my-1 h-px bg-[var(--border)]" />
+          ) : null}
+          {missingWallets.map((s) => (
+            <a
+              key={s.name}
+              href={s.installUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={() => setMenuOpen(false)}
+              className="block w-full rounded-sm px-3 py-2 text-left text-[13px] text-[var(--text-muted)] transition-colors hover:bg-[var(--accent)]/[0.06]"
+            >
+              Install {s.name}
+            </a>
           ))}
         </div>
       )}

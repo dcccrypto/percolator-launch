@@ -3,9 +3,9 @@
  * and the header's lazily-loaded button): the disconnected button's box, invisible, so the real
  * button appears in place on hydration with no layout shift.
  *
- * Invisible rather than a visible "Connect Wallet": the real label depends on the browser's wallets
- * ("Connect Solflare" with no extension, "Connect Wallet" with several, the address once a remembered
- * wallet auto-connects), so any visible guess would visibly change on hydration for someone.
+ * Invisible rather than a visible "Connect Wallet": the real label depends on the browser
+ * ("Connect Wallet", or the address once a remembered wallet auto-connects), so any visible
+ * guess would visibly change on hydration for someone.
  */
 export function ConnectButtonPlaceholder() {
   return (
