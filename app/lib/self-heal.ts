@@ -440,7 +440,10 @@ export async function planSelfHeal(params: SelfHealParams, deps: SelfHealDeps): 
     const beyondCap = catchUp?.beyondCap === true;
     if (repairs.length === 0 && cranks === 0) return unchanged("no-repair-needed", { catchUpBeyondCap: beyondCap });
 
-    const prefixOrig = computeBudgetPrefix(params.computeUnits);
+    // The verdict on the ORIGINAL tx runs at the maximum: its own limit can be sendTx's 200k default while the caller sizes
+    // the real limit from a later simulation (every v2.2 trade needs 380k+), and an out-of-compute answer here read as
+    // "not-repairable", so the repair / catch-up crank the trade needed was never added (browser E2E 2026-10-16).
+    const prefixOrig = computeBudgetPrefix(MAX_TX_CU);
     const origList = [...prefixOrig, ...params.instructions];
     const orig = await deps.simulate(origList);
     if (!orig.err) return unchanged("user-tx-ok");
