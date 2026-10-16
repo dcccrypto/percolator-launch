@@ -1,5 +1,6 @@
 "use client";
 
+import { stakePoolsUrl } from "@/lib/stake-pools-url";
 import { STAKE_COPY, cooldownDuration } from "@/lib/stake-copy";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { useStakeCooldown } from "@/hooks/useStakeCooldown";
@@ -1574,7 +1575,7 @@ export default function StakePage() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/stake/pools");
+        const res = await fetch(stakePoolsUrl(poolsRefreshKey));
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json() as { pools: ApiPool[] };
         if (!cancelled) {
