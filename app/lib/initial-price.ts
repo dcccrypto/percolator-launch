@@ -141,18 +141,23 @@ export function minTrackablePriceE6(maxPriceMoveBpsPerSlot: number): bigint {
  * Apply the trackable floor to a resolved price. Pass the
  * `maxPriceMoveBpsPerSlot` the market will actually be created with (it
  * depends on the chosen leverage), so the floor matches what InitMarket sets.
+ * `lotExp` (devnet v2.2): the market prices a LOT of 10^lotExp tokens, so the
+ * mark that must move is the per-lot price; the floor is checked on that. The
+ * result stays per token (`minPrice` too), as the wizard shows it.
  */
 export function withTrackableFloor(
   resolved: InitialPriceE6,
   maxPriceMoveBpsPerSlot: number,
+  lotExp = 0,
 ): InitialPriceE6 {
   if (!resolved.ok) return resolved;
   const min = minTrackablePriceE6(maxPriceMoveBpsPerSlot);
-  if (resolved.e6 >= min) return resolved;
+  const lot = 10n ** BigInt(Math.max(0, Math.floor(lotExp)));
+  if (resolved.e6 * lot >= min) return resolved;
   return {
     ok: false,
     reason: "below-trackable",
     price: Number(resolved.e6) / 1_000_000,
-    minPrice: Number(min) / 1_000_000,
+    minPrice: Number(min) / Number(lot) / 1_000_000,
   };
 }

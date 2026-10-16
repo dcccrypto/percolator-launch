@@ -43,6 +43,8 @@ import { defaultGrowthLaunch, growthTierX100, validateGrowthLaunch, type GrowthL
 import { EMPTY_TIER_EDIT, collateralDecimalsIssue, isUsdLikeCollateral, validateTierEdit } from "@/lib/v22/tier-config";
 import { V22LaunchOptions, type V22OptionsState } from "./V22LaunchOptions";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { lotMarketsEnabled } from "@/lib/v22/lot";
+import { lotExpForTokenPriceV22 } from "@/lib/v22/sdk/v22-math";
 import { planLaunchV22, toLaunchParams } from "@/lib/v22/launch-plan";
 import { ResumeFromChainCard } from "./ResumeFromChainCard";
 import { ChainResumeNotice } from "./ChainResumeNotice";
@@ -557,6 +559,18 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
 
   // Build oracle feed for create — also used below to gate launch on a real price
   // being available (no on-chain InitMarket call should ever ship a priceE6 of 0).
+  // Devnet v2.2: a market for a token under $10 prices a LOT of 10^k tokens (the same k planLaunchV22 picks below, from
+  // the raw per-token price), and InitMarket gets the per-lot price, so the trackable floor applies per lot. Without
+  // this, a sub-$0.0025 token was zeroed here before the plan ever saw it, and could not be launched at all.
+  const rawTokenPriceE6 = (() => {
+    if (wizard.oracleType === "pyth") return 0n;
+    const r = toInitialPriceE6(wizard.oracleType === "hyperp_ema" ? (wizard.dexPool?.priceUsd != null ? String(wizard.dexPool.priceUsd) : null) : wizard.adminPrice);
+    return r.ok ? r.e6 : 0n;
+  })();
+  const floorLotExp =
+    isDevnetV22Enabled() && growthLaunch && (wizard.oracleType === "keeper" || wizard.oracleType === "admin") && lotMarketsEnabled()
+      ? (lotExpForTokenPriceV22(rawTokenPriceE6) ?? 0)
+      : 0;
   const getOracleFeedAndPrice = (): { oracleFeed: string; priceE6: bigint } => {
     if (wizard.oracleType === "pyth") {
       return { oracleFeed: wizard.oracleFeed, priceE6: 0n };
@@ -573,6 +587,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
       const resolvedHyperp = withTrackableFloor(
         toInitialPriceE6(dexPrice != null ? String(dexPrice) : null),
         launchPriceMoveBps,
+        floorLotExp,
       );
       return {
         oracleFeed: "0".repeat(64),
@@ -589,7 +604,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
     // InvalidAccountData. A $1 fallback here also silently DEFEATED the
     // oraclePriceValid gate below (1 -> 1e6 is non-zero), so the launch was
     // never actually blocked. Missing or unparseable price => 0n => blocked.
-    const resolved = withTrackableFloor(toInitialPriceE6(wizard.adminPrice), launchPriceMoveBps);
+    const resolved = withTrackableFloor(toInitialPriceE6(wizard.adminPrice), launchPriceMoveBps, floorLotExp);
     return { oracleFeed: "0".repeat(64), priceE6: resolved.ok ? resolved.e6 : 0n };
   };
 
@@ -613,6 +628,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
               : wizard.adminPrice,
           ),
           launchPriceMoveBps,
+          floorLotExp,
         );
   const priceBelowMinimum =
     priceProblem != null && !priceProblem.ok && priceProblem.reason === "below-minimum"

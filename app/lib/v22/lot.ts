@@ -11,6 +11,7 @@
  * a market without lots is untouched).
  */
 import { isDevnetV22Enabled } from "./flag";
+import { allLotSurfacesCovered } from "./lot-coverage";
 // The two source modules, not the ./sdk barrel: this file is on the landing page and every market
 // surface, and the barrel pulls the whole v2.2 port (slab decoders, stake, spl-token) in with it.
 import {
@@ -27,17 +28,19 @@ import { displayPriceV22 } from "./sdk/v22-math";
 export const POS_SCALE_V22 = 1_000_000n;
 
 let lotMarketsOverride: boolean | null = null;
-/**
- * Whether the wizard may CREATE a lot market (token under $10). It stays false until every trade surface converts
- * through this module (see __tests__/lib/v22/lot-surfaces.test.ts, one test per surface). Test seam only.
- */
+/** Test seam only. */
 export function __setLotMarketsEnabledForTest(v: boolean | null): void {
   lotMarketsOverride = v;
 }
+/**
+ * Whether the wizard may CREATE a lot market (token under $10): exactly when every registered trade surface converts
+ * through this module (lib/v22/lot-coverage.ts, one test per surface). It was a hard-coded `false` that nobody flipped
+ * after QA L-1 (2026-10-11) attested the last surfaces, so a sub-$10 token could not be launched at all (browser E2E
+ * 2026-10-16, mint 8PzFWyLp…pump). Un-attesting any surface closes the wizard again.
+ */
 export function lotMarketsEnabled(): boolean {
-  return lotMarketsOverride ?? LOT_MARKETS_ENABLED;
+  return lotMarketsOverride ?? allLotSurfacesCovered();
 }
-export const LOT_MARKETS_ENABLED = false;
 
 /** The market's lot exponent for asset `assetIndex` (SDK `lotExpOfMarketV22`); 0 when flag off / not a v2.2 market / unreadable. */
 export function lotExpOf(raw: Uint8Array | null | undefined, assetIndex = 0): number {
