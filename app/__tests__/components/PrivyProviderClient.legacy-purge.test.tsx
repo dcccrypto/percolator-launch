@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { render, waitFor } from "@testing-library/react";
 
 // Records what localStorage looked like the moment PrivyProvider first renders
 // (the SDK's earliest possible storage read).
@@ -19,6 +19,7 @@ vi.mock("@privy-io/react-auth", () => ({
 }));
 vi.mock("@privy-io/react-auth/solana", () => ({
   toSolanaWalletConnectors: () => [],
+  useFundWallet: () => ({ fundWallet: vi.fn() }),
   useWallets: () => ({ wallets: [] }),
   useSignTransaction: () => ({ signTransaction: vi.fn() }),
   useSignAndSendTransaction: () => ({ signAndSendTransaction: vi.fn() }),
@@ -29,8 +30,9 @@ describe("PrivyProviderClient boot purge", () => {
   it("legacy tokens are gone before PrivyProvider renders", async () => {
     localStorage.setItem("privy:token", JSON.stringify("tok"));
     localStorage.setItem("privy:refresh_token", JSON.stringify("legacy-real-token"));
-    const { default: PrivyProviderClient } = await import("@/components/providers/PrivyProviderClient");
-    render(<PrivyProviderClient appId="test-app">{null}</PrivyProviderClient>);
+    const { PrivyBridgeHost } = await import("@/components/providers/PrivyBridgeHost");
+    render(<PrivyBridgeHost appId="test-app">{null}</PrivyBridgeHost>);
+    await waitFor(() => expect(seen.refreshAtProviderRender).not.toBe("unset"));
     expect(seen.refreshAtProviderRender).toBeNull();
     expect(localStorage.getItem("privy:token")).toBeNull();
   });

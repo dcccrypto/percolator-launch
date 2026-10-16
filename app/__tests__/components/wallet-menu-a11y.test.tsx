@@ -19,6 +19,8 @@ vi.mock("@/hooks/usePrivySafe", () => ({ usePrivyAvailable: () => flags.privy, u
 vi.mock("@/hooks/useWalletAdapterAvailable", () => ({ useWalletAdapterAvailable: () => true }));
 vi.mock("@privy-io/react-auth", () => ({
   useLogin: () => ({ login: vi.fn() }),
+  useConnectWallet: () => ({ connectWallet: vi.fn() }),
+  useIdentityToken: () => ({ identityToken: null }),
   usePrivy: () => ({ ready: true, authenticated: true, user: { linkedAccounts: [] }, logout: vi.fn(), exportWallet: vi.fn() }),
 }));
 vi.mock("@privy-io/react-auth/solana", () => ({
@@ -39,9 +41,10 @@ vi.mock("@solana/wallet-adapter-react", () => ({
 
 import { ConnectButtonPrivyInner } from "@/components/wallet/ConnectButtonPrivyInner";
 import { ConnectButton } from "@/components/wallet/ConnectButton";
+import { PrivyStateProvider } from "../helpers/privyBridge";
 
 const menus = [
-  { name: "Privy menu", privy: true, ui: () => <ConnectButtonPrivyInner /> },
+  { name: "Privy menu", privy: true, ui: () => <PrivyStateProvider><ConnectButtonPrivyInner /></PrivyStateProvider> },
   { name: "wallet-adapter menu", privy: false, ui: () => <ConnectButton /> },
 ];
 

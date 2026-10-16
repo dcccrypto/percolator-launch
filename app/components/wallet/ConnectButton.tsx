@@ -5,33 +5,12 @@ import { useToast } from "@/hooks/useToast";
 import { useMenuDismiss } from "@/hooks/useMenuDismiss";
 import { copyAddress } from "@/lib/copy-address";
 import Link from "next/link";
-import dynamic from "next/dynamic";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletReadyState } from "@solana/wallet-adapter-base";
 import { usePrivyAvailable } from "@/hooks/usePrivySafe";
 import { useWalletAdapterAvailable } from "@/hooks/useWalletAdapterAvailable";
 import { ConnectButtonPlaceholder } from "./ConnectButtonPlaceholder";
-
-/**
- * Privy-backed button is loaded on demand — its @privy-io/react-auth import (and
- * the transitive WalletConnect/Coinbase/viem graph) is a separate async chunk,
- * fetched only when Privy is the active provider, never in the shared bundle.
- */
-const ConnectButtonPrivyInner = dynamic(
-  () => import("./ConnectButtonPrivyInner").then((m) => m.ConnectButtonPrivyInner),
-  {
-    ssr: false,
-    loading: () => (
-      <button
-        disabled
-        className="min-h-10 rounded-sm border border-[var(--border)] px-4 text-[13px] font-medium text-[var(--text-muted)] opacity-50"
-        aria-label="Loading wallet"
-      >
-        Connect
-      </button>
-    ),
-  },
-);
+import { ConnectButtonPrivyInner } from "./ConnectButtonPrivyInner";
 
 /**
  * Wallet connect button — backs Privy (primary) or wallet-adapter (fallback).

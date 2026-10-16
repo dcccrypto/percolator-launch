@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { Suspense, useEffect, useMemo, useCallback } from "react";
-import { useConnectWallet, usePrivy, type LinkedAccountWithMetadata } from "@privy-io/react-auth";
-import { useFundWallet, useWallets } from "@privy-io/react-auth/solana";
+import type { LinkedAccountWithMetadata } from "@privy-io/react-auth";
+import { usePrivyBridge } from "@/hooks/usePrivyBridge";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { GlowButton } from "@/components/ui/GlowButton";
@@ -52,18 +52,11 @@ export default function WalletPage() {
 }
 
 function WalletPageInner() {
-  const { ready, authenticated, logout, exportWallet, user } = usePrivy();
-  const { wallets } = useWallets();
-  const { fundWallet } = useFundWallet();
+  const { ready, authenticated, logout, exportWallet, user, wallets, fundWallet, connectWallet } = usePrivyBridge();
   const { preferredAddress, setPreferredAddress } = usePreferredWallet();
   const privyLogin = usePrivyLogin();
 
-  const { connectWallet } = useConnectWallet({
-    onSuccess: ({ wallet }) => {
-      // A wallet explicitly added by the user becomes the active signer.
-      setPreferredAddress(wallet.address);
-    },
-  });
+  // connectWallet (from the bridge): a wallet explicitly added by the user becomes the active signer.
 
   const network = useMemo(() => getConfig().network, []);
 

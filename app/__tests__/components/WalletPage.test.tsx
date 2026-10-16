@@ -55,6 +55,8 @@ vi.mock("@/hooks/usePrivySafe", () => ({
 }));
 
 vi.mock("@privy-io/react-auth", () => ({
+  useIdentityToken: () => ({ identityToken: null }),
+  useLogin: () => ({ login: vi.fn() }),
   usePrivy: () => privyState,
   // PR#2620 (GH#2618): WalletPageInner now also calls useConnectWallet() so
   // "Connect another wallet" can promote the newly connected wallet to active.
@@ -72,6 +74,7 @@ vi.mock("@/components/ui/ScrollReveal", () => ({
   ScrollReveal: ({ children }: any) => <div>{children}</div>,
 }));
 import WalletPage from "../../app/wallet/page";
+import { PrivyStateProvider } from "../helpers/privyBridge";
 
 describe("WalletPage", () => {
   beforeEach(() => {
@@ -84,7 +87,7 @@ describe("WalletPage", () => {
   });
 
   it("shows wallet actions when authenticated", () => {
-    render(<WalletPage />);
+    render(<WalletPage />, { wrapper: PrivyStateProvider });
     expect(screen.getAllByRole("button", { name: /Add funds/i }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: /Export key/i }).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /Disconnect/i })).toBeTruthy();
@@ -93,7 +96,7 @@ describe("WalletPage", () => {
   // "Open faucet" went to the Devnet Token Factory (/devnet-mint), which has no Sim-USDC claim; the
   // playground faucet that funds trading is /faucet.
   it("devnet: Open faucet goes to the Sim-USDC faucet, not the token factory", () => {
-    render(<WalletPage />);
+    render(<WalletPage />, { wrapper: PrivyStateProvider });
     // One link (GlowButton href), not a button inside a link (#64).
     const link = screen.getByRole("link", { name: /Open faucet/i });
     expect(link.getAttribute("href")).toBe("/faucet");
@@ -103,7 +106,7 @@ describe("WalletPage", () => {
 
   it("shows connect prompt when unauthenticated", () => {
     privyState = { ...privyState, authenticated: false };
-    render(<WalletPage />);
+    render(<WalletPage />, { wrapper: PrivyStateProvider });
     expect(screen.getByText(/Connect a wallet/i)).toBeTruthy();
     // #2663: the Privy-only branch advertises email sign-in (loginMethods
     // includes "email", createOnLogin "users-without-wallets").
@@ -112,7 +115,7 @@ describe("WalletPage", () => {
 
   it("shows read-only warning when Privy is unavailable", () => {
     privyAvailable = false;
-    render(<WalletPage />);
+    render(<WalletPage />, { wrapper: PrivyStateProvider });
     expect(screen.getByText(/Wallet features unavailable/i)).toBeTruthy();
   });
 });

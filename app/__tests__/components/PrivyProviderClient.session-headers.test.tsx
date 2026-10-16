@@ -3,7 +3,7 @@
  * Privy tree, so a server route that verifies the Privy session can be called with no wallet prompt.
  * Signed out => null (the caller then asks nothing and fails open).
  */
-import { render, waitFor } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { useEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -11,24 +11,26 @@ vi.mock("@sentry/nextjs", () => ({ captureException: vi.fn(), captureMessage: vi
 
 const h = vi.hoisted(() => ({
   privy: { ready: true, authenticated: true, getAccessToken: async () => "ACCESS" as string | null, user: null as unknown },
+  reads: 0,
   idToken: "IDTOK" as string | null,
 }));
 vi.mock("@privy-io/react-auth", () => ({
   PrivyProvider: ({ children }: any) => <>{children}</>,
-  usePrivy: () => h.privy,
+  usePrivy: () => { h.reads++; return h.privy; },
   useIdentityToken: () => ({ identityToken: h.idToken }),
   useLogin: () => ({ login: vi.fn() }),
   useConnectWallet: () => ({ connectWallet: vi.fn() }),
 }));
 vi.mock("@privy-io/react-auth/solana", () => ({
   toSolanaWalletConnectors: () => [],
+  useFundWallet: () => ({ fundWallet: vi.fn() }),
   useWallets: () => ({ ready: true, wallets: [] }),
   useSignTransaction: () => ({ signTransaction: vi.fn() }),
   useSignAndSendTransaction: () => ({ signAndSendTransaction: vi.fn() }),
   useSignMessage: () => ({ signMessage: vi.fn() }),
 }));
 
-import PrivyProviderClient from "@/components/providers/PrivyProviderClient";
+import { PrivyBridgeHost } from "@/components/providers/PrivyBridgeHost";
 import { usePrivySessionHeaders, type PrivySessionHeaders } from "@/hooks/usePrivySafe";
 
 function Probe({ out }: { out: { get?: PrivySessionHeaders | null } }) {
@@ -38,8 +40,11 @@ function Probe({ out }: { out: { get?: PrivySessionHeaders | null } }) {
 }
 const read = async () => {
   const out: { get?: PrivySessionHeaders | null } = {};
-  render(<PrivyProviderClient appId="test"><Probe out={out} /></PrivyProviderClient>);
+  render(<PrivyBridgeHost appId="test"><Probe out={out} /></PrivyBridgeHost>);
   await waitFor(() => expect(out.get).toBeTruthy());
+  // Privy mounts as a lazy sibling after hydration: wait until its state is published.
+  await waitFor(() => expect(h.reads).toBeGreaterThan(0));
+  await act(async () => {});
   return out.get!;
 };
 

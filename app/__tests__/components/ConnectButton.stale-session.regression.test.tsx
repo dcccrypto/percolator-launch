@@ -37,6 +37,8 @@ vi.mock("@/hooks/usePreferredWallet", async (importOriginal) => {
   };
 });
 vi.mock("@privy-io/react-auth", () => ({
+  useConnectWallet: () => ({ connectWallet: vi.fn() }),
+  useIdentityToken: () => ({ identityToken: null }),
   usePrivy: () => mockUsePrivy(),
   useLogin: () => ({ login: vi.fn() }),
 }));
@@ -45,7 +47,15 @@ vi.mock("@privy-io/react-auth/solana", () => ({
   useFundWallet: () => ({ fundWallet: vi.fn() }),
 }));
 
-import { ConnectButtonPrivyInner } from "@/components/wallet/ConnectButtonPrivyInner";
+import { ConnectButtonPrivyInner as PrivyInnerBase } from "@/components/wallet/ConnectButtonPrivyInner";
+import { PrivyStateProvider } from "../helpers/privyBridge";
+
+// Privy reaches the button through the bridge (the real bridge hook over the mocked SDK above).
+const ConnectButtonPrivyInner = () => (
+  <PrivyStateProvider>
+    <PrivyInnerBase />
+  </PrivyStateProvider>
+);
 import { PrivyLoginContext } from "@/hooks/usePrivySafe";
 import {
   RECONNECT_GRACE_MS,
