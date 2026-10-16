@@ -29,7 +29,6 @@ const DEVNET_ITEMS = [
   "fully on-chain.",
   "no governance. no gatekeepers.",
   "insurance fund on every market.",
-  "burn the admin key.",
   "deploy in 60 seconds.",
 ];
 
@@ -42,7 +41,6 @@ const MAINNET_ITEMS = [
   `up to ${MAX_LEVERAGE_X}x leverage.`,
   "any SPL token.",
   "don't trust, verify.",
-  "burn the admin key.",
   "trade anything. permissionlessly.",
 ];
 
