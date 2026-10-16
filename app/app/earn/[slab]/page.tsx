@@ -384,7 +384,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
             <StatCell label="Insurance" loading={loading}>
               <span className="text-sm font-mono tabular-nums text-[var(--text)]">
                 {/* Unknown until marketInfo resolves, like the cells beside it: not $0. */}
-                {marketInfo ? `$${formatCompact(marketInfo.insuranceFund / collDivisor)}` : "—"}
+                {marketInfo && marketInfo.insuranceFund != null ? `$${formatCompact(marketInfo.insuranceFund / collDivisor)}` : "—"}
               </span>
             </StatCell>
             <StatCell label="Max Leverage" loading={loading}>

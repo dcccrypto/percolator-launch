@@ -98,7 +98,8 @@ export function EarnHeader({ stats, loading }: EarnHeaderProps) {
             label="Insurance Fund"
             loading={loading}
           >
-            <span className={FIGURE}>{usd(stats.totalInsurance)}</span>
+            {/* Unknown for every market (no stats rows): a dash, not $0. */}
+            <span className={FIGURE}>{stats.totalInsurance == null ? "—" : usd(stats.totalInsurance)}</span>
           </StatCell>
         </div>
       </div>
