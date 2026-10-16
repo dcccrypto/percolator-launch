@@ -7,7 +7,6 @@ Operational scripts for Percolator Launch — market management, keeper ops, E2E
 ### Market Operations
 | Script | Purpose |
 |--------|---------|
-| `create-market.ts` | Create a new perp market on-chain |
 | `market-bootstrap.ts` | Bootstrap market metadata to Supabase |
 | `new-sol-market.ts` | Create SOL-specific market with defaults |
 | `discover-markets.ts` | Discover on-chain markets and sync to DB |
@@ -35,8 +34,6 @@ Operational scripts for Percolator Launch — market management, keeper ops, E2E
 ### Market Making
 | Script | Purpose |
 |--------|---------|
-| `floating-maker.ts` | Floating-price market maker |
-| `mm-fleet.ts` | Multi-market MM fleet manager |
 | `mm-profiles.ts` | MM configuration profiles |
 | `deploy-devnet-mm.ts` | Deploy devnet market makers |
 | `fund-mm-bots.ts` | Fund MM bot wallets |

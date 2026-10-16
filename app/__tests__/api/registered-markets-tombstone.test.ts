@@ -15,6 +15,7 @@ const h = vi.hoisted(() => ({
   LOOKALIKE: "HvCDVSx5gStg1WAxBAaXwpouLyTvAHCyBPHJHh3RfVJg",
   replies: new Map<string, unknown>(),
   rpcFails: false,
+  readOk: true,
 }));
 
 vi.mock("@/lib/config", () => ({ getConfig: () => ({ network: "devnet", programId: h.WRAPPER }) }));
@@ -26,7 +27,7 @@ vi.mock("@/lib/supabase", () => ({
   },
 }));
 vi.mock("@/lib/playground-registered-markets", () => ({
-  readRegisteredMarkets: async () =>
+  readRegisteredMarketsChecked: async () => ({ ok: h.readOk, markets:
     [h.CLOSED, h.LIVE, h.LOOKALIKE].map((slabAddress) => ({
       slabAddress,
       marketAddress: slabAddress,
@@ -37,7 +38,7 @@ vi.mock("@/lib/playground-registered-markets", () => ({
       mainnetCA: null,
       collateral: "11111111111111111111111111111111",
       registeredAt: 1,
-    })),
+    })) }),
 }));
 vi.mock("@/lib/server-rpc", () => ({
   getServerConnection: () => ({
@@ -58,6 +59,7 @@ const slabs = async () =>
 
 beforeEach(() => {
   h.rpcFails = false;
+  h.readOk = true;
   h.replies = new Map<string, unknown>([
     [h.CLOSED, info(TOMB, h.WRAPPER)],
     [h.LIVE, info(LIVE_SLICE, h.WRAPPER)],
@@ -78,5 +80,20 @@ describe("registered-markets hides CloseSlab tombstones (real readSlabExistence)
   it("NEGATIVE CONTROL: an RPC error hides nothing", async () => {
     h.rpcFails = true;
     expect(await slabs()).toEqual([h.CLOSED, h.LIVE, h.LOOKALIKE]);
+  });
+});
+
+describe("registered-markets says when the store read failed", () => {
+  it("a failed read still answers 200 with what it has, flagged complete: false", async () => {
+    h.readOk = false;
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { complete?: boolean; markets: unknown[] };
+    expect(body.complete).toBe(false);
+    expect(body.markets.length).toBeGreaterThan(0);
+  });
+
+  it("CONTROL: a good read carries no complete field", async () => {
+    expect(await (await GET()).json()).not.toHaveProperty("complete");
   });
 });

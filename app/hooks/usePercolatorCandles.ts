@@ -1,5 +1,6 @@
 "use client";
 
+import { v22HasNoIndexer } from "@/lib/v22/indexer";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { boundedSet } from "@/lib/bounded-map";
 import { CHART_WINDOWS, type ChartTimeframe } from "@/lib/chart-window";
@@ -89,7 +90,8 @@ const QUANTIZE_SEC = 10;
 // single transient 500 or network blip permanently disabled the tier-0 candle
 // source for the entire session — and because this hook has no poll, nothing
 // ever retried it.
-let endpointUnavailable = false;
+// v2.2 preview: no indexer, so the route is known-unavailable from the start (no 404 round trip; lib/v22/indexer.ts).
+let endpointUnavailable = v22HasNoIndexer();
 
 /**
  * Internal-trade OHLCV for a Percolator slab. Loads historical bars from
@@ -152,9 +154,13 @@ export function usePercolatorCandles(
       return;
     }
 
-    const { resolution, lookbackSec } = RESOLUTION_MAP[tf];
+    const { resolution, lookbackSec, bucketSec } = RESOLUTION_MAP[tf];
     const nowSec = Math.floor(Date.now() / 1000);
-    const to = Math.floor(nowSec / QUANTIZE_SEC) * QUANTIZE_SEC;
+    // Bucket-aligned (review E3): the server answers whole buckets through the bucket of `to`, so
+    // the window still reaches now, and the URL repeats across viewers for a whole bucket (it used
+    // to change every QUANTIZE_SEC).
+    const step = Math.max(bucketSec, QUANTIZE_SEC);
+    const to = Math.floor(nowSec / step) * step;
     const from = to - lookbackSec;
 
     try {

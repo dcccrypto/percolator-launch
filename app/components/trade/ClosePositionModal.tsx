@@ -18,12 +18,24 @@ interface ClosePositionModalProps {
   collateralSymbol?: string;
   decimals: number;
   priceUsd: number | null;
+  /** v2.2 lot exponent (position in lots, prices per lot); omitted = no lots. */
+  lotExp?: number;
   isLong: boolean;
   loading: boolean;
   /** B-3: Trading fee basis points — subtracted from Est. Account Balance After so the preview matches on-chain. */
   tradingFeeBps?: bigint;
   /** GH#1842: Block submission when oracle price is stale or unavailable */
   oracleStale?: boolean;
+  /** Price older than 60 s but the chain would accept the close — note only, never blocks. */
+  oraclePriceBehind?: boolean;
+  /** Seconds since the last price push (note text). */
+  priceAgeSecs?: number;
+  /** The stored mark the chain settles at; the preview uses it when the price is behind. */
+  settleMarkE6?: bigint | null;
+  /** Engine lag (not the oracle): blocks the close with its own "Catching up" note. */
+  engineCatchingUp?: boolean;
+  /** Estimated catch-up wait (ms) for the "Catching up" note; absent = "usually a few minutes". */
+  catchUpMs?: number | null;
   /** PERC-2312: Surfaced close-tx failure (from useClosePosition's `error`). */
   error?: string | null;
   /** The market's per-fill cap (matcherCaps.maxFillAbs), when known. */
@@ -58,10 +70,16 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   collateralSymbol,
   decimals,
   priceUsd,
+  lotExp = 0,
   isLong,
   loading,
   tradingFeeBps,
   oracleStale = false,
+  oraclePriceBehind = false,
+  priceAgeSecs = 0,
+  settleMarkE6 = null,
+  engineCatchingUp = false,
+  catchUpMs = null,
   error = null,
   maxFillAbs = null,
   previewUnavailable = false,
@@ -76,6 +94,10 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   // Ref-based callback to prevent WS price ticks from replaying the GSAP animation
   const onCancelRef = useRef(onCancel);
   onCancelRef.current = onCancel;
+  // Mid-close the modal stays open: dismissing it unmounted the /portfolio flow and lost the
+  // result (an error had nowhere to show). Cancel is already disabled while loading.
+  const loadingRef = useRef(loading);
+  loadingRef.current = loading;
 
   // BUG 22 fix: mark a dialog as open on a body-level counter for the whole
   // time this modal is mounted — see the matching comment in
@@ -112,7 +134,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        onCancelRef.current();
+        if (!loadingRef.current) onCancelRef.current();
         return;
       }
       if (e.key === "Tab") {
@@ -135,14 +157,14 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   }, [prefersReduced]);
 
   const handleOverlayClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) onCancel();
+    if (e.target === e.currentTarget && !loading) onCancel();
   };
 
   const content = (
     <div
       ref={overlayRef}
       onClick={handleOverlayClick}
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4"
+      className="fixed inset-0 z-[9999] flex justify-center overflow-y-auto overscroll-contain bg-black/80 p-4"
       style={{ opacity: 0 }}
     >
       <div
@@ -151,7 +173,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
         data-testid="close-modal"
         aria-modal="true"
         aria-labelledby="close-position-title"
-        className="relative w-full max-w-md rounded-none border border-[var(--border)] bg-[var(--bg)] p-6 shadow-2xl"
+        className="relative my-auto w-full max-w-md rounded-none border border-[var(--border)] bg-[var(--bg)] p-6 shadow-2xl"
         style={{ opacity: 0 }}
       >
         <ClosePositionForm
@@ -164,10 +186,16 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
           collateralSymbol={collateralSymbol}
           decimals={decimals}
           priceUsd={priceUsd}
+          lotExp={lotExp}
           isLong={isLong}
           loading={loading}
           tradingFeeBps={tradingFeeBps}
           oracleStale={oracleStale}
+          oraclePriceBehind={oraclePriceBehind}
+          priceAgeSecs={priceAgeSecs}
+          settleMarkE6={settleMarkE6}
+          engineCatchingUp={engineCatchingUp}
+          catchUpMs={catchUpMs}
           error={error}
           maxFillAbs={maxFillAbs}
           previewUnavailable={previewUnavailable}

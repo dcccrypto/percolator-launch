@@ -1,9 +1,7 @@
 import { Connection, PublicKey } from "@solana/web3.js";
-import {
-  getMarketsByAddress,
-  type DiscoveredMarket,
-  type GetMarketsByAddressOptions,
-} from "@percolatorct/sdk";
+import { type DiscoveredMarket, type GetMarketsByAddressOptions } from "@percolatorct/sdk";
+// VERSION-aware (18 + 19) with the v2.2 flag on, the installed SDK function otherwise.
+import { getMarketsByAddress } from "@/lib/v22/discovery";
 
 interface ApiMarketEntry {
   slab_address?: unknown;
@@ -31,26 +29,53 @@ function dedupePublicKeys(addresses: PublicKey[]): PublicKey[] {
   return unique;
 }
 
+type AccountInfos = Awaited<ReturnType<Connection["getMultipleAccountsInfo"]>>;
+type AccountInfoEntry = AccountInfos[number];
+
+/**
+ * The program-owned subset of `addresses`, plus every account read on the way (by base58), so the
+ * caller can parse the same bytes instead of fetching each account a second time.
+ */
 async function getOwnedAddresses(
   connection: Connection,
   programId: PublicKey,
   addresses: PublicKey[],
-): Promise<PublicKey[]> {
+): Promise<{ owned: PublicKey[]; infos: Map<string, AccountInfoEntry> }> {
   const owned: PublicKey[] = [];
+  const infos = new Map<string, AccountInfoEntry>();
   const batchSize = 100;
-
   for (let offset = 0; offset < addresses.length; offset += batchSize) {
     const batch = addresses.slice(offset, offset + batchSize);
-    const infos = await connection.getMultipleAccountsInfo(batch);
+    const batchInfos = await connection.getMultipleAccountsInfo(batch);
     for (let i = 0; i < batch.length; i++) {
-      const info = infos[i];
+      const info = batchInfos[i];
+      infos.set(batch[i].toBase58(), info ?? null);
       if (info?.owner.equals(programId)) {
         owned.push(batch[i]);
       }
     }
   }
 
-  return owned;
+  return { owned, infos };
+}
+
+/**
+ * A Connection for getMarketsByAddress that answers `getMultipleAccountsInfo` from the reads the
+ * ownership pass just made. Without it every listed market was fetched twice per discovery, the two
+ * identical getMultipleAccounts batches ~1 s apart (measured on /markets, 2026-10-14). Any key that
+ * was not read falls through to the real connection; nothing else on the Connection is used there.
+ */
+function connectionServingReads(connection: Connection, infos: Map<string, AccountInfoEntry>): Connection {
+  const getMultipleAccountsInfo: Connection["getMultipleAccountsInfo"] = async (keys, commitmentOrConfig) => {
+    if (keys.every((k) => infos.has(k.toBase58()))) return keys.map((k) => infos.get(k.toBase58()) ?? null);
+    return connection.getMultipleAccountsInfo(keys, commitmentOrConfig);
+  };
+  return new Proxy(connection, {
+    get(target, prop, receiver) {
+      if (prop === "getMultipleAccountsInfo") return getMultipleAccountsInfo;
+      return Reflect.get(target, prop, receiver);
+    },
+  });
 }
 
 export async function discoverMarketsViaProgramDirectory(
@@ -99,8 +124,8 @@ export async function discoverMarketsViaProgramDirectory(
   );
   if (addresses.length === 0) return [];
 
-  const ownedAddresses = await getOwnedAddresses(connection, programId, addresses);
+  const { owned: ownedAddresses, infos } = await getOwnedAddresses(connection, programId, addresses);
   if (ownedAddresses.length === 0) return [];
 
-  return getMarketsByAddress(connection, programId, ownedAddresses, onChainOptions);
+  return getMarketsByAddress(connectionServingReads(connection, infos), programId, ownedAddresses, onChainOptions);
 }

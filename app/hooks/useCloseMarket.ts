@@ -1,5 +1,6 @@
 "use client";
 
+import { errorText } from "@/lib/error-text";
 import { useState, useCallback } from "react";
 import { PublicKey } from "@solana/web3.js";
 import type { TransactionInstruction } from "@solana/web3.js";
@@ -8,7 +9,6 @@ import {
   parseHeader,
   parseConfig,
   parseWrapperConfigV17,
-  isV17Account,
   V17_HEADER_LEN,
   encodeCloseSlab,
   ACCOUNTS_CLOSE_SLAB,
@@ -32,6 +32,7 @@ import { broadcastSignedTx, buildBatchTx, getFreshBlockhash, getPriorityFee, sig
 
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { plainMessage } from "@/lib/limits/user-message";
+import { isWrapperAccount } from "@/lib/v22/layout";
 /** Slab state after `sig`, read at (at least) the tx's slot so a cached pre-close read can't answer. */
 export async function readCloseSlabStateAfter(
   connection: { getSignatureStatuses: Connection["getSignatureStatuses"]; getAccountInfo: Connection["getAccountInfo"] },
@@ -114,7 +115,7 @@ export function useCloseMarket() {
         let slabAdmin: PublicKey;
         try {
           const data = new Uint8Array(accountInfo.data);
-          if (isV17Account(data)) {
+          if (isWrapperAccount(data)) {
             // v17: admin is in WrapperConfigV17.marketauth (at V17_HEADER_LEN offset)
             const cfg = parseWrapperConfigV17(data, V17_HEADER_LEN);
             slabAdmin = cfg.marketauth;
@@ -155,7 +156,7 @@ export function useCloseMarket() {
         const data = new Uint8Array(accountInfo.data);
         let vaultPubkey: PublicKey;
         let collateralMint: PublicKey;
-        if (isV17Account(data)) {
+        if (isWrapperAccount(data)) {
           // v17: vaultPubkey is derived (not stored), collateralMint from WrapperConfigV17
           const v17cfg = parseWrapperConfigV17(data, V17_HEADER_LEN);
           collateralMint = v17cfg.collateralMint;
@@ -178,7 +179,7 @@ export function useCloseMarket() {
         let resolveIx: ReturnType<typeof buildIx> | null = null;
         let preResolveCranks: TransactionInstruction[] = [];
         let cleanupGroups: TransactionInstruction[][] = [];
-        if (isV17Account(data)) {
+        if (isWrapperAccount(data)) {
           const plan = planCloseMarket(data);
           if (!plan.ok) {
             setError(
@@ -295,7 +296,7 @@ export function useCloseMarket() {
         setLoading(false);
         return { signature: sig, reclaimedLamports: reclaimableLamports };
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = errorText(err);
 
         // Parse common CloseSlab failures
         if (msg === COPY.closeRebooked) {

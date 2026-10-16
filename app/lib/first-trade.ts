@@ -15,11 +15,10 @@
  * nothing lands) and is rebuilt with the real id: the one 2-prompt case ("someone joined this
  * market at the same moment").
  */
-import { PublicKey as PublicKey, SystemProgram, type TransactionInstruction } from "@solana/web3.js";
+import { PublicKey as PublicKey, type TransactionInstruction } from "@solana/web3.js";
 import {
   ACCOUNTS_DEPOSIT_COLLATERAL,
   ACCOUNTS_INIT_USER,
-  V17_PORTFOLIO_ACCOUNT_LEN,
   WELL_KNOWN,
   buildAccountMetas,
   buildIx,
@@ -27,19 +26,26 @@ import {
   encodeInitUser,
 } from "@percolatorct/sdk";
 import { buildTradeCpiIx, type TradeIdentity } from "@/lib/trade-ix";
+import { rentSol } from "@/lib/rent";
+import { portfolioAccountLen } from "@/lib/v22/layout";
 import { assetWrapperOff } from "@/lib/limits/constants";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
+import { createPortfolioAccountIx } from "@/lib/v22/layout";
+import { marketOffsetsOrNull } from "@/lib/v22/market-offsets";
 
 /** offset_of!(AssetOracleProfileV16, next_portfolio_id); the profile opens the asset wrapper. */
 export const OP_NEXT_PORTFOLIO_ID = 480;
 
-/** Absolute offset of asset 0's next_portfolio_id in the market account. */
+/** Absolute offset of asset 0's next_portfolio_id in the v2.1 market account (v2.2: `marketOffsets(...).wrapperOff(0) + OP_NEXT_PORTFOLIO_ID`). */
 export const NEXT_PORTFOLIO_ID_OFF = assetWrapperOff(0) + OP_NEXT_PORTFOLIO_ID;
 
 /** The market's portfolio-id counter (u64 LE). null when the account is too short. */
 export function readNextPortfolioId(market: Uint8Array): bigint | null {
-  if (market.length < NEXT_PORTFOLIO_ID_OFF + 8) return null;
-  return new DataView(market.buffer, market.byteOffset, market.byteLength).getBigUint64(NEXT_PORTFOLIO_ID_OFF, true);
+  const M = marketOffsetsOrNull(market, "readNextPortfolioId");
+  if (!M) return null;
+  const off = M.wrapperOff(0) + OP_NEXT_PORTFOLIO_ID;
+  if (market.length < off + 8) return null;
+  return new DataView(market.buffer, market.byteOffset, market.byteLength).getBigUint64(off, true);
 }
 
 /** Port of `state::allocate_portfolio_id`: 0 (pre-counter sentinel) is normalised to 1. */
@@ -139,13 +145,40 @@ export class FirstTradeDepositError extends Error {
   }
 }
 
+/** SOL the first trade moves into the new portfolio account's rent (~0.049 SOL at 9,563 bytes; ~0.055 at v2.2's 10,603). */
+export const FIRST_TRADE_RENT_SOL = rentSol(portfolioAccountLen());
+const rentLabel = `~${FIRST_TRADE_RENT_SOL.toFixed(2)} SOL`;
+
 export const FIRST_TRADE_COPY = {
-  line: "First trade on this market sets up your trading account (one approval)",
+  line: `First trade on this market sets up your trading account (one approval, plus ${rentLabel} one-time account rent)`,
+  /** The confirm modal's row for that rent. */
+  rentRow: { label: "Account setup (one-time)", value: rentLabel },
   button: (amount: string, side: string) => `Deposit ${amount} & ${side}`,
   race: "One more approval: someone joined this market at the same moment.",
+  /** Multi-asset market: the positions are refreshed in their own transaction before the order (shown for a ticket trade too). */
+  twoTx: "This order refreshes positions first, so one approval may cover two transactions, or your wallet may ask twice.",
   /** GH#2959: the user turned the fund-and-trade down in the wallet. */
   cancelled: "Trade cancelled in your wallet.",
+  /** Devnet only: the usual reason a first trade gets turned down is a wallet still on Mainnet. Phantom
+   *  then simulates the devnet transaction against Mainnet, shows "insufficient SOL" and can flag the
+   *  site, so the user rejects it and nothing on our side can tell (no blockhash error reaches us). */
+  cancelledDevnetWhy:
+    "If your wallet said you don't have enough SOL, or warned about this site, it is probably still on Mainnet. In Phantom: Settings > Developer Settings > turn on Testnet Mode and pick Solana Devnet, then try again.",
 } as const;
+
+/** True only for the Phantom wallet (adapter name). The Mainnet-mode hint above is Phantom's setting, so it is never shown to Solflare etc. */
+export function isPhantomWalletName(name: string | null | undefined): boolean {
+  return typeof name === "string" && /phantom/i.test(name);
+}
+
+/**
+ * GH#2959 + RT5-2 (round f): the extra line for a fund-and-trade the user turned down. `why` (the Phantom Testnet-Mode
+ * hint) only for Phantom on devnet; a timeout is never a "cancelled" and has no hint (it never reaches here: kind
+ * "wallet-request-closed" is not quiet).
+ */
+export function firstTradeCancelledExtras(walletName: string | null | undefined, devnet: boolean): { body: string; why?: string } {
+  return { body: FIRST_TRADE_COPY.cancelled, ...(devnet && isPhantomWalletName(walletName) ? { why: FIRST_TRADE_COPY.cancelledDevnetWhy } : {}) };
+}
 
 // ── The instructions (shared by hooks/useFirstTrade.ts and the LiteSVM bridge) ──────────────
 
@@ -169,20 +202,29 @@ export interface FirstTradeIxParams {
 /** The first trade's set-up legs: [CreateAccount(portfolio, full length), InitPortfolio]. */
 export function buildFirstTradeInitIxs(p: Pick<FirstTradeIxParams, "programId" | "owner" | "market" | "portfolio">, rentLamports: number): TransactionInstruction[] {
   return [
-    SystemProgram.createAccount({ fromPubkey: p.owner, newAccountPubkey: p.portfolio, lamports: rentLamports, space: V17_PORTFOLIO_ACCOUNT_LEN, programId: p.programId }),
+    createPortfolioAccountIx(p.owner, p.portfolio, rentLamports, p.programId),
     buildIx({ programId: p.programId, keys: buildAccountMetas(ACCOUNTS_INIT_USER, [p.owner, p.market, p.portfolio]), data: encodeInitUser({}) }),
   ];
+}
+
+/** Deposit(id, sequence) into `portfolio`. For a fresh portfolio the id is the PREDICTED one and the
+ *  sequence is 0 (SOL-2: the standalone create-and-deposit uses exactly this leg). */
+export function buildFirstDepositIx(
+  p: Pick<FirstTradeIxParams, "programId" | "owner" | "market" | "portfolio" | "userAta" | "vaultTokenAta" | "depositAtoms">,
+  id: { portfolioId: bigint; sequence: bigint },
+): TransactionInstruction {
+  return buildIx({
+    programId: p.programId,
+    keys: buildAccountMetas(ACCOUNTS_DEPOSIT_COLLATERAL, [p.owner, p.market, p.portfolio, p.userAta, p.vaultTokenAta, WELL_KNOWN.tokenProgram]),
+    data: encodeDepositCollateral({ portfolioId: id.portfolioId, expectedSequence: id.sequence, amount: p.depositAtoms.toString() }),
+  });
 }
 
 /** [Deposit(id, sequence), TradeCpi(id, position epoch)] — for a fresh portfolio id is the
  *  PREDICTED one and sequence / epoch are 0. */
 export function buildFundAndTradeIxs(p: FirstTradeIxParams, id: { portfolioId: bigint; sequence: bigint; positionEpoch: bigint }): TransactionInstruction[] {
   return [
-    buildIx({
-      programId: p.programId,
-      keys: buildAccountMetas(ACCOUNTS_DEPOSIT_COLLATERAL, [p.owner, p.market, p.portfolio, p.userAta, p.vaultTokenAta, WELL_KNOWN.tokenProgram]),
-      data: encodeDepositCollateral({ portfolioId: id.portfolioId, expectedSequence: id.sequence, amount: p.depositAtoms.toString() }),
-    }),
+    buildFirstDepositIx(p, id),
     buildTradeCpiIx({
       programId: p.programId,
       signer: p.owner,

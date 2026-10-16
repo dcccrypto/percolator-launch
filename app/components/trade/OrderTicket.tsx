@@ -35,15 +35,17 @@
  * market order — nothing about that path changes here.
  */
 
+import { errorText } from "@/lib/error-text";
 import { FC, memo, useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { balanceKey, NO_BALANCE_KNOWN, resolveTokenBalance, type KnownBalance, type TokenRead } from "@/lib/token-balance";
 import { useWalletBalanceRefreshKey } from "@/lib/wallet-balance-invalidation";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { computeNotionalNative } from "@/lib/notional";
 import { availableLeverage as availableLeverageFor, nextLeverageInputState, clampSliderLeverage, LEVERAGE_STEP } from "@/lib/leverage-control";
-import { useTrade, prewarmTradeSubmission } from "@/hooks/useTrade";
+import { useTrade, prewarmTradeSubmission, resolveLpTradeAccounts } from "@/hooks/useTrade";
 import { useFirstTrade } from "@/hooks/useFirstTrade";
-import { FIRST_TRADE_COPY, FirstTradeDepositError, fundDepositAtoms, tradableMarginAtoms } from "@/lib/first-trade";
+import { FIRST_TRADE_COPY, FirstTradeDepositError, firstTradeCancelledExtras, fundDepositAtoms, tradableMarginAtoms } from "@/lib/first-trade";
 import { useMarketFillCap } from "@/hooks/useMarketFillCap";
 import { UNLIMITED_CAPACITY } from "@/lib/marketCapacity";
 import { isBlockedSlab } from "@/lib/blocklist";
@@ -51,7 +53,7 @@ import { humanizeError, isEngineLockError, withTransientRetry } from "@/lib/erro
 import { useSingleMarketHealth } from "@/hooks/useMarketHealth";
 import { safeExplainMarketTxError } from "@/lib/market-error";
 import { PublicKey } from "@solana/web3.js";
-import { diagnoseTradeRejection } from "@/lib/tradeRejectDiagnosis";
+import { diagnoseTradeRejection, isCustom9Error } from "@/lib/tradeRejectDiagnosis";
 import { explorerTxUrl, getNetwork } from "@/lib/config";
 import { useUserAccount, useUserAccountScanPending } from "@/hooks/useUserAccount";
 import { OrderTicketClosePanel } from "@/components/trade/OrderTicketClosePanel";
@@ -75,41 +77,69 @@ import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccountIdle } from "@/lib/mock-trade-data";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
-import { formatTokenAmount, formatUsdPriceE6, toE6, normalizeTokenDecimals } from "@/lib/format";
+import { formatTokenAmount, toE6, normalizeTokenDecimals } from "@/lib/format";
 import { describeLiqPrice, type LiqPriceDisplay } from "@/lib/liq-price-display";
 import { computeRiskLeverage, formatLeverageValue } from "@/lib/leverage-display";
-import { saveEntryPrice, getEntryPrice, clearEntryPrice } from "@/lib/entry-price";
+import { saveEntryPrice, getEntryPrice, clearEntryPrice, entryAfterTrade, getSavedEntry } from "@/lib/entry-price";
+import { takePositionChange, type PositionChange } from "@/lib/position-change";
+import { classifyOrderChange, orderResultBody } from "@/lib/order-result";
 import { isSentinelValue } from "@/lib/health";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
 import { useInitUser } from "@/hooks/useInitUser";
 import { AUTO_DEPOSIT_AMOUNT } from "@/hooks/useAutoDeposit";
 import { depositAmountMessage } from "@/lib/deposit-guard";
 import { useWalletNetworkGuard } from "@/hooks/useWalletNetworkGuard";
-import { isOracleStaleBlocking } from "@/lib/oracle-stale-gate";
+import { isOracleStaleBlocking, oracleAgeSecs, oracleCloseGate } from "@/lib/oracle-stale-gate";
 import { invalidatePortfolio } from "@/lib/portfolio-invalidation";
+import { checkSignatureLanded, timedOutSignature } from "@/lib/tx";
+import { watchPendingSignature } from "@/lib/pending-signature";
 import { FEE_LEGS, legPercent, splitFeeAtoms } from "@/lib/fee-breakdown";
 import { useMarketLimits } from "@/hooks/useMarketLimits";
 import { closeLimitNotice, deriveTicketLimits, feeFitSizeQ, sizeQToInput, type TicketLimitsInput } from "@/lib/limits/ticket";
 import { sameOwnerRoomQ } from "@/lib/limits/risk-limits";
-import { balanceMaxQ, deriveTicketState, maxInUnit, oneMaxQ, type TicketRow } from "@/lib/limits/ticket-state";
+import { balanceMaxQ, deriveTicketState, maxInUnit, oneMaxQ, sideRoomIsFull, type TicketRow } from "@/lib/limits/ticket-state";
 import { publishTicketRow } from "@/lib/limits/ticket-status-store";
-import { fmtQ } from "@/lib/limits/format";
+import { fmtQ as fmtQLots } from "@/lib/limits/format";
 import { takeFillResult } from "@/lib/limits/fill-check";
+import { feeRaiseCopy, takeFeeRaise } from "@/lib/v22/fee-raise-note";
+import { sizeWithLots } from "@/lib/v22/growth-room";
+import { clippedFillBody, readClippedFill } from "@/lib/v22/clipped-fill";
+import { isPortfolioClosable } from "@/lib/close-trading-account";
 import { defaultFeeCapMarginBps } from "@/lib/limits/fee-channel";
 import { OrderTicketLimits, reasonCopy } from "@/components/limits/OrderTicketLimits";
-import { GrowthTicketPanel } from "@/components/trade/GrowthTicketPanel";
+import { isUsdLikeCollateral } from "@/lib/v22/tier-config";
+import { GrowthTicketPanelLive } from "@/components/trade/GrowthTicketPanelLive";
 import { CloseOnlyBanner } from "@/components/trade/CloseOnlyBanner";
 import { isDevnetV21Enabled } from "@/lib/v21/flag";
 import { isMoveFlowEnabled } from "@/lib/v21/move/flag";
 import { isV1CloseOnly } from "@/lib/v21/move/ids";
 import { v1BlocksOrder } from "@/lib/v21/move/close-only";
 import { V1CloseOnlyBanner } from "@/components/move/V1CloseOnlyNotice";
+import { V21_REFRESHING_POSITIONS } from "@/lib/v21/loss-stale-retry";
 import { StatusLine } from "@/components/ui/StatusLine";
+import { V22_COPY } from "@/lib/v22/copy";
+import { parseHumanAmount } from "@/lib/parseAmount";
+import { recordCloseTx } from "@/lib/last-close-tx";
+import { LastCloseTxLink } from "@/components/trade/LastCloseTxLink";
+import { bandCatchUpMs, bandMinLeg, bandMinLegExactQ, legBelowBandMin } from "@/lib/v22/band-rent-state";
+import { POS_SCALE_V22, formatLotPriceE6, lotExpOf, lotOrderQ, tokenUsdOfLotUsd } from "@/lib/v22/lot";
+import { BandMarketNotice } from "@/components/v22/BandMarketNotice";
+import { OpenModeMarketNotes } from "@/components/v22/OpenModeMarketNotes";
+import { useBandRentView } from "@/hooks/useBandRentView";
+import { useLotTradingGuard } from "@/hooks/useLotTradingGuard";
 import { FixPricingAction } from "@/components/trade/FixPricingAction";
+import { waitPolicy } from "@/lib/limits/price-stall";
+import { CATCHUP_COPY, catchUpBudgetMs, catchUpEstimate, catchUpLine, measureSlotMs, retryOnceAfterShortLag, SLOT_MS_DEFAULT } from "@/lib/limits/catchup-estimate";
 import { resolveUserMessage, type UserMessage, type UserMessageAction } from "@/lib/limits/user-message";
 import { TICKET_COPY } from "@/lib/limits/copy";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
 import { isAdlReduceOnly } from "@/lib/limits/adl-reduce-only";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { FirstDepositCard } from "@/components/trade/FirstDepositCard";
+import { diagnoseV22TradeCustom9, positionCapBlocksOpen, positionCapCopy } from "@/lib/v22/trade-refusal-9";
+import { readMaxPortfolioAssets } from "@/lib/v22/market-cap";
+import { growthMaxLeverageForOrder } from "@/lib/v21/growth-market";
+import { getPortfolioRawSnapshot, makePortfolioScanKey } from "@/lib/userAccountScan";
 
 const SIZE_PRESETS = [25, 50, 75, 100];
 const MAX_DISPLAY_LEVERAGE = 200;
@@ -233,7 +263,8 @@ function DiffRow({
  * needed.
  */
 const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
-  const { connected: walletConnected, publicKey } = useWalletCompat();
+  const { connected: walletConnected, publicKey, wallet: connectedWallet } = useWalletCompat();
+  const walletAdapterName = (connectedWallet as { adapter?: { name?: string } } | null | undefined)?.adapter?.name ?? null;
   const { connection } = useConnectionCompat();
   const realUserAccount = useUserAccount();
   const mockMode = isMockMode() && isMockSlab(slabAddress);
@@ -251,6 +282,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const [fundInput, setFundInput] = useState("");
   /** UX WP-6: the portfolio-id race happened; the second prompt is labelled. */
   const [raceNote, setRaceNote] = useState(false);
+  // Multi-asset market: the order needs its refresh cranks as their own transaction first (two approvals possible).
+  const [twoTxNote, setTwoTxNote] = useState(false);
+  // Devnet v2.1: an order refused Custom(121) waits ~1-2 s and is sent again (lib/v21/loss-stale-retry.ts).
+  const [refreshingPositions, setRefreshingPositions] = useState(false);
   // The market's per-trade size ceiling (immutable, resolved once).
   const fillCaps = useMarketFillCap(slabAddress);
   const { engine, params, insuranceBalance: liveInsuranceBalance, totalOI: liveTotalOI, hasData: engineHasData } = useEngineState();
@@ -260,7 +295,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   // Non-reactive — see file-header comment. NOT `useLivePrice()`.
   const { priceUsd, priceE6: livePriceE6 } = getLivePriceSnapshot(slabAddress);
-  const { level: oracleLevel, mode: oracleMode, ready: oracleReady } = useOracleFreshness();
+  const { level: oracleLevel, mode: oracleMode, ready: oracleReady, elapsedSecs: oracleElapsed, lastUpdateMs: oracleLastMs, closeFacts } = useOracleFreshness();
   const oracleUnavailable = oracleLevel === "unavailable";
   // GH#2484: this was an inline ALLOWLIST of oracle modes, and it leaked twice —
   // first "keeper" (H7: a stale keeper-priced market never blocked trading,
@@ -268,6 +303,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // lib/oracle-stale-gate and blocks every recognised mode by default, so the
   // next mode added to the union cannot silently trade on a stale price.
   const oracleStale = !oracleUnavailable && isOracleStaleBlocking(oracleLevel, oracleMode, oracleReady);
+  // The Close tab is a reducing action: it blocks only when the chain would refuse
+  // (matured oracle / feed past its own max staleness / no price), not on the 60 s
+  // rule above, which stays for opening. See oracleCloseGate.
+  const closeGate = oracleCloseGate({ level: oracleLevel, mode: oracleMode, ready: oracleReady, facts: closeFacts });
   // H6: engine accrue-staleness — see useEngineFreshness's file header.
   const { engineStale } = useEngineFreshness();
   const openWalletModal = usePrivyLogin();
@@ -275,10 +314,27 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const adapterAvailable = useWalletAdapterAvailable();
   const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
   const collateralSymbol = sanitizeSymbol(tokenMeta?.symbol, mintAddress);
+  const bandView = useBandRentView();
+  // Round i: how long the price catch-up will take, from the market account (cap, effective, target); null without a gap source.
+  const [slotMs, setSlotMs] = useState(SLOT_MS_DEFAULT);
+  const catchUp = bandView?.band.enabled ? catchUpEstimate({ effectiveE6: bandView.price.markE6, targetE6: bandView.price.targetE6, capBpsPerSlot: bandView.price.capBpsPerSlot, slotMs }) : null;
+  const catchUpMsRef = useRef<number | null>(null);
+  catchUpMsRef.current = catchUp ? catchUp.ms : null;
+  // v2.2 (N2): a market with lots is not traded until every surface is lot-aware (null with the flag off).
+  const lotGuard = useLotTradingGuard(slabAddress);
+  // v2.2 lot markets (lib/v22/lot.ts): the mark, entry and every position q are PER LOT. The size box is in TOKENS, so
+  // typed sizes convert at the per-TOKEN price; Q is still derived from the per-lot mark below. lotExp 0 = identity.
+  const lotExp = lotExpOf(slabRaw);
+  const typedPrice = priceUsd ? tokenUsdOfLotUsd(priceUsd, lotExp) : priceUsd;
+  /** Sizes shown to the user are TOKENS: a Q in lots is scaled by 10^lotExp (identity without lots). */
+  const fmtQ = (q: bigint): string => fmtQLots(lotExp > 0 ? q * 10n ** BigInt(lotExp) : q);
 
   const [onChainDecimals, setOnChainDecimals] = useState<number | null>(null);
   const decimals = onChainDecimals ?? tokenMeta?.decimals ?? 6;
   const [walletAtaBalance, setWalletAtaBalance] = useState<bigint | null>(null);
+  // Last successful wallet-balance read, keyed by owner+mint (lib/token-balance.ts): a failed
+  // read keeps it instead of turning a funded wallet into "empty".
+  const knownWalletRef = useRef<KnownBalance>(NO_BALANCE_KNOWN);
 
   const riskThreshold = params?.riskReductionThreshold ?? 0n;
   const vaultBalance = engine?.vault ?? 0n;
@@ -320,7 +376,20 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // focus-visible outline invisible too, silently regressing keyboard a11y.
   const [leverageFocused, setLeverageFocused] = useState(false);
   const [lastSig, setLastSig] = useState<string | null>(null);
-  const [tradePhase, setTradePhase] = useState<"idle" | "submitting" | "waiting" | "confirming" | "error">("idle");
+  const [tradePhase, setTradePhase] = useState<"idle" | "submitting" | "waiting" | "confirming" | "pending" | "error">("idle");
+  // A trade whose confirmation timed out: its signature and what the watch found.
+  const [pendingTx, setPendingTx] = useState<{ sig: string; state: "watching" | "landed" | "dropped" | "undetermined" } | null>(null);
+  const pendingWatchRef = useRef<AbortController | null>(null);
+  // The market this ticket shows now, and whether it is still mounted: a trade that times out
+  // after a market switch or unmount must not start a watch on a ticket that isn't its own.
+  const liveSlabRef = useRef<string | null>(null);
+  useEffect(() => {
+    liveSlabRef.current = slabAddress;
+    return () => {
+      liveSlabRef.current = null;
+    };
+  }, [slabAddress]);
+  useEffect(() => () => pendingWatchRef.current?.abort(), []);
   const [humanError, setHumanError] = useState<string | null>(null);
   /** UX WP-1: a refusal the resolver mapped (simulation-gated: the wallet never opened). */
   const [refusal, setRefusal] = useState<UserMessage | null>(null);
@@ -335,6 +404,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     worstFillPriceE6: bigint;
     riskLeverage: number | null;
     depositAtoms: bigint;
+    createsAccount: boolean;
   } | null>(null);
   const [showInlineDeposit, setShowInlineDeposit] = useState(false);
   // A faucet claim changes none of the wallet-balance effect's other deps.
@@ -342,6 +412,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // Which tab the inline card opens on. Clicking the active trigger closes the
   // card; clicking the other trigger switches its tab in place.
   const [inlineDepositMode, setInlineDepositMode] = useState<"deposit" | "withdraw">("deposit");
+  // SOL-2 (v2.2): the new-account "+ Deposit" card (create account + deposit, no trade).
+  const [showFirstDeposit, setShowFirstDeposit] = useState(false);
   const toggleInlineDeposit = (target: "deposit" | "withdraw") => {
     if (showInlineDeposit && inlineDepositMode === target) {
       setShowInlineDeposit(false);
@@ -389,7 +461,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   /** WP-3 row 9: the size was just reduced to the max; the helper turns --warning for 4 s. */
   const [clampedToQ, setClampedToQ] = useState<bigint | null>(null);
   /** WP-3 result line (§3.3): full / partial / zero fill of the last order, in the status slot. */
-  const [result, setResult] = useState<{ kind: "full" | "partial" | "zero"; body: string; sig: string | null; tryQ: bigint | null } | null>(null);
+  const [feeRaiseNote, setFeeRaiseNote] = useState<{ sig: string | null; text: string } | null>(null);
+  const clippedSigsRef = useRef<Set<string>>(new Set());
+  const [result, setResult] = useState<{ kind: "full" | "partial" | "zero" | "sent"; body: string; sig: string | null; tryQ: bigint | null } | null>(null);
   /** WP-3: the wait loop passed ~30 s; "We'll keep trying" + Stop. */
   const [waitingLong, setWaitingLong] = useState(false);
   const waitAbortRef = useRef<AbortController | null>(null);
@@ -407,6 +481,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // back to a neutral "TOKEN" (never the collateral symbol — sizing is in
   // base units, and the collateral is sim-USDC on every playground market).
   const baseTicker = (marketInfo?.symbol ?? "").replace(/-PERP$/i, "").trim() || "TOKEN";
+  // The market's own cap on positions per account (config max_portfolio_assets); null = unread, then the copy drops the number.
+  const maxPositions = slabRaw ? readMaxPortfolioAssets(slabRaw) : null;
   const initialMarginBps = params?.initialMarginBps ?? 1000n;
   const maintenanceMarginBps = params?.maintenanceMarginBps ?? 500n;
   const tradingFeeBps = params?.tradingFeeBps ?? 30n;
@@ -530,19 +606,37 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       return;
     }
     let cancelled = false;
-    (async () => {
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    const mint = mktConfig.collateralMint;
+    const owner = publicKey;
+    const key = balanceKey(owner.toBase58(), mint.toBase58());
+    const ata = getAssociatedTokenAddressSync(mint, owner);
+    // A different wallet or mint: the previous token decimals do not apply until this account is read.
+    if (knownWalletRef.current.key !== key) setOnChainDecimals(null);
+    // A failed read is not a zero balance: keep the last known one for this wallet+mint and
+    // retry, instead of showing "Get Tokens to Trade" and Max 0 until something else re-runs
+    // this effect. A missing token account IS a real zero.
+    const RETRY_MS = [2_000, 5_000, 10_000];
+    const read = async (attempt: number) => {
+      let r: TokenRead;
       try {
-        const ata = getAssociatedTokenAddressSync(mktConfig.collateralMint, publicKey);
         const info = await connection.getTokenAccountBalance(ata);
-        if (!cancelled) {
-          if (info.value.decimals !== undefined) setOnChainDecimals(info.value.decimals);
-          if (info.value.amount) setWalletAtaBalance(BigInt(info.value.amount));
-        }
+        if (cancelled) return;
+        if (info.value.decimals !== undefined) setOnChainDecimals(info.value.decimals);
+        r = { ok: true, amount: BigInt(info.value.amount || "0") };
       } catch {
-        if (!cancelled) { setOnChainDecimals(null); setWalletAtaBalance(null); }
+        // getTokenAccountBalance throws for a missing account too; ask whether it exists.
+        const acct = await Promise.resolve().then(() => connection.getAccountInfo(ata)).catch(() => undefined);
+        if (cancelled) return;
+        r = acct === null ? { ok: true, absent: true } : { ok: false };
       }
-    })();
-    return () => { cancelled = true; };
+      const known = resolveTokenBalance(knownWalletRef.current, key, r);
+      knownWalletRef.current = known;
+      setWalletAtaBalance(known.amount);
+      if (!r.ok && attempt < RETRY_MS.length) retryTimer = setTimeout(() => void read(attempt + 1), RETRY_MS[attempt]);
+    };
+    void read(0);
+    return () => { cancelled = true; if (retryTimer) clearTimeout(retryTimer); };
     // BUG 10 fix: `capital` and `showInlineDeposit` are lastSig-style refresh
     // triggers (mirrors DepositWithdrawCard's own `lastSig` dependency on its
     // twin wallet-balance effect, DepositWithdrawCard.tsx:69) — without them this
@@ -570,6 +664,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setResult(null);
     setClampedToQ(null);
     setEngineLockError(null);
+    pendingWatchRef.current?.abort();
+    setPendingTx(null);
     setTradePhase("idle");
   }, [slabAddress]);
 
@@ -579,17 +675,17 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const recomputeFromSize = useCallback(
     (raw: string, unit: "token" | "usd", lev: number) => {
       const n = parseFloat(raw);
-      if (isNaN(n) || !priceUsd || priceUsd <= 0) {
+      if (isNaN(n) || !typedPrice || typedPrice <= 0) {
         setMarginInput("");
         return;
       }
-      const notionalUsd = unit === "token" ? n * priceUsd : n;
+      const notionalUsd = unit === "token" ? n * typedPrice : n;
       const marginAmt = notionalUsd / lev;
       // Truncate rather than round to prevent fractional float-overshoot
       // from generating a marginNative slightly larger than the user's actual balance.
       setMarginInput(truncateToDecimals(marginAmt, decimals));
     },
-    [priceUsd, decimals],
+    [typedPrice, decimals],
   );
 
   /** Set the size WITHOUT clearing the status slot (the ticket's own clamp). */
@@ -607,6 +703,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       setRefusal(null);
       setResult(null);
       setClampedToQ(null);
+      // A finished timeout outcome was about the old size; a running watch stays on screen.
+      setPendingTx((p) => (p?.state === "watching" ? p : null));
       applySize(val);
     },
     [applySize],
@@ -616,15 +714,15 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setSizeUnit((prev) => {
       const next = prev === "token" ? "usd" : "token";
       const n = parseFloat(sizeInput);
-      if (!isNaN(n) && priceUsd && priceUsd > 0) {
-        const converted = prev === "token" ? n * priceUsd : n / priceUsd;
+      if (!isNaN(n) && typedPrice && typedPrice > 0) {
+        const converted = prev === "token" ? n * typedPrice : n / typedPrice;
         const nextStr = truncateToDecimals(converted, next === "token" ? 6 : 2);
         setSizeInput(nextStr);
         recomputeFromSize(nextStr, next, leverage);
       }
       return next;
     });
-  }, [sizeInput, priceUsd, leverage, recomputeFromSize]);
+  }, [sizeInput, typedPrice, leverage, recomputeFromSize]);
 
   const updateLeverage = useCallback(
     (newLev: number) => {
@@ -661,12 +759,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       setMarginInput(marginStr);
       const marginNum = Number(marginAmount) / Math.pow(10, decimals);
       const notionalUsd = marginNum * leverage;
-      if (priceUsd && priceUsd > 0) {
-        const nextSize = sizeUnit === "token" ? notionalUsd / priceUsd : notionalUsd;
+      if (typedPrice && typedPrice > 0) {
+        const nextSize = sizeUnit === "token" ? notionalUsd / typedPrice : notionalUsd;
         setSizeInput(truncateToDecimals(nextSize, sizeUnit === "token" ? 6 : 2));
       }
     },
-    [tradableBalance, decimals, leverage, priceUsd, sizeUnit],
+    [tradableBalance, decimals, leverage, typedPrice, sizeUnit],
   );
 
   const marginNative = marginInput ? parsePercToNative(marginInput, decimals) : 0n;
@@ -675,7 +773,18 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // the fractional-safe fix, so it threw on any fractional leverage.
   const notionalNative = computeNotionalNative(marginNative, leverage);
   const rawPositionSize = livePriceE6 && livePriceE6 > 0n ? (notionalNative * 1_000_000n) / livePriceE6 : 0n;
-  const positionSize = rawPositionSize < 0n ? 0n : rawPositionSize;
+  // v2.2 lots: whole lots only (the typed token size rounds DOWN to a lot multiple; the remainder is shown, never sent).
+  let typedTokenQ: bigint | null = null;
+  if (lotExp > 0 && sizeUnit === "token" && sizeInput) {
+    try {
+      typedTokenQ = parseHumanAmount(sizeInput, 6);
+    } catch {
+      typedTokenQ = null; // an unparsable typed size keeps the margin-derived Q
+    }
+  }
+  const lotQuantised = lotOrderQ(rawPositionSize, typedTokenQ, lotExp);
+  const positionSize = lotQuantised.q;
+  const lotRemainderQ = lotQuantised.remainderQ;
   // GH#2953: the engine's initial margin is max(notional x IM bps, min_nonzero_im_req) (engine
   // v16.rs:23050 margin_requirement), so a NEW position needs at least the market's floor ($2 on
   // the wizard markets) however small it is: a $1 first trade deposited $1.11 and was refused
@@ -696,6 +805,19 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const needsWallet = !connected;
   const needsAccount = connected && !userAccount && !accountPending;
   const needsDeposit = connected && !!userAccount && capital === 0n;
+  // v2.2 QA (ANSEM / swordcat / CHILLHOUSE): a flat winner with capital 0 and released profit ("profit settling") had no
+  // way to reach the Withdraw card, because the Deposit/Withdraw toggles were hidden for capital 0. The Withdraw card
+  // converts the profit (tag 28) and withdraws it in one transaction, or says it is held.
+  const claimableProfit = connected && !accountPending && !!userAccount && capital === 0n && existingPositionSize === 0n && safeExistingPnl > 0n;
+  // #3458 (QA retest 7): "Close trading account" lives in the Withdraw card, which a capital-0 flat account could not reach
+  // (no toggle) - so the control never rendered at 0 balance. An empty, closable account (same test the row applies) gets an entry.
+  const closableEmptyAccount = (() => {
+    if (!connected || accountPending || !userAccount?.pubkey || !publicKey || !slabProgramId) return false;
+    if (capital !== 0n || existingPositionSize !== 0n || safeExistingPnl !== 0n) return false;
+    const scanned = getPortfolioRawSnapshot(makePortfolioScanKey(slabProgramId, slabAddress, publicKey));
+    return !!scanned && scanned.pubkey.equals(userAccount.pubkey) && isPortfolioClosable(scanned.portfolio, publicKey).closable;
+  })();
+  const withdrawEntryAtZero = claimableProfit || closableEmptyAccount;
   const walletHasTokens = (walletAtaBalance ?? 0n) > 0n;
   // UX WP-6 (§3.2): with sim-USDC in the wallet, "fund and trade" is ONE approval — no account
   // yet: [InitUser] + [Deposit, Trade] signed together; account short of margin: [Deposit, Trade].
@@ -787,7 +909,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     hasResolvedEntry:
       combinedEntryPriceE6 > 0n &&
       (existingPositionSize === 0n || existingEntryKnown || (!sameDirection && positionSize >= existingAbsSize)),
-    formatPrice: formatUsdPriceE6,
+    formatPrice: (e6: bigint) => formatLotPriceE6(e6, lotExp),
     unknownText: "—",
   });
   const beforeLiqDisplay = describeLiqPrice({
@@ -797,7 +919,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     markPriceE6: livePriceE6 ?? 0n,
     maintenanceMarginBps,
     hasResolvedEntry: existingEntryKnown,
-    formatPrice: formatUsdPriceE6,
+    formatPrice: (e6: bigint) => formatLotPriceE6(e6, lotExp),
     unknownText: "—",
   });
   // BUG 9 fix + copy clarity: opening a position RESERVES margin from
@@ -805,16 +927,20 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // "Margin req." but actually showed capital -> capital-minus-margin (a
   // balance readout), so the actual requirement never appeared as a number
   // and the label lied about the row. The receipt now shows BOTH, on the
-  // same "available" basis as the account strip above (capital minus margin
-  // already locked by an open position) so the two readouts can't disagree:
+  // same "available" basis as the account strip above (displayAvailable: free
+  // in-market margin plus the wallet, #57), so its before-value matches the strip:
   //   Margin            — what THIS order reserves (the requirement)
   //   Available to trade — before -> after reserving it
-  const beforeAvailable = availableBalance;
-  const afterAvailable = vsPosition
-    ? vsPosition.afterAvailable
-    : beforeAvailable > marginNative
-      ? beforeAvailable - marginNative
-      : 0n;
+  // The order only changes the in-market part (a deposit moves wallet money in, it
+  // doesn't add any), so after = before + the in-market change, unclamped until the end.
+  // The after-value is an estimate: it takes the order's margin at the chosen leverage
+  // (the engine locks notional x IM) and leaves out the fee.
+  const inMarketAfter = vsPosition
+    ? vsPosition.afterAvailable - vsPosition.shortBy
+    : availableBalance - marginNative;
+  const beforeAvailable = displayAvailable;
+  const afterUnclamped = displayAvailable - availableBalance + inMarketAfter;
+  const afterAvailable = afterUnclamped > 0n ? afterUnclamped : 0n;
   // Slippage: distance between the mark and the worst acceptable fill
   // (same computeLimitPriceE6 useTrade itself uses to derive the on-chain
   // limit when the caller doesn't supply one explicitly).
@@ -840,6 +966,20 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     markE6: livePriceE6 ?? undefined,
     feeMarginBps,
     growth: marketLimits.growth ?? null,
+    // The deployed wrapper's growth gate compares the account's conservative equity with the post-fill requirement (Custom 92). Known only
+    // for an existing account that bundles no deposit sized to this order (then the slider check stays).
+    takerEquity:
+      marketLimits.growth && userAccount && !fundingMode
+        ? capital +
+          (safeExistingPnl < 0n ? safeExistingPnl : 0n) +
+          (!isSentinelValue(userAccount.account.feeCredits) && userAccount.account.feeCredits < 0n ? userAccount.account.feeCredits : 0n)
+        : null,
+    minLegQ: bandMinLegExactQ(bandView),
+    sizeStepQ: lotExp > 0 ? POS_SCALE_V22 : 100n,
+    format: {
+      size: (q: bigint) => sizeWithLots(q, { lotExp, ticker: baseTicker }),
+      collateral: (atoms: bigint) => `${formatTokenAmount(atoms, decimals, 2)} ${collateralSymbol}`,
+    },
   };
   const ticketLimits = deriveTicketLimits(limitsInput);
   // P1 99165722 (F-7): a close that GROWS a halted / capped LP is refused or clipped too.
@@ -858,21 +998,25 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     // real position (useMarketFillCap.sideRoomQ / lib/limits/lp-inventory-room.ts).
     !mockMode && fillCaps != null && typeof fillCaps.sideRoomQ === "function" ? fillCaps.sideRoomQ(side) : null;
   const marketMaxQFor = (side: "long" | "short") =>
-    oneMaxQ([ticketLimits.sideLimits?.[side]?.maxQ, fillCapQ, legacySideCapQ(side)]);
+    oneMaxQ([ticketLimits.sideLimits?.[side]?.maxQ, fillCapQ, legacySideCapQ(side), side === direction ? ticketLimits.growthCapQ : null]);
   const marketMaxQ = marketMaxQFor(direction);
+  // A sub-cent room is full too: it can't be expressed as an order ("Max $0.00"), and clamping
+  // to it rewrote the size to "0.00" on every keystroke instead of saying the side is paused.
   const sidePaused = {
-    long: ticketLimits.halted.long || legacySideCapQ("long") === 0n,
-    short: ticketLimits.halted.short || legacySideCapQ("short") === 0n,
+    long: ticketLimits.halted.long || sideRoomIsFull(legacySideCapQ("long"), livePriceE6),
+    short: ticketLimits.halted.short || sideRoomIsFull(legacySideCapQ("short"), livePriceE6),
   };
   // The Max the trader sees (and the Max chip fills): the market's cap or what the balance can
   // margin at this leverage, whichever is smaller, in the input's unit.
   const displayMaxQ = oneMaxQ([marketMaxQ, balanceMaxQ(tradableBalance, leverage, livePriceE6)]);
 
   // Row 9 (AUTO): over the max, the size is reduced to it and the helper says so for 4 s.
-  const clampTarget = marketMaxQ !== null && marketMaxQ > 0n && positionSize > marketMaxQ ? marketMaxQ : null;
+  // Never on a paused side: there is nothing to reduce to, and the paused label says why.
+  const clampTarget =
+    !sidePaused[direction] && marketMaxQ !== null && marketMaxQ > 0n && positionSize > marketMaxQ ? marketMaxQ : null;
   useEffect(() => {
     if (clampTarget === null || !livePriceE6 || livePriceE6 <= 0n) return;
-    applySize(sizeQToInput(clampTarget, sizeUnit, livePriceE6));
+    applySize(sizeQToInput(clampTarget, sizeUnit, livePriceE6, lotExp));
     setClampedToQ(clampTarget);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fire only when a new clamp is required
   }, [clampTarget]);
@@ -894,6 +1038,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const feeFitQ = feeOverMax ? feeFitSizeQ(limitsInput) : null;
   const shortfall = vsPosition ? vsPosition.shortBy : marginNeed > effectiveBalance ? marginNeed - effectiveBalance : 0n;
 
+  // Empty or zero size: the button says "Enter a size" rather than naming an order of nothing
+  // ("Long SOL 1×", "Deposit 0.00 USDC & Long"). Submit is already disabled for it below.
+  const sizeEntered = marginNative > 0n && positionSize > 0n;
+  // v2.2 QA Q-3: read at refusal time by the wait loop (lib/limits/price-stall.ts).
+  const stallRef = useRef({ resolved: false, priceAgeSecs: null as number | null });
+  stallRef.current = { resolved: marketResolved, priceAgeSecs: oracleReady && !oracleUnavailable ? oracleAgeSecs(oracleLastMs, oracleElapsed) : null };
   // ── The state machine (audit §3.3): one status slot, one state-labelled button ──
   const ticketState = deriveTicketState({
     direction,
@@ -905,6 +1055,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     adlReduceOnly,
     engineStale,
     waitingForPrice: !mockMode && (oracleUnavailable || oracleStale || priceUsd == null),
+    priceAgeSecs: !mockMode && oracleReady && !oracleUnavailable ? oracleAgeSecs(oracleLastMs, oracleElapsed) : null,
     sidePaused,
     openingPaused: !mockMode && (vaultEmpty || lpDepleted || lpUnderfunded || riskGateActive),
     lpDepleted: !mockMode && lpDepleted,
@@ -914,6 +1065,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     shortfallLabel: fundingMode ? fundLabel : `${formatTokenAmount(shortfall, decimals)} ${collateralSymbol}`,
     feeOverMax,
     feeSuggested: feeFitQ !== null ? `${fmtQ(feeFitQ)} ${baseTicker}` : null,
+    sizeEntered,
   });
   // Row 5 (LIMIT): the selected side is paused and the other is open => select the open one.
   useEffect(() => {
@@ -937,16 +1089,38 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // below can only compose an order that cannot be submitted — the CTA at the bottom (Connect /
   // Get Tokens) is the only real action. With tokens in the wallet the ticket is fully usable:
   // the button funds and trades in one approval (UX WP-6).
-  const ticketLocked = needsWallet || accountPending || ((needsAccount || needsDeposit) && !walletHasTokens);
+  const ticketLocked = needsWallet || accountPending || ((needsAccount || needsDeposit) && !walletHasTokens) || lotGuard !== null;
 
+  const fmtUsdMin = (atoms: bigint, dec: number): string => (Number(atoms) / 10 ** dec).toLocaleString("en-US", { maximumFractionDigits: 2 });
   async function handleTrade(
     snapshotSize?: bigint,
     snapshotLimitPriceE6?: bigint,
   ) {
     const effectiveSize = snapshotSize ?? positionSize;
-    if (!marginInput || effectiveSize <= 0n) return;
-    if (accountPending) return;
-    if ((!userAccount || exceedsBalance) && !fundingMode) return;
+    // SILENT-1: every exit of this handler before the wallet leaves a visible line (it used to just return).
+    if (!marginInput) { setHumanError("Enter an amount to trade. Nothing was sent."); return; }
+    if (effectiveSize <= 0n) {
+      setHumanError(lotExp > 0 ? "That size is less than one lot here, so there is nothing to send. Enter a larger amount." : "That size is too small to send. Enter a larger amount.");
+      return;
+    }
+    // v2.2 lots: an order is whole lots (the ticket quantises); never sign a fractional lot or a size not derived in lots.
+    if (lotExp > 0 && effectiveSize % POS_SCALE_V22 !== 0n) {
+      setHumanError("That size isn't a whole number of lots here. Adjust it and try again. Nothing was sent.");
+      return;
+    }
+    if (accountPending) { setHumanError("Still loading your account on this market. Try again in a moment. Nothing was sent."); return; }
+    if ((!userAccount || exceedsBalance) && !fundingMode) {
+      setHumanError(exceedsBalance ? "That is more than your available balance. Lower the amount. Nothing was sent." : "Your trading account on this market is not ready yet. Try again in a moment. Nothing was sent.");
+      return;
+    }
+    // MIN-1: the same number the notice shows (whole lots worth at least the market minimum), checked before the wallet.
+    if (bandView && legBelowBandMin(bandView, existingPositionSize, direction === "long" ? effectiveSize : -effectiveSize)) {
+      const real = bandMinLeg(bandView);
+      if (real) {
+        setHumanError(`Below the minimum position size here: ${real.lots} lots (about ${fmtUsdMin(real.notionalAtoms, decimals)} ${collateralSymbol}) or more, or close fully. Nothing was sent.`);
+        return;
+      }
+    }
 
     if (mockMode) {
       setTradePhase("submitting");
@@ -963,19 +1137,40 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setRefusal(null);
     setResult(null);
     setEngineLockError(null);
+    setPendingTx(null);
     setWaitingLong(false);
     setRaceNote(false);
+    setTwoTxNote(false);
+    setRefreshingPositions(false);
     const waitAbort = new AbortController();
     waitAbortRef.current = waitAbort;
     const submitPriceE6 = getLivePriceSnapshot(slabAddress).priceE6 ?? livePriceE6 ?? 0n;
     setTradePhase("submitting");
+    // Round i: the wait budget follows the estimate (max(2 min, 1.5 x estimate), at most 10 min); one silent retry covers a lag
+    // that clears in about a keeper sweep (a 21 right after the approval).
+    const measuredSlotMs = isDevnetV22Enabled() ? await measureSlotMs(connection).catch(() => SLOT_MS_DEFAULT) : SLOT_MS_DEFAULT;
+    setSlotMs(measuredSlotMs);
+    const submitEstimate = bandView?.band.enabled
+      ? catchUpEstimate({ effectiveE6: bandView.price.markE6, targetE6: bandView.price.targetE6, capBpsPerSlot: bandView.price.capBpsPerSlot, slotMs: measuredSlotMs })
+      : null;
+    const waitBudgetMs = catchUpBudgetMs(submitEstimate ? submitEstimate.ms : null);
+    const lagRetry = <T,>(run: () => Promise<T>): Promise<T> =>
+      isDevnetV22Enabled()
+        ? retryOnceAfterShortLag(run, {
+            // Only a refusal AFTER the wallet signed (the send hit 21): a pre-wallet SimulationRefusal is already waited on by sendTxWaiting.
+            isLagRefusal: (e) => (e as { name?: string } | null)?.name !== "SimulationRefusal" && resolveUserMessage(e, { surface: "trade" }).kind === "engine-catching-up",
+            estimateMs: () => catchUpMsRef.current,
+            onWaiting: (w) => setTradePhase((ph) => (w ? "waiting" : ph === "waiting" ? "submitting" : ph)),
+            aborted: () => waitAbort.signal.aborted,
+          })
+        : run();
     try {
       const size = direction === "short" ? -effectiveSize : effectiveSize;
       // Confirmed submissions carry the exact worst-fill bound reviewed
       // in the modal. Other callers retain useTrade's live-mark fallback.
       const sig = fundingMode
         ? (
-            await fundAndTrade({
+            await lagRetry(() => fundAndTrade({
               size,
               depositAtoms: fundAtoms,
               limitPriceE6:
@@ -983,12 +1178,27 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 computeLimitPriceE6({ markE6: getLivePriceSnapshot(slabAddress).priceE6 ?? livePriceE6 ?? 0n, size }),
               ...(ticketLimits.fee?.channel.enabled ? { feeBps: ticketLimits.fee.signedFeeBps } : {}),
               amountLabel: fundLabel,
-              onRace: () => setRaceNote(true),
-            })
+              // The race re-opens the wallet, so the button goes back to "Confirm in wallet…".
+              onRace: () => { setRaceNote(true); setTradePhase("submitting"); },
+              onConfirming: () => setTradePhase("pending"),
+              onTwoTx: () => setTwoTxNote(true),
+              // v2.2 QA RT5b: the same waiting as the plain trade below (was three re-checks in 4.5 s, then a failure).
+              ...(isDevnetV22Enabled()
+                ? {
+                    maxWaitMs: waitBudgetMs,
+                    shouldWait: waitPolicy(() => stallRef.current),
+                    onWaiting: (w: boolean) => setTradePhase((ph) => (w ? "waiting" : ph === "waiting" ? "submitting" : ph)),
+                    onWaitingLong: () => setWaitingLong(true),
+                    abortSignal: waitAbort.signal,
+                  }
+                : {}),
+            }))
           ).signature
         : await withTransientRetry(
-        async () =>
-          trade(
+        async () => {
+          // A retry signs again: back to "Confirm in wallet…" until that one is broadcast too.
+          setTradePhase("submitting");
+          return lagRetry(() => trade(
             bindConfirmedLimitPrice(
               {
                 lpIdx,
@@ -998,22 +1208,35 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 // the protocol enabled the channel for this asset — else the base fee as before.
                 ...(ticketLimits.fee?.channel.enabled ? { feeBps: ticketLimits.fee.signedFeeBps } : {}),
                 // UX WP-2: the app waits for the market (no prompt) instead of failing.
-                onWaiting: (w: boolean) => setTradePhase(w ? "waiting" : "submitting"),
+                // Only "waiting" steps back to "submitting": sendTxWaiting also calls onWaiting(false)
+                // after the send confirmed, which must not undo "Confirming…" (#49).
+                onWaiting: (w: boolean) => setTradePhase((p) => (w ? "waiting" : p === "waiting" ? "submitting" : p)),
                 // UX WP-3: it keeps waiting past ~30 s ("We'll keep trying") until Stop.
                 keepWaiting: true,
                 onWaitingLong: () => setWaitingLong(true),
+                // v2.2 QA Q-3: never wait on a settled market or a price nobody is pushing.
+                shouldWait: waitPolicy(() => stallRef.current),
+                // v2.2 QA Q-7: a refusal that never clears (e.g. a 19 the program will not lift) ends after 2 minutes.
+                ...(isDevnetV22Enabled() ? { maxWaitMs: waitBudgetMs } : {}),
+                onRefreshingPositions: setRefreshingPositions,
                 abortSignal: waitAbort.signal,
+                // #49: signed and sent. "pending" is the ticket's "Confirming…" label.
+                onConfirming: () => setTradePhase("pending"),
+                onTwoTx: () => setTwoTxNote(true),
               },
               snapshotLimitPriceE6,
             ),
-          ),
+          ));
+        },
         { maxRetries: 2, delayMs: 3000 },
       );
       setWaitingLong(false);
       // P1: a confirmed TradeCpi can be a partial or ZERO fill (lib/limits/fill-check.ts).
       const limitsFillResult = takeFillResult(sig);
+      // U-2: the silent retry at a raised fee cap (no second confirmation) gets a small note once the order has landed.
+      const raisedFee = takeFeeRaise(sig);
+      setFeeRaiseNote(raisedFee ? { sig: sig ?? null, text: feeRaiseCopy(raisedFee) } : null);
       setClampedToQ(null);
-      const sideWord = direction === "long" ? "long" : "short";
       if (limitsFillResult?.kind === "zero") {
         // Never "Confirmed!" for a no-op: nothing filled, nothing to save. Offer a smaller size.
         const room = marketMaxQFor(direction);
@@ -1024,18 +1247,53 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         refreshSlab();
         return;
       }
-      setResult(
-        limitsFillResult?.kind === "partial"
-          ? { kind: "partial", body: TICKET_COPY.result.partial(fmtQ(limitsFillResult.filledQ ?? 0n), fmtQ(effectiveSize), baseTicker), sig: sig ?? null, tryQ: null }
-          : {
-              kind: "full",
-              body: TICKET_COPY.result.full(fmtQ(effectiveSize), baseTicker, sideWord, formatUsdPriceE6(submitPriceE6)),
-              sig: sig ?? null,
-              tryQ: null,
-            },
-      );
+      // The result line is worded from the MEASURED position change (ADL-effective before/after,
+      // lib/position-change.ts), never from the request or the raw pre-trade position
+      // (lib/order-result.ts). `orderHeading` (the pre-trade heading) stays request-based on
+      // purpose: before the trade there is nothing measured. takePositionChange consumes its
+      // entry, so it is awaited ONCE and shared with the saved-entry step below. Until it
+      // resolves the line is the neutral "went through" (true for any order).
+      const sigKey = sig ?? null;
+      const price = formatLotPriceE6(submitPriceE6, lotExp);
+      const measured = takePositionChange(sig).then((change): PositionChange | null => {
+        if (change) return change;
+        // Fund-and-trade records no position change, only the fill it measured itself. For a
+        // first trade (no position in this ticket) that fill is an open of the measured size.
+        if (fundingMode && existingPositionSize === 0n && limitsFillResult?.filledQ != null && limitsFillResult.filledQ !== 0n && (limitsFillResult.kind === "full" || limitsFillResult.kind === "partial")) {
+          return { beforeQ: 0n, afterQ: limitsFillResult.filledQ };
+        }
+        return null;
+      });
+      setResult({ kind: "sent", body: TICKET_COPY.result.unmeasured, sig: sigKey, tryQ: null });
+      void measured.then((change) => {
+        const outcome = classifyOrderChange(direction, effectiveSize, change);
+        let next: NonNullable<typeof result>;
+        if (outcome.effect === "zero") {
+          const room = marketMaxQFor(direction);
+          const tryQ = room !== null && room > 0n && room < effectiveSize ? room : effectiveSize / 2n;
+          next = { kind: "zero", body: TICKET_COPY.result.zero, sig: sigKey, tryQ: tryQ > 0n ? tryQ : null };
+        } else if (outcome.effect === "unmeasured") {
+          next = { kind: "sent", body: TICKET_COPY.result.unmeasured, sig: sigKey, tryQ: null };
+        } else {
+          next = { kind: outcome.partial ? "partial" : "full", body: orderResultBody(outcome, fmtQ, baseTicker, price), sig: sigKey, tryQ: null };
+        }
+        // Only if the ticket still shows this order's line (a newer order clears or replaces it). A clipped fill the chain
+        // itself reported (below) is not overwritten by the position-change inference.
+        setResult((prev) => (prev && prev.sig === sigKey && !(sigKey && clippedSigsRef.current.has(sigKey)) ? next : prev));
+      });
+      // v2.2 QA: the program clips an over-size order to the vault LP's room and returns Ok. The landed transaction's FILL event
+      // carries the CLIPPED flag with the requested and the executed size: say "Partially filled: X of Y" from that.
+      if (isDevnetV22Enabled() && sigKey && slabProgramId) {
+        void readClippedFill(connection, sigKey, slabProgramId, { market: new PublicKey(slabAddress) }).then((cf) => {
+          if (!cf || cf.zero) return; // a zero fill has its own line
+          clippedSigsRef.current.add(sigKey);
+          setResult((prev) => (prev && prev.sig === sigKey ? { kind: "partial", body: clippedFillBody(cf, lotExp, baseTicker), sig: sigKey, tryQ: null } : prev));
+        });
+      }
       setTradePhase("confirming");
       setLastSig(sig ?? null);
+      // SC-1: a visible "View transaction" link for an open / add, like a close (the status line's one is behind "Details").
+      recordCloseTx(slabAddress, sig, Date.now(), false, existingPositionSize === 0n ? "Position opened." : sameDirection ? "Position increased." : "Order placed.");
       setEngineLockError(null);
       setMarginInput("");
       setSizeInput("");
@@ -1043,24 +1301,40 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       // A first fund-and-trade runs with no account in this closure (fundingMode allows it), and the
       // portfolio it just created is a v17 one: idx 0, like every v17 account (lib/userAccountScan.ts).
       const entryIdx = userAccount?.idx ?? (fundingMode ? 0 : null);
-      if (livePriceE6 && livePriceE6 > 0n && entryIdx !== null) {
+      // The fill's price, read now rather than from this render (which may be minutes old after a
+      // long wait in the wallet). Same source as before: the live mark, as for every saved entry.
+      const fillPriceE6 = getLivePriceSnapshot(slabAddress).priceE6 ?? livePriceE6 ?? 0n;
+      if (fillPriceE6 > 0n && entryIdx !== null) {
         const wallet = publicKey?.toBase58();
-        // BUG 9 fix: this fired unconditionally on every successful open, so
-        // scaling INTO (or reducing/flipping through) an EXISTING position
-        // overwrote the cached entry with this trade's raw fill price — not
-        // a blended cost basis — corrupting Entry/Liq/PnL/ROE everywhere that
-        // reads the cache. Only a genuinely NEW position (flat -> open) has
-        // "this fill IS the entry" be true. When a position already existed
-        // pre-trade, clear the now-stale cache instead: every consumer's
-        // existing `cachedEntry > 0 ? cached : estimateEntryFromPnl(...)`
-        // fallback then recovers the correct basis from the refreshed
-        // on-chain size/pnl (accurate once refreshSlab() below lands)
-        // instead of showing this trade's fill price mislabeled as "Entry".
+        const slab = slabAddress;
+        const orderLeverage = leverage;
+        // #3314: read BEFORE anything below overwrites or clears it.
+        const prior = getSavedEntry(slab, entryIdx, wallet);
+        // Until the position is measured: a new position takes this fill as its entry; a trade on
+        // an existing one clears it (BUG 9: never let this fill's raw price stand in for the
+        // position's entry), so nothing shows an out-of-date entry as exact in the meantime.
         if (existingPositionSize === 0n) {
-          saveEntryPrice(slabAddress, entryIdx, livePriceE6, leverage, wallet);
+          saveEntryPrice(slab, entryIdx, fillPriceE6, orderLeverage, wallet);
         } else {
-          clearEntryPrice(slabAddress, entryIdx, wallet);
+          clearEntryPrice(slab, entryIdx, wallet);
         }
+        // Then decide from the position measured on chain before and after this trade
+        // (ADL-effective, lib/position-change.ts): an add averages the saved entry with this fill,
+        // a reduce keeps it, a flip or new position takes this fill (lib/entry-price.ts
+        // entryAfterTrade). No measurement (read failed, legacy market): the step above stands.
+        void measured.then((change) => {
+          if (!change) return;
+          const next = entryAfterTrade({ beforeQ: change.beforeQ, afterQ: change.afterQ, saved: prior, fillPriceE6 });
+          if (next === null) {
+            clearEntryPrice(slab, entryIdx, wallet);
+            return;
+          }
+          const opened = change.beforeQ === 0n || (change.beforeQ > 0n) !== (change.afterQ > 0n);
+          // The saved leverage describes the order that opened the position (PositionPanel's
+          // "Order Lev."), so an add or a reduce keeps it.
+          const lev = opened ? orderLeverage : prior?.leverage ?? undefined;
+          saveEntryPrice(slab, entryIdx, next, lev, wallet, change.afterQ);
+        });
       }
       // The site-wide PositionsBar reads usePortfolio, which refreshes its
       // position list on a 30s interval and learns nothing from refreshSlab()
@@ -1078,6 +1352,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     } catch (e) {
       setWaitingLong(false);
       setRaceNote(false);
+      setTwoTxNote(false);
+      setRefreshingPositions(false);
       if (e instanceof FirstTradeDepositError) {
         // §3.2 item 5: the account exists but the deposit didn't land — say so, offer the deposit.
         setRefusal({
@@ -1091,7 +1367,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         setTradePhase("idle");
         return;
       }
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errorText(e);
       console.error("[OrderTicket] raw error:", msg);
       // PERC-onboarding-5: advisory-only wrong-network-wallet check on the
       // raw (pre-humanization) message — see useWalletNetworkGuard's header.
@@ -1113,17 +1389,61 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         symbol: marketInfo?.symbol ?? undefined,
         maxNow: sideMaxQ !== null && sideMaxQ > 0n && sideMaxQ < UNLIMITED_CAPACITY ? fmtQ(sideMaxQ) : undefined,
         health: { lpDepleted, lpIsVault, adlReduceOnly, resolved: marketResolved },
+        // LEV-4: Custom 92 names the leverage the program allows at THIS size (post-fill requirement), not a generic line.
+        ...(marketLimits.growth ? (() => { const n = growthMaxLeverageForOrder(marketLimits.growth, direction, existingPositionSize, positionSize); return n === null ? {} : { maxLeverage: n }; })() : {}),
+        // 126: the market's own cap on positions per account.
+        ...(maxPositions !== null ? { maxPositions } : {}),
+        priceAgeSecs: oracleReady && !oracleUnavailable ? oracleAgeSecs(oracleLastMs, oracleElapsed) : null,
+        // The price catch-up wait, computed from the market, so a 21 says how long (never "a few seconds").
+        catchUpMs: bandCatchUpMs(bandView, slotMs),
         // GH#2953: fund-and-trade does not wait and resend; never promise "goes through automatically".
         oneShot: fundingMode,
+        // MIN-1: error 113 names the real minimum for this market at this mark.
+        ...(bandMinLeg(bandView) ? { minPositionLabel: `${bandMinLeg(bandView)!.lots} lots (about ${fmtUsdMin(bandMinLeg(bandView)!.notionalAtoms, decimals)} ${collateralSymbol})` } : {}),
         // GH#2959: a 49 on a new position below the market's floor is the floor, not the size.
         ...(belowImFloor ? { imFloorLabel: `$${usd2(imFloor, decimals).replace(/\.00$/, "")}` } : {}),
       });
+      // GH#2804 follow-up: the confirmation poll gave up but the trade may still land. Keep the
+      // submit locked and watch the signature, like Earn's DepositWithdrawPanel, instead of
+      // re-enabling the ticket with the same order filled in. Gated on the resolved kind so
+      // other errors never reach timedOutSignature.
+      const timedOutSig = um.kind === "still-confirming" ? timedOutSignature(e) : null;
+      if (timedOutSig && liveSlabRef.current !== slabAddress) return;
+      if (timedOutSig) {
+        pendingWatchRef.current?.abort();
+        const ctl = new AbortController();
+        pendingWatchRef.current = ctl;
+        const entryIdx = userAccount?.idx ?? (fundingMode ? 0 : null);
+        const wallet = publicKey?.toBase58();
+        setPendingTx({ sig: timedOutSig, state: "watching" });
+        setTradePhase("pending");
+        void watchPendingSignature(() => checkSignatureLanded(connection, timedOutSig), { signal: ctl.signal }).then((outcome) => {
+          if (outcome === "aborted" || ctl.signal.aborted) return;
+          setPendingTx({ sig: timedOutSig, state: outcome });
+          if (outcome === "landed") {
+            setMarginInput("");
+            setSizeInput("");
+            setFundInput("");
+            // The fill price is unknown here, so don't leave a cached entry for the position.
+            if (entryIdx !== null) clearEntryPrice(slabAddress, entryIdx, wallet);
+            invalidatePortfolio();
+          }
+          if (outcome !== "dropped") refreshSlab();
+          setTradePhase("idle");
+        });
+        return;
+      }
       if (um.quiet) {
         // GH#2959: a first fund-and-trade the user turned down in the wallet reset the ticket
         // with no word (some wallets showed their own warning, so it read as "nothing happened").
         // Say it, calmly. Other cancels (and Stop) stay quiet.
         if (fundingMode && um.kind === "cancelled") {
-          setRefusal({ ...um, quiet: false, title: "Cancelled", body: FIRST_TRADE_COPY.cancelled });
+          setRefusal({
+            ...um,
+            quiet: false,
+            title: "Cancelled",
+            ...firstTradeCancelledExtras(walletAdapterName, getNetwork() === "devnet"),
+          });
         }
         setTradePhase("idle");
         return;
@@ -1143,7 +1463,24 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       // generic text immediately, then refine it from pre-trade state (matcher
       // context / market completeness) if that proves the real cause. No-op for
       // every other error code.
-      if (slabProgramId) {
+      if (slabProgramId && isDevnetV22Enabled() && isCustom9Error(msg)) {
+        // v2.2 (Q-1 / Q-6): name the cause the chain state proves (position cap / price limit / fee).
+        const pid = slabProgramId;
+        const market = new PublicKey(slabAddress);
+        const signedSize = direction === "short" ? -effectiveSize : effectiveSize;
+        void (async () => {
+          const lp = await resolveLpTradeAccounts(connection, pid, market).catch(() => null);
+          return diagnoseV22TradeCustom9(connection, {
+            market,
+            matcherCtx: lp?.matcherCtx ?? null,
+            takerPortfolio: userAccount?.pubkey ?? null,
+            sizeQ: signedSize,
+            limitPriceE6: snapshotLimitPriceE6,
+          });
+        })()
+          .then((refined) => setHumanError(refined))
+          .catch(() => { /* keep the generic message */ });
+      } else if (slabProgramId) {
         void diagnoseTradeRejection(msg, connection, slabProgramId, new PublicKey(slabAddress))
           .then((refined) => { if (refined) setHumanError(refined); })
           .catch(() => { /* keep the generic message */ });
@@ -1167,7 +1504,18 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const v1CloseOnly = isV1CloseOnly(slabProgramId?.toBase58(), isMoveFlowEnabled());
   const v1Blocked = v1BlocksOrder({ v1CloseOnly, existing: existingPositionSize, direction, size: positionSize });
 
+  // Q-6 (v2.2): a 5th asset is refused on chain (49 or 9 depending on margin, never a deposit away
+  // from passing). Block it up front with its own line. Flag off: never set.
+  const ownPortfolioRaw =
+    isDevnetV22Enabled() && publicKey && slabProgramId
+      ? getPortfolioRawSnapshot(makePortfolioScanKey(slabProgramId, slabAddress, publicKey))
+      : null;
+  const positionCapReached = ownPortfolioRaw
+    ? positionCapBlocksOpen(ownPortfolioRaw.portfolio.legs.filter((l) => l.active).map((l) => l.assetIndex), 0, maxPositions ?? undefined)
+    : false;
+
   const submitDisabled =
+    positionCapReached ||
     v1Blocked ||
     accountPending ||
     sameOwnerOpenPending ||
@@ -1193,7 +1541,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       return;
     }
     const q = a.id === "try-size" ? result?.tryQ ?? null : a.id === "use-max" ? ticketLimits.sideLimits?.[direction]?.maxQ ?? null : null;
-    if (q && q > 0n && livePriceE6 && livePriceE6 > 0n) handleSizeChange(sizeQToInput(q, sizeUnit, livePriceE6));
+    if (q && q > 0n && livePriceE6 && livePriceE6 > 0n) handleSizeChange(sizeQToInput(q, sizeUnit, livePriceE6, lotExp));
   };
   const LEGACY_TESTID: Partial<Record<TicketRow, string>> = {
     "close-only": "limits-adl-reduce-only",
@@ -1201,11 +1549,44 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     "same-owner": "limits-same-owner-notice",
     "fee-over-max": "limits-quote-fee-over-max",
   };
+  const pendingLine = pendingTx && (
+    <div data-testid="trade-pending" data-state={pendingTx.state}>
+      <StatusLine
+        message={{
+          kind: `pending-${pendingTx.state}`,
+          variant: pendingTx.state === "watching" ? "wait" : pendingTx.state === "dropped" ? "error" : "info",
+          title: TICKET_COPY.pending[pendingTx.state].title,
+          body: TICKET_COPY.pending[pendingTx.state].body,
+        }}
+        txUrl={pendingTx.state === "dropped" ? undefined : explorerTxUrl(pendingTx.sig)}
+      />
+    </div>
+  );
   const statusSlot = (() => {
+    // While a timed-out trade is being watched, nothing replaces this line.
+    if (pendingTx?.state === "watching") return pendingLine;
     if (ticketState.status) {
       const legacy = LEGACY_TESTID[ticketState.row];
       const line = <StatusLine message={ticketState.status} legacyTestId={legacy} />;
       return legacy ? <div data-testid={legacy} data-side={direction}>{line}</div> : line;
+    }
+    if (positionCapReached) {
+      return (
+        <div data-testid="trade-position-cap">
+          <StatusLine message={{ kind: "position-cap", variant: "error", title: "Position limit reached", body: positionCapCopy(maxPositions) }} />
+        </div>
+      );
+    }
+    // Round i: while the order waits for the price walk, say how long (live from the market account), with Stop from the start.
+    if (tradePhase === "waiting" && catchUp && catchUp.ms > 0 && catchUpLine(catchUp.ms)) {
+      return (
+        <div data-testid="trade-catchup-estimate">
+          <StatusLine
+            message={{ kind: "waiting-estimate", variant: "wait", title: CATCHUP_COPY.title, body: catchUpLine(catchUp.ms) as string, action: { id: "stop", label: TICKET_COPY.waitingLong.stop } }}
+            onAction={onSlotAction}
+          />
+        </div>
+      );
     }
     if (tradePhase === "waiting" && waitingLong) {
       return (
@@ -1215,9 +1596,20 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         />
       );
     }
+    if (refreshingPositions && tradePhase !== "idle") {
+      return (
+        <div data-testid="trade-refreshing-positions">
+          <StatusLine message={{ kind: "loss-stale-retry", variant: "wait", title: "One moment", body: V21_REFRESHING_POSITIONS }} />
+        </div>
+      );
+    }
+    if (twoTxNote && (tradePhase === "submitting" || tradePhase === "pending")) {
+      return <StatusLine message={{ kind: "two-tx-order", variant: "info", title: "Two transactions", body: FIRST_TRADE_COPY.twoTx }} />;
+    }
     if (raceNote && tradePhase === "submitting") {
       return <StatusLine message={{ kind: "first-trade-race", variant: "info", title: "One more approval", body: FIRST_TRADE_COPY.race }} />;
     }
+    if (pendingLine) return pendingLine;
     const why = networkWarning ?? undefined;
     if (refusal) {
       return (
@@ -1241,8 +1633,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       );
     }
     if (result) {
-      const kind = result.kind === "zero" ? "zero-fill" : result.kind === "partial" ? "partial-fill" : "filled";
-      const title = result.kind === "zero" ? "Not filled" : result.kind === "partial" ? "Partly filled" : "Order filled";
+      const kind = result.kind === "zero" ? "zero-fill" : result.kind === "partial" ? "partial-fill" : result.kind === "sent" ? "sent" : "filled";
+      const title = result.kind === "zero" ? "Not filled" : result.kind === "partial" ? "Partially filled" : result.kind === "sent" ? "Order sent" : "Order filled";
       const line = (
         <StatusLine
           message={{
@@ -1256,7 +1648,13 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           txUrl={result.sig ? explorerTxUrl(result.sig) : undefined}
         />
       );
-      return result.kind === "full" ? line : <div data-testid="limits-fill-result" data-kind={result.kind}>{line}</div>;
+      const shown = result.kind === "full" ? line : <div data-testid="limits-fill-result" data-kind={result.kind}>{line}</div>;
+      return feeRaiseNote && feeRaiseNote.sig === result.sig && result.kind !== "zero" ? (
+        <>
+          {shown}
+          <p data-testid="fee-raise-note" className="mt-1 text-[10px] leading-snug text-[var(--text-muted)]">{feeRaiseNote.text}</p>
+        </>
+      ) : shown;
     }
     if (networkWarning) {
       return <StatusLine message={{ kind: "wallet-network", variant: "info", title: "Check your wallet's network", body: networkWarning }} />;
@@ -1338,6 +1736,16 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             </div>
           ) : null;
         })()}
+        {/* Devnet v2.2 band markets (flag-gated; renders nothing otherwise): mark vs target, minimum position. */}
+        {lotExp > 0 && lotRemainderQ > 0n && (
+          <p data-testid="lot-remainder" className="mb-2 text-[10px] text-[var(--text-secondary)]">
+            {V22_COPY.lot.remainder(fmtQLots(lotRemainderQ * 10n ** BigInt(lotExp)), baseTicker)}
+          </p>
+        )}
+        {lotGuard && (
+          <p data-testid="lot-trading-guard" role="status" className="mb-2 text-[11px] text-[var(--text-secondary)]">{lotGuard}</p>
+        )}
+        <BandMarketNotice view={bandView} collateralDecimals={decimals} collateralSymbol={collateralSymbol} />
         {/* Devnet v2.1: the close-only countdown + permissionless wind-down (flag-gated). */}
         {adlReduceOnly && isDevnetV21Enabled() && (
           <CloseOnlyBanner slabAddress={slabAddress} hasPosition={existingPositionSize !== 0n} collateralDecimals={decimals} />
@@ -1348,7 +1756,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           <OrderTicketClosePanel
             slabAddress={slabAddress}
             positionSize={closeView?.effectiveSize ?? existingPositionSize}
+            lotExp={lotExp}
             previewUnavailable={closeView != null && !closeView.adlKnown}
+            portfolioPk={userAccount?.pubkey}
             accountPending={accountPending}
             entryPriceE6={existingEntryKnown ? existingEntryPriceE6 : 0n}
             capital={capital}
@@ -1359,7 +1769,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             maxFillAbs={fillCaps?.maxFillAbs ?? null}
             lpUnderfunded={lpUnderfunded}
             engineStale={engineStale}
-            oracleBlocked={!mockMode && (oracleUnavailable || oracleStale)}
+            oracleBlocked={!mockMode && closeGate.blocked}
+            oraclePriceBehind={!mockMode && closeGate.behind}
+            priceAgeSecs={oracleAgeSecs(oracleLastMs, oracleElapsed)}
             onClosed={handleClosed}
           />
         )}
@@ -1379,10 +1791,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       : null;
   // One Max per side (§4.2): in the input's unit, tap = fill. Hidden while the ticket can't open.
   const showMax = displayMaxQ !== null && displayMaxQ > 0n && !!livePriceE6 && livePriceE6 > 0n && !ticketState.blocks;
-  const maxLabel = showMax ? maxInUnit(displayMaxQ!, sizeUnit, livePriceE6!, baseTicker) : null;
+  const maxLabel = showMax ? maxInUnit(displayMaxQ!, sizeUnit, livePriceE6!, baseTicker, lotExp) : null;
   const fillFraction = (pct: number) => {
     if (displayMaxQ !== null && displayMaxQ > 0n && livePriceE6 && livePriceE6 > 0n) {
-      handleSizeChange(sizeQToInput((displayMaxQ * BigInt(pct)) / 100n, sizeUnit, livePriceE6));
+      handleSizeChange(sizeQToInput((displayMaxQ * BigInt(pct)) / 100n, sizeUnit, livePriceE6, lotExp));
       return;
     }
     setSizePercent(pct);
@@ -1394,6 +1806,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {openCloseToggle}
       {v1CloseOnly && <V1CloseOnlyBanner />}
       {statusSlot && <div className="mb-3" data-testid="ticket-status-slot">{statusSlot}</div>}
+      {ticketMode === "open" && <LastCloseTxLink slabAddress={slabAddress} className="mb-3" />}
+      {/* v2.2 QA M-1: why OPEN is disabled, band, minimum size and holding fee, in OPEN mode too (flag-gated by its inputs). */}
+      <OpenModeMarketNotes lotGuard={lotGuard} view={bandView} side={direction} collateralDecimals={decimals} collateralSymbol={collateralSymbol} />
       {/* Creator-only, self-hiding: the LP owner can drop the matcher's skew (lib/fix-pricing.ts). */}
       {ticketLimits.sameOwnerCloseOnly && !mockMode && (
         <div className="mb-3" data-testid="fix-pricing-slot"><FixPricingAction slabAddress={slabAddress} /></div>
@@ -1430,7 +1845,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           Long
           {sidePaused.long && (
             <span data-testid="trade-side-paused" className="text-[10px] font-medium normal-case tracking-normal">
-              {TICKET_COPY.sidePausedSublabel}
+              {ticketLimits.fullSides.long ? TICKET_COPY.sidePausedFullSublabel : TICKET_COPY.sidePausedSublabel}
             </span>
           )}
         </button>
@@ -1451,7 +1866,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           Short
           {sidePaused.short && (
             <span data-testid="trade-side-paused" className="text-[10px] font-medium normal-case tracking-normal">
-              {TICKET_COPY.sidePausedSublabel}
+              {ticketLimits.fullSides.short ? TICKET_COPY.sidePausedFullSublabel : TICKET_COPY.sidePausedSublabel}
             </span>
           )}
         </button>
@@ -1495,7 +1910,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             className="mt-1 text-[11px] text-[var(--warning)]"
             style={{ fontFamily: "var(--font-mono)" }}
           >
-            {TICKET_COPY.clamped(livePriceE6 && livePriceE6 > 0n ? maxInUnit(clampedToQ, sizeUnit, livePriceE6, baseTicker).replace(` ${baseTicker}`, "") : fmtQ(clampedToQ), sizeUnit === "token" ? baseTicker : "USD")}
+            {TICKET_COPY.clamped(livePriceE6 && livePriceE6 > 0n ? maxInUnit(clampedToQ, sizeUnit, livePriceE6, baseTicker, lotExp).replace(` ${baseTicker}`, "") : fmtQ(clampedToQ), sizeUnit === "token" ? baseTicker : "USD")}
           </p>
         ) : (
           <div
@@ -1571,9 +1986,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               }}
               onBlur={() => setLeverageText(formatLeverageValue(leverage))}
               style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
-              className="w-12 rounded-none border border-[var(--border)]/50 bg-[var(--bg)] px-1.5 py-0.5 text-right text-[11px] text-[var(--text)] focus:border-[var(--accent)]/50 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]/20"
+              className="w-12 pointer-coarse:w-16 rounded-none border border-[var(--border)]/50 bg-[var(--bg)] px-1.5 py-0.5 text-right text-[11px] text-[var(--text)] focus:border-[var(--accent)]/50 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]/20"
             />
-            <span className="text-[11px] font-medium text-[var(--text)]">x</span>
+            <span className="text-[11px] pointer-coarse:text-base font-medium text-[var(--text)]">x</span>
           </div>
         </div>
         {maxLeverage > 1 ? (() => {
@@ -1667,7 +2082,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       </div>
 
       {marketLimits.growth && ticketLimits.growth && (
-        <GrowthTicketPanel view={marketLimits.growth} decision={ticketLimits.growth} direction={direction} />
+        <GrowthTicketPanelLive collateral={{ decimals, symbol: collateralSymbol, usdLike: isUsdLikeCollateral(collateralSymbol, decimals) }} view={marketLimits.growth} decision={ticketLimits.growth} direction={direction} sizeFormat={{ lotExp, ticker: baseTicker }} sidePaused={sidePaused[direction]} sideFull={ticketLimits.fullSides[direction]} bandBps={bandView ? bandView.band.bandBps : null} />
       )}
 
       {stepDownNote && (
@@ -1683,7 +2098,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {/* Summary (§4.2): entry / liq / fee / margin. Everything else is in Details. */}
       {hasOrder && (
         <div className="mb-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]" data-testid="ticket-summary" style={{ fontVariantNumeric: "tabular-nums" }}>
-          <SummaryCell label="Entry" value={formatUsdPriceE6(estEntry)} />
+          <SummaryCell label="Entry" value={formatLotPriceE6(estEntry, lotExp)} />
           <SummaryCell
             label="Liq. price"
             value={beforeLiqDisplay.text !== "—" && beforeLiqDisplay.text !== afterLiqDisplay.text ? `${beforeLiqDisplay.text} → ${afterLiqDisplay.text}` : afterLiqDisplay.text}
@@ -1774,7 +2189,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 <DiffRow
                   label="Worst fill price"
                   before="—"
-                  after={slippageBoundE6 > 0n ? formatUsdPriceE6(slippageBoundE6) : "—"}
+                  after={slippageBoundE6 > 0n ? formatLotPriceE6(slippageBoundE6, lotExp) : "—"}
                   tooltip="Worst acceptable fill price sent on-chain: the trade is refused rather than fill worse than this."
                 />
                 <DiffRow
@@ -1790,6 +2205,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               ticket={ticketLimits}
               direction={direction}
               symbol={baseTicker}
+              lotExp={lotExp}
               feeMarginBps={feeMarginBps}
               onFeeMarginChange={setFeeMarginBps}
             />
@@ -1830,7 +2246,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 // requiring a second manual deposit afterward.
                 await initUser(starterDeposit);
               } catch (e) {
-                const msg = e instanceof Error ? e.message : String(e);
+                const msg = errorText(e);
                 reportTxError(msg);
                 if (!/user rejected|cancelled|denied/i.test(msg)) setInitCtaError(msg);
               }
@@ -1908,7 +2324,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             );
           })()}
           {(initCtaError || initError) && <p data-testid="deposit-error" className="mt-1 text-[10px] text-[var(--short)]">{initCtaError ?? initError}</p>}
-          {showInlineDeposit && (
+          {showInlineDeposit && !(withdrawEntryAtZero && inlineDepositMode === "withdraw") && (
             <div className="mt-1.5" data-deposit-trigger>
               <DepositWithdrawCard slabAddress={slabAddress} />
             </div>
@@ -1955,6 +2371,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               // the liq row uses, over capital + deposit + pnl, as the position panel's Lev.
               riskLeverage: computeRiskLeverage(combinedSignedSize, livePriceE6 ?? 0n, capitalAfterFund + safeExistingPnl),
               depositAtoms: fundingMode && hasOrder ? fundAtoms : 0n,
+              // First trade: it creates the market portfolio account, whose SOL rent the modal shows.
+              createsAccount: needsAccount && fundingMode,
             });
             setShowConfirmModal(true);
             // Prewarm the entire submission path (blockhash, priority fee,
@@ -1973,8 +2391,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           {(ticketState.waiting || tradePhase === "waiting") && (
             <span aria-hidden="true" data-testid="trade-submit-spinner" className="mr-1.5 inline-block h-2 w-2 animate-pulse rounded-full bg-current align-middle" />
           )}
-          {tradePhase === "submitting"
+          {refreshingPositions && tradePhase !== "idle"
+            ? V21_REFRESHING_POSITIONS
+            : tradePhase === "submitting"
             ? TICKET_COPY.confirmInWallet
+            : tradePhase === "pending"
+              ? TICKET_COPY.pending.button
             : tradePhase === "waiting"
               ? TICKET_COPY.waitingLatest
               : sameOwnerOpenPending
@@ -1983,7 +2405,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 ? "Loading account…"
                 : fundOverWallet && !ticketState.blocks
                 ? "Get test funds"
-                : fundingMode && ticketState.row === "ok"
+                : fundingMode && ticketState.row === "ok" && sizeEntered
                   ? FIRST_TRADE_COPY.button(fundLabel, direction === "long" ? "Long" : "Short")
                   : ticketState.buttonLabel}
         </button>
@@ -2002,6 +2424,29 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           </div>
           <div className="font-mono tabular-nums text-[var(--text)]">{accountPending ? "—" : formatTokenAmount(buyingPower, decimals)} {collateralSymbol}</div>
         </div>
+        {/* SOL-2 (v2.2): a new user with tokens can deposit without trading first. */}
+        {isDevnetV22Enabled() && connected && !accountPending && needsAccount && walletHasTokens && (
+          <div className="flex shrink-0 items-center gap-1.5">
+            <button
+              onClick={() => setShowFirstDeposit((v) => !v)}
+              data-testid="deposit-toggle-new-account"
+              className="rounded-sm border border-[var(--accent)]/50 bg-[var(--accent)]/[0.1] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--accent)] transition-all duration-150 hover:bg-[var(--accent)]/[0.18] hover:brightness-110"
+            >
+              + Deposit
+            </button>
+          </div>
+        )}
+        {withdrawEntryAtZero && (
+          <div className="flex shrink-0 items-center gap-1.5">
+            <button
+              onClick={() => toggleInlineDeposit("withdraw")}
+              data-testid="withdraw-toggle"
+              className="rounded-sm border border-[var(--long)]/50 bg-[var(--long)]/[0.1] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--long)] transition-all duration-150 hover:bg-[var(--long)]/[0.18] hover:brightness-110"
+            >
+              {claimableProfit ? "Claim profit" : "Close account"}
+            </button>
+          </div>
+        )}
         {connected && !accountPending && !needsAccount && !needsDeposit && (
           <div className="flex shrink-0 items-center gap-1.5">
             <button
@@ -2021,9 +2466,16 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           </div>
         )}
       </div>
-      {connected && !accountPending && showInlineDeposit && !((needsAccount || needsDeposit) && !walletHasTokens) && (
+      {connected && !accountPending && showInlineDeposit && (!((needsAccount || needsDeposit) && !walletHasTokens) || (withdrawEntryAtZero && inlineDepositMode === "withdraw")) && (
         <div className="mt-1.5" data-deposit-trigger>
           <DepositWithdrawCard slabAddress={slabAddress} initialMode={inlineDepositMode} offerFaucet={fundOverWallet} />
+        </div>
+      )}
+      {/* SOL-2 (v2.2): no account yet — one approval creates it and deposits, no trade. Own state, so the
+          "Get test funds" / inline deposit paths above are unchanged. */}
+      {isDevnetV22Enabled() && showFirstDeposit && connected && !accountPending && needsAccount && walletHasTokens && !mockMode && (
+        <div className="mt-1.5">
+          <FirstDepositCard slabAddress={slabAddress} walletBalance={walletAtaBalance ?? 0n} decimals={decimals} symbol={collateralSymbol} />
         </div>
       )}
 
@@ -2047,9 +2499,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           accountEquity={userAccount ? capital : null}
           riskLeverage={confirmSnapshot.riskLeverage}
           depositAmount={confirmSnapshot.depositAtoms}
+          createsAccount={confirmSnapshot.createsAccount}
           symbol={baseTicker}
           collateralSymbol={collateralSymbol}
           decimals={decimals}
+          lotExp={lotExp}
           onConfirm={() => {
             const snapshot = confirmSnapshot;
             setShowConfirmModal(false);

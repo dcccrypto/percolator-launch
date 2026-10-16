@@ -1,5 +1,6 @@
 "use client";
 
+import { formatLotPriceE6, formatLotQ } from "@/lib/v22/lot";
 import Link from "next/link";
 import { useCallback, useSyncExternalStore } from "react";
 import { getSnapshot, subscribeSlab } from "@/lib/priceStore/priceStore";
@@ -72,7 +73,7 @@ export function LiquidationRiskItem({
     markPriceE6: markE6,
     maintenanceMarginBps: pos.maintenanceMarginBps,
     hasResolvedEntry: describeEntryPrice({ entryE6: pos.effectiveEntryPrice, source: pos.entryPriceSource }).known,
-    formatPrice: (p) => formatMarkPrice(Number(p) / 1e6),
+    formatPrice: (p) => formatLotPriceE6(p, pos.lotExp ?? 0),
     unknownText: "—",
   });
   const danger = severity === "danger";
@@ -100,7 +101,7 @@ export function LiquidationRiskItem({
             </span>
           </div>
           <div className="mt-0.5 font-mono text-[11px] tabular-nums text-[var(--text-secondary)]">
-            Mark {formatMarkPrice(Number(markE6) / 1e6)}
+            Mark {formatLotPriceE6(markE6, pos.lotExp ?? 0)}
             <span className="mx-1.5 text-[var(--text-dim)]">→</span>
             Liq <LiqPriceValue display={liqDisplay} />
           </div>

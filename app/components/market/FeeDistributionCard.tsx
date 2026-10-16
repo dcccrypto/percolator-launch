@@ -5,6 +5,7 @@ import { FEE_SPLIT } from "@percolatorct/sdk";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { formatUsdFromNumber } from "@/lib/format";
+import { legLabel } from "@/lib/fee-breakdown";
 
 /**
  * Fee distribution — how each trade fee is split four ways, and how much has
@@ -48,10 +49,10 @@ export const FeeDistributionCard: FC = () => {
     // pot alone rather than fabricating a per-asset value.
     const creatorAtoms = cfg.creatorFeeClaimableAtoms + (assetProfile?.creatorFeeClaimableAtoms ?? 0n);
     return [
-      { key: "protocol", label: "Protocol", bps: FEE_SPLIT.PROTOCOL_FEE_BPS, usd: toUsd(cfg.protocolFeeAccruedAtoms), note: "collected" },
-      { key: "creator", label: "Creator", bps: cfg.creatorShareBps, usd: toUsd(creatorAtoms), note: "claimable" },
-      { key: "lp", label: "LP", bps: cfg.lpShareBps, usd: toUsd(cfg.lpFeeAccruedAtoms), note: "collected" },
-      { key: "insurance", label: "Insurance", bps: cfg.insuranceShareBps, usd: toUsd(cfg.insuranceReserveAccruedAtoms), note: "collected" },
+      { key: "protocol", label: legLabel("protocol"), bps: FEE_SPLIT.PROTOCOL_FEE_BPS, usd: toUsd(cfg.protocolFeeAccruedAtoms), note: "collected" },
+      { key: "creator", label: legLabel("creator"), bps: cfg.creatorShareBps, usd: toUsd(creatorAtoms), note: "claimable" },
+      { key: "lp", label: legLabel("lp"), bps: cfg.lpShareBps, usd: toUsd(cfg.lpFeeAccruedAtoms), note: "collected" },
+      { key: "insurance", label: legLabel("insurance"), bps: cfg.insuranceShareBps, usd: toUsd(cfg.insuranceReserveAccruedAtoms), note: "collected" },
     ];
   }, [cfg, assetProfile, decimals]);
 

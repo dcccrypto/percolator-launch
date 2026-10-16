@@ -1,5 +1,6 @@
 "use client";
 
+import { errorText } from "@/lib/error-text";
 import { useCallback, useRef, useState } from "react";
 import { Keypair, PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
@@ -18,8 +19,6 @@ import {
   buildIx,
   getAta,
   detectSlabLayout,
-  isV17Account,
-  V17_PORTFOLIO_ACCOUNT_LEN,
   deriveVaultAuthority,
 } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
@@ -30,16 +29,14 @@ import { humanizeError } from "@/lib/errorMessages";
 import { fetchPortfolioIdentity } from "@/lib/v18-wire";
 import { assertDepositWithinBalance, DepositExceedsBalanceError } from "@/lib/deposit-guard";
 import { readU64LE } from "@/lib/u64le";
+import { isWrapperAccount, createPortfolioAccountIx, portfolioAccountLen } from "@/lib/v22/layout";
 
 /** Shared discovery (lib/owner-portfolio.ts): `null` only when the scan found
  *  none; an RPC failure throws PortfolioLookupError instead of reading as "no
  *  account" and creating a duplicate portfolio (M-4). */
 const findV17PortfolioForInit = findOwnerPortfolio;
 
-// Full v17 portfolio account size — must match V17_PORTFOLIO_ACCOUNT_LEN from SDK.
-// InitPortfolio reallocs to this size and does NOT add lamports, so the CreateAccount
-// rent must cover the full 9347 bytes or InitPortfolio fails with InsufficientFundsForRent.
-const V17_PORTFOLIO_ACCOUNT_SIZE = V17_PORTFOLIO_ACCOUNT_LEN;
+// Portfolio length comes from lib/v22/layout (portfolioAccountLen): exact for the active layout.
 
 export function useInitUser(slabAddress: string) {
   const { connection } = useConnectionCompat();
@@ -72,7 +69,10 @@ export function useInitUser(slabAddress: string) {
       setLoading(true);
       setError(null);
       try {
-        if (!wallet.publicKey || !mktConfig || !slabProgramId) throw new Error("Wallet not connected or market not loaded");
+        // Two errors, not one: the message resolver maps "Wallet not connected" to "Wallet locked", so the old
+        // combined string told a connected user to unlock their wallet while the market was still loading.
+        if (!wallet.publicKey) throw new Error("Wallet not connected");
+        if (!mktConfig || !slabProgramId) throw new Error("Market not loaded");
         // Defense-in-depth: refuse to build a tx whose programId is not in
         // our deployed allowlist. See SlabProvider.parseSlab for the primary gate.
         assertKnownProgram(slabProgramId);
@@ -81,7 +81,7 @@ export function useInitUser(slabAddress: string) {
         const slabPk = new PublicKey(slabAddress);
 
         // ── v17 vs v12 dispatch ──────────────────────────────────────────────
-        const isV17 = slabRaw && slabRaw.length > 0 && isV17Account(slabRaw);
+        const isV17 = slabRaw && slabRaw.length > 0 && isWrapperAccount(slabRaw);
 
         if (isV17) {
           // v17 path: portfolio accounts are standalone keypair-addressed accounts.
@@ -100,14 +100,8 @@ export function useInitUser(slabAddress: string) {
           const portfolioKp = Keypair.generate();
           const portfolioPk = portfolioKp.publicKey;
 
-          const portfolioRent = await connection.getMinimumBalanceForRentExemption(V17_PORTFOLIO_ACCOUNT_SIZE);
-          const createPortfolioIx = SystemProgram.createAccount({
-            fromPubkey: wallet.publicKey,
-            newAccountPubkey: portfolioPk,
-            lamports: portfolioRent,
-            space: V17_PORTFOLIO_ACCOUNT_SIZE,
-            programId,
-          });
+          const portfolioRent = await connection.getMinimumBalanceForRentExemption(portfolioAccountLen());
+          const createPortfolioIx = createPortfolioAccountIx(wallet.publicKey, portfolioPk, portfolioRent, programId);
           const initPortfolioIx = buildIx({
             programId,
             keys: buildAccountMetas(ACCOUNTS_INIT_USER, [
@@ -347,7 +341,7 @@ export function useInitUser(slabAddress: string) {
         setTimeout(() => refreshSlab(), 2000);
         return { sig, depositedAmount: effectiveFee };
       } catch (e) {
-        const raw = e instanceof Error ? e.message : String(e);
+        const raw = errorText(e);
         // PERC-698: Custom program error 0x4 = InvalidSlabLen — V0/V1 program mismatch.
         const is0x4 = /custom program error:\s*0x4\b/i.test(raw);
         // PERC-8388: Lighthouse/Blowfish 0x1900 — wallet middleware assertion failure.

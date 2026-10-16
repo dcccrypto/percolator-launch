@@ -15,6 +15,7 @@
  * ~25KB, so "len == 16" alone is not the tombstone (a sliced read of a live market is also short).
  */
 import { HEADER_LEN, WRAPPER_MAGIC, WRAPPER_VERSION_V18 } from "@/lib/limits/constants";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { KIND_CLOSED_MARKET } from "@/lib/limits/close-slab";
 
 const KIND_OFF = 10;
@@ -38,7 +39,9 @@ export function isClosedMarketTombstone(data: Uint8Array | null | undefined): bo
   if (!data || data.length !== HEADER_LEN) return false;
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   if (view.getBigUint64(0, true) !== WRAPPER_MAGIC) return false;
-  if (view.getUint16(8, true) !== WRAPPER_VERSION_V18) return false;
+  const version = view.getUint16(8, true);
+  // v2.2 (flag on) stamps VERSION 19 on every kind, a closed-market tombstone included.
+  if (version !== WRAPPER_VERSION_V18 && !(isDevnetV22Enabled() && version === 19)) return false;
   if (data[KIND_OFF] !== KIND_CLOSED_MARKET) return false;
   for (let i = KIND_OFF + 1; i < HEADER_LEN; i++) if (data[i] !== 0) return false;
   return true;

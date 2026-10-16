@@ -1,5 +1,7 @@
 'use client';
 
+import { errorText } from "@/lib/error-text";
+import { parseLpVaultRegistry, parseLpRedemption } from "@/lib/v22/records";
 import { vaultWithdrawView } from '@/lib/limits/earn-withdrawable';
 import type { BlockedBy, WithdrawStatus } from '@/lib/limits/earn-withdrawable';
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
@@ -18,18 +20,14 @@ import {
   deriveLpEscrow,
   encodeCreateLpVaultV17,
   encodeRequestRedeemLpShares,
-  ACCOUNTS_CREATE_LP_VAULT,
-  buildAccountMetas,
   buildIx,
-  WELL_KNOWN,
   deriveVaultAuthority,
   deriveLpBackingLedger,
-  parseLpVaultRegistry,
-  parseLpRedemption,
 } from '@percolatorct/sdk';
 import { sendTx, broadcastSignedTx, buildBatchTx, getFreshBlockhash, getPriorityFee, signAllCompat, simulateForGate } from '@/lib/tx';
 import { sizeComputeUnitLimit } from '@/lib/compute-budget';
 import { useSlabState } from '../components/providers/SlabProvider';
+import { createLpVaultKeys } from '@/lib/v22/create-lp-vault';
 import { assertKnownProgram } from '@/lib/programAllowlist';
 import { assertDepositWithinBalance, readTokenBalance } from '@/lib/deposit-guard';
 import { useParams } from 'next/navigation';
@@ -44,6 +42,7 @@ import { buildEarnDepositIxs, buildEarnExecuteIxs, buildRequestRedeemIx, earnTxP
 import { SimulationRefusal } from "@/lib/tx";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { resolveDevnetProgramIds } from "@/lib/program-ids";
+import { decodeLpVaultRegistryBound } from '@/lib/limits/decode';
 import { readEarnP3Context } from "@/lib/limits/earn-p3-read";
 import { readEmptyCloseIxs, readViewerTopupIxs } from "@/lib/limits/resolved-exit-load";
 import { sendWithTopup } from "@/lib/limits/resolved-topup";
@@ -75,6 +74,8 @@ import {
   type KnownBalance,
   type TokenRead,
 } from '@/lib/token-balance';
+import { withEarnPriceWait } from "@/lib/limits/earn-price-wait";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 
 /**
  * Bytes left free in a bundled Earn payout for the instructions sendTx can add (review of #2721,
@@ -454,6 +455,8 @@ export function useInsuranceLP() {
       // created, RPC hiccup, or an SDK without this export) never blocks the
       // insuranceBalance/lpSupply/userLpBalance state already computed above.
       let registryExists = false;
+      /** Unbound (two-pot) vault: worth its pots' NAV, never registry shares + fees. */
+      let twoPot = false;
       let lpVaultDomain = 0;
       let registryAddress: PublicKey | null = null;
       let vaultTotalAtoms = 0n;
@@ -481,11 +484,12 @@ export function useInsuranceLP() {
           if (registryAcctInfo && registryAcctInfo.data.length > 0) {
             const registry = parseLpVaultRegistry(new Uint8Array(registryAcctInfo.data));
             registryExists = true;
+            twoPot = decodeLpVaultRegistryBound(new Uint8Array(registryAcctInfo.data)) === false;
             lpVaultDomain = Number(registry.domain);
             redemptionCooldownSlots = sanitizeOnChainValue(registry.redemptionCooldownSlots);
 
-            // Total backing = shares outstanding (minted 1:1 with deposited atoms)
-            // + cumulative fee atoms distributed into the vault since launch.
+            // Fallback backing for legacy and bound registries: shares outstanding + cumulative fee
+            // atoms distributed into the vault. A two-pot vault is priced from its pots below.
             const shares = sanitizeOnChainValue(registry.totalLpSharesOutstanding);
             const feeAtoms = sanitizeOnChainValue(registry.feeDistributionTotalAtoms);
             vaultTotalAtoms = shares + feeAtoms;
@@ -554,6 +558,10 @@ export function useInsuranceLP() {
         const sp = rawSp ? repairUnderwaterPot(rawSp)?.state ?? null : null;
         // Wrapper 7a3ac04c+ (navFloor): an over-impaired pot is worth 0 instead of unpriceable.
         const v = sp ? combinedVault(sp.own, sp.sib, sp.feeShareBps, sp.navFloor === true) : null;
+        // A two-pot vault whose pots weren't read (RPC error) or couldn't be priced this cycle has no
+        // value: shares + fees above is far from its NAV (~3,450x on devnet). Fail the cycle so the
+        // outer catch keeps the last good state and flags readError, as useEarnStats does (#3264).
+        if (twoPot && !(sp && v)) throw new Error('Earn vault pot state unreadable');
         if (sp && v && sp.totalShares > 0n) {
           const held = heldShares;
           vaultTotalAtoms = v.nav;
@@ -679,6 +687,7 @@ export function useInsuranceLP() {
    *   [3] lpMint (writable, PDA: ["lp_vault_mint", market])
    *   [4] systemProgram
    *   [5] tokenProgram
+   *   [6] collateralMint (readonly) — v2.2 only
    */
   const createMint = useCallback(async () => {
     if (!wallet.publicKey || !wallet.signTransaction) {
@@ -697,14 +706,14 @@ export function useInsuranceLP() {
       const [registryPda] = deriveLpVaultRegistry(progPk, marketPk);
       const [lpMintPda] = deriveInsuranceLpMint(progPk, marketPk);
 
-      const keys = buildAccountMetas(ACCOUNTS_CREATE_LP_VAULT, [
-        wallet.publicKey,
-        marketPk,
-        registryPda,
-        lpMintPda,
-        WELL_KNOWN.systemProgram,
-        WELL_KNOWN.tokenProgram,
-      ]);
+      // v2.2: account [6] is the market's collateral mint (the six-account form is refused on chain); flag off: the six accounts as before.
+      const keys = createLpVaultKeys({
+        admin: wallet.publicKey,
+        market: marketPk,
+        registry: registryPda,
+        lpMint: lpMintPda,
+        collateralMint: slabState.config?.collateralMint ?? null,
+      });
       const data = encodeCreateLpVaultV17({
         feeShareBps: 2000,          // 20% of insurance earnings to LP providers
         oiReservationThresholdBps: 5000, // 50% OI reservation threshold
@@ -715,7 +724,7 @@ export function useInsuranceLP() {
       await sendTx({ connection, wallet, instructions: [ix] });
       await refreshState();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorText(err);
       setError(msg);
       throw err;
     } finally {
@@ -848,12 +857,15 @@ export function useInsuranceLP() {
         }));
         return sendTx({ connection, wallet, instructions: ixs, selfHeal: { programId: progPk, market: marketPk }, vaultLpRepair: earnRepairFor(progPk, marketPk) });
       };
-      const sig = await sendWithUpgradeRetry(attemptDeposit, isEarnVersionRefusal);
+      // S-3 (v2.2): a pre-sign 26/27 (price) is re-checked for up to 20 s, then a clear error.
+      const sig = isDevnetV22Enabled()
+        ? await withEarnPriceWait(() => sendWithUpgradeRetry(attemptDeposit, isEarnVersionRefusal), { wrapperProgramId: progPk.toBase58() })
+        : await sendWithUpgradeRetry(attemptDeposit, isEarnVersionRefusal);
       void readTxDrawSummary(connection, sig).then(setLastDrawSummary);
       await refreshState();
       return sig;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorText(err);
       setError(msg);
       throw err;
     } finally {
@@ -1074,7 +1086,7 @@ export function useInsuranceLP() {
       await refreshState();
       return { step, signature };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorText(err);
       setError(msg);
       throw err;
     } finally {
@@ -1124,7 +1136,7 @@ export function useInsuranceLP() {
       await refreshState();
       return sig;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorText(err));
       await refreshState().catch(() => {});
       throw err;
     } finally {

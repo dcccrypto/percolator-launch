@@ -27,9 +27,10 @@
  */
 import * as crypto from "node:crypto";
 import { del, list, put } from "@vercel/blob";
+import { PREFUND_WINDOW_MS } from "@/lib/prefund-requirement";
 
-/** 24h — mirrors RATE_LIMIT_MS in lib/faucet-rate-gate.ts. */
-export const PREFUND_CLAIM_TTL_MS = 24 * 60 * 60 * 1000;
+/** The pre-fund claim window (1 h, the playground faucet's), shared with the Supabase gate. */
+export const PREFUND_CLAIM_TTL_MS = PREFUND_WINDOW_MS;
 
 const CLAIM_BLOB_PREFIX = "playground/prefund-claims/";
 

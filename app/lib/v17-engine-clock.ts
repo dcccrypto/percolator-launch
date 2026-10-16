@@ -32,13 +32,8 @@
  *    advances it, so it reads fresh while the crank is dead, and it says
  *    nothing about accrual.
  */
-import {
-  V17_ASSET_ORACLE_WRAPPER_LEN,
-  V17_MARKET_ASSET_SLOT_LEN,
-  V17_MARKET_GROUP_LEN,
-  V17_MARKET_GROUP_OFF,
-} from "@percolatorct/sdk";
-import { V17_ENGINE_CONFIG_OFF } from "@/lib/v17-engine-config";
+import { marketGeometry, isUnsupportedLayout } from "@/lib/v22/layout";
+import { engineConfigOff } from "@/lib/v17-engine-config";
 
 /** Wrapper `oracle_mode` bytes (percolator-prog `constants::ORACLE_MODE_*`). */
 export const ORACLE_MODE_MANUAL = 0;
@@ -73,8 +68,14 @@ const CONFIG_MAX_ACCRUAL_DT_SLOTS_REL = 118;
  * accrued (0) — callers treat that as unknown, not as infinitely stale.
  */
 export function readV17AssetSlotLast(data: Uint8Array, assetIndex = 0): bigint | null {
-  const slotBase = V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN + assetIndex * V17_MARKET_ASSET_SLOT_LEN;
-  const off = slotBase + V17_ASSET_ORACLE_WRAPPER_LEN + ASSET_STATE_SLOT_LAST_REL;
+  let engineOff: number;
+  try {
+    engineOff = marketGeometry(data, "readV17AssetSlotLast").engineOff(assetIndex);
+  } catch (e) {
+    if (isUnsupportedLayout(e)) return null;
+    throw e;
+  }
+  const off = engineOff + ASSET_STATE_SLOT_LAST_REL;
   if (off + 8 > data.length) return null;
   const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const v = dv.getBigUint64(off, true);
@@ -83,7 +84,9 @@ export function readV17AssetSlotLast(data: Uint8Array, assetIndex = 0): bigint |
 
 /** Read the market's `max_accrual_dt_slots` (engine V16ConfigAccount). Null when unreadable or 0. */
 export function readV17MaxAccrualDtSlots(data: Uint8Array): bigint | null {
-  const off = V17_ENGINE_CONFIG_OFF + CONFIG_MAX_ACCRUAL_DT_SLOTS_REL;
+  const cfgOff = engineConfigOff(data);
+  if (cfgOff === null) return null;
+  const off = cfgOff + CONFIG_MAX_ACCRUAL_DT_SLOTS_REL;
   if (off + 8 > data.length) return null;
   const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const v = dv.getBigUint64(off, true);

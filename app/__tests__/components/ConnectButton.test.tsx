@@ -55,6 +55,8 @@ vi.mock("@privy-io/react-auth", () => ({
   useLogin: () => ({
     login: mockLogin,
   }),
+  useConnectWallet: () => ({ connectWallet: vi.fn() }),
+  useIdentityToken: () => ({ identityToken: null }),
   usePrivy: () => privyState,
 }));
 
@@ -64,13 +66,18 @@ vi.mock("@privy-io/react-auth/solana", () => ({
 }));
 
 /**
- * The Privy-backed behaviour lives in ConnectButtonPrivyInner — ConnectButton
- * itself is only a `dynamic(ssr:false)` shell that keeps @privy-io/react-auth
- * out of the shared bundle. Rendering the shell in jsdom yields its "Loading
- * wallet" placeholder forever (the dynamic import never resolves), so these
- * assert against the inner component, where the behaviour actually is.
+ * The Privy-backed behaviour lives in ConnectButtonPrivyInner, which reads Privy through the
+ * bridge. These assert against the inner component, where the behaviour actually is.
  */
-import { ConnectButtonPrivyInner as ConnectButton } from "@/components/wallet/ConnectButtonPrivyInner";
+import { ConnectButtonPrivyInner } from "@/components/wallet/ConnectButtonPrivyInner";
+import { PrivyStateProvider } from "../helpers/privyBridge";
+
+// Privy reaches the button through the bridge (the real bridge hook over the mocked SDK above).
+const ConnectButton = () => (
+  <PrivyStateProvider>
+    <ConnectButtonPrivyInner />
+  </PrivyStateProvider>
+);
 
 describe("ConnectButton", () => {
   beforeEach(() => {

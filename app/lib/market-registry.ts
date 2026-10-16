@@ -3,6 +3,7 @@ import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { readLiveMarketStateResolutions } from "@/lib/live-market-state";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import { getConfig } from "@/lib/config";
+import { isMissingColumnError } from "@/lib/supabase-missing-column";
 
 /**
  * The one place market rows are loaded.
@@ -46,11 +47,21 @@ export type MarketRegistryRow = Record<string, unknown>;
 async function fetchRegistryRows(
   supabase: ReturnType<typeof getServiceClient>,
 ): Promise<MarketRegistryRow[] | null> {
-  let { data, error } = await supabase
+  // Egress (review E2, 2026-10-14): rows that can never be listed are dropped IN THE QUERY, not
+  // after the fetch. `status = 'closed'` is how the 2026-10-01 relaunch retired every old-wrapper
+  // row (the view's own definition also excludes it; this keeps the filter if a live view drifts),
+  // and slabs this instance has already PROVEN dead (tombstone / foreign owner, both permanent) are
+  // excluded by address. `.not(...)` rather than `.neq(...)`: same SQL (`status <> 'closed'`; the
+  // column is NOT NULL).
+  let primary = supabase
     .from("markets_with_stats")
     .select(MARKET_SELECT_FIELDS)
     .eq("network", getServerNetwork())
     .not("slab_address", "is", null)
+    .not("status", "eq", "closed");
+  const gone = knownGoneFilter();
+  if (gone) primary = primary.not("slab_address", "in", gone);
+  let { data, error } = await primary
     // GH#2072: .neq("indexer_excluded", true) excludes NULL rows (SQL: NULL <> true → NULL → excluded).
     // Since most markets have indexer_excluded=NULL, use .or() to include both NULL and non-true values.
     .or("indexer_excluded.is.null,indexer_excluded.neq.true");
@@ -76,7 +87,7 @@ async function fetchRegistryRows(
   }
 
   // Fallback 2: network column also missing (migration 20260329180000 not applied).
-  if (error && error.message?.includes("network")) {
+  if (isMissingColumnError(error, "network")) {
     Sentry.captureMessage(
       "PERC-8215: network column missing — apply migration 20260329180000. Falling back to unfiltered query.",
       {
@@ -127,7 +138,82 @@ async function fetchRegistryRows(
  * tombstone CloseSlab leaves (CloseSlab shrinks to 16 bytes, it does not delete). Unresolved RPC/parse reads
  * keep their registry values and preserve the existing fail-open behaviour.
  */
-export async function loadMergedMarketRows(): Promise<MarketRegistryRow[] | null> {
+// ── Egress: one shared, short-lived copy per server instance (review E2, 2026-10-14) ──────────
+//
+// /api/markets (every URL variant), /api/stats and /api/funding/global all call this. Each call
+// used to re-read every registry row from Supabase plus one batched RPC read; the CDN could not
+// collapse them (5+ distinct URLs, a cookie-gated playground). Now an instance re-reads at most
+// once per MARKET_ROWS_MEMO_MS, and concurrent callers share the one in-flight read.
+
+const DEFAULT_MEMO_MS = 20_000;
+
+function memoTtlMs(): number {
+  const raw = process.env.MARKET_ROWS_MEMO_MS;
+  if (raw === undefined || raw.trim() === "") return DEFAULT_MEMO_MS;
+  const v = Number(raw);
+  return Number.isFinite(v) && v >= 0 ? v : DEFAULT_MEMO_MS;
+}
+
+let memo: { at: number; rows: MarketRegistryRow[] } | null = null;
+let inflight: { startedAt: number; promise: Promise<MarketRegistryRow[] | null> } | null = null;
+
+/**
+ * Slabs PROVEN un-listable for good: the CloseSlab tombstone, or an account owned by another
+ * program (an abandoned wrapper's market). Neither can become a live market of this wrapper again,
+ * so they are excluded from later queries by address. Bounded so the query string stays small;
+ * a plain RPC `null` is NOT recorded (a keypair-created account could still appear there).
+ */
+const knownGone = new Set<string>();
+const KNOWN_GONE_MAX = 200;
+
+function rememberGone(slab: string): void {
+  if (knownGone.size < KNOWN_GONE_MAX) knownGone.add(slab);
+}
+
+function knownGoneFilter(): string | null {
+  // Base58 only, so no quoting is needed inside PostgREST's in.(...) list.
+  const slabs = [...knownGone].filter((s) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s));
+  return slabs.length > 0 ? `(${slabs.join(",")})` : null;
+}
+
+/** Test hook: forget the memo, any in-flight read and the proven-dead set. */
+export function resetMarketRegistryCache(): void {
+  memo = null;
+  inflight = null;
+  knownGone.clear();
+}
+
+/**
+ * Load registry rows merged with live on-chain state (memoized; see above).
+ *
+ * `maxAgeMs` lowers the accepted age of the shared copy (never raises it past the TTL): the
+ * post-registration fresh fetch (/api/markets ?fresh=) passes 3 s so a creator sees their new market, while
+ * a flood of fresh requests still costs at most one read per that window per instance.
+ *
+ * The returned array and rows are shared between callers: treat them as read-only.
+ */
+export async function loadMergedMarketRows(opts: { maxAgeMs?: number } = {}): Promise<MarketRegistryRow[] | null> {
+  const ttl = memoTtlMs();
+  if (ttl === 0) return loadMergedMarketRowsUncached();
+  const maxAge = Math.min(opts.maxAgeMs ?? ttl, ttl);
+  const now = Date.now();
+  if (memo && now - memo.at < maxAge) return memo.rows;
+  if (inflight && now - inflight.startedAt < maxAge) return inflight.promise;
+  const startedAt = now;
+  const promise = loadMergedMarketRowsUncached()
+    .then((rows) => {
+      // Failures are not cached: the next caller retries.
+      if (rows !== null && (!memo || memo.at <= startedAt)) memo = { at: startedAt, rows };
+      return rows;
+    })
+    .finally(() => {
+      if (inflight?.promise === promise) inflight = null;
+    });
+  inflight = { startedAt, promise };
+  return promise;
+}
+
+async function loadMergedMarketRowsUncached(): Promise<MarketRegistryRow[] | null> {
   let supabase: ReturnType<typeof getServiceClient>;
   try {
     supabase = getServiceClient();
@@ -157,11 +243,17 @@ export async function loadMergedMarketRows(): Promise<MarketRegistryRow[] | null
     const slab = String(m.slab_address ?? "");
 
     if (liveRead.missing.has(slab)) {
+      // Optional chain: partial test doubles of readLiveMarketStateResolutions omit `tombstoned`.
+      if (liveRead.tombstoned?.has(slab)) rememberGone(slab);
       return false;
     }
 
     const owner = liveStates.get(slab)?.owner;
-    return owner === undefined || owner === wrapper;
+    if (owner !== undefined && owner !== wrapper) {
+      rememberGone(slab);
+      return false;
+    }
+    return true;
   });
 
   return current.map((m) => {

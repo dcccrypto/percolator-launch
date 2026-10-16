@@ -13,6 +13,8 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("@/lib/config", async (orig) => ({ ...(await orig<typeof import("@/lib/config")>()), getNetwork: () => "devnet" }));
 vi.mock("@/hooks/useWalletCompat", () => ({
   useWalletCompat: () => ({ publicKey: { toBase58: () => "WaLLet1111111111111111111111111111111111111" } }),
+  // v2.2 only (LaunchSuccess reads the share token through it); never called with the flag off.
+  useConnectionCompat: () => ({ connection: {} }),
 }));
 vi.mock("@/components/create/LogoUpload", () => ({ LogoUpload: () => null }));
 

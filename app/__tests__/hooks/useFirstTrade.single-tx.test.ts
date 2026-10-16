@@ -127,6 +127,28 @@ describe("GH#2959 useFirstTrade: the first trade is ONE transaction", () => {
     expect(signAll).not.toHaveBeenCalled();
   });
 
+  // S3: fund-and-trade sent no selfHeal, so a lagging engine clock or a lapsed backing bucket refused
+  // every deposit-and-trade (19/21) while a normal trade, which self-heals, went through.
+  it("the first trade carries the same self-heal a normal trade does (LP catch-up, market repairs)", async () => {
+    sendTx.mockResolvedValue("sigOne");
+    const { err } = await run();
+    expect(err).toBeNull();
+    const { resolveLpTradeAccounts } = await import("@/hooks/useTrade");
+    const lp = await (vi.mocked(resolveLpTradeAccounts).mock.results.at(-1)!.value as Promise<{ accountB: PublicKey }>);
+    const heal = (call(0) as SendArgs & { selfHeal?: { programId: PublicKey; market: PublicKey; catchUp: { portfolio: PublicKey; oracleTail: unknown[] } } }).selfHeal;
+    expect(heal).toBeDefined();
+    expect(heal!.catchUp.portfolio.equals(lp.accountB)).toBe(true);
+    expect(heal!.catchUp.oracleTail).toEqual([]); // admin oracle: no Pyth account
+  });
+
+  it("an existing account's deposit-and-trade carries it too", async () => {
+    findV17Portfolio.mockResolvedValue(Keypair.generate().publicKey);
+    sendTx.mockResolvedValue("sigFund");
+    const { err } = await run();
+    expect(err).toBeNull();
+    expect((call(0) as SendArgs & { selfHeal?: unknown }).selfHeal).toBeDefined();
+  });
+
   it("NEGATIVE CONTROL: an existing account sends [deposit, trade] with no co-signer", async () => {
     findV17Portfolio.mockResolvedValue(Keypair.generate().publicKey);
     sendTx.mockResolvedValue("sigFund");

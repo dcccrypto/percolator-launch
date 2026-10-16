@@ -2,6 +2,7 @@
 
 import { FC, useMemo } from "react";
 import { FEE_SPLIT, validateFeeSplit } from "@percolatorct/sdk";
+import { legLabel } from "@/lib/fee-breakdown";
 
 /** The three creator-settable fee shares, in bps of the total trade fee (T). */
 export interface FeeSplitBps {
@@ -71,9 +72,9 @@ export const FeeSplitControl: FC<FeeSplitControlProps> = ({ value, onChange }) =
   };
 
   const legs: { key: keyof FeeSplitBps; label: string; hint: string }[] = [
-    { key: "creatorShareBps", label: "Creator", hint: "max 36%" },
-    { key: "lpShareBps", label: "LP vault", hint: "min 32%" },
-    { key: "insuranceShareBps", label: "Insurance", hint: "min 12%" },
+    { key: "creatorShareBps", label: legLabel("creator"), hint: "max 36%" },
+    { key: "lpShareBps", label: legLabel("lp"), hint: "min 32%" },
+    { key: "insuranceShareBps", label: legLabel("insurance"), hint: "min 12%" },
   ];
 
   return (

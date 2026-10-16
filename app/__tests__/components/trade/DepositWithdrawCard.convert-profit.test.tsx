@@ -8,6 +8,8 @@ import { PublicKey } from '@solana/web3.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DepositWithdrawCard } from '@/components/trade/DepositWithdrawCard';
+import { HELD_AFTER_MS } from '@/lib/convert-released-pnl';
+import { __resetProfitHoldForTest } from '@/hooks/useProfitHold';
 
 const mocks = vi.hoisted(() => ({
   useWalletCompat: vi.fn(),
@@ -136,9 +138,89 @@ describe('DepositWithdrawCard: realized profit is withdrawable', () => {
   });
 
   it('profit not backed yet: one calm line, capital still withdrawable', () => {
-    mocks.useConvertibleProfit.mockReturnValue({ status: 'settling', released: 222_882n, code: 21 });
+    mocks.useConvertibleProfit.mockReturnValue({ status: 'settling', released: 222_882n, code: 21, reason: 'backing' });
     render(<DepositWithdrawCard slabAddress="8WC8vALsDJhNCUVRmqZBDSg5xgFAhDrgy7zWqF512pDx" initialMode="withdraw" />);
     expect(screen.getByTestId('settling-profit').textContent).toMatch(/^Your profit becomes withdrawable once the other side of your trade settles/);
+    expect(screen.getByTestId('account-balance').textContent).toContain('49.975');
+    expect(screen.getByTestId('settling-profit').getAttribute('data-held')).toBeNull();
+  });
+
+  it('W-1/W-2: backing still short after a few minutes -> "Held: waiting on backing" with the amount', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-10-14T10:00:00Z'));
+      __resetProfitHoldForTest();
+      window.sessionStorage.clear();
+      mocks.useConvertibleProfit.mockReturnValue({ status: 'settling', released: 222_882n, code: 21, reason: 'backing' });
+      render(<DepositWithdrawCard slabAddress="8WC8vALsDJhNCUVRmqZBDSg5xgFAhDrgy7zWqF512pDx" initialMode="withdraw" />);
+      expect(screen.getByTestId('settling-profit').getAttribute('data-held')).toBeNull();
+      act(() => { vi.advanceTimersByTime(HELD_AFTER_MS + 16_000); });
+      const line = screen.getByTestId('settling-profit');
+      expect(line.getAttribute('data-held')).toBe('true');
+      expect(line.textContent).toMatch(/^Held: waiting on backing/);
+      expect(line.textContent).toContain('0.222');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('NEGATIVE CONTROL: a stale-certificate quote never turns into Held, however long it lasts', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-10-14T10:00:00Z'));
+      __resetProfitHoldForTest();
+      window.sessionStorage.clear();
+      mocks.useConvertibleProfit.mockReturnValue({ status: 'settling', released: 222_882n, code: 19, reason: 'stale' });
+      render(<DepositWithdrawCard slabAddress="8WC8vALsDJhNCUVRmqZBDSg5xgFAhDrgy7zWqF512pDx" initialMode="withdraw" />);
+      act(() => { vi.advanceTimersByTime(HELD_AFTER_MS * 3); });
+      expect(screen.getByTestId('settling-profit').textContent).not.toMatch(/Held/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('capital 0 with profit on the Withdraw tab: no "Getting Started / deposit to start trading" hint', () => {
+    mocks.useUserAccount.mockReturnValue({ idx: 0, account: { ...account, capital: 0n }, pubkey: portfolio });
+    mocks.useConvertibleProfit.mockReturnValue({ status: 'ready', postCapital: 222_882n, convertible: 222_882n, prefix: [] });
+    render(<DepositWithdrawCard slabAddress="8WC8vALsDJhNCUVRmqZBDSg5xgFAhDrgy7zWqF512pDx" initialMode="withdraw" />);
+    expect(screen.queryByText('Getting Started')).toBeNull();
+    fireEvent.click(screen.getByText('Max'));
+    expect((screen.getByTestId('withdraw-amount-input') as HTMLInputElement).value).toBe('0.222882');
+  });
+});
+
+describe('DepositWithdrawCard: withdraw with an open position', () => {
+  const wallet = new PublicKey('3pae8qvc8wimpETqPkxYTYMciUiRNJ5Mpu8gGvBWqLxZ');
+  const portfolio = new PublicKey('4yjoGo9NWMv8XCfV2CZgaP6RyjwxxV6XbvMzmR7Z8b3i');
+  const collateralMint = new PublicKey('DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC');
+  // 0.1 long at $150 against ~50 USDC: plenty of capital above initial margin, which the
+  // old free-margin Max offered even though useWithdraw refuses any withdrawal here.
+  const account = { capital: 49_975_111n, pnl: 0n, positionSize: 100_000n, entryPrice: 150_000_000n };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.useWalletCompat.mockReturnValue({ connected: true, publicKey: wallet });
+    mocks.useConnectionCompat.mockReturnValue({ connection: { getTokenAccountBalance: mocks.getTokenAccountBalance } });
+    mocks.getTokenAccountBalance.mockResolvedValue({ value: { amount: '0', decimals: 6 } });
+    mocks.getAssociatedTokenAddressSync.mockReturnValue(collateralMint);
+    mocks.useUserAccount.mockReturnValue({ idx: 0, account, pubkey: portfolio });
+    mocks.useSlabState.mockReturnValue({ config: { collateralMint }, params: null });
+    mocks.useTokenMeta.mockReturnValue({ symbol: 'USDC', decimals: 6 });
+    mocks.useConvertibleProfit.mockReturnValue({ status: 'none' });
+  });
+
+  it('offers no Max, says to close first, and never sends a withdrawal', async () => {
+    render(<DepositWithdrawCard slabAddress="8WC8vALsDJhNCUVRmqZBDSg5xgFAhDrgy7zWqF512pDx" initialMode="withdraw" />);
+    expect(screen.queryByText('Max')).toBeNull();
+    expect(screen.getByTestId('withdraw-position-open').textContent).toBe('Close your position to withdraw.');
+    expect(screen.queryByText(/may trigger liquidation/)).toBeNull();
+    fireEvent.change(screen.getByTestId('withdraw-amount-input'), { target: { value: '1' } });
+    const submit = screen.getByTestId('withdraw-submit') as HTMLButtonElement;
+    expect(submit.textContent).toBe('Close your position to withdraw');
+    expect(submit.disabled).toBe(true);
+    await act(async () => { fireEvent.click(submit); });
+    expect(mocks.withdraw).not.toHaveBeenCalled();
+    // The balance still shows what the account holds.
     expect(screen.getByTestId('account-balance').textContent).toContain('49.975');
   });
 });

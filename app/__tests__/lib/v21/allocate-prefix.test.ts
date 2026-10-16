@@ -121,3 +121,58 @@ describe("refusal 100 and the wire", () => {
     expect(decodeVaultLpExtV19(new Uint8Array(10))).toBeNull();
   });
 });
+
+// --- v2.2 bond market: the gate must simulate the SAME accounts the send carries (QA EARN-10) ---
+import { readFileSync } from "node:fs";
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
+import { __setTailsClockForTest, applyMarketTailsV22, fetchMarketTailsV22 } from "@/lib/v22/market-tails";
+
+const SOL = JSON.parse(readFileSync(new URL("./data/sol-bond-market.json", import.meta.url), "utf8")) as Record<string, { address: string; dataB64: string }> & { programId: string; market: string; registryByte162: number };
+const solInfo = (k: "registry" | "vaultLpState" | "bondTranche") => ({ owner: new PublicKey(SOL.programId), data: Buffer.from(SOL[k].dataB64, "base64") });
+
+function solConn(withTranche = true) {
+  return {
+    getAccountInfo: vi.fn(),
+    getMultipleAccountsInfo: vi.fn(async (keys: PublicKey[]) => {
+      if (keys.length === 2) return [solInfo("registry"), solInfo("vaultLpState")];
+      return keys.map((_, i) => (i === 0 && withTranche ? solInfo("bondTranche") : null)); // [tranche, units, ext]
+    }),
+  } as never;
+}
+
+describe("tag 103 on a bond market (real devnet SOL bytes)", () => {
+  afterEach(() => { __setDevnetV22ForTest(null); __setTailsClockForTest(null); });
+  const run = async (conn: unknown) => {
+    const seen: number[] = [];
+    const sim = vi.fn(async (ixs: { keys: unknown[] }[]) => { seen.push(ixs[0].keys.length); return { err: seen[0] === 9 ? "NotEnoughAccountKeys" : null, rpcFailed: false }; });
+    const ixs = await planAllocatePrefix({ connection: conn as never, simulate: sim as never }, { programId: new PublicKey(SOL.programId), market: new PublicKey(SOL.market), cranker: CRANKER, beforeQ: 0n, signedSizeQ: 5n });
+    return { ixs, seen };
+  };
+  it("fixture is the SOL registry with the bond flag (byte 162) set", () => {
+    expect(SOL.registryByte162).toBe(1);
+    expect(Buffer.from(SOL.registry.dataB64, "base64")[162]).toBe(1);
+  });
+  it("v2.2 on: the gate simulates 10 accounts with the tranche at [9], and the prefix is kept", async () => {
+    __setDevnetV21ForTest(true);
+    __setDevnetV22ForTest(true);
+    const { ixs, seen } = await run(solConn());
+    expect(seen).toEqual([10]);
+    expect(ixs).toHaveLength(1);
+    expect(ixs[0].keys).toHaveLength(10);
+    expect(ixs[0].keys[9].pubkey.toBase58()).toBe(SOL.bondTranche.address);
+    expect(ixs[0].keys[9].isWritable).toBe(false);
+  });
+  it("the send path's tails do not append the tranche a second time", async () => {
+    __setDevnetV21ForTest(true);
+    __setDevnetV22ForTest(true);
+    const { ixs } = await run(solConn());
+    const tails = await fetchMarketTailsV22(solConn(), new PublicKey(SOL.programId), new PublicKey(SOL.market));
+    expect(applyMarketTailsV22(ixs[0], tails).keys).toHaveLength(10);
+  });
+  it("a market without a tranche still simulates 9 accounts", async () => {
+    __setDevnetV21ForTest(true);
+    __setDevnetV22ForTest(true);
+    const { seen } = await run(solConn(false));
+    expect(seen).toEqual([9]);
+  });
+});

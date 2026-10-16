@@ -15,9 +15,9 @@ describe("SI hidden from every browse surface (2026-10-02)", () => {
     expect(slabs).not.toContain(SI);
     expect(slabs).toContain(PERC);
   });
-  it("trade-page selector and switcher apply the listing-hidden filter", () => {
+  it("trade-page selector and switcher apply the browse filter (listing-hidden is part of isBrowsableMarketRow)", () => {
     for (const f of ["components/trade/MarketSelector.tsx", "components/trade/MarketSwitcher.tsx"]) {
-      expect(readFileSync(join(__dirname, "../..", f), "utf8")).toMatch(/isHiddenFromListing\(/);
+      expect(readFileSync(join(__dirname, "../..", f), "utf8")).toMatch(/isBrowsableMarketRow\(/);
     }
   });
 });

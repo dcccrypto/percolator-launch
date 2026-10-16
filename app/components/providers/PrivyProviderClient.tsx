@@ -1,13 +1,7 @@
 "use client";
 
-import { FC, ReactNode, useCallback, useMemo } from "react";
-import {
-  PrivyProvider,
-  useConnectWallet,
-  useLogin,
-  usePrivy,
-  type WalletListEntry,
-} from "@privy-io/react-auth";
+import { FC, useEffect, useMemo } from "react";
+import { PrivyProvider, usePrivy, type WalletListEntry } from "@privy-io/react-auth";
 import {
   toSolanaWalletConnectors,
   useWallets,
@@ -18,12 +12,17 @@ import {
 import { createSolanaRpc, createSolanaRpcSubscriptions } from "@solana/kit";
 import { PublicKey, Transaction } from "@solana/web3.js";
 import * as Sentry from "@sentry/nextjs";
+import { usePrivyBridgeState } from "@/components/providers/PrivyBridgeState";
 import { SentryUserContext } from "@/components/providers/SentryUserContext";
-import { PrivyLoginContext } from "@/hooks/usePrivySafe";
-import { WalletApiContext, type WalletApi } from "@/hooks/walletApiContext";
+import type { PrivySessionHeaders } from "@/hooks/usePrivySafe";
+import type { PrivyBridgeValue } from "@/hooks/usePrivyBridge";
+import type { WalletApi } from "@/hooks/walletApiContext";
 import { usePreferredWallet, resolveActiveWallet } from "@/hooks/usePreferredWallet";
 import { getNetwork } from "@/lib/config";
+import { useConnectionCompat } from "@/hooks/useWalletCompat";
+import { guardSign } from "@/lib/v22/sign-guard";
 import { purgeLegacyPrivyState } from "@/lib/privy-legacy-purge";
+import { EmbeddedBatchSignError, embeddedBatchSignOptions, isPrivyEmbeddedStandardWallet, isWalletRejection } from "@/lib/privy-batch-sign";
 
 // Drop legacy pre-cookie Privy tokens at module-evaluation time. This chunk is
 // loaded via next/dynamic (ssr:false) before PrivyProvider is ever rendered, and
@@ -33,12 +32,26 @@ import { purgeLegacyPrivyState } from "@/lib/privy-legacy-purge";
 purgeLegacyPrivyState();
 
 /**
- * Client-only Privy provider wrapper. Loaded via next/dynamic with ssr:false
- * to prevent Privy SDK from crashing during server-side rendering.
+ * Everything the app reads from Privy, published by `PrivyBridge` from inside the provider.
+ * The Host (PrivyBridgeHost.tsx) puts it into our own contexts for the app to read.
  */
-const PrivyProviderClient: FC<{ appId: string; children: ReactNode }> = ({
+export interface PrivyBridgeSnapshot {
+  walletApi: WalletApi;
+  /** `login()` with no session, `connectWallet()` with one (see usePrivyConnectAction). */
+  connect: () => void;
+  sessionHeaders: PrivySessionHeaders;
+  privy: PrivyBridgeValue;
+}
+
+/**
+ * Client-only Privy provider. It does NOT wrap the app: it is mounted as a sibling after
+ * hydration (PrivyBridgeHost.tsx) and renders only the bridge, so PrivyProvider's internal tree
+ * can never shift the app's React useIds and the app is server-rendered. Loaded lazily so the
+ * Privy SDK is never evaluated on the server (it needs window / localStorage).
+ */
+const PrivyProviderClient: FC<{ appId: string; onPublish: (snapshot: PrivyBridgeSnapshot) => void }> = ({
   appId,
-  children,
+  onPublish,
 }) => {
   const solanaConnectors = useMemo(() => toSolanaWalletConnectors(), []);
   const walletConnectCloudProjectId =
@@ -118,21 +131,18 @@ const PrivyProviderClient: FC<{ appId: string; children: ReactNode }> = ({
       }}
     >
       <SentryUserContext />
-      <PrivyLoginBridge>
-        <PrivyWalletApiBridge>{children}</PrivyWalletApiBridge>
-      </PrivyLoginBridge>
+      <PrivyBridge onPublish={onPublish} />
     </PrivyProvider>
   );
 };
 
 /**
- * Computes the unified WalletApi from Privy's hooks and injects it via
- * WalletApiContext. Lives INSIDE the PrivyProvider tree and inside this
- * dynamically-imported module, so `useWalletCompat()` consumers get the Privy
+ * Computes the unified WalletApi from Privy's hooks. Lives INSIDE the PrivyProvider tree and
+ * inside this lazily-imported module, so `useWalletCompat()` consumers get the Privy
  * implementation without ever importing @privy-io/react-auth themselves. Ported
  * verbatim from the former `useWalletCompatPrivyInner` in useWalletCompat.ts.
  */
-const PrivyWalletApiBridge: FC<{ children: ReactNode }> = ({ children }) => {
+function usePrivyWalletApi(): WalletApi {
   const { ready, authenticated, logout } = usePrivy();
   const { wallets } = useWallets();
   const { signTransaction: privySignTransaction } = useSignTransaction();
@@ -211,6 +221,12 @@ const PrivyWalletApiBridge: FC<{ children: ReactNode }> = ({ children }) => {
       // "I still signed 8 times" report on Solflare). Verified against
       // @privy-io/js-sdk-core's ConnectedStandardSolanaWallet class:
       // `get standardWallet(): SolanaStandardWallet`.
+      // Set when the embedded wallet's batch sign has been handed to Privy. Any
+      // non-rejection failure after that point (partway through headless signing,
+      // OR before a prompt even shows: unsupported chain, an instant feature
+      // rejection) ends the sign instead of trying a signer that would prompt
+      // again (see EmbeddedBatchSignError).
+      let embeddedBatchStarted = false;
       try {
         const connected = activeWallet as unknown as {
           address: string;
@@ -225,16 +241,36 @@ const PrivyWalletApiBridge: FC<{ children: ReactNode }> = ({ children }) => {
           | undefined;
         const account =
           std?.accounts?.find((a) => a.address === connected.address) ?? std?.accounts?.[0];
+        // Privy's EMBEDDED wallet answers this feature too, but loops one modal per
+        // tx. Its modal shows once, on tx 0, as the approval for the whole batch;
+        // the rest are signed without one (lib/privy-batch-sign.ts).
+        const embedded = isPrivyEmbeddedStandardWallet(std);
         if (typeof feature?.signTransaction === "function" && account) {
+          embeddedBatchStarted = embedded;
           const outputs = await feature.signTransaction(
-            ...serialized.map((bytes) => ({ transaction: bytes, account, chain })),
+            ...serialized.map((bytes, i) => ({
+              transaction: bytes,
+              account,
+              chain,
+              ...(embedded ? { options: embeddedBatchSignOptions(i, txs.length) } : {}),
+            })),
           );
           if (Array.isArray(outputs) && outputs.length === txs.length) {
             console.info(`[PrivyProviderClient] batch-signed ${txs.length} txs via wallet-standard feature (ONE approval)`);
             return outputs.map((o) => Transaction.from(Buffer.from(o.signedTransaction)));
           }
+          if (embeddedBatchStarted) throw new Error("embedded batch returned the wrong number of signatures");
         }
       } catch (e) {
+        // A user rejection ends the sign. Falling through would open per-tx prompts
+        // (attempt 2) and then the batch prompt again (attempt 3) for one cancel.
+        if (isWalletRejection(e)) throw e;
+        // Embedded wallet, failed once the batch was handed to Privy: do not prompt
+        // through another signer. Nothing was signed for broadcast; say so and stop.
+        if (embeddedBatchStarted) {
+          console.warn("[PrivyProviderClient] embedded batch sign failed — not retrying through a prompting signer:", e);
+          throw new EmbeddedBatchSignError(txs.length, { cause: e });
+        }
         console.warn("[PrivyProviderClient] wallet-standard batch sign failed — trying the connected wallet's own signer:", e);
       }
 
@@ -256,6 +292,7 @@ const PrivyWalletApiBridge: FC<{ children: ReactNode }> = ({ children }) => {
           }
         }
       } catch (e) {
+        if (isWalletRejection(e)) throw e; // see attempt 1: one cancel, one prompt
         console.warn("[PrivyProviderClient] connected-wallet variadic sign failed — using Privy signer (may prompt per tx):", e);
       }
 
@@ -275,10 +312,14 @@ const PrivyWalletApiBridge: FC<{ children: ReactNode }> = ({ children }) => {
         );
       }
 
-      const inputs = serialized.map((bytes) => ({
+      const embedded = isPrivyEmbeddedStandardWallet(
+        (activeWallet as unknown as { standardWallet?: unknown }).standardWallet,
+      );
+      const inputs = serialized.map((bytes, i) => ({
         transaction: bytes,
         wallet: activeWallet,
         chain: chain as any,
+        ...(embedded ? { options: embeddedBatchSignOptions(i, txs.length) } : {}),
       }));
       const results = await privySignTransaction(...inputs);
       return results.map((result) => Transaction.from(Buffer.from(result.signedTransaction)));
@@ -311,76 +352,49 @@ const PrivyWalletApiBridge: FC<{ children: ReactNode }> = ({ children }) => {
     };
   }, [activeWallet, privySignMessage]);
 
-  const api = useMemo<WalletApi>(
-    () => ({
+  // v2.2 QA NB-2: the same pre-sign assertion + log as the wallet-adapter bridge (pass-through when the flag is off).
+  const { connection: appConnection } = useConnectionCompat();
+  const api = useMemo<WalletApi>(() => {
+    const chain = getNetwork() === "mainnet" ? "solana:mainnet" : "solana:devnet";
+    const guarded = <T,>(via: string, txs: Transaction[], sign: () => Promise<T>): Promise<T> =>
+      guardSign({ txs, via, connection: appConnection, chain, sign });
+    return {
       publicKey,
       connected,
       connecting: !ready,
       wallet: activeWallet,
-      signTransaction,
-      signAndSendTransaction,
+      signTransaction: signTransaction && ((tx: Transaction) => guarded("privy signTransaction", [tx], () => signTransaction(tx))),
+      signAndSendTransaction:
+        signAndSendTransaction && ((tx: Transaction) => guarded("privy signAndSendTransaction", [tx], () => signAndSendTransaction(tx))),
       signMessage,
-      signAllTransactions,
+      signAllTransactions:
+        signAllTransactions && ((txs: Transaction[]) => guarded("privy signAllTransactions", txs, () => signAllTransactions(txs))),
       disconnect: logout,
-    }),
-    [publicKey, connected, ready, activeWallet, signTransaction, signAndSendTransaction, signMessage, signAllTransactions, logout],
-  );
+    };
+  }, [publicKey, connected, ready, activeWallet, signTransaction, signAndSendTransaction, signMessage, signAllTransactions, logout, appConnection]);
 
-  return <WalletApiContext.Provider value={api}>{children}</WalletApiContext.Provider>;
-};
+  return api;
+}
 
 /**
- * Bridge that exposes a "connect wallet" action via context so components
- * outside the Privy tree can trigger wallet connection safely.
- *
- * The action must never be a silent no-op. Privy's session (refresh token)
- * outlives the wallet connection: after e.g. an overnight extension lock,
- * Privy's silent reconnect fails, `authenticated` stays true, and no Solana
- * wallet is connected. `login()` in that state only logs "Attempted to log
- * in, but user is already logged in" (@privy-io/react-auth 3.41.0) and
- * returns — so every Connect CTA was dead. When authenticated we therefore
- * open `connectWallet()`, which re-prompts the external wallet.
+ * The only component that calls the real Privy hooks. Renders nothing; it publishes the wallet
+ * API, the connect action, the session-header getter and Privy's state into the app's own
+ * contexts (PrivyBridgeHost.tsx -> hooks/usePrivyBridge.ts).
  */
-const PrivyLoginBridge: FC<{ children: ReactNode }> = ({ children }) => {
-  const { setPreferredAddress } = usePreferredWallet();
-  const { authenticated } = usePrivy();
+const PrivyBridge: FC<{ onPublish: (snapshot: PrivyBridgeSnapshot) => void }> = ({ onPublish }) => {
+  const walletApi = usePrivyWalletApi();
+  const { privy, connect, sessionHeaders } = usePrivyBridgeState();
 
-  const { login } = useLogin({
-    onComplete: ({ loginAccount }) => {
-      // This bridge backs Trade/Faucet and other callers of usePrivyLogin().
-      // Persist the wallet that actually authenticated the session.
-      if (loginAccount?.type === "wallet" && loginAccount.chainType === "solana") {
-        setPreferredAddress(loginAccount.address);
-      }
-    },
-  });
-
-  // #2620 semantics for (re)connects: the wallet the user explicitly connects
-  // becomes the active signer. `useConnectWallet` subscribes to Privy's global
-  // `connectWallet` event, so this also covers the header's Reconnect button.
-  // Privy does not fire it for wallet-login or link flows (those go through
-  // `onComplete` above).
-  const { connectWallet } = useConnectWallet({
-    onSuccess: ({ wallet }) => {
-      if (wallet.type === "solana") {
-        setPreferredAddress(wallet.address);
-      }
-    },
-  });
-
-  const connect = useCallback(() => {
-    if (authenticated) {
-      connectWallet({ walletChainType: "solana-only" });
-      return;
-    }
-    login();
-  }, [authenticated, connectWallet, login]);
-
-  return (
-    <PrivyLoginContext.Provider value={connect}>
-      {children}
-    </PrivyLoginContext.Provider>
+  const snapshot = useMemo<PrivyBridgeSnapshot>(
+    () => ({ walletApi, connect, sessionHeaders, privy }),
+    [walletApi, connect, sessionHeaders, privy],
   );
+
+  useEffect(() => {
+    onPublish(snapshot);
+  }, [onPublish, snapshot]);
+
+  return null;
 };
 
 export default PrivyProviderClient;

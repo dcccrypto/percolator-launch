@@ -12,7 +12,7 @@
  * edge cached for it, whatever the query string. Snapshots are immutable, so it can't go stale
  * for them; the legacy single blob can, and the tests prove it no longer matters.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 
 interface Stored {
   body: string;
@@ -70,10 +70,12 @@ import {
   REGISTERED_MARKETS_KEEP_VERSIONS,
   parseRegisteredMarketsVersion,
   readRegisteredMarkets,
+  readRegisteredMarketsChecked,
   registeredMarketsVersionPath,
   upsertRegisteredMarket,
   type RegisteredMarket,
 } from "@/lib/playground-registered-markets";
+import { list } from "@vercel/blob";
 
 const mk = (slab: string, registeredAt = 1): RegisteredMarket => ({
   slabAddress: slab,
@@ -214,6 +216,32 @@ describe("versioned registry", () => {
     edge.clear();
     failNextFetch = "throw";
     await expect(readRegisteredMarkets()).resolves.toEqual([]);
+  });
+
+  describe("readRegisteredMarketsChecked (the route's complete flag)", () => {
+    beforeEach(() => vi.stubEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_test"));
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("a good read is complete", async () => {
+      await upsertRegisteredMarket(mk("A"));
+      expect(await readRegisteredMarketsChecked()).toEqual({ ok: true, markets: [expect.objectContaining({ slabAddress: "A" })] });
+    });
+
+    it("a failed newest read is not: the previous snapshot, ok false", async () => {
+      await upsertRegisteredMarket(mk("A"));
+      await upsertRegisteredMarket(mk("B"));
+      edge.clear();
+      origin.set(registeredMarketsVersionPath(2), { body: "not json" });
+      const r = await readRegisteredMarketsChecked();
+      expect(r.ok).toBe(false);
+      expect(r.markets.map((m) => m.slabAddress)).toEqual(["A"]);
+    });
+
+    it("no store configured (no token): an empty, complete answer, not a failed read", async () => {
+      vi.stubEnv("BLOB_READ_WRITE_TOKEN", "");
+      vi.mocked(list).mockRejectedValueOnce(new Error("Vercel Blob: No token found")); // what the SDK does without one
+      expect(await readRegisteredMarketsChecked()).toEqual({ ok: true, markets: [] });
+    });
   });
 
   it("empty store: reads [] and the first upsert creates v1", async () => {

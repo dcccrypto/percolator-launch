@@ -8,6 +8,7 @@
  * the cent. sim-USDC collateral is $1-pegged (PLAYGROUND.md), so a collateral-
  * scale atom count divided by 10^decimals IS the USD figure.
  */
+import { tokenUsdOfLotUsd } from "@/lib/v22/lot";
 import { computePnlPercent } from "@percolatorct/sdk";
 import { computePositionInitialMargin } from "@/lib/trading";
 import { valueAtMark } from "@/lib/position-pnl";
@@ -45,8 +46,10 @@ export interface PnlCardData {
   nominalSizeQ: bigint;
   /** ADL-effective size — PnL moves on this (lib/v17-adl). Equals nominal when never deleveraged. */
   effectiveSizeQ: bigint;
-  /** Entry price (E6). */
+  /** Entry price (E6; per LOT on a v2.2 lot market). */
   entryE6: bigint;
+  /** v2.2 lot exponent of the market (0 / omitted = no lots). The card SHOWS per-token prices (lib/v22/lot.ts). */
+  lotExp?: number;
   /** Initial-margin bps for this market. */
   initialMarginBps: bigint;
   /** Mark to use until the live store publishes a tick (keeps the card non-blank). */
@@ -55,7 +58,9 @@ export interface PnlCardData {
    * What the market's vault + insurance can currently pay out, in collateral atoms
    * (PositionsDock's `payableCapacity`). When the paper PnL exceeds it the card
    * shows the payable figure instead, flagged as capped — the same rule as the
-   * dock's pool-cap caveat (isPnlPoolCapped). null/undefined = unknown, no cap.
+   * dock's pool-cap caveat (isPnlPoolCapped). null/undefined = unknown, no cap: always the case
+   * on v17/v18 markets, where no per-position payout cap is computed client-side (the market-wide
+   * payout haircut is surfaced by lib/market-health.ts).
    */
   payableCapacityAtoms?: bigint | null;
 }
@@ -64,17 +69,21 @@ export interface PnlCardData {
 export type PnlTone = "profit" | "loss" | "flat";
 
 /**
- * Pool-capped PnL (GMX-style): a winning position's paper PnL can't exceed what
- * the vault + insurance can pay. Shared by PositionsDock's caveat icon and the
+ * Pool-capped PnL (GMX-style, legacy v12 engine): a winning position's paper PnL can't exceed
+ * what the vault + insurance can pay. Shared by PositionsDock's caveat icon and the
  * share card so the two can never disagree about when a PnL is capped.
  */
 export function isPnlPoolCapped(pnlAtoms: bigint, payableCapacityAtoms: bigint | null | undefined): boolean {
   return payableCapacityAtoms != null && pnlAtoms > 0n && payableCapacityAtoms > 0n && pnlAtoms > payableCapacityAtoms;
 }
 
-/** Vault + insurance payout capacity, in collateral atoms (PositionsDock's formula). */
-export function poolPayableCapacity(vault: bigint | null | undefined, insurance: bigint | null | undefined): bigint {
-  return (vault ?? 0n) + (insurance ?? 0n);
+/**
+ * Vault + insurance payout capacity, in collateral atoms (PositionsDock's formula). null when the
+ * vault is unknown (v17/v18: no engine block): there a winner's profit converts per source domain
+ * (lib/convert-released-pnl.ts), so insurance alone is not a cap.
+ */
+export function poolPayableCapacity(vault: bigint | null | undefined, insurance: bigint | null | undefined): bigint | null {
+  return vault == null ? null : vault + (insurance ?? 0n);
 }
 
 export interface PnlCardStats {
@@ -154,8 +163,8 @@ export function computePnlCardStats(data: PnlCardData, markRawE6: bigint): PnlCa
     isCapped,
     tone,
     spentUsd: Number.isFinite(spentRaw) ? spentRaw : 0,
-    avgEntryUsd: e6ToUsd(data.entryE6),
-    avgExitUsd: e6ToUsd(markE6),
+    avgEntryUsd: tokenUsdOfLotUsd(e6ToUsd(data.entryE6), data.lotExp ?? 0),
+    avgExitUsd: tokenUsdOfLotUsd(e6ToUsd(markE6), data.lotExp ?? 0),
     isProfit: pnlUsd >= 0,
     hasMark,
   };

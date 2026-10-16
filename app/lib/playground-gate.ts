@@ -16,6 +16,7 @@
  *   /charting_library/*, /tv-theme/*   the TradingView chart library's static files and our
  *                               theme CSS for it (loaded inside the chart iframe). Chart DATA
  *                               is /api/* and stays gated.
+ *   GET/HEAD /<16 hex>/script.js   the hashed Vercel Web Analytics script (#2826); that exact shape only
  *   top-level files by extension   e.g. /chart-empty-state.svg. ONLY top-level: a nested
  *                               /trade/x.png would otherwise render the [slab] page shell.
  *   favicon/icon, robots.txt, sitemap.xml, opengraph-image, twitter-image, manifest
@@ -29,11 +30,16 @@
  *                               HMAC-SHA256 over KEEPER_REGISTER_SECRET, timestamp-bounded
  *   POST /api/oracle/set-price-cap
  *                               operator tool; x-admin-secret vs ADMIN_API_SECRET, fails closed
+ *   GET  /api/earn-share/:market and /api/earn-share/:market/image   (v2.2 flag ON only)
+ *                               the metadata JSON and icon a wallet fetches for an Earn share token (the `uri` of its on-chain
+ *                               Metaplex record); the caller is a wallet or explorer, never a browser holding our cookie. Public by
+ *                               design, built from chain state, base58-validated. Flag off the path stays gated (and 404s anyway).
  *
  * Everything else under /api is called same-origin by the browser app, so it
  * is gated and the cookie rides along automatically.
  */
 import { SESSION_COOKIE, gateEnabled, sessionGrantsAccess } from "@/lib/playground-access";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 
 export const LOCKED_PATH = "/locked";
 export const ENTER_PATH = "/enter";
@@ -43,6 +49,9 @@ export type GateDecision = "pass" | "redirect-locked" | "unauthorized";
 /** A single top-level segment ending in a static extension (public/ root files). */
 const TOP_LEVEL_STATIC_RE =
   /^\/[^/]+\.(?:svg|png|jpg|jpeg|gif|webp|avif|ico|css|js|mjs|map|woff2?|ttf|otf|eot|mp3|ogg|wav|webm|mp4|txt|xml|webmanifest)$/i;
+
+/** Vercel Web Analytics' hashed first-party script path (#2826). Exactly one 16-hex segment. */
+const VERCEL_ANALYTICS_SCRIPT_RE = /^\/[0-9a-f]{16}\/script\.js$/;
 
 const EXEMPT_EXACT = new Set([
   ENTER_PATH,
@@ -71,13 +80,15 @@ const EXEMPT_PREFIXES = [
 ];
 
 /** Server-to-server API routes, by method. Each authenticates itself (see header). */
-const EXEMPT_API: ReadonlyArray<{ method: string; re: RegExp }> = [
+const EXEMPT_API: ReadonlyArray<{ method: string; re: RegExp; v22?: true }> = [
   { method: "GET", re: /^\/api\/health\/?$/ },
   { method: "GET", re: /^\/api\/playground\/registered-markets\/?$/ },
   // base58 slab only, so PATCH /api/markets/challenge|health (no PATCH handler) stays gated
   { method: "PATCH", re: /^\/api\/markets\/[1-9A-HJ-NP-Za-km-z]{32,44}\/?$/ },
   { method: "POST", re: /^\/api\/oracle-keeper\/register\/?$/ },
   { method: "POST", re: /^\/api\/oracle\/set-price-cap\/?$/ },
+  // v2.2 Earn share token metadata (wallets fetch it from the Metaplex record's uri); exempt only with the v2.2 flag on.
+  { method: "GET", re: /^\/api\/earn-share\/[1-9A-HJ-NP-Za-km-z]{32,44}(?:\/image)?\/?$/, v22: true },
 ];
 
 export function isExempt(pathname: string, method: string): boolean {
@@ -88,8 +99,10 @@ export function isExempt(pathname: string, method: string): boolean {
   const m = method.toUpperCase();
   if (pathname.startsWith("/api/")) {
     // HEAD rides on GET's exemption (uptime monitors often send HEAD).
-    return EXEMPT_API.some((e) => (e.method === m || (m === "HEAD" && e.method === "GET")) && e.re.test(pathname));
+    return EXEMPT_API.some((e) => (e.method === m || (m === "HEAD" && e.method === "GET")) && e.re.test(pathname) && (!e.v22 || isDevnetV22Enabled()));
   }
+  // Hashed Vercel Analytics script: read-only methods, exact shape, nothing else nested.
+  if ((m === "GET" || m === "HEAD") && VERCEL_ANALYTICS_SCRIPT_RE.test(pathname)) return true;
   // Top-level static files only — never nested, never under /api.
   return TOP_LEVEL_STATIC_RE.test(pathname);
 }

@@ -69,12 +69,10 @@
  */
 
 import {
-  V17_MARKET_GROUP_OFF,
-  V17_MARKET_GROUP_LEN,
-  V17_MARKET_ASSET_SLOT_LEN,
   V17_ASSET_SLOT_WRAPPER_LEN,
 } from "@percolatorct/sdk";
 import { formatTokenAmount } from "@/lib/format";
+import { marketGeometry, isUnsupportedLayout } from "@/lib/v22/layout";
 
 /** `ADL_ONE` — the un-deleveraged side factor (percolator/src/lib.rs:16). */
 export const ADL_ONE = 1_000_000_000_000_000n;
@@ -141,8 +139,13 @@ export function parseAssetAdlFactors(
   assetIndex: number,
 ): AssetAdlFactors | null {
   if (assetIndex < 0 || !Number.isInteger(assetIndex)) return null;
-  const slotsBase = V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN;
-  const slotBase = slotsBase + assetIndex * V17_MARKET_ASSET_SLOT_LEN;
+  let slotBase: number;
+  try {
+    slotBase = marketGeometry(slabData, "parseAssetAdlFactors").slotOff(assetIndex);
+  } catch (e) {
+    if (isUnsupportedLayout(e)) return null; // unknown VERSION: ADL state UNKNOWN, never guessed
+    throw e;
+  }
   const aLongOff = slotBase + ASSET_SLOT_WRAPPER_SIZE + A_LONG_REL;
   const aShortOff = slotBase + ASSET_SLOT_WRAPPER_SIZE + A_SHORT_REL;
   if (aShortOff + 16 > slabData.length) return null;

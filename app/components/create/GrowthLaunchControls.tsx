@@ -16,6 +16,7 @@ import {
   rGapRange,
   validateGrowthLaunch,
 } from "@/lib/v21/growth-launch";
+import { collateralDecimalsIssue } from "@/lib/v22/tier-config";
 import { V21_COPY } from "@/lib/v21/copy";
 
 export interface GrowthLaunchState {
@@ -137,6 +138,9 @@ export const GrowthLaunchControls: FC<GrowthLaunchControlsProps> = (p) => {
             <li>{V21_COPY.wizard.singleAsset}</li>
           </ul>
 
+          {collateralDecimalsIssue(p.collateralDecimals) && (
+            <p role="alert" data-testid="growth-decimals-issue" className="text-[11px] text-[var(--short)]">{collateralDecimalsIssue(p.collateralDecimals)}</p>
+          )}
           {issue && <p role="alert" data-testid="growth-launch-issue" className="text-[11px] text-[var(--short)]">{V21_COPY.wizard.issue[issue]}</p>}
         </div>
       )}

@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect } from 'react';
-import Link from 'next/link';
 import { GlowButton } from '@/components/ui/GlowButton';
 
 export default function VaultDetailError({
@@ -32,11 +31,9 @@ export default function VaultDetailError({
           <GlowButton onClick={reset} variant="primary" size="md">
             Try Again
           </GlowButton>
-          <Link href="/earn">
-            <GlowButton variant="secondary" size="md">
-              Back to Earn
-            </GlowButton>
-          </Link>
+          <GlowButton href="/earn" variant="secondary" size="md">
+            Back to Earn
+          </GlowButton>
         </div>
       </div>
     </div>

@@ -143,6 +143,15 @@ describe('useStakeWithdrawByPool', () => {
     expect(sendTx).toHaveBeenCalled();
   });
 
+  it('#26: a failed send sets a plain error, not the raw simulation text', async () => {
+    (sendTx as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("Transaction simulation failed: Error processing Instruction 1: custom program error: 0x15. Logs: [\"Program log: Error: EngineLockActive\"]"));
+    const { result } = renderHook(() => useStakeWithdrawByPool(DEFAULT_PARAMS));
+    await act(async () => {
+      await expect(result.current.withdraw(500_000n)).rejects.toThrow(/simulation failed/);
+    });
+    expect(result.current.error).toBeTruthy();
+    expect(result.current.error).not.toMatch(/simulation|Program|0x15|Logs|custom program error/i);
+  });
   it('rejects when wallet not connected', async () => {
     (useWalletCompat as ReturnType<typeof vi.fn>).mockReturnValue({
       publicKey: null,
@@ -156,7 +165,7 @@ describe('useStakeWithdrawByPool', () => {
     await act(async () => {
       await expect(result.current.withdraw(500_000n)).rejects.toThrow('Wallet not connected');
     });
-    expect(result.current.error).toBe('Wallet not connected');
+    expect(result.current.error).toBe('Unlock your wallet and try again.'); // #26: the plain line, not the raw message
   });
 
   it('rejects when slabAddress is empty', async () => {

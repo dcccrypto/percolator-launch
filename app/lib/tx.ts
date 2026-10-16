@@ -1,9 +1,13 @@
-import { Connection, Transaction, TransactionInstruction, ComputeBudgetProgram, SendTransactionError, SystemProgram, TransactionExpiredBlockheightExceededError, VersionedTransaction } from "@solana/web3.js";
-import { MAX_TX_COMPUTE_UNITS, sizeComputeUnitLimit, type CuSizing } from "@/lib/compute-budget";
+import { errorText } from "@/lib/error-text";
+import { Connection, PublicKey as PublicKeyCtor, Transaction, TransactionInstruction, ComputeBudgetProgram, SendTransactionError, SystemProgram, TransactionExpiredBlockheightExceededError, VersionedTransaction } from "@solana/web3.js";
+import { assertDevnetConnection } from "@/lib/v22/devnet-guard";
+import { noteBlockhash } from "@/lib/v22/sign-guard";
+import { MAX_TX_COMPUTE_UNITS, signedComputeUnitLimit, type CuSizing } from "@/lib/compute-budget";
 import bs58 from "bs58";
 import type { PublicKey, Signer } from "@solana/web3.js";
 import { getNetwork } from "@/lib/config";
 import { connectionSelfHealDeps, describeRepair, isSelfHealEnabled, planSelfHeal } from "@/lib/self-heal";
+import { finalTxWireSize, PACKET_DATA_SIZE } from "@/lib/limits/resolved-topup";
 import {
   connectionVaultLpRepairDeps,
   isVaultLpSelfHealEnabled,
@@ -18,6 +22,8 @@ import {
 import type { AccountMeta } from "@solana/web3.js";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { resolveDevnetProgramIds } from "@/lib/program-ids";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { withMarketTailsV22 } from "@/lib/v22/market-tails";
 import type { SelfHealResult } from "@/lib/self-heal";
 import { getMaintenanceConfig, MaintenanceError } from "@/lib/maintenance";
 import { readU64LE } from "@/lib/u64le";
@@ -53,7 +59,10 @@ export interface SendTxParams {
   maxRetries?: number;
   /** Optional callback for confirmation progress (elapsed time in ms) */
   onProgress?: (elapsedMs: number) => void;
-  /** Optional AbortSignal to cancel confirmation polling */
+  /**
+   * Stops a tx that has NOT been signed yet: checked at entry (before anything is built or signed)
+   * and before a blockhash retry. A tx already broadcast is always followed to confirmation.
+   */
   abortSignal?: AbortSignal;
   /**
    * Skip preflight simulation on the RPC node. Use as a fallback when wallet
@@ -124,6 +133,9 @@ export class SimulationRefusal extends Error {
   readonly instructionIndex: number | null;
   /** Program id of the failing instruction (from the list, else the "Program X failed" log). */
   readonly programId: string | null;
+  /** Program and first data byte of the failing TOP-LEVEL instruction (not the innermost callee), when it is in the simulated list. */
+  readonly failingInstructionProgram: string | null;
+  readonly failingInstructionTag: number | null;
   constructor(err: unknown, logs: readonly string[] = [], instructions: readonly TransactionInstruction[] = []) {
     const failing = logs.filter((l) => l.includes("Error") || l.includes("failed") || l.includes("Program log:")).slice(-3).join("\n");
     super(`Transaction simulation failed: ${JSON.stringify(err)}` + (failing ? `\n${failing}` : ""));
@@ -149,6 +161,9 @@ export class SimulationRefusal extends Error {
     }
     if (!pid && index !== null && instructions[index]) pid = instructions[index].programId.toBase58();
     this.programId = pid;
+    const top = index !== null ? instructions[index] : undefined;
+    this.failingInstructionProgram = top ? top.programId.toBase58() : null;
+    this.failingInstructionTag = top ? top.data[0] ?? null : null;
   }
 }
 
@@ -509,15 +524,35 @@ export function getClockDriftWarning(): string | null {
  *  confirm-click → wallet-popup critical path. Retries always force-refresh
  *  (a stale blockhash is a plausible cause of the failure being retried). */
 const BLOCKHASH_FRESH_MS = 20_000;
-let cachedBlockhash: { blockhash: string; ts: number } | null = null;
+let cachedBlockhash: { blockhash: string; ts: number; lastValidBlockHeight: number } | null = null;
 
-export async function getFreshBlockhash(connection: Connection, forceFresh = false): Promise<string> {
+export async function getFreshBlockhash(connection: Connection, forceFresh = false, path = "getFreshBlockhash"): Promise<string> {
+  // v2.2 QA NB-2: never a blockhash from a non-devnet connection, and never a reused one (always fetched now).
+  await assertDevnetConnection(connection);
+  if (isDevnetV22Enabled()) forceFresh = true;
   if (!forceFresh && cachedBlockhash && Date.now() - cachedBlockhash.ts < BLOCKHASH_FRESH_MS) {
     return cachedBlockhash.blockhash;
   }
-  const { blockhash } = await connection.getLatestBlockhash("confirmed");
-  cachedBlockhash = { blockhash, ts: Date.now() };
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+  const ts = Date.now();
+  cachedBlockhash = { blockhash, ts, lastValidBlockHeight };
+  noteBlockhash(blockhash, path, connection, ts, { commitment: "confirmed", lastValidBlockHeight });
   return blockhash;
+}
+
+/** NB-2 (round f): a blockhash fetched more than this long before the wallet opens is replaced right before the request. */
+export const HANDOFF_BLOCKHASH_MAX_AGE_MS = 5_000;
+/**
+ * v2.2: the wallet must be handed a blockhash fetched moments ago. sendTx fetches it at the START of an attempt, then plans
+ * (self-heal, fee, balance) and simulates; on a busy path that is seconds. Re-fetch (confirmed) right before the request when
+ * it has aged. Nothing is signed yet, so changing it is safe; the simulation does not depend on it.
+ */
+export async function refreshBlockhashBeforeHandoff(connection: Connection, tx: { recentBlockhash?: string }, now: number = Date.now()): Promise<boolean> {
+  if (!isDevnetV22Enabled()) return false;
+  const c = cachedBlockhash;
+  if (c && tx.recentBlockhash === c.blockhash && now - c.ts <= HANDOFF_BLOCKHASH_MAX_AGE_MS) return false;
+  tx.recentBlockhash = await getFreshBlockhash(connection, true, "sendTx hand-off refresh");
+  return true;
 }
 
 /**
@@ -624,7 +659,9 @@ async function checkSufficientBalance(
  * More reliable than confirmTransaction which can falsely report expiry.
  * 
  * @param onProgress - Optional callback for progress updates (elapsed time in ms)
- * @param abortSignal - Optional AbortSignal to cancel polling
+ * @param abortSignal - Optional AbortSignal to cancel polling. Only confirmSignatureByPolling (the
+ *   devnet airdrop) passes one: sendTx and broadcastSignedTx never do, since their tx is already
+ *   broadcast and a cancelled poll cannot stop it.
  */
 export async function pollConfirmation(
   connection: Connection,
@@ -749,7 +786,7 @@ export function isTxCancelledError(err: unknown): boolean {
 export async function sendTx({
   connection,
   wallet,
-  instructions,
+  instructions: instructionsIn,
   computeUnits = 200_000,
   signers = [],
   maxRetries = 2,
@@ -774,8 +811,8 @@ export async function sendTx({
   // had already unmounted — a wallet popup for a market the user had already
   // navigated away from. Checked before any tx is built or signed; a step
   // already broadcast when the signal fires is left to confirm normally (see
-  // the retry-loop check below and pollConfirmation's own abort check — both
-  // stop FUTURE signatures, never an already-submitted one).
+  // the retry-loop check below — it stops FUTURE signatures, never an
+  // already-submitted one; the confirmation poll ignores the signal).
   if (abortSignal?.aborted) {
     throw new TxCancelledError();
   }
@@ -789,6 +826,11 @@ export async function sendTx({
   // on the first submission of a session before the wallet popup could
   // appear). It self-caches for 5min; the warning below reads whatever the
   // last completed check found.
+  // Devnet v2.2 (flag-gated, no-op and no RPC otherwise): append the bond-tranche / insurance-units account the wrapper
+  // requires on tags 78 / 97 / 102 / 103 and 9 / 56 / 57 / 41 / 101 once the market has them (lib/v22/market-tails.ts).
+  const instructions = isDevnetV22Enabled()
+    ? await withMarketTailsV22(connection, new PublicKeyCtor(resolveDevnetProgramIds().wrapper), instructionsIn)
+    : instructionsIn;
   void checkClockDrift(connection).catch(() => {});
   const driftWarning = getClockDriftWarning();
   if (driftWarning) {
@@ -798,6 +840,10 @@ export async function sendTx({
 
   let lastError: Error | null = null;
   let lastSignature: string | undefined;
+  // Signature of the tx signed by THIS attempt's legacy path, known before it is broadcast. Used ONLY
+  // by the R2-S7 landed check; kept apart from `lastSignature` ("was sent atomically by the wallet"),
+  // which gates the PERC-8388 no-rebuild SAFETY branch below.
+  let preSendSignature: string | undefined;
 
   // P0b self-heal. Planned from the ORIGINAL instructions on EVERY attempt:
   // a repair that someone else (the keeper) landed meanwhile makes its engine
@@ -829,15 +875,20 @@ export async function sendTx({
       // lookup below (both usually resolve instantly from their caches after
       // a prewarmTxLanding call; retries force a fresh blockhash since a
       // stale one is a plausible cause of the failure being retried).
-      const blockhashPromise = getFreshBlockhash(connection, attempt > 0);
+      const blockhashPromise = getFreshBlockhash(connection, attempt > 0, `sendTx attempt ${attempt + 1}${signers.length ? ` (+${signers.length} keypair signer)` : ""}`);
       if (selfHealOn) {
         if (attempt > 0) selfHealPromise = planHeal();
         const heal = await selfHealPromise;
         healedInstructions = instructions;
         healedComputeUnits = computeUnits;
         if (heal) {
-          onSelfHeal?.(heal);
-          if (heal.outcome === "repaired") {
+          // The heal simulation omits the CU-price ix this tx adds below, so a repaired list can pass
+          // it and still exceed the packet once signed (a large first trade + many catch-up cranks).
+          // Keep it only if the final tx fits; otherwise send unchanged, as when it doesn't simulate.
+          const fits = heal.outcome !== "repaired" || finalTxWireSize(heal.instructions, feePayer) <= PACKET_DATA_SIZE;
+          if (!fits) console.warn("[self-heal] repairs do not fit one transaction; the keeper must catch up");
+          onSelfHeal?.(fits ? heal : { ...heal, instructions, computeUnits, repairs: [], catchUpCranks: 0, outcome: "oversize" });
+          if (fits && heal.outcome === "repaired") {
             healedInstructions = heal.instructions;
             healedComputeUnits = heal.computeUnits;
             console.info(`[self-heal] prepended ${heal.repairs.map(describeRepair).join(", ")}`);
@@ -893,9 +944,19 @@ export async function sendTx({
       let gateGreen = false;
       if (computeUnitsFromSim) {
         const g = await simulateForGate(connection, feePayer, healedInstructions);
-        if (g.err && !skipPreflight) throw new SimulationRefusal(g.err, g.logs, g.simulated);
+        if (g.err && !skipPreflight) {
+          // A wallet short of the rent for an account this tx creates (a first trade's portfolio)
+          // fails here, before the balance check below runs. Name the shortfall ("add at least X
+          // SOL") instead of the generic refusal; checkSufficientBalance only throws when short.
+          const rentLamports = getAccountCreationLamports(instructions);
+          if (rentLamports > 0) {
+            const fees = estimateFees(signedComputeUnitLimit(g.consumed, computeUnitsFromSim), PRIORITY_FEE_FALLBACK, 1 + signers.length);
+            await checkSufficientBalance(connection, wallet.publicKey, fees, rentLamports);
+          }
+          throw new SimulationRefusal(g.err, g.logs, g.simulated);
+        }
         gateGreen = !g.err && !g.rpcFailed;
-        healedComputeUnits = sizeComputeUnitLimit(g.consumed, computeUnitsFromSim);
+        healedComputeUnits = signedComputeUnitLimit(g.consumed, computeUnitsFromSim);
         onComputeUnits?.({ limit: healedComputeUnits, consumed: g.consumed });
       }
 
@@ -1020,6 +1081,7 @@ export async function sendTx({
         }
       } else if (wallet.signTransaction) {
         // Fallback: signTransaction + sendRawTransaction (legacy path)
+        await refreshBlockhashBeforeHandoff(connection, tx).catch(() => false);
         const signed = await wallet.signTransaction(tx);
 
         // Add keypair signatures AFTER wallet signs — Privy embedded wallets
@@ -1042,6 +1104,15 @@ export async function sendTx({
           skipPreflight = true;
         }
 
+        // Capture the signature BEFORE broadcasting. A tx's signature is its
+        // fee payer's (first) signature and is fixed once signed, so we know it
+        // before sendRawTransaction. If the send then THROWS (timeout, dropped
+        // connection, blockhash lag on a load-balanced RPC) the tx may still
+        // have landed; without this, `lastSignature` stayed unset on a throw and
+        // the R2-S7 landed check in the catch below was silently skipped.
+        if (signed.signature) {
+          preSendSignature = bs58.encode(signed.signature);
+        }
         try {
           lastSignature = await connection.sendRawTransaction(signed.serialize(), {
             skipPreflight: skipPreflight ?? false,
@@ -1071,11 +1142,13 @@ export async function sendTx({
 
       // Poll for confirmation instead of using confirmTransaction
       // (confirmTransaction falsely reports "block height exceeded" on devnet)
-      await pollConfirmation(connection, lastSignature, onProgress, abortSignal);
+      // No abortSignal here: the tx is already broadcast, so aborting the poll cannot stop it. It
+      // only turned a trade that still fills into an error the ticket read as "nothing was sent".
+      await pollConfirmation(connection, lastSignature, onProgress);
 
       return lastSignature;
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errorText(e);
       lastError = e instanceof Error ? e : new Error(msg);
 
       // Use the shared predicate so every blockhash-miss spelling is retried —
@@ -1095,9 +1168,10 @@ export async function sendTx({
 
       if (isBlockhashExpired && attempt < maxRetries) {
         // R2-S7: Before retrying, check if the original tx actually landed
-        if (lastSignature) {
+        const landedCheckSig = preSendSignature ?? lastSignature;
+        if (landedCheckSig) {
           try {
-            const statusResp = await connection.getSignatureStatuses([lastSignature], {
+            const statusResp = await connection.getSignatureStatuses([landedCheckSig], {
               searchTransactionHistory: true,
             });
             const prevStatus = statusResp.value[0];
@@ -1107,7 +1181,7 @@ export async function sendTx({
               (prevStatus.confirmationStatus === "confirmed" ||
                 prevStatus.confirmationStatus === "finalized")
             ) {
-              return lastSignature; // Already landed — no retry needed
+              return landedCheckSig; // Already landed — no retry needed
             }
           } catch {
             // RPC error checking status — proceed with retry
@@ -1356,7 +1430,7 @@ export async function signAllCompat(
 export async function broadcastSignedTx(
   connection: Connection,
   signedTx: Transaction,
-  opts: { skipPreflight?: boolean; onProgress?: (elapsedMs: number) => void; abortSignal?: AbortSignal } = {},
+  opts: { skipPreflight?: boolean; onProgress?: (elapsedMs: number) => void } = {},
 ): Promise<string> {
   let signature: string;
   try {
@@ -1370,7 +1444,7 @@ export async function broadcastSignedTx(
     throw new Error(await buildSendErrorMessage(connection, sendErr), { cause: sendErr });
   }
   try {
-    await pollConfirmation(connection, signature, opts.onProgress, opts.abortSignal);
+    await pollConfirmation(connection, signature, opts.onProgress); // already broadcast: never aborted
   } catch (confirmErr) {
     // The tx WAS submitted (we have its signature) but confirmation failed —
     // attach the signature so a caller (the batch pipeline) can status-check it
@@ -1386,6 +1460,19 @@ export async function broadcastSignedTx(
     throw confirmErr;
   }
   return signature;
+}
+
+/**
+ * Confirm a signature someone else broadcast (a devnet airdrop) by polling its
+ * status. `connection.confirmTransaction(sig)` waits on a websocket notification
+ * and reports a timeout for a tx that landed when the notification is missed.
+ */
+export async function confirmSignatureByPolling(
+  connection: Connection,
+  signature: string,
+  abortSignal?: AbortSignal,
+): Promise<void> {
+  await pollConfirmation(connection, signature, undefined, abortSignal);
 }
 
 /** UX WP-2 (principle 3): re-simulation backoff while waiting for the market, before any prompt. */
@@ -1406,6 +1493,16 @@ export function isWaitableRefusal(e: unknown): e is SimulationRefusal {
   return false;
 }
 
+/** The wait loop's decision for one refusal: re-simulate (true) or surface it now (false). */
+export function waitOnRefusal(
+  e: unknown,
+  o: { attempt: number; waitDelaysMs: readonly number[]; keepWaiting: boolean; aborted: boolean; shouldWait?: (e: SimulationRefusal) => boolean },
+): boolean {
+  const exhausted = o.attempt >= o.waitDelaysMs.length && !(o.keepWaiting && o.waitDelaysMs.length > 0);
+  if (!isWaitableRefusal(e) || exhausted || o.aborted) return false;
+  return o.shouldWait === undefined || o.shouldWait(e);
+}
+
 /**
  * sendTx, but a refusal the market clears on its own (engine/oracle catching up) is
  * re-simulated on WAIT_DELAYS_MS instead of surfacing — the wallet opens as soon as the
@@ -1424,9 +1521,19 @@ export async function sendTxWaiting(
     /** Called once when the wait passes `longWaitMs` (default 30 s). */
     onWaitingLong?: () => void;
     longWaitMs?: number;
+    /**
+     * v2.2 QA Q-3: a waitable refusal is surfaced at once when this returns false (a resolved market, a price nobody
+     * is pushing: lib/limits/price-stall.ts), instead of being re-simulated forever.
+     */
+    shouldWait?: (e: SimulationRefusal) => boolean;
+    /**
+     * v2.2 QA Q-7: total wait budget. A waitable refusal that has not cleared after this long is thrown as
+     * WaitExhaustedError (the last refusal is its `cause`) instead of being re-simulated forever. Omitted = unbounded.
+     */
+    maxWaitMs?: number;
   },
 ): Promise<string> {
-  const { onWaiting, waitDelaysMs = WAIT_DELAYS_MS, keepWaiting = false, onWaitingLong, longWaitMs = 30_000, ...rest } = params;
+  const { onWaiting, waitDelaysMs = WAIT_DELAYS_MS, keepWaiting = false, onWaitingLong, longWaitMs = 30_000, shouldWait, maxWaitMs, ...rest } = params;
   let waited = 0;
   let saidLong = false;
   for (let i = 0; ; i++) {
@@ -1435,11 +1542,14 @@ export async function sendTxWaiting(
       if (i > 0) onWaiting?.(false);
       return sig;
     } catch (e) {
-      const exhausted = i >= waitDelaysMs.length && !(keepWaiting && waitDelaysMs.length > 0);
-      if (!isWaitableRefusal(e) || exhausted || rest.abortSignal?.aborted) {
+      if (!waitOnRefusal(e, { attempt: i, waitDelaysMs, keepWaiting, aborted: rest.abortSignal?.aborted === true, shouldWait })) {
         if (i > 0) onWaiting?.(false);
         if (rest.abortSignal?.aborted && isWaitableRefusal(e)) throw new WaitStoppedError();
         throw e;
+      }
+      if (waitBudgetSpent(waited, maxWaitMs)) {
+        onWaiting?.(false);
+        throw new WaitExhaustedError(e);
       }
       onWaiting?.(true);
       const delay = waitDelaysMs[Math.min(i, waitDelaysMs.length - 1)];
@@ -1454,6 +1564,19 @@ export async function sendTxWaiting(
         throw new WaitStoppedError();
       }
     }
+  }
+}
+
+/** True once the wait loop has used its budget (undefined budget = never). */
+export function waitBudgetSpent(waitedMs: number, maxWaitMs: number | undefined): boolean {
+  return maxWaitMs !== undefined && waitedMs >= maxWaitMs;
+}
+
+/** The bounded wait ended without the market clearing the refusal: nothing was sent. `cause` = the last refusal. */
+export class WaitExhaustedError extends Error {
+  constructor(cause: unknown) {
+    super("Stopped waiting for the market after the time limit; nothing was sent.", { cause });
+    this.name = "WaitExhaustedError";
   }
 }
 

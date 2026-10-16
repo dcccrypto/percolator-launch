@@ -40,6 +40,8 @@ vi.mock("@/hooks/usePreferredWallet", async (importOriginal) => {
 });
 
 vi.mock("@privy-io/react-auth", () => ({
+  useIdentityToken: () => ({ identityToken: null }),
+  useLogin: () => ({ login: vi.fn() }),
   useConnectWallet: () => ({
     connectWallet: vi.fn(),
   }),
@@ -107,6 +109,7 @@ vi.mock("@/components/ui/InfoBanner", () => ({
 }));
 
 import WalletPage from "@/app/wallet/page";
+import { PrivyStateProvider } from "../helpers/privyBridge";
 
 describe("wallet page active-selection regression", () => {
   beforeEach(() => {
@@ -114,7 +117,7 @@ describe("wallet page active-selection regression", () => {
   });
 
   it("clears the persisted preferred wallet when disconnecting from Wallet Command", () => {
-    const { getByRole } = render(<WalletPage />);
+    const { getByRole } = render(<WalletPage />, { wrapper: PrivyStateProvider });
 
     fireEvent.click(
       getByRole("button", {

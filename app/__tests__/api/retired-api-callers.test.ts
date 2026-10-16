@@ -76,9 +76,11 @@ vi.mock("@/lib/indexer-db", async (orig) => {
       if (h.dbThrows) throw new Error("connection refused");
       return h.trades;
     },
-    queryTradesForCandles: async () => {
+    // The route aggregates in SQL now; the double buckets the same rows with the reference
+    // implementation (bucketCandles), which the SQL is tested against.
+    queryCandlesAggregated: async (_slab: string, bucketSeconds: number) => {
       if (h.dbThrows) throw new Error("connection refused");
-      return h.candleRows;
+      return { udf: m.bucketCandles(h.candleRows, bucketSeconds), truncated: false };
     },
   };
 });

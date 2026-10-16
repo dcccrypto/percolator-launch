@@ -1,7 +1,7 @@
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import { isHiddenFromListing } from "@/lib/listing-hidden";
 import { isZombieMarket } from "@/lib/activeMarketFilter";
-import { hasNoPriceSource } from "@/lib/listed-markets";
+import { hasNoPriceSource, isMultiAssetMarket } from "@/lib/listed-markets";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 
 /**
@@ -75,6 +75,7 @@ export function isListedMarket(row: Record<string, unknown>): boolean {
   if (BLOCKED_SLAB_ADDRESSES.has(slab)) return false;
   if (isHiddenFromListing(slab)) return false;
   if (isProvenIncompleteMarket(row)) return false;
+  if (isMultiAssetMarket(row)) return false;
   // A-6: an orphan with no keeper price source can never be priced (curated seeds are exempt).
   if (hasNoPriceSource(row) && !PLAYGROUND_SLAB_META[slab]) return false;
   return !isZombieRegistryRow(row);

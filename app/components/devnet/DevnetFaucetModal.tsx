@@ -131,12 +131,12 @@ export const DevnetFaucetModal: FC = () => {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex justify-center overflow-y-auto overscroll-contain bg-black/80 py-4 backdrop-blur-sm"
       onClick={handleBackdropClick}
     >
       <div
         ref={modalRef}
-        className="mx-4 w-full max-w-md rounded-none border border-[var(--border)] bg-[var(--bg)] shadow-2xl"
+        className="mx-4 my-auto w-full max-w-md rounded-none border border-[var(--border)] bg-[var(--bg)] shadow-2xl"
         role="dialog"
         aria-modal="true"
         aria-label="Fund your devnet account"

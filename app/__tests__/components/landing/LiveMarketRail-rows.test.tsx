@@ -3,7 +3,7 @@
  * PLAYGROUND_SLAB_META. The 2026-10-01 relaunch emptied that table, and the
  * rail rendered its header with no rows while /markets listed the live ones.
  */
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
@@ -70,10 +70,33 @@ describe("LiveMarketRail rows", () => {
     expect(links()).toEqual(["/trade/Azagguvr111111111111111111111111111111111111"]);
   });
 
-  it("caps the rail at the six busiest rows, in order", () => {
+  it("shows up to the default 10 busiest rows, in order", () => {
     setStats(Array.from({ length: 9 }, (_, i) => row(`slab${i}`, `M${i}`, i)));
     render(<LiveMarketRail />);
-    expect(links()).toEqual([8, 7, 6, 5, 4, 3].map((i) => `/trade/slab${i}`));
+    // Default "Show 10" — all 9 listed markets, busiest first (the /trade links only;
+    // the error/empty CTA links aren't present here).
+    expect(links()).toEqual([8, 7, 6, 5, 4, 3, 2, 1, 0].map((i) => `/trade/slab${i}`));
+  });
+
+  // Each visible row polls /api/prices/<slab> (GeckoTerminal, keyless 30 calls/min). 20 rows by
+  // default can exhaust that and blank the 24h change + mini chart for a minute, so default 10;
+  // 5/10/20 stay selectable.
+  it("defaults to 10 rows with 25 listed markets, and 5/10/20 stay selectable", () => {
+    setStats(Array.from({ length: 25 }, (_, i) => row(`slab${i}`, `M${i}`, i)));
+    render(<LiveMarketRail />);
+    expect(links()).toHaveLength(10);
+    expect(screen.getByRole("radio", { name: "10" }).getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("radio", { name: "20" }));
+    expect(links()).toHaveLength(20);
+    fireEvent.click(screen.getByRole("radio", { name: "5" }));
+    expect(links()).toHaveLength(5);
+  });
+
+  it("the Show control caps the rail (Show 5 → the five busiest, in order)", () => {
+    setStats(Array.from({ length: 9 }, (_, i) => row(`slab${i}`, `M${i}`, i)));
+    render(<LiveMarketRail />);
+    fireEvent.click(screen.getByRole("radio", { name: "5" }));
+    expect(links()).toEqual([8, 7, 6, 5, 4].map((i) => `/trade/slab${i}`));
   });
 
   it("orders zero-volume markets by slab so a refetch can't reshuffle them", () => {

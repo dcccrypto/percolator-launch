@@ -40,8 +40,14 @@ function subscribeSharedSlot(
     const poll = () => {
       const generation = subscriptionGeneration;
 
-      connection
-        .getSlot("confirmed")
+      let request: Promise<number>;
+      try {
+        request = connection.getSlot("confirmed");
+      } catch {
+        // A connection that cannot report a slot (a partial stand-in): keep the last known observation.
+        return;
+      }
+      request
         .then((slot) => {
           // A request started by a previous subscriber generation may finish
           // after the final old subscriber has already unmounted. Never allow
@@ -101,14 +107,14 @@ function subscribeSharedSlot(
  * callers can anchor slot-derived timestamps to the actual observation time
  * instead of to an unrelated later render.
  */
-export function useClusterSlotObservation(): ClusterSlotObservation | null {
+export function useClusterSlotObservation(enabled = true): ClusterSlotObservation | null {
   const { connection } = useConnectionCompat();
   const [observation, setObservation] =
     useState<ClusterSlotObservation | null>(sharedObservation);
 
   useEffect(
-    () => subscribeSharedSlot(connection, setObservation),
-    [connection],
+    () => (enabled ? subscribeSharedSlot(connection, setObservation) : undefined),
+    [connection, enabled],
   );
 
   return observation;
@@ -118,6 +124,6 @@ export function useClusterSlotObservation(): ClusterSlotObservation | null {
  * Backward-compatible slot-only view for consumers that do not need the
  * wall-clock observation time.
  */
-export function useClusterSlot(): bigint | null {
-  return useClusterSlotObservation()?.slot ?? null;
+export function useClusterSlot(enabled = true): bigint | null {
+  return useClusterSlotObservation(enabled)?.slot ?? null;
 }

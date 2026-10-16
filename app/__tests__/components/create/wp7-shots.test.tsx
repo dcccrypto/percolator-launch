@@ -7,7 +7,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
 
-vi.mock("@/hooks/useWalletCompat", () => ({ useWalletCompat: () => ({ publicKey: null, connected: false }) }));
+vi.mock("@/hooks/useWalletCompat", () => ({ useWalletCompat: () => ({ publicKey: null, connected: false }), useConnectionCompat: () => ({ connection: {} }) }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 import { LaunchSuccess } from "@/components/create/LaunchSuccess";

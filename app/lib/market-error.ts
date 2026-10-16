@@ -29,7 +29,7 @@ export type MarketTxAction = "open" | "close" | "deposit" | "withdraw" | "earn-d
 
 // No refill promise: nothing in the app can re-fund the counterparty of a non-vault market (GH#2882).
 export const MSG_LP_DEPLETED_OPEN =
-  "The market has no funds left to take the other side of new trades, so new positions can't open right now. " +
+  "The market doesn't have enough funds to take the other side of new trades, so new positions can't open right now. " +
   "Closing works normally.";
 export const MSG_RESOLVED =
   "This market is resolved. New positions can't be opened; you can still close positions and withdraw.";

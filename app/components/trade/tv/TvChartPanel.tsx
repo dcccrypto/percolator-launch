@@ -30,6 +30,7 @@ import { usePerpLiveStrip } from "@/hooks/usePerpLiveStrip";
 import { getSeriesStore, SERIES_LABEL } from "@/lib/chart/perp-series";
 import { perpChartEnabled } from "@/lib/tv/data";
 import type { PerpSeries } from "@/lib/chart/perp-types";
+import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
 
 /** Pill row on phones: label -> TradingView resolution. */
 export const COMPACT_RESOLUTIONS: ReadonlyArray<{ label: string; res: TvResolution }> = [
@@ -101,17 +102,13 @@ function FullscreenSheet({
   const [liqOff, setLiqOff] = useState<{ edge: LiqEdge; price: number | null }>({ edge: null, price: null });
   const [tvPopup, setTvPopup] = useState(false);
   const onLiqEdge = useCallback((edge: LiqEdge, price: number | null) => setLiqOff({ edge, price }), []);
+  useLockBodyScroll();
   useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
-    return () => {
-      document.body.style.overflow = prev;
-      window.removeEventListener("keydown", onKey);
-    };
+    return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
   return createPortal(
@@ -166,7 +163,8 @@ export function TvChartPanel({ slabAddress, onFailure }: TvChartPanelProps) {
   const isLarge = useIsLargeScreen();
   const mode = isLarge ? "desktop" : "compact";
   const [overlayPrefs, setOverlayPref] = useChartOverlayPrefs();
-  const [ready, setReady] = useState(false);
+  // The chart instance that reported ready (see instanceId below); `ready` is derived from it.
+  const [readyKey, setReadyKey] = useState<string | null>(null);
   const [source, setSource] = useState<BarSource | null>(null);
   const [interval, setIntervalState] = useState<TvResolution | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
@@ -182,7 +180,6 @@ export function TvChartPanel({ slabAddress, onFailure }: TvChartPanelProps) {
 
   const closeSheet = useCallback(() => {
     setFullscreen(false);
-    setReady(false);
     setEmbedEpoch((e) => e + 1);
   }, []);
 
@@ -192,6 +189,16 @@ export function TvChartPanel({ slabAddress, onFailure }: TvChartPanelProps) {
   const perpOn = perpChartEnabled();
   const seriesStore = getSeriesStore();
   const series = useSyncExternalStore(seriesStore.subscribe, seriesStore.get, () => "mark" as PerpSeries);
+  // `ready` belongs to one chart instance. A series switch (or a sheet close / Retry, via the epoch)
+  // mounts a new one, so `ready` is false in that same render: the opaque skeleton covers the rebuild
+  // (no bare "…", white frame or raw-address title) and the resolution pills wait for the new chart.
+  const chartKey = `${mode}:${embedEpoch}:${series}`;
+  // Each new chartKey is a new instance, even one that repeats an earlier key (Mark -> Oracle -> Mark
+  // before Oracle is ready), so the first Mark chart's ready can't count for the second.
+  const [instance, setInstance] = useState({ key: chartKey, n: 0 });
+  if (instance.key !== chartKey) setInstance({ key: chartKey, n: instance.n + 1 });
+  const instanceId = `${chartKey}#${instance.key === chartKey ? instance.n : instance.n + 1}`;
+  const ready = readyKey === instanceId;
   const strip = usePerpLiveStrip(slabAddress, series);
   const headerStats = usePerpHeaderStats(slabAddress, strip.price, series);
   // Pre-launch pool history on screen: CoinGecko attribution is mandatory (the TradingView logo is the library's own and stays visible).
@@ -253,7 +260,7 @@ export function TvChartPanel({ slabAddress, onFailure }: TvChartPanelProps) {
           <div className="h-[clamp(420px,62svh,640px)] w-full" />
         ) : (
           <TvChart
-            key={`${mode}:${embedEpoch}:${series}`}
+            key={chartKey}
             slabAddress={slabAddress}
             series={series}
             onDexData={() => setUsesDex(true)}
@@ -263,7 +270,7 @@ export function TvChartPanel({ slabAddress, onFailure }: TvChartPanelProps) {
             mode={mode}
             overlayPrefs={linePrefs}
             onFailure={onFailure}
-            onReady={() => setReady(true)}
+            onReady={() => setReadyKey(instanceId)}
             onSource={setSource}
             onInterval={setIntervalState}
             handleRef={handleRef}
@@ -280,7 +287,7 @@ export function TvChartPanel({ slabAddress, onFailure }: TvChartPanelProps) {
             <span>Chart data unavailable</span>
             <button
               type="button"
-              onClick={() => { setDataError(null); setReady(false); setEmbedEpoch((e) => e + 1); }}
+              onClick={() => { setDataError(null); setEmbedEpoch((e) => e + 1); }}
               className="rounded-none border border-[var(--border)] px-3 py-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text)]"
             >
               Retry
@@ -290,7 +297,8 @@ export function TvChartPanel({ slabAddress, onFailure }: TvChartPanelProps) {
 
         {!ready && !fullscreen && (
           <div
-            className="pointer-events-none absolute inset-0 flex items-end justify-center gap-1 pb-[30%]"
+            // Opaque: it hides the new iframe until onReady (after resolveSymbol and the theme overrides).
+            className="pointer-events-none absolute inset-0 flex items-end justify-center gap-1 bg-[var(--panel-bg)] pb-[30%]"
             aria-label="Loading chart"
             role="status"
           >

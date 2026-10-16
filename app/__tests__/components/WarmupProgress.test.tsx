@@ -2,6 +2,11 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, act, cleanup } from "@testing-library/react";
 import { WarmupProgress } from "@/components/trade/WarmupProgress";
 import "@testing-library/jest-dom";
+import { beforeEach as v22PinBefore, afterEach as v22PinAfter } from "vitest";
+import { __setDevnetV22ForTest as v22Pin } from "@/lib/v22/flag";
+// v2.2 flag pinned OFF: per-position warmup exists only before v2.2; on v2.2 the component does not ask (v22-no-backend-requests-rt5.test.tsx).
+v22PinBefore(() => v22Pin(false));
+v22PinAfter(() => v22Pin(null));
 
 // Mock the hooks and dependencies
 vi.mock("@/lib/mock-mode", () => ({

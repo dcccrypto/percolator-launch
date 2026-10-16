@@ -22,6 +22,16 @@ const mocks = vi.hoisted(() => ({
   parsePortfolioV17: vi.fn(),
   deriveMatcherDelegate: vi.fn(),
   getLivePriceSnapshot: vi.fn(),
+  readBeforeTrade: vi.fn(async () => 5n),
+  measurePositionChange: vi.fn(async () => ({ beforeQ: 5n, afterQ: 6n })),
+  recordPositionChange: vi.fn(),
+}));
+
+// #3314: the position measurement for the saved entry (lib/position-change.ts, tested on its own).
+vi.mock("@/lib/position-change", () => ({
+  readBeforeTrade: mocks.readBeforeTrade,
+  measurePositionChange: mocks.measurePositionChange,
+  recordPositionChange: mocks.recordPositionChange,
 }));
 
 vi.mock("@/hooks/useWalletCompat", () => ({
@@ -328,6 +338,17 @@ describe("useTrade v17 portfolio selection", () => {
     ).toBe(
       canonicalPortfolio.toBase58(),
     );
+  });
+
+  it("#3314: records the taker portfolio's measured position change under the trade's signature", async () => {
+    const accountA = await selectedAccountA([portfolioOne]);
+    const sig = await mocks.sendTx.mock.results.at(-1)?.value;
+    expect(mocks.readBeforeTrade).toHaveBeenCalledWith(connection, accountA, new PublicKey(slabAddress));
+    expect(mocks.recordPositionChange).toHaveBeenCalledTimes(1);
+    const [recordedSig, measurement] = mocks.recordPositionChange.mock.calls[0];
+    expect(recordedSig).toBe(sig);
+    expect(await measurement).toEqual({ beforeQ: 5n, afterQ: 6n });
+    expect(mocks.measurePositionChange).toHaveBeenCalledWith(connection, accountA, new PublicKey(slabAddress), sig, 5n);
   });
 
   describe("LP-portfolio exclusion (GH bug: market creator's LP mistaken for their own trading account)", () => {

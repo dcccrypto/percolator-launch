@@ -47,7 +47,7 @@ import { useUpdateAssetAuthority, ASSET_AUTH_KIND } from "@/hooks/useUpdateAsset
 import { assetProfileOff } from "@/lib/v18-wire";
 
 function slabWithAssetAdmin(admin: PublicKey): Uint8Array {
-  const off = assetProfileOff(0) + 368;
+  const off = assetProfileOff(0, new Uint8Array(0)) + 368;
   const d = new Uint8Array(off + 4096);
   d.set(admin.toBytes(), off);
   return d;

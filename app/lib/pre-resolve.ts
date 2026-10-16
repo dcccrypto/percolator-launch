@@ -20,6 +20,10 @@
  * account lists checked against wrapper 6377376a :17071 and stake e62aa4a
  * :2761), which use the SDK encoders + account specs.
  */
+import { decodeAssetVaultLpP3, parseLpVaultRegistry } from "@/lib/v22/records";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { fetchMarketTailsV22 } from "@/lib/v22/market-tails";
+import { buildLpVaultCrankFeesIxBoundV22, decodeStakePoolV5 } from "@/lib/v22/sdk";
 import {
   PublicKey,
   SystemProgram,
@@ -39,7 +43,6 @@ import {
   encodeLpVaultCrankFees,
   encodeStakeAccrueFees,
   encodeWithdrawInsuranceReserveToStake,
-  parseLpVaultRegistry,
   parseWrapperConfigV17,
 } from "@percolatorct/sdk";
 import { readCreatorFeeClaimable } from "@/lib/v17-creator-fee";
@@ -51,6 +54,31 @@ import { computeBudgetPrefix, connectionSelfHealDeps, parseCustomInstructionErro
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 /** percolator-stake `state::MINIMUM_LIQUIDITY` (dead shares), e62aa4a state.rs:25. */
 export const STAKE_MINIMUM_LIQUIDITY = 1_000n;
+
+/**
+ * Per-sub-pool dead-share floors (percolator-stake R-1, fix/v22-stake-last-junior-residual @ aebbff6; mirrors state.rs `dead_lp` /
+ * `real_lp_supply`). A tranche pool can hold 0, 1,000 or 2,000 dead shares, recorded in `StakePool._reserved[61]` (FLOOR_SENIOR 0x01,
+ * FLOOR_JUNIOR 0x02). A byte of 0 is a LEGACY pool (every pool on the currently deployed stake program): `total - 1,000`, saturating.
+ * `_reserved` starts at 320 on v2+ pools (state.rs `offset_of!(_reserved) == 320`), so the flags byte is at absolute 381.
+ * TODO(repin): swap for the SDK helpers (`stakeRealLpSupply`, percolator-sdk#406) once the app pins the v2.2 SDK.
+ */
+export const STAKE_FLOOR_SENIOR = 0x01;
+export const STAKE_FLOOR_JUNIOR = 0x02;
+const STAKE_FLOOR_FLAGS_OFFSET = 320 + 61;
+
+/** Raw floor-flags byte of a pool account (0 when absent / legacy). */
+export function readStakeFloorFlags(data: Uint8Array): number {
+  return data.length >= 384 ? data[STAKE_FLOOR_FLAGS_OFFSET] : 0;
+}
+
+/** `real_lp_supply()`: total minus the dead floors the flags record (legacy 0: minus one 1,000 floor), saturating. */
+export function stakeRealLpSupply(totalLpSupply: bigint, floorFlags: number): bigint {
+  const sat = (a: bigint, b: bigint): bigint => (a > b ? a - b : 0n);
+  if (floorFlags === 0) return sat(totalLpSupply, STAKE_MINIMUM_LIQUIDITY);
+  const sd = (floorFlags & STAKE_FLOOR_SENIOR) !== 0 ? STAKE_MINIMUM_LIQUIDITY : 0n;
+  const jd = (floorFlags & STAKE_FLOOR_JUNIOR) !== 0 ? STAKE_MINIMUM_LIQUIDITY : 0n;
+  return sat(sat(totalLpSupply, sd), jd);
+}
 /** Keeper K-1 gate: dead shares may take at most this share of a push. */
 export const STAKE_MAX_DEAD_SHARE_BPS = 100n;
 export const PRE_RESOLVE_CRANK_CU = 250_000;
@@ -82,9 +110,26 @@ export interface PoolState {
   slab: PublicKey;
   poolMode: number;
   totalLpSupply: bigint;
+  /** Raw `_reserved[61]` floor flags; omitted / 0 = legacy pool (total - 1,000). */
+  floorFlags?: number;
   isInitialized: boolean;
   percolatorProgram: PublicKey;
   vault: PublicKey;
+}
+
+/**
+ * v2.2 QA D-1: a v2.2 stake pool is the v5 layout (480 bytes, version byte 5). The installed SDK's `decodeStakePool`
+ * refuses it ("unsupported version: 5 !== 4"), which read as "no initialised stake pool" and marked the stake leg stuck.
+ * Flag on: the v5 decoder (it accepts only an initialised v5 pool). Flag off: the installed decoder, unchanged.
+ */
+export function decodePreResolvePool(data: Uint8Array): PoolState {
+  const floorFlags = readStakeFloorFlags(data);
+  if (isDevnetV22Enabled()) {
+    const d = decodeStakePoolV5(data);
+    return { slab: d.slab, poolMode: d.poolMode, totalLpSupply: d.totalLpSupply, floorFlags, isInitialized: data[0] === 1, percolatorProgram: d.percolatorProgram, vault: d.vault };
+  }
+  const d = decodeStakePool(data);
+  return { slab: d.slab, poolMode: d.poolMode, totalLpSupply: d.totalLpSupply, floorFlags, isInitialized: d.isInitialized, percolatorProgram: d.percolatorProgram, vault: d.vault };
 }
 
 export type StakeLegPlan = { action: "push" } | { action: "none" } | { action: "stuck"; reason: string };
@@ -98,9 +143,10 @@ export function decideStakeLeg(owed: bigint, market: PublicKey, wrapper: PublicK
     return { action: "stuck", reason: "the stake pool is not bound to this market" };
   }
   if (pool.poolMode !== 0) return { action: "stuck", reason: "the stake pool is not an insurance pool" };
-  const real = pool.totalLpSupply > STAKE_MINIMUM_LIQUIDITY ? pool.totalLpSupply - STAKE_MINIMUM_LIQUIDITY : 0n;
+  const real = stakeRealLpSupply(pool.totalLpSupply, pool.floorFlags ?? 0);
   if (real === 0n) return { action: "stuck", reason: "the stake pool has no stakers" };
-  if (STAKE_MINIMUM_LIQUIDITY * 10_000n > STAKE_MAX_DEAD_SHARE_BPS * pool.totalLpSupply) {
+  const dead = pool.totalLpSupply - real; // 1,000 legacy / non-tranche; up to 2,000 on a tranche pool
+  if (dead * 10_000n > STAKE_MAX_DEAD_SHARE_BPS * pool.totalLpSupply) {
     return { action: "stuck", reason: "the stake pool has too few stakers (the push would mostly go to dead shares)" };
   }
   return { action: "push" };
@@ -111,6 +157,11 @@ export interface PreResolveRegistry {
   sharesOutstanding: bigint;
   /** P3: a vault-owned LP is bound (registry `_reserved[0] == 1`). */
   bound?: boolean;
+  /**
+   * Devnet v2.2 (flag on, bound vault): the vault LP portfolio and the tail accounts the wrapper requires on tag 78 once the
+   * market has a P2b ext and / or a bond tranche. Absent = the plain bound 78 (7 accounts).
+   */
+  v22?: { lpPortfolio: PublicKey; vaultLpExt?: PublicKey; bond: boolean };
 }
 
 export function decideLpLeg(owed: bigint, registry: PreResolveRegistry | null): LpLegPlan {
@@ -129,7 +180,19 @@ export function decideLpLeg(owed: bigint, registry: PreResolveRegistry | null): 
  * VaultLpHarvestPending (84) while fees are harvestable, so fees left at resolution lock every
  * Earn senior (reproduced on P3 424fe7e4 BPF; see plan section 9).
  */
-export function buildLpCrankIx(programId: PublicKey, cranker: PublicKey, market: PublicKey, domain: number, bound = false): TransactionInstruction {
+export function buildLpCrankIx(
+  programId: PublicKey,
+  cranker: PublicKey,
+  market: PublicKey,
+  domain: number,
+  bound = false,
+  v22?: PreResolveRegistry["v22"],
+): TransactionInstruction {
+  if (bound && v22 && isDevnetV22Enabled() && (v22.vaultLpExt || v22.bond)) {
+    // v2.2: SDK builder (tail-aware): [6] vault_lp_state, [7] ext, [8] vault LP (writable), [9] bond tranche.
+    // On a bond market 78 re-certifies the vault LP before valuing the bonds; the keeper's refresh crank keeps it current.
+    return buildLpVaultCrankFeesIxBoundV22({ programId, market, registryDomain: domain, lpPortfolio: v22.lpPortfolio, vaultLpExt: v22.vaultLpExt }, cranker, domain, { bond: v22.bond });
+  }
   const [registry] = deriveLpVaultRegistry(programId, market);
   const [ledger] = deriveLpBackingLedger(programId, market, domain);
   const [siblingLedger] = deriveLpBackingLedger(programId, market, domain ^ 1);
@@ -214,7 +277,7 @@ export function planPreResolve(p: {
   const blockers: string[] = [];
   const warnings: string[] = [];
   const lp = decideLpLeg(legs.lpOwed, p.registry);
-  if (lp.action === "crank") cranks.push(buildLpCrankIx(p.programId, p.cranker, p.market, lp.domain, p.registry?.bound === true));
+  if (lp.action === "crank") cranks.push(buildLpCrankIx(p.programId, p.cranker, p.market, lp.domain, p.registry?.bound === true, p.registry?.v22));
   if (lp.action === "stuck") blockers.push(`${atoms(legs.lpOwed)} of LP fees can only be paid out while the market is live, and ${lp.reason}. Resolving now would burn them.`);
   const st = decideStakeLeg(legs.stakeOwed, p.market, p.programId, p.pool);
   if (st.action === "push" && p.pool) {
@@ -257,18 +320,21 @@ export async function readAndPlanPreResolve(
       registry = null;
     }
   }
+  if (registry?.bound && isDevnetV22Enabled()) {
+    // v2.2: a bonded / ext market needs the vault LP portfolio + ext + tranche on tag 78 (security review N: closing a
+    // bonded market was blocked at this step). Read failures leave the plain builder; the tail guard then refuses loudly.
+    try {
+      const lp = decodeAssetVaultLpP3(p.marketData, 0).vaultLpPortfolio;
+      const tails = await fetchMarketTailsV22(connection, p.programId, p.market);
+      if (lp && (tails.vaultLpExt || tails.bondTranche)) registry = { ...registry, v22: { lpPortfolio: lp, vaultLpExt: tails.vaultLpExt ?? undefined, bond: !!tails.bondTranche } };
+    } catch {
+      /* keep the plain builder */
+    }
+  }
   let pool: PoolState | null = null;
   if (pi && pi.owner.equals(p.stakeProgramId)) {
     try {
-      const d = decodeStakePool(new Uint8Array(pi.data));
-      pool = {
-        slab: d.slab,
-        poolMode: d.poolMode,
-        totalLpSupply: d.totalLpSupply,
-        isInitialized: d.isInitialized,
-        percolatorProgram: d.percolatorProgram,
-        vault: d.vault,
-      };
+      pool = decodePreResolvePool(new Uint8Array(pi.data));
     } catch {
       pool = null;
     }

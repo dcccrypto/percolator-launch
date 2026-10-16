@@ -4,7 +4,7 @@ import { usePortfolio } from "@/hooks/usePortfolio";
 import { useLivePortfolioMetrics } from "@/hooks/useLivePortfolioMetrics";
 import { unknownPnlCaveat } from "@/lib/position-pnl";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
-import { formatTokenAmount } from "@/lib/format";
+import { formatUsdAmount } from "@/lib/format";
 import { useState } from "react";
 
 function CopyableAddress({ address }: { address: string }) {
@@ -53,7 +53,8 @@ export function DashboardHeader() {
   const displayValue = loadError
     ? "—"
     : totalValue > 0n
-      ? formatTokenAmount(totalValue)
+      // A dollar figure like the "$0.00" beside it (browser E2E 2026-10-16 read a bare "4.37919"). Collateral is USD-like.
+      ? formatUsdAmount(Number(totalValue) / 1_000_000)
       : "$0.00";
 
   const pnlPositive = totalPnl >= 0n;

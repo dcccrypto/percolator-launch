@@ -6,6 +6,7 @@
  * Tag 44's capacity is min(eff, oi_long, oi_short), so a close can be PARTIAL: the result is
  * measured (lib/limits/fill-check.ts), never assumed.
  */
+import { errorText } from "@/lib/error-text";
 import { tradeCuCap } from "@/lib/compute-budget";
 import { PublicKey, Transaction, VersionedTransaction, type Connection } from "@solana/web3.js";
 import { computeBudgetPrefix, parseCustomInstructionError } from "@/lib/self-heal";
@@ -111,7 +112,7 @@ export async function closeViaRebalanceReduce(
     // Race seen in the #519 scenario: another holder's unilateral close ADLs the matching
     // opposite OI and flattens THIS position before our tx lands => Custom(18). If a fresh read
     // shows the leg is gone, the position IS closed: report that, not an error.
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errorText(e);
     if (extractErrorCode(msg) === ENGINE_INVALID_LEG) {
       const info = await p.connection.getAccountInfo(p.portfolio, "confirmed").catch(() => null);
       const now = info ? signedPositionForAsset(new Uint8Array(info.data), p.assetIndex ?? 0, p.marketId) : null;

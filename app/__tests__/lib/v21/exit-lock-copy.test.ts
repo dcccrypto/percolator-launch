@@ -12,6 +12,7 @@ import { resolveDevnetProgramIds } from "@/lib/program-ids";
 import { decodeMarketHealth, MARKET_HEALTH_SLICE_LEN } from "@/lib/market-health";
 import { ADL_ONE } from "@/lib/limits/constants";
 import { marketRaw } from "./fixtures";
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { __setDevnetV21ForTest } from "@/lib/v21/flag";
 
 const k = () => Keypair.generate().publicKey;
@@ -155,7 +156,7 @@ describe("close-only episode countdown", () => {
 
 describe("copy for 120/121/122, 92-99, 100-103", () => {
   beforeEach(() => __setDevnetV21ForTest(true));
-  afterEach(() => __setDevnetV21ForTest(null));
+  afterEach(() => { __setDevnetV21ForTest(null); __setDevnetV22ForTest(null); });
   const W = resolveDevnetProgramIds().wrapper;
   const raised = (code: number) => `Program ${W} failed: custom program error: 0x${code.toString(16)}`;
   const ctx = { surface: "trade" as const };
@@ -183,6 +184,7 @@ describe("copy for 120/121/122, 92-99, 100-103", () => {
   });
   it("CONTROL (today's programs, flag off): none of the v2.1 codes is interpreted", () => {
     __setDevnetV21ForTest(false);
+    __setDevnetV22ForTest(false); // v2.2 builds on v2.1: its flag also turns these codes on
     for (const c of [92, 98, 100, 103, 120, 121, 122]) {
       expect(resolveUserMessage(new Error(raised(c)), ctx).kind, `code ${c}`).toBe("unmapped");
       expect(humanizeError(raised(c), "trade"), `code ${c}`).not.toMatch(/closing|close-only|first-loss|busy/i);

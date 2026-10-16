@@ -4,17 +4,13 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useSearchParams } from "next/navigation";
-import dynamic from "next/dynamic";
+import { ConnectButton } from "@/components/wallet/ConnectButtonLazy";
 import { CreateMarketWizard } from "@/components/create/CreateMarketWizard";
 import { computeCreateMarketSolCost } from "@/components/create/CostEstimate";
 import { p3WizardEnabled } from "@/lib/limits/flags";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 
-const ConnectButton = dynamic(
-  () => import("@/components/wallet/ConnectButton").then((m) => m.ConnectButton),
-  { ssr: false }
-);
 
 /** Inner component that reads search params (needs Suspense boundary) */
 function CreatePageInner() {
@@ -32,6 +28,18 @@ function CreatePageInner() {
       initialMint = mintParam;
     } catch (err) {
       // Invalid base58 — ignore and use default
+    }
+  }
+
+  // #3267: /create?resume=<slab> continues an unfinished launch from chain. A malformed value is ignored.
+  const resumeParam = searchParams.get("resume");
+  let resumeSlabParam: string | undefined = undefined;
+  if (resumeParam) {
+    try {
+      const { PublicKey } = require("@solana/web3.js");
+      resumeSlabParam = new PublicKey(resumeParam).toBase58();
+    } catch {
+      // not a public key: ignore
     }
   }
 
@@ -95,7 +103,7 @@ function CreatePageInner() {
         <ErrorBoundary label="Create Market Wizard">
           <ScrollReveal delay={0.1}>
             <div className="border border-[var(--border)] bg-[var(--panel-bg)]">
-              <CreateMarketWizard initialMint={initialMint} />
+              <CreateMarketWizard initialMint={initialMint} resumeSlabParam={resumeSlabParam} />
             </div>
           </ScrollReveal>
         </ErrorBoundary>

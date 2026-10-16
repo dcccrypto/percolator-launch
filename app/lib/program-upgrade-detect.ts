@@ -16,7 +16,8 @@
  * "post" = different bytes. Detection deliberately keys ONLY on "not the old build": the shipping
  *          wrapper has been rebuilt several times (7a3ac04c -> bc228e1b H-1 -> impairment-ratio
  *          pause + inline(never)), so no post-upgrade hash is pinned anywhere in the app.
- * "unknown" = the read failed. Every caller treats unknown exactly like "pre" (conservative).
+ * "unknown" = the read failed. Callers treat unknown like "pre" (conservative), except the Earn
+ *          TVL (hooks/useEarnStats.ts), which skips a cycle whose value would depend on it.
  *
  * Only the devnet relaunch ids are probed; any other program id (mainnet, a test program) is "pre":
  * a mainnet build does not carry the sync (`matcher_takes_lp_position` is devnet-only, L-2).

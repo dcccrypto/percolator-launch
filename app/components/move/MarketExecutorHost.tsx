@@ -18,6 +18,7 @@ import { pickOwnerPortfolio, scanOwnerPortfolios } from "@/lib/owner-portfolio";
 import { decodePortfolioLegs } from "@/lib/limits/decode";
 import { releasedPnlFace } from "@/lib/convert-released-pnl";
 import type { MarketBridge } from "@/lib/v21/move/market-exec";
+import { parsePortfolio } from "@/lib/v22/layout";
 
 const Bridge: FC<{ slab: string; onBridge: (b: MarketBridge | null) => void }> = ({ slab, onBridge }) => {
   const { connection } = useConnectionCompat();
@@ -41,7 +42,7 @@ const Bridge: FC<{ slab: string; onBridge: (b: MarketBridge | null) => void }> =
         if (!owner || !programId) return null;
         const found = pickOwnerPortfolio(await scanOwnerPortfolios(connection, new PublicKey(programId), new PublicKey(slab), owner), owner);
         if (!found) return null;
-        const pf = parsePortfolioV17(found.data);
+        const pf = parsePortfolio(found.data);
         return {
           capital: BigInt(pf.capital),
           releasedPnl: releasedPnlFace(pf.pnl, pf.reservedPnl),

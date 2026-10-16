@@ -126,7 +126,9 @@ describe("GH#2517: no API route discards a confirmTransaction result", () => {
     // guarantee (throws on a non-null status.err), just not a confirmTransaction()
     // call, so the scan below correctly no longer sees them. Threshold lowered
     // to match, keeping the same ~1-site margin below the real count.
-    expect(callSites().length).toBeGreaterThanOrEqual(8);
+    //
+    // #3469: devnet-mint-token/route.ts deleted with its two call sites (8 -> 6).
+    expect(callSites().length).toBeGreaterThanOrEqual(5);
   });
 
   it("checks every one of them", () => {
@@ -143,7 +145,6 @@ describe("GH#2517: no API route discards a confirmTransaction result", () => {
     // sendAndConfirmSignedTx's poll-based confirmation), so it has nothing to
     // import this helper for.
     const named = [
-      "devnet-mint-token/route.ts",
       "devnet-mirror-mint/route.ts",
       "playground/faucet/route.ts",
     ];
@@ -163,9 +164,12 @@ describe("no client hook discards a confirmTransaction result", () => {
       fs.readdirSync(HOOKS_DIR).filter((n) => /.tsx?$/.test(n)).map((n) => path.join(HOOKS_DIR, n)),
     );
 
-  it("finds the call sites at all (guards the scan itself)", () => {
-    // useCreateMarket (3), useReclaimSlabRent, useMintPositionNft, useTransferPositionNft.
-    expect(hookSites().length).toBeGreaterThanOrEqual(6);
+  it("no client hook calls confirmTransaction at all", () => {
+    // Every hook confirms by polling (broadcastSignedTx / confirmSignatureByPolling). The last
+    // three sites, in useCreateMarket, waited on a websocket notification and reported a
+    // timeout for transactions that had landed (2026-10-06). The scan itself is guarded by
+    // the server-route block above, which uses the same callSites().
+    expect(hookSites().map((s) => `hooks/${s.file}:${s.line}`)).toEqual([]);
   });
 
   it("checks every one of them", () => {

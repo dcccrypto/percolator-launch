@@ -1,8 +1,10 @@
 "use client";
 
+import { stakePoolsUrl } from "@/lib/stake-pools-url";
 import { STAKE_COPY, cooldownDuration } from "@/lib/stake-copy";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { useStakeCooldown } from "@/hooks/useStakeCooldown";
-import { useEffect, useState, useCallback, useSyncExternalStore, type CSSProperties } from "react";
+import { useEffect, useId, useState, useCallback, useSyncExternalStore, type CSSProperties } from "react";
 import { DEVNET_PROGRAM_IDS } from "@/lib/program-ids";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
@@ -16,6 +18,12 @@ import { getConfig } from "@/lib/config";
 import { unpackAccount, getMint } from "@solana/spl-token";
 import { readPoolTotalLpSupply, stakeWithdrawChipAmount, valueStakePosition, withdrawAmountError } from "@/lib/stake-position";
 import { useStakeDepositByPool } from "@/hooks/useStakeDepositByPool";
+import { useStakeFirstLoss } from "@/hooks/useStakeFirstLoss";
+import { FirstLossDeposit } from "@/components/stake/FirstLossDeposit";
+import { V22_COPY } from "@/lib/v22/copy";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { decodeStakePoolV5, deriveInsuranceUnitsV22 } from "@/lib/v22/sdk";
+import { isInsuranceOnly, stakePoolValueView } from "@/lib/v22/stake-pool-value";
 import { useStakeWithdrawByPool } from "@/hooks/useStakeWithdrawByPool";
 import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
 import { formatTokenAmount } from "@/lib/format";
@@ -31,6 +39,7 @@ import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 import Link from "next/link";
 import { FeeBreakdown } from "@/components/FeeBreakdown";
 import { ConnectWalletCta } from "@/components/wallet/ConnectWalletCta";
+import { stakeErrorMessage } from "@/lib/earnErrors";
 
 /* ── Types ── */
 
@@ -45,12 +54,19 @@ interface StakePool {
   /** SPL mint for pool collateral (USDC). Used to query wallet ATA balance. */
   collateralMint?: string;
   tvl: number;
-  apr: number;
+  /** null = not tracked (the API has no fee history), never a real 0%. */
+  apr: number | null;
   capUsed: number;
   capTotal: number;
   cooldownSlots: number;
   totalLpSupply: number;
   vaultBalance: number;
+  /** v2.2 only. "first-loss" pools are insurance staking; absent / other kinds keep the "Fee staking" naming. */
+  stakeKind?: "first-loss" | "fee-only" | "legacy";
+  /** Insurance deployed for this pool's stakers, USD; null = unreadable (dash). */
+  deployedValue?: number | null;
+  /** Close-out: surplus recorded as unclaimed (0 / absent = none). */
+  unclaimedValue?: number;
 }
 
 interface UserPosition {
@@ -82,7 +98,7 @@ interface ApiPool {
   tvl: number;
   tvlRaw: string;
   poolValue: number;
-  apr: number;
+  apr: number | null;
   capTotal: number;
   capTotalRaw: string;
   capUsed: number;
@@ -92,6 +108,10 @@ interface ApiPool {
   vaultBalance: number;
   poolMode: number;
   adminTransferred: boolean;
+  stakeKind?: "first-loss" | "fee-only" | "legacy";
+  deployedValue?: number | null;
+  /** Close-out: surplus recorded as unclaimed (0 / absent = none). */
+  unclaimedValue?: number;
 }
 
 /** Convert API pool shape to the page-local StakePool type. */
@@ -111,6 +131,9 @@ function apiPoolToStakePool(p: ApiPool): StakePool {
     cooldownSlots: p.cooldownSlots,
     totalLpSupply: p.totalLpSupply,
     vaultBalance: p.vaultBalance,
+    stakeKind: p.stakeKind,
+    deployedValue: p.deployedValue,
+    unclaimedValue: p.unclaimedValue,
   };
 }
 
@@ -232,6 +255,18 @@ async function fetchPoolPosition(
   } catch {
     // fall back to the API snapshot below
   }
+  // v2.2 first-loss pool: the stake is worth its share of vault + deployed insurance, read fresh. Unreadable units
+  // leave the base null so the valuation falls back to the API snapshot (whose TVL already includes deployed).
+  if (isDevnetV22Enabled() && pool.stakeKind === "first-loss") {
+    chainVaultAtoms = null;
+    try {
+      const [unitsKey] = deriveInsuranceUnitsV22(decodeStakePoolV5(poolInfo.data).percolatorProgram, slabPk);
+      const unitsInfo = await connection.getAccountInfo(unitsKey);
+      chainVaultAtoms = stakePoolValueView(poolInfo.data, unitsInfo ? new Uint8Array(unitsInfo.data) : null)?.totalAtoms ?? null;
+    } catch {
+      chainVaultAtoms = null;
+    }
+  }
   const estimatedValue = valueStakePosition({
     lpRaw: lpAccount.amount,
     chainTotalLpSupplyRaw: readPoolTotalLpSupply(poolInfo.data),
@@ -300,9 +335,13 @@ function StakeHeader({
   const { connected } = useWalletCompat();
   const totalStaked = pools.reduce((s, p) => s + p.tvl, 0);
   const activePools = pools.length;
-  const avgApr = pools.length > 0
-    ? pools.reduce((s, p) => s + p.apr, 0) / pools.length
-    : 0;
+  // Only first-loss pools are insurance staking; any fee-only / legacy pool keeps the "Fee staking" name.
+  const insuranceOnly = isInsuranceOnly(pools);
+  // v2.2 pools carry a kind: the close-out rule (not "fees while the market runs") is what a fee-only staker is told.
+  const v22Pools = pools.some((p) => p.stakeKind !== undefined);
+  // Over the pools that report one; null when none does (not tracked), shown as "—", not "0%".
+  const aprs = pools.map((p) => p.apr).filter((a): a is number => a !== null);
+  const avgApr = aprs.length > 0 ? aprs.reduce((s, a) => s + a, 0) / aprs.length : null;
 
   const yourDeposits =
     !connected
@@ -317,7 +356,7 @@ function StakeHeader({
     { label: "Total Staked", value: loading ? "…" : formatUsd(totalStaked) },
     { label: "Your Deposits", value: yourDeposits, muted: !connected || totalUserDeposited === null || (totalUserDeposited ?? 0) <= 0 },
     { label: "Active Pools", value: loading ? "…" : String(activePools) },
-    { label: "Avg APR", value: avgApr > 0 ? `${avgApr.toFixed(1)}%` : "0%", muted: avgApr <= 0 },
+    { label: "Avg APR", value: avgApr === null ? "—" : `${avgApr.toFixed(1)}%`, muted: avgApr === null || avgApr <= 0 },
   ];
 
   return (
@@ -334,23 +373,35 @@ function StakeHeader({
           className="text-2xl font-medium tracking-[-0.01em] text-[var(--text)]"
           style={{ fontFamily: "var(--font-display)" }}
         >
-          <span className="font-normal text-[var(--text-secondary)]">Fee </span>staking
+          {insuranceOnly ? (
+            <span data-testid="stake-title-insurance"><span className="font-normal text-[var(--text-secondary)]">Insurance </span>staking</span>
+          ) : (
+            <><span className="font-normal text-[var(--text-secondary)]">Fee </span>staking</>
+          )}
         </h1>
+        {insuranceOnly ? (
+          <p className="mt-2 max-w-lg text-[13px] text-[var(--text-secondary)]" data-testid="stake-intro-insurance">{V22_COPY.stake.insuranceIntro}</p>
+        ) : v22Pools ? (
+          <p className="mt-2 max-w-lg text-[13px] text-[var(--text-secondary)]" data-testid="stake-intro-feeonly">{V22_COPY.stake.closeOut.feeOnly}</p>
+        ) : (
         <p className="mt-2 max-w-lg text-[13px] text-[var(--text-secondary)]">
           Stake into a market&apos;s pool to receive a share of that market&apos;s trading fees —
           fully on-chain and transparent.
         </p>
+        )}
         {/* E2E B4 (2026-09-30): stakers ARE paid. The insurance fee leg accrues to the wrapper's
             insurance reserve and the keeper (b004a0c) pushes it into the bound stake pool:
             wrapper tag 87 WithdrawInsuranceReserveToStake -> stake tag 12 AccrueFees, which takes
             insurance pools (pool_mode 0; see lib/pre-resolve.ts decideStakeLeg). Measured: stakers
             C3 +5.86 USDC, U3 +7.01 USDC. The old zero-yield caption was false. */}
+        {!insuranceOnly && !v22Pools && (
         <p className="mt-1.5 max-w-lg text-[11px] text-[var(--text-muted)]">
           Stakers are paid the insurance share of every trading fee, moved into the stake pool
           automatically. The pool admin can move staked funds into the market&apos;s insurance
           fund, where trading losses can use them, so your stake can lose value. This has not
           happened so far.
         </p>
+        )}
         {/* The 0% above reads as an oversight without the other shares beside
             it — "16% to insurance" is the number it gets mistaken for. #2565. */}
         <div className="mt-3 max-w-lg border border-[var(--border)] bg-[var(--panel-bg)] p-3">
@@ -418,7 +469,7 @@ function PositionCard({
       setTxStatus({ type: "success", msg: `Withdrawal confirmed: ${sig.slice(0, 8)}…` });
       onWithdrawSuccess?.();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = stakeErrorMessage(e); // #26: never raw chain text
       setTxStatus({ type: "error", msg });
     }
   }, [withdraw, position, onWithdrawSuccess]);
@@ -521,8 +572,12 @@ function YourPositionPanel({
   onManage,
   unreadable = 0,
   onRetry,
+  pending = false,
 }: {
   positions: UserPosition[];
+  /** The connected wallet's positions haven't been read yet (pools loading or the
+   *  scan in flight): neither "no positions" nor an error is known. */
+  pending?: boolean;
   /** Pools whose position could not be read (#2706) — 0 means every pool was
    *  read, so an empty list really is "no positions". -1 = the pool list
    *  itself failed, so no pool could be checked. */
@@ -548,7 +603,7 @@ function YourPositionPanel({
         )}
       </div>
 
-      {connected && unreadable !== 0 && (
+      {connected && !pending && unreadable !== 0 && (
         <div role="alert" data-testid="stake-positions-error" className="mb-3 border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-3 text-[11px] text-[var(--text-secondary)]">
           {unreadable < 0
             ? "Couldn't load your positions."
@@ -562,6 +617,10 @@ function YourPositionPanel({
       {!connected ? (
         <div className="border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-3 text-[11px] text-[var(--text-secondary)]">
           Connect a wallet to see your staked positions.
+        </div>
+      ) : pending ? (
+        <div data-testid="stake-positions-pending" className="border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-3 text-[11px] text-[var(--text-secondary)]">
+          Checking your positions…
         </div>
       ) : positions.length === 0 && unreadable !== 0 ? null : positions.length === 0 ? (
         <div className="border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-3 text-[11px] text-[var(--text-secondary)]">
@@ -601,20 +660,35 @@ function DepositWidget({
 }) {
   const { connected, publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
+  // Label ↔ field ids (the page also renders inside /earn, so no fixed ids).
+  const fieldId = useId();
   const [amount, setAmount] = useState("");
   const [walletBalanceRaw, setWalletBalanceRaw] = useState<bigint | null>(null);
   const [balanceDecimals, setBalanceDecimals] = useState(6);
   const [txStatus, setTxStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
 
   const [withdrawAmount, setWithdrawAmount] = useState("");
-  const [withdrawPosition, setWithdrawPosition] = useState<UserPosition | null>(null);
-  const [withdrawPositionLoading, setWithdrawPositionLoading] = useState(false);
+  const pool = pools.find((p) => p.id === selectedPool) ?? pools[0];
+  // Each read result is stored with the wallet + pool it was read for, and only counts
+  // while that pair is still selected. So after a pool or wallet change the previous
+  // position (and its Withdraw button) is never shown, not even for the frame before the
+  // new read starts; a refresh of the same pair keeps it on screen.
+  const withdrawKey =
+    connected && publicKey && pool?.slabAddress ? `${publicKey.toBase58()}:${pool.slabAddress}` : null;
+  const [withdrawRead, setWithdrawRead] = useState<{ key: string; position: UserPosition | null } | null>(null);
+  // The key whose balance could not be read (#2706): unknown, not "no balance".
+  const [withdrawErrorKey, setWithdrawErrorKey] = useState<string | null>(null);
+  const [withdrawReading, setWithdrawReading] = useState(false);
+  const withdrawPosition = withdrawRead !== null && withdrawRead.key === withdrawKey ? withdrawRead.position : null;
+  const withdrawPositionError = withdrawKey !== null && withdrawErrorKey === withdrawKey;
+  // Loading while a read runs, and for a selected pair that hasn't been read yet.
+  const withdrawPositionLoading =
+    withdrawReading || (withdrawKey !== null && withdrawRead?.key !== withdrawKey && !withdrawPositionError);
   const [withdrawRefreshKey, setWithdrawRefreshKey] = useState(0);
   // Live countdown for the Withdraw tab; at 0 re-read the position (the chain decides).
   const withdrawCooldown = useStakeCooldown(withdrawPosition, () => setWithdrawRefreshKey((k) => k + 1));
   const [withdrawTxStatus, setWithdrawTxStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
 
-  const pool = pools.find((p) => p.id === selectedPool) ?? pools[0];
   const amountNum = parseFloat(amount) || 0;
   // Exact deposit amount in base units (null = unparseable / too many decimals)
   // for the wallet-balance check; the float `amountNum` is display-only.
@@ -640,6 +714,10 @@ function DepositWidget({
     collateralMint: pool?.collateralMint ?? "",
   });
 
+  // Devnet v2.2 (flag-gated): a stake-v5 first-loss pool gets the consent deposit instead of the plain form.
+  // `firstLoss.pool` is null with the flag off and for every other pool, so nothing changes there.
+  const firstLoss = useStakeFirstLoss(pool?.slabAddress ?? "", pool?.collateralMint ?? "");
+
   // Withdraw for the currently SELECTED pool — same tx builder YourPositionPanel
   // uses, just parameterized by whichever pool is picked in the dropdown here
   // instead of the single globally-detected "first pool with a balance" position.
@@ -659,9 +737,12 @@ function DepositWidget({
   // now that selectedPool/mode are lifted to the parent (so PositionCard's
   // "Manage" button can jump here), a stale amount from a previous pool/tab
   // must not silently carry over into a different pool's deposit/withdraw.
+  // Same for the last result line: pool A's "Withdrawal confirmed" must not show under pool B (#63).
   useEffect(() => {
     setAmount("");
     setWithdrawAmount("");
+    setTxStatus(null);
+    setWithdrawTxStatus(null);
   }, [selectedPool, mode]);
 
   // Fetch real SPL token balance for the selected pool's collateral mint
@@ -688,12 +769,15 @@ function DepositWidget({
   // currently-selected pool instead of scanning all pools for the first match.
   useEffect(() => {
     if (!connected || !publicKey || !pool?.slabAddress) {
-      setWithdrawPosition(null);
-      setWithdrawPositionLoading(false);
+      setWithdrawRead(null);
+      setWithdrawReading(false);
+      setWithdrawErrorKey(null);
       return;
     }
     let cancelled = false;
-    setWithdrawPositionLoading(true);
+    const readKey = `${publicKey.toBase58()}:${pool.slabAddress}`;
+    setWithdrawReading(true);
+    setWithdrawErrorKey(null);
     (async () => {
       try {
         // Stake pools are owned by this deployment's vault program
@@ -703,12 +787,17 @@ function DepositWidget({
           ?? DEVNET_PROGRAM_IDS.stake
         );
         const found = await fetchPoolPosition(pool, publicKey, connection, stakeProgramId);
-        if (!cancelled) setWithdrawPosition(found);
+        if (!cancelled) setWithdrawRead({ key: readKey, position: found });
       } catch (err) {
+        // fetchPoolPosition throws only when the pool could not be read; a confirmed
+        // "no position" resolves to null. So this is unknown, not empty.
         console.error("[DepositWidget] Failed to fetch withdraw position:", err);
-        if (!cancelled) setWithdrawPosition(null);
+        if (!cancelled) {
+          setWithdrawRead(null);
+          setWithdrawErrorKey(readKey);
+        }
       } finally {
-        if (!cancelled) setWithdrawPositionLoading(false);
+        if (!cancelled) setWithdrawReading(false);
       }
     })();
     return () => { cancelled = true; };
@@ -752,7 +841,7 @@ function DepositWidget({
       setWithdrawRefreshKey((k) => k + 1);
       onTxSuccess?.();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = stakeErrorMessage(e); // #26: never raw chain text
       setTxStatus({ type: "error", msg });
     }
   }, [pool, amount, balanceDecimals, walletBalanceRaw, deposit, depositLoading, onTxSuccess]);
@@ -772,7 +861,7 @@ function DepositWidget({
       setWithdrawRefreshKey((k) => k + 1);
       onTxSuccess?.();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = stakeErrorMessage(e); // #26: never raw chain text
       setWithdrawTxStatus({ type: "error", msg });
     }
   }, [pool, withdrawPosition, withdrawAmount, withdraw, withdrawLoading, onTxSuccess]);
@@ -819,8 +908,9 @@ function DepositWidget({
 
         {/* Pool selector — shared between Deposit and Withdraw modes */}
         <div>
-          <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Select Pool</label>
+          <label htmlFor={`${fieldId}-pool`} className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Select Pool</label>
           <select
+            id={`${fieldId}-pool`}
             value={selectedPool}
             onChange={(e) => { setSelectedPool(e.target.value); setTxStatus(null); setWithdrawTxStatus(null); }}
             className="w-full border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2.5 text-[13px] text-[var(--text)] outline-none transition-colors focus:border-[var(--accent)]/50"
@@ -830,14 +920,25 @@ function DepositWidget({
               <option key={p.id} value={p.id}>{p.name}</option>
             ))}
           </select>
+          {pool?.stakeKind === "fee-only" && (
+            <p className="mt-1.5 text-[11px] text-[var(--text-secondary)]" data-testid="pool-feeonly-closeout">{V22_COPY.stake.closeOut.feeOnly}</p>
+          )}
         </div>
 
-        {mode === "deposit" ? (
+        {mode === "deposit" && firstLoss.pool ? (
+          <FirstLossDeposit
+            slabAddress={pool?.slabAddress ?? ""}
+            collateralMint={pool?.collateralMint ?? ""}
+            decimals={balanceDecimals}
+            deployedUsd={pool?.deployedValue}
+            onDone={() => { setWithdrawRefreshKey((k) => k + 1); onTxSuccess?.(); }}
+          />
+        ) : mode === "deposit" ? (
           <>
             {/* Amount input */}
             <div>
               <div className="mb-1.5 flex items-center justify-between">
-                <label className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Amount</label>
+                <label htmlFor={`${fieldId}-deposit`} className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Amount</label>
                 {connected && walletBalance !== null && (
                   <button
                     type="button"
@@ -852,6 +953,7 @@ function DepositWidget({
               </div>
               <div className="flex gap-2">
                 <input
+                  id={`${fieldId}-deposit`}
                   type="number"
                   data-testid="stake-deposit-input"
                   value={amount}
@@ -965,7 +1067,7 @@ function DepositWidget({
             {/* Withdraw amount input */}
             <div>
               <div className="mb-1.5 flex items-center justify-between">
-                <label className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Amount</label>
+                <label htmlFor={`${fieldId}-withdraw`} className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Amount</label>
                 {connected && withdrawPosition && (
                   <button
                     type="button"
@@ -980,6 +1082,7 @@ function DepositWidget({
               </div>
               <div className="flex gap-2">
                 <input
+                  id={`${fieldId}-withdraw`}
                   type="number"
                   data-testid="stake-withdraw-input"
                   value={withdrawAmount}
@@ -1025,7 +1128,19 @@ function DepositWidget({
             {withdrawPositionLoading && (
               <p className="text-[11px] text-[var(--text-muted)]">Checking staked balance…</p>
             )}
-            {!withdrawPositionLoading && connected && !withdrawPosition && (
+            {!withdrawPositionLoading && connected && withdrawPositionError && (
+              <p role="alert" data-testid="stake-withdraw-read-error" className="text-[11px] text-[var(--text-secondary)]">
+                Couldn&apos;t read your staked balance in this pool.{" "}
+                <button
+                  type="button"
+                  onClick={() => setWithdrawRefreshKey((k) => k + 1)}
+                  className="text-[var(--accent-text)] transition-colors hover:text-[var(--accent)]"
+                >
+                  Try again
+                </button>
+              </p>
+            )}
+            {!withdrawPositionLoading && connected && !withdrawPositionError && !withdrawPosition && (
               <p className="text-[11px] text-[var(--text-muted)]">No staked balance in this pool.</p>
             )}
 
@@ -1042,6 +1157,10 @@ function DepositWidget({
                   ? "Cooldown complete — ready to withdraw."
                   : `${withdrawCooldown.label}.`}
               </p>
+            )}
+
+            {firstLoss.pool && (
+              <p data-testid="first-loss-withdraw-note" className="text-[11px] text-[var(--text-muted)]">{V22_COPY.stake.withdraw}</p>
             )}
 
             {/* Tx feedback */}
@@ -1071,7 +1190,9 @@ function DepositWidget({
                 {withdrawLoading
                   ? "Withdrawing…"
                   : !withdrawPosition
-                  ? "Nothing to Withdraw"
+                  ? withdrawPositionLoading
+                    ? "Checking…"
+                    : withdrawPositionError ? "Balance unavailable" : "Nothing to Withdraw"
                   : !withdrawPosition.cooldownElapsed
                   ? withdrawCooldown.label
                   : "Withdraw →"}
@@ -1111,14 +1232,20 @@ function PoolRow({
   connected,
   selected,
   onSelect,
+  positionsPending = false,
 }: {
   pool: StakePool;
   position?: UserPosition;
   connected: boolean;
   selected: boolean;
   onSelect: (poolId: string) => void;
+  positionsPending?: boolean;
 }) {
-  const yourStake = position ? formatUsd(position.estimatedValue) : connected ? "$—" : "—";
+  const yourStake = position
+    ? formatUsd(position.estimatedValue)
+    : connected
+      ? positionsPending ? "…" : "$—"
+      : "—";
 
   return (
     <div
@@ -1140,6 +1267,14 @@ function PoolRow({
         >
           {pool.symbol}
         </Link>
+        {pool.stakeKind === "first-loss" && (
+          <span className="shrink-0 text-[10px] text-[var(--text-dim)]" data-testid="pool-deployed" title={V22_COPY.stake.insuranceStaking}>
+            {pool.deployedValue === null || pool.deployedValue === undefined ? V22_COPY.stake.deployedUnknown : V22_COPY.stake.deployed(formatUsd(pool.deployedValue))}
+          </span>
+        )}
+        {(pool.unclaimedValue ?? 0) > 0 && (
+          <span className="shrink-0 text-[10px] text-[var(--text-dim)]" data-testid="pool-unclaimed">{V22_COPY.stake.unclaimed(formatUsd(pool.unclaimedValue as number))}</span>
+        )}
       </div>
 
       {/* Clicks bubble to the row's onClick. */}
@@ -1166,10 +1301,11 @@ function PoolRow({
 
         {/* APR */}
         <span
-          className={`text-right text-[12px] tabular-nums ${pool.apr > 0 ? "text-[var(--cyan)]" : "text-[var(--text-muted)]"}`}
+          className={`text-right text-[12px] tabular-nums ${pool.apr !== null && pool.apr > 0 ? "text-[var(--cyan)]" : "text-[var(--text-muted)]"}`}
           style={{ fontFamily: "var(--font-mono)" }}
+          title={pool.apr === null ? "Not tracked yet" : undefined}
         >
-          {pool.apr > 0 ? `${pool.apr.toFixed(1)}%` : "0%"}
+          {pool.apr === null ? "—" : `${pool.apr.toFixed(1)}%`}
         </span>
       </button>
     </div>
@@ -1187,10 +1323,13 @@ function PoolTable({
   onSelect,
   loadError,
   onRetry,
+  positionsPending = false,
 }: {
   pools: StakePool[];
   loading: boolean;
   positions: UserPosition[];
+  /** The wallet's positions haven't been read yet: show "…", not "$—", per row. */
+  positionsPending?: boolean;
   connected: boolean;
   selectedPool: string;
   onSelect: (poolId: string) => void;
@@ -1313,6 +1452,7 @@ function PoolTable({
                 connected={connected}
                 selected={pool.id === selectedPool}
                 onSelect={onSelect}
+                positionsPending={positionsPending}
               />
             ))}
             {visiblePools.length === 0 && (
@@ -1384,7 +1524,7 @@ function StakeSidebar() {
         </h3>
         <div className="space-y-2">
           <SidebarStep num={1} title="Deposit" desc="Stake sim-USDC into a market's insurance pool" />
-          <SidebarStep num={2} title="Back the fund" desc="Your deposit becomes first-loss backing" />
+          <SidebarStep num={2} title="Back the fund" desc={STAKE_COPY.backStep} />
           <SidebarStep num={3} title="Withdraw" desc={STAKE_COPY.sidebar} />
         </div>
       </div>
@@ -1393,9 +1533,9 @@ function StakeSidebar() {
       <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-4 hud-corners">
         <div className="mb-2 text-[10px] uppercase tracking-[0.15em] text-[var(--warning)]">⚠ Risk Notice</div>
         <p className="text-[11px] leading-relaxed text-[var(--text-secondary)]">
-          Staked funds are first-loss insurance capital. Admin flushes permanently reduce your
-          redeemable value, and the fee income shown as APR depends on trading volume. Only stake
-          what you can afford to lose.
+          <Tooltip text={STAKE_COPY.risk.leadTip}><span className="underline decoration-dotted underline-offset-2">{STAKE_COPY.risk.lead}</span></Tooltip>{" "}
+          <Tooltip text={STAKE_COPY.risk.flushTip}><span className="underline decoration-dotted underline-offset-2">{STAKE_COPY.risk.flush}</span></Tooltip>{" "}
+          {STAKE_COPY.risk.tail}
         </p>
       </div>
     </div>
@@ -1415,6 +1555,10 @@ export default function StakePage() {
   // S-M1 fix: ALL positions the wallet holds across pools, not just the first
   // one found.
   const [positions, setPositions] = useState<UserPosition[]>([]);
+  // The wallet the last finished scan read. Until it matches the connected wallet,
+  // positions are unknown: shown as "Checking…", never as "No open positions" or as
+  // the previous wallet's positions. A refresh after a tx keeps the shown positions.
+  const [scannedFor, setScannedFor] = useState<string | null>(null);
   const [positionRefreshKey, setPositionRefreshKey] = useState(0);
   const [poolsRefreshKey, setPoolsRefreshKey] = useState(0);
 
@@ -1431,7 +1575,7 @@ export default function StakePage() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/stake/pools");
+        const res = await fetch(stakePoolsUrl(poolsRefreshKey));
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json() as { pools: ApiPool[] };
         if (!cancelled) {
@@ -1461,9 +1605,11 @@ export default function StakePage() {
     if (!connected || !publicKey || pools.length === 0) {
       setPositions([]);
       setPositionsUnreadable(0);
+      setScannedFor(null);
       return;
     }
     let cancelled = false;
+    const wallet = publicKey.toBase58();
 
     (async () => {
       try {
@@ -1493,11 +1639,13 @@ export default function StakePage() {
           .filter((p): p is UserPosition => p !== null);
         setPositions(found);
         setPositionsUnreadable(results.filter((r) => r.status === "rejected").length);
+        setScannedFor(wallet);
       } catch (err) {
         console.error("[StakePage] Failed to fetch user positions:", err);
         if (!cancelled) {
           setPositions([]);
           setPositionsUnreadable(pools.length);
+          setScannedFor(wallet);
         }
       }
     })();
@@ -1517,11 +1665,18 @@ export default function StakePage() {
     window.setTimeout(() => setPoolsRefreshKey((k) => k + 1), 2_000);
   }, []);
 
+  // Pools still loading, or a scan for this wallet not finished yet. A genuinely empty
+  // pool list (loaded, nothing to scan) is not pending.
+  const walletKey = publicKey?.toBase58() ?? null;
+  const positionsPending =
+    connected && walletKey !== null && (poolsLoading || (pools.length > 0 && scannedFor !== walletKey));
+  const shownPositions = positionsPending ? [] : positions;
+
   // S-M1 fix: sum across ALL positions, not just a single (possibly-missing) one.
   // #2706: if any pool could not be read (or the pool list failed), the total
   // is unknown — show it as unknown rather than an under-count or "$—".
   const totalUserDeposited =
-    connected && (positionsUnreadable > 0 || (poolsError && pools.length === 0))
+    connected && (positionsPending || positionsUnreadable > 0 || (poolsError && pools.length === 0))
       ? null
       : positions.length > 0
         ? positions.reduce((sum, p) => sum + p.estimatedValue, 0)
@@ -1533,9 +1688,11 @@ export default function StakePage() {
   }, []);
   const retryPositions = useCallback(() => setPositionRefreshKey((k) => k + 1), []);
 
-  const selectPoolAndScroll = useCallback((poolId: string, mode: "deposit" | "withdraw") => {
+  // `mode` only when the caller means a tab (Manage → Withdraw). Picking a pool row keeps the tab the
+  // user is on: switching pools while on Withdraw used to flip the widget back to Deposit.
+  const selectPoolAndScroll = useCallback((poolId: string, mode?: "deposit" | "withdraw") => {
     setSelectedPool(poolId);
-    setWidgetMode(mode);
+    if (mode) setWidgetMode(mode);
     document.getElementById("deposit")?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, []);
 
@@ -1543,7 +1700,12 @@ export default function StakePage() {
     // No min-h-screen: this page renders both standalone at /stake AND as a tab
     // inside the Earn hub (app/earn), which supplies the outer layout. Content
     // flows naturally at both mount points.
-    <div className="relative animate-fade-in overflow-x-hidden">
+    //
+    // overflow-x-CLIP, not -hidden: `overflow-x: hidden` makes overflow-y compute to `auto`,
+    // so this div was its own vertical scroll container, and any overflow inside it drew a
+    // second full-height scrollbar next to the page's (reported on Earn → Fee Staking).
+    // `clip` hides horizontal overflow the same way without creating a scroll container.
+    <div className="relative animate-fade-in overflow-x-clip">
       {/* Compact header + stats strip (mirrors EarnHeader) */}
       <ErrorBoundary label="Stake Header">
         {/* A failed pools fetch must not read as "0 pools / $0 staked" (#2706). */}
@@ -1561,18 +1723,22 @@ export default function StakePage() {
               <PoolTable
                 pools={pools}
                 loading={poolsLoading}
-                positions={positions}
+                positions={shownPositions}
+                positionsPending={positionsPending}
                 connected={connected}
                 selectedPool={selectedPool}
-                onSelect={(poolId) => selectPoolAndScroll(poolId, "deposit")}
+                onSelect={(poolId) => selectPoolAndScroll(poolId)}
                 loadError={poolsError}
                 onRetry={retryPools}
               />
             </ErrorBoundary>
           </div>
 
-          {/* RIGHT RAIL — deposit/withdraw bound to the selected pool, then positions */}
-          <div className="space-y-3 lg:sticky lg:top-4">
+          {/* RIGHT RAIL — deposit/withdraw bound to the selected pool, then positions. Scrolls
+              with the page: its `lg:sticky` never took effect inside the old overflow-x-hidden
+              root (a scroll container), and making it stick now would put its top under the
+              sticky site header, so the rail keeps the behaviour it has always had. */}
+          <div className="space-y-3">
             <ErrorBoundary label="Deposit Widget">
               <DepositWidget
                 pools={pools}
@@ -1585,7 +1751,8 @@ export default function StakePage() {
             </ErrorBoundary>
             <ErrorBoundary label="Your Positions">
               <YourPositionPanel
-                positions={positions}
+                positions={shownPositions}
+                pending={positionsPending}
                 onWithdrawSuccess={handleTxSuccess}
                 onManage={(poolId) => selectPoolAndScroll(poolId, "withdraw")}
                 unreadable={poolsError && pools.length === 0 ? -1 : positionsUnreadable}

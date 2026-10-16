@@ -276,9 +276,11 @@ export interface WsManagerHandle {
  * is ever attempted) so call sites never need an `if (url)` branch.
  *
  * Must only be called from inside a `useEffect`/subscribe callback (never
- * during render) — see priceStore.ts's `subscribeSlab`, which is the sole
- * caller and is itself only ever invoked by React's `useSyncExternalStore`
- * internals or a chart's own `useEffect`, never synchronously during render.
+ * during render) — see priceStore.ts's `subscribeSlab` and the chart live
+ * client's per-call proxy (lib/tv/data/index.ts), which are only ever invoked by
+ * React's `useSyncExternalStore` internals or a chart's own `useEffect`, never
+ * synchronously during render. Resolve it per call; never cache the handle: it
+ * is bound to one manager, which is torn down after TEARDOWN_DELAY_MS idle.
  */
 export function getWsManager(url: string): WsManagerHandle {
   if (!url) {

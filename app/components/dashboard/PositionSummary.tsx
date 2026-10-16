@@ -1,5 +1,6 @@
 "use client";
 
+import { formatLotPriceE6, formatLotQ } from "@/lib/v22/lot";
 import Link from "next/link";
 import { usePortfolio, liveLiquidationSeverity, liveLiquidationDistancePct, type PortfolioPosition } from "@/hooks/usePortfolio";
 import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
@@ -67,6 +68,7 @@ function PositionCard({
   const entryDisplay = describeEntryPrice({
     entryE6: pos.effectiveEntryPrice,
     source: pos.entryPriceSource,
+    formatPrice: (p) => formatLotPriceE6(p, pos.lotExp ?? 0),
   });
   const hasValidOracle = markE6 > 0n;
   const pnlIsKnown = live.pnlKnown;
@@ -82,7 +84,7 @@ function PositionCard({
     maintenanceMarginBps: pos.maintenanceMarginBps,
     // Same verdict as the Entry cell, so the two cannot contradict (#2671).
     hasResolvedEntry: entryDisplay.known,
-    formatPrice: formatUsdPriceE6,
+    formatPrice: (p) => formatLotPriceE6(p, pos.lotExp ?? 0),
     unknownText: "—",
   });
 
@@ -169,7 +171,7 @@ function PositionCard({
           <div>
             <span className="text-[var(--text-secondary)]">Size: </span>
             <span className="text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
-              {formatTokenAmount(sizeAbs, decimals)}
+              {formatLotQ(sizeAbs, decimals, pos.lotExp ?? 0)}
             </span>
           </div>
           <div>
@@ -181,7 +183,7 @@ function PositionCard({
           <div>
             <span className="text-[var(--text-secondary)]">Mark: </span>
             <span className="text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
-              {markE6 > 0n ? formatUsdPriceE6(markE6) : "—"}
+              {markE6 > 0n ? formatLotPriceE6(markE6, pos.lotExp ?? 0) : "—"}
             </span>
           </div>
           <div>
@@ -302,9 +304,7 @@ export function PositionSummary() {
             <div className="mb-3 text-2xl opacity-30">📊</div>
             <p className="text-[13px] font-medium text-[var(--text-secondary)]">No open positions</p>
             <p className="mt-1 text-[11px] text-[var(--text-secondary)]">Start trading →</p>
-            <Link href="/markets" className="mt-3">
-              <GlowButton>Browse Markets</GlowButton>
-            </Link>
+            <GlowButton href="/markets" className="mt-3">Browse Markets</GlowButton>
           </div>
         ) : (
           <div className="space-y-2">

@@ -1,5 +1,6 @@
 "use client";
 
+import { errorText } from "@/lib/error-text";
 import { useState, useCallback } from "react";
 import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
@@ -18,8 +19,8 @@ import {
   deriveExtraAccountMetas,
   deriveNftRegistry,
   encodeNftBurn,
-  isV17Account,
 } from "@percolatorct/sdk";
+import { isWrapperAccount } from "@/lib/v22/layout";
 
 // H8: NFT-program error code 22 = LegNotActive (percolator-nft/src/error.rs) —
 // the leg BurnPositionNft's verify_bound_leg gate expects is no longer active
@@ -94,7 +95,7 @@ export function useBurnPositionNft(slabAddress: string, override?: PositionNftOv
       return;
     }
 
-    const isV17 = raw != null && raw.length > 0 && isV17Account(raw);
+    const isV17 = raw != null && raw.length > 0 && isWrapperAccount(raw);
     if (!isV17) {
       setError("Position NFT burn is only supported on v17 markets.");
       return;
@@ -188,7 +189,7 @@ export function useBurnPositionNft(slabAddress: string, override?: PositionNftOv
       toast(UNWRAP_COPY.done, "success");
       return sig;
     } catch (e) {
-      const errMsg = e instanceof Error ? e.message : String(e);
+      const errMsg = errorText(e);
 
       // H8: a normal burn requires the bound leg to still be "active"
       // on-chain — if the position was closed or liquidated WHILE wrapped,

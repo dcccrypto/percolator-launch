@@ -8,16 +8,20 @@ import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
 import { formatLeverage, ORDER_LEVERAGE_LABEL, ORDER_LEVERAGE_TITLE, RISK_LEVERAGE_LABEL, RISK_LEVERAGE_TITLE } from "@/lib/leverage-display";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { formatTokenAmount } from "@/lib/format";
+import { formatLotPriceE6, formatLotQ } from "@/lib/v22/lot";
 import { computeNotionalNative } from "@/lib/notional";
 import { describeLiqPrice, type LiqPriceDisplay } from "@/lib/liq-price-display";
 import { LiqPriceValue } from "./LiqPriceValue";
 import { orderHeading } from "@/lib/trading";
+import { FIRST_TRADE_COPY } from "@/lib/first-trade";
 
 interface TradeConfirmationModalProps {
   direction: "long" | "short";
   /** Signed size of the account's open position on this market (omitted: none). */
   existingPositionSize?: bigint;
   positionSize: bigint;
+  /** v2.2 lot exponent (sizes in lots, prices per lot); 0 / omitted = no lots. */
+  lotExp?: number;
   margin: bigint;
   leverage: number;
   estimatedLiqPrice: bigint;
@@ -47,6 +51,8 @@ interface TradeConfirmationModalProps {
   riskLeverage?: number | null;
   /** Wallet deposit signed together with this trade (fund-and-trade), in collateral atoms. */
   depositAmount?: bigint;
+  /** This trade creates the market's portfolio account (first trade): show its one-time SOL rent. */
+  createsAccount?: boolean;
   /** Underlying asset symbol (e.g. SOL). Used to label the position size. */
   symbol: string;
   /** Collateral token symbol (e.g. USDC). Used to label margin/fee. */
@@ -68,6 +74,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   direction,
   existingPositionSize = 0n,
   positionSize,
+  lotExp = 0,
   margin,
   leverage,
   estimatedLiqPrice,
@@ -77,6 +84,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   accountEquity,
   riskLeverage: riskLeverageAfter,
   depositAmount,
+  createsAccount = false,
   symbol,
   collateralSymbol,
   decimals,
@@ -108,7 +116,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
       markPriceE6: null,
       maintenanceMarginBps: 500n,
       hasResolvedEntry: true,
-      formatPrice: (e6) => `$${formatTokenAmount(e6, 6)}`,
+      formatPrice: (e6) => (lotExp > 0 ? formatLotPriceE6(e6, lotExp) : `$${formatTokenAmount(e6, 6)}`),
     });
   const riskLeverage =
     riskLeverageAfter !== undefined
@@ -215,7 +223,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
     <div
       ref={overlayRef}
       onClick={handleOverlayClick}
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4"
+      className="fixed inset-0 z-[9999] flex justify-center overflow-y-auto overscroll-contain bg-black/80 p-4"
     style={{ opacity: 0 }}
     >
       <div
@@ -223,7 +231,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
         role="dialog"
         aria-modal="true"
         aria-labelledby="trade-confirm-title"
-        className="relative w-full max-w-md rounded-none border border-[var(--border)] bg-[var(--bg)] p-6 shadow-2xl"
+        className="relative my-auto w-full max-w-md rounded-none border border-[var(--border)] bg-[var(--bg)] p-6 shadow-2xl"
       style={{ opacity: 0 }}
       >
         {/* Header */}
@@ -261,7 +269,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
           <div className="flex justify-between">
             <span className="text-[var(--text-secondary)]">Position Size:</span>
             <span className="font-mono font-medium text-[var(--text)]">
-              {formatTokenAmount(positionSize, decimals)} {symbol}
+              {formatLotQ(positionSize, decimals, lotExp)} {symbol}
             </span>
           </div>
           <div className="flex justify-between">
@@ -294,6 +302,12 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
               {formatTokenAmount(tradingFee, decimals)} {settleSymbol}
             </span>
           </div>
+          {createsAccount && (
+            <div className="flex justify-between" data-testid="confirm-account-rent">
+              <span className="text-[var(--text-secondary)]">{FIRST_TRADE_COPY.rentRow.label}:</span>
+              <span className="font-mono font-medium text-[var(--text)]">{FIRST_TRADE_COPY.rentRow.value}</span>
+            </div>
+          )}
           <div className="flex justify-between border-t border-[var(--border)]/30 pt-2">
             <span className="text-[var(--text-secondary)]">Est. Liquidation Price:</span>
             <LiqPriceValue
@@ -307,7 +321,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
                 {direction === "long" ? "Max Fill Price:" : "Min Fill Price:"}
               </span>
               <span className="font-mono font-medium text-[var(--text)]">
-                ${formatTokenAmount(worstFillPriceE6, 6)}
+                {lotExp > 0 ? formatLotPriceE6(worstFillPriceE6, lotExp) : `$${formatTokenAmount(worstFillPriceE6, 6)}`}
               </span>
             </div>
           )}

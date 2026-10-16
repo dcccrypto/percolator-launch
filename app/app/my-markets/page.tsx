@@ -94,14 +94,14 @@ const MyMarketsPage: FC = () => {
   const slabs = useMemo(() => myMarkets.map((m) => m.slabAddress.toBase58()), [myMarkets]);
   const { details, detailsLoading, refetch: refetchDetails } = useCreatorMarketDetails(slabs);
 
-  // After a creator-fee claim, refresh BOTH the markets list AND the per-market
-  // details — the claimable amounts (and thus the claim-all count + Unclaimed
-  // total) live in `details`, which refetchMarkets does not touch. Without the
-  // details refetch the aggregate stayed stale until a full page reload.
+  // After a creator-fee claim, refresh the per-market details: the claimable amounts (and thus the
+  // claim-all count + Unclaimed total) live in `details` (#2665). Not refetchMarkets: a claim can't
+  // change which markets this wallet created, and a re-scan withholds the verified list (06032463),
+  // so the page swapped to the skeleton and unmounted the claim UI mid-claim, losing its progress,
+  // result and pending-signature note, and re-offering claims still in flight.
   const handleClaimed = useCallback(() => {
-    refetchMarkets?.();
     refetchDetails();
-  }, [refetchMarkets, refetchDetails]);
+  }, [refetchDetails]);
   // Identity on its own clock: the session cache synchronously, then ONE bulk
   // directory call (~150ms) instead of waiting out each market's per-slab
   // detail (~520-1020ms, blocked on an on-chain LP scan). #2569.

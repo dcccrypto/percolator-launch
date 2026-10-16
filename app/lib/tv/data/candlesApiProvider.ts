@@ -12,6 +12,8 @@
  * Replaced later by a hosted OHLCV provider via ./index.ts — chart code does
  * not change.
  */
+import { v22HasNoIndexer } from "@/lib/v22/indexer";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import {
   RESOLUTION_SECONDS,
   applyMarkTick,
@@ -27,6 +29,7 @@ import {
   type ProviderResolution,
 } from "./provider";
 import type { TradeStream } from "./tradeStream";
+import { MARKETS_LIST_URL, listedMarketRows, type MarketsListBody } from "@/lib/markets-list-client";
 
 type FetchLike = (input: string, init?: { signal?: AbortSignal }) => Promise<{
   ok: boolean;
@@ -90,22 +93,63 @@ export function parseUdf(body: unknown): ProviderBar[] {
   return normalizeBars(bars);
 }
 
+/**
+ * `from` and `to` down to their bucket starts. The server answers whole buckets from the bucket of
+ * `from` through the bucket of `to` (inclusive), so this asks for exactly the buckets the raw window
+ * touched, and every raw `now` inside one bucket maps to one URL.
+ */
+export function alignCandleWindow(fromSec: number, toSec: number, bucketSec: number): { from: number; to: number } {
+  if (!(bucketSec > 0)) return { from: Math.floor(fromSec), to: Math.floor(toSec) };
+  return { from: Math.floor(fromSec / bucketSec) * bucketSec, to: Math.floor(toSec / bucketSec) * bucketSec };
+}
+
 export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDataProvider {
   const { fetchImpl, trades, marks } = deps;
   const now = deps.now ?? Date.now;
   /** Set on a definitive 404: this deployment has no indexer — skip the call for the session. */
-  let candlesUnavailable = false;
+  let candlesUnavailable = v22HasNoIndexer(); // v2.2 preview: no indexer (lib/v22/indexer.ts)
+  /**
+   * v2.2 lot markets: the indexer stores per-LOT marks and trades in LOTS (wrapper doc v22-wave-a-wire.md:46: "candles in
+   * per-token price" is the app's job), and the app's mark store is per lot too. The chart shows per TOKEN, so every
+   * price from those sources is divided by 10^lot_exp and every size multiplied by it (lib/v22/lot.ts). 0 = no lots.
+   */
+  const lotBySlab = new Map<string, number>();
+  const lotOf = (slab: string): number => lotBySlab.get(slab) ?? 0;
+  async function ensureLot(slab: string): Promise<void> {
+    if (!isDevnetV22Enabled() || lotBySlab.has(slab)) return; // flag off: no extra request, behaviour unchanged
+    
+    try {
+      const r = await fetchImpl(`/api/markets/${encodeURIComponent(slab)}`);
+      if (r.ok) {
+        const body = (await r.json()) as { market?: { lot_exp?: unknown } };
+        const k = Number(body.market?.lot_exp ?? 0);
+        lotBySlab.set(slab, Number.isInteger(k) && k > 0 && k <= 15 ? k : 0);
+      }
+    } catch {
+      /* unknown: leave unset, retried on the next call */
+    }
+  }
+  const px = (v: number, k: number): number => (k === 0 ? v : v / 10 ** k);
+  const qty = (v: number, k: number): number => (k === 0 ? v : v * 10 ** k);
 
   async function fetchWindow(slab: string, res: ProviderResolution, fromSec: number, toSec: number): Promise<ProviderBar[]> {
     if (candlesUnavailable) return [];
-    const url = `/api/candles/${encodeURIComponent(slab)}?resolution=${res}&from=${Math.floor(fromSec)}&to=${Math.floor(toSec)}`;
+    await ensureLot(slab);
+    // fill=1: empty buckets carry the previous close, so a quiet market's last-trade chart is a
+    // continuous line, not scattered dashes with gaps (see /api/candles fillCandleGaps).
+    // Bucket-aligned from/to (review E3): the server answers per whole bucket anyway, and an aligned
+    // URL repeats across viewers and polls, so the edge cache can serve it.
+    const win = alignCandleWindow(fromSec, toSec, RESOLUTION_SECONDS[res]);
+    const url = `/api/candles/${encodeURIComponent(slab)}?resolution=${res}&from=${win.from}&to=${win.to}&fill=1`;
     const r = await fetchImpl(url);
     if (r.status === 404) {
       candlesUnavailable = true;
       return [];
     }
     if (!r.ok) throw new Error(`candles HTTP ${r.status}`);
-    return parseUdf(await r.json());
+    const k = lotOf(slab);
+    const bars = parseUdf(await r.json());
+    return k === 0 ? bars : bars.map((b) => ({ ...b, open: px(b.open, k), high: px(b.high, k), low: px(b.low, k), close: px(b.close, k), volume: qty(b.volume, k) }));
   }
 
   return {
@@ -123,6 +167,8 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
           if (m) {
             symbol = typeof m.symbol === "string" && m.symbol.trim() ? m.symbol.trim() : null;
             name = typeof m.name === "string" && m.name.trim() ? m.name.trim() : null;
+            const lk = Number((m as { lot_exp?: unknown }).lot_exp ?? 0);
+            lotBySlab.set(slab, Number.isInteger(lk) && lk > 0 && lk <= 15 ? lk : 0);
             const p = Number(m.mark_price ?? m.last_price);
             price = Number.isFinite(p) && p > 0 ? p : null;
           }
@@ -136,7 +182,7 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
         slab,
         symbol: display,
         description: name ?? `${display} perpetual`,
-        referencePrice: price ?? marks.latest(slab),
+        referencePrice: price ?? (() => { const l = marks.latest(slab); return l == null ? null : px(l, lotOf(slab)); })(),
         hasVolume: true,
       };
     },
@@ -185,7 +231,8 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
           }
           return;
         }
-        const bar = applyTrade(last, t, resolution);
+        const k = lotOf(slab);
+        const bar = applyTrade(last, k === 0 ? t : { ...t, price: px(t.price, k), size: qty(t.size, k) }, resolution);
         if (bar) {
           last = bar;
           handlers.onBar(bar);
@@ -194,7 +241,7 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
       const offMarks =
         source === "oracle"
           ? marks.subscribe(slab, (priceUsd, tsSec) => {
-              const bar = applyMarkTick(source, last, { price: priceUsd, tsSec }, resolution);
+              const bar = applyMarkTick(source, last, { price: px(priceUsd, lotOf(slab)), tsSec }, resolution);
               if (bar) {
                 last = bar;
                 handlers.onBar(bar);
@@ -232,10 +279,11 @@ export function createCandlesApiProvider(deps: CandlesApiProviderDeps): ChartDat
     async searchSymbols(query: string): Promise<ChartSymbolMeta[]> {
       const q = query.trim().toUpperCase();
       try {
-        const r = await fetchImpl("/api/markets");
+        // The canonical list URL (lib/markets-list-client.ts), so this shares the edge copy with
+        // every other caller; listedMarketRows() is what the bare /api/markets returned.
+        const r = await fetchImpl(MARKETS_LIST_URL);
         if (!r.ok) return [];
-        const body = (await r.json()) as { markets?: unknown };
-        const list = Array.isArray(body.markets) ? body.markets : [];
+        const list = listedMarketRows((await r.json()) as MarketsListBody) ?? [];
         const out: ChartSymbolMeta[] = [];
         for (const raw of list) {
           if (typeof raw !== "object" || raw === null) continue;

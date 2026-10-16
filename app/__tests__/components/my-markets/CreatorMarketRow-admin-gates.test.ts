@@ -27,7 +27,7 @@ describe("CreatorMarketRow admin-action gates", () => {
   });
 
   it("disables burn on !isAssetAdmin and close on !isMarketAuth", () => {
-    expect(SRC).toMatch(/disabled=\{actions\.loading === "renounceAdmin" \|\| !isAssetAdmin\}/);
+    expect(SRC).toMatch(/disabled=\{actions\.loading === "renounceAdmin" \|\| !isAssetAdmin \|\| adminBurned\}/);
     // Merged with WP-9's close checklist: the blocker AND the marketauth gate.
     expect(SRC).toMatch(/disabled=\{closeMarket\.loading \|\| closeBlocker !== null \|\| !isMarketAuth\}/);
     expect(SRC).toContain("<CloseMarketChecklistView checks={closeChecks} />");
@@ -43,7 +43,7 @@ describe("CreatorMarketRow admin-action gates", () => {
   // drawer asked the creator to "connect the creator wallet" and offered a burn they can't do.
   describe("after the admin key is burned", () => {
     it("detects the burn from the zero key the burn writes", () => {
-      expect(SRC).toMatch(/const adminBurned = detail\?\.creator_fee_authority === ZERO_PUBKEY\.toBase58\(\);/);
+      expect(SRC).toMatch(/const adminBurned = burnedHere \|\| detail\?\.creator_fee_authority === ZERO_PUBKEY\.toBase58\(\);/);
       expect(ZERO_B58).toBe("11111111111111111111111111111111");
     });
 
@@ -57,8 +57,12 @@ describe("CreatorMarketRow admin-action gates", () => {
       expect(SRC).toContain('{adminBurned ? "admin key burned" : "burn admin key"}');
     });
 
+    it("flips to burned as soon as this drawer's burn succeeds, before the detail refetch", () => {
+      expect(SRC).toMatch(/await actions\.renounceAdmin\(market\);\s*setBurnedHere\(true\);/);
+    });
+
     it("only offers the remaining burn to a wallet that still holds the admin key", () => {
-      expect(SRC).toContain('{isAssetAdmin && " You can still burn your remaining admin key."}');
+      expect(SRC).toContain('{isAssetAdmin && !adminBurned && " You can still burn your remaining admin key."}');
       expect(SRC).not.toMatch(/so it can’t be closed\. You can still burn/);
     });
   });

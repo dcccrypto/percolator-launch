@@ -233,13 +233,22 @@ describe("quoteConvertible — DEVNET fresh winner 4yjoGo9N (opened + closed sho
     let calls = 0;
     const q = await quoteConvertible(params, { async simulate() { calls++; return { err: custom(0, WRAPPER_ERR.EngineLockActive), postData: null, rpcFailed: false }; } });
     expect(calls).toBe(1);
-    expect(q).toEqual({ status: "settling", released: 222_882n, code: WRAPPER_ERR.EngineLockActive });
+    expect(q).toEqual({ status: "settling", released: 222_882n, code: WRAPPER_ERR.EngineLockActive, reason: "backing" });
     expect(settlingProfitMessage(WRAPPER_ERR.EngineLockActive)).toMatch(/^Your profit becomes withdrawable once/);
   });
 
   it("a code not raised by one of our wrapper instructions is not attributed to the wrapper", async () => {
     const q = await quoteConvertible(params, { async simulate() { return { err: custom(-1, WRAPPER_ERR.EngineLockActive), postData: null, rpcFailed: false }; } });
-    expect(q).toEqual({ status: "settling", released: 222_882n, code: null });
+    expect(q).toEqual({ status: "settling", released: 222_882n, code: null, reason: "unknown" });
+  });
+
+  it("tag 28 simulating to LockActive reads reason=backing; a stale certificate reads reason=stale", async () => {
+    const lock = await quoteConvertible(params, { async simulate() { return { err: custom(0, WRAPPER_ERR.EngineLockActive), postData: null, rpcFailed: false }; } });
+    expect(lock.status === "settling" && lock.reason).toBe("backing");
+    const stale = await quoteConvertible(params, { async simulate() { return { err: custom(0, WRAPPER_ERR.EngineStale), postData: null, rpcFailed: false }; } });
+    expect(stale.status === "settling" && stale.reason).toBe("stale");
+    const rpc = await quoteConvertible(params, { async simulate() { return { err: null, postData: null, rpcFailed: true }; } });
+    expect(rpc.status === "settling" && rpc.reason).toBe("unknown");
   });
 
   describe("convertPrefixForWithdraw (useWithdraw's decision)", () => {
@@ -270,5 +279,27 @@ describe("quoteConvertible — DEVNET fresh winner 4yjoGo9N (opened + closed sho
     const deps: QuoteDeps = { async simulate() { throw new Error("must not simulate"); } };
     const noProfit = new Uint8Array(post); // post state has pnl 0
     expect(await quoteConvertible({ ...params, portfolioData: noProfit }, deps)).toEqual({ status: "none" });
+  });
+});
+
+// ── v2.2 QA W-1/W-2: "Held: waiting on backing" is decided by the chain read, then the timer ──
+import { HELD_AFTER_MS, HELD_PROFIT_TITLE, heldProfitMessage, isProfitHeld } from "@/lib/convert-released-pnl";
+
+describe("held profit status (W-1/W-2)", () => {
+  it("only a chain-confirmed 'backing' (after the wait) or 'unbacked' (at once) is held; stale / locked / unknown never are", () => {
+    const t0 = 1_000_000;
+    expect(isProfitHeld({ reason: "backing" }, t0, t0 + HELD_AFTER_MS - 1)).toBe(false);
+    expect(isProfitHeld({ reason: "backing" }, t0, t0 + HELD_AFTER_MS)).toBe(true);
+    expect(isProfitHeld({ reason: "backing" }, null, t0 + 10 * HELD_AFTER_MS)).toBe(false);
+    expect(isProfitHeld({ reason: "unbacked" }, null, t0)).toBe(true);
+    for (const reason of ["stale", "locked", "unknown"] as const) expect(isProfitHeld({ reason }, t0, t0 + 10 * HELD_AFTER_MS)).toBe(false);
+  });
+
+  it("the held line names the amount and no longer promises automatic settlement", () => {
+    const m = heldProfitMessage("0.515 USDC");
+    expect(m.startsWith(HELD_PROFIT_TITLE)).toBe(true);
+    expect(m).toContain("0.515 USDC");
+    expect(m).not.toMatch(/automatically; /);
+    expect(settlingProfitMessage(WRAPPER_ERR.EngineLockActive)).not.toMatch(/happens automatically/);
   });
 });

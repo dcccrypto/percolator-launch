@@ -57,12 +57,12 @@ import {
   buildIx,
   encodeConvertReleasedPnl,
   encodePermissionlessCrank,
-  parsePortfolioV17,
 } from "@percolatorct/sdk";
 import type { PortfolioLegV17, PortfolioSourceDomainV17, PortfolioV17 } from "@percolatorct/sdk";
 import { defaultCrankObservations } from "@/lib/v18-wire";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { parseCustomInstructionError } from "@/lib/self-heal";
+import { parsePortfolio } from "@/lib/v22/layout";
 
 export const CONVERT_RELEASED_PNL_TAG = 28;
 /** percolator src/lib.rs:25-26. */
@@ -288,11 +288,14 @@ export function buildConvertReleasedPnlIx(p: ConvertIxParams): TransactionInstru
  * (v16.rs:16309-16326) refuses with Stale(19) — measured on devnet for a freshly closed winner.
  * A PermissionlessCrank on the user's own portfolio re-certifies it inside the same tx.
  */
-export function buildRecertifyCrankIx(programId: PublicKey, owner: PublicKey, market: PublicKey, portfolio: PublicKey): TransactionInstruction {
+export function buildRecertifyCrankIx(programId: PublicKey, owner: PublicKey, market: PublicKey, portfolio: PublicKey, assetSlots = 1): TransactionInstruction {
+  // v2.2 QA Q-7c: on a multi-asset market the crank must observe EVERY asset slot (a certificate against asset 0 alone
+  // leaves tag 28 stale: 19). `assetSlots = 1` is byte-identical to the single-asset crank.
+  const observations = assetSlots <= 1 ? defaultCrankObservations(0) : Array.from({ length: assetSlots }, (_, k) => defaultCrankObservations(k)[0]);
   return buildIx({
     programId,
     keys: buildAccountMetas(ACCOUNTS_PERMISSIONLESS_CRANK_BASE, [owner, market, portfolio]),
-    data: encodePermissionlessCrank({ nowSlot: 0n, observations: defaultCrankObservations(0) }),
+    data: encodePermissionlessCrank({ nowSlot: 0n, observations }),
   });
 }
 
@@ -309,7 +312,18 @@ export type ConvertQuote =
       /** Instructions to put in front of the withdraw: [recertify crank?] + [tag 28]. */
       prefix: TransactionInstruction[];
     }
-  | { status: "settling"; released: bigint; code: number | null };
+  | { status: "settling"; released: bigint; code: number | null; reason: SettlingReason };
+
+/**
+ * Why a flat winner's profit does not convert, read from the program itself (the gates above + the simulation of tag 28):
+ *   stale    - the certificate / market epochs are behind (19 / 16): a price-update matter, clears on its own.
+ *   backing  - tag 28 answers LockActive (21) or moves nothing although the portfolio gates pass: the market has no
+ *              backing for this profit right now (W-1 / W-2 family). Not a timing matter by itself.
+ *   locked   - liens or an opposite-side active exposure on the source domain (clears when that settles).
+ *   unbacked - the account holds no source claims at all, so there is nothing for the market to back.
+ *   unknown  - the read failed.
+ */
+export type SettlingReason = "stale" | "backing" | "locked" | "unbacked" | "unknown";
 
 export interface QuoteDeps {
   simulate: (
@@ -325,6 +339,8 @@ export interface QuoteParams {
   portfolio: PublicKey;
   /** Live portfolio bytes (owner already verified by the caller). */
   portfolioData: Uint8Array;
+  /** Asset slots of the market (lib/v22/trade-refresh marketAssetSlots); omitted = 1. */
+  assetSlots?: number;
 }
 
 /**
@@ -332,11 +348,13 @@ export interface QuoteParams {
  * that do it. Tries tag 28 alone, then with the recertify crank in front on Stale(19).
  */
 export async function quoteConvertible(p: QuoteParams, deps: QuoteDeps): Promise<ConvertQuote> {
-  const pf = parsePortfolioV17(p.portfolioData);
+  const pf = parsePortfolio(p.portfolioData);
   if (pf.legs.some((l) => l.active)) return { status: "none" }; // withdraw is flat-only (v16.rs:20416-20418)
   const gate = convertGate(pf);
   if (gate.kind === "nothing") return { status: "none" };
-  if (gate.kind !== "convertible") return { status: "settling", released: gate.released, code: WRAPPER_ERR.EngineLockActive };
+  if (gate.kind !== "convertible") {
+    return { status: "settling", released: gate.released, code: WRAPPER_ERR.EngineLockActive, reason: gate.kind === "unbacked" ? "unbacked" : "locked" };
+  }
   const convert = buildConvertReleasedPnlIx({
     programId: p.programId,
     owner: p.owner,
@@ -348,25 +366,49 @@ export async function quoteConvertible(p: QuoteParams, deps: QuoteDeps): Promise
   });
   const plans: TransactionInstruction[][] = [
     [convert],
-    [buildRecertifyCrankIx(p.programId, p.owner, p.market, p.portfolio), convert],
+    [buildRecertifyCrankIx(p.programId, p.owner, p.market, p.portfolio, p.assetSlots ?? 1), convert],
   ];
   let lastCode: number | null = null;
   for (const prefix of plans) {
     const r = await deps.simulate(prefix, p.portfolio);
-    if (r.rpcFailed) return { status: "settling", released: gate.released, code: null };
+    if (r.rpcFailed) return { status: "settling", released: gate.released, code: null, reason: "unknown" };
     if (!r.err && r.postData) {
-      const post = parsePortfolioV17(r.postData);
+      const post = parsePortfolio(r.postData);
       // Read the program's own result: what tag 28 moved (and anything the recertify
       // crank settled) is exactly post.capital − capital.
       const convertible = post.capital - pf.capital;
       if (post.capital > pf.capital) return { status: "ready", postCapital: post.capital, convertible, prefix };
-      return { status: "settling", released: gate.released, code: null };
+      // The handler ran and moved nothing: the market has no backing for this profit.
+      return { status: "settling", released: gate.released, code: null, reason: "backing" };
     }
     const c = parseCustomInstructionError(r.err);
     lastCode = c && prefix[c.index]?.programId.equals(p.programId) ? c.code : null;
     if (lastCode !== WRAPPER_ERR.EngineStale) break; // only a stale certificate is worth the crank
   }
-  return { status: "settling", released: gate.released, code: lastCode };
+  const reason: SettlingReason =
+    lastCode === WRAPPER_ERR.EngineStale || lastCode === WRAPPER_ERR.EngineProvenanceMismatch ? "stale" : lastCode === WRAPPER_ERR.EngineLockActive ? "backing" : "unknown";
+  return { status: "settling", released: gate.released, code: lastCode, reason };
+}
+
+// ── Held profit: "waiting on backing" ───────────────────────────────────────────────
+
+/**
+ * v2.2 QA W-1 / W-2: a winner's profit can sit unconvertible for good when the market's backing is short (no timer
+ * clears it; a top-up does). Saying "settles automatically" forever is then false. The status switches to
+ * "Held: waiting on backing" (with the amount) when the chain read says so:
+ *   - `unbacked`: the account has no source claims at all: held at once.
+ *   - `backing` (tag 28 simulates to LockActive / moves nothing although the portfolio gates pass): held once it has
+ *     persisted HELD_AFTER_MS (a fresh close can show it for a few seconds while the other side settles).
+ * `stale`, `locked` and `unknown` never read as held: they are timing / read problems.
+ */
+export const HELD_AFTER_MS = 180_000;
+export const HELD_PROFIT_TITLE = "Held: waiting on backing";
+export function isProfitHeld(q: { reason: SettlingReason }, sinceMs: number | null, nowMs: number): boolean {
+  if (q.reason === "unbacked") return true;
+  return q.reason === "backing" && sinceMs !== null && nowMs - sinceMs >= HELD_AFTER_MS;
+}
+export function heldProfitMessage(amountLabel: string): string {
+  return `${HELD_PROFIT_TITLE}: ${amountLabel} of your profit can't move to your balance yet because the market doesn't have enough backing for it. We check again automatically.`;
 }
 
 /** A withdraw the client refuses before signing; the message is user-facing as-is. */
@@ -390,7 +432,7 @@ export async function convertPrefixForWithdraw(
   p: QuoteParams & { amount: bigint },
   deps: QuoteDeps,
 ): Promise<TransactionInstruction[]> {
-  const pf = parsePortfolioV17(p.portfolioData);
+  const pf = parsePortfolio(p.portfolioData);
   if (p.amount <= pf.capital || pf.legs.some((l) => l.active)) return [];
   if (pf.pnl <= 0n) throw new WithdrawRefusal(WITHDRAW_EXCEEDS_BALANCE_MESSAGE);
   const quote = await quoteConvertible(p, deps);
@@ -399,6 +441,50 @@ export async function convertPrefixForWithdraw(
   const plan = planWithdraw({ capital: pf.capital, convertible, amount: p.amount });
   if (!plan.fits) throw new WithdrawRefusal(WITHDRAW_EXCEEDS_BALANCE_MESSAGE);
   return plan.needsConvert && quote.status === "ready" ? quote.prefix : [];
+}
+
+/**
+ * v2.2 QA Q-7c / W-1: the convert + withdraw plan for a flat account, on every market.
+ *
+ * The one-click "convert and withdraw all" failed on the multi-asset market with 21 (the withdraw asked for capital +
+ * the pnl FACE, but tag 28 credits slightly less: it floors per source domain, and on a plain-LP market it can be
+ * haircut) or 19 (the withdraw expected sequence + 1; tag 28 does not advance it). The shape that works, one tx:
+ * simulate [crank self observing every asset, tag 28] and read the post-conversion CAPITAL, then send
+ * [same crank, tag 28, withdraw(min(requested, that capital), the CURRENT sequence)].
+ *
+ * W-1 guard: when the simulated capital gain is short of the released profit by more than CONVERT_SHORTFALL_BPS (0.1%;
+ * beyond per-domain rounding), tag 28 would burn the unsupported part of the claim. The profit is then NOT converted:
+ * only the existing capital is withdrawn and the caller shows PROFIT_NOT_MOVABLE_MESSAGE.
+ */
+export const CONVERT_SHORTFALL_BPS = 10n;
+export const PROFIT_NOT_MOVABLE_MESSAGE = "Part of this profit can't be moved to your balance right now. Try again shortly.";
+
+export interface ConvertWithdrawPlan {
+  /** Instructions in front of the withdraw ([] = withdraw alone). */
+  prefix: TransactionInstruction[];
+  /** The amount to withdraw (never above the capital the account will hold when the withdraw runs). */
+  amount: bigint;
+  /** A calm line to show next to a successful withdrawal (the profit was left in place), or null. */
+  notice: string | null;
+}
+
+export async function planConvertWithdraw(p: QuoteParams & { amount: bigint }, deps: QuoteDeps): Promise<ConvertWithdrawPlan> {
+  const pf = parsePortfolio(p.portfolioData);
+  if (p.amount <= pf.capital || pf.legs.some((l) => l.active)) return { prefix: [], amount: p.amount, notice: null };
+  if (pf.pnl <= 0n) throw new WithdrawRefusal(WITHDRAW_EXCEEDS_BALANCE_MESSAGE);
+  const quote = await quoteConvertible(p, deps);
+  if (quote.status === "settling") throw new WithdrawRefusal(settlingProfitMessage(quote.code));
+  if (quote.status !== "ready") throw new WithdrawRefusal(WITHDRAW_EXCEEDS_BALANCE_MESSAGE);
+  const released = releasedPnlFace(pf.pnl, pf.reservedPnl);
+  const gain = quote.postCapital - pf.capital;
+  const shortfall = released > gain ? released - gain : 0n;
+  if (released > 0n && shortfall * 10_000n > released * CONVERT_SHORTFALL_BPS) {
+    if (pf.capital <= 0n) throw new WithdrawRefusal(PROFIT_NOT_MOVABLE_MESSAGE);
+    return { prefix: [], amount: p.amount < pf.capital ? p.amount : pf.capital, notice: PROFIT_NOT_MOVABLE_MESSAGE };
+  }
+  // More than capital + the released face is not a rounding matter: refuse as before.
+  if (p.amount > pf.capital + released) throw new WithdrawRefusal(WITHDRAW_EXCEEDS_BALANCE_MESSAGE);
+  return { prefix: quote.prefix, amount: p.amount < quote.postCapital ? p.amount : quote.postCapital, notice: null };
 }
 
 /** QuoteDeps over a real connection: one simulateTransaction with the portfolio read back. */
@@ -443,5 +529,5 @@ export function settlingProfitMessage(code: number | null): string {
   if (code === WRAPPER_ERR.EngineStale || code === WRAPPER_ERR.EngineProvenanceMismatch) {
     return "Your profit is being updated with the latest prices and will be withdrawable in a moment.";
   }
-  return "Your profit becomes withdrawable once the other side of your trade settles, which happens automatically; your deposit can be withdrawn now.";
+  return "Your profit becomes withdrawable once the other side of your trade settles, usually within a few minutes; your deposit can be withdrawn now.";
 }

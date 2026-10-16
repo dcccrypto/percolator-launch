@@ -1,17 +1,17 @@
 "use client";
 
+import { errorText } from "@/lib/error-text";
 import { useState, useCallback } from "react";
 import { PublicKey, Keypair, TransactionInstruction, SYSVAR_RENT_PUBKEY, SystemProgram } from "@solana/web3.js";
 import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { assertKnownProgram } from "@/lib/programAllowlist";
-import { sendTx } from "@/lib/tx";
-import { assertSuccessfulConfirmation } from "@/lib/transaction-confirmation";
+import { broadcastSignedTx } from "@/lib/tx";
 import { humanizeError } from "@/lib/errorMessages";
 import { plainMessage } from "@/lib/limits/user-message";
 import { useToast } from "@/hooks/useToast";
-import { isLpPortfolio } from "@/lib/userAccountScan";
+import { isPortfolioTargetError, PortfolioTargetError, TARGET_COPY, verifyPortfolioTarget } from "@/lib/portfolio-target";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
 import {
   deriveNftPda,
@@ -19,9 +19,9 @@ import {
   deriveExtraAccountMetas,
   deriveNftRegistry,
   encodeNftMint,
-  parsePortfolioV17,
-  isV17Account,
 } from "@percolatorct/sdk";
+import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
+import { noteBlockhash } from "@/lib/v22/sign-guard";
 
 export function useMintPositionNft(slabAddress: string) {
   const { publicKey: walletPubkey } = useWalletCompat();
@@ -33,7 +33,8 @@ export function useMintPositionNft(slabAddress: string) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const mint = useCallback(async () => {
+  /** `portfolioPk`: the account the row and the wrap sheet show (#3301 pattern). Never re-picked here. */
+  const mint = useCallback(async (portfolioPk: PublicKey) => {
     if (!walletPubkey || !programId) {
       setError("Wallet not connected or market not loaded");
       return;
@@ -52,53 +53,19 @@ export function useMintPositionNft(slabAddress: string) {
 
       const slabPk = new PublicKey(slabAddress);
       const nftProgId = PERCOLATOR_NFT_PROGRAM_ID;
-      const isV17 = raw != null && raw.length > 0 && isV17Account(raw);
+      const isV17 = raw != null && raw.length > 0 && isWrapperAccount(raw);
 
-      // ── Find the user's portfolio and active leg ──────────────────────────
-      // v17: portfolio is a standalone account; we need the marketId from the
-      // active leg to derive the correct NFT PDA seeds:
-      //   ["position_nft", portfolioPubkey, marketId_u64_LE]
-      // The portfolio is discovered via getProgramAccounts filtered by magic +
-      // market_group_id + owner (same filter as useTrade findV17Portfolio).
-      const V17_PORTFOLIO_MAGIC = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
-      const PORTFOLIO_PROVENANCE_MARKET_GROUP_OFF = 16;
-      // Mutable owner (SDK PF_OWNER_OFF) sits at offset 116, NOT provenance
-      // offset 80 (IMMUTABLE, set at creation). MintPositionNft moves the
-      // mutable owner to the escrow PDA on wrap but leaves provenance pointing
-      // at the original wallet, so filtering on 80 would ALSO match an
-      // already-wrapped/escrowed portfolio here. With one wrapped + one fresh
-      // portfolio on this market, the @80 filter returns both and picking
-      // allPortfolios[0] non-deterministically can target the already-minted
-      // portfolio, failing pre-send simulation and intermittently blocking
-      // mint of the genuinely-open position (mirrors useDeposit/usePositionNft).
-      const PORTFOLIO_OWNER_OFF = 116;
-
-      let portfolioPk: PublicKey;
+      // ── The portfolio the row shows, and its active leg ──────────────────
+      // v17: the NFT PDA seeds are ["position_nft", portfolioPubkey, marketId_u64_LE], marketId from the
+      // active leg. A wallet can own several portfolios on one market (wrap, trade again, unwrap), so
+      // this wraps exactly the account the caller named (the row's) and never re-discovers one: a
+      // getProgramAccounts pick in RPC order could escrow a position the user didn't choose.
       let marketId: bigint;
 
       if (isV17) {
-        const allPortfolios = await connection.getProgramAccounts(programId, {
-          filters: [
-            { memcmp: { offset: 0, bytes: V17_PORTFOLIO_MAGIC.toString("base64"), encoding: "base64" } },
-            { memcmp: { offset: PORTFOLIO_PROVENANCE_MARKET_GROUP_OFF, bytes: slabPk.toBase58() } },
-            { memcmp: { offset: PORTFOLIO_OWNER_OFF, bytes: walletPubkey.toBase58() } },
-          ],
-        });
-        // Drop the market's LP portfolio BEFORE picking a result — a market
-        // CREATOR must never mint an NFT wrapping the LP itself. See
-        // isLpPortfolio's doc comment.
-        const nonLpPortfolios = allPortfolios.filter(({ account }) => !isLpPortfolio(account.data));
-        if (nonLpPortfolios.length === 0) {
-          throw new Error("No portfolio found for your wallet on this market. Deposit collateral first.");
-        }
-        // Defense-in-depth: re-verify the mutable owner actually matches after
-        // fetch — memcmp filters are advisory server-side; don't trust them
-        // blindly (mirrors useDeposit/usePositionNft's re-verify).
-        const pf = parsePortfolioV17(new Uint8Array(nonLpPortfolios[0].account.data));
-        if (!pf.owner.equals(walletPubkey)) {
-          throw new Error("No portfolio found for your wallet on this market. Deposit collateral first.");
-        }
-        portfolioPk = nonLpPortfolios[0].pubkey;
+        if (!portfolioPk) throw new PortfolioTargetError(TARGET_COPY.unmatched);
+        const info = await connection.getAccountInfo(portfolioPk, "confirmed");
+        const pf = parsePortfolio(new Uint8Array(verifyPortfolioTarget(info, programId, slabPk, walletPubkey)));
         const activeLeg = pf.legs.find((l) => l.active);
         if (!activeLeg) {
           throw new Error("No active position to mint an NFT for. Open a position first.");
@@ -182,8 +149,9 @@ export function useMintPositionNft(slabAddress: string) {
       tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100_000 }));
       tx.add(ix);
 
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+      const { blockhash } = await connection.getLatestBlockhash("confirmed");
       tx.recentBlockhash = blockhash;
+      noteBlockhash(blockhash, "useMintPositionNft", connection);
       tx.feePayer = walletPubkey;
 
       // LAUNCH-H3: Pre-send simulation — catch program errors before user signs.
@@ -215,18 +183,12 @@ export function useMintPositionNft(slabAddress: string) {
       // Privy may have stripped the keypair sig — re-add it
       signed.partialSign(nftMintKeypair);
 
-      // Send — skipPreflight since we already simulated above
-      const sig = await connection.sendRawTransaction(signed.serialize(), {
-        skipPreflight: true,
-        maxRetries: 5,
-      });
-
-      // Wait for confirmation with blockhash-based expiry
-      // skipPreflight: confirmTransaction also resolves for a tx that landed and failed.
-      assertSuccessfulConfirmation(
-        await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed"),
-        "Position NFT mint",
-      );
+      // Send (skipPreflight: simulated above) and confirm by polling the signature status, the
+      // same path sendTx uses. Blockheight-bound confirmTransaction() throws "block height
+      // exceeded" whenever its subscription misses the landing, with no final status check, and
+      // that reads as "The network was slow. Nothing was sent." for a wrap that landed.
+      // pollConfirmation still throws for a tx that landed and failed on-chain (#2994).
+      const sig = await broadcastSignedTx(connection, signed, { skipPreflight: true });
 
       // Force an immediate slab re-poll so useUserAccount/usePositionNft re-scan
       // and the UI reflects the just-minted NFT without waiting for the next
@@ -236,8 +198,8 @@ export function useMintPositionNft(slabAddress: string) {
       toast("Position NFT minted!", "success");
       return sig;
     } catch (e) {
-      const errMsg = e instanceof Error ? e.message : String(e);
-      const msg = plainMessage(errMsg, { surface: "nft" }, humanizeError);
+      const errMsg = errorText(e);
+      const msg = isPortfolioTargetError(e) ? e.message : plainMessage(errMsg, { surface: "nft" }, humanizeError);
       console.error("[useMintPositionNft]", errMsg);
       setError(msg);
       toast(msg, "error");

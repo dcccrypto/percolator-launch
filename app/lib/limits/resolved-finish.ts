@@ -10,6 +10,7 @@
  * the end, so the withdrawal's pending card (WP-4) takes it from there.
  * Pure planning + an injected driver (no RPC here).
  */
+import { errorText } from "@/lib/error-text";
 import type { PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
 import { buildBatchTx } from "@/lib/tx";
 import { formatTokenAmount } from "@/lib/format";
@@ -201,7 +202,7 @@ export async function runFinish<Tx>(items: readonly { item: FinishItem; tx: Tx }
       if (item.step.kind === "earn-request") requested = true;
     } catch (e) {
       failed++;
-      if (/blockhash not found|block height exceeded|expired/i.test(e instanceof Error ? e.message : String(e))) {
+      if (/blockhash not found|block height exceeded|expired/i.test(errorText(e))) {
         stale = true;
         break;
       }

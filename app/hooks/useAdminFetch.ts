@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef } from "react";
-import { usePrivy, useIdentityToken } from "@privy-io/react-auth";
+import { usePrivyBridge } from "@/hooks/usePrivyBridge";
 
 /**
  * Hook returning a `fetch`-like function that automatically attaches
@@ -24,8 +24,7 @@ export function useAdminFetch(): (
   input: RequestInfo | URL,
   init?: RequestInit,
 ) => Promise<Response> {
-  const { getAccessToken } = usePrivy();
-  const { identityToken } = useIdentityToken();
+  const { getAccessToken, identityToken } = usePrivyBridge();
 
   const getAccessTokenRef = useRef(getAccessToken);
   const identityTokenRef = useRef(identityToken);

@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
-import { isV17Account } from "@percolatorct/sdk";
 import { isBlockedSlab } from "@/lib/blocklist";
 import { getConfig } from "@/lib/config";
 import { getServerConnection } from "@/lib/server-rpc";
 import { loadMergedMarketRows } from "@/lib/market-registry";
 import { readV17MaxAbsFunding } from "@/lib/v17-engine-config";
+import { isWrapperAccount } from "@/lib/v22/layout";
 
 export const dynamic = "force-dynamic";
 
@@ -80,7 +80,7 @@ export async function GET() {
       infos.forEach((info, j) => {
         if (!info || info.owner.toBase58() !== wrapper) return;
         const data = new Uint8Array(info.data);
-        if (!isV17Account(data)) return;
+        if (!isWrapperAccount(data)) return;
         if (readV17MaxAbsFunding(data) !== 0n) {
           ratesUnavailable += 1;
           return;

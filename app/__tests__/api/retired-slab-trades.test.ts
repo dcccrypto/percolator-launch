@@ -237,3 +237,56 @@ describe("degraded: when the retired set is unknown the routes behave as before"
     expect(body.leaderboard).toHaveLength(2);
   });
 });
+
+// S24: the dashboard's Buy/Sell filter is applied here, so the page and `total` describe the filtered set.
+describe("/api/trader/:wallet/trades side filter", () => {
+  const get = (qs = "") =>
+    tradesGET(new NextRequest(`http://localhost/api/trader/${WALLET}/trades${qs}`), { params: Promise.resolve({ wallet: WALLET }) });
+  beforeEach(() => {
+    h.trades.push({ ...trade(FRESH_SLAB, WALLET, "-3000000", "2026-10-01T04:00:00.000Z", 5), side: "short" });
+  });
+
+  it("Supabase path: ?side=short returns only sells, and total counts only sells", async () => {
+    const body = await (await get("?side=short")).json();
+    expect(body.trades.map((t: { side: string }) => t.side)).toEqual(["short"]);
+    expect(body.total).toBe(1);
+  });
+
+  it("Supabase path: ?side=long leaves the sells out of total", async () => {
+    const body = await (await get("?side=long")).json();
+    expect(body.trades.every((t: { side: string }) => t.side === "long")).toBe(true);
+    expect(body.total).toBe(2);
+  });
+
+  it("an unknown side is ignored, like an invalid slab", async () => {
+    const all = await (await get()).json();
+    const bogus = await (await get("?side=buy")).json();
+    expect(bogus.total).toBe(all.total);
+    expect(bogus.total).toBe(3);
+  });
+
+  it("indexer path: still one count and one page query, both carrying the side", async () => {
+    h.hasIndexer = true;
+    h.sqlResult = [{ cnt: "0" }];
+    await get("?side=short");
+    const tradeCalls = h.sqlCalls.filter((c) => c.text.includes("FROM trades"));
+    expect(tradeCalls).toHaveLength(2);
+    for (const c of tradeCalls) {
+      expect(c.text).toContain("::text IS NULL OR side = ");
+      expect(c.values).toContain("short");
+    }
+  });
+
+  it("indexer path: with no side the predicate binds null (every side)", async () => {
+    h.hasIndexer = true;
+    h.sqlResult = [{ cnt: "0" }];
+    await get();
+    const tradeCalls = h.sqlCalls.filter((c) => c.text.includes("FROM trades"));
+    expect(tradeCalls).toHaveLength(2);
+    for (const c of tradeCalls) {
+      expect(c.values).toContain(null);
+      expect(c.values).not.toContain("short");
+      expect(c.values).not.toContain("long");
+    }
+  });
+});

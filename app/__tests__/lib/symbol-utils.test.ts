@@ -33,6 +33,11 @@ describe("isPlaceholderSymbol", () => {
 
   it("returns true when symbol is a prefix of the mint address", () => {
     expect(isPlaceholderSymbol("So11111", SOL_MINT)).toBe(true);
+    // Every generated placeholder form (indexer substring(0, 8); app slice(0, 4) / (0, 6) / (0, 4).toUpperCase())
+    const JUP_MINT = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN";
+    for (const sym of [JUP_MINT.slice(0, 4), JUP_MINT.slice(0, 6), JUP_MINT.slice(0, 8), JUP_MINT.slice(0, 4).toUpperCase()]) {
+      expect(isPlaceholderSymbol(sym, JUP_MINT)).toBe(true);
+    }
   });
 
   it("returns true for 8-char hex placeholders", () => {
@@ -61,5 +66,10 @@ describe("sanitizeSymbol", () => {
 
   it("skips mint validation when mintAddress is omitted", () => {
     expect(sanitizeSymbol("So11111")).toBe("So11111");
+  });
+
+  it("a real ticker shorter than any generated placeholder is not one, even when its vanity mint starts with it (QA A-1: JUP)", () => {
+    expect(isPlaceholderSymbol("JUP", "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN")).toBe(false);
+    expect(isPlaceholderSymbol("JU", "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN")).toBe(false);
   });
 });

@@ -4,17 +4,13 @@ import { FC, useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import dynamic from "next/dynamic";
+import { ConnectButton } from "@/components/wallet/ConnectButtonLazy";
 import gsap from "gsap";
 import { type Network, getConfig, setNetwork } from "@/lib/config";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { NavDropdown, type NavItem } from "./NavDropdown";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 
-const ConnectButton = dynamic(
-  () => import("@/components/wallet/ConnectButton").then((m) => m.ConnectButton),
-  { ssr: false }
-);
 
 /* ── Navigation groups ── */
 /** Pages hidden on mainnet beta — devnet-only faucets and internal pages */

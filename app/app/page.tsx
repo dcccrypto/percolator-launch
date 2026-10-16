@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { ButtonLink } from "@/components/ui/Button";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { LiveMarketRail } from "@/components/landing/LiveMarketRail";
 import { MAX_LEVERAGE_X } from "@/lib/market-params";
+import { ADMIN_BURN_COPY } from "@/lib/admin-burn-copy";
 import { TrendingTokensRail } from "@/components/landing/TrendingTokensRail";
 
 const ARROW = (
@@ -22,8 +24,8 @@ const PROOF_POINTS = [
   },
   {
     index: "02",
-    title: "Admin key can be burned",
-    body: "Creators can permanently renounce admin control after launch. Once burned, no one can change config, pause the market, or touch its funds — it runs on its own code.",
+    title: "Creator admin key can be burned",
+    body: ADMIN_BURN_COPY.landing,
   },
   {
     index: "03",
@@ -58,15 +60,15 @@ const HOW_IT_WORKS = [
 export default function Home() {
   return (
     <div className="relative">
-      {/* ─── Hero ─── */}
+      {/* ─── Hero ─── (CSS reveal, not ScrollReveal: it paints from the server HTML; see .reveal-up) */}
       <section className="mx-auto flex min-h-[calc(72dvh-3.5rem)] max-w-[1100px] flex-col justify-center px-6 py-20 sm:px-8">
-        <ScrollReveal>
+        <div className="reveal-up">
           <div className="mb-5 text-[11px] font-medium uppercase tracking-[0.25em] text-[var(--accent-text)]">
             // v17 · solana devnet
           </div>
-        </ScrollReveal>
+        </div>
 
-        <ScrollReveal delay={0.06}>
+        <div className="reveal-up" style={{ animationDelay: "0.06s" }}>
           <h1
             className="max-w-[16ch] text-balance text-[var(--text)]"
             style={{
@@ -79,16 +81,16 @@ export default function Home() {
           >
             Perpetual futures that can&apos;t rug you.
           </h1>
-        </ScrollReveal>
+        </div>
 
-        <ScrollReveal delay={0.12}>
+        <div className="reveal-up" style={{ animationDelay: "0.12s" }}>
           <p className="mt-6 max-w-[52ch] text-[15px] leading-relaxed text-[var(--text-secondary)]">
             Every market carries its own insurance fund, prices off live Solana DEX pools, and
             can burn its own admin key. Fully on-chain, open to anyone, and open to any token.
           </p>
-        </ScrollReveal>
+        </div>
 
-        <ScrollReveal delay={0.18}>
+        <div className="reveal-up" style={{ animationDelay: "0.18s" }}>
           <div className="mt-10 flex flex-wrap items-center gap-6">
             <ButtonLink href="/markets" variant="primary" size="lg" iconRight={ARROW}>
               Start trading
@@ -103,19 +105,21 @@ export default function Home() {
               </span>
             </Link>
           </div>
-        </ScrollReveal>
+        </div>
       </section>
 
       {/* ─── Live market rail ─── */}
       <section className="relative mx-auto mt-28 max-w-[1100px] px-6 pb-20 sm:mt-40 sm:px-8">
         {/* Character banner floats above the whole section (heading + table) so it
             never overlaps the links or columns. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        {/* next/image + priority: on mobile this is the page's LCP element. A 1626 px source shown at
+            ~84% of a phone's width; the srcset serves a right-sized copy and priority preloads it. */}
+        <Image
           src="/landing/char-markets.webp"
           width={1626}
           height={369}
-          decoding="async"
+          priority
+          sizes="(min-width: 640px) min(52vw, 560px), 84vw"
           alt=""
           aria-hidden="true"
           className="pointer-events-none z-20 mx-auto -mb-2 block h-auto w-[84%] drop-shadow-[0_14px_26px_rgba(0,0,0,0.55)] sm:absolute sm:bottom-full sm:left-1/2 sm:mx-0 sm:mb-1.5 sm:w-[min(52%,560px)] sm:-translate-x-1/2"
@@ -143,13 +147,11 @@ export default function Home() {
 
       {/* ─── Trending on Solana DEXs (third-party tokens without a Percolator market yet) ─── */}
       <section className="relative mx-auto mt-28 max-w-[1100px] px-6 pb-20 sm:mt-40 sm:px-8">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        <Image
           src="/landing/char-trending.webp"
           width={1672}
           height={337}
-          loading="lazy"
-          decoding="async"
+          sizes="(min-width: 640px) min(52vw, 560px), 84vw"
           alt=""
           aria-hidden="true"
           className="pointer-events-none z-20 mx-auto -mb-2 block h-auto w-[84%] drop-shadow-[0_14px_26px_rgba(0,0,0,0.55)] sm:absolute sm:bottom-full sm:right-[3%] sm:mx-0 sm:mb-1.5 sm:w-[min(52%,560px)]"

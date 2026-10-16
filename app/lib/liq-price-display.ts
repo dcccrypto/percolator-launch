@@ -18,6 +18,7 @@
  */
 
 import { formatLiqPrice, LIQ_PRICE_UNLIQUIDATABLE } from "@/lib/format";
+import { computeLiquidationDistancePct } from "@/lib/liquidation-distance";
 import {
   computeMarginHealthPct,
   unliquidatableHealthThresholdPct,
@@ -127,4 +128,25 @@ export function describeLiqPrice(input: LiqPriceDisplayInput): LiqPriceDisplay {
     marginHealthPct,
     healthThresholdPct,
   };
+}
+
+/**
+ * The small "5.3% to liq" line under a liquidation price: how far the mark is
+ * from it, with the same directional distance (and denominators) as the
+ * portfolio card's "Liquidation Distance" (computeLiquidationDistancePct).
+ *
+ * Only under a REAL price (`kind: "price"`) with a live mark. The covered
+ * ("% mgn") and unknown cells get nothing: computeLiquidationDistancePct's
+ * finite fallback must never be printed as a distance, because a missing risk
+ * number is not evidence of safety (#2412). A crossed price reads 0.0%.
+ */
+export function describeLiqDistance(
+  display: LiqPriceDisplay,
+  positionSize: bigint,
+  markPriceE6: bigint | null | undefined,
+  liqPriceE6: bigint | null | undefined,
+): string | null {
+  if (display.kind !== "price" || markPriceE6 == null || liqPriceE6 == null) return null;
+  const pct = computeLiquidationDistancePct(positionSize, markPriceE6, liqPriceE6, Number.NaN);
+  return Number.isFinite(pct) ? `${pct.toFixed(1)}% to liq` : null;
 }

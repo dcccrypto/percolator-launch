@@ -75,7 +75,7 @@ import { assetProfileOff } from "@/lib/v18-wire";
 
 /** A slab whose asset 0 asset_admin is ADMIN_PK (AssetOracleProfileV17 +368). */
 function slabWithAssetAdmin(admin: PublicKey = ADMIN_PK): Uint8Array {
-  const off = assetProfileOff(0) + 368;
+  const off = assetProfileOff(0, new Uint8Array(0)) + 368;
   const d = new Uint8Array(off + 4096);
   d.set(admin.toBytes(), off);
   return d;

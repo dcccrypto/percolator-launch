@@ -1,6 +1,6 @@
 "use client";
 
-import { FC, useCallback, useState, useEffect, useMemo, useRef } from "react";
+import { FC, useCallback, useId, useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import {
@@ -31,6 +31,7 @@ import { LogoUpload } from "@/components/create/LogoUpload";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { getBatchRpc } from "@/lib/batchRpc";
 import { isValidBase58Pubkey } from "@/lib/createWizardUtils";
+import { noteBlockhash } from "@/lib/v22/sign-guard";
 
 /**
  * Use the server-side RPC proxy to avoid exposing HELIUS_API_KEY in the client bundle.
@@ -46,6 +47,8 @@ const PUBLIC_DEVNET_RPC = "https://api.devnet.solana.com";
 
 const DevnetMintContent: FC = () => {
   const { publicKey, signTransaction } = useWalletCompat();
+  // Label ↔ field ids.
+  const fieldId = useId();
   const prefersReducedMotion = usePrefersReducedMotion();
   const successCardRef = useRef<HTMLDivElement>(null);
   const searchParams = useSearchParams();
@@ -347,6 +350,7 @@ const DevnetMintContent: FC = () => {
       const { blockhash } = await connection.getLatestBlockhash("confirmed");
       tx.feePayer = publicKey;
       tx.recentBlockhash = blockhash;
+      noteBlockhash(blockhash, "devnet-mint page", connection);
       tx.partialSign(mintKeypair);
 
       setCreateStatus("Approve in your wallet...");
@@ -459,6 +463,7 @@ const DevnetMintContent: FC = () => {
       const { blockhash } = await connection.getLatestBlockhash("confirmed");
       tx.feePayer = publicKey;
       tx.recentBlockhash = blockhash;
+      noteBlockhash(blockhash, "devnet-mint page", connection);
 
       setMintMoreStatus("Approve in your wallet...");
       const signed = await signTransaction(tx);
@@ -563,8 +568,9 @@ const DevnetMintContent: FC = () => {
             )}
             <div className="space-y-2">
               <div>
-                <label className="mb-1 block text-xs text-[var(--text-secondary)]">Devnet Active Market Mint Address</label>
+                <label htmlFor={`${fieldId}-faucet-mint`} className="mb-1 block text-xs text-[var(--text-secondary)]">Devnet Active Market Mint Address</label>
                 <input
+                  id={`${fieldId}-faucet-mint`}
                   type="text"
                   value={faucetMint}
                   onChange={(e) => {
@@ -713,9 +719,10 @@ const DevnetMintContent: FC = () => {
             <div className={`space-y-3 ${!walletReady ? "opacity-50 pointer-events-none" : ""}`}>
               <div className="flex gap-3">
                 <div className="flex-1">
-                  <label className="mb-1 block text-xs text-[var(--text-secondary)]">Token Name</label>
+                  <label htmlFor={`${fieldId}-name`} className="mb-1 block text-xs text-[var(--text-secondary)]">Token Name</label>
                   <input 
                     type="text" 
+                    id={`${fieldId}-name`}
                     value={tokenName} 
                     onChange={(e) => { setTokenName(e.target.value); setNameError(null); }} 
                     className={`${inputClass} ${nameError ? "border-[var(--short)]" : ""}`}
@@ -724,9 +731,10 @@ const DevnetMintContent: FC = () => {
                   {nameError && <p className="mt-1 text-xs text-[var(--short)]">{nameError}</p>}
                 </div>
                 <div className="flex-1">
-                  <label className="mb-1 block text-xs text-[var(--text-secondary)]">Symbol</label>
+                  <label htmlFor={`${fieldId}-symbol`} className="mb-1 block text-xs text-[var(--text-secondary)]">Symbol</label>
                   <input 
                     type="text" 
+                    id={`${fieldId}-symbol`}
                     value={tokenSymbol} 
                     onChange={(e) => { setTokenSymbol(e.target.value.toUpperCase()); setSymbolError(null); }} 
                     className={`${inputClass} ${symbolError ? "border-[var(--short)]" : ""}`}
@@ -737,20 +745,20 @@ const DevnetMintContent: FC = () => {
               </div>
               <div className="flex gap-3">
                 <div className="flex-1">
-                  <label className="mb-1 block text-xs text-[var(--text-secondary)]">Decimals</label>
-                  <input type="number" min={0} max={MAX_DECIMALS} value={decimals} onChange={(e) => {
+                  <label htmlFor={`${fieldId}-decimals`} className="mb-1 block text-xs text-[var(--text-secondary)]">Decimals</label>
+                  <input id={`${fieldId}-decimals`} type="number" min={0} max={MAX_DECIMALS} value={decimals} onChange={(e) => {
                     const val = Math.min(MAX_DECIMALS, Math.max(0, Math.floor(Number(e.target.value) || 0)));
                     setDecimals(val);
                   }} className={inputClass} disabled={!walletReady} />
                 </div>
                 <div className="flex-[2]">
-                  <label className="mb-1 block text-xs text-[var(--text-secondary)]">Supply</label>
-                  <input type="text" value={supply} onChange={(e) => setSupply(e.target.value.replace(/[^0-9]/g, ""))} className={inputClass} disabled={!walletReady} />
+                  <label htmlFor={`${fieldId}-supply`} className="mb-1 block text-xs text-[var(--text-secondary)]">Supply</label>
+                  <input id={`${fieldId}-supply`} type="text" value={supply} onChange={(e) => setSupply(e.target.value.replace(/[^0-9]/g, ""))} className={inputClass} disabled={!walletReady} />
                 </div>
               </div>
               <div>
-                <label className="mb-1 block text-xs text-[var(--text-secondary)]">Recipient Address</label>
-                <input type="text" value={recipient} onChange={(e) => setRecipient(e.target.value)} className={inputClass} disabled={!walletReady} />
+                <label htmlFor={`${fieldId}-recipient`} className="mb-1 block text-xs text-[var(--text-secondary)]">Recipient Address</label>
+                <input id={`${fieldId}-recipient`} type="text" value={recipient} onChange={(e) => setRecipient(e.target.value)} className={inputClass} disabled={!walletReady} />
               </div>
             </div>
           </div>
@@ -852,12 +860,12 @@ const DevnetMintContent: FC = () => {
             <p className="mb-3 text-xs text-[var(--text-muted)]">Already created a market? Need more tokens for trading or deposits? Mint more of a token you own.</p>
             <div className={`space-y-3 ${!walletReady ? "opacity-50 pointer-events-none" : ""}`}>
               <div>
-                <label className="mb-1 block text-xs text-[var(--text-secondary)]">Existing Mint Address</label>
-                <input type="text" value={existingMint} onChange={(e) => setExistingMint(e.target.value.trim())} placeholder="Paste token mint address..." className={inputClass} disabled={!walletReady} />
+                <label htmlFor={`${fieldId}-existing-mint`} className="mb-1 block text-xs text-[var(--text-secondary)]">Existing Mint Address</label>
+                <input id={`${fieldId}-existing-mint`} type="text" value={existingMint} onChange={(e) => setExistingMint(e.target.value.trim())} placeholder="Paste token mint address..." className={inputClass} disabled={!walletReady} />
               </div>
               <div>
-                <label className="mb-1 block text-xs text-[var(--text-secondary)]">Amount to Mint</label>
-                <input type="text" value={mintMoreAmount} onChange={(e) => setMintMoreAmount(e.target.value.replace(/[^0-9]/g, ""))} className={inputClass} disabled={!walletReady} />
+                <label htmlFor={`${fieldId}-mint-amount`} className="mb-1 block text-xs text-[var(--text-secondary)]">Amount to Mint</label>
+                <input id={`${fieldId}-mint-amount`} type="text" value={mintMoreAmount} onChange={(e) => setMintMoreAmount(e.target.value.replace(/[^0-9]/g, ""))} className={inputClass} disabled={!walletReady} />
               </div>
               {checkingMintAuth && (
                 <div className="flex items-center gap-2">

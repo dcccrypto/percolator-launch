@@ -220,3 +220,130 @@ describe("2026-10-02 live: faucet_claims.id is a UUID in production", () => {
     expect(await lib.reserveServerSol(db, "W3", t0 + 2000, env)).toEqual({ reason: "budget" });
   });
 });
+
+describe("#2760: reservation deletes check {error}, retry, and log the final failure", () => {
+  type DelResult = { error: { message: string } | null };
+  /**
+   * Wraps fakeDb so that `.delete().eq("id", ...)` (the release / budget-overflow delete) resolves
+   * with scripted results first (PostgREST reports failure as a returned {error}, it does not throw).
+   * Once the script is exhausted it falls through to the real fake.
+   */
+  function flakyDeleteDb(script: DelResult[] | "always-error") {
+    const inner = fakeDb();
+    const calls = { byId: 0 };
+    const realFrom = inner.db.from("faucet_claims");
+    const table = {
+      ...realFrom,
+      delete: () => {
+        const real = realFrom.delete() as unknown as { eq: (k: string, v: unknown) => unknown; lt: (k: string, v: unknown) => unknown; then: (r: (v: unknown) => void) => void };
+        let byId = false;
+        const b: Record<string, unknown> = {};
+        b.eq = (k: string, v: unknown) => {
+          if (k === "id") byId = true;
+          real.eq(k, v);
+          return b;
+        };
+        b.lt = (k: string, v: unknown) => (real.lt(k, v), b);
+        b.then = (res: (v: unknown) => void) => {
+          if (!byId) return real.then(res);
+          calls.byId++;
+          if (script === "always-error") return res({ error: { message: "db down" } });
+          const next = script.shift();
+          return next ? res(next) : real.then(res);
+        };
+        return b;
+      },
+    };
+    return { db: { from: () => table }, rows: inner.rows, calls };
+  }
+  const refusedSend = () => conn({ send: async () => { throw new SendTransactionError({ action: "send", signature: "", transactionMessage: "blockhash not found" }); } });
+
+  it("release: a delete that returns {error} is retried and then succeeds (row removed)", async () => {
+    const { db, rows, calls } = flakyDeleteDb([{ error: { message: "transient" } }]);
+    const g = await grantServerSol({ connection: refusedSend() as never, db, to: to(), ip: ip(), env: env() });
+    expect(g).toEqual({ status: "skipped", reason: "failed" });
+    expect(calls.byId).toBe(2);
+    expect(rows).toHaveLength(0);
+  });
+
+  it("release: always-error is bounded (<= 3 attempts) and the final failure is logged", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { db, calls } = flakyDeleteDb("always-error");
+    const g = await grantServerSol({ connection: refusedSend() as never, db, to: to(), ip: ip(), env: env() });
+    expect(g).toEqual({ status: "skipped", reason: "failed" });
+    expect(calls.byId).toBeGreaterThanOrEqual(2);
+    expect(calls.byId).toBeLessThanOrEqual(3);
+    expect(err.mock.calls.some((c) => String(c[0]).includes("could not release reservation"))).toBe(true);
+  });
+
+  it("budget overflow: the over-cap delete is retried on {error} and the row ends up removed", async () => {
+    const { db, rows, calls } = flakyDeleteDb([{ error: { message: "transient" } }]);
+    const e = { PLAYGROUND_SOL_FAUCET_DAILY_SOL: "1" } as NodeJS.ProcessEnv; // 1 send / day
+    const t0 = Date.parse("2026-10-02T05:00:00Z");
+    expect(await lib.reserveServerSol(db, "W1", t0, e)).toHaveProperty("id");
+    expect(await lib.reserveServerSol(db, "W2", t0 + 1000, e)).toEqual({ reason: "budget" });
+    expect(calls.byId).toBe(2);
+    expect(rows.map((r) => r.wallet)).toEqual(["W1"]);
+  });
+
+  it("budget overflow: always-error is bounded and logged", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { db, calls } = flakyDeleteDb("always-error");
+    const e = { PLAYGROUND_SOL_FAUCET_DAILY_SOL: "1" } as NodeJS.ProcessEnv;
+    const t0 = Date.parse("2026-10-02T05:00:00Z");
+    await lib.reserveServerSol(db, "W1", t0, e);
+    expect(await lib.reserveServerSol(db, "W2", t0 + 1000, e)).toEqual({ reason: "budget" });
+    expect(calls.byId).toBeGreaterThanOrEqual(2);
+    expect(calls.byId).toBeLessThanOrEqual(3);
+    expect(err.mock.calls.some((c) => String(c[0]).includes("could not release reservation"))).toBe(true);
+  });
+});
+
+describe("#2760 follow-up: the stale-window cleanup delete checks {error} too", () => {
+  /** fakeDb whose `.delete()...lt("claimed_at", ...)` (the stale cleanup) returns scripted results first. */
+  function flakyStaleDb(script: ({ error: { message: string } } | null)[] | "always-error") {
+    const inner = fakeDb();
+    const realFrom = inner.db.from("faucet_claims");
+    const calls = { stale: 0 };
+    const table = {
+      ...realFrom,
+      delete: () => {
+        const real = realFrom.delete() as unknown as { eq: (k: string, v: unknown) => unknown; lt: (k: string, v: unknown) => unknown; then: (r: (v: unknown) => void) => void };
+        let stale = false;
+        const b: Record<string, unknown> = {};
+        b.eq = (k: string, v: unknown) => (real.eq(k, v), b);
+        b.lt = (k: string, v: unknown) => ((stale = true), real.lt(k, v), b);
+        b.then = (res: (v: unknown) => void) => {
+          if (!stale) return real.then(res);
+          calls.stale++;
+          if (script === "always-error") return res({ error: { message: "db down" } });
+          const next = script.shift();
+          return next ? res(next) : real.then(res);
+        };
+        return b;
+      },
+    };
+    return { db: { from: () => table }, rows: inner.rows, calls };
+  }
+  const T0 = Date.parse("2026-10-03T05:00:00Z");
+  const seedStale = (rows: { id: number | string; wallet: string; fund_type: string; claimed_at: string }[]) =>
+    rows.push({ id: 999, wallet: "W1", fund_type: lib.SERVER_SOL_FUND_TYPE, claimed_at: new Date(T0 - 2 * 24 * 3600 * 1000).toISOString() });
+
+  it("a failed stale cleanup is retried; the stale row goes and the reservation succeeds", async () => {
+    const { db, rows, calls } = flakyStaleDb([{ error: { message: "transient" } }]);
+    seedStale(rows);
+    expect(await lib.reserveServerSol(db, "W1", T0)).toHaveProperty("id");
+    expect(calls.stale).toBe(2);
+    expect(rows.some((r) => r.id === 999)).toBe(false);
+  });
+
+  it("always-error is bounded (<= 3 attempts), logged, and the stale row still blocks (wallet-limit)", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { db, rows, calls } = flakyStaleDb("always-error");
+    seedStale(rows);
+    expect(await lib.reserveServerSol(db, "W1", T0)).toEqual({ reason: "wallet-limit" });
+    expect(calls.stale).toBeGreaterThanOrEqual(2);
+    expect(calls.stale).toBeLessThanOrEqual(3);
+    expect(err.mock.calls.some((c) => String(c[0]).includes("delete stale claims for wallet W1"))).toBe(true);
+  });
+});

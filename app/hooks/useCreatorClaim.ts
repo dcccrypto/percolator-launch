@@ -1,5 +1,6 @@
 "use client";
 
+import { errorText } from "@/lib/error-text";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useParams } from "next/navigation";
@@ -178,7 +179,7 @@ export function useCreatorClaim() {
         setSuccess(typeof sig === "string" ? sig : "Claim submitted");
         return sig;
       } catch (err) {
-        const rawMsg = err instanceof Error ? err.message : String(err);
+        const rawMsg = errorText(err);
         // A guard message is already a sentence written for the creator; only
         // on-chain/RPC failures need the code-to-sentence mapper.
         const friendly = err instanceof CreatorFeeClaimError ? rawMsg : mapCreatorClaimError(rawMsg);

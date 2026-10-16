@@ -71,11 +71,11 @@ import { Buffer } from "buffer";
 import { PublicKey, type Connection } from "@solana/web3.js";
 import {
   AccountKind,
-  parsePortfolioV17,
   type Account,
   type PortfolioLegV17,
   type PortfolioV17,
 } from "@percolatorct/sdk";
+import { parsePortfolio } from "@/lib/v22/layout";
 
 // ---------------------------------------------------------------------------
 // Shared UserAccountInfo shape + v17→legacy Account mapper.
@@ -182,7 +182,7 @@ const V17_PF_OWNER_OFF = 116;
 // "why" doc comment (creator LP-mistaken-for-own-account bug, plus the new
 // server-side use by app/api/markets/[slab]/logo/route.ts) — so it's a plain
 // (non `"use client"`) module a server route can import directly. Re-exported
-// here so every existing call site in this file (and useMintPositionNft,
+// here so every existing call site in this file (and
 // usePortfolio, useDeposit, useWithdraw, useClosePosition, useTrade,
 // useInitUser, useCreatedMarkets) keeps working unchanged.
 // ---------------------------------------------------------------------------
@@ -408,7 +408,7 @@ async function runPortfolioScan(
     // the one trade / close / deposit act on.
     const picked = pickOwnerPortfolio(results, params.publicKey);
     const result: OwnPortfolioScanResult | null = picked
-      ? { pubkey: picked.pubkey, portfolio: parsePortfolioV17(picked.data) }
+      ? { pubkey: picked.pubkey, portfolio: parsePortfolio(picked.data) }
       : null;
     publishPortfolioResult(entry, result);
     return entry.raw;

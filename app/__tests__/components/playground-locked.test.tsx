@@ -4,13 +4,14 @@
  *   - global chrome (nav, footer, data bars) is not mounted on /locked;
  *   - a 401 from the gate never permanently "refuses" a pending keeper registration.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
 let pathname = "/locked";
 vi.mock("next/navigation", () => ({ usePathname: () => pathname }));
 
 import LockedPage from "@/app/locked/page";
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { ChromeGate } from "@/components/layout/ChromeGate";
 import { postKeeperRegistration, resumePendingRegistrations, type KeyStore } from "@/lib/keeper-register-client";
 
@@ -20,6 +21,9 @@ afterEach(() => {
 });
 
 describe("/locked", () => {
+  // The playground copy (flag off). The v2.2 preview copy: locked-preview-copy.test.tsx.
+  beforeEach(() => __setDevnetV22ForTest(false));
+  afterEach(() => __setDevnetV22ForTest(null));
   it("says who it is open to and links to the gate + waitlist only", () => {
     const { container } = render(<LockedPage />);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Devnet v2 is open to the first 1,000 on the waitlist.");

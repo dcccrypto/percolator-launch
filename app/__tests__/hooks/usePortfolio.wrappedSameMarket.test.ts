@@ -20,7 +20,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/market-directory-discovery', () => ({
   discoverMarketsViaProgramDirectory: mocks.discoverMarketsViaProgramDirectory,
 }));
-vi.mock('@/lib/config', () => ({ getAllProgramIds: vi.fn(() => []), getNetwork: mocks.getNetwork }));
+vi.mock('@/lib/config', () => ({
+  getAllProgramIds: vi.fn(() => []),
+  getMarketDiscoveryProgramIds: vi.fn(() => []),
+  getNetwork: mocks.getNetwork,
+}));
 vi.mock('@/lib/v17-engine-config', () => ({ parseV17RiskParams: mocks.parseV17RiskParams }));
 vi.mock('@percolatorct/sdk', async () => {
   const actual = await vi.importActual<typeof import('@percolatorct/sdk')>('@percolatorct/sdk');

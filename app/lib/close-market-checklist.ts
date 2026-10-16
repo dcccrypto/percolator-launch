@@ -1,3 +1,5 @@
+import { UNFINISHED_COPY } from "@/lib/unfinished-launch";
+
 /**
  * UX WP-9 (audit §3.11, MM-2): the close-market preconditions as a checklist shown BEFORE the
  * button ("Fees claimed ✓ · No open accounts ✓ · Insurance empty ✓"). The button is disabled with
@@ -20,12 +22,18 @@ export function closeMarketChecklist(i: {
   /** Accounts other than the creator's own (their cleanup rides in the close); null = unknown. */
   otherOpenAccounts: number | null;
   insuranceAtoms: bigint | null;
+  /**
+   * The market is a launch that never finished (marketauth still the creator). Its funded insurance
+   * is not something the creator can drain: it went in at launch step 3, and a launch past that can
+   * only be finished, so the reason says that instead of leaving a dead end (#3266).
+   */
+  unfinished?: boolean;
 }): CloseCheck[] {
   const st = (v: bigint | number | null): CheckState => (v === null ? "unknown" : BigInt(v) > 0n ? "unmet" : "ok");
   return [
     { key: "fees", label: "Fees claimed", state: st(i.claimableFeeAtoms), unmetLine: "Claim your fees first: closing the market would give them up." },
     { key: "accounts", label: "No open accounts", state: st(i.otherOpenAccounts), unmetLine: "Other traders still have accounts on this market." },
-    { key: "insurance", label: "Insurance empty", state: st(i.insuranceAtoms), unmetLine: "The market's insurance fund still holds funds." },
+    { key: "insurance", label: "Insurance empty", state: st(i.insuranceAtoms), unmetLine: i.unfinished ? UNFINISHED_COPY.insuranceBlocked : "The market's insurance fund still holds funds." },
   ];
 }
 
@@ -36,5 +44,10 @@ export const CLOSE_MARKET_COPY = {
   body: (sym: string, sol: string | null) =>
     sol ? `Close ${sym} market and get back ≈ ${sol} SOL rent. You can't reopen it.` : `Close ${sym} market and get back its rent. You can't reopen it.`,
   confirm: "Close market · 1 approval",
+  unfinishedTitle: "Reclaim rent from this unfinished launch",
+  unfinishedBody: "Remove this unfinished launch and get back its rent. You can't reopen it.",
+  /** Only when the chain read confirms nothing is funded. */
+  unfinishedBodyConfirmedEmpty: "Remove this unfinished launch and get back its rent. No funds, trading accounts or backing were found on it. You can't reopen it.",
+  unfinishedConfirm: "Reclaim rent · 1 approval",
   mark: (s: CheckState) => (s === "ok" ? "✓" : s === "unmet" ? "✗" : "?"),
 } as const;

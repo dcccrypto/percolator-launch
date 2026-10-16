@@ -25,18 +25,17 @@ import { PublicKey } from "@solana/web3.js";
 import {
   deriveStakePool,
   parseAssetOracleProfileV17,
-  parseMarketGroupV17OI,
   parseWrapperConfigV17,
   V17_HEADER_LEN,
-  V17_MARKET_GROUP_OFF,
 } from "@percolatorct/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { assetProfileOff } from "@/lib/v18-wire";
+import { marketGeometry, parseMarketOI } from "@/lib/v22/layout";
 
 /** AUTH_MARK: the keeper pushes the mark (wrapper ORACLE_MODE_AUTH_MARK). */
 export const ORACLE_MODE_AUTH_MARK = 3;
 /** `MarketGroupV16HeaderAccount.c_tot` (u128), relative to V17_MARKET_GROUP_OFF (lib/v18-wire.ts). */
-const MG_C_TOT_OFF = 317;
+const MG_C_TOT_OFF = 317; // v2.1; v2.2 value comes from the layout table (marketGeometry(..).layout.group.cTot)
 
 export type ReadinessFailure = "unconfigured" | "unreadable" | "incomplete" | "no-insurance" | "no-liquidity" | "oracle-not-keeper";
 export type ReadinessVerdict = { ok: true } | { ok: false; reason: ReadinessFailure };
@@ -64,10 +63,12 @@ export function checkKeeperReadiness(
   let oracleAuthority: PublicKey;
   try {
     marketauth = parseWrapperConfigV17(data, V17_HEADER_LEN).marketauth;
-    insurance = parseMarketGroupV17OI(data).insuranceBalance;
-    if (data.length < V17_MARKET_GROUP_OFF + MG_C_TOT_OFF + 16) return { ok: false, reason: "unreadable" };
-    cTot = readU128LE(data, V17_MARKET_GROUP_OFF + MG_C_TOT_OFF);
-    const profile = parseAssetOracleProfileV17(data, assetProfileOff(0));
+    insurance = parseMarketOI(data).insuranceBalance;
+    const geo = marketGeometry(data, "checkKeeperReadiness");
+    const cTotOff = geo.groupOff + geo.layout.group.cTot;
+    if (data.length < cTotOff + 16) return { ok: false, reason: "unreadable" };
+    cTot = readU128LE(data, cTotOff);
+    const profile = parseAssetOracleProfileV17(data, assetProfileOff(0, data));
     oracleMode = profile.oracleMode;
     oracleAuthority = profile.oracleAuthority;
   } catch {
@@ -105,10 +106,22 @@ export function readinessStatus(reason: ReadinessFailure): number {
 
 /** Shown when a creator hits the per-wallet ceiling (final; a maintainer can enroll more). */
 export const PER_CREATOR_CAP_COPY = "This wallet already has the most live-priced markets allowed.";
-/** Shown when the deployment's ceiling is full (final until a maintainer frees room). */
+/** Shown when the deployment's ceiling is full (not final: it clears once room is made). */
 export const GLOBAL_CAP_COPY = "Live prices are full right now. A maintainer can connect this market.";
 
-export const DEFAULT_MAX_ACTIVE_MARKETS = 50;
+/**
+ * The deployment-wide ceiling. 50 filled on 2026-10-05 20:14 UTC (the 50th active row, PLAGUE) and
+ * from then on EVERY new launch was refused with a final 403 for 28+ hours: ~25 markets, 7+
+ * deployers, all left "UNKNOWN" with no live price. The playground adds ~10 live markets a day, so
+ * a refusal for the ceiling is retryable (429, below), never final.
+ *
+ * 90, and NO HIGHER until the keeper changes: its push loop reads every eligible market in one
+ * getMultipleAccountsInfo call (percolator-oracle-keeper auth-mark-pusher.ts,
+ * fetchPushAuthMarkGenerationFields), which the RPC caps at 100 keys. At 101 priced markets that
+ * read throws every cycle and EVERY market's price stops, not just the new one. 90 leaves room for
+ * the registry and this table to disagree by a few. Raise it only after that read is chunked.
+ */
+export const DEFAULT_MAX_ACTIVE_MARKETS = 90;
 export const DEFAULT_MAX_ACTIVE_PER_CREATOR = 10;
 
 export interface EnrollmentCaps {
@@ -129,9 +142,47 @@ export function enrollmentCapsFromEnv(env: NodeJS.ProcessEnv = process.env): Enr
   };
 }
 
+/** Machine-readable cap refusals, sent as `code` so a client never has to match the copy. */
+export type CapRefusalCode = "per-creator-cap" | "global-cap";
+
 export type CapVerdict =
   | { ok: true }
-  | { ok: false; status: number; error: string; detail?: string };
+  | { ok: false; status: number; error: string; detail?: string; code?: CapRefusalCode };
+
+/**
+ * The rows that count against a ceiling: priced (keeper_status='active') on `network`. The guard
+ * below and `readCreatorAtLimit` both count through this one filter so they cannot drift (#3320).
+ */
+function activeEnrollmentCount(supabase: SupabaseClient, network: string) {
+  return supabase
+    .from("markets")
+    .select("slab_address", { count: "exact", head: true })
+    .eq("network", network)
+    .eq("keeper_status", "active");
+}
+
+/** Is this deployer at the per-creator ceiling? `{ ok: false }` = could not be read (unknown). */
+export type CreatorLimitRead = { ok: true; atLimit: boolean } | { ok: false };
+
+/**
+ * Would a NEW enrollment by `deployer` be refused by the per-creator ceiling? Same filter and same
+ * cap as `checkEnrollmentCaps` (for a slab not yet enrolled, `atLimit` is exactly its
+ * "per-creator-cap" refusal). Returns a verdict only, never rows or a count: callers expose it to
+ * the deployer themselves and to nobody else. A read that fails is unknown, never a verdict.
+ */
+export async function readCreatorAtLimit(
+  supabase: SupabaseClient,
+  args: { deployer: string; network: string },
+  caps: EnrollmentCaps,
+): Promise<CreatorLimitRead> {
+  try {
+    const mine = await activeEnrollmentCount(supabase, args.network).eq("deployer", args.deployer);
+    if (mine.error || typeof mine.count !== "number") return { ok: false };
+    return { ok: true, atLimit: mine.count >= caps.maxActivePerCreator };
+  } catch {
+    return { ok: false };
+  }
+}
 
 /**
  * Would enrolling `slab` for `deployer` exceed a ceiling? Counts the OTHER active rows on this
@@ -143,13 +194,7 @@ export async function checkEnrollmentCaps(
   args: { slab: string; deployer: string; network: string },
   caps: EnrollmentCaps,
 ): Promise<CapVerdict> {
-  const base = () =>
-    supabase
-      .from("markets")
-      .select("slab_address", { count: "exact", head: true })
-      .eq("network", args.network)
-      .eq("keeper_status", "active")
-      .neq("slab_address", args.slab);
+  const base = () => activeEnrollmentCount(supabase, args.network).neq("slab_address", args.slab);
   const [all, mine] = await Promise.all([base(), base().eq("deployer", args.deployer)]);
   const err = all.error ?? mine.error;
   if (err || typeof all.count !== "number" || typeof mine.count !== "number") {
@@ -160,7 +205,11 @@ export async function checkEnrollmentCaps(
       detail: err ? `${err.code ?? ""} ${err.message ?? ""}`.trim() : "count unavailable",
     };
   }
-  if (mine.count >= caps.maxActivePerCreator) return { ok: false, status: 403, error: PER_CREATOR_CAP_COPY };
-  if (all.count >= caps.maxActive) return { ok: false, status: 403, error: GLOBAL_CAP_COPY };
+  if (mine.count >= caps.maxActivePerCreator) return { ok: false, status: 403, error: PER_CREATOR_CAP_COPY, code: "per-creator-cap" };
+  // 429, not 403: a full deployment is a state that clears (a maintainer raises the ceiling or
+  // retires dead markets), not a verdict on this market. The launch screen and the resume pass
+  // keep retrying a 429 and never write the "refused" tombstone for it. The route reports it to
+  // Sentry at error level: the previous silent 403 hid a total outage for a day.
+  if (all.count >= caps.maxActive) return { ok: false, status: 429, error: GLOBAL_CAP_COPY, code: "global-cap" };
   return { ok: true };
 }

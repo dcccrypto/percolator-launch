@@ -9,7 +9,7 @@ import { createCandlesApiProvider, type MarkStream } from "./candlesApiProvider"
 import type { ChartDataProvider } from "./provider";
 import { createTradeStream } from "./tradeStream";
 import { createPerpProvider } from "./perpProvider";
-import { createLiveClient, wsToHttpBase, type LiveClient } from "@/lib/chart/live-client";
+import { createLiveClient, wsToHttpBase, type LiveClient, type WsLike } from "@/lib/chart/live-client";
 import { getSeriesStore } from "@/lib/chart/perp-series";
 import { getWsManager } from "@/lib/priceStore/wsManager";
 
@@ -39,7 +39,16 @@ export function getLiveClient(): LiveClient | null {
   const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "";
   if (!wsUrl) return null;
   if (!liveClient) {
-    liveClient = createLiveClient({ ws: getWsManager(wsUrl), httpBase: wsToHttpBase(wsUrl), fetchJson: (url) => fetch(url, { cache: "no-store" }) });
+    // Resolve the shared manager per call, never capture its handle: the manager is torn down after
+    // 20 s with no subscribers (e.g. a page without prices), and a captured handle stays bound to the
+    // dead one, so the chart sat at "Offline" until a reload while the header price kept ticking.
+    const ws: WsLike = {
+      subscribeChannel: (channel) => getWsManager(wsUrl).subscribeChannel(channel),
+      onMessageForChannel: (channel, listener) => getWsManager(wsUrl).onMessageForChannel(channel, listener),
+      onStatusChange: (listener) => getWsManager(wsUrl).onStatusChange(listener),
+      getStatus: () => getWsManager(wsUrl).getStatus(),
+    };
+    liveClient = createLiveClient({ ws, httpBase: wsToHttpBase(wsUrl), fetchJson: (url) => fetch(url, { cache: "no-store" }) });
   }
   return liveClient;
 }

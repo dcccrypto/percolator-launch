@@ -42,7 +42,12 @@ function makeConn(marketFixture: string) {
     }),
     simulateTransaction,
     sendRawTransaction: vi.fn().mockResolvedValue(SIG),
-    getSignatureStatuses: vi.fn().mockResolvedValue({ value: [{ confirmationStatus: "confirmed", err: null }] }),
+    // Only the signature sendRawTransaction returns (SIG) is confirmed. A blanket "confirmed"
+    // would make the R2-S7 landed check treat a send that THREW as landed (sendTx now knows the
+    // signature before broadcasting), hiding the retry these tests exercise.
+    getSignatureStatuses: vi.fn(async (sigs: string[]) => ({
+      value: sigs.map((s) => (s === SIG ? { confirmationStatus: "confirmed", err: null } : null)),
+    })),
   };
   return conn;
 }
@@ -94,6 +99,34 @@ describe("sendTx selfHeal", () => {
     expect(ixs[3].programId.equals(PROGRAM)).toBe(true);
     expect(ixs[4].data[0]).toBe(10);
     expect(conn.sendRawTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("CU sized from simulation (every v2.2 trade): the heal plan simulates at the 1.4M maximum, not sendTx's 200k default", async () => {
+    // Browser E2E 2026-10-16: a v2.2 trade needs 380k-560k CU; the heal plan simulated the original tx at 200k, got
+    // ProgramFailedToComplete ("not-repairable") and never added the repair / catch-up crank the trade needed.
+    const conn = makeConn("paid-market-v18-lapsed");
+    conn.simulateTransaction.mockImplementation(async (vtx: VersionedTransaction) => {
+      const keys = vtx.message.staticAccountKeys.map((k) => k.toBase58());
+      const ixs = vtx.message.compiledInstructions;
+      const cuIx = ixs.find((ix) => keys[ix.programIdIndex] === "ComputeBudget111111111111111111111111111111" && ix.data[0] === 2);
+      const cu = cuIx ? Buffer.from(cuIx.data).readUInt32LE(1) : 200_000;
+      if (cu < 450_000) return { value: { err: { InstructionError: [ixs.length - 1, "ProgramFailedToComplete"] }, logs: ["exceeded CUs meter at BPF instruction"], unitsConsumed: cu } };
+      const repaired = ixs.some((ix) => ix.data[0] === 89);
+      return { value: { err: repaired ? null : { InstructionError: [ixs.length - 1, { Custom: 19 }] }, logs: [], unitsConsumed: 450_000 } };
+    });
+    const wallet = makeWallet();
+    let heal: SelfHealResult | undefined;
+    const sig = await sendTx({
+      connection: conn as never,
+      wallet,
+      instructions: [tradeIx()],
+      computeUnitsFromSim: { cap: 800_000 },
+      selfHeal: { programId: PROGRAM, market: MARKET },
+      onSelfHeal: (r) => { heal = r; },
+    });
+    expect(sig).toBe(SIG);
+    expect(heal?.outcome).toBe("repaired");
+    expect(Array.from(wallet.signed[0].instructions[3].data)).toEqual([89, 1, 0]);
   });
 
   it("NEGATIVE CONTROL without selfHeal the same tx is never repaired and fails simulation", async () => {

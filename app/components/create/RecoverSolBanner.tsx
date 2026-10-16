@@ -107,7 +107,8 @@ const StuckSlabCard: FC<{
   // Already dismissed this session
   if (dismissed) return null;
 
-  // Account doesn't exist — the atomic tx rolled back. Show a brief info and auto-clean.
+  // Account doesn't exist — the atomic tx rolled back, or the rent was reclaimed and the
+  // user left before START NEW MARKET cleared the record. Show a brief info and auto-clean.
   if (!stuckSlab.exists) {
     return (
       <div className="mb-4 border border-[var(--text-dim)]/20 bg-[var(--bg-surface)] p-4">
@@ -119,8 +120,9 @@ const StuckSlabCard: FC<{
               </span>
             </div>
             <p className="text-[11px] text-[var(--text-secondary)]">
-              A previous market creation attempt was found but the transaction was
-              rolled back. No SOL was lost. You can safely start a new market.
+              A previous market creation attempt was found, but its account is no longer
+              on-chain (the transaction was rolled back, or its rent was already reclaimed).
+              No SOL was lost. You can safely start a new market.
             </p>
           </div>
           <button
@@ -173,6 +175,19 @@ const StuckSlabCard: FC<{
     // at closeSlab, and a wrong "not reclaimable" is near-impossible (lastStep>=3
     // means the LP-portfolio tx already landed).
     const reclaimable = resumeFromStep <= 2;
+
+    if (reclaimResult) {
+      return (
+        <ReclaimSuccessCard
+          sol={reclaimResult.sol.toFixed(4)}
+          txSig={reclaimResult.sig}
+          clearStuck={clearStuck}
+          onReset={onReset}
+          onReclaimSuccess={onReclaimSuccess}
+          onDone={() => setDismissed(true)}
+        />
+      );
+    }
 
     return (
       <div className="mb-4 border border-[var(--accent)]/30 bg-[var(--accent)]/[0.04] p-4">
@@ -258,12 +273,15 @@ const StuckSlabCard: FC<{
               disabled={closeLoading}
               onClick={async () => {
                 const result = await closeSlab(stuckSlab.publicKey.toBase58());
+                // S14: keep the record until the user moves on from the success card below.
+                // Clearing it here unmounted this card (it is keyed off the stuck list) in
+                // the same render, so the confirmation never showed and onReclaimSuccess
+                // never ran on this path.
                 if (result) {
                   setReclaimResult({
                     sig: result.signature,
                     sol: result.reclaimedLamports / 1_000_000_000,
                   });
-                  clearStuck();
                 }
               }}
               className="border border-[var(--accent)]/50 bg-[var(--accent)]/[0.08] px-4 py-2 text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--accent)] hover:bg-[var(--accent)]/[0.15] transition-colors disabled:opacity-50"
@@ -273,19 +291,6 @@ const StuckSlabCard: FC<{
           )}
           {closeError && (
             <p className="w-full text-[10px] text-[var(--short)]">{closeError}</p>
-          )}
-          {reclaimResult && (
-            <p className="w-full text-[10px] text-[var(--long)]">
-              ✓ Reclaimed {reclaimResult.sol.toFixed(4)} SOL —{" "}
-              <a
-                href={explorerTxUrl(reclaimResult.sig)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline"
-              >
-                View tx
-              </a>
-            </p>
           )}
           {/* Visible confirmation that the click registered — see the
               resuming fix note above. Without this, the card looked
@@ -338,64 +343,14 @@ const UninitialisedSlabBanner: FC<{
   // Success state — show confirmation and let user dismiss
   if (isSuccess) {
     return (
-      <div className="mb-4 border border-[var(--accent)]/40 bg-[var(--accent)]/[0.06] p-4">
-        <div className="flex items-center gap-2 mb-1">
-          <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />
-          <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--accent)]">
-            SOL Reclaimed ✓
-          </span>
-        </div>
-        <p className="text-[11px] text-[var(--text-secondary)] mb-3">
-          {rentSol} SOL has been returned to your wallet.
-          {txSig && (
-            <>
-              {" "}
-              <a
-                href={explorerTxUrl(txSig)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[var(--accent)]/80 hover:text-[var(--accent)] underline underline-offset-2"
-              >
-                View tx ↗
-              </a>
-            </>
-          )}
-        </p>
-        {onReset ? (
-          <button
-            type="button"
-            onClick={() => {
-              clearStuck();
-              // Notify parent wizard to clear its own persisted state so the user
-              // starts completely fresh (wizard localStorage + form fields reset).
-              onReclaimSuccess?.();
-              onReset();
-              setDismissed(true);
-            }}
-            className="border border-[var(--border)] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors"
-          >
-            START NEW MARKET →
-          </button>
-        ) : (
-          // Without onReset (/my-markets) nothing starts here, so go to /create; the rent
-          // is back, so the record can go, and so can the wizard's saved form from the
-          // failed attempt (as /create's onReclaimSuccess clears it).
-          <Link
-            href="/create"
-            onClick={() => {
-              clearStuck();
-              try {
-                localStorage.removeItem(WIZARD_STORAGE_KEY);
-              } catch {
-                // localStorage unavailable — non-critical
-              }
-            }}
-            className="border border-[var(--border)] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors"
-          >
-            START NEW MARKET →
-          </Link>
-        )}
-      </div>
+      <ReclaimSuccessCard
+        sol={rentSol}
+        txSig={txSig}
+        clearStuck={clearStuck}
+        onReset={onReset}
+        onReclaimSuccess={onReclaimSuccess}
+        onDone={() => setDismissed(true)}
+      />
     );
   }
 
@@ -493,3 +448,72 @@ const UninitialisedSlabBanner: FC<{
     </div>
   );
 };
+
+/** After a reclaim lands (either path): the confirmation, then a way to start over that clears the record. */
+const ReclaimSuccessCard: FC<{
+  sol: string;
+  txSig: string | null;
+  clearStuck: () => void;
+  onReset?: () => void;
+  onReclaimSuccess?: () => void;
+  onDone: () => void;
+}> = ({ sol, txSig, clearStuck, onReset, onReclaimSuccess, onDone }) => (
+  <div className="mb-4 border border-[var(--accent)]/40 bg-[var(--accent)]/[0.06] p-4">
+    <div className="flex items-center gap-2 mb-1">
+      <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />
+      <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--accent)]">
+        SOL Reclaimed ✓
+      </span>
+    </div>
+    <p className="text-[11px] text-[var(--text-secondary)] mb-3">
+      {sol} SOL has been returned to your wallet.
+      {txSig && (
+        <>
+          {" "}
+          <a
+            href={explorerTxUrl(txSig)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[var(--accent)]/80 hover:text-[var(--accent)] underline underline-offset-2"
+          >
+            View tx ↗
+          </a>
+        </>
+      )}
+    </p>
+    {onReset ? (
+      <button
+        type="button"
+        onClick={() => {
+          clearStuck();
+          // Notify parent wizard to clear its own persisted state so the user
+          // starts completely fresh (wizard localStorage + form fields reset).
+          onReclaimSuccess?.();
+          onReset();
+          onDone();
+        }}
+        className="border border-[var(--border)] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors"
+      >
+        START NEW MARKET →
+      </button>
+    ) : (
+      // Without onReset (/my-markets) nothing starts here, so go to /create; the rent
+      // is back, so the record can go, and so can the wizard's saved form from the
+      // failed attempt (as /create's onReclaimSuccess clears it).
+      <Link
+        href="/create"
+        onClick={() => {
+          clearStuck();
+          try {
+            localStorage.removeItem(WIZARD_STORAGE_KEY);
+          } catch {
+            // localStorage unavailable — non-critical
+          }
+        }}
+        className="border border-[var(--border)] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors"
+      >
+        START NEW MARKET →
+      </Link>
+    )}
+  </div>
+);

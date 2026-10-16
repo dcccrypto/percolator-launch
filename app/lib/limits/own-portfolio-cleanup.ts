@@ -44,7 +44,12 @@ export interface OwnCleanupGroup {
   withoutClose: TransactionInstruction[] | null;
 }
 
-export function ownerClosePortfolioIx(programId: PublicKey, owner: PublicKey, market: PublicKey, p: OwnPortfolio): TransactionInstruction {
+export function ownerClosePortfolioIx(
+  programId: PublicKey,
+  owner: PublicKey,
+  market: PublicKey,
+  p: Pick<OwnPortfolio, "key" | "portfolioId" | "matcherSequence" | "positionEpoch">,
+): TransactionInstruction {
   return new TransactionInstruction({
     programId,
     keys: [

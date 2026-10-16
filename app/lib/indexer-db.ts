@@ -135,13 +135,17 @@ export async function queryTrades(
 
 /**
  * Raw trades (price + size + created_at) for a slab in a time window.
- * Used by the /api/candles route to build OHLCV bars in-process.
+ * The /api/candles route no longer uses this (it aggregates in SQL: queryCandlesAggregated); it is
+ * kept as the reference the SQL aggregate is tested against (with bucketCandles).
  */
+/** Row ceiling of one candle query; a result this long may have lost its oldest trades. */
+export const CANDLE_TRADE_ROW_LIMIT = 50_000;
+
 export async function queryTradesForCandles(
   slabAddress: string,
   fromSec: number,
   toSec: number,
-  maxRows = 50_000,
+  maxRows = CANDLE_TRADE_ROW_LIMIT,
 ): Promise<RawCandleRow[]> {
   const sql = getSql();
   const fromIso = new Date(fromSec * 1000).toISOString();
@@ -164,6 +168,127 @@ export async function queryTradesForCandles(
     LIMIT ${maxRows}
   `;
   return rows.reverse();
+}
+
+// ── OHLCV aggregated in SQL (review E3, 2026-10-14) ─────────────────────────
+//
+// /api/candles used to pull up to 50,000 raw trade rows per call (about 3 MB on a busy market) and
+// bucket them in Node. The same buckets are now built in Postgres and only the bars cross the wire
+// (one row per traded bucket). bucketCandles() stays as the reference implementation: the
+// aggregation is tested against it on the same rows (__tests__/lib/candles-sql-aggregate.test.ts).
+
+/** Most bars one aggregated query returns; the NEWEST are kept (like the old row ceiling). */
+export const CANDLE_MAX_BARS = 10_000;
+
+/**
+ * The bucket-aligned window for a request. `firstBucket` is the bucket holding `fromSec`,
+ * `endExclusive` the end of the bucket holding `toSec`: the same buckets the raw path produced,
+ * but each one complete, so the answer depends only on the rounded window (cacheable).
+ */
+export function candleWindow(fromSec: number, toSec: number, bucketSeconds: number): { firstBucket: number; lastBucket: number; endExclusive: number } {
+  const firstBucket = Math.floor(fromSec / bucketSeconds) * bucketSeconds;
+  const lastBucket = Math.floor(toSec / bucketSeconds) * bucketSeconds;
+  return { firstBucket, lastBucket, endExclusive: lastBucket + bucketSeconds };
+}
+
+/**
+ * Params: $1 slab, $2 network, $3 bucket seconds, $4 first bucket (unix s, inclusive),
+ * $5 window end (unix s, exclusive), $6 max bars.
+ *
+ * Mirrors bucketCandles exactly: a row counts only with a positive, finite price and a finite (or
+ * NULL) size; bucket = floor(epoch seconds) floored to the bucket; open/close = first/last price by
+ * (created_at, id); v = sum(|size|). Prices and volume go out as numeric text so the JS side parses
+ * them with the same Number() the raw path used.
+ */
+export const CANDLE_AGG_SQL = `
+SELECT t, o, h, l, c, v FROM (
+  SELECT (floor(extract(epoch FROM created_at))::bigint / $3::bigint) * $3::bigint AS t,
+         ((array_agg(price ORDER BY created_at, id))[1])::text AS o,
+         max(price)::text AS h,
+         min(price)::text AS l,
+         ((array_agg(price ORDER BY created_at DESC, id DESC))[1])::text AS c,
+         coalesce(sum(abs(size)), 0)::text AS v
+    FROM trades
+   WHERE slab_address = $1
+     AND network = $2
+     AND created_at >= to_timestamp($4::bigint)
+     AND created_at <  to_timestamp($5::bigint)
+     AND price IS NOT NULL AND price > 0 AND price < 'Infinity'::numeric
+     AND (size IS NULL OR abs(size) < 'Infinity'::numeric)
+   GROUP BY 1
+   ORDER BY 1 DESC
+   LIMIT $6
+) b ORDER BY t`;
+
+interface AggCandleRow { t: string | number; o: string; h: string; l: string; c: string; v: string }
+
+/** Aggregated rows -> UDF. Pure (exported for the equivalence test). */
+export function aggRowsToUdf(rows: readonly AggCandleRow[]): UdfResponse {
+  if (rows.length === 0) return emptyUdf("no_data");
+  const out: UdfResponse = { s: "ok", t: [], o: [], h: [], l: [], c: [], v: [] };
+  for (const r of rows) {
+    out.t.push(Number(r.t));
+    out.o.push(Number(r.o));
+    out.h.push(Number(r.h));
+    out.l.push(Number(r.l));
+    out.c.push(Number(r.c));
+    out.v.push(Number(r.v));
+  }
+  return out;
+}
+
+/** Minimal client surface (the postgres.js instance, or a test double). */
+export interface CandleSql {
+  unsafe(query: string, params?: unknown[]): PromiseLike<ArrayLike<unknown>> | Promise<ArrayLike<unknown>>;
+}
+
+/**
+ * OHLCV for one slab, aggregated in Postgres. `truncated` = the bar ceiling was hit (the oldest
+ * buckets are missing), which callers treat like the old row ceiling.
+ */
+export async function queryCandlesAggregated(
+  slabAddress: string,
+  bucketSeconds: number,
+  firstBucket: number,
+  endExclusive: number,
+  opts: { maxBars?: number; sql?: CandleSql; network?: string } = {},
+): Promise<{ udf: UdfResponse; truncated: boolean }> {
+  const sql: CandleSql = opts.sql ?? (getSql() as unknown as CandleSql);
+  const maxBars = opts.maxBars ?? CANDLE_MAX_BARS;
+  const rows = Array.from(
+    (await sql.unsafe(CANDLE_AGG_SQL, [
+      slabAddress,
+      opts.network ?? getServerNetwork(),
+      bucketSeconds,
+      firstBucket,
+      endExclusive,
+      maxBars,
+    ])) as ArrayLike<AggCandleRow>,
+  );
+  return { udf: aggRowsToUdf(rows), truncated: rows.length >= maxBars };
+}
+
+/**
+ * The price of the last trade strictly before `beforeSec`, or null when there is none. Seeds
+ * `fillCandleGaps` so a history page that starts between trades opens on the price that was in
+ * force, not on a gap. Uses the same (slab_address, network, created_at DESC) index as above.
+ */
+export async function queryLastTradePriceBefore(slabAddress: string, beforeSec: number): Promise<number | null> {
+  const sql = getSql();
+  const beforeIso = new Date(beforeSec * 1000).toISOString();
+  const rows = await sql<{ price: string | null }[]>`
+    SELECT price::text AS price
+    FROM trades
+    WHERE slab_address = ${slabAddress}
+      AND network = ${getServerNetwork()}
+      AND created_at < ${beforeIso}::timestamptz
+      AND price IS NOT NULL
+      AND price > 0
+    ORDER BY created_at DESC
+    LIMIT 1
+  `;
+  const p = Number(rows[0]?.price);
+  return Number.isFinite(p) && p > 0 ? p : null;
 }
 
 // ── OHLCV bucketing (ported from percolator-api/src/routes/candles.ts) ──────
@@ -237,6 +362,57 @@ export function bucketCandles(
   return out;
 }
 
+/** Cap on bars a filled response may hold (about 3.5 days of 1-minute bars); the newest are kept. */
+export const MAX_FILLED_BARS = 5_000;
+
+/**
+ * Make a last-trade series continuous: every empty bucket between the start and `toSec` gets a
+ * flat bar at the previous close (o = h = l = c = previous close, v = 0). That is what the last
+ * trade price actually did — it stays put until the next trade — and it stops a quiet market's
+ * chart rendering as scattered dashes with gaps. Real (traded) bars are returned unchanged.
+ *
+ * Start: the bucket of `fromSec` when a `seedClose` (last trade before the window) is known,
+ * otherwise the first traded bucket (never invent a price before the first trade). End: the bucket
+ * of `toSec` (callers cap it at now), never earlier than the last real bar. Pure.
+ */
+export function fillCandleGaps(
+  udf: UdfResponse,
+  bucketSeconds: number,
+  opts: { fromSec: number; toSec: number; seedClose: number | null; maxBars?: number },
+): UdfResponse {
+  if (udf.s === "error" || !(bucketSeconds > 0)) return udf;
+  const maxBars = Math.max(1, Math.floor(opts.maxBars ?? MAX_FILLED_BARS));
+  const seed =
+    opts.seedClose != null && Number.isFinite(opts.seedClose) && opts.seedClose > 0 ? opts.seedClose : null;
+  const hasRows = udf.s === "ok" && udf.t.length > 0;
+  if (!hasRows && seed === null) return udf; // nothing traded, nothing known: stay "no_data"
+
+  const bucketOf = (sec: number) => Math.floor(sec / bucketSeconds) * bucketSeconds;
+  const start = seed !== null ? bucketOf(opts.fromSec) : udf.t[0];
+  const lastReal = hasRows ? udf.t[udf.t.length - 1] : start;
+  const end = Math.max(bucketOf(opts.toSec), lastReal);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return udf;
+  const first = Math.max(start, end - (maxBars - 1) * bucketSeconds);
+
+  const indexOf = new Map<number, number>();
+  udf.t.forEach((t, i) => indexOf.set(t, i));
+  let prev = seed;
+  // When the cap trims old buckets, carry the close of the newest real bar before the window.
+  for (let i = 0; i < udf.t.length && udf.t[i] < first; i++) prev = udf.c[i];
+
+  const out: UdfResponse = { s: "ok", t: [], o: [], h: [], l: [], c: [], v: [] };
+  for (let t = first; t <= end; t += bucketSeconds) {
+    const i = indexOf.get(t);
+    if (i !== undefined) {
+      out.t.push(t); out.o.push(udf.o[i]); out.h.push(udf.h[i]); out.l.push(udf.l[i]); out.c.push(udf.c[i]); out.v.push(udf.v[i]);
+      prev = udf.c[i];
+    } else if (prev !== null) {
+      out.t.push(t); out.o.push(prev); out.h.push(prev); out.l.push(prev); out.c.push(prev); out.v.push(0);
+    }
+  }
+  return out.t.length > 0 ? out : udf;
+}
+
 export const RES_TO_SECONDS: Record<string, number> = {
   "1":   60,
   "5":   5 * 60,
@@ -295,7 +471,7 @@ export async function queryStatsAggregate(): Promise<StatsAggregate> {
         0
       )::text                                          AS volume_24h_raw
     FROM trades
-    WHERE network = ${getServerNetwork()}
+    WHERE network = ${getServerNetwork()} AND is_liquidation IS NOT TRUE
   `;
   const row = rows[0];
   return {
@@ -356,6 +532,10 @@ export async function queryLeaderboard(
   const sql = getSql();
 
   let rows: RawLeaderboardRow[];
+  // Liquidation markers (percolator-indexer db/v17_baseline.sql; no longer written since indexer
+  // #203, but the old rows remain) carry trader = a portfolio address and NULL size/price, and
+  // "MUST be excluded" from aggregates: a marker-only group sums to NULL, which sorts first under
+  // DESC and put those addresses on the podium at $0.
   if (period === "24h") {
     rows = await sql<RawLeaderboardRow[]>`
       SELECT
@@ -366,6 +546,7 @@ export async function queryLeaderboard(
       FROM trades
       WHERE created_at >= NOW() - INTERVAL '24 hours'
         AND network = ${getServerNetwork()}
+        AND is_liquidation IS NOT TRUE
         AND NOT (slab_address = ANY(${excludeSlabs}::text[]))
       GROUP BY trader
       ORDER BY SUM(ABS(size::numeric) * price::numeric / 1e6) DESC
@@ -381,6 +562,7 @@ export async function queryLeaderboard(
       FROM trades
       WHERE created_at >= NOW() - INTERVAL '7 days'
         AND network = ${getServerNetwork()}
+        AND is_liquidation IS NOT TRUE
         AND NOT (slab_address = ANY(${excludeSlabs}::text[]))
       GROUP BY trader
       ORDER BY SUM(ABS(size::numeric) * price::numeric / 1e6) DESC
@@ -395,6 +577,7 @@ export async function queryLeaderboard(
         MAX(created_at)           AS last_trade_at
       FROM trades
       WHERE network = ${getServerNetwork()}
+        AND is_liquidation IS NOT TRUE
         AND NOT (slab_address = ANY(${excludeSlabs}::text[]))
       GROUP BY trader
       ORDER BY SUM(ABS(size::numeric) * price::numeric / 1e6) DESC
@@ -584,7 +767,8 @@ export interface TraderTradesPageResult {
 }
 
 /**
- * Paginated trade history for a specific wallet, optionally filtered by slab.
+ * Paginated trade history for a specific wallet, optionally filtered by slab and by side. The side
+ * predicate sits in both the count and the page query, so `total` counts the filtered set.
  */
 export async function queryTraderTradesPage(
   wallet: string,
@@ -592,6 +776,7 @@ export async function queryTraderTradesPage(
   offset: number,
   slabFilter?: string,
   excludeSlabs: string[] = [],
+  side?: "long" | "short",
 ): Promise<TraderTradesPageResult> {
   const sql = getSql();
 
@@ -602,12 +787,14 @@ export async function queryTraderTradesPage(
         WHERE trader = ${wallet} AND slab_address = ${slabFilter}
           AND network = ${getServerNetwork()}
           AND NOT (slab_address = ANY(${excludeSlabs}::text[]))
+          AND (${side ?? null}::text IS NULL OR side = ${side ?? null}::text)
       `
     : await sql<Array<{ cnt: string }>>`
         SELECT COUNT(*)::text AS cnt FROM trades
         WHERE trader = ${wallet}
           AND network = ${getServerNetwork()}
           AND NOT (slab_address = ANY(${excludeSlabs}::text[]))
+          AND (${side ?? null}::text IS NULL OR side = ${side ?? null}::text)
       `;
   const total = Number(countRows[0]?.cnt ?? "0");
 
@@ -632,6 +819,7 @@ export async function queryTraderTradesPage(
         WHERE trader = ${wallet} AND slab_address = ${slabFilter}
           AND network = ${getServerNetwork()}
           AND NOT (slab_address = ANY(${excludeSlabs}::text[]))
+          AND (${side ?? null}::text IS NULL OR side = ${side ?? null}::text)
         ORDER BY created_at DESC
         LIMIT ${limit} OFFSET ${offset}
       `
@@ -643,6 +831,7 @@ export async function queryTraderTradesPage(
         WHERE trader = ${wallet}
           AND network = ${getServerNetwork()}
           AND NOT (slab_address = ANY(${excludeSlabs}::text[]))
+          AND (${side ?? null}::text IS NULL OR side = ${side ?? null}::text)
         ORDER BY created_at DESC
         LIMIT ${limit} OFFSET ${offset}
       `;

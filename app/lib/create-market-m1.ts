@@ -8,7 +8,9 @@
 import { PublicKey, SystemProgram, type TransactionInstruction } from "@solana/web3.js";
 import { createAssociatedTokenAccountInstruction } from "@solana/spl-token";
 import { ACCOUNTS_INIT_MARKET, WELL_KNOWN, buildAccountMetas, buildIx, encodeSetNftProgramId } from "@percolatorct/sdk";
-import { encodeInitMarketData, type GrowthLaunch } from "@/lib/v21/growth-launch";
+import type { GrowthLaunch } from "@/lib/v21/growth-launch";
+import { encodeInitMarketDataWithV22 } from "@/lib/v22/launch-wire";
+import type { V22LaunchParams } from "@/lib/v22/launch-plan";
 import type { InitMarketV17Args } from "@percolatorct/sdk";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
 
@@ -25,6 +27,8 @@ export interface M1Params {
   initArgs: InitMarketV17Args;
   /** Devnet v2.1: the growth block (appends the r_gap / l_launch trailer to InitMarket). Absent = today's bytes. */
   growth?: GrowthLaunch;
+  /** Devnet v2.2: lot / holding fee / price protection ride the growth trailer. Absent = the v2.1 bytes. */
+  v22?: V22LaunchParams;
   /** The keeper-registration memo (UX WP-7), when the market is keeper-priced. */
   memo?: TransactionInstruction | null;
 }
@@ -34,7 +38,7 @@ export function buildM1Instructions(p: M1Params): TransactionInstruction[] {
     SystemProgram.createAccount({ fromPubkey: p.wallet, newAccountPubkey: p.slab, lamports: p.slabRent, space: p.slabSize, programId: p.programId }),
     createAssociatedTokenAccountInstruction(p.wallet, p.vaultAta, p.vaultPda, p.mint),
     // v18 InitMarket takes exactly 3 accounts [admin, slab, mint].
-    buildIx({ programId: p.programId, keys: buildAccountMetas(ACCOUNTS_INIT_MARKET, { admin: p.wallet, slab: p.slab, mint: p.mint }), data: encodeInitMarketData(p.initArgs, p.growth) }),
+    buildIx({ programId: p.programId, keys: buildAccountMetas(ACCOUNTS_INIT_MARKET, { admin: p.wallet, slab: p.slab, mint: p.mint }), data: encodeInitMarketDataWithV22(p.initArgs, p.growth, p.v22) }),
     buildIx({
       programId: p.programId,
       keys: [

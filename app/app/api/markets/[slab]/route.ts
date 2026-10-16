@@ -1,3 +1,5 @@
+import { lotExpOf } from "@/lib/v22/lot";
+import { lotMarketNumbers } from "@/lib/v22/lot-view";
 import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
@@ -7,8 +9,6 @@ import { isBlockedSlab } from "@/lib/blocklist";
 import * as Sentry from "@sentry/nextjs";
 import {
   parseWrapperConfigV17,
-  parseMarketGroupV17OI,
-  isV17Account,
   V17_HEADER_LEN,
 } from "@percolatorct/sdk";
 import { getConfig } from "@/lib/config";
@@ -21,6 +21,8 @@ import { readRegisteredMarkets } from "@/lib/playground-registered-markets";
 import { getMarketLpCapital } from "@/lib/lp-portfolio";
 import { verifyKeeperSignature } from "@/lib/keeper-hmac";
 import { sanitizeLogoUrl } from "@/lib/token-metadata-validators";
+import { parseMarketOI, isWrapperAccount, isUnknownWrapperVersion, unsupportedLayoutBody } from "@/lib/v22/layout";
+import { isMissingColumnError } from "@/lib/supabase-missing-column";
 
 /**
  * GH#2334 follow-up: `vault_balance`/`c_tot` are NULL for every v17 market in
@@ -145,13 +147,18 @@ async function onChainSlabFallback(slab: string): Promise<NextResponse> {
     }
 
     const data = new Uint8Array(info.data);
-    if (!isV17Account(data)) {
+    if (isUnknownWrapperVersion(data)) {
+      return NextResponse.json(unsupportedLayoutBody(null, new DataView(data.buffer, data.byteOffset, data.byteLength).getUint16(8, true)), { status: 422 });
+    }
+    if (!isWrapperAccount(data)) {
       return NextResponse.json({ error: "Market not found" }, { status: 404 });
     }
 
     const cfg = parseWrapperConfigV17(data, V17_HEADER_LEN);
     const markPriceRaw = cfg.markEwmaE6;
-    const markPriceUsd = markPriceRaw > 0n ? Number(markPriceRaw) / 1_000_000 : null;
+    // v2.2 lot market: per-LOT mark and lot-denominated OI -> per-token price and token-scaled OI (identity at lotExp 0).
+    const lotExp = lotExpOf(data);
+    const markPriceUsd = lotMarketNumbers({ markE6: markPriceRaw, oiLongQ: 0n, oiShortQ: 0n }, lotExp).priceUsd;
     // Creator fee claim (tag 90): the accrued balance + the wallet that may claim
     // it (asset 0's asset_admin). Surfaced so My Markets can show creators their
     // claimable fees without a separate on-chain read. Cheap — reuses `data`.
@@ -169,9 +176,10 @@ async function onChainSlabFallback(slab: string): Promise<NextResponse> {
     // v17 enrichment). Degrades to zeros if the parse throws.
     let oiLong = 0, oiShort = 0, insurance = 0;
     try {
-      const oi = parseMarketGroupV17OI(data);
-      oiLong = Number(oi.totalLongOiQ);
-      oiShort = Number(oi.totalShortOiQ);
+      const oi = parseMarketOI(data);
+      const lotNums = lotMarketNumbers({ markE6: markPriceRaw, oiLongQ: oi.totalLongOiQ, oiShortQ: oi.totalShortOiQ }, lotExp);
+      oiLong = lotNums.oiLong;
+      oiShort = lotNums.oiShort;
       insurance = Number(oi.insuranceBalance);
     } catch { /* stats stay zeroed */ }
 
@@ -196,6 +204,8 @@ async function onChainSlabFallback(slab: string): Promise<NextResponse> {
       is_zombie: false,
       last_price: markPriceUsd,
       mark_price: markPriceUsd,
+      // v2.2 lot market only (absent otherwise): tokens per lot = 10^lot_exp. last_price / OI are already per token.
+      ...(lotExp > 0 ? { lot_exp: lotExp } : {}),
       index_price: null,
       // Volume needs the trade-tape indexer — null ("no data"), NOT 0.
       // MarketInfoBar renders null as "—"; a hard $0 reads as "market is dead".
@@ -330,7 +340,7 @@ export async function GET(
         .eq("network", network)
         .maybeSingle();
 
-      if (error && error.message?.includes("network")) {
+      if (isMissingColumnError(error, "network")) {
         Sentry.captureMessage(
           "PERC-8225: markets_with_stats.network column missing in [slab] route — migration not applied. " +
           "Falling back to unfiltered query. Apply 20260329180000_add_network_column.sql to fix.",
@@ -360,16 +370,27 @@ export async function GET(
       // Slug resolution: strip "-PERP" suffix and match symbol case-insensitively
       const slugNorm = slab.toUpperCase().replace(/-PERP$/, "");
 
-      // Fetch all markets and filter in JS to avoid needing ilike + function indexes
+      // Review E5: narrow in SQL to the rows that can match (symbol equal to the slug, with or
+      // without "-PERP", case-insensitive; or the slug's well-known mint), instead of reading every
+      // row on the network; the exact match and the ranking below still run in JS. Only a plain
+      // [A-Z0-9-] slug goes into the PostgREST filter string; anything else keeps the full read.
+      const aliasMintForFilter = SLUG_ALIASES[slugNorm];
+      const sqlNarrowable = /^[A-Z0-9-]{1,10}$/.test(slugNorm) && (!aliasMintForFilter || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(aliasMintForFilter));
+      const slugFilter = [
+        `symbol.ilike.${slugNorm}`,
+        `symbol.ilike.${slugNorm}-PERP`,
+        ...(aliasMintForFilter ? [`mint_address.eq.${aliasMintForFilter}`] : []),
+      ].join(",");
       // PERC-8225: Graceful fallback — if the network column is missing (migration not yet
       // applied), retry without the filter to restore service. Mirrors the pattern in
       // /api/markets/route.ts (PERC-8215).
-      let { data: rows, error } = await supabase
+      const base = supabase
         .from("markets_with_stats")
         .select("*")
         .eq("network", network);
+      let { data: rows, error } = await (sqlNarrowable ? base.or(slugFilter) : base);
 
-      if (error && error.message?.includes("network")) {
+      if (isMissingColumnError(error, "network")) {
         Sentry.captureMessage(
           "PERC-8225: markets_with_stats.network column missing in [slab] slug route — migration not applied. " +
           "Falling back to unfiltered query. Apply 20260329180000_add_network_column.sql to fix.",

@@ -18,6 +18,8 @@ const h = vi.hoisted(() => ({
   priceE6: 100_000_000n as bigint | null,
   market: null as Record<string, unknown> | null,
   insurance: 0n as bigint | null,
+  /** null = v17/v18 (no engine block, the live markets); { vault } = legacy v12. */
+  engine: null as { vault: bigint } | null,
   shared: [] as unknown[],
 }));
 
@@ -49,7 +51,7 @@ vi.mock("@/hooks/useTokenMeta", () => ({ useTokenMeta: () => ({ symbol: "USDC", 
 vi.mock("@/hooks/useLivePrice", () => ({ useLivePrice: () => ({ priceE6: h.priceE6, priceUsd: h.priceE6 === null ? null : Number(h.priceE6) / 1e6 }) }));
 vi.mock("@/hooks/useMarketConfig", () => ({ useMarketConfig: () => null }));
 vi.mock("@/hooks/useMarketInfo", () => ({ useMarketInfo: () => ({ market: h.market }) }));
-vi.mock("@/hooks/useEngineState", () => ({ useEngineState: () => ({ engine: null, insuranceBalance: h.insurance }) }));
+vi.mock("@/hooks/useEngineState", () => ({ useEngineState: () => ({ engine: h.engine, insuranceBalance: h.insurance }) }));
 vi.mock("@/hooks/useMarketFillCap", () => ({ useMarketFillCap: () => ({ maxFillAbs: null }) }));
 vi.mock("@/hooks/useOracleFreshness", () => ({ useOracleFreshness: () => ({ level: "fresh", mode: "keeper", ready: true }) }));
 vi.mock("@/hooks/useEngineFreshness", () => ({ useEngineFreshness: () => ({ engineStale: false }) }));
@@ -87,6 +89,7 @@ beforeEach(() => {
   h.priceE6 = 100_000_000n;
   h.account = acct({});
   h.insurance = 0n;
+  h.engine = null;
   h.shared = [];
   h.market = { symbol: "SOL-PERP", name: "Solana", logo_url: null, mainnet_ca: "So11111111111111111111111111111111111111112", mint_address: DEVNET_MINT };
 });
@@ -114,9 +117,10 @@ describe("PositionsDock -> Share-PnL card data", () => {
     expect(screen.queryByText("Share PnL")).toBeNull();
   });
 
-  it("pool-capped: the dock flags it, and the card built from the same data shows the payable $2.00, not +$5.00", () => {
+  it("pool-capped (legacy v12 engine): the dock flags it, and the card built from the same data shows the payable $2.00, not +$5.00", () => {
     saveEntryPrice("s", 0, 99_875_000n, 4, OWNER.toBase58());
-    h.insurance = 2_000_000n; // pool can pay $2 of the +$5
+    h.engine = { vault: 500_000n };
+    h.insurance = 1_500_000n; // vault + insurance can pay $2 of the +$5
     const { container } = render(<PositionsDock slabAddress="s" />);
     expect(container.textContent ?? "").toContain("$5.00"); // the dock's paper figure...
     expect(document.body.textContent ?? "").toMatch(/Vault \+ insurance can currently pay up to 2/); // ...and its cap caveat
@@ -126,5 +130,20 @@ describe("PositionsDock -> Share-PnL card data", () => {
     render(<PnlShareModal data={d} onClose={() => {}} />);
     expect(screen.getByTestId("pnl-card-amount")).toHaveTextContent("+$2.00");
     expect(screen.getByTestId("pnl-card-capped")).toHaveTextContent("paper +$5.00");
+  });
+
+  // S6: on v17/v18 (every live market) the vault is unknown. The insurance balance alone used to
+  // become the cap, so a +$5 winner on a market with $2 insurance shared "+$2.00 ... capped".
+  it("v17 (no engine block): insurance alone does not cap the PnL; no caveat, the card shows +$5.00", () => {
+    saveEntryPrice("s", 0, 99_875_000n, 4, OWNER.toBase58());
+    h.insurance = 2_000_000n;
+    render(<PositionsDock slabAddress="s" />);
+    expect(document.body.textContent ?? "").not.toMatch(/Vault \+ insurance can currently pay/);
+    const d = lastShared()!;
+    expect(d.payableCapacityAtoms).toBeNull();
+    cleanup();
+    render(<PnlShareModal data={d} onClose={() => {}} />);
+    expect(screen.getByTestId("pnl-card-amount")).toHaveTextContent("+$5.00");
+    expect(screen.queryByTestId("pnl-card-capped")).toBeNull();
   });
 });

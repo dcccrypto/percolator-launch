@@ -252,8 +252,11 @@ export function createPgCandleStore(sql: SqlLike): CandleStore {
       for (const [res, days] of Object.entries(RETENTION_DAYS)) {
         if (days === null) continue;
         const cutoff = Math.floor(nowMs / 1000) - days * 86_400;
-        const out = await sql.unsafe(`DELETE FROM chart_candles WHERE res=$1 AND t < $2 RETURNING 1`, [Number(res), cutoff]);
-        removed += out.length;
+        // No RETURNING (review E5): it streamed one row back per deleted candle just to count them.
+        // postgres.js reports the deleted row count on the result as `count`.
+        const out = await sql.unsafe(`DELETE FROM chart_candles WHERE res=$1 AND t < $2`, [Number(res), cutoff]);
+        const count = (out as { count?: unknown }).count;
+        removed += typeof count === "number" ? count : out.length;
       }
       return removed;
     },

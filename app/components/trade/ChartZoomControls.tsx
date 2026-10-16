@@ -46,13 +46,13 @@ const MagnifierIcon = (): ReactNode => (
 );
 
 const buttonClass =
-  "flex h-6 w-6 items-center justify-center rounded-none transition-colors " +
+  "flex h-6 w-6 pointer-coarse:h-8 pointer-coarse:w-8 items-center justify-center rounded-none transition-colors " +
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)] focus-visible:outline-offset-1 " +
   "text-[var(--text-secondary)] hover:bg-[var(--bg-surface)] hover:text-[var(--text)]";
 
 const toggleButtonClass = (active: boolean): string =>
   [
-    "flex h-6 w-6 items-center justify-center rounded-none transition-colors",
+    "flex h-6 w-6 pointer-coarse:h-8 pointer-coarse:w-8 items-center justify-center rounded-none transition-colors",
     "focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)] focus-visible:outline-offset-1",
     active
       ? "bg-[var(--accent)]/10 text-[var(--accent)]"

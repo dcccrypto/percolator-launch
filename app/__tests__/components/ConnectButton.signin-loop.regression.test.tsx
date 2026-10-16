@@ -33,6 +33,8 @@ vi.mock("@/hooks/usePreferredWallet", async (orig) => ({
   usePreferredWallet: () => ({ preferredAddress: null, setPreferredAddress: mockSetPreferred }),
 }));
 vi.mock("@privy-io/react-auth", () => ({
+  useConnectWallet: () => ({ connectWallet: vi.fn() }),
+  useIdentityToken: () => ({ identityToken: null }),
   usePrivy: () => mockUsePrivy(),
   useLogin: (o: { onComplete?: (a: unknown) => void }) => {
     loginOpts.current = o;
@@ -45,7 +47,15 @@ vi.mock("@privy-io/react-auth/solana", () => ({
 }));
 vi.mock("@/lib/privy-reset", () => ({ resetPrivyConnection: (...a: unknown[]) => mockReset(...a) }));
 
-import { ConnectButtonPrivyInner } from "@/components/wallet/ConnectButtonPrivyInner";
+import { ConnectButtonPrivyInner as PrivyInnerBase } from "@/components/wallet/ConnectButtonPrivyInner";
+import { PrivyStateProvider } from "../helpers/privyBridge";
+
+// Privy reaches the button through the bridge (the real bridge hook over the mocked SDK above).
+const ConnectButtonPrivyInner = () => (
+  <PrivyStateProvider>
+    <PrivyInnerBase />
+  </PrivyStateProvider>
+);
 import { SESSION_DROP_WINDOW_MS } from "@/hooks/useSignInLoopRecovery";
 
 const SIGNED_OUT = { ready: true, authenticated: false, logout: mockLogout, exportWallet: vi.fn(), user: null };
@@ -160,7 +170,7 @@ describe("signed-out Connect loop", () => {
     expect(mockLogin).toHaveBeenCalledTimes(2);
   });
 
-  it("clicking Reset clears the preferred wallet and runs the reset with Privy logout; no login prompt", () => {
+  it("clicking Reset clears the preferred wallet and runs the reset with Privy logout; no login prompt", async () => {
     const { rerender } = render(<ConnectButtonPrivyInner />);
     clickConnect();
     sessionAppears(rerender);
@@ -168,7 +178,12 @@ describe("signed-out Connect loop", () => {
     mockLogin.mockClear();
     fireEvent.click(screen.getByTestId("wallet-reset"));
     expect(mockSetPreferred).toHaveBeenCalledWith(null);
-    expect(mockReset).toHaveBeenCalledWith(mockLogout);
+    // The bridge hands out a stable wrapper over Privy's logout, so check what it DOES: calling the
+    // function the reset received runs Privy's logout.
+    expect(mockReset).toHaveBeenCalledTimes(1);
+    expect(mockLogout).not.toHaveBeenCalled();
+    await mockReset.mock.calls[0][0]();
+    expect(mockLogout).toHaveBeenCalledTimes(1);
     expect(mockLogin).not.toHaveBeenCalled();
   });
 });

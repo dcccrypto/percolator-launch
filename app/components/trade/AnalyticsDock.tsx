@@ -11,6 +11,8 @@ import { useLivePrice } from "@/hooks/useLivePrice";
 import { sanitizeOnChainValue } from "@/lib/health";
 import { formatUsdFromNumber } from "@/lib/format";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { Tooltip } from "@/components/ui/Tooltip";
+import { STAKE_COPY } from "@/lib/stake-copy";
 import { EngineHealthCard } from "@/components/trade/EngineHealthCard";
 import { CrankHealthCard } from "@/components/trade/CrankHealthCard";
 
@@ -132,7 +134,7 @@ const CapitalSection: FC<{ slab: string }> = ({ slab }) => {
         </div>
       </div>
       <p className="mt-1.5 text-[8px] leading-relaxed text-[var(--text-muted)]">
-        Losses fall on the position margin first, then the insurance fund, then the market's liquidity and winning positions. Staked funds help only if an admin flushes them into insurance.
+        Losses fall on the position margin first, then the insurance fund, then the market's liquidity and winning positions. <Tooltip text={STAKE_COPY.waterfallStakeTip}><span className="underline decoration-dotted underline-offset-2">{STAKE_COPY.waterfallStakeNote}</span></Tooltip>
       </p>
     </div>
   );

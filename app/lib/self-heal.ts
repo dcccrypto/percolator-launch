@@ -74,6 +74,8 @@ import { defaultCrankObservations } from "@/lib/v18-wire";
 
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { decodeAssetVaultLp } from "@/lib/limits/decode";
+import { marketOffsets, marketOffsetsOrNull } from "@/lib/v22/market-offsets";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 // ── Wire tags (deployed wrapper decode arms) ─────────────────────────────────
 export const EXPIRE_BACKING_BUCKET_TAG = 89;
 export const FINALIZE_RESET_SIDE_TAG = 45;
@@ -147,24 +149,30 @@ function view(d: Uint8Array): DataView {
  * `readSlot` is the context slot the account was read at.
  */
 export function decodeMarketLiveness(data: Uint8Array, readSlot: bigint): MarketLiveness {
-  const slotsBase = MARKET_GROUP_OFF + MARKET_GROUP_LEN;
-  if (data.length < slotsBase + ASSET_WRAPPER_LEN + SLOT_BACKING[1] + BACKING_BUCKET_LEN) {
+  // VERSION-keyed geometry (flag on; unknown VERSION throws the typed UnknownLayoutError). Flag off: the v2.1 constants.
+  const M = marketOffsets(data, "decodeMarketLiveness");
+  const L = M.layout;
+  const slotsBase = L.marketGroupOff + L.marketGroupLen;
+  const strideLen = L.assetSlotStride;
+  const SLOT_BACKING_X = [M.slotRel(SLOT_BACKING[0]), M.slotRel(SLOT_BACKING[1])] as const;
+  const SLOT_BARRIER_X = [M.slotRel(SLOT_BARRIER[0]), M.slotRel(SLOT_BARRIER[1])] as const;
+  if (data.length < slotsBase + L.wrapperSlotLen + SLOT_BACKING_X[1] + BACKING_BUCKET_LEN) {
     throw new Error(`decodeMarketLiveness: market account too short (${data.length} bytes)`);
   }
   const dv = view(data);
-  const mode = data[MARKET_GROUP_OFF + GROUP_MODE_REL];
-  const headerSlot = dv.getBigUint64(MARKET_GROUP_OFF + GROUP_CURRENT_SLOT_REL, true);
-  const maxMarketSlots = dv.getUint32(MARKET_GROUP_OFF + GROUP_CONFIG_REL + CONFIG_MAX_MARKET_SLOTS_REL, true);
-  const physical = Math.floor((data.length - slotsBase) / MARKET_ASSET_SLOT_LEN);
+  const mode = data[M.g + L.group.mode];
+  const headerSlot = dv.getBigUint64(M.g + L.group.currentSlot, true);
+  const maxMarketSlots = dv.getUint32(M.g + L.group.config + L.group.maxMarketSlotsInConfig, true);
+  const physical = Math.floor((data.length - slotsBase) / strideLen);
   const assets = Math.min(maxMarketSlots, physical);
   const nowSlot = readSlot > headerSlot ? readSlot : headerSlot;
   const buckets: BucketLiveness[] = [];
   const sides: SideLiveness[] = [];
   for (let assetIndex = 0; assetIndex < assets; assetIndex++) {
-    const e = slotsBase + assetIndex * MARKET_ASSET_SLOT_LEN + ASSET_WRAPPER_LEN;
-    if (e + SLOT_BACKING[1] + BACKING_BUCKET_LEN > data.length) break;
+    const e = M.engineOff(assetIndex);
+    if (e + SLOT_BACKING_X[1] + BACKING_BUCKET_LEN > data.length) break;
     for (const s of [0, 1] as const) {
-      const b = e + SLOT_BACKING[s];
+      const b = e + SLOT_BACKING_X[s];
       buckets.push({
         domain: assetIndex * 2 + s,
         status: data[b + BK_STATUS],
@@ -177,7 +185,7 @@ export function decodeMarketLiveness(data: Uint8Array, readSlot: bigint): Market
         storedPos: dv.getBigUint64(e + AS_STORED_POS[s], true),
         stale: dv.getBigUint64(e + AS_STALE[s], true),
         pendingObligations: dv.getBigUint64(e + AS_PENDING_OBL[s], true),
-        pendingDomainLossBarrier: dv.getBigUint64(e + SLOT_BARRIER[s], true),
+        pendingDomainLossBarrier: dv.getBigUint64(e + SLOT_BARRIER_X[s], true),
       });
     }
   }
@@ -340,8 +348,22 @@ const ASSET_SLOT_LAST_REL = 41;
 const CONFIG_MAX_ACCRUAL_DT_REL = 118;
 
 /** Local readers (no SDK constants at import time: this module is loaded by sendTx everywhere). */
+/**
+ * v2.2 QA D-1: the market group is 48 bytes longer on v2.2 (806 vs 758) and `current_slot` moved (661 vs 613), so the
+ * v2.1 constants read other fields there: the catch-up plan saw no lag and never cranked. Flag on, both offsets come
+ * from the account's VERSION (lib/v22/market-offsets.ts); an unknown VERSION plans nothing. Flag off: the constants.
+ */
+function catchUpOffsets(d: Uint8Array): { slotLast: number; currentSlot: number } | null {
+  if (!isDevnetV22Enabled()) {
+    return { slotLast: MARKET_GROUP_OFF + MARKET_GROUP_LEN + ASSET_WRAPPER_LEN + ASSET_SLOT_LAST_REL, currentSlot: MARKET_GROUP_OFF + GROUP_CURRENT_SLOT_REL };
+  }
+  const M = marketOffsetsOrNull(d, "planCatchUp");
+  return M ? { slotLast: M.engineOff(0) + ASSET_SLOT_LAST_REL, currentSlot: M.g + M.layout.group.currentSlot } : null;
+}
 function readSlotLast(d: Uint8Array): bigint | null {
-  const off = MARKET_GROUP_OFF + MARKET_GROUP_LEN + ASSET_WRAPPER_LEN + ASSET_SLOT_LAST_REL;
+  const o = catchUpOffsets(d);
+  if (!o) return null;
+  const off = o.slotLast;
   if (off + 8 > d.length) return null;
   const v = view(d).getBigUint64(off, true);
   return v > 0n ? v : null;
@@ -356,7 +378,8 @@ function readMaxAccrualDt(d: Uint8Array): bigint | null {
 export function planCatchUp(data: Uint8Array, readSlot: bigint, userCu: number): CatchUpPlan {
   const slotLast = readSlotLast(data);
   const dt = readMaxAccrualDt(data);
-  const headerSlot = data.length >= MARKET_GROUP_OFF + GROUP_CURRENT_SLOT_REL + 8 ? view(data).getBigUint64(MARKET_GROUP_OFF + GROUP_CURRENT_SLOT_REL, true) : 0n;
+  const cur = catchUpOffsets(data)?.currentSlot ?? null;
+  const headerSlot = cur !== null && data.length >= cur + 8 ? view(data).getBigUint64(cur, true) : 0n;
   const now = readSlot > headerSlot ? readSlot : headerSlot;
   if (slotLast === null || dt === null || now <= slotLast) return { k: 0, lagSlots: 0n, dtSlots: dt, beyondCap: false };
   const lag = now - slotLast;
@@ -378,6 +401,8 @@ export type SelfHealOutcome =
   | "not-repairable"
   | "repaired"
   | "repair-did-not-help"
+  /** A repaired list that simulates clean but would not fit one 1232-byte packet once signed (set by sendTx, never by planSelfHeal). */
+  | "oversize"
   | "rpc-error";
 
 export interface SelfHealResult {
@@ -415,7 +440,10 @@ export async function planSelfHeal(params: SelfHealParams, deps: SelfHealDeps): 
     const beyondCap = catchUp?.beyondCap === true;
     if (repairs.length === 0 && cranks === 0) return unchanged("no-repair-needed", { catchUpBeyondCap: beyondCap });
 
-    const prefixOrig = computeBudgetPrefix(params.computeUnits);
+    // The verdict on the ORIGINAL tx runs at the maximum: its own limit can be sendTx's 200k default while the caller sizes
+    // the real limit from a later simulation (every v2.2 trade needs 380k+), and an out-of-compute answer here read as
+    // "not-repairable", so the repair / catch-up crank the trade needed was never added (browser E2E 2026-10-16).
+    const prefixOrig = computeBudgetPrefix(MAX_TX_CU);
     const origList = [...prefixOrig, ...params.instructions];
     const orig = await deps.simulate(origList);
     if (!orig.err) return unchanged("user-tx-ok");

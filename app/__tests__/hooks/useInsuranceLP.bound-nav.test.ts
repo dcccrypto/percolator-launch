@@ -3,7 +3,8 @@
  * gate must be fed the program's `bound_vault_nav`, not `shares + feeDistributionTotal`.
  * `state.backingNavAtoms` is what those call sites read.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { renderHook, waitFor } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
 import { useInsuranceLP } from "../../hooks/useInsuranceLP";
@@ -115,6 +116,10 @@ const pot = (principal: bigint, held: bigint, earnings = 0n): DomainState => ({
   ledger: { totalPrincipal: principal, totalEarnings: earnings, totalEarningsWithdrawn: 0n, lastObsBucketEarnings: 0n, cumulativeLoss: 0n, cumulativeRecovery: 0n, lastObsUnavailable: 0n },
 });
 
+// v2.1 account fixtures: decoded by the v2.1 parsers (v2.2 flag off), the convention from 02e50adc.
+beforeEach(() => __setDevnetV22ForTest(false));
+afterEach(() => __setDevnetV22ForTest(null));
+
 describe("useInsuranceLP backing NAV (M-9)", () => {
   const programId = new PublicKey("5BZWY6XWPxuWFxs2nPCLLsVaKRWZVnzZh3FkJDLJBkJf");
   const wallet = new PublicKey("7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU");
@@ -148,6 +153,50 @@ describe("useInsuranceLP backing NAV (M-9)", () => {
     await waitFor(() => expect(result.current.state.registryExists).toBe(true));
     await waitFor(() => expect(result.current.state.backingNavAtoms).toBe(805_000n));
     expect(result.current.state.splitPot).toBeNull();
+  });
+
+  // S10: every live registry is unbound (two-pot). A failed pot read (RPC 429 -> readVaultPotState
+  // null) used to publish the registry's shares + fees as the vault's value with readError false.
+  describe("two-pot vault whose pots can't be read", () => {
+    /** A real-shaped registry: kind 5, length 176, bound flag 0 (unbound, two-pot). */
+    const twoPotRegistry = () => {
+      const d = Buffer.alloc(C.LP_VAULT_REGISTRY_ACCOUNT_LEN);
+      d[C.HEADER_KIND_OFF] = C.KIND_LP_VAULT_REGISTRY;
+      d[C.REG_VAULT_LP_BOUND_FLAG] = 0;
+      return { data: d, executable: false, lamports: 1, owner: programId };
+    };
+    const healthy = () => ({ bound: false, own: pot(500_000n, 500_000n), sib: pot(200_000n, 200_000n), feeShareBps: 1_000, ownDomain: 0, totalShares: 1_000_000n, ownLedger: programId, sibLedger: programId });
+
+    it("a failed pot read after a good load keeps the last good figures and flags readError", async () => {
+      connection.getAccountInfo.mockResolvedValue(twoPotRegistry());
+      vp.state = healthy();
+      const { result } = renderHook(() => useInsuranceLP());
+      await waitFor(() => expect(result.current.state.splitPot).not.toBeNull());
+      const good = result.current.state.vaultTotalAtoms;
+      expect(good).toBeLessThan(1_000_000n); // the pots hold far less than the 1,000,000 shares
+      vp.state = null;
+      await result.current.refreshState();
+      await waitFor(() => expect(result.current.readError).toBe(true));
+      expect(result.current.state.vaultTotalAtoms).toBe(good);
+      expect(result.current.state.splitPot).not.toBeNull(); // the withdraw form still prices from the last NAV
+    });
+
+    it("a failed pot read on the first load publishes nothing (not shares + fees)", async () => {
+      connection.getAccountInfo.mockResolvedValue(twoPotRegistry());
+      vp.state = null;
+      const { result } = renderHook(() => useInsuranceLP());
+      await waitFor(() => expect(result.current.readError).toBe(true));
+      expect(result.current.state.registryExists).toBe(false);
+      expect(result.current.state.vaultTotalAtoms).not.toBe(1_000_000n);
+    });
+
+    it("CONTROL: a legacy registry (not two-pot) keeps its shares + fees fallback", async () => {
+      vp.state = null; // the default 82-byte registry doesn't decode as two-pot
+      const { result } = renderHook(() => useInsuranceLP());
+      await waitFor(() => expect(result.current.state.registryExists).toBe(true));
+      expect(result.current.state.vaultTotalAtoms).toBe(1_000_000n);
+      expect(result.current.readError).toBe(false);
+    });
   });
 
   it("a two-pot vault keeps its combined NAV as the backing NAV", async () => {

@@ -78,7 +78,7 @@ export const Footer: FC = () => {
               href="https://github.com/dcccrypto/percolator-launch"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex h-7 w-7 items-center justify-center rounded-sm border border-[var(--border)] text-[var(--text-muted)] transition-all hover:border-[var(--border-hover)] hover:text-[var(--text)] hover:bg-[var(--bg-elevated)]"
+              className="flex h-7 w-7 pointer-coarse:h-8 pointer-coarse:w-8 items-center justify-center rounded-sm border border-[var(--border)] text-[var(--text-muted)] transition-all hover:border-[var(--border-hover)] hover:text-[var(--text)] hover:bg-[var(--bg-elevated)]"
               title="GitHub"
               aria-label="Percolator on GitHub"
             >
@@ -90,7 +90,7 @@ export const Footer: FC = () => {
               href="https://x.com/PercolatorTrade"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex h-7 w-7 items-center justify-center rounded-sm border border-[var(--border)] text-[var(--text-muted)] transition-all hover:border-[var(--border-hover)] hover:text-[var(--text)] hover:bg-[var(--bg-elevated)]"
+              className="flex h-7 w-7 pointer-coarse:h-8 pointer-coarse:w-8 items-center justify-center rounded-sm border border-[var(--border)] text-[var(--text-muted)] transition-all hover:border-[var(--border-hover)] hover:text-[var(--text)] hover:bg-[var(--bg-elevated)]"
               title="X / Twitter"
               aria-label="Percolator on X (Twitter)"
             >
@@ -102,7 +102,7 @@ export const Footer: FC = () => {
               href="https://discord.gg/fJa4BDBxPN"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex h-7 w-7 items-center justify-center rounded-sm border border-[var(--border)] text-[var(--text-muted)] transition-all hover:border-[#5865F2]/40 hover:text-[#5865F2] hover:bg-[#5865F2]/[0.06]"
+              className="flex h-7 w-7 pointer-coarse:h-8 pointer-coarse:w-8 items-center justify-center rounded-sm border border-[var(--border)] text-[var(--text-muted)] transition-all hover:border-[#5865F2]/40 hover:text-[#5865F2] hover:bg-[#5865F2]/[0.06]"
               title="Discord"
               aria-label="Percolator on Discord"
             >
@@ -114,7 +114,7 @@ export const Footer: FC = () => {
               href="https://t.me/+fFHf5lGRAbk4OGEx"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex h-7 w-7 items-center justify-center rounded-sm border border-[var(--border)] text-[var(--text-muted)] transition-all hover:border-[#229ED9]/40 hover:text-[#229ED9] hover:bg-[#229ED9]/[0.06]"
+              className="flex h-7 w-7 pointer-coarse:h-8 pointer-coarse:w-8 items-center justify-center rounded-sm border border-[var(--border)] text-[var(--text-muted)] transition-all hover:border-[#229ED9]/40 hover:text-[#229ED9] hover:bg-[#229ED9]/[0.06]"
               title="Telegram"
               aria-label="Percolator on Telegram"
             >
@@ -125,7 +125,7 @@ export const Footer: FC = () => {
             <span className="h-3 w-px bg-[var(--border)]" />
             <Link
               href="/developers"
-              className="flex items-center gap-1 transition-colors hover:text-[var(--accent)]"
+              className="flex items-center gap-1 pointer-coarse:min-h-8 transition-colors hover:text-[var(--accent)]"
             >
               developers
             </Link>

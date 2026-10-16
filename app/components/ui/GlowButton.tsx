@@ -1,12 +1,16 @@
 "use client";
 
-import { type ReactNode, type ButtonHTMLAttributes } from "react";
+import { type ReactNode, type ButtonHTMLAttributes, type AnchorHTMLAttributes } from "react";
+import Link from "next/link";
 
 interface GlowButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children: ReactNode;
   variant?: "primary" | "secondary" | "ghost";
   size?: "sm" | "md" | "lg";
   asChild?: boolean;
+  /** Render as a link with the button's look. Use this instead of wrapping a GlowButton in a
+   *  <Link>: a button inside a link is two tab stops and invalid nested interactive content. */
+  href?: string;
 }
 
 export function GlowButton({
@@ -14,6 +18,7 @@ export function GlowButton({
   variant = "primary",
   size = "md",
   className = "",
+  href,
   ...props
 }: GlowButtonProps) {
   const sizeClasses = {
@@ -41,19 +46,33 @@ export function GlowButton({
     ].join(" "),
   };
 
+  const classes = [
+    "inline-flex items-center justify-center rounded-sm",
+    "transition-all duration-200",
+    "focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/20 focus:ring-offset-2 focus:ring-offset-[var(--bg)]",
+    "disabled:opacity-40 disabled:pointer-events-none",
+    sizeClasses[size],
+    variantClasses[variant],
+    className,
+  ].join(" ");
+
+  if (href !== undefined) {
+    return (
+      // w-fit: a flex-column parent would otherwise stretch the link (the old <Link> wrapper
+      // stretched instead, invisibly). max-md:min-h: globals.css gives <button>s a 44px tap height on
+      // phones; links aren't covered by that rule.
+      <Link
+        href={href}
+        className={`w-fit max-md:min-h-[44px] ${classes}`}
+        {...(props as AnchorHTMLAttributes<HTMLAnchorElement>)}
+      >
+        {children}
+      </Link>
+    );
+  }
+
   return (
-    <button
-      className={[
-        "inline-flex items-center justify-center rounded-sm",
-        "transition-all duration-200",
-        "focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/20 focus:ring-offset-2 focus:ring-offset-[var(--bg)]",
-        "disabled:opacity-40 disabled:pointer-events-none",
-        sizeClasses[size],
-        variantClasses[variant],
-        className,
-      ].join(" ")}
-      {...props}
-    >
+    <button className={classes} {...props}>
       {children}
     </button>
   );

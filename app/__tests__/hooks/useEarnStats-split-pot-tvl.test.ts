@@ -7,25 +7,36 @@
 import { PublicKey } from "@solana/web3.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const sdk = vi.hoisted(() => ({ parseThrows: false }));
 const mocks = vi.hoisted(() => ({
   chunked: vi.fn(),
   ledgerKeys: vi.fn(),
   fromAccounts: vi.fn(),
+  upgrade: vi.fn(),
 }));
 
 vi.mock("@/lib/config", () => ({
   getConfig: () => ({ programId: "ETDLAdiAyWnEUngspYczTXUceT6X8f92eZQvr8nmSkWB" }),
   getRpcEndpoint: () => "http://localhost:8899",
 }));
+vi.mock("@/lib/program-upgrade-detect", () => ({
+  programUpgradeState: mocks.upgrade,
+  // The real helper: "post" -> true, anything else ("unknown" included) -> false.
+  earnNavFloorLive: async () => (await mocks.upgrade()) === "post",
+}));
 vi.mock("@/lib/rpc-chunk", () => ({ getMultipleAccountsInfoChunked: mocks.chunked }));
 vi.mock("@percolatorct/sdk", async (orig) => ({
   ...(await orig<typeof import("@percolatorct/sdk")>()),
-  parseLpVaultRegistry: () => ({ totalLpSharesOutstanding: 2_000_000_000n, feeDistributionTotalAtoms: 350_000n, redemptionCooldownSlots: 150n }),
+  parseLpVaultRegistry: () => {
+    if (sdk.parseThrows) throw new Error("layout");
+    return { totalLpSharesOutstanding: 2_000_000_000n, feeDistributionTotalAtoms: 350_000n, redemptionCooldownSlots: 150n };
+  },
 }));
 vi.mock("@/lib/limits/earn-split-pot", () => ({
   splitPotLedgerKeys: mocks.ledgerKeys,
   splitPotStateFromAccounts: mocks.fromAccounts,
-  vaultValue: (sp: { own: { nav: bigint }; sib: { nav: bigint } }) => ({ nav: sp.own.nav + sp.sib.nav, available: 0n }),
+  vaultValue: (sp: { own: { nav: bigint }; sib: { nav: bigint }; unpriceable?: boolean }) =>
+    sp.unpriceable ? null : { nav: sp.own.nav + sp.sib.nav, available: 0n },
 }));
 
 import { fetchCuratedVaultsOnChain } from "@/hooks/useEarnStats";
@@ -40,6 +51,8 @@ describe("fetchCuratedVaultsOnChain: two-pot vaults are valued at NAV", () => {
     mocks.chunked.mockReset();
     mocks.ledgerKeys.mockReset();
     mocks.fromAccounts.mockReset();
+    mocks.upgrade.mockReset().mockResolvedValue("post");
+    sdk.parseThrows = false;
     mocks.chunked.mockResolvedValueOnce([acct]).mockResolvedValueOnce([acct, acct, acct]);
   });
 
@@ -60,11 +73,35 @@ describe("fetchCuratedVaultsOnChain: two-pot vaults are valued at NAV", () => {
     expect(mocks.chunked).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps shares + fees when the two-pot state cannot be read", async () => {
+  it.each([
+    ["two-pot state can't be read", () => mocks.fromAccounts.mockReturnValue(null)],
+    ["state reads but can't be priced (both pots under water, pre-floor)", () =>
+      mocks.fromAccounts.mockReturnValue({ own: { nav: 1n }, sib: { nav: 1n }, feeShareBps: 0, totalShares: 2_000_000_000n, unpriceable: true })],
+  ])("a vault whose %s is marked unvalued at 0, never shares + fees; the cycle still succeeds", async (_n, setup) => {
     mocks.ledgerKeys.mockReturnValue(ledgers);
-    mocks.fromAccounts.mockReturnValue(null);
-    const { data } = await fetchCuratedVaultsOnChain([SLAB]);
-    expect(data[SLAB].tvlAtoms).toBe(SHARES_PLUS_FEES);
+    setup();
+    const { data, ok } = await fetchCuratedVaultsOnChain([SLAB]);
+    expect(ok).toBe(true);
+    expect(data[SLAB]).toMatchObject({ tvlAtoms: 0n, unvalued: true, found: true });
+    expect(data[SLAB].tvlAtoms).not.toBe(SHARES_PLUS_FEES);
+  });
+
+  it("a registry account that doesn't decode is a vault of unknown value (unvalued), not 'no vault' at $0", async () => {
+    sdk.parseThrows = true;
+    mocks.ledgerKeys.mockReturnValue(ledgers);
+    const { data, ok } = await fetchCuratedVaultsOnChain([SLAB]);
+    expect(ok).toBe(true);
+    expect(data[SLAB]).toMatchObject({ tvlAtoms: 0n, found: true, unvalued: true });
+    expect(mocks.chunked).toHaveBeenCalledTimes(1); // not sent on to the two-pot read
+  });
+
+  it("no shares outstanding: the vault adds 0, not its lifetime fees (and isn't flagged unvalued)", async () => {
+    mocks.ledgerKeys.mockReturnValue(ledgers);
+    mocks.fromAccounts.mockReturnValue({ own: { nav: 350_000n }, sib: { nav: 0n }, feeShareBps: 0, totalShares: 0n });
+    const { data, ok } = await fetchCuratedVaultsOnChain([SLAB]);
+    expect(ok).toBe(true);
+    expect(data[SLAB].tvlAtoms).toBe(0n);
+    expect(data[SLAB].unvalued).toBeUndefined();
   });
 
   it("a failed two-pot read fails the cycle (keep-last-good), not a silent shares + fees", async () => {
@@ -73,5 +110,37 @@ describe("fetchCuratedVaultsOnChain: two-pot vaults are valued at NAV", () => {
     mocks.ledgerKeys.mockReturnValue(ledgers);
     const { ok } = await fetchCuratedVaultsOnChain([SLAB]);
     expect(ok).toBe(false);
+  });
+
+  it("the wrapper version can't be read and the floor changes this vault's value: fails the cycle", async () => {
+    mocks.ledgerKeys.mockReturnValue(ledgers);
+    // An over-impaired pot: unpriceable without the floor (-> shares + fees), worth 4.5 with it.
+    mocks.fromAccounts.mockImplementation((...a: unknown[]) =>
+      a[6] ? { own: { nav: 4_500_000n }, sib: { nav: 0n }, feeShareBps: 0, totalShares: 2_000_000_000n } : null,
+    );
+    mocks.upgrade.mockResolvedValue("unknown");
+    const { ok } = await fetchCuratedVaultsOnChain([SLAB]);
+    expect(ok).toBe(false);
+  });
+
+  it("the wrapper version can't be read but the floor doesn't matter for this vault: priced as usual", async () => {
+    mocks.ledgerKeys.mockReturnValue(ledgers);
+    mocks.fromAccounts.mockReturnValue({ own: { nav: 400_000_000n }, sib: { nav: 87_740_000n }, feeShareBps: 0, totalShares: 2_000_000_000n });
+    mocks.upgrade.mockResolvedValue("unknown");
+    const { data, ok } = await fetchCuratedVaultsOnChain([SLAB]);
+    expect(ok).toBe(true);
+    expect(data[SLAB].tvlAtoms).toBe(487_740_000n);
+  });
+
+  it("passes the NAV floor on (post-upgrade wrapper) and off (pre-upgrade)", async () => {
+    mocks.ledgerKeys.mockReturnValue(ledgers);
+    mocks.fromAccounts.mockReturnValue(null);
+    await fetchCuratedVaultsOnChain([SLAB]);
+    expect(mocks.fromAccounts.mock.calls[0][6]).toBe(true);
+    mocks.chunked.mockResolvedValueOnce([acct]).mockResolvedValueOnce([acct, acct, acct]);
+    mocks.upgrade.mockResolvedValue("pre");
+    const { ok } = await fetchCuratedVaultsOnChain([SLAB]);
+    expect(ok).toBe(true);
+    expect(mocks.fromAccounts.mock.calls[1][6]).toBe(false);
   });
 });

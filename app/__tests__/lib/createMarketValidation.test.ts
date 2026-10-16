@@ -15,7 +15,7 @@ function validForm(overrides: Partial<CreateFormValues> = {}): CreateFormValues 
     initialMarginBps: 1000,
     lpCollateral: "100",
     insuranceAmount: "10",
-    // LP 100 + insurance 10 + counterparty backing 2x100 = 310 required.
+    // LP 100 + insurance 10 + trader payout reserve 2x100 = 310 required.
     // (Backing was added to the check on 2026-08-02; it was previously
     // omitted, so this fixture only needed 110.)
     tokenBalance: 400_000_000_000n, // 400 SOL

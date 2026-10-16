@@ -26,6 +26,7 @@
  * NEXT_PUBLIC_SOLANA_NETWORK) === "devnet" is accepted; all other values (mainnet,
  * staging, unset) return 403 (GH#1950).
  */
+import { marketAccountLen } from "@/lib/v22/layout";
 import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -59,9 +60,10 @@ import {
   MATCHER_CONTEXT_LEN,
   MAX_BACKING_BUCKET_EXPIRY_SLOT,
   v17MarketAccountLen,
-  V17_PORTFOLIO_ACCOUNT_LEN,
   type SlabTierKey,
 } from "@percolatorct/sdk";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { portfolioAccountLen } from "@/lib/v22/layout";
 import { getConfig } from "@/lib/config";
 import { getServerConnection } from "@/lib/server-rpc";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
@@ -72,6 +74,7 @@ import {
 } from "@/lib/create-market-rate-limit";
 import * as Sentry from "@sentry/nextjs";
 import { deriveMarketParams, leverageFromMarginBps } from "@/lib/market-params";
+import { LAUNCH_ASSET_SLOTS, initialAssetGenerationFrontier } from "@/lib/create-market-args";
 import { buildInitMatcherCtxArgs } from "@/lib/matcher-params";
 import {
   buildMobileFundingIxs,
@@ -99,6 +102,8 @@ interface MobileCreateMarketBody {
   tier?: SlabTierKey;
   /** Human-readable market name. */
   name?: string;
+  /** Token symbol (<= 20 chars). v2.2 only: the Earn share token's ticker derives from it (tag 122); absent = the generic share name. */
+  symbol?: string;
   /** Oracle mode. Only "admin" is implemented — "hyperp"/"pyth" are rejected (GH#1989). */
   oracle_mode?: string;
   /** DEX pool address (base58). Reserved for future hyperp mode; currently unused. */
@@ -151,6 +156,7 @@ export async function POST(req: NextRequest) {
       mint,
       tier = "small",
       name: rawName = "Mobile Market",
+      symbol,
       oracle_mode = "admin",
       initial_price_e6 = "1000000",
     } = body;
@@ -162,6 +168,10 @@ export async function POST(req: NextRequest) {
         { error: "name must be 64 characters or fewer" },
         { status: 400 },
       );
+    }
+
+    if (symbol !== undefined && (typeof symbol !== "string" || symbol.length > 20)) {
+      return NextResponse.json({ error: "symbol must be a string of 20 characters or fewer" }, { status: 400 });
     }
 
     // ── Input validation ─────────────────────────────────────────────────────
@@ -236,7 +246,11 @@ export async function POST(req: NextRequest) {
     // those fail InitMarket's (len-592-758)%1797==0 check and revert; 592 = header+config after the
     // 576-byte fee-split config). `tier` still selects the program ID above; the slab account length
     // is computed from the asset-slot capacity via the SDK's v17MarketAccountLen (SDK-derived offsets).
-    const slabDataSize = v17MarketAccountLen(14);
+    // ONE slot capacity feeds all three places that must agree: the account length (here), InitMarket's
+    // maxPortfolioAssets, and SetMatcherConfig's frontier (slots + 1). Same count the wizard launches with.
+    const assetSlots = LAUNCH_ASSET_SLOTS;
+    // Layout-aware: v2.2 (flag on) sizes by the v2.2 stride; flag off this is exactly v17MarketAccountLen(assetSlots).
+    const slabDataSize = isDevnetV22Enabled() ? marketAccountLen(assetSlots) : v17MarketAccountLen(assetSlots);
 
     // Default margin/leverage params — conservative for new markets
     const initialMarginBps = 2000n; // 50% margin = 5× leverage
@@ -320,7 +334,7 @@ export async function POST(req: NextRequest) {
     );
 
     const v17InitArgs: InitMarketV17Args = {
-      maxPortfolioAssets: 14,
+      maxPortfolioAssets: assetSlots,
       hMin: "100",
       hMax: "86400",
       initialPrice: priceE6.toString(),
@@ -392,7 +406,7 @@ export async function POST(req: NextRequest) {
     // ═══════════════════════════════════════════════════════════════════════════
     // Full portfolio length (9347): InitPortfolio reallocs up to it and adds no lamports, so an
     // undersized createAccount leaves the account below rent-exempt → InsufficientFundsForRent.
-    const portfolioRent = await connection.getMinimumBalanceForRentExemption(V17_PORTFOLIO_ACCOUNT_LEN);
+    const portfolioRent = await connection.getMinimumBalanceForRentExemption(portfolioAccountLen());
 
   const createPortfolioIx = SystemProgram.createAccountWithSeed({
     fromPubkey: deployerPk,
@@ -400,7 +414,7 @@ export async function POST(req: NextRequest) {
     seed: lpPortfolioSeed,
     newAccountPubkey: lpPortfolioPk,
       lamports: portfolioRent,
-      space: V17_PORTFOLIO_ACCOUNT_LEN,
+      space: portfolioAccountLen(),
       programId,
     });
     const initPortfolioIx = buildIx({
@@ -459,12 +473,12 @@ export async function POST(req: NextRequest) {
         matcherDelegate: delegatePk,
       }),
       // v18 fresh-market: LP is the first portfolio (portfolioId 1), matcher-seq 0
-      // (InitUser just ran in TX1). assetGenerationFrontier = maxPortfolioAssets(14)
-      // + 1 = 15; tradeFeeCapBps 10000 = no practical cap; expirySlot born-immortal.
+      // (InitUser just ran in TX1). assetGenerationFrontier = maxPortfolioAssets + 1
+      // (initialAssetGenerationFrontier); tradeFeeCapBps 10000 = no practical cap; expirySlot born-immortal.
       data: encodeSetMatcherConfig({
         portfolioId: 1n,
         expectedSequence: 0n,
-        assetGenerationFrontier: 15n,
+        assetGenerationFrontier: initialAssetGenerationFrontier(assetSlots),
         enabled: 1,
         tradeFeeCapBps: 10_000,
         expirySlot: MAX_BACKING_BUCKET_EXPIRY_SLOT,
@@ -521,6 +535,8 @@ export async function POST(req: NextRequest) {
       deployer: deployerPk,
       userAta,
       vaultAta,
+      collateralMint: mintPk, // v2.2 only: tag 74's account [6]
+      shareSymbol: typeof symbol === "string" ? symbol : null, // v2.2 only: the share token's ticker (tag 122)
     });
 
     const tx3 = new Transaction({ recentBlockhash: blockhash, feePayer: deployerPk });

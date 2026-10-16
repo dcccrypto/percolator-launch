@@ -5,6 +5,7 @@ import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useMarketDiscovery } from "@/hooks/useMarketDiscovery";
 import { useAdminActions } from "@/hooks/useAdminActions";
 import type { DiscoveredMarket } from "@percolatorct/sdk";
+import { fetchMarketsList, listedMarketRows } from "@/lib/markets-list-client";
 
 // ─── Style tokens ──────────────────────────────────────────────────────────────
 const card = "rounded-none bg-[var(--panel-bg)] border border-[var(--border)]";
@@ -212,14 +213,11 @@ export function OracleFreshnessSection() {
     setLoadingFetch(true);
     setError(null);
     try {
-      const res = await fetch("/api/markets");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: unknown = await res.json();
-      const raw: unknown[] = Array.isArray(data)
-        ? data
-        : Array.isArray((data as { markets?: unknown[] }).markets)
-        ? (data as { markets: unknown[] }).markets
-        : [];
+      // The canonical list (lib/markets-list-client.ts); listedMarketRows() is what the bare
+      // /api/markets returned (zombies excluded: their mark_price is nulled, so they would all
+      // read as "stale" here).
+      const data = await fetchMarketsList();
+      const raw: unknown[] = listedMarketRows(data) ?? [];
 
       // Filter: has oracle_authority (admin-mode) AND no mark_price
       const stale = (raw as StaleMarket[])

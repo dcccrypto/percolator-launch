@@ -5,6 +5,7 @@ import { toE6 } from "@/lib/format";
 import { createUpstashRateLimiter } from "@/lib/upstash-rate-limit";
 import { hasIndexerDb, queryTraderStatsAggregate } from "@/lib/indexer-db";
 import { getRetiredSlabs } from "@/lib/retired-slabs";
+import { isMissingColumnError } from "@/lib/supabase-missing-column";
 
 /**
  * GET /api/trader/:wallet/stats
@@ -174,7 +175,7 @@ export async function GET(
       .order("created_at", { ascending: true })
       .limit(SUPABASE_ROW_CAP);
 
-    if (error && error.message?.includes("network")) {
+    if (isMissingColumnError(error, "network")) {
       let fallbackQuery = supabase
         .from("trades")
         .select("side, size, price, fee, slab_address, created_at")

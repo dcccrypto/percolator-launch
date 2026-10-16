@@ -26,6 +26,7 @@ export function readPoolTotalLpSupply(poolData: Uint8Array): bigint | null {
   return view.getBigUint64(POOL_TOTAL_LP_SUPPLY_OFFSET, true);
 }
 
+// TODO(R-1): tranche pools need per-sub-pool valuation with dead floors (_reserved[61]); unreachable while stake-junior UI is hidden (security-review-v22-stake-last-junior §F).
 /** floor(lp * vault / supply) in collateral atoms; null when there is no supply to value against. */
 export function stakeValueAtoms(lpRaw: bigint, totalLpSupplyRaw: bigint, vaultAtoms: bigint): bigint | null {
   if (totalLpSupplyRaw <= 0n) return null;

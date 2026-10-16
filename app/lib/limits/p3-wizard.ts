@@ -17,6 +17,7 @@
  * (C = the Earn seed NAV, all harvestable fees 0 on a fresh market), so the first-loss cushion
  * is at its floor from the first Earn deposit on. Pure.
  */
+import type { TierConfig } from "@/lib/v22/sdk/records/growth-v19";
 import { PublicKey, SystemProgram, type TransactionInstruction } from "@solana/web3.js";
 import { BPS, CANONICAL_VAULT_LP_MATCHER_PROGRAM_DEVNET, VAULT_LP_MATCHER_CTX_LEN, VAULT_LP_MAX_JUNIOR_FLOOR_BPS, VAULT_LP_MIN_JUNIOR_FLOOR_BPS } from "./constants";
 import { buildDepositJuniorTrancheIx, buildInitVaultLpIx, type VaultLpMarket } from "./p3-ix";
@@ -70,7 +71,7 @@ export function buildP3BindIxs(p: {
   creatorAta: PublicKey;
   vaultToken: PublicKey;
   /** Devnet v2.1: the growth block; the bind (94) then carries l_launch. Absent = today's bind. */
-  growth?: { lLaunchX100: number };
+  growth?: { lLaunchX100: number; tiers?: TierConfig; lTierX100?: number };
 }): TransactionInstruction[] {
   if (!p.market.lpPortfolio.equals(p.vaultLpPortfolio)) throw new Error("market.lpPortfolio must be the new vault LP portfolio");
   return [

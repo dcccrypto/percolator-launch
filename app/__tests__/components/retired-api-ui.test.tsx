@@ -7,6 +7,10 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, waitFor } from "@testing-library/react";
+import { beforeEach as v22PinBefore, afterEach as v22PinAfter } from "vitest";
+// v2.2 flag pinned OFF: the v2.2 preview has no registry and does not ask for funding/global (v22-no-backend-requests-rt5.test.tsx).
+v22PinBefore(() => { vi.stubEnv("NEXT_PUBLIC_DEVNET_V22", "0"); }); // env, not the test seam: these tests reset modules
+v22PinAfter(() => { vi.unstubAllEnvs(); });
 
 const ws = vi.hoisted(() => ({ urls: [] as string[] }));
 vi.mock("@/lib/priceStore/wsManager", () => ({

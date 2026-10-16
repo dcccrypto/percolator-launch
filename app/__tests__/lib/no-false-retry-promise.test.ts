@@ -34,7 +34,7 @@ describe("no automatic-retry promise where nothing retries", () => {
   it("an Earn deposit refused EngineStale does not talk about a trade", () => {
     const u = resolveUserMessage(refusal(W.EngineStale), { surface: "earn-deposit" });
     expect(u.body).not.toMatch(/trade/i);
-    expect(u.body).toMatch(/Try again in a moment/);
+    expect(u.body).toBe("The price is still catching up after a big move. This usually takes a few minutes; try again then.");
   });
 
   it("the trade ticket keeps its promise (it waits through the refusal and resends)", () => {

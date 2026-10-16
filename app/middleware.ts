@@ -637,7 +637,10 @@ function addSecurityHeaders(response: NextResponse, nonce?: string) {
     // arbitrary Vercel-hosted content in iframes. frame-src controls outbound iframe embedding.
     // challenges.cloudflare.com is the iframe origin the Turnstile widget
     // renders into — distinct from the api.js script-src entry above.
-    "frame-src 'self' https://privy.percolator.trade https://auth.privy.io https://embedded-wallets.privy.io https://*.privy.systems https://phantom.app https://solflare.com https://verify.walletconnect.com https://verify.walletconnect.org https://challenges.cloudflare.com",
+    // SOL-3 / S-2 (v2.2 QA 2026-10-11): Solflare's connect/sign iframe is served from
+    // connect.solflare.com (not solflare.com); without it Chrome blocks the frame and shows a
+    // full-page "This content is blocked" overlay that eats clicks after every wallet action.
+    "frame-src 'self' https://privy.percolator.trade https://auth.privy.io https://embedded-wallets.privy.io https://*.privy.systems https://phantom.app https://solflare.com https://connect.solflare.com https://verify.walletconnect.com https://verify.walletconnect.org https://challenges.cloudflare.com",
     // Removed https://*.vercel.app wildcard (issue #632) — any Vercel project could embed the app,
     // creating a clickjacking surface over wallet/sign flows. Keep only the specific preview URL.
     "frame-ancestors 'self' https://percolatorlaunch.com https://*.percolatorlaunch.com https://percolator-launch.vercel.app",

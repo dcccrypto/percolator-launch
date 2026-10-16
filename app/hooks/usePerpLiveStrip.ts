@@ -14,9 +14,12 @@ export function usePerpLiveStrip(slab: string, series: PerpSeries): { price: num
   const [lastAt, setLastAt] = useState<number | null>(null);
   const [, setBeat] = useState(0);
 
+  // Live/offline is the market's feed, not the series: only a market switch clears it. A series switch
+  // clears the price alone (the Mark price under an "Oracle" label would be wrong; "—" until a tick is not).
+  useEffect(() => setLastAt(null), [slab]);
+
   useEffect(() => {
     setPrice(null);
-    setLastAt(null);
     const client = getLiveClient();
     if (!client) return;
     return client.subscribe(slab, {

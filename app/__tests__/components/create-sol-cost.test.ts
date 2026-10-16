@@ -16,14 +16,19 @@ const rpcRent = (bytes: number) => ((bytes + 128) * 5080) / 1e9;
 
 describe("computeCreateMarketSolCost", () => {
   it("matches the RPC rent-exempt minimum for the market account", () => {
-    expect(DEFAULT_SLAB_SIZE).toBe(33_900);
-    // getMinimumBalanceForRentExemption(33900) = 172,862,240 on devnet and mainnet
-    expect(computeCreateMarketSolCost().slabRentSol).toBeCloseTo(0.17286224, 9);
+    // A launch allocates ONE asset slot: v17MarketAccountLen(1) = 3,675 bytes (was 33,900 at 14 slots).
+    expect(DEFAULT_SLAB_SIZE).toBe(3_675);
+    // getMinimumBalanceForRentExemption(3675) = (3675 + 128) * 5080 = 19,319,240 on devnet and mainnet
+    expect(computeCreateMarketSolCost().slabRentSol).toBeCloseTo(0.01931924, 9);
   });
 
   it("covers what real launches spent, below the old 0.347 gate", () => {
+    // Two real 14-slot launches cost their creators 0.2249 and 0.2382 SOL. A launch now allocates a
+    // 3,675-byte market account instead of 33,900, so the same launch costs that much less in rent;
+    // the estimate must still cover it.
+    const slabSaving = rpcRent(33_900) - rpcRent(3_675);
     const { totalSolCost } = computeCreateMarketSolCost();
-    expect(totalSolCost).toBeGreaterThanOrEqual(0.2382);
+    expect(totalSolCost).toBeGreaterThanOrEqual(0.2382 - slabSaving);
     expect(totalSolCost).toBeLessThan(0.3);
   });
 

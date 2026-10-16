@@ -82,6 +82,7 @@ async function ticket(account: unknown) {
   render(<OrderTicket slabAddress={SLAB} />);
   await waitFor(() => expect(screen.queryByTestId("trade-submit")).not.toBeNull());
 }
+// #57: "Available to trade" counts the 12 USDC wallet too, like the Available strip.
 function available() {
   fireEvent.click(screen.getByTestId("ticket-details-toggle"));
   return screen.getByTestId("ticket-details").textContent?.match(/Available to trade(.*?USDC.*?USDC)/)?.[1];
@@ -93,7 +94,7 @@ describe("Open-tab order against the open position", () => {
     short();
     size("5");
     expect(submit().textContent).toBe("Short SOL 1×");
-    expect(available()).toBe("1 USDC→1.5 USDC");
+    expect(available()).toBe("13 USDC→13.5 USDC");
   });
 
   it("a full close through the Open tab asks for no deposit", async () => {
@@ -101,7 +102,7 @@ describe("Open-tab order against the open position", () => {
     short();
     size("10");
     expect(submit().textContent).toBe("Short SOL 1×");
-    expect(available()).toBe("1 USDC→2 USDC");
+    expect(available()).toBe("13 USDC→14 USDC");
   });
 
   it("is symmetric for a short position", async () => {
@@ -140,12 +141,12 @@ describe("Open-tab order against the open position", () => {
   it("CONTROL: same-side receipt is unchanged", async () => {
     await ticket(LONG_10);
     size("0.5");
-    expect(available()).toBe("1 USDC→0.5 USDC");
+    expect(available()).toBe("13 USDC→12.5 USDC");
   });
 
   it("CONTROL: flat-account receipt is unchanged", async () => {
     await ticket(acct(2_000_000n, 0n));
     size("0.5");
-    expect(available()).toBe("2 USDC→1.5 USDC");
+    expect(available()).toBe("14 USDC→13.5 USDC");
   });
 });
