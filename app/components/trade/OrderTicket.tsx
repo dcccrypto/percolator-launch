@@ -66,7 +66,7 @@ import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { AccountKind } from "@percolatorct/sdk";
-import { computeEstimatedEntryPrice, computeLiqPrice, computeTradingFee, computePositionInitialMargin, orderAgainstPosition, resolveEntryPrice } from "@/lib/trading";
+import { computeEstimatedEntryPrice, computeLiqPrice, computeMarkPnlLinear, computeTradingFee, computePositionInitialMargin, orderAgainstPosition, resolveEntryPrice } from "@/lib/trading";
 import { TradeConfirmationModal } from "@/components/trade/TradeConfirmationModal";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { usePrivyLogin, usePrivyAvailable } from "@/hooks/usePrivySafe";
@@ -802,8 +802,17 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // estimated entry, so one branch is correct for both. (Previously the fresh-open
   // case priced against only the order's margin, understating liq distance and
   // making the preview jump once the position opened on full capital.)
+  // A reduce or flip closes part (or all) of the existing leg: that slice's PnL, at this fill's
+  // price (estEntry already carries the fee), stays in the account's equity. Pricing the remainder
+  // with the pre-trade capital alone dropped it, so cutting a loser read as "covered".
+  // ponytail: nominal size, as the rest of the ticket; an ADL-reduced leg is priced on its basis.
+  const closedQ = sameDirection ? 0n : positionSize < existingAbsSize ? positionSize : existingAbsSize;
+  const closedPnl = closedQ > 0n && existingEntryPriceE6 > 0n && estEntry > 0n
+    ? computeMarkPnlLinear(existingPositionSize > 0n ? closedQ : -closedQ, existingEntryPriceE6, estEntry)
+    : 0n;
+  const equityAfterTrade = capitalAfterFund + closedPnl;
   const afterLiqPrice = hasOrder && combinedSignedSize !== 0n && combinedEntryPriceE6 > 0n
-    ? computeLiqPrice(combinedEntryPriceE6, capitalAfterFund, combinedSignedSize, maintenanceMarginBps)
+    ? computeLiqPrice(combinedEntryPriceE6, equityAfterTrade, combinedSignedSize, maintenanceMarginBps)
     : 0n;
   const beforeLiqPrice = userAccount && userAccount.account.positionSize !== 0n && existingEntryPriceE6 > 0n
     ? computeLiqPrice(existingEntryPriceE6, capital, userAccount.account.positionSize, maintenanceMarginBps)
@@ -814,16 +823,15 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const afterLiqDisplay = describeLiqPrice({
     liqPriceE6: afterLiqPrice,
     positionSize: hasOrder ? combinedSignedSize : 0n,
-    capital: capitalAfterFund,
+    capital: equityAfterTrade,
     entryPriceE6: combinedEntryPriceE6,
     effectiveSize: hasOrder ? combinedSignedSize : 0n,
     markPriceE6: livePriceE6 ?? 0n,
     maintenanceMarginBps,
-    // The combined entry inherits the existing one unless there is none, or
-    // this order flips through it (the residual takes this fill's price).
-    hasResolvedEntry:
-      combinedEntryPriceE6 > 0n &&
-      (existingPositionSize === 0n || existingEntryKnown || (!sameDirection && positionSize >= existingAbsSize)),
+    // Resolved only when the existing entry is known (or there is none). A flip's residual takes
+    // this fill's price, but the closed leg's PnL above is priced from the old entry, and when that
+    // entry is only the mark fallback (a pnl that can't be back-solved) the leg's PnL is unknown.
+    hasResolvedEntry: combinedEntryPriceE6 > 0n && (existingPositionSize === 0n || existingEntryKnown),
     formatPrice: formatUsdPriceE6,
     unknownText: "—",
   });
