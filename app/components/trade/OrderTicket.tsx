@@ -35,6 +35,7 @@
  * market order — nothing about that path changes here.
  */
 
+import { errorText } from "@/lib/error-text";
 import { FC, memo, useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { balanceKey, NO_BALANCE_KNOWN, resolveTokenBalance, type KnownBalance, type TokenRead } from "@/lib/token-balance";
 import { useWalletBalanceRefreshKey } from "@/lib/wallet-balance-invalidation";
@@ -1366,7 +1367,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         setTradePhase("idle");
         return;
       }
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errorText(e);
       console.error("[OrderTicket] raw error:", msg);
       // PERC-onboarding-5: advisory-only wrong-network-wallet check on the
       // raw (pre-humanization) message — see useWalletNetworkGuard's header.
@@ -2245,7 +2246,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 // requiring a second manual deposit afterward.
                 await initUser(starterDeposit);
               } catch (e) {
-                const msg = e instanceof Error ? e.message : String(e);
+                const msg = errorText(e);
                 reportTxError(msg);
                 if (!/user rejected|cancelled|denied/i.test(msg)) setInitCtaError(msg);
               }

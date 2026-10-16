@@ -24,6 +24,7 @@
  * `ceil(sum(group.computeUnits) * cuHeadroom)` capped at 1.4M, and the app's priority fee
  * (micro-lamports/CU for legacy; the same total in lamports for v1).
  */
+import { errorText } from "@/lib/error-text";
 import {
   Keypair,
   PublicKey,
@@ -278,7 +279,7 @@ export function assembleSignedV1(compiled: CompiledV1Message, preSigned: Uint8Ar
   try {
     wallet = splitV1Wire(walletSigned);
   } catch (e) {
-    throw new WalletAlteredMessageError(`wallet returned a non-v1 transaction: ${e instanceof Error ? e.message : String(e)}`);
+    throw new WalletAlteredMessageError(`wallet returned a non-v1 transaction: ${errorText(e)}`);
   }
   if (!bytesEqual(wallet.message, compiled.message) || wallet.signatures.length !== compiled.numRequiredSignatures) {
     throw new WalletAlteredMessageError("wallet returned a different v1 message than the one it was asked to sign");

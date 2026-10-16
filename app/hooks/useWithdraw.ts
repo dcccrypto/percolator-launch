@@ -1,5 +1,6 @@
 "use client";
 
+import { errorText } from "@/lib/error-text";
 import { useCallback, useRef, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
@@ -445,7 +446,7 @@ export function useWithdraw(slabAddress: string) {
         setTimeout(() => refreshSlab?.(), 2000);
         return sig;
       } catch (e) {
-        const rawMsg = e instanceof Error ? e.message : String(e);
+        const rawMsg = errorText(e);
         // M7: don't let a withdraw-specific EngineStale(19) read as
         // transient/auto-fixable — see ENGINE_STALE_WITHDRAW_MESSAGE above.
         setError(userFacingMessage(e) ??

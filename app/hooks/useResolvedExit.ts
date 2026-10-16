@@ -9,6 +9,7 @@
  *
  * Reads only while the market is RESOLVED; on a live market the hook is inert (one market read).
  */
+import { errorText } from "@/lib/error-text";
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { PublicKey, type TransactionInstruction } from '@solana/web3.js';
 import {
@@ -124,7 +125,7 @@ export function useResolvedExit(slabAddress: string | null) {
         error: null,
       }));
     } catch (e) {
-      if (alive.current) setState((p) => ({ ...p, error: e instanceof Error ? e.message : String(e) }));
+      if (alive.current) setState((p) => ({ ...p, error: errorText(e) }));
     }
   }, [snapshot, wallet.publicKey]);
 
@@ -164,7 +165,7 @@ export function useResolvedExit(slabAddress: string | null) {
       if (alive.current) setState((p) => ({ ...p, running: false, lastRun: result, plan: result.final }));
       return result;
     } catch (e) {
-      if (alive.current) setState((p) => ({ ...p, running: false, error: e instanceof Error ? e.message : String(e) }));
+      if (alive.current) setState((p) => ({ ...p, running: false, error: errorText(e) }));
       throw e;
     }
   }, [connection, wallet, slabAddress, snapshot]);
@@ -239,7 +240,7 @@ export function useResolvedExit(slabAddress: string | null) {
         void refresh();
         return result;
       } catch (e) {
-        if (alive.current) setState((p) => ({ ...p, running: false, error: e instanceof Error ? e.message : String(e) }));
+        if (alive.current) setState((p) => ({ ...p, running: false, error: errorText(e) }));
         throw e;
       }
     },

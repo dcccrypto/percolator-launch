@@ -1,5 +1,6 @@
 "use client";
 
+import { errorText } from "@/lib/error-text";
 import { useState, useCallback } from "react";
 import { PublicKey, Keypair, TransactionInstruction, SYSVAR_RENT_PUBKEY, SystemProgram } from "@solana/web3.js";
 import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
@@ -197,7 +198,7 @@ export function useMintPositionNft(slabAddress: string) {
       toast("Position NFT minted!", "success");
       return sig;
     } catch (e) {
-      const errMsg = e instanceof Error ? e.message : String(e);
+      const errMsg = errorText(e);
       const msg = isPortfolioTargetError(e) ? e.message : plainMessage(errMsg, { surface: "nft" }, humanizeError);
       console.error("[useMintPositionNft]", errMsg);
       setError(msg);

@@ -1,5 +1,6 @@
 "use client";
 
+import { errorText } from "@/lib/error-text";
 import { useCallback, useRef, useState } from "react";
 import { Keypair, PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
@@ -340,7 +341,7 @@ export function useInitUser(slabAddress: string) {
         setTimeout(() => refreshSlab(), 2000);
         return { sig, depositedAmount: effectiveFee };
       } catch (e) {
-        const raw = e instanceof Error ? e.message : String(e);
+        const raw = errorText(e);
         // PERC-698: Custom program error 0x4 = InvalidSlabLen — V0/V1 program mismatch.
         const is0x4 = /custom program error:\s*0x4\b/i.test(raw);
         // PERC-8388: Lighthouse/Blowfish 0x1900 — wallet middleware assertion failure.

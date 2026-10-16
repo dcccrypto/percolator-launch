@@ -4,6 +4,7 @@
  * and Percolator program-specific error codes.
  */
 
+import { errorText } from "@/lib/error-text";
 import { EmbeddedBatchSignError } from "@/lib/privy-batch-sign";
 import { WALLET_BUSY_COPY } from "@/lib/wallet-request-copy";
 import { P3_ERR } from "@/lib/limits/constants";
@@ -195,7 +196,7 @@ export function parseMarketCreationError(error: unknown, context?: MarketCreatio
 }
 
 function parseMarketCreationErrorBase(error: unknown, context?: MarketCreationErrorContext): string {
-  const msg = error instanceof Error ? error.message : String(error);
+  const msg = errorText(error);
 
   // Step-aware program errors first: with a step known, a Custom code has a
   // specific meaning that the generic table below gets wrong.

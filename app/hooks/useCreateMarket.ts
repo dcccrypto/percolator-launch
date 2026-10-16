@@ -1,5 +1,6 @@
 "use client";
 
+import { errorText } from "@/lib/error-text";
 import { parseLpVaultRegistry } from "@/lib/v22/records";
 import { EmbeddedBatchSignError, isWalletRejection } from "@/lib/privy-batch-sign";
 import { WalletBusyError } from "@/lib/v22/sign-guard";
@@ -2218,7 +2219,7 @@ export function useCreateMarket() {
           oracleMode: params.oracleMode ?? "admin", isAdminOracle: params.oracleMode === "admin", isDevnetEnv: false,
         }));
       } catch (e) {
-        setState((s) => ({ ...s, error: e instanceof Error ? e.message : String(e) }));
+        setState((s) => ({ ...s, error: errorText(e) }));
         return;
       }
 
@@ -3979,7 +3980,7 @@ export function useCreateMarket() {
                 nameShareSeq,
                 programId,
                 (e) => (e instanceof SimulationRefusal ? { failingProgram: e.failingInstructionProgram, failingTag: e.failingInstructionTag, logs: e.logs } : null),
-                (e) => console.warn(`[useCreateMarket] share naming (tag 122) refused in simulation; retrying the Earn seed without it: ${e instanceof Error ? e.message : String(e)}`),
+                (e) => console.warn(`[useCreateMarket] share naming (tag 122) refused in simulation; retrying the Earn seed without it: ${errorText(e)}`),
               );
               setState((s) => ({ ...s, txSigs: [...s.txSigs, sigLpVault] }));
             } catch (earnErr) {
@@ -4280,7 +4281,7 @@ export function useCreateMarket() {
     } catch (err) {
       // Storage error - log for debugging but don't block flow
       console.debug('[useCreateMarket] Failed to clear pending keypair from storage:', 
-        err instanceof Error ? err.message : String(err)
+        errorText(err)
       );
     }
     setState({

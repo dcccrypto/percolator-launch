@@ -1,3 +1,4 @@
+import { errorText } from "@/lib/error-text";
 import { resolveDevnetProgramIds } from "@/lib/program-ids";
 import { P2_ERROR_COPY } from "@/lib/limits/copy";
 import { PORTFOLIO_LOOKUP_COPY } from "@/lib/owner-portfolio";
@@ -629,7 +630,7 @@ export async function withTransientRetry<T>(
       return await fn();
     } catch (e) {
       lastError = e;
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errorText(e);
       if (attempt < effectiveMaxRetries && isTransientError(msg)) {
         const code = extractErrorCode(msg);
         const longWindow = code !== null ? LONG_WINDOW_RETRY[code] : undefined;

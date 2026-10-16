@@ -6,6 +6,7 @@
  * predicted id, the first trade's legs minus the trade). After it lands the ticket's normal Deposit /
  * Withdraw toggles take over. Flag-gated by the caller (v2.2 only).
  */
+import { errorText } from "@/lib/error-text";
 import { FC, useState } from "react";
 import { useFirstTrade } from "@/hooks/useFirstTrade";
 import { parseHumanAmount } from "@/lib/parseAmount";
@@ -54,7 +55,7 @@ export const FirstDepositCard: FC<Props> = ({ slabAddress, walletBalance, decima
       setSig(r.signature);
       setAmount("");
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errorText(e);
       if (!/user rejected|cancelled|denied/i.test(msg)) setError(humanizeError(msg));
       return;
     }

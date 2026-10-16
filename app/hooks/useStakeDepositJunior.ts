@@ -1,4 +1,5 @@
 "use client";
+import { errorText } from "@/lib/error-text";
 import { withWritableStaker } from '@/lib/stake-staker-meta';
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -190,7 +191,7 @@ export function useStakeDepositJunior({ slabAddress, collateralMint }: StakeDepo
         const sig = await sendTx({ connection, wallet, instructions });
         return sig;
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
+        const msg = errorText(e);
         setError(msg);
         throw e;
       } finally {

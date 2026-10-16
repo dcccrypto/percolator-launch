@@ -1,5 +1,6 @@
 'use client';
 
+import { errorText } from "@/lib/error-text";
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { PublicKey, type TransactionInstruction } from '@solana/web3.js';
 import { createAssociatedTokenAccountInstruction, getAssociatedTokenAddress } from '@solana/spl-token';
@@ -76,7 +77,7 @@ export function useStakeFirstLoss(slabAddress: string, collateralMint: string) {
         ixs.push(buildStakeDepositV5Ix({ stakeProgramId: programId, pool: poolKey, poolState: fresh, user: wallet.publicKey, userCollateral, userLp, vaultAuthority: vaultAuth, depositPda, amount }));
         return await sendTx({ connection, wallet, instructions: ixs, simulateBeforeSign: true });
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorText(e));
         throw e;
       } finally {
         inflight.current = false;

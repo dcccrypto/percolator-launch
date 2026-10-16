@@ -22,6 +22,7 @@
 
 "use client";
 
+import { errorText } from "@/lib/error-text";
 import { useEffect, useRef, useCallback, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 
@@ -140,7 +141,7 @@ export function useAutoDeposit(slabAddress: string): AutoDepositState {
       setDeposited(true);
     } catch (e) {
       // User rejected or tx failed — not a critical error
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errorText(e);
       // Don't show error for user rejections
       if (msg.includes("User rejected") || msg.includes("cancelled")) {
         // Silently ignore — user can manually deposit later

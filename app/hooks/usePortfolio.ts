@@ -1,5 +1,6 @@
 "use client";
 
+import { errorText } from "@/lib/error-text";
 import { observeLotExp } from "@/lib/v22/lot-registry";
 import { lotExpOf } from "@/lib/v22/lot";
 import { useEffect, useRef, useState } from "react";
@@ -1444,7 +1445,7 @@ export function usePortfolio(enabled: boolean = true): PortfolioData {
         // cleared only by a successful load, so a retry that is still in
         // flight doesn't flash the $0 state back.
         if (!cancelled && !hasLoadedOnce.current) {
-          setError(err instanceof Error ? err.message : String(err));
+          setError(errorText(err));
         }
       } finally {
         if (!cancelled) {

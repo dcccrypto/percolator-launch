@@ -1,5 +1,6 @@
 "use client";
 
+import { errorText } from "@/lib/error-text";
 import { recordCloseTx } from "@/lib/last-close-tx";
 import { lotTradingRefusal } from "@/lib/v22/lot-coverage";
 import { ensureLotExp, getLotExp } from "@/lib/v22/lot-registry";
@@ -615,7 +616,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         }
         return { signature: sig ?? null, fill };
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
+        const msg = errorText(e);
         if (isPartialLegSendError(e)) {
           // M-2: some of the close's transactions landed. Say what happened, plainly.
           setError(msg);

@@ -1,5 +1,6 @@
 "use client";
 
+import { errorText } from "@/lib/error-text";
 import { useCallback, useState } from "react";
 import { Keypair, PublicKey, SystemProgram, Transaction, SendTransactionError } from "@solana/web3.js";
 import {
@@ -31,7 +32,7 @@ export interface UseReclaimSlabRentResult {
  * PercolatorError enum.  The numbers are derived from the on-chain error list.
  */
 function friendlyReclaimError(err: unknown): string {
-  const msg = err instanceof Error ? err.message : String(err);
+  const msg = errorText(err);
   const lower = msg.toLowerCase();
 
   // --- User-rejected / wallet errors ---

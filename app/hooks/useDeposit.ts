@@ -1,5 +1,6 @@
 "use client";
 
+import { errorText } from "@/lib/error-text";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Keypair, PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
 import {
@@ -344,7 +345,7 @@ export function useDeposit(slabAddress: string) {
         pendingTimersRef.current.push(setTimeout(() => refreshSlab?.(), 2000));
         return sig;
       } catch (e) {
-        setError(userFacingMessage(e) ?? humanizeError(e instanceof Error ? e.message : String(e)));
+        setError(userFacingMessage(e) ?? humanizeError(errorText(e)));
         throw e;
       } finally {
         inflightRef.current = false;

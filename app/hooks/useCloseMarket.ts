@@ -1,5 +1,6 @@
 "use client";
 
+import { errorText } from "@/lib/error-text";
 import { useState, useCallback } from "react";
 import { PublicKey } from "@solana/web3.js";
 import type { TransactionInstruction } from "@solana/web3.js";
@@ -295,7 +296,7 @@ export function useCloseMarket() {
         setLoading(false);
         return { signature: sig, reclaimedLamports: reclaimableLamports };
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = errorText(err);
 
         // Parse common CloseSlab failures
         if (msg === COPY.closeRebooked) {

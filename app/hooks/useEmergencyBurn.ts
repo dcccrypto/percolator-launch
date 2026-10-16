@@ -1,5 +1,6 @@
 "use client";
 
+import { errorText } from "@/lib/error-text";
 import { useState, useCallback } from "react";
 import { Connection, PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
@@ -178,7 +179,7 @@ export function useEmergencyBurn(slabAddress: string, override?: PositionNftOver
       toast("Position NFT recovered (emergency burn)", "success");
       return sig;
     } catch (e) {
-      const errMsg = e instanceof Error ? e.message : String(e);
+      const errMsg = errorText(e);
       const msg = humanizeError(errMsg);
       console.error("[useEmergencyBurn]", errMsg);
       setError(msg);

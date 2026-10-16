@@ -4,6 +4,7 @@
  * Deposit into a first-loss (stake v5) pool: the pool's target, liquid buffer and rebalance band, the consent
  * text v2 verbatim, a required checkbox, then Deposit. Renders nothing unless the pool is a v5 first-loss pool.
  */
+import { errorText } from "@/lib/error-text";
 import { useEffect, useState } from 'react';
 import { useStakeFirstLoss } from '@/hooks/useStakeFirstLoss';
 import { ConsentChangedError, consentKey, consentTextMatches, consentViewOf, pctOfBps } from '@/lib/v22/stake-v5';
@@ -39,7 +40,7 @@ export function FirstLossDeposit({ slabAddress, collateralMint, decimals = 6, de
       onDone?.();
     } catch (e) {
       if (e instanceof ConsentChangedError) { setAccepted(null); setNote(e.message); }
-      else setNote(e instanceof Error ? e.message : String(e));
+      else setNote(errorText(e));
     }
   };
 

@@ -1,5 +1,6 @@
 'use client';
 
+import { errorText } from "@/lib/error-text";
 import { parseLpVaultRegistry, parseLpRedemption } from "@/lib/v22/records";
 import { vaultWithdrawView } from '@/lib/limits/earn-withdrawable';
 import type { BlockedBy, WithdrawStatus } from '@/lib/limits/earn-withdrawable';
@@ -723,7 +724,7 @@ export function useInsuranceLP() {
       await sendTx({ connection, wallet, instructions: [ix] });
       await refreshState();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorText(err);
       setError(msg);
       throw err;
     } finally {
@@ -864,7 +865,7 @@ export function useInsuranceLP() {
       await refreshState();
       return sig;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorText(err);
       setError(msg);
       throw err;
     } finally {
@@ -1085,7 +1086,7 @@ export function useInsuranceLP() {
       await refreshState();
       return { step, signature };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorText(err);
       setError(msg);
       throw err;
     } finally {
@@ -1135,7 +1136,7 @@ export function useInsuranceLP() {
       await refreshState();
       return sig;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorText(err));
       await refreshState().catch(() => {});
       throw err;
     } finally {

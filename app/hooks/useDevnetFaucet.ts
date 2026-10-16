@@ -16,6 +16,7 @@
 
 "use client";
 
+import { errorText } from "@/lib/error-text";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Connection, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
@@ -200,7 +201,7 @@ export function useDevnetFaucet(): DevnetFaucetState {
         // account"; anything else (timeout, 5xx, rate limit) must NOT reset
         // the balance to 0 — that would pop the faucet modal over an
         // already-funded wallet.
-        const msg = e instanceof Error ? e.message : String(e);
+        const msg = errorText(e);
         if (stale()) return;
         if (/could not find account/i.test(msg)) {
           setUsdcBalance(0);

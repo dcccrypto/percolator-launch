@@ -1,3 +1,4 @@
+import { errorText } from "@/lib/error-text";
 import { Connection, PublicKey as PublicKeyCtor, Transaction, TransactionInstruction, ComputeBudgetProgram, SendTransactionError, SystemProgram, TransactionExpiredBlockheightExceededError, VersionedTransaction } from "@solana/web3.js";
 import { assertDevnetConnection } from "@/lib/v22/devnet-guard";
 import { noteBlockhash } from "@/lib/v22/sign-guard";
@@ -1147,7 +1148,7 @@ export async function sendTx({
 
       return lastSignature;
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errorText(e);
       lastError = e instanceof Error ? e : new Error(msg);
 
       // Use the shared predicate so every blockhash-miss spelling is retried —

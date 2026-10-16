@@ -51,6 +51,7 @@
  *
  * @module
  */
+import { errorText } from "@/lib/error-text";
 import { ed25519 } from "@noble/curves/ed25519";
 import {
   ComputeBudgetProgram,
@@ -511,7 +512,7 @@ function compileV1Unbounded(payer: PublicKey, ixs: readonly TransactionInstructi
   try {
     return compileV1Message({ payer, instructions: ixs, recentBlockhash: MEASURE_BLOCKHASH, config: cfg });
   } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
+    const m = errorText(e);
     const hit = /transaction is (\d+) bytes/.exec(m);
     if (hit) {
       return { message: new Uint8Array(0), accountKeys: [], numRequiredSignatures: 0, numReadonlySigned: 0, numReadonlyUnsigned: 0, txBytes: Number(hit[1]) };
@@ -1062,7 +1063,7 @@ export async function sendGroupsAdaptive<T = unknown>(p: AdaptiveSendParams<T>):
         i = 0;
         continue;
       }
-      const message = e instanceof Error ? e.message : String(e);
+      const message = errorText(e);
       const r: AdaptiveTxResult<T> = { format, tags: tx.groups.map((g) => g.tag), bytes: wire.length, error: message, afterFallback: fellBack };
       results.push(r);
       p.onTx?.(r);

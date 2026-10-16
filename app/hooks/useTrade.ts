@@ -1,5 +1,6 @@
 "use client";
 
+import { errorText } from "@/lib/error-text";
 import { tradeCuCap } from "@/lib/compute-budget";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Connection, PublicKey, type TransactionInstruction } from "@solana/web3.js";
@@ -877,7 +878,7 @@ export function useTrade(slabAddress: string) {
           refreshSlab?.();
           [1200, 2200, 3500].forEach((ms) => setTimeout(() => refreshSlab?.(), ms));
         }
-        const msg = e instanceof Error ? e.message : String(e);
+        const msg = errorText(e);
         if (mountedRef.current) setError(msg);
         throw e;
       } finally {

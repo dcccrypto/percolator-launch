@@ -1,5 +1,6 @@
 "use client";
 
+import { errorText } from "@/lib/error-text";
 import { useState, useCallback } from "react";
 import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
@@ -188,7 +189,7 @@ export function useBurnPositionNft(slabAddress: string, override?: PositionNftOv
       toast(UNWRAP_COPY.done, "success");
       return sig;
     } catch (e) {
-      const errMsg = e instanceof Error ? e.message : String(e);
+      const errMsg = errorText(e);
 
       // H8: a normal burn requires the bound leg to still be "active"
       // on-chain — if the position was closed or liquidated WHILE wrapped,
