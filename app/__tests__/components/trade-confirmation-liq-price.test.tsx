@@ -48,6 +48,14 @@ describe("TradeConfirmationModal liquidation price", () => {
     expect(screen.queryByText("N/A")).toBeNull();
   });
 
+  // #58: neutral like the dock/panel for a new (always "safe") position, never red or green by side.
+  it.each(["long", "short"] as const)("shows the price in the neutral colour for a %s", (direction) => {
+    render(<TradeConfirmationModal {...props({ direction, estimatedLiqPrice: 950_000n })} />);
+    const cls = screen.getByText("$0.95").className;
+    expect(cls).toContain("var(--text-secondary)");
+    expect(cls).not.toMatch(/var\(--(short|long)\)/);
+  });
+
   it("keeps the price for a caller that only has the raw price", () => {
     render(<TradeConfirmationModal {...props({ estimatedLiqPrice: 950_000n })} />);
     expect(screen.getByText("$0.95")).toBeInTheDocument();
