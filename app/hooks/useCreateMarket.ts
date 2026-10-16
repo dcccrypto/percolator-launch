@@ -3384,7 +3384,8 @@ export function useCreateMarket() {
               ],
             }));
             if (portfolioAccounts.length === 0) {
-              throw new Error("LP portfolio not found — Step 2 (LP init) may not have completed. Please retry from step 2.");
+              // Step 3 as the launch view counts (LaunchProgress shows step index + 1); LP init is index 2.
+              throw new Error("LP portfolio not found — Step 3 (LP init) may not have completed. Please retry from step 3.");
             }
             depositPortfolioPk = portfolioAccounts[0].pubkey;
           } else {

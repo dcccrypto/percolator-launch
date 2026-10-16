@@ -263,7 +263,7 @@ export const ResumeFromChainCard: FC<{
             {unboundResumeValues(verified).map((line) => <li key={line}>{line}</li>)}
           </ul>
           <p className="mt-1 text-[var(--text-secondary)]">
-            It resumes at step {chain.step} and skips whatever already landed. Continue below to review and launch.
+            It resumes at step {chain.step + 1} of 6 and skips whatever already landed. Continue below to review and launch.
           </p>
         </div>
       )}

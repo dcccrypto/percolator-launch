@@ -1365,7 +1365,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
               {resumeFromStep === 0
                 ? "Re-enter your parameters to retry market initialization."
                 : chainResume
-                  ? `Rebuilt from the chain and checked against this launch's signed registration. It resumes at step ${resumeFromStep} of 6 and skips what already landed. Continue to review and launch.`
+                  ? `Rebuilt from the chain and checked against this launch's signed registration. It resumes at step ${resumeFromStep + 1} of 6 and skips what already landed. Continue to review and launch.`
                   : `The market is set up through step ${resumeFromStep} of 6. Re-enter your parameters to resume from where you left off.`}
             </span>
           </div>

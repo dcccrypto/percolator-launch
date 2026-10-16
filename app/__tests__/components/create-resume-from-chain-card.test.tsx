@@ -219,3 +219,12 @@ describe("verified summary driven by the wizard (S15)", () => {
     expect(screen.getByTestId("resume-chain-ca")).toBeTruthy();
   });
 });
+
+describe("resume step label", () => {
+  it("names the step the resume runs next, counted from 1 like the launch view", async () => {
+    // no portfolio yet: the chain implies step 1 (index) runs next, the 2nd of 6
+    render(<ResumeFromChainCard slab={SLAB.toBase58()} onVerified={vi.fn()} verified={launch as never} />);
+    await waitFor(() => expect(screen.getByTestId("resume-chain-summary")).toBeTruthy());
+    expect(screen.getByTestId("resume-chain-summary").textContent).toContain("It resumes at step 2 of 6");
+  });
+});

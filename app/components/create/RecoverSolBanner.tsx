@@ -297,7 +297,8 @@ const StuckSlabCard: FC<{
               unchanged after clicking RESUME CREATION (a "dead button"). */}
           {resuming && (
             <p className="w-full text-[10px] text-[var(--accent)]">
-              ✓ Resume mode set for step {resumeFromStep} of 6 — scroll up, re-enter this
+              {/* resumeFromStep is the next step to run, counted from 0; the launch view counts from 1. */}
+              ✓ Resume mode set for step {resumeFromStep + 1} of 6 — scroll up, re-enter this
               market&apos;s parameters, and click LAUNCH MARKET to continue.
             </p>
           )}

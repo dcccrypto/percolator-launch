@@ -233,3 +233,18 @@ describe("Start Over ends a verified chain resume (S15 review)", () => {
     expect(screen.getByTestId("stub-verify").getAttribute("data-verified")).toBe("none");
   });
 });
+
+describe("chain resume banner step label", () => {
+  beforeEach(() => {
+    localStorage.clear(); sessionStorage.clear(); createState = IDLE;
+    (globalThis as { __wallet?: unknown }).__wallet = WALLET_A;
+    verifiedCreator = SystemProgram.programId.toBase58();
+  });
+  it("names the step the resume runs next, counted from 1 like the launch view", async () => {
+    render(<CreateMarketWizard resumeSlabParam={SLAB_Y} />);
+    await flush();
+    fireEvent.click(screen.getByTestId("stub-verify")); // verified at step index 2: the 3rd runs next
+    await flush();
+    expect(screen.getByText(/It resumes at step 3 of 6/)).toBeTruthy();
+  });
+});
