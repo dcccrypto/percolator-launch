@@ -69,3 +69,41 @@ describe("SOL step, server grant pending (S19)", () => {
     expect(result.current.error).not.toBe(PENDING.error);
   });
 });
+
+// Follow-up: the server counts a pending send as the claim, so a retry before the SOL lands got the
+// daily-claim 429 and fell through to a public airdrop anyway (a second airdrop, and usually a
+// rate-limit failure over the first one's "on its way").
+describe("retrying while the server's send is pending", () => {
+  const DAILY = { error: "Already claimed in the last 24 hours", funded: false, nextClaimAt: "2026-10-17T00:00:00.000Z" };
+
+  it("re-shows 'on its way' and requests nothing else", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(PENDING), { status: 503 }))
+      .mockResolvedValue(new Response(JSON.stringify(DAILY), { status: 429 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useDevnetFaucet());
+    await act(async () => { await result.current.airdropSol(); });
+    await act(async () => { await result.current.airdropSol(); }); // the retry
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(h.requestAirdrop).not.toHaveBeenCalled();
+    expect(result.current.error).toBe(PENDING.error);
+  });
+
+  it("after the window a retry goes through the normal path again", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify(PENDING), { status: 503 }))
+        .mockResolvedValue(new Response(JSON.stringify({ error: "boom" }), { status: 500 }));
+      vi.stubGlobal("fetch", fetchMock);
+      const { result } = renderHook(() => useDevnetFaucet());
+      await act(async () => { await result.current.airdropSol(); });
+      vi.setSystemTime(Date.now() + 121_000);
+      await act(async () => { await result.current.airdropSol(); });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(h.requestAirdrop).toHaveBeenCalled(); // public (and Helius, if a key is set)
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
