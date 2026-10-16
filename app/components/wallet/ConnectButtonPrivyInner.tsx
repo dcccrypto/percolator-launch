@@ -3,8 +3,8 @@
 import { FC, useCallback, useMemo, useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useLogin, usePrivy, type LinkedAccountWithMetadata } from "@privy-io/react-auth";
-import { useFundWallet, useWallets } from "@privy-io/react-auth/solana";
+import type { LinkedAccountWithMetadata } from "@privy-io/react-auth";
+import { usePrivyBridge } from "@/hooks/usePrivyBridge";
 import { getConfig } from "@/lib/config";
 import { usePreferredWallet, resolveActiveWallet } from "@/hooks/usePreferredWallet";
 import { buildSolflareBrowseUrl } from "@/lib/solflare";
@@ -19,12 +19,12 @@ import { isReconnectFallbackEligible, useWalletNeedsReconnect } from "@/hooks/us
  * transitive WalletConnect/Coinbase/viem graph — is NOT pulled into the shared
  * client bundle by every page that renders a ConnectButton. Only fetched, as a
  * separate async chunk, when Privy is actually the active wallet provider.
- * Ported verbatim from the former inline `ConnectButtonPrivyInner`.
+ * Ported from the former inline `ConnectButtonPrivyInner`; it now reads Privy through the bridge
+ * (usePrivyBridge) so it is server-rendered, as its disabled "Loading…" state.
  */
 export const ConnectButtonPrivyInner: FC = () => {
-  const { ready, authenticated, logout, exportWallet, user } = usePrivy();
-  const { ready: walletsReady, wallets } = useWallets();
-  const { fundWallet } = useFundWallet();
+  const { ready, authenticated, logout, exportWallet, user, walletsReady, wallets, fundWallet, login: privyLogin } =
+    usePrivyBridge();
   const { preferredAddress, setPreferredAddress } = usePreferredWallet();
   const searchParams = useSearchParams();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -44,7 +44,7 @@ export const ConnectButtonPrivyInner: FC = () => {
   const needsReconnect = useWalletNeedsReconnect({
     privyReady: ready,
     authenticated,
-    walletsReady: walletsReady === true,
+    walletsReady,
     hasActiveWallet: !!activeWallet,
     fallbackEligible: isReconnectFallbackEligible(user?.linkedAccounts),
   });
@@ -55,16 +55,10 @@ export const ConnectButtonPrivyInner: FC = () => {
     authenticated,
   });
 
-  const { login } = useLogin({
-    onComplete: ({ loginAccount }) => {
-      // `loginAccount` is the account actually used for this login flow.
-      // Bind that wallet explicitly instead of relying on linked-wallet order
-      // or `user.wallet`, which may still point at a previously-linked wallet.
-      if (loginAccount?.type === "wallet" && loginAccount.chainType === "solana") {
-        setPreferredAddress(loginAccount.address);
-      }
-    },
-  });
+  // The login modal's onComplete lives in the bridge (PrivyProviderClient): it binds the wallet
+  // that actually authenticated the session (`loginAccount`) instead of relying on linked-wallet
+  // order or `user.wallet`, which may still point at a previously-linked wallet.
+  const login = privyLogin;
 
   const displayAddress = useMemo(() => {
     // activeWallet can be transiently null right after Privy authenticates (the

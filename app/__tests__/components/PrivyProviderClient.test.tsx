@@ -87,6 +87,7 @@ vi.mock("@privy-io/react-auth", () => ({
 
 vi.mock("@privy-io/react-auth/solana", () => ({
   toSolanaWalletConnectors: () => [],
+  useFundWallet: () => ({ fundWallet: vi.fn() }),
   useWallets: () => mockUseWallets(),
   // A vi.mock factory REPLACES the module, so every hook the provider imports
   // must be listed here or the import throws before any test runs. These four
@@ -96,7 +97,7 @@ vi.mock("@privy-io/react-auth/solana", () => ({
   useSignMessage: () => ({ signMessage: vi.fn() }),
 }));
 
-import PrivyProviderClient from "@/components/providers/PrivyProviderClient";
+import { PrivyBridgeHost } from "@/components/providers/PrivyBridgeHost";
 import { WalletApiContext, type WalletApi } from "@/hooks/walletApiContext";
 import { PreferredWalletContext } from "@/hooks/usePreferredWallet";
 import { EmbeddedBatchSignError } from "@/lib/privy-batch-sign";
@@ -122,12 +123,14 @@ describe("PrivyProviderClient", () => {
     mockUseWallets.mockReturnValue({ wallets: [] });
   });
 
-  it("configures solana-first wallet login", () => {
+  it("configures solana-first wallet login", async () => {
     process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID = "walletconnect-test";
     const { container } = render(
-      <PrivyProviderClient appId="test">child</PrivyProviderClient>
+      <PrivyBridgeHost appId="test">child</PrivyBridgeHost>
     );
 
+    // PrivyProvider mounts as a sibling after hydration (lazy), not around the app.
+    await waitFor(() => expect(container.querySelector("div")).not.toBeNull());
     const wrapper = container.querySelector("div");
     expect(wrapper?.getAttribute("data-wallet-chain-type")).toBe("solana-only");
     expect(wrapper?.getAttribute("data-show-wallet-first")).toBe("true");
@@ -136,7 +139,7 @@ describe("PrivyProviderClient", () => {
     expect(wrapper?.getAttribute("data-walletlist")).toContain("solflare");
   });
 
-  it("binds the Solana account actually used by the central Privy login bridge", () => {
+  it("binds the Solana account actually used by the central Privy login bridge", async () => {
     const setPreferredAddress = vi.fn();
 
     render(
@@ -146,12 +149,13 @@ describe("PrivyProviderClient", () => {
           setPreferredAddress,
         }}
       >
-        <PrivyProviderClient appId="test">
+        <PrivyBridgeHost appId="test">
           child
-        </PrivyProviderClient>
+        </PrivyBridgeHost>
       </PreferredWalletContext.Provider>,
     );
 
+    await waitFor(() => expect(mockUseLogin).toHaveBeenCalled());
     const callbacks = mockUseLogin.mock.calls[0]?.[0];
     expect(callbacks?.onComplete).toBeTypeOf("function");
 
@@ -190,9 +194,9 @@ describe("PrivyProviderClient", () => {
     async function getApi(): Promise<WalletApi> {
       let captured: WalletApi | undefined;
       render(
-        <PrivyProviderClient appId="test">
+        <PrivyBridgeHost appId="test">
           <ApiCapture onApi={(api) => { captured = api; }} />
-        </PrivyProviderClient>
+        </PrivyBridgeHost>
       );
       await waitFor(() => expect(typeof captured?.signAllTransactions).toBe("function"));
       return captured!;
@@ -255,9 +259,9 @@ describe("PrivyProviderClient", () => {
     async function getApi(): Promise<WalletApi> {
       let captured: WalletApi | undefined;
       render(
-        <PrivyProviderClient appId="test">
+        <PrivyBridgeHost appId="test">
           <ApiCapture onApi={(api) => { captured = api; }} />
-        </PrivyProviderClient>
+        </PrivyBridgeHost>
       );
       await waitFor(() => expect(typeof captured?.signAllTransactions).toBe("function"));
       return captured!;

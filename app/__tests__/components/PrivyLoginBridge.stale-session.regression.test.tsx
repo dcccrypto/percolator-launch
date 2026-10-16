@@ -17,7 +17,7 @@
  * These tests drive the REAL PrivyProviderClient bridge with Privy mocked in
  * exactly that state.
  */
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useContext } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -54,13 +54,14 @@ vi.mock("@privy-io/react-auth", () => ({
 
 vi.mock("@privy-io/react-auth/solana", () => ({
   toSolanaWalletConnectors: () => [],
+  useFundWallet: () => ({ fundWallet: vi.fn() }),
   useWallets: () => mockUseWallets(),
   useSignTransaction: () => ({ signTransaction: vi.fn() }),
   useSignAndSendTransaction: () => ({ signAndSendTransaction: vi.fn() }),
   useSignMessage: () => ({ signMessage: vi.fn() }),
 }));
 
-import PrivyProviderClient from "@/components/providers/PrivyProviderClient";
+import { PrivyBridgeHost } from "@/components/providers/PrivyBridgeHost";
 import { usePrivyLogin } from "@/hooks/usePrivySafe";
 import { WalletApiContext, type WalletApi } from "@/hooks/walletApiContext";
 import { PreferredWalletContext } from "@/hooks/usePreferredWallet";
@@ -88,12 +89,18 @@ function renderBridge(setPreferredAddress = vi.fn()) {
     <PreferredWalletContext.Provider
       value={{ preferredAddress: "PHANTOM_LINKED_ADDRESS", setPreferredAddress }}
     >
-      <PrivyProviderClient appId="test">
+      <PrivyBridgeHost appId="test">
         <ConnectCta />
-      </PrivyProviderClient>
+      </PrivyBridgeHost>
     </PreferredWalletContext.Provider>,
   );
   return { setPreferredAddress };
+}
+
+/** Privy mounts as a lazy sibling after hydration: wait for it to be up and its state published. */
+async function settle() {
+  await waitFor(() => expect(connectWalletCallbacks.current).not.toBeNull());
+  await act(async () => {});
 }
 
 describe("PrivyLoginBridge — stale Privy session (authenticated, no wallet)", () => {
@@ -103,9 +110,10 @@ describe("PrivyLoginBridge — stale Privy session (authenticated, no wallet)", 
     mockUseWallets.mockReturnValue({ ready: true, wallets: [] });
   });
 
-  it("the Connect CTA is shown (connected=false) and its click opens connectWallet, not the no-op login", () => {
+  it("the Connect CTA is shown (connected=false) and its click opens connectWallet, not the no-op login", async () => {
     mockUsePrivy.mockReturnValue(STALE_SESSION);
     renderBridge();
+    await settle();
 
     fireEvent.click(screen.getByRole("button", { name: "Connect Wallet" }));
 
@@ -114,9 +122,10 @@ describe("PrivyLoginBridge — stale Privy session (authenticated, no wallet)", 
     expect(mockLogin).not.toHaveBeenCalled();
   });
 
-  it("with no session the same CTA still opens the Privy login modal", () => {
+  it("with no session the same CTA still opens the Privy login modal", async () => {
     mockUsePrivy.mockReturnValue({ ...STALE_SESSION, authenticated: false, user: null });
     renderBridge();
+    await settle();
 
     fireEvent.click(screen.getByRole("button", { name: "Connect Wallet" }));
 
@@ -124,9 +133,10 @@ describe("PrivyLoginBridge — stale Privy session (authenticated, no wallet)", 
     expect(mockConnectWallet).not.toHaveBeenCalled();
   });
 
-  it("binds the reconnected Solana wallet as the active signer (#2620 semantics)", () => {
+  it("binds the reconnected Solana wallet as the active signer (#2620 semantics)", async () => {
     mockUsePrivy.mockReturnValue(STALE_SESSION);
     const { setPreferredAddress } = renderBridge();
+    await settle();
 
     expect(connectWalletCallbacks.current?.onSuccess).toBeTypeOf("function");
     act(() => {
@@ -139,9 +149,10 @@ describe("PrivyLoginBridge — stale Privy session (authenticated, no wallet)", 
     expect(setPreferredAddress).toHaveBeenCalledWith("PHANTOM_RECONNECTED_ADDRESS");
   });
 
-  it("ignores a non-Solana wallet connection (never binds an EVM address as signer)", () => {
+  it("ignores a non-Solana wallet connection (never binds an EVM address as signer)", async () => {
     mockUsePrivy.mockReturnValue(STALE_SESSION);
     const { setPreferredAddress } = renderBridge();
+    await settle();
 
     act(() => {
       connectWalletCallbacks.current.onSuccess({
@@ -152,7 +163,7 @@ describe("PrivyLoginBridge — stale Privy session (authenticated, no wallet)", 
     expect(setPreferredAddress).not.toHaveBeenCalled();
   });
 
-  it("once a wallet is connected the WalletApi reports connected and no CTA renders", () => {
+  it("once a wallet is connected the WalletApi reports connected and no CTA renders", async () => {
     mockUsePrivy.mockReturnValue(STALE_SESSION);
     mockUseWallets.mockReturnValue({
       ready: true,
@@ -164,13 +175,14 @@ describe("PrivyLoginBridge — stale Privy session (authenticated, no wallet)", 
       return null;
     }
     render(
-      <PrivyProviderClient appId="test">
+      <PrivyBridgeHost appId="test">
         <Capture />
         <ConnectCta />
-      </PrivyProviderClient>,
+      </PrivyBridgeHost>,
     );
 
-    expect(api?.connected).toBe(true);
+    await settle();
+    await waitFor(() => expect(api?.connected).toBe(true));
     expect(screen.queryByRole("button", { name: "Connect Wallet" })).toBeNull();
   });
 });
