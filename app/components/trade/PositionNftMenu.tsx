@@ -7,7 +7,8 @@
  * position already closed, useBurnPositionNft). Replaces PositionNftPanel (removed from the rail).
  * The eligibility logic is PositionNftPanel's, unchanged (#13: mint only on the wallet's own
  * unwrapped leg; send / unwrap act on the NFT actually held, self-minted or received).
- * ClosedPositionNftNotice covers the one case the row menu can't: a wrapped position that closed, which has no row.
+ * ClosedPositionNftNotice covers the one case the row menu can't: a wrapped position that closed, which has no row
+ * (shown under the empty state, or under the own row when the wallet also has an open position on the market).
  */
 import { type CSSProperties, type FC, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -292,11 +293,15 @@ export const PositionNftMenu: FC<{ slabAddress: string; row?: "own" | "wrapped" 
 
 /**
  * H8: a position closed while wrapped (liquidated) has no row in the dock — useNftWrappedPosition skips size-0
- * legs — so the row's "⋯" menu never mounts and nothing offered Unwrap. Shown under the empty state instead.
- * Unwrap routes to EmergencyBurn itself on LegNotActive (useBurnPositionNft, NF-2). No Send: a closed leg can't
- * be transferred. Hidden once an unwrap lands, so a click during the rescan can't hit "already burned?".
+ * legs — so the row's "⋯" menu never mounts and nothing offered Unwrap. Shown under the empty state, or under
+ * the own position row when the wallet also holds an open position here (PositionsDock; `className` sets the
+ * margins). Unwrap routes to EmergencyBurn itself on LegNotActive (useBurnPositionNft, NF-2). No Send: a closed
+ * leg can't be transferred. Hidden once an unwrap lands, so a click during the rescan can't hit "already burned?".
  */
-export const ClosedPositionNftNotice: FC<{ slabAddress: string }> = ({ slabAddress }) => {
+export const ClosedPositionNftNotice: FC<{ slabAddress: string; className?: string }> = ({
+  slabAddress,
+  className = "-mt-4 mb-6",
+}) => {
   const { hasMintedNft, pendingSettlement, nftMint, nftPdaAddress } = usePositionNft(slabAddress);
   const { burn, loading, error } = useBurnPositionNft(
     slabAddress,
@@ -305,7 +310,7 @@ export const ClosedPositionNftNotice: FC<{ slabAddress: string }> = ({ slabAddre
   const [burnedPda, setBurnedPda] = useState<string | null>(null);
   if (!hasMintedNft || !pendingSettlement || !nftPdaAddress || burnedPda === nftPdaAddress) return null;
   return (
-    <div data-testid="closed-nft-notice" className="mx-auto -mt-4 mb-6 max-w-[260px] text-center">
+    <div data-testid="closed-nft-notice" className={`mx-auto ${className} max-w-[260px] text-center`}>
       <p className="text-[11px] font-medium text-[var(--text)]">{NFT_MENU_COPY.closedTitle}</p>
       <p className="mt-1 text-[10px] leading-relaxed text-[var(--text-secondary)]">{NFT_MENU_COPY.closedBody}</p>
       <button

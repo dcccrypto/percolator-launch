@@ -110,19 +110,21 @@ describe("PositionsDock: closed NFT position", () => {
     h.account = null;
     render(<PositionsDock slabAddress="s" />);
     expect(screen.getByText("No open positions")).toBeInTheDocument();
-    expect(screen.getByTestId("closed-nft-marker")).toBeInTheDocument();
+    expect(screen.getAllByTestId("closed-nft-marker")).toHaveLength(1);
   });
 
   it("mounts it with a flat account too", () => {
     h.account = acct({ positionSize: 0n });
     render(<PositionsDock slabAddress="s" />);
     expect(screen.getByText("Use the order ticket to open a position.")).toBeInTheDocument();
-    expect(screen.getByTestId("closed-nft-marker")).toBeInTheDocument();
+    expect(screen.getAllByTestId("closed-nft-marker")).toHaveLength(1);
   });
 
-  it("not when a position row renders", () => {
+  // S5: a closed wrapped position beside an open own one has no row either, so the notice sits under the own row.
+  it("also mounts beside an own position row, once", () => {
     render(<PositionsDock slabAddress="s" />);
-    expect(screen.queryByTestId("closed-nft-marker")).toBeNull();
+    expect(screen.getAllByTestId("closed-nft-marker")).toHaveLength(1);
+    expect(screen.getByTestId("position-row").querySelector("[data-testid=\"closed-nft-marker\"]")).toBeNull();
     expect(lev()).toBeInTheDocument();
   });
 });

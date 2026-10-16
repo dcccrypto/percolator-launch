@@ -57,7 +57,7 @@ vi.mock("@/components/trade/WarmupProgress", () => ({ WarmupProgress: () => <spa
 vi.mock("@/components/trade/ClosePositionModal", () => ({ ClosePositionModal: () => null }));
 vi.mock("@/components/trade/PositionNftMenu", () => ({
   PositionNftMenu: ({ row }: { row?: string }) => <span data-testid={`nft-menu-${row ?? "none"}`} />,
-  ClosedPositionNftNotice: () => null,
+  ClosedPositionNftNotice: () => <span data-testid="closed-nft-marker" />,
   NFT_MENU_COPY: { badge: "NFT", closeWrapped: "Unwrap to close this position", wrappedHint: "hint" },
 }));
 
@@ -125,5 +125,37 @@ describe("market-level chrome stays on the primary instance (audit #40)", () => 
     expect(screen.getAllByTestId("warmup-progress")).toHaveLength(1);
     expect(screen.getAllByText("Catching up with the latest prices")).toHaveLength(1);
     h.engineStale = false;
+  });
+});
+
+// S5: a wrapped position that closed has no row (useNftWrappedPosition skips size-0 legs). With an open own
+// position the empty state never renders, so the wrapped-extra slot hosts its Unwrap notice instead.
+describe("closed wrapped position beside an open own one (S5)", () => {
+  it("own open + wrapped leg closed: one row, the notice once, outside the row", () => {
+    h.wrapped = null;
+    render(<PositionsDock slabAddress="s" />);
+    expect(screen.getAllByTestId("position-row")).toHaveLength(1);
+    expect(screen.getAllByTestId("closed-nft-marker")).toHaveLength(1);
+    expect(screen.getByTestId("position-row").querySelector("[data-testid=\"closed-nft-marker\"]")).toBeNull();
+    expect(screen.getByTestId("nft-menu-own")).toBeInTheDocument();
+    expect(screen.queryByTestId("nft-menu-wrapped")).toBeNull();
+  });
+  it("empty dock: the notice once, under the empty state", () => {
+    h.account = null;
+    h.wrapped = null;
+    render(<PositionsDock slabAddress="s" />);
+    expect(screen.queryByTestId("position-row")).toBeNull();
+    expect(screen.getAllByTestId("closed-nft-marker")).toHaveLength(1);
+  });
+  it("own open + wrapped open: two rows, no notice", () => {
+    render(<PositionsDock slabAddress="s" />);
+    expect(screen.getAllByTestId("position-row")).toHaveLength(2);
+    expect(screen.queryByTestId("closed-nft-marker")).toBeNull();
+  });
+  it("wrapped only: one row, no notice", () => {
+    h.account = null;
+    render(<PositionsDock slabAddress="s" />);
+    expect(screen.getAllByTestId("position-row")).toHaveLength(1);
+    expect(screen.queryByTestId("closed-nft-marker")).toBeNull();
   });
 });
