@@ -6,11 +6,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 import { parseEngine } from "@percolatorct/sdk";
-import { discoverMarkets } from "@/lib/v22/discovery";
+import { loadDiscoveredMarketRows } from "@/lib/discovered-market-rows";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { isActiveMarket, isSaneMarketValue, isZombieMarket } from "@/lib/activeMarketFilter";
 import { isListedMarket } from "@/lib/market-visibility";
-import { loadMergedMarketRows, type MarketRegistryRow } from "@/lib/market-registry";
+import { loadMergedMarketRows } from "@/lib/market-registry";
 import { isPhantomOpenInterest } from "@/lib/phantom-oi";
 import { qToUsd, Q_SCALE } from "@/lib/q-usd";
 import { computeDisplayOiUsd } from "@/lib/oi-display";
@@ -26,7 +26,7 @@ import {
 } from "@/lib/indexer-db";
 import { getMultipleAccountsInfoChunked } from "@/lib/rpc-chunk";
 import type { Database } from "@/lib/database.types";
-import { parseMarketOI, isWrapperAccount } from "@/lib/v22/layout";
+import { isWrapperAccount } from "@/lib/v22/layout";
 import { isMissingColumnError } from "@/lib/supabase-missing-column";
 
 /** $1M ceiling — mirrors /api/markets sanitizePrice. */
@@ -76,26 +76,6 @@ function zeroStats() {
 }
 
 /**
- * M13/H10: on-chain-discovery stats path — devnet only, no DB dependency.
- *
- * Both the local indexer Postgres and Supabase have been dead in the
- * playground (D-OPS2), which made this endpoint return $0/$0/0 under a "live"
- * badge. This mirrors the v17 OI aggregation /api/markets already does:
- * discoverMarkets() finds every v17 market-group account for the configured
- * program, then a batched getMultipleAccountsInfo + parseMarketGroupV17OI
- * sums long+short OI (base-asset "Q" quantities, scale 1e6) and converts to
- * USD using each market's own live mark price (configV17.markEwmaE6) — no
- * external price feed needed.
- *
- * There is no on-chain source for trade history, so totalVolume24h/trades24h/
- * totalTraders stay 0 here — an honest empty state (PLAYGROUND.md already
- * documents candles/24h stats as optional/degraded), not a fabricated number.
- *
- * Returns null (not zeroStats()) on any failure or when discovery finds
- * nothing, so the caller falls through to the indexer/Supabase paths instead
- * of masking a real outage as "0 markets".
- */
-/**
  * QA 2026-07-12: consistency-first stats path — aggregate over the SAME
  * market list `/api/markets` serves the rest of the site.
  *
@@ -117,142 +97,124 @@ async function computeStatsFromMarketsApi(_request: NextRequest): Promise<(Retur
     // Reading the same rows in process gives the same guarantee structurally.
     const rows = await loadMergedMarketRows();
     if (rows === null || rows.length === 0) return null;
-
-    // GH#2705: one shared rule (lib/market-visibility.ts) instead of a hand-kept
-    // mirror of /api/markets. The old filter here applied only the zombie half,
-    // so markets whose creation provably never finished (is_complete === false,
-    // which /api/markets drops) were counted, and their OI / volume summed —
-    // "Active Markets 25" beside a /markets page of 20. isListedMarket is also
-    // what the /markets page counts: zombie, incomplete, blocked and
-    // listing-hidden slabs are all excluded.
-    const numericOrNull = (v: unknown): number | null => {
-      if (v == null) return null;
-      const n = Number(v);
-      return Number.isFinite(n) ? n : null;
-    };
-
-    const visible = rows.filter((m: MarketRegistryRow) => isListedMarket(m as Record<string, unknown>));
-
-    let totalOpenInterest = 0;
-    for (const m of visible) {
-      const row = m as Record<string, unknown>;
-      // Mirror /api/markets exactly (markets/route.ts:827-833): suppress phantom-OI
-      // markets (no accounts / dust vault) via the shared predicate before summing,
-      // so a market shown as $0 OI in the list can't inflate the protocol-wide
-      // total. Previously this path summed total_open_interest_usd raw, re-introducing
-      // the drift the shared predicate exists to prevent.
-      const isPhantomOI = isPhantomOpenInterest(numericOrNull(row.total_accounts), numericOrNull(row.vault_balance) ?? 0);
-      const displayOiUsd = computeDisplayOiUsd(
-        numericOrNull(row.total_open_interest_usd),
-        isPhantomOI,
-        numericOrNull(row.total_open_interest),
-      );
-      if (displayOiUsd != null && isSaneMarketValue(displayOiUsd)) totalOpenInterest += displayOiUsd;
-    }
-
-    // GH#2676: these rows DO carry the indexer's 24h volume + trade count (the
-    // zombie filter above already reads volume_24h). This path used to return a
-    // literal 0 for both — shadowing the #2083 volume fix in the later paths —
-    // so the dashboard showed $0 next to a markets list with ~$5K of volume.
-    // Convert with the SAME helper /api/markets uses for each row's
-    // volume_24h_usd, over the same visible rows, so the total equals the sum of
-    // what the list shows by construction.
-    let totalVolume24h = 0;
-    let trades24h = 0;
-    for (const m of visible) {
-      const row = m as Record<string, unknown>;
-      const rawPrice = numericOrNull(row.last_price);
-      const price = rawPrice != null && rawPrice > 0 && rawPrice <= MAX_SANE_PRICE_FOR_ACTIVE ? rawPrice : null;
-      const usd = qToUsd(numericOrNull(row.volume_24h), price);
-      if (usd != null) totalVolume24h += usd;
-      const count = numericOrNull(row.trade_count_24h);
-      if (count != null && count > 0) trades24h += count;
-    }
-    totalVolume24h = Math.round(totalVolume24h * 100) / 100;
-
-    const activeTotal = visible.filter((m: MarketRegistryRow) =>
-      isActiveMarket(m as Parameters<typeof isActiveMarket>[0]),
-    ).length;
-
-    return {
-      totalMarkets: visible.length,
-      activeTotal,
-      totalListedMarkets: visible.length,
-      totalVolume24h,
-      totalOpenInterest,
-      // Unique traders genuinely has no source on this path (market_stats has
-      // no trader count). null = unknown, which ProtocolStatsBar already
-      // renders as such — 0 would claim "nobody traded" next to real volume.
-      totalTraders: null,
-      trades24h,
-      updatedAt: new Date().toISOString(),
-      live: true,
-    };
+    return statsOverListedRows(rows as Record<string, unknown>[]);
   } catch (err) {
     console.warn("[/api/stats] shared market-registry path failed:", err);
     return null;
   }
 }
 
+/**
+ * Totals over the rows a markets list would show: the listed subset (isListedMarket), its OI, 24h volume
+ * and trade count. Both the Supabase rows and the no-Supabase discovered rows go through here, so each
+ * path counts exactly what /markets lists from the same rows.
+ */
+function statsOverListedRows(
+  rows: Record<string, unknown>[],
+  /** false for discovered rows: their OI is read from the chain this request, and their `total_accounts: 0` /
+   *  `vault_balance: null` are placeholders, not measurements, so the phantom-OI guard would zero every market. */
+  phantomOiGuard = true,
+): ReturnType<typeof zeroStats> {
+  // GH#2705: one shared rule (lib/market-visibility.ts) instead of a hand-kept
+  // mirror of /api/markets. The old filter here applied only the zombie half,
+  // so markets whose creation provably never finished (is_complete === false,
+  // which /api/markets drops) were counted, and their OI / volume summed —
+  // "Active Markets 25" beside a /markets page of 20. isListedMarket is also
+  // what the /markets page counts: zombie, incomplete, blocked and
+  // listing-hidden slabs are all excluded.
+  const numericOrNull = (v: unknown): number | null => {
+    if (v == null) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const visible = rows.filter((m) => isListedMarket(m));
+
+  let totalOpenInterest = 0;
+  for (const m of visible) {
+    const row = m as Record<string, unknown>;
+    // Mirror /api/markets exactly (markets/route.ts:827-833): suppress phantom-OI
+    // markets (no accounts / dust vault) via the shared predicate before summing,
+    // so a market shown as $0 OI in the list can't inflate the protocol-wide
+    // total. Previously this path summed total_open_interest_usd raw, re-introducing
+    // the drift the shared predicate exists to prevent.
+    const isPhantomOI = phantomOiGuard && isPhantomOpenInterest(numericOrNull(row.total_accounts), numericOrNull(row.vault_balance) ?? 0);
+    const displayOiUsd = computeDisplayOiUsd(
+      numericOrNull(row.total_open_interest_usd),
+      isPhantomOI,
+      numericOrNull(row.total_open_interest),
+    );
+    if (displayOiUsd != null && isSaneMarketValue(displayOiUsd)) totalOpenInterest += displayOiUsd;
+  }
+
+  // GH#2676: these rows DO carry the indexer's 24h volume + trade count (the
+  // zombie filter above already reads volume_24h). This path used to return a
+  // literal 0 for both — shadowing the #2083 volume fix in the later paths —
+  // so the dashboard showed $0 next to a markets list with ~$5K of volume.
+  // Convert with the SAME helper /api/markets uses for each row's
+  // volume_24h_usd, over the same visible rows, so the total equals the sum of
+  // what the list shows by construction.
+  let totalVolume24h = 0;
+  let trades24h = 0;
+  for (const m of visible) {
+    const row = m as Record<string, unknown>;
+    const rawPrice = numericOrNull(row.last_price);
+    const price = rawPrice != null && rawPrice > 0 && rawPrice <= MAX_SANE_PRICE_FOR_ACTIVE ? rawPrice : null;
+    const usd = qToUsd(numericOrNull(row.volume_24h), price);
+    if (usd != null) totalVolume24h += usd;
+    const count = numericOrNull(row.trade_count_24h);
+    if (count != null && count > 0) trades24h += count;
+  }
+  totalVolume24h = Math.round(totalVolume24h * 100) / 100;
+
+  const activeTotal = visible.filter((m) =>
+    isActiveMarket(m as Parameters<typeof isActiveMarket>[0]),
+  ).length;
+
+  return {
+    totalMarkets: visible.length,
+    activeTotal,
+    totalListedMarkets: visible.length,
+    totalVolume24h,
+    totalOpenInterest,
+    // Unique traders genuinely has no source on this path (market_stats has
+    // no trader count). null = unknown, which ProtocolStatsBar already
+    // renders as such — 0 would claim "nobody traded" next to real volume.
+    totalTraders: null,
+    trades24h,
+    updatedAt: new Date().toISOString(),
+    live: true,
+  };
+}
+
+/**
+ * M13/H10: on-chain-discovery stats path — devnet only, no DB dependency.
+ *
+ * Used when there is no Supabase (the v2.2 preview): totals over the rows
+ * /api/markets serves on its own no-Supabase path (lib/discovered-market-rows.ts:
+ * curated seeds ∪ registered launches, minus blocked and unfinished markets),
+ * then the same isListedMarket rule as the Supabase path. Each row's OI is read
+ * from the chain and priced at the market's own mark.
+ *
+ * There is no on-chain source for trade history, so totalVolume24h/trades24h
+ * stay 0 here — an honest empty state (PLAYGROUND.md already documents
+ * candles/24h stats as optional/degraded), not a fabricated number.
+ *
+ * Returns null (not zeroStats()) on any failure or when discovery finds
+ * nothing, so the caller falls through to the indexer/Supabase paths instead
+ * of masking a real outage as "0 markets".
+ */
 async function computeStatsFromOnChainDiscovery(): Promise<(ReturnType<typeof zeroStats>) | null> {
   const cfg = getConfig();
   if (cfg.network !== "devnet") return null;
-
   try {
-    const connection = getServerConnection("confirmed");
-    const programId = new PublicKey(cfg.programId);
-    const found = await discoverMarkets(connection, programId, {
-      sequential: true,
-      maxTierQueries: 0, // v17-only — mirrors /api/markets discoverMarketsOnChain()
-    });
-    if (found.length === 0) return null;
-
-    const seen = new Set<string>();
-    const unique = found.filter((m) => {
-      const key = m.slabAddress.toBase58();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-
-    const v17Markets = unique.filter((m) => m.configV17);
-    if (v17Markets.length === 0) return null;
-
-    let totalOpenInterest = 0;
-    const CHUNK = 100; // getMultipleAccountsInfo cap
-    for (let start = 0; start < v17Markets.length; start += CHUNK) {
-      const chunk = v17Markets.slice(start, start + CHUNK);
-      const infos = await connection.getMultipleAccountsInfo(chunk.map((m) => m.slabAddress));
-      infos.forEach((info, i) => {
-        if (!info?.data) return;
-        const bytes = new Uint8Array(info.data);
-        if (!isWrapperAccount(bytes)) return;
-        try {
-          const oi = parseMarketOI(bytes);
-          const markPriceRaw = chunk[i].configV17?.markEwmaE6 ?? 0n;
-          const markPriceUsd = markPriceRaw > 0n ? Number(markPriceRaw) / 1_000_000 : 0;
-          // No valid mark price → USD value of this market's OI is indeterminate;
-          // skip rather than fabricate (mirrors /api/markets' no-$1-fallback rule).
-          if (markPriceUsd <= 0) return;
-          const totalOiQ = Number(oi.totalLongOiQ + oi.totalShortOiQ);
-          totalOpenInterest += (totalOiQ / 1_000_000) * markPriceUsd;
-        } catch {
-          // Unparseable slab — contributes 0 to the total, not a crash
-        }
-      });
-    }
-
-    return {
-      totalMarkets: unique.length,
-      activeTotal: unique.length,
-      totalListedMarkets: unique.length,
-      totalVolume24h: 0,
-      totalOpenInterest,
-      totalTraders: 0,
-      trades24h: 0,
-      updatedAt: new Date().toISOString(),
-      live: true,
-    };
+    // The rows /api/markets serves without Supabase (curated seeds ∪ registered launches, minus blocked and
+    // unfinished markets), NOT every wrapper account discovery finds. Counting the raw discovery set read
+    // "Active Markets 27" on the v2.2 preview's portfolio beside a /markets page of 9.
+    const rows = await loadDiscoveredMarketRows();
+    if (rows.length === 0) return null;
+    // No on-chain trader count: null = unknown (ProtocolStatsBar renders it as such), not "nobody traded".
+    return statsOverListedRows(rows, false);
   } catch (err) {
     console.warn("[/api/stats] on-chain discovery path failed:", err);
     return null;

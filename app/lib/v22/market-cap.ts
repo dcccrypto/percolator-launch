@@ -20,7 +20,7 @@ export function readMaxPortfolioAssets(data: Uint8Array | null | undefined): num
   }
 }
 
-/** The app ticket trades asset 0 only (Q-7d): a market that lets an account hold more than one asset is SDK-only here. */
+/** A market that lets an account hold more than one asset. The app ticket trades its asset 0 only (Q-7d); the other assets are SDK-only. */
 export function isMultiAssetMarket(data: Uint8Array | null | undefined): boolean {
   const n = readMaxPortfolioAssets(data);
   return n !== null && n > 1;

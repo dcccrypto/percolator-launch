@@ -82,7 +82,8 @@ describe("surface: /api/markets row numbers (lotMarketNumbers)", () => {
     expect(n.totalOiUsd).toBeCloseTo(300, 9);
   });
   it("source guard: both market routes convert through lotMarketNumbers", () => {
-    for (const f of ["app/api/markets/route.ts", "app/api/markets/[slab]/route.ts"]) {
+    // /api/markets' on-chain rows are built in lib/discovered-market-rows.ts.
+    for (const f of ["lib/discovered-market-rows.ts", "app/api/markets/[slab]/route.ts"]) {
       const s = src(f);
       expect(s).toContain("lotMarketNumbers(");
       expect(s).toContain("lotExpOf(");

@@ -81,9 +81,15 @@ describe("closed-market tombstone stamps the VERSION of the program", () => {
 describe("source guard: no consumer calls the installed discovery directly", () => {
   it("routes and the directory use lib/v22/discovery", async () => {
     const fs = await import("node:fs");
-    for (const f of ["lib/market-directory-discovery.ts", "app/api/markets/route.ts", "app/api/stats/route.ts"]) {
+    // The routes' on-chain discovery lives in lib/discovered-market-rows.ts (shared by /api/markets and /api/stats).
+    for (const f of ["lib/market-directory-discovery.ts", "lib/discovered-market-rows.ts"]) {
       const src = fs.readFileSync(f, "utf8");
       expect(src, f).toMatch(/@\/lib\/v22\/discovery/);
+      expect(src, f).not.toMatch(/import\s*\{[^}]*\b(discoverMarkets|getMarketsByAddress)\b[^}]*\}\s*from\s*"@percolatorct\/sdk"/);
+    }
+    for (const f of ["app/api/markets/route.ts", "app/api/stats/route.ts"]) {
+      const src = fs.readFileSync(f, "utf8");
+      expect(src, f).toMatch(/from "@\/lib\/discovered-market-rows"/);
       expect(src, f).not.toMatch(/import\s*\{[^}]*\b(discoverMarkets|getMarketsByAddress)\b[^}]*\}\s*from\s*"@percolatorct\/sdk"/);
     }
   });

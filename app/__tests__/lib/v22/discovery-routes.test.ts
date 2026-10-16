@@ -70,6 +70,8 @@ describe("the stats route reaches discovery through the adapter", () => {
     const found = await discoverMarkets(getServerConnection("confirmed") as never, PROG, { sequential: true, maxTierQueries: 0 });
     expect(found.map((m) => m.slabAddress.toBase58())).toContain(K22.toBase58());
     const fs = await import("node:fs");
-    expect(fs.readFileSync("app/api/stats/route.ts", "utf8")).toMatch(/from "@\/lib\/v22\/discovery"/);
+    // The stats route reads discovery through the rows /api/markets serves (lib/discovered-market-rows.ts).
+    expect(fs.readFileSync("app/api/stats/route.ts", "utf8")).toMatch(/from "@\/lib\/discovered-market-rows"/);
+    expect(fs.readFileSync("lib/discovered-market-rows.ts", "utf8")).toMatch(/from "@\/lib\/v22\/discovery"/);
   });
 });

@@ -1,9 +1,13 @@
 import type { FC } from "react";
 
-/** Shown on a market whose own config lets an account hold more than one asset (`max_portfolio_assets` > 1). */
+/**
+ * Shown on a market whose own config lets an account hold more than one asset (`max_portfolio_assets` > 1).
+ * The ticket DOES trade such a market, on its first asset only (asset 0, Q-7d; the multi-asset order path,
+ * 58bd7bf07), and the position dock on this page shows and closes that position. Only the other assets need the SDK.
+ */
 export const MULTI_ASSET_NOTICE = {
-  label: "Multi-asset (SDK only)",
-  body: "This market holds more than one asset per account. This app trades only one asset per market, so trading it here isn't supported. Use the SDK for this market.",
+  label: "Multi-asset market",
+  body: "Accounts here can hold more than one asset. This app trades its first asset only: open, view and close that position on this page. The other assets are SDK-only.",
 } as const;
 
 export const MultiAssetNotice: FC<{ show: boolean }> = ({ show }) =>
