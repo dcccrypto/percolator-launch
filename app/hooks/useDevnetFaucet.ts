@@ -276,6 +276,10 @@ export function useDevnetFaucet(): DevnetFaucetState {
 
   const airdropSol = useCallback(async () => {
     if (!publicKey) return;
+    // A reply for the previous wallet must not mark this one funded or failed (as airdropUsdc), and
+    // the fallbacks must not spend another airdrop on a wallet that is no longer connected.
+    const forWallet = publicKey.toBase58();
+    const stale = () => walletAddressRef.current !== forWallet;
     setStep("sol");
     setLoading(true);
     setError(null);
@@ -289,7 +293,7 @@ export function useDevnetFaucet(): DevnetFaucetState {
         const resp = await fetch("/api/faucet", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ wallet: publicKey.toBase58(), type: "sol" }),
+          body: JSON.stringify({ wallet: forWallet, type: "sol" }),
         });
         const data = (await resp.json().catch(() => ({}))) as { signature?: string; pending?: boolean; error?: string };
         if (resp.ok && data.signature) sig = data.signature;
@@ -301,6 +305,7 @@ export function useDevnetFaucet(): DevnetFaucetState {
       } catch {
         sig = null;
       }
+      if (stale()) return;
       if (pendingMsg) {
         // Not done until the balance shows it: refreshBalances marks SOL done once it lands.
         lastOpFailedRef.current = true;
@@ -326,12 +331,14 @@ export function useDevnetFaucet(): DevnetFaucetState {
               break;
             }
             await new Promise((r) => setTimeout(r, 2000));
+            if (stale()) return; // a switch mid-poll frees the new wallet's buttons now, not in a minute
           }
           // Not confirmed in a minute: not done (it used to fall through to setSolDone).
           if (!confirmed) throw new Error("SOL airdrop not confirmed");
         } catch {
           sig = null; // Fall through to Solana faucet
         }
+        if (stale()) return;
       }
 
       // Fallback: Solana devnet faucet
@@ -352,16 +359,19 @@ export function useDevnetFaucet(): DevnetFaucetState {
             break;
           }
           await new Promise((r) => setTimeout(r, 2000));
+          if (stale()) return;
         }
         // Not confirmed in a minute: report it rather than showing the step done. If it lands
         // later, refreshBalances marks SOL done from the balance.
         if (!confirmed) throw new Error("SOL airdrop not confirmed");
       }
+      if (stale()) return;
 
       solAirdropPendingRef.current = true;
       setSolDone(true);
       await refreshBalances();
     } catch (e) {
+      if (stale()) return;
       lastOpFailedRef.current = true;
       const msg = plainMessage(e, { surface: "faucet" }, (raw) => keepAppMessage(raw) === raw ? raw : "SOL airdrop failed — devnet may be rate-limiting. Try the Solana Faucet.");
       solErrorRef.current = msg;
@@ -423,6 +433,10 @@ export function useDevnetFaucet(): DevnetFaucetState {
 
   const fundAll = useCallback(async () => {
     if (!publicKey) return;
+    // Stop at a wallet switch: the steps below would otherwise fund the previous wallet's USDC and
+    // set the new wallet's step.
+    const forWallet = publicKey.toBase58();
+    const stale = () => walletAddressRef.current !== forWallet;
     setError(null);
 
     // Bug: this used to check `error` (the render-time closure value) after
@@ -434,11 +448,13 @@ export function useDevnetFaucet(): DevnetFaucetState {
     let solFailed = false;
     if (!solDone && (solBalance === null || solBalance < 0.05)) {
       await airdropSol();
+      if (stale()) return;
       if (lastOpFailedRef.current) anyFailed = solFailed = true;
     }
 
     if (!usdcDone && (usdcBalance === null || usdcBalance < 1000)) {
       await airdropUsdc();
+      if (stale()) return;
       if (lastOpFailedRef.current) anyFailed = true;
       // airdropUsdc cleared the shared error and moved step to "usdc". If only SOL failed, put
       // its message back on the SOL step so the modal shows it (and its faucet.solana.com link).
