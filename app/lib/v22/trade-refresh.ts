@@ -347,7 +347,13 @@ export async function executeV22MultiAssetOrder(i: MultiAssetOrderInput, deps: M
       const r = await settle(chunk, []);
       if (r.sim.err) throw deps.refusal(r.sim, r.ixs);
       if (r.cranks.length === 0) continue;
-      refreshSignatures.push(await deps.send(r.ixs, "refresh"));
+      try {
+        refreshSignatures.push(await deps.send(r.ixs, "refresh"));
+      } catch (e) {
+        // 22 at send: another sender (the keeper) refreshed these in the same slot. The refresh is done either way, so
+        // the body is simulated alone again below (still bounded by MAX_TWO_TX_REPEATS); anything else is a refusal.
+        if (!isRefreshRace(e)) throw e;
+      }
     }
     await sleep(800); // a few slots: the body is simulated against the refreshed state
   }

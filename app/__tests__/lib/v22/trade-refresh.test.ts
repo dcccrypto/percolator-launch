@@ -260,6 +260,37 @@ describe("multi-asset order flow (fresh-taker fix): the body alone, cranks only 
     expect(r.signature).toBe("SIG");
     expect(sent).toEqual([{ ixs: [deposit, trade], kind: "order" }]);
   });
+
+  it("2-tx path: a refresh tx refused 22 when sent (someone refreshed first) is skipped and the order still goes, alone", async () => {
+    // Browser E2E 2026-10-16 (fresh taker on 2xhs): the crank tx simulated OK, the keeper cranked in the same slot, the
+    // send's preflight answered 0x16, and the order was dropped with "Nothing to do … Nothing was sent".
+    let raced = false;
+    const { d, sent } = mk((ixs) => {
+      if (bodyOnly(ixs)) return raced ? ok : tradeRefused(ixs);
+      if (ixs.some((ix) => !isCrank(ix))) return { ...ok, consumed: 1_300_000 }; // cranks + body: over 1.2M
+      return { ...ok, consumed: 300_000 }; // cranks alone simulate OK
+    }, [k()]);
+    (d.send as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (ixs: TransactionInstruction[], kind: MultiAssetSendKind) => {
+      if (kind === "refresh") { raced = true; throw new Error("Transaction simulation failed: Error processing Instruction 3: custom program error: 0x16"); }
+      sent.push({ ixs, kind });
+      return "ORDER";
+    });
+    const r = await executeV22MultiAssetOrder(input(), d);
+    expect(r.signature).toBe("ORDER");
+    expect(sent).toEqual([{ ixs: [deposit, trade], kind: "order" }]);
+    expect(r.refreshSignatures).toEqual([]);
+  });
+
+  it("2-tx path: any other refusal of the refresh tx is still thrown, and no order is sent", async () => {
+    const { d, sent } = mk((ixs) => (bodyOnly(ixs) ? tradeRefused(ixs) : ixs.some((ix) => !isCrank(ix)) ? { ...ok, consumed: 1_300_000 } : { ...ok, consumed: 300_000 }), [k()]);
+    (d.send as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (_ixs: TransactionInstruction[], kind: MultiAssetSendKind) => {
+      if (kind === "refresh") throw new Error("custom program error: 0x13");
+      sent.push({ ixs: _ixs, kind });
+      return "ORDER";
+    });
+    await expect(executeV22MultiAssetOrder(input(), d)).rejects.toThrow(/0x13/);
+    expect(sent).toEqual([]);
+  });
 });
 
 describe("refresh candidates and copy", () => {
