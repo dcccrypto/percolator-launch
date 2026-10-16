@@ -143,7 +143,10 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
   const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
   const collateralSymbol = sanitizeSymbol(tokenMeta?.symbol, mintAddress);
   const { market: marketInfo } = useMarketInfo(slabAddress);
-  const symbol = marketInfo?.symbol ?? collateralSymbol;
+  // No collateral-symbol fallback (same rule as the trade page header): sim-USDC collateralizes every market, so an
+  // unknown market read "USDC/USD" with its size "in USDC" (browser E2E 2026-10-16, unlisted 2xhs). Unknown identity
+  // is the truncated slab address; the base unit is a neutral "TOKEN", as in the order ticket.
+  const symbol = marketInfo?.symbol ?? "TOKEN";
   const decimals = tokenMeta?.decimals ?? 6;
   // P3 skew funding / liquidation drift (flag-gated; "off" = no RPC).
   const marketLimits = useMarketLimits(slabAddress);
@@ -152,7 +155,7 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
   // rendered "SOL-PERP/USD". Strip it once, just for the Market column label
   // below; every other `symbol` usage in this row (token amounts, tooltips)
   // is unaffected.
-  const marketDisplaySymbol = symbol.replace(/-PERP$/i, "");
+  const marketDisplaySymbol = marketInfo?.symbol ? symbol.replace(/-PERP$/i, "") : `${slabAddress.slice(0, 4)}…${slabAddress.slice(-4)}`;
 
   const { closePosition, loading: closeLoading, error: closeError, prewarmClose, resetPhase } = useClosePosition(slabAddress);
   // Per-trade fill cap — the close modal uses it to explain multi-fill closes.
