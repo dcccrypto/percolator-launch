@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { PROGRAM_IDS, PROGRAM_IDS_V17 } from "@percolatorct/sdk";
-import { DEVNET_PROGRAM_IDS, MAINNET_PROGRAM_IDS, parseProgramIdOverride, resolveDevnetProgramIds } from "@/lib/program-ids";
+import { DEVNET_PROGRAM_IDS, DEVNET_V22_PROGRAM_IDS, MAINNET_PROGRAM_IDS, parseProgramIdOverride, resolveDevnetProgramIds } from "@/lib/program-ids";
 
 describe("program-ids: the single repoint point", () => {
   afterEach(() => {
@@ -78,6 +78,40 @@ describe("program-ids: the single repoint point", () => {
     expect(warn).toHaveBeenCalled();
     expect(parseProgramIdOverride("X", "")).toBeNull();
     expect(parseProgramIdOverride("X", undefined)).toBeNull();
+  });
+
+  it("QA E2E-1: a v2.2 build defaults to the v2.2 set (nft 27LWmR72, the id wrapper 6kpg2wi7 pins), with no env override", async () => {
+    vi.stubEnv("NEXT_PUBLIC_DEFAULT_NETWORK", "devnet");
+    vi.stubEnv("NEXT_PUBLIC_DEVNET_V22", "1");
+    expect(resolveDevnetProgramIds()).toEqual({ ...DEVNET_V22_PROGRAM_IDS });
+    expect(DEVNET_V22_PROGRAM_IDS).toEqual({
+      wrapper: "6kpg2wi7vwkn7E9rvodXSktYRhna8TWjiZrC1dBek6NM",
+      matcher: "AsHvEJ8zNctKmdeS57H5E4w6nkTLi3bPVpd6ZCLc2ayN",
+      nft: "27LWmR72Ru1NCkbN2xgxB7BgYcTUrU7qeEJoV3D8sZh1",
+      stake: "7JrgAUHi4PxaRv5JKHoGAxodDFbozYexpERei66Xgq4V",
+    });
+    // The create wizard's SetNftProgramId (M1) carries the same id.
+    const { PERCOLATOR_NFT_PROGRAM_ID } = await import("@/lib/nft-program");
+    expect(PERCOLATOR_NFT_PROGRAM_ID.toBase58()).toBe("27LWmR72Ru1NCkbN2xgxB7BgYcTUrU7qeEJoV3D8sZh1");
+    const { getConfig } = await import("@/lib/config");
+    expect(getConfig().programId).toBe(DEVNET_V22_PROGRAM_IDS.wrapper);
+  });
+
+  it("QA E2E-1: on a v2.2 build an opted-in override still wins, per program", () => {
+    vi.stubEnv("NEXT_PUBLIC_DEFAULT_NETWORK", "devnet");
+    vi.stubEnv("NEXT_PUBLIC_DEVNET_V22", "1");
+    vi.stubEnv("NEXT_PUBLIC_ALLOW_PROGRAM_ID_OVERRIDE", "1");
+    vi.stubEnv("NEXT_PUBLIC_NFT_PROGRAM_ID", "4zopgi4NbdPbnBisYNMkWbVizGuWKHHuKYLpxXQoT5Hy");
+    expect(resolveDevnetProgramIds()).toEqual({ ...DEVNET_V22_PROGRAM_IDS, nft: "4zopgi4NbdPbnBisYNMkWbVizGuWKHHuKYLpxXQoT5Hy" });
+  });
+
+  it("NEGATIVE CONTROL (E2E-1): flag off keeps the live v2 set (EMYT15LZ pairs with ETDLAdi); mainnet ignores the flag", () => {
+    vi.stubEnv("NEXT_PUBLIC_DEFAULT_NETWORK", "devnet");
+    expect(resolveDevnetProgramIds()).toEqual({ ...DEVNET_PROGRAM_IDS });
+    expect(resolveDevnetProgramIds().nft).toBe("EMYT15LZWaP7Mmmm245kQPbrTyVjG16yZiU9kfNTF3GZ");
+    vi.stubEnv("NEXT_PUBLIC_DEVNET_V22", "1");
+    vi.stubEnv("NEXT_PUBLIC_DEFAULT_NETWORK", "mainnet");
+    expect(resolveDevnetProgramIds()).toEqual({ ...DEVNET_PROGRAM_IDS });
   });
 
   it("NEXT_PUBLIC_PROGRAM_ID (the old, unset-on-Vercel var) no longer affects anything", async () => {

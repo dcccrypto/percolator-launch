@@ -41,6 +41,18 @@ export const DEVNET_PROGRAM_IDS: Readonly<ProgramIdSet> = Object.freeze({
   stake: "VmpVUArRnVkrjaPXQ2qaqCQa3ZrZFgsz7rjeALitF5w",
 });
 
+/**
+ * Devnet v2.2 fresh-ID set (deployed 2026-10-10; ledger v22-devnet-fresh-2026-10-10.md), the default of a v2.2 build
+ * (NEXT_PUBLIC_DEVNET_V22=1). Kept as one set: wrapper 6kpg2wi7 pins nft 27LWmR72 in SetNftProgramId, so mixing it with
+ * the v2 nft EMYT15LZ answers Custom 9 and the create wizard silently fell back to step-by-step signing (QA E2E-1).
+ */
+export const DEVNET_V22_PROGRAM_IDS: Readonly<ProgramIdSet> = Object.freeze({
+  wrapper: "6kpg2wi7vwkn7E9rvodXSktYRhna8TWjiZrC1dBek6NM",
+  matcher: "AsHvEJ8zNctKmdeS57H5E4w6nkTLi3bPVpd6ZCLc2ayN",
+  nft: "27LWmR72Ru1NCkbN2xgxB7BgYcTUrU7qeEJoV3D8sZh1",
+  stake: "7JrgAUHi4PxaRv5JKHoGAxodDFbozYexpERei66Xgq4V",
+});
+
 export const MAINNET_PROGRAM_IDS: Readonly<Omit<ProgramIdSet, "nft">> = Object.freeze({
   wrapper: "ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv",
   matcher: "GDK8wx38kpiSVSfGTVNiSdptX3Z5R4kQyqh6Q3QX6wmi",
@@ -75,21 +87,29 @@ function overridesAllowed(): boolean {
   return v === "1" || v === "true";
 }
 
-/** Devnet program ids after env overrides. Pure function of build-time env. */
+/** Same rule as lib/v22/flag.ts (read literally here: this module stays a leaf). */
+function isDevnetV22Build(): boolean {
+  const v = process.env.NEXT_PUBLIC_DEVNET_V22;
+  return v === "1" || v === "true";
+}
+
+/** Devnet program ids: the v2.2 set on a v2.2 build, else the live v2 set; then env overrides. Pure function of build-time env. */
 export function resolveDevnetProgramIds(): ProgramIdSet {
-  if (isMainnetBuild() || !overridesAllowed()) return { ...DEVNET_PROGRAM_IDS };
+  if (isMainnetBuild()) return { ...DEVNET_PROGRAM_IDS };
+  const base = isDevnetV22Build() ? DEVNET_V22_PROGRAM_IDS : DEVNET_PROGRAM_IDS;
+  if (!overridesAllowed()) return { ...base };
   return {
     wrapper:
       parseProgramIdOverride("NEXT_PUBLIC_WRAPPER_PROGRAM_ID", process.env.NEXT_PUBLIC_WRAPPER_PROGRAM_ID) ??
-      DEVNET_PROGRAM_IDS.wrapper,
+      base.wrapper,
     matcher:
       parseProgramIdOverride("NEXT_PUBLIC_MATCHER_PROGRAM_ID", process.env.NEXT_PUBLIC_MATCHER_PROGRAM_ID) ??
-      DEVNET_PROGRAM_IDS.matcher,
+      base.matcher,
     nft:
       parseProgramIdOverride("NEXT_PUBLIC_NFT_PROGRAM_ID", process.env.NEXT_PUBLIC_NFT_PROGRAM_ID) ??
-      DEVNET_PROGRAM_IDS.nft,
+      base.nft,
     stake:
       parseProgramIdOverride("NEXT_PUBLIC_STAKE_PROGRAM_ID", process.env.NEXT_PUBLIC_STAKE_PROGRAM_ID) ??
-      DEVNET_PROGRAM_IDS.stake,
+      base.stake,
   };
 }
