@@ -30,6 +30,7 @@ import { buildTradeCpiIx, type TradeIdentity } from "@/lib/trade-ix";
 import { rentSol } from "@/lib/rent";
 import { assetWrapperOff } from "@/lib/limits/constants";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
+import { sanitizePriceE6 } from "@/lib/oraclePrice";
 
 /** offset_of!(AssetOracleProfileV16, next_portfolio_id); the profile opens the asset wrapper. */
 export const OP_NEXT_PORTFOLIO_ID = 480;
@@ -65,28 +66,125 @@ export function firstTradeDepositAtoms(marginAtoms: bigint, feeAtoms: bigint, de
  *
  * Max M satisfies firstTradeDepositAtoms(M - A, fee(M)) <= W, with fee(M) = M * lev * feeBps:
  *   1.1 * (M - A + M*k) <= W - cent   =>   M <= ((W - cent) / 1.1 + A) / (1 + k),
- * k = leverage100 * feeBps / 1e6. Never less than A (in-market capital alone needs no deposit).
+ * k = leverage100 * feeBps / 1e6.
+ *
+ * The engine's gate is what decides, not the ticket's margin. It charges the taker fee first, then
+ * needs equity >= max(notional x IM, floor) + a target-lag penalty, with the notional at ITS
+ * effective price (v16 compute_account_health_cert / target_effective_lag_loss_penalty), while the
+ * ticket sizes from the display feed. engineGateBps turns that into two numbers vs the display:
+ * the price ratio r and the lag penalty. A margin M at leverage lev then needs
+ * M x lev x (IM x r + lag + fee x r). At a max leverage that divides 10000 (10x, 5x, ...) there is
+ * no slack, so an unadjusted Max was refused Custom(49) on every fee-charging market.
+ * Omitting initialMarginBps keeps the legacy cap.
  */
 export function tradableMarginAtoms(p: {
   inMarketAvailable: bigint;
   walletAtoms: bigint;
   leverage100: number;
   feeBps: bigint;
+  /** The market's initial margin; omitted = no engine-gate cap (legacy). */
+  initialMarginBps?: bigint;
+  /** engineGateBps for the order's side; omitted = engine price equals the display price. */
+  gate?: EngineGate;
   decimals?: number;
 }): bigint {
   // 2026-10-02 (live report): the 10% deposit buffer must never shrink what the ticket offers —
   // "Available 9,154" against a 10.1k wallet read as missing money. The buffer is now taken only
   // from what the wallet has left (fundDepositAtoms), so the whole wallet backs margin + fee:
-  //   (M - A) + M*k <= W - cent   =>   M <= (W - cent + A) / (1 + k)
+  //   max(M, engine IM) - A + fee <= W - cent
   const A = p.inMarketAvailable > 0n ? p.inMarketAvailable : 0n;
   const decimals = p.decimals ?? 6;
   const cent = decimals >= 2 ? 10n ** BigInt(decimals - 2) : 1n;
   const W = p.walletAtoms - cent;
-  if (W <= 0n) return A;
   const lev100 = BigInt(Math.max(100, Math.round(p.leverage100)));
   const fee = p.feeBps > 0n ? p.feeBps : 0n;
-  const m = ((W + A) * 1_000_000n) / (1_000_000n + lev100 * fee);
-  return m > A ? m : A;
+  const im = p.initialMarginBps ?? 0n;
+  const { r, lag } = gateOf(p.gate);
+  // Per unit of margin, scaled by GATE_SCALE: the engine IM (with the lag penalty) and the fee.
+  const imPer = lev100 * (im * r + lag * RATIO_ONE);
+  const feePer = lev100 * fee * r;
+  if (W > 0n) {
+    // Bundled: the ticket deposits max(M, engine IM) - A + fee, so the gate holds after the fee.
+    const m = ((W + A) * GATE_SCALE) / ((imPer > GATE_SCALE ? imPer : GATE_SCALE) + feePer);
+    if (m > A) return m;
+  }
+  // No deposit: engine IM + fee must fit A. Below max leverage that is already true at M = A.
+  if (im <= 0n || imPer + feePer <= GATE_SCALE) return A;
+  const m = ((A > MAX_PAD_ATOMS ? A - MAX_PAD_ATOMS : 0n) * GATE_SCALE) / (imPer + feePer);
+  return m;
+}
+
+/** The engine's gate vs the display price, for one side (engineGateBps). */
+export interface EngineGate {
+  /** Engine price / display, bps, rounded up; 10_000 = at or below the display price. */
+  ratioBps: bigint;
+  /** The engine's target-lag penalty as a share of the display notional, bps, rounded up. */
+  lagBps: bigint;
+}
+
+/** 10_000 bps = 1x. */
+const RATIO_ONE = 10_000n;
+/** lev100 (x100) x bps (x1e4) x ratio bps (x1e4). */
+const GATE_SCALE = 10_000_000_000n;
+/**
+ * The engine ceils each term twice (risk_notional_ceil, then margin_requirement / checked_fee_bps),
+ * so it can sit up to 2 atoms above our single ceil per term: engineOpenNeedAtoms pads each by 2.
+ * Max keeps 3 atoms per term back (our ceil + that pad) x 3 terms, so it never trips that check.
+ */
+const ENGINE_CEIL_PAD = 2n;
+const MAX_PAD_ATOMS = 9n;
+
+const gateOf = (g?: EngineGate) => ({
+  r: g && g.ratioBps > RATIO_ONE ? g.ratioBps : RATIO_ONE,
+  lag: g && g.lagBps > 0n ? g.lagBps : 0n,
+});
+
+/**
+ * The engine's IM and fee for an order sized off `displayE6`, relative to it:
+ *  - ratioBps: IM and the fee are charged on size x the engine price. Both the current effective
+ *    price and the target it is moving toward count (it can step up before the order lands); a
+ *    price at or below the display adds nothing.
+ *  - lagBps: while the effective price lags its target the engine adds the WHOLE adverse gap to
+ *    initial margin (a long when the target is below, a short when it is above), not IM x gap.
+ * An unreadable engine view adds nothing (the ticket's other paths treat a missing on-chain read
+ * the same way).
+ */
+export function engineGateBps(
+  displayE6: bigint | null | undefined,
+  engine: { effectivePriceE6: bigint; targetPriceE6: bigint } | null,
+  side: "long" | "short",
+): EngineGate {
+  const none = { ratioBps: RATIO_ONE, lagBps: 0n };
+  if (!engine || !displayE6 || displayE6 <= 0n) return none;
+  const sane = (v: unknown) => (typeof v === "bigint" ? sanitizePriceE6(v) : 0n);
+  const eff = sane(engine.effectivePriceE6);
+  const target = sane(engine.targetPriceE6);
+  if (eff === 0n) return none;
+  const up = (n: bigint) => (n * RATIO_ONE + displayE6 - 1n) / displayE6;
+  const p = eff > target ? eff : target;
+  const adverse = target === 0n ? 0n : side === "long" ? (target < eff ? eff - target : 0n) : target > eff ? target - eff : 0n;
+  return { ratioBps: p > displayE6 ? up(p) : RATIO_ONE, lagBps: adverse > 0n ? up(adverse) : 0n };
+}
+
+/**
+ * What the engine's gate needs for an order of collateral notional `notionalAtoms` sized off the
+ * display price: base IM, the target-lag penalty and the taker fee, each rounded up like the
+ * engine plus ENGINE_CEIL_PAD. The caller applies the IM floor to `im` before adding `lag`.
+ */
+export function engineOpenNeedAtoms(
+  notionalAtoms: bigint,
+  initialMarginBps: bigint,
+  feeBps: bigint,
+  gate?: EngineGate,
+): { im: bigint; lag: bigint; fee: bigint } {
+  const { r, lag } = gateOf(gate);
+  const term = (num: bigint, den: bigint) => (num > 0n ? (num + den - 1n) / den + ENGINE_CEIL_PAD : 0n);
+  if (notionalAtoms <= 0n) return { im: 0n, lag: 0n, fee: 0n };
+  return {
+    im: term(notionalAtoms * initialMarginBps * r, 100_000_000n),
+    lag: term(notionalAtoms * lag, RATIO_ONE),
+    fee: term(notionalAtoms * feeBps * r, 100_000_000n),
+  };
 }
 
 /**
