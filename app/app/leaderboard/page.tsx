@@ -6,6 +6,7 @@ import gsap from "gsap";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
+import { traderPath } from "@/lib/trader-profile";
 
 /* ── Constants ────────────────────────────────────────────── */
 /** True when deployed against mainnet-beta (GH#1572, GH#1573) */
@@ -457,12 +458,15 @@ export default function LeaderboardPage() {
                       {String(entry.rank).padStart(2, "0")}
                     </span>
 
-                    {/* Trader address */}
-                    <span
-                      className={`truncate tabular-nums ${isTop3 ? "text-[var(--text)]" : "text-[var(--text-secondary)]"}`}
-                      title={entry.trader}
-                    >
-                      {shortenAddr(entry.trader)}
+                    {/* Trader address: opens the public /trader/<wallet> profile. */}
+                    <span className="min-w-0 truncate">
+                      <Link
+                        href={traderPath(entry.trader)}
+                        title={`${entry.trader} — view profile`}
+                        className={`tabular-nums underline-offset-4 transition-colors hover:text-[var(--accent)] hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)] ${isTop3 ? "text-[var(--text)]" : "text-[var(--text-secondary)]"}`}
+                      >
+                        {shortenAddr(entry.trader)}
+                      </Link>
                       {isMe && <span className="ml-2 text-[9px] uppercase tracking-[0.12em] text-[var(--accent)]">you</span>}
                     </span>
 

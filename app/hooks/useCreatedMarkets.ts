@@ -61,13 +61,14 @@ export interface CreatedMarket extends DiscoveredMarket {
 }
 
 /**
- * Returns markets created by the connected wallet.
+ * Returns markets created by the connected wallet, or by `wallet` when given (the public
+ * /trader/<wallet> profile; omitted, the hook behaves exactly as before for /my-markets).
  *
  * Incomplete launches are matched through their remaining wallet authority.
  * Completed launches are recovered through creator-owned LP portfolios
  * after marketauth rotates. Trading portfolios remain excluded.
  */
-export function useCreatedMarkets() {
+export function useCreatedMarkets(wallet?: string | null) {
   const { publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
   const { markets, loading: discoveryLoading, error: discoveryError, refetch: discoveryRefetch } = useMarketDiscovery();
@@ -109,7 +110,7 @@ export function useCreatedMarkets() {
   });
   const [creatorScanGeneration, setCreatorScanGeneration] = useState(0);
 
-  const walletStr = publicKey?.toBase58() ?? null;
+  const walletStr = wallet !== undefined ? wallet : publicKey?.toBase58() ?? null;
 
   // Keep the latest discovery objects without making the ownership
   // RPC scan depend on the markets array reference itself.
@@ -423,7 +424,7 @@ export function useCreatedMarkets() {
     myMarkets: enrichedMarkets,
     loading: discoveryLoading || creatorScanLoading,
     error: discoveryError ?? creatorScanError,
-    connected: !!publicKey,
+    connected: wallet !== undefined ? !!wallet : !!publicKey,
     /** Refresh market discovery and wallet-scoped creator ownership. */
     refetch,
     /** Current on-chain slot from the v17 enrichment fetch — null until it resolves. */
