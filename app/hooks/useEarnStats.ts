@@ -37,8 +37,8 @@ export interface MarketVaultInfo {
   totalOI: number;
   /** Max OI capacity (based on LP capital × max leverage) */
   maxOI: number;
-  /** Insurance fund balance */
-  insuranceFund: number;
+  /** Insurance fund balance (collateral atoms); null when no stats row carries it (not $0). */
+  insuranceFund: number | null;
   /** 24h volume in USD */
   volume24h: number;
   /** Trading fee bps */
@@ -85,7 +85,8 @@ export interface EarnStats {
   /** Platform-wide OI utilization */
   oiUtilPct: number;
   /** Insurance fund total */
-  totalInsurance: number;
+  /** Sum of the markets whose insurance is known; null when none is. */
+  totalInsurance: number | null;
   /** Per-market vault breakdown */
   markets: MarketVaultInfo[];
   /** Total 24h fee revenue estimate (USD) */
@@ -99,7 +100,7 @@ const DEFAULT_STATS: EarnStats = {
   totalOI: 0,
   maxOI: 0,
   oiUtilPct: 0,
-  totalInsurance: 0,
+  totalInsurance: null,
   markets: [],
   dailyFeeRevenue: 0,
   unvaluedSymbols: [],
@@ -189,7 +190,7 @@ function generateMockStats(): EarnStats {
   const tvl = markets.reduce((s, m) => s + m.vaultBalance / (10 ** m.decimals), 0);
   const totalOI = markets.reduce((s, m) => s + m.totalOI, 0);
   const maxOI = markets.reduce((s, m) => s + m.maxOI, 0);
-  const totalInsurance = markets.reduce((s, m) => s + m.insuranceFund / (10 ** m.decimals), 0);
+  const totalInsurance = markets.reduce((s, m) => s + (m.insuranceFund ?? 0) / (10 ** m.decimals), 0);
   const dailyFeeRevenue = markets.reduce(
     (s, m) => s + (m.volume24h * m.tradingFeeBps) / 10_000,
     0,
@@ -597,8 +598,9 @@ export function buildMarketVaultInfo(
     ? 0
     : (rowVolumeUsd(row as { volume_24h?: number | null; volume_24h_usd?: number | null; last_price?: number | null } | undefined) ?? 0);
 
-  const insuranceRaw = Number(row?.insurance_fund ?? 0);
-  const insuranceFund = insuranceRaw > 0 && insuranceRaw < 1e13 ? insuranceRaw : 0;
+  // No stats row (a registered-only market) or no readable value is unknown, not an empty fund.
+  const insuranceRaw = row?.insurance_fund == null ? NaN : Number(row.insurance_fund);
+  const insuranceFund = Number.isFinite(insuranceRaw) && insuranceRaw >= 0 && insuranceRaw < 1e13 ? insuranceRaw : null;
 
   const rawMaxOI = vaultUsd * maxLeverage;
   const maxOI = Math.max(rawMaxOI, totalOI);
@@ -720,7 +722,10 @@ export function computeAggregates(markets: MarketVaultInfo[]): Omit<EarnStats, '
   const tvl = markets.reduce((s, m) => s + m.vaultBalance / (10 ** m.decimals), 0);
   const totalOI = markets.reduce((s, m) => s + m.totalOI, 0);
   const maxOI = markets.reduce((s, m) => s + m.maxOI, 0);
-  const totalInsurance = markets.reduce((s, m) => s + m.insuranceFund / (10 ** m.decimals), 0);
+  const insured = markets.filter((m) => m.insuranceFund != null);
+  const totalInsurance = insured.length > 0
+    ? insured.reduce((s, m) => s + (m.insuranceFund as number) / (10 ** m.decimals), 0)
+    : null;
   const unvaluedSymbols = markets.filter((m) => m.unvalued).map((m) => m.symbol);
   const dailyFeeRevenue = markets.reduce(
     (s, m) => s + (m.volume24h * m.tradingFeeBps) / 10_000,

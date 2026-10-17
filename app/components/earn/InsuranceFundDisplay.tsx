@@ -67,12 +67,16 @@ export function InsuranceFundDisplay({
 
         {/* Total */}
         <div className="mb-4">
-          <AnimatedNumber
-            value={stats.totalInsurance}
-            prefix="$"
-            decimals={0}
-            className="text-2xl font-bold text-[var(--text)]"
-          />
+          {stats.totalInsurance == null ? (
+            <span className="text-2xl font-bold text-[var(--text)]">—</span>
+          ) : (
+            <AnimatedNumber
+              value={stats.totalInsurance}
+              prefix="$"
+              decimals={0}
+              className="text-2xl font-bold text-[var(--text)]"
+            />
+          )}
           <p className="text-[11px] text-[var(--text-secondary)] mt-1">
             Total insurance across all markets
           </p>
@@ -109,7 +113,8 @@ export function InsuranceFundDisplay({
               By Market
             </div>
             <div className="space-y-2">
-              {[...stats.markets]
+              {stats.markets
+                .filter((m): m is typeof m & { insuranceFund: number } => m.insuranceFund != null)
                 .sort((a, b) => b.insuranceFund - a.insuranceFund)
                 .slice(0, 5)
                 .map((m) => (

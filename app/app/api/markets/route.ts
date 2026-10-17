@@ -124,8 +124,9 @@ const DEVNET_ROW_TEMPLATE: Record<string, unknown> = {
   open_interest_short: 0,
   total_open_interest: 0,
   total_open_interest_usd: 0,
-  insurance_fund: 0,
-  insurance_balance: 0,
+  // Not read for these static rows: unknown (null), not an empty fund.
+  insurance_fund: null,
+  insurance_balance: null,
   total_accounts: 0,
   funding_rate: null,
   net_lp_pos: 0,
@@ -284,11 +285,12 @@ function discoveredToApiRow(
     const playgroundMeta = PLAYGROUND_SLAB_META[slabAddress];
     // Live engine stats parsed from the raw market-group bytes (see the extra
     // getMultipleAccountsInfo read in discoverMarketsOnChain). undefined when
-    // that read failed — fields then keep the previous zeroed placeholders.
+    // that read failed — OI then keeps the zeroed placeholders and insurance is null (unknown).
     const oiLong = v17Oi ? Number(v17Oi.totalLongOiQ) : 0;
     const oiShort = v17Oi ? Number(v17Oi.totalShortOiQ) : 0;
     const totalOi = oiLong + oiShort;
-    const insurance = v17Oi ? Number(v17Oi.insuranceBalance) : 0;
+    // A failed read leaves the fund unknown (null): Earn and my-markets show "—" for it, not $0.
+    const insurance = v17Oi ? Number(v17Oi.insuranceBalance) : null;
     return {
       slab_address: slabAddress,
       program_id: programId,
@@ -417,7 +419,7 @@ async function discoverMarketsOnChain(
     // bytes (discoverMarkets returns parsed WrapperConfigV17 only, not the
     // embedded V16ConfigAccount that carries initialMarginBps — see
     // lib/v17-engine-config.ts) — one batched RPC read for all v17 slabs.
-    // Degrades gracefully: on failure the rows keep zeroed stats / fall back to
+    // Degrades gracefully: on failure the rows keep zeroed OI, unknown (null) insurance / fall back to
     // the default max_leverage, which is exactly the pre-enrichment behavior.
     const v17Stats = new Map<string, V17MarketGroupOI>();
     const v17RiskParams = new Map<string, RiskParams | null>();

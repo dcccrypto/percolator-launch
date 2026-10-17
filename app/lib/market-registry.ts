@@ -268,8 +268,10 @@ async function loadMergedMarketRowsUncached(): Promise<MarketRegistryRow[] | nul
       open_interest_short: live.oiShortQ,
       total_open_interest: live.totalOiQ,
       total_open_interest_usd: live.totalOiUsd,
-      insurance_fund: live.insurance,
-      insurance_balance: live.insurance,
+      // An unreadable market group keeps the stored value ("partial reads degrade to pre-merge
+      // behaviour", as max_leverage below) instead of writing a 0 or a null over it.
+      insurance_fund: live.insurance ?? m.insurance_fund,
+      insurance_balance: live.insurance ?? m.insurance_balance,
       vault_balance: live.vault,
       c_tot: live.cTot,
       // Real per-market leverage cap from on-chain initialMarginBps. The stored

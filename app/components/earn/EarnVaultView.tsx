@@ -172,7 +172,7 @@ export function EarnVaultView() {
 
 /* ── Secondary info strip — slim row of small cards below the table+rail ── */
 
-/** `totalInsurance` null = not read yet (the header shows its loading state for the same figure). */
+/** `totalInsurance` null = not read yet, or unknown for every market (no stats row carries it). */
 function EarnInfoStrip({ totalInsurance }: { totalInsurance: number | null }) {
   return (
     <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">

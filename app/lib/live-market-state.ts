@@ -52,8 +52,8 @@ export interface LiveMarketState {
   totalOiQ: number;
   /** Total OI valued at the mark price. Null when there is no usable price. */
   totalOiUsd: number | null;
-  /** Group-level insurance reserve (micro-units). */
-  insurance: number;
+  /** Group-level insurance reserve (micro-units). Null when the market group couldn't be read. */
+  insurance: number | null;
   /** Engine vault (micro-units) — total collateral held by the market. */
   vault: number;
   /** Total collateral across portfolios (micro-units). */
@@ -195,7 +195,7 @@ function parseLiveState(data: Uint8Array, slabKey: PublicKey): LiveMarketState |
 
   let oiLongQ = 0;
   let oiShortQ = 0;
-  let insurance = 0;
+  let insurance: number | null = null;
   try {
     const oi = parseMarketGroupV17OI(data);
     // Sanitize sentinel/negative on-chain values (u64::MAX from an uninitialized
@@ -205,7 +205,7 @@ function parseLiveState(data: Uint8Array, slabKey: PublicKey): LiveMarketState |
     oiShortQ = Number(sanitizeOnChainValue(oi.totalShortOiQ));
     insurance = Number(sanitizeOnChainValue(oi.insuranceBalance));
   } catch {
-    // OI unreadable — zeros, same as the pre-existing degradation behaviour.
+    // OI unreadable: zeros, the pre-existing degradation; insurance stays null (unknown, not an empty fund).
   }
 
   let vault = 0;
