@@ -492,7 +492,34 @@ export async function POST(req: NextRequest) {
     resolvedLogo = null;
   }
 
-  const dbResult = await upsertRegisteredMarketRow(getServiceClient(), {
+  let registrationDb: ReturnType<typeof getServiceClient>;
+
+  try {
+    registrationDb = getServiceClient();
+  } catch (err) {
+    console.error(
+      "[playground/keeper-register] registration store unavailable:",
+      err instanceof Error ? err.message : String(err),
+    );
+
+    return NextResponse.json(
+      {
+        ok: false,
+        registered: false,
+        error: "Market registration is temporarily unavailable. Please retry later.",
+        code: "registration-store-unavailable",
+      },
+      {
+        status: 503,
+        headers: {
+          "Retry-After": "60",
+          "Cache-Control": "no-store",
+        },
+      },
+    );
+  }
+
+  const dbResult = await upsertRegisteredMarketRow(registrationDb, {
     slab_address: slabAddress,
     mint_address: str(p.mint_address) ?? PLAYGROUND_COLLATERAL_MINT,
     symbol: str(p.symbol) ?? symbol ?? "UNKNOWN",

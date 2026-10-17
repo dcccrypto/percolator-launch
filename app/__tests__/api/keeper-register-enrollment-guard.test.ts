@@ -222,3 +222,44 @@ describe("review M-7: only a finished, keeper-priced market under the ceilings i
     expect(attempt.retryable).toBe(true);
   });
 });
+
+// V22-NO-SUPABASE-REGRESSION
+describe("preview without Supabase", () => {
+  it("returns controlled 503 for a valid registration when DB is unavailable", async () => {
+    const supabase = await import("@/lib/supabase");
+    const spy = vi.spyOn(supabase, "getServiceClient").mockImplementation(() => {
+      throw new Error("Supabase env vars not set");
+    });
+
+    try {
+      const res = await post(REQUEST);
+      expect(res.status).toBe(503);
+      expect(res.headers.get("Retry-After")).toBe("60");
+      expect(res.headers.get("Cache-Control")).toBe("no-store");
+      expect(await res.json()).toMatchObject({
+        ok: false,
+        registered: false,
+        code: "registration-store-unavailable",
+      });
+      refusedNothingWritten();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("still rejects malformed creation proof before DB access", async () => {
+    const supabase = await import("@/lib/supabase");
+    const spy = vi.spyOn(supabase, "getServiceClient").mockImplementation(() => {
+      throw new Error("Supabase env vars not set");
+    });
+
+    try {
+      const res = await post({ ...REQUEST, proofTx: "invalid" });
+      expect(res.status).toBe(400);
+      expect(spy).not.toHaveBeenCalled();
+      refusedNothingWritten();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
