@@ -65,7 +65,8 @@ export const assetVaultLpAccountOffsetP3 = (i: number, layout?: Parameters<typeo
 export const readAssetPricesP3: typeof P3.readAssetPricesP3 = (d, i) => (on() ? P3.readAssetPricesP3(d, i) : oldReadAssetPricesP3(d, i));
 export const decodeAssetVaultLpP3: typeof oldDecodeAssetVaultLpP3 = (d, i) => (on() ? P3.decodeAssetVaultLpP3(d, i) : oldDecodeAssetVaultLpP3(d, i));
 export const decodeAssetVaultLpDrawP3: typeof P3.decodeAssetVaultLpDrawP3 = (d, i) => (on() ? P3.decodeAssetVaultLpDrawP3(d, i) : oldDecodeAssetVaultLpDrawP3(d, i));
-export const decodeVaultLpStateP3: typeof P3.decodeVaultLpStateP3 = (d) => (on() ? P3.decodeVaultLpStateP3(d) : oldDecodeVaultLpStateP3(d));
+// Flag off: the installed decoder refuses a non-zero [232..240) (v2.1 padding), so a decoded v2.1 state has no backstop.
+export const decodeVaultLpStateP3: typeof P3.decodeVaultLpStateP3 = (d) => (on() ? P3.decodeVaultLpStateP3(d) : { ...oldDecodeVaultLpStateP3(d), backstopOutstandingAtoms: 0n });
 export const decodeResolvedPayoutReceiptP3: typeof P3.decodeResolvedPayoutReceiptP3 = (d) => (on() ? P3.decodeResolvedPayoutReceiptP3(d) : oldDecodeResolvedPayoutReceiptP3(d));
 export const listOpenResolvedReceiptsP3: typeof P3.listOpenResolvedReceiptsP3 = (c, p, m, layout) =>
   on() ? P3.listOpenResolvedReceiptsP3(c, p, m, layout ?? undefined) : oldListOpenResolvedReceiptsP3(c, p, m);

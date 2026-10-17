@@ -79,8 +79,12 @@ export const VAULT_LP_STATE_OFF_P3 = Object.freeze({
   seniorClaimAtoms: 144, juniorDepositedAtoms: 160, juniorWithdrawnAtoms: 176,
   seniorFeeCreditedAtoms: 192, recalledAtoms: 208, assetIndex: 224, juniorFloorBps: 226,
   seniorFeeShareBps: 228, version: 230, bump: 231,
-  /** `_padding` [232..240) must be zero (program `validate_vault_lp_state`). */
-  padding: 232,
+  /**
+   * `backstop_outstanding_atoms` (u64) [232..240): G9 insurance the backstop (tag 111) lent to the vault LP and not yet
+   * repaid. Was the zero `_padding`; the deployed wrapper (aca02ba6 `state::VaultLpStateV18`) does NOT require it to be
+   * zero (`validate_vault_lp_state` checks version / keys / floor / fee share only). Audit 2026-10-17 S3-D1a.
+   */
+  backstopOutstandingAtoms: 232,
   /** P3 senior draw FINAL `d119eebd` (was `_reserved`). */
   seniorDrawnAtoms: 240, seniorDrawOutstandingAtoms: 256,
 } as const);
@@ -189,6 +193,8 @@ export interface VaultLpStateP3 {
   seniorFeeShareBps: number;
   version: number;
   bump: number;
+  /** G9 insurance lent to the vault LP by the backstop (tag 111), not yet repaid; senior to Earn in recovery. */
+  backstopOutstandingAtoms: bigint;
   /** Cumulative senior backing moved into the vault LP's capital by booked draws (junior cover excluded). */
   seniorDrawnAtoms: bigint;
   /**
@@ -214,7 +220,7 @@ function key(d: Uint8Array, o: number): PublicKey {
 
 /**
  * Decode a `VaultLpStateV18` account (kind 9, >= 272 bytes). Mirrors `read_vault_lp_state`'s
- * header + validation (version 1, floor 1000..=10000, senior fee share 10000, zero padding).
+ * header + validation (version 1, floor 1000..=10000, senior fee share 10000).
  *
  * @param data  Raw account bytes.
  * @returns Decoded state.
@@ -236,12 +242,12 @@ export function decodeVaultLpStateP3(data: Uint8Array): VaultLpStateP3 {
     seniorFeeCreditedAtoms: u128(v, O.seniorFeeCreditedAtoms), recalledAtoms: u128(v, O.recalledAtoms),
     assetIndex: v.getUint16(O.assetIndex, true), juniorFloorBps: v.getUint16(O.juniorFloorBps, true),
     seniorFeeShareBps: v.getUint16(O.seniorFeeShareBps, true), version: data[O.version], bump: data[O.bump],
+    backstopOutstandingAtoms: v.getBigUint64(O.backstopOutstandingAtoms, true),
     seniorDrawnAtoms: u128(v, O.seniorDrawnAtoms), seniorDrawOutstandingAtoms: u128(v, O.seniorDrawOutstandingAtoms),
   };
-  // Only `_padding` must be zero: from `d119eebd` bytes [240..272) hold the senior-draw counters.
-  const padZero = data.subarray(O.padding, O.padding + 8).every((b) => b === 0);
-  if (st.version !== 1 || st.juniorFloorBps < 1_000 || st.juniorFloorBps > 10_000 || st.seniorFeeShareBps !== 10_000 || !padZero) {
-    throw new Error("VaultLpStateV18: invalid (version/floor/fee share/padding) — the program would reject it too");
+  // The checks `validate_vault_lp_state` makes on these fields. Bytes [232..240) are `backstop_outstanding_atoms`, not padding.
+  if (st.version !== 1 || st.juniorFloorBps < 1_000 || st.juniorFloorBps > 10_000 || st.seniorFeeShareBps !== 10_000) {
+    throw new Error("VaultLpStateV18: invalid (version/floor/fee share) — the program would reject it too");
   }
   return st;
 }
