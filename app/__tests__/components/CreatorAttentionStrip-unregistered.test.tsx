@@ -41,7 +41,7 @@ describe("My Markets: an unregistered launch", () => {
 
   it("the launching browser still has the proof + request: offers the retry and sends them", async () => {
     const slab = SLAB.toBase58();
-    window.localStorage.setItem(`perc.keeperProofTx.${slab}`, "PROOFSIG");
+    window.localStorage.setItem(`perc.keeperProofTx.${slab}`, "2U4TFzSboHomgWAo1REiwVMC6jA8BZR77VdeNBChnE4NvSDsghA1Bg59oJ3fP6Gzk4FTv6THAJANRoYwV5Q1PRbY");
     window.localStorage.setItem(`perc.keeperRequest.${slab}`, JSON.stringify({ slabAddress: slab, mainnetCA: "CA1", dexPoolAddress: POOL, dexType: "pumpswap", symbol: "TOK" }));
     retry.mockResolvedValue({ registered: true, message: "ok" });
     renderStrip();

@@ -215,7 +215,7 @@ describe("review M-7: only a finished, keeper-priced market under the ceilings i
     const res = await post(REQUEST);
     const { postKeeperRegistration } = await import("@/lib/keeper-register-client");
     const attempt = await postKeeperRegistration(
-      { slabAddress: SLAB, dexPoolAddress: "x", proofTx: "p" },
+      { slabAddress: SLAB, dexPoolAddress: "x", proofTx: REQUEST.proofTx },
       async () => res,
     );
     expect(attempt.registered).toBe(false);

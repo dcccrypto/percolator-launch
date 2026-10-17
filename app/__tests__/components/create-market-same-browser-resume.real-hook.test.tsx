@@ -151,7 +151,7 @@ const SLAB = "7YttLkHDoNj9wDbjdtzpXUp9ufJDGNYTx3rW3jgN5VBw";
 const PIN_POOL = "9wFFyRfZBsuAha4YcuxcXLKwMxJR43S7fPfQLusDBzvT";
 const PIN_CA = "So11111111111111111111111111111111111111112";
 const seedLaunch = (o: { payload?: boolean; request?: boolean } = {}) => {
-  localStorage.setItem(`perc.keeperProofTx.${SLAB}`, "proofSig");
+  localStorage.setItem(`perc.keeperProofTx.${SLAB}`, "2U4TFzSboHomgWAo1REiwVMC6jA8BZR77VdeNBChnE4NvSDsghA1Bg59oJ3fP6Gzk4FTv6THAJANRoYwV5Q1PRbY");
   if (o.payload !== false) {
     localStorage.setItem(`perc.keeperPayload.${SLAB}`, JSON.stringify({
       slab_address: SLAB, deployer: SystemProgram.programId.toBase58(), symbol: "PINNED", name: "pinned token", dex_pool_address: PIN_POOL,

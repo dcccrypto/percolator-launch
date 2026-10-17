@@ -1489,7 +1489,7 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
           const slab = slabPk.toBase58();
           saveProofTx(slab, single.signature);
           if (keeperPayload) rememberRegistrationPayload(slab, keeperPayload);
-          saveRegisterRequest({ slabAddress: slab, mainnetCA: keeperRequestBase.mainnetCA, dexPoolAddress: keeperRequestBase.dexPoolAddress, dexType: keeperRequestBase.dexType, symbol: keeperRequestBase.symbol });
+          saveRegisterRequest({ slabAddress: slab, mainnetCA: keeperRequestBase.mainnetCA, dexPoolAddress: keeperRequestBase.dexPoolAddress, dexType: keeperRequestBase.dexType, symbol: keeperRequestBase.symbol, payloadRequired: true });
         }
         const msg =
           single.status === "unknown"
@@ -2179,7 +2179,7 @@ export function useCreateMarket() {
     };
     // Saved so a later visit can resume a registration this page did not finish
     // (lib/keeper-register-client.ts resumePendingRegistrations).
-    saveRegisterRequest({ slabAddress: slab, mainnetCA: request.mainnetCA, dexPoolAddress: request.dexPoolAddress, dexType: request.dexType, symbol: request.symbol });
+    saveRegisterRequest({ slabAddress: slab, mainnetCA: request.mainnetCA, dexPoolAddress: request.dexPoolAddress, dexType: request.dexType, symbol: request.symbol, payloadRequired: true });
     setState((s) => ({ ...s, keeperPhase: "connecting", keeperMessage: KEEPER_REGISTER_COPY.connecting }));
     void runKeeperRegistration({
       attempt: () => postKeeperRegistration(request),

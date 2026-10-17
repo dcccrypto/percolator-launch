@@ -123,7 +123,7 @@ describe("launch success: actions while the live price is still connecting", () 
 });
 
 /** The real registration loop driving the real screen, with keeper-register answering 502. */
-const REG_REQ = { slabAddress: SLAB, dexPoolAddress: "P", proofTx: "sig" };
+const REG_REQ = { slabAddress: SLAB, dexPoolAddress: "P", proofTx: "2U4TFzSboHomgWAo1REiwVMC6jA8BZR77VdeNBChnE4NvSDsghA1Bg59oJ3fP6Gzk4FTv6THAJANRoYwV5Q1PRbY" };
 function Harness({ fetchImpl, onRetry }: { fetchImpl: typeof fetch; onRetry?: () => void }) {
   const [phase, setPhase] = useState<KeeperRegisterPhase>("connecting");
   const [message, setMessage] = useState<string>(KEEPER_REGISTER_COPY.connecting);

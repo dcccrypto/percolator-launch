@@ -11,15 +11,24 @@
  */
 import { useEffect } from "react";
 import { getConfig } from "@/lib/config";
-import { RESUME_MAX_MS, RESUME_MAX_PASSES, RESUME_REPEAT_MS, resumePendingRegistrations } from "@/lib/keeper-register-client";
+import { RESUME_MAX_MS, RESUME_MAX_PASSES, RESUME_REPEAT_MS, pendingRegistrationSlabs, resumePendingRegistrations } from "@/lib/keeper-register-client";
 import { pollWhenVisible } from "@/lib/pollWhenVisible";
 
-let ranThisLoad = false;
+interface SlabRetry {
+  attempts: number;
+  startedAt: number;
+  nextAt: number;
+  inFlight: boolean;
+  exhausted: boolean;
+  terminal: boolean;
+}
+
+// A component effect may replay or remount in the same tab. A page load starts a new session.
+const retries = new Map<string, SlabRetry>();
 
 export function ResumeKeeperRegistrations(): null {
   useEffect(() => {
-    if (ranThisLoad || getConfig().network !== "devnet") return;
-    ranThisLoad = true;
+    if (getConfig().network !== "devnet") return;
     let store: Storage | null = null;
     try {
       store = window.localStorage;
@@ -28,31 +37,88 @@ export function ResumeKeeperRegistrations(): null {
     }
     if (!store) return;
     const s = store;
-    let waiting: string[] | null = null; // null = the first pass has not finished
-    let running = false;
-    let passes = 0;
-    let nextAt = 0;
-    const startedAt = Date.now();
+    let active = true;
+    let polling = false;
     let dispose: () => void = () => undefined;
-    const pass = async () => {
-      if (running || Date.now() < nextAt) return;
-      running = true;
-      try {
-        passes++;
-        const r = await resumePendingRegistrations({ store: s, ...(waiting ? { only: waiting } : {}) });
-        waiting = r.retryLater;
-        nextAt = Date.now() + Math.max(RESUME_REPEAT_MS, r.retryAfterMs ?? 0);
-        if (waiting.length === 0) dispose();
-      } catch {
-        /* the next tick tries again */
-      } finally {
-        running = false;
-        // Bounded: a standing retryable failure must not keep this tab posting for ever.
-        if (passes >= RESUME_MAX_PASSES || Date.now() - startedAt >= RESUME_MAX_MS) dispose();
+    const pending = () => pendingRegistrationSlabs(s);
+    const syncPolling = () => {
+      if (!active) return;
+      const hasWork = pending().some((slab) => {
+        const state = retries.get(slab);
+        return !state || (!state.exhausted && !state.terminal);
+      });
+      if (hasWork && !polling) {
+        dispose = pollWhenVisible(scan, RESUME_REPEAT_MS);
+        polling = true;
+      } else if (!hasWork && polling) {
+        dispose();
+        polling = false;
       }
     };
-    void pass();
-    dispose = pollWhenVisible(() => void pass(), RESUME_REPEAT_MS);
+    const attempt = async (slab: string) => {
+      let state = retries.get(slab);
+      if (!state) {
+        state = { attempts: 0, startedAt: Date.now(), nextAt: 0, inFlight: false, exhausted: false, terminal: false };
+        retries.set(slab, state);
+      }
+      const now = Date.now();
+      if (state.exhausted || state.terminal) return;
+      if (state.attempts >= RESUME_MAX_PASSES || now - state.startedAt >= RESUME_MAX_MS) {
+        state.exhausted = true;
+        syncPolling();
+        return;
+      }
+      if (state.inFlight || now < state.nextAt) return;
+      state.inFlight = true;
+      state.attempts++;
+      try {
+        const result = await resumePendingRegistrations({ store: s, only: [slab] });
+        if (result.retryLater.includes(slab)) {
+          state.nextAt = Math.max(state.nextAt, Date.now() + Math.max(RESUME_REPEAT_MS, result.retryAfterMs ?? 0));
+        } else {
+          state.terminal = true;
+        }
+      } catch {
+        state.nextAt = Math.max(state.nextAt, Date.now() + RESUME_REPEAT_MS);
+      } finally {
+        state.inFlight = false;
+        if (state.attempts >= RESUME_MAX_PASSES || Date.now() - state.startedAt >= RESUME_MAX_MS) state.exhausted = true;
+        syncPolling();
+      }
+    };
+    const scan = () => {
+      if (!active) return;
+      pending().forEach((slab) => void attempt(slab));
+      syncPolling();
+    };
+    const onPending = (event: Event) => {
+      const slab = (event as CustomEvent<{ slab?: unknown }>).detail?.slab;
+      if (typeof slab === "string" && slab.length > 0) {
+        if (pending().includes(slab)) void attempt(slab);
+        syncPolling();
+      } else {
+        scan();
+      }
+    };
+
+    window.addEventListener(
+      "percolator:keeper-registration-pending",
+      onPending,
+    );
+
+    // Cancel the first scheduled pass during Strict Mode replay.
+    // Only the currently mounted effect performs the initial scan.
+    const initialTimer = setTimeout(scan, 0);
+
+    return () => {
+      active = false;
+      clearTimeout(initialTimer);
+      dispose();
+      window.removeEventListener(
+        "percolator:keeper-registration-pending",
+        onPending,
+      );
+    };
   }, []);
   return null;
 }

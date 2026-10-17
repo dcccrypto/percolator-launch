@@ -15,7 +15,7 @@ import {
   runKeeperRegistration,
 } from "@/lib/keeper-register-client";
 
-const REQ = { slabAddress: "S", dexPoolAddress: "P", proofTx: "sig" };
+const REQ = { slabAddress: "S", dexPoolAddress: "P", proofTx: "2U4TFzSboHomgWAo1REiwVMC6jA8BZR77VdeNBChnE4NvSDsghA1Bg59oJ3fP6Gzk4FTv6THAJANRoYwV5Q1PRbY" };
 const res = (status: number, body: unknown) => ({ ok: status >= 200 && status < 300, status, json: async () => body }) as Response;
 
 describe("AC2: 503, 503, 200 -> connected, no user action", () => {
@@ -37,7 +37,7 @@ describe("AC2: 503, 503, 200 -> connected, no user action", () => {
     expect(waits).toEqual([5_000, 10_000]);
     expect(statuses).toEqual([`connecting:${KEEPER_REGISTER_COPY.connecting}`, `connecting:${KEEPER_REGISTER_COPY.connecting}`, `ready:${KEEPER_REGISTER_COPY.ready}`]);
     const body = JSON.parse(String((fetchImpl.mock.calls[0] as [string, RequestInit])[1].body));
-    expect(body.proofTx).toBe("sig");
+    expect(body.proofTx).toBe(REQ.proofTx);
     expect(body.signature).toBeUndefined();
   });
 

@@ -443,7 +443,7 @@ export function adoptRecoveredLaunch(launch: RecoveredLaunch, store?: KeyStore |
   saveProofTx(r.slabAddress, r.proofTx);
   if (r.payload) saveProofPayload(r.slabAddress, r.payload);
   saveRegisterRequest(
-    { slabAddress: r.slabAddress, mainnetCA: r.mainnetCA, dexPoolAddress: r.dexPoolAddress, dexType: r.dexType, symbol: r.symbol },
+    { slabAddress: r.slabAddress, mainnetCA: r.mainnetCA, dexPoolAddress: r.dexPoolAddress, dexType: r.dexType, symbol: r.symbol, ...(r.payload ? { payloadRequired: true as const } : {}) },
     store,
   );
 }

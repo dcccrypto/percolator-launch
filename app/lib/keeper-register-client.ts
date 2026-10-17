@@ -11,6 +11,7 @@ import type { MarketRegistrationPayload } from "@/lib/market-registration-auth";
 import { PRICE_SOURCE_LOCKED } from "@/lib/market-registration";
 import { UNSUPPORTED_POOL_COPY } from "@/lib/wizard-copy";
 import { GLOBAL_CAP_COPY, PER_CREATOR_CAP_COPY } from "@/lib/keeper-enrollment-guard";
+import { isTxSignature } from "@/lib/keeper-register-memo";
 
 export const KEEPER_REGISTER_BACKOFF_MS = [5_000, 10_000, 20_000, 40_000, 60_000, 60_000] as const;
 export const KEEPER_REGISTER_STEADY_MS = 120_000;
@@ -99,7 +100,25 @@ export interface KeeperRegisterAttempt {
   retryAfterMs?: number;
 }
 
-export async function postKeeperRegistration(req: KeeperRegisterRequest, fetchImpl: typeof fetch = fetch): Promise<KeeperRegisterAttempt> {
+const registrationPosts = new Map<string, Promise<KeeperRegisterAttempt>>();
+
+export function postKeeperRegistration(req: KeeperRegisterRequest, fetchImpl: typeof fetch = fetch): Promise<KeeperRegisterAttempt> {
+  if (!isTxSignature(req.proofTx)) {
+    return Promise.resolve({ registered: false, retryable: false, message: "Invalid proofTx: expected a transaction signature", status: 400 });
+  }
+  const existing = registrationPosts.get(req.slabAddress);
+  if (existing) return existing;
+  const pending = sendKeeperRegistration(req, fetchImpl);
+  registrationPosts.set(req.slabAddress, pending);
+  void pending.then(() => {
+    if (registrationPosts.get(req.slabAddress) === pending) registrationPosts.delete(req.slabAddress);
+  }, () => {
+    if (registrationPosts.get(req.slabAddress) === pending) registrationPosts.delete(req.slabAddress);
+  });
+  return pending;
+}
+
+async function sendKeeperRegistration(req: KeeperRegisterRequest, fetchImpl: typeof fetch): Promise<KeeperRegisterAttempt> {
   try {
     const r = await fetchImpl("/api/playground/keeper-register", {
       method: "POST",
@@ -180,7 +199,7 @@ export async function runKeeperRegistration(d: KeeperRegisterLoopDeps): Promise<
         : i < KEEPER_REGISTER_BACKOFF_MS.length
           ? KEEPER_REGISTER_BACKOFF_MS[i]
           : KEEPER_REGISTER_STEADY_MS;
-    await sleep(wait, d.signal);
+    await sleep(Math.max(wait, r.retryAfterMs ?? 0), d.signal);
   }
 }
 
@@ -208,9 +227,10 @@ const PAYLOAD_KEY = (slab: string) => `perc.keeperPayload.${slab}`;
  * The markets-row payload the creation-tx memo was built with (its digest is in the memo, memo
  * v2), so a registration retried after a reload sends the SAME payload and still verifies.
  */
-export function saveProofPayload(slab: string, payload: MarketRegistrationPayload): void {
+export function saveProofPayload(slab: string, payload: MarketRegistrationPayload, store: KeyStore | null = browserStore()): void {
   try {
-    window.localStorage.setItem(PAYLOAD_KEY(slab), JSON.stringify(payload));
+    store?.setItem(PAYLOAD_KEY(slab), JSON.stringify(payload));
+    if (store) announcePendingRegistration(slab, store);
   } catch {
     /* private mode: the in-memory copy still has it */
   }
@@ -234,6 +254,9 @@ export function loadProofPayload(slab: string): MarketRegistrationPayload | null
 const REQUEST_KEY = (slab: string) => `perc.keeperRequest.${slab}`;
 const REGISTERED_KEY = (slab: string) => `perc.keeperRegistered.${slab}`;
 const PROOF_PREFIX = "perc.keeperProofTx.";
+// New memo-v2 launches require the saved payload; older unmarked requests may have signed null.
+// This flag stays in localStorage only and is never sent to the registration route.
+type SavedRegisterRequest = Omit<KeeperRegisterRequest, "proofTx" | "payload"> & { payloadRequired?: true };
 
 /** Minimal Storage surface (window.localStorage in the app; a Map-backed fake in tests). */
 export interface KeyStore {
@@ -251,22 +274,41 @@ const browserStore = (): KeyStore | null => {
   }
 };
 
-/** The exact request the launch sent (without the proof), so a resume sends the same bytes. */
-export function saveRegisterRequest(req: Omit<KeeperRegisterRequest, "proofTx" | "payload">, store: KeyStore | null = browserStore()): void {
+/** The launch request without proof/payload, plus the local payload-presence contract. */
+function announcePendingRegistration(slab: string, store: KeyStore): void {
+  try {
+    const rawPayload = store.getItem(PAYLOAD_KEY(slab));
+    const payload: unknown = rawPayload ? JSON.parse(rawPayload) : null;
+    if (
+      isTxSignature(store.getItem(`${PROOF_PREFIX}${slab}`)) &&
+      payload && typeof payload === "object" && !Array.isArray(payload) &&
+      loadRegisterRequest(slab, store) &&
+      store.getItem(REGISTERED_KEY(slab)) === null &&
+      typeof window !== "undefined"
+    ) {
+      window.dispatchEvent(new CustomEvent("percolator:keeper-registration-pending", { detail: { slab } }));
+    }
+  } catch {
+    /* private mode */
+  }
+}
+
+export function saveRegisterRequest(req: SavedRegisterRequest, store: KeyStore | null = browserStore()): void {
   try {
     store?.setItem(REQUEST_KEY(req.slabAddress), JSON.stringify(req));
+    if (store) announcePendingRegistration(req.slabAddress, store);
   } catch {
     /* private mode */
   }
 }
 
 /** The registration request this browser saved for a slab (without proof/payload), or null. */
-export function loadRegisterRequest(slab: string, store: KeyStore | null = browserStore()): Omit<KeeperRegisterRequest, "proofTx" | "payload"> | null {
+export function loadRegisterRequest(slab: string, store: KeyStore | null = browserStore()): SavedRegisterRequest | null {
   try {
     const raw = store?.getItem(REQUEST_KEY(slab));
     const v: unknown = raw ? JSON.parse(raw) : null;
     return v && typeof v === "object" && !Array.isArray(v) && (v as { slabAddress?: unknown }).slabAddress === slab
-      ? (v as Omit<KeeperRegisterRequest, "proofTx" | "payload">)
+      ? (v as SavedRegisterRequest)
       : null;
   } catch {
     return null;
@@ -303,20 +345,27 @@ const KEEPER_DEX_TYPE_CANDIDATES: readonly (string | null)[] = ["raydium-clmm", 
  */
 export function registrationCandidates(slab: string, store: KeyStore): KeeperRegisterRequest[] {
   const proofTx = store.getItem(`${PROOF_PREFIX}${slab}`);
-  if (!proofTx) return [];
+  if (!isTxSignature(proofTx)) return [];
   let payload: MarketRegistrationPayload | null = null;
-  try {
-    const raw = store.getItem(`perc.keeperPayload.${slab}`);
-    const v: unknown = raw ? JSON.parse(raw) : null;
-    payload = v && typeof v === "object" && !Array.isArray(v) ? (v as MarketRegistrationPayload) : null;
-  } catch {
-    payload = null;
+  const rawPayload = store.getItem(PAYLOAD_KEY(slab));
+  if (rawPayload !== null) {
+    try {
+      const v: unknown = JSON.parse(rawPayload);
+      if (!v || typeof v !== "object" || Array.isArray(v)) return [];
+      payload = v as MarketRegistrationPayload;
+    } catch {
+      return [];
+    }
   }
   try {
     const raw = store.getItem(REQUEST_KEY(slab));
     if (raw) {
-      const req = JSON.parse(raw) as Omit<KeeperRegisterRequest, "proofTx" | "payload">;
-      if (req && req.slabAddress === slab && typeof req.dexPoolAddress === "string") return [{ ...req, payload, proofTx }];
+      const req = JSON.parse(raw) as SavedRegisterRequest;
+      if (req && req.slabAddress === slab && typeof req.dexPoolAddress === "string") {
+        const { payloadRequired, ...request } = req;
+        if (payloadRequired === true && !payload) return [];
+        return [{ ...request, payload, proofTx }];
+      }
     }
   } catch {
     /* fall through to the payload */
@@ -336,7 +385,7 @@ export function pendingRegistrationSlabs(store: KeyStore): string[] {
     if (!k || !k.startsWith(PROOF_PREFIX)) continue;
     const slab = k.slice(PROOF_PREFIX.length);
     // "1" = registered, "refused" = every candidate refused (final): both are done.
-    if (store.getItem(REGISTERED_KEY(slab)) === null) out.push(slab);
+    if (store.getItem(REGISTERED_KEY(slab)) === null && registrationCandidates(slab, store).length > 0) out.push(slab);
   }
   return out;
 }

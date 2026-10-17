@@ -70,11 +70,12 @@ describe("ChromeGate on /locked", () => {
 });
 
 describe("keeper registration vs the gate's 401", () => {
+  const proof = "2U4TFzSboHomgWAo1REiwVMC6jA8BZR77VdeNBChnE4NvSDsghA1Bg59oJ3fP6Gzk4FTv6THAJANRoYwV5Q1PRbY";
   const res = (status: number, body: unknown) => ({ ok: false, status, json: async () => body }) as Response;
 
   it("a 401 is retryable", async () => {
     const a = await postKeeperRegistration(
-      { slabAddress: "S", dexPoolAddress: "P", proofTx: "sig" },
+      { slabAddress: "S", dexPoolAddress: "P", proofTx: proof },
       vi.fn().mockResolvedValue(res(401, { error: "Playground access required" })) as unknown as typeof fetch,
     );
     expect(a.retryable).toBe(true);
@@ -82,7 +83,7 @@ describe("keeper registration vs the gate's 401", () => {
 
   it("a resume that hits 401 keeps the launch pending instead of marking it refused", async () => {
     const m = new Map<string, string>([
-      ["perc.keeperProofTx.SLAB1", "sig"],
+      ["perc.keeperProofTx.SLAB1", proof],
       ["perc.keeperRequest.SLAB1", JSON.stringify({ slabAddress: "SLAB1", dexPoolAddress: "POOL", dexType: "pumpswap" })],
     ]);
     const store: KeyStore = {

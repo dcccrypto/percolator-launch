@@ -19,7 +19,8 @@ import {
   type KeyStore,
 } from "@/lib/keeper-register-client";
 
-const REQ = { slabAddress: "S", dexPoolAddress: "P", proofTx: "sig" };
+const PROOF = "2U4TFzSboHomgWAo1REiwVMC6jA8BZR77VdeNBChnE4NvSDsghA1Bg59oJ3fP6Gzk4FTv6THAJANRoYwV5Q1PRbY";
+const REQ = { slabAddress: "S", dexPoolAddress: "P", proofTx: PROOF };
 const res = (status: number, body: unknown) => ({ ok: status >= 200 && status < 300, status, json: async () => body }) as Response;
 
 async function waitsFor(statuses: number[]): Promise<number[]> {
@@ -78,7 +79,7 @@ describe("a landed registration announces itself", () => {
     const seen: string[] = [];
     const on = () => seen.push("x");
     window.addEventListener(MARKET_REGISTERED_EVENT, on);
-    const store = mapStore({ "perc.keeperProofTx.S1": "sig", "perc.keeperPayload.S1": JSON.stringify({ dex_pool_address: "P" }) });
+    const store = mapStore({ "perc.keeperProofTx.S1": PROOF, "perc.keeperPayload.S1": JSON.stringify({ dex_pool_address: "P" }) });
     await resumePendingRegistrations({ store, post: async () => ({ registered: false, retryable: true, message: "409" }) });
     window.removeEventListener(MARKET_REGISTERED_EVENT, on);
     expect(seen).toEqual([]);
@@ -92,8 +93,8 @@ function mapStore(init: Record<string, string>): KeyStore {
 
 describe("a repeat resume pass is limited to what the last pass left as 'try again'", () => {
   const two = () => mapStore({
-    "perc.keeperProofTx.A": "sa", "perc.keeperPayload.A": JSON.stringify({ dex_pool_address: "P" }),
-    "perc.keeperProofTx.B": "sb", "perc.keeperPayload.B": JSON.stringify({ dex_pool_address: "P" }),
+    "perc.keeperProofTx.A": PROOF, "perc.keeperPayload.A": JSON.stringify({ dex_pool_address: "P" }),
+    "perc.keeperProofTx.B": PROOF, "perc.keeperPayload.B": JSON.stringify({ dex_pool_address: "P" }),
   });
   const later: KeeperRegisterAttempt = { registered: false, retryable: true, message: "429" };
 
@@ -117,8 +118,37 @@ describe("Retry-After is carried through, so a full ceiling (300 s) is not retri
     expect(a).toMatchObject({ retryable: true, retryAfterMs: 300_000 });
     // CONTROL: no header, no value
     expect((await postKeeperRegistration(REQ, vi.fn().mockResolvedValue(res(429, { error: "cap" })) as unknown as typeof fetch)).retryAfterMs).toBeUndefined();
-    const store = mapStore({ "perc.keeperProofTx.A": "s", "perc.keeperPayload.A": JSON.stringify({ dex_pool_address: "P" }) });
+    const store = mapStore({ "perc.keeperProofTx.A": PROOF, "perc.keeperPayload.A": JSON.stringify({ dex_pool_address: "P" }) });
     const r = await resumePendingRegistrations({ store, post: async () => ({ registered: false, retryable: true, message: "cap", retryAfterMs: 300_000 }) });
     expect(r.retryAfterMs).toBe(300_000);
+  });
+
+  it("the launch loop also waits for Retry-After before another POST", async () => {
+    const limited = { ok: false, status: 429, headers: new Headers({ "Retry-After": "300" }), json: async () => ({ error: "cap" }) } as Response;
+    const fetchImpl = vi.fn().mockResolvedValueOnce(limited).mockResolvedValueOnce(res(200, { registered: true }));
+    const waits: number[] = [];
+    await runKeeperRegistration({
+      attempt: () => postKeeperRegistration(REQ, fetchImpl as unknown as typeof fetch),
+      onStatus: () => undefined,
+      sleep: async (ms) => { waits.push(ms); },
+    });
+    expect(waits).toEqual([300_000]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("one in-flight registration POST per slab", () => {
+  it("shares an in-flight POST and permits a later retry", async () => {
+    let finish!: (response: Response) => void;
+    const fetchImpl = vi.fn()
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { finish = resolve; }))
+      .mockResolvedValueOnce(res(200, { registered: true }));
+    const first = postKeeperRegistration(REQ, fetchImpl as unknown as typeof fetch);
+    const second = postKeeperRegistration(REQ, fetchImpl as unknown as typeof fetch);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    finish(res(429, { error: "busy" }));
+    expect(await first).toEqual(await second);
+    await postKeeperRegistration(REQ, fetchImpl as unknown as typeof fetch);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });

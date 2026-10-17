@@ -32,7 +32,7 @@ const buttonName = /connect the live price/i;
 beforeEach(() => {
   retry.mockReset();
   window.localStorage.clear();
-  window.localStorage.setItem(`perc.keeperProofTx.${slab}`, "PROOFSIG");
+  window.localStorage.setItem(`perc.keeperProofTx.${slab}`, "2U4TFzSboHomgWAo1REiwVMC6jA8BZR77VdeNBChnE4NvSDsghA1Bg59oJ3fP6Gzk4FTv6THAJANRoYwV5Q1PRbY");
   window.localStorage.setItem(
     `perc.keeperRequest.${slab}`,
     JSON.stringify({ slabAddress: slab, mainnetCA: "CA1", dexPoolAddress: "9GBXHym9gxDZH3u6UnW71yXaixaBkG8K7EegywH2WQGg", dexType: "pumpswap", symbol: "TROLL" }),
@@ -94,7 +94,7 @@ describe("per-wallet limit is final on the row", () => {
 describe("client reads the route's code", () => {
   const resp = (status: number, body: object) =>
     vi.fn().mockResolvedValue({ ok: false, status, headers: { get: () => null }, json: async () => body }) as unknown as typeof fetch;
-  const req = { slabAddress: slab, dexPoolAddress: "P", proofTx: "x" };
+  const req = { slabAddress: slab, dexPoolAddress: "P", proofTx: "2U4TFzSboHomgWAo1REiwVMC6jA8BZR77VdeNBChnE4NvSDsghA1Bg59oJ3fP6Gzk4FTv6THAJANRoYwV5Q1PRbY" };
 
   it("carries `code` through and treats 403 per-creator-cap as final", async () => {
     const r = await postKeeperRegistration(req, resp(403, { ok: false, registered: false, error: PER_CREATOR_CAP_COPY, code: "per-creator-cap" }));

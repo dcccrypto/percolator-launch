@@ -35,7 +35,7 @@ const COLLATERAL = k();
 const CRANK = k().toBase58();
 const CA = k().toBase58();
 const POOL = k().toBase58();
-const PROOF_SIG = "5ProofSig11111111111111111111111111111111111111111111111111111111111111111111111111111";
+const PROOF_SIG = "2U4TFzSboHomgWAo1REiwVMC6jA8BZR77VdeNBChnE4NvSDsghA1Bg59oJ3fP6Gzk4FTv6THAJANRoYwV5Q1PRbY";
 const LP = 1_000_000_000n;
 const PRICE = 3695n;
 
@@ -226,6 +226,7 @@ describe("adopting a verified launch on this device", () => {
     expect(found).toHaveLength(1);
     expect(found[0]).toMatchObject({ dexPoolAddress: POOL, dexType: "meteora-dlmm", symbol: "AUTON", mainnetCA: CA, proofTx: PROOF_SIG });
     expect(found[0].payload).toEqual(r.launch.request.payload);
+    expect(JSON.parse(window.localStorage.getItem(`perc.keeperRequest.${SLAB.toBase58()}`) ?? "null")).toMatchObject({ payloadRequired: true });
     void store;
   });
 });
