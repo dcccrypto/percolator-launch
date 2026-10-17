@@ -11,6 +11,7 @@ import { useTraderPositions } from "@/hooks/useTraderPositions";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import type { PortfolioPosition } from "@/hooks/usePortfolio";
 import { TradeStatsPanel } from "@/components/trade/TradeStatsPanel";
+import { PnlHistoryCard } from "@/components/dashboard/pnl-history/PnlHistoryCard";
 import { TradeHistoryTable } from "@/components/trade/TradeHistoryTable";
 import { describeEntryPrice } from "@/lib/entry-price-display";
 import { formatPnl, formatTokenAmount, formatUsdPriceE6, LIQ_PRICE_UNLIQUIDATABLE } from "@/lib/format";
@@ -127,6 +128,17 @@ export default function TraderProfilePage() {
           onRetry={traderStats.refresh}
         />
       </section>
+
+      {/* ── Public realized PnL history (opt-in) ── */}
+      {process.env.NEXT_PUBLIC_ENABLE_TRADER_PNL_HISTORY === "1" && (
+        <section className="mt-10 min-w-0" aria-label="Trader realized PnL history">
+          <SectionLabel>realized PnL history</SectionLabel>
+          <PnlHistoryCard data={{ kind: "unavailable" }} />
+          <p className="mt-2 text-[10.5px] text-[var(--text-secondary)]">
+            Verified historical realized PnL is not available yet. Open-position PnL below is unrealized.
+          </p>
+        </section>
+      )}
 
       {/* ── Open positions ───────────────────────────────────── */}
       <section className="mt-10">
