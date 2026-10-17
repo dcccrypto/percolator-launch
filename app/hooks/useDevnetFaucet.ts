@@ -108,6 +108,11 @@ export function useDevnetFaucet(): DevnetFaucetState {
   const [nextClaimAt, setNextClaimAt] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(true); // default true to avoid flash
   const [checked, setChecked] = useState(false);
+  // This modal funded the wallet this session. Once the balances pass the thresholds the modal
+  // used to vanish on its own: no dismissal was saved (it reopened over the trade page as soon as a
+  // deposit took the wallet under 1,000 USDC, offering a claim the 24h gate refuses) and its
+  // "Start Trading" step was never seen. It now stays up until the user closes it.
+  const [fundedHere, setFundedHere] = useState(false);
 
   // Lazily construct the fallback airdrop Connection on first use instead of
   // on every render — `useRef(new Connection(...))` evaluates the initializer
@@ -162,6 +167,7 @@ export function useDevnetFaucet(): DevnetFaucetState {
   // gated on `!checked`, so wallet B's balances were never (re-)fetched.
   useEffect(() => {
     setChecked(false);
+    setFundedHere(false);
     setSolDone(false);
     setUsdcDone(false);
     solAirdropPendingRef.current = false;
@@ -260,7 +266,7 @@ export function useDevnetFaucet(): DevnetFaucetState {
     !dismissed &&
     checked &&
     solBalance !== null &&
-    (solBalance < 0.05 || (usdcBalance !== null && usdcBalance < 1000));
+    (fundedHere || solBalance < 0.05 || (usdcBalance !== null && usdcBalance < 1000));
 
   const dismiss = useCallback(() => {
     setDismissed(true);
@@ -360,6 +366,7 @@ export function useDevnetFaucet(): DevnetFaucetState {
 
       solAirdropPendingRef.current = true;
       setSolDone(true);
+      setFundedHere(true);
       await refreshBalances();
     } catch (e) {
       lastOpFailedRef.current = true;
@@ -411,6 +418,7 @@ export function useDevnetFaucet(): DevnetFaucetState {
       }
       usdcAirdropPendingRef.current = true;
       setUsdcDone(true);
+      setFundedHere(true);
       invalidateWalletBalance();
       await refreshBalances();
     } catch (e) {
