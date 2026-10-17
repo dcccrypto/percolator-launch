@@ -354,6 +354,8 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
           // = 0): closing it would trade nothing. It is cleared by the next refresh of the
           // account, so there is nothing for the user to sign.
           setError(COPY_RESET_LEG);
+          // Surfaces that close their modal on resolve unmount the error above: the toast outlives them.
+          toast(COPY_RESET_LEG, "info");
           setPhase("idle");
           inflightRef.current = false;
           setLoading(false);
@@ -542,7 +544,11 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         if (outcome === "partial" && fill?.filledQ != null) {
           const f = fill.filledQ < 0n ? -fill.filledQ : fill.filledQ;
           const r = closeSize < 0n ? -closeSize : closeSize;
-          setError(routedRebalance ? COPY.rebalancePartial(fmtQ(f), fmtQ(r)) : COPY.closePartial(fmtQ(f), fmtQ(r)));
+          const partialLine = routedRebalance ? COPY.rebalancePartial(fmtQ(f), fmtQ(r)) : COPY.closePartial(fmtQ(f), fmtQ(r));
+          setError(partialLine);
+          // The portfolio rows, other-markets list, liquidation alert and at-risk banner close their
+          // modal on resolve, which unmounts the line above: without a toast a clipped close read as done.
+          toast(partialLine, "info");
         }
         // The saved entry (lib/entry-price.ts) goes only when the position is actually flat. Every
         // close surface cleared it on a 100% REQUEST, so a partial fill (LP headroom clipped the
@@ -554,7 +560,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         }
         // The one confirmation a close gets: every close surface (dock, ticket, portfolio rows) closes
         // its modal on resolve, so without this a partial close just vanished. A clipped fill already
-        // said what filled (setError above), so it gets no success line.
+        // said what filled (toast above), so it gets no success line.
         if (outcome !== "partial") {
           const closedAbs = closeSize < 0n ? -closeSize : closeSize;
           // The tx is confirmed (sendTx returns only after confirmation; a timeout throws above), but a

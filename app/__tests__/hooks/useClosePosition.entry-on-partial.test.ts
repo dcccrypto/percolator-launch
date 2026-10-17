@@ -22,12 +22,13 @@ const mocks = vi.hoisted(() => ({
   getProgramAccounts: vi.fn(),
   getLivePriceSnapshot: vi.fn(),
   fill: { current: null as unknown },
+  toast: vi.fn(),
 }));
 
 vi.mock("@/hooks/useWalletCompat", () => ({ useConnectionCompat: vi.fn(), useWalletCompat: vi.fn() }));
 vi.mock("@/hooks/useTrade", () => ({ useTrade: vi.fn(), prewarmTradeSubmission: vi.fn() }));
 vi.mock("@/hooks/useWithdraw", () => ({ useWithdraw: () => ({ withdraw: vi.fn().mockResolvedValue("w") }) }));
-vi.mock("@/hooks/useToast", () => ({ useOptionalToast: () => vi.fn() }));
+vi.mock("@/hooks/useToast", () => ({ useOptionalToast: () => mocks.toast }));
 vi.mock("@/hooks/useUserAccount", () => ({ useUserAccount: vi.fn() }));
 vi.mock("@/components/providers/SlabProvider", () => ({ useSlabState: vi.fn() }));
 vi.mock("@/lib/priceStore/priceStore", () => ({ getLivePriceSnapshot: mocks.getLivePriceSnapshot }));
@@ -98,6 +99,9 @@ describe("useClosePosition keeps the saved entry unless the position is flat", (
     const { result } = renderHook(() => useClosePosition(slab));
     await act(async () => { await result.current.closePosition(100); });
     expect(result.current.error).toMatch(/Partially closed/i);
+    // /portfolio, other-markets, the liquidation alert and the at-risk banner unmount that error on resolve.
+    expect(mocks.toast).toHaveBeenCalledWith(expect.stringMatching(/^Partially closed: .+ The rest of your position is still open.$/), "info");
+    expect(mocks.toast).not.toHaveBeenCalledWith(expect.anything(), "success");
     expect(entry()).toBe(95_000_000n);
   });
 
