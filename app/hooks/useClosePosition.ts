@@ -19,6 +19,7 @@ import { getLpInventoryState, getMatcherCaps } from "@/lib/matcherCaps";
 import { lpInventoryRoomQ } from "@/lib/limits/lp-inventory-room";
 import { closeCapacityMessage } from "@/lib/marketCapacity";
 import { chunkCloseSize } from "@/lib/closeChunks";
+import { anySignatureLanded, remainingClose, signatureFromError } from "@/lib/close-resend-guard";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
@@ -405,6 +406,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         // signature). A caps read failure degrades to the single-leg path —
         // exactly the pre-existing behavior — rather than blocking the close.
         let closeLegs: bigint[] | undefined;
+        let capsMaxFill: bigint | null = null;
         // F-3: tag 44 does not go through the matcher, so its caps/inventory do not apply.
         const reduceOnlyNow = isV17Market
           ? isAdlReduceOnly(freshEngine ?? (raw ? decodeMarketEngineView(raw) : null))
@@ -437,6 +439,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
                   throw new UserFacingError(closeCapacityMessage(capacity, freshAbs));
                 }
               }
+              capsMaxFill = caps.maxFillAbs;
               const legs = chunkCloseSize(closeSize, caps.maxFillAbs);
               if (legs.length > 1) closeLegs = legs;
             }
@@ -484,6 +487,8 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         let sig: string | null | undefined;
         let fill: FillResult | null = null;
         let routedRebalance = false;
+        const closeState = { alreadyClosed: false };
+        const intendedFinalAbs = freshAbs - (closeSize < 0n ? -closeSize : closeSize);
         if (closeRouteFor(reduceOnlyNow) === "rebalance-reduce") {
           const r = await rebalanceClose();
           sig = r.signature;
@@ -500,23 +505,82 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
             const info = await connection.getAccountInfo(new PublicKey(slabAddress), "confirmed").catch(() => null);
             return closeLimitFromEngine(info ? decodeMarketEngineView(new Uint8Array(info.data)) : null, closeSize);
           };
+          // AUD-APP-FLIP (double-close safety, ported from v2.2 #3565). Every attempt rebuilds the trade (fresh
+          // blockhash). The close ix has NO reduce-only flag, so a stale -closeSize resent at a position the first
+          // attempt already flattened would OPEN the opposite side. Before ANY resend: (1) check whether an earlier
+          // attempt's signature landed, (2) re-size from the LIVE position; flat = done, flipped = refuse. A
+          // confirmation timeout is still never retried at all (isTransientError excludes it).
+          const failedSigs: string[] = [];
+          const readLiveSigned = async (): Promise<bigint> => {
+            try {
+              if (!isV17Market || !programId || !publicKey) throw new Error("live position unreadable");
+              const [data, slabInfo] = await Promise.all([
+                readFreshPortfolioData(connection, programId, slabAddress, publicKey, targetPk),
+                connection.getAccountInfo(new PublicKey(slabAddress), "confirmed"),
+              ]);
+              if (!data) return 0n;
+              const portfolio = parsePortfolioV17(data);
+              if (!portfolio.owner.equals(publicKey)) throw new Error("owner mismatch");
+              const leg = portfolio.legs.find((l) => l.active);
+              if (!leg) return 0n;
+              const eng = slabInfo ? decodeMarketEngineView(new Uint8Array(slabInfo.data)) : null;
+              if (!eng) throw new Error("market unreadable");
+              const eff = effectiveLeg(eng, leg);
+              if (eff.kind === "invalid") throw new Error("leg invalid");
+              return eff.kind === "reset" ? 0n : eff.signedQ;
+            } catch (e) {
+              if (e instanceof UserFacingError) throw e;
+              throw new UserFacingError("Could not verify your position before trying again, so nothing more was sent. Check your position, then retry.");
+            }
+          };
+          const guardBeforeResend = async (): Promise<string | null | undefined> => {
+            let landed: string | null;
+            try {
+              landed = await anySignatureLanded(connection, failedSigs);
+            } catch {
+              throw new UserFacingError("Could not confirm whether your close went through, so nothing more was sent. Check your position, then retry.");
+            }
+            if (landed) {
+              closeState.alreadyClosed = true;
+              return landed;
+            }
+            const r = remainingClose(await readLiveSigned(), closeSize, intendedFinalAbs);
+            if (r.kind === "done") {
+              closeState.alreadyClosed = true;
+              return failedSigs[failedSigs.length - 1] ?? null;
+            }
+            if (r.kind === "flipped") {
+              throw new UserFacingError("Your position changed while closing, so nothing more was sent. Check your position, then retry.");
+            }
+            closeSize = r.closeSize;
+            if (closeLegs) {
+              const legs = capsMaxFill !== null ? chunkCloseSize(closeSize, capsMaxFill) : [closeSize];
+              closeLegs = legs.length > 1 ? legs : undefined;
+            }
+            return undefined;
+          };
+          const sendCloseOnce = async (): Promise<string | null | undefined> => {
+            if (attempt++ > 0) {
+              const g = await guardBeforeResend();
+              if (closeState.alreadyClosed) return g;
+              if (closeLimitPriceE6 !== undefined) closeLimitPriceE6 = await rereadCloseLimit();
+            }
+            return trade({
+              lpIdx,
+              userIdx,
+              size: closeSize,
+              ...(targetPk && { portfolioPk: targetPk }),
+              sizes: closeLegs,
+              ...(closeLimitPriceE6 !== undefined && { limitPriceE6: closeLimitPriceE6 }),
+            }).catch((e: unknown) => {
+              const attached = (e as { signature?: unknown } | null)?.signature;
+              const sg = typeof attached === "string" ? attached : signatureFromError(e instanceof Error ? e.message : String(e));
+              if (sg) failedSigs.push(sg);
+              throw e;
+            });
+          };
           try {
-            sig = await withTransientRetry(
-              async () => {
-                if (attempt++ > 0 && closeLimitPriceE6 !== undefined) {
-                  closeLimitPriceE6 = await rereadCloseLimit();
-                }
-                return trade({
-                  lpIdx,
-                  userIdx,
-                  size: closeSize,
-                  ...(targetPk && { portfolioPk: targetPk }),
-                  sizes: closeLegs,
-                  ...(closeLimitPriceE6 !== undefined && { limitPriceE6: closeLimitPriceE6 }),
-                });
-              },
-              { maxRetries: 2, delayMs: 3000 },
-            );
+            sig = await withTransientRetry(sendCloseOnce, { maxRetries: 2, delayMs: 3000 });
           } catch (tradeErr) {
             const m = tradeErr instanceof Error ? tradeErr.message : String(tradeErr);
             if (isV17Market && programId && (await isReduceOnlyLock21(m, connection, new PublicKey(slabAddress), programId))) {
@@ -530,6 +594,16 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
           }
         }
 
+        if (closeState.alreadyClosed) {
+          // An earlier attempt landed (or the position is already at the intended size): nothing was resent.
+          setLastSig(sig ?? null);
+          if (closePercent === 100 && (!targetPk || userAccount?.pubkey?.equals(targetPk))) clearEntryPrice(slabAddress, userIdx, publicKey?.toBase58());
+          toast(closePercent >= 100 ? COPY.closeDone : COPY.closeDonePart(fmtQ(freshAbs - intendedFinalAbs), fmtQ(freshAbs)), "success");
+          setPhase("confirming");
+          setTimeout(() => setPhase("idle"), 2000);
+          invalidatePortfolio();
+          return { signature: sig ?? null, fill: null };
+        }
         setLastSig(sig ?? null);
         // P1: a confirmed TradeCpi can be a ZERO fill (the wrapper clipped the close to
         // LP headroom 0). useTrade measured it (lib/limits/fill-check.ts); a zero fill is
