@@ -524,7 +524,11 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
               const leg = portfolio.legs.find((l) => l.active);
               if (!leg) return 0n;
               const eng = slabInfo ? decodeMarketEngineView(new Uint8Array(slabInfo.data)) : null;
-              if (!eng) throw new Error("market unreadable");
+              if (!eng) {
+                // The market (so the price) is unreadable: the same calm refusal the limit re-read gives.
+                closeLimitFromEngine(null, closeSize);
+                throw new Error("market unreadable");
+              }
               const eff = effectiveLeg(eng, leg);
               if (eff.kind === "invalid") throw new Error("leg invalid");
               return eff.kind === "reset" ? 0n : eff.signedQ;
