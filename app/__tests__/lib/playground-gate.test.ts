@@ -28,7 +28,7 @@ describe("resolution order mirrors whoami", () => {
       { id: "row-me", privy_did: "did:privy:me", pubkey: "MYPUBKEY", referral_code: "ME" },
     ]);
     const v = await decidePlaygroundAccess(auth(), () => client, 1000);
-    expect(v).toEqual({ kind: "granted", rowId: "row-me", position: 5, cutoff: 1000 });
+    expect(v).toEqual({ kind: "granted", rowId: "row-me", position: 5, cutoff: 1000, referralCode: "ME" });
   });
 
   it("matches on ANY linked wallet, not just the first", async () => {

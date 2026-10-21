@@ -20,7 +20,7 @@ import type { PrivyAuthOk } from "@/lib/privy-auth";
 import { cohortCutoff, isWithinCohort } from "@/lib/playground-access";
 
 export type PlaygroundVerdict =
-  | { kind: "granted"; rowId: string; position: number; cutoff: number }
+  | { kind: "granted"; rowId: string; position: number; cutoff: number; referralCode: string | null }
   | { kind: "not_yet"; position: number; cutoff: number }
   | { kind: "not_member" }
   | { kind: "unavailable" };
@@ -128,7 +128,7 @@ export async function decidePlaygroundAccess(
       return { kind: "unavailable" };
     }
     if (!isWithinCohort(position, cutoff)) return { kind: "not_yet", position, cutoff };
-    return { kind: "granted", rowId: row.id, position, cutoff };
+    return { kind: "granted", rowId: row.id, position, cutoff, referralCode: row.referral_code };
   } catch (err) {
     console.warn(
       `[playground-gate] lookup failed for ${auth.userId}:`,

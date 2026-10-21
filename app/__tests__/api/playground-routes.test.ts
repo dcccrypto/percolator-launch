@@ -37,7 +37,7 @@ vi.mock("@/lib/waitlist/supabase", () => ({
 
 import { POST as authorize } from "@/app/api/playground/authorize/route";
 import { POST as enter } from "@/app/api/playground/enter/route";
-import { readHandoff, readSession } from "@/lib/playground-access";
+import { privyUserTag, readHandoff, readSession } from "@/lib/playground-access";
 
 const SECRET = "s".repeat(40);
 const ME: FakeRow = { id: "row-me", privy_did: "did:privy:me", pubkey: "MYPUBKEY", email: "me@x.io", referral_code: "ME" };
@@ -186,7 +186,11 @@ describe("POST /api/playground/enter — granted and open", () => {
     expect([...loc.searchParams.keys()]).toEqual(["t"]);
     const t = loc.searchParams.get("t")!;
     const claims = readHandoff(t, SECRET, now);
-    expect(claims).toMatchObject({ sub: "row-me", pos: 11 });
+    expect(claims).toMatchObject({ sub: "row-me", pos: 11, ref: "ME" }); // the referral code, for the playground to show
+    // ...bound to the Privy login THIS request verified, as a keyed tag (never the id), so the playground
+    // shows the code only to that login.
+    expect(claims?.uid).toBe(privyUserTag("did:privy:me", SECRET));
+    expect(claims?.uid).not.toBe(privyUserTag("did:privy:other", SECRET));
     // It is a HANDOFF, not a session: it must not open as one.
     expect(readSession(t, SECRET, now)).toBeNull();
     // ...and it carries no identifier.
