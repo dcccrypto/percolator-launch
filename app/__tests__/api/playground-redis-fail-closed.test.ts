@@ -97,6 +97,26 @@ describe('AUDIT: Redis fail-closed security policy', () => {
     expect(accepted(res)).toBe(true);
   });
 
+  it('CONTROL-07: the judge door survives a Redis failure and a missing Redis config', async () => {
+    // The judge door (launch #3397) never touches the replay store, so failing closed must not close it.
+    const judge = 'j'.repeat(32);
+    vi.stubEnv('PLAYGROUND_JUDGE_ACCESS_CODE', judge);
+    vi.stubEnv('PLAYGROUND_JUDGE_ACCESS_UNTIL', '');
+
+    state.failed = true;
+    vi.resetModules();
+    let { GET } = await import('@/app/enter/route');
+    expect(accepted(await GET(new NextRequest('https://pg.test/enter?judge=' + judge)))).toBe(true);
+
+    vi.stubEnv('UPSTASH_REDIS_REST_URL', '');
+    vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', '');
+    vi.resetModules();
+    ({ GET } = await import('@/app/enter/route'));
+    expect(accepted(await GET(new NextRequest('https://pg.test/enter?judge=' + judge)))).toBe(true);
+    // A wrong code is still refused with Redis down.
+    expect(accepted(await GET(new NextRequest('https://pg.test/enter?judge=' + 'n'.repeat(32))))).toBe(false);
+  });
+
   it('GATE-ON-TRANSITION-01: healthy to failed rejects replay', async () => {
     const token = gate.mintHandoff('transition-01', 10, SECRET);
 
