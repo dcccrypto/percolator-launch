@@ -8,6 +8,7 @@
  *   no Continue (the step-by-step path).
  * - I-1: a resume past step 0 with the bond ticked. The hook refuses it (bondResumeMessage); the panel offers only
  *   "Continue without the bond", which resumes at the SAME step with no bond and unticks the form.
+ * - I-2: the same for a resume AT step 0.
  *
  * Flags pinned on for this file (v2.1 growth block, P3 wizard, v2.2, lot markets), whatever mode the suite runs in.
  */
@@ -107,11 +108,15 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/", useSearchParams: () => new URLSearchParams(),
 }));
 
-// The stuck-slab banner is a resume entry point: faked to a single "resume at step 3" button (its own tests cover it).
+// The stuck-slab banner is a resume entry point: faked to "resume at step 3" and "resume at step 0" buttons (its own
+// tests cover it).
 const RESUME_SLAB = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
 vi.mock("@/components/create/RecoverSolBanner", () => ({
   RecoverSolBanner: (p: { onResume: (slab: string, step: number) => void }) => (
-    <button type="button" data-testid="fake-resume" onClick={() => p.onResume(RESUME_SLAB, 3)}>resume</button>
+    <>
+      <button type="button" data-testid="fake-resume" onClick={() => p.onResume(RESUME_SLAB, 3)}>resume</button>
+      <button type="button" data-testid="fake-resume-0" onClick={() => p.onResume(RESUME_SLAB, 0)}>resume at 0</button>
+    </>
   ),
 }));
 // The same-browser pin for a launch that bound no keeper registration: nothing to pin.
@@ -233,6 +238,26 @@ describe("v2.2 capacity bond: the wizard's real wiring (#3634 L-2, I-1)", () => 
     expect(call(1)).toEqual({ bond: false, step: 3 });
     createState = IDLE; await rerender();
     expect((screen.getByTestId("v22-bond-toggle") as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("I-2: a resume at step 0 with the bond ticked gets the same resume refusal, not a Try again that refuses again", async () => {
+    await formWithBond();
+    await act(async () => { fireEvent.click(screen.getByTestId("fake-resume-0")); }); await flush();
+    await waitFor(() => expect(launchBtn().disabled, launchBtn().getAttribute("aria-label") ?? "").toBe(false));
+    await act(async () => { fireEvent.mouseDown(launchBtn()); }); await flush();
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(call(0)).toEqual({ bond: true, step: 0 });
+    // The hook refuses a bond on any resume, step 0 included (hook test).
+    createState = { ...IDLE, step: 0, error: bondResumeMessage, slabAddress: RESUME_SLAB };
+    await rerender();
+    expect(screen.getByTestId("wizard-error").textContent).toContain(bondResumeMessage);
+    expect(screen.queryByTestId("wizard-retry")).toBeNull();
+    expect(screen.queryByTestId("wizard-bond-try-again")).toBeNull();
+    const without = screen.getByTestId("wizard-bond-launch-without");
+    expect(without.textContent).toBe("Continue without the bond");
+    await act(async () => { fireEvent.click(without); }); await flush();
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(call(1)).toEqual({ bond: false, step: 0 });
   });
 
   it("I-1, in-session: a refusal at a failed step continues there without the bond", async () => {

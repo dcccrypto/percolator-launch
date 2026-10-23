@@ -61,10 +61,13 @@ async function retryStep0(params: CreateMarketParams) {
 }
 
 describe("#3601: a bond launch is never sent step by step", () => {
-  it("Continue after the bond refusal (create(params, 0)) refuses with the bond message and sends nothing", async () => {
+  // I-2: create(params, 0) with a bond is a resume at step 0 (the wizard sends an in-session step-0 bond retry as a
+  // fresh launch), so it now gets the resume refusal rather than the single-approval one. Still nothing is sent.
+  it("a step-0 retry with a bond (create(params, 0)) refuses with the resume message and sends nothing", async () => {
     const result = await retryStep0(withBond);
     expect(mocks.sendTx).not.toHaveBeenCalled();
-    expect(result.current.state.error).toBe(bondNeedsSingleTxMessage);
+    expect(result.current.state.error).toBe(bondResumeMessage);
+    expect(result.current.state.error).not.toBe(bondNeedsSingleTxMessage);
     expect(result.current.state.loading).toBe(false);
   });
 
@@ -94,7 +97,7 @@ describe("#3601: a bond launch is never sent step by step", () => {
  * shares yet, and step 4's Earn seed mints shares before step 5 binds. So the resume refuses before anything is read
  * or sent, and says the bond can't be added; the wizard offers to continue without it.
  */
-describe("I-1: a resume past step 0 with the bond ticked refuses before sending anything", () => {
+describe("I-1/I-2: a resume with the bond ticked (step 0 included) refuses before sending anything", () => {
   async function resumeAt(params: CreateMarketParams, step: number) {
     const { result } = renderHook(() => useCreateMarket());
     const slab = Keypair.generate();
@@ -108,7 +111,7 @@ describe("I-1: a resume past step 0 with the bond ticked refuses before sending 
     return result;
   }
 
-  it.each([1, 3, 5])("resume at step %i: no read, no send, the resume message, the step kept", async (step) => {
+  it.each([0, 1, 3, 5])("resume at step %i: no read, no send, the resume message, the step kept", async (step) => {
     const result = await resumeAt(withBond, step);
     expect(mocks.getAccountInfo).not.toHaveBeenCalled();
     expect(mocks.sendTx).not.toHaveBeenCalled();

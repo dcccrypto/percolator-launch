@@ -2256,7 +2256,11 @@ export function useCreateMarket() {
       // I-1 (#3634 review): a resume past step 0 can't take a bond. The step-by-step path never reads it, and the
       // wrapper couldn't add one there anyway: tag 107 needs the vault LP bound (step 5's tag 94) AND no Earn shares,
       // and step 4's Earn seed mints shares first. Refuse before any read or send rather than finish without it.
-      if (params.v22?.bond && retryFromStep !== undefined && retryFromStep > 0) {
+      // I-2: a resume AT step 0 (RecoverSolBanner, /create?resume=) gets the same refusal. It reuses the saved slab
+      // keypair, so it can't be the one-transaction bond launch either, and the single-approval message offered a
+      // Try again that could only refuse again. (An in-session step-0 bond retry never gets here: the wizard sends it
+      // as a fresh launch, lib/v22/bond-relaunch.)
+      if (params.v22?.bond && retryFromStep !== undefined) {
         setState((s) => ({ ...s, loading: false, phase: "idle", error: bondResumeMessage, step: retryFromStep, stepLabel: STEP_LABELS[retryFromStep] ?? s.stepLabel, batchFallbackReason: null }));
         return;
       }
@@ -2579,8 +2583,8 @@ export function useCreateMarket() {
 
       // #3601: a bond launch exists only as ONE transaction (Wave C N-2: the Earn seed between the
       // steps disables bonds for good). The step-by-step path below never reads the bond, so a
-      // fresh launch or a step-0 retry that reaches here would go live without it. Refuse instead;
-      // nothing is on chain yet. (A resume past step 0 with a bond was refused above.)
+      // fresh launch that reaches here would go live without it. Refuse instead; nothing is on chain
+      // yet. (Any resume or retry with a bond, step 0 included, was refused above.)
       if (params.v22?.bond && startStep <= 0) {
         // batchFallbackReason cleared: "your wallet signs each step separately" would contradict this refusal.
         setState((s) => ({ ...s, loading: false, phase: "idle", error: bondNeedsSingleTxMessage, step: 0, stepLabel: STEP_LABELS[0] ?? s.stepLabel, batchFallbackReason: null }));
