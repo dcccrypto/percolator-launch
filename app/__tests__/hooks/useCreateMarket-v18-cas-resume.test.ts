@@ -55,11 +55,25 @@ describe("useCreateMarket v18 CAS + resume wiring", () => {
   });
 
   it("step 1 skips the keeper hand-off once it is on-chain, checked before the co-sign request", () => {
-    const guard = step1Source.indexOf("isOracleDelegationApplied(profile, wallet.publicKey)");
+    // The guard is keeper-aware: "already delegated" must mean delegated TO THE
+    // KEEPER, so the keeper pubkey is resolved before the guard runs.
+    const keeperKey = step1Source.indexOf("await fetchKeeperCosignPubkey()");
+    const guard = step1Source.indexOf("isOracleDelegationApplied(profile, wallet.publicKey, keeperPubkey)");
     const cosign = step1Source.indexOf('fetch("/api/playground/keeper-cosign"');
-    expect(guard).toBeGreaterThanOrEqual(0);
+    expect(keeperKey).toBeGreaterThanOrEqual(0);
+    expect(guard).toBeGreaterThan(keeperKey);
     expect(cosign).toBeGreaterThan(guard);
     expect(step1Source).toContain("if (isKeeperOracle && isV17Slab && !oracleDelegationDone)");
+  });
+
+  it("step 1 refuses a market whose oracle authority is neither the deployer nor the keeper", () => {
+    // Such a market can never be priced and its registration is refused with a
+    // final 403, so the launch must stop rather than continue (GH#3661).
+    const mismatch = step1Source.indexOf("oracleAuthorityMismatch(profile, wallet.publicKey, keeperPubkey)");
+    const cosign = step1Source.indexOf('fetch("/api/playground/keeper-cosign"');
+    expect(mismatch).toBeGreaterThanOrEqual(0);
+    expect(cosign).toBeGreaterThan(mismatch);
+    expect(step1Source).toMatch(/if \(strayAuthority\) \{[\s\S]*throw new Error\(/);
   });
 
   it("step 1 simulates the co-signed hand-off before the wallet prompt", () => {

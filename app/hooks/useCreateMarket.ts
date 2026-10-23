@@ -119,9 +119,11 @@ import {
 import {
   freshLaunchAuthorityEpoch,
   isOracleDelegationApplied,
+  oracleAuthorityMismatch,
   sequentialStepKind,
   type CreateStepKind,
 } from "@/lib/create-market-v18";
+import { fetchKeeperCosignPubkey } from "@/lib/keeper-cosign-pubkey";
 import { buildInitMatcherCtxArgs } from "@/lib/matcher-params";
 import { buildP3BindIxs, canonicalVaultLpMatcher, p3BindProgress, validateP3Wizard } from "@/lib/limits/p3-wizard";
 import { COPY as LIMITS_COPY } from "@/lib/limits/copy";
@@ -2674,7 +2676,27 @@ export function useCreateMarket() {
             const profileInfo = await connection.getAccountInfo(slabPk, "confirmed");
             if (profileInfo?.data) {
               const profile = parseAssetOracleProfileV17(new Uint8Array(profileInfo.data), assetProfileOff(0));
-              oracleDelegationDone = isOracleDelegationApplied(profile, wallet.publicKey);
+              // Ask the backend which key it co-signs as, so "already delegated"
+              // means delegated TO THE KEEPER. GH#2680's test was "no longer the
+              // deployer", which also reports a market whose authority is some
+              // THIRD key as a finished hand-off — and such a market can never be
+              // priced: the keeper cannot call PushAuthMark on it, and its
+              // registration is refused with `oracle-not-keeper`, a final 403.
+              // Null = backend unreachable/unconfigured; the call below then keeps
+              // the old behaviour rather than failing a launch over a missing GET.
+              const keeperPubkey = await fetchKeeperCosignPubkey();
+              const strayAuthority = oracleAuthorityMismatch(profile, wallet.publicKey, keeperPubkey);
+              if (strayAuthority) {
+                // Stop rather than hand the creator a market that is on-chain, paid
+                // for, and permanently unpriceable (GH#3637).
+                throw new Error(
+                  `This market's oracle authority is ${strayAuthority.toBase58()}, but the keeper signs as ` +
+                    `${keeperPubkey?.toBase58() ?? "an unknown key"}. The keeper cannot price this market and its ` +
+                    `registration would be refused, so the launch stopped instead of continuing to a market whose ` +
+                    `live price never connects.`,
+                );
+              }
+              oracleDelegationDone = isOracleDelegationApplied(profile, wallet.publicKey, keeperPubkey);
               if (oracleDelegationDone) {
                 console.log(
                   `[useCreateMarket] Step 1: oracle already delegated to ${profile.oracleAuthority.toBase58()} — skipping the keeper hand-off.`,

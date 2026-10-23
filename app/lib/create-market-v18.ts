@@ -54,14 +54,50 @@ export const ORACLE_MODE_AUTH_MARK = 3;
  *
  * After it lands the deployer is no longer the oracle authority, so sending it
  * again is refused with Unauthorized (Custom 8). A retry that re-sent it is
- * exactly how a user saw "not authorized" on the step after an earlier failure.
- * The resume path must check this first and skip the step.
+ * exactly how a user saw "not authorized" on the step after an earlier failure
+ * (GH#2680). The resume path must check this first and skip the step.
+ *
+ * `keeper` is the pubkey the co-sign backend signs as (GET
+ * /api/playground/keeper-cosign). When it is known, "applied" means the
+ * authority IS that keeper — NOT merely "someone other than the deployer".
+ * Those are not the same test: a market whose authority is a third key is
+ * unpriceable (the keeper cannot call PushAuthMark on it, and registration
+ * refuses it with `oracle-not-keeper`), yet the old test reported it as a
+ * finished hand-off and the resume path skipped the only step that could
+ * repair it. Use `oracleAuthorityMismatch` to detect that case.
+ *
+ * `keeper` omitted/null (the GET failed, or a caller that cannot reach it)
+ * falls back to GH#2680's original test, so a resume still skips a hand-off
+ * that genuinely landed rather than re-sending it into Custom(8).
  */
 export function isOracleDelegationApplied(
   profile: { oracleMode: number; oracleAuthority: PublicKey },
   deployer: PublicKey,
+  keeper?: PublicKey | null,
 ): boolean {
-  return profile.oracleMode === ORACLE_MODE_AUTH_MARK && !profile.oracleAuthority.equals(deployer);
+  if (profile.oracleMode !== ORACLE_MODE_AUTH_MARK) return false;
+  if (keeper) return profile.oracleAuthority.equals(keeper);
+  return !profile.oracleAuthority.equals(deployer);
+}
+
+/**
+ * The oracle authority when it is neither the deployer nor the keeper — i.e. a
+ * market that no one on this deployment can price, and that
+ * `checkKeeperReadiness` will refuse with `oracle-not-keeper` (HTTP 403, which
+ * the launch's registration loop treats as final and never retries).
+ *
+ * Returns null when there is nothing wrong, when the keeper is unknown, or when
+ * the authority is still the deployer (the hand-off simply has not run yet).
+ */
+export function oracleAuthorityMismatch(
+  profile: { oracleMode: number; oracleAuthority: PublicKey },
+  deployer: PublicKey,
+  keeper: PublicKey | null | undefined,
+): PublicKey | null {
+  if (!keeper || profile.oracleMode !== ORACLE_MODE_AUTH_MARK) return null;
+  if (profile.oracleAuthority.equals(keeper)) return null;
+  if (profile.oracleAuthority.equals(deployer)) return null;
+  return profile.oracleAuthority;
 }
 
 /**
