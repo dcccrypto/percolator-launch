@@ -26,6 +26,28 @@ describe("fetchKeeperCosignPubkey", () => {
     expect(await fetchKeeperCosignPubkey(jsonResponse(true, { keeperPubkey: "not-a-key" }))).toBeNull();
   });
 
+  it("gives up on a stalled request instead of holding the launch open", async () => {
+    // A server that accepts the connection and never answers. Unbounded, the
+    // awaited call would block step 1 forever (CodeRabbit, PR #3662).
+    const stalling = ((_url: string, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () =>
+          reject(new DOMException("The operation was aborted.", "AbortError")),
+        );
+      })) as unknown as typeof fetch;
+    expect(await fetchKeeperCosignPubkey(stalling, 10)).toBeNull();
+  });
+
+  it("passes an abort signal so the request is bounded", async () => {
+    let seen: RequestInit | undefined;
+    const capture = ((_url: string, init?: RequestInit) => {
+      seen = init;
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    }) as unknown as typeof fetch;
+    await fetchKeeperCosignPubkey(capture);
+    expect(seen?.signal).toBeDefined();
+  });
+
   it("is null, not a rejection, when the request itself throws", async () => {
     const throwing = (async () => {
       throw new Error("network down");
