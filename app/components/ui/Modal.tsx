@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import gsap from "gsap";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
+import { useDialogFocus } from "@/hooks/useDialogFocus";
 
 /**
  * The one portaled modal shell (GH#2286).
@@ -20,7 +21,8 @@ import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
  * other looks finished; it just means the gap is in all five.
  *
  * Owns:
- *   portal · z-tier + scrim · scroll lock · Escape · overlay-click ·
+ *   portal · z-tier + scrim · scroll lock · scrolling a panel taller than the screen ·
+ *   Escape · overlay-click ·
  *   entrance animation (reduced-motion aware) · focus trap + focus restore
  *
  * Callers own their panel's width, borders and content.
@@ -46,15 +48,6 @@ export interface ModalProps {
   /** Extra scrim classes, e.g. FundingExplainerModal's `backdrop-blur-sm`. */
   scrimClassName?: string;
 }
-
-const FOCUSABLE = [
-  "a[href]",
-  "button:not([disabled])",
-  "input:not([disabled])",
-  "select:not([disabled])",
-  "textarea:not([disabled])",
-  '[tabindex]:not([tabindex="-1"])',
-].join(",");
 
 export const Modal: FC<ModalProps> = ({
   onClose,
@@ -114,59 +107,21 @@ export const Modal: FC<ModalProps> = ({
       );
     }
 
-    // Restore focus to whatever opened the modal. Without this, dismissing drops
-    // the caret at the top of the document and a keyboard user has to tab back to
-    // where they were.
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    // Deliberately NOT filtered on `offsetParent !== null`. That is the usual
-    // visibility idiom and it is wrong here twice over: it is null for every
-    // descendant of a `position: fixed` ancestor — which this overlay is — and it
-    // is null for everything under jsdom. Either way the list came back empty, the
-    // Tab handler hit its `items.length === 0` branch, and the "trap" pinned focus
-    // to nothing at all. Caught by the tests before it shipped.
-    //
-    // The selector already excludes disabled controls and tabindex="-1"; `[hidden]`
-    // covers the deliberate-hide case without depending on layout.
-    const focusables = () =>
-      Array.from(modal.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
-        (el) => !el.hasAttribute("hidden")
-      );
-    focusables()[0]?.focus();
-
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (dismissibleRef.current) onCloseRef.current();
-        return;
-      }
-      if (e.key !== "Tab") return;
-      // THE FIX. Without this, Tab walks straight out of the dialog and into the
-      // page behind the scrim — which is still scrolled to wherever it was, still
-      // has live trade controls, and is invisible under an 80%-opaque overlay. A
-      // keyboard user could operate the page they cannot see.
-      const items = focusables();
-      if (items.length === 0) {
-        e.preventDefault();
-        return;
-      }
-      const first = items[0];
-      const last = items[items.length - 1];
-      const active = document.activeElement as HTMLElement | null;
-      if (e.shiftKey && (active === first || !modal.contains(active))) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && (active === last || !modal.contains(active))) {
-        e.preventDefault();
-        first.focus();
-      }
+      if (e.key === "Escape" && dismissibleRef.current) onCloseRef.current();
     };
 
     document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("keydown", handleKey);
-      previouslyFocused?.focus?.();
-    };
+    return () => document.removeEventListener("keydown", handleKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefersReduced]);
+
+  // Focus into the panel, Tab trapped inside it, focus restored on close. THE FIX of GH#2286:
+  // without it Tab walked straight out of the dialog into the live page behind the scrim.
+  // Declared after the entrance-animation effect, where this logic used to live: called ahead of
+  // gsap.fromTo, the initial focus was lost (Modal-2286.test.tsx "moves focus into the dialog"; it
+  // is kept with gsap mocked).
+  useDialogFocus(modalRef);
 
   const handleOverlayClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget && dismissible) onClose();
@@ -175,7 +130,7 @@ export const Modal: FC<ModalProps> = ({
   const content = (
     <div
       ref={overlayRef}
-      className={`fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4 ${scrimClassName}`}
+      className={`fixed inset-0 z-[9999] flex justify-center overflow-y-auto overscroll-contain bg-black/80 p-4 ${scrimClassName}`}
       onClick={handleOverlayClick}
       style={{ opacity: 0 }}
     >
@@ -184,7 +139,7 @@ export const Modal: FC<ModalProps> = ({
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
-        className={panelClassName}
+        className={`my-auto ${panelClassName}`}
         style={{ opacity: 0 }}
       >
         {children}

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { FundingGlobalEntry, FundingGlobalResponse } from "@/app/api/funding/global/route";
 import { pollWhenVisible } from "@/lib/pollWhenVisible";
+import { v22HasNoIndexer } from "@/lib/v22/indexer";
 
 /**
  * Funding Rates — shows top markets by funding rate from /api/funding/global.
@@ -23,6 +24,12 @@ export function FundingRates() {
     let cancelled = false;
 
     async function load() {
+      // v2.2 QA RT5-3: the list needs the market registry, which the v2.2 preview does not have (the route answers
+      // 503 there). Do not ask; the panel hides exactly as it does on a failure.
+      if (v22HasNoIndexer()) {
+        if (!cancelled) { setFailed(true); setLoading(false); }
+        return;
+      }
       try {
         const res = await fetch("/api/funding/global?limit=8");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);

@@ -5,7 +5,7 @@
  * "0.000006") and the per-fill column rendered sub-$0.50 fees as "0".
  */
 import { render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ trades: [] as unknown[], sql: vi.fn() }));
 vi.mock("@/hooks/useTradeHistory", () => ({
@@ -15,8 +15,15 @@ vi.mock("postgres", () => ({ default: vi.fn(() => h.sql) }));
 
 import { TradeHistoryTable } from "@/components/trade/TradeHistoryTable";
 import { TradeStatsPanel } from "@/components/trade/TradeStatsPanel";
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 
-afterEach(() => vi.unstubAllGlobals());
+// These pin the live (flag-off) display: with NEXT_PUBLIC_DEVNET_V22 on, volume is withheld until a lot-aware
+// indexer is attested (lib/v22/lot-l1.test.tsx covers that side).
+beforeEach(() => __setDevnetV22ForTest(false));
+afterEach(() => {
+  vi.unstubAllGlobals();
+  __setDevnetV22ForTest(null);
+});
 
 const stats = (totalFees: string) => ({
   totalTrades: 11, longTrades: 1, shortTrades: 10, totalVolume: "7664413830", totalFees, feesRecorded: 11,
@@ -28,6 +35,13 @@ describe("trader fees are dollars", () => {
     render(<TradeStatsPanel stats={stats("7030000") as never} loading={false} error={null} />);
     expect(screen.getByText("$7.03")).toBeTruthy();
     expect(screen.queryByText("0.000006")).toBeNull();
+  });
+
+  // #76: totalVolume is micro-USD too (|size| x USD price), but it rendered as a bare 6-dp number.
+  it("Volume Traded shows the micro-USD total as dollars, like Fees Paid", () => {
+    render(<TradeStatsPanel stats={stats("7030000") as never} loading={false} error={null} />);
+    expect(screen.getByText("$7.7K")).toBeTruthy(); // 7,664.41 USD
+    expect(screen.queryByText(/7664\.4138/)).toBeNull(); // the old bare render, "7664.41383"
   });
 
   it("the per-fill Fee column shows the USD fee", () => {

@@ -52,6 +52,13 @@ vi.mock("@/components/wallet/ConnectButton", () => ({ ConnectButton: () => <div 
 
 import { OrderTicket } from "@/components/trade/OrderTicket";
 import { __resetSameOwnerLpCache } from "@/hooks/useMarketLimits";
+import { isDevnetV21Enabled } from "@/lib/v21/flag";
+// Flags-OFF path only: the post-burn same-owner LP resolution (a getProgramAccounts-backed resolve) runs in useMarketLimits ONLY when no limits flag
+// and not the v2.1 flag is on (`if (anyOn || ...) return`). With NEXT_PUBLIC_DEVNET_V21=1 the hook reads the LP through the accounts path and the
+// ticket takes the same-owner owner from `limits.lp.owner` (lib/limits/ticket.ts: `L.lp?.owner ?? L.sameOwnerLpOwner`, covered by
+// lib/limits/ticket-state.test.ts), so these cases are skipped there, explicitly, rather than run against a branch that is not taken.
+const FLAGS_OFF_ONLY = isDevnetV21Enabled();
+
 
 const SLAB = "CjdnH8fTmxNMsuUevBt9VjSi87E3ESTcuWuoSrjUjvXE";
 const MINT = new PublicKey("So11111111111111111111111111111111111111112");
@@ -96,7 +103,7 @@ async function ticket(account: unknown = acct(50_000_000n, 0n)) {
 }
 
 describe("post-burn LP-owner resolution in flight (renounced market, wallet connected)", () => {
-  it("holds an OPEN with the calm loading label", async () => {
+  it.skipIf(FLAGS_OFF_ONLY)("holds an OPEN with the calm loading label", async () => {
     await ticket();
     size("5");
     expect(submit().textContent).toBe("Loading market…");
@@ -115,7 +122,7 @@ describe("post-burn LP-owner resolution in flight (renounced market, wallet conn
     expect(submit().disabled).toBe(false);
   });
 
-  it("CONTROL: a flip past the position (it opens the other side) is held", async () => {
+  it.skipIf(FLAGS_OFF_ONLY)("CONTROL: a flip past the position (it opens the other side) is held", async () => {
     await ticket(LONG_10);
     short();
     size("15");
@@ -159,7 +166,7 @@ describe("resolution outcome", () => {
     expect(submit().disabled).toBe(false);
   });
 
-  it("resolved to THIS wallet (post-burn creator): close-only is preserved", async () => {
+  it.skipIf(FLAGS_OFF_ONLY)("resolved to THIS wallet (post-burn creator): close-only is preserved", async () => {
     walletAs(CREATOR);
     mocks.resolveMarketLp.mockResolvedValue({ owner: CREATOR });
     await ticket();

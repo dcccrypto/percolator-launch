@@ -11,6 +11,9 @@ import { EarnPendingWithdrawal } from '@/components/earn/EarnPendingWithdrawal';
 import { EarnPayoutCapError } from '@/lib/limits/earn-split-pot';
 import { isDevnetV21Enabled } from '@/lib/v21/flag';
 import { V21_COPY } from '@/lib/v21/copy';
+import { isDevnetV22Enabled } from '@/lib/v22/flag';
+import { EarnExitQuote } from '@/components/earn/EarnExitQuote';
+import { useEarnExitV22, type EarnExitParams } from '@/hooks/useEarnExitV22';
 import {
   EARN_WITHDRAW_COPY as WC,
   cooldownPhrase,
@@ -23,13 +26,10 @@ import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
 import { checkSignatureLanded, timedOutSignature } from '@/lib/tx';
 import { watchPendingSignature } from '@/lib/pending-signature';
 import { explorerTxUrl } from '@/lib/config';
-import dynamic from 'next/dynamic';
+import { ConnectButton } from "@/components/wallet/ConnectButtonLazy";
+import { lpShareWalletNote, lpShareWalletNoteV22 } from '@/lib/lp-share-wallet-note';
+import { useDecimalInput } from '@/hooks/useDecimalInput';
 
-const ConnectButton = dynamic(
-  () =>
-    import('@/components/wallet/ConnectButton').then((m) => m.ConnectButton),
-  { ssr: false },
-);
 
 type Tab = 'deposit' | 'withdraw';
 
@@ -65,6 +65,13 @@ interface DepositWithdrawPanelProps {
   vaultAvailable: boolean;
   /** Collateral decimals */
   decimals: number;
+  /**
+   * v2.2 (flag on): the LP share mint's OWN decimals (a vault created by an earlier build keeps 0 for good; a new one is created with the
+   * collateral's). Shares are shown and typed in this scale; collateral amounts keep `decimals`. Absent / flag off: shares use `decimals`, as before.
+   */
+  lpDecimals?: number;
+  /** v2.2: whether the share token has its Metaplex name on chain (tag 122); decides the wording of the wallet note. `null` = not read. */
+  lpMetadataPresent?: boolean | null;
   /** Collateral symbol (e.g. USDC) */
   collateralSymbol: string;
   /** Loading state */
@@ -125,6 +132,68 @@ interface DepositWithdrawPanelProps {
    * `shares` (cancel + request in one transaction); the payout then collects by itself.
    */
   onResizeRedemption?: (shares: bigint) => Promise<void>;
+  /**
+   * Devnet v2.2 (flag): market / program / mint / pot for the quote-first exit. Absent or flag off: the
+   * existing one-step withdraw button is rendered, untouched.
+   */
+  exitV22?: Pick<EarnExitParams, 'market' | 'programId' | 'collateralMint' | 'sourceDomain'>;
+}
+
+/** v2.2 quote-first exit (own component so the v2.1 render path has no extra hook). */
+function ExitV22Step({ ex, shares, estimate, flow, decimals, symbol, valid }: { ex: NonNullable<DepositWithdrawPanelProps['exitV22']>; shares: bigint; estimate: bigint; flow: 'one-tx' | 'two-step'; decimals: number; symbol: string; valid: boolean }) {
+  const exit = useEarnExitV22({ ...ex, shares, mode: flow === 'one-tx' ? 'pair' : 'request', estimateAtoms: estimate });
+  return <EarnExitQuote exit={exit} decimals={decimals} symbol={symbol} canQuote={valid && shares > 0n} />;
+}
+
+/**
+ * v2.2: collecting a pending redemption is tag 77 too, so it needs the same floor, the inline refresh and the quote
+ * shown first (the legacy one-step claim sends a bare 77 that a v2.2 vault answers with 118 on a book that is not loss-current).
+ */
+function PendingClaimV22({ ex, shares, decimals, symbol, onRerequest }: { ex: NonNullable<DepositWithdrawPanelProps['exitV22']>; shares: bigint; decimals: number; symbol: string; onRerequest?: (shares: bigint) => Promise<void> }) {
+  const exit = useEarnExitV22({ ...ex, shares, mode: 'execute', estimateAtoms: 0n });
+  const [rerequesting, setRerequesting] = useState(false);
+  const [rerequestError, setRerequestError] = useState<string | null>(null);
+  // #3615: a request whose stored floor is above today's payout is refused (117) on every collect, and this card
+  // replaces EarnPendingWithdrawal (the flag-off home of the resize). Offer the same way out: cancel (81) and
+  // request again at today's price (resizeRedemption). The cooldown restarts; if the new request fails, the
+  // shares are back in the wallet.
+  const rerequest = async () => {
+    if (!onRerequest || rerequesting) return;
+    setRerequesting(true);
+    setRerequestError(null);
+    try {
+      await onRerequest(shares);
+      // A vault with no cooldown keeps this card mounted: drop the old failure with it.
+      exit.reset();
+    } catch (e) {
+      setRerequestError(earnErrorMessage(e, 'claim'));
+    } finally {
+      setRerequesting(false);
+    }
+  };
+  return (
+    <div data-testid="earn-pending-claim-v22" className="mx-5 mt-3">
+      {/* No collect while the cancel is in flight: a 77 would race the 81. */}
+      <EarnExitQuote exit={exit} decimals={decimals} symbol={symbol} canQuote={shares > 0n && !rerequesting} />
+      {/* Only the floor-stuck refusal: an RPC failure or a declined wallet prompt is fixed by trying again, and a
+          cancel would restart the wait for nothing. */}
+      {exit.state.phase === 'error' && exit.state.floorStuck && onRerequest && (
+        <div className="mt-2">
+          <button
+            type="button"
+            data-testid="earn-pending-rerequest-v22"
+            disabled={rerequesting}
+            onClick={() => void rerequest()}
+            className="text-[11px] text-[var(--accent)] underline disabled:opacity-50"
+          >
+            {rerequesting ? 'Requesting again…' : "Cancel and request again at today's price"}
+          </button>
+          <p className="mt-1 text-[10px] text-[var(--text-secondary)]">The wait starts over. Your shares stay yours either way.</p>
+          {rerequestError && <p role="alert" className="mt-1 text-[11px] text-[var(--short)]">{rerequestError}</p>}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function DepositWithdrawPanel({
@@ -134,6 +203,8 @@ export function DepositWithdrawPanel({
   lpSupply,
   vaultAvailable,
   decimals,
+  lpDecimals,
+  lpMetadataPresent = null,
   collateralSymbol,
   loading,
   cooldownElapsed,
@@ -151,11 +222,13 @@ export function DepositWithdrawPanel({
   pricing = null,
   onRefresh,
   onResizeRedemption,
+  exitV22,
 }: DepositWithdrawPanelProps) {
   const { connected } = useWalletCompat();
   const { connection } = useConnectionCompat();
   const [tab, setTab] = useState<Tab>('deposit');
   const [amount, setAmount] = useState('');
+  const amountField = useDecimalInput(amount, setAmount);
   const [submitting, setSubmitting] = useState(false);
   const [txError, setTxError] = useState<string | null>(null);
   const [txSuccess, setTxSuccess] = useState<string | null>(null);
@@ -174,7 +247,11 @@ export function DepositWithdrawPanel({
   const watchAbort = useRef<AbortController | null>(null);
   useEffect(() => () => watchAbort.current?.abort(), []);
 
-  const divisor = 10n ** BigInt(decimals);
+  // v2.2: shares are counted in the share mint's own decimals (what the wallet shows); flag off this is `decimals`.
+  const shareDecimals = isDevnetV22Enabled() ? lpDecimals ?? decimals : decimals;
+  // The amount field is in collateral decimals, except when the withdrawal is asked for in shares.
+  const inputDecimals = tab === 'withdraw' && withdrawUnit === 'shares' ? shareDecimals : decimals;
+  const divisor = 10n ** BigInt(inputDecimals);
 
   // Parse amount to raw bigint
   const rawAmount = useMemo(() => {
@@ -184,14 +261,14 @@ export function DepositWithdrawPanel({
       const whole = BigInt(parts[0] || '0');
       let frac = 0n;
       if (parts[1]) {
-        const fracStr = parts[1].slice(0, decimals).padEnd(decimals, '0');
+        const fracStr = parts[1].slice(0, inputDecimals).padEnd(inputDecimals, '0');
         frac = BigInt(fracStr);
       }
       return whole * divisor + frac;
     } catch {
       return 0n;
     }
-  }, [amount, decimals, divisor]);
+  }, [amount, inputDecimals, divisor]);
 
   // The program's own pricing when known (P3: registry shares + worse-of senior value).
   const shareTotal = pricing?.totalShares ?? lpSupply;
@@ -205,22 +282,28 @@ export function DepositWithdrawPanel({
     return previewDepositShares(rawAmount, shareTotal, depositValue) ?? 0n;
   }, [vaultAvailable, rawAmount, shareTotal, depositValue]);
 
+  // What the whole position redeems for: the Max / 100% amount in USDC.
+  const userWithdrawableAtoms = useMemo(
+    () => (userLpBalance > 0n && shareTotal > 0n ? previewWithdrawAtoms(userLpBalance, shareTotal, withdrawValue) ?? 0n : 0n),
+    [userLpBalance, shareTotal, withdrawValue],
+  );
+
   // Withdraw: the shares this request burns (USDC input -> shares at the withdraw-side value).
+  // The whole position's value (Max / 100%) or more burns every share: shares -> USDC -> shares
+  // floors twice, so converting the max back came out a share short and left that dust share
+  // behind as a $0.00 position that never closes.
   const withdrawShares = useMemo(() => {
     if (!vaultAvailable || rawAmount <= 0n) return 0n;
     if (withdrawUnit === 'shares') return rawAmount;
+    if (userWithdrawableAtoms > 0n && rawAmount >= userWithdrawableAtoms) return userLpBalance;
     return sharesForUsdc(rawAmount, shareTotal, withdrawValue, userLpBalance) ?? 0n;
-  }, [vaultAvailable, rawAmount, withdrawUnit, shareTotal, withdrawValue, userLpBalance]);
+  }, [vaultAvailable, rawAmount, withdrawUnit, shareTotal, withdrawValue, userLpBalance, userWithdrawableAtoms]);
 
   // Preview collateral for withdrawal
   const previewCollateral = useMemo(() => {
     if (withdrawShares <= 0n || shareTotal === 0n) return 0n;
     return previewWithdrawAtoms(withdrawShares, shareTotal, withdrawValue) ?? 0n;
   }, [withdrawShares, shareTotal, withdrawValue]);
-  const userWithdrawableAtoms = useMemo(
-    () => (userLpBalance > 0n && shareTotal > 0n ? previewWithdrawAtoms(userLpBalance, shareTotal, withdrawValue) ?? 0n : 0n),
-    [userLpBalance, shareTotal, withdrawValue],
-  );
   const pendingAtoms = useMemo(
     () => (pendingRedemptionShares > 0n && shareTotal > 0n ? previewWithdrawAtoms(pendingRedemptionShares, shareTotal, withdrawValue) : null),
     [pendingRedemptionShares, shareTotal, withdrawValue],
@@ -229,12 +312,17 @@ export function DepositWithdrawPanel({
   const maxNow = pricing?.maxNowAtoms ?? null;
   const overMaxNow = tab === 'withdraw' && maxNow !== null && previewCollateral > maxNow;
   const flow = withdrawFlow(cooldownSlots ?? 0n);
+  // v2.2: shares are printed in the mint's own decimals, so the count matches the wallet's; the note survives only as the chain says it should
+  // (lib/lp-share-wallet-note.ts lpShareWalletNoteV22).
+  const v22WalletNote = isDevnetV22Enabled()
+    ? lpShareWalletNoteV22({ appDecimals: shareDecimals, lpDecimals, metadataPresent: lpMetadataPresent })
+    : null;
 
   const withdrawMaxRaw = withdrawUnit === 'shares' ? userLpBalance : userWithdrawableAtoms;
   const maxAmount = useMemo(() => {
     const raw = tab === 'deposit' ? userBalance : withdrawMaxRaw;
-    return formatRaw(raw, decimals);
-  }, [tab, userBalance, withdrawMaxRaw, decimals]);
+    return formatRaw(raw, inputDecimals);
+  }, [tab, userBalance, withdrawMaxRaw, inputDecimals]);
   const unitLabel = tab === 'deposit' ? collateralSymbol : withdrawUnit === 'shares' ? 'shares' : collateralSymbol;
 
   const displayMaxAmount = loading || !vaultAvailable ? '—' : maxAmount;
@@ -250,9 +338,9 @@ export function DepositWithdrawPanel({
 
       const raw = tab === 'deposit' ? userBalance : withdrawMaxRaw;
       const partial = (raw * BigInt(pct)) / 100n;
-      setAmount(formatRaw(partial, decimals));
+      setAmount(formatRaw(partial, inputDecimals));
     },
-    [loading, vaultAvailable, tab, userBalance, withdrawMaxRaw, decimals],
+    [loading, vaultAvailable, tab, userBalance, withdrawMaxRaw, inputDecimals],
   );
 
   // GH#2804: after a confirmation timeout, watch the signature until it lands, is dropped, or the
@@ -401,7 +489,21 @@ export function DepositWithdrawPanel({
   if (!connected) {
     return (
       <div className="border border-[var(--border)] bg-[var(--panel-bg)] rounded-sm p-8 text-center hud-corners">
-        <div className="text-4xl mb-3">🔐</div>
+        {/* A wallet on a tile in the landing headline's gradient (was a 🔐 emoji). Decorative: the text
+            and the button below say what to do. */}
+        <div
+          aria-hidden="true"
+          data-testid="earn-connect-icon"
+          className="mx-auto mb-4 flex h-[52px] w-[52px] items-center justify-center rounded-[12px] text-white shadow-[0_8px_22px_-8px_rgba(153,69,255,0.65)]"
+          style={{ backgroundImage: "linear-gradient(135deg, #B97AFF 0%, #9945FF 45%, #14F195 100%)" }}
+        >
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M7 7.2V5.6A1.6 1.6 0 0 1 8.6 4h6.8A1.6 1.6 0 0 1 17 5.6v1.6" />
+            <rect x="3.5" y="7.2" width="17" height="12.3" rx="2.2" />
+            <path d="M20.5 10.8h-3.7a2.2 2.2 0 0 0 0 4.4h3.7" />
+            <circle cx="16.9" cy="13" r="0.85" fill="currentColor" stroke="none" />
+          </svg>
+        </div>
         <p className="text-[13px] text-[var(--text-secondary)] mb-4">
           Connect your wallet to deposit or withdraw
         </p>
@@ -440,9 +542,11 @@ export function DepositWithdrawPanel({
 
       {/* UX WP-4: the pending withdrawal card (both tabs). A full request escrows every share, so
           this is also what keeps the payout reachable (S1). It counts as an active position. */}
-      {hasPendingRedemption && (
+      {hasPendingRedemption && isDevnetV22Enabled() && exitV22 && cooldownElapsed ? (
+        <PendingClaimV22 ex={exitV22} shares={pendingRedemptionShares} decimals={decimals} symbol={collateralSymbol} onRerequest={onResizeRedemption} />
+      ) : hasPendingRedemption && (
         <EarnPendingWithdrawal
-          amountLabel={pendingAtoms !== null ? `${formatUsdc(pendingAtoms, decimals)} ${collateralSymbol}` : `${formatRaw(pendingRedemptionShares, decimals)} shares`}
+          amountLabel={pendingAtoms !== null ? `${formatUsdc(pendingAtoms, decimals)} ${collateralSymbol}` : `${formatRaw(pendingRedemptionShares, shareDecimals)} shares`}
           cooldownElapsed={cooldownElapsed}
           cooldownRemainingSlots={cooldownRemainingSlots}
           armed={armed}
@@ -496,12 +600,8 @@ export function DepositWithdrawPanel({
               type="text"
               inputMode="decimal"
               placeholder="0.00"
-              value={amount}
+              {...amountField}
               disabled={loading || !vaultAvailable}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (/^\d*\.?\d*$/.test(v)) setAmount(v);
-              }}
               className="w-full h-12 px-4 pr-16 text-2xl font-mono tabular-nums bg-[var(--bg)] border border-[var(--border)] rounded-sm text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]/40 transition-colors"
             />
             {tab === 'deposit' ? (
@@ -548,10 +648,22 @@ export function DepositWithdrawPanel({
           <div className="mb-4 p-3 bg-[var(--bg)] border border-[var(--border)] rounded-sm">
             <p data-testid="earn-deposit-preview" className="text-[12px] font-mono tabular-nums text-[var(--text)]">
               {WC.depositPreview(
-                formatShares(previewShares, decimals),
+                formatShares(previewShares, shareDecimals),
                 formatPercent(shareTotal + previewShares > 0n ? (Number(previewShares) / Number(shareTotal + previewShares)) * 100 : 100),
               )}
             </p>
+            {isDevnetV22Enabled() ? (
+              // v2.2: the note only where the wallet's count differs from the one shown here, and without "unnamed" once the token has its name.
+              v22WalletNote && (
+                <p data-testid="earn-lp-wallet-note" className="mt-1.5 text-[10px] leading-relaxed text-[var(--text-dim)]">
+                  {v22WalletNote}
+                </p>
+              )
+            ) : (
+              <p data-testid="earn-lp-wallet-note" className="mt-1.5 text-[10px] leading-relaxed text-[var(--text-dim)]">
+                {lpShareWalletNote(decimals)}
+              </p>
+            )}
           </div>
         )}
 
@@ -560,7 +672,7 @@ export function DepositWithdrawPanel({
         {vaultAvailable && rawAmount > 0n && tab === 'withdraw' && (
           <div className="mb-4 space-y-2">
             <p data-testid="earn-withdraw-receive" className="text-[12px] font-mono tabular-nums text-[var(--text)]">
-              {WC.receive(`${formatUsdc(previewCollateral, decimals)} ${collateralSymbol}`, formatShares(withdrawShares, decimals))}
+              {WC.receive(`${formatUsdc(previewCollateral, decimals)} ${collateralSymbol}`, formatShares(withdrawShares, shareDecimals))}
             </p>
             {overMaxNow && maxNow !== null && (
               <StatusLine
@@ -655,6 +767,9 @@ export function DepositWithdrawPanel({
             {WC.requestLine(flow === 'one-tx' ? 'one transaction' : cooldownPhrase(cooldownSlots ?? 0n), flow === 'one-tx' ? 1 : 2)}
           </p>
         )}
+        {tab === 'withdraw' && isDevnetV22Enabled() && exitV22 ? (
+          <ExitV22Step ex={exitV22} shares={withdrawShares} estimate={previewCollateral} flow={flow} decimals={decimals} symbol={collateralSymbol} valid={isValid} />
+        ) : (
         <div className="flex gap-2">
           <GlowButton
             data-testid={tab === 'deposit' ? 'earn-deposit-submit' : 'earn-withdraw-request'}
@@ -673,6 +788,7 @@ export function DepositWithdrawPanel({
                 : WC.requestButton(rawAmount > 0n ? `${formatUsdc(previewCollateral, decimals)} ${collateralSymbol}` : collateralSymbol)}
           </GlowButton>
         </div>
+        )}
         </>
         )}
       </div>

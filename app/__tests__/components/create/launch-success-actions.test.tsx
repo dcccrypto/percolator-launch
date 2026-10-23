@@ -22,11 +22,12 @@ vi.mock("@/lib/config", () => ({
   explorerAccountUrl: (addr: string) => `https://explorer.solana.com/account/${addr}?cluster=devnet`,
 }));
 const WALLET = new PublicKey("11111111111111111111111111111112");
-vi.mock("@/hooks/useWalletCompat", () => ({ useWalletCompat: () => ({ publicKey: WALLET, connected: true }) }));
+vi.mock("@/hooks/useWalletCompat", () => ({ useWalletCompat: () => ({ publicKey: WALLET, connected: true }), useConnectionCompat: () => ({ connection: {} }) }));
 vi.mock("@/components/create/LogoUpload", () => ({ LogoUpload: () => null }));
 
 import { LaunchSuccess, LAUNCH_PRICE_WAIT_MS } from "@/components/create/LaunchSuccess";
 import { PRICE_SOURCE_LOCKED } from "@/lib/market-registration";
+import { TICKET_COPY } from "@/lib/limits/copy";
 import {
   KEEPER_REGISTER_COPY,
   postKeeperRegistration,
@@ -122,7 +123,7 @@ describe("launch success: actions while the live price is still connecting", () 
 });
 
 /** The real registration loop driving the real screen, with keeper-register answering 502. */
-const REG_REQ = { slabAddress: SLAB, dexPoolAddress: "P", proofTx: "sig" };
+const REG_REQ = { slabAddress: SLAB, dexPoolAddress: "P", proofTx: "2U4TFzSboHomgWAo1REiwVMC6jA8BZR77VdeNBChnE4NvSDsghA1Bg59oJ3fP6Gzk4FTv6THAJANRoYwV5Q1PRbY" };
 function Harness({ fetchImpl, onRetry }: { fetchImpl: typeof fetch; onRetry?: () => void }) {
   const [phase, setPhase] = useState<KeeperRegisterPhase>("connecting");
   const [message, setMessage] = useState<string>(KEEPER_REGISTER_COPY.connecting);
@@ -222,5 +223,15 @@ describe("a final refusal shows only reasons written for creators", () => {
     render(<LaunchSuccess {...base({ keeperPhase: "failed", keeperMessage: KEEPER_REGISTER_COPY.noProof })} />);
     expect(screen.getByTestId("launch-price-status-line").textContent).toBe(KEEPER_REGISTER_COPY.noProof);
     expect(screen.queryByTestId("launch-price-retry")).toBeNull();
+  });
+});
+
+describe("launch success: the creator wallet is close-only on its own market", () => {
+  it("says so next to the Trade buttons, in the same words the trade ticket uses", () => {
+    render(<LaunchSuccess {...base({ keeperPhase: "ready", keeperMessage: KEEPER_REGISTER_COPY.ready })} />);
+    expect(screen.getByTestId("launch-go-to-market")).toBeTruthy();
+    expect(screen.getByTestId("launch-close-only-note").textContent).toContain(TICKET_COPY.sameOwner.body);
+    expect(screen.getByTestId("launch-close-only-note").textContent).toContain(TICKET_COPY.sameOwner.title);
+    expect(TICKET_COPY.sameOwner.body).toMatch(/can only close positions here/);
   });
 });

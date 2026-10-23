@@ -30,6 +30,9 @@ import { act } from "react";
 import { applyOnChainPoll } from "@/lib/priceStore/priceStore";
 import { computeLiqPrice } from "@/lib/trading";
 import { computeLiquidationDistancePct } from "@/lib/liquidation-distance";
+import { seedLotExp0 } from "../helpers/v22-fixtures";
+
+seedLotExp0();
 
 const pk = new PublicKey("11111111111111111111111111111111");
 const E6 = 1_000_000n;

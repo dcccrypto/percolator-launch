@@ -73,3 +73,13 @@ describe("RecoverSolBanner resume state follows the wizard", () => {
     expect(src).toContain("setResumeSlab(slabAddress);");
   });
 });
+
+// The launch view counts steps from 1 ("Step 3 of 6" while index 2 signs); lastStep is the next step
+// to run, counted from 0. The card said "step 2 of 6" for a launch about to run the 3rd step.
+describe("RecoverSolBanner resume step label", () => {
+  it("names the step the resume runs next, as the launch view numbers it", () => {
+    render(<Wizard />);
+    fireEvent.click(resumeButtons()[0]); // lastStep 2: steps 1 and 2 are done, the 3rd runs next
+    expect(screen.getByText(/Resume mode set for step 3 of 6/)).toBeInTheDocument();
+  });
+});

@@ -14,7 +14,8 @@
  */
 import { invalidateUpgradeDetection } from "@/lib/program-upgrade-detect";
 import type { PublicKey, TransactionInstruction } from "@solana/web3.js";
-import { ACCOUNTS_LP_VAULT_DEPOSIT, buildAccountMetas, buildIx, encodeDepositToLpVault, encodeExecuteRedemption, encodeRequestRedeemLpShares, WELL_KNOWN } from "@percolatorct/sdk";
+import { ACCOUNTS_LP_VAULT_DEPOSIT, buildAccountMetas, buildIx, encodeDepositToLpVault, encodeExecuteRedemption, WELL_KNOWN } from "@percolatorct/sdk";
+import { encodeRequestRedeemLpSharesV22 } from "@/lib/v22/sdk/v22-wire";
 import { buildLpVaultCrankFeesIx, withBoundVaultLpTail } from "./p3-ix";
 import { MARKET_MODE_LIVE, TAG_DEPOSIT_TO_LP_VAULT, TAG_EXECUTE_REDEMPTION, TAG_REQUEST_REDEEM_LP_SHARES } from "./constants";
 
@@ -164,9 +165,52 @@ export function buildEarnExecuteIxs(p: {
 }
 
 /**
+ * AUD-S1-18: how far below the quote the payout floor stored on a request sits, in bps. The stored
+ * floor binds EVERY later execution of the request (the program pays `max(wire, stored)`), the
+ * redeemer's own included, and a request waits out the cooldown before it can execute. So it is
+ * deliberately wide: it stops a third party (a bound vault's / Resolved 77 is permissionless) from
+ * executing the request at an arbitrarily bad moment, without trapping the redeemer on ordinary NAV
+ * drift during the cooldown. A payout below it is refused 117 and the shares stay escrowed
+ * (cancel 81 returns them).
+ */
+export const EARN_REQUEST_FLOOR_BPS = 1_000n;
+
+/**
+ * The payout floor for a tag-76 request of a quoted payout: `quote * (10_000 - bps) / 10_000`, at
+ * least 1 atom (the program refuses a zero floor). No quote => 1 atom (a floor that never binds;
+ * the request is then no worse than the retired floorless form).
+ */
+export function earnRequestFloorAtoms(quoteAtoms: bigint | null | undefined, bps: bigint = EARN_REQUEST_FLOOR_BPS): bigint {
+  if (bps < 0n || bps > 10_000n) throw new Error("floor bps must be 0..=10000");
+  if (quoteAtoms === null || quoteAtoms === undefined || quoteAtoms <= 0n) return 1n;
+  const f = (quoteAtoms * (10_000n - bps)) / 10_000n;
+  return f > 0n ? f : 1n;
+}
+
+/**
+ * What 77 would pay for `shares` at the vault's current pricing, or null when it cannot be priced:
+ * a two-pot vault at its combined NAV over the registry's shares (exactly what 77 pays), otherwise
+ * the backing NAV the program prices 75 / 77 against over the share supply.
+ */
+export function earnRequestQuoteAtoms(
+  shares: bigint,
+  s: { splitPot?: { navAtoms: bigint; totalShares: bigint } | null; backingNavAtoms?: bigint; lpSupply?: bigint },
+): bigint | null {
+  if (shares <= 0n) return null;
+  if (s.splitPot && s.splitPot.totalShares > 0n) return (shares * s.splitPot.navAtoms) / s.splitPot.totalShares;
+  if (s.backingNavAtoms !== undefined && s.lpSupply !== undefined && s.lpSupply > 0n && s.backingNavAtoms > 0n) {
+    return (shares * s.backingNavAtoms) / s.lpSupply;
+  }
+  return null;
+}
+
+/**
  * RequestRedeemLpShares (tag 76): [redeemer(s,w), registry(w), lpMint, redeemerLpAta(w), escrow(w),
  * redemption(w), tokenProgram, systemProgram] (percolator-prog handle_request_redeem_lp_shares).
  * Shared by useInsuranceLP.withdraw and the resolved "Finish now" batch (UX WP-8).
+ * AUD-S1-18: always the v2.2 floored wire `[76, shares u128, min_payout u64, keeper_ok u8]` (26 B,
+ * keeper_ok 0), never the floorless 17-byte form. Accepted by the deployed wrapper (aca02ba6
+ * decodes the trailer; the request account is created 128 B instead of 112 B).
  */
 export function buildRequestRedeemIx(p: {
   programId: PublicKey;
@@ -177,7 +221,10 @@ export function buildRequestRedeemIx(p: {
   escrow: PublicKey;
   redemption: PublicKey;
   shares: bigint;
+  /** The payout floor stored on the request (> 0): {@link earnRequestFloorAtoms} of a quote. */
+  minPayoutAtoms: bigint;
 }): TransactionInstruction {
+  if (p.minPayoutAtoms <= 0n) throw new Error("a tag-76 request needs a non-zero payout floor (AUD-S1-18)");
   return buildIx({
     programId: p.programId,
     keys: [
@@ -190,7 +237,7 @@ export function buildRequestRedeemIx(p: {
       { pubkey: WELL_KNOWN.tokenProgram, isSigner: false, isWritable: false },
       { pubkey: WELL_KNOWN.systemProgram, isSigner: false, isWritable: false },
     ],
-    data: encodeRequestRedeemLpShares({ shares: p.shares.toString() }),
+    data: encodeRequestRedeemLpSharesV22({ shares: p.shares, minPayoutAtoms: p.minPayoutAtoms, keeperOk: false }),
   });
 }
 

@@ -138,4 +138,16 @@ describe("#38: stake pool rows", () => {
     fireEvent.click(link.parentElement!);
     expect(poolButton("BBB").getAttribute("aria-pressed")).toBe("true");
   });
+
+  // #63: picking a pool while on the Withdraw tab flipped the widget back to Deposit.
+  it("picking another pool keeps the Withdraw tab", async () => {
+    await renderRows();
+    fireEvent.click(poolButton("AAA"));
+    fireEvent.click(await screen.findByTestId("stake-tab-withdraw"));
+    expect(screen.getByTestId("stake-tab-withdraw").className).toContain("var(--cyan)");
+    fireEvent.click(poolButton("BBB"));
+    expect(poolButton("BBB").getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByTestId("stake-tab-withdraw").className).toContain("var(--cyan)");
+    expect(screen.getByTestId("stake-tab-deposit").className).not.toContain("var(--accent)");
+  });
 });

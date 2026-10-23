@@ -7,6 +7,7 @@ import { UNLIMITED_CAPACITY } from "@/lib/marketCapacity";
 import { TICKET_COPY as T, TICKET_FUNDS_LINE } from "./copy";
 import type { StatusVariant } from "./user-message";
 import type { Side } from "./risk-limits";
+import { isLongStale, PRICE_STALLED } from "./price-stall";
 
 export type TicketRow =
   | "retired"
@@ -15,6 +16,7 @@ export type TicketRow =
   | "close-only"
   | "catching-up"
   | "waiting-price"
+  | "price-stalled"
   | "side-paused"
   | "both-paused"
   | "same-owner"
@@ -35,6 +37,8 @@ export interface TicketStateInput {
   engineStale: boolean;
   /** No price yet, the oracle isn't live, or its price is stale. */
   waitingForPrice: boolean;
+  /** v2.2 QA M-2: seconds since the last on-chain price; past LONG_STALE_SECS nobody is pushing it, so no "catching up". */
+  priceAgeSecs?: number | null;
   /** Per-side "no room for new exposure" (P1 halt, a legacy side capacity of 0). */
   sidePaused: Record<Side, boolean>;
   /** The market as a whole can't open (no liquidity, de-risking). */
@@ -51,6 +55,12 @@ export interface TicketStateInput {
   feeOverMax: boolean;
   /** A size under which the fee fits, formatted ("2.5 SOL"), or null. */
   feeSuggested: string | null;
+  /**
+   * False while the size is empty or zero: the open button then says what is missing
+   * ("Enter a size") instead of naming an order. Only the "ok" row's label changes; every
+   * row above it keeps its own label. Omitted = a size is entered.
+   */
+  sizeEntered?: boolean;
 }
 
 export interface TicketStatus {
@@ -91,6 +101,9 @@ export function deriveTicketState(i: TicketStateInput): TicketState {
     const body = i.lpDepleted ? `${T.closeOnly.body} ${TICKET_FUNDS_LINE(i.lpIsVault === true)}` : T.closeOnly.body;
     return paused("close-only", "close-only", T.closeOnly.title, body, T.closeOnly.button);
   }
+  if ((i.engineStale || i.waitingForPrice) && isLongStale(i.priceAgeSecs)) {
+    return paused("price-stalled", "price-stalled", PRICE_STALLED.title, PRICE_STALLED.ticketBody(i.priceAgeSecs as number), PRICE_STALLED.button);
+  }
   if (i.engineStale) return paused("catching-up", "engine-catching-up", T.catchingUp.title, T.catchingUp.body, T.catchingUp.button, "wait");
   if (i.waitingForPrice) return paused("waiting-price", "waiting-price", T.waitingPrice.title, T.waitingPrice.body, T.waitingPrice.button, "wait");
   // A depleted market gets its own reason; the generic "Opening paused" stays neutral because it
@@ -109,7 +122,7 @@ export function deriveTicketState(i: TicketStateInput): TicketState {
   if (i.feeOverMax) return paused("fee-over-max", "fee-over-max", T.feeOverMax.title, T.feeOverMax.body(i.feeSuggested), T.feeOverMax.button, "error");
   return {
     row: "ok",
-    buttonLabel: `${cap(d)} ${i.baseSymbol} ${i.leverageLabel}×`,
+    buttonLabel: i.sizeEntered === false ? T.enterSize : `${cap(d)} ${i.baseSymbol} ${i.leverageLabel}×`,
     blocks: false,
     waiting: false,
     status: null,
@@ -138,9 +151,26 @@ export function balanceMaxQ(balanceAtoms: bigint, leverage: number, priceE6: big
   return (balanceAtoms * lev100 * 1_000_000n) / (100n * priceE6);
 }
 
+/** One cent in USD atoms (6 dp): the smallest step the ticket's USD size and Max can show. */
+export const MIN_SIDE_ROOM_USD_ATOMS = 10_000n;
+
+/**
+ * The LP's room on a side counts as FULL (the side is paused) when it is 0 or worth less than
+ * one cent at `priceE6`. A sub-cent room is not an order the ticket can express: the USD Max
+ * reads "$0.00" and the clamp floors the size to "0.00". null = unknown room (not full).
+ * Without a price only an exact 0 is full (the ticket is waiting for a price anyway).
+ */
+export function sideRoomIsFull(roomQ: bigint | null, priceE6: bigint | null | undefined): boolean {
+  if (roomQ === null) return false;
+  if (roomQ <= 0n) return true;
+  if (!priceE6 || priceE6 <= 0n) return false;
+  return (roomQ * priceE6) / 1_000_000n < MIN_SIDE_ROOM_USD_ATOMS;
+}
+
 /** The Max figure in the input's unit: "41.88 SOL" (≤ 4 dp) or "$3,750.00" (2 dp, floored). */
-export function maxInUnit(q: bigint, unit: "token" | "usd", priceE6: bigint, baseSymbol: string): string {
+export function maxInUnit(q: bigint, unit: "token" | "usd", priceE6: bigint, baseSymbol: string, lotExp = 0): string {
   if (unit === "token") {
+    if (lotExp > 0) q = q * 10n ** BigInt(lotExp);
     const whole = q / 1_000_000n;
     const frac = (q % 1_000_000n).toString().padStart(6, "0").slice(0, 4).replace(/0+$/, "");
     return `${whole.toLocaleString("en-US")}${frac ? `.${frac}` : ""} ${baseSymbol}`;

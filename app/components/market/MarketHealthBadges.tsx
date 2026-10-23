@@ -4,7 +4,8 @@ import type { FC } from "react";
 import { Tooltip } from "@/components/ui/Tooltip";
 import type { HealthBadge, HealthBadgeTone, MarketHealthRow } from "@/lib/market-health";
 import { useSingleMarketHealth } from "@/hooks/useMarketHealth";
-import { LIST_BADGE_IDS, marketHeaderStatus } from "@/lib/market-header-status";
+import { LIST_BADGE_IDS, marketHeaderStatus, type HeaderPriceFacts } from "@/lib/market-header-status";
+import { useHeaderPriceFacts } from "@/hooks/useHeaderPriceFacts";
 import { StatusLine } from "@/components/ui/StatusLine";
 
 /**
@@ -87,8 +88,8 @@ export const TradeMarketHealthBanner: FC<{ slab: string }> = ({ slab }) => {
  * UX WP-10 (audit §4.3): the ONE header status line, only when the market is not simply live
  * (lib/market-header-status.ts). Replaces the health-banner stack and the limits strip row.
  */
-export const MarketHeaderStatusView: FC<{ row: MarketHealthRow | null | undefined }> = ({ row }) => {
-  const st = marketHeaderStatus(row);
+export const MarketHeaderStatusView: FC<{ row: MarketHealthRow | null | undefined; price?: HeaderPriceFacts }> = ({ row, price }) => {
+  const st = marketHeaderStatus(row, Date.now(), price);
   if (!st) return null;
   return (
     <div data-testid="market-header-status" className="border-b border-[var(--border)]">
@@ -99,5 +100,6 @@ export const MarketHeaderStatusView: FC<{ row: MarketHealthRow | null | undefine
 
 export const MarketHeaderStatus: FC<{ slab: string }> = ({ slab }) => {
   const row = useSingleMarketHealth(slab);
-  return <MarketHeaderStatusView row={row} />;
+  const price = useHeaderPriceFacts();
+  return <MarketHeaderStatusView row={row} price={price} />;
 };

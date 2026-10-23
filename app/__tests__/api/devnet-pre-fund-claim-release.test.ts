@@ -94,7 +94,11 @@ async function loadPostHandler() {
     getConfig: () => ({ rpcUrl: "https://api.devnet.solana.com" }),
   }));
   vi.doMock("@/lib/server-rpc", () => ({
-    getServerConnection: () => ({}),
+    // S3-C5: the route proves the sending connection is devnet by genesis hash.
+    getServerConnection: () => ({
+      rpcEndpoint: "https://api.devnet.solana.com",
+      getGenesisHash: async () => "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+    }),
     sendAndConfirmServerTx: (...a: unknown[]) => sendAndConfirmServerTx(...a),
     ServerSignatureTimeoutError,
   }));

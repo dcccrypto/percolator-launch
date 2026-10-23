@@ -1,14 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import dynamic from "next/dynamic";
+import { useHashTab } from "@/hooks/useHashTab";
 import { EarnVaultView } from "@/components/earn/EarnVaultView";
-import StakePage from "@/app/stake/page";
-import MyMarketsPage from "@/app/my-markets/page";
+import { prefetchOnIdle } from "@/lib/prefetch-on-idle";
+
+// Only the default tab (Vaults) is in this page's first-load bundle; the others are split out and
+// warmed at idle so switching to one is still instant (see app/portfolio/page.tsx).
+const loadStake = () => import("@/app/stake/page");
+const loadMyMarkets = () => import("@/app/my-markets/page");
+const tabLoading = () => <div className="min-h-[60vh]" aria-busy="true" />;
+const StakePage = dynamic(loadStake, { ssr: false, loading: tabLoading });
+const MyMarketsPage = dynamic(loadMyMarkets, { ssr: false, loading: tabLoading });
 import {
   EARN_TABS,
   DEFAULT_EARN_TAB,
   isEarnTabKey,
-  type EarnTabKey,
 } from "@/components/earn/earnTabs";
 
 /**
@@ -22,23 +30,13 @@ import {
  * bar sits above them with no extra max-width/padding wrapper.
  */
 export default function EarnHubPage() {
-  const [tab, setTab] = useState<EarnTabKey>(DEFAULT_EARN_TAB);
+  const [tab, selectTab] = useHashTab(isEarnTabKey, DEFAULT_EARN_TAB);
 
   useEffect(() => {
     document.title = "Earn | Percolator";
   }, []);
 
-  // Deep-link the initial tab from the hash on mount (client-only, no
-  // next/navigation Suspense requirement). Default is the first tab.
-  useEffect(() => {
-    const hash = window.location.hash.replace(/^#/, "");
-    if (isEarnTabKey(hash)) setTab(hash);
-  }, []);
-
-  const selectTab = (key: EarnTabKey) => {
-    setTab(key);
-    history.replaceState(null, "", "#" + key);
-  };
+  useEffect(() => prefetchOnIdle([loadStake, loadMyMarkets]), []);
 
   return (
     <div>

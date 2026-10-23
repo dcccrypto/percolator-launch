@@ -87,7 +87,7 @@ describe("ChartPnlBadge — Share PnL", () => {
     expect(d!.nominalSizeQ).toBe(40_000_000n);
     expect(d!.effectiveSizeQ).toBe(40_000_000n); // no ADL → equals nominal
     expect(d!.initialMarkE6).toBe(2_000_000n);
-    expect(d!.payableCapacityAtoms).toBe(7_000_000n); // vault(0) + insurance(7)
+    expect(d!.payableCapacityAtoms).toBeNull(); // v17: no vault, so no cap (insurance alone isn't one)
   });
 
   it("renders nothing when there is no open position", () => {

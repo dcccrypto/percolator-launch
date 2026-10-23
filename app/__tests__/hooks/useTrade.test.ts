@@ -137,6 +137,9 @@ vi.mock("@/lib/v18-wire", async (orig) => ({
 import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { sendTx, sendTxWaiting } from "@/lib/tx";
+import { seedLotExp0 } from "../helpers/v22-fixtures";
+
+seedLotExp0();
 
 /** The v17 trade is sent with sendTxWaiting; sendTx only carries a separate taker crank. */
 const sent = () => vi.mocked(sendTxWaiting);
@@ -270,6 +273,22 @@ describe("useTrade", () => {
 
     // 5c33e236 removed the dead "inline oracle push removed" throw: v18 AUTH_MARK
     // markets are priced by the keeper, so the authority wallet trades normally.
+    it("#49: forwards onConfirming as the send's onProgress", async () => {
+      // v2.1 market fixture: pin the v2.2 flag off (with it on, the v2.2 price check refuses this fixture before the send).
+      const { __setDevnetV22ForTest } = await import("@/lib/v22/flag");
+      __setDevnetV22ForTest(false);
+      try {
+        const onConfirming = vi.fn();
+        const { result } = renderHook(() => useTrade(mockSlabAddress));
+        await act(async () => {
+          await result.current.trade({ lpIdx: 0, userIdx: 1, size: 1000000n, onConfirming });
+        });
+        expect(sent()).toHaveBeenCalledWith(expect.objectContaining({ onProgress: onConfirming }));
+      } finally {
+        __setDevnetV22ForTest(null);
+      }
+    });
+
     it("lets the oracle-authority wallet trade on an admin market (no inline push)", async () => {
       mockSlabState.config.oracleAuthority = mockWalletPubkey;
 

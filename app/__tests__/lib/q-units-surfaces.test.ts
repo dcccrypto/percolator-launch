@@ -48,10 +48,11 @@ describe("Q-unit conversions are not decimals-based", () => {
     expect(s).toMatch(/qToUsd\(Number\(oiTokensRaw\)/);
     expect(s).toMatch(/qToUsd\(Number\(volume24hRaw\)/);
   });
-  it("MarketInfoBar: OI fallback divides by Q_SCALE; volume goes through rowVolumeUsd", () => {
+  it("MarketInfoBar: OI goes through qToUsd (Q_SCALE); volume goes through rowVolumeUsd", () => {
     const s = src("components/trade/MarketInfoBar.tsx");
     expect(s).not.toMatch(/Math\.pow\(10, decimals\)/);
-    expect(s).toMatch(/rawOiAtoms \/ Q_SCALE/);
+    // #38: both OI sources are Q quantities, converted by the shared helper (which divides by Q_SCALE).
+    expect(s).toMatch(/qToUsd\(totalOI != null \? Number\(totalOI\) : rawOiAtoms, priceUsd\)/);
     expect(s).toMatch(/rowVolumeUsd\(/);
     expect(s).not.toMatch(/const volume = market\?\.volume_24h/);
   });

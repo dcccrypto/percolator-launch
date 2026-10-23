@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import { PublicKey } from "@solana/web3.js";
 
 const parse = vi.hoisted(() => vi.fn());
+// close-sweep decodes through lib/v22/layout (flag off it delegates to the SDK parsePortfolioV17, flag on it is VERSION-keyed): stub that seam.
+vi.mock("@/lib/v22/layout", () => ({ parsePortfolio: parse }));
 vi.mock("@percolatorct/sdk", () => ({ parsePortfolioV17: parse }));
 import { readSweepableCapital } from "@/lib/close-sweep";
 

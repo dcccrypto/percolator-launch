@@ -1,11 +1,15 @@
 "use client";
 
+import { errorText } from "@/lib/error-text";
+import { recordCloseTx } from "@/lib/last-close-tx";
+import { lotTradingRefusal } from "@/lib/v22/lot-coverage";
+import { ensureLotExp, getLotExp } from "@/lib/v22/lot-registry";
 import { useState, useCallback, useRef } from "react";
 import { useSingleMarketHealth } from "@/hooks/useMarketHealth";
 import { safeExplainMarketTxError } from "@/lib/market-error";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
-import { AccountKind, isV17Account, parsePortfolioV17 } from "@percolatorct/sdk";
+import { AccountKind } from "@percolatorct/sdk";
 import { useTrade, prewarmTradeSubmission } from "@/hooks/useTrade";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { getPortfolioRawSnapshot, makePortfolioScanKey } from "@/lib/userAccountScan";
@@ -14,11 +18,13 @@ import { effectiveLeg } from "@/lib/limits/effective-quantity";
 import { isPartialLegSendError } from "@/lib/trade-leg-groups";
 import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
 import { useSlabState } from "@/components/providers/SlabProvider";
-import { humanizeError, UserFacingError, userFacingMessage, withTransientRetry } from "@/lib/errorMessages";
+import { humanizeError, isEngineStaleAtSend, UserFacingError, userFacingMessage, withTransientRetry } from "@/lib/errorMessages";
 import { getLpInventoryState, getMatcherCaps } from "@/lib/matcherCaps";
 import { lpInventoryRoomQ } from "@/lib/limits/lp-inventory-room";
 import { closeCapacityMessage } from "@/lib/marketCapacity";
 import { chunkCloseSize } from "@/lib/closeChunks";
+import { anySignatureLanded, inFlightAttemptOf, remainingClose, type InFlightAttempt } from "@/lib/close-resend-guard";
+import { awaitAmbiguousOutcome } from "@/lib/tx";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
@@ -40,6 +46,8 @@ import { useOptionalToast } from "@/hooks/useToast";
 import { formatTokenAmount } from "@/lib/format";
 import { closeLimitFromEngine } from "@/lib/close-limit";
 import { clearEntryPrice } from "@/lib/entry-price";
+import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
+import { PortfolioTargetError, TARGET_COPY, isPortfolioTargetError, verifyPortfolioTarget } from "@/lib/portfolio-target";
 
 /** M-3: the leg is a prior-reset obligation (owns 0 effective quantity). */
 export const COPY_RESET_LEG =
@@ -51,8 +59,21 @@ export interface ClosePositionResult {
   fill?: FillResult | null;
 }
 
+export interface ClosePositionOpts {
+  /**
+   * #3301: close EXACTLY this portfolio account (the one the row on screen shows). It is read fresh
+   * and must be owned by the market program, by the connected wallet and on this market; the size
+   * and percent come from its own leg. There is no fallback scan: a mismatch or an account with no
+   * open position is an error the user sees. Omit it only where no row exists (legacy v12 / mock),
+   * which keeps the old "the wallet's lowest-pubkey portfolio" resolution.
+   */
+  portfolioPk?: PublicKey;
+  /** Skip the post-close sweep (the v2.1 MOVE executor sweeps once after its own steps). */
+  skipSweep?: boolean;
+}
+
 export interface UseClosePositionReturn {
-  closePosition: (closePercent: number, opts?: { skipSweep?: boolean }) => Promise<ClosePositionResult>;
+  closePosition: (closePercent: number, opts?: ClosePositionOpts) => Promise<ClosePositionResult>;
   loading: boolean;
   error: string | null;
   phase: "idle" | "submitting" | "confirming";
@@ -61,7 +82,7 @@ export interface UseClosePositionReturn {
   /** Fire when the close MODAL opens (fire-and-forget): starts the fresh
    *  portfolio read + trade-account/blockhash/fee prewarms so the confirm
    *  click reaches the wallet popup with zero blocking RPC round-trips. */
-  prewarmClose: () => void;
+  prewarmClose: (opts?: ClosePositionOpts) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,8 +105,9 @@ const FRESH_READ_TTL_MS = 4_000;
 const freshReadCache = new Map<string, { data: Buffer | null; ts: number }>();
 const freshReadInflight = new Map<string, Promise<Buffer | null>>();
 
-function freshReadKey(programId: PublicKey, slab: string, owner: PublicKey): string {
-  return `${programId.toBase58()}|${slab}|${owner.toBase58()}`;
+function freshReadKey(programId: PublicKey, slab: string, owner: PublicKey, targetPk?: PublicKey): string {
+  // A targeted read is a different account from the owner's default one: never share a cache slot.
+  return `${programId.toBase58()}|${slab}|${owner.toBase58()}${targetPk ? `|${targetPk.toBase58()}` : ""}`;
 }
 
 /** One direct chain read of the caller's v17 portfolio for this market:
@@ -97,8 +119,14 @@ async function readFreshPortfolioData(
   programId: PublicKey,
   slabAddress: string,
   owner: PublicKey,
+  targetPk?: PublicKey,
 ): Promise<Buffer | null> {
   const slabPk = new PublicKey(slabAddress);
+  if (targetPk) {
+    // #3301: exactly the named account. Never the cached pick, never a scan.
+    const info = await connection.getAccountInfo(targetPk, "confirmed");
+    return verifyPortfolioTarget(info, programId, slabPk, owner);
+  }
   const cachedPk = getPortfolioRawSnapshot(
     makePortfolioScanKey(programId, slabAddress, owner),
   )?.pubkey;
@@ -122,15 +150,16 @@ function getFreshPortfolioData(
   slabAddress: string,
   owner: PublicKey,
   maxAgeMs: number,
+  targetPk?: PublicKey,
 ): Promise<Buffer | null> {
-  const key = freshReadKey(programId, slabAddress, owner);
+  const key = freshReadKey(programId, slabAddress, owner, targetPk);
   const cached = freshReadCache.get(key);
   if (cached && Date.now() - cached.ts < maxAgeMs) {
     return Promise.resolve(cached.data);
   }
   const inflight = freshReadInflight.get(key);
   if (inflight) return inflight;
-  const p = readFreshPortfolioData(connection, programId, slabAddress, owner)
+  const p = readFreshPortfolioData(connection, programId, slabAddress, owner, targetPk)
     .then((data) => {
       freshReadCache.set(key, { data, ts: Date.now() });
       return data;
@@ -165,7 +194,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
   // because useTrade v17 path discovers the LP via getProgramAccounts independently.
   const lpIdx = accounts.find(({ account }) => account.kind === AccountKind.LP)?.idx ?? 0;
 
-  const isV17Market = raw != null && raw.length > 0 && isV17Account(raw);
+  const isV17Market = raw != null && raw.length > 0 && isWrapperAccount(raw);
 
   const resetPhase = useCallback(() => {
     setPhase("idle");
@@ -173,15 +202,35 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
   }, []);
 
   const closePosition = useCallback(
-    async (closePercent: number, opts?: { skipSweep?: boolean }): Promise<ClosePositionResult> => {
+    async (closePercent: number, opts?: ClosePositionOpts): Promise<ClosePositionResult> => {
       if (inflightRef.current) throw new Error("Close already in progress");
-      if (!userAccount) {
+      const targetPk = opts?.portfolioPk;
+      // A named account does not need the canonical scan to have loaded; the unnamed path still does.
+      if (!userAccount && !targetPk) {
         // A fresh SlabProvider (/portfolio, other markets) can still be loading it. Say so; keep the
         // throw, which keeps the modal open. The in-progress guard above stays silent on purpose.
         setError(COPY.closeNotLoaded);
         throw new Error("No user account");
       }
+      // N6: a named account still needs the market itself. Before the first slab read lands (a fresh
+      // SlabProvider), `raw` is null and the market isn't known to be v17 yet: that is "not loaded",
+      // not the "couldn't match" a loaded legacy market gets below.
+      if (targetPk && !mockMode && raw == null) {
+        setError(COPY.closeNotLoaded);
+        throw new Error("Market not loaded");
+      }
       if (closePercent < 1 || closePercent > 100) throw new Error("Close percent must be 1-100");
+      // v2.2 (N2): a market with lots is not traded (closes included) until every surface is lot-aware.
+      {
+        const refusal = lotTradingRefusal(getLotExp(slabAddress));
+        if (refusal) {
+          ensureLotExp(slabAddress);
+          setError(refusal);
+          throw new UserFacingError(refusal);
+        }
+      }
+
+      const userIdx = userAccount?.idx ?? 0;
 
       inflightRef.current = true;
       setLoading(true);
@@ -189,6 +238,9 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
       setPhase("submitting");
 
       try {
+        // A named account only exists on v17/v18 markets; there is no legacy equivalent to target.
+        if (targetPk && !mockMode && !isV17Market) throw new PortfolioTargetError(TARGET_COPY.unmatched);
+
         // Mock mode: simulate close
         if (mockMode) {
           await new Promise((r) => setTimeout(r, 800));
@@ -231,7 +283,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         // property); otherwise this performs a live read right now, exactly
         // as before the prewarm existed.
         const [freshData, freshSlab] = await Promise.all([
-          getFreshPortfolioData(connection, programId, slabAddress, publicKey, FRESH_READ_TTL_MS),
+          getFreshPortfolioData(connection, programId, slabAddress, publicKey, FRESH_READ_TTL_MS, targetPk),
           connection.getAccountInfo(new PublicKey(slabAddress), "confirmed"),
         ]);
         freshEngine = freshSlab ? decodeMarketEngineView(new Uint8Array(freshSlab.data)) : null;
@@ -241,7 +293,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
           // portfolio for this wallet and market.
           freshPositionSize = 0n;
         } else {
-          const portfolio = parsePortfolioV17(freshData);
+          const portfolio = parsePortfolio(freshData);
 
           // Re-check the mutable owner after the read — covers both the
           // RPC-side memcmp filter AND the cached-pubkey shortcut (a wrapped
@@ -256,6 +308,8 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
 
           const activeLeg = portfolio.legs.find((leg) => leg.active);
           if (!activeLeg) {
+            // A named account that is flat is an error, not a success (#3301).
+            if (targetPk) throw new PortfolioTargetError(TARGET_COPY.flat);
             freshPositionSize = 0n;
           } else {
             const basisMag = activeLeg.basisPosQ < 0n ? -activeLeg.basisPosQ : activeLeg.basisPosQ;
@@ -274,6 +328,8 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
           }
         }
       } catch (cause) {
+        // The user must see WHY the named account was refused, not the generic "could not verify".
+        if (isPortfolioTargetError(cause)) throw cause;
         console.warn(
           "[useClosePosition] v17 fresh portfolio verification failed",
           cause,
@@ -296,7 +352,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
 
         const freshAccount = parseAccount(
           freshData,
-          userAccount.idx,
+          userIdx,
         );
 
         freshPositionSize = freshAccount.positionSize;
@@ -323,6 +379,8 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
           // = 0): closing it would trade nothing. It is cleared by the next refresh of the
           // account, so there is nothing for the user to sign.
           setError(COPY_RESET_LEG);
+          // Surfaces that close their modal on resolve unmount the error above: the toast outlives them.
+          toast(COPY_RESET_LEG, "info");
           setPhase("idle");
           inflightRef.current = false;
           setLoading(false);
@@ -330,10 +388,8 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         }
 
     if (freshPositionSize === 0n) {
-          setPhase("idle");
-          inflightRef.current = false;
-          setLoading(false);
-          return { signature: null };
+          // Nothing to close is not a success: say so and keep the caller's modal open.
+          throw new PortfolioTargetError(TARGET_COPY.flat);
         }
 
         const freshAbs = freshPositionSize < 0n ? -freshPositionSize : freshPositionSize;
@@ -356,10 +412,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         // short-circuit the same way the freshPositionSize === 0n guard above
         // does, rather than sending a trade for a size the user didn't ask for.
         if (closeSize === 0n) {
-          setPhase("idle");
-          inflightRef.current = false;
-          setLoading(false);
-          return { signature: null };
+          throw new PortfolioTargetError(TARGET_COPY.tooSmall);
         }
 
         // v17/v18: the close's slippage limit comes from the engine's effective_price
@@ -379,6 +432,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         // signature). A caps read failure degrades to the single-leg path —
         // exactly the pre-existing behavior — rather than blocking the close.
         let closeLegs: bigint[] | undefined;
+        let capsMaxFill: bigint | null = null;
         // F-3: tag 44 does not go through the matcher, so its caps/inventory do not apply.
         const reduceOnlyNow = isV17Market
           ? isAdlReduceOnly(freshEngine ?? (raw ? decodeMarketEngineView(raw) : null))
@@ -411,6 +465,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
                   throw new UserFacingError(closeCapacityMessage(capacity, freshAbs));
                 }
               }
+              capsMaxFill = caps.maxFillAbs;
               const legs = chunkCloseSize(closeSize, caps.maxFillAbs);
               if (legs.length > 1) closeLegs = legs;
             }
@@ -438,6 +493,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
           const eng = decodeMarketEngineView(marketBytes);
           if (!eng) throw new Error("Could not read the market to route the close.");
           const portfolio =
+            targetPk ??
             getPortfolioRawSnapshot(makePortfolioScanKey(programId, slabAddress, publicKey))?.pubkey ??
             (await findV17Portfolio(connection, programId, slabPk, publicKey));
           if (!portfolio) throw new Error("Could not find your portfolio on this market.");
@@ -457,6 +513,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         let sig: string | null | undefined;
         let fill: FillResult | null = null;
         let routedRebalance = false;
+        const closeState = { alreadyClosed: false };
         if (closeRouteFor(reduceOnlyNow) === "rebalance-reduce") {
           const r = await rebalanceClose();
           sig = r.signature;
@@ -473,22 +530,100 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
             const info = await connection.getAccountInfo(new PublicKey(slabAddress), "confirmed").catch(() => null);
             return closeLimitFromEngine(info ? decodeMarketEngineView(new Uint8Array(info.data)) : null, closeSize);
           };
+          // Every call rebuilds the trade (fresh crank prefix, fresh blockhash).
+          // Double-close safety: before ANY resend (transient retry or the EngineStale resend) check whether an earlier attempt landed, then
+          // re-size from the LIVE position. A stale -closeSize sent at an already-flat position would OPEN the opposite side (the close ix has
+          // no reduce-only flag; see lib/close-resend-guard.ts).
+          const failedSigs: string[] = [];
+          /** Attempts whose blockhash is known: they may still be in flight, so a resend waits until each lands or provably expires. */
+          const inFlight: InFlightAttempt[] = [];
+          const intendedFinalAbs = freshAbs - (closeSize < 0n ? -closeSize : closeSize);
+          const readLiveSigned = async (): Promise<bigint> => {
+            try {
+              if (!programId || !publicKey) throw new Error("no wallet");
+              const [data, slabInfo] = await Promise.all([
+                readFreshPortfolioData(connection, programId, slabAddress, publicKey, targetPk),
+                connection.getAccountInfo(new PublicKey(slabAddress), "confirmed"),
+              ]);
+              if (!data) return 0n;
+              const leg = parsePortfolio(data).legs.find((l) => l.active);
+              if (!leg) return 0n;
+              const eng = slabInfo ? decodeMarketEngineView(new Uint8Array(slabInfo.data)) : null;
+              if (!eng) {
+                closeLimitFromEngine(null, closeSize); // the market (so the price) is unreadable: the same calm refusal as the limit re-read
+                throw new Error("market unreadable");
+              }
+              const eff = effectiveLeg(eng, leg);
+              if (eff.kind === "invalid") throw new Error("leg invalid");
+              return eff.kind === "reset" ? 0n : eff.signedQ;
+            } catch (e) {
+              if (e instanceof UserFacingError) throw e;
+              throw new UserFacingError("Could not verify your position before trying again, so nothing more was sent. Check your position, then retry.");
+            }
+          };
+          const guardBeforeResend = async (): Promise<string | null | undefined> => {
+            let landed: string | null;
+            try {
+              landed = await anySignatureLanded(connection, failedSigs);
+            } catch {
+              throw new UserFacingError("Could not confirm whether your close went through, so nothing more was sent. Check your position, then retry.");
+            }
+            if (landed) {
+              closeState.alreadyClosed = true;
+              return landed;
+            }
+            // #3565 Low (pending-signature wait): a known signature with no status yet may still land. The live read below would be taken
+            // BEFORE it lands, and the resend would then close the position twice (or open the other side). Wait for each such attempt
+            // to land, fail, or provably expire (its blockhash no longer valid); anything undecidable refuses, nothing more is sent.
+            for (const a of inFlight.splice(0)) {
+              const outcome = a.blockhash ? await awaitAmbiguousOutcome(connection, a.sig, a.blockhash) : "unknown";
+              if (outcome === "landed") {
+                closeState.alreadyClosed = true;
+                return a.sig;
+              }
+              if (outcome === "unknown") {
+                throw new UserFacingError("Could not confirm whether your close went through, so nothing more was sent. Check your position, then retry.");
+              }
+            }
+            const r = remainingClose(await readLiveSigned(), closeSize, intendedFinalAbs);
+            if (r.kind === "done") {
+              closeState.alreadyClosed = true;
+              return failedSigs[failedSigs.length - 1] ?? null;
+            }
+            if (r.kind === "flipped") {
+              throw new UserFacingError("Your position changed while closing, so nothing more was sent. Check your position, then retry.");
+            }
+            closeSize = r.closeSize;
+            if (closeLegs) {
+              const legs = capsMaxFill !== null ? chunkCloseSize(closeSize, capsMaxFill) : [closeSize];
+              closeLegs = legs.length > 1 ? legs : undefined;
+            }
+            return undefined;
+          };
+          const sendCloseOnce = async (): Promise<string | null | undefined> => {
+            if (attempt++ > 0) {
+              const g = await guardBeforeResend();
+              if (closeState.alreadyClosed) return g;
+              closeLimitPriceE6 = closeLimitPriceE6 !== undefined ? await rereadCloseLimit() : undefined;
+            }
+            return trade({
+              lpIdx,
+              userIdx,
+              size: closeSize,
+              ...(targetPk && { portfolioPk: targetPk }),
+              sizes: closeLegs,
+              ...(closeLimitPriceE6 !== undefined && { limitPriceE6: closeLimitPriceE6 }),
+            }).catch((e: unknown) => {
+              const a = inFlightAttemptOf(e, errorText(e));
+              if (a) {
+                failedSigs.push(a.sig);
+                if (a.blockhash) inFlight.push(a);
+              }
+              throw e;
+            });
+          };
           try {
-            sig = await withTransientRetry(
-              async () => {
-                if (attempt++ > 0 && closeLimitPriceE6 !== undefined) {
-                  closeLimitPriceE6 = await rereadCloseLimit();
-                }
-                return trade({
-                  lpIdx,
-                  userIdx: userAccount.idx,
-                  size: closeSize,
-                  sizes: closeLegs,
-                  ...(closeLimitPriceE6 !== undefined && { limitPriceE6: closeLimitPriceE6 }),
-                });
-              },
-              { maxRetries: 2, delayMs: 3000 },
-            );
+            sig = await withTransientRetry(sendCloseOnce, { maxRetries: 2, delayMs: 3000 });
           } catch (tradeErr) {
             const m = tradeErr instanceof Error ? tradeErr.message : String(tradeErr);
             if (isV17Market && programId && (await isReduceOnlyLock21(m, connection, new PublicKey(slabAddress), programId))) {
@@ -496,13 +631,28 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
               sig = r.signature;
               fill = r.fill;
               routedRebalance = true;
+            } else if (isEngineStaleAtSend(m)) {
+              // C1 (feature check): the app's own simulation passed, then the send hit EngineStale (19): the engine clock moved on
+              // between the two. Nothing landed, so ONE more send with a freshly built crank prefix and a re-read limit is safe.
+              sig = await sendCloseOnce();
             } else {
               throw tradeErr;
             }
           }
         }
 
+        if (closeState.alreadyClosed) {
+          // An earlier attempt landed (or the position is already flat): nothing was resent. Say so as the close it is.
+          setLastSig(sig ?? null);
+          if (closePercent === 100 && (!targetPk || userAccount?.pubkey?.equals(targetPk))) clearEntryPrice(slabAddress, userIdx, publicKey?.toBase58());
+          toast(COPY.closeDone, "success");
+          setPhase("confirming");
+          setTimeout(() => setPhase("idle"), 2000);
+          invalidatePortfolio();
+          return { signature: sig ?? null, fill: null };
+        }
         setLastSig(sig ?? null);
+        recordCloseTx(slabAddress, sig, Date.now(), closePercent < 100); // stays linkable after the row is gone (lib/last-close-tx.ts)
         // P1: a confirmed TradeCpi can be a ZERO fill (the wrapper clipped the close to
         // LP headroom 0). useTrade measured it (lib/limits/fill-check.ts); a zero fill is
         // NOT a close — throw so every caller keeps its modal open and shows the reason.
@@ -514,13 +664,30 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         if (outcome === "partial" && fill?.filledQ != null) {
           const f = fill.filledQ < 0n ? -fill.filledQ : fill.filledQ;
           const r = closeSize < 0n ? -closeSize : closeSize;
-          setError(routedRebalance ? COPY.rebalancePartial(fmtQ(f), fmtQ(r)) : COPY.closePartial(fmtQ(f), fmtQ(r)));
+          const partialLine = routedRebalance ? COPY.rebalancePartial(fmtQ(f), fmtQ(r)) : COPY.closePartial(fmtQ(f), fmtQ(r));
+          setError(partialLine);
+          // The portfolio rows, other-markets list, liquidation alert and at-risk banner close their
+          // modal on resolve, which unmounts the line above: without a toast a clipped close read as done.
+          toast(partialLine, "info");
         }
         // The saved entry (lib/entry-price.ts) goes only when the position is actually flat. Every
         // close surface cleared it on a 100% REQUEST, so a partial fill (LP headroom clipped the
         // close) left the rest of the position with no entry: Entry / PnL / ROE read "--".
-        if (closePercent === 100 && outcome === "closed") {
-          clearEntryPrice(slabAddress, userAccount.idx, publicKey?.toBase58());
+        // The entry store is keyed per wallet+market, not per account: clearing it for a NON-canonical
+        // target would erase the entry of the account the market shows by default (#3301).
+        if (closePercent === 100 && outcome === "closed" && (!targetPk || userAccount?.pubkey?.equals(targetPk))) {
+          clearEntryPrice(slabAddress, userIdx, publicKey?.toBase58());
+        }
+        // The one confirmation a close gets: every close surface (dock, ticket, portfolio rows) closes
+        // its modal on resolve, so without this a partial close just vanished. A clipped fill already
+        // said what filled (toast above), so it gets no success line.
+        if (outcome !== "partial") {
+          const closedAbs = closeSize < 0n ? -closeSize : closeSize;
+          // The tx is confirmed (sendTx returns only after confirmation; a timeout throws above), but a
+          // fill the app could not measure (post-trade read failed, or the position moved the other
+          // way) does not prove the position is closed: say only what is known.
+          if (fill?.kind === "unknown") toast(COPY.closeConfirmedUnmeasured, "info");
+          else toast(closePercent >= 100 ? COPY.closeDone : COPY.closeDonePart(fmtQ(closedAbs), fmtQ(freshAbs)), "success");
         }
         setPhase("confirming");
         setTimeout(() => setPhase("idle"), 2000);
@@ -541,13 +708,14 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
           void (async () => {
             const amount = await readSweepableCapital({
               owner,
-              read: () => readFreshPortfolioData(connection, programId, slabAddress, owner),
+              read: () => readFreshPortfolioData(connection, programId, slabAddress, owner, targetPk),
             }).catch(() => null);
             if (amount === null) return;
             const label = `${formatTokenAmount(amount, decimals, 2)} USDC`;
             toast(SWEEP_COPY.prompt(label), "info");
             try {
-              await withdraw({ userIdx: userAccount.idx, amount });
+              // Sweep the account that was just closed, never "the" wallet portfolio.
+              await withdraw({ userIdx, amount, ...(targetPk && { portfolioPk: targetPk, strictPortfolio: true }) });
               toast(SWEEP_COPY.done(label), "success");
             } catch {
               toast(SWEEP_COPY.kept(label), "info");
@@ -557,7 +725,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         }
         return { signature: sig ?? null, fill };
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
+        const msg = errorText(e);
         if (isPartialLegSendError(e)) {
           // M-2: some of the close's transactions landed. Say what happened, plainly.
           setError(msg);
@@ -567,6 +735,12 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         }
         if (isZeroFillError(e)) {
           // Not a tx failure: the close landed and filled nothing. Plain copy, no diagnosis.
+          setError(msg);
+          setPhase("idle");
+          throw e;
+        }
+        if (isPortfolioTargetError(e)) {
+          // Refused before anything was sent: show the calm line as is, no diagnosis.
           setError(msg);
           setPhase("idle");
           throw e;
@@ -594,7 +768,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         // the over-close-into-opposite-exposure this fresh-read guard exists to
         // prevent; the cache had defeated the guard it was bolted onto.
         if (programId && publicKey) {
-          freshReadCache.delete(freshReadKey(programId, slabAddress, publicKey));
+          freshReadCache.delete(freshReadKey(programId, slabAddress, publicKey, targetPk));
         }
         inflightRef.current = false;
         setLoading(false);
@@ -603,12 +777,12 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
     [connection, publicKey, wallet, userAccount, trade, withdraw, toast, lpIdx, slabAddress, mockMode, isV17Market, programId, marketHealth, raw, slabConfig, wrapperConfigV17],
   );
 
-  const prewarmClose = useCallback(() => {
+  const prewarmClose = useCallback((opts?: ClosePositionOpts) => {
     if (mockMode || !isV17Market || !programId || !publicKey) return;
     prewarmTradeSubmission(connection, programId, slabAddress, publicKey);
     // maxAge 1.5s: dedupes a double-fire (open + re-render) without letting a
     // seconds-old read masquerade as a prewarm of THIS modal-open.
-    void getFreshPortfolioData(connection, programId, slabAddress, publicKey, 1_500).catch(() => {});
+    void getFreshPortfolioData(connection, programId, slabAddress, publicKey, 1_500, opts?.portfolioPk).catch(() => {});
   }, [connection, programId, publicKey, slabAddress, mockMode, isV17Market]);
 
   return { closePosition, loading, error, phase, lastSig, resetPhase, prewarmClose };

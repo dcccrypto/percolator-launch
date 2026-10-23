@@ -12,7 +12,7 @@
  * Only callable on devnet. Global rate limiting (120 req/min/IP) is handled
  * by middleware.ts. mintAddress must be in DEVNET_ALLOWED_MINTS env var.
  *
- * H3: balance is checked BEFORE the 24h per-wallet-per-mint rate gate is consulted.
+ * H3: balance is checked BEFORE the 1h per-wallet-per-mint rate gate is consulted.
  * A single wizard launch calls this endpoint up to 3× (vault seed, LP collateral,
  * insurance top-up) for the SAME wallet + SAME shared sim-USDC mint, so they'd
  * otherwise collide on one gate claim. Sufficient-balance is a 200 no-op that never
@@ -32,6 +32,7 @@ import {
   fundAmountFor,
   fundingRequirement,
   parseAtomicAmount,
+  PREFUND_WINDOW_MS,
 } from "@/lib/prefund-requirement";
 import { getClientIp } from "@/lib/get-client-ip";
 import { checkFundRateLimit } from "@/lib/fund-ip-rate-limit";
@@ -40,6 +41,7 @@ import {
   PublicKey,
   Transaction,
 } from "@solana/web3.js";
+import type { Connection } from "@solana/web3.js";
 import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
@@ -48,6 +50,7 @@ import {
   getMint,
 } from "@solana/spl-token";
 import { getConfig } from "@/lib/config";
+import { DEVNET_GENESIS_HASH } from "@/lib/v22/devnet-guard";
 import {
   getServerConnection,
   sendAndConfirmServerTx,
@@ -63,13 +66,37 @@ import { reserveClaim, releaseClaim, peekClaim, PREFUND_CLAIM_TTL_MS } from "@/l
 
 export const dynamic = "force-dynamic";
 
-// Canonical env var first, legacy fallback; undefined = non-devnet (fail-closed).
-// The real devnet guard is the devnet_mints DB lookup below — only mirror mints
-// (created by our /api/devnet-mirror-mint endpoint) can be funded.
-const NETWORK =
-  process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim() ??
-  process.env.NEXT_PUBLIC_SOLANA_NETWORK?.trim();
-const ALLOW_MIRROR_MINTS = true; // Always allow devnet_mints table entries regardless of NETWORK
+/**
+ * S3-C5 (fix-all 2026-10-18): this endpoint mints with a server key, so it is refused
+ * unless the cluster is devnet. Two independent checks, both fail-closed:
+ *   1. the deployment network env (canonical var first, legacy fallback; unset =
+ *      refused) — the old ALLOW_MIRROR_MINTS=true bypass of this check is removed;
+ *   2. the genesis hash of the SAME connection the mint is sent on (previously only
+ *      getConfig().rpcUrl was checked, a different connection from the sender).
+ * Read per request, not at module load.
+ */
+function deploymentNetwork(): string | undefined {
+  return (
+    process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim() ??
+    process.env.NEXT_PUBLIC_SOLANA_NETWORK?.trim()
+  );
+}
+
+/** Endpoints whose genesis hash has been proven to be devnet (positive verdicts only). */
+const provenDevnetEndpoints = new Set<string>();
+
+async function senderIsDevnet(connection: Connection): Promise<boolean> {
+  const key = connection.rpcEndpoint;
+  if (key && provenDevnetEndpoints.has(key)) return true;
+  try {
+    const hash = await withTimeout(connection.getGenesisHash(), 8_000);
+    if (hash !== DEVNET_GENESIS_HASH) return false;
+    if (key) provenDevnetEndpoints.add(key);
+    return true;
+  } catch {
+    return false; // unproven = refused
+  }
+}
 
 /**
  * Allowlist of devnet mint addresses this endpoint may fund.
@@ -97,7 +124,7 @@ const EMERGENCY_DEVNET_MINTS: Set<string> = new Set([
   // availability — this is the one mint every new market's vault seed / LP deposit /
   // insurance top-up needs pre-funded.
   "DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC", // Sim-USDC (testUsdcMint)
-  // Mirror mints — mainnet tokens mirrored to devnet via /api/devnet-mirror-mint
+  // Mirror mints — mainnet tokens mirrored to devnet (the mirror-mint route is removed, #3473)
   // Last synced: 2026-03-28 from devnet_mints table
   "DJKjmSbWjhx925kuk1fS1BENCBnqXCfwUJjb9EKwSEnV", // Percolator (PERC)
   "J5XdjMKTboG6VE9VJjMDknqsZ7QfSxbS8PUzqt2rN48c", // USDC
@@ -157,12 +184,8 @@ export async function POST(req: NextRequest) {
   let releaseGateClaimOnExit: (() => Promise<void>) | null = null;
 
   try {
-    // Allow if: explicitly on devnet network OR the mint is a mirror mint (DB-gated)
-    // Mirror mints are always safe to fund — their authority is our keypair and they
-    // only exist on devnet. The DB lookup below is the real security gate.
-    const isDevnetNetwork = NETWORK === "devnet";
-    // Non-devnet requests proceed but will be rejected at the DB lookup if not a mirror mint
-    if (!isDevnetNetwork && !ALLOW_MIRROR_MINTS) {
+    // S3-C5: devnet only, no bypass.
+    if (deploymentNetwork() !== "devnet") {
       return NextResponse.json({ error: "Only available on devnet" }, { status: 403 });
     }
 
@@ -214,8 +237,8 @@ export async function POST(req: NextRequest) {
     // Validate mintAddress: check static allowlist OR dynamic devnet_mints table.
     // #873 fix: ALWAYS check DB when no static allowlist is configured.
     // Previously, DEVNET_ALLOWED_MINTS.size === 0 short-circuited to mintPermitted=true,
-    // skipping the DB lookup entirely. The DB is the real security gate — only mirror mints
-    // (created by our /api/devnet-mirror-mint endpoint) should be fundable.
+    // skipping the DB lookup entirely. The DB is the real security gate — only server-owned
+    // mints recorded in devnet_mints should be fundable.
     // On-chain getMint authority check remains the final gate; on-chain checks below
     // also catch any DB-level bypass (our keypair can only mint its own authority mints).
     let finallyPermitted: boolean;
@@ -224,7 +247,7 @@ export async function POST(req: NextRequest) {
       if (DEVNET_ALLOWED_MINTS.has(mintAddress)) {
         finallyPermitted = true;
       } else {
-        // Not in static list — check dynamic mirror-mint table as fallback
+        // Not in static list — check the devnet_mints table as fallback
         try {
           const { getServiceClient: _gsc } = await import("@/lib/supabase");
           const supabase = _gsc();
@@ -342,12 +365,21 @@ export async function POST(req: NextRequest) {
 
     const connection = getServerConnection("confirmed");
 
-    // H3: read the on-chain balance FIRST — before touching the 24h rate gate.
+    // S3-C5: prove the connection the mint is SENT on is devnet before any read or send.
+    if (!(await senderIsDevnet(connection))) {
+      Sentry.captureMessage("devnet-pre-fund refused: sender connection is not proven devnet", {
+        level: "warning",
+        tags: { endpoint: "/api/devnet-pre-fund" },
+      });
+      return NextResponse.json({ error: "Only available on devnet" }, { status: 403 });
+    }
+
+    // H3: read the on-chain balance FIRST — before touching the 1h rate gate.
     // All three devnet-pre-fund calls inside a single wizard launch (vault seed,
     // LP collateral, insurance top-up — see hooks/useCreateMarket.ts) target the
     // SAME shared sim-USDC collateral mint for the SAME wallet, so they all hash to
     // one gate key (`rateKey` below). Checking the gate before the balance meant the
-    // 2nd/3rd call in one flow always hit the 1st call's still-open 24h claim and
+    // 2nd/3rd call in one flow always hit the 1st call's still-open 1h claim and
     // 429'd, throwing mid-launch. The mint tops up to 2× the full
     // three-step requirement, so once the first call funds the wallet the remaining
     // calls in the same flow see a sufficient balance here and return a 200 no-op —
@@ -377,7 +409,7 @@ export async function POST(req: NextRequest) {
     // This endpoint was the only one of the five without it (GH#2471's vector),
     // and the mint amount is now request-derived, so the per-request ceiling alone
     // is not a sufficient bound. Placed AFTER the sufficient-balance short-circuit
-    // so the second in-launch call spends no IP budget, and BEFORE the 24h gate.
+    // so the second in-launch call spends no IP budget, and BEFORE the 1h gate.
     const fundRl = await checkFundRateLimit(getClientIp(req));
     if (!fundRl.allowed) {
       return NextResponse.json(
@@ -409,7 +441,7 @@ export async function POST(req: NextRequest) {
       const sbMod = await import("@/lib/supabase");
       const gateMod = await import("@/lib/faucet-rate-gate");
       supabaseForGate = sbMod.getServiceClient();
-      gate = await gateMod.tryFaucetGate(supabaseForGate, walletAddress, fundType);
+      gate = await gateMod.tryFaucetGate(supabaseForGate, walletAddress, fundType, PREFUND_WINDOW_MS);
     } catch {
       usingFallbackGate = true;
       // Read-only pre-check (mirrors the Supabase pre-check SELECT in
@@ -423,7 +455,7 @@ export async function POST(req: NextRequest) {
     // GH#2597: the Supabase gate is check-AND-reserve, so from here the claim is
     // already spent. Three server-misconfiguration paths below used to `return` a
     // 500 without giving it back, so a deployment problem cost the caller their
-    // 24h window and funded nothing — and because they `return` rather than throw,
+    // 1h window and funded nothing — and because they `return` rather than throw,
     // the outer catch that releases the Blob fallback claim never ran either.
     //
     // Armed here, disarmed only once a mint has CONFIRMED, and called from the
@@ -552,7 +584,7 @@ export async function POST(req: NextRequest) {
     // Need to fund: top up to 2× the requirement for THIS launch. Because the
     // requirement now includes both backing seeds, one mint covers the whole
     // launch and the later calls short-circuit at the balance check above
-    // instead of reaching the 24h gate.
+    // instead of reaching the 1h gate.
     const toMint = fundAmountFor(fullRequirement) - currentBalance;
 
     // Reserve the durable fallback claim immediately before mint work.
@@ -638,7 +670,7 @@ export async function POST(req: NextRequest) {
       }
 
       // TX failed after reserving the durable fallback claim.
-      // Release it so a failed mint does not lock the wallet/mint pair for 24h.
+      // Release it so a failed mint does not lock the wallet/mint pair for 1h.
       await releaseFallbackClaim();
 
       throw txErr;
@@ -659,7 +691,7 @@ export async function POST(req: NextRequest) {
     // GH#2597: the claim was SPENT on a mint that CONFIRMED, so it must not be
     // given back. Without this, a throw anywhere after here — building the
     // response, or any code added later — would reach the outer catch and release
-    // a claim that was legitimately used, handing back a 24h window that had been
+    // a claim that was legitimately used, handing back a 1h window that had been
     // consumed. That is a rate-limit bypass, i.e. worse than the leak this change
     // fixes, so it is the one disarm that has to exist.
     releaseGateClaimOnExit = null;

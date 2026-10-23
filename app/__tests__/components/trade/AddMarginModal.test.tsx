@@ -67,6 +67,31 @@ describe("AddMarginModal", () => {
     walletBalance = 100_000_000n;
   });
 
+  it("N27: a decimal comma deposits 1.5, not 15", async () => {
+    depositMock.mockReset();
+    depositMock.mockResolvedValueOnce("sig");
+    render(<AddMarginModal slabAddress="s" userIdx={1} symbol="SOL" decimals={6} onClose={vi.fn()} />);
+    const input = screen.getByPlaceholderText("0.00 SOL") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "1," } }); // typed on a comma keyboard
+    fireEvent.change(input, { target: { value: input.value + "5" } });
+    expect(input.value).toBe("1,5"); // shown as typed
+    fireEvent.click(screen.getByRole("button", { name: /deposit margin/i }));
+    await waitFor(() => expect(depositMock).toHaveBeenCalledWith(expect.objectContaining({ amount: 1_500_000n })));
+  });
+
+  it("N27 follow-up: typing 1,000 key by key deposits 1000, not 1", async () => {
+    depositMock.mockReset();
+    depositMock.mockResolvedValueOnce("sig");
+    walletBalance = 5_000_000_000n; // 5000 SOL
+    render(<AddMarginModal slabAddress="s" userIdx={1} symbol="SOL" decimals={6} onClose={vi.fn()} />);
+    const input = screen.getByPlaceholderText("0.00 SOL") as HTMLInputElement;
+    for (const k of "1,000") fireEvent.change(input, { target: { value: input.value + k } });
+    expect(input.value).toBe("1,000");
+    fireEvent.click(screen.getByRole("button", { name: /deposit margin/i }));
+    await waitFor(() => expect(depositMock).toHaveBeenCalledWith(expect.objectContaining({ amount: 1_000_000_000n })));
+    walletBalance = 100_000_000n;
+  });
+
   it("does not allow submit while the wallet balance is still unknown", () => {
     walletBalance = null;
     render(<AddMarginModal slabAddress="s" userIdx={1} symbol="SOL" decimals={6} onClose={vi.fn()} />);

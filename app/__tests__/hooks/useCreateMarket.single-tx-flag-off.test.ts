@@ -47,6 +47,7 @@ vi.mock("@/lib/inFlightMarket", () => ({
 
 import { useCreateMarket } from "@/hooks/useCreateMarket";
 import { __setDevnetV21ForTest } from "@/lib/v21/flag";
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 
 const seed = (n: number): Uint8Array => Uint8Array.from({ length: 32 }, (_, i) => (i === 0 ? n : (i * 7 + n) & 0xff));
 const WALLET = Keypair.fromSeed(seed(201));
@@ -142,6 +143,9 @@ async function launchDigest(): Promise<string> {
 }
 
 describe("single-tx launch gate closed => the batch is byte-identical to the base", () => {
+  // The base digest is the v2.1 (flag off) launch batch: pin v2.2 off so the suite is independent of NEXT_PUBLIC_DEVNET_V22.
+  beforeEach(() => __setDevnetV22ForTest(false));
+  afterEach(() => __setDevnetV22ForTest(null));
   it("v2.1 flag off", async () => {
     __setDevnetV21ForTest(false);
     const d = await launchDigest();

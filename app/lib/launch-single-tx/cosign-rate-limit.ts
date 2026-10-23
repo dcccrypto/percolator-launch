@@ -34,8 +34,30 @@ export function cosignV1RateLimited(ip: string, deployer: string): "ip" | "deplo
   return null;
 }
 
+/**
+ * S3-C7 (fix-all 2026-10-18): the LEGACY (partial-tx) branch had no per-route limit, so it was an
+ * unbounded RPC-read + keeper-signature oracle. Its own counters (a launch's v1 request and its
+ * legacy fallback don't share a budget). A legacy launch co-signs once per asset (the program caps a
+ * market at 4), so these are well above honest use.
+ */
+export const COSIGN_LEGACY_LIMIT_PER_IP = 30;
+export const COSIGN_LEGACY_LIMIT_PER_DEPLOYER = 12;
+let legacyPerIp: MemoryRateLimiter = createMemoryRateLimiter({ limit: COSIGN_LEGACY_LIMIT_PER_IP, windowMs: WINDOW_MS });
+let legacyPerDeployer: MemoryRateLimiter = createMemoryRateLimiter({ limit: COSIGN_LEGACY_LIMIT_PER_DEPLOYER, windowMs: WINDOW_MS });
+
+/** Count one legacy co-sign request; null when allowed, else which limit was hit. */
+export function cosignLegacyRateLimited(ip: string, deployer: string): "ip" | "deployer" | null {
+  const ipHit = legacyPerIp.isLimited(`ip:${ip}`);
+  const deployerHit = legacyPerDeployer.isLimited(`deployer:${deployer}`);
+  if (ipHit) return "ip";
+  if (deployerHit) return "deployer";
+  return null;
+}
+
 /** Tests only: fresh windows. */
 export function resetCosignV1RateLimits(): void {
   perIp = createMemoryRateLimiter({ limit: COSIGN_V1_LIMIT_PER_IP, windowMs: WINDOW_MS });
   perDeployer = createMemoryRateLimiter({ limit: COSIGN_V1_LIMIT_PER_DEPLOYER, windowMs: WINDOW_MS });
+  legacyPerIp = createMemoryRateLimiter({ limit: COSIGN_LEGACY_LIMIT_PER_IP, windowMs: WINDOW_MS });
+  legacyPerDeployer = createMemoryRateLimiter({ limit: COSIGN_LEGACY_LIMIT_PER_DEPLOYER, windowMs: WINDOW_MS });
 }

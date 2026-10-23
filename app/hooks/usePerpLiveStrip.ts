@@ -14,18 +14,30 @@ export function usePerpLiveStrip(slab: string, series: PerpSeries): { price: num
   const [lastAt, setLastAt] = useState<number | null>(null);
   const [, setBeat] = useState(0);
 
+  // Live/offline is the market's feed, not the series: only a market switch clears it. A series switch
+  // clears the price alone (the Mark price under an "Oracle" label would be wrong; "—" until a tick is not).
+  useEffect(() => setLastAt(null), [slab]);
+
   useEffect(() => {
     setPrice(null);
-    setLastAt(null);
     const client = getLiveClient();
     if (!client) return;
+    // Last has no tick price: the mark stands in only until a trade prints in this subscription. After
+    // that a tick must not overwrite the trade price, or "Last" reads the mark. (PerpChart seeds Last
+    // from its last history candle instead; this strip has no history, so a thin market shows the mark
+    // until a trade.)
+    let traded = false;
     return client.subscribe(slab, {
       onTick: (m) => {
-        const p = series === "oracle" ? m.oracle : m.mark; // Last has no tick price: the mark stands in until a trade prints
-        if (p != null) setPrice(p);
+        const p = series === "oracle" ? m.oracle : m.mark;
+        if (p != null && !(series === "last" && traded)) setPrice(p);
         setLastAt(Date.now());
       },
-      onTrade: (t) => { if (series === "last") setPrice(t.price); },
+      onTrade: (t) => {
+        if (series !== "last") return;
+        traded = true;
+        setPrice(t.price);
+      },
     });
   }, [slab, series]);
 

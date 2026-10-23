@@ -9,8 +9,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   pendingRegistrationSlabs,
+  postKeeperRegistration,
   registrationCandidates,
   resumePendingRegistrations,
+  saveProofPayload,
   saveRegisterRequest,
   type KeeperRegisterAttempt,
   type KeeperRegisterRequest,
@@ -39,6 +41,126 @@ const memoMismatch: KeeperRegisterAttempt = { registered: false, retryable: fals
 const serverDown: KeeperRegisterAttempt = { registered: false, retryable: true, message: "HTTP 500" };
 
 describe("resume a registration the launch page did not finish", () => {
+  const request = { slabAddress: SLAB, dexPoolAddress: "POOL", dexType: "pumpswap" as const, payloadRequired: true as const };
+
+  it("waits for a new launch's payload instead of posting or permanently refusing it", async () => {
+    const s = store({ [`perc.keeperProofTx.${SLAB}`]: PROOF });
+    saveRegisterRequest(request, s);
+    const post = vi.fn(async () => memoMismatch);
+    expect(pendingRegistrationSlabs(s)).toEqual([]);
+    expect(await resumePendingRegistrations({ store: s, post })).toMatchObject({ registered: [], retryLater: [], refused: [] });
+    expect(post).not.toHaveBeenCalled();
+    expect(s.getItem(`perc.keeperRegistered.${SLAB}`)).toBeNull();
+  });
+
+  it("waits through malformed saved payload JSON, then sends the completed record once", async () => {
+    const s = store({ [`perc.keeperProofTx.${SLAB}`]: PROOF, [`perc.keeperPayload.${SLAB}`]: "{broken" });
+    saveRegisterRequest(request, s);
+    const post = vi.fn(async () => ok);
+    await resumePendingRegistrations({ store: s, post });
+    expect(post).not.toHaveBeenCalled();
+    expect(s.getItem(`perc.keeperRegistered.${SLAB}`)).toBeNull();
+    s.setItem(`perc.keeperPayload.${SLAB}`, JSON.stringify(PAYLOAD));
+    expect(pendingRegistrationSlabs(s)).toEqual([SLAB]);
+    expect((await resumePendingRegistrations({ store: s, post })).registered).toEqual([SLAB]);
+    await resumePendingRegistrations({ store: s, post });
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post.mock.calls[0][0].payload).toEqual(PAYLOAD);
+  });
+
+  it("retains a valid legacy no-payload request and treats an actual server refusal as terminal", async () => {
+    const s = store({ [`perc.keeperProofTx.${SLAB}`]: PROOF });
+    saveRegisterRequest({ slabAddress: SLAB, dexPoolAddress: "POOL", dexType: "pumpswap" }, s);
+    const post = vi.fn(async () => memoMismatch);
+    expect(pendingRegistrationSlabs(s)).toEqual([SLAB]);
+    expect((await resumePendingRegistrations({ store: s, post })).refused).toEqual([SLAB]);
+    expect(post).toHaveBeenCalledWith(expect.objectContaining({ payload: null, proofTx: PROOF }));
+    await resumePendingRegistrations({ store: s, post });
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
+  it("wakes a waiting new launch when its payload is saved after proof and request", async () => {
+    const s = store({ [`perc.keeperProofTx.${SLAB}`]: PROOF });
+    const seen: string[] = [];
+    vi.stubGlobal("window", new EventTarget());
+    vi.stubGlobal("CustomEvent", class<T> extends Event {
+      detail: T;
+      constructor(type: string, options: { detail: T }) { super(type); this.detail = options.detail; }
+    });
+    const onPending = (event: Event) => seen.push((event as CustomEvent<{ slab: string }>).detail.slab);
+    window.addEventListener("percolator:keeper-registration-pending", onPending);
+    try {
+      saveRegisterRequest(request, s);
+      expect(seen).toEqual([]);
+      saveProofPayload(SLAB, PAYLOAD, s);
+      expect(seen).toEqual([SLAB]);
+      const post = vi.fn(async () => ok);
+      expect((await resumePendingRegistrations({ store: s, post })).registered).toEqual([SLAB]);
+      await resumePendingRegistrations({ store: s, post });
+      expect(post).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener("percolator:keeper-registration-pending", onPending);
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("never posts when the saved proof is missing or malformed", async () => {
+    const missing = store({ [`perc.keeperPayload.${SLAB}`]: JSON.stringify(PAYLOAD) });
+    const malformed = store({ [`perc.keeperProofTx.${SLAB}`]: "invalid", [`perc.keeperPayload.${SLAB}`]: JSON.stringify(PAYLOAD) });
+    const post = vi.fn(async () => ok);
+    await resumePendingRegistrations({ store: missing, post });
+    await resumePendingRegistrations({ store: malformed, post });
+    expect(post).not.toHaveBeenCalled();
+    const fetchImpl = vi.fn();
+    const result = await postKeeperRegistration({ slabAddress: SLAB, dexPoolAddress: "POOL", proofTx: "invalid" }, fetchImpl as unknown as typeof fetch);
+    expect(result).toMatchObject({ registered: false, retryable: false, status: 400 });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("does not refuse a proof saved before its payload or request is ready", async () => {
+    const s = store({ [`perc.keeperProofTx.${SLAB}`]: PROOF });
+    const post = vi.fn(async () => ok);
+    expect(pendingRegistrationSlabs(s)).toEqual([]);
+    await resumePendingRegistrations({ store: s, post });
+    expect(post).not.toHaveBeenCalled();
+    expect(s.getItem(`perc.keeperRegistered.${SLAB}`)).toBeNull();
+    s.setItem(`perc.keeperPayload.${SLAB}`, JSON.stringify(PAYLOAD));
+    expect(pendingRegistrationSlabs(s)).toEqual([SLAB]);
+  });
+
+  it("announces a slab only after its proof, payload, and request are stored", () => {
+    const s = store({ [`perc.keeperPayload.${SLAB}`]: "{invalid" });
+    const seen: string[] = [];
+    vi.stubGlobal("window", new EventTarget());
+    vi.stubGlobal("CustomEvent", class<T> extends Event {
+      detail: T;
+      constructor(type: string, options: { detail: T }) {
+        super(type);
+        this.detail = options.detail;
+      }
+    });
+    const onPending = (event: Event) => seen.push((event as CustomEvent<{ slab: string }>).detail.slab);
+    window.addEventListener("percolator:keeper-registration-pending", onPending);
+    try {
+      saveRegisterRequest({ slabAddress: SLAB, dexPoolAddress: "POOL" }, s);
+      expect(seen).toEqual([]);
+      s.setItem(`perc.keeperProofTx.${SLAB}`, PROOF);
+      saveRegisterRequest({ slabAddress: SLAB, dexPoolAddress: "POOL" }, s);
+      expect(seen).toEqual([]);
+      s.setItem(`perc.keeperPayload.${SLAB}`, JSON.stringify(PAYLOAD));
+      s.setItem(`perc.keeperProofTx.${SLAB}`, "invalid");
+      saveRegisterRequest({ slabAddress: SLAB, dexPoolAddress: "POOL" }, s);
+      expect(seen).toEqual([]);
+      s.setItem(`perc.keeperProofTx.${SLAB}`, PROOF);
+      saveRegisterRequest({ slabAddress: SLAB, dexPoolAddress: "POOL" }, s);
+      expect(seen).toEqual([SLAB]);
+      expect(registrationCandidates(SLAB, s)[0]).toMatchObject({ proofTx: PROOF, payload: PAYLOAD });
+    } finally {
+      window.removeEventListener("percolator:keeper-registration-pending", onPending);
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("payload-only launch: tries each keeper dex type; the one the memo bound registers; marked done", async () => {
     const s = launched();
     const post = vi.fn(async (r: KeeperRegisterRequest) => (r.dexType === "meteora-dlmm" ? ok : memoMismatch));

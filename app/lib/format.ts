@@ -112,6 +112,24 @@ export function formatSpreadUsd(spreadE6: bigint): string {
   return `${spreadE6 > 0n ? "+" : "−"}${formatUsd(abs)}`;
 }
 
+/**
+ * A dollar AMOUNT (a PnL, not a price) with its own sign: two decimals, except under a cent.
+ *
+ * `toFixed(2)` turned every sub-cent amount into "$0.00": on a $0.0047 token a position can be a
+ * few tenths of a cent up or down and still be moving, but the dock's USD line read "$0.00" and
+ * never changed. Under a cent this shows 2 significant digits ("$0.0034"), and under $0.0001 a
+ * "<$0.0001" floor. Only an exact zero reads "$0.00". The sign is passed in (from the bigint PnL,
+ * not the float) so a tiny negative keeps its "-".
+ */
+export function formatUsdAmount(absUsd: number, sign: "+" | "-" | "" = ""): string {
+  const v = Math.abs(absUsd);
+  if (!Number.isFinite(v)) return "—";
+  if (v === 0) return "$0.00";
+  if (v >= 0.01) return `${sign}$${v.toFixed(2)}`;
+  if (v < 0.0001) return `${sign}<$0.0001`;
+  return `${sign}$${v.toPrecision(2)}`;
+}
+
 export function formatUsdPriceE6(priceE6: bigint | null | undefined, fallback = "—"): string {
   if (priceE6 == null || priceE6 <= 0n || priceE6 > MAX_PRICE_E6) return fallback;
   const val = Number(priceE6) / 1_000_000;

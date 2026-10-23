@@ -135,6 +135,29 @@ describe("the leverage box accepts a typed decimal", () => {
     expect(slider().getAttribute("max")).toBe("10");
   });
 
+  it("N3: a click on the track above the 5x label sets 5x, not the linear 7x", () => {
+    render(<OrderTicket slabAddress={SLAB} />);
+    // jsdom has no layout: give the track a 300px box. Presets on this 10x market are 1/3/5/10,
+    // drawn at 0/100/200/300px.
+    const track = slider().parentElement as HTMLElement;
+    track.getBoundingClientRect = () => ({ left: 0, width: 300, top: 0, height: 24, right: 300, bottom: 24, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    fireEvent.pointerDown(track, { button: 0, clientX: 200, pointerId: 1 });
+    expect(box().value).toBe("5");
+    // The native input still reads the leverage, for the keyboard and screen readers.
+    expect(slider().getAttribute("aria-valuetext")).toBe("5x");
+  });
+
+  it("N3: a touch that the browser turns into a page scroll leaves the leverage as it was", () => {
+    render(<OrderTicket slabAddress={SLAB} />);
+    const track = slider().parentElement as HTMLElement;
+    track.getBoundingClientRect = () => ({ left: 0, width: 300, top: 0, height: 24, right: 300, bottom: 24, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    fireEvent.pointerDown(track, { button: 0, clientX: 200, pointerId: 2, pointerType: "touch" });
+    expect(box().value).toBe("5");
+    // touch-action: pan-y hands a vertical swipe to the page and cancels the pointer.
+    fireEvent.pointerCancel(track, { pointerId: 2, pointerType: "touch" });
+    expect(box().value).toBe("1");
+  });
+
   it("dragging the slider is not overridden by a snap to a preset", () => {
     render(<OrderTicket slabAddress={SLAB} />);
     fireEvent.change(slider(), { target: { value: "4.5" } });

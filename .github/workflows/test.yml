@@ -286,6 +286,32 @@ jobs:
       - name: Run security tests (api)
         run: pnpm --filter @percolator/api test
 
+  # GH#2228: `security-tests` above is gated on `packages/*`, which no longer
+  # exists, so `pnpm audit` never ran. This job has no such gate. Non-blocking
+  # (`continue-on-error`) until the current high findings are cleared; then add
+  # it to the merge gate's `needs`. Accepted findings live in root package.json
+  # pnpm.auditConfig (must match SECURITY-DEPS.md).
+  dependency-audit:
+    name: Dependency audit (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      # Audit reads pnpm-lock.yaml only: no install, no package scripts run.
+      - name: Setup pnpm
+        run: npm install -g pnpm@10
+
+      - name: Run dependency audit
+        run: pnpm audit --audit-level=high
+
   # The app's own suite (2702 tests). Every other test job above is gated on
   # `packages/*`, which no longer exists on playground or main — so before this
   # job, CI ran no tests at all while ✅ Merge Gate still reported green (#2447).

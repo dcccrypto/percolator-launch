@@ -6,7 +6,7 @@
  *
  * Suitable for single-instance or serverless deployments (short-lived functions
  * bound memory growth). For multi-instance horizontal scaling, use the
- * Upstash-backed limiters in advance-phase-rate-limit.ts / create-market-rate-limit.ts.
+ * Upstash-backed limiters (see upstash-rate-limit.ts).
  *
  * Usage:
  *   const limiter = createMemoryRateLimiter({ limit: 60, windowMs: 60_000 });

@@ -15,6 +15,7 @@ import {
   type VaultLpMarket,
 } from "./p3-ix";
 import type { ExitStep } from "./resolved-exit";
+import { applyMarketTailsV22, MarketTailMismatchError, type MarketTailsV22 } from "@/lib/v22/market-tails";
 
 export interface ExitPortfolioRef {
   owner: PublicKey;
@@ -33,6 +34,12 @@ export interface ExitIxContext {
   programId: PublicKey;
   market: PublicKey;
   portfolios: ReadonlyMap<string, ExitPortfolioRef>;
+  /**
+   * v2.2 (flag on, set by resolved-exit-load): the market's bond_tranche / ins_units tails. The wrapper fails closed
+   * on 78 / 101 without them, and these instructions are simulated (run, finish) and signed (finish) outside sendTx,
+   * which is where the tails were added before (#3602). Absent = the builders' lists unchanged.
+   */
+  tails?: MarketTailsV22;
 }
 
 function ownerAta(c: ExitIxContext, owner: PublicKey): { ata: PublicKey; create: TransactionInstruction } {
@@ -41,10 +48,22 @@ function ownerAta(c: ExitIxContext, owner: PublicKey): { ata: PublicKey; create:
 }
 
 export function exitStepIxs(step: ExitStep, c: ExitIxContext): TransactionInstruction[] {
+  // sendTx applies the same tails again on run()'s send; applyMarketTailsV22 never appends twice. A list that can't take
+  // the tail (a 78 without vault_lp_ext: v2.2 on without v2.1, an unsupported mix) stays as built, so only that step is
+  // refused, as before, instead of the whole sweep stopping on the mismatch.
+  const tailed = (ix: TransactionInstruction): TransactionInstruction => {
+    if (!c.tails) return ix;
+    try {
+      return applyMarketTailsV22(ix, c.tails);
+    } catch (e) {
+      if (e instanceof MarketTailMismatchError) return ix;
+      throw e;
+    }
+  };
   if (step.kind === "harvest") {
     if (!c.vault) throw new Error("harvest without a bound vault");
     return [
-      buildLpVaultCrankFeesIx({
+      tailed(buildLpVaultCrankFeesIx({
         programId: c.programId,
         cranker: c.payer,
         market: c.market,
@@ -53,13 +72,13 @@ export function exitStepIxs(step: ExitStep, c: ExitIxContext): TransactionInstru
         siblingLedger: c.vault.siblingLedger,
         domain: c.vault.domain,
         bound: { vaultLpState: c.vault.vaultLpState, ...(c.vault.ext ? { ext: c.vault.ext, lpPortfolio: c.vault.lpPortfolio } : {}) },
-      }),
+      })),
     ];
   }
   if (step.kind === "settle-vault-lp") {
     if (!c.vault) throw new Error("settle-vault-lp without a bound vault");
     const j = ownerAta(c, c.vault.juniorOwner);
-    return [j.create, buildVaultLpSettleResolvedIx(c.vault, c.payer, j.ata, c.vaultToken, c.vaultAuthority, step.topup)];
+    return [j.create, tailed(buildVaultLpSettleResolvedIx(c.vault, c.payer, j.ata, c.vaultToken, c.vaultAuthority, step.topup))];
   }
   const ref = c.portfolios.get(step.portfolio);
   if (!ref) throw new Error(`unknown portfolio ${step.portfolio}`);

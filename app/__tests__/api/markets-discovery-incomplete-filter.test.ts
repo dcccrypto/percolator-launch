@@ -49,6 +49,12 @@ vi.mock("@/lib/playground-registered-markets", () => ({
     { slabAddress: USER_INCOMPLETE.toBase58(), symbol: "HALF", label: "Half" },
   ],
 }));
+// The route discovers through lib/v22/discovery (flag off it is the installed SDK function, flag on the VERSION-aware port): stub THAT seam so the
+// fixtures mean the same thing in every mode.
+vi.mock("@/lib/v22/discovery", async (orig) => ({
+  ...(await orig<typeof import("@/lib/v22/discovery")>()),
+  discoverMarkets: async () => mocks.discovered,
+}));
 vi.mock("@percolatorct/sdk", async (orig) => {
   const actual = await orig<typeof import("@percolatorct/sdk")>();
   return {

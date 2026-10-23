@@ -10,11 +10,18 @@
  * generated WRAPPER_ERR table (lib/wrapper-errors.ts), never a literal.
  */
 import { WRAPPER_ERR } from "../wrapper-errors";
-import { TICKET_FUNDS_LINE } from "./copy";
+import { NETWORK_BUSY_MESSAGE, PRICES_OUT_OF_SYNC_COPY, TICKET_FUNDS_LINE } from "./copy";
 import { V21_COPY } from "../v21/copy";
+import { V22_COPY } from "../v22/copy";
 import { isDevnetV21Enabled } from "../v21/flag";
 import { WRAPPER_ERR_V21 } from "../v21/wrapper-errors";
+import { isDevnetV22Enabled } from "../v22/flag";
+import { V22_NAME_BY_CODE } from "../v22/wrapper-errors";
+import { v22StakeMessage, v22WrapperMessage } from "../v22/error-message";
 import { resolveDevnetProgramIds } from "../program-ids";
+import { isLongStale, PRICE_CATCHING_UP, PRICE_STALLED } from "./price-stall";
+import { MAX_WAIT_BUDGET_MS, catchUpAvailableLine } from "./catchup-estimate";
+import { WALLET_REQUEST_CLOSED_COPY } from "../wallet-request-copy";
 
 export type StatusVariant = "info" | "wait" | "paused" | "error";
 
@@ -40,6 +47,8 @@ export interface MessageContext {
   symbol?: string;
   /** The most the user can open / withdraw now, already formatted ("41.88"), for "Use {max}". */
   maxNow?: string;
+  /** The market's `max_portfolio_assets` (positions one account can hold here), for the 126 line. */
+  maxPositions?: number;
   /** Leverage cap for new positions on the busy side (78 step-down). */
   maxLeverage?: number;
   /** Earn cooldown remaining, seconds (36). */
@@ -62,6 +71,12 @@ export interface MessageContext {
    * "lower the size" is the wrong advice: a smaller order is refused the same way.
    */
   imFloorLabel?: string;
+  /** v2.2 band market: the minimum position size, already formatted ("100 TOKEN"), for the 113 line. */
+  minPositionLabel?: string;
+  /** v2.2 QA Q-3: seconds since the market's last on-chain price. Past LONG_STALE_SECS a stale refusal is not "a few seconds". */
+  priceAgeSecs?: number | null;
+  /** How long the price catch-up is estimated to last (ms; lib/limits/catchup-estimate.ts). Null/absent: no estimate, the copy says "usually a few minutes". */
+  catchUpMs?: number | null;
 }
 
 export interface UserMessageAction {
@@ -88,11 +103,28 @@ export interface UserMessage {
   action?: UserMessageAction;
   /** The app retries on its own (wait loop / repair); the UI shows a calm waiting state. */
   autoRetry?: boolean;
+  /** v2.2: the quote the user signed against moved (117 / 124); re-quote and show the new minimum. */
+  requote?: boolean;
   /** Nothing to show (the user cancelled): the caller just restores the button. */
   quiet?: boolean;
   details: UserMessageDetails;
 }
 
+/**
+ * Wrapper 21 (the price is still catching up): no seconds promise. With an estimate it says when the action is available; without one,
+ * that this usually takes a few minutes. The ticket (which waits and resends) adds that the trade goes through by itself, but only when
+ * the wait fits what the app is willing to hold (10 minutes).
+ */
+function engineCatchUpBody(ctx: MessageContext, waits: boolean): string {
+  const what = ctx.surface === "trade" ? "open" : ctx.surface === "close" ? "close" : "any";
+  const ms = ctx.catchUpMs;
+  const base = catchUpAvailableLine(ms, what);
+  const fitsTheWait = ms === null || ms === undefined || ms <= 0 || ms <= MAX_WAIT_BUDGET_MS / 1.5;
+  return waits && fitsTheWait ? `${base} Your trade goes through automatically when it's ready.` : base;
+}
+
+/** The v2.1 growth / lock codes (92–103, 120–122) are also v2.2 codes: v2.2 builds on v2.1, so a v2.2-only build reads them too. */
+const growthCodesEnabled = (): boolean => isDevnetV21Enabled() || isDevnetV22Enabled();
 const V21_NAME_BY_CODE: Record<number, string> = Object.fromEntries(Object.entries(WRAPPER_ERR_V21).map(([n, c]) => [c, n]));
 const NAME_BY_CODE: Record<number, string> = Object.fromEntries(Object.entries(WRAPPER_ERR).map(([n, c]) => [c, n]));
 
@@ -142,12 +174,13 @@ function safeJson(v: unknown): string {
   }
 }
 
-type Origin = "wrapper" | "matcher" | "other" | "unknown";
+type Origin = "wrapper" | "matcher" | "stake" | "other" | "unknown";
 function originOf(programId: string | null): Origin {
   if (!programId) return "unknown";
   const ids = resolveDevnetProgramIds();
   if (programId === ids.wrapper) return "wrapper";
   if (programId === ids.matcher) return "matcher";
+  if (isDevnetV22Enabled() && programId === ids.stake) return "stake";
   return "other";
 }
 
@@ -162,7 +195,7 @@ function mmss(secs: number): string {
 
 /** GH#2953: the one-shot form of a waitable line (see MessageContext.oneShot). */
 const ONE_SHOT_BODY: Record<string, string> = {
-  "engine-catching-up": "The market is catching up with the latest prices. Nothing was sent. Try again in a moment.",
+  "engine-catching-up": "The price is still catching up after a big move. Nothing was sent. This usually takes a few minutes; try again then.",
   "price-wait": "Waiting for a fresh price. Nothing was sent. Try again in a few seconds.",
 };
 
@@ -222,7 +255,8 @@ function v21WrapperMessage(
     case V.VaultLpSeniorCapitalHalt:
       return m("growth-senior-halt", "paused", "Paused while it rebuilds", "This side is paused while the market's first-loss capital is rebuilt. Closing is always allowed.");
     case V.EngineAdlReduceOnly:
-      return m("adl-reduce-only", "paused", "Close-only for now", `${V21_COPY.lock.closeOnly} ${V21_COPY.lock.closeOnlySub}`);
+      // v2.2 band markets: a partial band liquidation is the usual cause (L7 D1); say what happens next and roughly when.
+      return m("adl-reduce-only", "paused", "Close-only for now", isDevnetV22Enabled() ? V22_COPY.band.closeOnlyAfterLiquidation : `${V21_COPY.lock.closeOnly} ${V21_COPY.lock.closeOnlySub}`);
     case V.EngineLossStale:
       return m("loss-stale", "wait", "Refreshing positions", "Positions are being refreshed after a price move. Opening is paused for a moment; closing still works. Try again shortly.", { autoRetry: ctx.surface === "trade" });
     case V.EarnExitWouldUnderBackClaims:
@@ -238,7 +272,7 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
   // A Custom(n) is decoded by the program that RAISED it (error-codes-4b1a5d30.md: CPI callees —
   // SPL Token, the matcher, stake, NFT — reuse the same numbers). No attribution => no guess.
   const wrapperish = origin === "wrapper";
-  const name = p.code !== null && wrapperish ? NAME_BY_CODE[p.code] ?? (isDevnetV21Enabled() ? V21_NAME_BY_CODE[p.code] : undefined) ?? null : null;
+  const name = p.code !== null && wrapperish ? NAME_BY_CODE[p.code] ?? (growthCodesEnabled() ? V21_NAME_BY_CODE[p.code] : undefined) ?? (isDevnetV22Enabled() ? V22_NAME_BY_CODE[p.code] : undefined) ?? null : null;
   const details: UserMessageDetails = { code: p.code, name, programId: p.programId, logs: p.logs, raw: p.raw };
   const m = (kind: string, variant: StatusVariant, title: string, body: string, extra: Partial<UserMessage> = {}): UserMessage => ({
     kind,
@@ -248,19 +282,47 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
     details,
     ...extra,
   });
+  const lpDepletedMsg = (vault?: boolean) =>
+    m("lp-depleted", "paused", "New positions paused", `${TICKET_FUNDS_LINE(vault === true)} Closing works normally.`);
   const sym = ctx.symbol ?? "";
   const s = sides(ctx.side);
   const useMax = ctx.maxNow ? { action: { id: "use-max" as const, label: `Use ${ctx.maxNow}` } } : {};
   const lower = p.raw.toLowerCase();
 
   // ── Wallet / network conditions (no program code) ──────────────────────────
-  if (/user rejected|rejected the request|user declined|transaction rejected|request rejected|\b4001\b/i.test(p.raw)) {
+  if (/user rejected|transaction cancell?ed|signing cancell?ed by user|rejected the request|user declined|transaction rejected|request rejected|\b4001\b/i.test(p.raw)) {
     return m("cancelled", "info", "Cancelled", "Cancelled.", { quiet: true });
   }
   // Earn deposit refused BEFORE the wallet opened (earn-split-pot planEarnDeposit): a pot is
   // over-impaired or the share price collapsed. Same line the program's Custom 91 gets.
   if ((err as { name?: string } | null)?.name === "EarnDepositsPausedError") {
     return m("earn-pot-impaired", "paused", "Deposits paused", EARN_DEPOSITS_PAUSED_BODY);
+  }
+  // v2.2: a builder and the wrapper's tail layout disagree (lib/v22/market-tails.ts); raised before the wallet prompt.
+  if ((err as { name?: string } | null)?.name === "MarketTailMismatchError") {
+    return m("market-tail", "paused", "Not available yet", "This action isn't available for this market yet. Nothing was sent.");
+  }
+  // v2.2 QA RT5-2: the wallet popup expired or was closed without a signature (lib/v22/sign-guard.ts).
+  if ((err as { name?: string } | null)?.name === "WalletRequestClosedError" || p.raw.includes(WALLET_REQUEST_CLOSED_COPY)) {
+    return m("wallet-request-closed", "info", "Try again", WALLET_REQUEST_CLOSED_COPY);
+  }
+  // v2.2 QA NB-2: the connection is not devnet (lib/v22/devnet-guard.ts); refused before any blockhash or prompt.
+  if ((err as { name?: string } | null)?.name === "WrongClusterError") {
+    return m("wrong-cluster", "error", "Wrong network", (err as Error).message, { action: { id: "refresh", label: "Refresh" } });
+  }
+  // v2.2 QA U-2 / P-3b: base + matcher + utilisation fee is over the market's maximum for this size (a second 98 after
+  // the cap was raised): one true line, no "Try again" loop.
+  if ((err as { name?: string } | null)?.name === "UtilFeeOverMaxError") {
+    return m("side-too-busy", "paused", "Side too busy", (err as Error).message);
+  }
+  // v2.2 QA Q-7b: the multi-asset refresh shape still returned 19 after every refinement (lib/v22/trade-refresh.ts).
+  // Never the waiting copy: this one does not "go through automatically".
+  if ((err as { name?: string } | null)?.name === "HealthCheckStaleError") {
+    return m("health-check-stale", "paused", "Not sent", (err as Error).message, { action: { id: "try-again", label: "Try again" } });
+  }
+  // v2.2 QA Q-7: the wait loop gave up (lib/tx.ts WaitExhaustedError): the refusal did not clear in the bounded time.
+  if ((err as { name?: string } | null)?.name === "WaitExhaustedError") {
+    return m("wait-exhausted", "paused", "Not sent", "This order still can't go through after waiting, so nothing was sent. Try again later.", { action: { id: "try-again", label: "Try again" } });
   }
   // UX WP-3: the user pressed Stop on a long wait (lib/tx.ts WaitStoppedError): nothing was sent.
   if ((err as { name?: string } | null)?.name === "WaitStoppedError") {
@@ -270,6 +332,18 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
     return m("wallet-locked", "error", "Wallet locked", `Unlock ${ctx.walletName ?? "your wallet"} and try again.`);
   }
   if (/insufficient lamports|insufficient sol|not enough sol|attempt to debit an account but found no record of a prior credit/i.test(p.raw)) {
+    // lib/tx.ts's pre-flight for a tx that creates accounts (a first trade's portfolio, a market's
+    // slab) names their rent and the shortfall; that is not "a little SOL for fees". Both figures
+    // come from the message, so the line is right for whichever flow it was.
+    const rent = Number(/~([\d.]+) SOL account rent/i.exec(p.raw)?.[1]);
+    const short = Number(/add at least ([\d.]+) SOL/i.exec(p.raw)?.[1]);
+    if (rent > 0 && short > 0) {
+      const rentLabel = rent >= 0.01 ? rent.toFixed(2) : rent.toFixed(4);
+      const addLabel = Math.max(0.001, Math.ceil(short * 1000) / 1000).toFixed(3); // rounded up, never 0.000
+      return m("insufficient-sol", "error", "Need SOL for account rent", `This creates an on-chain account: ~${rentLabel} SOL of one-time rent plus network fees. Add at least ${addLabel} SOL.`, {
+        action: { id: "get-funds", label: "Get test funds" },
+      });
+    }
     return m("insufficient-sol", "error", "Need network fees", "You need a little SOL for network fees.", {
       action: { id: "get-funds", label: "Get test funds" },
     });
@@ -286,6 +360,17 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
   }
   if (/confirmation timeout|was not confirmed in|timed out waiting for confirmation/i.test(lower)) {
     return m("still-confirming", "wait", "Still confirming", "Still confirming. We'll update this when it lands.", { autoRetry: true });
+  }
+  // #3459: the live price and the trading price disagree (lib/slippage.ts FeedDisagreementError).
+  // Before the network check below: its raw text carries the deviation in bps, and 429 of them
+  // read as an HTTP 429 ("Couldn't reach Solana"); after it, the slippage check below read it as
+  // "the price moved while you were confirming", which is not what happened.
+  if ((err as { name?: string } | null)?.name === "FeedDisagreementError") {
+    return m("prices-out-of-sync", "wait", PRICES_OUT_OF_SYNC_COPY.title, PRICES_OUT_OF_SYNC_COPY.body);
+  }
+  // C4: a rate-limited RPC has its own calm line (the tx was never accepted); a bare 429 digit run is not enough, so it needs rate-limit wording.
+  if (/too many requests|rate.?limits? exceeded|rate.?limited|-32429|\b429\b.{0,80}rate.?limit|rate.?limit.{0,80}\b429\b/i.test(p.raw) && p.code === null) {
+    return m("network-busy", "error", "Network busy", NETWORK_BUSY_MESSAGE, { action: { id: "try-again", label: "Try again" } });
   }
   if (/\b429\b|too many requests|-32005|-32603|failed to fetch|network request failed|econnreset/i.test(p.raw) && p.code === null) {
     return m("rpc-unreachable", "error", "Couldn't reach Solana", "Couldn't reach Solana. Nothing was sent.", {
@@ -359,24 +444,43 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
     return m("market-unavailable", "paused", "Temporarily unavailable", "This market is temporarily unavailable. We've been notified.");
   }
 
+  // ── Devnet v2.2 (flag-gated): stake v5 33..48, wrapper 104..119 / 123 / 124 ─────────────
+  if (p.code !== null && isDevnetV22Enabled()) {
+    if (origin === "stake") {
+      const sv = v22StakeMessage(p.code, m);
+      if (sv) return sv;
+    }
+    if (wrapperish) {
+      const wv = v22WrapperMessage(p.code, ctx, m);
+      if (wv) return wv;
+    }
+  }
+
   // ── Wrapper codes ───────────────────────────────────────────────────────────
-  if (p.code !== null && wrapperish && isDevnetV21Enabled()) {
+  if (p.code !== null && wrapperish && growthCodesEnabled()) {
     const v = v21WrapperMessage(p.code, ctx, m);
     if (v) return v;
   }
   if (p.code !== null && wrapperish) {
     const W = WRAPPER_ERR;
+    // v2.2 QA Q-3: on a settled market these refusals are permanent; with no price for minutes nobody is pushing it.
+    // Neither waits, and neither says "a few seconds" or "goes through automatically".
+    const staleFamily = p.code === W.EngineStale || p.code === W.EngineBStale || p.code === W.EngineLockActive || p.code === W.OracleStale || p.code === W.OracleInvalid;
+    if (staleFamily && ctx.health?.resolved) return m("market-settled", "info", "Market settled", "Close any position and withdraw. There's nothing else to do.");
+    if (staleFamily && isLongStale(ctx.priceAgeSecs) && !(p.code === W.EngineLockActive && (ctx.surface === "earn-withdraw" || ctx.surface === "earn-deposit"))) {
+      return m("price-stalled", "paused", PRICE_STALLED.title, PRICE_STALLED.body(ctx.priceAgeSecs as number));
+    }
     switch (p.code) {
       case W.EngineStale:
       case W.EngineBStale:
         return ctx.surface === "trade"
           // Only the trade ticket waits through this and resends (sendTxWaiting); nothing reads
           // autoRetry elsewhere, and Earn, close, deposit and withdraw do not resend.
-          ? m("engine-catching-up", "wait", "Catching up", "The market is catching up with the latest prices. Your trade goes through automatically when it's ready.", { autoRetry: true })
-          : m("engine-catching-up", "wait", "Catching up", "The market is catching up with the latest prices. Try again in a moment.");
+          ? m("engine-catching-up", "wait", "Catching up", engineCatchUpBody(ctx, true), { autoRetry: true })
+          : m("engine-catching-up", "wait", "Catching up", engineCatchUpBody(ctx, false));
       case W.OracleStale:
       case W.OracleInvalid:
-        return m("price-wait", "wait", "Waiting for price", "Waiting for a fresh price. This usually takes a few seconds.", { autoRetry: true });
+        return m("price-wait", "wait", PRICE_CATCHING_UP.title, PRICE_CATCHING_UP.body, { autoRetry: true });
       case W.EngineLockActive: {
         const h = ctx.health ?? {};
         if (h.resolved) return m("market-settled", "info", "Market settled", "Close any position and withdraw. There's nothing else to do.");
@@ -388,16 +492,27 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
           return m("earn-deposit-wait", "wait", "Vault updating", "This vault is updating after a market move. Nothing was deposited. Try again in a moment.");
         if (h.adlReduceOnly && ctx.surface === "trade")
           return m("adl-reduce-only", "paused", "Close-only for now", "Closing works normally. New positions reopen once the positions on one side have closed, which depends on those traders and can take a while.");
-        if (h.lpDepleted && ctx.surface === "trade")
-          return m("lp-depleted", "paused", "New positions paused", `${TICKET_FUNDS_LINE(h.lpIsVault === true)} Closing works normally.`);
+        if (h.lpDepleted && ctx.surface === "trade") return lpDepletedMsg(h.lpIsVault);
         if (h.lossStale) return m("loss-stale", "wait", "Refreshing positions", "Positions on this market are being refreshed after a price move. New trades wait until that finishes.", { autoRetry: true });
         return ctx.surface === "trade"
           // Only the trade ticket waits through this and resends (sendTxWaiting); nothing reads
           // autoRetry elsewhere, and Earn, close, deposit and withdraw do not resend.
-          ? m("engine-catching-up", "wait", "Catching up", "The market is catching up with the latest prices. Your trade goes through automatically when it's ready.", { autoRetry: true })
-          : m("engine-catching-up", "wait", "Catching up", "The market is catching up with the latest prices. Try again in a moment.");
+          ? m("engine-catching-up", "wait", "Catching up", engineCatchUpBody(ctx, true), { autoRetry: true })
+          : m("engine-catching-up", "wait", "Catching up", engineCatchUpBody(ctx, false));
       }
+      case W.EngineNonProgress:
+        // v2.2 QA copy round: the engine had nothing to do for this request (already up to date / nothing to settle).
+        return m("nothing-to-do", "info", "Nothing to do", "Nothing to do right now: this is already up to date. Nothing was sent.");
+      case W.LpVaultNoFeesToCrank:
+        // v2.2 QA Q-4: the Earn payout's fee collection (tag 78) found nothing left: the keeper collected the fees
+        // between the app's check and the send. Nothing moved; the next attempt goes without it.
+        return m("earn-fees-collected", "wait", "Try again", "Fees were just collected for this vault. Nothing moved. Try again.", { action: { id: "try-again", label: "Try again" } });
       case W.EngineInsufficientInitialMargin:
+        // The IM gate runs on the LP side of the fill too: with the counterparty below the floor every
+        // open is 49 whatever the trader deposits (STONK 2026-10-07), so "add collateral" is the wrong
+        // advice. Outranks the trader's own floor label, which the trader can act on. OrderTicket resolves
+        // here before safeExplainMarketTxError, so market-error's refinement never sees a 49.
+        if (ctx.health?.lpDepleted && ctx.surface === "trade") return lpDepletedMsg(ctx.health.lpIsVault);
         if (ctx.imFloorLabel) {
           return m("insufficient-margin", "error", "Not enough margin", `New positions on this market need at least ${ctx.imFloorLabel} of margin.`);
         }

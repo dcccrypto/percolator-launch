@@ -5,6 +5,7 @@ import {
   queryLeaderboard,
 } from "@/lib/indexer-db";
 import { getRetiredSlabs } from "@/lib/retired-slabs";
+import { isMissingColumnError } from "@/lib/supabase-missing-column";
 
 // Bug: `export const revalidate = 30` was INERT here — this handler reads
 // request.url search params (period/limit), which makes the route dynamic;
@@ -106,7 +107,7 @@ export async function GET(request: Request) {
 
     let { data, error } = await query;
 
-    if (error && error.message?.includes("network")) {
+    if (isMissingColumnError(error, "network")) {
       let fallbackQuery = supabase.from("trades").select("trader, size, price, created_at");
       if (period === "24h") fallbackQuery = fallbackQuery.gte("created_at", new Date(Date.now() - 86_400_000).toISOString());
       else if (period === "7d") fallbackQuery = fallbackQuery.gte("created_at", new Date(Date.now() - 7 * 86_400_000).toISOString());

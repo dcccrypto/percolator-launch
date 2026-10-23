@@ -1,0 +1,28 @@
+{
+ "sig": "4gyLCVZGK7K6xrckehovpymbdfrvrFrWkzA5UAXiM6G2CcJByJSpHEamKTWG9UE2uy1rKmYh26v4oxv7k56goLPV",
+ "err": null,
+ "logMessages": [
+  "Program ComputeBudget111111111111111111111111111111 invoke [1]",
+  "Program ComputeBudget111111111111111111111111111111 success",
+  "Program ComputeBudget111111111111111111111111111111 invoke [1]",
+  "Program ComputeBudget111111111111111111111111111111 success",
+  "Program ComputeBudget111111111111111111111111111111 invoke [1]",
+  "Program ComputeBudget111111111111111111111111111111 success",
+  "Program 6kpg2wi7vwkn7E9rvodXSktYRhna8TWjiZrC1dBek6NM invoke [1]",
+  "Program 6kpg2wi7vwkn7E9rvodXSktYRhna8TWjiZrC1dBek6NM consumed 189030 of 951250 compute units",
+  "Program 6kpg2wi7vwkn7E9rvodXSktYRhna8TWjiZrC1dBek6NM success",
+  "Program 6kpg2wi7vwkn7E9rvodXSktYRhna8TWjiZrC1dBek6NM invoke [1]",
+  "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]",
+  "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 76 of 705786 compute units",
+  "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success",
+  "Program 6kpg2wi7vwkn7E9rvodXSktYRhna8TWjiZrC1dBek6NM consumed 56929 of 762196 compute units",
+  "Program 6kpg2wi7vwkn7E9rvodXSktYRhna8TWjiZrC1dBek6NM success",
+  "Program 6kpg2wi7vwkn7E9rvodXSktYRhna8TWjiZrC1dBek6NM invoke [1]",
+  "Program AsHvEJ8zNctKmdeS57H5E4w6nkTLi3bPVpd6ZCLc2ayN invoke [2]",
+  "Program AsHvEJ8zNctKmdeS57H5E4w6nkTLi3bPVpd6ZCLc2ayN consumed 9225 of 643117 compute units",
+  "Program AsHvEJ8zNctKmdeS57H5E4w6nkTLi3bPVpd6ZCLc2ayN success",
+  "Program data: AQEKVDtn1CG6U2IbAuhwqkvSfoDkELVu1xiABD41qhes9vyP2vKXiqNu/IN2pBQeHgQwqB2BFzdSkufMiiF4EJto+u48Wt2yWg8Fvzw9lbxYaJZN9L6OJrMteGz/svt8jzIRAQAAAQAAAAAAAAAJgJaYAAAAAAAAAAAAAAAAAFpXkQAAAAAAAAAAAAAAAADa+JsBAAAAAFq+nQEAAAAAKdkmAAAAAAAAAAAAAAAAAA==",
+  "Program 6kpg2wi7vwkn7E9rvodXSktYRhna8TWjiZrC1dBek6NM consumed 447370 of 705243 compute units",
+  "Program 6kpg2wi7vwkn7E9rvodXSktYRhna8TWjiZrC1dBek6NM success"
+ ]
+}

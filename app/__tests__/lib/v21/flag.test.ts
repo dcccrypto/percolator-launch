@@ -9,6 +9,9 @@ afterEach(() => {
 
 describe("NEXT_PUBLIC_DEVNET_V21", () => {
   it("is OFF by default and for anything but 1/true", () => {
+    // "By default" = the variable UNSET. The run may set it (V22 + V21 mode), so unset it explicitly; unstubAllEnvs restores it.
+    vi.stubEnv("NEXT_PUBLIC_DEVNET_V21", undefined as unknown as string);
+    expect(process.env.NEXT_PUBLIC_DEVNET_V21).toBeUndefined();
     expect(isDevnetV21Enabled()).toBe(false);
     for (const v of ["0", "false", "", "yes", "on"]) {
       vi.stubEnv("NEXT_PUBLIC_DEVNET_V21", v);

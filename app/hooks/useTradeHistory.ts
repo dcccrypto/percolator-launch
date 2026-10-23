@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { TraderTradeEntry } from "@/app/api/trader/[wallet]/trades/route";
+import { INDEXER_RECONCILE_MS, subscribePortfolioReload } from "@/lib/portfolio-invalidation";
 
 export interface UseTradeHistoryOptions {
   wallet: string | null | undefined;
@@ -42,7 +43,7 @@ export function useTradeHistory({
   const requestIdRef = useRef(0);
 
   const fetchPage = useCallback(
-    async (currentOffset: number, append: boolean) => {
+    async (currentOffset: number, append: boolean, fresh = false) => {
       if (!wallet) return;
       const requestId = ++requestIdRef.current;
       setLoading(true);
@@ -54,8 +55,11 @@ export function useTradeHistory({
           offset: String(currentOffset),
         });
         if (slabFilter) params.set("slab", slabFilter);
+        // The route is CDN-cached (s-maxage=10, swr=30), so a reload after a fill would get the
+        // pre-fill body back without a unique URL.
+        if (fresh) params.set("_cb", String(Date.now()));
 
-        const res = await fetch(`/api/trader/${wallet}/trades?${params}`);
+        const res = await fetch(`/api/trader/${wallet}/trades?${params}`, fresh ? { cache: "no-store" } : undefined);
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error ?? `HTTP ${res.status}`);
@@ -94,6 +98,14 @@ export function useTradeHistory({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wallet, slabFilter]);
+
+  // A fill the wallet just made (open, close, the portfolio's Refresh button):
+  // re-read the first page. The current rows stay up until it lands, so the
+  // table does not flash back to its skeleton.
+  useEffect(() => {
+    if (!wallet) return;
+    return subscribePortfolioReload(() => void fetchPage(0, false, true), INDEXER_RECONCILE_MS);
+  }, [wallet, fetchPage]);
 
   const loadMore = useCallback(() => {
     const nextOffset = offset + limit;

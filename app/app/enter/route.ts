@@ -57,8 +57,8 @@ function finish(req: NextRequest, cookie: string | null): NextResponse {
   return res;
 }
 
-async function handle(req: NextRequest, token: string | null, team: string | null) {
-  const result = await decideEnter({ token, team }, process.env, replayGuard);
+async function handle(req: NextRequest, token: string | null, team: string | null, judge: string | null = null) {
+  const result = await decideEnter({ token, team, judge }, process.env, replayGuard);
   if (!result.ok) {
     // No token, identifier or reason in logs — only that a refusal happened.
     console.warn("[playground/enter] refused");
@@ -70,7 +70,7 @@ async function handle(req: NextRequest, token: string | null, team: string | nul
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams;
   // "t" is what percolator.trade sends (main lib/playground-access.ts HANDOFF_PARAM).
-  return handle(req, q.get("t") ?? q.get("token") ?? q.get("h"), q.get("team"));
+  return handle(req, q.get("t") ?? q.get("token") ?? q.get("h"), q.get("team"), q.get("judge"));
 }
 
 export async function POST(req: NextRequest) {
@@ -84,5 +84,5 @@ export async function POST(req: NextRequest) {
     const v = form?.get(k);
     return typeof v === "string" ? v : null;
   };
-  return handle(req, str("token") ?? str("h"), str("team"));
+  return handle(req, str("token") ?? str("h"), str("team"), str("judge"));
 }

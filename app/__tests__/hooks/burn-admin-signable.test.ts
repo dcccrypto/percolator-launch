@@ -44,13 +44,11 @@ vi.mock("@/lib/programAllowlist", () => ({ assertKnownProgram: () => {} }));
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useAdminActions } from "@/hooks/useAdminActions";
 import { useUpdateAssetAuthority, ASSET_AUTH_KIND } from "@/hooks/useUpdateAssetAuthority";
-import { assetProfileOff } from "@/lib/v18-wire";
+import { marketWithAssetAdmin } from "../helpers/v22-fixtures";
 
 function slabWithAssetAdmin(admin: PublicKey): Uint8Array {
-  const off = assetProfileOff(0) + 368;
-  const d = new Uint8Array(off + 4096);
-  d.set(admin.toBytes(), off);
-  return d;
+  // The ACTIVE mode's market with asset_admin set (helpers/v22-fixtures.ts): the v2.1 zero buffer flag off, a VERSION-19 market flag on.
+  return marketWithAssetAdmin(admin);
 }
 
 /**

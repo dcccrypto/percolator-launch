@@ -33,6 +33,7 @@ import {
   planSelfHeal,
 } from "@/lib/self-heal";
 import type { SelfHealDeps } from "@/lib/self-heal";
+import { modeFixtures } from "../helpers/v22-fixtures";
 
 const fixture = (name: string): Uint8Array =>
   new Uint8Array(
@@ -78,7 +79,9 @@ describe("decodeMarketLiveness — deployed layout vs live bytes", () => {
   });
 
   it("rejects a truncated buffer", () => {
-    expect(() => decodeMarketLiveness(new Uint8Array(1000), 0n)).toThrow(/too short/);
+    // A real market of the ACTIVE mode cut to 1,000 B (header intact, slot region missing). A zero buffer is refused by the v2.2 guard for a
+    // different reason (no wrapper magic), so the truncation control uses real bytes.
+    expect(() => decodeMarketLiveness(modeFixtures().market.slice(0, 1000), 0n)).toThrow(/too short/);
   });
 });
 

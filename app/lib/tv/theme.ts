@@ -80,9 +80,12 @@ export function customThemes(dark: ChartTheme, light: ChartTheme): { dark: TvThe
  * Pane/scale/series overrides for one site theme. Re-applied on every theme
  * switch (widget.applyOverrides) so a saved layout's stored colours never win.
  *
- * The main series' own last-price line and axis label are OFF: the chart's
- * price label is the live Mark line (lib/tv/positionLines.ts). Showing the
- * last candle close as a second price confused users on the old chart too.
+ * The main series' own last-price line and axis label are ON (#3382). The live
+ * Mark line (lib/tv/positionLines.ts) is the current price, but on a quiet
+ * market the last candle can close far from it (a pool with a multi-hour
+ * trading gap). With the series label hidden nothing on the chart said where
+ * the history stopped, so the gap read as a broken chart. Labelling the last
+ * candle shows both levels, as the v2.2 lightweight chart already does.
  */
 export function chartOverrides(t: ChartTheme): Record<string, string | number | boolean> {
   return {
@@ -93,8 +96,8 @@ export function chartOverrides(t: ChartTheme): Record<string, string | number | 
     "paneProperties.separatorColor": t.borderColor,
     "scalesProperties.textColor": t.textColor,
     "scalesProperties.lineColor": t.borderColor,
-    "scalesProperties.showSeriesLastValue": false,
-    "mainSeriesProperties.showPriceLine": false,
+    "scalesProperties.showSeriesLastValue": true,
+    "mainSeriesProperties.showPriceLine": true,
     "mainSeriesProperties.candleStyle.upColor": t.upColor,
     "mainSeriesProperties.candleStyle.downColor": t.downColor,
     "mainSeriesProperties.candleStyle.borderUpColor": t.upColor,

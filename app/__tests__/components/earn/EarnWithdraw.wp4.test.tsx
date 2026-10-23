@@ -133,7 +133,7 @@ describe("two signatures, one flow", () => {
     render(
       <>
         <DepositWithdrawPanel {...props} userLpBalance={0n} hasPendingRedemption pendingRedemptionShares={100_000_000n} cooldownElapsed={false} cooldownRemainingSlots={150n} onDeposit={vi.fn()} onWithdraw={vi.fn()} />
-        <LpPositionDashboard userLpBalance={0n} lpSupply={1n} vaultBalance={1n} decimals={6} lpDecimals={6} collateralSymbol="USDC" redemptionRateE6={1_000_000n} loading={false} pendingWithdrawalLabel="105 USDC" />
+        <LpPositionDashboard userLpBalance={0n} lpSupply={1n} vaultBalance={1n} decimals={6} collateralSymbol="USDC" redemptionRateE6={1_000_000n} loading={false} pendingWithdrawalLabel="105 USDC" />
       </>,
     );
     openWithdraw();

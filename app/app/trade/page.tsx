@@ -1,11 +1,12 @@
 "use client";
 
-import { isHiddenFromListing } from "@/lib/listing-hidden";
+import { isBrowsableMarketRow } from "@/lib/listed-markets";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import { qToUsd, rowVolumeUsd } from "@/lib/q-usd";
+import { fetchMarketsList, listedMarketRows, withTimeout } from "@/lib/markets-list-client";
 
 /**
  * /trade (no slab parameter)
@@ -38,18 +39,12 @@ export default function TradeRedirectPage() {
 
     async function pickMarket() {
       try {
-        const res = await fetch("/api/markets", {
-          signal: AbortSignal.timeout(8000),
-        });
-
-        if (!res.ok) {
-          throw new Error(`Markets API returned ${res.status}`);
-        }
-
-        const data = (await res.json()) as { markets?: MarketRow[] };
+        // The canonical list (lib/markets-list-client.ts); listedMarketRows() is what the bare
+        // /api/markets returned (zombies excluded).
+        const data = await withTimeout(fetchMarketsList(), 8000);
         if (cancelled) return;
 
-        const markets = data.markets ?? [];
+        const markets = (listedMarketRows(data) ?? []) as unknown as MarketRow[];
 
         if (markets.length === 0) {
           setNoMarkets(true);
@@ -57,7 +52,7 @@ export default function TradeRedirectPage() {
         }
 
         // Filter to markets with a sane last_price (active markets)
-        const listed = markets.filter((m) => !isHiddenFromListing(m.slab_address));
+        const listed = markets.filter((m) => isBrowsableMarketRow(m.slab_address, m));
         const active = listed.filter(
           (m) => m.last_price != null && m.last_price > 0 && m.last_price < 1e18
         );

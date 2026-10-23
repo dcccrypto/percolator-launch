@@ -75,9 +75,18 @@ describe("theme", () => {
     const o = chartOverrides(DARK_THEME);
     expect(o["paneProperties.background"]).toBe(DARK_THEME.bg);
     expect(o["mainSeriesProperties.candleStyle.upColor"]).toBe(DARK_THEME.upColor);
-    expect(o["mainSeriesProperties.showPriceLine"]).toBe(false);
-    expect(o["scalesProperties.showSeriesLastValue"]).toBe(false);
     expect(chartOverrides(LIGHT_THEME)["paneProperties.background"]).toBe(LIGHT_THEME.bg);
+  });
+
+  it("#3382: the last candle is labelled, so a quiet market's history shows where it stops", () => {
+    // Both themes: the series last-value axis label and its price line are on. With them off, the
+    // only price on screen was the live Mark line, and a candle history that ended far from it
+    // (a thin pool with a multi-hour gap) had nothing to explain the distance.
+    for (const theme of [DARK_THEME, LIGHT_THEME]) {
+      const o = chartOverrides(theme);
+      expect(o["scalesProperties.showSeriesLastValue"]).toBe(true);
+      expect(o["mainSeriesProperties.showPriceLine"]).toBe(true);
+    }
   });
 });
 

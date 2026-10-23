@@ -6,12 +6,15 @@
  * deposit of the vault bound to the right-hand rail; every other row was "—" whatever the wallet
  * held. This reads the wallet's LP ATA + pending-redemption escrow for all vaults in one batch
  * and values them like the rail (useInsuranceLP): the program's combined NAV over registry shares
- * on a two-pot vault (lib/limits/earn-split-pot.ts), else registry shares + distributed fees.
+ * on a two-pot vault (lib/limits/earn-split-pot.ts), else (legacy or bound registry) registry
+ * shares + distributed fees. A two-pot vault that can't be read or priced is null (unknown).
  */
+import { parseLpVaultRegistry, parseLpRedemption } from "@/lib/v22/records";
 import { PublicKey, type Connection } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync, unpackAccount } from "@solana/spl-token";
-import { deriveInsuranceLpMint, deriveLpRedemption, deriveLpVaultRegistry, parseLpRedemption, parseLpVaultRegistry } from "@percolatorct/sdk";
+import { deriveInsuranceLpMint, deriveLpRedemption, deriveLpVaultRegistry } from "@percolatorct/sdk";
 import { readSplitPotState, vaultValue } from "./earn-split-pot";
+import { decodeLpVaultRegistryBound } from "./decode";
 
 export interface EarnPosition {
   /** LP shares in the wallet + shares escrowed in a pending withdrawal. */
@@ -65,6 +68,8 @@ export async function readEarnPositions(
       const sp = await readSplitPotState(connection, programId, r.market);
       const v = sp ? vaultValue(sp) : null;
       if (sp && v) valueAtoms = valueShares(shares, v.nav, sp.totalShares);
+      // Two-pot vault whose pots couldn't be read or priced: unknown, not shares + fees.
+      else if (decodeLpVaultRegistryBound(new Uint8Array(regInfo.data)) === false) valueAtoms = null;
       out.set(r.slab, { shares, valueAtoms });
     }),
   );

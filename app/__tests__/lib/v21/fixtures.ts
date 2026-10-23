@@ -1,4 +1,7 @@
 /** Shared fixtures for the Devnet v2.1 tests (not a test file). */
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { marketOffsets } from "@/lib/v22/market-offsets";
+import { blankMarket } from "../../helpers/v22-fixtures";
 import { ASSET_GROWTH_FIELD_OFF, assetGrowthAccountOffsetV19 } from "@/lib/v21/sdk";
 
 export interface GrowthRecordInit {
@@ -13,14 +16,22 @@ export interface GrowthRecordInit {
   util?: number;
 }
 
-/** A market account (kind 1) long enough to hold asset 0's growth record, with that record set. */
+/**
+ * A market account (kind 1) long enough to hold asset 0's growth record, with that record set.
+ * Flag off: the v2.1 shape (a zero 4,000 B buffer, record at 2,022). Flag on: a v2.2 (VERSION 19) one-slot market (helpers/v22-fixtures.ts),
+ * the record at the slot's wrapper prefix +672 and the h-lock byte at `group.mode - 5`, both from the SDK layout table. The growth record's
+ * own field offsets (c_launch 0, lambda 16, l_launch 20, l_tier 22, ceil 24, kink 26, r_gap 28, version 38, util 40) are identical in
+ * v22-rust-layout-aca02ba6.json AssetGrowthV19, so one writer serves both modes.
+ */
 export function marketRaw(init: GrowthRecordInit | null, hlockByte = 0): Uint8Array {
-  const raw = new Uint8Array(4_000);
+  const v22 = isDevnetV22Enabled();
+  const raw = v22 ? blankMarket() : new Uint8Array(4_000);
+  const M = v22 ? marketOffsets(raw) : null;
   raw[10] = 1; // KIND_MARKET
-  raw[592 + 621] = hlockByte; // market-group bankruptcy_hlock_active
+  raw[v22 ? M!.g + M!.layout.group.mode - 5 : 592 + 621] = hlockByte; // market-group bankruptcy_hlock_active
   if (init) {
     const d = { cLaunch: 5_000_000_000n, lambda: 10_000, launch: 550, tier: 1_000, ceil: 550, kink: 5_000, gap: 500, version: 1, util: 0, ...init };
-    const off = assetGrowthAccountOffsetV19(0);
+    const off = v22 ? M!.wrapperOff(0) + M!.layout.wrapperSlot.growth : assetGrowthAccountOffsetV19(0);
     const v = new DataView(raw.buffer);
     const F = ASSET_GROWTH_FIELD_OFF;
     v.setBigUint64(off + F.cLaunchAtoms, d.cLaunch, true);

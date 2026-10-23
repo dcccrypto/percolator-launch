@@ -4,7 +4,7 @@ import { usePortfolio } from "@/hooks/usePortfolio";
 import { useLivePortfolioMetrics } from "@/hooks/useLivePortfolioMetrics";
 import { unknownPnlCaveat } from "@/lib/position-pnl";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
-import { formatTokenAmount } from "@/lib/format";
+import { formatUsdAmount } from "@/lib/format";
 import { useState } from "react";
 
 function CopyableAddress({ address }: { address: string }) {
@@ -48,13 +48,21 @@ export function DashboardHeader() {
   const totalPnl = liveMetrics.totalUnrealizedPnl;
   const positionCount = liveMetrics.openPositions.length;
 
-  // First scan failed with nothing loaded: "$0.00" / 0 would be a false claim.
+  // First scan failed with nothing loaded: "$0.00" / 0 would be a false claim. Before the first scan
+  // lands the totals are the empty seed, so say loading (as StatsBar beside it does), not $0.00.
   const loadError = portfolio.error;
+  const loading = portfolio.loading;
+  // One USD format for every value (it was a bare token amount above zero and "$0.00" at zero), with
+  // separators like StatsBar and the /portfolio hero; formatUsdAmount for $0.00 and sub-cent amounts.
+  const usd = Math.abs(Number(totalValue) / 1e6);
+  const sign = totalValue < 0n ? "-" : "";
   const displayValue = loadError
     ? "—"
-    : totalValue > 0n
-      ? formatTokenAmount(totalValue)
-      : "$0.00";
+    : loading
+      ? "..."
+      : usd >= 0.01
+        ? `${sign}$${usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        : formatUsdAmount(usd, sign);
 
   const pnlPositive = totalPnl >= 0n;
 
@@ -101,7 +109,7 @@ export function DashboardHeader() {
             className="text-sm font-bold text-[var(--text)]"
             style={{ fontFamily: "var(--font-jetbrains-mono)" }}
           >
-            {loadError ? "—" : positionCount}
+            {loadError ? "—" : loading ? "..." : positionCount}
           </p>
         </div>
       </div>

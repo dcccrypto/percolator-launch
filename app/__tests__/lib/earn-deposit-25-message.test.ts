@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { resolveUserMessage } from "@/lib/limits/user-message";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 
 const W = "ETDLAdiAyWnEUngspYczTXUceT6X8f92eZQvr8nmSkWB";
 const err = (code: number) => new Error(`Transaction simulation failed: Error processing Instruction 4: custom program error: 0x${code.toString(16)}
@@ -28,9 +29,17 @@ describe("Earn deposit refused with LpVaultTargetPotImpaired (91) — wrapper 7a
     expect(m.body).toMatch(/Nothing was sent/);
     expect(m.body).not.toMatch(/Custom|0x5b|impair/i);
   });
-  it("CONTROL: 92 (not a wrapper code) stays unmapped", () => {
+  // Code 92 is the v2.2 wrapper's GrowthLeverageExceeded (percolator-prog v16_program.rs:1718, ordinal 92; lib/v21/wrapper-errors.ts). The deployed
+  // v2 wrapper never raises it, so flag off it must stay unmapped; with the v2.2 flag on (which maps the growth codes on its own) it is the
+  // growth-leverage message.
+  it.skipIf(isDevnetV22Enabled())("CONTROL (flag off): 92 (not a code of today's wrapper) stays unmapped", () => {
     const m = resolveUserMessage(err(92) as never, { surface: "earn-deposit" } as never);
     expect(m.kind).toBe("unmapped");
+  });
+  it.runIf(isDevnetV22Enabled())("CONTROL (v2.2): 92 is the wrapper's GrowthLeverageExceeded, not a generic failure", () => {
+    const m = resolveUserMessage(err(92) as never, { surface: "earn-deposit" } as never);
+    expect(m.kind).toBe("growth-leverage");
+    expect(m.body).toMatch(/Closing is never blocked/);
   });
 });
 

@@ -51,6 +51,8 @@ vi.mock("@/hooks/useTrade", () => ({
   findV17Portfolio: vi.fn(async () => PORTFOLIO_PK),
 }));
 vi.mock("@/lib/limits/rebalance-close", () => ({ closeViaRebalanceReduce: (p: unknown) => rebalanceMock(p) }));
+const toastMock = vi.fn();
+vi.mock("@/hooks/useToast", async (orig) => ({ ...(await orig<typeof import("@/hooks/useToast")>()), useOptionalToast: () => toastMock }));
 const connection = {
   getProgramAccounts: vi.fn(async () => [{ pubkey: PORTFOLIO_PK, account: { data: Buffer.from(PORTFOLIO) } }]),
   getAccountInfo: vi.fn(async (pk: PublicKey) => (pk.toBase58() === SLAB ? { data: Buffer.from(chainMarket) } : { data: Buffer.from(PORTFOLIO) })),
@@ -70,10 +72,14 @@ vi.mock("@/lib/matcherCaps", () => ({ getMatcherCaps: vi.fn(async () => null), g
 
 import { useClosePosition, COPY_RESET_LEG } from "@/hooks/useClosePosition";
 import { getMatcherCaps } from "@/lib/matcherCaps";
+import { seedLotExp0 } from "../helpers/v22-fixtures";
+
+seedLotExp0();
 
 beforeEach(() => {
   tradeMock.mockReset();
   tradeMock.mockResolvedValue("SIGT");
+  toastMock.mockClear();
   rebalanceMock.mockClear();
   vi.mocked(getMatcherCaps).mockResolvedValue(null);
 });
@@ -131,6 +137,8 @@ describe("useClosePosition — ADL-effective close size (M-3)", () => {
     expect(rebalanceMock).not.toHaveBeenCalled();
     expect(r).toEqual({ signature: null });
     expect(error).toBe(COPY_RESET_LEG);
+    // Surfaces that close their modal on resolve unmount the error: the reason must also reach a toast.
+    expect(toastMock).toHaveBeenCalledWith(COPY_RESET_LEG, "info");
   });
 
   it("an epoch the engine would refuse (not a prior reset) blocks the close", async () => {

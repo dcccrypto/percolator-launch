@@ -1,7 +1,7 @@
 "use client";
 
 import { track as vercelTrack } from "@vercel/analytics";
-import { GA_ID } from "@/lib/analytics-config";
+import { GA_ID, vercelAnalyticsEnabled } from "@/lib/analytics-config";
 
 type AllowedValue = string | number | boolean | null;
 export type EventProps = Record<string, AllowedValue | undefined>;
@@ -23,11 +23,13 @@ export function track(event: string, props?: EventProps): void {
     }
   }
 
-  // Vercel Web Analytics (custom events)
-  try {
-    vercelTrack(event, clean);
-  } catch {
-    /* noop */
+  // Vercel Web Analytics (custom events) — only when opted in (see vercelAnalyticsEnabled)
+  if (vercelAnalyticsEnabled()) {
+    try {
+      vercelTrack(event, clean);
+    } catch {
+      /* noop */
+    }
   }
 
   // GA4 (gtag)

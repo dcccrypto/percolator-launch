@@ -71,14 +71,12 @@ vi.mock("@percolatorct/sdk", async () => {
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { renderHook } from "@testing-library/react";
 import { useAdminActions } from "@/hooks/useAdminActions";
-import { assetProfileOff } from "@/lib/v18-wire";
+import { marketWithAssetAdmin } from "../helpers/v22-fixtures";
 
 /** A slab whose asset 0 asset_admin is ADMIN_PK (AssetOracleProfileV17 +368). */
 function slabWithAssetAdmin(admin: PublicKey = ADMIN_PK): Uint8Array {
-  const off = assetProfileOff(0) + 368;
-  const d = new Uint8Array(off + 4096);
-  d.set(admin.toBytes(), off);
-  return d;
+  // The ACTIVE mode's market with asset_admin set (helpers/v22-fixtures.ts): the v2.1 zero buffer flag off, a VERSION-19 market flag on.
+  return marketWithAssetAdmin(admin);
 }
 h.slab = slabWithAssetAdmin();
 

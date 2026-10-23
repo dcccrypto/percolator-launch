@@ -100,6 +100,11 @@ vi.mock("@/hooks/useTrade", async () => {
   const actual = await vi.importActual<typeof import("@/hooks/useTrade")>("@/hooks/useTrade");
   return { ...actual, prewarmTradeSubmission: vi.fn() };
 });
+vi.mock("@/lib/v22/layout", async (orig) => ({
+  ...(await orig<typeof import("@/lib/v22/layout")>()),
+  isWrapperAccount: mocks.isV17Account,
+  parsePortfolio: mocks.parsePortfolioV17,
+}));
 vi.mock("@percolatorct/sdk", async () => {
   const actual = await vi.importActual<typeof import("@percolatorct/sdk")>("@percolatorct/sdk");
   mocks.encodeTradeCpi.mockImplementation(actual.encodeTradeCpi);
@@ -116,6 +121,7 @@ import { V17_PORTFOLIO_IDENTITY_TRAILER_LEN } from "@percolatorct/sdk";
 import * as C from "@/lib/limits/constants";
 import { CLOSE_PRICE_UNREADABLE } from "@/lib/close-limit";
 import { useClosePosition } from "@/hooks/useClosePosition";
+import { __setUnknownLotExpForTest } from "@/lib/v22/lot-registry";
 
 const key = (n: number) => new PublicKey(new Uint8Array(32).fill(n));
 const walletPk = key(41);
@@ -217,6 +223,7 @@ const FEED_17_LOW = 830_000n; // site feed 17% below (KARDASHEV, live)
 describe("closing while the feed is 17% off the chain", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    __setUnknownLotExpForTest(0);
     mocks.isV17Account.mockReturnValue(true);
     mocks.deriveMatcherDelegate.mockReturnValue([key(48), 254]);
     mocks.sendTx.mockResolvedValue("sig");

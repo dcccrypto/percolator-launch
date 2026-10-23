@@ -19,6 +19,8 @@ import {
   decodeVaultLpState,
 } from "./decode";
 import { isDevnetV21Enabled } from "@/lib/v21/flag";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { fetchMarketTailsV22 } from "@/lib/v22/market-tails";
 import { deriveVaultLpExt } from "@/lib/v21/sdk";
 import { deriveLpVaultRegistryPda, deriveVaultLpState } from "./p3-ix";
 import { planResolvedExit, type ExitPortfolio, type ExitStep, type ResolvedExitPlan } from "./resolved-exit";
@@ -56,7 +58,7 @@ export async function loadResolvedExitSnapshot(p: {
   const vaultLpState = deriveVaultLpState(prog, market);
   // Devnet v2.1: the P2b ext (a bound 78 needs it at [7] once it exists); flag-gated, one extra read.
   const extKey = isDevnetV21Enabled() ? deriveVaultLpExt(prog, market) : null;
-  const [ri, si, nowSlot, pfs, xi] = await Promise.all([
+  const [ri, si, nowSlot, pfs, xi, tails] = await Promise.all([
     connection.getAccountInfo(registry, "confirmed"),
     connection.getAccountInfo(vaultLpState, "confirmed"),
     connection.getSlot("confirmed"),
@@ -65,6 +67,9 @@ export async function loadResolvedExitSnapshot(p: {
       filters: [{ memcmp: { offset: PORTFOLIO_PROVENANCE_MARKET_GROUP_OFF, bytes: market.toBase58() } }],
     }),
     extKey ? connection.getAccountInfo(extKey, "confirmed") : Promise.resolve(null),
+    // v2.2 (#3602): the 78 / 101 tails, applied in exitStepIxs. Flag off: no read, no tails. A failed read = none, as in
+    // withMarketTailsV22 (the step is then refused as before, never sent with a guess).
+    isDevnetV22Enabled() ? fetchMarketTailsV22(connection, prog, market).catch(() => undefined) : Promise.resolve(undefined),
   ]);
   const rd = ri && ri.owner.equals(prog) ? new Uint8Array(ri.data) : null;
   const bound = rd ? decodeLpVaultRegistryBound(rd) === true : false;
@@ -109,6 +114,7 @@ export async function loadResolvedExitSnapshot(p: {
     programId: prog,
     market,
     portfolios: refs,
+    ...(tails ? { tails } : {}),
     vault:
       bound && st
         ? {

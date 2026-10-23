@@ -3,7 +3,8 @@
  * Every trade / close / batch sets an explicit, simulation-sized ComputeBudget limit (P1 final:
  * CPI trades ~13k CU heavier; single-leg BatchTradeCpi on asset 1 = 216,269 CU > 200k default).
  */
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ComputeBudgetInstruction, ComputeBudgetProgram, Keypair, PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
@@ -56,6 +57,9 @@ function limitOf(tx: Transaction): number | null {
 }
 
 describe("sendTx computeUnitsFromSim", () => {
+  // These pin the sizing rule itself (flag off). The v2.2 floor on the signed limit: lib/v22/cu-floor-a3.test.ts.
+  beforeEach(() => __setDevnetV22ForTest(false));
+  afterEach(() => __setDevnetV22ForTest(null));
   function run(unitsConsumed: number | undefined, err: unknown = null) {
     const kp = Keypair.generate();
     const signed: Transaction[] = [];

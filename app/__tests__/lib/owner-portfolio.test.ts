@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import { Keypair, PublicKey } from "@solana/web3.js";
-import { V17_PORTFOLIO_ACCOUNT_LEN } from "@percolatorct/sdk";
+import { blankPortfolio } from "../helpers/v22-fixtures";
 import {
   findOwnerPortfolio,
   pickOwnerPortfolio,
@@ -26,6 +26,11 @@ vi.mock("@/lib/lpPortfolio", () => ({
   // Fixture marker: byte 9000 = 1 means "this is the market's LP portfolio".
   isLpPortfolio: (d: Uint8Array) => d[9000] === 1,
 }));
+// lib/owner-portfolio decodes through lib/v22/layout (flag off it delegates to the SDK parser, flag on it is VERSION-keyed): stub both.
+vi.mock("@/lib/v22/layout", async (orig) => ({
+  ...(await orig<typeof import("@/lib/v22/layout")>()),
+  parsePortfolio: (d: Uint8Array) => ({ owner: new PublicKey(d.slice(OWNER_PORTFOLIO_OWNER_OFF, OWNER_PORTFOLIO_OWNER_OFF + 32)) }),
+}));
 vi.mock("@percolatorct/sdk", async (orig) => {
   const real = await orig<typeof import("@percolatorct/sdk")>();
   return {
@@ -35,7 +40,7 @@ vi.mock("@percolatorct/sdk", async (orig) => {
 });
 
 function pf(o: PublicKey, lp = false) {
-  const d = Buffer.alloc(V17_PORTFOLIO_ACCOUNT_LEN);
+  const d = blankPortfolio(); // the ACTIVE layout: 9,563 B flag off, 10,603 B (VERSION 19) flag on
   o.toBuffer().copy(d, OWNER_PORTFOLIO_OWNER_OFF);
   if (lp) d[9000] = 1;
   return d;

@@ -54,7 +54,7 @@ describe("ResolvedExitPanelView (WP-8)", () => {
     );
     expect(getByTestId("earn-resolved-exit-status").textContent).toBe(COPY.resolvedExit.status);
     const eta = getByTestId("earn-resolved-exit-eta");
-    expect(eta.textContent).toMatch(/^Your 1,250.00 USDC will be ready to withdraw by about Thu 1 Oct, 12:10 \(in about 24 hours\)\.$/);
+    expect(eta.textContent).toMatch(/^Your 1,250.00 USDC can be withdrawn from about Thu 1 Oct, 12:10 \(in about 24 hours\) if the automation runs the steps; sooner if you finish them yourself\.$/);
     expect(container.textContent).not.toMatch(/slot|217000|217,000|216000/i);
   });
   it("without an Earn position: the generic line", () => {

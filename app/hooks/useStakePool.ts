@@ -1,5 +1,6 @@
 'use client';
 
+import { errorText } from "@/lib/error-text";
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { DEVNET_PROGRAM_IDS } from "@/lib/program-ids";
 import { PublicKey } from '@solana/web3.js';
@@ -446,7 +447,7 @@ export function useStakePool() {
     } catch (err) {
       if (stale()) return;
       console.error('[useStakePool] Failed to refresh:', err);
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorText(err));
     } finally {
       // Guarded by `stale()`: a superseded call's finally must not clear
       // loading right after a NEWER call (e.g. a market/wallet switch) just

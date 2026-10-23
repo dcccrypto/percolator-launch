@@ -36,7 +36,7 @@
     "buffer": "^6.0.3",
     "gsap": "^3.14.2",
     "lightweight-charts": "^5.2.0",
-    "next": "16.3.6",
+    "next": "16.3.8",
     "postgres": "^3.4.9",
     "react": "18.3.1",
     "react-dom": "18.3.1",

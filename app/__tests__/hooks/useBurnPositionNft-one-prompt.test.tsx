@@ -19,6 +19,8 @@ vi.mock("@/components/providers/SlabProvider", () => ({ useSlabState: () => SLAB
 vi.mock("@/hooks/usePositionNft", () => ({ usePositionNft: () => ({ nftMint: null, nftPdaAddress: null }) }));
 vi.mock("@/hooks/useToast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 vi.mock("@/lib/programAllowlist", () => ({ assertKnownProgram: () => undefined }));
+// The hook reads "is this a wrapper market?" through lib/v22/layout (flag off it delegates to the SDK parser, flag on it checks magic + VERSION).
+vi.mock("@/lib/v22/layout", async (orig) => ({ ...(await orig<object>()), isWrapperAccount: () => true }));
 vi.mock("@percolatorct/sdk", async (orig) => ({
   ...(await orig<object>()),
   isV17Account: () => true,

@@ -115,15 +115,14 @@ describe("MobileTradeBand vs dialogs at 375px", () => {
     hidden.remove();
   });
 
-  it("the inline trade-page overlays declare themselves as modal dialogs", () => {
-    // Add Margin and the oracle details panel render inline (not portaled), so
-    // they must carry aria-modal for the band to see them.
+  it("the trade-page overlays declare themselves as modal dialogs", () => {
+    // The oracle details panel renders its own overlay, so it must carry aria-modal for the band to see it.
     const root = path.resolve(__dirname, "../..");
-    for (const f of ["components/trade/PositionPanel.tsx", "components/oracle/OracleDetailsPanel.tsx"]) {
-      expect(readFileSync(path.join(root, f), "utf8"), f).toMatch(/aria-modal="true"/);
+    expect(readFileSync(path.join(root, "components/oracle/OracleDetailsPanel.tsx"), "utf8")).toMatch(/aria-modal="true"/);
+    // The NFT Wrap sheet and Add Margin render through the shared Modal, which carries aria-modal itself.
+    for (const f of ["components/trade/PositionNftMenu.tsx", "components/trade/AddMarginModal.tsx"]) {
+      expect(readFileSync(path.join(root, f), "utf8"), f).toMatch(/<Modal[\s>]/);
     }
-    // The NFT Wrap sheet renders through the shared Modal, which carries aria-modal itself.
-    expect(readFileSync(path.join(root, "components/trade/PositionNftMenu.tsx"), "utf8")).toMatch(/<Modal[\s>]/);
     expect(readFileSync(path.join(root, "components/ui/Modal.tsx"), "utf8")).toMatch(/aria-modal="true"/);
   });
 });

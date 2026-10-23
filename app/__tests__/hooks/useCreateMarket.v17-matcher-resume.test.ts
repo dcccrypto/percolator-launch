@@ -334,6 +334,9 @@ describe('useCreateMarket v17 matcher resume PoC', () => {
     mocks.getAccountInfo.mockReset();
 
     mocks.getAccountInfo
+      // A resume first reads the slab's own length: it keeps the asset-slot capacity it was created with
+      // (this fixture is not a market-sized account, so nothing is adopted and the defaults stand).
+      .mockResolvedValueOnce(slabAccount)
       // Initial Step 2 slab lookup.
       .mockResolvedValueOnce(slabAccount)
       // Matcher-context readiness lookup.

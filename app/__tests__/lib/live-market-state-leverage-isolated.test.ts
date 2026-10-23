@@ -31,12 +31,13 @@ vi.mock("@/lib/v17-engine-config", () => ({
 }));
 
 import { readLiveMarketStates } from "@/lib/live-market-state";
+import { modeFixtures } from "../helpers/v22-fixtures";
 
 const KEY = "AzagguvrWmRgcBpsKuqomW7Yb1YUUd6UzcrkiRsqdhr";
 
 describe("readLiveMarketStates: a failed leverage parse never hides a market", () => {
   it("keeps the market complete and priced, with maxLeverage null", async () => {
-    const connection = { getMultipleAccountsInfo: vi.fn(async () => [{ data: Buffer.alloc(4096) }]) } as unknown as Connection;
+    const connection = { getMultipleAccountsInfo: vi.fn(async () => [{ data: Buffer.from(modeFixtures().market) }]) } as unknown as Connection;
     const out = await readLiveMarketStates([KEY], connection);
     const s = out.get(KEY);
     expect(s?.isComplete).toBe(true);

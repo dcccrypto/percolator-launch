@@ -15,9 +15,11 @@ vi.mock("@/lib/v18-wire", async (orig) => ({
   fetchPortfolioIdentity: vi.fn(async () => ({ portfolioId: 5n, matcherSequence: 0n, positionEpoch: 2n })),
 }));
 import { closeViaRebalanceReduce } from "@/lib/limits/rebalance-close";
+import { blankPortfolio } from "../../helpers/v22-fixtures";
+
 
 function portfolio(q: bigint): Buffer {
-  const d = Buffer.alloc(9579);
+  const d = blankPortfolio();
   if (q !== 0n) {
     const l = C.PF_LEGS;
     d[l] = 1;

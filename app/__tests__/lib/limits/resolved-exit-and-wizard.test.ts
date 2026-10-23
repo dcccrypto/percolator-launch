@@ -17,33 +17,33 @@ import { buildLpCrankIx, decideLpLeg } from "@/lib/pre-resolve";
 import { closeLimitNotice } from "@/lib/limits/ticket";
 import { UNLIMITED_CAPACITY } from "@/lib/marketCapacity";
 import { ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { afterLegsShift, blankMarket, blankPortfolio } from "../../helpers/v22-fixtures";
+import { marketOffsets } from "@/lib/v22/market-offsets";
+
 
 const k = () => Keypair.generate().publicKey;
 function marketBytes(o: { mode: number; cTot?: bigint; count?: bigint; resolvedSlot?: bigint; delay?: bigint }): Uint8Array {
-  const d = new Uint8Array(C.MARKET_GROUP_OFF + C.MARKET_GROUP_LEN);
+  const d = blankMarket();
   const v = new DataView(d.buffer);
-  v.setBigUint64(0, C.WRAPPER_MAGIC, true);
-  v.setUint16(8, C.WRAPPER_VERSION_V18, true);
-  d[10] = C.KIND_MARKET_ACCOUNT;
-  const g = C.MARKET_GROUP_OFF;
-  d[g + C.H_MODE] = o.mode;
-  v.setBigUint64(g + C.H_C_TOT, o.cTot ?? 0n, true);
-  v.setBigUint64(g + C.H_MATERIALIZED_PORTFOLIO_COUNT, o.count ?? 0n, true);
-  v.setBigUint64(g + C.H_RESOLVED_SLOT, o.resolvedSlot ?? 100n, true);
+  const M = marketOffsets(d);
+  d[M.hdr(C.H_MODE)] = o.mode;
+  v.setBigUint64(M.hdr(C.H_C_TOT), o.cTot ?? 0n, true);
+  v.setBigUint64(M.hdr(C.H_MATERIALIZED_PORTFOLIO_COUNT), o.count ?? 0n, true);
+  v.setBigUint64(M.hdr(C.H_RESOLVED_SLOT), o.resolvedSlot ?? 100n, true);
   v.setBigUint64(C.HEADER_LEN + C.WCFG_FORCE_CLOSE_DELAY_SLOTS, o.delay ?? 0n, true);
   return d;
 }
 function portfolioBytes(o: { capital?: bigint; bitmap?: bigint; receipt?: [boolean, boolean]; rebalanceLock?: boolean }): Uint8Array {
-  const d = new Uint8Array(C.PF_RESOLVED_PAYOUT_RECEIPT + 66);
+  const d = new Uint8Array(blankPortfolio());
   const v = new DataView(d.buffer);
   d[10] = C.KIND_PORTFOLIO;
   v.setBigUint64(C.PF_CAPITAL, o.capital ?? 0n, true);
   v.setBigUint64(C.PF_ACTIVE_BITMAP, o.bitmap ?? 0n, true);
   if (o.receipt) {
-    d[C.PF_RESOLVED_PAYOUT_RECEIPT + C.RECEIPT_PRESENT] = o.receipt[0] ? 1 : 0;
-    d[C.PF_RESOLVED_PAYOUT_RECEIPT + C.RECEIPT_FINALIZED] = o.receipt[1] ? 1 : 0;
+    d[C.PF_RESOLVED_PAYOUT_RECEIPT + afterLegsShift() + C.RECEIPT_PRESENT] = o.receipt[0] ? 1 : 0;
+    d[C.PF_RESOLVED_PAYOUT_RECEIPT + afterLegsShift() + C.RECEIPT_FINALIZED] = o.receipt[1] ? 1 : 0;
   }
-  if (o.rebalanceLock) d[C.PF_REBALANCE_LOCK] = 1;
+  if (o.rebalanceLock) d[C.PF_REBALANCE_LOCK + afterLegsShift()] = 1;
   return d;
 }
 const pf = (key: string, o: Parameters<typeof portfolioBytes>[0], x: Partial<ExitPortfolio> = {}): ExitPortfolio => {

@@ -17,7 +17,12 @@ import {
   createAssociatedTokenAccountInstruction,
 } from '@solana/spl-token';
 import { sendTx } from '@/lib/tx';
+import { isDevnetV22Enabled } from '@/lib/v22/flag';
+import { readFirstLossPool } from '@/lib/v22/stake-v5';
+import { ACCOUNTS_STAKE_WITHDRAW_V5, deriveInsuranceUnitsV22, stakeMetasV5 } from '@/lib/v22/sdk';
+import { stakeErrorMessage } from '@/lib/earnErrors';
 import { getConfig } from '@/lib/config';
+import { invalidateWalletBalance } from '@/lib/wallet-balance-invalidation';
 
 export interface StakeWithdrawPoolParams {
   /** The slab (market) address this pool belongs to. Used for PDA derivation. */
@@ -146,7 +151,24 @@ export function useStakeWithdrawByPool({ slabAddress, collateralMint }: StakeWit
 
         // Build stake withdraw instruction
         const data = Buffer.from(encodeStakeWithdraw(lpAmount));
-        const keys = withdrawAccounts({
+        // Devnet v2.2 (flag-gated): a first-loss v5 pool takes the 14-account withdraw (market + insurance units +
+        // wrapper program). Pays only from the pool's liquid part; the program refuses more with 36.
+        const v5 = isDevnetV22Enabled() ? readFirstLossPool(new Uint8Array(poolInfo.data)) : null;
+        const keys = v5
+          ? stakeMetasV5(ACCOUNTS_STAKE_WITHDRAW_V5, {
+              user: wallet.publicKey,
+              pool,
+              userLp: userLpAta,
+              lpMint,
+              vault,
+              userCollateral: userCollateralAta,
+              vaultAuthority: vaultAuth,
+              deposit: depositPda,
+              market: v5.slab,
+              insuranceUnits: deriveInsuranceUnitsV22(v5.percolatorProgram, v5.slab)[0],
+              wrapperProgram: v5.percolatorProgram,
+            })
+          : withdrawAccounts({
           user: wallet.publicKey,
           pool,
           userLpAta,
@@ -167,10 +189,13 @@ export function useStakeWithdrawByPool({ slabAddress, collateralMint }: StakeWit
         );
 
         const sig = await sendTx({ connection, wallet, instructions });
+        // The collateral is back in the wallet: /stake's Balance / MAX re-read it.
+        invalidateWalletBalance();
         return sig;
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        setError(msg);
+        // #26: the plain line, never the raw simulation JSON / program logs (kept in the console).
+        console.warn('[stake] transaction failed:', e);
+        setError(stakeErrorMessage(e));
         throw e;
       } finally {
         inflightRef.current = false;

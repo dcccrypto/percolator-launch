@@ -1,12 +1,15 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { ButtonLink } from "@/components/ui/Button";
-import { GlassCard } from "@/components/ui/GlassCard";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { LiveMarketRail } from "@/components/landing/LiveMarketRail";
 import { MAX_LEVERAGE_X } from "@/lib/market-params";
+import { ADMIN_BURN_COPY } from "@/lib/admin-burn-copy";
 import { TrendingTokensRail } from "@/components/landing/TrendingTokensRail";
+import { InfoTabs } from "@/components/waitlist/InfoTabs";
+import { GradientText } from "@/components/ui/GradientText";
 
 const ARROW = (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
@@ -22,13 +25,13 @@ const PROOF_POINTS = [
   },
   {
     index: "02",
-    title: "Admin key can be burned",
-    body: "Creators can permanently renounce admin control after launch. Once burned, no one can change config, pause the market, or touch its funds — it runs on its own code.",
+    title: "Creator admin key can be burned",
+    body: ADMIN_BURN_COPY.landing,
   },
   {
     index: "03",
-    title: "Deploy in ~60s",
-    body: "Launch a perpetual market for any Solana token in one on-chain transaction. No listing committee, no gatekeeper.",
+    title: "Launch in about a minute",
+    body: "Open a perpetual market for any Solana token with an active DEX pool. No listing committee, no gatekeeper.",
   },
   {
     index: "04",
@@ -46,7 +49,7 @@ const HOW_IT_WORKS = [
   {
     step: "02",
     title: "Pick a market",
-    body: "Trade any of the live markets below, or launch your own for any Solana token.",
+    body: "Trade any live market, or launch your own for a Solana token with an active DEX pool.",
   },
   {
     step: "03",
@@ -58,17 +61,17 @@ const HOW_IT_WORKS = [
 export default function Home() {
   return (
     <div className="relative">
-      {/* ─── Hero ─── */}
-      <section className="mx-auto flex min-h-[calc(72dvh-3.5rem)] max-w-[1100px] flex-col justify-center px-6 py-20 sm:px-8">
-        <ScrollReveal>
+      {/* ─── Hero ─── (CSS reveal, not ScrollReveal: it paints from the server HTML; see .reveal-up) */}
+      <section className="mx-auto flex min-h-[min(calc(72dvh-3.5rem),32rem)] max-w-[1100px] flex-col justify-center px-6 py-20 sm:px-8">
+        <div className="reveal-up">
           <div className="mb-5 text-[11px] font-medium uppercase tracking-[0.25em] text-[var(--accent-text)]">
-            // v17 · solana devnet
+            // solana devnet
           </div>
-        </ScrollReveal>
+        </div>
 
-        <ScrollReveal delay={0.06}>
+        <div className="reveal-up" style={{ animationDelay: "0.06s" }}>
           <h1
-            className="max-w-[16ch] text-balance text-[var(--text)]"
+            className="max-w-[16ch] text-balance text-[var(--text)] sm:max-w-none xl:whitespace-nowrap xl:!text-[3.25rem]"
             style={{
               fontFamily: "var(--font-display)",
               fontSize: "var(--fs-display)",
@@ -77,18 +80,22 @@ export default function Home() {
               fontWeight: 600,
             }}
           >
-            Perpetual futures that can&apos;t rug you.
+            Perps on Solana tokens;{" "}
+            <br className="hidden sm:inline xl:hidden" />
+            <GradientText variant="headline">before anyone else</GradientText>
+            .
           </h1>
-        </ScrollReveal>
+        </div>
 
-        <ScrollReveal delay={0.12}>
-          <p className="mt-6 max-w-[52ch] text-[15px] leading-relaxed text-[var(--text-secondary)]">
-            Every market carries its own insurance fund, prices off live Solana DEX pools, and
-            can burn its own admin key. Fully on-chain, open to anyone, and open to any token.
+        <div className="reveal-up" style={{ animationDelay: "0.12s" }}>
+          <p className="mt-6 max-w-[52ch] text-[15px] sm:max-w-[78ch] leading-relaxed text-[var(--text-secondary)]">
+            Any Solana token with an active DEX pool can have a leveraged market in about a minute. Trade it
+            long or short, or deposit into its Earn vault for a share of its trading fees. This is devnet:
+            everything runs on free test funds.
           </p>
-        </ScrollReveal>
+        </div>
 
-        <ScrollReveal delay={0.18}>
+        <div className="reveal-up" style={{ animationDelay: "0.18s" }}>
           <div className="mt-10 flex flex-wrap items-center gap-6">
             <ButtonLink href="/markets" variant="primary" size="lg" iconRight={ARROW}>
               Start trading
@@ -103,19 +110,21 @@ export default function Home() {
               </span>
             </Link>
           </div>
-        </ScrollReveal>
+        </div>
       </section>
 
       {/* ─── Live market rail ─── */}
-      <section className="relative mx-auto mt-28 max-w-[1100px] px-6 pb-20 sm:mt-40 sm:px-8">
+      <section className="relative mx-auto mt-20 max-w-[1100px] px-6 pb-20 sm:mt-40 sm:px-8">
         {/* Character banner floats above the whole section (heading + table) so it
             never overlaps the links or columns. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        {/* next/image + priority: on mobile this is the page's LCP element. A 1626 px source shown at
+            ~84% of a phone's width; the srcset serves a right-sized copy and priority preloads it. */}
+        <Image
           src="/landing/char-markets.webp"
           width={1626}
           height={369}
-          decoding="async"
+          priority
+          sizes="(min-width: 640px) min(52vw, 560px), 84vw"
           alt=""
           aria-hidden="true"
           className="pointer-events-none z-20 mx-auto -mb-2 block h-auto w-[84%] drop-shadow-[0_14px_26px_rgba(0,0,0,0.55)] sm:absolute sm:bottom-full sm:left-1/2 sm:mx-0 sm:mb-1.5 sm:w-[min(52%,560px)] sm:-translate-x-1/2"
@@ -143,13 +152,11 @@ export default function Home() {
 
       {/* ─── Trending on Solana DEXs (third-party tokens without a Percolator market yet) ─── */}
       <section className="relative mx-auto mt-28 max-w-[1100px] px-6 pb-20 sm:mt-40 sm:px-8">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        <Image
           src="/landing/char-trending.webp"
           width={1672}
           height={337}
-          loading="lazy"
-          decoding="async"
+          sizes="(min-width: 640px) min(52vw, 560px), 84vw"
           alt=""
           aria-hidden="true"
           className="pointer-events-none z-20 mx-auto -mb-2 block h-auto w-[84%] drop-shadow-[0_14px_26px_rgba(0,0,0,0.55)] sm:absolute sm:bottom-full sm:right-[3%] sm:mx-0 sm:mb-1.5 sm:w-[min(52%,560px)]"
@@ -166,47 +173,46 @@ export default function Home() {
         </ScrollReveal>
       </section>
 
-      {/* ─── Proof band ─── */}
-      <section className="mx-auto max-w-[1100px] px-6 pb-20 sm:px-8">
-        <ScrollReveal>
-          <h2 className="mb-6 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent-text)]">
-            // why it&apos;s different
-          </h2>
-        </ScrollReveal>
-        {/* Cards are direct children of ScrollReveal (grid classes live on
-            ScrollReveal itself) — `stagger` only staggers direct children;
-            wrapping them in an extra grid <div> made `el.children.length`
-            always 1, so the stagger silently no-op'd and every card faded
-            in as one block. */}
-        <ScrollReveal stagger={0.08} className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {PROOF_POINTS.map((p) => (
-            <GlassCard key={p.index} padding="md" elevation="sm">
-              <div className="mb-3 font-mono text-[11px] text-[var(--text-secondary)]">{p.index}</div>
-              <h3 className="mb-2 text-[13px] font-semibold leading-snug text-[var(--text)]">{p.title}</h3>
-              <p className="text-[12px] leading-relaxed text-[var(--text-secondary)]">{p.body}</p>
-            </GlassCard>
-          ))}
-        </ScrollReveal>
-      </section>
-
-      {/* ─── How it works ─── */}
+      {/* ─── More: why it's different / how it works, closed until clicked ─── */}
       <section className="mx-auto max-w-[1100px] px-6 pb-24 sm:px-8">
         <ScrollReveal>
-          <h2 className="mb-6 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent-text)]">
-            // how it works
+          <h2 className="mb-4 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent-text)]">
+            // about percolator
           </h2>
-        </ScrollReveal>
-
-        {/* Steps are direct children of ScrollReveal — see proof-band comment
-            above for why the stagger needs this instead of a nested grid <div>. */}
-        <ScrollReveal stagger={0.08} className="grid grid-cols-1 gap-8 sm:grid-cols-3">
-          {HOW_IT_WORKS.map((s) => (
-            <div key={s.step} className="border-t border-[var(--border)] pt-4">
-              <div className="mb-2 font-mono text-[11px] text-[var(--accent-text)]">{s.step}</div>
-              <h3 className="mb-1.5 text-[14px] font-semibold text-[var(--text)]">{s.title}</h3>
-              <p className="text-[13px] leading-relaxed text-[var(--text-secondary)]">{s.body}</p>
-            </div>
-          ))}
+          <InfoTabs
+            tabs={[
+              {
+                id: "why",
+                label: "Why it's different",
+                content: (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    {PROOF_POINTS.map((p) => (
+                      <div key={p.index} className="rounded-md border border-[var(--border)] p-4">
+                        <div className="mb-3 font-mono text-[11px] text-[var(--text-secondary)]">{p.index}</div>
+                        <h3 className="mb-2 text-[13px] font-semibold leading-snug text-[var(--text)]">{p.title}</h3>
+                        <p className="text-[12px] leading-relaxed text-[var(--text-secondary)]">{p.body}</p>
+                      </div>
+                    ))}
+                  </div>
+                ),
+              },
+              {
+                id: "how",
+                label: "How it works",
+                content: (
+                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
+                    {HOW_IT_WORKS.map((s) => (
+                      <div key={s.step} className="border-t border-[var(--border)] pt-4">
+                        <div className="mb-2 font-mono text-[11px] text-[var(--accent-text)]">{s.step}</div>
+                        <h3 className="mb-1.5 text-[14px] font-semibold text-[var(--text)]">{s.title}</h3>
+                        <p className="text-[13px] leading-relaxed text-[var(--text-secondary)]">{s.body}</p>
+                      </div>
+                    ))}
+                  </div>
+                ),
+              },
+            ]}
+          />
         </ScrollReveal>
 
         <ScrollReveal delay={0.15}>

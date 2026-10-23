@@ -18,6 +18,7 @@
  * held by the stake program (see stake threat model for the second-mover escape hatch).
  */
 
+import { errorText } from "@/lib/error-text";
 import { useCallback, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
@@ -93,7 +94,7 @@ export function useUpdateAssetAuthority() {
         const ix = buildIx({ programId: params.programId, keys, data });
         return await sendTx({ connection, wallet, instructions: [ix] });
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
+        const msg = errorText(e);
         setError(msg);
         throw e;
       } finally {

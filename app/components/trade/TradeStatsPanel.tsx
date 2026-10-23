@@ -2,11 +2,13 @@
 
 import { FC } from "react";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
-import { formatStatValue, formatTokenAmount } from "@/lib/format";
+import { formatStatValue } from "@/lib/format";
 import type { TraderStatsResponse } from "@/hooks/useTraderStats";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import {
   FEES_UNRECORDED_NOTE,
   feesPaidDisplay,
+  gateVolumeForV22,
   volumeDisplay,
   volumeNote,
 } from "@/lib/trade-stats-display";
@@ -56,8 +58,8 @@ function StatCell({
 
 function formatVolume(rawStr: string): string {
   try {
-    const raw = BigInt(rawStr);
-    return formatTokenAmount(raw, 6);
+    // totalVolume is micro-USD too: the route sums |size| x USD price (#76; it was a bare 6-dp number).
+    return formatStatValue(BigInt(rawStr), "currency");
   } catch {
     return "—";
   }
@@ -105,7 +107,8 @@ export const TradeStatsPanel: FC<TradeStatsPanelProps> = ({
   error,
   onRetry,
 }) => {
-  if (loading) {
+  // A reload keeps the last stats on screen; the skeleton is for the first load only.
+  if (loading && !stats) {
     return (
       <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-4">
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -120,7 +123,8 @@ export const TradeStatsPanel: FC<TradeStatsPanelProps> = ({
     );
   }
 
-  if (error || !stats || stats.totalTrades === 0) {
+  // An error with stats already on screen keeps them (a failed background reload).
+  if (!stats || stats.totalTrades === 0) {
     // If no trades yet, skip rendering (table will show empty state)
     if (!error && (!stats || stats.totalTrades === 0)) return null;
     return (
@@ -145,10 +149,10 @@ export const TradeStatsPanel: FC<TradeStatsPanelProps> = ({
   // above make `stats` non-null, so both cells read one decision rather than
   // re-deriving it inline.
   const fees = feesPaidDisplay(stats.totalTrades, stats.feesRecorded, stats.totalFees);
-  const volume = volumeDisplay(
-    stats.totalTrades,
-    stats.tradesMissingPrice,
-    stats.totalVolume,
+  const volume = gateVolumeForV22(
+    volumeDisplay(stats.totalTrades, stats.tradesMissingPrice, stats.totalVolume),
+    isDevnetV22Enabled(),
+    process.env.NEXT_PUBLIC_V22_INDEXER_LOT_AWARE === "1",
   );
 
   const longPct =
@@ -185,7 +189,7 @@ export const TradeStatsPanel: FC<TradeStatsPanelProps> = ({
             value={
               volume.kind === "no-trades"
                 ? "—"
-                : volume.kind === "unknown"
+                : volume.kind === "unknown" || volume.kind === "unverified"
                   ? "—"
                   : formatVolume(volume.atoms)
             }
@@ -205,10 +209,10 @@ export const TradeStatsPanel: FC<TradeStatsPanelProps> = ({
           />
         </div>
 
-        {/* Long / short split */}
+        {/* Buy / sell split: fills, not positions (closing a long is a sell, #3314) */}
         <div className="bg-[var(--panel-bg)] p-3.5">
           <StatCell
-            label="Long / Short Split"
+            label="Buy / Sell Split"
             value={
               <span>
                 <span className="text-[var(--long)]">{stats.longTrades.toLocaleString()}</span>
@@ -216,11 +220,22 @@ export const TradeStatsPanel: FC<TradeStatsPanelProps> = ({
                 <span className="text-[var(--short)]">{stats.shortTrades.toLocaleString()}</span>
               </span>
             }
-            sub={`${longPct}% long bias`}
+            sub={`${longPct}% buys`}
           />
           {longShortBar(stats.longTrades, stats.shortTrades)}
         </div>
       </div>
+      {/* A background reload failed: the numbers above are the last good ones, so say so. */}
+      {error && (
+        <div className="flex items-center justify-between border-t border-[var(--border)] px-4 py-2">
+          <p className="text-[10px] text-[var(--text-muted)]">Couldn&apos;t refresh stats; showing the last loaded numbers.</p>
+          {onRetry && (
+            <button onClick={onRetry} className="text-[10px] text-[var(--accent)] hover:underline">
+              Retry
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 };

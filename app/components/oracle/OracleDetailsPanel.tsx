@@ -1,6 +1,8 @@
 "use client";
 
 import { FC, useEffect, useCallback, useRef, useState } from "react";
+import { useDialogFocus } from "@/hooks/useDialogFocus";
+import { createPortal } from "react-dom";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useLivePrice } from "@/hooks/useLivePrice";
@@ -43,6 +45,7 @@ export const OracleDetailsPanel: FC<OracleDetailsPanelProps> = ({ onClose }) => 
   const panelRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const [isClosing, setIsClosing] = useState(false);
+  useDialogFocus(overlayRef);
 
   // Same pattern as TradeConfirmationModal — keep onClose accessible via ref
   // so the mount-time Escape listener always invokes the latest closure
@@ -86,10 +89,13 @@ export const OracleDetailsPanel: FC<OracleDetailsPanelProps> = ({ onClose }) => 
   // admin authority (PERC-371). No Pyth publishers.
   const publishers = dynamicPublishers;
 
-  return (
+  // Portaled to <body> at z-[60], like the trade page's order sheet: inline, the analytics page's
+  // animate-fade-in wrapper capped this layer, and MobileBottomNav (z-50, later in the DOM)
+  // covered the bottom of the mobile sheet.
+  return createPortal(
     <div
       ref={overlayRef}
-      className={`fixed inset-0 z-50 ${isClosing ? "animate-[fade-out_200ms_ease-in_forwards]" : "animate-[fade-in_200ms_ease-out]"}`}
+      className={`fixed inset-0 z-[60] ${isClosing ? "animate-[fade-out_200ms_ease-in_forwards]" : "animate-[fade-in_200ms_ease-out]"}`}
       onClick={handleOverlayClick}
       style={{ backgroundColor: "rgba(0,0,0,0.4)" }}
       role="dialog"
@@ -167,7 +173,8 @@ export const OracleDetailsPanel: FC<OracleDetailsPanelProps> = ({ onClose }) => 
           onClose={handleClose}
         />
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
 
@@ -221,8 +228,10 @@ function PanelContent({
           </div>
         </div>
         <button
+          type="button"
           onClick={onClose}
-          className="flex h-6 w-6 items-center justify-center rounded-sm text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-elevated)] hover:text-[var(--text)]"
+          aria-label="Close oracle details"
+          className="flex h-11 w-11 lg:h-6 lg:w-6 items-center justify-center rounded-sm text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-elevated)] hover:text-[var(--text)]"
         >
           ✕
         </button>

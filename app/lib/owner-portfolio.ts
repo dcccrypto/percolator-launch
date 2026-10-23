@@ -21,6 +21,7 @@
 import type { Connection, PublicKey } from "@solana/web3.js";
 import { parsePortfolioV17 } from "@percolatorct/sdk";
 import { isLpPortfolio } from "@/lib/lpPortfolio";
+import { parsePortfolio } from "@/lib/v22/layout";
 
 /** First 8 bytes of every v17/v18 portfolio account (PERCV16\0, little-endian). */
 export const OWNER_PORTFOLIO_MAGIC = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
@@ -66,7 +67,7 @@ export function pickOwnerPortfolio(results: readonly ScannedAccount[], owner: Pu
     if (isLpPortfolio(data)) continue;
     let ownerMatches = false;
     try {
-      ownerMatches = parsePortfolioV17(data).owner.equals(owner);
+      ownerMatches = parsePortfolio(data).owner.equals(owner);
     } catch {
       ownerMatches = false; // not a decodable portfolio: never select it
     }

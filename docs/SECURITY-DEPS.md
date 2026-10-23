@@ -46,6 +46,11 @@ Verified linting still passes with the override.
 
 ## Remaining Vulnerabilities — Risk Accepted
 
+### stream-json <=3.4.0 (moderate, ignored: GHSA-528h-pc64-c93x)
+
+- **Path:** `@solana/web3.js -> jayson 4.3.0 -> stream-json 1.9.1`
+- **Why accepted:** `@solana/web3.js` only loads `jayson/lib/client/browser`; the stream-json code path (server-side JSON streaming) is unreachable. Overriding to stream-json >=3.5.0 is NOT an option: 3.x is ESM-only and breaks `require('jayson')` / `jayson/lib/utils` (MODULE_NOT_FOUND) on jayson 4.3.0 (`^1.9.1`). Mirrored in `pnpm.auditConfig.ignoreGhsas`.
+
 ### bigint-buffer ≤1.1.5 — Buffer Overflow (HIGH)
 
 - **Advisory:** GHSA-3gc7-fjrx-p6mg / CVE-2025-3194

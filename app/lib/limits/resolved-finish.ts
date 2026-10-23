@@ -10,6 +10,7 @@
  * the end, so the withdrawal's pending card (WP-4) takes it from there.
  * Pure planning + an injected driver (no RPC here).
  */
+import { errorText } from "@/lib/error-text";
 import type { PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
 import { buildBatchTx } from "@/lib/tx";
 import { formatTokenAmount } from "@/lib/format";
@@ -17,6 +18,7 @@ import type { ExitPortfolio, ExitStep, ResolvedExitPlan } from "./resolved-exit"
 import { exitStepsCu, looksEmpty } from "./resolved-exit";
 import { exitStepIxs, type ExitIxContext } from "./resolved-exit-ixs";
 import { finishFeeSol } from "./resolved-eta";
+import { earnRequestQuoteAtoms } from "./earn-ixs";
 
 /** How many copies of a repeatable step are pre-signed ("settle-vault-lp" = the 101 close step;
  *  "settle-vault-lp-topup" = 101(1), repeated until the vault LP's receipt is final; the "retry"
@@ -201,7 +203,7 @@ export async function runFinish<Tx>(items: readonly { item: FinishItem; tx: Tx }
       if (item.step.kind === "earn-request") requested = true;
     } catch (e) {
       failed++;
-      if (/blockhash not found|block height exceeded|expired/i.test(e instanceof Error ? e.message : String(e))) {
+      if (/blockhash not found|block height exceeded|expired/i.test(errorText(e))) {
         stale = true;
         break;
       }
@@ -255,13 +257,23 @@ export function buildFinishTxs(
  * pending card owns that withdrawal).
  */
 export function earnExitProps(
-  s: { userLpBalance: bigint; userRedeemableValue: bigint; pendingRedemptionShares: bigint },
+  s: {
+    userLpBalance: bigint;
+    userRedeemableValue: bigint;
+    pendingRedemptionShares: bigint;
+    splitPot?: { navAtoms: bigint; totalShares: bigint } | null;
+    backingNavAtoms?: bigint;
+    lpSupply?: bigint;
+  },
   decimals: number,
   symbol: string,
-): { earnAmount: string | null; requestableShares: bigint } {
-  if (s.userLpBalance <= 0n) return { earnAmount: null, requestableShares: 0n };
+): { earnAmount: string | null; requestableShares: bigint; requestQuoteAtoms: bigint | null } {
+  if (s.userLpBalance <= 0n) return { earnAmount: null, requestableShares: 0n, requestQuoteAtoms: null };
+  const requestableShares = s.pendingRedemptionShares > 0n ? 0n : s.userLpBalance;
   return {
     earnAmount: `${formatTokenAmount(s.userRedeemableValue, decimals, 2)} ${symbol}`,
-    requestableShares: s.pendingRedemptionShares > 0n ? 0n : s.userLpBalance,
+    requestableShares,
+    // AUD-S1-18: the floored 76 in the finish batch takes its floor from this quote.
+    requestQuoteAtoms: earnRequestQuoteAtoms(requestableShares, s),
   };
 }

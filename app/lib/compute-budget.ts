@@ -12,6 +12,8 @@
  *   - if the simulated need is ABOVE `cap`, the limit follows the need (never past the 1.4M
  *     transaction maximum) — a tx sized below what it demonstrably uses would only fail.
  */
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+
 export const MAX_TX_COMPUTE_UNITS = 1_400_000;
 export const CU_PER_LEG_CAP = 400_000;
 // Live 2026-10-01 (PERC add, sig 632JyLFS…): simulated ~248k, landed needing >290k (+17%) — the
@@ -42,4 +44,19 @@ export function sizeComputeUnitLimit(consumed: number | null | undefined, s: CuS
   const sized = Math.max(floor, want);
   if (sized <= cap) return sized;
   return Math.min(MAX_TX_COMPUTE_UNITS, sized);
+}
+
+/**
+ * v2.2 QA A-3: the floor of every SIGNED limit on a v2.2 build. A band market's simulated cost is not a bound on its
+ * landed cost: the swordcat close simulated ~367k (limit 1.3x + 50k = 527,696) and landed needing 527,222+ of it
+ * (ProgramFailedToComplete, tx 46xL2VCt…); its retry simulated ~582k and landed at 525k. Measured v2.2 single-trade
+ * txs: open 364-396k, close 525-542k, crank + refresh + close 702k. 800k clears all of them; the cost is only the
+ * priority fee on the requested units. Flag off: unchanged.
+ */
+export const V22_MIN_SIGNED_CU = 800_000;
+
+/** The limit to SIGN: sizeComputeUnitLimit, raised to V22_MIN_SIGNED_CU on a v2.2 build, never past 1.4M. */
+export function signedComputeUnitLimit(consumed: number | null | undefined, s: CuSizing, v22: boolean = isDevnetV22Enabled()): number {
+  const n = sizeComputeUnitLimit(consumed, s);
+  return v22 ? Math.min(MAX_TX_COMPUTE_UNITS, Math.max(n, V22_MIN_SIGNED_CU)) : n;
 }

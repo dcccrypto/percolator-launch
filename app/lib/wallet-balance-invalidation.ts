@@ -1,5 +1,6 @@
 /**
- * "The connected wallet's token balance just changed" — sent by the faucets, read by the
+ * "The connected wallet's token balance just changed" — sent by the faucets and the stake
+ * deposit / withdraw hooks (useStake{Deposit,Withdraw}ByPool), read by /stake's Balance and the
  * components that gate on the wallet's collateral balance (DepositWithdrawCard's "Create
  * Account", OrderTicket's "Get Tokens to Trade"). Each of those reads the balance once in an
  * effect, and a faucet claim changed none of their deps, so a funded wallet kept reading 0

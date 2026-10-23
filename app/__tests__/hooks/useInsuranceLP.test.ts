@@ -44,6 +44,9 @@ vi.mock("@/lib/programAllowlist", () => ({
 
 vi.mock("@percolatorct/sdk", async () => {
   const { PublicKey: PK } = await import("@solana/web3.js");
+  // The floored tag-76 request (AUD-S1-18) is encoded by lib/v22/sdk/v22-wire, which builds its
+  // bytes with the SDK's byte helpers: keep those real.
+  const real = await vi.importActual<typeof import("@percolatorct/sdk")>("@percolatorct/sdk");
   // NOTE: vi.mock factories are hoisted — we must use dynamic import for external deps.
   const lpMint = new PK("9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin");
   const vaultAuth = new PK("11111111111111111111111111111111"); // all-zeros via string (valid)
@@ -53,6 +56,12 @@ vi.mock("@percolatorct/sdk", async () => {
   const escrowPda = new PK("4mB4qULhrn1PcDCTVfE3XPfKvGiCTiXhbmzuUwrQZzJj"); // stable 32-byte pubkey
   const progId = new PK("5BZWY6XWPxuWFxs2nPCLLsVaKRWZVnzZh3FkJDLJBkJf");
   return {
+    concatBytes: real.concatBytes,
+    encU8: real.encU8,
+    encU16: real.encU16,
+    encU32: real.encU32,
+    encU64: real.encU64,
+    encU128: real.encU128,
     deriveInsuranceLpMint: vi.fn().mockReturnValue([lpMint, 255]),
     deriveVaultAuthority: vi.fn().mockReturnValue([vaultAuth, 254]),
     deriveLpVaultRegistry: vi.fn().mockReturnValue([registryPda, 253]),
@@ -95,6 +104,18 @@ vi.mock("@percolatorct/sdk", async () => {
   };
 });
 
+// The hook decodes the registry and the redemption ticket through lib/v22/records (flag off it delegates to the SDK parsers, flag on it is the
+// VERSION-keyed port). Route that seam to the SDK mocks above, so `vi.mocked(sdk.parseLpVaultRegistry)` below means the same in every mode.
+vi.mock("@/lib/v22/records", async (orig) => {
+  const real = await orig<typeof import("@/lib/v22/records")>();
+  const sdk = await import("@percolatorct/sdk");
+  return {
+    ...real,
+    parseLpVaultRegistry: (d: Uint8Array) => sdk.parseLpVaultRegistry(d),
+    parseLpRedemption: (d: Uint8Array) => sdk.parseLpRedemption(d),
+  };
+});
+
 vi.mock("@solana/spl-token", () => ({
   TOKEN_PROGRAM_ID: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
   getAssociatedTokenAddress: vi.fn(),
@@ -120,6 +141,8 @@ import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useParams } from "next/navigation";
 import { sendTx } from "@/lib/tx";
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
+import { buildAccountMetas, buildIx } from "@percolatorct/sdk";
 import { getAssociatedTokenAddress, unpackMint, unpackAccount } from "@solana/spl-token";
 
 describe("useInsuranceLP", () => {
@@ -585,6 +608,48 @@ describe("useInsuranceLP", () => {
       await act(async () => {
         await expect(result.current.createMint()).rejects.toThrow("Wallet not connected");
       });
+    });
+  });
+
+  describe("Create Mint on v2.2 (tag 74 needs the 7th account: the market's collateral mint)", () => {
+    const realMetas = (spec: ReadonlyArray<{ name: string; signer: boolean; writable: boolean }>, keys: Record<string, PublicKey>) =>
+      spec.map((a) => ({ pubkey: keys[a.name], isSigner: a.signer, isWritable: a.writable }));
+    afterEach(() => __setDevnetV22ForTest(null));
+
+    it("flag on: CreateLpVault carries [6] = config.collateralMint, read-only", async () => {
+      __setDevnetV22ForTest(true);
+      mockConnection.getAccountInfo.mockResolvedValue(null);
+      vi.mocked(buildAccountMetas).mockImplementation(realMetas as never);
+      const { result } = renderHook(() => useInsuranceLP());
+      await waitFor(() => expect(result.current.state.mintExists).toBe(false));
+      await act(async () => { await result.current.createMint(); });
+      const call = vi.mocked(buildIx).mock.calls.at(-1)![0] as { keys: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[] };
+      expect(call.keys).toHaveLength(7);
+      expect(call.keys[6].pubkey.equals(mockCollateralMint)).toBe(true);
+      expect(call.keys[6]).toMatchObject({ isSigner: false, isWritable: false });
+      expect(call.keys[0].pubkey.equals(mockWalletPubkey)).toBe(true);
+    });
+
+    it("flag on but the market's config has not loaded: refuses to send the six-account form", async () => {
+      __setDevnetV22ForTest(true);
+      mockConnection.getAccountInfo.mockResolvedValue(null);
+      vi.mocked(buildAccountMetas).mockImplementation(realMetas as never);
+      vi.mocked(useSlabState).mockReturnValue({ ...mockSlabState, config: null });
+      const { result } = renderHook(() => useInsuranceLP());
+      await act(async () => {
+        await expect(result.current.createMint()).rejects.toThrow();
+      });
+      expect(sendTx).not.toHaveBeenCalled();
+    });
+
+    it("flag off: exactly the six accounts, as before", async () => {
+      __setDevnetV22ForTest(false);
+      mockConnection.getAccountInfo.mockResolvedValue(null);
+      vi.mocked(buildAccountMetas).mockImplementation(realMetas as never);
+      const { result } = renderHook(() => useInsuranceLP());
+      await waitFor(() => expect(result.current.state.mintExists).toBe(false));
+      await act(async () => { await result.current.createMint(); });
+      expect(vi.mocked(buildAccountMetas).mock.calls.at(-1)![0]).toHaveLength(6); // the app\'s own six-entry v2.1 spec, independent of the SDK
     });
   });
 
@@ -1092,6 +1157,54 @@ describe("useInsuranceLP", () => {
       expect(result.current.state.pendingRedemptionShares).toBe(250_000n);
       expect(result.current.state.userSharePct).toBe(25);
       expect(result.current.state.userVaultValueAtoms).toBe(250_000n);
+    });
+
+    // N13: a wallet switch whose first read fails kept the previous wallet's ticket, so its
+    // "Finish withdrawal" stayed enabled and would ask the new wallet to sign a fresh request.
+    it("N13: a wallet switch drops the previous wallet's position, even when the new read fails", async () => {
+      const MINT = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+      const REGISTRY = "7pXnR8Eg2g7YDtPkUeEmcYNpPN5yzGLbNHREeHJMzNhq";
+      const REDEMPTION = "6UwgpB4FBfQpKW8ACFv7EW5vXg1NiHRQijYzGBaXJSHJ";
+      const acct = { data: Buffer.alloc(64), lamports: 1, executable: false, owner: mockProgramId };
+      let failReads = false;
+      mockConnection.getAccountInfo.mockImplementation(async (pk: PublicKey) => {
+        if (failReads && pk.toBase58() !== MINT) throw new Error("429 Too Many Requests");
+        return [MINT, REGISTRY, REDEMPTION].includes(pk.toBase58()) ? acct : null;
+      });
+      vi.mocked(unpackMint).mockReturnValue({ supply: 1_000_000n, decimals: 6, isInitialized: true } as never);
+      const sdk = await import("@percolatorct/sdk");
+      vi.mocked(sdk.parseLpVaultRegistry).mockReturnValue({
+        totalLpSharesOutstanding: 1_000_000n,
+        feeDistributionTotalAtoms: 0n,
+        redemptionCooldownSlots: 0n,
+        domain: 0,
+      } as never);
+      vi.mocked(sdk.parseLpRedemption).mockReturnValue({ shares: 250_000n, requestSlot: 0n } as never);
+
+      const { result, rerender } = renderHook(() => useInsuranceLP());
+      await waitFor(() => expect(result.current.state.hasPendingRedemption).toBe(true));
+      const refreshOfA = result.current.refreshState;
+
+      failReads = true;
+      vi.mocked(useWalletCompat).mockReturnValue({ ...mockWallet, publicKey: new PublicKey("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM") });
+      rerender();
+      await waitFor(() => expect(result.current.readError).toBe(true));
+      expect(result.current.state.hasPendingRedemption).toBe(false);
+      expect(result.current.state.pendingRedemptionShares).toBe(0n);
+      expect(result.current.state.userVaultValueAtoms).toBe(0n);
+      expect(result.current.state.userSharePct).toBe(0);
+      // Vault-level state is not the wallet's, so it stays.
+      expect(result.current.state.registryExists).toBe(true);
+
+      // A deposit/withdraw that started under the old wallet refreshes through its own closure
+      // when it confirms. That refresh must not republish the old wallet's ticket.
+      const staleRefresh = refreshOfA;
+      failReads = false;
+      await act(async () => {
+        await staleRefresh();
+      });
+      expect(result.current.state.hasPendingRedemption).toBe(false);
+      expect(result.current.state.pendingRedemptionShares).toBe(0n);
     });
   });
 });

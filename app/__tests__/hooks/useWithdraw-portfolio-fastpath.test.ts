@@ -54,6 +54,13 @@ vi.mock("@/lib/userAccountScan", () => ({
 const mockVaultAuth = new PublicKey("DjVE6JNiYqPL2QXyCUUh8rNjHrbz9hXHNYt99MQ59qw1");
 const mockOraclePda = new PublicKey("8DjWTsU1o8RHTKpRsqGFyYqFMknb8g7z2mjLfVYUyYyF");
 
+// The hook decodes portfolios through lib/v22/layout (flag off it delegates to the SDK parser, flag on it is VERSION-keyed): route that seam to the
+// same mocked parsePortfolioV17 so the fixtures below mean the same thing in every mode.
+vi.mock("@/lib/v22/layout", async (orig) => ({
+  ...(await orig<object>()),
+  parsePortfolio: (...a: Parameters<typeof parsePortfolioV17>) => parsePortfolioV17(...a),
+}));
+
 vi.mock("@percolatorct/sdk", async () => {
   const actual = await vi.importActual("@percolatorct/sdk");
   return {

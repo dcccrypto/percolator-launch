@@ -1,5 +1,6 @@
+import { errorText } from "@/lib/error-text";
 import { resolveDevnetProgramIds } from "@/lib/program-ids";
-import { P2_ERROR_COPY } from "@/lib/limits/copy";
+import { P2_ERROR_COPY, TRADE_PRICES_MOVED_MESSAGE, NETWORK_BUSY_MESSAGE } from "@/lib/limits/copy";
 import { PORTFOLIO_LOOKUP_COPY } from "@/lib/owner-portfolio";
 /**
  * Percolator on-chain program error code to human-readable message mappings.
@@ -25,7 +26,13 @@ import { PORTFOLIO_LOOKUP_COPY } from "@/lib/owner-portfolio";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { isDevnetV21Enabled } from "@/lib/v21/flag";
 import { V21_ERROR_CODE_MAP } from "@/lib/v21/error-copy";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { V22_ERROR_CODE_MAP, V22_STAKE_ERROR_CODE_MAP } from "@/lib/v22/error-copy";
+import { V22_ENGINE_LOCK_CODES } from "@/lib/v22/wrapper-errors";
+import { stakeProgramIdOrNull } from "@/lib/v22/program-ids";
 import { V21_ENGINE_LOCK_CODES } from "@/lib/v21/wrapper-errors";
+import { V22_CUSTOM9_GENERIC, V22_CUSTOM9_OFF_TICKET } from "@/lib/v22/trade-refusal-9-copy";
+import { WALLET_BUSY_COPY, WALLET_REQUEST_CLOSED_COPY } from "./wallet-request-copy";
 const LIGHTHOUSE_PROGRAM_ID_STR = "L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95";
 
 const LIGHTHOUSE_USER_MESSAGE =
@@ -223,6 +230,7 @@ const NFT_ERROR_CODE_MAP: Record<number, string> = {
   25: "Market ID mismatch - the slab slot this NFT points to was reused by a newer position. This NFT no longer represents a valid position.",
   26: "This market's NFT registry isn't configured yet - minting a Position NFT isn't available for this market.",
   27: "This position spans multiple legs (cross-margin) and can't be wrapped as a single NFT - only single-position portfolios are eligible.",
+  28: "This NFT belongs to an earlier version of the account and no longer controls it. Burn it to reclaim its rent.",
 };
 
 /** Hard-coded NFT program id. Matches app/lib/nft-program.ts. Kept here to
@@ -263,16 +271,26 @@ const SPL_TOKEN_INSUFFICIENT_FUNDS_MESSAGE =
 //   Phantom  : {code: 4100, message: "The requested method and/or account has not been authorized by the user."}
 //              {code: 4001, message: "User rejected the request."}
 //   Solflare : "Wallet is locked" / "WalletNotConnectedError" / "User rejected the request"
+//   Privy    : "User rejected request" / "User exited the modal before submitting the transaction"
 //   adapters : WalletNotConnectedError, WalletSignTransactionError: "Wallet not connected"
 export const WALLET_LOCKED_MESSAGE =
   "Your wallet is locked or hasn't authorised this site. Unlock Phantom / Solflare, reconnect it from the header, and try again. Nothing was sent.";
 export type WalletErrorKind = "locked" | "rejected";
 
+/**
+ * Text that means the USER declined a wallet prompt. Deliberately narrow: it does not match a policy or
+ * rate-limit refusal ("Transaction rejected by policy", "429 ... request rejected") or a bare "4001"
+ * inside another message ("Custom(4001)"); the numeric `code === 4001` is checked on the error object
+ * by `isWalletRejection` (lib/privy-batch-sign.ts) instead. 0x6985 is a Ledger "denied by the user".
+ */
+export const USER_DECLINED_RE =
+  /user rejected|rejected the request|rejected by the user|user declined|user denied|user disapproved|request declined|signing cancell?ed by user|transaction cancell?ed|user exited the modal|\b0x6985\b/i;
+
 export function detectWalletError(msg: string): WalletErrorKind | null {
   if (/has not been authori[sz]ed by the user|\b4100\b.*authori[sz]|wallet is locked|locked wallet|WalletNotConnected|wallet not connected|please unlock/i.test(msg)) {
     return "locked";
   }
-  if (/user rejected|rejected the request|user declined|transaction rejected|request rejected|\b4001\b/i.test(msg)) {
+  if (USER_DECLINED_RE.test(msg) || /transaction rejected|request rejected|\b4001\b/i.test(msg)) {
     return "rejected";
   }
   return null;
@@ -327,6 +345,12 @@ function extractCustomIndex(msg: string): number | null {
 // ERROR_CODE_MAP[19]/[21] and useEngineFreshness.ts for the corrected model.
 const TRANSIENT_CODES = new Set<number>([WRAPPER_ERR.EngineBStale, WRAPPER_ERR.OracleInvalid, WRAPPER_ERR.OracleStale]);
 
+/** HTTP 429 / provider rate-limit wording. A bare "429" is NOT enough (base58 signatures contain digit runs). */
+export function isRateLimitText(msg: string): boolean {
+  if (/confirmation timeout|may still land/i.test(msg)) return false;
+  return /too many requests|rate.?limits? exceeded|rate.?limited/i.test(msg) || (/\b429\b/.test(msg) && /rate.?limit/i.test(msg)) || /"code"\s*:\s*-32429\b/.test(msg);
+}
+
 export function isTransientError(msg: string): boolean {
   // A confirmation timeout must NEVER classify as transient: the tx may have
   // already landed, and withTransientRetry callers (OrderTicket handleTrade,
@@ -345,6 +369,7 @@ export function isTransientError(msg: string): boolean {
   // can contain it — so require explicit rate-limit phrasing, optionally
   // alongside a word-bounded 429 status code.
   if (/too many requests/i.test(msg)) return true;
+  if (isRateLimitText(msg)) return true;
   if (/\b429\b/.test(msg) && /rate.?limit/i.test(msg)) return true;
   return false;
 }
@@ -359,11 +384,19 @@ export function isOracleStaleError(msg: string): boolean {
   return code === WRAPPER_ERR.OracleStale || code === WRAPPER_ERR.OracleInvalid || code === WRAPPER_ERR.EngineBStale;
 }
 
+/** C1: a send that failed with EngineStale (19) and never confirmed (a timeout may have landed, so it never counts). */
+export function isEngineStaleAtSend(msg: string): boolean {
+  if (/confirmation timeout|may still land/i.test(msg)) return false;
+  return extractErrorCode(msg) === WRAPPER_ERR.EngineStale;
+}
+
 export function isEngineLockError(msg: string): boolean {
   const code = extractErrorCode(msg);
   return (
     code === WRAPPER_ERR.EngineLockActive ||
     code === WRAPPER_ERR.EngineStale ||
+    // Devnet v2.2: 118 (exit needs loss-current) is an engine lock the app retries through.
+    (code !== null && isDevnetV22Enabled() && V22_ENGINE_LOCK_CODES.includes(code)) ||
     // Devnet v2.1, P2b E7: the codes that split out of 21 (close-only after ADL, refreshing, Earn
     // backed gate). Flag-gated: the live wrapper never raises them.
     (code !== null && isDevnetV21Enabled() && V21_ENGINE_LOCK_CODES.includes(code))
@@ -377,11 +410,19 @@ export function isEngineLockError(msg: string): boolean {
  *   TX1 below). Omit for the generic case; pass "trade" from a trade()-CPI
  *   submit path (open or close).
  */
+export { TRADE_PRICES_MOVED_MESSAGE, NETWORK_BUSY_MESSAGE };
+
+/** The market's config hasn't loaded yet; nothing was sent. */
+export const MARKET_LOADING_MESSAGE = "The market is still loading. Try again in a moment. Nothing was sent.";
+
 /** Shown when the wallet has no SOL to pay network fees (top-level AccountNotFound). */
 export const NO_SOL_FOR_FEES_MESSAGE =
   "Your wallet needs a little devnet SOL to pay network fees. Use Get test funds (the faucet) to add some, then try again.";
 
 export function humanizeError(rawMsg: string, context?: "trade"): string {
+  if (rawMsg.includes(WALLET_REQUEST_CLOSED_COPY)) return WALLET_REQUEST_CLOSED_COPY; // v2.2 QA RT5-2: already the calm line
+  if (rawMsg.includes(WALLET_BUSY_COPY)) return WALLET_BUSY_COPY; // v2.2 create step 1: already the calm line
+  if (rawMsg.includes("This action isn't available for this market yet. Nothing was sent.")) return rawMsg; // v2.2 tail mismatch: already the calm line
   // Log for debugging (only in browser)
   if (typeof window !== "undefined") {
     console.warn("[humanizeError] raw:", rawMsg);
@@ -404,6 +445,11 @@ export function humanizeError(rawMsg: string, context?: "trade"): string {
   const walletErr = detectWalletError(rawMsg);
   if (walletErr === "locked") return WALLET_LOCKED_MESSAGE;
   if (walletErr === "rejected") return "Transaction cancelled.";
+  // C4: a rate-limited RPC ("Connection rate limits exceeded", "429 Too Many Requests"). The tx was never accepted. Never matches a bare 429 inside a signature.
+  if (isRateLimitText(rawMsg)) return NETWORK_BUSY_MESSAGE;
+  // The trade/deposit/withdraw/init hooks' guard when the market config hasn't loaded yet:
+  // nothing was sent, and trying again in a moment works (same words as the ticket's resolver).
+  if (/market not loaded/i.test(rawMsg)) return MARKET_LOADING_MESSAGE;
 
   // Handle Solana system errors BEFORE custom code extraction.
   // These are string-form errors like "InvalidAccountData", "AccountAlreadyInitialized" etc.
@@ -481,11 +527,26 @@ export function humanizeError(rawMsg: string, context?: "trade"): string {
     // The old text asserted (a) only, which sent debugging down the slippage
     // path while the real cause was (b). Keep it honest: name the likely cause
     // and the recovery. Only trade-submit call sites pass context: "trade".
+    if (code === WRAPPER_ERR.EngineStale && context === "trade" && !isNftProgramError(rawMsg) && (origin === null || origin === WRAPPER_PROGRAM_ID)) return TRADE_PRICES_MOVED_MESSAGE;
+    // C3: SameOwnerTrade (67) off a trade / close send with no attributing log line still gets its calm line.
+    if (code === WRAPPER_ERR.SameOwnerTrade && context === "trade" && !isNftProgramError(rawMsg) && (origin === null || origin === WRAPPER_PROGRAM_ID)) return P1_ERROR_MESSAGES[WRAPPER_ERR.SameOwnerTrade];
     if (code === WRAPPER_ERR.InvalidInstruction && context === "trade") {
+      // v2.2 (Q-1): never guess "slippage" up front; the ticket refines this from chain state
+      // (lib/v22/trade-refusal-9.ts: position cap / price limit / fee change).
+      if (isDevnetV22Enabled()) return V22_CUSTOM9_GENERIC;
       return "The trade was rejected by the program (invalid instruction) — usually the price moved past your slippage tolerance, or a trade parameter was off. Try again with the same size and leverage.";
     }
     // error-codes-4b1a5d30.md: a Custom(n) is the WRAPPER's code only when the wrapper raised
     // it. An unattributed code (no "Program X failed" line) or another program's is not guessed.
+    // Devnet v2.2 (flag-gated): wrapper 104..119 / 123..127 (+ plain 28 / 29 / 93), stake v5 33..48. Checked before v2.1 / the
+    // legacy table because the stake program reuses low numbers (33..48) that the wrapper table also owns, and so v2.2's plain
+    // 28 / 29 win over the legacy lines for the same codes.
+    if (isDevnetV22Enabled()) {
+      if (origin !== null && origin === stakeProgramIdOrNull() && V22_STAKE_ERROR_CODE_MAP[code]) return V22_STAKE_ERROR_CODE_MAP[code];
+      if (origin === WRAPPER_PROGRAM_ID && V22_ERROR_CODE_MAP[code]) return V22_ERROR_CODE_MAP[code];
+      // A bare 9 off the trade ticket (deposit, withdraw, close...): the legacy line talks about matcher config. Same calm line as the ticket's.
+      if (origin === WRAPPER_PROGRAM_ID && code === WRAPPER_ERR.InvalidInstruction) return V22_CUSTOM9_OFF_TICKET;
+    }
     if (origin === WRAPPER_PROGRAM_ID && ERROR_CODE_MAP[code]) {
       return ERROR_CODE_MAP[code];
     }
@@ -556,7 +617,10 @@ export class UserFacingError extends Error {
 
 /** The message of a UserFacingError, else null (the caller then humanizes as before). */
 export function userFacingMessage(e: unknown): string | null {
-  return e instanceof UserFacingError ? e.message : null;
+  if (e instanceof UserFacingError) return e.message;
+  // v2.2 QA RT5-2 / create step 1: the wallet-request-closed and wallet-busy lines (lib/v22/sign-guard.ts) are written for the user too.
+  const name = (e as { name?: unknown } | null)?.name;
+  return name === "WalletRequestClosedError" ? WALLET_REQUEST_CLOSED_COPY : name === "WalletBusyError" ? WALLET_BUSY_COPY : null;
 }
 /** §5.3 "confirmation timeout" (never "check your wallet"). */
 export const CONFIRMING_MESSAGE = "Still confirming. We'll update this when it lands.";
@@ -587,7 +651,7 @@ export async function withTransientRetry<T>(
       return await fn();
     } catch (e) {
       lastError = e;
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errorText(e);
       if (attempt < effectiveMaxRetries && isTransientError(msg)) {
         const code = extractErrorCode(msg);
         const longWindow = code !== null ? LONG_WINDOW_RETRY[code] : undefined;

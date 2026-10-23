@@ -19,14 +19,8 @@
     "format": "prettier --write packages/*/src/**/*.ts",
     "format:check": "prettier --check packages/*/src/**/*.ts",
     "start": "pnpm --filter @percolator/app start",
-    "maker": "tsx scripts/floating-maker.ts",
-    "maker:dry": "DRY_RUN=true tsx scripts/floating-maker.ts",
-    "fleet": "tsx scripts/mm-fleet.ts",
-    "fleet:dry": "DRY_RUN=true tsx scripts/mm-fleet.ts",
     "fleet:keygen": "tsx scripts/generate-keeper-wallets.ts --airdrop",
     "fleet:keygen:dry": "tsx scripts/generate-keeper-wallets.ts",
-    "fleet:deploy": "bash scripts/deploy-mm-fleet.sh",
-    "fleet:deploy:dry": "bash scripts/deploy-mm-fleet.sh --dry-run",
     "localnet:test": "npx tsx tests/localnet/test-trade-flow.ts",
     "check:upgrade-authority": "tsx scripts/check-upgrade-authority.ts",
     "check:upgrade-authority:mainnet": "tsx scripts/check-upgrade-authority.ts --network mainnet",
@@ -45,7 +39,7 @@
     "tsx": "^4.21.0"
   },
   "dependencies": {
-    "@percolatorct/sdk": "^4.4.0",
+    "@percolatorct/sdk": "8.0.0",
     "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.98.4",
     "dotenv": "^17.3.1"
@@ -56,7 +50,8 @@
         "CVE-2025-3194"
       ],
       "ignoreGhsas": [
-        "GHSA-3gc7-fjrx-p6mg"
+        "GHSA-3gc7-fjrx-p6mg",
+        "GHSA-528h-pc64-c93x"
       ]
     },
     "overrides": {
@@ -93,6 +88,9 @@
       "esbuild": ">=0.28.1",
       "@opentelemetry/core": ">=2.8.0",
       "@metamask/utils>uuid": ">=11.1.1",
+      "react-native": "-",
+      "unplugin>chokidar": "^4.0.3",
+      "uuid@<11.1.1": ">=11.1.1",
       "@sentry/webpack-plugin>uuid": ">=11.1.1",
       "@walletconnect/jsonrpc-ws-connection>ws": "7.5.11",
       "jayson>ws": "7.5.11",

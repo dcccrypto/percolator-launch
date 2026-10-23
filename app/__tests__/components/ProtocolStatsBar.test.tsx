@@ -11,7 +11,14 @@
  */
 
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, cleanup } from "@testing-library/react";
+import { act, render, screen, waitFor, cleanup } from "@testing-library/react";
+
+// Capture the 30 s poll callback so a test can run the next poll without fake timers.
+const poll = vi.hoisted(() => ({ tick: (() => {}) as () => unknown }));
+vi.mock("@/lib/pollWhenVisible", () => ({
+  pollWhenVisible: (fn: () => unknown) => { poll.tick = fn; return () => {}; },
+}));
+
 import { ProtocolStatsBar } from "@/components/dashboard/ProtocolStatsBar";
 import "@testing-library/jest-dom";
 
@@ -33,7 +40,8 @@ describe("ProtocolStatsBar — /api/stats data source", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders zero stats when /api/stats reports no data", async () => {
+  // #54: live:false is the route's zeroStats() degrade ("no data source"), so its zeros are unknown.
+  it("shows '—', not $0 / 0, when /api/stats reports no data", async () => {
     mockStatsResponse({
       totalMarkets: 0,
       activeTotal: 0,
@@ -48,10 +56,30 @@ describe("ProtocolStatsBar — /api/stats data source", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Open Interest")).toBeInTheDocument();
-      expect(screen.getAllByText("$0").length).toBeGreaterThan(0);
-      expect(screen.getByText("Active Markets")).toBeInTheDocument();
-      expect(screen.getByText("0")).toBeInTheDocument();
+      expect(screen.getAllByText("—")).toHaveLength(3);
     });
+    expect(screen.queryByText("$0")).toBeNull();
+    expect(screen.queryByText("0")).toBeNull();
+  });
+
+  it("shows '—' when the very first fetch fails", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("network"));
+    render(<ProtocolStatsBar />);
+    await waitFor(() => expect(screen.getAllByText("—")).toHaveLength(3));
+    expect(screen.queryByText("$0")).toBeNull();
+    expect(screen.queryByText("0")).toBeNull();
+  });
+
+  it("keeps the last real figures and drops the live dot when a later poll degrades", async () => {
+    mockStatsResponse({ activeTotal: 3, totalVolume24h: 12_500, totalOpenInterest: 50_000, live: true });
+    const { container } = render(<ProtocolStatsBar />);
+    await waitFor(() => expect(container.querySelector(".animate-ping")).toBeInTheDocument());
+    mockStatsResponse({ activeTotal: 0, totalVolume24h: 0, totalOpenInterest: 0, live: false });
+    await act(async () => { await poll.tick(); });
+    expect(screen.getByText("$12.5K")).toBeInTheDocument();
+    expect(screen.getByText("$50.0K")).toBeInTheDocument();
+    expect(screen.queryByText("$0")).toBeNull();
+    expect(container.querySelector(".animate-ping")).toBeNull();
   });
 
   it("renders real volume/OI/active-market counts from a live response", async () => {

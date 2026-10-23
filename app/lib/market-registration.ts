@@ -34,7 +34,7 @@
  * See docs/MARKET-REGISTRATION-SPEC-2026-07-30.md.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { checkEnrollmentCaps, type EnrollmentCaps } from "@/lib/keeper-enrollment-guard";
+import { checkEnrollmentCaps, type CapRefusalCode, type EnrollmentCaps } from "@/lib/keeper-enrollment-guard";
 
 /** Everything registration writes. Display fields come from the creator. */
 export interface RegistrationRow {
@@ -63,7 +63,7 @@ export interface RegistrationRow {
 export type UpsertResult =
   /** `keeperActive`: the row is enrolled for pricing after this call. */
   | { ok: true; action: "inserted" | "updated" | "unchanged"; keeperActive: boolean }
-  | { ok: false; status: number; error: string; detail?: string };
+  | { ok: false; status: number; error: string; detail?: string; code?: CapRefusalCode };
 
 export type RegistrationMode = "proof" | "admin";
 
@@ -194,7 +194,7 @@ async function upsertOnce(
     );
     if (!cap.ok) {
       if (cap.detail) console.error("[market-registration] enrollment count failed:", cap.detail);
-      return { ok: false, status: cap.status, error: cap.error, ...(cap.detail ? { detail: cap.detail } : {}) };
+      return { ok: false, status: cap.status, error: cap.error, ...(cap.detail ? { detail: cap.detail } : {}), ...(cap.code ? { code: cap.code } : {}) };
     }
   }
 

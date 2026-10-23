@@ -16,6 +16,7 @@ vi.mock('@/lib/market-directory-discovery', () => ({
 
 vi.mock('@/lib/config', () => ({
   getAllProgramIds: vi.fn(() => []),
+  getMarketDiscoveryProgramIds: vi.fn(() => []),
   getNetwork: mocks.getNetwork,
 }));
 
@@ -23,6 +24,11 @@ vi.mock('@/lib/v17-engine-config', () => ({
   parseV17RiskParams: mocks.parseV17RiskParams,
 }));
 
+vi.mock("@/lib/v22/layout", async (orig) => ({
+  ...(await orig<typeof import("@/lib/v22/layout")>()),
+  isWrapperAccount: mocks.isV17Account,
+  parsePortfolio: mocks.parsePortfolioV17,
+}));
 vi.mock('@percolatorct/sdk', async () => {
   const actual = await vi.importActual<typeof import('@percolatorct/sdk')>('@percolatorct/sdk');
 
@@ -39,6 +45,8 @@ import {
   loadPortfolioShared,
   peekPortfolioSnapshot,
 } from '@/hooks/usePortfolio';
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
+import { __setUnknownLotExpForTest } from "@/lib/v22/lot-registry";
 
 type PortfolioSnapshot = Awaited<ReturnType<typeof fetchPortfolioSnapshot>>;
 
@@ -149,6 +157,7 @@ function makeOwnerScanFailureScenario() {
 
 describe('usePortfolio v17 owner-scan behavioral regression', () => {
   beforeEach(() => {
+    __setUnknownLotExpForTest(0);
     vi.clearAllMocks();
 
     mocks.getNetwork.mockReturnValue('devnet');

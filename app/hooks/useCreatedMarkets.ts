@@ -6,14 +6,14 @@ import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useMarketDiscovery } from "./useMarketDiscovery";
 import {
-  isV17MarketAccount,
-  parseMarketGroupV17OI,
   type DiscoveredMarket,
   type V17MarketGroupOI,
 } from "@percolatorct/sdk";
-import { fetchTokenMeta } from "@/lib/tokenMeta";
+import { fetchTokenMeta, isPlaceholderTokenMeta } from "@/lib/tokenMeta";
 import { isLpPortfolio } from "@/lib/userAccountScan";
 import { readV17AssetSlotLast } from "@/lib/v17-engine-clock";
+import { parseMarketOI, isWrapperMarketAccount } from "@/lib/v22/layout";
+import { readLaunchFootprint, type LaunchFootprint } from "@/lib/unfinished-launch";
 
 /** v17 portfolio account magic (PERCV16\0), base64 for the memcmp filter. */
 const V17_PORTFOLIO_MAGIC_B64 = Buffer.from([
@@ -54,17 +54,20 @@ export interface CreatedMarket extends DiscoveredMarket {
   v17Stats?: {
     oi: V17MarketGroupOI;
     assetSlotLast: bigint | null;
+    /** Header facts that decide whether an unfinished launch can still be removed (#3266). */
+    launch?: LaunchFootprint;
   };
 }
 
 /**
- * Returns markets created by the connected wallet.
+ * Returns markets created by the connected wallet, or by `wallet` when given (the public
+ * /trader/<wallet> profile; omitted, the hook behaves exactly as before for /my-markets).
  *
  * Incomplete launches are matched through their remaining wallet authority.
  * Completed launches are recovered through creator-owned LP portfolios
  * after marketauth rotates. Trading portfolios remain excluded.
  */
-export function useCreatedMarkets() {
+export function useCreatedMarkets(wallet?: string | null) {
   const { publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
   const { markets, loading: discoveryLoading, error: discoveryError, refetch: discoveryRefetch } = useMarketDiscovery();
@@ -81,7 +84,8 @@ export function useCreatedMarkets() {
     try {
       const meta = await fetchTokenMeta(connection, mint);
       const label = meta.symbol || meta.name || mintStr.slice(0, 8) + "…";
-      tokenLabelCache.current.set(mintStr, label);
+      // A truncated-address placeholder is a failed lookup: show it, but do not remember it.
+      if (!isPlaceholderTokenMeta(meta)) tokenLabelCache.current.set(mintStr, label);
       return label;
     } catch {
       return mintStr.slice(0, 8) + "…";
@@ -105,7 +109,7 @@ export function useCreatedMarkets() {
   });
   const [creatorScanGeneration, setCreatorScanGeneration] = useState(0);
 
-  const walletStr = publicKey?.toBase58() ?? null;
+  const walletStr = wallet !== undefined ? wallet : publicKey?.toBase58() ?? null;
 
   // Keep the latest discovery objects without making the ownership
   // RPC scan depend on the markets array reference itself.
@@ -358,7 +362,7 @@ export function useCreatedMarkets() {
   // successful fetch.
   const [v17Enrichment, setV17Enrichment] = useState<{
     currentSlot: bigint | null;
-    stats: Record<string, { oi: V17MarketGroupOI; assetSlotLast: bigint | null }>;
+    stats: Record<string, { oi: V17MarketGroupOI; assetSlotLast: bigint | null; launch?: LaunchFootprint }>;
   }>({ currentSlot: null, stats: {} });
 
   const v17SlabsKey = useMemo(
@@ -381,15 +385,16 @@ export function useCreatedMarkets() {
           connection.getMultipleAccountsInfo(v17Slabs),
         ]);
         if (cancelled) return;
-        const stats: Record<string, { oi: V17MarketGroupOI; assetSlotLast: bigint | null }> = {};
+        const stats: Record<string, { oi: V17MarketGroupOI; assetSlotLast: bigint | null; launch?: LaunchFootprint }> = {};
         infos.forEach((info, i) => {
           if (!info?.data) return;
           const bytes = new Uint8Array(info.data);
-          if (!isV17MarketAccount(bytes)) return;
+          if (!isWrapperMarketAccount(bytes)) return;
           try {
             stats[v17Slabs[i].toBase58()] = {
-              oi: parseMarketGroupV17OI(bytes),
+              oi: parseMarketOI(bytes),
               assetSlotLast: readV17AssetSlotLast(bytes),
+              launch: readLaunchFootprint(bytes) ?? undefined,
             };
           } catch {
             // Unparseable slab — this market keeps no v17Stats (page shows "—")
@@ -418,7 +423,7 @@ export function useCreatedMarkets() {
     myMarkets: enrichedMarkets,
     loading: discoveryLoading || creatorScanLoading,
     error: discoveryError ?? creatorScanError,
-    connected: !!publicKey,
+    connected: wallet !== undefined ? !!wallet : !!publicKey,
     /** Refresh market discovery and wallet-scoped creator ownership. */
     refetch,
     /** Current on-chain slot from the v17 enrichment fetch — null until it resolves. */

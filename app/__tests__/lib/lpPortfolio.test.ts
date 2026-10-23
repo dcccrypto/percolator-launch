@@ -8,20 +8,14 @@
  * context.
  */
 import { describe, it, expect } from "vitest";
-import { V17_PORTFOLIO_ACCOUNT_LEN, V17_PORTFOLIO_IDENTITY_TRAILER_LEN } from "@percolatorct/sdk";
+import { matcherPortfolio } from "../helpers/v22-fixtures";
 import { isLpPortfolio, PORTFOLIO_MATCHER_CONFIG_LEN } from "@/lib/lpPortfolio";
 
 // v18: the matcher config is followed by the identity trailer, and its trailing
 // u64 is a packed control word (bit 0 = enabled).
-// F-3: a real portfolio is V17_PORTFOLIO_ACCOUNT_LEN bytes with header kind byte [10] = 2.
-function makePortfolioBuffer(enabled: boolean, totalLen = V17_PORTFOLIO_ACCOUNT_LEN): Buffer {
-  const buf = Buffer.alloc(totalLen);
-  buf[10] = 2;
-  const matcherConfigOffset =
-    buf.length - PORTFOLIO_MATCHER_CONFIG_LEN - V17_PORTFOLIO_IDENTITY_TRAILER_LEN;
-  buf.writeBigUInt64LE(enabled ? 1n : 0n, matcherConfigOffset + 96);
-  return buf;
-}
+// F-3: a real portfolio carries the wrapper header (kind byte [10] = 2) and the exact length of its layout: 9,563 B v18 flag off, a captured
+// 10,603 B VERSION-19 portfolio flag on (helpers/v22-fixtures.ts); the matcher control word is patched in either.
+const makePortfolioBuffer = (enabled: boolean): Buffer => matcherPortfolio(enabled);
 
 describe("lib/lpPortfolio — isLpPortfolio", () => {
   it("PORTFOLIO_MATCHER_CONFIG_LEN is sizeof(PortfolioMatcherConfigV16) = 104", () => {

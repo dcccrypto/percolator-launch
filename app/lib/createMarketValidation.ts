@@ -166,7 +166,7 @@ export function validateCreateForm(values: CreateFormValues): ValidationError[] 
       if (totalRequired > balanceFloat) {
         errors.push({
           field: "Token Balance",
-          message: `You need ${totalRequired.toLocaleString()} tokens (LP ${lpNum.toLocaleString()} + insurance ${insNum.toLocaleString()} + ${backingTotal.toLocaleString()} counterparty backing) but only have ${balanceFloat.toLocaleString()}. Reduce amounts or get more tokens.`,
+          message: `You need ${totalRequired.toLocaleString()} tokens (LP ${lpNum.toLocaleString()} + insurance ${insNum.toLocaleString()} + ${backingTotal.toLocaleString()} trader payout reserve) but only have ${balanceFloat.toLocaleString()}. Reduce amounts or get more tokens.`,
           severity: "error",
         });
       } else if (totalRequired > balanceFloat * 0.9) {

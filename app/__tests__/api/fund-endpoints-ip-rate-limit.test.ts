@@ -5,8 +5,7 @@
  * gate on the caller-supplied WALLET only (1 claim per wallet per window). Every
  * mint/airdrop spends the shared DEVNET_MINT_AUTHORITY_KEYPAIR's SOL, so an
  * attacker generating fresh keypairs bypasses the gate entirely and can drain the
- * shared signer (playground-wide DoS) — unlike /api/devnet-mirror-mint, which
- * already applies a per-IP limit.
+ * shared signer (playground-wide DoS).
  *
  * This shows a per-wallet gate lets one IP make unlimited claims via fresh
  * wallets, while a per-IP limiter (the fix, reusing the app's own

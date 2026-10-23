@@ -51,6 +51,8 @@ export type VolumeDisplay =
   | { kind: "partial"; atoms: string; missing: number; total: number }
   /** No trade had a price, so the figure is meaningless rather than small. */
   | { kind: "unknown"; missing: number }
+  /** v2.2 QA L-1: no lot-aware v2.2 indexer is attested, so a lot market's size x price may be in the wrong unit. */
+  | { kind: "unverified" }
   | { kind: "no-trades" };
 
 export function volumeDisplay(
@@ -69,9 +71,23 @@ export function volumeDisplay(
 
 /** Why a figure is missing, in words a trader can act on. */
 export const FEES_UNRECORDED_NOTE =
-  "Not recorded — the indexer does not capture the fee amount, so this is unknown rather than zero. You were charged the market's trading fee on every fill.";
+  "Not recorded — the indexer does not capture the fee amount, so this is unknown rather than zero. The market's trading fee was still charged on every fill.";
+
+/**
+ * v2.2 QA L-1: on a v2.2 build the volume is shown only once a lot-aware v2.2 indexer is attested
+ * (`NEXT_PUBLIC_V22_INDEXER_LOT_AWARE=1`). The v2.2 indexer draft (percolator-indexer #218 @ 827aa7f) has no lot
+ * handling at all (`git grep -i lot` in src: nothing), so its size x price on a lot market is unproven; the figure is
+ * withheld instead of risking a wrong-unit number. Trading is NOT gated on it. Flag off: unchanged.
+ */
+export function gateVolumeForV22(v: VolumeDisplay, v22: boolean, indexerLotAware: boolean): VolumeDisplay {
+  if (!v22 || indexerLotAware || v.kind === "no-trades") return v;
+  return { kind: "unverified" };
+}
+
+export const VOLUME_UNVERIFIED_NOTE = "Not shown on Devnet v2.2 yet: the v2.2 trade indexer is not verified for lot markets.";
 
 export function volumeNote(v: VolumeDisplay): string | undefined {
+  if (v.kind === "unverified") return VOLUME_UNVERIFIED_NOTE;
   if (v.kind === "partial") {
     return `${v.missing} of ${v.total} trades have no recorded price and are not included in this figure.`;
   }

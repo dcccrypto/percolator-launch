@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useDialogFocus } from "@/hooks/useDialogFocus";
 import { createPortal } from "react-dom";
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
 import {
@@ -12,6 +13,7 @@ import {
 import { PnlShareCard, PNL_CARD_SIZE } from "@/components/share/PnlShareCard";
 import { captureCardToBlob, downloadBlob, writeImageToClipboard } from "@/lib/capture-node";
 import { useTokenLogo } from "@/hooks/useTokenLogo";
+import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
 
 /** Live market mark for a slab from the shared price store; falls back to the given snapshot. */
 function useLiveMarkE6(slab: string, fallbackE6: bigint): bigint {
@@ -61,8 +63,14 @@ type Toast = { msg: string; kind: "ok" | "err" } | null;
 
 export function PnlShareModal({ data, onClose }: { data: PnlCardData; onClose: () => void }) {
   const cardRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The overlay scrolls itself (short screens); the page behind it must not, or
+  // both scrollbars show and the wheel scrolls the page under the card.
+  useLockBodyScroll();
+  // After the scroll lock, as in Modal: focus is restored after the page unlocks.
+  useDialogFocus(dialogRef);
   const markE6 = useLiveMarkE6(data.slab, data.initialMarkE6);
   const stats = computePnlCardStats(data, markE6);
   // Smoothed polarity picks ONLY the background artwork set (so a breakeven PnL
@@ -195,6 +203,7 @@ export function PnlShareModal({ data, onClose }: { data: PnlCardData; onClose: (
 
   return createPortal(
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label="Share your PnL"
@@ -206,7 +215,7 @@ export function PnlShareModal({ data, onClose }: { data: PnlCardData; onClose: (
         e.stopPropagation();
         onClose();
       }}
-      style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(3,2,10,0.94)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}
+      style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(3,2,10,0.94)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto", overscrollBehavior: "contain" }}
     >
       <style>{`@keyframes pnlFlipShake{10%,90%{transform:translateX(-2px)}20%,80%{transform:translateX(3px)}30%,50%,70%{transform:translateX(-5px)}40%,60%{transform:translateX(5px)}}`}</style>
       {/* margin:auto centers vertically when there's room and lets the top scroll into

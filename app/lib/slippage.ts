@@ -74,6 +74,18 @@ export class SlippageError extends Error {
   }
 }
 
+/**
+ * The feed and the on-chain price disagree (assertFeedAgreesWithChain). A SlippageError, so
+ * existing handling keeps working; its own name so the user line can say what happened (the
+ * prices are out of sync) instead of "the price moved while you were confirming" (#3459).
+ */
+export class FeedDisagreementError extends SlippageError {
+  constructor(msg: string) {
+    super(msg);
+    this.name = "FeedDisagreementError";
+  }
+}
+
 export interface ComputeLimitArgs {
   markE6: bigint;
   size: bigint;
@@ -140,7 +152,7 @@ export function assertFeedAgreesWithChain(args: {
   const deviationBps = (diff * 10_000n) / onChainE6;
   if (deviationBps <= MAX_FEED_DEVIATION_BPS) return;
 
-  throw new SlippageError(
+  throw new FeedDisagreementError(
     `Price feed disagrees with the on-chain oracle by ${deviationBps} bps ` +
       `(limit is ${MAX_FEED_DEVIATION_BPS}). Refusing to derive a slippage limit ` +
       `from it — the limit would not mean what the screen says. Wait for the feed ` +

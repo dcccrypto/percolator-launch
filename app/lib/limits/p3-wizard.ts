@@ -17,8 +17,10 @@
  * (C = the Earn seed NAV, all harvestable fees 0 on a fresh market), so the first-loss cushion
  * is at its floor from the first Earn deposit on. Pure.
  */
+import type { TierConfig } from "@/lib/v22/sdk/records/growth-v19";
 import { PublicKey, SystemProgram, type TransactionInstruction } from "@solana/web3.js";
-import { BPS, CANONICAL_VAULT_LP_MATCHER_PROGRAM_DEVNET, VAULT_LP_MATCHER_CTX_LEN, VAULT_LP_MAX_JUNIOR_FLOOR_BPS, VAULT_LP_MIN_JUNIOR_FLOOR_BPS } from "./constants";
+import { pairedProgramSet, resolveDevnetProgramIds } from "@/lib/program-ids";
+import { BPS, VAULT_LP_MATCHER_CTX_LEN, VAULT_LP_MAX_JUNIOR_FLOOR_BPS, VAULT_LP_MIN_JUNIOR_FLOOR_BPS } from "./constants";
 import { buildDepositJuniorTrancheIx, buildInitVaultLpIx, type VaultLpMarket } from "./p3-ix";
 
 /** Default floor: 20% of the senior claim (the seed's P3 test markets use 1000-2000). */
@@ -41,14 +43,18 @@ export function validateP3Wizard(p: { juniorFloorBps: number; juniorAtoms: bigin
 }
 
 /**
- * Tag 94 accepts only the canonical matcher (07a1d0eb, devnet). The app's configured matcher
- * must be that program, else the bind would fail VaultLpMatcherNotApproved (81): refuse early.
+ * Tag 94 accepts only the canonical matcher of the deployed wrapper (`constants::CANONICAL_VAULT_LP_MATCHER_PROGRAM`): devnet v2 EDKKgRaV
+ * (07a1d0eb), the v2.2 fresh wrapper 6kpg2wi7 AsHvEJ8z (aca02ba6). The expected matcher is derived from the ACTIVE wrapper's program set
+ * (lib/program-ids.ts), never a literal here: the configured matcher must be the one that set pins, else the bind would fail
+ * VaultLpMatcherNotApproved (81), so refuse early. (This check used to know only the v2 matcher, so every P3 launch on 6kpg2wi7 built
+ * five steps and died at the sixth.)
  */
 export function canonicalVaultLpMatcher(configuredMatcher: string): PublicKey {
-  if (configuredMatcher !== CANONICAL_VAULT_LP_MATCHER_PROGRAM_DEVNET) {
+  const canonical = pairedProgramSet(resolveDevnetProgramIds().wrapper).matcher;
+  if (configuredMatcher !== canonical) {
     throw new Error(`The configured matcher ${configuredMatcher} is not the protocol's canonical vault-LP matcher; the vault LP cannot be bound on this deployment.`);
   }
-  return new PublicKey(CANONICAL_VAULT_LP_MATCHER_PROGRAM_DEVNET);
+  return new PublicKey(canonical);
 }
 
 /**
@@ -70,7 +76,7 @@ export function buildP3BindIxs(p: {
   creatorAta: PublicKey;
   vaultToken: PublicKey;
   /** Devnet v2.1: the growth block; the bind (94) then carries l_launch. Absent = today's bind. */
-  growth?: { lLaunchX100: number };
+  growth?: { lLaunchX100: number; tiers?: TierConfig; lTierX100?: number };
 }): TransactionInstruction[] {
   if (!p.market.lpPortfolio.equals(p.vaultLpPortfolio)) throw new Error("market.lpPortfolio must be the new vault LP portfolio");
   return [

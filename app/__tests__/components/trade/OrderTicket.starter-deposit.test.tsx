@@ -51,6 +51,7 @@ vi.mock("@/components/ConnectButton", () => ({ ConnectButton: () => null }));
 
 import { OrderTicket } from "@/components/trade/OrderTicket";
 import { FirstTradeDepositError } from "@/lib/first-trade";
+import { recordFillResult } from "@/lib/limits/fill-check";
 
 const SLAB = "CjdnH8fTmxNMsuUevBt9VjSi87E3ESTcuWuoSrjUjvXE";
 const MINT = new PublicKey("So11111111111111111111111111111111111111112");
@@ -95,7 +96,7 @@ describe("first trade, one approval", () => {
     render(<OrderTicket slabAddress={SLAB} />);
     await waitFor(() => expect(screen.queryByTestId("trade-submit")).not.toBeNull());
     size("5"); // $5 at 1x: margin 5, fee 0.015 => deposit (5.015) * 1.1 = 5.52 (cent up)
-    expect(screen.getByTestId("first-trade-line").textContent).toBe("First trade on this market sets up your trading account (one approval)");
+    expect(screen.getByTestId("first-trade-line").textContent).toBe("First trade on this market sets up your trading account (one approval, plus ~0.05 SOL one-time account rent)");
     expect(submit().textContent).toBe("Deposit 5.52 USDC & Long");
     expect(submit().disabled).toBe(false);
     expect(screen.queryByTestId("deposit-submit")).toBeNull(); // the old 2-step "Start Trading" CTA is gone
@@ -133,6 +134,19 @@ describe("first trade, one approval", () => {
     fireEvent.change(screen.getByTestId("deposit-amount-input"), { target: { value: "1" } });
     expect(screen.getByTestId("first-trade-deposit-too-small")).toBeTruthy();
     expect(submit().disabled).toBe(true);
+  });
+
+  // fund-and-trade records the fill it measured (useFirstTrade -> recordFillResult), not a position
+  // change: a first trade (no position) reads as an open of the MEASURED size, not the requested one.
+  it("the first fund-and-trade says what filled: an open of the measured size", async () => {
+    mocks.fund.mockResolvedValueOnce({ signature: "sigFirst" });
+    recordFillResult("sigFirst", { kind: "partial", filledQ: 2_000_000n });
+    render(<OrderTicket slabAddress={SLAB} />);
+    await waitFor(() => expect(screen.queryByTestId("trade-submit")).not.toBeNull());
+    size("5");
+    await place();
+    await waitFor(() => expect(screen.getByTestId("status-line-body").textContent).toMatch(/^Opened 2 of 5 /));
+    expect(screen.getByTestId("status-line-body").textContent).toMatch(/The market had room for part of your order\.$/);
   });
 
   it("a failed deposit leg is shown, with the next step (never swallowed)", async () => {

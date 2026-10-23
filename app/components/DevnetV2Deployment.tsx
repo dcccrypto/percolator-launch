@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { DEVNET_PROGRAM_IDS } from "@/lib/program-ids";
+import { resolveDevnetProgramIds } from "@/lib/program-ids";
+
+const IDS = resolveDevnetProgramIds();
 
 /**
  * Devnet V2 deployment addresses — read from the app's own program-id config so this can never
@@ -7,10 +9,10 @@ import { DEVNET_PROGRAM_IDS } from "@/lib/program-ids";
  * market is an account owned by the wrapper program, and the live, complete list is /markets.
  */
 const ROWS: { label: string; id: string }[] = [
-  { label: "Wrapper (Percolator program)", id: DEVNET_PROGRAM_IDS.wrapper },
-  { label: "Matcher", id: DEVNET_PROGRAM_IDS.matcher },
-  { label: "Stake", id: DEVNET_PROGRAM_IDS.stake },
-  { label: "NFT", id: DEVNET_PROGRAM_IDS.nft },
+  { label: "Wrapper (Percolator program)", id: IDS.wrapper },
+  { label: "Matcher", id: IDS.matcher },
+  { label: "Stake", id: IDS.stake },
+  { label: "NFT", id: IDS.nft },
 ];
 
 const explorer = (id: string) => `https://explorer.solana.com/address/${id}?cluster=devnet`;

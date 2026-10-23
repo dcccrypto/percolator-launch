@@ -32,6 +32,8 @@ vi.mock("@/hooks/useWalletCompat", () => ({
     signMessage: undefined,
     disconnect: async () => {},
   }),
+  // v2.2 only (LaunchSuccess reads the share token through it); never called with the flag off.
+  useConnectionCompat: () => ({ connection: {} }),
 }));
 
 // Mock next/navigation — LaunchSuccess calls useRouter() for post-mint navigation.
@@ -251,12 +253,12 @@ describe("LaunchSuccess", () => {
 
   it("shows market preview card with parameters", () => {
     render(<LaunchSuccess {...defaultProps} />);
-    // Fee, leverage, and slab capacity are shown in the market preview.
-    // v17 slabs have no tier — see LaunchSuccess.tsx's "Max capacity" comment.
+    // Fee and leverage are shown in the market preview. v17 slabs have no tier, and a new market is no
+    // longer "max capacity" (one asset slot): that phrase must not come back.
     // UX WP-10 (§5.1): fees as a percentage, not bps.
     expect(screen.getAllByText(/0\.30%/).length).toBeGreaterThan(0);
     expect(screen.getByText(/10x/)).toBeDefined();
-    expect(screen.getByText(/max capacity/i)).toBeDefined();
+    expect(screen.queryByText(/max capacity/i)).toBeNull();
   });
 
   it("copy button changes to checkmark on click", async () => {

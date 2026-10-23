@@ -3,6 +3,27 @@ import { getRpcEndpoint, getAllProgramIds, getConfig } from "@/lib/config";
 import { createHash, timingSafeEqual } from "crypto";
 import { getClientIp } from "@/lib/get-client-ip";
 import { createUpstashRateLimiter } from "@/lib/upstash-rate-limit";
+import { rpcCallCost } from "@/lib/rpc-call-cost";
+import { checkAdminSecret } from "@/lib/admin-secret";
+import { createAccountInfoCoalescer, parseAccountInfoParams, type Sender, type JsonRpcResponse } from "@/lib/rpc-coalesce";
+import { buildUpstreams, redactJson, safeErrorText, sharedUpstreamPool, UpstreamRateLimitedError, type UpstreamSpec } from "@/lib/rpc-upstreams";
+import { RATE_LIMITED_RPC_ERROR } from "@/lib/server-rpc";
+
+/**
+ * AUD-RAPP #3563: results that mean "every upstream refused for rate". A single request answers HTTP 429 with one; a batch answers 429
+ * only when every item is one. Kept out of the JSON (a WeakSet), so the body is a plain JSON-RPC error either way.
+ */
+const rateLimitedResults = new WeakSet<object>();
+function upstreamFailureResult(err: unknown, id: unknown): Record<string, unknown> {
+  if (err instanceof UpstreamRateLimitedError) {
+    const r = { jsonrpc: "2.0", error: { ...RATE_LIMITED_RPC_ERROR }, id };
+    rateLimitedResults.add(r);
+    return r;
+  }
+  return { jsonrpc: "2.0", error: { code: -32603, message: "Upstream RPC request failed" }, id };
+}
+const isRateLimitedResult = (r: unknown): boolean => typeof r === "object" && r !== null && rateLimitedResults.has(r);
+import { recordAccountRead, recordRpcRequest, recordUpstreamCall, getRpcMetricsSnapshot } from "@/lib/rpc-metrics";
 
 export const dynamic = "force-dynamic";
 
@@ -177,6 +198,23 @@ function resolveUpstream(networkOverride?: "mainnet" | "devnet"): Upstream {
   return upstream;
 }
 
+/** The ordered upstreams (primary, then the server-env fallbacks) for a request's network. Same list, same allowlist, for every call. */
+function upstreamsFor(networkOverride?: "mainnet" | "devnet"): UpstreamSpec[] {
+  const primary = resolveUpstream(networkOverride);
+  return buildUpstreams(networkOverride ?? getDeploymentNetwork(), primary);
+}
+
+/**
+ * One JSON-RPC call through the ordered upstreams (lib/rpc-upstreams.ts): the first healthy one answers; quota / 429 / 5xx / network
+ * failures move on to the next and cool the failed one down. Anything returned is scrubbed of upstream URLs, hosts and keys; a total
+ * failure throws one generic error (no upstream detail).
+ */
+async function callUpstream(body: unknown, networkOverride?: "mainnet" | "devnet"): Promise<JsonRpcResponse> {
+  const ups = upstreamsFor(networkOverride);
+  const data = await sharedUpstreamPool().post(ups, body, networkOverride ?? getDeploymentNetwork());
+  return redactJson(data, ups) as JsonRpcResponse;
+}
+
 /**
  * Allowlist of JSON-RPC methods that may be proxied to Helius.
  * Prevents abuse of the API key for unauthorized operations.
@@ -189,6 +227,8 @@ const ALLOWED_RPC_METHODS = new Set([
   // Health & cluster
   "getHealth",
   "getVersion",
+  // v2.2 QA NB-2: the client proves the cluster once per session before it builds a transaction (lib/v22/devnet-guard.ts).
+  "getGenesisHash",
   "getSlot",
   "getBlockHeight",
   "getEpochInfo",
@@ -229,6 +269,7 @@ const MAX_BATCH_SIZE = 40;
 const CACHEABLE_METHODS: Record<string, number> = {
   getHealth: 5_000,
   getVersion: 60_000,
+  getGenesisHash: 3_600_000,
   getSlot: 2_000,
   getBlockHeight: 2_000,
   getEpochInfo: 10_000,
@@ -278,7 +319,7 @@ function setCache(key: string, data: unknown, ttlMs: number): void {
 }
 
 /** Methods that mutate state — never cache, never deduplicate */
-const MUTATING_METHODS = new Set<string>();
+const MUTATING_METHODS = new Set<string>(["sendTransaction", "simulateTransaction"]);
 
 /**
  * In-flight request deduplication — if the same read request is already being
@@ -384,6 +425,27 @@ function validateRequest(req: Record<string, unknown>): { jsonrpc: string; error
  */
 const RPC_UPSTREAM_TIMEOUT_MS = 15_000;
 
+/**
+ * One coalescer per upstream (network). Concurrent getAccountInfo reads with the same config are
+ * merged into a single getMultipleAccounts upstream call (1 credit for up to 100 accounts).
+ * Kill switch: RPC_COALESCE_ACCOUNT_INFO=0 restores one upstream call per read.
+ */
+const coalescers = new Map<string, ReturnType<typeof createAccountInfoCoalescer>>();
+function coalescerFor(networkOverride?: "mainnet" | "devnet") {
+  const k = networkOverride ?? "default";
+  let c = coalescers.get(k);
+  if (!c) {
+    const send: Sender = async (body) => {
+      // Upstream calls actually billed; the browser-facing `in` count is recorded per request.
+      recordUpstreamCall(body.method);
+      return callUpstream(body, networkOverride);
+    };
+    c = createAccountInfoCoalescer(send);
+    coalescers.set(k, c);
+  }
+  return c;
+}
+
 async function processSingleRequest(
   req: JsonRpcRequest,
   networkOverride?: "mainnet" | "devnet",
@@ -400,6 +462,8 @@ async function processSingleRequest(
   if (ttl && !isMutating) {
     const cached = getCached(cacheKey);
     if (cached !== undefined) {
+      recordRpcRequest(method, "hit");
+      recordAccountRead(method, req.params);
       // Return cached response with the correct request id
       return { ...(cached as Record<string, unknown>), id: req.id };
     }
@@ -407,6 +471,8 @@ async function processSingleRequest(
 
   // Deduplicate in-flight requests for read-only methods
   if (!isMutating && inflightRequests.has(cacheKey)) {
+    recordRpcRequest(method, "coalesced");
+    recordAccountRead(method, req.params);
     // #2522: this await is OUTSIDE the try/catch below, so a rejection here
     // bypasses BUG 14's batch protection and fails the whole batch. That was
     // rare while the upstream fetch had no timeout (it hung rather than
@@ -416,30 +482,28 @@ async function processSingleRequest(
       const result = await inflightRequests.get(cacheKey)!;
       return { ...(result as Record<string, unknown>), id: req.id };
     } catch (err) {
-      console.error(`[/api/rpc] deduped request failed for method ${method}:`, err);
-      return {
-        jsonrpc: "2.0",
-        error: { code: -32603, message: "Upstream RPC request failed" },
-        id: req.id,
-      };
+      console.error(`[/api/rpc] deduped request failed for method ${method}:`, safeErrorText(err, upstreamsFor(networkOverride)));
+      return upstreamFailureResult(err, req.id);
     }
   }
 
-  const fetchPromise = (async () => {
+  const coalescible =
+    method === "getAccountInfo" && process.env.RPC_COALESCE_ACCOUNT_INFO !== "0"
+      ? parseAccountInfoParams(req.params)
+      : null;
+  recordRpcRequest(method, "miss");
+  recordAccountRead(method, req.params);
+  const fetchPromise = coalescible
+    ? coalescerFor(networkOverride).read(coalescible.pubkey, coalescible.config, req.id)
+    : (async () => {
     // #2522: bound the upstream call. Without a signal this fetch inherits the
     // platform default (effectively none), so one unresponsive RPC holds the
     // route open until the function times out. That is worse than it looks here:
     // read-only requests are DEDUPLICATED on `cacheKey`, so every later caller
     // for the same method awaits the SAME hung promise (`:335-337`) rather than
     // issuing its own — one slow upstream call stalls all of them together.
-    const upstream = resolveUpstream(networkOverride);
-    const response = await fetch(upstream.url, {
-      method: "POST",
-      headers: upstream.headers,
-      body: JSON.stringify(req),
-      signal: AbortSignal.timeout(RPC_UPSTREAM_TIMEOUT_MS),
-    });
-    return await response.json();
+    recordUpstreamCall(method);
+    return await callUpstream(req, networkOverride);
   })();
 
   // Register in-flight for dedup
@@ -464,12 +528,8 @@ async function processSingleRequest(
     // discarding every other (successful) result with one HTTP 500. Return a
     // JSON-RPC error object carrying this item's id instead, so the rest of the
     // batch — and single-request callers — still get a well-formed response.
-    console.error(`[/api/rpc] processSingleRequest failed for method ${method}:`, err);
-    return {
-      jsonrpc: "2.0",
-      error: { code: -32603, message: "Upstream RPC request failed" },
-      id: req.id,
-    };
+    console.error(`[/api/rpc] processSingleRequest failed for method ${method}:`, safeErrorText(err, upstreamsFor(networkOverride)));
+    return upstreamFailureResult(err, req.id);
   } finally {
     inflightRequests.delete(cacheKey);
   }
@@ -578,10 +638,10 @@ const rpcRateLimiter = createUpstashRateLimiter({
   prefix: "rl:rpc-proxy",
 });
 
-async function isRateLimited(req: NextRequest): Promise<boolean> {
+async function isRateLimited(req: NextRequest, cost: number): Promise<boolean> {
   if (!Number.isFinite(RATE_LIMIT_MAX) || RATE_LIMIT_MAX <= 0) return false; // disabled
   const ip = getClientIp(req);
-  const result = await rpcRateLimiter.check(ip);
+  const result = await rpcRateLimiter.check(ip, cost);
   return !result.allowed;
 }
 
@@ -594,8 +654,29 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch (error) {
+    console.error("[/api/rpc] Error:", safeErrorText(error));
+    return NextResponse.json(
+      { jsonrpc: "2.0", error: { code: -32700, message: "Parse error" }, id: null },
+      { status: 400 }
+    );
+  }
+
+  // S3-C4: refuse an oversized batch BEFORE charging the limiter, so the cap is a
+  // hard bound on calls per HTTP request.
+  if (Array.isArray(body) && body.length > MAX_BATCH_SIZE) {
+    return NextResponse.json(
+      { jsonrpc: "2.0", error: { code: -32600, message: `Batch too large (max ${MAX_BATCH_SIZE})` }, id: null },
+      { status: 400 }
+    );
+  }
+
   // #2210: per-IP rate limit — Origin is spoofable, so cap drain rate regardless.
-  if (await isRateLimited(req)) {
+  // S3-C4: a batch is charged one unit per entry.
+  if (await isRateLimited(req, rpcCallCost(body))) {
     return NextResponse.json(
       { jsonrpc: "2.0", error: { code: -32005, message: "Rate limit exceeded" }, id: null },
       { status: 429 }
@@ -603,8 +684,6 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const body = await req.json();
-    const isBatch = Array.isArray(body);
 
     // PERC-469: Optional ?network=mainnet|devnet query param lets Privy configure both
     // Solana chains through the same proxy without exposing any Helius API key client-side.
@@ -628,18 +707,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (isBatch) {
+    if (Array.isArray(body)) {
       // --- Batch request handling ---
       if (body.length === 0) {
         return NextResponse.json(
           { jsonrpc: "2.0", error: { code: -32600, message: "Empty batch" }, id: null },
-          { status: 400 }
-        );
-      }
-
-      if (body.length > MAX_BATCH_SIZE) {
-        return NextResponse.json(
-          { jsonrpc: "2.0", error: { code: -32600, message: `Batch too large (max ${MAX_BATCH_SIZE})` }, id: null },
           { status: 400 }
         );
       }
@@ -660,7 +732,7 @@ export async function POST(req: NextRequest) {
       const results = settled.map((r, i) => {
         if (r.status === "fulfilled") return r.value;
         const item = body[i] as Record<string, unknown> | undefined;
-        console.error(`[/api/rpc] batch item ${i} rejected:`, r.reason);
+        console.error(`[/api/rpc] batch item ${i} rejected:`, safeErrorText(r.reason, upstreamsFor(networkOverride)));
         return {
           jsonrpc: "2.0",
           error: { code: -32603, message: "Upstream RPC request failed" },
@@ -668,11 +740,12 @@ export async function POST(req: NextRequest) {
         };
       });
 
-      return NextResponse.json(results, { status: 200 });
+      const allRateLimited = results.length > 0 && results.every(isRateLimitedResult);
+      return NextResponse.json(results, { status: allRateLimited ? 429 : 200 });
     }
 
     // --- Single request handling ---
-    const error = validateRequest(body);
+    const error = validateRequest(body as Record<string, unknown>);
     if (error) {
       const status = error.error.code === -32601 ? 403 : 400;
       return NextResponse.json(error, { status });
@@ -681,9 +754,10 @@ export async function POST(req: NextRequest) {
     const result = await processSingleRequest(body as JsonRpcRequest, networkOverride);
     // JSON-RPC errors are application-level, not transport-level — always return HTTP 200.
     // Returning 400 for RPC errors breaks @solana/web3.js which treats non-2xx as network failures.
-    return NextResponse.json(result, { status: 200 });
+    // The one exception is a real rate limit from every upstream: HTTP 429, which web3.js handles as such (back-off).
+    return NextResponse.json(result, { status: isRateLimitedResult(result) ? 429 : 200 });
   } catch (error) {
-    console.error("[/api/rpc] Error:", error);
+    console.error("[/api/rpc] Error:", safeErrorText(error));
     return NextResponse.json(
       { jsonrpc: "2.0", error: { code: -32603, message: "Internal RPC proxy error" }, id: null },
       { status: 500 }
@@ -691,7 +765,13 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  // Admin-only live counters (per serverless instance): ?stats=1 + x-admin-secret.
+  // Fails closed when ADMIN_API_SECRET is unset. The same numbers are logged once a minute
+  // per instance as `[rpc-metrics]`, so verification does not depend on this route.
+  if (req.nextUrl.searchParams.get("stats") === "1" && checkAdminSecret(req, "rpc_stats")) {
+    return NextResponse.json(getRpcMetricsSnapshot(), { headers: { "Cache-Control": "no-store" } });
+  }
   return NextResponse.json(
     { error: "RPC proxy only accepts POST requests" },
     { status: 405 }

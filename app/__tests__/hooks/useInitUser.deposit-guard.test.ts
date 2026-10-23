@@ -33,6 +33,8 @@ vi.mock("@solana/web3.js", async () => {
     SystemProgram: { ...actual.SystemProgram, createAccount: () => new actual.TransactionInstruction({ keys: [], programId: actual.SystemProgram.programId }) },
   };
 });
+// The hook asks lib/v22/layout whether the slab is a wrapper market (flag off it delegates to the SDK isV17Account, flag on it checks magic + VERSION).
+vi.mock("@/lib/v22/layout", async (orig) => ({ ...(await orig<object>()), isWrapperAccount: () => true }));
 vi.mock("@percolatorct/sdk", async () => {
   const actual = await vi.importActual<typeof import("@percolatorct/sdk")>("@percolatorct/sdk");
   return {

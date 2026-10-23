@@ -1,0 +1,9 @@
+[package]
+name = "d1-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+[workspace]
+[dependencies]
+percolator = { path = "<PERCOLATOR_SRC>/percolator", features = ["fork-facade"] }
+percolator-prog = { path = "<PERCOLATOR_SRC>/percolator-prog", default-features = false, features = ["no-entrypoint", "devnet"] }

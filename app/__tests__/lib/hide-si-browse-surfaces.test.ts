@@ -15,9 +15,10 @@ describe("SI hidden from every browse surface (2026-10-02)", () => {
     expect(slabs).not.toContain(SI);
     expect(slabs).toContain(PERC);
   });
-  it("trade-page selector and switcher apply the listing-hidden filter", () => {
-    for (const f of ["components/trade/MarketSelector.tsx", "components/trade/MarketSwitcher.tsx"]) {
-      expect(readFileSync(join(__dirname, "../..", f), "utf8")).toMatch(/isHiddenFromListing\(/);
-    }
+  it("trade-page selector and switcher apply the browse filter (listing-hidden is part of isBrowsableMarketRow)", () => {
+    expect(readFileSync(join(__dirname, "../..", "components/trade/MarketSelector.tsx"), "utf8")).toMatch(/isBrowsableMarketRow\(/);
+    // The switcher's lists come from lib/market-switcher-lists.ts browsableRows(), which applies the predicate.
+    expect(readFileSync(join(__dirname, "../..", "components/trade/MarketSwitcher.tsx"), "utf8")).toMatch(/browsableRows\(statsMap\)/);
+    expect(readFileSync(join(__dirname, "../..", "lib/market-switcher-lists.ts"), "utf8")).toMatch(/isBrowsableMarketRow\(/);
   });
 });

@@ -13,7 +13,6 @@ const base = {
   lpSupply: 2_000_000_000n,
   vaultBalance: 2_200_000_000n,
   decimals: 6,
-  lpDecimals: 6,
   collateralSymbol: "USDC",
   redemptionRateE6: 1_100_000n,
   loading: false,

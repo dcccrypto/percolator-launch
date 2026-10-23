@@ -1,5 +1,6 @@
 "use client";
 
+import { lotExpOf, tokenUsdOfLotUsd } from "@/lib/v22/lot";
 import { useMemo } from "react";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useSlabState } from "@/components/providers/SlabProvider";
@@ -27,7 +28,9 @@ const NONE: PositionLinePrices = { liq: null, entry: null, entryIsEstimate: fals
  */
 export function usePositionLinePrices(slabAddress: string): PositionLinePrices {
   const ua = useUserAccount();
-  const { config, params, adlFactors, wrapperConfigV17 } = useSlabState();
+  const { config, params, adlFactors, wrapperConfigV17, raw: slabRaw } = useSlabState();
+  // v2.2 lots: entry / liq are per LOT; chart lines are per TOKEN (identity at lotExp 0).
+  const lotExp = lotExpOf(slabRaw);
 
   const pnl = useMemo(() => {
     if (!ua || ua.account.positionSize === 0n) return null;
@@ -50,8 +53,8 @@ export function usePositionLinePrices(slabAddress: string): PositionLinePrices {
   // The engine liquidation price on EFFECTIVE size, straight from the shared result (0n = none, null = unknown).
   const liq = pnl.liquidationPriceE6;
   return {
-    entry: Number(pnl.entry) / 1e6,
+    entry: tokenUsdOfLotUsd(Number(pnl.entry) / 1e6, lotExp),
     entryIsEstimate: pnl.isEstimate,
-    liq: liq != null && liq > 0n ? Number(liq) / 1e6 : null,
+    liq: liq != null && liq > 0n ? tokenUsdOfLotUsd(Number(liq) / 1e6, lotExp) : null,
   };
 }

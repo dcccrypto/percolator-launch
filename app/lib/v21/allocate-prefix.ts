@@ -20,6 +20,7 @@ import { deriveLpVaultRegistryPda, deriveVaultLpState } from "@/lib/limits/p3-ix
 import { extractErrorCode } from "@/lib/errorMessages";
 import { WRAPPER_ERR_V21 } from "./wrapper-errors";
 import { isDevnetV21Enabled } from "./flag";
+import { withMarketTailsV22 } from "@/lib/v22/market-tails";
 import { buildVaultLpAllocateIx } from "./sdk";
 
 /** The order grows the taker's exposure (an open, add or flip). A close or reduce is false. */
@@ -64,7 +65,7 @@ export async function planAllocatePrefix(
     // The bound LP portfolio is recorded in the vault-LP state.
     const st = decodeVaultLpState(new Uint8Array(si.data));
     if (!st) return [];
-    const ix = buildVaultLpAllocateIx({
+    const built = buildVaultLpAllocateIx({
       programId: p.programId,
       cranker: p.cranker,
       market: p.market,
@@ -74,6 +75,11 @@ export async function planAllocatePrefix(
       ledger: deriveLpBackingLedger(p.programId, p.market, domain)[0],
       siblingLedger: deriveLpBackingLedger(p.programId, p.market, domain ^ 1)[0],
     });
+    // v2.2: a market with a bond tranche needs it at [9] (registry bond flag). Apply the SAME tails the send path applies
+    // BEFORE the gate, else the gate simulation fails (NotEnoughAccountKeys) and the prefix is silently dropped. The
+    // choke point is idempotent (it never appends a tranche that is already there), so the send does not double it.
+    // Flag off: returned unchanged, no RPC.
+    const [ix] = await withMarketTailsV22(deps.connection, p.programId, [built]);
     const sim = await deps.simulate([ix]);
     if (sim.rpcFailed || sim.err) return []; // no verdict, or "no room / drawing / impaired": not needed now
     return [ix];

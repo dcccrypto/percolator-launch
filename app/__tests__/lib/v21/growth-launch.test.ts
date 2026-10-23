@@ -108,6 +108,14 @@ describe("wire: no growth => byte-for-byte today's InitMarket and bind", () => {
     expect(dv.getUint16(legacy.length, true)).toBe(g.rGapBps);
     expect(dv.getUint16(legacy.length + 2, true)).toBe(g.lLaunchX100);
   });
+  it("D-L1: collateral above 12 decimals cannot carry a growth market: the encoder refuses before anything is signed", () => {
+    const g = { ...defaultGrowthLaunch(base()), collateralDecimals: 13 };
+    expect(() => encodeInitMarketData(buildV17InitMarketArgs({ ...params, growth: g }, derived), g)).toThrow(/12/);
+    const ok = { ...g, collateralDecimals: 12 };
+    expect(() => encodeInitMarketData(buildV17InitMarketArgs({ ...params, growth: ok }, derived), ok)).not.toThrow();
+    const six = { ...g, collateralDecimals: 6 };
+    expect(() => encodeInitMarketData(buildV17InitMarketArgs({ ...params, growth: six }, derived), six)).not.toThrow();
+  });
   it("the SDK refuses an r_gap below the floor before anything is signed", () => {
     const g = { ...defaultGrowthLaunch(base()), rGapBps: 100 };
     expect(() => encodeInitMarketData(buildV17InitMarketArgs({ ...params, growth: g }, derived), g)).toThrow(/floor/);

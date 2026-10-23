@@ -19,6 +19,7 @@
 // the rate-limiting, blocklist, redirect, and CSP-nonce guarantees are intact.
 // NOTE: `proxy.ts` must export a `proxy` (or default) function; a route-segment
 // `export const runtime = ...` is NOT allowed (proxy is always Node.js).
+import { priceWsConnectSrc } from "@/lib/price-ws-csp";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { Redis } from "@upstash/redis";
@@ -26,6 +27,7 @@ import { Ratelimit } from "@upstash/ratelimit";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist-edge";
 import { parseBlocklist, isIpBlocked } from "@/lib/ip-blocklist";
 import { gateDecision, LOCKED_PATH, SESSION_COOKIE } from "@/lib/playground-gate";
+import { trustedProxyDepth } from "@/lib/trusted-proxy-depth";
 
 // ── Rate limiter configuration ───────────────────────────────────────────────
 // Two tiers: RPC proxy gets a higher limit since Solana web3.js generates many calls per page load.
@@ -197,6 +199,11 @@ const _rawBlocklist = (process.env.IP_BLOCKLIST ?? "")
 const _blocklist = parseBlocklist(_rawBlocklist, (entry, reason) => {
   console.warn(`[middleware] IP_BLOCKLIST: ignoring "${entry}" — ${reason}`);
 });
+// #3483: at depth 0 (no proxy) the client IP resolves to "unknown", which matches no entry,
+// so a configured blocklist cannot apply. Say so instead of looking protected.
+if (_blocklist.length > 0 && trustedProxyDepth() === 0) {
+  console.warn("[middleware] IP_BLOCKLIST is set but TRUSTED_PROXY_DEPTH=0: the blocklist cannot match any request.");
+}
 
 // ── Slab blocklist (GH#1363, GH#1390) ────────────────────────────────────────
 // next.config.ts rewrites /api/funding/:slab, /api/open-interest/:slab, and
@@ -284,7 +291,6 @@ const OLD_HOST_PASSTHROUGH_API: ReadonlyArray<{ method: string; re: RegExp }> = 
   { method: "GET", re: /^\/api\/playground\/registered-markets\/?$/ },
   { method: "PATCH", re: /^\/api\/markets\/[1-9A-HJ-NP-Za-km-z]{32,44}\/?$/ },
   { method: "POST", re: /^\/api\/oracle-keeper\/register\/?$/ },
-  { method: "POST", re: /^\/api\/oracle\/set-price-cap\/?$/ },
 ];
 function isOldHostPassthrough(pathname: string, method: string): boolean {
   if (OLD_HOST_PASSTHROUGH_PREFIXES.some((p) => pathname.startsWith(p))) return true;
@@ -406,12 +412,11 @@ export async function middleware(request: NextRequest) {
   // ── IP Blocklist check ─────────────────────────────────────────────────────
   // Resolve client IP using the same proxy-depth logic as the rate limiter.
   if (_blocklist.length > 0) {
-    const _proxyDepth = Math.max(0, Number(process.env.TRUSTED_PROXY_DEPTH ?? 1));
+    const _proxyDepth = trustedProxyDepth();
     let _clientIp = "unknown";
     // NOTE: depth=0 means "no proxy" — _clientIp stays "unknown" and
-    // isIpBlocked("unknown", ...) returns false, effectively disabling the
-    // Edge Runtime blocklist. The Hono ip-blocklist.ts middleware
-    // handles depth=0 correctly for the API server path.
+    // isIpBlocked("unknown", ...) returns false, so the blocklist cannot apply
+    // (warned once at module load, above).
     if (_proxyDepth > 0) {
       const _fwd = request.headers.get("x-forwarded-for");
       if (_fwd) {
@@ -431,7 +436,7 @@ export async function middleware(request: NextRequest) {
   // Off unless PLAYGROUND_GATE_ENABLED === "true" (kill switch: unset → this
   // block is a no-op and everything below behaves exactly as before). On: no
   // valid pg_access session cookie (minted by /enter from a percolator.trade
-  // handoff or the team bypass) → pages 307 to /locked, /api/* 401 JSON.
+  // handoff, the team bypass or the judge door) → pages 307 to /locked, /api/* 401 JSON.
   // Exemptions and why each is safe: lib/playground-gate.ts.
   {
     const decision = await gateDecision(
@@ -519,7 +524,7 @@ export async function middleware(request: NextRequest) {
   // - TRUSTED_PROXY_DEPTH=1: One proxy layer (Vercel, Cloudflare) — use last IP
   // - TRUSTED_PROXY_DEPTH=2: Two proxy layers — use second-to-last IP
   // This prevents IP spoofing attacks via forged X-Forwarded-For headers.
-  const PROXY_DEPTH = Math.max(0, Number(process.env.TRUSTED_PROXY_DEPTH ?? 1));
+  const PROXY_DEPTH = trustedProxyDepth();
   let ip = "unknown";
   if (PROXY_DEPTH > 0) {
     const forwarded = request.headers.get("x-forwarded-for");
@@ -611,6 +616,8 @@ function addSecurityHeaders(response: NextResponse, nonce?: string) {
   // on-chain seed only, with no other visible symptom). Dev-only, gated the
   // same way as devEval above — never present in a production CSP.
   const devLocalWs = isDev ? "ws://localhost:* http://localhost:* " : "";
+  // The configured price-WS origin itself (exact host only; lib/price-ws-csp.ts). Empty unless NEXT_PUBLIC_WS_URL is a wss:// URL.
+  const priceWs = priceWsConnectSrc(process.env.NEXT_PUBLIC_WS_URL);
   const csp = [
     "default-src 'self'",
     // challenges.cloudflare.com: Turnstile widget script (api.js). Loaded
@@ -632,12 +639,15 @@ function addSecurityHeaders(response: NextResponse, nonce?: string) {
     // challenges.cloudflare.com is appended for the Turnstile widget's
     // XHR back-channel (telemetry + challenge-state checks). Same
     // origin as the script load.
-    `connect-src 'self' https://privy.percolator.trade wss://privy.percolator.trade ${devLocalWs}https://*.solana.com wss://*.solana.com https://*.supabase.co wss://*.supabase.co https://*.vercel-insights.com https://api.coingecko.com https://api.geckoterminal.com https://*.helius-rpc.com wss://*.helius-rpc.com https://api.dexscreener.com https://*.up.railway.app wss://*.up.railway.app https://lite.jup.ag https://token.jup.ag https://tokens.jup.ag https://auth.privy.io https://embedded-wallets.privy.io https://*.privy.systems https://*.rpc.privy.systems https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org wss://www.walletlink.org https://challenges.cloudflare.com https://www.googletagmanager.com https://*.google-analytics.com https://*.analytics.google.com https://cloudflareinsights.com blob:`,
+    `connect-src 'self' https://privy.percolator.trade wss://privy.percolator.trade ${devLocalWs}${priceWs}https://*.solana.com wss://*.solana.com https://*.supabase.co wss://*.supabase.co https://*.vercel-insights.com https://api.coingecko.com https://api.geckoterminal.com https://*.helius-rpc.com wss://*.helius-rpc.com https://api.dexscreener.com https://*.up.railway.app wss://*.up.railway.app https://lite.jup.ag https://token.jup.ag https://tokens.jup.ag https://auth.privy.io https://embedded-wallets.privy.io https://*.privy.systems https://*.rpc.privy.systems https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org wss://www.walletlink.org https://challenges.cloudflare.com https://www.googletagmanager.com https://*.google-analytics.com https://*.analytics.google.com https://cloudflareinsights.com blob:`,
     // Removed https://*.vercel.app wildcard (issue #635) — no legitimate use case for embedding
     // arbitrary Vercel-hosted content in iframes. frame-src controls outbound iframe embedding.
     // challenges.cloudflare.com is the iframe origin the Turnstile widget
     // renders into — distinct from the api.js script-src entry above.
-    "frame-src 'self' https://privy.percolator.trade https://auth.privy.io https://embedded-wallets.privy.io https://*.privy.systems https://phantom.app https://solflare.com https://verify.walletconnect.com https://verify.walletconnect.org https://challenges.cloudflare.com",
+    // SOL-3 / S-2 (v2.2 QA 2026-10-11): Solflare's connect/sign iframe is served from
+    // connect.solflare.com (not solflare.com); without it Chrome blocks the frame and shows a
+    // full-page "This content is blocked" overlay that eats clicks after every wallet action.
+    "frame-src 'self' https://privy.percolator.trade https://auth.privy.io https://embedded-wallets.privy.io https://*.privy.systems https://phantom.app https://solflare.com https://connect.solflare.com https://verify.walletconnect.com https://verify.walletconnect.org https://challenges.cloudflare.com",
     // Removed https://*.vercel.app wildcard (issue #632) — any Vercel project could embed the app,
     // creating a clickjacking surface over wallet/sign flows. Keep only the specific preview URL.
     "frame-ancestors 'self' https://percolatorlaunch.com https://*.percolatorlaunch.com https://percolator-launch.vercel.app",

@@ -14,6 +14,7 @@
  */
 
 import { bpsPct } from "@/lib/format";
+import { V22_COPY } from "@/lib/v22/copy";
 import type { FC } from "react";
 import {
   FEE_LEGS,
@@ -32,6 +33,11 @@ interface FeeBreakdownProps {
   feeBps?: number | null;
   /** Render the staker row, which is 0% and easy to mistake for the insurance share. */
   showStaker?: boolean;
+  /**
+   * v2.2 fee-only stake pools: stakers are paid nothing while the market runs (V22_COPY.stake.closeOut.feeOnly), so
+   * the Stakers row says that at 0% and the insurance leg doesn't promise them its share.
+   */
+  stakersFeeOnly?: boolean;
   className?: string;
 }
 
@@ -39,6 +45,7 @@ export const FeeBreakdown: FC<FeeBreakdownProps> = ({
   highlight,
   feeBps,
   showStaker = false,
+  stakersFeeOnly = false,
   className = "",
 }) => {
   return (
@@ -64,7 +71,7 @@ export const FeeBreakdown: FC<FeeBreakdownProps> = ({
             >
               <span className={on ? "text-[var(--text)]" : "text-[var(--text-secondary)]"}>
                 {leg.label}
-                <span className="ml-1 text-[var(--text-muted)]">— {leg.note}</span>
+                <span className="ml-1 text-[var(--text-muted)]">— {stakersFeeOnly && leg.id === "insurance" ? V22_COPY.stake.feeOnlyInsuranceLeg : leg.note}</span>
               </span>
               <span
                 className={`shrink-0 font-mono tabular-nums ${
@@ -90,12 +97,18 @@ export const FeeBreakdown: FC<FeeBreakdownProps> = ({
             >
               Stakers
               <span className="ml-1 text-[var(--text-muted)]">
-                — the insurance share above, paid into the stake pool automatically. Stakers
-                back that fund and take first loss.
+                {stakersFeeOnly ? (
+                  <>— {V22_COPY.stake.feeOnlyStakersRow}</>
+                ) : (
+                  <>
+                    — the insurance share above, paid into the stake pool automatically. Stakers
+                    back that fund and take first loss.
+                  </>
+                )}
               </span>
             </span>
             <span className="shrink-0 font-mono tabular-nums text-[var(--text-secondary)]">
-              {STAKER_FEE_SHARE_BPS / 100}%
+              {stakersFeeOnly ? 0 : STAKER_FEE_SHARE_BPS / 100}%
             </span>
           </li>
         )}

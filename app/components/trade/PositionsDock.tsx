@@ -27,15 +27,28 @@
  * `OrderTicket` already owns the deposit entry point (its account row).
  */
 
+import { catchUpAvailableLine } from "@/lib/limits/catchup-estimate";
+import { LastCloseTxLink } from "@/components/trade/LastCloseTxLink";
 import { computeMarginCushion, severityFromCushion } from "@/lib/liquidation-risk";
 import { FC, memo, useMemo, useState } from "react";
 import { useUserAccount, useUserAccountScanPending } from "@/hooks/useUserAccount";
+import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useNftWrappedPosition } from "@/hooks/useNftWrappedPosition";
 import { PositionNftMenu, ClosedPositionNftNotice, NFT_MENU_COPY } from "@/components/trade/PositionNftMenu";
 import { useClosePosition } from "@/hooks/useClosePosition";
+import { AddMarginModal } from "@/components/trade/AddMarginModal";
 import { PnlShareButton } from "@/components/share/PnlShareButton";
 import { isPnlPoolCapped, poolPayableCapacity, type PnlCardData } from "@/lib/pnl-card";
 import { useSlabState } from "@/components/providers/SlabProvider";
+import { StaleSettleNotice } from "@/components/trade/StaleSettleNotice";
+import { marketResolvedV22 } from "@/lib/v22/stale-resolve";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { useBandRentView } from "@/hooks/useBandRentView";
+import { useLotTradingGuard } from "@/hooks/useLotTradingGuard";
+import { HoldingFeeChip } from "@/components/v22/HoldingFeeChip";
+import { bandCatchUpMs, closeBlockedByBand, legBelowHalfMin } from "@/lib/v22/band-rent-state";
+import { V22_COPY } from "@/lib/v22/copy";
+import { formatLotPriceE6, formatLotQ, lotExpOf } from "@/lib/v22/lot";
 import { useMarketLimits } from "@/hooks/useMarketLimits";
 import { PositionLimitsRow } from "@/components/limits/PositionLimitsRow";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
@@ -47,6 +60,7 @@ import { AccountKind } from "@percolatorct/sdk";
 import {
   formatTokenAmount,
   formatUsdPriceE6,
+  formatUsdAmount,
   formatPnl,
   formatPercent,
 } from "@/lib/format";
@@ -67,6 +81,7 @@ import { bigintToFloat } from "@/lib/formatters";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { ClosePositionModal } from "./ClosePositionModal";
 import { OtherMarketPositions } from "./OtherMarketPositions";
+import { MOBILE_CARD_ACTIONS, MOBILE_CARD_CELL, MOBILE_CARD_ROW } from "./positionCardClasses";
 import { WarmupProgress } from "./WarmupProgress";
 import { useMarketFillCap } from "@/hooks/useMarketFillCap";
 import { TradeHistory } from "./TradeHistory";
@@ -84,9 +99,10 @@ import { usePriceFlash } from "@/hooks/usePriceFlash";
 import { onChainMarkE6, terminalPositionPnl } from "@/lib/position-pnl";
 import { isSentinelValue } from "@/lib/health";
 import { RenderProfiler } from "@/components/dev/RenderProfiler";
-import { isOracleStaleBlocking } from "@/lib/oracle-stale-gate";
-import { describeLiqPrice } from "@/lib/liq-price-display";
+import { oracleAgeSecs, oracleCloseGate } from "@/lib/oracle-stale-gate";
+import { describeLiqDistance, describeLiqPrice } from "@/lib/liq-price-display";
 import { LiqPriceValue } from "./LiqPriceValue";
+import { positionSizeUsdText } from "@/lib/q-usd";
 
 function abs(n: bigint): bigint {
   return n < 0n ? -n : n;
@@ -114,22 +130,26 @@ function EmptyState({ subtitle, title = "No open positions" }: { subtitle: strin
  * reason (Phase 0/3's documented TradePageInner cascade) skips this row
  * unless its own props (slabAddress, a stable string) actually change.
  */
-const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ slabAddress }) {
+const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(function PositionRow({ slabAddress, wrappedRow }) {
   const realUserAccount = useUserAccount();
   const mockMode = isMockMode() && isMockSlab(slabAddress);
   const userAccount = realUserAccount ?? (mockMode ? getMockUserAccount(slabAddress) : null);
   // GH#2707: while the portfolio scan is in flight a null account is unknown, not absent.
   const scanPending = useUserAccountScanPending();
   const accountPending = !mockMode && !userAccount && scanPending;
+  const { connected } = useWalletCompat();
   const config = useMarketConfig();
-  const { accounts, config: mktConfig, params, adlFactors, wrapperConfigV17 } = useSlabState();
+  const { accounts, config: mktConfig, params, adlFactors, wrapperConfigV17, raw: slabRawForLot, refresh: refreshSlab } = useSlabState();
   const { engine, insuranceBalance } = useEngineState();
   const { priceE6: livePriceE6, priceUsd } = useLivePrice();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
   const collateralSymbol = sanitizeSymbol(tokenMeta?.symbol, mintAddress);
   const { market: marketInfo } = useMarketInfo(slabAddress);
-  const symbol = marketInfo?.symbol ?? collateralSymbol;
+  // No collateral-symbol fallback (same rule as the trade page header): sim-USDC collateralizes every market, so an
+  // unknown market read "USDC/USD" with its size "in USDC" (browser E2E 2026-10-16, unlisted 2xhs). Unknown identity
+  // is the truncated slab address; the base unit is a neutral "TOKEN", as in the order ticket.
+  const symbol = marketInfo?.symbol ?? "TOKEN";
   const decimals = tokenMeta?.decimals ?? 6;
   // P3 skew funding / liquidation drift (flag-gated; "off" = no RPC).
   const marketLimits = useMarketLimits(slabAddress);
@@ -138,30 +158,44 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   // rendered "SOL-PERP/USD". Strip it once, just for the Market column label
   // below; every other `symbol` usage in this row (token amounts, tooltips)
   // is unaffected.
-  const marketDisplaySymbol = symbol.replace(/-PERP$/i, "");
+  const marketDisplaySymbol = marketInfo?.symbol ? symbol.replace(/-PERP$/i, "") : `${slabAddress.slice(0, 4)}…${slabAddress.slice(-4)}`;
 
   const { closePosition, loading: closeLoading, error: closeError, prewarmClose, resetPhase } = useClosePosition(slabAddress);
   // Per-trade fill cap — the close modal uses it to explain multi-fill closes.
-  const fillCaps = useMarketFillCap(slabAddress);
+  // Only the close modal reads this, and the wrapped-extra instance never opens
+  // one — an empty slab disables the hook's per-instance inventory poll there,
+  // so the common no-wrapped case pays no second poll.
+  const fillCaps = useMarketFillCap(wrappedRow ? "" : slabAddress);
   // Called unconditionally, before the `!activeInfo` early return below, per
   // rules of hooks — mirrors MarketInfoBar's MarkPrice / MarketBookCard's
   // Oracle cell (same shared hook, see hooks/usePriceFlash.ts).
   const markFlash = usePriceFlash(livePriceE6 ?? null);
-  const { level: oracleLevel, mode: oracleMode, ready: oracleReady } = useOracleFreshness();
+  const { level: oracleLevel, mode: oracleMode, ready: oracleReady, elapsedSecs: oracleElapsed, lastUpdateMs: oracleLastMs, closeFacts } = useOracleFreshness();
   const oracleUnavailable = oracleLevel === "unavailable";
   // H7: "keeper" added to the mode set — this gate previously only fired for
   // admin/hyperp markets, so a stale keeper-priced market (all 5 live
   // playground markets) never blocked closing.
-  const oracleStale = !mockMode && (oracleUnavailable || isOracleStaleBlocking(oracleLevel, oracleMode, oracleReady));
+  // Closing is gated on what the chain would refuse, not on the 60 s display rule (lib/oracle-stale-gate).
+  const closeGate = oracleCloseGate({ level: oracleLevel, mode: oracleMode, ready: oracleReady, facts: closeFacts });
+  const oracleStale = !mockMode && closeGate.blocked;
+  const oraclePriceBehind = !mockMode && closeGate.behind;
+  const priceAgeSecs = oracleAgeSecs(oracleLastMs, oracleElapsed);
   // H6: engine accrue-staleness — distinct from the oracle-push freshness
   // above. A market can look perfectly fresh here (keeper still pushing
   // prices) while the ENGINE hasn't accrued in ~500 slots, cliff-dead and
   // permanently reverting every close (UX WP-2: only beyond the app's own catch-up). See
   // useEngineFreshness's file header.
   const { engineStale } = useEngineFreshness();
-  const closeBlockedByStaleness = !mockMode && (oracleStale || engineStale);
+  // Devnet v2.2 (flag-gated; null otherwise): band lag + holding fee for this market.
+  const bandView = useBandRentView();
+  const lotGuard = useLotTradingGuard(slabAddress); // v2.2 (N2)
+  // v2.2 lot markets: positions are in LOTS and marks per LOT; the table shows tokens and per-token prices (lib/v22/lot.ts).
+  const lotExp = lotExpOf(slabRawForLot);
 
   const [showCloseModal, setShowCloseModal] = useState(false);
+  // A Resolved market cannot take a normal close (the program answers 21 then 14): the notice below carries the exit (CloseResolved).
+  const marketIsResolved = isDevnetV22Enabled() && marketResolvedV22(slabRawForLot);
+  const [showMarginModal, setShowMarginModal] = useState(false);
 
   const lpEntry = useMemo(() => accounts.find(({ account }) => account.kind === AccountKind.LP) ?? null, [accounts]);
   const lpUnderfunded = lpEntry !== null && lpEntry.account.capital === 0n;
@@ -171,7 +205,12 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   // the NFT program's PDA, so useUserAccount can no longer see it and the
   // position would otherwise vanish from the dock. Only scan for it in that
   // case (zero extra RPC in the common path).
-  const hasNormalPosition = !!userAccount && userAccount.account.positionSize !== 0n;
+  const ownHasPosition = !!userAccount && userAccount.account.positionSize !== 0n;
+  // Audit #40: a wallet can hold BOTH (wrap, then open a fresh position on the
+  // same market — or receive a transferred Position NFT). The dock renders a
+  // second PositionRow with `wrappedRow` for that case; the scan is shared
+  // (lib/userAccountScan), so both instances join one RPC query.
+  const hasNormalPosition = !wrappedRow && ownHasPosition;
   const wrapped = useNftWrappedPosition(slabAddress, !hasNormalPosition && !mockMode);
   const activeInfo = hasNormalPosition ? userAccount : wrapped;
   const isNftWrapped = !hasNormalPosition && !!wrapped;
@@ -183,6 +222,16 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   // never blocks interaction.
   const isSettling = hasNormalPosition && !!realUserAccount?.provisional;
 
+  // The wrapped-extra row only exists to show a wrapped position ALONGSIDE an
+  // owned one; with no owned position the primary row already shows the wrapped
+  // position (and the empty state belongs to the primary row alone). A wrapped
+  // position that CLOSED has no row (useNftWrappedPosition skips size-0 legs),
+  // and with an owned position the primary row isn't empty, so its Unwrap lives
+  // here; the notice renders nothing unless such an NFT is held on this market.
+  if (wrappedRow && (!ownHasPosition || !wrapped)) {
+    return ownHasPosition ? <ClosedPositionNftNotice slabAddress={slabAddress} className="mt-2 mb-3" /> : null;
+  }
+
   if (!activeInfo) {
     // A position closed while wrapped as an NFT has no row (useNftWrappedPosition skips size-0 legs), so its
     // Unwrap lives under the empty state; renders nothing unless the wallet holds such an NFT on this market.
@@ -191,10 +240,14 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
       ? "Checking this market for your account."
       : userAccount
         ? "Use the order ticket to open a position."
-        : "Connect your wallet and deposit collateral to start trading.";
+        : connected
+          // Connected, no account on this market yet: the first trade sets it up (fund-and-trade).
+          ? "Use the order ticket to open a position. Your first trade sets up your account here."
+          : "Connect your wallet and deposit collateral to start trading.";
     return (
       <>
         <EmptyState title={accountPending ? "Loading positions…" : undefined} subtitle={subtitle} />
+        <LastCloseTxLink slabAddress={slabAddress} className="px-3 pb-2 text-center" />
         <ClosedPositionNftNotice slabAddress={slabAddress} />
       </>
     );
@@ -202,6 +255,8 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const { account } = activeInfo;
 
   const isLong = account.positionSize > 0n;
+  // v2.2 band: the favourable-side close is refused while the mark lags the oracle (104); say so instead of failing.
+  const bandCloseBlocked = closeBlockedByBand(bandView, isLong ? "long" : "short");
   // Auto-deleveraging scales the asset's shared per-side factor and leaves the
   // leg's stored basis alone, so `account.positionSize` is the NOMINAL basis,
   // not what the position is worth today. Everything the trader reads as size,
@@ -239,7 +294,12 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   });
   const effectiveSize = pnlResult.effectiveSize ?? account.positionSize;
   const absPosition = abs(effectiveSize);
+  // "≈ $200.12" under the base-unit size: effective size at the mark; nothing without a mark.
+  const sizeUsd = positionSizeUsdText(effectiveSize, currentPriceE6);
   const entryPriceE6 = pnlResult.entry;
+  // #3534: risk math (liq price, margin health, cushion tier) uses the risk entry: the settled back-solve when the leg
+  // has nothing pending, so a loss settlement already moved out of capital is not counted twice. Display keeps `entry`.
+  const riskEntryE6 = pnlResult.riskEntry;
   /** False when entry (and therefore PnL/ROE) cannot be honestly displayed. */
   const pnlIsKnown = pnlResult.pnlKnown;
   const entryKnown = isEntryKnown(pnlResult.entry, pnlResult.entrySource);
@@ -251,17 +311,16 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const pnlUsd = pnlUsdRaw !== null && Number.isFinite(pnlUsdRaw) ? pnlUsdRaw : null;
   const roe = pnlResult.roe ?? 0;
 
-  // GMX-style pool-capped PnL: the LP vault is the real counterparty (not a
+  // GMX-style pool-capped PnL (legacy v12 engine): the LP vault is the real counterparty (not a
   // matched order book) — a winning position's paper PnL can't exceed what
   // the vault + insurance fund can actually pay out. Display-only: does not
   // change settlement, just surfaces the same caveat GMX shows when
   // `cappedPnl !== poolPnl`. `engine.vault` is v12-only (legacy engine block;
   // always null on v17, and there's no v17 vault-capital field readable
   // client-side — same limitation MarketInfoBar's BUG 21 fix documents).
-  // `insuranceBalance` is `useEngineState()`'s unified v12/v17 field
-  // (`engine.insuranceFund.balance` on v12, `parseMarketGroupV17OI` on v17),
-  // so this gate at least fires off insurance capacity on v17 instead of
-  // silently reading 0 forever (engine.insuranceFund is always null there).
+  // On v17 the vault is unknown, so the capacity is null and no cap or caveat is shown: profit
+  // there converts per source domain (lib/convert-released-pnl.ts), and insurance alone is not
+  // a payout bound.
   const payableCapacity = poolPayableCapacity(engine?.vault, insuranceBalance);
   // Same predicate the Share-PnL card applies (lib/pnl-card), so they can't drift.
   const pnlIsCapped = hasValidMark && isPnlPoolCapped(pnlTokens, payableCapacity);
@@ -286,18 +345,23 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   // liquidated by price (excess collateral) — formatLiqPrice renders "∞".
   const liqUnliquidatable = pnlResult.adlKnown && liqPriceE6 <= 0n && entryPriceE6 > 0n && account.positionSize !== 0n;
   // When there is no liquidation price, "no liquidation price" is not a risk
-  // figure. Margin health is: capital/notional, defined without an entry or a
+  // figure. Margin health is: equity/notional, valued with the same entry as the
   // liq price, and it crosses its threshold at exactly the collateral level
   // where the liq price disappears. See lib/margin-health.ts and #2558.
   const liqDisplay = describeLiqPrice({
     liqPriceE6,
     positionSize: account.positionSize,
     capital: account.capital,
+    entryPriceE6: riskEntryE6,
+    effectiveSize: pnlResult.effectiveSize,
     markPriceE6: currentPriceE6,
     maintenanceMarginBps: maintenanceBps,
     // #2660: `entryPriceE6 > 0n` is always true — on "unknown" it is the mark.
     hasResolvedEntry: pnlIsKnown,
+    ...(lotExp > 0 ? { formatPrice: (e6: bigint) => formatLotPriceE6(e6, lotExp) } : {}),
   });
+  // "5.3% to liq" under a real price only; the "% mgn" / unknown cells stay as they are.
+  const liqDistance = describeLiqDistance(liqDisplay, account.positionSize, currentPriceE6, liqPriceE6);
   const liqPriceColor = (() => {
     if (liqUnliquidatable) return "text-[var(--text-secondary)]";
     if (liqPriceE6 <= 0n) return "text-[var(--text-secondary)]";
@@ -308,7 +372,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
     // effective_abs_q). Unknown ADL state => not measurable (null), never a raw-size tier.
     const cushion = pnlResult.effectiveSize === null ? null : computeMarginCushion({
       positionSize: pnlResult.effectiveSize,
-      entryPriceE6,
+      entryPriceE6: riskEntryE6,
       capital: account.capital,
       markPriceE6: currentPriceE6,
       maintenanceMarginBps: maintenanceBps,
@@ -340,12 +404,15 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
           entryE6: entryPriceE6,
           initialMarginBps,
           initialMarkE6: currentPriceE6,
+          lotExp,
         }
       : null;
 
+  const closeTarget = hasNormalPosition && activeInfo.pubkey ? { portfolioPk: activeInfo.pubkey } : undefined;
   const handleConfirmClose = async (percent: number) => {
     try {
-      await closePosition(percent);
+      // #3301: close the account this row shows (same pubkey it was drawn from), not a re-resolved one.
+      await closePosition(percent, closeTarget);
       setShowCloseModal(false);
     } catch {
       // error surfaced via hook state below
@@ -354,15 +421,31 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
 
   return (
     <div>
-      {lpUnderfunded && (
+      {/* The wrapped-extra row reads as its own labeled section, the same grammar
+          as "// other markets"; market-level banners and warmup stay on the
+          primary instance so they never render twice. */}
+      {wrappedRow && (
+        <div className="flex items-center gap-2 border-t border-[var(--border)]/40 px-4 pb-1 pt-3">
+          <span className="text-[9px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/80">
+            // wrapped as nft
+          </span>
+        </div>
+      )}
+      {!wrappedRow && lpUnderfunded && (
         <div className="border-b border-[var(--warning)]/20 bg-[var(--warning)]/5 px-4 py-1.5 text-center">
           <span className="text-[9px] font-medium uppercase tracking-[0.12em] text-[var(--warning)]">Low liquidity</span>
         </div>
       )}
       {/* UX WP-2 (SH-3): the engine is catching up beyond the app's own repair; calm, clears itself. */}
-      {engineStale && !oracleStale && (
+      {!wrappedRow && engineStale && !oracleStale && (
         <div className="border-b border-[var(--warning)]/20 bg-[var(--warning)]/5 px-4 py-1.5 text-center">
           <span className="text-[9px] font-medium uppercase tracking-[0.12em] text-[var(--text-secondary)]">Catching up with the latest prices</span>
+        </div>
+      )}
+      {/* GAP-12: the close the stale price would favour is refused (104) while the price walks to its target: say when it reopens. */}
+      {!wrappedRow && bandCloseBlocked && !engineStale && !oracleStale && !marketIsResolved && (
+        <div data-testid="band-close-on-hold" className="border-b border-[var(--warning)]/20 bg-[var(--warning)]/5 px-4 py-1.5 text-center">
+          <span className="text-[9px] font-medium tracking-[0.04em] text-[var(--text-secondary)]">{catchUpAvailableLine(bandCatchUpMs(bandView), "close")}</span>
         </div>
       )}
       {isNftWrapped && (
@@ -373,9 +456,10 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
           </span>
         </div>
       )}
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-[10px]">
-          <thead>
+      {/* Scrolls sideways on desktop only; on phones the row is a card (MOBILE_CARD_*). */}
+      <div className="lg:overflow-x-auto">
+        <table className="min-w-full text-[10px] max-lg:block">
+          <thead className="max-lg:hidden">
             <tr className="border-b border-[var(--border)]/30 text-[8px] uppercase tracking-[0.15em] text-[var(--text)]">
               <th className="whitespace-nowrap px-4 py-2 text-left font-medium">Market</th>
               <th className="whitespace-nowrap px-3 py-2 text-left font-medium">Side</th>
@@ -393,13 +477,13 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
               <th className="whitespace-nowrap px-3 py-2 text-right font-medium">ROE%</th>
               {/* Pinned to the right edge so the Share/Close actions stay reachable
                   when this wide table scrolls horizontally on a phone. */}
-              <th className="sticky right-0 z-20 whitespace-nowrap border-l border-[var(--border)]/30 bg-[var(--panel-bg)] px-3 py-2 text-right font-medium">Close</th>
+              <th className="lg:sticky right-0 z-20 whitespace-nowrap border-l border-[var(--border)]/30 bg-[var(--panel-bg)] px-3 py-2 text-right font-medium">Close</th>
             </tr>
           </thead>
-          <tbody>
-            <tr data-testid="position-row" className="border-b border-[var(--border)]/20 transition-colors hover:bg-[var(--accent)]/[0.03]">
-              <td className="whitespace-nowrap px-4 py-2.5 text-left"><span className="text-[11px] font-medium text-[var(--text)]">{marketDisplaySymbol}/USD</span></td>
-              <td className="whitespace-nowrap px-3 py-2.5 text-left">
+          <tbody className="max-lg:block">
+            <tr data-testid="position-row" className={`border-b border-[var(--border)]/20 transition-colors hover:bg-[var(--accent)]/[0.03] ${MOBILE_CARD_ROW}`}>
+              <td className="whitespace-nowrap px-4 py-2.5 text-left max-lg:col-span-2 max-lg:p-0"><span className="text-[11px] font-medium text-[var(--text)]">{marketDisplaySymbol}/USD</span></td>
+              <td className="whitespace-nowrap px-3 py-2.5 text-left max-lg:p-0 max-lg:text-right">
                 <span className={`inline-block rounded-sm px-1.5 py-0.5 text-[9px] font-bold uppercase ${isLong ? "bg-[var(--long)]/10 text-[var(--long)]" : "bg-[var(--short)]/10 text-[var(--short)]"}`}>
                   {isLong ? "LONG" : "SHORT"}
                 </span>
@@ -409,8 +493,8 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                   </span>
                 )}
               </td>
-              <td className="whitespace-nowrap px-3 py-2.5 text-right" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-                <span className="text-[var(--text)]">{formatTokenAmount(absPosition, decimals)}</span>
+              <td data-label="Size" className={`whitespace-nowrap px-3 py-2.5 text-right ${MOBILE_CARD_CELL}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+                <span className="text-[var(--text)]">{formatLotQ(absPosition, decimals, lotExp)}</span>
                 <span className="ml-1 text-[var(--text-secondary)]">{symbol}</span>
                 {wasDeleveraged && (
                   <span
@@ -420,23 +504,35 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                     ADL
                   </span>
                 )}
+                <HoldingFeeChip view={bandView} side={isLong ? "long" : "short"} />
+                {bandView?.band.enabled && legBelowHalfMin(account.positionSize < 0n ? -account.positionSize : account.positionSize, bandView.price.markE6, bandView.band.minLegNotionalAtoms) && (
+                  <div data-testid="band-small-position" className="mt-0.5 text-[9px] text-[var(--text-dim)]">
+                    {V22_COPY.band.smallPositionWarn(String(Number(bandView.band.minLegNotionalAtoms) / 10 ** decimals / 2), collateralSymbol)}
+                  </div>
+                )}
                 {isSettling && (
                   <span
                     className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)]/60 animate-pulse align-middle"
                     title="Size reflects your confirmed trade — balance is still settling"
                   />
                 )}
+                {sizeUsd && (
+                  <div data-testid="position-size-usd" className="text-[9px] text-[var(--text-secondary)]">
+                    {sizeUsd}
+                  </div>
+                )}
               </td>
               <td
-                className={`whitespace-nowrap px-3 py-2.5 text-right ${leverageDisplay.known ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`}
+                data-label={POSITION_LEVERAGE_LABEL}
+                className={`whitespace-nowrap px-3 py-2.5 text-right ${leverageDisplay.known ? "text-[var(--text)]" : "text-[var(--text-dim)]"} ${MOBILE_CARD_CELL}`}
                 style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
                 title={leverageDisplay.title}
                 data-testid="position-leverage"
               >
                 {leverageDisplay.text}
               </td>
-              <td className={`whitespace-nowrap px-3 py-2.5 text-right ${pnlIsKnown ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-                {entryKnown ? formatUsdPriceE6(entryPriceE6) : (
+              <td data-label="Entry" className={`whitespace-nowrap px-3 py-2.5 text-right ${pnlIsKnown ? "text-[var(--text)]" : "text-[var(--text-dim)]"} ${MOBILE_CARD_CELL}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+                {entryKnown ? formatLotPriceE6(entryPriceE6, lotExp) : (
                   <span className="inline-flex items-center justify-end gap-1">
                     --
                     <InfoIcon tooltip={UNKNOWN_ENTRY_TOOLTIP} />
@@ -444,23 +540,30 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                 )}
               </td>
               <td
-                className={`whitespace-nowrap px-3 py-2.5 text-right transition-colors duration-300 ease-out ${
+                data-label="Mark"
+                className={`whitespace-nowrap px-3 py-2.5 text-right transition-colors duration-300 ease-out ${MOBILE_CARD_CELL} ${
                   hasValidMark
                     ? markFlash === "up" ? "text-[var(--long)]" : markFlash === "down" ? "text-[var(--short)]" : "text-[var(--text)]"
                     : "text-[var(--text-dim)]"
                 }`}
                 style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
               >
-                {hasValidMark ? formatUsdPriceE6(currentPriceE6) : "--"}
+                {hasValidMark ? formatLotPriceE6(currentPriceE6, lotExp) : "--"}
               </td>
               <td
                 data-testid="position-liq"
-                className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${liqPriceColor}`}
+                data-label="Liq. Price"
+                className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${liqPriceColor} ${MOBILE_CARD_CELL}`}
                 style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
               >
                 <LiqPriceValue display={liqDisplay} />
+                {liqDistance && (
+                  <div data-testid="position-liq-distance" className="text-[9px] font-normal">
+                    {liqDistance}
+                  </div>
+                )}
               </td>
-              <td className={`whitespace-nowrap px-3 py-2.5 text-right ${hasValidMark && pnlIsKnown ? pnlColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+              <td data-label="PnL" className={`whitespace-nowrap px-3 py-2.5 text-right ${hasValidMark && pnlIsKnown ? pnlColor : "text-[var(--text-dim)]"} ${MOBILE_CARD_CELL}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                 {!pnlIsKnown ? (
                   <span className="inline-flex items-center justify-end gap-1">
                     --
@@ -468,7 +571,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                   </span>
                 ) : hasValidMark ? (
                   <>
-                    <div className="flex items-center justify-end gap-1">
+                    <div className="flex items-center justify-end gap-1 max-lg:justify-start">
                       {formatPnl(pnlTokens, decimals)} {collateralSymbol}
                       {pnlResult.isEstimate && (
                         <span className="text-[9px] font-normal text-[var(--text-dim)]" title={DERIVED_ENTRY_TOOLTIP}>{ESTIMATE_LABEL}</span>
@@ -486,7 +589,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                         float. */}
                     {pnlUsd !== null && (
                       <div className="text-[9px]">
-                        {pnlTokens > 0n ? "+" : pnlTokens < 0n ? "-" : ""}${Math.abs(pnlUsd).toFixed(2)}
+                        {formatUsdAmount(pnlUsd, pnlTokens > 0n ? "+" : pnlTokens < 0n ? "-" : "")}
                       </div>
                     )}
                   </>
@@ -494,11 +597,11 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                   <span>--</span>
                 )}
               </td>
-              <td className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${hasValidMark && pnlIsKnown ? roeColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+              <td data-label="ROE%" className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${hasValidMark && pnlIsKnown ? roeColor : "text-[var(--text-dim)]"} ${MOBILE_CARD_CELL}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                 {hasValidMark && pnlIsKnown ? formatPercent(roe) : "--"}
               </td>
-              <td className="sticky right-0 z-10 has-[[role=menu]]:z-30 whitespace-nowrap border-l border-[var(--border)]/30 bg-[var(--panel-bg)] px-3 py-2.5 text-right">
-                <span className="inline-flex items-center justify-end gap-1">
+              <td className={`lg:sticky right-0 z-10 has-[[role=menu]]:z-30 whitespace-nowrap border-l border-[var(--border)]/30 bg-[var(--panel-bg)] px-3 py-2.5 text-right ${MOBILE_CARD_ACTIONS}`}>
+                <span className="inline-flex items-center justify-end gap-1 max-lg:flex max-lg:flex-wrap max-lg:justify-start max-lg:gap-2">
                 <PnlShareButton
                   data={pnlCardData}
                   label="Share PnL"
@@ -509,27 +612,40 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                     {NFT_MENU_COPY.closeWrapped}
                   </span>
                 ) : (
+                  <>
+                  {/* #3304: add margin to THIS row's own account. Owned row only: collateral cannot back a
+                      position held in an NFT. The modal deposits into the account the row shows. */}
+                  {!mockMode && (
+                    <button
+                      onClick={() => setShowMarginModal(true)}
+                      data-testid="position-add-margin"
+                      className="rounded-none border border-[var(--accent)]/30 px-3 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--accent)] transition-colors duration-150 hover:bg-[var(--accent)]/8 hover:border-[var(--accent)]/50"
+                    >
+                      + Margin
+                    </button>
+                  )}
                   <button
                     // prewarmClose: start the fresh position read + tx prewarms
                     // the moment the modal opens, so the confirm click reaches
                     // the wallet popup with zero blocking round-trips.
-                    onClick={() => { resetPhase(); prewarmClose(); setShowCloseModal(true); }}
+                    onClick={() => { resetPhase(); prewarmClose(closeTarget); setShowCloseModal(true); }}
                     data-testid="position-close"
-                    disabled={closeLoading || lpUnderfunded || !hasValidMark || engineStale}
-                    title={!hasValidMark ? "Waiting for price data…" : engineStale ? "Prices are catching up. Closing resumes once the market has caught up." : undefined}
+                    disabled={closeLoading || lpUnderfunded || !hasValidMark || engineStale || bandCloseBlocked || lotGuard !== null || marketIsResolved}
+                    title={!hasValidMark ? "Waiting for price data…" : engineStale || bandCloseBlocked ? catchUpAvailableLine(bandCatchUpMs(bandView), "close") : lotGuard ?? undefined}
                     className="rounded-none border border-[var(--short)]/30 px-3 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-colors duration-150 hover:bg-[var(--short)]/8 hover:border-[var(--short)]/50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Close
                   </button>
+                  </>
                 )}
                 {/* UX WP-9 (§3.13): Wrap / Send / Unwrap live in this row's "⋯" menu. */}
-                <PositionNftMenu slabAddress={slabAddress} />
+                <PositionNftMenu slabAddress={slabAddress} row={isNftWrapped ? "wrapped" : "own"} />
                 </span>
               </td>
             </tr>
             {marketLimits.flags.p3 && (
-              <tr data-testid="limits-position-row" className="border-b border-[var(--border)]/20">
-                <td colSpan={99} className="px-4 pb-2">
+              <tr data-testid="limits-position-row" className="border-b border-[var(--border)]/20 max-lg:block">
+                <td colSpan={99} className="px-4 pb-2 max-lg:block">
                   <PositionLimitsRow
                     limits={marketLimits}
                     positionQ={effectiveSize}
@@ -537,6 +653,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                     marginAboveMaintAtoms={account.capital - (absPosition * currentPriceE6 * maintenanceBps) / 1_000_000n / 10_000n}
                     decimals={decimals}
                     collateralSymbol={collateralSymbol}
+                    lotExp={lotExp}
                   />
                 </td>
               </tr>
@@ -544,13 +661,27 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
           </tbody>
         </table>
       </div>
-      <div className="px-4 py-2">
-        <WarmupProgress slabAddress={slabAddress} accountIdx={activeInfo.idx} />
-      </div>
+      {!wrappedRow && isDevnetV22Enabled() && <StaleSettleNotice slabAddress={slabAddress} hasFunds canAct compact />}
+      {!wrappedRow && (
+        <div className="px-4 py-2">
+          <WarmupProgress slabAddress={slabAddress} accountIdx={activeInfo.idx} />
+        </div>
+      )}
       {closeError && (
         <div data-testid="position-close-error" className="mx-4 mb-3 rounded-none border border-[var(--short)]/20 bg-[var(--short)]/5 px-3 py-2">
           <p className="text-[10px] text-[var(--short)]">{closeError}</p>
         </div>
+      )}
+      {showMarginModal && !isNftWrapped && (
+        <AddMarginModal
+          slabAddress={slabAddress}
+          userIdx={activeInfo.idx}
+          symbol={collateralSymbol}
+          decimals={decimals}
+          portfolioPk={activeInfo.pubkey}
+          onClose={() => setShowMarginModal(false)}
+          onSuccess={refreshSlab}
+        />
       )}
       {showCloseModal && (
         <ClosePositionModal
@@ -566,6 +697,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
           collateralSymbol={collateralSymbol}
           decimals={decimals}
           priceUsd={priceUsd}
+          lotExp={lotExp}
           isLong={isLong}
           loading={closeLoading}
           error={closeError}
@@ -574,7 +706,12 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
           // disabled on engineStale (with its own correctly-labeled title),
           // but if the modal is somehow already open when engine-staleness
           // is detected, keep its Confirm button blocked too.
-          oracleStale={closeBlockedByStaleness}
+          oracleStale={oracleStale}
+          oraclePriceBehind={oraclePriceBehind}
+          priceAgeSecs={priceAgeSecs}
+          settleMarkE6={onChainPriceE6}
+          engineCatchingUp={!mockMode && engineStale}
+          catchUpMs={bandCatchUpMs(bandView)}
           maxFillAbs={fillCaps?.maxFillAbs ?? null}
           onConfirm={handleConfirmClose}
           onCancel={() => setShowCloseModal(false)}
@@ -635,6 +772,13 @@ const PositionsDockInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         </div>
         <RenderProfiler id="PositionRow">
           <PositionRow slabAddress={slabAddress} />
+        </RenderProfiler>
+        {/* Audit #40: wrap, then open a fresh position on the same market (or
+            receive a transferred Position NFT) — the wallet holds both; this
+            instance shows the wrapped one. Renders null unless both exist, except
+            for a closed wrapped position, whose Unwrap notice it shows. */}
+        <RenderProfiler id="PositionRowWrapped">
+          <PositionRow slabAddress={slabAddress} wrappedRow />
         </RenderProfiler>
         <OtherMarketPositions currentSlab={slabAddress} />
       </div>

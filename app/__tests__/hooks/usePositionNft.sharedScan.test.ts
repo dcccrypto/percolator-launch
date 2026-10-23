@@ -54,6 +54,11 @@ vi.mock("@/hooks/useUserAccount", () => ({
 vi.mock("@/lib/mock-mode", () => ({ isMockMode: () => false }));
 vi.mock("@/lib/mock-trade-data", () => ({ isMockSlab: () => false }));
 
+vi.mock("@/lib/v22/layout", async (orig) => ({
+  ...(await orig<typeof import("@/lib/v22/layout")>()),
+  isWrapperAccount: mocks.isV17Account,
+  parsePortfolio: mocks.parsePortfolioV17,
+}));
 vi.mock("@percolatorct/sdk", async () => {
   const actual = await vi.importActual<typeof import("@percolatorct/sdk")>("@percolatorct/sdk");
   return {
@@ -65,7 +70,30 @@ vi.mock("@percolatorct/sdk", async () => {
   };
 });
 
+// S1-2: the app parses NFTs with its own v3 port (the installed SDK 8.0.0 parser rejects version 3). These tests drive the
+// parser through `mocks.parsePositionNftAccount`; the stand-in returns a LEGACY (unbound, never stale) record merged with it.
+vi.mock("@/lib/v22/sdk/nft-v3", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/v22/sdk/nft-v3")>("@/lib/v22/sdk/nft-v3");
+  return {
+    ...actual,
+    parsePositionNftAccountV3: (d: Uint8Array) => ({ isLegacyV2: true, portfolioMarketGroup: null, portfolioIdAtMint: null, ...mocks.parsePositionNftAccount(d) }),
+  };
+});
+
+// The hook reads portfolios through lib/v22/layout (VERSION-keyed under the v2.2 flag). Route those reads to the same parser mocks, so
+// these cases exercise the hook's logic in every flag mode (the bytes here are stand-ins, not real accounts).
+vi.mock("@/lib/v22/layout", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/v22/layout")>("@/lib/v22/layout");
+  return {
+    ...actual,
+    isWrapperAccount: (d: Uint8Array) => mocks.isV17Account(d),
+    parsePortfolio: (d: Uint8Array) => mocks.parsePortfolioV17(d),
+  };
+});
+
 import { usePositionNft } from "@/hooks/usePositionNft";
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
+import { __setUnknownLotExpForTest } from "@/lib/v22/lot-registry";
 
 // Real, random Keypair-derived pubkeys (not structured fill()-style bytes) —
 // PDA derivation (deriveNftPdaV17, exercised for real in this file) needs an
@@ -107,6 +135,7 @@ describe("usePositionNft — v17 shared scan + batching", () => {
   };
 
   beforeEach(() => {
+    __setUnknownLotExpForTest(0);
     vi.clearAllMocks();
     wallet = uniquePubkey();
     programId = uniquePubkey();
@@ -132,9 +161,10 @@ describe("usePositionNft — v17 shared scan + batching", () => {
 
     // No own unwrapped portfolio here (leg-less / not found) — falls through
     // to the held-NFT scan.
-    connection.getProgramAccounts.mockImplementation(async (pid: PublicKey) => {
+    connection.getProgramAccounts.mockImplementation(async (pid: PublicKey, cfg?: { filters?: Array<{ dataSize?: number }> }) => {
       if (pid.equals(programId)) return []; // own-portfolio scan: nothing
-      // NFT-program held scan: two NFTs held by this wallet.
+      // NFT-program held scan: two NFTs held by this wallet (legacy 199 B layout; the 239 B query finds none).
+      if (cfg?.filters?.[0]?.dataSize === 239) return [];
       return [
         { pubkey: uniquePubkey(), account: { data: new Uint8Array(199) } },
         { pubkey: uniquePubkey(), account: { data: new Uint8Array(199) } },
@@ -219,5 +249,39 @@ describe("usePositionNft — v17 shared scan + batching", () => {
     // to "Not minted" (which would re-enable a doomed re-mint attempt).
     expect(result.current.hasMintedNft).toBe(true);
     expect(result.current.nftMint?.equals(nftMint)).toBe(true);
+  });
+
+  // S5: an own open position (no NFT of its own) plus a held NFT whose wrapped leg closed. The dock
+  // shows the notice for this market; it must resolve to the held NFT with pendingSettlement set.
+  it("own active leg without its own NFT + a held NFT whose leg closed: pending settlement on the held NFT", async () => {
+    const slabPk = new PublicKey(slabAddress);
+    mocks.useSlabState.mockReturnValue({ programId, raw: new Uint8Array([1]) });
+
+    const ownPortfolioPk = uniquePubkey();
+    const heldPda = uniquePubkey();
+    const heldMint = uniquePubkey();
+    const wrappedPf = uniquePubkey();
+    connection.getProgramAccounts.mockImplementation(async (pid: PublicKey) =>
+      pid.equals(programId)
+        ? [{ pubkey: ownPortfolioPk, account: { data: Buffer.from([1]) } }]
+        : [{ pubkey: heldPda, account: { data: new Uint8Array(199) } }],
+    );
+    connection.getAccountInfo.mockResolvedValue(null); // the own leg has no NFT PDA
+    connection.getMultipleAccountsInfo.mockResolvedValue([{ data: Buffer.from([2]) }]);
+    mocks.parsePositionNftAccount.mockReturnValue({ nftMint: heldMint, portfolioAccount: wrappedPf });
+    mocks.parsePortfolioV17.mockImplementation((d: Uint8Array) =>
+      d[0] === 1
+        ? { ...emptyPortfolio(slabPk), owner: wallet, legs: [{ active: true, assetIndex: 0, marketId: 1n, side: 0, basisPosQ: 10n }] }
+        : { ...emptyPortfolio(slabPk), legs: [] }, // wrapped leg closed (liquidated)
+    );
+
+    const { result } = renderHook(() => usePositionNft(slabAddress));
+
+    await waitFor(() => {
+      expect(result.current.hasMintedNft).toBe(true);
+    });
+    expect(result.current.pendingSettlement).toBe(true);
+    expect(result.current.nftPdaAddress).toBe(heldPda.toBase58());
+    expect(result.current.nftMint?.equals(heldMint)).toBe(true);
   });
 });

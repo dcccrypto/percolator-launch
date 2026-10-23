@@ -24,6 +24,8 @@ vi.mock("@/lib/matcherCaps", () => ({
 vi.mock("@/lib/market-completeness", () => ({
   isMarketauthComplete: vi.fn(() => mocks.complete),
 }));
+// The diagnosis asks lib/v22/layout whether the slab is a wrapper market (flag off it delegates to the SDK isV17Account): stub that seam too.
+vi.mock("@/lib/v22/layout", async (orig) => ({ ...(await orig<object>()), isWrapperAccount: () => mocks.slabIsV17 }));
 vi.mock("@percolatorct/sdk", () => ({
   isV17Account: vi.fn(() => mocks.slabIsV17),
   parseWrapperConfigV17: vi.fn(() => ({ marketauth: new PublicKey(new Uint8Array(32).fill(9)) })),

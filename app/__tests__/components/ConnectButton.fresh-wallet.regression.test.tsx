@@ -41,6 +41,8 @@ vi.mock("@/hooks/usePreferredWallet", async (importOriginal) => {
 });
 
 vi.mock("@privy-io/react-auth", () => ({
+  useConnectWallet: () => ({ connectWallet: vi.fn() }),
+  useIdentityToken: () => ({ identityToken: null }),
   usePrivy: () => ({
     ready: true,
     authenticated: false,
@@ -83,7 +85,15 @@ vi.mock("@privy-io/react-auth/solana", () => ({
   }),
 }));
 
-import { ConnectButtonPrivyInner as ConnectButton } from "@/components/wallet/ConnectButtonPrivyInner";
+import { ConnectButtonPrivyInner as PrivyInnerBase } from "@/components/wallet/ConnectButtonPrivyInner";
+import { PrivyStateProvider } from "../helpers/privyBridge";
+
+// Privy reaches the button through the bridge (the real bridge hook over the mocked SDK above).
+const ConnectButton = () => (
+  <PrivyStateProvider>
+    <PrivyInnerBase />
+  </PrivyStateProvider>
+);
 
 describe("fresh wallet authentication regression", () => {
   beforeEach(() => {

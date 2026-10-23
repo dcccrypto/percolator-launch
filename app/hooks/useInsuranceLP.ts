@@ -1,5 +1,7 @@
 'use client';
 
+import { errorText } from "@/lib/error-text";
+import { parseLpVaultRegistry, parseLpRedemption } from "@/lib/v22/records";
 import { vaultWithdrawView } from '@/lib/limits/earn-withdrawable';
 import type { BlockedBy, WithdrawStatus } from '@/lib/limits/earn-withdrawable';
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
@@ -18,18 +20,14 @@ import {
   deriveLpEscrow,
   encodeCreateLpVaultV17,
   encodeRequestRedeemLpShares,
-  ACCOUNTS_CREATE_LP_VAULT,
-  buildAccountMetas,
   buildIx,
-  WELL_KNOWN,
   deriveVaultAuthority,
   deriveLpBackingLedger,
-  parseLpVaultRegistry,
-  parseLpRedemption,
 } from '@percolatorct/sdk';
 import { sendTx, broadcastSignedTx, buildBatchTx, getFreshBlockhash, getPriorityFee, signAllCompat, simulateForGate } from '@/lib/tx';
 import { sizeComputeUnitLimit } from '@/lib/compute-budget';
 import { useSlabState } from '../components/providers/SlabProvider';
+import { createLpVaultKeys } from '@/lib/v22/create-lp-vault';
 import { assertKnownProgram } from '@/lib/programAllowlist';
 import { assertDepositWithinBalance, readTokenBalance } from '@/lib/deposit-guard';
 import { useParams } from 'next/navigation';
@@ -40,10 +38,11 @@ import { crankOracleTail } from "@/lib/limits/vault-lp-repair";
 import { MARKET_MODE_LIVE } from "@/lib/limits/constants";
 import { limitsFlags } from "@/lib/limits/flags";
 import { earnVaultLpRepairOption } from "@/lib/limits/vault-lp-repair";
-import { buildEarnDepositIxs, buildEarnExecuteIxs, buildRequestRedeemIx, earnTxPlan, sendWithHarvestOn84, sendWithUpgradeRetry, withForcedHarvest, type EarnTxPlan } from "@/lib/limits/earn-ixs";
+import { buildEarnDepositIxs, buildEarnExecuteIxs, buildRequestRedeemIx, earnRequestFloorAtoms, earnRequestQuoteAtoms, earnTxPlan, sendWithHarvestOn84, sendWithUpgradeRetry, withForcedHarvest, type EarnTxPlan } from "@/lib/limits/earn-ixs";
 import { SimulationRefusal } from "@/lib/tx";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { resolveDevnetProgramIds } from "@/lib/program-ids";
+import { decodeLpVaultRegistryBound } from '@/lib/limits/decode';
 import { readEarnP3Context } from "@/lib/limits/earn-p3-read";
 import { readEmptyCloseIxs, readViewerTopupIxs } from "@/lib/limits/resolved-exit-load";
 import { sendWithTopup } from "@/lib/limits/resolved-topup";
@@ -75,6 +74,8 @@ import {
   type KnownBalance,
   type TokenRead,
 } from '@/lib/token-balance';
+import { withEarnPriceWait } from "@/lib/limits/earn-price-wait";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 
 /**
  * Bytes left free in a bundled Earn payout for the instructions sendTx can add (review of #2721,
@@ -116,7 +117,7 @@ export interface InsuranceLPState {
   mintExists: boolean;
   /** The insurance LP mint address */
   lpMintAddress: PublicKey | null;
-  /** Decimals of the LP token mint (NOT collateral decimals) */
+  /** The LP mint's on-chain decimals (0 today). NOT for display: Earn shares are counted in the collateral's decimals (lib/lp-share-wallet-note.ts, percolator-prog#542). */
   lpDecimals: number;
 
   // ─── LP Vault Registry (v17 "Earn" vault — CreateLpVault/DepositToLpVault,
@@ -255,6 +256,9 @@ export function useInsuranceLP() {
 
   // Stabilize wallet.publicKey reference — PublicKey is not referentially stable
   const walletPubkeyStr = wallet.publicKey?.toBase58() ?? null;
+  // The wallet as of the latest render, for refreshState's superseded-wallet check.
+  const walletKeyRef = useRef(walletPubkeyStr);
+  walletKeyRef.current = walletPubkeyStr;
 
   // PERC-9204: stable primitive standing in for `slabState.config` in the
   // effect below. SlabProvider rebuilds `config` as a brand-new object literal
@@ -328,6 +332,9 @@ export function useInsuranceLP() {
 
   // Poll insurance state
   const refreshState = useCallback(async () => {
+    // N13: a refresh from a closure of a previous wallet (a deposit/withdraw that confirmed after a
+    // switch) must neither publish that wallet's position nor supersede the current wallet's read.
+    if (walletKeyRef.current !== walletPubkeyStr) return;
     if (!slabState || !lpMintInfo || !connection) {
       // Nothing to fetch yet (market/programId not resolved) — don't leave
       // the UI stuck on a loading skeleton forever. While the slab itself is
@@ -367,7 +374,8 @@ export function useInsuranceLP() {
 
       if (mintExists) {
         // Read supply and decimals from LP mint
-        // IMPORTANT: LP tokens have their own decimals — do NOT use collateral decimals here.
+        // The mint's own decimals (0 today) are not the display unit: shares are counted in
+        // collateral-atom units and shown in collateral decimals (lib/lp-share-wallet-note.ts).
         const mint = unpackMint(lpMintInfo.mintPda, mintInfo);
         lpSupply = mint.supply;
         lpDecimals = mint.decimals;
@@ -454,6 +462,8 @@ export function useInsuranceLP() {
       // created, RPC hiccup, or an SDK without this export) never blocks the
       // insuranceBalance/lpSupply/userLpBalance state already computed above.
       let registryExists = false;
+      /** Unbound (two-pot) vault: worth its pots' NAV, never registry shares + fees. */
+      let twoPot = false;
       let lpVaultDomain = 0;
       let registryAddress: PublicKey | null = null;
       let vaultTotalAtoms = 0n;
@@ -481,11 +491,12 @@ export function useInsuranceLP() {
           if (registryAcctInfo && registryAcctInfo.data.length > 0) {
             const registry = parseLpVaultRegistry(new Uint8Array(registryAcctInfo.data));
             registryExists = true;
+            twoPot = decodeLpVaultRegistryBound(new Uint8Array(registryAcctInfo.data)) === false;
             lpVaultDomain = Number(registry.domain);
             redemptionCooldownSlots = sanitizeOnChainValue(registry.redemptionCooldownSlots);
 
-            // Total backing = shares outstanding (minted 1:1 with deposited atoms)
-            // + cumulative fee atoms distributed into the vault since launch.
+            // Fallback backing for legacy and bound registries: shares outstanding + cumulative fee
+            // atoms distributed into the vault. A two-pot vault is priced from its pots below.
             const shares = sanitizeOnChainValue(registry.totalLpSharesOutstanding);
             const feeAtoms = sanitizeOnChainValue(registry.feeDistributionTotalAtoms);
             vaultTotalAtoms = shares + feeAtoms;
@@ -554,6 +565,10 @@ export function useInsuranceLP() {
         const sp = rawSp ? repairUnderwaterPot(rawSp)?.state ?? null : null;
         // Wrapper 7a3ac04c+ (navFloor): an over-impaired pot is worth 0 instead of unpriceable.
         const v = sp ? combinedVault(sp.own, sp.sib, sp.feeShareBps, sp.navFloor === true) : null;
+        // A two-pot vault whose pots weren't read (RPC error) or couldn't be priced this cycle has no
+        // value: shares + fees above is far from its NAV (~3,450x on devnet). Fail the cycle so the
+        // outer catch keeps the last good state and flags readError, as useEarnStats does (#3264).
+        if (twoPot && !(sp && v)) throw new Error('Earn vault pot state unreadable');
         if (sp && v && sp.totalShares > 0n) {
           const held = heldShares;
           vaultTotalAtoms = v.nav;
@@ -636,6 +651,28 @@ export function useInsuranceLP() {
     refreshStateRef.current = refreshState;
   }, [refreshState]);
 
+  // N13: the previous wallet's position is not this one's. Drop it before the re-read below, so a
+  // slow or failed read (the catch keeps `state`) never shows, or acts on, another wallet's value or
+  // pending withdrawal: a stale "Finish withdrawal" asked the new wallet to sign a fresh request
+  // sized to the old wallet's ticket. Vault-level fields stay. (An in-flight read for the old wallet
+  // is already dropped by refreshState's request id and wallet checks.)
+  useEffect(() => {
+    setState((s) => ({
+      ...s,
+      userLpBalance: 0n,
+      userSharePct: 0,
+      userRedeemableValue: 0n,
+      userCollateralBalance: 0n,
+      userVaultValueAtoms: 0n,
+      hasPendingRedemption: false,
+      pendingRedemptionShares: 0n,
+      cooldownRemainingSlots: 0n,
+      cooldownElapsed: true,
+      splitPot: s.splitPot && { ...s.splitPot, maxNowAtoms: null },
+    }));
+    setLastDrawSummary(null);
+  }, [walletPubkeyStr]);
+
   // S-H1 fix: refresh immediately whenever the derived PDAs, wallet, or slab
   // config change (wallet connect/switch, market switch) — previously this
   // only ran once on mount via the interval effect below, so a post-mount
@@ -679,6 +716,7 @@ export function useInsuranceLP() {
    *   [3] lpMint (writable, PDA: ["lp_vault_mint", market])
    *   [4] systemProgram
    *   [5] tokenProgram
+   *   [6] collateralMint (readonly) — v2.2 only
    */
   const createMint = useCallback(async () => {
     if (!wallet.publicKey || !wallet.signTransaction) {
@@ -697,14 +735,14 @@ export function useInsuranceLP() {
       const [registryPda] = deriveLpVaultRegistry(progPk, marketPk);
       const [lpMintPda] = deriveInsuranceLpMint(progPk, marketPk);
 
-      const keys = buildAccountMetas(ACCOUNTS_CREATE_LP_VAULT, [
-        wallet.publicKey,
-        marketPk,
-        registryPda,
-        lpMintPda,
-        WELL_KNOWN.systemProgram,
-        WELL_KNOWN.tokenProgram,
-      ]);
+      // v2.2: account [6] is the market's collateral mint (the six-account form is refused on chain); flag off: the six accounts as before.
+      const keys = createLpVaultKeys({
+        admin: wallet.publicKey,
+        market: marketPk,
+        registry: registryPda,
+        lpMint: lpMintPda,
+        collateralMint: slabState.config?.collateralMint ?? null,
+      });
       const data = encodeCreateLpVaultV17({
         feeShareBps: 2000,          // 20% of insurance earnings to LP providers
         oiReservationThresholdBps: 5000, // 50% OI reservation threshold
@@ -715,7 +753,7 @@ export function useInsuranceLP() {
       await sendTx({ connection, wallet, instructions: [ix] });
       await refreshState();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorText(err);
       setError(msg);
       throw err;
     } finally {
@@ -848,12 +886,15 @@ export function useInsuranceLP() {
         }));
         return sendTx({ connection, wallet, instructions: ixs, selfHeal: { programId: progPk, market: marketPk }, vaultLpRepair: earnRepairFor(progPk, marketPk) });
       };
-      const sig = await sendWithUpgradeRetry(attemptDeposit, isEarnVersionRefusal);
+      // S-3 (v2.2): a pre-sign 26/27 (price) is re-checked for up to 20 s, then a clear error.
+      const sig = isDevnetV22Enabled()
+        ? await withEarnPriceWait(() => sendWithUpgradeRetry(attemptDeposit, isEarnVersionRefusal), { wrapperProgramId: progPk.toBase58() })
+        : await sendWithUpgradeRetry(attemptDeposit, isEarnVersionRefusal);
       void readTxDrawSummary(connection, sig).then(setLastDrawSummary);
       await refreshState();
       return sig;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorText(err);
       setError(msg);
       throw err;
     } finally {
@@ -910,6 +951,8 @@ export function useInsuranceLP() {
           programId: progPk, redeemer: wallet.publicKey!, registry: registryPda, lpMint: lpMintPda,
           redeemerLpAta: await getAssociatedTokenAddress(lpMintPda, wallet.publicKey!), escrow: escrowPda,
           redemption: redemptionPda, shares: lpAmount,
+          // AUD-S1-18: the floored 76; the floor sits EARN_REQUEST_FLOOR_BPS under today's quote.
+          minPayoutAtoms: earnRequestFloorAtoms(earnRequestQuoteAtoms(lpAmount, state)),
         });
       // ExecuteRedemption (tag 77) — collect collateral after cooldown.
       // BUG FIX (devnet flow-test 2026-07-01): this account list was missing the LP
@@ -1074,13 +1117,13 @@ export function useInsuranceLP() {
       await refreshState();
       return { step, signature };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorText(err);
       setError(msg);
       throw err;
     } finally {
       setLoading(false);
     }
-  }, [wallet, connection, slabAddress, programId, slabState, state.lpVaultDomain, state.redemptionCooldownSlots, state.registryExists, refreshState, earnRepairFor]);
+  }, [wallet, connection, slabAddress, programId, slabState, state.lpVaultDomain, state.redemptionCooldownSlots, state.registryExists, state.splitPot, state.backingNavAtoms, state.lpSupply, refreshState, earnRepairFor]);
 
   /**
    * A pending redemption the vault cannot pay in full right now (EarnPayoutCapError): cancel it
@@ -1109,7 +1152,7 @@ export function useInsuranceLP() {
       const [escrowPda] = deriveLpEscrow(progPk, marketPk);
       const lpAta = await getAssociatedTokenAddress(lpMintPda, payer);
       const cancel = buildCancelRedemptionIx({ programId: progPk, redeemer: payer, registry: registryPda, redemption: redemptionPda, lpMint: lpMintPda, redeemerLpAta: lpAta, escrow: escrowPda });
-      const request = buildRequestRedeemIx({ programId: progPk, redeemer: payer, registry: registryPda, lpMint: lpMintPda, redeemerLpAta: lpAta, escrow: escrowPda, redemption: redemptionPda, shares });
+      const request = buildRequestRedeemIx({ programId: progPk, redeemer: payer, registry: registryPda, lpMint: lpMintPda, redeemerLpAta: lpAta, escrow: escrowPda, redemption: redemptionPda, shares, minPayoutAtoms: earnRequestFloorAtoms(earnRequestQuoteAtoms(shares, state)) });
       const gate = await simulateForGate(connection, payer, [cancel]);
       if (gate.err) throw gate.err instanceof Error ? gate.err : new Error(typeof gate.err === 'string' ? gate.err : JSON.stringify(gate.err));
       const [blockhash, fee] = await Promise.all([getFreshBlockhash(connection, true), getPriorityFee(connection)]);
@@ -1124,13 +1167,13 @@ export function useInsuranceLP() {
       await refreshState();
       return sig;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorText(err));
       await refreshState().catch(() => {});
       throw err;
     } finally {
       setLoading(false);
     }
-  }, [wallet, connection, slabAddress, programId, refreshState]);
+  }, [wallet, connection, slabAddress, programId, state.splitPot, state.backingNavAtoms, state.lpSupply, refreshState]);
 
   return {
     state,

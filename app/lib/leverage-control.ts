@@ -18,6 +18,7 @@
  * Fractional leverage is not an edge case here: markets are created in 0.5
  * steps (GH#2621), and a market's own maximum is derived to two decimals.
  */
+import { sanitizeDecimalInput } from "@/lib/decimal-input";
 
 /** Preset leverages offered as buttons, filtered to what the market allows. */
 export const LEVERAGE_SNAP_POINTS = [1, 3, 5, 10, 20];
@@ -28,8 +29,8 @@ export const LEVERAGE_SNAP_POINTS = [1, 3, 5, 10, 20];
  * 0.5 matches the step markets are created at, so MOST leverages a market can
  * be created with are reachable on the slider that trades it. Not all: a
  * market's max round-trips through bps and back, and 6x, 7x and 9.5x come back
- * as 5.99, 6.99 and 9.49 — off the 0.5 grid, so their top half-step is
- * drag-unreachable. The preset button for the max is how those are reached.
+ * as 5.99, 6.99 and 9.49 — off the 0.5 grid, so the keyboard can't step to them.
+ * The preset button for the max, or the far end of the track, reaches them.
  * (1500 bps is 6.66x here, not 6.67 — the derivation floors at 2dp.)
  */
 export const LEVERAGE_STEP = 0.5;
@@ -94,20 +95,45 @@ export function clampSliderLeverage(raw: number, maxLeverage: number): number {
   return Math.max(1, Math.min(maxLeverage, raw));
 }
 
+/**
+ * Leverage -> % along the slider track. The presets are evenly spaced (index scale), so
+ * 1/3/5/10/20 don't bunch up at the left; between two presets the position is linear.
+ */
+export function leverageToPct(val: number, presets: readonly number[]): number {
+  const n = presets.length;
+  if (n <= 1) return 0;
+  for (let i = 0; i < n - 1; i++) {
+    if (val <= presets[i + 1]) {
+      const lo = presets[i], hi = presets[i + 1];
+      return ((i + (hi > lo ? (val - lo) / (hi - lo) : 0)) / (n - 1)) * 100;
+    }
+  }
+  return 100;
+}
+
+/**
+ * The inverse of leverageToPct, for a pointer at fraction `frac` (0..1) of the track: the
+ * leverage drawn under it, on the LEVERAGE_STEP grid. N3: the native range input mapped the
+ * pointer linearly, so on a 10x market a click above the 5x label set 7x.
+ */
+export function pctToLeverage(frac: number, presets: readonly number[], maxLeverage: number): number {
+  const n = presets.length;
+  if (!Number.isFinite(frac) || n <= 1) return clampSliderLeverage(presets[0] ?? 1, maxLeverage);
+  const f = Math.max(0, Math.min(1, frac));
+  // The far end is the max itself, which can sit off the step grid (6.66x).
+  if (f === 1) return maxLeverage;
+  const pos = f * (n - 1);
+  const i = Math.min(Math.floor(pos), n - 2);
+  const raw = presets[i] + (pos - i) * (presets[i + 1] - presets[i]);
+  return clampSliderLeverage(1 + Math.round((raw - 1) / LEVERAGE_STEP) * LEVERAGE_STEP, maxLeverage);
+}
+
 /** What the leverage text box should show, and what value it implies. */
 export interface LeverageInputState {
   /** The text to render. Preserves a trailing "." so a decimal can be typed. */
   text: string;
   /** The leverage to apply, or null while the text is not yet a number. */
   leverage: number | null;
-}
-
-/** Digits and at most one decimal point, mirroring the ticket's own sanitiser. */
-function sanitizeDecimalInput(value: string): string {
-  const cleaned = value.replace(/[^0-9.]/g, "");
-  const dot = cleaned.indexOf(".");
-  if (dot === -1) return cleaned;
-  return cleaned.slice(0, dot + 1) + cleaned.slice(dot + 1).replace(/\./g, "");
 }
 
 /**

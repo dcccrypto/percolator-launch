@@ -124,11 +124,11 @@ export async function POST(
     const { data: urlData } = supabase.storage.from("logos").getPublicUrl(filePath);
     const publicUrl = urlData.publicUrl;
 
-    // If a market already exists for this mint, update its logo_url too
-    await supabase
-      .from("markets")
-      .update({ logo_url: publicUrl })
-      .eq("mint_address", canonicalMint);
+    // S3-C9 (fix-all 2026-10-18): this route used to also write `markets.logo_url` for EVERY
+    // market sharing the mint, so one API-key holder could restyle markets they did not create
+    // (all markets collateralised in the shared Sim-USDC mint at once). A market's logo is now
+    // set only per slab, by its creator, via /api/markets/[slab]/logo (signed deployer proof
+    // checked against markets.deployer). This route only stores the token's own logo file.
 
     uploadTimestamps.set(canonicalMint, Date.now());
 

@@ -36,7 +36,7 @@
  */
 import { computeMarkPnl, computePnlPercent } from "@percolatorct/sdk";
 import {
-  computeMarkPnlCollateral,
+  computeMarkPnlLinear,
   computePositionInitialMargin,
   resolveEntryPrice,
   type EntryPriceSource,
@@ -47,6 +47,7 @@ import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import type { AssetAdlFactors } from "@/lib/v17-adl";
 import { adlEffectiveQuantityCeil, effectiveLeg } from "@/lib/limits/effective-quantity";
 import { computeEngineLiqPrice } from "@/lib/liquidation-risk";
+import { riskEntryFromSettled, riskLegOf, settledRiskAnchorE6, type RiskLegCarrier, type RiskLegSnap } from "@/lib/risk-entry";
 
 export interface PositionPnlInput {
   /** RAW leg basis (`account.positionSize`, signed). Never pre-scaled by ADL. */
@@ -87,6 +88,13 @@ export interface PositionPnlInput {
   maintenanceMarginBps?: bigint;
   /** Fallback ROE denominator when no initial margin is computable. */
   capital: bigint;
+  /**
+   * #3534: the position's leg snapshots and the portfolio's active-leg count. With the asset's settle indices
+   * (`adlFactors.settle`) they decide whether the leg has nothing pending, which makes the RISK entry the back-solve
+   * of `pnl` at the asset's effective price (lib/risk-entry.ts). Omitted = today's entry.
+   */
+  riskLeg?: RiskLegSnap | null;
+  activeLegCount?: number | null;
 }
 
 export interface PositionPnl {
@@ -99,6 +107,14 @@ export interface PositionPnl {
   entrySource: EntryPriceSource;
   /** Entry is a back-solve - show "est." beside anything computed from it. */
   isEstimate: boolean;
+  /**
+   * #3534: the entry RISK math uses (liquidation price, margin cushion / tier, margin health): `capital + q x (mark -
+   * riskEntry)` is the engine's equity. Equals `entry` unless the leg is fully settled (lib/risk-entry.ts), where the
+   * cached fill price would count a loss settlement already moved out of capital a second time. Never for display.
+   */
+  riskEntry: bigint;
+  /** True when `riskEntry` is the settled back-solve rather than `entry`. */
+  riskEntrySettled: boolean;
   /** True when `unrealizedPnl`/`roe` are real numbers that may be displayed. */
   pnlKnown: boolean;
   /** Coin-margined native PnL (same scale as size), or null when unknown. */
@@ -131,7 +147,7 @@ export function valueAtMark(v: {
   capital: bigint;
 }): { pnlNative: bigint; unrealizedPnl: bigint; roe: number } {
   const pnlNative = computeMarkPnl(v.effectiveSize, v.entryE6, v.markE6);
-  const unrealizedPnl = computeMarkPnlCollateral(pnlNative, v.markE6);
+  const unrealizedPnl = computeMarkPnlLinear(v.effectiveSize, v.entryE6, v.markE6);
   let roe = 0;
   try {
     const margin = computePositionInitialMargin(v.effectiveSize, v.entryE6, v.initialMarginBps);
@@ -209,16 +225,29 @@ export function computePositionPnl(input: PositionPnlInput): PositionPnl {
           : ({ entry: anchorE6, source: "unknown" } as const)
       : resolveEntryPrice(effectiveSize, cached, safePnl, anchorE6, server);
 
+  // #3534: a fully settled single leg's risk entry is the back-solve of pnl at the asset's effective price.
+  const settledEntry =
+    effectiveSize !== null && effectiveSize !== 0n && !resetObligation && !isSentinelValue(input.onChainPnl) &&
+    input.riskLeg != null && input.riskLeg.side === (effectiveSize > 0n ? 0 : 1)
+      ? (() => {
+          const anchor = settledRiskAnchorE6(adlFactors?.settle, input.riskLeg, input.activeLegCount);
+          return anchor === null ? null : riskEntryFromSettled(effectiveSize, input.onChainPnl, anchor);
+        })()
+      : null;
+  const riskEntry = settledEntry ?? resolved.entry;
+
   const base = {
     effectiveSize,
     adlKnown,
     entry: resolved.entry,
     entrySource: resolved.source,
     isEstimate: resolved.source === "derived",
+    riskEntry,
+    riskEntrySettled: settledEntry !== null,
     liquidationPriceE6:
       effectiveSize === null || input.maintenanceMarginBps === undefined
         ? null
-        : computeEngineLiqPrice(resolved.entry, input.capital, effectiveSize, input.maintenanceMarginBps),
+        : computeEngineLiqPrice(riskEntry, input.capital, effectiveSize, input.maintenanceMarginBps),
   };
   const unknown: PositionPnl = {
     ...base,
@@ -262,7 +291,7 @@ export function lookupKnownEntries(
 
 /** Structural subset of `PortfolioPosition` the adapter needs (avoids a lib -> hook import cycle). */
 export interface PortfolioPnlSource {
-  account: { positionSize: bigint; adlABasis: bigint; adlEpochSnap?: bigint; pnl: bigint; capital: bigint } | null;
+  account: ({ positionSize: bigint; adlABasis: bigint; adlEpochSnap?: bigint; pnl: bigint; capital: bigint } & RiskLegCarrier) | null;
   adlFactors?: AssetAdlFactors | null;
   /** false on legacy v12.x portfolio rows. */
   adlApplicable?: boolean;
@@ -291,6 +320,7 @@ export function portfolioPositionPnl(pos: PortfolioPnlSource, liveMarkE6: bigint
     initialMarginBps: pos.initialMarginBps,
     maintenanceMarginBps: pos.maintenanceMarginBps,
     capital: pos.account?.capital ?? 0n,
+    ...riskLegOf(pos.account),
   });
 }
 
@@ -343,6 +373,7 @@ export function terminalPositionPnl(args: {
     initialMarginBps: args.initialMarginBps,
     maintenanceMarginBps: args.maintenanceMarginBps,
     capital: account.capital,
+    ...riskLegOf(account),
   });
 }
 

@@ -44,7 +44,12 @@ export interface OwnCleanupGroup {
   withoutClose: TransactionInstruction[] | null;
 }
 
-export function ownerClosePortfolioIx(programId: PublicKey, owner: PublicKey, market: PublicKey, p: OwnPortfolio): TransactionInstruction {
+export function ownerClosePortfolioIx(
+  programId: PublicKey,
+  owner: PublicKey,
+  market: PublicKey,
+  p: Pick<OwnPortfolio, "key" | "portfolioId" | "matcherSequence" | "positionEpoch">,
+): TransactionInstruction {
   return new TransactionInstruction({
     programId,
     keys: [
@@ -56,6 +61,53 @@ export function ownerClosePortfolioIx(programId: PublicKey, owner: PublicKey, ma
   });
 }
 
+/**
+ * [create owner ATA (idempotent), 30 CloseResolved | 46 ClaimResolvedPayoutTopup] in the OWNER-SIGNED form: [owner (s), market (w),
+ * portfolio (w), owner ATA (w), vault token (w), vault authority, token program] (wrapper `handle_close_resolved`,
+ * percolator-prog 1b9ee2af / aca02ba6: accounts 0..6; the NftRegistry at [7] is the unsigned-caller proof and harmless here).
+ * The owner signs, so it works inside the owner-only window too (before `resolved_slot + force_close_delay_slots`).
+ */
+export function ownResolvedPayIxs(
+  c: { programId: PublicKey; owner: PublicKey; market: PublicKey; collateralMint: PublicKey; vaultToken: PublicKey; vaultAuthority: PublicKey },
+  portfolio: PublicKey,
+  tag: typeof TAG_CLOSE_RESOLVED | typeof TAG_CLAIM_RESOLVED_PAYOUT_TOPUP,
+): [TransactionInstruction, TransactionInstruction] {
+  const ata = getAssociatedTokenAddressSync(c.collateralMint, c.owner);
+  const pay = buildPermissionlessResolvedIx({
+    tag,
+    programId: c.programId,
+    owner: c.owner,
+    market: c.market,
+    portfolio,
+    ownerAta: ata,
+    vaultToken: c.vaultToken,
+    vaultAuthority: c.vaultAuthority,
+  });
+  pay.keys[0] = { pubkey: c.owner, isSigner: true, isWritable: false };
+  return [createAssociatedTokenAccountIdempotentInstruction(c.owner, ata, c.owner, c.collateralMint), pay];
+}
+
+/** The wallet's OWN portfolios on a market (decoded for the resolved exit), read from chain. */
+export async function loadOwnPortfolios(connection: Connection, programId: PublicKey, market: PublicKey, owner: PublicKey): Promise<OwnPortfolio[]> {
+  const accts = await connection.getProgramAccounts(programId, {
+    commitment: "confirmed",
+    filters: [{ memcmp: { offset: 16, bytes: market.toBase58() } }],
+  });
+  const own: OwnPortfolio[] = [];
+  for (const { pubkey, account } of accts) {
+    const d = new Uint8Array(account.data);
+    if (d[10] !== KIND_PORTFOLIO) continue;
+    const view = decodeResolvedPortfolio(d);
+    if (!view || !new PublicKey(view.owner).equals(owner)) continue;
+    try {
+      own.push({ key: pubkey, view, ...readPortfolioIdentity(d) });
+    } catch {
+      // not a v18 portfolio this wire can address
+    }
+  }
+  return own;
+}
+
 export function planOwnPortfolioCleanup(c: {
   programId: PublicKey;
   owner: PublicKey;
@@ -65,7 +117,6 @@ export function planOwnPortfolioCleanup(c: {
   vaultAuthority: PublicKey;
   portfolios: readonly OwnPortfolio[];
 }): OwnCleanupGroup[] {
-  const ata = getAssociatedTokenAddressSync(c.collateralMint, c.owner);
   const out: OwnCleanupGroup[] = [];
   for (const p of c.portfolios) {
     if (!new PublicKey(p.view.owner).equals(c.owner)) continue;
@@ -75,24 +126,12 @@ export function planOwnPortfolioCleanup(c: {
       continue;
     }
     const tag = p.view.receiptPresent && !p.view.receiptFinalized ? TAG_CLAIM_RESOLVED_PAYOUT_TOPUP : TAG_CLOSE_RESOLVED;
-    const pay = buildPermissionlessResolvedIx({
-      tag,
-      programId: c.programId,
-      owner: c.owner,
-      market: c.market,
-      portfolio: p.key,
-      ownerAta: ata,
-      vaultToken: c.vaultToken,
-      vaultAuthority: c.vaultAuthority,
-    });
-    // Owner-signed form: the owner signs [0] (no NftRegistry proof needed, harmless at [7]).
-    pay.keys[0] = { pubkey: c.owner, isSigner: true, isWritable: false };
-    const create = createAssociatedTokenAccountIdempotentInstruction(c.owner, ata, c.owner, c.collateralMint);
+    const [create, pay] = ownResolvedPayIxs(c, p.key, tag);
     out.push({
       portfolio: p.key,
       kind: tag === TAG_CLOSE_RESOLVED ? "close-resolved" : "claim-topup",
-      withClose: [create, pay, close8],
-      withoutClose: [create, pay],
+      withClose: [create!, pay!, close8],
+      withoutClose: [create!, pay!],
     });
   }
   return out;
@@ -153,22 +192,7 @@ export async function cleanupOwnPortfoliosBeforeReclaim(p: {
   vaultAuthority: PublicKey;
   send: (ixs: TransactionInstruction[]) => Promise<string>;
 }): Promise<OwnCleanupOutcome> {
-  const accts = await p.connection.getProgramAccounts(p.programId, {
-    commitment: "confirmed",
-    filters: [{ memcmp: { offset: 16, bytes: p.market.toBase58() } }],
-  });
-  const own: OwnPortfolio[] = [];
-  for (const { pubkey, account } of accts) {
-    const d = new Uint8Array(account.data);
-    if (d[10] !== KIND_PORTFOLIO) continue;
-    const view = decodeResolvedPortfolio(d);
-    if (!view || !new PublicKey(view.owner).equals(p.owner)) continue;
-    try {
-      own.push({ key: pubkey, view, ...readPortfolioIdentity(d) });
-    } catch {
-      // not a v18 portfolio this wire can address
-    }
-  }
+  const own = await loadOwnPortfolios(p.connection, p.programId, p.market, p.owner);
   const groups = planOwnPortfolioCleanup({ ...p, portfolios: own });
   const sim = connectionSelfHealDeps(p.connection, p.market, p.owner);
   const res = await runOwnPortfolioCleanup(groups, {
@@ -200,22 +224,7 @@ export async function planOwnCleanupForOneApproval(p: {
   vaultToken: PublicKey;
   vaultAuthority: PublicKey;
 }): Promise<{ ok: true; groups: TransactionInstruction[][] } | { ok: false; reason: "progress-only" | "refused" | "others-remain"; remaining?: bigint }> {
-  const accts = await p.connection.getProgramAccounts(p.programId, {
-    commitment: "confirmed",
-    filters: [{ memcmp: { offset: 16, bytes: p.market.toBase58() } }],
-  });
-  const own: OwnPortfolio[] = [];
-  for (const { pubkey, account } of accts) {
-    const d = new Uint8Array(account.data);
-    if (d[10] !== KIND_PORTFOLIO) continue;
-    const view = decodeResolvedPortfolio(d);
-    if (!view || !new PublicKey(view.owner).equals(p.owner)) continue;
-    try {
-      own.push({ key: pubkey, view, ...readPortfolioIdentity(d) });
-    } catch {
-      // not a v18 portfolio this wire can address
-    }
-  }
+  const own = await loadOwnPortfolios(p.connection, p.programId, p.market, p.owner);
   const groups = planOwnPortfolioCleanup({ ...p, portfolios: own });
   const sim = connectionSelfHealDeps(p.connection, p.market, p.owner);
   const out: TransactionInstruction[][] = [];

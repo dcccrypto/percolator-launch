@@ -80,6 +80,10 @@ export interface FundingIxParams {
   userAta: PublicKey;
   /** The market vault's token account. */
   vaultAta: PublicKey;
+  /** The market's collateral mint. v2.2 (flag on): tag 74's required account `[6]`; flag off: unused. */
+  collateralMint?: PublicKey | null;
+  /** v2.2 only: the market symbol the share token's ticker derives from (tag 122); absent = the generic form. */
+  shareSymbol?: string | null;
 }
 
 export interface MobileFundingIxs {
@@ -171,6 +175,8 @@ export function buildMobileFundingIxs(p: FundingIxParams): MobileFundingIxs {
     vaultAta,
     seedPerDomain: backingSeedPerDomain(DEFAULT_LP_COLLATERAL),
     includeCreate: true,
+    collateralMint: p.collateralMint,
+    shareSymbol: p.shareSymbol,
   });
 
   // Insurance keeps one-shot lane 1 and runs in the mandatory group, before the

@@ -11,8 +11,8 @@ const src = (f: string) => readFileSync(resolve(process.cwd(), f), "utf8");
 describe("faucet modal mounting", () => {
   it("both provider branches render <DevnetFaucetModal />", () => {
     const s = src("components/providers/WalletProvider.tsx");
-    const adapter = s.slice(s.indexOf("if (!appId) {"), s.indexOf("// Mount Privy client-side only"));
-    const privy = s.slice(s.indexOf("// Mount Privy client-side only"));
+    const adapter = s.slice(s.indexOf("if (!appId) {"), s.indexOf("// Privy: the app is server-rendered here"));
+    const privy = s.slice(s.indexOf("// Privy: the app is server-rendered here"));
     expect(adapter).toContain("<WalletAdapterProviderClient>");
     expect(adapter).toContain("<DevnetFaucetModal />");
     expect(privy).toContain("<DevnetFaucetModal />");

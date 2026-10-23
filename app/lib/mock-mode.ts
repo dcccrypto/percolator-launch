@@ -2,9 +2,10 @@
  * Mock mode utilities for dev-only UI testing.
  * Mock mode is active when ANY of these are true:
  *   1. NEXT_PUBLIC_MOCK_MODE === "true" (build-time opt-in)
- *   2. URL contains ?mock=1 (per-request opt-in, client-only) — used by
- *      /demo-shots to capture authentic UI screenshots without flipping
- *      mock mode for the whole site.
+ *   2. URL contains ?mock=1 (per-request opt-in, client-only), in a
+ *      non-production build only. On the live site it showed fabricated
+ *      figures with no marker (e.g. a $24.7M Earn TVL at /earn?mock=1) to
+ *      anyone with the link. A demo deployment can still set the env flag.
  *
  * The URL-param branch only runs in the browser, which means SSR will
  * render as non-mock and the client will re-render with mock data on
@@ -17,8 +18,8 @@ export function isMockMode(): boolean {
   const envFlag = process.env.NEXT_PUBLIC_MOCK_MODE;
   if (envFlag === "true" || envFlag === "1") return true;
 
-  // Client-only URL-param check
-  if (typeof window !== "undefined") {
+  // Client-only URL-param check, never in a production build.
+  if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
     const params = new URLSearchParams(window.location.search);
     if (params.get("mock") === "1") return true;
   }

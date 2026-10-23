@@ -46,14 +46,33 @@ export const DEFAULT_COHORT_CUTOFF = 1000;
 /** Prefix on the `sub` of a session minted through the team bypass. */
 export const TEAM_SUB_PREFIX = "team:";
 
+/** Prefix on the `sub` of a session minted through the judge door. */
+export const JUDGE_SUB_PREFIX = "judge:";
+
+/** Minimum judge code length. Shorter than the team secret because it is typed/pasted by outsiders, still unguessable. */
+export const JUDGE_CODE_MIN_LENGTH = 24;
+
 export interface AccessClaims {
-  /** Stable waitlist row id (never a wallet or email), or `team:<fp>`. */
+  /** Stable waitlist row id (never a wallet or email), `team:<fp>` or `judge:<fp>`. */
   sub: string;
   /** Waitlist position at the moment of verification. */
   pos: number;
   /** Unix seconds after which this is refused. */
   exp: number;
+  /** The visitor's referral code, when the gate sent one (older handoffs don't). From #3191. */
+  ref?: string;
+  /**
+   * Keyed tag of the Privy user the gate verified (`privyUserTag`), when the gate sent one. Lets the
+   * playground show the referral code only to that same Privy login, not to whoever holds the cookie,
+   * without the Privy id itself ever appearing in the handoff URL.
+   */
+  uid?: string;
 }
+
+/** A referral code as the waitlist issues them: short, URL-safe. Anything else is dropped. */
+const REF_RE = /^[A-Za-z0-9_-]{1,32}$/;
+/** `privyUserTag` output: 22 base64url chars (128 bits). Anything else is dropped. */
+const UID_RE = /^[A-Za-z0-9_-]{22}$/;
 
 const enc = new TextEncoder();
 const dec = new TextDecoder("utf-8", { fatal: true });
@@ -136,7 +155,13 @@ async function open(
   if (typeof claims.pos !== "number" || !Number.isFinite(claims.pos)) return null;
   if (typeof claims.exp !== "number" || !Number.isFinite(claims.exp)) return null;
   if (nowSec >= claims.exp) return null;
-  return claims;
+  // Optional and never a reason to refuse: an odd value is dropped, the token still opens.
+  const { ref, uid, ...rest } = claims;
+  return {
+    ...rest,
+    ...(typeof ref === "string" && REF_RE.test(ref) ? { ref } : {}),
+    ...(typeof uid === "string" && UID_RE.test(uid) ? { uid } : {}),
+  };
 }
 
 // Same derivations as the gate. Changing either string here (or there) breaks
@@ -154,8 +179,32 @@ export function readHandoff(
   return open(token, handoffSecret(secret), toSec(nowMs));
 }
 
-export function mintSession(sub: string, pos: number, secret: string, nowMs = Date.now()): Promise<string> {
-  return mint({ sub, pos, exp: toSec(nowMs) + SESSION_TTL_SECONDS }, sessionSecret(secret));
+export function mintSession(
+  sub: string,
+  pos: number,
+  secret: string,
+  nowMs = Date.now(),
+  ref?: string,
+  uid?: string,
+): Promise<string> {
+  return mint(
+    { sub, pos, exp: toSec(nowMs) + SESSION_TTL_SECONDS, ...(ref ? { ref } : {}), ...(uid ? { uid } : {}) },
+    sessionSecret(secret),
+  );
+}
+
+/**
+ * Keyed, one-way tag of a Privy user id (`did:privy:…`). The gate on percolator.trade computes the same
+ * value (byte-compatible: HMAC-SHA256, key `${PLAYGROUND_ACCESS_SECRET}:privy-user:v1`, first 16 bytes,
+ * base64url) for the user it verified and signs it into the handoff as `uid`. Comparing tags lets the
+ * playground bind a session to a Privy login without either side putting the id in a URL.
+ */
+export async function privyUserTag(privyUserId: string, secret: string): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", enc.encode(`${secret}:privy-user:v1`), { name: "HMAC", hash: "SHA-256" }, false, [
+    "sign",
+  ]);
+  const mac = await crypto.subtle.sign("HMAC", key, enc.encode(privyUserId));
+  return bytesToB64url(new Uint8Array(mac).slice(0, 16));
 }
 
 export function readSession(
@@ -191,6 +240,32 @@ export function teamBypassSecret(env: Record<string, string | undefined> = proce
   return typeof s === "string" && s.length >= 32 ? s : null;
 }
 
+/**
+ * The judge door's code, or null when the door is closed. Closed when the code
+ * is unset/short, or when PLAYGROUND_JUDGE_ACCESS_UNTIL (an ISO date/time) is
+ * set and has passed — so a hackathon link expires on its own. UNTIL must be a
+ * full ISO date-time with an explicit zone (e.g. 2026-12-31T23:59:59Z); anything
+ * else closes the door (fail closed — Date.parse alone would read "99999" as
+ * the year 99999 and a date-only value as 00:00 UTC).
+ */
+const ISO_WITH_ZONE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+export function judgeAccessCode(
+  env: Record<string, string | undefined> = process.env,
+  nowMs = Date.now(),
+): string | null {
+  // Trimmed: a newline pasted into the dashboard must not silently close the door.
+  const s = env.PLAYGROUND_JUDGE_ACCESS_CODE?.trim();
+  if (!s || s.length < JUDGE_CODE_MIN_LENGTH) return null;
+  const until = (env.PLAYGROUND_JUDGE_ACCESS_UNTIL ?? "").trim();
+  if (until) {
+    if (!ISO_WITH_ZONE_RE.test(until)) return null;
+    const t = Date.parse(until);
+    if (!Number.isFinite(t) || nowMs >= t) return null;
+  }
+  return s;
+}
+
 /** The kill switch: the gate enforces only when this is exactly "true". */
 export function gateEnabled(env: Record<string, string | undefined> = process.env): boolean {
   return (env.PLAYGROUND_GATE_ENABLED ?? "").trim() === "true";
@@ -208,12 +283,25 @@ export async function teamFingerprint(teamSecret: string): Promise<string> {
 }
 
 /**
+ * Fingerprint of the judge code, baked into judge sessions as `judge:<fp>`.
+ * Domain-separated from the team fingerprint, so a judge session can never
+ * pass as a team session. Rotating, unsetting or expiring the code revokes
+ * every judge session at once.
+ */
+export async function judgeFingerprint(judgeCode: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", enc.encode(`pg-judge-fp:v1:${judgeCode}`));
+  return bytesToB64url(new Uint8Array(digest)).slice(0, 16);
+}
+
+/**
  * Is this session cookie good for entry right now?
  *
  * Checks the signature + expiry (readSession), then:
  *   - waitlist sessions: position still inside the CURRENT cutoff, so lowering
  *     PLAYGROUND_COHORT_CUTOFF takes effect on the next request;
- *   - team sessions: fingerprint matches the CURRENT team secret.
+ *   - team sessions: fingerprint matches the CURRENT team secret;
+ *   - judge sessions: fingerprint matches the CURRENT judge code, and the
+ *     judge door is still open (not past PLAYGROUND_JUDGE_ACCESS_UNTIL).
  */
 export async function sessionGrantsAccess(
   token: string | null | undefined,
@@ -228,6 +316,11 @@ export async function sessionGrantsAccess(
     const team = teamBypassSecret(env);
     if (!team) return false;
     return constantTimeEqual(claims.sub, TEAM_SUB_PREFIX + (await teamFingerprint(team)));
+  }
+  if (claims.sub.startsWith(JUDGE_SUB_PREFIX)) {
+    const judge = judgeAccessCode(env, nowMs);
+    if (!judge) return false;
+    return constantTimeEqual(claims.sub, JUDGE_SUB_PREFIX + (await judgeFingerprint(judge)));
   }
   return isWithinCohort(claims.pos, cohortCutoff(env.PLAYGROUND_COHORT_CUTOFF));
 }

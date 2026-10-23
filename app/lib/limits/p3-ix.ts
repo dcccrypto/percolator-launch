@@ -14,6 +14,7 @@
  */
 import { PublicKey, SystemProgram, TransactionInstruction, type AccountMeta } from "@solana/web3.js";
 import { encodeInitVaultLpV19 } from "@/lib/v21/sdk";
+import { encodeInitVaultLpV22Tiers, type TierConfig } from "@/lib/v22/sdk/records/growth-v19";
 import {
   BOUND_TAIL_INDEX,
   LP_VAULT_REGISTRY_SEED,
@@ -221,7 +222,7 @@ export function deriveVaultLpMatcherDelegate(programId: PublicKey, market: Publi
  * params + price-derived finite caps itself. No creator input; trading opens right after
  * (+ tag 96). Must run while the creator is still marketauth (before StakeInitPool).
  */
-export function buildInitVaultLpIx(m: VaultLpMarket, marketauth: PublicKey, juniorFloorBps: number, pin: { matcherProgram: PublicKey; matcherCtx: PublicKey }, growth?: { lLaunchX100: number }): TransactionInstruction {
+export function buildInitVaultLpIx(m: VaultLpMarket, marketauth: PublicKey, juniorFloorBps: number, pin: { matcherProgram: PublicKey; matcherCtx: PublicKey }, growth?: { lLaunchX100: number; tiers?: TierConfig; lTierX100?: number }): TransactionInstruction {
   return new TransactionInstruction({
     programId: m.programId,
     keys: [
@@ -238,7 +239,13 @@ export function buildInitVaultLpIx(m: VaultLpMarket, marketauth: PublicKey, juni
       meta(deriveVaultLpMatcherDelegate(m.programId, m.market, m.lpPortfolio, m.registry, pin.matcherProgram, pin.matcherCtx), false, false),
     ],
     // Devnet v2.1: a growth market's bind also carries the creator's starting leverage (5-byte form).
-    data: Buffer.from(growth ? encodeInitVaultLpV19(juniorFloorBps, growth.lLaunchX100) : encodeInitVaultLp(juniorFloorBps)),
+    data: Buffer.from(
+      growth
+        ? growth.tiers
+          ? encodeInitVaultLpV22Tiers(juniorFloorBps, growth.lLaunchX100, growth.tiers, growth.lTierX100)
+          : encodeInitVaultLpV19(juniorFloorBps, growth.lLaunchX100)
+        : encodeInitVaultLp(juniorFloorBps),
+    ),
   });
 }
 

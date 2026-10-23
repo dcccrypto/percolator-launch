@@ -100,6 +100,33 @@ export function toInitialPriceE6(price: string | null | undefined): InitialPrice
   return { ok: true, e6: BigInt(Math.round(n * 1_000_000)) };
 }
 
+/** A decimal price, plain or exponent form (what `String(number)` produces for small prices, e.g. "1.5e-7"). */
+const DECIMAL_PRICE = /^\+?(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/;
+
+/**
+ * `round-half-up(price * 10^scale)`, computed EXACTLY from the price's decimal digits (no float maths), or null when the
+ * string is not a positive finite price. Parsing accepts what `toInitialPriceE6` accepts (`Number.parseFloat` semantics):
+ * a string with trailing junk is read as the number `parseFloat` gives.
+ *
+ * #3610: a v2.2 lot market prices 10^lotExp tokens, so its InitMarket price is `price * 10^(6 + lotExp)`. Rounding the
+ * per-token price to a whole e6 first multiplied the rounding error by 10^lotExp (up to a third of the price for a
+ * $0.000001-$0.00001 token). This rounds once, at the scale the caller sends.
+ */
+export function decimalPriceToScaled(price: string | null | undefined, scale: number): bigint | null {
+  if (price == null || !Number.isInteger(scale) || scale < 0) return null;
+  const n = Number.parseFloat(price);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const m = DECIMAL_PRICE.exec(price.trim()) ?? DECIMAL_PRICE.exec(String(n));
+  if (!m || (m[1] === "" && (m[2] ?? "") === "")) return null;
+  const frac = m[2] ?? "";
+  const digits = BigInt(`${m[1]}${frac}` || "0");
+  const shift = Number(m[3] ?? "0") - frac.length + scale;
+  if (shift >= 0) return digits * 10n ** BigInt(shift);
+  const d = 10n ** BigInt(-shift);
+  const q = digits / d;
+  return 2n * (digits % d) >= d ? q + 1n : q;
+}
+
 /**
  * Format a price for carrying between the hooks and the wizard.
  *
@@ -141,18 +168,23 @@ export function minTrackablePriceE6(maxPriceMoveBpsPerSlot: number): bigint {
  * Apply the trackable floor to a resolved price. Pass the
  * `maxPriceMoveBpsPerSlot` the market will actually be created with (it
  * depends on the chosen leverage), so the floor matches what InitMarket sets.
+ * `lotExp` (devnet v2.2): the market prices a LOT of 10^lotExp tokens, so the
+ * mark that must move is the per-lot price; the floor is checked on that. The
+ * result stays per token (`minPrice` too), as the wizard shows it.
  */
 export function withTrackableFloor(
   resolved: InitialPriceE6,
   maxPriceMoveBpsPerSlot: number,
+  lotExp = 0,
 ): InitialPriceE6 {
   if (!resolved.ok) return resolved;
   const min = minTrackablePriceE6(maxPriceMoveBpsPerSlot);
-  if (resolved.e6 >= min) return resolved;
+  const lot = 10n ** BigInt(Math.max(0, Math.floor(lotExp)));
+  if (resolved.e6 * lot >= min) return resolved;
   return {
     ok: false,
     reason: "below-trackable",
     price: Number(resolved.e6) / 1_000_000,
-    minPrice: Number(min) / 1_000_000,
+    minPrice: Number(min) / Number(lot) / 1_000_000,
   };
 }

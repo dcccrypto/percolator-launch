@@ -22,9 +22,18 @@ interface SendPositionNftModalProps {
   nftMintShort: string;
   loading: boolean;
   error: string | null;
+  /**
+   * S1-2: this NFT belongs to an earlier incarnation of the portfolio and controls nothing. Sending is refused
+   * with one calm line and Confirm stays disabled.
+   */
+  stale?: boolean;
   onConfirm: (destination: PublicKey) => void;
   onCancel: () => void;
 }
+
+/** The one calm line shown when a stale NFT (earlier incarnation of the portfolio) is asked to be sent. */
+export const NFT_STALE_SEND_REFUSED =
+  "This NFT belongs to an earlier version of the account and can't be sent. Burn it to reclaim its rent.";
 
 function isValidPubkey(input: string): PublicKey | null {
   // Trim before the length check: a pasted address often carries a space or newline.
@@ -42,6 +51,7 @@ export const SendPositionNftModal: FC<SendPositionNftModalProps> = ({
   nftMintShort,
   loading,
   error,
+  stale = false,
   onConfirm,
   onCancel,
 }) => {
@@ -74,7 +84,7 @@ export const SendPositionNftModal: FC<SendPositionNftModalProps> = ({
 
   const parsedDest = isValidPubkey(destInput);
   const pubkeyInvalid = destInput.length > 0 && !parsedDest;
-  const canConfirm = parsedDest !== null && acknowledged && !loading;
+  const canConfirm = parsedDest !== null && acknowledged && !loading && !stale;
 
   // Trap Escape + Tab, match the other modals (ClosePositionModal /
   // TradeConfirmationModal). Without the Tab-wrap, focus escaped the dialog
@@ -126,14 +136,14 @@ export const SendPositionNftModal: FC<SendPositionNftModalProps> = ({
       onClick={(e) => {
         if (e.target === e.currentTarget && !loading) onCancel();
       }}
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4"
+      className="fixed inset-0 z-[9999] flex justify-center overflow-y-auto overscroll-contain bg-black/80 p-4"
       aria-modal="true"
       role="dialog"
       aria-label="Send Position NFT"
     >
       <div
         ref={modalRef}
-        className="relative w-full max-w-sm rounded-none border border-[var(--border)] bg-[var(--bg)] shadow-xl"
+        className="relative my-auto w-full max-w-sm rounded-none border border-[var(--border)] bg-[var(--bg)] shadow-xl"
       >
         <div className="flex items-center gap-2 px-4 py-3 border-l-2 border-l-[var(--accent)] bg-[var(--accent)]/[0.06]">
           <span className="text-[13px] leading-none text-[var(--accent)]">◆</span>
@@ -204,6 +214,12 @@ export const SendPositionNftModal: FC<SendPositionNftModalProps> = ({
               I understand the other wallet will control this position.
             </span>
           </label>
+
+          {stale && (
+            <div data-testid="send-nft-stale" className="rounded-none border border-[var(--short)]/30 bg-[var(--short)]/5 px-3 py-2">
+              <p className="text-[10px] text-[var(--short)]">{NFT_STALE_SEND_REFUSED}</p>
+            </div>
+          )}
 
           {/* On-chain error surfaced from the simulation / tx */}
           {error && (

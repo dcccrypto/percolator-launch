@@ -5,7 +5,7 @@
  * app/api/markets/[slab]/logo/route.ts) can import `isLpPortfolio` without
  * pulling in a `"use client"` module. userAccountScan.ts re-exports both
  * names from here so its existing client call sites (useUserAccount,
- * usePositionNft, useNftWrappedPosition, useMintPositionNft, usePortfolio,
+ * usePositionNft, useNftWrappedPosition, usePortfolio,
  * useDeposit, useWithdraw, useClosePosition, useTrade, useInitUser,
  * useCreatedMarkets) don't need to change.
  *

@@ -18,13 +18,20 @@ import { parseHumanAmount } from "@/lib/parseAmount";
 import { formatTokenAmount } from "@/lib/format";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
-import { computePositionInitialMargin, estimateEntryFromPnl } from "@/lib/trading";
-import { getEntryPrice } from "@/lib/entry-price";
-import { useLivePrice } from "@/hooks/useLivePrice";
 import { isSentinelValue } from "@/lib/health";
 import { useConvertibleProfit } from "@/hooks/useConvertibleProfit";
-import { settlingProfitMessage } from "@/lib/convert-released-pnl";
+import { heldProfitMessage, settlingProfitMessage } from "@/lib/convert-released-pnl";
+import { useProfitHold } from "@/hooks/useProfitHold";
 import { useWalletBalanceRefreshKey } from "@/lib/wallet-balance-invalidation";
+import { getPortfolioRawSnapshot, makePortfolioScanKey } from "@/lib/userAccountScan";
+const CLAIM_COPY = {
+  checking: "Checking how much of your profit can be withdrawn…",
+  nothing: "There is no profit that can be moved to your balance right now.",
+  couldNotCheck: "We couldn't check your profit just now. Try again in a moment.",
+} as const;
+import { CloseTradingAccountRow } from "./CloseTradingAccountRow";
+import { CLOSE_ACCOUNT_COPY, lamportsToSolText } from "@/lib/close-trading-account";
+import { useDecimalInput } from "@/hooks/useDecimalInput";
 
 interface DepositWithdrawCardProps {
   slabAddress: string;
@@ -38,13 +45,6 @@ interface DepositWithdrawCardProps {
   offerFaucet?: boolean;
 }
 
-function sanitizeDecimalInput(value: string): string {
-  const cleaned = value.replace(/[^0-9.]/g, "");
-  const dotIndex = cleaned.indexOf(".");
-  if (dotIndex === -1) return cleaned;
-  return cleaned.slice(0, dotIndex + 1) + cleaned.slice(dotIndex + 1).replace(/\./g, "");
-}
-
 export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress, isDevnetMirror = false, initialMode = "deposit", offerFaucet = false }) => {
   const { connected: walletConnected, publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
@@ -53,10 +53,11 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
   const connected = walletConnected || mockMode;
   const userAccount = realUserAccount ?? (mockMode ? getMockUserAccount(slabAddress) : null);
   const { deposit, loading: depositLoading, error: depositError } = useDeposit(slabAddress);
-  const { withdraw, loading: withdrawLoading, error: withdrawError } = useWithdraw(slabAddress);
+  const { withdraw, loading: withdrawLoading, error: withdrawError, notice: withdrawNotice } = useWithdraw(slabAddress);
   const { initUser, loading: initLoading, error: initError } = useInitUser(slabAddress);
-  const { config: mktConfig, params: slabParams } = useSlabState();
-  const { priceE6: livePriceE6 } = useLivePrice();
+  const { config: mktConfig, programId: slabProgramId } = useSlabState();
+  // #3426: set after this card's trading account was closed, so the create-account view can say so.
+  const [closedNote, setClosedNote] = useState<string | null>(null);
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const symbol = tokenMeta?.symbol ?? "Token";
 
@@ -97,6 +98,12 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
       : null;
 
   const maxRawRef = useRef<bigint | null>(null);
+  const amountField = useDecimalInput(amount, (newValue) => {
+    if (newValue !== amount) {
+      maxRawRef.current = null;
+    }
+    setAmount(newValue);
+  });
 
   // A typed or Max-derived amount belongs to the wallet/mint scope that
   // produced it. Clear both representations immediately after that scope
@@ -197,8 +204,10 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
     if (walletBalance == null) return; // wait for a real balance read
     const capitalNow = userAccount?.account.capital ?? 0n;
     if (capitalNow !== 0n) return; // only for never-funded accounts
+    // Nothing to prefill yet. Don't latch: an empty wallet funded from the faucet should
+    // still get the starter amount once the balance arrives.
+    if (walletBalance <= 0n) return;
     prefilledRef.current = true;
-    if (walletBalance <= 0n) return; // nothing to prefill
     const prefillAmt = walletBalance < AUTO_DEPOSIT_AMOUNT ? walletBalance : AUTO_DEPOSIT_AMOUNT;
     setAmount(formatTokenAmount(prefillAmt, decimals));
   }, [mode, amount, walletBalance, userAccount, decimals]);
@@ -213,6 +222,9 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
     userAccount && !isSentinelValue(userAccount.account.pnl) ? userAccount.account.pnl : 0n,
     (userAccount?.account.positionSize ?? 0n) !== 0n,
   );
+
+  // v2.2 W-1/W-2: tag 28 simulating to nothing for a few minutes reads as "Held: waiting on backing" (with the amount).
+  const profitHold = useProfitHold(mockMode ? null : userAccount?.pubkey?.toBase58() ?? null, convertQuote);
 
   if (!connected) {
     return (
@@ -235,6 +247,7 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
     const hasTokens = walletBalance !== null && walletBalance > 0n;
     return (
       <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
+        {closedNote && <p data-testid="close-account-done" role="status" className="mb-2 text-[10px] text-[var(--text-secondary)]">{closedNote}</p>}
         <p className="mb-1 text-[10px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">Create Account</p>
         {walletBalance !== null && (
           <p className="mb-2 text-[10px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
@@ -260,20 +273,14 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
         {hasTokens ? (
           <>
             <p className="mb-2 text-[10px] text-[var(--text-secondary)]">
-              Create your trading account on this market to start trading.
+              Create your trading account on this market, then deposit to trade.
             </p>
             <button
               onClick={async () => {
                 try {
-                  // min(wallet balance, the same starter cap useAutoDeposit
-                  // uses) lets useInitUser fold Deposit into the same
-                  // account-creation transaction when possible — one click
-                  // can end in a tradeable, funded account instead of always
-                  // needing a second manual deposit afterward.
-                  const depositAmt = walletBalance != null && walletBalance < AUTO_DEPOSIT_AMOUNT
-                    ? walletBalance
-                    : AUTO_DEPOSIT_AMOUNT;
-                  const result = await initUser(depositAmt);
+                  // Account only (#2424: the starter deposit is user-chosen). The deposit
+                  // form this card shows next is prefilled, editable and balance-checked.
+                  const result = await initUser(0n);
                   setLastSig(result?.sig ?? null);
                 } catch {
                   // initError state is set by the hook and shown below
@@ -307,50 +314,35 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
   const capital = userAccount.account.capital;
   const positionSize = userAccount.account.positionSize ?? 0n;
   const hasOpenPosition = positionSize !== 0n;
-  // M7 / D: gate withdraw on FREE margin (capital minus the open position's
-  // own locked initial margin), not total capital — total capital includes
-  // margin backing an open position that the on-chain program refuses to
-  // release. v17 doesn't store entry_price on-chain, so recover it the same
-  // 3-step fallback OrderTicket already uses: on-chain entry_price -> the
-  // locally-cached entry from this trade's open (lib/entry-price.ts) -> the
-  // on-chain-pnl-implied entry (estimateEntryFromPnl) for a cache miss (2nd
-  // device, cleared storage, or a Position NFT received via transfer).
-  //
-  // D: the previous version used ONLY getEntryPrice(), so a cache miss
-  // silently returned 0n -> computePositionInitialMargin(pos, 0n, bps) is
-  // guarded to return 0n -> lockedMargin=0 -> "Max" offered the FULL account
-  // capital of an account with an OPEN position, and the resulting withdrawal
-  // tx reverted on-chain. If even estimateEntryFromPnl can't establish an
-  // entry (no live oracle price yet), fail CLOSED: treat the WHOLE capital as
-  // locked (lockedMargin=capital -> freeMargin=0 -> the Max button, gated on
-  // `freeMargin > 0n` below, simply doesn't render) rather than open.
-  const rawEntryPrice = userAccount.account.entryPrice ?? 0n;
-  const cachedEntryPrice = hasOpenPosition && publicKey
-    ? getEntryPrice(slabAddress, userAccount.idx, publicKey.toBase58())
-    : 0n;
-  const safePnlForEstimate = isSentinelValue(userAccount.account.pnl) ? 0n : userAccount.account.pnl;
-  const estimatedEntryPrice = hasOpenPosition && livePriceE6 != null && livePriceE6 > 0n
-    ? estimateEntryFromPnl(positionSize, safePnlForEstimate, livePriceE6)
-    : 0n;
-  const effectiveEntryPrice = rawEntryPrice > 0n
-    ? rawEntryPrice
-    : cachedEntryPrice > 0n
-      ? cachedEntryPrice
-      : estimatedEntryPrice;
-  const initialMarginBps = slabParams?.initialMarginBps ?? 1000n;
-  const lockedMargin = !hasOpenPosition
-    ? 0n
-    : effectiveEntryPrice > 0n
-      ? computePositionInitialMargin(positionSize, effectiveEntryPrice, initialMarginBps)
-      : capital; // fail closed: no entry price could be established at all
-  const freeMargin = capital > lockedMargin ? capital - lockedMargin : 0n;
+  // The engine refuses EVERY withdrawal while a position is open, and useWithdraw
+  // blocks it up front (OPEN_POSITION_WITHDRAW_MESSAGE), so nothing is withdrawable
+  // until the position is closed: no Max, and any amount reads as blocked.
   // Flat: capital plus the released profit tag 28 would convert in the same tx.
-  const withdrawable = !hasOpenPosition && convertQuote?.status === "ready" && convertQuote.postCapital > freeMargin
-    ? convertQuote.postCapital
-    : freeMargin;
+  const withdrawable = hasOpenPosition
+    ? 0n
+    : convertQuote?.status === "ready" && convertQuote.postCapital > capital
+      ? convertQuote.postCapital
+      : capital;
   const settlingProfitLine = !hasOpenPosition && convertQuote?.status === "settling"
-    ? settlingProfitMessage(convertQuote.code)
+    ? profitHold.held && profitHold.amount !== null
+      ? heldProfitMessage(`${formatTokenAmount(profitHold.amount, decimals, 3)} ${symbol}`)
+      : settlingProfitMessage(convertQuote.code)
     : null;
+  // QA 12:38 (Low): a flat account holding only released profit (capital 0, pnl 196,157 = 0.196 USDC) clicked "Claim profit" and saw a disabled
+  // Withdraw with no reason. On chain [recertify crank, tag 28, withdraw 196157] lands (simulated), so the dust is claimable; the card now
+  //  1. fills the claimable amount once the quote is ready (one click on Withdraw, or "Withdraw all"),
+  //  2. says WHY when it cannot (checking / could not check / held / nothing to claim) instead of staying silent.
+  const pnlNow = userAccount && !isSentinelValue(userAccount.account.pnl) ? userAccount.account.pnl : 0n;
+  const claimFlow = mode === "withdraw" && !hasOpenPosition && capital === 0n && pnlNow > 0n;
+  const claimReason: string | null = !claimFlow || withdrawable > 0n || settlingProfitLine
+    ? null
+    : convertQuote === null
+      ? CLAIM_COPY.checking
+      : convertQuote.status === "none"
+        ? CLAIM_COPY.nothing
+        : convertQuote.status === "settling"
+          ? CLAIM_COPY.couldNotCheck
+          : null;
   const loading = mode === "deposit" ? depositLoading : withdrawLoading;
   const error = mode === "deposit" ? depositError : withdrawError;
   const isDepositBalanceUnverified =
@@ -372,10 +364,23 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
   const validationError = parseError
     ? parseError
     : isOverWithdraw
-    ? (hasOpenPosition ? "Exceeds free margin (position open)" : "Insufficient capital")
+    ? (hasOpenPosition ? "Close your position to withdraw" : "Insufficient capital")
     : isOverDeposit
     ? "Insufficient wallet balance"
     : null;
+
+  /** One click: convert the released profit and withdraw everything that is withdrawable (the same tx the Withdraw button builds). */
+  async function handleWithdrawAll() {
+    if (!userAccount || mockMode || withdrawable <= 0n || withdrawLoading) return;
+    try {
+      const sig = await withdraw({ userIdx: userAccount.idx, amount: withdrawable, portfolioPk: userAccount.pubkey });
+      setLastSig(sig ?? null);
+      maxRawRef.current = null;
+      setAmount("");
+    } catch {
+      // Error state is already handled by the withdraw hook
+    }
+  }
 
   async function handleSubmit() {
     if (!amount || !userAccount || validationError || isDepositBalanceUnverified) return;
@@ -406,7 +411,7 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
   return (
     <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
       {/* Onboarding hint for new users */}
-      {capital === 0n && !mockMode && (
+      {capital === 0n && !mockMode && !(mode === "withdraw" && (userAccount.account.pnl ?? 0n) > 0n && !isSentinelValue(userAccount.account.pnl)) && (
         <div className="mb-3 border-b border-[var(--border)]/30 pb-3">
           <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--accent)] mb-1">Getting Started</p>
           <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
@@ -464,14 +469,7 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
             type="text"
             data-testid={`${mode}-amount-input`}
             inputMode="decimal"
-            value={amount}
-            onChange={(e) => {
-              const newValue = sanitizeDecimalInput(e.target.value);
-              if (newValue !== amount) {
-                maxRawRef.current = null;
-              }
-              setAmount(newValue);
-            }}
+            {...amountField}
             placeholder={`Amount (${symbol})`}
             style={{ fontFamily: "var(--font-mono)" }}
             className="w-full rounded-none border border-[var(--border)]/50 bg-[var(--bg)] px-3 py-2 pr-14 text-sm text-[var(--text)] placeholder-[var(--text-muted)] focus:border-[var(--accent)]/40 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]/20"
@@ -479,10 +477,9 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
           {mode === "withdraw" && withdrawable > 0n && (
             <button
               type="button"
-              // M7: Max = FREE margin, not total capital — total capital
-              // includes margin locked by an open position, which the
-              // on-chain program refuses to release. Flat: plus the released
-              // profit that converts to capital in the same transaction.
+              // Only rendered flat (withdrawable is 0 with a position open):
+              // capital plus the released profit that converts to capital
+              // in the same transaction.
               onClick={() => { maxRawRef.current = withdrawable; setAmount(formatTokenAmount(withdrawable, decimals)); }}
               className="absolute right-2 top-1/2 -translate-y-1/2 rounded-none px-2 py-0.5 text-[9px] font-semibold uppercase text-[var(--accent)] hover:bg-[var(--accent)]/10"
             >
@@ -503,18 +500,31 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
           <p className="mt-1 text-[10px] text-[var(--short)]">{validationError}</p>
         )}
         {mode === "withdraw" && settlingProfitLine && (
-          <p data-testid="settling-profit" className="mt-1 text-[10px] text-[var(--text-secondary)]">{settlingProfitLine}</p>
+          <p data-testid="settling-profit" data-held={profitHold.held ? "true" : undefined} className="mt-1 text-[10px] text-[var(--text-secondary)]">{settlingProfitLine}</p>
         )}
       </div>
 
+      {mode === "withdraw" && claimReason && (
+        <p data-testid="claim-status" className="mb-2 text-[10px] text-[var(--text-secondary)]">{claimReason}</p>
+      )}
+      {mode === "withdraw" && !hasOpenPosition && withdrawable > 0n && (
+        <button
+          type="button"
+          onClick={handleWithdrawAll}
+          disabled={withdrawLoading}
+          data-testid="withdraw-all"
+          className="mb-2 w-full rounded-none border border-[var(--warning)]/60 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--warning)] hover:bg-[var(--warning)]/10 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {withdrawLoading ? "Sending..." : `Withdraw all (${formatTokenAmount(withdrawable, decimals, 3)} ${symbol})`}
+        </button>
+      )}
+
       {mode === "withdraw" && hasOpenPosition && (
         <div className="mb-2 border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] p-2 space-y-1">
-          <p className="text-[10px] text-[var(--warning)]">⚠ Withdrawing margin with an open position may trigger liquidation</p>
+          <p data-testid="withdraw-position-open" className="text-[10px] text-[var(--warning)]">Close your position to withdraw.</p>
           <p className="text-[10px] text-[var(--text-secondary)]">
-            Part of your balance is locked as margin backing the position — the
-            program rejects withdrawals that would under-collateralize it, so
-            MAX only offers your free (unlocked) margin, not your full account
-            balance, until the position is closed.
+            Your balance backs the open position, and this market can&apos;t release any of it
+            until the position is fully closed. Then the whole balance is withdrawable.
           </p>
         </div>
       )}
@@ -529,6 +539,22 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
       </button>
 
       {error && <p data-testid={`${mode}-error`} className="mt-2 text-[10px] text-[var(--short)]">{error}</p>}
+      {/* v2.2 QA Q-7c / W-1: the withdrawal went through, part of the profit stayed in the account. */}
+      {mode === "withdraw" && !error && withdrawNotice && (
+        <p data-testid="withdraw-notice" role="status" className="mt-2 text-[10px] text-[var(--text-secondary)]">{withdrawNotice}</p>
+      )}
+      {mode === "withdraw" && !mockMode && publicKey && slabProgramId && userAccount.pubkey && (() => {
+        // #3426: the EXACT account this card shows, as last scanned (the hook re-reads it before signing).
+        const scanned = getPortfolioRawSnapshot(makePortfolioScanKey(slabProgramId, slabAddress, publicKey));
+        return scanned && scanned.pubkey.equals(userAccount.pubkey!) ? (
+          <CloseTradingAccountRow
+            slabAddress={slabAddress}
+            portfolioPk={scanned.pubkey}
+            portfolio={scanned.portfolio}
+            onClosed={(l) => setClosedNote(CLOSE_ACCOUNT_COPY.done(lamportsToSolText(l)))}
+          />
+        ) : null;
+      })()}
       {lastSig && <p className="mt-2 text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>Tx: <a href={`${explorerTxUrl(lastSig)}`} target="_blank" rel="noopener noreferrer" className="text-[var(--accent)] hover:underline">{lastSig.slice(0, 12)}...</a></p>}
     </div>
   );

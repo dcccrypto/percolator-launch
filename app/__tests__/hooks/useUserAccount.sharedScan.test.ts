@@ -37,6 +37,11 @@ vi.mock("@/components/providers/SlabProvider", () => ({
   useSlabState: mocks.useSlabState,
 }));
 
+vi.mock("@/lib/v22/layout", async (orig) => ({
+  ...(await orig<typeof import("@/lib/v22/layout")>()),
+  isWrapperAccount: mocks.isV17Account,
+  parsePortfolio: mocks.parsePortfolioV17,
+}));
 vi.mock("@percolatorct/sdk", async () => {
   const actual = await vi.importActual<typeof import("@percolatorct/sdk")>("@percolatorct/sdk");
   return {
@@ -47,6 +52,8 @@ vi.mock("@percolatorct/sdk", async () => {
 });
 
 import { useUserAccount } from "@/hooks/useUserAccount";
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
+import { __setUnknownLotExpForTest } from "@/lib/v22/lot-registry";
 
 let byteCounter = 0;
 function uniquePubkey(): PublicKey {
@@ -82,6 +89,7 @@ describe("useUserAccount — shared v17 scan", () => {
   let getProgramAccounts: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    __setUnknownLotExpForTest(0);
     vi.clearAllMocks();
     wallet = uniquePubkey();
     programId = uniquePubkey();

@@ -10,7 +10,10 @@
 import { isDevnetV21Enabled } from '@/lib/v21/flag';
 import { deriveVaultLpExt } from '@/lib/v21/sdk';
 import { useCallback, useState } from 'react';
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, type Connection } from '@solana/web3.js';
+import { isDevnetV22Enabled } from '@/lib/v22/flag';
+import { fetchMarketTailsV22 } from '@/lib/v22/market-tails';
+import { buildWithdrawJuniorTrancheIxV22 } from '@/lib/v22/sdk';
 import { deriveLpBackingLedger, deriveVaultAuthority } from '@percolatorct/sdk';
 import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { useConnectionCompat, useWalletCompat } from '@/hooks/useWalletCompat';
@@ -20,7 +23,7 @@ import { WRAPPER_ERR } from '@/lib/wrapper-errors';
 import { keepAppMessage, plainMessage } from '@/lib/limits/user-message';
 import { assertDepositWithinBalance, readTokenBalance } from '@/lib/deposit-guard';
 import { decodeLpVaultRegistryDomain, decodeVaultLpState } from '@/lib/limits/decode';
-import { buildJuniorResolvedReleaseIxs, juniorReleaseNeedsHarvest } from '@/lib/limits/junior-resolved-release';
+import { buildJuniorResolvedReleaseIxs, juniorReleaseNeedsHarvest, juniorResolvedDomainIdle } from '@/lib/limits/junior-resolved-release';
 import { readEmptyCloseIxs } from '@/lib/limits/resolved-exit-load';
 import { sendWithTopup } from '@/lib/limits/resolved-topup';
 import { computeBudgetPrefix, connectionSelfHealDeps } from '@/lib/self-heal';
@@ -83,6 +86,28 @@ export function useJuniorTranche(slabAddress: string | null) {
     };
   }, [connection, wallet.publicKey, slabAddress, programId, config]);
 
+  /**
+   * 97 WithdrawJuniorTranche. Flag off, or no bond tranche: the app builder as before (it already appends the ext).
+   * Flag on + a bond tranche: the SDK's tail-aware builder (`[11]` ext, `[12]` tranche), so the creator can withdraw
+   * junior capital on a bonded market (the program refuses a bond-market 97 without the tranche).
+   */
+  const buildJuniorWithdrawIx = async (conn: Connection, c: { vm: VaultLpMarket; domain: number; owner: PublicKey; ownerAta: PublicKey; vaultToken: PublicKey; vaultAuthority: PublicKey }, amount: bigint) => {
+    if (isDevnetV22Enabled()) {
+      const tails = await fetchMarketTailsV22(conn, c.vm.programId, c.vm.market);
+      if (tails.bondTranche) {
+        return buildWithdrawJuniorTrancheIxV22(
+          { programId: c.vm.programId, market: c.vm.market, registryDomain: c.domain, lpPortfolio: c.vm.lpPortfolio, vaultLpExt: c.vm.ext ?? tails.vaultLpExt ?? undefined },
+          c.owner,
+          c.ownerAta,
+          c.vaultToken,
+          amount,
+          { bond: true },
+        );
+      }
+    }
+    return buildWithdrawJuniorTrancheIx(c.vm, c.owner, c.ownerAta, c.vaultToken, c.vaultAuthority, amount);
+  };
+
   const run = useCallback(
     async (kind: 'deposit' | 'withdraw', amount: bigint): Promise<string> => {
       setBusy(true);
@@ -97,7 +122,7 @@ export function useJuniorTranche(slabAddress: string | null) {
               [buildDepositJuniorTrancheIx(c.vm, c.owner, c.ownerAta, c.vaultToken, amount)])
             : [
                 createAssociatedTokenAccountIdempotentInstruction(c.owner, c.ownerAta, c.owner, c.mint),
-                buildWithdrawJuniorTrancheIx(c.vm, c.owner, c.ownerAta, c.vaultToken, c.vaultAuthority, amount),
+                await buildJuniorWithdrawIx(connection, c, amount),
               ];
         return await sendTx({ connection, wallet, instructions: ixs });
       } catch (e) {
@@ -124,7 +149,7 @@ export function useJuniorTranche(slabAddress: string | null) {
       try {
         if (amount <= 0n) throw new Error('Enter an amount greater than zero.');
         const c = await context();
-        const ixs = buildJuniorResolvedReleaseIxs(c, amount, juniorReleaseNeedsHarvest(c.marketData, c.domain));
+        const ixs = buildJuniorResolvedReleaseIxs(c, amount, juniorReleaseNeedsHarvest(c.marketData, c.domain), juniorResolvedDomainIdle(c.marketData, c.domain));
         // 102 is refused 21 while any EMPTY portfolio is still materialized on the Resolved market:
         // the permissionless tag-8 closes go first in the same tx (sim-gated; dropped if they
         // would make it fail), so the junior never waits on the keeper.

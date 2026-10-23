@@ -1,7 +1,13 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeAll, afterAll } from "vitest";
+
+// These cases feed indexer rows to the candle provider: an indexer is attested (on the v2.2 preview there is none and
+// the provider does not ask at all; lib/v22/indexer.ts, minor-qa-retest3.test.tsx).
+beforeAll(() => { process.env.NEXT_PUBLIC_V22_INDEXER_LOT_AWARE = "1"; });
+afterAll(() => { delete process.env.NEXT_PUBLIC_V22_INDEXER_LOT_AWARE; });
 import { applyMarkTick, applyTrade, bucketStart, normalizeBars, type ProviderBar } from "@/lib/tv/data/provider";
 import { HISTORY_PROBE_INTERVAL_MS, createCandlesApiProvider, parseUdf, type MarkStream } from "@/lib/tv/data/candlesApiProvider";
 import { createTradeStream, parseTradeMessage, type LiveTrade, type TradeStream } from "@/lib/tv/data/tradeStream";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 
 const SLAB = "HBU9iugdcxdvQ9tNFuTLTtcB1bYXFdh4d5reD8M2dpop";
 const b = (timeSec: number, close: number, volume = 1): ProviderBar => ({ timeSec, open: close, high: close, low: close, close, volume });
@@ -69,7 +75,10 @@ const udf = (bars: ProviderBar[]) => ({
 });
 
 function harness(route: (url: string) => Resp | Promise<Resp>) {
+  /** The /api/candles requests (what every assertion below counts). */
   const urls: string[] = [];
+  /** The /api/markets/<slab> requests: the lot-exponent lookup (one per slab with the v2.2 flag on, none flag off; candlesApiProvider ensureLot) and resolveSymbol. */
+  const lotUrls: string[] = [];
   const tradeListeners: Array<(t: LiveTrade) => void> = [];
   const markListeners: Array<(p: number, ts: number) => void> = [];
   const trades: TradeStream = {
@@ -87,13 +96,14 @@ function harness(route: (url: string) => Resp | Promise<Resp>) {
   };
   const provider = createCandlesApiProvider({
     fetchImpl: async (u) => {
-      urls.push(u);
+      if (u.startsWith("/api/markets/")) lotUrls.push(u);
+      else urls.push(u);
       return route(u);
     },
     trades,
     marks,
   });
-  return { provider, urls, tradeListeners, markListeners };
+  return { provider, urls, lotUrls, tradeListeners, markListeners };
 }
 
 const req = (over: Partial<Parameters<ReturnType<typeof createCandlesApiProvider>["getBars"]>[0]> = {}) => ({
@@ -112,10 +122,17 @@ describe("candles-api provider", () => {
   it("widens `from` to cover countBack, returns percolator bars", async () => {
     const h = harness(() => json(udf([b(3600 * 15, 1), b(3600 * 16, 2)])));
     const page = await h.provider.getBars(req({ fromSec: 70_000, countBack: 10 }));
-    expect(h.urls[0]).toBe(`/api/candles/${SLAB}?resolution=60&from=${72_000 - 36_000}&to=72000`);
+    expect(h.urls[0]).toBe(`/api/candles/${SLAB}?resolution=60&from=${72_000 - 36_000}&to=72000&fill=1`);
     expect(page.source).toBe("percolator");
     expect(page.noMoreHistory).toBe(false);
     expect(page.bars).toHaveLength(2);
+  });
+
+  it("the lot exponent is looked up once per slab with the v2.2 flag on, and never flag off", async () => {
+    const h = harness(() => json(udf([b(3600 * 15, 1)])));
+    await h.provider.getBars(req());
+    await h.provider.getBars(req({ firstRequest: false }));
+    expect(h.lotUrls).toEqual(isDevnetV22Enabled() ? [`/api/markets/${SLAB}`] : []);
   });
 
   it("an empty window gets ONE older look; empty again -> no more history", async () => {

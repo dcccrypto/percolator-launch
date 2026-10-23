@@ -24,6 +24,8 @@ import {
   V17_MARKET_ASSET_SLOT_LEN,
 } from "@percolatorct/sdk";
 import { parseV17RiskParams, V17_ENGINE_CONFIG_OFF } from "@/lib/v17-engine-config";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { v22MarketBytes } from "../helpers/v22-fixtures";
 
 const fixture = JSON.parse(
   readFileSync(join(__dirname, "..", "fixtures", "BPgSUbDs.market.json"), "utf-8"),
@@ -96,12 +98,25 @@ describe("WrapperConfigV17 (576-byte config) fee split reads correctly", () => {
 });
 
 describe("engine margins read at offset 624 (v17-engine-config)", () => {
-  it("parseV17RiskParams decodes maintenance 600 / initial 1200 bps", () => {
-    const params = parseV17RiskParams(data, 30n);
+  // Flag off: the historical v17-era BPgSUbDs account above (600 / 1200 bps, 4 slots). Flag on: that account is a layout the VERSION-keyed reader
+  // refuses by design, so the same read is pinned on the captured v2.2 one-slot market. Expected values are read straight from the raw bytes at
+  // the rustc offsets (V16ConfigAccount.maintenance_margin_bps @54, initial_margin_bps @62, v22-rust-layout-aca02ba6.json), not through the app.
+  it("parseV17RiskParams decodes the margins at the engine-config offset", () => {
+    const v22 = isDevnetV22Enabled();
+    const d = v22 ? v22MarketBytes() : data;
+    const dv = new DataView(d.buffer, d.byteOffset, d.byteLength);
+    const cfg = 592 + 32;
+    expect(dv.getBigUint64(cfg + 54, true)).toBe(600n); // independent read of the same bytes
+    expect(dv.getBigUint64(cfg + 62, true)).toBe(v22 ? 1000n : 1200n);
+    const params = parseV17RiskParams(d, 30n);
     expect(params).not.toBeNull();
     expect(params!.maintenanceMarginBps).toBe(600n);
-    expect(params!.initialMarginBps).toBe(1200n);
-    expect(params!.maxAccounts).toBe(4n);
+    expect(params!.initialMarginBps).toBe(v22 ? 1000n : 1200n);
+    expect(params!.maxAccounts).toBe(v22 ? 1n : 4n);
+  });
+  // Flag off the reader is length-based (the test above); the VERSION-keyed refusal only exists with the flag on.
+  it.skipIf(!isDevnetV22Enabled())("a market of a layout the reader does not know reads as null, never with another layout's offsets", () => {
+    expect(parseV17RiskParams(data, 30n)).toBeNull();
   });
 });
 

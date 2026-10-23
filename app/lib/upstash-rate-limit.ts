@@ -8,7 +8,7 @@
  * Fallback: in-memory sliding window (dev / CI / when Redis is unconfigured).
  *           Per-serverless-instance — not suitable for horizontal mainnet scaling.
  *
- * Replaces duplicated code in advance-phase-rate-limit.ts and create-market-rate-limit.ts.
+ * Replaces code that was duplicated across per-route limiter modules.
  *
  * Usage:
  *   const limiter = createUpstashRateLimiter({ limit: 60, windowMs: 60_000, prefix: "rl:my-route" });
@@ -27,7 +27,7 @@ export interface UpstashRateLimiterOptions {
   limit: number;
   /** Window duration in milliseconds. */
   windowMs: number;
-  /** Redis key prefix (e.g. "rl:advance-phase"). Must be unique per limiter. */
+  /** Redis key prefix (e.g. "rl:devnet-fund"). Must be unique per limiter. */
   prefix: string;
 }
 
@@ -40,7 +40,11 @@ export interface RateLimitResult {
 }
 
 export interface UpstashRateLimiter {
-  check(key: string): Promise<RateLimitResult>;
+  /**
+   * Count `cost` units against `key` (default 1). A JSON-RPC batch passes its
+   * entry count so N batched calls consume N units, not one (S3-C4).
+   */
+  check(key: string, cost?: number): Promise<RateLimitResult>;
 }
 
 // ── Factory ────────────────────────────────────────────────────────────────
@@ -82,12 +86,12 @@ export function createUpstashRateLimiter(
   // Similar to memory-rate-limit.ts evictionThreshold (500).
   const MAP_SIZE_CAP = 500;
 
-  function checkLocal(rateKey: string): RateLimitResult {
+  function checkLocal(rateKey: string, cost: number): RateLimitResult {
     const now = Date.now();
     const windowStart = now - windowMs;
 
     let timestamps = (localMap.get(rateKey) ?? []).filter((t) => t > windowStart);
-    timestamps.push(now);
+    for (let i = 0; i < cost; i++) timestamps.push(now);
     localMap.set(rateKey, timestamps);
 
     // Deterministic cleanup when map exceeds size cap (prevents memory exhaustion)
@@ -132,12 +136,16 @@ export function createUpstashRateLimiter(
   }
 
   return {
-    async check(key: string): Promise<RateLimitResult> {
+    async check(key: string, cost: number = 1): Promise<RateLimitResult> {
+      // A non-integer / non-positive cost is treated as 1, never 0, so a caller
+      // bug can't turn the limiter into a no-op.
+      const units = Number.isInteger(cost) && cost > 0 ? cost : 1;
       const limiter = getUpstashLimiter();
 
       if (limiter) {
         try {
-          const result = await limiter.limit(key);
+          const result =
+            units === 1 ? await limiter.limit(key) : await limiter.limit(key, { rate: units });
           return {
             allowed: result.success,
             remaining: result.remaining,
@@ -153,13 +161,13 @@ export function createUpstashRateLimiter(
             err instanceof Error ? err.message : err,
           );
           alertDegradedOnce("Redis unreachable");
-          return checkLocal(key);
+          return checkLocal(key, units);
         }
       }
 
       // limiter === null → Upstash is not configured.
       alertDegradedOnce("Upstash not configured");
-      return checkLocal(key);
+      return checkLocal(key, units);
     },
   };
 }

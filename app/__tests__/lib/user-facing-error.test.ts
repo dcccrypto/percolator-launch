@@ -9,8 +9,7 @@ import path from "path";
 import { describe, expect, it } from "vitest";
 import { humanizeError, UNMAPPED_MESSAGE, UserFacingError, userFacingMessage } from "@/lib/errorMessages";
 
-const OPEN_POSITION =
-  "You have an open position on this market. Close it (fully) before withdrawing — this market can't release collateral while a position is open.";
+const OPEN_POSITION = "Close your positions before withdrawing.";
 const CAPACITY =
   "The market can only absorb 40% of this close right now — its liquidity provider is at its exposure cap on your side. Close up to 40% now, or wait for other trades to free capacity.";
 

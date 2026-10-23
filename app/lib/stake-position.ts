@@ -26,6 +26,7 @@ export function readPoolTotalLpSupply(poolData: Uint8Array): bigint | null {
   return view.getBigUint64(POOL_TOTAL_LP_SUPPLY_OFFSET, true);
 }
 
+// TODO(R-1): tranche pools need per-sub-pool valuation with dead floors (_reserved[61]); unreachable while stake-junior UI is hidden (security-review-v22-stake-last-junior §F).
 /** floor(lp * vault / supply) in collateral atoms; null when there is no supply to value against. */
 export function stakeValueAtoms(lpRaw: bigint, totalLpSupplyRaw: bigint, vaultAtoms: bigint): bigint | null {
   if (totalLpSupplyRaw <= 0n) return null;
@@ -39,16 +40,21 @@ export interface StakeValuationInput {
   chainVaultAtoms: bigint | null;
   /** Cached /api/stake/pools snapshot, used only when the chain read is unavailable. */
   apiTotalLpSupply: number;
-  apiTvlUsd: number;
+  /** null = the API could not value the pool (#3611: a first-loss pool whose insurance units were unreadable). */
+  apiTvlUsd: number | null;
   lpDecimals: number;
 }
 
-/** USD value of the position: fresh chain numbers first, API snapshot as the fallback. */
-export function valueStakePosition(i: StakeValuationInput): number {
+/**
+ * USD value of the position: fresh chain numbers first, API snapshot as the fallback. Null when neither can value it
+ * (#3611): the page shows a dash, never a figure from a partial TVL.
+ */
+export function valueStakePosition(i: StakeValuationInput): number | null {
   if (i.chainTotalLpSupplyRaw !== null && i.chainVaultAtoms !== null) {
     const atoms = stakeValueAtoms(i.lpRaw, i.chainTotalLpSupplyRaw, i.chainVaultAtoms);
     if (atoms !== null) return Number(atoms) / 10 ** STAKE_COLLATERAL_DECIMALS;
   }
+  if (i.apiTvlUsd === null) return null;
   const lpHuman = Number(i.lpRaw) / 10 ** i.lpDecimals;
   const supplyHuman = i.apiTotalLpSupply / 10 ** i.lpDecimals;
   return supplyHuman > 0 ? (lpHuman / supplyHuman) * i.apiTvlUsd : 0;
@@ -60,6 +66,7 @@ export function valueStakePosition(i: StakeValuationInput): number {
  * the user holds, which handleWithdraw then refused without a word.
  */
 export function stakeWithdrawChipAmount(lpBalanceRaw: bigint, pct: number, lpDecimals: number): string {
+  // `lpBalanceRaw` here is the amount the chips are a percentage OF: the balance, or the withdrawable-now cap when it binds.
   return formatTokenAmount((lpBalanceRaw * BigInt(pct)) / 100n, lpDecimals);
 }
 
@@ -74,12 +81,15 @@ export function exceedsStakedBalance(amount: string, lpBalanceRaw: bigint, lpDec
 }
 
 /** The one-line reason a typed withdraw amount can't go through, or null when it can (or is empty). */
-export function withdrawAmountError(amount: string, lpBalanceRaw: bigint, lpDecimals: number): string | null {
+export function withdrawAmountError(amount: string, lpBalanceRaw: bigint, lpDecimals: number, nowCapLpRaw?: bigint | null, overCapMessage = "That is more than can be withdrawn now."): string | null {
   let raw: bigint;
   try {
     raw = parseHumanAmount(amount, lpDecimals);
   } catch {
     return `Use up to ${lpDecimals} decimal places.`;
   }
-  return raw > lpBalanceRaw ? "Exceeds your staked balance." : null;
+  if (raw > lpBalanceRaw) return "Exceeds your staked balance.";
+  // First-loss pool after an insurance loss: the program pays only the liquid part (LiquidityBufferExhausted, 36), so refuse here, calmly.
+  if (nowCapLpRaw !== undefined && nowCapLpRaw !== null && raw > nowCapLpRaw) return overCapMessage;
+  return null;
 }

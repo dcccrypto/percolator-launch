@@ -26,6 +26,9 @@ import { useMarketDiscovery } from "@/hooks/useMarketDiscovery";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { PublicKey } from "@solana/web3.js";
 import type { DiscoveredMarket } from "@percolatorct/sdk";
+import { seedLotExp0 } from "../helpers/v22-fixtures";
+
+seedLotExp0();
 
 // Mock Next.js
 vi.mock("next/link", () => ({

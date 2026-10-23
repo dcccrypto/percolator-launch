@@ -1,5 +1,6 @@
 "use client";
 
+import { lotExpOf, qToTokenQ } from "@/lib/v22/lot";
 import { FC, useState, useEffect, useMemo } from "react";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { computePositionPnl } from "@/lib/position-pnl";
@@ -231,7 +232,8 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
 
     // Calculate estimated 24h funding
     // hourlyRate * 24 * positionSize (in tokens)
-    const positionTokens = Number(absPosition) / (10 ** collateralDecimals);
+    // v2.2: the position is in LOTS; the estimate is in tokens (lib/v22/lot.ts). lotExp 0 = identical to before.
+    const positionTokens = Number(qToTokenQ(absPosition, lotExpOf(raw))) / (10 ** collateralDecimals);
     const estimated24h = (fundingData.hourlyRatePercent / 100) * 24 * positionTokens;
 
     return {
@@ -240,7 +242,7 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
       fundingSign: userPays ? "-" : "+",
       estimatedFunding24h: Math.abs(estimated24h),
     };
-  }, [userAccount, fundingData, adlFactors, wrapperConfigV17]);
+  }, [userAccount, fundingData, adlFactors, wrapperConfigV17, raw]);
 
   if (loading && !fundingData) {
     return (

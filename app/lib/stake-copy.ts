@@ -19,5 +19,18 @@ export const STAKE_COPY = {
   ready: "Ready",
   availableIn: (slots: number) => `Withdraw available in ${cooldownDuration(slots)}`,
   period: (slots: number) => `Cooldown: ${cooldownDuration(slots)} before you can withdraw.`,
-  sidebar: "Stake pays you a share of every trading fee. Your stake is first-loss for this market's insurance, so its value can fall.",
+  sidebar: "Stake pays you a share of every trading fee. Your stake covers the market's losses first, so its value can fall.",
+  /** "Back the fund" step under How It Works. */
+  backStep: "Your deposit backs the fund and covers losses first",
+  /** Risk notice: plain words on screen, the precise terms in the tooltip (stake page). */
+  risk: {
+    lead: "Staked funds cover the market's losses first.",
+    leadTip: "First-loss insurance capital: when the market's insurance is drawn on, staked funds are used before other backers' money.",
+    flush: "If an admin moves them into the insurance fund, your share is permanently worth less.",
+    flushTip: "An admin flush transfers staked funds into the market's insurance fund. It permanently reduces the redeemable value of your stake.",
+    tail: "Fee income depends on trading volume. Only stake what you can afford to lose.",
+  },
+  /** Trade page, losses line. */
+  waterfallStakeNote: "Staked funds only help if an admin moves them into the insurance fund.",
+  waterfallStakeTip: "An admin flush transfers staked funds into the market's insurance fund, where they cover losses.",
 } as const;

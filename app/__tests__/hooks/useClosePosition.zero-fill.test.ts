@@ -35,6 +35,9 @@ vi.mock("@percolatorct/sdk", async (orig) => {
 import { useClosePosition } from "@/hooks/useClosePosition";
 import { recordFillResult } from "@/lib/limits/fill-check";
 import { COPY } from "@/lib/limits/copy";
+import { seedLotExp0 } from "../helpers/v22-fixtures";
+
+seedLotExp0();
 
 const SLAB = "AzagguvrWmRgcBpsKuqomW7Yb1YUUd6UzcrkiRsqdhr";
 beforeEach(() => tradeMock.mockReset());

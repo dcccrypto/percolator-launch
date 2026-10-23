@@ -21,7 +21,7 @@ vi.mock("@/lib/config", () => ({
 }));
 
 import { TransactionExpiredBlockheightExceededError } from "@solana/web3.js";
-import { sendTx, estimateFees, getClockDriftWarning, isBlockhashExpiredError, isConfirmationTimeoutError, checkSignatureLanded, extractTxErrorMessage, TxCancelledError, isTxCancelledError } from "@/lib/tx";
+import { sendTx, AMBIGUOUS_OUTCOME_WAIT, awaitAmbiguousOutcome, estimateFees, getClockDriftWarning, isBlockhashExpiredError, isConfirmationTimeoutError, checkSignatureLanded, extractTxErrorMessage, TxCancelledError, isTxCancelledError } from "@/lib/tx";
 import type { SendTxParams, FeeEstimate } from "@/lib/tx";
 
 describe("sendTx", () => {
@@ -93,7 +93,8 @@ describe("sendTx", () => {
     expect(wallet.signTransaction).not.toHaveBeenCalled(); // failed before signing, for the unrelated reason
   });
 
-  it("BUG 24: no longer performs the dead genesis-hash network check", async () => {
+  it("BUG 24: no longer performs the dead genesis-hash network check (v2.2 flag off; the flag-gated devnet proof is devnet-only-nb2.test)", async () => {
+
     // validateNetwork() used to compare the app's OWN configured Connection's
     // genesis hash against its own config — a tautology (the connection is
     // always built from that same config) that also 403'd in production
@@ -103,6 +104,8 @@ describe("sendTx", () => {
     // weight in the sendTx hot path. Assert sendTx no longer calls
     // getGenesisHash and never throws "Network mismatch".
     vi.resetModules();
+    const { __setDevnetV22ForTest } = await import("@/lib/v22/flag");
+    __setDevnetV22ForTest(false);
     vi.mock("@/lib/config", () => ({
       getConfig: () => ({ network: "devnet", rpcUrl: "https://api.devnet.solana.com" }),
       getNetwork: () => netState.network,
@@ -559,5 +562,182 @@ describe("TxCancelledError / isTxCancelledError (GH#2623)", () => {
   it("carries a default message when none is given, and the given one otherwise", () => {
     expect(new TxCancelledError().message).toMatch(/cancelled/i);
     expect(new TxCancelledError("custom reason").message).toBe("custom reason");
+  });
+});
+
+describe("sendTx — R2-S7 landed check works when sendRawTransaction throws", () => {
+  // The signature is known from the signed tx BEFORE broadcast. If the send then
+  // throws a blockhash-expiry-shaped error but the tx actually landed, sendTx must
+  // return that signature instead of throwing (callers report a landed tx as failed).
+  const makeConn = (sendErr: Error, status: unknown) => {
+    const sendRawTransaction = vi.fn().mockRejectedValue(sendErr);
+    const getSignatureStatuses = vi.fn().mockResolvedValue({ value: [status] });
+    const conn = {
+      rpcEndpoint: "https://api.devnet.solana.com",
+      getRecentPrioritizationFees: vi.fn().mockResolvedValue([]),
+      getBalance: vi.fn().mockResolvedValue(1_000_000_000),
+      getLatestBlockhash: vi.fn().mockResolvedValue({
+        blockhash: "11111111111111111111111111111111",
+        lastValidBlockHeight: 10_000_000,
+      }),
+      getBlockHeight: vi.fn().mockResolvedValue(1),
+      simulateTransaction: vi.fn().mockResolvedValue({ value: { err: null, logs: [] } }),
+      sendRawTransaction,
+      getSignatureStatuses,
+    } as any;
+    return { conn, sendRawTransaction, getSignatureStatuses };
+  };
+
+  const makeWallet = () => {
+    const kp = Keypair.generate();
+    const signed: { sig: string | null } = { sig: null };
+    return {
+      signed,
+      wallet: {
+        publicKey: kp.publicKey,
+        signTransaction: vi.fn(async (tx: Transaction) => {
+          tx.partialSign(kp);
+          signed.sig = bs58.encode(tx.signature as Buffer);
+          return tx;
+        }),
+      },
+    };
+  };
+
+  it("returns the pre-broadcast signature when the send throws but the tx landed", async () => {
+    netState.network = "devnet";
+    const { conn, sendRawTransaction, getSignatureStatuses } = makeConn(
+      new Error("Blockhash not found"),
+      { confirmationStatus: "confirmed", err: null },
+    );
+    const { wallet, signed } = makeWallet();
+
+    const sig = await sendTx({ connection: conn, wallet, instructions: [] });
+
+    expect(sendRawTransaction).toHaveBeenCalledTimes(1); // no rebuild/resend
+    expect(getSignatureStatuses).toHaveBeenCalledWith([signed.sig], { searchTransactionHistory: true });
+    expect(sig).toBe(signed.sig);
+  });
+
+  it("still throws when the send threw and the tx did NOT land (no false success)", async () => {
+    netState.network = "devnet";
+    const { conn } = makeConn(new Error("Blockhash not found"), null);
+    const { wallet } = makeWallet();
+
+    await expect(
+      sendTx({ connection: conn, wallet, instructions: [], maxRetries: 0 }),
+    ).rejects.toThrow(/Blockhash not found/i);
+  });
+
+  it("a wallet that ALSO exposes signAndSendTransaction still retries a blockhash miss with a fresh blockhash", async () => {
+    // Every real wallet provider exposes signAndSendTransaction. The PERC-8388 no-rebuild SAFETY
+    // branch is only for a tx the WALLET broadcast atomically; knowing the pre-send signature of OUR
+    // sendRawTransaction must not trip it (it would wait 4s and throw instead of retrying).
+    netState.network = "devnet";
+    const SENT = bs58.encode(new Uint8Array(64).fill(9));
+    const { conn, sendRawTransaction } = makeConn(new Error("Blockhash not found"), null);
+    sendRawTransaction.mockReset();
+    sendRawTransaction
+      .mockRejectedValueOnce(new Error("Blockhash not found"))
+      .mockResolvedValueOnce(SENT);
+    conn.getSignatureStatuses.mockImplementation(async (sigs: string[]) => ({
+      value: sigs.map((x) => (x === SENT ? { confirmationStatus: "confirmed", err: null } : null)),
+    }));
+    const { wallet } = makeWallet();
+    const signAndSendTransaction = vi.fn();
+
+    const sig = await sendTx({ connection: conn, wallet: { ...wallet, signAndSendTransaction }, instructions: [] });
+
+    expect(signAndSendTransaction).not.toHaveBeenCalled();
+    expect(sendRawTransaction).toHaveBeenCalledTimes(2);
+    expect(wallet.signTransaction).toHaveBeenCalledTimes(2); // re-signed with a fresh blockhash
+    expect(sig).toBe(SENT);
+  });
+});
+
+
+describe("sendTx — #3565 Low: the internal re-sign never follows an AMBIGUOUS outcome", () => {
+  const SENT2 = bs58.encode(new Uint8Array(64).fill(4));
+  const prev = { ...AMBIGUOUS_OUTCOME_WAIT };
+  beforeEach(() => {
+    AMBIGUOUS_OUTCOME_WAIT.intervalMs = 1;
+    AMBIGUOUS_OUTCOME_WAIT.maxMs = 200;
+  });
+  afterEach(() => {
+    Object.assign(AMBIGUOUS_OUTCOME_WAIT, prev);
+  });
+  const base = () => ({
+    rpcEndpoint: "https://api.devnet.solana.com",
+    getRecentPrioritizationFees: vi.fn().mockResolvedValue([]),
+    getBalance: vi.fn().mockResolvedValue(1_000_000_000),
+    getLatestBlockhash: vi.fn().mockResolvedValue({ blockhash: "11111111111111111111111111111111", lastValidBlockHeight: 10_000_000 }),
+    getBlockHeight: vi.fn().mockResolvedValue(1),
+    simulateTransaction: vi.fn().mockResolvedValue({ value: { err: null, logs: [] } }),
+  });
+  const kpWallet = () => {
+    const kp = Keypair.generate();
+    return { publicKey: kp.publicKey, signTransaction: vi.fn(async (tx: Transaction) => (tx.partialSign(kp), tx)) };
+  };
+
+  it("skipPreflight (the RPC never checked the blockhash): status RPC error -> throws with the signature, never re-signs", async () => {
+    netState.network = "devnet";
+    const conn = { ...base(), sendRawTransaction: vi.fn().mockRejectedValue(new Error("Blockhash not found")), getSignatureStatuses: vi.fn().mockRejectedValue(new Error("429 Too Many Requests")), isBlockhashValid: vi.fn() } as any;
+    const wallet = kpWallet();
+    const err = await sendTx({ connection: conn, wallet, instructions: [], skipPreflight: true }).catch((e: unknown) => e as Error & { signature?: string });
+    expect(err).toBeInstanceOf(Error);
+    expect(wallet.signTransaction).toHaveBeenCalledTimes(1);
+    expect(conn.sendRawTransaction).toHaveBeenCalledTimes(1);
+    expect(typeof err.signature).toBe("string");
+  });
+
+  it("skipPreflight: no status while the blockhash is still valid -> waits; once it has expired with still no status -> re-signs", async () => {
+    netState.network = "devnet";
+    let validChecks = 0;
+    const conn = {
+      ...base(),
+      sendRawTransaction: vi.fn().mockRejectedValueOnce(new Error("Blockhash not found")).mockResolvedValueOnce(SENT2),
+      getSignatureStatuses: vi.fn(async (sigs: string[]) => ({ value: sigs.map((x) => (x === SENT2 ? { confirmationStatus: "confirmed", err: null } : null)) })),
+      isBlockhashValid: vi.fn(async () => ({ value: ++validChecks < 3 })),
+    } as any;
+    const wallet = kpWallet();
+    const sig = await sendTx({ connection: conn, wallet, instructions: [], skipPreflight: true });
+    expect(validChecks).toBe(3); // waited through two "still valid" checks before deciding
+    expect(wallet.signTransaction).toHaveBeenCalledTimes(2);
+    expect(sig).toBe(SENT2);
+  });
+
+  it("skipPreflight: pending (processed) for the whole wait -> unknown -> throws, no re-sign", async () => {
+    netState.network = "devnet";
+    const conn = {
+      ...base(),
+      sendRawTransaction: vi.fn().mockRejectedValue(new Error("Blockhash not found")),
+      getSignatureStatuses: vi.fn(async () => ({ value: [{ confirmationStatus: "processed", err: null }] })),
+      isBlockhashValid: vi.fn(async () => ({ value: true })),
+    } as any;
+    const wallet = kpWallet();
+    await expect(sendTx({ connection: conn, wallet, instructions: [], skipPreflight: true })).rejects.toThrow(/Blockhash not found/);
+    expect(wallet.signTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("a preflight rejection (RPC refused it, never forwarded) still re-signs at once, as before", async () => {
+    netState.network = "devnet";
+    const conn = {
+      ...base(),
+      sendRawTransaction: vi.fn().mockRejectedValueOnce(new Error("Blockhash not found")).mockResolvedValueOnce(SENT2),
+      getSignatureStatuses: vi.fn(async (sigs: string[]) => ({ value: sigs.map((x) => (x === SENT2 ? { confirmationStatus: "confirmed", err: null } : null)) })),
+      isBlockhashValid: vi.fn(),
+    } as any;
+    const wallet = kpWallet();
+    expect(await sendTx({ connection: conn, wallet, instructions: [] })).toBe(SENT2);
+    expect(conn.isBlockhashValid).not.toHaveBeenCalled();
+    expect(wallet.signTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  it("awaitAmbiguousOutcome: landed / failed on chain / no isBlockhashValid", async () => {
+    const c = (st: unknown, extra: Record<string, unknown> = {}) => ({ getSignatureStatuses: vi.fn(async () => ({ value: [st] })), ...extra }) as any;
+    expect(await awaitAmbiguousOutcome(c({ confirmationStatus: "finalized", err: null }), "s", "b")).toBe("landed");
+    expect(await awaitAmbiguousOutcome(c({ confirmationStatus: "confirmed", err: { InstructionError: [0, "x"] } }), "s", "b")).toBe("failed");
+    expect(await awaitAmbiguousOutcome(c(null), "s", "b")).toBe("unknown");
+    expect(await awaitAmbiguousOutcome(c(null, { isBlockhashValid: vi.fn(async () => ({ value: false })) }), "s", "b")).toBe("not-landed");
   });
 });

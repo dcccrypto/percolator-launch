@@ -8,6 +8,9 @@ import { render, screen, act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LiveRowPrice } from "@/components/market/LiveRowPrice";
 import { seedFromOnChain, applyOnChainPoll } from "@/lib/priceStore/priceStore";
+import { seedLotExp0 } from "../../helpers/v22-fixtures";
+
+seedLotExp0();
 
 // Unique slab per test so the module-level store never leaks state between cases.
 let n = 0;

@@ -11,6 +11,7 @@
 import type { StatusVariant } from "@/lib/limits/user-message";
 import type { HealthBadge, MarketHealthRow } from "@/lib/market-health";
 import { closeOnlyDurationLine } from "@/lib/adl-since";
+import { derivePriceState, PRICE_CATCHING_UP, PRICE_STALLED } from "@/lib/limits/price-stall";
 
 export interface HeaderStatus {
   kind: string;
@@ -30,7 +31,15 @@ function drainSides(row: MarketHealthRow): string[] {
   return b.label.replace(/\s*close-only$/i, "").split("&").map((x) => x.trim()).filter(Boolean);
 }
 
-export function marketHeaderStatus(row: MarketHealthRow | null | undefined, nowMs: number = Date.now()): HeaderStatus | null {
+/** C2: the live price facts the header needs beside the health row (both optional: omitted = judged by the row alone). */
+export interface HeaderPriceFacts {
+  /** Seconds since the last on-chain price. */
+  priceAgeSecs?: number | null;
+  /** The oracle read says the price is stale (had one, now old). */
+  oracleStale?: boolean;
+}
+
+export function marketHeaderStatus(row: MarketHealthRow | null | undefined, nowMs: number = Date.now(), price?: HeaderPriceFacts): HeaderStatus | null {
   if (!row) return null;
   if (has(row, "resolved")) {
     return { kind: "resolved", variant: "info", title: "Market settled", body: "Close any position and withdraw. There's nothing else to do." };
@@ -55,13 +64,13 @@ export function marketHeaderStatus(row: MarketHealthRow | null | undefined, nowM
   if (has(row, "lp-halted") || has(row, "lp-depleted")) {
     return { kind: "lp-halt", variant: "paused", title: "New positions paused", body: "The market has no room for new positions right now. Closing works normally." };
   }
-  if (has(row, "repairable") || has(row, "loss-stale")) {
-    return {
-      kind: "engine-catching-up",
-      variant: "wait",
-      title: "Catching up",
-      body: "The market is catching up with the latest prices. New positions wait until it has.",
-    };
+  const behind = has(row, "repairable") || has(row, "loss-stale") || price?.oracleStale === true;
+  const priceState = derivePriceState(behind, price?.priceAgeSecs);
+  if (priceState === "no-recent-price") {
+    return { kind: "no-recent-price", variant: "paused", title: PRICE_STALLED.title, body: PRICE_STALLED.ticketBody(price?.priceAgeSecs as number) };
+  }
+  if (priceState === "catching-up") {
+    return { kind: "engine-catching-up", variant: "wait", title: PRICE_CATCHING_UP.title, body: PRICE_CATCHING_UP.body };
   }
   const drain = drainSides(row);
   if (drain.length === 1) {

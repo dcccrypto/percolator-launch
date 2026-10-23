@@ -1,10 +1,16 @@
 "use client";
 
-import { useTradeHistory } from "@/hooks/useTradeHistory";
-import { formatStatValue, formatTokenAmount, formatUsdFromNumber } from "@/lib/format";
+import Link from "next/link";
 import { useEffect, useState } from "react";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { formatLotQ, tokenUsdOfLotUsd } from "@/lib/v22/lot";
+import { useTradeHistory } from "@/hooks/useTradeHistory";
+import { formatStatValue, formatUsdFromNumber } from "@/lib/format";
+import { Q_DECIMALS } from "@/lib/q-usd";
+import { fillSide, fillSideColor, fillSideLabel } from "@/lib/fill-side";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import type { MarketWithStats } from "@/hooks/useAllMarketStats";
+import { allMarketRows, fetchMarketsList } from "@/lib/markets-list-client";
 
 interface TradeHistoryTableProps {
   wallet: string | null | undefined;
@@ -19,6 +25,8 @@ interface TradeHistoryTableProps {
    * directory yet).
    */
   statsMap?: Map<string, MarketWithStats>;
+  /** Empty-state hint. Defaults to the connected trader's own wording; the public trader profile passes its own. */
+  emptyHint?: string;
 }
 
 /** Row market label: resolved symbol when available, truncated slab address
@@ -28,9 +36,9 @@ function marketLabel(slabAddress: string, statsMap?: Map<string, MarketWithStats
   return symbol ? `${symbol}/USD` : `${shortAddress(slabAddress)}/USD`;
 }
 
-function formatPrice(priceNum: number): string {
+export function formatPrice(priceNum: number, lotExp = 0): string {
   if (!priceNum) return "—";
-  return formatUsdFromNumber(priceNum);
+  return formatUsdFromNumber(tokenUsdOfLotUsd(priceNum, lotExp));
 }
 
 function formatFee(feeNum: number): string {
@@ -39,16 +47,43 @@ function formatFee(feeNum: number): string {
   return formatStatValue(feeNum, "currency");
 }
 
-function formatSize(sizeStr: string, decimals = 6): string {
+/**
+ * `trades.size` is engine Q: a base-asset amount at POS_SCALE 1e6 whatever the
+ * mint's decimals (lib/q-usd.ts), so it always formats with Q_DECIMALS. The
+ * mint's decimals are right only for 6-decimal mints; SOL (9) read 1000x low.
+ * `lotExp` (v2.2 lot markets, 0 otherwise): sizes are recorded in LOTS, shown as tokens (lib/v22/lot.ts).
+ */
+export function formatSize(sizeStr: string, lotExp = 0): string {
   try {
     const raw = BigInt(sizeStr.split(".")[0]);
     const abs = raw < 0n ? -raw : raw;
-    return formatTokenAmount(abs, decimals);
+    return formatLotQ(abs, Q_DECIMALS, lotExp);
   } catch {
     const n = Math.abs(parseFloat(sizeStr) || 0);
-    return formatTokenAmount(BigInt(Math.round(n)), decimals);
+    return formatLotQ(BigInt(Math.round(n)), Q_DECIMALS, lotExp);
   }
 }
+
+/** slab -> lot exponent (v2.2 lot markets only; /api/markets adds `lot_exp` when > 0). */
+const slabLotCache: Record<string, number> = {};
+let marketsFetchAttempted = false;
+
+async function loadMarketLots(): Promise<void> {
+  if (marketsFetchAttempted) return;
+  marketsFetchAttempted = true;
+  try {
+    // The canonical list, shared with every other list caller (lib/markets-list-client.ts).
+    const data = await fetchMarketsList();
+    for (const m of (allMarketRows(data) ?? []) as Array<{ slab_address?: string; lot_exp?: unknown }>) {
+      if (m.slab_address && typeof m.lot_exp === "number" && m.lot_exp > 0) slabLotCache[m.slab_address] = m.lot_exp;
+    }
+  } catch {
+    // best-effort: no lot exponent means lots are shown as tokens (exponent 0)
+  }
+}
+
+/** Lot exponent for a slab (0 until /api/markets has answered, and for any market without lots). */
+export const lotExpForSlab = (slab: string): number => slabLotCache[slab] ?? 0;
 
 function timeAgo(isoStr: string): string {
   const diff = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
@@ -62,43 +97,12 @@ function shortAddress(addr: string): string {
   return addr.length > 12 ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : addr;
 }
 
-/** Fetch slab → collateral decimals from /api/markets once, cache in module scope. */
-const slabDecimalsCache: Record<string, number> = {};
-let marketsFetchAttempted = false;
-
-async function loadMarketDecimals(): Promise<void> {
-  if (marketsFetchAttempted) return;
-  marketsFetchAttempted = true;
-  try {
-    const res = await fetch("/api/markets?limit=200");
-    if (!res.ok) return;
-    const data = await res.json();
-    for (const m of (data.markets ?? [])) {
-      if (m.slab_address && typeof m.decimals === "number") {
-        slabDecimalsCache[m.slab_address] = m.decimals;
-      }
-    }
-  } catch {
-    // best-effort — fall back to 6
-  }
-}
-
-/** Hook to lazily fetch and return slab → decimals map. */
-function useSlabDecimals(): Record<string, number> {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    if (!marketsFetchAttempted) {
-      loadMarketDecimals().then(() => setTick((t) => t + 1));
-    }
-  }, []);
-  return slabDecimalsCache;
-}
-
 export function TradeHistoryTable({
   wallet,
   slabFilter,
   pageSize = 20,
   statsMap,
+  emptyHint = "Your executed trades will appear here.",
 }: TradeHistoryTableProps) {
   const { trades, total, loading, error, hasMore, loadMore } = useTradeHistory({
     wallet,
@@ -106,12 +110,16 @@ export function TradeHistoryTable({
     slabFilter,
   });
 
-  // Slab → collateral decimals map (fetched from /api/markets)
-  const slabDecimals = useSlabDecimals();
+  const [, setLotTick] = useState(0);
+  useEffect(() => {
+    // v2.2 only: the lot exponents are the only thing this request is for. Flag off: no request at all (v2.1 behaviour).
+    if (isDevnetV22Enabled() && !marketsFetchAttempted) loadMarketLots().then(() => setLotTick((t) => t + 1));
+  }, []);
 
   if (!wallet) return null;
 
-  if (error) {
+  // A failed background reload keeps the rows already shown.
+  if (error && trades.length === 0) {
     return (
       <div className="border border-dashed border-[var(--short)]/30 bg-[var(--panel-bg)]/50 p-6 text-center">
         <p className="text-[12px] text-[var(--short)]/80">Failed to load trade history: {error}</p>
@@ -149,7 +157,7 @@ export function TradeHistoryTable({
       <div className="border border-dashed border-[var(--border)] bg-[var(--panel-bg)]/50 p-8 text-center">
         <p className="text-[13px] text-[var(--text)]">No trades yet</p>
         <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
-          Your executed trades will appear here.
+          {emptyHint}
         </p>
       </div>
     );
@@ -159,8 +167,8 @@ export function TradeHistoryTable({
     <div>
       {/* Header row */}
       <div className="hidden sm:grid sm:grid-cols-[1fr_80px_110px_110px_90px_110px_32px] gap-x-4 border-b border-[var(--border)] bg-[var(--bg-elevated)]/50 px-4 py-2">
-        {/* "Entry/Exit" — each row is a fill's execution price, not the token's live price. */}
-        {["Market", "Side", "Size", "Entry/Exit", "Fee", "Time", "Tx"].map((h) => (
+        {/* "Price": each row is one fill's execution price, not the token's live price (#3314). */}
+        {["Market", "Side", "Size", "Price", "Fee", "Time", "Tx"].map((h) => (
           <p
             key={h}
             className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text)]"
@@ -173,12 +181,10 @@ export function TradeHistoryTable({
       {/* Trade rows */}
       <div className="divide-y divide-[var(--border)] border border-t-0 border-[var(--border)]">
         {trades.map((trade) => {
-          const isLong = trade.side === "long";
+          const side = fillSide(trade.side);
           const txLink = trade.tx_signature
             ? `https://solscan.io/tx/${trade.tx_signature}?cluster=devnet`
             : null;
-          // Use per-slab decimals if available; default 6 (USDC) as safe fallback
-          const tradeDecimals = slabDecimals[trade.slab_address] ?? 6;
 
           return (
             <div
@@ -187,25 +193,24 @@ export function TradeHistoryTable({
             >
               {/* Market — resolved symbol via statsMap, truncated slab address fallback */}
               <div className="sm:truncate">
-                <p
-                  className="text-[11px] font-medium text-[var(--text)]"
+                <Link
+                  href={`/trade/${trade.slab_address}`}
+                  className="text-[11px] font-medium text-[var(--text)] underline-offset-4 transition-colors hover:text-[var(--accent)] hover:underline"
                   style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
-                  title={trade.slab_address}
+                  title={`${trade.slab_address} — open market`}
                 >
                   {marketLabel(trade.slab_address, statsMap)}
-                </p>
+                </Link>
               </div>
 
               {/* Side */}
               <div>
                 <span
-                  className={`inline-flex items-center rounded px-2 py-0.5 text-[10px] font-bold ${
-                    isLong
-                      ? "bg-[var(--long)]/10 text-[var(--long)]"
-                      : "bg-[var(--short)]/10 text-[var(--short)]"
+                  className={`inline-flex items-center rounded px-2 py-0.5 text-[10px] font-bold ${fillSideColor(trade.side)} ${
+                    side === "buy" ? "bg-[var(--long)]/10" : side === "sell" ? "bg-[var(--short)]/10" : ""
                   }`}
                 >
-                  {isLong ? "LONG" : "SHORT"}
+                  {fillSideLabel(trade.side)}
                 </span>
               </div>
 
@@ -215,7 +220,7 @@ export function TradeHistoryTable({
                   className="text-[11px] text-[var(--text)]"
                   style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
                 >
-                  {formatSize(trade.size, tradeDecimals)}
+                  {formatSize(trade.size, lotExpForSlab(trade.slab_address))}
                 </p>
               </div>
 
@@ -225,7 +230,7 @@ export function TradeHistoryTable({
                   className="text-[11px] text-[var(--text-secondary)]"
                   style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
                 >
-                  {formatPrice(trade.price)}
+                  {formatPrice(trade.price, lotExpForSlab(trade.slab_address))}
                 </p>
               </div>
 

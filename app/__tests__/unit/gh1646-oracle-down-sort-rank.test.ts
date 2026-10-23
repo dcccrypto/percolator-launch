@@ -50,9 +50,9 @@ describe("GH#1646: oracle-down sort rank cross-check (stale authorityPriceE6)", 
     expect(primary).toBeLessThan(secondary);
   });
 
-  it("sort order constants are unchanged: healthy=0 < caution=1 < warning=2 < empty-oracle-up=3 < oracle-down=4 < empty=5", () => {
+  it("sort order constants: healthy=0 < caution=1 < warning=2 < needs-liquidity=3 < empty-oracle-up=4 < close-only=5 < oracle-down=6 < empty=7 (N18 added the live grades)", () => {
     expect(marketsPageSource).toMatch(
-      /\{ healthy: 0, caution: 1, warning: 2, "empty-oracle-up": 3, "oracle-down": 4, empty: 5 \}/
+      /\{ healthy: 0, caution: 1, warning: 2, "needs-liquidity": 3, "empty-oracle-up": 4, "close-only": 5, "oracle-down": 6, empty: 7 \}/
     );
   });
 });

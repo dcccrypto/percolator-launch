@@ -501,7 +501,7 @@ export async function POST(req: NextRequest) {
     // SEC: per-IP rate limit. The per-wallet:mint gate below is trivially bypassed
     // with fresh keypairs, and every airdrop spends the shared
     // DEVNET_MINT_AUTHORITY_KEYPAIR — bound the drain per IP (shared across the
-    // fund endpoints), mirroring /api/devnet-mirror-mint.
+    // fund endpoints).
     const fundRl = await checkFundRateLimit(getClientIp(req));
     if (!fundRl.allowed) {
       return NextResponse.json(
@@ -841,8 +841,7 @@ export async function POST(req: NextRequest) {
       // Sign using sealed signer, then send + confirm via sendAndConfirmSignedTx.
       // sendAndConfirmTransaction() calls tx.sign(signers) internally which wipes all existing
       // signatures — including the one the sealed signer just applied — so we sign here and
-      // hand the ALREADY-SIGNED tx to sendAndConfirmSignedTx (same pattern as auto-fund and
-      // devnet-mirror-mint).
+      // hand the ALREADY-SIGNED tx to sendAndConfirmSignedTx (same pattern as auto-fund).
       const signedTx = mintSigner.signTransaction(tx) as Transaction;
       try {
         sig = await sendAndConfirmSignedTx(connection, signedTx, 45_000);

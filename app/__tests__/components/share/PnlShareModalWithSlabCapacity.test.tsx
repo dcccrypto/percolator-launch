@@ -41,6 +41,14 @@ describe("PnlShareModalWithSlabCapacity", () => {
     expect(screen.getByTestId("pnl-card-capped")).toHaveTextContent("paper +$37.50");
   });
 
+  it("v17/v18 (no engine block): a known insurance balance alone is not a cap", () => {
+    h.engine = null;
+    h.insurance = 15_000_000n;
+    render(<PnlShareModalWithSlabCapacity data={DATA} onClose={() => {}} />);
+    expect(screen.getByTestId("pnl-card-amount")).toHaveTextContent("+$37.50");
+    expect(screen.queryByTestId("pnl-card-capped")).toBeNull();
+  });
+
   it("no cap while the engine is unknown (same as the dock)", () => {
     h.engine = null;
     h.insurance = null;

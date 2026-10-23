@@ -63,6 +63,9 @@ export function ProtocolStatsBar() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (stale()) return;
+      // #54: `live: false` is /api/stats's zeroStats() degrade ("no data source"), not a measurement.
+      // Treat it like a failed fetch: keep the last real figures, never store its zeros as data.
+      if (data.live !== true) throw new Error("stats unavailable");
       setStats({
         volume24h: Number(data.totalVolume24h) || 0,
         openInterest: Number(data.totalOpenInterest) || 0,
@@ -95,25 +98,28 @@ export function ProtocolStatsBar() {
   }, []);
 
   const isLive = stats?.live === true;
+  // No real figures yet (every fetch failed or degraded): "—", never a fabricated $0 / 0 (#54).
+  const unknown = stats === null;
+  const dim = "text-[var(--text-secondary)]";
 
   const items = [
     {
       label: "24h Volume",
-      value: loading ? null : formatUsd(stats?.volume24h ?? 0),
+      value: loading ? null : unknown ? "—" : formatUsd(stats.volume24h),
       live: isLive,
-      color: (stats?.volume24h ?? 0) > 0 ? "text-[var(--long)]" : "text-[var(--text-secondary)]",
+      color: !unknown && stats.volume24h > 0 ? "text-[var(--long)]" : dim,
     },
     {
       label: "Open Interest",
-      value: loading ? null : formatUsd(stats?.openInterest ?? 0),
+      value: loading ? null : unknown ? "—" : formatUsd(stats.openInterest),
       live: false,
-      color: (stats?.openInterest ?? 0) > 0 ? "text-[var(--text)]" : "text-[var(--text-secondary)]",
+      color: !unknown && stats.openInterest > 0 ? "text-[var(--text)]" : dim,
     },
     {
       label: "Active Markets",
-      value: loading ? null : String(stats?.activeMarkets ?? 0),
+      value: loading ? null : unknown ? "—" : String(stats.activeMarkets),
       live: false,
-      color: "text-[var(--accent)]",
+      color: unknown ? dim : "text-[var(--accent)]",
     },
   ];
 

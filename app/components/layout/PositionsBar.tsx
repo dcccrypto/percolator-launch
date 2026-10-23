@@ -1,9 +1,10 @@
 "use client";
 
+import { observeLotExp } from "@/lib/v22/lot-registry";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { PublicKey } from "@solana/web3.js";
-import { parseWrapperConfigV17, isV17Account, V17_HEADER_LEN } from "@percolatorct/sdk";
+import { parseWrapperConfigV17, V17_HEADER_LEN } from "@percolatorct/sdk";
 import { subscribeSlab, getSnapshot, applyOnChainPoll } from "@/lib/priceStore/priceStore";
 import { sanitizePriceE6 } from "@/lib/oraclePrice";
 import { UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
@@ -16,6 +17,7 @@ import { formatTokenAmount } from "@/lib/format";
 import { isMockMode } from "@/lib/mock-mode";
 import { pollWhenVisible } from "@/lib/pollWhenVisible";
 import { getMockPortfolioPositions } from "@/lib/mock-trade-data";
+import { isWrapperAccount } from "@/lib/v22/layout";
 
 /** On-chain freshness floor for chips the WS feed isn't ticking: one batched
  *  getMultipleAccountsInfo across every position slab per interval. */
@@ -52,6 +54,7 @@ function PositionChip({ pos, decimals }: { pos: PortfolioPosition; decimals: num
   return (
     <Link
       href={`/trade/${pos.slabAddress}`}
+      title="Unrealized PnL and return on margin"
       className="group flex shrink-0 items-center gap-1.5 px-3 py-1 transition-colors hover:bg-[var(--bg-elevated)]"
       style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
     >
@@ -65,7 +68,8 @@ function PositionChip({ pos, decimals }: { pos: PortfolioPosition; decimals: num
       {entryKnown ? (
         <>
           <span className={`text-[11px] font-bold ${colorClass}`}>
-            {sign}{formatTokenAmount(abs, decimals)}
+            {/* #865: a known zero is "0.00", never a bare "0" (which read as the position size). */}
+            {abs === 0n ? "0.00" : `${sign}${formatTokenAmount(abs, decimals)}`}
           </span>
           {live.isEstimate && (
             <span className="text-[9px] font-medium text-[var(--text-dim)]" title={DERIVED_ENTRY_TOOLTIP}>{ESTIMATE_LABEL}</span>
@@ -171,7 +175,8 @@ export function PositionsBar() {
         const infos = await connection.getMultipleAccountsInfo(keys);
         if (cancelled) return;
         infos.forEach((info, i) => {
-          if (!info?.data || !isV17Account(info.data)) return;
+          if (!info?.data || !isWrapperAccount(info.data)) return;
+          observeLotExp(slabAddrs[i], new Uint8Array(info.data)); // N1: the exponent is a property of the market
           try {
             const e6 = sanitizePriceE6(parseWrapperConfigV17(info.data, V17_HEADER_LEN).markEwmaE6);
             if (e6 > 0n) applyOnChainPoll(slabAddrs[i], e6);

@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { Keypair } from "@solana/web3.js";
 import * as C from "@/lib/limits/constants";
+import { blankMarket } from "../helpers/v22-fixtures";
+import { marketOffsets } from "@/lib/v22/market-offsets";
 
 const h = vi.hoisted(() => ({ mode: 1, count: 1n, reads: 0 }));
 const PROGRAM = Keypair.generate().publicKey;
@@ -14,14 +16,13 @@ const SLAB = Keypair.generate().publicKey.toBase58();
 const MINT = Keypair.generate().publicKey;
 
 function marketBytes(): Uint8Array {
-  const d = new Uint8Array(C.MARKET_GROUP_OFF + C.MARKET_GROUP_LEN);
+  const d = blankMarket(); // the ACTIVE layout's market: VERSION 18 flag off, 19 flag on (helpers/v22-fixtures.ts)
   const v = new DataView(d.buffer);
-  v.setBigUint64(0, C.WRAPPER_MAGIC, true);
-  v.setUint16(8, C.WRAPPER_VERSION_V18, true);
+  const M = marketOffsets(d);
   d[10] = C.KIND_MARKET_ACCOUNT;
-  d[C.MARKET_GROUP_OFF + C.H_MODE] = h.mode;
-  v.setBigUint64(C.MARKET_GROUP_OFF + C.H_MATERIALIZED_PORTFOLIO_COUNT, h.count, true);
-  v.setBigUint64(C.MARKET_GROUP_OFF + C.H_RESOLVED_SLOT, 100n, true);
+  d[M.hdr(C.H_MODE)] = h.mode;
+  v.setBigUint64(M.hdr(C.H_MATERIALIZED_PORTFOLIO_COUNT), h.count, true);
+  v.setBigUint64(M.hdr(C.H_RESOLVED_SLOT), 100n, true);
   return d;
 }
 const connection = {
@@ -42,9 +43,13 @@ vi.mock("@/components/providers/SlabProvider", () => ({ useSlabState: () => SLAB
 
 // PDA derivation hashes under jsdom's cross-realm Uint8Array fail ("no viable program address"); the
 // addresses are irrelevant to polling, so they are stubbed.
-const PDA = () => [Keypair.generate().publicKey, 255] as const;
+function PDA() {
+  return [Keypair.generate().publicKey, 255] as const; // a function declaration: hoisted above the vi.mock factories that use it
+}
 vi.mock("@/lib/limits/p3-ix", async (orig) => ({ ...(await orig<object>()), deriveLpVaultRegistryPda: () => PDA()[0], deriveVaultLpState: () => PDA()[0] }));
 vi.mock("@percolatorct/sdk", async (orig) => ({ ...(await orig<object>()), deriveVaultAuthority: PDA, deriveLpBackingLedger: PDA }));
+// With the v2.1 flag on the loader also derives the VaultLpExt PDA (a PDA hash that fails under jsdom like the others): stub it the same way.
+vi.mock("@/lib/v21/sdk", async (orig) => ({ ...(await orig<object>()), deriveVaultLpExt: () => PDA()[0] }));
 vi.mock("@solana/spl-token", async (orig) => ({ ...(await orig<object>()), getAssociatedTokenAddressSync: () => PDA()[0] }));
 
 const { useResolvedExit, RESOLVED_POLL_MS } = await import("@/hooks/useResolvedExit");

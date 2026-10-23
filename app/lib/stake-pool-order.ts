@@ -57,7 +57,8 @@ export function orderStakePools<T extends StakeOrderable>(
  * top. Such a position gets the smallest positive weight (ranked last among
  * staked pools, still above every unstaked one).
  */
-export function stakedOrderValue(lpBalanceRaw: bigint, estimatedValue: number): number {
+export function stakedOrderValue(lpBalanceRaw: bigint, estimatedValue: number | null): number {
   if (lpBalanceRaw <= 0n) return 0;
-  return Number.isFinite(estimatedValue) && estimatedValue > 0 ? estimatedValue : Number.MIN_VALUE;
+  // null = the value is unknown (#3611); the wallet still holds LP, so it still sorts with the staked pools.
+  return estimatedValue !== null && Number.isFinite(estimatedValue) && estimatedValue > 0 ? estimatedValue : Number.MIN_VALUE;
 }

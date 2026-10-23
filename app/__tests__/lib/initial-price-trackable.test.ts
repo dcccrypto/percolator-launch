@@ -84,3 +84,18 @@ describe("withTrackableFloor refuses below the floor with the reason", () => {
     expect(withTrackableFloor(toInitialPriceE6("0.00000001"), 4)).toMatchObject({ reason: "below-minimum" });
   });
 });
+
+describe("devnet v2.2 lot markets: the floor applies to the per-LOT price (browser E2E 2026-10-16)", () => {
+  // 8PzFWyLp…pump at $0.001794 (1,794 e6), 10x cap 4 bps -> floor 2,500 e6 per priced unit.
+  const tok = { ok: true as const, e6: 1_794n };
+  it("a lot of 10^4 tokens ($17.94) moves: launchable", () => {
+    expect(withTrackableFloor(tok, 4, 4)).toEqual(tok);
+  });
+  it("NEGATIVE CONTROL: priced per token (lotExp 0) it is still refused, reported per token", () => {
+    expect(withTrackableFloor(tok, 4, 0)).toEqual({ ok: false, reason: "below-trackable", price: 0.001794, minPrice: 0.0025 });
+    expect(withTrackableFloor(tok, 4)).toMatchObject({ ok: false, reason: "below-trackable" });
+  });
+  it("too small even per lot: minPrice is the per-token floor for that lot", () => {
+    expect(withTrackableFloor({ ok: true, e6: 1n }, 4, 2)).toEqual({ ok: false, reason: "below-trackable", price: 0.000001, minPrice: 0.000025 });
+  });
+});

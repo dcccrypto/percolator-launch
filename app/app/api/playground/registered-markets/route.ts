@@ -48,7 +48,7 @@
  * degrading to "slightly stale" rather than "keeper prices nothing".
  */
 import { NextResponse } from "next/server";
-import { readRegisteredMarkets } from "@/lib/playground-registered-markets";
+import { readRegisteredMarketsChecked } from "@/lib/playground-registered-markets";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { readSlabExistence } from "@/lib/live-market-state";
@@ -56,10 +56,42 @@ import { readSlabExistence } from "@/lib/live-market-state";
 export const dynamic = "force-dynamic";
 
 /**
+ * Review E5: this route is unauthenticated and uncached, so every caller paid a Supabase read. The
+ * DB slab set is shared for REGISTERED_MARKETS_DB_MEMO_MS (default 3 s) with in-flight dedupe: a
+ * flood costs one read per 3 s per instance, and a just-registered market is delayed by at most
+ * that (the keeper polls every 30 s). A failed read (null) is not kept. The response stays no-store.
+ */
+let slabMemo: { at: number; set: Set<string> } | null = null;
+let slabInflight: Promise<Set<string> | null> | null = null;
+
+function slabMemoMs(): number {
+  const v = Number(process.env.REGISTERED_MARKETS_DB_MEMO_MS ?? 3_000);
+  return Number.isFinite(v) && v >= 0 ? v : 3_000;
+}
+
+async function liveSlabAddresses(): Promise<Set<string> | null> {
+  const ttl = slabMemoMs();
+  if (ttl === 0) return readLiveSlabAddresses();
+  const now = Date.now();
+  if (slabMemo && now - slabMemo.at < ttl) return slabMemo.set;
+  if (slabInflight) return slabInflight;
+  const p = readLiveSlabAddresses()
+    .then((set) => {
+      if (set !== null) slabMemo = { at: now, set };
+      return set;
+    })
+    .finally(() => {
+      if (slabInflight === p) slabInflight = null;
+    });
+  slabInflight = p;
+  return p;
+}
+
+/**
  * Slabs the database currently knows about, or null when it cannot be read.
  * Null means "skip this filter" — see the degradation note above.
  */
-async function liveSlabAddresses(): Promise<Set<string> | null> {
+async function readLiveSlabAddresses(): Promise<Set<string> | null> {
   try {
     const supabase = getServiceClient();
     const { data, error } = await supabase
@@ -78,7 +110,10 @@ async function liveSlabAddresses(): Promise<Set<string> | null> {
 }
 
 export async function GET() {
-  const all = await readRegisteredMarkets();
+  // A failed store read still answers 200 with what it has (the previous snapshot, or none), but
+  // says so: `complete: false` lets a reader that sums over the list (the Earn TVL) not treat a
+  // partial list as the whole one. Readers that ignore the field are unaffected.
+  const { markets: all, ok: readOk } = await readRegisteredMarketsChecked();
   const notBlocked = all.filter((m) => !BLOCKED_SLAB_ADDRESSES.has(m.slabAddress));
 
   const live = await liveSlabAddresses();
@@ -91,7 +126,7 @@ export async function GET() {
   const markets = dbFiltered.filter((m) => !chain.missing.has(m.slabAddress));
 
   return NextResponse.json(
-    { markets },
+    readOk ? { markets } : { markets, complete: false },
     {
       headers: {
         // NO CACHE. This is a liveness feed, not a page.
@@ -102,8 +137,9 @@ export async function GET() {
         // not up to s-maxage seconds from now. A stale-while-revalidate window
         // is worse still — it serves the pre-launch answer while refreshing.
         //
-        // The cost is one Supabase read per poll, which is a single indexed
-        // select over a table with a handful of rows.
+        // The cost is at most one Supabase read per 3 s per instance (the DB slab
+        // set is memoized server-side, see liveSlabAddresses), a single indexed
+        // select of one column.
         "Cache-Control": "no-store, max-age=0, must-revalidate",
       },
     },

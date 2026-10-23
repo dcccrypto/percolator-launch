@@ -96,6 +96,18 @@ function landed(tx: Transaction, err: unknown = null) {
 const WRAPPER = (programId: PublicKey) => programId.toBase58();
 
 describe("AC3: the route's verifier (security review 2026-09-30 fixes applied)", () => {
+  it("accepts a legacy null-payload creation memo but rejects a substituted payload", async () => {
+    const { tx, programId, wallet, slab } = await m1(true);
+    const request = { ...PARAMS, slabAddress: slab.publicKey.toBase58() };
+    const legacy = await keeperMemoParams({ ...request, payload: null });
+    expect(validateRegistrationPayload(null)).toEqual({ ok: true, payload: null });
+    expect(legacy.payloadDigest).toBe("");
+    expect(await verifyKeeperRegisterProofTx(landed(tx), legacy, WRAPPER(programId)))
+      .toEqual({ ok: true, creator: wallet.publicKey.toBase58() });
+    const substituted = await keeperMemoParams({ ...request, payload: { name: "Late payload" } });
+    expect((await verifyKeeperRegisterProofTx(landed(tx), substituted, WRAPPER(programId))).ok).toBe(false);
+  });
+
   it("accepts the creator's M1 (wrapper InitMarket admin == memo signer) for exactly these params", async () => {
     const { tx, programId, wallet, slab } = await m1(true);
     const p = { ...PARAMS, slabAddress: slab.publicKey.toBase58() };

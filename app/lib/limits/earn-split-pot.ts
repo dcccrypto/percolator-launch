@@ -29,6 +29,7 @@
  *   - handle_execute_redemption (+ vault_pot_free_backing_num and both sibling top-ups)
  * Pure; the hook reads the accounts.
  */
+import { parseLpVaultRegistry } from "@/lib/v22/records";
 import { SystemProgram, type Connection, type PublicKey, type TransactionInstruction } from "@solana/web3.js";
 import {
   ACCOUNTS_REBALANCE_LP_VAULT_BACKING,
@@ -38,8 +39,8 @@ import {
   deriveLpBackingLedger,
   deriveLpVaultRegistry,
   encodeRebalanceLpVaultBacking,
-  parseLpVaultRegistry,
 } from "@percolatorct/sdk";
+import { marketOffsetsOrNull } from "@/lib/v22/market-offsets";
 import * as C from "./constants";
 import { decodeLpVaultRegistryBound, decodeLpVaultRegistryOiThresholdBps, decodeMarketEngineView, decodeResolvedMarket, u128 } from "./decode";
 import { harvestableFeeAtoms } from "./vault-tranche";
@@ -101,7 +102,9 @@ function dv64(d: Uint8Array, off: number): bigint {
 }
 
 export function decodeBackingBucket(d: Uint8Array, domain: number): BackingBucket | null {
-  const b = C.assetEngineOff(Math.floor(domain / 2)) + (domain % 2 === 0 ? C.SLOT_BACKING_LONG : C.SLOT_BACKING_SHORT);
+  const M = marketOffsetsOrNull(d, "decodeBackingBucket");
+  if (!M) return null;
+  const b = M.engineOff(Math.floor(domain / 2)) + M.slotRel(domain % 2 === 0 ? C.SLOT_BACKING_LONG : C.SLOT_BACKING_SHORT);
   if (d.length < b + 97) return null;
   return {
     freshUnliened: u128(d, b + 8),
@@ -115,7 +118,9 @@ export function decodeBackingBucket(d: Uint8Array, domain: number): BackingBucke
 }
 
 export function decodeSourceCredit(d: Uint8Array, domain: number): SourceCredit | null {
-  const s = C.assetEngineOff(Math.floor(domain / 2)) + (domain % 2 === 0 ? SOURCE_LONG : SOURCE_SHORT);
+  const M = marketOffsetsOrNull(d, "decodeSourceCredit");
+  if (!M) return null;
+  const s = M.engineOff(Math.floor(domain / 2)) + M.slotRel(domain % 2 === 0 ? SOURCE_LONG : SOURCE_SHORT);
   if (d.length < s + 16 * 10) return null;
   const f = (i: number) => u128(d, s + i * 16);
   return {

@@ -1,14 +1,13 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PublicKey } from "@solana/web3.js";
+import { modeFixtures } from "../helpers/v22-fixtures";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 // M-3: a v17/v18 close reads the market fresh for the ADL-effective quantity (real v18 bytes).
-const MARKET_BYTES = Buffer.from(
-  JSON.parse(readFileSync(join(__dirname, "..", "fixtures", "5bVTTMRc.ansem.market.json"), "utf8")).dataBase64,
-  "base64",
-);
+// Captured market of the ACTIVE mode: the v2.1 ANSEM bytes flag off, the v2.2 (VERSION 19) one-slot market flag on (helpers/v22-fixtures.ts).
+const MARKET_BYTES = Buffer.from(modeFixtures().market);
 
 const mocks = vi.hoisted(() => ({
   trade: vi.fn(),
@@ -21,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   invalidatePortfolio: vi.fn(),
   withdraw: vi.fn(),
   toast: vi.fn(),
+  takeFillResult: vi.fn(),
 }));
 
 vi.mock("@/hooks/useWalletCompat", () => ({
@@ -37,6 +37,7 @@ vi.mock("@/hooks/useTrade", () => ({
 
 vi.mock("@/hooks/useWithdraw", () => ({ useWithdraw: () => ({ withdraw: mocks.withdraw }) }));
 vi.mock("@/hooks/useToast", () => ({ useOptionalToast: () => mocks.toast }));
+vi.mock("@/lib/limits/fill-check", () => ({ takeFillResult: (sig: string) => mocks.takeFillResult(sig) }));
 
 vi.mock("@/hooks/useUserAccount", () => ({
   useUserAccount: vi.fn(),
@@ -64,13 +65,19 @@ vi.mock("@/lib/portfolio-invalidation", () => ({
   invalidatePortfolio: mocks.invalidatePortfolio,
 }));
 
-vi.mock("@/lib/errorMessages", () => ({
+vi.mock("@/lib/errorMessages", async (orig) => ({
+  ...(await orig<typeof import("@/lib/errorMessages")>()),
   humanizeError: (message: string) => message,
   withTransientRetry: async (
     operation: () => Promise<unknown>,
   ) => operation(),
 }));
 
+vi.mock("@/lib/v22/layout", async (orig) => ({
+  ...(await orig<typeof import("@/lib/v22/layout")>()),
+  isWrapperAccount: mocks.isV17Account,
+  parsePortfolio: mocks.parsePortfolioV17,
+}));
 vi.mock("@percolatorct/sdk", () => ({
   AccountKind: {
     LP: "LP",
@@ -89,6 +96,7 @@ import { useTrade } from "@/hooks/useTrade";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useClosePosition } from "@/hooks/useClosePosition";
+import { __setUnknownLotExpForTest } from "@/lib/v22/lot-registry";
 
 describe("useClosePosition — a FULL close moves the freed USDC back to the wallet (Squid 2026-10-01)", () => {
   const slabAddress = "11111111111111111111111111111111";
@@ -99,6 +107,8 @@ describe("useClosePosition — a FULL close moves the freed USDC back to the wal
 
   beforeEach(() => {
     vi.clearAllMocks();
+    __setUnknownLotExpForTest(0);
+    mocks.takeFillResult.mockReturnValue(undefined); // a full fill unless a test says otherwise
     closed = false;
     mocks.trade.mockImplementation(async () => { closed = true; return "close-sig"; });
     mocks.withdraw.mockResolvedValue("withdraw-sig");
@@ -155,5 +165,38 @@ describe("useClosePosition — a FULL close moves the freed USDC back to the wal
     expect(r?.signature).toBe("close-sig");
     expect(result.current.error).toBeNull();
     await vi.waitFor(() => expect(mocks.toast).toHaveBeenCalledWith(expect.stringMatching(/stays on this market/), "info"), { timeout: 3000 });
+  });
+
+  it("every successful close says so: a full close and a requested partial close each toast once", async () => {
+    const { result } = renderHook(() => useClosePosition(slabAddress));
+    await act(async () => { await result.current.closePosition(100); });
+    expect(mocks.toast).toHaveBeenCalledWith("Position closed.", "success");
+    mocks.toast.mockClear();
+    closed = false;
+    await act(async () => { await result.current.closePosition(50); });
+    expect(mocks.toast).toHaveBeenCalledWith(expect.stringMatching(/^Closed .+ of .+. The rest of your position is still open.$/), "success");
+  });
+
+  it("an unmeasured fill (post-trade read failed / position moved the other way) never claims a close", async () => {
+    mocks.takeFillResult.mockReturnValue({ kind: "unknown", filledQ: null });
+    const { result } = renderHook(() => useClosePosition(slabAddress));
+    await act(async () => { await result.current.closePosition(100); });
+    expect(mocks.toast).not.toHaveBeenCalledWith("Position closed.", "success");
+    expect(mocks.toast).toHaveBeenCalledWith("Your order went through. Your position is updating.", "info");
+  });
+
+  it("a zero fill throws and toasts no success", async () => {
+    mocks.takeFillResult.mockReturnValue({ kind: "zero", filledQ: 0n });
+    const { result } = renderHook(() => useClosePosition(slabAddress));
+    await act(async () => { await result.current.closePosition(100).catch(() => undefined); });
+    expect(mocks.toast).not.toHaveBeenCalledWith("Position closed.", "success");
+  });
+
+  it("CONTROL: a clipped (partial) fill gets its own message, not a success toast", async () => {
+    mocks.takeFillResult.mockReturnValue({ kind: "partial", filledQ: -1n });
+    const { result } = renderHook(() => useClosePosition(slabAddress));
+    await act(async () => { await result.current.closePosition(100); });
+    expect(mocks.toast).not.toHaveBeenCalledWith("Position closed.", "success");
+    expect(result.current.error).toMatch(/^Partially closed/);
   });
 });

@@ -1,17 +1,15 @@
 "use client";
 
+import { useEffect } from "react";
 import useSWR from "swr";
+import { MARKET_REGISTERED_EVENT } from "@/lib/market-registered-event";
 import { isBlockedSlab } from "@/lib/blocklist";
 import type { Database } from "@/lib/database.types";
+import { MARKETS_LIST_URL, fetchMarketsList } from "@/lib/markets-list-client";
 
 export type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'];
-type MarketsApiResponse = {
-  markets?: MarketWithStats[];
-  error?: string;
-};
-
-/** Stable SWR cache key — shared across all mounting hook instances. */
-const SWR_KEY = "/api/markets?include_zombie=true&limit=500";
+/** Stable SWR cache key — shared across all mounting hook instances (the canonical list URL). */
+const SWR_KEY = MARKETS_LIST_URL;
 
 /**
  * Stable identity fallback so downstream memos don't churn while loading.
@@ -23,24 +21,53 @@ const SWR_KEY = "/api/markets?include_zombie=true&limit=500";
  */
 const EMPTY_STATS_MAP: Map<string, MarketWithStats> = new Map();
 
-async function fetchMarketStats(): Promise<Map<string, MarketWithStats>> {
-  const res = await fetch(SWR_KEY, {
-    headers: { Accept: "application/json" },
-  });
-  if (!res.ok) {
-    throw new Error(`Markets API returned ${res.status}`);
-  }
-  const body = (await res.json()) as MarketsApiResponse;
+/**
+ * `fresh` goes around the CDN copy (s-maxage 15 + stale-while-revalidate 60) and the server's
+ * shared row copy (it accepts one at most 3 s old): a distinct URL is a distinct cache key, and
+ * no-store skips the browser's copy. This is the one place `&fresh=` is still sent: right after a
+ * registration lands on this device, so the creator's own lists show the market without waiting
+ * out the cache. Ordinary polls share one in-flight request (lib/markets-list-client.ts).
+ */
+export async function fetchMarketStats(fresh = false): Promise<Map<string, MarketWithStats>> {
+  const body = await fetchMarketsList({ fresh });
   if (!Array.isArray(body.markets)) {
     throw new Error(body.error ?? "Markets API returned no markets array");
   }
   const map = new Map<string, MarketWithStats>();
-  body.markets.forEach((market) => {
+  (body.markets as MarketWithStats[]).forEach((market) => {
     if (market.slab_address && !isBlockedSlab(market.slab_address)) {
       map.set(market.slab_address, market);
     }
   });
   return map;
+}
+
+/**
+ * After a registration lands the CDN can still hold a copy made BEFORE it (up to s-maxage +
+ * stale-while-revalidate), so the next ordinary poll could bring the old list back and the new market
+ * would vanish again. For this long after a registration event every fetch of the list is fresh.
+ */
+export const FRESH_AFTER_REGISTRATION_MS = 30_000;
+let freshUntil = 0;
+/** Test hook: end the fresh window. */
+export function resetFreshWindow(): void {
+  freshUntil = 0;
+}
+
+/**
+ * SWR's default `compare` is `dequal/lite`, which has no Map support: it compares own enumerable
+ * keys, and a Map has none, so ANY two Maps compared equal and SWR silently kept the first fetch's
+ * data forever (the 30 s poll and any mutate fetched, then discarded the result). A markets list
+ * that never changes after the first load is why a new market stayed missing until a full reload.
+ */
+export function statsMapsEqual(a: Map<string, MarketWithStats> | undefined, b: Map<string, MarketWithStats> | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.size !== b.size) return false;
+  for (const [k, v] of a) {
+    const w = b.get(k);
+    if (w === undefined || JSON.stringify(v) !== JSON.stringify(w)) return false;
+  }
+  return true;
 }
 
 export interface UseAllMarketStatsOptions {
@@ -67,17 +94,31 @@ export interface UseAllMarketStatsOptions {
  */
 export function useAllMarketStats(options?: UseAllMarketStatsOptions) {
   const enabled = options?.enabled ?? true;
-  const { data, error, isLoading } = useSWR<Map<string, MarketWithStats>, Error>(
+  const { data, error, isLoading, mutate } = useSWR<Map<string, MarketWithStats>, Error>(
     enabled ? SWR_KEY : null,
-    fetchMarketStats,
+    () => fetchMarketStats(Date.now() < freshUntil),
     {
       // Collapse all concurrent hook instances to 1 request per 30 s.
       dedupingInterval: 30_000,
       // Replace the manual setInterval — SWR refetches in the background.
       refreshInterval: 30_000,
       revalidateOnFocus: false,
+      // See statsMapsEqual: the default compare treats every pair of Maps as equal.
+      compare: statsMapsEqual,
     },
   );
+
+  // A registration just landed on this device (lib/keeper-register-client.ts markRegistered):
+  // refetch past the CDN so the new market is in the list now, not on the next poll.
+  useEffect(() => {
+    if (!enabled || typeof window === "undefined") return;
+    const onRegistered = () => {
+      freshUntil = Date.now() + FRESH_AFTER_REGISTRATION_MS;
+      void mutate(fetchMarketStats(true), { revalidate: false }).catch(() => undefined);
+    };
+    window.addEventListener(MARKET_REGISTERED_EVENT, onRegistered);
+    return () => window.removeEventListener(MARKET_REGISTERED_EVENT, onRegistered);
+  }, [enabled, mutate]);
 
   return {
     statsMap: data ?? EMPTY_STATS_MAP,

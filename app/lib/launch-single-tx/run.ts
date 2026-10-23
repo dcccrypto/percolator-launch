@@ -22,6 +22,7 @@
  *              (a program error must never be "retried" in another format; a "no" is final).
  *  - unknown:  the tx may have landed and the outcome could not be resolved; never re-launch.
  */
+import { errorText } from "@/lib/error-text";
 import { type Keypair, type PublicKey, type TransactionInstruction } from "@solana/web3.js";
 import { ed25519 } from "@noble/curves/ed25519";
 import {
@@ -144,7 +145,7 @@ export function isPreflightRefusal(err: unknown): boolean {
   if (typeof err === "object" && err !== null && typeof (err as { code?: unknown }).code === "number") {
     return (err as { code: number }).code === -32002;
   }
-  const m = err instanceof Error ? err.message : String(err);
+  const m = errorText(err);
   return /-32002|Transaction simulation failed/i.test(m);
 }
 

@@ -12,10 +12,12 @@ import { maxTradeSizePerSide, sameOwnerBlocked, sameOwnerRoomQ, type Side, type 
 import { preTradeQuote, quoteFailsLimit, type PreTradeQuote } from "./matcher-quote";
 import { stepDownMaxLeverage } from "./vault-tranche";
 import { V21_COPY } from "@/lib/v21/copy";
-import { growthTicketDecision, type GrowthMarketView, type GrowthTicketDecision } from "@/lib/v21/growth-market";
+import { growthFillCapQ, growthGate, type GrowthGateResult } from "@/lib/v22/growth-gate";
+import { V22_COPY } from "@/lib/v22/copy";
+import { growthLeverageRefusal, growthTicketDecision, type GrowthMarketView, type GrowthTicketDecision } from "@/lib/v21/growth-market";
 
 export interface TicketIssue {
-  kind: "halted" | "same-owner" | "step-down" | "quote-slippage" | "limits-unavailable" | "fee-over-max" | "growth-closed" | "growth-leverage";
+  kind: "halted" | "same-owner" | "step-down" | "quote-slippage" | "limits-unavailable" | "fee-over-max" | "growth-closed" | "growth-leverage" | "growth-backing";
   severity: "error" | "warning";
   title: string;
   message: string;
@@ -43,11 +45,25 @@ export interface TicketLimitsInput {
    * growth is OFF (every market of today's programs). Absent => nothing here changes.
    */
   growth?: GrowthMarketView | null;
+  /**
+   * The taker's conservative equity on this market (capital + min(pnl,0) + min(fee_credits,0)) before this order, or null/absent when
+   * unknown or when the order bundles a deposit sized to itself (first trade). Present, the growth gate of the DEPLOYED wrapper is
+   * evaluated on the size that will actually fill (lib/v22/growth-gate.ts) and replaces the slider-based leverage check.
+   */
+  takerEquity?: bigint | null;
+  /** Band market: the program's exact minimum leg in Q (`bandMinLegExactQ`, fractional lots); a fill that would leave a smaller leg is refused (113). */
+  minLegQ?: bigint | null;
+  /** The smallest add the ticket can place (Q): one whole lot on a lot market, the 4 dp display step otherwise. Below it a side reads full. */
+  sizeStepQ?: bigint | null;
+  /** Wording helpers for the gate's messages (sizes in the ticket's units, collateral atoms as a dollar string). */
+  format?: { size: (q: bigint) => string; collateral: (atoms: bigint) => string };
 }
 
 export interface TicketLimits {
   sideLimits: Record<Side, SideLimit> | null;
   halted: Record<Side, boolean>;
+  /** Sides paused because they are FULL (growth capacity / room below the minimum or the step): the tab reads "Paused (full)". */
+  fullSides: Record<Side, boolean>;
   sameOwner: boolean;
   /** The wallet owns the LP or created the market: it may only reduce/close (P1 item 2). */
   sameOwnerCloseOnly: boolean;
@@ -68,6 +84,10 @@ export interface TicketLimits {
   } | null;
   /** Devnet v2.1 growth decision for this side/size; null when growth is OFF. */
   growth: GrowthTicketDecision | null;
+  /** The deployed wrapper's clip + gate for this order (null: growth off, no equity known, or a reduce). */
+  growthGate: GrowthGateResult | null;
+  /** The most that can be ordered on this side now (clip AND gate); null when growth does not constrain. */
+  growthCapQ: bigint | null;
   stepDown: {
     maxLeverage: number;
     stepped: boolean;
@@ -84,15 +104,50 @@ export interface TicketLimits {
 const NONE: TicketLimits = {
   sideLimits: null,
   halted: { long: false, short: false },
+  fullSides: { long: false, short: false },
   sameOwner: false,
   sameOwnerCloseOnly: false,
   clampToQ: null,
   quote: null,
   fee: null,
   growth: null,
+  growthGate: null,
+  growthCapQ: null,
   stepDown: null,
   issues: [],
 };
+
+/**
+ * Is opening on `side` impossible for this taker right now because of the growth state? A property of the MARKET for a flat taker, so it is
+ * evaluated for BOTH sides whatever the ticket's selected direction and whether or not a wallet is connected (otherwise a paused Long is
+ * only discovered by selecting it, and the auto-select that moves off it hides it again).
+ *  - "closed": the side's growth quote is closed (full / h-lock / not bound ...), unless the holder is on the other side and the tab is a close.
+ *  - "min-leg": a band market's room on the side is below the minimum position leg. The program clips an open to the room and then refuses
+ *    the leg that is left under `band_min_leg_notional` (Custom 113), so no fill can land. A holder whose leg is already at or above the
+ *    minimum may still add; a reduce is never paused.
+ */
+export function growthSideHalt(
+  view: GrowthMarketView | null | undefined,
+  side: Side,
+  takerPosQ: bigint,
+  minLegQ: bigint | null | undefined,
+  stepQ?: bigint | null,
+): "closed" | "min-leg" | "step" | null {
+  if (!view) return null;
+  const q = side === "long" ? view.long : view.short;
+  if (!q.growthOn) return null;
+  const closing = takerPosQ !== 0n && takerPosQ > 0n !== (side === "long") ? (takerPosQ < 0n ? -takerPosQ : takerPosQ) : 0n;
+  if (q.closed) return closing > 0n ? null : "closed";
+  if (closing > 0n) return null;
+  const held = takerPosQ < 0n ? -takerPosQ : takerPosQ;
+  const room = q.headroomQ ?? 0n;
+  // A FLAT taker's fill is the whole leg: it must reach the program's minimum (band_min_leg_notional, exact notional rule).
+  if (held === 0n && minLegQ != null && minLegQ > 0n && room < minLegQ) return "min-leg";
+  // Below one size step the ticket cannot place an add at all (an order is whole lots on a lot market; the clip would land a fraction of a
+  // lot, which program-wise is allowed but is not a size anyone can ask for). Holders and flat takers alike: the side reads full.
+  if (stepQ != null && stepQ > 0n && room < stepQ) return "step";
+  return null;
+}
 
 export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
   const L = i.limits;
@@ -110,7 +165,7 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
       issues: sameOwner ? [{ kind: "same-owner", severity: "error", title: "Can't open from this wallet", message: COPY.sameOwner }] : [],
     };
   }
-  const out: TicketLimits = { ...NONE, halted: { long: false, short: false }, issues: [] };
+  const out: TicketLimits = { ...NONE, halted: { long: false, short: false }, fullSides: { long: false, short: false }, issues: [] };
   const e = L.engine;
 
   // ── P1 ────────────────────────────────────────────────────────────────
@@ -124,7 +179,10 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
         initialMarginBps: e.initialMarginBps,
         oiEffLongQ: e.oiEffLongQ,
         oiEffShortQ: e.oiEffShortQ,
-        limits: L.riskLimits,
+        // On a growth asset the program's LP exposure multiplier defaults to the growth lambda, not 1e8/IMR (lp_floor_and_cap_q_for_target_view:
+        // `(0, Some(g)) => g.lambda_bps`); an explicit stored value stays an override. Without this the ticket's "most available" and
+        // the program's clip were two different numbers (QA LEV-8: 7.65 vs 5.94 lots).
+        limits: i.growth && L.riskLimits.lpExposureKBps === 0 ? { ...L.riskLimits, lpExposureKBps: i.growth.record.lambdaBps } : L.riskLimits,
         lp: L.lp,
         takerPosQ: i.takerPosQ,
         matcher: L.matcher
@@ -149,10 +207,13 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
         out.clampToQ = lim.maxQ;
       }
     }
-    // Blocked only when this ticket's direction cannot reduce the taker (room 0).
-    out.sameOwner = out.sameOwnerCloseOnly && sameOwnerRoomQ(i.takerPosQ, i.direction) === 0n;
-    if (out.sameOwner) out.issues.push({ kind: "same-owner", severity: "error", title: "Can't open from this wallet", message: COPY.sameOwner });
   }
+  // C3 (feature check): the wrapper refuses the creator / LP owner's opening trade on EVERY build (Custom 67), so the detection does not
+  // depend on the P1 flag or on the risk limits having loaded (it used to: the ticket then offered an open the program refuses).
+  if (!out.sameOwnerCloseOnly && sameOwnerBlocked(i.takerOwner, L.lp?.owner ?? L.sameOwnerLpOwner ?? null, L.assetAdmin)) out.sameOwnerCloseOnly = true;
+  // Blocked only when this ticket's direction cannot reduce the taker (room 0).
+  out.sameOwner = out.sameOwnerCloseOnly && sameOwnerRoomQ(i.takerPosQ, i.direction) === 0n;
+  if (out.sameOwner) out.issues.push({ kind: "same-owner", severity: "error", title: "Can't open from this wallet", message: COPY.sameOwner });
 
   // ── Devnet v2.1: growth-v19 dynamic leverage (feature-detected; absent on today's programs) ──
   const growth = i.growth ? growthTicketDecision(i.growth, i.direction, i.takerPosQ, i.sizeQ) : null;
@@ -164,8 +225,12 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
   if (growth && growthBlocks) {
     out.halted[i.direction] = true;
     out.issues.push({ kind: "growth-closed", severity: "error", title: "This side is full", message: V21_COPY.growthClosed(i.direction, growth.quote.closedReason) });
-  } else if (growth && growth.maxLeverage !== null && i.leverage > growth.maxLeverage) {
-    out.issues.push({ kind: "growth-leverage", severity: "error", title: "Leverage adjusted", message: V21_COPY.growthLeverage(String(growth.maxLeverage), i.direction) });
+  } else if (growth && i.growth && i.takerEquity == null) {
+    // LEV-8: judged on the size that will FILL (the program trims an over-capacity open to the side's room and lands it), never on the ask.
+    const over = growthLeverageRefusal(i.growth, i.direction, i.takerPosQ, i.sizeQ, i.leverage);
+    if (over !== null) {
+      out.issues.push({ kind: "growth-leverage", severity: "error", title: "Leverage adjusted", message: V21_COPY.growthLeverage(String(over), i.direction) });
+    }
   }
   const utilFeeBps = growth?.fee ? BigInt(growth.fee.utilFeeBps) : 0n;
 
@@ -208,6 +273,50 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
       }
     }
   }
+
+  // ── Devnet v2.2: the deployed wrapper's clip + growth gate on the size that FILLS (QA LEV-8) ──────────────
+  if (i.growth && !growth?.reducing) {
+    const params = {
+      view: i.growth,
+      direction: i.direction,
+      takerEffQ: i.takerPosQ,
+      takerEquity: i.takerEquity ?? 0n,
+      quoteFeeBps: out.fee?.requestedBps ?? 0n,
+    };
+    if (i.takerEquity != null) {
+      out.growthCapQ = growthFillCapQ(params);
+      if (i.sizeQ > 0n && !growth?.closed) {
+        const gate = growthGate({ ...params, askQ: i.sizeQ });
+        out.growthGate = gate;
+        const fmt = i.format;
+        if (!gate.passes && !gate.closed && fmt) {
+          out.issues.push({
+            kind: "growth-backing",
+            severity: "error",
+            title: "More collateral needed",
+            message: gate.maxPassingQ > 0n
+              ? V22_COPY.growth.backingTrim(fmt.size(gate.maxPassingQ), fmt.collateral(gate.extraEquityNeeded), fmt.size(gate.clipQ))
+              : V22_COPY.growth.backingAdd(fmt.collateral(gate.extraEquityNeeded)),
+          });
+        }
+      }
+    }
+    // Band market: the room left on a side can be smaller than the minimum position (see growthSideHalt).
+    const own = growth && !growth.reducing ? growthSideHalt(i.growth, i.direction, i.takerPosQ, i.minLegQ, i.sizeStepQ) : null;
+    if (own === "min-leg" || own === "step") {
+      out.halted[i.direction] = true;
+      out.fullSides[i.direction] = true;
+      out.issues.push({ kind: "growth-closed", severity: "error", title: "This side is full", message: V21_COPY.growthClosed(i.direction, "capacity-full") });
+    }
+  }
+  // The OTHER side's tab: paused for the same market reasons, independent of the wallet and of the selected direction.
+  const other: Side = i.direction === "long" ? "short" : "long";
+  const otherHalt = growthSideHalt(i.growth, other, i.takerPosQ, i.minLegQ, i.sizeStepQ);
+  if (otherHalt !== null) {
+    out.halted[other] = true;
+    out.fullSides[other] = true;
+  }
+  if (growth?.closed && !growth.reducing) out.fullSides[i.direction] = true;
 
   // ── P3 leverage step-down ──────────────────────────────────────────────────
   if (L.flags.p3 && L.vaultLp?.bound && L.vaultLp.levCapQ > 0n) {
@@ -252,8 +361,10 @@ export function boundVaultLpCap(L: MarketLimits): { levBps: number } | null {
 }
 
 /** base-q -> the ticket's size-input string (token units = q / 1e6, or USD at `priceE6`). */
-export function sizeQToInput(q: bigint, unit: "token" | "usd", priceE6: bigint): string {
+export function sizeQToInput(q: bigint, unit: "token" | "usd", priceE6: bigint, lotExp = 0): string {
   if (unit === "token") {
+    // v2.2 lot markets: q is in LOTS; the box is in TOKENS (lib/v22/lot.ts). lotExp 0 is the identity.
+    if (lotExp > 0) q = q * 10n ** BigInt(lotExp);
     const whole = q / 1_000_000n;
     const frac = (q % 1_000_000n).toString().padStart(6, "0").replace(/0+$/, "");
     return frac ? `${whole}.${frac}` : `${whole}`;

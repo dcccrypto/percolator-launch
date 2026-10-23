@@ -32,6 +32,13 @@ vi.mock("@/components/providers/SlabProvider", () => ({
 }));
 
 import { useMarketLimits, __resetSameOwnerLpCache } from "@/hooks/useMarketLimits";
+import { isDevnetV21Enabled } from "@/lib/v21/flag";
+// Flags-OFF path only: the post-burn same-owner LP resolution (a getProgramAccounts-backed resolve) runs in useMarketLimits ONLY when no limits flag
+// and not the v2.1 flag is on (`if (anyOn || ...) return`). With NEXT_PUBLIC_DEVNET_V21=1 the hook reads the LP through the accounts path and the
+// ticket takes the same-owner owner from `limits.lp.owner` (lib/limits/ticket.ts: `L.lp?.owner ?? L.sameOwnerLpOwner`, covered by
+// lib/limits/ticket-state.test.ts), so these cases are skipped there, explicitly, rather than run against a branch that is not taken.
+const FLAGS_OFF_ONLY = isDevnetV21Enabled();
+
 
 const RENOUNCED = { assetAdmin: PublicKey.default };
 
@@ -42,7 +49,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
-describe("caching / sharing", () => {
+describe.skipIf(FLAGS_OFF_ONLY)("caching / sharing", () => {
   it("resolves once per market across remounts; a remount starts NOT pending", async () => {
     mocks.resolveMarketLp.mockResolvedValue({ owner: CREATOR });
     const a = renderHook(() => useMarketLimits(SLAB, 0, WALLET));
@@ -81,7 +88,7 @@ describe("caching / sharing", () => {
   });
 });
 
-describe("bounded, non-blocking failure handling", () => {
+describe.skipIf(FLAGS_OFF_ONLY)("bounded, non-blocking failure handling", () => {
   it("a failed first attempt ends pending at once and retries in the background", async () => {
     vi.useFakeTimers();
     mocks.resolveMarketLp.mockRejectedValue(new Error("429"));

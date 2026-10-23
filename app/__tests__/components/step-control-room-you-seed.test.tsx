@@ -50,7 +50,7 @@ describe("Control Room: You seed is what the launch takes", () => {
   it("shows the total and the backing inside it", () => {
     renderStep();
     expect(screen.getByText("You seed").nextSibling?.textContent).toBe("3,100 USDC");
-    expect(screen.getByText("Incl. counterparty backing").nextSibling?.textContent).toBe("2,000 USDC");
+    expect(screen.getByText("Incl. trader payout reserve").nextSibling?.textContent).toBe("2,000 USDC");
   });
 
   it("1,000 LP + 100 insurance takes 3,100 under the backing policy", () => {

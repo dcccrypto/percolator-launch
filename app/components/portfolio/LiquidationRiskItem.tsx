@@ -1,5 +1,6 @@
 "use client";
 
+import { formatLotPriceE6, formatLotQ } from "@/lib/v22/lot";
 import Link from "next/link";
 import { useCallback, useSyncExternalStore } from "react";
 import { getSnapshot, subscribeSlab } from "@/lib/priceStore/priceStore";
@@ -69,10 +70,13 @@ export function LiquidationRiskItem({
     liqPriceE6: pos.liquidationPriceE6,
     positionSize: pos.account?.positionSize ?? 0n,
     capital: pos.account?.capital ?? 0n,
+    // #3534: risk math uses the risk entry (the settled back-solve when nothing is pending), never the display entry.
+    entryPriceE6: pos.riskEntryPrice ?? pos.effectiveEntryPrice,
+    effectiveSize: pos.adlKnown ? pos.effectiveSize : null,
     markPriceE6: markE6,
     maintenanceMarginBps: pos.maintenanceMarginBps,
     hasResolvedEntry: describeEntryPrice({ entryE6: pos.effectiveEntryPrice, source: pos.entryPriceSource }).known,
-    formatPrice: (p) => formatMarkPrice(Number(p) / 1e6),
+    formatPrice: (p) => formatLotPriceE6(p, pos.lotExp ?? 0),
     unknownText: "—",
   });
   const danger = severity === "danger";
@@ -100,7 +104,7 @@ export function LiquidationRiskItem({
             </span>
           </div>
           <div className="mt-0.5 font-mono text-[11px] tabular-nums text-[var(--text-secondary)]">
-            Mark {formatMarkPrice(Number(markE6) / 1e6)}
+            Mark {formatLotPriceE6(markE6, pos.lotExp ?? 0)}
             <span className="mx-1.5 text-[var(--text-dim)]">→</span>
             Liq <LiqPriceValue display={liqDisplay} />
           </div>

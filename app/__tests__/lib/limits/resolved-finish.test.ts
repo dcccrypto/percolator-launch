@@ -28,6 +28,9 @@ import {
 } from "@/lib/limits/resolved-finish";
 import { KEEPER_SWEEP_MARGIN_MS, SLOT_MS, finishFeeSol, relativePhrase, resolvedPayoutEta } from "@/lib/limits/resolved-eta";
 import type { ExitIxContext } from "@/lib/limits/resolved-exit-ixs";
+import { afterLegsShift, blankMarket, blankPortfolio } from "../../helpers/v22-fixtures";
+import { marketOffsets } from "@/lib/v22/market-offsets";
+
 
 // ── A tiny resolved market, planned by the real planner ─────────────────────
 interface PState {
@@ -40,27 +43,24 @@ interface PState {
   gone?: boolean;
 }
 function marketBytes(count: bigint, cTot: bigint, resolvedSlot: bigint, delay: bigint): Uint8Array {
-  const d = new Uint8Array(C.MARKET_GROUP_OFF + C.MARKET_GROUP_LEN);
+  const d = blankMarket();
   const v = new DataView(d.buffer);
-  v.setBigUint64(0, C.WRAPPER_MAGIC, true);
-  v.setUint16(8, C.WRAPPER_VERSION_V18, true);
-  d[10] = C.KIND_MARKET_ACCOUNT;
-  const g = C.MARKET_GROUP_OFF;
-  d[g + C.H_MODE] = C.MARKET_MODE_RESOLVED;
-  v.setBigUint64(g + C.H_C_TOT, cTot, true);
-  v.setBigUint64(g + C.H_MATERIALIZED_PORTFOLIO_COUNT, count, true);
-  v.setBigUint64(g + C.H_RESOLVED_SLOT, resolvedSlot, true);
+  const M = marketOffsets(d);
+  d[M.hdr(C.H_MODE)] = C.MARKET_MODE_RESOLVED;
+  v.setBigUint64(M.hdr(C.H_C_TOT), cTot, true);
+  v.setBigUint64(M.hdr(C.H_MATERIALIZED_PORTFOLIO_COUNT), count, true);
+  v.setBigUint64(M.hdr(C.H_RESOLVED_SLOT), resolvedSlot, true);
   v.setBigUint64(C.HEADER_LEN + C.WCFG_FORCE_CLOSE_DELAY_SLOTS, delay, true);
   return d;
 }
 function portfolio(p: PState): ExitPortfolio {
-  const d = new Uint8Array(C.PF_RESOLVED_PAYOUT_RECEIPT + 66);
+  const d = new Uint8Array(blankPortfolio());
   const v = new DataView(d.buffer);
   d[10] = C.KIND_PORTFOLIO;
   if (p.chunks > 0) v.setBigUint64(C.PF_CAPITAL, 1_000n, true);
   if (p.receipt !== "none") {
-    d[C.PF_RESOLVED_PAYOUT_RECEIPT + C.RECEIPT_PRESENT] = 1;
-    d[C.PF_RESOLVED_PAYOUT_RECEIPT + C.RECEIPT_FINALIZED] = p.receipt === "final" ? 1 : 0;
+    d[C.PF_RESOLVED_PAYOUT_RECEIPT + afterLegsShift() + C.RECEIPT_PRESENT] = 1;
+    d[C.PF_RESOLVED_PAYOUT_RECEIPT + afterLegsShift() + C.RECEIPT_FINALIZED] = p.receipt === "final" ? 1 : 0;
   }
   const view = decodeResolvedPortfolio(d)!;
   return { key: p.key, view, isVaultLp: p.vault, escrowed: !!p.escrowed };
@@ -293,8 +293,8 @@ describe("AC1: a time, never a slot", () => {
 describe("the viewer's Earn position in the panel", () => {
   it("amount + requestable shares; none while a request is pending; nothing without shares", async () => {
     const { earnExitProps } = await import("@/lib/limits/resolved-finish");
-    expect(earnExitProps({ userLpBalance: 10n, userRedeemableValue: 1_250_000_000n, pendingRedemptionShares: 0n }, 6, "USDC")).toEqual({ earnAmount: "1250 USDC", requestableShares: 10n });
+    expect(earnExitProps({ userLpBalance: 10n, userRedeemableValue: 1_250_000_000n, pendingRedemptionShares: 0n }, 6, "USDC")).toEqual({ earnAmount: "1250 USDC", requestableShares: 10n, requestQuoteAtoms: null }); // no NAV given: no quote (AUD-S1-18)
     expect(earnExitProps({ userLpBalance: 10n, userRedeemableValue: 1n, pendingRedemptionShares: 4n }, 6, "USDC").requestableShares).toBe(0n);
-    expect(earnExitProps({ userLpBalance: 0n, userRedeemableValue: 0n, pendingRedemptionShares: 0n }, 6, "USDC")).toEqual({ earnAmount: null, requestableShares: 0n });
+    expect(earnExitProps({ userLpBalance: 0n, userRedeemableValue: 0n, pendingRedemptionShares: 0n }, 6, "USDC")).toEqual({ earnAmount: null, requestableShares: 0n, requestQuoteAtoms: null });
   });
 });

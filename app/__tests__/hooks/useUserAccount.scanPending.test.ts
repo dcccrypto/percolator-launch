@@ -18,12 +18,18 @@ vi.mock("@/hooks/useWalletCompat", () => ({
   useWalletCompat: mocks.useWalletCompat,
 }));
 vi.mock("@/components/providers/SlabProvider", () => ({ useSlabState: mocks.useSlabState }));
+vi.mock("@/lib/v22/layout", async (orig) => ({
+  ...(await orig<typeof import("@/lib/v22/layout")>()),
+  isWrapperAccount: mocks.isV17Account,
+}));
 vi.mock("@percolatorct/sdk", async () => {
   const actual = await vi.importActual<typeof import("@percolatorct/sdk")>("@percolatorct/sdk");
   return { ...actual, isV17Account: mocks.isV17Account };
 });
 
 import { useUserAccount, useUserAccountScanPending } from "@/hooks/useUserAccount";
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
+import { __setUnknownLotExpForTest } from "@/lib/v22/lot-registry";
 
 let n = 50;
 const uniquePubkey = () => new PublicKey(new Uint8Array(32).fill(++n % 256));
@@ -40,6 +46,7 @@ describe("useUserAccountScanPending (GH#2707)", () => {
   const raw = new Uint8Array([4, 4, 4]);
 
   beforeEach(() => {
+    __setUnknownLotExpForTest(0);
     vi.clearAllMocks();
     wallet = uniquePubkey();
     programId = uniquePubkey();

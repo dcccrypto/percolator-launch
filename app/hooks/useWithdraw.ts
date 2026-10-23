@@ -1,5 +1,6 @@
 "use client";
 
+import { errorText } from "@/lib/error-text";
 import { useCallback, useRef, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
@@ -14,15 +15,7 @@ import {
   getAta,
   deriveVaultAuthority,
   derivePythPushOraclePDA,
-  isV17Account,
-  parsePortfolioV17,
 } from "@percolatorct/sdk";
-// TODO(oracle-migration): encodePushOraclePrice/ACCOUNTS_PUSH_ORACLE_PRICE removed in beta.29.
-// The DEX oracle inline push path needs to migrate to /api/oracle/advance-phase.
-import {
-  encodePushOraclePrice,
-  ACCOUNTS_PUSH_ORACLE_PRICE,
-} from "@/lib/sdk-compat";
 import { sendTx } from "@/lib/tx";
 import { getPortfolioRawSnapshot, isLpPortfolio, makePortfolioScanKey } from "@/lib/userAccountScan";
 import { useSlabState } from "@/components/providers/SlabProvider";
@@ -37,11 +30,16 @@ import { isSentinelValue } from "@/lib/health";
 import {
   WithdrawRefusal,
   connectionQuoteDeps,
-  convertPrefixForWithdraw,
+  planConvertWithdraw,
   settlingProfitMessage,
 } from "@/lib/convert-released-pnl";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
+import { verifyPortfolioTarget } from "@/lib/portfolio-target";
 import type { TransactionInstruction } from "@solana/web3.js";
+import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
+import { parseFailure } from "@/lib/limits/user-message";
+import { engineStaleWithdrawMessage, WITHDRAW_OPEN_POSITIONS_MESSAGE } from "@/lib/withdraw-copy";
+import { marketAssetSlots } from "@/lib/v22/trade-refresh";
 
 // M7: withdraw's own EngineStale(19) surface. Unlike a trade (which can be
 // auto-retried after the next keeper crank via withTransientRetry — see
@@ -53,15 +51,15 @@ import type { TransactionInstruction } from "@solana/web3.js";
 // errorMessages.ts's own extractCustomIndex regex) and override the message
 // without touching the shared error-copy table other flows still rely on.
 const ENGINE_STALE_CODE = 19;
+// QA: the wallet-side wording is hex ("custom program error: 0x13"); the two regexes this used to carry missed it, so a
+// real 19 on a flat account fell through to humanizeError's "close your open position first". parseFailure reads all three.
 function isEngineStaleWithdrawError(msg: string): boolean {
-  const m = msg.match(/Custom\((\d+)\)/) ?? msg.match(/"Custom"\s*:\s*(\d+)/);
-  return m !== null && parseInt(m[1], 10) === ENGINE_STALE_CODE;
+  return parseFailure(msg).code === ENGINE_STALE_CODE;
 }
 // The profit leg of a convert+withdraw lost a race (released/backed amount moved
 // between the quote and landing): same calm line as the pre-sign refusal.
 function isLockActiveError(msg: string): boolean {
-  const m = msg.match(/Custom\((\d+)\)/) ?? msg.match(/"Custom"\s*:\s*(\d+)/);
-  return m !== null && parseInt(m[1], 10) === WRAPPER_ERR.EngineLockActive;
+  return parseFailure(msg).code === WRAPPER_ERR.EngineLockActive;
 }
 // VERIFIED against the deployed engine 2026-07-27: `withdraw_not_atomic`
 // (percolator/src/v16.rs:14412) returns `Stale` (Custom 19) UNCONDITIONALLY
@@ -71,31 +69,45 @@ function isLockActiveError(msg: string): boolean {
 // all four cert epochs matching the header still reverts 19 while a leg is open).
 // The engine simply refuses to release collateral that backs an open position.
 // So the honest message points the user at the real remedy: close first.
-const ENGINE_STALE_WITHDRAW_MESSAGE =
-  "You can't withdraw while you have an open position on this market — the collateral backs your position. Close (or fully reduce) your position first, then withdraw. If you have no open position and still see this, the market may need a maintainer crank.";
-
-// Client-side guard message for the same rule, shown BEFORE sending a doomed tx.
-const OPEN_POSITION_WITHDRAW_MESSAGE =
-  "You have an open position on this market. Close it (fully) before withdrawing — this market can't release collateral while a position is open.";
+// v2.2 QA P-2: one calm line for both the pre-sign guard and an on-chain 19 with an open leg; a 19 on
+// an account known to be flat is real staleness and keeps the catching-up line (lib/withdraw-copy.ts).
+const OPEN_POSITION_WITHDRAW_MESSAGE = WITHDRAW_OPEN_POSITIONS_MESSAGE;
 
 export function useWithdraw(slabAddress: string) {
   const { connection } = useConnectionCompat();
   const wallet = useWalletCompat();
-  const { config: mktConfig, wrapperConfigV17, programId: slabProgramId, params: slabParams, refresh: refreshSlab } = useSlabState();
+  const { config: mktConfig, wrapperConfigV17, programId: slabProgramId, params: slabParams, refresh: refreshSlab, raw } = useSlabState();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** A calm line next to a SUCCESSFUL withdrawal (e.g. profit left in place, W-1). */
+  const [notice, setNotice] = useState<string | null>(null);
   const inflightRef = useRef(false);
 
   const withdraw = useCallback(
-    async (params: { userIdx: number; amount: bigint; portfolioPk?: PublicKey }) => {
+    async (params: {
+      userIdx: number;
+      amount: bigint;
+      portfolioPk?: PublicKey;
+      /** #3301: act on `portfolioPk` or fail. No fallback to another owned account (a close's sweep). */
+      strictPortfolio?: boolean;
+    }) => {
       if (inflightRef.current) throw new Error("Withdrawal already in progress");
       inflightRef.current = true;
       // True once a ConvertReleasedPnl prefix rides in this withdraw (error copy below).
       let usedConvertPrefix = false;
+      // Whether the portfolio had an open leg when read before sending (null = not read): picks the 19 line.
+      let knownOpenLegs: boolean | null = null;
+      // Q-7c / W-1: the amount the withdraw instruction carries (clamped to the post-conversion capital) and the notice.
+      let withdrawAmount = params.amount;
+      let pendingNotice: string | null = null;
+      setNotice(null);
       setLoading(true);
       setError(null);
       try {
-        if (!wallet.publicKey || !mktConfig || !slabProgramId) throw new Error("Wallet not connected or market not loaded");
+        // Two errors, not one: the message resolver maps "Wallet not connected" to "Wallet locked", so the old
+        // combined string told a connected user to unlock their wallet while the market was still loading.
+        if (!wallet.publicKey) throw new Error("Wallet not connected");
+        if (!mktConfig || !slabProgramId) throw new Error("Market not loaded");
         // Defense-in-depth: refuse to build a tx whose programId is not in
         // our deployed allowlist. See SlabProvider.parseSlab for the primary
         // gate; this hook is a second line so unknown-program slabs cannot
@@ -149,7 +161,7 @@ export function useWithdraw(slabAddress: string) {
         if (!isV17) {
           try {
             const slabInfo = await connection.getAccountInfo(slabPk);
-            if (slabInfo?.data) isV17 = isV17Account(new Uint8Array(slabInfo.data));
+            if (slabInfo?.data) isV17 = isWrapperAccount(new Uint8Array(slabInfo.data));
           } catch { /* fall through — layout detection best-effort */ }
         }
         if (isV17) {
@@ -163,7 +175,12 @@ export function useWithdraw(slabAddress: string) {
           const V17_MAGIC_BYTES = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
           let portfolioPk: PublicKey | null = params.portfolioPk ?? null;
           let portfolioData: Buffer | null = null;
-          if (portfolioPk) {
+          if (portfolioPk && params.strictPortfolio) {
+            // Exactly the named account, verified (program, owner, market); any miss is an error the
+            // caller shows. Reaching the scan below could withdraw ANOTHER account's capital.
+            const info = await connection.getAccountInfo(portfolioPk, "confirmed");
+            portfolioData = verifyPortfolioTarget(info, programId, slabPk, wallet.publicKey);
+          } else if (portfolioPk) {
             // Fast path: caller supplied the portfolio pubkey (SlabProvider's
             // userAccount). Fetch, parse, and owner-verify it exactly like the
             // scan-store path below. On ANY failure — fetch throw, missing
@@ -177,7 +194,7 @@ export function useWithdraw(slabAddress: string) {
               const info = await connection.getAccountInfo(portfolioPk, "confirmed");
               if (info) {
                 const candidateData = Buffer.from(info.data);
-                const candidatePf = parsePortfolioV17(candidateData);
+                const candidatePf = parsePortfolio(candidateData);
                 if (candidatePf.owner.equals(wallet.publicKey)) {
                   portfolioData = candidateData;
                 } else {
@@ -205,7 +222,7 @@ export function useWithdraw(slabAddress: string) {
                 const info = await connection.getAccountInfo(storePk, "confirmed");
                 if (info) {
                   const candidateData = Buffer.from(info.data);
-                  const candidatePf = parsePortfolioV17(candidateData);
+                  const candidatePf = parsePortfolio(candidateData);
                   if (candidatePf.owner.equals(wallet.publicKey)) {
                     portfolioPk = storePk;
                     portfolioData = candidateData;
@@ -250,7 +267,7 @@ export function useWithdraw(slabAddress: string) {
               // Defense-in-depth: re-verify the mutable owner actually matches after
               // fetch — memcmp filters are advisory server-side; don't trust blindly.
               try {
-                const candidatePf = parsePortfolioV17(candidateData);
+                const candidatePf = parsePortfolio(candidateData);
                 if (candidatePf.owner.equals(wallet.publicKey)) {
                   portfolioPk = sortedPortfolios[0].pubkey;
                   portfolioData = candidateData;
@@ -264,7 +281,7 @@ export function useWithdraw(slabAddress: string) {
           }
 
           // Over-withdraw pre-check (defense-in-depth). The DepositWithdrawCard UI
-          // already blocks amount > freeMargin, but this guards direct/other
+          // blocks any amount with a position open and above capital when flat; this guards direct/other
           // callers and turns a confusing on-chain failure into a clear message.
           //
           // M7: gate on FREE margin — capital minus the open position's OWN
@@ -284,9 +301,10 @@ export function useWithdraw(slabAddress: string) {
           let convertPrefix: TransactionInstruction[] = [];
           if (portfolioData) {
             try {
-              const portfolio = parsePortfolioV17(portfolioData);
+              const portfolio = parsePortfolio(portfolioData);
               const activeLeg = portfolio.legs.find((l) => l.active);
               hasActiveLegs = activeLeg !== undefined;
+              knownOpenLegs = hasActiveLegs;
               // The engine forbids ANY withdrawal while a position is open
               // (v16.rs:14412, active_bitmap non-empty -> Stale). "Free margin"
               // is not withdrawable here — the whole account is locked until the
@@ -319,10 +337,15 @@ export function useWithdraw(slabAddress: string) {
                   : portfolio.capital; // fail closed: no entry price could be established
               const freeMargin = portfolio.capital > lockedMargin ? portfolio.capital - lockedMargin : 0n;
               if (!hasActiveLegs && params.amount > portfolio.capital) {
-                convertPrefix = await convertPrefixForWithdraw(
-                  { programId, owner: wallet.publicKey, market: slabPk, portfolio: portfolioPk, portfolioData: new Uint8Array(portfolioData), amount: params.amount },
+                // v2.2 QA Q-7c / W-1 (lib/convert-released-pnl planConvertWithdraw): the crank observes every asset, the
+                // withdraw takes the capital the simulation shows after tag 28 (never the pnl face), same sequence.
+                const plan = await planConvertWithdraw(
+                  { programId, owner: wallet.publicKey, market: slabPk, portfolio: portfolioPk, portfolioData: new Uint8Array(portfolioData), amount: params.amount, assetSlots: raw ? marketAssetSlots(raw) ?? 1 : 1 },
                   connectionQuoteDeps(connection, wallet.publicKey),
                 );
+                convertPrefix = plan.prefix;
+                withdrawAmount = plan.amount;
+                pendingNotice = plan.notice;
               } else if (params.amount > freeMargin) {
                 throw new UserFacingError(
                   hasActiveLegs
@@ -369,7 +392,7 @@ export function useWithdraw(slabAddress: string) {
             data: encodeWithdrawCollateral({
               portfolioId: wdId.portfolioId,
               expectedSequence: wdId.matcherSequence,
-              amount: params.amount.toString(),
+              amount: withdrawAmount.toString(),
             }),
           }));
         } else {
@@ -411,12 +434,13 @@ export function useWithdraw(slabAddress: string) {
           connection, wallet, instructions, computeUnits: usedConvertPrefix ? 600_000 : 300_000,
           selfHeal: { programId, market: slabPk },
         });
+        if (pendingNotice) setNotice(pendingNotice);
         // Force immediate slab re-read so balance updates without waiting for the next poll.
         refreshSlab?.();
         setTimeout(() => refreshSlab?.(), 2000);
         return sig;
       } catch (e) {
-        const rawMsg = e instanceof Error ? e.message : String(e);
+        const rawMsg = errorText(e);
         // M7: don't let a withdraw-specific EngineStale(19) read as
         // transient/auto-fixable — see ENGINE_STALE_WITHDRAW_MESSAGE above.
         setError(userFacingMessage(e) ??
@@ -425,7 +449,7 @@ export function useWithdraw(slabAddress: string) {
               : usedConvertPrefix && isLockActiveError(rawMsg)
                 ? settlingProfitMessage(WRAPPER_ERR.EngineLockActive)
                 : isEngineStaleWithdrawError(rawMsg)
-                  ? ENGINE_STALE_WITHDRAW_MESSAGE
+                  ? engineStaleWithdrawMessage(knownOpenLegs)
                   : humanizeError(rawMsg)),
         );
         throw e;
@@ -437,5 +461,5 @@ export function useWithdraw(slabAddress: string) {
     [connection, wallet, mktConfig, slabAddress, slabProgramId, slabParams, wrapperConfigV17, refreshSlab]
   );
 
-  return { withdraw, loading, error };
+  return { withdraw, loading, error, notice };
 }

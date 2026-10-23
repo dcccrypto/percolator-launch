@@ -12,6 +12,8 @@ import { useLpCostBasis } from '@/hooks/useLpCostBasis';
 import { useWalletCompat } from '@/hooks/useWalletCompat';
 import { computeLpEarnedForVault } from '@/lib/lp-earned';
 import { isDevnetV21Enabled } from '@/lib/v21/flag';
+import { isDevnetV22Enabled } from '@/lib/v22/flag';
+import { PublicKey } from '@solana/web3.js';
 import { computeEntryVsExit } from '@/lib/v21/entry-exit';
 import { ResolvedExitPanel } from '@/components/limits/ResolvedExitPanel';
 import { earnExitProps } from '@/lib/limits/resolved-finish';
@@ -140,14 +142,17 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
     lastDrawSummary,
     readError: lpVaultReadError,
   } = useInsuranceLP();
+  const earnWallet = useWalletCompat();
+  const walletKey = earnWallet.publicKey?.toBase58() ?? 'none';
   // UX WP-10 (UI-2): until the first read lands, figures show "—" (data-state="loading").
   const [loadedOnce, setLoadedOnce] = useState(false);
+  // N13: a new wallet's position is unread until its own first load.
+  useEffect(() => setLoadedOnce(false), [walletKey]);
   // A failed read is not a load: its zeros stay "—".
   useEffect(() => {
     if (!lpVaultLoading && !lpVaultReadError) setLoadedOnce(true);
   }, [lpVaultLoading, lpVaultReadError]);
   const firstLoad = !loadedOnce;
-  const earnWallet = useWalletCompat();
   const earnLimits = useMarketLimits(slabAddress);
   // GH#2882: a depleted counterparty pauses trading; Earn deposits on an unbound vault can't reopen it.
   const marketHealth = useSingleMarketHealth(slabAddress);
@@ -169,7 +174,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
 
   // BUG-5 FIX: resolve actual collateral mint from on-chain slab data.
   // Previously hardcoded to USDC — wrong for coin-margined markets.
-  const { config: slabConfig, raw: slabRaw } = useSlabState();
+  const { config: slabConfig, raw: slabRaw, programId: slabProgramId } = useSlabState();
   const collateralTokenMeta = useTokenMeta(slabConfig?.collateralMint ?? null);
   const collateralSymbol = collateralTokenMeta?.symbol ?? 'Token';
   const collateralDecimals = collateralTokenMeta?.decimals ?? 6;
@@ -258,7 +263,6 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
   // TVL = the LP Vault Registry's own backing (shares + distributed fees), NOT the
   // percolator-stake pool (poolState.vaultBalance, wrong account — see hook comment above).
   const vaultUsd = Number(lpVaultState.vaultTotalAtoms) / collateralScale;
-  const insuranceFund = marketInfo?.insuranceFund ?? 0;
 
   if (marketNotFound) {
     return (
@@ -302,7 +306,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
               ⚠ Couldn&apos;t refresh market stats
             </p>
             <p className="text-[11px] text-[var(--text-secondary)] mt-1">
-              {earnStatsError} — volume and insurance figures below may be stale.{!lpVaultReadError && ' Vault balance and deposit/withdraw are unaffected.'}
+              Volume and insurance figures below may be stale.{!lpVaultReadError && ' Vault balance and deposit/withdraw are unaffected.'}
             </p>
           </div>
         )}
@@ -386,7 +390,8 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
             </StatCell>
             <StatCell label="Insurance" loading={loading}>
               <span className="text-sm font-mono tabular-nums text-[var(--text)]">
-                ${formatCompact(insuranceFund / collDivisor)}
+                {/* Unknown until marketInfo resolves, like the cells beside it: not $0. */}
+                {marketInfo && marketInfo.insuranceFund != null ? `$${formatCompact(marketInfo.insuranceFund / collDivisor)}` : "—"}
               </span>
             </StatCell>
             <StatCell label="Max Leverage" loading={loading}>
@@ -424,7 +429,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
               lpSupply={lpVaultState.splitPot?.totalShares ?? lpVaultState.lpSupply}
               vaultBalance={lpVaultState.vaultTotalAtoms}
               decimals={collateralDecimals}
-              lpDecimals={lpVaultState.lpDecimals}
+              lpDecimals={isDevnetV22Enabled() ? lpVaultState.lpDecimals : undefined}
               collateralSymbol={collateralSymbol}
               redemptionRateE6={lpVaultState.vaultSharePriceE6}
               loading={loading || firstLoad}
@@ -474,9 +479,10 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
           {/* P3 / F-4: after Resolve, finish the market so Earn can pay out (nothing on a live market). */}
           <ResolvedExitPanel slab={slabAddress} walletConnected={!!earnWallet.publicKey} onDone={refreshState} {...earnExitProps(lpVaultState, collateralDecimals, collateralSymbol)} />
 
-          {/* Deposit / Withdraw */}
+          {/* Deposit / Withdraw. Keyed by wallet (N13): its form and auto-finish arming are per wallet. */}
           <ScrollReveal>
             <DepositWithdrawPanel
+              key={walletKey}
               userBalance={lpVaultState.userCollateralBalance}
               userLpBalance={lpVaultState.userLpBalance}
               vaultBalance={lpVaultState.vaultTotalAtoms}
@@ -492,6 +498,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
               cooldownRemainingSlots={lpVaultState.cooldownRemainingSlots}
               onDeposit={handleDeposit}
               onWithdraw={handleWithdraw}
+              exitV22={isDevnetV22Enabled() ? { market: slabAddress ? new PublicKey(slabAddress) : null, programId: slabProgramId ?? null, collateralMint: slabConfig?.collateralMint ?? null, sourceDomain: lpVaultState.lpVaultDomain } : undefined}
               p3Bound={earnLimits.vaultLp?.bound === true}
               lpDepleted={marketHealth?.lpDepleted === true}
               drawSummary={lastDrawSummary}

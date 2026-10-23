@@ -9,6 +9,7 @@
  *
  * Reads only while the market is RESOLVED; on a live market the hook is inert (one market read).
  */
+import { errorText } from "@/lib/error-text";
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { PublicKey, type TransactionInstruction } from '@solana/web3.js';
 import {
@@ -28,7 +29,7 @@ import { loadResolvedExitSnapshot, type ResolvedExitSnapshot } from '@/lib/limit
 import { viewerOwnedKeys, viewerReceiptStatus, type ViewerReceipt } from '@/lib/limits/resolved-topup';
 import { exitStepIxs, type ExitIxContext } from '@/lib/limits/resolved-exit-ixs';
 import { runResolvedExit, type ResolvedExitRun } from '@/lib/limits/resolved-exit-run';
-import { buildRequestRedeemIx } from '@/lib/limits/earn-ixs';
+import { buildRequestRedeemIx, earnRequestFloorAtoms } from '@/lib/limits/earn-ixs';
 import {
   buildFinishList,
   FINISH_MAX_TXS,
@@ -74,6 +75,8 @@ export interface ResolvedExitState {
 /** The Earn request (76) the user's "Finish now and request my withdrawal" appends. */
 export interface FinishEarnRequest {
   shares: bigint;
+  /** AUD-S1-18: what 77 would pay for `shares` today (earnRequestQuoteAtoms); the request's floor sits under it. */
+  quoteAtoms?: bigint | null;
 }
 
 export function useResolvedExit(slabAddress: string | null) {
@@ -124,7 +127,7 @@ export function useResolvedExit(slabAddress: string | null) {
         error: null,
       }));
     } catch (e) {
-      if (alive.current) setState((p) => ({ ...p, error: e instanceof Error ? e.message : String(e) }));
+      if (alive.current) setState((p) => ({ ...p, error: errorText(e) }));
     }
   }, [snapshot, wallet.publicKey]);
 
@@ -164,7 +167,7 @@ export function useResolvedExit(slabAddress: string | null) {
       if (alive.current) setState((p) => ({ ...p, running: false, lastRun: result, plan: result.final }));
       return result;
     } catch (e) {
-      if (alive.current) setState((p) => ({ ...p, running: false, error: e instanceof Error ? e.message : String(e) }));
+      if (alive.current) setState((p) => ({ ...p, running: false, error: errorText(e) }));
       throw e;
     }
   }, [connection, wallet, slabAddress, snapshot]);
@@ -222,6 +225,7 @@ export function useResolvedExit(slabAddress: string | null) {
             escrow: deriveLpEscrow(prog, market)[0],
             redemption: deriveLpRedemption(prog, registry, payer)[0],
             shares: earn.shares,
+            minPayoutAtoms: earnRequestFloorAtoms(earn.quoteAtoms),
           });
         }
         if (items.length === 0) throw new Error('nothing to finish');
@@ -239,7 +243,7 @@ export function useResolvedExit(slabAddress: string | null) {
         void refresh();
         return result;
       } catch (e) {
-        if (alive.current) setState((p) => ({ ...p, running: false, error: e instanceof Error ? e.message : String(e) }));
+        if (alive.current) setState((p) => ({ ...p, running: false, error: errorText(e) }));
         throw e;
       }
     },

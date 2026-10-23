@@ -36,6 +36,7 @@ import { formatTokenAmount } from "@/lib/format";
 import { LimitsNotice, LimitsRow } from "./LimitsRow";
 import { fmtQ } from "./OrderTicketLimits";
 import { CREATOR_STAKE_COPY } from "@/lib/wizard-copy";
+import { useDecimalInput } from "@/hooks/useDecimalInput";
 
 export const WizardTranchePanel: FC<{
   juniorUnits: number;
@@ -134,6 +135,7 @@ export const JuniorTrancheActionsView: FC<{
   resolved?: { surplusAtoms: bigint | null; waitingUntil: string | null; onRelease: (atoms: bigint) => void } | null;
 }> = ({ stake, decimals, collateralSymbol, busy, error, refusedReason = null, onDeposit, onWithdraw, resolved }) => {
   const [raw, setRaw] = useState("");
+  const rawField = useDecimalInput(raw, setRaw);
   const K = CREATOR_STAKE_PANEL_COPY;
   const fmt = (a: bigint) => `${formatTokenAmount(a, decimals)} ${collateralSymbol}`;
   let typed = 0n;
@@ -205,8 +207,7 @@ export const JuniorTrancheActionsView: FC<{
         <input
           data-testid="limits-junior-amount-input"
           inputMode="decimal"
-          value={raw}
-          onChange={(e) => setRaw(e.target.value)}
+          {...rawField}
           placeholder={`Amount (${collateralSymbol})`}
           className="min-w-0 flex-1 border border-[var(--border)] bg-[var(--bg-elevated)] px-2 py-1 font-mono text-[11px] text-[var(--text)]"
         />

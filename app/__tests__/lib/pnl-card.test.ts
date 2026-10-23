@@ -131,8 +131,11 @@ describe("tone, tweet and pool cap (credit/2907 corrections)", () => {
     expect(isPnlPoolCapped(-10n, 5n)).toBe(false);
     expect(isPnlPoolCapped(10n, 0n)).toBe(false);
     expect(isPnlPoolCapped(10n, null)).toBe(false);
-    expect(poolPayableCapacity(null, 7n)).toBe(7n);
+    // S6: an unknown vault (every v17/v18 market) is an unknown capacity, not "insurance only".
+    expect(poolPayableCapacity(null, 7n)).toBeNull();
+    expect(poolPayableCapacity(undefined, 7n)).toBeNull();
     expect(poolPayableCapacity(3n, undefined)).toBe(3n);
+    expect(poolPayableCapacity(3n, 4n)).toBe(7n);
   });
   it("a capped PnL shows the payable figure; ROE is on that figure; paper PnL is kept", () => {
     // Paper profit above $1 ($0.40 -> $0.44 on base); the pool can pay $1.

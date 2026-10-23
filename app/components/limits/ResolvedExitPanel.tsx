@@ -123,7 +123,9 @@ export const ResolvedExitPanel: FC<{
   earnAmount?: string | null;
   /** Shares the viewer can request now (0 when none or a request is already pending). */
   requestableShares?: bigint;
-}> = ({ slab, walletConnected, onDone, earnAmount = null, requestableShares = 0n }) => {
+  /** AUD-S1-18: what 77 would pay for `requestableShares` today (the request's floor sits under it). */
+  requestQuoteAtoms?: bigint | null;
+}> = ({ slab, walletConnected, onDone, earnAmount = null, requestableShares = 0n, requestQuoteAtoms = null }) => {
   const x = useResolvedExit(slab);
   return (
     <ResolvedExitPanelView
@@ -139,7 +141,7 @@ export const ResolvedExitPanel: FC<{
       canRequest={requestableShares > 0n}
       onFinish={(withRequest) => {
         void x
-          .finish(withRequest ? { shares: requestableShares } : undefined)
+          .finish(withRequest ? { shares: requestableShares, quoteAtoms: requestQuoteAtoms } : undefined)
           .then(() => onDone?.())
           .catch(() => undefined);
       }}

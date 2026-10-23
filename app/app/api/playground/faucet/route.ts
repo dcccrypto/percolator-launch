@@ -159,7 +159,7 @@ export async function POST(req: NextRequest) {
     // SEC: per-IP rate limit. The per-wallet gate below is trivially bypassed
     // with fresh keypairs, and every mint/airdrop spends the shared
     // DEVNET_MINT_AUTHORITY_KEYPAIR — bound the drain per IP (shared across the
-    // fund endpoints), mirroring /api/devnet-mirror-mint.
+    // fund endpoints).
     const fundRl = await checkFundRateLimit(getClientIp(req));
     if (!fundRl.allowed) {
       return NextResponse.json(

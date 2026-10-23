@@ -14,6 +14,11 @@ const open = { capital: 5n, releasedPnl: 0n, openLegs: 1, closeOnly: false };
 
 describe("flag", () => {
   it("off by default; needs BOTH flags; nothing renders when off", () => {
+    // "By default" = both environment variables UNSET (the run may set NEXT_PUBLIC_DEVNET_V21 in V22 + V21 mode): unset, restore after.
+    const prev = { v21: process.env.NEXT_PUBLIC_DEVNET_V21, move: process.env.NEXT_PUBLIC_V21_MOVE };
+    delete process.env.NEXT_PUBLIC_DEVNET_V21;
+    delete process.env.NEXT_PUBLIC_V21_MOVE;
+    try {
     __setDevnetV21ForTest(null);
     __setMoveFlowForTest(null);
     expect(isMoveFlowEnabled()).toBe(false);
@@ -23,6 +28,10 @@ describe("flag", () => {
     expect(isMoveFlowEnabled()).toBe(true);
     __setMoveFlowForTest(null);
     __setDevnetV21ForTest(null);
+    } finally {
+      if (prev.v21 === undefined) delete process.env.NEXT_PUBLIC_DEVNET_V21; else process.env.NEXT_PUBLIC_DEVNET_V21 = prev.v21;
+      if (prev.move === undefined) delete process.env.NEXT_PUBLIC_V21_MOVE; else process.env.NEXT_PUBLIC_V21_MOVE = prev.move;
+    }
   });
   it("env path: NEXT_PUBLIC_V21_MOVE alone (v2.1 flag off) enables nothing", () => {
     const prev = process.env.NEXT_PUBLIC_V21_MOVE;

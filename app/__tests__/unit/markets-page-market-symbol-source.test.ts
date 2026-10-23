@@ -21,6 +21,11 @@ describe("/markets market identity display", () => {
     expect(source).toContain("displaySymbol ? `${baseSymbol(displaySymbol)}/USD`");
   });
 
+  it("labels withdraw-only markets in both row layouts, and takes the placeholder rule from symbol-utils", () => {
+    expect(source.match(/isWithdrawOnlyMarket\(m\.supabase\) && <WithdrawOnlyBadge \/>/g)?.length).toBe(2);
+    expect(source).not.toContain("function isPlaceholderMarketSymbol");
+  });
+
   it("does not prefer collateral token metadata for market identity", () => {
     expect(source).not.toContain("const onChainSym = tokenMetaMap.get(m.mintAddress)?.symbol");
     expect(source).not.toContain("const onChainName = tokenMetaMap.get(m.mintAddress)?.name");

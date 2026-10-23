@@ -5,6 +5,7 @@
  * REAL keeper co-sign route validates and signs it with a real keeper key. Only the network and the
  * wallet are faked. Every rule has a negative control.
  */
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { writeFileSync } from "node:fs";
@@ -229,6 +230,8 @@ async function launch(o: { singleTx: boolean; params?: CreateMarketParams; deps?
 let batches: Transaction[][] = [];
 
 beforeEach(() => {
+  // This file pins the v2.1 single-transaction launch; the v2.2 bundle (tag 74 with account [6], tag 122) is pinned in useCreateMarket.v22-launch.test.ts.
+  __setDevnetV22ForTest(false);
   vi.clearAllMocks();
   vi.spyOn(Keypair, "generate").mockImplementation(() => Keypair.fromSeed(seed(100 + generated++)));
   vi.spyOn(globalThis, "fetch").mockImplementation(routeFetch as typeof fetch);
@@ -438,6 +441,8 @@ describe("failure paths", () => {
     expect(walletPrompts).toBe(1);
     expect(S.signAllCompat).not.toHaveBeenCalled();
     expect(stateBox.error).toMatch(/declined/);
+    // #3601 follow-up: nothing was created, so the wizard may offer a fresh relaunch.
+    expect(stateBox.outcomeUnknown).toBe(false);
   });
 
   it("keeper route refusal => fallback to the batch before any wallet prompt", async () => {
@@ -519,6 +524,9 @@ describe("unknown send outcome => never a blind re-launch", () => {
     expect(outcome).toEqual({ status: "aborted" });
     expect(S.signAllCompat).not.toHaveBeenCalled();
     expect(stateBox.error).toMatch(/Do not launch again/);
+    // #3601 follow-up: it may have landed in full, so the wizard must not offer Continue or a fresh relaunch
+    // (a fresh launch makes a new slab keypair and could create a second market).
+    expect(stateBox.outcomeUnknown).toBe(true);
   });
 
   it("pending until the blockhash expires, still not found, NO slab => exactly one fallback", async () => {

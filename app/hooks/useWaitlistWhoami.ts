@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePrivy, useIdentityToken } from "@privy-io/react-auth";
+import { usePrivyBridge } from "@/hooks/usePrivyBridge";
 import { usePrivyAvailable } from "@/hooks/usePrivySafe";
 
 export type WhoamiState =
@@ -32,11 +32,8 @@ export type WhoamiState =
  */
 export function useWaitlistWhoami(): WhoamiState {
   const privyAvailable = usePrivyAvailable();
-  const { ready, authenticated, getAccessToken } = usePrivy();
-  // useIdentityToken only works inside PrivyProvider. The hook itself
-  // is null-safe at runtime, but TypeScript wants us to call it
-  // unconditionally — we guard the *use* of the result instead.
-  const { identityToken } = useIdentityToken();
+  // Privy's values come through the bridge: "not ready" until Privy is up, and when it is absent.
+  const { ready, authenticated, getAccessToken, identityToken } = usePrivyBridge();
   const [state, setState] = useState<WhoamiState>({ status: "idle" });
 
   useEffect(() => {

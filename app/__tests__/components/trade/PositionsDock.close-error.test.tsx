@@ -59,6 +59,9 @@ vi.mock("@/components/trade/WarmupProgress", () => ({ WarmupProgress: () => null
 vi.mock("@/components/trade/PositionNftMenu", () => ({ PositionNftMenu: () => null, ClosedPositionNftNotice: () => null, NFT_MENU_COPY: { badge: "NFT", closeWrapped: "Unwrap to close this position" } }));
 
 import { PositionsDock } from "@/components/trade/PositionsDock";
+import { seedLotExp0 } from "../../helpers/v22-fixtures";
+
+seedLotExp0();
 
 beforeEach(() => {
   localStorage.clear();

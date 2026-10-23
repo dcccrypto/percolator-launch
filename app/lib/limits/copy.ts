@@ -5,6 +5,22 @@
  */
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { P2_ERR, P3_ERR } from "./constants";
+import { PRICE_CATCHING_UP } from "./price-stall";
+
+/** C1: EngineStale (19) on a trade or close: the market moved on between the check and the send. Not the withdraw advice. */
+export const TRADE_PRICES_MOVED_MESSAGE = "Prices moved on while sending; nothing was sent. Try again.";
+
+/** C4: an RPC rate limit (HTTP 429). The transaction was never accepted. */
+export const NETWORK_BUSY_MESSAGE = "The network is busy; nothing was sent. Try again in a moment.";
+
+
+/**
+ * A trade (open, add, reduce, close, flip) confirmed on chain but the position change could not
+ * be measured (read failed, timed out, or contradicted the order). True for any order, claims no
+ * size or direction. ONE constant: the close toast (useClosePosition) and the order ticket's
+ * result line (OrderTicket) both say it.
+ */
+export const ORDER_CONFIRMED_UNMEASURED = "Your order went through. Your position is updating.";
 
 export const COPY = {
   bandTooltip: "Fills must execute within this distance of the oracle mark. Outside it the trade is refused.",
@@ -97,14 +113,19 @@ export const COPY = {
   adlExitTrapped:
     "The other side of this market has fully closed, and your position can settle once the market catches up. Nothing was sent. Try again in a moment.",
   closePartial: (filled: string, requested: string) => `Partially closed: ${filled} of ${requested}. The rest of your position is still open.`,
+  /** useClosePosition success toast: a full close, and a partial close the user asked for (not a clipped fill). */
+  closeDone: "Position closed.",
+  /** The close tx confirmed but the resulting position could not be measured: no claim about what closed. */
+  closeConfirmedUnmeasured: ORDER_CONFIRMED_UNMEASURED,
+  closeDonePart: (closed: string, of: string) => `Closed ${closed} of ${of}. The rest of your position is still open.`,
   /** UX WP-8 (audit §3.9): keeper-first, a time not a slot, "Finish now" as a secondary link. */
   resolvedExit: {
     title: "Market settled",
-    status: "This market has settled. Payouts are being finalised automatically.",
+    status: "This market has settled. Payouts open once its last settlement steps have run. They run on their own when the network's automation is active; you can also run them yourself below.",
     /** P3 ordering: the viewer's resolved close ran before the vault LP settled (receipt partial). */
     partialReceipt: "Part of your payout is on its way — it completes automatically once the market finishes settling.",
     eta: (amount: string | null, at: string, rel: string) =>
-      amount ? `Your ${amount} will be ready to withdraw by about ${at} (${rel}).` : `Earn withdrawals open by about ${at} (${rel}).`,
+      amount ? `Your ${amount} can be withdrawn from about ${at} (${rel}) if the automation runs the steps; sooner if you finish them yourself.` : `Earn withdrawals open from about ${at} (${rel}) if the automation runs the steps; sooner if you finish them yourself.`,
     ready: "Everything on this market is settled. Earn withdrawals pay out now: use Withdraw below.",
     finishNow: (n: number, sol: string) =>
       `Anyone can speed this up. Finish the remaining ${n} step${n === 1 ? "" : "s"} now (about ${sol} SOL in network fees).`,
@@ -225,20 +246,24 @@ export function p3ErrorCopyByCode(): Record<number, string> {
 }
 
 /**
- * The market has no funds left to take the other side of new trades (LP capital 0). Where the funds
+ * The market can't take the other side of new trades (LP capital below its IM floor). Where the funds
  * come back from depends on the market: a P3 vault-LP market is funded from its Earn vault, any other
  * market only by a deposit into its own counterparty, which Earn and staking deposits never reach.
  */
 export function TICKET_FUNDS_LINE(vault: boolean): string {
   return vault
-    ? "The market has no funds left to take the other side of new trades. Opening resumes when the Earn vault has funds to back them."
-    : "The market has no funds left to take the other side of new trades. Opening resumes once it is funded again; deposits to Earn or staking don't reopen it.";
+    ? "The market doesn't have enough funds to take the other side of new trades. Opening resumes when the Earn vault has funds to back them."
+    : "The market doesn't have enough funds to take the other side of new trades. Opening resumes once it is funded again; deposits to Earn or staking don't reopen it.";
 }
 
 /**
  * UX WP-3 (audit §3.3 / §3.4 / §4.2): the order ticket's one status slot, its state-labelled
  * button and its result lines. Plain words only (§5.1): no LP, crank, engine, keeper or codes.
  */
+function atPrice(price: string | null): string {
+  return price === null ? "" : ` at ${price}`;
+}
+
 export const TICKET_COPY = {
   settled: { title: "Market settled", body: "This market has settled. Close any position and withdraw; there's nothing else to do.", button: "Market settled" },
   retired: { title: "Market closed", body: "This market no longer takes new positions. Close any position and withdraw.", button: "Market closed" },
@@ -248,8 +273,9 @@ export const TICKET_COPY = {
     body: "Close-only for now after a liquidation. Closing works normally. New positions reopen once the positions on one side have closed, which depends on those traders and can take a while.",
     button: "Close-only for now",
   },
-  catchingUp: { title: "Catching up", body: "Prices are catching up. Trading resumes once the market has caught up.", button: "Waiting for prices…" },
-  waitingPrice: { title: "Waiting for price", body: "Waiting for a fresh price. This usually takes a few seconds.", button: "Waiting for price…" },
+  // C2 (feature check 2026-10-18): both "behind" rows and the header status line read the ONE catching-up copy (lib/limits/price-stall.ts).
+  catchingUp: { ...PRICE_CATCHING_UP },
+  waitingPrice: { ...PRICE_CATCHING_UP },
   sidePaused: {
     title: (sides: string) => `New ${sides} paused`,
     body: (sides: string, side: string, others: string) =>
@@ -257,7 +283,7 @@ export const TICKET_COPY = {
     button: (sides: string) => `New ${sides} paused`,
   },
   bothPaused: { title: "Opening paused", body: "New positions are paused right now. Closing works normally.", button: "Opening paused" },
-  /** No funds left to take the other side of new trades. What refills it depends on the market type. */
+  /** Not enough funds to take the other side of new trades. What refills it depends on the market type. */
   lpDepleted: {
     title: "Opening paused",
     body: (vault: boolean) => `${TICKET_FUNDS_LINE(vault)} Closing works normally.`,
@@ -275,6 +301,8 @@ export const TICKET_COPY = {
     button: "Reduce size",
   },
   depositToTrade: (amount: string, side: string) => `Deposit ${amount} & ${side}`,
+  /** The order button while there is no size to trade (it is disabled until there is). */
+  enterSize: "Enter a size",
   stepDownInline: (x: string, sides: string, y: string, others: string) =>
     `Up to ${x}× for new ${sides} right now (busy side). ${others}: up to ${y}×.`,
   clamped: (max: string, sym: string) => `Reduced to the most available now: ${max} ${sym}`,
@@ -285,11 +313,36 @@ export const TICKET_COPY = {
   },
   confirmInWallet: "Confirm in wallet…",
   waitingLatest: "Waiting for the latest price…",
+  /** GH#2804 follow-up: a trade whose confirmation timed out is watched until it resolves. */
+  pending: {
+    button: "Confirming…",
+    watching: { title: "Still confirming", body: "Checking the network…" },
+    // The fill isn't measured on this path, and a split order's later transactions were never
+    // sent, so never state a size or a full fill.
+    landed: { title: "Confirmed", body: "It went through, possibly only in part. Check your position before trading again." },
+    dropped: { title: "Order not placed", body: "This trade didn't go through. Nothing changed. You can try again." },
+    undetermined: { title: "Couldn't confirm yet", body: "Check your position or the explorer before trying again." },
+  },
   sidePausedSublabel: "Paused",
+  /** A side paused because it is FULL (no room left for any add the ticket can place). */
+  sidePausedFullSublabel: "Paused (full)",
   result: {
     full: (size: string, sym: string, side: string, price: string) => `Opened ${size} ${sym} ${side} at ${price}`,
+    /** Every line below is worded from the MEASURED position change (lib/order-result.ts), never the request. `price` null = omit it (partial fills). */
+    added: (size: string, sym: string, held: string, price: string | null) => `Added ${size} ${sym} to your ${held}${atPrice(price)}`,
+    reduced: (size: string, sym: string, held: string, price: string | null) => `Reduced your ${held} by ${size} ${sym}${atPrice(price)}`,
+    closed: (size: string, sym: string, held: string, price: string | null) => `Closed your ${size} ${sym} ${held}${atPrice(price)}`,
+    flipped: (closed: string, opened: string, sym: string, held: string, side: string, price: string | null) =>
+      `Closed your ${closed} ${sym} ${held} and opened ${opened} ${sym} ${side}${atPrice(price)}`,
+    /** Appended to a reduce / close / flip / add line when less than the requested size filled. */
+    partialTail: "The market had room for part of your order.",
+    /** The change could not be measured: the same wording as a close's (ORDER_CONFIRMED_UNMEASURED). */
+    unmeasured: ORDER_CONFIRMED_UNMEASURED,
     partial: (filled: string, requested: string, sym: string) =>
       `Opened ${filled} of ${requested} ${sym}. The market had room for part of your order.`,
+    /** The landed transaction's FILL event says the order was clipped to the market's room (v2.2 CLIPPED flag): filled vs requested. */
+    clipped: (filled: string, requested: string, sym: string, lots?: { filled: string; requested: string }) =>
+      `Partially filled: ${filled} of ${requested} ${sym}${lots ? ` (${lots.filled} of ${lots.requested} lots)` : ""}. The market had room for part of your order.`,
     zero: "Not filled: the market had no room for this trade when it landed. Nothing changed and no fee was charged.",
     tryChip: (size: string) => `Try ${size}`,
   },
@@ -299,4 +352,14 @@ export const TICKET_COPY = {
     cappedAction: (max: string) => `Close ${max}`,
     halted: "Closing this side is paused for a moment while the market rebalances. It reopens as other positions close.",
   },
+} as const;
+
+/**
+ * #3459: an order refused before signing because the site's live price and the market's trading
+ * price disagree by more than the guard allows (lib/slippage.ts FeedDisagreementError). Only legacy
+ * markets still build a limit from the live price; v17/v18 opens use the trading price itself.
+ */
+export const PRICES_OUT_OF_SYNC_COPY = {
+  title: "Prices out of sync",
+  body: "This market's live price and its trading price don't match right now, so the order wasn't placed. Nothing was sent. Try again in a moment.",
 } as const;

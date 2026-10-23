@@ -54,7 +54,7 @@ const execute77 = (m: Market) =>
     siblingLedger: m.siblingLedger, domain: 0, plan: { ok: true, tail: null, prependHarvest: false },
   });
 const request76 = (m: Market) =>
-  buildRequestRedeemIx({ programId, redeemer: wallet, registry: m.registry, lpMint: m.lpMint, redeemerLpAta: m.redeemerLpAta, escrow: m.escrow, redemption: m.redemption, shares: 123_456_789n });
+  buildRequestRedeemIx({ programId, redeemer: wallet, registry: m.registry, lpMint: m.lpMint, redeemerLpAta: m.redeemerLpAta, escrow: m.escrow, redemption: m.redemption, shares: 123_456_789n, minPayoutAtoms: 111_111_110n });
 const rebalance91 = (m: Market) =>
   buildRebalanceBackingIx({ programId, cranker: wallet, market: m.market, registry: m.registry, fromLedger: m.siblingLedger, toLedger: m.ledger, fromDomain: 1, toDomain: 0, amount: 1_000_000n });
 const withdraw = (m: Market) =>

@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { stripPublicRpcKeys } from "./lib/public-env-guard";
+
+// S3-C10: never inline an RPC API key into the browser bundle (see lib/public-env-guard.ts).
+// Runs before the config object below is read, i.e. before any NEXT_PUBLIC_* is inlined.
+stripPublicRpcKeys();
 // withSentryConfig disabled — its build-time instrumentation is not Turbopack-
 // compatible (Next 16 builds with Turbopack) and injects Node-only code into the
 // Edge middleware bundle, which Vercel rejects at deploy ("referencing unsupported
@@ -60,6 +65,9 @@ const TV_FRAME_CSP = [
 const nextConfig = {
   env: {
     NEXT_PUBLIC_TV_LIBRARY_VERSION: tvLibraryVersion(),
+    // v2.2 preview build tag (components/v22/BuildTag.tsx): public commit + deployment ids only, no secrets.
+    NEXT_PUBLIC_BUILD_SHA: (process.env.VERCEL_GIT_COMMIT_SHA ?? "").slice(0, 9),
+    NEXT_PUBLIC_BUILD_DEPLOYMENT: process.env.VERCEL_DEPLOYMENT_ID ?? "",
   },
   // Playground is a fast-moving devnet contributor app: don't let a lint warning block
   // `next build` (Vercel already builds this way).
@@ -147,6 +155,14 @@ const nextConfig = {
         source: "/charting_library/bundles/:path*",
         headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
       },
+      // Unhashed public/ assets (art, icons, audio, PnL card art): next start / Vercel serve them
+      // with max-age=0, so every page view revalidated each one (a 304 round trip apiece). An hour
+      // of browser cache plus a day of stale-while-revalidate; a replaced file shows within the hour.
+      // Not token-metadata/ (read by wallets/explorers) or tv-theme/ (own rule below).
+      ...["/landing/:path*", "/images/:path*", "/icons/:path*", "/audio/:path*", "/pnl-cards/:path*"].map((source) => ({
+        source,
+        headers: [{ key: "Cache-Control", value: "public, max-age=3600, stale-while-revalidate=86400" }],
+      })),
       {
         source: "/tv-theme/:path*",
         headers: [{ key: "Cache-Control", value: "public, max-age=300, must-revalidate" }],

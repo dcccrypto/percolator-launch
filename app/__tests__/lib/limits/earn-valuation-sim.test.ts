@@ -6,20 +6,24 @@
  * deposit button stays enabled on a stale valuation (85 is repaired inside the deposit tx).
  */
 import { describe, expect, it, vi } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import * as C from "@/lib/limits/constants";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
 import { __clearValuationCache, lpValueFromAccounts, simulateVaultLpValue, VALUATION_CACHE_MS } from "@/lib/limits/earn-valuation-sim";
 import { earnDepositPause } from "@/lib/limits/earn";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { afterLegsShift, blankPortfolio, v22MarketBytes } from "../../helpers/v22-fixtures";
 
+
+// Flag on: the captured v2.2 (VERSION 19) one-slot market (helpers/v22-fixtures.ts). Flag off: the v2.1 CdN8r7FB bytes this test always used.
 const FX = JSON.parse(readFileSync(join(process.cwd(), "__tests__/fixtures/CdN8r7FB.freshness.market.json"), "utf8")) as { dataBase64: string };
-const market = () => new Uint8Array(Buffer.from(FX.dataBase64, "base64"));
+const market = () => (isDevnetV22Enabled() ? v22MarketBytes() : new Uint8Array(Buffer.from(FX.dataBase64, "base64")));
 
 /** A vault-LP portfolio image: capital, an open leg, and a certificate at the given epochs. */
 function portfolio(o: { certEquity: bigint; epochs: { oracle: bigint; funding: bigint; risk: bigint; assetSet: bigint }; stale?: number; valid?: number; bitmap?: bigint }): Uint8Array {
-  const d = new Uint8Array(C.PF_B_STALE_STATE + 1);
+  const d = new Uint8Array(blankPortfolio());
   const dv = new DataView(d.buffer);
   const put128 = (off: number, v: bigint) => {
     const m = (1n << 128n) + v;
@@ -29,7 +33,7 @@ function portfolio(o: { certEquity: bigint; epochs: { oracle: bigint; funding: b
   put128(C.PF_CAPITAL, 100_000_000n);
   const bitmap = o.bitmap ?? 1n;
   dv.setBigUint64(C.PF_ACTIVE_BITMAP, bitmap, true);
-  const c = C.PF_HEALTH_CERT;
+  const c = C.PF_HEALTH_CERT + afterLegsShift(); // after the legs: moved by +1,040 B on v2.2
   put128(c + C.CERT_EQUITY, o.certEquity);
   dv.setBigUint64(c + C.CERT_ORACLE_EPOCH, o.epochs.oracle, true);
   dv.setBigUint64(c + C.CERT_FUNDING_EPOCH, o.epochs.funding, true);
@@ -37,7 +41,7 @@ function portfolio(o: { certEquity: bigint; epochs: { oracle: bigint; funding: b
   dv.setBigUint64(c + C.CERT_ASSET_SET_EPOCH, o.epochs.assetSet, true);
   dv.setBigUint64(c + C.CERT_ACTIVE_BITMAP, bitmap, true);
   d[c + C.CERT_VALID] = o.valid ?? 1;
-  d[C.PF_STALE_STATE] = o.stale ?? 0;
+  d[C.PF_STALE_STATE + afterLegsShift()] = o.stale ?? 0;
   return d;
 }
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { errorText } from "@/lib/error-text";
 import { useState, useCallback } from "react";
 import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
@@ -18,8 +19,8 @@ import {
   deriveExtraAccountMetas,
   deriveNftRegistry,
   encodeNftBurn,
-  isV17Account,
 } from "@percolatorct/sdk";
+import { isWrapperAccount } from "@/lib/v22/layout";
 
 // H8: NFT-program error code 22 = LegNotActive (percolator-nft/src/error.rs) —
 // the leg BurnPositionNft's verify_bound_leg gate expects is no longer active
@@ -31,15 +32,22 @@ import {
 // program, mirroring errorMessages.ts's isNftProgramError() routing (kept as
 // a local, self-contained check here rather than importing that file's
 // private helper).
-function isLegNotActiveError(rawMsg: string): boolean {
+function isNftCodeError(rawMsg: string, code: number): boolean {
   if (!rawMsg.includes(PERCOLATOR_NFT_PROGRAM_ID.toBase58())) return false;
   const hex = rawMsg.match(/(?:custom program error|Error Code)[:\s]+0x([0-9a-fA-F]+)/i);
-  if (hex) return parseInt(hex[1], 16) === 22;
+  if (hex) return parseInt(hex[1], 16) === code;
   const json = rawMsg.match(/"Custom"\s*:\s*(\d+)/);
-  if (json) return parseInt(json[1], 10) === 22;
+  if (json) return parseInt(json[1], 10) === code;
   const paren = rawMsg.match(/Custom\((\d+)\)/);
-  if (paren) return parseInt(paren[1], 10) === 22;
+  if (paren) return parseInt(paren[1], 10) === code;
   return false;
+}
+function isLegNotActiveError(rawMsg: string): boolean {
+  return isNftCodeError(rawMsg, 22);
+}
+/** NFT-program error 28 = StalePortfolioIncarnation (S1-2): this NFT belongs to an earlier incarnation of the portfolio. */
+function isStaleIncarnationError(rawMsg: string): boolean {
+  return isNftCodeError(rawMsg, 28);
 }
 
 /**
@@ -50,11 +58,24 @@ function isLegNotActiveError(rawMsg: string): boolean {
  * the wrapper is NOT LegNotActive.
  */
 export function isLegNotActiveSim(err: unknown, logs: readonly string[], wrapperProgramId: string): boolean {
+  return isNftCodeSim(err, logs, wrapperProgramId, 22);
+}
+
+function isNftCodeSim(err: unknown, logs: readonly string[], wrapperProgramId: string, code: number): boolean {
   const ie = (err as { InstructionError?: unknown } | null)?.InstructionError;
   const custom = Array.isArray(ie) ? (ie[1] as { Custom?: unknown } | null)?.Custom : undefined;
-  if (custom !== 22) return false;
+  if (custom !== code) return false;
   if (logs.some((l) => l.includes(`Program ${wrapperProgramId} failed`))) return false;
   return logs.some((l) => l.includes(`Program ${PERCOLATOR_NFT_PROGRAM_ID.toBase58()} failed`));
+}
+
+/**
+ * S1-2: a simulated Burn that fails with the NFT program's StalePortfolioIncarnation (28) means this NFT belongs to
+ * an earlier incarnation of the portfolio (closed and re-created). It has no authority over the live portfolio, so the
+ * ONLY transaction offered is EmergencyBurn, which reclaims the NFT-side rent and leaves the live portfolio untouched.
+ */
+export function isStaleIncarnationSim(err: unknown, logs: readonly string[], wrapperProgramId: string): boolean {
+  return isNftCodeSim(err, logs, wrapperProgramId, 28);
 }
 
 export const UNWRAP_COPY = {
@@ -94,7 +115,7 @@ export function useBurnPositionNft(slabAddress: string, override?: PositionNftOv
       return;
     }
 
-    const isV17 = raw != null && raw.length > 0 && isV17Account(raw);
+    const isV17 = raw != null && raw.length > 0 && isWrapperAccount(raw);
     if (!isV17) {
       setError("Position NFT burn is only supported on v17 markets.");
       return;
@@ -140,7 +161,7 @@ export function useBurnPositionNft(slabAddress: string, override?: PositionNftOv
       //   NEW [1]=nftPda,       [5]=mintAuthPda,            10 accounts
       //
       // The portfolio pubkey is read from bytes [10..42] of the NFT PDA
-      // account (portfolioAccount field in the v17 199-byte layout).
+      // account (portfolioAccount field, bytes 10..42, in every layout).
       const portfolioAccountInfo = await connection.getAccountInfo(nftPda);
       if (!portfolioAccountInfo) {
         throw new Error("NFT PDA account not found — was the NFT already burned?");
@@ -167,7 +188,7 @@ export function useBurnPositionNft(slabAddress: string, override?: PositionNftOv
 
       // NF-2: one simulation decides which ONE transaction the wallet signs.
       const g = await simulateForGate(connection, walletPubkey, [ix]);
-      if (g.err && isLegNotActiveSim(g.err, g.logs, programId.toBase58())) {
+      if (g.err && (isLegNotActiveSim(g.err, g.logs, programId.toBase58()) || isStaleIncarnationSim(g.err, g.logs, programId.toBase58()))) {
         const sig = await sendEmergencyBurn({ connection, wallet, walletPubkey, wrapperProgramId: programId, slabAddress, nftMint, nftPdaAddress });
         refresh();
         toast(UNWRAP_COPY.alreadyClosed, "success");
@@ -188,7 +209,7 @@ export function useBurnPositionNft(slabAddress: string, override?: PositionNftOv
       toast(UNWRAP_COPY.done, "success");
       return sig;
     } catch (e) {
-      const errMsg = e instanceof Error ? e.message : String(e);
+      const errMsg = errorText(e);
 
       // H8: a normal burn requires the bound leg to still be "active"
       // on-chain — if the position was closed or liquidated WHILE wrapped,
@@ -197,7 +218,7 @@ export function useBurnPositionNft(slabAddress: string, override?: PositionNftOv
       // recovery). Fall back in-place to EmergencyBurn (tag 5), which runs
       // the more permissive emergency_burn_ok() check instead and still
       // returns the escrow + rent to the holder. See useEmergencyBurn.ts.
-      if (isLegNotActiveError(errMsg) && walletPubkey && programId) {
+      if ((isLegNotActiveError(errMsg) || isStaleIncarnationError(errMsg)) && walletPubkey && programId) {
         try {
           const sig = await sendEmergencyBurn({
             connection,

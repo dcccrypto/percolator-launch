@@ -14,6 +14,7 @@ import { join } from "node:path";
 import * as ix from "@/lib/limits/p3-ix";
 import * as C from "@/lib/limits/constants";
 import { DEFAULT_SLAB_SIZE, slabSizeFor, wizardSlabBytes } from "@/lib/create-market-args";
+import { ONE_SLOT_LEN } from "../../helpers/v22-account-lens";
 import { V17_PORTFOLIO_ACCOUNT_LEN, v17MarketAccountLen } from "@percolatorct/sdk";
 import { decodeLpVaultRegistryBound } from "@/lib/limits/decode";
 
@@ -144,11 +145,14 @@ describe("P3 final head: layout (rustc offset_of!) and errors (by name)", () => 
     expect(C.BUCKET_FRESH_UNLIENED_BACKING_NUM).toBe(L["bucket.fresh_unliened_backing_num"]);
     expect(C.BOUND_SCALE).toBe(10n ** BigInt(L.boundScaleLog10));
   });
-  it("F14-Q2: the wizard's P3 slab is the program's ONE-slot length; legacy is its 14-slot length", () => {
-    expect(slabSizeFor({ p3: {} })).toBe(L.marketAccountLen1);
-    expect(wizardSlabBytes(true)).toBe(L.marketAccountLen1);
-    expect(v17MarketAccountLen(1)).toBe(L.marketAccountLen1);
-    expect(DEFAULT_SLAB_SIZE).toBe(L.marketAccountLen14);
+  it("F14-Q2: every wizard launch (P3 and legacy) is the program's ONE-slot length; the 14-slot length stays the program's for existing markets", () => {
+    expect(slabSizeFor({ p3: {} })).toBe(ONE_SLOT_LEN());
+    expect(slabSizeFor({})).toBe(ONE_SLOT_LEN());
+    expect(wizardSlabBytes(true)).toBe(ONE_SLOT_LEN());
+    expect(wizardSlabBytes(false)).toBe(ONE_SLOT_LEN());
+    expect(v17MarketAccountLen(1)).toBe(L.marketAccountLen1); // the v2.1 SDK function stays the v2.1 length
+    expect(DEFAULT_SLAB_SIZE).toBe(L.marketAccountLen1); // the flag-off constant by design
+    expect(v17MarketAccountLen(14)).toBe(L.marketAccountLen14);
     expect(V17_PORTFOLIO_ACCOUNT_LEN).toBe(L.portfolioAccountLen);
   });
   it("portfolio fields (emptiness subset + payout receipt)", () => {

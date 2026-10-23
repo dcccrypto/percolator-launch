@@ -76,7 +76,7 @@ describe("the first-trade refusal maps to its line (no 'Something went wrong')",
 describe("app pre-sign refusals get a specific calm line", () => {
   const cases: Array<[string, string]> = [
     ["No LP portfolio with an active matcher config found for this market. The LP must call SetMatcherConfig before trading.", "market-not-ready"],
-    ["Failed to scan LP portfolio accounts on-chain: 429 Too Many Requests", "rpc-unreachable"],
+    ["Failed to scan LP portfolio accounts on-chain: 429 Too Many Requests", "network-busy"],
     ["account not found: 9EPm8nB8Fs7WcEZgE1WGFPTGc6rAzD6GhFJyMm4dEFHn", "out-of-date"],
     ["Trade already in progress", "in-progress"],
     ["This market's matcher is not the recognized Percolator matcher program. Refusing to build a transaction.", "unsupported-market"],

@@ -19,6 +19,7 @@ import Link from "next/link";
 import { useWatchlist } from "@/hooks/useWatchlist";
 import { MarketLogo } from "@/components/market/MarketLogo";
 import { formatUsdFromNumber } from "@/lib/format";
+import { fetchMarketsList } from "@/lib/markets-list-client";
 
 interface DirectoryRow {
   slab_address: string;
@@ -56,9 +57,8 @@ export const WatchlistPanel: FC = () => {
     setResolving(true);
     (async () => {
       try {
-        const res = await fetch("/api/markets?limit=500", { headers: { Accept: "application/json" } });
-        if (!res.ok) return;
-        const body = (await res.json()) as { markets?: unknown };
+        // The canonical list, shared with every other list caller (lib/markets-list-client.ts).
+        const body = await fetchMarketsList();
         if (cancelled || !Array.isArray(body.markets)) return;
         const next: Record<string, DirectoryRow> = {};
         for (const raw of body.markets) {

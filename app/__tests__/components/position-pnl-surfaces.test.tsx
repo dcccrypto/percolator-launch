@@ -104,7 +104,7 @@ vi.mock("@/components/trade/PositionNftMenu", () => ({
 
 // ── positions bar mocks ─────────────────────────────────────────────────────
 vi.mock("next/link", () => ({
-  default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a>,
+  default: ({ children, href, title, className, style }: { children: React.ReactNode; href: string; title?: string; className?: string; style?: React.CSSProperties }) => <a href={href} title={title} className={className} style={style}>{children}</a>,
 }));
 vi.mock("@/hooks/usePortfolio", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/usePortfolio")>();
@@ -121,15 +121,19 @@ import { PositionsBar } from "@/components/layout/PositionsBar";
 import { ChartPnlBadge } from "@/components/trade/ChartPnlBadge";
 import { PositionsDock } from "@/components/trade/PositionsDock";
 import { computePnlCardStats } from "@/lib/pnl-card";
-import { onChainMarkE6, portfolioPositionPnl, terminalPositionPnl } from "@/lib/position-pnl";
+import { onChainMarkE6, portfolioPositionPnl, terminalPositionPnl, valueAtMark } from "@/lib/position-pnl";
 import { computeEngineLiqPrice } from "@/lib/liquidation-risk";
 import { parseAssetAdlFactors } from "@/lib/v17-adl";
 import { computeMarginCushion } from "@/lib/liquidation-risk";
 import { liveMarginCushion } from "@/hooks/usePortfolio";
-import { V17_MARKET_GROUP_OFF, V17_MARKET_GROUP_LEN, V17_MARKET_ASSET_SLOT_LEN, V17_ASSET_SLOT_WRAPPER_LEN } from "@percolatorct/sdk";
+import { activeLayout } from "@/lib/v22/layout";
+import { blankMarket } from "../helpers/v22-fixtures";
 import { fireEvent } from "@testing-library/react";
 import { formatUsdPriceE6 } from "@/lib/format";
 import { saveEntryPrice } from "@/lib/entry-price";
+import { seedLotExp0 } from "../helpers/v22-fixtures";
+
+seedLotExp0();
 
 interface Scenario {
   /** raw leg basis (signed) */
@@ -445,10 +449,13 @@ describe("one position, every surface, one PnL (#3077)", () => {
 
 // ── #3077 follow-ups ────────────────────────────────────────────────────────
 
-const SLOTS_BASE = V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN + V17_ASSET_SLOT_WRAPPER_LEN;
-/** A real v17 slab byte layout (parsed by the real parser), not a hand-built factors object. */
+/** Start of asset 0's engine slot in the ACTIVE layout (v2.1: 758 B group + 1,024 B wrapper prefix; v2.2: 806 B + 1,024 B). The asset-state fields
+ *  below (a_long 49, a_short 65, epoch_long 497, mode_long 513) are at the same offsets in both (rustc: v22-rust-layout-aca02ba6.json AssetStateV16Account). */
+const slotsBase = (): number => activeLayout().marketGroupOff + activeLayout().marketGroupLen + activeLayout().wrapperSlotLen;
+/** A real slab byte layout of the ACTIVE mode (parsed by the real parser), not a hand-built factors object. */
 function slabFactors(aLong: bigint, aShort: bigint, epochLong = 0n, modeLong = 0): Factors {
-  const buf = new Uint8Array(V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN + V17_MARKET_ASSET_SLOT_LEN);
+  const SLOTS_BASE = slotsBase();
+  const buf = blankMarket(1);
   const dv = new DataView(buf.buffer);
   const u128 = (off: number, v: bigint) => {
     dv.setBigUint64(SLOTS_BASE + off, v & 0xffffffffffffffffn, true);
@@ -576,5 +583,48 @@ describe("risk tier (margin cushion) is on EFFECTIVE size (follow-up)", () => {
     expect(cls).not.toContain("--short"); // no raw-size "danger"
     // CONTROL: with the factors known the cushion is a number
     expect(liveMarginCushion(setup(DOWN).pos, DOWN.mark)).not.toBeNull();
+  });
+});
+
+describe("dust positions (Discord: a tiny position read \"SOL 0\" in the positions bar)", () => {
+  // 72 base atoms long, entry $150, mark $152: the engine values it at 72 x $2 / 1e6 = 144 atoms
+  // ($0.000144). Going through native units first truncated it to 0n, so PnL read 0 and ROE 0.0%.
+  const dust = { effectiveSize: 72n, entryE6: 150_000_000n, markE6: 152_000_000n, initialMarginBps: 1_000n, capital: 1_000_000n };
+
+  it("PnL is valued in one division, as the engine does: 144 atoms, not 0, and its real ROE", () => {
+    const v = valueAtMark(dust);
+    expect(v.unrealizedPnl).toBe(144n);
+    // Initial margin: 72 x $150 x 10% = 1080 atoms; 144 / 1080 = 13.33%.
+    expect(v.roe).toBeCloseTo(13.33, 1);
+  });
+
+  it("a loss on the same dust position is negative, not 0", () => {
+    expect(valueAtMark({ ...dust, markE6: 148_000_000n }).unrealizedPnl).toBe(-144n);
+  });
+
+  it("a loss that doesn't divide evenly floors like the engine (-1 atom, not 0)", () => {
+    // 72 x -$0.000001 = -72 / 1e6 -> floor -1 (truncation toward zero would read 0 again).
+    expect(valueAtMark({ ...dust, markE6: 149_999_999n }).unrealizedPnl).toBe(-1n);
+    expect(valueAtMark({ ...dust, markE6: 150_000_001n }).unrealizedPnl).toBe(0n);
+  });
+
+  it("a short dust position gains when the mark falls", () => {
+    expect(valueAtMark({ ...dust, effectiveSize: -72n, markE6: 148_000_000n }).unrealizedPnl).toBe(144n);
+  });
+
+  it("the chip shows a dust position's real PnL, not 0 (the Discord report)", () => {
+    // 1 base atom (effective) of a $100 market moving to $102: +2 atoms = +0.000002.
+    setup({ ...BASE, basis: 1n, cached: 100_000_000n, mark: 102_000_000n, factors: { aLong: ADL_ONE, aShort: ADL_ONE } });
+    const { container } = render(<PositionsBar />);
+    const bar = container.querySelector('[data-testid="positions-bar"]')!;
+    expect(bar.querySelector("span.font-bold")?.textContent?.trim()).toBe("+0.000002");
+  });
+
+  it("the chip shows a known zero as 0.00, never a bare 0 (#865), and says what the figure is", () => {
+    setup({ ...BASE, cached: 100_000_000n, mark: 100_000_000n, factors: { aLong: ADL_ONE, aShort: ADL_ONE } });
+    const { container } = render(<PositionsBar />);
+    const bar = container.querySelector('[data-testid="positions-bar"]')!;
+    expect(bar.querySelector("span.font-bold")?.textContent?.trim()).toBe("0.00");
+    expect(bar.querySelector('[title="Unrealized PnL and return on margin"]')).not.toBeNull();
   });
 });

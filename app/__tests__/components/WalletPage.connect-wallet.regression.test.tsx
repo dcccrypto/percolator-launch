@@ -48,6 +48,8 @@ vi.mock("@/hooks/usePreferredWallet", async (importOriginal) => {
 });
 
 vi.mock("@privy-io/react-auth", () => ({
+  useIdentityToken: () => ({ identityToken: null }),
+  useLogin: () => ({ login: vi.fn() }),
   usePrivy: () => ({
     ready: true,
     authenticated: true,
@@ -117,6 +119,7 @@ vi.mock("@/components/ui/InfoBanner", () => ({
 }));
 
 import WalletPage from "@/app/wallet/page";
+import { PrivyStateProvider } from "../helpers/privyBridge";
 
 describe("Wallet Command connect-wallet regression", () => {
   beforeEach(() => {
@@ -125,7 +128,7 @@ describe("Wallet Command connect-wallet regression", () => {
   });
 
   it("makes the newly connected Solflare wallet active", () => {
-    const { getByRole } = render(<WalletPage />);
+    const { getByRole } = render(<WalletPage />, { wrapper: PrivyStateProvider });
 
     fireEvent.click(
       getByRole("button", {
@@ -144,6 +147,7 @@ describe("Wallet Command connect-wallet regression", () => {
     act(() => {
       connectWalletCallbacks.current.onSuccess({
         wallet: {
+          type: "solana",
           address: "SOLFLARE_CONNECTED_ADDRESS",
         },
       });

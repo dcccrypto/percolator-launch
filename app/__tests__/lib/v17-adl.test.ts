@@ -7,12 +7,8 @@ import {
   adlRemainingBps,
   isDeleveraged,
 } from "@/lib/v17-adl";
-import {
-  V17_MARKET_GROUP_OFF,
-  V17_MARKET_GROUP_LEN,
-  V17_MARKET_ASSET_SLOT_LEN,
-  V17_ASSET_SLOT_WRAPPER_LEN,
-} from "@percolatorct/sdk";
+import { activeLayout } from "@/lib/v22/layout";
+import { blankMarket } from "../helpers/v22-fixtures";
 
 /**
  * Regression cover for the "auto-deleveraged position over-reports its size" bug.
@@ -33,9 +29,10 @@ import {
  */
 
 /** Layout constants mirrored from lib/v17-adl.ts (see its doc comment).
- *  v18: the asset-slot wrapper grew 512 → 1024 (V17_ASSET_SLOT_WRAPPER_LEN). */
-const SLOTS_BASE = V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN;
-const WRAPPER = V17_ASSET_SLOT_WRAPPER_LEN;
+ *  v18: the asset-slot wrapper grew 512 → 1024. The asset STATE (a_long, a_short...) sits at the same offsets inside the engine slot on v2.1 and
+ *  v2.2 (AssetStateV16Account is < 515 B in both; v22-rust-layout-aca02ba6.json), so only the group/slot geometry is mode-dependent: it comes from
+ *  the ACTIVE layout table (v2.1: 758 B group, 2,325 B slots; v2.2: 806 B group, 2,661 B slots). */
+const geo = () => activeLayout();
 const A_LONG_REL = 49;
 const A_SHORT_REL = 65;
 // oi_eff_long_q: 49 + 15 x 16 = 289 (verified against a live devnet slab with open interest).
@@ -53,11 +50,12 @@ function writeU128LE(buf: Uint8Array, off: number, v: bigint): void {
   }
 }
 
-/** Build a synthetic v17 market account with the given per-side ADL factors. */
+/** Build a synthetic market account (of the ACTIVE layout) with the given per-side ADL factors. */
 function makeSlab(aLong: bigint, aShort: bigint, slots = 1): Uint8Array {
-  const buf = new Uint8Array(SLOTS_BASE + slots * V17_MARKET_ASSET_SLOT_LEN);
+  const L = geo();
+  const buf = blankMarket(slots);
   for (let i = 0; i < slots; i++) {
-    const base = SLOTS_BASE + i * V17_MARKET_ASSET_SLOT_LEN + WRAPPER;
+    const base = L.marketGroupOff + L.marketGroupLen + i * L.assetSlotStride + L.wrapperSlotLen;
     writeU128LE(buf, base + A_LONG_REL, aLong);
     writeU128LE(buf, base + A_SHORT_REL, aShort);
   }
@@ -79,7 +77,7 @@ describe("parseAssetAdlFactors", () => {
   });
 
   it("refuses a buffer too short to hold the asset slot", () => {
-    expect(parseAssetAdlFactors(new Uint8Array(SLOTS_BASE + 10), 0)).toBeNull();
+    expect(parseAssetAdlFactors(new Uint8Array(geo().marketGroupOff + geo().marketGroupLen + 10), 0)).toBeNull();
   });
 
   it("reads a side deleveraged BELOW MIN_A_SIDE (DrainOnly) instead of reporting unknown (#3077 cause 3)", () => {
@@ -109,7 +107,7 @@ describe("parseAssetAdlFactors", () => {
 
   it("reads the side epochs and modes at the tail of the asset state", () => {
     const buf = makeSlab(ADL_ONE, ADL_ONE);
-    const base = SLOTS_BASE + WRAPPER;
+    const base = geo().marketGroupOff + geo().marketGroupLen + geo().wrapperSlotLen;
     new DataView(buf.buffer).setBigUint64(base + EPOCH_LONG_REL, 7n, true);
     new DataView(buf.buffer).setBigUint64(base + EPOCH_SHORT_REL, 9n, true);
     buf[base + MODE_LONG_REL] = 2;
@@ -137,7 +135,7 @@ describe("parseAssetAdlFactors", () => {
     // Guards the 49/65 offsets: if they ever drifted onto the OI fields the
     // range check would mostly still pass, so pin the distance explicitly.
     const buf = makeSlab(ADL_ONE, ADL_ONE);
-    writeU128LE(buf, SLOTS_BASE + WRAPPER + OI_LONG_REL, 12_345n);
+    writeU128LE(buf, geo().marketGroupOff + geo().marketGroupLen + geo().wrapperSlotLen + OI_LONG_REL, 12_345n);
     const f = parseAssetAdlFactors(buf, 0);
     expect(f!.aLong).toBe(ADL_ONE);
     expect(OI_LONG_REL - A_LONG_REL).toBe(15 * 16);

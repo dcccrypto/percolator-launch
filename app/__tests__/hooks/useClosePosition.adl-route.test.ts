@@ -46,6 +46,8 @@ vi.mock("@/hooks/useTrade", () => ({
   findV17Portfolio: vi.fn(async () => PORTFOLIO_PK),
 }));
 vi.mock("@/lib/limits/rebalance-close", () => ({ closeViaRebalanceReduce: (p: unknown) => rebalanceMock(p) }));
+const toastMock = vi.fn();
+vi.mock("@/hooks/useToast", async (orig) => ({ ...(await orig<typeof import("@/hooks/useToast")>()), useOptionalToast: () => toastMock }));
 const connection = {
   getProgramAccounts: vi.fn(async () => [{ pubkey: PORTFOLIO_PK, account: { data: Buffer.from(PORTFOLIO) } }]),
   getAccountInfo: vi.fn(async (pk: PublicKey) => (pk.toBase58() === SLAB ? { data: Buffer.from(chainMarket) } : { data: Buffer.from(PORTFOLIO) })),
@@ -64,10 +66,14 @@ vi.mock("@/lib/portfolio-invalidation", () => ({ invalidatePortfolio: vi.fn() })
 vi.mock("@/lib/matcherCaps", () => ({ getMatcherCaps: vi.fn(async () => null), getLpInventoryState: vi.fn(async () => null) }));
 
 import { useClosePosition } from "@/hooks/useClosePosition";
+import { seedLotExp0 } from "../helpers/v22-fixtures";
+
+seedLotExp0();
 
 beforeEach(() => {
   tradeMock.mockReset();
   rebalanceMock.mockClear();
+  toastMock.mockClear();
 });
 
 describe("useClosePosition — F-3 reduce-only routing (real ANSEM bytes)", () => {
@@ -132,5 +138,8 @@ describe("useClosePosition — F-3 reduce-only routing (real ANSEM bytes)", () =
       await result.current.closePosition(100);
     });
     expect(result.current.error).toMatch(/reduce-only after a bankruptcy/);
+    // The portfolio / alert surfaces unmount the error on resolve: the partial must also reach a toast.
+    expect(toastMock).toHaveBeenCalledWith(expect.stringMatching(/^Partially closed: .*reduce-only after a bankruptcy/), "info");
+    expect(toastMock).not.toHaveBeenCalledWith(expect.anything(), "success");
   });
 });

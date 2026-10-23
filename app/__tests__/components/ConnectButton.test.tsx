@@ -49,13 +49,18 @@ let privyState = {
   logout: mockLogout,
   login: mockLogin,
   exportWallet: mockExportWallet,
+  getAccessToken: async (): Promise<string | null> => null,
 };
 
 vi.mock("@privy-io/react-auth", () => ({
   useLogin: () => ({
     login: mockLogin,
   }),
+  useConnectWallet: () => ({ connectWallet: vi.fn() }),
+  useIdentityToken: () => ({ identityToken: null }),
   usePrivy: () => privyState,
+  useLinkAccount: () => ({ linkTwitter: vi.fn() }),
+  useUnlinkOAuth: () => ({ unlink: vi.fn() }),
 }));
 
 vi.mock("@privy-io/react-auth/solana", () => ({
@@ -64,13 +69,18 @@ vi.mock("@privy-io/react-auth/solana", () => ({
 }));
 
 /**
- * The Privy-backed behaviour lives in ConnectButtonPrivyInner — ConnectButton
- * itself is only a `dynamic(ssr:false)` shell that keeps @privy-io/react-auth
- * out of the shared bundle. Rendering the shell in jsdom yields its "Loading
- * wallet" placeholder forever (the dynamic import never resolves), so these
- * assert against the inner component, where the behaviour actually is.
+ * The Privy-backed behaviour lives in ConnectButtonPrivyInner, which reads Privy through the
+ * bridge. These assert against the inner component, where the behaviour actually is.
  */
-import { ConnectButtonPrivyInner as ConnectButton } from "@/components/wallet/ConnectButtonPrivyInner";
+import { ConnectButtonPrivyInner } from "@/components/wallet/ConnectButtonPrivyInner";
+import { PrivyStateProvider } from "../helpers/privyBridge";
+
+// Privy reaches the button through the bridge (the real bridge hook over the mocked SDK above).
+const ConnectButton = () => (
+  <PrivyStateProvider>
+    <ConnectButtonPrivyInner />
+  </PrivyStateProvider>
+);
 
 describe("ConnectButton", () => {
   beforeEach(() => {
@@ -84,6 +94,7 @@ describe("ConnectButton", () => {
       logout: mockLogout,
       login: mockLogin,
       exportWallet: mockExportWallet,
+      getAccessToken: async (): Promise<string | null> => null,
     };
   });
 
@@ -92,6 +103,29 @@ describe("ConnectButton", () => {
     fireEvent.click(getByRole("button", { name: /wallet:/i }));
     expect(getByText("Manage Wallet")).toBeTruthy();
     expect(getByText("Disconnect")).toBeTruthy();
+  });
+
+  it("Account and Security opens its window and closes the menu", () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ref: null }))));
+    const { getByRole, getByText, queryByText } = render(<ConnectButton />);
+    fireEvent.click(getByRole("button", { name: /wallet:/i }));
+    fireEvent.click(getByText("Account and Security"));
+    expect(getByRole("dialog", { name: "Account and Security" })).toBeTruthy();
+    expect(queryByText("Manage Wallet")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("a sign-out closes the window; signing back in doesn't reopen it", () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ref: null }))));
+    const { getByRole, getByText, queryByRole, rerender } = render(<ConnectButton />);
+    fireEvent.click(getByRole("button", { name: /wallet:/i }));
+    fireEvent.click(getByText("Account and Security"));
+    privyState = { ...privyState, authenticated: false };
+    rerender(<ConnectButton />);
+    privyState = { ...privyState, authenticated: true };
+    rerender(<ConnectButton />);
+    expect(queryByRole("dialog")).toBeNull();
+    vi.unstubAllGlobals();
   });
 
   // Privy funding is mainnet-only, so on devnet "Add funds" was always disabled and the Privy menu

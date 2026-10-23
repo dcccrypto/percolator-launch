@@ -2,6 +2,10 @@ import { cleanup } from '@testing-library/react';
 import { afterEach, vi } from 'vitest';
 import '@testing-library/jest-dom';
 
+// keeper-register re-reads a not-yet-visible creation tx in-request (app/api/playground/keeper-register);
+// tests must not sleep through that grace. The route's own tests set it explicitly when they exercise it.
+process.env.KEEPER_REGISTER_PROOF_POLL_MS ??= '0';
+
 // jsdom doesn't implement window.matchMedia — mock it so hooks like
 // usePrefersReducedMotion don't throw during component tests.
 //

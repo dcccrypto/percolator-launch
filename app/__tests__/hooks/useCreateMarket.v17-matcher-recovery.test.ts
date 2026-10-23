@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Keypair, PublicKey } from '@solana/web3.js';
-import { V17_EXPECTED_VERSION } from '@percolatorct/sdk';
+import { blankPortfolio, marketImageOfLen } from '../helpers/v22-fixtures';
 
 const mocks = vi.hoisted(() => ({
   sendTx: vi.fn(),
@@ -157,16 +157,12 @@ describe('useCreateMarket v17 matcher recovery', () => {
 
     const v17Magic = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
 
-    const slabData = Buffer.alloc(26_364);
-    v17Magic.copy(slabData, 0);
-    slabData.writeUInt16LE(V17_EXPECTED_VERSION, 8);
+    const slabData = marketImageOfLen(26_364); // wrapper header of the ACTIVE mode (VERSION 18 / 19)
 
     const slabAccount = makeAccount(slabData, programId);
 
-    const emptyPortfolioData = Buffer.alloc(actualSdk.V17_PORTFOLIO_ACCOUNT_LEN);
-
-    v17Magic.copy(emptyPortfolioData, 0);
-    emptyPortfolioData.writeUInt16LE(V17_EXPECTED_VERSION, 8);
+    // The ACTIVE layout's portfolio (9,563 B v18 / 10,603 B v19, with the engine provenance header on v2.2); header + kind byte below.
+    const emptyPortfolioData = blankPortfolio();
     // Standalone account kind byte (V17_KIND_PORTFOLIO = 2 at offset 10). Since
     // 0d975d00 TX C (SetMatcherConfig) live-reads the portfolio identity through
     // parsePortfolioV17, which asserts this header — a real InitUser portfolio has it.
@@ -334,16 +330,11 @@ describe('useCreateMarket v17 matcher recovery', () => {
 
     const v17Magic = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
 
-    const slabData = Buffer.alloc(26_364);
-    v17Magic.copy(slabData, 0);
-    slabData.writeUInt16LE(V17_EXPECTED_VERSION, 8);
+    const slabData = marketImageOfLen(26_364); // wrapper header of the ACTIVE mode (VERSION 18 / 19)
 
     const slabAccount = makeAccount(slabData, programId);
 
-    const portfolioData = Buffer.alloc(actualSdk.V17_PORTFOLIO_ACCOUNT_LEN);
-
-    v17Magic.copy(portfolioData, 0);
-    portfolioData.writeUInt16LE(V17_EXPECTED_VERSION, 8);
+    const portfolioData = blankPortfolio(); // the ACTIVE layout's portfolio (header, VERSION, provenance on v2.2)
     portfolioData[10] = 2; // V17_KIND_PORTFOLIO, as on a real InitUser portfolio
 
     slabKeypair.publicKey.toBuffer().copy(portfolioData, 16);

@@ -4,13 +4,14 @@
  *   - global chrome (nav, footer, data bars) is not mounted on /locked;
  *   - a 401 from the gate never permanently "refuses" a pending keeper registration.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
 let pathname = "/locked";
 vi.mock("next/navigation", () => ({ usePathname: () => pathname }));
 
 import LockedPage from "@/app/locked/page";
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { ChromeGate } from "@/components/layout/ChromeGate";
 import { postKeeperRegistration, resumePendingRegistrations, type KeyStore } from "@/lib/keeper-register-client";
 
@@ -20,6 +21,9 @@ afterEach(() => {
 });
 
 describe("/locked", () => {
+  // The playground copy (flag off). The v2.2 preview copy: locked-preview-copy.test.tsx.
+  beforeEach(() => __setDevnetV22ForTest(false));
+  afterEach(() => __setDevnetV22ForTest(null));
   it("says who it is open to and links to the gate + waitlist only", () => {
     const { container } = render(<LockedPage />);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Devnet v2 is open to the first 1,000 on the waitlist.");
@@ -66,11 +70,12 @@ describe("ChromeGate on /locked", () => {
 });
 
 describe("keeper registration vs the gate's 401", () => {
+  const proof = "2U4TFzSboHomgWAo1REiwVMC6jA8BZR77VdeNBChnE4NvSDsghA1Bg59oJ3fP6Gzk4FTv6THAJANRoYwV5Q1PRbY";
   const res = (status: number, body: unknown) => ({ ok: false, status, json: async () => body }) as Response;
 
   it("a 401 is retryable", async () => {
     const a = await postKeeperRegistration(
-      { slabAddress: "S", dexPoolAddress: "P", proofTx: "sig" },
+      { slabAddress: "S", dexPoolAddress: "P", proofTx: proof },
       vi.fn().mockResolvedValue(res(401, { error: "Playground access required" })) as unknown as typeof fetch,
     );
     expect(a.retryable).toBe(true);
@@ -78,7 +83,7 @@ describe("keeper registration vs the gate's 401", () => {
 
   it("a resume that hits 401 keeps the launch pending instead of marking it refused", async () => {
     const m = new Map<string, string>([
-      ["perc.keeperProofTx.SLAB1", "sig"],
+      ["perc.keeperProofTx.SLAB1", proof],
       ["perc.keeperRequest.SLAB1", JSON.stringify({ slabAddress: "SLAB1", dexPoolAddress: "POOL", dexType: "pumpswap" })],
     ]);
     const store: KeyStore = {

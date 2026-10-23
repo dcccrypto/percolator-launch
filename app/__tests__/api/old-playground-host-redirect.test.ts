@@ -79,7 +79,6 @@ describe("old host exclusions (not redirected)", () => {
     ["GET", "/api/playground/registered-markets"],
     ["PATCH", "/api/markets/" + SLAB],
     ["POST", "/api/oracle-keeper/register"],
-    ["POST", "/api/oracle/set-price-cap"],
   ])("%s %s is served, not redirected", async (method, p) => {
     const r = await middleware(req(OLD, p, method));
     expect(r.status).not.toBe(308);

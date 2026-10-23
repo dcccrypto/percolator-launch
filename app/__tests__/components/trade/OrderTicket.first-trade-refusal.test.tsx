@@ -108,7 +108,7 @@ describe("GH#2953 first trade refused before the wallet opened", () => {
     const line = screen.getByTestId("status-line");
     expect(line.dataset.kind).toBe("engine-catching-up");
     const body = screen.getByTestId("status-line-body").textContent ?? "";
-    expect(body).toBe("The market is catching up with the latest prices. Nothing was sent. Try again in a moment.");
+    expect(body).toBe("The price is still catching up after a big move. Nothing was sent. This usually takes a few minutes; try again then.");
     // the old copy promised a retry this path never makes (the "ready." the issue saw)
     expect(body).not.toMatch(wrongRefusalWorded);
     await snap("first-trade-21");

@@ -6,6 +6,7 @@ import { V21_COPY } from "@/lib/v21/copy";
 import type { EntryVsExit } from "@/lib/v21/entry-exit";
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 import type { LpEarned } from '@/lib/lp-earned';
+import { isDevnetV22Enabled } from '@/lib/v22/flag';
 
 
 interface LpPositionDashboardProps {
@@ -15,10 +16,14 @@ interface LpPositionDashboardProps {
   lpSupply: bigint;
   /** Total vault balance (raw) */
   vaultBalance: bigint;
-  /** Decimals for collateral */
+  /** Decimals for collateral; flag off also used for LP shares, which the app counts in collateral decimals (lib/lp-share-wallet-note.ts, percolator-prog#542, #3432) */
   decimals: number;
-  /** Decimals for the LP token mint — NOT necessarily the same as collateral decimals */
-  lpDecimals: number;
+  /**
+   * v2.2 only: the share mint's own decimals. With NEXT_PUBLIC_DEVNET_V22 on, the Shares stat uses the same scale as
+   * DepositWithdrawPanel (`lpDecimals ?? decimals`, percolator-prog#545 mints carry the collateral's decimals), so the
+   * card and the panel never disagree on one vault. Ignored flag off (#3432: collateral decimals).
+   */
+  lpDecimals?: number;
   /** Collateral symbol */
   collateralSymbol: string;
   /** Redemption rate (e6) */
@@ -195,7 +200,7 @@ export function LpPositionDashboard({
 
             {/* Metrics grid (UX WP-5 §4.4: shares at 2 dp, never raw atoms; one share value) */}
             <div className="grid grid-cols-2 gap-4">
-              <MetricCell label="Shares" value={formatShares(userLpBalance, lpDecimals)} />
+              <MetricCell label="Shares" value={formatShares(userLpBalance, isDevnetV22Enabled() ? lpDecimals ?? decimals : decimals)} />
               <MetricCell label="Of the vault" value={`${userSharePct.toFixed(2)}%`} highlight />
               <MetricCell
                 label="Share value"

@@ -19,7 +19,7 @@ import {
   IX_TAG,
   STAKE_IX,
 } from "@percolatorct/sdk";
-import { orderStakeTailInstructions } from "@/hooks/useCreateMarket";
+import { orderStakeTailInstructions, assetAdminBurnForCreate, FIRST_LOSS_BURN_CONSENT_COPY } from "@/hooks/useCreateMarket";
 
 describe("UpdateFeeSplit (tag 86) wire bytes", () => {
   it("encodes tag 86 + three u16 LE shares + u64 authority epoch (15 bytes)", () => {
@@ -99,5 +99,38 @@ describe("stake-tail sequence (orderStakeTailInstructions)", () => {
     const data = encodeStakeInitPool(5n, 0n);
     expect(data[0]).toBe(0);
     expect(STAKE_IX.InitPool).toBe(0);
+  });
+});
+
+describe("asset-admin burn in the create bundle (L5 2026-10-22; code only, not wired to the wizard UI)", () => {
+  const INIT_POOL_IX = { tag: STAKE_IX.InitPool };
+  const BIND_IX = { tag: STAKE_IX.BindInsuranceAuthority };
+  const BURN_IX = { tag: 21 };
+  const PRE = { tag: -1 };
+
+  it("with no burn ix the output is unchanged (default param is null)", () => {
+    expect(orderStakeTailInstructions([PRE], null, INIT_POOL_IX, BIND_IX)).toEqual([PRE, INIT_POOL_IX, BIND_IX]);
+  });
+
+  it("the burn is the LAST instruction: after InitPool and after the bind (L-4: the bind is part of creation, the burn ends it)", () => {
+    const out = orderStakeTailInstructions([PRE], null, INIT_POOL_IX, BIND_IX, BURN_IX);
+    expect(out).toEqual([PRE, INIT_POOL_IX, BIND_IX, BURN_IX]);
+    expect(out.indexOf(BURN_IX)).toBe(out.length - 1);
+    expect(out.indexOf(BIND_IX)).toBeGreaterThan(out.indexOf(INIT_POOL_IX));
+  });
+
+  it("only a first-loss pool WITH the creator's acknowledgement burns; fee-only / legacy never do", () => {
+    expect(assetAdminBurnForCreate("first-loss", true)).toBe(true);
+    expect(assetAdminBurnForCreate("first-loss", false)).toBe(false);
+    expect(assetAdminBurnForCreate("fee-only", true)).toBe(false);
+    expect(assetAdminBurnForCreate("legacy", true)).toBe(false);
+  });
+
+  it("the consent copy states the three costs (fee leg, Recovery, no rotation) and irreversibility", () => {
+    const t = FIRST_LOSS_BURN_CONSENT_COPY.join(" ");
+    expect(t).toMatch(/cannot be undone/i);
+    expect(t).toMatch(/creator fee/i);
+    expect(t).toMatch(/Recovery/);
+    expect(t).toMatch(/rotated/i);
   });
 });

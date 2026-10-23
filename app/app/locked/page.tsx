@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { cohortCutoff } from "@/lib/playground-access";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { lockedCopy } from "@/lib/locked-copy";
 
 /**
  * /locked — where the devnet v2 waitlist gate (middleware.ts, PLAYGROUND_GATE_ENABLED)
@@ -19,6 +21,7 @@ const WAITLIST_URL = "https://percolator.trade/waitlist";
 
 export default function LockedPage() {
   const cutoff = cohortCutoff().toLocaleString("en-US");
+  const copy = lockedCopy(isDevnetV22Enabled(), cutoff);
   return (
     <div className="relative flex min-h-[100dvh] items-center justify-center px-4">
       <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" aria-hidden="true" />
@@ -27,7 +30,7 @@ export default function LockedPage() {
         className="relative w-full max-w-md border border-[var(--border)] bg-[var(--panel-bg)] px-6 py-10 text-center sm:px-10"
       >
         <p className="mb-6 text-[11px] font-medium uppercase tracking-[0.2em] text-[var(--text-muted)]">
-          Percolator · Devnet v2
+          {copy.eyebrow}
         </p>
 
         <div
@@ -45,14 +48,14 @@ export default function LockedPage() {
           className="mb-3 text-xl font-semibold leading-snug text-[var(--text)] sm:text-2xl"
           style={{ fontFamily: "var(--font-display)" }}
         >
-          Devnet v2 is open to the first {cutoff} on the waitlist.
+          {copy.title}
         </h1>
 
         <p className="mb-8 text-[13px] leading-relaxed text-[var(--text-secondary)]">
-          Sign in on percolator.trade with the wallet or email you joined with. If you&apos;re in, you&apos;ll come
-          straight back here.
+          {copy.body}
         </p>
 
+        {copy.showWaitlistLinks && (
         <div className="flex flex-col gap-3">
           <a
             href={CHECK_SPOT_URL}
@@ -67,6 +70,7 @@ export default function LockedPage() {
             Join the waitlist
           </a>
         </div>
+        )}
       </section>
     </div>
   );

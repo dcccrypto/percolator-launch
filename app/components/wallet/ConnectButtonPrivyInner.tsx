@@ -1,10 +1,10 @@
 "use client";
 
-import { FC, useCallback, useMemo, useState, useRef, useEffect } from "react";
+import { FC, useCallback, useEffect, useMemo, useState, useRef } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useLogin, usePrivy, type LinkedAccountWithMetadata } from "@privy-io/react-auth";
-import { useFundWallet, useWallets } from "@privy-io/react-auth/solana";
+import type { LinkedAccountWithMetadata } from "@privy-io/react-auth";
+import { usePrivyBridge } from "@/hooks/usePrivyBridge";
 import { getConfig } from "@/lib/config";
 import { usePreferredWallet, resolveActiveWallet } from "@/hooks/usePreferredWallet";
 import { buildSolflareBrowseUrl } from "@/lib/solflare";
@@ -12,6 +12,10 @@ import { usePrivyLogin } from "@/hooks/usePrivySafe";
 import { useSignInLoopRecovery } from "@/hooks/useSignInLoopRecovery";
 import { resetPrivyConnection } from "@/lib/privy-reset";
 import { isReconnectFallbackEligible, useWalletNeedsReconnect } from "@/hooks/useWalletNeedsReconnect";
+import { useMenuDismiss } from "@/hooks/useMenuDismiss";
+import { useOptionalToast } from "@/hooks/useToast";
+import { copyAddress } from "@/lib/copy-address";
+import { AccountSecurityModal } from "@/components/wallet/AccountSecurityModal";
 
 /**
  * Privy-backed connect button. Split into its own module (loaded via
@@ -19,15 +23,20 @@ import { isReconnectFallbackEligible, useWalletNeedsReconnect } from "@/hooks/us
  * transitive WalletConnect/Coinbase/viem graph — is NOT pulled into the shared
  * client bundle by every page that renders a ConnectButton. Only fetched, as a
  * separate async chunk, when Privy is actually the active wallet provider.
- * Ported verbatim from the former inline `ConnectButtonPrivyInner`.
+ * Ported from the former inline `ConnectButtonPrivyInner`; it now reads Privy through the bridge
+ * (usePrivyBridge) so it is server-rendered, as its disabled "Loading…" state.
  */
 export const ConnectButtonPrivyInner: FC = () => {
-  const { ready, authenticated, logout, exportWallet, user } = usePrivy();
-  const { ready: walletsReady, wallets } = useWallets();
-  const { fundWallet } = useFundWallet();
+  const { ready, authenticated, logout, exportWallet, user, walletsReady, wallets, fundWallet, login: privyLogin } =
+    usePrivyBridge();
   const { preferredAddress, setPreferredAddress } = usePreferredWallet();
   const searchParams = useSearchParams();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  // Signed out with the window open: don't bring it back on the next sign-in.
+  useEffect(() => {
+    if (!authenticated) setAccountOpen(false);
+  }, [authenticated]);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const activeWallet = useMemo(() => {
@@ -44,7 +53,7 @@ export const ConnectButtonPrivyInner: FC = () => {
   const needsReconnect = useWalletNeedsReconnect({
     privyReady: ready,
     authenticated,
-    walletsReady: walletsReady === true,
+    walletsReady,
     hasActiveWallet: !!activeWallet,
     fallbackEligible: isReconnectFallbackEligible(user?.linkedAccounts),
   });
@@ -55,16 +64,10 @@ export const ConnectButtonPrivyInner: FC = () => {
     authenticated,
   });
 
-  const { login } = useLogin({
-    onComplete: ({ loginAccount }) => {
-      // `loginAccount` is the account actually used for this login flow.
-      // Bind that wallet explicitly instead of relying on linked-wallet order
-      // or `user.wallet`, which may still point at a previously-linked wallet.
-      if (loginAccount?.type === "wallet" && loginAccount.chainType === "solana") {
-        setPreferredAddress(loginAccount.address);
-      }
-    },
-  });
+  // The login modal's onComplete lives in the bridge (PrivyProviderClient): it binds the wallet
+  // that actually authenticated the session (`loginAccount`) instead of relying on linked-wallet
+  // order or `user.wallet`, which may still point at a previously-linked wallet.
+  const login = privyLogin;
 
   const displayAddress = useMemo(() => {
     // activeWallet can be transiently null right after Privy authenticates (the
@@ -90,17 +93,9 @@ export const ConnectButtonPrivyInner: FC = () => {
   const canExport = !!exportWallet && !!embeddedWallet && ready && authenticated;
   const canFund = !!fundWallet && !!activeWallet && network === "mainnet";
 
-  // Close menu on outside click
-  useEffect(() => {
-    if (!menuOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [menuOpen]);
+  // Close menu on outside click or Escape
+  useMenuDismiss(menuOpen, setMenuOpen, menuRef);
+  const toast = useOptionalToast();
 
   const handleClick = useCallback(() => {
     if (!authenticated) {
@@ -173,6 +168,7 @@ export const ConnectButtonPrivyInner: FC = () => {
             : "text-[var(--text)] border-[var(--accent)] bg-[var(--accent)]/20 hover:bg-[var(--accent)]/30",
         ].join(" ")}
         aria-label={authenticated ? `Wallet: ${displayAddress || "connected"}` : "Connect wallet"}
+        aria-expanded={authenticated ? menuOpen : undefined}
       >
         {authenticated ? (displayAddress || "Wallet") : "Connect"}
       </button>
@@ -210,6 +206,15 @@ export const ConnectButtonPrivyInner: FC = () => {
             {activeWallet?.address}
           </div>
           <div className="h-px bg-[var(--border)] my-1" />
+          <button
+            onClick={() => {
+              setMenuOpen(false);
+              setAccountOpen(true);
+            }}
+            className="w-full px-3 py-1.5 text-left text-[13px] text-[var(--text-secondary)] hover:bg-[var(--accent)]/[0.06] rounded-sm transition-colors"
+          >
+            Account and Security
+          </button>
           <Link
             href="/wallet"
             onClick={() => setMenuOpen(false)}
@@ -219,7 +224,7 @@ export const ConnectButtonPrivyInner: FC = () => {
           </Link>
           <button
             onClick={() => {
-              navigator.clipboard.writeText(activeWallet?.address ?? "");
+              void copyAddress(activeWallet?.address ?? "", toast);
               setMenuOpen(false);
             }}
             className="w-full px-3 py-1.5 text-left text-[13px] text-[var(--text-secondary)] hover:bg-[var(--accent)]/[0.06] rounded-sm transition-colors"
@@ -275,6 +280,10 @@ export const ConnectButtonPrivyInner: FC = () => {
       )}
 
       {menuOpen && !authenticated && null}
+
+      {accountOpen && authenticated && (
+        <AccountSecurityModal onClose={() => setAccountOpen(false)} walletAddress={activeWallet?.address ?? null} />
+      )}
     </div>
   );
 };

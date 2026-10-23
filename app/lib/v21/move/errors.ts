@@ -1,4 +1,5 @@
 /** Calm, honest copy for a Move step that did not go through. Nothing was lost; say what and why. */
+import { errorText } from "@/lib/error-text";
 import { humanizeError, userFacingMessage } from "@/lib/errorMessages";
 
 export const MOVE_ERR = {
@@ -11,7 +12,7 @@ export const MOVE_ERR = {
 } as const;
 
 export function safeUserMessage(e: unknown): string {
-  const raw = e instanceof Error ? e.message : String(e);
+  const raw = errorText(e);
   if (/user rejected|rejected the request|declined/i.test(raw)) return MOVE_ERR.declined;
   if (/market not loaded/i.test(raw)) return MOVE_ERR.notLoaded;
   if (/Custom\(21\)|custom program error: 0x15\b/i.test(raw)) return MOVE_ERR.hlock;

@@ -1,5 +1,16 @@
 import { Connection, Transaction, type Commitment, type Signer } from "@solana/web3.js";
 import { getNetwork, getRpcEndpoint } from "./config";
+import { buildUpstreams, redactJson, sharedUpstreamPool, UpstreamRateLimitedError, type RpcNetwork, type UpstreamSpec } from "./rpc-upstreams";
+
+/** The JSON-RPC code and calm text for "every upstream is rate-limiting us" (matched by lib/limits/user-message.ts as network-busy). */
+export const RATE_LIMITED_RPC_ERROR = Object.freeze({ code: -32429, message: "Too many requests: the RPC is rate limited. Try again shortly." });
+
+/** An HTTP 429 carrying a JSON-RPC rate-limit error per request item (batch-shaped when the request was a batch). */
+export function rateLimitedResponse(body: unknown): Response {
+  const item = (x: unknown) => ({ jsonrpc: "2.0", id: (x as { id?: unknown } | null)?.id ?? null, error: { ...RATE_LIMITED_RPC_ERROR } });
+  const json = Array.isArray(body) ? body.map(item) : item(body);
+  return new Response(JSON.stringify(json), { status: 429, headers: { "content-type": "application/json" } });
+}
 
 /**
  * Server-side Solana Connection for API routes.
@@ -22,6 +33,28 @@ import { getNetwork, getRpcEndpoint } from "./config";
  * SERVER-ONLY: reads `process.env.DEVNET_RPC_URL` / `RPC_UPSTREAM_ORIGIN`, which
  * are undefined in the browser. Client code must keep using the `/api/rpc` proxy.
  */
+/**
+ * The `fetch` handed to web3.js when fallbacks exist: it ignores the URL web3.js built (the pool picks the upstream), returns the answering
+ * upstream's real status, honours the caller's abort signal, and throws one generic error when nothing could answer.
+ */
+export function makeRotatingFetch(upstreams: readonly UpstreamSpec[], cluster: RpcNetwork): typeof fetch {
+  return async (_input, init) => {
+    // web3.js sends the JSON-RPC body as a string. Anything else is not ours to rotate.
+    if (typeof init?.body !== "string") throw new Error("RPC request unavailable");
+    const body = JSON.parse(init.body) as unknown;
+    let r;
+    try {
+      r = await sharedUpstreamPool().postRaw(upstreams, body, cluster, init.signal ? { signal: init.signal } : {});
+    } catch (e) {
+      // AUD-RAPP #3563: every upstream refused for rate. Answer as an HTTP 429 (no upstream detail), so web3.js applies its own back-off
+      // or, with `disableRetryOnRateLimit`, fails fast as asked, and callers see a rate limit rather than a generic failure.
+      if (e instanceof UpstreamRateLimitedError) return rateLimitedResponse(body);
+      throw e;
+    }
+    return new Response(JSON.stringify(redactJson(r.json, upstreams)), { status: r.status, headers: { "content-type": "application/json" } });
+  };
+}
+
 export function getServerConnection(
   commitment: Commitment = "confirmed",
   opts: { disableRetryOnRateLimit?: boolean } = {},
@@ -34,8 +67,14 @@ export function getServerConnection(
   const origin =
     (process.env.RPC_UPSTREAM_ORIGIN ?? "").trim() ||
     (net === "devnet" ? "https://trade.padre.gg" : "");
+  // Ordered fallback (lib/rpc-upstreams.ts): when the primary is dead (quota, 429, 5xx, network) the next upstream answers. Only when a
+  // fallback is configured (devnet: the public RPC unless DEVNET_RPC_FALLBACK_URLS says otherwise); otherwise the plain Connection.
+  const cluster = net === "mainnet" ? "mainnet" : "devnet";
+  const upstreams = buildUpstreams(cluster, { url, headers: { "Content-Type": "application/json", ...(origin ? { Origin: origin } : {}) } });
+  const rotating = upstreams.length > 1 ? makeRotatingFetch(upstreams, cluster) : undefined;
   return new Connection(url, {
     commitment,
+    ...(rotating ? { fetch: rotating } : {}),
     // Opt-in per call (default unchanged): web3.js otherwise retries HTTP 429 with backoff, which a
     // latency-sensitive probe must not do.
     ...(opts.disableRetryOnRateLimit ? { disableRetryOnRateLimit: true } : {}),

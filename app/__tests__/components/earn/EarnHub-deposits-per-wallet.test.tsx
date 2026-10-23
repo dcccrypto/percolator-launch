@@ -16,7 +16,7 @@ const market = (slabAddress: string, symbol: string) => ({
 });
 const STATS = {
   stats: { markets: [market(FIRST, "PERCOLATOR"), market(OTHER, "TRENDS")], tvl: 0, totalOI: 0, maxOI: 0, totalInsurance: 0 },
-  loading: false, error: null, refresh: vi.fn(),
+  loading: false, error: null, hasData: true, refresh: vi.fn(),
 };
 vi.mock("@/hooks/useEarnStats", () => ({ useEarnStats: () => STATS }));
 vi.mock("@/components/earn/EarnHeader", () => ({ EarnHeader: () => null }));

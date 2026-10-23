@@ -22,6 +22,9 @@ import { planResolvedExit, type ExitPortfolio, type ResolvedExitPlan } from "@/l
 import { FINISH_MAX_TXS, buildFinishList, pruneRefusedItems, runFinish, stepNeeded, type FinishItem } from "@/lib/limits/resolved-finish";
 import { sendWithTopup, viewerOwnedKeys, viewerReceiptStatus, viewerTopupSteps } from "@/lib/limits/resolved-topup";
 import { COPY } from "@/lib/limits/copy";
+import { afterLegsShift, blankMarket, blankPortfolio } from "../../helpers/v22-fixtures";
+import { marketOffsets } from "@/lib/v22/market-offsets";
+
 
 const VIEWER = Keypair.generate().publicKey;
 const OTHER = Keypair.generate().publicKey;
@@ -39,27 +42,24 @@ interface P {
   gone?: boolean;
 }
 function marketBytes(count: bigint, cTot: bigint): Uint8Array {
-  const d = new Uint8Array(C.MARKET_GROUP_OFF + C.MARKET_GROUP_LEN);
+  const d = blankMarket();
   const v = new DataView(d.buffer);
-  v.setBigUint64(0, C.WRAPPER_MAGIC, true);
-  v.setUint16(8, C.WRAPPER_VERSION_V18, true);
-  d[10] = C.KIND_MARKET_ACCOUNT;
-  const g = C.MARKET_GROUP_OFF;
-  d[g + C.H_MODE] = C.MARKET_MODE_RESOLVED;
-  v.setBigUint64(g + C.H_C_TOT, cTot, true);
-  v.setBigUint64(g + C.H_MATERIALIZED_PORTFOLIO_COUNT, count, true);
-  v.setBigUint64(g + C.H_RESOLVED_SLOT, 100n, true);
+  const M = marketOffsets(d);
+  d[M.hdr(C.H_MODE)] = C.MARKET_MODE_RESOLVED;
+  v.setBigUint64(M.hdr(C.H_C_TOT), cTot, true);
+  v.setBigUint64(M.hdr(C.H_MATERIALIZED_PORTFOLIO_COUNT), count, true);
+  v.setBigUint64(M.hdr(C.H_RESOLVED_SLOT), 100n, true);
   return d;
 }
 function portfolio(p: P): ExitPortfolio {
-  const d = new Uint8Array(C.PF_RESOLVED_PAYOUT_RECEIPT + 66);
+  const d = new Uint8Array(blankPortfolio());
   const v = new DataView(d.buffer);
   d[10] = C.KIND_PORTFOLIO;
   d.set(p.owner.toBytes(), C.PF_OWNER);
   if (p.capital > 0n || p.chunks > 0) v.setBigUint64(C.PF_CAPITAL, p.capital > 0n ? p.capital : 1_000n, true);
   if (p.receipt !== "none") {
-    d[C.PF_RESOLVED_PAYOUT_RECEIPT + C.RECEIPT_PRESENT] = 1;
-    d[C.PF_RESOLVED_PAYOUT_RECEIPT + C.RECEIPT_FINALIZED] = p.receipt === "final" ? 1 : 0;
+    d[C.PF_RESOLVED_PAYOUT_RECEIPT + afterLegsShift() + C.RECEIPT_PRESENT] = 1;
+    d[C.PF_RESOLVED_PAYOUT_RECEIPT + afterLegsShift() + C.RECEIPT_FINALIZED] = p.receipt === "final" ? 1 : 0;
   }
   return { key: p.key, view: decodeResolvedPortfolio(d)!, isVaultLp: p.vault, escrowed: false };
 }

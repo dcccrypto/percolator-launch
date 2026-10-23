@@ -62,10 +62,10 @@ const STALE_CHECK_INTERVAL_MS = 5_000;
  * server permanently down, DNS gone, etc.) leaves every open browser tab
  * retrying every ~30s forever — pure CPU/battery/log noise with no path to
  * success. A fresh subscriber (a new component mounting and calling
- * `getWsManager`) still gets exactly one more attempt via the "closed && no
- * timer" check in `getWsManager` below, which also resets this counter — so
- * tripping the breaker doesn't permanently wedge the app, it just stops the
- * unattended background retry storm.
+ * `getWsManager`), the browser going back online, or the tab becoming visible
+ * again each get a fresh attempt budget via `revive` below — so tripping the
+ * breaker doesn't permanently wedge the app, it just stops the unattended
+ * background retry storm.
  */
 const MAX_RECONNECT_ATTEMPTS = 10;
 
@@ -205,6 +205,37 @@ function ensureStaleCheck(state: ManagerState): void {
   }, STALE_CHECK_INTERVAL_MS);
 }
 
+/**
+ * A closed manager with no retry pending (never started, or the circuit breaker
+ * tripped) gets a full fresh attempt budget rather than inheriting the tripped breaker.
+ */
+function revive(state: ManagerState): void {
+  if (state.destroyed || state.status !== "closed" || state.ws || state.reconnectTimer) return;
+  state.reconnectAttempts = 0;
+  state.reconnectDelay = RECONNECT_BASE_MS;
+  connect(state);
+  ensureStaleCheck(state);
+}
+
+/**
+ * The breaker trips after ~3 min of failures (MAX_RECONNECT_ATTEMPTS with the backoff), and a page
+ * that stays put (a trade page left open) gets no fresh subscriber to revive it: a Wi-Fi drop or a
+ * price-ws redeploy longer than that froze the feed until a reload. The network coming back, or the
+ * tab coming back into view, is a new reason to try.
+ */
+let watchingNetwork = false;
+function watchNetworkReturn(): void {
+  if (watchingNetwork || typeof window === "undefined") return;
+  watchingNetwork = true;
+  const reviveAll = () => {
+    for (const state of managers.values()) revive(state);
+  };
+  window.addEventListener("online", reviveAll);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") reviveAll();
+  });
+}
+
 function getOrCreateManager(url: string): ManagerState {
   const existing = managers.get(url);
   if (existing) {
@@ -276,9 +307,11 @@ export interface WsManagerHandle {
  * is ever attempted) so call sites never need an `if (url)` branch.
  *
  * Must only be called from inside a `useEffect`/subscribe callback (never
- * during render) — see priceStore.ts's `subscribeSlab`, which is the sole
- * caller and is itself only ever invoked by React's `useSyncExternalStore`
- * internals or a chart's own `useEffect`, never synchronously during render.
+ * during render) — see priceStore.ts's `subscribeSlab` and the chart live
+ * client's per-call proxy (lib/tv/data/index.ts), which are only ever invoked by
+ * React's `useSyncExternalStore` internals or a chart's own `useEffect`, never
+ * synchronously during render. Resolve it per call; never cache the handle: it
+ * is bound to one manager, which is torn down after TEARDOWN_DELAY_MS idle.
  */
 export function getWsManager(url: string): WsManagerHandle {
   if (!url) {
@@ -292,15 +325,10 @@ export function getWsManager(url: string): WsManagerHandle {
   }
 
   const state = getOrCreateManager(url);
-  if (state.status === "closed" && !state.ws && !state.reconnectTimer) {
-    // A fresh subscriber is a new reason to try, independent of how many
-    // automatic retries already failed — give it a full fresh attempt budget
-    // rather than inheriting an already-tripped circuit breaker.
-    state.reconnectAttempts = 0;
-    state.reconnectDelay = RECONNECT_BASE_MS;
-    connect(state);
-    ensureStaleCheck(state);
-  }
+  // A fresh subscriber is a new reason to try, independent of how many
+  // automatic retries already failed.
+  revive(state);
+  watchNetworkReturn();
 
   return {
     subscribeChannel(channel: string) {

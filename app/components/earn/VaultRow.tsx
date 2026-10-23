@@ -12,10 +12,14 @@ import { withdrawChip, withdrawFlagLine } from '@/lib/limits/earn-withdrawable';
  * cells always line up. Mirrors the terminal-table idiom in
  * components/trade/TradeHistoryTable.tsx.
  *
- * Columns: Market · TVL · Utilization · Fee · Your Deposit.
+ * Columns: Market · TVL · Utilization · Fee · Your Value.
  */
+// v2.2 QA Mob-1: below `sm` (390 px phones) the Utilization column is dropped and the grid fits the screen, so FEE and
+// YOUR VALUE are never clipped behind a horizontal scroll; from `sm` up it is the five-column table.
 export const VAULT_GRID_COLS =
-  'grid grid-cols-[minmax(120px,1.6fr)_84px_minmax(104px,1.2fr)_64px_92px] items-center gap-x-3';
+  'grid grid-cols-[minmax(88px,1fr)_72px_48px_76px] sm:grid-cols-[minmax(120px,1.6fr)_84px_minmax(104px,1.2fr)_64px_92px] items-center gap-x-3';
+/** The Utilization cell / header: hidden below `sm` (see VAULT_GRID_COLS). */
+export const VAULT_UTIL_CELL = 'hidden sm:block';
 
 interface VaultRowProps {
   vault: MarketVaultInfo;
@@ -80,13 +84,15 @@ export function VaultRow({ vault, selected, userDepositUsd, onSelect }: VaultRow
       <span
         className="text-right text-[12px] tabular-nums text-[var(--text)]"
         style={{ fontFamily: 'var(--font-mono)' }}
-        title={valueTitle}
+        title={vault.unvalued ? "This vault's value can't be determined right now: it can't take deposits or pay withdrawals until it's repaired. Not counted in the TVL." : valueTitle}
       >
-        ${formatCompact(vaultUsd)}
+        {vault.unvalued ? '—' : `$${formatCompact(vaultUsd)}`}
       </span>
 
       {/* Utilization — thin OI/capacity bar + % */}
-      <OiCapMeter currentOI={vault.totalOI} maxOI={vault.maxOI} compact />
+      <div className={VAULT_UTIL_CELL} data-testid="vault-util-cell">
+        <OiCapMeter currentOI={vault.totalOI} maxOI={vault.maxOI} compact />
+      </div>
 
       {/* Fee */}
       <span
@@ -96,7 +102,7 @@ export function VaultRow({ vault, selected, userDepositUsd, onSelect }: VaultRow
         {(vault.tradingFeeBps / 100).toFixed(2)}%
       </span>
 
-      {/* Your Deposit */}
+      {/* Your Value */}
       <span
         className={`text-right text-[12px] tabular-nums ${
           userDepositUsd && userDepositUsd > 0 ? 'text-[var(--accent-text)]' : 'text-[var(--text-muted)]'

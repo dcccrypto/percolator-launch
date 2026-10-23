@@ -32,11 +32,16 @@ vi.mock("@/lib/server-rpc", () => ({ getServerConnection: vi.fn() }));
 vi.mock("@/lib/health", () => ({ sanitizeOnChainValue: (v: bigint) => v, isSentinelValue: () => false }));
 
 import { readLiveMarketStates } from "@/lib/live-market-state";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { modeFixtures } from "../helpers/v22-fixtures";
 
 const IMR_OFF = 592 + 32 + 62;
 
 function slabWithImr(bps: number | null, len = 4096): Buffer {
-  const b = Buffer.alloc(len);
+  // A slab of the ACTIVE mode: zeros flag off (the v2.1 reader never checked more), the captured v2.2 VERSION-19 one-slot market flag on (the
+  // VERSION-keyed reader refuses anything else). initial_margin_bps sits in the group config, which does not move.
+  // A SHORT slab (the engine-config region cut off) is the captured market truncated, so it still carries the wrapper header.
+  const b = isDevnetV22Enabled() ? Buffer.from(modeFixtures().market).subarray(0, len) : Buffer.alloc(len);
   if (bps != null) b.writeBigUInt64LE(BigInt(bps), IMR_OFF);
   return b;
 }

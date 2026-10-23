@@ -1,8 +1,9 @@
+import { lotExpOf } from "@/lib/v22/lot";
 import { type NextRequest, NextResponse } from "next/server";
-import { parseMarketGroupV17OI, isV17MarketAccount } from "@percolatorct/sdk";
 import { validateSlabParam } from "@/lib/route-validators";
 import { isBlockedSlab } from "@/lib/blocklist";
 import { readCurrentWrapperSlab } from "@/lib/current-wrapper-slab";
+import { isUnsupportedLayout, isWrapperMarketAccount, parseMarketOI, unsupportedLayoutBody } from "@/lib/v22/layout";
 
 export const dynamic = "force-dynamic";
 
@@ -39,16 +40,17 @@ export async function GET(
 
   const read = await readCurrentWrapperSlab(validSlab);
   if (!read.ok) {
+    if (read.reason === "unsupported-layout") return NextResponse.json(unsupportedLayoutBody(null, read.version), { status: 422 });
     return read.reason === "rpc"
       ? degraded(validSlab, "chain read")
       : NextResponse.json({ error: "Market not found" }, { status: 404 });
   }
-  if (!isV17MarketAccount(read.data)) {
+  if (!isWrapperMarketAccount(read.data)) {
     return NextResponse.json({ error: "Market not found" }, { status: 404 });
   }
 
   try {
-    const oi = parseMarketGroupV17OI(read.data);
+    const oi = parseMarketOI(read.data);
     const totalOi = oi.totalLongOiQ + oi.totalShortOiQ;
     return NextResponse.json(
       {
@@ -61,10 +63,14 @@ export async function GET(
         historicalOi: [],
         // H12: OI above is base-asset Q (scale 1e6); the client multiplies by the live price.
         isV17: true,
+        // v2.2 lot market: OI above is in LOTS (the client prices it with the per-LOT live price, so USD is exact).
+        // Tokens = lots * 10^lotExp. Absent on a market without lots (flag off / v2.1): the response is unchanged.
+        ...(lotExpOf(read.data) > 0 ? { lotExp: lotExpOf(read.data) } : {}),
       },
       { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30" } },
     );
   } catch (err) {
+    if (isUnsupportedLayout(err)) return NextResponse.json(unsupportedLayoutBody(err), { status: 422 });
     console.warn(`[/api/open-interest/${validSlab}] v17 OI parse failed:`, err);
     return degraded(validSlab, "OI parse");
   }

@@ -20,8 +20,17 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/market-directory-discovery', () => ({
   discoverMarketsViaProgramDirectory: mocks.discoverMarketsViaProgramDirectory,
 }));
-vi.mock('@/lib/config', () => ({ getAllProgramIds: vi.fn(() => []), getNetwork: mocks.getNetwork }));
+vi.mock('@/lib/config', () => ({
+  getAllProgramIds: vi.fn(() => []),
+  getMarketDiscoveryProgramIds: vi.fn(() => []),
+  getNetwork: mocks.getNetwork,
+}));
 vi.mock('@/lib/v17-engine-config', () => ({ parseV17RiskParams: mocks.parseV17RiskParams }));
+vi.mock("@/lib/v22/layout", async (orig) => ({
+  ...(await orig<typeof import("@/lib/v22/layout")>()),
+  isWrapperAccount: mocks.isV17Account,
+  parsePortfolio: mocks.parsePortfolioV17,
+}));
 vi.mock('@percolatorct/sdk', async () => {
   const actual = await vi.importActual<typeof import('@percolatorct/sdk')>('@percolatorct/sdk');
   return {
@@ -33,8 +42,20 @@ vi.mock('@percolatorct/sdk', async () => {
   };
 });
 
+// S1-2: the app parses NFTs with its own v3 port (the installed SDK 8.0.0 parser rejects version 3). These tests drive the
+// parser through `mocks.parsePositionNftAccount`; the stand-in returns a LEGACY (unbound, never stale) record merged with it.
+vi.mock('@/lib/v22/sdk/nft-v3', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/v22/sdk/nft-v3')>('@/lib/v22/sdk/nft-v3');
+  return {
+    ...actual,
+    parsePositionNftAccountV3: (d: Uint8Array) => ({ isLegacyV2: true, portfolioMarketGroup: null, portfolioIdAtMint: null, ...mocks.parsePositionNftAccount(d) }),
+  };
+});
+
 import { fetchPortfolioSnapshot, positionRowKeys, type PortfolioPosition } from '@/hooks/usePortfolio';
 import { PERCOLATOR_NFT_PROGRAM_ID } from '@/lib/nft-program';
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
+import { __setUnknownLotExpForTest } from "@/lib/v22/lot-registry";
 
 let b = 101;
 const pk = () => new PublicKey(new Uint8Array(32).fill(b++));
@@ -80,9 +101,10 @@ function scenario(wrappedCount: 1 | 2) {
     .mockResolvedValueOnce([{ data: Buffer.alloc(256), owner: wrapperProgram }])
     // 2nd call: escrowed portfolios the NFTs point at.
     .mockResolvedValueOnce(wrappedPfs.map((_, i) => ({ data: tagged(2 + i) })));
-  const getProgramAccounts = vi.fn(async (programId: PublicKey) => {
+  const getProgramAccounts = vi.fn(async (programId: PublicKey, cfg?: { filters?: Array<{ dataSize?: number }> }) => {
     if (programId.equals(wrapperProgram)) return [{ pubkey: pk(), account: { data: tagged(1) } }];
     if (programId.equals(PERCOLATOR_NFT_PROGRAM_ID)) {
+      if (cfg?.filters?.[0]?.dataSize === 239) return []; // legacy 199 B fixtures
       return wrappedPfs.map((_, i) => ({ pubkey: pk(), account: { data: Buffer.from([i]) } }));
     }
     return [];
@@ -93,6 +115,7 @@ function scenario(wrappedCount: 1 | 2) {
 
 describe('usePortfolio: wrapped position on a market where the wallet also owns a portfolio', () => {
   beforeEach(() => {
+    __setUnknownLotExpForTest(0);
     vi.clearAllMocks();
     mocks.getNetwork.mockReturnValue('devnet');
     mocks.isV17Account.mockReturnValue(true);
@@ -149,9 +172,9 @@ describe('usePortfolio: same portfolio seen by both scans (stale NFT / slot skew
       .fn()
       .mockResolvedValueOnce([{ data: Buffer.alloc(256), owner: wrapperProgram }])
       .mockResolvedValueOnce([{ data: tagged(1) }]);
-    const getProgramAccounts = vi.fn(async (programId: PublicKey) => {
+    const getProgramAccounts = vi.fn(async (programId: PublicKey, cfg?: { filters?: Array<{ dataSize?: number }> }) => {
       if (programId.equals(wrapperProgram)) return [{ pubkey: pf, account: { data: tagged(1) } }];
-      if (programId.equals(PERCOLATOR_NFT_PROGRAM_ID)) return [{ pubkey: pk(), account: { data: Buffer.from([0]) } }];
+      if (programId.equals(PERCOLATOR_NFT_PROGRAM_ID)) return cfg?.filters?.[0]?.dataSize === 239 ? [] : [{ pubkey: pk(), account: { data: Buffer.from([0]) } }];
       return [];
     });
     const connection = { getMultipleAccountsInfo, getProgramAccounts } as unknown as Parameters<typeof fetchPortfolioSnapshot>[0];
@@ -183,9 +206,9 @@ describe('usePortfolio: same portfolio seen by both scans (stale NFT / slot skew
       .fn()
       .mockResolvedValueOnce([{ data: Buffer.alloc(256), owner: wrapperProgram }])
       .mockResolvedValueOnce([{ data: tagged(2) }]);
-    const getProgramAccounts = vi.fn(async (programId: PublicKey) => {
+    const getProgramAccounts = vi.fn(async (programId: PublicKey, cfg?: { filters?: Array<{ dataSize?: number }> }) => {
       if (programId.equals(wrapperProgram)) return [{ pubkey: pf, account: { data: tagged(1) } }];
-      if (programId.equals(PERCOLATOR_NFT_PROGRAM_ID)) return [{ pubkey: pk(), account: { data: Buffer.from([0]) } }];
+      if (programId.equals(PERCOLATOR_NFT_PROGRAM_ID)) return cfg?.filters?.[0]?.dataSize === 239 ? [] : [{ pubkey: pk(), account: { data: Buffer.from([0]) } }];
       return [];
     });
     const connection = { getMultipleAccountsInfo, getProgramAccounts } as unknown as Parameters<typeof fetchPortfolioSnapshot>[0];

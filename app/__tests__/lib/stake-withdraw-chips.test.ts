@@ -55,10 +55,10 @@ describe("stake withdraw chips", () => {
 
   it("the page uses them, disables Withdraw and says why", () => {
     const src = fs.readFileSync(path.resolve(__dirname, "../../app/stake/page.tsx"), "utf8");
-    expect(src).toContain("setWithdrawAmount(stakeWithdrawChipAmount(withdrawPosition.lpBalanceRaw, pct, withdrawPosition.lpDecimals))");
+    expect(src).toContain("setWithdrawAmount(stakeWithdrawChipAmount(withdrawMaxLpRaw(withdrawPosition), pct, withdrawPosition.lpDecimals))");
     expect(src).not.toMatch(/setWithdrawAmount\(val\.toFixed\(4\)\)/);
     expect(src).toMatch(/disabled=\{[^}]*withdrawExceeds[^}]*\}/);
     expect(src).toContain('data-testid="stake-withdraw-amount-error"');
-    expect(src).toContain("withdrawAmountError(withdrawAmount, withdrawPosition.lpBalanceRaw, withdrawPosition.lpDecimals)");
+    expect(src).toContain("withdrawAmountError(withdrawAmount, withdrawPosition.lpBalanceRaw, withdrawPosition.lpDecimals, withdrawCap?.maxLpRaw, V22_COPY.stake.withdrawOverCap)");
   });
 });

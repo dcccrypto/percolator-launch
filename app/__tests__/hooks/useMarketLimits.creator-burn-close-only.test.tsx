@@ -12,6 +12,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
 import { deriveTicketLimits } from "@/lib/limits/ticket";
+import { isDevnetV21Enabled } from "@/lib/v21/flag";
+// Flags-OFF path only: the post-burn same-owner LP resolution (a getProgramAccounts-backed resolve) runs in useMarketLimits ONLY when no limits flag
+// and not the v2.1 flag is on (`if (anyOn || ...) return`). With NEXT_PUBLIC_DEVNET_V21=1 the hook reads the LP through the accounts path and the
+// ticket takes the same-owner owner from `limits.lp.owner` (lib/limits/ticket.ts: `L.lp?.owner ?? L.sameOwnerLpOwner`, covered by
+// lib/limits/ticket-state.test.ts), so these cases are skipped there, explicitly, rather than run against a branch that is not taken.
+const FLAGS_OFF_ONLY = isDevnetV21Enabled();
+
 
 const CREATOR = new Uint8Array(32).fill(0x9c);
 const OTHER_WALLET = new Uint8Array(32).fill(0x42);
@@ -134,7 +141,7 @@ function ticketFor(
 }
 
 describe("creator close-only after Burn Admin Key", () => {
-  it("remains close-only from LP ownership when asset_admin is zero and flags are OFF", async () => {
+  it.skipIf(FLAGS_OFF_ONLY)("remains close-only from LP ownership when asset_admin is zero and flags are OFF", async () => {
     mocks.resolveMarketLp.mockResolvedValue({
       owner: new PublicKey(CREATOR),
     });
@@ -168,7 +175,7 @@ describe("creator close-only after Burn Admin Key", () => {
     });
   });
 
-  it("negative control: an unrelated wallet is not marked same-owner", async () => {
+  it.skipIf(FLAGS_OFF_ONLY)("negative control: an unrelated wallet is not marked same-owner", async () => {
     const { useMarketLimits } =
       await import("@/hooks/useMarketLimits");
 
@@ -248,7 +255,7 @@ describe("root-cause control", () => {
 });
 
 describe("user-facing ticket impact", () => {
-  it("post-burn creator must see a blocked Close-only CTA, not an actionable Long CTA", async () => {
+  it.skipIf(FLAGS_OFF_ONLY)("post-burn creator must see a blocked Close-only CTA, not an actionable Long CTA", async () => {
     const { useMarketLimits } =
       await import("@/hooks/useMarketLimits");
 
@@ -334,7 +341,7 @@ describe("same-owner LP resolution gating", () => {
 
 
 describe("same-owner resolution recovery", () => {
-  it("retries in the background after a failed resolution, without blocking", async () => {
+  it.skipIf(FLAGS_OFF_ONLY)("retries in the background after a failed resolution, without blocking", async () => {
     vi.useFakeTimers();
 
     try {

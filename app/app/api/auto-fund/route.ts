@@ -93,6 +93,7 @@ export async function POST(req: NextRequest) {
    * this fixes, so that disarm is not optional.
    */
   let releaseGateClaimOnExit: (() => Promise<void>) | null = null;
+  let usdcMintOutcomeUnknown = false;
 
   try {
     // Only works on devnet
@@ -106,7 +107,7 @@ export async function POST(req: NextRequest) {
     // SEC: per-IP rate limit. The per-wallet gate below is trivially bypassed
     // with fresh keypairs, and every mint/airdrop spends the shared
     // DEVNET_MINT_AUTHORITY_KEYPAIR — bound the drain per IP (shared across the
-    // fund endpoints), mirroring /api/devnet-mirror-mint.
+    // fund endpoints).
     const fundRl = await checkFundRateLimit(getClientIp(req));
     if (!fundRl.allowed) {
       return NextResponse.json(
@@ -268,16 +269,51 @@ export async function POST(req: NextRequest) {
               (signed as Transaction).serialize(),
             );
 
-            const confirmation =
-              await connection.confirmTransaction(
-                { signature: sig, blockhash, lastValidBlockHeight },
-                "confirmed",
+            // S3 audit 2026-10-17 (sibling of #2599/#2629 on faucet): once the
+            // mint is SENT, a confirmTransaction throw ("block height exceeded"
+            // on slow devnet RPC) does not prove it failed. Re-check the status;
+            // if that is inconclusive, keep the claim rather than release it,
+            // so a retry cannot mint a second 1,000 USDC.
+            usdcMintOutcomeUnknown = true;
+            // Resolves null ONLY when the mint landed but confirmTransaction threw.
+            const confirmation = await connection.confirmTransaction(
+              { signature: sig, blockhash, lastValidBlockHeight },
+              "confirmed",
+            ).catch(async (confirmErr: unknown) => {
+              const status = await connection.getSignatureStatus(sig, {
+                searchTransactionHistory: true,
+              });
+              const st = status.value;
+              if (st && st.err) {
+                usdcMintOutcomeUnknown = false; // landed and failed: nothing minted
+                throw confirmErr;
+              }
+              const landed =
+                !!st &&
+                (st.confirmationStatus === "confirmed" ||
+                  st.confirmationStatus === "finalized");
+              if (!landed) {
+                // Not found AND the blockhash expired: it can never land, so
+                // nothing was minted. Any other throw (RPC/network error) leaves
+                // the outcome unknown and the claim kept.
+                const expired =
+                  confirmErr instanceof Error &&
+                  confirmErr.name === "TransactionExpiredBlockheightExceededError";
+                if (!st && expired) usdcMintOutcomeUnknown = false;
+                throw confirmErr;
+              }
+              return null;
+            });
+            if (confirmation) {
+              // A definitive confirmation result: an on-chain error means
+              // nothing was minted (claim may be released).
+              usdcMintOutcomeUnknown = false;
+              assertSuccessfulConfirmation(
+                confirmation,
+                "Auto-fund USDC mint",
               );
-
-            assertSuccessfulConfirmation(
-              confirmation,
-              "Auto-fund USDC mint",
-            );
+            }
+            usdcMintOutcomeUnknown = false;
 
             results.usdc_minted = true;
             results.usdc_amount = USDC_MINT_AMOUNT / 1_000_000;
@@ -313,6 +349,9 @@ export async function POST(req: NextRequest) {
           });
         }
       }
+    } else if (usdcMintOutcomeUnknown) {
+      // A mint was sent and may have landed: keep the claim (no double mint).
+      releaseGateClaimOnExit = null;
     } else {
       // Nothing funded — release gate so user can retry.
       await releaseGateClaimOnExit?.();

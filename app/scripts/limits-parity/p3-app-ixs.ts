@@ -413,6 +413,8 @@ if (cmd === "init-market") {
     request = buildRequestRedeemIx({
       programId, redeemer, registry, lpMint, redeemerLpAta: pk("redeemerLpAta"),
       escrow: deriveLpEscrow(programId, market)[0], redemption: deriveLpRedemption(programId, registry, redeemer)[0], shares: big("shares"),
+      // AUD-S1-18: the app always sends the floored 76; the floor is whatever the caller quotes (default 1 atom).
+      minPayoutAtoms: a.minPayout !== undefined ? big("minPayout") : 1n,
     });
   }
   process.stdout.write(JSON.stringify({

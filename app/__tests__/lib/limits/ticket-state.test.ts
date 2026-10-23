@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { balanceMaxQ, deriveTicketState, maxInUnit, oneMaxQ, type TicketStateInput } from "@/lib/limits/ticket-state";
+import { balanceMaxQ, deriveTicketState, maxInUnit, oneMaxQ, sideRoomIsFull, type TicketStateInput } from "@/lib/limits/ticket-state";
 import { ticketRowShortLabel } from "@/lib/limits/ticket-status-store";
 import { deriveTicketLimits, feeFitSizeQ } from "@/lib/limits/ticket";
 import { UNLIMITED_CAPACITY } from "@/lib/marketCapacity";
@@ -43,8 +43,8 @@ describe("deriveTicketState: the §3.3 priority table", () => {
     const rows: Array<[Partial<TicketStateInput>, string, string, string, string]> = [
       [{ marketResolved: true }, "settled", "Market settled", "info", "This market has settled. Close any position and withdraw; there's nothing else to do."],
       [{ adlReduceOnly: true }, "close-only", "Close-only for now", "paused", "Close-only for now after a liquidation. Closing works normally. New positions reopen once the positions on one side have closed, which depends on those traders and can take a while."],
-      [{ engineStale: true }, "catching-up", "Waiting for prices…", "wait", "Prices are catching up. Trading resumes once the market has caught up."],
-      [{ waitingForPrice: true }, "waiting-price", "Waiting for price…", "wait", "Waiting for a fresh price. This usually takes a few seconds."],
+      [{ engineStale: true }, "catching-up", "Waiting for prices…", "wait", "The market is catching up with the latest prices. New positions wait until it has."],
+      [{ waitingForPrice: true }, "waiting-price", "Waiting for prices…", "wait", "The market is catching up with the latest prices. New positions wait until it has."],
       [{ openingPaused: true }, "both-paused", "Opening paused", "paused", "New positions are paused right now. Closing works normally."],
       [{ sameOwner: true }, "same-owner", "Close-only for this wallet", "paused", "You created this market, so this wallet can only close positions here. Use another wallet to trade it."],
       [{ feeOverMax: true, feeSuggested: "2.5 SOL" }, "fee-over-max", "Reduce size", "error", "This size costs more than the market's maximum fee. Try 2.5 SOL."],
@@ -68,14 +68,14 @@ describe("deriveTicketState: the §3.3 priority table", () => {
       expect(s.row).toBe("both-paused");
       expect(s.status?.kind).toBe("lp-depleted");
       expect(s.status?.body).toBe(
-        "The market has no funds left to take the other side of new trades. Opening resumes once it is funded again; deposits to Earn or staking don't reopen it. Closing works normally.",
+        "The market doesn't have enough funds to take the other side of new trades. Opening resumes once it is funded again; deposits to Earn or staking don't reopen it. Closing works normally.",
       );
     });
 
     it("a P3 vault-LP market points at the Earn vault instead", () => {
       const s = deriveTicketState(base({ lpDepleted: true, lpIsVault: true, openingPaused: true }));
       expect(s.status?.body).toBe(
-        "The market has no funds left to take the other side of new trades. Opening resumes when the Earn vault has funds to back them. Closing works normally.",
+        "The market doesn't have enough funds to take the other side of new trades. Opening resumes when the Earn vault has funds to back them. Closing works normally.",
       );
     });
 
@@ -120,6 +120,31 @@ describe("deriveTicketState: the §3.3 priority table", () => {
     const s = deriveTicketState(base({ sidePaused: { long: true, short: true } }));
     expect(s.row).toBe("both-paused");
     expect(s.autoSelect).toBeNull();
+  });
+
+  it("row 12 with no size: the button says what is missing, not an order of nothing", () => {
+    const s = deriveTicketState(base({ sizeEntered: false }));
+    expect(s).toMatchObject({ row: "ok", buttonLabel: "Enter a size", blocks: false, status: null, autoSelect: null });
+    expect(deriveTicketState(base({ direction: "short", sizeEntered: false })).buttonLabel).toBe("Enter a size");
+    // CONTROL: a size names the order
+    expect(deriveTicketState(base({ sizeEntered: true })).buttonLabel).toBe("Long SOL 5×");
+  });
+
+  it("no size: every row above 'ok' keeps its own label (paused side, waits, close-only...)", () => {
+    const rows: Array<[Partial<TicketStateInput>, string]> = [
+      [{ marketResolved: true }, "Market settled"],
+      [{ adlReduceOnly: true }, "Close-only for now"],
+      [{ engineStale: true }, "Waiting for prices…"],
+      [{ waitingForPrice: true }, "Waiting for prices…"],
+      [{ sidePaused: { long: true, short: false } }, "New longs paused"],
+      [{ openingPaused: true }, "Opening paused"],
+      [{ sameOwner: true }, "Close-only for this wallet"],
+    ];
+    for (const [over, label] of rows) {
+      const s = deriveTicketState(base({ ...over, sizeEntered: false }));
+      expect(s.buttonLabel, label).toBe(label);
+      expect(s.blocks, label).toBe(true);
+    }
   });
 
   it("row 10: exceeds balance does NOT block; the button says 'Deposit {x} & Long' (one tx, WP-6); no status line", () => {
@@ -184,6 +209,20 @@ describe("one max per side (§4.2, TR-2)", () => {
     expect(maxInUnit(41_883_456n, "token", 89_550_000n, "SOL")).toBe("41.8834 SOL");
     expect(maxInUnit(41_883_456n, "usd", 89_550_000n, "SOL")).toBe("$3,750.66");
     expect(maxInUnit(1_000_000n, "token", 1n, "SOL")).toBe("1 SOL");
+  });
+
+  it("a side room worth under one cent is full (paused), not a $0.00 max", () => {
+    const sol150 = 150_000_000n; // 1 q = $0.00015
+    expect(sideRoomIsFull(0n, sol150)).toBe(true);
+    expect(sideRoomIsFull(3n, sol150)).toBe(true); // $0.00045: the live SOL/USD case
+    expect(sideRoomIsFull(66n, sol150)).toBe(true); // $0.0099
+    expect(sideRoomIsFull(67n, sol150)).toBe(false); // $0.01005 -> "Max $0.01"
+    expect(maxInUnit(67n, "usd", sol150, "SOL")).toBe("$0.01");
+    expect(sideRoomIsFull(1_000_000n, sol150)).toBe(false);
+    // unknown room never pauses; without a price only an exact 0 does
+    expect(sideRoomIsFull(null, sol150)).toBe(false);
+    expect(sideRoomIsFull(3n, null)).toBe(false);
+    expect(sideRoomIsFull(0n, null)).toBe(true);
   });
 });
 

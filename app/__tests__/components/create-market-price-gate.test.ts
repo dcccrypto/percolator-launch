@@ -82,7 +82,7 @@ describe("M-8: an opening price too small to track is refused at launch", () => 
     const body = code(slice(WIZARD, "const getOracleFeedAndPrice", "const { priceE6:"));
     // hyperp (DEX) branch and admin/keeper branch — two call sites.
     expect(body.match(/withTrackableFloor\(\s*toInitialPriceE6\(/g)?.length).toBe(2);
-    expect(body.match(/launchPriceMoveBps,?\s*\)/g)?.length).toBe(2);
+    expect(body.match(/launchPriceMoveBps,\s*floorLotExp,?\s*\)/g)?.length).toBe(2);
   });
 
   it("the cap is the one create() will set (deriveLaunchMarketParams of the dial)", () => {

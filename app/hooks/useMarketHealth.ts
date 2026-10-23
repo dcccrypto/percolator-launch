@@ -61,13 +61,23 @@ export function useMarketHealth(slabs: readonly string[]): {
     }
     let cancelled = false;
     const list = key.split(",");
+    // The route takes at most MAX_HEALTH_SLABS per request, so a longer list (/markets reads every
+    // listed market) goes out in chunks. The key is sorted, so each chunk's cache key is stable.
+    const chunks: string[][] = [];
+    for (let i = 0; i < list.length; i += MAX_HEALTH_SLABS) chunks.push(list.slice(i, i + MAX_HEALTH_SLABS));
     const run = (force: boolean) => {
-      fetchMarketHealth(list, force)
-        .then((m) => {
-          if (!cancelled) setHealth(m);
-        })
-        .catch(() => {
-          /* keep the last good value */
+      Promise.allSettled(chunks.map((c) => fetchMarketHealth(c, force)))
+        .then((results) => {
+          if (cancelled) return;
+          setHealth((prev) => {
+            const next: HealthMap = {};
+            results.forEach((r, i) => {
+              if (r.status === "fulfilled") Object.assign(next, r.value);
+              // A failed chunk keeps its last good value.
+              else for (const s of chunks[i]) if (s in prev) next[s] = prev[s];
+            });
+            return next;
+          });
         })
         .finally(() => {
           if (!cancelled) setLoading(false);

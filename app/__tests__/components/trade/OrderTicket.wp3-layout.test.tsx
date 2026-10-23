@@ -8,6 +8,7 @@
  *  AC5 partial fill: data-variant=info.
  * Plus: side paused auto-selects the open side, the clamp helper, the long wait + Stop.
  */
+import { StrictMode } from "react";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,7 +23,9 @@ const mocks = vi.hoisted(() => ({
   trade: vi.fn(),
   engineStale: false,
   adl: false,
-  fill: null as null | { kind: "full" | "partial" | "zero"; filledQ: bigint | null },
+  fill: null as null | { kind: "full" | "partial" | "zero" | "unknown"; filledQ: bigint | null },
+  /** The measured position change (lib/position-change.ts); null = none / unmeasured. */
+  change: null as null | { beforeQ: bigint; afterQ: bigint },
   sideLimits: null as null | { long: SideLimit; short: SideLimit },
   sameOwner: false,
   limits: null as unknown,
@@ -65,8 +68,11 @@ vi.mock("@/lib/priceStore/priceStore", async (orig) => ({
 vi.mock("@/lib/mock-trade-data", () => ({ isMockSlab: () => false, getMockUserAccountIdle: () => null, getMockUserAccount: () => null }));
 vi.mock("@/lib/tx", () => ({ prewarmTxLanding: vi.fn() }));
 vi.mock("@/lib/limits/adl-reduce-only", () => ({ isAdlReduceOnly: () => mocks.adl }));
-vi.mock("@/lib/limits/decode", async (orig) => ({ ...(await orig<object>()), decodeMarketEngineView: () => ({}) }));
+// A decoded engine view always carries effectivePriceE6, the OI and the ADL factors (the V21 close-only state reads them): use the shared
+// real-shaped fixture instead of an empty object.
+vi.mock("@/lib/limits/decode", async (orig) => ({ ...(await orig<object>()), decodeMarketEngineView: () => marketLimits().engine }));
 vi.mock("@/hooks/useMarketLimits", () => ({ useMarketLimits: () => mocks.limits }));
+vi.mock("@/lib/position-change", async (orig) => ({ ...(await orig<object>()), takePositionChange: async () => mocks.change }));
 vi.mock("@/lib/limits/fill-check", () => ({ takeFillResult: () => mocks.fill }));
 vi.mock("@/components/trade/DepositWithdrawCard", () => ({ DepositWithdrawCard: () => <div data-testid="deposit-card" /> }));
 vi.mock("@/components/trade/OrderTicketClosePanel", () => ({ OrderTicketClosePanel: () => <div data-testid="close-panel" /> }));
@@ -107,6 +113,7 @@ beforeEach(() => {
   mocks.engineStale = false;
   mocks.adl = false;
   mocks.fill = null;
+  mocks.change = null;
   mocks.sameOwner = false;
   mocks.limits = marketLimits({ state: "off" });
   // P1: long room 41.8834 SOL, short room 100 SOL (1e6 scale). $2 per SOL.
@@ -170,7 +177,10 @@ describe("WP-3 AC1/AC2: live ticket", () => {
     expect(screen.queryAllByTestId("limits-max-size")).toHaveLength(0);
     fireEvent.click(screen.getByTestId("ticket-details-toggle"));
     expect(within(screen.getByTestId("ticket-details")).getAllByTestId("limits-max-size")).toHaveLength(2);
-    // the button is the state
+    // the button is the state: with no size it says what is missing, then it names the order
+    expect(submit().textContent).toBe("Enter a size");
+    expect(submit().disabled).toBe(true);
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "5" } });
     expect(submit().textContent).toBe("Long SOL 1×");
   });
 
@@ -221,6 +231,8 @@ describe("WP-3 states: at most one status line, the button names the state", () 
     await snap("catching-up");
     await act(async () => setEngineStale(false));
     expect(lines()).toHaveLength(0);
+    expect(submit().textContent).toBe("Enter a size");
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "5" } });
     expect(submit().textContent).toBe("Long SOL 1×");
   });
 
@@ -234,9 +246,11 @@ describe("WP-3 states: at most one status line, the button names the state", () 
     expect(long.dataset.limitsHalted).toBe("true");
     expect(within(long).getByTestId("trade-side-paused").textContent).toBe("Paused");
     expect(lines()).toHaveLength(0);
-    expect(submit().textContent).toBe("Short SOL 1×");
+    expect(submit().textContent).toBe("Enter a size");
     expect(screen.getByTestId("limits-max-size-inline").dataset.side).toBe("short");
     await snap("side-paused");
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "5" } });
+    expect(submit().textContent).toBe("Short SOL 1×");
   });
 
   it("both sides paused: one 'Opening paused' line, no Max", () => {
@@ -299,6 +313,7 @@ describe("WP-3 result lines", () => {
   it("AC5 partial: data-variant=info, 'Opened X of Y SOL'", async () => {
     mocks.trade.mockResolvedValueOnce("sigPartial");
     mocks.fill = { kind: "partial", filledQ: 2_000_000n };
+    mocks.change = { beforeQ: 0n, afterQ: 2_000_000n }; // worded from the measured change
     render(<OrderTicket slabAddress={SLAB} />);
     await placeOrder("10"); // $10 at $2 = 5 SOL
     expect(lines()).toHaveLength(1);
@@ -311,11 +326,80 @@ describe("WP-3 result lines", () => {
 
   it("full fill: 'Opened 5 SOL long at $2.00'", async () => {
     mocks.trade.mockResolvedValueOnce("sigFull");
+    mocks.change = { beforeQ: 0n, afterQ: 5_000_000n };
     render(<OrderTicket slabAddress={SLAB} />);
     await placeOrder("10");
     expect(lines()).toHaveLength(1);
     expect(lines()[0].dataset.kind).toBe("filled");
     expect(screen.getByTestId("status-line-body").textContent).toMatch(/^Opened 5 SOL long at \$2\.0+$/);
+  });
+
+  // The line is worded from the MEASURED change (before/after, ADL-effective), not the request or
+  // the raw position. `raw` = the position the account shows (heading only); `before`/`after` = measured.
+  const withLong = (q: bigint) =>
+    mocks.useUserAccount.mockReturnValue({ account: { capital: 10_000_000_000n, positionSize: q, entryPrice: 2_000_000n, pnl: 0n }, idx: 0 });
+  const placeShort = async (size: string) => {
+    fireEvent.click(screen.getByTestId("trade-side-short"));
+    await placeOrder(size);
+  };
+  const body = () => screen.getByTestId("status-line-body").textContent;
+
+  it.each([
+    ["reduce", 8_000_000n, 8_000_000n, 3_000_000n, "Reduced your long by 5 SOL at $2.000000", "filled"],
+    ["close", 5_000_000n, 5_000_000n, 0n, "Closed your 5 SOL long at $2.000000", "filled"],
+    ["flip", 3_000_000n, 3_000_000n, -2_000_000n, "Closed your 3 SOL long and opened 2 SOL short at $2.000000", "filled"],
+    // ADL scaled a raw 8 long to an effective 3: selling 5 flips it (the PR said "Reduced your long by 5").
+    ["ADL flip", 8_000_000n, 3_000_000n, -2_000_000n, "Closed your 3 SOL long and opened 2 SOL short at $2.000000", "filled"],
+    // The fill was clipped: 2 of the 5 SOL reduced the long; nothing here says "Opened".
+    ["partial reduce", 8_000_000n, 8_000_000n, 6_000_000n, "Reduced your long by 2 SOL. The market had room for part of your order.", "partial-fill"],
+  ])("%s: a 10 USD short reads as what was measured", async (_n, raw, before, after, want, kind) => {
+    withLong(raw);
+    mocks.trade.mockResolvedValueOnce("sigCut");
+    mocks.change = { beforeQ: before, afterQ: after };
+    render(<OrderTicket slabAddress={SLAB} />);
+    await placeShort("10");
+    expect(body()).toBe(want);
+    expect(lines()[0].dataset.kind).toBe(kind);
+    expect(body()).not.toMatch(/Opened \d+(\.\d+)? of/);
+  });
+
+  it("an unmeasured fill (flag OFF, nothing measured) never claims a size or direction", async () => {
+    mocks.trade.mockResolvedValueOnce("sigUnknown");
+    mocks.fill = null; // P1 off: takeFillResult has nothing
+    mocks.change = null;
+    render(<OrderTicket slabAddress={SLAB} />);
+    await placeOrder("10");
+    expect(body()).toBe("Your order went through. Your position is updating.");
+    expect(lines()[0].dataset.kind).toBe("sent");
+    expect(lines()[0].textContent).not.toMatch(/Order filled|Opened/);
+  });
+
+  it("an unmeasured fill (flag ON, unknown) says the same neutral line", async () => {
+    mocks.trade.mockResolvedValueOnce("sigUnknown2");
+    mocks.fill = { kind: "unknown", filledQ: null };
+    mocks.change = null;
+    render(<OrderTicket slabAddress={SLAB} />);
+    await placeOrder("10");
+    expect(body()).toBe("Your order went through. Your position is updating.");
+    expect(lines()[0].dataset.kind).toBe("sent");
+  });
+
+  it("a measurement that contradicts the order (bought, position shrank) is unmeasured", async () => {
+    withLong(8_000_000n);
+    mocks.trade.mockResolvedValueOnce("sigOdd");
+    mocks.change = { beforeQ: 8_000_000n, afterQ: 3_000_000n }; // a LONG order cannot reduce a long
+    render(<OrderTicket slabAddress={SLAB} />);
+    await placeOrder("10");
+    expect(body()).toBe("Your order went through. Your position is updating.");
+  });
+
+  it("a measured zero change reads as Not filled", async () => {
+    mocks.trade.mockResolvedValueOnce("sigNoop");
+    mocks.change = { beforeQ: 0n, afterQ: 0n };
+    render(<OrderTicket slabAddress={SLAB} />);
+    await placeOrder("10");
+    expect(lines()[0].dataset.kind).toBe("zero-fill");
+    expect(body()).toMatch(/^Not filled: the market had no room/);
   });
 });
 
@@ -344,5 +428,59 @@ describe("WP-3 long wait: 'We'll keep trying' + Stop, never 'try again'", () => 
     });
     expect(lines()).toHaveLength(0);
     expect(submit().textContent).toBe("Long SOL 1×");
+  });
+
+  // S1: before the Stop chip appears (~41 s) nothing ended the wait when the user left, so the
+  // loop kept retrying and could open the wallet for the old market's order (GH#2623 rule).
+  const waitingTrade = (signals: AbortSignal[]) =>
+    (p: { onWaiting?: (w: boolean) => void; abortSignal?: AbortSignal }) =>
+      new Promise((_res, rej) => {
+        signals.push(p.abortSignal!);
+        p.onWaiting?.(true);
+        p.abortSignal?.addEventListener("abort", () =>
+          rej(Object.assign(new Error("Stopped waiting for the market; nothing was sent."), { name: "WaitStoppedError" })),
+        );
+      });
+
+  it("leaving the page (unmount) ends the wait", async () => {
+    const signals: AbortSignal[] = [];
+    mocks.trade.mockImplementationOnce(waitingTrade(signals));
+    const { unmount } = render(<OrderTicket slabAddress={SLAB} />);
+    await placeOrder("10");
+    expect(signals[0].aborted).toBe(false);
+    unmount();
+    expect(signals[0].aborted).toBe(true);
+  });
+
+  it("switching market (the page's key={slab} remount) ends the old wait; the new ticket's trade is not aborted", async () => {
+    const OTHER = "8WC8vALsDJhNCUVRmqZBDSg5xgFAhDrgy7zWqF512pDx";
+    const signals: AbortSignal[] = [];
+    mocks.trade.mockImplementation(waitingTrade(signals));
+    const { rerender } = render(<OrderTicket key={SLAB} slabAddress={SLAB} />);
+    await placeOrder("10");
+    rerender(<OrderTicket key={OTHER} slabAddress={OTHER} />);
+    expect(signals[0].aborted).toBe(true);
+    await placeOrder("10");
+    expect(signals).toHaveLength(2);
+    expect(signals[1].aborted).toBe(false);
+  });
+
+  it("an in-place market change (no remount) also ends the old wait", async () => {
+    const signals: AbortSignal[] = [];
+    mocks.trade.mockImplementationOnce(waitingTrade(signals));
+    const { rerender } = render(<OrderTicket slabAddress={SLAB} />);
+    await placeOrder("10");
+    rerender(<OrderTicket slabAddress="8WC8vALsDJhNCUVRmqZBDSg5xgFAhDrgy7zWqF512pDx" />);
+    expect(signals[0].aborted).toBe(true);
+  });
+
+  it("CONTROL: StrictMode's dev double-mount doesn't abort a live wait", async () => {
+    const signals: AbortSignal[] = [];
+    mocks.trade.mockImplementationOnce(waitingTrade(signals));
+    const { unmount } = render(<StrictMode><OrderTicket slabAddress={SLAB} /></StrictMode>);
+    await placeOrder("10");
+    expect(signals[0].aborted).toBe(false);
+    unmount();
+    expect(signals[0].aborted).toBe(true);
   });
 });

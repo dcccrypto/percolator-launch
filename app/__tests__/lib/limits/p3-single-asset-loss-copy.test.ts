@@ -155,7 +155,7 @@ describe("junior resolved release (102): physical - C, 78 first when pending", (
   it("the creator panel and the hook both go through this module", () => {
     const hook = readFileSync(resolve(process.cwd(), "hooks/useJuniorTranche.ts"), "utf8");
     const panel = readFileSync(resolve(process.cwd(), "components/limits/CreatorLimits.tsx"), "utf8");
-    expect(hook).toContain("buildJuniorResolvedReleaseIxs(c, amount, juniorReleaseNeedsHarvest(c.marketData, c.domain))");
+    expect(hook).toContain("buildJuniorResolvedReleaseIxs(c, amount, juniorReleaseNeedsHarvest(c.marketData, c.domain), juniorResolvedDomainIdle(c.marketData, c.domain))");
     expect(panel).toContain("juniorResolvedReleasableAtoms(");
   });
 });

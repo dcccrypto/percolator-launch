@@ -4,6 +4,18 @@
  */
 export const UNSUPPORTED_POOL_COPY = "This token trades on a pool type we can't price yet. Markets can use Meteora DLMM or PumpSwap pools.";
 
+/** #3320: the wallet is at its per-creator live-price ceiling, so a new market would never be priced.
+ *  Shown on the disabled launch button before anything is built or signed. */
+export const LIVE_PRICE_LIMIT_COPY =
+  "This wallet has reached its limit of live-priced markets, so a new one wouldn't get a live price. Ask the team to connect more.";
+
+/** The money the launch sets aside on both sides so winning traders can be paid (was "counterparty backing" / "backing domains"). */
+export const PAYOUT_RESERVE_COPY = {
+  name: "trader payout reserve",
+  readout: "Incl. trader payout reserve",
+  tip: "Money set aside on both sides of the market so winning traders can be paid. Precisely: the counterparty backing seeded for each of the market's two sides.",
+} as const;
+
 /** The batch progress, in landing order (§3.15). */
 export const WIZARD_STEP_COPY = {
   createMarket: "Creating the market",

@@ -17,8 +17,11 @@ import {
   createAssociatedTokenAccountInstruction,
 } from '@solana/spl-token';
 import { sendTx } from '@/lib/tx';
+import { withWritableStaker } from '@/lib/stake-staker-meta';
+import { stakeErrorMessage } from '@/lib/earnErrors';
 import { getConfig } from '@/lib/config';
 import { assertDepositWithinBalance, readTokenBalance } from '@/lib/deposit-guard';
+import { invalidateWalletBalance } from '@/lib/wallet-balance-invalidation';
 
 export interface StakeDepositPoolParams {
   /** The slab (market) address this pool belongs to. Used for PDA derivation. */
@@ -163,7 +166,7 @@ export function useStakeDepositByPool({ slabAddress, collateralMint }: StakeDepo
 
         // Build stake deposit instruction
         const data = Buffer.from(encodeStakeDeposit(amount));
-        const keys = depositAccounts({
+        const keys = withWritableStaker(depositAccounts({
           user: wallet.publicKey,
           pool,
           userCollateralAta,
@@ -173,7 +176,7 @@ export function useStakeDepositByPool({ slabAddress, collateralMint }: StakeDepo
           vaultAuth,
           depositPda,
           slab: poolSlab,
-        });
+        }));
 
         instructions.push(
           new TransactionInstruction({
@@ -184,10 +187,13 @@ export function useStakeDepositByPool({ slabAddress, collateralMint }: StakeDepo
         );
 
         const sig = await sendTx({ connection, wallet, instructions });
+        // The wallet's collateral just left it: /stake's Balance / MAX re-read it.
+        invalidateWalletBalance();
         return sig;
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        setError(msg);
+        // #26: the plain line, never the raw simulation JSON / program logs (kept in the console).
+        console.warn('[stake] transaction failed:', e);
+        setError(stakeErrorMessage(e));
         throw e;
       } finally {
         inflightRef.current = false;

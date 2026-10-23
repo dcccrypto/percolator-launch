@@ -35,6 +35,9 @@ import {
   applyOnChainPoll,
   seedFromDbIfEmpty,
 } from "@/lib/priceStore/priceStore";
+import { seedLotExp0 } from "../helpers/v22-fixtures";
+
+seedLotExp0();
 
 /** Deliver a live WS tick and force the store's buffered flush (the
  *  visibilitychange handler flushes pending ticks synchronously — same

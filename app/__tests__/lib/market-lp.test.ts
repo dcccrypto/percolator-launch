@@ -1,9 +1,11 @@
 // @vitest-environment node
 import { describe, it, expect, vi } from "vitest";
 import { Keypair, PublicKey } from "@solana/web3.js";
-import { V17_PORTFOLIO_ACCOUNT_LEN, V17_PORTFOLIO_IDENTITY_TRAILER_LEN, deriveMatcherDelegate } from "@percolatorct/sdk";
+import { V17_PORTFOLIO_IDENTITY_TRAILER_LEN, deriveMatcherDelegate } from "@percolatorct/sdk";
 import { selectMarketLp, ctxAddressesToFetch, type CtxRow, type PortfolioRow } from "@/lib/market-lp";
 import { assetProfileOff } from "@/lib/v18-wire";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { blankMarket, blankPortfolio } from "../helpers/v22-fixtures";
 
 const PROGRAM = new PublicKey("ETDLAdiAyWnEUngspYczTXUceT6X8f92eZQvr8nmSkWB");
 const MATCHER = new PublicKey("EDKKgRaVHna6FCxiY1kgMzegD9rpaN1nwJNSzAzeBUBX");
@@ -12,9 +14,11 @@ const CREATOR = Keypair.generate().publicKey;
 const MARKET_LEN = 33_900;
 
 function marketData(admin: PublicKey | null): Uint8Array {
-  const d = new Uint8Array(MARKET_LEN);
+  // The ACTIVE mode's market: a 14-slot zero buffer flag off (v2.1), an otherwise-zero VERSION-19 market flag on (the VERSION-keyed reader refuses
+  // anything else). asset_admin sits at the asset-profile offset + 368 in both (AssetOracleProfileV16.asset_admin, v22-rust-layout-aca02ba6.json).
+  const d = isDevnetV22Enabled() ? blankMarket() : new Uint8Array(MARKET_LEN);
   d[10] = 1; // kind = market
-  if (admin) d.set(admin.toBytes(), assetProfileOff(0) + 368);
+  if (admin) d.set(admin.toBytes(), assetProfileOff(0, d) + 368);
   return d;
 }
 
@@ -34,15 +38,12 @@ function portfolio(opts: {
 }): Pf {
   const pubkey = opts.pubkey ?? Keypair.generate().publicKey;
   const ctx = Keypair.generate().publicKey;
-  const d = new Uint8Array(V17_PORTFOLIO_ACCOUNT_LEN);
-  d.set([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50], 0); // PERCV16 magic
-  d[8] = 18; // version u16 LE
-  d[10] = 2; // kind = portfolio
+  const d = new Uint8Array(blankPortfolio()); // the ACTIVE layout: PERCV16 magic, VERSION 18 / 19, kind = portfolio, exact account length
   d.set((opts.market ?? MARKET).toBytes(), 16);
   d.set(pubkey.toBytes(), 48);
   d.set(opts.owner.toBytes(), 80);
   d.set(opts.owner.toBytes(), 116);
-  const cfgOff = d.length - 104 - V17_PORTFOLIO_IDENTITY_TRAILER_LEN;
+  const cfgOff = d.length - 104 - V17_PORTFOLIO_IDENTITY_TRAILER_LEN; // = matcherConfigOff of both layouts
   const [delegate] = deriveMatcherDelegate(PROGRAM, opts.market ?? MARKET, pubkey, opts.owner, MATCHER, ctx);
   d.set(MATCHER.toBytes(), cfgOff);
   d.set(ctx.toBytes(), cfgOff + 32);

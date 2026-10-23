@@ -25,7 +25,15 @@ export const CLOSE_PRICE_UNREADABLE = "Couldn't read the market price just now. 
  * reverts or gets gated when the feed is off.
  */
 export function closeLimitFromEngine(engine: Pick<MarketEngineView, "effectivePriceE6"> | null, closeSize: bigint): bigint {
+  return limitFromEngine(engine, closeSize);
+}
+
+/**
+ * The same limit for any signed size: a close, or an open (#3459, lib/open-limit.ts). Around the
+ * engine's effective price, the price the matcher prices exec from and the trade settles at.
+ */
+export function limitFromEngine(engine: Pick<MarketEngineView, "effectivePriceE6"> | null, signedSize: bigint): bigint {
   const effectiveE6 = engine ? sanitizePriceE6(engine.effectivePriceE6) : 0n;
   if (effectiveE6 === 0n) throw new UserFacingError(CLOSE_PRICE_UNREADABLE);
-  return computeLimitPriceE6({ markE6: effectiveE6, size: closeSize });
+  return computeLimitPriceE6({ markE6: effectiveE6, size: signedSize });
 }

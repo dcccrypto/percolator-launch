@@ -8,12 +8,11 @@ import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PublicKey } from "@solana/web3.js";
 import { readFileSync } from "node:fs";
+import { modeFixtures } from "../helpers/v22-fixtures";
 import { join } from "node:path";
 
-const MARKET_BYTES = Buffer.from(
-  JSON.parse(readFileSync(join(__dirname, "..", "fixtures", "5bVTTMRc.ansem.market.json"), "utf8")).dataBase64,
-  "base64",
-);
+// Captured market of the ACTIVE mode: the v2.1 ANSEM bytes flag off, the v2.2 (VERSION 19) one-slot market flag on (helpers/v22-fixtures.ts).
+const MARKET_BYTES = Buffer.from(modeFixtures().market);
 
 const mocks = vi.hoisted(() => ({
   trade: vi.fn(),
@@ -22,12 +21,13 @@ const mocks = vi.hoisted(() => ({
   getProgramAccounts: vi.fn(),
   getLivePriceSnapshot: vi.fn(),
   fill: { current: null as unknown },
+  toast: vi.fn(),
 }));
 
 vi.mock("@/hooks/useWalletCompat", () => ({ useConnectionCompat: vi.fn(), useWalletCompat: vi.fn() }));
 vi.mock("@/hooks/useTrade", () => ({ useTrade: vi.fn(), prewarmTradeSubmission: vi.fn() }));
 vi.mock("@/hooks/useWithdraw", () => ({ useWithdraw: () => ({ withdraw: vi.fn().mockResolvedValue("w") }) }));
-vi.mock("@/hooks/useToast", () => ({ useOptionalToast: () => vi.fn() }));
+vi.mock("@/hooks/useToast", () => ({ useOptionalToast: () => mocks.toast }));
 vi.mock("@/hooks/useUserAccount", () => ({ useUserAccount: vi.fn() }));
 vi.mock("@/components/providers/SlabProvider", () => ({ useSlabState: vi.fn() }));
 vi.mock("@/lib/priceStore/priceStore", () => ({ getLivePriceSnapshot: mocks.getLivePriceSnapshot }));
@@ -35,13 +35,19 @@ vi.mock("@/lib/mock-mode", () => ({ isMockMode: () => false }));
 vi.mock("@/lib/mock-trade-data", () => ({ isMockSlab: () => false }));
 vi.mock("@/lib/lpPortfolio", () => ({ isLpPortfolio: () => false }));
 vi.mock("@/lib/portfolio-invalidation", () => ({ invalidatePortfolio: vi.fn() }));
-vi.mock("@/lib/errorMessages", () => ({
+vi.mock("@/lib/errorMessages", async (orig) => ({
+  ...(await orig<typeof import("@/lib/errorMessages")>()),
   humanizeError: (message: string) => message,
   withTransientRetry: async (operation: () => Promise<unknown>) => operation(),
 }));
 vi.mock("@/lib/limits/fill-check", async (orig) => ({
   ...(await orig<typeof import("@/lib/limits/fill-check")>()),
   takeFillResult: () => mocks.fill.current,
+}));
+vi.mock("@/lib/v22/layout", async (orig) => ({
+  ...(await orig<typeof import("@/lib/v22/layout")>()),
+  isWrapperAccount: mocks.isV17Account,
+  parsePortfolio: mocks.parsePortfolioV17,
 }));
 vi.mock("@percolatorct/sdk", () => ({
   AccountKind: { LP: "LP" },
@@ -56,6 +62,7 @@ import { useTrade } from "@/hooks/useTrade";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useClosePosition } from "@/hooks/useClosePosition";
+import { __setUnknownLotExpForTest } from "@/lib/v22/lot-registry";
 import { getEntryPrice, saveEntryPrice } from "@/lib/entry-price";
 
 describe("useClosePosition keeps the saved entry unless the position is flat", () => {
@@ -67,6 +74,7 @@ describe("useClosePosition keeps the saved entry unless the position is flat", (
 
   beforeEach(() => {
     vi.clearAllMocks();
+    __setUnknownLotExpForTest(0);
     localStorage.clear();
     saveEntryPrice(slab, 7, 95_000_000n, 2, wallet.toBase58());
     mocks.fill.current = null;
@@ -98,6 +106,9 @@ describe("useClosePosition keeps the saved entry unless the position is flat", (
     const { result } = renderHook(() => useClosePosition(slab));
     await act(async () => { await result.current.closePosition(100); });
     expect(result.current.error).toMatch(/Partially closed/i);
+    // /portfolio, other-markets, the liquidation alert and the at-risk banner unmount that error on resolve.
+    expect(mocks.toast).toHaveBeenCalledWith(expect.stringMatching(/^Partially closed: .+ The rest of your position is still open.$/), "info");
+    expect(mocks.toast).not.toHaveBeenCalledWith(expect.anything(), "success");
     expect(entry()).toBe(95_000_000n);
   });
 

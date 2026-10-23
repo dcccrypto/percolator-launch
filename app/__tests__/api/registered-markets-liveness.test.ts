@@ -33,7 +33,7 @@ const h = vi.hoisted(() => ({
 vi.mock(
   "@/lib/playground-registered-markets",
   () => ({
-    readRegisteredMarkets: async () => {
+    readRegisteredMarketsChecked: async () => {
       const entry = (slabAddress: string) => ({
         slabAddress,
         marketAddress: slabAddress,
@@ -48,11 +48,10 @@ vi.mock(
         registeredAt: 1,
       });
 
-      return [
-        entry(h.MISTYPED_2988),
-        entry(h.LIVE),
-        entry(h.BLOCKED),
-      ];
+      return {
+        ok: true,
+        markets: [entry(h.MISTYPED_2988), entry(h.LIVE), entry(h.BLOCKED)],
+      };
     },
   }),
 );

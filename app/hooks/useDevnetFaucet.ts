@@ -16,6 +16,7 @@
 
 "use client";
 
+import { errorText } from "@/lib/error-text";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Connection, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
@@ -23,6 +24,7 @@ import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getConfig } from "@/lib/config";
 import { invalidateWalletBalance } from "@/lib/wallet-balance-invalidation";
 import { keepAppMessage, plainMessage } from "@/lib/limits/user-message";
+import { shortRateLimitMessage } from "@/lib/faucet-429";
 
 export type FaucetStep = "idle" | "sol" | "usdc" | "deposit" | "done" | "error";
 
@@ -64,6 +66,9 @@ export interface DevnetFaucetState {
 const PUBLIC_DEVNET_RPC = "https://api.devnet.solana.com";
 const SOL_THRESHOLD = 0.05 * LAMPORTS_PER_SOL;
 const USDC_THRESHOLD = 1_000_000_000n; // 1,000 USDC (6 decimals) — PERC-808
+/** How long a pending server SOL send holds back a retry: a blockhash expires in about 60-90 s, so by
+ *  then the send has landed or never will. */
+const SOL_SERVER_PENDING_MS = 120_000;
 const DISMISSED_KEY = "percolator:faucet-dismissed";
 
 /**
@@ -107,6 +112,11 @@ export function useDevnetFaucet(): DevnetFaucetState {
   const [nextClaimAt, setNextClaimAt] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(true); // default true to avoid flash
   const [checked, setChecked] = useState(false);
+  // This modal funded the wallet this session. Once the balances pass the thresholds the modal
+  // used to vanish on its own: no dismissal was saved (it reopened over the trade page as soon as a
+  // deposit took the wallet under 1,000 USDC, offering a claim the 24h gate refuses) and its
+  // "Start Trading" step was never seen. It now stays up until the user closes it.
+  const [fundedHere, setFundedHere] = useState(false);
 
   // Lazily construct the fallback airdrop Connection on first use instead of
   // on every render — `useRef(new Connection(...))` evaluates the initializer
@@ -125,6 +135,14 @@ export function useDevnetFaucet(): DevnetFaucetState {
   const lastOpFailedRef = useRef(false);
   // The SOL step's message: fundAll's USDC step clears the shared error, which erased it.
   const solErrorRef = useRef<string | null>(null);
+  // An airdrop this modal just made, not yet visible in a balance read (the RPC can lag the
+  // airdrop by a few seconds). Keeps the step done until a read shows the funds, then the step
+  // follows the balance again.
+  const solAirdropPendingRef = useRef(false);
+  // The server's "on its way" (503 pending) reply and when it came: a retry before the SOL lands
+  // would get the daily-claim 429 and fall through to a second, public airdrop.
+  const solServerPendingRef = useRef<{ msg: string; at: number } | null>(null);
+  const usdcAirdropPendingRef = useRef(false);
 
   // Check if previously dismissed for this wallet
   useEffect(() => {
@@ -143,6 +161,12 @@ export function useDevnetFaucet(): DevnetFaucetState {
     }
   }, [publicKey]);
 
+  // The wallet's address, not the PublicKey object: a refreshed wallet list hands back a new
+  // object for the same wallet, which is not a wallet change.
+  const walletAddress = publicKey?.toBase58() ?? null;
+  const walletAddressRef = useRef(walletAddress);
+  walletAddressRef.current = walletAddress;
+
   // Bug #34: reset per-wallet check/balance state when the connected wallet
   // changes. Without this, switching from wallet A (already `checked`) to
   // wallet B left `checked` (and solDone/usdcDone/balances) at wallet A's
@@ -150,18 +174,36 @@ export function useDevnetFaucet(): DevnetFaucetState {
   // gated on `!checked`, so wallet B's balances were never (re-)fetched.
   useEffect(() => {
     setChecked(false);
+    setFundedHere(false);
     setSolDone(false);
     setUsdcDone(false);
+    solAirdropPendingRef.current = false;
+    solServerPendingRef.current = null;
+    usdcAirdropPendingRef.current = false;
     setSolBalance(null);
     setUsdcBalance(null);
-  }, [publicKey]);
+    // The 24h claim gate is per wallet: the previous wallet's "Rate limited" / next-claim time
+    // and its error must not disable or explain this one's claim.
+    setRateLimited(false);
+    setNextClaimAt(null);
+    setError(null);
+    setStep("idle");
+  }, [walletAddress]);
 
   const refreshBalances = useCallback(async () => {
     if (!publicKey) return;
+    // A read that resolves after the wallet changed belongs to the previous wallet: drop it.
+    const forWallet = publicKey.toBase58();
+    const stale = () => walletAddressRef.current !== forWallet;
     try {
       const bal = await connection.getBalance(publicKey);
+      if (stale()) return;
       setSolBalance(bal / LAMPORTS_PER_SOL);
-      if (bal >= SOL_THRESHOLD) setSolDone(true);
+      if (bal >= SOL_THRESHOLD) {
+        solAirdropPendingRef.current = false;
+        solServerPendingRef.current = null;
+      }
+      setSolDone(bal >= SOL_THRESHOLD || solAirdropPendingRef.current);
     } catch {
       // non-fatal
     }
@@ -170,9 +212,11 @@ export function useDevnetFaucet(): DevnetFaucetState {
       try {
         const ata = getAssociatedTokenAddressSync(usdcMintPk, publicKey);
         const info = await connection.getTokenAccountBalance(ata);
+        if (stale()) return;
         const amount = BigInt(info.value.amount);
         setUsdcBalance(Number(amount) / 1_000_000);
-        if (amount >= USDC_THRESHOLD) setUsdcDone(true);
+        if (amount >= USDC_THRESHOLD) usdcAirdropPendingRef.current = false;
+        setUsdcDone(amount >= USDC_THRESHOLD || usdcAirdropPendingRef.current);
       } catch (e) {
         // Distinguish "no ATA yet" (definitive — this wallet has never
         // received USDC, so 0 is correct) from a transient RPC hiccup.
@@ -180,9 +224,11 @@ export function useDevnetFaucet(): DevnetFaucetState {
         // account"; anything else (timeout, 5xx, rate limit) must NOT reset
         // the balance to 0 — that would pop the faucet modal over an
         // already-funded wallet.
-        const msg = e instanceof Error ? e.message : String(e);
+        const msg = errorText(e);
+        if (stale()) return;
         if (/could not find account/i.test(msg)) {
           setUsdcBalance(0);
+          setUsdcDone(usdcAirdropPendingRef.current);
         } else {
           console.warn("[useDevnetFaucet] transient USDC balance fetch error, keeping previous balance:", msg);
         }
@@ -231,7 +277,7 @@ export function useDevnetFaucet(): DevnetFaucetState {
     !dismissed &&
     checked &&
     solBalance !== null &&
-    (solBalance < 0.05 || (usdcBalance !== null && usdcBalance < 1000));
+    (fundedHere || solBalance < 0.05 || (usdcBalance !== null && usdcBalance < 1000));
 
   const dismiss = useCallback(() => {
     setDismissed(true);
@@ -247,6 +293,22 @@ export function useDevnetFaucet(): DevnetFaucetState {
 
   const airdropSol = useCallback(async () => {
     if (!publicKey) return;
+    // A reply for the previous wallet must not mark this one funded or failed (as airdropUsdc), and
+    // the fallbacks must not spend another airdrop on a wallet that is no longer connected.
+    const forWallet = publicKey.toBase58();
+    const stale = () => walletAddressRef.current !== forWallet;
+    // A server send still within its window: say so again instead of airdropping a second time.
+    // Past it the send has landed (the balance check clears this) or can't any more (blockhash expiry).
+    const serverPending = solServerPendingRef.current;
+    if (serverPending && Date.now() - serverPending.at < SOL_SERVER_PENDING_MS) {
+      setStep("sol");
+      lastOpFailedRef.current = true;
+      solErrorRef.current = serverPending.msg;
+      setError(serverPending.msg);
+      void refreshBalances();
+      return;
+    }
+    solServerPendingRef.current = null;
     setStep("sol");
     setLoading(true);
     setError(null);
@@ -255,16 +317,32 @@ export function useDevnetFaucet(): DevnetFaucetState {
       // UX WP-10 (FA-1): the server faucet first — it sends from the playground's server wallet
       // when that is configured (the public airdrop below is usually rate-limited).
       let sig: string | null = null;
+      let pendingMsg: string | null = null;
       try {
         const resp = await fetch("/api/faucet", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ wallet: publicKey.toBase58(), type: "sol" }),
+          body: JSON.stringify({ wallet: forWallet, type: "sol" }),
         });
-        const data = (await resp.json().catch(() => ({}))) as { signature?: string };
+        const data = (await resp.json().catch(() => ({}))) as { signature?: string; pending?: boolean; error?: string };
         if (resp.ok && data.signature) sig = data.signature;
+        // The server sent the SOL but couldn't confirm it in time (503 `pending`). It counts that as
+        // the claim and never re-sends, so the fallbacks below would be a second airdrop, and their
+        // failure read "SOL airdrop failed" while this one was landing (as /faucet's sol_pending).
+        else if (resp.status === 503 && data.pending === true)
+          pendingMsg = data.error ?? "Your test SOL is on its way but not confirmed yet. Check your balance in a minute before trying again.";
       } catch {
         sig = null;
+      }
+      if (stale()) return;
+      if (pendingMsg) {
+        // Not done until the balance shows it: refreshBalances marks SOL done once it lands.
+        solServerPendingRef.current = { msg: pendingMsg, at: Date.now() };
+        lastOpFailedRef.current = true;
+        solErrorRef.current = pendingMsg;
+        setError(pendingMsg);
+        void refreshBalances();
+        return;
       }
       // PERC-808: Try Helius devnet faucet next (more reliable, higher limits)
       if (!sig && HELIUS_DEVNET_RPC) {
@@ -283,12 +361,14 @@ export function useDevnetFaucet(): DevnetFaucetState {
               break;
             }
             await new Promise((r) => setTimeout(r, 2000));
+            if (stale()) return; // a switch mid-poll frees the new wallet's buttons now, not in a minute
           }
           // Not confirmed in a minute: not done (it used to fall through to setSolDone).
           if (!confirmed) throw new Error("SOL airdrop not confirmed");
         } catch {
           sig = null; // Fall through to Solana faucet
         }
+        if (stale()) return;
       }
 
       // Fallback: Solana devnet faucet
@@ -309,15 +389,20 @@ export function useDevnetFaucet(): DevnetFaucetState {
             break;
           }
           await new Promise((r) => setTimeout(r, 2000));
+          if (stale()) return;
         }
         // Not confirmed in a minute: report it rather than showing the step done. If it lands
         // later, refreshBalances marks SOL done from the balance.
         if (!confirmed) throw new Error("SOL airdrop not confirmed");
       }
+      if (stale()) return;
 
+      solAirdropPendingRef.current = true;
       setSolDone(true);
+      setFundedHere(true);
       await refreshBalances();
     } catch (e) {
+      if (stale()) return;
       lastOpFailedRef.current = true;
       const msg = plainMessage(e, { surface: "faucet" }, (raw) => keepAppMessage(raw) === raw ? raw : "SOL airdrop failed — devnet may be rate-limiting. Try the Solana Faucet.");
       solErrorRef.current = msg;
@@ -329,6 +414,7 @@ export function useDevnetFaucet(): DevnetFaucetState {
 
   const airdropUsdc = useCallback(async () => {
     if (!publicKey) return;
+    const forWallet = publicKey.toBase58();
     setStep("usdc");
     setLoading(true);
     setError(null);
@@ -337,9 +423,18 @@ export function useDevnetFaucet(): DevnetFaucetState {
       const resp = await fetch("/api/faucet", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet: publicKey.toBase58(), type: "usdc" }),
+        body: JSON.stringify({ wallet: forWallet, type: "usdc" }),
       });
       const data = await resp.json();
+      // A reply for the previous wallet must not mark this one rate limited or funded (as refreshBalances).
+      if (walletAddressRef.current !== forWallet) return;
+      // The short per-IP / middleware limit: say so, and don't latch "Rate limited" (lib/faucet-429).
+      const shortLimit = shortRateLimitMessage(resp, data);
+      if (shortLimit) {
+        lastOpFailedRef.current = true;
+        setError(shortLimit);
+        return;
+      }
       if (resp.status === 429) {
         lastOpFailedRef.current = true;
         setRateLimited(true);
@@ -355,7 +450,9 @@ export function useDevnetFaucet(): DevnetFaucetState {
       if (!resp.ok) {
         throw new Error(data.error ?? "USDC airdrop failed");
       }
+      usdcAirdropPendingRef.current = true;
       setUsdcDone(true);
+      setFundedHere(true);
       invalidateWalletBalance();
       await refreshBalances();
     } catch (e) {
@@ -368,6 +465,10 @@ export function useDevnetFaucet(): DevnetFaucetState {
 
   const fundAll = useCallback(async () => {
     if (!publicKey) return;
+    // Stop at a wallet switch: the steps below would otherwise fund the previous wallet's USDC and
+    // set the new wallet's step.
+    const forWallet = publicKey.toBase58();
+    const stale = () => walletAddressRef.current !== forWallet;
     setError(null);
 
     // Bug: this used to check `error` (the render-time closure value) after
@@ -379,11 +480,13 @@ export function useDevnetFaucet(): DevnetFaucetState {
     let solFailed = false;
     if (!solDone && (solBalance === null || solBalance < 0.05)) {
       await airdropSol();
+      if (stale()) return;
       if (lastOpFailedRef.current) anyFailed = solFailed = true;
     }
 
     if (!usdcDone && (usdcBalance === null || usdcBalance < 1000)) {
       await airdropUsdc();
+      if (stale()) return;
       if (lastOpFailedRef.current) anyFailed = true;
       // airdropUsdc cleared the shared error and moved step to "usdc". If only SOL failed, put
       // its message back on the SOL step so the modal shows it (and its faucet.solana.com link).

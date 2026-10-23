@@ -46,6 +46,8 @@
  * sharpen.
  */
 
+import { isPlaceholderTicker } from "@/lib/unfinished-launch";
+
 /** The identity fields any source may contribute. Null = this source does not
  *  know the field; it is NOT an assertion that the market has no value. */
 export interface ResolvedIdentity {
@@ -73,6 +75,19 @@ function present(v: string | null | undefined): string | null {
   return typeof v === "string" && v.length > 0 ? v : null;
 }
 
+/** The ticker only: the indexer's "UNKNOWN" placeholder (an unfinished or unregistered launch)
+ *  is "no ticker", not a ticker. Without this it won over every better source, because the
+ *  per-market detail is first in precedence (#3266). */
+function presentTicker(v: string | null | undefined): string | null {
+  const t = present(v);
+  return t !== null && !isPlaceholderTicker(t) ? t : null;
+}
+
+/** True when any source carried the placeholder ticker: identity HAS loaded, it just knows nothing. */
+export function sawPlaceholderTicker(...sources: IdentitySource[]): boolean {
+  return sources.some((s) => !!s && isPlaceholderTicker(s.symbol));
+}
+
 /**
  * Field-level merge across sources given in PRECEDENCE ORDER (most
  * authoritative first). For each field independently, the first source that
@@ -86,7 +101,7 @@ export function resolveIdentity(...sources: IdentitySource[]): ResolvedIdentity 
   const out: ResolvedIdentity = { ...EMPTY };
   for (const source of sources) {
     if (!source) continue;
-    out.symbol ??= present(source.symbol);
+    out.symbol ??= presentTicker(source.symbol);
     out.name ??= present(source.name);
     out.logo_url ??= present(source.logo_url);
     out.mainnet_ca ??= present(source.mainnet_ca);

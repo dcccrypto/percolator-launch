@@ -5,7 +5,10 @@ import { BACKING_SEED_PCT_OF_LP } from "@/lib/market-params";
 import { wizardSlabBytes } from "@/lib/create-market-args";
 import { p3WizardEnabled } from "@/lib/limits/flags";
 import { VAULT_LP_MATCHER_CTX_LEN } from "@/lib/limits/constants";
-import { V17_PORTFOLIO_ACCOUNT_LEN, MATCHER_CONTEXT_LEN } from "@percolatorct/sdk";
+import { MATCHER_CONTEXT_LEN } from "@percolatorct/sdk";
+import { portfolioAccountLen } from "@/lib/v22/layout";
+import { SHARE_NAMING_NET_LAMPORTS, isShareNamingEnabled } from "@/lib/v22/share-naming";
+import { rentSol } from "@/lib/rent";
 
 interface CostEstimateProps {
   lpCollateral: string;
@@ -14,22 +17,6 @@ interface CostEstimateProps {
   tokenDecimals: number;
   tokenPriceUsd?: number;
   className?: string;
-}
-
-/**
- * Rent-exempt minimum per account: (data bytes + 128) × lamports per byte. The rate was
- * 6960; getMinimumBalanceForRentExemption on devnet AND mainnet now returns 5080/byte
- * (0 B → 650,240; 33,900 B → 172,862,240), so 6960 over-quoted every launch by ~37%.
- * ponytail: hard-coded rate — if rent changes again, read it once from
- * getMinimumBalanceForRentExemption(0) / 128 instead.
- */
-const RENT_PER_BYTE = 5080;
-const RENT_OVERHEAD_BYTES = 128;
-const LAMPORTS_PER_SOL = 1_000_000_000;
-
-/** Rent-exempt minimum, in SOL, for accounts of the given data sizes. */
-function rentSol(...sizes: number[]): number {
-  return sizes.reduce((sum, bytes) => sum + (bytes + RENT_OVERHEAD_BYTES) * RENT_PER_BYTE, 0) / LAMPORTS_PER_SOL;
 }
 
 /** Estimated transaction fees for the ~9-10 signed-transaction creation flow (see
@@ -62,8 +49,9 @@ const EARN_VAULT_AND_STAKE_ACCOUNT_BYTES = [176, 82, 82, 165, 352];
  * P3 launches also create the vault-owned LP portfolio + its matcher context
  * client-side (buildP3BindIxs in lib/limits/p3-wizard.ts).
  */
-const LP_PORTFOLIO_AND_MATCHER_ACCOUNT_BYTES = [V17_PORTFOLIO_ACCOUNT_LEN, MATCHER_CONTEXT_LEN];
-const P3_VAULT_LP_ACCOUNT_BYTES = [V17_PORTFOLIO_ACCOUNT_LEN, VAULT_LP_MATCHER_CTX_LEN];
+// Functions, not module constants: the portfolio length depends on the layout flag (9,563 v2.1 / 10,603 v2.2).
+const lpPortfolioAndMatcherAccountBytes = (): number[] => [portfolioAccountLen(), MATCHER_CONTEXT_LEN];
+const p3VaultLpAccountBytes = (): number[] => [portfolioAccountLen(), VAULT_LP_MATCHER_CTX_LEN];
 
 export interface CreateMarketSolCostBreakdown {
   slabRentSol: number;
@@ -71,7 +59,30 @@ export interface CreateMarketSolCostBreakdown {
   lpPortfolioMatcherRentSol: number;
   earnVaultStakeRentSol: number;
   txFeeSol: number;
+  /**
+   * v2.2 only (absent otherwise, so the flag-off breakdown is byte-identical): the Earn share token's Metaplex record, ~0.0151 SOL net
+   * (the wallet briefly holds 0.03 SOL for it; the rest comes back in the same instruction).
+   */
+  shareNamingSol?: number;
   totalSolCost: number;
+}
+
+/**
+ * SOL a resumed launch still needs, starting at create()'s `startStep` (the steps before it have
+ * landed; useCreateMarket.ts skips them). Only the rent of a step that has certainly run comes
+ * off: the slab (step 0, it exists on any resume), the LP portfolio + matcher context (step 2,
+ * legacy launches; P3 creates its LP accounts elsewhere) and the Earn vault + stake pool (steps
+ * 4-5, once both ran). Token accounts and the fee headroom stay in: the check stays conservative.
+ */
+export function remainingCreateMarketSolCost(
+  cost: CreateMarketSolCostBreakdown,
+  startStep: number,
+  opts: { p3?: boolean } = {},
+): number {
+  let remaining = cost.totalSolCost - cost.slabRentSol;
+  if (startStep > 2 && opts.p3 !== true) remaining -= cost.lpPortfolioMatcherRentSol;
+  if (startStep > 5) remaining -= cost.earnVaultStakeRentSol;
+  return remaining;
 }
 
 /**
@@ -86,9 +97,9 @@ export function computeCreateMarketSolCost(
   opts: { p3?: boolean } = {},
 ): CreateMarketSolCostBreakdown {
   // BUG 1 fix: the v17 slab account length is fixed per market kind, never per tier.
-  // Legacy markets encode maxPortfolioAssets:14 (DEFAULT_SLAB_SIZE); P3 markets are
-  // single-asset (tag 94 refuses anything but one slot), so they encode 1 and the
-  // slab is v17MarketAccountLen(1). wizardSlabBytes is the same helper create() uses.
+  // Every new launch, legacy and P3, encodes maxPortfolioAssets:1 (P3 because tag 94 refuses
+  // anything but one slot; legacy because only slot 0 is ever used), so the slab is
+  // v17MarketAccountLen(1). wizardSlabBytes is the same helper create() uses.
   const dataSize = wizardSlabBytes(opts.p3 === true);
 
   // Rent-exempt minimum for the slab account
@@ -99,18 +110,21 @@ export function computeCreateMarketSolCost(
   const tokenAccountRentSol = rentSol(165, 165, 165, 82, 82);
 
   // Rent for the Step 2 LP portfolio + matcher context accounts — see
-  // LP_PORTFOLIO_AND_MATCHER_ACCOUNT_BYTES doc comment above.
+  // lpPortfolioAndMatcherAccountBytes() doc comment above.
   const lpPortfolioMatcherRentSol = rentSol(
-    ...LP_PORTFOLIO_AND_MATCHER_ACCOUNT_BYTES,
-    ...(opts.p3 === true ? P3_VAULT_LP_ACCOUNT_BYTES : []),
+    ...lpPortfolioAndMatcherAccountBytes(),
+    ...(opts.p3 === true ? p3VaultLpAccountBytes() : []),
   );
 
   // Rent for the Earn vault (Step 4) + stake pool (Step 5) accounts — see
   // EARN_VAULT_AND_STAKE_ACCOUNT_BYTES doc comment above.
   const earnVaultStakeRentSol = rentSol(...EARN_VAULT_AND_STAKE_ACCOUNT_BYTES);
 
+  // v2.2: naming the Earn share token (tag 122) costs the Metaplex record's rent + create fee.
+  const shareNamingSol = isShareNamingEnabled() ? SHARE_NAMING_NET_LAMPORTS / 1_000_000_000 : null;
+
   const totalSolCost =
-    slabRentSol + tokenAccountRentSol + lpPortfolioMatcherRentSol + earnVaultStakeRentSol + TX_FEE_ESTIMATE_SOL;
+    slabRentSol + tokenAccountRentSol + lpPortfolioMatcherRentSol + earnVaultStakeRentSol + TX_FEE_ESTIMATE_SOL + (shareNamingSol ?? 0);
 
   return {
     slabRentSol,
@@ -118,6 +132,7 @@ export function computeCreateMarketSolCost(
     lpPortfolioMatcherRentSol,
     earnVaultStakeRentSol,
     txFeeSol: TX_FEE_ESTIMATE_SOL,
+    ...(shareNamingSol !== null ? { shareNamingSol } : {}),
     totalSolCost,
   };
 }
@@ -164,6 +179,7 @@ export const CostEstimate: FC<CostEstimateProps> = ({
       lpPortfolioMatcherRentSol: sol.lpPortfolioMatcherRentSol.toFixed(4),
       earnVaultStakeRentSol: sol.earnVaultStakeRentSol.toFixed(4),
       txFeeSol: sol.txFeeSol.toFixed(4),
+      shareNamingSol: sol.shareNamingSol === undefined ? null : sol.shareNamingSol.toFixed(4),
       totalSolCost: sol.totalSolCost.toFixed(4),
       lpTokens: lpNum,
       insTokens: insNum,
@@ -187,9 +203,9 @@ export const CostEstimate: FC<CostEstimateProps> = ({
       <div className="px-4 py-3 space-y-2 border-b border-[var(--border)]">
         <div className="flex items-center justify-between text-[11px]">
           {/* v17 slabs are always sized to max capacity — there is no tier to
-              display here (see DEFAULT_SLAB_SIZE doc comment above). */}
+              display here (see LAUNCH_ASSET_SLOTS in lib/create-market-args.ts). */}
           <span className="text-[var(--text-secondary)]">
-            Market account rent (max capacity)
+            Market account rent
           </span>
           <span className="font-mono text-[var(--text)]">{estimate.slabRentSol} SOL</span>
         </div>
@@ -205,6 +221,12 @@ export const CostEstimate: FC<CostEstimateProps> = ({
           <span className="text-[var(--text-secondary)]">Earn vault & stake pool</span>
           <span className="font-mono text-[var(--text)]">{estimate.earnVaultStakeRentSol} SOL</span>
         </div>
+        {estimate.shareNamingSol !== null && (
+          <div className="flex items-center justify-between text-[11px]" data-testid="cost-share-naming">
+            <span className="text-[var(--text-secondary)]">Earn share token name</span>
+            <span className="font-mono text-[var(--text)]">{estimate.shareNamingSol} SOL</span>
+          </div>
+        )}
         <div className="flex items-center justify-between text-[11px]">
           <span className="text-[var(--text-secondary)]">Transaction fees (~9 txs)</span>
           <span className="font-mono text-[var(--text)]">{estimate.txFeeSol} SOL</span>

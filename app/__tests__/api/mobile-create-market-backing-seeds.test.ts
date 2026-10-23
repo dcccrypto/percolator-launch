@@ -51,6 +51,7 @@
  * CreateLpVault refuse forever (Custom 63), so "no direct top-up at all" is asserted.
  */
 
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { describe, it, expect } from "vitest";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
@@ -93,7 +94,9 @@ const deployer = Keypair.fromSeed(new Uint8Array(32).fill(13)).publicKey;
 const userAta = fixedKey(17);
 const vaultAta = fixedKey(19);
 
-const funding = buildMobileFundingIxs({ programId, market, lpPortfolio, deployer, userAta, vaultAta });
+// collateralMint: tag 74's account [6] on v2.2 (ignored with the flag off). With the flag on the vault-create group also carries tag 122 right after 74.
+const NAMED = isDevnetV22Enabled() ? 1 : 0;
+const funding = buildMobileFundingIxs({ programId, market, lpPortfolio, deployer, userAta, vaultAta, collateralMint: fixedKey(23) });
 /** Every instruction the launch issues, for presence/absence checks. */
 const ixs = [...funding.mandatory, ...funding.backingSeeds];
 const seed = backingSeedPerDomain(DEFAULT_LP_COLLATERAL);
@@ -169,11 +172,11 @@ describe("GH#2749: no direct TopUpBackingBucket is ever sent", () => {
 
 describe("both backing domains are funded through the Earn vault (C-1 path)", () => {
   it("is exactly CreateLpVault, the LP-share ATA, then a deposit into domain 0 and domain 1", () => {
-    expect(funding.backingSeeds).toHaveLength(4);
+    expect(funding.backingSeeds).toHaveLength(4 + NAMED);
     expect(dataOf(funding.backingSeeds[0]).equals(createVaultData)).toBe(true);
-    expect(funding.backingSeeds[1].programId.equals(ASSOCIATED_TOKEN_PROGRAM_ID)).toBe(true);
-    expect(indexOfData(depositVaultData(0))).toBe(2);
-    expect(indexOfData(depositVaultData(1))).toBe(3);
+    expect(funding.backingSeeds[1 + NAMED].programId.equals(ASSOCIATED_TOKEN_PROGRAM_ID)).toBe(true);
+    expect(indexOfData(depositVaultData(0))).toBe(2 + NAMED);
+    expect(indexOfData(depositVaultData(1))).toBe(3 + NAMED);
   });
 
   it("creates the vault BEFORE either deposit (CreateLpVault needs Empty buckets)", () => {

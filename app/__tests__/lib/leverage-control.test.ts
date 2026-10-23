@@ -22,6 +22,8 @@ import {
   quantizeTypedLeverage,
   clampSliderLeverage,
   nextLeverageInputState,
+  leverageToPct,
+  pctToLeverage,
   LEVERAGE_STEP,
 } from "@/lib/leverage-control";
 import { formatLeverageValue } from "@/lib/leverage-display";
@@ -99,6 +101,33 @@ describe("the slider can express the leverages a market can be created at", () =
     expect(clampSliderLeverage(99, 7.5)).toBe(7.5);
     expect(clampSliderLeverage(0, 7.5)).toBe(1);
     expect(clampSliderLeverage(Number.NaN, 7.5)).toBe(1);
+  });
+});
+
+// N3: the thumb and labels sit on the preset index scale; a pointer must map back through it.
+describe("the slider track maps a pointer to the leverage drawn under it", () => {
+  it("each preset's position maps back to that preset", () => {
+    for (const max of [10, 20, 6.66, 4.5]) {
+      const presets = availableLeverage(max);
+      for (const p of presets) expect(pctToLeverage(leverageToPct(p, presets) / 100, presets, max)).toBe(p);
+    }
+  });
+
+  it("the 5x stop is 5x, not the linear 7x (10x market) or 10.5x (20x market)", () => {
+    expect(pctToLeverage(2 / 3, [1, 3, 5, 10], 10)).toBe(5);
+    expect(pctToLeverage(0.5, [1, 3, 5, 10, 20], 20)).toBe(5);
+  });
+
+  it("between presets the pointer lands on the half-step grid", () => {
+    // Halfway between the 5x and 10x stops of a 10x market.
+    expect(pctToLeverage(5 / 6, [1, 3, 5, 10], 10)).toBe(7.5);
+    expect(pctToLeverage(0.1, [1, 3, 5, 10], 10)).toBe(1.5);
+  });
+
+  it("CONTROL: the ends are 1x and the max, and junk is 1x", () => {
+    expect(pctToLeverage(0, [1, 3, 5, 10], 10)).toBe(1);
+    expect(pctToLeverage(1.4, [1, 3, 5, 6.66], 6.66)).toBe(6.66);
+    expect(pctToLeverage(Number.NaN, [1, 3, 5, 10], 10)).toBe(1);
   });
 });
 

@@ -12,16 +12,19 @@ export const FundingExplainerModal: FC<FundingExplainerModalProps> = ({ onClose 
   return (
     <Modal
       onClose={onClose}
+      labelledBy="funding-explainer-title"
       scrimClassName="backdrop-blur-sm"
       panelClassName="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-sm border border-[var(--border)] bg-[var(--bg)] shadow-2xl"
     >
         {/* Header */}
         <div className="sticky top-0 flex items-center justify-between border-b border-[var(--border)]/50 bg-[var(--bg)] px-4 py-3">
-          <h2 className="text-2xl font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
+          <h2 id="funding-explainer-title" className="text-2xl font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
             Understanding Funding Rates
           </h2>
           <button
+            type="button"
             onClick={onClose}
+            aria-label="Close"
             className="flex h-8 w-8 items-center justify-center rounded-sm text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-elevated)] hover:text-[var(--text)]"
           >
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

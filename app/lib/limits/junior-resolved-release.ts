@@ -8,7 +8,7 @@
  */
 import type { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { createAssociatedTokenAccountIdempotentInstruction } from "@solana/spl-token";
-import { decodeMarketEngineView, decodeTerminalBacking } from "./decode";
+import { decodeMarketEngineView, decodeTerminalBacking, decodeTerminalBackingDomains } from "./decode";
 import { harvestableFeeAtoms, juniorResolvedSurplusAtoms } from "./vault-tranche";
 import { buildLpVaultCrankFeesIx, buildVaultLpReleaseSurplusIx, type VaultLpMarket } from "./p3-ix";
 
@@ -41,10 +41,35 @@ export interface JuniorResolvedReleaseCtx {
   vaultAuthority: PublicKey;
 }
 
+/** Idle backing per source domain `[registry domain, sibling]` (null when the market cannot be decoded). */
+export function juniorResolvedDomainIdle(marketData: Uint8Array | null, registryDomain: number): readonly [bigint, bigint] | null {
+  return marketData ? decodeTerminalBackingDomains(marketData, registryDomain) : null;
+}
+
+/**
+ * Tag 102 pays from ONE domain's backing bucket per call, but its gate (`physical - C`) spans both
+ * domains. Split `amount` into per-domain legs: the registry's own bucket first (up to what it holds),
+ * the rest from the sibling's. A claim that fits one bucket stays a single 102. With no per-domain
+ * figures (null) the amount is one leg on the registry domain, as before.
+ */
+export function splitJuniorRelease(
+  amount: bigint,
+  registryDomain: number,
+  idle: readonly [bigint, bigint] | null,
+): { sourceDomain: number; amount: bigint }[] {
+  if (!idle || amount <= idle[0]) return [{ sourceDomain: registryDomain, amount }];
+  const first = idle[0];
+  const rest = amount - first;
+  return first > 0n
+    ? [{ sourceDomain: registryDomain, amount: first }, { sourceDomain: registryDomain ^ 1, amount: rest }]
+    : [{ sourceDomain: registryDomain ^ 1, amount: rest }];
+}
+
 export function buildJuniorResolvedReleaseIxs(
   c: JuniorResolvedReleaseCtx,
   amount: bigint,
   needHarvest: boolean,
+  domainIdle: readonly [bigint, bigint] | null = null,
 ): TransactionInstruction[] {
   return [
     createAssociatedTokenAccountIdempotentInstruction(c.owner, c.ownerAta, c.owner, c.mint),
@@ -62,10 +87,12 @@ export function buildJuniorResolvedReleaseIxs(
           }),
         ]
       : []),
-    buildVaultLpReleaseSurplusIx(c.vm, c.owner, amount, c.domain, {
-      destToken: c.ownerAta,
-      vaultToken: c.vaultToken,
-      vaultAuthority: c.vaultAuthority,
-    }),
+    ...splitJuniorRelease(amount, c.domain, domainIdle).map((leg) =>
+      buildVaultLpReleaseSurplusIx(c.vm, c.owner, leg.amount, leg.sourceDomain, {
+        destToken: c.ownerAta,
+        vaultToken: c.vaultToken,
+        vaultAuthority: c.vaultAuthority,
+      }),
+    ),
   ];
 }

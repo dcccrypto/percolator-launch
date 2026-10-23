@@ -10,6 +10,9 @@ describe("#2320 priceStore caps retained snapshots", () => {
   it("evicts idle entries past the cap, and keeps a subscribed one alive", async () => {
     vi.resetModules();
     const store = await import("../../lib/priceStore/priceStore");
+    // vi.resetModules() above also reset the lot-exponent registry. With the v2.2 flag on, a price is withheld until the market's lot exponent is
+    // known (N1 gate), so seed exponent 0 on the FRESH module instance the store just imported (flag off this is a no-op).
+    (await import("../../lib/v22/lot-registry")).__setUnknownLotExpForTest(0);
 
     // A subscribed slab must survive eviction no matter how much churn follows.
     const pinned = "PINNED_SLAB";

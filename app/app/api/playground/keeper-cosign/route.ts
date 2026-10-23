@@ -61,7 +61,7 @@ import { requirePlaygroundKeeperSigner } from "@/lib/playground-keeper-signer";
 import { DEVNET_PROGRAM_IDS } from "@/lib/program-ids";
 import { authorizeKeeperCosignV1 } from "@/lib/launch-single-tx/cosign-validate";
 import { launchCreatePins, neutralFromInstructions, type LaunchCreatePins } from "@/lib/launch-single-tx/shape";
-import { cosignV1RateLimited } from "@/lib/launch-single-tx/cosign-rate-limit";
+import { cosignLegacyRateLimited, cosignV1RateLimited } from "@/lib/launch-single-tx/cosign-rate-limit";
 import { canonicalVaultLpMatcher } from "@/lib/limits/p3-wizard";
 import { getClientIp } from "@/lib/get-client-ip";
 import { WELL_KNOWN } from "@percolatorct/sdk";
@@ -339,6 +339,12 @@ export async function POST(req: NextRequest) {
         keeperPubkey: keeper.publicKey(),
         nowSlot: verdict.message.nowSlot.toString(),
       });
+    }
+
+    // S3-C7: the legacy branch is bounded per IP and per deployer too, before any RPC read or signature.
+    const legacyLimited = cosignLegacyRateLimited(getClientIp(req), deployerPk.toBase58());
+    if (legacyLimited) {
+      return NextResponse.json({ error: `Too many co-sign requests (per ${legacyLimited}); retry in a minute` }, { status: 429, headers: { "Retry-After": "60" } });
     }
 
     // Fetch slot (used as initial mark timestamp in ConfigureAuthMark)

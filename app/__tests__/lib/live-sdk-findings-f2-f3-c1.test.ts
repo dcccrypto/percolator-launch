@@ -11,7 +11,8 @@
  */
 import { describe, it, expect } from "vitest";
 import { Keypair, PublicKey } from "@solana/web3.js";
-import { V17_PORTFOLIO_ACCOUNT_LEN, V17_PORTFOLIO_IDENTITY_TRAILER_LEN } from "@percolatorct/sdk";
+import { V17_PORTFOLIO_IDENTITY_TRAILER_LEN } from "@percolatorct/sdk";
+import { matcherPortfolio } from "../helpers/v22-fixtures";
 import { buildTradeCpiIx, buildTradeIxs, batchTradeCaps } from "@/lib/trade-ix";
 import { isLpPortfolio } from "@/lib/lpPortfolio";
 import { matcherCtxOfPortfolio } from "@/lib/limits/lp-discovery";
@@ -84,13 +85,14 @@ describe("F-3: only a full portfolio can be the LP", () => {
     expect(isLpPortfolio(registry)).toBe(false);
     expect(matcherCtxOfPortfolio(registry)).toBeNull();
   });
-  it("a full portfolio (9,563 B, kind 2) with the enabled bit IS the LP", () => {
-    const pf = control(Buffer.alloc(V17_PORTFOLIO_ACCOUNT_LEN), true);
-    pf[10] = 2;
+  // A full portfolio of the ACTIVE layout (9,563 B v18 flag off; a captured 10,603 B VERSION-19 portfolio flag on).
+  it("a full portfolio (kind 2) with the enabled bit IS the LP", () => {
+    const pf = matcherPortfolio(true);
+    expect(pf[10]).toBe(2);
     expect(isLpPortfolio(pf)).toBe(true);
   });
   it("a full-length account of another kind is not", () => {
-    const other = control(Buffer.alloc(V17_PORTFOLIO_ACCOUNT_LEN), true);
+    const other = matcherPortfolio(true);
     other[10] = 3;
     expect(isLpPortfolio(other)).toBe(false);
   });

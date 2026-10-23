@@ -51,6 +51,8 @@ Team sessions carry a fingerprint of the team secret, so **rotating or unsetting
 browser history and request logs — use it from your own browser, and rotate it if it is shared.
 There are no wallet or email allowlists in code.
 
+Hackathon judges have their own revocable door (`/enter?judge=…`) — see [PLAYGROUND-JUDGE-ACCESS.md](./PLAYGROUND-JUDGE-ACCESS.md).
+
 ## What stays reachable without a session
 
 `/enter`, `/locked`, `/_next/*`, `/_vercel/*`, `/.well-known/*`, `/images/*`, `/icons/*`, `/audio/*`,
@@ -64,7 +66,6 @@ authenticates itself:
 | `GET /api/playground/registered-markets` | oracle keeper poll (cookie-less) | public market config by design |
 | `PATCH /api/markets/<slab>` | external ops/keeper signer | HMAC-SHA256 over `KEEPER_REGISTER_SECRET`, timestamp-bounded |
 | `POST /api/oracle-keeper/register` | keeper registration | HMAC-SHA256 over `KEEPER_REGISTER_SECRET`, timestamp-bounded |
-| `POST /api/oracle/set-price-cap` | operator tool | `x-admin-secret` vs `ADMIN_API_SECRET`, fails closed |
 
 Every other `/api/*` route is called same-origin by the app in the browser and is gated (the cookie
 rides along). There are no Vercel crons on this project. A test enumerates `app/api/**/route.ts` and

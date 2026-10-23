@@ -5,6 +5,7 @@ import { WarmupExplainerModal } from "./WarmupExplainerModal";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
 import { pollWhenVisible } from "@/lib/pollWhenVisible";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 
 interface WarmupData {
   warmupStartedAtSlot: number;
@@ -67,6 +68,12 @@ export const WarmupProgress: FC<{
   // tab is hidden via pollWhenVisible.
   useEffect(() => {
     if (mockMode) return;
+    // v2.2 QA RT5-3: the v2.2 engine has no per-position warmup and the endpoint answers 501 for it, permanently.
+    if (isDevnetV22Enabled()) {
+      setWarmupData(null);
+      setLoading(false);
+      return;
+    }
 
     let disposePoll: (() => void) | null = null;
 

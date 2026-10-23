@@ -1,88 +1,36 @@
 "use client";
 
-import { FC, useEffect, useRef } from "react";
-import { createPortal } from "react-dom";
-import gsap from "gsap";
-import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
+import { FC } from "react";
+import { Modal } from "@/components/ui/Modal";
 
 interface InsuranceExplainerModalProps {
   onClose: () => void;
-  onTopUp?: () => void;
 }
 
+/** On the shared Modal (role=dialog, focus trap and restore, Escape, scroll lock), like the Funding explainer. */
 export const InsuranceExplainerModal: FC<InsuranceExplainerModalProps> = ({
   onClose,
-  onTopUp,
 }) => {
-  const overlayRef = useRef<HTMLDivElement>(null);
-  const modalRef = useRef<HTMLDivElement>(null);
-  const prefersReduced = usePrefersReducedMotion();
-
-  // Keep the onClose callback in a ref so the mount effect never re-runs on parent
-  // re-renders. Insurance-dashboard parents re-render whenever LP / vault / live-price
-  // data ticks and pass freshly-allocated inline `onClose` closures each time; with
-  // `onClose` in the effect deps, every parent re-render re-fired the gsap fade-in
-  // (opacity 0 → 1) and made the modal blink continuously while open. Same canonical
-  // pattern as TradeConfirmationModal.tsx.
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-
-  useEffect(() => {
-    const overlay = overlayRef.current;
-    const modal = modalRef.current;
-    if (!overlay || !modal) return;
-
-    if (prefersReduced) {
-      overlay.style.opacity = "1";
-      modal.style.opacity = "1";
-      modal.style.transform = "scale(1)";
-    } else {
-      gsap.fromTo(
-        overlay,
-        { opacity: 0 },
-        { opacity: 1, duration: 0.2, ease: "power2.out" }
-      );
-      gsap.fromTo(
-        modal,
-        { opacity: 0, scale: 0.95 },
-        { opacity: 1, scale: 1, duration: 0.25, ease: "power2.out" }
-      );
-    }
-
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCloseRef.current();
-    };
-    document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefersReduced]);
-
-  const handleOverlayClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) onClose();
-  };
-
-  const content = (
-    <div
-      ref={overlayRef}
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
-      style={{ opacity: 0 }}
-      onClick={handleOverlayClick}
+  return (
+    <Modal
+      onClose={onClose}
+      labelledBy="insurance-explainer-title"
+      scrimClassName="backdrop-blur-sm"
+      panelClassName="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-none border border-[var(--border)] bg-[var(--bg)] shadow-2xl"
     >
-      <div
-        ref={modalRef}
-        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-none border border-[var(--border)] bg-[var(--bg)] shadow-2xl"
-        style={{ opacity: 0 }}
-      >
         {/* Header */}
         <div className="sticky top-0 flex items-center justify-between border-b border-[var(--border)]/50 bg-[var(--bg)] px-4 py-3">
           <h2
+            id="insurance-explainer-title"
             className="text-2xl font-bold text-[var(--text)]"
             style={{ fontFamily: "var(--font-display)" }}
           >
             What is the Insurance Fund?
           </h2>
           <button
+            type="button"
             onClick={onClose}
+            aria-label="Close"
             className="flex h-8 w-8 items-center justify-center rounded-none text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-elevated)] hover:text-[var(--text)]"
           >
             <svg
@@ -132,7 +80,7 @@ export const InsuranceExplainerModal: FC<InsuranceExplainerModalProps> = ({
                     Accumulates from trading fees
                   </div>
                   <div className="text-xs text-[var(--text-dim)]">
-                    A portion of every trade goes to the insurance fund
+                    A share of every trade fee is set aside for the insurance side (paid into the stake pool where the market has one)
                   </div>
                 </div>
               </div>
@@ -151,10 +99,11 @@ export const InsuranceExplainerModal: FC<InsuranceExplainerModalProps> = ({
                 <span className="text-[var(--long)]">✓</span>
                 <div>
                   <div className="text-sm font-medium text-[var(--text)]">
-                    Anyone can contribute, no approval needed
+                    Funded by trading fees and the market&apos;s insurance authority
                   </div>
                   <div className="text-xs text-[var(--text-dim)]">
-                    Community members can top up the insurance fund anytime
+                    Only that authority can add to it directly. On a staked
+                    market the authority is the stake pool
                   </div>
                 </div>
               </div>
@@ -255,41 +204,26 @@ export const InsuranceExplainerModal: FC<InsuranceExplainerModalProps> = ({
             </p>
           </section>
 
-          {/* How to contribute */}
+          {/* Who funds it */}
           <section>
             <h3 className="mb-2 text-sm font-bold text-[var(--text)]">
-              How to contribute
+              Who funds it
             </h3>
             <p className="text-sm leading-relaxed text-[var(--text-secondary)]">
-              Anyone can top up the insurance fund by depositing collateral.
-              <strong>Anyone</strong> can do it — no approvals needed.
+              A share of every trading fee is set aside for the insurance
+              side. On a market with a stake pool that share is paid into the
+              pool, and the pool&apos;s admin can move staked funds into
+              insurance, so staked funds can be used to cover losses. Apart
+              from that, only the market&apos;s insurance authority can add
+              collateral to the insurance balance.
             </p>
             <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
-              Why would you contribute?
+              There is no public deposit into the insurance fund. Depositing
+              into a market&apos;s <strong>Earn</strong> vault is a different
+              thing: it provides counterparty backing, mints vault shares and
+              is exposed to trader profit and loss. It does not add to the
+              insurance balance.
             </p>
-            <ul className="mt-2 space-y-1 text-sm text-[var(--text-secondary)]">
-              <li className="flex items-start gap-2">
-                <span className="text-[var(--accent)]">•</span>
-                <span>
-                  <strong>Protect your Earn deposit:</strong> if you have one,
-                  stronger insurance = safer deposit
-                </span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-[var(--accent)]">•</span>
-                <span>
-                  <strong>Support the ecosystem:</strong> Help Percolator grow
-                  by making markets safer
-                </span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-[var(--accent)]">•</span>
-                <span>
-                  <strong>Community alignment:</strong> Show you believe in the
-                  project
-                </span>
-              </li>
-            </ul>
           </section>
 
           {/* Coverage Ratio */}
@@ -315,8 +249,8 @@ export const InsuranceExplainerModal: FC<InsuranceExplainerModalProps> = ({
               <div className="flex items-start gap-2">
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--short)] mt-0.5" />
                 <span>
-                  <strong>&lt;2x coverage:</strong> Low — risky, consider
-                  topping up
+                  <strong>&lt;2x coverage:</strong> Low — a large liquidation
+                  could exceed the insurance balance
                 </span>
               </div>
             </div>
@@ -331,21 +265,7 @@ export const InsuranceExplainerModal: FC<InsuranceExplainerModalProps> = ({
           >
             Close
           </button>
-          <button
-            onClick={() => {
-              onClose();
-              onTopUp?.();
-            }}
-            className="flex-1 rounded-none border border-[var(--accent)]/30 bg-[var(--accent)]/10 px-4 py-2 text-sm font-medium text-[var(--accent)] transition-colors hover:bg-[var(--accent)]/20"
-          >
-            Top Up Insurance
-          </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
-
-  return typeof document !== "undefined"
-    ? createPortal(content, document.body)
-    : null;
 };

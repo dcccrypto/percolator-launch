@@ -15,6 +15,8 @@ import { join, relative, resolve } from "node:path";
 import { PublicKey } from "@solana/web3.js";
 import { parseMarketGroupV17OI, V17_KIND_OFF } from "@percolatorct/sdk";
 import { V17_ENGINE_CONFIG_OFF, V17_MAX_ABS_FUNDING_REL } from "@/lib/v17-engine-config";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { modeFixtures } from "../helpers/v22-fixtures";
 
 const APP = resolve(__dirname, "..", "..");
 const WRAPPER = "ETDLAdiAyWnEUngspYczTXUceT6X8f92eZQvr8nmSkWB";
@@ -76,9 +78,11 @@ vi.mock("@/lib/indexer-db", async (orig) => {
       if (h.dbThrows) throw new Error("connection refused");
       return h.trades;
     },
-    queryTradesForCandles: async () => {
+    // The route aggregates in SQL now; the double buckets the same rows with the reference
+    // implementation (bucketCandles), which the SQL is tested against.
+    queryCandlesAggregated: async (_slab: string, bucketSeconds: number) => {
       if (h.dbThrows) throw new Error("connection refused");
-      return h.candleRows;
+      return { udf: m.bucketCandles(h.candleRows, bucketSeconds), truncated: false };
     },
   };
 });
@@ -196,8 +200,13 @@ describe("/api/open-interest/:slab (OpenInterestCard) -> chain only", () => {
     expect((await call(oiGET, SLAB)).status).toBe(404);
   });
   it("v17 market that fails to parse -> 503, not a 200 of zeros", async () => {
-    put(SLAB, { owner: WRAPPER, data: PENGU.subarray(0, 400) });
-    expect((await call(oiGET, SLAB)).status).toBe(503);
+    // Flag off the truncated v18 market is a parse failure: retryable 503. Flag on the reader is VERSION-keyed, so the same truncation of a real
+    // v2.2 market is a typed layout refusal (422 unsupported_layout, lib/v22/layout.ts), which is the designed answer; either way never a 200.
+    const truncated = isDevnetV22Enabled() ? Buffer.from(modeFixtures().market).subarray(0, 400) : PENGU.subarray(0, 400);
+    put(SLAB, { owner: WRAPPER, data: truncated });
+    const res = await call(oiGET, SLAB);
+    expect(res.status).toBe(isDevnetV22Enabled() ? 422 : 503);
+    if (isDevnetV22Enabled()) expect((await res.json()).error).toBe("unsupported_layout");
   });
   it("an account that is not a market at all -> 404 (permanent), not 503 'temporarily unavailable'", async () => {
     put(SLAB, { owner: "11111111111111111111111111111111", data: Buffer.alloc(0) }); // system account

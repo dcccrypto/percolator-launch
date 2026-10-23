@@ -5,6 +5,7 @@ import {
   isOpenPosition,
   type PortfolioPosition,
 } from "@/hooks/usePortfolio";
+import { pendingProfit } from "@/lib/convert-released-pnl";
 import {
   subscribeSlab,
   getSnapshot,
@@ -48,7 +49,10 @@ export interface LivePortfolioMetrics {
    */
   livePositions: LivePositionMetric[];
   totalUnrealizedPnl: bigint;
-  /** Same definition usePortfolio uses: deposited capital + current unrealized PnL. */
+  /**
+   * Deposited capital + profit still settling on flat accounts (`pendingProfit`) + current
+   * unrealized PnL: the same terms as /portfolio's Portfolio Value tile.
+   */
   totalValue: bigint;
 }
 
@@ -148,13 +152,14 @@ export function useLivePortfolioMetrics(
       (sum, metric) => sum + metric.pnl,
       0n,
     );
+    const totalPendingProfit = positions.reduce((sum, pos) => sum + pendingProfit(pos), 0n);
 
     return {
       unknownPnlCount: livePositions.filter((m) => !m.pnlKnown).length,
       openPositions,
       livePositions,
       totalUnrealizedPnl,
-      totalValue: totalDeposited + totalUnrealizedPnl,
+      totalValue: totalDeposited + totalPendingProfit + totalUnrealizedPnl,
     };
-  }, [openPositions, totalDeposited, liveVersion]);
+  }, [positions, openPositions, totalDeposited, liveVersion]);
 }

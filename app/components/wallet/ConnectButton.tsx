@@ -1,34 +1,16 @@
 "use client";
 
-import { FC, useCallback, useMemo, useState, useRef, useEffect } from "react";
+import { FC, useCallback, useMemo, useState, useRef, useEffect, useSyncExternalStore } from "react";
 import { useToast } from "@/hooks/useToast";
+import { useMenuDismiss } from "@/hooks/useMenuDismiss";
+import { copyAddress } from "@/lib/copy-address";
 import Link from "next/link";
-import dynamic from "next/dynamic";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletReadyState } from "@solana/wallet-adapter-base";
 import { usePrivyAvailable } from "@/hooks/usePrivySafe";
 import { useWalletAdapterAvailable } from "@/hooks/useWalletAdapterAvailable";
-
-/**
- * Privy-backed button is loaded on demand — its @privy-io/react-auth import (and
- * the transitive WalletConnect/Coinbase/viem graph) is a separate async chunk,
- * fetched only when Privy is the active provider, never in the shared bundle.
- */
-const ConnectButtonPrivyInner = dynamic(
-  () => import("./ConnectButtonPrivyInner").then((m) => m.ConnectButtonPrivyInner),
-  {
-    ssr: false,
-    loading: () => (
-      <button
-        disabled
-        className="min-h-10 rounded-sm border border-[var(--border)] px-4 text-[13px] font-medium text-[var(--text-muted)] opacity-50"
-        aria-label="Loading wallet"
-      >
-        Connect
-      </button>
-    ),
-  },
-);
+import { ConnectButtonPlaceholder } from "./ConnectButtonPlaceholder";
+import { ConnectButtonPrivyInner } from "./ConnectButtonPrivyInner";
 
 /**
  * Wallet connect button — backs Privy (primary) or wallet-adapter (fallback).
@@ -48,7 +30,7 @@ export const ConnectButton: FC = () => {
   }
 
   if (adapterAvailable) {
-    return <ConnectButtonAdapterInner />;
+    return <ConnectButtonAdapterGate />;
   }
 
   // Neither Privy nor wallet-adapter — read-only mode
@@ -63,11 +45,33 @@ export const ConnectButton: FC = () => {
   );
 };
 
+const noopSubscribe = () => () => {};
+
+/** The wallets the fallback picker always offers: connect when present, install link when not. */
+const SUPPORTED_WALLETS = [
+  { name: "Phantom", installUrl: "https://phantom.com/download" },
+  { name: "Solflare", installUrl: "https://solflare.com/download" },
+  { name: "Backpack", installUrl: "https://backpack.app/download" },
+] as const;
+
+/**
+ * Pages are server-rendered, but which wallets this browser has (and whether a remembered one
+ * auto-connects, so the button shows an address) is only known in the browser, and the
+ * server pass has no wallet-adapter provider at all. So the server pass and the hydration pass both
+ * render an invisible placeholder of the button's size, and the real one takes over right after
+ * hydration (useSyncExternalStore: server snapshot false, client snapshot true, no mismatch).
+ */
+const ConnectButtonAdapterGate: FC = () => {
+  const hydrated = useSyncExternalStore(noopSubscribe, () => true, () => false);
+  if (!hydrated) return <ConnectButtonPlaceholder />;
+  return <ConnectButtonAdapterInner />;
+};
+
 /**
  * Wallet-adapter backed connect button (no Privy).
  * Detects installed Wallet Standard extensions (Phantom, Solflare, Backpack, etc.)
- * and presents a minimal selection dropdown. Degrades gracefully to an
- * "Install Phantom" link when no extension is detected.
+ * and presents a minimal selection dropdown, with install links for the supported
+ * wallets this browser does not have.
  */
 const ConnectButtonAdapterInner: FC = () => {
   const { wallets, wallet, select, connect, disconnect, connected, publicKey, connecting } =
@@ -96,17 +100,8 @@ const ConnectButtonAdapterInner: FC = () => {
     [wallets],
   );
 
-  // Close menu on outside click
-  useEffect(() => {
-    if (!menuOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [menuOpen]);
+  // Close menu on outside click or Escape
+  useMenuDismiss(menuOpen, setMenuOpen, menuRef);
 
   const handleConnect = useCallback(
     async (walletName: string) => {
@@ -147,6 +142,7 @@ const ConnectButtonAdapterInner: FC = () => {
           data-state="connected"
           className="min-h-10 max-w-[10rem] truncate rounded-sm border border-[var(--accent)]/30 bg-[var(--accent)]/[0.06] px-4 text-[13px] font-medium text-[var(--accent)] transition-all duration-200 hover:bg-[var(--accent)]/[0.12] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
           aria-label={`Wallet: ${displayAddress}`}
+          aria-expanded={menuOpen}
         >
           {displayAddress}
         </button>
@@ -165,7 +161,7 @@ const ConnectButtonAdapterInner: FC = () => {
             </Link>
             <button
               onClick={() => {
-                void navigator.clipboard.writeText(publicKey.toBase58());
+                void copyAddress(publicKey.toBase58(), toast);
                 setMenuOpen(false);
               }}
               className="w-full rounded-sm px-3 py-1.5 text-left text-[13px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--accent)]/[0.06]"
@@ -187,40 +183,20 @@ const ConnectButtonAdapterInner: FC = () => {
     );
   }
 
-  // Not connected — show wallet picker if extensions are available
-  if (readyWallets.length === 0) {
-    return (
-      <a
-        href="https://phantom.app"
-        target="_blank"
-        rel="noreferrer"
-        className="min-h-10 inline-flex items-center rounded-sm border border-[var(--accent)] bg-[var(--accent)]/20 px-4 text-[13px] font-medium text-[var(--text)] transition-all hover:bg-[var(--accent)]/30"
-      >
-        Install Phantom
-      </a>
-    );
-  }
-
-  if (readyWallets.length === 1) {
-    return (
-      <button
-        onClick={() => void handleConnect(readyWallets[0].adapter.name)}
-        data-testid="wallet-connect"
-        data-state="disconnected"
-        className="min-h-10 rounded-sm border border-[var(--accent)] bg-[var(--accent)]/20 px-4 text-[13px] font-medium text-[var(--text)] transition-all hover:bg-[var(--accent)]/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
-      >
-        Connect {readyWallets[0].adapter.name}
-      </button>
-    );
-  }
-
-  // Multiple wallets available — picker dropdown
+  // Not connected: always the picker. With no extension the only ready wallet is the
+  // always-Loadable Solflare adapter, and a lone "Connect Solflare" button left Phantom and
+  // Backpack unreachable (v2.2 QA 2026-10-16). Supported wallets missing from this browser are
+  // listed as install links.
+  const missingWallets = SUPPORTED_WALLETS.filter(
+    (s) => !readyWallets.some((w) => w.adapter.name === s.name),
+  );
   return (
     <div className="relative" ref={menuRef}>
       <button
         onClick={() => setMenuOpen((v) => !v)}
         data-testid="wallet-connect"
         data-state="disconnected"
+        aria-expanded={menuOpen}
         className="min-h-10 rounded-sm border border-[var(--accent)] bg-[var(--accent)]/20 px-4 text-[13px] font-medium text-[var(--text)] transition-all hover:bg-[var(--accent)]/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
       >
         Connect Wallet
@@ -239,6 +215,21 @@ const ConnectButtonAdapterInner: FC = () => {
               ) : null}
               {w.adapter.name}
             </button>
+          ))}
+          {readyWallets.length > 0 && missingWallets.length > 0 ? (
+            <div className="my-1 h-px bg-[var(--border)]" />
+          ) : null}
+          {missingWallets.map((s) => (
+            <a
+              key={s.name}
+              href={s.installUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={() => setMenuOpen(false)}
+              className="block w-full rounded-sm px-3 py-2 text-left text-[13px] text-[var(--text-muted)] transition-colors hover:bg-[var(--accent)]/[0.06]"
+            >
+              Install {s.name}
+            </a>
           ))}
         </div>
       )}

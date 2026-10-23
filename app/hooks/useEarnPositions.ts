@@ -9,7 +9,7 @@ import { pollWhenVisible } from "@/lib/pollWhenVisible";
 
 /**
  * The connected wallet's deposit (USD) in every listed Earn vault, keyed by slab, for the hub
- * table's "Your Deposit" column. Includes a creator's wizard seed and escrowed pending shares.
+ * table's "Your Value" column. Includes a creator's wizard seed and escrowed pending shares.
  * Absent key = not read yet / unreadable (the row shows "—"); 0 = genuinely nothing.
  */
 export function useEarnPositions(markets: readonly { slabAddress: string; decimals: number }[]): Record<string, number> {

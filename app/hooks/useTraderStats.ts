@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { TraderStatsResponse } from "@/app/api/trader/[wallet]/stats/route";
+import { INDEXER_RECONCILE_MS, subscribePortfolioReload } from "@/lib/portfolio-invalidation";
 
 export type { TraderStatsResponse };
 
@@ -23,7 +24,7 @@ export function useTraderStats(wallet: string | null | undefined): UseTraderStat
   const requestSeqRef = useRef(0);
 
   const fetch_ = useCallback(
-    async (requestSeq = requestSeqRef.current) => {
+    async (requestSeq = requestSeqRef.current, fresh = false) => {
       if (!wallet) {
         setStats(null);
         setLoading(false);
@@ -36,7 +37,10 @@ export function useTraderStats(wallet: string | null | undefined): UseTraderStat
       setError(null);
 
       try {
-        const res = await fetch(`/api/trader/${wallet}/stats`);
+        // The route is CDN-cached (s-maxage=30, swr=60); a refresh needs a unique URL to see a new fill.
+        const res = fresh
+          ? await fetch(`/api/trader/${wallet}/stats?_cb=${Date.now()}`, { cache: "no-store" })
+          : await fetch(`/api/trader/${wallet}/stats`);
 
         if (!isCurrentRequest()) return;
 
@@ -95,12 +99,18 @@ export function useTraderStats(wallet: string | null | undefined): UseTraderStat
     setError(null);
 
     if (wallet) {
-      void fetch_(requestSeq);
+      void fetch_(requestSeq, true);
     } else {
       setStats(null);
       setLoading(false);
     }
   }, [wallet, fetch_]);
+
+  // A fill the wallet just made changes its totals; refresh keeps the last-good stats on screen.
+  useEffect(() => {
+    if (!wallet) return;
+    return subscribePortfolioReload(refresh, INDEXER_RECONCILE_MS);
+  }, [wallet, refresh]);
 
   return { stats, loading, error, refresh };
 }

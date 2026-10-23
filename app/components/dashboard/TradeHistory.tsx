@@ -9,22 +9,18 @@
  * Bug 6 fix: "Trader dashboard showing stats but zero transactions"
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import Link from "next/link";
+import { NO_HISTORY_COPY, v22HasNoIndexer } from "@/lib/v22/indexer";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
+import { useAllMarketStats } from "@/hooks/useAllMarketStats";
+import { fillTimeParts } from "@/lib/fill-time";
 import { explorerTxUrl } from "@/lib/config";
 import { formatUsdFromNumber } from "@/lib/format";
+import { fillSide, fillSideColor, fillSideLabel } from "@/lib/fill-side";
 import type { TraderTradeEntry } from "@/app/api/trader/[wallet]/trades/route";
 
 type TradeType = "all" | "long" | "short";
-
-function formatTime(ts: string): string {
-  const d = new Date(ts);
-  return (
-    d.toLocaleDateString([], { month: "short", day: "numeric" }) +
-    ", " +
-    d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-  );
-}
 
 function formatUsd(val: number, showSign = false): string {
   const sign = showSign ? (val >= 0 ? "+" : "") : "";
@@ -43,6 +39,8 @@ const PAGE_SIZE = 25;
 export function TradeHistory() {
   const { publicKey } = useWalletCompat();
   const wallet = publicKey?.toBase58() ?? null;
+  // slab -> market symbol, for the Market cell (shared, deduped SWR with the rest of the app).
+  const { statsMap } = useAllMarketStats();
 
   const [trades, setTrades] = useState<TraderTradeEntry[]>([]);
   const [total, setTotal] = useState(0);
@@ -51,47 +49,64 @@ export function TradeHistory() {
   const [page, setPage] = useState(1);
   const [sideFilter, setSideFilter] = useState<TradeType>("all");
 
+  // A different wallet starts on its own first page. Carrying the old page over
+  // read the new wallet at the old offset: one with fewer trades got an empty
+  // page, "No trades yet", and no pager (it only renders past one page).
+  const [pageWallet, setPageWallet] = useState(wallet);
+  if (pageWallet !== wallet) {
+    setPageWallet(wallet);
+    setPage(1);
+  }
+
   const offset = (page - 1) * PAGE_SIZE;
+
+  // Bumped by every read and by the effect cleanup (wallet or page change,
+  // unmount), so a slower response for the previous wallet or page can't land
+  // over the current one. Same guard as hooks/useTradeHistory.ts.
+  const requestSeqRef = useRef(0);
 
   const fetchTrades = useCallback(async () => {
     if (!wallet) return;
+    const requestSeq = ++requestSeqRef.current;
+    const isCurrent = () => requestSeqRef.current === requestSeq;
     setLoading(true);
     setError(null);
     try {
       const res = await fetch(
-        `/api/trader/${wallet}/trades?limit=${PAGE_SIZE}&offset=${offset}`
+        `/api/trader/${wallet}/trades?limit=${PAGE_SIZE}&offset=${offset}${sideFilter === "all" ? "" : `&side=${sideFilter}`}`
       );
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? `HTTP ${res.status}`);
       }
       const data = await res.json();
+      if (!isCurrent()) return;
       setTrades(data.trades ?? []);
       setTotal(data.total ?? 0);
     } catch (err) {
+      if (!isCurrent()) return;
       setError(err instanceof Error ? err.message : "Failed to load trades");
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [wallet, offset]);
+  }, [wallet, offset, sideFilter]);
 
   useEffect(() => {
     fetchTrades();
+    return () => {
+      requestSeqRef.current++;
+    };
   }, [fetchTrades]);
 
-  const filtered = useMemo(() => {
-    if (sideFilter === "all") return trades;
-    return trades.filter((t) => t.side === sideFilter);
-  }, [trades, sideFilter]);
-
+  // The side filter runs on the server, so `trades` and `total` already describe the filtered set.
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const handleExportCsv = () => {
-    const headers = ["Time", "Market", "Side", "Size", "Entry/Exit Price", "Fee", "Tx"];
-    const rows = filtered.map((t) => [
+    const headers = ["Time", "Market", "Side", "Size", "Price", "Fee", "Tx"];
+    const rows = trades.map((t) => [
       t.created_at,
       t.slab_address,
-      t.side,
+      fillSide(t.side) ?? "",
       t.size,
       t.price,
       t.fee,
@@ -131,7 +146,8 @@ export function TradeHistory() {
         </p>
         <button
           onClick={handleExportCsv}
-          disabled={filtered.length === 0}
+          // `trades` keeps the last good read through a refetch or an error, so only export a settled one.
+          disabled={loading || !!error || trades.length === 0}
           className="rounded-sm border border-[var(--border)] px-3 py-1 text-[10px] text-[var(--text-secondary)] transition-all hover:border-[var(--accent)]/30 hover:text-[var(--text)] disabled:opacity-30"
         >
           Export CSV
@@ -144,12 +160,13 @@ export function TradeHistory() {
           value={sideFilter}
           onChange={(e) => {
             setSideFilter(e.target.value as TradeType);
+            setPage(1);
           }}
           className="rounded-sm border border-[var(--border)] bg-[var(--bg)] px-3 py-1.5 text-[11px] text-[var(--text-secondary)] outline-none focus:border-[var(--accent)]/30"
         >
           <option value="all">All Sides</option>
-          <option value="long">Long</option>
-          <option value="short">Short</option>
+          <option value="long">Buy</option>
+          <option value="short">Sell</option>
         </select>
       </div>
 
@@ -169,13 +186,17 @@ export function TradeHistory() {
               Retry
             </button>
           </div>
-        ) : filtered.length === 0 ? (
+        ) : trades.length === 0 && sideFilter !== "all" ? (
           <div className="flex flex-col items-center justify-center py-12">
-            <p className="text-[13px] text-[var(--text-secondary)]">No trades yet</p>
+            <p className="text-[13px] text-[var(--text-secondary)]">{sideFilter === "long" ? "No buy fills" : "No sell fills"}</p>
+          </div>
+        ) : trades.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12">
+            <p data-testid="trade-history-empty" className="text-[13px] text-[var(--text-secondary)]">{v22HasNoIndexer() ? NO_HISTORY_COPY.title : "No trades yet"}</p>
             <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
-              Your executed trades will appear here once the trade indexer has processed them.
+              {v22HasNoIndexer() ? NO_HISTORY_COPY.body : "Your executed trades will appear here once the trade indexer has processed them."}
             </p>
-            {(process.env.NEXT_PUBLIC_DEFAULT_NETWORK ?? process.env.NEXT_PUBLIC_SOLANA_NETWORK) === "devnet" && (
+            {!v22HasNoIndexer() && (process.env.NEXT_PUBLIC_DEFAULT_NETWORK ?? process.env.NEXT_PUBLIC_SOLANA_NETWORK) === "devnet" && (
               <p className="mt-2 text-[10px] text-[var(--warning)]/60">
                 ⚠ Devnet: trade indexer may not be running. Trades are on-chain but not yet indexed.
               </p>
@@ -189,16 +210,15 @@ export function TradeHistory() {
                 <th className="px-3 py-3 text-left">Market</th>
                 <th className="px-3 py-3 text-left">Side</th>
                 <th className="px-3 py-3 text-right">Size</th>
-                {/* Each row is a fill — a trade's entry or a close's exit — so the column is the
-                    execution price of THAT fill, not the token's current market price. Label it
-                    accordingly so the number isn't misread as a live quote. */}
-                <th className="px-3 py-3 text-right">Entry/Exit</th>
+                {/* Each row is one fill: the execution price of THAT fill, not the token's
+                    current market price, and not knowably an entry or an exit (#3314). */}
+                <th className="px-3 py-3 text-right">Price</th>
                 <th className="px-3 py-3 text-right">Fee</th>
                 <th className="px-3 py-3 text-center">Tx</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((trade) => (
+              {trades.map((trade) => (
                 <tr
                   key={trade.id}
                   className="border-b border-[rgba(255,255,255,0.04)] text-[11px] transition-colors hover:bg-[rgba(255,255,255,0.02)]"
@@ -206,23 +226,33 @@ export function TradeHistory() {
                   <td
                     className="px-4 py-2.5 text-[var(--text-secondary)]"
                     style={{ fontFamily: "var(--font-jetbrains-mono)" }}
+                    title={new Date(trade.created_at).toLocaleString()}
                   >
-                    {formatTime(trade.created_at)}
+                    {/* Two short lines ("5 Oct" / "18:38") that never wrap mid-date on a phone. */}
+                    {(() => {
+                      const t = fillTimeParts(trade.created_at);
+                      return t ? (
+                        <>
+                          <span className="block whitespace-nowrap">{t.date}</span>
+                          <span className="block whitespace-nowrap text-[10px] text-[var(--text-dim)]">{t.time}</span>
+                        </>
+                      ) : (
+                        "—"
+                      );
+                    })()}
                   </td>
                   <td className="px-3 py-2.5">
-                    <span className="rounded border border-[var(--accent)]/20 bg-[var(--accent)]/5 px-1.5 py-0.5 text-[10px] font-bold text-[var(--accent)]">
-                      {shortAddr(trade.slab_address)}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <span
-                      className={`text-[10px] font-bold ${
-                        trade.side === "long"
-                          ? "text-[var(--long)]"
-                          : "text-[var(--short)]"
-                      }`}
+                    <Link
+                      href={`/trade/${trade.slab_address}`}
+                      title={`${trade.slab_address} — open market`}
+                      className="whitespace-nowrap rounded border border-[var(--accent)]/20 bg-[var(--accent)]/5 px-1.5 py-0.5 text-[10px] font-bold text-[var(--accent)] transition-colors hover:border-[var(--accent)]/50 hover:bg-[var(--accent)]/10"
                     >
-                      {trade.side.toUpperCase()}
+                      {statsMap.get(trade.slab_address)?.symbol ?? shortAddr(trade.slab_address)}
+                    </Link>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <span className={`text-[10px] font-bold ${fillSideColor(trade.side)}`}>
+                      {fillSideLabel(trade.side)}
                     </span>
                   </td>
                   <td
@@ -268,7 +298,8 @@ export function TradeHistory() {
       </div>
 
       {/* Pagination */}
-      {totalPages > 1 && (
+      {/* After an error, `total` is the previous read's count (another side or wallet), so no pager. */}
+      {totalPages > 1 && !error && (
         <div className="flex items-center justify-end gap-3 border-t border-[var(--border)] px-5 py-3">
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}

@@ -17,6 +17,11 @@ function formatUsd(n: number): string {
   })}`;
 }
 
+/** A value that could not be read (v2.2 first-loss stake, units unreadable) is a dash, never a partial figure. */
+function formatUsdOrDash(n: number | null): string {
+  return n === null ? "—" : formatUsd(n);
+}
+
 function formatPct(n: number): string {
   if (n < 0.01) return "< 0.01%";
   return `${n.toFixed(2)}%`;
@@ -157,7 +162,7 @@ function LpPositionCard({ position: pos, kind }: { position: LpPosition; kind: P
               className="text-sm font-bold"
               style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums", color: accent }}
             >
-              {formatUsd(pos.redeemable)}
+              {formatUsdOrDash(pos.redeemable)}
             </p>
             <p className="text-[10px] text-[var(--text-secondary)]">redeemable</p>
           </div>
@@ -192,7 +197,7 @@ function LpPositionCard({ position: pos, kind }: { position: LpPosition; kind: P
               className="text-[12px] text-[var(--text-secondary)]"
               style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
             >
-              {formatUsd(pos.tvl)}
+              {pos.tvl === null ? "—" : formatUsd(pos.tvl)}
             </p>
           </div>
 
@@ -214,7 +219,7 @@ function LpPositionCard({ position: pos, kind }: { position: LpPosition; kind: P
 /** One titled section (Vault or Stake) with its own redeemable total. */
 function PositionGroup({ kind, positions }: { kind: PositionKind; positions: LpPosition[] }) {
   const { title, subtitle, accent } = KIND[kind];
-  const total = positions.reduce((s, p) => s + p.redeemable, 0);
+  const total = positions.some((p) => p.redeemable === null) ? null : positions.reduce((s, p) => s + (p.redeemable ?? 0), 0);
   return (
     <section>
       <div className="mb-2 flex items-end justify-between border-b border-[var(--border)] pb-2">
@@ -231,7 +236,7 @@ function PositionGroup({ kind, positions }: { kind: PositionKind; positions: LpP
             className="text-[13px] font-bold tabular-nums"
             style={{ fontFamily: "var(--font-jetbrains-mono)", color: accent }}
           >
-            {formatUsd(total)}
+            {formatUsdOrDash(total)}
           </p>
           <p className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">total redeemable</p>
         </div>
@@ -252,7 +257,8 @@ function PositionGroup({ kind, positions }: { kind: PositionKind; positions: LpP
 interface LpPositionsPanelProps {
   loading: boolean;
   positions: LpPosition[];
-  totalRedeemable: number;
+  /** null = a position's value is unknown: the total is a dash. */
+  totalRedeemable: number | null;
   error: string | null;
   onRetry?: () => void;
 }
@@ -282,7 +288,7 @@ export function LpPositionsPanel({
             className="text-[11px] font-semibold text-[var(--text-secondary)]"
             style={{ fontFamily: "var(--font-jetbrains-mono)" }}
           >
-            {formatUsd(totalRedeemable)} total
+            {formatUsdOrDash(totalRedeemable)} total
           </span>
         )}
       </div>
@@ -331,7 +337,7 @@ export function LpPositionsPanel({
           <div>
             <p className="text-[12px] font-medium text-[var(--text)]">No Earn or stake positions</p>
             <p className="mt-0.5 text-[11px] text-[var(--text-secondary)]">
-              Deposit into insurance pools to earn yield while backing the fund.
+              Deposit into an Earn vault, or stake into a pool, to earn a share of trading fees.
             </p>
           </div>
           <Link

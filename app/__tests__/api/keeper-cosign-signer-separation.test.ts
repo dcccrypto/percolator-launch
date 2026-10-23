@@ -15,6 +15,8 @@ import {
   Transaction,
 } from "@solana/web3.js";
 import { NextRequest } from "next/server";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { v22MarketBytes } from "../helpers/v22-fixtures";
 
 const state = vi.hoisted(() => ({
   keeper: null as Keypair | null,
@@ -131,12 +133,12 @@ describe("keeper-cosign signer-role separation", () => {
         Keypair.generate().publicKey.toBase58(),
       lastValidBlockHeight: 999999,
     });
-    // A zeroed market at a live slab's size: the v18 readers see asset 0 with
-    // market_id 0 and both control lanes at 0.
+    // Flag off: a zeroed market at a live slab's size (the v18 readers see asset 0 with market_id 0 and both control lanes at 0).
+    // Flag on the readers are VERSION-keyed and refuse zeros, so the market is the captured v2.2 (VERSION 19) one-slot account.
     vi.mocked(
       Connection.prototype.getAccountInfo,
     ).mockResolvedValue({
-      data: Buffer.alloc(24_600),
+      data: isDevnetV22Enabled() ? Buffer.from(v22MarketBytes()) : Buffer.alloc(24_600),
       executable: false,
       lamports: 1,
       owner: Keypair.generate().publicKey,

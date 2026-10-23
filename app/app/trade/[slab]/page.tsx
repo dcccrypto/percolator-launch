@@ -1,9 +1,11 @@
 "use client";
 
+import { UnsupportedLayoutNotice } from "@/components/v22/UnsupportedLayoutNotice";
 import { use, useState, useEffect, useRef, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { MobileTradeBand } from "@/components/trade/MobileTradeBand";
 import { isInsideModalSurface } from "@/hooks/useOtherModalOpen";
+import { lockPageScroll } from "@/hooks/useLockBodyScroll";
 import useSWR from "swr";
 import { useRouter } from "next/navigation";
 import { PublicKey } from "@solana/web3.js";
@@ -14,33 +16,46 @@ import { OrderTicket } from "@/components/trade/OrderTicket";
 import { useTicketRow, ticketRowShortLabel } from "@/lib/limits/ticket-status-store";
 import { PositionsDock } from "@/components/trade/PositionsDock";
 import dynamic from "next/dynamic";
+import { selectChartEngine, tvLibraryVersion } from "@/lib/tv/config";
 import { MarketInfoBar } from "@/components/trade/MarketInfoBar";
 import { MarketLimitsStrip } from "@/components/limits/MarketLimitsStrip";
 import { MarketHeaderStatus, TradeMarketHealthBanner } from "@/components/market/MarketHealthBadges";
 import { AnalyticsDock } from "@/components/trade/AnalyticsDock";
 import { useIsLargeScreen } from "@/hooks/useIsLargeScreen";
-import { useAdvanceOraclePhase } from "@/hooks/useAdvanceOraclePhase";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { useLivePriceHasData, livePriceJsonFetcher } from "@/hooks/useLivePrice";
 import { getMarketIdentity, setMarketIdentity } from "@/lib/marketIdentityCache";
-import { useToast } from "@/hooks/useToast";
 import { isPlaceholderSymbol, SLUG_ALIASES } from "@/lib/symbol-utils";
 // DevnetFaucetModal moved to WalletProvider (PERC-808: global placement on all pages)
 import { getNetwork } from "@/lib/config";
 import { RenderProfiler } from "@/components/dev/RenderProfiler";
 import TradingPageLoading from "./loading";
+import { ADMIN_BURN_COPY, creatorAdminBurned } from "@/lib/admin-burn-copy";
+import { MultiAssetNotice } from "@/components/trade/MultiAssetNotice";
+import { isMultiAssetMarket } from "@/lib/v22/market-cap";
+import { fetchMarketsList, listedMarketRows } from "@/lib/markets-list-client";
 
 // Lazy-load the chart so it streams AFTER the order ticket + positions are
 // interactive, instead of blocking the trade page's initial load. ssr:false —
 // the chart is client-only. ChartSwitch is the single seam that picks the chart
 // (see components/trade/ChartSwitch.tsx and lib/chart-engine.ts).
+// The skeleton holds the mobile height of the chart that will mount (below lg the chart sets its own
+// height; the positions dock sits right under it). With `h-full` in an auto-height wrapper it was 0 px
+// tall, so the dock jumped ~560 px down when the chart chunk arrived after the dock had painted
+// (Lighthouse mobile, 2 of 6 runs: a 0.26 layout shift). Engine per build (no ?chart= override, which
+// only exists in the browser): the TradingView body, or the built-in perp chart's exact height.
+const CHART_SKELETON_MOBILE_HEIGHT =
+  selectChartEngine({ libraryVersion: tvLibraryVersion(), envEngine: process.env.NEXT_PUBLIC_CHART_ENGINE, query: null }) === "tv"
+    ? "h-[clamp(420px,62svh,640px)]"
+    : "h-[clamp(460px,68svh,700px)]";
+
 const TradingChart = dynamic(
   () => import("@/components/trade/ChartSwitch").then((m) => m.ChartSwitch),
   {
     ssr: false,
     loading: () => (
-      <div className="h-full w-full animate-pulse rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]" />
+      <div className={`${CHART_SKELETON_MOBILE_HEIGHT} lg:h-full w-full animate-pulse rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]`} />
     ),
   },
 );
@@ -87,35 +102,6 @@ const TradingChart = dynamic(
  *   this protocol's model, so PositionsDock ships with the two tabs that
  *   actually correspond to real data: Positions, Trades.
  */
-
-/* ── Reusable tiny components ─────────────────────────────── */
-
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  const { toast } = useToast();
-  return (
-    <button
-      onClick={() => {
-        navigator.clipboard.writeText(text);
-        setCopied(true);
-        toast("Address copied to clipboard!", "success");
-        setTimeout(() => setCopied(false), 1500);
-      }}
-      className="inline-flex items-center text-[var(--text-muted)] transition-colors duration-150 hover:text-[var(--accent)]"
-      title="Copy address"
-    >
-      {copied ? (
-        <svg className="h-3 w-3 text-[var(--long)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-        </svg>
-      ) : (
-        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-        </svg>
-      )}
-    </button>
-  );
-}
 
 /* Phase 5: the page-local `Tabs` helper is gone — its only remaining
  * consumer (the old PositionsDockShell) was replaced by
@@ -196,15 +182,11 @@ function MobileOrderSheet({ slab }: { slab: string }) {
   // cleanup (and whenever `open` flips back to false).
   useEffect(() => {
     if (!open) return;
-    const prevOverflow = document.body.style.overflow;
-    const prevHtmlOverflow = document.documentElement.style.overflow;
-    // Lock BOTH elements: `globals.css` sets `html { overflow-x: hidden }`, which
-    // makes <html> itself the viewport scroller (overflow-y computes to `auto`).
-    // The UA propagates <html>'s overflow to the viewport and only falls back to
-    // <body>'s when <html> itself is `visible` — so locking body alone locked
-    // nothing and the page behind the sheet kept scrolling under a 40% backdrop.
-    document.body.style.overflow = "hidden";
-    document.documentElement.style.overflow = "hidden";
+    // Shared, ref-counted lock (hooks/useLockBodyScroll): it locks BOTH <html> and <body> (globals.css
+    // makes <html> the viewport scroller). A private save/restore here would put the page back to
+    // "unlocked" when the sheet closes while a dialog opened over it is still up, and that dialog's
+    // later release would then restore the stale "hidden" and leave the page locked for good.
+    const unlockPage = lockPageScroll();
 
     // iOS Safari ignores overflow:hidden on the viewport scroller entirely, so a
     // touch outside the sheet still drags the page behind it. Block those moves
@@ -257,8 +239,7 @@ function MobileOrderSheet({ slab }: { slab: string }) {
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => {
-      document.body.style.overflow = prevOverflow;
-      document.documentElement.style.overflow = prevHtmlOverflow;
+      unlockPage();
       document.removeEventListener("touchmove", handleTouchMove);
       document.removeEventListener("keydown", handleKeyDown);
     };
@@ -279,7 +260,7 @@ function MobileOrderSheet({ slab }: { slab: string }) {
 
       {/* Backdrop + sheet are portaled to <body> — the same thing every other
           dialog in this codebase already does (components/ui/Modal.tsx,
-          ClosePositionModal, TradeConfirmationModal, InsuranceTopUpModal,
+          ClosePositionModal, TradeConfirmationModal,
           SendPositionNftModal, InsuranceExplainerModal). This sheet was the
           only one left inline, and inline it sits inside the trade page's
           `animate-fade-in` wrapper (see the TradePageInner root). While that
@@ -344,8 +325,9 @@ const MARKET_META_SWR_OPTS = { dedupingInterval: 10_000, refreshInterval: 0, rev
 function TradePageInner({ slab }: { slab: string }) {
   const isLargeScreen = useIsLargeScreen();
 
-  const { engine, config, header, loading: slabLoading, error: slabError } = useSlabState();
-  useAdvanceOraclePhase(slab);
+  const { engine, config, header, raw: slabRaw, loading: slabLoading, error: slabError, layoutUnsupported } = useSlabState();
+  // #3463: the chip names the key a burn clears (asset 0's asset_admin), not the market authority in the header shim.
+  const adminBurned = creatorAdminBurned(slabRaw, header?.admin);
   // Boolean presence subscription, NOT the full live-price state: this keeps the
   // trade-page shell OFF the ~4-5/sec price-tick re-render path (it only needs to
   // know whether a price exists, for the no-data gate below). See useLivePriceHasData.
@@ -415,6 +397,14 @@ function TradePageInner({ slab }: { slab: string }) {
 
   if (slabLoading && !engine) {
     return <TradingPageLoading />;
+  }
+
+  if (layoutUnsupported) {
+    return (
+      <div className="min-h-[calc(100dvh-48px)] flex items-center justify-center px-4">
+        <UnsupportedLayoutNotice className="max-w-sm w-full" />
+      </div>
+    );
   }
 
   if (slabError && !config) {
@@ -545,9 +535,11 @@ function TradePageInner({ slab }: { slab: string }) {
       <MarketInfoBar slabAddress={slab} symbol={symbol} logoUrl={logoUrl} mintAddress={mintAddress} mainnetCa={chartMintAddress} />
       {/* UX WP-10 (§4.3): ONE status line under the header, only when the market is not live. */}
       <MarketHeaderStatus slab={slab} />
+      <MultiAssetNotice show={isMultiAssetMarket(slabRaw)} />
       {/* UX WP-10 (GL-1, §4.3): the market address and admin status left the page chrome; they sit
           in a collapsed "Market details" disclosure (the "ADMIN ACTIVE" chip is no longer shown by
           default above every market). */}
+      <div className="relative">
       <details data-testid="market-details" className="border-b border-[var(--border)]/30 px-3 py-1 text-[10px] text-[var(--text-secondary)]">
         <summary className="cursor-pointer select-none py-0.5">Market details</summary>
       {/* The health detail lines (payout level etc.) and the limits strip (OI vs cap, liquidity,
@@ -555,29 +547,30 @@ function TradePageInner({ slab }: { slab: string }) {
       <TradeMarketHealthBanner slab={slab} />
       <MarketLimitsStrip slab={slab} symbol={symbol} />
       <div className="flex items-center gap-3 py-1 overflow-x-auto whitespace-nowrap scrollbar-none">
-        <span className="flex items-center gap-1 text-[10px] text-[var(--text-muted)]" style={{ fontFamily: "var(--font-mono)" }}>
-          {shortAddress}
-          <CopyButton text={slab} />
-        </span>
-        {header?.admin && (
-          <Tooltip
-            text={
-              header.admin.toBase58() === "11111111111111111111111111111111"
-                ? "Admin key burned (set to the system program's default null address). No one can change this market's config, pause it, or touch its funds — it runs purely on its own code from here on."
-                : "This market still has a live admin key that can change config, pause the market, or adjust parameters. Not yet renounced."
-            }
-          >
-            <span className={`text-[9px] font-medium uppercase tracking-[0.12em] px-1.5 py-0.5 rounded-sm border ${
-              header.admin.toBase58() === "11111111111111111111111111111111"
+        {adminBurned !== null && (
+          <Tooltip text={adminBurned ? ADMIN_BURN_COPY.burned : ADMIN_BURN_COPY.active}>
+            <span data-testid="creator-key-chip" className={`text-[9px] font-medium uppercase tracking-[0.12em] px-1.5 py-0.5 rounded-sm border ${
+              adminBurned
                 ? "border-[var(--long)]/30 bg-[var(--long)]/5 text-[var(--long)]"
                 : "border-[var(--warning)]/30 bg-[var(--warning)]/5 text-[var(--warning)]"
             }`}>
-              {header.admin.toBase58() === "11111111111111111111111111111111" ? "Admin Renounced" : "Admin Active"}
+              {adminBurned ? ADMIN_BURN_COPY.chipBurned : ADMIN_BURN_COPY.chipActive}
             </span>
           </Tooltip>
         )}
       </div>
       </details>
+      {/* Below lg the AnalyticsDock (and its "Full analytics" link) is hidden, so the analytics
+          page gets a link on the Market details line. Outside <summary>, so a tap navigates
+          instead of toggling the disclosure. */}
+      <a
+        href={`/analytics/${slab}`}
+        data-testid="market-analytics-link"
+        className="absolute right-3 top-1 inline-flex items-center py-0.5 pointer-coarse:min-h-8 pointer-coarse:top-0 text-[10px] text-[var(--text-muted)] transition-colors hover:text-[var(--accent-text)] lg:hidden"
+      >
+        Full analytics <span aria-hidden="true">↗</span>
+      </a>
+      </div>
 
       {/* ════════════════ DESKTOP (≥ lg) — named grid ════════════════ */}
       {isLargeScreen && (
@@ -626,7 +619,9 @@ function TradePageInner({ slab }: { slab: string }) {
             </RenderProfiler>
           </ErrorBoundary>
 
-          <div className="h-[45vh] min-h-[280px] border border-[var(--border)] bg-[var(--panel-bg)]">
+          {/* Height follows the content (was a fixed 45vh: mostly empty with one position, and a second
+              scrollbar inside the page with several). The page scrolls instead; Trades pages at 25 rows. */}
+          <div className="min-h-[160px] border border-[var(--border)] bg-[var(--panel-bg)]">
             <ErrorBoundary label="PositionsDock"><PositionsDock slabAddress={slab} /></ErrorBoundary>
           </div>
 
@@ -683,11 +678,12 @@ function SlugResolvePage({ slug }: { slug: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/markets")
-      .then((r) => r.json())
+    // The canonical list (lib/markets-list-client.ts); listedMarketRows() is what the bare
+    // /api/markets returned (zombies excluded).
+    fetchMarketsList()
       .then((data) => {
         if (cancelled) return;
-        const markets: Array<{ slab_address: string; symbol?: string; mint_address?: string; volume_24h?: number | null; total_open_interest?: number | null; created_at?: string }> = data.markets ?? [];
+        const markets = (listedMarketRows(data) ?? []) as unknown as Array<{ slab_address: string; symbol?: string; mint_address?: string; volume_24h?: number | null; total_open_interest?: number | null; created_at?: string }>;
         const slugNorm = slug.toUpperCase().replace(/-PERP$/, "");
 
         const sorted = [...markets].sort((a, b) => {

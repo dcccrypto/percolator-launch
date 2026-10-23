@@ -7,18 +7,21 @@ import * as C from "@/lib/limits/constants";
 import { decodeResolvedPortfolio } from "@/lib/limits/decode";
 import { planOwnPortfolioCleanup, runOwnPortfolioCleanup, type OwnPortfolio } from "@/lib/limits/own-portfolio-cleanup";
 import { encodeClosePortfolio } from "@/lib/limits/p3-ix";
+import { afterLegsShift, blankMarket, blankPortfolio } from "../../helpers/v22-fixtures";
+import { marketOffsets } from "@/lib/v22/market-offsets";
+
 
 const k = () => Keypair.generate().publicKey;
 const PROG = k(), MARKET = k(), MINT = k(), OWNER = k(), VT = k(), VA = k();
 function pf(owner: PublicKey, o: { capital?: bigint; receipt?: [boolean, boolean] } = {}): OwnPortfolio {
-  const d = new Uint8Array(C.PF_RESOLVED_PAYOUT_RECEIPT + 66);
+  const d = new Uint8Array(blankPortfolio());
   const v = new DataView(d.buffer);
   d[10] = C.KIND_PORTFOLIO;
   d.set(owner.toBytes(), C.PF_OWNER);
   v.setBigUint64(C.PF_CAPITAL, o.capital ?? 0n, true);
   if (o.receipt) {
-    d[C.PF_RESOLVED_PAYOUT_RECEIPT + C.RECEIPT_PRESENT] = o.receipt[0] ? 1 : 0;
-    d[C.PF_RESOLVED_PAYOUT_RECEIPT + C.RECEIPT_FINALIZED] = o.receipt[1] ? 1 : 0;
+    d[C.PF_RESOLVED_PAYOUT_RECEIPT + afterLegsShift() + C.RECEIPT_PRESENT] = o.receipt[0] ? 1 : 0;
+    d[C.PF_RESOLVED_PAYOUT_RECEIPT + afterLegsShift() + C.RECEIPT_FINALIZED] = o.receipt[1] ? 1 : 0;
   }
   return { key: k(), view: decodeResolvedPortfolio(d)!, portfolioId: 3n, matcherSequence: 4n, positionEpoch: 5n };
 }
