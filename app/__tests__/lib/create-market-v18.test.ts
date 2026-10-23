@@ -5,6 +5,7 @@ import {
   DIRECT_BACKING_TOPUP_EXPIRY_SLOT,
   freshLaunchAuthorityEpoch,
   isOracleDelegationApplied,
+  oracleAuthorityMismatch,
   ORACLE_MODE_AUTH_MARK,
   sequentialStepKind,
 } from "@/lib/create-market-v18";
@@ -58,6 +59,67 @@ describe("isOracleDelegationApplied", () => {
 
   it("is false for a non-AUTH_MARK market even if someone else holds the authority", () => {
     expect(isOracleDelegationApplied({ oracleMode: 0, oracleAuthority: keeper }, deployer)).toBe(false);
+  });
+
+  // The live failure: devnet markets 4beVPGLp… and ELaepc4x… hold oracle
+  // authority HQuGYrSg… while the keeper that cranks every working market is
+  // FbTbDeGW…. Both were reported as a finished hand-off.
+  const strayKey = Keypair.generate().publicKey;
+
+  it("is FALSE when a third key holds the authority and the keeper is known", () => {
+    expect(
+      isOracleDelegationApplied({ oracleMode: ORACLE_MODE_AUTH_MARK, oracleAuthority: strayKey }, deployer, keeper),
+    ).toBe(false);
+  });
+
+  it("is true when the authority is the known keeper", () => {
+    expect(
+      isOracleDelegationApplied({ oracleMode: ORACLE_MODE_AUTH_MARK, oracleAuthority: keeper }, deployer, keeper),
+    ).toBe(true);
+  });
+
+  it("keeps GH#2680 behaviour when the keeper is unknown (backend unreachable)", () => {
+    // Must still skip a hand-off that landed, or a resume re-sends it into Custom(8).
+    expect(
+      isOracleDelegationApplied({ oracleMode: ORACLE_MODE_AUTH_MARK, oracleAuthority: keeper }, deployer, null),
+    ).toBe(true);
+    expect(
+      isOracleDelegationApplied({ oracleMode: ORACLE_MODE_AUTH_MARK, oracleAuthority: deployer }, deployer, null),
+    ).toBe(false);
+  });
+});
+
+describe("oracleAuthorityMismatch", () => {
+  const deployer = Keypair.generate().publicKey;
+  const keeper = Keypair.generate().publicKey;
+  const strayKey = Keypair.generate().publicKey;
+
+  it("reports the stray authority that makes a market unpriceable", () => {
+    expect(
+      oracleAuthorityMismatch({ oracleMode: ORACLE_MODE_AUTH_MARK, oracleAuthority: strayKey }, deployer, keeper),
+    ).toBe(strayKey);
+  });
+
+  it("is null when the keeper holds it", () => {
+    expect(
+      oracleAuthorityMismatch({ oracleMode: ORACLE_MODE_AUTH_MARK, oracleAuthority: keeper }, deployer, keeper),
+    ).toBeNull();
+  });
+
+  it("is null when the hand-off simply has not run yet (deployer still holds it)", () => {
+    expect(
+      oracleAuthorityMismatch({ oracleMode: ORACLE_MODE_AUTH_MARK, oracleAuthority: deployer }, deployer, keeper),
+    ).toBeNull();
+  });
+
+  it("is null when the keeper is unknown — never block a launch on a missing GET", () => {
+    expect(
+      oracleAuthorityMismatch({ oracleMode: ORACLE_MODE_AUTH_MARK, oracleAuthority: strayKey }, deployer, null),
+    ).toBeNull();
+  });
+
+  it("is null for a non-AUTH_MARK market", () => {
+    expect(oracleAuthorityMismatch({ oracleMode: 0, oracleAuthority: strayKey }, deployer, keeper)).toBeNull();
   });
 });
 
