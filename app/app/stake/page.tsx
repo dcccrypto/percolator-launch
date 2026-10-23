@@ -42,6 +42,7 @@ import { FeeBreakdown } from "@/components/FeeBreakdown";
 import { ConnectWalletCta } from "@/components/wallet/ConnectWalletCta";
 import { stakeErrorMessage } from "@/lib/earnErrors";
 import { useWalletBalanceRefreshKey } from "@/lib/wallet-balance-invalidation";
+import { GradientText } from "@/components/ui/GradientText";
 
 /* ── Types ── */
 
@@ -417,12 +418,12 @@ function StakeHeader({
               {insuranceOnly ? (
                 <span data-testid="stake-title-insurance">
                   Insurance{" "}
-                  <span className="bg-clip-text text-transparent" style={{ backgroundImage: "linear-gradient(110deg, #B97AFF 0%, #9945FF 35%, #14F195 100%)" }}>staking</span>
+                  <GradientText variant="headline">staking</GradientText>
                 </span>
               ) : (
                 <>
                   Fee{" "}
-                  <span className="bg-clip-text text-transparent" style={{ backgroundImage: "linear-gradient(110deg, #B97AFF 0%, #9945FF 35%, #14F195 100%)" }}>staking</span>
+                  <GradientText variant="headline">staking</GradientText>
                 </>
               )}
             </h1>

@@ -7,6 +7,7 @@ import { FeeBreakdown } from "@/components/FeeBreakdown";
 import { FEE_LEGS, legPercent } from "@/lib/fee-breakdown";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { V22_COPY } from "@/lib/v22/copy";
+import { GradientText } from "@/components/ui/GradientText";
 
 /**
  * The figures as plain text, formatted as AnimatedNumber's final frame. Not animated: a count-up
@@ -49,13 +50,7 @@ export function EarnHeader({ stats, loading }: EarnHeaderProps) {
               style={{ fontFamily: 'var(--font-display)' }}
             >
               Earn from{" "}
-              {/* Same gradient as the landing headline's "before anyone else". */}
-              <span
-                className="bg-clip-text text-transparent"
-                style={{ backgroundImage: "linear-gradient(110deg, #B97AFF 0%, #9945FF 35%, #14F195 100%)" }}
-              >
-                trading fees
-              </span>
+              <GradientText variant="headline">trading fees</GradientText>
             </h1>
             {/* Corrected 2026-07-28: fees ARE paid into the vault on the deployed program (a
                 500-notional round trip accrued the vault's 48% and moved it in on its own). */}

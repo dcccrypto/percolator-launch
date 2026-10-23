@@ -9,6 +9,7 @@ import { MAX_LEVERAGE_X } from "@/lib/market-params";
 import { ADMIN_BURN_COPY } from "@/lib/admin-burn-copy";
 import { TrendingTokensRail } from "@/components/landing/TrendingTokensRail";
 import { InfoTabs } from "@/components/waitlist/InfoTabs";
+import { GradientText } from "@/components/ui/GradientText";
 
 const ARROW = (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
@@ -81,12 +82,7 @@ export default function Home() {
           >
             Perps on Solana tokens;{" "}
             <br className="hidden sm:inline xl:hidden" />
-            <span
-              className="bg-clip-text text-transparent"
-              style={{ backgroundImage: "linear-gradient(110deg, #B97AFF 0%, #9945FF 35%, #14F195 100%)" }}
-            >
-              before anyone else
-            </span>
+            <GradientText variant="headline">before anyone else</GradientText>
             .
           </h1>
         </div>
