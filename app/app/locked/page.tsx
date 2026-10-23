@@ -9,16 +9,23 @@ import { cohortCutoff } from "@/lib/playground-access";
 
 export const metadata: Metadata = {
   title: "Devnet v2 — waitlist access",
-  description: "Devnet v2 is open to the first 1,000 on the Percolator waitlist.",
+  description: "Devnet v2 is open to the Percolator waitlist.",
   robots: { index: false, follow: false },
 };
+
+/** At or above this cutoff the cohort is the whole waitlist, so the page says so instead of a number. */
+const OPEN_TO_ALL_CUTOFF = 100_000;
 
 /** Where members prove their spot (percolator.trade, branch `main`, #2732). */
 const CHECK_SPOT_URL = "https://percolator.trade/playground";
 const WAITLIST_URL = "https://percolator.trade/waitlist";
 
 export default function LockedPage() {
-  const cutoff = cohortCutoff().toLocaleString("en-US");
+  const cutoff = cohortCutoff();
+  const headline =
+    cutoff >= OPEN_TO_ALL_CUTOFF
+      ? "Devnet v2 is open to everyone on the waitlist."
+      : `Devnet v2 is open to the first ${cutoff.toLocaleString("en-US")} on the waitlist.`;
   return (
     <div className="relative flex min-h-[100dvh] items-center justify-center px-4">
       <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" aria-hidden="true" />
@@ -45,7 +52,7 @@ export default function LockedPage() {
           className="mb-3 text-xl font-semibold leading-snug text-[var(--text)] sm:text-2xl"
           style={{ fontFamily: "var(--font-display)" }}
         >
-          Devnet v2 is open to the first {cutoff} on the waitlist.
+          {headline}
         </h1>
 
         <p className="mb-8 text-[13px] leading-relaxed text-[var(--text-secondary)]">
