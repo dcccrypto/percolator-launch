@@ -21,6 +21,8 @@ interface TradeHistoryTableProps {
    * directory yet).
    */
   statsMap?: Map<string, MarketWithStats>;
+  /** Empty-state hint. Defaults to the connected trader's own wording; the public trader profile passes its own. */
+  emptyHint?: string;
 }
 
 /** Row market label: resolved symbol when available, truncated slab address
@@ -74,6 +76,7 @@ export function TradeHistoryTable({
   slabFilter,
   pageSize = 20,
   statsMap,
+  emptyHint = "Your executed trades will appear here.",
 }: TradeHistoryTableProps) {
   const { trades, total, loading, error, hasMore, loadMore } = useTradeHistory({
     wallet,
@@ -122,7 +125,7 @@ export function TradeHistoryTable({
       <div className="border border-dashed border-[var(--border)] bg-[var(--panel-bg)]/50 p-8 text-center">
         <p className="text-[13px] text-[var(--text)]">No trades yet</p>
         <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
-          Your executed trades will appear here.
+          {emptyHint}
         </p>
       </div>
     );
