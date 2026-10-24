@@ -3,10 +3,10 @@
  * page's Total Staked, and a stake in it whose own units read also failed is shown as unknown (a dash), never valued
  * from a vault-only figure. With a TVL the API could read (vault + deployed) the stake is still valued from it.
  */
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { ACCOUNT_SIZE } from "@solana/spl-token";
-import { STAKE_POOL_FIELD_OFF_V5, STAKE_POOL_SIZE_V5 } from "@/lib/v22/sdk";
+import { ACCOUNT_KIND, INSURANCE_UNITS_FIELD_OFF_V22, LAYOUT_V22, STAKE_POOL_FIELD_OFF_V5, STAKE_POOL_SIZE_V5, WRAPPER_ACCOUNT_MAGIC } from "@/lib/v22/sdk";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 
 const STAKE_PROGRAM = new PublicKey("Stake11111111111111111111111111111111111111");
@@ -16,12 +16,17 @@ const SLAB = new PublicKey("4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T");
 const LP_MINT = new PublicKey("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB");
 const POOL_PDA = new PublicKey("SysvarC1ock11111111111111111111111111111111");
 const LP_ATA = new PublicKey("SysvarRecentB1ockHashes11111111111111111111");
+const VAULT = Keypair.generate().publicKey;
+const UNITS = Keypair.generate().publicKey;
 
 const h = vi.hoisted(() => ({
   getAccountInfo: vi.fn(),
   fetch: vi.fn(),
   conn: null as unknown as { connection: Record<string, unknown> },
   wallet: null as unknown as Record<string, unknown>,
+  unitsReadable: false,
+  liquidAtoms: 0n,
+  failLpReads: 0,
 }));
 h.conn = { connection: { getAccountInfo: (...a: unknown[]) => h.getAccountInfo(...a), getSlot: async () => 0, getTokenAccountBalance: async () => { throw new Error("n/a"); } } };
 h.wallet = { connected: true, publicKey: WALLET, signTransaction: () => undefined };
@@ -36,7 +41,10 @@ vi.mock("@percolatorct/sdk", async (orig) => ({
 vi.mock("@/lib/v22/sdk", async (orig) => ({
   ...(await orig<typeof import("@/lib/v22/sdk")>()),
   // The page's own InsuranceUnits read fails (as on a rate-limited devnet RPC).
-  deriveInsuranceUnitsV22: () => { throw new Error("429 Too Many Requests"); },
+  deriveInsuranceUnitsV22: () => {
+    if (!h.unitsReadable) throw new Error("429 Too Many Requests");
+    return [UNITS, 255];
+  },
 }));
 vi.mock("@solana/spl-token", async (orig) => ({
   ...(await orig<typeof import("@solana/spl-token")>()),
@@ -70,9 +78,29 @@ function v5PoolData(): Buffer {
   d[F.version] = 5; d[F.riskMode] = 1; d[F.consentVersion] = 2;
   v.setUint16(F.deployTargetBps, 5000, true); v.setUint16(F.liquidBufferBps, 3000, true); v.setUint16(F.hysteresisBps, 500, true);
   v.setBigUint64(176, 1_000_000_000n, true); // total LP supply
+  if (h.unitsReadable) {
+    v.setBigUint64(168, 1_000_000_000n, true); // deposited
+    v.setBigUint64(200, 1_000_000_000n - h.liquidAtoms, true); // flushed; liquid is returned later
+  }
   for (const off of [F.slab, 40, 72, F.vault, F.percolatorProgram]) d.set(Keypair.generate().publicKey.toBytes(), off);
+  if (h.unitsReadable) d.set(VAULT.toBytes(), F.vault);
   d.set(LP_MINT.toBytes(), 104);
   return Buffer.from(d);
+}
+function unitsData(): Buffer {
+  const d = Buffer.alloc(16 + 192);
+  const b = 16, F = INSURANCE_UNITS_FIELD_OFF_V22;
+  d.writeBigUInt64LE(WRAPPER_ACCOUNT_MAGIC, 0);
+  d.writeUInt16LE(LAYOUT_V22.version, 8);
+  d[10] = ACCOUNT_KIND.InsuranceUnits;
+  d.set(SLAB.toBytes(), b + F.marketGroup);
+  d.writeBigUInt64LE(1_000_000_000n, b + F.unitsTotal);
+  d.writeBigUInt64LE(500_000_000n, b + F.unitsStake);
+  d.writeBigUInt64LE(500_000_000n, b + F.unitsCreator);
+  d.writeBigUInt64LE(1_000_000_000n, b + F.snapInsuranceMintAtoms);
+  d.writeBigUInt64LE(1_000_000_000n, b + F.snapInsuranceFreeAtoms);
+  d[b + F.version] = 1;
+  return d;
 }
 function lpTokenAccountData(amount: bigint): Buffer {
   const d = Buffer.alloc(ACCOUNT_SIZE);
@@ -85,6 +113,9 @@ function lpTokenAccountData(amount: bigint): Buffer {
 
 beforeEach(() => {
   __setDevnetV22ForTest(true);
+  h.unitsReadable = false;
+  h.liquidAtoms = 0n;
+  h.failLpReads = 0;
   h.getAccountInfo.mockReset();
   h.fetch.mockReset();
   vi.stubGlobal("fetch", h.fetch);
@@ -93,15 +124,77 @@ beforeEach(() => {
   h.getAccountInfo.mockImplementation(async (pk: PublicKey) => {
     if (pk.equals(POOL_PDA)) return { data: v5PoolData(), owner: STAKE_PROGRAM, lamports: 1, executable: false };
     // The wallet holds half the pool's LP; the pool vault holds $500 (the vault-only figure).
-    if (pk.equals(LP_ATA)) return { data: lpTokenAccountData(500_000_000n), owner: STAKE_PROGRAM, lamports: 1, executable: false };
+    if (pk.equals(LP_ATA)) {
+      if (h.failLpReads > 0) { h.failLpReads--; throw new Error("temporary RPC failure"); }
+      return { data: lpTokenAccountData(h.unitsReadable ? 900_000_000n : 500_000_000n), owner: STAKE_PROGRAM, lamports: 1, executable: false };
+    }
+    if (h.unitsReadable && pk.equals(VAULT)) return { data: lpTokenAccountData(h.liquidAtoms), owner: STAKE_PROGRAM, lamports: 1, executable: false };
+    if (h.unitsReadable && pk.equals(UNITS)) return { data: unitsData(), owner: STAKE_PROGRAM, lamports: 1, executable: false };
     return null;
   });
 });
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   __setDevnetV22ForTest(null);
+});
+
+const lpReads = () => h.getAccountInfo.mock.calls.filter(([pk]: [PublicKey]) => pk.equals(LP_ATA)).length;
+
+describe("first-loss position refresh after keeper recovery", () => {
+  it("re-reads the position after a later on-chain sync without a page reload", async () => {
+    h.unitsReadable = true;
+    h.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ pools: [apiPool(900)] }) });
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    render(<StakePage />);
+    await waitFor(() => expect(stat("Your Deposits")).toBe("$450.00"));
+    const withdraw = screen.getByTestId("stake-withdraw-available") as HTMLButtonElement;
+    expect(withdraw.disabled).toBe(true); // vault empty after the confirmed withdrawal
+    fireEvent.click(screen.getByTestId("stake-tab-withdraw"));
+    await waitFor(() => expect(screen.getAllByTestId("stake-withdraw-cap-note")).toHaveLength(2));
+    expect(screen.getAllByTestId("stake-withdraw-cap-note").every((note) => note.textContent?.includes("$0.00"))).toBe(true);
+    expect(document.visibilityState).toBe("visible");
+    const before = lpReads();
+
+    h.liquidAtoms = 500_000_000n; // keeper sync returned collateral after the 2-second follow-up
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+
+    expect(lpReads()).toBeGreaterThan(before);
+    expect(withdraw.disabled).toBe(false);
+    expect(screen.getAllByTestId("stake-withdraw-cap-note").every((note) => note.textContent?.includes("$500.00"))).toBe(true);
+  });
+
+  it("does not poll a fee-only position for insurance recovery", async () => {
+    h.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ pools: [{ ...apiPool(900), stakeKind: "fee-only" }] }) });
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    render(<StakePage />);
+    await waitFor(() => expect(stat("Your Deposits")).toBe("$450.00"));
+    const before = lpReads();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+
+    expect(lpReads()).toBe(before);
+  });
+
+  it("retries after a temporary position-read failure instead of stopping the recovery watch", async () => {
+    h.unitsReadable = true;
+    h.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ pools: [apiPool(900)] }) });
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    render(<StakePage />);
+    await waitFor(() => expect((screen.getByTestId("stake-withdraw-available") as HTMLButtonElement).disabled).toBe(true));
+
+    h.failLpReads = 2; // parent card and selected-pool widget both fail once
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(screen.queryByTestId("stake-withdraw-available")).toBeNull();
+    const afterFailure = lpReads();
+
+    h.liquidAtoms = 500_000_000n;
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(lpReads()).toBeGreaterThan(afterFailure);
+    expect((screen.getByTestId("stake-withdraw-available") as HTMLButtonElement).disabled).toBe(false);
+  });
 });
 
 const stat = (label: string) => screen.getByText(label).nextElementSibling?.textContent;
