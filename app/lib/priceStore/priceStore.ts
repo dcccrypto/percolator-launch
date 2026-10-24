@@ -453,8 +453,8 @@ export function seedFromDbIfEmpty(slab: string, dbPrice: number, invert: number 
 const LIVE_TICK_STALE_MS = 10_000;
 
 /**
- * Recurring on-chain poll update (PositionsBar's ≤4s freshness floor for
- * markets the WS feed isn't covering). Unlike `seedFromOnChain` (one-shot,
+ * Recurring on-chain update for markets the WS feed isn't covering: SlabProvider on every fresh slab read, and
+ * PositionsBar's ≤4s poll of slabs with an open position. Unlike `seedFromOnChain` (one-shot,
  * only-if-empty), this MAY overwrite an existing price — but never a live
  * one: it applies only when the slab has no live WS tick in the last
  * `LIVE_TICK_STALE_MS`, so a streaming feed always outranks the poll and
@@ -470,7 +470,8 @@ export function applyOnChainPoll(slab: string, onChainE6: bigint): void {
   const entry = getOrCreateEntry(slab);
   if (entry.source === "live" && Date.now() - entry.lastLiveTickAt < LIVE_TICK_STALE_MS) return;
   const usd = Number(onChainE6) / 1_000_000;
-  if (entry.source === null) entry.source = "seed-onchain";
+  // The chain value now owns the entry: a DB seed's invert / lotExp retro-correction must not rewrite over it.
+  entry.source = "seed-onchain";
   applyPatch(entry, { price: usd, priceUsd: usd, priceE6: onChainE6, loading: false });
 }
 

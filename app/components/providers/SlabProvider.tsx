@@ -1,6 +1,8 @@
 "use client";
 
 import { observeLotExp } from "@/lib/v22/lot-registry";
+import { applyOnChainPoll } from "@/lib/priceStore/priceStore";
+import { sanitizePriceE6 } from "@/lib/oraclePrice";
 import {
   FC,
   ReactNode,
@@ -207,6 +209,9 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
     // a re-render through every SlabContext consumer.
     let lastRawData: Uint8Array | null = null;
     let lastOwnerKey: string | null = null;
+    // Whether the last processed bytes came from a fresh read: identical bytes from the network after a seed-cache parse
+    // must still reach the price store.
+    let lastParseFresh = false;
     // Tracks whether the last committed state update carries a non-null `error`.
     // The byte-equality short-circuit below must NOT fire while an error is
     // outstanding — otherwise a byte-identical successful poll that follows a
@@ -218,13 +223,15 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
     // this true; every branch that sets `error: null` flips it back to false.
     let lastHadError = false;
 
-    function parseSlab(data: Uint8Array, owner?: PublicKey) {
+    // `fresh`: the bytes were just read from chain (not the seed cache, which can be minutes old).
+    function parseSlab(data: Uint8Array, owner?: PublicKey, fresh = true) {
       if (cancelled) return;
       const ownerKey = owner ? owner.toBase58() : null;
       if (
         lastRawData !== null &&
         ownerKey === lastOwnerKey &&
         !lastHadError &&
+        (lastParseFresh || !fresh) &&
         bytesEqual(lastRawData, data)
       ) {
         // Identical bytes (and owner) to the last processed update, and no
@@ -234,6 +241,7 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
       }
       lastRawData = data;
       lastOwnerKey = ownerKey;
+      lastParseFresh = fresh;
       // Refuse to surface programId for slabs owned by a program we did not
       // deploy. The slab address in the URL is user-controlled, and Solana
       // lets anyone create an account owned by any BPF program — so without
@@ -384,6 +392,12 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
           // hardcoded ?? 500n/1000n fallbacks. See lib/v17-engine-config.ts.
           const v17Params = parseV17RiskParams(data, wrapperConfigV17.tradeFeeBps);
           observeLotExp(slabAddress, data); // N1: the exponent is a property of the market (no-op flag off)
+          // The on-chain mark keeps the live price current when the feed does not tick this slab (an unlisted or v2.2
+          // slab, skipped pool reads, a dead socket): the price used to stay at its first value and the ticket sized orders
+          // from it. Same value PositionsBar writes; a live tick under 10 s old still wins. Written before setState so a
+          // reader of getLivePriceSnapshot sees it in the render these bytes trigger.
+          const markE6 = sanitizePriceE6(wrapperConfigV17.markEwmaE6);
+          if (fresh && markE6 > 0n) applyOnChainPoll(slabAddress, markE6);
           lastHadError = false;
           setState((s) => ({
             slabAddress,
@@ -540,7 +554,7 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
     // strict 20s getCachedSlab tier here, anyone browsing /markets for >20s
     // before clicking missed the seed and ate a ~560ms full-page skeleton.
     const cachedSeed = getSeedSlab(slabAddress);
-    if (cachedSeed) parseSlab(cachedSeed.data, cachedSeed.owner);
+    if (cachedSeed) parseSlab(cachedSeed.data, cachedSeed.owner, false);
     poll().then(schedulePoll);
 
     return () => {
