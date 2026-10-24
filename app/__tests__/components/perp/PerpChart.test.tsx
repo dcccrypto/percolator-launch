@@ -169,6 +169,22 @@ describe("PerpChart", () => {
     });
   });
 
+  it("an empty chart caused by a missing candle store says so, instead of blaming the price feed", async () => {
+    // A deployment with no CANDLES_DATABASE_URL 503s, which the provider reports as
+    // unavailable:"not-configured". Before, that rendered "Waiting for the first price
+    // tick…" - a claim about the market, not about the deployment (#3663).
+    h.getBars.mockResolvedValue({ bars: [], noMoreHistory: true, source: "perp-mark", unavailable: "not-configured" });
+    await mount();
+    expect(await screen.findByText(/Chart history isn't available on this deployment/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Waiting for the first price tick/i)).not.toBeInTheDocument();
+  });
+
+  it("an empty chart with no stated reason still reads as waiting for the feed (negative control)", async () => {
+    h.getBars.mockResolvedValue({ bars: [], noMoreHistory: true, source: "perp-mark" });
+    await mount();
+    expect(await screen.findByText(/Waiting for the first price tick/i)).toBeInTheDocument();
+  });
+
   it("the Last series adds a volume plot and an honest empty state", async () => {
     h.getBars.mockResolvedValue({ bars: [], noMoreHistory: true, source: "percolator" });
     const { store } = await mount();

@@ -77,6 +77,18 @@ export interface BarsPage {
   noMoreHistory: boolean;
   source: BarSource | null;
   /**
+   * Why an empty page is empty, when the reason is NOT "this market has no history".
+   *
+   *   "not-configured" - the deployment has no candle store (/api/perp-chart 503s).
+   *   "not-found"      - the store has no such market (404).
+   *
+   * Both stay empty pages rather than thrown errors, so neither drives the chart
+   * into a retry loop. But an empty page alone cannot say WHY it is empty, and a
+   * deployment missing its store then looks exactly like a market nobody has
+   * traded. The UI reads this to tell those apart instead of guessing.
+   */
+  unavailable?: "not-configured" | "not-found";
+  /**
    * Perp mark series only: the end of the newest stretch of bars that are the pool (oracle) price
    * standing in for a mark that does not exist (before the first mark, in a gap, or not yet
    * backfilled). Lets the UI say so instead of implying they are marks.

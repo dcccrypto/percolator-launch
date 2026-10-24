@@ -78,6 +78,29 @@ describe("perp provider history", () => {
     await expect(mk(async () => { throw new Error("net"); }).getBars(req())).rejects.toThrow("net");
     await expect(mk(async () => { throw new Error("net"); }).getBars(req({ firstRequest: false }))).rejects.toThrow();
   });
+
+  it("says WHY an empty page is empty: a missing store is not the same claim as a market with no history", async () => {
+    // A 503 (no candle store on this deployment) rendered identically to "nobody has
+    // traded this market", which is how a misconfigured preview looked like a chart
+    // bug for weeks. The page stays empty - no retry loop - but carries the reason.
+    const mk = (f: () => Promise<ReturnType<typeof json>>) => createPerpProvider({ base: base(), live: liveFake().live, fetchImpl: f, series: createSeriesStore(null) });
+
+    const notConfigured = await mk(async () => json({ error: "chart history store is not configured" }, 503)).getBars(req());
+    expect(notConfigured.unavailable).toBe("not-configured");
+    expect(notConfigured.bars).toEqual([]);
+    expect(notConfigured.noMoreHistory).toBe(true);
+
+    const notFound = await mk(async () => json({}, 404)).getBars(req());
+    expect(notFound.unavailable).toBe("not-found");
+
+    // A real, populated answer makes no such claim.
+    const ok = await mk(async () => json({ bars: [{ t: 60, o: 1, h: 1, l: 1, c: 1 }], noMoreHistory: false })).getBars(req());
+    expect(ok.unavailable).toBeUndefined();
+
+    // And an empty-but-healthy answer is still "no history", not "no store".
+    const emptyOk = await mk(async () => json({ bars: [], noMoreHistory: true })).getBars(req());
+    expect(emptyOk.unavailable).toBeUndefined();
+  });
   it("last-trade series uses the base provider; no trades is an honest empty chart", async () => {
     const store = createSeriesStore(null);
     store.set("last");

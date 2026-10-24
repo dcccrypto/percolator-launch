@@ -107,7 +107,12 @@ export function createPerpProvider(deps: PerpProviderDeps): ChartDataProvider {
       // page is indistinguishable from "no data" and leaves a blank canvas with no explanation.
       // Only a store that is not configured / a market that is unknown is an honest empty chart.
       const r = await fetchImpl(url);
-      if (r.status === 503 || r.status === 404) return { bars: [], noMoreHistory: true, source };
+      // Still empty pages, not errors - a chart must not retry-loop on either. The
+      // reason rides along so the UI can say which it is: 503 means this deployment
+      // has no candle store at all, which is NOT the same statement as "this market
+      // has no history" and must not be rendered as one.
+      if (r.status === 503) return { bars: [], noMoreHistory: true, source, unavailable: "not-configured" };
+      if (r.status === 404) return { bars: [], noMoreHistory: true, source, unavailable: "not-found" };
       if (!r.ok) throw new Error(`perp-chart HTTP ${r.status}`);
       const h = parsePerpHistory(await r.json());
       const bars = h.bars.filter((b) => b.timeSec >= req.fromSec - 1 || req.countBack > 0);

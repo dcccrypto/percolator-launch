@@ -109,6 +109,8 @@ function PerpChartInner({ slabAddress }: Props) {
   // Bumped by the Retry button: re-runs the history load effect.
   const [retryNonce, setRetryNonce] = useState(0);
   const [proxyBefore, setProxyBefore] = useState<number | null>(null);
+  /** Why an empty chart is empty, when the provider could say (see BarsPage.unavailable). */
+  const [unavailable, setUnavailable] = useState<"not-configured" | "not-found" | null>(null);
   const [proxyFrom, setProxyFrom] = useState<number | null>(null);
   // Any bar on screen sourced from GeckoTerminal / CoinGecko (pre-launch history): attribution is then mandatory.
   const [usesDex, setUsesDex] = useState(false);
@@ -280,6 +282,7 @@ function PerpChartInner({ slabAddress }: Props) {
         if (page.dexThroughSec != null) setUsesDex(true);
         setAll(page.bars);
         setLastPrice(page.bars.length ? page.bars[page.bars.length - 1].close : null);
+        setUnavailable(page.unavailable ?? null);
         setStatus(page.bars.length ? "ready" : "empty");
         requestAnimationFrame(() => { if (!cancelled) recomputeLiqEdge(); }); // autoscale has settled on the new data
         if (page.bars.length) chart.timeScale().fitContent();
@@ -417,6 +420,7 @@ function PerpChartInner({ slabAddress }: Props) {
                   </button>
                 </>
               )
+              : unavailable === "not-configured" ? "Chart history isn't available on this deployment."
               : series === "last" ? "No trades on this market yet."
               : "Waiting for the first price tick…"}
           </div>
