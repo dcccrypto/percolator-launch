@@ -48,6 +48,25 @@ describe("fetchKeeperCosignPubkey", () => {
     expect(seen?.signal).toBeDefined();
   });
 
+  it("stays bounded when AbortSignal.timeout is unavailable (older runtimes)", async () => {
+    // Returning no signal here would leave the request unbounded again — the
+    // exact failure the timeout was added for (CodeRabbit, PR #3662).
+    const original = AbortSignal.timeout;
+    // @ts-expect-error — simulating a runtime without AbortSignal.timeout
+    delete (AbortSignal as unknown as { timeout?: unknown }).timeout;
+    try {
+      const stalling = ((_url: string, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("The operation was aborted.", "AbortError")),
+          );
+        })) as unknown as typeof fetch;
+      expect(await fetchKeeperCosignPubkey(stalling, 10)).toBeNull();
+    } finally {
+      (AbortSignal as unknown as { timeout: unknown }).timeout = original;
+    }
+  });
+
   it("is null, not a rejection, when the request itself throws", async () => {
     const throwing = (async () => {
       throw new Error("network down");

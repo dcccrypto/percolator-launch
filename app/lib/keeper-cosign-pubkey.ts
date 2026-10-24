@@ -11,14 +11,28 @@ import { PublicKey } from "@solana/web3.js";
  * (503) must degrade to "unknown" rather than fail a launch that would
  * otherwise succeed.
  */
+/**
+ * A signal that aborts after `ms`. `AbortSignal.timeout` where it exists, an
+ * AbortController + timer where it does not — returning `undefined` for the
+ * older environment would leave the request unbounded again, which is the very
+ * failure this guards against.
+ */
 function timeoutSignal(ms: number): AbortSignal | undefined {
   try {
-    return typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
-      ? AbortSignal.timeout(ms)
-      : undefined;
+    if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+      return AbortSignal.timeout(ms);
+    }
+    if (typeof AbortController === "function") {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), ms);
+      // Node keeps the process alive for a pending timer; browsers have no unref.
+      (timer as unknown as { unref?: () => void }).unref?.();
+      return controller.signal;
+    }
   } catch {
-    return undefined;
+    /* fall through: an environment with neither is left unbounded by necessity */
   }
+  return undefined;
 }
 
 export async function fetchKeeperCosignPubkey(
