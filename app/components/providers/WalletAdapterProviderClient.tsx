@@ -28,6 +28,7 @@ import { WalletApiContext, type WalletApi } from "@/hooks/walletApiContext";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { guardSign, noteBlockhash, SIGN_CHAIN_DEVNET } from "@/lib/v22/sign-guard";
+import { sendMayHaveBroadcast } from "@/lib/tx";
 import { chainSignerNote, standardDevnetSigner } from "@/lib/v22/standard-sign";
 
 const bs58 = _bs58 as { decode(str: string): Uint8Array };
@@ -136,8 +137,14 @@ const AdapterWalletApiBridge: FC<{ children: ReactNode }> = ({ children }) => {
       }
       const d = decideChain();
       const signed = await guarded("adapter signAndSendTransaction", [tx], d, async () => (d.chainSigner ? (await d.chainSigner([tx]))[0] : adapterSignTx(tx)));
-      const sig = await conn.sendRawTransaction(signed.serialize());
-      return bs58.decode(sig);
+      const wire = signed.serialize(); // a serialize error never left the browser
+      try {
+        return bs58.decode(await conn.sendRawTransaction(wire));
+      } catch (e) {
+        // The bytes may be on the wire: hand back the signature so sendTx confirms it instead of reporting "nothing was sent".
+        if (signed.signature && sendMayHaveBroadcast(e)) return new Uint8Array(signed.signature);
+        throw e;
+      }
     };
   }, [adapterSignTx, publicKey, cfg.rpcUrl, guarded, decideChain]);
 

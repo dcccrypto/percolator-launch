@@ -21,6 +21,9 @@ import { Keypair, PublicKey, SendTransactionError, TransactionExpiredBlockheight
 
 // ─── Mock @solana/web3.js Transaction (avoids real serialization in unit tests) ─
 
+// The signature the mocked tx carries once "signed" (null = an unsigned mock).
+const txMock = vi.hoisted(() => ({ signature: null as Uint8Array | null }));
+
 vi.mock("@solana/web3.js", async () => {
   const actual = await vi.importActual<typeof import("@solana/web3.js")>("@solana/web3.js");
   // Must use regular function expressions (not arrow functions) for constructors
@@ -30,6 +33,7 @@ vi.mock("@solana/web3.js", async () => {
     this.partialSign = vi.fn();
     this.serialize = vi.fn().mockReturnValue(Buffer.from([1, 2, 3]));
     this.feePayer = null;
+    this.signature = txMock.signature;
   }
   function MockTransactionInstruction(this: Record<string, unknown>, args: unknown) {
     Object.assign(this, args);
@@ -359,21 +363,27 @@ describe("useReclaimSlabRent", () => {
     expect(result.current.error).not.toMatch(/Error:/);
   });
 
-  it("shows friendly message for network errors during broadcast", async () => {
-    mockConnection = makeMockConnection();
-    mockConnection.sendRawTransaction = vi.fn().mockRejectedValue(new Error("Failed to fetch: network error ECONNRESET"));
-    vi.mocked(useConnectionCompat).mockReturnValue({
-      connection: mockConnection,
-    } as ReturnType<typeof useConnectionCompat>);
+  it("a network error after a signed send may have reached Solana: it is confirmed (here it landed), not reported as a network error", async () => {
+    txMock.signature = new Uint8Array(64).fill(7);
+    try {
+      mockConnection = makeMockConnection();
+      mockConnection.sendRawTransaction = vi.fn().mockRejectedValue(new Error("Failed to fetch: network error ECONNRESET"));
+      vi.mocked(useConnectionCompat).mockReturnValue({
+        connection: mockConnection,
+      } as ReturnType<typeof useConnectionCompat>);
 
-    const { result } = renderHook(() => useReclaimSlabRent());
+      const { result } = renderHook(() => useReclaimSlabRent());
 
-    await act(async () => {
-      await result.current.reclaim(slabKeypair);
-    });
+      await act(async () => {
+        await result.current.reclaim(slabKeypair);
+      });
 
-    expect(result.current.status).toBe("error");
-    expect(result.current.error).toMatch(/network error/i);
+      expect(mockConnection.sendRawTransaction).toHaveBeenCalledTimes(1);
+      expect(mockConnection.getSignatureStatuses).toHaveBeenCalled();
+      expect(result.current.status).toBe("success");
+    } finally {
+      txMock.signature = null;
+    }
   });
 
   it("GH#1488: a blockhash miss on the first send (wrapped by broadcastSignedTx) retries once with a fresh blockhash", async () => {
