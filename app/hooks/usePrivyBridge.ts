@@ -45,9 +45,19 @@ export interface PrivyBridgeValue {
   login: (options?: LoginModalOptions) => void;
   /** `useConnectWallet().connectWallet`: re-prompts an external wallet. The connected wallet becomes the signer. */
   connectWallet: (options?: ConnectWalletModalOptions) => void;
+  /**
+   * `usePrivy().linkTwitter`: redirects to X. Rejects on a failure before the redirect (e.g. Privy's
+   * OAuth init refusing X); the result comes back on the next page load as `user.twitter`.
+   */
+  linkTwitter: () => Promise<void>;
+  /** `usePrivy().unlinkOAuth` (= `useUnlinkOAuth().unlink`). `user` updates when it resolves. */
+  unlinkOAuth: PrivyApi["unlinkOAuth"];
 }
 
 const noopAsync = async (): Promise<void> => {};
+const notReady = async (): Promise<never> => {
+  throw new Error("Privy is not ready");
+};
 
 export const PRIVY_NOT_READY: PrivyBridgeValue = {
   ready: false,
@@ -62,6 +72,8 @@ export const PRIVY_NOT_READY: PrivyBridgeValue = {
   fundWallet: (async () => {}) as ReturnType<typeof useFundWallet>["fundWallet"],
   login: () => {},
   connectWallet: () => {},
+  linkTwitter: notReady,
+  unlinkOAuth: notReady,
 };
 
 export const PrivyBridgeContext = createContext<PrivyBridgeValue>(PRIVY_NOT_READY);

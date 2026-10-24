@@ -81,12 +81,12 @@ export function usePrivyBridgeState(): {
   sessionHeaders: PrivySessionHeaders;
 } {
   const { connect, sessionHeaders, login, connectWallet, identityToken } = usePrivyConnectSurface();
-  const { ready, authenticated, logout, exportWallet, getAccessToken, user } = usePrivy();
+  const { ready, authenticated, logout, exportWallet, getAccessToken, user, linkTwitter, unlinkOAuth } = usePrivy();
   const { ready: walletsReady, wallets } = useWallets();
   const { fundWallet } = useFundWallet();
 
-  const latest = useRef({ logout, exportWallet, getAccessToken, fundWallet, login, connectWallet });
-  latest.current = { logout, exportWallet, getAccessToken, fundWallet, login, connectWallet };
+  const latest = useRef({ logout, exportWallet, getAccessToken, fundWallet, login, connectWallet, linkTwitter, unlinkOAuth });
+  latest.current = { logout, exportWallet, getAccessToken, fundWallet, login, connectWallet, linkTwitter, unlinkOAuth };
   const stable = useMemo(
     () => ({
       logout: ((...a) => latest.current.logout(...a)) as PrivyBridgeValue["logout"],
@@ -95,6 +95,11 @@ export function usePrivyBridgeState(): {
       fundWallet: ((...a) => latest.current.fundWallet(...a)) as PrivyBridgeValue["fundWallet"],
       login: ((o) => latest.current.login(o)) as PrivyBridgeValue["login"],
       connectWallet: ((o) => latest.current.connectWallet(o)) as PrivyBridgeValue["connectWallet"],
+      // Typed `() => void` but async in 3.41: every failure before the redirect rejects (some fire no onError).
+      linkTwitter: async () => {
+        await latest.current.linkTwitter();
+      },
+      unlinkOAuth: ((o) => latest.current.unlinkOAuth(o)) as PrivyBridgeValue["unlinkOAuth"],
     }),
     [],
   );

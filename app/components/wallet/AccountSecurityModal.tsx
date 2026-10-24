@@ -1,7 +1,7 @@
 "use client";
 
 import { FC, useEffect, useState, type ReactNode } from "react";
-import { useLinkAccount, usePrivy, useUnlinkOAuth } from "@privy-io/react-auth";
+import { usePrivyBridge } from "@/hooks/usePrivyBridge";
 import { Modal } from "@/components/ui/Modal";
 
 const WAITLIST_URL = "https://percolator.trade/waitlist";
@@ -31,17 +31,10 @@ interface AccountSecurityModalProps {
 }
 
 export const AccountSecurityModal: FC<AccountSecurityModalProps> = ({ onClose, walletAddress }) => {
-  const { user, getAccessToken } = usePrivy();
-  const { unlink } = useUnlinkOAuth();
+  // Rendered in the app, OUTSIDE PrivyProvider (PrivyBridgeHost.tsx): Privy only through the bridge.
+  const { user, getAccessToken, linkTwitter, unlinkOAuth } = usePrivyBridge();
   const [xError, setXError] = useState<string | null>(null);
   const [xBusy, setXBusy] = useState(false);
-  // linkTwitter redirects to X and back (a page load), so this only hears failures before the
-  // redirect, e.g. X not enabled for this Privy app. The OAuth result itself is Privy's to show.
-  const { linkTwitter } = useLinkAccount({
-    onError: (code) => {
-      if (code !== "exited_link_flow") setXError("Couldn't connect X. Try again later.");
-    },
-  });
 
   // undefined = loading, null = not available here.
   const [refCode, setRefCode] = useState<string | null | undefined>(undefined);
@@ -81,7 +74,7 @@ export const AccountSecurityModal: FC<AccountSecurityModalProps> = ({ onClose, w
     setXError(null);
     setXBusy(true);
     try {
-      await unlink({ provider: "twitter", subject: twitter.subject });
+      await unlinkOAuth({ provider: "twitter", subject: twitter.subject });
     } catch {
       setXError("Couldn't disconnect X. Try again later.");
     } finally {
@@ -157,7 +150,8 @@ export const AccountSecurityModal: FC<AccountSecurityModalProps> = ({ onClose, w
               <SmallButton
                 onClick={() => {
                   setXError(null);
-                  linkTwitter();
+                  // A redirect to X and back (a page load): only a failure before it lands here.
+                  linkTwitter().catch(() => setXError("Couldn't connect X. Try again later."));
                 }}
               >
                 Connect X

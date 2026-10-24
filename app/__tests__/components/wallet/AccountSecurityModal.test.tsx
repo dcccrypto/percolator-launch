@@ -2,38 +2,48 @@
  * Account and Security window (wallet dropdown): signed-in identity, referral code (from
  * /api/playground/me, else a link to the waitlist page), Connect X through Privy, and a
  * confirmed reset of this device's chart settings.
+ *
+ * The window is rendered outside PrivyProvider, so it reads Privy only through the bridge. The bridge
+ * context is fed directly here, and the Privy SDK is NOT mocked: a direct SDK hook in the window would
+ * read the real, empty SDK state (or throw), and these assertions fail. The import guard and the
+ * user-path test pin the boundary itself.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { PRIVY_NOT_READY, PrivyBridgeContext, type PrivyBridgeValue } from "@/hooks/usePrivyBridge";
+import { AccountSecurityModal, clearChartSettings } from "@/components/wallet/AccountSecurityModal";
 
 const h = vi.hoisted(() => ({
   user: null as unknown,
-  linkTwitter: vi.fn(),
-  unlink: vi.fn(),
-  linkCallbacks: null as null | { onError?: (code: string) => void },
+  linkTwitter: vi.fn(async (): Promise<void> => {}),
+  unlinkOAuth: vi.fn(async (_o: { provider: string; subject: string }): Promise<unknown> => ({})),
   getAccessToken: vi.fn(async (): Promise<string | null> => "privy-token"),
 }));
-
-vi.mock("@privy-io/react-auth", () => ({
-  usePrivy: () => ({ user: h.user, getAccessToken: h.getAccessToken }),
-  useUnlinkOAuth: () => ({ unlink: h.unlink }),
-  useLinkAccount: (cb: { onError?: (code: string) => void }) => {
-    h.linkCallbacks = cb;
-    return { linkTwitter: h.linkTwitter };
-  },
-}));
-
-import { AccountSecurityModal, clearChartSettings } from "@/components/wallet/AccountSecurityModal";
 
 const WALLET = "GXjpKbhkJMgJiooFAJAn2LpeByYLD8LsaBJszbqQtxfQ";
 const fetchRef = (ref: string | null, ok = true) =>
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ref }), { status: ok ? 200 : 401 })));
-const open = () => render(<AccountSecurityModal onClose={() => {}} walletAddress={WALLET} />);
+const open = () => {
+  const bridge = {
+    ...PRIVY_NOT_READY,
+    ready: true,
+    authenticated: true,
+    user: h.user,
+    getAccessToken: h.getAccessToken,
+    linkTwitter: h.linkTwitter,
+    unlinkOAuth: h.unlinkOAuth,
+  } as unknown as PrivyBridgeValue;
+  return render(
+    <PrivyBridgeContext.Provider value={bridge}>
+      <AccountSecurityModal onClose={() => {}} walletAddress={WALLET} />
+    </PrivyBridgeContext.Provider>,
+  );
+};
 
 beforeEach(() => {
   h.user = { email: { address: "me@x.io" } };
-  h.linkTwitter.mockReset();
-  h.unlink.mockReset().mockResolvedValue({});
+  h.linkTwitter.mockReset().mockResolvedValue(undefined);
+  h.unlinkOAuth.mockReset().mockResolvedValue({});
   h.getAccessToken.mockReset().mockResolvedValue("privy-token");
   localStorage.clear();
 });
@@ -89,7 +99,7 @@ describe("AccountSecurityModal", () => {
     expect(link.getAttribute("href")).toBe("https://percolator.trade/waitlist");
   });
 
-  it("Connect X starts Privy's X link flow; a failure before the redirect is shown, a cancel is silent", async () => {
+  it("Connect X starts Privy's X link flow; only a failure before the redirect (a rejection) is shown", async () => {
     fetchRef(null);
     open();
     const x = within(screen.getByTestId("account-x"));
@@ -97,10 +107,11 @@ describe("AccountSecurityModal", () => {
     expect(x.getByRole("img", { name: "X" })).toBeTruthy();
     fireEvent.click(x.getByText("Connect X"));
     expect(h.linkTwitter).toHaveBeenCalledTimes(1);
-    act(() => h.linkCallbacks!.onError!("exited_link_flow"));
+    await act(async () => {}); // the resolved link settles: nothing to show
     expect(x.queryByRole("alert")).toBeNull();
-    act(() => h.linkCallbacks!.onError!("failed_to_link_account"));
-    expect(x.getByRole("alert").textContent).toBe("Couldn't connect X. Try again later.");
+    h.linkTwitter.mockRejectedValueOnce(new Error("oauth init refused"));
+    fireEvent.click(x.getByText("Connect X"));
+    expect((await x.findByRole("alert")).textContent).toBe("Couldn't connect X. Try again later.");
   });
 
   it("a linked X account shows its handle and disconnects by its subject", async () => {
@@ -111,7 +122,30 @@ describe("AccountSecurityModal", () => {
     expect(x.getByText("@brian")).toBeTruthy();
     expect(x.queryByText("Not connected")).toBeNull();
     fireEvent.click(x.getByText("Disconnect"));
-    await waitFor(() => expect(h.unlink).toHaveBeenCalledWith({ provider: "twitter", subject: "12345" }));
+    await waitFor(() => expect(h.unlinkOAuth).toHaveBeenCalledWith({ provider: "twitter", subject: "12345" }));
+  });
+
+  it("before the bridge is up, Connect X says it failed instead of doing nothing", async () => {
+    fetchRef(null);
+    render(
+      <PrivyBridgeContext.Provider value={PRIVY_NOT_READY}>
+        <AccountSecurityModal onClose={() => {}} walletAddress={WALLET} />
+      </PrivyBridgeContext.Provider>,
+    );
+    const x = within(screen.getByTestId("account-x"));
+    fireEvent.click(x.getByText("Connect X"));
+    expect((await x.findByRole("alert")).textContent).toBe("Couldn't connect X. Try again later.");
+  });
+
+  it("a failed disconnect keeps the handle and says so", async () => {
+    h.user = { email: { address: "me@x.io" }, twitter: { subject: "12345", username: "brian", name: null, profilePictureUrl: null } };
+    h.unlinkOAuth.mockRejectedValue(new Error("nope"));
+    fetchRef(null);
+    open();
+    const x = within(screen.getByTestId("account-x"));
+    fireEvent.click(x.getByText("Disconnect"));
+    expect((await x.findByRole("alert")).textContent).toBe("Couldn't disconnect X. Try again later.");
+    expect(x.getByText("@brian")).toBeTruthy();
   });
 
   it("Reset chart settings asks first; only the confirm clears and reloads", async () => {
