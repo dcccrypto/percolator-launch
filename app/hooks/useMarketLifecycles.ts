@@ -12,7 +12,7 @@
  * The returned map keeps its identity while no market changes state: the 10 s cluster-slot tick re-derives, but an unchanged result
  * does not refilter the list.
  */
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
@@ -22,6 +22,8 @@ import { isBlockedSlab } from "@/lib/blocklist";
 import { LIFECYCLE_SLICE_LEN, deriveMarketLifecycle, type MarketLifecycle } from "@/lib/v22/market-lifecycle";
 
 const BATCH = 100;
+/** After this long without a first answer the list stops waiting and shows every market as live (nothing claimed). */
+export const LIFECYCLE_READY_TIMEOUT_MS = 8_000;
 const EMPTY: ReadonlyMap<string, MarketLifecycle> = new Map();
 
 /** Same states and windows for every slab = same map. */
@@ -67,7 +69,7 @@ export function useMarketLifecycles(slabs: readonly string[]): MarketLifecycles 
       }
       return out;
     },
-    { dedupingInterval: 30_000, refreshInterval: 30_000, revalidateOnFocus: false },
+    { dedupingInterval: 30_000, refreshInterval: 30_000, revalidateOnFocus: false, keepPreviousData: true },
   );
 
   const prev = useRef<ReadonlyMap<string, MarketLifecycle>>(EMPTY);
@@ -82,7 +84,18 @@ export function useMarketLifecycles(slabs: readonly string[]): MarketLifecycles 
     // eslint-disable-next-line react-hooks/exhaustive-deps -- slabs is keyed on slabsKey (stable string)
   }, [data, clusterSlot, slabsKey]);
 
-  // A failed read is not "loading for ever": the list then shows every market as live (nothing claimed), as before this feature.
-  const ready = !enabled || slabs.length === 0 || data !== undefined || error !== undefined;
+  // Ready once ANY read has answered: a new slab set (a market landing, a wallet connecting) keeps the previous data
+  // (keepPreviousData) and never puts the list back into loading. A failed or hung read is not "loading for ever" either: an error,
+  // or LIFECYCLE_READY_TIMEOUT_MS without an answer, shows every market as live (nothing claimed), as before this feature.
+  const answered = useRef(false);
+  if (data !== undefined || error !== undefined) answered.current = true;
+  const [timedOut, setTimedOut] = useState(false);
+  const waiting = key !== null && !answered.current;
+  useEffect(() => {
+    if (!waiting) return;
+    const t = setTimeout(() => setTimedOut(true), LIFECYCLE_READY_TIMEOUT_MS);
+    return () => clearTimeout(t);
+  }, [waiting]);
+  const ready = !enabled || slabs.length === 0 || answered.current || timedOut;
   return { lifecycles, ready };
 }
