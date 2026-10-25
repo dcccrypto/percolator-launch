@@ -33,7 +33,12 @@ import { broadcastSignedTx, buildBatchTx, getFreshBlockhash, getPriorityFee, sen
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { plainMessage } from "@/lib/limits/user-message";
 import { isWrapperAccount } from "@/lib/v22/layout";
-import { EARN_FLOOR_COPY, earnDeadShareFloorPresent } from "@/lib/v22/resolved-claims";
+import { EARN_FLOOR_COPY, earnDeadShareFloorPresent, othersWithPositions } from "@/lib/v22/resolved-claims";
+import { staleResolveStatusV22 } from "@/lib/v22/stale-resolve";
+import { decodeResolvedPortfolio } from "@/lib/limits/decode";
+import { looksEmpty } from "@/lib/limits/resolved-exit";
+import { KIND_PORTFOLIO } from "@/lib/limits/constants";
+import { deriveLpVaultRegistry } from "@percolatorct/sdk";
 import { readAssetControlSeqs, readMarketGroupHeader } from "@/lib/v18-wire";
 /** Slab state after `sig`, read at (at least) the tx's slot so a cached pre-close read can't answer. */
 export async function readCloseSlabStateAfter(
@@ -326,9 +331,8 @@ export function useCloseMarket() {
           // caught before sending, so what remains is the LP-vault backing floor a
           // market gets once its Earn vault exists — CloseSlab refuses that by design.
           setError(
-            "Cannot reclaim: this market got far enough to create its Earn vault, and the " +
-            "program permanently blocks closing a market once that exists. Resume creation " +
-            "to finish it instead."
+            "Cannot close this market: the program refuses while it is live, still holds accounts, or has an Earn vault. " +
+            "A v2.2 Earn market can never be closed, so its rent is not reclaimable."
           );
         } else {
           // Any other custom-program-error code: reuse the same decoder the create-market
@@ -359,7 +363,7 @@ export function useCloseMarket() {
    * Earn markets, where CloseSlab can never run (FC-B5), so there is no rent to reclaim and settling is the way out.
    */
   const settleMarket = useCallback(
-    async (slabAddress: string): Promise<{ signature: string | null } | null> => {
+    async (slabAddress: string): Promise<{ signature: string | null; route?: "stale" } | null> => {
       if (!walletCompat.publicKey || !walletCompat.signTransaction) {
         setError("Wallet not connected");
         return null;
@@ -384,8 +388,40 @@ export function useCloseMarket() {
           return null;
         }
         const hdr = readMarketGroupHeader(data);
-        if (hdr.mode !== 0) return { signature: null }; // already settled: nothing to send
+        if (hdr.mode === 1) return { signature: null }; // already Resolved: nothing to send
+        if (hdr.mode !== 0) {
+          // Recovery (2) is not settled: its own crank reaches Resolved. Nothing for the admin to send.
+          setError(EARN_FLOOR_COPY.refuse.recovery);
+          return null;
+        }
         const programId = info.owner;
+        // A matured stale window means anyone can settle it with tag 39 (the market page's Settle): the admin path is not for that.
+        const slot = BigInt(await connection.getSlot("confirmed"));
+        const st = staleResolveStatusV22(data, slot);
+        if (st?.canResolve) {
+          return { signature: null, route: "stale" }; // the caller sends the admin to the market page (tag 39)
+        }
+        // Admin resolve is for a market nobody else is trading in: refuse while anyone but this wallet and the Earn vault holds anything.
+        let rows: { owner: string; empty: boolean }[];
+        try {
+          const accts = await connection.getProgramAccounts(programId, { commitment: "confirmed", filters: [{ memcmp: { offset: 16, bytes: slabPk.toBase58() } }] });
+          rows = [];
+          for (const { account } of accts) {
+            const d = new Uint8Array(account.data);
+            if (d[10] !== KIND_PORTFOLIO) continue;
+            const v = decodeResolvedPortfolio(d);
+            if (!v) throw new Error("unreadable portfolio");
+            rows.push({ owner: new PublicKey(v.owner).toBase58(), empty: looksEmpty(v) });
+          }
+        } catch {
+          setError(EARN_FLOOR_COPY.refuse.unreadable);
+          return null;
+        }
+        const [registry] = deriveLpVaultRegistry(programId, slabPk);
+        if (othersWithPositions(rows, walletCompat.publicKey.toBase58(), registry.toBase58()) > 0) {
+          setError(EARN_FLOOR_COPY.refuse.others);
+          return null;
+        }
         const gate = await readAndPlanPreResolve(connection, {
           programId,
           stakeProgramId: new PublicKey((getConfig() as { vaultProgramId?: string }).vaultProgramId ?? DEVNET_PROGRAM_IDS.stake),

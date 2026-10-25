@@ -34,8 +34,11 @@ export interface ResolvedClaimsState {
   window: OwnerWindow | null;
   /** The wallet holds something here (any row with an action). */
   hasClaims: boolean;
-  /** Some read has not finished or failed: rows may be missing, never invented. */
+  /** Some read has not finished: rows may be missing, never invented. */
   loading: boolean;
+  /** A read failed (RPC): the rows say nothing about that part, and the panel must not say "nothing left". */
+  readFailed: boolean;
+  retry: () => void;
 }
 
 export function useResolvedClaims(slabAddress: string | null): ResolvedClaimsState {
@@ -47,7 +50,9 @@ export function useResolvedClaims(slabAddress: string | null): ResolvedClaimsSta
   const resolved = isDevnetV22Enabled() && market !== null && market.mode === 1;
   const owner = wallet.publicKey ?? null;
   const [viewer, setViewer] = useState<ClaimViewer>({ positions: null, earnShares: null, stakeShares: null, stakeNeedsRecover: false });
-  const [loading, setLoading] = useState(false);
+  // True from the first render: an unread panel must not say "nothing left" for a frame.
+  const [loading, setLoading] = useState(true);
+  const [readFailed, setReadFailed] = useState(false);
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -75,6 +80,7 @@ export function useResolvedClaims(slabAddress: string | null): ResolvedClaimsSta
         return ataInfo ? unpackAccount(ata, ataInfo).amount : 0n;
       })(),
     ]);
+    const failed = own.status === "rejected" || earn.status === "rejected" || stake.status === "rejected";
     if (own.status === "fulfilled") next.positions = own.value.length;
     if (earn.status === "fulfilled") next.earnShares = earn.value.get(slabAddress)?.shares ?? 0n;
     if (stake.status === "fulfilled") {
@@ -85,11 +91,17 @@ export function useResolvedClaims(slabAddress: string | null): ResolvedClaimsSta
         next.stakeNeedsRecover = false;
       }
     }
-    if (alive.current) setViewer(next);
+    if (alive.current) {
+      setViewer(next);
+      setReadFailed(failed);
+    }
   }, [resolved, slabAddress, programId, owner, raw, connection]);
 
   useEffect(() => {
-    if (!resolved || !owner) return;
+    if (!resolved || !owner) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     void read().finally(() => {
@@ -104,5 +116,9 @@ export function useResolvedClaims(slabAddress: string | null): ResolvedClaimsSta
 
   const rows = useMemo(() => (market && resolved ? planClaimRows(market, viewer) : []), [market, resolved, viewer]);
   const window = useMemo(() => (market && resolved ? ownerWindow(market, nowSlot, Date.now()) : null), [market, resolved, nowSlot]);
-  return { resolved, rows, window, hasClaims: rows.some((r) => r.actions.length > 0), loading };
+  const retry = useCallback(() => {
+    setLoading(true);
+    void read().finally(() => alive.current && setLoading(false));
+  }, [read]);
+  return { resolved, rows, window, hasClaims: rows.some((r) => r.actions.length > 0), loading, readFailed, retry };
 }

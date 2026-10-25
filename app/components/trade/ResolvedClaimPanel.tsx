@@ -19,6 +19,9 @@ export interface ResolvedClaimPanelViewProps {
   slabAddress: string;
   walletConnected: boolean;
   loading: boolean;
+  /** A read failed: never say "nothing left" then. */
+  readFailed?: boolean;
+  onRetry?: () => void;
   busy: boolean;
   error: string | null;
   done: string | null;
@@ -38,7 +41,7 @@ function windowLine(w: OwnerWindow | null, locale?: string, timeZone?: string): 
   return CLAIM_COPY.ownerWindow(`${at} (${relativePhrase(w.endsAtMs - Date.now())})`);
 }
 
-export const ResolvedClaimPanelView: FC<ResolvedClaimPanelViewProps> = ({ rows, window: w, slabAddress, walletConnected, loading, busy, error, done, waiting, onClose, locale, timeZone }) => {
+export const ResolvedClaimPanelView: FC<ResolvedClaimPanelViewProps> = ({ rows, window: w, slabAddress, walletConnected, loading, readFailed = false, onRetry, busy, error, done, waiting, onClose, locale, timeZone }) => {
   const line = windowLine(w, locale, timeZone);
   const mine = rows.filter((r) => r.actions.length > 0);
   return (
@@ -50,7 +53,20 @@ export const ResolvedClaimPanelView: FC<ResolvedClaimPanelViewProps> = ({ rows, 
           {line}
         </p>
       )}
-      {walletConnected && mine.length === 0 && !loading && (
+      <p data-testid="claim-exceptions" className="mt-1 text-[10px] text-[var(--text-secondary)]">
+        {CLAIM_COPY.windowExceptions}
+      </p>
+      {walletConnected && readFailed && !loading && (
+        <p data-testid="claim-read-failed" className="mt-2 text-[var(--text)]">
+          {CLAIM_COPY.readFailed}{" "}
+          {onRetry && (
+            <button type="button" data-testid="claim-retry" onClick={onRetry} className="underline underline-offset-2 text-[var(--accent)]">
+              {CLAIM_COPY.retry}
+            </button>
+          )}
+        </p>
+      )}
+      {walletConnected && mine.length === 0 && !loading && !readFailed && (
         <p data-testid="claim-none" className="mt-2 text-[var(--text)]">
           {CLAIM_COPY.none}
         </p>
@@ -126,6 +142,8 @@ export const ResolvedClaimPanel: FC<{ slabAddress: string; walletConnected: bool
       slabAddress={slabAddress}
       walletConnected={walletConnected}
       loading={c.loading}
+      readFailed={c.readFailed}
+      onRetry={c.retry}
       busy={s.busy}
       error={s.error}
       done={s.done}

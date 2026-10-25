@@ -6,6 +6,9 @@
  * a portfolio counts when its market is Resolved (mode 1) or blocklisted, and it still holds value. Hiding a market from discovery
  * never hides a holder's own funds from them (percolator ops plan section 4).
  *
+ * POSITIONS ONLY: Earn-only and stake-only holders, and portfolios held as an NFT (owner = the NFT escrow PDA, closed by the holder),
+ * are not found by this owner scan; the Earn and Stake pages list those.
+ *
  * Layout: portfolios are decoded by the account's wrapper VERSION (lib/v22/layout.ts, lib/limits/decode.ts), the owner is the mutable
  * owner at account offset 116 and the market group at 16, both unchanged between v2.1 and v2.2 (lib/limits/constants.ts PF_OWNER).
  */
@@ -56,7 +59,9 @@ export function classifyRetiredHolding(args: { portfolio: Uint8Array; slabAddres
   const { portfolio, slabAddress, market, blocked } = args;
   const settled = market !== null && market.mode === 1;
   if (!settled && !blocked) return null;
-  if (isLpPortfolio(portfolio)) return null;
+  // On a SETTLED market the wallet's own LP portfolio is capital it can close like any other (the claim panel lists it the same way).
+  // Only for a blocklisted market that is not settled is it left to the Earn flow, as before.
+  if (!settled && isLpPortfolio(portfolio)) return null;
   let capital: bigint;
   let positionSizeQ: bigint;
   try {

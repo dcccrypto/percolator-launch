@@ -20,13 +20,29 @@ describe("ResolvedClaimPanelView", () => {
     expect(screen.getByTestId("claim-action-close-and-withdraw")).toBeTruthy();
     expect(screen.getByTestId("claim-action-recover-to-stakers")).toBeTruthy();
     expect(screen.getByTestId("claim-waiting").textContent).toMatch(/open positions/);
-    expect(screen.getByTestId("claim-owner-window").textContent).toMatch(/After that, anyone can settle a position/);
+    expect(screen.getByTestId("claim-owner-window").textContent).toMatch(/until about .*After that, anyone can settle a position/);
   });
   it("only the Close button sends; it calls onClose", () => {
     const onClose = vi.fn();
     render(<ResolvedClaimPanelView {...base} onClose={onClose} rows={planClaimRows(market, { positions: 1, earnShares: 0n, stakeShares: 0n, stakeNeedsRecover: false })} window={null} />);
     fireEvent.click(screen.getByTestId("claim-action-close-and-withdraw"));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+  it("a failed read never says 'nothing left': it says it could not read, and Try again re-reads", () => {
+    const onRetry = vi.fn();
+    render(<ResolvedClaimPanelView {...base} readFailed onRetry={onRetry} rows={planClaimRows(market, { positions: null, earnShares: null, stakeShares: null, stakeNeedsRecover: false })} window={null} />);
+    expect(screen.queryByTestId("claim-none")).toBeNull();
+    expect(screen.getByTestId("claim-read-failed").textContent).toMatch(/Couldn't read your balances/);
+    fireEvent.click(screen.getByTestId("claim-retry"));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+  it("while the first read is in flight it says nothing about 'nothing left'", () => {
+    render(<ResolvedClaimPanelView {...base} loading rows={planClaimRows(market, { positions: null, earnShares: null, stakeShares: null, stakeNeedsRecover: false })} window={null} />);
+    expect(screen.queryByTestId("claim-none")).toBeNull();
+  });
+  it("names the NFT and Earn exceptions to the window line", () => {
+    render(<ResolvedClaimPanelView {...base} rows={[]} window={null} />);
+    expect(screen.getByTestId("claim-exceptions").textContent).toMatch(/held as an NFT can only be closed by its holder/);
   });
   it("says so when nothing of the wallet's is left", () => {
     render(<ResolvedClaimPanelView {...base} rows={planClaimRows(market, { positions: 0, earnShares: 0n, stakeShares: 0n, stakeNeedsRecover: false })} window={null} />);

@@ -16,7 +16,7 @@ import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { getConfig } from "@/lib/config";
 import { DEVNET_PROGRAM_IDS } from "@/lib/program-ids";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
-import { decodeStakePoolV5, deriveInsuranceUnitsV22, STAKE_RISK_MODE } from "@/lib/v22/sdk";
+import { decodeStakePoolV5, deriveInsuranceUnitsV22, STAKE_RISK_MODE, type StakePoolV5 } from "@/lib/v22/sdk";
 import { buildRecoverTerminalInsuranceIx, decodeTerminalInsuranceCapacity } from "@/lib/v22/sdk/records/stake-wind-down";
 import { stakeRecoverState, RECOVER_COPY, type StakeRecoverState } from "@/lib/v22/resolved-claims";
 import { parseCustomInstructionError } from "@/lib/self-heal";
@@ -38,6 +38,38 @@ export function recoverRefusalCopy(code: number | undefined): { line: string; ok
   if (code === 31) return { line: RECOVER_COPY.nothing, ok: true };
   if (code === 21) return { line: RECOVER_COPY.waitingOnPositions, ok: false };
   return { line: RECOVER_COPY.failed, ok: false };
+}
+
+/**
+ * The transaction's instructions: [create the creator's collateral token account (idempotent, FIRST_LOSS / FEE_ONLY only: the program
+ * REQUIRES it even when nothing is owed), tag 29]. The per-mode account tail is the stake program's (instruction.rs, tag 29).
+ */
+export function buildRecoverIxs(a: { caller: PublicKey; stakeProgram: PublicKey; pool: PublicKey; market: PublicKey; poolState: StakePoolV5; amount: bigint }): TransactionInstruction[] {
+  const { poolState } = a;
+  const [vaultAuth] = deriveStakeVaultAuth(a.pool, a.stakeProgram);
+  const [wrapperVaultAuthority] = deriveVaultAuthority(poolState.percolatorProgram, a.market);
+  const riskMode = poolState.riskMode as 0 | 1 | 2;
+  const creatorToken = riskMode === 0 ? undefined : getAssociatedTokenAddressSync(poolState.collateralMint, poolState.admin, true);
+  const pre: TransactionInstruction[] = creatorToken ? [createAssociatedTokenAccountIdempotentInstruction(a.caller, creatorToken, poolState.admin, poolState.collateralMint)] : [];
+  const ix = buildRecoverTerminalInsuranceIx(
+    {
+      stakeProgram: a.stakeProgram,
+      caller: a.caller,
+      pool: a.pool,
+      poolVault: poolState.vault,
+      vaultAuth,
+      market: a.market,
+      wrapperVault: getAssociatedTokenAddressSync(poolState.collateralMint, wrapperVaultAuthority, true),
+      wrapperVaultAuthority,
+      wrapperProgram: poolState.percolatorProgram,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      riskMode,
+      ...(riskMode === STAKE_RISK_MODE.FirstLoss ? { insuranceUnits: deriveInsuranceUnitsV22(poolState.percolatorProgram, a.market)[0] } : {}),
+      ...(creatorToken ? { creatorToken } : {}),
+    },
+    a.amount,
+  );
+  return [...pre, ix];
 }
 
 export function useRecoverToStakers(slabAddress: string | null): RecoverToStakersState {
@@ -68,6 +100,8 @@ export function useRecoverToStakers(slabAddress: string | null): RecoverToStaker
     const [poolInfo, marketInfo] = await Promise.all([connection.getAccountInfo(pool, "confirmed"), connection.getAccountInfo(market, "confirmed")]);
     if (!poolInfo || !poolInfo.owner.equals(sp) || !marketInfo) return null;
     const poolState = decodeStakePoolV5(new Uint8Array(poolInfo.data));
+    // Tag 29 is refused (InvalidPoolMode) for a trading LP pool (pool_mode 1): there is nothing of ours to offer.
+    if (poolState.poolMode !== 0) return null;
     const cap = decodeTerminalInsuranceCapacity(new Uint8Array(marketInfo.data), 0);
     return { market, sp, pool, poolState, cap, wrapper: marketInfo.owner };
   }, [connection, slabAddress, stakeProgram]);
@@ -105,32 +139,7 @@ export function useRecoverToStakers(slabAddress: string | null): RecoverToStaker
         setError(RECOVER_COPY.waitingOnPositions);
         return;
       }
-      const [vaultAuth] = deriveStakeVaultAuth(r.pool, r.sp);
-      const [wrapperVaultAuthority] = deriveVaultAuthority(r.poolState.percolatorProgram, r.market);
-      const riskMode = r.poolState.riskMode as 0 | 1 | 2;
-      const creatorToken = riskMode === 0 ? undefined : getAssociatedTokenAddressSync(r.poolState.collateralMint, r.poolState.admin, true);
-      const pre: TransactionInstruction[] = creatorToken
-        ? [createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, creatorToken, r.poolState.admin, r.poolState.collateralMint)]
-        : [];
-      const ix = buildRecoverTerminalInsuranceIx(
-        {
-          stakeProgram: r.sp,
-          caller: wallet.publicKey,
-          pool: r.pool,
-          poolVault: r.poolState.vault,
-          vaultAuth,
-          market: r.market,
-          wrapperVault: getAssociatedTokenAddressSync(r.poolState.collateralMint, wrapperVaultAuthority, true),
-          wrapperVaultAuthority,
-          wrapperProgram: r.poolState.percolatorProgram,
-          tokenProgram: TOKEN_PROGRAM_ID,
-          riskMode,
-          ...(riskMode === STAKE_RISK_MODE.FirstLoss ? { insuranceUnits: deriveInsuranceUnitsV22(r.poolState.percolatorProgram, r.market)[0] } : {}),
-          ...(creatorToken ? { creatorToken } : {}),
-        },
-        state.amount,
-      );
-      const ixs = [...pre, ix];
+      const ixs = buildRecoverIxs({ caller: wallet.publicKey, stakeProgram: r.sp, pool: r.pool, market: r.market, poolState: r.poolState, amount: state.amount });
       const sim = await simulateForGate(connection, wallet.publicKey, ixs);
       if (sim.err) {
         const c = recoverRefusalCopy(parseCustomInstructionError(sim.err)?.code);

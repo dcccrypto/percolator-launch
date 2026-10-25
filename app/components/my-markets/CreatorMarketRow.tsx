@@ -35,6 +35,9 @@ import { CreatorTranchePanel } from "@/components/limits/CreatorLimits";
 import { ADMIN_BURN_COPY } from "@/lib/admin-burn-copy";
 import { sanitizeDecimalInput } from "@/lib/decimal-input";
 import { EARN_FLOOR_COPY, earnDeadShareFloorPresent } from "@/lib/v22/resolved-claims";
+import { staleMinutes, staleResolveStatusV22 } from "@/lib/v22/stale-resolve";
+import { useClusterSlot } from "@/hooks/useClusterSlot";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 
 /** Same accrue-cliff threshold as useCreatedMarkets/CrankHealthCard — the
  *  asset's accrue slot (advances only via crank/trade) vs the current
@@ -208,10 +211,18 @@ export const InsuranceAuthorityReader: FC<{ onRead: (b58: string | null) => void
  * Reports whether the drawer's market carries the Earn dead-share-floor backing bucket (lib/v22/resolved-claims.ts): then CloseSlab
  * refuses with Custom 21 for ever (FC-B5) and the row offers settle instead of close. Null until the market bytes are read.
  */
-export const EarnFloorReader: FC<{ onRead: (floor: boolean | null) => void }> = ({ onRead }) => {
+export interface EarnFloorRead {
+  floor: boolean | null;
+  /** Minutes since the last good price (for the settle dialog); null when unknown. */
+  priceAgeMinutes: number | null;
+}
+export const EarnFloorReader: FC<{ onRead: (r: EarnFloorRead) => void }> = ({ onRead }) => {
   const { raw } = useSlabState();
+  const clusterSlot = useClusterSlot(isDevnetV22Enabled());
   const floor = raw ? earnDeadShareFloorPresent(raw) : null;
-  useEffect(() => onRead(floor), [floor, onRead]);
+  const st = raw ? staleResolveStatusV22(raw, clusterSlot) : null;
+  const priceAgeMinutes = st ? staleMinutes(st.ageSlots) : null;
+  useEffect(() => onRead({ floor, priceAgeMinutes }), [floor, priceAgeMinutes, onRead]);
   return null;
 };
 
@@ -416,7 +427,8 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
   const canTopUpInsurance = insuranceAuthorityKnown && insuranceAuthority === (wallet.publicKey?.toBase58() ?? "");
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   // v2.2 Earn market: CloseSlab can never run (Earn dead-share floor), so no close / reclaim is offered; settle is.
-  const [earnFloor, setEarnFloor] = useState<boolean | null>(null);
+  const [earnRead, setEarnRead] = useState<EarnFloorRead>({ floor: null, priceAgeMinutes: null });
+  const earnFloor = earnRead.floor;
   const [showSettleConfirm, setShowSettleConfirm] = useState(false);
 
   async function handleAction(name: string, fn: () => Promise<string>) {
@@ -451,7 +463,9 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
   const handleSettleEverything = useCallback(async () => {
     setShowSettleConfirm(false);
     const result = await closeMarket.settleMarket(slab);
-    if (result) {
+    if (result?.route === "stale") {
+      window.location.assign(`/trade/${slab}`); // the market page's Settle (tag 39) is the right door
+    } else if (result) {
       toast(EARN_FLOOR_COPY.settledToast, "success");
       window.location.assign(`/trade/${slab}`); // the market page owns the claims; a full load re-reads the settled market
     }
@@ -597,7 +611,7 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
               <CreatorTranchePanel slab={slab} decimals={decimals} collateralSymbol="USDC" />
               <CreatorClaimPanel slabAddress={slab} />
               <InsuranceAuthorityReader onRead={setInsuranceAuthority} />
-              <EarnFloorReader onRead={setEarnFloor} />
+              {isDevnetV22Enabled() && <EarnFloorReader onRead={setEarnRead} />}
             </SlabProvider>
           </div>
 
@@ -752,7 +766,7 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
       <ConfirmDialog
         open={showSettleConfirm}
         title={EARN_FLOOR_COPY.confirmTitle}
-        description={EARN_FLOOR_COPY.confirmBody}
+        description={EARN_FLOOR_COPY.confirmBody(earnRead.priceAgeMinutes)}
         confirmLabel={EARN_FLOOR_COPY.confirm}
         danger
         onConfirm={handleSettleEverything}

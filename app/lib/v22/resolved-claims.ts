@@ -163,14 +163,15 @@ export interface StakeRecoverState {
   amount: bigint;
   /** The wrapper still has open portfolios: its terminal insurance withdraw (tag 41) refuses until they are closed. */
   blockedByPositions: boolean;
-  /** Offer "Recover to stakers": Resolved, and either insurance to move or a surplus that may need booking. */
+  /** Offer "Recover to stakers": Resolved and the market still has insurance to move into the pool. */
   offer: boolean;
 }
 
 /**
  * From the market's terminal capacity (lib/v22/sdk/records/stake-wind-down.ts `decodeTerminalInsuranceCapacity(data, 0)`).
- * A Resolved bound pool is always offered the recovery: with `amount` 0 it books a surplus someone else pushed, and the program
- * answers 31 (NothingToRecover) when there is nothing, which the caller shows as "nothing left to recover".
+ * Offered only while there is insurance left to move (`terminalCapacity > 0`): once tag 29 has run the market's insurance budget is
+ * spent and the offer goes away. (A surplus someone else pushed straight into the pool vault is not visible from the market; the
+ * program books it on the next run and answers 31 NothingToRecover when there is none.)
  */
 export function stakeRecoverState(cap: { resolved: boolean; terminalCapacity: bigint; materializedPortfolioCount: bigint }): StakeRecoverState {
   const blockedByPositions = cap.materializedPortfolioCount !== 0n;
@@ -178,7 +179,7 @@ export function stakeRecoverState(cap: { resolved: boolean; terminalCapacity: bi
     resolved: cap.resolved,
     amount: blockedByPositions ? 0n : cap.terminalCapacity,
     blockedByPositions,
-    offer: cap.resolved,
+    offer: cap.resolved && cap.terminalCapacity > 0n,
   };
 }
 
@@ -194,15 +195,19 @@ export const CLAIM_COPY = {
   },
   waitingOnPositions: "Waiting for open positions to be settled.",
   none: "Nothing of yours is left here.",
-  ownerWindow: (until: string): string => `Only position owners can settle a position until ${until}. After that, anyone can settle a position, and the payout still goes to its owner.`,
-  ownerWindowOver: "The owner-only window has passed: anyone can settle a position here, and the payout still goes to its owner.",
-  ownerWindowNone: "Anyone can settle a position here, and the payout still goes to its owner.",
+  ownerWindow: (until: string): string => `Only position owners can settle a position until about ${until}. After that, anyone can settle a position and the payout goes to its owner.`,
+  ownerWindowOver: "The owner-only window has passed: anyone can settle a position here and the payout goes to its owner.",
+  ownerWindowNone: "Anyone can settle a position here and the payout goes to its owner.",
+  /** Cases the line above does not cover. */
+  windowExceptions: "A position held as an NFT can only be closed by its holder, and Earn deposits are paid from the Earn page.",
+  readFailed: "Couldn't read your balances here. Nothing is lost; try again.",
+  retry: "Try again",
 } as const;
 
 /** The /stake wording for a resolved pool. */
 export const RECOVER_COPY = {
   title: "This market is settled",
-  body: "Recover to stakers first: it moves the market's remaining insurance back into the pool so every staker can withdraw it. Anyone can run it.",
+  body: "Recover to stakers first: it moves the market's remaining insurance back into the pool so every staker can withdraw it. Anyone can run it. Withdrawing before it runs pays only what is in the pool now.",
   button: "Recover to stakers",
   busy: "Recovering…",
   done: "Recovered. You can withdraw now.",
@@ -216,7 +221,34 @@ export const EARN_FLOOR_COPY = {
   line: "Rent is not reclaimable on v2.2 Earn markets. The program keeps a small permanent balance in every Earn vault, so the market account can never be closed.",
   action: "Settle and withdraw everything",
   confirmTitle: "Settle this market?",
-  confirmBody: "Settling stops trading for good. Then you withdraw your positions, Earn and stake from the market page. The market's rent stays locked.",
+  /** `ageMinutes` = how long ago the last good price landed (null when unknown). */
+  confirmBody: (ageMinutes: number | null): string =>
+    `This cannot be undone. Trading stops for good and open positions settle at the market's last price${ageMinutes === null ? "" : ` (last updated about ${ageMinutes} minute${ageMinutes === 1 ? "" : "s"} ago)`}. Other users are not notified. Then you withdraw your positions, Earn and stake from the market page. The market's rent stays locked.`,
   confirm: "Settle market",
   settledToast: "Market settled. Withdraw what is yours from the market page.",
+  /** A refusal, one plain line each. */
+  refuse: {
+    others: "Other people have positions in this market, so it can't be settled from here. Once its price stops, anyone can settle it from the market page.",
+    stale: "This market's price has stopped, so anyone can settle it. Use Settle on the market page.",
+    recovery: "This market is already winding down on its own. Open its page to see what you can claim.",
+    unreadable: "Couldn't check who else has positions in this market, so nothing was sent. Try again.",
+  },
 } as const;
+
+// ── Who else is in the market (settle by the admin) ────────────────────────────────────────────
+
+export interface MarketPortfolioRow {
+  /** Mutable owner (base58). */
+  owner: string;
+  /** Nothing left in it (lib/limits/resolved-exit.ts looksEmpty). */
+  empty: boolean;
+}
+
+/**
+ * Portfolios that are neither the wallet's own nor the Earn vault's (its registry PDA owns the vault LP) and still hold something:
+ * other users' positions. A market settled by its admin while these exist settles them at the last price without notice, so the
+ * admin path refuses (decision C: admin resolve is for deliberate retirement of markets we operate, not for people mid-trade).
+ */
+export function othersWithPositions(rows: readonly MarketPortfolioRow[], wallet: string, vaultRegistry: string): number {
+  return rows.filter((r) => !r.empty && r.owner !== wallet && r.owner !== vaultRegistry).length;
+}
