@@ -33,6 +33,8 @@ import { RenderProfiler } from "@/components/dev/RenderProfiler";
 import TradingPageLoading from "./loading";
 import { ADMIN_BURN_COPY, creatorAdminBurned } from "@/lib/admin-burn-copy";
 import { MultiAssetNotice } from "@/components/trade/MultiAssetNotice";
+import { ResolvedClaimPanel } from "@/components/trade/ResolvedClaimPanel";
+import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { isMultiAssetMarket } from "@/lib/v22/market-cap";
 import { fetchMarketsList, listedMarketRows } from "@/lib/markets-list-client";
 
@@ -326,6 +328,7 @@ function TradePageInner({ slab }: { slab: string }) {
   const isLargeScreen = useIsLargeScreen();
 
   const { engine, config, header, raw: slabRaw, loading: slabLoading, error: slabError, layoutUnsupported } = useSlabState();
+  const claimWalletConnected = useWalletCompat().publicKey !== null;
   // #3463: the chip names the key a burn clears (asset 0's asset_admin), not the market authority in the header shim.
   const adminBurned = creatorAdminBurned(slabRaw, header?.admin);
   // Boolean presence subscription, NOT the full live-price state: this keeps the
@@ -536,6 +539,8 @@ function TradePageInner({ slab }: { slab: string }) {
       {/* UX WP-10 (§4.3): ONE status line under the header, only when the market is not live. */}
       <MarketHeaderStatus slab={slab} />
       <MultiAssetNotice show={isMultiAssetMarket(slabRaw)} />
+      {/* A settled market: what this wallet can still collect (positions, Earn, stake) and when the owner-only window ends. Renders nothing on a live market. */}
+      <ResolvedClaimPanel slabAddress={slab} walletConnected={claimWalletConnected} />
       {/* UX WP-10 (GL-1, §4.3): the market address and admin status left the page chrome; they sit
           in a collapsed "Market details" disclosure (the "ADMIN ACTIVE" chip is no longer shown by
           default above every market). */}

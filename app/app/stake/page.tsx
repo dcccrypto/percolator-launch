@@ -1,5 +1,6 @@
 "use client";
 
+import { RecoverToStakers } from "@/components/stake/RecoverToStakers";
 import { stakePoolsUrl } from "@/lib/stake-pools-url";
 import { STAKE_COPY, cooldownDuration } from "@/lib/stake-copy";
 import { Tooltip } from "@/components/ui/Tooltip";
@@ -590,6 +591,9 @@ function PositionCard({
         {withdrawError && !txStatus && (
           <p data-testid="stake-error" data-kind="withdraw" className="text-[11px] text-[var(--short)]">{withdrawError}</p>
         )}
+
+        {/* A settled market: recover its insurance to stakers first (stake tag 29, anyone), then Withdraw. Renders nothing on a live pool. */}
+        <RecoverToStakers slabAddress={position.slabAddress} canAct />
 
         {/* Action buttons */}
         <div className="space-y-2">

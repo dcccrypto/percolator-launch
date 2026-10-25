@@ -1,11 +1,10 @@
 "use client";
 
 /**
- * "Retired markets holding your funds" — renders ONLY when the connected
- * wallet has capital or an open position in a blocklisted market. Without
- * this section, retirement made that money silently invisible (the portfolio
- * universe is blocklist-filtered by design). Each row links to the trade
- * page, which renders retired markets in close/withdraw-only mode.
+ * "Settled and retired markets holding your funds" — renders ONLY when the connected wallet has capital or an open position in a
+ * market that is Resolved (settled) or blocklisted. Without this section, settling or retiring a market made that money silently
+ * invisible (the portfolio universe is blocklist-filtered by design). Each row links to the market page, whose claim panel lists
+ * what can be collected and the next step (lib/v22/resolved-claims.ts).
  */
 import { FC } from "react";
 import Link from "next/link";
@@ -20,13 +19,11 @@ export const RetiredHoldings: FC = () => {
     <section className="mt-6 border border-[var(--short)]/30 bg-[var(--short)]/[0.04]">
       <div className="border-b border-[var(--short)]/20 px-4 py-2.5">
         <h2 className="text-[11px] font-bold uppercase tracking-[0.15em] text-[var(--short)]">
-          Retired markets holding your funds
+          Settled and retired markets holding your funds
         </h2>
         <p className="mt-1 text-[10px] leading-relaxed text-[var(--text-secondary)]">
-          These markets have been retired and are hidden from the market lists, but your money in
-          them is still yours. Open one to close positions or withdraw where the market allows it —
-          note that a market locked by an on-chain bankruptcy cannot release funds until it is
-          resolved.
+          These markets are settled or retired, and may be hidden from the market lists, but your money in
+          them is still yours. Open one to see what you can collect and the next step.
         </p>
       </div>
       <div className="divide-y divide-[var(--border)]/30">
@@ -49,7 +46,8 @@ export const RetiredHoldings: FC = () => {
               {h.positionSizeQ !== 0n && (
                 <span className="text-[var(--text-secondary)]">+ open position</span>
               )}
-              <span className="text-[var(--accent)]">manage →</span>
+              <span data-testid="retired-holding-state" className="text-[var(--text-secondary)]">{h.settled ? "settled" : "retired"}</span>
+              <span className="text-[var(--accent)]">{h.settled ? "claim →" : "manage →"}</span>
             </span>
           </Link>
         ))}
