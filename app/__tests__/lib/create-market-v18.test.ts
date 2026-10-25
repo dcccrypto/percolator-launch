@@ -8,6 +8,7 @@ import {
   oracleAuthorityMismatch,
   ORACLE_MODE_AUTH_MARK,
   sequentialStepKind,
+  strayOracleAuthorityMessage,
 } from "@/lib/create-market-v18";
 
 // The wrapper's LP-vault sentinel (percolator-prog v16_program.rs:560,
@@ -138,5 +139,18 @@ describe("sequentialStepKind", () => {
   it("clamps out-of-range steps", () => {
     expect(sequentialStepKind(-1)).toBe("create-market");
     expect(sequentialStepKind(9)).toBe("stake-pool");
+  });
+});
+
+describe("strayOracleAuthorityMessage", () => {
+  const stray = Keypair.generate().publicKey;
+  const keeper = Keypair.generate().publicKey;
+
+  it("names both keys, says nothing further was sent and what to do", () => {
+    const m = strayOracleAuthorityMessage(stray, keeper);
+    expect(m).toContain(stray.toBase58());
+    expect(m).toContain(keeper.toBase58());
+    expect(m).toMatch(/nothing further was sent/);
+    expect(m).toMatch(/report it to the team/);
   });
 });

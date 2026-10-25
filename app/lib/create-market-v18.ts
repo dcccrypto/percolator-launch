@@ -126,3 +126,18 @@ export function sequentialStepKind(step: number): CreateStepKind {
   ];
   return kinds[Math.min(Math.max(step, 0), kinds.length - 1)] ?? "create-market";
 }
+
+/**
+ * The creator-facing refusal for a market whose oracle authority is neither the
+ * deployer nor the co-sign key (see `oracleAuthorityMismatch`). Says what is
+ * wrong, that nothing further was sent, and what to do next, instead of leaving
+ * the creator with a raw on-chain key comparison.
+ */
+export function strayOracleAuthorityMessage(stray: PublicKey, keeper: PublicKey | null | undefined): string {
+  return (
+    `This market's oracle authority is ${stray.toBase58()}, but the live-price keeper signs as ` +
+    `${keeper?.toBase58() ?? "an unknown key"}. The keeper cannot price this market and its registration ` +
+    `would be refused, so the launch stopped here and nothing further was sent. ` +
+    `Retrying will not change this: please report it to the team with the market address.`
+  );
+}

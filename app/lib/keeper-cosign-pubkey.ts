@@ -1,17 +1,6 @@
 import { PublicKey } from "@solana/web3.js";
 
 /**
- * The pubkey the playground co-sign backend signs as, from
- * `GET /api/playground/keeper-cosign`.
- *
- * Never throws, never rejects, and never hangs: the request is bounded by
- * `timeoutMs`. The caller uses this to sharpen a check it
- * can still make without it (see `isOracleDelegationApplied`), so an
- * unreachable backend, a non-devnet deployment (403) or an unconfigured keeper
- * (503) must degrade to "unknown" rather than fail a launch that would
- * otherwise succeed.
- */
-/**
  * A signal that aborts after `ms`. `AbortSignal.timeout` where it exists, an
  * AbortController + timer where it does not — returning `undefined` for the
  * older environment would leave the request unbounded again, which is the very
@@ -35,6 +24,16 @@ function timeoutSignal(ms: number): AbortSignal | undefined {
   return undefined;
 }
 
+/**
+ * The pubkey the playground co-sign backend signs as, from
+ * `GET /api/playground/keeper-cosign`.
+ *
+ * Never throws, never rejects, and never hangs: the request is bounded by
+ * `timeoutMs`. The caller uses this to sharpen a check it can still make without it (see `isOracleDelegationApplied`), so an
+ * unreachable backend, a non-devnet deployment (403) or an unconfigured keeper
+ * (503) must degrade to "unknown" rather than fail a launch that would
+ * otherwise succeed.
+ */
 export async function fetchKeeperCosignPubkey(
   fetchImpl: typeof fetch = fetch,
   timeoutMs = 5_000,

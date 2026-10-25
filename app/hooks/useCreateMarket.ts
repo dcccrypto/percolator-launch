@@ -120,6 +120,7 @@ import {
   isOracleDelegationApplied,
   oracleAuthorityMismatch,
   sequentialStepKind,
+  strayOracleAuthorityMessage,
   type CreateStepKind,
 } from "@/lib/create-market-v18";
 import { fetchKeeperCosignPubkey } from "@/lib/keeper-cosign-pubkey";
@@ -3018,12 +3019,7 @@ export function useCreateMarket() {
               if (strayAuthority) {
                 // Stop rather than hand the creator a market that is on-chain, paid
                 // for, and permanently unpriceable (GH#3637).
-                throw new Error(
-                  `This market's oracle authority is ${strayAuthority.toBase58()}, but the keeper signs as ` +
-                    `${keeperPubkey?.toBase58() ?? "an unknown key"}. The keeper cannot price this market and its ` +
-                    `registration would be refused, so the launch stopped instead of continuing to a market whose ` +
-                    `live price never connects.`,
-                );
+                throw new Error(strayOracleAuthorityMessage(strayAuthority, keeperPubkey));
               }
               oracleDelegationDone = isOracleDelegationApplied(profile, wallet.publicKey, keeperPubkey);
               if (oracleDelegationDone) {
