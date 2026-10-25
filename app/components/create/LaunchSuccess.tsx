@@ -70,7 +70,7 @@ export const LAUNCH_PRICE_COPY = {
   pendingTitle: "Market created",
   failedTitle: "Market created, but its live price can't connect",
   failedSub: "is on Percolator devnet without a live price",
-  supportLink: "Percolator Discord",
+  supportLink: "Open the Percolator Discord",
   readyTitle: "Ready to trade",
   connecting: "Live price connecting… usually under a minute.",
   timedOut: "Live price still isn't connected. Keep this page open while we keep trying; we can't say when, or whether, it will connect.",
@@ -235,15 +235,19 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
   };
 
   return (
-    <div data-testid="launch-success" className="border border-[var(--long)]/30 bg-[var(--long)]/[0.06] p-6 text-center">
-      {/* Success icon */}
+    <div
+      data-testid="launch-success"
+      data-final-failure={finalRefusal ? "true" : undefined}
+      className={`border p-6 text-center ${finalRefusal ? "border-[var(--warning)]/40 bg-[var(--warning)]/[0.06]" : "border-[var(--long)]/30 bg-[var(--long)]/[0.06]"}`}
+    >
+      {/* Success icon (a warning mark when the live price can never connect) */}
       <div className="mb-4">
-        <div className="inline-flex h-12 w-12 items-center justify-center border-2 border-[var(--long)]/40 bg-[var(--long)]/[0.1] text-[24px] text-[var(--long)]">
-          ✓
+        <div className={`inline-flex h-12 w-12 items-center justify-center border-2 text-[24px] ${finalRefusal ? "border-[var(--warning)]/50 bg-[var(--warning)]/[0.1] text-[var(--warning)]" : "border-[var(--long)]/40 bg-[var(--long)]/[0.1] text-[var(--long)]"}`}>
+          {finalRefusal ? "!" : "✓"}
         </div>
       </div>
 
-      <h2 className="text-[18px] font-bold text-[var(--long)] mb-2">
+      <h2 className={`text-[18px] font-bold mb-2 ${finalRefusal ? "text-[var(--warning)]" : "text-[var(--long)]"}`}>
         {finalRefusal ? LAUNCH_PRICE_COPY.failedTitle : pricePending ? LAUNCH_PRICE_COPY.pendingTitle : LAUNCH_PRICE_COPY.readyTitle}
       </h2>
       <p className="text-[13px] text-[var(--text-secondary)] mb-4">
@@ -435,7 +439,7 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
       {/* CTAs */}
       <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
         {/* PERC-475: Claim Sim-USDC collateral + trade on devnet when a collateral mint is available */}
-        {isDevnet && devnetMint && publicKey && (
+        {isDevnet && devnetMint && publicKey && !finalRefusal && (
           <button
             type="button"
             onClick={handleMintAndTrade}
@@ -454,13 +458,24 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
         )}
         {/* Always present, from the moment the market's creation lands — even while the live price
             is still connecting, and alongside the Sim-USDC claim when that is offered. */}
-        <Link
-          href={`/trade/${marketAddress}`}
-          data-testid="launch-go-to-market"
-          className="w-full sm:w-auto border border-[var(--accent)]/50 bg-[var(--accent)]/[0.08] px-8 py-3 text-center text-[13px] font-bold uppercase tracking-[0.1em] text-[var(--accent)] transition-all hud-btn-corners hover:bg-[var(--accent)]/[0.15]"
-        >
-          TRADE THIS MARKET →
-        </Link>
+        {finalRefusal ? (
+          // No live price, so trading is not offered as the next step: a plain secondary link only.
+          <Link
+            href={`/trade/${marketAddress}`}
+            data-testid="launch-go-to-market"
+            className="w-full sm:w-auto border border-[var(--border)] bg-transparent px-8 py-3 text-center text-[12px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-all hud-btn-corners hover:border-[var(--accent)]/30 hover:text-[var(--text)]"
+          >
+            VIEW MARKET
+          </Link>
+        ) : (
+          <Link
+            href={`/trade/${marketAddress}`}
+            data-testid="launch-go-to-market"
+            className="w-full sm:w-auto border border-[var(--accent)]/50 bg-[var(--accent)]/[0.08] px-8 py-3 text-center text-[13px] font-bold uppercase tracking-[0.1em] text-[var(--accent)] transition-all hud-btn-corners hover:bg-[var(--accent)]/[0.15]"
+          >
+            TRADE THIS MARKET →
+          </Link>
+        )}
         {/* /my-markets had zero navigational entry point — link to it here, at
             the moment a creator has just proven they own a market, so they can
             find their creator dashboard again later. */}

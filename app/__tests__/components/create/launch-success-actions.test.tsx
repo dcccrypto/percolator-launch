@@ -30,6 +30,7 @@ import { PRICE_SOURCE_LOCKED } from "@/lib/market-registration";
 import { TICKET_COPY } from "@/lib/limits/copy";
 import {
   KEEPER_REGISTER_COPY,
+  KEEPER_NO_PROOF_STATE,
   postKeeperRegistration,
   runKeeperRegistration,
   type KeeperRegisterPhase,
@@ -156,6 +157,39 @@ function Harness({ fetchImpl, onRetry }: { fetchImpl: typeof fetch; onRetry?: ()
     />
   );
 }
+
+describe("#3637: the final-failure screen is not a success screen", () => {
+  const finalProps = (over: Partial<Props> = {}) =>
+    base({ keeperPhase: "failed", keeperMessage: KEEPER_REGISTER_COPY.oracleNotKeeper, keeperFinal: true, ...over });
+
+  it("no Sim-USDC & Trade, no 'Trade this market'; a plain View market link; warning styling, not the green check", () => {
+    render(<LaunchSuccess {...finalProps()} />);
+    expect(screen.queryByTestId("launch-claim-sim-usdc")).toBeNull();
+    const link = screen.getByTestId("launch-go-to-market");
+    expect(link.textContent).toBe("VIEW MARKET");
+    expect(link.getAttribute("href")).toBe(`/trade/${SLAB}`);
+    expect(screen.getByTestId("launch-success").textContent).not.toMatch(/TRADE THIS MARKET|GET SIM-USDC & TRADE|✓/);
+    const root = screen.getByTestId("launch-success");
+    expect(root.getAttribute("data-final-failure")).toBe("true");
+    expect(root.className).toContain("--warning");
+    expect(root.className).not.toContain("--long");
+  });
+
+  it("the normal and retryable states keep the trade actions and the success look", () => {
+    render(<LaunchSuccess {...base({ keeperPhase: "failed", keeperMessage: KEEPER_REGISTER_COPY.serverTrouble })} />);
+    expect(screen.getByTestId("launch-go-to-market").textContent).toMatch(/TRADE THIS MARKET/);
+    expect(screen.getByTestId("launch-success").getAttribute("data-final-failure")).toBeNull();
+    expect(screen.getByTestId("launch-success").className).toContain("--long");
+  });
+
+  it("no creation tx saved at launch: failure headline, the noProof reason, Discord next step, no Retry", () => {
+    render(<LaunchSuccess {...finalProps({ keeperMessage: KEEPER_NO_PROOF_STATE.keeperMessage })} />);
+    expect(screen.getByTestId("launch-success").textContent).toContain(LAUNCH_PRICE_COPY.failedTitle);
+    expect(screen.getByTestId("launch-price-status-line").textContent).toBe(KEEPER_REGISTER_COPY.noProof);
+    expect(screen.getByTestId("launch-price-support").getAttribute("href")).toBe("https://discord.gg/fJa4BDBxPN");
+    expect(screen.queryByTestId("launch-price-retry")).toBeNull();
+  });
+});
 
 describe("#3637: a retryable failure keeps its Retry and the success headline", () => {
   it("5xx -> Retry shown, no support link, no failure headline", async () => {

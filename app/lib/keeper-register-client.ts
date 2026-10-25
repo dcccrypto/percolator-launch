@@ -48,6 +48,10 @@ export const KEEPER_REGISTER_COPY = {
   oracleNotKeeper: "This market's price feed was set up with a key our price service doesn't control, so its live price can't connect, and trying again won't change that. The market exists on-chain but will not show a price. Share its address in the Percolator Discord.",
 } as const;
 
+/** Hook state for a launch whose creation tx was not saved on this device: nothing can ever be sent from
+ *  here, so it is a final failure from the start (not "connecting"). Shared by the launch and the retry. */
+export const KEEPER_NO_PROOF_STATE = { keeperPhase: "failed", keeperMessage: KEEPER_REGISTER_COPY.noProof, keeperFinal: true } as const;
+
 /**
  * The keeper-register reasons that were written for creators. Everything else the route can say
  * ("Slab account does not exist on-chain", "Registration proof refused: …", "Invalid dexType", …)
@@ -193,6 +197,9 @@ export async function runKeeperRegistration(d: KeeperRegisterLoopDeps): Promise<
       d.onStatus({ phase: "ready", message: KEEPER_REGISTER_COPY.ready, attempts: i + 1 });
       return "ready";
     }
+    // Aborted while this attempt was in flight (a manual retry already ended it, or the page left):
+    // its answer must not overwrite a status the caller has since set (#3637).
+    if (d.signal?.aborted) return phase;
     if (!r.retryable) {
       d.onStatus({ phase: "failed", message: userFacingRegistrationReason(r.message, r.code, false), attempts: i + 1, final: true, ...(r.code ? { code: r.code } : {}) });
       return "failed";

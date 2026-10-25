@@ -76,6 +76,8 @@ describe("useCreateMarket — retryKeeperRegistration (Try now)", () => {
     expect(signMessage).not.toHaveBeenCalled();
     expect(result.current.state.keeperDelegated).toBe(false);
     expect(result.current.state.keeperMessage).toMatch(/creation transaction isn't known on this device/);
+    expect(result.current.state.keeperFinal).toBe(true);
+    expect(result.current.state.keeperPhase).toBe("failed");
   });
 
   it("a refusal is surfaced and nothing is marked connected", async () => {

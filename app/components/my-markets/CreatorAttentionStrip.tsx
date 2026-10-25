@@ -16,7 +16,7 @@ import { RecoverSolBanner } from "@/components/create/RecoverSolBanner";
 import { useCreateMarket, type KeeperRegisterRetryParams } from "@/hooks/useCreateMarket";
 import { isKeeperFeedDead, isEngineCrankStale, summarizeAffectedMarkets } from "./attentionLogic";
 import { resolveIdentity, type ResolvedIdentity } from "@/lib/bulk-identity";
-import { PER_CREATOR_LIMIT_ROW_COPY, isPerCreatorCapRefusal, registrationCandidates, userFacingRegistrationReason, type KeeperRegisterRequest } from "@/lib/keeper-register-client";
+import { KEEPER_REGISTER_COPY, PER_CREATOR_LIMIT_ROW_COPY, isPerCreatorCapRefusal, registrationCandidates, userFacingRegistrationReason, type KeeperRegisterRequest } from "@/lib/keeper-register-client";
 
 /** The launch's own registration request, as this browser saved it at launch time (the creation-tx
  *  proof, plus the pool / CA / symbol / payload the memo bound). Empty when the launch happened on
@@ -159,6 +159,12 @@ const KeeperRetryRow: FC<{ market: CreatedMarket; detail: CreatorMarketDetail | 
   const [limitReached, setLimitReached] = useState(false);
   const [savedBusy, setSavedBusy] = useState(false);
   const [savedNote, setSavedNote] = useState<string | null>(null);
+  // #3637: the server refused for good. The refusal is said once (under the market name, with the
+  // support link) and the connect button goes, since pressing it again cannot change the answer.
+  // The recover-from-chain form stays: a different token address is a different request.
+  const finalRefusal = state.keeperFinal === true && !limitReached;
+  const showSupport = finalRefusal && (state.keeperMessage === KEEPER_REGISTER_COPY.oracleNotKeeper || state.keeperMessage === KEEPER_REGISTER_COPY.refused);
+  const hasFixedRequest = !!dexPoolAddress || saved.length > 0;
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
@@ -167,11 +173,21 @@ const KeeperRetryRow: FC<{ market: CreatedMarket; detail: CreatorMarketDetail | 
         <span className="ml-2 text-[10px] text-[var(--text-secondary)]">
           the live price isn&apos;t connected — new positions may be blocked until it is.
         </span>
-        {state.keeperMessage && (
-          <p className="mt-0.5 text-[10px] text-[var(--text-dim)]">{state.keeperMessage}</p>
+        {state.keeperMessage && !(limitReached || (finalRefusal && !hasFixedRequest)) && (
+          <p data-testid="live-price-row-message" className="mt-0.5 text-[10px] text-[var(--text-dim)]">
+            {state.keeperMessage}
+            {showSupport && (
+              <>
+                {" "}
+                <a href="https://discord.gg/fJa4BDBxPN" target="_blank" rel="noopener noreferrer" data-testid="live-price-row-support" className="text-[var(--accent)] underline underline-offset-2 hover:text-[var(--text)]">
+                  Open the Percolator Discord
+                </a>
+              </>
+            )}
+          </p>
         )}
       </div>
-      {dexPoolAddress ? (
+      {finalRefusal && hasFixedRequest ? null : dexPoolAddress ? (
         <button
           type="button"
           disabled={state.keeperRegistering}

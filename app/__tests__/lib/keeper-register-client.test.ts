@@ -13,6 +13,7 @@ import {
   KEEPER_REGISTER_STEADY_MS,
   USER_FACING_REGISTRATION_REASONS,
   userFacingRegistrationReason,
+  KEEPER_NO_PROOF_STATE,
   postKeeperRegistration,
   runKeeperRegistration,
 } from "@/lib/keeper-register-client";
@@ -213,5 +214,22 @@ describe("#3637: a final refusal is surfaced with its reason, never swallowed", 
     const seen: Array<{ phase: string; final?: boolean }> = [];
     await runKeeperRegistration({ attempt: () => postKeeperRegistration(REQ, f as unknown as typeof fetch), onStatus: (s) => seen.push(s), sleep: async () => undefined });
     expect(seen[seen.length - 1]).toMatchObject({ phase: "failed", final: true });
+  });
+
+  it("#3637: an attempt in flight when the loop is aborted (a manual retry ended it) never overwrites the status", async () => {
+    const ac = new AbortController();
+    const seen: string[] = [];
+    type Attempt = Awaited<ReturnType<typeof postKeeperRegistration>>;
+    let release: (v: Attempt) => void = () => undefined;
+    const blip = new Promise<Attempt>((r) => { release = r; });
+    const p = runKeeperRegistration({ attempt: () => blip, signal: ac.signal, onStatus: (s) => seen.push(s.phase), sleep: async () => undefined });
+    ac.abort();
+    release({ registered: false, retryable: true, message: "Failed to fetch" });
+    await p;
+    expect(seen).toEqual([]);
+  });
+
+  it("#3637: no creation tx on this device is a final failure state", () => {
+    expect(KEEPER_NO_PROOF_STATE).toMatchObject({ keeperPhase: "failed", keeperFinal: true, keeperMessage: KEEPER_REGISTER_COPY.noProof });
   });
 });

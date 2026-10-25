@@ -74,7 +74,7 @@ import { preflightRegistration, resolveMarketMetadata } from "@/lib/market-metad
 import { buildM1Instructions } from "@/lib/create-market-m1";
 import { WIZARD_STEP_COPY } from "@/lib/wizard-copy";
 import { withRateLimitRetry } from "@/lib/rpc-rate-limit";
-import { KEEPER_REGISTER_COPY, loadProofPayload, loadProofTx, markRegistered, postKeeperRegistration, runKeeperRegistration, saveProofPayload, saveProofTx, saveRegisterRequest, userFacingRegistrationReason, type KeeperRegisterPhase } from "@/lib/keeper-register-client";
+import { KEEPER_NO_PROOF_STATE, KEEPER_REGISTER_COPY, loadProofPayload, loadProofTx, markRegistered, postKeeperRegistration, runKeeperRegistration, saveProofPayload, saveProofTx, saveRegisterRequest, userFacingRegistrationReason, type KeeperRegisterPhase } from "@/lib/keeper-register-client";
 import { deriveLaunchMarketParams, backingSeedPerDomain } from "@/lib/market-params";
 import { buildMarketRegistrationPayload, flooredInitialMarginBps } from "@/lib/market-registration-payload";
 // GH#2592: the step-4 predicate and /api/devnet-pre-fund's funding target must be
@@ -2194,7 +2194,8 @@ export function useCreateMarket() {
     if (!params.dexPoolAddress) return;
     const proofTx = loadProofTx(slab);
     if (!proofTx) {
-      setState((s) => ({ ...s, keeperPhase: "failed", keeperMessage: KEEPER_REGISTER_COPY.noProof }));
+      // Nothing can ever be sent from this device: a final failure, not "connecting" (#3637).
+      setState((s) => ({ ...s, ...KEEPER_NO_PROOF_STATE }));
       return;
     }
     keeperLoopRef.current?.abort();
@@ -4398,7 +4399,7 @@ export function useCreateMarket() {
       const proofTx = loadProofTx(params.slabAddress);
       if (!proofTx) {
         const outcome: { registered: boolean; retryable: boolean; message: string; code?: string } = { registered: false, retryable: false, message: KEEPER_REGISTER_COPY.noProof };
-        setState((s) => ({ ...s, keeperMessage: outcome.message, keeperPhase: "failed" }));
+        setState((s) => ({ ...s, ...KEEPER_NO_PROOF_STATE }));
         return outcome;
       }
       setState((s) => ({ ...s, keeperRegistering: true }));
@@ -4417,8 +4418,10 @@ export function useCreateMarket() {
         keeperPhase: r.registered ? "ready" : !r.retryable ? "failed" : s.keeperPhase,
         keeperFinal: r.registered ? false : !r.retryable ? true : s.keeperFinal,
       }));
-      if (r.registered) {
-        markRegistered(params.slabAddress);
+      // A registered market or a final refusal ends the background loop: a later retryable blip
+      // in the loop must not turn the failure back into "still connecting" (#3637).
+      if (r.registered || !r.retryable) {
+        if (r.registered) markRegistered(params.slabAddress);
         keeperLoopRef.current?.abort();
       }
       return { registered: r.registered, retryable: r.retryable, message: r.message, ...(r.code ? { code: r.code } : {}) };
