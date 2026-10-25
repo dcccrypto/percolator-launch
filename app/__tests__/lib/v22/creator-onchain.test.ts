@@ -1,8 +1,9 @@
 // @vitest-environment node
 /**
- * #3637: the creator's own markets found on chain, with no registry. Real LP portfolio + market bytes (CHILLHOUSE-T). The fake
- * connection checks the exact filters sent (offsets: percolator-prog aca02ba6: portfolio market id +16, owner +116, market kind
- * byte +10 = 1, marketauth +16) and that the RPC budget holds.
+ * #3637: the creator's own markets found on chain, with no registry, and "was a price ever pushed" read from the transaction at
+ * last_good_oracle_slot. Real LP portfolio + market bytes (CHILLHOUSE-T). The fake connection checks the exact filters/slices sent
+ * (percolator-prog aca02ba6: portfolio market id +16, owner +116, matcher control = config +96, market kind byte +10 = 1,
+ * marketauth +16) and that the RPC budget holds.
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -10,13 +11,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
+import { LAYOUT_V22 } from "@/lib/v22/sdk/layout";
 import {
-  MAX_CREATION_LOOKUPS,
-  __clearCreationSlotCache,
-  findCreationSlot,
+  MAX_HISTORY_LOOKUPS,
+  __clearHistoryCache,
   findCreatorSlabKeys,
   lookupCreatorMarkets,
   readCreatorSlabs,
+  readNeverPushed,
+  readSlabHistory,
 } from "@/lib/v22/creator-onchain";
 
 const fx = (n: string): { owner: string; data: Uint8Array } => {
@@ -28,52 +31,68 @@ const MKT = fx("chillhouse-t.market");
 const PROGRAM = new PublicKey(LP.owner);
 const SLAB = new PublicKey("56pWj8zYeZMv6oHHf4nwAfWAunzixxknaVNEFY48oJ2Y");
 const WALLET = new PublicKey(LP.data.subarray(116, 148));
+const CONTROL_OFF = LAYOUT_V22.portfolio.matcherConfigOff + 96;
 
 beforeEach(() => {
   __setDevnetV22ForTest(true);
-  __clearCreationSlotCache();
+  __clearHistoryCache();
 });
 afterEach(() => __setDevnetV22ForTest(null));
 
 const acct = (data: Uint8Array) => ({ data: Buffer.from(data), owner: PROGRAM, lamports: 1, executable: false });
+const slice = (d: Uint8Array, o: number, l: number): Uint8Array => d.slice(o, o + l);
 
 describe("fixture sanity (the offsets are real)", () => {
-  it("the LP portfolio carries the market id at +16 and the creator at +116", () => {
+  it("the LP carries the market id at +16, the creator at +116, an enabled matcher control word at config +96", () => {
     expect(new PublicKey(LP.data.subarray(16, 48)).toBase58()).toBe(SLAB.toBase58());
     expect(LP.data[10]).toBe(2);
     expect(MKT.data[10]).toBe(1);
+    expect(CONTROL_OFF).toBe(LP.data.length - 104 - 24 + 96);
+    expect(LP.data[CONTROL_OFF] & 1).toBe(1);
   });
 });
 
 describe("findCreatorSlabKeys", () => {
-  it("one owner-scoped portfolio scan + one keys-only marketauth scan; the LP's market id is the creator marker", async () => {
-    const getProgramAccounts = vi.fn(async (_p: PublicKey, cfg?: { filters?: unknown[]; dataSlice?: unknown }) =>
-      cfg?.dataSlice ? [] : [{ pubkey: new PublicKey("11111111111111111111111111111112"), account: acct(LP.data) }],
-    );
-    const keys = await findCreatorSlabKeys({ getProgramAccounts } as never, PROGRAM, WALLET);
+  const portfolioScan = (data: Uint8Array) =>
+    vi.fn(async (_p: PublicKey, cfg?: { dataSlice?: { offset: number; length: number } }) => {
+      if (cfg?.dataSlice?.length === 0) return [];
+      return [{ pubkey: PublicKey.unique(), account: acct(slice(data, cfg!.dataSlice!.offset, cfg!.dataSlice!.length)) }];
+    });
+  const multi = vi.fn(async (ks: PublicKey[], cfg?: { dataSlice?: { offset: number; length: number } }) => ks.map(() => acct(slice(LP.data, cfg!.dataSlice!.offset, cfg!.dataSlice!.length))));
+
+  it("scans owner-scoped portfolios returning ONLY the 8-byte control word, then fetches the 32-byte market id of the LP ones", async () => {
+    multi.mockClear();
+    const getProgramAccounts = portfolioScan(LP.data);
+    const keys = await findCreatorSlabKeys({ getProgramAccounts, getMultipleAccountsInfo: multi } as never, PROGRAM, WALLET);
     expect(keys.map((k) => k.toBase58())).toEqual([SLAB.toBase58()]);
     expect(getProgramAccounts).toHaveBeenCalledTimes(2);
-    const [portfolioCall, authCall] = getProgramAccounts.mock.calls as unknown as [[PublicKey, { filters: Array<Record<string, unknown>> }], [PublicKey, { filters: Array<Record<string, unknown>>; dataSlice: unknown }]];
-    expect(portfolioCall[1].filters).toContainEqual({ memcmp: { offset: 116, bytes: WALLET.toBase58() } });
-    expect(portfolioCall[1].filters.some((f) => "dataSize" in f && f.dataSize === LP.data.length)).toBe(true);
-    expect(authCall[1].dataSlice).toEqual({ offset: 0, length: 0 });
-    expect(authCall[1].filters).toEqual([
+    const [pCall, aCall] = getProgramAccounts.mock.calls as unknown as Array<[PublicKey, { filters: Array<Record<string, unknown>>; dataSlice: unknown }]>;
+    expect(pCall[1].dataSlice).toEqual({ offset: CONTROL_OFF, length: 8 });
+    expect(pCall[1].filters).toContainEqual({ memcmp: { offset: 116, bytes: WALLET.toBase58() } });
+    expect(pCall[1].filters.some((f) => "dataSize" in f && f.dataSize === LP.data.length)).toBe(true);
+    expect(aCall[1].dataSlice).toEqual({ offset: 0, length: 0 });
+    expect(aCall[1].filters).toEqual([
       { memcmp: { offset: 10, bytes: bs58.encode(Uint8Array.of(1)) } },
       { memcmp: { offset: 16, bytes: WALLET.toBase58() } },
     ]);
+    expect(multi).toHaveBeenCalledTimes(1);
+    expect((multi.mock.calls[0] as unknown[])[1]).toEqual({ dataSlice: { offset: 16, length: 32 } });
   });
-  it("a trading portfolio (matcher not enabled) is not a creator marker", async () => {
+  it("a trading portfolio (matcher not enabled) is not a creator marker and costs no second fetch", async () => {
+    multi.mockClear();
     const trader = LP.data.slice();
-    const off = trader.length - 104 - 24 + 96;
-    trader.fill(0, off, off + 8); // control word: enabled bit cleared
-    const getProgramAccounts = vi.fn(async (_p: PublicKey, cfg?: { dataSlice?: unknown }) => (cfg?.dataSlice ? [] : [{ pubkey: SLAB, account: acct(trader) }]));
-    expect(await findCreatorSlabKeys({ getProgramAccounts } as never, PROGRAM, WALLET)).toEqual([]);
+    trader.fill(0, CONTROL_OFF, CONTROL_OFF + 8);
+    const keys = await findCreatorSlabKeys({ getProgramAccounts: portfolioScan(trader), getMultipleAccountsInfo: multi } as never, PROGRAM, WALLET);
+    expect(keys).toEqual([]);
+    expect(multi).not.toHaveBeenCalled();
   });
   it("an unfinished launch (marketauth still the wallet) is found by key, and de-duplicated with the LP marker", async () => {
-    const getProgramAccounts = vi.fn(async (_p: PublicKey, cfg?: { dataSlice?: unknown }) =>
-      cfg?.dataSlice ? [{ pubkey: SLAB, account: acct(new Uint8Array()) }] : [{ pubkey: SLAB, account: acct(LP.data) }],
+    const getProgramAccounts = vi.fn(async (_p: PublicKey, cfg?: { dataSlice?: { offset: number; length: number } }) =>
+      cfg?.dataSlice?.length === 0
+        ? [{ pubkey: SLAB, account: acct(new Uint8Array()) }]
+        : [{ pubkey: PublicKey.unique(), account: acct(slice(LP.data, CONTROL_OFF, 8)) }],
     );
-    expect((await findCreatorSlabKeys({ getProgramAccounts } as never, PROGRAM, WALLET)).length).toBe(1);
+    expect((await findCreatorSlabKeys({ getProgramAccounts, getMultipleAccountsInfo: multi } as never, PROGRAM, WALLET)).length).toBe(1);
   });
 });
 
@@ -86,44 +105,114 @@ describe("readCreatorSlabs", () => {
     );
     const out = await readCreatorSlabs({ getMultipleAccountsInfo } as never, PROGRAM, keys);
     expect(getMultipleAccountsInfo).toHaveBeenCalledTimes(2);
-    expect(out.length).toBe(2); // index 0 of each batch
+    expect(out.length).toBe(2);
   });
 });
 
-describe("findCreationSlot", () => {
-  const sig = (slot: number, err: unknown = null) => ({ signature: `s${slot}`, slot, err, memo: null, blockTime: null });
-  it("the oldest successful transaction; a failed earlier attempt does not count", async () => {
-    const getSignaturesForAddress = vi.fn(async () => [sig(30), sig(20), sig(10, { InstructionError: [0, "x"] })]);
-    expect(await findCreationSlot({ getSignaturesForAddress } as never, SLAB)).toBe(20n);
+// ── history: was a price ever pushed? ───────────────────────────────────────────────────────────
+/** A transaction whose wrapper instructions have these tags, all touching the slab (index 1). */
+function txWith(tags: number[], opts: { err?: unknown } = {}) {
+  const keys = [WALLET, SLAB, PROGRAM];
+  return {
+    meta: { err: opts.err ?? null, loadedAddresses: undefined },
+    transaction: {
+      message: {
+        getAccountKeys: () => ({ get: (i: number) => keys[i] }),
+        compiledInstructions: tags.map((t) => ({ programIdIndex: 2, accountKeyIndexes: [0, 1], data: Uint8Array.of(t, 0, 0) })),
+      },
+    },
+  };
+}
+const sig = (signature: string, slot: number, err: unknown = null) => ({ signature, slot, err, memo: null, blockTime: null });
+
+describe("readNeverPushed (launch gaps 37 / 60 / 516 are no obstacle)", () => {
+  const C = 1_000_000;
+  for (const gap of [37, 60, 516]) {
+    it(`gap ${gap}: createAccount+InitMarket at C, ConfigureAuthMark (62) at C+${gap} = last good -> never pushed`, async () => {
+      const getTransaction = vi.fn(async (s: string) => (s === "cfg" ? txWith([62]) : txWith([0])));
+      const r = await readNeverPushed({ getTransaction } as never, PROGRAM, SLAB, BigInt(C + gap), [sig("init", C), sig("cfg", C + gap)]);
+      expect(r).toBe(true);
+      expect(getTransaction).toHaveBeenCalledTimes(1); // only the tx at last_good_oracle_slot
+    });
+  }
+  it("a PushAuthMark (63) at last good: a price was pushed", async () => {
+    const getTransaction = vi.fn(async () => txWith([63]));
+    expect(await readNeverPushed({ getTransaction } as never, PROGRAM, SLAB, BigInt(C + 60), [sig("p", C + 60)])).toBe(false);
   });
-  it("a full page is an old busy market: unknown (so not classified), and is cached", async () => {
-    const getSignaturesForAddress = vi.fn(async () => Array.from({ length: 1000 }, (_, i) => sig(i + 1)));
-    expect(await findCreationSlot({ getSignaturesForAddress } as never, SLAB)).toBeNull();
-    await findCreationSlot({ getSignaturesForAddress } as never, SLAB);
+  it("PushEwmaMark (36) too; and a batched launch+first push in ONE tx counts as pushed", async () => {
+    expect(await readNeverPushed({ getTransaction: async () => txWith([36]) } as never, PROGRAM, SLAB, BigInt(C), [sig("p", C)])).toBe(false);
+    expect(await readNeverPushed({ getTransaction: async () => txWith([0, 62, 63]) } as never, PROGRAM, SLAB, BigInt(C), [sig("p", C)])).toBe(false);
+  });
+  it("an unknown tag at last good is treated as a price (conservative)", async () => {
+    expect(await readNeverPushed({ getTransaction: async () => txWith([99]) } as never, PROGRAM, SLAB, BigInt(C), [sig("x", C)])).toBe(false);
+  });
+  it("unreadable: no tx at that slot, a null/failed transaction, or no wrapper instruction -> null", async () => {
+    expect(await readNeverPushed({ getTransaction: vi.fn() } as never, PROGRAM, SLAB, BigInt(C), [sig("a", C + 1)])).toBeNull();
+    expect(await readNeverPushed({ getTransaction: async () => null } as never, PROGRAM, SLAB, BigInt(C), [sig("a", C)])).toBeNull();
+    expect(await readNeverPushed({ getTransaction: async () => txWith([]) } as never, PROGRAM, SLAB, BigInt(C), [sig("a", C)])).toBeNull();
+  });
+  it("a failed transaction at that slot is ignored", async () => {
+    expect(await readNeverPushed({ getTransaction: vi.fn() } as never, PROGRAM, SLAB, BigInt(C), [sig("a", C, { InstructionError: [0, "x"] })])).toBeNull();
+  });
+});
+
+describe("readSlabHistory", () => {
+  it("creation slot = oldest successful tx; a failed earlier attempt does not count", async () => {
+    const getSignaturesForAddress = vi.fn(async () => [sig("c", 30), sig("b", 20), sig("a", 10, { InstructionError: [0, "x"] })]);
+    const h = await readSlabHistory({ getSignaturesForAddress, getTransaction: async () => txWith([62]) } as never, PROGRAM, SLAB, 30n);
+    expect(h).toEqual({ creationSlot: 20n, neverPushed: true });
+  });
+  it("a full page is an old busy market: unknown, and cached per (slab, last good)", async () => {
+    const getSignaturesForAddress = vi.fn(async () => Array.from({ length: 1000 }, (_, i) => sig(`s${i}`, i + 1)));
+    const c = { getSignaturesForAddress, getTransaction: vi.fn() } as never;
+    expect(await readSlabHistory(c, PROGRAM, SLAB, 5n)).toEqual({ creationSlot: null, neverPushed: null });
+    await readSlabHistory(c, PROGRAM, SLAB, 5n);
     expect(getSignaturesForAddress).toHaveBeenCalledTimes(1);
   });
-  it("an RPC failure is unknown and is NOT cached (the next scan retries)", async () => {
-    const getSignaturesForAddress = vi.fn().mockRejectedValueOnce(new Error("429")).mockResolvedValueOnce([sig(5)]);
-    expect(await findCreationSlot({ getSignaturesForAddress } as never, SLAB)).toBeNull();
-    expect(await findCreationSlot({ getSignaturesForAddress } as never, SLAB)).toBe(5n);
+  it("an RPC failure is unknown and NOT cached (the next scan retries)", async () => {
+    const getSignaturesForAddress = vi.fn().mockRejectedValueOnce(new Error("429")).mockResolvedValueOnce([sig("a", 5)]);
+    const c = { getSignaturesForAddress, getTransaction: async () => txWith([0]) } as never;
+    expect(await readSlabHistory(c, PROGRAM, SLAB, 5n)).toEqual({ creationSlot: null, neverPushed: null });
+    expect((await readSlabHistory(c, PROGRAM, SLAB, 5n)).creationSlot).toBe(5n);
   });
 });
 
 describe("lookupCreatorMarkets budget", () => {
-  it("at most MAX_CREATION_LOOKUPS signature calls however many markets the wallet has", async () => {
-    const n = MAX_CREATION_LOOKUPS + 5;
-    const lps = Array.from({ length: n }, () => {
-      const d = LP.data.slice();
-      d.set(PublicKey.unique().toBytes(), 16);
+  const setup = (n: number, lastGoodFor: (i: number) => bigint, clusterSlot: number) => {
+    const lps = Array.from({ length: n }, () => PublicKey.unique());
+    const slabIds = Array.from({ length: n }, () => PublicKey.unique());
+    const markets = slabIds.map((_, i) => {
+      const d = MKT.data.slice();
+      new DataView(d.buffer).setBigUint64(16 + 152, lastGoodFor(i), true);
       return d;
     });
-    const getProgramAccounts = vi.fn(async (_p: PublicKey, cfg?: { dataSlice?: unknown }) => (cfg?.dataSlice ? [] : lps.map((d) => ({ pubkey: PublicKey.unique(), account: acct(d) }))));
-    const getMultipleAccountsInfo = vi.fn(async (ks: PublicKey[]) => ks.map(() => acct(MKT.data)));
-    const getSignaturesForAddress = vi.fn(async () => [{ signature: "s", slot: 7, err: null, memo: null, blockTime: null }]);
-    const out = await lookupCreatorMarkets({ getProgramAccounts, getMultipleAccountsInfo, getSignaturesForAddress } as never, PROGRAM, WALLET);
+    const getProgramAccounts = vi.fn(async (_p: PublicKey, cfg?: { dataSlice?: { offset: number; length: number } }) =>
+      cfg?.dataSlice?.length === 0 ? [] : lps.map((k) => ({ pubkey: k, account: acct(slice(LP.data, CONTROL_OFF, 8)) })),
+    );
+    const getMultipleAccountsInfo = vi.fn(async (ks: PublicKey[], cfg?: { dataSlice?: { offset: number; length: number } }) =>
+      cfg?.dataSlice ? ks.map((k) => acct(slabIds[lps.findIndex((l) => l.equals(k))].toBytes())) : ks.map((k) => acct(markets[slabIds.findIndex((s) => s.equals(k))])),
+    );
+    // each slab has one successful tx, at its last-good slot (launch-time config only)
+    const getSignaturesForAddress = vi.fn(async (k: PublicKey) => [sig("t", Number(lastGoodFor(slabIds.findIndex((s) => s.equals(k)))))]);
+    const getTransaction = vi.fn(async () => txWith([62]));
+    return { slabIds, conn: { getProgramAccounts, getMultipleAccountsInfo, getSignaturesForAddress, getTransaction, getSlot: vi.fn(async () => clusterSlot) } as never, getSignaturesForAddress, getTransaction };
+  };
+
+  it("healthy markets (pushed within the launch wait) cost no history call", async () => {
+    const t = setup(8, () => 999_900n, 1_000_000);
+    const out = await lookupCreatorMarkets(t.conn, PROGRAM, WALLET);
+    expect(out.length).toBe(8);
+    expect(t.getSignaturesForAddress).not.toHaveBeenCalled();
+    expect(out.every((o) => o.neverPushed === null && o.creationSlot === null)).toBe(true);
+  });
+  it("silent markets: at most MAX_HISTORY_LOOKUPS history reads, newest last-good first; the rest keep unknown history", async () => {
+    const n = MAX_HISTORY_LOOKUPS + 5;
+    const t = setup(n, (i) => BigInt(100 + i), 1_000_000); // higher i = went silent more recently
+    const out = await lookupCreatorMarkets(t.conn, PROGRAM, WALLET);
     expect(out.length).toBe(n);
-    expect(getSignaturesForAddress).toHaveBeenCalledTimes(MAX_CREATION_LOOKUPS);
-    expect(out.filter((o) => o.creationSlot === null).length).toBe(5);
-    expect(getMultipleAccountsInfo).toHaveBeenCalledTimes(1);
+    expect(t.getSignaturesForAddress).toHaveBeenCalledTimes(MAX_HISTORY_LOOKUPS);
+    const unread = out.filter((o) => o.creationSlot === null).map((o) => Number(o.lastGoodOracleSlot));
+    expect(unread.length).toBe(5);
+    expect(Math.max(...unread)).toBeLessThan(100 + 5); // the 5 oldest were the ones skipped
   });
 });

@@ -361,6 +361,15 @@ export function saveRegisterRequest(req: SavedRegisterRequest, store: KeyStore |
   }
 }
 
+/** #3637: a FINAL refusal seen live (launch loop or manual retry) is recorded like the resume pass records it, so /my-markets can use it later. */
+export function markRegistrationRefused(slab: string, store: KeyStore | null = browserStore()): void {
+  try {
+    if (store && store.getItem(REGISTERED_KEY(slab)) !== "1") store.setItem(REGISTERED_KEY(slab), "refused");
+  } catch {
+    /* private mode */
+  }
+}
+
 /** #3637: this device's resume pass recorded a FINAL refusal for the slab ("refused" under REGISTERED_KEY, set in resumePendingRegistrations). */
 export function isRegistrationRefused(slab: string, store: KeyStore | null = browserStore()): boolean {
   try {

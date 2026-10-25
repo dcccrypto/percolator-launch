@@ -74,7 +74,7 @@ import { preflightRegistration, resolveMarketMetadata } from "@/lib/market-metad
 import { buildM1Instructions } from "@/lib/create-market-m1";
 import { WIZARD_STEP_COPY } from "@/lib/wizard-copy";
 import { withRateLimitRetry } from "@/lib/rpc-rate-limit";
-import { KEEPER_NO_PROOF_STATE, KEEPER_REGISTER_COPY, loadProofPayload, loadProofTx, markRegistered, postKeeperRegistration, runKeeperRegistration, saveProofPayload, saveProofTx, saveRegisterRequest, userFacingRegistrationReason, type KeeperRegisterPhase } from "@/lib/keeper-register-client";
+import { KEEPER_NO_PROOF_STATE, KEEPER_REGISTER_COPY, loadProofPayload, loadProofTx, markRegistered, markRegistrationRefused, postKeeperRegistration, runKeeperRegistration, saveProofPayload, saveProofTx, saveRegisterRequest, userFacingRegistrationReason, type KeeperRegisterPhase } from "@/lib/keeper-register-client";
 import { deriveLaunchMarketParams, backingSeedPerDomain } from "@/lib/market-params";
 import { buildMarketRegistrationPayload, flooredInitialMarginBps } from "@/lib/market-registration-payload";
 // GH#2592: the step-4 predicate and /api/devnet-pre-fund's funding target must be
@@ -2220,6 +2220,7 @@ export function useCreateMarket() {
       signal: ac.signal,
       onStatus: ({ phase, message, final }) => {
         if (phase === "ready") markRegistered(slab);
+        else if (phase === "failed" && final === true) markRegistrationRefused(slab); // #3637: kept for /my-markets
         setState((s) => ({ ...s, keeperPhase: phase, keeperMessage: message, keeperFinal: final === true, keeperDelegated: phase === "ready" || s.keeperDelegated }));
       },
     });
@@ -4427,6 +4428,7 @@ export function useCreateMarket() {
       // in the loop must not turn the failure back into "still connecting" (#3637).
       if (r.registered || !r.retryable) {
         if (r.registered) markRegistered(params.slabAddress);
+        else markRegistrationRefused(params.slabAddress);
         keeperLoopRef.current?.abort();
       }
       return { registered: r.registered, retryable: r.retryable, message: r.message, ...(r.code ? { code: r.code } : {}) };

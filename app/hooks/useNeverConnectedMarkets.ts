@@ -15,6 +15,8 @@ import { priceNeverAdvanced } from "@/lib/v22/never-connected";
 export interface CreatorOnChainMarket {
   slab: string;
   creationSlot: bigint | null;
+  /** true / false from the transaction at last_good_oracle_slot; null = not readable. */
+  neverPushed: boolean | null;
 }
 
 export interface NeverConnectedMarketsState {
@@ -27,8 +29,10 @@ export interface NeverConnectedMarketsState {
 
 /**
  * `isRefused` (#3676 keeper-register-client `isRegistrationRefused`, optional, must be a stable function): slabs whose live-price registration was refused for good. They are kept even when the
- * creation slot could not be read, so the panel can still explain them. Every other market is kept only when the chain shows
- * its price never advanced past the creation slot, so healthy markets never open a live subscription here.
+ * history could not be read, so the panel can still explain them (it then also requires the price to be stale today). Every other
+ * market is kept only when the chain shows no price was ever pushed (or, history unreadable, the slack fallback), so healthy
+ * markets never open a live subscription here. Scanned once per wallet and on `refetch`; a market younger than the launch wait
+ * shows up on the next visit or refresh.
  */
 export function useNeverConnectedMarkets(isRefused?: (slab: string) => boolean): NeverConnectedMarketsState {
   const { connection } = useConnectionCompat();
@@ -50,8 +54,13 @@ export function useNeverConnectedMarkets(isRefused?: (slab: string) => boolean):
       try {
         const found = await lookupCreatorMarkets(connection, new PublicKey(getConfig().programId), new PublicKey(wallet));
         if (!cancelled) setState({ key, markets: found
-              .filter((f) => isRefused?.(f.slab.toBase58()) === true || (f.creationSlot !== null && priceNeverAdvanced(f.lastGoodOracleSlot, f.creationSlot)))
-              .map((f) => ({ slab: f.slab.toBase58(), creationSlot: f.creationSlot })), loading: false, error: false });
+              .filter(
+                (f) =>
+                  isRefused?.(f.slab.toBase58()) === true ||
+                  f.neverPushed === true ||
+                  (f.neverPushed === null && f.creationSlot !== null && priceNeverAdvanced(f.lastGoodOracleSlot, f.creationSlot)),
+              )
+              .map((f) => ({ slab: f.slab.toBase58(), creationSlot: f.creationSlot, neverPushed: f.neverPushed })), loading: false, error: false });
       } catch {
         if (!cancelled) setState({ key, markets: [], loading: false, error: true });
       }

@@ -25,10 +25,12 @@ import { isRegistrationRefused } from "@/lib/keeper-register-client";
 import { STALE_SETTLE_COPY } from "@/lib/v22/stale-resolve";
 import {
   NEVER_CONNECTED_COPY,
-  RECOVER_STEPS,
+  marketFeatures,
   neverConnectedView,
   phaseLine,
+  recoverSteps,
   rentRefundCopy,
+  type MarketFeatures,
   type NeverConnectedView,
   type RefundNetwork,
 } from "@/lib/v22/never-connected";
@@ -37,6 +39,7 @@ export interface NeverConnectedCardViewProps {
   slab: string;
   view: NeverConnectedView;
   network: RefundNetwork;
+  features: MarketFeatures;
   canAct: boolean;
   busy: boolean;
   error: string | null;
@@ -46,7 +49,7 @@ export interface NeverConnectedCardViewProps {
 }
 
 /** Pure renderer (tested without a provider). */
-export const NeverConnectedCardView: FC<NeverConnectedCardViewProps> = ({ slab, view, network, canAct, busy, error, done, waiting, onSettle }) => (
+export const NeverConnectedCardView: FC<NeverConnectedCardViewProps> = ({ slab, view, network, features, canAct, busy, error, done, waiting, onSettle }) => (
   <section data-testid="never-connected-card" data-phase={view.phase} data-slab={slab} className="mb-4 border border-[var(--warning)]/40 bg-[var(--warning)]/[0.04] p-4 text-[12px]">
     <h2 className="text-[11px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">{NEVER_CONNECTED_COPY.title}</h2>
     <p className="mt-1 font-mono text-[10px] text-[var(--text-muted)]" data-testid="never-connected-slab">{slab.slice(0, 8)}…{slab.slice(-4)}</p>
@@ -77,7 +80,7 @@ export const NeverConnectedCardView: FC<NeverConnectedCardViewProps> = ({ slab, 
       <div className="mt-4" data-testid="never-connected-steps">
         <h3 className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">{NEVER_CONNECTED_COPY.stepsTitle}</h3>
         <ul className="mt-2 space-y-2">
-          {RECOVER_STEPS.map((s) => (
+          {recoverSteps(features).map((s) => (
             <li key={s.id} data-testid={`never-connected-step-${s.id}`}>
               <p className="text-[var(--text)]">{s.title}</p>
               <p className="text-[var(--text-secondary)]">{s.body}</p>
@@ -92,29 +95,30 @@ export const NeverConnectedCardView: FC<NeverConnectedCardViewProps> = ({ slab, 
 
     <div className="mt-4" data-testid="never-connected-rent" data-network={network}>
       <h3 className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">{NEVER_CONNECTED_COPY.rentTitle}</h3>
-      {rentRefundCopy(network).map((line) => (
+      {rentRefundCopy(network, features).map((line) => (
         <p key={line} className="mt-1 text-[var(--text-secondary)]">{line}</p>
       ))}
     </div>
   </section>
 );
 
-const Card: FC<{ slab: string; creationSlot: bigint | null; refused: boolean; network: RefundNetwork }> = ({ slab, creationSlot, refused, network }) => {
+const Card: FC<{ slab: string; creationSlot: bigint | null; neverPushed: boolean | null; refused: boolean; network: RefundNetwork }> = ({ slab, creationSlot, neverPushed, refused, network }) => {
   const { raw } = useSlabState();
   const clusterSlot = useClusterSlot(isDevnetV22Enabled());
   const { publicKey } = useWalletCompat();
   const s = useStaleResolve(slab, true);
-  const view = neverConnectedView({ raw, clusterSlot, creationSlot, registrationRefused: refused });
+  const view = neverConnectedView({ raw, clusterSlot, creationSlot, neverPushed, registrationRefused: refused });
   if (!view) return null;
   return (
     <NeverConnectedCardView
       slab={slab}
       view={view}
       network={network}
+      features={marketFeatures(raw, publicKey)}
       canAct={publicKey !== null}
       busy={s.busy}
       error={s.error}
-      done={s.done}
+      done={s.done === STALE_SETTLE_COPY.settled ? NEVER_CONNECTED_COPY.settledDone : s.done}
       waiting={s.waiting}
       onSettle={() => void s.settle()}
     />
@@ -131,7 +135,7 @@ const Inner: FC = () => {
     <div data-testid="never-connected-panel">
       {markets.map((m) => (
         <SlabProvider key={m.slab} slabAddress={m.slab}>
-          <Card slab={m.slab} creationSlot={m.creationSlot} refused={refusedOnDevice(m.slab)} network={network} />
+          <Card slab={m.slab} creationSlot={m.creationSlot} neverPushed={m.neverPushed} refused={refusedOnDevice(m.slab)} network={network} />
         </SlabProvider>
       ))}
     </div>

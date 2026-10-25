@@ -105,6 +105,8 @@ describe("useCreateMarket — retryKeeperRegistration (Try now)", () => {
     });
     expect(result.current.state.keeperMessage).toBe(KEEPER_REGISTER_COPY.oracleNotKeeper);
     expect(result.current.state.keeperFinal).toBe(true);
+    // #3637: the final refusal is kept on this device so /my-markets can use it later.
+    expect(window.localStorage.getItem(`perc.keeperRegistered.${SLAB}`)).toBe("refused");
   });
 
   it("#3637: a 5xx on retry is not final", async () => {
@@ -212,6 +214,22 @@ describe("useCreateMarket: #3637 final state is per attempt, and a final refusal
     expect(fetchMock.mock.calls.length).toBe(calls);
     expect(result.current.state.keeperFinal).toBe(true);
     expect(result.current.state.keeperMessage).toBe(KEEPER_REGISTER_COPY.oracleNotKeeper);
+  });
+
+  it("#3637: a final refusal seen by the launch-time loop is recorded on this device; a retryable one is not", async () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useCreateMarket());
+    fetchMock.mockResolvedValue(resp(502, {}));
+    await act(async () => {
+      result.current.startKeeperLoop({ dexPoolAddress: REQ.dexPoolAddress, mainnetCA: REQ.mainnetCA, dexType: "pumpswap", symbol: "TEST" } as never, SLAB);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(window.localStorage.getItem(`perc.keeperRegistered.${SLAB}`)).toBeNull();
+    fetchMock.mockResolvedValue(NOT_KEEPER);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(window.localStorage.getItem(`perc.keeperRegistered.${SLAB}`)).toBe("refused");
   });
 
   it("reset() aborts the previous launch's loop: a late answer cannot write into the next launch's state", async () => {

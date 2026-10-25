@@ -271,6 +271,23 @@ describe("#3637: a final refusal is surfaced with its reason, never swallowed", 
   });
 });
 
+describe("#3637: markRegistrationRefused records a live final refusal", () => {
+  const store = () => {
+    const m = new Map<string, string>();
+    return { m, s: { get length() { return m.size; }, key: () => null, getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) } };
+  };
+  it("writes the marker the resume pass writes, and never downgrades a registered market", async () => {
+    const { markRegistrationRefused, isRegistrationRefused } = await import("@/lib/keeper-register-client");
+    const a = store();
+    markRegistrationRefused("S", a.s);
+    expect(isRegistrationRefused("S", a.s)).toBe(true);
+    const b = store();
+    b.m.set("perc.keeperRegistered.S", "1");
+    markRegistrationRefused("S", b.s);
+    expect(b.m.get("perc.keeperRegistered.S")).toBe("1");
+  });
+});
+
 describe("#3637: isRegistrationRefused reads the resume pass's final marker", () => {
   const mem = (v: string | null) => ({ length: 0, key: () => null, getItem: () => v, setItem: () => undefined });
   it("only 'refused' counts (registered '1' and absent do not)", async () => {

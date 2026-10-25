@@ -14,7 +14,7 @@ const SLAB = "56pWj8zYeZMv6oHHf4nwAfWAunzixxknaVNEFY48oJ2Y";
 const h = vi.hoisted(() => ({
   raw: null as Uint8Array | null,
   slot: null as bigint | null,
-  markets: [] as { slab: string; creationSlot: bigint | null }[],
+  markets: [] as { slab: string; creationSlot: bigint | null; neverPushed: boolean | null }[],
   settle: vi.fn(async () => undefined),
   stale: { busy: false, error: null as string | null, done: null as string | null, waiting: null as string | null },
   wallet: null as unknown,
@@ -56,7 +56,7 @@ beforeEach(() => {
   __setDevnetV22ForTest(true);
   h.raw = market(CREATED);
   h.slot = CREATED + 6_000n;
-  h.markets = [{ slab: SLAB, creationSlot: CREATED }];
+  h.markets = [{ slab: SLAB, creationSlot: CREATED, neverPushed: true }];
   h.wallet = new PublicKey("11111111111111111111111111111112");
   h.stale = { busy: false, error: null, done: null, waiting: null };
   h.settle.mockClear();
@@ -112,6 +112,26 @@ describe("never-connected panel", () => {
     expect(screen.getByTestId("never-connected-step-stake").querySelector("a")?.getAttribute("href")).toBe("/stake");
   });
 
+  it("a young market (inside the launch wait) is not called never-connected", () => {
+    h.slot = CREATED + 1_000n;
+    render(<NeverConnectedPanel />);
+    expect(screen.queryByTestId("never-connected-card")).toBeNull();
+  });
+
+  it("the generic 'funds are back' line is replaced by one that is true while Earn / stake seeds remain", () => {
+    h.slot = CREATED + 18_000n;
+    h.stale = { busy: false, error: null, done: "Settled. Your funds are back in your wallet.", waiting: null };
+    render(<NeverConnectedPanel />);
+    expect(screen.getByTestId("never-connected-done").textContent).toMatch(/Earn or the stake pool is still to be taken out/);
+    expect(screen.getByTestId("never-connected-card").textContent).not.toMatch(/funds are back in your wallet\.$/);
+  });
+
+  it("the settle note does not claim one approval", () => {
+    h.slot = CREATED + 18_000n;
+    render(<NeverConnectedPanel />);
+    expect(screen.getByTestId("never-connected-card").textContent).not.toMatch(/one approval/i);
+  });
+
   it("devnet: no refund is paid; mainnet: the treasury refunds the locked rent", () => {
     render(<NeverConnectedPanel />);
     expect(screen.getByTestId("never-connected-rent").textContent).toMatch(/no rent refund is paid/);
@@ -125,6 +145,7 @@ describe("never-connected panel", () => {
 
   it("a market whose price advanced after creation renders nothing", () => {
     h.raw = market(CREATED + 5_000n);
+    h.markets = [{ slab: SLAB, creationSlot: CREATED, neverPushed: false }];
     render(<NeverConnectedPanel />);
     expect(screen.queryByTestId("never-connected-card")).toBeNull();
   });
@@ -149,7 +170,8 @@ describe("never-connected panel", () => {
   });
 
   it("a final refusal recorded on this device (#3676) classifies a market whose history could not be read", () => {
-    h.markets = [{ slab: SLAB, creationSlot: null }];
+    h.markets = [{ slab: SLAB, creationSlot: null, neverPushed: null }];
+    h.slot = CREATED + 9_000n; // half the window: stale enough for a refusal alone to count
     render(<NeverConnectedPanel />);
     expect(screen.queryByTestId("never-connected-card")).toBeNull(); // no refusal: nothing claimed
     cleanup();
