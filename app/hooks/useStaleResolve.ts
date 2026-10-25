@@ -33,6 +33,7 @@ import { TAG_CLAIM_RESOLVED_PAYOUT_TOPUP, TAG_CLOSE_RESOLVED } from "@/lib/limit
 import { TRADER_ITEM_CU, runTraderExit, traderExitItems, type TraderExitItem } from "@/lib/limits/trader-resolved-exit";
 import { errorText } from "@/lib/error-text";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { formatStoppedAt, stoppedAtMs } from "@/lib/v22/market-lifecycle";
 import { RESOLVED_CLOSE_WAIT_COPY, isResolvedCloseWait, resolvedCloseWaitLive } from "@/lib/v22/resolved-close-wait";
 import {
   STALE_SETTLE_COPY,
@@ -49,6 +50,8 @@ export interface StaleSettleView {
   /** "stale": settle it first (tag 39). "settled": already resolved, take the funds out. */
   kind: "stale" | "settled";
   minutes: number;
+  /** Local wall-clock time the last good price landed (an estimate from its age in slots); null for a settled market. */
+  stoppedAtLabel: string | null;
   status: StaleResolveStatusV22;
 }
 
@@ -112,8 +115,11 @@ export function useStaleResolve(slabAddress: string | null, hasFunds: boolean): 
   const status = useMemo(() => (isDevnetV22Enabled() ? staleResolveStatusV22(raw, clusterSlot) : null), [raw, clusterSlot]);
   const resolved = useMemo(() => isDevnetV22Enabled() && marketResolvedV22(raw), [raw]);
   const view = useMemo<StaleSettleView | null>(() => {
-    if (showStaleSettle(status)) return { kind: "stale", minutes: staleMinutes(status.ageSlots), status };
-    if (status !== null && resolved && hasFunds) return { kind: "settled", minutes: 0, status };
+    if (showStaleSettle(status)) {
+      const now = Date.now();
+      return { kind: "stale", minutes: staleMinutes(status.ageSlots), stoppedAtLabel: formatStoppedAt(stoppedAtMs(status.ageSlots, now), now), status };
+    }
+    if (status !== null && resolved && hasFunds) return { kind: "settled", minutes: 0, stoppedAtLabel: null, status };
     return null;
   }, [status, resolved, hasFunds]);
 

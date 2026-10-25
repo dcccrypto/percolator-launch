@@ -157,7 +157,7 @@ describe("StaleSettleNotice (hook wired)", () => {
 
   it("matured: renders the line and NEVER sends on its own", async () => {
     render(<StaleSettleNotice slabAddress={SLAB} hasFunds canAct />);
-    expect(screen.getByTestId("stale-settle-line").textContent).toMatch(/^This market has had no price for over \d+ minutes and can be settled\. Settle it to get your funds back\.$/);
+    expect(screen.getByTestId("stale-settle-line").textContent).toMatch(/^Price stopped at .+\. Anyone can settle this market\. Settle it to get your funds back\.$/);
     await new Promise((r) => setTimeout(r, 30));
     expect(h.sendTx).not.toHaveBeenCalled();
     expect(h.simulateForGate).not.toHaveBeenCalled();

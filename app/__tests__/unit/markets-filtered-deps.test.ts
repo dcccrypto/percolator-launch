@@ -15,7 +15,14 @@ describe("/markets list memo dependencies", () => {
   it("the filtered list re-derives when activeMarkets changes", () => {
     const start = src.indexOf("const filtered = useMemo(() => {");
     const body = src.slice(start, src.indexOf("\n  }, [", start) + 120);
-    expect(body).toContain("let list = activeMarkets;");
-    expect(body).toMatch(/\n {2}\}, \[activeMarkets, /);
+    // The list starts from `shownMarkets` (activeMarkets narrowed by the lifecycle filter), which itself re-derives with activeMarkets.
+    expect(body).toContain("let list = shownMarkets;");
+    expect(body).toMatch(/\n {2}\}, \[shownMarkets, /);
+    const shown = src.slice(src.indexOf("const shownMarkets = useMemo("));
+    expect(shown.slice(0, shown.indexOf("\n  );"))).toContain("[activeMarkets, lifecycles, lifecycleFilter]");
+  });
+  it("retired markets are left out of the default list, and the state filter is wired to ?state=", () => {
+    expect(src).toContain("matchesLifecycleFilter(lifecycles.get(m.slabAddress)?.state");
+    expect(src).toContain('params.set("state", lifecycleFilter)');
   });
 });

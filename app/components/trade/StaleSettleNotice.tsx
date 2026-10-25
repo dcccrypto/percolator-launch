@@ -8,9 +8,12 @@
 import { type FC } from "react";
 import { useStaleResolve } from "@/hooks/useStaleResolve";
 import { STALE_SETTLE_COPY } from "@/lib/v22/stale-resolve";
+import { staleLine } from "@/lib/v22/market-lifecycle";
 
 export interface StaleSettleNoticeViewProps {
   minutes: number;
+  /** When the price stopped (local time, an estimate). With it a stale market reads "Price stopped at <time>. Anyone can settle this market."; without it, the minutes line. */
+  stoppedAtLabel?: string | null;
   /** "settled" = the market is already resolved: close out (no tag 39). */
   kind?: "stale" | "settled";
   hasFunds: boolean;
@@ -26,14 +29,14 @@ export interface StaleSettleNoticeViewProps {
 }
 
 /** Pure renderer (tested without a provider). */
-export const StaleSettleNoticeView: FC<StaleSettleNoticeViewProps> = ({ minutes, kind = "stale", hasFunds, busy, error, done, waiting = null, canAct, onSettle, compact }) => (
+export const StaleSettleNoticeView: FC<StaleSettleNoticeViewProps> = ({ minutes, stoppedAtLabel = null, kind = "stale", hasFunds, busy, error, done, waiting = null, canAct, onSettle, compact }) => (
   <div
     role="status"
     data-testid="stale-settle-notice"
     className={`${compact ? "mx-4 my-2" : "mb-3"} border border-[var(--warning)]/30 bg-[var(--warning)]/[0.04] px-3 py-2 text-[11px]`}
   >
     <p className="text-[var(--text)]" data-testid="stale-settle-line">
-      {kind === "settled" ? STALE_SETTLE_COPY.settledLine : hasFunds ? STALE_SETTLE_COPY.line(minutes) : STALE_SETTLE_COPY.lineNoFunds(minutes)}
+      {kind === "settled" ? STALE_SETTLE_COPY.settledLine : stoppedAtLabel ? staleLine(stoppedAtLabel, hasFunds) : hasFunds ? STALE_SETTLE_COPY.line(minutes) : STALE_SETTLE_COPY.lineNoFunds(minutes)}
     </p>
     {canAct && !done && (
       <button
@@ -59,6 +62,7 @@ export const StaleSettleNotice: FC<{ slabAddress: string; hasFunds: boolean; can
   return (
     <StaleSettleNoticeView
       minutes={s.view?.minutes ?? 0}
+      stoppedAtLabel={s.view?.stoppedAtLabel ?? null}
       kind={s.view?.kind ?? "stale"}
       hasFunds={hasFunds}
       busy={s.busy}

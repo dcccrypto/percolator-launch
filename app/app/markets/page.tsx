@@ -9,6 +9,9 @@ import { getConfig } from "@/lib/config";
 import { isMoveFlowEnabled } from "@/lib/v21/move/flag";
 import { isV1CloseOnly } from "@/lib/v21/move/ids";
 import { WithdrawOnlyBadge } from "@/components/market/WithdrawOnlyBadge";
+import { MarketLifecycleBadge } from "@/components/market/MarketLifecycleBadge";
+import { useMarketLifecycles } from "@/hooks/useMarketLifecycles";
+import { LIFECYCLE_HINTS, LIFECYCLE_LABELS, LIFECYCLE_STATES, matchesLifecycleFilter, parseLifecycleFilter, type LifecycleFilter, type MarketLifecycleState } from "@/lib/v22/market-lifecycle";
 import { V1CloseOnlyBadge } from "@/components/move/V1CloseOnlyNotice";
 import { useEffect, useState, useMemo, useRef, Suspense } from "react";
 import type { Metadata } from "next";
@@ -181,6 +184,8 @@ function MarketsPageInner() {
   // is opt-in via ?usd=false. A markets list of raw base-token quantities (25.0M
   // BONK next to 24.38 SOL) reads as garbage — USD is the sane default.
   const [showUsd, setShowUsd] = useState<boolean>(searchParams.get("usd") !== "false");
+  // Lifecycle filter (?state=): "all" lists every market except retired ones; a state lists just that state.
+  const [lifecycleFilter, setLifecycleFilter] = useState<LifecycleFilter>(parseLifecycleFilter(searchParams.get("state")));
   
   // P-MED-3: Pagination state for infinite scroll
   const [displayCount, setDisplayCount] = useState(20);
@@ -200,7 +205,8 @@ function MarketsPageInner() {
     if (debouncedSearch) params.set("q", debouncedSearch);
     if (sortBy !== "volume") params.set("sort", sortBy);
     if (!showUsd) params.set("usd", "false");
-    
+    if (lifecycleFilter !== "all") params.set("state", lifecycleFilter);
+
     // Mirror the filters into the address bar WITHOUT navigating. router.replace()
     // is an App Router soft-nav: it re-fetches the route's RSC payload, re-suspends
     // the page's <Suspense>, and remounts the whole list — so even guarded against
@@ -212,7 +218,7 @@ function MarketsPageInner() {
     const nextSearch = params.toString() ? `?${params.toString()}` : "";
     if (nextSearch === window.location.search) return;
     window.history.replaceState(null, "", nextSearch || "/markets");
-  }, [debouncedSearch, sortBy, showUsd]);
+  }, [debouncedSearch, sortBy, showUsd, lifecycleFilter]);
 
   const merged = useMemo<MergedMarket[]>(() => {
     const result: MergedMarket[] = [];
@@ -406,12 +412,22 @@ function MarketsPageInner() {
   // before sorting: the Health sort ranks by it and the row badges show it. Choosing the set from
   // the sorted, visible rows would loop: a demoted row leaves the set, loses its read and sorts
   // back up. Keyed on a sorted string so a re-sort or a poll with the same markets never refetches.
+  // Lifecycle (live / stale / settling / settled / retired) read from the market accounts; unread = live (or retired when blocklisted).
+  const lifecycleSlabs = useMemo(() => activeMarkets.map((m) => m.slabAddress), [activeMarkets]);
+  const lifecycles = useMarketLifecycles(lifecycleSlabs);
+  const lifecycleOf = (slab: string): MarketLifecycleState => lifecycles.get(slab)?.state ?? "live";
+  // The markets the current lifecycle filter lists (retired ones only when asked for). Counts and the list both start here.
+  const shownMarkets = useMemo(
+    () => activeMarkets.filter((m) => matchesLifecycleFilter(lifecycles.get(m.slabAddress)?.state ?? "live", lifecycleFilter)),
+    [activeMarkets, lifecycles, lifecycleFilter],
+  );
+
   const healthSlabsKey = useMemo(() => activeMarkets.map((m) => m.slabAddress).sort().join(","), [activeMarkets]);
   const healthSlabs = useMemo(() => (healthSlabsKey ? healthSlabsKey.split(",") : []), [healthSlabsKey]);
   const { health: marketHealth } = useMarketHealth(healthSlabs);
 
   const filtered = useMemo(() => {
-    let list = activeMarkets;
+    let list = shownMarkets;
     // Text search — matches on-chain symbol, name, slab address, mint address,
     // OR Supabase market name/symbol (e.g. "BTC-PERP-1", "BTC") — fixes #1132
     // Fix #1146: address fields (slab/mint) are only searched when query is ≥8 chars
@@ -596,7 +612,7 @@ function MarketsPageInner() {
     return list;
   // activeMarkets, not effectiveMarkets: it is what the list reads, and it also changes with the
   // wallet (a creator's own awaiting-price market), which effectiveMarkets does not.
-  }, [activeMarkets, debouncedSearch, sortBy, showUsd, tokenMetaMap, lotExps, marketHealth]);
+  }, [shownMarkets, debouncedSearch, sortBy, showUsd, tokenMetaMap, lotExps, marketHealth]);
 
   // P-MED-3: Progressive reveal + intersection observer backup
   // Auto-load items in batches via requestAnimationFrame for instant display.
@@ -758,9 +774,9 @@ function MarketsPageInner() {
               <span className="md:hidden ml-auto shrink-0 whitespace-nowrap text-sm font-semibold uppercase tracking-[0.08em] text-[var(--text)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
                 {loading
                   ? <>&hellip; MARKETS</>
-                  : (hasSearch) && filtered.length !== activeMarkets.length
-                    ? <>{filtered.length} / {activeMarkets.length} {activeMarkets.length !== 1 ? "MARKETS" : "MARKET"}</>
-                    : <>{activeMarkets.length} {activeMarkets.length !== 1 ? "MARKETS" : "MARKET"}</>}
+                  : (hasSearch) && filtered.length !== shownMarkets.length
+                    ? <>{filtered.length} / {shownMarkets.length} {shownMarkets.length !== 1 ? "MARKETS" : "MARKET"}</>
+                    : <>{shownMarkets.length} {shownMarkets.length !== 1 ? "MARKETS" : "MARKET"}</>}
               </span>
             </div>
           </div>
@@ -799,14 +815,34 @@ function MarketsPageInner() {
               </button>
             </div>
 
+            {/* Lifecycle filter: the default list leaves retired markets out; they are one click away. */}
+            <div className="flex gap-1 rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5 shrink-0" role="group" aria-label="Market state" data-testid="lifecycle-filter">
+              {(["all", ...LIFECYCLE_STATES] as const).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setLifecycleFilter(f)}
+                  title={f === "all" ? "Every market except retired ones." : LIFECYCLE_HINTS[f]}
+                  className={[
+                    "rounded-sm px-2.5 py-1.5 sm:py-1 text-[10px] font-bold uppercase tracking-[0.08em] transition-all duration-200 min-h-[36px] sm:min-h-[32px]",
+                    lifecycleFilter === f
+                      ? "bg-[var(--accent)]/10 text-[var(--accent)]"
+                      : "text-[var(--text-secondary)] hover:text-[var(--text)]",
+                  ].join(" ")}
+                  aria-pressed={lifecycleFilter === f}
+                >
+                  {f === "all" ? "ALL" : LIFECYCLE_LABELS[f]}
+                </button>
+              ))}
+            </div>
+
             {/* Results count — desktop only, in filter row */}
             <span className="hidden md:inline-block ml-auto text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text)] shrink-0 whitespace-nowrap tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
               {/* Same as the mobile count: activeMarkets is empty until stats load, so not "0 MARKETS". */}
               {loading
                 ? "… MARKETS"
-                : (hasSearch) && filtered.length !== activeMarkets.length
-                  ? `${filtered.length} / ${activeMarkets.length} MARKETS`
-                  : `${activeMarkets.length} ${activeMarkets.length !== 1 ? "MARKETS" : "MARKET"}`}
+                : (hasSearch) && filtered.length !== shownMarkets.length
+                  ? `${filtered.length} / ${shownMarkets.length} MARKETS`
+                  : `${shownMarkets.length} ${shownMarkets.length !== 1 ? "MARKETS" : "MARKET"}`}
             </span>
           </div>
         </ScrollReveal>
@@ -838,7 +874,7 @@ function MarketsPageInner() {
               </div>
             ) : filtered.length === 0 ? (
             <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-16 text-center">
-              {hasSearch ? (
+              {hasSearch || lifecycleFilter !== "all" ? (
                 <>
                   <h3 className="text-2xl font-medium tracking-tight text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>nothing here.</h3>
                   <p className="mt-1 text-sm text-[var(--text-secondary)]">try a different search or filter.</p>
@@ -1066,6 +1102,7 @@ function MarketsPageInner() {
                             <span className="truncate text-sm font-semibold text-[var(--text)]">{displaySymbol ? `${baseSymbol(displaySymbol)}/USD` : shortenAddress(m.slabAddress)}{awaitingOwnPrice.has(m.slabAddress) && <span className="ml-1.5 text-[9px] font-medium uppercase tracking-wider text-[var(--warning)]">awaiting live price</span>}</span>
                             {v1Label && <V1CloseOnlyBadge />}
                             {m.supabase && isWithdrawOnlyMarket(m.supabase) && <WithdrawOnlyBadge />}
+                            <MarketLifecycleBadge state={lifecycleOf(m.slabAddress)} />
                             <span className="shrink-0 text-sm tabular-nums text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
                               <LiveRowPrice slab={m.slabAddress} fallback={lastPrice} />
                             </span>
@@ -1108,6 +1145,7 @@ function MarketsPageInner() {
                           </span>
                           {v1Label && <V1CloseOnlyBadge />}
                             {m.supabase && isWithdrawOnlyMarket(m.supabase) && <WithdrawOnlyBadge />}
+                          <MarketLifecycleBadge state={lifecycleOf(m.slabAddress)} />
                           {awaitingOwnPrice.has(m.slabAddress) && (
                             <span data-testid="awaiting-live-price" className="shrink-0 border border-[var(--warning)]/30 bg-[var(--warning)]/[0.08] px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider text-[var(--warning)]">awaiting live price</span>
                           )}
