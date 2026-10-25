@@ -25,7 +25,7 @@ import bs58 from "bs58";
 import { decodePortfolioMatcherControl } from "@percolatorct/sdk";
 import { ACCOUNT_KIND, LAYOUT_V22 } from "./sdk/layout";
 import { activeLayout, portfolioGpaFilters } from "./layout";
-import { LAUNCH_WAIT_SLOTS, classifyLastGoodTags } from "./never-connected";
+import { LAUNCH_WAIT_SLOTS, NEVER_CONNECTED_FALLBACK_SLACK_SLOTS, classifyLastGoodTags } from "./never-connected";
 import { parseWrapperConfigV17 } from "./sdk/slab";
 import { staleResolveStatusV22 } from "./stale-resolve";
 
@@ -156,6 +156,7 @@ export async function readNeverPushed(
   lastGood: bigint,
   sigs: readonly SigInfo[],
   oracleMode: number,
+  creationSlot: bigint | null = null,
 ): Promise<boolean | null> {
   const at = sigs.filter((s) => s.err === null && BigInt(s.slot) === lastGood);
   if (at.length === 0) return null;
@@ -166,7 +167,11 @@ export async function readNeverPushed(
     all.push(...t);
   }
   if (all.length === 0) return null;
-  return classifyLastGoodTags(all, oracleMode);
+  const r = classifyLastGoodTags(all, oracleMode);
+  // A config / restart / freeze tx (62, 69, 40, 34, 35) long after creation, with no InitMarket in it, is a rotation or restart of a
+  // market that may well have had prices before: its history is not "no price ever accepted". Inconclusive.
+  if (r === true && creationSlot !== null && !all.includes(0) && lastGood - creationSlot > NEVER_CONNECTED_FALLBACK_SLACK_SLOTS) return null;
+  return r;
 }
 
 /**
@@ -185,7 +190,7 @@ export async function readSlabHistory(connection: Pick<Connection, "getSignature
     } else {
       const ok = sigs.filter((s) => s.err === null);
       const creationSlot = ok.length > 0 ? BigInt(ok.reduce((m, s) => (s.slot < m ? s.slot : m), ok[0].slot)) : null;
-      result = { creationSlot, neverPushed: await readNeverPushed(connection, programId, slab, lastGood, ok, oracleMode) };
+      result = { creationSlot, neverPushed: await readNeverPushed(connection, programId, slab, lastGood, ok, oracleMode, creationSlot) };
     }
     historyCache.set(key, result);
     return result;

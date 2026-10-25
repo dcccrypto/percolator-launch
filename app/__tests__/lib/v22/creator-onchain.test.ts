@@ -161,6 +161,16 @@ describe("readNeverPushed: only a tag that can advance last_good_oracle_slot as 
     expect(await never([69])).toBe(true);
     expect(await never([40])).toBe(true);
   });
+  it("a rotation / restart long after creation (62, 69, 40 with no InitMarket, beyond the creation window) is inconclusive, not 'no price ever'", async () => {
+    const read = (tags: number[], gap: number) =>
+      readNeverPushed({ getTransaction: vi.fn(async () => txWith(tags)) } as never, PROGRAM, SLAB, BigInt(C + gap), [sig("t", C + gap)], 0, BigInt(C));
+    expect(await read([62, 65], 516)).toBe(true); // inside the creation window
+    expect(await read([62, 65], 1000)).toBe(true); // window edge
+    for (const t of [62, 69, 40, 34, 35]) expect(await read([t], 1001)).toBeNull();
+    expect(await read([62, 65], 50_000)).toBeNull(); // keeper rotation after the market had prices
+    expect(await read([0, 73], 50_000)).toBe(true); // InitMarket in the tx: it IS the creation tx
+    expect(await read([62, 63], 50_000)).toBe(false); // a push is still a push
+  });
   it("nothing in the tx explains the write (e.g. only [65, 73]): inconclusive, not 'pushed' and not 'never'", async () => {
     expect(await never([65, 73])).toBeNull();
   });

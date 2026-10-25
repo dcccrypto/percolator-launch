@@ -105,6 +105,21 @@ describe("never-connected panel", () => {
     expect(screen.queryByTestId("never-connected-steps")).toBeNull();
   });
 
+  it("Resolved: no Settle button (nothing left to settle), the claim steps are shown", () => {
+    h.raw = (() => {
+      const m = market(CREATED);
+      const g = resolveMarketGeometry(m, { parser: "t", strictLength: false });
+      m[g.groupOff + g.layout.group.mode] = 1;
+      return m;
+    })();
+    h.slot = CREATED + 30_000n;
+    render(<NeverConnectedPanel />);
+    expect(screen.getByTestId("never-connected-card").getAttribute("data-phase")).toBe("settled");
+    expect(screen.queryByTestId("never-connected-settle")).toBeNull();
+    expect(screen.getByTestId("never-connected-status").textContent).toMatch(/settled/i);
+    expect(screen.getByTestId("never-connected-steps")).toBeTruthy();
+  });
+
   it("the money-back steps link the existing flows", () => {
     render(<NeverConnectedPanel />);
     expect(screen.getByTestId("never-connected-step-portfolio").querySelector("a")?.getAttribute("href")).toBe("/portfolio");
