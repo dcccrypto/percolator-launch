@@ -8,6 +8,7 @@ import { useCreatedMarkets, type CreatedMarket } from "@/hooks/useCreatedMarkets
 import { CreatorMarketRow } from "@/components/my-markets/CreatorMarketRow";
 import { CreatorAttentionStrip } from "@/components/my-markets/CreatorAttentionStrip";
 import { RecoverSolBanner } from "@/components/create/RecoverSolBanner";
+import { NeverConnectedPanel } from "@/components/my-markets/NeverConnectedPanel";
 import { unitScaleToDecimals, resolveCreatedMarketPriceE6 } from "@/components/my-markets/types";
 import { isKeeperFeedDead, isEngineCrankStale } from "@/components/my-markets/attentionLogic";
 import { useLiveSlabPrices } from "@/hooks/useLiveSlabPrices";
@@ -261,6 +262,8 @@ const MyMarketsPage: FC = () => {
               the same recovery card the attention strip shows, or their locked
               rent has no way back from here. Zero height when nothing is stuck. */}
           <RecoverSolBanner />
+          {/* #3637: a never-connected market has no registry row, so it is not in myMarkets either; found on chain. */}
+          <NeverConnectedPanel />
           <div className="border border-[var(--border)]/50 bg-[var(--panel-bg)] p-10 text-center">
             <p className="mb-4 text-[11px] text-[var(--text-secondary)]">
               you haven&apos;t created a market with this wallet yet.
@@ -307,6 +310,9 @@ const MyMarketsPage: FC = () => {
 
         {/* Attention strip — zero height unless something actually needs it. */}
         <CreatorAttentionStrip markets={myMarkets} details={details} identities={identities} currentSlot={chainCurrentSlot} />
+
+        {/* #3637: creator's never-connected markets (found on chain), with the way to get the money back. */}
+        <NeverConnectedPanel />
 
         {/* Hero: Markets Created count + live total-liquidity-seeded sub-line. */}
         <div className="mb-2 border border-[var(--border)] bg-[var(--panel-bg)] p-6 transition-colors duration-200 hover:bg-[var(--bg-elevated)] sm:p-8">

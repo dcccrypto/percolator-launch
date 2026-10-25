@@ -270,3 +270,13 @@ describe("#3637: a final refusal is surfaced with its reason, never swallowed", 
     expect(KEEPER_NO_PROOF_STATE).toMatchObject({ keeperPhase: "failed", keeperFinal: true, keeperMessage: KEEPER_REGISTER_COPY.noProof });
   });
 });
+
+describe("#3637: isRegistrationRefused reads the resume pass's final marker", () => {
+  const mem = (v: string | null) => ({ length: 0, key: () => null, getItem: () => v, setItem: () => undefined });
+  it("only 'refused' counts (registered '1' and absent do not)", async () => {
+    const { isRegistrationRefused } = await import("@/lib/keeper-register-client");
+    expect(isRegistrationRefused("S", mem("refused"))).toBe(true);
+    expect(isRegistrationRefused("S", mem("1"))).toBe(false);
+    expect(isRegistrationRefused("S", mem(null))).toBe(false);
+  });
+});
