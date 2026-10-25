@@ -11,6 +11,8 @@ import {
   KEEPER_REGISTER_COPY,
   KEEPER_REGISTER_MAX_SERVER_RETRIES,
   KEEPER_REGISTER_STEADY_MS,
+  USER_FACING_REGISTRATION_REASONS,
+  userFacingRegistrationReason,
   postKeeperRegistration,
   runKeeperRegistration,
 } from "@/lib/keeper-register-client";
@@ -140,5 +142,76 @@ describe("5xx is retried a bounded number of times, then 'failed' with calm copy
       sleep: async () => undefined,
     });
     expect(p2).toBe("ready");
+  });
+});
+
+describe("#3637: a final refusal is surfaced with its reason, never swallowed", () => {
+  const notKeeper = () => res(403, { error: "Market is not ready for the live price: oracle-not-keeper", code: "oracle-not-keeper" });
+
+  it("final 403 oracle-not-keeper -> failed status carrying final, the code and creator copy", async () => {
+    const f = vi.fn().mockResolvedValue(notKeeper());
+    const seen: Array<{ phase: string; message: string; final?: boolean; code?: string }> = [];
+    const phase = await runKeeperRegistration({
+      attempt: () => postKeeperRegistration(REQ, f as unknown as typeof fetch),
+      onStatus: (s) => seen.push(s),
+      sleep: async () => undefined,
+    });
+    expect(phase).toBe("failed");
+    expect(f).toHaveBeenCalledTimes(1);
+    const last = seen[seen.length - 1];
+    expect(last.phase).toBe("failed");
+    expect(last.final).toBe(true);
+    expect(last.code).toBe("oracle-not-keeper");
+    expect(last.message).toBe(KEEPER_REGISTER_COPY.oracleNotKeeper);
+    expect(last.message).not.toMatch(/oracle-not-keeper|connecting|try again in a moment/i);
+    expect(USER_FACING_REGISTRATION_REASONS).toContain(KEEPER_REGISTER_COPY.oracleNotKeeper);
+  });
+
+  it("any other non-retryable refusal is final too, with the non-jargon refusal line", async () => {
+    const seen: Array<{ message: string; final?: boolean }> = [];
+    await runKeeperRegistration({
+      attempt: () => postKeeperRegistration(REQ, vi.fn().mockResolvedValue(res(400, { error: "Invalid dexType" })) as unknown as typeof fetch),
+      onStatus: (s) => seen.push(s),
+      sleep: async () => undefined,
+    });
+    expect(seen[seen.length - 1]).toMatchObject({ final: true, message: KEEPER_REGISTER_COPY.refused });
+    expect(KEEPER_REGISTER_COPY.refused).not.toMatch(/try again in a moment/i);
+  });
+
+  it("a 5xx keeps retrying: not final until the retry cap, then the retryable server-trouble line", async () => {
+    const seen: Array<{ phase: string; message: string; final?: boolean }> = [];
+    const f = vi.fn().mockResolvedValue(res(502, { error: "Bad Gateway" }));
+    await runKeeperRegistration({
+      attempt: () => postKeeperRegistration(REQ, f as unknown as typeof fetch),
+      onStatus: (s) => seen.push(s),
+      sleep: async () => undefined,
+    });
+    expect(f).toHaveBeenCalledTimes(KEEPER_REGISTER_MAX_SERVER_RETRIES + 1);
+    expect(seen.slice(0, -1).every((s) => s.phase === "connecting" && !s.final)).toBe(true);
+    expect(seen[seen.length - 1]).toMatchObject({ phase: "failed", message: KEEPER_REGISTER_COPY.serverTrouble });
+    expect(seen[seen.length - 1].final).toBeFalsy();
+  });
+
+  it("the slow copy is true: retries only run while the page is open", () => {
+    expect(KEEPER_REGISTER_COPY.slow).not.toMatch(/you can close this page/i);
+    expect(KEEPER_REGISTER_COPY.slow).toMatch(/keep this page open/i);
+    expect(KEEPER_REGISTER_COPY.slow).toMatch(/this browser/i);
+  });
+
+  it("no copy promises a refund or recovery of funds", () => {
+    for (const c of Object.values(KEEPER_REGISTER_COPY)) expect(c).not.toMatch(/refund|recover|get your .* back|contact the team/i);
+  });
+
+  it("a non-allow-listed reason maps to the retry line only while retryable, else the final line", () => {
+    expect(userFacingRegistrationReason("boom")).toBe(KEEPER_REGISTER_COPY.generic);
+    expect(userFacingRegistrationReason("boom", undefined, false)).toBe(KEEPER_REGISTER_COPY.refused);
+    expect(userFacingRegistrationReason("whatever", "oracle-not-keeper")).toBe(KEEPER_REGISTER_COPY.oracleNotKeeper);
+  });
+
+  it("a final refusal after retries of 5xx still ends final (a later 403 is not softened)", async () => {
+    const f = vi.fn().mockResolvedValueOnce(res(502, {})).mockResolvedValue(res(403, { error: "x", code: "oracle-not-keeper" }));
+    const seen: Array<{ phase: string; final?: boolean }> = [];
+    await runKeeperRegistration({ attempt: () => postKeeperRegistration(REQ, f as unknown as typeof fetch), onStatus: (s) => seen.push(s), sleep: async () => undefined });
+    expect(seen[seen.length - 1]).toMatchObject({ phase: "failed", final: true });
   });
 });

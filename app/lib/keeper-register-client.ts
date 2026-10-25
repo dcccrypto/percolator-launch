@@ -3,8 +3,10 @@
  * signature. The proof is the market-creation transaction itself (lib/keeper-register-memo.ts), so
  * the app can retry in the background for as long as the page is open:
  *   attempt now, then after 5, 10, 20, 40, 60, 60 s, then every 2 min.
- * Status copy: "Connecting the live price… usually under a minute."; after 5 min: "Your market is
- * created but its live price isn't connected yet. We'll keep trying; you can close this page."
+ * Status copy: "Connecting the live price… usually under a minute."; after 5 min: "Keep this page open
+ * while we keep trying; if you close it, this browser retries on its next visit (resumePendingRegistrations)."
+ * A FINAL refusal (a 4xx that is not retryable, e.g. 403 oracle-not-keeper) ends the loop as a
+ * "failed" status flagged `final`, with the reason, so the screen says so instead of "connecting".
  * SECURITY REVIEW REQUIRED before merge (replaces the signed-message registration).
  */
 import type { MarketRegistrationPayload } from "@/lib/market-registration-auth";
@@ -34,12 +36,16 @@ export const KEEPER_REGISTER_MAX_SERVER_RETRIES = 3;
 
 export const KEEPER_REGISTER_COPY = {
   connecting: "Connecting the live price… usually under a minute.",
-  slow: "Your market is created but its live price isn't connected yet. We'll keep trying; you can close this page.",
+  slow: "Your market is created but its live price isn't connected yet. Keep this page open while we keep trying. If you close it, this browser tries again the next time you open Percolator; other devices don't.",
   ready: "Live price connected.",
   tryNow: "Try now",
   noProof: "This market's creation transaction isn't known on this device, so the live price can't be connected from here.",
   serverTrouble: "Live price couldn't connect just now. Your market is live; try again in a moment.",
+  /** Retryable-neutral fallback for a reason that is not creator copy (the status may still be a passing one). */
   generic: "Live price couldn't connect for this market. Your market is live; try again in a moment.",
+  /** FINAL (#3637): the server refused for good, so nothing here says "try again" and nothing promises a fix. */
+  refused: "This market's live price can't connect, and trying again won't change that. The market exists on-chain but will not show a price. Share its address in the Percolator Discord.",
+  oracleNotKeeper: "This market's price feed was set up with a key our price service doesn't control, so its live price can't connect, and trying again won't change that. The market exists on-chain but will not show a price. Share its address in the Percolator Discord.",
 } as const;
 
 /**
@@ -55,6 +61,8 @@ export const USER_FACING_REGISTRATION_REASONS: readonly string[] = [
   "Could not verify the pool on mainnet right now. Try again in a moment.",
   KEEPER_REGISTER_COPY.noProof,
   KEEPER_REGISTER_COPY.serverTrouble,
+  KEEPER_REGISTER_COPY.oracleNotKeeper,
+  KEEPER_REGISTER_COPY.refused,
   PER_CREATOR_CAP_COPY,
   GLOBAL_CAP_COPY,
 ];
@@ -69,10 +77,13 @@ export function isPerCreatorCapRefusal(r: { code?: string | null; message?: stri
   return r.code === "per-creator-cap" || (r.message ?? "").trim() === PER_CREATOR_CAP_COPY;
 }
 
-/** The line a creator sees for a failed registration: the reason itself if it is user copy. */
-export function userFacingRegistrationReason(message: string | null | undefined): string {
+/** The line a creator sees for a failed registration: the reason itself if it is user copy; otherwise the
+ *  final-refusal line when the server refused for good (`retryable` false), else the try-again line. */
+export function userFacingRegistrationReason(message: string | null | undefined, code?: string | null, retryable = true): string {
+  if (code === "oracle-not-keeper") return KEEPER_REGISTER_COPY.oracleNotKeeper;
   const m = (message ?? "").trim();
-  return USER_FACING_REGISTRATION_REASONS.includes(m) ? m : KEEPER_REGISTER_COPY.generic;
+  if (USER_FACING_REGISTRATION_REASONS.includes(m)) return m;
+  return retryable ? KEEPER_REGISTER_COPY.generic : KEEPER_REGISTER_COPY.refused;
 }
 
 export interface KeeperRegisterRequest {
@@ -151,7 +162,8 @@ export type KeeperRegisterPhase = "connecting" | "slow" | "ready" | "failed";
 
 export interface KeeperRegisterLoopDeps {
   attempt: () => Promise<KeeperRegisterAttempt>;
-  onStatus: (s: { phase: KeeperRegisterPhase; message: string; attempts: number }) => void;
+  /** `final` = the server refused for good (not retryable); `message` is then creator copy and `code` the route's reason. */
+  onStatus: (s: { phase: KeeperRegisterPhase; message: string; attempts: number; final?: boolean; code?: string }) => void;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   now?: () => number;
   signal?: AbortSignal;
@@ -182,7 +194,7 @@ export async function runKeeperRegistration(d: KeeperRegisterLoopDeps): Promise<
       return "ready";
     }
     if (!r.retryable) {
-      d.onStatus({ phase: "failed", message: r.message, attempts: i + 1 });
+      d.onStatus({ phase: "failed", message: userFacingRegistrationReason(r.message, r.code, false), attempts: i + 1, final: true, ...(r.code ? { code: r.code } : {}) });
       return "failed";
     }
     serverErrors = r.status !== undefined && r.status >= 500 ? serverErrors + 1 : 0;

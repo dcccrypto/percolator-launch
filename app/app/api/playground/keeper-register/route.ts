@@ -332,7 +332,7 @@ export async function POST(req: NextRequest) {
           extra: { slabAddress, reason: readiness.reason },
         });
         return NextResponse.json(
-          { error: `Market is not ready for the live price: ${readiness.reason}` },
+          { error: `Market is not ready for the live price: ${readiness.reason}`, code: readiness.reason },
           { status: readinessStatus(readiness.reason) },
         );
       }

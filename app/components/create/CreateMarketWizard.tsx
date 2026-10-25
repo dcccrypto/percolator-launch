@@ -1325,6 +1325,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
         onRetryKeeperRegistration={handleRetryKeeperRegistration}
         priceFeedRequired={createState.priceFeedRequired}
         keeperPhase={createState.keeperPhase ?? null}
+        keeperFinal={createState.keeperFinal ?? false}
       />
     );
   }

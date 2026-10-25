@@ -56,7 +56,7 @@ export const NO_SAVED_REGISTRATION_COPY =
  */
 const RecoverFromChainForm: FC<{
   slab: string;
-  retry: (p: KeeperRegisterRetryParams) => Promise<{ registered: boolean; message: string; code?: string }>;
+  retry: (p: KeeperRegisterRetryParams) => Promise<{ registered: boolean; retryable?: boolean; message: string; code?: string }>;
   registering: boolean;
 }> = ({ slab, retry, registering }) => {
   const { connection } = useConnectionCompat();
@@ -97,7 +97,7 @@ const RecoverFromChainForm: FC<{
         payload: r.launch.request.payload ?? null,
       });
       if (!res.registered && isPerCreatorCapRefusal(res)) setLimit(true);
-      setNote(res.registered ? null : userFacingRegistrationReason(res.message));
+      setNote(res.registered ? null : userFacingRegistrationReason(res.message, res.code, res.retryable));
     } catch {
       setNote(RECOVERY_COPY.rpc);
     } finally {
@@ -201,6 +201,8 @@ const KeeperRetryRow: FC<{ market: CreatedMarket; detail: CreatorMarketDetail | 
               setSavedBusy(true);
               setSavedNote(null);
               let last = "";
+              let lastCode: string | undefined;
+              let lastRetryable = true;
               let limit = false;
               for (const req of saved) {
                 const r = await retryKeeperRegistration({
@@ -216,13 +218,15 @@ const KeeperRetryRow: FC<{ market: CreatedMarket; detail: CreatorMarketDetail | 
                   break;
                 }
                 last = r.message;
+                lastCode = r.code;
+                lastRetryable = r.retryable ?? true;
                 if (isPerCreatorCapRefusal(r)) {
                   limit = true;
                   break;
                 }
               }
               if (limit) setLimitReached(true);
-              setSavedNote(last ? userFacingRegistrationReason(last) : null);
+              setSavedNote(last ? userFacingRegistrationReason(last, lastCode, lastRetryable) : null);
               setSavedBusy(false);
             }}
             className="border border-[var(--warning)]/50 bg-[var(--warning)]/[0.08] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--warning)] hover:bg-[var(--warning)]/[0.15] transition-colors disabled:opacity-50"

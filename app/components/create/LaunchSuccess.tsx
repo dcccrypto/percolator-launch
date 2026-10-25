@@ -54,6 +54,8 @@ interface LaunchSuccessProps {
   priceFeedRequired?: boolean;
   /** UX WP-7: the background registration loop's phase (connecting / slow / ready / failed). */
   keeperPhase?: "connecting" | "slow" | "ready" | "failed" | null;
+  /** #3637: the server refused the registration for good, so a retry cannot help (no Retry; a next step instead). */
+  keeperFinal?: boolean;
 }
 
 /**
@@ -66,9 +68,12 @@ interface LaunchSuccessProps {
 export const LAUNCH_PRICE_WAIT_MS = 90_000;
 export const LAUNCH_PRICE_COPY = {
   pendingTitle: "Market created",
+  failedTitle: "Market created, but its live price can't connect",
+  failedSub: "is on Percolator devnet without a live price",
+  supportLink: "Percolator Discord",
   readyTitle: "Ready to trade",
   connecting: "Live price connecting… usually under a minute.",
-  timedOut: "Live price is still connecting; your market is live and tradable once it arrives.",
+  timedOut: "Live price still isn't connected. Keep this page open while we keep trying; we can't say when, or whether, it will connect.",
   failed: KEEPER_REGISTER_COPY.serverTrouble,
   ready: KEEPER_REGISTER_COPY.ready,
   retry: "Retry",
@@ -96,6 +101,7 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
   onRetryKeeperRegistration,
   priceFeedRequired = false,
   keeperPhase = null,
+  keeperFinal = false,
 }) => {
   const feed = launchPriceFeedStatus({ priceFeedRequired, keeperDelegated: !!keeperDelegated });
   // v2.2 (flag on; off = no request): what the chain says about this market's share token (decimals, name) gates the wallet note below.
@@ -142,8 +148,10 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
             : null;
   // Without the creation tx on this device a retry can only repeat the same message, so none is offered.
   const noProofHere = keeperMessage === KEEPER_REGISTER_COPY.noProof;
+  // A final refusal cannot be cleared by clicking again, so no Retry for it.
+  const finalRefusal = priceStatus === "failed" && keeperFinal;
   const showPriceRetry =
-    !!onRetryKeeperRegistration && !noProofHere && (priceStatus === "failed" || priceStatus === "timed-out");
+    !!onRetryKeeperRegistration && !noProofHere && !finalRefusal && (priceStatus === "failed" || priceStatus === "timed-out");
 
   /**
    * PERC-475: Claim ~$500 of Sim-USDC collateral, then navigate to the trade page.
@@ -236,10 +244,10 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
       </div>
 
       <h2 className="text-[18px] font-bold text-[var(--long)] mb-2">
-        {pricePending ? LAUNCH_PRICE_COPY.pendingTitle : LAUNCH_PRICE_COPY.readyTitle}
+        {finalRefusal ? LAUNCH_PRICE_COPY.failedTitle : pricePending ? LAUNCH_PRICE_COPY.pendingTitle : LAUNCH_PRICE_COPY.readyTitle}
       </h2>
       <p className="text-[13px] text-[var(--text-secondary)] mb-4">
-        {tokenSymbol} is live on Percolator devnet
+        {tokenSymbol} {finalRefusal ? LAUNCH_PRICE_COPY.failedSub : "is live on Percolator devnet"}
       </p>
 
       {/* Market address */}
@@ -480,6 +488,17 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
             <span aria-hidden="true" className="inline-block h-[6px] w-[6px] animate-pulse rounded-full bg-[var(--text-muted)]" />
           )}
           <span data-testid="launch-price-status-line">{priceLine}</span>
+          {finalRefusal && (
+            <a
+              href="https://discord.gg/fJa4BDBxPN"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-testid="launch-price-support"
+              className="text-[var(--accent)] underline underline-offset-2 hover:text-[var(--text)]"
+            >
+              {LAUNCH_PRICE_COPY.supportLink}
+            </a>
+          )}
           {showPriceRetry && (
             <button
               type="button"

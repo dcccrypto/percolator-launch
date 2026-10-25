@@ -7,6 +7,7 @@
  * no signMessage), no stored proof (no fetch, a plain message), a server refusal (surfaced), and the
  * in-flight flag.
  */
+import { KEEPER_REGISTER_COPY } from "@/lib/keeper-register-client";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { SystemProgram } from "@solana/web3.js";
@@ -85,8 +86,33 @@ describe("useCreateMarket — retryKeeperRegistration (Try now)", () => {
     await act(async () => {
       outcome = await result.current.retryKeeperRegistration(REQ);
     });
-    expect(outcome).toEqual({ registered: false, message: "Registration proof refused: the memo's signer is not this market's creator" });
+    expect(outcome).toEqual({ registered: false, retryable: false, message: "Registration proof refused: the memo's signer is not this market's creator" });
     expect(result.current.state.keeperDelegated).toBe(false);
+    // #3637: a final refusal is a failure with creator copy, not a stale "connecting" line.
+    expect(result.current.state.keeperPhase).toBe("failed");
+    expect(result.current.state.keeperFinal).toBe(true);
+    expect(result.current.state.keeperMessage).toBe(KEEPER_REGISTER_COPY.refused);
+  });
+
+  it("#3637: 403 oracle-not-keeper carries its code and the specific reason", async () => {
+    saveProofTx(SLAB, PROOF);
+    fetchMock.mockResolvedValue({ ok: false, status: 403, json: async () => ({ error: "Market is not ready for the live price: oracle-not-keeper", code: "oracle-not-keeper" }) });
+    const { result } = renderHook(() => useCreateMarket());
+    await act(async () => {
+      await result.current.retryKeeperRegistration(REQ);
+    });
+    expect(result.current.state.keeperMessage).toBe(KEEPER_REGISTER_COPY.oracleNotKeeper);
+    expect(result.current.state.keeperFinal).toBe(true);
+  });
+
+  it("#3637: a 5xx on retry is not final", async () => {
+    saveProofTx(SLAB, PROOF);
+    fetchMock.mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: "busy" }) });
+    const { result } = renderHook(() => useCreateMarket());
+    await act(async () => {
+      await result.current.retryKeeperRegistration(REQ);
+    });
+    expect(result.current.state.keeperFinal).not.toBe(true);
   });
 
   it("sets keeperRegistering while the call is in flight", async () => {

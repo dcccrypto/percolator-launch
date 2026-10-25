@@ -74,7 +74,7 @@ import { preflightRegistration, resolveMarketMetadata } from "@/lib/market-metad
 import { buildM1Instructions } from "@/lib/create-market-m1";
 import { WIZARD_STEP_COPY } from "@/lib/wizard-copy";
 import { withRateLimitRetry } from "@/lib/rpc-rate-limit";
-import { KEEPER_REGISTER_COPY, loadProofPayload, loadProofTx, markRegistered, postKeeperRegistration, runKeeperRegistration, saveProofPayload, saveProofTx, saveRegisterRequest, type KeeperRegisterPhase } from "@/lib/keeper-register-client";
+import { KEEPER_REGISTER_COPY, loadProofPayload, loadProofTx, markRegistered, postKeeperRegistration, runKeeperRegistration, saveProofPayload, saveProofTx, saveRegisterRequest, userFacingRegistrationReason, type KeeperRegisterPhase } from "@/lib/keeper-register-client";
 import { deriveLaunchMarketParams, backingSeedPerDomain } from "@/lib/market-params";
 import { buildMarketRegistrationPayload, flooredInitialMarginBps } from "@/lib/market-registration-payload";
 // GH#2592: the step-4 predicate and /api/devnet-pre-fund's funding target must be
@@ -484,6 +484,8 @@ export interface CreateMarketState {
   keeperProofTx?: string | null;
   /** UX WP-7: the background registration loop's phase. */
   keeperPhase?: KeeperRegisterPhase | null;
+  /** The server refused the live-price registration for good (#3637): retrying cannot help. */
+  keeperFinal?: boolean;
   /**
    * E2E B21: this market's price comes from a keeper-read DEX pool, so it is NOT launched
    * until keeper-register succeeds (`keeperDelegated`). LaunchSuccess shows "launched" only
@@ -2214,9 +2216,9 @@ export function useCreateMarket() {
     void runKeeperRegistration({
       attempt: () => postKeeperRegistration(request),
       signal: ac.signal,
-      onStatus: ({ phase, message }) => {
+      onStatus: ({ phase, message, final }) => {
         if (phase === "ready") markRegistered(slab);
-        setState((s) => ({ ...s, keeperPhase: phase, keeperMessage: message, keeperDelegated: phase === "ready" || s.keeperDelegated }));
+        setState((s) => ({ ...s, keeperPhase: phase, keeperMessage: message, keeperFinal: final === true, keeperDelegated: phase === "ready" || s.keeperDelegated }));
       },
     });
   }, []);
@@ -4395,7 +4397,7 @@ export function useCreateMarket() {
     async (params: KeeperRegisterRetryParams) => {
       const proofTx = loadProofTx(params.slabAddress);
       if (!proofTx) {
-        const outcome = { registered: false, message: KEEPER_REGISTER_COPY.noProof };
+        const outcome: { registered: boolean; retryable: boolean; message: string; code?: string } = { registered: false, retryable: false, message: KEEPER_REGISTER_COPY.noProof };
         setState((s) => ({ ...s, keeperMessage: outcome.message, keeperPhase: "failed" }));
         return outcome;
       }
@@ -4410,14 +4412,16 @@ export function useCreateMarket() {
         ...s,
         keeperRegistering: false,
         keeperDelegated: r.registered || s.keeperDelegated,
-        keeperMessage: r.registered ? KEEPER_REGISTER_COPY.ready : s.keeperMessage,
-        keeperPhase: r.registered ? "ready" : s.keeperPhase,
+        // A final refusal replaces the stale "connecting" line with its reason (#3637).
+        keeperMessage: r.registered ? KEEPER_REGISTER_COPY.ready : !r.retryable ? userFacingRegistrationReason(r.message, r.code, false) : s.keeperMessage,
+        keeperPhase: r.registered ? "ready" : !r.retryable ? "failed" : s.keeperPhase,
+        keeperFinal: r.registered ? false : !r.retryable ? true : s.keeperFinal,
       }));
       if (r.registered) {
         markRegistered(params.slabAddress);
         keeperLoopRef.current?.abort();
       }
-      return { registered: r.registered, message: r.message, ...(r.code ? { code: r.code } : {}) };
+      return { registered: r.registered, retryable: r.retryable, message: r.message, ...(r.code ? { code: r.code } : {}) };
     },
     [],
   );
