@@ -35,7 +35,6 @@ import { CreatorTranchePanel } from "@/components/limits/CreatorLimits";
 import { ADMIN_BURN_COPY } from "@/lib/admin-burn-copy";
 import { sanitizeDecimalInput } from "@/lib/decimal-input";
 import { EARN_FLOOR_COPY, earnDeadShareFloorPresent } from "@/lib/v22/resolved-claims";
-import { useRouter } from "next/navigation";
 
 /** Same accrue-cliff threshold as useCreatedMarkets/CrankHealthCard — the
  *  asset's accrue slot (advances only via crank/trade) vs the current
@@ -419,7 +418,6 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
   // v2.2 Earn market: CloseSlab can never run (Earn dead-share floor), so no close / reclaim is offered; settle is.
   const [earnFloor, setEarnFloor] = useState<boolean | null>(null);
   const [showSettleConfirm, setShowSettleConfirm] = useState(false);
-  const router = useRouter();
 
   async function handleAction(name: string, fn: () => Promise<string>) {
     try {
@@ -455,9 +453,9 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
     const result = await closeMarket.settleMarket(slab);
     if (result) {
       toast(EARN_FLOOR_COPY.settledToast, "success");
-      router.push(`/trade/${slab}`);
+      window.location.assign(`/trade/${slab}`); // the market page owns the claims; a full load re-reads the settled market
     }
-  }, [closeMarket, slab, toast, router]);
+  }, [closeMarket, slab, toast]);
 
   const handleClose = useCallback(async () => {
     setShowCloseConfirm(false);
@@ -665,7 +663,7 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
               below says it can't be closed, and a checklist would list steps that lead nowhere (#43). */}
           {earnFloor === true && <EarnFloorNote canSettle={isMarketAuth} busy={closeMarket.loading} onSettle={() => setShowSettleConfirm(true)} />}
           {!removalImpossible && isMarketAuth && earnFloor !== true && <CloseMarketChecklistView checks={closeChecks} />}
-          {!isMarketAuth && earnFloor !== true && (
+          {!isMarketAuth && (
             <p className="mt-2 text-[10px] text-[var(--text-secondary)]">
               This market is autonomous — admin control was permanently renounced to the stake-pool
               program at creation, so it can’t be closed.{isAssetAdmin && !adminBurned && " You can still burn your remaining admin key."}
