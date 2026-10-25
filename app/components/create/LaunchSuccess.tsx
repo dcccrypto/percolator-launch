@@ -304,7 +304,7 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
       {backingSeedFailed && (
         <div className="border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] px-4 py-2 mb-4 text-left w-full max-w-sm mx-auto">
           <p className="text-[11px] text-[var(--text-secondary)]">
-            Market is <strong className="text-[var(--text)]">live and tradeable</strong>, but its trader payout reserve was <strong className="text-[var(--text)]">not seeded</strong> — the deposit for both sides did not land. Retry it from market settings before the market takes size.
+            {finalRefusal ? "Also, the" : <>Market is <strong className="text-[var(--text)]">live and tradeable</strong>, but its</>} trader payout reserve was <strong className="text-[var(--text)]">not seeded</strong> — the deposit for both sides did not land. Retry it from market settings{finalRefusal ? "." : " before the market takes size."}
           </p>
         </div>
       )}
@@ -313,7 +313,7 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
       {insuranceMintFailed && (
         <div className="border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] px-4 py-2 mb-4 text-left w-full max-w-sm mx-auto">
           <p className="text-[11px] text-[var(--text-secondary)]">
-            Market is <strong className="text-[var(--text)]">live and tradeable</strong>. Earn deposits aren't open yet (the setup step timed out). Retry later from My Markets.
+            {finalRefusal ? "Also, Earn" : <>Market is <strong className="text-[var(--text)]">live and tradeable</strong>. Earn</>} deposits aren't open yet (the setup step timed out). Retry later from My Markets.
           </p>
         </div>
       )}
@@ -336,7 +336,8 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
         Reframed below to describe what's actually happening: a Sim-USDC
         collateral top-up, plus a note on how the market gets its price.
       */}
-      {isDevnet && devnetMint && (
+      {/* #3637: not shown on a final failure: it describes trading and pricing this market cannot have. */}
+      {isDevnet && devnetMint && !finalRefusal && (
         <div className="mb-5 w-full max-w-sm mx-auto text-left">
           {/* GH#2608/#2610: this used to reflect an automatic background claim
               that fired the instant the market landed (see useCreateMarket.ts).

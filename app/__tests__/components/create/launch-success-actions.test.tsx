@@ -175,6 +175,18 @@ describe("#3637: the final-failure screen is not a success screen", () => {
     expect(root.className).not.toContain("--long");
   });
 
+  it("leftover 'live and tradeable' / 'priced off its live pool' / faucet copy is gone on a final failure, kept otherwise", () => {
+    const extra = { backingSeedFailed: true, insuranceMintFailed: true, mainnetCA: "CA1" };
+    const { unmount } = render(<LaunchSuccess {...finalProps(extra)} />);
+    const text = screen.getByTestId("launch-success").textContent ?? "";
+    expect(text).not.toMatch(/live and tradeable|priced off its live mainnet DEX pool|Sim-USDC mint/i);
+    expect(text).toMatch(/not seeded/);
+    expect(text).toMatch(/Earn deposits aren't open yet/);
+    unmount();
+    render(<LaunchSuccess {...base({ ...extra, keeperPhase: "ready", keeperMessage: KEEPER_REGISTER_COPY.ready, keeperDelegated: true })} />);
+    expect(screen.getByTestId("launch-success").textContent).toMatch(/live and tradeable/);
+  });
+
   it("the normal and retryable states keep the trade actions and the success look", () => {
     render(<LaunchSuccess {...base({ keeperPhase: "failed", keeperMessage: KEEPER_REGISTER_COPY.serverTrouble })} />);
     expect(screen.getByTestId("launch-go-to-market").textContent).toMatch(/TRADE THIS MARKET/);
@@ -262,19 +274,30 @@ describe("a final refusal shows only reasons written for creators", () => {
   it.each([
     "Slab account does not exist on-chain",
     "Slab account is not a market of this deployment's program",
-    "Registration proof refused: memo signer is not the market creator",
+    "Registration proof refused: no matching registration memo signed in the proof transaction",
     "Invalid dexType",
-  ])("jargon 400 %j -> the final refusal line", async (jargon) => {
-    const fetchImpl = refuse(400, jargon);
+  ])("#3637 B1: unlisted 4xx %j -> retried, then a non-final failure with Retry and no jargon", async (jargon) => {
+    vi.useFakeTimers();
+    const fetchImpl = refuse(jargon.startsWith("Registration") ? 403 : 400, jargon);
     render(<Harness fetchImpl={fetchImpl as unknown as typeof fetch} />);
     await act(async () => {
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(40_000);
     });
+    expect(screen.getByTestId("launch-price-status").getAttribute("data-status")).toBe("failed");
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
+    expect(screen.getByTestId("launch-price-status-line").textContent).toBe(KEEPER_REGISTER_COPY.generic);
+    expect(screen.getByTestId("launch-success").textContent).not.toContain(jargon);
+    expect(screen.getByTestId("launch-price-retry")).toBeTruthy();
+    expect(screen.queryByTestId("launch-price-support")).toBeNull();
+    expect(screen.getByTestId("launch-success").textContent).not.toContain(LAUNCH_PRICE_COPY.failedTitle);
+  });
+
+  it("a permanent proof refusal is final: the final line, no Retry", async () => {
+    const fetchImpl = refuse(403, "Registration proof refused: the memo's signer is not this market's creator");
+    render(<Harness fetchImpl={fetchImpl as unknown as typeof fetch} />);
     await vi.waitFor(() => expect(screen.getByTestId("launch-price-status").getAttribute("data-status")).toBe("failed"));
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId("launch-price-status-line").textContent).toBe(KEEPER_REGISTER_COPY.refused);
-    expect(screen.getByTestId("launch-success").textContent).not.toContain(jargon);
-    // Final: another click cannot help, so no Retry.
     expect(screen.queryByTestId("launch-price-retry")).toBeNull();
   });
 

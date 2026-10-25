@@ -134,3 +134,120 @@ describe("useCreateMarket — retryKeeperRegistration (Try now)", () => {
     expect(result.current.state.keeperRegistering).toBe(false);
   });
 });
+
+describe("useCreateMarket: #3637 final state is per attempt, and a final refusal ends the loop", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  const resp = (status: number, body: Record<string, unknown>) => ({ ok: status < 300, status, headers: new Headers(), json: async () => body });
+  const NOT_KEEPER = resp(403, { error: "Market is not ready for the live price: oracle-not-keeper", code: "oracle-not-keeper" });
+  const MISMATCH = resp(403, { error: "Registration proof refused: no matching registration memo signed in the proof transaction" });
+  const LAG = resp(400, { error: "Slab account does not exist on-chain" });
+  const PARAMS = { ...REQ, payload: null };
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    mockUseConnectionCompat.mockReturnValue({ connection: {} });
+    mockUseWalletCompat.mockReturnValue({ publicKey: SystemProgram.programId, connected: true, signTransaction: vi.fn(), signMessage: vi.fn(), disconnect: vi.fn() });
+    fetchMock = vi.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+    saveProofTx(SLAB, PROOF);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("B2: a wrong-candidate proof mismatch and a lagging 400 are NOT final", async () => {
+    const { result } = renderHook(() => useCreateMarket());
+    for (const answer of [MISMATCH, LAG]) {
+      fetchMock.mockResolvedValue(answer);
+      await act(async () => {
+        const out = await result.current.retryKeeperRegistration(PARAMS);
+        expect(out.retryable).toBe(true);
+      });
+      expect(result.current.state.keeperFinal).toBe(false);
+    }
+  });
+
+  it("B2: keeperFinal is not sticky: final, then a non-final answer on the right candidate clears it and its line", async () => {
+    const { result } = renderHook(() => useCreateMarket());
+    fetchMock.mockResolvedValue(NOT_KEEPER);
+    await act(async () => {
+      await result.current.retryKeeperRegistration(PARAMS);
+    });
+    expect(result.current.state.keeperFinal).toBe(true);
+    expect(result.current.state.keeperMessage).toBe(KEEPER_REGISTER_COPY.oracleNotKeeper);
+    fetchMock.mockResolvedValue(resp(503, { error: "busy" }));
+    await act(async () => {
+      await result.current.retryKeeperRegistration(PARAMS);
+    });
+    expect(result.current.state.keeperFinal).toBe(false);
+    expect(result.current.state.keeperMessage).not.toBe(KEEPER_REGISTER_COPY.oracleNotKeeper);
+    fetchMock.mockResolvedValue(resp(200, { registered: true }));
+    await act(async () => {
+      await result.current.retryKeeperRegistration(PARAMS);
+    });
+    expect(result.current.state.keeperPhase).toBe("ready");
+    expect(result.current.state.keeperFinal).toBe(false);
+  });
+
+  it("a manual Retry that gets a final refusal stops the background loop (no further POSTs, state stays final)", async () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useCreateMarket());
+    fetchMock.mockResolvedValue(resp(502, {}));
+    await act(async () => {
+      result.current.startKeeperLoop({ dexPoolAddress: REQ.dexPoolAddress, mainnetCA: REQ.mainnetCA, dexType: "pumpswap", symbol: "TEST" } as never, SLAB);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fetchMock.mockResolvedValue(NOT_KEEPER);
+    await act(async () => {
+      await result.current.retryKeeperRegistration(PARAMS);
+    });
+    expect(result.current.state.keeperFinal).toBe(true);
+    const calls = fetchMock.mock.calls.length;
+    fetchMock.mockResolvedValue(resp(502, {}));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+    });
+    expect(fetchMock.mock.calls.length).toBe(calls);
+    expect(result.current.state.keeperFinal).toBe(true);
+    expect(result.current.state.keeperMessage).toBe(KEEPER_REGISTER_COPY.oracleNotKeeper);
+  });
+
+  it("reset() aborts the previous launch's loop: a late answer cannot write into the next launch's state", async () => {
+    const { result } = renderHook(() => useCreateMarket());
+    let release: (v: unknown) => void = () => undefined;
+    fetchMock.mockReturnValue(new Promise((r) => { release = r; }));
+    await act(async () => {
+      result.current.startKeeperLoop({ dexPoolAddress: REQ.dexPoolAddress, mainnetCA: REQ.mainnetCA, dexType: "pumpswap", symbol: "TEST" } as never, SLAB);
+    });
+    act(() => result.current.reset());
+    await act(async () => {
+      release(NOT_KEEPER);
+      await Promise.resolve();
+    });
+    expect(result.current.state.keeperFinal).toBeFalsy();
+    expect(result.current.state.keeperMessage).toBeNull();
+  });
+
+  it("a new launch with no saved proof aborts the previous loop, and is a final failure itself", async () => {
+    const { result } = renderHook(() => useCreateMarket());
+    let release: (v: unknown) => void = () => undefined;
+    fetchMock.mockReturnValue(new Promise((r) => { release = r; }));
+    const p = { dexPoolAddress: REQ.dexPoolAddress, mainnetCA: REQ.mainnetCA, dexType: "pumpswap", symbol: "TEST" } as never;
+    await act(async () => {
+      result.current.startKeeperLoop(p, SLAB);
+    });
+    await act(async () => {
+      result.current.startKeeperLoop(p, "11111111111111111111111111111112"); // no proof saved for this slab
+    });
+    expect(result.current.state.keeperMessage).toBe(KEEPER_REGISTER_COPY.noProof);
+    await act(async () => {
+      release(resp(200, { registered: true }));
+      await Promise.resolve();
+    });
+    expect(result.current.state.keeperPhase).toBe("failed");
+    expect(result.current.state.keeperFinal).toBe(true);
+    expect(result.current.state.keeperDelegated).toBe(false);
+  });
+});

@@ -95,7 +95,7 @@ import { getServerConnection } from "@/lib/server-rpc";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { resolveTokenLogo } from "@/lib/token-logo";
 import { sanitizeLogoUrl } from "@/lib/token-metadata-validators";
-import { upsertRegisteredMarketRow } from "@/lib/market-registration";
+import { LIVE_PRICE_TURNED_OFF, upsertRegisteredMarketRow } from "@/lib/market-registration";
 import { checkSymbol, checkName } from "@/lib/market-metadata-validation";
 import { checkKeeperReadiness, enrollmentCapsFromEnv, GLOBAL_CAP_COPY, readinessStatus } from "@/lib/keeper-enrollment-guard";
 import { getPlaygroundKeeperSigner } from "@/lib/playground-keeper-signer";
@@ -569,7 +569,7 @@ export async function POST(req: NextRequest) {
   // and the blob is not re-written for it either. Final (not retryable).
   if (dbResult.action === "unchanged" && !dbResult.keeperActive) {
     return NextResponse.json(
-      { ok: false, registered: false, error: "This market's live price was turned off by a maintainer." },
+      { ok: false, registered: false, error: LIVE_PRICE_TURNED_OFF },
       { status: 403 },
     );
   }

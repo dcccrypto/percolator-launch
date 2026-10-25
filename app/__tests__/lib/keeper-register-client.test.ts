@@ -5,6 +5,8 @@
  * "Live price connected." Backoff 5, 10, 20, 40, 60, 60 s, then every 2 min; "slow" copy after 5 min;
  * a final refusal (403) stops the loop.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   KEEPER_REGISTER_BACKOFF_MS,
@@ -13,6 +15,8 @@ import {
   KEEPER_REGISTER_STEADY_MS,
   USER_FACING_REGISTRATION_REASONS,
   userFacingRegistrationReason,
+  isFinalRegistrationRefusal,
+  PERMANENT_PROOF_REFUSALS,
   KEEPER_NO_PROOF_STATE,
   postKeeperRegistration,
   runKeeperRegistration,
@@ -62,7 +66,7 @@ describe("AC2: 503, 503, 200 -> connected, no user action", () => {
   });
 
   it("CONTROL: a final refusal (403) stops the loop; a 409 (not landed yet) keeps it going", async () => {
-    const refused = vi.fn().mockResolvedValue(res(403, { error: "Registration proof refused: x" }));
+    const refused = vi.fn().mockResolvedValue(res(403, { error: "Registration proof refused: the memo's signer is not this market's creator" }));
     const phase = await runKeeperRegistration({
       attempt: () => postKeeperRegistration(REQ, refused as unknown as typeof fetch),
       onStatus: () => undefined,
@@ -107,7 +111,7 @@ describe("re-review I-R2: 'locked to another price source' is final", () => {
   it("422 -> not retryable, the reason is the message", async () => {
     const f = vi.fn(async () => res(422, { error: "This market is already registered with a different price source." }));
     const a = await postKeeperRegistration(REQ, f as unknown as typeof fetch);
-    expect(a).toEqual({ registered: false, retryable: false, message: "This market is already registered with a different price source.", status: 422 });
+    expect(a).toEqual({ registered: false, retryable: false, transient: false, message: "This market is already registered with a different price source.", status: 422 });
   });
 });
 
@@ -168,14 +172,47 @@ describe("#3637: a final refusal is surfaced with its reason, never swallowed", 
     expect(USER_FACING_REGISTRATION_REASONS).toContain(KEEPER_REGISTER_COPY.oracleNotKeeper);
   });
 
-  it("any other non-retryable refusal is final too, with the non-jargon refusal line", async () => {
-    const seen: Array<{ message: string; final?: boolean }> = [];
-    await runKeeperRegistration({
-      attempt: () => postKeeperRegistration(REQ, vi.fn().mockResolvedValue(res(400, { error: "Invalid dexType" })) as unknown as typeof fetch),
-      onStatus: (s) => seen.push(s),
-      sleep: async () => undefined,
-    });
-    expect(seen[seen.length - 1]).toMatchObject({ final: true, message: KEEPER_REGISTER_COPY.refused });
+  it("#3637 B1: an unlisted 4xx is NOT final: retried, then a non-final failure that keeps Retry (never 'never')", async () => {
+    for (const [status, error] of [[400, "Slab account does not exist on-chain"], [400, "Invalid dexType"], [403, "Registration proof refused: no matching registration memo signed in the proof transaction"]] as const) {
+      const f = vi.fn().mockResolvedValue(res(status, { error }));
+      const seen: Array<{ phase: string; message: string; final?: boolean }> = [];
+      await runKeeperRegistration({ attempt: () => postKeeperRegistration(REQ, f as unknown as typeof fetch), onStatus: (s) => seen.push(s), sleep: async () => undefined });
+      expect(f).toHaveBeenCalledTimes(KEEPER_REGISTER_MAX_SERVER_RETRIES + 1);
+      expect(seen.every((s) => !s.final)).toBe(true);
+      const last = seen[seen.length - 1];
+      expect(last.phase).toBe("failed");
+      expect(last.message).toBe(KEEPER_REGISTER_COPY.generic);
+      expect(last.message).not.toMatch(/won't change that|will not show a price/i);
+    }
+  });
+
+  it("#3637 B1: a one-slot RPC lag ('Slab account does not exist') that clears is registered, not given up on", async () => {
+    const f = vi.fn().mockResolvedValueOnce(res(400, { error: "Slab account does not exist on-chain" })).mockResolvedValue(res(200, { registered: true }));
+    const phase = await runKeeperRegistration({ attempt: () => postKeeperRegistration(REQ, f as unknown as typeof fetch), onStatus: () => undefined, sleep: async () => undefined });
+    expect(phase).toBe("ready");
+  });
+
+  it("#3637 B1: the allowlist is exactly the permanent refusals", () => {
+    const f = (status: number, message: string, code?: string) => isFinalRegistrationRefusal({ status, message, code });
+    expect(f(403, "Market is not ready for the live price: oracle-not-keeper", "oracle-not-keeper")).toBe(true);
+    expect(f(403, "x", "per-creator-cap")).toBe(true);
+    expect(f(422, "This market is already registered with a different price source.")).toBe(true);
+    expect(f(403, "This market's live price was turned off by a maintainer.")).toBe(true);
+    for (const r of PERMANENT_PROOF_REFUSALS) expect(f(403, `Registration proof refused: ${r}`)).toBe(true);
+    expect(f(403, "Registration proof refused: no matching registration memo signed in the proof transaction")).toBe(false);
+    expect(f(409, "Registration proof refused: proof transaction not found")).toBe(false);
+    expect(f(400, "Slab account does not exist on-chain")).toBe(false);
+    expect(f(400, "Slab account is not a market of this deployment's program")).toBe(false);
+    expect(f(503, "x")).toBe(false);
+  });
+
+  it("the proof-refusal texts match lib/keeper-register-memo.ts", () => {
+    const src = readFileSync(join(__dirname, "../../lib/keeper-register-memo.ts"), "utf8");
+    for (const r of PERMANENT_PROOF_REFUSALS) expect(src).toContain(r);
+    expect(src).toContain("no matching registration memo signed in the proof transaction");
+  });
+
+  it("the final refusal line never says 'try again in a moment'", () => {
     expect(KEEPER_REGISTER_COPY.refused).not.toMatch(/try again in a moment/i);
   });
 

@@ -37,7 +37,8 @@ function store(init: Record<string, string> = {}): KeyStore & { m: Map<string, s
 }
 const launched = () => store({ [`perc.keeperProofTx.${SLAB}`]: PROOF, [`perc.keeperPayload.${SLAB}`]: JSON.stringify(PAYLOAD) });
 const ok: KeeperRegisterAttempt = { registered: true, retryable: false, message: "ok" };
-const memoMismatch: KeeperRegisterAttempt = { registered: false, retryable: false, message: "no matching registration memo" };
+const memoMismatch: KeeperRegisterAttempt = { registered: false, retryable: true, transient: false, message: "no matching registration memo" };
+const permanent: KeeperRegisterAttempt = { registered: false, retryable: false, message: "x", code: "oracle-not-keeper", status: 403 };
 const serverDown: KeeperRegisterAttempt = { registered: false, retryable: true, message: "HTTP 500" };
 
 describe("resume a registration the launch page did not finish", () => {
@@ -68,10 +69,10 @@ describe("resume a registration the launch page did not finish", () => {
     expect(post.mock.calls[0][0].payload).toEqual(PAYLOAD);
   });
 
-  it("retains a valid legacy no-payload request and treats an actual server refusal as terminal", async () => {
+  it("retains a valid legacy no-payload request and treats an allowlisted permanent refusal as terminal", async () => {
     const s = store({ [`perc.keeperProofTx.${SLAB}`]: PROOF });
     saveRegisterRequest({ slabAddress: SLAB, dexPoolAddress: "POOL", dexType: "pumpswap" }, s);
-    const post = vi.fn(async () => memoMismatch);
+    const post = vi.fn(async () => permanent);
     expect(pendingRegistrationSlabs(s)).toEqual([SLAB]);
     expect((await resumePendingRegistrations({ store: s, post })).refused).toEqual([SLAB]);
     expect(post).toHaveBeenCalledWith(expect.objectContaining({ payload: null, proofTx: PROOF }));
@@ -194,11 +195,27 @@ describe("resume a registration the launch page did not finish", () => {
     expect(pendingRegistrationSlabs(s)).toEqual([SLAB]);
   });
 
-  it("every candidate refused (final): marked, never re-sent", async () => {
+  it("a permanent refusal (allowlist) stops at the first candidate: marked refused, never re-sent", async () => {
+    const s = launched();
+    const post = vi.fn(async () => permanent);
+    const res = await resumePendingRegistrations({ store: s, post });
+    expect(res.refused).toEqual([SLAB]);
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(pendingRegistrationSlabs(s)).toEqual([]);
+  });
+
+  it("#3637 B1: every candidate merely mismatched / a lagging 400 is NOT marked refused: tried again on the next visit", async () => {
     const s = launched();
     const res = await resumePendingRegistrations({ store: s, post: async () => memoMismatch });
-    expect(res.refused).toEqual([SLAB]);
-    expect(pendingRegistrationSlabs(s)).toEqual([]);
+    expect(res.refused).toEqual([]);
+    expect(res.retryLater).toEqual([SLAB]);
+    expect(s.getItem(`perc.keeperRegistered.${SLAB}`)).toBeNull();
+    expect(pendingRegistrationSlabs(s)).toEqual([SLAB]);
+    const lag: KeeperRegisterAttempt = { registered: false, retryable: true, transient: false, message: "Slab account does not exist on-chain", status: 400 };
+    const one = store({ [`perc.keeperProofTx.${SLAB}`]: PROOF });
+    saveRegisterRequest({ slabAddress: SLAB, dexPoolAddress: "POOL", dexType: "pumpswap" }, one);
+    expect((await resumePendingRegistrations({ store: one, post: async () => lag })).refused).toEqual([]);
+    expect(pendingRegistrationSlabs(one)).toEqual([SLAB]);
   });
 
   it("NEGATIVE CONTROL: no proof on this device -> nothing to resume, nothing sent", async () => {

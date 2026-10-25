@@ -240,6 +240,9 @@ const KeeperRetryRow: FC<{ market: CreatedMarket; detail: CreatorMarketDetail | 
                   limit = true;
                   break;
                 }
+                // An allowlisted permanent refusal does not depend on the guess: stop, so a later wrong
+                // candidate's answer cannot replace it.
+                if (r.retryable === false) break;
               }
               if (limit) setLimitReached(true);
               setSavedNote(last ? userFacingRegistrationReason(last, lastCode, lastRetryable) : null);

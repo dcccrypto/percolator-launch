@@ -72,6 +72,9 @@ export const PRICE_SOURCE_LOCKED = "This market is already registered with a dif
 /** Final, not retryable (the client's backoff retries 409): the binding only changes via the admin path. */
 export const PRICE_SOURCE_LOCKED_STATUS = 422;
 
+/** The 403 when a maintainer turned a creator-registered market's live price off (final). */
+export const LIVE_PRICE_TURNED_OFF = "This market's live price was turned off by a maintainer.";
+
 interface ExistingRow {
   id: string;
   metadata_source: string | null;

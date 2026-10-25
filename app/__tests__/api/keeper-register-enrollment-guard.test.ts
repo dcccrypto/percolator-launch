@@ -176,7 +176,10 @@ describe("review M-7: only a finished, keeper-priced market under the ceilings i
 
   it("an oracle authority that is not our keeper -> 403 (final), nothing written", async () => {
     h.slab = mutated((b) => new PublicKey(CREATOR).toBuffer().copy(b, ORACLE_AUTHORITY_OFF));
-    expect((await post(REQUEST)).status).toBe(403);
+    const res = await post(REQUEST);
+    expect(res.status).toBe(403);
+    // #3637: the client keys "final" on this code (never on the prose).
+    expect(await res.json()).toMatchObject({ error: "Market is not ready for the live price: oracle-not-keeper", code: "oracle-not-keeper" });
     refusedNothingWritten();
   });
 

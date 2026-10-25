@@ -2192,13 +2192,14 @@ export function useCreateMarket() {
   useEffect(() => () => keeperLoopRef.current?.abort(), []);
   const startKeeperLoop = useCallback((params: CreateMarketParams, slab: string) => {
     if (!params.dexPoolAddress) return;
+    // A previous launch's loop must never write into this launch's state, whatever happens next.
+    keeperLoopRef.current?.abort();
     const proofTx = loadProofTx(slab);
     if (!proofTx) {
       // Nothing can ever be sent from this device: a final failure, not "connecting" (#3637).
       setState((s) => ({ ...s, ...KEEPER_NO_PROOF_STATE }));
       return;
     }
-    keeperLoopRef.current?.abort();
     const ac = new AbortController();
     keeperLoopRef.current = ac;
     const request = {
@@ -4357,6 +4358,8 @@ export function useCreateMarket() {
   );
 
   const reset = useCallback(() => {
+    // The previous launch's registration loop must not write into the next launch's state.
+    keeperLoopRef.current?.abort();
     slabKpRef.current = null;
     chainResumeSlabRef.current = null;
     // PERC-8329: Clear any stale key that may have been stored by old code (defensive cleanup).
@@ -4414,9 +4417,11 @@ export function useCreateMarket() {
         keeperRegistering: false,
         keeperDelegated: r.registered || s.keeperDelegated,
         // A final refusal replaces the stale "connecting" line with its reason (#3637).
-        keeperMessage: r.registered ? KEEPER_REGISTER_COPY.ready : !r.retryable ? userFacingRegistrationReason(r.message, r.code, false) : s.keeperMessage,
-        keeperPhase: r.registered ? "ready" : !r.retryable ? "failed" : s.keeperPhase,
-        keeperFinal: r.registered ? false : !r.retryable ? true : s.keeperFinal,
+        keeperMessage: r.registered ? KEEPER_REGISTER_COPY.ready : !r.retryable ? userFacingRegistrationReason(r.message, r.code, false) : s.keeperFinal ? userFacingRegistrationReason(r.message, r.code, true) : s.keeperMessage,
+        // Recomputed on every attempt: only THIS answer being an allowlisted permanent refusal makes it final.
+        // A later non-final answer (a different candidate, a blip) clears a stale final state and its line.
+        keeperPhase: r.registered ? "ready" : !r.retryable ? "failed" : s.keeperFinal ? "failed" : s.keeperPhase,
+        keeperFinal: !r.registered && !r.retryable,
       }));
       // A registered market or a final refusal ends the background loop: a later retryable blip
       // in the loop must not turn the failure back into "still connecting" (#3637).
@@ -4429,5 +4434,5 @@ export function useCreateMarket() {
     [],
   );
 
-  return { state, create, reset, restoreSlabKeypair, restoreSlabAddress, clearChainResume, retryKeeperRegistration, cancelInFlightLaunch };
+  return { state, create, reset, restoreSlabKeypair, restoreSlabAddress, clearChainResume, retryKeeperRegistration, startKeeperLoop, cancelInFlightLaunch };
 }
