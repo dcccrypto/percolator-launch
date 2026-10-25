@@ -1,32 +1,38 @@
 /**
- * Market lifecycle state for /markets (percolator ops plan v22-market-lifecycle-plan-2026-10-25, section 4, option C).
+ * Market lifecycle state for /markets (percolator ops plan v22-market-lifecycle-plan-2026-10-25, sections 3.8 and 4, option C).
  *
- * Five states, decided from the market account's own bytes (engine mode, stale window, open portfolios, vault), not from the
- * blocklist alone:
+ * Five states, decided from the market account's own bytes (engine mode, stale window, open portfolios), not from the blocklist alone:
  *
  *   live     mode Live, price fresh (or the stale window is off).
- *   stale    mode Live and `cluster slot - last_good_oracle_slot >= permissionless_resolve_stale_slots` (wrapper tag 39 can settle it).
- *   settling mode Resolved (or Recovery) and portfolios are still open (`materialized_portfolio_count > 0`).
- *   settled  mode Resolved, no portfolio left, but the vault still holds more than dust (Earn, stake or insurance claims).
- *   retired  blocklisted, a CloseSlab tombstone, or Resolved with no portfolio and only dust in the vault. Hidden from discovery by
- *            default; never hidden from the wallets that hold funds there (they reach it by the slab URL and from Portfolio).
+ *   stale    mode Live and tag 39 would resolve it now (`staleResolveStatusV22`: stale window matured, cluster not behind the engine clock).
+ *   settling mode Recovery, or Resolved with portfolios still open (`materialized_portfolio_count > 0`).
+ *   settled  mode Resolved and no portfolio left. Claims may still be open: Earn, stake and insurance money lives in other accounts
+ *            (the stake pool vault, the Earn vault), which market bytes cannot show.
+ *   retired  a CloseSlab tombstone, or an explicit retirement (the blocklist). NEVER derived from market bytes alone: a Resolved market
+ *            with no portfolio and an empty vault can still have a stake pool holding stakers' money (devnet 6mqz4o7j…, 4,000,000 atoms).
+ *            Hidden from the default list; stakers reach their funds on the stake page, Earn holders on the Earn page, traders from Portfolio.
  *
  * Offsets: group header rows of the layout table keyed on wrapper VERSION (lib/v22/sdk/layout.ts); `resolved_slot` is the u64 right
  * after the `mode` byte (engine v16.rs `MarketGroupV16HeaderAccount`: `mode: u8, resolved_slot: V16PodU64`), the same offsets the
  * oracle keeper decodes (percolator-oracle-keeper src/cross-cluster/market-state.ts: VERSION 19 mode 674, resolved_slot 675). The
  * wrapper config sits at account offset 16: `permissionless_resolve_stale_slots` +136, `force_close_delay_slots` +144,
  * `last_good_oracle_slot` +152 (wrapper v16_program.rs `WrapperConfigV16`; same as lib/v22/sdk/slab.ts parseWrapperConfigV17).
+ * The stale test is lib/v22/stale-resolve.ts `staleResolveStatusV22`, the one the Settle button uses.
  *
  * Pure: no RPC, no React. Unknown VERSION / magic / short bytes decode to null: nothing is claimed about them.
  */
 import { ACCOUNT_KIND, LAYOUTS_BY_VERSION, WRAPPER_ACCOUNT_MAGIC, readWrapperHeader } from "./sdk/layout";
+import { staleResolveStatusV22 } from "./stale-resolve";
 
 export type MarketLifecycleState = "live" | "stale" | "settling" | "settled" | "retired";
 
 export const LIFECYCLE_STATES: readonly MarketLifecycleState[] = ["live", "stale", "settling", "settled", "retired"];
 
-/** Bytes to read per market (`dataSlice` 0..N): covers the wrapper config and the end of the group header of every known VERSION. */
-export const LIFECYCLE_SLICE_LEN = 1280;
+/**
+ * Bytes to read per market (`dataSlice` 0..N): the whole market-group header of the longest known layout, which is what
+ * `staleResolveStatusV22` needs and covers the wrapper config and the `mode` / `resolved_slot` bytes. Derived from the layout table.
+ */
+export const LIFECYCLE_SLICE_LEN: number = Math.max(...[...LAYOUTS_BY_VERSION.values()].map((l) => Math.max(l.marketGroupOff + l.marketGroupLen, l.marketGroupOff + l.group.mode + 9)));
 
 /** `permissionless_resolve_stale_slots` etc. live in the wrapper config, which starts at account offset 16. */
 const CONFIG_OFF = 16;
@@ -41,14 +47,6 @@ const MODE_RESOLVED = 1;
 /** Seconds per slot used for time copy (400 ms), the same figure lib/v22/stale-resolve.ts uses. */
 export const LIFECYCLE_SLOT_SECONDS = 0.4;
 
-/**
- * A resolved market whose vault holds at most this many atoms is "retired": the Earn vault's 1,000-share dead floor
- * (`LP_VAULT_MINIMUM_LIQUIDITY`) keeps about 1,000 atoms in a v2.2 vault forever (FC-B5, about 0.001 USDC at genesis), so a
- * vault of exactly zero would never happen. 50,000 atoms is 0.05 of a 6-decimal token: well above the floor, below anything a
- * person would call a claim.
- */
-export const RETIRED_VAULT_DUST_ATOMS = 50_000n;
-
 export interface MarketLifecycleFields {
   /** Account kind byte: 1 market, 8 CloseSlab tombstone. */
   kind: number;
@@ -56,14 +54,9 @@ export interface MarketLifecycleFields {
   mode: number | null;
   resolvedSlot: bigint;
   materializedPortfolios: bigint;
-  vault: bigint;
   staleSlots: bigint;
   forceCloseDelaySlots: bigint;
   lastGoodOracleSlot: bigint;
-}
-
-function u128(v: DataView, off: number): bigint {
-  return v.getBigUint64(off, true) | (v.getBigUint64(off + 8, true) << 64n);
 }
 
 /**
@@ -76,7 +69,7 @@ export function decodeMarketLifecycleFields(data: Uint8Array | null | undefined)
     const { magic, version, kind } = readWrapperHeader(data, "decodeMarketLifecycleFields");
     if (magic !== WRAPPER_ACCOUNT_MAGIC) return null;
     if (kind === ACCOUNT_KIND.ClosedMarket) {
-      return { kind, mode: null, resolvedSlot: 0n, materializedPortfolios: 0n, vault: 0n, staleSlots: 0n, forceCloseDelaySlots: 0n, lastGoodOracleSlot: 0n };
+      return { kind, mode: null, resolvedSlot: 0n, materializedPortfolios: 0n, staleSlots: 0n, forceCloseDelaySlots: 0n, lastGoodOracleSlot: 0n };
     }
     if (kind !== ACCOUNT_KIND.Market) return null;
     const layout = LAYOUTS_BY_VERSION.get(version);
@@ -90,7 +83,6 @@ export function decodeMarketLifecycleFields(data: Uint8Array | null | undefined)
       mode: data[g + layout.group.mode] as number,
       resolvedSlot: dv.getBigUint64(g + layout.group.mode + 1, true),
       materializedPortfolios: dv.getBigUint64(g + layout.group.materializedPortfolioCount, true),
-      vault: u128(dv, g + layout.group.vault),
       staleSlots: dv.getBigUint64(CONFIG_OFF + CFG_STALE_SLOTS, true),
       forceCloseDelaySlots: dv.getBigUint64(CONFIG_OFF + CFG_FORCE_CLOSE_DELAY, true),
       lastGoodOracleSlot: dv.getBigUint64(CONFIG_OFF + CFG_LAST_GOOD_ORACLE_SLOT, true),
@@ -113,28 +105,25 @@ export interface MarketLifecycle {
 }
 
 /**
- * The state of one market. `fields` null (unread / unknown layout) falls back to the blocklist alone: blocklisted = retired,
- * anything else = live (nothing is claimed that was not read).
+ * The state of one market from its bytes (a {@link LIFECYCLE_SLICE_LEN} prefix is enough). Unread / unknown layout falls back to the
+ * blocklist alone: blocklisted = retired, anything else = live (nothing is claimed that was not read).
  */
-export function deriveMarketLifecycle(args: { fields: MarketLifecycleFields | null; clusterSlot: bigint | null; blocklisted: boolean }): MarketLifecycle {
-  const { fields, clusterSlot, blocklisted } = args;
+export function deriveMarketLifecycle(args: { data: Uint8Array | null | undefined; clusterSlot: bigint | null; blocklisted: boolean }): MarketLifecycle {
+  const { data, clusterSlot, blocklisted } = args;
   const base = { staleAgeSlots: 0n, lastGoodOracleSlot: 0n, ownerOnlyEndsAtSlot: null, blocklisted };
   if (blocklisted) return { ...base, state: "retired" };
+  const fields = decodeMarketLifecycleFields(data);
   if (!fields) return { ...base, state: "live" };
   if (fields.mode === null) return { ...base, state: "retired" }; // CloseSlab tombstone
   if (fields.mode === MODE_LIVE) {
-    if (clusterSlot !== null && fields.staleSlots !== 0n) {
-      const age = clusterSlot > fields.lastGoodOracleSlot ? clusterSlot - fields.lastGoodOracleSlot : 0n;
-      if (age >= fields.staleSlots) return { ...base, state: "stale", staleAgeSlots: age, lastGoodOracleSlot: fields.lastGoodOracleSlot };
-    }
+    const st = staleResolveStatusV22(data, clusterSlot);
+    if (st !== null && st.canResolve) return { ...base, state: "stale", staleAgeSlots: st.ageSlots, lastGoodOracleSlot: st.lastGoodOracleSlot };
     return { ...base, state: "live" };
   }
   const ownerOnlyEndsAtSlot = fields.forceCloseDelaySlots === 0n ? null : fields.resolvedSlot + fields.forceCloseDelaySlots;
-  if (fields.mode === MODE_RESOLVED && fields.materializedPortfolios === 0n) {
-    return { ...base, ownerOnlyEndsAtSlot, state: fields.vault <= RETIRED_VAULT_DUST_ATOMS ? "retired" : "settled" };
-  }
   // Resolved with portfolios still open, or Recovery (its crank reaches Resolved): settlement is under way.
-  return { ...base, ownerOnlyEndsAtSlot, state: "settling" };
+  if (fields.mode !== MODE_RESOLVED || fields.materializedPortfolios > 0n) return { ...base, ownerOnlyEndsAtSlot, state: "settling" };
+  return { ...base, ownerOnlyEndsAtSlot, state: "settled" };
 }
 
 /** Retired markets are not offered in discovery unless the viewer asks for them; every other state is. */
@@ -179,12 +168,12 @@ export const LIFECYCLE_LABELS: Record<MarketLifecycleState, string> = {
 export const LIFECYCLE_HINTS: Record<MarketLifecycleState, string> = {
   live: "Trading normally.",
   stale: "The price has stopped. Anyone can settle this market.",
-  settling: "This market has been settled. Open positions are being closed out and paid to their owners.",
-  settled: "This market is settled and closed to trading. Open it to claim what is yours.",
-  retired: "Nothing is left to settle here. Hidden from the list by default; your funds, if any, stay reachable from Portfolio.",
+  settling: "This market has stopped trading and is being wound down. Open positions are being closed out and paid to their owners.",
+  settled: "This market is settled and closed to trading. Open it to see what you can claim; stakers withdraw on the Stake page, Earn depositors on Earn.",
+  retired: "This market has been retired. Hidden from the list by default; it stays reachable by its link, and your funds, if any, are still yours: traders from Portfolio, stakers on the Stake page, Earn depositors on Earn.",
 };
 
-/** The stale line shown with the Settle button. */
+/** The stale line shown with the Settle button (the time is an estimate from the age in slots). */
 export function staleLine(stoppedAtLabel: string, hasFunds: boolean): string {
-  return `Price stopped at ${stoppedAtLabel}. Anyone can settle this market.${hasFunds ? " Settle it to get your funds back." : ""}`;
+  return `Price stopped at about ${stoppedAtLabel}. Anyone can settle this market.${hasFunds ? " Settle it to get your funds back." : ""}`;
 }

@@ -9,7 +9,6 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   LIFECYCLE_SLICE_LEN,
-  RETIRED_VAULT_DUST_ATOMS,
   decodeMarketLifecycleFields,
   deriveMarketLifecycle,
   formatStoppedAt,
@@ -17,7 +16,6 @@ import {
   parseLifecycleFilter,
   staleLine,
   stoppedAtMs,
-  type MarketLifecycleFields,
 } from "@/lib/v22/market-lifecycle";
 
 const GROUP = 592;
@@ -30,7 +28,7 @@ const CFG = 16;
 const fixture = (): Uint8Array =>
   new Uint8Array(Buffer.from((JSON.parse(readFileSync(path.join(__dirname, "../../fixtures/v22-growth/chillhouse-t.market.json"), "utf8")) as { data: string }).data, "base64"));
 
-function patched(o: { mode?: number; resolvedSlot?: bigint; materialized?: bigint; vault?: bigint; stale?: bigint; delay?: bigint; lastGood?: bigint }): Uint8Array {
+function patched(o: { mode?: number; resolvedSlot?: bigint; materialized?: bigint; vault?: bigint; stale?: bigint; delay?: bigint; lastGood?: bigint; current?: bigint }): Uint8Array {
   const d = fixture();
   const v = new DataView(d.buffer, d.byteOffset, d.byteLength);
   if (o.mode !== undefined) d[MODE] = o.mode;
@@ -42,6 +40,7 @@ function patched(o: { mode?: number; resolvedSlot?: bigint; materialized?: bigin
   }
   if (o.stale !== undefined) v.setBigUint64(CFG + 136, o.stale, true);
   if (o.delay !== undefined) v.setBigUint64(CFG + 144, o.delay, true);
+  if (o.current !== undefined) v.setBigUint64(GROUP + 661, o.current, true);
   if (o.lastGood !== undefined) v.setBigUint64(CFG + 152, o.lastGood, true);
   return d;
 }
@@ -50,7 +49,7 @@ const fields = (d: Uint8Array): MarketLifecycleFields => {
   if (!f) throw new Error("fixture did not decode");
   return f;
 };
-const derive = (f: MarketLifecycleFields | null, clusterSlot: bigint | null = 600_000_000n, blocklisted = false) => deriveMarketLifecycle({ fields: f, clusterSlot, blocklisted });
+const derive = (d: Uint8Array | null, clusterSlot: bigint | null = 600_000_000n, blocklisted = false) => deriveMarketLifecycle({ data: d, clusterSlot, blocklisted });
 
 describe("decode (real CHILLHOUSE-T bytes)", () => {
   it("reads a Live v2.2 market: mode 0, wizard windows 18,000 / 216,000, no resolved slot", () => {
@@ -62,8 +61,10 @@ describe("decode (real CHILLHOUSE-T bytes)", () => {
     expect(f.lastGoodOracleSlot).toBeGreaterThan(511_000_000n);
     expect(f.resolvedSlot).toBe(0n);
   });
-  it("a 1,280-byte dataSlice is enough (what the list reads)", () => {
+  it("the dataSlice length is derived from the layouts: it is the whole group header (1,398 for VERSION 19) and decodes", () => {
+    expect(LIFECYCLE_SLICE_LEN).toBe(592 + 806);
     expect(fields(fixture().slice(0, LIFECYCLE_SLICE_LEN)).mode).toBe(0);
+    expect(derive(fixture().slice(0, LIFECYCLE_SLICE_LEN), fields(fixture()).lastGoodOracleSlot + 20_000n).state).toBe("stale");
     expect(decodeMarketLifecycleFields(fixture().slice(0, 1270))).toBeNull();
   });
   it("reads the Resolved fields at the keeper's offsets", () => {
@@ -71,7 +72,6 @@ describe("decode (real CHILLHOUSE-T bytes)", () => {
     expect(f.mode).toBe(1);
     expect(f.resolvedSlot).toBe(512_200_000n);
     expect(f.materializedPortfolios).toBe(3n);
-    expect(f.vault).toBe((1n << 70n) + 5n);
   });
   it("is null for foreign bytes, an unknown VERSION and a short buffer; a tombstone decodes as kind 8", () => {
     expect(decodeMarketLifecycleFields(null)).toBeNull();
@@ -88,46 +88,50 @@ describe("decode (real CHILLHOUSE-T bytes)", () => {
 describe("state derivation", () => {
   const lastGood = fields(fixture()).lastGoodOracleSlot;
   it("live: price fresh", () => {
-    expect(derive(fields(fixture()), lastGood + 100n).state).toBe("live");
+    expect(derive(fixture(), lastGood + 100n).state).toBe("live");
   });
   it("stale: exactly on the window; one slot short is still live", () => {
-    expect(derive(fields(fixture()), lastGood + 18_000n).state).toBe("stale");
-    expect(derive(fields(fixture()), lastGood + 17_999n).state).toBe("live");
-    const s = derive(fields(fixture()), lastGood + 20_000n);
+    expect(derive(fixture(), lastGood + 18_000n).state).toBe("stale");
+    expect(derive(fixture(), lastGood + 17_999n).state).toBe("live");
+    const s = derive(fixture(), lastGood + 20_000n);
     expect(s.staleAgeSlots).toBe(20_000n);
     expect(s.lastGoodOracleSlot).toBe(lastGood);
   });
   it("a market with the stale window off never goes stale; no cluster slot claims nothing", () => {
-    expect(derive(fields(patched({ stale: 0n })), lastGood + 99_999_999n).state).toBe("live");
-    expect(derive(fields(fixture()), null).state).toBe("live");
+    expect(derive(patched({ stale: 0n }), lastGood + 99_999_999n).state).toBe("live");
+    expect(derive(fixture(), null).state).toBe("live");
   });
   it("settling: Resolved with portfolios still open, owner-only window = resolved_slot + force_close_delay", () => {
-    const s = derive(fields(patched({ mode: 1, resolvedSlot: 512_200_000n, materialized: 2n, vault: 9_000_000n })));
+    const s = derive(patched({ mode: 1, resolvedSlot: 512_200_000n, materialized: 2n, vault: 9_000_000n }));
     expect(s.state).toBe("settling");
     expect(s.ownerOnlyEndsAtSlot).toBe(512_200_000n + 216_000n);
   });
   it("settling: Recovery mode (its crank reaches Resolved)", () => {
-    expect(derive(fields(patched({ mode: 2, materialized: 1n }))).state).toBe("settling");
+    expect(derive(patched({ mode: 2, materialized: 1n })).state).toBe("settling");
   });
-  it("settled (claims open): Resolved, no portfolio, more than dust in the vault", () => {
-    expect(derive(fields(patched({ mode: 1, materialized: 0n, vault: RETIRED_VAULT_DUST_ATOMS + 1n }))).state).toBe("settled");
+  it("settled: Resolved with no portfolio is NEVER retired from the market bytes, whatever the vault holds (stake pool money lives elsewhere)", () => {
+    for (const vault of [0n, 1_005n, 4_000_000n, 1n << 70n]) expect(derive(patched({ mode: 1, materialized: 0n, vault })).state).toBe("settled");
   });
-  it("retired: Resolved, no portfolio, vault at dust (the Earn floor never reaches zero)", () => {
-    expect(derive(fields(patched({ mode: 1, materialized: 0n, vault: RETIRED_VAULT_DUST_ATOMS }))).state).toBe("retired");
-    expect(derive(fields(patched({ mode: 1, materialized: 0n, vault: 1_005n }))).state).toBe("retired");
+  it("Recovery with no portfolio is settling, never settled or retired (cannot be hidden)", () => {
+    expect(derive(patched({ mode: 2, materialized: 0n })).state).toBe("settling");
+  });
+  it("stale uses the Settle button's own test: a cluster behind the engine clock is not stale (tag 39 would refuse 19)", () => {
+    const d = patched({ current: 700_000_000n });
+    expect(derive(d, 600_000_000n).state).toBe("live");
+    expect(derive(patched({ current: 1n }), 600_000_000n).state).toBe("stale");
   });
   it("retired: a CloseSlab tombstone, and the blocklist (even over a Live read)", () => {
     const tomb = fixture().slice(0, 64);
     tomb[10] = 8;
-    expect(derive(fields(tomb)).state).toBe("retired");
-    expect(derive(fields(fixture()), lastGood, true).state).toBe("retired");
+    expect(derive(tomb).state).toBe("retired");
+    expect(derive(fixture(), lastGood, true).state).toBe("retired");
     expect(derive(null, null, true).state).toBe("retired");
   });
   it("unread / unknown layout: live, nothing claimed", () => {
     expect(derive(null, 1n).state).toBe("live");
   });
   it("a zero force_close_delay has no owner-only window", () => {
-    expect(derive(fields(patched({ mode: 1, materialized: 1n, delay: 0n }))).ownerOnlyEndsAtSlot).toBeNull();
+    expect(derive(patched({ mode: 1, materialized: 1n, delay: 0n })).ownerOnlyEndsAtSlot).toBeNull();
   });
 });
 
@@ -148,8 +152,8 @@ describe("filter", () => {
 
 describe("copy", () => {
   it("stale line is the plan's wording; funds add the way out", () => {
-    expect(staleLine("14:05", false)).toBe("Price stopped at 14:05. Anyone can settle this market.");
-    expect(staleLine("14:05", true)).toBe("Price stopped at 14:05. Anyone can settle this market. Settle it to get your funds back.");
+    expect(staleLine("14:05", false)).toBe("Price stopped at about 14:05. Anyone can settle this market.");
+    expect(staleLine("14:05", true)).toBe("Price stopped at about 14:05. Anyone can settle this market. Settle it to get your funds back.");
   });
   it("stoppedAt is now minus the age at 400 ms a slot; another day carries the date", () => {
     const now = Date.UTC(2026, 9, 25, 12, 0, 0);

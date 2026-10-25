@@ -414,7 +414,7 @@ function MarketsPageInner() {
   // back up. Keyed on a sorted string so a re-sort or a poll with the same markets never refetches.
   // Lifecycle (live / stale / settling / settled / retired) read from the market accounts; unread = live (or retired when blocklisted).
   const lifecycleSlabs = useMemo(() => activeMarkets.map((m) => m.slabAddress), [activeMarkets]);
-  const lifecycles = useMarketLifecycles(lifecycleSlabs);
+  const { lifecycles, ready: lifecycleReady } = useMarketLifecycles(lifecycleSlabs);
   const lifecycleOf = (slab: string): MarketLifecycleState => lifecycles.get(slab)?.state ?? "live";
   // The markets the current lifecycle filter lists (retired ones only when asked for). Counts and the list both start here.
   const shownMarkets = useMemo(
@@ -669,7 +669,8 @@ function MarketsPageInner() {
   }, [debouncedSearch, sortBy]);
 
   const displayedMarkets = filtered.slice(0, displayCount);
-  const loading = discoveryLoading || statsLoading;
+  // The first lifecycle read is part of loading: until it lands a retired market would flash in the list and ?state=stale would read as empty.
+  const loading = discoveryLoading || statsLoading || !lifecycleReady;
   const showDegradedBanner = Boolean(loadErrorMessage && !loading && filtered.length > 0);
 
   const clearSearch = () => {
@@ -816,6 +817,7 @@ function MarketsPageInner() {
             </div>
 
             {/* Lifecycle filter: the default list leaves retired markets out; they are one click away. */}
+            {isDevnetV22Enabled() && (
             <div className="flex gap-1 rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5 shrink-0" role="group" aria-label="Market state" data-testid="lifecycle-filter">
               {(["all", ...LIFECYCLE_STATES] as const).map((f) => (
                 <button
@@ -834,6 +836,7 @@ function MarketsPageInner() {
                 </button>
               ))}
             </div>
+            )}
 
             {/* Results count — desktop only, in filter row */}
             <span className="hidden md:inline-block ml-auto text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text)] shrink-0 whitespace-nowrap tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
