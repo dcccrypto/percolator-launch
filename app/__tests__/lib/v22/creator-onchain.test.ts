@@ -125,34 +125,52 @@ function txWith(tags: number[], opts: { err?: unknown } = {}) {
 }
 const sig = (signature: string, slot: number, err: unknown = null) => ({ signature, slot, err, memo: null, blockTime: null });
 
-describe("readNeverPushed (launch gaps 37 / 60 / 516 are no obstacle)", () => {
+describe("readNeverPushed: only a tag that can advance last_good_oracle_slot as a PRICE counts (tags from v16_program.rs aca02ba6)", () => {
   const C = 1_000_000;
+  const never = (tags: number[], mode = 0, at = C) =>
+    readNeverPushed({ getTransaction: vi.fn(async () => txWith(tags)) } as never, PROGRAM, SLAB, BigInt(at), [sig("t", at)], mode);
   for (const gap of [37, 60, 516]) {
-    it(`gap ${gap}: createAccount+InitMarket at C, ConfigureAuthMark (62) at C+${gap} = last good -> never pushed`, async () => {
-      const getTransaction = vi.fn(async (s: string) => (s === "cfg" ? txWith([62]) : txWith([0])));
-      const r = await readNeverPushed({ getTransaction } as never, PROGRAM, SLAB, BigInt(C + gap), [sig("init", C), sig("cfg", C + gap)]);
+    it(`gap ${gap}: ConfigureAuthMark (62) at C+${gap} is the last good write -> never pushed, and only that tx is read`, async () => {
+      const getTransaction = vi.fn(async (sg: string) => (sg === "cfg" ? txWith([62]) : txWith([0])));
+      const r = await readNeverPushed({ getTransaction } as never, PROGRAM, SLAB, BigInt(C + gap), [sig("init", C), sig("cfg", C + gap)], 0);
       expect(r).toBe(true);
-      expect(getTransaction).toHaveBeenCalledTimes(1); // only the tx at last_good_oracle_slot
+      expect(getTransaction).toHaveBeenCalledTimes(1);
     });
   }
-  it("a PushAuthMark (63) at last good: a price was pushed", async () => {
-    const getTransaction = vi.fn(async () => txWith([63]));
-    expect(await readNeverPushed({ getTransaction } as never, PROGRAM, SLAB, BigInt(C + 60), [sig("p", C + 60)])).toBe(false);
+  it("the keeper co-sign tx [62, 65] (ConfigureAuthMark + UpdateAssetAuthority): never pushed", async () => {
+    expect(await never([62, 65])).toBe(true);
   });
-  it("PushEwmaMark (36) too; and a batched launch+first push in ONE tx counts as pushed", async () => {
-    expect(await readNeverPushed({ getTransaction: async () => txWith([36]) } as never, PROGRAM, SLAB, BigInt(C), [sig("p", C)])).toBe(false);
-    expect(await readNeverPushed({ getTransaction: async () => txWith([0, 62, 63]) } as never, PROGRAM, SLAB, BigInt(C), [sig("p", C)])).toBe(false);
+  it("InitMarket sharing a tx with SetNftProgramId [0, 73]: never pushed", async () => {
+    expect(await never([0, 73])).toBe(true);
   });
-  it("an unknown tag at last good is treated as a price (conservative)", async () => {
-    expect(await readNeverPushed({ getTransaction: async () => txWith([99]) } as never, PROGRAM, SLAB, BigInt(C), [sig("x", C)])).toBe(false);
+  it("a single-tx launch tag set (InitMarket, SetNftProgramId, more setup, ConfigureAuthMark): never pushed", async () => {
+    expect(await never([0, 73, 74, 9, 62, 65])).toBe(true);
   });
-  it("unreadable: no tx at that slot, a null/failed transaction, or no wrapper instruction -> null", async () => {
-    expect(await readNeverPushed({ getTransaction: vi.fn() } as never, PROGRAM, SLAB, BigInt(C), [sig("a", C + 1)])).toBeNull();
-    expect(await readNeverPushed({ getTransaction: async () => null } as never, PROGRAM, SLAB, BigInt(C), [sig("a", C)])).toBeNull();
-    expect(await readNeverPushed({ getTransaction: async () => txWith([]) } as never, PROGRAM, SLAB, BigInt(C), [sig("a", C)])).toBeNull();
+  it("PushAuthMark (63) and PushEwmaMark (36): a price, alone or inside a batched launch tx", async () => {
+    expect(await never([63])).toBe(false);
+    expect(await never([36])).toBe(false);
+    expect(await never([0, 62, 65, 63])).toBe(false);
+  });
+  it("the crank family is a price only on a non-manual oracle market", async () => {
+    for (const t of [5, 77, 104, 106, 119]) {
+      expect(await never([62, t], 0)).toBe(true); // manual: cannot write the slot
+      expect(await never([62, t], 1)).toBe(false); // hybrid / pyth: can
+    }
+  });
+  it("RestartAssetOracle (69) and UpdateAssetLifecycle (40) write the slot without a price", async () => {
+    expect(await never([69])).toBe(true);
+    expect(await never([40])).toBe(true);
+  });
+  it("nothing in the tx explains the write (e.g. only [65, 73]): inconclusive, not 'pushed' and not 'never'", async () => {
+    expect(await never([65, 73])).toBeNull();
+  });
+  it("unreadable: no tx at that slot, a null transaction, or no wrapper instruction -> null", async () => {
+    expect(await readNeverPushed({ getTransaction: vi.fn() } as never, PROGRAM, SLAB, BigInt(C), [sig("a", C + 1)], 0)).toBeNull();
+    expect(await readNeverPushed({ getTransaction: async () => null } as never, PROGRAM, SLAB, BigInt(C), [sig("a", C)], 0)).toBeNull();
+    expect(await never([])).toBeNull();
   });
   it("a failed transaction at that slot is ignored", async () => {
-    expect(await readNeverPushed({ getTransaction: vi.fn() } as never, PROGRAM, SLAB, BigInt(C), [sig("a", C, { InstructionError: [0, "x"] })])).toBeNull();
+    expect(await readNeverPushed({ getTransaction: vi.fn() } as never, PROGRAM, SLAB, BigInt(C), [sig("a", C, { InstructionError: [0, "x"] })], 0)).toBeNull();
   });
 });
 

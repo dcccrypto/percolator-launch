@@ -7,7 +7,7 @@
  *     which can land tens to hundreds of slots after creation), and advanced by every accepted price push (tags 63 PushAuthMark,
  *     36 PushEwmaMark; `max(cfg.last_good_oracle_slot, authenticated_slot)`, asset 0; percolator-prog aca02ba6
  *     `src/v16_program.rs`). So the decisive read is the transaction AT `last_good_oracle_slot`: launch-time config means no price
- *     was ever pushed (lib/v22/creator-onchain.ts `readNeverPushed`). Only when that cannot be read does the creation-slot
+ *     was ever pushed (lib/v22/creator-onchain.ts `readNeverPushed`, rule in `classifyLastGoodTags`). Only when that cannot be read does the creation-slot
  *     fallback apply, with a wide slack and a staleness requirement.
  *  2. The registration refusal (#3676: a final refusal such as oracle-not-keeper). It corroborates; it never overrides a
  *     chain read that shows a price was pushed. Alone (history unreadable) it also needs the price to be stale today.
@@ -35,10 +35,35 @@ export const NEVER_CONNECTED_FALLBACK_SLACK_SLOTS = 1_000n;
 /** A market younger than this (about 10 minutes) is not called never-connected: its first push may simply not have landed yet. */
 export const LAUNCH_WAIT_SLOTS = 1_500n;
 
-/** Wrapper tags that set `last_good_oracle_slot` at LAUNCH time and carry no price: InitMarket 0, ConfigureHybridOracle 34, ConfigureEwmaMark 35, ConfigureAuthMark 62. */
-export const LAUNCH_TIME_TAGS: readonly number[] = [0, 34, 35, 62];
-/** Tags that deliver a price: PushEwmaMark 36, PushAuthMark / PushAuthMarkDepth 63. Any tag outside both lists counts as a price too (conservative). */
+/**
+ * Every write of `last_good_oracle_slot` in percolator-prog aca02ba6 `src/v16_program.rs`, mapped to the instruction tag(s) that
+ * reach it (derived by walking the call graph from each dispatch arm, not by guesswork):
+ *
+ *  - NOT a price (sets the slot while configuring, restarting or freezing): InitMarket 0 (all variants, `last_good_oracle_slot:
+ *    slot`), ConfigureHybridOracle 34, ConfigureEwmaMark 35, ConfigureAuthMark 62 (`max(cfg, authenticated_slot)`),
+ *    RestartAssetOracle 69 (mirror_manual_profile_to_base_config), UpdateAssetLifecycle 40 (shutdown to Recovery).
+ *  - A price: PushEwmaMark 36 and PushAuthMark / PushAuthMarkDepth 63 (`profile.last_good_oracle_slot = authenticated_slot`).
+ *  - A price only on a market whose oracle mode is not MANUAL (0): the crank family reads the external feed and advances the slot
+ *    when it moved (`hybrid_effective_price_for_crank_view`, `if advanced`): PermissionlessCrank 5, ExecuteRedemption 77,
+ *    AdlWindDown 104, SettleHoldingRent 106, EvictAndTradeCpi 119. A MANUAL market returns before the feed read, so these never
+ *    write the slot there.
+ * Any OTHER tag in the same transaction (UpdateAssetAuthority 65, SetNftProgramId 73, ...) does not write the slot, so it neither
+ * proves nor disproves a push: the keeper co-sign tx is [62, 65], a single-tx launch is [0, 73, ...].
+ */
+export const LAUNCH_WRITER_TAGS: readonly number[] = [0, 34, 35, 62, 69, 40];
 export const PUSH_TAGS: readonly number[] = [36, 63];
+export const CRANK_TAGS: readonly number[] = [5, 77, 104, 106, 119];
+export const ORACLE_MODE_MANUAL = 0;
+
+/**
+ * From the wrapper tags in the transaction(s) at `last_good_oracle_slot`: false = a price was delivered, true = the slot was written
+ * by launch-time config only (no price ever pushed), null = nothing in the transaction explains the write (inconclusive).
+ */
+export function classifyLastGoodTags(tags: readonly number[], oracleMode: number): boolean | null {
+  if (tags.some((t) => PUSH_TAGS.includes(t))) return false;
+  if (oracleMode !== ORACLE_MODE_MANUAL && tags.some((t) => CRANK_TAGS.includes(t))) return false;
+  return tags.some((t) => LAUNCH_WRITER_TAGS.includes(t)) ? true : null;
+}
 
 export type NeverConnectedEvidence = "chain" | "chain+registration" | "registration";
 

@@ -25,7 +25,8 @@ import bs58 from "bs58";
 import { decodePortfolioMatcherControl } from "@percolatorct/sdk";
 import { ACCOUNT_KIND, LAYOUT_V22 } from "./sdk/layout";
 import { activeLayout, portfolioGpaFilters } from "./layout";
-import { LAUNCH_TIME_TAGS, LAUNCH_WAIT_SLOTS, PUSH_TAGS } from "./never-connected";
+import { LAUNCH_WAIT_SLOTS, classifyLastGoodTags } from "./never-connected";
+import { parseWrapperConfigV17 } from "./sdk/slab";
 import { staleResolveStatusV22 } from "./stale-resolve";
 
 const PF_MARKET_OFF = 16;
@@ -145,8 +146,8 @@ async function tagsAt(connection: Pick<Connection, "getTransaction">, programId:
 }
 
 /**
- * Was a price ever pushed? Reads the transaction(s) at `lastGood`: only launch-time tags (0 / 34 / 35 / 62) and no push tag
- * (36 / 63) means no. Any other tag, or a push tag, means a price was delivered (conservative). Unreadable gives null.
+ * Was a price ever pushed? Reads the transaction(s) at `lastGood` and applies `classifyLastGoodTags` (which tags can advance the
+ * slot, derived from the program source). Unreadable or unexplained gives null.
  */
 export async function readNeverPushed(
   connection: Pick<Connection, "getTransaction">,
@@ -154,6 +155,7 @@ export async function readNeverPushed(
   slab: PublicKey,
   lastGood: bigint,
   sigs: readonly SigInfo[],
+  oracleMode: number,
 ): Promise<boolean | null> {
   const at = sigs.filter((s) => s.err === null && BigInt(s.slot) === lastGood);
   if (at.length === 0) return null;
@@ -164,15 +166,14 @@ export async function readNeverPushed(
     all.push(...t);
   }
   if (all.length === 0) return null;
-  if (all.some((t) => PUSH_TAGS.includes(t))) return false;
-  return all.every((t) => LAUNCH_TIME_TAGS.includes(t));
+  return classifyLastGoodTags(all, oracleMode);
 }
 
 /**
  * History facts for a slab. An RPC failure is unknown and NOT cached (the next scan retries); a full signature page is an old busy
  * market (certainly not freshly created): creation unknown, cached.
  */
-export async function readSlabHistory(connection: Pick<Connection, "getSignaturesForAddress" | "getTransaction">, programId: PublicKey, slab: PublicKey, lastGood: bigint): Promise<SlabHistory> {
+export async function readSlabHistory(connection: Pick<Connection, "getSignaturesForAddress" | "getTransaction">, programId: PublicKey, slab: PublicKey, lastGood: bigint, oracleMode = 0): Promise<SlabHistory> {
   const key = `${slab.toBase58()}:${lastGood}`;
   const hit = historyCache.get(key);
   if (hit) return hit;
@@ -184,7 +185,7 @@ export async function readSlabHistory(connection: Pick<Connection, "getSignature
     } else {
       const ok = sigs.filter((s) => s.err === null);
       const creationSlot = ok.length > 0 ? BigInt(ok.reduce((m, s) => (s.slot < m ? s.slot : m), ok[0].slot)) : null;
-      result = { creationSlot, neverPushed: await readNeverPushed(connection, programId, slab, lastGood, ok) };
+      result = { creationSlot, neverPushed: await readNeverPushed(connection, programId, slab, lastGood, ok, oracleMode) };
     }
     historyCache.set(key, result);
     return result;
@@ -196,6 +197,15 @@ export async function readSlabHistory(connection: Pick<Connection, "getSignature
 export interface CreatorCandidate extends CreatorSlab, SlabHistory {
   /** `last_good_oracle_slot` from the bytes just read. */
   lastGoodOracleSlot: bigint;
+}
+
+/** `oracle_mode` (config +193); an unreadable market is treated as non-manual (the conservative side: a crank tag then counts as a price). */
+function oracleModeOf(raw: Uint8Array): number {
+  try {
+    return parseWrapperConfigV17(raw).oracleMode;
+  } catch {
+    return 1;
+  }
 }
 
 async function mapBounded<T, R>(items: readonly T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
@@ -228,7 +238,7 @@ export async function lookupCreatorMarkets(connection: Conn, programId: PublicKe
   const toRead = [...silent.filter(cached), ...silent.filter((r) => !cached(r)).slice(0, MAX_HISTORY_LOOKUPS)];
   const histories = new Map<string, SlabHistory>();
   await mapBounded(toRead, MAX_PARALLEL, async (r) => {
-    histories.set(r.slab.toBase58(), await readSlabHistory(connection, programId, r.slab, r.lastGoodOracleSlot));
+    histories.set(r.slab.toBase58(), await readSlabHistory(connection, programId, r.slab, r.lastGoodOracleSlot, oracleModeOf(r.raw)));
   });
   return rows.map((r) => ({ ...r, ...(histories.get(r.slab.toBase58()) ?? { creationSlot: null, neverPushed: null }) }));
 }

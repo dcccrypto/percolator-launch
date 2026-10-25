@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import {
   NEVER_CONNECTED_COPY,
   LAUNCH_WAIT_SLOTS,
+  classifyLastGoodTags,
   NEVER_CONNECTED_FALLBACK_SLACK_SLOTS,
   UNKNOWN_FEATURES,
   marketFeatures,
@@ -59,6 +60,23 @@ describe("offsets the classifier relies on", () => {
     expect(s.staleSlots).toBe(18_000n);
     expect(LAST_GOOD_OFF).toBe(168);
     expect(STALE_OFF).toBe(152);
+  });
+});
+
+describe("classifyLastGoodTags (rule derived from every write of last_good_oracle_slot)", () => {
+  it("launch-time tag sets, alone or with unrelated tags, are never-pushed; pushes are not", () => {
+    expect(classifyLastGoodTags([62, 65], 0)).toBe(true);
+    expect(classifyLastGoodTags([0, 73], 0)).toBe(true);
+    expect(classifyLastGoodTags([0, 73, 74, 62, 65], 0)).toBe(true);
+    expect(classifyLastGoodTags([63], 0)).toBe(false);
+    expect(classifyLastGoodTags([62, 63], 0)).toBe(false);
+    expect(classifyLastGoodTags([36], 0)).toBe(false);
+  });
+  it("an explanation-free tx is inconclusive; the crank family depends on the oracle mode", () => {
+    expect(classifyLastGoodTags([65, 73], 0)).toBeNull();
+    expect(classifyLastGoodTags([5], 0)).toBeNull();
+    expect(classifyLastGoodTags([62, 5], 0)).toBe(true);
+    expect(classifyLastGoodTags([62, 5], 2)).toBe(false);
   });
 });
 
@@ -133,6 +151,12 @@ describe("neverConnectedView", () => {
     // a refused flag with a CURRENT price (pushed an hour ago relative to the window) does not list it
     const live = market({ stale: 18_000n, lastGood: CREATED + 50_000n });
     expect(neverConnectedView({ raw: live, clusterSlot: CREATED + 50_100n, creationSlot: null, registrationRefused: true })).toBeNull();
+  });
+  it("an inconclusive read does not drop a recorded refusal: it falls through to the refusal-plus-staleness rule", () => {
+    const m = market({ stale: 18_000n, lastGood: CREATED });
+    const v = neverConnectedView({ raw: m, clusterSlot: CREATED + 9_000n, creationSlot: CREATED, neverPushed: null, registrationRefused: true });
+    expect(v?.evidence).toBe("chain+registration"); // creation slot known, fallback rule + refusal
+    expect(neverConnectedView({ raw: m, clusterSlot: CREATED + 9_000n, creationSlot: null, neverPushed: null, registrationRefused: true })?.evidence).toBe("registration");
   });
   it("unknown evidence claims nothing", () => {
     const m = market({ stale: 18_000n, lastGood: CREATED });
