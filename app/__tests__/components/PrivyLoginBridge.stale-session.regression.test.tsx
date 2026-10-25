@@ -65,6 +65,10 @@ import { PrivyBridgeHost } from "@/components/providers/PrivyBridgeHost";
 import { usePrivyLogin } from "@/hooks/usePrivySafe";
 import { WalletApiContext, type WalletApi } from "@/hooks/walletApiContext";
 import { PreferredWalletContext } from "@/hooks/usePreferredWallet";
+import { useAsyncUtilTimeout } from "../helpers/async-budget";
+
+// Scoped waitFor budget for this suite only (see helpers/async-budget.ts).
+useAsyncUtilTimeout();
 
 /** Stand-in for OrderTicket's / Faucet's Privy-mode Connect CTA — the exact
  *  wiring they use: `onClick={() => usePrivyLogin()()}` shown when

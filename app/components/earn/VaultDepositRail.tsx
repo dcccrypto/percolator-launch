@@ -295,11 +295,15 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
         depositBlockedReason={depositBlockedReason}
         depositBlockKind={depositBlock}
         onWithdraw={handleWithdraw}
+        // v2.2: the same quote-first exit and pending claim as /earn/<slab>. Gated on the flag only: an absent exitV22
+        // under the flag falls back to the legacy one-step exit.
+        exitV22={isDevnetV22Enabled() ? { market: new PublicKey(slab), programId: slabProgramId ?? null, collateralMint: config?.collateralMint ?? null, sourceDomain: state.lpVaultDomain } : undefined}
         p3Bound={marketLimits.vaultLp?.bound === true}
         lpDepleted={marketHealth?.lpDepleted === true}
         drawSummary={lastDrawSummary}
         pricing={earnPricing}
         onRefresh={refreshState}
+        onExitSent={onTxSuccess}
         onResizeRedemption={async (shares) => {
           await resizeRedemption(shares);
           await refreshState();

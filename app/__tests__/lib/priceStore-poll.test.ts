@@ -34,6 +34,7 @@ import {
   getSnapshot,
   applyOnChainPoll,
   seedFromDbIfEmpty,
+  setInvertFlag,
 } from "@/lib/priceStore/priceStore";
 import { seedLotExp0 } from "../helpers/v22-fixtures";
 
@@ -95,5 +96,14 @@ describe("applyOnChainPoll", () => {
     applyOnChainPoll(slab, 43_000_000n);
     expect(getSnapshot(slab).priceE6).toBe(43_000_000n); // poll allowed now
     unsub();
+  });
+
+  it("a chain write owns the price: a DB seed's invert correction never brings the old DB price back", () => {
+    const slab = "poll-slab-db-then-chain";
+    seedFromDbIfEmpty(slab, 1.5, undefined);
+    expect(getSnapshot(slab).priceE6).toBe(1_500_000n);
+    applyOnChainPoll(slab, 2_000_000n);
+    setInvertFlag(slab, 0); // the first market config: invert undefined -> 0 counts as a change
+    expect(getSnapshot(slab).priceE6).toBe(2_000_000n);
   });
 });

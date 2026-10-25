@@ -245,7 +245,7 @@ describe("resume helpers", () => {
 });
 void IX_TAG;
 
-import fs from "fs";
+import { readSource } from "../helpers/source-scan";
 import path from "path";
 import { applyRecoveredLaunch, canResumeLaunch, chainResumeRefusal, CHAIN_RESUME_MISMATCH_COPY, unboundResumeValues, type RecoveredLaunch } from "@/lib/launch-recovery";
 
@@ -293,7 +293,7 @@ describe("a chain-recovered resume pins the launch's parameters", () => {
     expect(applyRecoveredLaunch(live, null)).toBe(live);
   });
   it("the wizard routes every create() call through it", () => {
-    const src = fs.readFileSync(path.resolve(__dirname, "../../components/create/CreateMarketWizard.tsx"), "utf8");
+    const src = readSource(path.resolve(__dirname, "../../components/create/CreateMarketWizard.tsx"));
     expect(src).toContain("create(applySameBrowserPin(applyRecoveredLaunch(params, gate.resume), activeSameBrowserPin), resumeFromStep ?? undefined);");
     expect(src).toContain("create(applySameBrowserPin(applyRecoveredLaunch(params, gate.resume), activeSameBrowserPin), createState.step);");
     expect(src).toContain("restoreSlabAddress(resumeSlabParam);");

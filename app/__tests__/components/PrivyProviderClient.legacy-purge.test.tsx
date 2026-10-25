@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
 import { render, waitFor } from "@testing-library/react";
+import { useAsyncUtilTimeout } from "../helpers/async-budget";
+
+// Scoped waitFor budget for this suite only (see helpers/async-budget.ts).
+useAsyncUtilTimeout();
 
 // Records what localStorage looked like the moment PrivyProvider first renders
 // (the SDK's earliest possible storage read).

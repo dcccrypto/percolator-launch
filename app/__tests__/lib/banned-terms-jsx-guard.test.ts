@@ -10,12 +10,16 @@
  * chrome (components/dev, app/dev-preview), API routes, and code comments.
  */
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { readSource, toPosixPath } from "../helpers/source-scan";
 import ts from "typescript";
 import { BANNED } from "./banned-terms-harvest";
 
 const ROOT = process.cwd();
+// Tested against toPosixPath(f): path.join emits a backslash separator on Windows, where a
+// "/"-spelled skip stops matching, the operator-only admin pages and the API routes get
+// swept after all, and the guard reports 8 hits in files §5.1 does not cover.
 const SKIP = [/\/admin\//, /\/dev\//, /dev-preview/, /\/api\//, /__tests__/];
 
 function tsx(dir: string, out: string[] = []): string[] {
@@ -86,15 +90,15 @@ function hits(src: string): string[] {
 }
 
 describe("§5.1 banned terms in rendered JSX (AC6 source sweep)", () => {
-  const files = [...tsx(join(ROOT, "app")), ...tsx(join(ROOT, "components"))].filter((f) => !SKIP.some((re) => re.test(f)));
+  const files = [...tsx(join(ROOT, "app")), ...tsx(join(ROOT, "components"))].filter((f) => !SKIP.some((re) => re.test(toPosixPath(f))));
   it("covers the app (never a vacuous pass)", () => {
-    const n = files.reduce((a, f) => a + visibleStrings(readFileSync(f, "utf8")).length, 0);
+    const n = files.reduce((a, f) => a + visibleStrings(readSource(f)).length, 0);
     expect(files.length).toBeGreaterThan(200);
     expect(n).toBeGreaterThan(1_000); // 1,305 visible strings in 230 files at 2026-09-30
   });
   it("no banned term in any user-visible JSX text or attribute", () => {
     const all: string[] = [];
-    for (const f of files) for (const h of hits(readFileSync(f, "utf8"))) all.push(`${relative(ROOT, f)}:${h}`);
+    for (const f of files) for (const h of hits(readSource(f))) all.push(`${toPosixPath(relative(ROOT, f))}:${h}`);
     expect(all).toEqual([]);
   });
   it("NEGATIVE CONTROL: the sweep finds text nodes and attributes, and ignores comments", () => {

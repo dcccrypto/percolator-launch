@@ -39,6 +39,10 @@ vi.mock("@privy-io/react-auth/solana", () => ({
 
 import { PrivyBridgeHost } from "@/components/providers/PrivyBridgeHost";
 import { PrivyProvider } from "@privy-io/react-auth";
+import { useAsyncUtilTimeout } from "../helpers/async-budget";
+
+// Scoped waitFor budget for this suite only (see helpers/async-budget.ts).
+useAsyncUtilTimeout();
 
 /** A /stake-like page: several sibling fields, each with a useId label/input pair. */
 function Field({ name }: { name: string }) {

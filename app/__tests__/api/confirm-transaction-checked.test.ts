@@ -22,6 +22,7 @@
 import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
+import { readSource, toPosixPath } from "../helpers/source-scan";
 
 const API_DIR = path.resolve(__dirname, "../../app/api");
 // Client hooks too: the Position NFT mint and transfer hooks sent with skipPreflight and
@@ -38,7 +39,10 @@ function routeFiles(dir: string): string[] {
   return out;
 }
 
-/** Strip line comments so prose mentioning confirmTransaction() isn't counted. */
+/** Reads through readSource(), so this per-line `//…$` match is not defeated by a CRLF
+ *  working tree: `.` never matches a CR, and `$` without the `m` flag does not assert before
+ *  one, so the whole match fails and the comment survives. See helpers/source-scan.ts.
+ *  Strip line comments so prose mentioning confirmTransaction() isn't counted. */
 function stripComments(src: string): string {
   return src
     .split("\n")
@@ -99,11 +103,11 @@ function isChecked(code: string, callIdx: number): boolean {
 function callSites(dir = API_DIR, files = routeFiles(API_DIR)): Site[] {
   const sites: Site[] = [];
   for (const file of files) {
-    const code = stripComments(fs.readFileSync(file, "utf8"));
+    const code = stripComments(readSource(file));
     for (const m of code.matchAll(/\.confirmTransaction\(/g)) {
       const idx = m.index ?? 0;
       sites.push({
-        file: path.relative(dir, file),
+        file: toPosixPath(path.relative(dir, file)),
         line: code.slice(0, idx).split("\n").length,
         checked: isChecked(code, idx),
       });
@@ -149,7 +153,7 @@ describe("GH#2517: no API route discards a confirmTransaction result", () => {
       "playground/faucet/route.ts",
     ];
     for (const rel of named) {
-      const src = fs.readFileSync(path.join(API_DIR, rel), "utf8");
+      const src = readSource(path.join(API_DIR, rel));
       expect(src, rel).toContain(
         'from "@/lib/transaction-confirmation"',
       );

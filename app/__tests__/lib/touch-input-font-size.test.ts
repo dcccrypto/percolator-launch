@@ -8,9 +8,10 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "fs";
 import { join } from "path";
+import { readSource } from "../helpers/source-scan";
 
 const root = process.cwd();
-const css = readFileSync(join(root, "app/globals.css"), "utf8");
+const css = readSource(join(root, "app/globals.css"));
 const at = css.indexOf("@media (pointer: coarse) {\n  input:not(");
 const block = css.slice(at, css.indexOf("\n}\n", at) + 3);
 const body = block.slice(block.indexOf("{") + 1, block.lastIndexOf("}"));

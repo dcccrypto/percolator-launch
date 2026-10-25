@@ -7,6 +7,7 @@
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { readSource, toPosixPath } from "../../helpers/source-scan";
 import { P3_ERROR_COPY_BY_NAME } from "@/lib/limits/copy";
 import { P3_ERR } from "@/lib/limits/constants";
 
@@ -26,10 +27,10 @@ describe("no NoCpi trades anywhere in the app", () => {
     const hits: string[] = [];
     for (const root of ["hooks", "lib", "components", "app"]) {
       for (const f of files(join(process.cwd(), root))) {
-        readFileSync(f, "utf8").split("\n").forEach((line, i) => {
+        readSource(f).split("\n").forEach((line, i) => {
           const code = line.replace(/\/\/.*$/, "").trim();
           if (code.startsWith("*") || code.startsWith("/*")) return;
-          if (NOCPI.test(code)) hits.push(`${f}:${i + 1}: ${line.trim()}`);
+          if (NOCPI.test(code)) hits.push(`${toPosixPath(f)}:${i + 1}: ${line.trim()}`);
         });
       }
     }

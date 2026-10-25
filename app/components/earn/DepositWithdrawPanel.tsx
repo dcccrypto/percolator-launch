@@ -137,11 +137,24 @@ interface DepositWithdrawPanelProps {
    * existing one-step withdraw button is rendered, untouched.
    */
   exitV22?: Pick<EarnExitParams, 'market' | 'programId' | 'collateralMint' | 'sourceDomain'>;
+  /** A v2.2 exit landed: the caller's own stats (hub table / market stats). Balances re-read through onRefresh. */
+  onExitSent?: () => void;
+}
+
+/** A v2.2 exit landed (phase 'sent', after confirmation): call `onSent` once per landed signature, as the legacy path's awaited refresh did. */
+function useOnSent(state: { phase: string; signature: string | null }, onSent?: () => void) {
+  const cb = useRef(onSent);
+  cb.current = onSent;
+  const sent = state.phase === 'sent' ? state.signature : null;
+  useEffect(() => {
+    if (sent) cb.current?.();
+  }, [sent]);
 }
 
 /** v2.2 quote-first exit (own component so the v2.1 render path has no extra hook). */
-function ExitV22Step({ ex, shares, estimate, flow, decimals, symbol, valid }: { ex: NonNullable<DepositWithdrawPanelProps['exitV22']>; shares: bigint; estimate: bigint; flow: 'one-tx' | 'two-step'; decimals: number; symbol: string; valid: boolean }) {
+function ExitV22Step({ ex, shares, estimate, flow, decimals, symbol, valid, onSent }: { ex: NonNullable<DepositWithdrawPanelProps['exitV22']>; shares: bigint; estimate: bigint; flow: 'one-tx' | 'two-step'; decimals: number; symbol: string; valid: boolean; onSent?: () => void }) {
   const exit = useEarnExitV22({ ...ex, shares, mode: flow === 'one-tx' ? 'pair' : 'request', estimateAtoms: estimate });
+  useOnSent(exit.state, onSent);
   return <EarnExitQuote exit={exit} decimals={decimals} symbol={symbol} canQuote={valid && shares > 0n} />;
 }
 
@@ -149,8 +162,9 @@ function ExitV22Step({ ex, shares, estimate, flow, decimals, symbol, valid }: { 
  * v2.2: collecting a pending redemption is tag 77 too, so it needs the same floor, the inline refresh and the quote
  * shown first (the legacy one-step claim sends a bare 77 that a v2.2 vault answers with 118 on a book that is not loss-current).
  */
-function PendingClaimV22({ ex, shares, decimals, symbol, onRerequest }: { ex: NonNullable<DepositWithdrawPanelProps['exitV22']>; shares: bigint; decimals: number; symbol: string; onRerequest?: (shares: bigint) => Promise<void> }) {
+function PendingClaimV22({ ex, shares, decimals, symbol, onRerequest, onSent }: { ex: NonNullable<DepositWithdrawPanelProps['exitV22']>; shares: bigint; decimals: number; symbol: string; onRerequest?: (shares: bigint) => Promise<void>; onSent?: () => void }) {
   const exit = useEarnExitV22({ ...ex, shares, mode: 'execute', estimateAtoms: 0n });
+  useOnSent(exit.state, onSent);
   const [rerequesting, setRerequesting] = useState(false);
   const [rerequestError, setRerequestError] = useState<string | null>(null);
   // #3615: a request whose stored floor is above today's payout is refused (117) on every collect, and this card
@@ -223,6 +237,7 @@ export function DepositWithdrawPanel({
   onRefresh,
   onResizeRedemption,
   exitV22,
+  onExitSent,
 }: DepositWithdrawPanelProps) {
   const { connected } = useWalletCompat();
   const { connection } = useConnectionCompat();
@@ -459,6 +474,21 @@ export function DepositWithdrawPanel({
     }
   }, [resizeOffer, onResizeRedemption, claimSubmitting, p3Bound]);
 
+  // v2.2 exit landed: re-read the vault and refresh the caller's stats, as the legacy path's awaited refresh did. A collect
+  // keeps the legacy "Sent ≈ X to your wallet." line (its card goes once the re-read shows no pending request) and leaves
+  // the form alone; a withdraw clears the form.
+  const handleExitSent = (collect: boolean) => {
+    if (collect) setClaimSuccess(`Sent${pendingAtoms !== null ? ` ≈ ${formatUsdc(pendingAtoms, decimals)} ${collateralSymbol}` : ''} to your wallet.`);
+    else setAmount('');
+    for (const refresh of [onRefresh, onExitSent]) {
+      try {
+        void Promise.resolve(refresh?.()).catch(() => {});
+      } catch {
+        /* a refresh failure must not mask the outcome */
+      }
+    }
+  };
+
   // Validation
   const isValid = useMemo(() => {
     if (loading || !vaultAvailable) return false;
@@ -543,7 +573,7 @@ export function DepositWithdrawPanel({
       {/* UX WP-4: the pending withdrawal card (both tabs). A full request escrows every share, so
           this is also what keeps the payout reachable (S1). It counts as an active position. */}
       {hasPendingRedemption && isDevnetV22Enabled() && exitV22 && cooldownElapsed ? (
-        <PendingClaimV22 ex={exitV22} shares={pendingRedemptionShares} decimals={decimals} symbol={collateralSymbol} onRerequest={onResizeRedemption} />
+        <PendingClaimV22 ex={exitV22} shares={pendingRedemptionShares} decimals={decimals} symbol={collateralSymbol} onRerequest={onResizeRedemption} onSent={() => handleExitSent(true)} />
       ) : hasPendingRedemption && (
         <EarnPendingWithdrawal
           amountLabel={pendingAtoms !== null ? `${formatUsdc(pendingAtoms, decimals)} ${collateralSymbol}` : `${formatRaw(pendingRedemptionShares, shareDecimals)} shares`}
@@ -768,7 +798,7 @@ export function DepositWithdrawPanel({
           </p>
         )}
         {tab === 'withdraw' && isDevnetV22Enabled() && exitV22 ? (
-          <ExitV22Step ex={exitV22} shares={withdrawShares} estimate={previewCollateral} flow={flow} decimals={decimals} symbol={collateralSymbol} valid={isValid} />
+          <ExitV22Step ex={exitV22} shares={withdrawShares} estimate={previewCollateral} flow={flow} decimals={decimals} symbol={collateralSymbol} valid={isValid} onSent={() => handleExitSent(false)} />
         ) : (
         <div className="flex gap-2">
           <GlowButton

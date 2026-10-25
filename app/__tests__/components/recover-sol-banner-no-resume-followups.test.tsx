@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { readFileSync, readdirSync, statSync } from "fs";
 import path from "path";
+import { toPosixPath } from "../helpers/source-scan";
 import { Keypair } from "@solana/web3.js";
 import { RecoverSolBanner } from "@/components/create/RecoverSolBanner";
 import { WIZARD_STORAGE_KEY } from "@/lib/wizard-storage";
@@ -85,7 +86,7 @@ describe("START NEW MARKET link clears the wizard's own storage key", () => {
         const full = path.join(dir, name);
         if (statSync(full).isDirectory()) walk(full);
         else if (/\.(ts|tsx)$/.test(name) && readFileSync(full, "utf8").includes('"percolator-wizard-state"')) {
-          hits.push(path.relative(root, full));
+          hits.push(toPosixPath(path.relative(root, full)));
         }
       }
     };

@@ -32,6 +32,10 @@ vi.mock("@privy-io/react-auth/solana", () => ({
 
 import { PrivyBridgeHost } from "@/components/providers/PrivyBridgeHost";
 import { usePrivySessionHeaders, type PrivySessionHeaders } from "@/hooks/usePrivySafe";
+import { useAsyncUtilTimeout } from "../helpers/async-budget";
+
+// Scoped waitFor budget for this suite only (see helpers/async-budget.ts).
+useAsyncUtilTimeout();
 
 function Probe({ out }: { out: { get?: PrivySessionHeaders | null } }) {
   const get = usePrivySessionHeaders();

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import { readSource } from "../helpers/source-scan";
 
 // #2513 — every read against the indexer DB must be scoped to the deployment's
 // network. The `trades` and `funding_history` tables both carry a `network`
@@ -12,10 +13,7 @@ import path from "node:path";
 // catches that. A value test over the existing queries would pass forever while
 // query #13 silently leaks.
 describe("#2513 indexer-db reads are network-scoped", () => {
-  const src = fs.readFileSync(
-    path.join(__dirname, "../../lib/indexer-db.ts"),
-    "utf8",
-  );
+  const src = readSource(path.join(__dirname, "../../lib/indexer-db.ts"));
   const lines = src.split("\n");
 
   it("every FROM trades / funding_history is followed by a network predicate", () => {

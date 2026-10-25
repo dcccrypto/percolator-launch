@@ -102,6 +102,10 @@ import { WalletApiContext, type WalletApi } from "@/hooks/walletApiContext";
 import { PreferredWalletContext } from "@/hooks/usePreferredWallet";
 import { EmbeddedBatchSignError } from "@/lib/privy-batch-sign";
 import { detectWalletError, humanizeError, userFacingMessage } from "@/lib/errorMessages";
+import { useAsyncUtilTimeout } from "../helpers/async-budget";
+
+// Scoped waitFor budget for this suite only (see helpers/async-budget.ts).
+useAsyncUtilTimeout();
 
 /** Reads the WalletApi injected by PrivyProviderClient's inner bridge and
  *  reports it back to the test via a plain callback (no state needed —

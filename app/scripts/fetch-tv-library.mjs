@@ -147,6 +147,26 @@ export function installRuntime(srcLibDir, destDir, lock) {
   );
 }
 
+/**
+ * `tar` the same way on every OS.
+ *
+ * GNU tar (what Git for Windows ships, and what is on PATH there) parses an archive name
+ * containing a colon as `host:path` and dies with "Cannot connect to C: resolve failed" on
+ * any absolute Windows path given to -f; it also mangles the backslashes in a -C argument
+ * ("C\\:\\Users...: Cannot open"). So -f is always a BARE NAME resolved against `cwd`, and
+ * every directory argument is spelled with forward slashes, which GNU tar and macOS bsdtar
+ * both accept. On Linux and macOS this is byte-identical to passing the paths directly.
+ */
+const slashes = (p) => p.split(path.sep).join("/");
+function tar(mode, args, { archive, cwd }) {
+  // `-<mode>zf NAME` first, then the rest: bsdtar (macOS) reads an option after a member name as a
+  // member, so `-f` must not trail a create's member list; this is the original argv shape.
+  execFileSync("tar", [`-${mode}zf`, path.basename(archive), ...args], {
+    cwd: cwd ?? path.dirname(archive),
+    stdio: "ignore",
+  });
+}
+
 /** Find the single top-level folder a GitHub tarball extracts to. */
 function archiveRoot(extractDir) {
   const dirs = readdirSync(extractDir).filter((n) => statSync(path.join(extractDir, n)).isDirectory());
@@ -235,7 +255,7 @@ export async function main(env = process.env, deps = {}) {
           throw new DigestMismatch(`blob tarball sha256 mismatch: expected ${lock.blob.tarballSha256}, got ${got}. Refusing to install.`);
         }
         writeFileSync(tarball, buf);
-        execFileSync("tar", ["-xzf", tarball, "-C", extract], { stdio: "ignore" });
+        tar("x", ["-C", slashes(extract)], { archive: tarball });
         libDir = path.join(extract, "charting_library");
         if (!existsSync(libDir)) throw new Error("blob archive has no charting_library/ folder");
         const digest = treeDigest(libDir);
@@ -257,7 +277,7 @@ export async function main(env = process.env, deps = {}) {
       if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error("TV_LIBRARY_REPO must look like owner/name");
       log(`downloading ${repo}@${lock.commit.slice(0, 12)} (${lock.tag})…`);
       await (deps.download ?? download)(repo, lock.commit, ghToken, tarball);
-      execFileSync("tar", ["-xzf", tarball, "-C", extract], { stdio: "ignore" });
+      tar("x", ["-C", slashes(extract)], { archive: tarball });
       libDir = path.join(archiveRoot(extract), "charting_library");
       if (!existsSync(libDir)) throw new Error("archive has no charting_library/ folder");
       const digest = treeDigest(libDir);

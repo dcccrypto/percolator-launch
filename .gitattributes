@@ -1,0 +1,28 @@
+# Normalise line endings in the repository and in every working tree.
+#
+# Git for Windows ships `core.autocrlf=true` in its SYSTEM config, so a Windows clone of a
+# repo with no .gitattributes gets CRLF working-tree files. This suite reads shipped source
+# off disk and asserts on its text (the source-scanning guards in app/__tests__), and several
+# of those assertions are written against "\n" — on a CRLF checkout they change what the
+# guard concludes rather than merely failing, and the module transform also chokes on a
+# CRLF shebang in scripts/*.mjs. `eol=lf` makes every checkout agree with CI.
+#
+# app/__tests__/helpers/source-scan.ts normalises newlines a second time at read, so the
+# guards hold even in a working tree configured some other way.
+* text=auto eol=lf
+
+# Binary: never touched, never diffed as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.pdf binary
+*.tgz binary
+*.gz binary
+*.zip binary

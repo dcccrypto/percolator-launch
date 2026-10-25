@@ -95,6 +95,10 @@ import { PrivyBridgeHost } from "@/components/providers/PrivyBridgeHost";
 import { PrivyAvailableContext, usePrivyLogin, usePrivySessionHeaders } from "@/hooks/usePrivySafe";
 import { PRIVY_NOT_READY, usePrivyBridge, type PrivyBridgeValue } from "@/hooks/usePrivyBridge";
 import { WalletApiContext, type WalletApi } from "@/hooks/walletApiContext";
+import { useAsyncUtilTimeout } from "../helpers/async-budget";
+
+// Scoped waitFor budget for this suite only (see helpers/async-budget.ts).
+useAsyncUtilTimeout();
 
 const WALLET = { address: "11111111111111111111111111111111", standardWallet: { name: "Phantom" } };
 

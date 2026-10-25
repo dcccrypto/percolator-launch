@@ -13,17 +13,13 @@
  */
 
 import { describe, expect, it } from "vitest";
-import fs from "fs";
 import path from "path";
+import { readSource } from "../helpers/source-scan";
 
-const WIZARD = fs.readFileSync(
+const WIZARD = readSource(
   path.resolve(__dirname, "../../components/create/CreateMarketWizard.tsx"),
-  "utf8",
 );
-const HOOK = fs.readFileSync(
-  path.resolve(__dirname, "../../hooks/useCreateMarket.ts"),
-  "utf8",
-);
+const HOOK = readSource(path.resolve(__dirname, "../../hooks/useCreateMarket.ts"));
 
 /** Drop comments, so an assertion about CODE is not satisfied by prose. */
 function code(src: string): string {

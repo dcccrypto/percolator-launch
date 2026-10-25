@@ -11,7 +11,8 @@ import * as C from "@/lib/limits/constants";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
 import { __clearValuationCache, lpValueFromAccounts, simulateVaultLpValue, VALUATION_CACHE_MS } from "@/lib/limits/earn-valuation-sim";
 import { earnDepositPause } from "@/lib/limits/earn";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { toPosixPath } from "../../helpers/source-scan";
 import { join } from "node:path";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { afterLegsShift, blankPortfolio, v22MarketBytes } from "../../helpers/v22-fixtures";
@@ -110,9 +111,30 @@ describe("the deposit stays enabled on a stale valuation (85 self-repairs in the
 });
 
 describe("AC3: the resolved 'not available yet' string is gone", () => {
-  it("no source file carries it", async () => {
-    const { execSync } = await import("node:child_process");
-    const out = execSync(`grep -rlnE "settlement for resolved markets is not available yet|resolvedVault" app components lib hooks || true`, { cwd: process.cwd(), encoding: "utf8" });
-    expect(out.trim()).toBe("");
+  it("no source file carries it", () => {
+    // Pure node, no shell. This used to be execSync(`grep -rlnE ... || true`): on Windows (cmd.exe,
+    // no grep) the command failed and `|| true` turned that into empty stdout, so the guard passed
+    // whatever the tree contained -- and a missing grep on any minimal CI image did the same.
+    const FORBIDDEN = /settlement for resolved markets is not available yet|resolvedVault/;
+    const SOURCE_EXT = /\.(?:tsx?|jsx?|mjs|cjs|json|css|mdx?)$/;
+    const SKIP_DIRS = new Set(["node_modules", ".next"]);
+    let scanned = 0;
+    const hits: string[] = [];
+    const walk = (dir: string): void => {
+      for (const ent of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, ent.name);
+        if (ent.isDirectory()) {
+          if (!SKIP_DIRS.has(ent.name)) walk(full);
+        } else if (SOURCE_EXT.test(ent.name)) {
+          scanned++;
+          if (FORBIDDEN.test(readFileSync(full, "utf8"))) hits.push(toPosixPath(full));
+        }
+      }
+    };
+    for (const d of ["app", "components", "lib", "hooks"]) walk(join(process.cwd(), d));
+    // The old shape could not tell "nothing found" from "nothing searched"; so assert the scan
+    // really covered the tree (about 1000 source files at f13b73b3e).
+    expect(scanned).toBeGreaterThan(500);
+    expect(hits).toEqual([]);
   });
 });

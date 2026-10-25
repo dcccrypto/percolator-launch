@@ -136,6 +136,9 @@ export function useEarnExitV22(p: EarnExitParams) {
   const currentKey = exitQuoteKey({ market: p.market?.toBase58() ?? null, programId: p.programId?.toBase58() ?? null, collateralMint: p.collateralMint?.toBase58() ?? null, sourceDomain: p.sourceDomain, shares: p.shares, mode: p.mode, redeemer: wallet.publicKey?.toBase58() ?? null });
   const keyRef = useRef(currentKey);
   keyRef.current = currentKey;
+  // True from the moment `confirm` starts sending until its send loop ends (incl. 118 refresh retries, where the phase
+  // reads 'refreshing' / 'quoting' while the loop will still call the wallet again).
+  const sendInFlight = useRef(false);
 
   const build = useCallback(async (): Promise<{ input: ExitRunInput; deps: ExitRunDeps } | null> => {
     const payer = wallet.publicKey;
@@ -208,6 +211,7 @@ export function useEarnExitV22(p: EarnExitParams) {
   };
 
   const getQuote = useCallback(async () => {
+    if (sendInFlight.current) return;
     const id = ++runId.current;
     const keyAtStart = keyRef.current;
     newExit.current = true; // a new exit: scan once, then re-read only those accounts
@@ -230,6 +234,7 @@ export function useEarnExitV22(p: EarnExitParams) {
 
   const confirm = useCallback(async () => {
     const quote = state.quote;
+    if (sendInFlight.current) return;
     if (!quote || state.phase !== 'quoted') return;
     // F6: never sign a floor made for other inputs or an old moment.
     if (!quoteUsable(state.bound ?? null, keyRef.current, __clock.now())) {
@@ -239,6 +244,7 @@ export function useEarnExitV22(p: EarnExitParams) {
     }
     const keyAtStart = keyRef.current;
     const id = ++runId.current;
+    sendInFlight.current = true;
     setState((s) => ({ ...s, phase: 'sending' }));
     try {
       const b = await build();
@@ -252,6 +258,8 @@ export function useEarnExitV22(p: EarnExitParams) {
       else setState({ ...IDLE, phase: 'error', message: failMessage(r.error), floorStuck: isFloorStuck(r.error) });
     } catch (e) {
       if (id === runId.current) setState({ ...IDLE, phase: 'error', message: failMessage(e) });
+    } finally {
+      sendInFlight.current = false;
     }
   }, [state.quote, state.phase, build]);
 
@@ -265,6 +273,9 @@ export function useEarnExitV22(p: EarnExitParams) {
   useEffect(() => {
     if (prevKey.current === currentKey) return;
     prevKey.current = currentKey;
+    // A send already handed to the wallet is not undone by an edit: dropping it re-enables Get quote -> Withdraw while it
+    // may still land (a second send), and loses its result. The edited inputs hide any later quote through `view`.
+    if (sendInFlight.current) return;
     runId.current++;
     setState((s) => (s.phase === 'sent' ? s : IDLE));
   }, [currentKey]);
