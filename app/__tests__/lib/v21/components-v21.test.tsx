@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom";
-import { describe, expect, it, vi, afterEach } from "vitest";
+import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { GrowthTicketPanel } from "@/components/trade/GrowthTicketPanel";
 import { CloseOnlyBannerView } from "@/components/trade/CloseOnlyBanner";
@@ -67,6 +68,10 @@ describe("CloseOnlyBannerView", () => {
 });
 
 describe("GrowthLaunchControls", () => {
+  // The v2.1 wizard ($1 junior minimum); with the v2.2 flag on the minimum is $500 (product review 2026-10-28,
+  // covered in growth-launch.test.ts), so pin the flag this block describes.
+  beforeEach(() => __setDevnetV22ForTest(false));
+  afterEach(() => __setDevnetV22ForTest(null));
   const props = { engineImrBps: 1000, maintenanceMarginBps: 500, maxPriceMoveBpsPerSlot: 4, baseFeeBps: 30, juniorAtoms: 5_000_000n, collateralDecimals: 6, collateralSymbol: "USDC" };
   const mount = (value: GrowthLaunchState, onChange = vi.fn()) => ({ onChange, ...render(<GrowthLaunchControls {...props} value={value} onChange={onChange} />) });
   it("off: only the toggle and the one-line promise", () => {

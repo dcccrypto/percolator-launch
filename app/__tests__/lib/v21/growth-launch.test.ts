@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect } from "vitest";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { encodeInitMarket } from "@percolatorct/sdk";
@@ -14,6 +14,10 @@ import { buildM1Instructions } from "@/lib/create-market-m1";
 
 const derived = deriveLaunchMarketParams({ initialMarginBps: 1000, lpCollateral: 0n, initialPriceE6: 1_000_000n }); // 10x
 const params = { p3: {}, initialPriceE6: 1_000_000n, tradingFeeBps: 30 };
+// These cases describe the v2.1 wizard ($1 junior minimum); v2.2's $500 has its own case below (product review 2026-10-28).
+beforeEach(() => __setDevnetV22ForTest(false));
+afterEach(() => __setDevnetV22ForTest(null));
+
 const base = (over: Partial<GrowthLaunchInput> = {}): GrowthLaunchInput => ({
   engineImrBps: derived.initialMarginBps,
   maintenanceMarginBps: derived.maintenanceMarginBps,

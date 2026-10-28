@@ -27,6 +27,7 @@ vi.mock("@/components/market/MarketLogo", () => ({ MarketLogo: () => null }));
 vi.mock("@/components/wallet/ConnectWalletCta", () => ({ ConnectWalletCta: ({ label }: { label: string }) => <button>{label}</button> }));
 
 import StakePage from "@/app/stake/page";
+import { stakeCoverageCopy } from "@/lib/stake-copy";
 
 beforeEach(() => {
   h.fetch.mockReset();
@@ -83,7 +84,8 @@ describe("Stake info rows", () => {
     await waitFor(() => expect(panel("how")).toBeTruthy());
     fireEvent.click(row(/How it works/));
     expect(panel("how").hidden).toBe(false);
-    fireEvent.click(row(/If the pool admin moves stake into insurance/));
+    // Product review 2026-10-28: the panel title is build-dependent (v2.2: no admin flush), so read it from the copy module.
+    fireEvent.click(row(new RegExp(stakeCoverageCopy().title)));
     expect(panel("backs").hidden).toBe(false);
     expect(panel("how").hidden).toBe(true);
     expect(row(/How it works/).getAttribute("aria-expanded")).toBe("false");
