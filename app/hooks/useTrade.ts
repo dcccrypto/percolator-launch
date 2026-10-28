@@ -47,6 +47,7 @@ import { measurePositionChange, readBeforeTrade, recordPositionChange } from "@/
 import { tradeFeeBpsToSign } from "@/lib/limits/fee-channel";
 import { fetchTradeFeeBps, sendWithUtilFeeRetry } from "@/lib/limits/trade-fee-resolve";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { levGuardExists } from "@/lib/v22/lev-guard";
 import { marketAssetSlots } from "@/lib/v22/trade-refresh";
 import { planTradeRefresh, sendMultiAssetOrder, sendWithRefreshRetry } from "@/lib/v22/trade-refresh-wire";
 import { MAX_TX_COMPUTE_UNITS } from "@/lib/compute-budget";
@@ -561,7 +562,11 @@ export function useTrade(slabAddress: string) {
 
         // v18: TradeCpi/BatchTradeCpi bind both portfolios' identity + accountB's matcher
         // sequence + the asset marketId (lib/trade-ix.ts; shared with the first-trade flow).
+        // v2.2 leverage guard (tag 124): when the market has its guard account every TradeCpi carries it as the last account
+        // (the program strips it). Opening trades on a guarded market fail Custom(132) without it. One cached getAccountInfo.
+        const levGuard = isDevnetV22Enabled() && isV17Market ? await levGuardExists(connection, programId, slabPk) : false;
         const tradeIxParams = {
+          levGuard,
           programId,
           signer: wallet.publicKey,
           market: slabPk,

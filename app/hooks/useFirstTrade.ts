@@ -47,6 +47,7 @@ import { readU64LE } from "@/lib/u64le";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { fetchTradeFeeBps, sendWithUtilFeeRetry } from "@/lib/limits/trade-fee-resolve";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { levGuardExists } from "@/lib/v22/lev-guard";
 import { marketAssetSlots } from "@/lib/v22/trade-refresh";
 import { planTradeRefresh, sendMultiAssetOrder, sendWithRefreshRetry } from "@/lib/v22/trade-refresh-wire";
 import type { MultiAssetSendKind } from "@/lib/v22/trade-refresh";
@@ -189,9 +190,11 @@ export function useFirstTrade(slabAddress: string) {
           market,
           catchUp: { portfolio: lp.accountB, oracleTail: crankOracleTail(pythCrankAccount(mktConfig, wrapperConfigV17?.oracleMode)) },
         };
+        // v2.2 leverage guard (tag 124): appended to the TradeCpi when the market has its guard account (else the open fails 132).
+        const levGuard = isDevnetV22Enabled() ? await levGuardExists(connection, programId, market) : false;
         const ixp = (portfolio: PublicKey): FirstTradeIxParams => ({
           programId, owner, market, portfolio, userAta, vaultTokenAta, depositAtoms: p.depositAtoms,
-          lp, lpId, marketId, size: p.size, limitPriceE6: p.limitPriceE6, feeBps, marketTradeFeeBps: wrapperConfigV17?.tradeFeeBps,
+          lp, lpId, marketId, size: p.size, limitPriceE6: p.limitPriceE6, feeBps, marketTradeFeeBps: wrapperConfigV17?.tradeFeeBps, levGuard,
         });
         // A confirmed TradeCpi is not proof the requested size filled: the matcher clips an
         // order to the LP's inventory room and the trade still returns Ok (a $100 order into a

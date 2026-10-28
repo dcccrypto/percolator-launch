@@ -11,6 +11,7 @@
 import type { MessageContext, StatusVariant, UserMessage } from "@/lib/limits/user-message";
 import { STAKE_ERRORS_V5 } from "./sdk";
 import { STAKE_ERR_DEPOSIT_BELOW_MIN_LIQUIDITY, STAKE_ERR_V5, WRAPPER_ERR_V22 } from "./wrapper-errors";
+import { LEV_GUARD_COPY, LEV_GUARD_REFUSED_TITLE, levGuardRefusedCopy, parseLevGuardRefusal } from "./lev-guard-copy";
 import { catchUpAvailableLine } from "@/lib/limits/catchup-estimate";
 import { V22_COPY, V22_DEPTH_INPUT_COPY, V22_DEPTH_SOURCE_COPY, V22_TIER_CONFIG_COPY } from "./copy";
 import { V22_COUNTERPARTY_CAP_COPY, V22_CUSTOM9_OFF_TICKET, V22_SIDE_FULL_COPY, positionCapCopy } from "./trade-refusal-9-copy";
@@ -25,7 +26,7 @@ export const STAKE_ERR_NO_REAL_HOLDERS = 29;
 
 type Build = (kind: string, variant: StatusVariant, title: string, body: string, extra?: Partial<UserMessage>) => UserMessage;
 
-export function v22WrapperMessage(code: number, ctx: MessageContext & { minPositionLabel?: string }, m: Build): UserMessage | null {
+export function v22WrapperMessage(code: number, ctx: MessageContext & { minPositionLabel?: string; levGuardLogs?: readonly string[] }, m: Build): UserMessage | null {
   const V = WRAPPER_ERR_V22;
   // A bare 9 off the trade ticket. ON the ticket it stays unmapped on purpose: the ticket then reads chain state to name the cause.
   if (code === WRAPPER_ERR.InvalidInstruction && ctx.surface !== "trade") {
@@ -91,6 +92,21 @@ export function v22WrapperMessage(code: number, ctx: MessageContext & { minPosit
       return m("depth-source", "info", "Try again", V22_DEPTH_SOURCE_COPY);
     case V.GrowthTierConfigInvalid:
       return m("tier-config", "error", "Check the leverage tiers", V22_TIER_CONFIG_COPY);
+    // Leverage guard (tag 124). 133 names its cause from the `lev_guard_refused <why>` log line when the error carries logs.
+    case V.CreatorStakeBelowMinimum:
+      return m("lev-guard-creator-stake", "error", "Creator stake too low", LEV_GUARD_COPY.creatorStake);
+    case V.LevGuardRequired:
+      return m("lev-guard-required", "error", "Page out of date", LEV_GUARD_COPY.required, { action: { id: "refresh", label: "Refresh" } });
+    case V.LevGuardRefused: {
+      const reason = parseLevGuardRefusal(ctx.levGuardLogs);
+      // A young token and an LP round are waits, not mistakes; the others ask the trader to change the order.
+      const variant = reason === "age_under_6h" || reason === "lp_stop_round" ? "wait" : reason === null ? "paused" : "error";
+      return m(`lev-guard-${reason ?? "refused"}`, variant, LEV_GUARD_REFUSED_TITLE[reason ?? "unknown"], levGuardRefusedCopy(reason));
+    }
+    case V.LevGuardInvalid:
+      return m("lev-guard-invalid", "error", "Page out of date", LEV_GUARD_COPY.invalid, { action: { id: "refresh", label: "Refresh" } });
+    case V.LpStopNotTriggered:
+      return m("lp-stop-not-triggered", "info", "Nothing to do", LEV_GUARD_COPY.lpStopNotTriggered);
     // Plain lines for three wrapper codes that used to fall to "Something went wrong" (28, 29) or the engine-speak of the
     // pre-v2.2 table (93).
     case WRAPPER_ERR.OracleConfTooWide:

@@ -291,6 +291,32 @@ describe("v2.2 launch", () => {
     expect(findIx(d, PROGRAM, IX_TAG_V22.InitBondTranche)).toHaveLength(0);
   });
 
+  it("leverage guard: flag ON + growth: the ONE launch tx carries tag 124 op 0 (t0 = 0) right after the junior deposit, before the stake InitPool; the real keeper route accepts it", async () => {
+    __setDevnetV22ForTest(true);
+    const { outcome } = await launch({ singleTx: true, params: params({ growth: GROWTH, v22: { lotExp: 3, rent: { ...DEFAULT_RENT }, band: bandDefaultsV22(6) } }) });
+    expect(outcome).toEqual({ status: "success" });
+    expect(sent).toHaveLength(1);
+    const d = decodeV1Message(splitV1Wire(sent[0]!).message);
+    const kinds = kindsOf(d);
+    const g = findIx(d, PROGRAM, 124);
+    expect(g).toHaveLength(1);
+    const ix = d.instructions[g[0]!]!;
+    expect(Array.from(ix.data)).toEqual([124, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(kinds[g[0]! - 1]).toBe(`w${IX_TAG_P3.DepositJuniorTranche}`);
+    expect(g[0]!).toBeLessThan(findIx(d, STAKE, STAKE_IX.InitPool)[0]!);
+    expect(g[0]!).toBeGreaterThan(findIx(d, PROGRAM, IX_TAG_P3.InitVaultLp)[0]!);
+  });
+
+  it("leverage guard NEGATIVE CONTROLS: flag OFF, or no growth block, sends no tag 124", async () => {
+    __setDevnetV22ForTest(false);
+    await launch({ singleTx: true, params: params({ growth: GROWTH }) });
+    expect(findIx(decodeV1Message(splitV1Wire(sent[0]!).message), PROGRAM, 124)).toHaveLength(0);
+    sent = [];
+    __setDevnetV22ForTest(true);
+    await launch({ singleTx: true, params: params({}) });
+    expect(sent.length === 0 || findIx(decodeV1Message(splitV1Wire(sent[0]!).message), PROGRAM, 124).length === 0).toBe(true);
+  });
+
   it("NEGATIVE CONTROL: flag OFF drops the v2.2 params; InitMarket is the plain growth form (4-byte trailer)", async () => {
     __setDevnetV22ForTest(false);
     await launch({ singleTx: true, params: params({ growth: GROWTH, v22: { lotExp: 3, rent: { ...DEFAULT_RENT }, band: bandDefaultsV22(6) } }) });

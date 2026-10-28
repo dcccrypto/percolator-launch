@@ -127,6 +127,8 @@ import { validateGrowthLaunch, type GrowthLaunch } from "@/lib/v21/growth-launch
 import { staleResolveLaunchIxs, staleWindowRepair, buildConfigurePermissionlessResolveIxV22, buildLaunchBondIx, bondBundleTooLargeMessage, bondNeedsSingleTxMessage, bondResumeMessage, encodeInitMarketDataWithV22, placeBondTranche } from "@/lib/v22/launch-wire";
 import type { V22LaunchParams } from "@/lib/v22/launch-plan";
 import { V21_COPY } from "@/lib/v21/copy";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { LEV_GUARD_INIT_FAILED, levGuardPda, planLevGuardLaunch } from "@/lib/v22/lev-guard";
 import { buildP3BindIxs, canonicalVaultLpMatcher, p3BindProgress, validateP3Wizard } from "@/lib/limits/p3-wizard";
 import { COPY as LIMITS_COPY } from "@/lib/limits/copy";
 import { buildDepositJuniorTrancheIx, deriveVaultLpState } from "@/lib/limits/p3-ix";
@@ -1390,6 +1392,8 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
               creatorAta: userAta,
               vaultToken: vaultAta,
               ...(params.growth ? { growth: { lLaunchX100: params.growth.lLaunchX100, ...(params.growth.tiers ? { tiers: params.growth.tiers, lTierX100: params.growth.lTierX100 } : {}) } } : {}),
+              // v2.2 leverage guard (tag 124 op 0, t0 = 0), signed by the creator right after the bind while still the market authority.
+              levGuard: isDevnetV22Enabled(),
             }),
             computeUnits: P3_BIND_COMPUTE_UNITS,
             signers: [vaultLpPortfolioKp, vaultLpCtxKp!],
@@ -4189,6 +4193,7 @@ export function useCreateMarket() {
                     creatorAta,
                     vaultToken: vaultTokenAta,
                     ...(params.growth ? { growth: { lLaunchX100: params.growth.lLaunchX100, ...(params.growth.tiers ? { tiers: params.growth.tiers, lTierX100: params.growth.lTierX100 } : {}) } } : {}),
+                    levGuard: isDevnetV22Enabled(),
                   })
                 : [buildDepositJuniorTrancheIx(p3Market, wallet.publicKey, creatorAta, vaultTokenAta, params.p3.juniorAtoms)];
               setState((s) => ({ ...s, stepLabel: "Binding the vault-owned LP..." }));
@@ -4202,6 +4207,31 @@ export function useCreateMarket() {
                 computeUnits: P3_BIND_COMPUTE_UNITS,
               });
               setState((s) => ({ ...s, txSigs: [...s.txSigs, p3Sig], stepLabel: STEP_LABELS[5] }));
+            }
+            // v2.2 leverage guard (tag 124 op 0). A fresh bind carried it (buildP3BindIxs); a resume after a bind or junior-only send, or a
+            // launch from before the guard existed, may not have it yet. Created here, still before StakeInitPool rotates marketauth.
+            // A failure stops the launch with a clear line: never carry on without it.
+            const guardPlan = planLevGuardLaunch({
+              v22On: isDevnetV22Enabled(),
+              growth: !!params.growth,
+              vaultLpBound: true,
+              guardExists: !!(await connection.getAccountInfo(levGuardPda(programId, slabPk), "confirmed"))?.data.length,
+              poolExists: !!existingPool,
+              programId,
+              market: slabPk,
+              creator: wallet.publicKey,
+            });
+            if (guardPlan.action === "send") {
+              setState((s) => ({ ...s, stepLabel: "Setting up the market's safety guard..." }));
+              try {
+                const guardSig = await sendTx({ simulateBeforeSign: true, connection, wallet, abortSignal, instructions: [guardPlan.ix], signers: [], computeUnits: 200_000 });
+                setState((s) => ({ ...s, txSigs: [...s.txSigs, guardSig], stepLabel: STEP_LABELS[5] }));
+              } catch (e) {
+                console.warn("[useCreateMarket] leverage guard init failed", e);
+                throw new Error(`${LEV_GUARD_INIT_FAILED} (${e instanceof Error ? e.message : String(e)})`);
+              }
+            } else if (guardPlan.action === "authority-rotated") {
+              console.warn("[useCreateMarket] leverage guard is missing and marketauth has already moved to the stake pool; only the upgrade authority can add it now");
             }
           }
           if (!existingPool) {

@@ -311,6 +311,8 @@ export interface FirstTradeIxParams {
   limitPriceE6: bigint;
   feeBps?: bigint;
   marketTradeFeeBps?: bigint;
+  /** v2.2: the market has its leverage guard account; the TradeCpi then carries it as its last account (lib/v22/lev-guard.ts). */
+  levGuard?: boolean;
 }
 
 /** The first trade's set-up legs: [CreateAccount(portfolio, full length), InitPortfolio]. */
@@ -353,6 +355,7 @@ export function buildFundAndTradeIxs(p: FirstTradeIxParams, id: { portfolioId: b
       limitPriceE6: p.limitPriceE6,
       feeBps: p.feeBps,
       marketTradeFeeBps: p.marketTradeFeeBps,
+      levGuard: p.levGuard,
     }),
   ];
 }

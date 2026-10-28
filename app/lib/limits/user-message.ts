@@ -456,7 +456,7 @@ function resolveUserMessageInner(err: unknown, ctx: MessageContext): UserMessage
       if (sv) return sv;
     }
     if (wrapperish) {
-      const wv = v22WrapperMessage(p.code, ctx, m);
+      const wv = v22WrapperMessage(p.code, { ...ctx, levGuardLogs: [p.raw, ...p.logs] }, m);
       if (wv) return wv;
     }
   }

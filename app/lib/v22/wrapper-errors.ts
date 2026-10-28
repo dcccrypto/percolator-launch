@@ -1,5 +1,5 @@
 /**
- * The Devnet v2.2 wrapper error codes 104..=119, 123..=130 (percolator-prog release/v22-wrapper, waves A to D),
+ * The Devnet v2.2 wrapper error codes 104..=119, 123..=135 (percolator-prog release/v22-wrapper, waves A to D),
  * kept OUT of `WRAPPER_ERR` and `WRAPPER_ERR_V21` for the same reason: those are pinned to the deployed wrapper.
  * Names are the Rust variant names (as in the SDK table `PERCOLATOR_ERRORS_V22`); codes 120..=122 stay in
  * `WRAPPER_ERR_V21`. Only interpreted when `NEXT_PUBLIC_DEVNET_V22` is on.
@@ -29,6 +29,12 @@ export const WRAPPER_ERR_V22 = {
   DepthInputInvalid: 128,
   DepthSourceInvalid: 129,
   GrowthTierConfigInvalid: 130,
+  // v2.2 leverage guard (percolator-prog fix/v22-lev-audit-2026-10-28, wire spec v22-lev-guard-wire-spec-2026-10-28)
+  CreatorStakeBelowMinimum: 131,
+  LevGuardRequired: 132,
+  LevGuardRefused: 133,
+  LevGuardInvalid: 134,
+  LpStopNotTriggered: 135,
 } as const;
 
 export type WrapperErrorV22Name = keyof typeof WRAPPER_ERR_V22;

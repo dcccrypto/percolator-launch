@@ -8,6 +8,7 @@ import { V22_COUNTERPARTY_CAP_COPY, V22_POSITION_CAP_REACHED_COPY, V22_SIDE_FULL
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
 import { WRAPPER_ERR_V21 } from "@/lib/v21/wrapper-errors";
 import { STAKE_ERRORS_V5 } from "./sdk";
+import { LEV_GUARD_COPY, levGuardRefusedCopy } from "./lev-guard-copy";
 
 export const V22_ERROR_CODE_MAP: Record<number, string> = {
   [WRAPPER_ERR_V22.PriceBandPinned]: V22_COPY.band.catchingUp,
@@ -34,6 +35,12 @@ export const V22_ERROR_CODE_MAP: Record<number, string> = {
   [WRAPPER_ERR_V22.DepthInputInvalid]: V22_DEPTH_INPUT_COPY,
   [WRAPPER_ERR_V22.DepthSourceInvalid]: V22_DEPTH_SOURCE_COPY,
   [WRAPPER_ERR_V22.GrowthTierConfigInvalid]: V22_TIER_CONFIG_COPY,
+  // Leverage guard 131..135. 133 here is the general line; errorMessages.ts picks the reason line from the logs when it has them.
+  [WRAPPER_ERR_V22.CreatorStakeBelowMinimum]: LEV_GUARD_COPY.creatorStake,
+  [WRAPPER_ERR_V22.LevGuardRequired]: LEV_GUARD_COPY.required,
+  [WRAPPER_ERR_V22.LevGuardRefused]: levGuardRefusedCopy(null),
+  [WRAPPER_ERR_V22.LevGuardInvalid]: LEV_GUARD_COPY.invalid,
+  [WRAPPER_ERR_V22.LpStopNotTriggered]: LEV_GUARD_COPY.lpStopNotTriggered,
   // Plain lines for 28 / 29 (pre-v2.2 table speaks of confidence intervals and oracle accounts) and 93 (capacity full).
   [WRAPPER_ERR.OracleConfTooWide]: "The price feed is too uncertain right now, so the market is not accepting this action. Nothing was changed. Wait a moment and try again.",
   [WRAPPER_ERR.InvalidOracleKey]: "The price account sent with this transaction is not the one this market uses. Nothing was changed. Refresh the page and try again; if it keeps happening, the app is out of date.",

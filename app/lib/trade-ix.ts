@@ -6,6 +6,7 @@
 import { PublicKey, type TransactionInstruction } from "@solana/web3.js";
 import { encodeTradeCpi, ACCOUNTS_TRADE_CPI, buildAccountMetas, buildIx } from "@percolatorct/sdk";
 import { tradeFeeBpsToSign } from "@/lib/limits/fee-channel";
+import { withLevGuardTail } from "@/lib/v22/lev-guard";
 
 export interface TradeIdentity {
   portfolioId: bigint;
@@ -32,6 +33,12 @@ export interface TradeCpiIxParams {
   feeBps?: bigint;
   /** The market's configured trade fee (wrapperConfigV17.tradeFeeBps). */
   marketTradeFeeBps?: bigint;
+  /**
+   * v2.2: the market has its leverage guard account (lib/v22/lev-guard.ts levGuardExists). Each TradeCpi then carries the guard as its
+   * LAST account (the program strips it); without it an opening trade on a guarded market fails Custom(132). Absent / false = the
+   * instruction is byte-identical to before.
+   */
+  levGuard?: boolean;
 }
 
 /**
@@ -69,7 +76,7 @@ export function batchTradeCaps(p: {
 
 /** One TradeCpi (tag 10) for `sizeQ`, bound to both portfolios' identity (v18 wire). */
 function tradeCpiIx(p: TradeCpiIxParams, sizeQ: bigint, fee: bigint): TransactionInstruction {
-  return buildIx({
+  const ix = buildIx({
     programId: p.programId,
     keys: buildAccountMetas(ACCOUNTS_TRADE_CPI, [
       p.signer, // [0] signerA
@@ -94,6 +101,7 @@ function tradeCpiIx(p: TradeCpiIxParams, sizeQ: bigint, fee: bigint): Transactio
       backingFeeCapBps: 0,
     }),
   });
+  return withLevGuardTail(ix, p.market, p.levGuard === true);
 }
 
 /**

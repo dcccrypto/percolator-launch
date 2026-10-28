@@ -21,6 +21,7 @@ import type { TierConfig } from "@/lib/v22/sdk/records/growth-v19";
 import { PublicKey, SystemProgram, type TransactionInstruction } from "@solana/web3.js";
 import { pairedProgramSet, resolveDevnetProgramIds } from "@/lib/program-ids";
 import { BPS, VAULT_LP_MATCHER_CTX_LEN, VAULT_LP_MAX_JUNIOR_FLOOR_BPS, VAULT_LP_MIN_JUNIOR_FLOOR_BPS } from "./constants";
+import { buildLevGuardInitIx } from "@/lib/v22/lev-guard";
 import { buildDepositJuniorTrancheIx, buildInitVaultLpIx, type VaultLpMarket } from "./p3-ix";
 
 /** Default floor: 20% of the senior claim (the seed's P3 test markets use 1000-2000). */
@@ -77,6 +78,11 @@ export function buildP3BindIxs(p: {
   vaultToken: PublicKey;
   /** Devnet v2.1: the growth block; the bind (94) then carries l_launch. Absent = today's bind. */
   growth?: { lLaunchX100: number; tiers?: TierConfig; lTierX100?: number };
+  /**
+   * v2.2 leverage guard (wrapper tag 124 op 0, t0 = 0): appended right after the junior deposit, signed by the creator while they are still
+   * the market authority. The program needs a bound vault LP and a growth block (134 otherwise), so it is added only with `growth`.
+   */
+  levGuard?: boolean;
 }): TransactionInstruction[] {
   if (!p.market.lpPortfolio.equals(p.vaultLpPortfolio)) throw new Error("market.lpPortfolio must be the new vault LP portfolio");
   return [
@@ -96,6 +102,7 @@ export function buildP3BindIxs(p: {
     }),
     buildInitVaultLpIx(p.market, p.creator, p.juniorFloorBps, { matcherProgram: p.matcherProgram, matcherCtx: p.matcherCtx }, p.growth),
     buildDepositJuniorTrancheIx(p.market, p.creator, p.creatorAta, p.vaultToken, p.juniorAtoms),
+    ...(p.levGuard && p.growth ? [buildLevGuardInitIx(p.market.programId, p.market.market, p.creator)] : []),
   ];
 }
 

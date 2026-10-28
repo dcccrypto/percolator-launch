@@ -37,8 +37,8 @@ afterEach(() => {
 
 describe("every new code has a calm one-line message", () => {
   const wrapperCodes = Object.values(WRAPPER_ERR_V22);
-  it("covers wrapper 104..119, 123..130", () => {
-    expect([...wrapperCodes].sort((a, b) => a - b)).toEqual([104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 123, 124, 125, 126, 127, 128, 129, 130]);
+  it("covers wrapper 104..119, 123..135", () => {
+    expect([...wrapperCodes].sort((a, b) => a - b)).toEqual([104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135]);
   });
   it.each(wrapperCodes)("wrapper %i: structured message and plain string, one line, no jargon", (code) => {
     const m = resolveUserMessage(fail(code), { surface: "any", minPositionLabel: "100 USDC" });
@@ -165,11 +165,11 @@ describe("126 / 127: named position-cap refusals (percolator-prog fix/v22-p1-pos
     expect(m.body).not.toBe(resolveUserMessage(fail(126), { surface: "trade" }).body);
     expect(humanizeError(raw(127))).toBe(V22_COUNTERPARTY_CAP_COPY);
   });
-  it("negative control: a bare 9 on a trade is unchanged (generic, no cap claim) and 131 is unknown", () => {
+  it("negative control: a bare 9 on a trade is unchanged (generic, no cap claim) and 136 (past the table's tail) is unknown", () => {
     expect(humanizeError(raw(9), "trade")).toBe(V22_CUSTOM9_GENERIC);
     expect(resolveUserMessage(fail(9), { surface: "trade" }).kind).not.toMatch(/cap/);
-    expect(resolveUserMessage(fail(131), { surface: "trade" }).kind).not.toMatch(/cap/);
-    expect(V22_ERROR_CODE_MAP[131]).toBeUndefined();
+    expect(resolveUserMessage(fail(136), { surface: "trade" }).kind).not.toMatch(/cap/);
+    expect(V22_ERROR_CODE_MAP[136]).toBeUndefined();
   });
   it("flag off: 126 / 127 are not interpreted", () => {
     __setDevnetV22ForTest(false);

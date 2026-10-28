@@ -24,7 +24,7 @@ import { slabSizeFor } from "@/lib/create-market-args";
 import { VAULT_LP_MATCHER_CTX_LEN } from "@/lib/limits/constants";
 import { MEMO_PROGRAM_ID } from "@/lib/keeper-register-memo";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
-import { METAPLEX_TOKEN_METADATA_PROGRAM_ID_V22, deriveLpShareMetaPayerPdaV22, deriveLpShareMetadataPdaV22, isLpShareTickerV22 } from "@/lib/v22/sdk";
+import { TAG_LEV_GUARD_V22, deriveLevGuardV22, deriveProgramDataV22, METAPLEX_TOKEN_METADATA_PROGRAM_ID_V22, deriveLpShareMetaPayerPdaV22, deriveLpShareMetadataPdaV22, isLpShareTickerV22 } from "@/lib/v22/sdk";
 import { decodeV1Message, v1IsSigner, v1IsWritable, type DecodedV1Message } from "./v1-decode";
 
 /** One instruction with MESSAGE-level account flags (what the runtime enforces). */
@@ -48,6 +48,9 @@ const V22_INIT_LP_SHARE_METADATA_TAG = 122;
 
 /** Wrapper tag 38 (ConfigurePermissionlessResolve): the stale window every v2.2 market is launched with. */
 const V22_CONFIGURE_PERMISSIONLESS_RESOLVE_TAG = 38;
+
+/** Wrapper tag 124 op 0 (v2.2 leverage guard INIT, same number as TAG_LEV_GUARD_V22); data `[124, 0, t0 u64 = 0]`. */
+const V22_LEV_GUARD_TAG = TAG_LEV_GUARD_V22;
 
 const WRAPPER_TAGS = {
   InitMarket: IX_TAG.InitMarket,
@@ -75,6 +78,7 @@ export type LaunchIxKind =
   | "wrapper.InitBondTranche"
   | "wrapper.InitLpShareMetadata"
   | "wrapper.ConfigurePermissionlessResolve"
+  | "wrapper.LevGuardInit"
   | "wrapper.other"
   | "stake.InitPool"
   | "stake.BindInsuranceAuthority"
@@ -95,6 +99,8 @@ export const MARKETAUTH_GATED: readonly LaunchIxKind[] = [
   "wrapper.ConfigurePermissionlessResolve",
   // Only the ticker form is marketauth-gated, but the launch never sends either form after the rotation.
   "wrapper.InitLpShareMetadata",
+  // The creator signs it as the market authority (the program also accepts the upgrade authority), so it must precede the rotation.
+  "wrapper.LevGuardInit",
 ];
 
 export function classifyLaunchIx(ix: NeutralIx, p: LaunchPrograms): LaunchIxKind {
@@ -121,6 +127,8 @@ export function classifyLaunchIx(ix: NeutralIx, p: LaunchPrograms): LaunchIxKind
     if (isDevnetV22Enabled() && tag === V22_INIT_LP_SHARE_METADATA_TAG) return "wrapper.InitLpShareMetadata";
     // v2.2 (flag-gated): the stale window, right after InitMarket.
     if (isDevnetV22Enabled() && tag === V22_CONFIGURE_PERMISSIONLESS_RESOLVE_TAG) return "wrapper.ConfigurePermissionlessResolve";
+    // v2.2 (flag-gated): the leverage guard, right after the vault LP is bound and its junior tranche funded. Only op 0 (INIT).
+    if (isDevnetV22Enabled() && tag === V22_LEV_GUARD_TAG && ix.data[1] === 0) return "wrapper.LevGuardInit";
     return "wrapper.other";
   }
   if (ix.programId === p.stake) {
@@ -150,6 +158,8 @@ export interface LaunchShapeOptions {
   shareName?: boolean;
   /** v2.2: ConfigurePermissionlessResolve (tag 38) right after the memo / SetNftProgramId, before the keeper co-sign pair. */
   staleResolve?: boolean;
+  /** v2.2 leverage guard INIT (tag 124 op 0) right after DepositJuniorTranche (growth + vault-LP launches). Absent = the previous shape. */
+  levGuard?: boolean;
 }
 
 /** The exact kind sequence of a single-transaction P3 launch. */
@@ -173,6 +183,7 @@ export function expectedLaunchShape(o: LaunchShapeOptions): LaunchIxKind[] {
     "system.createAccount",
     "wrapper.InitVaultLp",
     "wrapper.DepositJuniorTranche",
+    ...(o.levGuard ? (["wrapper.LevGuardInit"] as const) : []),
     "system.createAccount",
     "system.createAccount",
     ...(o.feeSplit ? (["wrapper.UpdateFeeSplit"] as const) : []),
@@ -289,6 +300,7 @@ export function launchBundleViolations(ixs: readonly NeutralIx[], ctx: LaunchBun
     bond: kinds.includes("wrapper.InitBondTranche"),
     shareName: kinds.includes("wrapper.InitLpShareMetadata"),
     staleResolve: kinds.includes("wrapper.ConfigurePermissionlessResolve"),
+    levGuard: kinds.includes("wrapper.LevGuardInit"),
   };
   const expected = expectedLaunchShape(opts);
   if (kinds.length !== expected.length || kinds.some((k, i) => k !== expected[i])) {
@@ -318,6 +330,11 @@ export function launchBundleViolations(ixs: readonly NeutralIx[], ctx: LaunchBun
   if (isDevnetV22Enabled() && !kinds.includes("wrapper.ConfigurePermissionlessResolve")) v.push("a v2.2 launch must set the stale window (ConfigurePermissionlessResolve, tag 38)");
   kinds.forEach((k, i) => {
     if (k === "wrapper.ConfigurePermissionlessResolve") v.push(...staleResolveViolations(ixs[i]!, i, ctx));
+  });
+
+  // v2.2: the leverage guard INIT is for THIS market, paid and signed by the creator, with t0 = 0 (a creator cannot backdate it).
+  kinds.forEach((k, i) => {
+    if (k === "wrapper.LevGuardInit") v.push(...levGuardInitViolations(ixs[i]!, i, ctx));
   });
 
   // v2.2: the share-token naming is bound to THIS market, funded and signed only by the creator, and carries a ticker the program accepts.
@@ -456,6 +473,25 @@ export function staleResolveViolations(ix: NeutralIx, i: number, ctx: LaunchBund
  * Metaplex metadata PDA, the wrapper's fee-payer PDA), the payer and marketauth are the creator (fee payer) and nobody else, and the data is
  * `[122][n][ticker]` with a program-valid ticker (`A-Z0-9`, n <= 8; n = 0 is the generic form, which carries no market / marketauth accounts).
  */
+export function levGuardInitViolations(ix: NeutralIx, i: number, ctx: LaunchBundleContext): string[] {
+  const v: string[] = [];
+  const wrapper = new PublicKey(ctx.programs.wrapper);
+  const market = new PublicKey(ctx.slab);
+  if (ix.data.length !== 10 || ix.data[1] !== 0 || ix.data.subarray(2).some((b) => b !== 0)) {
+    v.push(`ix ${i}: LevGuardInit data is not [124][0][t0 = 0 u64]`);
+  }
+  if (ix.accounts.length !== 5) {
+    v.push(`ix ${i}: LevGuardInit has ${ix.accounts.length} accounts (expected 5)`);
+    return v;
+  }
+  const want = [ctx.payer, deriveProgramDataV22(wrapper)[0].toBase58(), ctx.slab, deriveLevGuardV22(wrapper, market)[0].toBase58(), SYSTEM];
+  want.forEach((key, pos) => {
+    if (ix.accounts[pos]!.key !== key) v.push(`ix ${i}: LevGuardInit account [${pos}] is not the one derived from this market`);
+  });
+  if (!ix.accounts[0]!.signer || !ix.accounts[0]!.writable) v.push(`ix ${i}: LevGuardInit authority must be the creator, a writable signer`);
+  return v;
+}
+
 export function shareNameViolations(ix: NeutralIx, i: number, ctx: LaunchBundleContext): string[] {
   const v: string[] = [];
   const wrapper = new PublicKey(ctx.programs.wrapper);

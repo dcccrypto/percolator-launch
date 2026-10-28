@@ -28,7 +28,8 @@ import { isDevnetV21Enabled } from "@/lib/v21/flag";
 import { V21_ERROR_CODE_MAP } from "@/lib/v21/error-copy";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { V22_ERROR_CODE_MAP, V22_STAKE_ERROR_CODE_MAP } from "@/lib/v22/error-copy";
-import { V22_ENGINE_LOCK_CODES } from "@/lib/v22/wrapper-errors";
+import { levGuardRefusedCopy, parseLevGuardRefusal } from "@/lib/v22/lev-guard-copy";
+import { V22_ENGINE_LOCK_CODES, WRAPPER_ERR_V22 } from "@/lib/v22/wrapper-errors";
 import { stakeProgramIdOrNull } from "@/lib/v22/program-ids";
 import { V21_ENGINE_LOCK_CODES } from "@/lib/v21/wrapper-errors";
 import { V22_CUSTOM9_GENERIC, V22_CUSTOM9_OFF_TICKET } from "@/lib/v22/trade-refusal-9-copy";
@@ -543,6 +544,8 @@ export function humanizeError(rawMsg: string, context?: "trade"): string {
     // 28 / 29 win over the legacy lines for the same codes.
     if (isDevnetV22Enabled()) {
       if (origin !== null && origin === stakeProgramIdOrNull() && V22_STAKE_ERROR_CODE_MAP[code]) return V22_STAKE_ERROR_CODE_MAP[code];
+      // Leverage guard refusal (133): the log line `lev_guard_refused <why>` names the cause when the message carries logs.
+      if (origin === WRAPPER_PROGRAM_ID && code === WRAPPER_ERR_V22.LevGuardRefused) return levGuardRefusedCopy(parseLevGuardRefusal(rawMsg));
       if (origin === WRAPPER_PROGRAM_ID && V22_ERROR_CODE_MAP[code]) return V22_ERROR_CODE_MAP[code];
       // A bare 9 off the trade ticket (deposit, withdraw, close...): the legacy line talks about matcher config. Same calm line as the ticket's.
       if (origin === WRAPPER_PROGRAM_ID && code === WRAPPER_ERR.InvalidInstruction) return V22_CUSTOM9_OFF_TICKET;
