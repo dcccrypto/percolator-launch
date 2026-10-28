@@ -102,7 +102,7 @@ describe("every launch creates a single-asset market", () => {
 
     it("the Control Room readout and the cost estimate use the P3-aware size", () => {
       expect(wizard).toContain("slabBytes={wizardSlabBytes(p3WizardEnabled())}");
-      expect(wizard).toContain("computeCreateMarketSolCost({ p3: p3WizardEnabled() })");
+      expect(wizard).toContain("computeCreateMarketSolCost({ p3: p3WizardEnabled(), levGuard: levGuardOn })");
       expect(cost).not.toMatch(/=\s*DEFAULT_SLAB_SIZE;/);
       expect(cost).not.toMatch(/dataSize:\s*DEFAULT_SLAB_SIZE/);
     });

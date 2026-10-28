@@ -48,7 +48,7 @@ describe("the wizard routes its error panel through these", () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(path.resolve(__dirname, "../../../components/create/CreateMarketWizard.tsx"), "utf8");
-    expect(src).toMatch(/onRetry=\{bondRetry === "hidden" \? undefined : handleRetry\}/);
+    expect(src).toMatch(/onRetry=\{bondRetry === "hidden" \|\| guardMissingBlock ? undefined : handleRetry\}/);
     expect(src).toMatch(/if \(bondRetry === "hidden"\) return false;/);
     expect(src).toMatch(/outcomeUnknown: !!createState\.outcomeUnknown/);
     // Every fresh launch from the panel goes through one path: the blocked-reason note, then the one-shot guard.
