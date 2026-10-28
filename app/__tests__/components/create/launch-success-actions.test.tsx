@@ -352,3 +352,17 @@ describe("launch success: the creator wallet is close-only on its own market", (
     expect(TICKET_COPY.sameOwner.body).toMatch(/can only close positions here/);
   });
 });
+
+// Product review 2026-10-28 (M-1 / D-5): a guarded v2.2 launch refuses every opening trade for 6 hours, so the success screen must not
+// say "Ready to trade" and must name the wait.
+describe("v2.2 guarded launch: the 6-hour open delay", () => {
+  it("says 'Market launched' and shows the delay line instead of 'Ready to trade'", () => {
+    render(<LaunchSuccess {...base({ newMarketOpenDelay: true, keeperPhase: "ready", keeperMessage: KEEPER_REGISTER_COPY.ready, keeperFinal: true })} />);
+    expect(screen.queryByText(LAUNCH_PRICE_COPY.readyTitle)).toBeNull();
+    expect(screen.getByTestId("launch-open-delay").textContent).toMatch(/New positions open 6 hours after launch/);
+  });
+  it("without a guard nothing changes", () => {
+    render(<LaunchSuccess {...base({ keeperPhase: "ready", keeperMessage: KEEPER_REGISTER_COPY.ready, keeperFinal: true })} />);
+    expect(screen.queryByTestId("launch-open-delay")).toBeNull();
+  });
+});

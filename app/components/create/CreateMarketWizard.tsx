@@ -750,14 +750,14 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
   // P3 wizard: the junior tranche requirement (floor range, junior >= floor of the Earn seed).
   const p3Issue = useMemo(() => {
     if (!p3WizardEnabled()) return null;
-    // Same decimals handleLaunch parses the Liquidity amount with.
-    const j = parseHumanAmount(wizard.lpCollateral || "0", wizard.tokenMeta?.decimals ?? 6);
+    // Same decimals handleLaunch parses the Liquidity amount with: always 6 (Sim-USDC), never the base token's own decimals.
+    const j = parseHumanAmount(wizard.lpCollateral || "0", 6);
     return validateP3Wizard({
       juniorFloorBps: wizard.juniorFloorBps ?? DEFAULT_JUNIOR_FLOOR_BPS,
       juniorAtoms: j,
       seedNavAtoms: 2n * backingSeedPerDomain(j),
     });
-  }, [wizard.lpCollateral, wizard.juniorFloorBps, wizard.tokenMeta?.decimals]);
+  }, [wizard.lpCollateral, wizard.juniorFloorBps]);
   const growthIssue = growthLaunch
     ? validateGrowthLaunch({
         engineImrBps: growthDerived.initialMarginBps,
@@ -766,7 +766,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
         baseFeeBps: wizard.tradingFeeBps,
         lLaunchX100: growthLaunch.lLaunchX100,
         rGapBps: growthLaunch.rGapBps,
-        juniorAtoms: parseHumanAmount(wizard.lpCollateral || "0", wizard.tokenMeta?.decimals ?? 6),
+        juniorAtoms: parseHumanAmount(wizard.lpCollateral || "0", 6),
         collateralDecimals: 6,
         singleAsset: true,
       })
@@ -1319,6 +1319,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
   if (isSuccess) {
     return (
       <LaunchSuccess
+        newMarketOpenDelay={levGuardOn}
         tokenSymbol={symbol}
         tradingFeeBps={wizard.tradingFeeBps}
         maxLeverage={maxLeverage}
@@ -1666,7 +1667,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
             maintenanceMarginBps={growthDerived.maintenanceMarginBps}
             maxPriceMoveBpsPerSlot={growthDerived.maxPriceMoveBpsPerSlot}
             baseFeeBps={wizard.tradingFeeBps}
-            juniorAtoms={parseHumanAmount(wizard.lpCollateral || "0", wizard.tokenMeta?.decimals ?? 6)}
+            juniorAtoms={parseHumanAmount(wizard.lpCollateral || "0", 6)}
             collateralDecimals={6}
             collateralSymbol={collateralSymbol}
           />

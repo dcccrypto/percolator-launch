@@ -111,6 +111,7 @@ import { clippedFillBody, readClippedFill } from "@/lib/v22/clipped-fill";
 import { isPortfolioClosable } from "@/lib/close-trading-account";
 import { defaultFeeCapMarginBps } from "@/lib/limits/fee-channel";
 import { OrderTicketLimits, reasonCopy } from "@/components/limits/OrderTicketLimits";
+import { estimatedTotalFeeBps, feeHasExtras } from "@/lib/limits/estimated-fee";
 import { isUsdLikeCollateral } from "@/lib/v22/tier-config";
 import { GrowthTicketPanelLive } from "@/components/trade/GrowthTicketPanelLive";
 import { CloseOnlyBanner } from "@/components/trade/CloseOnlyBanner";
@@ -413,6 +414,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     estimatedLiqPrice: bigint;
     estimatedLiqDisplay: LiqPriceDisplay;
     tradingFee: bigint;
+    tradingFeeEstimated?: boolean;
     worstFillPriceE6: bigint;
     riskLeverage: number | null;
     depositAtoms: bigint;
@@ -1067,6 +1069,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     },
   };
   const ticketLimits = deriveTicketLimits(limitsInput);
+  // Product review T-1: show what the fill is expected to charge (base + matcher quote fee + busy-side fee), not the base alone.
+  // Display only; the signed cap and the deposit math above are unchanged.
+  const estFeeBps = estimatedTotalFeeBps(tradingFeeBps, ticketLimits.fee);
+  const estFee = hasOrder ? computeTradingFee((positionSize * oracleE6) / 1_000_000n, estFeeBps) : 0n;
+  const estFeeHasExtras = feeHasExtras(tradingFeeBps, estFeeBps);
   // P1 99165722 (F-7): a close that GROWS a halted / capped LP is refused or clipped too.
   const limitsCloseNotice = closeLimitNotice(existingPositionSize, ticketLimits.sideLimits);
 
@@ -2238,10 +2245,14 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             tooltip={`Estimated liquidation price if this order fills at the estimated entry.${afterLiqDisplay.title ? ` ${afterLiqDisplay.title}` : ""}`}
           />
           <SummaryCell
-            label="Fee"
-            value={`${formatTokenAmount(fee, decimals)} ${collateralSymbol}`}
-            /* A trader saw what they pay and nothing about where it goes. #2565. */
-            tooltip={feeDestinationTitle}
+            label={estFeeHasExtras ? "Fee (est.)" : "Fee"}
+            value={`${formatTokenAmount(estFee, decimals)} ${collateralSymbol}`}
+            /* A trader saw what they pay and nothing about where it goes. #2565. Product review T-1: the extras are named too. */
+            tooltip={
+              estFeeHasExtras
+                ? `Estimated ${estFeeBps.toString()} bps: the market's ${tradingFeeBps.toString()} bps base fee plus the market maker's quote fee${ticketLimits.fee?.utilFeeBps ? " and the busy-side fee" : ""}. The extra parts go to the market's liquidity (Earn). Your signature caps the total.${feeDestinationTitle ? ` Base fee split: ${feeDestinationTitle}` : ""}`
+                : feeDestinationTitle
+            }
           />
           <SummaryCell
             label="Margin"
@@ -2498,7 +2509,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               marginNative,
               estimatedLiqPrice: afterLiqPrice,
               estimatedLiqDisplay: afterLiqDisplay,
-              tradingFee: fee,
+              tradingFee: estFee,
+              tradingFeeEstimated: estFeeHasExtras,
               worstFillPriceE6,
               // The account after this trade: the resulting position and the bundled deposit, as
               // the liq row uses, over capital + deposit + pnl, as the position panel's Lev.
@@ -2630,6 +2642,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           estimatedLiqPrice={confirmSnapshot.estimatedLiqPrice}
           estimatedLiqDisplay={confirmSnapshot.estimatedLiqDisplay}
           tradingFee={confirmSnapshot.tradingFee}
+          tradingFeeEstimated={confirmSnapshot.tradingFeeEstimated ?? false}
           worstFillPriceE6={confirmSnapshot.worstFillPriceE6}
           accountEquity={userAccount ? capital : null}
           riskLeverage={confirmSnapshot.riskLeverage}

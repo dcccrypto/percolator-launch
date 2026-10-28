@@ -33,6 +33,8 @@ interface TradeConfirmationModalProps {
    */
   estimatedLiqDisplay?: LiqPriceDisplay;
   tradingFee: bigint;
+  /** Product review T-1: the fee is an estimate that includes the quote / busy-side fee on top of the base fee. */
+  tradingFeeEstimated?: boolean;
   /**
    * Worst-acceptable fill price (limit_price_e6) the trade will be signed
    * with, derived from live mark + default slippage bps. Shown so the user
@@ -80,6 +82,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   estimatedLiqPrice,
   estimatedLiqDisplay,
   tradingFee,
+  tradingFeeEstimated = false,
   worstFillPriceE6,
   accountEquity,
   riskLeverage: riskLeverageAfter,
@@ -300,7 +303,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
             </div>
           )}
           <div className="flex justify-between">
-            <span className="text-[var(--text-secondary)]">Trading Fee:</span>
+            <span className="text-[var(--text-secondary)]">{tradingFeeEstimated ? "Trading Fee (est.):" : "Trading Fee:"}</span>
             <span className="font-mono font-medium text-[var(--text)]">
               {formatTokenAmount(tradingFee, decimals)} {settleSymbol}
             </span>

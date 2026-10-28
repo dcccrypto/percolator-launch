@@ -17,6 +17,11 @@ import { useLpShareToken } from "@/hooks/useLpShareToken";
 import { resolveDevnetProgramIds } from "@/lib/program-ids";
 
 interface LaunchSuccessProps {
+  /**
+   * v2.2 (product review M-1 / D-5): the launch created the market's leverage guard, whose clock starts now, so the program refuses
+   * every OPENING trade for 6 hours (tag 124 age band) and keeps young-market limits for a week. Say so instead of "Ready to trade".
+   */
+  newMarketOpenDelay?: boolean;
   tokenSymbol: string;
   tradingFeeBps: number;
   maxLeverage: number;
@@ -72,6 +77,10 @@ export const LAUNCH_PRICE_COPY = {
   failedSub: "is on Percolator devnet without a live price",
   supportLink: "Open the Percolator Discord",
   readyTitle: "Ready to trade",
+  /** v2.2 guarded launch: the title and the one line under it. */
+  launchedTitle: "Market launched",
+  openDelay:
+    "New positions open 6 hours after launch; until then traders can only close. For its first week this market also has tighter leverage and size limits.",
   connecting: "Live price connecting… usually under a minute.",
   timedOut: "Live price still isn't connected. Keep this page open while we keep trying; we can't say when, or whether, it will connect.",
   failed: KEEPER_REGISTER_COPY.serverTrouble,
@@ -85,6 +94,7 @@ export const LAUNCH_PRICE_COPY = {
  * Shows market card, address with copy, Solscan link, and CTAs.
  */
 export const LaunchSuccess: FC<LaunchSuccessProps> = ({
+  newMarketOpenDelay = false,
   tokenSymbol,
   tradingFeeBps,
   maxLeverage,
@@ -248,11 +258,22 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
       </div>
 
       <h2 className={`text-[18px] font-bold mb-2 ${finalRefusal ? "text-[var(--warning)]" : "text-[var(--long)]"}`}>
-        {finalRefusal ? LAUNCH_PRICE_COPY.failedTitle : pricePending ? LAUNCH_PRICE_COPY.pendingTitle : LAUNCH_PRICE_COPY.readyTitle}
+        {finalRefusal
+          ? LAUNCH_PRICE_COPY.failedTitle
+          : pricePending
+            ? LAUNCH_PRICE_COPY.pendingTitle
+            : newMarketOpenDelay
+              ? LAUNCH_PRICE_COPY.launchedTitle
+              : LAUNCH_PRICE_COPY.readyTitle}
       </h2>
       <p className="text-[13px] text-[var(--text-secondary)] mb-4">
         {tokenSymbol} {finalRefusal ? LAUNCH_PRICE_COPY.failedSub : "is live on Percolator devnet"}
       </p>
+      {newMarketOpenDelay && !finalRefusal && (
+        <p data-testid="launch-open-delay" className="mx-auto mb-4 max-w-[52ch] text-[12px] text-[var(--warning)]">
+          {LAUNCH_PRICE_COPY.openDelay}
+        </p>
+      )}
 
       {/* Market address */}
       <div className="flex items-center justify-center gap-2 mb-4">

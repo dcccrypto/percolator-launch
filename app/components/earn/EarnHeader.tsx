@@ -1,5 +1,6 @@
 'use client';
 
+import { EARN_LOSS_LINE } from "@/lib/earn-vault-page";
 import { useState } from 'react';
 import type { EarnStats } from '@/hooks/useEarnStats';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
@@ -59,7 +60,7 @@ export function EarnHeader({ stats, loading }: EarnHeaderProps) {
               {isDevnetV22Enabled() ? V22_COPY.earnPage.depositLead : "Deposit USDC into a market's vault."} {LP_SHARE_PCT}% of every trading fee on that market is
               added to the vault, so your deposit grows as people trade it.{" "}
               {/* Always visible: the detailed Risk notice row below starts closed, so the downside is stated here too. */}
-              <span data-testid="earn-loss-line">It can also fall when traders win, so only deposit what you can afford to lose.</span>
+              <span data-testid="earn-loss-line">{EARN_LOSS_LINE}</span>
             </p>
             <button
               type="button"

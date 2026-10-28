@@ -46,8 +46,8 @@ export const NON_USD_QUOTE_REASON =
  */
 export const BELOW_LIQUIDITY_FLOOR_REASON =
   "This token's pool is too shallow to price safely. Our price feed refuses to quote pools with " +
-  "so little liquidity, so a market launched on it would never get a price. Pick a deeper pool, " +
-  "or wait until the pool has more liquidity.";
+  "so little liquidity, so a market launched on it would never get a price. The wizard already uses this token's " +
+  "deepest pool, so wait until it has more liquidity and try again.";
 
 /**
  * DEXes deliberately withheld from new market creation, and why. Rendered to

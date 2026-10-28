@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { Keypair, PublicKey } from "@solana/web3.js";
+import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { encodeInitMarket } from "@percolatorct/sdk";
 import {
   GROWTH_FEE_HEADROOM_BPS, GROWTH_SEED_ORDER, defaultGrowthLaunch, encodeInitMarketData, fundingE9PerSlotFor, fundingPctPerHour,
@@ -77,6 +78,17 @@ describe("validateGrowthLaunch mirrors the wrapper's refusals (94)", () => {
     expect(validateGrowthLaunch(base({ juniorAtoms: 999_999n }))).toBe("junior-below-minimum");
     expect(validateGrowthLaunch(base({ juniorAtoms: 1_000_000n }))).toBeNull();
     expect(validateGrowthLaunch(base({ singleAsset: false }))).toBe("not-single-asset");
+  });
+  it("v2.2 (product review S-1 / D-1): the minimum is the program's $500, so $100-$499 is refused before anything is sent", () => {
+    __setDevnetV22ForTest(true);
+    try {
+      expect(minJuniorAtoms(6)).toBe(500_000_000n);
+      expect(validateGrowthLaunch(base({ juniorAtoms: 499_999_999n }))).toBe("junior-below-minimum");
+      expect(validateGrowthLaunch(base({ juniorAtoms: 100_000_000n }))).toBe("junior-below-minimum");
+      expect(validateGrowthLaunch(base({ juniorAtoms: 500_000_000n }))).toBeNull();
+    } finally {
+      __setDevnetV22ForTest(null);
+    }
   });
 });
 

@@ -19,7 +19,7 @@ import { LAYOUT_V21, LAYOUT_V22 } from "@/lib/v22/sdk";
 import { PERCOLATOR_ERRORS_V22 } from "@/lib/v22/sdk/errors-v22";
 import { isMultiAssetMarket, readMaxPortfolioAssets } from "@/lib/v22/market-cap";
 import { ADMIN_BURN_COPY } from "@/lib/admin-burn-copy";
-import { STAKE_COPY } from "@/lib/stake-copy";
+import { STAKE_COPY, STAKE_COPY_V22 } from "@/lib/stake-copy";
 import { PAYOUT_RESERVE_COPY } from "@/lib/wizard-copy";
 import { feeRaiseCopy, recordFeeRaise, takeFeeRaise } from "@/lib/v22/fee-raise-note";
 import { growthMaxLeverageForOrder, growthMarketView } from "@/lib/v21/growth-market";
@@ -50,7 +50,8 @@ describe("items 1 + 4: codes 126 / 127 copy, and the cap comes from the market",
     const m = resolveUserMessage(fail(126), { surface: "trade", maxPositions: 2 });
     expect(m.body).toBe(positionCapCopy(2));
     expect(m.body).toContain("maximum of 2 positions");
-    expect(m.body).toMatch(/Close one, or try again later/);
+    expect(m.body).toMatch(/Close one to open another/);
+    expect(m.body).not.toMatch(/try again later/); // product review L-8: only a close frees a slot
     expect(m.body).not.toMatch(/another asset/i);
     expect(m.body).not.toMatch(/\b4\b/);
   });
@@ -173,6 +174,12 @@ describe("items 6 + 7: staking and wizard jargon", () => {
     expect(STAKE_COPY.risk.leadTip).toMatch(/first-loss insurance capital/i);
     expect(STAKE_COPY.risk.flushTip).toMatch(/flush/i);
     expect(STAKE_COPY.waterfallStakeTip).toMatch(/flush/i);
+    // Same rule for the v2.2 lines (product review 2026-10-28).
+    const shownV22 = [STAKE_COPY_V22.sidebar, STAKE_COPY_V22.backStep, STAKE_COPY_V22.risk.lead, STAKE_COPY_V22.risk.flush, STAKE_COPY_V22.risk.tail, STAKE_COPY_V22.waterfallStakeNote].join("\n");
+    expect(shownV22).not.toMatch(/first-loss|flush|insurance capital/i);
+    expect(STAKE_COPY_V22.risk.leadTip).toMatch(/first-loss insurance capital/i);
+    expect(STAKE_COPY_V22.risk.flushTip).toMatch(/flush/i);
+    expect(STAKE_COPY_V22.waterfallStakeTip).toMatch(/flush/i);
   });
   it("the wizard says 'trader payout reserve', with the precise meaning in the tip", () => {
     expect(PAYOUT_RESERVE_COPY.readout).toBe("Incl. trader payout reserve");
@@ -288,8 +295,9 @@ describe("wiring (source-level, as the U-2 test does for the hooks)", () => {
     expect(src("app/page.tsx")).not.toMatch(/no one can change/i);
   });
   it("items 6 + 7: the pages use the plain copy modules", () => {
-    expect(src("app/stake/page.tsx")).toContain("STAKE_COPY.risk.lead");
-    expect(src("components/trade/AnalyticsDock.tsx")).toContain("STAKE_COPY.waterfallStakeNote");
+    // Product review 2026-10-28: both now read through stakeCopy() (v2.2 wording when the flag is on).
+    expect(src("app/stake/page.tsx")).toContain("copy.risk.lead");
+    expect(src("components/trade/AnalyticsDock.tsx")).toContain("stakeCopy().waterfallStakeNote");
     expect(src("components/create/StepControlRoom.tsx")).toContain("PAYOUT_RESERVE_COPY.readout");
     expect(src("components/create/LaunchSuccess.tsx")).not.toMatch(/counterparty backing|both domains/i);
   });

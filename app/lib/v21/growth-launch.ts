@@ -23,6 +23,7 @@ import { encodeInitVaultLpV19, rGapFloorBps, GROWTH_LEVERAGE_X100_ONE } from "./
 // D-L1: the v2.2 port also refuses collateral above 12 decimals (the wrapper answers 94). TODO(repin): with the SDK package.
 import { encodeInitMarketV19 } from "../v22/sdk/records/growth-v19";
 import { encodeInitMarket, type InitMarketV17Args } from "@percolatorct/sdk";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 
 /** Matches wrapper `GROWTH_FEE_HEADROOM`: base + 100 (matcher fee channel) + 500 (utilisation fee) = base + 600. */
 export const GROWTH_FEE_HEADROOM_BPS = 600n;
@@ -34,6 +35,17 @@ export const DEFAULT_FUNDING_PCT_PER_HOUR = 0.1;
 export const SLOTS_PER_HOUR = 9_000;
 /** The creator's first junior deposit is at least this many dollars (collateral is a dollar token). */
 export const MIN_JUNIOR_USD = 1;
+/**
+ * v2.2 (percolator-prog rc23, decision 7): the creator stake on a growth asset must be 0 or at least $500
+ * (`lev_guard_v22::MIN_CREATOR_STAKE_USD`); tags 96 / 97 / 103 refuse anything in between with 131. The wizard
+ * said $1 here, so a $100-$499 launch passed every check and then stopped at the vault-LP bind (product review S-1 / D-1).
+ */
+export const MIN_JUNIOR_USD_V22 = 500;
+
+/** The minimum creator stake for the build: $500 on v2.2, $1 otherwise. */
+export function minJuniorUsd(): number {
+  return isDevnetV22Enabled() ? MIN_JUNIOR_USD_V22 : MIN_JUNIOR_USD;
+}
 /** Default starting leverage offered when the market's tier allows it. */
 export const DEFAULT_LAUNCH_LEVERAGE_X100 = 500;
 
@@ -75,9 +87,9 @@ export function growthMaxTradingFeeBps(baseFeeBps: number): bigint {
   return BigInt(baseFeeBps) + GROWTH_FEE_HEADROOM_BPS;
 }
 
-/** Atoms of the minimum junior deposit: $1, i.e. `10^decimals` of a dollar-pegged collateral. */
+/** Atoms of the minimum junior deposit (`minJuniorUsd()` dollars of a dollar-pegged collateral). */
 export function minJuniorAtoms(collateralDecimals: number): bigint {
-  return BigInt(MIN_JUNIOR_USD) * 10n ** BigInt(collateralDecimals);
+  return BigInt(minJuniorUsd()) * 10n ** BigInt(collateralDecimals);
 }
 
 export interface GrowthLaunch {

@@ -142,7 +142,8 @@ export const levGuardApplies = (p: { v22On: boolean; growth: boolean; p3: boolea
 
 /** Shown, and blocking until acknowledged, when a resumed launch has no guard and the creator can no longer create it. */
 export const LEV_GUARD_MISSING_BLOCK =
-  "This market has no safety guard, and its creator can no longer add one: the market authority has already moved to the stake pool. Only the upgrade authority can create the guard now, so ask the Percolator team to do it. You can continue without it, but until it exists this market trades without the new leverage and new-token limits.";
+  "This market has no safety guard, and its creator can no longer add one: the market authority has already moved to the stake pool. Only the upgrade authority can create the guard now, so ask the Percolator team to do it. You can continue without it. On devnet the market then trades without the new leverage and new-market limits until the guard exists; on mainnet nobody can open a position on it until the guard exists.";
 
 /** The line shown when the guard could not be created. The launch stops there rather than carrying on without it. */
-export const LEV_GUARD_INIT_FAILED = "The market was created, but its safety guard could not be set up, so the launch stopped here. Nothing else was changed. Try again to finish it.";
+// Product review M-14: by this step the market, its liquidity and its deposits have landed, so "nothing else was changed" was untrue.
+export const LEV_GUARD_INIT_FAILED = "The market was created and the launch steps before this one are in place, but its safety guard could not be set up, so the launch stopped here. Try again to finish it.";

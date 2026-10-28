@@ -10,18 +10,19 @@ export type V22Custom9Cause = "position-cap" | "price-limit" | "fee-cap" | "unde
 /**
  * THE one message for the position cap (wrapper 126, the classified Custom(9), and the ticket's own pre-check). `cap` is the market's
  * `max_portfolio_assets` (config); unknown (null / undefined / not a positive integer) drops the number instead of guessing one.
- * The app ticket trades asset 0 only, so the advice is "close one or try later", never "try another asset".
+ * The app ticket trades asset 0 only, so the advice is "close one", never "try another asset".
  */
 export function positionCapCopy(cap?: number | null): string {
   const n = typeof cap === "number" && Number.isInteger(cap) && cap > 0 ? cap : null;
   const limit = n === null ? "the most positions this market allows" : `the maximum of ${n} position${n === 1 ? "" : "s"} on this market`;
-  return `This account already holds ${limit}. Close one, or try again later. Nothing changed.`;
+  // Only a close frees a slot: no deposit or wait cures it (review L-8).
+  return `This account already holds ${limit}. Close one to open another. Nothing changed.`;
 }
 
 export const V22_CUSTOM9_COPY: Record<V22Custom9Cause, string> = {
   "position-cap": positionCapCopy(),
   "price-limit":
-    "The market's fill price moved past your price limit, so the order was not placed and nothing changed. Try again, or allow a little more slippage.",
+    "The market's fill price moved past your price limit, so the order was not placed and nothing changed. Try again, or try a smaller size.",
   "fee-cap": "The market's trading fee changed while the order was being sent, so it was not placed and nothing changed. Try again.",
   undetermined: "The program refused this order before it filled, so nothing changed. Try again in a moment.",
 };

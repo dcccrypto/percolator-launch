@@ -22,24 +22,31 @@ export function parseLevGuardRefusal(source: string | readonly string[] | null |
 
 export const LEV_GUARD_COPY = {
   /** 131 */
-  creatorStake: "The creator stake has to be at least $500, or none at all. Add to the stake and try again. Nothing was changed.",
+  // The program checks deposits minus withdrawals after the action (tags 96 / 97 / 103), so the line covers both directions:
+  // a deposit that stays under $500, and a withdrawal that would leave between $0 and $500 (review S-2 / D-9).
+  creatorStake:
+    "The creator stake has to be at least $500 in total, or none at all. A deposit must bring it to $500 or more, and a withdrawal can't leave less than $500 behind. Nothing was changed.",
   /** 132 */
   required:
-    "This market needs its safety guard account on opening trades, and this page didn't send it. Refresh the page and try again; if it keeps happening, the app is out of date. Nothing was changed.",
+    "This market needs its safety guard account on opening trades, and it wasn't sent. Refresh the page and try again. If it keeps happening, the market's guard may not be set up yet, so new positions can't open here for now. Closing still works. Nothing was changed.",
   /** 133 by reason; `unknown` when the logs did not name one. */
   refused: {
-    age_under_6h: "New token: opening positions unlocks 6 hours after launch. You can still close.",
-    leverage: "That leverage is above this market's current safety limit. Lower the leverage and try again.",
-    size: "That position is bigger than this market's current safety limit. Try a smaller size.",
-    short_dump_cap: "New shorts are capped on this market right now, after a sharp move down. Try a smaller short, or go long.",
-    lp_stop_round: "The LP is rebalancing after a loss; try again shortly.",
+    // The clock starts when the market's guard was created (its launch), not when the token was minted (review L-4 / M-2).
+    age_under_6h: "New market: opening positions unlocks 6 hours after this market launched. You can still close.",
+    // Checked on the whole position after the fill, so an existing position can need more margin, not just a lower slider.
+    leverage: "That leverage is above this market's current safety limit. Lower the leverage, or add margin, and try again.",
+    // The program checks the market's total room (the liquidity pool's net position), not this account's own size.
+    size: "This market's room for new positions on this side is used up right now. Try a smaller size, or the other side.",
+    // Structural, not price-driven: users' shorts <= longs x min(1, MMR/m) + beta x backing / m (lev_guard_v22 short_users_cap_notional).
+    short_dump_cap: "New shorts are limited on this market: total shorts can't grow past what its longs and backing can cover. Try a smaller short, or go long.",
+    lp_stop_round: "This market's liquidity is rebalancing after a loss, so it can't take on new positions for now. Try again shortly.",
     unknown:
-      "This market's safety guard declined that opening trade right now (a new token, a size or leverage above the current limit, or a sharp price move). Try a smaller size or lower leverage, or try again shortly. Nothing was changed.",
+      "This market's safety guard declined that opening trade right now (a newly launched market, a size or leverage above the current limit, or a sharp price move). Try a smaller size or lower leverage, or try again shortly. Nothing was changed.",
   } satisfies Record<LevGuardRefusalReason | "unknown", string>,
   /** 134 */
   invalid: "This market's safety guard setup isn't valid. Nothing was changed. Refresh the page and try again; if it keeps happening, the app is out of date.",
   /** 135 */
-  lpStopNotTriggered: "Nothing to do: the LP's loss stop isn't triggered right now. Nothing was changed.",
+  lpStopNotTriggered: "Nothing to do: this market's liquidity loss stop isn't triggered right now. Nothing was changed.",
 } as const;
 
 /** The 133 line for a reason (null / unknown reason = the general line). */
@@ -49,10 +56,10 @@ export function levGuardRefusedCopy(reason: LevGuardRefusalReason | null): strin
 
 /** Titles for the structured resolver, by reason. */
 export const LEV_GUARD_REFUSED_TITLE: Record<LevGuardRefusalReason | "unknown", string> = {
-  age_under_6h: "New token",
+  age_under_6h: "New market",
   leverage: "Leverage too high",
   size: "Size too big",
   short_dump_cap: "Shorts capped",
-  lp_stop_round: "LP rebalancing",
+  lp_stop_round: "Liquidity rebalancing",
   unknown: "Not right now",
 };

@@ -17,6 +17,7 @@ import { PublicKey } from '@solana/web3.js';
 import { computeEntryVsExit } from '@/lib/v21/entry-exit';
 import { ResolvedExitPanel } from '@/components/limits/ResolvedExitPanel';
 import { earnExitProps } from '@/lib/limits/resolved-finish';
+import { EARN_LOSS_LINE, earnMarketSettled, earnPageDepositBlock, earnVaultStatusLabel } from '@/lib/earn-vault-page';
 import { EarnTrancheCardView } from '@/components/limits/EarnTrancheCard';
 import { useVaultLpValuation } from '@/hooks/useVaultLpValuation';
 import { useMarketLimits } from '@/hooks/useMarketLimits';
@@ -479,6 +480,9 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
           {/* P3 / F-4: after Resolve, finish the market so Earn can pay out (nothing on a live market). */}
           <ResolvedExitPanel slab={slabAddress} walletConnected={!!earnWallet.publicKey} onDone={refreshState} {...earnExitProps(lpVaultState, collateralDecimals, collateralSymbol)} />
 
+          {/* Product review E-4: a direct link to this page showed no loss warning before Deposit. */}
+          <p data-testid="earn-vault-loss-line" className="text-[11px] text-[var(--text-secondary)]">{EARN_LOSS_LINE}</p>
+
           {/* Deposit / Withdraw. Keyed by wallet (N13): its form and auto-finish arming are per wallet. */}
           <ScrollReveal>
             <DepositWithdrawPanel
@@ -501,6 +505,8 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
               exitV22={isDevnetV22Enabled() ? { market: slabAddress ? new PublicKey(slabAddress) : null, programId: slabProgramId ?? null, collateralMint: slabConfig?.collateralMint ?? null, sourceDomain: lpVaultState.lpVaultDomain } : undefined}
               p3Bound={earnLimits.vaultLp?.bound === true}
               lpDepleted={marketHealth?.lpDepleted === true}
+              // Product review E-6: the program refuses Earn deposits once the market has settled; say so before signing.
+              depositBlockedReason={earnPageDepositBlock(marketHealth, null)}
               drawSummary={lastDrawSummary}
               pricing={earnPricing}
               onRefresh={refreshState}
@@ -538,7 +544,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
               />
               <InfoRow
                 label="Vault status"
-                value={loadingText(firstLoad, vaultAvailable ? 'Active' : 'Unavailable')}
+                value={loadingText(firstLoad, earnVaultStatusLabel(vaultAvailable, earnMarketSettled(marketHealth)))}
               />
             </div>
             {/* UX WP-5 (§4.4): addresses live under Details. */}

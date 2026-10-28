@@ -174,14 +174,14 @@ export const InsuranceExplainerModal: FC<InsuranceExplainerModalProps> = ({
               <div className="flex items-start gap-2">
                 <span className="font-mono text-[var(--text-dim)]">4.</span>
                 <span>
-                  The market takes on the position at a loss: should receive $10,000
-                  but only gets $8,500
+                  The position has lost $1,500. The trader&apos;s $1,000 collateral
+                  covers $1,000 of it, leaving a $500 shortfall
                 </span>
               </div>
               <div className="flex items-start gap-2">
                 <span className="font-mono text-[var(--text-dim)]">5.</span>
                 <span className="text-[var(--long)]">
-                  <strong>Insurance fund covers the $1,500 shortfall</strong> →
+                  <strong>Insurance fund covers the $500 shortfall</strong> →
                   the market is made whole
                 </span>
               </div>

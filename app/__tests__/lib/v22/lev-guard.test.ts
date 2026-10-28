@@ -23,7 +23,7 @@ import {
   shouldAppendLevGuard,
   withLevGuardTail,
 } from "@/lib/v22/lev-guard";
-import { LEV_GUARD_COPY, levGuardRefusedCopy, parseLevGuardRefusal } from "@/lib/v22/lev-guard-copy";
+import { LEV_GUARD_COPY, LEV_GUARD_REFUSED_TITLE, levGuardRefusedCopy, parseLevGuardRefusal } from "@/lib/v22/lev-guard-copy";
 import { V22_ERROR_CODE_MAP } from "@/lib/v22/error-copy";
 import { WRAPPER_ERR_V22 } from "@/lib/v22/wrapper-errors";
 import { PERCOLATOR_ERRORS_V22 } from "@/lib/v22/sdk";
@@ -301,16 +301,18 @@ describe("errors 131..135", () => {
     const m = resolveUserMessage(fail(132), { surface: "trade" });
     expect(m.body).toMatch(/safety guard account/);
     expect(m.body).toMatch(/Refresh the page/);
-    expect(m.body).toMatch(/out of date/);
+    // Product review 2026-10-28 (L-5 / M-3): on a market whose guard was never created, refreshing never helps, so the line says so.
+    expect(m.body).toMatch(/guard may not be set up yet/);
+    expect(m.body).toMatch(/Closing still works/);
     expect(m.action?.id).toBe("refresh");
     expect(humanizeError(raw(132))).toBe(LEV_GUARD_COPY.required);
   });
   it.each([
-    ["age_under_6h", /new token: opening positions unlocks 6 hours after launch/i],
+    ["age_under_6h", /new market: opening positions unlocks 6 hours after this market launched/i],
     ["leverage", /leverage is above/i],
-    ["size", /bigger than/i],
-    ["short_dump_cap", /shorts are capped/i],
-    ["lp_stop_round", /LP is rebalancing after a loss; try again shortly/i],
+    ["size", /room for new positions on this side is used up/i],
+    ["short_dump_cap", /shorts are limited on this market/i],
+    ["lp_stop_round", /liquidity is rebalancing after a loss/i],
   ])("133 with the log reason %s names the cause (structured and plain)", (why, re) => {
     const structured = resolveUserMessage(fail(133, [log(why)]), { surface: "trade" });
     expect(structured.body).toMatch(re);
@@ -334,13 +336,28 @@ describe("errors 131..135", () => {
   it("the reason can ride in the raw message text too (wallet error with logs inlined)", () => {
     const e = fail(133);
     e.message += `\n${log("size")}`;
-    expect(resolveUserMessage(e, { surface: "trade" }).body).toMatch(/bigger than/);
+    expect(resolveUserMessage(e, { surface: "trade" }).body).toMatch(/room for new positions/);
   });
   it("134 and 135 have plain lines", () => {
     expect(resolveUserMessage(fail(134), { surface: "any" }).body).toBe(LEV_GUARD_COPY.invalid);
     expect(resolveUserMessage(fail(135), { surface: "any" }).body).toBe(LEV_GUARD_COPY.lpStopNotTriggered);
     expect(V22_ERROR_CODE_MAP[134]).toBe(LEV_GUARD_COPY.invalid);
     expect(V22_ERROR_CODE_MAP[135]).toBe(LEV_GUARD_COPY.lpStopNotTriggered);
+  });
+  it("product review 2026-10-28: the 133 lines describe what the program actually checks", () => {
+    // The age clock is the market's launch (guard creation), not the token's mint: never call an old token "new".
+    expect(LEV_GUARD_COPY.refused.age_under_6h).not.toMatch(/new token/i);
+    expect(LEV_GUARD_REFUSED_TITLE.age_under_6h).toBe("New market");
+    // The short cap is structural (longs + backing), not a reaction to a price move.
+    expect(LEV_GUARD_COPY.refused.short_dump_cap).not.toMatch(/sharp move/i);
+    // The size check is the market's total room, not this account's own position.
+    expect(LEV_GUARD_COPY.refused.size).not.toMatch(/That position is bigger/);
+    // The leverage gate is on the whole position after the fill: adding margin also cures it.
+    expect(LEV_GUARD_COPY.refused.leverage).toMatch(/add margin/);
+    // 131 also fires on a withdrawal that would leave between $0 and $500; "add to the stake" alone was wrong advice there.
+    expect(LEV_GUARD_COPY.creatorStake).toMatch(/withdrawal can't leave less than \$500/);
+    // No bare "LP" jargon in trader-facing copy.
+    for (const t of [...Object.values(LEV_GUARD_COPY.refused), LEV_GUARD_COPY.lpStopNotTriggered]) expect(t).not.toMatch(/\bLP\b/);
   });
   it("all copy is one calm line without protocol vocabulary", () => {
     const all = [LEV_GUARD_COPY.creatorStake, LEV_GUARD_COPY.required, LEV_GUARD_COPY.invalid, LEV_GUARD_COPY.lpStopNotTriggered, ...Object.values(LEV_GUARD_COPY.refused)];

@@ -21,6 +21,14 @@ import { WRAPPER_ERR_V21 } from "@/lib/v21/wrapper-errors";
 /** percolator-stake error.rs: TrancheNotEnabled = 19, WrongTranche = 21. */
 export const STAKE_ERR_TRANCHE_NOT_ENABLED = 19;
 export const STAKE_ERR_WRONG_TRANCHE = 21;
+/**
+ * Product review 2026-10-28 (S-5 / S-6 / S-12): three pre-v5 stake codes (percolator-stake src/error.rs) that the stake page can hit
+ * and that fell through to "Something went wrong": the withdraw cooldown, a deposit into a pool whose market is resolved, and a deposit
+ * over the pool's cap (devnet freezes a pool with `deposit_cap = 1` once a resolve is decided: stake #318 / L5 M-3).
+ */
+export const STAKE_ERR_COOLDOWN_NOT_ELAPSED = 3;
+export const STAKE_ERR_MARKET_RESOLVED = 8;
+export const STAKE_ERR_DEPOSIT_CAP_EXCEEDED = 9;
 /** percolator-stake error.rs: 29 = AccrueFees refused because only the dead-share floor is staked (no real holders yet). */
 export const STAKE_ERR_NO_REAL_HOLDERS = 29;
 
@@ -128,6 +136,15 @@ export function v22StakeMessage(code: number, m: Build): UserMessage | null {
   }
   if (code === STAKE_ERR_WRONG_TRANCHE) {
     return m("stake-wrong-tier", "info", "Other tier in use", "This wallet already has a deposit in the other tier of this pool. Use that tier, or another wallet. Nothing was sent.");
+  }
+  if (code === STAKE_ERR_COOLDOWN_NOT_ELAPSED) {
+    return m("stake-cooldown", "wait", "Still cooling down", "This stake's cooldown hasn't ended yet. Each new deposit restarts it for the whole position. Try again after it ends. Nothing was sent.");
+  }
+  if (code === STAKE_ERR_MARKET_RESOLVED) {
+    return m("stake-market-settled", "info", "Market settled", "This market has settled, so its pool takes no new deposits. You can still withdraw. Nothing was sent.");
+  }
+  if (code === STAKE_ERR_DEPOSIT_CAP_EXCEEDED) {
+    return m("stake-cap", "info", "Deposits closed", "This pool isn't taking that much right now: it's at its deposit limit, or deposits are closed while the market is being settled. Try a smaller amount, or another pool. Nothing was sent.");
   }
   const info = STAKE_ERRORS_V5[code];
   if (!info) return null;

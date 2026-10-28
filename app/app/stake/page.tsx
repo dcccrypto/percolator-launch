@@ -2,7 +2,7 @@
 
 import { RecoverToStakers } from "@/components/stake/RecoverToStakers";
 import { stakePoolsUrl } from "@/lib/stake-pools-url";
-import { STAKE_COPY, cooldownDuration } from "@/lib/stake-copy";
+import { STAKE_COPY, cooldownDuration, stakeCopy, stakeCoverageCopy } from "@/lib/stake-copy";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { useStakeCooldown } from "@/hooks/useStakeCooldown";
 import { useEffect, useId, useState, useRef, useCallback, useSyncExternalStore, type CSSProperties } from "react";
@@ -318,9 +318,11 @@ async function fetchPoolPosition(
       const currentSlot = BigInt(await connection.getSlot());
       const slotsElapsed = currentSlot - userDepositSlot;
       const cooldownTotal = BigInt(pool.cooldownSlots);
-      if (slotsElapsed < cooldownTotal) {
+      // The program's boundary is exclusive: a withdrawal needs `slot > last_deposit_slot + cooldown_slots` (percolator-stake GH#268),
+      // so the exact boundary slot is still cooling down (product review S-12).
+      if (slotsElapsed <= cooldownTotal) {
         cooldownElapsed = false;
-        cooldownRemaining = Number(cooldownTotal - slotsElapsed);
+        cooldownRemaining = Number(cooldownTotal - slotsElapsed + 1n);
       }
     } catch {
       cooldownElapsed = false;
@@ -1602,29 +1604,31 @@ type StakeInfoKey = "how" | "backs" | "risk";
 function StakeSidebar() {
   const [open, setOpen] = useState<StakeInfoKey | null>(null);
   const toggle = (key: StakeInfoKey) => setOpen((cur) => (cur === key ? null : key));
+  const copy = stakeCopy();
+  const coverage = stakeCoverageCopy();
   return (
     <div data-testid="stake-info" className="divide-y divide-[var(--border)] border border-[var(--border)] bg-[var(--panel-bg)]">
       <StakeInfoRow id="how" title="How it works" open={open === "how"} onToggle={toggle}>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <SidebarStep num={1} title="Deposit" desc="Stake sim-USDC into a market's insurance pool" />
-          <SidebarStep num={2} title="Back the fund" desc={STAKE_COPY.backStep} />
-          <SidebarStep num={3} title="Withdraw" desc={STAKE_COPY.sidebar} />
+          <SidebarStep num={2} title="Back the fund" desc={copy.backStep} />
+          <SidebarStep num={3} title="Withdraw" desc={copy.sidebar} />
         </div>
       </StakeInfoRow>
 
-      <StakeInfoRow id="backs" title="If the pool admin moves stake into insurance" open={open === "backs"} onToggle={toggle}>
+      <StakeInfoRow id="backs" title={coverage.title} open={open === "backs"} onToggle={toggle}>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <CoverageItem label="Liquidation Shortfall" description="Moved stake can cover losses when liquidations don't fully cover a position" />
-          <CoverageItem label="Socialized Loss Buffer" description="Absorbs bad debt before it reaches the market's liquidity and Earn deposits" />
-          <CoverageItem label="Protocol Solvency" description="Pre-funds the market's insurance fund via an admin flush" />
+          {coverage.items.map((it) => (
+            <CoverageItem key={it.label} label={it.label} description={it.description} />
+          ))}
         </div>
       </StakeInfoRow>
 
       <StakeInfoRow id="risk" title="Risk notice" warning open={open === "risk"} onToggle={toggle}>
         <p className="max-w-[90ch] text-[11px] leading-relaxed text-[var(--text-secondary)]">
-          <Tooltip text={STAKE_COPY.risk.leadTip}><span className="underline decoration-dotted underline-offset-2">{STAKE_COPY.risk.lead}</span></Tooltip>{" "}
-          <Tooltip text={STAKE_COPY.risk.flushTip}><span className="underline decoration-dotted underline-offset-2">{STAKE_COPY.risk.flush}</span></Tooltip>{" "}
-          {STAKE_COPY.risk.tail}
+          <Tooltip text={copy.risk.leadTip}><span className="underline decoration-dotted underline-offset-2">{copy.risk.lead}</span></Tooltip>{" "}
+          <Tooltip text={copy.risk.flushTip}><span className="underline decoration-dotted underline-offset-2">{copy.risk.flush}</span></Tooltip>{" "}
+          {copy.risk.tail}
         </p>
       </StakeInfoRow>
     </div>

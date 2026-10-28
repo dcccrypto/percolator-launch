@@ -35,7 +35,9 @@ describe("AC5: no slots in the Stake DOM", () => {
     }
     expect(STAKE_COPY.availableIn(300)).toBe("Withdraw available in 2 min");
     expect(STAKE_COPY.ready).toBe("Ready");
-    expect(SRC).toContain("STAKE_COPY.sidebar");
+    // Product review 2026-10-28: the sidebar line now comes through stakeCopy() (v2.2 wording when the flag is on).
+    expect(SRC).toContain("desc={copy.sidebar}");
+    expect(SRC).toContain("const copy = stakeCopy();");
     expect(SRC).not.toContain("Redeem LP tokens");
   });
 });

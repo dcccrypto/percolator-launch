@@ -175,6 +175,9 @@ function PortfolioCloseFlow({
     <ClosePositionModal
       positionSize={posSize}
       previewUnavailable={!closePnl.adlKnown}
+      // Lot markets: the row shows size / entry per lot (pos.lotExp); without this the modal read lotExp 0 and disagreed with
+      // the row it was opened from (product review T-5).
+      lotExp={pos.lotExp ?? 0}
       entryPrice={closePnl.pnlKnown ? closePnl.entry : 0n}
       currentPrice={markE6}
       capital={pos.account?.capital ?? 0n}
