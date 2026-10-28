@@ -1,6 +1,6 @@
 /*
- * LOCAL ADAPTER PORT, not original code: from percolator-sdk feat/v22-sdk-integration @ f1cada61746e8c4a5670dc1326fc5ee12d799099
- * (#426, "tag 124 leverage guard", additive, no version bump), src/abi/lev-guard-v22.ts + src/solana/lev-guard-v22.ts. Ported minimally for the
+ * LOCAL ADAPTER PORT, not original code: from percolator-sdk feat/v22-sdk-growth @ 7aeb7a13a1b95892a291e86f9e0b8453f85f1c61 (#427)
+ * (tag 124 leverage guard, additive, no version bump; ported pieces identical to f1cada61 / #426), src/abi/lev-guard-v22.ts + src/solana/lev-guard-v22.ts. Ported minimally for the
  * app: constants, the instruction-data encoders, the op account lists, the age band, the guard / program-data PDAs, the op 0 INIT builder and
  * the TradeCpi / EvictAndTradeCpi guard tail. The kind-17 account DECODER and the keeper-side builders (ops 1 to 6) are not ported (the app only
  * needs to know the guard exists, not read it). Only the imports are retargeted (installed @percolatorct/sdk 8.0.0 root, ./v22-wire).

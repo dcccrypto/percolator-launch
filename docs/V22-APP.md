@@ -23,7 +23,7 @@ ports + one adapter), see `app/lib/v22/sdk/index.ts`:
 
 ### Leverage guard (wrapper tag 124), 2026-10-28
 
-Ported from percolator-sdk `feat/v22-sdk-integration` @ f1cada61746e8c4a5670dc1326fc5ee12d799099 (#426): `lib/v22/sdk/lev-guard-v22.ts` (constants, op encoders, op account lists, age band, guard / program-data PDAs, the op 0 INIT builder,
+Ported from percolator-sdk `feat/v22-sdk-growth` @ 7aeb7a13a1b95892a291e86f9e0b8453f85f1c61 (PR #427) (#426): `lib/v22/sdk/lev-guard-v22.ts` (constants, op encoders, op account lists, age band, guard / program-data PDAs, the op 0 INIT builder,
 `withLevGuardTailV22`; the kind-17 decoder and the keeper-side ops 1 to 6 builders are NOT ported) and the 131..135 rows of `errors-v22.ts`. Wire: ledger `v22-lev-guard-wire-spec-2026-10-28.md`.
 - **Launch**: `buildP3BindIxs({ levGuard })` appends op 0 (`t0 = 0`, creator = market authority) after the junior deposit, only with the growth block (the program answers 134 without it) and the v2.2 flag. The batched M4p, the single-transaction launch
   (`launch-single-tx/shape.ts` knows `wrapper.LevGuardInit`: position, exact accounts, `t0 = 0`) and the sequential resume path (`planLevGuardLaunch`: sends it when missing and the creator can still sign; a failed send stops the launch with `LEV_GUARD_INIT_FAILED`) all carry it. The creator pays the guard's rent (4,456 B, about 0.031 SOL).

@@ -1,5 +1,5 @@
 /*
- * LOCAL ADAPTER PORT, not original code: the v2.2 additions to PERCOLATOR_ERRORS (codes 104-119, 123-127, 131-135 from feat/v22-sdk-integration f1cada61; 125-127 added from feat/v22-sdk b60b36d) verbatim from percolator-sdk
+ * LOCAL ADAPTER PORT, not original code: the v2.2 additions to PERCOLATOR_ERRORS (codes 104-119, 123-127, 131-135 from feat/v22-sdk-growth 7aeb7a13; 125-127 added from feat/v22-sdk b60b36d) verbatim from percolator-sdk
  * feat/v22-sdk @ ecb6215 (draft dcccrypto/percolator-sdk#406) src/abi/errors.ts, lifted into their own table because the installed
  * @percolatorct/sdk 8.0.0 table stops at 122. Delete when @percolatorct/sdk >= 9.0.0 ships. Do not edit here; fix upstream.
  */
