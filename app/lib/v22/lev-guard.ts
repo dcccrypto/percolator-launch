@@ -104,7 +104,9 @@ export type LevGuardLaunchAction =
   /** Not a launch the guard applies to (flag off, no growth block, or no vault LP). */
   | { action: "not-applicable" }
   /** The creator is no longer the market authority (the stake pool exists), so only the upgrade authority could add it now. */
-  | { action: "authority-rotated" };
+  | { action: "authority-rotated" }
+  /** As above, and the user chose to continue without the guard. Logged by the caller. */
+  | { action: "authority-rotated-accepted" };
 
 /**
  * Decide the guard step of a launch (or of its resume). Pure: the caller reads `guardExists` and `poolExists` from the chain.
@@ -116,15 +118,31 @@ export function planLevGuardLaunch(p: {
   vaultLpBound: boolean;
   guardExists: boolean;
   poolExists: boolean;
+  /** The user acknowledged continuing without a guard (the wizard's explicit button). */
+  acceptNoGuard?: boolean;
   programId: PublicKey;
   market: PublicKey;
   creator: PublicKey;
 }): LevGuardLaunchAction {
   if (!p.v22On || !p.growth || !p.vaultLpBound) return { action: "not-applicable" };
   if (p.guardExists) return { action: "exists" };
-  if (p.poolExists) return { action: "authority-rotated" };
+  if (p.poolExists) return { action: p.acceptNoGuard ? "authority-rotated-accepted" : "authority-rotated" };
   return { action: "send", ix: buildLevGuardInitIx(p.programId, p.market, p.creator) };
 }
+
+/**
+ * Account length the rent is costed at. 4,456 B today; 4,472 B once percolator-prog #605 (burst-memory layout) lands. Costing the larger
+ * keeps the SOL pre-check from under-counting either way (a few thousand lamports of headroom). The app never decodes a guard, so no
+ * length is checked anywhere else.
+ */
+export const LEV_GUARD_RENT_ACCOUNT_LEN = 4_472;
+
+/** The launch creates a guard: v2.2 on, with a growth block and the vault-LP bind (the program answers 134 otherwise). */
+export const levGuardApplies = (p: { v22On: boolean; growth: boolean; p3: boolean }): boolean => p.v22On && p.growth && p.p3;
+
+/** Shown, and blocking until acknowledged, when a resumed launch has no guard and the creator can no longer create it. */
+export const LEV_GUARD_MISSING_BLOCK =
+  "This market has no safety guard, and its creator can no longer add one: the market authority has already moved to the stake pool. Only the upgrade authority can create the guard now, so ask the Percolator team to do it. You can continue without it, but until it exists this market trades without the new leverage and new-token limits.";
 
 /** The line shown when the guard could not be created. The launch stops there rather than carrying on without it. */
 export const LEV_GUARD_INIT_FAILED = "The market was created, but its safety guard could not be set up, so the launch stopped here. Nothing else was changed. Try again to finish it.";

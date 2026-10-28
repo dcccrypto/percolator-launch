@@ -11,6 +11,9 @@ import { resolveUserMessage } from "@/lib/limits/user-message";
 import { humanizeError } from "@/lib/errorMessages";
 import { resolveDevnetProgramIds } from "@/lib/program-ids";
 import {
+  LEV_GUARD_MISSING_BLOCK,
+  LEV_GUARD_RENT_ACCOUNT_LEN,
+  levGuardApplies,
   LEV_GUARD_MISS_TTL_MS,
   buildLevGuardInitIx,
   levGuardExists,
@@ -26,6 +29,8 @@ import { WRAPPER_ERR_V22 } from "@/lib/v22/wrapper-errors";
 import { PERCOLATOR_ERRORS_V22 } from "@/lib/v22/sdk";
 import { buildTradeIxs } from "@/lib/trade-ix";
 import { buildP3BindIxs } from "@/lib/limits/p3-wizard";
+import { computeCreateMarketSolCost, remainingCreateMarketSolCost } from "@/components/create/CostEstimate";
+import { rentSol } from "@/lib/rent";
 import { levGuardInitViolations, classifyLaunchIx, expectedLaunchShape, neutralFromInstructions, MARKETAUTH_GATED } from "@/lib/launch-single-tx/shape";
 import { LEV_GUARD_ACCOUNT_LEN_V22, LEV_GUARD_OP_V22, TAG_LEV_GUARD_V22, deriveProgramDataV22, levAgeBandV22 } from "@/lib/v22/sdk";
 
@@ -354,5 +359,52 @@ describe("errors 131..135", () => {
   it("flag off: the guard codes are not interpreted (v2.1 build reads wrapper codes only up to its own table)", () => {
     __setDevnetV22ForTest(false);
     expect(resolveUserMessage(fail(132), { surface: "trade" }).kind).not.toBe("lev-guard-required");
+  });
+});
+
+// ── security review A-1 / A-2 ───────────────────────────────────────────────────────────────────
+describe("A-1: the guard's rent is in the SOL estimate and gate", () => {
+  it("costed at 4,472 B (the larger layout)", () => expect(LEV_GUARD_RENT_ACCOUNT_LEN).toBe(4_472));
+  it("levGuard on adds exactly rentSol(4472) to the total and shows as its own line", () => {
+    const off = computeCreateMarketSolCost({ p3: true });
+    const on = computeCreateMarketSolCost({ p3: true, levGuard: true });
+    expect(off.levGuardRentSol).toBeUndefined();
+    expect(on.levGuardRentSol).toBeCloseTo(rentSol(4_472), 12);
+    expect(on.totalSolCost - off.totalSolCost).toBeCloseTo(rentSol(4_472), 12);
+    expect(on.levGuardRentSol!).toBeGreaterThan(0.022);
+  });
+  it("the resume remainder keeps the guard rent (conservative)", () => {
+    const on = computeCreateMarketSolCost({ p3: true, levGuard: true });
+    expect(remainingCreateMarketSolCost(on, 3, { p3: true })).toBeGreaterThan(remainingCreateMarketSolCost(computeCreateMarketSolCost({ p3: true }), 3, { p3: true }));
+  });
+  it("applies only with v2.2 on, a growth block and the vault-LP bind", () => {
+    expect(levGuardApplies({ v22On: true, growth: true, p3: true })).toBe(true);
+    for (const p of [{ v22On: false, growth: true, p3: true }, { v22On: true, growth: false, p3: true }, { v22On: true, growth: true, p3: false }]) expect(levGuardApplies(p)).toBe(false);
+  });
+});
+
+describe("A-2: a rotated market without a guard blocks unless acknowledged", () => {
+  const a = { v22On: true, growth: true, vaultLpBound: true, guardExists: false, poolExists: true, programId: PROG, market: k(), creator: k() };
+  it("default: blocking action (the hook throws LEV_GUARD_MISSING_BLOCK)", () => expect(planLevGuardLaunch(a).action).toBe("authority-rotated"));
+  it("acknowledged: continues, as its own logged action", () => expect(planLevGuardLaunch({ ...a, acceptNoGuard: true }).action).toBe("authority-rotated-accepted"));
+  it("an existing guard never blocks, acknowledged or not", () => expect(planLevGuardLaunch({ ...a, guardExists: true }).action).toBe("exists"));
+  it("the text names the upgrade authority and the explicit choice", () => {
+    expect(LEV_GUARD_MISSING_BLOCK).toMatch(/upgrade authority/);
+    expect(LEV_GUARD_MISSING_BLOCK).toMatch(/continue without it/);
+  });
+});
+
+describe("A-1 / A-2 wiring (source guard)", () => {
+  const src = (f: string) => require("node:fs").readFileSync(require("node:path").join(__dirname, "../../..", f), "utf8") as string;
+  it("the launch's SOL pre-check adds the guard rent, and a rotated market throws the blocking text unless acknowledged", () => {
+    const h = src("hooks/useCreateMarket.ts");
+    expect(h).toMatch(/totalRent = slabRent \+ portfolioRent \+ matcherCtxRent \+ mintRent \+ tokenAcctRent \+ levGuardRent/);
+    expect(h).toMatch(/throw new Error\(LEV_GUARD_MISSING_BLOCK\)/);
+    expect(h).toMatch(/acceptNoGuard: params\.acceptNoLevGuard === true/);
+  });
+  it("the wizard shows the acknowledgement button and passes the cost option", () => {
+    const w = src("components/create/CreateMarketWizard.tsx");
+    expect(w).toMatch(/data-testid="lev-guard-continue"/);
+    expect(w).toMatch(/computeCreateMarketSolCost\(\{ p3: p3WizardEnabled\(\), levGuard: levGuardOn \}\)/);
   });
 });

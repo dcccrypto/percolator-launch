@@ -128,7 +128,7 @@ import { staleResolveLaunchIxs, staleWindowRepair, buildConfigurePermissionlessR
 import type { V22LaunchParams } from "@/lib/v22/launch-plan";
 import { V21_COPY } from "@/lib/v21/copy";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
-import { LEV_GUARD_INIT_FAILED, levGuardPda, planLevGuardLaunch } from "@/lib/v22/lev-guard";
+import { LEV_GUARD_INIT_FAILED, LEV_GUARD_MISSING_BLOCK, LEV_GUARD_RENT_ACCOUNT_LEN, levGuardApplies, levGuardPda, planLevGuardLaunch } from "@/lib/v22/lev-guard";
 import { buildP3BindIxs, canonicalVaultLpMatcher, p3BindProgress, validateP3Wizard } from "@/lib/limits/p3-wizard";
 import { COPY as LIMITS_COPY } from "@/lib/limits/copy";
 import { buildDepositJuniorTrancheIx, deriveVaultLpState } from "@/lib/limits/p3-ix";
@@ -332,6 +332,8 @@ export interface VammParams {
 }
 
 export interface CreateMarketParams {
+  /** v2.2: a resume may continue on a market that has no leverage guard and cannot get one from the creator (the user acknowledged it). */
+  acceptNoLevGuard?: boolean;
   mint: PublicKey;
   initialPriceE6: bigint;
   lpCollateral: bigint;
@@ -984,6 +986,10 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
       getCachedRentExemption(connection, MATCHER_CONTEXT_LEN),
       getCachedRentExemption(connection, MINT_SIZE),
       getCachedRentExemption(connection, ACCOUNT_SIZE),
+      // v2.2 leverage guard (tag 124 op 0): the creator pays its rent (4,472 B costed; 4,456 B today).
+      levGuardApplies({ v22On: isDevnetV22Enabled(), growth: !!params.growth, p3: !!params.p3 })
+        ? getCachedRentExemption(connection, LEV_GUARD_RENT_ACCOUNT_LEN)
+        : Promise.resolve(0),
     ]);
     const balancePromise = connection.getBalance(walletPk);
 
@@ -1061,10 +1067,10 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
       ? await buildKeeperRegisterMemoIx(walletPk, await keeperMemoParams({ ...keeperRequestBase, payload: keeperPayload }))
       : null;
 
-    const [slabRent, portfolioRent, matcherCtxRent, mintRent, tokenAcctRent] = await rentPromise;
+    const [slabRent, portfolioRent, matcherCtxRent, mintRent, tokenAcctRent, levGuardRent] = await rentPromise;
     const solBalance = await balancePromise;
     const effectiveSlabSize = slabSizeFor(params);
-    const totalRent = slabRent + portfolioRent + matcherCtxRent + mintRent + tokenAcctRent;
+    const totalRent = slabRent + portfolioRent + matcherCtxRent + mintRent + tokenAcctRent + levGuardRent;
     const minSolRequired = totalRent + 20_000_000; // rent + ~0.02 SOL for 5-6 tx fees/priority fees
     if (solBalance < minSolRequired) {
       if (isDevnetEnv) {
@@ -4217,6 +4223,7 @@ export function useCreateMarket() {
               vaultLpBound: true,
               guardExists: !!(await connection.getAccountInfo(levGuardPda(programId, slabPk), "confirmed"))?.data.length,
               poolExists: !!existingPool,
+              acceptNoGuard: params.acceptNoLevGuard === true,
               programId,
               market: slabPk,
               creator: wallet.publicKey,
@@ -4231,7 +4238,12 @@ export function useCreateMarket() {
                 throw new Error(`${LEV_GUARD_INIT_FAILED} (${e instanceof Error ? e.message : String(e)})`);
               }
             } else if (guardPlan.action === "authority-rotated") {
-              console.warn("[useCreateMarket] leverage guard is missing and marketauth has already moved to the stake pool; only the upgrade authority can add it now");
+              // Blocking by default: the market would trade without its guard. The wizard shows this text with an explicit
+              // "continue without the guard" button that retries with acceptNoLevGuard.
+              console.error(`[useCreateMarket] BLOCKED: leverage guard missing on ${slabPk.toBase58()} and marketauth already moved to the stake pool; only the upgrade authority can create it`);
+              throw new Error(LEV_GUARD_MISSING_BLOCK);
+            } else if (guardPlan.action === "authority-rotated-accepted") {
+              console.error(`[useCreateMarket] CONTINUING WITHOUT GUARD (user acknowledged): ${slabPk.toBase58()} has no leverage guard; the upgrade authority must create it`);
             }
           }
           if (!existingPool) {

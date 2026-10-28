@@ -9,6 +9,7 @@ import { MATCHER_CONTEXT_LEN } from "@percolatorct/sdk";
 import { portfolioAccountLen } from "@/lib/v22/layout";
 import { SHARE_NAMING_NET_LAMPORTS, isShareNamingEnabled } from "@/lib/v22/share-naming";
 import { rentSol } from "@/lib/rent";
+import { LEV_GUARD_RENT_ACCOUNT_LEN } from "@/lib/v22/lev-guard";
 
 interface CostEstimateProps {
   lpCollateral: string;
@@ -16,6 +17,8 @@ interface CostEstimateProps {
   tokenSymbol: string;
   tokenDecimals: number;
   tokenPriceUsd?: number;
+  /** v2.2: the launch creates a leverage guard (adds its rent). */
+  levGuard?: boolean;
   className?: string;
 }
 
@@ -64,6 +67,8 @@ export interface CreateMarketSolCostBreakdown {
    * (the wallet briefly holds 0.03 SOL for it; the rest comes back in the same instruction).
    */
   shareNamingSol?: number;
+  /** v2.2 only: the leverage guard account's rent (tag 124 op 0, costed at 4,472 B). Absent unless a guard is created. */
+  levGuardRentSol?: number;
   totalSolCost: number;
 }
 
@@ -94,7 +99,7 @@ export function remainingCreateMarketSolCost(
  * TX_FEE_ESTIMATE_SOL constants on top of the missing LP-portfolio/matcher rent).
  */
 export function computeCreateMarketSolCost(
-  opts: { p3?: boolean } = {},
+  opts: { p3?: boolean; levGuard?: boolean } = {},
 ): CreateMarketSolCostBreakdown {
   // BUG 1 fix: the v17 slab account length is fixed per market kind, never per tier.
   // Every new launch, legacy and P3, encodes maxPortfolioAssets:1 (P3 because tag 94 refuses
@@ -123,8 +128,10 @@ export function computeCreateMarketSolCost(
   // v2.2: naming the Earn share token (tag 122) costs the Metaplex record's rent + create fee.
   const shareNamingSol = isShareNamingEnabled() ? SHARE_NAMING_NET_LAMPORTS / 1_000_000_000 : null;
 
+  const levGuardRentSol = opts.levGuard === true ? rentSol(LEV_GUARD_RENT_ACCOUNT_LEN) : null;
+
   const totalSolCost =
-    slabRentSol + tokenAccountRentSol + lpPortfolioMatcherRentSol + earnVaultStakeRentSol + TX_FEE_ESTIMATE_SOL + (shareNamingSol ?? 0);
+    slabRentSol + tokenAccountRentSol + lpPortfolioMatcherRentSol + earnVaultStakeRentSol + TX_FEE_ESTIMATE_SOL + (shareNamingSol ?? 0) + (levGuardRentSol ?? 0);
 
   return {
     slabRentSol,
@@ -133,6 +140,7 @@ export function computeCreateMarketSolCost(
     earnVaultStakeRentSol,
     txFeeSol: TX_FEE_ESTIMATE_SOL,
     ...(shareNamingSol !== null ? { shareNamingSol } : {}),
+    ...(levGuardRentSol !== null ? { levGuardRentSol } : {}),
     totalSolCost,
   };
 }
@@ -147,10 +155,11 @@ export const CostEstimate: FC<CostEstimateProps> = ({
   tokenSymbol,
   tokenDecimals,
   tokenPriceUsd,
+  levGuard,
   className = "",
 }) => {
   const estimate = useMemo(() => {
-    const sol = computeCreateMarketSolCost({ p3: p3WizardEnabled() });
+    const sol = computeCreateMarketSolCost({ p3: p3WizardEnabled(), levGuard });
 
     // Token costs.
     // W11 fix (2026-07-08): useCreateMarket.ts no longer transfers a 500-token vault
@@ -189,7 +198,7 @@ export const CostEstimate: FC<CostEstimateProps> = ({
       dataSize: wizardSlabBytes(p3WizardEnabled()),
       tokenDecimals,
     };
-  }, [lpCollateral, insuranceAmount, tokenPriceUsd, tokenDecimals]);
+  }, [lpCollateral, insuranceAmount, tokenPriceUsd, tokenDecimals, levGuard]);
 
   return (
     <div className={`border border-[var(--border)] bg-[var(--bg)] ${className}`}>

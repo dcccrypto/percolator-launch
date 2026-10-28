@@ -34,6 +34,7 @@ import { WizardProgress } from "./WizardProgress";
 import { StepTokenSelect } from "./StepTokenSelect";
 import { StepControlRoom, leverageToMarginBps, marginBpsToLeverage } from "./StepControlRoom";
 import { LaunchProgress } from "./LaunchProgress";
+import { LEV_GUARD_MISSING_BLOCK, levGuardApplies } from "@/lib/v22/lev-guard";
 import { retryBlockedReason } from "@/lib/retry-blocked";
 import { LaunchSuccess } from "./LaunchSuccess";
 import { GrowthLaunchControls, type GrowthLaunchState } from "./GrowthLaunchControls";
@@ -517,9 +518,11 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
   // lamports." Delegates to computeCreateMarketSolCost() (CostEstimate.tsx), the SAME formula
   // the Control Room's rent readout uses, so the gate and the displayed number can't drift
   // apart.
+  // v2.2: the leverage guard's rent (the launch creates one with a growth block) is part of the cost and of the gate.
+  const levGuardOn = levGuardApplies({ v22On: isDevnetV22Enabled(), growth: !!growthLaunch, p3: p3WizardEnabled() });
   const solCostBreakdown = useMemo(
-    () => computeCreateMarketSolCost({ p3: p3WizardEnabled() }),
-    [],
+    () => computeCreateMarketSolCost({ p3: p3WizardEnabled(), levGuard: levGuardOn }),
+    [levGuardOn],
   );
   // Resuming a stuck launch: only the steps still to run need SOL (the slab is about a sixth of the
   // total, not the bulk; the LP accounts are the largest part once step 2 has landed). Still a
@@ -1150,7 +1153,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
 
   // Retry from failed step. `withoutBond` (I-1): the same retry with the bond left out, after the resume refused it.
   // Returns false when it stopped before calling create().
-  const retry = (withoutBond: boolean): boolean => {
+  const retry = (withoutBond: boolean, acceptNoLevGuard = false): boolean => {
     // #3601: a bond launch that failed at step 0 (declined prompt, simulation) left nothing on chain and can only go as
     // one transaction: Continue is a fresh launch, not the step-by-step path (which refuses a bond).
     if (!withoutBond) {
@@ -1182,6 +1185,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
     });
 
     const params: CreateMarketParams = {
+      ...(acceptNoLevGuard ? { acceptNoLevGuard: true } : {}),
       mint: new PublicKey(collateralMintAddress),
       initialPriceE6: launchPriceE6(priceE6),
       lpCollateral: parseHumanAmount(wizard.lpCollateral || "0", decimals),
@@ -1224,8 +1228,14 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
     create(applySameBrowserPin(applyRecoveredLaunch(params, gate.resume), activeSameBrowserPin), createState.step);
     return true;
   };
+  const guardMissingBlock = createState.error === LEV_GUARD_MISSING_BLOCK;
   const handleRetry = () => {
     retry(false);
+  };
+  // v2.2: the explicit acknowledgement for a market that has no guard and cannot get one from the creator.
+  const handleContinueWithoutGuard = () => {
+    console.error("[wizard] user chose to continue a launch without the leverage guard");
+    retry(false, true);
   };
   // I-1: continue the refused resume without the bond, the way it was started (a resume from the banner or the
   // chain re-runs launch at resumeFromStep; an in-session retry re-runs at the failed step). The form is unticked
@@ -1341,10 +1351,18 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
         )}
         {/* A Retry refused by the chain-resume gate must say why here too: this view replaces the main one. */}
         <ChainResumeNotice message={chainResumeError} />
+        {guardMissingBlock && (
+          <div data-testid="lev-guard-missing" role="alert" className="mx-4 mt-4 border border-[var(--warning)]/40 bg-[var(--warning)]/[0.06] px-4 py-3 text-[11px] text-[var(--text)] sm:mx-6">
+            <p>{LEV_GUARD_MISSING_BLOCK}</p>
+            <button type="button" data-testid="lev-guard-continue" onClick={handleContinueWithoutGuard} className="mt-2 border border-[var(--warning)]/60 px-3 py-1 text-[11px] uppercase">
+              I understand, continue without the guard
+            </button>
+          </div>
+        )}
         <LaunchProgress
           state={createState}
           onReset={handleReset}
-          onRetry={bondRetry === "hidden" ? undefined : handleRetry}
+          onRetry={bondRetry === "hidden" || guardMissingBlock ? undefined : handleRetry}
           bondChoice={bondRefusal ? {
             // Too large is not a passing failure: the same launch would be refused the same way.
             onTryAgain: createState.error === bondNeedsSingleTxMessage ? handleBondTryAgain : undefined,

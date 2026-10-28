@@ -4,6 +4,8 @@
  * app: constants, the instruction-data encoders, the op account lists, the age band, the guard / program-data PDAs, the op 0 INIT builder and
  * the TradeCpi / EvictAndTradeCpi guard tail. The kind-17 account DECODER and the keeper-side builders (ops 1 to 6) are not ported (the app only
  * needs to know the guard exists, not read it). Only the imports are retargeted (installed @percolatorct/sdk 8.0.0 root, ./v22-wire).
+ * Account length note: the guard is 4,456 B here (`LEV_GUARD_ACCOUNT_LEN_V22`); percolator-prog #605 (burst-memory layout) makes it 4,472 B and the SDK decoder
+ * (percolator-sdk #429) accepts both. The app never decodes a guard; its rent is costed at 4,472 B (`LEV_GUARD_RENT_ACCOUNT_LEN` in ../lev-guard.ts).
  * Delete when @percolatorct/sdk >= 9.0.0 ships these and point ./index.ts at the package. Do not edit here; fix upstream in percolator-sdk.
  */
 import { PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
