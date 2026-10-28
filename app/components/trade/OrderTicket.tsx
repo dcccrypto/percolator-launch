@@ -2250,7 +2250,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             /* A trader saw what they pay and nothing about where it goes. #2565. Product review T-1: the extras are named too. */
             tooltip={
               estFeeHasExtras
-                ? `Estimated ${estFeeBps.toString()} bps: the market's ${tradingFeeBps.toString()} bps base fee plus the market maker's quote fee${ticketLimits.fee?.utilFeeBps ? " and the busy-side fee" : ""}. The extra parts go to the market's liquidity (Earn). Your signature caps the total.${feeDestinationTitle ? ` Base fee split: ${feeDestinationTitle}` : ""}`
+                ? `Estimated ${(Number(estFeeBps) / 100).toFixed(2)}%: the market's ${(Number(tradingFeeBps) / 100).toFixed(2)}% base fee plus the market maker's quote fee${ticketLimits.fee?.utilFeeBps ? " and the busy-side fee" : ""}. The extra parts go to the market's liquidity (Earn). Your signature caps the total.${feeDestinationTitle ? ` Base fee split: ${feeDestinationTitle}` : ""}`
                 : feeDestinationTitle
             }
           />
