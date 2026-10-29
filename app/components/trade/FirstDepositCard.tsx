@@ -10,6 +10,7 @@ import { errorText } from "@/lib/error-text";
 import { FC, useState } from "react";
 import { useFirstTrade } from "@/hooks/useFirstTrade";
 import { parseHumanAmount } from "@/lib/parseAmount";
+import { useDecimalInput } from "@/hooks/useDecimalInput";
 import { formatTokenAmount } from "@/lib/format";
 import { humanizeError } from "@/lib/errorMessages";
 import { explorerTxUrl } from "@/lib/config";
@@ -28,15 +29,14 @@ interface Props {
   symbol: string;
 }
 
-function sanitize(v: string): string {
-  const c = v.replace(/[^0-9.]/g, "");
-  const i = c.indexOf(".");
-  return i === -1 ? c : c.slice(0, i + 1) + c.slice(i + 1).replace(/\./g, "");
-}
-
 export const FirstDepositCard: FC<Props> = ({ slabAddress, walletBalance, decimals, symbol }) => {
   const { createAndDeposit, loading } = useFirstTrade(slabAddress);
   const [amount, setAmount] = useState("");
+  // #3575: a typed decimal comma is a decimal point ("1,5" = 1.5); the field shows what was typed, the state holds the canonical value.
+  const amountField = useDecimalInput(amount, (v) => {
+    setError(null);
+    setAmount(v);
+  });
   const [error, setError] = useState<string | null>(null);
   const [sig, setSig] = useState<string | null>(null);
 
@@ -69,11 +69,7 @@ export const FirstDepositCard: FC<Props> = ({ slabAddress, walletBalance, decima
           data-testid="first-deposit-amount"
           type="text"
           inputMode="decimal"
-          value={amount}
-          onChange={(e) => {
-            setError(null);
-            setAmount(sanitize(e.target.value));
-          }}
+          {...amountField}
           disabled={loading}
           placeholder="0.00"
           aria-label={`Deposit amount in ${symbol}`}
