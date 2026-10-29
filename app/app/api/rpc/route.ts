@@ -336,13 +336,19 @@ interface JsonRpcRequest {
 }
 
 const MAX_GPA_MEMCMP_BYTES = 128;
+/**
+ * Longest text that can encode MAX_GPA_MEMCMP_BYTES: 175 base58 chars (ceil(128 * log 256 / log 58));
+ * base64 needs 172. Checked BEFORE decoding: bs58.decode is ~quadratic (a 200k-char string costs
+ * ~20 s of CPU), so an unbounded string would be a per-request CPU sink on this route.
+ */
+const MAX_GPA_MEMCMP_CHARS = 175;
 
 /** Validate decoded memcmp bytes before forwarding to the RPC. */
 function isValidGpaMemcmpBytes(
   bytes: unknown,
   encoding: unknown,
 ): boolean {
-  if (typeof bytes !== "string" || bytes.length === 0) {
+  if (typeof bytes !== "string" || bytes.length === 0 || bytes.length > MAX_GPA_MEMCMP_CHARS) {
     return false;
   }
 
