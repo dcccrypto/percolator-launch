@@ -17,6 +17,8 @@ const loadReferrals = () => import("@/components/portfolio/ReferralsTab");
 const tabLoading = () => <div className="min-h-[60vh]" aria-busy="true" />;
 const PortfolioPositionsView = dynamic(() => loadPositions().then((m) => m.PortfolioPositionsView), { ssr: false, loading: tabLoading });
 const RetiredHoldings = dynamic(() => loadRetired().then((m) => m.RetiredHoldings), { ssr: false });
+// D2 gate: positions reduced without the trader's order (v2.2 only; renders nothing with the flag off).
+const ReduceEventsPanel = dynamic(() => import("@/components/portfolio/ReduceEventsPanel").then((m) => m.ReduceEventsPanel), { ssr: false });
 const WalletPage = dynamic(loadWallet, { ssr: false, loading: tabLoading });
 const MyMarketsPage = dynamic(loadMyMarkets, { ssr: false, loading: tabLoading });
 const ReferralsTab = dynamic(loadReferrals, { ssr: false, loading: tabLoading });
@@ -93,6 +95,7 @@ export default function PortfolioHubPage() {
               universe above cannot show them by design; this section is the
               audit fix that keeps them visible to their owners. */}
           <RetiredHoldings />
+          <ReduceEventsPanel />
         </>
       )}
       {tab === "wallet" && <WalletPage />}
