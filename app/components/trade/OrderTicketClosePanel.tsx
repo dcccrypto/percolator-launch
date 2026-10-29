@@ -27,6 +27,8 @@ export interface OrderTicketClosePanelProps {
   accountPending?: boolean;
   /** Resolved entry price (E6), or 0n when UNKNOWN (#2660) — never the mark placeholder. */
   entryPriceE6: bigint;
+  /** #3534: the risk entry the close preview's balance-after is valued from. Omitted = `entryPriceE6`. */
+  riskEntryPriceE6?: bigint;
   capital: bigint;
   symbol: string;
   collateralSymbol: string;
@@ -80,6 +82,7 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
   lotExp = 0,
   accountPending = false,
   entryPriceE6,
+  riskEntryPriceE6,
   capital,
   symbol,
   collateralSymbol,
@@ -219,6 +222,7 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
         positionSize={positionSize}
         lotExp={lotExp}
         entryPrice={entryPriceE6}
+        riskEntryPrice={riskEntryPriceE6}
         currentPrice={currentPriceE6}
         capital={capital}
         symbol={symbol}

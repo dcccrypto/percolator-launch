@@ -111,6 +111,7 @@ export const CloseFlow: FC<{
       // the row it was opened from (product review T-5).
       lotExp={pos.lotExp ?? 0}
       entryPrice={closePnl.pnlKnown ? closePnl.entry : 0n}
+      riskEntryPrice={closePnl.pnlKnown ? closePnl.riskEntry : 0n}
       currentPrice={markE6}
       capital={pos.account?.capital ?? 0n}
       symbol={symbol}

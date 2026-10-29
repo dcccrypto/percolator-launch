@@ -691,6 +691,7 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
           positionSize={effectiveSize}
           previewUnavailable={!pnlResult.adlKnown}
           entryPrice={pnlIsKnown ? entryPriceE6 : 0n}
+          riskEntryPrice={pnlIsKnown ? riskEntryE6 : 0n}
           currentPrice={currentPriceE6}
           capital={account.capital}
           symbol={symbol}

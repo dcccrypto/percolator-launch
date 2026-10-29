@@ -28,6 +28,8 @@ export interface LivePositionMetric {
   pnlKnown: boolean;
   /** PnL rests on a back-solved entry: label it "est.". */
   isEstimate: boolean;
+  /** #3534: the PnL that adds to the position's capital in the account's value (differs from `pnl` only on a fully settled leg). */
+  valuePnl: bigint;
 }
 
 export interface LivePortfolioMetrics {
@@ -142,6 +144,7 @@ export function useLivePortfolioMetrics(
         position: pos,
         markE6,
         pnl: live.unrealizedPnl ?? 0n,
+        valuePnl: live.riskUnrealizedPnl ?? 0n,
         pnlPercent: live.roe ?? 0,
         pnlKnown: live.pnlKnown,
         isEstimate: live.isEstimate,
@@ -152,6 +155,8 @@ export function useLivePortfolioMetrics(
       (sum, metric) => sum + metric.pnl,
       0n,
     );
+    // #3534: value = capital + the PnL still on top of it. A settled loss already left capital, so the since-entry PnL is not added again.
+    const totalValuePnl = livePositions.reduce((sum, metric) => sum + metric.valuePnl, 0n);
     const totalPendingProfit = positions.reduce((sum, pos) => sum + pendingProfit(pos), 0n);
 
     return {
@@ -159,7 +164,7 @@ export function useLivePortfolioMetrics(
       openPositions,
       livePositions,
       totalUnrealizedPnl,
-      totalValue: totalDeposited + totalPendingProfit + totalUnrealizedPnl,
+      totalValue: totalDeposited + totalPendingProfit + totalValuePnl,
     };
   }, [positions, openPositions, totalDeposited, liveVersion]);
 }

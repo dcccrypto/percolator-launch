@@ -181,6 +181,11 @@ function resolveSymbol(slabAddrStr: string, symbolBySlab: Map<string, string>): 
   return symbolBySlab.get(slabAddrStr) ?? PLAYGROUND_SLAB_META[slabAddrStr]?.symbol ?? null;
 }
 
+/** #3534: the PnL that adds to a position's capital in the account's value (see `PortfolioPosition.riskUnrealizedPnl`). */
+export function positionValuePnl(pos: { unrealizedPnl: bigint; riskUnrealizedPnl?: bigint }): bigint {
+  return pos.riskUnrealizedPnl ?? pos.unrealizedPnl;
+}
+
 export interface PortfolioPosition {
   slabAddress: string;
   symbol: string | null;
@@ -220,6 +225,12 @@ export interface PortfolioPosition {
   liquidationState: LiquidationState;
   /** Unrealized PnL (mark-to-market using oracle) */
   unrealizedPnl: bigint;
+  /**
+   * #3534: the PnL that adds to `capital` to give the account's value (`q x (mark - riskEntry)`). Differs from `unrealizedPnl`
+   * only on a fully settled leg, where adding the since-entry figure to the capital counts the settled loss twice. VALUE sums
+   * use this (`positionValuePnl`); `unrealizedPnl` stays the since-entry figure for display.
+   */
+  riskUnrealizedPnl?: bigint;
   /**
    * How trustworthy `effectiveEntryPrice` / `unrealizedPnl` are — see
    * `resolveEntryPrice`. When "unknown" the entry price could not be
@@ -631,6 +642,7 @@ export function buildV17Position(
     liquidationDistancePct,
     liquidationState,
     unrealizedPnl,
+    riskUnrealizedPnl: pnlResult.riskUnrealizedPnl ?? unrealizedPnl,
     entryPriceSource,
     realizedLoss: portfolio.residualCrystallizedLossAtomsTotal,
     effectiveSize,
@@ -742,6 +754,8 @@ export async function fetchPortfolioSnapshot(
   let pnlSum = 0n;
   let depositSum = 0n;
   let unrealizedPnlSum = 0n;
+  // #3534: what adds to capital in the account's value (== unrealizedPnlSum unless a settle already took a loss out of capital).
+  let valuePnlSum = 0n;
   let riskCount = 0;
 
   // Batch fetch all slab accounts using getMultipleAccountsInfo
@@ -965,6 +979,7 @@ export async function fetchPortfolioSnapshot(
             pnlSum += isSentinelValue(account.pnl) ? 0n : account.pnl;
             depositSum += account.capital;
             unrealizedPnlSum += unrealizedPnl;
+            valuePnlSum += unrealizedPnl;
           }
         }
       }
@@ -1072,6 +1087,7 @@ export async function fetchPortfolioSnapshot(
         pnlSum += isSentinelValue(pos.account.pnl) ? 0n : pos.account.pnl;
         depositSum += pos.account.capital;
         unrealizedPnlSum += pos.unrealizedPnl;
+        valuePnlSum += positionValuePnl(pos);
       } catch (error) {
         console.debug(
           `[usePortfolio] skipping unparseable v17 portfolio account ${pubkey?.toBase58?.() ?? "?"}:`,
@@ -1169,6 +1185,7 @@ export async function fetchPortfolioSnapshot(
           pnlSum += isSentinelValue(pos.account.pnl) ? 0n : pos.account.pnl;
           depositSum += pos.account.capital;
           unrealizedPnlSum += pos.unrealizedPnl;
+        valuePnlSum += positionValuePnl(pos);
         } catch {
           // Resilient per-NFT: skip on any parse error.
         }
@@ -1209,7 +1226,7 @@ export async function fetchPortfolioSnapshot(
     positions: allPositions,
     totalPnl: pnlSum,
     totalDeposited: depositSum,
-    totalValue: depositSum + unrealizedPnlSum,
+    totalValue: depositSum + valuePnlSum,
     totalUnrealizedPnl: unrealizedPnlSum,
     atRiskCount: riskCount,
   };

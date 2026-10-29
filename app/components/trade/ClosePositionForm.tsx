@@ -29,6 +29,11 @@ export interface ClosePositionFormProps {
    * Est. Account Balance After marked "excl. PnL".
    */
   entryPrice: bigint;
+  /**
+   * #3534: the entry the balance-after is valued from (`capital + q x (mark - riskEntry)` is the account's equity). Omitted = `entryPrice`.
+   * It differs only on a fully settled leg, where the display entry (the fill price) would take a loss out of a capital that already paid it.
+   */
+  riskEntryPrice?: bigint;
   currentPrice: bigint;
   capital: bigint;
   /** Index asset symbol for position size (e.g. "SOL"). */
@@ -87,6 +92,7 @@ const PRESETS = [25, 50, 75, 100];
 export const ClosePositionForm: FC<ClosePositionFormProps> = ({
   positionSize,
   entryPrice,
+  riskEntryPrice,
   currentPrice: liveCurrentPrice,
   capital,
   symbol,
@@ -153,7 +159,10 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
     // A close settles inside the trading account: nothing goes to the wallet, and the whole capital
     // stays (it still backs any remaining position). So the preview is the account balance after the
     // close: capital + the closed part's PnL − the fee, never capital × percent.
-    const rawBalanceAfter = capital + pnl - closeFee;
+    // #3534: the closed part's PnL on the RISK entry: a loss a settle already moved out of `capital` is not charged again.
+    const riskBasis = riskEntryPrice != null && riskEntryPrice > 0n ? riskEntryPrice : entryPrice;
+    const balancePnl = riskBasis > 0n ? computeMarkPnlLinear(closePositionSigned, riskBasis, currentPrice) : 0n;
+    const rawBalanceAfter = capital + balancePnl - closeFee;
     const balanceAfter = rawBalanceAfter > 0n ? rawBalanceAfter : 0n;
 
     const pnlUsd =
@@ -162,7 +171,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
         : null;
 
     return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, balanceAfter };
-  }, [percent, absPosition, isLong, entryPrice, currentPrice, capital, priceUsd, tradingFeeBps, decimals]);
+  }, [percent, absPosition, isLong, entryPrice, riskEntryPrice, currentPrice, capital, priceUsd, tradingFeeBps, decimals]);
 
   // #2660: 0n = unknown entry (see the prop doc) — never a confident zero PnL.
   const entryKnown = entryPrice > 0n;

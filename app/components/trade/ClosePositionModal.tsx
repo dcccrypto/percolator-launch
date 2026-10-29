@@ -10,6 +10,8 @@ import { ClosePositionForm } from "@/components/trade/ClosePositionForm";
 interface ClosePositionModalProps {
   positionSize: bigint;
   entryPrice: bigint;
+  /** #3534: the risk entry the balance-after is valued from (see ClosePositionForm). Omitted = `entryPrice`. */
+  riskEntryPrice?: bigint;
   currentPrice: bigint;
   capital: bigint;
   /** Index asset symbol for position size (e.g. "SOL") */
@@ -64,6 +66,7 @@ const FOCUSABLE_SELECTOR =
 export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   positionSize,
   entryPrice,
+  riskEntryPrice,
   currentPrice,
   capital,
   symbol,
@@ -180,6 +183,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
           variant="modal"
           positionSize={positionSize}
           entryPrice={entryPrice}
+          riskEntryPrice={riskEntryPrice}
           currentPrice={currentPrice}
           capital={capital}
           symbol={symbol}

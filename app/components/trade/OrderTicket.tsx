@@ -1881,6 +1881,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             portfolioPk={userAccount?.pubkey}
             accountPending={accountPending}
             entryPriceE6={existingEntryKnown ? existingEntryPriceE6 : 0n}
+            riskEntryPriceE6={existingEntryKnown ? existingRiskEntryE6 : 0n}
             capital={capital}
             symbol={baseTicker}
             collateralSymbol={collateralSymbol}

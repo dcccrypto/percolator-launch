@@ -616,6 +616,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           positionSize={effectiveSize}
           previewUnavailable={!pnlResult.adlKnown}
           entryPrice={pnlIsKnown ? entryPriceE6 : 0n}
+          riskEntryPrice={pnlIsKnown ? riskEntryE6 : 0n}
           currentPrice={currentPriceE6}
           capital={account.capital}
           symbol={symbol}

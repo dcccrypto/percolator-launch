@@ -121,6 +121,12 @@ export interface PositionPnl {
   pnlNative: bigint | null;
   /** Collateral-scale PnL at the mark, or null when unknown. */
   unrealizedPnl: bigint | null;
+  /**
+   * #3534: the PnL that sits ON TOP of `capital` in the engine's equity: `q x (mark - riskEntry)`, so `capital + riskUnrealizedPnl`
+   * is the account's value. Equals `unrealizedPnl` unless the leg is fully settled, where `unrealizedPnl` is the honest since-entry
+   * figure but adding it to a capital that already paid part of it counts the loss twice. For VALUE sums, never for display.
+   */
+  riskUnrealizedPnl: bigint | null;
   /** Return on initial margin, percent, or null when unknown. */
   roe: number | null;
   /**
@@ -254,10 +260,11 @@ export function computePositionPnl(input: PositionPnlInput): PositionPnl {
     pnlKnown: false,
     pnlNative: null,
     unrealizedPnl: null,
+    riskUnrealizedPnl: null,
     roe: null,
   };
 
-  if (flat) return { ...base, pnlKnown: true, pnlNative: 0n, unrealizedPnl: 0n, roe: 0 };
+  if (flat) return { ...base, pnlKnown: true, pnlNative: 0n, unrealizedPnl: 0n, riskUnrealizedPnl: 0n, roe: 0 };
   if (effectiveSize === null || resetObligation) return unknown;
   if (resolved.source === "unknown" || resolved.entry <= 0n || markE6 <= 0n) return unknown;
 
@@ -269,8 +276,11 @@ export function computePositionPnl(input: PositionPnlInput): PositionPnl {
     capital: input.capital,
   });
   const { pnlNative, unrealizedPnl, roe } = valued;
+  // #3534: the value-side PnL, from the risk entry (the same figure as `unrealizedPnl` unless a settle already moved a loss out of capital).
+  const riskUnrealizedPnl =
+    settledEntry !== null && riskEntry > 0n ? computeMarkPnlLinear(effectiveSize, riskEntry, markE6) : unrealizedPnl;
 
-  return { ...base, pnlKnown: true, pnlNative, unrealizedPnl, roe };
+  return { ...base, pnlKnown: true, pnlNative, unrealizedPnl, riskUnrealizedPnl, roe };
 }
 
 /**
