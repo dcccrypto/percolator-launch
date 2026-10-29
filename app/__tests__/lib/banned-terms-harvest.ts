@@ -40,6 +40,7 @@ export async function collectCopyStrings(): Promise<CopyString[]> {
     ["limits/copy", () => import("@/lib/limits/copy")],
     ["limits/earn-withdraw", () => import("@/lib/limits/earn-withdraw")],
     ["limits/creator-stake", () => import("@/lib/limits/creator-stake")],
+    ["v22/reduce-copy", () => import("@/lib/v22/reduce-copy")],
     ["limits/resolved-eta", () => import("@/lib/limits/resolved-eta")],
     ["first-trade", () => import("@/lib/first-trade")],
     ["keeper-register-client", () => import("@/lib/keeper-register-client")],

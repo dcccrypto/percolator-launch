@@ -50,13 +50,22 @@ export const LOG_TRUNCATED_V22 = "Log truncated";
 /** FILL record `flags` bits. A decoder must not reject an unknown bit or combination. */
 export const FILL_FLAG_V22 = Object.freeze({ CLIPPED: 1, PARTIAL: 2, ZERO: 4, MATCHER: 8 });
 
-/** REDUCE `reason`. Units differ: 1 = basis units; 2 and 3 = ADL-effective units; 4 and 5 = size traded against the vault LP. */
+/**
+ * REDUCE `reason`. Units differ: 1 = basis units; 2 and 3 = ADL-effective units; 4 and 5 = size traded against the vault LP;
+ * 6, 7 and 8 = ADL-effective units. 6 = tag 64 force-close of an abandoned asset (a Recovery pair closed against each other at the
+ * frozen mark), 7 = tag 30 close after resolution (settled at the resolved price), 8 = the W1 stop (tag 124 op 5). Names match
+ * percolator-prog src/fill_events_v22.rs (rc23 77b4060c); the SDK's feat/v22-sdk-growth decodes only 8 of the three.
+ */
 export const REDUCE_REASON_V22 = Object.freeze({
   REBALANCE_REDUCE: 1,
   ADL_WIND_DOWN: 2,
   LIQUIDATION: 3,
   DUST_SWEEP: 4,
   EVICTION: 5,
+  FORCE_CLOSE_ABANDONED: 6,
+  RESOLVED_CLOSE: 7,
+  /** Tag 124 op 5 (W1 LP stop): an opposing account cut to the round's keep fraction at P_last. */
+  LP_STOP: 8,
 } as const);
 export type ReduceReasonV22 = (typeof REDUCE_REASON_V22)[keyof typeof REDUCE_REASON_V22];
 
@@ -191,7 +200,7 @@ export function decodeWrapperEventV22(b: Uint8Array): { event: WrapperEventV22 }
   if (b[0] === EVENT_KIND_REDUCE_V22) {
     if (b.length !== REDUCE_LEN_V22) return { skip: "bad-length" };
     const reason = b[109];
-    if (reason < 1 || reason > 5) return { skip: "unknown-reduce-reason" };
+    if (reason < 1 || reason > REDUCE_REASON_V22.LP_STOP) return { skip: "unknown-reduce-reason" };
     return {
       event: {
         kind: "reduce", ixTag, market, portfolio: key(b, 35), counterparty: key(b, 67), assetIndex: u16(b, 99), assetGen: u64(b, 101),
