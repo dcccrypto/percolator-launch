@@ -297,6 +297,10 @@ export function DepositWithdrawPanel({
     // with shares outstanding, or a deposit that floors to no shares). Never a 1:1 fallback.
     return previewDepositSharesMinted(rawAmount, shareTotal, depositValue ?? null) ?? 0n;
   }, [vaultAvailable, rawAmount, shareTotal, depositValue]);
+  // The program would refuse this deposit (genesis at/below the dead shares, a zero value with
+  // shares outstanding, a mint that floors to 0 or overflows u64). Unknown pricing (null) is not a refusal.
+  const depositRefused =
+    tab === 'deposit' && vaultAvailable && rawAmount > 0n && previewShares === 0n && (shareTotal === 0n || depositValue != null);
 
   // What the whole position redeems for: the Max / 100% amount in USDC.
   const userWithdrawableAtoms = useMemo(
@@ -496,6 +500,7 @@ export function DepositWithdrawPanel({
     if (rawAmount <= 0n) return false;
     if (tab === 'deposit' && rawAmount > userBalance) return false;
     if (tab === 'deposit' && depositBlockedReason) return false;
+    if (depositRefused) return false;
     if (tab === 'withdraw') {
       if (hasPendingRedemption) return false;
       if (withdrawShares <= 0n || withdrawShares > userLpBalance) return false;
@@ -513,6 +518,7 @@ export function DepositWithdrawPanel({
     withdrawShares,
     withdrawUnit,
     hasPendingRedemption,
+    depositRefused,
     overMaxNow,
     depositBlockedReason,
   ]);
@@ -678,7 +684,7 @@ export function DepositWithdrawPanel({
         {vaultAvailable && rawAmount > 0n && tab === 'deposit' && (
           <div className="mb-4 p-3 bg-[var(--bg)] border border-[var(--border)] rounded-sm">
             <p data-testid="earn-deposit-preview" className="text-[12px] font-mono tabular-nums text-[var(--text)]">
-              {WC.depositPreview(
+              {depositRefused ? WC.depositRefused : WC.depositPreview(
                 formatShares(previewShares, shareDecimals),
                 formatPercent(shareTotal + previewShares > 0n ? (Number(previewShares) / Number(shareTotal + previewShares)) * 100 : 100),
               )}

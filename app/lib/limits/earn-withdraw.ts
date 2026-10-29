@@ -33,6 +33,8 @@ export function previewDepositShares(usdcAtoms: bigint, totalShares: bigint, dep
 /** Wrapper `LP_VAULT_MINIMUM_LIQUIDITY`: the genesis deposit's dead shares (never minted to anyone). */
 export const LP_VAULT_MINIMUM_LIQUIDITY = 1_000n;
 
+const U64_MAX = (1n << 64n) - 1n;
+
 /**
  * What tag 75 actually MINTS to the depositor, or null when the program refuses the deposit
  * (prog#627 family: a share price over a zero / dust base must never preview as 1:1):
@@ -42,13 +44,14 @@ export const LP_VAULT_MINIMUM_LIQUIDITY = 1_000n;
  *  - a deposit that floors to 0 shares: refused (LpVaultZeroSharesMinted).
  */
 export function previewDepositSharesMinted(usdcAtoms: bigint, totalShares: bigint, depositClaim: bigint | null): bigint | null {
-  if (usdcAtoms <= 0n) return null;
+  // amount_to_u64 / u64::try_from(shares_to_mint): above u64 the program refuses (overflow).
+  if (usdcAtoms <= 0n || usdcAtoms > U64_MAX) return null;
   if (totalShares === 0n) {
     const minted = usdcAtoms - LP_VAULT_MINIMUM_LIQUIDITY;
     return minted > 0n ? minted : null;
   }
   const shares = previewDepositShares(usdcAtoms, totalShares, depositClaim);
-  return shares !== null && shares > 0n ? shares : null;
+  return shares !== null && shares > 0n && shares <= U64_MAX ? shares : null;
 }
 
 /** USDC `shares` redeem for at the (withdraw-side) senior value. */
@@ -108,6 +111,8 @@ export const EARN_WITHDRAW_COPY = {
     `Part of this vault's money is in use by open trades right now. You can withdraw up to ${max} now, or the rest once those trades close.`,
   maxNowAction: (max: string) => `Withdraw ${max}`,
   depositPreview: (shares: string, pct: string) => `You'll get ≈ ${shares} shares (${pct} of the vault)`,
+  /** Tag 75 would refuse this amount (too small for the first deposit, or the vault has no value to price against). */
+  depositRefused: "This amount can't be deposited right now: it would mint no shares. Try a larger amount.",
   /** Two-pot vault: the full pending amount can't be paid in one go right now (Custom 21 / 25 before signing). */
   maxAvailableTitle: "Partly available now",
   maxAvailableBody: "The full amount can't be paid in one go right now. Nothing moved. You can withdraw the max available now; the rest stays in the vault.",
