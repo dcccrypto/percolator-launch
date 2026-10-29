@@ -14,6 +14,7 @@ import { LoadingValue } from '@/components/ui/LoadingValue';
 import { useMarketLimits } from '@/hooks/useMarketLimits';
 import { useSingleMarketHealth } from '@/hooks/useMarketHealth';
 import { earnDepositPause, earnGateShares, earnViewFromLimits, earnPanelPricing, withSplitPotPricing } from '@/lib/limits/earn';
+import { earnDisplayFigures } from '@/lib/limits/earn-display';
 import { earnDepositBlock } from '@/lib/limits/vault-tranche';
 import { COPY } from '@/lib/limits/copy';
 import { chargedTradeFeeLabel } from '@/lib/limits/format';
@@ -103,8 +104,6 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
   // v2.2 (flag on; off = no request): the share token's own decimals and whether it has its name on chain.
   const shareToken = useLpShareToken(slab, slabProgramId ?? null);
 
-  const vaultUsd = Number(state.vaultTotalAtoms) / collDivisor;
-  const positionUsd = Number(state.userVaultValueAtoms) / collDivisor;
   // A pending withdrawal keeps its shares in escrow until paid: still the user's deposit.
   const hasPosition = state.userLpBalance > 0n || state.pendingRedemptionShares > 0n;
 
@@ -119,6 +118,11 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
   const lpValuation = useVaultLpValuation(slab, marketLimits);
   const trancheView = earnViewFromLimits(marketLimits, state.backingNavAtoms, state.userLpBalance, undefined, lpValuation.value);
   const earnPricing = withSplitPotPricing(earnPanelPricing(marketLimits, state.backingNavAtoms, lpValuation.sim ?? lpValuation.value), state.splitPot);
+  // App bug 2026-10-29: TVL / Your Value at the withdraw price (a bound vault's losses included),
+  // never registry shares + fees. null = not priced yet ("—").
+  const figures = earnDisplayFigures(state, earnPricing);
+  const vaultUsd = figures.tvlAtoms === null ? null : Number(figures.tvlAtoms) / collDivisor;
+  const positionUsd = figures.userValueAtoms === null ? null : Number(figures.userValueAtoms) / collDivisor;
   const gateShares = earnGateShares(marketLimits);
   // Genesis with fees pending (P3-L1) is NOT a block any more: the deposit tx bundles tag 78
   // first (lib/limits/earn-ixs.ts earnTxPlan), so only a real refusal disables the button.
@@ -153,7 +157,8 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
   // Only once this vault's first read has landed: reporting the pre-load 0 would overwrite the
   // table's chain-read position (incl. a creator's seed) with "$—".
   useEffect(() => {
-    if (!everLoaded) return;
+    // Unpriced (bound vault, no program price yet): the table keeps its own read.
+    if (!everLoaded || positionUsd === null) return;
     onPositionResolved?.(slab, positionUsd);
   }, [slab, positionUsd, onPositionResolved, everLoaded]);
 
@@ -192,6 +197,7 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
         collateralSymbol={collateralSymbol}
         valuation={lpValuation}
         maxNowAtoms={earnPricing?.maxNowAtoms ?? null}
+        pricing={earnPricing}
       />
       {/* Selected-vault header + key figures + position */}
       <div className="border border-[var(--border)] bg-[var(--panel-bg)] hud-corners">
@@ -210,7 +216,7 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
           {/* Key figures */}
           <div className="grid grid-cols-2 gap-3 border-t border-[var(--border)]/60 pt-3">
             {/* UX WP-10 (UI-2): "—" with data-state="loading" until the first read lands. */}
-            <Figure label="TVL" loading={!everLoaded} value={`$${formatCompact(vaultUsd)}`} />
+            <Figure label="TVL" loading={!everLoaded || vaultUsd === null} value={`$${formatCompact(vaultUsd ?? 0)}`} />
             {/* E2E B5: the CHARGED fee (trade_fee_base_bps), not the matcher's tradingFeeBps. */}
             <Figure label="Fee" loading={!everLoaded} value={chargedTradeFeeLabel(slabRaw ? decodeMarketEngineView(slabRaw)?.tradeFeeBaseBps : null) ?? '—'} />
             <Figure label="Cooldown" loading={!everLoaded} value={slotsToLabel(state.redemptionCooldownSlots)} />
@@ -219,7 +225,7 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
               // valued at $491.72 as money gone (Discord). The vault page calls it "Value" too.
               label="Your Value"
               loading={!everLoaded}
-              value={hasPosition ? `$${formatCompact(positionUsd)}` : '$—'}
+              value={hasPosition ? (positionUsd === null ? '—' : `$${formatCompact(positionUsd)}`) : '$—'}
               accent={hasPosition}
             />
           </div>

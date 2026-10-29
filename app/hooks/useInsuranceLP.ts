@@ -149,6 +149,12 @@ export interface InsuranceLPState {
    * shares + distributed-fees proxy. Falls back to vaultTotalAtoms when the pots are unreadable.
    */
   backingNavAtoms: bigint;
+  /**
+   * The registry is BOUND to the market's vault LP (P3; every leverage market). Its shares + fees
+   * figures below are NOT its value: display goes through lib/limits/earn-display.ts, which prices
+   * it at the withdraw (tag 77) senior value, losses included.
+   */
+  bound: boolean;
   /** Share price = vaultTotalAtoms / lpSupply, scaled by 1e6 (1_000_000n = 1:1). */
   vaultSharePriceE6: bigint;
   /** User's LP position value in underlying collateral atoms (derived from vaultTotalAtoms, not insuranceBalance). */
@@ -232,6 +238,7 @@ export function useInsuranceLP() {
     backingNavAtoms: 0n,
     vaultSharePriceE6: 1_000_000n,
     userVaultValueAtoms: 0n,
+    bound: false,
     redemptionCooldownSlots: 0n,
     hasPendingRedemption: false,
     pendingRedemptionShares: 0n,
@@ -464,6 +471,7 @@ export function useInsuranceLP() {
       let registryExists = false;
       /** Unbound (two-pot) vault: worth its pots' NAV, never registry shares + fees. */
       let twoPot = false;
+      let bound = false;
       let lpVaultDomain = 0;
       let registryAddress: PublicKey | null = null;
       let vaultTotalAtoms = 0n;
@@ -491,7 +499,9 @@ export function useInsuranceLP() {
           if (registryAcctInfo && registryAcctInfo.data.length > 0) {
             const registry = parseLpVaultRegistry(new Uint8Array(registryAcctInfo.data));
             registryExists = true;
-            twoPot = decodeLpVaultRegistryBound(new Uint8Array(registryAcctInfo.data)) === false;
+            const boundFlag = decodeLpVaultRegistryBound(new Uint8Array(registryAcctInfo.data));
+            twoPot = boundFlag === false;
+            bound = boundFlag === true;
             lpVaultDomain = Number(registry.domain);
             redemptionCooldownSlots = sanitizeOnChainValue(registry.redemptionCooldownSlots);
 
@@ -558,7 +568,10 @@ export function useInsuranceLP() {
         // M-9: a BOUND (P3) vault is priced on `bound_vault_nav` (per pot min(principal, held) +
         // LP earnings), not shares + distributed fees. Its per-share pricing stays with the P3
         // tranche model (earnPanelPricing), which takes this as its backing NAV.
-        if (vp?.bound) backingNavAtoms = vaultBackingNav(vp);
+        if (vp?.bound) {
+          bound = true;
+          backingNavAtoms = vaultBackingNav(vp);
+        }
         // Non-bound: priced as the program will see it once the app's own repair (an underwater
         // pot, #2853) lands.
         const rawSp: SplitPotState | null = vp && !vp.bound ? vp : null;
@@ -621,6 +634,7 @@ export function useInsuranceLP() {
         backingNavAtoms: backingNavAtoms ?? vaultTotalAtoms,
         vaultSharePriceE6,
         userVaultValueAtoms,
+        bound,
         redemptionCooldownSlots,
         hasPendingRedemption,
         pendingRedemptionShares,

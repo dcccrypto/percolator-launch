@@ -10,7 +10,8 @@
 import { useState, type FC } from "react";
 import type { MarketLimits } from "@/hooks/useMarketLimits";
 import { COPY } from "@/lib/limits/copy";
-import { earnAbsorbed, seniorAtomsForRedemption, type EarnTrancheView } from "@/lib/limits/vault-tranche";
+import { earnAbsorbed, seniorAtomsForRedemption, seniorSharePriceE6, type EarnTrancheView } from "@/lib/limits/vault-tranche";
+import type { EarnWithdrawPricing } from "@/lib/limits/earn-display";
 
 export interface EarnTrancheCardViewProps {
   limits: MarketLimits;
@@ -26,6 +27,12 @@ export interface EarnTrancheCardViewProps {
   valuation?: { updating: boolean; asOf: number | null } | null;
   /** What the vault can pay out now (88 path); the footnote shows only when it binds. */
   maxNowAtoms?: bigint | null;
+  /**
+   * App bug 2026-10-29: the withdraw pricing (earnPanelPricing). When given, Share value and "Your
+   * Earn balance" are priced exactly as a withdrawal (the worse-of senior value during a price
+   * catch-up), so they match the page's Value and the withdraw preview.
+   */
+  pricing?: EarnWithdrawPricing | null;
 }
 
 /** "$1,234.56" (2 dp, floored) for collateral atoms. */
@@ -54,7 +61,7 @@ function Row({ label, value, sub, testId, data }: { label: string; value: React.
   );
 }
 
-export const EarnTrancheCardView: FC<EarnTrancheCardViewProps> = ({ limits, view, withdrawShares, decimals, valuation = null, maxNowAtoms = null }) => {
+export const EarnTrancheCardView: FC<EarnTrancheCardViewProps> = ({ limits, view, withdrawShares, decimals, valuation = null, maxNowAtoms = null, pricing = null }) => {
   const [open, setOpen] = useState(false);
   const vs = limits.vaultState;
   if (!limits.flags.p3 || limits.state === "off") return null;
@@ -66,8 +73,11 @@ export const EarnTrancheCardView: FC<EarnTrancheCardViewProps> = ({ limits, view
   // Never "Needs refresh": a stale certificate is valued by simulation (or shows the last value).
   const status = view.impaired === true ? "impaired" : view.senior === null ? "updating" : "covered";
   const absorbed = earnAbsorbed(vs);
-  const totalShares = limits.registryShares ?? 0n;
-  const yours = view.senior !== null && withdrawShares > 0n && totalShares > 0n ? seniorAtomsForRedemption(withdrawShares, totalShares, view.senior) : null;
+  const totalShares = pricing?.totalShares ?? limits.registryShares ?? 0n;
+  // The withdraw price when known, else the tranche split (same thing outside a price catch-up).
+  const priceSenior = pricing ? pricing.withdrawSeniorValue : view.senior;
+  const sharePriceE6 = pricing ? (priceSenior === null ? null : seniorSharePriceE6(priceSenior, totalShares)) : view.sharePriceE6;
+  const yours = priceSenior !== null && withdrawShares > 0n && totalShares > 0n ? seniorAtomsForRedemption(withdrawShares, totalShares, priceSenior) : null;
   const money = (a: bigint | null) => (a === null ? "—" : usd(a, decimals));
   const showMaxNow = maxNowAtoms !== null && yours !== null && yours > maxNowAtoms;
   const updatingDot = (valuation?.updating || view.senior === null) && (
@@ -93,12 +103,12 @@ export const EarnTrancheCardView: FC<EarnTrancheCardViewProps> = ({ limits, view
       <div className="divide-y divide-[var(--border)]/30">
         <Row
           testId="limits-share-price"
-          data={{ "price-e6": view.sharePriceE6?.toString() ?? "" }}
+          data={{ "price-e6": sharePriceE6?.toString() ?? "" }}
           label="Share value"
           value={
             <>
               {updatingDot}
-              {view.sharePriceE6 === null ? "—" : `${(Number(view.sharePriceE6) / 1e6).toFixed(4)} USDC`}
+              {sharePriceE6 === null ? "—" : `${(Number(sharePriceE6) / 1e6).toFixed(4)} USDC`}
             </>
           }
           sub={valuation?.asOf ? `as of ${new Date(valuation.asOf).toTimeString().slice(0, 5)}` : undefined}

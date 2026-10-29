@@ -21,10 +21,12 @@ describe("LoadingValue", () => {
   });
   it("the Earn rail and the Earn market page gate TVL / cooldown / status on the first read", () => {
     const rail = readFileSync(resolve(process.cwd(), "components/earn/VaultDepositRail.tsx"), "utf8");
-    for (const f of ["TVL", "Fee", "Cooldown"]) expect(rail).toMatch(new RegExp(`<Figure label="${f}" loading=\\{!everLoaded\\}`));
+    for (const f of ["Fee", "Cooldown"]) expect(rail).toMatch(new RegExp(`<Figure label="${f}" loading=\\{!everLoaded\\}`));
+    // App bug 2026-10-29: TVL is also "—" while a bound vault has no program price yet.
+    expect(rail).toContain('<Figure label="TVL" loading={!everLoaded || vaultUsd === null}');
     expect(rail).toContain("<LoadingValue loading={loading}>{value}</LoadingValue>");
     const page = readFileSync(resolve(process.cwd(), "app/earn/[slab]/page.tsx"), "utf8");
-    expect(page).toContain("<LoadingValue loading={firstLoad}>${formatCompact(vaultUsd)}</LoadingValue>");
+    expect(page).toContain("<LoadingValue loading={firstLoad || vaultUsd === null}>${formatCompact(vaultUsd ?? 0)}</LoadingValue>");
     expect(page).toMatch(/label="Withdrawal wait"\s*value=\{loadingText\(firstLoad,/);
     expect(page).toMatch(/label="Vault status"\s*value=\{loadingText\(firstLoad,/);
   });

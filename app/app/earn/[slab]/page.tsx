@@ -23,6 +23,7 @@ import { useVaultLpValuation } from '@/hooks/useVaultLpValuation';
 import { useMarketLimits } from '@/hooks/useMarketLimits';
 import { useSingleMarketHealth } from '@/hooks/useMarketHealth';
 import { earnViewFromLimits, earnPanelPricing, withSplitPotPricing } from '@/lib/limits/earn';
+import { earnDisplayFigures } from '@/lib/limits/earn-display';
 import { cooldownPhrase, previewWithdrawAtoms } from '@/lib/limits/earn-withdraw';
 import { formatTokenAmount } from '@/lib/format';
 import { chargedTradeFeeLabel } from '@/lib/limits/format';
@@ -161,6 +162,9 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
   const lpValuation = useVaultLpValuation(slabAddress, earnLimits);
   const earnTrancheView = earnViewFromLimits(earnLimits, lpVaultState.backingNavAtoms, lpVaultState.userLpBalance, undefined, lpValuation.value);
   const earnPricing = withSplitPotPricing(earnPanelPricing(earnLimits, lpVaultState.backingNavAtoms, lpValuation.sim ?? lpValuation.value), lpVaultState.splitPot);
+  // App bug 2026-10-29: TVL / Value / Share value / Earned come from the withdraw pricing (a bound
+  // vault's losses included), never registry shares + fees. null = not priced yet ("—").
+  const earnFigures = earnDisplayFigures(lpVaultState, earnPricing);
   const { engine, totalOI, vault: engineVault } = useEngineState();
 
   // percolator-indexer#207: exact earned = value − indexed cost basis (+ realized), priced on
@@ -168,9 +172,9 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
   const lpClaimShares = lpVaultState.userLpBalance + lpVaultState.pendingRedemptionShares;
   const lpCostBasis = useLpCostBasis(slabAddress, earnWallet.publicKey?.toBase58() ?? null, lpClaimShares);
   const lpEarned = useMemo(
-    () => computeLpEarnedForVault(lpCostBasis, lpVaultState),
+    () => computeLpEarnedForVault(lpCostBasis, lpVaultState, earnPricing),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [lpCostBasis, lpVaultState.userLpBalance, lpVaultState.pendingRedemptionShares, lpVaultState.vaultTotalAtoms, lpVaultState.lpSupply, lpVaultState.splitPot],
+    [lpCostBasis, lpVaultState.bound, lpVaultState.userLpBalance, lpVaultState.pendingRedemptionShares, lpVaultState.vaultTotalAtoms, lpVaultState.lpSupply, lpVaultState.splitPot, earnPricing?.totalShares, earnPricing?.withdrawSeniorValue],
   );
 
   // BUG-5 FIX: resolve actual collateral mint from on-chain slab data.
@@ -261,9 +265,10 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
   const collDivisor = 10 ** collateralDecimals;
   const currentOI = marketInfo?.totalOI ?? (totalOI ? Number(totalOI) / collDivisor : 0);
   const collateralScale = Math.pow(10, collateralDecimals);
-  // TVL = the LP Vault Registry's own backing (shares + distributed fees), NOT the
+  // TVL = what every Earn share redeems for (lib/limits/earn-display.ts), NOT the
   // percolator-stake pool (poolState.vaultBalance, wrong account — see hook comment above).
-  const vaultUsd = Number(lpVaultState.vaultTotalAtoms) / collateralScale;
+  // null = a bound vault not priced yet: "—", never shares + fees.
+  const vaultUsd = earnFigures.tvlAtoms === null ? null : Number(earnFigures.tvlAtoms) / collateralScale;
 
   if (marketNotFound) {
     return (
@@ -362,7 +367,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
                 TVL
               </div>
               <div data-testid="earn-page-tvl" className="text-2xl font-semibold text-[var(--text)] font-mono tabular-nums">
-                <LoadingValue loading={firstLoad}>${formatCompact(vaultUsd)}</LoadingValue>
+                <LoadingValue loading={firstLoad || vaultUsd === null}>${formatCompact(vaultUsd ?? 0)}</LoadingValue>
               </div>
             </div>
           </div>
@@ -372,12 +377,16 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
         <ScrollReveal>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-px border border-[var(--border)] bg-[var(--border)] mb-6">
             <StatCell label="Vault Balance" loading={loading || firstLoad}>
-              <AnimatedNumber
-                value={vaultUsd}
-                prefix="$"
-                decimals={2}
-                className="text-sm font-semibold text-[var(--text)]"
-              />
+              {vaultUsd === null ? (
+                <span className="text-sm font-semibold text-[var(--text)]">—</span>
+              ) : (
+                <AnimatedNumber
+                  value={vaultUsd}
+                  prefix="$"
+                  decimals={2}
+                  className="text-sm font-semibold text-[var(--text)]"
+                />
+              )}
             </StatCell>
             <StatCell label="Earn shares" loading={loading || firstLoad}>
               <span className="text-sm font-mono tabular-nums text-[var(--text)]">
@@ -427,12 +436,12 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
               // Escrowed (pending-withdrawal) shares are still the user's until paid; priced at
               // the program's NAV over registry shares on a two-pot vault (state.splitPot).
               userLpBalance={lpVaultState.userLpBalance + lpVaultState.pendingRedemptionShares}
-              lpSupply={lpVaultState.splitPot?.totalShares ?? lpVaultState.lpSupply}
-              vaultBalance={lpVaultState.vaultTotalAtoms}
+              lpSupply={earnFigures.totalShares ?? lpVaultState.lpSupply}
+              vaultBalance={earnFigures.tvlAtoms}
               decimals={collateralDecimals}
               lpDecimals={isDevnetV22Enabled() ? lpVaultState.lpDecimals : undefined}
               collateralSymbol={collateralSymbol}
-              redemptionRateE6={lpVaultState.vaultSharePriceE6}
+              redemptionRateE6={earnFigures.sharePriceE6}
               loading={loading || firstLoad}
               pendingWithdrawalLabel={(() => {
                 if (!lpVaultState.hasPendingRedemption) return null;
@@ -475,6 +484,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
             collateralSymbol={collateralSymbol}
             valuation={lpValuation}
             maxNowAtoms={earnPricing?.maxNowAtoms ?? null}
+            pricing={earnPricing}
           />
 
           {/* P3 / F-4: after Resolve, finish the market so Earn can pay out (nothing on a live market). */}

@@ -30,7 +30,7 @@ export interface LpCostBasis {
 
 export type LpEarned =
   | { kind: "exact"; earnedAtoms: bigint; unrealizedAtoms: bigint; realizedAtoms: bigint; costBasisAtoms: bigint }
-  | { kind: "unavailable"; reason: "no-data" | "basis-unknown" | "out-of-sync" | "no-supply" };
+  | { kind: "unavailable"; reason: "no-data" | "basis-unknown" | "out-of-sync" | "no-supply" | "unpriced" };
 
 export function computeExactLpEarned(args: {
   basis: LpCostBasis | null;
@@ -77,8 +77,11 @@ export function parseLpCostBasis(json: unknown): LpCostBasis | null {
  * (non-bound) vault `vaultTotalAtoms` is already the program's combined NAV, and it is
  * spread over the registry's shares (`splitPot.totalShares`), not the LP mint supply —
  * the same pair the card's Value uses, so Earned never disagrees with Value.
+ * On a BOUND vault (`bound`) the pair is the withdraw pricing (lib/limits/earn-display.ts):
+ * the program's senior value over registry shares, so a loss shows in Earned.
  */
 export interface LpVaultValuationState {
+  bound?: boolean;
   userLpBalance: bigint;
   pendingRedemptionShares: bigint;
   vaultTotalAtoms: bigint;
@@ -86,7 +89,22 @@ export interface LpVaultValuationState {
   splitPot: { totalShares: bigint } | null;
 }
 
-export function computeLpEarnedForVault(basis: LpCostBasis | null, state: LpVaultValuationState): LpEarned {
+export function computeLpEarnedForVault(
+  basis: LpCostBasis | null,
+  state: LpVaultValuationState,
+  pricing?: { totalShares: bigint; withdrawSeniorValue: bigint | null } | null,
+): LpEarned {
+  if (state.bound) {
+    if (!basis) return { kind: "unavailable", reason: "no-data" };
+    if (!pricing || pricing.withdrawSeniorValue === null) return { kind: "unavailable", reason: "unpriced" };
+    return computeExactLpEarned({
+      basis,
+      userLpBalance: state.userLpBalance,
+      pendingRedemptionShares: state.pendingRedemptionShares,
+      vaultTotalAtoms: pricing.withdrawSeniorValue,
+      lpSupply: pricing.totalShares,
+    });
+  }
   return computeExactLpEarned({
     basis,
     userLpBalance: state.userLpBalance,

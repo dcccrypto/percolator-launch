@@ -21,6 +21,8 @@ import { splitPotLedgerKeys, splitPotStateFromAccounts, vaultValue } from '@/lib
 import { atomsToUsd, vaultWithdrawView } from '@/lib/limits/earn-withdrawable';
 import type { BlockedBy, WithdrawStatus } from '@/lib/limits/earn-withdrawable';
 import { isWrapperAccount } from "@/lib/v22/layout";
+import { decodeLpVaultRegistryBound } from '@/lib/limits/decode';
+import { readBoundVaultPricing } from '@/lib/limits/earn-bound-pricing';
 import { fetchMarketsList, listedMarketRows } from '@/lib/markets-list-client';
 
 // ═══════════════════════════════════════════════════════════════
@@ -470,6 +472,21 @@ export async function fetchCuratedVaultsOnChain(
       });
       if (unpriced) return { data: result, ok: false };
     }
+
+    // App bug 2026-10-29: a BOUND vault (every leverage market) is worth what its shares redeem
+    // for at the program's senior value (tag 77, losses included), as on its own page and in the
+    // withdraw preview, never shares + fees. Unpriceable this cycle => unvalued, per vault.
+    const bound = slabs.filter((slab, i) => {
+      const info = infos[i];
+      return !!info && result[slab].found && !result[slab].unvalued && decodeLpVaultRegistryBound(new Uint8Array(info.data)) === true;
+    });
+    const priced = await Promise.all(bound.map((slab) => readBoundVaultPricing(connection, programId, new PublicKey(slab))));
+    bound.forEach((slab, j) => {
+      const p = priced[j];
+      if (p && p.totalShares === 0n) result[slab] = { ...result[slab], tvlAtoms: 0n };
+      else if (p && p.withdrawSeniorValue !== null) result[slab] = { ...result[slab], tvlAtoms: p.withdrawSeniorValue };
+      else result[slab] = { ...result[slab], tvlAtoms: 0n, unvalued: true };
+    });
   } catch (err) {
     console.error('[useEarnStats] Failed to fetch LP vault registries on-chain:', err);
     return { data: result, ok: false };

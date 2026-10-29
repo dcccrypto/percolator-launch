@@ -14,8 +14,11 @@ interface LpPositionDashboardProps {
   userLpBalance: bigint;
   /** Total LP supply */
   lpSupply: bigint;
-  /** Total vault balance (raw) */
-  vaultBalance: bigint;
+  /**
+   * What every share redeems for together (raw). On a bound vault this is the withdraw (tag 77)
+   * senior value, so Value == the withdraw preview. null = not priced yet: "—".
+   */
+  vaultBalance: bigint | null;
   /** Decimals for collateral; flag off also used for LP shares, which the app counts in collateral decimals (lib/lp-share-wallet-note.ts, percolator-prog#542, #3432) */
   decimals: number;
   /**
@@ -26,8 +29,8 @@ interface LpPositionDashboardProps {
   lpDecimals?: number;
   /** Collateral symbol */
   collateralSymbol: string;
-  /** Redemption rate (e6) */
-  redemptionRateE6: bigint;
+  /** Share value (e6). null = a bound vault not priced yet (lib/limits/earn-display.ts): "—". */
+  redemptionRateE6: bigint | null;
   /** Loading */
   loading: boolean;
   /**
@@ -55,6 +58,7 @@ interface LpPositionDashboardProps {
 const EARNED_UNAVAILABLE_HINT: Partial<Record<Extract<LpEarned, { kind: 'unavailable' }>['reason'], string>> = {
   'out-of-sync': 'Updating',
   'basis-unknown': 'Not available for shares received by transfer',
+  unpriced: 'Updating',
 };
 
 export function LpPositionDashboard({
@@ -80,12 +84,13 @@ export function LpPositionDashboard({
       ? Number((userLpBalance * 10000n) / lpSupply) / 100
       : 0;
 
+  // floor(shares * value / S): the same formula as the withdraw preview (previewWithdrawAtoms).
   const userRedeemableValue =
-    lpSupply > 0n ? (userLpBalance * vaultBalance) / lpSupply : 0n;
+    vaultBalance === null ? null : lpSupply > 0n ? (userLpBalance * vaultBalance) / lpSupply : 0n;
 
   // #2324: both sides can be large while the quotient is small, so scale inside
   // bigint arithmetic rather than converting each side to a float first.
-  const userRedeemableFloat = bigintRatio(userRedeemableValue, divisor) ?? 0;
+  const userRedeemableFloat = userRedeemableValue === null ? null : bigintRatio(userRedeemableValue, divisor) ?? 0;
 
   if (loading) {
     return (
@@ -145,11 +150,15 @@ export function LpPositionDashboard({
                 Value
               </div>
               <div className="flex items-baseline gap-2">
-                <AnimatedNumber
-                  value={userRedeemableFloat}
-                  decimals={4}
-                  className="text-2xl font-bold text-[var(--text)]"
-                />
+                {userRedeemableFloat === null ? (
+                  <span data-testid="lp-value-unpriced" className="text-2xl font-bold text-[var(--text)]">—</span>
+                ) : (
+                  <AnimatedNumber
+                    value={userRedeemableFloat}
+                    decimals={4}
+                    className="text-2xl font-bold text-[var(--text)]"
+                  />
+                )}
                 <span className="text-sm text-[var(--text-secondary)]">
                   {collateralSymbol}
                 </span>
@@ -204,9 +213,9 @@ export function LpPositionDashboard({
               <MetricCell label="Of the vault" value={`${userSharePct.toFixed(2)}%`} highlight />
               <MetricCell
                 label="Share value"
-                value={`${(Number(redemptionRateE6) / 1_000_000).toFixed(4)} ${collateralSymbol}`}
+                value={redemptionRateE6 === null ? '—' : `${(Number(redemptionRateE6) / 1_000_000).toFixed(4)} ${collateralSymbol}`}
               />
-              <MetricCell label="Vault total" value={`${formatShares(vaultBalance, decimals)} ${collateralSymbol}`} />
+              <MetricCell label="Vault total" value={vaultBalance === null ? '—' : `${formatShares(vaultBalance, decimals)} ${collateralSymbol}`} />
             </div>
           </>
         )}
