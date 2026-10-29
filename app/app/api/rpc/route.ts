@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import bs58 from "bs58";
 import { getRpcEndpoint, getAllProgramIds, getConfig } from "@/lib/config";
 import { createHash, timingSafeEqual } from "crypto";
 import { getClientIp } from "@/lib/get-client-ip";
@@ -334,6 +335,43 @@ interface JsonRpcRequest {
   params?: unknown;
 }
 
+const MAX_GPA_MEMCMP_BYTES = 128;
+
+/** Validate decoded memcmp bytes before forwarding to the RPC. */
+function isValidGpaMemcmpBytes(
+  bytes: unknown,
+  encoding: unknown,
+): boolean {
+  if (typeof bytes !== "string" || bytes.length === 0) {
+    return false;
+  }
+
+  try {
+    if (encoding === undefined || encoding === "base58") {
+      const decoded = bs58.decode(bytes);
+      return decoded.length > 0 &&
+        decoded.length <= MAX_GPA_MEMCMP_BYTES;
+    }
+
+    if (encoding !== "base64") return false;
+
+    // Buffer.from(..., "base64") is permissive.
+    // Require canonical, padded standard Base64.
+    const canonicalBase64 =
+      /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+    if (!canonicalBase64.test(bytes)) return false;
+
+    const decoded = Buffer.from(bytes, "base64");
+
+    return decoded.length > 0 &&
+      decoded.length <= MAX_GPA_MEMCMP_BYTES &&
+      decoded.toString("base64") === bytes;
+  } catch {
+    return false;
+  }
+}
+
 /** Validate a single JSON-RPC request, return error response or null if valid */
 function validateRequest(req: Record<string, unknown>): { jsonrpc: string; error: { code: number; message: string }; id: unknown } | null {
   const method = req?.method;
@@ -392,12 +430,44 @@ function validateRequest(req: Record<string, unknown>): { jsonrpc: string; error
     const filters = cfg?.filters;
     const bounded =
       Array.isArray(filters) &&
-      filters.some(
-        (f) =>
-          f != null &&
-          typeof f === "object" &&
-          ("dataSize" in (f as object) || "memcmp" in (f as object)),
-      );
+      filters.length > 0 &&
+      filters.every((f) => {
+        if (!f || typeof f !== "object" || Array.isArray(f)) {
+          return false;
+        }
+
+        const filter = f as Record<string, unknown>;
+
+        if (Object.keys(filter).length !== 1) {
+          return false;
+        }
+
+        if ("dataSize" in filter) {
+          return typeof filter.dataSize === "number" &&
+            Number.isSafeInteger(filter.dataSize) &&
+            filter.dataSize >= 0;
+        }
+
+        if (!("memcmp" in filter)) return false;
+
+        const cmp = filter.memcmp;
+
+        if (!cmp || typeof cmp !== "object" || Array.isArray(cmp)) {
+          return false;
+        }
+
+        const m = cmp as Record<string, unknown>;
+
+        return typeof m.offset === "number" &&
+          Number.isSafeInteger(m.offset) &&
+          m.offset >= 0 &&
+          Object.keys(m).every(
+            (key) => key === "offset" ||
+              key === "bytes" ||
+              key === "encoding",
+          ) &&
+          isValidGpaMemcmpBytes(m.bytes, m.encoding);
+      });
     if (!bounded) {
       console.warn("[/api/rpc] Blocked unbounded getProgramAccounts (no dataSize/memcmp filter)");
       return {
