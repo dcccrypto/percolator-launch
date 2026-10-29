@@ -22,7 +22,7 @@ interface LpPositionDashboardProps {
   /** Decimals for collateral; flag off also used for LP shares, which the app counts in collateral decimals (lib/lp-share-wallet-note.ts, percolator-prog#542, #3432) */
   decimals: number;
   /**
-   * v2.2 only: the share mint's own decimals. With NEXT_PUBLIC_DEVNET_V22 on, the Shares stat uses the same scale as
+   * v2.2 only: the share mint's own decimals. With NEXT_PUBLIC_V22 on, the Shares stat uses the same scale as
    * DepositWithdrawPanel (`lpDecimals ?? decimals`, percolator-prog#545 mints carry the collateral's decimals), so the
    * card and the panel never disagree on one vault. Ignored flag off (#3432: collateral decimals).
    */

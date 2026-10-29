@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * v2.2 Earn exit: quote (simulate first), show the minimum, then send. Only mounted under NEXT_PUBLIC_DEVNET_V22
+ * v2.2 Earn exit: quote (simulate first), show the minimum, then send. Only mounted under NEXT_PUBLIC_V22
  * (components/earn/EarnExitQuote). The orchestration is lib/v22/earn-exit-run.ts; this hook wires the app's
  * connection, wallet and send path (sendUserBundle, one group, explicit compute budget).
  */

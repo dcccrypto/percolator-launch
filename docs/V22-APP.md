@@ -1,4 +1,9 @@
-# Devnet v2.2 app support (flag `NEXT_PUBLIC_DEVNET_V22`)
+# v2.2 app support (flag `NEXT_PUBLIC_V22`)
+
+The switch is cluster-neutral: a mainnet v2.2 build sets the same `NEXT_PUBLIC_V22=1`. The old name `NEXT_PUBLIC_DEVNET_V22` is still read as a
+fallback when `NEXT_PUBLIC_V22` is unset or empty (deployments that already set it keep working); when both are set, `NEXT_PUBLIC_V22` wins.
+Launch preflight (D27): on mainnet, `create()` refuses a growth launch whose plan has no leverage-guard step (v2.2 switch off, or no vault LP),
+before anything is signed; without the guard every open on the market fails 132 and only the upgrade authority can add it later.
 
 Status: BUILT, NOT DEPLOYED. Default OFF: with the flag unset the app behaves exactly as it does against the v2.1 programs
 (no v2.2 account is decoded, no v2.2 instruction is built, no v2.2 surface renders). Set it only on the deployment that points at
@@ -44,7 +49,7 @@ band anchor, `rent_max`) and the rent rate port (`growth_v19::rent_rate_e9`). Th
 6. Bonds card, 7. rescue action (Earn rail), 8. first-loss stake deposit with consent text v2 (`components/stake/FirstLossDeposit.tsx`).
 9. Band markets and 10. holding fee: `band-rent-state.ts`, `BandMarketNotice`, `HoldingFeeChip`, favourable-side close disabled while lagging.
 Bond / insurance-units account tails are appended centrally in `sendTx` (`market-tails.ts`).
-Visual check: `/dev-preview/v22` with `NEXT_PUBLIC_DEV_PREVIEW=1 NEXT_PUBLIC_DEVNET_V22=1`.
+Visual check: `/dev-preview/v22` with `NEXT_PUBLIC_DEV_PREVIEW=1 NEXT_PUBLIC_V22=1`.
 
 
 Discovery: `lib/v22/sdk/discovery.ts` (verbatim port) behind `lib/v22/discovery.ts` (flag off = installed SDK). Lot markets stay refused in the wizard (`LOT_MARKETS_ENABLED=false`); `lib/v22/lot-coverage.ts` guards trading on lot markets until every surface is covered. Bond-launch replay: `app/scripts/v22-bond-replay/RESULTS.md`.
@@ -72,6 +77,6 @@ percolator-nft @ 95dcece (merged) grows `PositionNftV16` 199 -> 239 B (version 2
 - RUNBOOK (same step that records deployments.md / ci/deployed-refs.env for the NFT upgrade): set `deployed: true` and `minDeploySlot` (the upgrade slot from ProgramData) for the NFT id in `NFT_S12_DEPLOY` (lib/program-ids.ts). BEFORE the upgrade, count `dataSize=199` accounts on the NFT program and burn them with the OLD program; after it they cannot be burned.
 
 ## Reading a flag-on suite (by-name delta)
-`NEXT_PUBLIC_DEVNET_V22=1 npx vitest run` is not a usable signal on its own: ~300 v2.1-fixture tests fail by design. Use the delta:
+`NEXT_PUBLIC_V22=1 npx vitest run` is not a usable signal on its own: ~300 v2.1-fixture tests fail by design. Use the delta:
 `cd app && node scripts/flag-on-delta.mjs <base-worktree>/app` runs the suite with the flag on in both checkouts (`vitest --reporter=json`) and lists only the tests that fail here and not in the base (exit 1 if any). Choose the base that isolates your change (a worktree of the previous head, or the playground-merge-only commit). `--json-base` / `--json-head` reuse saved reports.
 Flag off, the whole suite is the gate (it must match playground by name).
