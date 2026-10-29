@@ -13,7 +13,18 @@
  * Wire and rules: ledger `v22-lev-guard-wire-spec-2026-10-28.md`; the program is percolator-prog `src/lev_guard_v22.rs`.
  */
 import { PublicKey, type Connection, type TransactionInstruction } from "@solana/web3.js";
-import { buildLevGuardInitIxV22, deriveLevGuardV22, withLevGuardTailV22, TAG_LEV_GUARD_V22 } from "./sdk";
+import { TransactionInstruction as TxIx } from "@solana/web3.js";
+import { buildAccountMetas } from "@percolatorct/sdk";
+import {
+  ACCOUNTS_LEV_GUARD_POKE_V22,
+  buildLevGuardInitIxV22,
+  deriveLevGuardV22,
+  encodeLevGuardPokeV22,
+  withLevGuardTailV22,
+  TAG_LEV_GUARD_V22,
+} from "./sdk";
+import { deriveVaultLpState } from "@/lib/limits/p3-ix";
+import { deriveVaultLpExt } from "@/lib/v21/sdk";
 
 export { TAG_LEV_GUARD_V22 };
 
@@ -25,6 +36,20 @@ export function levGuardPda(programId: PublicKey, market: PublicKey): PublicKey 
 /** The op 0 INIT instruction the creator (market authority) signs. `t0 = 0` = now; a creator can never backdate it. */
 export function buildLevGuardInitIx(programId: PublicKey, market: PublicKey, creator: PublicKey): TransactionInstruction {
   return buildLevGuardInitIxV22({ programId, market }, creator, 0n);
+}
+
+/**
+ * D16: op 4 POKE with the NAV-sampling tail, the keeper's pre-allocate poke (`buildLevGuardPokeIxV22(..., { sampleNav: true })`):
+ * `[0]` caller (signer) · `[1]` market (w) · `[2]` guard (w) · `[3]` bound vault-LP portfolio (w) · `[4]` vault_lp_state · `[5]` vault_lp_ext
+ * (required with `[4]`; an empty account is fine before the first allocation creates it). Permissionless.
+ */
+export function buildLevGuardPokeIx(programId: PublicKey, market: PublicKey, caller: PublicKey, vaultLpPortfolio: PublicKey): TransactionInstruction {
+  const keys = buildAccountMetas(ACCOUNTS_LEV_GUARD_POKE_V22, { caller, market, guard: levGuardPda(programId, market), vaultLpPortfolio });
+  keys.push(
+    { pubkey: deriveVaultLpState(programId, market), isSigner: false, isWritable: false },
+    { pubkey: deriveVaultLpExt(programId, market), isSigner: false, isWritable: false },
+  );
+  return new TxIx({ programId, keys, data: Buffer.from(encodeLevGuardPokeV22()) });
 }
 
 /**

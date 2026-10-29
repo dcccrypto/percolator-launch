@@ -12,6 +12,9 @@
  *    normal state (the market is already allocated up to alpha), not an error to show;
  *  - and if it still refuses (100) when the whole transaction is checked, the trade is rebuilt
  *    without it once (`isAllocateRefusal`).
+ *  - D16 (v2.2): on a market with a leverage guard the 103 is preceded by the guard poke (tag 124 op 4, NAV-sampling tail),
+ *    as the keeper does before every allocation, so the guard samples NAV before Earn's capital moves. The pair is
+ *    simulated together and the poke is dropped (never the trade) unless it passes.
  */
 import { PublicKey, type Connection, type TransactionInstruction } from "@solana/web3.js";
 import { deriveLpBackingLedger } from "@percolatorct/sdk";
@@ -22,6 +25,8 @@ import { WRAPPER_ERR_V21 } from "./wrapper-errors";
 import { isDevnetV21Enabled } from "./flag";
 import { withMarketTailsV22 } from "@/lib/v22/market-tails";
 import { buildVaultLpAllocateIx } from "./sdk";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { buildLevGuardPokeIx, levGuardExists } from "@/lib/v22/lev-guard";
 
 /** The order grows the taker's exposure (an open, add or flip). A close or reduce is false. */
 export function isRiskIncreasing(beforeQ: bigint | null, signedSizeQ: bigint): boolean {
@@ -82,9 +87,27 @@ export async function planAllocatePrefix(
     const [ix] = await withMarketTailsV22(deps.connection, p.programId, [built]);
     const sim = await deps.simulate([ix]);
     if (sim.rpcFailed || sim.err) return []; // no verdict, or "no room / drawing / impaired": not needed now
-    return [ix];
+    return await withGuardPoke(deps, p, new PublicKey(st.lpPortfolio), ix);
   } catch {
     return [];
+  }
+}
+
+/** D16: `[poke, 103]` on a guarded v2.2 market when the pair simulates clean; otherwise `[103]`. Never throws. */
+async function withGuardPoke(
+  deps: AllocatePrefixDeps,
+  p: { programId: PublicKey; market: PublicKey; cranker: PublicKey },
+  lpPortfolio: PublicKey,
+  allocate: TransactionInstruction,
+): Promise<TransactionInstruction[]> {
+  if (!isDevnetV22Enabled()) return [allocate];
+  try {
+    if (!(await levGuardExists(deps.connection, p.programId, p.market))) return [allocate];
+    const pair = [buildLevGuardPokeIx(p.programId, p.market, p.cranker, lpPortfolio), allocate];
+    const sim = await deps.simulate(pair);
+    return sim.rpcFailed || sim.err ? [allocate] : pair;
+  } catch {
+    return [allocate];
   }
 }
 
