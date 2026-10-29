@@ -80,11 +80,9 @@ export const V22LaunchOptions: FC<V22LaunchOptionsProps> = ({ value, onChange, p
         </ul>
       )}
       <p className="text-[11px] text-[var(--text-secondary)]" data-testid="v22-creator-seed">{V22_COPY.growth.creatorSeed}</p>
-      {/* Creator share disclosure (L5 FC-B2): where a creator weighs first-loss against fee-only, before signing. */}
+      {/* Creator share disclosure (L5 FC-B2): the wizard always launches a fee-only pool, stated before signing. */}
       <div className="space-y-0.5 text-[11px] text-[var(--text-secondary)]" data-testid="v22-creator-share">
         <p data-testid="v22-creator-share-fee-only">{V22_COPY.stake.creatorShare.feeOnly}</p>
-        <p data-testid="v22-creator-share-first-loss">{V22_COPY.stake.creatorShare.firstLoss}</p>
-        <p data-testid="v22-creator-share-compare">{V22_COPY.stake.creatorShare.compare}</p>
       </div>
       {plan.protection && tierBounds && (
         <TierControls

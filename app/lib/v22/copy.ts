@@ -184,14 +184,11 @@ export const V22_COPY = {
       firstLoss: "At close, you share everything above the creator's seed in proportion to your stake.",
     },
     /**
-     * Creator share disclosure (decision 2026-10-22, L5 FC-B2). The creator fee leg is 16%. A first-loss pool only deploys after the
-     * market's asset-admin key is burned, and nobody can claim the creator leg after that, so it goes to the protocol. Shown wherever
-     * a creator picks how the market's stake pool works, before anything is signed. Calm and short; no authority names.
+     * Creator share disclosure (D5, 2026-10-29). Every market the wizard launches gets a fee-only stake pool (InitPoolV5, FEE_ONLY), so
+     * there is no choice to offer: the creator keeps the 16% creator share and the pool never deploys into insurance.
      */
     creatorShare: {
-      feeOnly: "Fee-only: the creator share (16% of fees) is yours.",
-      firstLoss: "First-loss: the creator share goes to the protocol, because first-loss locks the creator key after launch.",
-      compare: "So a first-loss creator can earn less than a fee-only creator, for more risk.",
+      feeOnly: "Your market's stake pool is fee-only: the creator share (16% of fees) is yours.",
     },
     /**
      * The fee split's Stakers row on a fee-only page (agrees with closeOut.feeOnly): a FEE_ONLY pool is paid nothing

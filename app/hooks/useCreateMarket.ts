@@ -31,7 +31,6 @@ import {
   encodeSetMatcherConfig,
   encodeInitUser,
   encodeSetNftProgramId,
-  encodeStakeInitPool,
   encodeUpdateFeeSplit,
   encodeStakeBindInsuranceAuthority,
   bindInsuranceAuthorityAccounts,
@@ -128,6 +127,7 @@ import { staleResolveLaunchIxs, staleWindowRepair, buildConfigurePermissionlessR
 import type { V22LaunchParams } from "@/lib/v22/launch-plan";
 import { V21_COPY } from "@/lib/v21/copy";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { buildStakeInitPoolData } from "@/lib/v22/stake-v5";
 import { LEV_GUARD_INIT_FAILED, LEV_GUARD_MISSING_BLOCK, LEV_GUARD_RENT_ACCOUNT_LEN, levGuardApplies, levGuardPda, planLevGuardLaunch } from "@/lib/v22/lev-guard";
 import { buildP3BindIxs, canonicalVaultLpMatcher, p3BindProgress, validateP3Wizard } from "@/lib/limits/p3-wizard";
 import { COPY as LIMITS_COPY } from "@/lib/limits/copy";
@@ -1308,7 +1308,7 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
         admin: walletPk, slab: slabPk, pool: stakePoolPda, lpMint: stakeLpMintKp.publicKey,
         vault: stakeVaultKp.publicKey, vaultAuth: stakeVaultAuth, collateralMint: params.mint, percolatorProgram: programId,
       }),
-      data: encodeStakeInitPool(STAKE_POOL_COOLDOWN_SLOTS, 0n), // C-1: relaunch floor, 150 slots
+      data: buildStakeInitPoolData(isDevnetV22Enabled(), STAKE_POOL_COOLDOWN_SLOTS), // C-1: relaunch floor, 150 slots; D5: v2.2 = InitPoolV5 FEE_ONLY
     });
     // UpdateFeeSplit (wrapper tag 86) — creator-chosen split, MARKETAUTH-GATED, so it
     // MUST land BEFORE initPoolIx (StakeInitPool irreversibly rotates cfg.marketauth to
@@ -4281,7 +4281,7 @@ export function useCreateMarket() {
                 percolatorProgram: programId,
               }),
               // cooldown = the relaunch floor (C-1, 150 slots), depositCap=0 (uncapped)
-              data: encodeStakeInitPool(STAKE_POOL_COOLDOWN_SLOTS, 0n),
+              data: buildStakeInitPoolData(isDevnetV22Enabled(), STAKE_POOL_COOLDOWN_SLOTS),
             });
 
             // UpdateFeeSplit (wrapper tag 86) — MARKETAUTH-GATED, so it MUST land

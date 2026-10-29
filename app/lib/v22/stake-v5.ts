@@ -6,6 +6,7 @@
  * so the hook re-reads the pool right before building and asks for consent again.
  */
 import { PublicKey, TransactionInstruction } from "@solana/web3.js";
+import { encodeStakeInitPool } from "@percolatorct/sdk";
 import {
   ACCOUNTS_STAKE_DEPOSIT_V5,
   CONSENT_VERSION_FIRST_LOSS_V5,
@@ -14,6 +15,9 @@ import {
   decodeStakePoolV5,
   deriveInsuranceUnitsV22,
   encodeStakeDepositWithConsentV5,
+  encodeStakeInitPoolV5,
+  LIQUID_BUFFER_DEFAULT_BPS_V5,
+  HYSTERESIS_DEFAULT_BPS_V5,
   stakeMetasV5,
   type StakeDeployParamsV5,
   type StakePoolV5,
@@ -87,4 +91,21 @@ export function buildStakeDepositV5Ix(p: BuildStakeDepositV5): TransactionInstru
     wrapperProgram: p.poolState.percolatorProgram,
   });
   return new TransactionInstruction({ programId: p.stakeProgramId, keys, data: Buffer.from(data) });
+}
+
+
+/**
+ * The wizard's stake pool init data (D5, v22 deep memo 2026-10-29). Plain InitPool (16-byte payload) creates a
+ * FIRST_LOSS pool on the v2.2 stake program, which is not what the wizard offers. With v2.2 on the wizard sends
+ * InitPoolV5 with risk mode FEE_ONLY (2) and deploy target 0, matching the seed kit default: the creator keeps the
+ * 16% creator share and the pool never deploys into insurance. Uncapped (depositCap 0). With v2.2 off the
+ * deployed stake program only knows plain InitPool, so that is sent unchanged.
+ */
+export function buildStakeInitPoolData(v22On: boolean, cooldownSlots: bigint): Uint8Array {
+  if (!v22On) return encodeStakeInitPool(cooldownSlots, 0n);
+  return encodeStakeInitPoolV5(cooldownSlots, 0n, STAKE_RISK_MODE.FeeOnly, {
+    targetBps: 0,
+    bufferBps: LIQUID_BUFFER_DEFAULT_BPS_V5,
+    hysteresisBps: HYSTERESIS_DEFAULT_BPS_V5,
+  });
 }

@@ -29,16 +29,14 @@ describe("V22LaunchOptions", () => {
     expect(screen.getByTestId("v22-lot-tip")).toHaveTextContent("1 lot = 100,000 TOK");
     expect(screen.queryByTestId("v22-launch-issue")).toBeNull();
   });
-  it("creator share disclosure (FC-B2): 16% fee-only vs first-loss to the protocol, said before signing, no protocol jargon", () => {
+  it("creator share disclosure (D5): the wizard launches a fee-only pool and says so plainly; no first-loss choice is implied", () => {
     const { container } = mount();
     const box = screen.getByTestId("v22-creator-share");
-    expect(screen.getByTestId("v22-creator-share-fee-only")).toHaveTextContent("Fee-only: the creator share (16% of fees) is yours.");
-    expect(screen.getByTestId("v22-creator-share-first-loss")).toHaveTextContent("First-loss: the creator share goes to the protocol");
-    expect(screen.getByTestId("v22-creator-share-compare")).toHaveTextContent("a first-loss creator can earn less than a fee-only creator");
-    expect(box.textContent).toBe(
-      `${V22_COPY.stake.creatorShare.feeOnly}${V22_COPY.stake.creatorShare.firstLoss}${V22_COPY.stake.creatorShare.compare}`,
-    );
-    expect(box.textContent).not.toMatch(/asset.?admin|burn|tag \d+|authority/i);
+    expect(screen.getByTestId("v22-creator-share-fee-only")).toHaveTextContent("Your market's stake pool is fee-only: the creator share (16% of fees) is yours.");
+    expect(box.textContent).toBe(V22_COPY.stake.creatorShare.feeOnly);
+    expect(box.textContent).not.toMatch(/first-loss|protocol|asset.?admin|burn|tag \d+|authority/i);
+    expect(screen.queryByTestId("v22-creator-share-first-loss")).toBeNull();
+    expect(screen.queryByTestId("v22-creator-share-compare")).toBeNull();
     expect(container.textContent).toContain("16%");
   });
   it("creator share disclosure is not shown when the launch options are unavailable", () => {
