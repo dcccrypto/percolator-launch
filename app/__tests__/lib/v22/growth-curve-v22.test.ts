@@ -6,6 +6,12 @@ import { LAYOUT_V22, WRAPPER_ACCOUNT_MAGIC } from "@/lib/v22/sdk";
 import { assetGrowthAccountOffsetV19 } from "@/lib/v22/records";
 import { ASSET_GROWTH_FIELD_OFF, DEPTH_EVER, DEPTH_PREV_REAL, DEPTH_SOURCE, curveDepthForLeverageX100, tierThresholdsE6 } from "@/lib/v22/sdk/records/growth-v19";
 
+// App bug 2026-10-29: these pin the PRE-rc23 wrapper deployed on devnet (aca02ba6: no κ / λ caps, round-2 math for legacy records), i.e.
+// the ticket with NEXT_PUBLIC_RC23_OPEN_LIMITS=0. The rc23 numbers are pinned in ticket-rc23-open-limits.test.ts.
+import { __setRc23OpenLimitsForTest } from "@/lib/v21/growth-market";
+beforeEach(() => __setRc23OpenLimitsForTest(false));
+afterEach(() => __setRc23OpenLimitsForTest(null));
+
 /**
  * Continuous leverage (percolator-prog feat/v22-continuous-leverage @ e699d7da + the continuous stress cap @ 3198539a): on a market whose growth record the controller wrapper
  * wrote (GROWTH_FLAG_R3_LAYOUT, set from birth), the ticket quotes the log2-interpolated depth curve the program gates on -- 7.5x at

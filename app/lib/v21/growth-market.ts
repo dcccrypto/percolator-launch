@@ -19,6 +19,14 @@ import {
   type QuoteMaxLeverageInput,
 } from "../v22/sdk/records/growth-v19";
 import * as R2 from "../v22/sdk/records/growth-v19-r2";
+import { clampEnforced, conservativeEquity } from "../v22/sdk/records/growth-v19";
+import {
+  GROWTH_FLAG_LEV_GUARD_V22,
+  levGuardOpenLimitsV22,
+  type LevGuardOpenInputV22,
+  type LevGuardOpenLimitsV22,
+  type LevGuardV22,
+} from "../v22/sdk";
 import { decodeAssetGrowthV19, decodeAssetVaultLpDrawP3 } from "../v22/records";
 import { layoutOf } from "../v22/layout";
 import { readBandRentView } from "../v22/band-rent-state";
@@ -48,6 +56,24 @@ function hlockOffset(raw: Uint8Array): number | null {
  */
 export const GROWTH_DEPTH_RULES_DEPLOYED = true;
 
+/**
+ * App bug 2026-10-29 (product review findings 4 / 5): the ticket quotes the open limits of percolator-prog `feat/v22-rc23-2026-10-22`
+ * @ 02524b05, the program the v2.2 app ships with: the κ cap (#594, 253 bps of depth today) and the λ ≤ 1.0 / λ_vol cap (#599) on N_cap,
+ * the leverage guard (tag 124, #601 / #605) and the controller math for every record (rc23 quotes a legacy record with it too). All of
+ * them only TIGHTEN, so on the pre-rc23 wrapper still deployed on devnet (aca02ba6, which has none of them) the ticket can under-promise
+ * room but never over-promise. The guard rules apply only where the program applies them (the market's growth guard bit, or a mainnet
+ * build on a clamp-enforced market), so markets without a guard are unchanged by them.
+ * Build-time switch `NEXT_PUBLIC_RC23_OPEN_LIMITS=0` quotes the old wrapper exactly (preview builds against aca02ba6 only).
+ */
+let rc23Override: boolean | null = null;
+export function rc23OpenLimits(): boolean {
+  return rc23Override ?? process.env.NEXT_PUBLIC_RC23_OPEN_LIMITS?.trim() !== "0";
+}
+/** Test hook (null = the build switch). */
+export function __setRc23OpenLimitsForTest(v: boolean | null): void {
+  rc23Override = v;
+}
+
 
 /** The record, or null when growth is OFF / the bytes are not a market account. Never throws. */
 export function decodeGrowthRecord(raw: Uint8Array | null | undefined, assetIndex = 0): AssetGrowthV19 | null {
@@ -72,7 +98,11 @@ export interface GrowthMarketInput {
   assetIndex?: number;
   engine: {
     initialMarginBps: bigint;
+    /** Guard leverage / short cap (`maintenance_margin_bps`); without it a required guard fails closed. */
+    maintenanceMarginBps?: bigint;
     effectivePriceE6: bigint;
+    /** The oracle target the guard's price band samples (`lev_target_price`); absent -> the effective price. */
+    targetPriceE6?: bigint;
     oiEffLongQ: bigint;
     oiEffShortQ: bigint;
     tradeFeeBaseBps: bigint;
@@ -95,6 +125,12 @@ export interface GrowthMarketInput {
    * pick the stress level and `vol` feeds L_vol ({@link growthControllerInputs} reads them from the market bytes); a record with
    * volatility data and no `vol` fails closed to launch leverage.
    */
+  /**
+   * v2.2 leverage guard (tag 124): the market's guard account as read this poll (`account` null = absent, undecodable, or for another
+   * market / asset), and whether this is a mainnet build (where the program requires a guard on every clamp-enforced growth asset).
+   * Omitted = not read (the guard is not quoted).
+   */
+  guard?: { account: LevGuardV22 | null; mainnet: boolean };
   v22?: {
     bandBps: number;
     nowSlot: bigint | null;
@@ -154,6 +190,54 @@ export interface GrowthMarketView {
   hlockActive: boolean;
   tradeFeeBaseBps: bigint;
   maxTradingFeeBps: bigint;
+  /**
+   * The leverage guard's open limits for this market right now (null = the guard was not read, or the v2.2 clock is unknown). Already
+   * folded into `long` / `short` (leverage, blocked); its size / short / leverage-at-equity caps are per order (lib/limits/ticket.ts).
+   */
+  guard: { input: LevGuardOpenInputV22; limits: LevGuardOpenLimitsV22 } | null;
+}
+
+/** The ticket's closed reasons beyond the growth gate's own: the guard refuses every open (132 missing, 133 `age_under_6h`). */
+export type GuardClosedReason = "guard-new-market" | "guard-missing";
+
+/**
+ * The guard's view for this market (`lev_trade_post`'s market part), from the same numbers the growth quote uses (`l_now` = the ceiling
+ * in force, `n_now` = N_cap with the rc23 caps). Null when the guard was not read or the clock is unknown.
+ */
+function guardView(i: GrowthMarketInput, record: AssetGrowthV19, q: MaxLeverageQuote): GrowthMarketView["guard"] {
+  if (!i.guard || !i.lp || i.lpEffectiveQ === null || !i.v22 || i.v22.nowSlot === null) return null;
+  const clamp = clampEnforced(i.v22.bandBps, record.rGapBps);
+  const required = (record.flags & GROWTH_FLAG_LEV_GUARD_V22) !== 0 || (i.guard.mainnet && clamp);
+  const input: LevGuardOpenInputV22 = {
+    guard: i.guard.account,
+    guardRequired: required,
+    nowSlot: i.v22.nowSlot,
+    lNowX100: q.ceilingX100 > 0 ? q.ceilingX100 : Math.min(record.lLaunchX100, record.lTierX100),
+    nCapQ: q.nCapQ ?? 0n,
+    priceE6: i.engine.effectivePriceE6,
+    targetPriceE6: i.engine.targetPriceE6 && i.engine.targetPriceE6 > 0n ? i.engine.targetPriceE6 : i.engine.effectivePriceE6,
+    volHasData: record.volHasData === true,
+    volVarX100: record.volVarX100 ?? 0,
+    mmrBps: i.engine.maintenanceMarginBps ?? 10_000n,
+    engineImrBps: i.engine.initialMarginBps,
+    lTierX100: record.lTierX100,
+    collateralDecimals: record.collateralDecimals,
+    cM: conservativeEquity(i.lp.capital, i.lp.pnl, i.lp.feeCredits),
+    oiEffLongQ: i.engine.oiEffLongQ,
+    oiEffShortQ: i.engine.oiEffShortQ,
+    lpEffQ: i.lpEffectiveQ,
+  };
+  return { input, limits: levGuardOpenLimitsV22(input) };
+}
+
+/** Fold the guard into a side quote: a blocked market closes both sides; otherwise leverage is `min(quote, L_eff)`. */
+function withGuard(q: MaxLeverageQuote, g: GrowthMarketView["guard"]): MaxLeverageQuote {
+  if (!g || !g.limits.applies || q.closed) return q;
+  if (g.limits.blocked !== null) {
+    const reason: GuardClosedReason = g.limits.blocked === "age-under-6h" ? "guard-new-market" : "guard-missing";
+    return { ...q, closed: true, closedReason: reason as unknown as MaxLeverageQuote["closedReason"], maxLeverageX100: 0 };
+  }
+  return q.maxLeverageX100 > g.limits.lEffX100 ? { ...q, maxLeverageX100: g.limits.lEffX100 } : q;
 }
 
 /**
@@ -174,7 +258,8 @@ function r2Input(q: QuoteMaxLeverageInput, r2: R2.AssetGrowthV19): R2.QuoteMaxLe
 
 /** Controller records: the continuous-leverage quote; legacy records under the v2.2 input: the round-2 quote (what that wrapper gates). */
 function quoteFor(q: QuoteMaxLeverageInput, r2: R2.AssetGrowthV19 | null, side: "long" | "short"): MaxLeverageQuote {
-  return r2 ? R2.quoteMaxLeverage(r2Input(q, r2), side) : quoteMaxLeverage(q, side);
+  // A round-2 quote predates λ_eff on the quote: null keeps the stored λ (only with rc23OpenLimits() off).
+  return r2 ? { ...R2.quoteMaxLeverage(r2Input(q, r2), side), lambdaEffBps: null } : quoteMaxLeverage(q, side);
 }
 
 /** Null when growth is OFF for this asset or the LP is not read yet (then nothing is claimed). */
@@ -186,6 +271,7 @@ export function growthMarketView(i: GrowthMarketInput): GrowthMarketView | null 
   // down) and no reading can be called conservative without the slot. The ticket shows no growth numbers until the clock arrives.
   if (i.v22 && i.v22.nowSlot === null) return null;
   const record: AssetGrowthV19 = decoded;
+  const rc23Open = rc23OpenLimits();
   const hlockActive = readBankruptcyHlockActive(i.raw);
   const quoteInput: QuoteMaxLeverageInput = {
     engineImrBps: i.engine.initialMarginBps,
@@ -208,19 +294,26 @@ export function growthMarketView(i: GrowthMarketInput): GrowthMarketView | null 
             ...(i.v22.modeLong === undefined ? {} : { modeLong: i.v22.modeLong }),
             ...(i.v22.modeShort === undefined ? {} : { modeShort: i.v22.modeShort }),
             ...(i.v22.vol === undefined ? {} : { vol: i.v22.vol }),
+            rc23Caps: rc23Open,
           },
         }
       : {}),
   };
   // Which wrapper generation wrote the record decides the math (the controller program sets GROWTH_FLAG_R3_LAYOUT from birth). Without
   // the v2.2 input the quote is growth-1 in both ports.
-  const r2Record = quoteInput.v22 ? asRound2Record(record) : null;
+  // rc23 quotes EVERY record with the controller math (a legacy record reads no volatility data), so the round-2 port is used only
+  // with rc23OpenLimits() off (the round-2 wrapper still on devnet).
+  const r2Record = quoteInput.v22 && !rc23Open ? asRound2Record(record) : null;
+  const long = quoteFor(quoteInput, r2Record, "long");
+  const short = quoteFor(quoteInput, r2Record, "short");
+  const guard = rc23Open ? guardView(i, record, long) : null;
   return {
     record,
     r2Record,
     quoteInput,
-    long: quoteFor(quoteInput, r2Record, "long"),
-    short: quoteFor(quoteInput, r2Record, "short"),
+    long: withGuard(long, guard),
+    short: withGuard(short, guard),
+    guard,
     hlockActive,
     tradeFeeBaseBps: i.engine.tradeFeeBaseBps,
     maxTradingFeeBps: i.engine.maxTradingFeeBps,

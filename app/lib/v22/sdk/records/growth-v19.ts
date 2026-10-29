@@ -2480,6 +2480,108 @@ export interface NextUnlock {
 }
 
 /** Everything derived from the growth record + band + depth + LP equity for the app. */
+// ============================================================================
+// rc23 open-limit caps (percolator-prog feat/v22-rc23-2026-10-22 @ 02524b05; #594 κ cap, #599 λ cap)
+// ============================================================================
+
+/** `KAPPA_CAP_NUM / KAPPA_CAP_DEN`: κ_cap = fee · 0.5 · 101.5 = `floor(fee_bps · 1015 / 20)` (growth_v19 S-3). */
+export const KAPPA_CAP_NUM = 1_015;
+export const KAPPA_CAP_DEN = 20;
+/** `KAPPA_CAP_FALLBACK_FEE_BPS`: the pool fee is not plumbed (`growth_g8_ctx_view` passes `None`), so every market reads 5 bps => κ_cap 253 bps. */
+export const KAPPA_CAP_FALLBACK_FEE_BPS = 5;
+/** `lev_guard_v22::W1_LIVE` (false at 02524b05): before W1 ships λ_eff is also capped at 1.0. */
+export const LEV_W1_LIVE = false;
+/** `LAMBDA_CAP_PRE_W1_BPS`: λ_eff ≤ 1.0 until W1. */
+export const LAMBDA_CAP_PRE_W1_BPS = 10_000;
+/** `LAMBDA_VOL_HORIZON_SLOTS`: σ for λ_vol over 72 h before W1 (24 h after). */
+export const LAMBDA_VOL_HORIZON_SLOTS: bigint = LEV_W1_LIVE ? 216_000n : 648_000n;
+
+/**
+ * `growth_v19::kappa_cap_bps`: the κ cap (bps of depth) of a pool with fee `feeBps`, rounded DOWN.
+ *
+ * @param feeBps  Pool fee (bps).
+ * @returns `floor(feeBps * 1015 / 20)`.
+ * @example
+ * ```ts
+ * kappaCapBps(5); // 253
+ * ```
+ */
+export function kappaCapBps(feeBps: number): number {
+  return Math.floor((feeBps * KAPPA_CAP_NUM) / KAPPA_CAP_DEN);
+}
+
+/**
+ * `growth_v19::kappa_eff_bps`: `min(κ_tier, kappaCapBps(fee))`, an unknown fee (`null`) reading {@link KAPPA_CAP_FALLBACK_FEE_BPS}. Tighten-only.
+ *
+ * @param kappaTierBps  κ from the dials (lagging curve).
+ * @param feeBps        Pool fee, or `null` (what the program passes today).
+ * @returns κ_eff (bps).
+ * @example
+ * ```ts
+ * kappaEffBps(10_000, null); // 253
+ * ```
+ */
+export function kappaEffBps(kappaTierBps: number, feeBps: number | null): number {
+  const cap = kappaCapBps(feeBps ?? KAPPA_CAP_FALLBACK_FEE_BPS);
+  return kappaTierBps < cap ? kappaTierBps : cap;
+}
+
+/**
+ * `lev_guard_v22::lambda_vol_bps`: `λ_vol = 0.95 / (2·σ_H)` = `floor(47_500_000 / σ_bps)`; σ 0 = no cap.
+ *
+ * @param sigmaHBps_  σ over {@link LAMBDA_VOL_HORIZON_SLOTS} (bps).
+ * @returns λ_vol (bps), `Number.MAX_SAFE_INTEGER` for no cap.
+ */
+export function lambdaVolBps(sigmaHBps_: bigint): number {
+  if (sigmaHBps_ === 0n) return Number.MAX_SAFE_INTEGER;
+  const v = 47_500_000n / sigmaHBps_;
+  return v > 0xffff_ffffn ? 0xffff_ffff : Number(v);
+}
+
+/**
+ * `lev_guard_v22::lambda_fallback_bps`: `min(λ, [1.0 before W1], λ_vol)`. Tighten-only.
+ *
+ * @param lambdaEffBps  λ_depth from the dials.
+ * @param sigmaHBps_    σ over {@link LAMBDA_VOL_HORIZON_SLOTS} (bps).
+ * @returns The capped λ_depth (bps).
+ * @example
+ * ```ts
+ * lambdaFallbackBps(20_000, sigmaHBps(2_500, 648_000n)); // 10_000 (the 1.0 cap binds; λ_vol ~11,800)
+ * ```
+ */
+export function lambdaFallbackBps(lambdaEffBps: number, sigmaHBps_: bigint): number {
+  let l = lambdaEffBps;
+  if (!LEV_W1_LIVE && LAMBDA_CAP_PRE_W1_BPS < l) l = LAMBDA_CAP_PRE_W1_BPS;
+  const v = lambdaVolBps(sigmaHBps_);
+  return v < l ? v : l;
+}
+
+/**
+ * The two rc23 lines of `growth_g8_ctx_view` on a clamp-enforced market: κ ← `kappaEffBps(κ, None)`, λ_depth ←
+ * `lambdaFallbackBps(λ_depth, σ_72h)` with σ from the stored variance, the seed variance without data (fails closed).
+ *
+ * @param dials  The dials from {@link smoothDialsAndVenueL}.
+ * @param g      The growth record (its variance).
+ * @returns The capped dials (leverage signal unchanged).
+ */
+export function rc23CapDials(dials: SmoothDials, g: Pick<AssetGrowthV19, "volHasData" | "volVarX100">): SmoothDials {
+  const v = g.volHasData ? g.volVarX100 : VOL_VAR_SEED_X100;
+  return {
+    lSignalX100: dials.lSignalX100,
+    kappaBps: kappaEffBps(dials.kappaBps, null),
+    lambdaDepthBps: lambdaFallbackBps(dials.lambdaDepthBps, sigmaHBps(v, LAMBDA_VOL_HORIZON_SLOTS)),
+  };
+}
+
+/** Options of {@link growthCeilingView}. */
+export interface GrowthCeilingOptions {
+  /**
+   * Apply the rc23 κ / λ caps ({@link rc23CapDials}). Default `true` (the program this file tracks). `false` quotes a wrapper that predates
+   * them (prog #594 / #599 not deployed); the caps only ever tighten, so `true` never over-quotes either program.
+   */
+  rc23Caps?: boolean;
+}
+
 export interface GrowthCeilingView {
   /** Combined tier `min(venue, book)`; 0 off the clamp. */
   tier: number;
@@ -2528,6 +2630,11 @@ export interface GrowthCeilingView {
   nextUnlock: NextUnlock;
   /** The next tier's requirements regardless of the ratchet. */
   nextTierUnlock: NextUnlock;
+  /**
+   * λ_eff every stored-λ reader uses (`growth_capacity_lambda_view`: the P1 LP cap 68, the P3-H2 vault-LP cap 80, the bond / junior
+   * locks): `min(stored λ, dials.lambdaDepthBps)` on a clamp-enforced market, the stored λ off it.
+   */
+  lambdaEffBps: number;
 }
 
 /**
@@ -2544,6 +2651,7 @@ export interface GrowthCeilingView {
  * @param stress     Stress level ({@link stressLevel}); a legacy boolean `forceDown` is accepted (`true` = h-lock, launch).
  * @param vol        Engine config for the volatility term ({@link GrowthVolInputs}). Required for an exact ceiling once the record has volatility
  *                   data; omitted -> the view fails closed to launch and sets `volInputsMissing`.
+ * @param opts       {@link GrowthCeilingOptions} (rc23 κ / λ caps, on by default).
  * @returns {@link GrowthCeilingView}.
  * @example
  * ```ts
@@ -2551,7 +2659,7 @@ export interface GrowthCeilingView {
  * if (v.nextUnlock.kind === "both") console.log(`${v.nextUnlock.leverageX100! / 100}x unlocks at $${v.nextUnlock.depthUsd} pool depth and $${v.nextUnlock.backingUsd} market backing`);
  * ```
  */
-export function growthCeilingView(g: AssetGrowthV19, bandBps: number, nowSlot: bigint, cM: bigint | null, stress: number | boolean, vol?: GrowthVolInputs): GrowthCeilingView {
+export function growthCeilingView(g: AssetGrowthV19, bandBps: number, nowSlot: bigint, cM: bigint | null, stress: number | boolean, vol?: GrowthVolInputs, opts: GrowthCeilingOptions = {}): GrowthCeilingView {
   const st = stressOf(stress);
   const clamp = clampEnforced(bandBps, g.rGapBps);
   const unit = wholeTokenAtoms(g.collateralDecimals);
@@ -2570,8 +2678,9 @@ export function growthCeilingView(g: AssetGrowthV19, bandBps: number, nowSlot: b
   const grad = graduationOn(clamp, bandBps, tier);
   const venueD = clamp ? venueDepthCapped(eff, dsByte, thresholds, g.attestedMaxTier) : 0n;
   const dv = clamp ? smoothDialsAndVenueL(venueD, clamp && cM !== null ? bookD : 0n, thresholds, table) : null;
+  // rc23 (prog #594 / #599): κ_eff and the λ cap, on a clamp-enforced market only (the program's early return keeps tier-0 dials off it).
   const dials: SmoothDials = dv !== null
-    ? dv.dials
+    ? opts.rc23Caps === false ? dv.dials : rc23CapDials(dv.dials, g)
     : { lSignalX100: 0, kappaBps: Number(KAPPA_TABLE_BPS[0]), lambdaDepthBps: Number(LAMBDA_DEPTH_TABLE_BPS[0]) };
   const venueLX100 = dv !== null ? dv.venueLX100 : 0;
   const volInputsMissing = clamp && g.volHasData === true && vol === undefined;
@@ -2624,6 +2733,7 @@ export function growthCeilingView(g: AssetGrowthV19, bandBps: number, nowSlot: b
     tier, freshDepthE6: freshRaw, collateralDecimals: g.collateralDecimals, venueTier: venue, bookTier: book, bookDepthE6: bookD, effectiveDepthE6: eff,
     capDepthE6: capDepth, thresholdsE6: thresholds, table, clampEnforced: clamp, graduationOn: grad, targetX100: target, ceilingX100: ceiling, nextUnlock,
     nextTierUnlock, stress: st, stressCapX100: sCap, dials, venueLX100, lVolX100: lVol, lSignalX100: lSignal, volInputsMissing, venueDepthE6: venueD, depthTwMinE6: twMin,
+    lambdaEffBps: clamp ? Math.min(g.lambdaBps, dials.lambdaDepthBps) : g.lambdaBps,
   };
 }
 
@@ -2674,6 +2784,8 @@ export interface QuoteMaxLeverageInput {
     modeShort?: number;
     /** Item 6: engine `liquidation_fee_bps` and `band_max_epoch_slots` for `L_vol` (the IMR is `engineImrBps`). Omitted on a record with volatility data -> launch (fail closed). */
     vol?: { liquidationFeeBps: bigint; bandMaxEpochSlots: bigint };
+    /** rc23 κ / λ caps ({@link GrowthCeilingOptions.rc23Caps}); default `true`. */
+    rc23Caps?: boolean;
   };
 }
 
@@ -2742,6 +2854,8 @@ export interface MaxLeverageQuote {
   nextTierUnlock: NextUnlock;
   /** v2.2: graduation above `L_launch` is allowed (clamp enforced and tier >= 1). */
   graduationOn: boolean;
+  /** λ_eff of the P1 LP cap / P3-H2 cap ({@link GrowthCeilingView.lambdaEffBps}); the stored λ without the v2.2 input; null with growth off. */
+  lambdaEffBps: number | null;
 }
 
 /**
@@ -2787,7 +2901,7 @@ export function quoteMaxLeverage(input: QuoteMaxLeverageInput, side: "long" | "s
   const out = (p: Partial<MaxLeverageQuote>): MaxLeverageQuote => ({
     side, crowd, closed: false, closedReason: null, maxLeverageX100: 0, imrBps: null,
     utilizationBps: null, nCapQ: null, growthOn: g !== null, headroomQ: null, reduceOnlyCapacityExempt: true, utilisationFeeBps: null,
-    ceilingX100: 0, tier: 0, venueTier: 0, bookTier: 0, capDepthE6: null, nextUnlock: { kind: "none" }, nextTierUnlock: { kind: "none" }, graduationOn: false, ...meta, ...p,
+    ceilingX100: 0, tier: 0, venueTier: 0, bookTier: 0, capDepthE6: null, nextUnlock: { kind: "none" }, nextTierUnlock: { kind: "none" }, graduationOn: false, lambdaEffBps: null, ...meta, ...p,
   });
   const lev = (imr: bigint): number => {
     const l = leverageX100ForImrBps(imr);
@@ -2804,12 +2918,13 @@ export function quoteMaxLeverage(input: QuoteMaxLeverageInput, side: "long" | "s
   const v = input.v22;
   const stress = v ? stressLevel(v.drawOutstanding === true, realAdl(v.modeLong ?? 0, v.modeShort ?? 0), input.bankruptcyHlockActive) : STRESS_NONE;
   const view = v
-    ? growthCeilingView(g, v.bandBps, v.nowSlot, cM, stress, v.vol ? { engineImrBps: e, liquidationFeeBps: v.vol.liquidationFeeBps, bandMaxEpochSlots: v.vol.bandMaxEpochSlots } : undefined)
+    ? growthCeilingView(g, v.bandBps, v.nowSlot, cM, stress, v.vol ? { engineImrBps: e, liquidationFeeBps: v.vol.liquidationFeeBps, bandMaxEpochSlots: v.vol.bandMaxEpochSlots } : undefined, { rc23Caps: v.rc23Caps !== false })
     : null;
   const lCeil = view ? view.ceilingX100 : Math.min(g.lLaunchX100, g.lTierX100);
   meta = {
     ceilingX100: lCeil, tier: view?.tier ?? 0, venueTier: view?.venueTier ?? 0, bookTier: view?.bookTier ?? 0, capDepthE6: view?.capDepthE6 ?? null,
     nextUnlock: view?.nextUnlock ?? { kind: "none" }, nextTierUnlock: view?.nextTierUnlock ?? { kind: "none" }, graduationOn: view?.graduationOn ?? false,
+    lambdaEffBps: view ? view.lambdaEffBps : g.lambdaBps,
   };
   const base = ceilingImrBps(e, lCeil);
   if (base === null) return closed("invalid-config");

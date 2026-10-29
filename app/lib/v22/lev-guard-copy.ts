@@ -63,3 +63,35 @@ export const LEV_GUARD_REFUSED_TITLE: Record<LevGuardRefusalReason | "unknown", 
   lp_stop_round: "Liquidity rebalancing",
   unknown: "Not right now",
 };
+
+// ── the trade ticket, before signing (app bug 2026-10-29, product review finding 4 / R2) ────────────────────────────────────────────
+
+/** "about 2 h" / "about 25 min" for a slot count (0.4 s a slot), never "0 min". */
+export function slotsWait(slots: bigint): string {
+  const mins = Math.max(1, Math.ceil(Number(slots) * 0.4 / 60));
+  if (mins < 60) return `about ${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m === 0 ? `about ${h} h` : `about ${h} h ${m} min`;
+}
+
+export const LEV_GUARD_TICKET_COPY = {
+  newMarket: (wait: string): string => `New market: opening positions unlocks in ${wait}, 6 hours after this market launched. You can still close.`,
+  missing: "This market's safety guard isn't set up yet, so new positions can't open here for now. Closing still works.",
+} as const;
+
+/**
+ * The ticket's line when the guard closes every open: `null` for any other closed reason (the growth copy handles those).
+ * `reason` is the side quote's `closedReason` (lib/v21/growth-market.ts GuardClosedReason).
+ */
+export function levGuardTicketClosed(
+  view: { guard: { input: { nowSlot: bigint }; limits: { opensAtSlot: bigint | null } } | null } | null | undefined,
+  reason: string | null,
+): { title: string; message: string } | null {
+  if (reason === "guard-missing") return { title: "Opening unavailable", message: LEV_GUARD_TICKET_COPY.missing };
+  if (reason !== "guard-new-market") return null;
+  const at = view?.guard?.limits.opensAtSlot ?? null;
+  const now = view?.guard?.input.nowSlot ?? null;
+  if (at === null || now === null) return { title: LEV_GUARD_REFUSED_TITLE.age_under_6h, message: LEV_GUARD_COPY.refused.age_under_6h };
+  return { title: LEV_GUARD_REFUSED_TITLE.age_under_6h, message: LEV_GUARD_TICKET_COPY.newMarket(slotsWait(at > now ? at - now : 1n)) };
+}

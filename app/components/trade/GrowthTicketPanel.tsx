@@ -11,6 +11,7 @@
  */
 import { type FC } from "react";
 import type { GrowthMarketView, GrowthTicketDecision } from "@/lib/v21/growth-market";
+import { levGuardTicketClosed } from "@/lib/v22/lev-guard-copy";
 import { V21_COPY } from "@/lib/v21/copy";
 import { V22_COPY } from "@/lib/v22/copy";
 import type { TierCollateral } from "@/lib/v22/tier-config";
@@ -46,16 +47,18 @@ export const GrowthTicketPanel: FC<GrowthTicketPanelProps> = ({ view, decision, 
   const openSides = (["long", "short"] as const).filter((side) => !(side === "long" ? view.long : view.short).closed);
   const closedSides = (["long", "short"] as const).filter((side) => (side === "long" ? view.long : view.short).closed);
   const reasonOf = (side: "long" | "short") => (side === "long" ? view.long : view.short).closedReason;
+  // The leverage guard closes every open (missing guard / first 6 hours): its own line with the unlock time, not "full".
+  const closedCopy = (side: string, r: GrowthMarketView["long"]["closedReason"]): string => levGuardTicketClosed(view, r)?.message ?? V21_COPY.growthClosed(side, r);
   const closedLine: string | null =
     closedSides.length === 0
       ? null
       : closedSides.length === 2
         ? closedSides.every((s) => isFullReason(reasonOf(s)))
           ? V22_COPY.growth.bothPaused
-          : V21_COPY.growthClosed(direction, reasonOf(direction))
+          : closedCopy(direction, reasonOf(direction))
         : isFullReason(reasonOf(closedSides[0] as "long" | "short"))
           ? V22_COPY.growth.sidePaused(closedSides[0] as "long" | "short")
-          : V21_COPY.growthClosed(closedSides[0] as string, reasonOf(closedSides[0] as "long" | "short"));
+          : closedCopy(closedSides[0] as string, reasonOf(closedSides[0] as "long" | "short"));
   const graduating = !!unlock && unlock.graduation;
   const tier = graduating ? unlock.tier : null;
   const nextLine = graduating ? unlockLine(unlock.unlock, collateral) : null;

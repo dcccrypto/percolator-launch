@@ -8,7 +8,7 @@
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PublicKey } from "@solana/web3.js";
 import { decodeAssetVaultLp, decodeMarketEngineView, decodePortfolioLegs, decodePortfolioRisk } from "@/lib/limits/decode";
 import { lpEffectiveSignedQ } from "@/lib/limits/lp-inventory-room";
@@ -16,6 +16,12 @@ import { growthFor } from "@/hooks/useMarketLimits";
 import { GROWTH_DEPTH_RULES_DEPLOYED, growthMarketView, type GrowthMarketView } from "@/lib/v21/growth-market";
 import { readBandRentView } from "@/lib/v22/band-rent-state";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
+
+// App bug 2026-10-29: these pin the PRE-rc23 wrapper deployed on devnet (aca02ba6: no κ / λ caps, round-2 math for legacy records), i.e.
+// the ticket with NEXT_PUBLIC_RC23_OPEN_LIMITS=0. The rc23 numbers are pinned in ticket-rc23-open-limits.test.ts.
+import { __setRc23OpenLimitsForTest } from "@/lib/v21/growth-market";
+beforeEach(() => __setRc23OpenLimitsForTest(false));
+afterEach(() => __setRc23OpenLimitsForTest(null));
 
 const DIR = path.join(__dirname, "../../fixtures/v22-growth");
 const load = (n: string): Uint8Array => new Uint8Array(Buffer.from((JSON.parse(readFileSync(path.join(DIR, n), "utf8")) as { data: string }).data, "base64"));

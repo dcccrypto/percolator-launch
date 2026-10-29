@@ -25,5 +25,7 @@ export * from "./errors-v22";
 export * from "./v22-trade-fee";
 export * from "./v22-multi-asset-trade";
 export * from "./lev-guard-v22";
+export * from "./lev-guard-decode-v22";
+export * from "./lev-guard-limits-v22";
 export * as v22Slab from "./slab";
 export * from "./nft-v3";

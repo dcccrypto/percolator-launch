@@ -53,6 +53,9 @@ import { isDevnetV21Enabled } from "@/lib/v21/flag";
 import { growthMarketView, type GrowthMarketView } from "@/lib/v21/growth-market";
 import { GROWTH_DEPTH_RULES_DEPLOYED, growthControllerInputs } from "@/lib/v21/growth-market";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { levGuardPda } from "@/lib/v22/lev-guard";
+import { decodeLevGuardV22, type LevGuardV22 } from "@/lib/v22/sdk";
+import { getConfig } from "@/lib/config";
 import { useClusterSlot } from "@/hooks/useClusterSlot";
 
 const POLL_MS = 20_000;
@@ -181,9 +184,28 @@ const OFF = (flags: LimitsFlags): MarketLimits => ({
 });
 
 /** Devnet v2.1: the growth view from what is already read; null when growth is OFF for the asset. */
+/**
+ * The market's leverage guard (tag 124) from its account bytes: null when absent, not owned by the program, undecodable, or written for
+ * another market / asset (the program answers 132 for all of those on a market that needs one). Pure; never throws.
+ */
+export function decodeMarketLevGuard(
+  info: { data: Uint8Array | Buffer; owner: PublicKey } | null | undefined,
+  programId: PublicKey,
+  market: PublicKey,
+  assetIndex: number,
+): LevGuardV22 | null {
+  if (!info || !info.owner.equals(programId)) return null;
+  try {
+    const g = decodeLevGuardV22(new Uint8Array(info.data));
+    return g.market.equals(market) && g.assetIndex === assetIndex ? g : null;
+  } catch {
+    return null;
+  }
+}
+
 export function growthFor(
   slabPart: { engine: MarketEngineView | null; vaultLp: AssetVaultLp | null } | null,
-  accPart: { lp: LpView | null } | null,
+  accPart: { lp: LpView | null; guard?: { account: LevGuardV22 | null } | null } | null,
   lpRealQ: bigint | null,
   raw: Uint8Array | null,
   assetIndex: number,
@@ -208,6 +230,8 @@ export function growthFor(
     // for the clip and the gate (QA LEV-8). Unknown clock = conservative reading.
     // Controller round + continuous leverage (wrapper 21b8ccfd, contlev3): the stress inputs and the volatility config come from the same bytes.
     ...(isDevnetV22Enabled() && GROWTH_DEPTH_RULES_DEPLOYED ? { v22: { ...growthControllerInputs(raw, assetIndex, engine), nowSlot } } : {}),
+    // App bug 2026-10-29: the leverage guard, read with the LP every poll (v2.2 only).
+    ...(accPart?.guard ? { guard: { account: accPart.guard.account, mainnet: getConfig().network === "mainnet" } } : {}),
   });
 }
 
@@ -248,6 +272,8 @@ export function useMarketLimits(
     matcherSyncLive: boolean;
     vaultState: VaultLpStateView | null;
     registryShares: bigint | null;
+    /** v2.2: the leverage guard as last read (null = not read). */
+    guard?: { account: LevGuardV22 | null } | null;
     error: boolean;
   } | null>(null);
 
@@ -367,6 +393,9 @@ export function useMarketLimits(
         if (vaultPda) keys.push(vaultPda);
         const registryPda = flags.p3 ? deriveVaultLpStatePda(programPk, slabPk, LP_VAULT_REGISTRY_SEED) : null;
         if (registryPda) keys.push(registryPda);
+        // App bug 2026-10-29: the ticket quotes the guard's limits, so its account is read with the LP (appended LAST).
+        const guardPda = isDevnetV22Enabled() ? levGuardPda(programPk, slabPk) : null;
+        if (guardPda) keys.push(guardPda);
         const infos = keys.length ? await connection.getMultipleAccountsInfo(keys, "confirmed") : [];
         if (!alive) return; // market switched while in flight
         let k = 0;
@@ -374,6 +403,7 @@ export function useMarketLimits(
         const ctxInfo = lpAccts?.matcherCtx ? infos[k++] : null;
         const vaultInfo = vaultPda ? infos[k++] : null;
         const registryInfo = registryPda ? infos[k++] : null;
+        const guardInfo = guardPda ? infos[k++] : null;
         let lp: LpView | null = null;
         let lpBytes: Uint8Array | null = null;
         if (lpAccts && lpInfo) {
@@ -388,6 +418,7 @@ export function useMarketLimits(
         if (!alive) return;
         const vaultState = vaultInfo ? decodeVaultLpState(new Uint8Array(vaultInfo.data)) : null;
         const registryShares = registryInfo ? decodeLpVaultRegistryShares(new Uint8Array(registryInfo.data)) : null;
+        const guardAccount = guardPda ? decodeMarketLevGuard(guardInfo, programPk, slabPk, assetIndex) : null;
         setAccts((prev) => ({
           slab: slabAddress,
           // never blank a good value on a failed/empty read
@@ -397,6 +428,8 @@ export function useMarketLimits(
           matcherSyncLive: ctxInfo ? matcherSyncLive : prev?.slab === slabAddress ? prev.matcherSyncLive : false,
           vaultState: vaultState ?? (prev?.slab === slabAddress ? prev.vaultState : null),
           registryShares: registryShares ?? (prev?.slab === slabAddress ? prev.registryShares : null),
+          // A guard is never closed: a read that misses it keeps the last one seen for this market.
+          guard: guardPda ? { account: guardAccount ?? (prev?.slab === slabAddress ? prev.guard?.account ?? null : null) } : null,
           error: false,
         }));
       } catch {

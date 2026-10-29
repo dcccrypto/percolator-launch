@@ -15,9 +15,11 @@ import { V21_COPY } from "@/lib/v21/copy";
 import { growthFillCapQ, growthGate, type GrowthGateResult } from "@/lib/v22/growth-gate";
 import { V22_COPY } from "@/lib/v22/copy";
 import { growthLeverageRefusal, growthTicketDecision, type GrowthMarketView, type GrowthTicketDecision } from "@/lib/v21/growth-market";
+import { levGuardMaxFillQV22, levGuardMaxPositionQV22, levGuardRefusalV22 } from "@/lib/v22/sdk";
+import { LEV_GUARD_REFUSED_TITLE, levGuardRefusedCopy, levGuardTicketClosed } from "@/lib/v22/lev-guard-copy";
 
 export interface TicketIssue {
-  kind: "halted" | "same-owner" | "step-down" | "quote-slippage" | "limits-unavailable" | "fee-over-max" | "growth-closed" | "growth-leverage" | "growth-backing";
+  kind: "halted" | "same-owner" | "step-down" | "quote-slippage" | "limits-unavailable" | "fee-over-max" | "growth-closed" | "growth-leverage" | "growth-backing" | "lev-guard";
   severity: "error" | "warning";
   title: string;
   message: string;
@@ -182,7 +184,8 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
         // On a growth asset the program's LP exposure multiplier defaults to the growth lambda, not 1e8/IMR (lp_floor_and_cap_q_for_target_view:
         // `(0, Some(g)) => g.lambda_bps`); an explicit stored value stays an override. Without this the ticket's "most available" and
         // the program's clip were two different numbers (QA LEV-8: 7.65 vs 5.94 lots).
-        limits: i.growth && L.riskLimits.lpExposureKBps === 0 ? { ...L.riskLimits, lpExposureKBps: i.growth.record.lambdaBps } : L.riskLimits,
+        // W-L1 / rc23: that default is λ_eff (`growth_capacity_lambda_view`: min(stored λ, λ_depth), λ_depth capped at 1.0 by #599).
+        limits: i.growth && L.riskLimits.lpExposureKBps === 0 ? { ...L.riskLimits, lpExposureKBps: i.growth.long.lambdaEffBps ?? i.growth.record.lambdaBps } : L.riskLimits,
         lp: L.lp,
         takerPosQ: i.takerPosQ,
         matcher: L.matcher
@@ -224,7 +227,13 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
   const growthBlocks = !!growth?.closed && !(mayReduce && i.sizeQ === 0n);
   if (growth && growthBlocks) {
     out.halted[i.direction] = true;
-    out.issues.push({ kind: "growth-closed", severity: "error", title: "This side is full", message: V21_COPY.growthClosed(i.direction, growth.quote.closedReason) });
+    // The leverage guard closes every open (132 missing / 133 under 6 h): its own title and line, with the unlock time.
+    const guardLine = levGuardTicketClosed(i.growth, growth.quote.closedReason);
+    out.issues.push(
+      guardLine
+        ? { kind: "lev-guard", severity: "error", title: guardLine.title, message: guardLine.message }
+        : { kind: "growth-closed", severity: "error", title: "This side is full", message: V21_COPY.growthClosed(i.direction, growth.quote.closedReason) },
+    );
   } else if (growth && i.growth && i.takerEquity == null) {
     // LEV-8: judged on the size that will FILL (the program trims an over-capacity open to the side's room and lands it), never on the ask.
     const over = growthLeverageRefusal(i.growth, i.direction, i.takerPosQ, i.sizeQ, i.leverage);
@@ -301,6 +310,34 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
         }
       }
     }
+    // ── v2.2 leverage guard (tag 124, app bug 2026-10-29): the program REFUSES (133), it does not trim, so its caps bound the ticket's
+    // Max / size clamp (`growthCapQ`) and an order over them is named before signing. Leverage is already in the side quote.
+    const gv = i.growth.guard;
+    if (gv && gv.limits.applies && gv.limits.blocked === null && !growth?.closed) {
+      const caps: bigint[] = [];
+      const fill = levGuardMaxFillQV22(gv.limits, gv.input, i.direction, i.takerPosQ);
+      if (fill !== null) caps.push(fill);
+      if (i.takerEquity != null) {
+        const pos = levGuardMaxPositionQV22(gv.limits, i.takerEquity, gv.input.priceE6);
+        if (pos !== null) {
+          // |taker after| <= pos: a long may move the position up to +pos, a short down to -pos.
+          const room = i.direction === "long" ? pos - i.takerPosQ : pos + i.takerPosQ;
+          caps.push(room > 0n ? room : 0n);
+        }
+      }
+      for (const c of caps) if (out.growthCapQ == null || c < out.growthCapQ) out.growthCapQ = c;
+      if (i.sizeQ > 0n && growth) {
+        const signed = i.direction === "long" ? growth.fillQ : -growth.fillQ;
+        // Equity after the fill's fee (the program checks after the fill); unknown equity skips the leverage check only.
+        const notional = (growth.fillQ * gv.input.priceE6) / 1_000_000n;
+        const fee = (notional * (out.fee?.requestedBps ?? 0n) + 9_999n) / 10_000n;
+        const eq = i.takerEquity != null ? i.takerEquity - fee : null;
+        const why = levGuardRefusalV22(gv.limits, gv.input, i.takerPosQ, signed, eq ?? (1n << 120n));
+        if (why !== null && why !== "guard_required" && why !== "age_under_6h") {
+          out.issues.push({ kind: "lev-guard", severity: "error", title: LEV_GUARD_REFUSED_TITLE[why], message: levGuardRefusedCopy(why) });
+        }
+      }
+    }
     // Band market: the room left on a side can be smaller than the minimum position (see growthSideHalt).
     const own = growth && !growth.reducing ? growthSideHalt(i.growth, i.direction, i.takerPosQ, i.minLegQ, i.sizeStepQ) : null;
     if (own === "min-leg" || own === "step") {
@@ -357,7 +394,9 @@ export function boundVaultLpCap(L: MarketLimits): { levBps: number } | null {
   const key = L.lp.address.toBytes();
   const same = key.length === L.vaultLp.vaultLpPortfolio.length && key.every((b, k) => b === L.vaultLp!.vaultLpPortfolio[k]);
   if (!same) return null;
-  return { levBps: L.vaultLp.vaultLpMaxLevBps === 0 ? VAULT_LP_DEFAULT_MAX_LEV_BPS : L.vaultLp.vaultLpMaxLevBps };
+  // P3-H2 (80): on a growth asset the default is λ_eff (`growth_capacity_lambda_view`, rc23 caps included), else the 1x default.
+  if (L.vaultLp.vaultLpMaxLevBps !== 0) return { levBps: L.vaultLp.vaultLpMaxLevBps };
+  return { levBps: L.growth ? L.growth.long.lambdaEffBps ?? L.growth.record.lambdaBps : VAULT_LP_DEFAULT_MAX_LEV_BPS };
 }
 
 /** base-q -> the ticket's size-input string (token units = q / 1e6, or USD at `priceE6`). */
