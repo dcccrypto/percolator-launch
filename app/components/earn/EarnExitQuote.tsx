@@ -2,7 +2,7 @@
 
 /**
  * v2.2 Earn exit step: get the exit price (simulated), show "You'll receive at least X", and only then enable the
- * withdraw button. Rendered by DepositWithdrawPanel under NEXT_PUBLIC_DEVNET_V22 in place of the one-step button.
+ * withdraw button. Rendered by DepositWithdrawPanel under NEXT_PUBLIC_V22 in place of the one-step button.
  * Presentational: the hook (hooks/useEarnExitV22) is injected so the component is testable without a wallet.
  */
 import { useState } from 'react';

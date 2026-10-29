@@ -128,7 +128,7 @@ import type { V22LaunchParams } from "@/lib/v22/launch-plan";
 import { V21_COPY } from "@/lib/v21/copy";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { buildStakeInitPoolData } from "@/lib/v22/stake-v5";
-import { LEV_GUARD_INIT_FAILED, LEV_GUARD_MISSING_BLOCK, LEV_GUARD_RENT_ACCOUNT_LEN, levGuardApplies, levGuardPda, planLevGuardLaunch } from "@/lib/v22/lev-guard";
+import { LEV_GUARD_INIT_FAILED, LEV_GUARD_MISSING_BLOCK, LEV_GUARD_RENT_ACCOUNT_LEN, levGuardApplies, levGuardPlanBlock, levGuardPda, planLevGuardLaunch } from "@/lib/v22/lev-guard";
 import { buildP3BindIxs, canonicalVaultLpMatcher, p3BindProgress, validateP3Wizard } from "@/lib/limits/p3-wizard";
 import { COPY as LIMITS_COPY } from "@/lib/limits/copy";
 import { buildDepositJuniorTrancheIx, deriveVaultLpState } from "@/lib/limits/p3-ix";
@@ -2287,6 +2287,12 @@ export function useCreateMarket() {
       const derived = deriveLaunchMarketParams(params);
       const backingSeed = backingSeedPerDomain(params.lpCollateral);
 
+      // D27: a growth launch on mainnet must plan the leverage-guard step; refuse before anything is signed.
+      const guardPlanBlock = levGuardPlanBlock({ v22On: isDevnetV22Enabled(), growth: !!params.growth, p3: !!params.p3, network: getNetwork() });
+      if (guardPlanBlock) {
+        setState((s) => ({ ...s, error: guardPlanBlock }));
+        return;
+      }
       // P3: refuse a junior requirement the program (or the cushion floor) would refuse BEFORE
       // anything is broadcast — a throw later would leave a half-built market (M4p sits after
       // M4a) and the batched path would fall back to the sequential one first.

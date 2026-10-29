@@ -30,7 +30,7 @@ export const LOSS_STALE_RETRY_DELAYS_MS: readonly number[] = [1_000, 1_500, 2_00
 
 /**
  * The 121 handling (retry; the stale peers' refresh cranks in the same tx on v2.2) runs on a v2.1 build or a v2.2 build: v2.2 builds on
- * the v2.1 programs, so a deployment that sets only NEXT_PUBLIC_DEVNET_V22 must get it too (QA FUND-6 / E-121). Neither flag: off, as before.
+ * the v2.1 programs, so a deployment that sets only NEXT_PUBLIC_V22 must get it too (QA FUND-6 / E-121). Neither flag: off, as before.
  */
 export function lossStaleHandlingEnabled(): boolean {
   return isDevnetV21Enabled() || isDevnetV22Enabled();

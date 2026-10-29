@@ -1,6 +1,6 @@
 /**
  * Calm one-line messages for the Devnet v2.2 wrapper codes 104..=119, 123, 124 and the stake v5 codes 33..=45.
- * Used by `lib/limits/user-message.ts` ONLY when `NEXT_PUBLIC_DEVNET_V22` is on (flag off the resolver never
+ * Used by `lib/limits/user-message.ts` ONLY when `NEXT_PUBLIC_V22` is on (flag off the resolver never
  * calls this). Special handling:
  *  - 104 (band pinned) is NOT an error: variant "wait", "Close on hold while the price catches up. Try again once it has."
  *  - 117 (below min payout) and 124 (bond slippage): `requote` = re-quote and show the new minimum.

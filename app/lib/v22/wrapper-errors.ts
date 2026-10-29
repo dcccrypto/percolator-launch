@@ -2,7 +2,7 @@
  * The Devnet v2.2 wrapper error codes 104..=119, 123..=135 (percolator-prog release/v22-wrapper, waves A to D),
  * kept OUT of `WRAPPER_ERR` and `WRAPPER_ERR_V21` for the same reason: those are pinned to the deployed wrapper.
  * Names are the Rust variant names (as in the SDK table `PERCOLATOR_ERRORS_V22`); codes 120..=122 stay in
- * `WRAPPER_ERR_V21`. Only interpreted when `NEXT_PUBLIC_DEVNET_V22` is on.
+ * `WRAPPER_ERR_V21`. Only interpreted when `NEXT_PUBLIC_V22` is on.
  */
 export const WRAPPER_ERR_V22 = {
   PriceBandPinned: 104,

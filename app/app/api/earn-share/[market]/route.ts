@@ -2,7 +2,7 @@
  * GET /api/earn-share/<market>: the metadata JSON wallets fetch for an Earn share token (the `uri` of its Metaplex record, written by wrapper
  * tag 122). Spec: percolator-prog `docs/v22-lp-share-mint.md` ("The JSON the app must serve"); review R10.
  *
- *  - v2.2 only: with `NEXT_PUBLIC_DEVNET_V22` unset the route answers 404 (it does not exist as far as a v2.1 deployment is concerned).
+ *  - v2.2 only: with `NEXT_PUBLIC_V22` unset the route answers 404 (it does not exist as far as a v2.1 deployment is concerned).
  *  - The path parameter must be a canonical base58 32-byte key AND the LP vault registry PDA `["lp_vault", market]` must exist and be owned by
  *    the wrapper; otherwise 404. The parameter is never echoed (the response carries the re-encoded canonical key only).
  *  - Built from CHAIN STATE only (the registry account and the Metaplex record of the share mint). No app database, no secret, no request

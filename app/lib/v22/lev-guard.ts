@@ -140,6 +140,21 @@ export const LEV_GUARD_RENT_ACCOUNT_LEN = 4_472;
 /** The launch creates a guard: v2.2 on, with a growth block and the vault-LP bind (the program answers 134 otherwise). */
 export const levGuardApplies = (p: { v22On: boolean; growth: boolean; p3: boolean }): boolean => p.v22On && p.growth && p.p3;
 
+/** Shown when a growth launch has no leverage-guard step in its plan on mainnet (preflight, before anything is signed). */
+export const LEV_GUARD_PLAN_MISSING =
+  "This launch cannot be created: it has a growth block but no leverage-guard step, and on mainnet every open on such a market would be refused. Nothing was sent. This build is missing the v2.2 setting (NEXT_PUBLIC_V22) or the launch has no vault-owned LP, so ask the Percolator team.";
+
+/**
+ * Launch preflight: the message that REFUSES the launch, or null. A growth launch on mainnet must plan the guard step
+ * ({@link levGuardApplies}); without it the program refuses every open on the market (132), and after the stake pool takes the market
+ * authority only the upgrade authority can add the guard. Devnet does not require it (the market trades without the new limits), so it is
+ * not refused there.
+ */
+export function levGuardPlanBlock(p: { v22On: boolean; growth: boolean; p3: boolean; network: "mainnet" | "devnet" }): string | null {
+  if (p.network !== "mainnet" || !p.growth) return null;
+  return levGuardApplies(p) ? null : LEV_GUARD_PLAN_MISSING;
+}
+
 /** Shown, and blocking until acknowledged, when a resumed launch has no guard and the creator can no longer create it. */
 export const LEV_GUARD_MISSING_BLOCK =
   "This market has no safety guard, and its creator can no longer add one: the market authority has already moved to the stake pool. Only the upgrade authority can create the guard now, so ask the Percolator team to do it. You can continue without it. On devnet the market then trades without the new leverage and new-market limits until the guard exists; on mainnet nobody can open a position on it until the guard exists.";

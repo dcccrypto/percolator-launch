@@ -8,7 +8,7 @@
  * is chosen from the account's VERSION through the SDK's table, and an unknown VERSION is refused with the
  * SDK's typed `UnknownLayoutError` (see {@link isUnsupportedLayout}); callers render the calm fallback.
  *
- * Flag off (`NEXT_PUBLIC_DEVNET_V22` unset): every function here returns what the v2.1 constants returned
+ * Flag off (`NEXT_PUBLIC_V22` unset): every function here returns what the v2.1 constants returned
  * and delegates to the installed SDK 8.0.0 decoders, so behaviour is unchanged (pinned by
  * `__tests__/lib/v22/layout.test.ts`, including a parity run against the old constants).
  */
