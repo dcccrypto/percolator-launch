@@ -111,7 +111,7 @@ import { clippedFillBody, readClippedFill } from "@/lib/v22/clipped-fill";
 import { isPortfolioClosable } from "@/lib/close-trading-account";
 import { defaultFeeCapMarginBps } from "@/lib/limits/fee-channel";
 import { OrderTicketLimits, reasonCopy } from "@/components/limits/OrderTicketLimits";
-import { estimatedTotalFeeBps, feeHasExtras } from "@/lib/limits/estimated-fee";
+import { estimatedTotalFeeBps, feeHasExtras, gateFeeBps } from "@/lib/limits/estimated-fee";
 import { isUsdLikeCollateral } from "@/lib/v22/tier-config";
 import { GrowthTicketPanelLive } from "@/components/trade/GrowthTicketPanelLive";
 import { CloseOnlyBanner } from "@/components/trade/CloseOnlyBanner";
@@ -616,17 +616,33 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // The engine charges IM and the fee at ITS price (plus a lag penalty that depends on the side);
   // the ticket sizes from the display feed (lib/first-trade.ts engineGateBps).
   const engineGate = engineGateBps(livePriceE6, engineView, direction);
-  const tradableBalance = mockMode
-    ? effectiveBalance
-    : tradableMarginAtoms({
-        inMarketAvailable: userAccount ? availableBalance : 0n,
-        walletAtoms: walletAtaBalance ?? 0n,
-        leverage100: leverage * 100,
-        feeBps: tradingFeeBps,
-        initialMarginBps,
-        gate: engineGate,
-        decimals,
-      });
+  // #3553: the engine charges the WHOLE fee (base + the matcher's quote fee + the busy-side fee) before its IM gate, so the gate sizing needs
+  // that total, not the base alone (at 10x / IM 10% the base-only Max left equity short by the extras: Custom 49). One probe at the size the
+  // base-fee Max would place; a smaller order's fee is no higher, so the sized margin is never over.
+  const feeProbe = (sizeQ: bigint): TicketLimitsInput | null =>
+    mockMode || !marketLimits
+      ? null
+      : {
+          limits: marketLimits, direction, sizeQ, takerPosQ: existingPositionSize, takerOwner: publicKey ? publicKey.toBytes() : null, leverage,
+          limitPriceE6: 0n, markE6: livePriceE6 ?? undefined, feeMarginBps, growth: marketLimits.growth ?? null, takerEquity: null,
+        };
+  const tradableFor = (feeBps: bigint): bigint =>
+    tradableMarginAtoms({
+      inMarketAvailable: userAccount ? availableBalance : 0n,
+      walletAtoms: walletAtaBalance ?? 0n,
+      leverage100: leverage * 100,
+      feeBps,
+      initialMarginBps,
+      gate: engineGate,
+      decimals,
+    });
+  const tradableAtBaseFee = mockMode ? effectiveBalance : tradableFor(tradingFeeBps);
+  const maxOrderFeeBps = (() => {
+    if (mockMode || !livePriceE6 || livePriceE6 <= 0n || tradableAtBaseFee <= 0n) return tradingFeeBps;
+    const refQ = (computeNotionalNative(tradableAtBaseFee, leverage) * 1_000_000n) / livePriceE6;
+    return gateFeeBps(tradingFeeBps, feeProbe(refQ));
+  })();
+  const tradableBalance = mockMode || maxOrderFeeBps <= tradingFeeBps ? tradableAtBaseFee : tradableFor(maxOrderFeeBps);
   // Buying power: how large a position (in collateral notional) the user could
   // open at the current max leverage with their full AVAILABLE (not total)
   // balance — capital already locked by an open position can't back a
@@ -833,7 +849,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const imFloor = params?.minNonzeroImReq ?? 0n;
   const belowImFloor = existingPositionSize === 0n && marginNative > 0n && marginNative < imFloor;
   // The engine's own IM for this size, at its price (the order is sized off the display feed).
-  const openNeed = engineOpenNeedAtoms(notionalNative, initialMarginBps, tradingFeeBps, engineGate);
+  // #3553: at the fee this order is charged (base + quote + busy-side), not the base alone.
+  const orderFeeBps = gateFeeBps(tradingFeeBps, feeProbe(positionSize));
+  const openNeed = engineOpenNeedAtoms(notionalNative, initialMarginBps, orderFeeBps, engineGate);
   const typedNeed = belowImFloor ? imFloor : marginNative;
   // The engine floors the base IM, then adds the lag penalty: max(IM, floor) + lag.
   const engineIm = existingPositionSize === 0n && imFloor > openNeed.im ? imFloor : openNeed.im;

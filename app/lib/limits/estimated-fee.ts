@@ -1,3 +1,5 @@
+import { deriveTicketLimits, type TicketLimitsInput } from "./ticket";
+
 /**
  * The fee a trade is expected to be charged, in bps (product review 2026-10-28, T-1).
  *
@@ -8,6 +10,7 @@
  * This is an ESTIMATE for display: the quote and busy-side parts are the ticket's own pre-trade reads. The signed cap
  * (`ticketLimits.fee.signedFeeBps` / the send-time read) is unchanged and is still what bounds the charge.
  */
+
 export function estimatedTotalFeeBps(
   baseFeeBps: bigint,
   fee: { charged: boolean; requestedBps: bigint; utilFeeBps?: bigint } | null | undefined,
@@ -20,4 +23,20 @@ export function estimatedTotalFeeBps(
 /** True when the estimate includes more than the base fee (the row then says "est." and names the parts). */
 export function feeHasExtras(baseFeeBps: bigint, totalBps: bigint): boolean {
   return totalBps > baseFeeBps;
+}
+
+/**
+ * #3553: the fee the engine will charge for an order of `input.sizeQ`, for the ticket's IM-gate sizing (Max, `exceedsBalance`, the bundled
+ * deposit). The engine charges the WHOLE fee (base + the matcher's quote fee + the busy-side fee) BEFORE its initial-margin gate, so sizing
+ * from the base fee alone leaves a max-leverage order short by the extra parts (Custom 49). Same estimate the Fee row shows.
+ * No input, no size, or a read that fails = the base fee (today's behaviour).
+ */
+export function gateFeeBps(baseFeeBps: bigint, input: TicketLimitsInput | null): bigint {
+  if (!input || input.sizeQ <= 0n) return baseFeeBps;
+  try {
+    const total = estimatedTotalFeeBps(baseFeeBps, deriveTicketLimits(input).fee);
+    return total > baseFeeBps ? total : baseFeeBps;
+  } catch {
+    return baseFeeBps;
+  }
 }
