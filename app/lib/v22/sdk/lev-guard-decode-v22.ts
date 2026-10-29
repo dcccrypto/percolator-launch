@@ -2,14 +2,14 @@
  * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk-growth @ 15cf3be (#429 360 B record, burst memory),
  * src/abi/lev-guard-v22.ts: the kind-17 guard account DECODER, report freshness and the W1 round test (the ticket now reads the guard:
  * app bug 2026-10-29, product review finding 4). Only the imports are retargeted (the vendored ./layout has no LevGuard kind, so the kind
- * byte is a local constant). Delete when @percolatorct/sdk >= 9.0.0 ships these and point ./index.ts at the package. Do not edit here;
+ * byte is a local constant). Delete when @percolatorct/sdk >= 9.0.0 ships these and point ./index.ts at the package. Re-synced with percolator-sdk PR #432 (prog#611: 16-byte tags, cap 256). Do not edit here;
  * fix upstream in percolator-sdk.
  */
 import { PublicKey } from "@solana/web3.js";
 import { LAYOUT_V22, UnknownLayoutError, resolveLayout } from "./layout";
 import type { LayoutTable } from "./layout";
 import {
-  LEV_GUARD_FLAG_V22, LEV_GUARD_TOUCHED_CAP_V22, LEV_GUARD_TOUCHED_LEN_V22, LEV_GUARD_VERSION_V22,
+  LEV_GUARD_FLAG_V22, LEV_GUARD_KEY_TAG_LEN_V22, LEV_GUARD_TOUCHED_CAP_V22, LEV_GUARD_TOUCHED_LEN_V22, LEV_GUARD_VERSION_V22,
   LEV_REPORT_FRESH_SLOTS_V22, LEV_REPORT_HELD_SLOTS_V22, LEV_W1_ROUND_SLOTS_V22,
 } from "./lev-guard-v22";
 
@@ -87,7 +87,7 @@ export interface LevGuardV22 {
   burstVarPeakX100: number;
   /** Slot the burst peak was set (record offset 352); the peak is read decayed with a 7-day half-life. */
   burstPeakSlot: bigint;
-  /** The first `touchedN` tags of the touched set (first 8 bytes of each cut portfolio key, as a LE u64). */
+  /** The first `touchedN` tags of the touched set: the first `LEV_GUARD_KEY_TAG_LEN_V22` (16) bytes of each cut portfolio key, as a LE unsigned integer (prog#611). Compare with `levKeyTagV22`. */
   touchedTags: bigint[];
 }
 
@@ -101,7 +101,7 @@ function allZero(b: Uint8Array): boolean {
 
 /**
  * Decode a leverage guard account (`16 + 360 + 4096 = 4472` bytes, header kind 17). Mirrors the program's `validate_guard`
- * (version 1, only known flag bits, booleans 0/1, `touched_n <= 512`, `round_keep_bps <= 10 000`, report bps in range, padding zero).
+ * (version 1, only known flag bits, booleans 0/1, `touched_n <= 256`, `round_keep_bps <= 10 000`, report bps in range, padding zero).
  *
  * @param data   Raw account bytes.
  * @param table  Layout table (default {@link LAYOUT_V22}); only its header version is used.
@@ -192,10 +192,19 @@ export function decodeLevGuardV22(data: Uint8Array, table: LayoutTable = LAYOUT_
     (burst && !allZero(data.subarray(b + F.pad3, b + F.pad3 + 4)));
   if (bad) throw new UnknownLayoutError("INVALID_RECORD", parser, "invalid account data: lev guard fails the program's validate_guard", { kind: LEV_GUARD_ACCOUNT_KIND_V22 });
   const t = b + recLen;
-  for (let i = 0; i < g.touchedN; i++) g.touchedTags.push(v.getBigUint64(t + 8 * i, true));
+  for (let i = 0; i < g.touchedN; i++) g.touchedTags.push(u128At(v, t + LEV_GUARD_KEY_TAG_LEN_V22 * i));
   return g;
 }
 
+
+/**
+ * The tag the program stores for a cut portfolio: the first `LEV_GUARD_KEY_TAG_LEN_V22` bytes of its key as a LE unsigned integer
+ * (`key_tag`). Always derive it here so the width stays in one place (the SDK's `levKeyTagV22`).
+ */
+export function levKeyTagV22(key: PublicKey): bigint {
+  const b = key.toBytes(); // a fresh copy; never read `.buffer` of a pooled Buffer
+  return u128At(new DataView(b.buffer, b.byteOffset, b.byteLength), 0);
+}
 
 /** Freshness of the holder risk report (`ReportAge`). */
 export type LevReportAgeV22 = "None" | "Fresh" | "Held" | "Stale";

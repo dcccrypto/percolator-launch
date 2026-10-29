@@ -46,10 +46,15 @@ export const LEV_GUARD_SEEDS_V22 = Object.freeze({
 
 /** Record length (`LEV_GUARD_REC_LEN`). */
 export const LEV_GUARD_REC_LEN_V22 = 344;
-/** Touched-set capacity (`W1_TOUCHED_CAP`). */
-export const LEV_GUARD_TOUCHED_CAP_V22 = 512;
-/** Touched-set byte length (`8 * W1_TOUCHED_CAP`). */
-export const LEV_GUARD_TOUCHED_LEN_V22 = 8 * LEV_GUARD_TOUCHED_CAP_V22;
+/**
+ * Tag width (`KEY_TAG_LEN`, prog#610/#611). The tag is a portfolio address PREFIX and is that account's identity in the touched
+ * set, so the width is a security parameter: at 8 bytes a birthday search over client-chosen portfolio addresses costs ~2^32, at 16 ~2^64.
+ */
+export const LEV_GUARD_KEY_TAG_LEN_V22 = 16;
+/** Touched-set capacity (`W1_TOUCHED_CAP`; 512 before prog#611). */
+export const LEV_GUARD_TOUCHED_CAP_V22 = 256;
+/** Touched-set byte length (`KEY_TAG_LEN * W1_TOUCHED_CAP`): 4096, unchanged by the widening. */
+export const LEV_GUARD_TOUCHED_LEN_V22 = LEV_GUARD_KEY_TAG_LEN_V22 * LEV_GUARD_TOUCHED_CAP_V22;
 /** Body length (record + touched set). */
 export const LEV_GUARD_BODY_LEN_V22 = LEV_GUARD_REC_LEN_V22 + LEV_GUARD_TOUCHED_LEN_V22;
 /** Account length: 16-byte header + body = 4456. */
