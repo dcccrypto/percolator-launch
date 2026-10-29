@@ -3,6 +3,8 @@
  * leverage curve, LAGGING κ / λ_depth and STEPPED stress cap, bit-exact with percolator-prog feat/v22-continuous-leverage @ 21b8ccfd
  * "contlev3"; parity suite in the SDK), src/abi/growth-v19.ts. Only the imports are retargeted (the vendored v22 layout/slab ports, sibling
  * records ports, and the installed @percolatorct/sdk 8.0.0 root). Records the round-2 wrapper wrote (flags 0) are quoted by ./growth-v19-r2.
+ * PLUS the rc23 open-limit caps (κ_eff, λ cap, `lambdaEffBps`, `rc23Caps` option), the same patch as percolator-sdk fix/v22-sdk-rc23-open-limits @ e4d99ac
+ * (app bug 2026-10-29).
  * TODO(repin): delete when @percolatorct/sdk >= 9.0.0 ships and point ../../records.ts at the package. Do not edit here; fix upstream in percolator-sdk.
  */
 /**

@@ -394,7 +394,15 @@ export function useMarketLimits(
         const registryPda = flags.p3 ? deriveVaultLpStatePda(programPk, slabPk, LP_VAULT_REGISTRY_SEED) : null;
         if (registryPda) keys.push(registryPda);
         // App bug 2026-10-29: the ticket quotes the guard's limits, so its account is read with the LP (appended LAST).
-        const guardPda = isDevnetV22Enabled() ? levGuardPda(programPk, slabPk) : null;
+        // An underivable guard address never stops the LP / vault reads (as levGuardExists): the guard is then simply not quoted.
+        let guardPda: PublicKey | null = null;
+        if (isDevnetV22Enabled()) {
+          try {
+            guardPda = levGuardPda(programPk, slabPk);
+          } catch {
+            guardPda = null;
+          }
+        }
         if (guardPda) keys.push(guardPda);
         const infos = keys.length ? await connection.getMultipleAccountsInfo(keys, "confirmed") : [];
         if (!alive) return; // market switched while in flight
