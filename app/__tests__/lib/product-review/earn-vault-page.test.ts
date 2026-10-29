@@ -27,7 +27,7 @@ describe("earn vault page", () => {
     expect(page).toContain("depositBlockedReason={earnPageDepositBlock(marketHealth, null)}");
     expect(page).toContain("earnVaultStatusLabel(vaultAvailable, earnMarketSettled(marketHealth))");
     expect(page).toContain('data-testid="earn-vault-loss-line"');
-    expect(src("components/earn/EarnHeader.tsx")).toContain("{EARN_LOSS_LINE}");
+    expect(src("components/earn/EarnHeader.tsx")).toContain("EARN_LOSS_LINE}");
     expect(EARN_LOSS_LINE).toMatch(/afford to lose/);
   });
 });

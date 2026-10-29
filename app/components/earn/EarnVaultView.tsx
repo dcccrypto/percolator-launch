@@ -215,6 +215,15 @@ function EarnInfoStrip({ totalInsurance }: { totalInsurance: number | null }) {
       </InfoRow>
 
       <InfoRow id="risk" title="Risk notice" warning open={open === 'risk'} onToggle={toggle}>
+        {isDevnetV22Enabled() && (
+          <>
+            <p data-testid="earn-risk-v22-line" className="mb-2 max-w-[90ch] text-[11px] leading-relaxed text-[var(--text)]">{V22_COPY.earnRisk.line}</p>
+            <p data-testid="earn-risk-v22-stop" className="mb-2 max-w-[90ch] text-[11px] leading-relaxed text-[var(--text-secondary)]">
+              {V22_COPY.lpStop.notice}{" "}
+              <a href={V22_COPY.earnRisk.linkHref} className="text-[var(--accent-text)] underline decoration-dotted underline-offset-4">{V22_COPY.earnRisk.linkLabel}</a>
+            </p>
+          </>
+        )}
         <p className="max-w-[90ch] text-[11px] leading-relaxed text-[var(--text-secondary)]">
           {limitsFlags().p3
             ? COPY.howLossesWork

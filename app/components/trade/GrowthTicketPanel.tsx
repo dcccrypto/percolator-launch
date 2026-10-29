@@ -14,6 +14,7 @@ import type { GrowthMarketView, GrowthTicketDecision } from "@/lib/v21/growth-ma
 import { levGuardTicketClosed } from "@/lib/v22/lev-guard-copy";
 import { V21_COPY } from "@/lib/v21/copy";
 import { V22_COPY } from "@/lib/v22/copy";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import type { TierCollateral } from "@/lib/v22/tier-config";
 import { unlockLine, type GrowthUnlockView } from "@/lib/v22/growth-unlock";
 import { InfoIcon } from "@/components/ui/Tooltip";
@@ -125,6 +126,8 @@ export const GrowthTicketPanel: FC<GrowthTicketPanelProps> = ({ view, decision, 
       {trimText && <p className="mt-1 text-[var(--warning)]" data-testid="growth-trim-notice">{trimText}</p>}
       {feePct && <p className="mt-2 text-[var(--text-secondary)]" data-testid="growth-fee">{V21_COPY.ticket.fee(feePct)}</p>}
       <p className="mt-2 text-[10px] text-[var(--text-dim)]">{V21_COPY.ticket.closeAlways}</p>
+      {/* D2: the liquidity stop is permissionless on the v2.2 program; say it before the order, in the same words as Earn. */}
+      {isDevnetV22Enabled() && <p className="mt-1 text-[10px] text-[var(--text-dim)]" data-testid="growth-lp-stop">{V22_COPY.lpStop.notice}</p>}
     </section>
   );
 };

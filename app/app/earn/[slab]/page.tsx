@@ -13,6 +13,7 @@ import { useWalletCompat } from '@/hooks/useWalletCompat';
 import { computeLpEarnedForVault } from '@/lib/lp-earned';
 import { isDevnetV21Enabled } from '@/lib/v21/flag';
 import { isDevnetV22Enabled } from '@/lib/v22/flag';
+import { V22_COPY } from '@/lib/v22/copy';
 import { PublicKey } from '@solana/web3.js';
 import { computeEntryVsExit } from '@/lib/v21/entry-exit';
 import { ResolvedExitPanel } from '@/components/limits/ResolvedExitPanel';
@@ -491,7 +492,14 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
           <ResolvedExitPanel slab={slabAddress} walletConnected={!!earnWallet.publicKey} onDone={refreshState} {...earnExitProps(lpVaultState, collateralDecimals, collateralSymbol)} />
 
           {/* Product review E-4: a direct link to this page showed no loss warning before Deposit. */}
-          <p data-testid="earn-vault-loss-line" className="text-[11px] text-[var(--text-secondary)]">{EARN_LOSS_LINE}</p>
+          <p data-testid="earn-vault-loss-line" className="text-[11px] text-[var(--text-secondary)]">{isDevnetV22Enabled() ? V22_COPY.earnRisk.line : EARN_LOSS_LINE}</p>
+          {/* D2 / D3: the stop notice before the deposit, and the way to the backtest (never quoted here). */}
+          {isDevnetV22Enabled() && (
+            <p data-testid="earn-vault-lp-stop" className="text-[11px] text-[var(--text-secondary)]">
+              {V22_COPY.lpStop.notice}{" "}
+              <a href={V22_COPY.earnRisk.linkHref} className="text-[var(--accent-text)] underline decoration-dotted underline-offset-4">{V22_COPY.earnRisk.linkLabel}</a>
+            </p>
+          )}
 
           {/* Deposit / Withdraw. Keyed by wallet (N13): its form and auto-finish arming are per wallet. */}
           <ScrollReveal>

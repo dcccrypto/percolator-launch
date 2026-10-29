@@ -60,8 +60,16 @@ export function EarnHeader({ stats, loading }: EarnHeaderProps) {
               {isDevnetV22Enabled() ? V22_COPY.earnPage.depositLead : "Deposit USDC into a market's vault."} {LP_SHARE_PCT}% of every trading fee on that market is
               added to the vault, so your deposit grows as people trade it.{" "}
               {/* Always visible: the detailed Risk notice row below starts closed, so the downside is stated here too. */}
-              <span data-testid="earn-loss-line">{EARN_LOSS_LINE}</span>
+              <span data-testid="earn-loss-line">{isDevnetV22Enabled() ? V22_COPY.earnRisk.line : EARN_LOSS_LINE}</span>
             </p>
+            {isDevnetV22Enabled() && (
+              <p data-testid="earn-lp-stop" className="mt-2 max-w-[68ch] text-[12px] leading-relaxed text-[var(--text-secondary)] xl:max-w-none">
+                {V22_COPY.lpStop.notice}{" "}
+                <a href={V22_COPY.earnRisk.linkHref} data-testid="earn-risk-link" className="text-[var(--accent-text)] underline decoration-dotted underline-offset-4">
+                  {V22_COPY.earnRisk.linkLabel}
+                </a>
+              </p>
+            )}
             <button
               type="button"
               data-testid="earn-fee-split-toggle"

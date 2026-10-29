@@ -231,6 +231,18 @@ export const V22_COPY = {
      */
     insuranceOrder: "A trading loss reaches the creator's stake and Earn deposits first; insurance can step in only once they're used up",
   },
+  // ── LP stop and Earn risk (D2 / D3, memo 2026-10-29) ─────────────────────
+  lpStop: {
+    /** Shown on the trade ticket and on Earn, wherever the stop can matter to the reader. Same sentence, same words. */
+    notice: "If this market's liquidity loses half its value, positions on the winning side can be reduced at the market price, all by the same percentage.",
+  },
+  earnRisk: {
+    /** Always visible on Earn (v2.2). Says plainly how bad it can get and why; no figure, no floor. */
+    line: "You can lose most of your deposit. Earn pays traders who win, so it can fall when traders win, and a market's liquidity can lose most of its value. Only deposit what you can afford to lose.",
+    /** The link to the backtest page, the only place the 27-30% figure appears. */
+    linkLabel: "How Earn risk works",
+    linkHref: "/earn/risk",
+  },
   // ── Unsupported layout ───────────────────────────────────────────────────
   layout: {
     title: "This market uses a newer version",
