@@ -64,7 +64,7 @@ describe("DepositWithdrawPanel", () => {
     expect(screen.getByText(/Max:\s*16000\s*USDC/)).toBeInTheDocument();
   });
 
-  it("keeps the initial 1:1 LP preview for an available initialized-empty vault", () => {
+  it("keeps the genesis LP preview (1:1 less the dead shares) for an available initialized-empty vault", () => {
     render(
       <DepositWithdrawPanel
         {...defaultProps}
@@ -79,7 +79,8 @@ describe("DepositWithdrawPanel", () => {
       target: { value: "1000" },
     });
 
-    expect(screen.getByText(/≈ 1,000\.00 shares/)).toBeInTheDocument();
+    // genesis mints 1:1 LESS the 1,000 dead-share atoms (LP_VAULT_MINIMUM_LIQUIDITY): 999.999 shares
+    expect(screen.getByText(/≈ 999\.99 shares/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Deposit" })).toBeEnabled();
   });
 
@@ -101,7 +102,8 @@ describe("DepositWithdrawPanel", () => {
       target: { value: "1000" },
     });
 
-    expect(screen.getByText(/≈ 1,000\.00 shares/)).toBeInTheDocument();
+    // genesis mints 1:1 LESS the 1,000 dead-share atoms (LP_VAULT_MINIMUM_LIQUIDITY): 999.999 shares
+    expect(screen.getByText(/≈ 999\.99 shares/)).toBeInTheDocument();
 
     rerender(
       <DepositWithdrawPanel

@@ -30,6 +30,27 @@ export function previewDepositShares(usdcAtoms: bigint, totalShares: bigint, dep
   return seniorSharesForDeposit(usdcAtoms, totalShares, depositClaim);
 }
 
+/** Wrapper `LP_VAULT_MINIMUM_LIQUIDITY`: the genesis deposit's dead shares (never minted to anyone). */
+export const LP_VAULT_MINIMUM_LIQUIDITY = 1_000n;
+
+/**
+ * What tag 75 actually MINTS to the depositor, or null when the program refuses the deposit
+ * (prog#627 family: a share price over a zero / dust base must never preview as 1:1):
+ *  - genesis (`totalShares == 0`): `amount - LP_VAULT_MINIMUM_LIQUIDITY`, refused if that is <= 0
+ *    (LpVaultDepositBelowMinimumLiquidity);
+ *  - shares outstanding at a zero price: refused (the senior value is 0);
+ *  - a deposit that floors to 0 shares: refused (LpVaultZeroSharesMinted).
+ */
+export function previewDepositSharesMinted(usdcAtoms: bigint, totalShares: bigint, depositClaim: bigint | null): bigint | null {
+  if (usdcAtoms <= 0n) return null;
+  if (totalShares === 0n) {
+    const minted = usdcAtoms - LP_VAULT_MINIMUM_LIQUIDITY;
+    return minted > 0n ? minted : null;
+  }
+  const shares = previewDepositShares(usdcAtoms, totalShares, depositClaim);
+  return shares !== null && shares > 0n ? shares : null;
+}
+
 /** USDC `shares` redeem for at the (withdraw-side) senior value. */
 export function previewWithdrawAtoms(shares: bigint, totalShares: bigint, seniorValue: bigint | null): bigint | null {
   if (seniorValue === null || shares <= 0n) return null;

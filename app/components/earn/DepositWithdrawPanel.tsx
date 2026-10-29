@@ -17,7 +17,7 @@ import { useEarnExitV22, type EarnExitParams } from '@/hooks/useEarnExitV22';
 import {
   EARN_WITHDRAW_COPY as WC,
   cooldownPhrase,
-  previewDepositShares,
+  previewDepositSharesMinted,
   previewWithdrawAtoms,
   sharesForUsdc,
   withdrawFlow,
@@ -293,8 +293,9 @@ export function DepositWithdrawPanel({
   // Preview shares for deposit
   const previewShares = useMemo(() => {
     if (!vaultAvailable || rawAmount <= 0n) return 0n;
-    if (shareTotal === 0n || (depositValue ?? 0n) === 0n) return rawAmount; // 1:1 initial mint
-    return previewDepositShares(rawAmount, shareTotal, depositValue) ?? 0n;
+    // What tag 75 mints (genesis less the dead shares; 0 where the program refuses: a zero price
+    // with shares outstanding, or a deposit that floors to no shares). Never a 1:1 fallback.
+    return previewDepositSharesMinted(rawAmount, shareTotal, depositValue ?? null) ?? 0n;
   }, [vaultAvailable, rawAmount, shareTotal, depositValue]);
 
   // What the whole position redeems for: the Max / 100% amount in USDC.

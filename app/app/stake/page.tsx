@@ -904,9 +904,13 @@ function DepositWidget({
   // When pool is empty (first depositor), LP tokens = deposit amount (1:1 ratio).
   // totalLpSupply from API is raw (6 decimals), so divide to get human-readable.
   const lpSupplyHuman = pool ? pool.totalLpSupply / 1e6 : 0;
+  // prog#627 family: LP outstanding at a zero pool value is not a first deposit -- the stake
+  // program refuses it (math.rs: supply > 0, value 0 -> None), so the estimate is 0, not 1:1.
   const lpEstimate = pool
-    ? pool.vaultBalance > 0 && lpSupplyHuman > 0
-      ? (amountNum / pool.vaultBalance) * lpSupplyHuman
+    ? lpSupplyHuman > 0
+      ? pool.vaultBalance > 0
+        ? (amountNum / pool.vaultBalance) * lpSupplyHuman
+        : 0
       : amountNum // First depositor: 1:1 ratio
     : 0;
 
