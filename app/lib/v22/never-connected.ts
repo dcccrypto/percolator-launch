@@ -180,7 +180,7 @@ export const NEVER_CONNECTED_COPY = {
   rentNoEarn: "This market has no Earn pool, so its admin can close the market account and get its rent back.",
   rentStake: "The stake pool, vault and LP-mint account rent is not returned by any instruction either.",
   rentFreed: "Your trading account's rent comes back when you close it.",
-  rentMainnet: "On mainnet the treasury refunds that locked rent to the creator of a market whose price never connected.",
+  rentMainnet: "On mainnet, the creator of a market whose price never connected is eligible for a refund of that locked rent.",
   rentDevnet: "On devnet no rent refund is paid: devnet SOL comes from a faucet. The settle and withdraw path above works the same.",
   noFund: "Transaction fees are not refunded.",
 } as const;

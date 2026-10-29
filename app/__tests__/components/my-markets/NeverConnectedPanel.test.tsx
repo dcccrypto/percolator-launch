@@ -147,14 +147,15 @@ describe("never-connected panel", () => {
     expect(screen.getByTestId("never-connected-card").textContent).not.toMatch(/one approval/i);
   });
 
-  it("devnet: no refund is paid; mainnet: the treasury refunds the locked rent", () => {
+  it("devnet: no refund is paid; mainnet: the creator is eligible for a refund", () => {
     render(<NeverConnectedPanel />);
     expect(screen.getByTestId("never-connected-rent").textContent).toMatch(/no rent refund is paid/);
     expect(screen.getByTestId("never-connected-rent").textContent).not.toMatch(/treasury/i);
     cleanup();
     net.n = "mainnet";
     render(<NeverConnectedPanel />);
-    expect(screen.getByTestId("never-connected-rent").textContent).toMatch(/treasury refunds that locked rent/);
+    expect(screen.getByTestId("never-connected-rent").textContent).toMatch(/is eligible for a refund of that locked rent/);
+    expect(screen.getByTestId("never-connected-rent").textContent).not.toMatch(/automatic|treasury refunds/i);
     expect(screen.getByTestId("never-connected-rent").textContent).not.toMatch(/no rent refund is paid/);
   });
 

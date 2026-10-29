@@ -190,9 +190,9 @@ describe("rent copy (decision (a), 2026-10-25) is true for what the market has",
       expect(t).toMatch(/stake pool, vault and LP-mint account rent is not returned/);
     }
   });
-  it("mainnet: the treasury refunds the locked rent; no amount, no timing", () => {
-    expect(main).toMatch(/treasury refunds that locked rent to the creator of a market whose price never connected/);
-    expect(main).not.toMatch(/\bSOL\b|\$|within|hours|days|immediately|apply|form|\bclaim/i);
+  it("mainnet (D6): the creator is 'eligible for a refund'; no automatic, no promise, no amount, no timing", () => {
+    expect(main).toMatch(/creator of a market whose price never connected is eligible for a refund of that locked rent/);
+    expect(main).not.toMatch(/treasury|automatic|will be|will get|refunds that|\bSOL\b|\$|within|hours|days|immediately|apply|form|\bclaim/i);
   });
   it("devnet: no refund is paid, no claim or payment is implied", () => {
     expect(dev).toMatch(/no rent refund is paid/);
