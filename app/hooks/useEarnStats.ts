@@ -22,7 +22,7 @@ import { atomsToUsd, vaultWithdrawView } from '@/lib/limits/earn-withdrawable';
 import type { BlockedBy, WithdrawStatus } from '@/lib/limits/earn-withdrawable';
 import { isWrapperAccount } from "@/lib/v22/layout";
 import { decodeLpVaultRegistryBound } from '@/lib/limits/decode';
-import { readBoundVaultPricing } from '@/lib/limits/earn-bound-pricing';
+import { readBoundVaultPricings } from '@/lib/limits/earn-bound-pricing';
 import { fetchMarketsList, listedMarketRows } from '@/lib/markets-list-client';
 
 // ═══════════════════════════════════════════════════════════════
@@ -480,9 +480,9 @@ export async function fetchCuratedVaultsOnChain(
       const info = infos[i];
       return !!info && result[slab].found && !result[slab].unvalued && decodeLpVaultRegistryBound(new Uint8Array(info.data)) === true;
     });
-    const priced = await Promise.all(bound.map((slab) => readBoundVaultPricing(connection, programId, new PublicKey(slab))));
-    bound.forEach((slab, j) => {
-      const p = priced[j];
+    const priced = await readBoundVaultPricings(connection, programId, bound.map((slab) => new PublicKey(slab)));
+    bound.forEach((slab) => {
+      const p = priced.get(slab) ?? null;
       if (p && p.totalShares === 0n) result[slab] = { ...result[slab], tvlAtoms: 0n };
       else if (p && p.withdrawSeniorValue !== null) result[slab] = { ...result[slab], tvlAtoms: p.withdrawSeniorValue };
       else result[slab] = { ...result[slab], tvlAtoms: 0n, unvalued: true };

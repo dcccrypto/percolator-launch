@@ -17,7 +17,7 @@ import { getAssociatedTokenAddressSync, unpackAccount } from "@solana/spl-token"
 import { deriveInsuranceLpMint, deriveLpRedemption, deriveLpVaultRegistry } from "@percolatorct/sdk";
 import { readSplitPotState, vaultValue } from "./earn-split-pot";
 import { decodeLpVaultRegistryBound } from "./decode";
-import { readBoundVaultPricing } from "./earn-bound-pricing";
+import { readBoundVaultPricings } from "./earn-bound-pricing";
 import { previewWithdrawAtoms } from "./earn-withdraw";
 
 export interface EarnPosition {
@@ -51,6 +51,7 @@ export async function readEarnPositions(
   const infos: (Awaited<ReturnType<Connection["getAccountInfo"]>>)[] = [];
   for (let i = 0; i < keys.length; i += 99) infos.push(...(await connection.getMultipleAccountsInfo(keys.slice(i, i + 99), "confirmed")));
 
+  const boundHeld: { slab: string; market: PublicKey; shares: bigint }[] = [];
   await Promise.all(
     rows.map(async (r, i) => {
       const [ataInfo, redInfo, regInfo] = [infos[3 * i], infos[3 * i + 1], infos[3 * i + 2]];
@@ -68,10 +69,7 @@ export async function readEarnPositions(
       }
       const boundFlag = decodeLpVaultRegistryBound(new Uint8Array(regInfo.data));
       if (boundFlag === true) {
-        // The same price as the withdraw preview: floor(shares * senior / S).
-        const p = await readBoundVaultPricing(connection, programId, r.market);
-        const valueAtoms = p && p.withdrawSeniorValue !== null && p.totalShares > 0n ? previewWithdrawAtoms(shares, p.totalShares, p.withdrawSeniorValue) : null;
-        out.set(r.slab, { shares, valueAtoms });
+        boundHeld.push({ slab: r.slab, market: r.market, shares }); // priced below, in one batch
         return;
       }
       const reg = parseLpVaultRegistry(new Uint8Array(regInfo.data));
@@ -85,5 +83,14 @@ export async function readEarnPositions(
       out.set(r.slab, { shares, valueAtoms });
     }),
   );
+  // Bound vaults: the same price as the withdraw preview, floor(shares * senior / S); unpriceable => unknown.
+  if (boundHeld.length > 0) {
+    const priced = await readBoundVaultPricings(connection, programId, boundHeld.map((b) => b.market));
+    for (const b of boundHeld) {
+      const p = priced.get(b.slab) ?? null;
+      const valueAtoms = p && p.withdrawSeniorValue !== null && p.totalShares > 0n ? previewWithdrawAtoms(b.shares, p.totalShares, p.withdrawSeniorValue) : null;
+      out.set(b.slab, { shares: b.shares, valueAtoms });
+    }
+  }
   return out;
 }

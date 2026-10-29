@@ -3,9 +3,10 @@
  * App bug 2026-10-29: the hub's bound-vault reader prices with the SAME function as the vault
  * page and the withdraw preview (earnPanelPricing), so the hub, the page and the quote agree.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { earnPanelPricing } from "@/lib/limits/earn";
-import { boundVaultPricingFromParts, type BoundVaultParts } from "@/lib/limits/earn-bound-pricing";
+import { boundVaultPricingFromParts, readBoundVaultPricings, type BoundVaultParts } from "@/lib/limits/earn-bound-pricing";
+import { Keypair } from "@solana/web3.js";
 import { __setLimitsFlagsForTest } from "@/lib/limits/flags";
 import { ALL_ON, marketLimits } from "./fixtures";
 
@@ -40,5 +41,18 @@ describe("boundVaultPricingFromParts", () => {
   it("P3 flag off: null (the app cannot price a bound vault)", () => {
     __setLimitsFlagsForTest({ ...ALL_ON, p3: false });
     expect(boundVaultPricingFromParts(parts(700_000_000n))).toBeNull();
+  });
+});
+
+describe("readBoundVaultPricings (the hub's batch read)", () => {
+  it("one chunked read for every vault; unreadable vaults are unknown (null), never a guess; a failed RPC never throws", async () => {
+    const markets = Array.from({ length: 40 }, () => Keypair.generate().publicKey);
+    const conn = { getMultipleAccountsInfo: vi.fn(async (keys: unknown[]) => keys.map(() => null)) };
+    const out = await readBoundVaultPricings(conn as never, Keypair.generate().publicKey, markets);
+    expect(conn.getMultipleAccountsInfo).toHaveBeenCalledTimes(2); // 120 keys -> 2 chunks of <= 100, nothing to read in round 2
+    expect([...out.values()].every((v) => v === null)).toBe(true);
+    const failing = { getMultipleAccountsInfo: vi.fn(async () => { throw new Error("429"); }) };
+    const out2 = await readBoundVaultPricings(failing as never, Keypair.generate().publicKey, markets.slice(0, 3));
+    expect([...out2.values()]).toEqual([null, null, null]);
   });
 });

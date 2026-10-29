@@ -11,8 +11,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import * as C from "@/lib/limits/constants";
 
-const m = vi.hoisted(() => ({ pricing: vi.fn(), chunked: vi.fn() }));
-vi.mock("@/lib/limits/earn-bound-pricing", () => ({ readBoundVaultPricing: m.pricing }));
+const m = vi.hoisted(() => ({ pricing: vi.fn(), chunked: vi.fn(), batches: [] as string[][] }));
+// The batch reader (one call for every bound vault): `m.pricing` answers per market.
+vi.mock("@/lib/limits/earn-bound-pricing", () => ({
+  readBoundVaultPricings: async (_c: unknown, _p: unknown, markets: PublicKey[]) => {
+    m.batches.push(markets.map((x) => x.toBase58()));
+    const out = new Map<string, unknown>();
+    for (const k of markets) out.set(k.toBase58(), await m.pricing(_c, _p, k));
+    return out;
+  },
+}));
 vi.mock("@/lib/rpc-chunk", () => ({ getMultipleAccountsInfoChunked: m.chunked }));
 vi.mock("@/lib/config", () => ({
   getConfig: () => ({ programId: "ETDLAdiAyWnEUngspYczTXUceT6X8f92eZQvr8nmSkWB" }),
@@ -55,6 +63,7 @@ beforeEach(() => {
   __setDevnetV22ForTest(false);
   m.pricing.mockReset();
   m.chunked.mockReset();
+  m.batches.length = 0;
 });
 afterEach(() => __setDevnetV22ForTest(null));
 
@@ -73,6 +82,15 @@ describe("hub TVL (fetchCuratedVaultsOnChain), bound vault", () => {
     m.pricing.mockResolvedValue(null);
     const { data } = await fetchCuratedVaultsOnChain([SLAB]);
     expect(data[SLAB]).toMatchObject({ tvlAtoms: 0n, found: true, unvalued: true });
+  });
+
+  it("every bound vault is priced in ONE batch (no round trip per vault)", async () => {
+    const OTHER = "9EPm8nB8Fs7WcEZgE1WGFPTGc6rAzD6GhFJyMm4dEFHn";
+    m.chunked.mockResolvedValueOnce([registry(1), registry(1)]);
+    m.pricing.mockResolvedValue(LOSS);
+    const { data } = await fetchCuratedVaultsOnChain([SLAB, OTHER]);
+    expect(m.batches).toEqual([[SLAB, OTHER]]);
+    expect([data[SLAB].tvlAtoms, data[OTHER].tvlAtoms]).toEqual([822_000_000n, 822_000_000n]);
   });
 
   it("no shares outstanding: 0", async () => {
