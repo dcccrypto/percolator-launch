@@ -54,6 +54,20 @@ export function previewDepositSharesMinted(usdcAtoms: bigint, totalShares: bigin
   return shares !== null && shares > 0n && shares <= U64_MAX ? shares : null;
 }
 
+/** Why tag 75 would refuse a deposit, or null when it would mint (or the price is unknown). */
+export type DepositRefusal = "genesis-minimum" | "no-value" | "zero-shares" | "too-large";
+
+export function depositRefusalReason(usdcAtoms: bigint, totalShares: bigint, depositClaim: bigint | null): DepositRefusal | null {
+  if (usdcAtoms <= 0n) return null;
+  if (usdcAtoms > U64_MAX) return "too-large";
+  if (totalShares === 0n) return usdcAtoms > LP_VAULT_MINIMUM_LIQUIDITY ? null : "genesis-minimum";
+  if (depositClaim === null) return null; // unknown pricing is not a refusal
+  if (depositClaim === 0n) return "no-value";
+  const shares = previewDepositShares(usdcAtoms, totalShares, depositClaim);
+  if (shares === null || shares === 0n) return "zero-shares";
+  return shares > U64_MAX ? "too-large" : null;
+}
+
 /** USDC `shares` redeem for at the (withdraw-side) senior value. */
 export function previewWithdrawAtoms(shares: bigint, totalShares: bigint, seniorValue: bigint | null): bigint | null {
   if (seniorValue === null || shares <= 0n) return null;
@@ -111,8 +125,13 @@ export const EARN_WITHDRAW_COPY = {
     `Part of this vault's money is in use by open trades right now. You can withdraw up to ${max} now, or the rest once those trades close.`,
   maxNowAction: (max: string) => `Withdraw ${max}`,
   depositPreview: (shares: string, pct: string) => `You'll get ≈ ${shares} shares (${pct} of the vault)`,
-  /** Tag 75 would refuse this amount (too small for the first deposit, or the vault has no value to price against). */
-  depositRefused: "This amount can't be deposited right now: it would mint no shares. Try a larger amount.",
+  /** Tag 75 would refuse this amount; one line per reason (`depositRefusalReason`). */
+  depositRefused: {
+    "genesis-minimum": "Too small for this vault's first deposit (a tiny amount stays locked in the vault). Try a larger amount.",
+    "no-value": "This vault has no value left to price new shares against, so it can't take deposits right now.",
+    "zero-shares": "Too small: this amount would mint no shares. Try a larger amount.",
+    "too-large": "Too large for one deposit at this vault's share price. Try a smaller amount.",
+  } as Record<DepositRefusal, string>,
   /** Two-pot vault: the full pending amount can't be paid in one go right now (Custom 21 / 25 before signing). */
   maxAvailableTitle: "Partly available now",
   maxAvailableBody: "The full amount can't be paid in one go right now. Nothing moved. You can withdraw the max available now; the rest stays in the vault.",

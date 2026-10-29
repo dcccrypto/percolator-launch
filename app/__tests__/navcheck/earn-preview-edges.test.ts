@@ -2,7 +2,7 @@
 // Independent review (v22 navcheck 2026-10-29): previewDepositSharesMinted vs wrapper tag 75
 // (v16_program.rs ~31354-31478 @ rc23 686d98d0) and vault_lp_v18::senior_shares_for_deposit.
 import { describe, expect, it } from "vitest";
-import { previewDepositSharesMinted } from "@/lib/limits/earn-withdraw";
+import { depositRefusalReason, EARN_WITHDRAW_COPY, previewDepositSharesMinted } from "@/lib/limits/earn-withdraw";
 
 const U64_MAX = (1n << 64n) - 1n;
 const U128_MAX = (1n << 128n) - 1n;
@@ -58,5 +58,34 @@ describe("navcheck: divergences", () => {
     const a = 1_000_000n, s = 2_000_000n, v = 1_000n;
     expect(chainMint(a, s, v, false)).toBeNull();
     expect(previewDepositSharesMinted(a, s, v)).toBe(chainMint(a, s, v, true));
+  });
+});
+
+
+describe("navcheck: depositRefusalReason names the program's refusal", () => {
+  it("genesis at or below the dead shares", () => {
+    expect(depositRefusalReason(1_000n, 0n, null)).toBe("genesis-minimum");
+    expect(depositRefusalReason(1_001n, 0n, null)).toBeNull();
+  });
+  it("shares outstanding at a zero value: every amount is refused", () => {
+    expect(depositRefusalReason(10n ** 12n, 5_000n, 0n)).toBe("no-value");
+  });
+  it("a deposit that floors to 0 shares", () => {
+    expect(depositRefusalReason(1n, 1_000n, 2_000n)).toBe("zero-shares");
+    expect(depositRefusalReason(2n, 1_000n, 2_000n)).toBeNull();
+  });
+  it("above u64 (amount or minted shares)", () => {
+    expect(depositRefusalReason(1n << 64n, 1_000n, 1_000n)).toBe("too-large");
+    expect(depositRefusalReason(1_000_000_000n, 10n ** 12n, 1n)).toBe("too-large");
+  });
+  it("unknown pricing is not a refusal", () => {
+    expect(depositRefusalReason(5_000n, 1_000n, null)).toBeNull();
+  });
+  it("every reason has copy, and only the too-small ones say 'larger'", () => {
+    for (const r of ["genesis-minimum", "no-value", "zero-shares", "too-large"] as const) {
+      expect(EARN_WITHDRAW_COPY.depositRefused[r].length).toBeGreaterThan(10);
+    }
+    expect(EARN_WITHDRAW_COPY.depositRefused["no-value"]).not.toMatch(/larger/);
+    expect(EARN_WITHDRAW_COPY.depositRefused["too-large"]).toMatch(/smaller/);
   });
 });

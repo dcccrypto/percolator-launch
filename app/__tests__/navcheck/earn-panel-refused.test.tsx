@@ -25,6 +25,7 @@ describe("navcheck: a deposit the program refuses", () => {
     render(<DepositWithdrawPanel {...base} />);
     fireEvent.change(screen.getByLabelText("Deposit Amount"), { target: { value: "0.0005" } });
     expect(screen.queryByTestId("earn-deposit-preview")?.textContent ?? "").not.toMatch(/≈ 0(\.0+)? shares/);
+    expect(screen.getByTestId("earn-deposit-preview").textContent).toMatch(/first deposit/);
     expect(screen.getByRole("button", { name: "Deposit" })).toBeDisabled();
   });
   it("shares outstanding at a zero value", () => {
@@ -32,6 +33,7 @@ describe("navcheck: a deposit the program refuses", () => {
       pricing={{ totalShares: 5_000n, depositSeniorValue: 0n, withdrawSeniorValue: 0n, maxNowAtoms: 0n }} />);
     fireEvent.change(screen.getByLabelText("Deposit Amount"), { target: { value: "10" } });
     expect(screen.queryByTestId("earn-deposit-preview")?.textContent ?? "").not.toMatch(/≈ 0(\.0+)? shares/);
+    expect(screen.getByTestId("earn-deposit-preview").textContent).toMatch(/no value left/);
     expect(screen.getByRole("button", { name: "Deposit" })).toBeDisabled();
   });
 });
