@@ -25,7 +25,7 @@ import { backingSeedPerDomain } from "@/lib/market-params";
 import { COPY } from "@/lib/limits/copy";
 import { defaultLpExposureKBps, lpEquityInitRaw, lpExposureCapQ, maxTradeSizePerSide, nonnegEquity, effectiveLpExposureKBps } from "@/lib/limits/risk-limits";
 import { projectCreatorCaps } from "@/lib/limits/vault-tranche";
-import { CREATOR_STAKE_PANEL_COPY, clampStakeWithdraw, creatorStakeState, stakeReasonFromRefusal, type CreatorStakeState, type StakeReason } from "@/lib/limits/creator-stake";
+import { CREATOR_STAKE_PANEL_COPY, clampStakeWithdrawFor, creatorStakeState, stakeReasonFromRefusal, type CreatorStakeState, type StakeReason } from "@/lib/limits/creator-stake";
 import { useResolvedExit } from "@/hooks/useResolvedExit";
 import { resolvedPayoutEta } from "@/lib/limits/resolved-eta";
 import { juniorResolvedReleasableAtoms } from "@/lib/limits/junior-resolved-release";
@@ -36,6 +36,7 @@ import { formatTokenAmount } from "@/lib/format";
 import { LimitsNotice, LimitsRow } from "./LimitsRow";
 import { fmtQ } from "./OrderTicketLimits";
 import { CREATOR_STAKE_COPY } from "@/lib/wizard-copy";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { useDecimalInput } from "@/hooks/useDecimalInput";
 
 export const WizardTranchePanel: FC<{
@@ -180,7 +181,7 @@ export const JuniorTrancheActionsView: FC<{
       </div>
     );
   }
-  const amount = clampStakeWithdraw(typed, w);
+  const amount = clampStakeWithdrawFor(typed, stake);
   return (
     <div data-testid="limits-junior-actions" data-reason={reason ?? ""} className="mb-3 border border-[var(--border)] bg-[var(--panel-bg)] p-3">
       {header}
@@ -193,6 +194,11 @@ export const JuniorTrancheActionsView: FC<{
           {reason && (
             <p data-testid="limits-junior-reason" data-reason={reason} className="text-[10px] leading-snug text-[var(--text-secondary)]">
               {K.reasons[reason]}
+            </p>
+          )}
+          {!reason && stake.netRule && (
+            <p data-testid="limits-junior-net-rule" className="text-[10px] leading-snug text-[var(--text-secondary)]">
+              {K.netRuleNote}
             </p>
           )}
         </div>
@@ -290,6 +296,10 @@ const CreatorTranchePanelLive: FC<{ slab: string; decimals: number; collateralSy
           lpFlat: limits.lp?.posQ === 0n,
           drawOutstandingAtoms: vs.seniorDrawOutstandingAtoms,
           impaired: view.impaired === true,
+          // D1 interim: the deployed program holds a v2.2 creator stake to net deposits (0 or >= 500), not value.
+          netRule: isDevnetV22Enabled()
+            ? { deposited: vs.juniorDepositedAtoms, withdrawn: vs.juniorWithdrawnAtoms, minAtoms: 500n * 10n ** BigInt(decimals) }
+            : null,
         })
       : null;
   const resolvedMode = limits.engine?.mode === 1 && !!vs;

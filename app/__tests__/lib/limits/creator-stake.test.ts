@@ -1,7 +1,7 @@
 // @vitest-environment node
 /** UX WP-9 AC1 (audit §3.10): the creator-stake state, the program's 97 rule, reason precedence. */
 import { describe, expect, it } from "vitest";
-import { clampStakeWithdraw, creatorStakeState, stakeReasonFromRefusal } from "@/lib/limits/creator-stake";
+import { CREATOR_STAKE_PANEL_COPY, clampStakeWithdraw, clampStakeWithdrawFor, creatorStakeState, stakeReasonFromRefusal } from "@/lib/limits/creator-stake";
 import { juniorWithdrawableAtoms } from "@/lib/limits/vault-tranche";
 import { SimulationRefusal } from "@/lib/tx";
 import { WRAPPER_ERR } from "@/lib/wrapper-errors";
@@ -55,5 +55,48 @@ describe("creatorStakeState", () => {
     expect(isJuniorWithdrawRefusal(new SimulationRefusal({ InstructionError: [1, { Custom: WRAPPER_ERR.VaultLpJuniorWithdrawRefused }] }))).toBe(true);
     expect(isJuniorWithdrawRefusal(new SimulationRefusal({ InstructionError: [1, { Custom: 21 }] }))).toBe(false);
     expect(isJuniorWithdrawRefusal(new Error("custom program error: 0x4b"))).toBe(false);
+  });
+});
+
+/** D1 interim (v22 deep memo 2026-10-29): the deployed rule is net-based. Tag 97 refuses unless (deposited - withdrawn) after is 0 or >= $500. */
+describe("creatorStakeState: the deployed net-deposit rule (D1 interim)", () => {
+  const MIN = 500_000_000n;
+  // Earn claim 1000, floor 20%: the value rule alone would let value - 200 leave.
+  const g = { ...base, floorBps: 2_000 };
+  const rule = (deposited: bigint, withdrawn = 0n) => ({ netRule: { deposited, withdrawn, minAtoms: MIN } });
+
+  it("after a loss: $500 in, value 400 junior => nothing is offered, reason 'net-minimum' (the memo's example)", () => {
+    // value 1400 = C 1000 + 400 junior; floor 200 => value rule alone offers 200, which the program refuses (net 300 in (0, 500)).
+    const s = creatorStakeState({ ...g, vaultValue: C + 400_000_000n, ...rule(500_000_000n) });
+    expect(s.withdrawable).toBe(0n);
+    expect(s.reason).toBe("net-minimum");
+    expect(clampStakeWithdrawFor(200_000_000n, s)).toBe(0n);
+    expect(clampStakeWithdrawFor(400_000_000n, s)).toBe(0n);
+  });
+  it("net 1000, value 1100 junior (floor leaves 900 free): offers only what leaves >= 500 net, never an amount that leaves (0, 500)", () => {
+    const s = creatorStakeState({ ...g, vaultValue: C + 1_100_000_000n, ...rule(1_000_000_000n) });
+    expect(s.withdrawable).toBe(500_000_000n);
+    expect(clampStakeWithdrawFor(900_000_000n, s)).toBe(500_000_000n);
+    expect(clampStakeWithdrawFor(700_000_000n, s)).toBe(500_000_000n);
+    expect(clampStakeWithdrawFor(500_000_000n, s)).toBe(500_000_000n);
+    expect(clampStakeWithdrawFor(300_000_000n, s)).toBe(300_000_000n);
+  });
+  it("a full exit (net after 0) is offered only when the value rule allows the whole net", () => {
+    const s = creatorStakeState({ ...g, vaultValue: C + 1_000_000_000n, ...rule(800_000_000n) });
+    expect(s.withdrawable).toBe(800_000_000n);
+    expect(clampStakeWithdrawFor(800_000_000n, s)).toBe(800_000_000n);
+    expect(clampStakeWithdrawFor(600_000_000n, s)).toBe(300_000_000n); // 600 would leave 200 in (0, 500)
+    expect(clampStakeWithdrawFor(900_000_000n, s)).toBe(300_000_000n);
+  });
+  it("a refused value rule keeps its own reason (at-floor beats net-minimum); null netRule is the old behaviour", () => {
+    expect(creatorStakeState({ ...g, vaultValue: C + 150_000_000n, ...rule(500_000_000n) }).reason).toBe("at-floor");
+    expect(creatorStakeState({ ...base })).toMatchObject({ withdrawable: 100_000_000n, reason: null });
+    expect(clampStakeWithdrawFor(250_000_000n, creatorStakeState({ ...base }))).toBe(100_000_000n);
+    expect(clampStakeWithdrawFor(1n, creatorStakeState({ ...base, vaultValue: null }))).toBe(0n);
+  });
+  it("copy: the interim sentence, exactly", () => {
+    expect(CREATOR_STAKE_PANEL_COPY.reasons["net-minimum"]).toBe(
+      "Locked until the market settles after a loss; withdrawals must leave at least $500 in deposits.",
+    );
   });
 });

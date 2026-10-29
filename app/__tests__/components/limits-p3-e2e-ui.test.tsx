@@ -194,6 +194,28 @@ describe("Your creator stake (96 / 97)", () => {
       expect(onWithdraw).not.toHaveBeenCalled();
     });
   }
+  it("D1 interim: after a loss the panel says why, offers nothing, and Withdraw never fires; with room it shows the rule as a note", async () => {
+    const NET = { deposited: 500_000_000n, withdrawn: 0n, minAtoms: 500_000_000n };
+    const onWithdraw = vi.fn();
+    const lost = await panel({ stake: stake({ vaultValue: C0 + 400_000_000n, netRule: NET }), onWithdraw });
+    expect(lost.getByTestId("limits-junior-reason").dataset.reason).toBe("net-minimum");
+    expect(lost.getByTestId("limits-junior-reason").textContent).toBe("Locked until the market settles after a loss; withdrawals must leave at least $500 in deposits.");
+    expect(lost.getByTestId("limits-junior-withdrawable").textContent).toContain("0 USDC");
+    expect(lost.queryByTestId("limits-junior-max")).toBeNull();
+    fireEvent.change(lost.getByTestId("limits-junior-amount-input"), { target: { value: "200" } });
+    const wd = lost.getByTestId("limits-junior-withdraw") as HTMLButtonElement;
+    expect(wd.disabled).toBe(true);
+    fireEvent.click(wd);
+    expect(onWithdraw).not.toHaveBeenCalled();
+    lost.unmount();
+    const open = await panel({ stake: stake({ vaultValue: C0 + 1_100_000_000n, netRule: { ...NET, deposited: 1_000_000_000n } }), onWithdraw });
+    expect(open.getByTestId("limits-junior-net-rule").textContent).toBe("Withdrawals must leave at least $500 in deposits, or take everything out.");
+    fireEvent.click(open.getByTestId("limits-junior-max"));
+    expect((open.getByTestId("limits-junior-amount-input") as HTMLInputElement).value).toBe("500");
+    fireEvent.change(open.getByTestId("limits-junior-amount-input"), { target: { value: "700" } });
+    fireEvent.click(open.getByTestId("limits-junior-withdraw"));
+    expect(onWithdraw).toHaveBeenCalledWith(500_000_000n); // 700 would leave 300 in (0, 500): never offered
+  });
   it("a 75 refusal from the simulation shows the reason line, not a raw error", async () => {
     const { getByTestId, queryByTestId } = await panel({ stake: stake({ drawOutstandingAtoms: 1n }), refusedReason: "draw-pending", error: "Not withdrawable yet" });
     expect(getByTestId("limits-junior-reason").dataset.reason).toBe("draw-pending");
