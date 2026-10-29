@@ -9,6 +9,14 @@ Status: BUILT, NOT DEPLOYED. Default OFF: with the flag unset the app behaves ex
 (no v2.2 account is decoded, no v2.2 instruction is built, no v2.2 surface renders). Set it only on the deployment that points at
 the v2.2 programs, together with `NEXT_PUBLIC_DEVNET_V21=1`.
 
+## rc23 open limits on the preview (D9)
+
+`NEXT_PUBLIC_RC23_OPEN_LIMITS` (`lib/v21/growth-market.ts`): the code default stays **ON** (quote rc23's κ / λ caps and the guard
+limits; all of them only tighten). A build that talks to a wrapper WITHOUT those rules (the devnet preview against `aca02ba6`) must be
+built with `NEXT_PUBLIC_RC23_OPEN_LIMITS=0` until rc23 is deployed there; ON would quote up to 20-80x less room than the chain allows on
+depth-capped markets. No preview build config lives in this repo (only `app/vercel.mainnet.json`), so this is a Vercel project env
+setting on `percolator-v22-preview`: set `=0` now, and remove it in the same change as the rc23 upgrade.
+
 ## SDK pin
 
 `@percolatorct/sdk` 9.0.0-candidate is not published. The app pins the candidate the way the v2.1 stack did (verbatim local
