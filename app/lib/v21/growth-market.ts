@@ -226,6 +226,7 @@ function guardView(i: GrowthMarketInput, record: AssetGrowthV19, q: MaxLeverageQ
     oiEffLongQ: i.engine.oiEffLongQ,
     oiEffShortQ: i.engine.oiEffShortQ,
     lpEffQ: i.lpEffectiveQ,
+    permProofRequired: i.guard.mainnet,
   };
   return { input, limits: levGuardOpenLimitsV22(input) };
 }

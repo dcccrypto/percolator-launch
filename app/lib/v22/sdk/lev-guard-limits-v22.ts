@@ -92,7 +92,7 @@ export function levDefaultOverlayV22(band: LevAgeBandV22, rep: LevReportAgeV22):
 export type LevOverlayFieldsV22 = Pick<
   LevGuardV22,
   "repJDumpBps" | "repMIndBps" | "repLCapX100" | "repNMultBps" | "repSlot" | "holderDumpBps" | "holderDumpSlot" | "mintAuthLive" | "freezeAuthLive"
->;
+> & { permProven?: boolean };
 
 /**
  * `merge_overlay(band, report, perm, now)`: tighten-only (j, m max; l_cap, n_mult min).
@@ -102,7 +102,7 @@ export type LevOverlayFieldsV22 = Pick<
  * levMergeOverlayV22("Week", guard, slot).jDumpBps; // >= 2000
  * ```
  */
-export function levMergeOverlayV22(band: LevAgeBandV22, g: LevOverlayFieldsV22, nowSlot: bigint): LevOverlayV22 {
+export function levMergeOverlayV22(band: LevAgeBandV22, g: LevOverlayFieldsV22, nowSlot: bigint, permProofRequired = false): LevOverlayV22 {
   const rep = levReportAgeV22(g.repSlot, nowSlot);
   const o = levDefaultOverlayV22(band, rep);
   if (rep === "Fresh" || rep === "Held") {
@@ -116,7 +116,8 @@ export function levMergeOverlayV22(band: LevAgeBandV22, g: LevOverlayFieldsV22, 
     o.jDumpBps = max16(o.jDumpBps, d);
     o.mIndBps = max16(o.mIndBps, d);
   }
-  if (g.mintAuthLive || g.freezeAuthLive) {
+  // rc23 `perm_for_gate`: where the proof is required (a mainnet build) a guard no TIGHTEN has proven reads as "mint and freeze live".
+  if (g.mintAuthLive || g.freezeAuthLive || (permProofRequired && g.permProven !== true)) {
     o.lCapX100 = 1;
     o.nMultBps = 0;
   }
@@ -303,6 +304,8 @@ export interface LevGuardOpenInputV22 {
   /** The LP's effective signed position BEFORE the fill (Q). */
   lpEffQ: bigint;
   posScale?: bigint;
+  /** A mainnet build (`LEV_GUARD_PERM_PROOF_REQUIRED`): an unproven guard is quoted with the authority-live clamp (2x / $200). */
+  permProofRequired?: boolean;
 }
 
 export type LevGuardBlockV22 = "guard-missing" | "age-under-6h";
@@ -365,7 +368,7 @@ export function levGuardOpenLimitsV22(i: LevGuardOpenInputV22): LevGuardOpenLimi
   const frozenN = tripNow ? i.nCapQ : g.frozenNQ;
   const frozen = levFrozenV22(pb, now);
   const mOracle = levMOracleOnV22(pb, now);
-  const ov = levMergeOverlayV22(band, g, now);
+  const ov = levMergeOverlayV22(band, g, now, i.permProofRequired === true);
   let sigmaLev: bigint | null = null;
   if (i.volHasData) {
     const [p, t] = levBurstUpdateV22(g.burstVarPeakX100, g.burstPeakSlot, i.volVarX100, now);

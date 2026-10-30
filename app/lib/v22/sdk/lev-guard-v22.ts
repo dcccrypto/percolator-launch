@@ -63,7 +63,7 @@ export const LEV_GUARD_ACCOUNT_LEN_V22 = 16 + LEV_GUARD_BODY_LEN_V22;
 export const LEV_GUARD_VERSION_V22 = 1;
 
 /** `flags` bits. */
-export const LEV_GUARD_FLAG_V22 = Object.freeze({ MINT_AUTH_LIVE: 1, FREEZE_AUTH_LIVE: 2 } as const);
+export const LEV_GUARD_FLAG_V22 = Object.freeze({ MINT_AUTH_LIVE: 1, FREEZE_AUTH_LIVE: 2, PERM_PROVEN: 4 } as const);
 
 /** Slots per hour / day (`SLOTS_PER_HOUR`, `SLOTS_PER_DAY`). */
 export const LEV_SLOTS_PER_HOUR_V22 = 9_000n;

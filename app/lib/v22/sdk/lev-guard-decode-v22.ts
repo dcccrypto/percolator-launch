@@ -47,6 +47,11 @@ export interface LevGuardV22 {
   mintAuthLive: boolean;
   /** Bit 1 of `flags`: ... a live freeze authority. */
   freezeAuthLive: boolean;
+  /**
+   * Bit 2 of `flags` (rc23 `GUARD_FLAG_PERM_PROVEN`, prog#614/#620): a permissionless TIGHTEN proved the mint / freeze authority
+   * bits. Set by every op-3 TIGHTEN; a mainnet build treats a guard without it as "authority live" (`perm_for_gate`).
+   */
+  permProven: boolean;
   /** W1: a stop round is open. */
   roundActive: boolean;
   /** W1: the LP side when the round opened. */
@@ -146,6 +151,7 @@ export function decodeLevGuardV22(data: Uint8Array, table: LayoutTable = LAYOUT_
     flags,
     mintAuthLive: (flags & LEV_GUARD_FLAG_V22.MINT_AUTH_LIVE) !== 0,
     freezeAuthLive: (flags & LEV_GUARD_FLAG_V22.FREEZE_AUTH_LIVE) !== 0,
+    permProven: (flags & LEV_GUARD_FLAG_V22.PERM_PROVEN) !== 0,
     roundActive: data[b + F.roundActive] === 1,
     roundLpLong: data[b + F.roundLpLong] === 1,
     repJDumpBps: u16(F.repJDumpBps),
@@ -184,7 +190,7 @@ export function decodeLevGuardV22(data: Uint8Array, table: LayoutTable = LAYOUT_
   const rawBool = (o: number): boolean => data[b + o] <= 1;
   const bad =
     g.version !== LEV_GUARD_VERSION_V22 ||
-    (flags & ~(LEV_GUARD_FLAG_V22.MINT_AUTH_LIVE | LEV_GUARD_FLAG_V22.FREEZE_AUTH_LIVE)) !== 0 ||
+    (flags & ~(LEV_GUARD_FLAG_V22.MINT_AUTH_LIVE | LEV_GUARD_FLAG_V22.FREEZE_AUTH_LIVE | LEV_GUARD_FLAG_V22.PERM_PROVEN)) !== 0 ||
     !rawBool(F.roundActive) || !rawBool(F.roundLpLong) ||
     g.touchedN > LEV_GUARD_TOUCHED_CAP_V22 || g.roundKeepBps > 10_000 ||
     g.repJDumpBps > 10_000 || g.repMIndBps > 10_000 || g.repNMultBps > 10_000 ||
