@@ -20,14 +20,18 @@
  * getSignaturesForAddress and one getTransaction per transaction at that slot, at most MAX_HISTORY_LOOKUPS markets, newest
  * silence first, MAX_PARALLEL at a time. Results are cached for the session (history of a past slot never changes).
  */
-import { PublicKey, type Connection } from "@solana/web3.js";
-import bs58 from "bs58";
-import { decodePortfolioMatcherControl } from "@percolatorct/sdk";
-import { ACCOUNT_KIND, LAYOUT_V22 } from "./sdk/layout";
-import { activeLayout, portfolioGpaFilters } from "./layout";
-import { LAUNCH_WAIT_SLOTS, NEVER_CONNECTED_FALLBACK_SLACK_SLOTS, classifyLastGoodTags } from "./never-connected";
-import { parseWrapperConfigV17 } from "./sdk/slab";
-import { staleResolveStatusV22 } from "./stale-resolve";
+import { PublicKey, type Connection } from '@solana/web3.js';
+import bs58 from 'bs58';
+import { decodePortfolioMatcherControl } from '@percolatorct/sdk';
+import { ACCOUNT_KIND, LAYOUT_V22 } from './sdk/layout';
+import { activeLayout, portfolioGpaFilters } from './layout';
+import {
+  LAUNCH_WAIT_SLOTS,
+  NEVER_CONNECTED_FALLBACK_SLACK_SLOTS,
+  classifyLastGoodTags,
+} from './never-connected';
+import { parseWrapperConfigV17 } from './sdk/slab';
+import { staleResolveStatusV22 } from './stale-resolve';
 
 const PF_MARKET_OFF = 16;
 const PF_OWNER_OFF = 116;
@@ -47,13 +51,21 @@ export interface CreatorSlab {
   raw: Uint8Array;
 }
 
-type Conn = Pick<Connection, "getProgramAccounts" | "getMultipleAccountsInfo" | "getSignaturesForAddress" | "getTransaction" | "getSlot">;
+type Conn = Pick<
+  Connection,
+  | 'getProgramAccounts'
+  | 'getMultipleAccountsInfo'
+  | 'getSignaturesForAddress'
+  | 'getTransaction'
+  | 'getSlot'
+>;
 
-const bytes = (d: Uint8Array | Buffer): Uint8Array => (d instanceof Uint8Array ? d : new Uint8Array(d));
+const bytes = (d: Uint8Array | Buffer): Uint8Array =>
+  d instanceof Uint8Array ? d : new Uint8Array(d);
 
 /** Distinct market ids the wallet created, from both markers. */
 export async function findCreatorSlabKeys(
-  connection: Pick<Connection, "getProgramAccounts" | "getMultipleAccountsInfo">,
+  connection: Pick<Connection, 'getProgramAccounts' | 'getMultipleAccountsInfo'>,
   programId: PublicKey,
   wallet: PublicKey,
 ): Promise<PublicKey[]> {
@@ -62,7 +74,10 @@ export async function findCreatorSlabKeys(
   const [owned, authored] = await Promise.all([
     connection.getProgramAccounts(programId, {
       dataSlice: { offset: controlOff, length: 8 },
-      filters: [...portfolioGpaFilters(), { memcmp: { offset: PF_OWNER_OFF, bytes: wallet.toBase58() } }],
+      filters: [
+        ...portfolioGpaFilters(),
+        { memcmp: { offset: PF_OWNER_OFF, bytes: wallet.toBase58() } },
+      ],
     }),
     connection.getProgramAccounts(programId, {
       dataSlice: { offset: 0, length: 0 },
@@ -82,7 +97,9 @@ export async function findCreatorSlabKeys(
   const out = new Map<string, PublicKey>();
   for (let i = 0; i < lpKeys.length; i += 100) {
     const chunk = lpKeys.slice(i, i + 100);
-    const infos = await connection.getMultipleAccountsInfo(chunk, { dataSlice: { offset: PF_MARKET_OFF, length: 32 } });
+    const infos = await connection.getMultipleAccountsInfo(chunk, {
+      dataSlice: { offset: PF_MARKET_OFF, length: 32 },
+    });
     for (const info of infos) {
       if (!info || info.data.length < 32) continue;
       const k = new PublicKey(bytes(info.data).subarray(0, 32));
@@ -94,7 +111,11 @@ export async function findCreatorSlabKeys(
 }
 
 /** Market bytes for each key; keeps only accounts the program owns that decode as a v2.2 market. */
-export async function readCreatorSlabs(connection: Pick<Connection, "getMultipleAccountsInfo">, programId: PublicKey, keys: PublicKey[]): Promise<CreatorSlab[]> {
+export async function readCreatorSlabs(
+  connection: Pick<Connection, 'getMultipleAccountsInfo'>,
+  programId: PublicKey,
+  keys: PublicKey[],
+): Promise<CreatorSlab[]> {
   const out: CreatorSlab[] = [];
   for (let i = 0; i < keys.length; i += 100) {
     const chunk = keys.slice(i, i + 100);
@@ -116,11 +137,60 @@ export interface SlabHistory {
   neverPushed: boolean | null;
 }
 
-const historyCache = new Map<string, SlabHistory>();
+const HISTORY_UNKNOWN_TTL_MS = 60_000;
+
+interface CachedHistory {
+  result: SlabHistory;
+  expiresAt: number | null;
+}
+
+let historyCache = new WeakMap<object, Map<string, CachedHistory>>();
+let historyInFlight = new WeakMap<object, Map<string, Promise<SlabHistory>>>();
+
+function historyKey(
+  programId: PublicKey,
+  slab: PublicKey,
+  lastGood: bigint,
+  oracleMode: number,
+): string {
+  return `${programId.toBase58()}:${slab.toBase58()}:${lastGood}:${oracleMode}`;
+}
+
+function getCachedHistory(connection: object, key: string): SlabHistory | null {
+  const bucket = historyCache.get(connection);
+  const entry = bucket?.get(key);
+  if (!entry) return null;
+
+  if (entry.expiresAt !== null && Date.now() >= entry.expiresAt) {
+    bucket?.delete(key);
+    return null;
+  }
+
+  return entry.result;
+}
+
+function setCachedHistory(
+  connection: object,
+  key: string,
+  result: SlabHistory,
+  ttlMs: number | null,
+): void {
+  let bucket = historyCache.get(connection);
+  if (!bucket) {
+    bucket = new Map<string, CachedHistory>();
+    historyCache.set(connection, bucket);
+  }
+
+  bucket.set(key, {
+    result,
+    expiresAt: ttlMs === null ? null : Date.now() + ttlMs,
+  });
+}
 
 /** Test seam. */
 export function __clearHistoryCache(): void {
-  historyCache.clear();
+  historyCache = new WeakMap<object, Map<string, CachedHistory>>();
+  historyInFlight = new WeakMap<object, Map<string, Promise<SlabHistory>>>();
 }
 
 interface SigInfo {
@@ -130,8 +200,16 @@ interface SigInfo {
 }
 
 /** Wrapper instruction tags in a transaction that touch the slab. Null when the transaction cannot be read. */
-async function tagsAt(connection: Pick<Connection, "getTransaction">, programId: PublicKey, slab: PublicKey, signature: string): Promise<number[] | null> {
-  const tx = await connection.getTransaction(signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
+async function tagsAt(
+  connection: Pick<Connection, 'getTransaction'>,
+  programId: PublicKey,
+  slab: PublicKey,
+  signature: string,
+): Promise<number[] | null> {
+  const tx = await connection.getTransaction(signature, {
+    maxSupportedTransactionVersion: 0,
+    commitment: 'confirmed',
+  });
   if (!tx || tx.meta?.err) return null;
   const msg = tx.transaction.message;
   const keys = msg.getAccountKeys({ accountKeysFromLookups: tx.meta?.loadedAddresses });
@@ -150,7 +228,7 @@ async function tagsAt(connection: Pick<Connection, "getTransaction">, programId:
  * slot, derived from the program source). Unreadable or unexplained gives null.
  */
 export async function readNeverPushed(
-  connection: Pick<Connection, "getTransaction">,
+  connection: Pick<Connection, 'getTransaction'>,
   programId: PublicKey,
   slab: PublicKey,
   lastGood: bigint,
@@ -170,7 +248,13 @@ export async function readNeverPushed(
   const r = classifyLastGoodTags(all, oracleMode);
   // A config / restart / freeze tx (62, 69, 40, 34, 35) long after creation, with no InitMarket in it, is a rotation or restart of a
   // market that may well have had prices before: its history is not "no price ever accepted". Inconclusive.
-  if (r === true && creationSlot !== null && !all.includes(0) && lastGood - creationSlot > NEVER_CONNECTED_FALLBACK_SLACK_SLOTS) return null;
+  if (
+    r === true &&
+    creationSlot !== null &&
+    !all.includes(0) &&
+    lastGood - creationSlot > NEVER_CONNECTED_FALLBACK_SLACK_SLOTS
+  )
+    return null;
   return r;
 }
 
@@ -178,24 +262,75 @@ export async function readNeverPushed(
  * History facts for a slab. An RPC failure is unknown and NOT cached (the next scan retries); a full signature page is an old busy
  * market (certainly not freshly created): creation unknown, cached.
  */
-export async function readSlabHistory(connection: Pick<Connection, "getSignaturesForAddress" | "getTransaction">, programId: PublicKey, slab: PublicKey, lastGood: bigint, oracleMode = 0): Promise<SlabHistory> {
-  const key = `${slab.toBase58()}:${lastGood}`;
-  const hit = historyCache.get(key);
-  if (hit) return hit;
-  try {
-    const sigs = await connection.getSignaturesForAddress(slab, { limit: SIGNATURE_PAGE }, "confirmed");
-    let result: SlabHistory;
-    if (sigs.length === 0 || sigs.length >= SIGNATURE_PAGE) {
-      result = { creationSlot: null, neverPushed: null };
-    } else {
-      const ok = sigs.filter((s) => s.err === null);
-      const creationSlot = ok.length > 0 ? BigInt(ok.reduce((m, s) => (s.slot < m ? s.slot : m), ok[0].slot)) : null;
-      result = { creationSlot, neverPushed: await readNeverPushed(connection, programId, slab, lastGood, ok, oracleMode, creationSlot) };
+export async function readSlabHistory(
+  connection: Pick<Connection, 'getSignaturesForAddress' | 'getTransaction'>,
+  programId: PublicKey,
+  slab: PublicKey,
+  lastGood: bigint,
+  oracleMode = 0,
+): Promise<SlabHistory> {
+  const key = historyKey(programId, slab, lastGood, oracleMode);
+  const hit = getCachedHistory(connection, key);
+  if (hit !== null) return hit;
+
+  const existing = historyInFlight.get(connection)?.get(key);
+  if (existing) return existing;
+
+  const task = (async (): Promise<SlabHistory> => {
+    try {
+      const sigs = await connection.getSignaturesForAddress(
+        slab,
+        { limit: SIGNATURE_PAGE },
+        'confirmed',
+      );
+      let result: SlabHistory;
+      if (sigs.length === 0 || sigs.length >= SIGNATURE_PAGE) {
+        result = { creationSlot: null, neverPushed: null };
+      } else {
+        const ok = sigs.filter((s) => s.err === null);
+        const creationSlot =
+          ok.length > 0 ? BigInt(ok.reduce((m, s) => (s.slot < m ? s.slot : m), ok[0].slot)) : null;
+        result = {
+          creationSlot,
+          neverPushed: await readNeverPushed(
+            connection,
+            programId,
+            slab,
+            lastGood,
+            ok,
+            oracleMode,
+            creationSlot,
+          ),
+        };
+      }
+      // Full pages retain the existing budget policy.
+      // Inconclusive partial/empty reads expire for a bounded retry.
+      const ttlMs =
+        sigs.length < SIGNATURE_PAGE && result.neverPushed === null ? HISTORY_UNKNOWN_TTL_MS : null;
+      setCachedHistory(connection, key, result, ttlMs);
+      return result;
+    } catch {
+      return { creationSlot: null, neverPushed: null };
     }
-    historyCache.set(key, result);
-    return result;
-  } catch {
-    return { creationSlot: null, neverPushed: null };
+  })();
+
+  let pending = historyInFlight.get(connection);
+  if (!pending) {
+    pending = new Map<string, Promise<SlabHistory>>();
+    historyInFlight.set(connection, pending);
+  }
+
+  pending.set(key, task);
+
+  try {
+    return await task;
+  } finally {
+    if (pending.get(key) === task) {
+      pending.delete(key);
+      if (pending.size === 0) {
+        historyInFlight.delete(connection);
+      }
+    }
   }
 }
 
@@ -213,7 +348,11 @@ function oracleModeOf(raw: Uint8Array): number {
   }
 }
 
-async function mapBounded<T, R>(items: readonly T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+async function mapBounded<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (t: T) => Promise<R>,
+): Promise<R[]> {
   const out: R[] = new Array<R>(items.length);
   let next = 0;
   const worker = async (): Promise<void> => {
@@ -231,19 +370,51 @@ async function mapBounded<T, R>(items: readonly T[], limit: number, fn: (t: T) =
  * MAX_HISTORY_LOOKUPS with the NEWEST last-good slot (the likeliest fresh launches) are read, MAX_PARALLEL at a time; the rest
  * are returned with unknown history.
  */
-export async function lookupCreatorMarkets(connection: Conn, programId: PublicKey, wallet: PublicKey): Promise<CreatorCandidate[]> {
+export async function lookupCreatorMarkets(
+  connection: Conn,
+  programId: PublicKey,
+  wallet: PublicKey,
+): Promise<CreatorCandidate[]> {
   const keys = await findCreatorSlabKeys(connection, programId, wallet);
   const slabs = await readCreatorSlabs(connection, programId, keys);
-  const clusterSlot = BigInt(await connection.getSlot("confirmed"));
-  const rows = slabs.map((s) => ({ ...s, lastGoodOracleSlot: staleResolveStatusV22(s.raw, 0n)?.lastGoodOracleSlot ?? 0n }));
+  const clusterSlot = BigInt(await connection.getSlot('confirmed'));
+  const rows = slabs.map((s) => ({
+    ...s,
+    lastGoodOracleSlot: staleResolveStatusV22(s.raw, 0n)?.lastGoodOracleSlot ?? 0n,
+  }));
   const silent = rows
     .filter((r) => clusterSlot - r.lastGoodOracleSlot > LAUNCH_WAIT_SLOTS)
-    .sort((a, b) => (a.lastGoodOracleSlot < b.lastGoodOracleSlot ? 1 : a.lastGoodOracleSlot > b.lastGoodOracleSlot ? -1 : 0));
-  const cached = (r: { slab: PublicKey; lastGoodOracleSlot: bigint }): boolean => historyCache.has(`${r.slab.toBase58()}:${r.lastGoodOracleSlot}`);
-  const toRead = [...silent.filter(cached), ...silent.filter((r) => !cached(r)).slice(0, MAX_HISTORY_LOOKUPS)];
+    .sort((a, b) =>
+      a.lastGoodOracleSlot < b.lastGoodOracleSlot
+        ? 1
+        : a.lastGoodOracleSlot > b.lastGoodOracleSlot
+          ? -1
+          : 0,
+    );
+  const cached = (r: { slab: PublicKey; lastGoodOracleSlot: bigint; raw: Uint8Array }): boolean =>
+    getCachedHistory(
+      connection,
+      historyKey(programId, r.slab, r.lastGoodOracleSlot, oracleModeOf(r.raw)),
+    ) !== null;
+  const toRead = [
+    ...silent.filter(cached),
+    ...silent.filter((r) => !cached(r)).slice(0, MAX_HISTORY_LOOKUPS),
+  ];
   const histories = new Map<string, SlabHistory>();
   await mapBounded(toRead, MAX_PARALLEL, async (r) => {
-    histories.set(r.slab.toBase58(), await readSlabHistory(connection, programId, r.slab, r.lastGoodOracleSlot, oracleModeOf(r.raw)));
+    histories.set(
+      r.slab.toBase58(),
+      await readSlabHistory(
+        connection,
+        programId,
+        r.slab,
+        r.lastGoodOracleSlot,
+        oracleModeOf(r.raw),
+      ),
+    );
   });
-  return rows.map((r) => ({ ...r, ...(histories.get(r.slab.toBase58()) ?? { creationSlot: null, neverPushed: null }) }));
+  return rows.map((r) => ({
+    ...r,
+    ...(histories.get(r.slab.toBase58()) ?? { creationSlot: null, neverPushed: null }),
+  }));
 }
