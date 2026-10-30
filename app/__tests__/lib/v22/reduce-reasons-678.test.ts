@@ -46,7 +46,8 @@ describe("a plain line for each reduction reason", () => {
   it("the stop cut says what happened and at what price, in plain words", () => {
     const t = reduceNoticeCopy(8)!;
     expect(t.title).toBe("Position reduced");
-    expect(t.body).toBe("This market's liquidity hit its stop-loss, so positions on the winning side were cut by the same percentage at the market price.");
+    expect(t.body).toBe("This market's liquidity hit its stop-loss, so positions on the winning side were cut at the market price. Each was cut by the same share, except a position that would be left below the market's minimum size, which was closed entirely.");
+    expect(t.body).not.toMatch(/same percentage/);
   });
   it("every reason the parser knows has a line, and none uses engineering terms", () => {
     for (const reason of Object.values(REDUCE_REASON_V22)) {

@@ -21,6 +21,7 @@ vi.mock("@/lib/supabase", () => ({
       q.select = (c: string) => { h.calls.push(["select", c]); return q; };
       q.eq = (c: string, v: unknown) => { h.calls.push(["eq", c, v]); preds.push((r) => r[c] === v); return q; };
       q.in = (c: string, v: unknown[]) => { h.calls.push(["in", c, v]); preds.push((r) => v.includes(r[c])); return q; };
+      q.not = (c: string, op: string, v: string) => { h.calls.push(["not", c, op, v]); return q; };
       q.order = (c: string, o: unknown) => { h.calls.push(["order", c, o]); return q; };
       q.limit = (n: number) => { h.calls.push(["limit", n]); return q; };
       q.then = (res: (v: unknown) => unknown) =>
@@ -58,15 +59,18 @@ describe("reduce-events route", () => {
   });
   it("returns this network's reduce events for the listed portfolios only, newest first, capped", async () => {
     __setDevnetV22ForTest(true);
-    h.rows = [ev(P1, 8), ev(P2, 1), ev(M, 8), ev(P1, 3, "fill_event"), ev(P1, 2, "reduce_event", "mainnet")];
+    h.rows = [ev(P1, 8), ev(P2, 3), ev(M, 8), ev(P1, 3, "fill_event"), ev(P1, 2, "reduce_event", "mainnet")];
     const body = await (await call(`?portfolios=${P1},${P2}`)).json();
     expect(body.available).toBe(true);
-    expect(body.events.map((e: { signature: string }) => e.signature).sort()).toEqual([`sig-${P1.slice(0, 4)}-8`, `sig-${P2.slice(0, 4)}-1`].sort());
+    expect(body.events.map((e: { signature: string }) => e.signature).sort()).toEqual([`sig-${P1.slice(0, 4)}-8`, `sig-${P2.slice(0, 4)}-3`].sort());
     expect(body.events.find((e: { reason: number }) => e.reason === 8).lpStop).toBe(true);
     expect(h.calls).toContainEqual(["from", "v22_events"]);
     expect(h.calls).toContainEqual(["eq", "kind", "reduce_event"]);
     expect(h.calls).toContainEqual(["eq", "network", "devnet"]);
-    expect(h.calls).toContainEqual(["order", "block_time", { ascending: false }]);
+    expect(h.calls).toContainEqual(["order", "block_time", { ascending: false, nullsFirst: false }]);
+    expect(h.calls).toContainEqual(["order", "slot", { ascending: false, nullsFirst: false }]);
+    // the trader's own reduces (1 rebalance, 7 resolved close) are excluded in SQL, before the limit
+    expect(h.calls).toContainEqual(["not", "detail->>reason", "in", "(1,7)"]);
     expect(h.calls.some((c) => c[0] === "limit" && (c[1] as number) <= 100)).toBe(true);
   });
   it("no valid portfolio, or a bad wallet: an empty answer / 400, no query", async () => {

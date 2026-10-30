@@ -36,15 +36,26 @@ describe("toReduceEventView", () => {
       priceE6: "2500000",
     });
   });
-  it("every known reason maps to its plain line; only reason 8 is an LP stop", () => {
-    for (const r of [1, 2, 3, 4, 5, 6, 7]) {
+  it("every involuntary reason maps to its plain line; only reason 8 is an LP stop", () => {
+    for (const r of [2, 3, 4, 5, 6]) {
       const v = toReduceEventView(row(r));
       expect(v?.body).toBe(REDUCE_NOTICE_COPY[r].body);
       expect(v?.lpStop).toBe(false);
     }
   });
-  it("unknown reasons, other kinds and malformed rows are dropped, never shown with made-up words", () => {
-    expect(toReduceEventView(row(99))).toBeNull();
+  it("the trader's own reduces (1 rebalance-reduce, 7 owner-signed resolved close) are not 'without your order'", () => {
+    expect(toReduceEventView(row(1))).toBeNull();
+    expect(toReduceEventView(row(7))).toBeNull();
+  });
+  it("an unknown reason is listed generically with its number, not hidden and not given made-up words", () => {
+    const v = toReduceEventView(row(99))!;
+    expect(v).not.toBeNull();
+    expect(v.reason).toBe(99);
+    expect(v.lpStop).toBe(false);
+    expect(v.title).toBe("Position reduced (reason 99)");
+    expect(v.body).toBe("Your position was reduced for a reason this app does not describe yet.");
+  });
+  it("other kinds and malformed rows are dropped", () => {
     expect(toReduceEventView(row(8, { kind: "fill_event" }))).toBeNull();
     expect(toReduceEventView(row(8, { detail: null }))).toBeNull();
     expect(toReduceEventView(row(8, { signature: null }))).toBeNull();
@@ -63,7 +74,7 @@ describe("parsePortfolioList", () => {
   });
 });
 
-import { fetchReduceEvents } from "@/lib/v22/reduce-events";
+import { fetchReduceEvents, compareNewestFirst } from "@/lib/v22/reduce-events";
 describe("fetchReduceEvents", () => {
   const v = (sig: string, at: string, portfolio = P) => ({ ...toReduceEventView(row(8, { signature: sig, block_time: at, actor: portfolio }))! });
   it("chunks by the cap, merges newest first, drops duplicates", async () => {
@@ -87,5 +98,17 @@ describe("fetchReduceEvents", () => {
     expect(out.events).toHaveLength(1);
     const thrown = await fetchReduceEvents("W", ["p"], async () => { throw new Error("net"); });
     expect(thrown).toEqual({ available: false, events: [] });
+  });
+});
+
+describe("ordering with missing block times", () => {
+  const v = (sig: string, at: string | null, slot: number | null) => toReduceEventView(row(8, { signature: sig, block_time: at, slot }))!;
+  it("a row with no block time sorts after every timed row; untimed rows order by slot", async () => {
+    const rows = [v("nt-lo", null, 10), v("old", "2026-10-01T00:00:00Z", 1), v("nt-hi", null, 99), v("new", "2026-10-29T00:00:00Z", 2)];
+    const out = await fetchReduceEvents("W", ["p"], async () => ({ available: true, events: rows }));
+    expect(out.events.map((e) => e.signature)).toEqual(["new", "old", "nt-hi", "nt-lo"]);
+  });
+  it("same time: higher slot first", () => {
+    expect(compareNewestFirst(v("a", "2026-10-29T00:00:00Z", 5), v("b", "2026-10-29T00:00:00Z", 9))).toBeGreaterThan(0);
   });
 });

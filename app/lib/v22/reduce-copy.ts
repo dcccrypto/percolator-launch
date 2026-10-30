@@ -24,7 +24,7 @@ export const REDUCE_NOTICE_COPY: Record<number, ReduceNotice> = {
   [REDUCE_REASON_V22.RESOLVED_CLOSE]: { title: "Position settled", body: "This market has resolved, so your position was settled at the final price." },
   [REDUCE_REASON_V22.LP_STOP]: {
     title: TITLE,
-    body: "This market's liquidity hit its stop-loss, so positions on the winning side were cut by the same percentage at the market price.",
+    body: "This market's liquidity hit its stop-loss, so positions on the winning side were cut at the market price. Each was cut by the same share, except a position that would be left below the market's minimum size, which was closed entirely.",
   },
 };
 

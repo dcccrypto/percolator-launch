@@ -1,8 +1,12 @@
 /**
  * D2 gate (v22 deep memo 2026-10-29): the wallet screen for positions reduced WITHOUT the trader's own order (liquidation, ADL wind-down,
  * eviction, the LP stop, ...). Rows come from the indexer's `v22_events` (kind `reduce_event`, written by percolator-indexer #243 from the
- * wrapper's REDUCE log events); `actor` is the PORTFOLIO that was reduced. Words come only from `reduceNoticeCopy`: a reason this app does
- * not know is dropped, never shown with made-up text.
+ * wrapper's REDUCE log events); `actor` is the PORTFOLIO that was reduced. Words come from `reduceNoticeCopy`; a reason this app does
+ * not know is still listed, generically ("reduced (reason N)"), never hidden and never given made-up words.
+ *
+ * Reasons 1 (REBALANCE_REDUCE, tag 44: the owner signs it and picks the size) and 7 (RESOLVED_CLOSE, tag 30: the owner signs it while the
+ * force-close delay runs) are the trader's own action, so they are NOT "reduced without your order" and are not listed here
+ * (percolator-prog feat/v22-rc23-2026-10-22 v16_program.rs; fill_events_v22.rs).
  */
 import { PublicKey } from "@solana/web3.js";
 import { REDUCE_REASON_V22 } from "./sdk/v22-fill-events";
@@ -30,6 +34,9 @@ export interface ReduceEventView {
   priceE6: string | null;
 }
 
+/** Reduce reasons the trader initiated (owner-signed): not listed on the "without your order" screen. */
+export const USER_INITIATED_REDUCE_REASONS: readonly number[] = [REDUCE_REASON_V22.REBALANCE_REDUCE, REDUCE_REASON_V22.RESOLVED_CLOSE];
+
 const str = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : typeof v === "number" || typeof v === "bigint" ? String(v) : null);
 
 /** One `v22_events` row -> a screen row, or null (not a reduce event, unknown reason, malformed). */
@@ -42,8 +49,9 @@ export function toReduceEventView(row: Record<string, unknown>): ReduceEventView
   const d = detail as Record<string, unknown>;
   const reason = typeof d.reason === "number" ? d.reason : Number(d.reason);
   if (!Number.isInteger(reason)) return null;
-  const copy = reduceNoticeCopy(reason);
-  if (!copy) return null;
+  if (USER_INITIATED_REDUCE_REASONS.includes(reason)) return null;
+  const known = reduceNoticeCopy(reason);
+  const copy = known ?? { title: `Position reduced (reason ${reason})`, body: "Your position was reduced for a reason this app does not describe yet." };
   const slot = row.slot === null || row.slot === undefined ? null : Number(row.slot);
   return {
     signature,
@@ -58,6 +66,23 @@ export function toReduceEventView(row: Record<string, unknown>): ReduceEventView
     reducedQ: str(row.amount),
     priceE6: str(d.price_e6),
   };
+}
+
+const ms = (at: string | null): number | null => {
+  if (at === null) return null;
+  const t = Date.parse(at);
+  return Number.isNaN(t) ? null : t;
+};
+
+/** Newest first. A row with no block time sorts after every timed row (never first); ties and untimed rows fall back to slot. */
+export function compareNewestFirst(a: ReduceEventView, b: ReduceEventView): number {
+  const ta = ms(a.at), tb = ms(b.at);
+  if (ta !== null && tb !== null && ta !== tb) return tb - ta;
+  if ((ta === null) !== (tb === null)) return ta === null ? 1 : -1;
+  const sa = a.slot, sb = b.slot;
+  if (sa !== null && sb !== null) return sb - sa;
+  if ((sa === null) !== (sb === null)) return sa === null ? 1 : -1;
+  return 0;
 }
 
 /** `?portfolios=a,b,c` -> distinct valid base58 addresses, at most {@link REDUCE_EVENTS_MAX_PORTFOLIOS}. */
@@ -108,6 +133,6 @@ export async function fetchReduceEvents(
       events.push(e);
     }
   }
-  events.sort((a, b) => (b.at ?? "").localeCompare(a.at ?? "") || (b.slot ?? 0) - (a.slot ?? 0));
+  events.sort(compareNewestFirst);
   return { available, events };
 }

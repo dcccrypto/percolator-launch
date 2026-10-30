@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getClientIp } from "@/lib/get-client-ip";
 import { createUpstashRateLimiter } from "@/lib/upstash-rate-limit";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
-import { parsePortfolioList, REDUCE_EVENTS_LIMIT, toReduceEventView, type ReduceEventView } from "@/lib/v22/reduce-events";
+import { parsePortfolioList, REDUCE_EVENTS_LIMIT, USER_INITIATED_REDUCE_REASONS, toReduceEventView, type ReduceEventView } from "@/lib/v22/reduce-events";
 
 /**
  * GET /api/trader/:wallet/reduce-events?portfolios=<a,b,...>
@@ -52,7 +52,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       .eq("kind", "reduce_event")
       .eq("network", getServerNetwork())
       .in("actor", portfolios)
-      .order("block_time", { ascending: false })
+      // The trader's own reduces (reasons 1, 7) are not "without your order": filter before the limit so they cannot crowd out the rest.
+      .not("detail->>reason", "in", `(${USER_INITIATED_REDUCE_REASONS.join(",")})`)
+      // Postgres puts NULLs first on DESC: rows with no block time go last, then by slot.
+      .order("block_time", { ascending: false, nullsFirst: false })
+      .order("slot", { ascending: false, nullsFirst: false })
       .limit(REDUCE_EVENTS_LIMIT);
     if (error) {
       console.warn("[reduce-events] v22_events read failed:", error.message);
