@@ -65,7 +65,7 @@ band anchor, `rent_max`) and the rent rate port (`growth_v19::rent_rate_e9`). Th
 ## Surfaces
 
 1. Layout and decoders: `lib/v22/layout.ts`, `market-offsets.ts`, `records.ts` (VERSION-keyed; unknown VERSION is a typed `UnknownLayoutError`, API routes answer 422, `UnsupportedLayoutNotice`).
-2. Portfolio creation at exactly `PORTFOLIO_ACCOUNT_LEN` (10,603 B) in every flow via `createPortfolioAccountIx`.
+2. Portfolio creation at exactly `PORTFOLIO_ACCOUNT_LEN` (10,607 B since engine #299, read from the SDK layout row) in every flow via `createPortfolioAccountIx`.
 3. Errors: wrapper 104-119/123/124 and stake 33-45 (`lib/v22/error-message.ts`, `error-copy.ts`); 104 calm wait, 117/124 re-quote, 118 retry, 121 unchanged.
 4. Earn exit: `earn-exit.ts`, `earn-exit-run.ts`, `useEarnExitV22`, `EarnExitQuote` (simulate first, quoted minimum before signing; pending claims too).
 5. Launch wizard: `launch-plan.ts`, `launch-wire.ts`, `V22LaunchOptions` (auto lot size, price protection / holding fee toggles, optional bond inside the single launch transaction).
