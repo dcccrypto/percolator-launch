@@ -36,7 +36,7 @@ ports + one adapter), see `app/lib/v22/sdk/index.ts`:
 
 ### #636 NAV flow tails (prog #640 + #641) and the engine #299 portfolio layout, 2026-10-31
 
-Ported from percolator-sdk#437 (`fix/v22-636-flow-accounts-302-portfolio` @ f86dcfd): `lib/v22/sdk/v22-nav-flow.ts` (new; one local adaptation: the vendored
+Ported from percolator-sdk feat/v22-sdk-growth @ d13e1a48 (the merge of #437; these files are unchanged from #437 head f86dcfd): `lib/v22/sdk/v22-nav-flow.ts` (new; one local adaptation: the vendored
 `buildVaultLpAllocateIxP2b` has no bond option, so the 103 builder appends the tranche itself), the 97 / 108 / 110 / 111 builders + presets + tails table in
 `v22.ts`, the variant-B row in `layout.ts` (engine discriminator 20, portfolio 10,607 B, trailer +4) and the #641 `other_flow` counters in the ext decoder.
 - **Send choke point** (`lib/v22/market-tails.ts`): every wrapper instruction of tag 96 / 97 / 98 / 102 (Live) / 103 / 108 / 110 / 111 (modes 0/1/3) gets the lev guard
@@ -48,6 +48,12 @@ Ported from percolator-sdk#437 (`fix/v22-636-flow-accounts-302-portfolio` @ f86d
   sized from the simulation of the whole transaction. Numbers: `NAV_FLOW_COMPUTE_UNITS_V22` (>= 2x the measured worst case).
 - **Recorded fixtures** (devnet, pre-#299, 10,603 B, disc 19) are lifted in tests by `__tests__/helpers/portfolio-disc20.ts`; `v22-rust-layout-aca02ba6.json` is
   hand-patched for #299 (noted in its `source.patched`).
+
+### Rescue NAV floor 50% of par (D23 / prog #595), 2026-10-31
+
+`RESCUE_NAV_FLOOR_BPS_V22` in `lib/v22/sdk/v22-wire.ts` is 5,000 (ported from percolator-sdk feat/v22-sdk-growth @ d13e1a48). It was 500, stale since
+prog #624 (cb5bfcf2): `rescueAdmittedV22` / `rescueView` offered "Add capital at a discount" on vaults at 5%..50% of par that the program refuses with
+115 `RescueNavFloor`. Those vaults now show the wind-down line. Tests: `__tests__/lib/v22/bond-rescue-ui.test.ts` (40% refused 115, 49.99..% wound, 50% admitted).
 
 ### Leverage guard (wrapper tag 124), 2026-10-28
 

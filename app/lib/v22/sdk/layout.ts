@@ -2,7 +2,7 @@
  * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ d98488b (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate),
  * src/abi/layout.ts. Only the imports are retargeted (the installed @percolatorct/sdk 8.0.0 root, the v2.1 txv1 port, and the sibling v22 ports).
  * Delete when @percolatorct/sdk >= 9.0.0 ships and point ./index.ts at the package. Do not edit here; fix upstream in percolator-sdk.
- * 2026-10-31: the engine #299 / prog #641 hunks are ported from percolator-sdk#437 @ f86dcfd.
+ * 2026-10-31: the engine #299 / prog #641 hunks are ported from percolator-sdk feat/v22-sdk-growth @ d13e1a48 (merge of #437; unchanged from f86dcfd).
  */
 /**
  * Account LAYOUT tables keyed on the wrapper VERSION, plus the VERSION / discriminator guard that

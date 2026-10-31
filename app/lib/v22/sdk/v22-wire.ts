@@ -2,6 +2,7 @@
  * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ d98488b (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate),
  * src/abi/v22-wire.ts. Only the imports are retargeted (the installed @percolatorct/sdk 8.0.0 root, the v2.1 txv1 port, and the sibling v22 ports).
  * Delete when @percolatorct/sdk >= 9.0.0 ships and point ./index.ts at the package. Do not edit here; fix upstream in percolator-sdk.
+ * 2026-10-31: the RESCUE_NAV_FLOOR_BPS_V22 500 -> 5_000 hunk is ported from percolator-sdk feat/v22-sdk-growth @ d13e1a48 (the merge of #437).
  */
 /**
  * v2.2 wrapper wire: instruction encoders and account lists for every tag the v2.2 programs add or
@@ -168,8 +169,8 @@ export function assertBatchLegsV22(n: number): void {
 /** `bond_v20::SLOTS_PER_YEAR` (400 ms slots). */
 export const SLOTS_PER_YEAR_V22 = 78_840_000n;
 
-/** `p4_rescue_ins` constants. */
-export const RESCUE_NAV_FLOOR_BPS_V22 = 500;
+/** `p4_rescue_ins` constants. `RESCUE_NAV_FLOOR_BPS` is 5,000 (50% of par) since D23 / prog #595 (#624, cb5bfcf2); it was 500. */
+export const RESCUE_NAV_FLOOR_BPS_V22 = 5_000;
 export const RESCUE_MIN_ATOMS_V22 = 100_000_000n;
 export const RESCUE_MAX_MULT_V22 = 10n;
 export const INS_UNITS_GENESIS_MIN_ATOMS_V22 = 1_000_000n;

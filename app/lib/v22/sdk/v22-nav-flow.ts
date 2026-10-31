@@ -1,5 +1,5 @@
 /*
- * LOCAL ADAPTER PORT, not original code: from percolator-sdk fix/v22-636-flow-accounts-302-portfolio @ f86dcfd (dcccrypto/percolator-sdk#437,
+ * LOCAL ADAPTER PORT, not original code: from percolator-sdk feat/v22-sdk-growth @ d13e1a48 (the merge of dcccrypto/percolator-sdk#437; this file is unchanged from #437 head f86dcfd,
  * sdk 9.0.0-candidate), src/solana/v22-nav-flow.ts. The imports are retargeted (sibling lev-guard / records ports). ONE local adaptation:
  * the vendored records/p2b-earn `buildVaultLpAllocateIxP2b` (ecb6215) has no `bondTranche` option, so `buildVaultLpAllocateIxV22` appends
  * the tranche at [9] itself (read-only, exactly what the SDK's ACCOUNTS_VAULT_LP_ALLOCATE_BOND_P2B does).

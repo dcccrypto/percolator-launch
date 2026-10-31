@@ -2,7 +2,7 @@
  * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ ecb6215 (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate),
  * src/solana/p2b-earn.ts. Only the imports are retargeted (the vendored v22 layout/slab ports, sibling records ports, and the installed @percolatorct/sdk 8.0.0 root).
  * Delete when @percolatorct/sdk >= 9.0.0 ships and point ../../records.ts at the package. Do not edit here; fix upstream in percolator-sdk.
- * 2026-10-31: the engine #299 / prog #641 hunks are ported from percolator-sdk#437 @ f86dcfd.
+ * 2026-10-31: the engine #299 / prog #641 hunks are ported from percolator-sdk feat/v22-sdk-growth @ d13e1a48 (merge of #437; unchanged from f86dcfd).
  */
 /**
  * P2b Earn as counterparty — PDA, instruction builders and account decoders (tag 103, tag 99
@@ -137,7 +137,7 @@ function uLeAt(d: Uint8Array, o: number, n: number): bigint {
  * cushion target / share <= 10000 and both-or-neither). Since percolator-prog #641 the former zero `_padding` / `_reserved`
  * bytes hold the two 88-bit `other_flow` counters (`otherInAtoms` / `otherOutAtoms`) and the program no longer requires
  * them to be zero, so neither does this decoder (a pre-#641 decoder throws on any market that saw a bond deposit).
- * (Port of percolator-sdk#437 f86dcfd's decoder change only.)
+ * (Port of percolator-sdk#437's decoder change only; merged as d13e1a48.)
  *
  * @param data  Raw account bytes (header included).
  * @returns Decoded ext.

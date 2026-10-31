@@ -1,7 +1,7 @@
 /*
  * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ ecb6215 (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate),
  * src/abi/p2b-earn.ts (the abi half; the solana half is ./p2b-earn.ts). Only the imports are retargeted. Delete when @percolatorct/sdk >= 9.0.0 ships. Do not edit here.
- * 2026-10-31: the prog #641 other_flow offsets are ported from percolator-sdk#437 @ f86dcfd.
+ * 2026-10-31: the prog #641 other_flow offsets are ported from percolator-sdk feat/v22-sdk-growth @ d13e1a48 (merge of #437; unchanged from f86dcfd).
  */
 /**
  * P2b Earn as counterparty — wrapper tag 103 `VaultLpAllocate`, the tag-99 dials trailer, the
