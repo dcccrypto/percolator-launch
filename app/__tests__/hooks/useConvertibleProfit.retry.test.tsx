@@ -19,6 +19,7 @@ vi.mock("@/components/providers/SlabProvider", () => ({ useSlabState: () => mock
 vi.mock("@/lib/convert-released-pnl", async (orig) => ({ ...(await orig<object>()), quoteConvertible: mocks.quote, connectionQuoteDeps: () => ({}) }));
 
 import { QUOTE_RETRY_DELAYS_MS, useConvertibleProfit } from "@/hooks/useConvertibleProfit";
+import { liftV22Portfolio } from "../helpers/portfolio-disc20";
 
 const READY = { status: "ready", postCapital: 196_157n, convertible: 196_157n, prefix: [] };
 beforeEach(() => {
@@ -27,7 +28,7 @@ beforeEach(() => {
   (QUOTE_RETRY_DELAYS_MS as number[]).splice(0, 4, 20, 20, 20, 20);
   __setDevnetV22ForTest(true);
   mocks.quote.mockReset();
-  mocks.getAccountInfo.mockResolvedValue({ data: Buffer.from(fx.portfolio, "base64") });
+  mocks.getAccountInfo.mockResolvedValue({ data: Buffer.from(liftV22Portfolio(new Uint8Array(Buffer.from(fx.portfolio, "base64")))) }); // recorded pre-#299: lifted to disc 20
 });
 afterEach(() => { (QUOTE_RETRY_DELAYS_MS as number[]).splice(0, 4, 2_000, 4_000, 8_000, 16_000); __setDevnetV22ForTest(null); });
 

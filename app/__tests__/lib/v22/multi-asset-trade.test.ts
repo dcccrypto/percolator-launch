@@ -13,6 +13,7 @@ import {
   buildMultiAssetTradeIxsV22, refineMultiAssetTradePlanV22, buildRefreshCrankIxV22,
   WRAPPER_PRE_CRANK_MIN_LEGS_V22, MULTI_ASSET_TRADE_COMPUTE_UNITS_V22, MULTI_ASSET_TRADE_MAX_EXTRA_CRANKS_V22,
 } from "@/lib/v22/sdk";
+import { liftV22Portfolio } from "../../helpers/portfolio-disc20";
 const PROGRAM_IDS_DEVNET_V22 = { percolator: "6kpg2wi7vwkn7E9rvodXSktYRhna8TWjiZrC1dBek6NM", nft: "27LWmR72Ru1NCkbN2xgxB7BgYcTUrU7qeEJoV3D8sZh1" };
 
 interface Ser { programId: string; keys: string[]; data: string }
@@ -22,7 +23,7 @@ const FX = JSON.parse(readFileSync(path.join(__dirname, "../../fixtures/v22-q7-d
   cases: { label: string; scriptIxs: Ser[]; plain: { err: unknown; logs: string[] }; result: { ok: boolean; cranks: string[]; cu: number } }[];
 };
 const FEE = JSON.parse(readFileSync(path.join(__dirname, "../../fixtures/v22-fee-channel-2026-10-11.json"), "utf8")) as { markets: Record<string, Record<string, string>> };
-const b64 = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, "base64"));
+const b64 = (s: string): Uint8Array => liftV22Portfolio(new Uint8Array(Buffer.from(s, "base64"))); // recorded pre-#299 portfolios lifted to disc 20
 const W = new PublicKey(PROGRAM_IDS_DEVNET_V22.percolator), MKT = new PublicKey(FX.market), P = new PublicKey(FX.portfolio), LP = new PublicKey(FX.lp), OWNER = new PublicKey(FX.owner);
 const ser = (ix: TransactionInstruction): Ser => ({ programId: ix.programId.toBase58(), keys: ix.keys.map((k) => `${k.pubkey.toBase58()}:${k.isSigner ? "s" : "-"}${k.isWritable ? "w" : "-"}`), data: Buffer.from(ix.data).toString("hex") });
 const unser = (s: Ser): TransactionInstruction => new TransactionInstruction({ programId: new PublicKey(s.programId), keys: s.keys.map((k) => { const [pk, f] = k.split(":"); return { pubkey: new PublicKey(pk!), isSigner: f![0] === "s", isWritable: f![1] === "w" }; }), data: Buffer.from(s.data, "hex") });

@@ -8,7 +8,8 @@ import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
 import { ACCOUNTS_TOPUP_INSURANCE, buildAccountMetas, encodeTopUpInsurance } from "@percolatorct/sdk";
 import { TransactionInstruction } from "@solana/web3.js";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
-import { ACCOUNT_KIND, LAYOUT_V22, WRAPPER_ACCOUNT_MAGIC, deriveBondTrancheV22, deriveInsuranceUnitsV22 } from "@/lib/v22/sdk";
+import { ACCOUNT_KIND, LAYOUT_V22, WRAPPER_ACCOUNT_MAGIC, deriveBondTrancheV22, deriveInsuranceUnitsV22, deriveLevGuardV22 } from "@/lib/v22/sdk";
+import { deriveVaultLpExtP2b } from "@/lib/v22/sdk/records/p2b-earn";
 import { MarketTailMismatchError, __setTailsClockForTest, applyMarketTailsV22, withMarketTailsV22 } from "@/lib/v22/market-tails";
 import { buildLpVaultCrankFeesIx, buildVaultLpReleaseSurplusIx, buildWithdrawJuniorTrancheIx, type VaultLpMarket } from "@/lib/limits/p3-ix";
 import { buildVaultLpAllocateIx } from "@/lib/v21/sdk/p2b-earn";
@@ -20,7 +21,10 @@ const market = k();
 const tranche = deriveBondTrancheV22(prog, market)[0];
 const units = deriveInsuranceUnitsV22(prog, market)[0];
 const tails = { bondTranche: tranche, insuranceUnits: units };
-const m: VaultLpMarket = { programId: prog, market, registry: k(), vaultLpState: k(), lpPortfolio: k(), ledger: k(), siblingLedger: k(), ext: k() };
+// The ext is the real PDA: the #636 flow tail (prog #640) checks it where the program reads it.
+const EXT = deriveVaultLpExtP2b(prog, market)[0];
+const GUARD = deriveLevGuardV22(prog, market)[0];
+const m: VaultLpMarket = { programId: prog, market, registry: k(), vaultLpState: k(), lpPortfolio: k(), ledger: k(), siblingLedger: k(), ext: EXT };
 
 beforeEach(() => __setDevnetV22ForTest(true));
 afterEach(() => __setDevnetV22ForTest(null));
@@ -36,24 +40,33 @@ describe("builders that match the SDK tail index", () => {
     expect(lastIs(out, tranche)).toBe(true);
     expect(out.keys[8].isWritable).toBe(true);
   });
-  it("97 with the ext at [11] (12 accounts): tranche appended", () => {
+  it("97 with the ext at [11] (12 accounts): tranche at [12], then the #636 lev guard at [13]", () => {
     const ix = buildWithdrawJuniorTrancheIx(m, k(), k(), k(), k(), 1n);
     expect(ix.keys).toHaveLength(12);
     expect(ix.keys[1].pubkey.equals(market)).toBe(true);
-    expect(lastIs(applyMarketTailsV22(ix, tails), tranche)).toBe(true);
+    const out = applyMarketTailsV22(ix, tails);
+    expect(out.keys).toHaveLength(14);
+    expect(out.keys[12].pubkey.equals(tranche)).toBe(true);
+    expect(lastIs(out, GUARD)).toBe(true);
   });
-  it("102 resolved (11 accounts): tranche appended; live (7): left alone, no error", () => {
+  it("102 resolved (11 accounts): tranche appended, no flow tail; live (7): no tranche, the #641 tail ([7..11] pads, [12] ext, [13] guard)", () => {
     const resolved = buildVaultLpReleaseSurplusIx(m, k(), 1n, 0, { destToken: k(), vaultToken: k(), vaultAuthority: k() });
     expect(resolved.keys).toHaveLength(11);
     expect(lastIs(applyMarketTailsV22(resolved, tails), tranche)).toBe(true);
     const live = buildVaultLpReleaseSurplusIx(m, k(), 1n, 0, null);
     expect(live.keys).toHaveLength(7);
-    expect(applyMarketTailsV22(live, tails)).toBe(live);
+    const out = applyMarketTailsV22(live, tails);
+    expect(out.keys).toHaveLength(14);
+    expect(out.keys[12].pubkey.equals(EXT)).toBe(true);
+    expect(lastIs(out, GUARD)).toBe(true);
   });
-  it("103 allocate (9 accounts): tranche appended", () => {
+  it("103 allocate (9 accounts): tranche at [9], then the #640 lev guard at [10]", () => {
     const ix = buildVaultLpAllocateIx({ programId: prog, cranker: k(), market, registry: m.registry, vaultLpState: m.vaultLpState, lpPortfolio: m.lpPortfolio, ledger: m.ledger, siblingLedger: m.siblingLedger });
     expect(ix.keys).toHaveLength(9);
-    expect(lastIs(applyMarketTailsV22(ix, tails), tranche)).toBe(true);
+    const out = applyMarketTailsV22(ix, tails);
+    expect(out.keys).toHaveLength(11);
+    expect(out.keys[9].pubkey.equals(tranche)).toBe(true);
+    expect(lastIs(out, GUARD)).toBe(true);
   });
   it("9 TopUpInsurance (5 accounts, market at [1]): units appended last", () => {
     const keys = buildAccountMetas(ACCOUNTS_TOPUP_INSURANCE, [k(), market, k(), k(), SystemProgram.programId]);

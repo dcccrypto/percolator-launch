@@ -52,7 +52,7 @@ const EARN_VAULT_AND_STAKE_ACCOUNT_BYTES = [176, 82, 82, 165, 352];
  * P3 launches also create the vault-owned LP portfolio + its matcher context
  * client-side (buildP3BindIxs in lib/limits/p3-wizard.ts).
  */
-// Functions, not module constants: the portfolio length depends on the layout flag (9,563 v2.1 / 10,603 v2.2).
+// Functions, not module constants: the portfolio length depends on the layout flag (9,563 v2.1 / 10,607 v2.2 since engine #299; read from the SDK row).
 const lpPortfolioAndMatcherAccountBytes = (): number[] => [portfolioAccountLen(), MATCHER_CONTEXT_LEN];
 const p3VaultLpAccountBytes = (): number[] => [portfolioAccountLen(), VAULT_LP_MATCHER_CTX_LEN];
 

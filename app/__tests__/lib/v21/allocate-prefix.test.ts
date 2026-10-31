@@ -152,27 +152,29 @@ describe("tag 103 on a bond market (real devnet SOL bytes)", () => {
     expect(SOL.registryByte162).toBe(1);
     expect(Buffer.from(SOL.registry.dataB64, "base64")[162]).toBe(1);
   });
-  it("v2.2 on: the gate simulates 10 accounts with the tranche at [9], and the prefix is kept", async () => {
+  it("v2.2 on: the gate simulates 11 accounts, the tranche at [9] and the #640 lev guard at [10], and the prefix is kept", async () => {
     __setDevnetV21ForTest(true);
     __setDevnetV22ForTest(true);
     const { ixs, seen } = await run(solConn());
-    expect(seen).toEqual([10]);
+    expect(seen).toEqual([11]);
     expect(ixs).toHaveLength(1);
-    expect(ixs[0].keys).toHaveLength(10);
+    expect(ixs[0].keys).toHaveLength(11);
     expect(ixs[0].keys[9].pubkey.toBase58()).toBe(SOL.bondTranche.address);
     expect(ixs[0].keys[9].isWritable).toBe(false);
+    expect(ixs[0].keys[10].pubkey.equals(PublicKey.findProgramAddressSync([Buffer.from("lev_guard"), new PublicKey(SOL.market).toBuffer()], new PublicKey(SOL.programId))[0])).toBe(true);
+    expect(ixs[0].keys[10].isWritable).toBe(true);
   });
   it("the send path's tails do not append the tranche a second time", async () => {
     __setDevnetV21ForTest(true);
     __setDevnetV22ForTest(true);
     const { ixs } = await run(solConn());
     const tails = await fetchMarketTailsV22(solConn(), new PublicKey(SOL.programId), new PublicKey(SOL.market));
-    expect(applyMarketTailsV22(ixs[0], tails).keys).toHaveLength(10);
+    expect(applyMarketTailsV22(ixs[0], tails)).toBe(ixs[0]);
   });
-  it("a market without a tranche still simulates 9 accounts", async () => {
+  it("a market without a tranche simulates 11 accounts (pad at [9], #640 lev guard at [10])", async () => {
     __setDevnetV21ForTest(true);
     __setDevnetV22ForTest(true);
     const { seen } = await run(solConn(false));
-    expect(seen).toEqual([9]);
+    expect(seen).toEqual([11]);
   });
 });

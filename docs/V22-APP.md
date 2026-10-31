@@ -34,6 +34,21 @@ ports + one adapter), see `app/lib/v22/sdk/index.ts`:
   bump the dependency, replace `lib/v22/sdk/index.ts` with `export * from "@percolatorct/sdk"`, delete the siblings.
 - The layout row is the fold of 2026-10-08 (slot 2,661 B, G9 body 2,064 B, portfolio 10,603 B, leg 217 B, `WRAPPER_MAX_PORTFOLIO_ASSETS` = 4 FINAL).
 
+### #636 NAV flow tails (prog #640 + #641) and the engine #299 portfolio layout, 2026-10-31
+
+Ported from percolator-sdk#437 (`fix/v22-636-flow-accounts-302-portfolio` @ f86dcfd): `lib/v22/sdk/v22-nav-flow.ts` (new; one local adaptation: the vendored
+`buildVaultLpAllocateIxP2b` has no bond option, so the 103 builder appends the tranche itself), the 97 / 108 / 110 / 111 builders + presets + tails table in
+`v22.ts`, the variant-B row in `layout.ts` (engine discriminator 20, portfolio 10,607 B, trailer +4) and the #641 `other_flow` counters in the ext decoder.
+- **Send choke point** (`lib/v22/market-tails.ts`): every wrapper instruction of tag 96 / 97 / 98 / 102 (Live) / 103 / 108 / 110 / 111 (modes 0/1/3) gets the lev guard
+  + vault ext tail after the bond tranche (`withNavFlowTailV22`, no RPC, idempotent; also applied when the tails RPC fails). A full-form 97 / 103 with a padded bond
+  slot gets the tranche in that slot. A list the helper cannot place is a loud `MarketTailMismatchError`.
+- **Paths that skip the choke point** carry the tail themselves: the launch bind's 96 (`buildP3BindIxs({ navFlowTail })`, used by the single-transaction launch) and the
+  senior-draw repair's 98 (`recallIxFor77`).
+- **Compute**: junior deposit 250k / withdraw 300k (`juniorFlowComputeUnits`), recall margin 400k (`recallCu`), bonds 600k (presets), 103 in the trade prefix is
+  sized from the simulation of the whole transaction. Numbers: `NAV_FLOW_COMPUTE_UNITS_V22` (>= 2x the measured worst case).
+- **Recorded fixtures** (devnet, pre-#299, 10,603 B, disc 19) are lifted in tests by `__tests__/helpers/portfolio-disc20.ts`; `v22-rust-layout-aca02ba6.json` is
+  hand-patched for #299 (noted in its `source.patched`).
+
 ### Leverage guard (wrapper tag 124), 2026-10-28
 
 Ported from percolator-sdk `feat/v22-sdk-growth` @ 7aeb7a13a1b95892a291e86f9e0b8453f85f1c61 (PR #427) (#426): `lib/v22/sdk/lev-guard-v22.ts` (constants, op encoders, op account lists, age band, guard / program-data PDAs, the op 0 INIT builder,
@@ -50,7 +65,7 @@ band anchor, `rent_max`) and the rent rate port (`growth_v19::rent_rate_e9`). Th
 ## Surfaces
 
 1. Layout and decoders: `lib/v22/layout.ts`, `market-offsets.ts`, `records.ts` (VERSION-keyed; unknown VERSION is a typed `UnknownLayoutError`, API routes answer 422, `UnsupportedLayoutNotice`).
-2. Portfolio creation at exactly `PORTFOLIO_ACCOUNT_LEN` (10,603 B) in every flow via `createPortfolioAccountIx`.
+2. Portfolio creation at exactly `PORTFOLIO_ACCOUNT_LEN` (10,607 B since engine #299, read from the SDK layout row) in every flow via `createPortfolioAccountIx`.
 3. Errors: wrapper 104-119/123/124 and stake 33-45 (`lib/v22/error-message.ts`, `error-copy.ts`); 104 calm wait, 117/124 re-quote, 118 retry, 121 unchanged.
 4. Earn exit: `earn-exit.ts`, `earn-exit-run.ts`, `useEarnExitV22`, `EarnExitQuote` (simulate first, quoted minimum before signing; pending claims too).
 5. Launch wizard: `launch-plan.ts`, `launch-wire.ts`, `V22LaunchOptions` (auto lot size, price protection / holding fee toggles, optional bond inside the single launch transaction).
