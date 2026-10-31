@@ -1,6 +1,7 @@
 /*
  * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ ecb6215 (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate),
  * src/abi/p2b-earn.ts (the abi half; the solana half is ./p2b-earn.ts). Only the imports are retargeted. Delete when @percolatorct/sdk >= 9.0.0 ships. Do not edit here.
+ * 2026-10-31: the prog #641 other_flow offsets are ported from percolator-sdk#437 @ f86dcfd.
  */
 /**
  * P2b Earn as counterparty — wrapper tag 103 `VaultLpAllocate`, the tag-99 dials trailer, the
@@ -221,6 +222,16 @@ export const VAULT_LP_EXT_FIELD_OFF_P2B = Object.freeze({
   deallocatedTotalAtoms: 80, allocAlphaBps: 96, allocBufferBps: 98, cushionTargetBps: 100,
   cushionShareBps: 102, version: 104, bump: 105, padding: 106, reserved: 112,
 } as const);
+
+/**
+ * percolator-prog #641: the former `_padding[6] + _reserved[16]` (body 106..128) are `other_flow: [u8; 22]`, two 88-bit
+ * little-endian monotonic counters: `other_in` (tags 102 Live, 108, 111 DRAW) at body 106..117 and `other_out`
+ * (tags 110 Live, 111 RESTORE) at 117..128. Offsets inside the 128-byte body (add 16 for the account).
+ */
+export const VAULT_LP_EXT_OTHER_FLOW_OFF_P2B = Object.freeze({ in: 106, out: 117 } as const);
+
+/** #641: width of one `other_flow` counter (88 bits, little-endian). */
+export const VAULT_LP_EXT_OTHER_FLOW_BYTES_P2B = 11;
 
 // ============================================================================
 // Q2 senior floor: 16-bit ceiling float at AssetRiskLimitsV17 record bytes 42..44

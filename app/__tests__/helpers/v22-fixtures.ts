@@ -7,6 +7,7 @@ import { PublicKey } from "@solana/web3.js";
 import { LAYOUT_V21, LAYOUT_V22 } from "@/lib/v22/sdk/layout";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { activeLayout } from "@/lib/v22/layout";
+import { liftV22Portfolio } from "./portfolio-disc20";
 
 const LAYOUT_V21_MAGIC = 0x5045_5243_5631_3600n;
 
@@ -15,7 +16,8 @@ const LAYOUT_V21_MAGIC = 0x5045_5243_5631_3600n;
  *
  * Bytes are CAPTURED from the deployed v2.2 devnet program, never hand-built from the app's own decoders:
  *  - market: the one-slot SOL market (4,059 B), fixtures/v22-market-single-asset-SOL.json
- *  - portfolio: a flat 10,603 B trader portfolio, fixtures/v22-flat-winner-portfolio-2026-10-11.json
+ *  - portfolio: a flat 10,603 B trader portfolio, fixtures/v22-flat-winner-portfolio-2026-10-11.json (recorded before engine #299;
+ *    v22PortfolioBase lifts it to disc 20 / 10,607 B, helpers/portfolio-disc20.ts)
  * Patches are written at offsets from the SDK table LAYOUT_V22 (pinned to rustc `offset_of!` by lib/v22/rust-layout-parity-d1.test.ts).
  */
 const FX = join(__dirname, "..", "fixtures");
@@ -35,7 +37,7 @@ export const V22_OWNER = new PublicKey(PORTFOLIO_FX.owner);
 /** A fresh copy of the captured one-slot v2.2 market account (4,059 B, VERSION 19). */
 export const v22MarketBytes = (): Uint8Array => new Uint8Array(Buffer.from(MARKET_FX.dataBase64, "base64"));
 /** A fresh copy of the captured flat v2.2 portfolio (10,603 B, VERSION 19). */
-export const v22PortfolioBase = (): Buffer => Buffer.from(PORTFOLIO_FX.b64, "base64");
+export const v22PortfolioBase = (): Buffer => Buffer.from(liftV22Portfolio(new Uint8Array(Buffer.from(PORTFOLIO_FX.b64, "base64")))); // recorded pre-#299: lifted to disc 20 / 10,607 B
 
 const LEG = LAYOUT_V22.portfolio.leg;
 const LEG0 = LAYOUT_V22.portfolio.legsOff;

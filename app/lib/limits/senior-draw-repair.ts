@@ -22,6 +22,8 @@ import { WRAPPER_ERR } from "../wrapper-errors";
 import { decodeAssetVaultLp, decodeMarketEngineView, decodePortfolioRisk, decodeTerminalBacking, decodeVaultLpState, type VaultLpStateView } from "./decode";
 import { isDevnetV21Enabled } from "@/lib/v21/flag";
 import { deriveVaultLpExt } from "@/lib/v21/sdk";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { NAV_FLOW_COMPUTE_UNITS_V22, withNavFlowTailV22 } from "@/lib/v22/sdk/v22-nav-flow";
 import { buildVaultLpRecallIx, type VaultLpMarket } from "./p3-ix";
 import { effectiveSeniorClaim, harvestableFeeAtoms, recallLimit, vaultLpValueAtoms } from "./vault-tranche";
 import { buildVaultLpCrankIx, isVaultLpSelfHealEnabled } from "./vault-lp-repair";
@@ -29,6 +31,13 @@ import { buildVaultLpCrankIx, isVaultLpSelfHealEnabled } from "./vault-lp-repair
 const MAX_TX_CU = 1_400_000;
 /** 98 costs ~62k CU on BPF (d119eebd sim); margin on top of the caller's limit. */
 export const RECALL_CU = 120_000;
+/**
+ * The recall margin actually added. v2.2 (percolator-prog #640): 98 samples the LP-stop NAV at the flow, measured up to 176k
+ * CU, so the margin is the SDK's NAV_FLOW_COMPUTE_UNITS_V22[98] (400k, >= 2x the worst case) on a v2.2 build.
+ */
+export function recallCu(): number {
+  return isDevnetV22Enabled() ? NAV_FLOW_COMPUTE_UNITS_V22[98].units : RECALL_CU;
+}
 
 /**
  * Which repair a failed simulation calls for. 87 / 88 by their codes. ALSO 25
@@ -93,7 +102,10 @@ export function recallIxFor77(ix77: TransactionInstruction, cranker: PublicKey, 
     lpPortfolio: k(14),
     ...(ext ? { ext } : {}),
   };
-  return buildVaultLpRecallIx(vm, cranker, amount, domain);
+  const recall = buildVaultLpRecallIx(vm, cranker, amount, domain);
+  // v2.2 (prog #640): [8] vault ext (always), [9] lev guard; REQUIRED on a growth market (134). This 98 is built AFTER the send
+  // choke point (lib/v22/market-tails.ts) ran, and is simulated directly, so it carries the tail itself.
+  return isDevnetV22Enabled() ? withNavFlowTailV22(recall, vm.market) : recall;
 }
 
 /**
@@ -216,7 +228,7 @@ export async function planSeniorDrawRepair(p: SeniorDrawRepairParams, deps: Seni
     const risk = lpd ? decodePortfolioRisk(lpd) : null;
     const lpVal = eng && risk ? vaultLpValueAtoms(risk, eng) : null;
     const lpValueAtoms = lpVal && lpVal.kind !== "stale" ? lpVal.atoms : null;
-    const cu = Math.min(MAX_TX_CU, p.computeUnits + RECALL_CU);
+    const cu = Math.min(MAX_TX_CU, p.computeUnits + recallCu());
     // Devnet v2.1: once the P2b ext exists, 98 takes it at [8] (flag-gated read; undefined otherwise).
     const extKey = isDevnetV21Enabled() ? deriveVaultLpExt(p.programId, p.market) : null;
     const ext = extKey && (await deps.read(extKey)) ? extKey : undefined;

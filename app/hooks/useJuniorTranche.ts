@@ -13,7 +13,7 @@ import { useCallback, useState } from 'react';
 import { PublicKey, type Connection } from '@solana/web3.js';
 import { isDevnetV22Enabled } from '@/lib/v22/flag';
 import { fetchMarketTailsV22 } from '@/lib/v22/market-tails';
-import { buildWithdrawJuniorTrancheIxV22 } from '@/lib/v22/sdk';
+import { buildWithdrawJuniorTrancheIxV22, NAV_FLOW_COMPUTE_UNITS_V22 } from '@/lib/v22/sdk';
 import { deriveLpBackingLedger, deriveVaultAuthority } from '@percolatorct/sdk';
 import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { useConnectionCompat, useWalletCompat } from '@/hooks/useWalletCompat';
@@ -39,6 +39,11 @@ import {
   deriveVaultLpState,
   type VaultLpMarket,
 } from '@/lib/limits/p3-ix';
+
+/** v2.2 compute-unit limit of a junior deposit (96) / withdrawal (97) transaction (SDK NAV_FLOW_COMPUTE_UNITS_V22). */
+export function juniorFlowComputeUnits(kind: 'deposit' | 'withdraw'): number {
+  return NAV_FLOW_COMPUTE_UNITS_V22[kind === 'deposit' ? 96 : 97].units;
+}
 
 export function useJuniorTranche(slabAddress: string | null) {
   const { connection } = useConnectionCompat();
@@ -124,7 +129,10 @@ export function useJuniorTranche(slabAddress: string | null) {
                 createAssociatedTokenAccountIdempotentInstruction(c.owner, c.ownerAta, c.owner, c.mint),
                 await buildJuniorWithdrawIx(connection, c, amount),
               ];
-        return await sendTx({ connection, wallet, instructions: ixs });
+        // v2.2 (prog #640): 96 / 97 sample the LP-stop NAV at the flow (measured up to 101k / 131k CU): an explicit limit with
+        // >= 2x headroom from the SDK table, never the 200k default. v2.1: unchanged.
+        const computeUnits = isDevnetV22Enabled() ? juniorFlowComputeUnits(kind) : undefined;
+        return await sendTx({ connection, wallet, instructions: ixs, ...(computeUnits ? { computeUnits } : {}) });
       } catch (e) {
         if (isJuniorWithdrawRefusal(e)) setRefused75(true);
         // UX WP-1 (JR-2): the one resolver, never the raw "custom program error: 0x4b".

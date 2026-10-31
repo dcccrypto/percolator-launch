@@ -64,10 +64,10 @@ beforeEach(() => __setDevnetV22ForTest(true));
 afterEach(() => __setDevnetV22ForTest(null));
 
 describe("D-1 parity: the fixture is the deployed set", () => {
-  it("wrapper VERSION 19, engine discriminator 19, the v2.2 sizes", () => {
+  it("wrapper VERSION 19, engine discriminator 20 (engine #299, fixture hand-patched), the v2.2 sizes", () => {
     expect(K.VERSION).toBe(19);
-    expect(K.V16_LAYOUT_DISCRIMINATOR).toBe(19);
-    expect(K.PORTFOLIO_ACCOUNT_LEN).toBe(10603);
+    expect(K.V16_LAYOUT_DISCRIMINATOR).toBe(20);
+    expect(K.PORTFOLIO_ACCOUNT_LEN).toBe(10607);
     expect(K.MARKET_ASSET_SLOT_LEN).toBe(2661);
     expect(SIZE.Market1024).toBe(K.MARKET_ASSET_SLOT_LEN);
   });

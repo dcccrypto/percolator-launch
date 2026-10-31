@@ -9,14 +9,24 @@
  * - {@link applyMarketTailsV22}: returns the instruction unchanged unless its tag takes a tail AND that tail exists.
  *   The market is `keys[1]` for every one of these tags (ACCOUNTS_LP_VAULT_CRANK_FEES / WITHDRAW_JUNIOR_TRANCHE_P3 /
  *   TOPUP_INSURANCE / WITHDRAW_INSURANCE ...); a wrong guess is harmless because the PDA of a non-market is absent.
+ * - #636 / #636b (percolator-prog #640 + #641): the flow tags 96 / 97 / 98 / 102 (Live) / 103 / 108 / 110 / 111 (modes 0/1/3) sample the
+ *   LP-stop NAV at the flow and REQUIRE the lev guard `["lev_guard", market]` and the vault ext `["vault_lp_ext", market]` as trailing
+ *   accounts on a growth market (Custom 134 without). Appending them is correct on every market (the program skips the sample on a
+ *   non-growth market or before the guard is initialised), so this choke point appends them to every flow-tag instruction AFTER the bond
+ *   tranche (`withNavFlowTailV22`: no RPC, idempotent). A v2.2 builder that already emitted the full list is left as is, except that a
+ *   padded bond slot (97 `[12]`, 103 `[9]`) becomes the tranche once the market has one. A list the helper cannot place is refused loudly
+ *   (MarketTailMismatchError) before the wallet prompt.
  */
-import { PublicKey, TransactionInstruction, type Connection } from "@solana/web3.js";
+import { PublicKey, SystemProgram, TransactionInstruction, type Connection } from "@solana/web3.js";
 import * as Sentry from "@sentry/nextjs";
 import { isDevnetV22Enabled } from "./flag";
 import { deriveVaultLpExtP2b } from "./sdk/records/p2b-earn";
 import {
   ACCOUNT_KIND,
   BOND_TAIL_INDEX_V22,
+  NAV_FLOW_TAILS_V22,
+  hasNavFlowTailV22,
+  withNavFlowTailV22,
   INSURANCE_UNITS_TAIL_FROM_V22,
   deriveBondTrancheV22,
   deriveInsuranceUnitsV22,
@@ -47,6 +57,8 @@ const loud = (): boolean => true;
 const BOND_LOUD_TAGS = new Set([78, 97, 102, 103]);
 /** 101 is ExecuteAdl in the installed SDK (it only sometimes takes units), so it is never loud. */
 const UNITS_LOUD_TAGS = new Set([9, 56, 57, 41]);
+/** #636 / #636b flow tags (prog #640 + #641): they take the lev guard + vault ext tail. */
+export const NAV_FLOW_TAGS_V22: ReadonlySet<number> = new Set([96, 97, 98, 102, 103, 108, 110, 111]);
 
 export interface MarketTailsV22 {
   bondTranche: PublicKey | null;
@@ -97,11 +109,39 @@ export async function fetchMarketTailsV22(connection: Pick<Connection, "getMulti
 export function takesMarketTail(ix: TransactionInstruction, wrapper: PublicKey): boolean {
   if (!ix.programId.equals(wrapper) || ix.data.length === 0 || ix.keys.length < 2) return false;
   const tag = ix.data[0];
-  return tag in BOND_TAIL_INDEX_V22 || tag in INSURANCE_UNITS_TAIL_FROM_V22;
+  return tag in BOND_TAIL_INDEX_V22 || tag in INSURANCE_UNITS_TAIL_FROM_V22 || NAV_FLOW_TAGS_V22.has(tag);
+}
+
+/** #636: bring a flow-tag instruction to its #640 / #641 list; a list the helper cannot place is a loud mismatch. */
+function applyNavFlowTail(ix: TransactionInstruction): TransactionInstruction {
+  const tag = ix.data[0];
+  if (!NAV_FLOW_TAGS_V22.has(tag)) return ix;
+  try {
+    const out = withNavFlowTailV22(ix, ix.keys[1].pubkey);
+    // Already the full form (or a form the program does not sample, 102 Resolved / 111 PROPOSE): keep the caller's object.
+    const same = out.keys.length === ix.keys.length && out.keys.every((k, i) => k.pubkey.equals(ix.keys[i].pubkey) && k.isWritable === ix.keys[i].isWritable && k.isSigner === ix.keys[i].isSigner);
+    return same ? ix : out;
+  } catch (e) {
+    console.error(`[v22 tails] ${e instanceof Error ? e.message : String(e)}`);
+    throw new MarketTailMismatchError(tag, ix.keys.length, "the #636 NAV flow tail form");
+  }
+}
+
+/** A full-form 97 / 103 built without the tranche (pad at the bond slot) on a market that has one: put the tranche there. */
+function fillBondSlot(ix: TransactionInstruction, tranche: PublicKey | null): TransactionInstruction {
+  const tag = ix.data[0];
+  if (!tranche || (tag !== 97 && tag !== 103)) return ix;
+  const slot = NAV_FLOW_TAILS_V22[tag].bondSlot;
+  const k = ix.keys[slot];
+  if (!k || k.pubkey.equals(tranche) || !k.pubkey.equals(SystemProgram.programId)) return ix;
+  const keys = ix.keys.map((m, i) => (i === slot ? { pubkey: tranche, isSigner: false, isWritable: false } : m));
+  return new TransactionInstruction({ programId: ix.programId, keys, data: ix.data });
 }
 
 export function applyMarketTailsV22(ix: TransactionInstruction, tails: MarketTailsV22): TransactionInstruction {
   const tag = ix.data[0];
+  // A v2.2 builder already emitted the #636 full list (bond slot decided by the builder): only fix a padded bond slot.
+  if (NAV_FLOW_TAGS_V22.has(tag) && ix.keys.length >= 2 && hasNavFlowTailV22(ix, ix.keys[1].pubkey)) return fillBondSlot(ix, tails.bondTranche);
   let out = ix;
   const bondAt = (BOND_TAIL_INDEX_V22 as Record<number, number>)[tag];
   if (loud() && tails.bondTranche && bondAt !== undefined && BOND_LOUD_TAGS.has(tag)) {
@@ -125,7 +165,7 @@ export function applyMarketTailsV22(ix: TransactionInstruction, tails: MarketTai
   if (tails.insuranceUnits && unitsFrom !== undefined && out.keys.length >= unitsFrom && !out.keys.some((k) => k.pubkey.equals(tails.insuranceUnits!))) {
     out = withInsuranceUnitsTailV22(out, tails.insuranceUnits);
   }
-  return out;
+  return applyNavFlowTail(out);
 }
 
 /**
@@ -154,7 +194,9 @@ export async function withMarketTailsV22(connection: Pick<Connection, "getMultip
         }
         throw e;
       }
-      out.push(ix);
+      // The tails read failed: the bond / units tails stay unknown (the program then refuses visibly), but the #636 flow tail
+      // needs no RPC, so it is still applied (its own mismatch is loud).
+      out.push(applyNavFlowTail(ix));
     }
   }
   return out;

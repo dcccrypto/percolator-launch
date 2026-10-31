@@ -22,6 +22,7 @@ import { PublicKey, SystemProgram, type TransactionInstruction } from "@solana/w
 import { pairedProgramSet, resolveDevnetProgramIds } from "@/lib/program-ids";
 import { BPS, VAULT_LP_MATCHER_CTX_LEN, VAULT_LP_MAX_JUNIOR_FLOOR_BPS, VAULT_LP_MIN_JUNIOR_FLOOR_BPS } from "./constants";
 import { buildLevGuardInitIx } from "@/lib/v22/lev-guard";
+import { withNavFlowTailV22 } from "@/lib/v22/sdk/v22-nav-flow";
 import { buildDepositJuniorTrancheIx, buildInitVaultLpIx, type VaultLpMarket } from "./p3-ix";
 
 /** Default floor: 20% of the senior claim (the seed's P3 test markets use 1000-2000). */
@@ -83,6 +84,12 @@ export function buildP3BindIxs(p: {
    * the market authority. The program needs a bound vault LP and a growth block (134 otherwise), so it is added only with `growth`.
    */
   levGuard?: boolean;
+  /**
+   * v2.2 (percolator-prog #640): the junior deposit (96) carries the NAV flow tail `[7]` lev guard, `[8]` vault ext. Required on a growth
+   * market even though the guard is created by the NEXT instruction (a missing account is Custom 134; an uninitialised guard is skipped).
+   * The single-transaction launch does not pass the send choke point (lib/v22/market-tails.ts), so the bind adds it itself.
+   */
+  navFlowTail?: boolean;
 }): TransactionInstruction[] {
   if (!p.market.lpPortfolio.equals(p.vaultLpPortfolio)) throw new Error("market.lpPortfolio must be the new vault LP portfolio");
   return [
@@ -101,7 +108,9 @@ export function buildP3BindIxs(p: {
       programId: p.matcherProgram,
     }),
     buildInitVaultLpIx(p.market, p.creator, p.juniorFloorBps, { matcherProgram: p.matcherProgram, matcherCtx: p.matcherCtx }, p.growth),
-    buildDepositJuniorTrancheIx(p.market, p.creator, p.creatorAta, p.vaultToken, p.juniorAtoms),
+    p.navFlowTail
+      ? withNavFlowTailV22(buildDepositJuniorTrancheIx(p.market, p.creator, p.creatorAta, p.vaultToken, p.juniorAtoms), p.market.market)
+      : buildDepositJuniorTrancheIx(p.market, p.creator, p.creatorAta, p.vaultToken, p.juniorAtoms),
     ...(p.levGuard && p.growth ? [buildLevGuardInitIx(p.market.programId, p.market.market, p.creator)] : []),
   ];
 }

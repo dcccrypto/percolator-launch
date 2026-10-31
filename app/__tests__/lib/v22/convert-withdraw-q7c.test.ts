@@ -8,8 +8,9 @@ import { parsePortfolio } from "@/lib/v22/layout";
 import { buildRecertifyCrankIx, CONVERT_RELEASED_PNL_TAG, planConvertWithdraw, PROFIT_NOT_MOVABLE_MESSAGE, WithdrawRefusal, type QuoteDeps } from "@/lib/convert-released-pnl";
 import { defaultCrankObservations } from "@/lib/v18-wire";
 import { encodePermissionlessCrank } from "@percolatorct/sdk";
+import { liftV22Portfolio } from "../../helpers/portfolio-disc20";
 
-const data = Uint8Array.from(Buffer.from(fixture.b64, "base64"));
+const data = liftV22Portfolio(Uint8Array.from(Buffer.from(fixture.b64, "base64"))); // recorded pre-#299: lifted to disc 20 / 10,607 B
 const program = new PublicKey("6kpg2wi7vwkn7E9rvodXSktYRhna8TWjiZrC1dBek6NM");
 const base = { programId: program, owner: new PublicKey(fixture.owner), market: new PublicKey(fixture.market), portfolio: new PublicKey(fixture.portfolio), portfolioData: data };
 

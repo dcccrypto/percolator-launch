@@ -1,6 +1,7 @@
 /*
  * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ adf8fd0 (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate),
  * src/solana/v22.ts. Only the imports are retargeted (the installed @percolatorct/sdk 8.0.0 root, the v2.1 txv1 port, and the sibling v22 ports).
+ * The #640 / #641 NAV flow hunks (97 / 108 / 110 / 111 builders, presets, tails table) are from percolator-sdk#437 @ f86dcfd.
  * Delete when @percolatorct/sdk >= 9.0.0 ships and point ./index.ts at the package. Do not edit here; fix upstream in percolator-sdk.
  */
 /**
@@ -60,6 +61,7 @@ import type { LayoutTable } from "./layout";
 import { ACCOUNTS_LP_VAULT_DEPOSIT, buildAccountMetas, encodeDepositToLpVault, encodeLpVaultCrankFees, parseErrorFromLogs, deriveInsuranceLpMint, deriveLpBackingLedger, deriveLpEscrow, deriveLpRedemption, deriveLpVaultRegistry, deriveVaultAuthority, V17_WRAPPER_HEAP_FRAME_BYTES } from "@percolatorct/sdk";
 import { buildWithdrawJuniorTrancheIxP3, deriveProgramDataAddressP3, deriveVaultLpStateP3, withBoundVaultLpTailP3 } from "./records/p3-vault-lp";
 import { TX_LEGACY_MAX_BYTES, TX_V1_MAX_BYTES, computeBudgetInstructions, measureTxBytes } from "../../v21/sdk/txv1";
+import { NAV_FLOW_COMPUTE_UNITS_V22, withNavFlowTailV22 } from "./v22-nav-flow";
 import type { BudgetParams, TxFormat } from "../../v21/sdk/txv1";
 
 const w = (pubkey: PublicKey, isSigner = false): AccountMeta => ({ pubkey, isSigner, isWritable: true });
@@ -120,11 +122,16 @@ export const COMPUTE_PRESETS_V22: Readonly<Record<string, ComputePresetV22>> = O
   sweepBandDustLeg: { units: 600_000, basis: "estimated", note: "Bilateral close against the vault LP at P_last." },
   evictAndTradeCpi: { units: 1_000_000, basis: "estimated", note: "A forced close plus a full TradeCpi (600k each is the P3 worst case for the trade alone)." },
   initBondTranche: { units: 200_000, basis: "estimated", note: "Creates the ext (if absent) and the tranche PDA." },
-  bondDeposit: { units: 600_000, basis: "estimated", note: "Prices the vault LP equity, then an engine deposit; like tradeCpi's valuation path." },
+  bondDeposit: { units: NAV_FLOW_COMPUTE_UNITS_V22[108].units, basis: "measured", note: `Prices the vault LP equity, then an engine deposit + the #641 NAV flow sample. ${NAV_FLOW_COMPUTE_UNITS_V22[108].note}` },
   bondRequestWithdraw: { units: 60_000, basis: "estimated", note: "Writes one position." },
-  bondExecuteWithdraw: { units: 600_000, basis: "estimated", note: "Vault valuation + OI lock + engine withdraw." },
+  bondExecuteWithdraw: { units: NAV_FLOW_COMPUTE_UNITS_V22[110].units, basis: "measured", note: `Vault valuation + OI lock + engine withdraw + the #641 NAV flow sample. ${NAV_FLOW_COMPUTE_UNITS_V22[110].note}` },
   lpVaultCrankFeesBond: { units: 400_000, basis: "estimated", note: "On a bond market 78 re-certifies the vault LP before valuing the bonds (N-1)." },
-  insuranceBackstopDraw: { units: 600_000, basis: "estimated", note: "Draw-and-book plus an insurance move." },
+  insuranceBackstopDraw: { units: NAV_FLOW_COMPUTE_UNITS_V22[111].units, basis: "measured", note: `Draw-and-book plus an insurance move + the #641 NAV flow sample. ${NAV_FLOW_COMPUTE_UNITS_V22[111].note}` },
+  depositJuniorTranche: { units: NAV_FLOW_COMPUTE_UNITS_V22[96].units, basis: "measured", note: `Tag 96 with the #640 NAV flow sample. ${NAV_FLOW_COMPUTE_UNITS_V22[96].note}` },
+  withdrawJuniorTranche: { units: NAV_FLOW_COMPUTE_UNITS_V22[97].units, basis: "measured", note: `Tag 97 with the #640 NAV flow sample. ${NAV_FLOW_COMPUTE_UNITS_V22[97].note}` },
+  vaultLpRecall: { units: NAV_FLOW_COMPUTE_UNITS_V22[98].units, basis: "measured", note: `Tag 98 with the #640 NAV flow sample. ${NAV_FLOW_COMPUTE_UNITS_V22[98].note}` },
+  vaultLpReleaseSurplus: { units: NAV_FLOW_COMPUTE_UNITS_V22[102].units, basis: "measured", note: `Tag 102 (Live) with the #641 NAV flow sample. ${NAV_FLOW_COMPUTE_UNITS_V22[102].note}` },
+  vaultLpAllocate: { units: NAV_FLOW_COMPUTE_UNITS_V22[103].units, basis: "measured", note: `Tag 103 with the #640 NAV flow sample (ABOVE the 200k default). ${NAV_FLOW_COMPUTE_UNITS_V22[103].note}` },
   rescueDeposit: { units: 400_000, basis: "estimated", note: "Priced like tag 75 plus the certified value." },
   initInsuranceUnits: { units: 200_000, basis: "estimated", note: "Creates / refreshes a 208-byte PDA." },
   launchBundle: { units: 800_000, basis: "estimated", note: "74 + 94 + 107 in one transaction; 94 initialises the matcher context and a portfolio." },
@@ -485,7 +492,7 @@ export function buildInitBondTrancheIxV22(m: MarketV22, authority: PublicKey, pa
  * @param vaultToken  Market collateral vault token account.
  * @param amount      Atoms.
  * @param minShares   Slippage floor.
- * @returns Instruction (13 accounts).
+ * @returns Instruction (15 accounts: 13 + the #641 NAV flow tail `[13]` vault ext w, `[14]` lev guard w).
  * @example
  * ```ts
  * const ix = buildBondDepositIxV22(m, user, userAta, vaultAta, 1_000_000n, quote.minShares!);
@@ -499,7 +506,7 @@ export function buildBondDepositIxV22(m: MarketV22, depositor: PublicKey, source
     bondTranche: deriveBondTrancheV22(m.programId, m.market)[0], bondPosition: deriveBondPositionV22(m.programId, m.market, depositor)[0],
     sourceToken, vaultToken, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
   });
-  return ix(m.programId, metas, encodeBondDepositV22(amount, minShares));
+  return withNavFlowTailV22(ix(m.programId, metas, encodeBondDepositV22(amount, minShares)), m.market);
 }
 
 /**
@@ -531,7 +538,7 @@ export function buildBondRequestWithdrawIxV22(m: Pick<MarketV22, "programId" | "
  * @param vaultToken    Market collateral vault token account.
  * @param minOut        Slippage floor.
  * @param sourceDomain  Pot for a Resolved exit (ignored when Live).
- * @returns Instruction (13 accounts).
+ * @returns Instruction (15 accounts: 13 + the #641 NAV flow tail `[13]` vault ext w, `[14]` lev guard w; Resolved does not read them).
  * @example
  * ```ts
  * const ix = buildBondExecuteWithdrawIxV22(m, holder, holderAta, vaultAta, quote.minOut!, 0);
@@ -545,7 +552,7 @@ export function buildBondExecuteWithdrawIxV22(m: MarketV22, holder: PublicKey, d
     bondTranche: deriveBondTrancheV22(m.programId, m.market)[0], bondPosition: deriveBondPositionV22(m.programId, m.market, holder)[0],
     destToken, vaultToken, vaultAuthority: deriveVaultAuthority(m.programId, m.market)[0], tokenProgram: TOKEN_PROGRAM_ID,
   });
-  return ix(m.programId, metas, encodeBondExecuteWithdrawV22(minOut, sourceDomain));
+  return withNavFlowTailV22(ix(m.programId, metas, encodeBondExecuteWithdrawV22(minOut, sourceDomain)), m.market);
 }
 
 /**
@@ -602,7 +609,8 @@ export function withInsuranceUnitsTailV22(base: TransactionInstruction, units: P
 /**
  * InsuranceBackstopDraw (tag 111, G9), permissionless. `tail` carries what the program searches for in `[7..]`: the units
  * account is appended automatically; pass any Hybrid-leg feed accounts and the allowlist for modes 0 and 2 on a mainnet
- * build via `extraTail`.
+ * build via `extraTail`. Modes 0 / 1 / 3 also get the #641 NAV flow tail (vault ext w, lev guard w, right after the
+ * units account; REQUIRED on a growth market); mode 2 moves nothing and takes none.
  *
  * @param m           Market context (`lpPortfolio` required).
  * @param cranker     Signer.
@@ -622,8 +630,10 @@ export function buildInsuranceBackstopDrawIxV22(m: MarketV22, cranker: PublicKey
     cranker, market: m.market, registry, vaultLpState: deriveVaultLpStateP3(m.programId, m.market)[0], lpPortfolio: m.lpPortfolio, ...ledgers(m),
   });
   metas.push(w(deriveInsuranceUnitsV22(m.programId, m.market)[0]));
-  for (const a of extraTail) metas.push(r(a));
-  return ix(m.programId, metas, encodeInsuranceBackstopDrawV22(mode, maxAmount));
+  // #641: modes 0 / 1 / 3 sample the LP-stop NAV at the flow: the vault ext and the lev guard ride in [7..] (found by
+  // key), right after the units account; the caller's feeds / allowlist stay last.
+  const withTail = withNavFlowTailV22(ix(m.programId, metas, encodeInsuranceBackstopDrawV22(mode, maxAmount)), m.market);
+  return ix(m.programId, [...withTail.keys, ...extraTail.map((a) => r(a))], withTail.data);
 }
 
 /**
@@ -883,7 +893,7 @@ export function buildCreatePortfolioAccountIxV22(payer: PublicKey, portfolio: Pu
  * @returns `PORTFOLIO_ACCOUNT_LEN`.
  * @example
  * ```ts
- * portfolioAccountLenV22(); // 10603 on variant B
+ * portfolioAccountLenV22(); // 10607 on variant B (engine #299 +4 B loss_provenance)
  * ```
  */
 export function portfolioAccountLenV22(layout: LayoutTable = LAYOUT_V22): number {
@@ -898,19 +908,22 @@ export function portfolioAccountLenV22(layout: LayoutTable = LAYOUT_V22): number
  * EVERY account tail the v2.2 programs read on an existing tag, in one table (index = position in the account list).
  * `bond` columns apply once the registry's bond flag is set (REQUIRED then, fail closed); `ext` once the vault-LP ext exists.
  *
- * | tag | base | bound-vault tail | ext | bond tranche | units |
- * |---|---|---|---|---|---|
+ * | tag | base | bound-vault tail | ext | bond tranche | units | NAV flow tail |
+ * |---|---|---|---|---|---|---|
  * | 75 DepositToLpVault | 11 | `[11]` vault_lp_state w, `[12]` vault LP w | - | - | - |
  * | 77 ExecuteRedemption | 13 | bound: `[13]` state w, `[14]` LP w; NON-bound: `[13..13+n]` refresh w, then oracles | - | - | - |
  * | 78 LpVaultCrankFees | 6 | `[6]` vault_lp_state w | `[7]` ext w, `[8]` vault LP **w** | `[9]` tranche w | - |
- * | 97 WithdrawJuniorTranche | 11 | - | `[11]` ext w | `[12]` tranche | - |
- * | 98 VaultLpRecall | 8 | - | `[8]` ext w | - | - |
+ * | 96 DepositJuniorTranche | 7 | - | `[8]` ext w | - | - | (`[7]` lev guard w) |
+ * | 97 WithdrawJuniorTranche | 11 | - | `[11]` ext w | `[12]` tranche (else pad) | - | (`[13]` lev guard w) |
+ * | 98 VaultLpRecall | 8 | - | `[8]` ext w | - | - | (`[9]` lev guard w) |
+ * | 102 VaultLpReleaseSurplus (Live) | 7 | - | `[12]` ext w | - | - | (`[7..11]` pads, `[13]` lev guard w) |
  * | 102 VaultLpReleaseSurplus (Resolved) | 7 + 4 | - | - | `[11]` tranche | - |
- * | 103 VaultLpAllocate | 9 | - | `[7]` ext (base) | `[9]` tranche | - |
+ * | 103 VaultLpAllocate | 9 | - | `[7]` ext (base) | `[9]` tranche (else pad) | - | (`[10]` lev guard w) |
+ * | 108 BondDeposit / 110 BondExecuteWithdraw | 13 | - | `[13]` ext w | base `[7]` | - | (`[14]` lev guard w) |
  * | 9, 56 top-ups | 5 (+ optional ledger `[5]`) | - | - | - | units LAST |
  * | 57, 41 withdraws | 6 | - | - | - | units LAST |
  * | 101 VaultLpSettleResolved | 12 | - | - | - | units LAST |
- * | 111 InsuranceBackstopDraw | 7 | - | - | - | units in `[7..]` (+ G9 legs / allowlist) |
+ * | 111 InsuranceBackstopDraw | 7 | - | by key in `[7..]` (modes 0/1/3) | - | units in `[7..]` (+ G9 legs / allowlist) | (lev guard w by key, modes 0/1/3) |
  * | 112 RescueDeposit | 11 | `[11]` state w, `[12]` LP w | - | - | - |
  *
  * The same numbers are enforced by {@link withBondTailV22}, {@link withInsuranceUnitsTailV22} and
@@ -920,10 +933,13 @@ export const ACCOUNT_TAILS_V22 = Object.freeze({
   75: { base: 11, boundState: 11, boundLp: 12 },
   77: { base: 13, boundState: 13, boundLp: 14, refreshStart: 13 },
   78: { base: 6, boundState: 6, ext: 7, boundLp: 8, bondTranche: 9 },
-  97: { base: 11, ext: 11, bondTranche: 12 },
-  98: { base: 8, ext: 8 },
-  102: { base: 7, resolvedBase: 11, bondTranche: 11 },
-  103: { base: 9, ext: 7, bondTranche: 9 },
+  96: { base: 7, levGuard: 7, ext: 8 },
+  97: { base: 11, ext: 11, bondTranche: 12, levGuard: 13 },
+  98: { base: 8, ext: 8, levGuard: 9 },
+  102: { base: 7, resolvedBase: 11, bondTranche: 11, liveExt: 12, levGuard: 13 },
+  103: { base: 9, ext: 7, bondTranche: 9, levGuard: 10 },
+  108: { base: 13, ext: 13, levGuard: 14 },
+  110: { base: 13, ext: 13, levGuard: 14 },
   112: { base: 11, boundState: 11, boundLp: 12 },
   units: { 9: 5, 56: 5, 57: 6, 41: 6, 101: 12 },
 } as const);
@@ -958,8 +974,9 @@ export function buildLpVaultCrankFeesIxBoundV22(m: MarketV22, cranker: PublicKey
 }
 
 /**
- * WithdrawJuniorTranche (tag 97), fully assembled: 11 base accounts, `[11]` ext when it exists, and on a bond market `[12]` the
- * bond tranche (the junior can never withdraw bond value).
+ * WithdrawJuniorTranche (tag 97), fully assembled: 11 base accounts, `[11]` ext (always since #640: the NAV sample reads
+ * it at its PDA), `[12]` the bond tranche on a bond market (the junior can never withdraw bond value) else a pad, `[13]` the
+ * lev guard (w; REQUIRED on a growth market). 14 accounts.
  *
  * @param m            Market context (`lpPortfolio` required; `vaultLpExt` once the ext exists, required with `bond`).
  * @param juniorOwner  Signer.
@@ -977,5 +994,6 @@ export function buildWithdrawJuniorTrancheIxV22(m: MarketV22, juniorOwner: Publi
   if (!m.lpPortfolio) throw new Error("tag 97 needs the vault LP portfolio (m.lpPortfolio)");
   if (opts.bond && !m.vaultLpExt) throw new Error("a bond market always has the vault LP ext: set m.vaultLpExt");
   const base = buildWithdrawJuniorTrancheIxP3({ programId: m.programId, market: m.market, registryDomain: m.registryDomain, lpPortfolio: m.lpPortfolio, vaultLpExt: m.vaultLpExt }, juniorOwner, destToken, vaultToken, amount);
-  return opts.bond ? withBondTailV22(base, deriveBondTrancheV22(m.programId, m.market)[0]) : base;
+  // #640: [11] ext (always), [12] bond tranche or a pad, [13] lev guard.
+  return withNavFlowTailV22(opts.bond ? withBondTailV22(base, deriveBondTrancheV22(m.programId, m.market)[0]) : base, m.market);
 }
