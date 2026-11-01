@@ -7,12 +7,12 @@ import { rescueQuote, rescueView } from "@/lib/v22/rescue-ui";
 
 const tranche = (o: Partial<BondTrancheV20> = {}): BondTrancheV20 => ({
   marketGroup: PublicKey.default, cBAtoms: 1_000_000_000n, bSharesTotal: 1_000_000_000n, principalInLpAtoms: 0n, bondDrawnOutstandingAtoms: 0n,
-  lastCouponSlot: 0n, couponBpsPerYear: 800, couponUtilBonusBps: 0, bondCooldownSlots: 9_000, bondCapBpsOfC: 5000, version: 1, bump: 255,
-  lastUtilBps: 0, couponPaidTotalAtoms: 0n, ...o,
+  lastCouponSlot: 0n, couponBpsPerYear: 800, couponUtilBonusBps: 0, bondCooldownSlots: 9_000, bondCapBpsOfC: 5000, version: 2, bump: 255,
+  lastUtilBps: 0, couponPaidTotalAtoms: 0n, couponArrearsAtoms: 0n, couponUnfundedAtoms: 0n, couponAccrualRem: 0n, couponGateSeen: 0n, ...o,
 });
 const pos = (o: Partial<BondPositionV20> = {}): BondPositionV20 => ({ owner: PublicKey.default, shares: 100_000_000n, pendingWithdrawShares: 0n, requestSlot: 0n, version: 1, bump: 255, ...o });
 // vault 5_000, senior claim 2_000 -> bond (1_000) is whole, junior 2_000
-const flat: BondReadings = { vaultValue: 5_000_000_000n, seniorClaimEff: 2_000_000_000n, oiLongQ: 0n, oiShortQ: 0n, lpEffAbsQ: 0n };
+const flat: BondReadings = { vaultValue: 5_000_000_000n, seniorClaimEff: 2_000_000_000n, nowSlot: 0n, seniorDrawnAtoms: 0n, seniorDrawOutstandingAtoms: 0n, oiLongQ: 0n, oiShortQ: 0n, lpEffAbsQ: 0n };
 const busy: BondReadings = { ...flat, oiLongQ: 50n };
 
 describe("bondCardState", () => {
@@ -76,6 +76,33 @@ describe("bond quotes", () => {
   it("no quote without a pending request or without a vault reading", () => {
     expect(bondWithdrawQuote(tranche(), pos(), flat)).toBeNull();
     expect(bondDepositQuote(tranche(), 1n, { ...flat, vaultValue: null })).toBeNull();
+    // GH#571: the program settles the coupon to the current slot first, so no slot / drawn counter = no quote
+    expect(bondDepositQuote(tranche(), 1n, { ...flat, nowSlot: null })).toBeNull();
+    expect(bondDepositQuote(tranche(), 1n, { ...flat, seniorDrawnAtoms: null })).toBeNull();
+    expect(bondWithdrawQuote(tranche(), pos({ pendingWithdrawShares: 1n }), { ...flat, nowSlot: null })).toBeNull();
+  });
+});
+
+describe("bond quotes: cumulative coupon (prog #649, GH#571)", () => {
+  const YEAR = 78_840_000n;
+  it("a newcomer pays for the settled coupon: one year at 8% makes K 1,080 and 108 buys 100 shares", () => {
+    const q = bondDepositQuote(tranche(), 108_000_000n, { ...flat, nowSlot: YEAR }, 0)!;
+    expect([q.refusal, q.settledCoupon, q.claimAtPrice, q.shares]).toEqual([null, 80_000_000n, 1_080_000_000n, 100_000_000n]);
+    // the receivable and the cap meter carry the settled coupon; the new shares are labelled at the pool's ratio (ceil)
+    expect([q.trancheAfter!.couponArrearsAtoms, q.trancheAfter!.couponUnfundedAtoms, q.trancheAfter!.cBAtoms]).toEqual([80_000_000n, 88_000_000n, 1_188_000_000n]);
+  });
+  it("an exit is paid its slice of the claim incl. the settled coupon, and leaves the receivable", () => {
+    const p = pos({ pendingWithdrawShares: 100_000_000n });
+    const q = bondWithdrawQuote(tranche(), p, { ...flat, nowSlot: YEAR }, 0)!;
+    expect([q.refusal, q.settledCoupon, q.atoms, q.claimAfter, q.trancheAfter!.couponArrearsAtoms]).toEqual([null, 80_000_000n, 108_000_000n, 972_000_000n, 80_000_000n]);
+  });
+  it("an interval with a senior draw booked since the last settlement accrues nothing (att649 F2)", () => {
+    const q = bondDepositQuote(tranche(), 100_000_000n, { ...flat, nowSlot: YEAR, seniorDrawnAtoms: 1n }, 0)!;
+    expect([q.settledCoupon, q.shares]).toEqual([0n, 100_000_000n]);
+  });
+  it("a senior draw outstanding pauses deposits and exits (89)", () => {
+    expect(bondDepositQuote(tranche(), 1n, { ...flat, seniorDrawOutstandingAtoms: 1n })!.refusal?.code).toBe(89);
+    expect(bondWithdrawQuote(tranche(), pos({ pendingWithdrawShares: 1n }), { ...flat, seniorDrawOutstandingAtoms: 1n })!.refusal?.code).toBe(89);
   });
 });
 

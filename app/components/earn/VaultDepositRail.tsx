@@ -148,6 +148,8 @@ function VaultDepositRailInner({ slab, vault, onTxSuccess, onPositionResolved }:
           oiLongQ: marketLimits.engine?.oiEffLongQ ?? 0n,
           oiShortQ: marketLimits.engine?.oiEffShortQ ?? 0n,
           lpEffAbsQ: marketLimits.lpRealQ === null ? 0n : marketLimits.lpRealQ < 0n ? -marketLimits.lpRealQ : marketLimits.lpRealQ,
+          seniorDrawnAtoms: marketLimits.vaultState?.seniorDrawnAtoms ?? null,
+          seniorDrawOutstandingAtoms: marketLimits.vaultState?.seniorDrawOutstandingAtoms ?? 0n,
           onDone: refreshState,
         }
       : null;

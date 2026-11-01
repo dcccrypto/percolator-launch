@@ -135,6 +135,10 @@ fn main() {
             println!("tranche coupon_bps={} util_bonus={} cooldown_slots={} cap_bps={} market_group_ok={} c_b={:?} shares={:?}",
                 u16at(104), u16at(106), u32at(108), u16at(112), a.data[b..b + 32] == market.to_bytes(),
                 &a.data[b + 32..b + 48] == &[0u8; 16], &a.data[b + 48..b + 64] == &[0u8; 16]);
+            // GH#571 (prog #649) layout v2: 176 B body (account 192), version 2 at body 114, R @128 / U @144 zero at launch.
+            // A pre-#649 wrapper writes 128 B (account 144): the getters below print None instead of panicking.
+            let zero16 = |o: usize| a.data.get(b + o..b + o + 16).map(|x| x == [0u8; 16]);
+            println!("tranche body_version={} r_zero={:?} u_zero={:?}", a.data[b + 114], zero16(128), zero16(144));
             // registry: bound flag (LP_VAULT_REGISTRY_BOUND_FLAG_OFF_P3 = 160) and the Earn seeds (LP mint supply)
             let seed75 = dump["instructions"].as_array().unwrap().iter().find(|i| i["data"].as_str().unwrap().starts_with("4b")).unwrap();
             let registry = pk(&seed75["keys"][2]["pubkey"]);

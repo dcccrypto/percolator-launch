@@ -256,7 +256,7 @@ const STANDALONE_V22: StandaloneAccountLens = Object.freeze({
   headerLen: 16,
   redemptionBody: 96,
   redemptionExtBody: 16,
-  bondTrancheBody: 128,
+  bondTrancheBody: 176, // GH#571 layout v2 (prog #649); v1 was 128. Ported from percolator-sdk#439 @ c1fb497 (this one line).
   bondPositionBody: 96,
   insuranceUnitsBody: 192,
   g9FeedAllowlistBody: 2064,

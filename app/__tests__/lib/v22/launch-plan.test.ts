@@ -142,7 +142,8 @@ describe("capacity bond at launch", () => {
     expect(p.bondArgs).toEqual({ ...DEFAULT_BOND });
     expect(toLaunchParams(p)!.bond).toEqual({ ...DEFAULT_BOND });
     expect(V22_COPY.bond.absorbs).toBe("Losses come after the creator's first-loss stake and before Earn.");
-    expect(V22_COPY.bond.coupon).toMatch(/fees and is capped/);
+    expect(V22_COPY.bond.coupon).toMatch(/fees fund it/i);
+    expect(V22_COPY.bond.coupon).toMatch(/is capped/);
     expect(V22_COPY.bond.exit).toMatch(/flat/);
   });
   it("NEGATIVE CONTROL: dials the program would refuse become an issue and no params", () => {

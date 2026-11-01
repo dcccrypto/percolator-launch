@@ -16,10 +16,10 @@ import { BondCard } from "@/components/earn/BondCard";
 import { RescueAction } from "@/components/earn/RescueAction";
 
 const k = () => Keypair.generate().publicKey;
-const ctx: EarnV22Context = { market: k(), programId: k(), collateralMint: k(), decimals: 6, symbol: "SOL", registryDomain: 0, lpPortfolio: null, view: null, registryShares: null, oiLongQ: 0n, oiShortQ: 0n, lpEffAbsQ: 0n };
-const tranche: BondTrancheV20 = { marketGroup: PublicKey.default, cBAtoms: 1_000_000_000n, bSharesTotal: 1_000_000_000n, principalInLpAtoms: 0n, bondDrawnOutstandingAtoms: 0n, lastCouponSlot: 0n, couponBpsPerYear: 800, couponUtilBonusBps: 0, bondCooldownSlots: 9000, bondCapBpsOfC: 5000, version: 1, bump: 1, lastUtilBps: 0, couponPaidTotalAtoms: 0n };
+const ctx: EarnV22Context = { market: k(), programId: k(), collateralMint: k(), decimals: 6, symbol: "SOL", registryDomain: 0, lpPortfolio: null, view: null, registryShares: null, oiLongQ: 0n, oiShortQ: 0n, lpEffAbsQ: 0n, seniorDrawnAtoms: 0n, seniorDrawOutstandingAtoms: 0n };
+const tranche: BondTrancheV20 = { marketGroup: PublicKey.default, cBAtoms: 1_000_000_000n, bSharesTotal: 1_000_000_000n, principalInLpAtoms: 0n, bondDrawnOutstandingAtoms: 0n, lastCouponSlot: 0n, couponBpsPerYear: 800, couponUtilBonusBps: 0, bondCooldownSlots: 9000, bondCapBpsOfC: 5000, version: 2, bump: 1, lastUtilBps: 0, couponPaidTotalAtoms: 0n, couponArrearsAtoms: 0n, couponUnfundedAtoms: 0n, couponAccrualRem: 0n, couponGateSeen: 0n };
 const position = (o: Partial<BondPositionV20> = {}): BondPositionV20 => ({ owner: PublicKey.default, shares: 100_000_000n, pendingWithdrawShares: 0n, requestSlot: 0n, version: 1, bump: 1, ...o });
-const flat: BondReadings = { vaultValue: 5_000_000_000n, seniorClaimEff: 2_000_000_000n, oiLongQ: 0n, oiShortQ: 0n, lpEffAbsQ: 0n };
+const flat: BondReadings = { vaultValue: 5_000_000_000n, seniorClaimEff: 2_000_000_000n, nowSlot: 0n, seniorDrawnAtoms: 0n, seniorDrawOutstandingAtoms: 0n, oiLongQ: 0n, oiShortQ: 0n, lpEffAbsQ: 0n };
 
 function setBond(o: { bond?: unknown; position?: BondPositionV20 | null; slot?: bigint; readings?: BondReadings }) {
   const readings = o.readings ?? flat;
@@ -45,7 +45,11 @@ describe("BondCard", () => {
     setBond({});
     render(<BondCard ctx={ctx} />);
     expect(screen.getByTestId("bond-absorbs").textContent).toBe(V22_COPY.bond.absorbs);
-    expect(screen.getByTestId("bond-coupon").textContent).toContain("paid from trading fees and is capped");
+    // GH#571: the coupon is cumulative (it builds up in the bond's value, fronted by the creator's stake until fees catch up)
+    expect(screen.getByTestId("bond-coupon").textContent).toContain("adds to the bond's value");
+    expect(screen.getByTestId("bond-coupon").textContent).toContain("Trading fees fund it");
+    expect(screen.getByTestId("bond-coupon").textContent).toContain("creator's first-loss stake");
+    expect(screen.getByTestId("bond-coupon").textContent).toContain("is capped");
     expect(screen.getByTestId("bond-coupon").textContent).toContain("Up to 8%");
     expect(screen.getByTestId("bond-exit").textContent).toBe(V22_COPY.bond.exit);
   });
