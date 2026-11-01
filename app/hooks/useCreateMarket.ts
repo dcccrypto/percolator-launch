@@ -187,6 +187,9 @@ import {
 import { parsePortfolio, parseMarketOI, isWrapperAccount, createPortfolioAccountIx, portfolioAccountLen, portfolioGpaFilters } from "@/lib/v22/layout";
 const ALL_ZEROS_FEED = "0".repeat(64);
 
+/** InitMarket's creator share (`constants::DEFAULT_CREATOR_SHARE_BPS`, = the SDK's `FEE_SPLIT.DEFAULT_CREATOR_SHARE_BPS`). */
+const DEFAULT_CREATOR_SHARE_BPS = 1600;
+
 /**
  * Order the stake-tail instructions so the fee-split → stake-pool sequence is
  * always correct, in BOTH the batched (M4) and sequential (Step 5) create paths:
@@ -204,6 +207,10 @@ const ALL_ZEROS_FEED = "0".repeat(64);
  * `updateFeeSplitIx` is null for a default split (no tx needed — defaults are
  * written at InitMarket). Exported so the sequence invariant can be unit-tested
  * without driving the whole wallet/RPC create flow.
+ *
+ * `creatorShareBps` is the creator share the bundle leaves on the market (the creator's fee split, else the InitMarket default).
+ * Khubair 2026-11-01: a burn records the creator wallet as the payee (tag 125) unless the creator chose 0 creator fees; then
+ * no payee is recorded (nothing accrues; a later creator leg is re-booked to the protocol at CloseSlab).
  */
 export function orderStakeTailInstructions<T>(
   preInitPool: T[],
@@ -212,11 +219,16 @@ export function orderStakeTailInstructions<T>(
   bindInsuranceIx: T,
   burnAssetAdminIx: T | null = null,
   setCreatorFeePayeeIx: T | null = null,
+  creatorShareBps: number = DEFAULT_CREATOR_SHARE_BPS,
 ): T[] {
-  // prog #587 (#644): a bundle that burns the asset admin MUST record the creator-fee payee first (wrapper tag 125, signed by
-  // the still-live asset admin). After the burn no key can set it, and the creator fee would have no claimant.
-  if (burnAssetAdminIx && !setCreatorFeePayeeIx) {
+  // prog #587 (#644): a bundle that burns the asset admin of a creator that takes a creator fee MUST record the creator-fee
+  // payee first (wrapper tag 125, signed by the still-live asset admin). After the burn no key can set it, and the creator fee
+  // would have no claimant. A creator with 0 creator fees gets no payee (Khubair 11-01): tag 125 is refused there.
+  if (burnAssetAdminIx && creatorShareBps > 0 && !setCreatorFeePayeeIx) {
     throw new Error("orderStakeTailInstructions: the asset-admin burn needs the creator-fee payee instruction (tag 125) before it");
+  }
+  if (burnAssetAdminIx && creatorShareBps === 0 && setCreatorFeePayeeIx) {
+    throw new Error("orderStakeTailInstructions: a creator with 0 creator fees records no creator-fee payee (no tag 125)");
   }
   return [
     ...preInitPool,
@@ -252,6 +264,25 @@ export const FIRST_LOSS_BURN_CONSENT_COPY = [
   "If this market's oracle ever enters Recovery it cannot be restarted: it can only be resolved.",
   "The asset admin can no longer be rotated.",
 ] as const;
+
+/** The consent line 2 for a creator with 0 creator fees: no payee is recorded (Khubair 11-01). */
+export const FIRST_LOSS_BURN_CONSENT_ZERO_FEE_LINE =
+  "You chose no creator fee, so no fee wallet is recorded. A creator fee set later goes to the protocol.";
+
+/**
+ * The consent copy for this creator's fee split.
+ *
+ * @param creatorShareBps The creator share the market will have (0 = no creator fee).
+ * @returns The lines to show and have acknowledged.
+ * @example
+ * ```ts
+ * firstLossBurnConsentCopy(params.feeSplit?.creatorShareBps ?? 1600)
+ * ```
+ */
+export function firstLossBurnConsentCopy(creatorShareBps: number): readonly string[] {
+  if (creatorShareBps > 0) return FIRST_LOSS_BURN_CONSENT_COPY;
+  return FIRST_LOSS_BURN_CONSENT_COPY.map((l, i) => (i === 1 ? FIRST_LOSS_BURN_CONSENT_ZERO_FEE_LINE : l));
+}
 
 // BACKING-BUCKET SEEDING: both domains of asset 0 (long=2*assetIndex,
 // short=2*assetIndex+1) are funded by DepositToLpVault in the Earn-vault step

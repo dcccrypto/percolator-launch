@@ -7,10 +7,28 @@
  *
  * The app keeps that invisible: burning the admin key records the burning wallet as the payee in the SAME transaction, unless a
  * payee was recorded earlier (then it is left as it is; tag 125 refuses a no-op anyway).
+ *
+ * The burning wallet IS the creator wallet: it must be asset 0's `asset_admin` (renounceAdmin checks it and the program refuses
+ * otherwise), the app sets `asset_admin` only at InitMarket (the creating wallet) and never rotates it to another key (the only tag 65
+ * AssetAdmin it sends is the burn to zero).
+ *
+ * Khubair (2026-11-01): a creator that chose 0 creator fees (`creator_share_bps` 0, the wizard's fee-split control allows it) gets NO
+ * payee: nothing accrues at 0 bps, and any creator leg that accrues later (the stake pool admin can still raise the share via stake
+ * tag 25) has no claimant and is re-booked to the protocol at CloseSlab. With 0 bps but fees still unclaimed (the share was lowered
+ * after they accrued) the burn is refused until they are claimed, so they are never lost.
  */
 import { PublicKey, type TransactionInstruction } from "@solana/web3.js";
-import { buildSetCreatorFeePayeeIxV22, hasCreatorFeePayeeFlagV22 } from "@/lib/v22/sdk/creator-fee-payee-v22";
+import { FEE_SPLIT, parseWrapperConfigV17 } from "@percolatorct/sdk";
+import { buildSetCreatorFeePayeeIxV22, hasCreatorFeePayeeFlagV22, readCreatorFeeClaimStateV22 } from "@/lib/v22/sdk/creator-fee-payee-v22";
 import { LAYOUT_V22, readWrapperHeader } from "@/lib/v22/sdk/layout";
+
+/** Thrown when a 0-fee creator still has unclaimed creator fees: claim them, then burn (nothing is lost, nothing is sent). */
+export class ClaimCreatorFeesBeforeBurnError extends Error {
+  constructor(readonly owedAtoms: bigint) {
+    super("Claim your creator fees before burning the admin key.");
+    this.name = "ClaimCreatorFeesBeforeBurnError";
+  }
+}
 
 /** The wrapper VERSION of a market account (header u16 at byte 8). */
 export function wrapperVersionOf(raw: Uint8Array): number {
@@ -28,8 +46,12 @@ export interface CreatorFeePayeeBeforeBurnArgs {
   authorityEpoch: bigint;
   /** Asset 0's `p4_flags` (bit 3 = a payee is already recorded). */
   p4Flags: number;
-  /** Payee to record; default the asset admin itself. */
+  /** Payee to record; default the asset admin itself (the creator wallet). An explicit payee is recorded even at 0 bps. */
   payee?: PublicKey;
+  /** The market's `WrapperConfig.creator_share_bps` (0 = the creator chose 0 creator fees). */
+  creatorShareBps: number;
+  /** Unclaimed creator fees of asset 0 (`readCreatorFeeClaimStateV22(...).owed`: the asset pot + the legacy market-wide pot). */
+  creatorFeeOwedAtoms: bigint;
   /**
    * The market's wrapper VERSION (header bytes 8..9). Tag 125 exists only on the v2.2 wrapper (VERSION 19, rc23 + prog #644); on
    * any other market nothing is prepended and the burn is the pre-#587 one.
@@ -39,11 +61,17 @@ export interface CreatorFeePayeeBeforeBurnArgs {
 
 /**
  * The instructions that must precede the asset-admin burn in the same transaction, and the authority epoch the burn must carry.
- * No payee yet: `[tag 125(payee, epoch)]` and `burnEpoch = epoch + 1` (tag 125 advances the epoch). Payee already recorded:
- * `[]` and `burnEpoch = epoch`.
+ * No payee yet: `[tag 125(payee, epoch)]` and `burnEpoch = epoch + 1` (tag 125 advances the epoch). Payee already recorded, or a
+ * creator with 0 creator fees and nothing owed (no explicit payee): `[]` and `burnEpoch = epoch`.
+ *
+ * @throws ClaimCreatorFeesBeforeBurnError at 0 bps with fees still owed (and no explicit payee).
  */
 export function creatorFeePayeeBeforeBurn(a: CreatorFeePayeeBeforeBurnArgs): { ixs: TransactionInstruction[]; burnEpoch: bigint } {
   if (a.wrapperVersion !== LAYOUT_V22.version || hasCreatorFeePayeeFlagV22(a.p4Flags)) return { ixs: [], burnEpoch: a.authorityEpoch };
+  if (!a.payee && a.creatorShareBps === 0) {
+    if (a.creatorFeeOwedAtoms > 0n) throw new ClaimCreatorFeesBeforeBurnError(a.creatorFeeOwedAtoms);
+    return { ixs: [], burnEpoch: a.authorityEpoch };
+  }
   const ix = buildSetCreatorFeePayeeIxV22({
     programId: a.programId,
     market: a.market,
@@ -54,4 +82,22 @@ export function creatorFeePayeeBeforeBurn(a: CreatorFeePayeeBeforeBurnArgs): { i
     authorityEpoch: a.authorityEpoch,
   });
   return { ixs: [ix], burnEpoch: a.authorityEpoch + 1n };
+}
+
+/**
+ * The creator fee terms the burn needs, read from the same market bytes: `creator_share_bps` and the unclaimed creator fees of
+ * asset 0. Only meaningful on a v2.2 market (the only one where tag 125 exists); elsewhere it returns the InitMarket default share
+ * and 0 owed, which {@link creatorFeePayeeBeforeBurn} ignores.
+ *
+ * @param raw The market account bytes.
+ * @returns `{ creatorShareBps, creatorFeeOwedAtoms }`.
+ * @example
+ * ```ts
+ * const terms = creatorFeeTermsForBurn(slabData);
+ * creatorFeePayeeBeforeBurn({ ...live, ...terms });
+ * ```
+ */
+export function creatorFeeTermsForBurn(raw: Uint8Array): { creatorShareBps: number; creatorFeeOwedAtoms: bigint } {
+  if (wrapperVersionOf(raw) !== LAYOUT_V22.version) return { creatorShareBps: FEE_SPLIT.DEFAULT_CREATOR_SHARE_BPS, creatorFeeOwedAtoms: 0n };
+  return { creatorShareBps: parseWrapperConfigV17(raw).creatorShareBps, creatorFeeOwedAtoms: readCreatorFeeClaimStateV22(raw, 0).owed };
 }
