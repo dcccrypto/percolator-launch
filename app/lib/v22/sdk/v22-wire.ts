@@ -185,6 +185,8 @@ export const G9_FEED_ALLOWLIST_CAP_V22 = 16;
 /** `p4_flags` bits (oracle profile byte +20). */
 export const P4_FLAG_INS_UNITS_REQUIRED_V22 = 1;
 export const P4_FLAG_EXIT_REQUIRES_LOSS_CURRENT_V22 = 1 << 2;
+/** prog#587 (#644): a creator-fee payee is recorded for this asset (`P4_FLAG_CREATOR_FEE_PAYEE`); set by tag 125, cleared by asset activation. Ported from percolator-sdk #438. */
+export const P4_FLAG_CREATOR_FEE_PAYEE_V22 = 1 << 3;
 /** Insurance unit classes (`INS_UNIT_CLASS_*`). */
 export const INS_UNIT_CLASS_STAKE_V22 = 0;
 export const INS_UNIT_CLASS_CREATOR_V22 = 1;

@@ -19,7 +19,7 @@
  */
 
 import { PublicKey, type TransactionInstruction } from "@solana/web3.js";
-import { getAssociatedTokenAddress } from "@solana/spl-token";
+import { getAssociatedTokenAddress, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import {
   ACCOUNTS_WITHDRAW_CREATOR_FEE,
   buildAccountMetas,
@@ -28,7 +28,14 @@ import {
   encodeWithdrawCreatorFee,
   WELL_KNOWN,
 } from "@percolatorct/sdk";
-import { readAssetControlSeqs } from "@/lib/v18-wire";
+import { readAssetAdmin, readAssetControlSeqs, readAssetP4Flags } from "@/lib/v18-wire";
+import {
+  buildClaimCreatorFeeToPayeeIxsV22,
+  creatorFeeClaimRouteV22,
+  decodeCreatorFeePayeeV22,
+  hasCreatorFeePayeeFlagV22,
+  type CreatorFeeClaimRouteV22,
+} from "@/lib/v22/sdk/creator-fee-payee-v22";
 import { isCreatorFeeClaimAuthority, readCreatorFeeClaimable } from "@/lib/v17-creator-fee";
 
 export interface BuildCreatorFeeClaimArgs {
@@ -105,4 +112,68 @@ export async function buildCreatorFeeClaimIx(
   ]);
 
   return { instruction: buildIx({ programId, keys, data }), amount, collateralMint };
+}
+
+// ============================================================================
+// prog #587 (#644): the PAYEE route. Once asset 0's asset_admin is burned AFTER a payee was recorded (tag 125, p4 bit 3), tag 90
+// is permissionless: anyone may send it, it pays ONLY the payee's canonical ATA for the collateral mint, and it takes the payee
+// record as account [6]. CloseSlab waits for this pot (it is no longer re-booked to the protocol).
+// ============================================================================
+
+/** Asset 0's creator-fee route read from the market bytes (`claim_route`), or null when the profile is unreadable. */
+export function creatorFeeRouteOf(raw: Uint8Array): CreatorFeeClaimRouteV22 | null {
+  try {
+    return creatorFeeClaimRouteV22(readAssetAdmin(raw, 0), hasCreatorFeePayeeFlagV22(readAssetP4Flags(raw, 0)));
+  } catch {
+    return null;
+  }
+}
+
+export interface BuildCreatorFeePayeeClaimArgs {
+  programId: PublicKey;
+  market: PublicKey;
+  /** Raw market bytes, read at SEND time (amount + authority epoch). */
+  raw: Uint8Array;
+  /** The payee record account's data (`deriveCreatorFeePayeeV22(programId, market, 0)`). */
+  payeeRecord: Uint8Array;
+  /** Any connected wallet: it signs and pays the payee ATA rent if the ATA does not exist yet. */
+  caller: PublicKey;
+}
+
+export interface BuiltCreatorFeePayeeClaim {
+  instructions: TransactionInstruction[];
+  amount: bigint;
+  payee: PublicKey;
+  collateralMint: PublicKey;
+}
+
+/**
+ * Build the permissionless claim to the recorded payee: idempotent payee-ATA create + tag 90 (7 accounts) for the full balance.
+ * Fails closed: not the payee route, nothing owed, or a payee record the program would refuse (136) each throw.
+ */
+export function buildCreatorFeePayeeClaimIxs(args: BuildCreatorFeePayeeClaimArgs): BuiltCreatorFeePayeeClaim {
+  const { programId, market, raw, caller } = args;
+  if (creatorFeeRouteOf(raw) !== "Payee") {
+    throw new CreatorFeeClaimError("This market's creator fees are not paid to a recorded payee.");
+  }
+  const current = readCreatorFeeClaimable(raw);
+  if (!current || current.atoms <= 0n) {
+    throw new CreatorFeeClaimError("Nothing to send: no creator fees have accrued since the last payout.");
+  }
+  let payee: PublicKey;
+  try {
+    const rec = decodeCreatorFeePayeeV22(args.payeeRecord);
+    if (!rec.market.equals(market) || rec.assetIndex !== 0) throw new Error("record of another market");
+    payee = rec.payee;
+  } catch {
+    throw new CreatorFeeClaimError("This market's fee payee record could not be read. Try again in a moment.");
+  }
+  const authorityEpoch = readAssetControlSeqs(raw, 0).authorityEpoch;
+  const [vaultPda] = deriveVaultAuthority(programId, market);
+  const vaultToken = getAssociatedTokenAddressSync(current.collateralMint, vaultPda, true);
+  const instructions = buildClaimCreatorFeeToPayeeIxsV22({
+    programId, market, caller, assetIndex: 0, payee, vaultMint: current.collateralMint, vaultToken,
+    amount: current.atoms, authorityEpoch,
+  });
+  return { instructions, amount: current.atoms, payee, collateralMint: current.collateralMint };
 }

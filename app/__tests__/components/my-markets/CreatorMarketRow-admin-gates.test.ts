@@ -67,9 +67,12 @@ describe("CreatorMarketRow admin-action gates", () => {
     });
   });
 
-  it("the burn confirm says it forfeits creator fees, and warns to claim first when fees are unclaimed", () => {
-    expect(SRC).toContain('data-testid="burn-forfeits-fees"');
-    expect(SRC).toMatch(/give up this market&apos;s creator fees for good/);
+  it("prog #587: the burn confirm says the creator fees keep going to the fee payee (not forfeited); unclaimed fees stay owed", () => {
+    expect(SRC).toContain('data-testid="burn-fees-to-payee"');
+    expect(SRC).toContain("{ADMIN_BURN_COPY.feesAfterBurn}");
+    expect(SRC).not.toMatch(/creator fees for good/);
+    expect(SRC).not.toMatch(/or they are lost/);
     expect(SRC).toMatch(/\{hasClaimableFees && \(\s*<p data-testid="burn-claim-first"/);
+    expect(SRC).toContain("{ADMIN_BURN_COPY.unclaimedAfterBurn}");
   });
 });

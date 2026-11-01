@@ -211,9 +211,19 @@ export function orderStakeTailInstructions<T>(
   initPoolIx: T,
   bindInsuranceIx: T,
   burnAssetAdminIx: T | null = null,
+  setCreatorFeePayeeIx: T | null = null,
 ): T[] {
+  // prog #587 (#644): a bundle that burns the asset admin MUST record the creator-fee payee first (wrapper tag 125, signed by
+  // the still-live asset admin). After the burn no key can set it, and the creator fee would have no claimant.
+  if (burnAssetAdminIx && !setCreatorFeePayeeIx) {
+    throw new Error("orderStakeTailInstructions: the asset-admin burn needs the creator-fee payee instruction (tag 125) before it");
+  }
   return [
     ...preInitPool,
+    // Tag 125 goes BEFORE InitPool and Bind: both advance asset 0's authority epoch (their CPIs, UpdateAuthority and
+    // UpdateAssetAuthority, advance lane 0), while tag 125 carries the epoch as a CAS. Placed here it carries the epoch the
+    // market has when the stake tail is built; tag 125 itself advances it by one, which the later stake CPIs read live.
+    ...(burnAssetAdminIx && setCreatorFeePayeeIx ? [setCreatorFeePayeeIx] : []),
     ...(updateFeeSplitIx ? [updateFeeSplitIx] : []),
     initPoolIx,
     bindInsuranceIx,
@@ -238,7 +248,7 @@ export function assetAdminBurnForCreate(riskMode: "first-loss" | "fee-only" | "l
 /** Must be shown, and acknowledged, before the wallet is asked to sign a bundle that burns the asset admin. */
 export const FIRST_LOSS_BURN_CONSENT_COPY = [
   "First-loss markets burn the asset admin when they are created. This cannot be undone.",
-  "The creator fee on a first-loss market goes to the protocol, not to you.",
+  "Your creator fee keeps coming to your wallet: it is recorded as the fee payee before the burn, and anyone can send the fees to it.",
   "If this market's oracle ever enters Recovery it cannot be restarted: it can only be resolved.",
   "The asset admin can no longer be rotated.",
 ] as const;

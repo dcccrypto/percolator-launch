@@ -126,6 +126,11 @@ export const PERCOLATOR_ERRORS_V22: Readonly<Record<number, ErrorInfo>> = Object
     name: "LpStopNotTriggered",
     hint: "The liquidity-provider stop does not hold right now, or there is nothing left to cut.",
   },
+  // prog#587 (#644): tag 125 SetCreatorFeePayee and the tag 90 payee route. Verbatim from percolator-sdk #438.
+  136: {
+    name: "CreatorFeePayeeInvalid",
+    hint: "The creator fee payee was refused: only the live asset admin can set it, to a new non-zero wallet that is not the market vault; a payout must go to the recorded payee's own token account for the market's collateral, with no delegate or close authority.",
+  },
   // TODO(repin): percolator-sdk feat/v22-sdk-growth (error 128, tag 63 44-byte depth wire). Align name and hint to the SDK table when it lands.
   128: {
     name: "DepthInputInvalid",
