@@ -23,7 +23,7 @@ import { updateAssetAuthorityKeys, ZERO_PUBKEY } from "@/lib/update-asset-author
 import { sendTx } from "@/lib/tx";
 import type { DiscoveredMarket } from "@percolatorct/sdk";
 import { readAssetMarketId, readAssetControlSeqs, readAssetAdmin, readAssetP4Flags } from "@/lib/v18-wire";
-import { creatorFeePayeeBeforeBurn, wrapperVersionOf } from "@/lib/creator-fee-payee";
+import { creatorFeePayeeBeforeBurn, creatorFeeTermsForBurn, wrapperVersionOf } from "@/lib/creator-fee-payee";
 
 const INLINE_ORACLE_ADMIN_REMOVED_ERROR =
   "Admin oracle update instructions were removed on-chain in beta.29. Migrate this action to the server-side oracle flow before using it.";
@@ -233,6 +233,7 @@ export function useAdminActions() {
         // prog #587 (#644): keep the creator fee claimable after the burn. If no fee payee is recorded yet, the SAME transaction
         // first records this wallet (the asset admin) as the payee (tag 125, while the key is still live), then burns. Tag 125
         // advances asset 0's authority epoch by one, so the burn carries epoch + 1. A payee recorded earlier is left as it is.
+        // A creator with 0 creator fees gets no payee (Khubair 11-01); with fees still owed at 0 bps the burn is refused (claim first).
         const { ixs: payeeIxs, burnEpoch } = creatorFeePayeeBeforeBurn({
           programId: market.programId,
           market: market.slabAddress,
@@ -241,6 +242,7 @@ export function useAdminActions() {
           authorityEpoch,
           p4Flags: readAssetP4Flags(slabData, 0),
           wrapperVersion: wrapperVersionOf(slabData),
+          ...creatorFeeTermsForBurn(slabData),
         });
         const data = encodeUpdateAssetAuthority({
           assetIndex: 0,

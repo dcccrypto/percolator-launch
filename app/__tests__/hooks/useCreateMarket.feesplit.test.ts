@@ -19,7 +19,7 @@ import {
   IX_TAG,
   STAKE_IX,
 } from "@percolatorct/sdk";
-import { orderStakeTailInstructions, assetAdminBurnForCreate, FIRST_LOSS_BURN_CONSENT_COPY } from "@/hooks/useCreateMarket";
+import { orderStakeTailInstructions, assetAdminBurnForCreate, FIRST_LOSS_BURN_CONSENT_COPY, firstLossBurnConsentCopy, FIRST_LOSS_BURN_CONSENT_ZERO_FEE_LINE } from "@/hooks/useCreateMarket";
 
 describe("UpdateFeeSplit (tag 86) wire bytes", () => {
   it("encodes tag 86 + three u16 LE shares + u64 authority epoch (15 bytes)", () => {
@@ -128,6 +128,20 @@ describe("asset-admin burn in the create bundle (L5 2026-10-22; code only, not w
 
   it("prog #587: a burn without the payee instruction is refused (the fee would have no claimant after the burn)", () => {
     expect(() => orderStakeTailInstructions([PRE], null, INIT_POOL_IX, BIND_IX, BURN_IX)).toThrow(/creator-fee payee/);
+  });
+
+  it("Khubair 11-01: a creator with 0 creator fees burns WITHOUT tag 125; tag 125 is refused there", () => {
+    expect(orderStakeTailInstructions([PRE], null, INIT_POOL_IX, BIND_IX, BURN_IX, null, 0)).toEqual([PRE, INIT_POOL_IX, BIND_IX, BURN_IX]);
+    expect(() => orderStakeTailInstructions([PRE], null, INIT_POOL_IX, BIND_IX, BURN_IX, PAYEE_IX, 0)).toThrow(/0 creator fees/);
+    expect(() => orderStakeTailInstructions([PRE], null, INIT_POOL_IX, BIND_IX, BURN_IX, null, 1)).toThrow(/creator-fee payee/);
+  });
+
+  it("Khubair 11-01: the 0-fee consent copy says no fee wallet is recorded; the fee-taking copy is unchanged", () => {
+    expect(firstLossBurnConsentCopy(1600)).toEqual(FIRST_LOSS_BURN_CONSENT_COPY);
+    const z = firstLossBurnConsentCopy(0);
+    expect(z[1]).toBe(FIRST_LOSS_BURN_CONSENT_ZERO_FEE_LINE);
+    expect(z.join(" ")).not.toMatch(/keeps coming to your wallet/);
+    expect(z.slice(2)).toEqual(FIRST_LOSS_BURN_CONSENT_COPY.slice(2));
   });
 
   it("prog #587: no burn = no payee instruction, even if one is passed", () => {

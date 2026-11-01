@@ -19,7 +19,7 @@ import {
 import { ACCOUNT_KIND } from "@/lib/v22/sdk/layout";
 import { P4_FLAG_CREATOR_FEE_PAYEE_V22 } from "@/lib/v22/sdk/v22-wire";
 import { PERCOLATOR_ERRORS_V22 } from "@/lib/v22/sdk/errors-v22";
-import { creatorFeePayeeBeforeBurn, wrapperVersionOf } from "@/lib/creator-fee-payee";
+import { ClaimCreatorFeesBeforeBurnError, creatorFeePayeeBeforeBurn, creatorFeeTermsForBurn, wrapperVersionOf } from "@/lib/creator-fee-payee";
 import { buildCreatorFeePayeeClaimIxs, creatorFeeRouteOf, CreatorFeeClaimError } from "@/lib/creator-fee-claim-ix";
 import { readCreatorFeeClaimable } from "@/lib/v17-creator-fee";
 
@@ -62,7 +62,7 @@ describe("vendored creator-fee-payee port == the real crate (percolator-sdk #438
 
 describe("burn = record the payee first (useAdminActions.renounceAdmin)", () => {
   const programId = Keypair.generate().publicKey, market = Keypair.generate().publicKey, admin = Keypair.generate().publicKey;
-  const base = { programId, market, assetAdmin: admin, marketId: 1n, authorityEpoch: 4n, p4Flags: 0, wrapperVersion: 19 };
+  const base = { programId, market, assetAdmin: admin, marketId: 1n, authorityEpoch: 4n, p4Flags: 0, wrapperVersion: 19, creatorShareBps: 1600, creatorFeeOwedAtoms: 0n };
   it("no payee yet on a v2.2 market: tag 125 (payee = the burning wallet, epoch 4) and the burn carries epoch 5", () => {
     const r = creatorFeePayeeBeforeBurn(base);
     expect(r.burnEpoch).toBe(5n);
@@ -84,6 +84,41 @@ describe("burn = record the payee first (useAdminActions.renounceAdmin)", () => 
     const src = readFileSync(join(__dirname, "..", "..", "hooks", "useAdminActions.ts"), "utf8");
     expect(src).toMatch(/authorityEpoch: burnEpoch,/);
     expect(src).toMatch(/instructions: \[\.\.\.payeeIxs, ix\]/);
+    expect(src).toMatch(/\.\.\.creatorFeeTermsForBurn\(slabData\),/);
+  });
+});
+
+describe("Khubair 11-01: payee = the creator wallet, none for a creator with 0 creator fees", () => {
+  const programId = Keypair.generate().publicKey, market = Keypair.generate().publicKey, admin = Keypair.generate().publicKey;
+  const base = { programId, market, assetAdmin: admin, marketId: 1n, authorityEpoch: 4n, p4Flags: 0, wrapperVersion: 19, creatorShareBps: 0, creatorFeeOwedAtoms: 0n };
+  const payeeOf = (r: { ixs: { data: Buffer }[] }) => new PublicKey(r.ixs[0]!.data.subarray(11, 43)).toBase58();
+  it("0 bps, nothing owed: no tag 125, the burn keeps the live epoch", () => {
+    expect(creatorFeePayeeBeforeBurn(base)).toEqual({ ixs: [], burnEpoch: 4n });
+  });
+  it("0 bps with fees still owed: refused (claim first), nothing built", () => {
+    expect(() => creatorFeePayeeBeforeBurn({ ...base, creatorFeeOwedAtoms: 3n })).toThrow(ClaimCreatorFeesBeforeBurnError);
+    expect(() => creatorFeePayeeBeforeBurn({ ...base, creatorFeeOwedAtoms: 3n })).toThrow(/Claim your creator fees/);
+  });
+  it("any creator fee (1 bps): tag 125 records the burning wallet = the creator", () => {
+    const r = creatorFeePayeeBeforeBurn({ ...base, creatorShareBps: 1 });
+    expect(r.burnEpoch).toBe(5n);
+    expect(payeeOf(r)).toBe(admin.toBase58());
+  });
+  it("an explicit payee still wins at 0 bps", () => {
+    const team = Keypair.generate().publicKey;
+    const r = creatorFeePayeeBeforeBurn({ ...base, payee: team, creatorFeeOwedAtoms: 3n });
+    expect(payeeOf(r)).toBe(team.toBase58());
+  });
+  it("creatorFeeTermsForBurn reads creator_share_bps (cfg +560) and the owed pot off a v2.2 market; default elsewhere", () => {
+    const fx = JSON.parse(readFileSync(join(__dirname, "..", "fixtures", "v22-market-single-asset-SOL.json"), "utf8")) as { dataBase64: string };
+    const raw = new Uint8Array(Buffer.from(fx.dataBase64, "base64"));
+    expect(wrapperVersionOf(raw)).toBe(19);
+    expect(creatorFeeTermsForBurn(raw)).toEqual({ creatorShareBps: 1600, creatorFeeOwedAtoms: 3_085_557n }); // the captured asset-0 pot
+    const zero = Uint8Array.from(raw); new DataView(zero.buffer).setUint16(16 + 560, 0, true);
+    new DataView(zero.buffer).setBigUint64(16 + 568, 9n, true); // legacy market-wide pot counts as owed
+    expect(creatorFeeTermsForBurn(zero)).toEqual({ creatorShareBps: 0, creatorFeeOwedAtoms: 3_085_566n });
+    const v18 = JSON.parse(readFileSync(join(__dirname, "..", "fixtures", "Azagguvr.market.json"), "utf8")) as { dataBase64: string };
+    expect(creatorFeeTermsForBurn(new Uint8Array(Buffer.from(v18.dataBase64, "base64"))).creatorShareBps).toBe(1600);
   });
 });
 
