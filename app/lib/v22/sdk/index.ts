@@ -27,5 +27,7 @@ export * from "./v22-multi-asset-trade";
 export * from "./lev-guard-v22";
 export * from "./lev-guard-decode-v22";
 export * from "./lev-guard-limits-v22";
+// R6 (2 Nov): byte-identical copy of percolator-sdk PR #442 src/abi/v22-band-safety-law.ts (sha256 pinned in __tests__/lib/v22/band-safety-law.test.ts).
+export * from "./v22-band-safety-law";
 export * as v22Slab from "./slab";
 export * from "./nft-v3";
