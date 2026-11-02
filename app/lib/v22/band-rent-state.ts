@@ -4,7 +4,7 @@
  *  - state words:       `layout.bandRent` offsets via `readBandRentViewV22`;
  *  - lag predicate:     `assetPriceLaggedV22` (requires open interest on at least one side AND mark != target);
  *  - floor-stuck rule:  `bandFloorStuckV22`; favourable side as in `favourableCloseRefusedV22`;
- *  - rent rate:         `rentRateE9FailClosedV22`.
+ *  - rent rate:         `rentRatesFromStateV22` via the view: per side `max(utilisation, occupancy)` (prog#653), `rentRateE9FailClosedV22` is the utilisation term.
  * The app-facing names (`readBandRentView`, `closeBlockedByBand`, ...) are kept so the surfaces do not change.
  */
 import { bandWalkEstimate } from "@/lib/limits/catchup-estimate";
@@ -58,7 +58,10 @@ export interface BandRentView {
     enabled: boolean;
     maxE9PerSlot: bigint;
     kinkBps: number;
-    /** Current per-slot rate per side, e9 of notional (0 while there is no bound vault / measured N_cap). */
+    /**
+     * Current per-slot rate per side, e9 of notional: the rate the program charges, the higher of the utilisation rent and
+     * the occupancy rent past 85% of a side's position slots (0 while there is no bound vault / measured N_cap).
+     */
     rateLongE9: bigint;
     rateShortE9: bigint;
   };

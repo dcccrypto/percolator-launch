@@ -1,6 +1,9 @@
 "use client";
 
-/** The current holding fee on a position in a rent market ("Holding fee 0.04% per day"). Nothing otherwise. */
+/**
+ * The current holding fee on a position in a rent market ("Holding fee 0.04% per day"): one per-notional rate, the rate the
+ * program charges, which already includes the rise when a side is nearly full (prog#653). Nothing otherwise.
+ */
 import type { FC } from "react";
 import { V22_COPY } from "@/lib/v22/copy";
 import { rentPercentPerDay, type BandRentView } from "@/lib/v22/band-rent-state";

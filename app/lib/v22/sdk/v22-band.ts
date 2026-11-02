@@ -1,5 +1,5 @@
 /*
- * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ adf8fd0 (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate),
+ * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ adf8fd0 (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate) + prog#653 per-notional occupancy from percolator-sdk#443 @ 51eb6e1,
  * src/abi/v22-band.ts. Only the imports are retargeted (the installed @percolatorct/sdk 8.0.0 root, the v2.1 txv1 port, and the sibling v22 ports).
  * Delete when @percolatorct/sdk >= 9.0.0 ships and point ./index.ts at the package. Do not edit here; fix upstream in percolator-sdk.
  */
@@ -15,6 +15,9 @@
  * `reject_band_favourable_close_view`, are views over the group, so they are ported from the wrapper source
  * (`v16_program.rs` `asset_price_lagged_view`, `band_floor_stuck_view`, `reject_band_favourable_close_view`) and
  * covered by truth-table tests citing it.
+ *
+ * prog#572 per notional (#653, rc23 178fedc4): a side's rent rate is `max(utilisation rent, occupancy rent)`, the occupancy
+ * term ramping past 85% of `band_max_positions_per_side` (`rent_occupancy_rate_e9`, `rent_side_rate_e9`, same crate).
  *
  * Note vs. earlier app code: the wrapper's lag predicate is "EXPOSED (open interest on either side) AND mark != target";
  * an unexposed asset is never lagged.
@@ -102,6 +105,63 @@ export function usersSideOiQV22(oiSideQ: bigint, vaultLpEffQ: bigint, longSide: 
   if (!onSide) return oiSideQ;
   const abs = vaultLpEffQ < 0n ? -vaultLpEffQ : vaultLpEffQ;
   return oiSideQ > abs ? oiSideQ - abs : 0n;
+}
+
+/** `RENT_OCC_KNEE_BPS`: at or below 85% of the side cap the occupancy term is 0. */
+export const RENT_OCC_KNEE_BPS_V22 = 8_500;
+/** `RENT_OCC_CAP_DOMAIN`: past the knee a cap above 2^16 fails closed to the ceiling. */
+export const RENT_OCC_CAP_DOMAIN_V22 = 1n << 16n;
+
+/**
+ * `growth_v19::rent_occupancy_rate_e9`: the side's slot-occupancy rent rate, e9 of notional per slot. 0 when `cap == 0` (band
+ * off) or `max == 0` or at / below 85% of the cap; past it `ceil(max * x^2)` with `x = (o - 0.85) / 0.15`, in `1..=max`; `max` at
+ * a full side or a cap above {@link RENT_OCC_CAP_DOMAIN_V22}.
+ *
+ * @param count         `stored_pos_count_*` of the side.
+ * @param cap           `band_max_positions_per_side` (0 when the band is off).
+ * @param maxE9PerSlot  `rent_max_e9_per_slot`.
+ * @returns The rate.
+ * @example
+ * ```ts
+ * rentOccupancyRateE9V22(256n, 256n, 100n); // 100n
+ * rentOccupancyRateE9V22(217n, 256n, 100n); // 0n
+ * ```
+ */
+export function rentOccupancyRateE9V22(count: bigint, cap: bigint, maxE9PerSlot: bigint): bigint {
+  if (cap === 0n || maxE9PerSlot === 0n) return 0n;
+  const c = count < cap ? count : cap;
+  const lhs = c * BPS;
+  const knee = cap * BigInt(RENT_OCC_KNEE_BPS_V22);
+  if (lhs <= knee) return 0n;
+  if (c >= cap || cap > RENT_OCC_CAP_DOMAIN_V22) return maxE9PerSlot;
+  const ex = lhs - knee;
+  const span = cap * (BPS - BigInt(RENT_OCC_KNEE_BPS_V22));
+  const num = maxE9PerSlot * ex * ex;
+  const den = span * span;
+  const r = num / den + (num % den !== 0n ? 1n : 0n);
+  if (r >= maxE9PerSlot) return maxE9PerSlot;
+  return r > 1n ? r : 1n;
+}
+
+/**
+ * `growth_v19::rent_side_rate_e9`: the per-side rent rate charged, `max(utilisation rent, occupancy rent)`.
+ *
+ * @param usersQ        Users' open interest on the side ({@link usersSideOiQV22}).
+ * @param nCapQ         `rent_n_cap_q`.
+ * @param kinkBps       `rent_kink_bps`.
+ * @param rentMax       `rent_max_e9_per_slot`.
+ * @param sideCount     `stored_pos_count_*` of the side.
+ * @param sideCap       `band_max_positions_per_side`, 0 when the band is off.
+ * @returns The rate, e9 of notional per slot.
+ * @example
+ * ```ts
+ * rentSideRateE9V22(0n, 1000n, 5000, 100n, 256n, 256n); // 100n: no utilisation, full side
+ * ```
+ */
+export function rentSideRateE9V22(usersQ: bigint, nCapQ: bigint, kinkBps: number, rentMax: bigint, sideCount: bigint, sideCap: bigint): bigint {
+  const util = rentRateE9FailClosedV22(usersQ, nCapQ, kinkBps, rentMax);
+  const occ = rentOccupancyRateE9V22(sideCount, sideCap, rentMax);
+  return occ > util ? occ : util;
 }
 
 /**
@@ -235,10 +295,15 @@ export interface AssetBandStateV22 {
   rentUnroutedAtoms: bigint;
   oiEffLongQ: bigint;
   oiEffShortQ: bigint;
+  /** `stored_pos_count_long`: the count the engine's "side full" check and the occupancy rent read (the vault LP's own leg included). */
+  storedPosCountLong: bigint;
+  storedPosCountShort: bigint;
 }
 
 /** Decoded rent fields of the growth record and the vault LP record. */
 export interface AssetRentStateV22 {
+  /** The growth record is on (`version != 0`): off, the program charges no rent at all. */
+  growthOn: boolean;
   rentKinkBps: number;
   rentNCapQ: bigint;
   vaultLpNetQ: bigint;
@@ -300,6 +365,7 @@ export function decodeAssetBandStateV22(data: Uint8Array, assetIndex = 0): Asset
     bandLiqPendingLong: u64(data, e + S.bandLiqPendingLong), bandLiqPendingShort: u64(data, e + S.bandLiqPendingShort),
     bandPinSinceSlot: u64(data, e + S.bandPinSinceSlot), rentIndexLongNum: u128(data, e + S.rentIndexLongNum), rentIndexShortNum: u128(data, e + S.rentIndexShortNum),
     rentUnroutedAtoms: u128(data, e + S.rentUnroutedAtoms), oiEffLongQ: u128(data, e + A.oiEffLongQ), oiEffShortQ: u128(data, e + A.oiEffShortQ),
+    storedPosCountLong: u64(data, e + S.storedPosCountLong), storedPosCountShort: u64(data, e + S.storedPosCountShort),
   };
 }
 
@@ -321,6 +387,7 @@ export function decodeAssetRentStateV22(data: Uint8Array, assetIndex = 0): Asset
   const s = g.slotOff(assetIndex);
   const W = g.layout.wrapperSlot;
   return {
+    growthOn: data[s + W.growth + B.growth.version] !== 0,
     rentKinkBps: u16(data, s + W.growth + B.growth.rentKinkBps),
     rentNCapQ: u64(data, s + W.growth + B.growth.rentNCapQ),
     vaultLpNetQ: i128(data, s + W.vaultLp + B.vaultLp.lpNetQ),
@@ -328,12 +395,27 @@ export function decodeAssetRentStateV22(data: Uint8Array, assetIndex = 0): Asset
   };
 }
 
-/** `rent_rates_view`: per-side rent rates, e9 of notional per slot (0 without a rent ceiling, a bound vault or a measured `N_cap`). */
+/**
+ * `rent_rates_view`: the per-side rent rates, e9 of notional per slot, `max(utilisation rent, occupancy rent)` per side (the
+ * rate the engine's rent index moves at). `{0, 0}` unless the config has a rent ceiling, the growth record is on, a vault LP is
+ * bound and `N_cap` is measured: the occupancy term has the same gates. It uses the side's position count against
+ * `band_max_positions_per_side` (cap 0 when `band_bps == 0`). Not modelled: a duration-pinned accrual charges no rent.
+ *
+ * @param cfg    {@link decodeBandConfigV22}.
+ * @param asset  {@link decodeAssetBandStateV22}.
+ * @param rent   {@link decodeAssetRentStateV22}.
+ * @returns `{ long, short }`.
+ * @example
+ * ```ts
+ * rentRatesFromStateV22(cfg, asset, rent).long;
+ * ```
+ */
 export function rentRatesFromStateV22(cfg: BandConfigV22, asset: AssetBandStateV22, rent: AssetRentStateV22): { long: bigint; short: bigint } {
-  if (cfg.rentMaxE9PerSlot === 0n || !rent.vaultLpBound || rent.rentNCapQ === 0n) return { long: 0n, short: 0n };
+  if (cfg.rentMaxE9PerSlot === 0n || !rent.growthOn || !rent.vaultLpBound || rent.rentNCapQ === 0n) return { long: 0n, short: 0n };
+  const cap = cfg.bandBps === 0 ? 0n : cfg.bandMaxPositionsPerSide;
   return {
-    long: rentRateE9FailClosedV22(usersSideOiQV22(asset.oiEffLongQ, rent.vaultLpNetQ, true), rent.rentNCapQ, rent.rentKinkBps, cfg.rentMaxE9PerSlot),
-    short: rentRateE9FailClosedV22(usersSideOiQV22(asset.oiEffShortQ, rent.vaultLpNetQ, false), rent.rentNCapQ, rent.rentKinkBps, cfg.rentMaxE9PerSlot),
+    long: rentSideRateE9V22(usersSideOiQV22(asset.oiEffLongQ, rent.vaultLpNetQ, true), rent.rentNCapQ, rent.rentKinkBps, cfg.rentMaxE9PerSlot, asset.storedPosCountLong, cap),
+    short: rentSideRateE9V22(usersSideOiQV22(asset.oiEffShortQ, rent.vaultLpNetQ, false), rent.rentNCapQ, rent.rentKinkBps, cfg.rentMaxE9PerSlot, asset.storedPosCountShort, cap),
   };
 }
 

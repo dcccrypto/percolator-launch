@@ -33,7 +33,7 @@ function putI128(d: Uint8Array, o: number, x: bigint) {
   v.setBigInt64(o + 8, x >> 64n, true);
 }
 
-interface Opts { maxStepBps?: number; maxDt?: number; pinSince?: bigint; bandBps?: number; epoch?: number; pin?: number; rentMax?: number; minLeg?: bigint; mark?: bigint; target?: bigint; lotExp?: number; kink?: number; nCap?: bigint; bound?: boolean; lpNet?: bigint; oiLong?: bigint; oiShort?: bigint }
+interface Opts { maxStepBps?: number; maxDt?: number; pinSince?: bigint; bandBps?: number; epoch?: number; pin?: number; rentMax?: number; minLeg?: bigint; mark?: bigint; target?: bigint; lotExp?: number; kink?: number; nCap?: bigint; bound?: boolean; lpNet?: bigint; oiLong?: bigint; oiShort?: bigint; nLong?: bigint; nShort?: bigint }
 function build(o: Opts): Uint8Array {
   const d = market();
   const cfg = L.marketGroupOff + L.group.config;
@@ -42,6 +42,7 @@ function build(o: Opts): Uint8Array {
   put64(d, cfg + B.config.bandMaxPinSlots, BigInt(o.pin ?? 9000));
   put64(d, cfg + B.config.rentMaxE9PerSlot, BigInt(o.rentMax ?? 0));
   put64(d, cfg + B.config.bandMinLegNotional, o.minLeg ?? 0n);
+  put64(d, cfg + B.config.bandMaxPositionsPerSide, 256n);
   put64(d, cfg + B.config.maxPriceMoveBpsPerSlot, BigInt(o.maxStepBps ?? 4));
   put64(d, cfg + B.config.maxAccrualDtSlots, BigInt(o.maxDt ?? 100));
   const slot = L.marketGroupOff + L.marketGroupLen;
@@ -54,6 +55,9 @@ function build(o: Opts): Uint8Array {
   d[slot + L.wrapperSlot.profileLotExp] = o.lotExp ?? 0;
   put16(d, slot + L.wrapperSlot.growth + 42, o.kink ?? 5000);
   put64(d, slot + L.wrapperSlot.growth + 48, o.nCap ?? 0n);
+  d[slot + L.wrapperSlot.growth + B.growth.version] = 1; // growth on: `rent_rates_view` charges nothing without it
+  put64(d, eng + B.assetState.storedPosCountLong, o.nLong ?? 0n);
+  put64(d, eng + B.assetState.storedPosCountShort, o.nShort ?? 0n);
   d[slot + L.wrapperSlot.vaultLp + 90] = o.bound ? 1 : 0;
   putI128(d, slot + L.wrapperSlot.vaultLp + 32, o.lpNet ?? 0n);
   return d;
