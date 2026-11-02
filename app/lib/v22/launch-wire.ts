@@ -35,7 +35,7 @@ export function encodeInitMarketDataWithV22(args: InitMarketV17Args, growth: Gro
     throw new Error(`collateral with ${growth.collateralDecimals} decimals cannot carry a leveraged market (max ${GROWTH_MAX_COLLATERAL_DECIMALS})`);
   }
   // R6: every InitMarket path encodes here, so a config the program refuses (Band Safety Law, 105 / 106) never leaves.
-  const bsl = bandSafetyLawIssue(args, v22);
+  const bsl = bandSafetyLawIssue(args, v22, growth.collateralDecimals);
   if (bsl) throw new Error(bsl.message);
   return encodeInitMarketV22(args, {
     rGapBps: growth.rGapBps,

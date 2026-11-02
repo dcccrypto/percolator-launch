@@ -2,8 +2,8 @@
  * R6 (Khubair, 2 Nov): the Band Safety Law pre-check in the launch path.
  *
  * Program verdicts quoted here were measured on the real wrapper .so in LiteSVM with the app's own InitMarket bytes
- * (bsl6 matrix): x5 = rc23 34996503 (.so md5 ae4fdd9b), x1 = bbaa0e7b (.so md5 f52a302d). Every config the wizard can
- * derive (IMR 1000..5000 x holding fee x price protection, 15,432 InitMarkets) is accepted by both.
+ * (bsl6 matrix): rc23 178fedc4 (.so md5 9cde60a6). Every config the wizard can derive (IMR 1000..5000 x holding fee x
+ * price protection, 15,432 InitMarkets) is accepted, at most about 78k compute units.
  */
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -12,13 +12,13 @@ import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { deriveLaunchMarketParams } from "@/lib/market-params";
 import { buildV17InitMarketArgs } from "@/lib/create-market-args";
 import { defaultGrowthLaunch } from "@/lib/v21/growth-launch";
-import { BSL_OCCUPANCY_MULTIPLE_APP, bandSafetyLawIssue, planLaunchV22, toLaunchParams } from "@/lib/v22/launch-plan";
+import { bandSafetyLawIssue, planLaunchV22, toLaunchParams } from "@/lib/v22/launch-plan";
 import { encodeInitMarketDataWithV22 } from "@/lib/v22/launch-wire";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { V22_COPY } from "@/lib/v22/copy";
 
 /** sha256 of percolator-sdk PR #442 `src/abi/v22-band-safety-law.ts` (the SDK test pins the same value). */
-const BSL_SHA256 = "cf96931c39c1b024b492a881acb3937814ddb908fdc6348529e18d6045c97f09";
+const BSL_SHA256 = "6103c6a85eff49a5d632093e90a3b7c98a7f4efe6fc0a68981238fc923e3254d";
 const PRICE = 20_000_000n;
 
 function launch(imr: number, protection: boolean, holdingFee: boolean) {
@@ -36,10 +36,9 @@ describe("R6: Band Safety Law pre-check (launch path)", () => {
   it("the vendored file is byte-identical to the SDK copy (sha256 pin)", () => {
     const p = path.join(__dirname, "../../../lib/v22/sdk/v22-band-safety-law.ts");
     expect(createHash("sha256").update(readFileSync(p)).digest("hex")).toBe(BSL_SHA256);
-    expect(BSL_OCCUPANCY_MULTIPLE_APP).toBe(5n);
   });
 
-  it("every wizard leverage x toggle passes (program: ok on x5 and x1 for all 15,432) and encodes", () => {
+  it("every wizard leverage x toggle passes (program: ok on all 15,432) and encodes", () => {
     const seen = new Set<number>();
     let n = 0;
     for (let imr = 1000; imr <= 5000; imr++) {
@@ -57,12 +56,12 @@ describe("R6: Band Safety Law pre-check (launch path)", () => {
   });
 
   // Program rows (sdk test/fixtures/v22-bsl/parity.json): the 10x margin (MMR 500, price move 4, dt 100, funding 111) with
-  // price protection: rent 500 ok on both; rent 1000 -> 106 on x5, ok on x1.
-  it("refuses, before encoding, what the program refuses at the 10x margin (rent 1000 + protection -> 106 on rc23)", () => {
+  // price protection: rent 4,055 ok; rent 4,056 refused (the program's validator runs out of compute there).
+  it("refuses, before encoding, what the program refuses at the 10x margin (rent limit 4,055)", () => {
     const { initArgs, growth, plan } = launch(1000, true, true);
     const v22 = toLaunchParams(plan)!;
-    expect(bandSafetyLawIssue(initArgs, { ...v22, rent: { rentMaxE9PerSlot: 500, rentKinkBps: 5000 } })).toBeNull();
-    const bad = { ...v22, rent: { rentMaxE9PerSlot: 1000, rentKinkBps: 5000 } };
+    expect(bandSafetyLawIssue(initArgs, { ...v22, rent: { rentMaxE9PerSlot: 4_055, rentKinkBps: 5000 } })).toBeNull();
+    const bad = { ...v22, rent: { rentMaxE9PerSlot: 4_056, rentKinkBps: 5000 } };
     expect(bandSafetyLawIssue(initArgs, bad)).toEqual({ code: "protection-unsafe", message: V22_COPY.wizard.protectionUnsafe });
     expect(() => encodeInitMarketDataWithV22(initArgs, growth, bad)).toThrow(V22_COPY.wizard.protectionUnsafe);
   });
@@ -74,6 +73,29 @@ describe("R6: Band Safety Law pre-check (launch path)", () => {
     const plan = planLaunchV22({ tokenPriceE6: PRICE, collateralDecimals: 6, oracleMode: "keeper", growthOn: true, protection: true, holdingFee: true, initArgs: thin });
     expect(plan.issues.map((x) => x.code)).toEqual(["protection-unsafe"]);
     expect(toLaunchParams(plan)).toBeUndefined();
+  });
+
+  // Program rows (sdk parity.json later-*): each is 105 right after the law, and outranks an invalid base config.
+  it("refuses the band rules after the law: maintenance fee, genesis price, minimum leg", () => {
+    const { initArgs, growth, plan } = launch(2000, true, true);
+    const v22 = toLaunchParams(plan)!;
+    expect(bandSafetyLawIssue(initArgs, v22, 6)).toBeNull();
+    const fee = { ...initArgs, maintenanceFeePerSlot: "1" };
+    expect(bandSafetyLawIssue(fee, v22, 6)?.code).toBe("protection-unsafe");
+    expect(() => encodeInitMarketDataWithV22(fee, growth, v22)).toThrow("The price protection setting isn't valid.");
+    const low = { ...initArgs, initialPrice: "123099" };
+    expect(bandSafetyLawIssue(low, v22, 6)?.code).toBe("protection-unsafe");
+    expect(bandSafetyLawIssue({ ...initArgs, initialPrice: "123100" }, v22, 6)).toBeNull();
+    expect(() => encodeInitMarketDataWithV22(low, growth, v22)).toThrow("The price protection setting isn't valid.");
+    const thinLeg = { ...v22, band: { ...v22.band!, bandMinLegNotional: 9_999_999n } };
+    expect(bandSafetyLawIssue(initArgs, thinLeg, 6)?.code).toBe("protection-unsafe");
+    expect(bandSafetyLawIssue(initArgs, { ...v22, band: { ...v22.band!, bandMinLegNotional: 10_000_000n } }, 6)).toBeNull();
+  });
+
+  it("the plan reads its own per-lot price, not the placeholder in initArgs", () => {
+    const { initArgs } = launch(2000, true, true);
+    const plan = planLaunchV22({ tokenPriceE6: PRICE, collateralDecimals: 6, oracleMode: "keeper", growthOn: true, protection: true, holdingFee: true, initArgs: { ...initArgs, initialPrice: "1" } });
+    expect(plan.issues).toEqual([]);
   });
 
   it("no rent block (both toggles off): nothing to check", () => {

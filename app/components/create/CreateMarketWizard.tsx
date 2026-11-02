@@ -784,7 +784,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
           oracleMode: wizard.oracleType === "hyperp_ema" ? "hyperp" : wizard.oracleType,
           growthOn: true,
           ...wizard.v22,
-          // R6: the Band Safety Law pre-check runs on the margins this launch will send (the price is not read by it).
+          // R6: the Band Safety Law pre-check runs on the margins this launch will send (the plan substitutes its per-lot price).
           initArgs: buildV17InitMarketArgs({ p3: true, initialPriceE6: 1_000_000n, tradingFeeBps: wizard.tradingFeeBps, growth: growthLaunch }, growthDerived),
         })
       : null;
