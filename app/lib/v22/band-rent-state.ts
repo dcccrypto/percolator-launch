@@ -4,7 +4,8 @@
  *  - state words:       `layout.bandRent` offsets via `readBandRentViewV22`;
  *  - lag predicate:     `assetPriceLaggedV22` (requires open interest on at least one side AND mark != target);
  *  - floor-stuck rule:  `bandFloorStuckV22`; favourable side as in `favourableCloseRefusedV22`;
- *  - rent rate:         `rentRateE9FailClosedV22`.
+ *  - rent rate:         `rentRateE9FailClosedV22`;
+ *  - occupancy (prog#572): `occupancyRatesFromStateV22` via the view (flat per position per slot past 85% of a side).
  * The app-facing names (`readBandRentView`, `closeBlockedByBand`, ...) are kept so the surfaces do not change.
  */
 import { bandWalkEstimate } from "@/lib/limits/catchup-estimate";
@@ -62,6 +63,19 @@ export interface BandRentView {
     rateLongE9: bigint;
     rateShortE9: bigint;
   };
+  /**
+   * prog#572 (#647): on a band market every position on a side that is more than 85% full also pays a FLAT amount per
+   * slot, the same for every position whatever its size (`occupancyRatesFromStateV22`), on top of the per-notional
+   * rate above. Atoms x 1e9 per slot per position; 0 at or below 85%. Absent on a market without a band.
+   */
+  occupancy?: {
+    enabled: boolean;
+    perPositionLongE9: bigint;
+    perPositionShortE9: bigint;
+    countLong: bigint;
+    countShort: bigint;
+    cap: bigint;
+  };
 }
 
 /** Band / rent view of asset `assetIndex`; null for anything that is not a v2.2 band / rent market (never throws). */
@@ -82,7 +96,21 @@ export function readBandRentView(data: Uint8Array | null | undefined, assetIndex
     },
     price: { capBpsPerSlot: v.config.maxPriceMoveBpsPerSlot, markE6: v.price.markE6, targetE6: v.price.targetE6, lagging: v.price.lagging, floorStuck: v.price.floorStuck, favourableCloseSide: v.price.favourableCloseSide },
     rent: { enabled: v.rentRates.enabled, maxE9PerSlot: v.config.rentMaxE9PerSlot, kinkBps: v.rent.rentKinkBps, rateLongE9: v.rentRates.long, rateShortE9: v.rentRates.short },
+    ...(v.occupancy
+      ? { occupancy: { enabled: v.occupancy.enabled, perPositionLongE9: v.occupancy.long, perPositionShortE9: v.occupancy.short, countLong: v.occupancy.countLong, countShort: v.occupancy.countShort, cap: v.occupancy.cap } }
+      : {}),
   };
+}
+
+/**
+ * prog#572: the flat per-position occupancy charge on `side` per DAY, in collateral atoms (floored), at the side's current
+ * fullness. 0 when the side is at or below 85% full, off the band, or the charge is off.
+ */
+export function occupancyAtomsPerDay(view: BandRentView | null, side: "long" | "short"): bigint {
+  const o = view?.occupancy;
+  if (!o || !o.enabled) return 0n;
+  const e9 = side === "long" ? o.perPositionLongE9 : o.perPositionShortE9;
+  return (e9 * BigInt(SLOTS_PER_DAY_V22)) / 1_000_000_000n;
 }
 
 /** How long the price catch-up is estimated to last on a band market (ms): the gap between target and effective price over the per-sweep walk min(cap x sweep, band); null = no estimate. */

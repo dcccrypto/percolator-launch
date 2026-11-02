@@ -1,5 +1,5 @@
 /*
- * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ adf8fd0 (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate),
+ * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ adf8fd0 (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate), [+ prog#572 occupancy port from percolator-sdk#441 @ ed4097c]
  * src/solana/slab.ts. Only the imports are retargeted (the installed @percolatorct/sdk 8.0.0 root, the v2.1 txv1 port, and the sibling v22 ports).
  * Delete when @percolatorct/sdk >= 9.0.0 ships and point ./index.ts at the package. Do not edit here; fix upstream in percolator-sdk.
  */
@@ -4517,9 +4517,17 @@ export interface AssetOracleProfileV17 {
   assetAdmin: PublicKey;
   /** v18 NEW (GH#420, offset 400): this asset's unclaimed creator share of trade fees. Claim via {@link encodeWithdrawCreatorFee}. */
   creatorFeeClaimableAtoms: bigint;
-  /** v18 NEW (GH#444, offset 408): slot at which `maintenance_fee_per_slot` last changed (asset-0 only; market-wide). */
+  /**
+   * v18 NEW (GH#444, offset 408): slot at which `maintenance_fee_per_slot` last changed (asset-0 only; market-wide).
+   * On a v2.2 BAND market (prog#572) these bytes are the occupancy clocks' last-accrual slot instead (the maintenance fee
+   * is always 0 there): read them with v22-band `occupancyClocksFromProfileV22` / `decodeOccupancyStateV22`.
+   */
   maintenanceFeeCheckpointSlot: bigint;
-  /** v18 NEW (GH#444, offset 416): the maintenance fee rate in force before the last change (asset-0 only; market-wide). */
+  /**
+   * v18 NEW (GH#444, offset 416): the maintenance fee rate in force before the last change (asset-0 only; market-wide).
+   * On a v2.2 BAND market (prog#572) this u128 packs the occupancy clocks `C_long` (low 64 bits) | `C_short` (high 64 bits),
+   * Q32.32 full-occupancy slots; it is NOT a fee rate there.
+   */
   maintenanceFeePreviousRate: bigint;
   /** v18 NEW (zero-move-funding, offset 432): mark whose premium applies at the engine asset's current slot. Zero = not-yet-initialized. */
   fundingMarkE6: bigint;
@@ -5021,8 +5029,18 @@ export interface PortfolioV17 {
   feeCredits: bigint;
   /** Cancel-deposit escrow holding (u128). */
   cancelDepositEscrow: bigint;
-  /** Slot when fees were last accrued. */
+  /**
+   * Engine `last_fee_slot`: the slot recurring wrapper fees were last charged to. On a v2.2 BAND market (prog#572, while
+   * Live, once the portfolio holds a leg) it is NOT a slot but a tagged occupancy checkpoint `bit63 | clockInt << 1 | short`
+   * (see {@link PortfolioV17.occupancyCheckpoint}); never compare a tagged word with a slot.
+   */
   lastFeeSlot: bigint;
+  /**
+   * prog#572: `lastFeeSlot` decoded as an occupancy checkpoint when bit 63 is set (band markets only): the side it was
+   * taken on and the side clock's integer part (full-occupancy slots) at the leg's last charge. `null` = a real slot / 0.
+   * Always set by {@link parsePortfolioV17}; optional in the type so portfolios from older decoders stay assignable.
+   */
+  occupancyCheckpoint?: { short: boolean; clockInt: bigint } | null;
   /** Bitmap of active leg slots (one u64 word for 16-asset portfolios). */
   activeBitmap: bigint;
   /** All 16 position leg slots (active or empty). */
@@ -5117,6 +5135,9 @@ export function parsePortfolioV17(data: Uint8Array): PortfolioV17 {
     ? readU128LE(data, PF_CANCEL_ESCROW_OFF) : 0n;
   const lastFeeSlot = data.length >= PF_LAST_FEE_SLOT_OFF + 8
     ? readU64LE(data, PF_LAST_FEE_SLOT_OFF) : 0n;
+  // prog#572 `growth_v19::OCC_CK_TAG` / `occ_ck_encode` (same rule as v22-band `decodeOccupancyCheckpointV22`).
+  const occupancyCheckpoint = (lastFeeSlot >> 63n) === 1n
+    ? { short: (lastFeeSlot & 1n) === 1n, clockInt: (lastFeeSlot & ((1n << 63n) - 1n)) >> 1n } : null;
   const activeBitmap = data.length >= PF_ACTIVE_BITMAP_OFF + 8
     ? readU64LE(data, PF_ACTIVE_BITMAP_OFF) : 0n;
 
@@ -5235,6 +5256,7 @@ export function parsePortfolioV17(data: Uint8Array): PortfolioV17 {
     feeCredits,
     cancelDepositEscrow,
     lastFeeSlot,
+    occupancyCheckpoint,
     activeBitmap,
     legs,
     sourceDomains,

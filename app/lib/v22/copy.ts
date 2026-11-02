@@ -70,7 +70,12 @@ export const V22_COPY = {
   rent: {
     rate: (pctPerDay: string) => `Holding fee ${pctPerDay} per day`,
     none: "No holding fee",
-    hint: "A small fee while a position is open, charged from the position's margin.",
+    // prog#572: past 85% of a side's position slots, every position on that side also pays the same small flat amount.
+    flat: (amountPerDay: string) => `Holding fee ${amountPerDay} per day per position`,
+    rateAndFlat: (pctPerDay: string, amountPerDay: string) => `Holding fee ${pctPerDay} + ${amountPerDay} per day`,
+    hint:
+      "A small fee while a position is open, charged from the position's margin. When one side of the market is more than 85% full, " +
+      "every position on that side also pays the same small flat amount per day, whatever its size. It rises as the side fills and stops once it is 85% full or less.",
   },
   // ── Launch wizard ────────────────────────────────────────────────────────
   wizard: {

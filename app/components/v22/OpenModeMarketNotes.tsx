@@ -29,7 +29,7 @@ export const OpenModeMarketNotes: FC<OpenModeMarketNotesProps> = ({ lotGuard: gu
   // The "exponent not read yet" guard is a brief loading state, not a reason: only a definitive refusal is shown here.
   const lotGuard = guard === V22_COPY.lot.unitsUnknown ? null : guard;
   const band = bandLabel(view);
-  const fee = holdingFeeLabel(view, side);
+  const fee = holdingFeeLabel(view, side, { decimals: collateralDecimals, symbol: collateralSymbol });
   if (!lotGuard && !band && !fee && !(view && view.band.enabled)) return null;
   return (
     <div data-testid="open-mode-market-notes" className="mb-3">

@@ -1,5 +1,5 @@
 /*
- * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ d98488b (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate),
+ * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ d98488b (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate), [+ prog#572 occupancy port from percolator-sdk#441 @ ed4097c]
  * src/abi/layout.ts. Only the imports are retargeted (the installed @percolatorct/sdk 8.0.0 root, the v2.1 txv1 port, and the sibling v22 ports).
  * Delete when @percolatorct/sdk >= 9.0.0 ships and point ./index.ts at the package. Do not edit here; fix upstream in percolator-sdk.
  */
@@ -199,6 +199,14 @@ export interface BandRentOffsets {
   assetState: { bandAnchorPrice: number; bandAnchorSlot: number; bandEpoch: number; bandUncertifiedLong: number; bandUncertifiedShort: number; bandLiqPendingLong: number; bandLiqPendingShort: number; bandPinSinceSlot: number; rentIndexLongNum: number; rentIndexShortNum: number; rentUnroutedAtoms: number };
   growth: { rentKinkBps: number; rentNCapQ: number };
   vaultLp: { lpNetQ: number; flags: number };
+  /**
+   * prog#572 (#647) per-slot occupancy charge on band markets. `storedPosCount*` / `slotLast` are relative to the ENGINE slot
+   * start; `profileClock*` to the asset-0 oracle profile (wrapper slot + `wrapperSlot.oracleProfile`): on a band market the
+   * GH#444 bytes `maintenance_fee_checkpoint_slot` (+408) and `maintenance_fee_previous_rate` (+416, u128) hold the side
+   * clocks' last slot, `C_long` (low 8 B) and `C_short` (high 8 B); `vaultLpPortfolio` to the vault LP record;
+   * `portfolioLastFeeSlot` to the engine `PortfolioAccountV16Account` (account offset + the 16-byte header; on band markets a tagged checkpoint, see `decodeOccupancyCheckpointV22`).
+   */
+  occupancy: { storedPosCountLong: number; storedPosCountShort: number; slotLast: number; profileClockSlot: number; profileClockLong: number; profileClockShort: number; vaultLpPortfolio: number; portfolioLastFeeSlot: number };
 }
 
 /** One complete layout. */
@@ -341,6 +349,8 @@ const BAND_RENT_V22: BandRentOffsets = Object.freeze({
   assetState: Object.freeze({ bandAnchorPrice: 515, bandAnchorSlot: 523, bandEpoch: 531, bandUncertifiedLong: 539, bandUncertifiedShort: 547, bandLiqPendingLong: 555, bandLiqPendingShort: 563, bandPinSinceSlot: 571, rentIndexLongNum: 579, rentIndexShortNum: 595, rentUnroutedAtoms: 611 }),
   growth: Object.freeze({ rentKinkBps: 42, rentNCapQ: 48 }),
   vaultLp: Object.freeze({ lpNetQ: 32, flags: 90 }),
+  // prog#572 (#647 @ 34996503); pinned by test/fixtures/v22-band-parity.json `occupancy`.
+  occupancy: Object.freeze({ storedPosCountLong: 321, storedPosCountShort: 329, slotLast: 41, profileClockSlot: 408, profileClockLong: 416, profileClockShort: 424, vaultLpPortfolio: 0, portfolioLastFeeSlot: 324 }),
 });
 
 function v22Row(o: {

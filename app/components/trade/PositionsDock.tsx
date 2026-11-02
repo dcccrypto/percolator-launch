@@ -504,7 +504,7 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
                     ADL
                   </span>
                 )}
-                <HoldingFeeChip view={bandView} side={isLong ? "long" : "short"} />
+                <HoldingFeeChip view={bandView} side={isLong ? "long" : "short"} collateral={{ decimals, symbol: collateralSymbol }} />
                 {bandView?.band.enabled && legBelowHalfMin(account.positionSize < 0n ? -account.positionSize : account.positionSize, bandView.price.markE6, bandView.band.minLegNotionalAtoms) && (
                   <div data-testid="band-small-position" className="mt-0.5 text-[9px] text-[var(--text-dim)]">
                     {V22_COPY.band.smallPositionWarn(String(Number(bandView.band.minLegNotionalAtoms) / 10 ** decimals / 2), collateralSymbol)}
