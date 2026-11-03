@@ -6,9 +6,11 @@
  * the page, the nav tab and the door can never disagree about who is in.
  *
  * Membership and position are the definitions /api/waitlist/whoami already
- * uses — same row resolution order, same "a row without a referral code is not
- * a membership", same position RPCs preferring pubkey then email — so a member
- * reading "#812" on the waitlist page is judged on #812 here.
+ * uses — same row resolution order, same "a member's row has a referral code",
+ * same position RPCs preferring pubkey then email — so a member reading "#812"
+ * on the waitlist page is judged on #812 here. A legacy row that missed the
+ * referral-code backfill is given its code here, once its owner has proved the
+ * DID, wallet or email that matched it, instead of being turned away.
  *
  * Fails CLOSED. Any lookup error, or a member whose position cannot be read, is
  * `unavailable` — never a grant, and never mislabelled as "not on the list" or
@@ -18,6 +20,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PrivyAuthOk } from "@/lib/privy-auth";
 import { cohortCutoff, isWithinCohort } from "@/lib/playground-access";
+import { ensureReferralCode } from "@/lib/waitlist/ensureReferralCode";
 
 export type PlaygroundVerdict =
   | { kind: "granted"; rowId: string; position: number; cutoff: number }
@@ -49,10 +52,7 @@ async function findBy(
   // supabase-js reports failures in `error` rather than throwing. Ignoring it
   // would turn an outage into "we don't see you on the list".
   if (error) throw new LookupError(`waitlist lookup by ${column} failed`);
-  const row = data as WaitlistRow | null;
-  // whoami's definition of membership: a row only counts once it has a
-  // referral code.
-  return row?.referral_code ? row : null;
+  return data as WaitlistRow | null;
 }
 
 /** Case-insensitive exact email match (stored casing varies); LIKE wildcards escaped. */
@@ -60,8 +60,17 @@ async function findByEmail(supabase: SupabaseClient, email: string): Promise<Wai
   const escaped = email.replace(/[\\%_]/g, (c) => `\\${c}`);
   const { data, error } = await supabase.from("waitlist").select(SELECT).ilike("email", escaped).limit(1).maybeSingle();
   if (error) throw new LookupError("waitlist lookup by email failed");
-  const row = data as WaitlistRow | null;
-  return row?.referral_code ? row : null;
+  return data as WaitlistRow | null;
+}
+
+/** A row missing its referral code gets one now (see ensureReferralCode); the caller has proved the identifier that matched it. */
+async function withCode(supabase: SupabaseClient, row: WaitlistRow): Promise<WaitlistRow> {
+  if (row.referral_code) return row;
+  try {
+    return { ...row, referral_code: await ensureReferralCode(supabase, row.id) };
+  } catch (err) {
+    throw new LookupError(err instanceof Error ? err.message : "referral code assign failed");
+  }
 }
 
 /** Like whoami: an email/wallet hit stores the Privy DID so the next sign-in matches directly. Best effort. */
@@ -76,18 +85,18 @@ async function backfillDid(supabase: SupabaseClient, row: WaitlistRow, did: stri
 
 async function resolveRow(supabase: SupabaseClient, auth: PrivyAuthOk): Promise<WaitlistRow | null> {
   const byDid = await findBy(supabase, "privy_did", auth.userId);
-  if (byDid) return byDid;
+  if (byDid) return withCode(supabase, byDid);
   // FULL arrays: a member who signed up with their second wallet or second
   // email must still resolve.
   for (const pubkey of auth.solanaWallets ?? []) {
     const hit = await findBy(supabase, "pubkey", pubkey);
-    if (hit) return hit;
+    if (hit) return withCode(supabase, hit);
   }
   for (const email of auth.emails ?? []) {
     const hit = await findByEmail(supabase, email);
     if (hit) {
       await backfillDid(supabase, hit, auth.userId);
-      return hit;
+      return withCode(supabase, hit);
     }
   }
   return null;

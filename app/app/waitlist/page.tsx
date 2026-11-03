@@ -6,7 +6,7 @@ import { usePrivy, useLoginWithEmail } from "@privy-io/react-auth";
 import { useWallets, useSignMessage } from "@privy-io/react-auth/solana";
 import { usePrivyAvailable } from "@/hooks/usePrivySafe";
 import { resolveActiveWallet, usePreferredWallet } from "@/hooks/usePreferredWallet";
-import { useWaitlistWhoami } from "@/hooks/useWaitlistWhoami";
+import { useWaitlistWhoami, type WhoamiState } from "@/hooks/useWaitlistWhoami";
 import { TurnstileGate } from "@/components/waitlist/TurnstileGate";
 import bs58 from "bs58";
 import { track } from "@/lib/analytics";
@@ -431,6 +431,7 @@ function SignupCard() {
               )
             ) : (
               <EmailFlow
+                whoami={whoami}
                 turnstileToken={turnstileToken}
                 resetCaptcha={resetCaptcha}
                 mountedAt={mountedAt}
@@ -528,6 +529,8 @@ type EmailState =
   | { kind: "awaiting-code"; email: string }
   | { kind: "verifying" }
   | { kind: "submitting"; email: string }
+  // Sign-in mode: verified, waiting for whoami (found replaces this whole card).
+  | { kind: "signin-checking"; email: string }
   | {
       kind: "done";
       email: string;
@@ -537,10 +540,12 @@ type EmailState =
   | { kind: "error"; reason: string };
 
 function EmailFlow({
+  whoami,
   turnstileToken,
   resetCaptcha,
   mountedAt,
 }: {
+  whoami: WhoamiState;
   turnstileToken: string | null;
   resetCaptcha: () => void;
   mountedAt: number;
@@ -551,6 +556,10 @@ function EmailFlow({
   const [referredBy, setReferredBy] = useState("");
   const [state, setState] = useState<EmailState>({ kind: "idle" });
   const { status: refStatus } = useReferralCodeValidation(referredBy);
+  // "join" with a valid referral code; otherwise "signin": an existing member
+  // (who has no invite to give) proves their email and whoami shows their spot
+  // and code — the email twin of the wallet tab's "Sign in to check".
+  const [mode, setMode] = useState<"join" | "signin">("join");
   // Guards against double-firing the submit fetch when the post-OTP
   // effect re-runs because a non-state dep changed (turnstileToken
   // expiring → onToken(null); Privy user object updating). Without
@@ -587,7 +596,7 @@ function EmailFlow({
     },
   });
 
-  const { user, ready, authenticated } = usePrivy();
+  const { user, ready, authenticated, logout } = usePrivy();
   // The embedded-wallet binding step is gone — see the submit effect below
   // for why. useWallets / useSignMessage are no longer needed in EmailFlow.
 
@@ -597,15 +606,18 @@ function EmailFlow({
       setState({ kind: "error", reason: "that email looks off" });
       return;
     }
+    setMode(refStatus === "valid" ? "join" : "signin");
     setState({ kind: "sending-code", email: trimmed });
     try {
+      // A session from an earlier attempt would make Privy refuse a new login.
+      if (authenticated) await logout();
       await sendCode({ email: trimmed });
       setState({ kind: "awaiting-code", email: trimmed });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "could not send code";
       setState({ kind: "error", reason: msg });
     }
-  }, [email, sendCode]);
+  }, [email, sendCode, refStatus, authenticated, logout]);
 
   const onVerifyCode = useCallback(async () => {
     if (state.kind !== "awaiting-code") return;
@@ -648,6 +660,12 @@ function EmailFlow({
       user.email?.address?.trim().toLowerCase() ?? email.trim().toLowerCase();
     if (!userEmail) {
       setState({ kind: "error", reason: "missing email after login" });
+      return;
+    }
+    // Sign-in: nothing to submit. The verified session drives whoami, which
+    // swaps in the welcome-back card or lands in the effect below.
+    if (mode === "signin") {
+      setState({ kind: "signin-checking", email: userEmail });
       return;
     }
 
@@ -705,6 +723,7 @@ function EmailFlow({
     })();
   }, [
     state,
+    mode,
     ready,
     authenticated,
     user,
@@ -715,6 +734,19 @@ function EmailFlow({
     resetCaptcha,
     mountedAt,
   ]);
+
+  // Sign-in landed on no row (or the check failed): say so, and drop the
+  // session so the next attempt can use a different address.
+  useEffect(() => {
+    if (state.kind !== "signin-checking") return;
+    if (whoami.status !== "not-found" && whoami.status !== "error") return;
+    const reason =
+      whoami.status === "not-found"
+        ? `We don't see ${state.email} on the waitlist. Check it's the exact address you joined with, or enter a referral code to join.`
+        : "Couldn't check the list right now. Try again in a minute.";
+    setState({ kind: "error", reason });
+    void logout().catch(() => {});
+  }, [state, whoami.status, logout]);
 
   if (state.kind === "done") {
     const shareUrl = state.referralCode
@@ -785,7 +817,7 @@ function EmailFlow({
           />
         </div>
         <button className={ctaPrimary} onClick={onVerifyCode} disabled={busy || code.length < 6}>
-          {busy ? "Verifying…" : "Verify & join"}
+          {busy ? "Verifying…" : mode === "signin" ? "Verify & sign in" : "Verify & join"}
         </button>
         <button
           className="text-[11px] font-mono uppercase tracking-[0.12em] text-[var(--text-secondary)] transition-colors hover:text-[var(--accent)]"
@@ -793,6 +825,17 @@ function EmailFlow({
         >
           ← change email
         </button>
+      </div>
+    );
+  }
+
+  if (state.kind === "signin-checking") {
+    return (
+      <div className="space-y-3">
+        <PromptLine prefix="$" text="checking_list" status="pending" />
+        <p className="font-mono text-[11px] leading-relaxed text-[var(--text-secondary)]">
+          Verified {state.email}. Looking up your spot.
+        </p>
       </div>
     );
   }
@@ -832,33 +875,36 @@ function EmailFlow({
         disabled={sending}
       />
       <FormGateDivider unlocked={formUnlocked} />
+      {/* The email field and the button sit OUTSIDE the locked container so a
+          member who joined by email can sign in without an invite (the email
+          twin of the wallet tab's "Sign in to check"). x_handle only lands on
+          a NEW row, so it stays behind the gate. */}
+      <div className="space-y-1.5">
+        <label
+          htmlFor="signup-email"
+          className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]"
+        >
+          email
+        </label>
+        <input
+          id="signup-email"
+          type="email"
+          autoComplete="email"
+          inputMode="email"
+          className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 font-mono text-[13px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/15 disabled:opacity-50"
+          placeholder="you@domain.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          disabled={sending}
+          maxLength={254}
+        />
+      </div>
       <div
         className={`space-y-3.5 transition-opacity duration-200 ${
           formUnlocked ? "" : "pointer-events-none select-none opacity-40"
         }`}
         aria-hidden={!formUnlocked}
       >
-        <div className="space-y-1.5">
-          <label
-            htmlFor="signup-email"
-            className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]"
-          >
-            email
-          </label>
-          <input
-            id="signup-email"
-            type="email"
-            autoComplete="email"
-            inputMode="email"
-            className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 font-mono text-[13px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/15 disabled:opacity-50"
-            placeholder="you@domain.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            disabled={sending || !formUnlocked}
-            maxLength={254}
-            tabIndex={formUnlocked ? 0 : -1}
-          />
-        </div>
         <div className="space-y-1.5">
           <label
             htmlFor="x-handle"
@@ -877,21 +923,27 @@ function EmailFlow({
             tabIndex={formUnlocked ? 0 : -1}
           />
         </div>
-        <button
-          className={ctaPrimary}
-          onClick={onSendCode}
-          disabled={sending || !formUnlocked || !turnstileToken}
-          tabIndex={formUnlocked ? 0 : -1}
-        >
-          {sending
-            ? "Sending code…"
-            : !formUnlocked
-              ? "Enter referral code to continue"
-              : !turnstileToken
-                ? "Complete the captcha above"
-                : "Send 6-digit code →"}
-        </button>
       </div>
+      <button
+        className={ctaPrimary}
+        onClick={onSendCode}
+        disabled={sending || !turnstileToken || email.trim().length < 3}
+      >
+        {sending
+          ? "Sending code…"
+          : !turnstileToken
+            ? "Complete the captcha above"
+            : formUnlocked
+              ? "Send 6-digit code →"
+              : "Send code to sign in →"}
+      </button>
+      {!formUnlocked && (
+        <p className="font-mono text-[10.5px] leading-relaxed text-[var(--text-secondary)]">
+          Already on the waitlist? Sign in with the email you joined with —
+          we&apos;ll show your spot and referral code. New here? Enter a
+          referral code above to claim your spot.
+        </p>
+      )}
       <NoCodeFallback />
     </div>
   );

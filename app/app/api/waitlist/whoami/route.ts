@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getWaitlistServiceSupabase } from "@/lib/waitlist/supabase";
 import { verifyPrivyAuth } from "@/lib/privy-auth";
+import { ensureReferralCode } from "@/lib/waitlist/ensureReferralCode";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +24,11 @@ export const dynamic = "force-dynamic";
  * On a (2) or (3) hit, opportunistically backfill `privy_did` so the
  * next request is a (1) hit. This unifies the 126 pre-Privy-DID rows
  * over time with no migration script.
+ *
+ * A matched row without a referral code (a legacy row the backfill
+ * missed) is given one here: the Privy session has just proved the DID,
+ * wallet or email that matched it. Without this an early email member
+ * could never get back in — see lib/waitlist/ensureReferralCode.
  *
  * Returns:
  *   { found: true, referral_code, position, returning, linked: {…} }
@@ -49,16 +55,19 @@ export async function POST(req: Request) {
 
     // ── Step 1: privy_did exact match ────────────────────────────────
     {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("waitlist")
         .select("id, pubkey, email, referral_code, privy_did, created_at")
         .eq("privy_did", auth.userId)
         .maybeSingle();
-      if (data?.referral_code) {
+      // An outage must not read as "not on the list".
+      if (error) throw new Error("whoami lookup by privy_did failed");
+      if (data) {
+        const referral_code = data.referral_code ?? (await ensureReferralCode(supabase, data.id));
         const position = await getPosition(supabase, data);
         return NextResponse.json({
           found: true,
-          referral_code: data.referral_code,
+          referral_code,
           position,
           returning: true,
         });
@@ -67,20 +76,22 @@ export async function POST(req: Request) {
 
     // ── Step 2: pubkey match (legacy wallet-path signups) ────────────
     for (const pubkey of auth.solanaWallets) {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("waitlist")
         .select("id, pubkey, email, referral_code, privy_did, created_at")
         .eq("pubkey", pubkey)
         .maybeSingle();
-      if (data?.referral_code) {
+      if (error) throw new Error("whoami lookup by pubkey failed");
+      if (data) {
         // Opportunistic backfill — if this row has no DID yet, claim it.
         if (!data.privy_did) {
           await backfillPrivyDid(supabase, data.id, auth.userId);
         }
+        const referral_code = data.referral_code ?? (await ensureReferralCode(supabase, data.id));
         const position = await getPosition(supabase, data);
         return NextResponse.json({
           found: true,
-          referral_code: data.referral_code,
+          referral_code,
           position,
           returning: true,
         });
@@ -88,20 +99,28 @@ export async function POST(req: Request) {
     }
 
     // ── Step 3: email match (legacy email-path signups) ──────────────
-    if (auth.email) {
-      const { data } = await supabase
+    // Every verified email, not just the primary: a member may have signed
+    // in with a different address than the one linked first.
+    for (const email of auth.emails.length ? auth.emails : auth.email ? [auth.email] : []) {
+      // Case-insensitive exact match (rows from before the lowercase policy
+      // may store mixed case); LIKE wildcards escaped.
+      const escaped = email.replace(/[\\%_]/g, (c) => `\\${c}`);
+      const { data, error } = await supabase
         .from("waitlist")
         .select("id, pubkey, email, referral_code, privy_did, created_at")
-        .eq("email", auth.email)
+        .ilike("email", escaped)
+        .limit(1)
         .maybeSingle();
-      if (data?.referral_code) {
+      if (error) throw new Error("whoami lookup by email failed");
+      if (data) {
         if (!data.privy_did) {
           await backfillPrivyDid(supabase, data.id, auth.userId);
         }
+        const referral_code = data.referral_code ?? (await ensureReferralCode(supabase, data.id));
         const position = await getPosition(supabase, data);
         return NextResponse.json({
           found: true,
-          referral_code: data.referral_code,
+          referral_code,
           position,
           returning: true,
         });

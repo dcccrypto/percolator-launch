@@ -167,10 +167,23 @@ export default function PlaygroundGatePage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email: email.trim() }),
       })
-        .then((r) => (r.ok ? (r.json() as Promise<{ onList?: boolean }>) : { onList: true }))
+        .then((r) =>
+          r.status === 429
+            ? { onList: false, limited: true }
+            : r.ok
+              ? (r.json() as Promise<{ onList?: boolean; limited?: boolean }>)
+              : { onList: true },
+        )
         .catch(() => ({ onList: true }));
+      if ("limited" in pre && pre.limited) {
+        setEmailError("Too many tries from this network. Wait 10 minutes, then try again.");
+        setEmailStage("email");
+        return;
+      }
       if (!pre.onList) {
-        setEmailError("We don't see that email on the waitlist. Join the waitlist first, or try the email you signed up with.");
+        setEmailError(
+          "We don't see that email on the waitlist. Check it's the exact address you joined with. If you joined with a wallet, use Connect wallet instead.",
+        );
         setEmailStage("email");
         return;
       }

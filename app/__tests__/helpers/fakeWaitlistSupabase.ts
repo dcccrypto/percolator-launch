@@ -23,6 +23,8 @@ export type FakeOptions = {
   failRpc?: boolean;
   /** Override the RPC's answer (e.g. null for "row vanished"). */
   rpcValue?: number | null;
+  /** Make every `.update()` report an error with this Postgres code. */
+  failUpdate?: string;
 };
 
 export function fakeWaitlistSupabase(rows: FakeRow[], opts: FakeOptions = {}) {
@@ -37,6 +39,7 @@ export function fakeWaitlistSupabase(rows: FakeRow[], opts: FakeOptions = {}) {
               return {
                 async is(nullCol: string) {
                   calls.push({ kind: "update", column: nullCol, value: patch });
+                  if (opts.failUpdate) return { data: null, error: { message: "update failed", code: opts.failUpdate } };
                   const r = rows.find((x) => (x as Record<string, unknown>)[column] === value);
                   if (r && (r as Record<string, unknown>)[nullCol] == null) Object.assign(r, patch);
                   return { data: null, error: null };
