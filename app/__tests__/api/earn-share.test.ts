@@ -383,3 +383,44 @@ describe("network isolation (#3720)", () => {
     expect(h.filters.filter(([c]) => c === "network").length).toBe(h.filters.filter(([c]) => c === "slab_address").length);
   });
 });
+
+describe("curated v2.2 markets (NEXT_PUBLIC_V22_MARKETS_JSON) are ours without the markets table", () => {
+  const k = () => Keypair.generate().publicKey.toBase58();
+  const entry = (slab: string) => ({ slab, symbol: "SOL", name: "SOL", mainnet_ca: k(), dex_pool_address: k(), lp_portfolio_address: k() });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("a seeded market is served with the table down (the v2.2 preview has no Supabase) and without a DB read", async () => {
+    vi.stubEnv("NEXT_PUBLIC_V22_MARKETS_JSON", JSON.stringify([entry(M)]));
+    h.db = "down";
+    chain(acct(PROGRAM), null);
+    const res = await call(M);
+    expect(res.status).toBe(200);
+    expect(h.dbCalls).toBe(0);
+    expect((await callImage(M)).status).toBe(200);
+  });
+
+  it("a seeded market missing from the table is not a 404", async () => {
+    vi.stubEnv("NEXT_PUBLIC_V22_MARKETS_JSON", JSON.stringify([entry(M)]));
+    h.db = "none";
+    chain(acct(PROGRAM), null);
+    expect((await call(M)).status).toBe(200);
+  });
+
+  it("NEGATIVE: a market not in the list still needs the table (404 on no row, 503 on a read failure, no chain read)", async () => {
+    vi.stubEnv("NEXT_PUBLIC_V22_MARKETS_JSON", JSON.stringify([entry(k())]));
+    h.db = "none";
+    expect((await call(M)).status).toBe(404);
+    __clearEarnShareGuardForTest();
+    h.db = "down";
+    expect((await call(M)).status).toBe(503);
+    expect(h.getMultiple).not.toHaveBeenCalled();
+  });
+
+  it("NEGATIVE: a mainnet build ignores the list", async () => {
+    vi.stubEnv("NEXT_PUBLIC_V22_MARKETS_JSON", JSON.stringify([entry(M)]));
+    vi.stubEnv("NEXT_PUBLIC_DEFAULT_NETWORK", "mainnet");
+    h.db = "down";
+    expect((await call(M)).status).toBe(503);
+    expect(h.getMultiple).not.toHaveBeenCalled();
+  });
+});
