@@ -21,7 +21,7 @@ import type { TierConfig } from "@/lib/v22/sdk/records/growth-v19";
 import { PublicKey, SystemProgram, type TransactionInstruction } from "@solana/web3.js";
 import { pairedProgramSet, resolveDevnetProgramIds } from "@/lib/program-ids";
 import { BPS, VAULT_LP_MATCHER_CTX_LEN, VAULT_LP_MAX_JUNIOR_FLOOR_BPS, VAULT_LP_MIN_JUNIOR_FLOOR_BPS } from "./constants";
-import { buildLevGuardInitIx } from "@/lib/v22/lev-guard";
+import { buildLevGuardInitIx, levGuardApplies } from "@/lib/v22/lev-guard";
 import { withNavFlowTailV22 } from "@/lib/v22/sdk/v22-nav-flow";
 import { buildDepositJuniorTrancheIx, buildInitVaultLpIx, type VaultLpMarket } from "./p3-ix";
 
@@ -81,7 +81,8 @@ export function buildP3BindIxs(p: {
   growth?: { lLaunchX100: number; tiers?: TierConfig; lTierX100?: number };
   /**
    * v2.2 leverage guard (wrapper tag 124 op 0, t0 = 0): appended right after the junior deposit, signed by the creator while they are still
-   * the market authority. The program needs a bound vault LP and a growth block (134 otherwise), so it is added only with `growth`.
+   * the market authority. The program needs a bound vault LP and a growth block (134 otherwise), so it is added only with `growth`, and only
+   * where the wrapper has tag 124 ({@link levGuardApplies}: off with `NEXT_PUBLIC_RC23_OPEN_LIMITS=0`).
    */
   levGuard?: boolean;
   /**
@@ -111,7 +112,7 @@ export function buildP3BindIxs(p: {
     p.navFlowTail
       ? withNavFlowTailV22(buildDepositJuniorTrancheIx(p.market, p.creator, p.creatorAta, p.vaultToken, p.juniorAtoms), p.market.market)
       : buildDepositJuniorTrancheIx(p.market, p.creator, p.creatorAta, p.vaultToken, p.juniorAtoms),
-    ...(p.levGuard && p.growth ? [buildLevGuardInitIx(p.market.programId, p.market.market, p.creator)] : []),
+    ...(levGuardApplies({ v22On: !!p.levGuard, growth: !!p.growth, p3: true }) ? [buildLevGuardInitIx(p.market.programId, p.market.market, p.creator)] : []),
   ];
 }
 
