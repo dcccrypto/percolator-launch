@@ -10,7 +10,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getClientIp } from "@/lib/get-client-ip";
 import { createUpstashRateLimiter } from "@/lib/upstash-rate-limit";
-import { getServiceClient } from "@/lib/supabase";
+import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 
 const jsonLimiter = createUpstashRateLimiter({ limit: 120, windowMs: 60_000, prefix: "rl:earn-share" });
 const imageLimiter = createUpstashRateLimiter({ limit: 30, windowMs: 60_000, prefix: "rl:earn-share-image" });
@@ -65,7 +65,7 @@ export async function marketIsKnown(market: string): Promise<MarketKnown> {
   const k = known.get(market);
   if (k !== undefined && now - k < KNOWN_TTL_MS) return "known";
   try {
-    const { data, error } = await getServiceClient().from("markets").select("slab_address").eq("slab_address", market).single();
+    const { data, error } = await getServiceClient().from("markets").select("slab_address").eq("slab_address", market).eq("network", getServerNetwork()).single();
     if (!error && data) {
       put(known, market, now, MAX_KEYS);
       return "known";
