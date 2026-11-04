@@ -11,7 +11,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 import { getConfig } from "@/lib/config";
 import { getServerConnection } from "@/lib/server-rpc";
-import { getServiceClient } from "@/lib/supabase";
+import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { parseMarketParam } from "@/lib/v22/earn-share-meta";
 import { loadEarnShareChainState } from "@/lib/v22/earn-share-chain";
@@ -27,7 +27,7 @@ const notFound = () => NextResponse.json({ error: "not found" }, { status: 404, 
 /** The market's uploaded / resolved logo URL from the app's own table (cosmetic; any failure = no logo). */
 async function logoUrlOf(market: string): Promise<string | null> {
   try {
-    const { data } = await getServiceClient().from("markets").select("logo_url").eq("slab_address", market).single();
+    const { data } = await getServiceClient().from("markets").select("logo_url").eq("slab_address", market).eq("network", getServerNetwork()).single();
     return typeof data?.logo_url === "string" ? data.logo_url : null;
   } catch {
     return null;
