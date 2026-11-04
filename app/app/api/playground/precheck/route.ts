@@ -2,13 +2,16 @@
  * POST /api/playground/precheck { email } -> { onList: boolean }
  *
  * Asked before the gate page sends a Privy email code, so a code is only sent to an address that
- * is on the waitlist (product decision 2026-10-02). It reads the waitlist database directly (the
- * same table and membership rule as whoami / the gate: a row with a referral code).
+ * is on the waitlist (product decision 2026-10-02). It reads the waitlist database directly. Any
+ * row for the email counts: a legacy row without a referral code is given one by the gate once the
+ * code proves the address (lib/playground-gate), so it must not be refused here first.
  *
  * Trade-off, accepted: this answers "is this email on the list?". Mitigations: strict per-IP
- * rate limit (a rate-limited caller gets the same `onList: false` as a non-member), no position,
- * id or any other field returned, and logs never carry the email. Entry is still decided only
- * by the authenticated gate (/api/playground/authorize, /enter) — this is a UX filter, not access.
+ * rate limit, no position, id or any other field returned, and logs never carry the email. A
+ * rate-limited caller gets 429 `{ onList: false, limited: true }` whatever the email, so the page
+ * can say "wait" instead of telling a member they are not on the list; that answer does not depend
+ * on the email, so it reveals nothing about membership. Entry is still decided only by the
+ * authenticated gate (/api/playground/authorize, /enter) — this is a UX filter, not access.
  */
 import { NextResponse, type NextRequest } from "next/server";
 import { getWaitlistServiceSupabase } from "@/lib/waitlist/supabase";
@@ -38,7 +41,9 @@ const answer = (onList: boolean) =>
 
 export async function POST(req: NextRequest) {
   const ip = (req.headers.get("x-real-ip") ?? req.headers.get("x-forwarded-for")?.split(",")[0] ?? "").trim() || "unknown";
-  if (limited(ip)) return answer(false);
+  if (limited(ip)) {
+    return NextResponse.json({ onList: false, limited: true }, { status: 429, headers: { "Cache-Control": "no-store" } });
+  }
   let email = "";
   try {
     const body = (await req.json()) as { email?: unknown };
@@ -51,7 +56,7 @@ export async function POST(req: NextRequest) {
     const escaped = email.replace(/[\\%_]/g, (c) => `\\${c}`);
     const { data, error } = await getWaitlistServiceSupabase()
       .from("waitlist")
-      .select("referral_code")
+      .select("id")
       .ilike("email", escaped)
       .limit(1)
       .maybeSingle();
@@ -61,7 +66,7 @@ export async function POST(req: NextRequest) {
       // Access itself is still decided by the authenticated gate.
       return NextResponse.json({ onList: true, unverified: true }, { headers: { "Cache-Control": "no-store" } });
     }
-    return answer(Boolean((data as { referral_code?: string | null } | null)?.referral_code));
+    return answer(Boolean(data));
   } catch {
     return NextResponse.json({ onList: true, unverified: true }, { headers: { "Cache-Control": "no-store" } });
   }

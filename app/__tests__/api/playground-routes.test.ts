@@ -112,17 +112,20 @@ describe("POST /api/playground/authorize", () => {
     let res = await authorize(authReq());
     expect(res.status).toBe(403);
     bodies.push(await res.text());
-    // a half-row with no referral code
-    setWaitlist([{ ...ME, referral_code: null }]);
-    res = await authorize(authReq());
-    expect(res.status).toBe(403);
-    bodies.push(await res.text());
+    // (a legacy row with no referral code is a member: the gate gives it a code — see below)
     // a different identity entirely, with wallets and emails that miss
     h.auth = { ok: true, userId: "did:privy:other", email: "o@x.io", emails: ["o@x.io"], solanaWallets: ["OTHER"] };
     setWaitlist([ME]);
     res = await authorize(authReq());
     bodies.push(await res.text());
     expect(new Set(bodies)).toEqual(new Set([JSON.stringify({ ok: false, status: "not_member" })]));
+  });
+
+  it("a legacy row without a referral code is a member: it is given a code and judged on its position", async () => {
+    setWaitlist([{ ...ME, referral_code: null }]);
+    const res = await authorize(authReq());
+    expect(res.status).toBe(200);
+    expect((await res.json()).status).toBe("granted");
   });
 
   it("fails CLOSED with an unset or short secret — and never even asks Privy", async () => {

@@ -21,16 +21,31 @@ describe("POST /api/playground/precheck — only send a code to a waitlist email
     const { POST } = await import("@/app/api/playground/precheck/route");
     expect(await (await POST(req("KhubairNasir26@gmail.com "))).json()).toEqual({ onList: true });
   });
-  it("CONTROL: an unknown email, a row without a referral code, or junk is not", async () => {
+  it("a legacy row without a referral code is on the list (the gate gives it a code after sign-in)", async () => {
+    const { POST } = await import("@/app/api/playground/precheck/route");
+    expect(await (await POST(req("Half@x.io"))).json()).toEqual({ onList: true });
+  });
+  it("CONTROL: an unknown email or junk is not", async () => {
     const { POST } = await import("@/app/api/playground/precheck/route");
     expect(await (await POST(req("nobody@x.io"))).json()).toEqual({ onList: false });
-    expect(await (await POST(req("half@x.io"))).json()).toEqual({ onList: false });
     expect(await (await POST(req(42))).json()).toEqual({ onList: false });
   });
-  it("rate-limited callers get the same answer as non-members (no enumeration signal)", async () => {
+  it("rate-limited callers are told to wait, and the answer is the same for members and non-members", async () => {
     const { POST } = await import("@/app/api/playground/precheck/route");
     for (let i = 0; i < 8; i++) await POST(req("khubairnasir26@gmail.com", "9.9.9.9"));
-    expect(await (await POST(req("khubairnasir26@gmail.com", "9.9.9.9"))).json()).toEqual({ onList: false });
+    const member = await POST(req("khubairnasir26@gmail.com", "9.9.9.9"));
+    const stranger = await POST(req("nobody@x.io", "9.9.9.9"));
+    expect(member.status).toBe(429);
+    expect(stranger.status).toBe(429);
+    expect(await member.json()).toEqual({ onList: false, limited: true });
+    expect(await stranger.json()).toEqual({ onList: false, limited: true });
+  });
+  it("the 8th try in the window is still answered normally", async () => {
+    const { POST } = await import("@/app/api/playground/precheck/route");
+    for (let i = 0; i < 7; i++) await POST(req("nobody@x.io", "8.8.8.8"));
+    const r = await POST(req("khubairnasir26@gmail.com", "8.8.8.8"));
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ onList: true });
   });
   it("a DB failure fails open for the code only (access is still decided by the gate)", async () => {
     state.client = fakeWaitlistSupabase(rows, { failColumn: "email" }).client;

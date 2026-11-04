@@ -26,9 +26,10 @@ export type WhoamiState =
  *   • not-found       — render the signup form (this Privy user has
  *                       never joined the waitlist)
  *
- * The hook never blocks the rest of the page from rendering. If the
- * fetch errors (network, server, 5xx), it falls back to "not-found"
- * so the user can still complete a signup manually.
+ * The hook never blocks the rest of the page from rendering. A fetch or
+ * server error is "error" (only "found" replaces the signup form, so the
+ * user can still complete a signup manually); an unconfigured server
+ * (503) is "not-found".
  */
 export function useWaitlistWhoami(): WhoamiState {
   const privyAvailable = usePrivyAvailable();
@@ -75,7 +76,9 @@ export function useWaitlistWhoami(): WhoamiState {
           return;
         }
         if (!res.ok) {
-          setState({ status: "not-found" });
+          // A server error is not "you're not on the list": the email sign-in
+          // path tells those two apart. The signup form still renders on error.
+          setState({ status: "error", reason: `HTTP ${res.status}` });
           return;
         }
         const json = (await res.json()) as {

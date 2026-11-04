@@ -57,9 +57,45 @@ describe("resolution order mirrors whoami", () => {
     expect(rows[1].privy_did).toBe("did:privy:me");
   });
 
-  it("a row with no referral code is not a membership (whoami's definition)", async () => {
-    const { client } = fakeWaitlistSupabase([{ id: "row-half", privy_did: "did:privy:me", pubkey: "P", referral_code: null }]);
-    expect(await decidePlaygroundAccess(auth(), () => client, 1000)).toEqual({ kind: "not_member" });
+  it("an early email-only row that missed the referral-code backfill is given a code and let in", async () => {
+    const rows = [...fillerRows(2), { id: "row-old", email: "early@x.io", referral_code: null as string | null }];
+    const { client } = fakeWaitlistSupabase(rows);
+    const v = await decidePlaygroundAccess(auth({ emails: ["Early@x.io"] }), () => client, 1000);
+    expect(v).toEqual({ kind: "granted", rowId: "row-old", position: 3, cutoff: 1000 });
+    expect(rows[2].referral_code).toMatch(/^[0-9A-HJKMNP-TV-Z]{8}$/);
+    expect(rows[2].privy_did).toBe("did:privy:me");
+  });
+
+  it("the same repair applies to a code-less row matched by DID or by wallet", async () => {
+    const byDid = [{ id: "row-d", privy_did: "did:privy:me", pubkey: "P", referral_code: null as string | null }];
+    expect(await decidePlaygroundAccess(auth(), () => fakeWaitlistSupabase(byDid).client, 1000)).toMatchObject({ kind: "granted", rowId: "row-d" });
+    expect(byDid[0].referral_code).toBeTruthy();
+
+    const byWallet = [{ id: "row-w", pubkey: "W1", referral_code: null as string | null }];
+    const v = await decidePlaygroundAccess(auth({ solanaWallets: ["W1"] }), () => fakeWaitlistSupabase(byWallet).client, 1000);
+    expect(v).toMatchObject({ kind: "granted", rowId: "row-w" });
+    expect(byWallet[0].referral_code).toBeTruthy();
+  });
+
+  it("a member's existing code is never rewritten", async () => {
+    const rows = [{ id: "row-k", email: "k@x.io", referral_code: "KEEPCODE" }];
+    const { client, calls } = fakeWaitlistSupabase(rows);
+    await decidePlaygroundAccess(auth({ emails: ["k@x.io"] }), () => client, 1000);
+    expect(rows[0].referral_code).toBe("KEEPCODE");
+    expect(calls.some((c) => c.kind === "update" && c.column === "referral_code")).toBe(false);
+  });
+
+  it("if the code cannot be assigned the verdict is unavailable, not 'not on the list'", async () => {
+    const rows = [{ id: "row-old", email: "early@x.io", referral_code: null }];
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const v = await decidePlaygroundAccess(auth({ emails: ["early@x.io"] }), () => fakeWaitlistSupabase(rows, { failUpdate: "XX000" }).client, 1000);
+    expect(v).toEqual({ kind: "unavailable" });
+  });
+
+  it("a code-less row outside the cutoff is repaired and told its position", async () => {
+    const rows = [...fillerRows(5), { id: "row-late", email: "late@x.io", referral_code: null as string | null }];
+    const v = await decidePlaygroundAccess(auth({ emails: ["late@x.io"] }), () => fakeWaitlistSupabase(rows).client, 3);
+    expect(v).toEqual({ kind: "not_yet", position: 6, cutoff: 3 });
   });
 
   it("no row at all is not_member — the same verdict, nothing more", async () => {
