@@ -30,6 +30,7 @@ import {
   playgroundAppUrl,
   playgroundEntryUrl,
   playgroundOpen,
+  privyUserTag,
 } from "@/lib/playground-access";
 import { decidePlaygroundAccess } from "@/lib/playground-gate";
 
@@ -101,7 +102,14 @@ export async function POST(req: NextRequest) {
   const verdict = await decidePlaygroundAccess(auth, getWaitlistServiceSupabase);
   if (verdict.kind !== "granted") return back();
 
-  const token = mintHandoff(verdict.rowId, verdict.position, secret);
+  const token = mintHandoff(
+    verdict.rowId,
+    verdict.position,
+    secret,
+    Date.now(),
+    verdict.referralCode ?? undefined,
+    privyUserTag(auth.userId, secret),
+  );
   console.info(`[playground-enter] handoff minted for ${auth.userId}`);
   return see(playgroundEntryUrl(appUrl, token));
 }

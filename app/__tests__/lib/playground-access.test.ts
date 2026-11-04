@@ -25,6 +25,19 @@ const OTHER = "y".repeat(32);
 const NOW = 1_800_000_000_000; // fixed clock; nothing here may depend on real time
 
 describe("handoff tokens", () => {
+  it("carries the referral code, signed: it round-trips and can't be edited", () => {
+    const t = mintHandoff("row-1", 42, SECRET, NOW, "PERC7Q");
+    expect(readHandoff(t, SECRET, NOW)).toMatchObject({ sub: "row-1", pos: 42, ref: "PERC7Q" });
+    const [body, mac] = t.split(".");
+    const forged = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(body!, "base64url").toString("utf8")), ref: "OTHER1" })).toString("base64url");
+    expect(readHandoff(`${forged}.${mac}`, SECRET, NOW)).toBeNull();
+  });
+
+  it("no referral code: no ref claim (an old-style token)", () => {
+    expect(readHandoff(mintHandoff("row-1", 42, SECRET, NOW), SECRET, NOW)).not.toHaveProperty("ref");
+    expect(readHandoff(mintHandoff("row-1", 42, SECRET, NOW, ""), SECRET, NOW)).not.toHaveProperty("ref");
+  });
+
   it("round-trips the claims it was minted with", () => {
     const t = mintHandoff("row-1", 42, SECRET, NOW);
     const c = readHandoff(t, SECRET, NOW);
@@ -180,5 +193,30 @@ describe("no identifier is carried in a token", () => {
     expect(decoded).toContain("row-abc");
     expect(decoded).not.toMatch(/@/);
     expect(JSON.parse(decoded)).toEqual({ sub: "row-abc", pos: 12, exp: expect.any(Number) });
+  });
+
+  it("the referral code, when given, is the only addition: public by design, still no email or wallet", () => {
+    const t = mintHandoff("row-abc", 12, SECRET, NOW, "PERC7Q");
+    const decoded = Buffer.from(t.split(".")[0]!, "base64url").toString("utf8");
+    expect(decoded).not.toMatch(/@/);
+    expect(JSON.parse(decoded)).toEqual({ sub: "row-abc", pos: 12, exp: expect.any(Number), ref: "PERC7Q" });
+  });
+});
+
+// Shared vector, pinned identically in the playground (`playground` branch, __tests__/lib/playground-access-referral-claims.test.ts):
+// if either side changes the tag derivation, both suites break.
+describe("privyUserTag", () => {
+  it("matches the vector the playground pins", async () => {
+    const { privyUserTag } = await import("@/lib/playground-access");
+    expect(privyUserTag("did:privy:cm1owner000000000000", "s".repeat(40))).toBe("S6aKBBv7X44b_af1E6gH5w");
+  });
+
+  it("a handoff carries uid only when given one, and keeps it through readHandoff", async () => {
+    const { mintHandoff, readHandoff, privyUserTag } = await import("@/lib/playground-access");
+    const secret = "s".repeat(40);
+    const now = 1_800_000_000_000;
+    const uid = privyUserTag("did:privy:x", secret);
+    expect(readHandoff(mintHandoff("row", 1, secret, now, "AB", uid), secret, now)).toMatchObject({ ref: "AB", uid });
+    expect(readHandoff(mintHandoff("row", 1, secret, now, "AB"), secret, now)).not.toHaveProperty("uid");
   });
 });

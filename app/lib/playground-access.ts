@@ -51,6 +51,17 @@ export interface AccessClaims {
   pos: number;
   /** Unix seconds after which this is refused. */
   exp: number;
+  /**
+   * The visitor's referral code, so the playground can show it without reading the waitlist DB.
+   * Optional: older tokens lack it, and `open` checks only sub / pos / exp.
+   */
+  ref?: string;
+  /**
+   * `privyUserTag` of the Privy login this gate verified, so the playground shows the referral code
+   * only to that same login (not to whoever holds the session cookie). A keyed tag, never the Privy id:
+   * the handoff rides in a URL. Optional, like `ref`.
+   */
+  uid?: string;
 }
 
 const b64url = (b: Buffer): string => b.toString("base64url");
@@ -112,9 +123,28 @@ function open(token: string | null | undefined, secret: string, now: number): Ac
 const handoffSecret = (base: string): string => `${base}:handoff:v1`;
 const sessionSecret = (base: string): string => `${base}:session:v1`;
 
-export function mintHandoff(sub: string, pos: number, secret: string, nowMs = Date.now()): string {
+export function mintHandoff(
+  sub: string,
+  pos: number,
+  secret: string,
+  nowMs = Date.now(),
+  ref?: string,
+  uid?: string,
+): string {
   const now = Math.floor(nowMs / 1000);
-  return mint({ sub, pos, exp: now + HANDOFF_TTL_SECONDS }, handoffSecret(secret));
+  return mint(
+    { sub, pos, exp: now + HANDOFF_TTL_SECONDS, ...(ref ? { ref } : {}), ...(uid ? { uid } : {}) },
+    handoffSecret(secret),
+  );
+}
+
+/**
+ * Keyed, one-way tag of a Privy user id. Byte-compatible with the playground's `privyUserTag`
+ * (lib/playground-access.ts on `playground`): HMAC-SHA256 with key `${secret}:privy-user:v1`, first
+ * 16 bytes, base64url (22 chars). Domain-separated from the handoff and session keys.
+ */
+export function privyUserTag(privyUserId: string, secret: string): string {
+  return b64url(createHmac("sha256", `${secret}:privy-user:v1`).update(privyUserId).digest().subarray(0, 16));
 }
 
 export function readHandoff(token: string | null | undefined, secret: string, nowMs = Date.now()): AccessClaims | null {
