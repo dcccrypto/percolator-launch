@@ -25,6 +25,7 @@ import {
 } from "./sdk";
 import { deriveVaultLpState } from "@/lib/limits/p3-ix";
 import { deriveVaultLpExt } from "@/lib/v21/sdk";
+import { rc23OpenLimits } from "@/lib/v21/growth-market";
 
 export { TAG_LEV_GUARD_V22 };
 
@@ -126,7 +127,7 @@ export type LevGuardLaunchAction =
   | { action: "send"; ix: TransactionInstruction }
   /** Nothing to do: the guard is already there (a resume, or the batched M4p carried it). */
   | { action: "exists" }
-  /** Not a launch the guard applies to (flag off, no growth block, or no vault LP). */
+  /** Not a launch the guard applies to (flag off, no growth block, no vault LP, or a pre-rc23 wrapper: D9 `NEXT_PUBLIC_RC23_OPEN_LIMITS=0`). */
   | { action: "not-applicable" }
   /** The creator is no longer the market authority (the stake pool exists), so only the upgrade authority could add it now. */
   | { action: "authority-rotated" }
@@ -149,7 +150,7 @@ export function planLevGuardLaunch(p: {
   market: PublicKey;
   creator: PublicKey;
 }): LevGuardLaunchAction {
-  if (!p.v22On || !p.growth || !p.vaultLpBound) return { action: "not-applicable" };
+  if (!levGuardApplies({ v22On: p.v22On, growth: p.growth, p3: p.vaultLpBound })) return { action: "not-applicable" };
   if (p.guardExists) return { action: "exists" };
   if (p.poolExists) return { action: p.acceptNoGuard ? "authority-rotated-accepted" : "authority-rotated" };
   return { action: "send", ix: buildLevGuardInitIx(p.programId, p.market, p.creator) };
@@ -162,12 +163,16 @@ export function planLevGuardLaunch(p: {
  */
 export const LEV_GUARD_RENT_ACCOUNT_LEN = 4_472;
 
-/** The launch creates a guard: v2.2 on, with a growth block and the vault-LP bind (the program answers 134 otherwise). */
-export const levGuardApplies = (p: { v22On: boolean; growth: boolean; p3: boolean }): boolean => p.v22On && p.growth && p.p3;
+/**
+ * The launch creates a guard: v2.2 on, with a growth block and the vault-LP bind (the program answers 134 otherwise), on a wrapper that
+ * has tag 124 (rc23). The D9 switch `NEXT_PUBLIC_RC23_OPEN_LIMITS=0` (the preview against aca02ba6, which has no tag 124 and refuses it
+ * as invalid instruction data) turns the step off, and with it the guard rent and the "opens 6 hours after launch" line.
+ */
+export const levGuardApplies = (p: { v22On: boolean; growth: boolean; p3: boolean }): boolean => p.v22On && p.growth && p.p3 && rc23OpenLimits();
 
 /** Shown when a growth launch has no leverage-guard step in its plan on mainnet (preflight, before anything is signed). */
 export const LEV_GUARD_PLAN_MISSING =
-  "This launch cannot be created: it has a growth block but no leverage-guard step, and on mainnet every open on such a market would be refused. Nothing was sent. This build is missing the v2.2 setting (NEXT_PUBLIC_V22) or the launch has no vault-owned LP, so ask the Percolator team.";
+  "This launch cannot be created: it has a growth block but no leverage-guard step, and on mainnet every open on such a market would be refused. Nothing was sent. This build is missing the v2.2 setting (NEXT_PUBLIC_V22), is built for a pre-rc23 wrapper (NEXT_PUBLIC_RC23_OPEN_LIMITS=0), or the launch has no vault-owned LP, so ask the Percolator team.";
 
 /**
  * Launch preflight: the message that REFUSES the launch, or null. A growth launch on mainnet must plan the guard step

@@ -7,12 +7,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ComputeBudgetProgram, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction } from "@solana/web3.js";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
+import { __setRc23OpenLimitsForTest } from "@/lib/v21/growth-market";
 import { resolveUserMessage } from "@/lib/limits/user-message";
 import { humanizeError } from "@/lib/errorMessages";
 import { resolveDevnetProgramIds } from "@/lib/program-ids";
 import {
   LEV_GUARD_MISSING_BLOCK,
+  LEV_GUARD_PLAN_MISSING,
   LEV_GUARD_RENT_ACCOUNT_LEN,
+  levGuardPlanBlock,
   levGuardApplies,
   LEV_GUARD_MISS_TTL_MS,
   buildLevGuardInitIx,
@@ -40,9 +43,14 @@ const PROG = new PublicKey(ids.wrapper);
 
 beforeEach(() => {
   __setDevnetV22ForTest(true);
+  // The guard tests describe an rc23 wrapper; pin the D9 switch so a shell with NEXT_PUBLIC_RC23_OPEN_LIMITS=0 can't flip them.
+  __setRc23OpenLimitsForTest(true);
   resetLevGuardCache();
 });
-afterEach(() => __setDevnetV22ForTest(null));
+afterEach(() => {
+  __setDevnetV22ForTest(null);
+  __setRc23OpenLimitsForTest(null);
+});
 
 // ── the op 0 INIT instruction ───────────────────────────────────────────────────────────────────
 describe("buildLevGuardInitIx (launch wizard step)", () => {
@@ -397,6 +405,39 @@ describe("A-1: the guard's rent is in the SOL estimate and gate", () => {
   it("applies only with v2.2 on, a growth block and the vault-LP bind", () => {
     expect(levGuardApplies({ v22On: true, growth: true, p3: true })).toBe(true);
     for (const p of [{ v22On: false, growth: true, p3: true }, { v22On: true, growth: false, p3: true }, { v22On: true, growth: true, p3: false }]) expect(levGuardApplies(p)).toBe(false);
+  });
+});
+
+// ── D9: a pre-rc23 wrapper (NEXT_PUBLIC_RC23_OPEN_LIMITS=0) has no tag 124 ──────────────────────
+describe("D9 switch off: no launch path builds the guard", () => {
+  afterEach(() => __setRc23OpenLimitsForTest(null));
+  const PROG2 = k(), lp = k();
+  const bind = {
+    market: { programId: PROG2, market: k(), registry: k(), vaultLpState: k(), lpPortfolio: lp, ledger: k(), siblingLedger: k() },
+    creator: k(), vaultLpPortfolio: lp, portfolioLen: 9_435, portfolioRentLamports: 1, matcherProgram: k(), matcherCtx: k(), matcherCtxRentLamports: 2,
+    juniorFloorBps: 2_000, juniorAtoms: 7n, creatorAta: k(), vaultToken: k(), growth: { lLaunchX100: 500 }, levGuard: true,
+  };
+  const plan = { v22On: true, growth: true, vaultLpBound: true, guardExists: false, programId: PROG, market: k(), creator: k() };
+  const on = { v22On: true, growth: true, p3: true };
+  it("control (switch on): applies, the bind carries op 0, the resume sends it", () => {
+    __setRc23OpenLimitsForTest(true);
+    expect(levGuardApplies(on)).toBe(true);
+    expect(buildP3BindIxs(bind).map((ix) => ix.data[0])).toContain(124);
+    expect(planLevGuardLaunch({ ...plan, poolExists: false }).action).toBe("send");
+  });
+  it("off: not applicable, the four-instruction bind, no send and no rotated-authority block", () => {
+    __setRc23OpenLimitsForTest(false);
+    expect(levGuardApplies(on)).toBe(false);
+    expect(buildP3BindIxs(bind)).toHaveLength(4);
+    expect(buildP3BindIxs(bind).map((ix) => ix.data[0])).not.toContain(124);
+    expect(planLevGuardLaunch({ ...plan, poolExists: false }).action).toBe("not-applicable");
+    expect(planLevGuardLaunch({ ...plan, poolExists: true }).action).toBe("not-applicable");
+  });
+  it("off: devnet launches; a mainnet growth launch is refused by the D27 preflight", () => {
+    __setRc23OpenLimitsForTest(false);
+    expect(levGuardPlanBlock({ ...on, network: "devnet" })).toBeNull();
+    expect(levGuardPlanBlock({ ...on, network: "mainnet" })).toBe(LEV_GUARD_PLAN_MISSING);
+    expect(LEV_GUARD_PLAN_MISSING).toMatch(/NEXT_PUBLIC_RC23_OPEN_LIMITS=0/);
   });
 });
 

@@ -9,6 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
+import { __setRc23OpenLimitsForTest } from "@/lib/v21/growth-market";
 import { bandDefaultsV22, encodeInitMarketTrailerV22, IX_TAG_V22 } from "@/lib/v22/sdk";
 import { placeBondTranche } from "@/lib/v22/launch-wire";
 import { DEFAULT_BOND, DEFAULT_RENT } from "@/lib/v22/launch-plan";
@@ -315,6 +316,22 @@ describe("v2.2 launch", () => {
     __setDevnetV22ForTest(true);
     await launch({ singleTx: true, params: params({}) });
     expect(sent.length === 0 || findIx(decodeV1Message(splitV1Wire(sent[0]!).message), PROGRAM, 124).length === 0).toBe(true);
+  });
+
+  it("leverage guard D9: flag ON + growth on a pre-rc23 build (NEXT_PUBLIC_RC23_OPEN_LIMITS=0): the ONE launch tx lands with no tag 124; the real keeper route accepts it", async () => {
+    __setDevnetV22ForTest(true);
+    __setRc23OpenLimitsForTest(false);
+    try {
+      const { outcome } = await launch({ singleTx: true, params: params({ growth: GROWTH, v22: { lotExp: 3, rent: { ...DEFAULT_RENT }, band: bandDefaultsV22(6) } }) });
+      expect(outcome).toEqual({ status: "success" });
+      expect(sent).toHaveLength(1);
+      const d = decodeV1Message(splitV1Wire(sent[0]!).message);
+      expect(findIx(d, PROGRAM, 124)).toHaveLength(0);
+      expect(findIx(d, PROGRAM, IX_TAG_P3.DepositJuniorTranche)).toHaveLength(1);
+      expect(findIx(d, STAKE, STAKE_IX.InitPool)).toHaveLength(1);
+    } finally {
+      __setRc23OpenLimitsForTest(null);
+    }
   });
 
   it("NEGATIVE CONTROL: flag OFF drops the v2.2 params; InitMarket is the plain growth form (4-byte trailer)", async () => {
