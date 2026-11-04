@@ -86,35 +86,81 @@ export function createUpstashRateLimiter(
   // Similar to memory-rate-limit.ts evictionThreshold (500).
   const MAP_SIZE_CAP = 500;
 
+
   function checkLocal(rateKey: string, cost: number): RateLimitResult {
     const now = Date.now();
     const windowStart = now - windowMs;
 
-    let timestamps = (localMap.get(rateKey) ?? []).filter((t) => t > windowStart);
-    for (let i = 0; i < cost; i++) timestamps.push(now);
-    localMap.set(rateKey, timestamps);
+    const timestamps = (localMap.get(rateKey) ?? [])
+      .filter((t) => t > windowStart);
 
-    // Deterministic cleanup when map exceeds size cap (prevents memory exhaustion)
-    if (localMap.size > MAP_SIZE_CAP) {
-      for (const [key, ts] of localMap) {
-        const pruned = ts.filter((t) => t > windowStart);
-        if (pruned.length === 0) localMap.delete(key);
-        else localMap.set(key, pruned);
+    if (timestamps.length === 0) {
+      localMap.delete(rateKey);
+    }
+
+    // Rejected calls must never extend the stored history.
+    if (timestamps.length + cost > limit) {
+      const retryAfterSecs = timestamps.length > 0
+        ? Math.max(1, Math.ceil(
+            (timestamps[0] + windowMs - now) / 1000
+          ))
+        : Math.max(1, Math.ceil(windowMs / 1000));
+
+      return {
+        allowed: false,
+        remaining: Math.max(0, limit - timestamps.length),
+        retryAfterSecs,
+      };
+    }
+
+    // Preserve active rate-limit history: never evict active keys.
+    if (timestamps.length === 0 && localMap.size >= MAP_SIZE_CAP) {
+      for (const [key, history] of localMap) {
+        const recent = history.filter((t) => t > windowStart);
+
+        if (recent.length === 0) {
+          localMap.delete(key);
+        } else if (recent.length !== history.length) {
+          localMap.set(key, recent);
+        }
+      }
+
+      // Capacity exhausted: fail closed for previously unseen keys.
+      if (localMap.size >= MAP_SIZE_CAP) {
+        let earliestExpiry = now + windowMs;
+
+        for (const history of localMap.values()) {
+          earliestExpiry = Math.min(
+            earliestExpiry,
+            history[0] + windowMs
+          );
+        }
+
+        return {
+          allowed: false,
+          remaining: 0,
+          retryAfterSecs: Math.max(
+            1,
+            Math.ceil((earliestExpiry - now) / 1000)
+          ),
+        };
       }
     }
 
-    const count = timestamps.length;
-    const allowed = count <= limit;
-    const remaining = Math.max(0, limit - count);
-    const oldest = timestamps[0];
-    const retryAfterMs = oldest
-      ? Math.max(0, oldest + windowMs - now)
-      : 0;
+    for (let i = 0; i < cost; i++) {
+      timestamps.push(now);
+    }
+
+    localMap.set(rateKey, timestamps);
 
     return {
-      allowed,
-      remaining,
-      retryAfterSecs: Math.ceil(retryAfterMs / 1000),
+      allowed: true,
+      remaining: Math.max(0, limit - timestamps.length),
+      retryAfterSecs: timestamps.length > 0
+        ? Math.max(0, Math.ceil(
+            (timestamps[0] + windowMs - now) / 1000
+          ))
+        : 0,
     };
   }
 
