@@ -340,7 +340,8 @@ describe('useCreatedMarkets Hook', () => {
       expect(result.current.myMarkets).toHaveLength(1);
     });
 
-    expect(mockConnection.getProgramAccounts).toHaveBeenCalledTimes(1);
+    // One program: the LP-portfolio, asset_admin and junior_owner scans.
+    expect(mockConnection.getProgramAccounts).toHaveBeenCalledTimes(3);
 
     // A discovery refresh may replace the array while preserving the exact
     // same wallet, slab, program, authority, and collateral identities.
@@ -356,7 +357,7 @@ describe('useCreatedMarkets Hook', () => {
       await Promise.resolve();
     });
 
-    expect(mockConnection.getProgramAccounts).toHaveBeenCalledTimes(1);
+    expect(mockConnection.getProgramAccounts).toHaveBeenCalledTimes(3);
     expect(result.current.error).toBeNull();
     expect(result.current.myMarkets).toHaveLength(1);
   });
@@ -374,7 +375,9 @@ describe('useCreatedMarkets Hook', () => {
     });
 
     mockConnection.getProgramAccounts
-      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]) // wallet A: LP-portfolio scan
+      .mockResolvedValueOnce([]) // wallet A: asset_admin scan
+      .mockResolvedValueOnce([]) // wallet A: junior_owner scan
       .mockImplementationOnce(() => new Promise<never[]>(() => {}));
 
     const { result, rerender } = renderHook(() => useCreatedMarkets());
@@ -383,7 +386,7 @@ describe('useCreatedMarkets Hook', () => {
       expect(result.current.myMarkets).toHaveLength(1);
     });
 
-    expect(mockConnection.getProgramAccounts).toHaveBeenCalledTimes(1);
+    expect(mockConnection.getProgramAccounts).toHaveBeenCalledTimes(3);
 
     mockUseWallet.mockReturnValue({
       publicKey: walletB,
@@ -393,7 +396,7 @@ describe('useCreatedMarkets Hook', () => {
     rerender();
 
     await waitFor(() => {
-      expect(mockConnection.getProgramAccounts).toHaveBeenCalledTimes(2);
+      expect(mockConnection.getProgramAccounts).toHaveBeenCalledTimes(6);
     });
 
     expect(result.current.myMarkets).toEqual([]);
@@ -417,7 +420,7 @@ describe('useCreatedMarkets Hook', () => {
     const { result } = renderHook(() => useCreatedMarkets());
 
     await waitFor(() => {
-      expect(mockConnection.getProgramAccounts).toHaveBeenCalledTimes(1);
+      expect(mockConnection.getProgramAccounts).toHaveBeenCalledTimes(3);
     });
 
     await waitFor(
@@ -445,7 +448,7 @@ describe('useCreatedMarkets Hook', () => {
     const { result } = renderHook(() => useCreatedMarkets());
 
     await waitFor(() => {
-      expect(mockConnection.getProgramAccounts).toHaveBeenCalledTimes(1);
+      expect(mockConnection.getProgramAccounts).toHaveBeenCalledTimes(3);
     });
 
     expect(result.current.loading).toBe(true);
