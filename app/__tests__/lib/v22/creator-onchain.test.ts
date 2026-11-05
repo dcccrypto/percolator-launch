@@ -65,8 +65,8 @@ describe("findCreatorSlabKeys", () => {
     const getProgramAccounts = portfolioScan(LP.data);
     const keys = await findCreatorSlabKeys({ getProgramAccounts, getMultipleAccountsInfo: multi } as never, PROGRAM, WALLET);
     expect(keys.map((k) => k.toBase58())).toEqual([SLAB.toBase58()]);
-    expect(getProgramAccounts).toHaveBeenCalledTimes(2);
-    const [pCall, aCall] = getProgramAccounts.mock.calls as unknown as Array<[PublicKey, { filters: Array<Record<string, unknown>>; dataSlice: unknown }]>;
+    expect(getProgramAccounts).toHaveBeenCalledTimes(3);
+    const [pCall, aCall, adminCall] = getProgramAccounts.mock.calls as unknown as Array<[PublicKey, { filters: Array<Record<string, unknown>>; dataSlice: unknown }]>;
     expect(pCall[1].dataSlice).toEqual({ offset: CONTROL_OFF, length: 8 });
     expect(pCall[1].filters).toContainEqual({ memcmp: { offset: 116, bytes: WALLET.toBase58() } });
     expect(pCall[1].filters.some((f) => "dataSize" in f && f.dataSize === LP.data.length)).toBe(true);
@@ -74,6 +74,11 @@ describe("findCreatorSlabKeys", () => {
     expect(aCall[1].filters).toEqual([
       { memcmp: { offset: 10, bytes: bs58.encode(Uint8Array.of(1)) } },
       { memcmp: { offset: 16, bytes: WALLET.toBase58() } },
+    ]);
+    expect(adminCall[1].dataSlice).toEqual({ offset: 0, length: 0 }); // asset 0 asset_admin, keys only
+    expect(adminCall[1].filters).toEqual([
+      { memcmp: { offset: 10, bytes: bs58.encode(Uint8Array.of(1)) } },
+      { memcmp: { offset: 1766, bytes: WALLET.toBase58() } },
     ]);
     expect(multi).toHaveBeenCalledTimes(1);
     expect((multi.mock.calls[0] as unknown[])[1]).toEqual({ dataSlice: { offset: 16, length: 32 } });
