@@ -365,7 +365,7 @@ export function useLpPositions(): LpPositionsState & { refresh: () => void } {
       const vaultInfos = combinedAccountInfos.slice(3 * pools.length);
 
       // v2.2 first-loss pools: the stake is worth its share of vault + the insurance deployed into the market, the /stake
-      // page's value (stakePoolValueView with the units ledger, clamped to the market's live free insurance). The units
+      // page's value (stakePoolValueView with the units ledger, priced at the market's live free insurance). The units
       // and market accounts are read in ONE extra batched call, only for first-loss pools this wallet holds; flag off,
       // nothing here runs.
       const firstLoss = isDevnetV22Enabled()

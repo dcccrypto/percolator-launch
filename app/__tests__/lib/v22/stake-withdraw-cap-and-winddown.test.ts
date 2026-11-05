@@ -2,9 +2,9 @@
 import { describe, expect, it } from "vitest";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
-import { LAYOUT_V22, STAKE_POOL_FIELD_OFF_V5, STAKE_POOL_SIZE_V5, STAKE_RISK_MODE, INSURANCE_UNITS_FIELD_OFF_V22, ACCOUNT_KIND, WRAPPER_ACCOUNT_MAGIC, deriveInsuranceUnitsV22 } from "@/lib/v22/sdk";
+import { LAYOUT_V22, STAKE_POOL_FIELD_OFF_V5, STAKE_POOL_SIZE_V5, STAKE_RISK_MODE, INSURANCE_UNITS_FIELD_OFF_V22, ACCOUNT_KIND, WRAPPER_ACCOUNT_MAGIC, collateralForLpV5, decodeStakePoolV5, deriveInsuranceUnitsV22, quoteStakeWithdrawNowV5, stakePoolValue } from "@/lib/v22/sdk";
 import { buildRecoverTerminalInsuranceIx, planStakeWindDown } from "@/lib/v22/sdk/records/stake-wind-down";
-import { liveFreeInsuranceAtoms, stakeWithdrawCapView } from "@/lib/v22/stake-pool-value";
+import { liveFreeInsuranceAtoms, stakeWithdrawCapView, WITHDRAW_CAP_HEADROOM_BPS } from "@/lib/v22/stake-pool-value";
 import { withdrawAmountError } from "@/lib/stake-position";
 import { V22_COPY } from "@/lib/v22/copy";
 import { syntheticMarket } from "./_stamp";
@@ -86,16 +86,53 @@ describe("stakeWithdrawCapView (stake processor.rs:1626-1631, LiquidityBufferExh
     expect(withdrawAmountError("10", 20_000_000n, 6, cap.maxLpRaw)).toBeNull();
     expect(V22_COPY.stake.withdrawCap("$10.96")).toBe("Part of this pool is deployed as insurance; up to $10.96 can be withdrawn now, the rest returns if and when it's recovered.");
   });
-  it("AUD-FC-B3: a stale-high units snapshot is clamped to the live free reading (never quotes above it); live above the snapshot changes nothing", () => {
+  it("AUD-FC-B3: a stale-high units snapshot is priced at the live free reading (never quotes above it)", () => {
     const stale = unitsBytes(10_960_000n, 65_280_000n, 65_280_000n); // snapshot says insurance is still full
     const old = stakeWithdrawCapView(poolBytes(), stale, 10_960_000n, 20_000_000n)!;
     const live = stakeWithdrawCapView(poolBytes(), stale, 10_960_000n, 20_000_000n, 32_640_000n)!;
     expect(live.deferredAtoms).toBeLessThan(old.deferredAtoms); // the stale snapshot overstated what the deployed part is worth
     expect(live.maxAtoms).toBeLessThanOrEqual(old.maxAtoms);
-    const above = stakeWithdrawCapView(poolBytes(), units, 10_960_000n, 20_000_000n, 999_000_000n)!;
-    expect(above).toEqual(stakeWithdrawCapView(poolBytes(), units, 10_960_000n, 20_000_000n)!);
     expect(liveFreeInsuranceAtoms(null)).toBeNull();
     expect(liveFreeInsuranceAtoms(new Uint8Array(10))).toBeNull();
+  });
+  it("a stale-LOW snapshot (insurance grew since the last ledger touch) is priced at the live reading, so the capped burn passes Withdraw's liquid check (stake processor.rs:2802 refresh, :1617 price, :1624 36)", () => {
+    const LIQUID = 10_960_000n, LIVE = 40_000_000n; // snapshot 32.64M, live 40M
+    const p = poolBytes();
+    const pool = decodeStakePoolV5(p);
+    const U = { unitsStake: 10_960_000n, unitsTotal: 65_280_000n };
+    // What the program pays for a burn of `lp` once the refresh has written `free`: calc_collateral_for_withdraw(S, liquid + deployed_value(free)).
+    const pays = (lp: bigint, free: bigint) => collateralForLpV5(lp, pool.totalLpSupply, stakePoolValue(pool, U, free)!.total)!;
+    const fixed = stakeWithdrawCapView(p, units, LIQUID, 20_000_000n, LIVE)!;
+    const snapshotQuote = stakeWithdrawCapView(p, units, LIQUID, 20_000_000n)!;
+    expect(fixed.capBinds).toBe(true);
+    expect(pays(snapshotQuote.maxLpRaw, LIVE)).toBeGreaterThan(LIQUID); // a burn sized at the snapshot is refused 36
+    expect(fixed.maxLpRaw).toBeLessThan(snapshotQuote.maxLpRaw);
+    expect(pays(fixed.maxLpRaw, LIVE)).toBeLessThanOrEqual(LIQUID);
+    expect(fixed.maxAtoms).toBe(LIQUID);
+    // Headroom: the exact boundary burn is refused after 1,000 atoms of further growth; the trimmed burn still fits after 90,000.
+    const exact = quoteStakeWithdrawNowV5(pool, U, LIVE, LIQUID, 20_000_000n)!.maxLpNow;
+    expect(pays(exact, LIVE)).toBeLessThanOrEqual(LIQUID);
+    expect(pays(exact, LIVE + 1_000n)).toBeGreaterThan(LIQUID);
+    expect(fixed.maxLpRaw).toBe(exact - (exact * WITHDRAW_CAP_HEADROOM_BPS) / 10_000n);
+    expect(pays(fixed.maxLpRaw, LIVE + 90_000n)).toBeLessThanOrEqual(LIQUID);
+    // No live reading (market unreadable): priced at the snapshot, as before.
+    expect(stakeWithdrawCapView(p, units, LIQUID, 20_000_000n, null)).toEqual(snapshotQuote);
+    const snap = quoteStakeWithdrawNowV5(pool, U, 32_640_000n, LIQUID, 20_000_000n)!;
+    expect(snapshotQuote.maxAtoms).toBe(snap.maxCollateralNow);
+    expect(snapshotQuote.maxLpRaw).toBe(snap.maxLpNow - (snap.maxLpNow * WITHDRAW_CAP_HEADROOM_BPS) / 10_000n);
+    // The cap may bind only at the live reading: the snapshot says "withdraw everything", the program would refuse it.
+    const lp = (LIQUID * 1_000_000n) / pays(1_000_000n, 32_640_000n) - 1_000n; // pays just under liquid at the snapshot
+    const mid = stakeWithdrawCapView(p, units, LIQUID, lp)!;
+    const midLive = stakeWithdrawCapView(p, units, LIQUID, lp, LIVE)!;
+    expect(mid.capBinds).toBe(false);
+    expect(mid.maxLpRaw).toBe(lp);
+    expect(pays(lp, LIVE)).toBeGreaterThan(LIQUID);
+    expect(midLive.capBinds).toBe(true);
+    expect(pays(midLive.maxLpRaw, LIVE)).toBeLessThanOrEqual(LIQUID);
+    // An uncapped withdrawal is never trimmed.
+    const small = stakeWithdrawCapView(p, units, LIQUID, 1_000_000n, LIVE)!;
+    expect(small.capBinds).toBe(false);
+    expect(small.maxLpRaw).toBe(1_000_000n);
   });
   it("no cap known (units unreadable, vault unread, fee-only) -> null, balance rules apply", () => {
     expect(stakeWithdrawCapView(poolBytes(), null, 10_960_000n, 1n)).toBeNull();

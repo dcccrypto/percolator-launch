@@ -303,8 +303,8 @@ export async function GET() {
         if (info) unitsByPool.set(u.pubkey, new Uint8Array(info.data));
       });
       for (const [pubkey, data] of kinds) {
-        // The units snapshot is stale-high after an insurance loss: clamp it to the market's live free reading, exactly as
-        // /stake does (AUD-FC-B3), from the slab bytes read above. A market that can't be decoded keeps the snapshot (as the page).
+        // The units snapshot lags the market both ways (high after a loss, AUD-FC-B3; low after growth): price at the market's live
+        // free reading, exactly as /stake does, from the slab bytes read above. A market that can't be decoded keeps the snapshot (as the page).
         const v = stakePoolValueView(data, unitsByPool.get(pubkey), liveFreeInsuranceAtoms(slabDataByPool.get(pubkey)));
         if (v) valueViews.set(pubkey, v);
       }

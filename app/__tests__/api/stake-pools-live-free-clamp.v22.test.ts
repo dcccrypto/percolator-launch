@@ -130,11 +130,12 @@ describe("/api/stake/pools clamps a first-loss pool to the market's live free in
     expect(fl.poolValue).toBe(usd(page.totalAtoms));
   });
 
-  it("live reading above the snapshot changes nothing (the clamp only lowers)", async () => {
+  it("live reading above a stale-low snapshot (growth since the last ledger touch): priced at the live reading, as Withdraw refreshes to it", async () => {
     rpc.liveFree = 900_000_000n;
     const fl = (await getPools(true)).find((p) => p.poolAddress === FIRST_LOSS_POOL)!;
-    expect(fl.deployedValue).toBe(300);
-    expect(fl.tvl).toBe(usd(stakePoolValueView(poolBytes, UNITS, null)!.totalAtoms));
+    expect(fl.deployedValue).toBe(540); // 60% of the live 900M, not of the 500M snapshot
+    expect(fl.tvl).toBe(usd(stakePoolValueView(poolBytes, UNITS, 900_000_000n)!.totalAtoms));
+    expect(fl.tvl!).toBeGreaterThan(usd(stakePoolValueView(poolBytes, UNITS, null)!.totalAtoms)!);
   });
 
   it("market not decodable as a v2.2 market: the snapshot, exactly as the page (liveFreeInsuranceAtoms null)", async () => {

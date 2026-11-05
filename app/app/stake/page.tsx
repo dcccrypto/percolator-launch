@@ -280,7 +280,7 @@ async function fetchPoolPosition(
       const [unitsKey] = deriveInsuranceUnitsV22(decodeStakePoolV5(poolInfo.data).percolatorProgram, slabPk);
       const unitsInfo = await connection.getAccountInfo(unitsKey);
       const unitsBytes = unitsInfo ? new Uint8Array(unitsInfo.data) : null;
-      // The units snapshot is stale-high after a loss: clamp to the live free reading read from the market (AUD-FC-B3).
+      // The units snapshot lags the market both ways (high after a loss, AUD-FC-B3; low after growth): price at the live free reading read from the market.
       const marketInfo = await connection.getAccountInfo(slabPk);
       const liveFree = liveFreeInsuranceAtoms(marketInfo ? new Uint8Array(marketInfo.data) : null);
       chainVaultAtoms = stakePoolValueView(poolInfo.data, unitsBytes, liveFree)?.totalAtoms ?? null;
