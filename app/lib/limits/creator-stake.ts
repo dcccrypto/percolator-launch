@@ -138,4 +138,6 @@ export const CREATOR_STAKE_PANEL_COPY = {
   resolvedAvailable: (amount: string) => `Your creator stake: ${amount} available after Earn depositors are paid.`,
   resolvedWithdraw: (amount: string) => `Withdraw ${amount}`,
   resolvedWaiting: (at: string) => `Available once the market's final payouts finish (about ${at}).`,
+  /** The steps that end the market can all run now (resolved-exit canFinishNow), the junior owner's 101 included. */
+  resolvedFinishFirst: "Available once the market's last settlement steps have run. You can run them now.",
 } as const;

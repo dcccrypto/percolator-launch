@@ -27,6 +27,7 @@ import { defaultLpExposureKBps, lpEquityInitRaw, lpExposureCapQ, maxTradeSizePer
 import { projectCreatorCaps } from "@/lib/limits/vault-tranche";
 import { CREATOR_STAKE_PANEL_COPY, clampStakeWithdrawFor, creatorStakeState, stakeReasonFromRefusal, type CreatorStakeState, type StakeReason } from "@/lib/limits/creator-stake";
 import { useResolvedExit } from "@/hooks/useResolvedExit";
+import { canFinishNow } from "@/lib/limits/resolved-exit";
 import { resolvedPayoutEta } from "@/lib/limits/resolved-eta";
 import { juniorResolvedReleasableAtoms } from "@/lib/limits/junior-resolved-release";
 import { earnViewFromLimits } from "@/lib/limits/earn";
@@ -132,8 +133,17 @@ export const JuniorTrancheActionsView: FC<{
   refusedReason?: StakeReason | null;
   onDeposit: (atoms: bigint) => void;
   onWithdraw: (atoms: bigint) => void;
-  /** RESOLVED market: the junior's terminal exit (102) takes only what is above the seniors' claim. */
-  resolved?: { surplusAtoms: bigint | null; waitingUntil: string | null; onRelease: (atoms: bigint) => void } | null;
+  /**
+   * RESOLVED market: the junior's terminal exit (102) takes only what is above the seniors' claim. `finish`: the market's
+   * remaining settlement steps this wallet can run now (useResolvedExit.finish, the Earn panel's "Finish now"); the junior
+   * owner can run the vault LP's 101 inside the owner window, so it need not wait for it.
+   */
+  resolved?: {
+    surplusAtoms: bigint | null;
+    waitingUntil: string | null;
+    onRelease: (atoms: bigint) => void;
+    finish?: { steps: number; sol: string; running: boolean; error: string | null; onFinish: () => void } | null;
+  } | null;
 }> = ({ stake, decimals, collateralSymbol, busy, error, refusedReason = null, onDeposit, onWithdraw, resolved }) => {
   const [raw, setRaw] = useState("");
   const rawField = useDecimalInput(raw, setRaw);
@@ -156,11 +166,12 @@ export const JuniorTrancheActionsView: FC<{
   if (resolved) {
     const s = resolved.surplusAtoms;
     const open = s !== null && s > 0n;
+    const fin = !open ? resolved.finish ?? null : null;
     return (
       <div data-testid="limits-junior-actions" data-mode="resolved" className="mb-3 border border-[var(--border)] bg-[var(--panel-bg)] p-3">
         {header}
         <p data-testid="limits-junior-resolved-surplus" className="text-[11px] leading-relaxed text-[var(--text)]">
-          {open ? K.resolvedAvailable(fmt(s)) : resolved.waitingUntil ? K.resolvedWaiting(resolved.waitingUntil) : K.resolvedAvailable(fmt(0n))}
+          {open ? K.resolvedAvailable(fmt(s)) : fin ? K.resolvedFinishFirst : resolved.waitingUntil ? K.resolvedWaiting(resolved.waitingUntil) : K.resolvedAvailable(fmt(0n))}
         </p>
         {open && (
           <button
@@ -172,6 +183,27 @@ export const JuniorTrancheActionsView: FC<{
           >
             {K.resolvedWithdraw(fmt(s))}
           </button>
+        )}
+        {fin && (
+          <div className="mt-2">
+            <p data-testid="limits-junior-finish-explain" className="text-[10px] leading-relaxed text-[var(--text-secondary)]">
+              {COPY.resolvedExit.finishNow(fin.steps, fin.sol)}
+            </p>
+            <button
+              type="button"
+              data-testid="limits-junior-finish"
+              disabled={busy || fin.running}
+              onClick={fin.onFinish}
+              className="mt-1 w-full border border-[var(--accent)]/50 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {fin.running ? COPY.resolvedExit.running : COPY.resolvedExit.finishLink}
+            </button>
+          </div>
+        )}
+        {fin?.error && (
+          <p data-testid="limits-junior-finish-error" className="mt-2 text-[10px] text-[var(--short)]">
+            {fin.error}
+          </p>
         )}
         {error && (
           <p data-testid="limits-junior-error" className="mt-2 text-[10px] text-[var(--short)]">
@@ -265,14 +297,17 @@ function juniorResolvedSurplus(raw: Uint8Array | null | undefined, assetIndex: n
 /** Floors the wizard offers (the program accepts 1000..=10000). */
 export const WIZARD_FLOOR_CHOICES_BPS = [1_000, 2_000, 3_000, 5_000] as const;
 
-/** Mounts the data hooks only when a limits flag is on (flag-off = zero extra RPC). */
-export const CreatorTranchePanel: FC<{ slab: string; decimals: number; collateralSymbol: string }> = (p) => {
+/**
+ * Mounts the data hooks only when a limits flag is on (flag-off = zero extra RPC). `caps={false}`: the creator stake only, without
+ * the "Risk & caps" rows (the never-connected card: a market that never traded has no caps worth showing).
+ */
+export const CreatorTranchePanel: FC<{ slab: string; decimals: number; collateralSymbol: string; caps?: boolean }> = (p) => {
   const f = limitsFlags();
   if (!f.p1 && !f.p3) return null;
   return <CreatorTranchePanelLive {...p} />;
 };
 
-const CreatorTranchePanelLive: FC<{ slab: string; decimals: number; collateralSymbol: string }> = ({ slab, decimals, collateralSymbol: fallbackSymbol }) => {
+const CreatorTranchePanelLive: FC<{ slab: string; decimals: number; collateralSymbol: string; caps?: boolean }> = ({ slab, decimals, collateralSymbol: fallbackSymbol, caps = true }) => {
   const limits = useMarketLimits(slab);
   const { state: lpState } = useInsuranceLP();
   const { assetProfile, raw: slabRaw, config: slabConfig } = useSlabState();
@@ -326,12 +361,16 @@ const CreatorTranchePanelLive: FC<{ slab: string; decimals: number; collateralSy
                   surplusAtoms: exit.plan && exit.plan.phase !== "ready" ? null : juniorResolvedSurplus(slabRaw, vs.assetIndex, vs.seniorClaimAtoms),
                   waitingUntil: eta ? `${eta.label}, ${eta.relative}` : null,
                   onRelease: (a) => void junior.releaseResolved(a).catch(() => undefined),
+                  finish:
+                    exit.plan && canFinishNow(exit.plan) && exit.estimate
+                      ? { ...exit.estimate, running: exit.running, error: exit.error, onFinish: () => void exit.finish().catch(() => undefined) }
+                      : null,
                 }
               : null
           }
         />
       )}
-      <CreatorTranchePanelView
+      {caps && <CreatorTranchePanelView
       limits={limits}
       slab={slab}
       backingNavAtoms={lpState.backingNavAtoms}
@@ -339,7 +378,7 @@ const CreatorTranchePanelLive: FC<{ slab: string; decimals: number; collateralSy
       decimals={decimals}
       collateralSymbol={collateralSymbol}
       simulatedLpValue={lpValuation.value}
-      />
+      />}
     </>
   );
 };

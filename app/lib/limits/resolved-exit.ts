@@ -48,7 +48,8 @@ export type ExitBlocker =
 export type ResolvedExitPlan =
   | { phase: "not-resolved" }
   /** Live-mode resolve not done; or the owner-only window: trader/vault closes need their owner until `untilSlot`. */
-  | { phase: "owner-window"; untilSlot: bigint; steps: ExitStep[]; blockers: ExitBlocker[] }
+  /** `ownersPending`: portfolios only their owner may close before `untilSlot` (absent = none), so the market cannot finish sooner. */
+  | { phase: "owner-window"; untilSlot: bigint; steps: ExitStep[]; blockers: ExitBlocker[]; ownersPending?: number }
   | { phase: "sweep"; steps: ExitStep[]; blockers: ExitBlocker[] }
   /** Terminal-flat: the Earn redemption (76 -> 77) can run now. */
   | { phase: "ready"; blockers: ExitBlocker[] };
@@ -91,6 +92,12 @@ export function planResolvedExit(input: {
   harvestableAtoms: bigint | null;
   /** F-14 claim-free residual (decodeTerminalBacking); 78 absorbs it at terminal-flat. */
   terminalResidualAtoms?: bigint | null;
+  /**
+   * The fee payer is the vault's junior owner. Tag 101 admits the junior owner inside the owner window
+   * (percolator-prog aca02ba6 `v16_program.rs` `... && caller.key != &junior_owner { return Err(Unauthorized) }`),
+   * so its close step is planned now instead of after `force_close_delay_slots` (216,000 slots, about 24 h).
+   */
+  juniorOwnerPays?: boolean;
 }): ResolvedExitPlan {
   const { market, nowSlot, portfolios, boundVault, harvestableAtoms } = input;
   const residual = input.terminalResidualAtoms ?? 0n;
@@ -100,6 +107,8 @@ export function planResolvedExit(input: {
   const windowEnd = ownerWindowEnd(market);
   const inWindow = nowSlot < windowEnd;
   const steps: ExitStep[] = [];
+  let ownersPending = 0;
+  const juniorEarly: ExitStep[] = [];
   const vault = portfolios.filter((p) => p.isVaultLp);
   const traders = portfolios.filter((p) => !p.isVaultLp);
 
@@ -107,6 +116,7 @@ export function planResolvedExit(input: {
     if (looksEmpty(v.view)) steps.push({ kind: "close-empty", portfolio: v.key, isVaultLp: true });
     else if (receiptOpen(v.view)) steps.push({ kind: "settle-vault-lp", topup: 1, portfolio: v.key });
     else if (!inWindow) steps.push({ kind: "settle-vault-lp", topup: 0, portfolio: v.key });
+    else if (input.juniorOwnerPays === true) juniorEarly.push({ kind: "settle-vault-lp", topup: 0, portfolio: v.key });
   }
   // Both directions depend on each other (P3 final pass + 5e4c15ff): a WINNING trader's close is
   // progress-only (or pays a PARTIAL receipt) until the vault LP has settled, and a WINNING vault
@@ -129,9 +139,15 @@ export function planResolvedExit(input: {
       blockers.push({ kind: "locked", portfolio: t.key });
       continue;
     }
-    if (inWindow) continue;
+    if (inWindow) {
+      ownersPending++;
+      continue;
+    }
     steps.push(receiptOpen(t.view) ? { kind: "claim-topup", portfolio: t.key } : { kind: "close-resolved", portfolio: t.key });
   }
+  // The junior owner's early 101 only helps when nothing else holds the market open: a trader only its owner may close, or an
+  // escrowed or locked portfolio, keeps it from terminal-flat, so running 101 early would cost fees and change nothing for the junior.
+  if (ownersPending === 0 && blockers.length === 0) steps.unshift(...juniorEarly);
 
   const terminalFlat = market.materializedPortfolioCount === 0n && market.cTot === 0n;
   // F-14: 78 on a terminal-flat Resolved bound market harvests pending fees AND absorbs the
@@ -140,7 +156,7 @@ export function planResolvedExit(input: {
     return { phase: "sweep", steps: [{ kind: "harvest" }], blockers };
   }
   if (terminalFlat) return { phase: "ready", blockers };
-  if (inWindow) return { phase: "owner-window", untilSlot: windowEnd, steps, blockers };
+  if (inWindow) return { phase: "owner-window", untilSlot: windowEnd, steps, blockers, ...(ownersPending > 0 ? { ownersPending } : {}) };
   return { phase: "sweep", steps, blockers };
 }
 
@@ -188,6 +204,18 @@ export function batchExitSteps(steps: readonly ExitStep[], perTx = 3): ExitStep[
   }
   if (cur.length) out.push(cur);
   return out;
+}
+
+/**
+ * Can this plan's steps take the market to terminal-flat NOW (so the junior's 102 opens right after)? Not while a portfolio is
+ * escrowed or locked, nor inside the owner window while a trader only its owner may close is still open (on devnet 5S7h2kKg a third
+ * party's portfolio keeps the junior waiting for the window whatever the junior runs). After the window every step is
+ * permissionless; each one is still simulated before the wallet opens.
+ */
+export function canFinishNow(plan: ResolvedExitPlan): boolean {
+  if (plan.phase !== "sweep" && plan.phase !== "owner-window") return false;
+  if (plan.steps.length === 0 || plan.blockers.length > 0) return false;
+  return plan.phase === "sweep" || (plan.ownersPending ?? 0) === 0;
 }
 
 /** What the Earn panel says about a resolved market (pure; copy in ./copy). */

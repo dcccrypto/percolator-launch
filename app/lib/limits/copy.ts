@@ -128,7 +128,7 @@ export const COPY = {
       amount ? `Your ${amount} can be withdrawn from about ${at} (${rel}) if the automation runs the steps; sooner if you finish them yourself.` : `Earn withdrawals open from about ${at} (${rel}) if the automation runs the steps; sooner if you finish them yourself.`,
     ready: "Everything on this market is settled. Earn withdrawals pay out now: use Withdraw below.",
     finishNow: (n: number, sol: string) =>
-      `Anyone can speed this up. Finish the remaining ${n} step${n === 1 ? "" : "s"} now (about ${sol} SOL in network fees).`,
+      `You can speed this up. Finish the remaining ${n} step${n === 1 ? "" : "s"} now (about ${sol} SOL in network fees).`,
     finishLink: "Finish now",
     finishAndWithdrawLink: "Finish now and request my withdrawal",
     escrowed: (n: number) =>
