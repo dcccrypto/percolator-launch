@@ -1,8 +1,9 @@
 // @vitest-environment node
 /**
  * A completed P3 (vault-LP) launch has no creator-owned LP (useCreateMarket `includeM2 = !params.p3`) and its marketauth is the
- * stake pool PDA, so only asset 0's `asset_admin` (+1766, set by InitMarket) still names the creator. Real bytes of devnet market
- * K6xMbo (slot 518,690,419; creator 2GxFkYSK... = fee payer of its creation tx) and of CHILLHOUSE-T (creator-LP launch).
+ * stake pool PDA, so asset 0's `asset_admin` (+1766, set by InitMarket) names the creator, and after an admin-key burn only the
+ * vault's `VaultLpState.junior_owner` does. Real bytes of devnet market K6xMbo (slot 518,690,419; creator 2GxFkYSK... = fee payer
+ * of its creation tx) and of CHILLHOUSE-T, whose LP portfolio is owned by an off-curve vault-LP address (it exercises the LP marker).
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -12,6 +13,7 @@ import bs58 from "bs58";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { readAssetAdmin } from "@/lib/v18-wire";
 import { findCreatorSlabKeys } from "@/lib/v22/creator-onchain";
+import { KIND_VAULT_LP_STATE, VAULT_LP_STATE_ACCOUNT_LEN, VS } from "@/lib/limits/constants";
 
 const fx = (n: string): { owner: string; data: Uint8Array } => {
   const j = JSON.parse(readFileSync(path.join(__dirname, `../../fixtures/v22-growth/${n}.json`), "utf8")) as { owner: string; data: string };
@@ -23,7 +25,7 @@ const P3 = fx("k6xmbo-p3.market");
 const PROGRAM = new PublicKey(LP.owner);
 const SLAB = new PublicKey("56pWj8zYeZMv6oHHf4nwAfWAunzixxknaVNEFY48oJ2Y");
 const P3_SLAB = new PublicKey("K6xMbo6GUNhhAf2Krrm6pUCiFj1qbdZPSnrXig1scHi");
-const WALLET = new PublicKey(LP.data.subarray(116, 148));
+const WALLET = new PublicKey(LP.data.subarray(116, 148)); // owner of CHILLHOUSE-T's LP portfolio (off-curve)
 
 beforeEach(() => __setDevnetV22ForTest(true));
 afterEach(() => __setDevnetV22ForTest(null));
@@ -80,10 +82,28 @@ describe("findCreatorSlabKeys: a completed P3 (vault-LP) launch", () => {
       accounts[0] = { pubkey: P3_SLAB, data: P3.data };
     }
   });
-  it("a creator-LP launch is unchanged (LP marker); its asset_admin is whoever signed InitMarket; an unrelated wallet finds nothing", async () => {
+  it("the LP marker still lists a market for its LP owner; CHILLHOUSE-T's asset_admin is its InitMarket signer; an unrelated wallet finds nothing", async () => {
     expect(readAssetAdmin(MKT.data, 0).equals(INIT_SIGNER)).toBe(true); // CHILLHOUSE-T: LP owner != asset_admin
     expect((await findCreatorSlabKeys(conn as never, PROGRAM, WALLET)).map((k) => k.toBase58())).toEqual([SLAB.toBase58()]);
     expect((await findCreatorSlabKeys(conn as never, PROGRAM, INIT_SIGNER)).map((k) => k.toBase58())).toEqual([SLAB.toBase58()]);
     expect(await findCreatorSlabKeys(conn as never, PROGRAM, PublicKey.unique())).toEqual([]);
+  });
+  it("a burned admin key (asset_admin zero) is still listed through the vault's junior_owner, and only through it", async () => {
+    const burned = P3.data.slice();
+    burned.fill(0, 1766, 1798);
+    const vault = new Uint8Array(VAULT_LP_STATE_ACCOUNT_LEN);
+    vault[10] = KIND_VAULT_LP_STATE;
+    vault.set(P3_SLAB.toBytes(), VS.marketGroup);
+    vault.set(CREATOR.toBytes(), VS.juniorOwner);
+    accounts[0] = { pubkey: P3_SLAB, data: burned };
+    try {
+      expect(await findCreatorSlabKeys(conn as never, PROGRAM, CREATOR)).toEqual([]);
+      accounts.push({ pubkey: PublicKey.unique(), data: vault });
+      expect((await findCreatorSlabKeys(conn as never, PROGRAM, CREATOR)).map((k) => k.toBase58())).toEqual([P3_SLAB.toBase58()]);
+      expect(await findCreatorSlabKeys(conn as never, PROGRAM, PublicKey.unique())).toEqual([]);
+    } finally {
+      accounts[0] = { pubkey: P3_SLAB, data: P3.data };
+      accounts.splice(3);
+    }
   });
 });

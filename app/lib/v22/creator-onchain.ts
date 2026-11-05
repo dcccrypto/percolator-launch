@@ -2,7 +2,7 @@
  * Creator lookup that does not depend on the Supabase registry (#3637): a market with no registry row is invisible on
  * /markets and /my-markets, so the creator's own v2.2 markets are found on chain.
  *
- * Three markers:
+ * Four markers:
  *  - the LP portfolio the wizard creates with the creator's wallet as owner (portfolio +116, market id +16; the LP is the one
  *    whose matcher control bit 0 is set, lib/lpPortfolio.ts). Completed launches rotate `marketauth` to the stake pool PDA, so
  *    this marks a completed creator-LP launch. Found WITHOUT downloading every trading portfolio: the owner-scoped scan returns only
@@ -12,7 +12,9 @@
  *    launch, which has no creator-owned LP (useCreateMarket `includeM2 = !params.p3`) and whose marketauth is the pool PDA.
  *    InitMarket sets it to the market's first marketauth, the creator (`asset_admin: config.marketauth`); StakeInitPool leaves it,
  *    and only UpdateAssetAuthority (tag 65, kind 0) moves it: signed by the current asset_admin, and co-signed by the new key unless
- *    it is zero. A market handed to another admin is listed for that admin, a burned one (zero) for no one. Keys only (dataSlice length 0).
+ *    it is zero. A market handed to another admin is listed for that admin, a burned one (zero) by this marker for no one. Keys only (dataSlice length 0);
+ *  - the vault's `VaultLpState.junior_owner` equal to the wallet: a completed P3 launch whose admin key was burned. InitVaultLp
+ *    writes it from the launching marketauth and nothing moves it. Only the market id (32 bytes at +16) is read.
  * Offsets: percolator-prog aca02ba6 `src/v16_program.rs` (HEADER_LEN 16, KIND_MARKET 1, KIND_PORTFOLIO 2, provenance market id
  * at +16, owner at +116, matcher control = matcher config +96, `WrapperConfigV16.marketauth` first field).
  *
@@ -20,7 +22,7 @@
  * (ConfigureAuthMark, tag 62), which can land tens to hundreds of slots after creation, so a slot-gap rule misses real cases.
  * `readNeverPushed` reads the transaction(s) AT `last_good_oracle_slot` and looks at the wrapper tags (lib/v22/never-connected.ts).
  *
- * RPC budget per lookup: 3 getProgramAccounts (tiny slices), ceil(n/100) getMultipleAccounts for market ids and for market
+ * RPC budget per lookup: 4 getProgramAccounts (tiny slices), ceil(n/100) getMultipleAccounts for market ids and for market
  * bytes, and per market that has been silent for longer than the launch wait (healthy markets cost nothing): one
  * getSignaturesForAddress and one getTransaction per transaction at that slot, at most MAX_HISTORY_LOOKUPS markets, newest
  * silence first, MAX_PARALLEL at a time. Results are cached for the session (history of a past slot never changes).
@@ -33,6 +35,7 @@ import { activeLayout, portfolioGpaFilters } from "./layout";
 import { LAUNCH_WAIT_SLOTS, NEVER_CONNECTED_FALLBACK_SLACK_SLOTS, classifyLastGoodTags } from "./never-connected";
 import { parseWrapperConfigV17 } from "./sdk/slab";
 import { staleResolveStatusV22 } from "./stale-resolve";
+import { HEADER_KIND_OFF, KIND_VAULT_LP_STATE, VAULT_LP_STATE_ACCOUNT_LEN, VS } from "@/lib/limits/constants";
 
 const PF_MARKET_OFF = 16;
 const PF_OWNER_OFF = 116;
@@ -41,7 +44,7 @@ const MARKETAUTH_OFF = LAYOUT_V22.headerLen; // config rel 0
 const CONTROL_REL = 96; // matcher control word inside the 104-byte matcher config
 const ASSET_ADMIN_REL = 368; // AssetOracleProfileV16.asset_admin inside the oracle profile (lib/v18-wire.ts readAssetAdmin)
 
-/** A creator has few markets; this bounds a pathological wallet. Applied in marker order (LP, marketauth, asset_admin); `lookupCreatorMarkets` reorders only the silent ones, to pick history reads. */
+/** A creator has few markets; this bounds a pathological wallet. Applied in marker order (LP, marketauth, asset_admin, junior_owner); `lookupCreatorMarkets` reorders only the silent ones, to pick history reads. */
 export const MAX_CREATOR_SLABS = 100;
 /** Markets whose history is read per lookup; the rest keep `neverPushed: null` (the fallback rule applies). */
 export const MAX_HISTORY_LOOKUPS = 12;
@@ -57,7 +60,7 @@ type Conn = Pick<Connection, "getProgramAccounts" | "getMultipleAccountsInfo" | 
 
 const bytes = (d: Uint8Array | Buffer): Uint8Array => (d instanceof Uint8Array ? d : new Uint8Array(d));
 
-/** Distinct market ids the wallet created, from both markers. */
+/** Distinct market ids the wallet created, from all four markers. */
 export async function findCreatorSlabKeys(
   connection: Pick<Connection, "getProgramAccounts" | "getMultipleAccountsInfo">,
   programId: PublicKey,
@@ -66,7 +69,7 @@ export async function findCreatorSlabKeys(
   const L = activeLayout();
   const controlOff = L.portfolio.matcherConfigOff + CONTROL_REL;
   const adminOff = L.marketGroupOff + L.marketGroupLen + L.wrapperSlot.oracleProfile + ASSET_ADMIN_REL; // asset 0
-  const [owned, authored, administered] = await Promise.all([
+  const [owned, authored, administered, juniors] = await Promise.all([
     connection.getProgramAccounts(programId, {
       dataSlice: { offset: controlOff, length: 8 },
       filters: [...portfolioGpaFilters(), { memcmp: { offset: PF_OWNER_OFF, bytes: wallet.toBase58() } }],
@@ -83,6 +86,14 @@ export async function findCreatorSlabKeys(
       filters: [
         { memcmp: { offset: KIND_OFF, bytes: bs58.encode(Uint8Array.of(ACCOUNT_KIND.Market)) } },
         { memcmp: { offset: adminOff, bytes: wallet.toBase58() } },
+      ],
+    }),
+    connection.getProgramAccounts(programId, {
+      dataSlice: { offset: VS.marketGroup, length: 32 },
+      filters: [
+        { dataSize: VAULT_LP_STATE_ACCOUNT_LEN },
+        { memcmp: { offset: HEADER_KIND_OFF, bytes: bs58.encode(Uint8Array.of(KIND_VAULT_LP_STATE)) } },
+        { memcmp: { offset: VS.juniorOwner, bytes: wallet.toBase58() } },
       ],
     }),
   ]);
@@ -105,6 +116,12 @@ export async function findCreatorSlabKeys(
   }
   for (const { pubkey } of authored) out.set(pubkey.toBase58(), pubkey);
   for (const { pubkey } of administered) out.set(pubkey.toBase58(), pubkey);
+  for (const { account } of juniors) {
+    const d = bytes(account.data);
+    if (d.length !== 32) continue;
+    const k = new PublicKey(d);
+    out.set(k.toBase58(), k);
+  }
   return [...out.values()].slice(0, MAX_CREATOR_SLABS);
 }
 
