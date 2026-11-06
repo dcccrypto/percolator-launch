@@ -75,14 +75,14 @@ export const V22_COPY = {
   rent: {
     rate: (pctPerDay: string) => `Holding fee ${pctPerDay} per day`,
     none: "No holding fee",
-    hint: "A small fee while a position is open, charged from the position's margin.",
+    hint: "A small fee while a position is open, charged from the position's margin. The holding fee rises when the market is nearly full.",
   },
   // ── Launch wizard ────────────────────────────────────────────────────────
   wizard: {
     protectionTitle: "Price protection",
     protectionHint: "Keeps the market price from jumping on thin trading. Closing can pause for a few minutes while the price catches up.",
     holdingFeeTitle: "Holding fee",
-    holdingFeeHint: "A small fee on open positions. It keeps tiny positions from clogging the market.",
+    holdingFeeHint: "A small fee on open positions. It keeps tiny positions from clogging the market, and rises when the market is nearly full.",
     bondTitle: "Capacity bond",
     bondHint: "Add liquidity at launch that absorbs losses after the first-loss stake and before Earn, and earns a capped share of fees.",
     bondAtomic: "Created in the same transaction as the market.",

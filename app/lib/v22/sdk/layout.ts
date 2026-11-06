@@ -1,5 +1,5 @@
 /*
- * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ d98488b (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate),
+ * LOCAL ADAPTER PORT, not original code: verbatim from percolator-sdk feat/v22-sdk @ d98488b (draft dcccrypto/percolator-sdk#406, sdk 9.0.0-candidate), [+ prog#653 rent offsets from percolator-sdk#443 @ 51eb6e1]
  * src/abi/layout.ts. Only the imports are retargeted (the installed @percolatorct/sdk 8.0.0 root, the v2.1 txv1 port, and the sibling v22 ports).
  * Delete when @percolatorct/sdk >= 9.0.0 ships and point ./index.ts at the package. Do not edit here; fix upstream in percolator-sdk.
  * 2026-10-31: the engine #299 / prog #641 hunks are ported from percolator-sdk feat/v22-sdk-growth @ d13e1a48 (merge of #437; unchanged from f86dcfd).
@@ -197,8 +197,8 @@ export interface StandaloneAccountLens {
 export interface BandRentOffsets {
   configLen: number;
   config: { maxAccrualDtSlots: number; maxPriceMoveBpsPerSlot: number; bandBps: number; bandMaxEpochSlots: number; bandMaxPinSlots: number; rentMaxE9PerSlot: number; bandMaxPositionsPerSide: number; bandMinLegNotional: number };
-  assetState: { bandAnchorPrice: number; bandAnchorSlot: number; bandEpoch: number; bandUncertifiedLong: number; bandUncertifiedShort: number; bandLiqPendingLong: number; bandLiqPendingShort: number; bandPinSinceSlot: number; rentIndexLongNum: number; rentIndexShortNum: number; rentUnroutedAtoms: number };
-  growth: { rentKinkBps: number; rentNCapQ: number };
+  assetState: { bandAnchorPrice: number; bandAnchorSlot: number; bandEpoch: number; bandUncertifiedLong: number; bandUncertifiedShort: number; bandLiqPendingLong: number; bandLiqPendingShort: number; bandPinSinceSlot: number; rentIndexLongNum: number; rentIndexShortNum: number; rentUnroutedAtoms: number; storedPosCountLong: number; storedPosCountShort: number };
+  growth: { rentKinkBps: number; rentNCapQ: number; version: number };
   vaultLp: { lpNetQ: number; flags: number };
 }
 
@@ -339,8 +339,8 @@ export const LAYOUT_V21: LayoutTable = Object.freeze({
 const BAND_RENT_V22: BandRentOffsets = Object.freeze({
   configLen: 297,
   config: Object.freeze({ maxAccrualDtSlots: 118, maxPriceMoveBpsPerSlot: 142, bandBps: 249, bandMaxEpochSlots: 257, bandMaxPinSlots: 265, rentMaxE9PerSlot: 273, bandMaxPositionsPerSide: 281, bandMinLegNotional: 289 }),
-  assetState: Object.freeze({ bandAnchorPrice: 515, bandAnchorSlot: 523, bandEpoch: 531, bandUncertifiedLong: 539, bandUncertifiedShort: 547, bandLiqPendingLong: 555, bandLiqPendingShort: 563, bandPinSinceSlot: 571, rentIndexLongNum: 579, rentIndexShortNum: 595, rentUnroutedAtoms: 611 }),
-  growth: Object.freeze({ rentKinkBps: 42, rentNCapQ: 48 }),
+  assetState: Object.freeze({ bandAnchorPrice: 515, bandAnchorSlot: 523, bandEpoch: 531, bandUncertifiedLong: 539, bandUncertifiedShort: 547, bandLiqPendingLong: 555, bandLiqPendingShort: 563, bandPinSinceSlot: 571, rentIndexLongNum: 579, rentIndexShortNum: 595, rentUnroutedAtoms: 611, storedPosCountLong: 321, storedPosCountShort: 329 }),
+  growth: Object.freeze({ rentKinkBps: 42, rentNCapQ: 48, version: 38 }),
   vaultLp: Object.freeze({ lpNetQ: 32, flags: 90 }),
 });
 
