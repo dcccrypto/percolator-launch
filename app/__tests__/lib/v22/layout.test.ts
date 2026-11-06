@@ -59,10 +59,12 @@ describe("flag OFF: identical to the v2.1 constants", () => {
 describe("flag ON: VERSION-keyed geometry", () => {
   it("v2.2 lengths and the VERSION memcmp", () => {
     __setDevnetV22ForTest(true);
-    expect(portfolioAccountLen()).toBe(10603);
-    expect(LAYOUT_V22.portfolio.accountLen).toBe(10603);
+    // engine #299 (rc23): 10,603 + 4 B loss_provenance, engine discriminator 20
+    expect(portfolioAccountLen()).toBe(10607);
+    expect(LAYOUT_V22.portfolio.accountLen).toBe(10607);
+    expect(LAYOUT_V22.engineDiscriminator).toBe(20);
     const f = portfolioGpaFilters();
-    expect(f[0]).toEqual({ dataSize: 10603 });
+    expect(f[0]).toEqual({ dataSize: 10607 });
     expect(f[1]).toHaveProperty("memcmp.offset", 8);
   });
   it("a v2.2 market decodes with v2.2 offsets, and the v2.1 stride would read different numbers", () => {

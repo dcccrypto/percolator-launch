@@ -4,6 +4,7 @@ import { PublicKey } from "@solana/web3.js";
 import type { BondPositionV20, BondTrancheV20 } from "@/lib/v22/sdk";
 import { bondCardState, bondDepositQuote, bondWithdrawQuote, slotsToWait, type BondReadings } from "@/lib/v22/bond-ui";
 import { rescueQuote, rescueView } from "@/lib/v22/rescue-ui";
+import { RESCUE_NAV_FLOOR_BPS_V22, rescueAdmittedV22 } from "@/lib/v22/sdk";
 
 const tranche = (o: Partial<BondTrancheV20> = {}): BondTrancheV20 => ({
   marketGroup: PublicKey.default, cBAtoms: 1_000_000_000n, bSharesTotal: 1_000_000_000n, principalInLpAtoms: 0n, bondDrawnOutstandingAtoms: 0n,
@@ -97,6 +98,26 @@ describe("rescue", () => {
     const v = rescueView({ v: 10_000_000n, par: 1_000_000_000n, shares: 1_000_000_000n });
     expect(v.wound).toBe(true);
     expect(v.visible).toBe(false);
+  });
+  // D23 / prog #595 (#624, cb5bfcf2): RESCUE_NAV_FLOOR_BPS is 5,000 (50% of par); it was 500. sdk#437 merge d13e1a48.
+  // Under the old 500 the app offered "Add capital at a discount" at 5%..50% of par and the program refused with 115.
+  it("NAV floor is 50% of par (prog #624): the vendored constant", () => {
+    expect(RESCUE_NAV_FLOOR_BPS_V22).toBe(5_000);
+  });
+  it("40% of par: wind-down line, no action, and a quote is refused 115 RescueNavFloor", () => {
+    const at40 = { v: 400_000_000n, par: 1_000_000_000n, shares: 1_000_000_000n };
+    const v = rescueView(at40);
+    expect(v.wound).toBe(true);
+    expect(v.visible).toBe(false);
+    expect(rescueAdmittedV22(100_000_000n, at40.v, at40.par, at40.shares)).toBe("NavFloor");
+    expect(rescueQuote(at40, 100_000_000n)!.refusal).toMatchObject({ code: 115, name: "RescueNavFloor", reason: "NavFloor" });
+  });
+  it("just under 50% of par is past the floor; exactly 50% is admitted", () => {
+    expect(rescueView({ v: 499_999_999n, par: 1_000_000_000n, shares: 1_000_000_000n }).wound).toBe(true);
+    const at50 = { v: 500_000_000n, par: 1_000_000_000n, shares: 1_000_000_000n };
+    expect(rescueView(at50).visible).toBe(true);
+    expect(rescueAdmittedV22(100_000_000n, at50.v, at50.par, at50.shares)).toBeNull();
+    expect(rescueQuote(at50, 100_000_000n)!.admitted).toBe(true);
   });
   it("quote: shares at the impaired value (never par) and a floor below them", () => {
     const q = rescueQuote(r, 200_000_000n, 50)!;

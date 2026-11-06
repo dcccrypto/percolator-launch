@@ -52,7 +52,7 @@ export function activeLayout(): LayoutTable {
   return isDevnetV22Enabled() ? LAYOUT_V22 : LAYOUT_V21;
 }
 
-/** Exact `PORTFOLIO_ACCOUNT_LEN` of the active layout (9,563 flag off; 10,603 flag on). */
+/** Exact `PORTFOLIO_ACCOUNT_LEN` of the active layout (9,563 flag off; 10,607 flag on since engine #299, from the SDK row). */
 export function portfolioAccountLen(): number {
   return isDevnetV22Enabled() ? LAYOUT_V22.portfolio.accountLen : V17_PORTFOLIO_ACCOUNT_LEN;
 }

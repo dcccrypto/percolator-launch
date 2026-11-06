@@ -53,10 +53,22 @@ export const DEVNET_V22_PROGRAM_IDS: Readonly<ProgramIdSet> = Object.freeze({
   stake: "7JrgAUHi4PxaRv5JKHoGAxodDFbozYexpERei66Xgq4V",
 });
 
+/**
+ * Devnet v2.2 fresh-address set (deployed 2026-11-06: rc23 wrapper 244d63d1 + engine db019142 with these ids pinned; ledger
+ * v22-exec-2026-10-31.md "Fresh-address v2.2 launch"). The wrapper pins exactly this stake / nft / matcher, so it is one set.
+ */
+export const DEVNET_V22_FRESH_1106_PROGRAM_IDS: Readonly<ProgramIdSet> = Object.freeze({
+  wrapper: "5NGgnU2j315Ci2tso8VJDEthaVExuiKG3tn4xnur28xe",
+  matcher: "DfTxJUT5BbERs1tR33dP82kaUJ1NLymRxXErXAYXcDam",
+  nft: "DWUNq2iYh6Sdgdv3qv7aWJNJGhoK25FqyQrqDUrDD9zs",
+  stake: "A6DVNubvzMMETQinK6bipekkaTTrkUu2RMw2kBoJrdkE",
+});
+
 /** The program set each known devnet wrapper was deployed with (and pins). An unknown wrapper (a local fork) keeps DEVNET_PROGRAM_IDS. */
 const PAIRED_SETS: Readonly<Record<string, Readonly<ProgramIdSet>>> = Object.freeze({
   [DEVNET_PROGRAM_IDS.wrapper]: DEVNET_PROGRAM_IDS,
   [DEVNET_V22_PROGRAM_IDS.wrapper]: DEVNET_V22_PROGRAM_IDS,
+  [DEVNET_V22_FRESH_1106_PROGRAM_IDS.wrapper]: DEVNET_V22_FRESH_1106_PROGRAM_IDS,
 });
 
 /**

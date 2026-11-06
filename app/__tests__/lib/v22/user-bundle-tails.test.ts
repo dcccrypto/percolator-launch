@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Keypair, PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { resolveDevnetProgramIds } from "@/lib/program-ids";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
-import { ACCOUNT_KIND, LAYOUT_V22, WRAPPER_ACCOUNT_MAGIC, deriveBondTrancheV22 } from "@/lib/v22/sdk";
+import { ACCOUNT_KIND, LAYOUT_V22, WRAPPER_ACCOUNT_MAGIC, deriveBondTrancheV22, deriveLevGuardV22 } from "@/lib/v22/sdk";
+import { deriveVaultLpExtP2b } from "@/lib/v22/sdk/records/p2b-earn";
 import { __setTailsClockForTest } from "@/lib/v22/market-tails";
 import { sendUserBundle } from "@/lib/tx-v1/user-bundle";
 
@@ -12,7 +13,7 @@ const wrapper = new PublicKey(resolveDevnetProgramIds().wrapper);
 const market = Keypair.generate().publicKey;
 const k = () => Keypair.generate().publicKey;
 const ix97 = () =>
-  new TransactionInstruction({ programId: wrapper, keys: Array.from({ length: 12 }, (_, i) => ({ pubkey: i === 1 ? market : k(), isSigner: i === 0, isWritable: false })), data: Buffer.from([97, 1]) });
+  new TransactionInstruction({ programId: wrapper, keys: Array.from({ length: 12 }, (_, i) => ({ pubkey: i === 1 ? market : i === 11 ? deriveVaultLpExtP2b(wrapper, market)[0] : k(), isSigner: i === 0, isWritable: false })), data: Buffer.from([97, 1]) });
 
 const trancheAcct = () => {
   const d = new Uint8Array(200);
@@ -47,13 +48,14 @@ async function capture(flag: boolean) {
 afterEach(() => __setDevnetV22ForTest(null));
 
 describe("sendUserBundle applies the market tails", () => {
-  it("flag on: the tranche is appended to tag 97 and exactly one RPC read is made", async () => {
+  it("flag on: the tranche and the #640 lev guard are appended to tag 97 and exactly one RPC read is made", async () => {
     const { planned, getMultipleAccountsInfo } = await capture(true);
     const tranche = deriveBondTrancheV22(wrapper, market)[0];
     const flat = planned.flat();
     const found = flat.find((i) => i.data[0] === 97);
-    expect(found?.keys).toHaveLength(13);
+    expect(found?.keys).toHaveLength(14);
     expect(found!.keys[12].pubkey.equals(tranche)).toBe(true);
+    expect(found!.keys[13].pubkey.equals(deriveLevGuardV22(wrapper, market)[0])).toBe(true);
     expect(getMultipleAccountsInfo).toHaveBeenCalledTimes(1);
   });
   it("CONTROL flag off: untouched, no RPC", async () => {

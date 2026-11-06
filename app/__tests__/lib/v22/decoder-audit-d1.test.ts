@@ -33,12 +33,13 @@ import { decodePreResolvePool } from "@/lib/pre-resolve";
 import { decodeInitMarketData } from "@/lib/launch-recovery";
 import { buildV17InitMarketArgs } from "@/lib/create-market-args";
 import { deriveLaunchMarketParams } from "@/lib/market-params";
+import { liftV22Portfolio } from "../../helpers/portfolio-disc20";
 
 type Mkt = { market: string; marketB64: string; vaultLpStateB64: string | null; registryB64: string | null; lpPortfolio: string | null; lpPortfolioB64: string | null; matcherCtxB64: string | null };
 const MARKETS = fx.markets as unknown as Record<string, Mkt>;
 const PORTFOLIOS = fx.portfolios as unknown as Record<string, { address: string; dataB64: string }>;
 const POOLS = fx.stakePools as unknown as Record<string, string>;
-const b = (s: string) => new Uint8Array(Buffer.from(s, "base64"));
+const b = (s: string) => liftV22Portfolio(new Uint8Array(Buffer.from(s, "base64"))); // recorded pre-#299 portfolios lifted to disc 20
 const dv = (d: Uint8Array) => new DataView(d.buffer, d.byteOffset, d.byteLength);
 const u64 = (d: Uint8Array, o: number) => dv(d).getBigUint64(o, true);
 const u128 = (d: Uint8Array, o: number) => (u64(d, o + 8) << 64n) | u64(d, o);

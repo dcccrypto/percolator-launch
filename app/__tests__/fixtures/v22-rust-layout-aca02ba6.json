@@ -26,7 +26,7 @@
   "MARKET_ASSET_SLOT_LEN": 2661,
   "MARKET_GROUP_LEN": 806,
   "MARKET_GROUP_OFF": 592,
-  "PORTFOLIO_ACCOUNT_LEN": 10603,
+  "PORTFOLIO_ACCOUNT_LEN": 10607,
   "PORTFOLIO_MATCHER_CONFIG_LEN": 104,
   "STAKE_POOL_LEN": 480,
   "STAKE_POOL_OFF_DISCRIMINATOR": 320,
@@ -37,7 +37,7 @@
   "STAKE_POOL_OFF_VAULT": 136,
   "STAKE_POOL_OFF_VERSION": 328,
   "STAKE_POOL_VERSION": 5,
-  "V16_LAYOUT_DISCRIMINATOR": 19,
+  "V16_LAYOUT_DISCRIMINATOR": 20,
   "VERSION": 19,
   "WRAPPER_CONFIG_LEN": 576
  },
@@ -489,7 +489,8 @@
    "residual_spent_principal_atoms_total": 196,
    "resolved_payout_receipt": 10393,
    "source_domains": 3812,
-   "stale_state": 10205
+   "stale_state": 10205,
+   "loss_provenance": 10459
   },
   "PortfolioLegV16Account": {
    "a_basis": 30,
@@ -768,7 +769,7 @@
   "Market1024": 2661,
   "MarketGroupV16HeaderAccount": 806,
   "NftRegistryV16": 72,
-  "PortfolioAccountV16Account": 10459,
+  "PortfolioAccountV16Account": 10463,
   "PortfolioLegV16Account": 217,
   "PortfolioMatcherConfigV16": 104,
   "PortfolioSourceDomainV16Account": 196,
@@ -785,6 +786,7 @@
   "engine": "percolator 3ce4cbd1 (path dep of the wrapper)",
   "generatedAt": "2026-10-17",
   "stake": "percolator-stake 53f5480 (7JrgAUHi deployed 2026-10-16)",
-  "wrapper": "percolator-prog aca02ba6 (6kpg2wi7 deployed 2026-10-15, ledger deployments.md)"
+  "wrapper": "percolator-prog aca02ba6 (6kpg2wi7 deployed 2026-10-15, ledger deployments.md)",
+  "patched": "2026-10-31 by hand for engine #299 (rc23 engine c630fce4, kept by #302; rustc const assert size_of::<PortfolioAccountV16Account>() == 10463): PORTFOLIO_ACCOUNT_LEN 10603->10607, V16_LAYOUT_DISCRIMINATOR 19->20, sizes.PortfolioAccountV16Account 10459->10463, offsets.PortfolioAccountV16Account.loss_provenance = 10459 (appended last). Everything else as generated at aca02ba6 / 3ce4cbd1."
  }
 }

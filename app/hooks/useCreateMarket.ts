@@ -1403,6 +1403,8 @@ export async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise
               ...(params.growth ? { growth: { lLaunchX100: params.growth.lLaunchX100, ...(params.growth.tiers ? { tiers: params.growth.tiers, lTierX100: params.growth.lTierX100 } : {}) } } : {}),
               // v2.2 leverage guard (tag 124 op 0, t0 = 0), signed by the creator right after the bind while still the market authority.
               levGuard: isDevnetV22Enabled(),
+              // #640: the 96 carries the lev guard + vault ext (the single-tx launch skips the send choke point).
+              navFlowTail: isDevnetV22Enabled(),
             }),
             computeUnits: P3_BIND_COMPUTE_UNITS,
             signers: [vaultLpPortfolioKp, vaultLpCtxKp!],
@@ -4224,6 +4226,7 @@ export function useCreateMarket() {
                     vaultToken: vaultTokenAta,
                     ...(params.growth ? { growth: { lLaunchX100: params.growth.lLaunchX100, ...(params.growth.tiers ? { tiers: params.growth.tiers, lTierX100: params.growth.lTierX100 } : {}) } } : {}),
                     levGuard: isDevnetV22Enabled(),
+                    navFlowTail: isDevnetV22Enabled(),
                   })
                 : [buildDepositJuniorTrancheIx(p3Market, wallet.publicKey, creatorAta, vaultTokenAta, params.p3.juniorAtoms)];
               setState((s) => ({ ...s, stepLabel: "Binding the vault-owned LP..." }));

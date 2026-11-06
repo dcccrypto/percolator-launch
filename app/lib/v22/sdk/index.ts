@@ -8,6 +8,12 @@
  * txv1 port. Same convention as ../../v21/sdk. When 9.0.0 ships: bump the dependency, replace these re-exports with `export * from "@percolatorct/sdk"`, delete the
  * sibling files. Nothing else in the app changes. See docs/V22-APP.md for the pin record and how to re-port.
  *
+ * 2026-10-31 (prog #640 + #641 NAV flow tails, engine #299 portfolio layout): v22-nav-flow.ts (new), the 97 / 108 / 110 / 111 builders,
+ * presets and tails table in v22.ts, the variant-B row in layout.ts (engine disc 20, 10,607 B) and the #641 ext decoder in records/p2b-earn are
+ * ported from percolator-sdk feat/v22-sdk-growth @ d13e1a48 (the merge of #437; those hunks are identical at #437 head f86dcfd); the rest of
+ * those files is unchanged. From the same commit: RESCUE_NAV_FLOOR_BPS_V22 500 -> 5_000 in v22-wire.ts (D23 / prog #595). The #436 hunks in
+ * d13e1a48 (src/abi/accounts.ts, src/abi/v22-launch-settings.ts) are in files this directory does not vendor.
+ *
  * `slab.ts` is exported under its own namespace (`v22Slab`) because it re-declares every v2.1 slab decoder name (the guarded versions).
  */
 export * from "./layout";
@@ -18,6 +24,7 @@ export * from "./v22-stake";
 export * from "./v22-lot";
 export * from "./v22-band";
 export * from "./v22";
+export * from "./v22-nav-flow";
 export * from "./v22-lp-share";
 export * from "./v22-lp-share-ix";
 export * from "./v22-fill-events";

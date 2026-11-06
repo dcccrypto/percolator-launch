@@ -29,7 +29,7 @@ const FLOWS: Array<[string, () => number]> = [
 ];
 
 describe.each([
-  ["flag ON", true, LAYOUT_V22.portfolio.accountLen, 10603],
+  ["flag ON", true, LAYOUT_V22.portfolio.accountLen, 10607], // engine #299: 10,603 + 4 B loss_provenance
   ["flag OFF", false, LAYOUT_V21.portfolio.accountLen, 9563],
 ] as const)("%s", (_n, on, layoutLen, literal) => {
   it("the length is the layout's", () => {
@@ -77,7 +77,7 @@ describe("source guard: no flow names a portfolio length of its own", () => {
     "lib/first-trade.ts", "lib/launch-single-tx/shape.ts", "app/api/mobile/create-market/route.ts", "components/create/CostEstimate.tsx", "lib/lp-portfolio.ts",
   ];
   const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
-  const offends = (src: string) => /V17_PORTFOLIO_ACCOUNT_(LEN|SIZE)\b|\b(9563|10603|9347|10091)\b/.test(strip(src));
+  const offends = (src: string) => /V17_PORTFOLIO_ACCOUNT_(LEN|SIZE)\b|\b(9563|10603|10607|9347|10091)\b/.test(strip(src));
   it.each(FILES)("%s", (f) => {
     expect(offends(readFileSync(join(__dirname, "../../..", f), "utf8"))).toBe(false);
   });

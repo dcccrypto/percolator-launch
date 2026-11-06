@@ -31,9 +31,10 @@ import { buildRecoverIxs, recoverRefusalCopy } from "@/hooks/useRecoverToStakers
 import { isLpPortfolio } from "@/lib/lpPortfolio";
 import { decodeResolvedMarket } from "@/lib/limits/decode";
 import type { ResolvedMarketView } from "@/lib/limits/decode";
+import { liftV22Portfolio } from "../../helpers/portfolio-disc20";
 
 const fx = (f: string): unknown => JSON.parse(readFileSync(path.join(__dirname, "../../fixtures", f), "utf8"));
-const b64 = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, "base64"));
+const b64 = (s: string): Uint8Array => liftV22Portfolio(new Uint8Array(Buffer.from(s, "base64"))); // recorded pre-#299 portfolios lifted to disc 20
 const chill = (): Uint8Array => b64((fx("v22-growth/chillhouse-t.market.json") as { data: string }).data);
 const flatWinner = (): { data: Uint8Array; market: string; owner: string } => {
   const j = fx("v22-flat-winner-portfolio-2026-10-11.json") as { b64: string; market: string; owner: string };

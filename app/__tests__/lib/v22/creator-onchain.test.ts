@@ -21,10 +21,11 @@ import {
   readNeverPushed,
   readSlabHistory,
 } from "@/lib/v22/creator-onchain";
+import { liftV22Portfolio } from "../../helpers/portfolio-disc20";
 
 const fx = (n: string): { owner: string; data: Uint8Array } => {
   const j = JSON.parse(readFileSync(path.join(__dirname, `../../fixtures/v22-growth/${n}.json`), "utf8")) as { owner: string; data: string };
-  return { owner: j.owner, data: new Uint8Array(Buffer.from(j.data, "base64")) };
+  return { owner: j.owner, data: liftV22Portfolio(new Uint8Array(Buffer.from(j.data, "base64"))) }; // recorded pre-#299 portfolios lifted to disc 20
 };
 const LP = fx("chillhouse-t.lp");
 const MKT = fx("chillhouse-t.market");

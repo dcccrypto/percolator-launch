@@ -14,12 +14,13 @@ import { convertGate, planConvertWithdraw, quoteConvertible, type QuoteDeps } fr
 import { assessPortfolioBytes } from "@/lib/close-trading-account";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { parsePortfolio } from "@/lib/v22/layout";
+import { liftV22Portfolio } from "../../helpers/portfolio-disc20";
 
 const WRAPPER = new PublicKey("6kpg2wi7vwkn7E9rvodXSktYRhna8TWjiZrC1dBek6NM");
 const OWNER = new PublicKey("6Rz2i9cRAQ2JRZ9pZAuPidYQAYhrJSWbbWaJAVvknAVq");
 const MARKET = new PublicKey("6fonYScxUpeN8782wm1DQMPJVZj5vUGXnKg75GTRSBUF");
 const PF = new PublicKey("FnY2i6UFCwHQYbS8rcA6QzjcgUxwZzYXjHhjDeLM1b68");
-const BYTES = new Uint8Array(Buffer.from(fx.portfolio, "base64"));
+const BYTES = liftV22Portfolio(new Uint8Array(Buffer.from(fx.portfolio, "base64"))); // recorded pre-#299: lifted to disc 20
 
 beforeEach(() => __setDevnetV22ForTest(true));
 afterEach(() => __setDevnetV22ForTest(null));

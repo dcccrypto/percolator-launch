@@ -1,5 +1,5 @@
 /**
- * Real portfolio bytes (v2.1: DAC2a44p, 9,563 B; v2.2: QA's flat CHILLHOUSE winner, 10,603 B) edited into the
+ * Real portfolio bytes (v2.1: DAC2a44p, 9,563 B; v2.2: QA's flat CHILLHOUSE winner, 10,603 B recorded before engine #299, lifted to disc 20 / 10,607 B) edited into the
  * states the ClosePortfolio emptiness rule distinguishes. Offsets are the wrapper's: body @116, capital +32,
  * pnl +48, reserved pnl +64, fee credits +192, cancel-deposit escrow +208, active bitmap +232.
  */
@@ -8,12 +8,13 @@ import { join } from "node:path";
 import { PublicKey } from "@solana/web3.js";
 import fixtureV22 from "../fixtures/v22-flat-winner-portfolio-2026-10-11.json";
 import { LAYOUT_V21, LAYOUT_V22 } from "@/lib/v22/sdk/layout";
+import { liftV22Portfolio } from "./portfolio-disc20";
 
 export const V21_BYTES = Buffer.from(
   JSON.parse(readFileSync(join(__dirname, "..", "fixtures", "DAC2a44p.portfolio.json"), "utf8")).dataBase64,
   "base64",
 );
-export const V22_BYTES = Buffer.from(fixtureV22.b64, "base64");
+export const V22_BYTES = Buffer.from(liftV22Portfolio(new Uint8Array(Buffer.from(fixtureV22.b64, "base64")))); // recorded pre-#299: lifted to disc 20 / 10,607 B
 
 const BODY = 116;
 export const OFF = { capital: BODY + 32, pnl: BODY + 48, reserved: BODY + 64, fee: BODY + 192, escrow: BODY + 208, bitmap: BODY + 232 } as const;

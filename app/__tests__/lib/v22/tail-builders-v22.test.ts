@@ -6,7 +6,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
-import { ACCOUNT_KIND, ACCOUNT_TAILS_V22, LAYOUT_V22, WRAPPER_ACCOUNT_MAGIC, buildWithdrawJuniorTrancheIxV22, deriveBondTrancheV22 } from "@/lib/v22/sdk";
+import { ACCOUNT_KIND, ACCOUNT_TAILS_V22, LAYOUT_V22, WRAPPER_ACCOUNT_MAGIC, buildWithdrawJuniorTrancheIxV22, deriveBondTrancheV22, deriveLevGuardV22 } from "@/lib/v22/sdk";
+import { deriveVaultLpExtP2b } from "@/lib/v22/sdk/records/p2b-earn";
 import { MARKET_TAIL_CALM_LINE, MarketTailMismatchError, __setTailsClockForTest, applyMarketTailsV22, withMarketTailsV22 } from "@/lib/v22/market-tails";
 import { buildLpCrankIx } from "@/lib/pre-resolve";
 import { buildWithdrawJuniorTrancheIx, type VaultLpMarket } from "@/lib/limits/p3-ix";
@@ -17,7 +18,9 @@ const k = () => Keypair.generate().publicKey;
 const prog = k();
 const market = k();
 const lp = k();
-const ext = k();
+// The real ext PDA: the #636 flow tail checks it where the program reads it (97 [11]).
+const ext = deriveVaultLpExtP2b(prog, market)[0];
+const guard = deriveLevGuardV22(prog, market)[0];
 const tranche = deriveBondTrancheV22(prog, market)[0];
 
 beforeEach(() => {
@@ -57,21 +60,26 @@ describe("tag 78: pre-resolve crank", () => {
 
 describe("tag 97: junior withdraw", () => {
   const m: VaultLpMarket = { programId: prog, market, registry: k(), vaultLpState: k(), lpPortfolio: lp, ledger: k(), siblingLedger: k(), ext };
-  it("bond market via the SDK builder: ext at [11], tranche at [12]; the SDK builder equals the app builder on the ext market (keys + data)", () => {
+  it("bond market via the SDK builder: ext at [11], tranche at [12], #640 lev guard at [13]; the SDK builder equals the app builder after the choke point (keys + data)", () => {
     const [jo, dest, vault, auth] = [k(), k(), k(), k()];
-    const app = buildWithdrawJuniorTrancheIx(m, jo, dest, vault, auth, 5n);
+    const app = applyMarketTailsV22(buildWithdrawJuniorTrancheIx(m, jo, dest, vault, auth, 5n), { bondTranche: null, insuranceUnits: null });
     const sdkNoBond = buildWithdrawJuniorTrancheIxV22({ programId: prog, market, registryDomain: 0, lpPortfolio: lp, vaultLpExt: ext }, jo, dest, vault, 5n);
     expect(sdkNoBond.keys).toHaveLength(app.keys.length);
+    // the tail is identical (the base differs only in the random registry / ledgers of this synthetic market)
+    expect(sdkNoBond.keys.slice(11).map((x) => [x.pubkey.toBase58(), x.isWritable])).toEqual(app.keys.slice(11).map((x) => [x.pubkey.toBase58(), x.isWritable]));
     expect([...sdkNoBond.data]).toEqual([...app.data]);
     expect(sdkNoBond.keys[ACCOUNT_TAILS_V22[97].ext].pubkey.equals(ext)).toBe(true);
     const bond = buildWithdrawJuniorTrancheIxV22({ programId: prog, market, registryDomain: 0, lpPortfolio: lp, vaultLpExt: ext }, jo, dest, vault, 5n, { bond: true });
-    expect(bond.keys).toHaveLength(ACCOUNT_TAILS_V22[97].bondTranche + 1);
+    expect(bond.keys).toHaveLength(ACCOUNT_TAILS_V22[97].levGuard + 1);
     expect(bond.keys[ACCOUNT_TAILS_V22[97].bondTranche].pubkey.equals(tranche)).toBe(true);
+    expect(bond.keys[ACCOUNT_TAILS_V22[97].levGuard].pubkey.equals(guard)).toBe(true);
     expect(applyMarketTailsV22(bond, { bondTranche: tranche, insuranceUnits: null })).toBe(bond);
   });
-  it("NEGATIVE CONTROL: the app's 97 on a bond market gets the tranche appended by the choke point (12 -> 13), not silently skipped", () => {
+  it("NEGATIVE CONTROL: the app's 97 on a bond market gets the tranche (and the #640 guard) from the choke point (12 -> 14), not silently skipped", () => {
     const app = buildWithdrawJuniorTrancheIx(m, k(), k(), k(), k(), 5n);
-    expect(applyMarketTailsV22(app, { bondTranche: tranche, insuranceUnits: null }).keys).toHaveLength(13);
+    const out = applyMarketTailsV22(app, { bondTranche: tranche, insuranceUnits: null });
+    expect(out.keys).toHaveLength(14);
+    expect(out.keys[12].pubkey.equals(tranche)).toBe(true);
   });
 });
 

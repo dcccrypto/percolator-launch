@@ -259,7 +259,7 @@ export class FirstTradeDepositError extends Error {
   }
 }
 
-/** SOL the first trade moves into the new portfolio account's rent (~0.049 SOL at 9,563 bytes; ~0.055 at v2.2's 10,603). */
+/** SOL the first trade moves into the new portfolio account's rent (~0.049 SOL at 9,563 bytes; ~0.055 at v2.2's 10,607). */
 export const FIRST_TRADE_RENT_SOL = rentSol(portfolioAccountLen());
 const rentLabel = `~${FIRST_TRADE_RENT_SOL.toFixed(2)} SOL`;
 

@@ -9,6 +9,7 @@ import { isRefreshRace, refreshCandidatesFromAccounts, REFRESH_RACE_RETRIES, sen
 import { resolveUserMessage } from "@/lib/limits/user-message";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { executeV22MultiAssetOrder, HealthCheckStaleError, MAX_PEER_CRANKS, MAX_TWO_TX_REPEATS, marketAssetSlots, needsMultiAssetShape, planV22TradeRefresh, type MultiAssetOrderDeps, type MultiAssetOrderInput, type MultiAssetSendKind, type RefreshSim, type TradeRefreshDeps, type TradeRefreshInput } from "@/lib/v22/trade-refresh";
+import { liftV22Portfolio } from "../../helpers/portfolio-disc20";
 
 interface Ser { programId: string; keys: string[]; data: string }
 const FX = JSON.parse(readFileSync(path.join(__dirname, "../../fixtures/v22-q7-devnet-2026-10-12.json"), "utf8")) as {
@@ -17,7 +18,7 @@ const FX = JSON.parse(readFileSync(path.join(__dirname, "../../fixtures/v22-q7-d
   cases: { label: string; scriptIxs: Ser[] }[];
 };
 const FEE = JSON.parse(readFileSync(path.join(__dirname, "../../fixtures/v22-fee-channel-2026-10-11.json"), "utf8")) as { markets: Record<string, Record<string, string>> };
-const b64 = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, "base64"));
+const b64 = (s: string): Uint8Array => liftV22Portfolio(new Uint8Array(Buffer.from(s, "base64"))); // recorded pre-#299 portfolios lifted to disc 20
 const W = new PublicKey("6kpg2wi7vwkn7E9rvodXSktYRhna8TWjiZrC1dBek6NM");
 const MKT = new PublicKey(FX.market), P = new PublicKey(FX.portfolio), LP = new PublicKey(FX.lp), OWNER = new PublicKey(FX.owner);
 const unser = (s: Ser): TransactionInstruction => new TransactionInstruction({ programId: new PublicKey(s.programId), keys: s.keys.map((k) => { const [pk, f] = k.split(":"); return { pubkey: new PublicKey(pk), isSigner: f[0] === "s", isWritable: f[1] === "w" }; }), data: Buffer.from(s.data, "hex") });

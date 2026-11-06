@@ -13,9 +13,10 @@ import fixture from "../fixtures/v22-flat-winner-portfolio-2026-10-11.json";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { parsePortfolio } from "@/lib/v22/layout";
 import { convertGate, convertPrefixForWithdraw, WithdrawRefusal, type QuoteDeps } from "@/lib/convert-released-pnl";
+import { liftV22Portfolio } from "../helpers/portfolio-disc20";
 
 const WRAPPER = new PublicKey("6kpg2wi7vwkn7E9rvodXSktYRhna8TWjiZrC1dBek6NM");
-const data = () => new Uint8Array(Buffer.from(fixture.b64, "base64"));
+const data = () => liftV22Portfolio(new Uint8Array(Buffer.from(fixture.b64, "base64"))); // recorded pre-#299: lifted to disc 20
 const base = () => ({ programId: WRAPPER, owner: new PublicKey(fixture.owner), market: new PublicKey(fixture.market), portfolio: new PublicKey(fixture.portfolio), portfolioData: data() });
 
 /** The handler as oracle: bare 28 -> 19 (stale certificate on a flat account); [crank, 28] -> capital += pnl. */

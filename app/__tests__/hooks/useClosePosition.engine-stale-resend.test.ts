@@ -19,7 +19,7 @@ const FX = join(__dirname, "..", "fixtures");
 const MARKET_FX = JSON.parse(readFileSync(join(FX, "v22-market-single-asset-SOL.json"), "utf8"));
 const PORTFOLIO_FX = JSON.parse(readFileSync(join(FX, "v22-flat-winner-portfolio-2026-10-11.json"), "utf8"));
 const MARKET = new Uint8Array(Buffer.from(MARKET_FX.dataBase64, "base64"));
-const BASE = Buffer.from(PORTFOLIO_FX.b64, "base64");
+const BASE = Buffer.from(liftV22Portfolio(new Uint8Array(Buffer.from(PORTFOLIO_FX.b64, "base64")))); // recorded pre-#299: lifted to disc 20
 const OWNER = new PublicKey(PORTFOLIO_FX.owner);
 const SLAB = new PublicKey(MARKET_FX.market);
 const PROGRAM = new PublicKey("6kpg2wi7vwkn7E9rvodXSktYRhna8TWjiZrC1dBek6NM"); // v2.2 fresh-ID wrapper
@@ -212,6 +212,7 @@ beforeEach(() => {
 
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { __setUnknownLotExpForTest } from "@/lib/v22/lot-registry";
+import { liftV22Portfolio } from "../helpers/portfolio-disc20";
 
 const STALE = `Transaction failed: {"InstructionError":[1,{"Custom":19}]}`;
 const SIG1 = "5".repeat(88); // a base58 signature shape
