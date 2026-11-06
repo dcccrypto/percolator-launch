@@ -2,9 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getAssociatedTokenAddressSync } from '@solana/spl-token';
+import type { TransactionInstruction } from '@solana/web3.js';
 import { useConnectionCompat, useWalletCompat } from '@/hooks/useWalletCompat';
 import { useClusterSlot } from '@/hooks/useClusterSlot';
-import { sendTx } from '@/lib/tx';
+import { SimulationRefusal, sendTx } from '@/lib/tx';
+import { sendWithHarvestOn84 } from '@/lib/limits/earn-ixs';
+import { WRAPPER_ERR } from '@/lib/wrapper-errors';
+import { deriveVaultLpExt } from '@/lib/v21/sdk';
 import { resolveUserMessage, type UserMessage } from '@/lib/limits/user-message';
 import { isDevnetV22Enabled } from '@/lib/v22/flag';
 import { wrapperRefusal } from '@/lib/v22/refusal';
@@ -16,6 +20,7 @@ import {
   buildBondDepositIxV22,
   buildBondExecuteWithdrawIxV22,
   buildBondRequestWithdrawIxV22,
+  buildLpVaultCrankFeesIxBoundV22,
   type MarketV22,
 } from '@/lib/v22/sdk';
 
@@ -73,7 +78,20 @@ export function useBondV22(ctx: EarnV22Context | null) {
       setMessage(null);
       try {
         const { ix, units } = build();
-        await sendTx({ connection, wallet, instructions: [ix], computeUnits: units, simulateBeforeSign: true });
+        const owner = wallet.publicKey;
+        // 108 and the Live 110 refuse 84 while LP fees are harvestable; the Resolved 110 refuses it instead on a terminal residual
+        // or a stray (the stray is not decoded here). 109 never does. The pre-sign simulation is the check: on its 84 the same tx is
+        // rebuilt once with 78 (bond tail) in front, still one wallet prompt. 78 alone fails 38 when there is nothing to
+        // harvest, so it is never sent blind; a 38 here (cranked in between) shows "Try again", and the retry goes without it.
+        const harvest = () =>
+          buildLpVaultCrankFeesIxBoundV22({ ...market(), vaultLpExt: deriveVaultLpExt(ctx.programId, ctx.market) }, owner, ctx.registryDomain, { bond: true });
+        const wrapper = ctx.programId.toBase58();
+        await sendWithHarvestOn84({
+          build: async (force): Promise<TransactionInstruction[]> => (force ? [harvest(), ix] : [ix]),
+          send: (ixs) =>
+            sendTx({ connection, wallet, instructions: ixs, computeUnits: ixs.length > 1 ? units + COMPUTE_PRESETS_V22.lpVaultCrankFeesBond.units : units, simulateBeforeSign: true }),
+          isHarvestPendingRefusal: (e) => e instanceof SimulationRefusal && e.code === WRAPPER_ERR.VaultLpHarvestPending && (e.programId === null || e.programId === wrapper),
+        });
         await refresh();
         ctx.onDone?.();
       } catch (e) {
