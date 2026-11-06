@@ -23,6 +23,15 @@ export interface BondReadings {
   vaultValue: bigint | null;
   /** `C_eff`. */
   seniorClaimEff: bigint;
+  /**
+   * GH#571 (prog #649): the program settles the coupon to the current slot before it prices a bond, and only accrues an
+   * interval in which no senior draw was booked. The quotes need the slot and the vault-LP state's cumulative
+   * `senior_drawn_atoms`; null = unknown (no quote is shown).
+   */
+  nowSlot: bigint | null;
+  seniorDrawnAtoms: bigint | null;
+  /** A senior draw outstanding pauses bond deposits and exits (89). */
+  seniorDrawOutstandingAtoms: bigint;
   /** Market open interest and the vault LP's absolute inventory, engine Q. */
   oiLongQ: bigint;
   oiShortQ: bigint;
@@ -87,23 +96,35 @@ export function slotsToWait(slots: bigint): string {
   return `in about ${Math.round(s / 3600)} hours`;
 }
 
-export function bondDepositQuote(t: BondTrancheV20, amount: bigint, r: BondReadings, slippageBps = 50): BondDepositQuote | null {
-  if (r.vaultValue === null || amount <= 0n) return null;
-  return quoteBondDepositV22({ amount, bSharesTotal: t.bSharesTotal, cBAtoms: t.cBAtoms, capBps: t.bondCapBpsOfC, vaultValue: r.vaultValue, seniorClaimEff: r.seniorClaimEff, slippageBps });
+export function bondDepositQuote(t: BondTrancheV20, amount: bigint, r: BondReadings, slippageBps = 50): BondDepositQuote<BondTrancheV20> | null {
+  if (r.vaultValue === null || r.nowSlot === null || r.seniorDrawnAtoms === null || amount <= 0n) return null;
+  return quoteBondDepositV22({
+    amount,
+    tranche: t,
+    nowSlot: r.nowSlot,
+    seniorDrawnAtoms: r.seniorDrawnAtoms,
+    vaultValue: r.vaultValue,
+    seniorClaimEff: r.seniorClaimEff,
+    seniorDrawOutstandingAtoms: r.seniorDrawOutstandingAtoms,
+    slippageBps,
+  });
 }
 
 /**
  * Withdraw quote for the position's pending shares. A Live exit passes `nCapAfter: null`, which the program's
- * lock accepts only with nothing open: "live exit only when the market's liquidity is flat".
+ * lock accepts only with nothing open: "live exit only when the market's liquidity is flat". The payout includes the
+ * coupon settled up to now (GH#571: the coupon is cumulative and is part of the bond's value).
  */
-export function bondWithdrawQuote(t: BondTrancheV20, p: BondPositionV20, r: BondReadings, slippageBps = 50): BondWithdrawQuote | null {
-  if (r.vaultValue === null || p.pendingWithdrawShares === 0n) return null;
+export function bondWithdrawQuote(t: BondTrancheV20, p: BondPositionV20, r: BondReadings, slippageBps = 50): BondWithdrawQuote<BondTrancheV20> | null {
+  if (r.vaultValue === null || r.nowSlot === null || r.seniorDrawnAtoms === null || p.pendingWithdrawShares === 0n) return null;
   return quoteBondWithdrawV22({
     shares: p.pendingWithdrawShares,
-    bSharesTotal: t.bSharesTotal,
-    cBAtoms: t.cBAtoms,
+    tranche: t,
+    nowSlot: r.nowSlot,
+    seniorDrawnAtoms: r.seniorDrawnAtoms,
     vaultValue: r.vaultValue,
     seniorClaimEff: r.seniorClaimEff,
+    seniorDrawOutstandingAtoms: r.seniorDrawOutstandingAtoms,
     live: { nCapAfter: null, oiLongQ: r.oiLongQ, oiShortQ: r.oiShortQ, lpEffAbsQ: r.lpEffAbsQ },
     slippageBps,
   });

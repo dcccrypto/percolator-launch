@@ -2,8 +2,9 @@
 
 /**
  * Capacity bond: a compact card on the Earn rail, only for markets that have a bond tranche. Honest copy,
- * no mechanics: losses come after the creator's first-loss stake and before Earn, the coupon comes from
- * fees and is capped, and a live exit needs the market's liquidity to be flat.
+ * no mechanics: losses come after the creator's first-loss stake and before Earn, the coupon builds up in the
+ * bond's value (cumulative since prog #649 / GH#571; funded by fees, fronted by the creator's stake until they catch
+ * up) and is capped, and a live exit needs the market's liquidity to be flat.
  */
 import { useState } from 'react';
 import { StatusLine } from '@/components/ui/StatusLine';

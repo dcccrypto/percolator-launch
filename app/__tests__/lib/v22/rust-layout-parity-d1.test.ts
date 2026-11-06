@@ -28,6 +28,9 @@ import { ASSET_RISK_LIMITS_FIELD_OFF_P1, ASSET_RISK_LIMITS_LEN_P1, ASSET_RISK_LI
 import { ASSET_GROWTH_DEPTH_FIELD_OFF, ASSET_GROWTH_FIELD_OFF, ASSET_GROWTH_LEGACY_FIELD_OFF } from "@/lib/v22/sdk/records/growth-v19";
 import { ASSET_GROWTH_DEPTH_FIELD_OFF as R2_ASSET_GROWTH_DEPTH_FIELD_OFF, ASSET_GROWTH_FIELD_OFF as R2_ASSET_GROWTH_FIELD_OFF } from "@/lib/v22/sdk/records/growth-v19-r2";
 import growthCtl from "../../fixtures/v22-rust-growth-layout-3198539a.json";
+// prog #649 (GH#571): BondTrancheV20 v2 (176 B) comes from rustc at f7a54350; the rest of the deployed set stays at aca02ba6.
+import bondFx from "../../fixtures/v22-rust-layout-bond-f7a54350.json";
+import { BOND_TRANCHE_VERSION_V22, BOND_COUPON_DENOM_V22 } from "@/lib/v22/sdk/v22-state";
 import { ASSET_VAULT_LP_DRAW_LEN_P3, ASSET_VAULT_LP_DRAW_SLOT_OFF_P3, ASSET_VAULT_LP_FIELD_OFF_P3, ASSET_VAULT_LP_P2B_FLAGS_OFF_P3, VAULT_LP_STATE_OFF_P3 } from "@/lib/v22/sdk/records/p3-vault-lp";
 import { STAKE_POOL_FIELD_OFF_V5, STAKE_POOL_SIZE_V5, STAKE_POOL_VERSION_V5 } from "@/lib/v22/sdk/v22-stake";
 import * as C from "@/lib/limits/constants";
@@ -36,7 +39,7 @@ import { portfolioLegGeometry } from "@/lib/v22/layout";
 import { OP_NEXT_PORTFOLIO_ID } from "@/lib/first-trade";
 
 type Offsets = Record<string, Record<string, number>>;
-const OFF = fx.offsets as unknown as Offsets;
+const OFF = { ...(fx.offsets as unknown as Offsets), BondTrancheV20: bondFx.offsets.BondTrancheV20 } as Offsets;
 const SIZE = fx.sizes as unknown as Record<string, number>;
 const K = fx.consts as unknown as Record<string, number>;
 const H = K.HEADER_LEN;
@@ -137,7 +140,7 @@ describe("D-1 parity: LAYOUT_V22 (lib/v22/sdk/layout.ts) vs rustc", () => {
     expect(A.headerLen).toBe(K.HEADER_LEN);
     expect(A.redemptionBody).toBe(SIZE.LpRedemptionV16);
     expect(A.redemptionExtBody).toBe(SIZE.LpRedemptionExtV22);
-    expect(A.bondTrancheBody).toBe(SIZE.BondTrancheV20);
+    expect(A.bondTrancheBody).toBe(bondFx.sizes.BondTrancheV20);
     expect(A.bondPositionBody).toBe(SIZE.BondPositionV20);
     expect(A.insuranceUnitsBody).toBe(SIZE.InsuranceUnitsV20);
     expect(A.g9FeedAllowlistBody).toBe(SIZE.G9FeedAllowlistV22);
@@ -157,6 +160,10 @@ describe("D-1 parity: LAYOUT_V22 (lib/v22/sdk/layout.ts) vs rustc", () => {
 describe("D-1 parity: SDK record field tables vs rustc", () => {
   it("bond tranche / bond position / insurance units (v22-state.ts)", () => {
     expectTable(BOND_TRANCHE_FIELD_OFF_V22, "BondTrancheV20", { rename: { cBAtoms: "c_b_atoms", bondCapBpsOfC: "bond_cap_bps_of_c", padding: "_padding" } });
+    // GH#571: every Rust field of the v2 tranche is decoded (market_group is read at 0 by the decoder), and the version / kind / denominator match
+    const tsFields = new Set(Object.keys(BOND_TRANCHE_FIELD_OFF_V22).map((k) => ({ cBAtoms: "c_b_atoms", bondCapBpsOfC: "bond_cap_bps_of_c", padding: "_padding" } as Record<string, string>)[k] ?? k.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`)));
+    expect(Object.keys(bondFx.offsets.BondTrancheV20).filter((f) => !tsFields.has(f))).toEqual([]);
+    expect([BOND_TRANCHE_VERSION_V22, ACCOUNT_KIND.BondTranche, BOND_COUPON_DENOM_V22.toString(), bondFx.consts.HEADER_LEN]).toEqual([bondFx.consts.BOND_TRANCHE_VERSION, bondFx.consts.KIND_BOND_TRANCHE, bondFx.consts.COUPON_DENOM, K.HEADER_LEN]);
     expectTable(BOND_POSITION_FIELD_OFF_V22, "BondPositionV20", { rename: { padding: "_padding", reserved: "_reserved" } });
     expectTable(INSURANCE_UNITS_FIELD_OFF_V22, "InsuranceUnitsV20", { rename: { padding: "_padding", g9EpochDrawnAtoms: "g9_epoch_drawn_atoms", g9PendingSlot: "g9_pending_slot", g9Epoch: "g9_epoch" } });
   });
