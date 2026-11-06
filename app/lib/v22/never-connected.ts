@@ -170,16 +170,20 @@ export const NEVER_CONNECTED_COPY = {
   noPath: "This market has no permissionless settle window, so nobody but its operator can settle it. There is no automatic path from here.",
   settled: "This market is settled. Take your money out with the steps below.",
   settleNote:
-    "Your wallet asks to approve the settle first. If you hold funds here, a second approval closes your trading account and returns its collateral. Settling cannot be undone.",
-  /** Shown instead of the generic "funds are back" line: that line is only true for the trading account. */
-  settledDone: "Settled. Your trading account's funds are back in your wallet. Anything you seeded into Earn or the stake pool is still to be taken out with the steps below.",
+    "Your wallet asks to approve the settle first. If you have a trading account here, a second approval closes it and returns its collateral. Settling cannot be undone.",
+  /**
+   * Shown instead of the generic "funds are back" line. The settle flow says "settled" both when it closed this wallet's trading
+   * account and when the wallet had none here (a P3 launch creates no creator trading account), so the line claims neither.
+   */
+  settledDone:
+    "Settled. Any trading account you had here is closed and its funds are back in your wallet. Anything you put up as a creator stake or seeded into Earn or the stake pool is still to be taken out below.",
   stepsTitle: "Get your money back",
   rentTitle: "What about the rent?",
   rentEarn:
     "The market account's rent cannot be reclaimed on chain: closing a market is refused while its Earn floor is funded, which is every Earn market.",
   rentNoEarn: "This market has no Earn pool, so its admin can close the market account and get its rent back.",
   rentStake: "The stake pool, vault and LP-mint account rent is not returned by any instruction either.",
-  rentFreed: "Your trading account's rent comes back when you close it.",
+  rentFreed: "If you have a trading account here, its rent comes back when it is closed.",
   rentMainnet: "On mainnet, the creator of a market whose price never connected is eligible for a refund of that locked rent.",
   rentDevnet: "On devnet no rent refund is paid: devnet SOL comes from a faucet. The settle and withdraw path above works the same.",
   noFund: "Transaction fees are not refunded.",
@@ -198,7 +202,7 @@ const STEP_DEFS: readonly RecoverStep[] = [
   {
     id: "portfolio",
     title: "Your own portfolio",
-    body: "Settle the market with the button above. It also closes your trading account and returns the collateral and the account rent.",
+    body: "Settle the market with the button above. If you have a trading account here, that also closes it and returns its collateral and rent.",
     href: () => "/portfolio",
     linkLabel: "Open portfolio",
   },

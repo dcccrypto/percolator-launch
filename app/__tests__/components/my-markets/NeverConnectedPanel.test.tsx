@@ -18,6 +18,7 @@ const h = vi.hoisted(() => ({
   settle: vi.fn(async () => undefined),
   stale: { busy: false, error: null as string | null, done: null as string | null, waiting: null as string | null },
   wallet: null as unknown,
+  meta: { symbol: "USDC", name: "Sim USDC", decimals: 6 } as null | { symbol: string; name: string; decimals: number },
   lookups: 0,
 }));
 
@@ -34,12 +35,20 @@ vi.mock("@/hooks/useNeverConnectedMarkets", () => ({
     return { markets: h.markets, loading: false, error: false, refetch: vi.fn() };
   },
 }));
+vi.mock("@/hooks/useTokenMeta", () => ({ useTokenMeta: () => h.meta }));
+vi.mock("@/components/limits/CreatorLimits", () => ({
+  CreatorTranchePanel: (p: { slab: string; decimals: number; caps?: boolean }) => (
+    <div data-testid="creator-tranche-mount" data-slab={p.slab} data-decimals={String(p.decimals)} data-caps={String(p.caps)} />
+  ),
+}));
 const net = vi.hoisted(() => ({ n: "devnet" as "devnet" | "mainnet" }));
 vi.mock("@/lib/config", () => ({ getNetwork: () => net.n }));
 
 import { NeverConnectedPanel } from "@/components/my-markets/NeverConnectedPanel";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { resolveMarketGeometry } from "@/lib/v22/sdk/layout";
+import { ASSET_VAULT_LP_FIELD_OFF_P3, assetVaultLpAccountOffsetP3 } from "@/lib/v22/sdk/records/p3-vault-lp";
+import { decodeAssetVaultLpP3 } from "@/lib/v22/records";
 
 const CREATED = 1_000_000n;
 function market(lastGood: bigint, stale = 18_000n): Uint8Array {
@@ -52,6 +61,20 @@ function market(lastGood: bigint, stale = 18_000n): Uint8Array {
   return m;
 }
 
+function resolved(m: Uint8Array): Uint8Array {
+  const g = resolveMarketGeometry(m, { parser: "t", strictLength: false });
+  m[g.groupOff + g.layout.group.mode] = 1;
+  return m;
+}
+/** Clear asset 0's vault-LP record (flags + portfolio): no P3 state. */
+function unbound(m: Uint8Array): Uint8Array {
+  const g = resolveMarketGeometry(m, { parser: "t", strictLength: false });
+  const o = assetVaultLpAccountOffsetP3(0, g.layout);
+  m[o + ASSET_VAULT_LP_FIELD_OFF_P3.flags] = 0;
+  m.fill(0, o + ASSET_VAULT_LP_FIELD_OFF_P3.vaultLpPortfolio, o + ASSET_VAULT_LP_FIELD_OFF_P3.vaultLpPortfolio + 32);
+  return m;
+}
+
 beforeEach(() => {
   __setDevnetV22ForTest(true);
   h.raw = market(CREATED);
@@ -61,6 +84,7 @@ beforeEach(() => {
   h.stale = { busy: false, error: null, done: null, waiting: null };
   h.settle.mockClear();
   h.lookups = 0;
+  h.meta = { symbol: "USDC", name: "Sim USDC", decimals: 6 };
   net.n = "devnet";
 });
 afterEach(() => {
@@ -195,6 +219,38 @@ describe("never-connected panel", () => {
     render(<NeverConnectedPanel />);
     expect(screen.getByTestId("never-connected-lead").textContent).toMatch(/refused, and the price history could not be read/);
     window.localStorage.removeItem(`perc.keeperRegistered.${SLAB}`);
+  });
+
+  it("a settled market with a bound vault LP mounts the creator-stake panel (stake only, decimals from the market)", () => {
+    h.raw = resolved(market(CREATED));
+    expect(decodeAssetVaultLpP3(h.raw, 0).bound).toBe(true); // CHILLHOUSE-T has a bound vault LP
+    h.slot = CREATED + 30_000n;
+    render(<NeverConnectedPanel />);
+    const m = screen.getByTestId("creator-tranche-mount");
+    expect(m.dataset.slab).toBe(SLAB);
+    expect(m.dataset.caps).toBe("false");
+    expect(m.dataset.decimals).toBe("6");
+  });
+  it("not before Settle (the stake's Live actions are refused OracleStale on a market that never had a price)", () => {
+    h.slot = CREATED + 18_000n;
+    render(<NeverConnectedPanel />);
+    expect(screen.getByTestId("never-connected-card").getAttribute("data-phase")).toBe("settle");
+    expect(screen.queryByTestId("creator-tranche-mount")).toBeNull();
+  });
+  it("not while the mint metadata is loading (no guessed decimals)", () => {
+    h.raw = resolved(market(CREATED));
+    h.slot = CREATED + 30_000n;
+    h.meta = null;
+    render(<NeverConnectedPanel />);
+    expect(screen.queryByTestId("creator-tranche-mount")).toBeNull();
+  });
+  it("CONTROL: a settled market without a bound vault LP mounts nothing", () => {
+    h.raw = resolved(unbound(market(CREATED)));
+    expect(decodeAssetVaultLpP3(h.raw, 0).bound).toBe(false);
+    h.slot = CREATED + 30_000n;
+    render(<NeverConnectedPanel />);
+    expect(screen.getByTestId("never-connected-card").getAttribute("data-phase")).toBe("settled");
+    expect(screen.queryByTestId("creator-tranche-mount")).toBeNull();
   });
 
   it("no on-chain finds: nothing", () => {

@@ -8,7 +8,7 @@ import { describe, it, expect } from "vitest";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import * as C from "@/lib/limits/constants";
 import { decodeResolvedMarket, decodeResolvedPortfolio } from "@/lib/limits/decode";
-import { batchExitSteps, looksEmpty, planResolvedExit, summarizeResolvedExit, type ExitPortfolio } from "@/lib/limits/resolved-exit";
+import { batchExitSteps, canFinishNow, looksEmpty, planResolvedExit, summarizeResolvedExit, type ExitPortfolio } from "@/lib/limits/resolved-exit";
 import { runResolvedExit, type ResolvedExitDeps } from "@/lib/limits/resolved-exit-run";
 import { exitStepIxs } from "@/lib/limits/resolved-exit-ixs";
 import { buildP3BindIxs, juniorFloorAtoms, maxWizardFloorBps, p3BindProgress, validateP3Wizard, wizardP3Params, canonicalVaultLpMatcher } from "@/lib/limits/p3-wizard";
@@ -108,6 +108,51 @@ describe("planResolvedExit", () => {
     const market = decodeResolvedMarket(marketBytes({ mode: 1, cTot: 1n, count: 2n, resolvedSlot: 900n, delay: 500n }))!;
     const plan = planResolvedExit({ ...base, market, portfolios: [pf("V", { capital: 1n, bitmap: 1n }, { isVaultLp: true }), pf("E", {})] });
     expect(plan).toEqual({ phase: "owner-window", untilSlot: 1_400n, steps: [{ kind: "close-empty", portfolio: "E", isVaultLp: false }], blockers: [] });
+  });
+  it("owner window, the junior owner pays: the vault LP's 101 is planned now, unless a trader still waits for its owner", () => {
+    // percolator-prog aca02ba6 v16_program.rs: 101 inside the window is refused only when `caller.key != &junior_owner`.
+    const market = decodeResolvedMarket(marketBytes({ mode: 1, cTot: 1n, count: 2n, resolvedSlot: 900n, delay: 500n }))!;
+    const vaultAndEmpty = [pf("V", { capital: 1n, bitmap: 1n }, { isVaultLp: true }), pf("E", {})];
+    expect(planResolvedExit({ ...base, market, portfolios: vaultAndEmpty, juniorOwnerPays: true })).toEqual({
+      phase: "owner-window",
+      untilSlot: 1_400n,
+      steps: [
+        { kind: "settle-vault-lp", topup: 0, portfolio: "V" },
+        { kind: "close-empty", portfolio: "E", isVaultLp: false },
+      ],
+      blockers: [],
+    });
+    // CONTROL: any other payer (or not known) plans what it planned before.
+    const before = { phase: "owner-window", untilSlot: 1_400n, steps: [{ kind: "close-empty", portfolio: "E", isVaultLp: false }], blockers: [] };
+    expect(planResolvedExit({ ...base, market, portfolios: vaultAndEmpty, juniorOwnerPays: false })).toEqual(before);
+    expect(planResolvedExit({ ...base, market, portfolios: vaultAndEmpty })).toEqual(before);
+    // A trader only its owner may close keeps the market open until the window ends, so an early 101 would change nothing:
+    // not planned, and the Earn panel offers no "Finish now" either.
+    const withTrader = [...vaultAndEmpty, pf("T", { capital: 1n, bitmap: 1n })];
+    expect(planResolvedExit({ ...base, market, portfolios: withTrader, juniorOwnerPays: true })).toEqual({ ...before, ownersPending: 1 });
+    // Same for an escrowed (NFT) portfolio: only its holder can end the market.
+    const withEscrow = [...vaultAndEmpty, pf("N", { capital: 1n }, { escrowed: true })];
+    expect(planResolvedExit({ ...base, market, portfolios: withEscrow, juniorOwnerPays: true })).toEqual({
+      ...before,
+      blockers: [{ kind: "escrowed", portfolio: "N" }],
+    });
+  });
+  it("canFinishNow: the junior's Finish only when the steps can end the market now (5S7h: a third-party trader in the window)", () => {
+    const market = decodeResolvedMarket(marketBytes({ mode: 1, cTot: 1n, count: 2n, resolvedSlot: 900n, delay: 500n }))!;
+    const vault = pf("V", { capital: 1n, bitmap: 1n }, { isVaultLp: true });
+    // K6xMbo shape: only the vault LP. The junior's 101 + 8 finish it.
+    expect(canFinishNow(planResolvedExit({ ...base, market, portfolios: [vault], juniorOwnerPays: true }))).toBe(true);
+    // 5S7h shape: a flat trader with capital that only its owner may close until the window ends.
+    const withTrader = planResolvedExit({ ...base, market, portfolios: [vault, pf("T", { capital: 5n })], juniorOwnerPays: true });
+    expect(withTrader).toMatchObject({ phase: "owner-window", ownersPending: 1 });
+    expect(canFinishNow(withTrader)).toBe(false);
+    // After the window the trader's 30 is permissionless: Finish again.
+    expect(canFinishNow(planResolvedExit({ ...base, nowSlot: 1_400n, market, portfolios: [vault, pf("T", { capital: 5n })] }))).toBe(true);
+    // An escrowed (NFT) portfolio: nobody but its holder can end the market.
+    expect(canFinishNow(planResolvedExit({ ...base, nowSlot: 1_400n, market, portfolios: [vault, pf("N", { capital: 1n }, { escrowed: true })] }))).toBe(false);
+    // No steps (another payer, in the window) and ready: nothing to finish.
+    expect(canFinishNow(planResolvedExit({ ...base, market, portfolios: [vault] }))).toBe(false);
+    expect(canFinishNow(planResolvedExit({ ...base, market: decodeResolvedMarket(marketBytes({ mode: 1 }))!, portfolios: [] }))).toBe(false);
   });
   it("escrowed (NFT) and locked portfolios are blockers, never sent unsigned", () => {
     const market = decodeResolvedMarket(marketBytes({ mode: 1, cTot: 1n, count: 2n }))!;

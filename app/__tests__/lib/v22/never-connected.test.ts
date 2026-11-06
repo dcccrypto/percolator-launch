@@ -221,6 +221,13 @@ describe("the money-back steps link the existing flows, only the ones this marke
     expect(recoverSteps({ earn: false, stake: false }).map((s) => s.id)).toEqual(["portfolio"]);
     expect(recoverSteps({ earn: true, stake: false }).map((s) => s.title)).toEqual(["1. Your own portfolio", "2. Your Earn seed"]);
   });
+  it("no line claims the viewer HAS a trading account (a P3 launch creates none for its creator)", () => {
+    const presume = /your trading account|closes your trading account|trading account's funds are back/i;
+    for (const line of Object.values(NEVER_CONNECTED_COPY).filter((v): v is string => typeof v === "string")) expect(line).not.toMatch(presume);
+    expect(NEVER_CONNECTED_COPY.settledDone).toMatch(/creator stake/);
+    expect(recoverSteps(UNKNOWN_FEATURES).find((s) => s.id === "portfolio")?.body).not.toMatch(presume);
+    expect(rentRefundCopy("devnet", UNKNOWN_FEATURES).join(" ")).not.toMatch(presume);
+  });
   it("marketFeatures: unreadable bytes mean both; a real Earn market with admin rotated has both", () => {
     expect(marketFeatures(null, null)).toEqual(UNKNOWN_FEATURES);
     expect(marketFeatures(market({}), null).stake).toBe(true);

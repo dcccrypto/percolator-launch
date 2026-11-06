@@ -11,14 +11,22 @@
  * Composes with #3676: that PR makes the launch screen and the creator row say the price cannot connect; this panel is the
  * "what now" for the same market. A final refusal that #3676 recorded on this device (`isRegistrationRefused`) corroborates the
  * chain read and keeps the market listed when its history cannot be read.
+ *
+ * A market with a bound vault LP (P3) also holds the creator's junior tranche ("Your creator stake"). Once the market is settled
+ * the card mounts the creator-stake panel (components/limits/CreatorLimits.tsx), the only exit for it: "Finish now" (101 + 8),
+ * then Withdraw (102). It renders only for the junior owner. Not before Settle: on a Live market whose price never connected,
+ * 96 / 97 are refused OracleStale (27).
  */
-import { type FC } from "react";
+import { type FC, type ReactNode } from "react";
 import Link from "next/link";
 import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useClusterSlot } from "@/hooks/useClusterSlot";
 import { useStaleResolve } from "@/hooks/useStaleResolve";
 import { useNeverConnectedMarkets } from "@/hooks/useNeverConnectedMarkets";
+import { CreatorTranchePanel } from "@/components/limits/CreatorLimits";
+import { useTokenMeta } from "@/hooks/useTokenMeta";
+import { decodeAssetVaultLpP3 } from "@/lib/v22/records";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { getNetwork } from "@/lib/config";
 import { isRegistrationRefused } from "@/lib/keeper-register-client";
@@ -46,10 +54,12 @@ export interface NeverConnectedCardViewProps {
   done: string | null;
   waiting: string | null;
   onSettle: () => void;
+  /** Rendered after the status lines (the creator-stake panel on a settled P3 market). */
+  children?: ReactNode;
 }
 
 /** Pure renderer (tested without a provider). */
-export const NeverConnectedCardView: FC<NeverConnectedCardViewProps> = ({ slab, view, network, features, canAct, busy, error, done, waiting, onSettle }) => (
+export const NeverConnectedCardView: FC<NeverConnectedCardViewProps> = ({ slab, view, network, features, canAct, busy, error, done, waiting, onSettle, children }) => (
   <section data-testid="never-connected-card" data-phase={view.phase} data-slab={slab} className="mb-4 border border-[var(--warning)]/40 bg-[var(--warning)]/[0.04] p-4 text-[12px]">
     <h2 className="text-[11px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">{NEVER_CONNECTED_COPY.title}</h2>
     <p className="mt-1 font-mono text-[10px] text-[var(--text-muted)]" data-testid="never-connected-slab">{slab.slice(0, 8)}…{slab.slice(-4)}</p>
@@ -75,6 +85,7 @@ export const NeverConnectedCardView: FC<NeverConnectedCardViewProps> = ({ slab, 
     {done && <p className="mt-2 text-[var(--long)]" data-testid="never-connected-done">{done}</p>}
     {waiting && !done && <p className="mt-2 text-[var(--text-secondary)]" data-testid="never-connected-waiting">{waiting}</p>}
     {error && <p role="alert" className="mt-2 text-[var(--short)]" data-testid="never-connected-error">{error}</p>}
+    {children && <div className="mt-4">{children}</div>}
 
     {view.phase !== "no-path" && (
       <div className="mt-4" data-testid="never-connected-steps">
@@ -102,8 +113,19 @@ export const NeverConnectedCardView: FC<NeverConnectedCardViewProps> = ({ slab, 
   </section>
 );
 
+/** Asset 0's vault LP is bound (a P3 market: the creator's junior tranche lives there). Same read as lib/market-lp.ts. */
+function hasBoundVaultLp(raw: Uint8Array | null | undefined): boolean {
+  if (!raw) return false;
+  try {
+    return decodeAssetVaultLpP3(raw, 0).bound;
+  } catch {
+    return false;
+  }
+}
+
 const Card: FC<{ slab: string; creationSlot: bigint | null; neverPushed: boolean | null; refused: boolean; network: RefundNetwork }> = ({ slab, creationSlot, neverPushed, refused, network }) => {
-  const { raw } = useSlabState();
+  const { raw, config } = useSlabState();
+  const mint = useTokenMeta(config?.collateralMint ?? null);
   const clusterSlot = useClusterSlot(isDevnetV22Enabled());
   const { publicKey } = useWalletCompat();
   const s = useStaleResolve(slab, true);
@@ -121,7 +143,11 @@ const Card: FC<{ slab: string; creationSlot: bigint | null; neverPushed: boolean
       done={s.done === STALE_SETTLE_COPY.settled ? NEVER_CONNECTED_COPY.settledDone : s.done}
       waiting={s.waiting}
       onSettle={() => void s.settle()}
-    />
+    >
+      {view.phase === "settled" && mint && hasBoundVaultLp(raw) && (
+        <CreatorTranchePanel slab={slab} decimals={mint.decimals} collateralSymbol={mint.symbol} caps={false} />
+      )}
+    </NeverConnectedCardView>
   );
 };
 

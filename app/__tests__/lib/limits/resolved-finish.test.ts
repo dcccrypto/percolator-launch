@@ -69,6 +69,8 @@ function portfolio(p: PState): ExitPortfolio {
 class Chain {
   harvestable = 5n;
   requested = false;
+  /** The payer is the vault's junior owner (planResolvedExit juniorOwnerPays). */
+  juniorSigns = false;
   broadcasts: string[] = [];
   constructor(public ps: PState[], public nowSlot = 10_000n, public resolvedSlot = 100n, public delay = 0n) {}
   live() {
@@ -82,6 +84,7 @@ class Chain {
       portfolios: live.map(portfolio),
       boundVault: true,
       harvestableAtoms: this.harvestable,
+      juniorOwnerPays: this.juniorSigns,
     });
   }
   portfolios() {
@@ -220,6 +223,30 @@ describe("AC2 + AC4: one pre-signed list, only needed copies broadcast", () => {
     expect(plan.phase).toBe("owner-window");
     const items = buildFinishList({ portfolios: chain.portfolios(), boundVault: true, withEarnRequest: false, only: planPortfolios(plan) });
     expect(items.filter((i) => i.step.kind !== "harvest").map(tag)).toEqual(["close-empty:E#0"]);
+  });
+
+  it("owners' window, the junior owner pays: the 101 runs now, the vault LP closes, the market is ready in one list; resumed, only what is left", async () => {
+    const mk = () => new Chain([{ key: "V", vault: true, chunks: 1, receipt: "none" }], 150n, 100n, 1_000n);
+    const someone = mk();
+    expect(someone.plan()).toEqual({ phase: "owner-window", untilSlot: 1_100n, steps: [], blockers: [] }); // 49beb760 for everyone
+    const chain = mk();
+    chain.juniorSigns = true;
+    const plan = chain.plan();
+    expect(plan.phase === "owner-window" && plan.steps).toEqual([{ kind: "settle-vault-lp", topup: 0, portfolio: "V" }]);
+    const items = buildFinishList({ portfolios: chain.portfolios(), boundVault: true, withEarnRequest: false, only: planPortfolios(plan) });
+    const run = await runFinish(
+      items.map((item) => ({ item, tx: item })),
+      { plan: async () => chain.plan(), broadcast: async (it) => (chain.apply(it), chain.broadcasts.push(tag(it)), "sig") },
+    );
+    // 101(0), then its receipt top-up 101(1) (the model opens a receipt when the last chunk settles), 8, 78
+    expect(chain.broadcasts).toEqual(["settle-vault-lp:V#0", "settle-vault-lp:V#0", "close-empty:V#0", "harvest#0"]);
+    expect(items.filter((i) => i.step.kind === "settle-vault-lp").length).toBeGreaterThan(0);
+    expect(run.failed).toBe(0);
+    expect(run.final.phase).toBe("ready");
+    // resumed after the 101 and its top-up landed: the vault LP is empty, only its close (+ harvest) is left
+    const resumed = new Chain([{ key: "V", vault: true, chunks: 0, receipt: "final" }], 150n, 100n, 1_000n);
+    resumed.juniorSigns = true;
+    expect(resumed.plan()).toEqual({ phase: "owner-window", untilSlot: 1_100n, steps: [{ kind: "close-empty", portfolio: "V", isVaultLp: true }], blockers: [] });
   });
 
   it("stepNeeded: the request only once ready; a done step is not needed", () => {

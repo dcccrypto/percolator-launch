@@ -65,7 +65,7 @@ describe("ResolvedExitPanelView (WP-8)", () => {
     const onFinish = vi.fn();
     const { getByTestId } = render(view({ plan: sweep, estimate: { steps: 3, sol: "0.004" }, onFinish }));
     expect(getByTestId("earn-resolved-exit-finish-explain").textContent).toBe(
-      "Anyone can speed this up. Finish the remaining 3 steps now (about 0.004 SOL in network fees).",
+      "You can speed this up. Finish the remaining 3 steps now (about 0.004 SOL in network fees).",
     );
     const b = getByTestId("earn-resolved-exit") as HTMLButtonElement;
     expect(b.textContent).toBe(COPY.resolvedExit.finishLink);
@@ -240,6 +240,31 @@ describe("Your creator stake: resolved (102)", () => {
     expect(getByTestId("limits-junior-release-resolved").textContent).toBe("Withdraw 2.5 USDC");
     fireEvent.click(getByTestId("limits-junior-release-resolved"));
     expect(onRelease).toHaveBeenCalledWith(2_500_000n);
+  });
+  it("steps this wallet can run now: 'Finish now' with the Earn panel's own line, and it runs the finish", async () => {
+    const { JuniorTrancheActionsView } = await import("@/components/limits/CreatorLimits");
+    const onFinish = vi.fn();
+    const finish = { steps: 2, sol: "0.0001", running: false, error: null, onFinish };
+    const r = render(<JuniorTrancheActionsView {...props} resolved={{ surplusAtoms: null, waitingUntil: "Thu 1 Oct, 12:10, in about 24 hours", onRelease: () => undefined, finish }} />);
+    expect(r.getByTestId("limits-junior-resolved-surplus").textContent).toBe("Available once the market's last settlement steps have run. You can run them now.");
+    expect(r.getByTestId("limits-junior-finish-explain").textContent).toBe(COPY.resolvedExit.finishNow(2, "0.0001"));
+    expect(r.getByTestId("limits-junior-finish").textContent).toBe(COPY.resolvedExit.finishLink);
+    expect(r.queryByTestId("limits-junior-release-resolved")).toBeNull();
+    fireEvent.click(r.getByTestId("limits-junior-finish"));
+    expect(onFinish).toHaveBeenCalledTimes(1);
+    r.unmount();
+    const run = render(<JuniorTrancheActionsView {...props} resolved={{ surplusAtoms: null, waitingUntil: null, onRelease: () => undefined, finish: { ...finish, running: true, error: "Blockhash not found" } }} />);
+    const b = run.getByTestId("limits-junior-finish") as HTMLButtonElement;
+    expect(b.disabled).toBe(true);
+    expect(b.textContent).toBe(COPY.resolvedExit.running);
+    expect(run.getByTestId("limits-junior-finish-error").textContent).toBe("Blockhash not found");
+  });
+  it("CONTROL: once the stake is available the finish is not offered, only Withdraw", async () => {
+    const { JuniorTrancheActionsView } = await import("@/components/limits/CreatorLimits");
+    const finish = { steps: 1, sol: "0.0001", running: false, error: null, onFinish: () => undefined };
+    const r = render(<JuniorTrancheActionsView {...props} resolved={{ surplusAtoms: 2_500_000n, waitingUntil: null, onRelease: () => undefined, finish }} />);
+    expect(r.queryByTestId("limits-junior-finish")).toBeNull();
+    expect(r.getByTestId("limits-junior-release-resolved")).toBeTruthy();
   });
   it("before the final payouts: when, as a time; no button", async () => {
     const { JuniorTrancheActionsView } = await import("@/components/limits/CreatorLimits");

@@ -104,6 +104,7 @@ export async function loadResolvedExitSnapshot(p: {
     boundVault: bound,
     harvestableAtoms: engine ? harvestableFeeAtoms(engine) : null,
     terminalResidualAtoms: decodeTerminalBacking(md, domain)?.residual ?? null,
+    juniorOwnerPays: !!st && !!p.payer && p.payer.equals(new PublicKey(st.juniorOwner)),
   });
   const [vaultAuthority] = deriveVaultAuthority(prog, market);
   const ctx: ExitIxContext = {
