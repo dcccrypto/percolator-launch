@@ -1,0 +1,61 @@
+"use client";
+
+import { useCallback } from "react";
+import { useSlabState } from "@/components/providers/SlabProvider";
+import { useMarketLimits } from "@/hooks/useMarketLimits";
+import { useWalletCompat } from "@/hooks/useWalletCompat";
+import { closeFeeBps } from "@/lib/limits/estimated-fee";
+import type { MarketLimits } from "@/hooks/useMarketLimits";
+import type { TicketLimitsInput } from "@/lib/limits/ticket";
+import { isMockMode } from "@/lib/mock-mode";
+import { isMockSlab } from "@/lib/mock-trade-data";
+
+/** The order a close of `closeAbs` from `positionSize` sends: the OPPOSITE side, reducing the position. */
+export function closeOrderInput(
+  limits: MarketLimits,
+  positionSize: bigint,
+  closeAbs: bigint,
+  takerOwner: Uint8Array | null,
+  markE6: bigint,
+): TicketLimitsInput {
+  return {
+    limits,
+    direction: positionSize > 0n ? "short" : "long",
+    sizeQ: closeAbs,
+    takerPosQ: positionSize,
+    takerOwner,
+    leverage: 1,
+    limitPriceE6: 0n,
+    markE6: markE6 > 0n ? markE6 : undefined,
+  };
+}
+
+/**
+ * #3726: the close previews' fee estimate for the market of the surrounding SlabProvider. Every close surface sits inside its market's
+ * provider (the trade page's, or the on-demand one /portfolio and the other-market rows mount for the close), so this reads THAT market.
+ *
+ * Returns `(closeAbs) => bps` for a close of `closeAbs` from `positionSize`: base + the matcher's requested fee where the fee channel
+ * charges it. Mock markets, and any read that is not available yet, give the base fee, as before.
+ *
+ * `limits`: the market's limits when the caller already reads them (the trade page's ticket and dock). Then no second read is started;
+ * only the on-demand closes (/portfolio, other-market rows, the at-risk flows) read them here, while the modal is open.
+ */
+export function useCloseFeeEstimate(
+  positionSize: bigint,
+  baseFeeBps: bigint,
+  markE6: bigint,
+  limits?: MarketLimits | null,
+): (closeAbs: bigint) => bigint {
+  const { slabAddress } = useSlabState();
+  const { publicKey } = useWalletCompat();
+  const mockMode = isMockMode() && isMockSlab(slabAddress);
+  const own = useMarketLimits(mockMode || limits ? null : slabAddress);
+  const marketLimits = limits ?? own;
+  return useCallback(
+    (closeAbs: bigint) => {
+      if (mockMode || positionSize === 0n) return baseFeeBps;
+      return closeFeeBps(baseFeeBps, closeOrderInput(marketLimits, positionSize, closeAbs, publicKey ? publicKey.toBytes() : null, markE6));
+    },
+    [mockMode, positionSize, baseFeeBps, markE6, marketLimits, publicKey],
+  );
+}

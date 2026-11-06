@@ -47,6 +47,11 @@ export interface ClosePositionFormProps {
   isLong: boolean;
   loading: boolean;
   tradingFeeBps?: bigint;
+  /**
+   * #3726: the fee a close of `closeAbs` is expected to be charged (bps): base + the matcher's requested fee on a fee-channel market.
+   * Omitted = `tradingFeeBps` alone. A larger value shows the row as "Trading Fee (est.)", as the confirm screen does for opens.
+   */
+  closeFeeBpsFor?: (closeAbs: bigint) => bigint;
   /** Blocks close + shows the oracle-stale warning (matured oracle / no price — what the chain refuses). */
   oracleStale?: boolean;
   /** Price older than 60 s but the chain would accept the close — shows one calm line, never blocks. */
@@ -103,6 +108,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
   isLong,
   loading,
   tradingFeeBps = 0n,
+  closeFeeBpsFor,
   oracleStale = false,
   oraclePriceBehind = false,
   priceAgeSecs = 0,
@@ -154,7 +160,11 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
     const pnl = entryPrice > 0n ? computeMarkPnlLinear(closePositionSigned, entryPrice, currentPrice) : 0n;
 
     const closeNotional = currentPrice > 0n ? (closeAbs * currentPrice) / 1_000_000n : 0n;
-    const closeFee = tradingFeeBps > 0n ? (closeNotional * tradingFeeBps) / 10_000n : 0n;
+    // #3726: the whole close fee (base + the requested fee where the fee channel charges it), never below the base.
+    const estBps = closeFeeBpsFor ? closeFeeBpsFor(closeAbs) : tradingFeeBps;
+    const feeBps = estBps > tradingFeeBps ? estBps : tradingFeeBps;
+    const feeEstimated = feeBps > tradingFeeBps;
+    const closeFee = feeBps > 0n ? (closeNotional * feeBps) / 10_000n : 0n;
 
     // A close settles inside the trading account: nothing goes to the wallet, and the whole capital
     // stays (it still backs any remaining position). So the preview is the account balance after the
@@ -170,8 +180,8 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
         ? (Number(pnlNative) / 10 ** decimals) * priceUsd
         : null;
 
-    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, balanceAfter };
-  }, [percent, absPosition, isLong, entryPrice, riskEntryPrice, currentPrice, capital, priceUsd, tradingFeeBps, decimals]);
+    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, feeEstimated, balanceAfter };
+  }, [percent, absPosition, isLong, entryPrice, riskEntryPrice, currentPrice, capital, priceUsd, tradingFeeBps, closeFeeBpsFor, decimals]);
 
   // #2660: 0n = unknown entry (see the prop doc) — never a confident zero PnL.
   const entryKnown = entryPrice > 0n;
@@ -310,7 +320,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
         </div>
         {preview.closeFee > 0n && (
           <div className="flex justify-between">
-            <span className="text-[var(--text-dim)]">Trading Fee:</span>
+            <span className="text-[var(--text-dim)]">{preview.feeEstimated ? "Trading Fee (est.):" : "Trading Fee:"}</span>
             <span className="font-mono font-medium text-[var(--text-secondary)]">
               −{formatTokenAmount(preview.closeFee, decimals)} {colSym}
             </span>

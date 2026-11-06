@@ -6,6 +6,8 @@ import gsap from "gsap";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
 import { ClosePositionForm } from "@/components/trade/ClosePositionForm";
+import { useCloseFeeEstimate } from "@/hooks/useCloseFeeEstimate";
+import type { MarketLimits } from "@/hooks/useMarketLimits";
 
 interface ClosePositionModalProps {
   positionSize: bigint;
@@ -26,6 +28,8 @@ interface ClosePositionModalProps {
   loading: boolean;
   /** B-3: Trading fee basis points — subtracted from Est. Account Balance After so the preview matches on-chain. */
   tradingFeeBps?: bigint;
+  /** #3726: the market's limits, when the caller already reads them (the dock); omitted = read here while open. */
+  marketLimits?: MarketLimits | null;
   /** GH#1842: Block submission when oracle price is stale or unavailable */
   oracleStale?: boolean;
   /** Price older than 60 s but the chain would accept the close — note only, never blocks. */
@@ -77,6 +81,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   isLong,
   loading,
   tradingFeeBps,
+  marketLimits,
   oracleStale = false,
   oraclePriceBehind = false,
   priceAgeSecs = 0,
@@ -97,6 +102,8 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   // Ref-based callback to prevent WS price ticks from replaying the GSAP animation
   const onCancelRef = useRef(onCancel);
   onCancelRef.current = onCancel;
+  // #3726: the whole close fee for this market (every caller mounts the modal inside that market's SlabProvider).
+  const closeFeeBpsFor = useCloseFeeEstimate(positionSize, tradingFeeBps ?? 0n, currentPrice, marketLimits);
   // Mid-close the modal stays open: dismissing it unmounted the /portfolio flow and lost the
   // result (an error had nowhere to show). Cancel is already disabled while loading.
   const loadingRef = useRef(loading);
@@ -194,6 +201,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
           isLong={isLong}
           loading={loading}
           tradingFeeBps={tradingFeeBps}
+          closeFeeBpsFor={closeFeeBpsFor}
           oracleStale={oracleStale}
           oraclePriceBehind={oraclePriceBehind}
           priceAgeSecs={priceAgeSecs}

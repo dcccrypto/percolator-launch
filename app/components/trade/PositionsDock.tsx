@@ -703,6 +703,7 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
           loading={closeLoading}
           error={closeError}
           tradingFeeBps={params?.tradingFeeBps}
+          marketLimits={marketLimits}
           // Defense-in-depth: the row-level Close button above is already
           // disabled on engineStale (with its own correctly-labeled title),
           // but if the modal is somehow already open when engine-staleness

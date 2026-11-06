@@ -1913,6 +1913,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         ) : (
           <OrderTicketClosePanel
             slabAddress={slabAddress}
+            marketLimits={mockMode ? null : marketLimits}
             positionSize={closeView?.effectiveSize ?? existingPositionSize}
             lotExp={lotExp}
             previewUnavailable={closeView != null && !closeView.adlKnown}
