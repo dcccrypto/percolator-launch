@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { PROGRAM_IDS, PROGRAM_IDS_V17 } from "@percolatorct/sdk";
-import { DEVNET_PROGRAM_IDS, DEVNET_V22_PROGRAM_IDS, MAINNET_PROGRAM_IDS, parseProgramIdOverride, resolveDevnetProgramIds } from "@/lib/program-ids";
+import { DEVNET_PROGRAM_IDS, DEVNET_V22_FRESH_1106_PROGRAM_IDS, DEVNET_V22_PROGRAM_IDS, MAINNET_PROGRAM_IDS, parseProgramIdOverride, resolveDevnetProgramIds } from "@/lib/program-ids";
 
 describe("program-ids: the single repoint point", () => {
   afterEach(() => {
@@ -94,6 +94,21 @@ describe("program-ids: the single repoint point", () => {
     // The create wizard's SetNftProgramId (M1) carries the same id.
     const { PERCOLATOR_NFT_PROGRAM_ID } = await import("@/lib/nft-program");
     expect(PERCOLATOR_NFT_PROGRAM_ID.toBase58()).toBe("27LWmR72Ru1NCkbN2xgxB7BgYcTUrU7qeEJoV3D8sZh1");
+  });
+
+  it("fresh-address v2.2 (2026-11-06): the wrapper 5NGgnU2j alone resolves the set it pins (stake A6DVNubv, nft DWUNq2iY, matcher DfTxJUT5)", async () => {
+    vi.stubEnv("NEXT_PUBLIC_DEFAULT_NETWORK", "devnet");
+    vi.stubEnv("NEXT_PUBLIC_ALLOW_PROGRAM_ID_OVERRIDE", "1");
+    vi.stubEnv("NEXT_PUBLIC_WRAPPER_PROGRAM_ID", "5NGgnU2j315Ci2tso8VJDEthaVExuiKG3tn4xnur28xe");
+    expect(resolveDevnetProgramIds()).toEqual({
+      wrapper: "5NGgnU2j315Ci2tso8VJDEthaVExuiKG3tn4xnur28xe",
+      matcher: "DfTxJUT5BbERs1tR33dP82kaUJ1NLymRxXErXAYXcDam",
+      nft: "DWUNq2iYh6Sdgdv3qv7aWJNJGhoK25FqyQrqDUrDD9zs",
+      stake: "A6DVNubvzMMETQinK6bipekkaTTrkUu2RMw2kBoJrdkE",
+    });
+    expect(resolveDevnetProgramIds()).toEqual({ ...DEVNET_V22_FRESH_1106_PROGRAM_IDS });
+    const { PERCOLATOR_NFT_PROGRAM_ID } = await import("@/lib/nft-program");
+    expect(PERCOLATOR_NFT_PROGRAM_ID.toBase58()).toBe("DWUNq2iYh6Sdgdv3qv7aWJNJGhoK25FqyQrqDUrDD9zs");
   });
 
   it("QA E2E-1: an explicit override still wins per program; an unknown (fork) wrapper keeps today's defaults", () => {
