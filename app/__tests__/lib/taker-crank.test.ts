@@ -89,3 +89,31 @@ describe("planTakerCrank: the taker crank never shares the trade's transaction",
     expect(await planTakerCrank(crankFails, [TRADE], CRANK)).toBe("none");
   });
 });
+
+describe("council GO1106: a close carries the crank in its own tx when that simulates clean", () => {
+  it("reducing + bundle clean: 'bundle' (one approval), and the trade-alone sim is not even needed", async () => {
+    const seen: TransactionInstruction[][] = [];
+    const sim = async (l: TransactionInstruction[]): Promise<TakerCrankSim> => { seen.push(l); return { err: null, rpcFailed: false }; };
+    expect(await planTakerCrank(sim, [TRADE], CRANK, 2, true)).toBe("bundle");
+    expect(seen).toEqual([[CRANK, TRADE]]);
+  });
+
+  it("reducing but the bundle is refused (the 21 lag gate): falls back to the old plan, unchanged", async () => {
+    // The 2026-10-01 chain model: [crank, trade] -> 21; trade alone -> 19 while the portfolio needs maintenance.
+    expect(await planTakerCrank(chain(true).simulate, [TRADE], CRANK, 0, true)).toBe("separate-tx");
+    expect(await planTakerCrank(chain(false).simulate, [TRADE], CRANK, 0, true)).toBe("none");
+  });
+
+  it("NEGATIVE CONTROL: an opening (non-reducing) order never tries the bundle", async () => {
+    const seen: TransactionInstruction[][] = [];
+    const sim = async (l: TransactionInstruction[]): Promise<TakerCrankSim> => { seen.push(l); return { err: null, rpcFailed: false }; };
+    expect(await planTakerCrank(sim, [TRADE], CRANK, 2, false)).toBe("none");
+    expect(seen.some((l) => l.includes(CRANK))).toBe(false);
+  });
+
+  it("an RPC failure on the bundle sim falls back too", async () => {
+    let n = 0;
+    const sim = async (): Promise<TakerCrankSim> => (n++ === 0 ? { err: null, rpcFailed: true } : { err: null, rpcFailed: false });
+    expect(await planTakerCrank(sim, [TRADE], CRANK, 0, true)).toBe("none");
+  });
+});

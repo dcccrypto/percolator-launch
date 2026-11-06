@@ -2628,7 +2628,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             Buying power
             <InfoIcon tooltip="Available balance x max leverage - the largest notional you could open right now." />
           </div>
-          <div className="font-mono tabular-nums text-[var(--text)]">{accountPending ? "—" : formatTokenAmount(buyingPower, decimals)} {collateralSymbol}</div>
+          {/* Council GO1106 (first-timer): "199366.68411 USDC" - 2 dp with thousands separators like every other amount. */}
+          <div data-testid="buying-power" className="font-mono tabular-nums text-[var(--text)]">{accountPending ? "—" : formatTokenAmount(buyingPower, decimals, 2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} {collateralSymbol}</div>
         </div>
         {/* SOL-2 (v2.2): a new user with tokens can deposit without trading first. */}
         {isDevnetV22Enabled() && connected && !accountPending && needsAccount && walletHasTokens && (

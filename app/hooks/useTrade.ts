@@ -593,6 +593,8 @@ export function useTrade(slabAddress: string) {
         // Cranking an empty portfolio returns EngineNonProgress (0x16), so it is only
         // considered when the taker already has active legs.
         let hasActiveLegs = false;
+        // Council GO1106: the taker's signed asset-0 position before this order, to tell a close (risk-reducing) apart.
+        let takerBeforeQ: bigint | null = null;
         // P1 (flag-gated): a confirmed TradeCpi can be a partial or ZERO fill.
         const limitsMarketId =
           isV17Market && limitsFlags().p1 && raw ? decodeMarketEngineView(raw)?.marketId ?? null : null;
@@ -606,6 +608,8 @@ export function useTrade(slabAddress: string) {
             if (portInfo) {
               const pf = parsePortfolio(new Uint8Array(portInfo.data));
               hasActiveLegs = pf.legs.some((l) => l.active);
+              const takerMid = raw ? decodeMarketEngineView(raw)?.marketId ?? null : null;
+              if (takerMid !== null) takerBeforeQ = signedPositionForAsset(new Uint8Array(portInfo.data), 0, takerMid);
               if (isDevnetV21Enabled() && raw) {
                 const mid = decodeMarketEngineView(raw)?.marketId ?? null;
                 if (mid !== null) v21BeforeQ = signedPositionForAsset(new Uint8Array(portInfo.data), 0, mid);
@@ -643,8 +647,13 @@ export function useTrade(slabAddress: string) {
             legs.length > SINGLE_TX_MAX_LEGS ? tradeIxs.slice(0, SINGLE_TX_MAX_LEGS) : tradeIxs,
             crankIx,
             2, // simulateForGate's heap-frame + CU-limit prefix
+            isReducingOrder(takerBeforeQ, params.size, legs.length),
           );
-          if (plan === "separate-tx") {
+          if (plan === "bundle") {
+            // A close: the crank rides IN the close's transaction (sim-verified clean just now). One approval.
+            console.info("[useTrade] close: maintenance crank bundled into the same tx");
+            instructions.push(crankIx);
+          } else if (plan === "separate-tx") {
             console.info("[useTrade] taker portfolio needs a maintenance crank first; sending it as its own tx");
             await sendTx({ connection, wallet, instructions: [crankIx], computeUnitsFromSim: { cap: 200_000 }, abortSignal: params.abortSignal }).catch((err) => {
               // The trade below was never sent. Don't let the ticket watch the crank's signature
@@ -895,4 +904,16 @@ export function useTrade(slabAddress: string) {
   );
 
   return { trade, loading, error };
+}
+
+/**
+ * Council GO1106: an order that only shrinks the taker's open asset-0 position (opposite sign, no larger than it).
+ * Single-leg orders only; anything unknown is treated as NOT reducing (the old crank plan).
+ */
+export function isReducingOrder(beforeQ: bigint | null, size: bigint, legCount: number): boolean {
+  if (beforeQ === null || beforeQ === 0n || size === 0n || legCount > 1) return false;
+  if ((beforeQ > 0n) === (size > 0n)) return false;
+  const absSize = size < 0n ? -size : size;
+  const absBefore = beforeQ < 0n ? -beforeQ : beforeQ;
+  return absSize <= absBefore;
 }

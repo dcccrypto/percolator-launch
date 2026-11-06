@@ -128,3 +128,12 @@ describe("council GO1106: the ticket shows the lot-rounded order", () => {
     expect(screen.queryByTestId("lot-below-min")).toBeNull();
   });
 });
+
+describe("council GO1106 (first-timer): buying power reads like other amounts", () => {
+  it("thousands separators and at most 2 decimals", async () => {
+    mocks.useUserAccount.mockReturnValue({ account: { capital: 19_936_668_411n, positionSize: 0n, entryPrice: 0n, pnl: 0n }, idx: 3 });
+    render(<OrderTicket slabAddress={SLAB} />);
+    const bp = await screen.findByTestId("buying-power");
+    expect(bp.textContent).toMatch(/^\d{1,3}(,\d{3})+(\.\d{1,2})? USDC$/);
+  });
+});
