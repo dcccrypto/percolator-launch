@@ -25,6 +25,7 @@ import { type DexPoolResult, isVerifiedPool } from "@/hooks/useDexPoolSearch";
 import { parseHumanAmount } from "@/lib/parseAmount";
 import { MAX_FUNDABLE_REQUIREMENT } from "@/lib/prefund-requirement";
 import { backingSeedPerDomain, deriveLaunchMarketParams, leverageFromMarginBps } from "@/lib/market-params";
+import { buildV17InitMarketArgs } from "@/lib/create-market-args";
 import { LP_EXPOSURE_DEFAULT_BPS, clampLpExposureBps } from "@/lib/matcher-params";
 import { getConfig, getNetwork } from "@/lib/config";
 import { toE6, formatMarkPrice } from "@/lib/format";
@@ -783,6 +784,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
           oracleMode: wizard.oracleType === "hyperp_ema" ? "hyperp" : wizard.oracleType,
           growthOn: true,
           ...wizard.v22,
+          // R6: the Band Safety Law pre-check runs on the margins this launch will send (the plan substitutes its per-lot price).
+          initArgs: buildV17InitMarketArgs({ p3: true, initialPriceE6: 1_000_000n, tradingFeeBps: wizard.tradingFeeBps, growth: growthLaunch }, growthDerived),
         })
       : null;
   const v22Params = v22Plan ? toLaunchParams(v22Plan) : undefined;
