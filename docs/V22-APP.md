@@ -17,6 +17,13 @@ built with `NEXT_PUBLIC_RC23_OPEN_LIMITS=0` until rc23 is deployed there; ON wou
 depth-capped markets. No preview build config lives in this repo (only `app/vercel.mainnet.json`), so this is a Vercel project env
 setting on `percolator-v22-preview`: set `=0` now, and remove it in the same change as the rc23 upgrade.
 
+The same switch drops the launch's leverage-guard step (tag 124 op 0, `levGuardApplies` in `lib/v22/lev-guard.ts`). aca02ba6 has no
+tag 124 and refuses it as invalid instruction data, so with the step on every growth + vault-LP launch is refused (one transaction) or
+stops at the vault-LP bind (batched or step by step). With `=0` the launch, its resume and its SOL estimate skip the guard, and the success
+screen no longer says new positions open 6 hours after launch. A market launched this way has no guard even after rc23 reaches devnet:
+once its stake pool exists only the upgrade authority can add one. A mainnet build must never set `=0`: the D27 preflight then refuses
+every growth launch up front.
+
 ## SDK pin
 
 `@percolatorct/sdk` 9.0.0-candidate is not published. The app pins the candidate the way the v2.1 stack did (verbatim local
