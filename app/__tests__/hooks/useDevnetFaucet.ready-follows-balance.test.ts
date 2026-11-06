@@ -76,8 +76,22 @@ describe("Fund Your Account: Ready follows the current balance", () => {
     rpc.usdcAtoms = "0"; // deposited / traded away
     await act(async () => { await result.current.refreshBalances(); });
     expect(result.current.usdcBalance).toBe(0);
-    expect(result.current.shouldShow).toBe(true); // the modal reopens below 1,000 USDC…
+    expect(result.current.shouldShow).toBe(true); // the modal reopens when the wallet is out of USDC…
     expect(result.current.usdcDone).toBe(false); // …and must not call the USDC step done
+  });
+
+  // Council GO1106-UX nit: a wallet holding ~495 USDC (the rest deposited) was nagged on every page.
+  it("a funded wallet (495 USDC, 2.5 SOL) is not nagged; an empty one still is", async () => {
+    rpc.lamports = 2_500_000_000;
+    rpc.usdcAtoms = "495000000";
+    const { useDevnetFaucet } = await import("@/hooks/useDevnetFaucet");
+    const { result } = renderHook(() => useDevnetFaucet());
+    await act(async () => { await result.current.refreshBalances(); });
+    expect(result.current.usdcBalance).toBe(495);
+    expect(result.current.shouldShow).toBe(false);
+    rpc.usdcAtoms = "50000000"; // 50 USDC: below the nag threshold
+    await act(async () => { await result.current.refreshBalances(); });
+    expect(result.current.shouldShow).toBe(true);
   });
 
   it("after this modal's airdrop, a lagging read of 0 keeps the step done until the funds show", async () => {

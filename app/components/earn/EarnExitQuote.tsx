@@ -5,7 +5,7 @@
  * withdraw button. Rendered by DepositWithdrawPanel under NEXT_PUBLIC_V22 in place of the one-step button.
  * Presentational: the hook (hooks/useEarnExitV22) is injected so the component is testable without a wallet.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { GlowButton } from '@/components/ui/GlowButton';
 import { StatusLine } from '@/components/ui/StatusLine';
 import { V22_COPY } from '@/lib/v22/copy';
@@ -28,9 +28,13 @@ export interface EarnExitQuoteProps {
   symbol: string;
   /** The amount the user typed is valid and non-zero. */
   canQuote: boolean;
+  /** Button text before the quote (default "See exit price"). */
+  quoteLabel?: string;
+  /** Button text once quoted (default "Withdraw"). */
+  confirmLabel?: string;
 }
 
-export function EarnExitQuote({ exit, decimals, symbol, canQuote }: EarnExitQuoteProps) {
+export function EarnExitQuote({ exit, decimals, symbol, canQuote, quoteLabel = 'See exit price', confirmLabel = 'Withdraw' }: EarnExitQuoteProps) {
   const { state, getQuote, confirm } = exit;
   // N4: confirm() rejects with StaleExitQuoteError when the quote expired or no longer matches; say so calmly.
   const [expired, setExpired] = useState(false);
@@ -47,6 +51,12 @@ export function EarnExitQuote({ exit, decimals, symbol, canQuote }: EarnExitQuot
     setExpired(false);
     await getQuote();
   };
+  // A quote that times out (EXIT_QUOTE_MAX_AGE_MS) used to vanish without a word: say it expired.
+  const prevPhase = useRef(state.phase);
+  useEffect(() => {
+    if (prevPhase.current === 'quoted' && state.phase === 'idle') setExpired(true);
+    prevPhase.current = state.phase;
+  }, [state.phase]);
   const busy = state.phase === 'quoting' || state.phase === 'refreshing' || state.phase === 'sending';
   const quoted = state.phase === 'quoted' && state.quote !== null;
   return (
@@ -84,11 +94,11 @@ export function EarnExitQuote({ exit, decimals, symbol, canQuote }: EarnExitQuot
       <div className="flex gap-2">
         {quoted ? (
           <GlowButton data-testid="earn-exit-confirm" onClick={() => void onConfirm()} disabled={busy} variant="primary" size="lg" className="flex-1">
-            Withdraw
+            {confirmLabel}
           </GlowButton>
         ) : (
           <GlowButton data-testid="earn-exit-get-quote" onClick={() => void onGetQuote()} disabled={!canQuote || busy} variant="primary" size="lg" className="flex-1">
-            {busy ? 'Working…' : 'See exit price'}
+            {busy ? 'Working…' : quoteLabel}
           </GlowButton>
         )}
       </div>

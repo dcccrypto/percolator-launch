@@ -70,6 +70,8 @@ const USDC_THRESHOLD = 1_000_000_000n; // 1,000 USDC (6 decimals) — PERC-808
  *  then the send has landed or never will. */
 const SOL_SERVER_PENDING_MS = 120_000;
 const DISMISSED_KEY = "percolator:faucet-dismissed";
+/** The modal opens on its own only below this wallet USDC balance (a funded wallet is not nagged). */
+export const FUND_MODAL_NAG_USDC = 100;
 
 /**
  * PERC-808: Helius devnet faucet for SOL airdrop (more reliable than Solana's).
@@ -269,7 +271,10 @@ export function useDevnetFaucet(): DevnetFaucetState {
     };
   }, [connected, publicKey, isDevnet, checked, dismissed, refreshBalances]);
 
-  // PERC-808: Show when SOL < 0.05 OR USDC < 1,000 (no longer gated on userAccount)
+  // PERC-808: Show when SOL < 0.05 OR the wallet is (nearly) out of USDC (no longer gated on userAccount).
+  // Council GO1106-UX nit (Trader): "The Fund Your Account modal pops on every trade page and on /portfolio for a
+  // wallet that already holds ~495 USDC and has market accounts." It reopened below 1,000 USDC, so any wallet that had
+  // deposited part of its 10,000 faucet grant was nagged. It now opens only when the wallet can't fund a trade.
   const shouldShow =
     isDevnet &&
     connected &&
@@ -277,7 +282,7 @@ export function useDevnetFaucet(): DevnetFaucetState {
     !dismissed &&
     checked &&
     solBalance !== null &&
-    (fundedHere || solBalance < 0.05 || (usdcBalance !== null && usdcBalance < 1000));
+    (fundedHere || solBalance < 0.05 || (usdcBalance !== null && usdcBalance < FUND_MODAL_NAG_USDC));
 
   const dismiss = useCallback(() => {
     setDismissed(true);

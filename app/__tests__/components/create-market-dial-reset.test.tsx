@@ -54,7 +54,9 @@ globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
   const url = String(input instanceof Request ? input.url : input);
   if (url.startsWith("https://api.dexscreener.com/latest/dex/tokens/")) {
     await gateDex.p;
-    return json({ ...DEXSCREENER_BODY, pairs: dexPairs });
+    // The pair's base token is whichever mint was asked for (DexScreener lists a pair under its base mint).
+    const asked = url.slice("https://api.dexscreener.com/latest/dex/tokens/".length);
+    return json({ ...DEXSCREENER_BODY, pairs: (dexPairs as Array<{ baseToken: object }>).map((p) => ({ ...p, baseToken: { ...p.baseToken, address: asked } })) });
   }
   if (url.includes("/api/oracle/resolve/")) {
     await gateResolve.p;

@@ -104,8 +104,8 @@ describe("B21: pools are classified by mainnet OWNER, never by DexScreener's dex
     const MINT = "So11111111111111111111111111111111111111112";
     const dexscreener = {
       pairs: [
-        { chainId: "solana", dexId: "meteora", pairAddress: DAMM_POOL, baseToken: { symbol: "WIF" }, quoteToken: { symbol: "SOL" }, liquidity: { usd: 9e6 }, priceUsd: "1" },
-        { chainId: "solana", dexId: "meteora", pairAddress: DLMM_POOL, baseToken: { symbol: "WIF" }, quoteToken: { symbol: "SOL" }, liquidity: { usd: 1e6 }, priceUsd: "1" },
+        { chainId: "solana", dexId: "meteora", pairAddress: DAMM_POOL, baseToken: { symbol: "WIF", address: MINT }, quoteToken: { symbol: "SOL" }, liquidity: { usd: 9e6 }, priceUsd: "1" },
+        { chainId: "solana", dexId: "meteora", pairAddress: DLMM_POOL, baseToken: { symbol: "WIF", address: MINT }, quoteToken: { symbol: "SOL" }, liquidity: { usd: 1e6 }, priceUsd: "1" },
       ],
     };
     let classify: (body: { addresses: string[] }) => Response;

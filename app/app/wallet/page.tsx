@@ -38,11 +38,16 @@ export default function WalletPage() {
   if (!privyAvailable) {
     return (
       <WalletLayout>
-        <InfoBanner variant="warning">Wallet features unavailable — Privy is not configured.</InfoBanner>
+        {/* Council GO1106-UX nit: this read "Set NEXT_PUBLIC_PRIVY_APP_ID to enable wallet management" to every user.
+            Without Privy the app uses the browser wallet (wallet adapter); say that instead of a deploy setting. */}
+        <InfoBanner variant="info">Email and embedded wallets aren&apos;t available on this site.</InfoBanner>
         <GlassCard className="mt-6 text-center">
-          <p className="text-[13px] text-[var(--text-secondary)]">
-            Connecting a wallet is disabled in this environment. Set <span className="text-[var(--text)]">NEXT_PUBLIC_PRIVY_APP_ID</span> to enable wallet management.
+          <p data-testid="wallet-no-embedded" className="text-[13px] text-[var(--text-secondary)]">
+            Use a browser wallet such as Phantom or Solflare. Connect it with the button below or in the top bar.
           </p>
+          <div className="mt-4 flex justify-center">
+            <ConnectButton />
+          </div>
         </GlassCard>
       </WalletLayout>
     );

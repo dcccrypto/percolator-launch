@@ -14,6 +14,7 @@ import { V21_COPY } from '@/lib/v21/copy';
 import { isDevnetV22Enabled } from '@/lib/v22/flag';
 import { EarnExitQuote } from '@/components/earn/EarnExitQuote';
 import { useEarnExitV22, type EarnExitParams } from '@/hooks/useEarnExitV22';
+import { useLatchedShares } from '@/hooks/useLatchedShares';
 import {
   EARN_WITHDRAW_COPY as WC,
   cooldownPhrase,
@@ -153,8 +154,12 @@ function useOnSent(state: { phase: string; signature: string | null }, onSent?: 
 }
 
 /** v2.2 quote-first exit (own component so the v2.1 render path has no extra hook). */
-function ExitV22Step({ ex, shares, estimate, flow, decimals, symbol, valid, onSent }: { ex: NonNullable<DepositWithdrawPanelProps['exitV22']>; shares: bigint; estimate: bigint; flow: 'one-tx' | 'two-step'; decimals: number; symbol: string; valid: boolean; onSent?: () => void }) {
-  const exit = useEarnExitV22({ ...ex, shares, mode: flow === 'one-tx' ? 'pair' : 'request', estimateAtoms: estimate });
+function ExitV22Step({ ex, shares, inputKey, estimate, flow, decimals, symbol, valid, onSent }: { ex: NonNullable<DepositWithdrawPanelProps['exitV22']>; shares: bigint; inputKey: string; estimate: bigint; flow: 'one-tx' | 'two-step'; decimals: number; symbol: string; valid: boolean; onSent?: () => void }) {
+  // Council GO1106-UX #1: `shares` is re-derived from the typed USDC at the live share price, so every background
+  // poll that moved the price by a hair changed the share count, which is part of the quote key (F6), and wiped the
+  // quote 2-4 s after it appeared. Hold the share count while what the user typed is unchanged.
+  const stableShares = useLatchedShares(shares, inputKey);
+  const exit = useEarnExitV22({ ...ex, shares: stableShares, mode: flow === 'one-tx' ? 'pair' : 'request', estimateAtoms: estimate });
   useOnSent(exit.state, onSent);
   return <EarnExitQuote exit={exit} decimals={decimals} symbol={symbol} canQuote={valid && shares > 0n} />;
 }
@@ -163,7 +168,7 @@ function ExitV22Step({ ex, shares, estimate, flow, decimals, symbol, valid, onSe
  * v2.2: collecting a pending redemption is tag 77 too, so it needs the same floor, the inline refresh and the quote
  * shown first (the legacy one-step claim sends a bare 77 that a v2.2 vault answers with 118 on a book that is not loss-current).
  */
-function PendingClaimV22({ ex, shares, decimals, symbol, onRerequest, onSent }: { ex: NonNullable<DepositWithdrawPanelProps['exitV22']>; shares: bigint; decimals: number; symbol: string; onRerequest?: (shares: bigint) => Promise<void>; onSent?: () => void }) {
+function PendingClaimV22({ ex, shares, amountLabel, decimals, symbol, onRerequest, onSent }: { ex: NonNullable<DepositWithdrawPanelProps['exitV22']>; shares: bigint; amountLabel: string; decimals: number; symbol: string; onRerequest?: (shares: bigint) => Promise<void>; onSent?: () => void }) {
   const exit = useEarnExitV22({ ...ex, shares, mode: 'execute', estimateAtoms: 0n });
   useOnSent(exit.state, onSent);
   const [rerequesting, setRerequesting] = useState(false);
@@ -187,9 +192,12 @@ function PendingClaimV22({ ex, shares, decimals, symbol, onRerequest, onSent }: 
     }
   };
   return (
-    <div data-testid="earn-pending-claim-v22" className="mx-5 mt-3">
+    <div data-testid="earn-pending-claim-v22" className="mx-5 mt-3 border border-[var(--accent)]/30 bg-[var(--accent)]/5 p-3">
+      {/* Council GO1106-UX #1: after a reload this card was a bare "See exit price" button with no amount or state. */}
+      <p data-testid="earn-pending-claim-v22-title" className="text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--text-secondary)]">{WC.pendingTitle(amountLabel)}</p>
+      <p data-testid="earn-pending-claim-v22-ready" className="mb-2 mt-1 font-mono text-[13px] text-[var(--text)]">{WC.ready}</p>
       {/* No collect while the cancel is in flight: a 77 would race the 81. */}
-      <EarnExitQuote exit={exit} decimals={decimals} symbol={symbol} canQuote={shares > 0n && !rerequesting} />
+      <EarnExitQuote exit={exit} decimals={decimals} symbol={symbol} canQuote={shares > 0n && !rerequesting} quoteLabel={`Collect ${amountLabel}`} confirmLabel="Confirm and collect" />
       {/* Only the floor-stuck refusal: an RPC failure or a declined wallet prompt is fixed by trying again, and a
           cancel would restart the wait for nothing. */}
       {exit.state.phase === 'error' && exit.state.floorStuck && onRerequest && (
@@ -581,7 +589,7 @@ export function DepositWithdrawPanel({
       {/* UX WP-4: the pending withdrawal card (both tabs). A full request escrows every share, so
           this is also what keeps the payout reachable (S1). It counts as an active position. */}
       {hasPendingRedemption && isDevnetV22Enabled() && exitV22 && cooldownElapsed ? (
-        <PendingClaimV22 ex={exitV22} shares={pendingRedemptionShares} decimals={decimals} symbol={collateralSymbol} onRerequest={onResizeRedemption} onSent={() => handleExitSent(true)} />
+        <PendingClaimV22 ex={exitV22} shares={pendingRedemptionShares} amountLabel={pendingAtoms !== null ? `${formatUsdc(pendingAtoms, decimals)} ${collateralSymbol}` : `${formatRaw(pendingRedemptionShares, shareDecimals)} shares`} decimals={decimals} symbol={collateralSymbol} onRerequest={onResizeRedemption} onSent={() => handleExitSent(true)} />
       ) : hasPendingRedemption && (
         <EarnPendingWithdrawal
           amountLabel={pendingAtoms !== null ? `${formatUsdc(pendingAtoms, decimals)} ${collateralSymbol}` : `${formatRaw(pendingRedemptionShares, shareDecimals)} shares`}
@@ -806,7 +814,7 @@ export function DepositWithdrawPanel({
           </p>
         )}
         {tab === 'withdraw' && isDevnetV22Enabled() && exitV22 ? (
-          <ExitV22Step ex={exitV22} shares={withdrawShares} estimate={previewCollateral} flow={flow} decimals={decimals} symbol={collateralSymbol} valid={isValid} onSent={() => handleExitSent(false)} />
+          <ExitV22Step ex={exitV22} shares={withdrawShares} inputKey={`${amount}|${withdrawUnit}|${userLpBalance}`} estimate={previewCollateral} flow={flow} decimals={decimals} symbol={collateralSymbol} valid={isValid} onSent={() => handleExitSent(false)} />
         ) : (
         <div className="flex gap-2">
           <GlowButton

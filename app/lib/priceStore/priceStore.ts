@@ -210,12 +210,16 @@ function flushEntry(entry: SlabEntry): void {
     entry.lastLiveTickAt = Date.now();
     const prevHigh = entry.snapshot.high24h;
     const prevLow = entry.snapshot.low24h;
+    // Council GO1106-UX #3: the 24h stats are per TOKEN (GeckoTerminal, setStats24h) while the tick is per LOT
+    // (tokenToLotE6). Folding the per-lot tick in raw made 24H HIGH read 10^lotExp too high ("24H HIGH $35.78" against a
+    // $0.003578 mark on a lot-4 market) while 24H LOW stayed right. Compare in per-token units.
+    const tokenUsd = entry.lotExp === 0 ? tick.usd : tick.usd / 10 ** entry.lotExp;
     applyPatch(entry, {
       price: tick.usd,
       priceUsd: tick.usd,
       priceE6: tick.priceE6,
-      high24h: prevHigh !== null ? Math.max(prevHigh, tick.usd) : prevHigh,
-      low24h: prevLow !== null ? Math.min(prevLow, tick.usd) : prevLow,
+      high24h: prevHigh !== null ? Math.max(prevHigh, tokenUsd) : prevHigh,
+      low24h: prevLow !== null ? Math.min(prevLow, tokenUsd) : prevLow,
       loading: false,
     });
   }

@@ -1,5 +1,6 @@
 "use client";
 
+import { dexPairBaseIs } from "@/lib/dex-pair-side";
 import { errorText } from "@/lib/error-text";
 import { parseLpVaultRegistry } from "@/lib/v22/records";
 import { EmbeddedBatchSignError, isWalletRejection } from "@/lib/privy-batch-sign";
@@ -277,8 +278,9 @@ async function fetchJupiterPriceE6(ca: string): Promise<bigint | null> {
       { signal: AbortSignal.timeout(5_000) },
     );
     if (resp.ok) {
-      const json = await resp.json() as { pairs?: Array<{ priceUsd?: string }> };
-      const priceStr = json.pairs?.[0]?.priceUsd;
+      const json = await resp.json() as { pairs?: Array<{ priceUsd?: string; baseToken?: { address?: string } }> };
+      // Council GO1106-UX #4: a pair's priceUsd is its BASE token's price; skip pairs where `ca` is the quote.
+      const priceStr = json.pairs?.find((p) => dexPairBaseIs(p, ca))?.priceUsd;
       const price = priceStr ? parseFloat(priceStr) : 0;
       if (price > 0 && isFinite(price)) {
         return toE6(price);

@@ -21,7 +21,7 @@ import { splitPotLedgerKeys, splitPotStateFromAccounts, vaultValue } from '@/lib
 import { atomsToUsd, vaultWithdrawView } from '@/lib/limits/earn-withdrawable';
 import type { BlockedBy, WithdrawStatus } from '@/lib/limits/earn-withdrawable';
 import { isWrapperAccount } from "@/lib/v22/layout";
-import { decodeLpVaultRegistryBound } from '@/lib/limits/decode';
+import { decodeLpVaultRegistryBound, decodeMarketEngineView } from '@/lib/limits/decode';
 import { readBoundVaultPricings } from '@/lib/limits/earn-bound-pricing';
 import { fetchMarketsList, listedMarketRows } from '@/lib/markets-list-client';
 
@@ -527,11 +527,25 @@ export function computeMaxLeverageFromBps(bps: bigint | null | undefined): numbe
  * fetchCuratedVaultsOnChain: `ok` is false only when the batched RPC call
  * itself failed, not when an individual slab simply isn't a v17 account yet.
  */
+/** The charged trade fee in bps from a wrapper slab (engine `trade_fee_base_bps`), or null when it can't be decoded. */
+export function chargedFeeBpsFromSlab(data: Uint8Array): number | null {
+  try {
+    const bps = decodeMarketEngineView(data, 0)?.tradeFeeBaseBps;
+    if (bps === undefined || bps === null || bps < 0n || bps > 5_000n) return null;
+    return Number(bps);
+  } catch {
+    return null;
+  }
+}
+
 async function fetchOnChainMaxLeverage(
   slabs: string[],
-): Promise<{ data: Record<string, number>; ok: boolean }> {
+): Promise<{ data: Record<string, number>; feeBps: Record<string, number>; ok: boolean }> {
   const result: Record<string, number> = {};
-  if (slabs.length === 0) return { data: result, ok: true };
+  // Council GO1106-UX #2: the CHARGED fee (engine trade_fee_base_bps), read from the same slab bytes. The vault table
+  // read the DB row's trading_fee_bps (default 10 = "0.10%") while the rail shows the charged fee ("0.30%").
+  const feeBps: Record<string, number> = {};
+  if (slabs.length === 0) return { data: result, feeBps, ok: true };
 
   try {
     const connection = getSharedEarnStatsConnection();
@@ -548,13 +562,15 @@ async function fetchOnChainMaxLeverage(
       // elsewhere that also need the real trading fee.
       const params = parseV17RiskParams(data, 0n);
       if (params) result[slabs[i]] = computeMaxLeverageFromBps(params.initialMarginBps);
+      const fee = chargedFeeBpsFromSlab(data);
+      if (fee !== null) feeBps[slabs[i]] = fee;
     });
   } catch (err) {
     console.error('[useEarnStats] Failed to fetch on-chain max leverage:', err);
-    return { data: result, ok: false };
+    return { data: result, feeBps, ok: false };
   }
 
-  return { data: result, ok: true };
+  return { data: result, feeBps, ok: true };
 }
 
 /**
@@ -570,6 +586,7 @@ export function buildMarketVaultInfo(
   curatedVaults: Record<string, CuratedVaultOnChain>,
   supabaseBySlab: Map<string, Record<string, unknown>>,
   onChainMaxLeverage: Record<string, number> = {},
+  onChainFeeBps: Record<string, number> = {},
 ): MarketVaultInfo {
   const isSentinel = (v: number) => v > 1e18;
   const row = supabaseBySlab.get(slab);
@@ -606,7 +623,8 @@ export function buildMarketVaultInfo(
   // 10 only as the genuine last resort (both sources unavailable).
   const maxLeverage = onChainMaxLeverage[slab] ?? (Number(row?.max_leverage) || 10);
   const tradingFeeBpsRaw = Number(row?.trading_fee_bps ?? 10);
-  const tradingFeeBps = tradingFeeBpsRaw > 5_000 ? 0 : tradingFeeBpsRaw;
+  // The charged on-chain fee wins (the rail and the ticket show it); the DB row only where the slab can't be decoded.
+  const tradingFeeBps = onChainFeeBps[slab] ?? (tradingFeeBpsRaw > 5_000 ? 0 : tradingFeeBpsRaw);
 
   // volume_24h is engine Q (base-asset amount, scale 1e6) — NOT dollars. It was
   // divided by the collateral decimals only, so it read as USD without the
@@ -697,6 +715,7 @@ export function buildLiveMarkets(
    * cold start hides every market from the grid.
    */
   vaultsTrusted = true,
+  onChainFeeBps: Record<string, number> = {},
 ): MarketVaultInfo[] {
   const live = liveMarkets
     .filter((m) => !isBlockedSlab(m.slabAddress) && !isHiddenFromListing(m.slabAddress))
@@ -707,7 +726,7 @@ export function buildLiveMarkets(
     // An entry with no row at all is unknown, not unpriced: it stays listed (and must not throw).
     .filter((m) => PLAYGROUND_SLAB_META[m.slabAddress] !== undefined || !m.row || !hasNoPriceSource(m.row))
     .map((m) => {
-      const info = buildMarketVaultInfo(m.slabAddress, m.symbol, m.name, m.mainnetCa, curatedVaults, supabaseBySlab, onChainMaxLeverage);
+      const info = buildMarketVaultInfo(m.slabAddress, m.symbol, m.name, m.mainnetCa, curatedVaults, supabaseBySlab, onChainMaxLeverage, onChainFeeBps);
       return vaultsTrusted ? info : { ...info, hasVault: undefined };
     });
 
@@ -725,7 +744,7 @@ export function buildLiveMarkets(
     // never a fabricated $0 phantom for a market that hasn't created one yet.
     .filter((m) => curatedVaults[m.slabAddress]?.found === true)
     .map((m) =>
-      buildMarketVaultInfo(m.slabAddress, m.symbol, m.name, m.mainnetCa, curatedVaults, supabaseBySlab, onChainMaxLeverage),
+      buildMarketVaultInfo(m.slabAddress, m.symbol, m.name, m.mainnetCa, curatedVaults, supabaseBySlab, onChainMaxLeverage, onChainFeeBps),
     );
 
   return [...live, ...registered];
@@ -878,6 +897,7 @@ export function useEarnStats() {
         registeredMarkets,
         onChainMaxLeverage,
         curatedVaultsResult.ok,
+        maxLeverageResult.feeBps,
       );
       setStats({ markets, ...computeAggregates(markets) });
 

@@ -7,6 +7,7 @@
 import type { MarketLimits } from "@/hooks/useMarketLimits";
 import { earnTrancheView, harvestableFeeAtoms, vaultLpValueAtoms, type EarnDepositBlock, type EarnTrancheView, type VaultLpValue } from "./vault-tranche";
 import { maxNowAtoms } from "./earn-withdraw";
+import { earnP3Enabled } from "./flags";
 import { earnSeniorPricing, type LagBoundsLp, type LagBoundsMarket } from "./earn-pricing";
 
 export function earnViewFromLimits(
@@ -18,7 +19,7 @@ export function earnViewFromLimits(
   /** UX WP-5: the LP value from a simulated crank when the certificate is stale (never guessed). */
   simulatedLpValue?: VaultLpValue | null,
 ): EarnTrancheView | null {
-  const vs = limits.flags.p3 ? limits.vaultState : null;
+  const vs = earnP3Enabled(limits.flags) ? limits.vaultState : null;
   const e = limits.engine;
   // The program prices against registry.total_lp_shares_outstanding (tags 75/77), never the
   // LP mint supply. Unread => no view (the gate then does not guess).
@@ -77,7 +78,7 @@ export function earnPanelPricing(
   backingNavAtoms: bigint,
   simulated?: SimulatedEarnState | VaultLpValue | null,
 ): { totalShares: bigint; depositSeniorValue: bigint | null; withdrawSeniorValue: bigint | null; maxNowAtoms: bigint | null } | null {
-  if (!limits.flags.p3 || !limits.vaultLp?.bound || limits.registryShares === null || !limits.engine || !limits.vaultState) return null;
+  if (!earnP3Enabled(limits.flags) || !limits.vaultLp?.bound || limits.registryShares === null || !limits.engine || !limits.vaultState) return null;
   const sim: SimulatedEarnState | null = simulated ? ("kind" in simulated ? { value: simulated } : simulated) : null;
   const view = earnViewFromLimits(limits, backingNavAtoms, 0n, undefined, sim?.value ?? null);
   if (!view) return null;
