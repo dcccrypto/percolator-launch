@@ -1,7 +1,7 @@
 "use client";
 
 import { errorText } from "@/lib/error-text";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useParams } from "next/navigation";
 import { PublicKey } from "@solana/web3.js";
@@ -14,7 +14,13 @@ import {
   readCreatorFeeClaimable,
 } from "@/lib/v17-creator-fee";
 import { mapCreatorClaimError } from "@/lib/creatorClaimError";
-import { buildCreatorFeeClaimIx, CreatorFeeClaimError } from "@/lib/creator-fee-claim-ix";
+import {
+  buildCreatorFeeClaimIx,
+  buildCreatorFeePayeeClaimIxs,
+  creatorFeeRouteOf,
+  CreatorFeeClaimError,
+} from "@/lib/creator-fee-claim-ix";
+import { decodeCreatorFeePayeeV22, deriveCreatorFeePayeeV22 } from "@/lib/v22/sdk/creator-fee-payee-v22";
 
 export interface CreatorClaimData {
   /** True iff the connected wallet is asset 0's `asset_admin` — the ONLY wallet tag 90 accepts. */
@@ -120,7 +126,32 @@ export function useCreatorClaim() {
     };
   }, [parsed, walletKeyStr, wallet.publicKey]);
 
-  const tokenMeta = useTokenMeta(gated.collateralMint);
+  // prog #587: asset 0's admin burned AFTER recording a payee -> anyone may send the fees to that payee (tag 90 payee route).
+  const payeeRoute = useMemo(() => (raw ? creatorFeeRouteOf(raw) === "Payee" : false), [raw]);
+  const owedToPayee = payeeRoute && parsed ? parsed.atoms : 0n;
+  const [payee, setPayee] = useState<PublicKey | null>(null);
+  const programIdStr = slabState.programId ? String(slabState.programId) : null;
+  useEffect(() => {
+    if (!payeeRoute || !programIdStr || !slabAddress) { setPayee(null); return; }
+    let live = true;
+    const market = new PublicKey(slabAddress);
+    const [pda] = deriveCreatorFeePayeeV22(new PublicKey(programIdStr), market, 0);
+    connection.getAccountInfo(pda, "confirmed").then(
+      (info) => {
+        if (!live) return;
+        try {
+          const rec = info ? decodeCreatorFeePayeeV22(new Uint8Array(info.data)) : null;
+          setPayee(rec && rec.market.equals(market) ? rec.payee : null);
+        } catch {
+          setPayee(null);
+        }
+      },
+      () => { if (live) setPayee(null); },
+    );
+    return () => { live = false; };
+  }, [payeeRoute, programIdStr, slabAddress, connection]);
+
+  const tokenMeta = useTokenMeta(gated.collateralMint ?? (payeeRoute ? parsed?.collateralMint ?? null : null));
   const decimals = tokenMeta?.decimals ?? 6;
 
   const data: CreatorClaimData = { ...gated, decimals };
@@ -192,6 +223,46 @@ export function useCreatorClaim() {
     [wallet, raw, slabState, slabAddress, connection],
   );
 
+  /**
+   * prog #587: send this market's creator fees to the recorded payee (permissionless tag 90, payee route). Any connected wallet
+   * can do it; the funds go only to the payee's own token account (created in the same transaction if needed).
+   */
+  const claimToPayee = useCallback(async () => {
+    const fail = (msg: string): never => {
+      setSuccess(null);
+      setError(msg);
+      throw new Error(msg);
+    };
+    if (!wallet.publicKey || !wallet.signTransaction) return fail("Wallet not connected");
+    if (!slabState.programId || !slabAddress) return fail("Market not loaded");
+    assertKnownProgram(slabState.programId);
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const programId = new PublicKey(slabState.programId);
+      const market = new PublicKey(slabAddress);
+      // Send-time reads: the amount and the authority epoch must match what tag 90 debits / checks.
+      const [mInfo, rInfo] = await connection.getMultipleAccountsInfo([market, deriveCreatorFeePayeeV22(programId, market, 0)[0]], "confirmed");
+      if (!mInfo) return fail("Market not loaded");
+      if (!rInfo) return fail("This market's fee payee record could not be read. Try again in a moment.");
+      const built = buildCreatorFeePayeeClaimIxs({
+        programId, market, raw: new Uint8Array(mInfo.data), payeeRecord: new Uint8Array(rInfo.data), caller: wallet.publicKey,
+      });
+      const sig = await sendTx({ connection, wallet, instructions: built.instructions });
+      slabState.refresh();
+      setSuccess(typeof sig === "string" ? sig : "Payout submitted");
+      return sig;
+    } catch (err) {
+      const rawMsg = errorText(err);
+      const friendly = err instanceof CreatorFeeClaimError ? rawMsg : mapCreatorClaimError(rawMsg);
+      setError(friendly);
+      throw new Error(friendly);
+    } finally {
+      setLoading(false);
+    }
+  }, [wallet, slabState, slabAddress, connection]);
+
   const refresh = useCallback(() => {
     slabState.refresh();
   }, [slabState]);
@@ -202,5 +273,5 @@ export function useCreatorClaim() {
     setSuccess(null);
   }).current;
 
-  return { ...data, loading, error, success, claim, refresh, clearStatus };
+  return { ...data, payeeRoute, payee, owedToPayee, loading, error, success, claim, claimToPayee, refresh, clearStatus };
 }

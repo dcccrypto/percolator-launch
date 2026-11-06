@@ -109,3 +109,20 @@ percolator-nft @ 95dcece (merged) grows `PositionNftV16` 199 -> 239 B (version 2
 `NEXT_PUBLIC_V22=1 npx vitest run` is not a usable signal on its own: ~300 v2.1-fixture tests fail by design. Use the delta:
 `cd app && node scripts/flag-on-delta.mjs <base-worktree>/app` runs the suite with the flag on in both checkouts (`vitest --reporter=json`) and lists only the tests that fail here and not in the base (exit 1 if any). Choose the base that isolates your change (a worktree of the previous head, or the playground-merge-only commit). `--json-base` / `--json-head` reuse saved reports.
 Flag off, the whole suite is the gate (it must match playground by name).
+
+## prog #587 (#644): creator-fee payee
+
+Wrapper rc23 2b5dce8a adds tag 125 `SetCreatorFeePayee` (signed by the live asset admin; PDA `["creator_fee_payee", market, idx u16 LE]`,
+kind 19; profile `p4_flags` bit 3) and a payee route for tag 90: once asset 0's admin is burned after a payee was recorded, anyone may
+send the creator fee to the payee's canonical ATA (7 accounts, `[6]` = the payee PDA), and CloseSlab waits for it instead of re-booking
+it to the protocol. Vendored from percolator-sdk #438 into `app/lib/v22/sdk/creator-fee-payee-v22.ts` (+ kind 19 in `layout.ts`, bit 3
+in `v22-wire.ts`, error 136 in `errors-v22.ts`).
+
+- Burn admin key (`useAdminActions.renounceAdmin`): on a VERSION 19 market with no payee yet, the same transaction first records the
+  burning wallet as the payee (tag 125, epoch E), then burns (tag 65, epoch E + 1). A payee recorded earlier is kept. VERSION 18: unchanged.
+- Create flow (`orderStakeTailInstructions`, code only like the burn itself): a bundle with the burn must carry tag 125, placed before the
+  fee split / InitPool / Bind (both advance asset 0's authority epoch); a burn without it throws.
+- Copy: the burn confirmation and `ADMIN_BURN_COPY` no longer say the creator fees are lost; `FIRST_LOSS_BURN_CONSENT_COPY` line 2 names
+  the fee payee.
+- `CreatorClaimPanel` payee view: on the payee route every wallet sees what is owed to the payee and a "Send fees to payee" button
+  (`useCreatorClaim().claimToPayee`, `buildCreatorFeePayeeClaimIxs`: idempotent payee-ATA create + tag 90).
