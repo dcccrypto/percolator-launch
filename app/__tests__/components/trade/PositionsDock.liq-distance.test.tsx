@@ -83,9 +83,9 @@ describe("PositionsDock liquidation distance", () => {
     h.account = acct({ capital: 10n * E6, positionSize: -1n * E6 });
     h.priceE6 = 100n * E6;
     render(<PositionsDock slabAddress="s" />);
-    // engine liq (100 + 10) / 1.05 = 104.76; (104.76 - 100) / 104.76, the shared helper's short denominator
+    // engine liq (100 + 10) / 1.05 = 104.76; (104.76 - 100) / 100, a share of the mark (council GO1106)
     expect(liq().textContent).toMatch(/104\.76/);
-    expect(distance()).toHaveTextContent("4.5% to liq");
+    expect(distance()).toHaveTextContent("4.8% to liq");
   });
 
   it("follows the live mark", () => {

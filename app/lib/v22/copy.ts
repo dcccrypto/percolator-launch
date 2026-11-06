@@ -65,6 +65,11 @@ export const V22_COPY = {
     unitsUnknown: "Checking this market's price. Try again in a moment.",
     tradingUnavailable: "Trading this market isn't available in the app yet.",
     remainder: (tokens: string, sym: string) => `Sizes are rounded down to whole lots here: ${tokens} ${sym} of what you typed is not included.`,
+    /** Council GO1106: the open ticket names the size it will actually send. */
+    rounded: (tokens: string, sym: string, lots: string, usd: string) =>
+      `Orders here are whole lots, so this opens ${tokens} ${sym} (${lots} ${lots === "1" ? "lot" : "lots"}, about $${usd}). Margin and fee are for that size.`,
+    /** Council GO1106: below one lot the button stays disabled; this says why. */
+    belowOne: (tokens: string, sym: string, usd: string) => `Minimum order here is 1 lot = ${tokens} ${sym} (about $${usd}).`,
   },
   // ── Holding fee ──────────────────────────────────────────────────────────
   rent: {
