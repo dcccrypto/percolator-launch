@@ -60,6 +60,21 @@ describe("withdraw tab", () => {
     // the hook got the mode for a cooldown-0 vault (one transaction)
     expect(useEarnExitV22.mock.calls.at(-1)![0]).toMatchObject({ mode: "pair", sourceDomain: 0 });
   });
+  // Council GO1106-UX #1: the quote vanished 2-4 s after it appeared because each poll re-priced the typed USDC into a
+  // different share count (part of the quote key). The hook must see one share count while the typed amount is unchanged.
+  it("a share-price tick on a re-render does not change the shares the exit hook is quoting", () => {
+    __setDevnetV22ForTest(true);
+    const { rerender } = render(<DepositWithdrawPanel {...base} exitV22={exitV22} />);
+    openWithdraw();
+    fireEvent.change(screen.getByTestId("earn-withdraw-input"), { target: { value: "10" } });
+    const sharesAtQuote = useEarnExitV22.mock.calls.at(-1)![0].shares as bigint;
+    expect(sharesAtQuote > 0n).toBe(true);
+    rerender(<DepositWithdrawPanel {...base} exitV22={exitV22} pricing={{ ...pricing, withdrawSeniorValue: 1_050_700_000n }} />);
+    expect(useEarnExitV22.mock.calls.at(-1)![0].shares).toBe(sharesAtQuote);
+    // CONTROL: editing the amount re-derives the shares
+    fireEvent.change(screen.getByTestId("earn-withdraw-input"), { target: { value: "20" } });
+    expect(useEarnExitV22.mock.calls.at(-1)![0].shares).not.toBe(sharesAtQuote);
+  });
   it("CONTROL flag off (params present): the existing button, no v2.2 hook", () => {
     __setDevnetV22ForTest(false); // explicit off: independent of NEXT_PUBLIC_DEVNET_V22 in the environment
     render(<DepositWithdrawPanel {...base} exitV22={exitV22} />);
@@ -84,6 +99,13 @@ describe("pending redemption", () => {
     expect(screen.getByTestId("earn-pending-claim-v22")).toBeTruthy();
     expect(screen.queryByTestId("earn-withdraw-execute")).toBeNull();
     expect(useEarnExitV22.mock.calls.some((c) => c[0].mode === "execute" && c[0].shares === 9_523_809n)).toBe(true);
+  });
+  it("ready + flag on (e.g. after a reload): the card names the amount, says it is ready, and the button says Collect", () => {
+    __setDevnetV22ForTest(true);
+    render(<DepositWithdrawPanel {...pending} exitV22={exitV22} />);
+    expect(screen.getByTestId("earn-pending-claim-v22-title").textContent).toMatch(/Withdrawal in progress: 9\.99 USDC/);
+    expect(screen.getByTestId("earn-pending-claim-v22-ready").textContent).toBe("Ready to collect");
+    expect(screen.getByTestId("earn-exit-get-quote").textContent).toBe("Collect 9.99 USDC");
   });
   it("still counting down + flag on: the existing countdown card", () => {
     __setDevnetV22ForTest(true);
