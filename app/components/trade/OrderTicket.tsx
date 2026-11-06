@@ -428,6 +428,15 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const [inlineDepositMode, setInlineDepositMode] = useState<"deposit" | "withdraw">("deposit");
   // SOL-2 (v2.2): the new-account "+ Deposit" card (create account + deposit, no trade).
   const [showFirstDeposit, setShowFirstDeposit] = useState(false);
+  // Council GO1106 (first-timer): "Claim profit" opened the withdraw card below the fold (or toggled an already-open one
+  // shut), so the click read as doing nothing. The claim entry always OPENS the card and brings it into view.
+  const inlineFundsRef = useRef<HTMLDivElement | null>(null);
+  const openClaimCard = () => {
+    setInlineDepositMode("withdraw");
+    setShowInlineDeposit(true);
+    requestAnimationFrame(() => inlineFundsRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" }));
+  };
+
   const toggleInlineDeposit = (target: "deposit" | "withdraw") => {
     if (showInlineDeposit && inlineDepositMode === target) {
       setShowInlineDeposit(false);
@@ -2605,11 +2614,15 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         {withdrawEntryAtZero && (
           <div className="flex shrink-0 items-center gap-1.5">
             <button
-              onClick={() => toggleInlineDeposit("withdraw")}
+              onClick={() => (claimableProfit ? openClaimCard() : toggleInlineDeposit("withdraw"))}
               data-testid="withdraw-toggle"
+              // Council GO1106 (first-timer): "Claim profit" after a trade that lost money overall read as wrong. The
+              // engine keeps the price gain in pnl while fees came out of the deposit, so a net loser can still hold a
+              // small positive pnl: name the amount and say where it comes from.
+              title={claimableProfit ? "Price gain left in this market account after your last close (fees were paid from your deposit). Claiming moves it to your wallet." : undefined}
               className="rounded-sm border border-[var(--long)]/50 bg-[var(--long)]/[0.1] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--long)] transition-all duration-150 hover:bg-[var(--long)]/[0.18] hover:brightness-110"
             >
-              {claimableProfit ? "Claim profit" : "Close account"}
+              {claimableProfit ? `Claim ~${formatTokenAmount(safeExistingPnl, decimals, 3)} ${collateralSymbol}` : "Close account"}
             </button>
           </div>
         )}
@@ -2633,7 +2646,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         )}
       </div>
       {connected && !accountPending && showInlineDeposit && (!((needsAccount || needsDeposit) && !walletHasTokens) || (withdrawEntryAtZero && inlineDepositMode === "withdraw")) && (
-        <div className="mt-1.5" data-deposit-trigger>
+        <div ref={inlineFundsRef} className="mt-1.5" data-deposit-trigger>
           <DepositWithdrawCard slabAddress={slabAddress} initialMode={inlineDepositMode} offerFaucet={fundOverWallet} />
         </div>
       )}

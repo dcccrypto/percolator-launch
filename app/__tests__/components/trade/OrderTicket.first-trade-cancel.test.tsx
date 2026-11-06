@@ -365,8 +365,12 @@ describe("v2.2 QA: PROFIT SETTLING with capital 0 still reaches the Withdraw car
     flat(0n, 515_025n);
     render(<OrderTicket slabAddress={SLAB} />);
     const t = await screen.findByTestId("withdraw-toggle");
-    expect(t.textContent).toBe("Claim profit");
+    // Council GO1106: the entry names the amount (a net loser can hold a small price gain) instead of a bare "Claim profit".
+    expect(t.textContent).toMatch(/^Claim ~0\.515 /);
     expect(screen.queryByTestId("deposit-card")).toBeNull();
+    await act(async () => fireEvent.click(t));
+    expect(screen.queryByTestId("deposit-card")).not.toBeNull();
+    // A second click keeps the card open (it used to toggle it shut, which read as "nothing happened").
     await act(async () => fireEvent.click(t));
     expect(screen.queryByTestId("deposit-card")).not.toBeNull();
   });
