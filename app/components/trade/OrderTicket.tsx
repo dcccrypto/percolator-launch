@@ -2105,7 +2105,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <button
               type="button"
               data-testid="lot-use-one"
-              onClick={() => livePriceE6 && handleSizeChange(sizeQToInput(POS_SCALE_V22, sizeUnit, livePriceE6, lotExp))}
+              onClick={() => livePriceE6 && handleSizeChange(sizeQToInput(POS_SCALE_V22, sizeUnit, livePriceE6, lotExp, "up"))}
               className="font-semibold text-[var(--accent)] underline underline-offset-2 hover:brightness-110"
             >
               Use 1 lot
