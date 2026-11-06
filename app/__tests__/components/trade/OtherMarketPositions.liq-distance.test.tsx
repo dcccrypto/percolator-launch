@@ -56,11 +56,11 @@ describe("OtherMarketPositions liquidation distance", () => {
     expect(distance()).toHaveTextContent("5.0% to liq");
   });
 
-  it("short: (liq - mark) / liq under the price", () => {
+  it("short: (liq - mark) / mark under the price", () => {
     h.positions = [position({ size: -1n * E6, capital: 10n * E6, markE6: 100n * E6, liqE6: 110n * E6 })];
     render(<OtherMarketPositions currentSlab="this-slab" />);
-    // (110 - 100) / 110 = 9.09%: the shared helper measures a short against the liq price
-    expect(distance()).toHaveTextContent("9.1% to liq");
+    // (110 - 100) / 100 = 10%: the price move from the mark, like a long (council GO1106)
+    expect(distance()).toHaveTextContent("10.0% to liq");
   });
 
   it("no distance under the covered '% mgn' cell", () => {

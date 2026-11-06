@@ -41,15 +41,30 @@ export interface TakerCrankSim {
   rpcFailed: boolean;
 }
 
-export type TakerCrankPlan = "none" | "separate-tx";
+export type TakerCrankPlan = "none" | "separate-tx" | "bundle";
 
+/**
+ * Council GO1106 (first-timer): one Close click cost 4 wallet prompts. The close alone simulated clean, then LANDED
+ * failed with Stale(19) (the certificate went behind between simulation and landing), and the C1 resend then needed
+ * a separate crank tx before the close: failed close + crank + close + the sweep. A close is RISK-REDUCING, so the
+ * target/effective-lag gate that makes [crank, trade] fail 21 for opens (module comment) is not the gate a close
+ * meets. For a close we therefore try the crank IN the close's own transaction first, and keep it only when that
+ * exact list simulates clean: one approval, and the in-tx crank re-certifies the portfolio at landing time, so the
+ * Stale race above cannot happen. If the bundle is refused (any error) the plan is exactly the old one.
+ */
 export async function planTakerCrank(
   simulate: (instructions: TransactionInstruction[]) => Promise<TakerCrankSim>,
   tradeIxs: TransactionInstruction[],
   crankIx: TransactionInstruction,
   /** Instructions `simulate` puts in front of the list (simulateForGate: 2 compute-budget ixs). */
   prefixLen = 0,
+  /** The order only reduces the taker's open position (a close / partial close): try the same-tx crank first. */
+  reducing = false,
 ): Promise<TakerCrankPlan> {
+  if (reducing) {
+    const bundled = await simulate([crankIx, ...tradeIxs]);
+    if (!bundled.rpcFailed && !bundled.err) return "bundle";
+  }
   const alone = await simulate(tradeIxs);
   if (alone.rpcFailed || !alone.err) return "none";
   const refusal = parseCustomInstructionError(alone.err);
