@@ -16,7 +16,7 @@ vi.mock("@/lib/priceStore/wsManager", () => ({
 
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { __resetLotRegistryForTest, ensureLotExp, getLotExp, lotExpOfStrict, observeLotExp, setLotExpLoader, LOT_LOAD_RETRY_MS } from "@/lib/v22/lot-registry";
-import { applyOnChainPoll, getLivePriceSnapshot, getSnapshot, isLotKnown, seedFromDbIfEmpty, subscribeSlab } from "@/lib/priceStore/priceStore";
+import { applyOnChainPoll, getLivePriceSnapshot, getSnapshot, isLotKnown, seedFromDbIfEmpty, setStats24h, subscribeSlab } from "@/lib/priceStore/priceStore";
 import { LAYOUT_V22, LAYOUT_V21, WRAPPER_ACCOUNT_MAGIC, ACCOUNT_KIND } from "@/lib/v22/sdk";
 
 function market(version: 19 | 18, lotExp: number): Uint8Array {
@@ -124,6 +124,34 @@ describe("price store: per-token feeds of a slab with an unknown exponent are NO
     tick(slab, 0.06);
     expect(getSnapshot(slab).priceE6).toBe(60_000n);
     expect(isLotKnown(slab)).toBe(true);
+    off();
+  });
+});
+
+// Council GO1106-UX #3 (Creator/Trader): "The trade header shows 24H HIGH $35.780000 while the price is $0.003578 and
+// 24H LOW is $0.002895" / "PENGU ... 24H HIGH $66.120000 on a token priced $0.006612". The per-token 24h stats were
+// widened with the per-LOT tick.
+describe("price store: 24h high/low stay per token on a lot market", () => {
+  it("a per-lot tick widens the per-token high/low in token units", () => {
+    const slab = fresh();
+    observeLotExp(slab, market(19, 4));
+    const off = subscribeSlab(slab, () => {});
+    setStats24h(slab, { change24h: 1, high24h: 0.0035, low24h: 0.002895 });
+    tick(slab, 0.003578); // stored per lot: 35.78
+    expect(getSnapshot(slab).priceUsd).toBeCloseTo(35.78, 6);
+    expect(getSnapshot(slab).high24h).toBeCloseTo(0.003578, 9); // was 35.78
+    expect(getSnapshot(slab).low24h).toBeCloseTo(0.002895, 9);
+    tick(slab, 0.0028);
+    expect(getSnapshot(slab).low24h).toBeCloseTo(0.0028, 9);
+    off();
+  });
+  it("CONTROL lot 0: unchanged", () => {
+    const slab = fresh();
+    observeLotExp(slab, market(19, 0));
+    const off = subscribeSlab(slab, () => {});
+    setStats24h(slab, { change24h: 1, high24h: 90, low24h: 80 });
+    tick(slab, 95);
+    expect(getSnapshot(slab).high24h).toBe(95);
     off();
   });
 });

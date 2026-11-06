@@ -32,6 +32,7 @@ import { formatTokenAmount } from "@/lib/format";
 import { checkDepositAmount, depositAmountMessage } from "@/lib/deposit-guard";
 import { orderStakePools, stakedOrderValue } from "@/lib/stake-pool-order";
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
+import { tokenUsdOfLotUsd } from "@/lib/v22/lot";
 import { formatMarkPrice } from "@/lib/format";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
@@ -193,7 +194,11 @@ function LivePoolPrice({
 }) {
   const subscribe = useCallback((cb: () => void) => subscribeSlab(slab, cb), [slab]);
   const getSnap = useCallback(() => getSnapshot(slab).priceUsd, [slab]);
-  const priceUsd = useSyncExternalStore(subscribe, getSnap, () => null);
+  const lotPriceUsd = useSyncExternalStore(subscribe, getSnap, () => null);
+  // Council GO1106-UX #3 (LP/Creator): "'Percolator $35.83' against a market price of $0.003583 (10,000x)". The store
+  // price is per LOT on a v2.2 lot market; show it per token like /markets (LiveRowPrice) and the trade header.
+  const lotExp = useSyncExternalStore(subscribe, useCallback(() => getSnapshot(slab).lotExp ?? 0, [slab]), () => 0);
+  const priceUsd = lotPriceUsd == null ? null : tokenUsdOfLotUsd(lotPriceUsd, lotExp);
   return (
     <span className={className} style={style}>
       {formatMarkPrice(priceUsd)}
