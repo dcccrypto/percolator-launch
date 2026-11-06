@@ -99,7 +99,7 @@ describe("describeLiqDistance", () => {
   });
 
   it("short: the mark's distance up to the price, over the price (the shared helper's convention)", () => {
-    expect(dist({ positionSize: -1_000_000n, liqPriceE6: 125_000_000n })).toBe("20.0% to liq"); // (125 - 100) / 125
+    expect(dist({ positionSize: -1_000_000n, liqPriceE6: 125_000_000n })).toBe("25.0% to liq"); // (125 - 100) / 100, share of the mark
   });
 
   it("a crossed price reads 0.0%, not a distance", () => {

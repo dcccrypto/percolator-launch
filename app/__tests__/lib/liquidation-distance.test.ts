@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { computeLiquidationDistancePct } from '@/lib/liquidation-distance';
+import { computeLiquidationDistancePct, computeLiquidationMovePct } from '@/lib/liquidation-distance';
 
 describe('computeLiquidationDistancePct', () => {
   it('preserves the canonical warning distance for a short position', () => {
     const distance = computeLiquidationDistancePct(-1n, 77_000_000n, 110_000_000n);
 
-    // (110 - 77) / 110 * 100 = 30%
-    expect(distance).toBe(30);
+    // (110 - 77) / 77 * 100 = 42.85% (share of the mark, like a long)
+    expect(distance).toBe(42.85);
   });
 
   it('computes the directional distance for a healthy long position', () => {
@@ -20,8 +20,8 @@ describe('computeLiquidationDistancePct', () => {
   it('computes the directional distance for a healthy short position', () => {
     const distance = computeLiquidationDistancePct(-1n, 80_000_000n, 100_000_000n);
 
-    // (100 - 80) / 100 * 100 = 20%
-    expect(distance).toBe(20);
+    // (100 - 80) / 80 * 100 = 25%
+    expect(distance).toBe(25);
   });
 
   it('returns zero when a short mark has crossed its liquidation price', () => {
@@ -83,5 +83,16 @@ describe('computeLiquidationDistancePct', () => {
     );
 
     expect(distance).toBe(10);
+  });
+
+  it('council GO1106: the PENGU short reads 46.6% to liq, not 31.8%', () => {
+    // mark $0.006612, liq $0.009697 (e6 units)
+    expect(computeLiquidationMovePct(-1n, 6_612n, 9_697n)).toBeCloseTo(46.65, 1);
+  });
+
+  it('does not clamp a short that is more than 100% from liq, but the bar metric does', () => {
+    // liq at 3x the mark: a 200% move
+    expect(computeLiquidationMovePct(-1n, 100_000_000n, 300_000_000n)).toBe(200);
+    expect(computeLiquidationDistancePct(-1n, 100_000_000n, 300_000_000n)).toBe(100);
   });
 });
