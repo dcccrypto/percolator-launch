@@ -56,3 +56,16 @@ describe("computeMaxLeverageFromBps", () => {
     expect(computeMaxLeverageFromBps(null)).toBe(10);
   });
 });
+
+// Council GO1106-UX #2: "The vault table says FEE 0.10% for every market, while the selected-vault rail says FEE 0.30%."
+// The table read the DB row's trading_fee_bps (default 10); the charged on-chain fee (30 bps on every v2.2 market) wins.
+describe("buildMarketVaultInfo fee source", () => {
+  it("the charged on-chain fee wins over the DB row and the default", () => {
+    expect(buildMarketVaultInfo("S", "SYM", "Sym", null, noVaults, new Map([["S", {}]]), {}, { S: 30 }).tradingFeeBps).toBe(30);
+    expect(buildMarketVaultInfo("S", "SYM", "Sym", null, noVaults, new Map([["S", { trading_fee_bps: 10 }]]), {}, { S: 30 }).tradingFeeBps).toBe(30);
+  });
+  it("CONTROL: no on-chain fee -> the DB row, then the 10 bps default", () => {
+    expect(build({ trading_fee_bps: 25 }).tradingFeeBps).toBe(25);
+    expect(build({}).tradingFeeBps).toBe(10);
+  });
+});

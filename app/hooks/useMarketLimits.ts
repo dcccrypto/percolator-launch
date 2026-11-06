@@ -23,7 +23,7 @@ import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { pollWhenVisible } from "@/lib/pollWhenVisible";
-import { limitsFlags, type LimitsFlags } from "@/lib/limits/flags";
+import { earnP3Enabled, limitsFlags, type LimitsFlags } from "@/lib/limits/flags";
 import {
   decodeAssetRiskLimits,
   decodeAssetVaultLp,
@@ -249,7 +249,9 @@ export function useMarketLimits(
   const resolveSameOwnerLp = !!sameOwnerWallet;
   const flags = useMemo(() => limitsFlags(), []);
   const v21 = isDevnetV21Enabled();
-  const anyOn = flags.p1 || flags.p2 || flags.p3 || v21;
+  // Earn's bound-vault reads (vault state, registry) also run on a v2.2 build (lib/limits/flags earnP3Enabled).
+  const earnP3 = earnP3Enabled(flags);
+  const anyOn = flags.p1 || flags.p2 || earnP3 || v21;
   const { connection } = useConnectionCompat();
   const { raw, programId, assetProfile } = useSlabState();
   // Only a v2.2 growth deployment needs the clock (the quote reads depth age); everywhere else no slot poll is started.
@@ -357,9 +359,9 @@ export function useMarketLimits(
     if (!anyOn || !raw) return null;
     const engine = decodeMarketEngineView(raw, assetIndex);
     const riskLimits = flags.p1 ? decodeAssetRiskLimits(raw, assetIndex) : null;
-    const vaultLp = flags.p3 || v21 ? decodeAssetVaultLp(raw, assetIndex) : null;
+    const vaultLp = earnP3 || v21 ? decodeAssetVaultLp(raw, assetIndex) : null;
     return { engine, riskLimits, vaultLp };
-  }, [anyOn, raw, assetIndex, flags.p1, flags.p3, v21]);
+  }, [anyOn, raw, assetIndex, flags.p1, earnP3, v21]);
 
   const boundVaultLpKey = slabPart?.vaultLp?.bound ? new PublicKey(slabPart.vaultLp.vaultLpPortfolio).toBase58() : null;
   const marketId = slabPart?.engine?.marketId ?? null;
@@ -389,9 +391,9 @@ export function useMarketLimits(
         const keys: PublicKey[] = [];
         if (lpAccts) keys.push(lpAccts.lpPortfolio);
         if (lpAccts?.matcherCtx) keys.push(lpAccts.matcherCtx);
-        const vaultPda = flags.p3 ? deriveVaultLpStatePda(programPk, slabPk, VAULT_LP_STATE_SEED) : null;
+        const vaultPda = earnP3 ? deriveVaultLpStatePda(programPk, slabPk, VAULT_LP_STATE_SEED) : null;
         if (vaultPda) keys.push(vaultPda);
-        const registryPda = flags.p3 ? deriveVaultLpStatePda(programPk, slabPk, LP_VAULT_REGISTRY_SEED) : null;
+        const registryPda = earnP3 ? deriveVaultLpStatePda(programPk, slabPk, LP_VAULT_REGISTRY_SEED) : null;
         if (registryPda) keys.push(registryPda);
         // App bug 2026-10-29: the ticket quotes the guard's limits, so its account is read with the LP (appended LAST).
         // An underivable guard address never stops the LP / vault reads (as levGuardExists): the guard is then simply not quoted.
@@ -454,7 +456,7 @@ export function useMarketLimits(
       alive = false;
       dispose();
     };
-  }, [anyOn, slabAddress, programIdStr, connection, boundVaultLpKey, marketId, assetIndex, flags.p3]);
+  }, [anyOn, slabAddress, programIdStr, connection, boundVaultLpKey, marketId, assetIndex, earnP3]);
 
   return useMemo((): MarketLimits => {
     const admin = assetAdminBytes;
