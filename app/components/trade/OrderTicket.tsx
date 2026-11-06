@@ -830,12 +830,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     [tradableBalance, decimals, leverage, typedPrice, sizeUnit],
   );
 
-  const marginNative = marginInput ? parsePercToNative(marginInput, decimals) : 0n;
+  const typedMarginNative = marginInput ? parsePercToNative(marginInput, decimals) : 0n;
   // GH#2616: shared with TradeConfirmationModal, which renders the confirmation
   // for this very quote. It was a second copy of this expression and did not get
   // the fractional-safe fix, so it threw on any fractional leverage.
-  const notionalNative = computeNotionalNative(marginNative, leverage);
-  const rawPositionSize = livePriceE6 && livePriceE6 > 0n ? (notionalNative * 1_000_000n) / livePriceE6 : 0n;
+  const typedNotionalNative = computeNotionalNative(typedMarginNative, leverage);
+  const rawPositionSize = livePriceE6 && livePriceE6 > 0n ? (typedNotionalNative * 1_000_000n) / livePriceE6 : 0n;
   // v2.2 lots: whole lots only (the typed token size rounds DOWN to a lot multiple; the remainder is shown, never sent).
   let typedTokenQ: bigint | null = null;
   if (lotExp > 0 && sizeUnit === "token" && sizeInput) {
@@ -848,6 +848,17 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const lotQuantised = lotOrderQ(rawPositionSize, typedTokenQ, lotExp);
   const positionSize = lotQuantised.q;
   const lotRemainderQ = lotQuantised.remainderQ;
+  // Council GO1106 (trader): on a lot market the ticket quoted the TYPED size ("Covers 33.33 margin + fee for this 99.99
+  // position", Order Lev 3x) while the fill was one whole lot (10,000 PENGU = $66, 1.8x). The order IS the rounded size,
+  // so the notional, margin, fee and deposit below all follow it; the margin scales with it, keeping the chosen leverage.
+  const lotRoundedDown = lotExp > 0 && positionSize < rawPositionSize && !!livePriceE6 && livePriceE6 > 0n && typedNotionalNative > 0n;
+  const notionalNative = lotRoundedDown ? (positionSize * livePriceE6!) / 1_000_000n : typedNotionalNative;
+  const marginNative = lotRoundedDown
+    ? (typedMarginNative * notionalNative + typedNotionalNative - 1n) / typedNotionalNative
+    : typedMarginNative;
+  // A typed size below ONE lot rounds to nothing: say so (and what one lot costs) instead of a silent disabled button.
+  const belowOneLot = lotExp > 0 && typedMarginNative > 0n && rawPositionSize > 0n && positionSize === 0n;
+  const oneLotNotional = lotExp > 0 && livePriceE6 && livePriceE6 > 0n ? (POS_SCALE_V22 * livePriceE6) / 1_000_000n : null;
   // GH#2953: the engine's initial margin is max(notional x IM bps, min_nonzero_im_req) (engine
   // v16.rs:23050 margin_requirement), so a NEW position needs at least the market's floor ($2 on
   // the wizard markets) however small it is: a $1 first trade deposited $1.11 and was refused
@@ -2088,6 +2099,24 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             )}
           </div>
         )}
+        {belowOneLot && oneLotNotional !== null && (
+          <p data-testid="lot-below-min" role="status" className="mt-1 text-[11px] leading-relaxed text-[var(--warning)]">
+            {V22_COPY.lot.belowOne(fmtQ(POS_SCALE_V22), baseTicker, formatTokenAmount(oneLotNotional, decimals, 2))}{" "}
+            <button
+              type="button"
+              data-testid="lot-use-one"
+              onClick={() => livePriceE6 && handleSizeChange(sizeQToInput(POS_SCALE_V22, sizeUnit, livePriceE6, lotExp))}
+              className="font-semibold text-[var(--accent)] underline underline-offset-2 hover:brightness-110"
+            >
+              Use 1 lot
+            </button>
+          </p>
+        )}
+        {lotRoundedDown && positionSize > 0n && (
+          <p data-testid="lot-rounded" className="mt-1 text-[11px] leading-relaxed text-[var(--text-secondary)]">
+            {V22_COPY.lot.rounded(fmtQ(positionSize), baseTicker, (positionSize / POS_SCALE_V22).toString(), formatTokenAmount(notionalNative, decimals, 2))}
+          </p>
+        )}
         {capital === 0n && (walletAtaBalance ?? 0n) > 0n && !fundingMode && (
           <p className="mt-1 text-[11px] leading-relaxed text-[var(--text-secondary)]">
             {formatTokenAmount(walletAtaBalance ?? 0n, decimals, 2)} {collateralSymbol} in your wallet. Deposit it to start trading.
@@ -2578,6 +2607,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 ? accountScanSlow
                   ? ACCOUNT_LOADING_COPY.slow
                   : ACCOUNT_LOADING_COPY.loading
+                : belowOneLot && !ticketState.blocks
+                ? "Below the 1-lot minimum"
                 : fundOverWallet && !ticketState.blocks
                 ? "Get test funds"
                 : fundingMode && ticketState.row === "ok" && sizeEntered
