@@ -10,7 +10,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getClientIp } from "@/lib/get-client-ip";
 import { createUpstashRateLimiter } from "@/lib/upstash-rate-limit";
-import { getServiceClient } from "@/lib/supabase";
+import { getServiceClient, getServerNetwork } from "@/lib/supabase";
+import { v22MarketMetaFromEnv } from "@/lib/v22/market-meta";
 
 const jsonLimiter = createUpstashRateLimiter({ limit: 120, windowMs: 60_000, prefix: "rl:earn-share" });
 const imageLimiter = createUpstashRateLimiter({ limit: 30, windowMs: 60_000, prefix: "rl:earn-share-image" });
@@ -59,13 +60,16 @@ export type MarketKnown = "known" | "unknown" | "unavailable";
  * read: the caller answers 503.
  */
 export async function marketIsKnown(market: string): Promise<MarketKnown> {
+  // The build's own curated v2.2 list (NEXT_PUBLIC_V22_MARKETS_JSON) is ours by definition. Seeded v2.2 markets are listed only there, never
+  // in the markets table, and the v2.2 preview runs without Supabase at all, so without this every seeded market answered 404 / 503.
+  if (Object.prototype.hasOwnProperty.call(v22MarketMetaFromEnv(), market)) return "known";
   const now = Date.now();
   const neg = negative.get(market);
   if (neg !== undefined && now - neg < NEG_TTL_MS) return "unknown";
   const k = known.get(market);
   if (k !== undefined && now - k < KNOWN_TTL_MS) return "known";
   try {
-    const { data, error } = await getServiceClient().from("markets").select("slab_address").eq("slab_address", market).single();
+    const { data, error } = await getServiceClient().from("markets").select("slab_address").eq("slab_address", market).eq("network", getServerNetwork()).single();
     if (!error && data) {
       put(known, market, now, MAX_KEYS);
       return "known";

@@ -20,26 +20,26 @@ const h = vi.hoisted(() => ({
   db: "known" as "known" | "none" | "down",
   dbCalls: 0,
   allowed: true,
+  filters: [] as [string, string][],
 }));
 vi.mock("@/lib/upstash-rate-limit", () => ({
   createUpstashRateLimiter: () => ({ check: async () => ({ allowed: h.allowed, remaining: 1, retryAfterSecs: 7 }) }),
 }));
 vi.mock("@/lib/server-rpc", () => ({ getServerConnection: () => ({ getMultipleAccountsInfo: h.getMultiple }) }));
-vi.mock("@/lib/supabase", () => ({
-  getServiceClient: () => ({
-    from: () => ({
-      select: () => ({
-        eq: () => ({
-          single: async () => {
-            h.dbCalls++;
-            if (h.db === "down") throw new Error("db down");
-            return h.db === "none" ? { data: null, error: { code: "PGRST116" } } : { data: { logo_url: h.logoUrl, slab_address: "x" }, error: null };
-          },
-        }),
-      }),
-    }),
-  }),
-}));
+vi.mock("@/lib/supabase", () => {
+  const single = async () => {
+    h.dbCalls++;
+    if (h.db === "down") throw new Error("db down");
+    return h.db === "none" ? { data: null, error: { code: "PGRST116" } } : { data: { logo_url: h.logoUrl, slab_address: "x" }, error: null };
+  };
+  const q: Record<string, unknown> = {};
+  q.eq = (col: string, val: string) => { h.filters.push([col, val]); return q; };
+  q.single = single;
+  return {
+    getServerNetwork: () => "devnet",
+    getServiceClient: () => ({ from: () => ({ select: () => q }) }),
+  };
+});
 
 import { GET, OPTIONS } from "@/app/api/earn-share/[market]/route";
 import { GET as GET_IMAGE } from "@/app/api/earn-share/[market]/image/route";
@@ -85,6 +85,7 @@ beforeEach(() => {
   h.db = "known";
   h.dbCalls = 0;
   h.allowed = true;
+  h.filters = [];
 });
 afterEach(() => __setDevnetV22ForTest(null));
 
@@ -369,5 +370,57 @@ describe("the image", () => {
     expect((await callImage("nope")).status).toBe(404);
     chain(null, null);
     expect((await callImage(M)).status).toBe(404);
+  });
+});
+
+describe("network isolation (#3720)", () => {
+  it("scopes the markets lookups to the server network", async () => {
+    chain(acct(PROGRAM), null);
+    await call(M);
+    await callImage(M);
+    expect(h.filters).toContainEqual(["slab_address", M]);
+    expect(h.filters).toContainEqual(["network", "devnet"]);
+    expect(h.filters.filter(([c]) => c === "network").length).toBe(h.filters.filter(([c]) => c === "slab_address").length);
+  });
+});
+
+describe("curated v2.2 markets (NEXT_PUBLIC_V22_MARKETS_JSON) are ours without the markets table", () => {
+  const k = () => Keypair.generate().publicKey.toBase58();
+  const entry = (slab: string) => ({ slab, symbol: "SOL", name: "SOL", mainnet_ca: k(), dex_pool_address: k(), lp_portfolio_address: k() });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("a seeded market is served with the table down (the v2.2 preview has no Supabase) and without a DB read", async () => {
+    vi.stubEnv("NEXT_PUBLIC_V22_MARKETS_JSON", JSON.stringify([entry(M)]));
+    h.db = "down";
+    chain(acct(PROGRAM), null);
+    const res = await call(M);
+    expect(res.status).toBe(200);
+    expect(h.dbCalls).toBe(0);
+    expect((await callImage(M)).status).toBe(200);
+  });
+
+  it("a seeded market missing from the table is not a 404", async () => {
+    vi.stubEnv("NEXT_PUBLIC_V22_MARKETS_JSON", JSON.stringify([entry(M)]));
+    h.db = "none";
+    chain(acct(PROGRAM), null);
+    expect((await call(M)).status).toBe(200);
+  });
+
+  it("NEGATIVE: a market not in the list still needs the table (404 on no row, 503 on a read failure, no chain read)", async () => {
+    vi.stubEnv("NEXT_PUBLIC_V22_MARKETS_JSON", JSON.stringify([entry(k())]));
+    h.db = "none";
+    expect((await call(M)).status).toBe(404);
+    __clearEarnShareGuardForTest();
+    h.db = "down";
+    expect((await call(M)).status).toBe(503);
+    expect(h.getMultiple).not.toHaveBeenCalled();
+  });
+
+  it("NEGATIVE: a mainnet build ignores the list", async () => {
+    vi.stubEnv("NEXT_PUBLIC_V22_MARKETS_JSON", JSON.stringify([entry(M)]));
+    vi.stubEnv("NEXT_PUBLIC_DEFAULT_NETWORK", "mainnet");
+    h.db = "down";
+    expect((await call(M)).status).toBe(503);
+    expect(h.getMultiple).not.toHaveBeenCalled();
   });
 });
