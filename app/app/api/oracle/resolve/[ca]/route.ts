@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { dexPairBaseIs } from "@/lib/dex-pair-side";
 import { PublicKey } from "@solana/web3.js";
 import { registeredPoolForMint } from "@/lib/registered-pool";
 import { SUPPORTED_DEX_IDS } from "@/lib/dex-constants";
@@ -100,7 +101,7 @@ async function fetchDexScreenerInfo(
     const json = await resp.json();
     const pairs = json.pairs as Array<{
       priceUsd?: string;
-      baseToken?: { symbol?: string };
+      baseToken?: { symbol?: string; address?: string };
       liquidity?: { usd?: number };
       chainId?: string;
       dexId?: string;
@@ -110,7 +111,8 @@ async function fetchDexScreenerInfo(
 
     // Sort by liquidity, pick best Solana pair (for price/symbol — most liquid wins)
     const solPairs = pairs
-      .filter((p) => p.chainId === "solana" && p.priceUsd)
+      // Council GO1106-UX #4: priceUsd is the BASE token's price; a pair where `ca` is the quote prices another token.
+      .filter((p) => p.chainId === "solana" && p.priceUsd && dexPairBaseIs(p, ca))
       .sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
     if (!solPairs.length) return null;
 

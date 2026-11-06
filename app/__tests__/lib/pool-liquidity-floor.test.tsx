@@ -148,9 +148,9 @@ describe("classifyPoolsByOwner: the liquidity floor", () => {
 const BOME = "ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82";
 const BOME_POOL = "GmoZsr3G4aV5B4Uk6zsTN2KbXGagV3JM2RkDCgszr8Ls";
 const DEEP_POOL = "9GD7vaaocPe8sQFriG4iMhLL6mWxmevTVnjpSbCHRBqc";
-const pair = (pairAddress: string, dexId: string, usd: number) => ({
+const pair = (pairAddress: string, dexId: string, usd: number, base = BOME) => ({
   chainId: "solana", dexId, pairAddress,
-  baseToken: { address: BOME, symbol: "BOME" }, quoteToken: { address: WSOL, symbol: "SOL" },
+  baseToken: { address: base, symbol: "BOME" }, quoteToken: { address: WSOL, symbol: "SOL" },
   liquidity: { usd }, priceUsd: "0.0006",
 });
 function mockNetwork(pairs: unknown[]) {
@@ -194,7 +194,8 @@ describe("wizard surfaces refuse a below-floor pool", () => {
 
   it("/api/oracle/resolve: only a shallow pool -> no pool, with the reason", async () => {
     put(pumpswapWithDepth(BOME_POOL, USDC, 1_640_000n));
-    mockNetwork([pair(BOME_POOL, "pumpswap", 1_000_000)]);
+    // A second mint (not served from the resolve cache); the pair is listed under it as its base token.
+    mockNetwork([pair(BOME_POOL, "pumpswap", 1_000_000, "7mqDbApo4K3Ft7jQnGeAPBTsRYKXcQV3dFfN8nQMDNN4")]);
     const r = await resolve("7mqDbApo4K3Ft7jQnGeAPBTsRYKXcQV3dFfN8nQMDNN4");
     expect(r.dexPoolAddress).toBeNull();
     expect(r.oracleMode).toBe("admin");

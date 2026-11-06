@@ -5,6 +5,7 @@ import { PublicKey } from "@solana/web3.js";
 import { SUPPORTED_DEX_IDS, BLOCKED_DEX_IDS, NON_USD_QUOTE_REASON, BELOW_LIQUIDITY_FLOOR_REASON } from "@/lib/dex-constants";
 import { dexTypeLabel, isOfferable, MAX_CLASSIFY_POOLS, type PoolClass } from "@/lib/dex-pool-owner";
 import type { KeeperDexType } from "@/lib/dex-type";
+import { dexPairBaseIs, dexPairQuoteIs, QUOTE_ONLY_REASON } from "@/lib/dex-pair-side";
 
 export interface DexPoolResult {
   poolAddress: string;
@@ -92,8 +93,8 @@ export async function searchVerifiedPools(
     chainId?: string;
     dexId?: string;
     pairAddress: string;
-    baseToken?: { symbol?: string };
-    quoteToken?: { symbol?: string };
+    baseToken?: { symbol?: string; address?: string };
+    quoteToken?: { symbol?: string; address?: string };
     liquidity?: { usd?: number };
     priceUsd?: string;
   }> } = await resp.json();
@@ -104,8 +105,15 @@ export async function searchVerifiedPools(
    *  nothing supported turns up, so a token that also trades on Meteora
    *  is never nagged about its Raydium pool. */
   let blockedHit: string | null = null;
+  /** The mint sat on the QUOTE side of a real pool: its priceUsd is the other token's price. */
+  let quoteOnlyHit = false;
   for (const pair of pairs) {
     if (pair.chainId !== "solana") continue;
+    // Council GO1106-UX #4: only a pool whose BASE token is this mint prices it (DexScreener's priceUsd is the base's).
+    if (!dexPairBaseIs(pair, mint)) {
+      if (dexPairQuoteIs(pair, mint) && (pair.liquidity?.usd || 0) >= 100) quoteOnlyHit = true;
+      continue;
+    }
     const dexId = (pair.dexId || "").toLowerCase();
     const liquidityRaw = pair.liquidity?.usd || 0;
     if (!SUPPORTED_DEX_IDS.has(dexId)) {
@@ -159,7 +167,7 @@ export async function searchVerifiedPools(
     // Only surface the block when it actually cost this token every option.
     blockedReason:
       verified.length === 0
-        ? blockedHit ?? (candidates.length > 0 ? unverifiedReason(candidates, classesSeen) : null)
+        ? blockedHit ?? (candidates.length > 0 ? unverifiedReason(candidates, classesSeen) : quoteOnlyHit ? QUOTE_ONLY_REASON : null)
         : null,
   };
 }
