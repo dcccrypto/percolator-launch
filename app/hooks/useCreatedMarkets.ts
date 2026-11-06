@@ -2,6 +2,7 @@
 
 import { useMemo, useEffect, useState, useRef, useCallback } from "react";
 import { PublicKey } from "@solana/web3.js";
+import bs58 from "bs58";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useMarketDiscovery } from "./useMarketDiscovery";
@@ -12,8 +13,10 @@ import {
 import { fetchTokenMeta, isPlaceholderTokenMeta } from "@/lib/tokenMeta";
 import { isLpPortfolio } from "@/lib/userAccountScan";
 import { readV17AssetSlotLast } from "@/lib/v17-engine-clock";
-import { parseMarketOI, isWrapperMarketAccount } from "@/lib/v22/layout";
+import { activeLayout, parseMarketOI, isWrapperMarketAccount } from "@/lib/v22/layout";
+import { ACCOUNT_KIND } from "@/lib/v22/sdk/layout";
 import { readLaunchFootprint, type LaunchFootprint } from "@/lib/unfinished-launch";
+import { HEADER_KIND_OFF, KIND_VAULT_LP_STATE, VAULT_LP_STATE_ACCOUNT_LEN, VS } from "@/lib/limits/constants";
 
 /** v17 portfolio account magic (PERCV16\0), base64 for the memcmp filter. */
 const V17_PORTFOLIO_MAGIC_B64 = Buffer.from([
@@ -23,14 +26,20 @@ const V17_PORTFOLIO_MAGIC_B64 = Buffer.from([
 const V17_PF_MARKET_OFF = 16;
 /** Mutable owner (SDK PF_OWNER_OFF) — NOT provenance@80. */
 const V17_PF_OWNER_OFF = 116;
+/** AssetOracleProfileV16.asset_admin inside the oracle profile (lib/v18-wire.ts readAssetAdmin). */
+const ASSET_ADMIN_REL = 368;
 
 /**
  * /my-markets creator dashboard — markets created by the connected wallet.
  *
  * Incomplete launches are identified through their remaining wallet
  * authority. Completed launches rotate marketauth to a stake-pool PDA, so
- * creator-owned LP portfolios are used as the durable creator marker.
- * Trading portfolios remain excluded.
+ * creator-owned LP portfolios mark a completed creator-LP launch, and asset
+ * 0's `asset_admin` (set to the creator by InitMarket, moved only by
+ * UpdateAssetAuthority) marks a completed launch with no creator LP, such as
+ * a P3 (vault-LP) launch. A P3 creator who burns the admin key zeroes asset_admin, so the
+ * vault's `VaultLpState.junior_owner` (set to the launching marketauth by
+ * InitVaultLp, never moved) is checked too. Trading portfolios remain excluded.
  *
  * Creator verification is wallet-scoped and participates in loading/error
  * state so pending or failed scans are never rendered as confirmed-empty.
@@ -65,7 +74,9 @@ export interface CreatedMarket extends DiscoveredMarket {
  *
  * Incomplete launches are matched through their remaining wallet authority.
  * Completed launches are recovered through creator-owned LP portfolios
- * after marketauth rotates. Trading portfolios remain excluded.
+ * (creator-LP), or asset 0's asset_admin or the vault's junior_owner (P3),
+ * after marketauth rotates.
+ * Trading portfolios remain excluded.
  */
 export function useCreatedMarkets(wallet?: string | null) {
   const { publicKey } = useWalletCompat();
@@ -227,8 +238,11 @@ export function useCreatedMarkets(wallet?: string | null) {
         // Every configured program scan is required for a verified result.
         // Promise.all intentionally rejects the scan if any RPC request fails,
         // preventing a partial result from being presented as confirmed empty.
-        const ownedByProgram = await Promise.all(
-          programIds.map((programId) =>
+        const L = activeLayout();
+        const assetAdminOff =
+          L.marketGroupOff + L.marketGroupLen + L.wrapperSlot.oracleProfile + ASSET_ADMIN_REL; // asset 0
+        const [ownedByProgram, administeredByProgram, juniorByProgram] = await Promise.all([
+          Promise.all(programIds.map((programId) =>
             connection.getProgramAccounts(new PublicKey(programId), {
               filters: [
                 {
@@ -246,10 +260,40 @@ export function useCreatedMarkets(wallet?: string | null) {
                 },
               ],
             }),
-          ),
-        );
+          )),
+          // Completed launches with no creator LP (every P3 launch, and markets with no LP at all): asset 0's asset_admin. Keys only.
+          Promise.all(programIds.map((programId) =>
+            connection.getProgramAccounts(new PublicKey(programId), {
+              dataSlice: { offset: 0, length: 0 },
+              filters: [
+                { memcmp: { offset: HEADER_KIND_OFF, bytes: bs58.encode(Uint8Array.of(ACCOUNT_KIND.Market)) } },
+                { memcmp: { offset: assetAdminOff, bytes: walletStr } },
+              ],
+            }),
+          )),
+          // Completed P3 launches whose admin key was burned: VaultLpState.junior_owner, market id only.
+          Promise.all(programIds.map((programId) =>
+            connection.getProgramAccounts(new PublicKey(programId), {
+              dataSlice: { offset: VS.marketGroup, length: 32 },
+              filters: [
+                { dataSize: VAULT_LP_STATE_ACCOUNT_LEN },
+                { memcmp: { offset: HEADER_KIND_OFF, bytes: bs58.encode(Uint8Array.of(KIND_VAULT_LP_STATE)) } },
+                { memcmp: { offset: VS.juniorOwner, bytes: walletStr } },
+              ],
+            }),
+          )),
+        ]);
 
         if (cancelled) return;
+
+        for (const administered of administeredByProgram) {
+          for (const { pubkey } of administered) createdSlabs.add(pubkey.toBase58());
+        }
+        for (const juniors of juniorByProgram) {
+          for (const { account } of juniors) {
+            if (account.data.length === 32) createdSlabs.add(new PublicKey(account.data).toBase58());
+          }
+        }
 
         for (const owned of ownedByProgram) {
           for (const { account } of owned) {
