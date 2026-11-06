@@ -41,6 +41,8 @@ vi.mock("@/hooks/usePortfolio", async (importOriginal) => {
   };
 });
 vi.mock("@/hooks/useMultiTokenMeta", () => ({ useMultiTokenMeta: () => new Map() }));
+// #3726: the close modal reads the market's limits for its close-fee estimate. Not under test here; no limits = the base fee.
+vi.mock("@/hooks/useMarketLimits", () => ({ useMarketLimits: () => null }));
 vi.mock("@/hooks/useWalletCompat", () => ({
   useWalletCompat: () => ({ connected: true, publicKey: new PublicKey("11111111111111111111111111111111") }),
 }));

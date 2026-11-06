@@ -9,6 +9,8 @@ import type { PublicKey } from "@solana/web3.js";
 import { useClosePosition } from "@/hooks/useClosePosition";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { ClosePositionForm } from "@/components/trade/ClosePositionForm";
+import { useCloseFeeEstimate } from "@/hooks/useCloseFeeEstimate";
+import type { MarketLimits } from "@/hooks/useMarketLimits";
 import { NFT_MENU_COPY } from "@/components/trade/PositionNftMenu";
 import { useNftWrappedPosition } from "@/hooks/useNftWrappedPosition";
 import { isMockMode } from "@/lib/mock-mode";
@@ -34,6 +36,8 @@ export interface OrderTicketClosePanelProps {
   collateralSymbol: string;
   decimals: number;
   tradingFeeBps?: bigint;
+  /** #3726: the ticket's own market-limits read, reused for the close-fee estimate (no second read). */
+  marketLimits?: MarketLimits | null;
   /** Per-fill cap (matcherCaps.maxFillAbs), surfaced when a close batches. */
   maxFillAbs: bigint | null;
   /** The market's LP has no capital: a close cannot fill (mirrors PositionsDock). */
@@ -88,6 +92,7 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
   collateralSymbol,
   decimals,
   tradingFeeBps,
+  marketLimits,
   maxFillAbs,
   lpUnderfunded,
   engineStale: engineStaleProp,
@@ -112,6 +117,8 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
   const hasValidMark = currentPriceE6 > 0n;
   const hasPosition = positionSize !== 0n;
   const isLong = positionSize > 0n;
+  // #3726: the whole close fee (base + the matcher's requested fee where the fee channel charges it).
+  const closeFeeBpsFor = useCloseFeeEstimate(positionSize, tradingFeeBps ?? 0n, currentPriceE6, marketLimits);
 
   // `positionSize` comes from useUserAccount, which only sees portfolios the
   // wallet OWNS. Wrapping a position as a Position NFT moves the portfolio's
@@ -232,6 +239,7 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
         isLong={isLong}
         loading={loading}
         tradingFeeBps={tradingFeeBps}
+        closeFeeBpsFor={closeFeeBpsFor}
         oracleStale={oracleBlocked}
         oraclePriceBehind={oraclePriceBehind}
         engineCatchingUp={engineStale}

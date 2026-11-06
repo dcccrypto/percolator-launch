@@ -22,6 +22,8 @@ vi.mock("@/hooks/useClosePosition", async () => {
     },
   };
 });
+// #3726: the close modal reads the market's limits for its close-fee estimate. Not under test here; no limits = the base fee.
+vi.mock("@/hooks/useMarketLimits", () => ({ useMarketLimits: () => null }));
 vi.mock("@/hooks/useWalletCompat", () => ({ useWalletCompat: () => ({ connected: false }) }));
 vi.mock("@/hooks/usePortfolio", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/hooks/usePortfolio")>()),

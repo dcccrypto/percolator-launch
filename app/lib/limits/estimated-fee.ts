@@ -40,3 +40,21 @@ export function gateFeeBps(baseFeeBps: bigint, input: TicketLimitsInput | null):
     return baseFeeBps;
   }
 }
+
+/**
+ * #3726: the fee a CLOSE is expected to be charged, in bps, for the close previews (the ticket's Close tab, the dock, /portfolio and
+ * other-market rows). On a fee-channel market the program charges base + the matcher's requested fee on a close too: the matcher attaches
+ * the request on every filled leg, with no reduce exemption. It does NOT charge the growth busy-side fee on a close (growth_v19.rs), so
+ * unlike `estimatedTotalFeeBps` the utilisation part is left out. `input` is the closing order (opposite side, the closed size).
+ * No input, no size, or a read that fails = the base fee (the previous behaviour).
+ */
+export function closeFeeBps(baseFeeBps: bigint, input: TicketLimitsInput | null): bigint {
+  if (!input || input.sizeQ <= 0n) return baseFeeBps;
+  try {
+    const fee = deriveTicketLimits(input).fee;
+    const total = estimatedTotalFeeBps(baseFeeBps, fee ? { charged: fee.charged, requestedBps: fee.requestedBps } : null);
+    return total > baseFeeBps ? total : baseFeeBps;
+  } catch {
+    return baseFeeBps;
+  }
+}

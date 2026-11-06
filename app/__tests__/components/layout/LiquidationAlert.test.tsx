@@ -25,6 +25,8 @@ const h = vi.hoisted(() => ({
 
 vi.mock("next/link", () => ({ default: ({ children, href, className }: any) => <a href={href} className={className}>{children}</a> }));
 vi.mock("next/navigation", () => ({ usePathname: () => h.pathname }));
+// #3726: the close modal reads the market's limits for its close-fee estimate. Not under test here; no limits = the base fee.
+vi.mock("@/hooks/useMarketLimits", () => ({ useMarketLimits: () => null }));
 vi.mock("@/hooks/useWalletCompat", () => ({ useWalletCompat: () => ({ connected: h.connected, publicKey: null }) }));
 vi.mock("@/hooks/usePortfolio", async (io) => ({
   ...(await io<typeof import("@/hooks/usePortfolio")>()),

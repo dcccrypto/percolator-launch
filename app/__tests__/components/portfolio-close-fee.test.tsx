@@ -14,6 +14,8 @@ import { AccountKind } from "@percolatorct/sdk";
 
 vi.mock("next/link", () => ({ default: ({ children, href }: any) => <a href={href}>{children}</a> }));
 vi.mock("next/dynamic", () => ({ default: () => () => <button>ConnectButton</button> }));
+// #3726: the close modal reads the market's limits for its close-fee estimate. Not under test here; no limits = the base fee.
+vi.mock("@/hooks/useMarketLimits", () => ({ useMarketLimits: () => null }));
 vi.mock("@/hooks/useWalletCompat");
 vi.mock("@/hooks/usePortfolio", async (io) => ({ ...(await io<typeof import("@/hooks/usePortfolio")>()), usePortfolio: vi.fn() }));
 vi.mock("@/hooks/useMultiTokenMeta");
