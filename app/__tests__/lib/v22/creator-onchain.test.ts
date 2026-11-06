@@ -12,6 +12,7 @@ import { PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
 import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { LAYOUT_V22 } from "@/lib/v22/sdk/layout";
+import { VAULT_LP_STATE_ACCOUNT_LEN } from "@/lib/limits/constants";
 import {
   MAX_HISTORY_LOOKUPS,
   __clearHistoryCache,
@@ -55,8 +56,9 @@ describe("fixture sanity (the offsets are real)", () => {
 
 describe("findCreatorSlabKeys", () => {
   const portfolioScan = (data: Uint8Array) =>
-    vi.fn(async (_p: PublicKey, cfg?: { dataSlice?: { offset: number; length: number } }) => {
+    vi.fn(async (_p: PublicKey, cfg?: { dataSlice?: { offset: number; length: number }; filters?: Array<{ dataSize?: number }> }) => {
       if (cfg?.dataSlice?.length === 0) return [];
+      if (cfg?.filters?.some((f) => f.dataSize === VAULT_LP_STATE_ACCOUNT_LEN)) return []; // no VaultLpState names this wallet
       return [{ pubkey: PublicKey.unique(), account: acct(slice(data, cfg!.dataSlice!.offset, cfg!.dataSlice!.length)) }];
     });
   const multi = vi.fn(async (ks: PublicKey[], cfg?: { dataSlice?: { offset: number; length: number } }) => ks.map(() => acct(slice(LP.data, cfg!.dataSlice!.offset, cfg!.dataSlice!.length))));
@@ -66,8 +68,8 @@ describe("findCreatorSlabKeys", () => {
     const getProgramAccounts = portfolioScan(LP.data);
     const keys = await findCreatorSlabKeys({ getProgramAccounts, getMultipleAccountsInfo: multi } as never, PROGRAM, WALLET);
     expect(keys.map((k) => k.toBase58())).toEqual([SLAB.toBase58()]);
-    expect(getProgramAccounts).toHaveBeenCalledTimes(2);
-    const [pCall, aCall] = getProgramAccounts.mock.calls as unknown as Array<[PublicKey, { filters: Array<Record<string, unknown>>; dataSlice: unknown }]>;
+    expect(getProgramAccounts).toHaveBeenCalledTimes(4);
+    const [pCall, aCall, adminCall, juniorCall] = getProgramAccounts.mock.calls as unknown as Array<[PublicKey, { filters: Array<Record<string, unknown>>; dataSlice: unknown }]>;
     expect(pCall[1].dataSlice).toEqual({ offset: CONTROL_OFF, length: 8 });
     expect(pCall[1].filters).toContainEqual({ memcmp: { offset: 116, bytes: WALLET.toBase58() } });
     expect(pCall[1].filters.some((f) => "dataSize" in f && f.dataSize === LP.data.length)).toBe(true);
@@ -75,6 +77,17 @@ describe("findCreatorSlabKeys", () => {
     expect(aCall[1].filters).toEqual([
       { memcmp: { offset: 10, bytes: bs58.encode(Uint8Array.of(1)) } },
       { memcmp: { offset: 16, bytes: WALLET.toBase58() } },
+    ]);
+    expect(adminCall[1].dataSlice).toEqual({ offset: 0, length: 0 }); // asset 0 asset_admin, keys only
+    expect(adminCall[1].filters).toEqual([
+      { memcmp: { offset: 10, bytes: bs58.encode(Uint8Array.of(1)) } },
+      { memcmp: { offset: 1766, bytes: WALLET.toBase58() } },
+    ]);
+    expect(juniorCall[1].dataSlice).toEqual({ offset: 16, length: 32 }); // VaultLpState.market_group
+    expect(juniorCall[1].filters).toEqual([
+      { dataSize: 272 }, // 16 + size_of::<VaultLpStateV18>() == 256 (percolator-prog aca02ba6 v16_program.rs:6785)
+      { memcmp: { offset: 10, bytes: bs58.encode(Uint8Array.of(9)) } },
+      { memcmp: { offset: 112, bytes: WALLET.toBase58() } },
     ]);
     expect(multi).toHaveBeenCalledTimes(1);
     expect((multi.mock.calls[0] as unknown[])[1]).toEqual({ dataSlice: { offset: 16, length: 32 } });
