@@ -94,4 +94,19 @@ describe("sizeQToInput", () => {
     expect(sizeQToInput(1_234_567n, "token", 1_000_000n)).toBe("1.234567");
     expect(sizeQToInput(1_234_567n, "usd", 2_000_000n)).toBe("2.46");
   });
+
+  // GO1106 verify (low): "Use 1 lot" in dollar mode filled $65.47 for a $65.4712 lot, which is still under one lot.
+  it("Use 1 lot (USD, rounded up): the filled dollars re-read as at least one lot", () => {
+    const LOT = 1_000_000n; // POS_SCALE_V22: one lot in q
+    const lotPriceE6 = 65_471_200n; // $65.4712 per lot
+    expect(sizeQToInput(LOT, "usd", lotPriceE6)).toBe("65.47"); // the default (max clamp) still floors
+    const up = sizeQToInput(LOT, "usd", lotPriceE6, 0, "up");
+    expect(up).toBe("65.48");
+    const usdAtoms = BigInt(up.replace(".", "")) * 10_000n;
+    expect((usdAtoms * 1_000_000n) / lotPriceE6).toBeGreaterThanOrEqual(LOT);
+    // An exact-cent notional is not bumped a cent.
+    expect(sizeQToInput(LOT, "usd", 65_470_000n, 0, "up")).toBe("65.47");
+    // Token mode is exact either way.
+    expect(sizeQToInput(LOT, "token", lotPriceE6, 0, "up")).toBe("1");
+  });
 });

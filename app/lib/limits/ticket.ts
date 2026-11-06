@@ -399,8 +399,12 @@ export function boundVaultLpCap(L: MarketLimits): { levBps: number } | null {
   return { levBps: L.growth ? L.growth.long.lambdaEffBps ?? L.growth.record.lambdaBps : VAULT_LP_DEFAULT_MAX_LEV_BPS };
 }
 
-/** base-q -> the ticket's size-input string (token units = q / 1e6, or USD at `priceE6`). */
-export function sizeQToInput(q: bigint, unit: "token" | "usd", priceE6: bigint, lotExp = 0): string {
+/**
+ * base-q -> the ticket's size-input string (token units = q / 1e6, or USD at `priceE6`).
+ * `usdRound` (USD only): "down" (default) so a clamped size never exceeds the max; "up" for a MINIMUM fill
+ * ("Use 1 lot"), where cents floored below one lot's notional ($65.47 for a $65.4712 lot) re-read as under one lot.
+ */
+export function sizeQToInput(q: bigint, unit: "token" | "usd", priceE6: bigint, lotExp = 0, usdRound: "down" | "up" = "down"): string {
   if (unit === "token") {
     // v2.2 lot markets: q is in LOTS; the box is in TOKENS (lib/v22/lot.ts). lotExp 0 is the identity.
     if (lotExp > 0) q = q * 10n ** BigInt(lotExp);
@@ -408,11 +412,14 @@ export function sizeQToInput(q: bigint, unit: "token" | "usd", priceE6: bigint, 
     const frac = (q % 1_000_000n).toString().padStart(6, "0").replace(/0+$/, "");
     return frac ? `${whole}.${frac}` : `${whole}`;
   }
-  // USD atoms (6 dp) floored to cents so the clamped size never exceeds the max.
-  const usdAtoms = (q * priceE6) / 1_000_000n;
-  const cents = usdAtoms / 10_000n;
+  // USD atoms (6 dp) floored to cents so the clamped size never exceeds the max (ceiled for a minimum fill).
+  const up = usdRound === "up";
+  const usdAtoms = up ? ceilDiv(q * priceE6, 1_000_000n) : (q * priceE6) / 1_000_000n;
+  const cents = up ? ceilDiv(usdAtoms, 10_000n) : usdAtoms / 10_000n;
   return `${cents / 100n}.${(cents % 100n).toString().padStart(2, "0")}`;
 }
+
+const ceilDiv = (a: bigint, b: bigint): bigint => (a <= 0n ? a / b : (a + b - 1n) / b);
 
 /**
  * P1 99165722 (F-7): the LP's halt / cap applies to a CLOSE that grows the LP too. Closing a
