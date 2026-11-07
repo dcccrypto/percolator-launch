@@ -3,6 +3,8 @@ import { AutoSignIn } from "@/components/wallet/AutoSignIn";
 import { ConnectionBar } from "@/components/layout/ConnectionBar";
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+import Script from "next/script";
+import { RUNTIME_CONFIG_PATH } from "@/lib/price-ws-url";
 import "./globals.css";
 import { Providers } from "./providers";
 import { Header } from "@/components/layout/Header";
@@ -112,6 +114,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             `,
           }}
         />
+        {/* The price-WS URL resolved at request time (lib/price-ws-url.ts): runs before hydration so the price store
+            and charts connect to the CURRENT feed, not the URL inlined at build time. If it fails to load (e.g. the
+            playground gate answers 401 on /locked), the client falls back to NEXT_PUBLIC_WS_URL. */}
+        <Script id="percolator-runtime-config" src={RUNTIME_CONFIG_PATH} strategy="beforeInteractive" />
         {/* Network hints: token logos are fetched cross-origin (next/image
             unoptimized), so resolve/warm the logo CDN's connection early.
             Cheap and safe — a no-op when unused. */}
