@@ -254,7 +254,7 @@ export function DepositWithdrawPanel({
   const [tab, setTab] = useState<Tab>('deposit');
   const [amount, setAmount] = useState('');
   // Strict: "-5" / "1e3" / "5 USDC" are refused with a reason, never read as 5 / 13 / 5 (Council GO1106-UX, LP).
-  const { field: amountField, rejection: amountRejection } = useStrictDecimalInput(amount, setAmount);
+  const { field: amountField, rejection: amountRejection, echo: amountEcho, reset: resetAmountText } = useStrictDecimalInput(amount, setAmount);
   const [submitting, setSubmitting] = useState(false);
   const [txError, setTxError] = useState<string | null>(null);
   const [txSuccess, setTxSuccess] = useState<string | null>(null);
@@ -265,6 +265,8 @@ export function DepositWithdrawPanel({
   const [claimSuccess, setClaimSuccess] = useState<string | null>(null);
   // UX WP-4: the withdrawal is asked for in USDC (a "shares" toggle for those who think in shares).
   const [withdrawUnit, setWithdrawUnit] = useState<'usdc' | 'shares'>('usdc');
+  // A tab or unit switch starts the field fresh: a refused "-5" typed on Deposit must not follow the user to Withdraw (run 2, LP).
+  useEffect(() => resetAmountText(), [tab, withdrawUnit, resetAmountText]);
   // Requested in this page session: the payout prompt opens by itself when the cooldown ends.
   const [armed, setArmed] = useState(false);
   // The payout was refused before signing because the vault can pay only part of it right now.
@@ -690,6 +692,14 @@ export function DepositWithdrawPanel({
             ))}
           </div>
         </div>
+
+        {amountError === null && amountEcho !== null && amount !== '' && (
+          // Any comma: say the amount read, in a form no locale misreads (Council council-leftovers run 2, #5).
+          <p role="status" data-testid="earn-amount-echo" className="mb-3 text-[11px] font-mono tabular-nums text-[var(--text-secondary)]">
+            Reads as {amountEcho.amount} {unitLabel}.
+            {amountEcho.alternative !== null && ` For ${amountEcho.alternative} ${unitLabel}, type ${amountEcho.alternative}.`}
+          </p>
+        )}
 
         {amountError !== null && (
           <p id="earn-amount-input-error" role="alert" data-testid="earn-amount-input-error" className="mb-3 text-[11px] text-[var(--short)]">

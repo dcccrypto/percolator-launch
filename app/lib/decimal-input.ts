@@ -92,22 +92,109 @@ function readDecimal(raw: string): DecimalReading {
   return { value: f, grouped: false, decimalChar: null };
 }
 
+/** What the user meant, said back to them: the amount read (thin-space grouping past 4 digits, never "," or ".") and,
+ *  for the one ambiguous shape, the other reading. */
+export interface StrictAmountEcho {
+  amount: string;
+  /** "1,500" is read as 1500; a decimal-comma typist may have meant 1.5: say so. null when there is no other reading. */
+  alternative: string | null;
+}
+
+export type StrictDecimalReading =
+  | { ok: true; value: string; echo: StrictAmountEcho | null }
+  | { ok: false; reason: string };
+
+const EXPONENT_REASON = "Type the full number (for example 1000, not 1e3).";
+const NEGATIVE_REASON = "Amounts can't be negative.";
+const CHARS_REASON = "Use digits and one decimal point only.";
+const ONE_POINT_REASON = "Use one decimal point (for example 1000.5 or 1,000.50).";
+const GROUPING_REASON = "Check the commas: each thousands comma needs 3 digits after it (1,000,000), or type the number without commas.";
+
+const MINUS = /[-−‒–]/;
+const PLAIN = /^\d*\.?\d*$/;
+const STRICT_COMMA_GROUPED = /^[1-9]\d{0,2}(?:,\d{3})+(?:\.\d*)?$/;
+const STRICT_DECIMAL_COMMA = /^\d*,\d*$/;
+const STRICT_POINT_GROUPED_COMMA_DECIMAL = /^[1-9]\d{0,2}(?:\.\d{3})+,\d*$/;
+/** "1,500": a thousands comma (1500) or a decimal comma (1.5). Read as 1500 (the pre-N27 reading), echoed with both. */
+const AMBIGUOUS_COMMA = /^([1-9]\d{0,2}),(\d{3})$/;
+
+/** The canonical amount for display: thin-space grouping (U+202F) of an integer part longer than 4 digits. */
+function echoAmount(canonical: string): string {
+  const dot = canonical.indexOf(".");
+  const int = dot === -1 ? canonical : canonical.slice(0, dot);
+  const rest = dot === -1 ? "" : canonical.slice(dot);
+  const grouped = int.length > 4 ? int.replace(/\B(?=(\d{3})+(?!\d))/g, "\u202f") : int;
+  return grouped + rest;
+}
+
+/** "1.500" → "1.5", "1.000" → "1": the decimal-comma reading of the ambiguous shape, said as a person would. */
+function trimFraction(intPart: string, frac: string): string {
+  const f = frac.replace(/0+$/, "");
+  return f === "" ? intPart : `${intPart}.${f}`;
+}
+
 /**
- * Why the typed text is not an amount at all, or null when it is one (possibly still being typed).
+ * The STRICT reading of a money field (Earn deposit / withdraw): one grammar, no rewriting.
  *
- * `sanitizeDecimalInput` drops anything that is not a digit or separator, which is right for a stray space
- * or a pasted currency sign on a field that only displays, but wrong as the ONLY rule on a money field: it
- * read "-5" as 5 and "1e3" as 13 and left Deposit enabled on both (Council 2026-11-06-go1106-ux, LP). A
- * field that asks for strict input shows this reason, keeps what was typed, and holds no amount.
- * Leading/trailing spaces are allowed; everything else outside digits, "." and "," is refused.
+ * Council 2026-11-06-go1106-ux (LP) and 2026-11-07 council-leftovers run 2 (Skeptic, Attacker, First-timer, Trader):
+ * `sanitizeDecimalInput` drops what it does not understand, which turned "-5" into 5, "1e3" into 13, "1.2.3" into
+ * 1.23, "1..5" into 1.5, "1,2,3" into 1.23, "1,000.5.5" into 1.00055 and "1,000,00" into 100000, all with Deposit
+ * enabled. Here each text either IS one amount or is refused with a reason (and the field holds no amount):
+ *
+ * - the exponent check comes first ("5e-1" is not a negative number, it is scientific notation);
+ * - then a minus sign anywhere, then any character other than digits, "." and "," (spaces at the ends are fine);
+ * - accepted shapes, and only these:
+ *     plain           "5", "0.5", ".5", "5."                      (one point at most)
+ *     comma-grouped   "1,000", "12,345,678", "1,234.56"           (groups of exactly 3; a point decimal after)
+ *     decimal comma   "1,5", "0,5", "12,75", "1,"                 (exactly one comma, no point)
+ *     point-grouped   "1.000,50", "1.234.567,8"                   (groups of exactly 3, then a decimal comma)
+ * - refused: two or more points without a decimal comma ("1.2.3", "1..5", "1.000.000": "1.000" alone is 1, so
+ *   point-only grouping cannot be told from a typo), a misplaced or unfinished thousands comma ("1,2,3",
+ *   "1,000,00", "1,000,"), a separator after the decimal one ("1,5.", "1,000.5.5").
+ *
+ * The one shape with two readings, "1,500" (1-3 digits, a comma, exactly 3 digits), is read as 1500 and echoed as
+ * "1500" with "1.5" named as the other reading; any comma echoes the amount read (resolves the ambiguity in the open).
+ */
+export function strictDecimalReading(raw: string): StrictDecimalReading {
+  const t = raw.trim();
+  if (t === "") return { ok: true, value: "", echo: null };
+  // Exponent BEFORE minus (run 2, #13): "5e-1", "1e-7", "-1e3" are notation, not negatives.
+  if (/\d/.test(t) && /[eE]/.test(t) && /^[0-9.,eE+\-−‒–]+$/.test(t)) return { ok: false, reason: EXPONENT_REASON };
+  if (MINUS.test(t)) return { ok: false, reason: NEGATIVE_REASON };
+  if (/[^0-9.,]/.test(t)) return { ok: false, reason: CHARS_REASON };
+
+  if (PLAIN.test(t)) return { ok: true, value: t, echo: null };
+
+  const amb = AMBIGUOUS_COMMA.exec(t);
+  if (amb) {
+    const value = amb[1] + amb[2];
+    return { ok: true, value, echo: { amount: echoAmount(value), alternative: trimFraction(amb[1], amb[2]) } };
+  }
+  if (STRICT_COMMA_GROUPED.test(t)) {
+    const value = t.replace(/,/g, "");
+    return { ok: true, value, echo: { amount: echoAmount(value), alternative: null } };
+  }
+  if (STRICT_DECIMAL_COMMA.test(t)) {
+    const value = t.replace(",", ".");
+    return { ok: true, value, echo: { amount: echoAmount(value), alternative: null } };
+  }
+  if (STRICT_POINT_GROUPED_COMMA_DECIMAL.test(t)) {
+    const value = t.replace(/\./g, "").replace(",", ".");
+    return { ok: true, value, echo: { amount: echoAmount(value), alternative: null } };
+  }
+  // Refused. Any point in a text that is not one of the shapes above is a decimal-point problem ("1.2.3", "1..5",
+  // "1,5.", "1,000.5.5"); commas alone are a grouping problem ("1,2,3", "1,000,00", "1,000,").
+  return { ok: false, reason: t.includes(".") ? ONE_POINT_REASON : GROUPING_REASON };
+}
+
+/**
+ * Why the typed text is not an amount at all, or null when it is one (possibly still being typed): the reason from
+ * `strictDecimalReading`. A field that asks for strict input shows this reason, keeps what was typed, and holds no
+ * amount (Council 2026-11-06-go1106-ux, LP; 2026-11-07 council-leftovers run 2).
  */
 export function decimalInputRejection(raw: string): string | null {
-  const t = raw.trim();
-  if (t === "") return null;
-  if (/[-−‒–]/.test(t)) return "Amounts can't be negative.";
-  if (/^[0-9.,]*\d[0-9.,]*[eE][+-]?\d*$/.test(t)) return "Type the full number (for example 1000, not 1e3).";
-  if (/[^0-9.,]/.test(t)) return "Use digits and one decimal point only.";
-  return null;
+  const r = strictDecimalReading(raw);
+  return r.ok ? null : r.reason;
 }
 
 /**

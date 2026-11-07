@@ -94,3 +94,55 @@ describe("Earn deposit amount: malformed input is refused, not rewritten", () =>
     expect(screen.getByRole("button", { name: "Deposit" })).toBeEnabled();
   });
 });
+
+// Council 2026-11-07 council-leftovers run 2, #4/#5/#13: separators were still rewritten (1.2.3 → 1.23, 1,000,00 →
+// 100000) with Deposit enabled, and a comma amount was never echoed. Typed text stays, no amount, Deposit disabled.
+describe("Earn deposit amount: repeated or misplaced separators (run 2)", () => {
+  it.each(["1.2.3", "1..5", "1,2,3", "1,000.5.5", "1,000,00"])("%s is refused as typed and Deposit stays disabled", (raw) => {
+    render(<DepositWithdrawPanel {...props} />);
+    const input = type(raw);
+    expect(input.value).toBe(raw);
+    expect(screen.getByTestId("earn-amount-input-error")).toHaveTextContent(/decimal point|comma/i);
+    expect(screen.getByRole("button", { name: "Deposit" })).toBeDisabled();
+    expect(screen.queryByTestId("earn-deposit-preview")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("earn-amount-echo")).not.toBeInTheDocument();
+  });
+
+  it('"5e-1" gets the full-number reason, not "negative"', () => {
+    render(<DepositWithdrawPanel {...props} />);
+    type("5e-1");
+    expect(screen.getByTestId("earn-amount-input-error")).toHaveTextContent(/full number/i);
+    expect(screen.getByTestId("earn-amount-input-error")).not.toHaveTextContent(/negative/i);
+  });
+
+  it('"1,500" is echoed as 1500 with the 1.5 reading named; "1,5" is echoed as 1.5', () => {
+    render(<DepositWithdrawPanel {...props} />);
+    type("1,500");
+    expect(screen.getByTestId("earn-amount-echo")).toHaveTextContent("Reads as 1500 USDC. For 1.5 USDC, type 1.5.");
+    expect(screen.getByRole("button", { name: "Deposit" })).toBeEnabled();
+    type("1,5");
+    expect(screen.getByTestId("earn-amount-echo")).toHaveTextContent("Reads as 1.5 USDC.");
+    expect(screen.getByTestId("earn-amount-echo")).not.toHaveTextContent("For ");
+    type("25");
+    expect(screen.queryByTestId("earn-amount-echo")).not.toBeInTheDocument();
+  });
+
+  it("typing and pasting the same text read the same amount (1.000.000 was 1 typed, 1,000,000 pasted)", () => {
+    render(<DepositWithdrawPanel {...props} />);
+    for (const step of ["1", "1.", "1.0", "1.00", "1.000", "1.000.", "1.000.0", "1.000.00", "1.000.000"]) type(step);
+    const typed = screen.getByTestId("earn-amount-input-error").textContent;
+    type("");
+    type("1.000.000");
+    expect(screen.getByTestId("earn-amount-input-error").textContent).toBe(typed);
+    expect(screen.getByRole("button", { name: "Deposit" })).toBeDisabled();
+  });
+
+  it("a refused amount does not follow the user to the Withdraw tab", () => {
+    render(<DepositWithdrawPanel {...props} />);
+    type("-5");
+    expect(screen.getByTestId("earn-amount-input-error")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^withdraw$/i }));
+    expect(screen.queryByTestId("earn-amount-input-error")).not.toBeInTheDocument();
+    expect((screen.getByTestId("earn-withdraw-input") as HTMLInputElement).value).toBe("");
+  });
+});
