@@ -69,7 +69,10 @@ describe("GET /api/oracle/resolve: pool by owner", () => {
         ? new Response(JSON.stringify({ pairs: [{ chainId: "solana", dexId: "meteora", pairAddress: QUOTE_POOL, priceUsd: "0.004", liquidity: { usd: 5e7 }, baseToken: { symbol: "PUMP", address: OTHER }, quoteToken: { symbol: "WIF", address: MINT } }] }), { status: 200 })
         : new Response("{}", { status: 404 })));
     owner.classify.mockResolvedValue({ [QUOTE_POOL]: "meteora-dlmm" });
-    const j = await (await GET(req(), { params: Promise.resolve({ ca: MINT }) })).json();
+    const r = await GET(req(), { params: Promise.resolve({ ca: MINT }) });
+    const j = await r.json();
+    // Intended outcome pinned: no base-side pool and no Jupiter price -> 404, not a crash / 500 that would also pass the not.* checks.
+    expect(r.status).toBe(404);
     expect(owner.classify).not.toHaveBeenCalledWith(expect.arrayContaining([QUOTE_POOL]));
     expect(j.dexPoolAddress ?? null).not.toBe(QUOTE_POOL);
     expect(j.price ?? null).not.toBe(0.004);
