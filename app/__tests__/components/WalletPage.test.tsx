@@ -124,5 +124,8 @@ describe("WalletPage", () => {
     expect(screen.queryByRole("button", { name: /Export key/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /Add funds/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /Disconnect/i })).toBeNull();
+    // ...and the copy's "connect it with the button below" has a connect control to point at (#3740 renders <ConnectButton />).
+    // (in this test env neither Privy nor wallet-adapter is mounted: the disabled fallback, accessible name "Wallet unavailable")
+    expect(screen.getByRole("button", { name: /connect|wallet unavailable/i })).toBeTruthy();
   });
 });
