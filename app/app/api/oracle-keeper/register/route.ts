@@ -16,7 +16,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/supabase";
+import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { PublicKey } from "@solana/web3.js";
 import { signKeeperRequest, verifyKeeperSignature } from "@/lib/keeper-hmac";
 
@@ -106,6 +106,7 @@ export async function POST(req: NextRequest) {
           mainnet_ca: mainnetCA,
         })
         .eq("slab_address", slabAddress)
+        .eq("network", getServerNetwork())
         .select("slab_address, mainnet_ca, symbol")
         .single();
 
