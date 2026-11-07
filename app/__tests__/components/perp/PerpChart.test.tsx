@@ -42,6 +42,7 @@ const h = vi.hoisted(() => ({
   barHandlers: null as null | { onBar(b: unknown): void; onReset?(): void },
   subscribeCalls: 0,
   tickHandlers: null as null | { onTick(m: unknown): void },
+  displayHandler: null as null | (() => void),
 }));
 vi.mock("@/lib/tv/data", () => ({
   getChartDataProvider: () => ({
@@ -50,6 +51,7 @@ vi.mock("@/lib/tv/data", () => ({
   }),
   getLiveClient: () => ({ subscribe: (_s: string, handlers: { onTick(m: unknown): void }) => { h.tickHandlers = handlers; return () => { h.tickHandlers = null; }; } }),
   perpChartEnabled: () => true,
+  subscribeDisplayPrice: (_s: string, onUpdate: () => void) => { h.displayHandler = onUpdate; return () => { h.displayHandler = null; }; },
 }));
 const lineState = vi.hoisted(() => ({ v: { liq: 0.0021 as number | null, entry: 0.0034 as number | null, entryIsEstimate: false } }));
 vi.mock("@/hooks/usePositionLinePrices", () => ({ usePositionLinePrices: () => lineState.v }));
@@ -175,7 +177,8 @@ describe("PerpChart", () => {
     // tick…" - a claim about the market, not about the deployment (#3663).
     h.getBars.mockResolvedValue({ bars: [], noMoreHistory: true, source: "perp-mark", unavailable: "not-configured" });
     await mount();
-    expect(await screen.findByText(/Chart history isn't available on this deployment/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Price history isn't recorded on this test build yet/i)).toBeInTheDocument();
+    expect(screen.queryByText(/isn't available on this deployment/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Waiting for the first price tick/i)).not.toBeInTheDocument();
   });
 
@@ -329,5 +332,26 @@ describe("PerpChart", () => {
     await waitFor(() => expect(h.tickHandlers).not.toBeNull());
     act(() => h.tickHandlers!.onTick(tick(1, 1, 1)));
     expect(await screen.findByText(/^Live \d/)).toBeInTheDocument();
+  });
+
+  // Council 2026-11-06-go1106-ux, Trader + First-timer: "the chart box says 'Offline' / 'Chart history isn't available
+  // on this deployment' while the header shows LIVE." The v2.2 price-WS pushes the display price (type "price"), not
+  // the indexer's `tick` channel, so the badge only ever saw silence while the price ticked. A display-price update
+  // is a live price too.
+  it("the header reads Live when the display price is updating, even with no tick channel", async () => {
+    h.getBars.mockResolvedValue({ bars: [], noMoreHistory: true, source: "perp-mark", unavailable: "not-configured" });
+    await mount();
+    expect(await screen.findByText("Offline")).toBeInTheDocument();
+    await waitFor(() => expect(h.displayHandler).not.toBeNull());
+    act(() => h.displayHandler!());
+    expect(await screen.findByText(/^Live \d/)).toBeInTheDocument();
+    expect(screen.queryByText("Offline")).not.toBeInTheDocument();
+  });
+
+  it("the display-price subscription is torn down on unmount", async () => {
+    const { unmount } = await mount();
+    await waitFor(() => expect(h.displayHandler).not.toBeNull());
+    unmount();
+    expect(h.displayHandler).toBeNull();
   });
 });

@@ -26,7 +26,8 @@ import { useChartTheme } from "@/hooks/useChartTheme";
 import { useChartOverlayPrefs } from "@/hooks/useChartOverlayPrefs";
 import { usePositionLinePrices } from "@/hooks/usePositionLinePrices";
 import { usePerpHeaderStats } from "@/hooks/usePerpHeaderStats";
-import { getChartDataProvider, getLiveClient } from "@/lib/tv/data";
+import { getChartDataProvider, getLiveClient, subscribeDisplayPrice } from "@/lib/tv/data";
+import { chartLiveState } from "@/lib/chart/live-state";
 import {
   RESOLUTION_SECONDS,
   type ProviderBar,
@@ -56,8 +57,6 @@ const DEFAULT_RES: ProviderResolution = "15";
 const RES_STORAGE_KEY = "perc:chart:perp-res";
 const INITIAL_BARS = 400;
 const PAGE_BARS = 300;
-const DELAYED_AFTER_MS = 10_000;
-const OFFLINE_AFTER_MS = 60_000;
 
 const toTime = (sec: number) => sec as UTCTimestamp;
 const toCandle = (b: ProviderBar) => ({ time: toTime(b.timeSec), open: b.open, high: b.high, low: b.low, close: b.close });
@@ -124,6 +123,8 @@ function PerpChartInner({ slabAddress }: Props) {
   const [lastPrice, setLastPrice] = useState<number | null>(null); // the shown series' newest value
   const [markPrice, setMarkPrice] = useState<number | null>(null);
   const [lastTickAt, setLastTickAt] = useState<number | null>(null);
+  // The display price (shared price store) is a live price too: lib/chart/live-state.ts.
+  const [lastDisplayAt, setLastDisplayAt] = useState<number | null>(null);
   const [nowTick, setNowTick] = useState(0);
 
   // ── chart instance (once) ────────────────────────────────────────────────
@@ -369,6 +370,12 @@ function PerpChartInner({ slabAddress }: Props) {
     return off;
   }, [slabAddress, series]);
 
+  // Liveness from the display price, independent of the tick channel (the v2.2 price-WS publishes only this one).
+  useEffect(() => {
+    setLastDisplayAt(null);
+    return subscribeDisplayPrice(slabAddress, () => setLastDisplayAt(Date.now()));
+  }, [slabAddress]);
+
   // 1 Hz re-render for the "age" readout only.
   useEffect(() => {
     const id = setInterval(() => setNowTick((n) => n + 1), 1000);
@@ -376,9 +383,8 @@ function PerpChartInner({ slabAddress }: Props) {
   }, []);
 
   const stats = usePerpHeaderStats(slabAddress, lastPrice, series);
-  const ageMs = lastTickAt === null ? null : Date.now() - lastTickAt;
   void nowTick;
-  const liveState: LiveState = ageMs === null ? "offline" : ageMs > OFFLINE_AFTER_MS ? "offline" : ageMs > DELAYED_AFTER_MS ? "delayed" : "live";
+  const { state: liveState, ageMs } = chartLiveState({ tickAt: lastTickAt, displayAt: lastDisplayAt, now: Date.now() });
 
   return (
     <div className="flex h-[clamp(460px,68svh,700px)] w-full flex-col rounded-sm lg:h-full border border-[var(--border)] bg-[var(--panel-bg)]" data-testid="perp-chart">
@@ -420,7 +426,7 @@ function PerpChartInner({ slabAddress }: Props) {
                   </button>
                 </>
               )
-              : unavailable === "not-configured" ? "Chart history isn't available on this deployment."
+              : unavailable === "not-configured" ? "Price history isn't recorded on this test build yet."
               : series === "last" ? "No trades on this market yet."
               : "Waiting for the first price tick…"}
           </div>

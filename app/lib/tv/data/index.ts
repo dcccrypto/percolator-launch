@@ -29,6 +29,17 @@ const priceStoreMarks: MarkStream = {
   },
 };
 
+/**
+ * Calls `onUpdate` whenever the market's DISPLAY price (the shared price store, the same feed as the page header)
+ * moves. The chart uses it as a liveness signal next to its own tick channel (lib/chart/live-state.ts).
+ */
+export function subscribeDisplayPrice(slab: string, onUpdate: () => void): () => void {
+  return subscribeSlab(slab, () => {
+    const p = getSnapshot(slab).priceUsd;
+    if (p != null && Number.isFinite(p) && p > 0) onUpdate();
+  });
+}
+
 /** NEXT_PUBLIC_PERP_CHART=0 is the rollback switch back to the trade-built candles-api provider alone. */
 export function perpChartEnabled(): boolean {
   return process.env.NEXT_PUBLIC_PERP_CHART !== "0" && !!process.env.NEXT_PUBLIC_WS_URL;

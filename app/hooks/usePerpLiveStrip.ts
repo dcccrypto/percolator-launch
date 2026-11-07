@@ -1,22 +1,29 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getLiveClient } from "@/lib/tv/data";
+import { getLiveClient, subscribeDisplayPrice } from "@/lib/tv/data";
 import type { PerpSeries } from "@/lib/chart/perp-types";
 import type { LiveState } from "@/components/trade/perp/PerpChartHeader";
+import { chartLiveState } from "@/lib/chart/live-state";
 
-const DELAYED_AFTER_MS = 10_000;
-const OFFLINE_AFTER_MS = 60_000;
-
-/** Live price of the chosen series from the pushed ticks, plus a live/delayed/offline marker (1 Hz age readout). */
+/**
+ * Live price of the chosen series from the pushed ticks, plus a live/delayed/offline marker (1 Hz age readout).
+ * The marker also counts display-price updates (lib/chart/live-state.ts): the v2.2 price-WS publishes no ticks.
+ */
 export function usePerpLiveStrip(slab: string, series: PerpSeries): { price: number | null; live: LiveState; ageSec: number | null } {
   const [price, setPrice] = useState<number | null>(null);
   const [lastAt, setLastAt] = useState<number | null>(null);
+  const [displayAt, setDisplayAt] = useState<number | null>(null);
   const [, setBeat] = useState(0);
 
   // Live/offline is the market's feed, not the series: only a market switch clears it. A series switch
   // clears the price alone (the Mark price under an "Oracle" label would be wrong; "—" until a tick is not).
   useEffect(() => setLastAt(null), [slab]);
+
+  useEffect(() => {
+    setDisplayAt(null);
+    return subscribeDisplayPrice(slab, () => setDisplayAt(Date.now()));
+  }, [slab]);
 
   useEffect(() => {
     setPrice(null);
@@ -46,7 +53,6 @@ export function usePerpLiveStrip(slab: string, series: PerpSeries): { price: num
     return () => clearInterval(id);
   }, []);
 
-  const age = lastAt === null ? null : Date.now() - lastAt;
-  const live: LiveState = age === null || age > OFFLINE_AFTER_MS ? "offline" : age > DELAYED_AFTER_MS ? "delayed" : "live";
-  return { price, live, ageSec: age === null ? null : age / 1000 };
+  const { state: live, ageMs } = chartLiveState({ tickAt: lastAt, displayAt, now: Date.now() });
+  return { price, live, ageSec: ageMs === null ? null : ageMs / 1000 };
 }

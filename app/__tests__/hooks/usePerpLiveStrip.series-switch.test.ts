@@ -15,6 +15,7 @@ vi.mock("@/lib/tv/data", () => ({
       return () => {};
     },
   }),
+  subscribeDisplayPrice: () => () => {},
 }));
 
 import { usePerpLiveStrip } from "@/hooks/usePerpLiveStrip";

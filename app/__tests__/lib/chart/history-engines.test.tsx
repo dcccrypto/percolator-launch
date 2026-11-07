@@ -166,6 +166,7 @@ vi.mock("@/lib/tv/data", () => ({
   getChartDataProvider: () => dp.provider,
   getLiveClient: () => ({ subscribe: () => () => {} }),
   perpChartEnabled: () => true,
+  subscribeDisplayPrice: () => () => {},
 }));
 vi.mock("@/hooks/usePositionLinePrices", () => ({ usePositionLinePrices: () => ({ liq: null, entry: null, entryIsEstimate: false }) }));
 vi.mock("@/hooks/usePerpHeaderStats", () => ({ usePerpHeaderStats: () => ({ change: null, volume24hUsd: null, oiUsd: null, funding: undefined }) }));
