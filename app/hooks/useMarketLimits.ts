@@ -387,7 +387,7 @@ export function useMarketLimits(
         const known = boundVaultLpKey ? new PublicKey(boundVaultLpKey) : null;
         // E2E B17: LP discovery (a program scan when the LP is not known) can fail on a public
         // RPC; that must not hide the P3 vault state / registry reads the tranche card needs.
-        const lpAccts = await resolveLpAccounts(connection, programPk, slabPk, known).catch(() => null);
+        const lpAccts = await resolveLpAccounts(connection, programPk, slabPk, known, assetIndex).catch(() => null);
         const keys: PublicKey[] = [];
         if (lpAccts) keys.push(lpAccts.lpPortfolio);
         if (lpAccts?.matcherCtx) keys.push(lpAccts.matcherCtx);
@@ -426,6 +426,7 @@ export function useMarketLimits(
         // The ctx is owned by the LP's matcher program; unknown / failed detection = not live.
         const matcherSyncLive = ctxInfo ? await matcherLpSyncLive(connection, programPk, ctxInfo.owner).catch(() => false) : false;
         if (!alive) return;
+        const explicitNoMatcher = lpAccts?.matcherCtx === null;
         const vaultState = vaultInfo ? decodeVaultLpState(new Uint8Array(vaultInfo.data)) : null;
         const registryShares = registryInfo ? decodeLpVaultRegistryShares(new Uint8Array(registryInfo.data)) : null;
         const guardAccount = guardPda ? decodeMarketLevGuard(guardInfo, programPk, slabPk, assetIndex) : null;
@@ -434,8 +435,14 @@ export function useMarketLimits(
           // never blank a good value on a failed/empty read
           lp: lp ?? (prev?.slab === slabAddress ? prev.lp : null),
           lpBytes: lpBytes ?? (prev?.slab === slabAddress ? prev.lpBytes : null),
-          matcher: matcher ?? (prev?.slab === slabAddress ? prev.matcher : null),
-          matcherSyncLive: ctxInfo ? matcherSyncLive : prev?.slab === slabAddress ? prev.matcherSyncLive : false,
+          matcher: explicitNoMatcher
+            ? null
+            : matcher ?? (prev?.slab === slabAddress ? prev.matcher : null),
+          matcherSyncLive: explicitNoMatcher
+            ? false
+            : ctxInfo
+              ? matcherSyncLive
+              : prev?.slab === slabAddress ? prev.matcherSyncLive : false,
           vaultState: vaultState ?? (prev?.slab === slabAddress ? prev.vaultState : null),
           registryShares: registryShares ?? (prev?.slab === slabAddress ? prev.registryShares : null),
           // A guard is never closed: a read that misses it keeps the last one seen for this market.
