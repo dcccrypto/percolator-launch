@@ -92,6 +92,37 @@ function readDecimal(raw: string): DecimalReading {
   return { value: f, grouped: false, decimalChar: null };
 }
 
+/**
+ * Why the typed text is not an amount at all, or null when it is one (possibly still being typed).
+ *
+ * `sanitizeDecimalInput` drops anything that is not a digit or separator, which is right for a stray space
+ * or a pasted currency sign on a field that only displays, but wrong as the ONLY rule on a money field: it
+ * read "-5" as 5 and "1e3" as 13 and left Deposit enabled on both (Council 2026-11-06-go1106-ux, LP). A
+ * field that asks for strict input shows this reason, keeps what was typed, and holds no amount.
+ * Leading/trailing spaces are allowed; everything else outside digits, "." and "," is refused.
+ */
+export function decimalInputRejection(raw: string): string | null {
+  const t = raw.trim();
+  if (t === "") return null;
+  if (/[-−‒–]/.test(t)) return "Amounts can't be negative.";
+  if (/^[0-9.,]*\d[0-9.,]*[eE][+-]?\d*$/.test(t)) return "Type the full number (for example 1000, not 1e3).";
+  if (/[^0-9.,]/.test(t)) return "Use digits and one decimal point only.";
+  return null;
+}
+
+/**
+ * An amount with more decimal places than the unit holds: it used to be cut off silently (so "0.0000001" became
+ * 0 and Deposit greyed out with no reason). Takes the canonical value from `sanitizeDecimalInput`.
+ */
+export function amountPrecisionProblem(canonical: string, decimals: number, unit: string): string | null {
+  const dot = canonical.indexOf(".");
+  if (dot === -1) return null;
+  const frac = canonical.slice(dot + 1);
+  if (frac.length <= decimals) return null;
+  if (decimals <= 0) return `${unit} are whole numbers only.`;
+  return `${unit} has ${decimals} decimal places: the smallest amount is 0.${"0".repeat(decimals - 1)}1 ${unit}.`;
+}
+
 /** The canonical value of an amount field's text: digits and at most one decimal point. */
 export function sanitizeDecimalInput(value: string): string {
   return readDecimal(value).value;
