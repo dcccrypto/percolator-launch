@@ -452,9 +452,9 @@ export const CreatorMarketRow: FC<CreatorMarketRowProps> = ({ market, detail, id
     try {
       await actions.renounceAdmin(market);
       setBurnedHere(true);
-      // The market stays in Your Markets: useCreatedMarkets lists every market whose LP
-      // portfolio this wallet owns (owner @116), and burning asset_admin doesn't change that.
-      toast("Admin key burned. The market stays in Your Markets because your wallet still owns its liquidity position.", "success");
+      // No claim about Your Markets: useCreatedMarkets also lists a market by asset_admin, which this zeroes. A creator-LP
+      // or P3 (junior_owner) market stays listed; one listed by asset_admin alone leaves on the next scan.
+      toast("Admin key burned.", "success");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Burn admin key failed", "error");
     }

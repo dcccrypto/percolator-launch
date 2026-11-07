@@ -38,8 +38,7 @@ describe("CreatorMarketRow admin-action gates", () => {
     expect(SRC).toMatch(/This market is autonomous/);
   });
 
-  // After a burn asset_admin is the zero key, but the market stays in Your Markets (useCreatedMarkets
-  // lists markets whose LP portfolio the wallet owns). The toast said it would disappear, and the
+  // After a burn asset_admin is the zero key. The toast once said the market would disappear, and the
   // drawer asked the creator to "connect the creator wallet" and offered a burn they can't do.
   describe("after the admin key is burned", () => {
     it("detects the burn from the zero key the burn writes", () => {
@@ -47,9 +46,13 @@ describe("CreatorMarketRow admin-action gates", () => {
       expect(ZERO_B58).toBe("11111111111111111111111111111111");
     });
 
-    it("the toast no longer says the market leaves Your Markets", () => {
+    // Whether the market stays in Your Markets depends on which marker lists it: the creator's LP portfolio
+    // or the vault's junior_owner keep it, asset_admin alone (zeroed by the burn) does not. The row doesn't
+    // know which one matched, so the toast makes no claim either way.
+    it("the toast makes no claim about Your Markets", () => {
+      expect(SRC).toContain('toast("Admin key burned.", "success");');
       expect(SRC).not.toMatch(/no longer appear in Your Markets/);
-      expect(SRC).toContain("The market stays in Your Markets because your wallet still owns its liquidity position.");
+      expect(SRC).not.toMatch(/stays in Your Markets|liquidity position/);
     });
 
     it("the burn button says it is burned instead of asking to connect the creator wallet", () => {
