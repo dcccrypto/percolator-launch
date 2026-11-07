@@ -39,7 +39,7 @@ describe("P3 builders: account order + signer/writable exactly as the handlers r
     const i = ix.buildInitVaultLpIx(m, auth, 2_000, { matcherProgram: mp, matcherCtx: ctxk });
     const del = ix.deriveVaultLpMatcherDelegate(PROG, MARKET, m.lpPortfolio, m.registry, mp, ctxk);
     expect(keys(i)).toEqual([auth, MARKET, m.registry, m.vaultLpState, m.lpPortfolio, SystemProgram.programId, m.ledger, m.siblingLedger, mp, ctxk, del].map((x) => x.toBase58()));
-    expect(flags(i)).toBe("sw -w -w -w -w -- -w -w -- -w --");
+    expect(flags(i)).toBe("sw -w -w -w sw -- -w -w -- -w --"); // prog #684: LP portfolio [4] signs
   });
   it("96 DepositJuniorTranche (handle_deposit_junior_tranche :26282)", () => {
     const o = k(), src = k(), vt = k();

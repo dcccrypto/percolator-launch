@@ -291,6 +291,9 @@ describe("P3 wizard", () => {
     const i94 = ixs[2];
     expect(i94.keys).toHaveLength(11);
     expect(i94.keys[0]).toEqual({ pubkey: creator, isSigner: true, isWritable: true });
+    // prog #684: the LP portfolio [4] is a writable signer (the same fresh keypair that signs its createAccount in ixs[0])
+    expect(i94.keys[4]).toEqual({ pubkey: lp, isSigner: true, isWritable: true });
+    expect(ixs[0].keys.find((x) => x.pubkey.equals(lp))?.isSigner).toBe(true);
     expect(i94.keys[8]).toEqual({ pubkey: matcher, isSigner: false, isWritable: false });
     expect(i94.keys[9]).toEqual({ pubkey: ctx, isSigner: false, isWritable: true });
     const enc = new TextEncoder();
