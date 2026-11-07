@@ -43,6 +43,7 @@ import { V21_COPY } from "@/lib/v21/copy";
 import { defaultGrowthLaunch, growthTierX100, validateGrowthLaunch, type GrowthLaunch } from "@/lib/v21/growth-launch";
 import { EMPTY_TIER_EDIT, collateralDecimalsIssue, isUsdLikeCollateral, validateTierEdit } from "@/lib/v22/tier-config";
 import { V22LaunchOptions, type V22OptionsState } from "./V22LaunchOptions";
+import { priceFloorMessage } from "@/lib/creator-copy";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { lotMarketsEnabled } from "@/lib/v22/lot";
 import { launchInitialPriceE6, lotLaunchPrice, planLaunchV22, toLaunchParams } from "@/lib/v22/launch-plan";
@@ -844,7 +845,13 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
                   : priceAboveMaximum
                     ? `${wizard.tokenMeta?.symbol ?? "This token"} trades at ${formatMarkPrice(priceAboveMaximum.price)}, above the $1,000,000 maximum a market can price`
                     : priceBelowTrackable
-                      ? `${wizard.tokenMeta?.symbol ?? "This token"} trades at ${formatMarkPrice(priceBelowTrackable.price)}, below the ${formatMarkPrice(priceBelowTrackable.minPrice)} a ${maxLeverage}x market needs to track its price${priceBelowTrackable.price >= lowestLeverageMinPrice ? " — try lower leverage" : ""}`
+                      ? priceFloorMessage({
+                          symbol: wizard.tokenMeta?.symbol ?? "This token",
+                          price: formatMarkPrice(priceBelowTrackable.price),
+                          minPrice: formatMarkPrice(priceBelowTrackable.minPrice),
+                          maxLeverage,
+                          priceAboveLowestLeverageMin: priceBelowTrackable.price >= lowestLeverageMinPrice,
+                        })
                       : "Waiting on price feed")
               : !mockBypass && !hasSufficientSol
                 ? `Need ~${requiredSol.toFixed(3)} SOL`
@@ -1631,6 +1638,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
             startPrice={startPrice}
             slabBytes={wizardSlabBytes(p3WizardEnabled())}
             rentSol={solCostBreakdown.slabRentSol}
+            totalSol={requiredSol}
             initialMarginBps={wizard.initialMarginBps}
             tradingFeeBps={wizard.tradingFeeBps}
             lpCollateral={wizard.lpCollateral}
