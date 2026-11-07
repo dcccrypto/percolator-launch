@@ -508,6 +508,7 @@ export async function POST(req: NextRequest) {
     // Build, send, confirm on-chain first. If anything fails before confirmation,
     // release the faucet gate so the user is not locked out for 24h with no tokens.
     let sig: string;
+    let pendingUsdcSig: string | null = null; // set when the mint was sent and its outcome is unknown
     try {
       const ata = await getAssociatedTokenAddress(usdcMint, walletPk);
       const tx = new Transaction();
@@ -544,36 +545,43 @@ export async function POST(req: NextRequest) {
       sig = await connection.sendRawTransaction(
         (signedTx as Transaction).serialize(),
       );
-      try {
-        const confirmation =
-          await connection.confirmTransaction(
-            { signature: sig, blockhash, lastValidBlockHeight },
-            "confirmed",
-          );
-
-        assertSuccessfulConfirmation(
-          confirmation,
-          "USDC faucet mint",
-        );
-      } catch (confirmErr) {
-        // The devnet RPC can be slow to reflect confirmation, so
-        // confirmTransaction may throw "block height exceeded" even though the
-        // mint actually landed — a false negative that would show the user an
-        // error and burn their 24h rate-limit claim despite receiving tokens.
-        // Re-check the signature status directly before declaring failure.
-        const status = await connection.getSignatureStatus(sig, {
-          searchTransactionHistory: true,
+      // The devnet RPC can be slow to reflect confirmation, so confirmTransaction
+      // may throw "block height exceeded" even though the mint landed. Re-check the
+      // status (same rule as auto-fund, e665b92b): landed -> success; landed with an
+      // error, or not found once the blockhash expired -> nothing minted (release);
+      // anything else -> the outcome is unknown and the claim is kept, so a retry
+      // cannot mint a second 1,000 USDC.
+      const confirmation = await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed")
+        .catch(async (confirmErr: unknown) => {
+          let s: Awaited<ReturnType<Connection["getSignatureStatus"]>>["value"] | undefined;
+          try {
+            s = (await connection.getSignatureStatus(sig, { searchTransactionHistory: true })).value;
+          } catch {
+            s = undefined; // the re-check itself failed: unknown
+          }
+          if (s && !s.err && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized")) return null;
+          const expired = confirmErr instanceof Error && confirmErr.name === "TransactionExpiredBlockheightExceededError";
+          if (!(s?.err || (s === null && expired))) pendingUsdcSig = sig;
+          throw confirmErr;
         });
-        const s = status.value;
-        const landed =
-          !!s &&
-          !s.err &&
-          (s.confirmationStatus === "confirmed" ||
-            s.confirmationStatus === "finalized");
-        if (!landed) throw confirmErr;
-        // else: the mint confirmed on re-check — fall through to success.
-      }
+      // A definitive result with an on-chain error: nothing was minted.
+      if (confirmation) assertSuccessfulConfirmation(confirmation, "USDC faucet mint");
     } catch (chainErr) {
+      if (pendingUsdcSig !== null) {
+        // Sent and may have landed: the claim counts as spent, never re-sent (as the SOL path's L-1).
+        releaseGateClaimOnExit = null;
+        _faucetRecord(rateKey);
+        console.error("[faucet] USDC mint outcome unknown:", chainErr instanceof Error ? chainErr.message || String(chainErr) : String(chainErr));
+        return NextResponse.json(
+          {
+            error: "Your test USDC is on its way but not confirmed yet. Check your balance in a minute before trying again.",
+            pending: true,
+            retryable: false,
+            signature: pendingUsdcSig,
+          },
+          { status: 503 },
+        );
+      }
       if (supabase && gate.claimId) { try { const { releaseFaucetClaim } = await import("@/lib/faucet-rate-gate"); await releaseFaucetClaim(supabase, gate.claimId); } catch { /* best-effort */ } }
       throw chainErr;
     }

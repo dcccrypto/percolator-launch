@@ -10,6 +10,7 @@ import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({
   confirmTransaction: vi.fn(),
+  getSignatureStatus: vi.fn(),
   getAccountInfo: vi.fn(),
   getLatestBlockhash: vi.fn(),
   sendRawTransaction: vi.fn(),
@@ -71,6 +72,9 @@ vi.mock("@solana/web3.js", () => {
 
     getLatestBlockhash =
       mocks.getLatestBlockhash;
+
+    getSignatureStatus =
+      mocks.getSignatureStatus;
 
     sendRawTransaction =
       mocks.sendRawTransaction;
@@ -356,3 +360,51 @@ describe(
     );
   },
 );
+
+// The mint is sent and confirmTransaction throws. The claim is given back only when nothing was minted (the
+// re-checked status has an error, or the tx is not found once its blockhash expired). Any other outcome is
+// unknown: keep the claim and answer "on its way", or a retry mints a second 1,000 USDC.
+describe("POST /api/faucet USDC: a confirm that throws keeps the claim unless nothing was minted", () => {
+  const blockheightExpired = () => Object.assign(new Error("block height exceeded"), { name: "TransactionExpiredBlockheightExceededError" });
+  const confirmThrows = (err: Error) => mocks.confirmTransaction.mockRejectedValueOnce(err);
+  const status = (value: unknown) => mocks.getSignatureStatus.mockResolvedValueOnce({ context: { slot: 202 }, value });
+
+  it("landed on re-check (confirmed, no error): success, the claim is spent", async () => {
+    confirmThrows(blockheightExpired());
+    status({ err: null, confirmationStatus: "confirmed" });
+    const res = await POST(createRequest());
+    expect(res.status).toBe(200);
+    expect((await res.json()).usdc_minted).toBe(true);
+    expect(mocks.releaseFaucetClaim).not.toHaveBeenCalled();
+  });
+
+  it("landed with an error: nothing minted, the claim is released", async () => {
+    confirmThrows(new Error("confirm failed"));
+    status({ err: { InstructionError: [0, { Custom: 1 }] }, confirmationStatus: "confirmed" });
+    const res = await POST(createRequest());
+    expect(res.status).toBe(500);
+    expect(mocks.releaseFaucetClaim).toHaveBeenCalledWith(expect.anything(), 88);
+  });
+
+  it("not found after the blockhash expired: it can never land, the claim is released", async () => {
+    confirmThrows(blockheightExpired());
+    status(null);
+    const res = await POST(createRequest());
+    expect(res.status).toBe(500);
+    expect(mocks.releaseFaucetClaim).toHaveBeenCalledWith(expect.anything(), 88);
+  });
+
+  it.each([
+    ["seen but only processed", () => { confirmThrows(new Error("timeout")); status({ err: null, confirmationStatus: "processed" }); }],
+    ["not found, blockhash not expired (e.g. a 429 on confirm)", () => { confirmThrows(new Error("429 Too Many Requests")); status(null); }],
+    ["the status re-check itself fails", () => { confirmThrows(new Error("timeout")); mocks.getSignatureStatus.mockRejectedValueOnce(new Error("fetch failed")); }],
+  ])("%s: outcome unknown, the claim is kept and the reply says it is on its way", async (_name, arrange) => {
+    arrange();
+    const res = await POST(createRequest());
+    const body = await res.json();
+    expect(res.status).toBe(503);
+    expect(body).toMatchObject({ pending: true, retryable: false, signature: "failed-on-chain-usdc-signature" });
+    expect(body.error).toMatch(/on its way but not confirmed yet/);
+    expect(mocks.releaseFaucetClaim).not.toHaveBeenCalled();
+  });
+});
