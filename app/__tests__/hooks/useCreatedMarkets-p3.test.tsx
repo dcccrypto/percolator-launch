@@ -17,10 +17,11 @@ import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { readAssetAdmin } from "@/lib/v18-wire";
 import { getMarketsByAddress } from "@/lib/v22/discovery";
 import { useCreatedMarkets } from "@/hooks/useCreatedMarkets";
+import { liftV22Portfolio } from "../helpers/portfolio-disc20";
 
 const fx = (n: string): { owner: string; data: Uint8Array } => {
   const j = JSON.parse(readFileSync(path.join(__dirname, `../fixtures/v22-growth/${n}.json`), "utf8")) as { owner: string; data: string };
-  return { owner: j.owner, data: new Uint8Array(Buffer.from(j.data, "base64")) };
+  return { owner: j.owner, data: liftV22Portfolio(new Uint8Array(Buffer.from(j.data, "base64"))) }; // recorded pre-#299 portfolios lifted to disc 20
 };
 const LP = fx("chillhouse-t.lp");
 const MKT = fx("chillhouse-t.market");

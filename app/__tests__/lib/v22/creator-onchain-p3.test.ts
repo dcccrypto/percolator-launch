@@ -14,10 +14,11 @@ import { __setDevnetV22ForTest } from "@/lib/v22/flag";
 import { readAssetAdmin } from "@/lib/v18-wire";
 import { findCreatorSlabKeys } from "@/lib/v22/creator-onchain";
 import { KIND_VAULT_LP_STATE, VAULT_LP_STATE_ACCOUNT_LEN, VS } from "@/lib/limits/constants";
+import { liftV22Portfolio } from "../../helpers/portfolio-disc20";
 
 const fx = (n: string): { owner: string; data: Uint8Array } => {
   const j = JSON.parse(readFileSync(path.join(__dirname, `../../fixtures/v22-growth/${n}.json`), "utf8")) as { owner: string; data: string };
-  return { owner: j.owner, data: new Uint8Array(Buffer.from(j.data, "base64")) };
+  return { owner: j.owner, data: liftV22Portfolio(new Uint8Array(Buffer.from(j.data, "base64"))) }; // recorded pre-#299 portfolios lifted to disc 20
 };
 const LP = fx("chillhouse-t.lp");
 const MKT = fx("chillhouse-t.market");
