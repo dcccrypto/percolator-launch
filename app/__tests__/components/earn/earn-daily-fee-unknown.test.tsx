@@ -34,6 +34,11 @@ describe("volume is known only when an indexer actually reported it", () => {
   it("a Supabase registry-only market (no market_stats row: volume / trades null) is unknown", async () => {
     expect((await infoFor({ volume_24h: null, trade_count_24h: null, last_price: 1 })).volumeKnown).toBe(false);
   });
+  it("trades / raw volume reported but no USD value (no usable price) is unknown, not a $0 understatement", async () => {
+    const i = await infoFor({ volume_24h: "5000000", trade_count_24h: 3, last_price: null, volume_24h_usd: null });
+    expect(i.volume24h).toBe(0);
+    expect(i.volumeKnown).toBe(false);
+  });
   it("real activity always counts as known, even on a row flagged stats_collected false", async () => {
     const i = await infoFor({ stats_collected: false, volume_24h_usd: 120, last_price: 1, trade_count_24h: 3 });
     expect(i.volumeKnown).toBe(true);

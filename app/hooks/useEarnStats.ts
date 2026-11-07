@@ -581,17 +581,19 @@ async function fetchOnChainMaxLeverage(
 }
 
 /**
- * Whether a /api/markets row's 24h volume was actually reported by an indexer (see MarketVaultInfo.volumeKnown).
- * - real activity (volume > 0 or trades > 0) is always known;
+ * Whether a /api/markets row's 24h volume (in USD, `volume24h`) is a real figure (see MarketVaultInfo.volumeKnown).
+ * - a positive USD volume is known;
+ * - trades or raw volume reported but no USD value (no usable price, a sentinel) is unknown: the 0 would understate it;
  * - stats_collected === false (no-indexer discovery / static rows) is unknown;
  * - otherwise (Supabase markets_with_stats) a reported number, including 0, is known; null volume AND null trades
  *   (registry-only market, no market_stats row) is unknown.
  */
 export function rowVolumeKnown(row: Record<string, unknown> | undefined, volume24h: number): boolean {
   if (row == null) return false;
-  if (volume24h > 0 || Number(row.trade_count_24h ?? 0) > 0) return true;
+  if (volume24h > 0) return true;
+  if (Number(row.trade_count_24h ?? 0) > 0 || Number(row.volume_24h ?? 0) > 0) return false;
   if (row.stats_collected === false) return false;
-  return row.volume_24h != null || row.volume_24h_usd != null || row.trade_count_24h != null;
+  return row.volume_24h != null || row.trade_count_24h != null;
 }
 
 /**

@@ -15,11 +15,11 @@ const K22 = new PublicKey(new Uint8Array(32).fill(9));
 const m22 = syntheticMarket(LAYOUT_V22, 1);
 m22.set(deriveStakePool(K22, new PublicKey("GCHhcgwPyrai8SWHEVWw3odedguFXEtJobNnWSfWBCU3"))[0].toBytes(), 16);
 const info = (d: Uint8Array) => ({ data: Buffer.from(d), executable: false, lamports: 1, owner: PROG });
-const io = vi.hoisted(() => ({ discoveryFails: false }));
+const io = vi.hoisted(() => ({ discoveryFails: false, network: "devnet" as "devnet" | "mainnet" }));
 
 vi.mock("@sentry/nextjs", () => ({ captureException: vi.fn(), captureMessage: vi.fn() }));
 vi.mock("@/lib/config", () => ({
-  getConfig: () => ({ network: "devnet", programId: "GnwdeQrAh4qzChJeVLrM21CXXWC1akjLH3DiijwzEEYZ", vaultProgramId: "GCHhcgwPyrai8SWHEVWw3odedguFXEtJobNnWSfWBCU3", rpcUrl: "https://api.devnet.solana.com" }),
+  getConfig: () => ({ network: io.network, programId: "GnwdeQrAh4qzChJeVLrM21CXXWC1akjLH3DiijwzEEYZ", vaultProgramId: "GCHhcgwPyrai8SWHEVWw3odedguFXEtJobNnWSfWBCU3", rpcUrl: "https://api.devnet.solana.com" }),
 }));
 vi.mock("@/lib/supabase", () => ({ getServerNetwork: () => "devnet", getServiceClient: () => { throw new Error("no supabase"); } }));
 vi.mock("@/lib/server-rpc", () => ({
@@ -42,6 +42,7 @@ vi.mock("@/lib/playground-registered-markets", () => ({ readRegisteredMarkets: a
 beforeEach(() => {
   vi.resetModules();
   io.discoveryFails = false;
+  io.network = "devnet";
   process.env.NEXT_PUBLIC_DEVNET_V22 = "1";
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -76,5 +77,18 @@ describe("no-indexer /api/markets rows are marked stats_collected: false", () =>
     expect(source).not.toBe("on-chain-discovery");
     expect(markets.length).toBeGreaterThan(0);
     for (const m of markets) expect(m.stats_collected).toBe(false);
+  });
+  it("the MAINNET static fallback row carries the marker too", async () => {
+    io.discoveryFails = true;
+    io.network = "mainnet";
+    const { markets } = await rows();
+    expect(markets.length).toBeGreaterThan(0);
+    for (const m of markets) expect(m.stats_collected).toBe(false);
+  });
+  it("the legacy (non-v17 config) discovery row carries the marker", async () => {
+    const { discoveredToApiRow } = await import("@/lib/discovered-market-rows");
+    const row = discoveredToApiRow({ slabAddress: K22, programId: PROG, config: { collateralMint: K22 }, params: { initialMarginBps: 1000n } } as never);
+    expect(row.max_leverage).toBeDefined(); // the legacy branch, not the v17 one
+    expect(row.stats_collected).toBe(false);
   });
 });

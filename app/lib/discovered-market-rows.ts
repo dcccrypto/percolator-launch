@@ -112,7 +112,8 @@ function computeMaxLeverage(initialMarginBps: bigint | null | undefined): number
  *   lives in the embedded V16ConfigAccount region, which the raw-bytes parse
  *   in discoverMarketsOnChain() supplies here.
  */
-function discoveredToApiRow(
+/** @internal exported for tests (both row branches carry the no-indexer marker). */
+export function discoveredToApiRow(
   m: DiscoveredMarket,
   v17Oi?: V17MarketGroupOI,
   registered?: RegisteredMarket,
