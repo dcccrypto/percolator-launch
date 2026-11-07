@@ -543,7 +543,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
   // CONFIGS), collateral remains the user-entered mint, unchanged.
   const simUsdcMint = (getConfig() as Record<string, unknown>).testUsdcMint as string | undefined;
   const collateralMintAddress = isDevnet && simUsdcMint ? simUsdcMint : wizard.mintAddress;
-  const collateralSymbol = isDevnet ? "Sim-USDC" : symbol;
+  const collateralSymbol = isDevnet ? "USDC" : symbol;
   // GH#1301 (superseded): tokens used to be auto-airdropped only for Percolator-managed
   // mirror mints. Now that devnet collateral is ALWAYS Sim-USDC and is ALWAYS auto-funded
   // via /api/devnet-pre-fund (called from useCreateMarket.ts's create() before every

@@ -42,6 +42,6 @@ export const CREATOR_STAKE_COPY = {
   floorHint: "You can withdraw anything above this while no trades are open.",
   limits: "Market limits at launch: up to $5,000 per trade, $25,000 total exposure.",
   limitsTooltip: "Set by the protocol.",
-  issueMin: (min: string, floor: string) => `Your creator stake must be at least ${min} Sim-USDC for a ${floor}% minimum.`,
+  issueMin: (min: string, floor: string) => `Your creator stake must be at least ${min} USDC for a ${floor}% minimum.`,
   issueEmpty: "Enter a creator stake.",
 } as const;

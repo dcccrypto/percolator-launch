@@ -101,7 +101,7 @@ describe("WalletPage", () => {
     const link = screen.getByRole("link", { name: /Open faucet/i });
     expect(link.getAttribute("href")).toBe("/faucet");
     expect(link.querySelector("button")).toBeNull();
-    expect(screen.getByText("On devnet, use the faucet to get Sim-USDC and a little test SOL.")).toBeTruthy();
+    expect(screen.getByText("On devnet, use the faucet to get test USDC and a little test SOL.")).toBeTruthy();
   });
 
   it("shows connect prompt when unauthenticated", () => {

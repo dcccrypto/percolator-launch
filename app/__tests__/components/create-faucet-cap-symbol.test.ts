@@ -14,7 +14,7 @@ describe("create wizard faucet-cap reason", () => {
     expect(src).not.toContain(".toLocaleString()} ${symbol} — reduce LP collateral");
   });
 
-  it("collateralSymbol is Sim-USDC on devnet", () => {
-    expect(src).toContain('const collateralSymbol = isDevnet ? "Sim-USDC" : symbol;');
+  it("collateralSymbol is USDC on devnet (one name for the collateral, Council GO1106-UX)", () => {
+    expect(src).toContain('const collateralSymbol = isDevnet ? "USDC" : symbol;');
   });
 });

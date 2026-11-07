@@ -61,7 +61,7 @@ export interface StakeCopyShape {
 export const STAKE_COPY_V22: StakeCopyShape = {
   ...STAKE_COPY,
   sidebar:
-    "What you earn depends on the pool: fee-only stakers earn nothing while the market runs and share what is left above the creator's seed when it closes; insurance-pool stakers share the insurance part of trading fees. Your stake can lose value.",
+    "What you earn depends on the pool: fee-only stakers earn nothing while the market runs and share what is left above the creator's starting deposit when it closes; insurance-pool stakers share the insurance part of trading fees. Your stake can lose value.",
   backStep: "Your deposit backs the market's insurance, which steps in only after the creator's stake and Earn deposits are used up",
   risk: {
     lead: "Staked funds can be lost if a market's losses use up the creator's stake, bonds and Earn deposits.",

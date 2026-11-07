@@ -483,7 +483,7 @@ describe("LaunchSuccess", () => {
       render(<LaunchSuccess {...defaultProps} devnetMint={mint} />);
       fireEvent.click(screen.getByText("GET SIM-USDC & TRADE →"));
 
-      await screen.findByText(/Sim-USDC claim failed \(HTTP 429\)/);
+      await screen.findByText(/USDC claim failed \(HTTP 429\)/);
       expect(mockPush).not.toHaveBeenCalled();
     });
 

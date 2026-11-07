@@ -19,7 +19,7 @@ const earn: LpPosition = { ...base, poolAddress: "E", slabAddress: "E", name: "J
 describe("LpPositionsPanel: a stake with an unknown value", () => {
   it("shows a dash for the row, the Stake section total and the panel total", () => {
     render(<LpPositionsPanel positions={[earn, known, unknown]} totalRedeemable={null} loading={false} error={null} />);
-    const stake = screen.getByText("Fee staking").closest("section") as HTMLElement;
+    const stake = screen.getByText("Staking").closest("section") as HTMLElement;
     const sol = within(stake).getByText("SOL").closest("a") as HTMLElement;
     expect(within(sol).getByText("redeemable").previousElementSibling?.textContent).toBe("—");
     expect(within(stake).getByText("total redeemable").previousElementSibling?.textContent).toBe("—");
@@ -33,7 +33,7 @@ describe("LpPositionsPanel: a stake with an unknown value", () => {
   it("CONTROL: all known values sum as before", () => {
     render(<LpPositionsPanel positions={[earn, known]} totalRedeemable={7.5} loading={false} error={null} />);
     expect(screen.getByText("$7.50 total")).toBeTruthy();
-    const stake = screen.getByText("Fee staking").closest("section") as HTMLElement;
+    const stake = screen.getByText("Staking").closest("section") as HTMLElement;
     expect(within(stake).getByText("total redeemable").previousElementSibling?.textContent).toBe("$5.00");
   });
 });

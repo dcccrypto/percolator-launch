@@ -78,7 +78,7 @@ function kindOf(pos: LpPosition): PositionKind {
 /** Per-kind presentation. Earn (Vault) reads cyan; Stake reads violet accent. */
 const KIND = {
   earn: { title: "Vault", subtitle: "Earn deposits", accent: "var(--cyan)" },
-  stake: { title: "Fee staking", subtitle: "Fee staking pools", accent: "var(--accent)" },
+  stake: { title: "Staking", subtitle: "Stake pools", accent: "var(--accent)" },
 } as const;
 
 // ═══════════════════════════════════════════════════════════════

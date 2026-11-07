@@ -334,7 +334,7 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
               </p>
               {isDevnet && (
                 <p className="text-[9px] text-[var(--accent)]/60 mt-0.5">
-                  ✓ Priced off this token&apos;s mainnet DEX pool — collateral is Sim-USDC
+                  ✓ Priced off this token&apos;s mainnet DEX pool — collateral is test USDC
                 </p>
               )}
             </div>

@@ -28,7 +28,12 @@ export const STAKE_CONSENT_TEXT_V2: readonly string[] = Object.freeze([
  * target". `STAKE_CONSENT_TEXT_V2` stays the verbatim source of truth (and is what the tests compare to the Rust file);
  * this transform is the one and only difference, and it is tested.
  */
-export const consentDisplay = (para: string): string => para.replace("`deploy_target_bps`", "the deployment target");
+export const consentDisplay = (para: string): string =>
+  para
+    .replace("`deploy_target_bps`", "the deployment target")
+    // Council 2026-11-06-go1106-ux (Creator, First-timer): program internals a staker can't act on.
+    .replace(" (the target signed in the consent, including a pending raise)", " (the target you agree to here, including any pending increase)")
+    .replace(" (wrapper tag 111, G9)", "");
 
 /** Wrapper 128 `DepthInputInvalid`: only a keeper's price push can hit it, so a trader should essentially never see this. */
 export const V22_DEPTH_INPUT_COPY = "The market's depth reading was not accepted, so nothing changed. Try again in a moment.";
@@ -179,14 +184,22 @@ export const V22_COPY = {
   },
   // ── First-loss staking (stake v5) ────────────────────────────────────────
   stake: {
-    title: "First-loss staking",
+    // Council GO1106-UX (First-timer): one name per pool kind, the same one the page title uses (insuranceStaking).
+    title: "Insurance staking",
     target: (pct: string) => `Deployment target ${pct}`,
     buffer: (pct: string) => `Liquid buffer ${pct}`,
     hysteresis: (pct: string) => `Rebalance band ${pct}`,
+    /** The deposit's pool settings, in words (were "Target / Liquid buffer / Rebalance band"). */
+    paramLabels: { target: "Backs insurance", buffer: "Kept for withdrawals", hysteresis: "Rebalance margin" },
+    paramHints: {
+      target: "The most of this pool that can move into the market's insurance fund.",
+      buffer: "The part kept liquid so withdrawals can be paid.",
+      hysteresis: "How far the pool can drift from its target before it rebalances.",
+    },
     /** The close-out rule, one plain line per audience. */
     closeOut: {
-      feeOnly: "Fee-only stakers earn nothing while the market runs. When it closes, you share everything above the creator's seed, in proportion to your stake.",
-      firstLoss: "At close, you share everything above the creator's seed in proportion to your stake.",
+      feeOnly: "Fee-only stakers earn nothing while the market runs. When it closes, you share everything above the creator's starting deposit, in proportion to your stake.",
+      firstLoss: "At close, you share everything above the creator's starting deposit in proportion to your stake.",
     },
     /**
      * Creator share disclosure (D5, 2026-10-29). Every market the wizard launches gets a fee-only stake pool (InitPoolV5, FEE_ONLY), so
@@ -199,7 +212,7 @@ export const V22_COPY = {
      * The fee split's Stakers row on a fee-only page (agrees with closeOut.feeOnly): a FEE_ONLY pool is paid nothing
      * while the market runs and never deploys into insurance.
      */
-    feeOnlyStakersRow: "nothing while the market runs. At close, fee-only stakers share what is above the creator's seed.",
+    feeOnlyStakersRow: "nothing while the market runs. At close, fee-only stakers share what is above the creator's starting deposit.",
     /** The insurance fee leg on a fee-only page: it does not go to fee-only stakers. */
     feeOnlyInsuranceLeg: "Backs losses a liquidation cannot cover.",
     /** A closed pool that holds surplus no staker owns (nobody staked): shown, never paid to the creator. */
@@ -210,7 +223,7 @@ export const V22_COPY = {
     deployed: (usd: string) => `Deployed to insurance: ${usd}`,
     deployedUnknown: "Deployed to insurance: —",
     /** One plain paragraph above the program's own consent text (phase4 §6.1 item 5 wording). */
-    consentSummary: "Staking insures this market's backstop: you can lose part of your stake if losses exceed the creator's tranche, bonds and Earn.",
+    consentSummary: "Staking insures this market's backstop: you can lose part of your stake if losses are bigger than what the creator and Earn depositors put in ahead of you.",
     consentUnavailable: "First-loss deposits aren't available for this pool right now.",
     /** #3607: a first-loss pool whose own account is still being read; the deposit form waits for it. */
     poolReading: "Reading this pool…",
