@@ -36,7 +36,7 @@ const PROOF_POINTS = [
   {
     index: "04",
     title: "Devnet — not real money",
-    body: "This playground runs on Solana devnet with test funds. Claim sim-USDC from the faucet and trade freely, no risk.",
+    body: "This playground runs on Solana devnet with test funds. Claim test USDC from the faucet and trade freely, no risk.",
   },
 ];
 
@@ -44,7 +44,7 @@ const HOW_IT_WORKS = [
   {
     step: "01",
     title: "Connect & fund",
-    body: "Connect a devnet wallet and claim sim-USDC from the faucet — one click, no signup.",
+    body: "Connect a devnet wallet and claim test USDC from the faucet — one click, no signup.",
   },
   {
     step: "02",

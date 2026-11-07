@@ -4,6 +4,7 @@ import { v22HasNoIndexer } from "@/lib/v22/indexer";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { boundedSet } from "@/lib/bounded-map";
 import { CHART_WINDOWS, type ChartTimeframe } from "@/lib/chart-window";
+import { getPriceWsUrl } from "@/lib/price-ws-url";
 
 type Timeframe = ChartTimeframe;
 
@@ -39,10 +40,10 @@ const RESOLUTION_MAP: Record<Timeframe, { resolution: string; bucketSec: number;
     ]),
   ) as Record<Timeframe, { resolution: string; bucketSec: number; lookbackSec: number }>;
 
-/** The price-WS service (NEXT_PUBLIC_WS_URL). No fallback: the retired percolator-api URL it was
- *  once derived from is dead, so without an explicit URL there is no live trade feed. */
+/** The price-WS service (runtime value, else NEXT_PUBLIC_WS_URL: lib/price-ws-url.ts). No fallback: the retired
+ *  percolator-api URL it was once derived from is dead, so without an explicit URL there is no live trade feed. */
 function deriveWsUrl(): string | null {
-  return process.env.NEXT_PUBLIC_WS_URL || null;
+  return getPriceWsUrl() || null;
 }
 
 // Module-level (not per-component-instance) so it survives a slab switch and

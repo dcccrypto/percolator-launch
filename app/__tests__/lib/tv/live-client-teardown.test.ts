@@ -32,7 +32,8 @@ beforeEach(() => {
   vi.resetModules();
   FakeWs.all = [];
   vi.stubGlobal("WebSocket", FakeWs);
-  vi.stubEnv("NEXT_PUBLIC_WS_URL", "ws://live.test");
+  // wss://: a ws:// URL to a non-local host is not a usable price-WS URL (lib/price-ws-url.ts; the CSP never allows it).
+  vi.stubEnv("NEXT_PUBLIC_WS_URL", "wss://live.test");
   vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({}) })));
 });
 afterEach(() => {

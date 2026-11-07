@@ -12,6 +12,8 @@ import { createPerpProvider } from "./perpProvider";
 import { createLiveClient, wsToHttpBase, type LiveClient, type WsLike } from "@/lib/chart/live-client";
 import { getSeriesStore } from "@/lib/chart/perp-series";
 import { getWsManager } from "@/lib/priceStore/wsManager";
+import { getPriceWsUrl } from "@/lib/price-ws-url";
+import { markPriceFresh } from "@/lib/price-freshness";
 
 let provider: ChartDataProvider | null = null;
 let liveClient: LiveClient | null = null;
@@ -31,12 +33,12 @@ const priceStoreMarks: MarkStream = {
 
 /** NEXT_PUBLIC_PERP_CHART=0 is the rollback switch back to the trade-built candles-api provider alone. */
 export function perpChartEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_PERP_CHART !== "0" && !!process.env.NEXT_PUBLIC_WS_URL;
+  return process.env.NEXT_PUBLIC_PERP_CHART !== "0" && !!getPriceWsUrl();
 }
 
 /** The shared push client (null when no WS URL is configured). Same socket the price store uses. */
 export function getLiveClient(): LiveClient | null {
-  const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "";
+  const wsUrl = getPriceWsUrl();
   if (!wsUrl) return null;
   if (!liveClient) {
     // Resolve the shared manager per call, never capture its handle: the manager is torn down after
@@ -48,14 +50,18 @@ export function getLiveClient(): LiveClient | null {
       onStatusChange: (listener) => getWsManager(wsUrl).onStatusChange(listener),
       getStatus: () => getWsManager(wsUrl).getStatus(),
     };
-    liveClient = createLiveClient({ ws, httpBase: wsToHttpBase(wsUrl), fetchJson: (url) => fetch(url, { cache: "no-store" }) });
+    const inner = createLiveClient({ ws, httpBase: wsToHttpBase(wsUrl), fetchJson: (url) => fetch(url, { cache: "no-store" }) });
+    // Every chart tick is a fresh price on the shared clock (lib/price-freshness.ts) that the header badge also reads.
+    liveClient = {
+      subscribe: (slab, h) => inner.subscribe(slab, { ...h, onTick: (m) => { markPriceFresh(slab); h.onTick(m); } }),
+    };
   }
   return liveClient;
 }
 
 export function getChartDataProvider(): ChartDataProvider {
   if (!provider) {
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "";
+    const wsUrl = getPriceWsUrl();
     const base = createCandlesApiProvider({
       fetchImpl: (input, init) => fetch(input, init),
       trades: createTradeStream(wsUrl || null),

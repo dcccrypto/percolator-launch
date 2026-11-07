@@ -65,7 +65,7 @@ describe("flag off: unchanged", () => {
     __setDevnetV22ForTest(false);
     render(<EarnVaultView />);
     expect(text("earn-info-insurance")).toMatch(/Covers losses before they reach Earn deposits/);
-    expect(text("earn-info-how")).toMatch(/Provide sim-USDC as counterparty backing/);
+    expect(text("earn-info-how")).toMatch(/Provide USDC as counterparty backing/);
     cleanup();
     await header();
     expect(screen.getByText(/added to the vault/).textContent).toMatch(/^Deposit USDC into a market's vault\./);

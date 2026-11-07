@@ -253,20 +253,20 @@ export const CostEstimate: FC<CostEstimateProps> = ({
         <div className="flex items-center justify-between text-[11px]">
           <span className="text-[var(--text-secondary)]">Starting liquidity</span>
           <span className="font-mono text-[var(--text)]">
-            {estimate.lpTokens > 0 ? estimate.lpTokens.toLocaleString() : "—"} Sim-USDC
+            {estimate.lpTokens > 0 ? estimate.lpTokens.toLocaleString() : "—"} USDC
           </span>
         </div>
         <div className="flex items-center justify-between text-[11px]">
           <span className="text-[var(--text-secondary)]">Insurance Fund</span>
           <span className="font-mono text-[var(--text)]">
-            {estimate.insTokens > 0 ? estimate.insTokens.toLocaleString() : "—"} Sim-USDC
+            {estimate.insTokens > 0 ? estimate.insTokens.toLocaleString() : "—"} USDC
           </span>
         </div>
         <div className="flex items-center justify-between pt-2 border-t border-[var(--border)]">
           <span className="text-[11px] font-semibold text-[var(--text)]">Total Collateral Required</span>
           <div className="text-right">
             <span className="text-[13px] font-bold font-mono text-[var(--text)]">
-              {estimate.totalTokens > 0 ? estimate.totalTokens.toLocaleString() : "—"} Sim-USDC
+              {estimate.totalTokens > 0 ? estimate.totalTokens.toLocaleString() : "—"} USDC
             </span>
             {estimate.tokenUsdValue !== null && estimate.tokenUsdValue > 0 && (
               <p className="text-[10px] text-[var(--text-secondary)]">

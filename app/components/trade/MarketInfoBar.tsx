@@ -1,5 +1,7 @@
 "use client";
 
+import { usePriceFreshness } from "@/hooks/usePriceFreshness";
+import type { ChartLiveState } from "@/lib/chart/live-state";
 import { getConfig } from "@/lib/config";
 import { isMoveFlowEnabled } from "@/lib/v21/move/flag";
 import { isV1CloseOnly } from "@/lib/v21/move/ids";
@@ -48,7 +50,7 @@ function fundingRateBpsTo8h(rateBps: bigint): number {
 }
 
 /** P3-3: Market health badge — surfaces oracle/liquidity status in the ticker bar */
-type HealthBadgeState = "live" | "no-oracle" | "no-liquidity" | "inactive" | "settled" | "close-only" | "paused" | "catching-up" | "no-recent-price";
+type HealthBadgeState = "live" | "price-delayed" | "price-offline" | "no-oracle" | "no-liquidity" | "inactive" | "settled" | "close-only" | "paused" | "catching-up" | "no-recent-price";
 
 /**
  * The badge follows the status line rendered under this bar (MarketHeaderStatus, the same
@@ -56,8 +58,12 @@ type HealthBadgeState = "live" | "no-oracle" | "no-liquidity" | "inactive" | "se
  * green "LIVE" above a line saying new positions are refused. A settled market says so first: it
  * is terminal, so "no oracle" or "no liquidity" would point at a fix that will never come. The
  * oracle/vault states then keep their place ahead of the other statuses.
+ *
+ * `feed` is the market's price freshness (lib/price-freshness.ts), the SAME clock the chart's Live / Delayed /
+ * Offline marker reads. A market that would otherwise read "LIVE" reads "DELAYED" / "OFFLINE" when the price has
+ * gone quiet, so the header never says LIVE next to a chart that says Offline (Council council-leftovers run 2, #1).
  */
-export function healthBadgeState(oracleDown: boolean, vaultEmpty: boolean, status: HeaderStatus | null): HealthBadgeState {
+export function healthBadgeState(oracleDown: boolean, vaultEmpty: boolean, status: HeaderStatus | null, feed: ChartLiveState = "live"): HealthBadgeState {
   if (status?.kind === "resolved") return "settled";
   if (oracleDown && vaultEmpty) return "inactive";
   if (vaultEmpty) return "no-liquidity";
@@ -68,14 +74,19 @@ export function healthBadgeState(oracleDown: boolean, vaultEmpty: boolean, statu
   if (status?.kind === "adl-reduce-only") return "close-only";
   if (status?.kind === "engine-catching-up") return "catching-up";
   if (status) return "paused";
+  if (feed === "offline") return "price-offline";
+  if (feed === "delayed") return "price-delayed";
   return "live";
 }
 
-export const MarketHealthBadge = memo(function MarketHealthBadge({ oracleDown, vaultEmpty, status }: { oracleDown: boolean; vaultEmpty: boolean; status: HeaderStatus | null }) {
-  const state = healthBadgeState(oracleDown, vaultEmpty, status);
+export const MarketHealthBadge = memo(function MarketHealthBadge({ oracleDown, vaultEmpty, status, feed = "live", feedAgeMs = null }: { oracleDown: boolean; vaultEmpty: boolean; status: HeaderStatus | null; feed?: ChartLiveState; feedAgeMs?: number | null }) {
+  const state = healthBadgeState(oracleDown, vaultEmpty, status, feed);
+  const quietFor = feedAgeMs === null ? "No price has arrived yet on this page." : `No new price for ${Math.round(feedAgeMs / 1000)}s.`;
 
   const cfg: Record<HealthBadgeState, { label: string; icon: string; cls: string; pulse: boolean; tooltip: string }> = {
     live:          { label: "LIVE",         icon: "●",  cls: "text-[var(--long)] bg-[var(--long)]/10 border-[var(--long)]/20",       pulse: false, tooltip: "Oracle healthy - market is live" },
+    "price-delayed": { label: "DELAYED",    icon: "◉",  cls: "text-[var(--warning)] bg-[var(--warning)]/10 border-[var(--warning)]/20", pulse: false, tooltip: `${quietFor} The price shown may be behind.` },
+    "price-offline": { label: "OFFLINE",    icon: "◉",  cls: "text-[var(--short)] bg-[var(--short)]/10 border-[var(--short)]/20",     pulse: false, tooltip: `${quietFor} The price shown is the last one received.` },
     "no-oracle":   { label: "NO ORACLE",    icon: "◉",  cls: "text-[var(--warning)] bg-[var(--warning)]/10 border-[var(--warning)]/20", pulse: true,  tooltip: "Oracle not cranked - market paused. Trades are blocked." },
     "no-liquidity":{ label: "NO LIQUIDITY", icon: "⚠",  cls: "text-[var(--short)] bg-[var(--short)]/10 border-[var(--short)]/20",     pulse: false, tooltip: "No vault liquidity - trades cannot execute until this market is funded." },
     inactive:      { label: "INACTIVE",     icon: "⚠",  cls: "text-[var(--short)] bg-[var(--short)]/10 border-[var(--short)]/20",     pulse: false, tooltip: "Oracle unavailable and no vault liquidity." },
@@ -91,6 +102,8 @@ export const MarketHealthBadge = memo(function MarketHealthBadge({ oracleDown, v
   return (
     <span
       title={tooltip}
+      data-testid="market-health-badge"
+      data-state={state}
       className={`shrink-0 inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded border ${cls} ${pulse ? "animate-pulse" : ""}`}
     >
       <span>{icon}</span>
@@ -197,7 +210,10 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
   const priceFacts = useHeaderPriceFacts();
   const headerStatus = useMemo(() => marketHeaderStatus(healthRow, Date.now(), priceFacts), [healthRow, priceFacts]);
   // C2: the price shown is the last one the market had when it is behind for good.
-  const priceIsLastKnown = headerStatus?.kind === "no-recent-price";
+  // The one price-freshness clock the chart marker reads too (lib/price-freshness.ts): an Offline feed greys the price
+  // as "last known" here exactly when the chart says Offline.
+  const feed = usePriceFreshness(slabAddress);
+  const priceIsLastKnown = headerStatus?.kind === "no-recent-price" || feed.state === "offline";
 
   // volume_24h is the indexer's SUM(ABS(size)) in engine Q units (base-asset
   // amount, POS_SCALE 1e6) — NOT dollars. It used to be formatted as USD
@@ -328,7 +344,7 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
 
         {/* P3-3: Market health badge — ml-auto pushes to far right within flex-1 group */}
         <span className="ml-auto hidden md:block h-6 w-px bg-[var(--border)] shrink-0" />
-        <MarketHealthBadge oracleDown={oracleDown} vaultEmpty={vaultEmpty} status={headerStatus} />
+        <MarketHealthBadge oracleDown={oracleDown} vaultEmpty={vaultEmpty} status={headerStatus} feed={feed.state} feedAgeMs={feed.ageMs} />
       </div>
     </div>
   );

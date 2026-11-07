@@ -227,7 +227,7 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
         return;
       }
       setMintLoading(false);
-      setMintError(d.error ?? `Sim-USDC claim failed (HTTP ${resp.status})`);
+      setMintError(d.error ?? `USDC claim failed (HTTP ${resp.status})`);
     } catch (e) {
       setMintLoading(false);
       setMintError(e instanceof Error ? e.message : "Network error — could not reach the faucet.");
@@ -381,7 +381,7 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
               The claim's outcome belongs to the button that makes it, which
               reports it through this component's own `mintError` state below. */}
           <p className="text-[11px] text-[var(--text-secondary)]">
-            <strong className="text-[var(--text)]">Sim-USDC</strong> is your collateral —
+            <strong className="text-[var(--text)]">Test USDC</strong> is your collateral —
             claim it any time from the{" "}
             <Link href="/faucet" className="text-[var(--accent)] underline underline-offset-2">faucet</Link>.
           </p>
@@ -392,7 +392,7 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
             </summary>
             <div className="mt-2 space-y-2 border-l border-[var(--border)] pl-3">
               <p className="text-[10px] leading-relaxed text-[var(--text-secondary)]">
-                You trade with <strong className="text-[var(--text)]">Sim-USDC</strong> — one balance shared
+                You trade with <strong className="text-[var(--text)]">USDC</strong> — one balance shared
                 across every market.{mainnetCA ? ` ${tokenSymbol} is a price reference only: the market is priced off its live mainnet DEX pool. You never hold ${tokenSymbol} on devnet.` : ""}
               </p>
               <p className="text-[10px] leading-relaxed text-[var(--text-secondary)]">
@@ -413,7 +413,7 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
               )}
               {devnetMint && (
                 <div className="flex items-center gap-2 text-[10px]">
-                  <span className="flex-shrink-0 font-medium text-[var(--text-dim)]">Sim-USDC mint</span>
+                  <span className="flex-shrink-0 font-medium text-[var(--text-dim)]">USDC mint</span>
                   <code className="flex-1 truncate font-mono text-[9px] text-[var(--text-secondary)]">{devnetMint}</code>
                   <button
                     type="button"

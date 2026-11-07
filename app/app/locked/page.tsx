@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { cohortCutoff } from "@/lib/playground-access";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
-import { lockedCopy } from "@/lib/locked-copy";
+import { lockedCopy, PLAYGROUND_CHECK_SPOT_URL } from "@/lib/locked-copy";
 
 /**
  * /locked — where the devnet v2 waitlist gate (middleware.ts, PLAYGROUND_GATE_ENABLED)
@@ -15,8 +15,7 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-/** Where members prove their spot (percolator.trade, branch `main`, #2732). */
-const CHECK_SPOT_URL = "https://percolator.trade/playground";
+const CHECK_SPOT_URL = PLAYGROUND_CHECK_SPOT_URL;
 const WAITLIST_URL = "https://percolator.trade/waitlist";
 
 export default function LockedPage() {
@@ -54,6 +53,29 @@ export default function LockedPage() {
         <p className="mb-8 text-[13px] leading-relaxed text-[var(--text-secondary)]">
           {copy.body}
         </p>
+
+        {copy.requestAccess && (
+          <div className="flex flex-col gap-3">
+            <a
+              href={copy.requestAccess.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="border border-[var(--accent)]/50 bg-[var(--accent)]/[0.08] px-6 py-3 text-xs font-semibold uppercase tracking-wider text-[var(--accent-text)] transition-colors hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.15]"
+            >
+              {copy.requestAccess.label}
+            </a>
+          </div>
+        )}
+
+        {copy.playgroundNote && (
+          <p className="mt-6 text-[11px] leading-relaxed text-[var(--text-muted)]">
+            {copy.playgroundNote.before}
+            <a href={copy.playgroundNote.link.href} className="underline underline-offset-2 hover:text-[var(--text)]">
+              {copy.playgroundNote.link.label}
+            </a>
+            {copy.playgroundNote.after}
+          </p>
+        )}
 
         {copy.showWaitlistLinks && (
         <div className="flex flex-col gap-3">

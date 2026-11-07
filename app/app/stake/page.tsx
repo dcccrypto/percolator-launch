@@ -415,7 +415,7 @@ function StakeHeader({
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,48rem)] xl:items-end xl:gap-10">
           <div className="min-w-0">
             <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
-              // insurance stake
+              // staking
             </div>
 
             {/* First word plain, "staking" in the landing headline's gradient (as Earn's title). */}
@@ -1619,7 +1619,7 @@ function StakeSidebar() {
     <div data-testid="stake-info" className="divide-y divide-[var(--border)] border border-[var(--border)] bg-[var(--panel-bg)]">
       <StakeInfoRow id="how" title="How it works" open={open === "how"} onToggle={toggle}>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <SidebarStep num={1} title="Deposit" desc="Stake sim-USDC into a market's insurance pool" />
+          <SidebarStep num={1} title="Deposit" desc="Stake USDC into a market's insurance pool" />
           <SidebarStep num={2} title="Back the fund" desc={copy.backStep} />
           <SidebarStep num={3} title="Withdraw" desc={copy.sidebar} />
         </div>

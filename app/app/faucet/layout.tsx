@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 export const metadata: Metadata = {
   title: "Faucet — Test Funds",
   description:
-    "Get devnet SOL and sim-USDC test funds to trade on the Percolator playground.",
+    "Get devnet SOL and test USDC to trade on the Percolator playground.",
 };
 
 export default function FaucetLayout({ children }: { children: ReactNode }) {

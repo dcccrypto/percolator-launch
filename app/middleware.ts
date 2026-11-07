@@ -20,6 +20,7 @@
 // NOTE: `proxy.ts` must export a `proxy` (or default) function; a route-segment
 // `export const runtime = ...` is NOT allowed (proxy is always Node.js).
 import { priceWsConnectSrc } from "@/lib/price-ws-csp";
+import { resolveServerPriceWsUrl } from "@/lib/price-ws-url";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { Redis } from "@upstash/redis";
@@ -616,8 +617,10 @@ function addSecurityHeaders(response: NextResponse, nonce?: string) {
   // on-chain seed only, with no other visible symptom). Dev-only, gated the
   // same way as devEval above — never present in a production CSP.
   const devLocalWs = isDev ? "ws://localhost:* http://localhost:* " : "";
-  // The configured price-WS origin itself (exact host only; lib/price-ws-csp.ts). Empty unless NEXT_PUBLIC_WS_URL is a wss:// URL.
-  const priceWs = priceWsConnectSrc(process.env.NEXT_PUBLIC_WS_URL);
+  // The configured price-WS origin itself (exact host only; lib/price-ws-csp.ts), resolved per request the same way
+  // /api/runtime-config resolves it for the browser (PRICE_WS_URL, else NEXT_PUBLIC_WS_URL; lib/price-ws-url.ts).
+  // Built from the same predicate's output (lib/price-ws-csp.ts): served ⇔ allowed. Production: wss:// only.
+  const priceWs = priceWsConnectSrc(resolveServerPriceWsUrl(process.env), { allowLocalWs: process.env.NODE_ENV !== "production" });
   const csp = [
     "default-src 'self'",
     // challenges.cloudflare.com: Turnstile widget script (api.js). Loaded

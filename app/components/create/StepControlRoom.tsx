@@ -11,6 +11,7 @@ import { FeeBreakdown } from "@/components/FeeBreakdown";
 import { WizardTranchePanel } from "@/components/limits/CreatorLimits";
 import { PositionLimit } from "./PositionLimit";
 import { PAYOUT_RESERVE_COPY } from "@/lib/wizard-copy";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 
 /**
  * GH#2621: this dial used to floor initial margin at the OLD
@@ -66,6 +67,11 @@ export interface StepControlRoomProps {
   /** The market account size: one fixed size per launch in v17 (one asset slot) — there is no tier to pick. */
   slabBytes: number;
   rentSol: number | null;
+  /**
+   * Everything the launch costs in SOL (all accounts' rent + fees; the header's "≈ X SOL"). Council GO1106-UX Creator:
+   * the pre-flight listed only the market's own rent (0.021) under a 0.14 header, so the rest looked missing.
+   */
+  totalSol?: number | null;
 
   initialMarginBps: number;
   /** Displayed as a fixed readout — NOT creator-settable. One rate for every
@@ -142,6 +148,7 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
   startPrice,
   slabBytes,
   rentSol,
+  totalSol = null,
   initialMarginBps,
   tradingFeeBps,
   lpCollateral,
@@ -278,6 +285,11 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
           <Readout k="Market size" v={`${slabBytes.toLocaleString()} B`} />
           {/* #2954: the cost estimate is dimmed when this market cannot be registered. */}
           <Readout k="Market rent" v={rentSol === null ? "—" : `${rentSol.toFixed(3)} SOL`} dimmed={!registrable} />
+          <Readout
+            k="Total SOL (all accounts + fees)"
+            v={totalSol == null ? "—" : `≈ ${totalSol.toFixed(2)} SOL`}
+            dimmed={!registrable}
+          />
           {/* GH#2622: set expectations UP FRONT, before launch — not only after
               a creator gets stuck (RecoverSolBanner's gated RECLAIM handles that
               case). Rent is reclaimable only if setup stops before any deposit
@@ -301,7 +313,9 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
           <Readout k="Trading fee" v={`${bpsPct(tradingFeeBps)} · set by token liquidity`} />
           {/* A creator is never told they earn a share of this anywhere. #2565. */}
           <div className="col-span-full pt-1">
-            <FeeBreakdown highlight="creator" feeBps={tradingFeeBps} />
+            {/* v2.2: every wizard launch gets a FEE-ONLY stake pool (V22_COPY.stake.creatorShare), so the insurance leg
+                must not promise stakers that share (Council GO1106-UX Creator: it contradicted /stake). */}
+            <FeeBreakdown highlight="creator" feeBps={tradingFeeBps} stakersFeeOnly={isDevnetV22Enabled()} />
           </div>
           {/* LP + insurance alone understated it ~3x: both backing domains are seeded at 100% of LP. */}
           <Readout k="You seed" v={`${seedTotal.toLocaleString()} ${collateralSymbol}`} dimmed={!registrable} />

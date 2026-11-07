@@ -11,7 +11,7 @@
  *   3. A small SOL airdrop (~0.05) is attempted so the user can pay for
  *      subsequent transactions.
  *
- * Rate-limited: 1 claim per wallet per hour.
+ * Rate-limited: 1 claim per wallet per day, shared with the Fund-your-account modal (lib/sim-usdc-claim.ts).
  */
 
 import { FC, useState, useCallback, useEffect } from "react";
@@ -21,6 +21,7 @@ import { useWalletAdapterAvailable } from "@/hooks/useWalletAdapterAvailable";
 import { usePrivyAvailable, usePrivyLogin } from "@/hooks/usePrivySafe";
 import { SimUsdcBalance } from "@/components/playground/SimUsdcBalance";
 import { ConnectButton } from "@/components/wallet/ConnectButton";
+import { SIM_USDC_LIMIT_LABEL } from "@/lib/sim-usdc-claim";
 
 const SIM_USDC_MINT =
   process.env.NEXT_PUBLIC_TEST_USDC_MINT?.trim() ||
@@ -35,6 +36,8 @@ interface FaucetResult {
   sol_sig?: string;
   /** The server's SOL top-up was broadcast but not confirmed yet (sol_airdropped is false). */
   sol_pending?: boolean;
+  /** The wallet already holds enough SOL for fees, so none was sent (sol_airdropped is false). */
+  sol_has_enough?: boolean;
   nextClaimAt: string;
 }
 
@@ -91,6 +94,7 @@ const FaucetPage: FC = () => {
           sol_airdropped: data.sol_airdropped as boolean,
           sol_sig: data.sol_sig as string | undefined,
           sol_pending: data.sol_pending === true,
+          sol_has_enough: data.sol_has_enough === true,
           nextClaimAt: data.nextClaimAt as string,
         });
         // Refresh balance display after successful mint
@@ -114,7 +118,10 @@ const FaucetPage: FC = () => {
       <div className="mb-8">
         <h1 className="text-2xl font-semibold text-[var(--text)]">Playground Faucet</h1>
         <p className="mt-2 text-[14px] text-[var(--text-secondary)]">
-          Get 10,000 Sim-USDC to trade on devnet. No real funds required.
+          Get 10,000 test USDC to trade on devnet. It has no real value.
+        </p>
+        <p className="mt-1 text-[12px] text-[var(--text-muted)]" data-testid="faucet-limit">
+          {SIM_USDC_LIMIT_LABEL}, the same claim as the Fund your account window.
         </p>
         <p className="mt-1 text-[12px] font-mono text-[var(--text-muted)]">
           mint: {SIM_USDC_MINT.slice(0, 8)}...{SIM_USDC_MINT.slice(-6)}
@@ -150,7 +157,7 @@ const FaucetPage: FC = () => {
           {/* Balance */}
           <div className="rounded-md border border-[var(--border)] bg-[var(--bg-elevated,var(--bg))] p-4">
             <p className="mb-1 text-[12px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
-              Your Sim-USDC balance
+              Your USDC balance
             </p>
             <SimUsdcBalance
               publicKey={publicKey}
@@ -170,14 +177,14 @@ const FaucetPage: FC = () => {
                 : "border-[var(--accent)] bg-[var(--accent)]/20 text-[var(--text)] hover:bg-[var(--accent)]/30",
             ].join(" ")}
           >
-            {loading ? "Minting..." : result ? "Claimed" : "Get 10,000 Sim-USDC"}
+            {loading ? "Minting..." : result ? "Claimed" : "Get 10,000 USDC"}
           </button>
 
           {/* Success result */}
           {result && (
             <div className="rounded-md border border-[var(--long)]/30 bg-[var(--long)]/[0.06] p-4 text-[13px]">
               <p className="font-semibold text-[var(--long)]">
-                {result.usdc_amount.toLocaleString()} Sim-USDC minted
+                {result.usdc_amount.toLocaleString()} USDC minted
               </p>
               <p className="mt-1 text-[var(--text-secondary)]">
                 Transaction:{" "}
@@ -221,7 +228,12 @@ const FaucetPage: FC = () => {
                   )}
                 </p>
               )}
-              {!result.sol_airdropped && !result.sol_pending && (
+              {result.sol_has_enough && !result.sol_airdropped && !result.sol_pending && (
+                <p className="mt-1 text-[var(--text-muted)] text-[12px]">
+                  You already have enough SOL for fees, so none was sent.
+                </p>
+              )}
+              {!result.sol_airdropped && !result.sol_pending && !result.sol_has_enough && (
                 <p className="mt-1 text-[var(--text-muted)] text-[12px]">
                   SOL airdrop skipped (public faucet busy). Try{" "}
                   <a
@@ -239,7 +251,7 @@ const FaucetPage: FC = () => {
                 Next claim:{" "}
                 {result.nextClaimAt
                   ? new Date(result.nextClaimAt).toLocaleString()
-                  : "in 1 hour"}
+                  : "in 24 hours"}
               </p>
             </div>
           )}

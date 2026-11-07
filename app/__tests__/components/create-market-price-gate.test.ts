@@ -97,7 +97,10 @@ describe("M-8: an opening price too small to track is refused at launch", () => 
     const cascade = code(slice(WIZARD, "const priceBelowMinimum", "Waiting on price feed"));
     expect(cascade).toMatch(/reason === "below-trackable"/);
     expect(cascade).toMatch(/priceBelowTrackable\s*\?/);
-    expect(cascade).toContain("market needs to track its price");
+    // The sentence moved to lib/creator-copy.ts priceFloorMessage (Council GO1106-UX: it gained a next step when no
+    // leverage is low enough); its wording is pinned in __tests__/components/create/creator-copy-go1106.test.tsx.
+    expect(cascade).toMatch(/priceFloorMessage\(/);
+    expect(fs.readFileSync(path.join(process.cwd(), "lib/creator-copy.ts"), "utf8")).toContain("market needs to track its price");
   });
 });
 

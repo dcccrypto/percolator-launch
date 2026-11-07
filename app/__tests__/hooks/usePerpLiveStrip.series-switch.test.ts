@@ -10,14 +10,16 @@ import type { PerpSeries } from "@/lib/chart/perp-types";
 const live = vi.hoisted(() => ({ onTick: null as null | ((m: { mark: number; oracle: number }) => void) }));
 vi.mock("@/lib/tv/data", () => ({
   getLiveClient: () => ({
-    subscribe: (_slab: string, h: { onTick: (m: { mark: number; oracle: number }) => void }) => {
-      live.onTick = h.onTick;
+    // As the real getLiveClient does (lib/tv/data): every tick stamps the shared freshness clock first.
+    subscribe: (slab: string, h: { onTick: (m: { mark: number; oracle: number }) => void }) => {
+      live.onTick = (m) => { markPriceFresh(slab); h.onTick(m); };
       return () => {};
     },
   }),
 }));
 
 import { usePerpLiveStrip } from "@/hooks/usePerpLiveStrip";
+import { markPriceFresh } from "@/lib/price-freshness";
 
 describe("usePerpLiveStrip across a switch", () => {
   it("stays live on a series switch, clears the price; a market switch clears both", () => {

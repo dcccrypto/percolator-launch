@@ -39,6 +39,8 @@ import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { toE6 } from "@/lib/format";
 import { startPerfSpan } from "@/lib/perf/perfTiming";
 import { getWsManager } from "./wsManager";
+import { getPriceWsUrl } from "@/lib/price-ws-url";
+import { markPriceFresh } from "@/lib/price-freshness";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { ensureLotExp, getLotExp, onLotExp } from "@/lib/v22/lot-registry";
 
@@ -85,12 +87,12 @@ export const EMPTY_PRICE_STATE: PriceState = Object.freeze({
  * Still to decide before mainnet: whether this client should carry an HMAC
  * token so it keeps the WS path in production instead of degrading to REST. */
 function getWsUrl(): string {
-  // Only the explicit price-WS URL. Production sets NEXT_PUBLIC_WS_URL to the Railway price-ws
-  // service; the old fallback derived ws(s):// from the retired percolator-api URL, which could
-  // only ever point at a dead host. Unset/empty means "WS disabled" (see wsManager).
-  return process.env.NEXT_PUBLIC_WS_URL ?? "";
+  // Only the explicit price-WS URL: the runtime value from /api/runtime-config, else the build-time
+  // NEXT_PUBLIC_WS_URL (lib/price-ws-url.ts). The old fallback derived ws(s):// from the retired
+  // percolator-api URL, which could only ever point at a dead host. Empty means "WS disabled" (see
+  // wsManager). Resolved per subscribe, not once at module load, so the runtime value is the one used.
+  return getPriceWsUrl();
 }
-const WS_URL = getWsUrl();
 let warnedNoUrl = false;
 
 /* ── Per-slab store entries ── */
@@ -291,6 +293,8 @@ function handleRawMessage(slab: string, entry: SlabEntry, data: unknown): void {
   const e6 = sanitizePriceE6(tokenToLotE6(applyInvert(rawE6, entry.invert), entry.lotExp));
   if (e6 === 0n) return; // reject corrupt/out-of-band WS prices, same guard as pre-refactor
   const usd = Number(e6) / 1_000_000;
+  // The shared freshness clock (lib/price-freshness.ts): stamped on receipt, not on the rAF flush.
+  markPriceFresh(slab);
 
   if (!entry.pendingTick) {
     entry.pendingSpanFinish = startPerfSpan("price-push-to-paint");
@@ -314,13 +318,14 @@ export function subscribeSlab(slab: string, onStoreChange: () => void): () => vo
   if (!entry.lotKnown) ensureLotExp(slab);
 
   if (!entry.releaseWs) {
-    if (!WS_URL && typeof window !== "undefined" && !warnedNoUrl) {
+    const wsUrl = getWsUrl();
+    if (!wsUrl && typeof window !== "undefined" && !warnedNoUrl) {
       warnedNoUrl = true;
       console.warn(
-        "[priceStore] No WebSocket URL configured — live price streaming disabled, falling back to REST/on-chain seed only. Set NEXT_PUBLIC_WS_URL.",
+        "[priceStore] No WebSocket URL configured — live price streaming disabled, falling back to REST/on-chain seed only. Set PRICE_WS_URL (runtime) or NEXT_PUBLIC_WS_URL (build time).",
       );
     }
-    const manager = getWsManager(WS_URL);
+    const manager = getWsManager(wsUrl);
     entry.releaseWs = manager.subscribeChannel(slab);
     entry.releaseMsg = manager.onMessageForChannel(slab, (data) => handleRawMessage(slab, entry, data));
   }
@@ -478,6 +483,8 @@ export function applyOnChainPoll(slab: string, onChainE6: bigint): boolean {
   // The chain value now owns the entry: a DB seed's invert / lotExp retro-correction must not rewrite over it.
   entry.source = "seed-onchain";
   applyPatch(entry, { price: usd, priceUsd: usd, priceE6: onChainE6, loading: false });
+  // A moved on-chain price is a fresh price; an unchanged re-read of a stalled mark is not (lib/price-freshness.ts).
+  if (before !== onChainE6) markPriceFresh(slab);
   return before !== onChainE6;
 }
 

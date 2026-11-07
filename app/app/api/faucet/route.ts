@@ -42,12 +42,25 @@ import { getServerConnection } from "@/lib/server-rpc";
 import { getDevnetMintSigner } from "@/lib/devnet-signer";
 import { assertSuccessfulConfirmation } from "@/lib/transaction-confirmation";
 import * as Sentry from "@sentry/nextjs";
+import {
+  SIM_USDC_ALREADY_CLAIMED,
+  SIM_USDC_CLAIM_FUND_TYPE,
+  recordSimUsdcClaimInMemory,
+  simUsdcClaimInMemory,
+} from "@/lib/sim-usdc-claim";
 
 // ── In-memory rate-limit fallback (when Supabase unavailable) ─────────────────
 const _faucetClaims = new Map<string, number>();
 const _FAUCET_RATE_MS = 24 * 60 * 60 * 1000;
 
+/** A Sim-USDC key ("<wallet>:usdc") uses the map /api/playground/faucet shares (lib/sim-usdc-claim.ts). */
+function _simUsdcWallet(key: string): string | null {
+  return key.endsWith(`:${SIM_USDC_CLAIM_FUND_TYPE}`) ? key.slice(0, -(SIM_USDC_CLAIM_FUND_TYPE.length + 1)) : null;
+}
+
 function _faucetIsLimited(key: string): { limited: boolean; nextClaimAt: string | null } {
+  const simWallet = _simUsdcWallet(key);
+  if (simWallet !== null) return simUsdcClaimInMemory(simWallet);
   const last = _faucetClaims.get(key);
   if (last === undefined) return { limited: false, nextClaimAt: null };
   const elapsed = Date.now() - last;
@@ -58,6 +71,11 @@ function _faucetIsLimited(key: string): { limited: boolean; nextClaimAt: string 
 }
 
 function _faucetRecord(key: string): void {
+  const simWallet = _simUsdcWallet(key);
+  if (simWallet !== null) {
+    recordSimUsdcClaimInMemory(simWallet);
+    return;
+  }
   _faucetClaims.set(key, Date.now());
 }
 
@@ -199,9 +217,10 @@ export async function POST(req: NextRequest) {
     }
 
     if (!gate.allowed) {
+      const alreadyClaimed = type === "usdc" ? SIM_USDC_ALREADY_CLAIMED : "Already claimed in the last 24 hours";
       return NextResponse.json(
         {
-          error: "Already claimed in the last 24 hours",
+          error: alreadyClaimed,
           funded: false,
           nextClaimAt: gate.nextClaimAt,
         },
