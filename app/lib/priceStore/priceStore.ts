@@ -40,6 +40,7 @@ import { toE6 } from "@/lib/format";
 import { startPerfSpan } from "@/lib/perf/perfTiming";
 import { getWsManager } from "./wsManager";
 import { getPriceWsUrl } from "@/lib/price-ws-url";
+import { markPriceFresh } from "@/lib/price-freshness";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { ensureLotExp, getLotExp, onLotExp } from "@/lib/v22/lot-registry";
 
@@ -292,6 +293,8 @@ function handleRawMessage(slab: string, entry: SlabEntry, data: unknown): void {
   const e6 = sanitizePriceE6(tokenToLotE6(applyInvert(rawE6, entry.invert), entry.lotExp));
   if (e6 === 0n) return; // reject corrupt/out-of-band WS prices, same guard as pre-refactor
   const usd = Number(e6) / 1_000_000;
+  // The shared freshness clock (lib/price-freshness.ts): stamped on receipt, not on the rAF flush.
+  markPriceFresh(slab);
 
   if (!entry.pendingTick) {
     entry.pendingSpanFinish = startPerfSpan("price-push-to-paint");
@@ -480,6 +483,8 @@ export function applyOnChainPoll(slab: string, onChainE6: bigint): boolean {
   // The chain value now owns the entry: a DB seed's invert / lotExp retro-correction must not rewrite over it.
   entry.source = "seed-onchain";
   applyPatch(entry, { price: usd, priceUsd: usd, priceE6: onChainE6, loading: false });
+  // A moved on-chain price is a fresh price; an unchanged re-read of a stalled mark is not (lib/price-freshness.ts).
+  if (before !== onChainE6) markPriceFresh(slab);
   return before !== onChainE6;
 }
 

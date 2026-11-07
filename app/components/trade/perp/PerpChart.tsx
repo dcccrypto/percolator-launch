@@ -26,8 +26,8 @@ import { useChartTheme } from "@/hooks/useChartTheme";
 import { useChartOverlayPrefs } from "@/hooks/useChartOverlayPrefs";
 import { usePositionLinePrices } from "@/hooks/usePositionLinePrices";
 import { usePerpHeaderStats } from "@/hooks/usePerpHeaderStats";
-import { getChartDataProvider, getLiveClient, subscribeDisplayPrice } from "@/lib/tv/data";
-import { chartLiveState } from "@/lib/chart/live-state";
+import { getChartDataProvider, getLiveClient } from "@/lib/tv/data";
+import { useDisplayPriceTokenUsd, usePriceFreshness } from "@/hooks/usePriceFreshness";
 import {
   RESOLUTION_SECONDS,
   type ProviderBar,
@@ -122,10 +122,6 @@ function PerpChartInner({ slabAddress }: Props) {
   const liqPriceRef = useRef<number | null>(null);
   const [lastPrice, setLastPrice] = useState<number | null>(null); // the shown series' newest value
   const [markPrice, setMarkPrice] = useState<number | null>(null);
-  const [lastTickAt, setLastTickAt] = useState<number | null>(null);
-  // The display price (shared price store) is a live price too: lib/chart/live-state.ts.
-  const [lastDisplayAt, setLastDisplayAt] = useState<number | null>(null);
-  const [nowTick, setNowTick] = useState(0);
 
   // ── chart instance (once) ────────────────────────────────────────────────
   useEffect(() => {
@@ -353,7 +349,6 @@ function PerpChartInner({ slabAddress }: Props) {
   // ── header feed: independent of the candle series (mark line, price, liveness) ──
   useEffect(() => {
     setMarkPrice(null);
-    setLastTickAt(null);
     const live = getLiveClient();
     if (!live) return;
     const off = live.subscribe(slabAddress, {
@@ -362,7 +357,6 @@ function PerpChartInner({ slabAddress }: Props) {
         if (m.mark !== null) setMarkPrice(m.mark);
         if (series === "oracle" && m.oracle !== null) setLastPrice(m.oracle);
         else if (series === "mark" && m.mark !== null) setLastPrice(m.mark);
-        setLastTickAt(now);
         const p = probe();
         if (p) { p.push({ slab: slabAddress, seq: m.seq, landedMs: m.landedMs, recvMs: m.recvMs, wsMs: now, paintMs: null }); if (p.length > 2000) p.shift(); }
       },
@@ -370,25 +364,20 @@ function PerpChartInner({ slabAddress }: Props) {
     return off;
   }, [slabAddress, series]);
 
-  // Liveness from the display price, independent of the tick channel (the v2.2 price-WS publishes only this one).
-  useEffect(() => {
-    setLastDisplayAt(null);
-    return subscribeDisplayPrice(slabAddress, () => setLastDisplayAt(Date.now()));
-  }, [slabAddress]);
-
-  // 1 Hz re-render for the "age" readout only.
-  useEffect(() => {
-    const id = setInterval(() => setNowTick((n) => n + 1), 1000);
-    return () => clearInterval(id);
-  }, []);
 
   const stats = usePerpHeaderStats(slabAddress, lastPrice, series);
-  void nowTick;
-  const { state: liveState, ageMs } = chartLiveState({ tickAt: lastTickAt, displayAt: lastDisplayAt, now: Date.now() });
+  // One freshness clock for this marker, this price and the page header badge (lib/price-freshness.ts): a tick, a
+  // live display price or a moved on-chain price advances it; it re-reads once a second, so a dead feed goes
+  // Live → Delayed → Offline here and in the header together.
+  const { state: liveState, ageMs } = usePriceFreshness(slabAddress);
+  // The v2.2 price-WS publishes the display price and no ticks, so the series may have no value of its own: show the
+  // page header's price (same store, per token) rather than "—" beside a "$" header. "Last" is trades only.
+  const displayPrice = useDisplayPriceTokenUsd(slabAddress);
+  const shownPrice = lastPrice ?? (series === "last" ? null : displayPrice);
 
   return (
     <div className="flex h-[clamp(460px,68svh,700px)] w-full flex-col rounded-sm lg:h-full border border-[var(--border)] bg-[var(--panel-bg)]" data-testid="perp-chart">
-      <PerpChartHeader price={lastPrice} stats={stats} live={liveState} ageSec={ageMs === null ? null : ageMs / 1000} seriesLabel={SERIES_LABEL[series]} />
+      <PerpChartHeader price={shownPrice} stats={stats} live={liveState} ageSec={ageMs === null ? null : ageMs / 1000} seriesLabel={SERIES_LABEL[series]} />
       <div className="flex items-center gap-2 border-y border-[var(--border)] px-2 py-1">
         <PerpSeriesToggle value={series} onChange={(s) => seriesStore.set(s)} />
         {/* Off-screen liq indicator lives in the chrome strip, not over the chart area. */}

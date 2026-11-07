@@ -42,7 +42,6 @@ const h = vi.hoisted(() => ({
   barHandlers: null as null | { onBar(b: unknown): void; onReset?(): void },
   subscribeCalls: 0,
   tickHandlers: null as null | { onTick(m: unknown): void },
-  displayHandler: null as null | (() => void),
 }));
 vi.mock("@/lib/tv/data", () => ({
   getChartDataProvider: () => ({
@@ -51,7 +50,6 @@ vi.mock("@/lib/tv/data", () => ({
   }),
   getLiveClient: () => ({ subscribe: (_s: string, handlers: { onTick(m: unknown): void }) => { h.tickHandlers = handlers; return () => { h.tickHandlers = null; }; } }),
   perpChartEnabled: () => true,
-  subscribeDisplayPrice: (_s: string, onUpdate: () => void) => { h.displayHandler = onUpdate; return () => { h.displayHandler = null; }; },
 }));
 const lineState = vi.hoisted(() => ({ v: { liq: 0.0021 as number | null, entry: 0.0034 as number | null, entryIsEstimate: false } }));
 vi.mock("@/hooks/usePositionLinePrices", () => ({ usePositionLinePrices: () => lineState.v }));
@@ -326,32 +324,52 @@ describe("PerpChart", () => {
     expect(created.removed).toBe(1);
   });
 
+  // The real getLiveClient (lib/tv/data) stamps the shared freshness clock on every tick before the chart sees it;
+  // this mock replaces it, so the test stamps the clock the same way (lib/price-freshness.ts).
+  const emitTick = async (m: TickMessage) => {
+    const { markPriceFresh } = await import("@/lib/price-freshness");
+    act(() => { markPriceFresh(SLAB); h.tickHandlers!.onTick(m); });
+  };
+
   it("the header goes Offline with no ticks and Live right after one", async () => {
     await mount();
     expect(await screen.findByText("Offline")).toBeInTheDocument();
     await waitFor(() => expect(h.tickHandlers).not.toBeNull());
-    act(() => h.tickHandlers!.onTick(tick(1, 1, 1)));
+    await emitTick(tick(1, 1, 1));
     expect(await screen.findByText(/^Live \d/)).toBeInTheDocument();
   });
 
-  // Council 2026-11-06-go1106-ux, Trader + First-timer: "the chart box says 'Offline' / 'Chart history isn't available
-  // on this deployment' while the header shows LIVE." The v2.2 price-WS pushes the display price (type "price"), not
-  // the indexer's `tick` channel, so the badge only ever saw silence while the price ticked. A display-price update
-  // is a live price too.
-  it("the header reads Live when the display price is updating, even with no tick channel", async () => {
+  // Council 2026-11-06-go1106-ux, Trader + First-timer: "the chart box says 'Offline' ... while the header shows LIVE."
+  // The v2.2 price-WS pushes the display price (type "price"), not the indexer's `tick` channel. A live display price
+  // stamps the shared clock in the price store (lib/priceStore/priceStore.ts), and the marker reads that clock.
+  it("the header reads Live when the display price is fresh, even with no tick channel", async () => {
     h.getBars.mockResolvedValue({ bars: [], noMoreHistory: true, source: "perp-mark", unavailable: "not-configured" });
     await mount();
     expect(await screen.findByText("Offline")).toBeInTheDocument();
-    await waitFor(() => expect(h.displayHandler).not.toBeNull());
-    act(() => h.displayHandler!());
+    const { markPriceFresh } = await import("@/lib/price-freshness");
+    act(() => markPriceFresh(SLAB));
     expect(await screen.findByText(/^Live \d/)).toBeInTheDocument();
     expect(screen.queryByText("Offline")).not.toBeInTheDocument();
   });
 
-  it("the display-price subscription is torn down on unmount", async () => {
-    const { unmount } = await mount();
-    await waitFor(() => expect(h.displayHandler).not.toBeNull());
-    unmount();
-    expect(h.displayHandler).toBeNull();
+  // Council council-leftovers run 2, finding 1 (dead feed): the marker must age on its own, once a second.
+  it("a dead feed ages the marker: a price 30 s old reads Delayed, one 61 s old reads Offline", async () => {
+    await mount();
+    const { markPriceFresh, __resetPriceFreshnessForTests } = await import("@/lib/price-freshness");
+    act(() => markPriceFresh(SLAB, Date.now() - 30_000));
+    expect(await screen.findByText(/^Delayed \d+s/, undefined, { timeout: 2500 })).toBeInTheDocument();
+    act(() => { __resetPriceFreshnessForTests(); markPriceFresh(SLAB, Date.now() - 61_000); });
+    expect(await screen.findByText("Offline", undefined, { timeout: 2500 })).toBeInTheDocument();
+  });
+
+  // Council council-leftovers run 2, finding 1: chart PRICE read "—" next to a "$" header price. With no series value
+  // of its own (no history, no ticks) the chart shows the page header's display price from the same store.
+  it("with no series value the chart price is the display price, not \"—\"", async () => {
+    h.getBars.mockResolvedValue({ bars: [], noMoreHistory: true, source: "perp-mark", unavailable: "not-configured" });
+    await mount();
+    expect(await screen.findByTestId("perp-price")).toHaveTextContent("—");
+    const { applyOnChainPoll } = await import("@/lib/priceStore/priceStore");
+    act(() => { applyOnChainPoll(SLAB, 151_250_000n); });
+    await waitFor(() => expect(screen.getByTestId("perp-price").textContent).toMatch(/151\.2/));
   });
 });

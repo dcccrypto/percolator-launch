@@ -13,6 +13,7 @@ import { createLiveClient, wsToHttpBase, type LiveClient, type WsLike } from "@/
 import { getSeriesStore } from "@/lib/chart/perp-series";
 import { getWsManager } from "@/lib/priceStore/wsManager";
 import { getPriceWsUrl } from "@/lib/price-ws-url";
+import { markPriceFresh } from "@/lib/price-freshness";
 
 let provider: ChartDataProvider | null = null;
 let liveClient: LiveClient | null = null;
@@ -29,17 +30,6 @@ const priceStoreMarks: MarkStream = {
     return p != null && Number.isFinite(p) && p > 0 ? p : null;
   },
 };
-
-/**
- * Calls `onUpdate` whenever the market's DISPLAY price (the shared price store, the same feed as the page header)
- * moves. The chart uses it as a liveness signal next to its own tick channel (lib/chart/live-state.ts).
- */
-export function subscribeDisplayPrice(slab: string, onUpdate: () => void): () => void {
-  return subscribeSlab(slab, () => {
-    const p = getSnapshot(slab).priceUsd;
-    if (p != null && Number.isFinite(p) && p > 0) onUpdate();
-  });
-}
 
 /** NEXT_PUBLIC_PERP_CHART=0 is the rollback switch back to the trade-built candles-api provider alone. */
 export function perpChartEnabled(): boolean {
@@ -60,7 +50,11 @@ export function getLiveClient(): LiveClient | null {
       onStatusChange: (listener) => getWsManager(wsUrl).onStatusChange(listener),
       getStatus: () => getWsManager(wsUrl).getStatus(),
     };
-    liveClient = createLiveClient({ ws, httpBase: wsToHttpBase(wsUrl), fetchJson: (url) => fetch(url, { cache: "no-store" }) });
+    const inner = createLiveClient({ ws, httpBase: wsToHttpBase(wsUrl), fetchJson: (url) => fetch(url, { cache: "no-store" }) });
+    // Every chart tick is a fresh price on the shared clock (lib/price-freshness.ts) that the header badge also reads.
+    liveClient = {
+      subscribe: (slab, h) => inner.subscribe(slab, { ...h, onTick: (m) => { markPriceFresh(slab); h.onTick(m); } }),
+    };
   }
   return liveClient;
 }

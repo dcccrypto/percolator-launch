@@ -1,31 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getLiveClient, subscribeDisplayPrice } from "@/lib/tv/data";
+import { getLiveClient } from "@/lib/tv/data";
 import type { PerpSeries } from "@/lib/chart/perp-types";
 import type { LiveState } from "@/components/trade/perp/PerpChartHeader";
-import { chartLiveState } from "@/lib/chart/live-state";
+import { useDisplayPriceTokenUsd, usePriceFreshness } from "@/hooks/usePriceFreshness";
 
 /**
  * Live price of the chosen series from the pushed ticks, plus a live/delayed/offline marker (1 Hz age readout).
- * The marker also counts display-price updates (lib/chart/live-state.ts): the v2.2 price-WS publishes no ticks.
+ * The marker is the market's ONE freshness clock (lib/price-freshness.ts), the one the page header badge reads too:
+ * a chart tick, a live display price or a moved on-chain price advances it. With no tick price of its own (the v2.2
+ * price-WS publishes the display price only) the strip shows the page header's display price, not "—".
  */
 export function usePerpLiveStrip(slab: string, series: PerpSeries): { price: number | null; live: LiveState; ageSec: number | null } {
   const [price, setPrice] = useState<number | null>(null);
-  const [lastAt, setLastAt] = useState<number | null>(null);
-  const [displayAt, setDisplayAt] = useState<number | null>(null);
-  const [, setBeat] = useState(0);
-
-  // Live/offline is the market's feed, not the series: only a market switch clears it. A series switch
-  // clears the price alone (the Mark price under an "Oracle" label would be wrong; "—" until a tick is not).
-  useEffect(() => setLastAt(null), [slab]);
 
   useEffect(() => {
-    setDisplayAt(null);
-    return subscribeDisplayPrice(slab, () => setDisplayAt(Date.now()));
-  }, [slab]);
-
-  useEffect(() => {
+    // A series switch clears the price alone (the Mark price under an "Oracle" label would be wrong).
     setPrice(null);
     const client = getLiveClient();
     if (!client) return;
@@ -38,7 +29,6 @@ export function usePerpLiveStrip(slab: string, series: PerpSeries): { price: num
       onTick: (m) => {
         const p = series === "oracle" ? m.oracle : m.mark;
         if (p != null && !(series === "last" && traded)) setPrice(p);
-        setLastAt(Date.now());
       },
       onTrade: (t) => {
         if (series !== "last") return;
@@ -48,11 +38,8 @@ export function usePerpLiveStrip(slab: string, series: PerpSeries): { price: num
     });
   }, [slab, series]);
 
-  useEffect(() => {
-    const id = setInterval(() => setBeat((n) => n + 1), 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  const { state: live, ageMs } = chartLiveState({ tickAt: lastAt, displayAt, now: Date.now() });
-  return { price, live, ageSec: ageMs === null ? null : ageMs / 1000 };
+  const { state: live, ageMs } = usePriceFreshness(slab);
+  const displayPrice = useDisplayPriceTokenUsd(slab);
+  const shown = price ?? (series === "last" ? null : displayPrice);
+  return { price: shown, live, ageSec: ageMs === null ? null : ageMs / 1000 };
 }
