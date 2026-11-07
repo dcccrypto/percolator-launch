@@ -40,7 +40,7 @@ describe("runtime price-WS URL wiring", () => {
 
   it("the middleware CSP allows the request-time URL", () => {
     const mw = code("middleware.ts");
-    expect(mw).toMatch(/priceWsConnectSrc\(resolveServerPriceWsUrl\(process\.env\)\)/);
+    expect(mw).toMatch(/priceWsConnectSrc\(resolveServerPriceWsUrl\(process\.env\), \{ allowLocalWs: process\.env\.NODE_ENV !== "production" \}\)/);
     expect(mw).not.toMatch(/priceWsConnectSrc\(process\.env\.NEXT_PUBLIC_WS_URL\)/);
   });
 });

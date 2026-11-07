@@ -102,3 +102,16 @@ describe("getPriceWsUrl (browser)", () => {
     }
   });
 });
+
+// Council council-leftovers run 2, #2: one predicate for "served" and "allowed". The production CSP never allows
+// ws://, so in production ws:// (even to localhost) is refused here too.
+describe("normalizePriceWsUrl in production", () => {
+  it("refuses ws:// to a local server when local ws is not allowed (production)", () => {
+    expect(normalizePriceWsUrl("ws://localhost:8797", { allowLocalWs: false })).toBeNull();
+    expect(normalizePriceWsUrl("wss://feed.example.com", { allowLocalWs: false })).toBe("wss://feed.example.com");
+  });
+  it("resolveServerPriceWsUrl follows the env's NODE_ENV", () => {
+    expect(resolveServerPriceWsUrl({ NODE_ENV: "production", PRICE_WS_URL: "ws://localhost:8797" })).toBe("");
+    expect(resolveServerPriceWsUrl({ NODE_ENV: "development", PRICE_WS_URL: "ws://localhost:8797" })).toBe("ws://localhost:8797");
+  });
+});

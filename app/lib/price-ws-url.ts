@@ -11,8 +11,15 @@
  *           CSP connect-src, so the socket the browser opens is also the one the CSP allows.
  *   browser getPriceWsUrl(): the value /api/runtime-config set on window before hydration (app/layout.tsx loads it
  *           with strategy="beforeInteractive"), else the build-time NEXT_PUBLIC_WS_URL.
- * With PRICE_WS_URL unset everything resolves exactly as before. Only wss:// URLs (and ws:// to a local server) are
- * accepted; anything else counts as unset.
+ * With PRICE_WS_URL unset everything resolves exactly as before.
+ *
+ * ONE predicate decides what is a usable URL, and the CSP connect-src is built from its output (lib/price-ws-csp.ts),
+ * so a URL that is served is always a URL the browser is allowed to open (Council council-leftovers run 2, #2: a
+ * ws://localhost value was served by /api/runtime-config but refused by the production CSP):
+ *   - wss:// to any host: accepted, everywhere;
+ *   - ws:// to a local server (localhost / 127.0.0.1 / [::1]): accepted only outside production (`next dev`, tests),
+ *     where the dev CSP allows ws://localhost:*; in production it counts as unset (feed off, REST / on-chain seed);
+ *   - anything else (other schemes, credentials, garbage): unset.
  */
 
 /** window[PRICE_WS_RUNTIME_GLOBAL] = { priceWsUrl } — set by /api/runtime-config. */
@@ -23,8 +30,20 @@ export const RUNTIME_CONFIG_PATH = "/api/runtime-config";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
-/** A usable price-WS URL, trimmed, or null. */
-export function normalizePriceWsUrl(raw: string | undefined | null): string | null {
+/** ws:// to a local server is a development convenience only (the production CSP never allows it). */
+function localWsAllowedByDefault(): boolean {
+  return process.env.NODE_ENV !== "production";
+}
+
+/**
+ * A usable price-WS URL, trimmed, or null. `allowLocalWs` defaults to "not production" (process.env.NODE_ENV, inlined
+ * by Next in client bundles); the server passes the NODE_ENV of the env it resolves from.
+ */
+export function normalizePriceWsUrl(
+  raw: string | undefined | null,
+  opts: { allowLocalWs?: boolean } = {},
+): string | null {
+  const allowLocalWs = opts.allowLocalWs ?? localWsAllowedByDefault();
   const v = (raw ?? "").trim();
   if (!v) return null;
   let u: URL;
@@ -35,13 +54,14 @@ export function normalizePriceWsUrl(raw: string | undefined | null): string | nu
   }
   if (u.username || u.password || !u.hostname) return null;
   if (u.protocol === "wss:") return v;
-  if (u.protocol === "ws:" && LOCAL_HOSTS.has(u.hostname)) return v;
+  if (u.protocol === "ws:" && allowLocalWs && LOCAL_HOSTS.has(u.hostname)) return v;
   return null;
 }
 
 /** Server, per request. `env` is passed in so tests (and the middleware) say exactly what they read. */
 export function resolveServerPriceWsUrl(env: Record<string, string | undefined>): string {
-  return normalizePriceWsUrl(env.PRICE_WS_URL) ?? normalizePriceWsUrl(env.NEXT_PUBLIC_WS_URL) ?? "";
+  const opts = { allowLocalWs: env.NODE_ENV !== "production" };
+  return normalizePriceWsUrl(env.PRICE_WS_URL, opts) ?? normalizePriceWsUrl(env.NEXT_PUBLIC_WS_URL, opts) ?? "";
 }
 
 /** The body of /api/runtime-config: sets a frozen config object on window. `<` is escaped so it can't close a tag. */
@@ -64,6 +84,6 @@ export function getPriceWsUrl(): string {
       if (ok) return ok;
     }
   }
-  // Literal access so Next inlines the build-time value into client bundles.
-  return process.env.NEXT_PUBLIC_WS_URL ?? "";
+  // Literal access so Next inlines the build-time value into client bundles. Same predicate as the server and the CSP.
+  return normalizePriceWsUrl(process.env.NEXT_PUBLIC_WS_URL) ?? "";
 }

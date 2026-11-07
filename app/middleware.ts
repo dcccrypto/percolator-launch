@@ -619,8 +619,8 @@ function addSecurityHeaders(response: NextResponse, nonce?: string) {
   const devLocalWs = isDev ? "ws://localhost:* http://localhost:* " : "";
   // The configured price-WS origin itself (exact host only; lib/price-ws-csp.ts), resolved per request the same way
   // /api/runtime-config resolves it for the browser (PRICE_WS_URL, else NEXT_PUBLIC_WS_URL; lib/price-ws-url.ts).
-  // Empty unless that URL is a wss:// URL.
-  const priceWs = priceWsConnectSrc(resolveServerPriceWsUrl(process.env));
+  // Built from the same predicate's output (lib/price-ws-csp.ts): served ⇔ allowed. Production: wss:// only.
+  const priceWs = priceWsConnectSrc(resolveServerPriceWsUrl(process.env), { allowLocalWs: process.env.NODE_ENV !== "production" });
   const csp = [
     "default-src 'self'",
     // challenges.cloudflare.com: Turnstile widget script (api.js). Loaded
