@@ -163,3 +163,52 @@ describe("N12: the Deposit tab's wallet balance follows a stake withdraw", () =>
     expect(screen.queryByText(/Exceeds your wallet balance/i)).toBeNull();
   });
 });
+
+describe("a refused withdraw re-reads the position, so the retry is quoted on fresh data", () => {
+  it("Withdraw All refused (36): the LP position is read again", async () => {
+    h.fetch.mockResolvedValue(okResponse([apiPool(SLAB_OK, "AAA")]));
+    h.getAccountInfo.mockImplementation(async (pk: PublicKey) => {
+      if (pk.equals(poolPdaOk)) return { data: poolAccountData(), owner: STAKE_PROGRAM, lamports: 1, executable: false };
+      if (pk.equals(lpAta)) return { data: lpTokenAccountData(500_000_000n), owner: TOKEN_PROGRAM_ID, lamports: 1, executable: false };
+      return null;
+    });
+    h.withdraw.mockRejectedValue(new Error("custom program error: 0x24"));
+    const lpReads = () => h.getAccountInfo.mock.calls.filter(([pk]) => (pk as PublicKey).equals(lpAta)).length;
+
+    render(<StakePage />);
+    const button = await screen.findByText(/Withdraw All/);
+    await waitFor(() => expect(lpReads()).toBeGreaterThan(0));
+    const before = lpReads();
+    await act(async () => { fireEvent.click(button); });
+
+    expect(h.withdraw).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(lpReads()).toBeGreaterThan(before));
+    // The re-read keeps the card mounted, so the refusal line stays on screen.
+    await waitFor(() => expect(screen.getByTestId("stake-error")).toBeTruthy());
+  });
+
+  it("the Withdraw tab's withdraw refused (36): the selected pool's position is read again", async () => {
+    h.fetch.mockResolvedValue(okResponse([apiPool(SLAB_OK, "AAA")]));
+    h.getAccountInfo.mockImplementation(async (pk: PublicKey) => {
+      if (pk.equals(poolPdaOk)) return { data: poolAccountData(), owner: STAKE_PROGRAM, lamports: 1, executable: false };
+      if (pk.equals(lpAta)) return { data: lpTokenAccountData(500_000_000n), owner: TOKEN_PROGRAM_ID, lamports: 1, executable: false };
+      return null;
+    });
+    h.withdraw.mockRejectedValue(new Error("custom program error: 0x24"));
+    const lpReads = () => h.getAccountInfo.mock.calls.filter(([pk]) => (pk as PublicKey).equals(lpAta)).length;
+
+    render(<StakePage />);
+    await act(async () => { fireEvent.click(await screen.findByTestId("stake-tab-withdraw")); });
+    const input = await screen.findByTestId("stake-withdraw-input");
+    await waitFor(() => expect((input as HTMLInputElement).disabled).toBe(false));
+    fireEvent.change(input, { target: { value: "100" } });
+    const submit = screen.getByTestId("stake-withdraw-submit");
+    await waitFor(() => expect((submit as HTMLButtonElement).disabled).toBe(false));
+    const before = lpReads();
+    await act(async () => { fireEvent.click(submit); });
+
+    expect(h.withdraw).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(lpReads()).toBeGreaterThan(before));
+    await waitFor(() => expect(screen.getByTestId("stake-error")).toBeTruthy());
+  });
+});

@@ -546,6 +546,9 @@ function PositionCard({
     } catch (e) {
       const msg = stakeErrorMessage(e); // #26: never raw chain text
       setTxStatus({ type: "error", msg });
+      // Re-read too: a refusal such as 36 (the liquid part shrank since the read) was quoted on old data, and the retry would
+      // sign the same LP amount until the next refresh.
+      onWithdrawSuccess?.();
     }
   }, [withdraw, position, onWithdrawSuccess]);
 
@@ -966,6 +969,7 @@ function DepositWidget({
     } catch (e) {
       const msg = stakeErrorMessage(e); // #26: never raw chain text
       setWithdrawTxStatus({ type: "error", msg });
+      setWithdrawRefreshKey((k) => k + 1); // re-read the max: a refusal (e.g. 36) was quoted on old data
     }
   }, [pool, withdrawPosition, withdrawAmount, withdraw, withdrawLoading, onTxSuccess]);
 
