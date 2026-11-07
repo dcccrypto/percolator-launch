@@ -215,8 +215,8 @@ export function deriveVaultLpMatcherDelegate(programId: PublicKey, market: Publi
 
 /**
  * 94 InitVaultLp (FINAL 07a1d0eb, AUTO-PIN; marketauth only): [marketauth (s,w), market (w),
- * registry (w), vault_lp_state (w, fresh PDA), lp_portfolio (w, pre-created program-owned,
- * portfolio length), system, own ledger, sibling ledger, matcher_program (== the canonical one),
+ * registry (w), vault_lp_state (w, fresh PDA), lp_portfolio (s,w; pre-created program-owned,
+ * portfolio length, rent-exempt; it SIGNS since prog #684, so the caller must add its keypair to the tx signers), system, own ledger, sibling ledger, matcher_program (== the canonical one),
  * matcher_ctx (w, pre-created, owner = matcher, zeroed), matcher_delegate]. Data is still only
  * junior_floor_bps: the program approves the canonical matcher and pins the protocol's vAMM
  * params + price-derived finite caps itself. No creator input; trading opens right after
@@ -230,7 +230,7 @@ export function buildInitVaultLpIx(m: VaultLpMarket, marketauth: PublicKey, juni
       meta(m.market, false, true),
       meta(m.registry, false, true),
       meta(m.vaultLpState, false, true),
-      meta(m.lpPortfolio, false, true),
+      meta(m.lpPortfolio, true, true), // prog #684: the LP portfolio must SIGN (D26 pattern); its fresh keypair already signs the createAccount
       meta(SystemProgram.programId, false, false),
       meta(m.ledger, false, true),
       meta(m.siblingLedger, false, true),
