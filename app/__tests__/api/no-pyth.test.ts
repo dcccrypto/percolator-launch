@@ -59,7 +59,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("/api/oracle/resolve without Pyth", () => {
   it("SOL (formerly a pinned Pyth feed) resolves to its DEX pool, keeper-priced; no Pyth anywhere", async () => {
     stubFetch({
-      dex: { pairs: [{ chainId: "solana", dexId: "meteora", pairAddress: SOL_POOL, priceUsd: "118", liquidity: { usd: 9e7 }, baseToken: { symbol: "SOL" } }] },
+      dex: { pairs: [{ chainId: "solana", dexId: "meteora", pairAddress: SOL_POOL, priceUsd: "118", liquidity: { usd: 9e7 }, baseToken: { symbol: "SOL", address: SOL } }] },
       jup: { [SOL]: { usdPrice: 118.2 } },
     });
     owner.classify.mockResolvedValue({ [SOL_POOL]: "meteora-dlmm" });
