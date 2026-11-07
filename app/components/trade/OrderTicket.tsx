@@ -773,6 +773,24 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // Shows the typed text ("1,", "1,000") while sizeInput holds the dot value (N27 follow-up).
   const sizeField = useDecimalInput(sizeInput, handleSizeChange);
 
+  /**
+   * "Use 1 lot" (v22-mediums 1107, live 5e54bab7d): fill exactly ONE lot, in TOKEN units. A dollar fill ($64.33) is
+   * re-divided by the ticking live price on every render, so an uptick of more than a cent per lot put the order back
+   * under the minimum. A typed whole-lot token size is pinned by lotOrderQ, so it holds whatever the next tick. The unit
+   * is passed explicitly (applySize would still read the old "usd" unit in this same click).
+   */
+  const fillOneLot = useCallback(() => {
+    if (!livePriceE6) return;
+    const oneLot = sizeQToInput(POS_SCALE_V22, "token", livePriceE6, lotExp);
+    setRefusal(null);
+    setResult(null);
+    setClampedToQ(null);
+    setPendingTx((p) => (p?.state === "watching" ? p : null));
+    setSizeUnit("token");
+    setSizeInput(oneLot);
+    recomputeFromSize(oneLot, "token", leverage);
+  }, [livePriceE6, lotExp, leverage, recomputeFromSize]);
+
   const toggleSizeUnit = useCallback(() => {
     setSizeUnit((prev) => {
       const next = prev === "token" ? "usd" : "token";
@@ -2106,7 +2124,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <button
               type="button"
               data-testid="lot-use-one"
-              onClick={() => livePriceE6 && handleSizeChange(sizeQToInput(POS_SCALE_V22, sizeUnit, livePriceE6, lotExp, "up"))}
+              onClick={fillOneLot}
               className="font-semibold text-[var(--accent)] underline underline-offset-2 hover:brightness-110"
             >
               Use 1 lot

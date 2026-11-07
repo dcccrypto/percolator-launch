@@ -10,6 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   bandView: null as unknown,
   lotExp: 0,
+  /** Per-LOT live mark (e6). Mutable so a test can tick the price between renders (getLivePriceSnapshot is read per render). */
+  priceE6: 66_120_000n,
   scanPending: false,
   useWalletCompat: vi.fn(),
   useConnectionCompat: vi.fn(),
@@ -40,7 +42,7 @@ vi.mock("@/hooks/useEngineFreshness", () => ({ useEngineFreshness: () => ({ engi
 vi.mock("@/hooks/usePrivySafe", () => ({ usePrivyLogin: () => vi.fn(), usePrivyAvailable: () => false }));
 vi.mock("@/hooks/useWalletAdapterAvailable", () => ({ useWalletAdapterAvailable: () => true }));
 vi.mock("@/lib/mock-mode", () => ({ isMockMode: () => false }));
-vi.mock("@/lib/priceStore/priceStore", async (orig) => ({ ...(await orig<object>()), getLivePriceSnapshot: () => ({ priceUsd: 66.12, priceE6: 66_120_000n }) }));
+vi.mock("@/lib/priceStore/priceStore", async (orig) => ({ ...(await orig<object>()), getLivePriceSnapshot: () => ({ priceUsd: Number(mocks.priceE6) / 1e6, priceE6: mocks.priceE6 }) }));
 vi.mock("@/lib/v22/lot", async (orig) => ({ ...(await orig<object>()), lotExpOf: () => mocks.lotExp }));
 vi.mock("@/hooks/useLotTradingGuard", () => ({ useLotTradingGuard: () => null }));
 vi.mock("@/lib/mock-trade-data", () => ({ isMockSlab: () => false, getMockUserAccountIdle: () => null, getMockUserAccount: () => null }));
@@ -69,6 +71,7 @@ beforeEach(() => {
   mocks.rawSnap.mockReturnValue(null);
   mocks.closable.mockReturnValue({ closable: false });
   mocks.bandView = null;
+  mocks.priceE6 = 66_120_000n;
   mocks.scanPending = false;
   mocks.useWalletCompat.mockReturnValue({ publicKey: new PublicKey("11111111111111111111111111111111"), connected: true });
   wallet("12000000"); // 12 USDC in the wallet
@@ -116,6 +119,27 @@ describe("council GO1106: the ticket shows the lot-rounded order", () => {
     await act(async () => fireEvent.click(screen.getByTestId("lot-use-one")));
     await waitFor(() => expect(screen.queryByTestId("lot-below-min")).toBeNull());
     expect(submit().disabled).toBe(false);
+  });
+
+  it("v22-mediums 1107 (live): after 'Use 1 lot', a price uptick does not push the order back under one lot", async () => {
+    // Live preview 5e54bab7d: 'Use 1 lot' filled $64.33, the mark then ticked up and the ticket read "Below the 1-lot
+    // minimum" again (submit disabled). A dollar size is re-divided by the live price on every render, so a 1-cent round-up
+    // only survives an uptick of < 1 cent per lot. The one-lot fill must not depend on the next tick.
+    render(<OrderTicket slabAddress={SLAB} />);
+    await waitFor(() => expect(screen.queryByTestId("trade-submit")).not.toBeNull());
+    size("0.5");
+    await screen.findByTestId("lot-below-min");
+    await act(async () => fireEvent.click(screen.getByTestId("lot-use-one")));
+    await waitFor(() => expect(screen.queryByTestId("lot-below-min")).toBeNull());
+    for (const tick of [66_130_000n, 66_200_000n, 67_000_000n]) { // +0.015 %, +0.12 %, +1.3 %
+      mocks.priceE6 = tick;
+      // OrderTicket is memo()ed and reads the price per render: re-render it the way the live page does, via its own state.
+      await act(async () => fireEvent.click(screen.getByTestId("trade-side-short")));
+      await act(async () => fireEvent.click(screen.getByTestId("trade-side-long")));
+      expect(screen.queryByTestId("lot-below-min")).toBeNull();
+      expect(submit().textContent).not.toContain("Below the 1-lot minimum");
+      expect(submit().disabled).toBe(false);
+    }
   });
 
   it("NEGATIVE CONTROL: no lots (lotExp 0) shows neither line", async () => {
