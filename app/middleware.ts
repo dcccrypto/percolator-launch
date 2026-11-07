@@ -5,6 +5,7 @@ import { Ratelimit } from "@upstash/ratelimit";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import { getClientIp } from "@/lib/get-client-ip";
 import { isPlaygroundGateHost } from "@/lib/playground-hosts";
+import { NOINDEX, isAllocationVoteHost, isAllocationVoteSurface } from "@/lib/allocation-vote/host";
 
 // ── Rate limiter configuration ───────────────────────────────────────────────
 // Two tiers: RPC proxy gets a higher limit since Solana web3.js generates many calls per page load.
@@ -258,6 +259,8 @@ const WAITLIST_HOST_ALLOWED_PREFIXES = [
   "/agents",
   "/leaderboard",
   "/openclaw",
+  "/allocation",   // PERC allocation checker (unpublished state); direct URL only, noindex
+  "/vote",         // PERC holder vote (disabled); direct URL only, noindex
 ];
 // Crawler-facing metadata routes (Next.js file conventions + static SEO files).
 // These have no file extension (or a non-asset one like .xml/.txt) so they'd
@@ -305,6 +308,15 @@ export async function middleware(request: NextRequest) {
       "https://percolator.trade",
     );
     return NextResponse.redirect(target, { status: 301 });
+  }
+
+  // ── Allocation checker + holder vote exist only on percolator.trade ───────
+  // Pages AND APIs. Exact Host match (never x-forwarded-host or a substring),
+  // so mainnet.percolatorlaunch.com, previews, localhost and lookalikes 404
+  // exactly as if the routes had never been added.
+  const isAllocVote = isAllocationVoteSurface(request.nextUrl.pathname);
+  if (isAllocVote && !isAllocationVoteHost(request.headers.get("host"))) {
+    return new NextResponse("Not Found", { status: 404, headers: { "X-Robots-Tag": NOINDEX } });
   }
 
   // Waitlist host: rewrite root to /waitlist, redirect everything non-allowed to /waitlist
@@ -458,6 +470,7 @@ export async function middleware(request: NextRequest) {
     response.headers.set("X-RateLimit-Remaining", String(remaining));
     response.headers.set("X-RateLimit-Reset", String(reset));
     addSecurityHeaders(response);
+    if (isAllocVote) response.headers.set("X-Robots-Tag", NOINDEX);
     return response;
   }
 
@@ -476,6 +489,7 @@ export async function middleware(request: NextRequest) {
   // A cached response would carry the old nonce in data-nonce while the middleware
   // generates a fresh nonce for the CSP header — making the nonce effectively static.
   response.headers.set("Cache-Control", "no-store, must-revalidate");
+  if (isAllocVote) response.headers.set("X-Robots-Tag", NOINDEX);
   return response;
 }
 
