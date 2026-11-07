@@ -23,8 +23,8 @@ const base = { funded: true, usdc_amount: 10_000, usdc_sig: "usdcsig111", nextCl
 async function claim(body: Record<string, unknown>) {
   fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ ...base, ...body }) });
   render(<FaucetPage />);
-  fireEvent.click(screen.getByRole("button", { name: /Get 10,000 Sim-USDC/ }));
-  await screen.findByText(/Sim-USDC minted/);
+  fireEvent.click(screen.getByRole("button", { name: /Get 10,000 USDC/ }));
+  await screen.findByText(/USDC minted/);
 }
 
 beforeEach(() => {

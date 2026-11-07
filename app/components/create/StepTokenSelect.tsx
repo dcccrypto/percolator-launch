@@ -10,6 +10,7 @@ import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { formatHumanAmount } from "@/lib/parseAmount";
 import { isValidBase58Pubkey } from "@/lib/createWizardUtils";
 import { getNetwork } from "@/lib/config";
+import { COLLATERAL_MINT_REASON, isCollateralMint } from "@/lib/creator-copy";
 import type { DuplicateMarket } from "@/hooks/useDuplicateMarket";
 
 /** Derive whether we're on devnet from the live RPC endpoint (not build-time env var). */
@@ -255,8 +256,11 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
   const mintNetworkBlocked = mintValid && (mintNetworkStatus === "loading" || mintNetworkStatus === "invalid");
   // One market per token — an existing market for this CA blocks Continue
   // (server enforces the same rule with a 409 at registration).
-  const duplicateBlocked = mintValid && duplicateMarkets.length > 0;
-  const effectiveCanContinue = canContinue && !mintNetworkBlocked && !duplicateBlocked;
+  // The devnet collateral mint is stored as every market's mint_address, so the duplicate check "finds" all of them;
+  // the real reason is that it is the collateral (Council GO1106-UX Creator). It takes precedence over the duplicate box.
+  const collateralPasted = mintValid && isDevnet && isCollateralMint(mintAddress);
+  const duplicateBlocked = mintValid && !collateralPasted && duplicateMarkets.length > 0;
+  const effectiveCanContinue = canContinue && !mintNetworkBlocked && !duplicateBlocked && !collateralPasted;
 
   return (
     <div className="space-y-5">
@@ -332,9 +336,9 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
               <p className="text-[10px] font-mono text-[var(--text-secondary)] truncate">
                 {debounced.slice(0, 6)}...{debounced.slice(-4)}
               </p>
-              {isDevnet && (
+              {isDevnet && !collateralPasted && (
                 <p className="text-[9px] text-[var(--accent)]/60 mt-0.5">
-                  ✓ Priced off this token&apos;s mainnet DEX pool — collateral is Sim-USDC
+                  ✓ Priced off this token&apos;s mainnet DEX pool — collateral is test USDC
                 </p>
               )}
             </div>
@@ -346,6 +350,12 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
               </p>
             </div>
           )}
+        </div>
+      )}
+
+      {collateralPasted && (
+        <div className="border border-[var(--short)]/30 bg-[var(--short)]/[0.04] p-4" role="alert" data-testid="create-collateral-mint-blocked">
+          <p className="text-[11px] font-semibold text-[var(--short)]">✗ {COLLATERAL_MINT_REASON}</p>
         </div>
       )}
 

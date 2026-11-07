@@ -30,7 +30,8 @@ import { watchPendingSignature } from '@/lib/pending-signature';
 import { explorerTxUrl } from '@/lib/config';
 import { ConnectButton } from "@/components/wallet/ConnectButtonLazy";
 import { lpShareWalletNote, lpShareWalletNoteV22 } from '@/lib/lp-share-wallet-note';
-import { useDecimalInput } from '@/hooks/useDecimalInput';
+import { useStrictDecimalInput } from '@/hooks/useDecimalInput';
+import { amountPrecisionProblem } from '@/lib/decimal-input';
 
 
 type Tab = 'deposit' | 'withdraw';
@@ -252,7 +253,8 @@ export function DepositWithdrawPanel({
   const { connection } = useConnectionCompat();
   const [tab, setTab] = useState<Tab>('deposit');
   const [amount, setAmount] = useState('');
-  const amountField = useDecimalInput(amount, setAmount);
+  // Strict: "-5" / "1e3" / "5 USDC" are refused with a reason, never read as 5 / 13 / 5 (Council GO1106-UX, LP).
+  const { field: amountField, rejection: amountRejection, echo: amountEcho, reset: resetAmountText } = useStrictDecimalInput(amount, setAmount);
   const [submitting, setSubmitting] = useState(false);
   const [txError, setTxError] = useState<string | null>(null);
   const [txSuccess, setTxSuccess] = useState<string | null>(null);
@@ -263,6 +265,8 @@ export function DepositWithdrawPanel({
   const [claimSuccess, setClaimSuccess] = useState<string | null>(null);
   // UX WP-4: the withdrawal is asked for in USDC (a "shares" toggle for those who think in shares).
   const [withdrawUnit, setWithdrawUnit] = useState<'usdc' | 'shares'>('usdc');
+  // A tab or unit switch starts the field fresh: a refused "-5" typed on Deposit must not follow the user to Withdraw (run 2, LP).
+  useEffect(() => resetAmountText(), [tab, withdrawUnit, resetAmountText]);
   // Requested in this page session: the payout prompt opens by itself when the cooldown ends.
   const [armed, setArmed] = useState(false);
   // The payout was refused before signing because the vault can pay only part of it right now.
@@ -353,6 +357,8 @@ export function DepositWithdrawPanel({
     return formatRaw(raw, inputDecimals);
   }, [tab, userBalance, withdrawMaxRaw, inputDecimals]);
   const unitLabel = tab === 'deposit' ? collateralSymbol : withdrawUnit === 'shares' ? 'shares' : collateralSymbol;
+  // What is wrong with the typed amount itself (not the balance): shown under the field, and the form stays shut.
+  const amountError = amountRejection ?? amountPrecisionProblem(amount, inputDecimals, unitLabel);
 
   const displayMaxAmount = loading || !vaultAvailable ? '—' : maxAmount;
 
@@ -506,6 +512,7 @@ export function DepositWithdrawPanel({
   // Validation
   const isValid = useMemo(() => {
     if (loading || !vaultAvailable) return false;
+    if (amountError !== null) return false;
     if (rawAmount <= 0n) return false;
     if (tab === 'deposit' && rawAmount > userBalance) return false;
     if (tab === 'deposit' && depositBlockedReason) return false;
@@ -520,6 +527,7 @@ export function DepositWithdrawPanel({
   }, [
     loading,
     vaultAvailable,
+    amountError,
     rawAmount,
     tab,
     userBalance,
@@ -647,6 +655,8 @@ export function DepositWithdrawPanel({
               inputMode="decimal"
               placeholder="0.00"
               {...amountField}
+              aria-invalid={amountError !== null ? true : undefined}
+              aria-describedby={amountError !== null ? 'earn-amount-input-error' : undefined}
               disabled={loading || !vaultAvailable}
               className="w-full h-12 px-4 pr-16 text-2xl font-mono tabular-nums bg-[var(--bg)] border border-[var(--border)] rounded-sm text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]/40 transition-colors"
             />
@@ -683,14 +693,28 @@ export function DepositWithdrawPanel({
           </div>
         </div>
 
-        {tab === 'deposit' && !loading && rawAmount > userBalance && (
+        {amountError === null && amountEcho !== null && amount !== '' && (
+          // Any comma: say the amount read, in a form no locale misreads (Council council-leftovers run 2, #5).
+          <p role="status" data-testid="earn-amount-echo" className="mb-3 text-[11px] font-mono tabular-nums text-[var(--text-secondary)]">
+            Reads as {amountEcho.amount} {unitLabel}.
+            {amountEcho.alternative !== null && ` For ${amountEcho.alternative} ${unitLabel}, type ${amountEcho.alternative}.`}
+          </p>
+        )}
+
+        {amountError !== null && (
+          <p id="earn-amount-input-error" role="alert" data-testid="earn-amount-input-error" className="mb-3 text-[11px] text-[var(--short)]">
+            {amountError}
+          </p>
+        )}
+
+        {tab === 'deposit' && !loading && amountError === null && rawAmount > userBalance && (
           <p role="alert" data-testid="earn-deposit-amount-error" className="mb-3 text-[11px] text-[var(--short)]">
             Exceeds your wallet balance ({maxAmount} {collateralSymbol} available)
           </p>
         )}
 
         {/* Preview */}
-        {vaultAvailable && rawAmount > 0n && tab === 'deposit' && (
+        {vaultAvailable && amountError === null && rawAmount > 0n && tab === 'deposit' && (
           <div className="mb-4 p-3 bg-[var(--bg)] border border-[var(--border)] rounded-sm">
             <p data-testid="earn-deposit-preview" className="text-[12px] font-mono tabular-nums text-[var(--text)]">
               {depositRefused ? WC.depositRefused[depositRefused] : WC.depositPreview(
@@ -715,7 +739,7 @@ export function DepositWithdrawPanel({
 
         {/* Withdrawal: one receive line (never "LP tokens will be permanently burned": burning
             shares for USDC IS the withdrawal), and 88 before it happens (max_now). */}
-        {vaultAvailable && rawAmount > 0n && tab === 'withdraw' && (
+        {vaultAvailable && amountError === null && rawAmount > 0n && tab === 'withdraw' && (
           <div className="mb-4 space-y-2">
             <p data-testid="earn-withdraw-receive" className="text-[12px] font-mono tabular-nums text-[var(--text)]">
               {WC.receive(`${formatUsdc(previewCollateral, decimals)} ${collateralSymbol}`, formatShares(withdrawShares, shareDecimals))}

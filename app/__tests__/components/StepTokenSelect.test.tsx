@@ -25,17 +25,21 @@ const mockPublicKey = {
 
 vi.mock("@/hooks/useWalletCompat", () => ({
   useWalletCompat: () => ({ publicKey: null }),
-  useConnectionCompat: () => ({
-    connection: {
-      rpcEndpoint: "https://api.devnet.solana.com",
-      getAccountInfo: vi.fn().mockResolvedValue(null),
-      getParsedAccountInfo: vi.fn().mockResolvedValue({ value: null }),
-    },
-  }),
+  // One stable connection object, as the real hook returns: a fresh object per render re-ran the
+  // validation effect on every render and kept a resolved devnet mint stuck at "loading".
+  useConnectionCompat: () => connMock,
+}));
+const connMock = vi.hoisted(() => ({
+  connection: {
+    rpcEndpoint: "https://api.devnet.solana.com",
+    getAccountInfo: async () => null,
+    getParsedAccountInfo: async () => ({ value: null }),
+  },
 }));
 
+const tokenMetaMock = vi.hoisted(() => ({ value: null as null | { name: string; symbol: string; decimals: number } }));
 vi.mock("@/hooks/useTokenMeta", () => ({
-  useTokenMeta: () => null,
+  useTokenMeta: () => tokenMetaMock.value,
 }));
 
 vi.mock("@/lib/config", () => ({
@@ -169,6 +173,57 @@ describe("StepTokenSelect — GH#1263 debounce race condition", () => {
 // Mirror-mint model removed (2026-07): the playground no longer creates a
 // per-market devnet mirror mint — collateral is always the universal
 // Sim-USDC mint (see CreateMarketWizard.tsx's collateralMintAddress). The
+// Council 2026-11-06-go1106-ux, Creator (low): "Pasting the sim-USDC collateral mint says 'This token already has a
+// market' and links to Percolator, PUMP and PENGU, which is the wrong reason." (shots/cr2-create-simusdc.png)
+describe("StepTokenSelect: pasting the collateral mint", () => {
+  const COLLATERAL = "DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC";
+  const dupes = [
+    { slab: "BbuB3mb5DkFmJLfoaumkbM6eEv3wZDjz9YZokhEgVJv3", symbol: "Percolator" },
+    { slab: "ENdXK8k6iiWCAx4Z9XfoKLg9oXsEbPL4hEtmEmUqozDZ", symbol: "PENGU" },
+  ];
+  const renderWith = (mint: string) =>
+    render(
+      <StepTokenSelect
+        mintAddress={mint}
+        onMintChange={vi.fn()}
+        onTokenResolved={vi.fn()}
+        onBalanceChange={vi.fn()}
+        onMintNetworkValidChange={vi.fn()}
+        onContinue={vi.fn()}
+        canContinue={true}
+        duplicateMarkets={dupes}
+      />,
+    );
+
+  it("says it is the collateral, not 'already has a market', and lists no markets", () => {
+    renderWith(COLLATERAL);
+    expect(screen.getByTestId("create-collateral-mint-blocked").textContent).toMatch(/collateral every market uses/);
+    expect(screen.queryByText(/already has a market/)).toBeNull();
+    expect(screen.queryByRole("link", { name: /PENGU/ })).toBeNull();
+  });
+
+  it("the resolved-token card does not also say '✓ Priced off this token's mainnet DEX pool' (evidence shot 06)", async () => {
+    tokenMetaMock.value = { name: "Sim USDC (devnet)", symbol: "USDC", decimals: 6 };
+    try {
+      renderWith(COLLATERAL);
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 50));
+      });
+      expect(screen.getByTestId("create-collateral-mint-blocked")).toBeTruthy();
+      expect(screen.getByText("Sim USDC (devnet)")).toBeTruthy(); // the resolved card IS on screen
+      expect(screen.queryByText(/Priced off this token/)).toBeNull();
+    } finally {
+      tokenMetaMock.value = null;
+    }
+  });
+
+  it("a real duplicate still shows the one-market-per-token box (negative control)", () => {
+    renderWith(DEVNET_MINT);
+    expect(screen.queryByTestId("create-collateral-mint-blocked")).toBeNull();
+    expect(screen.getByText(/already has a market/)).toBeTruthy();
+  });
+});
+
 // GH#1614 regression tests that used to live here asserted the now-deleted
 // /api/devnet-mirror-mint POST call existed in source; removed along with
 // that code path. See StepTokenSelect.tsx's validation effect doc comment

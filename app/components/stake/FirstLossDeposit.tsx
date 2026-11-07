@@ -84,9 +84,9 @@ export function FirstLossDeposit({ slabAddress, collateralMint, decimals = 6, de
         </p>
       )}
       <dl className="grid grid-cols-3 gap-2 text-[11px]" data-testid="first-loss-params">
-        <div><dt className="text-[var(--text-secondary)]">Target</dt><dd className="tabular-nums text-[var(--text)]" data-testid="fl-target">{pctOfBps(view.targetBps)}</dd></div>
-        <div><dt className="text-[var(--text-secondary)]">Liquid buffer</dt><dd className="tabular-nums text-[var(--text)]" data-testid="fl-buffer">{pctOfBps(view.bufferBps)}</dd></div>
-        <div><dt className="text-[var(--text-secondary)]">Rebalance band</dt><dd className="tabular-nums text-[var(--text)]" data-testid="fl-hysteresis">{pctOfBps(view.hysteresisBps)}</dd></div>
+        <div title={V22_COPY.stake.paramHints.target}><dt className="text-[var(--text-secondary)]">{V22_COPY.stake.paramLabels.target}</dt><dd className="tabular-nums text-[var(--text)]" data-testid="fl-target">{pctOfBps(view.targetBps)}</dd></div>
+        <div title={V22_COPY.stake.paramHints.buffer}><dt className="text-[var(--text-secondary)]">{V22_COPY.stake.paramLabels.buffer}</dt><dd className="tabular-nums text-[var(--text)]" data-testid="fl-buffer">{pctOfBps(view.bufferBps)}</dd></div>
+        <div title={V22_COPY.stake.paramHints.hysteresis}><dt className="text-[var(--text-secondary)]">{V22_COPY.stake.paramLabels.hysteresis}</dt><dd className="tabular-nums text-[var(--text)]" data-testid="fl-hysteresis">{pctOfBps(view.hysteresisBps)}</dd></div>
       </dl>
       <div data-testid="consent-text" className="max-h-48 space-y-2 overflow-y-auto border border-[var(--border)] bg-[var(--bg-surface)] p-3 text-[11px] leading-relaxed text-[var(--text-secondary)]">
         <p data-testid="consent-summary" className="font-medium text-[var(--text)]">{V22_COPY.stake.consentSummary}</p>

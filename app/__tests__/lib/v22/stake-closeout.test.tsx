@@ -85,15 +85,15 @@ describe("decoder: seed and unclaimed", () => {
 describe("close-out copy", () => {
   it("the one-line strings", () => {
     expect(V22_COPY.growth.creatorSeed).toBe("If this market closes, you get back your insurance seed (or what's left of it after losses). Anything above it goes to stakers.");
-    expect(V22_COPY.stake.closeOut.feeOnly).toBe("Fee-only stakers earn nothing while the market runs. When it closes, you share everything above the creator's seed, in proportion to your stake.");
-    expect(V22_COPY.stake.closeOut.firstLoss).toBe("At close, you share everything above the creator's seed in proportion to your stake.");
+    expect(V22_COPY.stake.closeOut.feeOnly).toBe("Fee-only stakers earn nothing while the market runs. When it closes, you share everything above the creator's starting deposit, in proportion to your stake.");
+    expect(V22_COPY.stake.closeOut.firstLoss).toBe("At close, you share everything above the creator's starting deposit in proportion to your stake.");
     expect(V22_COPY.stake.unclaimed("$2.6")).toBe("$2.6 left in the closed pool, not claimable");
   });
   it("a first-loss deposit keeps the risk line and adds the close-out line", () => {
     hook.pool = { riskMode: 1, consentVersion: 2, deployTargetBps: 5000, liquidBufferBps: 3000, hysteresisBps: 500 };
     render(<FirstLossDeposit slabAddress="S" collateralMint="M" decimals={6} />);
     expect(screen.getByTestId("consent-summary")).toHaveTextContent(V22_COPY.stake.consentSummary);
-    expect(screen.getByTestId("consent-closeout")).toHaveTextContent("At close, you share everything above the creator's seed in proportion to your stake.");
+    expect(screen.getByTestId("consent-closeout")).toHaveTextContent("At close, you share everything above the creator's starting deposit in proportion to your stake.");
   });
   it("no line still says the creator gets the fund back in full or that fee-only stakers earn fees while the market runs", () => {
     const all = JSON.stringify(V22_COPY.stake) + JSON.stringify(V22_COPY.growth);

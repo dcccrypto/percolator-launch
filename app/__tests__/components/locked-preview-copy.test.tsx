@@ -15,6 +15,31 @@ describe("QA-0: /locked", () => {
     expect(screen.queryByText("Check my spot")).toBeNull();
     expect(screen.queryByText("Join the waitlist")).toBeNull();
   });
+  // Council 2026-11-06-go1106-ux, First-timer (low): "The locked page names percolator.trade without a link and offers
+  // no way to ask for access." Clerk: "The 'waitlist' half of 'waitlist/enter' is not a working flow on this preview."
+  it("v2.2 preview: offers a request-access path (the team's Discord), opened safely in a new tab", () => {
+    __setDevnetV22ForTest(true);
+    render(<LockedPage />);
+    const link = screen.getByRole("link", { name: /request access/i });
+    expect(link.getAttribute("href")).toBe("https://discord.gg/fJa4BDBxPN");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toMatch(/noopener/);
+    expect(document.body.textContent).toMatch(/ask the team for a tester link/i);
+    const copy = lockedCopy(true, "1,000");
+    expect(copy.requestAccess?.href).toBe("https://discord.gg/fJa4BDBxPN");
+  });
+  it("v2.2 preview: the playground it points to is a link, not bare text", () => {
+    __setDevnetV22ForTest(true);
+    render(<LockedPage />);
+    const link = screen.getByRole("link", { name: /devnet v2 playground/i });
+    expect(link.getAttribute("href")).toBe("https://percolator.trade/playground");
+  });
+  it("playground (flag off): no request-access link (the waitlist links are the path there)", () => {
+    __setDevnetV22ForTest(false);
+    render(<LockedPage />);
+    expect(screen.queryByRole("link", { name: /request access/i })).toBeNull();
+    expect(lockedCopy(false, "1,000").requestAccess).toBeNull();
+  });
   it("playground (flag off): unchanged waitlist copy and links", () => {
     __setDevnetV22ForTest(false);
     render(<LockedPage />);

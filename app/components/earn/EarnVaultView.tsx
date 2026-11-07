@@ -190,7 +190,7 @@ function EarnInfoStrip({ totalInsurance }: { totalInsurance: number | null }) {
     <div data-testid="earn-info" className="mt-8 divide-y divide-[var(--border)] border border-[var(--border)] bg-[var(--panel-bg)]">
       <InfoRow id="how" title="How it works" open={open === 'how'} onToggle={toggle}>
         <ol className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <MiniStep num={1} title="Deposit" desc={isDevnetV22Enabled() ? V22_COPY.earnPage.howDeposit : "Provide sim-USDC as counterparty backing"} />
+          <MiniStep num={1} title="Deposit" desc={isDevnetV22Enabled() ? V22_COPY.earnPage.howDeposit : "Provide USDC as counterparty backing"} />
           <MiniStep num={2} title="Earn fees" desc="Every trade on that market pays a fee share into the vault" />
           <MiniStep num={3} title="Withdraw" desc="Request a withdrawal; it pays out after a short wait" />
         </ol>

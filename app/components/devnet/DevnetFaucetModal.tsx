@@ -19,6 +19,7 @@ import { useDialogFocus } from "@/hooks/useDialogFocus";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useDevnetFaucet } from "@/hooks/useDevnetFaucet";
+import { SIM_USDC_LIMIT_LABEL } from "@/lib/sim-usdc-claim";
 
 /* ── Step indicator ──────────────────────────────────── */
 const StepBadge: FC<{
@@ -373,7 +374,7 @@ export const DevnetFaucetModal: FC = () => {
           </div>
 
           <p className="mt-2 text-center text-[9px] text-[var(--text-dim)]">
-            Devnet tokens have no real value · 1 claim per wallet per day
+            Devnet tokens have no real value · {SIM_USDC_LIMIT_LABEL}
           </p>
         </div>
       </div>

@@ -98,7 +98,7 @@ export const SimUsdcBalance: FC<SimUsdcBalanceProps> = ({
 
   return (
     <div className={`flex items-baseline gap-1.5 ${className}`}>
-      <span className="text-[13px] text-[var(--text-muted)]">Sim-USDC</span>
+      <span className="text-[13px] text-[var(--text-muted)]">USDC</span>
       {loading ? (
         <span className="h-4 w-16 animate-pulse rounded bg-[var(--border)]" />
       ) : error ? (

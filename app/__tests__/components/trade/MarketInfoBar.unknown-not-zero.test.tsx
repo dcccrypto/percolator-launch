@@ -21,6 +21,7 @@ vi.mock("@/components/market/WatchButton", () => ({ WatchButton: () => null }));
 vi.mock("@/components/trade/TokenCopyMenu", () => ({ TokenCopyMenu: () => null }));
 
 import { MarketInfoBar } from "@/components/trade/MarketInfoBar";
+import { markPriceFresh } from "@/lib/price-freshness";
 
 const bar = () => render(<MarketInfoBar slabAddress="S" symbol="SOL" />);
 const oiValue = () => screen.getByText("Open Interest").nextElementSibling?.textContent;
@@ -29,6 +30,8 @@ describe("unknown header figures read '—', not a fake zero (#38)", () => {
   it("no 24h change: '—', not 0.00%", () => {
     h.live = { priceUsd: 100, priceE6: 100_000_000n, change24h: null };
     h.totalOI = null;
+    // A live price (fresh on the shared clock, lib/price-freshness.ts), so the header price carries no "last known" tag.
+    markPriceFresh("S");
     bar();
     expect(screen.queryByText("0.00%")).toBeNull();
     // The badge right after the mark price (not just any "—" in the header).

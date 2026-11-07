@@ -50,11 +50,21 @@ describe("consent text v2", () => {
 });
 
 describe("consent display layer", () => {
-  it("the transform is the ONLY difference between what is shown and the verbatim text", () => {
+  // The display transforms are the ONLY differences from the verbatim text: the field name (review F10), and the two
+  // program internals the Council GO1106-UX Creator / First-timer seats flagged. Every one is pinned here.
+  it("the transforms are the ONLY differences between what is shown and the verbatim text", () => {
     const shown = STAKE_CONSENT_TEXT_V2.map(consentDisplay);
-    expect(shown[0]).toBe(STAKE_CONSENT_TEXT_V2[0].replace("`deploy_target_bps`", "the deployment target"));
-    expect(shown.slice(1)).toEqual(STAKE_CONSENT_TEXT_V2.slice(1));
+    expect(shown[0]).toBe(
+      STAKE_CONSENT_TEXT_V2[0]
+        .replace("`deploy_target_bps`", "the deployment target")
+        .replace(" (the target signed in the consent, including a pending raise)", " (the target you agree to here, including any pending increase)"),
+    );
+    expect(shown[1]).toBe(STAKE_CONSENT_TEXT_V2[1].replace(" (wrapper tag 111, G9)", ""));
+    expect(shown[2]).toBe(STAKE_CONSENT_TEXT_V2[2]);
     expect(shown.join(" ")).not.toContain("`");
+    // each replacement actually matched (a no-op transform would leave the verbatim text in place)
+    expect(shown[0]).not.toBe(STAKE_CONSENT_TEXT_V2[0].replace("`deploy_target_bps`", "the deployment target"));
+    expect(shown[1]).not.toBe(STAKE_CONSENT_TEXT_V2[1]);
   });
 });
 

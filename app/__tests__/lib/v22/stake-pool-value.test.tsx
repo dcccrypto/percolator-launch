@@ -112,7 +112,7 @@ describe("FirstLossDeposit: deployed line and the one-paragraph risk summary", (
     render(<FirstLossDeposit {...props} deployedUsd={1234.5} />);
     expect(screen.getByTestId("fl-deployed")).toHaveTextContent("Deployed to insurance: $1,234.50");
     expect(screen.getByTestId("consent-summary")).toHaveTextContent(V22_COPY.stake.consentSummary);
-    expect(V22_COPY.stake.consentSummary).toBe("Staking insures this market's backstop: you can lose part of your stake if losses exceed the creator's tranche, bonds and Earn.");
+    expect(V22_COPY.stake.consentSummary).toBe("Staking insures this market's backstop: you can lose part of your stake if losses are bigger than what the creator and Earn depositors put in ahead of you.");
   });
   it("unreadable deployed value shows a dash, absent prop shows nothing", () => {
     hook.pool = pool;

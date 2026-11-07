@@ -275,7 +275,7 @@ function WalletPageInner() {
             </div>
             {network === "devnet" && (
               <p className="mt-3 text-[11px] text-[var(--text-muted)]">
-                On devnet, use the faucet to get Sim-USDC and a little test SOL.
+                On devnet, use the faucet to get test USDC and a little test SOL.
               </p>
             )}
           </GlassCard>
