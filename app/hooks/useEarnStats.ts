@@ -46,8 +46,10 @@ export interface MarketVaultInfo {
   /** 24h volume in USD (0 when unknown: see volumeKnown) */
   volume24h: number;
   /**
-   * False when no stats were ever collected for this market (no row, or stats_updated_at null with no trades): the 0
-   * above is a placeholder, not a quiet day. Council 2026-11-07: the v2.2 fresh set has no indexer.
+   * False when no indexer reported this market's volume, so the 0 above is a placeholder, not a quiet day: no row, a
+   * no-indexer row from /api/markets (stats_collected: false: on-chain discovery / static fallback), or a Supabase
+   * registry-only row with no market_stats (volume_24h and trade_count_24h null). Any real trades / volume count as
+   * known. Council 2026-11-07: the v2.2 fresh set has no indexer. See rowVolumeKnown.
    */
   volumeKnown?: boolean;
   /** Trading fee bps */
@@ -579,6 +581,20 @@ async function fetchOnChainMaxLeverage(
 }
 
 /**
+ * Whether a /api/markets row's 24h volume was actually reported by an indexer (see MarketVaultInfo.volumeKnown).
+ * - real activity (volume > 0 or trades > 0) is always known;
+ * - stats_collected === false (no-indexer discovery / static rows) is unknown;
+ * - otherwise (Supabase markets_with_stats) a reported number, including 0, is known; null volume AND null trades
+ *   (registry-only market, no market_stats row) is unknown.
+ */
+export function rowVolumeKnown(row: Record<string, unknown> | undefined, volume24h: number): boolean {
+  if (row == null) return false;
+  if (volume24h > 0 || Number(row.trade_count_24h ?? 0) > 0) return true;
+  if (row.stats_collected === false) return false;
+  return row.volume_24h != null || row.volume_24h_usd != null || row.trade_count_24h != null;
+}
+
+/**
  * Build a single market's MarketVaultInfo from its on-chain vault data + optional
  * Supabase cosmetic row. Shared by both the curated (PLAYGROUND_SLAB_META) markets
  * and the registered (user-launched) markets below.
@@ -639,8 +655,7 @@ export function buildMarketVaultInfo(
   const volume24h = isSentinel(volume24hRaw)
     ? 0
     : (rowVolumeUsd(row as { volume_24h?: number | null; volume_24h_usd?: number | null; last_price?: number | null } | undefined) ?? 0);
-  // Stats were collected if the row has a stats timestamp, or it carries trades / volume anyway.
-  const volumeKnown = row != null && (row.stats_updated_at != null || Number(row.trade_count_24h ?? 0) > 0 || volume24h > 0);
+  const volumeKnown = rowVolumeKnown(row, volume24h);
 
   // No stats row (a registered-only market) or no readable value is unknown, not an empty fund.
   const insuranceRaw = row?.insurance_fund == null ? NaN : Number(row.insurance_fund);
