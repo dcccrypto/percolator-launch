@@ -25,17 +25,21 @@ const mockPublicKey = {
 
 vi.mock("@/hooks/useWalletCompat", () => ({
   useWalletCompat: () => ({ publicKey: null }),
-  useConnectionCompat: () => ({
-    connection: {
-      rpcEndpoint: "https://api.devnet.solana.com",
-      getAccountInfo: vi.fn().mockResolvedValue(null),
-      getParsedAccountInfo: vi.fn().mockResolvedValue({ value: null }),
-    },
-  }),
+  // One stable connection object, as the real hook returns: a fresh object per render re-ran the
+  // validation effect on every render and kept a resolved devnet mint stuck at "loading".
+  useConnectionCompat: () => connMock,
+}));
+const connMock = vi.hoisted(() => ({
+  connection: {
+    rpcEndpoint: "https://api.devnet.solana.com",
+    getAccountInfo: async () => null,
+    getParsedAccountInfo: async () => ({ value: null }),
+  },
 }));
 
+const tokenMetaMock = vi.hoisted(() => ({ value: null as null | { name: string; symbol: string; decimals: number } }));
 vi.mock("@/hooks/useTokenMeta", () => ({
-  useTokenMeta: () => null,
+  useTokenMeta: () => tokenMetaMock.value,
 }));
 
 vi.mock("@/lib/config", () => ({
@@ -196,6 +200,21 @@ describe("StepTokenSelect: pasting the collateral mint", () => {
     expect(screen.getByTestId("create-collateral-mint-blocked").textContent).toMatch(/collateral every market uses/);
     expect(screen.queryByText(/already has a market/)).toBeNull();
     expect(screen.queryByRole("link", { name: /PENGU/ })).toBeNull();
+  });
+
+  it("the resolved-token card does not also say '✓ Priced off this token's mainnet DEX pool' (evidence shot 06)", async () => {
+    tokenMetaMock.value = { name: "Sim USDC (devnet)", symbol: "USDC", decimals: 6 };
+    try {
+      renderWith(COLLATERAL);
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 50));
+      });
+      expect(screen.getByTestId("create-collateral-mint-blocked")).toBeTruthy();
+      expect(screen.getByText("Sim USDC (devnet)")).toBeTruthy(); // the resolved card IS on screen
+      expect(screen.queryByText(/Priced off this token/)).toBeNull();
+    } finally {
+      tokenMetaMock.value = null;
+    }
   });
 
   it("a real duplicate still shows the one-market-per-token box (negative control)", () => {

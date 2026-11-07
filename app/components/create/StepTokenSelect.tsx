@@ -336,7 +336,7 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
               <p className="text-[10px] font-mono text-[var(--text-secondary)] truncate">
                 {debounced.slice(0, 6)}...{debounced.slice(-4)}
               </p>
-              {isDevnet && (
+              {isDevnet && !collateralPasted && (
                 <p className="text-[9px] text-[var(--accent)]/60 mt-0.5">
                   ✓ Priced off this token&apos;s mainnet DEX pool — collateral is test USDC
                 </p>
