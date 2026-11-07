@@ -113,9 +113,16 @@ describe("WalletPage", () => {
     expect(screen.getByText(/sign in with email/i)).toBeTruthy();
   });
 
-  it("shows read-only warning when Privy is unavailable", () => {
+  // #3740 (Council GO1106-UX nit) replaced the "Wallet features unavailable" / "Set NEXT_PUBLIC_PRIVY_APP_ID" wording, which
+  // leaked a deploy setting to every user, with a plain notice that points at a browser wallet.
+  it("without Privy: says embedded wallets aren't available, points at a browser wallet, offers no embedded-wallet actions", () => {
     privyAvailable = false;
     render(<WalletPage />, { wrapper: PrivyStateProvider });
-    expect(screen.getByText(/Wallet features unavailable/i)).toBeTruthy();
+    expect(screen.getByText(/Email and embedded wallets aren.t available on this site/i)).toBeTruthy();
+    expect(screen.getByTestId("wallet-no-embedded").textContent).toMatch(/Phantom or Solflare/);
+    expect(screen.queryByText(/NEXT_PUBLIC_PRIVY_APP_ID/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Export key/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Add funds/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Disconnect/i })).toBeNull();
   });
 });
