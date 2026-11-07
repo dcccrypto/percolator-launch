@@ -43,8 +43,13 @@ export interface MarketVaultInfo {
   maxOI: number;
   /** Insurance fund balance (collateral atoms); null when no stats row carries it (not $0). */
   insuranceFund: number | null;
-  /** 24h volume in USD */
+  /** 24h volume in USD (0 when unknown: see volumeKnown) */
   volume24h: number;
+  /**
+   * False when no stats were ever collected for this market (no row, or stats_updated_at null with no trades): the 0
+   * above is a placeholder, not a quiet day. Council 2026-11-07: the v2.2 fresh set has no indexer.
+   */
+  volumeKnown?: boolean;
   /** Trading fee bps */
   tradingFeeBps: number;
   /** Max leverage */
@@ -93,8 +98,8 @@ export interface EarnStats {
   totalInsurance: number | null;
   /** Per-market vault breakdown */
   markets: MarketVaultInfo[];
-  /** Total 24h fee revenue estimate (USD) */
-  dailyFeeRevenue: number;
+  /** Total 24h fee revenue estimate (USD) over the markets whose volume is known; null when none is (not $0). */
+  dailyFeeRevenue: number | null;
   /** Symbols of the vaults left out of `tvl` because their value can't be determined. */
   unvaluedSymbols: string[];
 }
@@ -106,7 +111,7 @@ const DEFAULT_STATS: EarnStats = {
   oiUtilPct: 0,
   totalInsurance: null,
   markets: [],
-  dailyFeeRevenue: 0,
+  dailyFeeRevenue: null,
   unvaluedSymbols: [],
 };
 
@@ -634,6 +639,8 @@ export function buildMarketVaultInfo(
   const volume24h = isSentinel(volume24hRaw)
     ? 0
     : (rowVolumeUsd(row as { volume_24h?: number | null; volume_24h_usd?: number | null; last_price?: number | null } | undefined) ?? 0);
+  // Stats were collected if the row has a stats timestamp, or it carries trades / volume anyway.
+  const volumeKnown = row != null && (row.stats_updated_at != null || Number(row.trade_count_24h ?? 0) > 0 || volume24h > 0);
 
   // No stats row (a registered-only market) or no readable value is unknown, not an empty fund.
   const insuranceRaw = row?.insurance_fund == null ? NaN : Number(row.insurance_fund);
@@ -659,6 +666,7 @@ export function buildMarketVaultInfo(
     maxOI,
     insuranceFund,
     volume24h,
+    volumeKnown,
     tradingFeeBps,
     maxLeverage,
     oiUtilPct,
@@ -765,10 +773,11 @@ export function computeAggregates(markets: MarketVaultInfo[]): Omit<EarnStats, '
     ? insured.reduce((s, m) => s + (m.insuranceFund as number) / (10 ** m.decimals), 0)
     : null;
   const unvaluedSymbols = markets.filter((m) => m.unvalued).map((m) => m.symbol);
-  const dailyFeeRevenue = markets.reduce(
-    (s, m) => s + (m.volume24h * m.tradingFeeBps) / 10_000,
-    0,
-  );
+  // undefined (fixtures, mock data) counts as known; only an explicit false is a placeholder 0.
+  const volumeKnown = markets.filter((m) => m.volumeKnown !== false);
+  const dailyFeeRevenue = volumeKnown.length > 0
+    ? volumeKnown.reduce((s, m) => s + (m.volume24h * m.tradingFeeBps) / 10_000, 0)
+    : null;
   return {
     unvaluedSymbols,
     tvl,
