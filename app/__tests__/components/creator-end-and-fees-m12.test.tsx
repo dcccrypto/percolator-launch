@@ -66,8 +66,9 @@ describe("M12: wizard review states how the market ends", () => {
     for (const sentence of [
       "What you're committing / how this market ends",
       "Your creator stake is first-loss: trader profits are paid from it before Earn depositors are affected, and the insurance fund only steps in after both are used up. You can lose all of it.",
-      "You can withdraw anything above your minimum, but only while the market is live, its price is current, it is not past the stale window and no trades are open, and a cushion of recent earnings is held back. The minimum moves with Earn deposits.",
+      "You can withdraw anything above your minimum, but only while the market is live, its price is current, it is not past the stale window and no trades are open, and part of recent earnings is held back. The minimum moves with Earn deposits.",
       "The market account's rent cannot be reclaimed on chain",
+      "The stake pool and vault account rent is not returned by any instruction either.",
       "its rent comes back when it is closed.",
       "On mainnet, the creator of a market whose price never connected is eligible for a refund of that locked rent.",
       "On devnet no rent refund is paid",
@@ -116,7 +117,7 @@ describe("M12: FEES tab shows creator fees in dollars", () => {
 describe("M12 r2: copy is tied to the app's other sources", () => {
   const all = Object.values(CREATOR_END_COPY).join("\n");
   it("rent and refund lines are the NEVER_CONNECTED_COPY lines, and refunds are not 'undecided'", () => {
-    for (const k of ["rentEarn", "rentStake", "rentFreed", "rentMainnet", "rentDevnet"] as const) {
+    for (const k of ["rentEarn", "rentFreed", "rentMainnet", "rentDevnet"] as const) {
       expect(all).toContain(NEVER_CONNECTED_COPY[k]);
     }
     expect(all).not.toMatch(/whether any launch costs are refunded/i);

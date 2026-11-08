@@ -66,8 +66,8 @@ const hoursText = (slots: bigint): string => `about ${Math.round((Number(slots) 
 export const CREATOR_END_COPY = {
   title: "What you're committing / how this market ends",
   firstLoss: "Your creator stake is first-loss: trader profits are paid from it before Earn depositors are affected, and the insurance fund only steps in after both are used up. You can lose all of it.",
-  withdraw: "You can withdraw anything above your minimum, but only while the market is live, its price is current, it is not past the stale window and no trades are open, and a cushion of recent earnings is held back. The minimum moves with Earn deposits.",
-  rent: `${NEVER_CONNECTED_COPY.rentEarn} ${NEVER_CONNECTED_COPY.rentStake} ${NEVER_CONNECTED_COPY.rentFreed}`,
+  withdraw: "You can withdraw anything above your minimum, but only while the market is live, its price is current, it is not past the stale window and no trades are open, and part of recent earnings is held back. The minimum moves with Earn deposits.",
+  rent: `${NEVER_CONNECTED_COPY.rentEarn} The stake pool and vault account rent is not returned by any instruction either. ${NEVER_CONNECTED_COPY.rentFreed}`,
   refund: `${NEVER_CONNECTED_COPY.rentMainnet} ${NEVER_CONNECTED_COPY.rentDevnet}`,
   ends: `If the price feed stops for ${hoursText(PERMISSIONLESS_RESOLVE_STALE_SLOTS_V22)}, anyone can settle the market at its last good price. For ${hoursText(FORCE_CLOSE_DELAY_SLOTS_V22)} after that only each position's owner can close it; then anyone can settle a position to its owner.`,
   admin: "The market's admin can also retire it early; the plan keeps that alongside the stale-feed backstop. On markets launched here the stake pool's admin is the creator wallet, so that power may be yours on chain. This app has no button for it.",
