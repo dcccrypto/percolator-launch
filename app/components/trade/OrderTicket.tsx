@@ -424,7 +424,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     estimatedLiqDisplay: LiqPriceDisplay;
     tradingFee: bigint;
     tradingFeeEstimated?: boolean;
-    quoteInFee?: boolean;
+    /** L-7: the parts of the fee estimate, so the confirm recomputes the fee from the REFRESHED quote at render. */
+    feeBaseBps: bigint;
+    feeQuoteCharged: boolean;
+    feeNotional: bigint;
     worstFillPriceE6: bigint;
     riskLeverage: number | null;
     depositAtoms: bigint;
@@ -1141,10 +1144,14 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // exceedsBalance and the balance-bound Max include the busy-side fee on a no-matcher growth market (#3553: the engine charges it before the IM gate).
   // L-2 / M-B: on a fee-channel market the chain charges base + the matcher's requested fee whether or not the P2 flag put the QUOTE in the
   // estimate. Add it unless the estimate's quote is already charged in it (a busy-side fee above base says nothing about the quote).
-  const feeForEstimate = ticketFeeForEstimate(ticketLimits);
+  const quoteChargedInEstimate = !!ticketFeeForEstimate(ticketLimits)?.charged;
   const spreadQuote = hasOrder ? spreadFor(positionSize, direction === "long") : null;
-  const estFeeBps = feeBpsWithSpread(estimatedTotalFeeBps(tradingFeeBps, feeForEstimate), spreadQuote, !!feeForEstimate?.charged);
-  const estFeeIncludesQuote = !!feeForEstimate?.charged || !!spreadQuote?.inFee;
+  const estFeeBps = feeBpsWithSpread(estimatedTotalFeeBps(tradingFeeBps, ticketFeeForEstimate(ticketLimits)), spreadQuote, quoteChargedInEstimate);
+  // L-5: the quote fee is named in the Fee tooltip whenever it is in the number, whether the P2 estimate or the spread add put it there.
+  const quoteFeeAdded = !!spreadQuote?.inFee && !quoteChargedInEstimate;
+  const feeExtrasText = quoteFeeAdded
+    ? [ "the market maker's quote fee", ...((ticketFeeForEstimate(ticketLimits)?.utilFeeBps ?? 0n) > 0n ? ["the busy-side fee"] : []) ].join(" and ")
+    : feeExtrasLabel(ticketFeeForEstimate(ticketLimits));
   const estFee = hasOrder ? computeTradingFee((positionSize * oracleE6) / 1_000_000n, estFeeBps) : 0n;
   const estFeeHasExtras = feeHasExtras(tradingFeeBps, estFeeBps);
   // P1 99165722 (F-7): a close that GROWS a halted / capped LP is refused or clipped too.
@@ -1540,7 +1547,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           // The trade book follows every fill so a finished trade's result (open + adds + close, fees and spread included) is known.
           if (ef && publicKey) {
             // The size the chain had BEFORE this fill: the measured change (ADL-effective, read around the trade) is fresher than the
-            // render-time position, which can be stale (e.g. the position was closed on another device). Fallback: the render-time size.
+            // render-time position, which can be stale (e.g. the position was closed on another device). Without a measurement the book is dropped
+            // (below) unless the position was flat, in which case the size before is 0.
             const change = await measured.catch(() => null);
             // L-3: no measurement and the render-time position is not flat: that size may be stale (closed on another device), so a book
             // cannot be reconciled with it. Fail closed: drop the book, claim nothing (costs only this trade's result).
@@ -2041,6 +2049,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   };
   const clampReason = ticketLimits.sideLimits ? reasonCopy(ticketLimits, marketLimits, direction) : "";
 
+  // L-7: the confirm's fee is computed at render from the quote read when the confirm opened (the same read as its spread row), not from
+  // the click-time estimate, so a refreshed quote moves both rows together.
+  const confirmQuoteNow = confirmSnapshot ? spreadFor(confirmSnapshot.positionSize, direction === "long") : null;
+  const confirmFeeBpsNow = confirmSnapshot ? feeBpsWithSpread(confirmSnapshot.feeBaseBps, confirmQuoteNow, confirmSnapshot.feeQuoteCharged) : tradingFeeBps;
+  const confirmFeeNow = confirmSnapshot ? computeTradingFee(confirmSnapshot.feeNotional, confirmFeeBpsNow) : 0n;
+
   return (
     <div className="relative p-3.5" data-testid="order-ticket" data-ticket-row={ticketState.row}>
       {openCloseToggle}
@@ -2386,7 +2400,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             /* A trader saw what they pay and nothing about where it goes. #2565. Product review T-1: the extras are named too. */
             tooltip={
               estFeeHasExtras
-                ? `Estimated ${(Number(estFeeBps) / 100).toFixed(2)}%: the market's ${(Number(tradingFeeBps) / 100).toFixed(2)}% base fee plus ${feeExtrasLabel(ticketFeeForEstimate(ticketLimits))}. The extra parts go to the market's liquidity (Earn). Your signature caps the total.${feeDestinationTitle ? ` Base fee split: ${feeDestinationTitle}` : ""}`
+                ? `Estimated ${(Number(estFeeBps) / 100).toFixed(2)}%: the market's ${(Number(tradingFeeBps) / 100).toFixed(2)}% base fee plus ${feeExtrasText}. The extra parts go to the market's liquidity (Earn). Your signature caps the total.${feeDestinationTitle ? ` Base fee split: ${feeDestinationTitle}` : ""}`
                 : feeDestinationTitle
             }
           />
@@ -2654,7 +2668,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               estimatedLiqDisplay: afterLiqDisplay,
               tradingFee: estFee,
               tradingFeeEstimated: estFeeHasExtras,
-              quoteInFee: estFeeIncludesQuote,
+              feeBaseBps: estimatedTotalFeeBps(tradingFeeBps, ticketFeeForEstimate(ticketLimits)),
+              feeQuoteCharged: quoteChargedInEstimate,
+              feeNotional: (positionSize * oracleE6) / 1_000_000n,
               worstFillPriceE6,
               // The account after this trade: the resulting position and the bundled deposit, as
               // the liq row uses, over capital + deposit + pnl, as the position panel's Lev.
@@ -2796,9 +2812,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           leverage={leverage}
           estimatedLiqPrice={confirmSnapshot.estimatedLiqPrice}
           estimatedLiqDisplay={confirmSnapshot.estimatedLiqDisplay}
-          tradingFee={confirmSnapshot.tradingFee}
-          tradingFeeEstimated={confirmSnapshot.tradingFeeEstimated ?? false}
-          quoteInFee={confirmSnapshot.quoteInFee}
+          tradingFee={confirmFeeNow}
+          tradingFeeEstimated={confirmFeeBpsNow > tradingFeeBps}
+          quoteInFee={confirmSnapshot.feeQuoteCharged || !!confirmQuoteNow?.inFee}
           worstFillPriceE6={confirmSnapshot.worstFillPriceE6}
           spreadEstimate={spreadFor(confirmSnapshot.positionSize, direction === "long")}
           accountEquity={userAccount ? capital : null}

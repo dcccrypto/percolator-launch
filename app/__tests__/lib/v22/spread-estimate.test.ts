@@ -61,4 +61,9 @@ describe("feeBpsWithSpread: decide on the QUOTE, not on 'above base' (M-B)", () 
     expect(feeBpsWithSpread(30n, { kind: "quote", bps: 23, execPriceE6: null }, false)).toBe(30n);
     expect(feeBpsWithSpread(30n, null, false)).toBe(30n);
   });
+  it("I-3: a range estimate adds its FLOOR (minBps); a charged quote adds nothing", () => {
+    const r = { kind: "range" as const, minBps: 20, maxBps: 80, inFee: true };
+    expect(feeBpsWithSpread(30n, r, false)).toBe(50n);
+    expect(feeBpsWithSpread(50n, r, true)).toBe(50n);
+  });
 });
