@@ -5075,7 +5075,7 @@ export interface PortfolioV17 {
  * console.log('capital:', portfolio.capital);
  * ```
  */
-export function parsePortfolioV17(data: Uint8Array): PortfolioV17 {
+export function parsePortfolioV17(data: Uint8Array, opts: { registry?: ReadonlyMap<number, LayoutTable>; strictLength?: boolean } = {}): PortfolioV17 {
   // Minimum size check: header(16) + provenance(100) + owner/capital/pnl/reserved_pnl.
   const MIN_PORTFOLIO_BYTES = PF_RESERVED_PNL_OFF + 16;
   if (data.length < MIN_PORTFOLIO_BYTES) {
@@ -5083,7 +5083,9 @@ export function parsePortfolioV17(data: Uint8Array): PortfolioV17 {
   }
   // VERSION + engine-discriminator guard (typed UnknownLayoutError); the leg stride and every offset after the
   // legs come from the table of the account's VERSION, never from its length.
-  const L = resolvePortfolioLayout(data, { parser: "parsePortfolioV17" });
+  // `opts.registry` (e.g. LAYOUTS_BY_VERSION_PRE299 for a wrapper known to hold pre-#299 portfolios) picks the row per VERSION;
+  // the discriminator guard still has to match that row, so a registry never widens what one VERSION accepts.
+  const L = resolvePortfolioLayout(data, { parser: "parsePortfolioV17", registry: opts.registry, strictLength: opts.strictLength });
   const G = L.portfolio;
 
   // Provenance header
