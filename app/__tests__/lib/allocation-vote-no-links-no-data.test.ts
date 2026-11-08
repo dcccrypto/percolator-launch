@@ -13,6 +13,7 @@ const SCAN_DIRS = ["app", "components", "hooks", "lib", "public"];
 const SURFACE_FILES = new Set([
   "middleware.ts",
 ]);
+const COPY_FILE = "lib/allocation-vote/copy.ts";
 const SURFACE_DIRS = ["app/allocation/", "app/vote/", "app/api/allocation/", "app/api/vote/", "lib/allocation-vote/"];
 
 function walk(dir: string, out: string[] = []): string[] {
@@ -81,9 +82,24 @@ describe("no synthetic, private, or raw data in the new surfaces", () => {
     ["large numeric figures", /\b\d[\d,_]{4,}\b/],
     ["pool / raise wording", /holder pool|raise/i],
     ["seed phrase or private key material", /secretKey|privateKey|mnemonic|BEGIN [A-Z ]*PRIVATE KEY/],
-  ])("no %s", (_label, re) => {
-    const offenders = surfaceSources.filter((f) => re.test(fs.readFileSync(path.join(ROOT, f), "utf8")));
+  ])("no %s", (label, re) => {
+    // The published terms (20% of the full $250,000 raise) live in exactly one
+    // file, copy.ts, which is pinned verbatim below instead.
+    const exempt = label === "large numeric figures" || label === "pool / raise wording" ? new Set([COPY_FILE]) : new Set<string>();
+    const offenders = surfaceSources.filter((f) => !exempt.has(f) && re.test(fs.readFileSync(path.join(ROOT, f), "utf8")));
     expect(offenders).toEqual([]);
+  });
+
+  it("copy.ts holds only the published terms (pinned) and no other figures", async () => {
+    const { ALLOCATION_COPY } = await import("@/lib/allocation-vote/copy");
+    expect(ALLOCATION_COPY.terms).toEqual([
+      "Holders in the 7 Nov 2026 snapshot share a guaranteed floor of 20% of the full $250,000 raise ($50,000), split in proportion to snapshot balance.",
+      "If you commit more than your allocation, the excess commitment is refunded.",
+      "All figures are provisional until the raise.",
+    ]);
+    const src = fs.readFileSync(path.join(ROOT, COPY_FILE), "utf8").replace(/\$250,000|\$50,000/g, "");
+    expect(src).not.toMatch(/\b\d[\d,_]{4,}\b/);
+    expect(src).not.toMatch(/\bcap\b|capped|maximum|reserve|releas|v2\.2|\bbuild\b|—/i);
   });
 
   it("no data files were added under the surfaces", () => {

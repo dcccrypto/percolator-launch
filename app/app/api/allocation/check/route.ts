@@ -1,34 +1,60 @@
-import { validateOwner } from "@/lib/allocation-vote/owner";
-import { ALLOCATION_UNAVAILABLE_MESSAGE } from "@/lib/allocation-vote/state";
+import { checkEnvelope, parseCheckJson, MAX_BODY } from "@/lib/allocation-vote/check-request";
+import { mapCheckRow, UNAVAILABLE } from "@/lib/allocation-vote/check-result";
+import { clientKey } from "@/lib/allocation-vote/client-key";
+import { lookupAllocation } from "@/lib/allocation-vote/lookup-db";
+import { readAllocationConfig } from "@/lib/allocation-vote/server-config";
 import { hostGuard, json } from "@/lib/allocation-vote/respond";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-const MAX_BODY = 1024;
+/** Read at most `limit` bytes of the body; null when it is larger. */
+async function readCapped(req: Request, limit: number): Promise<string | null> {
+  if (!req.body) return "";
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
 
 /**
- * Port of the local checker's POST /api/check with no data loaded: a malformed
- * address gets the same 400 message, a well-formed one gets 503 unavailable.
- * No address is logged or stored, and no allocation figure exists to return.
+ * POST {"wallet": "<one address>"} -> the result for that wallet only:
+ * eligible (snapshot balance + provisional USD allocation), excluded (known
+ * reasons), not_found (no figures), rate_limited, invalid or unavailable.
+ * The wallet is never logged, stored or cached by this handler.
  */
 export async function POST(req: Request) {
   const blocked = hostGuard(req);
   if (blocked) return blocked;
-  if (!String(req.headers.get("content-type") ?? "").startsWith("application/json")) {
-    return json(415, { status: "invalid", error: "Content-Type must be application/json" });
-  }
-  const declared = Number(req.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > MAX_BODY) return json(413, { status: "invalid", error: "Request too large" });
-  const text = await req.text();
-  if (text.length > MAX_BODY) return json(413, { status: "invalid", error: "Request too large" });
-  let parsed: unknown;
+  const refused = checkEnvelope(req.headers.get("content-type"), req.headers.get("content-length"));
+  if (refused) return json(refused.status, { status: "invalid", error: refused.error });
+  const text = await readCapped(req, MAX_BODY);
+  if (text === null) return json(413, { status: "invalid", error: "Request too large" });
+  const parsed = parseCheckJson(text);
+  if (!parsed.ok) return json(parsed.status, { status: "invalid", error: parsed.error });
+
+  const cfg = readAllocationConfig();
+  if (!cfg) return json(503, UNAVAILABLE);
+  let row;
   try {
-    parsed = JSON.parse(text);
-  } catch {
-    return json(400, { status: "invalid", error: 'Body must be JSON {"wallet": "<address>"}' });
+    row = await lookupAllocation(cfg, parsed.owner, clientKey(req.headers, cfg.secret));
+  } catch (e) {
+    const code = typeof (e as { code?: unknown })?.code === "string" ? (e as { code: string }).code : "unknown";
+    console.error(`[allocation] lookup failed (${code.replace(/[^A-Za-z0-9_]/g, "").slice(0, 16)})`);
+    return json(503, UNAVAILABLE);
   }
-  const wallet = parsed && typeof parsed === "object" ? (parsed as { wallet?: unknown }).wallet : undefined;
-  const v = validateOwner(wallet);
-  if (!v.ok) return json(400, { status: "invalid", error: v.message });
-  return json(503, { status: "unavailable", message: ALLOCATION_UNAVAILABLE_MESSAGE });
+  const m = mapCheckRow(row);
+  const res = json(m.http, m.body);
+  if (m.retryAfter) res.headers.set("Retry-After", String(m.retryAfter));
+  return res;
 }
