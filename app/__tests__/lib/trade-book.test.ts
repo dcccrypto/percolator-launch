@@ -77,4 +77,11 @@ describe("reconcile / recordFill: a result is only claimed for a trade whose who
     expect(loadBook("W", "S", "P2")).toBeNull();
     expect(loadBook("W2", "S", "P1")).toBeNull();
   });
+  it("F3: the render-time position is stale (the long on the book was closed on another device; this ticket still shows it) and a short is opened here: the anchor moved, so the book is dropped and NO fabricated result is recorded", () => {
+    open(5n); // long 1 on the book, sequence 5
+    // elsewhere: the long is closed (sequence 6). Here: a short 1 opens (sequence 7). The ticket's stale existingPositionSize is still +1.
+    // The open path derives preSeq = postSeq - legs = 6, not the 5 the book holds.
+    expect(recordFill("W", "S", "P", { q: -TOKEN, bookedPriceE6: 99_000_000n, feeAtoms: 1_000n }, TOKEN, { preSeq: 6n, postSeq: 7n })).toBeNull();
+    expect(loadBook("W", "S", "P")).toBeNull();
+  });
 });

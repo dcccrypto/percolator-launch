@@ -6,7 +6,7 @@ describe("close toast text", () => {
   it("a loss reads with a real minus, never as profit, and says what it excludes", () => {
     expect(formatSignedAtoms(-56_043n, 6, "USDC")).toBe("−0.056043 USDC");
     const t = closeResultText({ base: "Position closed.", execPriceText: "$89.419", result: -412_000n, decimals: 6, symbol: "USDC" });
-    expect(t).toBe("Position closed. Effective price $89.419. Trade result −0.412 USDC (trading fees and spread included; funding and maintenance fees not included).");
+    expect(t).toBe("Position closed. Effective price $89.419. Trade result −0.412 USDC (trading fees, spread and other non-base fees included; funding and maintenance fees not included).");
     expect(t).not.toMatch(/profit/i);
   });
   it("unmeasured halves are left out, never zeroed", () => {

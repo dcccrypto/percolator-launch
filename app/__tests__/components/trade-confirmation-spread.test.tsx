@@ -45,4 +45,15 @@ describe("TradeConfirmationModal spread line (M7)", () => {
     expect(row).toHaveTextContent("~0.23% (est., included in the trading fee)");
     expect(row.textContent).not.toMatch(/USDC/);
   });
+
+  it("F1: channel ON but the ticket's fee estimate is base-only (P2 flag off): the fee row adds the requested bps (30 + 23 = 53 bps of the 40 USDC notional = 0.212), 'est.'", () => {
+    render(<TradeConfirmationModal {...base} tradingFee={120_000n} tradingFeeEstimated={false} spreadEstimate={{ kind: "quote", bps: 23, execPriceE6: null, inFee: true }} />);
+    expect(screen.getByText("Trading Fee (est.):")).toBeInTheDocument();
+    expect(screen.getByText(/0\.212 USDC/)).toBeInTheDocument();
+  });
+  it("F1 CONTROL: the ticket's estimate already includes the extras: not added a second time", () => {
+    render(<TradeConfirmationModal {...base} tradingFee={212_000n} tradingFeeEstimated spreadEstimate={{ kind: "quote", bps: 23, execPriceE6: null, inFee: true }} />);
+    expect(screen.getByText(/0\.212 USDC/)).toBeInTheDocument();
+    expect(screen.queryByText(/0\.304/)).toBeNull();
+  });
 });

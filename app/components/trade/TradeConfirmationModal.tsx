@@ -118,6 +118,13 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   // the original crash, and a confirmation screen that silently disagrees with
   // the order it submits would be worse than crashing.
   const notional = computeNotionalNative(margin, leverage);
+  // F1: on a fee-channel market the chain charges base + the matcher's requested fee. When the ticket's fee estimate holds the base only
+  // (its P2 flag is off), the row adds the quote's requested bps, display only (what is signed is unchanged), so the spread row's "included
+  // in the trading fee" is true.
+  const addSpreadToFee = !!spreadEstimate?.inFee && !tradingFeeEstimated;
+  const shownFee = addSpreadToFee
+    ? tradingFee + (notional * BigInt(spreadEstimate.kind === "quote" ? spreadEstimate.bps : spreadEstimate.minBps)) / 10_000n
+    : tradingFee;
   const liqDisplay =
     estimatedLiqDisplay ??
     describeLiqPrice({
@@ -311,9 +318,9 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
             </div>
           )}
           <div className="flex justify-between">
-            <span className="text-[var(--text-secondary)]">{tradingFeeEstimated ? "Trading Fee (est.):" : "Trading Fee:"}</span>
+            <span className="text-[var(--text-secondary)]">{tradingFeeEstimated || addSpreadToFee ? "Trading Fee (est.):" : "Trading Fee:"}</span>
             <span className="font-mono font-medium text-[var(--text)]">
-              {formatTokenAmount(tradingFee, decimals)} {settleSymbol}
+              {formatTokenAmount(shownFee, decimals)} {settleSymbol}
             </span>
           </div>
           <div className="flex justify-between gap-3" data-testid="confirm-spread">

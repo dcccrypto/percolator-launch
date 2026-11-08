@@ -78,7 +78,7 @@ export function execFillFromLogs(
   return { bookedPriceE6: sumPx / sumAbs, executedQ: signed, feeAtoms: fee, notionalAtoms: sumPx / 1_000_000n, taker, quotedPriceE6: sumQuote / sumAbs, legs };
 }
 
-/** The part of the fee that is the matcher's spread: total fee minus the base fee on the notional (never negative). */
+/** The part of the fee above the base fee: the matcher's spread, and also any growth busy-side fee or dynamic base-fee excess in it: total fee minus the base fee on the notional (never negative). */
 export function spreadFeeAtoms(f: ExecFill, baseFeeBps: bigint): bigint {
   const base = (f.notionalAtoms * baseFeeBps) / 10_000n;
   return f.feeAtoms > base ? f.feeAtoms - base : 0n;

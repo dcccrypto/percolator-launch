@@ -160,7 +160,7 @@ describe("useClosePosition: effective price and lifetime trade result (M7)", () 
     const call = mocks.toast.mock.calls.map((c) => c[0] as string).find((t) => t.startsWith("Position closed."))!;
     expect(call).toContain(`Effective price ${effective()}.`);
     expect(call).not.toContain("$89.607382");
-    expect(call).toContain("Trade result −0.192157 USDC (trading fees and spread included; funding and maintenance fees not included).");
+    expect(call).toContain("Trade result −0.192157 USDC (trading fees, spread and other non-base fees included; funding and maintenance fees not included).");
     expect(EXPECT_RESULT).toBe(-192_157n);
     expect(getRealized(wallet.toBase58(), SOL_MARKET)).toBe(EXPECT_RESULT);
     expect(getLastResult(wallet.toBase58(), SOL_MARKET)).toBe(EXPECT_RESULT);
