@@ -19,6 +19,8 @@ import * as path from "node:path";
 import { Client } from "pg";
 import { applySnapshot, ImportError, summarize, validateSnapshot } from "./import-lib";
 
+/** URL parameters pg would use to override host/port/options (same list as lib/allocation-vote/server-config.ts). */
+export const OVERRIDE_PARAMS = ["host", "hostaddr", "port", "options", "service", "servicefile"];
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
 function arg(argv: string[], name: string): string | undefined {
@@ -58,13 +60,17 @@ export async function main(argv: string[]): Promise<number> {
   const envName = arg(argv, "--database-url-env") ?? "ALLOCATION_IMPORT_DATABASE_URL";
   const url = process.env[envName];
   if (!url) throw new ImportError("NO_DB", `${envName} is not set`);
-  const host = new URL(url).hostname;
+  const parsed = new URL(url);
+  if (OVERRIDE_PARAMS.some((k) => parsed.searchParams.has(k))) {
+    throw new ImportError("BAD_DB_URL", "database URL must not carry host/hostaddr/port/options/service parameters");
+  }
+  const host = parsed.hostname;
   if (!LOCAL_HOSTS.has(host) && !argv.includes("--allow-remote")) {
     throw new ImportError("REMOTE_REFUSED", "non-local database host; requires --allow-remote after owner approval");
   }
   // Remote imports always use verified TLS (URL ssl parameters cannot weaken it).
   const u = new URL(url);
-  for (const k of ["sslmode", "ssl", "sslrootcert", "sslcert", "sslkey", "uselibpqcompat"]) u.searchParams.delete(k);
+  u.search = "";
   const ca = process.env.ALLOCATION_DATABASE_CA_PEM?.trim();
   const client = new Client({
     connectionString: u.toString(),

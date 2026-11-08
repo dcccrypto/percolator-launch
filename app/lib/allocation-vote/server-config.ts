@@ -12,6 +12,8 @@ import "server-only";
 
 export const READER_ROLE = "perc_alloc_reader";
 export const MIN_SECRET_LENGTH = 32;
+/** URL query parameters that pg would use to override the host/port/options. */
+export const OVERRIDE_PARAMS = ["host", "hostaddr", "port", "options", "service", "servicefile"];
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
 export interface AllocationConfig {
@@ -35,9 +37,12 @@ export function readAllocationConfig(env: NodeJS.ProcessEnv = process.env): Allo
   // Only the least-privilege runtime role may be configured (Supavisor form: role.project_ref).
   const user = decodeURIComponent(u.username);
   if (user !== READER_ROLE && !user.startsWith(`${READER_ROLE}.`)) return null;
+  // Connection parameters that could redirect the connection away from the URL
+  // host (and so dodge the TLS decision below) are refused outright.
+  if (OVERRIDE_PARAMS.some((k) => u.searchParams.has(k))) return null;
   const local = LOCAL_HOSTS.has(u.hostname);
-  // TLS is decided here, not by URL parameters: strip them so they cannot weaken it.
-  for (const k of ["sslmode", "ssl", "sslrootcert", "sslcert", "sslkey", "uselibpqcompat"]) u.searchParams.delete(k);
+  // TLS is decided here, not by URL parameters: drop every query parameter.
+  u.search = "";
   const ca = env.ALLOCATION_DATABASE_CA_PEM?.trim();
   return {
     connectionString: u.toString(),

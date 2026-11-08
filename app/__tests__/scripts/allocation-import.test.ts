@@ -2,7 +2,7 @@
  * Snapshot import validation (operator tooling), SYNTHETIC files only.
  * Every check fails closed and names rows/codes, never owner addresses.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { allocateAll } from "@/lib/allocation-vote/math";
 import { ImportError, PUBLISHED_TERMS, sha256Hex, summarize, validateSnapshot, dateLabel, type ImportInput } from "@/scripts/allocation/import-lib";
 import { syntheticOwner } from "../db/synthetic";
@@ -198,4 +198,38 @@ describe("import CLI refuses repository files (realpath)", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+describe("import CLI database URL", () => {
+  it.each(["host=evil.example", "hostaddr=203.0.113.9", "port=6543", "options=-cx", "service=x"])(
+    "refuses a URL carrying %s (it could dodge the local/TLS decision)",
+    async (param) => {
+      const fs = await import("node:fs");
+      const os = await import("node:os");
+      const path = await import("node:path");
+      const { main, OVERRIDE_PARAMS } = await import("@/scripts/allocation/import-snapshot");
+      const { OVERRIDE_PARAMS: RUNTIME } = await (async () => {
+        vi.doMock("server-only", () => ({}));
+        return import("@/lib/allocation-vote/server-config");
+      })();
+      expect(OVERRIDE_PARAMS).toEqual(RUNTIME);
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "perc-alloc-url-"));
+      try {
+        const i = build(base);
+        fs.writeFileSync(path.join(dir, "e.csv"), i.eligibleCsv);
+        fs.writeFileSync(path.join(dir, "m.json"), i.manifest);
+        fs.writeFileSync(path.join(dir, "a.csv"), i.allHoldersCsv);
+        process.env.PERC_ALLOC_TEST_DB_URL = `postgresql://migrator:x@127.0.0.1:1/app?${param}`;
+        const log = vi.spyOn(console, "log").mockImplementation(() => {});
+        await expect(
+          main(["--eligible", path.join(dir, "e.csv"), "--manifest", path.join(dir, "m.json"), "--all-holders", path.join(dir, "a.csv"),
+            "--snapshot-date", "2026-11-07", "--snapshot-slot", "1", "--token-decimals", "6", "--apply", "--database-url-env", "PERC_ALLOC_TEST_DB_URL"]),
+        ).rejects.toThrow(/BAD_DB_URL/);
+        log.mockRestore();
+      } finally {
+        delete process.env.PERC_ALLOC_TEST_DB_URL;
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 });

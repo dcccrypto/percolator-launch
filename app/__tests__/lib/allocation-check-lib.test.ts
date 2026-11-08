@@ -73,7 +73,7 @@ describe("server config fails closed", () => {
   it("remote reader (Supavisor user form): always verified TLS, URL ssl params stripped", () => {
     const c = readAllocationConfig(env("postgres://perc_alloc_reader.abcdef:pw@pooler.example.com:6543/postgres?sslmode=disable&ssl=false&sslrootcert=/x"))!;
     expect(c.ssl).toEqual({ rejectUnauthorized: true });
-    expect(c.connectionString).not.toMatch(/ssl/);
+    expect(c.connectionString).not.toMatch(/\?/);
   });
   it("optional CA is passed through for verification", () => {
     expect(readAllocationConfig(env("postgres://perc_alloc_reader:pw@db.example.com/p", S, "-----BEGIN CERTIFICATE-----x"))!.ssl).toEqual({
@@ -90,6 +90,11 @@ describe("server config fails closed", () => {
     ["postgresql://service_role.perc_alloc_reader:pw@127.0.0.1/app", S],
     ["mysql://perc_alloc_reader:pw@127.0.0.1/app", S],
     ["not a url", S],
+    ["postgresql://perc_alloc_reader:pw@127.0.0.1/app?host=evil.example", S],
+    ["postgresql://perc_alloc_reader:pw@127.0.0.1/app?hostaddr=203.0.113.9", S],
+    ["postgresql://perc_alloc_reader:pw@127.0.0.1/app?port=6543", S],
+    ["postgresql://perc_alloc_reader:pw@127.0.0.1/app?options=-csearch_path%3Dx", S],
+    ["postgresql://perc_alloc_reader:pw@127.0.0.1/app?service=x", S],
   ])("refuses url=%j", (url, secret) => expect(readAllocationConfig(env(url, secret))).toBeNull());
 });
 
