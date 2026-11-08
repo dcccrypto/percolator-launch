@@ -42,6 +42,7 @@ import { getServerConnection } from "@/lib/server-rpc";
 import { getDevnetMintSigner } from "@/lib/devnet-signer";
 import { assertSuccessfulConfirmation } from "@/lib/transaction-confirmation";
 import * as Sentry from "@sentry/nextjs";
+import { findRecentOnchainClaim, onchainClaimCheckFailure } from "@/lib/sim-usdc-onchain-claim";
 import {
   SIM_USDC_ALREADY_CLAIMED,
   SIM_USDC_CLAIM_FUND_TYPE,
@@ -205,6 +206,8 @@ export async function POST(req: NextRequest) {
     let supabase: ReturnType<typeof import("@/lib/supabase").getServiceClient> | null = null;
     let gate: { allowed: boolean; nextClaimAt: string | null; claimId?: number } = { allowed: true, nextClaimAt: null };
     const rateKey = `${walletAddress}:${type}`;
+    // R3 M8: true when no durable gate answered; the Sim-USDC limit then also comes from chain history.
+    let durableGateUnavailable = false;
     try {
       const sbMod = await import("@/lib/supabase");
       const gateMod = await import("@/lib/faucet-rate-gate");
@@ -212,6 +215,7 @@ export async function POST(req: NextRequest) {
       gate = await gateMod.tryFaucetGate(supabase, walletAddress, type);
     } catch {
       // Supabase unavailable — use in-memory limiter
+      durableGateUnavailable = true;
       const { limited, nextClaimAt } = _faucetIsLimited(rateKey);
       gate = { allowed: !limited, nextClaimAt };
     }
@@ -503,6 +507,32 @@ export async function POST(req: NextRequest) {
         { error: "Could not verify mint authority due to RPC error. Please retry.", retryable: true },
         { status: 503 },
       );
+    }
+
+    // R3 M8: no durable gate, so the per-process map above is not enough (it resets on every cold start and
+    // per instance). Refuse a wallet whose Sim-USDC ATA shows a recent faucet-paid tx; fail closed if the chain
+    // cannot be read. Nothing is reserved yet, so there is nothing to release.
+    if (durableGateUnavailable) {
+      try {
+        const claimedUntil = await findRecentOnchainClaim(
+          connection,
+          await getAssociatedTokenAddress(usdcMint, walletPk),
+          mintAuthPk.toBase58(),
+        );
+        if (claimedUntil) {
+          return NextResponse.json(
+            { error: SIM_USDC_ALREADY_CLAIMED, funded: false, nextClaimAt: claimedUntil },
+            { status: 429 },
+          );
+        }
+      } catch (verifyErr) {
+        Sentry.captureException(verifyErr, {
+          tags: { endpoint: "/api/faucet", step: "onchain_claim_check" },
+          extra: { walletAddress },
+        });
+        return NextResponse.json(onchainClaimCheckFailure(verifyErr), { status: 503 },
+        );
+      }
     }
 
     // Build, send, confirm on-chain first. If anything fails before confirmation,
