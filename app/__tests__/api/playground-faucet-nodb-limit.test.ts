@@ -1,13 +1,10 @@
 // @vitest-environment node
-// R3 M8: with no DB the daily limit is read from chain history; see lib/sim-usdc-onchain-claim.ts.
 /**
- * Council 2026-11-06-go1106-ux, First-timer (low) + Clerk (med): "The modal says '1 claim per wallet per day', but
- * about a minute after the modal claim, the /faucet page let me claim another 10,000 (balance 20,000), then said
- * 'Next claim: ... (1 hour)'." Mint txs 2tzysWCo... (06:51:12Z) and 3MadPBz8... 58 s apart, same wallet.
- *
- * Cause: the modal mints through /api/faucet (faucet_claims slot "usdc", 24h) and /faucet through
- * /api/playground/faucet (its own "playground-faucet" slot, 1h). Two gates, so one wallet got two claims.
- * Both routes now take the ONE Sim-USDC daily slot. Harness: playground-faucet-unresolved-claim.test.ts.
+ * R3 M8, "Faucet daily limit not enforced on the preview": the same wallet claimed 10,000 USDC twice ~1 min apart
+ * with no database configured (process-local limiter, reset per serverless instance). With no durable gate the
+ * route now reads the wallet's Sim-USDC ATA history: a recent faucet mint (10,000 mintTo to that ATA, paid by the
+ * mint authority) is a claim; an unreadable or undecidable history fails closed. Harness copied from
+ * playground-faucet-daily-limit.test.ts.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
@@ -146,6 +143,11 @@ const MINT_AUTH = 'MintAuthority1111111111111111111111111111';
 const WALLET = 'WalletNoDb1111111111111111111111111111111';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+const ATA = 'Ata111111111111111111111111111111111111';
+function mintToIx(amount: string) {
+  return { program: 'spl-token', parsed: { type: 'mintTo', info: { account: ATA, amount } } };
+}
+
 /** A tiny on-chain ledger: mints sent by the route show up in the ATA's history. */
 function chain() {
   const landed: { signature: string; blockTime: number; err: unknown }[] = [];
@@ -156,7 +158,14 @@ function chain() {
   });
   mocks.getSignaturesForAddress.mockImplementation(async () => landed.map((l) => ({ ...l, slot: 1, memo: null })));
   mocks.getParsedTransactions.mockImplementation(async (sigs: string[]) =>
-    sigs.map(() => ({ transaction: { message: { accountKeys: [{ pubkey: { toBase58: () => MINT_AUTH } }] } } })),
+    sigs.map((sig) => ({
+      transaction: {
+        message: {
+          accountKeys: [{ pubkey: { toBase58: () => MINT_AUTH } }],
+          instructions: [mintToIx(sig.startsWith('autofund') ? '1000000000' : '10000000000')],
+        },
+      },
+    })),
   );
   return landed;
 }
@@ -214,5 +223,44 @@ describe('R3 M8: with no durable DB, the daily claim limit is still true', () =>
     newInstance();
     chain();
     expect((await POST(requestFor(WALLET))).status).toBe(200);
+  });
+});
+
+describe('R3 M8 (review H1/L1): content-based claim detection and honest failures', () => {
+  beforeEach(() => {
+    newInstance();
+    mocks.tryFaucetGate.mockRejectedValue(new Error('Supabase env vars not set'));
+  });
+
+  it('an auto-fund mint (1,000, same fee payer) is NOT a claim: the first faucet claim still works', async () => {
+    const landed = chain();
+    landed.unshift({ signature: 'autofund-1', blockTime: Math.floor(Date.now() / 1000), err: null });
+    const { POST } = await import('@/app/api/playground/faucet/route');
+    expect((await POST(requestFor(WALLET))).status).toBe(200);
+    expect(mocks.sendRawTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('a full in-window page the route cannot decide is refused with honest, non-retryable copy', async () => {
+    chain();
+    const now = Math.floor(Date.now() / 1000);
+    mocks.getSignaturesForAddress.mockImplementation(async () =>
+      Array.from({ length: 40 }, (_, i) => ({ signature: `autofund-${i}`, blockTime: now - i, err: null, slot: 1, memo: null })),
+    );
+    const { POST } = await import('@/app/api/playground/faucet/route');
+    const res = await POST(requestFor(WALLET));
+    const body = await res.json();
+    expect(res.status).toBe(503);
+    expect(body.retryable).toBe(false);
+    expect(body.error).not.toMatch(/try again in a moment/i);
+    expect(mocks.sendRawTransaction).not.toHaveBeenCalled();
+  });
+
+  it('with a healthy durable gate the chain is not queried', async () => {
+    mocks.tryFaucetGate.mockResolvedValue({ allowed: true, nextClaimAt: null, claimId: 5 });
+    chain();
+    const { POST } = await import('@/app/api/playground/faucet/route');
+    expect((await POST(requestFor(WALLET))).status).toBe(200);
+    expect(mocks.getSignaturesForAddress).not.toHaveBeenCalled();
+    expect(mocks.getParsedTransactions).not.toHaveBeenCalled();
   });
 });

@@ -42,7 +42,7 @@ import { getServerConnection } from "@/lib/server-rpc";
 import { getDevnetMintSigner } from "@/lib/devnet-signer";
 import { assertSuccessfulConfirmation } from "@/lib/transaction-confirmation";
 import * as Sentry from "@sentry/nextjs";
-import { findRecentOnchainClaim } from "@/lib/sim-usdc-onchain-claim";
+import { findRecentOnchainClaim, onchainClaimCheckFailure } from "@/lib/sim-usdc-onchain-claim";
 import {
   SIM_USDC_ALREADY_CLAIMED,
   SIM_USDC_CLAIM_FUND_TYPE,
@@ -530,9 +530,7 @@ export async function POST(req: NextRequest) {
           tags: { endpoint: "/api/faucet", step: "onchain_claim_check" },
           extra: { walletAddress },
         });
-        return NextResponse.json(
-          { error: "The faucet can't check your daily claim right now, so nothing was sent. Try again in a moment.", retryable: true },
-          { status: 503 },
+        return NextResponse.json(onchainClaimCheckFailure(verifyErr), { status: 503 },
         );
       }
     }

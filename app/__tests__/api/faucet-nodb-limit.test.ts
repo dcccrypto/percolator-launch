@@ -1,4 +1,5 @@
-// R3 M8 (sibling route): /api/faucet type=usdc, the Fund-your-account modal's route, with no durable DB.
+// R3 M8 (sibling route): /api/faucet type=usdc, the Fund-your-account modal's route, with no durable DB. Claims are read
+// from chain history by content (10,000 mintTo to the ATA), see lib/sim-usdc-onchain-claim.ts.
 import {
   afterEach,
   beforeEach,
@@ -160,6 +161,11 @@ function req(type = "usdc"): NextRequest {
 function newInstance() {
   delete (globalThis as unknown as Record<string, unknown>).__percolatorSimUsdcClaims__;
 }
+const ATA = 'Ata1';
+function mintToIx(amount: string) {
+  return { program: 'spl-token', parsed: { type: 'mintTo', info: { account: ATA, amount } } };
+}
+
 function chain() {
   const landed: { signature: string; blockTime: number; err: unknown }[] = [];
   mocks.sendRawTransaction.mockImplementation(async () => {
@@ -170,7 +176,14 @@ function chain() {
   mocks.confirmTransaction.mockResolvedValue({ context: { slot: 1 }, value: { err: null } });
   mocks.getSignaturesForAddress.mockImplementation(async () => landed.map((l) => ({ ...l, slot: 1, memo: null })));
   mocks.getParsedTransactions.mockImplementation(async (sigs: string[]) =>
-    sigs.map(() => ({ transaction: { message: { accountKeys: [{ pubkey: { toBase58: () => MINT_AUTH } }] } } })),
+    sigs.map((sig) => ({
+      transaction: {
+        message: {
+          accountKeys: [{ pubkey: { toBase58: () => MINT_AUTH } }],
+          instructions: [mintToIx(sig.startsWith('autofund') ? '1000000000' : '10000000000')],
+        },
+      },
+    })),
   );
   return landed;
 }
@@ -219,5 +232,35 @@ describe("R3 M8: /api/faucet type=usdc keeps the daily limit with no durable DB"
     const landed = chain();
     landed.unshift({ signature: "old", blockTime: Math.floor((Date.now() - DAY_MS - 3_600_000) / 1000), err: null });
     expect((await POST(req())).status).toBe(200);
+  });
+});
+
+describe("R3 M8 (review H1/L1): content-based claim detection and honest failures", () => {
+  it("an auto-fund mint (1,000, same fee payer) is NOT a claim: the first faucet claim still works", async () => {
+    const landed = chain();
+    landed.unshift({ signature: "autofund-1", blockTime: Math.floor(Date.now() / 1000), err: null });
+    expect((await POST(req())).status).toBe(200);
+    expect(mocks.sendRawTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("a full in-window page it cannot decide is refused with honest, non-retryable copy", async () => {
+    chain();
+    const now = Math.floor(Date.now() / 1000);
+    mocks.getSignaturesForAddress.mockImplementation(async () =>
+      Array.from({ length: 40 }, (_, i) => ({ signature: `autofund-${i}`, blockTime: now - i, err: null, slot: 1, memo: null })),
+    );
+    const res = await POST(req());
+    const body = await res.json();
+    expect(res.status).toBe(503);
+    expect(body.retryable).toBe(false);
+    expect(body.error).not.toMatch(/try again in a moment/i);
+    expect(mocks.sendRawTransaction).not.toHaveBeenCalled();
+  });
+
+  it("with a healthy durable gate the chain is not queried", async () => {
+    mocks.tryFaucetGate.mockResolvedValue({ allowed: true, nextClaimAt: null, claimId: 5 });
+    chain();
+    expect((await POST(req())).status).toBe(200);
+    expect(mocks.getSignaturesForAddress).not.toHaveBeenCalled();
   });
 });
