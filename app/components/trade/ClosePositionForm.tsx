@@ -4,7 +4,7 @@ import { catchUpAvailableLine } from "@/lib/limits/catchup-estimate";
 import { priceBehindLine } from "@/lib/oracle-stale-gate";
 import { FC, useId, useMemo, useState } from "react";
 import { formatTokenAmount } from "@/lib/format";
-import { SPREAD_LABEL, spreadCostAtoms, spreadCostIsMinimum, spreadValueText, type SpreadEstimate } from "@/lib/v22/spread-estimate";
+import { SPREAD_LABEL, spreadValueText, type SpreadEstimate } from "@/lib/v22/spread-estimate";
 import { formatLotPriceE6, formatLotQ } from "@/lib/v22/lot";
 import { computeMarkPnl, computeMarkPnlLinear, clampClosePercent, UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
 
@@ -54,9 +54,9 @@ export interface ClosePositionFormProps {
    */
   closeFeeBpsFor?: (closeAbs: bigint) => bigint;
   /**
-   * M7: the matcher's pre-trade spread / price impact for a close of `closeAbs` (`takerBuys` = closing a short). The close fills at the
-   * matcher's execution price, not the mark, so the row is always shown and the balance preview subtracts the estimated cost.
-   * Omitted / null result = "Not available before the trade" (never 0%).
+   * M7: the matcher's pre-trade spread / price impact for a close of `closeAbs` (`takerBuys` = closing a short), shown for INFORMATION.
+   * The close books at the mark; the spread is charged only through the fee channel (already inside the fee estimate where it is on,
+   * nothing extra where it is off), so it is never subtracted from the balance preview. Omitted / null = "Not available before the trade".
    */
   spreadEstimateFor?: (closeAbs: bigint, takerBuys: boolean) => SpreadEstimate | null;
   /** Blocks close + shows the oracle-stale warning (matured oracle / no price — what the chain refuses). */
@@ -181,8 +181,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
     const riskBasis = riskEntryPrice != null && riskEntryPrice > 0n ? riskEntryPrice : entryPrice;
     const balancePnl = riskBasis > 0n ? computeMarkPnlLinear(closePositionSigned, riskBasis, currentPrice) : 0n;
     const spread = spreadEstimateFor ? spreadEstimateFor(closeAbs, !isLong) : null;
-    const spreadCost = spreadCostAtoms(spread, closeNotional) ?? 0n;
-    const rawBalanceAfter = capital + balancePnl - closeFee - spreadCost;
+    const rawBalanceAfter = capital + balancePnl - closeFee;
     const balanceAfter = rawBalanceAfter > 0n ? rawBalanceAfter : 0n;
 
     const pnlUsd =
@@ -190,7 +189,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
         ? (Number(pnlNative) / 10 ** decimals) * priceUsd
         : null;
 
-    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, feeEstimated, balanceAfter, spread, spreadCost };
+    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, feeEstimated, balanceAfter, spread };
   }, [percent, absPosition, isLong, entryPrice, riskEntryPrice, currentPrice, capital, priceUsd, tradingFeeBps, closeFeeBpsFor, spreadEstimateFor, decimals]);
 
   // #2660: 0n = unknown entry (see the prop doc) — never a confident zero PnL.
@@ -340,7 +339,6 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
           <span className="text-[var(--text-dim)]">{SPREAD_LABEL}:</span>
           <span className="text-right font-mono font-medium text-[var(--text-secondary)]">
             {spreadValueText(preview.spread)}
-            {preview.spreadCost > 0n && ` ${spreadCostIsMinimum(preview.spread) ? "at least " : ""}−${formatTokenAmount(preview.spreadCost, decimals)} ${colSym}`}
           </span>
         </div>
         <div className="flex justify-between">

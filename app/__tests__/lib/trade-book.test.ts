@@ -42,25 +42,38 @@ describe("applyFill: lifetime result", () => {
   });
 });
 
-describe("reconcile / recordFill: a result is only claimed for a trade whose whole life was seen", () => {
+describe("reconcile / recordFill: a result is only claimed for a trade whose whole life was seen (size AND chain anchor)", () => {
   beforeEach(() => localStorage.clear());
-  it("open then close through the stored book", () => {
-    expect(recordFill("W", "S", "P", { q: TOKEN, bookedPriceE6: 100_000_000n, feeAtoms: 106_043n }, 0n)).toBeNull();
-    expect(loadBook("W", "S", "P")?.q).toBe(TOKEN);
-    expect(recordFill("W", "S", "P", { q: -TOKEN, bookedPriceE6: 100_150_000n, feeAtoms: 100_000n }, TOKEN)).toBe(-56_043n);
+  const open = (seq: bigint | null) => recordFill("W", "S", "P", { q: TOKEN, bookedPriceE6: 100_000_000n, feeAtoms: 106_043n }, 0n, { preSeq: null, postSeq: seq });
+  it("open then close through the stored book: the close finds exactly the sequence the open left", () => {
+    expect(open(5n)).toBeNull();
+    expect(loadBook("W", "S", "P")).toMatchObject({ q: TOKEN, seq: 5n });
+    expect(recordFill("W", "S", "P", { q: -TOKEN, bookedPriceE6: 100_150_000n, feeAtoms: 100_000n }, TOKEN, { preSeq: 5n, postSeq: 6n })).toBe(-56_043n);
     expect(loadBook("W", "S", "P")).toBeNull();
   });
-  it("NEGATIVE: the position was opened elsewhere (no book, chain not flat): no result, nothing claimed", () => {
-    expect(recordFill("W", "S", "P", { q: -TOKEN, bookedPriceE6: 100_000_000n, feeAtoms: 1n }, TOKEN)).toBeNull();
+  it("N-4 probe: the position was closed and REOPENED at the same size elsewhere (the sequence moved): size matches, the anchor does not: no result", () => {
+    open(5n);
+    // unseen: close (seq 6) and reopen 1 @ 60 (seq 7); here it is closed @ 61 and the chain shows preSeq 7
+    expect(recordFill("W", "S", "P", { q: -TOKEN, bookedPriceE6: 61_000_000n, feeAtoms: 1_000n }, TOKEN, { preSeq: 7n, postSeq: 8n })).toBeNull();
+    expect(loadBook("W", "S", "P")).toBeNull();
   });
-  it("NEGATIVE: the stored book no longer matches the chain (ADL / another device): dropped, no result", () => {
-    recordFill("W", "S", "P", { q: 2n * TOKEN, bookedPriceE6: 100_000_000n, feeAtoms: 1n }, 0n);
-    expect(reconcile(loadBook("W", "S", "P"), TOKEN)).toBeNull();
-    expect(recordFill("W", "S", "P", { q: -TOKEN, bookedPriceE6: 1n, feeAtoms: 1n }, TOKEN)).toBeNull();
+  it("an unknown anchor on either side is not trusted", () => {
+    open(5n);
+    expect(reconcile(loadBook("W", "S", "P"), TOKEN, null)).toBeNull();
+    open(null);
+    expect(reconcile(loadBook("W", "S", "P"), TOKEN, 5n)).toBeNull();
+  });
+  it("NEGATIVE: the position was opened elsewhere (no book, chain not flat): no result, nothing claimed", () => {
+    expect(recordFill("W", "S", "P", { q: -TOKEN, bookedPriceE6: 100_000_000n, feeAtoms: 1n }, TOKEN, { preSeq: 5n, postSeq: 6n })).toBeNull();
+  });
+  it("NEGATIVE: the stored book no longer matches the chain size (ADL / another device): dropped, no result", () => {
+    recordFill("W", "S", "P", { q: 2n * TOKEN, bookedPriceE6: 100_000_000n, feeAtoms: 1n }, 0n, { preSeq: null, postSeq: 5n });
+    expect(reconcile(loadBook("W", "S", "P"), TOKEN, 5n)).toBeNull();
+    expect(recordFill("W", "S", "P", { q: -TOKEN, bookedPriceE6: 1n, feeAtoms: 1n }, TOKEN, { preSeq: 5n, postSeq: 6n })).toBeNull();
     expect(loadBook("W", "S", "P")).toBeNull();
   });
   it("books are per wallet, market and portfolio", () => {
-    recordFill("W", "S", "P1", { q: TOKEN, bookedPriceE6: 1n, feeAtoms: 0n }, 0n);
+    recordFill("W", "S", "P1", { q: TOKEN, bookedPriceE6: 1n, feeAtoms: 0n }, 0n, { preSeq: null, postSeq: 1n });
     expect(loadBook("W", "S", "P2")).toBeNull();
     expect(loadBook("W2", "S", "P1")).toBeNull();
   });

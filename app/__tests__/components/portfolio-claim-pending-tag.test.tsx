@@ -62,7 +62,7 @@ describe("claim pending vs profit settling (M7)", () => {
     expect(screen.getByTestId("pending-profit")).toHaveTextContent("to claim");
     expect(screen.getByTestId("pending-profit").textContent).not.toMatch(/profit/);
     expect(screen.getByTestId("realized-net")).toHaveTextContent("-$0.06");
-    expect(screen.getByTestId("realized-net")).toHaveTextContent(/fees and spread included, funding not included/);
+    expect(screen.getByTestId("realized-net")).toHaveTextContent(/trading fees and spread included; funding and maintenance fees not included/);
     expect(screen.queryByText(/already deducted/)).toBeNull();
   });
 

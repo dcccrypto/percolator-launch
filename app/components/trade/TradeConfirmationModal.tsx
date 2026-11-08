@@ -14,7 +14,7 @@ import { describeLiqPrice, type LiqPriceDisplay } from "@/lib/liq-price-display"
 import { LiqPriceValue } from "./LiqPriceValue";
 import { orderHeading } from "@/lib/trading";
 import { FIRST_TRADE_COPY } from "@/lib/first-trade";
-import { SPREAD_LABEL, spreadCostAtoms, spreadCostIsMinimum, spreadValueText, type SpreadEstimate } from "@/lib/v22/spread-estimate";
+import { SPREAD_LABEL, spreadValueText, type SpreadEstimate } from "@/lib/v22/spread-estimate";
 
 interface TradeConfirmationModalProps {
   direction: "long" | "short";
@@ -46,9 +46,9 @@ interface TradeConfirmationModalProps {
    */
   worstFillPriceE6?: bigint;
   /**
-   * M7: the matcher's pre-trade spread / price impact for this size (lib/v22/spread-estimate.ts). The booked price of a fill is the
-   * matcher's execution price, not the mark, so the row is ALWAYS shown: null / omitted reads "Not available before the trade",
-   * never 0%.
+   * M7: the matcher's pre-trade spread / price impact for this size (lib/v22/spread-estimate.ts), shown for INFORMATION. The booked price is
+   * the mark; the spread is charged only through the fee channel, so where it is on the Trading Fee row already contains it (the row says so)
+   * and where it is off nothing extra is charged. Always shown: null / omitted reads "Not available before the trade", never 0%.
    */
   spreadEstimate?: SpreadEstimate | null;
   /** Current slab account equity in collateral units. Used to show risk leverage. */
@@ -320,10 +320,6 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
             <span className="text-[var(--text-secondary)]">{SPREAD_LABEL}:</span>
             <span className="text-right font-mono font-medium text-[var(--text)]">
               {spreadValueText(spreadEstimate)}
-              {(() => {
-                const cost = spreadCostAtoms(spreadEstimate, notional);
-                return cost !== null && cost > 0n ? ` ${spreadCostIsMinimum(spreadEstimate) ? "at least " : "~"}${formatTokenAmount(cost, decimals)} ${settleSymbol}` : "";
-              })()}
             </span>
           </div>
           {createsAccount && (

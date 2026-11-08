@@ -56,6 +56,7 @@ import { fillEventLogs } from "../../helpers/fill-event-fixture";
 import { modeFixtures } from "../../helpers/v22-fixtures";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
 import { effectivePriceE6, execFillFromLogs } from "@/lib/v22/exec-fill";
+import { computePositionPnl } from "@/lib/position-pnl";
 import { loadBook } from "@/lib/trade-book";
 import { OrderTicket } from "@/components/trade/OrderTicket";
 import { getSavedEntry, saveEntryPrice } from "@/lib/entry-price";
@@ -120,7 +121,7 @@ const effectiveOf = (priceE6: bigint, fee = FEE) =>
   effectivePriceE6(execFillFromLogs(landed(priceE6, fee).meta.logMessages, WALLET, { market: new PublicKey(SLAB) })!, BASE_BPS)!;
 
 describe("OrderTicket: the price shown and saved is what the trader effectively paid (M7)", () => {
-  it("the result line and the saved entry use booked + the fee's spread part: above the mark, not the bare mark and not the matcher quote", async () => {
+  it("the result line shows booked + the fee's spread part (above the mark, not the matcher quote); the saved ENTRY is the BOOKED price, so uPnL is 0 at an unchanged mark (N-1)", async () => {
     withPosition(0n);
     mocks.change = { beforeQ: 0n, afterQ: FILLED };
     mocks.getTransaction.mockResolvedValue(landed(BOOKED));
@@ -130,7 +131,14 @@ describe("OrderTicket: the price shown and saved is what the trader effectively 
     const eff = effectiveOf(BOOKED);
     expect(eff > BOOKED).toBe(true);
     expect(eff < BOOKED + 1_000_000n).toBe(true); // and it is not the matcher's quote either
-    expect(getSavedEntry(SLAB, 0, W)).toMatchObject({ entryPriceE6: eff, sizeQ: FILLED });
+    // N-1: capital is already net of the fee/spread; the engine measures pnl from the BOOKED price. Saving the effective price as the
+    // entry would count the spread twice (capital AND q x (mark - entry)).
+    expect(getSavedEntry(SLAB, 0, W)).toMatchObject({ entryPriceE6: BOOKED, sizeQ: FILLED });
+    expect(getSavedEntry(SLAB, 0, W)?.entryPriceE6).not.toBe(eff);
+    const ONE = 1_000_000_000_000_000n;
+    const pnlAt = (entry: bigint) => computePositionPnl({ basisQ: FILLED, aBasis: ONE, adlFactors: { aLong: ONE, aShort: ONE }, markE6: BOOKED, cachedEntryE6: entry, onChainPnl: 0n, initialMarginBps: 1000n, capital: 1_000_000_000n });
+    expect(pnlAt(getSavedEntry(SLAB, 0, W)!.entryPriceE6).unrealizedPnl).toBe(0n);
+    expect(pnlAt(eff).unrealizedPnl! < 0n).toBe(true); // control: the effective price as entry would book a phantom loss
     const line = screen.getByText(/Opened .* at /);
     expect(line.textContent).toContain((Number(eff) / 1e6).toFixed(2));
     expect(line.textContent).not.toContain("1.20");
@@ -150,7 +158,7 @@ describe("OrderTicket: the price shown and saved is what the trader effectively 
     expect(line.textContent).not.toMatch(/ at /);
   });
 
-  it("an add averages with the EFFECTIVE price of this fill", async () => {
+  it("an add averages with the BOOKED price of this fill", async () => {
     saveEntryPrice(SLAB, 0, 90_000_000n, 3, W, FILLED);
     withPosition(FILLED, 1_000_000n);
     mocks.change = { beforeQ: FILLED, afterQ: 2n * FILLED };
@@ -158,6 +166,6 @@ describe("OrderTicket: the price shown and saved is what the trader effectively 
     render(<OrderTicket slabAddress={SLAB} />);
     await submit("5");
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
-    expect(getSavedEntry(SLAB, 0, W)?.entryPriceE6).toBe((90_000_000n + effectiveOf(BOOKED)) / 2n);
+    expect(getSavedEntry(SLAB, 0, W)?.entryPriceE6).toBe((90_000_000n + BOOKED) / 2n);
   });
 });

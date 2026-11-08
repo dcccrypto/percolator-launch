@@ -110,6 +110,7 @@ import { sizeWithLots } from "@/lib/v22/growth-room";
 import { clippedFillBody, readClippedFill } from "@/lib/v22/clipped-fill";
 import { effectivePriceE6, readExecFill, type ExecFill } from "@/lib/v22/exec-fill";
 import { recordFill } from "@/lib/trade-book";
+import { readMatcherSequence } from "@/lib/v22/portfolio-anchor";
 import { recordRealized } from "@/lib/realized-pnl";
 import { useSpreadQuoter } from "@/hooks/useSpreadQuoter";
 import { isPortfolioClosable } from "@/lib/close-trading-account";
@@ -1517,16 +1518,21 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       }
       };
       if (v22Fill) {
-        void execFillP.then((ef) => {
+        void execFillP.then(async (ef) => {
+          // N-1: the ENTRY is the BOOKED price (the engine's basis: capital + pnl is measured against it, and the spread is already out of
+          // capital as a fee). The effective price (booked + spread) is only for the result line and the toast.
+          if (ef) applyEntryFill(ef.bookedPriceE6);
+          // The fill could not be read: keep no entry at all (the position panel then derives an "est." one) rather than the mark.
+          else if (entryIdx !== null) clearEntryPrice(slabAddress, entryIdx, publicKey?.toBase58());
           // The trade book follows every fill so a finished trade's result (open + adds + close, fees and spread included) is known.
           if (ef && publicKey) {
-            const r = recordFill(publicKey.toBase58(), slabAddress, ef.taker.toBase58(), { q: ef.executedQ, bookedPriceE6: ef.bookedPriceE6, feeAtoms: ef.feeAtoms }, existingPositionSize);
+            // The book's chain anchor: the portfolio's matcher sequence after this fill (read at the fill's slot). Before it ran it was one lower
+            // per FILL record, which is what the previous book must have recorded.
+            const postSeq = await readMatcherSequence(connection, ef.taker, slabProgramId as PublicKey, ef.slot);
+            const preSeq = postSeq !== null ? postSeq - BigInt(ef.legs) : null;
+            const r = recordFill(publicKey.toBase58(), slabAddress, ef.taker.toBase58(), { q: ef.executedQ, bookedPriceE6: ef.bookedPriceE6, feeAtoms: ef.feeAtoms }, existingPositionSize, { preSeq, postSeq });
             if (r !== null) recordRealized(publicKey.toBase58(), slabAddress, r);
           }
-          const effective = ef ? effectivePriceE6(ef, baseFeeBps) : null;
-          if (effective !== null) applyEntryFill(effective);
-          // The effective price could not be derived: keep no entry at all (the position panel then derives an "est." one) rather than the mark.
-          else if (entryIdx !== null) clearEntryPrice(slabAddress, entryIdx, publicKey?.toBase58());
         });
       } else {
         applyEntryFill(markFillPriceE6);

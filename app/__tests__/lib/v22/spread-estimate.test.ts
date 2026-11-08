@@ -2,7 +2,7 @@
 /** M7: the pre-trade "Spread / price impact" figure comes from the matcher's own context and is never a silent zero. */
 import { describe, expect, it } from "vitest";
 import type { MatcherCtxView, V2BlockView } from "@/lib/limits/decode";
-import { spreadCostAtoms, spreadEstimateFromCtx, spreadValueText } from "@/lib/v22/spread-estimate";
+import { spreadEstimateFromCtx, spreadValueText } from "@/lib/v22/spread-estimate";
 
 const v2: V2BlockView = {
   flags: 1, feeLoBps: 10, feeHiBps: 80, feeColdBps: 10, volAMilli: 1000, volBDen: 100, volAlphaBps: 1000, volWarmupLeft: 0,
@@ -18,12 +18,12 @@ describe("spreadEstimateFromCtx", () => {
   it("adaptive matcher: the quote's total bps for this size (5 base + 10 fee + 1 impact + 15 skew = 31)", () => {
     const e = spreadEstimateFromCtx(ctx(), 1_000_000n, 100_000_000n, true);
     expect(e).toMatchObject({ kind: "quote", bps: 31 });
-    expect(spreadValueText(e)).toBe("~0.31% (est.)");
+    expect(spreadValueText(e)).toBe("~0.31% (est., not charged on this market: fills settle at the mark)");
   });
   it("legacy matcher: an honest RANGE from the base spread to max_total, never a point 0", () => {
     const e = spreadEstimateFromCtx(ctx({ kind: 1, v2: null, baseSpreadBps: 20, maxTotalBps: 80 }), 1_000_000n, 100_000_000n, true);
     expect(e).toEqual({ kind: "range", minBps: 20, maxBps: 80 });
-    expect(spreadValueText(e)).toBe("0.20% to 0.80% (est. range)");
+    expect(spreadValueText(e)).toBe("0.20% to 0.80% (est. range, not charged on this market: fills settle at the mark)");
   });
   it("unknown (no context / no price / no size) is null and reads as unavailable, never 0%", () => {
     expect(spreadEstimateFromCtx(null, 1_000_000n, 1n, true)).toBeNull();
@@ -35,19 +35,10 @@ describe("spreadEstimateFromCtx", () => {
   });
 });
 
-describe("spreadCostAtoms", () => {
-  it("cost of the point estimate on the notional; the floor of a range; null when unknown", () => {
-    expect(spreadCostAtoms({ kind: "quote", bps: 23, execPriceE6: null }, 40_000_000n)).toBe(92_000n);
-    expect(spreadCostAtoms({ kind: "range", minBps: 20, maxBps: 80 }, 40_000_000n)).toBe(80_000n);
-    expect(spreadCostAtoms(null, 40_000_000n)).toBeNull();
-  });
-});
-
 describe("fee channel (M-3)", () => {
   it("inFee is carried onto the estimate, worded, and removes the separate cost", () => {
     const e = spreadEstimateFromCtx(ctx(), 1_000_000n, 100_000_000n, true, true)!;
     expect(e).toMatchObject({ kind: "quote", bps: 31, inFee: true });
     expect(spreadValueText(e)).toBe("~0.31% (est., included in the trading fee)");
-    expect(spreadCostAtoms(e, 40_000_000n)).toBeNull();
   });
 });

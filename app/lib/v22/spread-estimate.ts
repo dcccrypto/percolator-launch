@@ -1,9 +1,11 @@
 /**
  * M7: the cost of crossing the matcher's spread / price impact, as the ticket and the close dialog can know it BEFORE the trade.
  *
- * The booked price of a v2.2 fill is the matcher's execution price (oracle +/- total bps, lib/limits/matcher-quote.ts), so a
- * spread applies on every market whose matcher charges one. This module turns the matcher's own context into the honest pre-trade
- * figure:
+ * The booked price of a v2.2 fill is the asset MARK (wrapper effective_price), NOT the matcher's execution price. The matcher's
+ * quote (oracle +/- total bps, lib/limits/matcher-quote.ts) is CHARGED ONLY through the fee channel (fee_bps = base + requested),
+ * so the spread is part of the trading fee where the channel is on (`inFee`) and costs nothing extra anywhere else (channel off:
+ * the wrapper refuses a requested fee and books at the mark). This module turns the matcher's own context into the honest pre-trade
+ * figure, for information; it NEVER yields an extra cost to add to the fee row or a balance preview:
  *   - "quote": the adaptive matcher's quote for this exact size (same integer math as the program). Still an ESTIMATE: the
  *     volatility term, the LP inventory and the oracle move between the read and the fill.
  *   - "range": a legacy / unquoted matcher. We know the floor (base spread) and the ceiling (max_total); the fill lands in between.
@@ -48,22 +50,9 @@ const pct = (bps: number): string => `${(bps / 100).toFixed(2)}%`;
 /** The "Spread / price impact" row's value. Always labelled as an estimate; null (unknown) has its own honest words. */
 export function spreadValueText(e: SpreadEstimate | null): string {
   if (!e) return "Not available before the trade. The fill price is shown after it.";
-  const tail = e.inFee ? ", included in the trading fee" : "";
+  const tail = e.inFee ? ", included in the trading fee" : ", not charged on this market: fills settle at the mark";
   if (e.kind === "quote") return `~${pct(e.bps)} (est.${tail})`;
   return e.minBps === e.maxBps ? `~${pct(e.minBps)} (est.${tail})` : `${pct(e.minBps)} to ${pct(e.maxBps)} (est. range${tail})`;
 }
 
 export const SPREAD_LABEL = "Spread / price impact";
-
-/** Estimated EXTRA cost in collateral atoms (null when the spread is already inside the fee) of a trade of `notionalAtoms`: the point estimate, or the floor of a range. Null = unknown. */
-export function spreadCostAtoms(e: SpreadEstimate | null, notionalAtoms: bigint): bigint | null {
-  // On a fee-channel market the spread is already inside the fee row: no separate cost to add.
-  if (!e || e.inFee || notionalAtoms <= 0n) return null;
-  const bps = e.kind === "quote" ? e.bps : e.minBps;
-  return (notionalAtoms * BigInt(bps)) / 10_000n;
-}
-
-/** True when the cost from spreadCostAtoms is only a FLOOR (a range estimate): callers must word it "at least". */
-export function spreadCostIsMinimum(e: SpreadEstimate | null): boolean {
-  return !!e && e.kind === "range" && !e.inFee;
-}

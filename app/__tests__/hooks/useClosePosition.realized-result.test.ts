@@ -120,11 +120,13 @@ const Q = 223_463n;
 const EXPECT_RESULT = (Q * (89_607_382n - 89_535_739n)) / 1_000_000n - 106_043n - 102_123n;
 
 describe("useClosePosition: effective price and lifetime trade result (M7)", () => {
+  let chainSeq = 41n;
   const openLeg = { active: true, side: 0, aBasis: 1_000_000_000_000_000n, epochSnap: 0n, basisPosQ: Q };
 
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    chainSeq = 41n;
     __setUnknownLotExpForTest(0);
     mocks.takeFillResult.mockReturnValue(undefined);
     mocks.trade.mockResolvedValue("close-sig");
@@ -132,7 +134,7 @@ describe("useClosePosition: effective price and lifetime trade result (M7)", () 
     mocks.isV17Account.mockReturnValue(true);
     mocks.getLivePriceSnapshot.mockReturnValue({ priceE6: 89_500_000n });
     mocks.getProgramAccounts.mockResolvedValue([{ pubkey: SOL_PORTFOLIO, account: { data: Buffer.alloc(1) } }]);
-    mocks.parsePortfolioV17.mockImplementation(() => ({ owner: wallet, capital: 44_140_000n, pnl: 0n, legs: [openLeg] }));
+    mocks.parsePortfolioV17.mockImplementation(() => ({ owner: wallet, capital: 44_140_000n, pnl: 0n, matcherSequence: chainSeq, legs: [openLeg] }));
     mocks.getTransaction.mockResolvedValue({ meta: { err: null, logMessages: closeFx.logMessages } });
     vi.mocked(useConnectionCompat).mockReturnValue({
       connection: { getProgramAccounts: mocks.getProgramAccounts, getAccountInfo: async () => ({ data: MARKET_BYTES }), getTransaction: mocks.getTransaction },
@@ -145,7 +147,7 @@ describe("useClosePosition: effective price and lifetime trade result (M7)", () 
     } as unknown as ReturnType<typeof useSlabState>);
   });
 
-  const seedOpen = () => saveBook(wallet.toBase58(), SOL_MARKET, SOL_PORTFOLIO.toBase58(), { q: Q, avgE6: 89_535_739n, fees: 106_043n, pnl: 0n });
+  const seedOpen = () => saveBook(wallet.toBase58(), SOL_MARKET, SOL_PORTFOLIO.toBase58(), { q: Q, avgE6: 89_535_739n, fees: 106_043n, pnl: 0n, seq: 41n });
   const effective = () => {
     const f = execFillFromLogs(closeFx.logMessages, SOL_WRAPPER, { market: new PublicKey(SOL_MARKET) })!;
     return formatLotPriceE6(effectivePriceE6(f, decodeMarketEngineView(new Uint8Array(MARKET_BYTES))!.tradeFeeBaseBps), 0);
@@ -158,7 +160,7 @@ describe("useClosePosition: effective price and lifetime trade result (M7)", () 
     const call = mocks.toast.mock.calls.map((c) => c[0] as string).find((t) => t.startsWith("Position closed."))!;
     expect(call).toContain(`Effective price ${effective()}.`);
     expect(call).not.toContain("$89.607382");
-    expect(call).toContain("Trade result −0.192157 USDC (fees and spread included, funding not included).");
+    expect(call).toContain("Trade result −0.192157 USDC (trading fees and spread included; funding and maintenance fees not included).");
     expect(EXPECT_RESULT).toBe(-192_157n);
     expect(getRealized(wallet.toBase58(), SOL_MARKET)).toBe(EXPECT_RESULT);
     expect(getLastResult(wallet.toBase58(), SOL_MARKET)).toBe(EXPECT_RESULT);
@@ -171,6 +173,17 @@ describe("useClosePosition: effective price and lifetime trade result (M7)", () 
     const call = mocks.toast.mock.calls.map((c) => c[0] as string).find((t) => t.startsWith("Position closed."))!;
     expect(call).toContain("Effective price");
     expect(call).not.toMatch(/Trade result|Realized|profit/);
+    expect(getRealized(wallet.toBase58(), SOL_MARKET)).toBeNull();
+  });
+
+  it("N-4: the book's anchor no longer matches the chain (the position was closed and reopened at the same size elsewhere): the price shows, NO result", async () => {
+    seedOpen();
+    chainSeq = 43n; // two matcher trades happened that this device never saw
+    const { result } = renderHook(() => useClosePosition(SOL_MARKET));
+    await act(async () => { await result.current.closePosition(100, { skipSweep: true }); });
+    const call = mocks.toast.mock.calls.map((c) => c[0] as string).find((t) => t.startsWith("Position closed."))!;
+    expect(call).toContain("Effective price");
+    expect(call).not.toMatch(/Trade result/);
     expect(getRealized(wallet.toBase58(), SOL_MARKET)).toBeNull();
   });
 

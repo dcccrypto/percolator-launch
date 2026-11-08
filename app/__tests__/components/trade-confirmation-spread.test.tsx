@@ -21,16 +21,17 @@ const base = {
 };
 
 describe("TradeConfirmationModal spread line (M7)", () => {
-  it("shows the matcher's estimate as its own labelled row, with the estimated cost on the notional", () => {
+  it("channel OFF (N-2): the estimate is information only: the fill books at the mark, so no extra cost is shown", () => {
     render(<TradeConfirmationModal {...base} spreadEstimate={{ kind: "quote", bps: 23, execPriceE6: 89_741_672n }} />);
     const row = screen.getByTestId("confirm-spread");
     expect(row).toHaveTextContent("Spread / price impact:");
-    expect(row).toHaveTextContent("~0.23% (est.)");
-    expect(row).toHaveTextContent("~0.092 USDC"); // 0.23% of the 40 USDC notional
+    expect(row).toHaveTextContent("~0.23% (est., not charged on this market: fills settle at the mark)");
+    expect(row.textContent).not.toMatch(/USDC/);
   });
-  it("a range is shown as a range", () => {
+  it("a range is shown as a range, with no cost either", () => {
     render(<TradeConfirmationModal {...base} spreadEstimate={{ kind: "range", minBps: 20, maxBps: 80 }} />);
-    expect(screen.getByTestId("confirm-spread")).toHaveTextContent("0.20% to 0.80% (est. range)");
+    expect(screen.getByTestId("confirm-spread")).toHaveTextContent("0.20% to 0.80% (est. range, not charged on this market: fills settle at the mark)");
+    expect(screen.getByTestId("confirm-spread").textContent).not.toMatch(/USDC|at least/);
   });
   it("NEGATIVE: with no estimate the row still exists and says so; it never shows 0.00%", () => {
     render(<TradeConfirmationModal {...base} />);
@@ -43,12 +44,5 @@ describe("TradeConfirmationModal spread line (M7)", () => {
     const row = screen.getByTestId("confirm-spread");
     expect(row).toHaveTextContent("~0.23% (est., included in the trading fee)");
     expect(row.textContent).not.toMatch(/USDC/);
-  });
-  it("a range's cost is only a FLOOR and is worded 'at least', never as the approximate cost", () => {
-    render(<TradeConfirmationModal {...base} spreadEstimate={{ kind: "range", minBps: 20, maxBps: 80 }} />);
-    const row = screen.getByTestId("confirm-spread");
-    expect(row).toHaveTextContent("0.20% to 0.80% (est. range)");
-    expect(row).toHaveTextContent("at least 0.08 USDC");
-    expect(row.textContent).not.toMatch(/~0\.08/);
   });
 });

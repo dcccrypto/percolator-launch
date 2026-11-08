@@ -28,14 +28,13 @@ describe("ClosePositionForm spread line (M7)", () => {
     expect(screen.getByTestId("close-spread").textContent).not.toMatch(/0\.00%/);
     expect(screen.getByText(/43\.88/)).toBeInTheDocument(); // 44 - 0.12
   });
-  it("with a 23 bps estimate: the row shows it and Est. Account Balance After is lower by that cost", () => {
+  it("channel OFF (N-2): a 23 bps estimate is shown for information; the close books at the mark, so NOTHING is subtracted", () => {
     const asked: Array<[bigint, boolean]> = [];
     render(<ClosePositionForm {...props} spreadEstimateFor={(q, buys) => { asked.push([q, buys]); return { kind: "quote", bps: 23, execPriceE6: null }; }} />);
     expect(screen.getByTestId("close-spread")).toHaveTextContent("Spread / price impact:");
-    expect(screen.getByTestId("close-spread")).toHaveTextContent("~0.23% (est.)");
-    expect(screen.getByTestId("close-spread")).toHaveTextContent("−0.092 USDC");
-    expect(screen.getByText(/43\.788/)).toBeInTheDocument(); // 44 - 0.12 - 0.092
-    // Closing a LONG sells: the taker does not buy.
+    expect(screen.getByTestId("close-spread")).toHaveTextContent("~0.23% (est., not charged on this market: fills settle at the mark)");
+    expect(screen.getByTestId("close-spread").textContent).not.toMatch(/USDC|−0\./);
+    expect(screen.getByText(/43\.88/)).toBeInTheDocument(); // 44 - 0.12, unchanged
     expect(asked.every(([, buys]) => buys === false)).toBe(true);
     expect(asked.some(([q]) => q === 40n * USDC)).toBe(true);
   });
@@ -52,13 +51,5 @@ describe("ClosePositionForm spread line (M7)", () => {
     expect(row.textContent).not.toMatch(/−0\./);
     expect(screen.getByText(/43\.788/)).toBeInTheDocument(); // 44 - 0.212 once, not 44 - 0.212 - 0.092
     expect(screen.queryByText(/43\.696/)).toBeNull();
-  });
-  it("M-3 CONTROL: fee channel OFF: the spread is its own cost and IS subtracted", () => {
-    render(<ClosePositionForm {...props} closeFeeBpsFor={() => 30n} spreadEstimateFor={() => ({ kind: "quote", bps: 23, execPriceE6: null })} />);
-    expect(screen.getByText(/43\.788/)).toBeInTheDocument(); // 44 - 0.12 - 0.092
-  });
-  it("a range's cost is only a floor: the close row says 'at least'", () => {
-    render(<ClosePositionForm {...props} spreadEstimateFor={() => ({ kind: "range", minBps: 20, maxBps: 80 })} />);
-    expect(screen.getByTestId("close-spread")).toHaveTextContent("at least −0.08 USDC");
   });
 });

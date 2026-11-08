@@ -31,6 +31,10 @@ export interface ExecFill {
   taker: PublicKey;
   /** The matcher's own quote (UNTRUSTED, display only, always labelled as the matcher's quote). Size-weighted; 0 when none. */
   quotedPriceE6: bigint;
+  /** Number of FILL records (legs) summed in. */
+  legs: number;
+  /** The slot the transaction landed in (set by readExecFill; undefined from raw logs). */
+  slot?: number;
 }
 
 const abs = (n: bigint): bigint => (n < 0n ? -n : n);
@@ -47,6 +51,7 @@ export function execFillFromLogs(
   let sumQuote = 0n;
   let signed = 0n;
   let fee = 0n;
+  let legs = 0;
   let taker: PublicKey | null = null;
   const assets = new Set<number>();
   for (const e of ev.events) {
@@ -65,11 +70,12 @@ export function execFillFromLogs(
       sumQuote += q * r.quotedPriceE6;
       signed += r.executedQ;
       fee += r.feeAtoms;
+      legs++;
     }
   }
   // Prices of two assets cannot be averaged: with no asset named and more than one filled, there is no single price.
   if (sumAbs === 0n || assets.size !== 1 || !taker) return null;
-  return { bookedPriceE6: sumPx / sumAbs, executedQ: signed, feeAtoms: fee, notionalAtoms: sumPx / 1_000_000n, taker, quotedPriceE6: sumQuote / sumAbs };
+  return { bookedPriceE6: sumPx / sumAbs, executedQ: signed, feeAtoms: fee, notionalAtoms: sumPx / 1_000_000n, taker, quotedPriceE6: sumQuote / sumAbs, legs };
 }
 
 /** The part of the fee that is the matcher's spread: total fee minus the base fee on the notional (never negative). */
@@ -102,7 +108,10 @@ export function readExecFill(
     for (let i = 0; i < tries; i++) {
       try {
         const tx = await connection.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
-        if (tx?.meta) return execFillFromLogs(tx.meta.logMessages, wrapper, { ...o, succeeded: tx.meta.err === null });
+        if (tx?.meta) {
+          const f = execFillFromLogs(tx.meta.logMessages, wrapper, { ...o, succeeded: tx.meta.err === null });
+          return f ? { ...f, slot: tx.slot } : null;
+        }
       } catch { /* retry */ }
       if (i < tries - 1) await sleep(700);
     }
