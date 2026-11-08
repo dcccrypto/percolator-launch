@@ -9,6 +9,7 @@ import { useStakePool } from "@/hooks/useStakePool";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { sanitizeOnChainValue } from "@/lib/health";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { readCreatorFeeClaimable } from "@/lib/v17-creator-fee";
 import { formatUsdFromNumber } from "@/lib/format";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
@@ -141,7 +142,7 @@ const CapitalSection: FC<{ slab: string }> = ({ slab }) => {
   );
 };
 
-/* ── Fees: split policy + realized amounts, NO claimable figure ────────────── */
+/* ── Fees: split policy + realized amounts; the creator leg shows the unclaimed balance ── */
 const FeesSection: FC = () => {
   const { wrapperConfigV17: cfg, raw } = useSlabState();
   const decimals = useTokenMeta(cfg?.collateralMint ?? null)?.decimals ?? 6;
@@ -163,8 +164,10 @@ const FeesSection: FC = () => {
     { key: "lp", label: "LP", bps: cfg.lpShareBps, usd: toUsd(cfg.lpFeeAccruedAtoms) as number | null, color: "var(--long)" },
     { key: "protocol", label: "Protocol", bps: FEE_SPLIT.PROTOCOL_FEE_BPS, usd: toUsd(cfg.protocolFeeAccruedAtoms) as number | null, color: "var(--text-dim)" },
     { key: "insurance", label: "Insurance", bps: cfg.insuranceShareBps, usd: toUsd(cfg.insuranceReserveAccruedAtoms) as number | null, color: "var(--short)" },
-    // Creator leg: the creator's unclaimed balance, read from the market account (asset 0 counter + legacy pot, the
-    // amount WithdrawCreatorFee pays). It is the CURRENT balance: claims debit it, so it is not a lifetime total.
+    // Creator leg: the creator's unclaimed balance, read from the market account (asset 0 counter + legacy pot). It is the MOST
+    // WithdrawCreatorFee (tag 90) can pay, not a promise: tag 90 also refuses while a bound vault's fee vesting is set and is capped
+    // by the insurance surplus and vault balance. The vesting flag is not read app-side, so on v2.2 the row says "claimable once
+    // vested". It is the CURRENT balance: claims debit it, so it is not a lifetime total.
     { key: "creator", label: "Creator", bps: cfg.creatorShareBps, usd: creatorUsd, color: "var(--accent-text)" },
   ];
   const pendingLabel = (key: string) => (key === "creator" ? "not tracked: market data unreadable" : "share only");
@@ -193,7 +196,7 @@ const FeesSection: FC = () => {
               ) : (
                 <>
                   {formatUsdFromNumber(l.usd)}
-                  <span className="ml-1 text-[8px] uppercase tracking-[0.1em] text-[var(--text-muted)]">{l.key === "creator" ? "unclaimed" : "collected"}</span>
+                  <span className="ml-1 text-[8px] uppercase tracking-[0.1em] text-[var(--text-muted)]">{l.key === "creator" ? (isDevnetV22Enabled() ? "unclaimed · claimable once vested" : "unclaimed") : "collected"}</span>
                 </>
               )}
             </span>

@@ -332,8 +332,11 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
               <p>{CREATOR_END_COPY.firstLoss}</p>
               <p>{CREATOR_END_COPY.withdraw}</p>
               <p>{CREATOR_END_COPY.rent}</p>
+              <p>{CREATOR_END_COPY.refund}</p>
               <p>{CREATOR_END_COPY.ends}</p>
+              <p>{CREATOR_END_COPY.admin}</p>
               <p>{CREATOR_END_COPY.positions}</p>
+              <p>{CREATOR_END_COPY.insurance}</p>
               <p>{CREATOR_END_COPY.undecided}</p>
             </div>
           )}
