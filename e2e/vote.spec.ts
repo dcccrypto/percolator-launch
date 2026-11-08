@@ -3,6 +3,10 @@
  * Postgres, driven by app/scripts/vote/e2e-local.ts.
  *
  * SKIPPED unless VOTE_E2E_PORT is set (CI does not run the local DB harness).
+ * REMOTE mode (VOTE_E2E_BASE=https://<preview alias>): the same cases against a
+ * deployed Vercel PREVIEW backed by an isolated THROWAWAY database, driven by
+ * app/scripts/vote/e2e-preview.ts. Vercel sets the client IP there, so the
+ * throwaway DB's limiter rows are cleared between cases instead of rotating IPs.
  * Voters are SYNTHETIC keypairs generated per run; every vote carries a genuine
  * Ed25519 signature. The poll is started only inside the throwaway database.
  * Test titles and logs never include a wallet address.
@@ -10,6 +14,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import * as fs from "node:fs";
 import * as http from "node:http";
+import * as https from "node:https";
 import * as path from "node:path";
 import { createRequire } from "node:module";
 import type naclT from "tweetnacl";
@@ -41,7 +46,12 @@ function buildVoteMessage(f: { choice: string; wallet: string; nonce: string; is
 declare namespace nacl { type SignKeyPair = naclT.SignKeyPair }
 
 const PORT = Number(process.env.VOTE_E2E_PORT);
-const enabled = Number.isInteger(PORT) && PORT > 0 && !!process.env.VOTE_E2E_VOTERS;
+const REMOTE = process.env.VOTE_E2E_BASE ? new URL(process.env.VOTE_E2E_BASE) : null;
+if (REMOTE && (REMOTE.protocol !== "https:" || !REMOTE.hostname.endsWith(".vercel.app"))) throw new Error("VOTE_E2E_BASE must be an https *.vercel.app preview");
+const enabled = (REMOTE !== null || (Number.isInteger(PORT) && PORT > 0)) && !!process.env.VOTE_E2E_VOTERS;
+// Deployment-protection header for the preview (value from env, never logged).
+const PROTECT: Record<string, string> = process.env.VOTE_E2E_OIDC ? { "x-vercel-trusted-oidc-idp-token": process.env.VOTE_E2E_OIDC } : {};
+const TARGET_HOST = REMOTE ? REMOTE.hostname : "percolator.trade";
 test.skip(!enabled, "local vote E2E harness not configured");
 
 const keys = enabled ? JSON.parse(fs.readFileSync(process.env.VOTE_E2E_VOTERS!, "utf8")) : { eligible: [], excluded: "" };
@@ -51,10 +61,26 @@ const X = enabled ? kp(keys.excluded) : null;
 const addr = (k: nacl.SignKeyPair) => bs58.encode(k.publicKey);
 const ADMIN = process.env.VOTE_E2E_ADMIN ?? "";
 const SHOTS = process.env.VOTE_E2E_SHOTS;
-const BASE = `http://percolator.trade:${PORT}`;
+const BASE = REMOTE ? REMOTE.origin : `http://percolator.trade:${PORT}`;
 
-test.use({ launchOptions: { args: ["--host-resolver-rules=MAP percolator.trade 127.0.0.1, MAP mainnet.percolatorlaunch.com 127.0.0.1"] } });
+if (!REMOTE) test.use({ launchOptions: { args: ["--host-resolver-rules=MAP percolator.trade 127.0.0.1, MAP mainnet.percolatorlaunch.com 127.0.0.1"] } });
 test.describe.configure({ mode: "serial" });
+
+/** REMOTE only: clear limiter rows in the THROWAWAY database (all clients share one real IP there). */
+async function resetLimits() {
+  if (!REMOTE) return;
+  const su = new Client({ connectionString: process.env.VOTE_E2E_SUPER_URL });
+  await su.connect();
+  try {
+    await su.query("delete from perc_alloc.rate_limit");
+  } finally {
+    await su.end();
+  }
+}
+test.beforeEach(async ({ page }) => {
+  await resetLimits();
+  if (REMOTE) await page.setExtraHTTPHeaders(PROTECT);
+});
 
 let ipSeq = 10;
 const ip = () => `198.51.100.${ipSeq++}`;
@@ -62,12 +88,9 @@ const ip = () => `198.51.100.${ipSeq++}`;
 function raw(o: { host?: string; path: string; method?: string; body?: unknown; headers?: Record<string, string> }) {
   return new Promise<{ status: number; json: Record<string, unknown> | null; text: string }>((resolve, reject) => {
     const body = o.body === undefined ? undefined : typeof o.body === "string" ? o.body : JSON.stringify(o.body);
-    const r = http.request(
-      {
-        host: "127.0.0.1", port: PORT, path: o.path, method: o.method ?? (body ? "POST" : "GET"),
-        headers: { host: `${o.host ?? "percolator.trade"}:${PORT}`, "x-real-ip": ip(), ...(body ? { "content-type": "application/json" } : {}), ...o.headers },
-      },
-      (res) => {
+    const method = o.method ?? (body ? "POST" : "GET");
+    const ctype = body ? { "content-type": "application/json" } : {};
+    const onRes = (res: http.IncomingMessage) => {
         const chunks: Buffer[] = [];
         res.on("data", (c) => chunks.push(c));
         res.on("end", () => {
@@ -80,8 +103,14 @@ function raw(o: { host?: string; path: string; method?: string; body?: unknown; 
           }
           resolve({ status: res.statusCode!, json, text });
         });
-      },
-    );
+    };
+    // REMOTE: the request goes to o.host (default: the preview alias) over TLS; Vercel routes by that name.
+    const r = REMOTE
+      ? https.request({ host: o.host ?? TARGET_HOST, port: 443, path: o.path, method, headers: { ...PROTECT, ...ctype, ...o.headers } }, onRes)
+      : http.request(
+          { host: "127.0.0.1", port: PORT, path: o.path, method, headers: { host: `${o.host ?? "percolator.trade"}:${PORT}`, "x-real-ip": ip(), ...ctype, ...o.headers } },
+          onRes,
+        );
     r.on("error", reject);
     if (body) r.write(body);
     r.end();
@@ -137,7 +166,10 @@ const shot = async (page: Page, name: string) => {
 };
 
 test("host lock: mainnet host and lookalikes 404 on vote pages and APIs", async () => {
-  for (const host of ["mainnet.percolatorlaunch.com", "evilpercolator.trade"]) {
+  // REMOTE: the same deployment under its OTHER hostnames (unique URL, branch alias) must 404.
+  const hosts = REMOTE ? (process.env.VOTE_E2E_OTHER_HOSTS ?? "").split(",").filter(Boolean) : ["mainnet.percolatorlaunch.com", "evilpercolator.trade"];
+  expect(hosts.length).toBeGreaterThan(0);
+  for (const host of hosts) {
     for (const p of ["/vote", "/vote/admin", "/api/vote/status", "/api/vote/results"]) expect((await raw({ host, path: p })).status, `${host}${p}`).toBe(404);
     expect((await raw({ host, path: "/api/vote/admin/start", body: { confirm: "START perc-fee-policy-2026-11" }, headers: { authorization: `Bearer ${ADMIN}` } })).status).toBe(404);
   }
@@ -147,7 +179,7 @@ test("default: NOT STARTED; nothing can be voted; results hidden", async ({ page
   expect((await raw({ path: "/api/vote/status" })).json).toMatchObject({ status: "ok", state: "not_started", starts_at: null });
   expect((await challenge(V[0]!, "buy-and-burn")).json).toMatchObject({ status: "not_started" });
   expect((await raw({ path: "/api/vote/results" })).status).toBe(409);
-  await page.setExtraHTTPHeaders({ "x-real-ip": ip() });
+  await page.setExtraHTTPHeaders({ ...(REMOTE ? PROTECT : {}), "x-real-ip": ip() });
   await page.goto(`${BASE}/vote`);
   await expect(page.getByTestId("vote-state")).toHaveAttribute("data-state", "not_started");
   await shot(page, "01-not-started");
@@ -162,14 +194,14 @@ test("admin start refuses missing, wrong, URL-borne secrets and bad confirmation
   const one = "203.0.113.77";
   const codes = [];
   for (let i = 0; i < 6; i++) {
-    codes.push((await raw({ path: "/api/vote/admin/start", body: { confirm: "nope" }, headers: { authorization: `Bearer ${i === 5 ? ADMIN : "wrong"}`, "x-real-ip": one } })).status);
+    codes.push((await raw({ path: "/api/vote/admin/start", body: { confirm: "nope" }, headers: { authorization: `Bearer ${i === 5 ? ADMIN : "wrong"}`, ...(REMOTE ? {} : { "x-real-ip": one }) } })).status);
   }
   expect(codes).toEqual([401, 401, 401, 401, 401, 429]);
   expect((await raw({ path: "/api/vote/status" })).json!.state).toBe("not_started");
 });
 
 test("one-click admin start (throwaway local DB) opens exactly 24h; a second start is refused", async ({ page }) => {
-  await page.setExtraHTTPHeaders({ "x-real-ip": ip() });
+  await page.setExtraHTTPHeaders({ ...(REMOTE ? PROTECT : {}), "x-real-ip": ip() });
   await page.goto(`${BASE}/vote/admin`);
   await page.locator("#vote-admin-secret").fill(ADMIN);
   await page.getByRole("checkbox").check();
@@ -230,7 +262,7 @@ test("API: genuine signed vote, replay, concurrent replay, binding, eligibility,
 
 test("UI: connect an injected Wallet Standard wallet, sign, vote recorded (desktop + mobile)", async ({ page, browser }) => {
   await injectWallet(page, V[2]!);
-  await page.setExtraHTTPHeaders({ "x-real-ip": ip() });
+  await page.setExtraHTTPHeaders({ ...(REMOTE ? PROTECT : {}), "x-real-ip": ip() });
   await page.goto(`${BASE}/vote`);
   await expect(page.getByTestId("vote-state")).toHaveAttribute("data-state", "open");
   await page.getByRole("button", { name: "Connect E2E Test Wallet" }).click();
@@ -240,9 +272,9 @@ test("UI: connect an injected Wallet Standard wallet, sign, vote recorded (deskt
   await expect(page.getByTestId("vote-result")).toContainText("Vote recorded: Weekly fee claims");
   await shot(page, "02-open-voted-desktop");
 
-  const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, extraHTTPHeaders: REMOTE ? PROTECT : {} });
   const m = await mobile.newPage();
-  await m.setExtraHTTPHeaders({ "x-real-ip": ip() });
+  await m.setExtraHTTPHeaders({ ...(REMOTE ? PROTECT : {}), "x-real-ip": ip() });
   await m.goto(`${BASE}/vote`);
   await expect(m.getByTestId("vote-state")).toHaveAttribute("data-state", "open");
   await expect(m.getByText("No Solana wallet with message signing was found in this browser.")).toBeVisible();
@@ -277,7 +309,7 @@ test("after close: writes refused; final aggregate is an exact balance tie -> bu
     turnout: { voted_balance: "10", eligible_balance: "10", eligible_wallets: 4, percent: "100.00" },
   });
   expect(res.text).not.toMatch(/[1-9A-HJ-NP-Za-km-z]{32,44}/);
-  await page.setExtraHTTPHeaders({ "x-real-ip": ip() });
+  await page.setExtraHTTPHeaders({ ...(REMOTE ? PROTECT : {}), "x-real-ip": ip() });
   await page.goto(`${BASE}/vote`);
   await expect(page.getByTestId("vote-results")).toContainText("Result: Buy and burn");
   await shot(page, "04-closed-tie-buy-and-burn");

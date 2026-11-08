@@ -212,13 +212,17 @@ serves these surfaces on one extra host if both of these hold:
 The value must be exactly one single-label `*.vercel.app` hostname. It is
 compared by exact equality, with no wildcard and no port. Production, mainnet
 and ordinary previews are unaffected. Never store this variable in the project
-env. Use it only with an isolated throwaway database.
+env. Use it only with an isolated throwaway database, and give that deployment
+throwaway `ALLOCATION_DATABASE_URL`, `ALLOCATION_RATE_LIMIT_SECRET` and
+`VOTE_ADMIN_SECRET` values. Never reuse production values there. The harness is
+`app/scripts/vote/e2e-preview.ts`. It refuses any database holding a
+non-synthetic snapshot.
 
 ## Known limitations
 
-- Client IP comes from the waitlist helper (`cf-connecting-ip`, then `x-real-ip`).
-  If the origin can be reached without Cloudflare, `cf-connecting-ip` can be
-  forged to rotate per-client keys; the global cap still bounds total lookups.
+- The client IP for allocation/vote rate limits comes only from the
+  Vercel-set `x-real-ip` / `x-vercel-forwarded-for`. `cf-connecting-ip` and
+  `x-forwarded-for` are ignored. The global cap still bounds total lookups.
 - The global cap trades availability for enumeration resistance: a distributed
   flood can make the checker answer 429 for everyone for up to a minute.
 - The runtime role still has the privileges Postgres grants every role through
