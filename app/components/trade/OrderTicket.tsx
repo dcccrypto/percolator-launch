@@ -2547,6 +2547,13 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             {FIRST_TRADE_COPY.line}
           </p>
         )}
+        {/* v22-mediums 1107 M11: below lg the ticket lives in the order sheet's scroll area, and the submit sat under the
+            fold (y 914-958 in an 844 px viewport). The footer pins it to the sheet's bottom edge (with the home-indicator
+            safe area); everything else, validation lines included, scrolls above it. Desktop: no sticky, unchanged. */}
+        <div
+          data-testid="trade-submit-footer"
+          className="max-lg:sticky max-lg:bottom-0 max-lg:z-10 max-lg:-mx-3.5 max-lg:border-t max-lg:border-[var(--border)]/50 max-lg:bg-[var(--bg)] max-lg:px-3.5 max-lg:pt-2 max-lg:pb-[max(0.5rem,env(safe-area-inset-bottom,0px))]"
+        >
         <button
           data-testid="trade-submit"
           data-state={ticketState.row}
@@ -2634,6 +2641,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                   ? FIRST_TRADE_COPY.button(fundLabel, direction === "long" ? "Long" : "Short")
                   : ticketState.buttonLabel}
         </button>
+        </div>
         </>
       )}
 

@@ -376,7 +376,7 @@ function PerpChartInner({ slabAddress }: Props) {
   const shownPrice = lastPrice ?? (series === "last" ? null : displayPrice);
 
   return (
-    <div className="flex h-[clamp(460px,68svh,700px)] w-full flex-col rounded-sm lg:h-full border border-[var(--border)] bg-[var(--panel-bg)]" data-testid="perp-chart">
+    <div className={`flex ${status === "empty" || status === "error" ? "h-[clamp(220px,32svh,280px)]" : "h-[clamp(460px,68svh,700px)]"} w-full flex-col rounded-sm lg:h-full border border-[var(--border)] bg-[var(--panel-bg)]`} data-testid="perp-chart">
       <PerpChartHeader price={shownPrice} stats={stats} live={liveState} ageSec={ageMs === null ? null : ageMs / 1000} seriesLabel={SERIES_LABEL[series]} />
       <div className="flex items-center gap-2 border-y border-[var(--border)] px-2 py-1">
         <PerpSeriesToggle value={series} onChange={(s) => seriesStore.set(s)} />
