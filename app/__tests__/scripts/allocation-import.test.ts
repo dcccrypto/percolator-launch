@@ -283,7 +283,7 @@ function buildV2(fx: Fx, exc: { owner: string; raw: bigint }, over: V2Over = {})
   );
   const exception = Buffer.from(
     JSON.stringify({
-      type: "founder_exception_override",
+      type: "owner_exception_override",
       owner_address: exc.owner,
       raw_balance: exc.raw.toString(),
       decimals: 6,
@@ -339,6 +339,7 @@ describe("validateSnapshot: derived (v2) manifest with an approved balance excep
     ["exception owner absent from the export", () => buildV2(base, exc, { exception: { owner_address: syntheticOwner("i-nobody") } }), "EXCEPTION_MISSING"],
     ["exception owner not canonical", () => buildV2(base, exc, { exception: { owner_address: "1" + exc.owner } }), "BAD_OWNER"],
     ["exception of unknown type", () => buildV2(base, exc, { exception: { type: "team" } }), "BAD_EXCEPTION"],
+    ["exception type that only looks like one", () => buildV2(base, exc, { exception: { type: "x_exception_override; drop" } }), "BAD_EXCEPTION"],
     ["exception without authority", () => buildV2(base, exc, { exception: { authority: " " } }), "BAD_EXCEPTION"],
     ["exception claiming ordinary inclusion", () => buildV2(base, exc, { exception: { ordinary_snapshot_inclusion: true } }), "BAD_EXCEPTION"],
     ["exception with wrong decimals", () => buildV2(base, exc, { exception: { decimals: 9 } }), "BAD_EXCEPTION"],

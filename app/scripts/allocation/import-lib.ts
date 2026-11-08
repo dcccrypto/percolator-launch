@@ -58,7 +58,8 @@ export interface HolderRow {
 
 /** Rounding the exports use; a v2 manifest must declare exactly this. */
 export const ROUNDING = Object.freeze({ mode: "largest_remainder", tie_break: "owner_address_asc", share_decimals: 18, pct_decimals: 12, usd_decimals: 2 });
-export const EXCEPTION_TYPES = ["founder_exception_override", "balance_exception_override"] as const;
+/** Exception files declare a `<kind>_exception_override` type (the kind is private provenance, never shown). */
+export const EXCEPTION_TYPE = /^[a-z][a-z_]{0,40}_exception_override$/;
 
 export interface SnapshotMeta {
   label: string;
@@ -222,7 +223,7 @@ export function validateSnapshot(input: ImportInput): ValidatedSnapshot {
     for (const [i, b] of files.entries()) {
       const x = parseJson(b, `exception file ${i + 1}`);
       const where = `exception file ${i + 1}`;
-      if (!(EXCEPTION_TYPES as readonly string[]).includes(x.type as string)) fail("BAD_EXCEPTION", `${where}: unknown type`);
+      if (typeof x.type !== "string" || !EXCEPTION_TYPE.test(x.type)) fail("BAD_EXCEPTION", `${where}: unknown type`);
       const owner = canonicalOwner(String(x.owner_address ?? ""), where);
       if (typeof x.raw_balance !== "string" || !/^[1-9]\d*$/.test(x.raw_balance) || BigInt(x.raw_balance) > U64_MAX)
         fail("BAD_EXCEPTION", `${where}: raw_balance must be a positive integer string`);
