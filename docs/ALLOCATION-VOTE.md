@@ -129,15 +129,74 @@ Remote imports always use verified TLS.
 - **Connection budget.** The reader role allows 30 connections; each warm
   serverless instance holds up to 3. Prefer the provider's pooled URL.
 
-## Vote: disabled
+## Vote: weekly fee claims vs buy-and-burn (NOT STARTED by default)
 
-`/vote` says voting is not open and has no controls.
-`GET /api/vote/status` returns `{"state":"UNAVAILABLE","open":false}`.
-`POST /api/vote/challenge` and `POST /api/vote/submit` always return 503 without
-reading the body. `GET /api/vote/results` and `/api/vote/log` return 409 `not_started`.
-There is no start, admin or configure endpoint. The state lives in
-`app/lib/allocation-vote/state.ts` as constants; a test asserts the vote files
-read no `process.env`, filesystem or storage.
+**Rules.** Voters are the eligible rows of the checker snapshot that is active
+when the poll starts (the poll pins that `snapshot_id`; a later re-import does
+not change the voter set or weights). Votes are weighted by exact snapshot
+`balance_raw`. Weekly fee claims wins only on a strict majority of balance
+voted; a tie or zero votes is buy-and-burn. No quorum. One 24 hour window from
+the moment an admin starts it (database clock). One ballot row per wallet;
+a wallet may change its vote while the window is open and its last valid vote
+counts. Results are aggregates only, published 60 seconds after the window
+closes (`tallying` until then, so a cast committing at the boundary can never
+change a published result).
+
+**Flow.** `POST /api/vote/challenge {"wallet","choice"}` returns a single-use
+5 minute nonce and the exact text to sign:
+
+```
+percolator.trade PERC holder vote
+Action: cast-vote
+Domain: percolator.trade
+Poll: perc-fee-policy-2026-11
+Choice: <weekly-fee-claims|buy-and-burn>
+Wallet: <address>
+Nonce: <64 hex>
+Issued At: <UTC ms ISO>
+Expires At: <UTC ms ISO>
+Signing records a vote only. It is not a transaction and moves no funds.
+```
+
+The wallet signs it (Wallet Standard `solana:signMessage`, no transaction).
+`POST /api/vote/submit` sends the fields + base58 signature. The server
+rebuilds the text, verifies Ed25519 (canonical encodings, S < L), then one
+database transaction (`perc_vote.cast_vote`) rebuilds the text again, checks the
+window and eligibility, locks and consumes the nonce (bound to poll, wallet,
+choice, issue and expiry time) and upserts the ballot, storing message and
+signature. Concurrent replays consume a nonce at most once.
+
+**Database.** `supabase/waitlist-migrations/20261108010000_perc_vote.sql`, applied
+AFTER the checker migration to the same database. Private schema `perc_vote`
+(poll, nonce, ballot); SECURITY DEFINER functions owned by `perc_alloc_definer`;
+the runtime role `perc_alloc_reader` may only EXECUTE them (no table access).
+Rate limits reuse `perc_alloc._hit` with hashed client keys. Applying the
+migration does not start the vote. The migration is additive only (no DROP).
+
+Then `20261108020000_perc_private_rls.sql` enables row level security on all six
+private tables (`perc_alloc.{snapshot,holder,rate_limit}` and
+`perc_vote.{poll,nonce,ballot}`). Only `perc_alloc_definer` gets a policy. The
+API roles and the runtime role have no grants and no policies. The table owner,
+used by the import, is not forced through RLS.
+
+**Configuration.** Same server-only `ALLOCATION_DATABASE_URL` and
+`ALLOCATION_RATE_LIMIT_SECRET` as the checker, plus `VOTE_ADMIN_SECRET`
+(server-only, Production only, at least 32 random characters). Without
+`VOTE_ADMIN_SECRET` the start endpoint returns 404.
+
+**Starting (owner approval required; one-shot, irreversible).** Open
+`https://percolator.trade/vote/admin`, paste the admin secret, tick the
+confirmation and press Start. Equivalent:
+`POST /api/vote/admin/start` with header `Authorization: Bearer <secret>` and body
+`{"confirm":"START perc-fee-policy-2026-11"}`. The secret is never accepted
+from a URL or cookie. Attempts are limited to 5 per client per 15 minutes
+(no global bucket, so strangers cannot lock the admin out), counted before the
+secret is compared. Note: the runtime database role can also execute
+`perc_vote.start_poll`; treat `ALLOCATION_DATABASE_URL` as able to start the poll. A second start
+returns 409 and never extends or restarts the window.
+
+**Not-started check (read-only):** `GET /api/vote/status` -> `"state":"not_started"`,
+or `select count(*) from perc_vote.poll` -> 0.
 
 ## Host isolation
 
@@ -150,11 +209,26 @@ headers (`x-forwarded-host` and similar) are never consulted. The existing
 `www.percolator.trade` and `percolatorlaunch.com` 301s to `percolator.trade` are
 unchanged. The env vars above belong on the percolator.trade project only.
 
+**Deployed-preview E2E exception (opt-in, one host).** A Vercel deployment also
+serves these surfaces on one extra host if both of these hold:
+
+- Vercel marks it as a preview (`VERCEL_ENV=preview`, a Vercel system variable);
+- it was given `ALLOCATION_VOTE_PREVIEW_HOST` per deployment (`vercel deploy -e/-b`).
+
+The value must be exactly one single-label `*.vercel.app` hostname. It is
+compared by exact equality, with no wildcard and no port. Production, mainnet
+and ordinary previews are unaffected. Never store this variable in the project
+env. Use it only with an isolated throwaway database, and give that deployment
+throwaway `ALLOCATION_DATABASE_URL`, `ALLOCATION_RATE_LIMIT_SECRET` and
+`VOTE_ADMIN_SECRET` values. Never reuse production values there. The harness is
+`app/scripts/vote/e2e-preview.ts`. It refuses any database holding a
+non-synthetic snapshot.
+
 ## Known limitations
 
-- Client IP comes from the waitlist helper (`cf-connecting-ip`, then `x-real-ip`).
-  If the origin can be reached without Cloudflare, `cf-connecting-ip` can be
-  forged to rotate per-client keys; the global cap still bounds total lookups.
+- The client IP for allocation/vote rate limits comes only from the
+  Vercel-set `x-real-ip` / `x-vercel-forwarded-for`. `cf-connecting-ip` and
+  `x-forwarded-for` are ignored. The global cap still bounds total lookups.
 - The global cap trades availability for enumeration resistance: a distributed
   flood can make the checker answer 429 for everyone for up to a minute.
 - The runtime role still has the privileges Postgres grants every role through

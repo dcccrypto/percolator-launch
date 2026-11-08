@@ -5,8 +5,8 @@
  *  - Allocation checker: one wallet per request, answered from the private
  *    database through a single lookup function (mocked here; the database side
  *    is covered by __tests__/db). Unconfigured -> fails closed as unavailable.
- *  - Vote: DISABLED. Every write fails closed server-side, nothing reads env to
- *    switch it on, and there is no start/admin endpoint.
+ *  - Vote: state lives in the private database (see vote-routes.test.ts and
+ *    __tests__/db/perc-vote-db.test.ts); unconfigured it fails closed.
  *  - Each handler refuses any host other than the exact waitlist host (defense
  *    in depth behind middleware).
  */
@@ -25,7 +25,6 @@ import { GET as voteStatus } from "@/app/api/vote/status/route";
 import { POST as voteChallenge } from "@/app/api/vote/challenge/route";
 import { POST as voteSubmit } from "@/app/api/vote/submit/route";
 import { GET as voteResults } from "@/app/api/vote/results/route";
-import { GET as voteLog } from "@/app/api/vote/log/route";
 
 const ROOT = path.resolve(__dirname, "../..");
 // A syntactically valid 32-byte base58 key (the System Program id), not a holder.
@@ -296,46 +295,26 @@ describe("allocation: one wallet's result only", () => {
   });
 });
 
-describe("vote: disabled, fail closed", () => {
-  it("status is UNAVAILABLE and not open", async () => {
-    const res = await voteStatus(req("/api/vote/status"));
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ state: "UNAVAILABLE", open: false });
-    expectPrivateHeaders(res);
-  });
-
-  it.each([
-    {},
-    { wallet: VALID_SYNTAX, option: "OPTION_A" },
-    { wallet: VALID_SYNTAX, option: "OPTION_B" },
-    { challenge_id: "0".repeat(32), signature: "1".repeat(88) },
-  ])("challenge and submit refuse every body with 503 (%j)", async (body) => {
-    for (const [fn, p] of [[voteChallenge, "/api/vote/challenge"], [voteSubmit, "/api/vote/submit"]] as const) {
-      const res = await fn(post(p, body));
-      expect(res.status).toBe(503);
-      expect(await res.json()).toEqual({ status: "unavailable", message: "Vote unavailable" });
-      expectPrivateHeaders(res);
-    }
-  });
-
-  it("results and log are not available (409 not_started)", async () => {
-    for (const [fn, p] of [[voteResults, "/api/vote/results"], [voteLog, "/api/vote/log"]] as const) {
-      const res = await fn(req(p));
-      expect(res.status).toBe(409);
-      expect(await res.json()).toEqual({ status: "not_started", final: false });
-    }
-  });
-
-  it("env cannot open the vote (even with the allocation checker configured)", async () => {
-    configure();
+describe("vote: fail closed without server configuration (full behaviour in vote-routes.test.ts)", () => {
+  it("unconfigured: status and writes are 503 unavailable; env flags cannot open it", async () => {
     process.env.VOTE_ENABLED = "true";
     process.env.NEXT_PUBLIC_VOTE_ENABLED = "true";
     process.env.VOTE_STATE = "OPEN";
-    expect((await (await voteStatus(req("/api/vote/status"))).json()).state).toBe("UNAVAILABLE");
-    expect((await voteChallenge(post("/api/vote/challenge", { wallet: VALID_SYNTAX, option: "OPTION_B" }))).status).toBe(503);
+    const res = await voteStatus(req("/api/vote/status"));
+    expect(res.status).toBe(503);
+    expectPrivateHeaders(res);
+    for (const [fn, p] of [[voteChallenge, "/api/vote/challenge"], [voteSubmit, "/api/vote/submit"]] as const) {
+      const r = await fn(post(p, { wallet: VALID_SYNTAX, choice: "buy-and-burn" }));
+      expect(r.status).toBe(503);
+      expect((await r.json()).status).toBe("unavailable");
+    }
+    expect((await voteResults(req("/api/vote/results"))).status).toBe(503);
+    delete process.env.VOTE_ENABLED;
+    delete process.env.NEXT_PUBLIC_VOTE_ENABLED;
+    delete process.env.VOTE_STATE;
   });
 
-  it("there is no start, admin, or configure endpoint under /api/vote", () => {
+  it("the only start endpoint is admin/start; there is no configure/reset/delete endpoint", () => {
     const dir = path.join(ROOT, "app/api/vote");
     const routes: string[] = [];
     const walk = (d: string) => {
@@ -347,36 +326,50 @@ describe("vote: disabled, fail closed", () => {
     };
     walk(dir);
     expect(routes.sort()).toEqual([
+      "admin/start/route.ts",
       "challenge/route.ts",
-      "log/route.ts",
       "results/route.ts",
       "status/route.ts",
       "submit/route.ts",
     ]);
   });
 
-  it("vote sources and pages read no env, filesystem, or storage (nothing can switch them on)", () => {
+  it("vote/allocation sources and pages read no env except the config modules, and no storage", () => {
+    const CONFIG = new Set(["server-config.ts", "vote-admin.ts", "preview-host.ts"]);
     const files = [
-      ...["status", "challenge", "submit", "results", "log"].map((r) => `app/api/vote/${r}/route.ts`),
-      ...fs.readdirSync(path.join(ROOT, "lib/allocation-vote")).filter((f) => f !== "server-config.ts").map((f) => `lib/allocation-vote/${f}`),
+      ...["status", "challenge", "submit", "results", "admin/start"].map((r) => `app/api/vote/${r}/route.ts`),
+      ...fs.readdirSync(path.join(ROOT, "lib/allocation-vote")).filter((f) => !CONFIG.has(f)).map((f) => `lib/allocation-vote/${f}`),
       "app/allocation/page.tsx",
       "app/allocation/AllocationChecker.tsx",
       "app/vote/page.tsx",
+      "app/vote/VoteClient.tsx",
+      "app/vote/wallet-standard.ts",
+      "app/vote/admin/page.tsx",
+      "app/vote/admin/AdminStart.tsx",
     ];
     for (const f of files) {
       const src = fs.readFileSync(path.join(ROOT, f), "utf8");
       expect(src, f).not.toMatch(/process\.env/);
-      expect(src, f).not.toMatch(/from ["'](node:)?fs["']|supabase|@upstash|@vercel\/blob|localStorage|sessionStorage|indexedDB/);
+      expect(src, f).not.toMatch(/from ["'](node:)?fs["']|supabase|@upstash|@vercel\/blob|localStorage|sessionStorage|indexedDB|document\.cookie/);
     }
   });
 
-  it("the allocation surface's only env reads are the three server-only lookup settings", () => {
+  it("preview-host.ts reads exactly VERCEL_ENV and ALLOCATION_VOTE_PREVIEW_HOST, nothing else, no storage", () => {
+    const src = fs.readFileSync(path.join(ROOT, "lib/allocation-vote/preview-host.ts"), "utf8");
+    const reads = [...src.matchAll(/process\.env(?:\.([A-Z_]+)|\[)/g)].map((m) => m[1] ?? "<dynamic>");
+    expect([...new Set(reads)].sort()).toEqual(["ALLOCATION_VOTE_PREVIEW_HOST", "VERCEL_ENV"]);
+    expect(src).not.toMatch(/import |require\(|localStorage|document\.cookie/);
+  });
+
+  it("the allocation surface's only env reads are the three lookup settings plus VOTE_ADMIN_SECRET", () => {
     const src = fs.readFileSync(path.join(ROOT, "lib/allocation-vote/server-config.ts"), "utf8");
     expect(src).toMatch(/^import "server-only";$/m);
     const names = [...src.matchAll(/env\.([A-Z0-9_]+)/g)].map((m) => m[1]).sort();
     expect([...new Set(names)]).toEqual(["ALLOCATION_DATABASE_CA_PEM", "ALLOCATION_DATABASE_URL", "ALLOCATION_RATE_LIMIT_SECRET"]);
-    expect(src).not.toMatch(/NEXT_PUBLIC_/);
-    for (const f of ["lookup-db.ts", "client-key.ts"]) {
+    const admin = fs.readFileSync(path.join(ROOT, "lib/allocation-vote/vote-admin.ts"), "utf8");
+    expect([...new Set([...admin.matchAll(/env\.([A-Z0-9_]+)/g)].map((m) => m[1]))]).toEqual(["VOTE_ADMIN_SECRET"]);
+    for (const s of [src, admin]) expect(s).not.toMatch(/NEXT_PUBLIC_/);
+    for (const f of ["lookup-db.ts", "client-key.ts", "vote-db.ts", "vote-admin.ts", "vote-route.ts"]) {
       expect(fs.readFileSync(path.join(ROOT, "lib/allocation-vote", f), "utf8"), f).toMatch(/^import "server-only";$/m);
     }
   });
@@ -394,7 +387,6 @@ describe("handlers refuse every host but percolator.trade", () => {
       voteChallenge(post("/api/vote/challenge", {}, host)),
       voteSubmit(post("/api/vote/submit", {}, host)),
       voteResults(req("/api/vote/results", { host })),
-      voteLog(req("/api/vote/log", { host })),
     ]);
     for (const r of results) {
       expect(r.status).toBe(404);

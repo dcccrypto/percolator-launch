@@ -155,6 +155,52 @@ describe("middleware: allocation/vote surfaces are percolator.trade only", () =>
   );
 });
 
+describe("middleware: opt-in preview-only exact host (deployed-preview E2E)", () => {
+  const P = "perc-vote-e2e-1108.vercel.app";
+  let middleware: MiddlewareFn;
+  beforeEach(async () => {
+    vi.unstubAllEnvs();
+    middleware = await freshMiddleware();
+  });
+
+  it.each(SURFACES)(`[${P}] %s passes through only with VERCEL_ENV=preview + exact host`, async (p) => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("ALLOCATION_VOTE_PREVIEW_HOST", P);
+    const res = await middleware(at(P, p));
+    expect(res.status).not.toBe(404);
+    expect(res.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+    vi.unstubAllEnvs();
+  });
+
+  it.each([
+    ["production", P],
+    ["development", P],
+    [undefined, P],
+    ["preview", undefined],
+    ["preview", "*.vercel.app"],
+    ["preview", "vercel.app"],
+  ])("VERCEL_ENV=%s host=%s → still 404", async (ve, h) => {
+    if (ve !== undefined) vi.stubEnv("VERCEL_ENV", ve);
+    if (h !== undefined) vi.stubEnv("ALLOCATION_VOTE_PREVIEW_HOST", h);
+    for (const p of ["/vote", "/api/vote/admin/start", "/allocation", "/api/allocation/check"]) {
+      expect((await middleware(at(P, p))).status).toBe(404);
+    }
+    vi.unstubAllEnvs();
+  });
+
+  it("with the allowance on, every OTHER host still 404s (no blanket vercel.app)", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("ALLOCATION_VOTE_PREVIEW_HOST", P);
+    for (const host of [...OTHER_HOSTS, `x${P}`, `evil.${P}`, `${P}.evil.com`, "other.vercel.app"]) {
+      expect((await middleware(at(host, "/api/vote/status"))).status).toBe(404);
+    }
+    // forwarded headers cannot borrow the preview host either
+    const res = await middleware(at("other.vercel.app", "/vote", { "x-forwarded-host": P, forwarded: `host=${P}` }));
+    expect(res.status).toBe(404);
+    vi.unstubAllEnvs();
+  });
+});
+
 describe("middleware: existing waitlist and mainnet behavior unchanged", () => {
   let middleware: MiddlewareFn;
   beforeEach(async () => {
