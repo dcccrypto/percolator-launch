@@ -498,6 +498,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // wallet on a market whose asset_admin is renounced (cached per market); normal
   // markets, visitors without a wallet and mock mode pay for no extra read.
   const marketLimits = useMarketLimits(slabAddress, 0, mockMode ? null : publicKey?.toBase58() ?? null);
+  // M9 (round 4): a room-limited v2.2 market whose room is still loading / failed to read is NOT fillable: Max, the deposit quote and submit all fail closed.
+  const roomUnknown = !mockMode && (marketLimits.growthRoom === "loading" || marketLimits.growthRoom === "error");
   /** WP-3 row 9: the size was just reduced to the max; the helper turns --warning for 4 s. */
   const [clampedToQ, setClampedToQ] = useState<bigint | null>(null);
   /** WP-3 result line (§3.3): full / partial / zero fill of the last order, in the status slot. */
@@ -962,7 +964,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const fundMinAtoms = fundingMode && hasOrder ? marginShort + fundFee : 0n;
   const fundEnteredAtoms = fundInput ? parsePercToNative(fundInput, decimals) : 0n;
   const fundAtoms = fundEnteredAtoms > 0n ? fundEnteredAtoms : fundNeededAtoms;
-  const fundOverWallet = fundingMode && fundAtoms > (walletAtaBalance ?? 0n);
+  const fundOverWallet = !roomUnknown && fundingMode && fundAtoms > (walletAtaBalance ?? 0n);
   const fundTooSmall = fundingMode && hasOrder && fundAtoms < fundMinAtoms;
   const fundLabel = `${usd2(fundAtoms, decimals)} ${collateralSymbol}`;
   // The liquidation preview prices the account as it will be AFTER the bundled deposit.
@@ -1183,7 +1185,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   };
   // The Max the trader sees (and the Max chip fills): the market's cap or what the balance can
   // margin at this leverage, whichever is smaller, in the input's unit.
-  const displayMaxQ = oneMaxQ([marketMaxQ, balanceMaxQ(tradableBalance, leverage, livePriceE6)]);
+  const displayMaxQ = roomUnknown ? 0n : oneMaxQ([marketMaxQ, balanceMaxQ(tradableBalance, leverage, livePriceE6)]);
 
   // Row 9 (AUTO): over the max, the size is reduced to it and the helper says so for 4 s.
   // Never on a paused side: there is nothing to reduce to, and the paused label says why.
@@ -1759,6 +1761,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     limitsBlocking ||
     fundTooSmall ||
     overFillable ||
+    roomUnknown ||
     !marginInput ||
     positionSize <= 0n ||
     (exceedsBalance && !fundingMode && ticketState.row !== "exceeds-balance");
@@ -2041,6 +2044,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const showMax = displayMaxQ !== null && displayMaxQ > 0n && !!livePriceE6 && livePriceE6 > 0n && !ticketState.blocks;
   const maxLabel = showMax ? maxInUnit(displayMaxQ!, sizeUnit, livePriceE6!, baseTicker, lotExp) : null;
   const fillFraction = (pct: number) => {
+    if (roomUnknown) return;
     if (displayMaxQ !== null && displayMaxQ > 0n && livePriceE6 && livePriceE6 > 0n) {
       handleSizeChange(sizeQToInput((displayMaxQ * BigInt(pct)) / 100n, sizeUnit, livePriceE6, lotExp));
       return;
@@ -2711,6 +2715,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 ? accountScanSlow
                   ? ACCOUNT_LOADING_COPY.slow
                   : ACCOUNT_LOADING_COPY.loading
+                : roomUnknown
+                ? marketLimits.growthRoom === "error" ? "Market room unavailable" : "Checking room…"
                 : belowOneLot && !ticketState.blocks
                 ? "Below the 1-lot minimum"
                 : overFillable && !ticketState.blocks

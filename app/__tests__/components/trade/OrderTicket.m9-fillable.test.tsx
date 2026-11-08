@@ -178,3 +178,47 @@ describe("M9 mounted: the quote follows the fillable room (first trade, wallet 3
     expect((screen.getByTestId("trade-submit") as HTMLButtonElement).disabled).toBe(false);
   });
 });
+
+describe("M9 mounted: the room is a required input (loading / failed room read fails closed on a room-limited v22 market)", () => {
+  const unknown = (growthRoom: "loading" | "error") =>
+    mocks.useMarketLimits.mockReturnValue(marketLimits({ matcher: null, growth: null, growthRoom, flags: { p1: false, p2: false, p2FeeCharged: false, p3: false } }));
+  const mountUnknown = async () => {
+    render(<OrderTicket slabAddress={SLAB} />);
+    await waitFor(() => expect(screen.queryByTestId("trade-submit")).not.toBeNull());
+  };
+  const btn = () => screen.getByTestId("trade-submit") as HTMLButtonElement;
+
+  for (const [state, label] of [["loading", "Checking room"], ["error", "Market room unavailable"]] as const) {
+    it(`(6-${state}) room ${state}: no wallet-bound Max, submit disabled + labelled, never a deposit CTA or Get test funds, for any size`, async () => {
+      unknown(state);
+      await mountUnknown();
+      // Max is not offered (it used to show the wallet balance x leverage).
+      expect(screen.queryByTestId("limits-max-size-inline")).toBeNull();
+      for (const size of ["", "300", "5000", "999999999"]) {
+        fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: size } });
+        expect(btn().disabled).toBe(true);
+        expect(btn().textContent).toContain(label);
+        expect(btn().textContent).not.toContain("Get test funds");
+        expect(btn().textContent).not.toMatch(/DEPOSIT/i);
+        expect(screen.queryByTestId("limits-max-size-inline")).toBeNull();
+      }
+      expect(document.body.textContent).not.toContain("Reduced to the most available");
+    });
+  }
+
+  it("(7) control: once the room loads, Max is the room and an in-room order is submittable again", async () => {
+    unknown("loading");
+    const { rerender } = render(<OrderTicket slabAddress={SLAB} />);
+    await waitFor(() => expect(screen.queryByTestId("trade-submit")).not.toBeNull());
+    expect(btn().textContent).toContain("Checking room");
+    mocks.useMarketLimits.mockReturnValue(marketLimits({ matcher: null, growth: view(), growthRoom: "known", flags: { p1: false, p2: false, p2FeeCharged: false, p3: false } }));
+    rerender(<OrderTicket slabAddress={SLAB} />);
+    // The ticket is memoised on its props: a local edit is what re-reads the hook (as the 20 s poll's state update does in the app).
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "1" } });
+    await waitFor(() => expect(screen.queryByTestId("limits-max-size-inline")).not.toBeNull(), { timeout: 8000 });
+    expect(maxQ()).toBe(ROOM);
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "300" } });
+    await waitFor(() => expect(btn().disabled).toBe(false));
+    expect(btn().textContent).not.toContain("Checking room");
+  });
+});

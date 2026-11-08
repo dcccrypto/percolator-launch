@@ -51,7 +51,7 @@ import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 import { resolveMarketLp } from "@/lib/market-lp";
 import { isDevnetV21Enabled } from "@/lib/v21/flag";
 import { growthMarketView, type GrowthMarketView } from "@/lib/v21/growth-market";
-import { GROWTH_DEPTH_RULES_DEPLOYED, growthControllerInputs } from "@/lib/v21/growth-market";
+import { GROWTH_DEPTH_RULES_DEPLOYED, decodeGrowthRecord, growthControllerInputs } from "@/lib/v21/growth-market";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { levGuardPda } from "@/lib/v22/lev-guard";
 import { decodeLevGuardV22, type LevGuardV22 } from "@/lib/v22/sdk";
@@ -165,6 +165,28 @@ export interface MarketLimits {
    * record reads all-zero) and whenever the v2.1 flag is off.
    */
   growth?: GrowthMarketView | null;
+  /**
+   * M9 (round 4): is the side room a ROOM-LIMITED v2.2 market reports known? "known" = the growth view is there; "none" = this asset has no growth
+   * record (genuinely no room limit); "loading" / "error" = the asset has a growth record but the view cannot be built yet (slab / LP read pending,
+   * clock unknown) or the LP read failed. The ticket fails CLOSED on loading / error (no wallet-bound Max, no deposit quote, submit held).
+   * Only ever set on a v2.2 build; undefined elsewhere (legacy paths unchanged).
+   */
+  growthRoom?: "known" | "none" | "loading" | "error";
+}
+
+/** Pure: see MarketLimits.growthRoom. */
+export function growthRoomState(
+  growth: GrowthMarketView | null,
+  raw: Uint8Array | null,
+  assetIndex: number,
+  lpReadFailed: boolean,
+): NonNullable<MarketLimits["growthRoom"]> {
+  if (growth) return "known";
+  // Slab bytes not here yet: whether the asset has a growth record is itself unknown.
+  if (!raw) return lpReadFailed ? "error" : "loading";
+  // Bytes decoded and the record is absent / all-zero: growth is OFF for this asset, no room limit.
+  if (decodeGrowthRecord(raw, assetIndex) === null) return "none";
+  return lpReadFailed ? "error" : "loading";
 }
 
 const OFF = (flags: LimitsFlags): MarketLimits => ({
@@ -484,6 +506,7 @@ export function useMarketLimits(
       accPart?.lpBytes && slabPart?.engine
         ? lpEffectiveSignedQ(accPart.lpBytes, slabPart.engine, assetIndex, slabPart.engine.marketId)
         : null;
+    const growth = v21 ? growthFor(slabPart, accPart, lpRealQ, raw, assetIndex, clusterSlot) : null;
     return {
       state,
       flags,
@@ -501,7 +524,8 @@ export function useMarketLimits(
       sameOwnerLpOwner: null,
       sameOwnerPending: false,
       sameOwnerUnresolved: false,
-      growth: v21 ? growthFor(slabPart, accPart, lpRealQ, raw, assetIndex, clusterSlot) : null,
+      growth,
+      ...(v21 && isDevnetV22Enabled() ? { growthRoom: growthRoomState(growth, raw, assetIndex, !!accPart?.error && !accPart.lp) } : {}),
     };
   }, [
     v21,
