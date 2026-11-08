@@ -36,6 +36,8 @@ interface TradeConfirmationModalProps {
   tradingFee: bigint;
   /** Product review T-1: the fee is an estimate that includes the quote / busy-side fee on top of the base fee. */
   tradingFeeEstimated?: boolean;
+  /** The fee above already holds the matcher's requested fee (charged quote, or added from the spread quote). Omitted: inferred from `tradingFeeEstimated`. */
+  quoteInFee?: boolean;
   /**
    * Worst-acceptable fill price (limit_price_e6) the trade will be signed
    * with, derived from live mark + default slippage bps. Shown so the user
@@ -90,6 +92,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   estimatedLiqDisplay,
   tradingFee,
   tradingFeeEstimated = false,
+  quoteInFee,
   worstFillPriceE6,
   spreadEstimate = null,
   accountEquity,
@@ -121,7 +124,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   // F1: on a fee-channel market the chain charges base + the matcher's requested fee. When the ticket's fee estimate holds the base only
   // (its P2 flag is off), the row adds the quote's requested bps, display only (what is signed is unchanged), so the spread row's "included
   // in the trading fee" is true.
-  const addSpreadToFee = !!spreadEstimate?.inFee && !tradingFeeEstimated;
+  const addSpreadToFee = !!spreadEstimate?.inFee && !(quoteInFee ?? tradingFeeEstimated);
   const shownFee = addSpreadToFee
     ? tradingFee + (notional * BigInt(spreadEstimate.kind === "quote" ? spreadEstimate.bps : spreadEstimate.minBps)) / 10_000n
     : tradingFee;

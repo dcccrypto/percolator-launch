@@ -110,13 +110,14 @@ import { sizeWithLots } from "@/lib/v22/growth-room";
 import { clippedFillBody, readClippedFill } from "@/lib/v22/clipped-fill";
 import { feeBpsWithSpread } from "@/lib/v22/spread-estimate";
 import { effectivePriceE6, readExecFill, type ExecFill } from "@/lib/v22/exec-fill";
-import { recordFill } from "@/lib/trade-book";
+import { recordFill, saveBook } from "@/lib/trade-book";
 import { recordRealized } from "@/lib/realized-pnl";
 import { useSpreadQuoter } from "@/hooks/useSpreadQuoter";
 import { isPortfolioClosable } from "@/lib/close-trading-account";
 import { defaultFeeCapMarginBps } from "@/lib/limits/fee-channel";
 import { OrderTicketLimits, reasonCopy } from "@/components/limits/OrderTicketLimits";
-import { estimatedTotalFeeBps, feeHasExtras, gateFeeBps } from "@/lib/limits/estimated-fee";
+import { estimatedTotalFeeBps, feeHasExtras, feeExtrasLabel, gateFeeBps, ticketFeeForEstimate } from "@/lib/limits/estimated-fee";
+import { sideOverFillable } from "@/lib/limits/fillable-quote";
 import { isUsdLikeCollateral } from "@/lib/v22/tier-config";
 import { GrowthTicketPanelLive } from "@/components/trade/GrowthTicketPanelLive";
 import { CloseOnlyBanner } from "@/components/trade/CloseOnlyBanner";
@@ -413,8 +414,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   };
   const [engineLockError, setEngineLockError] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  // M7: the matcher's spread / price impact for the confirm dialog (read once; also feeds the ticket's Fee cell).
-  const spreadFor = useSpreadQuoter(isDevnetV22Enabled());
+  // M7: the matcher's spread / price impact for the confirm dialog (read at mount for the Fee cell, and again each time the confirm opens, so its figure is not from page load).
+  const [confirmOpens, setConfirmOpens] = useState(0);
+  const spreadFor = useSpreadQuoter(isDevnetV22Enabled(), 0, confirmOpens);
   const [confirmSnapshot, setConfirmSnapshot] = useState<{
     positionSize: bigint;
     marginNative: bigint;
@@ -422,6 +424,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     estimatedLiqDisplay: LiqPriceDisplay;
     tradingFee: bigint;
     tradingFeeEstimated?: boolean;
+    quoteInFee?: boolean;
     worstFillPriceE6: bigint;
     riskLeverage: number | null;
     depositAtoms: bigint;
@@ -1133,9 +1136,15 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   };
   const ticketLimits = deriveTicketLimits(limitsInput);
   // Product review T-1: show what the fill is expected to charge (base + matcher quote fee + busy-side fee), not the base alone.
-  // Display only; the signed cap and the deposit math above are unchanged.
-  // L-2: on a fee-channel market the chain charges base + the matcher's requested fee whether or not the P2 flag put it in the estimate.
-  const estFeeBps = feeBpsWithSpread(estimatedTotalFeeBps(tradingFeeBps, ticketLimits.fee), tradingFeeBps, hasOrder ? spreadFor(positionSize, direction === "long") : null);
+  // M9: the busy-side surcharge is part of it even with no matcher quote (ticketFeeForEstimate). The signed cap is unchanged, but the
+  // same estimate (gateFeeBps, via ticketFeeForEstimate) now also sizes the engine gate: openNeed / the bundled deposit,
+  // exceedsBalance and the balance-bound Max include the busy-side fee on a no-matcher growth market (#3553: the engine charges it before the IM gate).
+  // L-2 / M-B: on a fee-channel market the chain charges base + the matcher's requested fee whether or not the P2 flag put the QUOTE in the
+  // estimate. Add it unless the estimate's quote is already charged in it (a busy-side fee above base says nothing about the quote).
+  const feeForEstimate = ticketFeeForEstimate(ticketLimits);
+  const spreadQuote = hasOrder ? spreadFor(positionSize, direction === "long") : null;
+  const estFeeBps = feeBpsWithSpread(estimatedTotalFeeBps(tradingFeeBps, feeForEstimate), spreadQuote, !!feeForEstimate?.charged);
+  const estFeeIncludesQuote = !!feeForEstimate?.charged || !!spreadQuote?.inFee;
   const estFee = hasOrder ? computeTradingFee((positionSize * oracleE6) / 1_000_000n, estFeeBps) : 0n;
   const estFeeHasExtras = feeHasExtras(tradingFeeBps, estFeeBps);
   // P1 99165722 (F-7): a close that GROWS a halted / capped LP is refused or clipped too.
@@ -1156,6 +1165,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const marketMaxQFor = (side: "long" | "short") =>
     oneMaxQ([ticketLimits.sideLimits?.[side]?.maxQ, fillCapQ, legacySideCapQ(side), side === direction ? ticketLimits.growthCapQ : null]);
   const marketMaxQ = marketMaxQFor(direction);
+  // M9: the typed size is above what this side can fill (the program clips it). The size input is clamped to the room below, but until
+  // that lands (and whenever it cannot) the ticket must not price, deposit for or submit the ask: it would quote more than it fills.
+  const overFillable = sideOverFillable(positionSize, marketMaxQ) && marketMaxQ !== null && marketMaxQ > 0n;
   // A sub-cent room is full too: it can't be expressed as an order ("Max $0.00"), and clamping
   // to it rewrote the size to "0.00" on every keystroke instead of saying the side is paused.
   const sidePaused = {
@@ -1530,7 +1542,13 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             // The size the chain had BEFORE this fill: the measured change (ADL-effective, read around the trade) is fresher than the
             // render-time position, which can be stale (e.g. the position was closed on another device). Fallback: the render-time size.
             const change = await measured.catch(() => null);
-            const before = change ? change.beforeQ : existingPositionSize;
+            // L-3: no measurement and the render-time position is not flat: that size may be stale (closed on another device), so a book
+            // cannot be reconciled with it. Fail closed: drop the book, claim nothing (costs only this trade's result).
+            if (!change && existingPositionSize !== 0n) {
+              saveBook(publicKey.toBase58(), slabAddress, ef.taker.toBase58(), null);
+              return;
+            }
+            const before = change ? change.beforeQ : 0n;
             const r = recordFill(publicKey.toBase58(), slabAddress, ef.taker.toBase58(), { q: ef.executedQ, bookedPriceE6: ef.bookedPriceE6, feeAtoms: ef.feeAtoms }, before);
             if (r !== null) recordRealized(publicKey.toBase58(), slabAddress, r);
           }
@@ -1732,6 +1750,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     ticketState.blocks ||
     limitsBlocking ||
     fundTooSmall ||
+    overFillable ||
     !marginInput ||
     positionSize <= 0n ||
     (exceedsBalance && !fundingMode && ticketState.row !== "exceeds-balance");
@@ -2367,7 +2386,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             /* A trader saw what they pay and nothing about where it goes. #2565. Product review T-1: the extras are named too. */
             tooltip={
               estFeeHasExtras
-                ? `Estimated ${(Number(estFeeBps) / 100).toFixed(2)}%: the market's ${(Number(tradingFeeBps) / 100).toFixed(2)}% base fee plus the market maker's quote fee${ticketLimits.fee?.utilFeeBps ? " and the busy-side fee" : ""}. The extra parts go to the market's liquidity (Earn). Your signature caps the total.${feeDestinationTitle ? ` Base fee split: ${feeDestinationTitle}` : ""}`
+                ? `Estimated ${(Number(estFeeBps) / 100).toFixed(2)}%: the market's ${(Number(tradingFeeBps) / 100).toFixed(2)}% base fee plus ${feeExtrasLabel(ticketFeeForEstimate(ticketLimits))}. The extra parts go to the market's liquidity (Earn). Your signature caps the total.${feeDestinationTitle ? ` Base fee split: ${feeDestinationTitle}` : ""}`
                 : feeDestinationTitle
             }
           />
@@ -2588,6 +2607,13 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             {FIRST_TRADE_COPY.line}
           </p>
         )}
+        {/* v22-mediums 1107 M11: below lg the ticket lives in the order sheet's scroll area, and the submit sat under the
+            fold (y 914-958 in an 844 px viewport). The footer pins it to the sheet's bottom edge (with the home-indicator
+            safe area); everything else, validation lines included, scrolls above it. Desktop: no sticky, unchanged. */}
+        <div
+          data-testid="trade-submit-footer"
+          className="max-lg:sticky max-lg:bottom-0 max-lg:z-10 max-lg:-mx-3.5 max-lg:border-t max-lg:border-[var(--border)]/50 max-lg:bg-[var(--bg)] max-lg:px-3.5 max-lg:pt-2 max-lg:pb-[max(0.5rem,env(safe-area-inset-bottom,0px))]"
+        >
         <button
           data-testid="trade-submit"
           data-state={ticketState.row}
@@ -2628,6 +2654,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               estimatedLiqDisplay: afterLiqDisplay,
               tradingFee: estFee,
               tradingFeeEstimated: estFeeHasExtras,
+              quoteInFee: estFeeIncludesQuote,
               worstFillPriceE6,
               // The account after this trade: the resulting position and the bundled deposit, as
               // the liq row uses, over capital + deposit + pnl, as the position panel's Lev.
@@ -2637,6 +2664,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               createsAccount: needsAccount && fundingMode,
             });
             setShowConfirmModal(true);
+            setConfirmOpens((n) => n + 1);
             // Prewarm the entire submission path (blockhash, priority fee,
             // v17 trade-account resolution) while the user reads the confirm
             // modal — their confirm click then reaches the wallet popup with
@@ -2669,12 +2697,15 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                   : ACCOUNT_LOADING_COPY.loading
                 : belowOneLot && !ticketState.blocks
                 ? "Below the 1-lot minimum"
+                : overFillable && !ticketState.blocks
+                ? "Over the max fillable size"
                 : fundOverWallet && !ticketState.blocks
                 ? "Get test funds"
                 : fundingMode && ticketState.row === "ok" && sizeEntered
                   ? FIRST_TRADE_COPY.button(fundLabel, direction === "long" ? "Long" : "Short")
                   : ticketState.buttonLabel}
         </button>
+        </div>
         </>
       )}
 
@@ -2767,6 +2798,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           estimatedLiqDisplay={confirmSnapshot.estimatedLiqDisplay}
           tradingFee={confirmSnapshot.tradingFee}
           tradingFeeEstimated={confirmSnapshot.tradingFeeEstimated ?? false}
+          quoteInFee={confirmSnapshot.quoteInFee}
           worstFillPriceE6={confirmSnapshot.worstFillPriceE6}
           spreadEstimate={spreadFor(confirmSnapshot.positionSize, direction === "long")}
           accountEquity={userAccount ? capital : null}

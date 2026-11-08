@@ -175,7 +175,8 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
     // F1: the chain charges base + the matcher's requested fee on a fee-channel market whether or not the ticket's P2 flag put it in the
     // estimate above (flag off = base only). When the channel is on and the estimate holds the base only, the displayed fee adds the quote's
     // requested bps (display only; what is signed is unchanged), so "included in the trading fee" is true and the preview is not high.
-    feeBps = feeBpsWithSpread(feeBps, tradingFeeBps, spread);
+    // A close never carries the busy-side fee (growth_v19.rs), so an estimate above base on a close IS the charged quote.
+    feeBps = feeBpsWithSpread(feeBps, spread, feeBps > tradingFeeBps);
     const feeEstimated = feeBps > tradingFeeBps;
     const closeFee = feeBps > 0n ? (closeNotional * feeBps) / 10_000n : 0n;
 

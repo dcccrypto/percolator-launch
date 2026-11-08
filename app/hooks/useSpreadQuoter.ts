@@ -16,7 +16,7 @@ import { spreadEstimateFromCtx, type SpreadEstimate } from "@/lib/v22/spread-est
  * portfolio close mounts). While `enabled` (a confirm or close dialog is open) it reads the market and the LP's matcher context ONCE
  * and returns `(sizeQ, takerBuys) => estimate`. Null until read / when it cannot be read: callers word that as unknown, never as 0.
  */
-export function useSpreadQuoter(enabled: boolean, assetIndex = 0): (sizeQ: bigint, takerBuys: boolean) => SpreadEstimate | null {
+export function useSpreadQuoter(enabled: boolean, assetIndex = 0, refreshKey: number = 0): (sizeQ: bigint, takerBuys: boolean) => SpreadEstimate | null {
   const connection = useConnectionCompat()?.connection ?? null;
   const slab = useSlabState();
   const slabAddress = slab?.slabAddress;
@@ -43,7 +43,7 @@ export function useSpreadQuoter(enabled: boolean, assetIndex = 0): (sizeQ: bigin
       }
     })();
     return () => { cancelled = true; };
-  }, [enabled, mockMode, connection, programId, slabAddress, assetIndex]);
+  }, [enabled, mockMode, connection, programId, slabAddress, assetIndex, refreshKey]);
 
   return useCallback(
     (sizeQ: bigint, takerBuys: boolean) => (src ? spreadEstimateFromCtx(src.ctx, src.oracleE6, sizeQ < 0n ? -sizeQ : sizeQ, takerBuys, src.inFee) : null),

@@ -9,6 +9,8 @@ import { useStakePool } from "@/hooks/useStakePool";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { sanitizeOnChainValue } from "@/lib/health";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { readCreatorFeeClaimable } from "@/lib/v17-creator-fee";
 import { formatUsdFromNumber } from "@/lib/format";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { Tooltip } from "@/components/ui/Tooltip";
@@ -30,7 +32,7 @@ import { CrankHealthCard } from "@/components/trade/CrankHealthCard";
  *    high/low, spread, funding, live badge). The dock shows only what the bar
  *    does NOT: the capital stack, health internals, liquidation/risk params,
  *    and the fee split.
- *  - No claimable-fee figure (that's the creator-only /analytics claim panel).
+ *  - The creator leg shows the unclaimed balance (read from the market account); claiming stays on the creator-only /analytics panel.
  *  - Fast: each tab's data hooks live in a subcomponent that only MOUNTS while
  *    that tab is open; the closed dock costs nothing and reused cards ride the
  *    SlabProvider the trade page already mounted (no extra RPC).
@@ -140,9 +142,9 @@ const CapitalSection: FC<{ slab: string }> = ({ slab }) => {
   );
 };
 
-/* ── Fees: split policy + realized amounts, NO claimable figure ────────────── */
+/* ── Fees: split policy + realized amounts; the creator leg shows the unclaimed balance ── */
 const FeesSection: FC = () => {
-  const { wrapperConfigV17: cfg } = useSlabState();
+  const { wrapperConfigV17: cfg, raw } = useSlabState();
   const decimals = useTokenMeta(cfg?.collateralMint ?? null)?.decimals ?? 6;
 
   if (!cfg) {
@@ -151,13 +153,24 @@ const FeesSection: FC = () => {
   const toUsd = (a: bigint) => Number(a) / 10 ** decimals;
   const baseFeeBps = Number(cfg.tradeFeeBps);
   const baseFeeStr = (baseFeeBps / 100).toFixed(baseFeeBps % 100 === 0 ? 0 : 2) + "%";
+  let creatorUsd: number | null = null;
+  try {
+    const claimable = raw ? readCreatorFeeClaimable(raw) : null;
+    creatorUsd = claimable ? toUsd(claimable.atoms) : null;
+  } catch {
+    creatorUsd = null;
+  }
   const legs = [
     { key: "lp", label: "LP", bps: cfg.lpShareBps, usd: toUsd(cfg.lpFeeAccruedAtoms) as number | null, color: "var(--long)" },
     { key: "protocol", label: "Protocol", bps: FEE_SPLIT.PROTOCOL_FEE_BPS, usd: toUsd(cfg.protocolFeeAccruedAtoms) as number | null, color: "var(--text-dim)" },
     { key: "insurance", label: "Insurance", bps: cfg.insuranceShareBps, usd: toUsd(cfg.insuranceReserveAccruedAtoms) as number | null, color: "var(--short)" },
-    // Creator leg: share % only. Claimable amount intentionally omitted here.
-    { key: "creator", label: "Creator", bps: cfg.creatorShareBps, usd: null, color: "var(--accent-text)" },
+    // Creator leg: the creator's unclaimed balance, read from the market account (asset 0 counter + legacy pot). It is the MOST
+    // WithdrawCreatorFee (tag 90) can pay, not a promise: tag 90 also refuses while a bound vault's fee vesting is set and is capped
+    // by the insurance surplus and vault balance. The vesting flag is not read app-side, so on v2.2 the row says "claimable once
+    // vested". It is the CURRENT balance: claims debit it, so it is not a lifetime total.
+    { key: "creator", label: "Creator", bps: cfg.creatorShareBps, usd: creatorUsd, color: "var(--accent-text)" },
   ];
+  const pendingLabel = (key: string) => (key === "creator" ? "not tracked: market data unreadable" : "share only");
   const pct = (bps: number) => `${((bps / 10_000) * 100).toFixed(Number.isInteger((bps / 10_000) * 100) ? 0 : 1)}%`;
 
   return (
@@ -179,11 +192,11 @@ const FeesSection: FC = () => {
             <span className="text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{pct(l.bps)}</span>
             <span className="ml-auto text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
               {l.usd == null ? (
-                <span className="text-[8px] uppercase tracking-[0.1em] text-[var(--text-muted)]">share only</span>
+                <span className="text-[8px] uppercase tracking-[0.1em] text-[var(--text-muted)]">{pendingLabel(l.key)}</span>
               ) : (
                 <>
                   {formatUsdFromNumber(l.usd)}
-                  <span className="ml-1 text-[8px] uppercase tracking-[0.1em] text-[var(--text-muted)]">collected</span>
+                  <span className="ml-1 text-[8px] uppercase tracking-[0.1em] text-[var(--text-muted)]">{l.key === "creator" ? (isDevnetV22Enabled() ? "unclaimed · claimable once vested" : "unclaimed") : "collected"}</span>
                 </>
               )}
             </span>

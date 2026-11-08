@@ -100,7 +100,8 @@ export function EarnHeader({ stats, loading }: EarnHeaderProps) {
               label="Daily Fee Revenue"
               loading={loading}
             >
-              <span className={FIGURE}>{usd(stats.dailyFeeRevenue)}</span>
+              {/* No volume stats collected (v2.2 has no indexer yet): unknown, not $0. */}
+              <span className={FIGURE}>{stats.dailyFeeRevenue == null ? "—" : usd(stats.dailyFeeRevenue)}</span>
             </StatCell>
             <StatCell
               label="Insurance Fund"

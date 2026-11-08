@@ -2,7 +2,8 @@
 /** M7: the pre-trade "Spread / price impact" figure comes from the matcher's own context and is never a silent zero. */
 import { describe, expect, it } from "vitest";
 import type { MatcherCtxView, V2BlockView } from "@/lib/limits/decode";
-import { spreadEstimateFromCtx, spreadValueText } from "@/lib/v22/spread-estimate";
+import { estimatedTotalFeeBps } from "@/lib/limits/estimated-fee";
+import { feeBpsWithSpread, spreadEstimateFromCtx, spreadValueText } from "@/lib/v22/spread-estimate";
 
 const v2: V2BlockView = {
   flags: 1, feeLoBps: 10, feeHiBps: 80, feeColdBps: 10, volAMilli: 1000, volBDen: 100, volAlphaBps: 1000, volWarmupLeft: 0,
@@ -40,5 +41,24 @@ describe("fee channel (M-3)", () => {
     const e = spreadEstimateFromCtx(ctx(), 1_000_000n, 100_000_000n, true, true)!;
     expect(e).toMatchObject({ kind: "quote", bps: 31, inFee: true });
     expect(spreadValueText(e)).toBe("~0.31% (est., included in the trading fee)");
+  });
+});
+
+describe("feeBpsWithSpread: decide on the QUOTE, not on 'above base' (M-B)", () => {
+  const q = { kind: "quote" as const, bps: 23, execPriceE6: null, inFee: true };
+  it("P2 off + a busy-side fee (30 base + 200 util + 23 requested): the estimate is above base WITHOUT the quote, so the requested bps IS added: 253, not 230", () => {
+    const est = estimatedTotalFeeBps(30n, { charged: false, requestedBps: 0n, utilFeeBps: 200n });
+    expect(est).toBe(230n);
+    expect(feeBpsWithSpread(est, q, false)).toBe(253n);
+  });
+  it("P2 on with a CHARGED quote (30 + 23 + 200): already in the estimate, not added a second time", () => {
+    const est = estimatedTotalFeeBps(30n, { charged: true, requestedBps: 23n, utilFeeBps: 200n });
+    expect(est).toBe(253n);
+    expect(feeBpsWithSpread(est, q, true)).toBe(253n);
+  });
+  it("P2 off, no busy-side fee: base 30 + 23 = 53; channel off or no estimate: unchanged", () => {
+    expect(feeBpsWithSpread(30n, q, false)).toBe(53n);
+    expect(feeBpsWithSpread(30n, { kind: "quote", bps: 23, execPriceE6: null }, false)).toBe(30n);
+    expect(feeBpsWithSpread(30n, null, false)).toBe(30n);
   });
 });

@@ -194,4 +194,18 @@ describe("OrderTicket: the price shown and saved is what the trader effectively 
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     expect(loadBook(W, SLAB, WALLET.toBase58())).toMatchObject({ q: 2n * FILLED, fees: 5_000n + FEE });
   });
+
+  it("L-3: the size measurement FAILED and the render-time position is not flat (it may be stale): the book is dropped and NO result is claimed, even for a short that would 'close' the old long", async () => {
+    saveBook(W, SLAB, WALLET.toBase58(), { q: FILLED, avgE6: 99_000_000n, fees: 5_000n, pnl: 0n });
+    withPosition(FILLED);
+    mocks.change = null; // takePositionChange gave nothing
+    mocks.getTransaction.mockResolvedValue({
+      meta: { err: null, logMessages: fillEventLogs(WALLET, new PublicKey(SLAB), [{ flags: 8, requestedQ: -FILLED, executedQ: -FILLED, priceE6: BOOKED, quotedPriceE6: BOOKED, feeAtoms: FEE }]) },
+    });
+    render(<OrderTicket slabAddress={SLAB} />);
+    await submit("5", "short");
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(getRealized(W, SLAB)).toBeNull();
+    expect(loadBook(W, SLAB, WALLET.toBase58())).toBeNull();
+  });
 });

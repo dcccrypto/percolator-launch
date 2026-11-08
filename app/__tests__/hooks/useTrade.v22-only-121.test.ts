@@ -208,4 +208,61 @@ describe("useTrade: the 121 peer-refresh retry follows the v2.2 flag too (FUND-6
     expect(mocks.planTradeRefresh).not.toHaveBeenCalled();
     expect(mocks.sendTxWaiting).toHaveBeenCalledTimes(1);
   });
+  // ---- M5 residual (council r2): pin the hook's 121 retry predicate (sendOrderOnce in hooks/useTrade.ts) -------------------
+  // `v22Refresh && !multiAsset && isLossStaleError(e, programId) && a stale PEER crank is planned`. The order is re-sent
+  // with the peer cranks exactly once on that condition; any other refusal / error is thrown after ONE wallet prompt.
+  const withPeers = () => mocks.planTradeRefresh.mockResolvedValue({ cranks: [{ role: "peer" }], instructions: [peerCrank, { programId, keys: [], data: Buffer.from([10]) } as unknown as TransactionInstruction] });
+  const sentLists = () => mocks.sendTxWaiting.mock.calls.map((c) => (c[0] as { instructions: TransactionInstruction[] }).instructions);
+
+  it("M5: Custom(121) from the wrapper -> exactly TWO sends (the refused order, then ONE retry carrying the peer crank), then it stops", async () => {
+    __setDevnetV21ForTest(false);
+    __setDevnetV22ForTest(true);
+    withPeers();
+    mocks.sendTxWaiting.mockRejectedValueOnce(wrapperRefusal(121)).mockResolvedValue("sig-peer");
+    const { sig, err } = await runOrder();
+    expect(err).toBeNull();
+    expect(sig).toBe("sig-peer");
+    expect(mocks.sendTxWaiting).toHaveBeenCalledTimes(2);
+    expect(mocks.planTradeRefresh).toHaveBeenCalledTimes(1);
+    const lists = sentLists();
+    expect(lists[0].some((ix) => ix.programId.equals(peerCrankProgram))).toBe(false);
+    expect(lists[1].some((ix) => ix.programId.equals(peerCrankProgram))).toBe(true);
+  });
+
+  const notRetried: Array<[string, () => unknown]> = [
+    ["Custom(22) same-slot race", () => wrapperRefusal(22)],
+    ["Custom(19) expired bucket", () => wrapperRefusal(19)],
+    ["Custom(98) fee cap", () => wrapperRefusal(98)],
+    ["Custom(120)", () => wrapperRefusal(120)],
+    ["Custom(122)", () => wrapperRefusal(122)],
+    ["Custom(1210) (121 as a prefix of another code)", () => wrapperRefusal(1210)],
+    ["121 raised by ANOTHER program (a CPI callee reusing the number)", () => { const e = wrapperRefusal(121); e.programId = new PublicKey(new Uint8Array(32).fill(77)).toBase58(); return e; }],
+    ["wallet rejection", () => new Error("User rejected the request.")],
+    ["network / blockhash error", () => new Error("failed to fetch: blockhash not found")],
+    ["non-Error rejection", () => "boom"],
+  ];
+  for (const [name, mk] of notRetried) {
+    it(`M5 NEGATIVE CONTROL: ${name} is not retried (one send, one wallet prompt, no refresh planned, error surfaces)`, async () => {
+      __setDevnetV21ForTest(false);
+      __setDevnetV22ForTest(true);
+      withPeers(); // a stale peer is available: only the predicate stands between the error and a second prompt
+      mocks.sendTxWaiting.mockRejectedValue(mk());
+      const { sig, err } = await runOrder();
+      expect(sig).toBeNull();
+      expect(err).not.toBeNull();
+      expect(mocks.sendTxWaiting).toHaveBeenCalledTimes(1);
+      expect(mocks.planTradeRefresh).not.toHaveBeenCalled();
+    });
+  }
+
+  it("M5: a 121 with NO stale peer to refresh gets no peer-crank retry (no list ever carries a peer crank)", async () => {
+    __setDevnetV21ForTest(false);
+    __setDevnetV22ForTest(true);
+    mocks.planTradeRefresh.mockResolvedValue({ cranks: [{ role: "lp" }], instructions: [peerCrank] });
+    mocks.sendTxWaiting.mockRejectedValue(wrapperRefusal(121));
+    const { sig } = await runOrder();
+    expect(sig).toBeNull();
+    expect(mocks.planTradeRefresh).toHaveBeenCalled();
+    expect(sentLists().some((l) => l.some((ix) => ix.programId.equals(peerCrankProgram)))).toBe(false);
+  });
 });

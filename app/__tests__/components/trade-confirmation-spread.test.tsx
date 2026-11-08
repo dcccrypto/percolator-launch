@@ -56,4 +56,14 @@ describe("TradeConfirmationModal spread line (M7)", () => {
     expect(screen.getByText(/0\.212 USDC/)).toBeInTheDocument();
     expect(screen.queryByText(/0\.304/)).toBeNull();
   });
+
+  it("M-B: a busy-side fee lifts the estimate above base WITHOUT the quote (quoteInFee false): the requested bps is still added", () => {
+    render(<TradeConfirmationModal {...base} tradingFee={920_000n} tradingFeeEstimated quoteInFee={false} spreadEstimate={{ kind: "quote", bps: 23, execPriceE6: null, inFee: true }} />);
+    expect(screen.getByText(/1\.012 USDC/)).toBeInTheDocument(); // 920,000 + 23 bps of 40 USDC (92,000)
+  });
+  it("M-B: quoteInFee true (the ticket's estimate holds it): not added", () => {
+    render(<TradeConfirmationModal {...base} tradingFee={920_000n} tradingFeeEstimated quoteInFee spreadEstimate={{ kind: "quote", bps: 23, execPriceE6: null, inFee: true }} />);
+    expect(screen.getByText(/0\.92 USDC/)).toBeInTheDocument();
+    expect(screen.queryByText(/1\.012/)).toBeNull();
+  });
 });

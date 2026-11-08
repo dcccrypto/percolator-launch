@@ -29,8 +29,10 @@ const ctx = { params: Promise.resolve({ ca: MINT }) };
 const req = () => new NextRequest(`http://localhost/api/oracle/resolve/${MINT}`);
 const pairs = {
   pairs: [
-    { chainId: "solana", dexId: "meteora", pairAddress: DAMM, priceUsd: "1.5", liquidity: { usd: 9e6 }, baseToken: { symbol: "WIF" } },
-    { chainId: "solana", dexId: "meteora", pairAddress: DLMM, priceUsd: "1.5", liquidity: { usd: 1e6 }, baseToken: { symbol: "WIF" } },
+    // DexScreener pairs carry the base token's mint; /api/oracle/resolve only prices `mint` from pairs where it is the
+    // BASE (lib/dex-pair-side.ts, #3740). These fixtures predate that filter and lacked the address.
+    { chainId: "solana", dexId: "meteora", pairAddress: DAMM, priceUsd: "1.5", liquidity: { usd: 9e6 }, baseToken: { symbol: "WIF", address: MINT } },
+    { chainId: "solana", dexId: "meteora", pairAddress: DLMM, priceUsd: "1.5", liquidity: { usd: 1e6 }, baseToken: { symbol: "WIF", address: MINT } },
   ],
 };
 
@@ -58,6 +60,22 @@ describe("GET /api/oracle/resolve: pool by owner", () => {
     const j = await (await GET(req(), { params: Promise.resolve({ ca: MINT }) })).json();
     expect(j.dexPoolAddress).toBeNull();
     expect(j.oracleMode).toBe("admin");
+  });
+  it("NEGATIVE CONTROL: a pool where the mint is only the QUOTE side is never offered or classified", async () => {
+    const QUOTE_POOL = key(3);
+    const OTHER = key(4);
+    vi.stubGlobal("fetch", vi.fn(async (url: string) =>
+      url.includes("dexscreener")
+        ? new Response(JSON.stringify({ pairs: [{ chainId: "solana", dexId: "meteora", pairAddress: QUOTE_POOL, priceUsd: "0.004", liquidity: { usd: 5e7 }, baseToken: { symbol: "PUMP", address: OTHER }, quoteToken: { symbol: "WIF", address: MINT } }] }), { status: 200 })
+        : new Response("{}", { status: 404 })));
+    owner.classify.mockResolvedValue({ [QUOTE_POOL]: "meteora-dlmm" });
+    const r = await GET(req(), { params: Promise.resolve({ ca: MINT }) });
+    const j = await r.json();
+    // Intended outcome pinned: no base-side pool and no Jupiter price -> 404, not a crash / 500 that would also pass the not.* checks.
+    expect(r.status).toBe(404);
+    expect(owner.classify).not.toHaveBeenCalledWith(expect.arrayContaining([QUOTE_POOL]));
+    expect(j.dexPoolAddress ?? null).not.toBe(QUOTE_POOL);
+    expect(j.price ?? null).not.toBe(0.004);
   });
   it("mainnet unreachable: 503, and the failure is NOT cached", async () => {
     owner.classify.mockResolvedValue(null);

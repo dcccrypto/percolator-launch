@@ -12,7 +12,8 @@
  * Rate limit: 1 Sim-USDC claim per wallet per day, the SAME faucet_claims slot ("usdc", 24h) the
  * Fund-your-account modal's /api/faucet uses (lib/sim-usdc-claim.ts; Council GO1106-UX: the two
  * routes had separate slots, so one wallet claimed twice in a minute). Falls back to a shared
- * process-local Map when Supabase is unavailable (a cold start resets it; acceptable on devnet).
+ * process-local Map when Supabase is unavailable, and then ALSO refuses a wallet whose Sim-USDC ATA shows a
+ * faucet-paid tx in the last 24h (lib/sim-usdc-onchain-claim.ts; R3 M8), failing closed if the chain is unreadable.
  *
  * Required env vars:
  *   DEVNET_MINT_AUTHORITY_KEYPAIR — JSON array or base58 string of the 64-byte
@@ -65,6 +66,7 @@ import {
 import * as Sentry from "@sentry/nextjs";
 import { assertSuccessfulConfirmation } from "@/lib/transaction-confirmation";
 import { grantServerSol } from "@/lib/server-sol-faucet";
+import { findRecentOnchainClaim, onchainClaimCheckFailure } from "@/lib/sim-usdc-onchain-claim";
 import {
   SIM_USDC_ALREADY_CLAIMED,
   SIM_USDC_CLAIM_FUND_TYPE,
@@ -198,6 +200,8 @@ export async function POST(req: NextRequest) {
     // "playground-faucet" slot with a 1h window: two claims in a minute).
     let supabase: ReturnType<typeof import("@/lib/supabase").getServiceClient> | null = null;
     let gate: { allowed: boolean; nextClaimAt: string | null; claimId?: number } = { allowed: true, nextClaimAt: null };
+    // R3 M8: true when no durable gate answered, so the limit must come from the in-memory map AND chain history.
+    let durableGateUnavailable = false;
     try {
       const sbMod = await import("@/lib/supabase");
       const gateMod = await import("@/lib/faucet-rate-gate");
@@ -205,6 +209,7 @@ export async function POST(req: NextRequest) {
       gate = await gateMod.tryFaucetGate(supabase, walletAddress, SIM_USDC_CLAIM_FUND_TYPE, RATE_LIMIT_MS);
     } catch {
       // Supabase unavailable — fall back to the in-memory limiter.
+      durableGateUnavailable = true;
       const { limited, nextClaimAt } = isRateLimited(walletAddress);
       gate = { allowed: !limited, nextClaimAt: nextClaimAt || null };
     }
@@ -265,6 +270,31 @@ export async function POST(req: NextRequest) {
     // working DEVNET_RPC_URL override (with the required Origin header) and
     // falls back to the public devnet RPC instead.
     const connection = getServerConnection("confirmed");
+
+    // R3 M8: no durable gate (no DB configured, or its table missing). The process-local map above resets on every
+    // cold start and per instance, so also read the wallet's Sim-USDC ATA history: a recent faucet-paid tx there is
+    // a claim. If the chain cannot be read, refuse rather than risk a second mint. Nothing is reserved yet.
+    if (durableGateUnavailable) {
+      try {
+        const claimedUntil = await findRecentOnchainClaim(
+          connection,
+          await getAssociatedTokenAddress(usdcMint, walletPk),
+          mintAuthPk.toBase58(),
+        );
+        if (claimedUntil) {
+          return NextResponse.json(
+            { error: SIM_USDC_ALREADY_CLAIMED, nextClaimAt: claimedUntil },
+            { status: 429 },
+          );
+        }
+      } catch (verifyErr) {
+        Sentry.captureException(verifyErr, {
+          tags: { endpoint: "/api/playground/faucet", step: "onchain_claim_check" },
+        });
+        return NextResponse.json(onchainClaimCheckFailure(verifyErr), { status: 503 },
+        );
+      }
+    }
 
     // ── Mint Sim-USDC ───────────────────────────────────────────────────────
     let usdcSig: string | undefined;

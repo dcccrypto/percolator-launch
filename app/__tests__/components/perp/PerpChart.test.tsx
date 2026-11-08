@@ -186,6 +186,29 @@ describe("PerpChart", () => {
     expect(await screen.findByText(/Waiting for the first price tick/i)).toBeInTheDocument();
   });
 
+  // v22-mediums 1107 M11: an EMPTY chart used to hold the full 460-700 px mobile height (an empty block pushing the order
+  // ticket and positions a screen down). Empty/error is capped on mobile; loading and ready keep the full height (no layout
+  // shift on the normal path); desktop (lg:h-full) is unchanged in every state.
+  it("M11: an empty chart is height-capped on mobile; a chart with bars keeps the full height; desktop is unchanged", async () => {
+    h.getBars.mockResolvedValue({ bars: [], noMoreHistory: true, source: "perp-mark" });
+    const empty = await mount();
+    await screen.findByText(/Waiting for the first price tick/i);
+    const cls = screen.getByTestId("perp-chart").className;
+    expect(cls).toContain("h-[clamp(220px,32svh,280px)]");
+    expect(cls).not.toContain("h-[clamp(460px,68svh,700px)]");
+    expect(cls).toContain("lg:h-full");
+    empty.unmount();
+
+    h.getBars.mockResolvedValue({ bars: [bar(0, 100), bar(1, 101)], noMoreHistory: false, source: "perp-mark" });
+    await mount();
+    const candle = () => created.series.find((s) => s.kind === "Candlestick");
+    await waitFor(() => expect(candle()?.setData).toHaveBeenCalled());
+    const full = screen.getByTestId("perp-chart").className;
+    expect(full).toContain("h-[clamp(460px,68svh,700px)]");
+    expect(full).not.toContain("h-[clamp(220px,32svh,280px)]");
+    expect(full).toContain("lg:h-full");
+  });
+
   it("the Last series adds a volume plot and an honest empty state", async () => {
     h.getBars.mockResolvedValue({ bars: [], noMoreHistory: true, source: "percolator" });
     const { store } = await mount();
