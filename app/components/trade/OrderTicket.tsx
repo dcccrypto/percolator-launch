@@ -150,7 +150,7 @@ import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { FirstDepositCard } from "@/components/trade/FirstDepositCard";
 import { diagnoseV22TradeCustom9, positionCapBlocksOpen, positionCapCopy } from "@/lib/v22/trade-refusal-9";
 import { readMaxPortfolioAssets } from "@/lib/v22/market-cap";
-import { growthMaxLeverageForOrder } from "@/lib/v21/growth-market";
+import { growthMaxLeverageForOrder, isReducingOrder } from "@/lib/v21/growth-market";
 import { getPortfolioRawSnapshot, makePortfolioScanKey } from "@/lib/userAccountScan";
 import { sanitizeDecimalInput } from "@/lib/decimal-input";
 import { useDecimalInput } from "@/hooks/useDecimalInput";
@@ -498,6 +498,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // wallet on a market whose asset_admin is renounced (cached per market); normal
   // markets, visitors without a wallet and mock mode pay for no extra read.
   const marketLimits = useMarketLimits(slabAddress, 0, mockMode ? null : publicKey?.toBase58() ?? null);
+  // M9 (round 4): a room-limited v2.2 market whose room is still loading / failed to read is NOT fillable: Max, the deposit quote and submit all fail closed.
+  const roomUnknownRaw = !mockMode && (marketLimits.growthRoom === "loading" || marketLimits.growthRoom === "error");
+  // Still "loading" after the slow threshold: say so honestly instead of "Checking room…" forever.
+  const roomSlow = useSlowFlag(roomUnknownRaw && marketLimits.growthRoom === "loading");
   /** WP-3 row 9: the size was just reduced to the max; the helper turns --warning for 4 s. */
   const [clampedToQ, setClampedToQ] = useState<bigint | null>(null);
   /** WP-3 result line (§3.3): full / partial / zero fill of the last order, in the status slot. */
@@ -878,6 +882,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   }
   const lotQuantised = lotOrderQ(rawPositionSize, typedTokenQ, lotExp);
   const positionSize = lotQuantised.q;
+  // A reduce / close of the open position needs no room (opposite side, no larger than the position): never held on the room read.
+  const roomUnknown = roomUnknownRaw && !isReducingOrder(existingPositionSize, direction, positionSize);
   const lotRemainderQ = lotQuantised.remainderQ;
   // Council GO1106 (trader): on a lot market the ticket quoted the TYPED size ("Covers 33.33 margin + fee for this 99.99
   // position", Order Lev 3x) while the fill was one whole lot (10,000 PENGU = $66, 1.8x). The order IS the rounded size,
@@ -962,7 +968,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const fundMinAtoms = fundingMode && hasOrder ? marginShort + fundFee : 0n;
   const fundEnteredAtoms = fundInput ? parsePercToNative(fundInput, decimals) : 0n;
   const fundAtoms = fundEnteredAtoms > 0n ? fundEnteredAtoms : fundNeededAtoms;
-  const fundOverWallet = fundingMode && fundAtoms > (walletAtaBalance ?? 0n);
+  const fundOverWallet = !roomUnknown && fundingMode && fundAtoms > (walletAtaBalance ?? 0n);
   const fundTooSmall = fundingMode && hasOrder && fundAtoms < fundMinAtoms;
   const fundLabel = `${usd2(fundAtoms, decimals)} ${collateralSymbol}`;
   // The liquidation preview prices the account as it will be AFTER the bundled deposit.
@@ -1174,7 +1180,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const marketMaxQ = marketMaxQFor(direction);
   // M9: the typed size is above what this side can fill (the program clips it). The size input is clamped to the room below, but until
   // that lands (and whenever it cannot) the ticket must not price, deposit for or submit the ask: it would quote more than it fills.
-  const overFillable = sideOverFillable(positionSize, marketMaxQ) && marketMaxQ !== null && marketMaxQ > 0n;
+  const overFillable = !roomUnknown && sideOverFillable(positionSize, marketMaxQ) && marketMaxQ !== null && marketMaxQ > 0n;
   // A sub-cent room is full too: it can't be expressed as an order ("Max $0.00"), and clamping
   // to it rewrote the size to "0.00" on every keystroke instead of saying the side is paused.
   const sidePaused = {
@@ -1183,12 +1189,14 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   };
   // The Max the trader sees (and the Max chip fills): the market's cap or what the balance can
   // margin at this leverage, whichever is smaller, in the input's unit.
-  const displayMaxQ = oneMaxQ([marketMaxQ, balanceMaxQ(tradableBalance, leverage, livePriceE6)]);
+  // While the room is unknown (whatever size is typed): nothing on the adding side, and on the reducing side at most the open position (a full close).
+  const reduceOnlyMaxQ = existingPositionSize !== 0n && (existingPositionSize > 0n) !== (direction === "long") ? (existingPositionSize < 0n ? -existingPositionSize : existingPositionSize) : 0n;
+  const displayMaxQ = roomUnknownRaw ? reduceOnlyMaxQ : oneMaxQ([marketMaxQ, balanceMaxQ(tradableBalance, leverage, livePriceE6)]);
 
   // Row 9 (AUTO): over the max, the size is reduced to it and the helper says so for 4 s.
   // Never on a paused side: there is nothing to reduce to, and the paused label says why.
   const clampTarget =
-    !sidePaused[direction] && marketMaxQ !== null && marketMaxQ > 0n && positionSize > marketMaxQ ? marketMaxQ : null;
+    !roomUnknown && !sidePaused[direction] && marketMaxQ !== null && marketMaxQ > 0n && positionSize > marketMaxQ ? marketMaxQ : null;
   useEffect(() => {
     if (clampTarget === null || !livePriceE6 || livePriceE6 <= 0n) return;
     applySize(sizeQToInput(clampTarget, sizeUnit, livePriceE6, lotExp));
@@ -1759,6 +1767,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     limitsBlocking ||
     fundTooSmall ||
     overFillable ||
+    roomUnknown ||
     !marginInput ||
     positionSize <= 0n ||
     (exceedsBalance && !fundingMode && ticketState.row !== "exceeds-balance");
@@ -2041,6 +2050,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const showMax = displayMaxQ !== null && displayMaxQ > 0n && !!livePriceE6 && livePriceE6 > 0n && !ticketState.blocks;
   const maxLabel = showMax ? maxInUnit(displayMaxQ!, sizeUnit, livePriceE6!, baseTicker, lotExp) : null;
   const fillFraction = (pct: number) => {
+    if (roomUnknownRaw && !(displayMaxQ !== null && displayMaxQ > 0n && livePriceE6 && livePriceE6 > 0n)) return;
     if (displayMaxQ !== null && displayMaxQ > 0n && livePriceE6 && livePriceE6 > 0n) {
       handleSizeChange(sizeQToInput((displayMaxQ * BigInt(pct)) / 100n, sizeUnit, livePriceE6, lotExp));
       return;
@@ -2383,7 +2393,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       )}
 
       {/* Summary (§4.2): entry / liq / fee / margin. Everything else is in Details. */}
-      {hasOrder && (
+      {hasOrder && roomUnknown && (
+        <p data-testid="room-unknown-note" role="status" className="mb-2 text-[11px] leading-snug text-[var(--text-secondary)]">
+          {marketLimits.growthRoom === "error" || roomSlow ? "Market room unavailable. Fee, margin and deposit are not quoted until it loads." : "Checking room… Fee, margin and deposit are quoted once the market's room is known."}
+        </p>
+      )}
+      {hasOrder && !roomUnknown && (
         <div className="mb-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]" data-testid="ticket-summary" style={{ fontVariantNumeric: "tabular-nums" }}>
           <SummaryCell label="Entry" value={formatLotPriceE6(estEntry, lotExp)} />
           <SummaryCell
@@ -2413,7 +2428,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       )}
 
       {/* UX WP-6: the deposit that rides with this trade (margin + fee + 10%), editable. */}
-      {fundingMode && hasOrder && (
+      {fundingMode && hasOrder && !roomUnknown && (
         <div className="mb-2">
           <div className="flex items-center gap-1.5 border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5">
             <label htmlFor="first-trade-deposit" className="whitespace-nowrap text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
@@ -2711,6 +2726,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 ? accountScanSlow
                   ? ACCOUNT_LOADING_COPY.slow
                   : ACCOUNT_LOADING_COPY.loading
+                : roomUnknown
+                ? marketLimits.growthRoom === "error" || roomSlow ? "Market room unavailable" : "Checking room…"
                 : belowOneLot && !ticketState.blocks
                 ? "Below the 1-lot minimum"
                 : overFillable && !ticketState.blocks
@@ -2829,6 +2846,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             const snapshot = confirmSnapshot;
             setShowConfirmModal(false);
             setConfirmSnapshot(null);
+            if (roomUnknown) return; // the room read was lost after the modal opened
             void handleTrade(
               snapshot.positionSize,
               snapshot.worstFillPriceE6,

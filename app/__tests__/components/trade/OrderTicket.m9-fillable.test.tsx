@@ -3,10 +3,11 @@
  * Max is clamped to the room; an oversize ask is clamped / blocked so the deposit, margin and fee never price unfillable size;
  * the busy-side surcharge is in Fee with no matcher quote; a funded wallet with an impossible size sees no "Get test funds".
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const slow = vi.hoisted(() => ({ on: false }));
 const mocks = vi.hoisted(() => ({
   useWalletCompat: vi.fn(),
   useConnectionCompat: vi.fn(),
@@ -14,6 +15,9 @@ const mocks = vi.hoisted(() => ({
   useSlabState: vi.fn(),
   useEngineState: vi.fn(),
   useMarketLimits: vi.fn(),
+  useMarketFillCap: vi.fn(),
+  fundAndTrade: vi.fn(),
+  modal: { props: null as null | { onConfirm: () => void } },
 }));
 
 vi.mock("@/hooks/useWalletCompat", () => ({ useWalletCompat: mocks.useWalletCompat, useConnectionCompat: mocks.useConnectionCompat }));
@@ -35,14 +39,15 @@ vi.mock("@/components/trade/GrowthTicketPanelLive", async () => {
     },
   };
 });
+vi.mock("@/hooks/useSlowFlag", async (orig) => ({ ...(await orig<object>()), useSlowFlag: (active: boolean) => active && slow.on }));
 vi.mock("@/hooks/useMarketLimits", () => ({ useMarketLimits: mocks.useMarketLimits }));
 vi.mock("@/hooks/useEngineState", () => ({ useEngineState: mocks.useEngineState }));
 vi.mock("@/hooks/useInitUser", () => ({ useInitUser: () => ({ initUser: vi.fn(), loading: false, error: null }) }));
-vi.mock("@/hooks/useFirstTrade", () => ({ useFirstTrade: () => ({ fundAndTrade: vi.fn(), loading: false }) }));
+vi.mock("@/hooks/useFirstTrade", () => ({ useFirstTrade: () => ({ fundAndTrade: mocks.fundAndTrade, loading: false }) }));
 vi.mock("@solana/spl-token", () => ({ getAssociatedTokenAddressSync: vi.fn(() => new PublicKey("11111111111111111111111111111111")) }));
 vi.mock("@/hooks/useTrade", () => ({ useTrade: () => ({ trade: vi.fn(), loading: false, error: null }), prewarmTradeSubmission: vi.fn() }));
 vi.mock("@/hooks/useBandRentView", () => ({ useBandRentView: () => null }));
-vi.mock("@/hooks/useMarketFillCap", () => ({ useMarketFillCap: () => null }));
+vi.mock("@/hooks/useMarketFillCap", () => ({ useMarketFillCap: mocks.useMarketFillCap }));
 vi.mock("@/hooks/useTokenMeta", () => ({ useTokenMeta: () => ({ symbol: "USDC", decimals: 6 }) }));
 vi.mock("@/hooks/useMarketInfo", () => ({ useMarketInfo: () => ({ market: { symbol: "SOL-PERP", max_leverage: 10 } }) }));
 vi.mock("@/hooks/useOracleFreshness", () => ({ useOracleFreshness: () => ({ isStale: false, stale: false }) }));
@@ -54,7 +59,7 @@ vi.mock("@/lib/priceStore/priceStore", async (orig) => ({ ...(await orig<object>
 vi.mock("@/lib/mock-trade-data", () => ({ isMockSlab: () => false, getMockUserAccountIdle: () => null, getMockUserAccount: () => null }));
 vi.mock("@/lib/tx", () => ({ prewarmTxLanding: vi.fn() }));
 vi.mock("@/components/trade/DepositWithdrawCard", () => ({ DepositWithdrawCard: () => <div data-testid="deposit-card" /> }));
-vi.mock("@/components/trade/TradeConfirmationModal", () => ({ TradeConfirmationModal: () => null }));
+vi.mock("@/components/trade/TradeConfirmationModal", () => ({ TradeConfirmationModal: (p: { onConfirm: () => void }) => { mocks.modal.props = p; return <div data-testid="confirm-modal" />; } }));
 vi.mock("@/components/ConnectButton", () => ({ ConnectButton: () => null }));
 vi.mock("@/lib/userAccountScan", async (orig) => ({ ...(await orig<object>()), getPortfolioRawSnapshot: () => null }));
 vi.mock("@/lib/close-trading-account", async (orig) => ({ ...(await orig<object>()), isPortfolioClosable: () => ({ closable: false }) }));
@@ -83,6 +88,9 @@ const view = () =>
   })!;
 
 beforeEach(() => {
+  mocks.modal.props = null;
+  mocks.fundAndTrade.mockReset();
+  mocks.useMarketFillCap.mockReturnValue(null);
   const g = view();
   mocks.useMarketLimits.mockReturnValue(marketLimits({ matcher: null, growth: g, flags: { p1: false, p2: false, p2FeeCharged: false, p3: false } }));
   __setDevnetV22ForTest(true);
@@ -176,5 +184,146 @@ describe("M9 mounted: the quote follows the fillable room (first trade, wallet 3
     // And once the clamp lands the order is the fillable one and submit is live again.
     await waitFor(() => expect((screen.getByTestId("trade-size-input") as HTMLInputElement).value).toBe("350.00"));
     expect((screen.getByTestId("trade-submit") as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+describe("M9 mounted: the room is a required input (loading / failed room read fails closed on a room-limited v22 market)", () => {
+  const unknown = (growthRoom: "loading" | "error") =>
+    mocks.useMarketLimits.mockReturnValue(marketLimits({ matcher: null, growth: null, growthRoom, flags: { p1: false, p2: false, p2FeeCharged: false, p3: false } }));
+  const mountUnknown = async () => {
+    render(<OrderTicket slabAddress={SLAB} />);
+    await waitFor(() => expect(screen.queryByTestId("trade-submit")).not.toBeNull());
+  };
+  const btn = () => screen.getByTestId("trade-submit") as HTMLButtonElement;
+
+  for (const [state, label] of [["loading", "Checking room"], ["error", "Market room unavailable"]] as const) {
+    it(`(6-${state}) room ${state}: no wallet-bound Max, submit disabled + labelled, never a deposit CTA or Get test funds, for any size`, async () => {
+      unknown(state);
+      await mountUnknown();
+      // Max is not offered (it used to show the wallet balance x leverage).
+      expect(screen.queryByTestId("limits-max-size-inline")).toBeNull();
+      for (const size of ["", "300", "5000", "999999999"]) {
+        fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: size } });
+        expect(btn().disabled).toBe(true);
+        expect(btn().textContent).toContain(label);
+        expect(btn().textContent).not.toContain("Get test funds");
+        expect(btn().textContent).not.toMatch(/DEPOSIT/i);
+        expect(screen.queryByTestId("limits-max-size-inline")).toBeNull();
+      }
+      expect(document.body.textContent).not.toContain("Reduced to the most available");
+      // No quote for the unfillable size: no deposit box / explain / summary Fee+Margin, only the calm note.
+      expect(document.getElementById("first-trade-deposit")).toBeNull();
+      expect(screen.queryByTestId("deposit-amount-input")).toBeNull();
+      expect(screen.queryByTestId("fund-explain")).toBeNull();
+      expect(screen.queryByTestId("starter-deposit-error")).toBeNull();
+      expect(screen.queryByTestId("ticket-summary")).toBeNull();
+      expect(screen.getByTestId("room-unknown-note").textContent).toContain(state === "loading" ? "Checking room" : "Market room unavailable");
+      expect(document.body.textContent).not.toMatch(/5,?516|1,?002,?999,?998/);
+    });
+  }
+
+  it("(8) a NON-null fill cap (LP inventory room) does not clamp or message while the room is unknown", async () => {
+    mocks.useMarketFillCap.mockReturnValue({ maxFillAbs: 252_489_196n * LOT, sideRoomQ: () => 252_489_196n * LOT });
+    unknown("loading");
+    await mountUnknown();
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "999999999" } });
+    await new Promise((r) => setTimeout(r, 50));
+    expect((screen.getByTestId("trade-size-input") as HTMLInputElement).value).toBe("999999999");
+    expect(document.body.textContent).not.toContain("Reduced to the most available");
+    expect(document.getElementById("first-trade-deposit")).toBeNull();
+    expect(btn().disabled).toBe(true);
+    expect(btn().textContent).toContain("Checking room");
+  });
+
+  it("(9) a stuck 'loading' turns into 'Market room unavailable' once the slow flag fires", async () => {
+    unknown("loading");
+    await mountUnknown();
+    expect(btn().textContent).toContain("Checking room");
+    slow.on = true;
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "300" } }); // re-render (memoised ticket)
+    await waitFor(() => expect(btn().textContent).toContain("Market room unavailable"));
+    expect(btn().disabled).toBe(true);
+    slow.on = false;
+  });
+
+  it("(7) control: once the room loads, Max is the room and an in-room order is submittable again", async () => {
+    unknown("loading");
+    const { rerender } = render(<OrderTicket slabAddress={SLAB} />);
+    await waitFor(() => expect(screen.queryByTestId("trade-submit")).not.toBeNull());
+    expect(btn().textContent).toContain("Checking room");
+    mocks.useMarketLimits.mockReturnValue(marketLimits({ matcher: null, growth: view(), growthRoom: "known", flags: { p1: false, p2: false, p2FeeCharged: false, p3: false } }));
+    rerender(<OrderTicket slabAddress={SLAB} />);
+    // The ticket is memoised on its props: a local edit is what re-reads the hook (as the 20 s poll's state update does in the app).
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "1" } });
+    await waitFor(() => expect(screen.queryByTestId("limits-max-size-inline")).not.toBeNull(), { timeout: 8000 });
+    expect(maxQ()).toBe(ROOM);
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "300" } });
+    await waitFor(() => expect(btn().disabled).toBe(false));
+    expect(btn().textContent).not.toContain("Checking room");
+  });
+
+  it("(10) a reduce of the open position is not held on the room read (opposite side, no larger than the position)", async () => {
+    mocks.useUserAccount.mockReturnValue({ idx: 3, account: { capital: 500_000_000n, positionSize: 200n * LOT, entryPrice: 1_000_000n, pnl: 0n, feeCredits: 0n } });
+    unknown("loading");
+    await mountUnknown();
+    // Same-direction (long) add is held on the room ...
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "50" } });
+    expect(btn().textContent).toContain("Checking room");
+    // ... a short smaller than the long position is a reduce: not held by the room read.
+    fireEvent.click(screen.getByTestId("trade-side-short"));
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "50" } });
+    expect(btn().textContent).not.toContain("Checking room");
+    expect(btn().textContent).not.toContain("Market room unavailable");
+  });
+
+  it("(11) room unknown: Max and the % chips never exceed the open position on the reducing side, and offer nothing on the adding side, whatever is typed", async () => {
+    mocks.useUserAccount.mockReturnValue({ idx: 3, account: { capital: 500_000_000n, positionSize: 200n * LOT, entryPrice: 1_000_000n, pnl: 0n, feeCredits: 0n } });
+    unknown("loading");
+    await mountUnknown();
+    const input = () => screen.getByTestId("trade-size-input") as HTMLInputElement;
+    const preset = (pct: number) => screen.getAllByTestId("trade-size-preset").find((b) => b.getAttribute("data-percent") === String(pct))!;
+    // Adding side (long on a long position): no Max, chips do nothing.
+    for (const typed of ["", "50"]) {
+      fireEvent.change(input(), { target: { value: typed } });
+      expect(screen.queryByTestId("limits-max-size-inline")).toBeNull();
+      fireEvent.click(preset(100));
+      fireEvent.click(preset(50));
+      expect(input().value).toBe(typed);
+    }
+    // Reducing side (short): Max is at most the position (a full close), for any typed size, and the chips cannot fill above it.
+    fireEvent.click(screen.getByTestId("trade-side-short"));
+    for (const typed of ["", "50", "200"]) {
+      fireEvent.change(input(), { target: { value: typed } });
+      expect(maxQ()).toBe(200n * LOT);
+      fireEvent.click(preset(100));
+      expect(Number(input().value)).toBeLessThanOrEqual(200);
+      expect(Number(input().value)).toBe(200);
+      fireEvent.click(preset(50));
+      expect(Number(input().value)).toBe(100);
+    }
+  });
+
+  it("(12) the confirm modal re-checks the room: a room lost after the modal opened does not send", async () => {
+    await mount();
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "300" } });
+    await waitFor(() => expect(btn().disabled).toBe(false));
+    fireEvent.click(btn());
+    await waitFor(() => expect(screen.queryByTestId("confirm-modal")).not.toBeNull());
+    // The room read is lost while the modal is open (a re-render picks it up, as the poll's state update would).
+    unknown("loading");
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "301" } });
+    await waitFor(() => expect(btn().textContent).toContain("Checking room"));
+    await act(async () => { mocks.modal.props!.onConfirm(); });
+    expect(mocks.fundAndTrade).not.toHaveBeenCalled();
+  });
+
+  it("(12-control) with the room known the same confirm does send", async () => {
+    await mount();
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "300" } });
+    await waitFor(() => expect(btn().disabled).toBe(false));
+    fireEvent.click(btn());
+    await waitFor(() => expect(screen.queryByTestId("confirm-modal")).not.toBeNull());
+    await act(async () => { mocks.modal.props!.onConfirm(); });
+    await waitFor(() => expect(mocks.fundAndTrade).toHaveBeenCalled());
   });
 });
