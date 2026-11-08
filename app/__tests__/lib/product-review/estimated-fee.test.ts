@@ -29,7 +29,7 @@ describe("wiring (source-level)", () => {
   const src = (rel: string) => readFileSync(path.resolve(__dirname, "../../..", rel), "utf8");
   it("the ticket's Fee row and the confirm snapshot use the estimate, not the base-rate fee", () => {
     const s = src("components/trade/OrderTicket.tsx");
-    expect(s).toContain("estimatedTotalFeeBps(tradingFeeBps, ticketLimits.fee)");
+    expect(s).toContain("estimatedTotalFeeBps(tradingFeeBps, ticketFeeForEstimate(ticketLimits))");
     expect(s).toMatch(/value=\{`\$\{formatTokenAmount\(estFee, decimals\)\} \$\{collateralSymbol\}`\}/);
     expect(s).toContain("tradingFee: estFee,");
     expect(s).not.toContain("tradingFee: fee,");

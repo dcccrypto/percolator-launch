@@ -34,7 +34,7 @@ export function feeHasExtras(baseFeeBps: bigint, totalBps: bigint): boolean {
 export function gateFeeBps(baseFeeBps: bigint, input: TicketLimitsInput | null): bigint {
   if (!input || input.sizeQ <= 0n) return baseFeeBps;
   try {
-    const total = estimatedTotalFeeBps(baseFeeBps, deriveTicketLimits(input).fee);
+    const total = estimatedTotalFeeBps(baseFeeBps, ticketFeeForEstimate(deriveTicketLimits(input)));
     return total > baseFeeBps ? total : baseFeeBps;
   } catch {
     return baseFeeBps;
@@ -57,4 +57,30 @@ export function closeFeeBps(baseFeeBps: bigint, input: TicketLimitsInput | null)
   } catch {
     return baseFeeBps;
   }
+}
+
+/**
+ * M9: the fee parts the ticket charges, for the Fee row and the gate sizing. The matcher-quote block of `deriveTicketLimits` is the only
+ * place `fee` is set, so a market with no matcher quote dropped the busy-side surcharge ("busy 5%") from the Fee row while the program
+ * charged it. Fall back to the growth decision's surcharge (already computed on the size that FILLS).
+ */
+export function ticketFeeForEstimate(t: {
+  fee: { charged: boolean; requestedBps: bigint; utilFeeBps?: bigint } | null;
+  growth?: { fee: { utilFeeBps: number } | null } | null;
+}): { charged: boolean; requestedBps: bigint; utilFeeBps?: bigint } | null {
+  if (t.fee) return t.fee;
+  const util = t.growth?.fee ? BigInt(Math.max(0, Math.round(t.growth.fee.utilFeeBps))) : 0n;
+  return util > 0n ? { charged: false, requestedBps: 0n, utilFeeBps: util } : null;
+}
+
+/**
+ * The Fee row's tooltip parts, from the SAME fee read as the number (`ticketFeeForEstimate`): the matcher's quote fee is named only when
+ * it is charged (> 0 bps), the busy-side fee only when it is > 0. A growth market with no matcher quote used to say "the market maker's
+ * quote fee" for what is only the busy-side fee.
+ */
+export function feeExtrasLabel(fee: { charged: boolean; requestedBps: bigint; utilFeeBps?: bigint } | null | undefined): string {
+  const parts: string[] = [];
+  if (fee?.charged && fee.requestedBps > 0n) parts.push("the market maker's quote fee");
+  if (fee?.utilFeeBps && fee.utilFeeBps > 0n) parts.push("the busy-side fee");
+  return parts.join(" and ");
 }

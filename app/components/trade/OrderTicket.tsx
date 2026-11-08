@@ -111,7 +111,8 @@ import { clippedFillBody, readClippedFill } from "@/lib/v22/clipped-fill";
 import { isPortfolioClosable } from "@/lib/close-trading-account";
 import { defaultFeeCapMarginBps } from "@/lib/limits/fee-channel";
 import { OrderTicketLimits, reasonCopy } from "@/components/limits/OrderTicketLimits";
-import { estimatedTotalFeeBps, feeHasExtras, gateFeeBps } from "@/lib/limits/estimated-fee";
+import { estimatedTotalFeeBps, feeHasExtras, feeExtrasLabel, gateFeeBps, ticketFeeForEstimate } from "@/lib/limits/estimated-fee";
+import { sideOverFillable } from "@/lib/limits/fillable-quote";
 import { isUsdLikeCollateral } from "@/lib/v22/tier-config";
 import { GrowthTicketPanelLive } from "@/components/trade/GrowthTicketPanelLive";
 import { CloseOnlyBanner } from "@/components/trade/CloseOnlyBanner";
@@ -1126,8 +1127,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   };
   const ticketLimits = deriveTicketLimits(limitsInput);
   // Product review T-1: show what the fill is expected to charge (base + matcher quote fee + busy-side fee), not the base alone.
-  // Display only; the signed cap and the deposit math above are unchanged.
-  const estFeeBps = estimatedTotalFeeBps(tradingFeeBps, ticketLimits.fee);
+  // M9: the busy-side surcharge is part of it even with no matcher quote (ticketFeeForEstimate). The signed cap is unchanged, but the
+  // same estimate (gateFeeBps, via ticketFeeForEstimate) now also sizes the engine gate: openNeed / the bundled deposit,
+  // exceedsBalance and the balance-bound Max include the busy-side fee on a no-matcher growth market (#3553: the engine charges it before the IM gate).
+  const estFeeBps = estimatedTotalFeeBps(tradingFeeBps, ticketFeeForEstimate(ticketLimits));
   const estFee = hasOrder ? computeTradingFee((positionSize * oracleE6) / 1_000_000n, estFeeBps) : 0n;
   const estFeeHasExtras = feeHasExtras(tradingFeeBps, estFeeBps);
   // P1 99165722 (F-7): a close that GROWS a halted / capped LP is refused or clipped too.
@@ -1148,6 +1151,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const marketMaxQFor = (side: "long" | "short") =>
     oneMaxQ([ticketLimits.sideLimits?.[side]?.maxQ, fillCapQ, legacySideCapQ(side), side === direction ? ticketLimits.growthCapQ : null]);
   const marketMaxQ = marketMaxQFor(direction);
+  // M9: the typed size is above what this side can fill (the program clips it). The size input is clamped to the room below, but until
+  // that lands (and whenever it cannot) the ticket must not price, deposit for or submit the ask: it would quote more than it fills.
+  const overFillable = sideOverFillable(positionSize, marketMaxQ) && marketMaxQ !== null && marketMaxQ > 0n;
   // A sub-cent room is full too: it can't be expressed as an order ("Max $0.00"), and clamping
   // to it rewrote the size to "0.00" on every keystroke instead of saying the side is paused.
   const sidePaused = {
@@ -1691,6 +1697,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     ticketState.blocks ||
     limitsBlocking ||
     fundTooSmall ||
+    overFillable ||
     !marginInput ||
     positionSize <= 0n ||
     (exceedsBalance && !fundingMode && ticketState.row !== "exceeds-balance");
@@ -2326,7 +2333,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             /* A trader saw what they pay and nothing about where it goes. #2565. Product review T-1: the extras are named too. */
             tooltip={
               estFeeHasExtras
-                ? `Estimated ${(Number(estFeeBps) / 100).toFixed(2)}%: the market's ${(Number(tradingFeeBps) / 100).toFixed(2)}% base fee plus the market maker's quote fee${ticketLimits.fee?.utilFeeBps ? " and the busy-side fee" : ""}. The extra parts go to the market's liquidity (Earn). Your signature caps the total.${feeDestinationTitle ? ` Base fee split: ${feeDestinationTitle}` : ""}`
+                ? `Estimated ${(Number(estFeeBps) / 100).toFixed(2)}%: the market's ${(Number(tradingFeeBps) / 100).toFixed(2)}% base fee plus ${feeExtrasLabel(ticketFeeForEstimate(ticketLimits))}. The extra parts go to the market's liquidity (Earn). Your signature caps the total.${feeDestinationTitle ? ` Base fee split: ${feeDestinationTitle}` : ""}`
                 : feeDestinationTitle
             }
           />
@@ -2635,6 +2642,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                   : ACCOUNT_LOADING_COPY.loading
                 : belowOneLot && !ticketState.blocks
                 ? "Below the 1-lot minimum"
+                : overFillable && !ticketState.blocks
+                ? "Over the max fillable size"
                 : fundOverWallet && !ticketState.blocks
                 ? "Get test funds"
                 : fundingMode && ticketState.row === "ok" && sizeEntered
