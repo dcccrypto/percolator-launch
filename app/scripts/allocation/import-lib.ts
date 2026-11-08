@@ -414,8 +414,10 @@ export async function applySnapshot(
     const act = await client.query(
       `select id from perc_alloc.snapshot
         where is_active and eligible_csv_sha256 = $1 and all_holders_csv_sha256 = $2 and manifest_sha256 = $3
-          and exception_files_sha256 = $4::text[] and base_manifest_sha256 is not distinct from $5`,
-      [m.eligibleCsvSha256, m.allHoldersCsvSha256, m.manifestSha256, m.exceptionFilesSha256, m.baseManifestSha256],
+          and exception_files_sha256 = $4::text[] and base_manifest_sha256 is not distinct from $5
+          and snapshot_slot = $6 and snapshot_date = $7::date and token_decimals = $8 and label = $9`,
+      [m.eligibleCsvSha256, m.allHoldersCsvSha256, m.manifestSha256, m.exceptionFilesSha256, m.baseManifestSha256,
+        m.snapshotSlot.toString(), m.snapshotDate, m.tokenDecimals, m.label],
     );
     if (act.rows.length === 1) {
       await client.query("commit");

@@ -368,6 +368,17 @@ d("perc_alloc schema (local Postgres)", () => {
       expect(n.rows[0].n).toBe(2);
     });
 
+    it("same files but a corrected snapshot slot is NOT a no-op: it is re-imported and activated", async () => {
+      const b = syntheticSnapshot("b");
+      b.meta.snapshotSlot = 2n;
+      const res = await withClient(cluster.migratorUrl, (c) => applySnapshot(c, b));
+      expect(res.unchanged).toBe(false);
+      const a = await su((c) => c.query("select snapshot_slot::text as slot from perc_alloc.snapshot where is_active"));
+      expect(a.rows[0].slot).toBe("2");
+      // and re-running that is now the no-op
+      expect((await withClient(cluster.migratorUrl, (c) => applySnapshot(c, b))).unchanged).toBe(true);
+    });
+
     it("replacement with re-divided shares + an added exception owner: atomic, no stale figures", async () => {
       // Same owner tags as the active snapshot "b" but new hashes and new figures.
       const next = syntheticSnapshot("b", { exception: true });
