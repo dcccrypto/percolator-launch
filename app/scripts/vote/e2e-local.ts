@@ -111,15 +111,16 @@ async function run() {
     const kps = Array.from({ length: 5 }, () => nacl.sign.keyPair());
     const raws = [1_000_000n, 2_000_000n, 3_000_000n, 4_000_000n];
     const holders: HolderRow[] = raws.map((raw, i) => ({
-      owner: bs58.encode(kps[i]!.publicKey), eligible: true, balanceRaw: raw, allocationCents: [500n, 1000n, 1500n, 2000n][i]!, reasons: [],
+      owner: bs58.encode(kps[i]!.publicKey), eligible: true, balanceRaw: raw, allocationCents: [500n, 1000n, 1500n, 2000n][i]!, reasons: [], basis: "snapshot",
     }));
-    holders.push({ owner: bs58.encode(kps[4]!.publicKey), eligible: false, balanceRaw: 9n, allocationCents: 0n, reasons: ["off-curve"] });
+    holders.push({ owner: bs58.encode(kps[4]!.publicKey), eligible: false, balanceRaw: 9n, allocationCents: 0n, reasons: ["off-curve"], basis: "snapshot" });
     await withClient(migratorUrl, (c) =>
       applySnapshot(c, {
         meta: {
           label: "SYNTHETIC vote e2e", snapshotDate: "2000-01-01", snapshotSlot: 1n, tokenDecimals: 6, fullRaiseCents: 25_000n,
           floorPercent: "20", floorCents: 5_000n, eligibleCsvSha256: "e".repeat(64), allHoldersCsvSha256: "f".repeat(64),
           manifestSha256: "9".repeat(64), teamExclusionBasis: "SYNTHETIC", teamExclusionVerified: false,
+          exceptionOwners: 0, exceptionBasis: null, exceptionFilesSha256: [], baseManifestSha256: null,
         },
         holders, eligibleCount: 4, excludedCount: 1, eligibleRawTotal: 10_000_000n,
       }),

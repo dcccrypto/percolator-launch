@@ -55,8 +55,12 @@ function voteSnapshot(tag: string, vs: Voter[], ex: Voter): ValidatedSnapshot {
     balanceRaw: v.raw,
     allocationCents: i === 0 ? floor - each * BigInt(vs.length - 1) : each,
     reasons: [],
+    // In snapshot "a" the third voter is counted under an approved balance exception:
+    // it must vote with exactly its stored balance, like any other eligible row.
+    basis: tag === "a" && i === 2 ? ("exception" as const) : ("snapshot" as const),
   }));
-  holders.push({ owner: ex.owner, eligible: false, balanceRaw: 9_999n, allocationCents: 0n, reasons: ["off-curve"] });
+  holders.push({ owner: ex.owner, eligible: false, balanceRaw: 9_999n, allocationCents: 0n, reasons: ["off-curve"], basis: "snapshot" });
+  const exc = tag === "a" && vs.length > 2;
   return {
     meta: {
       label: `SYNTHETIC vote ${tag}`,
@@ -71,6 +75,10 @@ function voteSnapshot(tag: string, vs: Voter[], ex: Voter): ValidatedSnapshot {
       manifestSha256: "c".repeat(64),
       teamExclusionBasis: "SYNTHETIC",
       teamExclusionVerified: false,
+      exceptionOwners: exc ? 1 : 0,
+      exceptionBasis: exc ? "SYNTHETIC approved balance exception" : null,
+      exceptionFilesSha256: exc ? ["7".repeat(64)] : [],
+      baseManifestSha256: null,
     },
     holders,
     eligibleCount: vs.length,
@@ -483,6 +491,7 @@ d("perc_vote schema (local Postgres)", () => {
       await vote(voters[4]!, "buy-and-burn");
       await closePoll();
       const t = await tally();
+      // voters[2] (balance 3) is an exception-basis row: counted at exactly its stored balance
       expect(t.weekly_fee_claims_raw).toBe((U64_MAX + 3n).toString());
       expect(t.buy_and_burn_raw).toBe((U64_MAX - 1n + 2_000_000n).toString());
       expect(t.winner).toBe("buy-and-burn");
