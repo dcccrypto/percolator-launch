@@ -2,13 +2,17 @@
  * Deployed-PREVIEW end-to-end harness for the PERC holder vote, against an
  * ISOLATED THROWAWAY Postgres (never the production allocation database).
  *
- *   setup: npx tsx app/scripts/vote/e2e-preview.ts setup --owner-url-file <0600 file> --private <0700 dir>
+ *   setup: npx tsx app/scripts/vote/e2e-preview.ts setup --owner-url-file <0600 file> --private <0700 dir> \
+ *            --confirm-throwaway-host <exact DB hostname>
  *   run:   npx tsx app/scripts/vote/e2e-preview.ts run --owner-url-file <0600 file> --private <0700 dir> \
- *            --base https://<alias>.vercel.app --other-hosts <h1,h2> --out <evidence dir>
+ *            --confirm-throwaway-host <exact DB hostname> --base https://<alias>.vercel.app --other-hosts <h1,h2> --out <evidence dir>
  *
  * setup
- *   - refuses unless the target DB is EMPTY of allocation data or holds ONLY a
- *     previous SYNTHETIC snapshot of this harness (so it can never touch real data);
+ *   - refuses unless ALL hold (it can never touch real data):
+ *       * --confirm-throwaway-host equals the URL hostname exactly (operator names it);
+ *       * the `public` schema has NO tables (a real waitlist/app DB has some);
+ *       * perc_alloc is absent, or present with ONLY this harness's SYNTHETIC
+ *         snapshot (never an empty or real one), and carries the harness marker;
  *   - applies the checker + vote migrations as the throwaway owner role;
  *   - gives perc_alloc_reader a fresh random password; seeds a SYNTHETIC snapshot
  *     of freshly generated keypairs (balances 1:2:3:4 + one excluded);
@@ -39,10 +43,13 @@ const SYNTHETIC_LABEL = "SYNTHETIC vote preview e2e";
 
 const argv = process.argv.slice(2);
 const cmd = argv[0];
-const arg = (n: string) => {
+const arg = (n: string): string => {
   const i = argv.indexOf(n);
-  return i > 0 && argv[i + 1] ? argv[i + 1]! : null;
+  const v = i > 0 ? argv[i + 1] : undefined;
+  if (!v || v.startsWith("--")) throw new Error(`${n} is required`);
+  return v;
 };
+const MARKER = "perc_vote_preview_e2e_throwaway";
 
 function privateFile(p: string): string {
   const st = fs.statSync(p);
@@ -64,19 +71,32 @@ async function withClient<T>(url: string, fn: (c: Client) => Promise<T>) {
   }
 }
 
-async function assertThrowaway(c: Client) {
-  const s = await c.query("select to_regclass('perc_alloc.snapshot') is not null as has");
-  if (!s.rows[0].has) return;
+function assertHost(ownerUrl: string) {
+  const host = new URL(ownerUrl).hostname;
+  if (arg("--confirm-throwaway-host") !== host) throw new Error("REFUSING: --confirm-throwaway-host does not equal the DB hostname");
+  if (!/\.(neon\.tech|supabase\.co|supabase\.com)$/.test(host) && host !== "127.0.0.1") throw new Error("REFUSING: unexpected throwaway DB host");
+}
+
+/** fresh=true: setup may initialise a pristine DB. fresh=false: the harness marker must already exist. */
+async function assertThrowaway(c: Client, fresh: boolean) {
+  const pub = await c.query("select count(*)::int as n from pg_tables where schemaname = 'public'");
+  if (pub.rows[0].n !== 0) throw new Error("REFUSING: public schema has tables (not a throwaway DB)");
+  const has = (await c.query("select to_regclass('perc_alloc.snapshot') is not null as has")).rows[0].has;
+  const marked = (await c.query("select obj_description(oid, 'pg_namespace') = $1 as m from pg_namespace where nspname = 'perc_alloc'", [MARKER])).rows[0]?.m === true;
+  if (!has) {
+    if (!fresh) throw new Error("REFUSING: harness marker missing (run setup first)");
+    return;
+  }
+  if (!marked) throw new Error("REFUSING: perc_alloc exists without the harness marker (not created by this harness)");
   const r = await c.query("select count(*)::int as n, count(*) filter (where label <> $1)::int as real from perc_alloc.snapshot", [SYNTHETIC_LABEL]);
-  if (r.rows[0].real !== 0) throw new Error("REFUSING: target database holds a non-synthetic snapshot (not a throwaway DB)");
+  if (r.rows[0].real !== 0 || r.rows[0].n === 0) throw new Error("REFUSING: target database holds a non-synthetic or empty snapshot set");
 }
 
 async function setup() {
-  const ownerUrl = privateFile(arg("--owner-url-file") ?? "");
-  const dir = privateDir(path.resolve(arg("--private") ?? ""));
-  const u = new URL(ownerUrl);
-  if (!/\.neon\.tech$/.test(u.hostname) && u.hostname !== "127.0.0.1") throw new Error("unexpected throwaway DB host");
-  await withClient(ownerUrl, assertThrowaway);
+  const ownerUrl = privateFile(arg("--owner-url-file"));
+  const dir = privateDir(path.resolve(arg("--private")));
+  assertHost(ownerUrl);
+  await withClient(ownerUrl, (c) => assertThrowaway(c, true));
   // Fresh run: drop a previous SYNTHETIC preview poll/snapshot so the run starts NOT STARTED.
   await withClient(ownerUrl, async (c) => {
     if ((await c.query("select to_regclass('perc_vote.poll') is not null as has")).rows[0].has) {
@@ -87,6 +107,7 @@ async function setup() {
     }
   });
   for (const m of MIGRATIONS) await withClient(ownerUrl, (c) => c.query(fs.readFileSync(m, "utf8")));
+  await withClient(ownerUrl, (c) => c.query(`comment on schema perc_alloc is '${MARKER}'`));
   const readerPw = randomBytes(24).toString("hex");
   await withClient(ownerUrl, (c) => c.query(`alter role perc_alloc_reader login password '${readerPw}'`));
 
@@ -126,15 +147,14 @@ async function setup() {
 }
 
 async function run() {
-  const ownerFile = arg("--owner-url-file") ?? "";
-  const ownerUrl = privateFile(ownerFile);
-  const dir = path.resolve(arg("--private") ?? "");
+  const ownerUrl = privateFile(arg("--owner-url-file"));
+  const dir = path.resolve(arg("--private"));
   const base = arg("--base");
   const others = arg("--other-hosts");
-  const out = privateDir(path.resolve(arg("--out") ?? ""));
-  if (!base || !others) throw new Error("--base and --other-hosts are required");
-  if (!process.env.VERCEL_OIDC_TOKEN) throw new Error("VERCEL_OIDC_TOKEN missing (run under `vercel env run`)");
-  await withClient(ownerUrl, assertThrowaway);
+  const out = privateDir(path.resolve(arg("--out")));
+  if (!process.env.VERCEL_OIDC_TOKEN) throw new Error("VERCEL_OIDC_TOKEN missing");
+  assertHost(ownerUrl);
+  await withClient(ownerUrl, (c) => assertThrowaway(c, false));
   const env = Object.fromEntries(privateFile(path.join(dir, "preview.env")).split("\n").map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]));
   const pw = spawnSync("npx", ["playwright", "test", "-c", "playwright.vote.config.ts"], {
     cwd: REPO,
