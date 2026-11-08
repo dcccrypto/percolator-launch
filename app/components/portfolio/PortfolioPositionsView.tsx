@@ -51,12 +51,12 @@ import { invalidatePortfolio } from "@/lib/portfolio-invalidation";
 import { computePositionLeverage, describePositionLeverage, POSITION_LEVERAGE_LABEL } from "@/lib/position-leverage";
 import { formatSignedUsd } from "@/lib/pnl-card";
 import { InfoIcon } from "@/components/ui/Tooltip";
-import { getRealized, pendingTag } from "@/lib/realized-pnl";
+import { getLastResult, getRealized, pendingTag } from "@/lib/realized-pnl";
 
 
 /** Same mechanics wording as the trade page's withdraw card (settlingProfitMessage). */
 const CLAIM_PENDING_TITLE =
-  "This is released value waiting to be claimed. Your result on this market is a net loss once fees and the spread are counted, so it is not a profit. Convert and withdraw it on this market's Withdraw tab.";
+  "This is released value waiting to be claimed. It is not labelled profit: the app has no finished-trade gain recorded for this market on this device. Convert and withdraw it on this market's Withdraw tab.";
 const SETTLING_PROFIT_TITLE =
   "Your profit becomes withdrawable once the other side of your trade settles, which happens automatically. Convert and withdraw it on this market's Withdraw tab.";
 
@@ -673,7 +673,7 @@ export function PortfolioPositionsView() {
   const idleDeposits = activePositions.filter((pos) => (pos.account?.positionSize ?? 0n) === 0n);
   // M7: "profit settling" only where the recorded result is a gain; a market the user lost on reads "claim pending".
   const tagOf = (pos: (typeof activePositions)[number]) =>
-    pendingTag(pendingProfit(pos), walletPublicKey ? getRealized(walletPublicKey.toBase58(), pos.slabAddress) : null, pos.realizedLoss ?? 0n);
+    pendingTag(pendingProfit(pos), walletPublicKey ? getLastResult(walletPublicKey.toBase58(), pos.slabAddress) : null);
   // A card holds its open close modal in state, so its key must not move to another
   // position when the list re-sorts (an owned and a wrapped row can share a market).
   const openKeys = positionRowKeys(openPositions);
@@ -897,7 +897,7 @@ export function PortfolioPositionsView() {
                   {formatSignedUsd(usdTotals.realizedNetUsd)}
                 </span>
                 <span className="text-xs font-medium text-[var(--text-secondary)]">
-                  realized from your closes on this device, fees and spread included
+                  realized from your finished trades on this device (fees and spread included, funding not included)
                 </span>
               </div>
             )}

@@ -108,7 +108,9 @@ import { takeFillResult } from "@/lib/limits/fill-check";
 import { feeRaiseCopy, takeFeeRaise } from "@/lib/v22/fee-raise-note";
 import { sizeWithLots } from "@/lib/v22/growth-room";
 import { clippedFillBody, readClippedFill } from "@/lib/v22/clipped-fill";
-import { readExecFill, type ExecFill } from "@/lib/v22/exec-fill";
+import { effectivePriceE6, readExecFill, type ExecFill } from "@/lib/v22/exec-fill";
+import { recordFill } from "@/lib/trade-book";
+import { recordRealized } from "@/lib/realized-pnl";
 import { useSpreadQuoter } from "@/hooks/useSpreadQuoter";
 import { isPortfolioClosable } from "@/lib/close-trading-account";
 import { defaultFeeCapMarginBps } from "@/lib/limits/fee-channel";
@@ -1419,12 +1421,14 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       // entry, so it is awaited ONCE and shared with the saved-entry step below. Until it
       // resolves the line is the neutral "went through" (true for any order).
       const sigKey = sig ?? null;
-      // M7: on v2.2 the fill price is the price the position was BOOKED at (the matcher's execution price, spread included), read from the
-      // landed transaction's FILL event. Never the oracle / mark the ticket showed. Until it is read, and when it cannot be, no price is
-      // claimed. Pre-v2.2 markets keep the submit price (their fills settle at the mark).
+      // M7: on v2.2 the price the trader EFFECTIVELY paid is the FILL event's booked price (the mark at execution) adjusted by the spread part
+      // of fee_atoms (lib/v22/exec-fill.ts): the matcher's spread is charged through the fee channel, not through the booked price. Read
+      // from the landed transaction, from the user's own portfolio's FILL only. Until it is read, and when it cannot be, no price is claimed.
+      // Pre-v2.2 markets keep the submit price (their fills settle at the mark).
       const v22Fill = isDevnetV22Enabled() && !!sigKey && !!slabProgramId;
+      const baseFeeBps = engineView?.tradeFeeBaseBps ?? null;
       const execFillP: Promise<ExecFill | null> = v22Fill
-        ? readExecFill(connection, sigKey as string, slabProgramId as PublicKey, { market: new PublicKey(slabAddress) }).catch(() => null)
+        ? readExecFill(connection, sigKey as string, slabProgramId as PublicKey, { market: new PublicKey(slabAddress), taker: userAccount?.pubkey ?? null }).catch(() => null)
         : Promise.resolve(null);
       const measured = takePositionChange(sig).then((change): PositionChange | null => {
         if (change) return change;
@@ -1437,7 +1441,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       });
       setResult({ kind: "sent", body: TICKET_COPY.result.unmeasured, sig: sigKey, tryQ: null });
       void Promise.all([measured, execFillP]).then(([change, execFill]) => {
-        const price = v22Fill ? (execFill ? formatLotPriceE6(execFill.priceE6, lotExp) : null) : formatLotPriceE6(submitPriceE6, lotExp);
+        const effective = execFill ? effectivePriceE6(execFill, baseFeeBps) : null;
+        const price = v22Fill ? (effective !== null ? formatLotPriceE6(effective, lotExp) : null) : formatLotPriceE6(submitPriceE6, lotExp);
         const outcome = classifyOrderChange(direction, effectiveSize, change);
         let next: NonNullable<typeof result>;
         if (outcome.effect === "zero") {
@@ -1513,8 +1518,14 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       };
       if (v22Fill) {
         void execFillP.then((ef) => {
-          if (ef) applyEntryFill(ef.priceE6);
-          // The booked price could not be read: keep no entry at all (the position panel then derives an "est." one) rather than the mark.
+          // The trade book follows every fill so a finished trade's result (open + adds + close, fees and spread included) is known.
+          if (ef && publicKey) {
+            const r = recordFill(publicKey.toBase58(), slabAddress, ef.taker.toBase58(), { q: ef.executedQ, bookedPriceE6: ef.bookedPriceE6, feeAtoms: ef.feeAtoms }, existingPositionSize);
+            if (r !== null) recordRealized(publicKey.toBase58(), slabAddress, r);
+          }
+          const effective = ef ? effectivePriceE6(ef, baseFeeBps) : null;
+          if (effective !== null) applyEntryFill(effective);
+          // The effective price could not be derived: keep no entry at all (the position panel then derives an "est." one) rather than the mark.
           else if (entryIdx !== null) clearEntryPrice(slabAddress, entryIdx, publicKey?.toBase58());
         });
       } else {

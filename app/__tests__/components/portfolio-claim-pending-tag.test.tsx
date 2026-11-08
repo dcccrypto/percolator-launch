@@ -54,27 +54,33 @@ const mount = (p: ReturnType<typeof position>) => {
 describe("claim pending vs profit settling (M7)", () => {
   beforeEach(() => localStorage.clear());
 
-  it("a recorded -0.412 round trip with 0.021 released: 'claim pending', never 'profit settling', and the net realized loss is shown", () => {
-    recordRealized(pk.toBase58(), "slab-loss", -412_000n);
+  it("a finished trade measured at -0.056 with 0.021 released: 'claim pending', never 'profit settling', and the lifetime result is shown with what it excludes", () => {
+    recordRealized(pk.toBase58(), "slab-loss", -56_043n);
     mount(position(200_000n));
     expect(screen.getByTestId("deposit-tag")).toHaveTextContent("claim pending");
     expect(screen.queryByText("profit settling")).toBeNull();
     expect(screen.getByTestId("pending-profit")).toHaveTextContent("to claim");
     expect(screen.getByTestId("pending-profit").textContent).not.toMatch(/profit/);
-    expect(screen.getByTestId("realized-net")).toHaveTextContent("-$0.41");
-    expect(screen.getByTestId("realized-net")).toHaveTextContent(/fees and spread included/);
-    // the old counter-only line is not shown next to the reconciled one
+    expect(screen.getByTestId("realized-net")).toHaveTextContent("-$0.06");
+    expect(screen.getByTestId("realized-net")).toHaveTextContent(/fees and spread included, funding not included/);
     expect(screen.queryByText(/already deducted/)).toBeNull();
   });
 
-  it("CONTROL: a recorded gain keeps 'profit settling'", () => {
+  it("CONTROL: a measured gain keeps 'profit settling'", () => {
     recordRealized(pk.toBase58(), "slab-loss", 300_000n);
     mount(position());
     expect(screen.getByTestId("deposit-tag")).toHaveTextContent("profit settling");
     expect(screen.getByTestId("pending-profit")).toHaveTextContent("profit");
   });
 
-  it("nothing recorded on this device but a chain-crystallized loss: not 'profit settling' either, and the counter line says what it leaves out", () => {
+  it("the LAST finished trade decides the tag: a gain after a bigger loss is still labelled by the gain, a loss after a gain is not", () => {
+    recordRealized(pk.toBase58(), "slab-loss", 300_000n);
+    recordRealized(pk.toBase58(), "slab-loss", -100_000n);
+    mount(position());
+    expect(screen.getByTestId("deposit-tag")).toHaveTextContent("claim pending");
+  });
+
+  it("nothing recorded on this device: neutral too (no 'profit' without a measured gain), and the counter line says what it leaves out", () => {
     mount(position(200_000n));
     expect(screen.getByTestId("deposit-tag")).toHaveTextContent("claim pending");
     expect(screen.queryByTestId("realized-net")).toBeNull();

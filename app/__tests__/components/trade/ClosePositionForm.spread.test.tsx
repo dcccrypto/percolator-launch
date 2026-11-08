@@ -44,4 +44,17 @@ describe("ClosePositionForm spread line (M7)", () => {
     render(<ClosePositionForm {...props} positionSize={-40n * USDC} isLong={false} spreadEstimateFor={(_q, buys) => { asked.push(buys); return null; }} />);
     expect(asked.every((b) => b === true)).toBe(true);
   });
+  it("M-3: on a fee-channel market the spread is INSIDE the fee row: the row says so and the balance is NOT reduced a second time", () => {
+    // the close-fee estimate (#3726) already contains the matcher's requested fee: base 30 + 23 spread bps = 53 bps on 40 = 0.212
+    render(<ClosePositionForm {...props} closeFeeBpsFor={() => 53n} spreadEstimateFor={() => ({ kind: "quote", bps: 23, execPriceE6: null, inFee: true })} />);
+    const row = screen.getByTestId("close-spread");
+    expect(row).toHaveTextContent("~0.23% (est., included in the trading fee)");
+    expect(row.textContent).not.toMatch(/−0\./);
+    expect(screen.getByText(/43\.788/)).toBeInTheDocument(); // 44 - 0.212 once, not 44 - 0.212 - 0.092
+    expect(screen.queryByText(/43\.696/)).toBeNull();
+  });
+  it("M-3 CONTROL: fee channel OFF: the spread is its own cost and IS subtracted", () => {
+    render(<ClosePositionForm {...props} closeFeeBpsFor={() => 30n} spreadEstimateFor={() => ({ kind: "quote", bps: 23, execPriceE6: null })} />);
+    expect(screen.getByText(/43\.788/)).toBeInTheDocument(); // 44 - 0.12 - 0.092
+  });
 });

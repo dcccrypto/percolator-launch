@@ -48,9 +48,10 @@ import { closeLimitFromEngine } from "@/lib/close-limit";
 import { clearEntryPrice } from "@/lib/entry-price";
 import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
-import { readExecFill, type ExecFill } from "@/lib/v22/exec-fill";
+import { effectivePriceE6, readExecFill } from "@/lib/v22/exec-fill";
+import { recordFill } from "@/lib/trade-book";
 import { formatLotPriceE6 } from "@/lib/v22/lot";
-import { closeResultText, realizedFromEquity, recordRealized, type EquitySnap } from "@/lib/realized-pnl";
+import { closeResultText, recordRealized } from "@/lib/realized-pnl";
 import { PortfolioTargetError, TARGET_COPY, isPortfolioTargetError, verifyPortfolioTarget } from "@/lib/portfolio-target";
 
 /** M-3: the leg is a prior-reset obligation (owns 0 effective quantity). */
@@ -176,35 +177,37 @@ function getFreshPortfolioData(
 }
 
 /**
- * M7: what a landed close actually did, from the chain: the price the fill was BOOKED at (the FILL event) and the realized result
- * from the account's value before and after (capital + settled pnl: fees and the spread are inside it). Bounded: a slow RPC gives
- * up and the toast says only what is known. Either half is null when it could not be read; neither is ever guessed.
+ * M7: what a landed close actually did, from the FILL event of its own transaction: the price the trader EFFECTIVELY received (booked
+ * price adjusted by the spread part of the fee, lib/v22/exec-fill.ts) and, when the app saw the whole trade, the trade's result over
+ * its lifetime (lib/trade-book.ts: price PnL on booked prices minus every fee). The book is updated whatever the toast waits for;
+ * the toast waits at most `budgetMs`. Either half is null when unknown; nothing is guessed. No account re-read is involved, so a
+ * lagging node cannot hand back a pre-close balance.
  */
 async function measureCloseResult(o: {
   connection: Connection;
   programId: PublicKey;
   slabAddress: string;
-  owner: PublicKey;
-  targetPk?: PublicKey;
   sig: string;
-  before: EquitySnap | null;
+  taker?: PublicKey | null;
+  baseFeeBps: bigint | null;
+  wallet: string;
+  /** The signed effective position the chain had before this close. */
+  onChainQBefore: bigint;
   budgetMs?: number;
-}): Promise<{ exec: ExecFill | null; realized: bigint | null }> {
-  const exec = readExecFill(o.connection, o.sig, o.programId, { market: new PublicKey(o.slabAddress) }, undefined, 3).catch(() => null);
-  const realized = (async (): Promise<bigint | null> => {
-    if (!o.before) return null;
-    const data = await readFreshPortfolioData(o.connection, o.programId, o.slabAddress, o.owner, o.targetPk);
-    if (!data) return null;
-    const p = parsePortfolio(data);
-    return realizedFromEquity(o.before, { capital: p.capital, pnl: p.pnl });
-  })().catch(() => null);
+}): Promise<{ effectiveE6: bigint | null; result: bigint | null }> {
+  const work = (async (): Promise<{ effectiveE6: bigint | null; result: bigint | null }> => {
+    const fill = await readExecFill(o.connection, o.sig, o.programId, { market: new PublicKey(o.slabAddress), taker: o.taker ?? null }, undefined, 3).catch(() => null);
+    if (!fill) return { effectiveE6: null, result: null };
+    const result = recordFill(o.wallet, o.slabAddress, fill.taker.toBase58(), { q: fill.executedQ, bookedPriceE6: fill.bookedPriceE6, feeAtoms: fill.feeAtoms }, o.onChainQBefore);
+    if (result !== null) recordRealized(o.wallet, o.slabAddress, result);
+    return { effectiveE6: effectivePriceE6(fill, o.baseFeeBps), result };
+  })().catch(() => ({ effectiveE6: null, result: null }));
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const budget = new Promise<[null, null]>((resolve) => {
-    timer = setTimeout(() => resolve([null, null]), o.budgetMs ?? 4000);
+  const budget = new Promise<{ effectiveE6: null; result: null }>((resolve) => {
+    timer = setTimeout(() => resolve({ effectiveE6: null, result: null }), o.budgetMs ?? 4000);
   });
   try {
-    const [e, r] = await Promise.race([Promise.all([exec, realized]), budget]);
-    return { exec: e, realized: r };
+    return await Promise.race([work, budget]);
   } finally {
     clearTimeout(timer);
   }
@@ -300,8 +303,6 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
     let freshBasisQ: bigint | null = null;
     let freshEngine: MarketEngineView | null = null;
     let resetLeg = false;
-    // M7: the account's value before the close (capital + settled pnl), for the realized result.
-    let equityBefore: EquitySnap | null = null;
 
     if (isV17Market) {
       // v17: re-fetch via a FRESH on-chain read + parsePortfolioV17.
@@ -335,7 +336,6 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
           freshPositionSize = 0n;
         } else {
           const portfolio = parsePortfolio(freshData);
-          equityBefore = { capital: portfolio.capital, pnl: portfolio.pnl };
 
           // Re-check the mutable owner after the read — covers both the
           // RPC-side memcmp filter AND the cached-pubkey shortcut (a wrapped
@@ -723,19 +723,24 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         // The one confirmation a close gets: every close surface (dock, ticket, portfolio rows) closes
         // its modal on resolve, so without this a partial close just vanished. A clipped fill already
         // said what filled (toast above), so it gets no success line.
-        // M7: v2.2 closes report what the chain did: the booked (matcher execution) price and the realized result from the account's
-        // value delta, fees and spread included. Recorded per wallet + market for the Portfolio.
-        let measured: { exec: ExecFill | null; realized: bigint | null } | null = null;
+        // M7: v2.2 closes report what the chain did: the effective price (booked price adjusted by the spread part of the fee) and, when the
+        // app saw the whole trade, its lifetime result (fees and spread included, funding not). The trade book is updated here too.
+        let measured: { effectiveE6: bigint | null; result: bigint | null } | null = null;
         if (isDevnetV22Enabled() && isV17Market && programId && publicKey && sig) {
-          measured = await measureCloseResult({ connection, programId, slabAddress, owner: publicKey, targetPk, sig, before: equityBefore });
-          if (measured.realized !== null) recordRealized(publicKey.toBase58(), slabAddress, measured.realized);
+          measured = await measureCloseResult({
+            connection, programId, slabAddress, sig,
+            taker: targetPk ?? userAccount?.pubkey ?? null,
+            baseFeeBps: freshEngine ? freshEngine.tradeFeeBaseBps : null,
+            wallet: publicKey.toBase58(),
+            onChainQBefore: freshPositionSize,
+          });
         }
         const closeDetail = (base: string): string =>
           measured
             ? closeResultText({
                 base,
-                execPriceText: measured.exec && getLotExp(slabAddress) !== null ? formatLotPriceE6(measured.exec.priceE6, getLotExp(slabAddress) as number) : null,
-                realized: measured.realized,
+                execPriceText: measured.effectiveE6 !== null && getLotExp(slabAddress) !== null ? formatLotPriceE6(measured.effectiveE6, getLotExp(slabAddress) as number) : null,
+                result: measured.result,
                 decimals: 6, // playground collateral is sim-USDC (6 decimals) on every market
                 symbol: "USDC",
               })

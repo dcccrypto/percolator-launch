@@ -13,26 +13,32 @@
 import type { MatcherCtxView } from "@/lib/limits/decode";
 import { preTradeQuote } from "@/lib/limits/matcher-quote";
 
+/**
+ * `inFee`: the market's fee channel is on, so the matcher's spread is CHARGED AS PART OF THE TRADING FEE (fee_bps = base + requested)
+ * and the fee row already contains it. Then the spread is shown for information and must never be added to the fee row or the
+ * balance preview a second time.
+ */
 export type SpreadEstimate =
-  | { kind: "quote"; bps: number; execPriceE6: bigint | null }
-  | { kind: "range"; minBps: number; maxBps: number };
+  | { kind: "quote"; bps: number; execPriceE6: bigint | null; inFee?: boolean }
+  | { kind: "range"; minBps: number; maxBps: number; inFee?: boolean };
 
 export function spreadEstimateFromCtx(
   ctx: MatcherCtxView | null | undefined,
   oracleE6: bigint,
   sizeQ: bigint,
   takerBuys: boolean,
+  inFee = false,
 ): SpreadEstimate | null {
   if (!ctx || oracleE6 <= 0n || sizeQ <= 0n) return null;
   const q = preTradeQuote(ctx, oracleE6, sizeQ, takerBuys);
   if (!q) return null;
   if (q.kind === "adaptive" && q.totalBps !== null && q.fillQ > 0n) {
-    return { kind: "quote", bps: Number(q.totalBps), execPriceE6: q.quotePriceE6 };
+    return { kind: "quote", bps: Number(q.totalBps), execPriceE6: q.quotePriceE6, ...(inFee ? { inFee } : {}) };
   }
   if (q.kind === "legacy") {
     const min = Math.max(0, q.baseSpreadBps);
     const max = Math.max(min, q.maxTotalBps);
-    return { kind: "range", minBps: min, maxBps: max };
+    return { kind: "range", minBps: min, maxBps: max, ...(inFee ? { inFee } : {}) };
   }
   return null;
 }
@@ -42,15 +48,17 @@ const pct = (bps: number): string => `${(bps / 100).toFixed(2)}%`;
 /** The "Spread / price impact" row's value. Always labelled as an estimate; null (unknown) has its own honest words. */
 export function spreadValueText(e: SpreadEstimate | null): string {
   if (!e) return "Not available before the trade. The fill price is shown after it.";
-  if (e.kind === "quote") return `~${pct(e.bps)} (est.)`;
-  return e.minBps === e.maxBps ? `~${pct(e.minBps)} (est.)` : `${pct(e.minBps)} to ${pct(e.maxBps)} (est. range)`;
+  const tail = e.inFee ? ", included in the trading fee" : "";
+  if (e.kind === "quote") return `~${pct(e.bps)} (est.${tail})`;
+  return e.minBps === e.maxBps ? `~${pct(e.minBps)} (est.${tail})` : `${pct(e.minBps)} to ${pct(e.maxBps)} (est. range${tail})`;
 }
 
 export const SPREAD_LABEL = "Spread / price impact";
 
-/** Estimated cost in collateral atoms of a trade of `notionalAtoms`: the point estimate, or the floor of a range. Null = unknown. */
+/** Estimated EXTRA cost in collateral atoms (null when the spread is already inside the fee) of a trade of `notionalAtoms`: the point estimate, or the floor of a range. Null = unknown. */
 export function spreadCostAtoms(e: SpreadEstimate | null, notionalAtoms: bigint): bigint | null {
-  if (!e || notionalAtoms <= 0n) return null;
+  // On a fee-channel market the spread is already inside the fee row: no separate cost to add.
+  if (!e || e.inFee || notionalAtoms <= 0n) return null;
   const bps = e.kind === "quote" ? e.bps : e.minBps;
   return (notionalAtoms * BigInt(bps)) / 10_000n;
 }

@@ -38,4 +38,10 @@ describe("TradeConfirmationModal spread line (M7)", () => {
     expect(row).toHaveTextContent(/not available before the trade/i);
     expect(row.textContent).not.toMatch(/0\.00%/);
   });
+  it("M-3: on a fee-channel market the spread is said to be inside the Trading Fee and no second cost is shown", () => {
+    render(<TradeConfirmationModal {...base} spreadEstimate={{ kind: "quote", bps: 23, execPriceE6: null, inFee: true }} />);
+    const row = screen.getByTestId("confirm-spread");
+    expect(row).toHaveTextContent("~0.23% (est., included in the trading fee)");
+    expect(row.textContent).not.toMatch(/USDC/);
+  });
 });

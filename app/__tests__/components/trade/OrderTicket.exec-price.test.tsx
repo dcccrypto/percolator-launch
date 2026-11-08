@@ -1,7 +1,7 @@
 /**
- * M7: after a v2.2 fill the result line and the saved position entry carry the price the fill was BOOKED at (the FILL event of the
- * landed transaction: matcher execution price, spread included), never the mark the ticket showed. Council: executed 89.741672,
- * shown 89.50.
+ * M7: after a v2.2 fill the result line and the saved entry carry the price the trader EFFECTIVELY paid: the FILL event's booked price
+ * (the mark at execution) adjusted by the spread part of fee_atoms (fee channel). Never the mark the ticket showed. Council: effective
+ * 89.7417, booked 89.5357, shown 89.50.
  *
  * Runs the REAL OrderTicket submit path; only the network edges are mocked (as in OrderTicket.merged-position-entry.test.tsx).
  */
@@ -53,6 +53,10 @@ vi.mock("@/components/trade/TradeConfirmationModal", () => ({
 }));
 
 import { fillEventLogs } from "../../helpers/fill-event-fixture";
+import { modeFixtures } from "../../helpers/v22-fixtures";
+import { decodeMarketEngineView } from "@/lib/limits/decode";
+import { effectivePriceE6, execFillFromLogs } from "@/lib/v22/exec-fill";
+import { loadBook } from "@/lib/trade-book";
 import { OrderTicket } from "@/components/trade/OrderTicket";
 import { getSavedEntry, saveEntryPrice } from "@/lib/entry-price";
 import { resolveEntryPrice } from "@/lib/trading";
@@ -90,7 +94,7 @@ beforeEach(() => {
   mocks.trade.mockResolvedValue(SIG);
   mocks.useWalletCompat.mockReturnValue({ publicKey: WALLET, connected: true });
   mocks.useConnectionCompat.mockReturnValue({ connection: { tag: "conn", getTransaction: mocks.getTransaction } });
-  mocks.useSlabState.mockReturnValue({ accounts: [], config: { collateralMint: MINT, decimals: 6 }, header: null, refresh: mocks.refresh, programId: WALLET });
+  mocks.useSlabState.mockReturnValue({ accounts: [], config: { collateralMint: MINT, decimals: 6 }, header: null, refresh: mocks.refresh, programId: WALLET, raw: new Uint8Array(modeFixtures().market) });
   mocks.useEngineState.mockReturnValue({ engine: null, params: { initialMarginBps: 1000n, maintenanceMarginBps: 500n }, insuranceBalance: 1_000_000n, totalOI: 0n, hasData: true });
 });
 afterEach(() => {
@@ -101,29 +105,40 @@ afterEach(() => {
 
 // the order's size for typing "5" at 1.20 with the test account (ticket-derived)
 const FILLED = 4_166_666n;
-const BOOKED = 1_234_000n; // the matcher's execution price; the mark shown on the ticket is 1_200_000
-const landed = (priceE6: bigint) => ({
+const BOOKED = 100_000_000n; // the booked price = the mark at execution (the ticket's own mark is 1.20)
+const BASE_BPS = decodeMarketEngineView(new Uint8Array(modeFixtures().market))!.tradeFeeBaseBps;
+const NOTIONAL = (FILLED * BOOKED) / 1_000_000n;
+// base fee + a 25 bps matcher spread, as the fee channel charges it
+const FEE = (NOTIONAL * (BASE_BPS + 25n)) / 10_000n;
+const landed = (priceE6: bigint, fee = FEE) => ({
   meta: {
     err: null,
-    logMessages: fillEventLogs(WALLET, new PublicKey(SLAB), [{ flags: 8, requestedQ: FILLED, executedQ: FILLED, priceE6, quotedPriceE6: 1_199_000n }]),
+    logMessages: fillEventLogs(WALLET, new PublicKey(SLAB), [{ flags: 8, requestedQ: FILLED, executedQ: FILLED, priceE6, quotedPriceE6: priceE6 + 1_000_000n, feeAtoms: fee }]),
   },
 });
+const effectiveOf = (priceE6: bigint, fee = FEE) =>
+  effectivePriceE6(execFillFromLogs(landed(priceE6, fee).meta.logMessages, WALLET, { market: new PublicKey(SLAB) })!, BASE_BPS)!;
 
-describe("OrderTicket: fill price is the booked execution price (M7)", () => {
-  it("the result line and the saved entry use the FILL event's price, not the mark", async () => {
+describe("OrderTicket: the price shown and saved is what the trader effectively paid (M7)", () => {
+  it("the result line and the saved entry use booked + the fee's spread part: above the mark, not the bare mark and not the matcher quote", async () => {
     withPosition(0n);
     mocks.change = { beforeQ: 0n, afterQ: FILLED };
     mocks.getTransaction.mockResolvedValue(landed(BOOKED));
     render(<OrderTicket slabAddress={SLAB} />);
     await submit("5");
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
-    expect(getSavedEntry(SLAB, 0, W)).toMatchObject({ entryPriceE6: BOOKED, sizeQ: FILLED });
+    const eff = effectiveOf(BOOKED);
+    expect(eff > BOOKED).toBe(true);
+    expect(eff < BOOKED + 1_000_000n).toBe(true); // and it is not the matcher's quote either
+    expect(getSavedEntry(SLAB, 0, W)).toMatchObject({ entryPriceE6: eff, sizeQ: FILLED });
     const line = screen.getByText(/Opened .* at /);
-    expect(line.textContent).toContain("1.234");
+    expect(line.textContent).toContain((Number(eff) / 1e6).toFixed(2));
     expect(line.textContent).not.toContain("1.20");
+    // the trade book follows the fill so the close can report the whole trade
+    expect(loadBook(W, SLAB, WALLET.toBase58())).toMatchObject({ q: FILLED, avgE6: BOOKED, fees: FEE });
   });
 
-  it("NEGATIVE: the booked price could not be read: no price is claimed and the mark is NOT saved as the entry", async () => {
+  it("NEGATIVE: the fill could not be read: no price is claimed and the mark is NOT saved as the entry", async () => {
     withPosition(0n);
     mocks.change = { beforeQ: 0n, afterQ: FILLED };
     mocks.getTransaction.mockResolvedValue(null);
@@ -132,17 +147,17 @@ describe("OrderTicket: fill price is the booked execution price (M7)", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
     expect(getSavedEntry(SLAB, 0, W)).toBeNull();
     const line = screen.getByText(/Opened /);
-    expect(line.textContent).not.toMatch(/ at \$?1\.2/);
+    expect(line.textContent).not.toMatch(/ at /);
   });
 
-  it("an add averages with the BOOKED price of this fill", async () => {
-    saveEntryPrice(SLAB, 0, 1_000_000n, 3, W, FILLED);
+  it("an add averages with the EFFECTIVE price of this fill", async () => {
+    saveEntryPrice(SLAB, 0, 90_000_000n, 3, W, FILLED);
     withPosition(FILLED, 1_000_000n);
     mocks.change = { beforeQ: FILLED, afterQ: 2n * FILLED };
-    mocks.getTransaction.mockResolvedValue(landed(1_400_000n));
+    mocks.getTransaction.mockResolvedValue(landed(BOOKED));
     render(<OrderTicket slabAddress={SLAB} />);
     await submit("5");
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
-    expect(getSavedEntry(SLAB, 0, W)?.entryPriceE6).toBe(1_200_000n); // equal sizes at 1.00 and 1.40
+    expect(getSavedEntry(SLAB, 0, W)?.entryPriceE6).toBe((90_000_000n + effectiveOf(BOOKED)) / 2n);
   });
 });

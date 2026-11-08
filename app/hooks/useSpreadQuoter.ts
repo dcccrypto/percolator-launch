@@ -5,7 +5,8 @@ import { PublicKey } from "@solana/web3.js";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { resolveLpTradeAccounts } from "@/hooks/useTrade";
-import { decodeMarketEngineView, decodeMatcherCtx, type MatcherCtxView } from "@/lib/limits/decode";
+import { decodeAssetRiskLimits, decodeMarketEngineView, decodeMatcherCtx, type MatcherCtxView } from "@/lib/limits/decode";
+import { feeChannelOf } from "@/lib/limits/fee-channel";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
 import { spreadEstimateFromCtx, type SpreadEstimate } from "@/lib/v22/spread-estimate";
@@ -20,7 +21,7 @@ export function useSpreadQuoter(enabled: boolean, assetIndex = 0): (sizeQ: bigin
   const slab = useSlabState();
   const slabAddress = slab?.slabAddress;
   const programId = slab?.programId;
-  const [src, setSrc] = useState<{ ctx: MatcherCtxView; oracleE6: bigint } | null>(null);
+  const [src, setSrc] = useState<{ ctx: MatcherCtxView; oracleE6: bigint; inFee: boolean } | null>(null);
   const mockMode = !!slabAddress && isMockMode() && isMockSlab(slabAddress);
 
   useEffect(() => {
@@ -36,7 +37,7 @@ export function useSpreadQuoter(enabled: boolean, assetIndex = 0): (sizeQ: bigin
         const c = infos[1] ? new Uint8Array(infos[1].data) : null;
         const eng = m ? decodeMarketEngineView(m, assetIndex) : null;
         const ctx = c ? decodeMatcherCtx(c) : null;
-        if (!cancelled && eng && ctx && eng.effectivePriceE6 > 0n) setSrc({ ctx, oracleE6: eng.effectivePriceE6 });
+        if (!cancelled && eng && ctx && eng.effectivePriceE6 > 0n) setSrc({ ctx, oracleE6: eng.effectivePriceE6, inFee: feeChannelOf(m ? decodeAssetRiskLimits(m, assetIndex) : null).enabled });
       } catch {
         /* unknown stays unknown */
       }
@@ -45,7 +46,7 @@ export function useSpreadQuoter(enabled: boolean, assetIndex = 0): (sizeQ: bigin
   }, [enabled, mockMode, connection, programId, slabAddress, assetIndex]);
 
   return useCallback(
-    (sizeQ: bigint, takerBuys: boolean) => (src ? spreadEstimateFromCtx(src.ctx, src.oracleE6, sizeQ < 0n ? -sizeQ : sizeQ, takerBuys) : null),
+    (sizeQ: bigint, takerBuys: boolean) => (src ? spreadEstimateFromCtx(src.ctx, src.oracleE6, sizeQ < 0n ? -sizeQ : sizeQ, takerBuys, src.inFee) : null),
     [src],
   );
 }

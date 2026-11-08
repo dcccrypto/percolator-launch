@@ -42,3 +42,12 @@ describe("spreadCostAtoms", () => {
     expect(spreadCostAtoms(null, 40_000_000n)).toBeNull();
   });
 });
+
+describe("fee channel (M-3)", () => {
+  it("inFee is carried onto the estimate, worded, and removes the separate cost", () => {
+    const e = spreadEstimateFromCtx(ctx(), 1_000_000n, 100_000_000n, true, true)!;
+    expect(e).toMatchObject({ kind: "quote", bps: 31, inFee: true });
+    expect(spreadValueText(e)).toBe("~0.31% (est., included in the trading fee)");
+    expect(spreadCostAtoms(e, 40_000_000n)).toBeNull();
+  });
+});
