@@ -443,6 +443,29 @@ export const LAYOUTS_BY_VERSION: ReadonlyMap<number, LayoutTable> = new Map<numb
   [LAYOUT_V22.version, LAYOUT_V22],
 ]);
 
+/**
+ * Wrapper VERSION 19 BEFORE engine #299: variant B without the 4 B `loss_provenance` (portfolio 10,603 B, engine
+ * discriminator 19). FROZEN: it is what the old devnet v2.2 wrapper 6kpg2wi7 wrote and still holds (census 2026-11-08: all 211
+ * of its portfolios are 10,603 B / disc 19). Every offset below byte 10,475 (legs, receipt) equals variant B; only the length,
+ * the discriminator and the trailer (matcher config, identity) differ. NOT in {@link LAYOUTS_BY_VERSION}: a caller opts in with
+ * {@link LAYOUTS_BY_VERSION_PRE299} only for a wrapper known to hold this layout, so a disc-19 account is never read as current.
+ */
+export const LAYOUT_V22_PRE299: LayoutTable = Object.freeze({
+  ...v22Row({
+    name: "v2.2 variant B before engine #299 (old devnet wrapper 6kpg2wi7)",
+    source: "variant B with portfolioLen 10603 / engine discriminator 19 (engine before #299 c630fce4)",
+    slotStride: 2661, engineSlotLen: 1637, portfolioLen: 10603, legStride: 217, receiptOff: 10409, engineDiscriminator: 19,
+    leg: LAYOUT_V22_VARIANT_B.portfolio.leg,
+  }),
+  status: "FROZEN" as const,
+});
+
+/** {@link LAYOUTS_BY_VERSION} with VERSION 19 mapped to {@link LAYOUT_V22_PRE299}: for a wrapper that holds pre-#299 portfolios only. */
+export const LAYOUTS_BY_VERSION_PRE299: ReadonlyMap<number, LayoutTable> = new Map<number, LayoutTable>([
+  [LAYOUT_V21.version, LAYOUT_V21],
+  [LAYOUT_V22_PRE299.version, LAYOUT_V22_PRE299],
+]);
+
 /** Wrapper account magic (`"PERCV16\0"` little-endian). */
 export const WRAPPER_ACCOUNT_MAGIC = 0x5045_5243_5631_3600n;
 

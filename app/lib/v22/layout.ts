@@ -31,19 +31,23 @@ import {
   ACCOUNT_KIND,
   LAYOUT_V21,
   LAYOUT_V22,
+  LAYOUT_V22_PRE299,
   UnknownLayoutError,
   LAYOUTS_BY_VERSION,
+  LAYOUTS_BY_VERSION_PRE299,
   WRAPPER_ACCOUNT_MAGIC,
   readWrapperHeader,
   buildCreatePortfolioAccountIxV22,
   portfolioFilterForLayout,
   resolveLayout,
+  resolvePortfolioLayout,
   resolveMarketGeometry,
   v22Slab,
   type LayoutTable,
   type MarketGeometry,
 } from "./sdk";
 import { V22_COPY } from "./copy";
+import { DEVNET_V22_PROGRAM_IDS, resolveDevnetProgramIds } from "@/lib/program-ids";
 
 export { UnknownLayoutError };
 
@@ -52,9 +56,35 @@ export function activeLayout(): LayoutTable {
   return isDevnetV22Enabled() ? LAYOUT_V22 : LAYOUT_V21;
 }
 
-/** Exact `PORTFOLIO_ACCOUNT_LEN` of the active layout (9,563 flag off; 10,607 flag on since engine #299, from the SDK row). */
+/**
+ * Wrappers whose portfolios are ALL the pre-#299 v2.2 row (10,603 B, engine discriminator 19). Council R2-1: read-only census
+ * 2026-11-08 — 6kpg2wi7: 211 portfolios, every one 10,603 B / VERSION 19 / disc 19; 5NGgnU2j: 22, every one 10,607 B / disc 20.
+ * Only a build configured for one of these wrappers reads (and creates) the pre-#299 row; every other wrapper keeps the current row.
+ */
+const PRE299_PORTFOLIO_WRAPPERS: ReadonlySet<string> = new Set([DEVNET_V22_PROGRAM_IDS.wrapper]);
+
+/** Flag on and the configured wrapper holds pre-#299 portfolios ({@link PRE299_PORTFOLIO_WRAPPERS}). */
+function pre299PortfolioWrapper(): boolean {
+  return isDevnetV22Enabled() && PRE299_PORTFOLIO_WRAPPERS.has(resolveDevnetProgramIds().wrapper);
+}
+
+/**
+ * The portfolio row of the configured wrapper: v2.1 flag off; the pre-#299 row on the old v2.2 wrapper 6kpg2wi7; the current
+ * (#299, disc 20, 10,607 B) row otherwise. The ONE place scans, length checks, account creation and the parser pick it from.
+ */
+export function activePortfolioLayout(): LayoutTable {
+  if (!isDevnetV22Enabled()) return LAYOUT_V21;
+  return pre299PortfolioWrapper() ? LAYOUT_V22_PRE299 : LAYOUT_V22;
+}
+
+/** Registry for portfolio decodes of the configured wrapper (`undefined` = the SDK default {@link LAYOUTS_BY_VERSION}). */
+function portfolioRegistry(): ReadonlyMap<number, LayoutTable> | undefined {
+  return pre299PortfolioWrapper() ? LAYOUTS_BY_VERSION_PRE299 : undefined;
+}
+
+/** Exact `PORTFOLIO_ACCOUNT_LEN` of the active layout (9,563 flag off; 10,607 flag on since engine #299; 10,603 on 6kpg2wi7). */
 export function portfolioAccountLen(): number {
-  return isDevnetV22Enabled() ? LAYOUT_V22.portfolio.accountLen : V17_PORTFOLIO_ACCOUNT_LEN;
+  return isDevnetV22Enabled() ? activePortfolioLayout().portfolio.accountLen : V17_PORTFOLIO_ACCOUNT_LEN;
 }
 
 /**
@@ -63,7 +93,7 @@ export function portfolioAccountLen(): number {
  * Flag off this is byte-identical to the instruction the call sites built inline before.
  */
 export function createPortfolioAccountIx(payer: PublicKey, portfolio: PublicKey, lamports: number, programId: PublicKey): TransactionInstruction {
-  if (isDevnetV22Enabled()) return buildCreatePortfolioAccountIxV22(payer, portfolio, lamports, programId, LAYOUT_V22);
+  if (isDevnetV22Enabled()) return buildCreatePortfolioAccountIxV22(payer, portfolio, lamports, programId, activePortfolioLayout());
   return SystemProgram.createAccount({ fromPubkey: payer, newAccountPubkey: portfolio, lamports, space: V17_PORTFOLIO_ACCOUNT_LEN, programId });
 }
 
@@ -80,13 +110,20 @@ export function marketAccountLen(n: number): number {
 
 /** `getProgramAccounts` size + VERSION filters for portfolios of the active layout. */
 export function portfolioScanFilters(): { dataSize: number; versionMemcmp?: { offset: number; bytes: string } } {
-  if (isDevnetV22Enabled()) return portfolioFilterForLayout(LAYOUT_V22);
+  if (isDevnetV22Enabled()) return portfolioFilterForLayout(activePortfolioLayout());
   return { dataSize: V17_PORTFOLIO_ACCOUNT_LEN };
 }
 
-/** Is `data` a whole portfolio account of the active layout? (kind byte + exact length) */
+/**
+ * Is `data` a whole portfolio account of the active layout? Kind byte + exact length, and (flag on) the VERSION and the engine
+ * provenance discriminator of that row, so a disc-19 account padded to 10,607 B (or a disc-20 one on 6kpg2wi7) is not one.
+ */
 export function isPortfolioOfActiveLayout(data: Uint8Array): boolean {
-  return data.length === portfolioAccountLen() && data[10] === ACCOUNT_KIND.Portfolio;
+  if (data.length !== portfolioAccountLen() || data[10] !== ACCOUNT_KIND.Portfolio) return false;
+  if (!isDevnetV22Enabled()) return true;
+  const L = activePortfolioLayout();
+  const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  return dv.getUint16(8, true) === L.version && dv.getUint16(L.portfolio.provenanceVersionOff, true) === 1 && dv.getUint16(L.portfolio.provenanceDiscriminatorOff, true) === L.engineDiscriminator;
 }
 
 /** Geometry of a market account, resolved from its VERSION (flag on) or the v2.1 constants (flag off). */
@@ -127,7 +164,7 @@ export function marketGeometry(data: Uint8Array, parser = "marketGeometry"): App
 /** Table for ANY wrapper account (market, portfolio, ...) by VERSION (flag on) or v2.1 (flag off). */
 export function layoutOf(data: Uint8Array, parser: string, kind?: number): LayoutTable {
   if (!isDevnetV22Enabled()) return LAYOUT_V21;
-  return resolveLayout(data, { parser, kind });
+  return resolveLayout(data, { parser, kind, registry: kind === ACCOUNT_KIND.Portfolio ? portfolioRegistry() : undefined });
 }
 
 /** Total + per-asset open interest and insurance of a market, by the account's VERSION. */
@@ -137,7 +174,10 @@ export function parseMarketOI(data: Uint8Array): V17MarketGroupOI {
 
 /** A portfolio decoded by the account's VERSION + engine discriminator. */
 export function parsePortfolio(data: Uint8Array): ReturnType<typeof v22Slab.parsePortfolioV17> {
-  return isDevnetV22Enabled() ? v22Slab.parsePortfolioV17(data) : parsePortfolioV17(data);
+  if (!isDevnetV22Enabled()) return parsePortfolioV17(data);
+  // On a pre-#299 wrapper the old row is read only at its exact length; elsewhere the SDK default (current row) as before.
+  const registry = portfolioRegistry();
+  return registry ? v22Slab.parsePortfolioV17(data, { registry, strictLength: true }) : v22Slab.parsePortfolioV17(data);
 }
 
 /** True for the SDK's typed refusal of an unknown VERSION / discriminator / length. */
@@ -217,7 +257,11 @@ export function portfolioLegGeometry(data: Uint8Array): PortfolioLegGeometry | n
   if (!isDevnetV22Enabled()) L = LAYOUT_V21;
   else {
     try {
-      L = resolveLayout(data, { parser: "portfolioLegGeometry", kind: ACCOUNT_KIND.Portfolio });
+      const registry = portfolioRegistry();
+      // Pre-#299 wrapper: full guard (VERSION + discriminator + exact length) before any offset is trusted. Elsewhere unchanged.
+      L = registry
+        ? resolvePortfolioLayout(data, { parser: "portfolioLegGeometry", registry, strictLength: true })
+        : resolveLayout(data, { parser: "portfolioLegGeometry", kind: ACCOUNT_KIND.Portfolio });
     } catch (e) {
       if (isUnsupportedLayout(e)) return null;
       throw e;

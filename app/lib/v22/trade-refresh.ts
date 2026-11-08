@@ -26,6 +26,8 @@
  */
 import { PublicKey, type TransactionInstruction } from "@solana/web3.js";
 import { buildRefreshCrankIxV22, resolveMarketGeometry, v22Slab, WRAPPER_PRE_CRANK_MIN_LEGS_V22 } from "./sdk";
+import { parsePortfolio } from "./layout";
+import { isDevnetV22Enabled } from "./flag";
 
 /** Stale peers refreshed in one transaction (each ~114k CU and one more account; 6 keeps the tx inside 1.4M CU / 1,232 B). */
 export const MAX_PEER_CRANKS = 6;
@@ -105,7 +107,11 @@ export function marketAssetSlots(marketData: Uint8Array): number | null {
 function activeLegs(data: Uint8Array | null): number {
   if (!data) return 0;
   try {
-    return v22Slab.parsePortfolioV17(data).legs.filter((l) => l.active).length;
+    // Flag on: the wrapper-bound parser, so the old 6kpg2wi7 build reads a pre-#299 portfolio with its own row instead of a swallowed
+    // DISCRIMINATOR_MISMATCH -> 0 legs (review r3 #3770). Flag off: the v2.2 SDK parser exactly as before (parsePortfolio would route
+    // to the v1.7 parser there and every v2.2 portfolio would read as 0 legs — review r3b M-1).
+    const p = isDevnetV22Enabled() ? parsePortfolio(data) : v22Slab.parsePortfolioV17(data);
+    return p.legs.filter((l) => l.active).length;
   } catch {
     return 0;
   }
