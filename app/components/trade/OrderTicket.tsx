@@ -108,6 +108,11 @@ import { takeFillResult } from "@/lib/limits/fill-check";
 import { feeRaiseCopy, takeFeeRaise } from "@/lib/v22/fee-raise-note";
 import { sizeWithLots } from "@/lib/v22/growth-room";
 import { clippedFillBody, readClippedFill } from "@/lib/v22/clipped-fill";
+import { feeBpsWithSpread } from "@/lib/v22/spread-estimate";
+import { effectivePriceE6, readExecFill, type ExecFill } from "@/lib/v22/exec-fill";
+import { recordFill, saveBook } from "@/lib/trade-book";
+import { recordRealized } from "@/lib/realized-pnl";
+import { useSpreadQuoter } from "@/hooks/useSpreadQuoter";
 import { isPortfolioClosable } from "@/lib/close-trading-account";
 import { defaultFeeCapMarginBps } from "@/lib/limits/fee-channel";
 import { OrderTicketLimits, reasonCopy } from "@/components/limits/OrderTicketLimits";
@@ -409,6 +414,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   };
   const [engineLockError, setEngineLockError] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  // M7: the matcher's spread / price impact for the confirm dialog (read at mount for the Fee cell, and again each time the confirm opens, so its figure is not from page load).
+  const [confirmOpens, setConfirmOpens] = useState(0);
+  const spreadFor = useSpreadQuoter(isDevnetV22Enabled(), 0, confirmOpens);
   const [confirmSnapshot, setConfirmSnapshot] = useState<{
     positionSize: bigint;
     marginNative: bigint;
@@ -416,6 +424,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     estimatedLiqDisplay: LiqPriceDisplay;
     tradingFee: bigint;
     tradingFeeEstimated?: boolean;
+    /** L-7: the parts of the fee estimate, so the confirm recomputes the fee from the REFRESHED quote at render. */
+    feeBaseBps: bigint;
+    feeQuoteCharged: boolean;
+    feeNotional: bigint;
     worstFillPriceE6: bigint;
     riskLeverage: number | null;
     depositAtoms: bigint;
@@ -1130,7 +1142,16 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // M9: the busy-side surcharge is part of it even with no matcher quote (ticketFeeForEstimate). The signed cap is unchanged, but the
   // same estimate (gateFeeBps, via ticketFeeForEstimate) now also sizes the engine gate: openNeed / the bundled deposit,
   // exceedsBalance and the balance-bound Max include the busy-side fee on a no-matcher growth market (#3553: the engine charges it before the IM gate).
-  const estFeeBps = estimatedTotalFeeBps(tradingFeeBps, ticketFeeForEstimate(ticketLimits));
+  // L-2 / M-B: on a fee-channel market the chain charges base + the matcher's requested fee whether or not the P2 flag put the QUOTE in the
+  // estimate. Add it unless the estimate's quote is already charged in it (a busy-side fee above base says nothing about the quote).
+  const quoteChargedInEstimate = !!ticketFeeForEstimate(ticketLimits)?.charged;
+  const spreadQuote = hasOrder ? spreadFor(positionSize, direction === "long") : null;
+  const estFeeBps = feeBpsWithSpread(estimatedTotalFeeBps(tradingFeeBps, ticketFeeForEstimate(ticketLimits)), spreadQuote, quoteChargedInEstimate);
+  // L-5: the quote fee is named in the Fee tooltip whenever it is in the number, whether the P2 estimate or the spread add put it there.
+  const quoteFeeAdded = !!spreadQuote?.inFee && !quoteChargedInEstimate;
+  const feeExtrasText = quoteFeeAdded
+    ? [ "the market maker's quote fee", ...((ticketFeeForEstimate(ticketLimits)?.utilFeeBps ?? 0n) > 0n ? ["the busy-side fee"] : []) ].join(" and ")
+    : feeExtrasLabel(ticketFeeForEstimate(ticketLimits));
   const estFee = hasOrder ? computeTradingFee((positionSize * oracleE6) / 1_000_000n, estFeeBps) : 0n;
   const estFeeHasExtras = feeHasExtras(tradingFeeBps, estFeeBps);
   // P1 99165722 (F-7): a close that GROWS a halted / capped LP is refused or clipped too.
@@ -1421,7 +1442,15 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       // entry, so it is awaited ONCE and shared with the saved-entry step below. Until it
       // resolves the line is the neutral "went through" (true for any order).
       const sigKey = sig ?? null;
-      const price = formatLotPriceE6(submitPriceE6, lotExp);
+      // M7: on v2.2 the price the trader EFFECTIVELY paid is the FILL event's booked price (the mark at execution) adjusted by the spread part
+      // of fee_atoms (lib/v22/exec-fill.ts): the matcher's spread is charged through the fee channel, not through the booked price. Read
+      // from the landed transaction, from the user's own portfolio's FILL only. Until it is read, and when it cannot be, no price is claimed.
+      // Pre-v2.2 markets keep the submit price (their fills settle at the mark).
+      const v22Fill = isDevnetV22Enabled() && !!sigKey && !!slabProgramId;
+      const baseFeeBps = engineView?.tradeFeeBaseBps ?? null;
+      const execFillP: Promise<ExecFill | null> = v22Fill
+        ? readExecFill(connection, sigKey as string, slabProgramId as PublicKey, { market: new PublicKey(slabAddress), taker: userAccount?.pubkey ?? null }).catch(() => null)
+        : Promise.resolve(null);
       const measured = takePositionChange(sig).then((change): PositionChange | null => {
         if (change) return change;
         // Fund-and-trade with no measured change (a new portfolio, or a read that failed) leaves
@@ -1432,7 +1461,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         return null;
       });
       setResult({ kind: "sent", body: TICKET_COPY.result.unmeasured, sig: sigKey, tryQ: null });
-      void measured.then((change) => {
+      void Promise.all([measured, execFillP]).then(([change, execFill]) => {
+        const effective = execFill ? effectivePriceE6(execFill, baseFeeBps) : null;
+        const price = v22Fill ? (effective !== null ? formatLotPriceE6(effective, lotExp) : null) : formatLotPriceE6(submitPriceE6, lotExp);
         const outcome = classifyOrderChange(direction, effectiveSize, change);
         let next: NonNullable<typeof result>;
         if (outcome.effect === "zero") {
@@ -1469,8 +1500,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       // portfolio it just created is a v17 one: idx 0, like every v17 account (lib/userAccountScan.ts).
       const entryIdx = userAccount?.idx ?? (fundingMode ? 0 : null);
       // The fill's price, read now rather than from this render (which may be minutes old after a
-      // long wait in the wallet). Same source as before: the live mark, as for every saved entry.
-      const fillPriceE6 = getLivePriceSnapshot(slabAddress).priceE6 ?? livePriceE6 ?? 0n;
+      // long wait in the wallet). Pre-v2.2: the live mark (those fills settle at it). v2.2 (M7): the BOOKED price from the FILL event
+      // (applied below once read); the mark is never the entry of a v2.2 fill.
+      const markFillPriceE6 = getLivePriceSnapshot(slabAddress).priceE6 ?? livePriceE6 ?? 0n;
+      const applyEntryFill = (fillPriceE6: bigint) => {
       if (fillPriceE6 > 0n && entryIdx !== null) {
         const wallet = publicKey?.toBase58();
         const slab = slabAddress;
@@ -1502,6 +1535,34 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           const lev = opened ? orderLeverage : prior?.leverage ?? undefined;
           saveEntryPrice(slab, entryIdx, next, lev, wallet, change.afterQ);
         });
+      }
+      };
+      if (v22Fill) {
+        void execFillP.then(async (ef) => {
+          // N-1: the ENTRY is the BOOKED price (the engine's basis: capital + pnl is measured against it, and the spread is already out of
+          // capital as a fee). The effective price (booked + spread) is only for the result line and the toast.
+          if (ef) applyEntryFill(ef.bookedPriceE6);
+          // The fill could not be read: keep no entry at all (the position panel then derives an "est." one) rather than the mark.
+          else if (entryIdx !== null) clearEntryPrice(slabAddress, entryIdx, publicKey?.toBase58());
+          // The trade book follows every fill so a finished trade's result (open + adds + close, fees and spread included) is known.
+          if (ef && publicKey) {
+            // The size the chain had BEFORE this fill: the measured change (ADL-effective, read around the trade) is fresher than the
+            // render-time position, which can be stale (e.g. the position was closed on another device). Without a measurement the book is dropped
+            // (below) unless the position was flat, in which case the size before is 0.
+            const change = await measured.catch(() => null);
+            // L-3: no measurement and the render-time position is not flat: that size may be stale (closed on another device), so a book
+            // cannot be reconciled with it. Fail closed: drop the book, claim nothing (costs only this trade's result).
+            if (!change && existingPositionSize !== 0n) {
+              saveBook(publicKey.toBase58(), slabAddress, ef.taker.toBase58(), null);
+              return;
+            }
+            const before = change ? change.beforeQ : 0n;
+            const r = recordFill(publicKey.toBase58(), slabAddress, ef.taker.toBase58(), { q: ef.executedQ, bookedPriceE6: ef.bookedPriceE6, feeAtoms: ef.feeAtoms }, before);
+            if (r !== null) recordRealized(publicKey.toBase58(), slabAddress, r);
+          }
+        });
+      } else {
+        applyEntryFill(markFillPriceE6);
       }
       // The site-wide PositionsBar reads usePortfolio, which refreshes its
       // position list on a 30s interval and learns nothing from refreshSlab()
@@ -1988,6 +2049,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   };
   const clampReason = ticketLimits.sideLimits ? reasonCopy(ticketLimits, marketLimits, direction) : "";
 
+  // L-7: the confirm's fee is computed at render from the quote read when the confirm opened (the same read as its spread row), not from
+  // the click-time estimate, so a refreshed quote moves both rows together.
+  const confirmQuoteNow = confirmSnapshot ? spreadFor(confirmSnapshot.positionSize, direction === "long") : null;
+  const confirmFeeBpsNow = confirmSnapshot ? feeBpsWithSpread(confirmSnapshot.feeBaseBps, confirmQuoteNow, confirmSnapshot.feeQuoteCharged) : tradingFeeBps;
+  const confirmFeeNow = confirmSnapshot ? computeTradingFee(confirmSnapshot.feeNotional, confirmFeeBpsNow) : 0n;
+
   return (
     <div className="relative p-3.5" data-testid="order-ticket" data-ticket-row={ticketState.row}>
       {openCloseToggle}
@@ -2333,7 +2400,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             /* A trader saw what they pay and nothing about where it goes. #2565. Product review T-1: the extras are named too. */
             tooltip={
               estFeeHasExtras
-                ? `Estimated ${(Number(estFeeBps) / 100).toFixed(2)}%: the market's ${(Number(tradingFeeBps) / 100).toFixed(2)}% base fee plus ${feeExtrasLabel(ticketFeeForEstimate(ticketLimits))}. The extra parts go to the market's liquidity (Earn). Your signature caps the total.${feeDestinationTitle ? ` Base fee split: ${feeDestinationTitle}` : ""}`
+                ? `Estimated ${(Number(estFeeBps) / 100).toFixed(2)}%: the market's ${(Number(tradingFeeBps) / 100).toFixed(2)}% base fee plus ${feeExtrasText}. The extra parts go to the market's liquidity (Earn). Your signature caps the total.${feeDestinationTitle ? ` Base fee split: ${feeDestinationTitle}` : ""}`
                 : feeDestinationTitle
             }
           />
@@ -2601,6 +2668,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               estimatedLiqDisplay: afterLiqDisplay,
               tradingFee: estFee,
               tradingFeeEstimated: estFeeHasExtras,
+              feeBaseBps: estimatedTotalFeeBps(tradingFeeBps, ticketFeeForEstimate(ticketLimits)),
+              feeQuoteCharged: quoteChargedInEstimate,
+              feeNotional: (positionSize * oracleE6) / 1_000_000n,
               worstFillPriceE6,
               // The account after this trade: the resulting position and the bundled deposit, as
               // the liq row uses, over capital + deposit + pnl, as the position panel's Lev.
@@ -2610,6 +2680,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               createsAccount: needsAccount && fundingMode,
             });
             setShowConfirmModal(true);
+            setConfirmOpens((n) => n + 1);
             // Prewarm the entire submission path (blockhash, priority fee,
             // v17 trade-account resolution) while the user reads the confirm
             // modal — their confirm click then reaches the wallet popup with
@@ -2741,9 +2812,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           leverage={leverage}
           estimatedLiqPrice={confirmSnapshot.estimatedLiqPrice}
           estimatedLiqDisplay={confirmSnapshot.estimatedLiqDisplay}
-          tradingFee={confirmSnapshot.tradingFee}
-          tradingFeeEstimated={confirmSnapshot.tradingFeeEstimated ?? false}
+          tradingFee={confirmFeeNow}
+          tradingFeeEstimated={confirmFeeBpsNow > tradingFeeBps}
+          quoteInFee={confirmSnapshot.feeQuoteCharged || !!confirmQuoteNow?.inFee}
           worstFillPriceE6={confirmSnapshot.worstFillPriceE6}
+          spreadEstimate={spreadFor(confirmSnapshot.positionSize, direction === "long")}
           accountEquity={userAccount ? capital : null}
           riskLeverage={confirmSnapshot.riskLeverage}
           depositAmount={confirmSnapshot.depositAtoms}

@@ -60,7 +60,7 @@ export function classifyOrderChange(direction: "long" | "short", requestedQ: big
 }
 
 /** The result line body for a measured outcome (not "zero": that keeps TICKET_COPY.result.zero). */
-export function orderResultBody(o: Exclude<OrderOutcome, { effect: "zero" }>, fmt: (q: bigint) => string, sym: string, price: string): string {
+export function orderResultBody(o: Exclude<OrderOutcome, { effect: "zero" }>, fmt: (q: bigint) => string, sym: string, price: string | null): string {
   if (o.effect === "unmeasured") return TICKET_COPY.result.unmeasured;
   const p = o.partial ? null : price;
   const tail = o.partial ? `. ${TICKET_COPY.result.partialTail}` : "";

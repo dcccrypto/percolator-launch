@@ -326,8 +326,8 @@ describe("one position, every surface, one PnL (#3077)", () => {
     // ROE is one number too (raw-basis initial margin: 80 x $99.875 x 10%).
     expect(f.roe.builder).toBe(f.roe.portfolio);
     expect(f.roe.builder).toBe(f.roe.terminal);
-    // ... and it is the engine's ROE: +$5.00 on 40 EFFECTIVE tokens x $99.875 x 10% = $399.50 margin.
-    expect(f.roe.builder).toBeCloseTo(1.25, 1);
+    // ... and it is the return on the position's CAPITAL (M7): +$5.00 on $1,000 = 0.5% (it was on notional / 10 = $399.50 -> 1.25%).
+    expect(f.roe.builder).toBeCloseTo(0.5, 1);
     // NEGATIVE CONTROL: the raw-basis denominator (80 tokens) would read 0.63%.
     expect(f.roe.builder).not.toBeCloseTo(0.63, 1);
   });
@@ -594,8 +594,10 @@ describe("dust positions (Discord: a tiny position read \"SOL 0\" in the positio
   it("PnL is valued in one division, as the engine does: 144 atoms, not 0, and its real ROE", () => {
     const v = valueAtMark(dust);
     expect(v.unrealizedPnl).toBe(144n);
-    // Initial margin: 72 x $150 x 10% = 1080 atoms; 144 / 1080 = 13.33%.
-    expect(v.roe).toBeCloseTo(13.33, 1);
+    // M7: on the position's capital (1,000,000 atoms): 144 / 1e6 = 0.0144%. Initial margin (72 x $150 x 10% = 1080 atoms) is the
+    // basis only when the capital is shared by several legs: 144 / 1080 = 13.33%.
+    expect(v.roe).toBeCloseTo(0.01, 2); // the SDK rounds to 2 decimals: 0.0144% -> 0.01
+    expect(valueAtMark({ ...dust, capitalIsPositionMargin: false }).roe).toBeCloseTo(13.33, 1);
   });
 
   it("a loss on the same dust position is negative, not 0", () => {

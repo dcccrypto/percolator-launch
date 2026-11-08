@@ -10,6 +10,7 @@ import { useClosePosition } from "@/hooks/useClosePosition";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { ClosePositionForm } from "@/components/trade/ClosePositionForm";
 import { useCloseFeeEstimate } from "@/hooks/useCloseFeeEstimate";
+import { useSpreadQuoter } from "@/hooks/useSpreadQuoter";
 import type { MarketLimits } from "@/hooks/useMarketLimits";
 import { NFT_MENU_COPY } from "@/components/trade/PositionNftMenu";
 import { useNftWrappedPosition } from "@/hooks/useNftWrappedPosition";
@@ -119,6 +120,7 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
   const isLong = positionSize > 0n;
   // #3726: the whole close fee (base + the matcher's requested fee where the fee channel charges it).
   const closeFeeBpsFor = useCloseFeeEstimate(positionSize, tradingFeeBps ?? 0n, currentPriceE6, marketLimits);
+  const spreadEstimateFor = useSpreadQuoter(true);
 
   // `positionSize` comes from useUserAccount, which only sees portfolios the
   // wallet OWNS. Wrapping a position as a Position NFT moves the portfolio's
@@ -240,6 +242,7 @@ export const OrderTicketClosePanel: FC<OrderTicketClosePanelProps> = ({
         loading={loading}
         tradingFeeBps={tradingFeeBps}
         closeFeeBpsFor={closeFeeBpsFor}
+        spreadEstimateFor={spreadEstimateFor}
         oracleStale={oracleBlocked}
         oraclePriceBehind={oraclePriceBehind}
         engineCatchingUp={engineStale}

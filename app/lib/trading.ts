@@ -154,13 +154,11 @@ export function orderAgainstPosition(
  * The same math as `valueAtMark` (lib/position-pnl.ts), re-run with a fresher mark:
  *   1. `computeMarkPnlLinear` — collateral-scale PnL in one floor division, as the
  *      engine credits it (no truncation to whole base atoms in between).
- *   2. ROE (`pnlPercent`) divides by the position's OWN locked initial
- *      margin (`computePositionInitialMargin`), not total account capital —
- *      capital can include collateral not backing this specific position.
- *      Falls back to `capitalFallback` (typically account capital) when the
- *      position has no computable initial margin (e.g. a flat/closed leg),
- *      then to `pnlPercentFallback` (typically the position's last-polled
- *      `pnlPercent`) if that's also unavailable.
+ *   2. ROE (`pnlPercent`) divides by the position's capital (M7; `capitalFallback`,
+ *      typically the account's capital), not by notional / max leverage. With no
+ *      capital it falls back to the position's own locked initial margin
+ *      (`computePositionInitialMargin`), then to `pnlPercentFallback`
+ *      (typically the position's last-polled `pnlPercent`) if that's also unavailable.
  *
  * `entryPriceE6 <= 0n` / `markPriceE6 <= 0n` / a flat `positionSize` all fall
  * back to `unrealizedPnlFallback`/`pnlPercentFallback` (typically the
@@ -187,9 +185,10 @@ export function computeLivePositionPnl(
 
   const pnlPercent = (() => {
     try {
+      // M7: the return on the position's capital (what the trader put up), the same basis as valueAtMark (lib/position-pnl.ts).
+      if (capitalFallback > 0n) return computePnlPercent(pnl, capitalFallback);
       const initialMargin = computePositionInitialMargin(positionSize, entryPriceE6, initialMarginBps);
-      if (initialMargin > 0n) return computePnlPercent(pnl, initialMargin);
-      return capitalFallback > 0n ? computePnlPercent(pnl, capitalFallback) : pnlPercentFallback;
+      return initialMargin > 0n ? computePnlPercent(pnl, initialMargin) : pnlPercentFallback;
     } catch {
       return pnlPercentFallback;
     }

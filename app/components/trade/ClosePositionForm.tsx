@@ -4,6 +4,7 @@ import { catchUpAvailableLine } from "@/lib/limits/catchup-estimate";
 import { priceBehindLine } from "@/lib/oracle-stale-gate";
 import { FC, useId, useMemo, useState } from "react";
 import { formatTokenAmount } from "@/lib/format";
+import { SPREAD_LABEL, feeBpsWithSpread, spreadValueText, type SpreadEstimate } from "@/lib/v22/spread-estimate";
 import { formatLotPriceE6, formatLotQ } from "@/lib/v22/lot";
 import { computeMarkPnl, computeMarkPnlLinear, clampClosePercent, UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
 
@@ -52,6 +53,12 @@ export interface ClosePositionFormProps {
    * Omitted = `tradingFeeBps` alone. A larger value shows the row as "Trading Fee (est.)", as the confirm screen does for opens.
    */
   closeFeeBpsFor?: (closeAbs: bigint) => bigint;
+  /**
+   * M7: the matcher's pre-trade spread / price impact for a close of `closeAbs` (`takerBuys` = closing a short), shown for INFORMATION.
+   * The close books at the mark; the spread is charged only through the fee channel (already inside the fee estimate where it is on,
+   * nothing extra where it is off), so it is never subtracted from the balance preview. Omitted / null = "Not available before the trade".
+   */
+  spreadEstimateFor?: (closeAbs: bigint, takerBuys: boolean) => SpreadEstimate | null;
   /** Blocks close + shows the oracle-stale warning (matured oracle / no price — what the chain refuses). */
   oracleStale?: boolean;
   /** Price older than 60 s but the chain would accept the close — shows one calm line, never blocks. */
@@ -109,6 +116,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
   loading,
   tradingFeeBps = 0n,
   closeFeeBpsFor,
+  spreadEstimateFor,
   oracleStale = false,
   oraclePriceBehind = false,
   priceAgeSecs = 0,
@@ -160,9 +168,15 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
     const pnl = entryPrice > 0n ? computeMarkPnlLinear(closePositionSigned, entryPrice, currentPrice) : 0n;
 
     const closeNotional = currentPrice > 0n ? (closeAbs * currentPrice) / 1_000_000n : 0n;
+    const spread = spreadEstimateFor ? spreadEstimateFor(closeAbs, !isLong) : null;
     // #3726: the whole close fee (base + the requested fee where the fee channel charges it), never below the base.
     const estBps = closeFeeBpsFor ? closeFeeBpsFor(closeAbs) : tradingFeeBps;
-    const feeBps = estBps > tradingFeeBps ? estBps : tradingFeeBps;
+    let feeBps = estBps > tradingFeeBps ? estBps : tradingFeeBps;
+    // F1: the chain charges base + the matcher's requested fee on a fee-channel market whether or not the ticket's P2 flag put it in the
+    // estimate above (flag off = base only). When the channel is on and the estimate holds the base only, the displayed fee adds the quote's
+    // requested bps (display only; what is signed is unchanged), so "included in the trading fee" is true and the preview is not high.
+    // A close never carries the busy-side fee (growth_v19.rs), so an estimate above base on a close IS the charged quote.
+    feeBps = feeBpsWithSpread(feeBps, spread, feeBps > tradingFeeBps);
     const feeEstimated = feeBps > tradingFeeBps;
     const closeFee = feeBps > 0n ? (closeNotional * feeBps) / 10_000n : 0n;
 
@@ -180,8 +194,8 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
         ? (Number(pnlNative) / 10 ** decimals) * priceUsd
         : null;
 
-    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, feeEstimated, balanceAfter };
-  }, [percent, absPosition, isLong, entryPrice, riskEntryPrice, currentPrice, capital, priceUsd, tradingFeeBps, closeFeeBpsFor, decimals]);
+    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, feeEstimated, balanceAfter, spread };
+  }, [percent, absPosition, isLong, entryPrice, riskEntryPrice, currentPrice, capital, priceUsd, tradingFeeBps, closeFeeBpsFor, spreadEstimateFor, decimals]);
 
   // #2660: 0n = unknown entry (see the prop doc) — never a confident zero PnL.
   const entryKnown = entryPrice > 0n;
@@ -326,6 +340,12 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
             </span>
           </div>
         )}
+        <div className="flex justify-between gap-3" data-testid="close-spread">
+          <span className="text-[var(--text-dim)]">{SPREAD_LABEL}:</span>
+          <span className="text-right font-mono font-medium text-[var(--text-secondary)]">
+            {spreadValueText(preview.spread)}
+          </span>
+        </div>
         <div className="flex justify-between">
           <span className="text-[var(--text-dim)]">Est. Account Balance After:</span>
           <span className="font-mono font-medium text-[var(--text)]" title={entryKnown ? undefined : "Excludes PnL — the entry price is unknown, so the PnL settled on close can't be previewed."}>

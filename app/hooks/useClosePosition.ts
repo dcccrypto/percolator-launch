@@ -47,6 +47,11 @@ import { formatTokenAmount } from "@/lib/format";
 import { closeLimitFromEngine } from "@/lib/close-limit";
 import { clearEntryPrice } from "@/lib/entry-price";
 import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { effectivePriceE6, readExecFill } from "@/lib/v22/exec-fill";
+import { recordFill } from "@/lib/trade-book";
+import { formatLotPriceE6 } from "@/lib/v22/lot";
+import { closeResultText, recordRealized } from "@/lib/realized-pnl";
 import { PortfolioTargetError, TARGET_COPY, isPortfolioTargetError, verifyPortfolioTarget } from "@/lib/portfolio-target";
 
 /** M-3: the leg is a prior-reset obligation (owns 0 effective quantity). */
@@ -169,6 +174,43 @@ function getFreshPortfolioData(
     });
   freshReadInflight.set(key, p);
   return p;
+}
+
+/**
+ * M7: what a landed close actually did, from the FILL event of its own transaction: the price the trader EFFECTIVELY received (booked
+ * price adjusted by the spread part of the fee, lib/v22/exec-fill.ts) and, when the app saw the whole trade, the trade's result over
+ * its lifetime (lib/trade-book.ts: price PnL on booked prices minus every fee). The book is updated whatever the toast waits for;
+ * the toast waits at most `budgetMs`. Either half is null when unknown; nothing is guessed. No account re-read is involved, so a
+ * lagging node cannot hand back a pre-close balance.
+ */
+async function measureCloseResult(o: {
+  connection: Connection;
+  programId: PublicKey;
+  slabAddress: string;
+  sig: string;
+  taker?: PublicKey | null;
+  baseFeeBps: bigint | null;
+  wallet: string;
+  /** The signed effective position the chain had before this close. */
+  onChainQBefore: bigint;
+  budgetMs?: number;
+}): Promise<{ effectiveE6: bigint | null; result: bigint | null }> {
+  const work = (async (): Promise<{ effectiveE6: bigint | null; result: bigint | null }> => {
+    const fill = await readExecFill(o.connection, o.sig, o.programId, { market: new PublicKey(o.slabAddress), taker: o.taker ?? null }, undefined, 3).catch(() => null);
+    if (!fill) return { effectiveE6: null, result: null };
+    const result = recordFill(o.wallet, o.slabAddress, fill.taker.toBase58(), { q: fill.executedQ, bookedPriceE6: fill.bookedPriceE6, feeAtoms: fill.feeAtoms }, o.onChainQBefore);
+    if (result !== null) recordRealized(o.wallet, o.slabAddress, result);
+    return { effectiveE6: effectivePriceE6(fill, o.baseFeeBps), result };
+  })().catch(() => ({ effectiveE6: null, result: null }));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const budget = new Promise<{ effectiveE6: null; result: null }>((resolve) => {
+    timer = setTimeout(() => resolve({ effectiveE6: null, result: null }), o.budgetMs ?? 4000);
+  });
+  try {
+    return await Promise.race([work, budget]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function useClosePosition(slabAddress: string): UseClosePositionReturn {
@@ -681,13 +723,35 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         // The one confirmation a close gets: every close surface (dock, ticket, portfolio rows) closes
         // its modal on resolve, so without this a partial close just vanished. A clipped fill already
         // said what filled (toast above), so it gets no success line.
+        // M7: v2.2 closes report what the chain did: the effective price (booked price adjusted by the spread part of the fee) and, when the
+        // app saw the whole trade, its lifetime result (fees and spread included, funding not). The trade book is updated here too.
+        let measured: { effectiveE6: bigint | null; result: bigint | null } | null = null;
+        if (isDevnetV22Enabled() && isV17Market && programId && publicKey && sig) {
+          measured = await measureCloseResult({
+            connection, programId, slabAddress, sig,
+            taker: targetPk ?? userAccount?.pubkey ?? null,
+            baseFeeBps: freshEngine ? freshEngine.tradeFeeBaseBps : null,
+            wallet: publicKey.toBase58(),
+            onChainQBefore: freshPositionSize,
+          });
+        }
+        const closeDetail = (base: string): string =>
+          measured
+            ? closeResultText({
+                base,
+                execPriceText: measured.effectiveE6 !== null && getLotExp(slabAddress) !== null ? formatLotPriceE6(measured.effectiveE6, getLotExp(slabAddress) as number) : null,
+                result: measured.result,
+                decimals: 6, // playground collateral is sim-USDC (6 decimals) on every market
+                symbol: "USDC",
+              })
+            : base;
         if (outcome !== "partial") {
           const closedAbs = closeSize < 0n ? -closeSize : closeSize;
           // The tx is confirmed (sendTx returns only after confirmation; a timeout throws above), but a
           // fill the app could not measure (post-trade read failed, or the position moved the other
           // way) does not prove the position is closed: say only what is known.
           if (fill?.kind === "unknown") toast(COPY.closeConfirmedUnmeasured, "info");
-          else toast(closePercent >= 100 ? COPY.closeDone : COPY.closeDonePart(fmtQ(closedAbs), fmtQ(freshAbs)), "success");
+          else toast(closeDetail(closePercent >= 100 ? COPY.closeDone : COPY.closeDonePart(fmtQ(closedAbs), fmtQ(freshAbs))), "success");
         }
         setPhase("confirming");
         setTimeout(() => setPhase("idle"), 2000);

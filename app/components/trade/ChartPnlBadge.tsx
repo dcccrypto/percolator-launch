@@ -104,6 +104,7 @@ export const ChartPnlBadge: FC<ChartPnlBadgeProps> = ({ slabAddress }) => {
     effectiveSizeQ: effectiveSize,
     entryE6: recordedEntryE6,
     initialMarginBps,
+    ...((((account as { activeLegCount?: number | null }).activeLegCount ?? 1) <= 1 && account.capital > 0n) ? { capital: account.capital } : {}),
     initialMarkE6: livePriceE6,
     ...(lotExp > 0 ? { lotExp } : {}),
   };

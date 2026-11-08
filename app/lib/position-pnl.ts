@@ -23,8 +23,8 @@
  *   3. Entry priority is `server` > `cache` > `derived` > `unknown`. The derived
  *      entry is back-solved over the effective size and is only an ESTIMATE
  *      (`isEstimate`); every surface labels it "est." (ESTIMATE_LABEL).
- *   4. ROE divides by the position's own initial margin on EFFECTIVE size (the
- *      engine's risk_notional runs over effective_abs_q), falling back to capital.
+ *   4. ROE divides by the position's capital (its margin; M7: not notional / max leverage). With several open legs sharing the
+ *      account's capital it divides by the position's own initial margin on EFFECTIVE size instead.
  *   5. The effective size mirrors the engine's `effective_abs_quantity_for_leg`
  *      (lib/limits/effective-quantity.ts): a leg whose factors are invalid
  *      (a_side > a_basis, a_basis out of range) or whose epoch no longer matches
@@ -151,14 +151,25 @@ export function valueAtMark(v: {
   markE6: bigint;
   initialMarginBps: bigint;
   capital: bigint;
+  /**
+   * M7: false when the account's capital is shared by several positions, so it is not THIS position's margin; ROE then divides by the
+   * position's own initial margin. Default true: a single-position account's capital IS its margin.
+   */
+  capitalIsPositionMargin?: boolean;
 }): { pnlNative: bigint; unrealizedPnl: bigint; roe: number } {
   const pnlNative = computeMarkPnl(v.effectiveSize, v.entryE6, v.markE6);
   const unrealizedPnl = computeMarkPnlLinear(v.effectiveSize, v.entryE6, v.markE6);
   let roe = 0;
   try {
-    const margin = computePositionInitialMargin(v.effectiveSize, v.entryE6, v.initialMarginBps);
-    if (margin > 0n) roe = computePnlPercent(unrealizedPnl, margin);
-    else if (v.capital > 0n) roe = computePnlPercent(unrealizedPnl, v.capital);
+    // M7: ROE is the return on what the trader actually put up: the position's capital (its margin), NOT notional / max leverage
+    // (a 5x position's initial margin at 10x max understated the denominator by half and doubled every percentage).
+    if (v.capital > 0n && v.capitalIsPositionMargin !== false) {
+      roe = computePnlPercent(unrealizedPnl, v.capital);
+    } else {
+      const margin = computePositionInitialMargin(v.effectiveSize, v.entryE6, v.initialMarginBps);
+      if (margin > 0n) roe = computePnlPercent(unrealizedPnl, margin);
+      else if (v.capital > 0n) roe = computePnlPercent(unrealizedPnl, v.capital);
+    }
   } catch {
     // dust margin + huge PnL overflows computePnlPercent; ROE is cosmetic.
     roe = 0;
@@ -274,6 +285,8 @@ export function computePositionPnl(input: PositionPnlInput): PositionPnl {
     markE6,
     initialMarginBps: input.initialMarginBps,
     capital: input.capital,
+    // Several open legs share the account's capital: then the position's own initial margin is its denominator.
+    capitalIsPositionMargin: (input.activeLegCount ?? 1) <= 1,
   });
   const { pnlNative, unrealizedPnl, roe } = valued;
   // #3534: the value-side PnL, from the risk entry (the same figure as `unrealizedPnl` unless a settle already moved a loss out of capital).

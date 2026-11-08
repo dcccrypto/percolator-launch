@@ -7,6 +7,7 @@ import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
 import { ClosePositionForm } from "@/components/trade/ClosePositionForm";
 import { useCloseFeeEstimate } from "@/hooks/useCloseFeeEstimate";
+import { useSpreadQuoter } from "@/hooks/useSpreadQuoter";
 import type { MarketLimits } from "@/hooks/useMarketLimits";
 
 interface ClosePositionModalProps {
@@ -104,6 +105,8 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   onCancelRef.current = onCancel;
   // #3726: the whole close fee for this market (every caller mounts the modal inside that market's SlabProvider).
   const closeFeeBpsFor = useCloseFeeEstimate(positionSize, tradingFeeBps ?? 0n, currentPrice, marketLimits);
+  // M7: the matcher's spread / price impact for the close (the dialog is open, so read it now).
+  const spreadEstimateFor = useSpreadQuoter(true);
   // Mid-close the modal stays open: dismissing it unmounted the /portfolio flow and lost the
   // result (an error had nowhere to show). Cancel is already disabled while loading.
   const loadingRef = useRef(loading);
@@ -202,6 +205,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
           loading={loading}
           tradingFeeBps={tradingFeeBps}
           closeFeeBpsFor={closeFeeBpsFor}
+          spreadEstimateFor={spreadEstimateFor}
           oracleStale={oracleStale}
           oraclePriceBehind={oraclePriceBehind}
           priceAgeSecs={priceAgeSecs}

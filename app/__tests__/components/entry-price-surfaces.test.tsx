@@ -46,6 +46,8 @@ vi.mock("@/hooks/useMarketLimits", () => ({ useMarketLimits: () => null }));
 vi.mock("@/hooks/useWalletCompat", () => ({
   useWalletCompat: () => ({ connected: true, publicKey: new PublicKey("11111111111111111111111111111111") }),
 }));
+// M7: the close dialog reads the matcher quote through this hook; this test is not about it.
+vi.mock("@/hooks/useSpreadQuoter", () => ({ useSpreadQuoter: () => () => null }));
 vi.mock("@/hooks/useLpPositions", () => ({
   useLpPositions: () => ({ positions: [], totalRedeemable: 0, loading: false, isRefreshing: false, error: null, refresh: () => {} }),
 }));

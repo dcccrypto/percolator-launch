@@ -222,8 +222,9 @@ describe("Portfolio Component Tests", () => {
 
       render(<PortfolioPage />);
 
-      // Should not crash and display +0
-      expect(screen.getAllByText(/\+0/).length).toBeGreaterThanOrEqual(1);
+      // Should not crash. M7: ROE is on the position's capital ($2): this fixture has no initialMarginBps, which used to zero the
+      // ROE ("+0.00%") by a failed margin computation; the mark-valued +$15.00 is now +750.00% of the $2 capital.
+      expect(screen.getAllByText(/\+750\.00%/).length).toBeGreaterThanOrEqual(1);
     });
 
     it("should correctly display negative PnL", () => {

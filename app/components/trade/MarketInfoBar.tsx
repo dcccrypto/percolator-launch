@@ -319,8 +319,8 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
 
         {/* Mark/Index spread — hidden for pyth-pinned markets (mark === index there) */}
         {showSpread && (
-          <div className="flex flex-col shrink-0">
-            <span className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-muted)]">Spread</span>
+          <div className="flex flex-col shrink-0" title="Mark minus index price. This is NOT the cost of a trade: the order dialogs show the spread / price impact you will pay.">
+            <span className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-muted)]">Mark–index gap</span>
             <span className={`text-xs font-medium ${spreadColor}`} style={{ fontFamily: "var(--font-mono)" }}>
               {spreadBps! >= 0 ? "+" : ""}{(spreadBps! / 100).toFixed(2)}%
             </span>

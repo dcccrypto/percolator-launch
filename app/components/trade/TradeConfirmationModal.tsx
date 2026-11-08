@@ -14,6 +14,7 @@ import { describeLiqPrice, type LiqPriceDisplay } from "@/lib/liq-price-display"
 import { LiqPriceValue } from "./LiqPriceValue";
 import { orderHeading } from "@/lib/trading";
 import { FIRST_TRADE_COPY } from "@/lib/first-trade";
+import { SPREAD_LABEL, spreadValueText, type SpreadEstimate } from "@/lib/v22/spread-estimate";
 
 interface TradeConfirmationModalProps {
   direction: "long" | "short";
@@ -35,6 +36,8 @@ interface TradeConfirmationModalProps {
   tradingFee: bigint;
   /** Product review T-1: the fee is an estimate that includes the quote / busy-side fee on top of the base fee. */
   tradingFeeEstimated?: boolean;
+  /** The fee above already holds the matcher's requested fee (charged quote, or added from the spread quote). Omitted: inferred from `tradingFeeEstimated`. */
+  quoteInFee?: boolean;
   /**
    * Worst-acceptable fill price (limit_price_e6) the trade will be signed
    * with, derived from live mark + default slippage bps. Shown so the user
@@ -44,6 +47,12 @@ interface TradeConfirmationModalProps {
    * trade anyway.
    */
   worstFillPriceE6?: bigint;
+  /**
+   * M7: the matcher's pre-trade spread / price impact for this size (lib/v22/spread-estimate.ts), shown for INFORMATION. The booked price is
+   * the mark; the spread is charged only through the fee channel, so where it is on the Trading Fee row already contains it (the row says so)
+   * and where it is off nothing extra is charged. Always shown: null / omitted reads "Not available before the trade", never 0%.
+   */
+  spreadEstimate?: SpreadEstimate | null;
   /** Current slab account equity in collateral units. Used to show risk leverage. */
   accountEquity?: bigint | null;
   /**
@@ -83,7 +92,9 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   estimatedLiqDisplay,
   tradingFee,
   tradingFeeEstimated = false,
+  quoteInFee,
   worstFillPriceE6,
+  spreadEstimate = null,
   accountEquity,
   riskLeverage: riskLeverageAfter,
   depositAmount,
@@ -110,6 +121,13 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   // the original crash, and a confirmation screen that silently disagrees with
   // the order it submits would be worse than crashing.
   const notional = computeNotionalNative(margin, leverage);
+  // F1: on a fee-channel market the chain charges base + the matcher's requested fee. When the ticket's fee estimate holds the base only
+  // (its P2 flag is off), the row adds the quote's requested bps, display only (what is signed is unchanged), so the spread row's "included
+  // in the trading fee" is true.
+  const addSpreadToFee = !!spreadEstimate?.inFee && !(quoteInFee ?? tradingFeeEstimated);
+  const shownFee = addSpreadToFee
+    ? tradingFee + (notional * BigInt(spreadEstimate.kind === "quote" ? spreadEstimate.bps : spreadEstimate.minBps)) / 10_000n
+    : tradingFee;
   const liqDisplay =
     estimatedLiqDisplay ??
     describeLiqPrice({
@@ -303,9 +321,15 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
             </div>
           )}
           <div className="flex justify-between">
-            <span className="text-[var(--text-secondary)]">{tradingFeeEstimated ? "Trading Fee (est.):" : "Trading Fee:"}</span>
+            <span className="text-[var(--text-secondary)]">{tradingFeeEstimated || addSpreadToFee ? "Trading Fee (est.):" : "Trading Fee:"}</span>
             <span className="font-mono font-medium text-[var(--text)]">
-              {formatTokenAmount(tradingFee, decimals)} {settleSymbol}
+              {formatTokenAmount(shownFee, decimals)} {settleSymbol}
+            </span>
+          </div>
+          <div className="flex justify-between gap-3" data-testid="confirm-spread">
+            <span className="text-[var(--text-secondary)]">{SPREAD_LABEL}:</span>
+            <span className="text-right font-mono font-medium text-[var(--text)]">
+              {spreadValueText(spreadEstimate)}
             </span>
           </div>
           {createsAccount && (

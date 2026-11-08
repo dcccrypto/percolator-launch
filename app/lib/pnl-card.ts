@@ -13,9 +13,9 @@ import { computePnlPercent } from "@percolatorct/sdk";
 import { computePositionInitialMargin } from "@/lib/trading";
 import { valueAtMark } from "@/lib/position-pnl";
 
-function valueRoe(pnlCollateral: bigint, marginSizeQ: bigint, entryE6: bigint, initialMarginBps: bigint): number {
+function valueRoe(pnlCollateral: bigint, marginSizeQ: bigint, entryE6: bigint, initialMarginBps: bigint, capital = 0n): number {
   try {
-    const margin = computePositionInitialMargin(marginSizeQ, entryE6, initialMarginBps);
+    const margin = capital > 0n ? capital : computePositionInitialMargin(marginSizeQ, entryE6, initialMarginBps);
     const roe = margin > 0n ? computePnlPercent(pnlCollateral, margin) : 0;
     return Number.isFinite(roe) ? roe : 0;
   } catch {
@@ -52,6 +52,11 @@ export interface PnlCardData {
   lotExp?: number;
   /** Initial-margin bps for this market. */
   initialMarginBps: bigint;
+  /**
+   * M7: the position's capital, the ROE denominator (same as the position row: lib/position-pnl.ts valueAtMark). Omitted = the
+   * position's initial margin. Only pass it for a single-position account; with several legs it is shared, not this position's margin.
+   */
+  capital?: bigint;
   /** Mark to use until the live store publishes a tick (keeps the card non-blank). */
   initialMarkE6: bigint;
   /**
@@ -132,7 +137,7 @@ export function computePnlCardStats(data: PnlCardData, markRawE6: bigint): PnlCa
       entryE6: data.entryE6,
       markE6,
       initialMarginBps: data.initialMarginBps,
-      capital: 0n,
+      capital: data.capital ?? 0n,
     });
     const paperCollateral = valued.unrealizedPnl;
     isCapped = isPnlPoolCapped(paperCollateral, data.payableCapacityAtoms);
@@ -146,7 +151,7 @@ export function computePnlCardStats(data: PnlCardData, markRawE6: bigint): PnlCa
     tone = pnlCollateral > 0n ? "profit" : pnlCollateral < 0n ? "loss" : "flat";
     // ROE is on the SHOWN pnl (the payable cap can shrink it), same margin base.
     roePct = isCapped
-      ? valueRoe(pnlCollateral, data.effectiveSizeQ, data.entryE6, data.initialMarginBps)
+      ? valueRoe(pnlCollateral, data.effectiveSizeQ, data.entryE6, data.initialMarginBps, data.capital ?? 0n)
       : valued.roe;
   }
 

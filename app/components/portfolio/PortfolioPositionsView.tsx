@@ -51,9 +51,12 @@ import { invalidatePortfolio } from "@/lib/portfolio-invalidation";
 import { computePositionLeverage, describePositionLeverage, POSITION_LEVERAGE_LABEL } from "@/lib/position-leverage";
 import { formatSignedUsd } from "@/lib/pnl-card";
 import { InfoIcon } from "@/components/ui/Tooltip";
+import { getLastResult, getRealized, pendingTag } from "@/lib/realized-pnl";
 
 
 /** Same mechanics wording as the trade page's withdraw card (settlingProfitMessage). */
+const CLAIM_PENDING_TITLE =
+  "This is released value waiting to be claimed. It is not labelled profit: the app has no finished-trade gain recorded for this market on this device. Convert and withdraw it on this market's Withdraw tab.";
 const SETTLING_PROFIT_TITLE =
   "Your profit becomes withdrawable once the other side of your trade settles, which happens automatically. Convert and withdraw it on this market's Withdraw tab.";
 
@@ -432,6 +435,7 @@ function PositionCard({
                         entryE6: posEntry,
                         lotExp: pos.lotExp ?? 0,
                         initialMarginBps: pos.initialMarginBps,
+                        ...((((pos.account as { activeLegCount?: number | null } | null)?.activeLegCount ?? 1) <= 1 && (pos.account?.capital ?? 0n) > 0n) ? { capital: pos.account?.capital } : {}),
                         initialMarkE6: markE6,
                       } satisfies PnlCardData
                     : null
@@ -667,6 +671,9 @@ export function PortfolioPositionsView() {
   // (and counting deposits in the POSITIONS stat) read as bogus data.
   const openPositions = activePositions.filter((pos) => (pos.account?.positionSize ?? 0n) !== 0n);
   const idleDeposits = activePositions.filter((pos) => (pos.account?.positionSize ?? 0n) === 0n);
+  // M7: "profit settling" only where the recorded result is a gain; a market the user lost on reads "claim pending".
+  const tagOf = (pos: (typeof activePositions)[number]) =>
+    pendingTag(pendingProfit(pos), walletPublicKey ? getLastResult(walletPublicKey.toBase58(), pos.slabAddress) : null);
   // A card holds its open close modal in state, so its key must not move to another
   // position when the list re-sorts (an owned and a wrapped row can share a market).
   const openKeys = positionRowKeys(openPositions);
@@ -699,7 +706,19 @@ export function PortfolioPositionsView() {
     // Realized-but-unconverted profit on flat accounts (the swept-close case).
     // Part of the portfolio's value, NOT of "Total Deposited" — it never was a deposit.
     let pendingProfitUsd = 0;
+    // M7: the measured result of this device's closes (capital + settled pnl deltas, fees and spread included), per market once.
+    let realizedNetUsd = 0;
+    let realizedRecorded = false;
+    const seenSlabs = new Set<string>();
     for (const pos of activePositions) {
+      if (walletPublicKey && !seenSlabs.has(pos.slabAddress)) {
+        seenSlabs.add(pos.slabAddress);
+        const r = getRealized(walletPublicKey.toBase58(), pos.slabAddress);
+        if (r !== null) {
+          realizedRecorded = true;
+          realizedNetUsd += Number(r) / 10 ** getDecimals(pos);
+        }
+      }
       const decimals = getDecimals(pos);
       const divisor = 10 ** decimals;
       const capital = Number(pos.account.capital ?? 0n) / divisor;
@@ -711,13 +730,13 @@ export function PortfolioPositionsView() {
       // capital above (collateral is sim-USDC dollars, no price factor).
       unrealizedPnlUsd += Number(pos.unrealizedPnl) / divisor;
     }
-    return { depositedUsd, pendingProfitUsd, unrealizedPnlUsd, realizedLossUsd, valueUsd: depositedUsd + pendingProfitUsd + unrealizedPnlUsd };
+    return { depositedUsd, pendingProfitUsd, unrealizedPnlUsd, realizedLossUsd, realizedNetUsd, realizedRecorded, valueUsd: depositedUsd + pendingProfitUsd + unrealizedPnlUsd };
   };
   // Don't compute USD totals until token metadata (decimals) has loaded —
   // using the default 6 decimals for a 9-decimal token inflates values 1000x
   const usdTotals = activePositions.length > 0 && !tokenMetasLoading
     ? computeUsdTotals()
-    : { depositedUsd: 0, pendingProfitUsd: 0, unrealizedPnlUsd: 0, realizedLossUsd: 0, valueUsd: 0 };
+    : { depositedUsd: 0, pendingProfitUsd: 0, unrealizedPnlUsd: 0, realizedLossUsd: 0, realizedNetUsd: 0, realizedRecorded: false, valueUsd: 0 };
 
   // PERF PLAN #3: the hero tiles (Portfolio Value / Unrealized PnL) tick
   // LIVE off the shared WS price store, instead of only refreshing on
@@ -869,7 +888,20 @@ export function PortfolioPositionsView() {
             {/* Realized loss is settled straight out of capital on-chain, so it
                 never appears in the unrealized figure above. Surfacing it is
                 what makes a shrinking Portfolio Value explainable. */}
-            {walletConnected && !loading && !tokenMetasLoading && usdTotals.realizedLossUsd > 0 && (
+            {walletConnected && !loading && !tokenMetasLoading && usdTotals.realizedRecorded && (
+              <div className="mt-1.5 flex items-baseline gap-2" data-testid="realized-net">
+                <span
+                  className={`text-xs font-medium ${usdTotals.realizedNetUsd >= 0 ? "text-[var(--long)]" : "text-[var(--short)]"}`}
+                  style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
+                >
+                  {formatSignedUsd(usdTotals.realizedNetUsd)}
+                </span>
+                <span className="text-xs font-medium text-[var(--text-secondary)]">
+                  realized from trades made on this device (trading fees, spread and other non-base fees included; funding and maintenance fees not included). A trade on another device can make this figure wrong.
+                </span>
+              </div>
+            )}
+            {walletConnected && !loading && !tokenMetasLoading && !usdTotals.realizedRecorded && usdTotals.realizedLossUsd > 0 && (
               <div className="mt-1.5 flex items-baseline gap-2">
                 <span
                   className="text-xs font-medium text-[var(--short)]"
@@ -878,7 +910,7 @@ export function PortfolioPositionsView() {
                   -${usdTotals.realizedLossUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
                 <span className="text-xs font-medium text-[var(--text-secondary)]">
-                  realized loss, already deducted from your capital
+                  realized loss taken from your capital (the on-chain counter; it leaves out the spread)
                 </span>
               </div>
             )}
@@ -1029,9 +1061,10 @@ export function PortfolioPositionsView() {
                       </span>
                       <span
                         className="rounded bg-[var(--bg-elevated)] px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)]"
-                        title={pendingProfit(pos) > 0n ? SETTLING_PROFIT_TITLE : undefined}
+                        title={pendingProfit(pos) > 0n ? (tagOf(pos) === "profit settling" ? SETTLING_PROFIT_TITLE : CLAIM_PENDING_TITLE) : undefined}
+                        data-testid="deposit-tag"
                       >
-                        {pendingProfit(pos) > 0n ? "profit settling" : "idle collateral"}
+                        {tagOf(pos)}
                       </span>
                     </div>
                     <div className="flex items-center gap-4">
@@ -1041,8 +1074,8 @@ export function PortfolioPositionsView() {
                           {tokenMetaMap.get(pos.collateralMint.toBase58())?.symbol ?? "USDC"}
                         </span>
                         {pendingProfit(pos) > 0n && (
-                          <>{" "}<span data-testid="pending-profit" className="ml-2 text-[11px] text-[var(--long)]" title={SETTLING_PROFIT_TITLE}>
-                            up to +{formatTokenAmount(pendingProfit(pos), getDecimals(pos), 3)} profit
+                          <>{" "}<span data-testid="pending-profit" className={`ml-2 text-[11px] ${tagOf(pos) === "profit settling" ? "text-[var(--long)]" : "text-[var(--text-secondary)]"}`} title={tagOf(pos) === "profit settling" ? SETTLING_PROFIT_TITLE : CLAIM_PENDING_TITLE}>
+                            {tagOf(pos) === "profit settling" ? "up to +" : "up to "}{formatTokenAmount(pendingProfit(pos), getDecimals(pos), 3)}{tagOf(pos) === "profit settling" ? " profit" : " to claim"}
                           </span></>
                         )}
                       </span>

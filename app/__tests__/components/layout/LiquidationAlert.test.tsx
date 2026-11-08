@@ -28,6 +28,8 @@ vi.mock("next/navigation", () => ({ usePathname: () => h.pathname }));
 // #3726: the close modal reads the market's limits for its close-fee estimate. Not under test here; no limits = the base fee.
 vi.mock("@/hooks/useMarketLimits", () => ({ useMarketLimits: () => null }));
 vi.mock("@/hooks/useWalletCompat", () => ({ useWalletCompat: () => ({ connected: h.connected, publicKey: null }) }));
+// M7: the close dialog reads the matcher quote through this hook; these tests are not about it (tested in ClosePositionForm.spread.test.tsx).
+vi.mock("@/hooks/useSpreadQuoter", () => ({ useSpreadQuoter: () => () => null }));
 vi.mock("@/hooks/usePortfolio", async (io) => ({
   ...(await io<typeof import("@/hooks/usePortfolio")>()),
   usePortfolio: () => ({ positions: h.positions, refresh: vi.fn(), loading: false }),
