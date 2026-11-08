@@ -334,8 +334,8 @@ describe("vote: fail closed without server configuration (full behaviour in vote
     ]);
   });
 
-  it("vote/allocation sources and pages read no env except the two server-only config modules, and no storage", () => {
-    const CONFIG = new Set(["server-config.ts", "vote-admin.ts"]);
+  it("vote/allocation sources and pages read no env except the config modules, and no storage", () => {
+    const CONFIG = new Set(["server-config.ts", "vote-admin.ts", "preview-host.ts"]);
     const files = [
       ...["status", "challenge", "submit", "results", "admin/start"].map((r) => `app/api/vote/${r}/route.ts`),
       ...fs.readdirSync(path.join(ROOT, "lib/allocation-vote")).filter((f) => !CONFIG.has(f)).map((f) => `lib/allocation-vote/${f}`),
@@ -352,6 +352,13 @@ describe("vote: fail closed without server configuration (full behaviour in vote
       expect(src, f).not.toMatch(/process\.env/);
       expect(src, f).not.toMatch(/from ["'](node:)?fs["']|supabase|@upstash|@vercel\/blob|localStorage|sessionStorage|indexedDB|document\.cookie/);
     }
+  });
+
+  it("preview-host.ts reads exactly VERCEL_ENV and ALLOCATION_VOTE_PREVIEW_HOST, nothing else, no storage", () => {
+    const src = fs.readFileSync(path.join(ROOT, "lib/allocation-vote/preview-host.ts"), "utf8");
+    const reads = [...src.matchAll(/process\.env(?:\.([A-Z_]+)|\[)/g)].map((m) => m[1] ?? "<dynamic>");
+    expect([...new Set(reads)].sort()).toEqual(["ALLOCATION_VOTE_PREVIEW_HOST", "VERCEL_ENV"]);
+    expect(src).not.toMatch(/import |require\(|localStorage|document\.cookie/);
   });
 
   it("the allocation surface's only env reads are the three lookup settings plus VOTE_ADMIN_SECRET", () => {

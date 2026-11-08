@@ -203,6 +203,17 @@ headers (`x-forwarded-host` and similar) are never consulted. The existing
 `www.percolator.trade` and `percolatorlaunch.com` 301s to `percolator.trade` are
 unchanged. The env vars above belong on the percolator.trade project only.
 
+**Deployed-preview E2E exception (opt-in, one host).** A Vercel deployment also
+serves these surfaces on one extra host if both of these hold:
+
+- Vercel marks it as a preview (`VERCEL_ENV=preview`, a Vercel system variable);
+- it was given `ALLOCATION_VOTE_PREVIEW_HOST` per deployment (`vercel deploy -e/-b`).
+
+The value must be exactly one single-label `*.vercel.app` hostname. It is
+compared by exact equality, with no wildcard and no port. Production, mainnet
+and ordinary previews are unaffected. Never store this variable in the project
+env. Use it only with an isolated throwaway database.
+
 ## Known limitations
 
 - Client IP comes from the waitlist helper (`cf-connecting-ip`, then `x-real-ip`).

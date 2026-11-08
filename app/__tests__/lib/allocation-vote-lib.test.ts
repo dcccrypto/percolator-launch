@@ -4,7 +4,7 @@
  * exact BigInt allocation math (ported, parameterized: no figures baked in).
  */
 import { describe, it, expect } from "vitest";
-import { isAllocationVoteHost, isAllocationVoteSurface } from "@/lib/allocation-vote/host";
+import { allocationVotePreviewHost, isAllocationVoteHost, isAllocationVoteSurface } from "@/lib/allocation-vote/host";
 import { validateOwner } from "@/lib/allocation-vote/owner";
 import { roundRational, allocateAll } from "@/lib/allocation-vote/math";
 
@@ -19,6 +19,54 @@ describe("isAllocationVoteHost: exact percolator.trade only", () => {
     "percolator.trade:443:1", " percolator.trade", "percolator.trade ", "percolator.trade,evil.com", "user@percolator.trade",
   ])("rejects %j", (h) => {
     expect(isAllocationVoteHost(h as string)).toBe(false);
+  });
+});
+
+describe("preview-only exact host allowance (deployed-preview E2E)", () => {
+  const P = "perc-vote-e2e-1108.vercel.app";
+  const on = { VERCEL_ENV: "preview", ALLOCATION_VOTE_PREVIEW_HOST: P };
+
+  it("accepts exactly the configured host on a Vercel preview", () => {
+    expect(allocationVotePreviewHost(on)).toBe(P);
+    expect(isAllocationVoteHost(P, on)).toBe(true);
+    expect(isAllocationVoteHost("percolator.trade", on)).toBe(true);
+  });
+
+  it.each([
+    { VERCEL_ENV: "production", ALLOCATION_VOTE_PREVIEW_HOST: P },
+    { VERCEL_ENV: "development", ALLOCATION_VOTE_PREVIEW_HOST: P },
+    { VERCEL_ENV: "Preview", ALLOCATION_VOTE_PREVIEW_HOST: P },
+    { VERCEL_ENV: " preview", ALLOCATION_VOTE_PREVIEW_HOST: P },
+    { ALLOCATION_VOTE_PREVIEW_HOST: P },
+    { VERCEL_ENV: "preview" },
+    {},
+  ])("never honoured outside VERCEL_ENV=preview with an explicit host: %j", (env) => {
+    expect(allocationVotePreviewHost(env)).toBeNull();
+    expect(isAllocationVoteHost(P, env)).toBe(false);
+  });
+
+  it.each([
+    "", "*.vercel.app", ".vercel.app", "vercel.app", "a.b.vercel.app", "x.vercel.app.evil.com", "x.vercel.app.",
+    "x.vercel.app:443", "X.vercel.app", "-x.vercel.app", "x-.vercel.app", " x.vercel.app", "x.vercel.app ",
+    "percolator.trade", "mainnet.percolatorlaunch.com", "localhost", "127.0.0.1", "x.vercel.app,y.vercel.app",
+    "x.vercel.app/evil", "user@x.vercel.app", `${"a".repeat(64)}.vercel.app`,
+  ])("rejects malformed or non-preview configured value %j", (v) => {
+    expect(allocationVotePreviewHost({ VERCEL_ENV: "preview", ALLOCATION_VOTE_PREVIEW_HOST: v })).toBeNull();
+  });
+
+  it.each([
+    "other.vercel.app", "PERC-VOTE-E2E-1108.vercel.app", `${P}:443`, `${P}.`, ` ${P}`, `${P} `, `x${P}`, `${P}.evil.com`,
+    `evil.${P}`, "percolator-launch.vercel.app", "mainnet.percolatorlaunch.com", "localhost", "", null, undefined,
+  ])("only the exact configured host matches, not %j", (h) => {
+    expect(isAllocationVoteHost(h as string, on)).toBe(false);
+  });
+
+  it("an unset or malformed value leaves the production-only lock exactly as before", () => {
+    for (const env of [{}, { VERCEL_ENV: "preview", ALLOCATION_VOTE_PREVIEW_HOST: "*.vercel.app" }]) {
+      expect(isAllocationVoteHost("percolator.trade", env)).toBe(true);
+      expect(isAllocationVoteHost("percolator-launch-git-x-team.vercel.app", env)).toBe(false);
+      expect(isAllocationVoteHost("mainnet.percolatorlaunch.com", env)).toBe(false);
+    }
   });
 });
 
