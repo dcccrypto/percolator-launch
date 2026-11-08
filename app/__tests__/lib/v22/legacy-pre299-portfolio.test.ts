@@ -30,6 +30,9 @@ import {
 } from "@/lib/v22/layout";
 import { isPortfolioAccount } from "@/lib/portfolio-account";
 import { loadOwnPortfolios } from "@/lib/limits/own-portfolio-cleanup";
+import { decodeResolvedPortfolio } from "@/lib/limits/decode";
+import { rawStateRefusal } from "@/lib/close-trading-account";
+import { needsMultiAssetShape } from "@/lib/v22/trade-refresh";
 import { liftV22Portfolio } from "../../helpers/portfolio-disc20";
 
 const fx = (n: string): { owner: string; data: Uint8Array } => {
@@ -104,6 +107,44 @@ describe("old wrapper 6kpg2wi7: its pre-#299 portfolios are read with the pre-#2
     const b = make();
     expect(() => parsePortfolio(b)).toThrow();
     expect(isPortfolioOfActiveLayout(b)).toBe(false);
+  });
+
+  it("the pre-#299 trailer and receipt offsets are the real ones (identity at len-24/-16; receipt where the close ledger ends)", () => {
+    const dv = new DataView(LEGACY.data.buffer, LEGACY.data.byteOffset, LEGACY.data.byteLength);
+    const p = parsePortfolio(LEGACY.data);
+    expect(p.portfolioId).toBe(dv.getBigUint64(10_603 - 24, true));
+    expect(p.matcherSequence).toBe(dv.getBigUint64(10_603 - 16, true));
+    // rawStateRefusal checks close-progress end (sourceDomains + 121 + 4 + 184) === the row's receipt offset: a wrong
+    // receiptOff in the pre-#299 row reads as "unreadable".
+    expect(rawStateRefusal(LEGACY.data)).not.toBe("unreadable");
+    // Receipt flags at receiptOff + 64 / + 65 are read from the right bytes.
+    const b = LEGACY.data.slice();
+    b[10_409 + 64] = 1;
+    b[10_409 + 65] = 1;
+    expect(decodeResolvedPortfolio(b)).toMatchObject({ receiptPresent: true, receiptFinalized: true });
+  });
+
+  it("decodeResolvedPortfolio refuses a malformed pre-#299 portfolio (full guard, not VERSION only)", () => {
+    const padded = new Uint8Array(10_607);
+    padded.set(LEGACY.data);
+    expect(decodeResolvedPortfolio(padded)).toBeNull();
+    const disc18 = LEGACY.data.slice();
+    new DataView(disc18.buffer).setUint16(114, 18, true);
+    expect(decodeResolvedPortfolio(disc18)).toBeNull();
+    expect(decodeResolvedPortfolio(LEGACY.data)).not.toBeNull();
+  });
+
+  it("trade-refresh counts a legacy portfolio's legs with the wrapper-bound parser (3 legs on a 2-slot market => Q-7 shape)", () => {
+    // Legs at 356 + i*217, active flag at +0 (pre-#299 = variant B leg geometry). Mark 3 legs active.
+    const taker = LEGACY.data.slice();
+    for (let i = 0; i < 3; i++) taker[356 + i * 217] = 1;
+    expect(parsePortfolio(taker).legs.filter((l) => l.active).length).toBe(3);
+    // The recorded market with its configured slot count set to 2 (group @592, config +32, maxMarketSlotsInConfig +2).
+    const mj = JSON.parse(readFileSync(path.join(__dirname, "../../fixtures/v22-growth/chillhouse-t.market.json"), "utf8")) as { data: string };
+    const market = new Uint8Array(Buffer.from(mj.data, "base64"));
+    new DataView(market.buffer).setUint32(592 + 32 + 2, 2, true);
+    // Before the fix activeLegs threw DISCRIMINATOR_MISMATCH -> 0 legs -> false (the simple shape, refused on chain).
+    expect(needsMultiAssetShape({ marketData: market, takerData: taker, lpData: null })).toBe(true);
   });
 
   it("loadOwnPortfolios lists the holder's legacy portfolio (R2-1: the holder is no longer told 'nothing of yours')", async () => {
