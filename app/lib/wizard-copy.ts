@@ -45,3 +45,23 @@ export const CREATOR_STAKE_COPY = {
   issueMin: (min: string, floor: string) => `Your creator stake must be at least ${min} USDC for a ${floor}% minimum.`,
   issueEmpty: "Enter a creator stake.",
 } as const;
+
+/**
+ * Pre-flight "what you're committing / how this market ends" (council M12). Every line is derived from code or the lifecycle
+ * plan (ledger v22-market-lifecycle-plan-2026-10-25, decided option C), nothing invented:
+ *  - first-loss: CREATOR_STAKE_COPY.explain and V22_COPY.earnPage.insuranceOrder (creator stake, then Earn, then insurance);
+ *  - withdraw: CREATOR_STAKE_COPY.floorHint (anything above the floor while no trades are open);
+ *  - rent: StepControlRoom's rent note (marketauth rotates to a keyless PDA, FC-B5: no refund on Earn markets);
+ *  - ending: ConfigurePermissionlessResolve 18,000 / 216,000 slots on every wizard launch (launch-single-tx/shape.ts),
+ *    tag 39 settles at the last good price for anyone, tag 30 owner-only during the delay then permissionless.
+ * "Not yet decided" lines are facts the ledger leaves open; they are stated, not guessed.
+ */
+export const CREATOR_END_COPY = {
+  title: "What you're committing / how this market ends",
+  firstLoss: "Your creator stake is first-loss: trader profits are paid from it before Earn depositors are affected, and the insurance fund only steps in after both are used up. You can lose all of it.",
+  withdraw: "While the market runs you can withdraw anything above your minimum while no trades are open. The minimum stays in until the market ends.",
+  rent: "Rent is permanent: it is not returned when the market ends.",
+  ends: "If the price feed stops for about 2 hours, anyone can settle the market at its last good price. For about 24 hours after that only each position's owner can close it; then anyone can settle a position to its owner.",
+  positions: "Open positions are settled at that price and traders are paid first. Your stake and Earn seed come back after that, minus any losses; nothing is guaranteed.",
+  undecided: "Not yet decided: whether you can end your own market early, and whether any launch costs are refunded.",
+} as const;
