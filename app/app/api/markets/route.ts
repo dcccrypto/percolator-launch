@@ -90,6 +90,7 @@ const MAINNET_MARKET_DIRECTORY_FALLBACK: Record<string, unknown>[] = [
     vault_balance: 70_000_000,
     created_at: "2026-05-04T00:32:02.380Z",
     stats_updated_at: null,
+    stats_collected: false, // static row: volume / trades are placeholders
     oracle_mode: "admin",
     dex_pool_address: "3ucNos4NbumPLZNWztqGHNFFgkHeRMBQAVemeeomsUxv",
     mainnet_ca: "So11111111111111111111111111111111111111112",
@@ -112,6 +113,8 @@ const DEVNET_ROW_TEMPLATE: Record<string, unknown> = {
   oracle_mode: "hyperp",
   created_at: null,
   stats_updated_at: null,
+  // Static rows: volume_24h / trade_count_24h are placeholders, not a quiet day (Earn reads "—").
+  stats_collected: false,
   is_zombie: false,
   last_price: null,
   mark_price: null,

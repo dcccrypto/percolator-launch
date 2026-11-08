@@ -43,8 +43,15 @@ export interface MarketVaultInfo {
   maxOI: number;
   /** Insurance fund balance (collateral atoms); null when no stats row carries it (not $0). */
   insuranceFund: number | null;
-  /** 24h volume in USD */
+  /** 24h volume in USD (0 when unknown: see volumeKnown) */
   volume24h: number;
+  /**
+   * False when no indexer reported this market's volume, so the 0 above is a placeholder, not a quiet day: no row, a
+   * no-indexer row from /api/markets (stats_collected: false: on-chain discovery / static fallback), or a Supabase
+   * registry-only row with no market_stats (volume_24h and trade_count_24h null). Any real trades / volume count as
+   * known. Council 2026-11-07: the v2.2 fresh set has no indexer. See rowVolumeKnown.
+   */
+  volumeKnown?: boolean;
   /** Trading fee bps */
   tradingFeeBps: number;
   /** Max leverage */
@@ -93,8 +100,8 @@ export interface EarnStats {
   totalInsurance: number | null;
   /** Per-market vault breakdown */
   markets: MarketVaultInfo[];
-  /** Total 24h fee revenue estimate (USD) */
-  dailyFeeRevenue: number;
+  /** Total 24h fee revenue estimate (USD) over the markets whose volume is known; null when none is (not $0). */
+  dailyFeeRevenue: number | null;
   /** Symbols of the vaults left out of `tvl` because their value can't be determined. */
   unvaluedSymbols: string[];
 }
@@ -106,7 +113,7 @@ const DEFAULT_STATS: EarnStats = {
   oiUtilPct: 0,
   totalInsurance: null,
   markets: [],
-  dailyFeeRevenue: 0,
+  dailyFeeRevenue: null,
   unvaluedSymbols: [],
 };
 
@@ -574,6 +581,22 @@ async function fetchOnChainMaxLeverage(
 }
 
 /**
+ * Whether a /api/markets row's 24h volume (in USD, `volume24h`) is a real figure (see MarketVaultInfo.volumeKnown).
+ * - a positive USD volume is known;
+ * - trades or raw volume reported but no USD value (no usable price, a sentinel) is unknown: the 0 would understate it;
+ * - stats_collected === false (no-indexer discovery / static rows) is unknown;
+ * - otherwise (Supabase markets_with_stats) a reported number, including 0, is known; null volume AND null trades
+ *   (registry-only market, no market_stats row) is unknown.
+ */
+export function rowVolumeKnown(row: Record<string, unknown> | undefined, volume24h: number): boolean {
+  if (row == null) return false;
+  if (volume24h > 0) return true;
+  if (Number(row.trade_count_24h ?? 0) > 0 || Number(row.volume_24h ?? 0) > 0) return false;
+  if (row.stats_collected === false) return false;
+  return row.volume_24h != null || row.trade_count_24h != null;
+}
+
+/**
  * Build a single market's MarketVaultInfo from its on-chain vault data + optional
  * Supabase cosmetic row. Shared by both the curated (PLAYGROUND_SLAB_META) markets
  * and the registered (user-launched) markets below.
@@ -634,6 +657,7 @@ export function buildMarketVaultInfo(
   const volume24h = isSentinel(volume24hRaw)
     ? 0
     : (rowVolumeUsd(row as { volume_24h?: number | null; volume_24h_usd?: number | null; last_price?: number | null } | undefined) ?? 0);
+  const volumeKnown = rowVolumeKnown(row, volume24h);
 
   // No stats row (a registered-only market) or no readable value is unknown, not an empty fund.
   const insuranceRaw = row?.insurance_fund == null ? NaN : Number(row.insurance_fund);
@@ -659,6 +683,7 @@ export function buildMarketVaultInfo(
     maxOI,
     insuranceFund,
     volume24h,
+    volumeKnown,
     tradingFeeBps,
     maxLeverage,
     oiUtilPct,
@@ -765,10 +790,11 @@ export function computeAggregates(markets: MarketVaultInfo[]): Omit<EarnStats, '
     ? insured.reduce((s, m) => s + (m.insuranceFund as number) / (10 ** m.decimals), 0)
     : null;
   const unvaluedSymbols = markets.filter((m) => m.unvalued).map((m) => m.symbol);
-  const dailyFeeRevenue = markets.reduce(
-    (s, m) => s + (m.volume24h * m.tradingFeeBps) / 10_000,
-    0,
-  );
+  // undefined (fixtures, mock data) counts as known; only an explicit false is a placeholder 0.
+  const volumeKnown = markets.filter((m) => m.volumeKnown !== false);
+  const dailyFeeRevenue = volumeKnown.length > 0
+    ? volumeKnown.reduce((s, m) => s + (m.volume24h * m.tradingFeeBps) / 10_000, 0)
+    : null;
   return {
     unvaluedSymbols,
     tvl,

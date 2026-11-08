@@ -112,7 +112,8 @@ function computeMaxLeverage(initialMarginBps: bigint | null | undefined): number
  *   lives in the embedded V16ConfigAccount region, which the raw-bytes parse
  *   in discoverMarketsOnChain() supplies here.
  */
-function discoveredToApiRow(
+/** @internal exported for tests (both row branches carry the no-indexer marker). */
+export function discoveredToApiRow(
   m: DiscoveredMarket,
   v17Oi?: V17MarketGroupOI,
   registered?: RegisteredMarket,
@@ -161,6 +162,8 @@ function discoveredToApiRow(
       max_leverage: computeMaxLeverage(riskParams?.initialMarginBps),
       created_at: null,
       stats_updated_at: null,
+      // No indexer on this path: volume_24h / trade_count_24h below are placeholders, not a quiet day (Earn reads "—").
+      stats_collected: false,
       is_zombie: false,
       // Completeness signal for the on-chain-discovery path (the Supabase path
       // gets this from loadMergedMarketRows). A market that died mid-creation
@@ -219,6 +222,7 @@ function discoveredToApiRow(
     max_leverage: computeMaxLeverage(m.params?.initialMarginBps),
     created_at: null,
     stats_updated_at: null,
+    stats_collected: false, // no indexer on this path: volume / trades below are placeholders
     is_zombie: false,
     last_price: null,
     mark_price: null,
