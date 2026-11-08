@@ -13,7 +13,7 @@ import type { CheckRow } from "./check-result";
 
 const SQL =
   "select outcome, retry_after_seconds, eligible, balance_raw, token_decimals, " +
-  "allocation_usd_cents::text as allocation_usd_cents, exclusion_reasons, snapshot_label, allocation_status " +
+  "allocation_usd_cents::text as allocation_usd_cents, exclusion_reasons, snapshot_label, allocation_status, balance_basis " +
   "from perc_alloc.check_allocation($1::text, $2::bytea)";
 
 let pool: Pool | null = null;

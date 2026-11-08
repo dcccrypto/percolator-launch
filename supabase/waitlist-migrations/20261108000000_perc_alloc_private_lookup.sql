@@ -1,9 +1,10 @@
 -- PERC allocation checker: private holder table + single-owner lookup + durable rate limit.
 --
--- !! APPLY TO THE WAITLIST SUPABASE PROJECT ONLY (the one behind percolator.trade).
--- !! NOT APPLIED BY THIS CHANGE. Applying it, setting the runtime role's password,
--- !! importing the snapshot and adding the two server-only env vars are external
--- !! changes that need explicit owner approval first (see docs/ALLOCATION-VOTE.md).
+-- Target: the dedicated, private allocation-checker Postgres database (Neon project
+-- `percolator-allocation-checker`), applied by its owner/import role. Plain Postgres; it
+-- also runs on Supabase (anon/authenticated/service_role are revoked when present).
+-- Setting the runtime role's password, importing the snapshot and adding the two
+-- server-only env vars are operator steps outside git (see docs/ALLOCATION-VOTE.md).
 --
 -- Design
 --   * Schema `perc_alloc` is NOT a PostgREST-exposed schema and grants nothing to
@@ -21,7 +22,11 @@
 --     sha256(scope || key). Limits are constants here, not caller-supplied.
 --   * Balances are exact base units (numeric(20,0), u64 range). Allocations are
 --     integer USD cents. Excluded owners carry their known reason codes.
---   * Snapshots are never deleted; a new import supersedes the active one.
+--   * Snapshots are never deleted; a new import supersedes the active one inside one
+--     transaction (versioned rows + a single active pointer), so a lookup sees either
+--     the old snapshot or the new one, never a mix or a partial import.
+--   * balance_basis is 'snapshot' for ordinary rows and 'exception' for an eligible
+--     owner counted under an approved balance exception (provenance in snapshot).
 --
 -- Idempotent: safe to run more than once. Does not touch any existing table.
 
@@ -73,11 +78,18 @@ create table if not exists perc_alloc.snapshot (
   manifest_sha256        text not null check (manifest_sha256 ~ '^[0-9a-f]{64}$'),
   team_exclusion_basis   text not null check (char_length(team_exclusion_basis) between 1 and 500),
   team_exclusion_verified boolean not null,
+  exception_owners       integer not null default 0 check (exception_owners >= 0),
+  exception_basis        text check (exception_basis is null or char_length(exception_basis) between 1 and 4000),
+  exception_files_sha256 text[] not null default '{}'
+                         check (array_position(exception_files_sha256, null) is null),
+  base_manifest_sha256   text check (base_manifest_sha256 is null or base_manifest_sha256 ~ '^[0-9a-f]{64}$'),
   imported_at            timestamptz not null default now(),
   activated_at           timestamptz,
   superseded_at          timestamptz,
   is_active              boolean not null default false,
-  check (floor_usd_cents * 100 = full_raise_usd_cents * floor_percent)
+  check (floor_usd_cents * 100 = full_raise_usd_cents * floor_percent),
+  check ((exception_owners = 0) = (exception_basis is null)),
+  check (cardinality(exception_files_sha256) = exception_owners)
 );
 create unique index if not exists snapshot_one_active on perc_alloc.snapshot ((true)) where is_active;
 
@@ -91,11 +103,13 @@ create table if not exists perc_alloc.holder (
                        check (exclusion_reasons <@ array['off-curve', 'LP', 'burn']::text[]
                               and array_position(exclusion_reasons, null) is null
                               and cardinality(exclusion_reasons) <= 3),
+  balance_basis        text not null default 'snapshot' check (balance_basis in ('snapshot', 'exception')),
   primary key (snapshot_id, owner),
   check (
     (eligible and cardinality(exclusion_reasons) = 0)
     or (not eligible and cardinality(exclusion_reasons) > 0 and allocation_usd_cents = 0)
-  )
+  ),
+  check (balance_basis = 'snapshot' or eligible)
 );
 
 create table if not exists perc_alloc.rate_limit (
@@ -170,7 +184,8 @@ returns table (
   allocation_usd_cents bigint,
   exclusion_reasons    text[],
   snapshot_label       text,
-  allocation_status    text
+  allocation_status    text,
+  balance_basis        text
 )
 language plpgsql
 volatile
@@ -190,7 +205,7 @@ begin
   if p_owner is null or p_client_key is null or octet_length(p_client_key) <> 32
      or char_length(p_owner) not between 32 and 44
      or p_owner !~ '^[1-9A-HJ-NP-Za-km-z]{32,44}$' then
-    return query select 'invalid'::text, 0, null::boolean, null::text, null::smallint, null::bigint, null::text[], null::text, null::text;
+    return query select 'invalid'::text, 0, null::boolean, null::text, null::smallint, null::bigint, null::text[], null::text, null::text, null::text;
     return;
   end if;
 
@@ -206,19 +221,19 @@ begin
     v_retry := perc_alloc._hit(sha256('perc_alloc:global:60'::bytea), 60, c_global_min_max, v_now);
   end if;
   if v_retry > 0 then
-    return query select 'rate_limited'::text, v_retry, null::boolean, null::text, null::smallint, null::bigint, null::text[], null::text, null::text;
+    return query select 'rate_limited'::text, v_retry, null::boolean, null::text, null::smallint, null::bigint, null::text[], null::text, null::text, null::text;
     return;
   end if;
 
   select * into v_snap from perc_alloc.snapshot s where s.is_active;
   if not found then
-    return query select 'unavailable'::text, 0, null::boolean, null::text, null::smallint, null::bigint, null::text[], null::text, null::text;
+    return query select 'unavailable'::text, 0, null::boolean, null::text, null::smallint, null::bigint, null::text[], null::text, null::text, null::text;
     return;
   end if;
 
   select * into v_h from perc_alloc.holder h where h.snapshot_id = v_snap.id and h.owner = p_owner;
   if not found then
-    return query select 'not_found'::text, 0, null::boolean, null::text, null::smallint, null::bigint, null::text[], v_snap.label, v_snap.allocation_status;
+    return query select 'not_found'::text, 0, null::boolean, null::text, null::smallint, null::bigint, null::text[], v_snap.label, v_snap.allocation_status, null::text;
     return;
   end if;
 
@@ -231,7 +246,8 @@ begin
     case when v_h.eligible then v_h.allocation_usd_cents else null end,
     v_h.exclusion_reasons,
     v_snap.label,
-    v_snap.allocation_status;
+    v_snap.allocation_status,
+    v_h.balance_basis;
 end
 $$;
 alter function perc_alloc.check_allocation(text, bytea) owner to perc_alloc_definer;

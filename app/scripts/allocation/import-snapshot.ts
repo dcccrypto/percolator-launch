@@ -3,7 +3,11 @@
  *
  *   npx tsx app/scripts/allocation/import-snapshot.ts \
  *     --eligible <eligible.csv> --manifest <manifest.json> --all-holders <all-holders.csv> \
- *     --snapshot-date YYYY-MM-DD --snapshot-slot <slot> --token-decimals <n> [--apply]
+ *     --snapshot-date YYYY-MM-DD --snapshot-slot <slot> --token-decimals <n> \
+ *     [--base-manifest <v1 manifest.json> --exception <exception.json> ...] [--apply]
+ *
+ * A derived (v2) manifest, which adds approved balance-exception owners to a v1
+ * export, needs its v1 base manifest and every exception file (repeat --exception).
  *
  * Default is validate-only: prints counts and hashes (never an address) and
  * exits. --apply writes one snapshot atomically to the database whose URL is in
@@ -28,6 +32,18 @@ function arg(argv: string[], name: string): string | undefined {
   return i >= 0 ? argv[i + 1] : undefined;
 }
 
+function all(argv: string[], name: string): string[] {
+  const out: string[] = [];
+  argv.forEach((a, i) => {
+    if (a === name) {
+      const v = argv[i + 1];
+      if (!v || v.startsWith("--")) throw new ImportError("USAGE", `missing value for ${name}`);
+      out.push(v);
+    }
+  });
+  return out;
+}
+
 function need(argv: string[], name: string): string {
   const v = arg(argv, name);
   if (!v || v.startsWith("--")) throw new ImportError("USAGE", `missing ${name}`);
@@ -50,6 +66,8 @@ export async function main(argv: string[]): Promise<number> {
     snapshotDate: need(argv, "--snapshot-date"),
     snapshotSlot: BigInt(need(argv, "--snapshot-slot")),
     tokenDecimals: Number(need(argv, "--token-decimals")),
+    baseManifest: arg(argv, "--base-manifest") !== undefined ? readPrivate(need(argv, "--base-manifest")) : undefined,
+    exceptions: all(argv, "--exception").map(readPrivate),
   };
   const v = validateSnapshot(input);
   console.log(JSON.stringify({ validated: true, ...summarize(v) }, null, 2));
@@ -80,7 +98,7 @@ export async function main(argv: string[]): Promise<number> {
   await client.connect();
   try {
     const r = await applySnapshot(client, v);
-    console.log(JSON.stringify({ applied: true, snapshot_id: r.snapshotId, superseded_snapshot_ids: r.superseded }));
+    console.log(JSON.stringify({ applied: !r.unchanged, unchanged: r.unchanged, snapshot_id: r.snapshotId, superseded_snapshot_ids: r.superseded }));
   } finally {
     await client.end();
   }

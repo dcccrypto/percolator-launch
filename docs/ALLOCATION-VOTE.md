@@ -28,19 +28,26 @@ page renders only static copy; the form posts one wallet and renders one answer.
 Nothing is cached (`Cache-Control: no-store`, no result cache, no shared state
 between requests beyond pooled connections). The wallet is not logged.
 
-### Database (waitlist Supabase project, private schema)
+### Database (dedicated private Postgres: Neon project `percolator-allocation-checker`)
 
 Migration: `supabase/waitlist-migrations/20261108000000_perc_alloc_private_lookup.sql`.
 
-- Schema `perc_alloc` (not a PostgREST-exposed schema; nothing granted to
-  `anon`, `authenticated` or `service_role`).
+- A dedicated database, separate from the waitlist Supabase project (which is
+  untouched). The SQL is plain Postgres; on Supabase it would also revoke
+  `anon`, `authenticated` and `service_role`.
+- Schema `perc_alloc`: nothing granted to PUBLIC.
 - `perc_alloc.snapshot`: label, date, slot, token decimals, floor/raise in cents,
   counts, source hashes, team-exclusion provenance, active/superseded timestamps.
   One active snapshot; older ones are kept as superseded, never deleted.
+  Approved balance exceptions: count, private provenance text, exception-file
+  hashes and the base manifest hash.
 - `perc_alloc.holder`: one row per owner per snapshot. `balance_raw numeric(20,0)`
   (exact base units, u64 range), `allocation_usd_cents bigint`, `eligible`,
   `exclusion_reasons` (only `off-curve`, `LP`, `burn`). Constraints make an
   excluded row with an allocation, or an eligible row with a reason, impossible.
+  `balance_basis` is `snapshot`, or `exception` for an eligible owner counted
+  under an approved balance exception (shown as "Counted balance (approved
+  exception)"; no other label is ever public).
 - `perc_alloc.rate_limit`: `bucket bytea(32)`, window, hits, expiry. No IP, no owner.
 - `perc_alloc.check_allocation(owner text, client_key bytea)`: the only runtime
   entry point. SECURITY DEFINER, owned by the NOLOGIN role `perc_alloc_definer`
@@ -61,17 +68,16 @@ cost the same as known ones.
 
 | Env var | Purpose |
 |---|---|
-| `ALLOCATION_DATABASE_URL` | Postgres URL for `perc_alloc_reader` (Supavisor user form `perc_alloc_reader.<project-ref>` accepted). Non-loopback hosts always use verified TLS; URL `ssl*` parameters are ignored. |
+| `ALLOCATION_DATABASE_URL` | Postgres URL for `perc_alloc_reader` (Neon pooled host recommended; Supavisor user form `perc_alloc_reader.<project-ref>` also accepted). Non-loopback hosts always use verified TLS; URL `ssl*` parameters are ignored. |
 | `ALLOCATION_RATE_LIMIT_SECRET` | 32+ random characters. |
 | `ALLOCATION_DATABASE_CA_PEM` | Optional CA certificate for TLS verification. |
 
 Without a valid URL and secret the checker answers 503 unavailable. None of
 these are `NEXT_PUBLIC_*`.
 
-### Operator procedure (each step needs owner approval; none is done by this change)
+### Operator procedure (owner-approved; done outside git, secrets never committed)
 
-1. Apply the migration to the waitlist project (SQL editor or psql as `postgres`).
-   Confirm `perc_alloc` is not in Settings, API, Exposed schemas.
+1. Apply the migration to the dedicated database as its owner/import role.
 2. Out of band: `alter role perc_alloc_reader login password '<generated>';`
 3. Import the snapshot from the private files (kept outside the repository):
 
@@ -81,6 +87,21 @@ these are `NEXT_PUBLIC_*`.
      --snapshot-date YYYY-MM-DD --snapshot-slot <slot> --token-decimals <n>          # validate only
    ALLOCATION_IMPORT_DATABASE_URL=... npx tsx app/scripts/allocation/import-snapshot.ts ... --apply --allow-remote
    ```
+
+   A derived (v2) export that adds approved balance-exception owners needs
+   `--base-manifest <v1 manifest.json>` and one `--exception <file.json>` per
+   added owner. The importer then also checks: the derived manifest names the
+   base export by hash, the floor/terms/rounding/slot agree, the declared owner
+   counts and raw totals match, each exception owner is canonical, present in
+   the export at exactly its exception balance and not already ordinarily
+   eligible (an exception supersedes an earlier exclusion), and the all-holder
+   file's balances for every other owner. All v1 checks still run.
+
+   Re-runnable: each `--apply` inserts a new versioned snapshot, verifies it
+   (row count, unique owners, eligible and exception counts, exact cents and raw
+   totals) in the same transaction and only then moves the single active
+   pointer. A failure leaves the previous snapshot active; re-applying the
+   inputs that are already active is a no-op.
 
    The importer checks the eligible file's hash against the manifest, every row
    and owner, the exact floor arithmetic, re-derives every allocation with exact
@@ -97,14 +118,16 @@ Remote imports always use verified TLS.
 
 ### Deployment prerequisites (from the independent review)
 
-- **Cloudflare-only origin.** Per-client limits key on `cf-connecting-ip`. Make
-  sure the Vercel origin for percolator.trade only accepts Cloudflare traffic
-  (authenticated origin pulls or a firewall rule on Cloudflare IP ranges);
-  otherwise a client can forge that header to rotate keys and use up the global cap.
-- **TLS CA.** Supabase database/pooler certificates usually need the project CA:
+- **Client IP.** percolator.trade is served by Vercel directly (not through the
+  Cloudflare proxy), so per-client limits key only on the Vercel-set
+  `x-real-ip` / `x-vercel-forwarded-for`; client-settable `cf-connecting-ip` and
+  `x-forwarded-for` are ignored. Putting a proxy in front would make clients
+  share the proxy's buckets (more limiting, not less).
+- **TLS CA.** Neon certificates chain to a public CA (no PEM needed). Supabase
+  database/pooler certificates usually need the project CA:
   set `ALLOCATION_DATABASE_CA_PEM`, or every lookup fails closed as unavailable.
 - **Connection budget.** The reader role allows 30 connections; each warm
-  serverless instance holds up to 3. Prefer the Supavisor transaction pooler URL.
+  serverless instance holds up to 3. Prefer the provider's pooled URL.
 
 ## Vote: disabled
 

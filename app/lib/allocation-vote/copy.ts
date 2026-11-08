@@ -11,6 +11,8 @@ export const ALLOCATION_COPY = {
   ],
   instructions: "Paste one Solana wallet address. Only that wallet is looked up.",
   provisionalNote: "Provisional until the raise.",
+  /** Shown instead of "Snapshot balance" for an owner counted under an approved balance exception. */
+  exceptionBalanceLabel: "Counted balance (approved exception)",
 } as const;
 
 /** Labels for the known exclusion reason codes stored with the snapshot. */

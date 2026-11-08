@@ -130,6 +130,19 @@ describe("rate-limit identity", () => {
     expect(prod({ "x-forwarded-for": "198.51.100.1" })).toBe("unknown");
     expect(prod({})).toBe("unknown");
   });
+  it("client-settable cf-connecting-ip / x-forwarded-for never change the identity (origin is not behind Cloudflare)", () => {
+    const real = prod({ "x-real-ip": "203.0.113.5" });
+    for (let i = 0; i < 5; i++) {
+      expect(prod({ "x-real-ip": "203.0.113.5", "cf-connecting-ip": `198.51.100.${i}`, "x-forwarded-for": `192.0.2.${i}` })).toBe(real);
+    }
+    expect(prod({ "cf-connecting-ip": "198.51.100.1" })).toBe("unknown");
+    expect(real).toBe("203.0.113.5");
+  });
+  it("falls back to the first x-vercel-forwarded-for entry; garbage is 'unknown'", () => {
+    expect(prod({ "x-vercel-forwarded-for": "203.0.113.9, 10.0.0.1" })).toBe("203.0.113.9");
+    expect(prod({ "x-real-ip": "not-an-ip" })).toBe("unknown");
+    expect(prod({ "x-real-ip": "203.0.113.5:443" })).toBe("203.0.113.5");
+  });
   it("key is a 32-byte HMAC that depends on the secret", () => {
     const h = new Headers({ "x-real-ip": "203.0.113.5" });
     const a = clientKey(h, "a".repeat(32));

@@ -68,6 +68,7 @@ const row = (o: Record<string, unknown>) => ({
   exclusion_reasons: null,
   snapshot_label: "7 Nov 2026",
   allocation_status: "provisional",
+  balance_basis: null,
   ...o,
 });
 
@@ -172,13 +173,14 @@ describe("allocation: one wallet's result only", () => {
   beforeEach(configure);
 
   it("eligible: exact balance and provisional allocation, nothing else", async () => {
-    lookup.mockResolvedValue(row({ outcome: "eligible", eligible: true, balance_raw: "1234567890123", token_decimals: 6, allocation_usd_cents: "12345", exclusion_reasons: [] }));
+    lookup.mockResolvedValue(row({ outcome: "eligible", eligible: true, balance_raw: "1234567890123", token_decimals: 6, allocation_usd_cents: "12345", exclusion_reasons: [], balance_basis: "snapshot" }));
     const res = await allocationCheck(post("/api/allocation/check", { wallet: VALID_SYNTAX }));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       status: "eligible",
       snapshot: "7 Nov 2026",
       snapshot_balance: "1234567.890123",
+      balance_basis: "snapshot",
       provisional_allocation_usd: "123.45",
       allocation_status: "provisional",
     });
@@ -190,7 +192,7 @@ describe("allocation: one wallet's result only", () => {
   });
 
   it("excluded: known reasons, balance, no allocation figure", async () => {
-    lookup.mockResolvedValue(row({ outcome: "excluded", eligible: false, balance_raw: "5", token_decimals: 6, exclusion_reasons: ["off-curve", "LP"] }));
+    lookup.mockResolvedValue(row({ outcome: "excluded", eligible: false, balance_raw: "5", token_decimals: 6, exclusion_reasons: ["off-curve", "LP"], balance_basis: "snapshot" }));
     const body = await (await allocationCheck(post("/api/allocation/check", { wallet: VALID_SYNTAX }))).json();
     expect(body).toEqual({
       status: "excluded",
@@ -202,6 +204,22 @@ describe("allocation: one wallet's result only", () => {
       ],
     });
     expect(body).not.toHaveProperty("provisional_allocation_usd");
+  });
+
+  it("approved balance exception: eligible, flagged as exception, with no founder/team wording", async () => {
+    lookup.mockResolvedValue(row({ outcome: "eligible", eligible: true, balance_raw: "2500000", token_decimals: 6, allocation_usd_cents: "777", exclusion_reasons: [], balance_basis: "exception" }));
+    const res = await allocationCheck(post("/api/allocation/check", { wallet: VALID_SYNTAX }));
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(JSON.parse(text)).toEqual({
+      status: "eligible",
+      snapshot: "7 Nov 2026",
+      snapshot_balance: "2.5",
+      balance_basis: "exception",
+      provisional_allocation_usd: "7.77",
+      allocation_status: "provisional",
+    });
+    expect(text).not.toMatch(/founder|team/i);
   });
 
   it("unknown: not_found with no balance and no allocation (never a fabricated zero)", async () => {
@@ -227,6 +245,10 @@ describe("allocation: one wallet's result only", () => {
     ["excluded with an unknown reason", row({ outcome: "excluded", eligible: false, balance_raw: "1", token_decimals: 6, exclusion_reasons: ["team"] })],
     ["eligible with a malformed cents value", row({ outcome: "eligible", eligible: true, balance_raw: "1", token_decimals: 6, allocation_usd_cents: "1.5", exclusion_reasons: [] })],
     ["unexpected outcome", row({ outcome: "everything" })],
+    ["eligible without a balance basis", row({ outcome: "eligible", eligible: true, balance_raw: "1", token_decimals: 6, allocation_usd_cents: "1", exclusion_reasons: [] })],
+    ["eligible with an unknown balance basis", row({ outcome: "eligible", eligible: true, balance_raw: "1", token_decimals: 6, allocation_usd_cents: "1", exclusion_reasons: [], balance_basis: "founder" })],
+    ["excluded with an exception basis", row({ outcome: "excluded", eligible: false, balance_raw: "1", token_decimals: 6, exclusion_reasons: ["LP"], balance_basis: "exception" })],
+    ["not_found carrying a basis", row({ outcome: "not_found", balance_basis: "snapshot" })],
   ])("malformed database answer (%s) fails closed as 503", async (_l, r) => {
     lookup.mockResolvedValue(r);
     const res = await allocationCheck(post("/api/allocation/check", { wallet: VALID_SYNTAX }));
@@ -259,7 +281,7 @@ describe("allocation: one wallet's result only", () => {
 
   it("no cross-wallet leakage: each request is its own lookup, results are not reused", async () => {
     lookup
-      .mockResolvedValueOnce(row({ outcome: "eligible", eligible: true, balance_raw: "1000000", token_decimals: 6, allocation_usd_cents: "100", exclusion_reasons: [] }))
+      .mockResolvedValueOnce(row({ outcome: "eligible", eligible: true, balance_raw: "1000000", token_decimals: 6, allocation_usd_cents: "100", exclusion_reasons: [], balance_basis: "snapshot" }))
       .mockResolvedValueOnce(row({ outcome: "not_found" }));
     const a = await (await allocationCheck(post("/api/allocation/check", { wallet: VALID_SYNTAX }))).json();
     const b = await (await allocationCheck(post("/api/allocation/check", { wallet: OTHER_SYNTAX }))).json();

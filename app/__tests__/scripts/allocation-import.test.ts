@@ -233,3 +233,139 @@ describe("import CLI database URL", () => {
     },
   );
 });
+
+// ─── v2: derived manifest adding approved balance-exception owners ───────────
+const ROUNDING_V2 = { mode: "largest_remainder", tie_break: "owner_address_asc", share_decimals: 18, pct_decimals: 12, usd_decimals: 2 };
+
+interface V2Over {
+  manifest?: Record<string, unknown>;
+  exception?: Record<string, unknown>;
+  /** the exception owner also appears in the all-holder file as excluded (newly eligible overrides it) */
+  exceptionListedExcluded?: boolean;
+  mutateEligible?: (rows: string[][]) => void;
+}
+
+function buildV2(fx: Fx, exc: { owner: string; raw: bigint }, over: V2Over = {}): ImportInput {
+  const v1 = build(fx);
+  const all = [...fx.eligible, exc];
+  const owners = all.map((e) => e.owner);
+  const raws = all.map((e) => e.raw);
+  const total = raws.reduce((a, b) => a + b, 0n);
+  const alloc = allocateAll(raws, total, { mode: "largest_remainder", tie_break: "owner_address_asc" }, [
+    { key: "share", decimals: 18, total: 1n },
+    { key: "pct", decimals: 12, total: 20n },
+    { key: "usd", decimals: 2, total: 50000n },
+  ], owners);
+  const erows = all.map((e, i) => [e.owner, e.raw.toString(), alloc[i]!.share!, alloc[i]!.pct!, alloc[i]!.usd!]);
+  over.mutateEligible?.(erows);
+  const eligibleCsv = Buffer.from(["owner_address,raw_balance,holder_share,full_raise_percentage,indicative_usd", ...erows.map((r) => r.join(","))].join("\n") + "\n");
+  let allHoldersCsv = v1.allHoldersCsv;
+  if (over.exceptionListedExcluded) allHoldersCsv = Buffer.concat([allHoldersCsv, Buffer.from(`${exc.owner},0.5,0.1,no,off-curve,\r\n`)]);
+  const baseMan = JSON.parse(v1.manifest.toString());
+  const manifest = Buffer.from(
+    JSON.stringify({
+      snapshot: "7 Nov 2026",
+      snapshot_slot: 42,
+      eligible_owners: all.length,
+      previous_eligible_owners: fx.eligible.length,
+      reserve_percent: 20,
+      reserve_usd: "50000.00",
+      totals: { indicative_usd: "50000.00", holder_share: "1.000000000000000000", full_raise_percentage: "20.000000000000" },
+      previous_eligible_raw: fx.eligible.reduce((a, e) => a + e.raw, 0n).toString(),
+      new_eligible_raw: total.toString(),
+      sha256: sha256Hex(eligibleCsv),
+      source_sha256: baseMan.sha256,
+      override_file: "exception.json",
+      rounding: ROUNDING_V2,
+      allocation_status: "provisional until raise",
+      ...over.manifest,
+    }),
+  );
+  const exception = Buffer.from(
+    JSON.stringify({
+      type: "founder_exception_override",
+      owner_address: exc.owner,
+      raw_balance: exc.raw.toString(),
+      decimals: 6,
+      basis: "SYNTHETIC pre-sale balance",
+      authority: "SYNTHETIC owner approval",
+      ordinary_snapshot_inclusion: false,
+      ...over.exception,
+    }),
+  );
+  return { ...v1, eligibleCsv, allHoldersCsv, manifest, baseManifest: v1.manifest, exceptions: [exception] };
+}
+
+const exc = { owner: syntheticOwner("i-exc"), raw: 2_583_406n };
+
+describe("validateSnapshot: derived (v2) manifest with an approved balance exception", () => {
+  it("accepts it; the exception owner is eligible with basis 'exception' and the floor sums exactly", () => {
+    const v = validateSnapshot(buildV2(base, exc));
+    expect(v.eligibleCount).toBe(5);
+    expect(v.excludedCount).toBe(3);
+    expect(v.holders.filter((h) => h.eligible).reduce((a, h) => a + h.allocationCents, 0n)).toBe(5_000_000n);
+    expect(v.holders.find((h) => h.owner === exc.owner)).toMatchObject({ eligible: true, balanceRaw: exc.raw, basis: "exception", reasons: [] });
+    expect(v.holders.filter((h) => h.basis === "exception")).toHaveLength(1);
+    expect(v.meta.exceptionOwners).toBe(1);
+    expect(v.meta.exceptionFilesSha256).toHaveLength(1);
+    expect(v.meta.baseManifestSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(v.meta.teamExclusionBasis).toBe("owner statement: SYNTHETIC source (not independently verified)");
+    const s = JSON.stringify(summarize(v));
+    expect(s).not.toContain(exc.owner);
+  });
+
+  it("an exception owner previously classified as excluded becomes eligible (the exclusion is dropped)", () => {
+    const v = validateSnapshot(buildV2(base, exc, { exceptionListedExcluded: true }));
+    const rows = v.holders.filter((h) => h.owner === exc.owner);
+    expect(rows).toEqual([expect.objectContaining({ eligible: true, basis: "exception", reasons: [], balanceRaw: exc.raw })]);
+    expect(v.excludedCount).toBe(3);
+  });
+
+  it.each<[string, () => ImportInput, string]>([
+    ["no base manifest", () => ({ ...buildV2(base, exc), baseManifest: undefined }), "NO_BASE_MANIFEST"],
+    ["no exception file", () => ({ ...buildV2(base, exc), exceptions: [] }), "NO_EXCEPTIONS"],
+    ["base manifest is not the source", () => buildV2(base, exc, { manifest: { source_sha256: "0".repeat(64) } }), "BASE_MISMATCH"],
+    ["eligible CSV checksum mismatch", () => buildV2(base, exc, { manifest: { sha256: "0".repeat(64) } }), "SHA_MISMATCH"],
+    ["owner count off by one", () => buildV2(base, exc, { manifest: { eligible_owners: 6 } }), "COUNT_MISMATCH"],
+    ["previous owner count wrong", () => buildV2(base, exc, { manifest: { previous_eligible_owners: 3 } }), "COUNT_MISMATCH"],
+    ["floor changed in derived manifest", () => buildV2(base, exc, { manifest: { reserve_usd: "40000.00" } }), "TERMS_MISMATCH"],
+    ["declared totals wrong", () => buildV2(base, exc, { manifest: { totals: { indicative_usd: "49999.99", holder_share: "1.000000000000000000", full_raise_percentage: "20.000000000000" } } }), "BAD_MANIFEST"],
+    ["new raw total wrong", () => buildV2(base, exc, { manifest: { new_eligible_raw: "1" } }), "RAW_MISMATCH"],
+    ["previous raw total wrong", () => buildV2(base, exc, { manifest: { previous_eligible_raw: "1" } }), "RAW_MISMATCH"],
+    ["slot differs", () => buildV2(base, exc, { manifest: { snapshot_slot: 43 } }), "SLOT_MISMATCH"],
+    ["different rounding", () => buildV2(base, exc, { manifest: { rounding: { ...ROUNDING_V2, usd_decimals: 3 } } }), "BAD_MANIFEST"],
+    ["not provisional", () => buildV2(base, exc, { manifest: { allocation_status: "final" } }), "STATUS"],
+    ["exception balance differs from the export", () => buildV2(base, exc, { exception: { raw_balance: "1" } }), "BALANCE_MISMATCH"],
+    ["exception owner absent from the export", () => buildV2(base, exc, { exception: { owner_address: syntheticOwner("i-nobody") } }), "EXCEPTION_MISSING"],
+    ["exception owner not canonical", () => buildV2(base, exc, { exception: { owner_address: "1" + exc.owner } }), "BAD_OWNER"],
+    ["exception of unknown type", () => buildV2(base, exc, { exception: { type: "team" } }), "BAD_EXCEPTION"],
+    ["exception without authority", () => buildV2(base, exc, { exception: { authority: " " } }), "BAD_EXCEPTION"],
+    ["exception claiming ordinary inclusion", () => buildV2(base, exc, { exception: { ordinary_snapshot_inclusion: true } }), "BAD_EXCEPTION"],
+    ["exception with wrong decimals", () => buildV2(base, exc, { exception: { decimals: 9 } }), "BAD_EXCEPTION"],
+    ["exception figures not recomputable", () => buildV2(base, exc, { mutateEligible: (r) => { r[4]![4] = (Number(r[4]![4]) + 0.01).toFixed(2); r[0]![4] = (Number(r[0]![4]) - 0.01).toFixed(2); } }), "RECOMPUTE_MISMATCH"],
+  ])("refuses: %s", (_l, mk, expected) => {
+    const input = mk();
+    if (expected !== "SHA_MISMATCH" && expected !== "BASE_MISMATCH") {
+      const m = JSON.parse(input.manifest.toString());
+      m.sha256 = sha256Hex(input.eligibleCsv);
+      input.manifest = Buffer.from(JSON.stringify(m));
+    }
+    expect(code(() => validateSnapshot(input))).toBe(expected);
+  });
+
+  it("refuses an exception owner that is already ordinarily eligible", () => {
+    const i = buildV2(base, { owner: base.eligible[0]!.owner, raw: 1_000_000n });
+    expect(["DUPLICATE", "EXCEPTION_ALREADY_ELIGIBLE"]).toContain(code(() => validateSnapshot(i)));
+  });
+
+  it("refuses exception files or a base manifest with a v1 manifest", () => {
+    const v2 = buildV2(base, exc);
+    expect(code(() => validateSnapshot({ ...build(base), exceptions: v2.exceptions }))).toBe("UNEXPECTED_INPUT");
+    expect(code(() => validateSnapshot({ ...build(base), baseManifest: v2.baseManifest }))).toBe("UNEXPECTED_INPUT");
+  });
+
+  it("refuses a derived manifest used as the base (no chaining without provenance)", () => {
+    const v2 = buildV2(base, exc);
+    expect(code(() => validateSnapshot({ ...v2, baseManifest: v2.manifest }))).toBe("BAD_MANIFEST");
+  });
+});

@@ -15,6 +15,8 @@ import * as path from "node:path";
 interface Cases {
   eligible: { wallet: string; balance: string; usd: string }[];
   excluded: { wallet: string; reasons: string[] };
+  /** optional: an owner counted under an approved balance exception */
+  exception?: { wallet: string; balance: string; usd: string };
   unknown: string;
   screenshots: boolean;
 }
@@ -80,9 +82,22 @@ test.describe("desktop", () => {
     for (const c of cases.eligible) {
       await lookUp(page, c.wallet);
       await expect(page.getByTestId("alloc-result")).toHaveAttribute("data-status", "eligible");
+      await expect(page.getByTestId("alloc-balance-label")).toHaveText("Snapshot balance (7 Nov 2026)");
       await expect(page.getByTestId("alloc-balance")).toHaveText(`${group(c.balance)} PERC`);
       await expect(page.getByTestId("alloc-usd")).toHaveText(`$${group(c.usd)}`);
     }
+  });
+
+  test("an approved-exception owner is eligible with a neutral 'counted balance' label", async ({ page }) => {
+    test.skip(!cases.exception, "no exception case supplied");
+    await freshClient(page);
+    await page.goto(`${BASE}/allocation`);
+    await lookUp(page, cases.exception!.wallet);
+    await expect(page.getByTestId("alloc-result")).toHaveAttribute("data-status", "eligible");
+    await expect(page.getByTestId("alloc-balance-label")).toHaveText("Counted balance (approved exception)");
+    await expect(page.getByTestId("alloc-balance")).toHaveText(`${group(cases.exception!.balance)} PERC`);
+    await expect(page.getByTestId("alloc-usd")).toHaveText(`$${group(cases.exception!.usd)}`);
+    await expect(page.getByTestId("alloc-result")).not.toContainText(/founder|team/i);
   });
 
   test("a known excluded wallet shows its exclusion reasons and no allocation", async ({ page }) => {

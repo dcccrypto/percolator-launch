@@ -20,7 +20,9 @@ function ResultView({ body }: { body: CheckBody }) {
         <div data-testid="alloc-result" data-status="eligible">
           <p className="mb-3 text-[15px] font-semibold text-[var(--text)]">Eligible</p>
           <dl className="grid grid-cols-1 gap-y-1 text-[14px] sm:grid-cols-[auto_1fr] sm:gap-x-4">
-            <dt className="text-[var(--text-secondary)]">Snapshot balance ({body.snapshot})</dt>
+            <dt className="text-[var(--text-secondary)]" data-testid="alloc-balance-label">
+              {body.balance_basis === "exception" ? `${ALLOCATION_COPY.exceptionBalanceLabel}` : `Snapshot balance (${body.snapshot})`}
+            </dt>
             <dd className="break-all font-mono text-[var(--text)]" data-testid="alloc-balance">
               {grouped(body.snapshot_balance)} PERC
             </dd>

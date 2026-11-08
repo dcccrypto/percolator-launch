@@ -4,8 +4,14 @@
  * the IP. IPv6 is keyed by /64 so one host cannot rotate through its prefix.
  * Requests with no usable IP share one "unknown" bucket.
  *
- * IP resolution reuses the waitlist helper (cf-connecting-ip, then x-real-ip;
- * x-forwarded-for is ignored in production).
+ * IP source: ONLY headers the Vercel edge sets itself and overwrites
+ * (x-real-ip, then the first x-vercel-forwarded-for entry). cf-connecting-ip
+ * and x-forwarded-for are ignored: percolator.trade is served by Vercel
+ * directly (not through the Cloudflare proxy), so those two are whatever the
+ * client sent and would let one client rotate its rate-limit identity. If a
+ * proxy is ever put in front, clients would share the proxy's buckets, which
+ * fails towards more limiting, not less. Validation/normalisation reuses the
+ * waitlist helper.
  */
 import "server-only";
 import { createHmac } from "node:crypto";
@@ -22,8 +28,16 @@ export function ipv6Prefix64(ip: string): string {
   return full.slice(0, 4).map((x) => (x || "0").replace(/^0+(?=.)/, "")).join(":") + "::/64";
 }
 
+/** The client IP as set by the Vercel edge, or null. Never reads client-settable headers. */
+export function edgeClientIp(headers: Headers): string | null {
+  const v = headers.get("x-real-ip")?.trim() || headers.get("x-vercel-forwarded-for")?.split(",")[0]?.trim();
+  if (!v) return null;
+  // getClientIp only ever sees this one value (no cf-connecting-ip / x-forwarded-for).
+  return getClientIp(new Headers({ "x-real-ip": v }));
+}
+
 export function rateLimitIdentity(headers: Headers): string {
-  const ip = getClientIp(headers);
+  const ip = edgeClientIp(headers);
   if (!ip) return "unknown";
   const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(ip);
   if (mapped) return mapped[1]!;

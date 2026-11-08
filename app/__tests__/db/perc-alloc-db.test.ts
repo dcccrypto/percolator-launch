@@ -22,7 +22,7 @@ let cluster: Cluster;
 let reader: Client;
 
 const CHECK =
-  "select outcome, retry_after_seconds, eligible, balance_raw, token_decimals, allocation_usd_cents::text as allocation_usd_cents, exclusion_reasons, snapshot_label, allocation_status from perc_alloc.check_allocation($1::text, $2::bytea)";
+  "select outcome, retry_after_seconds, eligible, balance_raw, token_decimals, allocation_usd_cents::text as allocation_usd_cents, exclusion_reasons, snapshot_label, allocation_status, balance_basis from perc_alloc.check_allocation($1::text, $2::bytea)";
 
 async function check(owner: unknown, key: Buffer | null = syntheticKey("default"), c: Client = reader) {
   const r = await c.query(CHECK, [owner, key]);
@@ -185,6 +185,7 @@ d("perc_alloc schema (local Postgres)", () => {
           exclusion_reasons: [],
           snapshot_label: "SYNTHETIC 1 Jan 2000",
           allocation_status: "provisional",
+          balance_basis: "snapshot",
         });
       }
     });
@@ -356,6 +357,51 @@ d("perc_alloc schema (local Postgres)", () => {
 
     it("the runtime role cannot import", async () => {
       await expect(applySnapshot(reader, syntheticSnapshot("e"))).rejects.toThrow(/permission denied/);
+    });
+
+    it("re-running the exact active inputs is a no-op (no new snapshot)", async () => {
+      const before = await su((c) => c.query("select id from perc_alloc.snapshot where is_active"));
+      const b = syntheticSnapshot("b");
+      const res = await withClient(cluster.migratorUrl, (c) => applySnapshot(c, b));
+      expect(res).toMatchObject({ unchanged: true, superseded: [], snapshotId: before.rows[0].id });
+      const n = await su((c) => c.query("select count(*)::int as n from perc_alloc.snapshot"));
+      expect(n.rows[0].n).toBe(2);
+    });
+
+    it("replacement with re-divided shares + an added exception owner: atomic, no stale figures", async () => {
+      // Same owner tags as the active snapshot "b" but new hashes and new figures.
+      const next = syntheticSnapshot("b", { exception: true });
+      next.meta.eligibleCsvSha256 = "f".repeat(64);
+      next.holders[0]!.allocationCents = 9_000n;
+      next.holders[1]!.allocationCents = 21_000n;
+      const res = await withClient(cluster.migratorUrl, (c) => applySnapshot(c, next));
+      expect(res.unchanged).toBe(false);
+      expect(res.superseded).toHaveLength(1);
+      expect(await check(syntheticOwner("b-e1"))).toMatchObject({ outcome: "eligible", allocation_usd_cents: "9000", balance_basis: "snapshot" });
+      expect(await check(syntheticOwner("b-e2"))).toMatchObject({ outcome: "eligible", allocation_usd_cents: "21000" });
+      expect(await check(syntheticOwner("b-e3"))).toMatchObject({ outcome: "eligible", allocation_usd_cents: "30000", balance_basis: "exception" });
+      expect(await check(syntheticOwner("b-x1"))).toMatchObject({ outcome: "excluded", balance_basis: "snapshot" });
+      expect((await check(syntheticOwner("b-zz"))).balance_basis).toBeNull();
+      const s = await su((c) =>
+        c.query("select exception_owners, exception_files_sha256, base_manifest_sha256, eligible_csv_sha256 from perc_alloc.snapshot where is_active"),
+      );
+      expect(s.rows[0]).toMatchObject({ exception_owners: 1, exception_files_sha256: ["d".repeat(64)], base_manifest_sha256: "e".repeat(64), eligible_csv_sha256: "f".repeat(64) });
+    });
+
+    it.each([
+      ["an exception row the metadata does not declare", (s: ReturnType<typeof syntheticSnapshot>) => (s.holders[1]!.basis = "exception")],
+      ["declared exceptions with no exception row", (s: ReturnType<typeof syntheticSnapshot>) => (s.holders[2]!.basis = "snapshot")],
+      ["a duplicate owner", (s: ReturnType<typeof syntheticSnapshot>) => (s.holders[1]!.owner = s.holders[0]!.owner)],
+      ["exception basis on an excluded owner", (s: ReturnType<typeof syntheticSnapshot>) => (s.holders[3]!.basis = "exception")],
+      ["exception count without provenance", (s: ReturnType<typeof syntheticSnapshot>) => (s.meta.exceptionBasis = null)],
+    ])("a replacement with %s is refused and the active snapshot is untouched", async (_l, mutate) => {
+      const active = await su((c) => c.query("select id from perc_alloc.snapshot where is_active"));
+      const s = syntheticSnapshot("g", { exception: true });
+      mutate(s);
+      await expect(withClient(cluster.migratorUrl, (c) => applySnapshot(c, s))).rejects.toThrow();
+      const after = await su((c) => c.query("select id from perc_alloc.snapshot where is_active"));
+      expect(after.rows[0].id).toBe(active.rows[0].id);
+      expect((await check(syntheticOwner("g-e1"))).outcome).toBe("not_found");
     });
   });
 });

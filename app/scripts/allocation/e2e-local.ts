@@ -4,7 +4,8 @@
  *
  *   npx tsx app/scripts/allocation/e2e-local.ts --mode synthetic --out <evidence dir>
  *   npx tsx app/scripts/allocation/e2e-local.ts --mode private --out <private dir> --cases <cases.json> \
- *     --eligible <csv> --manifest <json> --all-holders <csv> --snapshot-date YYYY-MM-DD --snapshot-slot N --token-decimals N
+ *     --eligible <csv> --manifest <json> --all-holders <csv> --snapshot-date YYYY-MM-DD --snapshot-slot N --token-decimals N \
+ *     [--base-manifest <v1 json> --exception <json>]
  *
  * 1. throwaway Postgres cluster (temp dir, 0700), Supabase-like roles
  * 2. migration applied as a non-superuser migrator; random reader password
@@ -71,9 +72,15 @@ const fmtBal = (raw: bigint, d: number) => {
   return f ? `${s.slice(0, -d)}.${f}` : s.slice(0, -d);
 };
 
-/** Synthetic export in the real file formats (20% of $250,000 split over 25 holders). */
+/**
+ * Synthetic export in the real file formats: a v1 export of 25 holders plus a
+ * derived (v2) export that adds one approved balance-exception owner, so the
+ * floor (20% of $250,000) is re-divided over 26 holders.
+ */
 function writeSynthetic(dir: string) {
-  const eligible = Array.from({ length: 25 }, (_, i) => ({ owner: synthOwner(`e${i}`), raw: BigInt(1_000_000 + i * 7_654_321 + (i % 3) * 13) }));
+  const base = Array.from({ length: 25 }, (_, i) => ({ owner: synthOwner(`e${i}`), raw: BigInt(1_000_000 + i * 7_654_321 + (i % 3) * 13) }));
+  const exc = { owner: synthOwner("exception"), raw: 55_555_555n };
+  const eligible = [...base, exc];
   const excluded = [
     { owner: synthOwner("x0"), raw: 42_000_000n, reason: "off-curve;LP" },
     { owner: synthOwner("x1"), raw: 5n, reason: "off-curve" },
@@ -87,34 +94,67 @@ function writeSynthetic(dir: string) {
     { key: "u", decimals: 2, total: 50000n },
   ], owners);
   const eligibleCsv = ["owner_address,raw_balance,holder_share,full_raise_percentage,indicative_usd", ...eligible.map((e, i) => [e.owner, e.raw, al[i]!.s, al[i]!.p, al[i]!.u].join(","))].join("\n") + "\n";
+  const sha = (s: string) => createHash("sha256").update(s).digest("hex");
+  // The all-holder file is the base (v1) one: the exception owner is not in it,
+  // and its USD column is the base export's (re-divided in v2).
   const all = [
     "owner,balance,pct_of_supply,eligible,exclusion_reason,provisional_allocation_usd",
-    ...eligible.map((e, i) => [e.owner, fmtBal(e.raw, 6), "0", "yes", "", al[i]!.u].join(",")),
+    ...base.map((e) => [e.owner, fmtBal(e.raw, 6), "0", "yes", "", "0.00"].join(",")),
     ...excluded.map((x) => [x.owner, fmtBal(x.raw, 6), "0", "no", x.reason, ""].join(",")),
   ].join("\r\n") + "\r\n";
-  const manifest = {
+  const baseManifest = {
     snapshot: "7 Nov 2026",
-    eligible_owners: eligible.length,
+    eligible_owners: base.length,
     reserve_percent: 20,
     full_raise_usd: "250000.00",
     reserve_usd: "50000.00",
     allocation_status: "provisional until raise",
-    sha256: createHash("sha256").update(eligibleCsv).digest("hex"),
+    sha256: sha("SYNTHETIC base eligible csv"),
     team_exclusion: { basis: "SYNTHETIC", source: "SYNTHETIC e2e fixture", independently_verified: false },
+  };
+  const manifest = {
+    snapshot: "7 Nov 2026",
+    snapshot_slot: 1,
+    eligible_owners: eligible.length,
+    previous_eligible_owners: base.length,
+    reserve_percent: 20,
+    reserve_usd: "50000.00",
+    totals: { indicative_usd: "50000.00", holder_share: "1.000000000000000000", full_raise_percentage: "20.000000000000" },
+    previous_eligible_raw: base.reduce((a, e) => a + e.raw, 0n).toString(),
+    new_eligible_raw: total.toString(),
+    sha256: sha(eligibleCsv),
+    source_sha256: baseManifest.sha256,
+    override_file: "exception.json",
+    rounding: { mode: "largest_remainder", tie_break: "owner_address_asc", share_decimals: 18, pct_decimals: 12, usd_decimals: 2 },
+    allocation_status: "provisional until raise",
+  };
+  const exception = {
+    type: "balance_exception_override",
+    owner_address: exc.owner,
+    raw_balance: exc.raw.toString(),
+    decimals: 6,
+    basis: "SYNTHETIC approved balance",
+    authority: "SYNTHETIC approval",
+    ordinary_snapshot_inclusion: false,
   };
   fs.writeFileSync(path.join(dir, "eligible.csv"), eligibleCsv);
   fs.writeFileSync(path.join(dir, "all.csv"), all);
   fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify(manifest));
+  fs.writeFileSync(path.join(dir, "base-manifest.json"), JSON.stringify(baseManifest));
+  fs.writeFileSync(path.join(dir, "exception.json"), JSON.stringify(exception));
+  const xi = eligible.length - 1;
   const pick = [0, 12, 24];
   const cases = {
     eligible: pick.map((i) => ({ wallet: eligible[i]!.owner, balance: fmtBal(eligible[i]!.raw, 6), usd: al[i]!.u! })),
     excluded: { wallet: excluded[0]!.owner, reasons: ["Off-curve address", "Liquidity pool, vault or program-owned account"] },
+    exception: { wallet: exc.owner, balance: fmtBal(exc.raw, 6), usd: al[xi]!.u! },
     unknown: synthOwner("nobody"),
     screenshots: true,
   };
   fs.writeFileSync(path.join(dir, "cases.json"), JSON.stringify(cases));
   return {
     files: { eligible: path.join(dir, "eligible.csv"), manifest: path.join(dir, "manifest.json"), all: path.join(dir, "all.csv") },
+    extra: ["--base-manifest", path.join(dir, "base-manifest.json"), "--exception", path.join(dir, "exception.json")],
     cases: path.join(dir, "cases.json"),
     date: "2026-11-07",
     slot: "1",
@@ -173,7 +213,7 @@ async function run() {
     await withClient(migratorUrl, (c) => c.query(`alter role perc_alloc_reader login password '${readerPw}'`));
     console.log("[e2e] local postgres ready, migration applied as non-superuser");
 
-    let src: { files: { eligible: string; manifest: string; all: string }; cases: string; date: string; slot: string; decimals: string };
+    let src: { files: { eligible: string; manifest: string; all: string }; extra: string[]; cases: string; date: string; slot: string; decimals: string };
     if (mode === "synthetic") src = writeSynthetic(tmp);
     else {
       const need = (n: string) => {
@@ -183,6 +223,10 @@ async function run() {
       };
       src = {
         files: { eligible: need("--eligible"), manifest: need("--manifest"), all: need("--all-holders") },
+        extra: [
+          ...(opt("--base-manifest") ? ["--base-manifest", need("--base-manifest")] : []),
+          ...(opt("--exception") ? ["--exception", need("--exception")] : []),
+        ],
         cases: need("--cases"),
         date: need("--snapshot-date"),
         slot: need("--snapshot-slot"),
@@ -192,8 +236,17 @@ async function run() {
     process.env.ALLOCATION_IMPORT_DATABASE_URL = migratorUrl;
     await importMain([
       "--eligible", src.files.eligible, "--manifest", src.files.manifest, "--all-holders", src.files.all,
-      "--snapshot-date", src.date, "--snapshot-slot", src.slot, "--token-decimals", src.decimals, "--apply",
+      "--snapshot-date", src.date, "--snapshot-slot", src.slot, "--token-decimals", src.decimals, ...src.extra, "--apply",
     ]);
+    // Re-running the same import is a no-op (the active snapshot is unchanged).
+    await importMain([
+      "--eligible", src.files.eligible, "--manifest", src.files.manifest, "--all-holders", src.files.all,
+      "--snapshot-date", src.date, "--snapshot-slot", src.slot, "--token-decimals", src.decimals, ...src.extra, "--apply",
+    ]);
+    const act = await withClient(migratorUrl, (c) =>
+      c.query("select count(*)::int as n, max(eligible_csv_sha256) filter (where is_active) as sha from perc_alloc.snapshot"),
+    );
+    console.log(`[e2e] snapshots=${act.rows[0].n} active_eligible_csv_sha256=${act.rows[0].sha}`);
     delete process.env.ALLOCATION_IMPORT_DATABASE_URL;
 
     const port = await freePort();
