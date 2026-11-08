@@ -1,0 +1,76 @@
+# v2.2 feature-branch CI (Council 2026-11-07 r1 M3): PRs into and pushes to feat/v22-app had NO test run
+# (test.yml / pr-check.yml only target main + playground; Vercel builds are not tests).
+# App tests + typecheck only. No secrets, read-only token, no deploy, no network services beyond package install.
+name: v2.2 App CI
+
+on:
+  pull_request:
+    branches: [feat/v22-app]
+  push:
+    branches: [feat/v22-app]
+
+permissions:
+  contents: read
+
+# PR runs: a newer push to the same PR supersedes the older run. Push runs on feat/v22-app are keyed on the SHA and never
+# cancelled, so every merge SHA (the one the preview deploys) keeps its own result (review r3 Low).
+concurrency:
+  group: v22-app-ci-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  app-tests:
+    name: v2.2 App Tests (blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Setup pnpm
+        run: npm install -g pnpm@9
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run app test suite
+        id: run
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -o pipefail
+          echo "commit ${GITHUB_SHA} (event ${GITHUB_EVENT_NAME}; PR head ${PR_HEAD_SHA:-n/a})"
+          cd app && pnpm test 2>&1 | tee /tmp/app-tests.log
+      - name: Summarise results
+        if: always()
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          {
+            echo "### v2.2 app test suite at \`${GITHUB_SHA}\` (PR head \`${PR_HEAD_SHA:-n/a}\`)"
+            sed 's/\x1b\[[0-9;]*m//g' /tmp/app-tests.log 2>/dev/null | grep -E '^[[:space:]]*(Test Files|Tests)[[:space:]]' | sed 's/^/    /' || echo "    no result line"
+            echo
+            echo "Failing tests:"
+            sed 's/\x1b\[[0-9;]*m//g' /tmp/app-tests.log 2>/dev/null | grep -E '^ FAIL ' | sort -u | sed 's/^/    /' || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  type-check:
+    name: v2.2 App Type Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Setup pnpm
+        run: npm install -g pnpm@9
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Type check
+        run: pnpm --filter app exec tsc --noEmit
