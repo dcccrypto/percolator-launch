@@ -90,6 +90,22 @@ these are `NEXT_PUBLIC_*`.
    counts and hashes only.
 4. Set the server-only env vars on the percolator.trade Vercel project only.
 
+The importer refuses a manifest whose snapshot date, floor percent or raise
+differ from the published terms (`PUBLISHED_TERMS` in `import-lib.ts`, tied to
+`copy.ts` by a test), so the page cannot contradict the per-wallet figures.
+Remote imports always use verified TLS.
+
+### Deployment prerequisites (from the independent review)
+
+- **Cloudflare-only origin.** Per-client limits key on `cf-connecting-ip`. Make
+  sure the Vercel origin for percolator.trade only accepts Cloudflare traffic
+  (authenticated origin pulls or a firewall rule on Cloudflare IP ranges);
+  otherwise a client can forge that header to rotate keys and use up the global cap.
+- **TLS CA.** Supabase database/pooler certificates usually need the project CA:
+  set `ALLOCATION_DATABASE_CA_PEM`, or every lookup fails closed as unavailable.
+- **Connection budget.** The reader role allows 30 connections; each warm
+  serverless instance holds up to 3. Prefer the Supavisor transaction pooler URL.
+
 ## Vote: disabled
 
 `/vote` says voting is not open and has no controls.

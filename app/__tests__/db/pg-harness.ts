@@ -92,6 +92,14 @@ export async function startCluster(bin: string): Promise<Cluster> {
     await su.query(`create database app owner migrator`);
     for (const r of ["anon", "authenticated", "service_role"]) await su.query(`create role ${r} nologin`);
     await su.end();
+    // Supabase-style default ACLs (per database, so on `app`): everything the
+    // migrator creates is granted to the API roles unless the migration revokes it.
+    const ad = new Client({ host: "127.0.0.1", port, user: "pgsuper", database: "app" });
+    await ad.connect();
+    for (const kind of ["tables", "functions", "sequences"]) {
+      await ad.query(`alter default privileges for role migrator grant all on ${kind} to anon, authenticated, service_role`);
+    }
+    await ad.end();
   } catch (e) {
     stop();
     throw e;

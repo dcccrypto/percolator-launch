@@ -19,6 +19,12 @@ export const ELIGIBLE_HEADER = "owner_address,raw_balance,holder_share,full_rais
 export const ALL_HOLDERS_HEADER = "owner,balance,pct_of_supply,eligible,exclusion_reason,provisional_allocation_usd";
 export const REASON_CODES = ["off-curve", "LP", "burn"] as const;
 const U64_MAX = 18446744073709551615n;
+/**
+ * The published terms shown on /allocation (lib/allocation-vote/copy.ts). An
+ * import whose manifest disagrees is refused, so the page can never state
+ * terms that contradict the per-wallet figures. A test ties copy.ts to these.
+ */
+export const PUBLISHED_TERMS = Object.freeze({ snapshotDate: "2026-11-07", floorPercent: 20, fullRaiseCents: 25_000_000n, floorCents: 5_000_000n });
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 export class ImportError extends Error {
@@ -144,6 +150,13 @@ export function validateSnapshot(input: ImportInput): ValidatedSnapshot {
   const floorCents = usdToCents(String(man.reserve_usd), "reserve_usd");
   const pct = BigInt(man.reserve_percent as number);
   if (floorCents * 100n !== fullRaiseCents * pct) fail("FLOOR_MISMATCH", "reserve_usd is not reserve_percent of full_raise_usd");
+  if (
+    input.snapshotDate !== PUBLISHED_TERMS.snapshotDate ||
+    man.reserve_percent !== PUBLISHED_TERMS.floorPercent ||
+    fullRaiseCents !== PUBLISHED_TERMS.fullRaiseCents ||
+    floorCents !== PUBLISHED_TERMS.floorCents
+  )
+    fail("TERMS_MISMATCH", "snapshot date / floor / raise differ from the published terms on /allocation");
   const team = man.team_exclusion as Record<string, unknown> | undefined;
   if (!team || typeof team.basis !== "string" || typeof team.source !== "string" || typeof team.independently_verified !== "boolean")
     fail("BAD_MANIFEST", "team_exclusion basis/source/independently_verified required");

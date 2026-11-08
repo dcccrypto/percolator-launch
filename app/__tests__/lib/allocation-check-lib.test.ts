@@ -118,6 +118,8 @@ describe("rate-limit identity", () => {
   });
   it("IPv4-mapped IPv6 is keyed as the IPv4 address", () => {
     expect(prod({ "x-real-ip": "::ffff:203.0.113.5" })).toBe("203.0.113.5");
+    expect(prod({ "x-real-ip": "::ffff:cb00:7105" })).toBe("203.0.113.5");
+    expect(prod({ "x-real-ip": "::ffff:7f00:1" })).toBe("127.0.0.1");
   });
   it("in production x-forwarded-for is ignored (no spoofed rotation via XFF); no IP -> shared 'unknown'", () => {
     expect(prod({ "x-forwarded-for": "198.51.100.1" })).toBe("unknown");

@@ -122,16 +122,22 @@ d("perc_alloc schema (local Postgres)", () => {
       expect(r.rows.map((x) => x.proname)).toEqual(["check_allocation"]);
     });
 
+    it("the harness really applies Supabase-style default ACLs (so the next assertions are not vacuous)", async () => {
+      const r = await su((c) => c.query("select count(*)::int as n from pg_default_acl d join pg_roles r on r.oid = d.defaclrole where r.rolname = 'migrator'"));
+      expect(r.rows[0].n).toBe(3);
+    });
+
     it.each(["anon", "authenticated", "service_role"])("%s has no access to the schema or its functions", async (role) => {
       const r = await su((c) =>
         c.query(
           `select has_schema_privilege($1, 'perc_alloc', 'USAGE') as usage,
                   has_function_privilege($1, 'perc_alloc.check_allocation(text, bytea)', 'EXECUTE') as exec,
+                  has_function_privilege($1, 'perc_alloc._hit(bytea, integer, integer, timestamptz)', 'EXECUTE') as hit,
                   has_table_privilege($1, 'perc_alloc.holder', 'SELECT') as sel`,
           [role],
         ),
       );
-      expect(r.rows[0]).toEqual({ usage: false, exec: false, sel: false });
+      expect(r.rows[0]).toEqual({ usage: false, exec: false, hit: false, sel: false });
     });
 
     it("the definer that owns the function is NOLOGIN and cannot touch other schemas' writes", async () => {
@@ -214,6 +220,9 @@ d("perc_alloc schema (local Postgres)", () => {
       expect(row).toMatchObject({ outcome: "invalid", balance_raw: null });
       const n = await su((c) => c.query("select count(*)::int as n from perc_alloc.holder"));
       expect(n.rows[0].n).toBeGreaterThan(0);
+      // nothing was counted against any limiter bucket
+      const rl = await su((c) => c.query("select count(*)::int as n from perc_alloc.rate_limit"));
+      expect(rl.rows[0].n).toBe(0);
     });
 
     it.each([

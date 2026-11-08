@@ -27,6 +27,13 @@ export function rateLimitIdentity(headers: Headers): string {
   if (!ip) return "unknown";
   const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(ip);
   if (mapped) return mapped[1]!;
+  // Hex form of an IPv4-mapped address (::ffff:7f00:1): key by the embedded IPv4.
+  const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(ip);
+  if (hex) {
+    const hi = parseInt(hex[1]!, 16);
+    const lo = parseInt(hex[2]!, 16);
+    return [hi >> 8, hi & 255, lo >> 8, lo & 255].join(".");
+  }
   return isIPv6(ip) ? ipv6Prefix64(ip) : ip;
 }
 

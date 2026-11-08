@@ -33,9 +33,10 @@ function need(argv: string[], name: string): string {
 }
 
 function readPrivate(p: string): Buffer {
-  const abs = path.resolve(p);
-  const repo = path.resolve(__dirname, "../../..");
-  if (abs.startsWith(repo + path.sep)) throw new ImportError("IN_REPO", `${path.basename(p)} is inside the repository; keep holder data outside it`);
+  // realpath: a symlink cannot smuggle a repository file in, or hide one.
+  const abs = fs.realpathSync(path.resolve(p));
+  const repo = fs.realpathSync(path.resolve(__dirname, "../../.."));
+  if (abs === repo || abs.startsWith(repo + path.sep)) throw new ImportError("IN_REPO", `${path.basename(p)} is inside the repository; keep holder data outside it`);
   return fs.readFileSync(abs);
 }
 
@@ -61,7 +62,15 @@ export async function main(argv: string[]): Promise<number> {
   if (!LOCAL_HOSTS.has(host) && !argv.includes("--allow-remote")) {
     throw new ImportError("REMOTE_REFUSED", "non-local database host; requires --allow-remote after owner approval");
   }
-  const client = new Client({ connectionString: url, application_name: "perc-alloc-import" });
+  // Remote imports always use verified TLS (URL ssl parameters cannot weaken it).
+  const u = new URL(url);
+  for (const k of ["sslmode", "ssl", "sslrootcert", "sslcert", "sslkey", "uselibpqcompat"]) u.searchParams.delete(k);
+  const ca = process.env.ALLOCATION_DATABASE_CA_PEM?.trim();
+  const client = new Client({
+    connectionString: u.toString(),
+    ssl: LOCAL_HOSTS.has(host) ? false : { rejectUnauthorized: true, ...(ca ? { ca } : {}) },
+    application_name: "perc-alloc-import",
+  });
   await client.connect();
   try {
     const r = await applySnapshot(client, v);

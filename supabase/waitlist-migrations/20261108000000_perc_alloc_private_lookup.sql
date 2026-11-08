@@ -239,6 +239,24 @@ revoke all on function perc_alloc.check_allocation(text, bytea) from public;
 grant execute on function perc_alloc.check_allocation(text, bytea) to perc_alloc_reader;
 revoke create on schema perc_alloc from perc_alloc_definer;
 
+-- Repeat the role revokes now that the functions exist: on Supabase, default
+-- privileges can grant EXECUTE on newly created functions to anon /
+-- authenticated / service_role, after the first revoke pass above.
+do $$
+declare r text;
+begin
+  foreach r in array array['anon', 'authenticated', 'service_role'] loop
+    if exists (select 1 from pg_roles where rolname = r) then
+      execute format('revoke all on schema perc_alloc from %I', r);
+      execute format('revoke all on all tables in schema perc_alloc from %I', r);
+      execute format('revoke all on all sequences in schema perc_alloc from %I', r);
+      execute format('revoke all on all functions in schema perc_alloc from %I', r);
+    end if;
+  end loop;
+end
+$$;
+revoke all on function perc_alloc._hit(bytea, integer, integer, timestamptz) from perc_alloc_reader;
+
 commit;
 
 -- ─── Verification (run after applying; expected results in comments) ─────────

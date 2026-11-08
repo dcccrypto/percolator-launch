@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { allocateAll } from "@/lib/allocation-vote/math";
-import { ImportError, sha256Hex, summarize, validateSnapshot, dateLabel, type ImportInput } from "@/scripts/allocation/import-lib";
+import { ImportError, PUBLISHED_TERMS, sha256Hex, summarize, validateSnapshot, dateLabel, type ImportInput } from "@/scripts/allocation/import-lib";
 import { syntheticOwner } from "../db/synthetic";
 
 interface Fx {
@@ -40,7 +40,7 @@ function build(fx: Fx, over: { manifest?: Record<string, unknown>; mutateEligibl
   const allHoldersCsv = Buffer.from(["owner,balance,pct_of_supply,eligible,exclusion_reason,provisional_allocation_usd", ...arows.map((r) => r.join(","))].join(nl) + nl);
   const manifest = Buffer.from(
     JSON.stringify({
-      snapshot: "1 Jan 2000",
+      snapshot: "7 Nov 2026",
       eligible_owners: fx.eligible.length,
       reserve_percent: 20,
       full_raise_usd: "250000.00",
@@ -51,7 +51,7 @@ function build(fx: Fx, over: { manifest?: Record<string, unknown>; mutateEligibl
       ...over.manifest,
     }),
   );
-  return { eligibleCsv, allHoldersCsv, manifest, snapshotDate: "2000-01-01", snapshotSlot: 42n, tokenDecimals: 6 };
+  return { eligibleCsv, allHoldersCsv, manifest, snapshotDate: "2026-11-07", snapshotSlot: 42n, tokenDecimals: 6 };
 }
 
 // Three equal holders: independent rounding would total 49999.99; largest remainder must give 50000.00.
@@ -87,7 +87,7 @@ describe("validateSnapshot: happy path", () => {
     expect(v.eligibleCount).toBe(4);
     expect(v.excludedCount).toBe(3);
     expect(v.meta.floorCents).toBe(5_000_000n);
-    expect(v.meta.label).toBe("1 Jan 2000");
+    expect(v.meta.label).toBe("7 Nov 2026");
     const cents = v.holders.filter((h) => h.eligible).reduce((a, h) => a + h.allocationCents, 0n);
     expect(cents).toBe(5_000_000n);
     expect(v.holders.find((h) => h.owner === syntheticOwner("i-x1"))).toMatchObject({ eligible: false, balanceRaw: 10n, allocationCents: 0n, reasons: ["off-curve", "LP"] });
@@ -117,8 +117,10 @@ describe("validateSnapshot: fails closed", () => {
     ["sha256 mismatch", () => ({ ...build(base), eligibleCsv: Buffer.from(build(base).eligibleCsv.toString() + "\n") }), "SHA_MISMATCH"],
     ["row count != manifest", () => build(base, { manifest: { eligible_owners: 5 } }), "COUNT_MISMATCH"],
     ["floor not 20% of raise", () => build(base, { manifest: { reserve_usd: "37500.00" } }), "FLOOR_MISMATCH"],
+    ["different floor percent (consistent but not the published 20%)", () => build(base, { manifest: { reserve_percent: 15, reserve_usd: "37500.00" } }), "TERMS_MISMATCH"],
+    ["different raise (consistent but not the published $250,000)", () => build(base, { manifest: { full_raise_usd: "300000.00", reserve_usd: "60000.00" } }), "TERMS_MISMATCH"],
     ["not provisional", () => build(base, { manifest: { allocation_status: "final" } }), "STATUS"],
-    ["label/date mismatch", () => build(base, { manifest: { snapshot: "2 Jan 2000" } }), "SNAPSHOT_MISMATCH"],
+    ["label/date mismatch", () => build(base, { manifest: { snapshot: "8 Nov 2026" } }), "SNAPSHOT_MISMATCH"],
     ["missing team provenance", () => build(base, { manifest: { team_exclusion: undefined } }), "BAD_MANIFEST"],
     ["usd moved between rows (sum intact, recompute differs)", () => build(base, { mutateEligible: swapUsd }), "RECOMPUTE_MISMATCH"],
     ["holder_share altered", () => build(base, { mutateEligible: (r) => (r[0]![2] = "0.1") }), "RECOMPUTE_MISMATCH"],
@@ -157,10 +159,43 @@ describe("validateSnapshot: fails closed", () => {
     expect(code(() => validateSnapshot({ ...i, allHoldersCsv: Buffer.from(i.allHoldersCsv.toString().replace("\r\n", "\r\r\n")) }))).toBe("STRAY_CR");
   });
 
+  it("rejects a snapshot date other than the published one", () => {
+    const i = build(base, { manifest: { snapshot: "8 Nov 2026" } });
+    expect(code(() => validateSnapshot({ ...i, snapshotDate: "2026-11-08" }))).toBe("TERMS_MISMATCH");
+  });
+
+  it("the public copy states exactly the importer's pinned terms", async () => {
+    const { ALLOCATION_COPY } = await import("@/lib/allocation-vote/copy");
+    const t = PUBLISHED_TERMS;
+    const usd = (c: bigint) => "$" + (c / 100n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    expect(ALLOCATION_COPY.terms[0]).toContain(`${dateLabel(t.snapshotDate)} snapshot`);
+    expect(ALLOCATION_COPY.terms[0]).toContain(`${t.floorPercent}% of the full ${usd(t.fullRaiseCents)} raise (${usd(t.floorCents)})`);
+    expect(t.floorCents * 100n).toBe(t.fullRaiseCents * BigInt(t.floorPercent));
+  });
+
   it("rejects bad slot / decimals / date", () => {
     const i = build(base);
     expect(code(() => validateSnapshot({ ...i, snapshotSlot: 0n }))).toBe("BAD_SLOT");
     expect(code(() => validateSnapshot({ ...i, tokenDecimals: 19 }))).toBe("BAD_DECIMALS");
     expect(code(() => validateSnapshot({ ...i, snapshotDate: "2000-02-30" }))).toBe("BAD_DATE");
+  });
+});
+
+describe("import CLI refuses repository files (realpath)", () => {
+  it("a symlink outside the repo that points into it is refused, before anything is read or written", async () => {
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const { main } = await import("@/scripts/allocation/import-snapshot");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "perc-alloc-link-"));
+    try {
+      const link = path.join(dir, "eligible.csv");
+      fs.symlinkSync(path.resolve(__dirname, "../../package.json"), link);
+      await expect(
+        main(["--eligible", link, "--manifest", link, "--all-holders", link, "--snapshot-date", "2026-11-07", "--snapshot-slot", "1", "--token-decimals", "6"]),
+      ).rejects.toThrow(/IN_REPO/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
