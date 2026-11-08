@@ -5,7 +5,7 @@
  *   setup: npx tsx app/scripts/vote/e2e-preview.ts setup --owner-url-file <0600 file> --private <0700 dir> \
  *            --confirm-throwaway-host <exact DB hostname>
  *   run:   npx tsx app/scripts/vote/e2e-preview.ts run --owner-url-file <0600 file> --private <0700 dir> \
- *            --confirm-throwaway-host <exact DB hostname> --base https://<alias>.vercel.app --other-hosts <h1,h2> --out <evidence dir>
+ *            --confirm-throwaway-host <exact DB hostname> [--ca <CA pem, required for remote DBs>] --base https://<alias>.vercel.app --other-hosts <h1,h2> --out <evidence dir>
  *
  * setup
  *   - refuses unless ALL hold (it can never touch real data):
@@ -19,8 +19,8 @@
  *   - writes <private>/voters.json and <private>/preview.env (0600) holding the
  *     THROWAWAY runtime values for `vercel deploy -e/-b`. Nothing is printed.
  * run
- *   - runs e2e/vote.spec.ts in REMOTE mode; the deployment-protection token is
- *     taken from VERCEL_OIDC_TOKEN in the environment and never printed.
+ *   - runs e2e/vote.spec.ts in REMOTE mode; an optional deployment-protection token is
+ *     taken from VERCEL_OIDC_TOKEN in the environment (never printed).
  *
  * The poll is started only inside the throwaway database.
  */
@@ -62,8 +62,20 @@ function privateDir(p: string): string {
   fs.chmodSync(p, 0o700);
   return p;
 }
+/** Remote throwaway DBs: verified TLS only (CA from --ca, never rejectUnauthorized:false). */
+function caFor(url: string): string | null {
+  if (new URL(url).hostname === "127.0.0.1") return null;
+  return fs.readFileSync(arg("--ca"), "utf8");
+}
+function clientFor(url: string): Client {
+  const ca = caFor(url);
+  // drop URL query params so they cannot override the TLS decision
+  const u = new URL(url);
+  u.search = "";
+  return new Client({ connectionString: u.toString(), ...(ca ? { ssl: { rejectUnauthorized: true, ca } } : {}) });
+}
 async function withClient<T>(url: string, fn: (c: Client) => Promise<T>) {
-  const c = new Client({ connectionString: url });
+  const c = clientFor(url);
   await c.connect();
   try {
     return await fn(c);
@@ -153,7 +165,6 @@ async function run() {
   const base = arg("--base");
   const others = arg("--other-hosts");
   const out = privateDir(path.resolve(arg("--out")));
-  if (!process.env.VERCEL_OIDC_TOKEN) throw new Error("VERCEL_OIDC_TOKEN missing");
   assertHost(ownerUrl);
   await withClient(ownerUrl, (c) => assertThrowaway(c, false));
   const env = Object.fromEntries(privateFile(path.join(dir, "preview.env")).split("\n").map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]));
@@ -163,10 +174,12 @@ async function run() {
       NODE_ENV: "test", PATH: process.env.PATH, HOME: process.env.HOME,
       VOTE_E2E_BASE: base,
       VOTE_E2E_OTHER_HOSTS: others,
-      VOTE_E2E_OIDC: process.env.VERCEL_OIDC_TOKEN,
+      // optional: only needed if the project enables Deployment Protection on previews
+      ...(process.env.VERCEL_OIDC_TOKEN ? { VOTE_E2E_OIDC: process.env.VERCEL_OIDC_TOKEN } : {}),
       VOTE_E2E_VOTERS: path.join(dir, "voters.json"),
       VOTE_E2E_ADMIN: env.VOTE_ADMIN_SECRET!,
       VOTE_E2E_SUPER_URL: ownerUrl,
+      ...(caFor(ownerUrl) ? { VOTE_E2E_SUPER_CA: caFor(ownerUrl)! } : {}),
       VOTE_E2E_SHOTS: out,
       VOTE_E2E_JSON: path.join(out, "playwright-vote.json"),
     },

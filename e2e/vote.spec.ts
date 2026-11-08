@@ -66,10 +66,19 @@ const BASE = REMOTE ? REMOTE.origin : `http://percolator.trade:${PORT}`;
 if (!REMOTE) test.use({ launchOptions: { args: ["--host-resolver-rules=MAP percolator.trade 127.0.0.1, MAP mainnet.percolatorlaunch.com 127.0.0.1"] } });
 test.describe.configure({ mode: "serial" });
 
+/** Throwaway-DB operator connection; verified TLS when a CA is given (remote preview DB). */
+function superClient() {
+  const ca = process.env.VOTE_E2E_SUPER_CA;
+  if (REMOTE && !ca) throw new Error("VOTE_E2E_SUPER_CA required in REMOTE mode");
+  const u = new URL(process.env.VOTE_E2E_SUPER_URL!);
+  u.search = "";
+  return new Client({ connectionString: u.toString(), ...(ca ? { ssl: { rejectUnauthorized: true, ca } } : {}) });
+}
+
 /** REMOTE only: clear limiter rows in the THROWAWAY database (all clients share one real IP there). */
 async function resetLimits() {
   if (!REMOTE) return;
-  const su = new Client({ connectionString: process.env.VOTE_E2E_SUPER_URL });
+  const su = superClient();
   await su.connect();
   try {
     await su.query("delete from perc_alloc.rate_limit");
@@ -284,7 +293,7 @@ test("UI: connect an injected Wallet Standard wallet, sign, vote recorded (deskt
 
 test("after close: writes refused; final aggregate is an exact balance tie -> buy-and-burn", async ({ page }) => {
   // Votes: V0 burn 1.0, V1 weekly 2.0, V2 weekly 3.0 (UI), V3 burn 4.0 => 5.0 vs 5.0 tie.
-  const su = new Client({ connectionString: process.env.VOTE_E2E_SUPER_URL });
+  const su = superClient();
   await su.connect();
   try {
     // Test-only time travel in the throwaway DB: move window AND ballots back by the same amount.
