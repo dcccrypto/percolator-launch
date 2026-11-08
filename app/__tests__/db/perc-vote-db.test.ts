@@ -26,6 +26,7 @@ import { buildVoteMessage, type VoteChoice } from "@/lib/allocation-vote/vote-me
 import { verifyVoteSignature } from "@/lib/allocation-vote/vote-verify";
 
 export const VOTE_MIGRATION_PATH = path.resolve(__dirname, "../../../supabase/waitlist-migrations/20261108010000_perc_vote.sql");
+export const RLS_MIGRATION_PATH = path.resolve(__dirname, "../../../supabase/waitlist-migrations/20261108020000_perc_private_rls.sql");
 
 const bin = findPgBin();
 if (!bin) console.warn("[perc-vote-db] SKIPPED: no local Postgres binaries (set PERC_ALLOC_PG_BIN)");
@@ -142,8 +143,11 @@ async function closePoll() {
 }
 
 async function migrateVote() {
-  const sql = fs.readFileSync(VOTE_MIGRATION_PATH, "utf8");
-  await withClient(cluster.migratorUrl, (c) => c.query(sql));
+  // vote migration, then the RLS layer: every vote test runs with RLS enabled.
+  for (const p of [VOTE_MIGRATION_PATH, RLS_MIGRATION_PATH]) {
+    const sql = fs.readFileSync(p, "utf8");
+    await withClient(cluster.migratorUrl, (c) => c.query(sql));
+  }
 }
 
 d("perc_vote schema (local Postgres)", () => {
@@ -177,6 +181,26 @@ d("perc_vote schema (local Postgres)", () => {
       expect((await su((c) => c.query("select count(*)::int as n from perc_vote.poll"))).rows[0].n).toBe(0);
       const s = (await reader.query("select * from perc_vote.status($1)", [KEY])).rows[0];
       expect(s).toMatchObject({ outcome: "ok", state: "not_started", poll_key: "perc-fee-policy-2026-11", starts_at: null, ends_at: null });
+    });
+
+    it("RLS is enabled on all 6 private tables with a definer-only policy; the checker lookup still works", async () => {
+      const t = await su((c) =>
+        c.query(`select n.nspname || '.' || c.relname as t, c.relrowsecurity as rls, c.relforcerowsecurity as force
+                   from pg_class c join pg_namespace n on n.oid = c.relnamespace
+                  where n.nspname in ('perc_alloc', 'perc_vote') and c.relkind = 'r' order by 1`),
+      );
+      expect(t.rows).toEqual(
+        ["perc_alloc.holder", "perc_alloc.rate_limit", "perc_alloc.snapshot", "perc_vote.ballot", "perc_vote.nonce", "perc_vote.poll"].map((x) => ({ t: x, rls: true, force: false })),
+      );
+      const p = await su((c) => c.query("select schemaname || '.' || tablename as t, policyname, roles::text[] as roles, cmd from pg_policies where schemaname in ('perc_alloc','perc_vote') order by 1"));
+      expect(p.rows).toHaveLength(6);
+      for (const r of p.rows) expect([r.policyname, r.roles, r.cmd]).toEqual(["perc_definer_only", ["perc_alloc_definer"], "ALL"]);
+      // checker lookup through the definer, with RLS on, returns the eligible row
+      const a = (await reader.query("select outcome, eligible, balance_raw from perc_alloc.check_allocation($1::text, $2::bytea)", [voters[2]!.owner, KEY])).rows[0];
+      expect(a).toMatchObject({ outcome: "eligible", eligible: true, balance_raw: "3" });
+      // re-applying the RLS layer is a no-op (no duplicate policies)
+      await withClient(cluster.migratorUrl, (c) => c.query(fs.readFileSync(RLS_MIGRATION_PATH, "utf8")));
+      expect((await su((c) => c.query("select count(*)::int as n from pg_policies where schemaname in ('perc_alloc','perc_vote')"))).rows[0].n).toBe(6);
     });
 
     it("runtime role cannot read or write any vote/checker table, nor call helpers", async () => {
@@ -259,7 +283,10 @@ d("perc_vote schema (local Postgres)", () => {
       expect((await nonce(voters[0]!.owner, "buy-and-burn")).outcome).toBe("not_started");
       await shiftPoll("-1 second");
       expect((await nonce(voters[0]!.owner, "buy-and-burn")).outcome).toBe("ok");
-      await shiftPoll("-24 hours");
+      // 1s past ends_at: a zero-margin "exactly at ends_at" setup races the next
+      // statement's clock under load (observed once); closed-at-ends_at is the
+      // `v_now >= ends_at` rule, exercised with margin here.
+      await shiftPoll("-24 hours -1 second");
       expect((await nonce(voters[0]!.owner, "buy-and-burn")).outcome).toBe("closed");
     });
 

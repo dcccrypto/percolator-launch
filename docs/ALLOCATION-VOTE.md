@@ -171,7 +171,13 @@ AFTER the checker migration to the same database. Private schema `perc_vote`
 (poll, nonce, ballot); SECURITY DEFINER functions owned by `perc_alloc_definer`;
 the runtime role `perc_alloc_reader` may only EXECUTE them (no table access).
 Rate limits reuse `perc_alloc._hit` with hashed client keys. Applying the
-migration does not start the vote.
+migration does not start the vote. The migration is additive only (no DROP).
+
+Then `20261108020000_perc_private_rls.sql` enables row level security on all six
+private tables (`perc_alloc.{snapshot,holder,rate_limit}` and
+`perc_vote.{poll,nonce,ballot}`). Only `perc_alloc_definer` gets a policy. The
+API roles and the runtime role have no grants and no policies. The table owner,
+used by the import, is not forced through RLS.
 
 **Configuration.** Same server-only `ALLOCATION_DATABASE_URL` and
 `ALLOCATION_RATE_LIMIT_SECRET` as the checker, plus `VOTE_ADMIN_SECRET`

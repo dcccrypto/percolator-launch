@@ -38,6 +38,7 @@ const REPO = path.resolve(APP, "..");
 const MIGRATIONS = [
   "supabase/waitlist-migrations/20261108000000_perc_alloc_private_lookup.sql",
   "supabase/waitlist-migrations/20261108010000_perc_vote.sql",
+  "supabase/waitlist-migrations/20261108020000_perc_private_rls.sql",
 ].map((m) => path.join(REPO, m));
 const SYNTHETIC_LABEL = "SYNTHETIC vote preview e2e";
 
