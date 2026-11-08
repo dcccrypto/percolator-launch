@@ -24,7 +24,7 @@ export function closeResultText(o: {
 }): string {
   const parts = [o.base];
   if (o.execPriceText) parts.push(`Effective price ${o.execPriceText}.`);
-  if (o.result !== null) parts.push(`Trade result ${formatSignedAtoms(o.result, o.decimals, o.symbol)} (trading fees, spread and other non-base fees included; funding and maintenance fees not included).`);
+  if (o.result !== null) parts.push(`Trade result ${formatSignedAtoms(o.result, o.decimals, o.symbol)} (trading fees, spread and other non-base fees included; funding and maintenance fees not included). Counted from trades made on this device; a trade on another device can make this figure wrong.`);
   return parts.join(" ");
 }
 

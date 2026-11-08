@@ -4,7 +4,7 @@ import { catchUpAvailableLine } from "@/lib/limits/catchup-estimate";
 import { priceBehindLine } from "@/lib/oracle-stale-gate";
 import { FC, useId, useMemo, useState } from "react";
 import { formatTokenAmount } from "@/lib/format";
-import { SPREAD_LABEL, spreadValueText, type SpreadEstimate } from "@/lib/v22/spread-estimate";
+import { SPREAD_LABEL, feeBpsWithSpread, spreadValueText, type SpreadEstimate } from "@/lib/v22/spread-estimate";
 import { formatLotPriceE6, formatLotQ } from "@/lib/v22/lot";
 import { computeMarkPnl, computeMarkPnlLinear, clampClosePercent, UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
 
@@ -175,7 +175,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
     // F1: the chain charges base + the matcher's requested fee on a fee-channel market whether or not the ticket's P2 flag put it in the
     // estimate above (flag off = base only). When the channel is on and the estimate holds the base only, the displayed fee adds the quote's
     // requested bps (display only; what is signed is unchanged), so "included in the trading fee" is true and the preview is not high.
-    if (spread?.inFee && feeBps <= tradingFeeBps) feeBps = tradingFeeBps + BigInt(spread.kind === "quote" ? spread.bps : spread.minBps);
+    feeBps = feeBpsWithSpread(feeBps, tradingFeeBps, spread);
     const feeEstimated = feeBps > tradingFeeBps;
     const closeFee = feeBps > 0n ? (closeNotional * feeBps) / 10_000n : 0n;
 

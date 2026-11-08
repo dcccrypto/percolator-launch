@@ -83,4 +83,9 @@ describe("ClosePositionForm spread line (M7)", () => {
     expect(screen.getByText("Trading Fee:")).toBeInTheDocument();
     expect(screen.getByText(/−0\.0600/)).toBeInTheDocument();
   });
+  it("L-1: the estimate holds MORE than base (53 bps, e.g. P2 on with a busy-side part): the quote's 21 bps is not added on top and not substituted either (53 bps of 20.0248 = 106,131)", () => {
+    render(<ClosePositionForm {...council} closeFeeBpsFor={() => 53n} spreadEstimateFor={() => ({ kind: "quote", bps: 21, execPriceE6: null, inFee: true })} />);
+    expect(screen.getByText(/−0\.1061/)).toBeInTheDocument();
+    expect(screen.queryByText(/−0\.1021/)).toBeNull();
+  });
 });

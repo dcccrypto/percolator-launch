@@ -57,7 +57,8 @@ import { modeFixtures } from "../../helpers/v22-fixtures";
 import { decodeMarketEngineView } from "@/lib/limits/decode";
 import { effectivePriceE6, execFillFromLogs } from "@/lib/v22/exec-fill";
 import { computePositionPnl } from "@/lib/position-pnl";
-import { loadBook } from "@/lib/trade-book";
+import { loadBook, saveBook } from "@/lib/trade-book";
+import { getRealized } from "@/lib/realized-pnl";
 import { OrderTicket } from "@/components/trade/OrderTicket";
 import { getSavedEntry, saveEntryPrice } from "@/lib/entry-price";
 import { resolveEntryPrice } from "@/lib/trading";
@@ -167,5 +168,30 @@ describe("OrderTicket: the price shown and saved is what the trader effectively 
     await submit("5");
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     expect(getSavedEntry(SLAB, 0, W)?.entryPriceE6).toBe((90_000_000n + BOOKED) / 2n);
+  });
+
+  it("F3 / probe C: the long on the book was closed on another device, this ticket still RENDERS it (+1), and a short is opened here: the MEASURED size before the trade (0) is used, so no result is fabricated and the new short gets its own book", async () => {
+    saveBook(W, SLAB, WALLET.toBase58(), { q: FILLED, avgE6: 99_000_000n, fees: 5_000n, pnl: 0n });
+    withPosition(FILLED); // stale render-time position
+    mocks.change = { beforeQ: 0n, afterQ: -FILLED }; // what the chain actually had
+    mocks.getTransaction.mockResolvedValue({
+      meta: { err: null, logMessages: fillEventLogs(WALLET, new PublicKey(SLAB), [{ flags: 8, requestedQ: -FILLED, executedQ: -FILLED, priceE6: BOOKED, quotedPriceE6: BOOKED, feeAtoms: FEE }]) },
+    });
+    render(<OrderTicket slabAddress={SLAB} />);
+    await submit("5", "short");
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(getRealized(W, SLAB)).toBeNull();
+    expect(loadBook(W, SLAB, WALLET.toBase58())).toMatchObject({ q: -FILLED, avgE6: BOOKED, fees: FEE });
+  });
+
+  it("probe A: an ADD from existing capital keeps the book (size match), so the later close reports the whole trade", async () => {
+    saveBook(W, SLAB, WALLET.toBase58(), { q: FILLED, avgE6: 90_000_000n, fees: 5_000n, pnl: 0n });
+    withPosition(FILLED, 1_000_000n);
+    mocks.change = { beforeQ: FILLED, afterQ: 2n * FILLED };
+    mocks.getTransaction.mockResolvedValue(landed(BOOKED));
+    render(<OrderTicket slabAddress={SLAB} />);
+    await submit("5");
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(loadBook(W, SLAB, WALLET.toBase58())).toMatchObject({ q: 2n * FILLED, fees: 5_000n + FEE });
   });
 });

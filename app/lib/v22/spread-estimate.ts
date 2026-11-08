@@ -56,3 +56,13 @@ export function spreadValueText(e: SpreadEstimate | null): string {
 }
 
 export const SPREAD_LABEL = "Spread / price impact";
+
+/**
+ * The displayed fee bps on a fee-channel market: the chain charges base + the matcher's requested fee whether or not the ticket's P2
+ * flag put it in the estimate. When the estimate holds the base only, add the quote's requested bps (floor for a range); an estimate
+ * that already holds extras is left alone (never added twice). Display only: what is signed is unchanged.
+ */
+export function feeBpsWithSpread(feeBps: bigint, baseBps: bigint, e: SpreadEstimate | null): bigint {
+  if (!e?.inFee || feeBps > baseBps) return feeBps;
+  return baseBps + BigInt(e.kind === "quote" ? e.bps : e.minBps);
+}

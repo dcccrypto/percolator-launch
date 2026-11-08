@@ -897,7 +897,7 @@ export function PortfolioPositionsView() {
                   {formatSignedUsd(usdTotals.realizedNetUsd)}
                 </span>
                 <span className="text-xs font-medium text-[var(--text-secondary)]">
-                  realized from your finished trades on this device (trading fees, spread and other non-base fees included; funding and maintenance fees not included)
+                  realized from trades made on this device (trading fees, spread and other non-base fees included; funding and maintenance fees not included). A trade on another device can make this figure wrong.
                 </span>
               </div>
             )}

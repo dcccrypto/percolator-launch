@@ -50,7 +50,6 @@ import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { effectivePriceE6, readExecFill } from "@/lib/v22/exec-fill";
 import { recordFill } from "@/lib/trade-book";
-import { readMatcherSequence } from "@/lib/v22/portfolio-anchor";
 import { formatLotPriceE6 } from "@/lib/v22/lot";
 import { closeResultText, recordRealized } from "@/lib/realized-pnl";
 import { PortfolioTargetError, TARGET_COPY, isPortfolioTargetError, verifyPortfolioTarget } from "@/lib/portfolio-target";
@@ -194,15 +193,12 @@ async function measureCloseResult(o: {
   wallet: string;
   /** The signed effective position the chain had before this close. */
   onChainQBefore: bigint;
-  /** The portfolio's matcher sequence as read BEFORE the close (the trade book's anchor), null = unknown. */
-  preSeq: bigint | null;
   budgetMs?: number;
 }): Promise<{ effectiveE6: bigint | null; result: bigint | null }> {
   const work = (async (): Promise<{ effectiveE6: bigint | null; result: bigint | null }> => {
     const fill = await readExecFill(o.connection, o.sig, o.programId, { market: new PublicKey(o.slabAddress), taker: o.taker ?? null }, undefined, 3).catch(() => null);
     if (!fill) return { effectiveE6: null, result: null };
-    const postSeq = await readMatcherSequence(o.connection, fill.taker, o.programId, fill.slot);
-    const result = recordFill(o.wallet, o.slabAddress, fill.taker.toBase58(), { q: fill.executedQ, bookedPriceE6: fill.bookedPriceE6, feeAtoms: fill.feeAtoms }, o.onChainQBefore, { preSeq: o.preSeq, postSeq });
+    const result = recordFill(o.wallet, o.slabAddress, fill.taker.toBase58(), { q: fill.executedQ, bookedPriceE6: fill.bookedPriceE6, feeAtoms: fill.feeAtoms }, o.onChainQBefore);
     if (result !== null) recordRealized(o.wallet, o.slabAddress, result);
     return { effectiveE6: effectivePriceE6(fill, o.baseFeeBps), result };
   })().catch(() => ({ effectiveE6: null, result: null }));
@@ -307,8 +303,6 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
     let freshBasisQ: bigint | null = null;
     let freshEngine: MarketEngineView | null = null;
     let resetLeg = false;
-    // M7: the portfolio's matcher sequence before the close (trade-book anchor).
-    let preSeq: bigint | null = null;
 
     if (isV17Market) {
       // v17: re-fetch via a FRESH on-chain read + parsePortfolioV17.
@@ -342,7 +336,6 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
           freshPositionSize = 0n;
         } else {
           const portfolio = parsePortfolio(freshData);
-          preSeq = typeof portfolio.matcherSequence === "bigint" ? portfolio.matcherSequence : null;
 
           // Re-check the mutable owner after the read — covers both the
           // RPC-side memcmp filter AND the cached-pubkey shortcut (a wrapped
@@ -740,7 +733,6 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
             baseFeeBps: freshEngine ? freshEngine.tradeFeeBaseBps : null,
             wallet: publicKey.toBase58(),
             onChainQBefore: freshPositionSize,
-            preSeq,
           });
         }
         const closeDetail = (base: string): string =>

@@ -42,46 +42,43 @@ describe("applyFill: lifetime result", () => {
   });
 });
 
-describe("reconcile / recordFill: a result is only claimed for a trade whose whole life was seen (size AND chain anchor)", () => {
+describe("reconcile / recordFill: a result is only claimed for a trade whose whole life was seen (size match)", () => {
   beforeEach(() => localStorage.clear());
-  const open = (seq: bigint | null) => recordFill("W", "S", "P", { q: TOKEN, bookedPriceE6: 100_000_000n, feeAtoms: 106_043n }, 0n, { preSeq: null, postSeq: seq });
-  it("open then close through the stored book: the close finds exactly the sequence the open left", () => {
-    expect(open(5n)).toBeNull();
-    expect(loadBook("W", "S", "P")).toMatchObject({ q: TOKEN, seq: 5n });
-    expect(recordFill("W", "S", "P", { q: -TOKEN, bookedPriceE6: 100_150_000n, feeAtoms: 100_000n }, TOKEN, { preSeq: 5n, postSeq: 6n })).toBe(-56_043n);
+  const open = () => recordFill("W", "S", "P", { q: TOKEN, bookedPriceE6: 100_000_000n, feeAtoms: 106_043n }, 0n);
+  it("open then close through the stored book", () => {
+    expect(open()).toBeNull();
+    expect(loadBook("W", "S", "P")?.q).toBe(TOKEN);
+    expect(recordFill("W", "S", "P", { q: -TOKEN, bookedPriceE6: 100_150_000n, feeAtoms: 100_000n }, TOKEN)).toBe(-56_043n);
     expect(loadBook("W", "S", "P")).toBeNull();
   });
-  it("N-4 probe: the position was closed and REOPENED at the same size elsewhere (the sequence moved): size matches, the anchor does not: no result", () => {
-    open(5n);
-    // unseen: close (seq 6) and reopen 1 @ 60 (seq 7); here it is closed @ 61 and the chain shows preSeq 7
-    expect(recordFill("W", "S", "P", { q: -TOKEN, bookedPriceE6: 61_000_000n, feeAtoms: 1_000n }, TOKEN, { preSeq: 7n, postSeq: 8n })).toBeNull();
-    expect(loadBook("W", "S", "P")).toBeNull();
+  it("probe A: open 1, ADD 1 from existing capital (no deposit, so the wrapper's matcher sequence does not move), then close 2: the WHOLE trade is reported", () => {
+    open();
+    expect(recordFill("W", "S", "P", { q: TOKEN, bookedPriceE6: 110_000_000n, feeAtoms: 1_000n }, TOKEN)).toBeNull();
+    expect(loadBook("W", "S", "P")).toMatchObject({ q: 2n * TOKEN, avgE6: 105_000_000n, fees: 107_043n });
+    // 2 tokens from 105 avg to 108: +6.0 price PnL, minus 106,043 + 1,000 + 2,000 fees
+    expect(recordFill("W", "S", "P", { q: -2n * TOKEN, bookedPriceE6: 108_000_000n, feeAtoms: 2_000n }, 2n * TOKEN)).toBe(6_000_000n - 109_043n);
   });
-  it("an unknown anchor on either side is not trusted", () => {
-    open(5n);
-    expect(reconcile(loadBook("W", "S", "P"), TOKEN, null)).toBeNull();
-    open(null);
-    expect(reconcile(loadBook("W", "S", "P"), TOKEN, 5n)).toBeNull();
+  it("probe C / F3: the long on the book was closed on another device and this ticket still RENDERS +1, but the MEASURED size before the trade is 0: no fabricated result, and the new short gets its own fresh book", () => {
+    open();
+    expect(recordFill("W", "S", "P", { q: -TOKEN, bookedPriceE6: 99_000_000n, feeAtoms: 1_000n }, 0n)).toBeNull();
+    expect(loadBook("W", "S", "P")).toMatchObject({ q: -TOKEN, avgE6: 99_000_000n, fees: 1_000n });
+  });
+  it("DOCUMENTED RESIDUAL (probe B): a same-size close + reopen made elsewhere cannot be told apart from the size alone, so the result is computed on the stale book. The copy says the figure counts trades made on this device and another device can make it wrong. (The wrapper's portfolio matcher sequence moves only on deposit / withdraw, so it cannot detect trades.)", () => {
+    open();
+    expect(recordFill("W", "S", "P", { q: -TOKEN, bookedPriceE6: 61_000_000n, feeAtoms: 1_000n }, TOKEN)).toBe(-39_000_000n - 107_043n);
   });
   it("NEGATIVE: the position was opened elsewhere (no book, chain not flat): no result, nothing claimed", () => {
-    expect(recordFill("W", "S", "P", { q: -TOKEN, bookedPriceE6: 100_000_000n, feeAtoms: 1n }, TOKEN, { preSeq: 5n, postSeq: 6n })).toBeNull();
+    expect(recordFill("W", "S", "P", { q: -TOKEN, bookedPriceE6: 100_000_000n, feeAtoms: 1n }, TOKEN)).toBeNull();
   });
   it("NEGATIVE: the stored book no longer matches the chain size (ADL / another device): dropped, no result", () => {
-    recordFill("W", "S", "P", { q: 2n * TOKEN, bookedPriceE6: 100_000_000n, feeAtoms: 1n }, 0n, { preSeq: null, postSeq: 5n });
-    expect(reconcile(loadBook("W", "S", "P"), TOKEN, 5n)).toBeNull();
-    expect(recordFill("W", "S", "P", { q: -TOKEN, bookedPriceE6: 1n, feeAtoms: 1n }, TOKEN, { preSeq: 5n, postSeq: 6n })).toBeNull();
+    recordFill("W", "S", "P", { q: 2n * TOKEN, bookedPriceE6: 100_000_000n, feeAtoms: 1n }, 0n);
+    expect(reconcile(loadBook("W", "S", "P"), TOKEN)).toBeNull();
+    expect(recordFill("W", "S", "P", { q: -TOKEN, bookedPriceE6: 1n, feeAtoms: 1n }, TOKEN)).toBeNull();
     expect(loadBook("W", "S", "P")).toBeNull();
   });
   it("books are per wallet, market and portfolio", () => {
-    recordFill("W", "S", "P1", { q: TOKEN, bookedPriceE6: 1n, feeAtoms: 0n }, 0n, { preSeq: null, postSeq: 1n });
+    recordFill("W", "S", "P1", { q: TOKEN, bookedPriceE6: 1n, feeAtoms: 0n }, 0n);
     expect(loadBook("W", "S", "P2")).toBeNull();
     expect(loadBook("W2", "S", "P1")).toBeNull();
-  });
-  it("F3: the render-time position is stale (the long on the book was closed on another device; this ticket still shows it) and a short is opened here: the anchor moved, so the book is dropped and NO fabricated result is recorded", () => {
-    open(5n); // long 1 on the book, sequence 5
-    // elsewhere: the long is closed (sequence 6). Here: a short 1 opens (sequence 7). The ticket's stale existingPositionSize is still +1.
-    // The open path derives preSeq = postSeq - legs = 6, not the 5 the book holds.
-    expect(recordFill("W", "S", "P", { q: -TOKEN, bookedPriceE6: 99_000_000n, feeAtoms: 1_000n }, TOKEN, { preSeq: 6n, postSeq: 7n })).toBeNull();
-    expect(loadBook("W", "S", "P")).toBeNull();
   });
 });

@@ -21,11 +21,6 @@ export interface Book {
   fees: bigint;
   /** Price PnL realized by reductions so far, atoms. */
   pnl: bigint;
-  /**
-   * Chain anchor: the portfolio's matcher sequence AFTER the last fill the book applied (null = unknown). The next trade must find
-   * exactly this value before it runs; any other trade, deposit or withdraw in between moves it, and the history is then incomplete.
-   */
-  seq: bigint | null;
 }
 
 export interface FillIn {
@@ -40,12 +35,12 @@ const abs = (n: bigint): bigint => (n < 0n ? -n : n);
 /** Applies one fill. `closedResult` is the finished trade's result when this fill takes the position to flat (or through it). */
 export function applyFill(book: Book | null, f: FillIn): { book: Book | null; closedResult: bigint | null } {
   if (f.q === 0n) return { book, closedResult: null };
-  if (!book || book.q === 0n) return { book: { q: f.q, avgE6: f.bookedPriceE6, fees: f.feeAtoms, pnl: 0n, seq: null }, closedResult: null };
+  if (!book || book.q === 0n) return { book: { q: f.q, avgE6: f.bookedPriceE6, fees: f.feeAtoms, pnl: 0n }, closedResult: null };
   const sameSide = (book.q > 0n) === (f.q > 0n);
   if (sameSide) {
     const total = abs(book.q) + abs(f.q);
     const avg = (abs(book.q) * book.avgE6 + abs(f.q) * f.bookedPriceE6) / total;
-    return { book: { q: book.q + f.q, avgE6: avg, fees: book.fees + f.feeAtoms, pnl: book.pnl, seq: null }, closedResult: null };
+    return { book: { q: book.q + f.q, avgE6: avg, fees: book.fees + f.feeAtoms, pnl: book.pnl }, closedResult: null };
   }
   const closeQ = abs(f.q) < abs(book.q) ? abs(f.q) : abs(book.q);
   const dir = book.q > 0n ? 1n : -1n;
@@ -55,20 +50,14 @@ export function applyFill(book: Book | null, f: FillIn): { book: Book | null; cl
   const fees = book.fees + feeClosing;
   const remaining = book.q + f.q;
   if (remaining === 0n) return { book: null, closedResult: pnl - fees };
-  if ((remaining > 0n) === (book.q > 0n)) return { book: { q: remaining, avgE6: book.avgE6, fees, pnl, seq: null }, closedResult: null };
-  return { book: { q: remaining, avgE6: f.bookedPriceE6, fees: f.feeAtoms - feeClosing, pnl: 0n, seq: null }, closedResult: pnl - fees };
+  if ((remaining > 0n) === (book.q > 0n)) return { book: { q: remaining, avgE6: book.avgE6, fees, pnl }, closedResult: null };
+  return { book: { q: remaining, avgE6: f.bookedPriceE6, fees: f.feeAtoms - feeClosing, pnl: 0n }, closedResult: pnl - fees };
 }
 
-/**
- * The book is only trusted while it matches the chain: the same size AND the same anchor. A size match alone is not enough (an unseen
- * close + reopen of the same size would pass it), so the portfolio's matcher sequence the book recorded after its last fill must be
- * exactly what the chain shows before this trade (`preSeq`). Unknown on either side = not trusted.
- */
-export function reconcile(book: Book | null, onChainQ: bigint, preSeq: bigint | null): Book | null {
+/** The book is only trusted while it matches the chain: a different size (ADL, another device) means the history is incomplete. */
+export function reconcile(book: Book | null, onChainQ: bigint): Book | null {
   if (!book) return null;
-  if (book.q !== onChainQ) return null;
-  if (book.seq === null || preSeq === null || book.seq !== preSeq) return null;
-  return book;
+  return book.q === onChainQ ? book : null;
 }
 
 // ── persistence (device-local) ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -89,7 +78,7 @@ export function loadBook(wallet: string, slab: string, portfolio: string): Book 
     const j = JSON.parse(raw) as Record<string, string>;
     const ok = (v: unknown): v is string => typeof v === "string" && /^-?\d+$/.test(v);
     if (!ok(j.q) || !ok(j.avgE6) || !ok(j.fees) || !ok(j.pnl)) return null;
-    return { q: BigInt(j.q), avgE6: BigInt(j.avgE6), fees: BigInt(j.fees), pnl: BigInt(j.pnl), seq: ok(j.seq) ? BigInt(j.seq) : null };
+    return { q: BigInt(j.q), avgE6: BigInt(j.avgE6), fees: BigInt(j.fees), pnl: BigInt(j.pnl) };
   } catch {
     return null;
   }
@@ -100,7 +89,7 @@ export function saveBook(wallet: string, slab: string, portfolio: string, book: 
     const st = store();
     if (!st) return;
     if (!book) st.removeItem(KEY(wallet, slab, portfolio));
-    else st.setItem(KEY(wallet, slab, portfolio), JSON.stringify({ q: book.q.toString(), avgE6: book.avgE6.toString(), fees: book.fees.toString(), pnl: book.pnl.toString(), seq: book.seq === null ? null : book.seq.toString() }));
+    else st.setItem(KEY(wallet, slab, portfolio), JSON.stringify({ q: book.q.toString(), avgE6: book.avgE6.toString(), fees: book.fees.toString(), pnl: book.pnl.toString() }));
   } catch {
     /* storage unavailable: no result is claimed later (the book is simply absent) */
   }
@@ -110,21 +99,14 @@ export function saveBook(wallet: string, slab: string, portfolio: string, book: 
  * Applies a landed fill to the stored book and returns the finished trade's result (null = no finished trade, or its start was not
  * seen). `onChainQBefore` is the position (signed, effective) the chain had BEFORE this fill: the book must match it.
  */
-export function recordFill(
-  wallet: string,
-  slab: string,
-  portfolio: string,
-  f: FillIn,
-  onChainQBefore: bigint,
-  anchor: { preSeq: bigint | null; postSeq: bigint | null },
-): bigint | null {
-  const trusted = reconcile(loadBook(wallet, slab, portfolio), onChainQBefore, anchor.preSeq);
+export function recordFill(wallet: string, slab: string, portfolio: string, f: FillIn, onChainQBefore: bigint): bigint | null {
+  const trusted = reconcile(loadBook(wallet, slab, portfolio), onChainQBefore);
   // Flat before and the fill opens: a fresh book (its whole life is seen). Anything else without a matching book: history unknown.
   if (!trusted && onChainQBefore !== 0n) {
     saveBook(wallet, slab, portfolio, null);
     return null;
   }
   const r = applyFill(trusted, f);
-  saveBook(wallet, slab, portfolio, r.book ? { ...r.book, seq: anchor.postSeq } : null);
+  saveBook(wallet, slab, portfolio, r.book);
   return r.closedResult;
 }

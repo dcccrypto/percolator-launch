@@ -108,9 +108,9 @@ import { takeFillResult } from "@/lib/limits/fill-check";
 import { feeRaiseCopy, takeFeeRaise } from "@/lib/v22/fee-raise-note";
 import { sizeWithLots } from "@/lib/v22/growth-room";
 import { clippedFillBody, readClippedFill } from "@/lib/v22/clipped-fill";
+import { feeBpsWithSpread } from "@/lib/v22/spread-estimate";
 import { effectivePriceE6, readExecFill, type ExecFill } from "@/lib/v22/exec-fill";
 import { recordFill } from "@/lib/trade-book";
-import { readMatcherSequence } from "@/lib/v22/portfolio-anchor";
 import { recordRealized } from "@/lib/realized-pnl";
 import { useSpreadQuoter } from "@/hooks/useSpreadQuoter";
 import { isPortfolioClosable } from "@/lib/close-trading-account";
@@ -413,8 +413,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   };
   const [engineLockError, setEngineLockError] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  // M7: the matcher's spread / price impact for the confirm dialog (read once while it is open).
-  const spreadFor = useSpreadQuoter(showConfirmModal);
+  // M7: the matcher's spread / price impact for the confirm dialog (read once; also feeds the ticket's Fee cell).
+  const spreadFor = useSpreadQuoter(isDevnetV22Enabled());
   const [confirmSnapshot, setConfirmSnapshot] = useState<{
     positionSize: bigint;
     marginNative: bigint;
@@ -1134,7 +1134,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const ticketLimits = deriveTicketLimits(limitsInput);
   // Product review T-1: show what the fill is expected to charge (base + matcher quote fee + busy-side fee), not the base alone.
   // Display only; the signed cap and the deposit math above are unchanged.
-  const estFeeBps = estimatedTotalFeeBps(tradingFeeBps, ticketLimits.fee);
+  // L-2: on a fee-channel market the chain charges base + the matcher's requested fee whether or not the P2 flag put it in the estimate.
+  const estFeeBps = feeBpsWithSpread(estimatedTotalFeeBps(tradingFeeBps, ticketLimits.fee), tradingFeeBps, hasOrder ? spreadFor(positionSize, direction === "long") : null);
   const estFee = hasOrder ? computeTradingFee((positionSize * oracleE6) / 1_000_000n, estFeeBps) : 0n;
   const estFeeHasExtras = feeHasExtras(tradingFeeBps, estFeeBps);
   // P1 99165722 (F-7): a close that GROWS a halted / capped LP is refused or clipped too.
@@ -1526,11 +1527,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           else if (entryIdx !== null) clearEntryPrice(slabAddress, entryIdx, publicKey?.toBase58());
           // The trade book follows every fill so a finished trade's result (open + adds + close, fees and spread included) is known.
           if (ef && publicKey) {
-            // The book's chain anchor: the portfolio's matcher sequence after this fill (read at the fill's slot). Before it ran it was one lower
-            // per FILL record, which is what the previous book must have recorded.
-            const postSeq = await readMatcherSequence(connection, ef.taker, slabProgramId as PublicKey, ef.slot);
-            const preSeq = postSeq !== null ? postSeq - BigInt(ef.legs) : null;
-            const r = recordFill(publicKey.toBase58(), slabAddress, ef.taker.toBase58(), { q: ef.executedQ, bookedPriceE6: ef.bookedPriceE6, feeAtoms: ef.feeAtoms }, existingPositionSize, { preSeq, postSeq });
+            // The size the chain had BEFORE this fill: the measured change (ADL-effective, read around the trade) is fresher than the
+            // render-time position, which can be stale (e.g. the position was closed on another device). Fallback: the render-time size.
+            const change = await measured.catch(() => null);
+            const before = change ? change.beforeQ : existingPositionSize;
+            const r = recordFill(publicKey.toBase58(), slabAddress, ef.taker.toBase58(), { q: ef.executedQ, bookedPriceE6: ef.bookedPriceE6, feeAtoms: ef.feeAtoms }, before);
             if (r !== null) recordRealized(publicKey.toBase58(), slabAddress, r);
           }
         });
