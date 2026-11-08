@@ -10,7 +10,7 @@ import { LP_EXPOSURE_DEFAULT_BPS } from "@/lib/matcher-params";
 import { FeeBreakdown } from "@/components/FeeBreakdown";
 import { WizardTranchePanel } from "@/components/limits/CreatorLimits";
 import { PositionLimit } from "./PositionLimit";
-import { PAYOUT_RESERVE_COPY } from "@/lib/wizard-copy";
+import { CREATOR_END_COPY, PAYOUT_RESERVE_COPY } from "@/lib/wizard-copy";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 
 /**
@@ -325,6 +325,21 @@ export const StepControlRoom: FC<StepControlRoomProps> = ({
         </div>
 
         <div className="flex flex-col items-center justify-center rounded-[4px] border border-[var(--border)] bg-[var(--panel-bg)] p-4">
+          {/* Council M12: say how the market ends and how capital comes back BEFORE the launch button. v2.2 facts only. */}
+          {isDevnetV22Enabled() && (
+            <div data-testid="creator-commitment" className="mb-4 w-full space-y-1.5 text-[11px] leading-relaxed text-[var(--text-muted)]">
+              <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">{CREATOR_END_COPY.title}</div>
+              <p>{CREATOR_END_COPY.firstLoss}</p>
+              <p>{CREATOR_END_COPY.withdraw}</p>
+              <p>{CREATOR_END_COPY.rent}</p>
+              <p>{CREATOR_END_COPY.refund}</p>
+              <p>{CREATOR_END_COPY.ends}</p>
+              <p>{CREATOR_END_COPY.admin}</p>
+              <p>{CREATOR_END_COPY.positions}</p>
+              <p>{CREATOR_END_COPY.insurance}</p>
+              <p>{CREATOR_END_COPY.undecided}</p>
+            </div>
+          )}
           <HoldToLaunch
             onLaunch={onLaunch}
             disabled={launchDisabled}
