@@ -7,10 +7,11 @@
  */
 import { describe, expect, it } from "vitest";
 import { deriveTicketLimits, type TicketLimitsInput } from "@/lib/limits/ticket";
-import { estimatedTotalFeeBps, gateFeeBps, ticketFeeForEstimate } from "@/lib/limits/estimated-fee";
+import { feeExtrasLabel, estimatedTotalFeeBps, gateFeeBps, ticketFeeForEstimate } from "@/lib/limits/estimated-fee";
 import { sideOverFillable } from "@/lib/limits/fillable-quote";
 import { growthMarketView } from "@/lib/v21/growth-market";
-import { marketLimits, OWNER_A } from "../limits/fixtures";
+import { ALL_ON, marketLimits, OWNER_A } from "../limits/fixtures";
+import { engineOpenNeedAtoms, tradableMarginAtoms } from "@/lib/first-trade";
 import { marketRaw } from "../v21/fixtures";
 
 const LOT = 1_000_000n;
@@ -25,6 +26,7 @@ const view = () =>
     bound: true,
   })!;
 const ROOM = 9_284_648n;
+const USD_ATOMS = 1_000_000n;
 const input = (over: Partial<TicketLimitsInput> = {}): TicketLimitsInput => ({
   limits: marketLimits({ matcher: null }), direction: "long", sizeQ: 100n * LOT, takerPosQ: 0n, takerOwner: OWNER_A, leverage: 1, limitPriceE6: 0n,
   growth: view(), takerEquity: null, ...over,
@@ -43,10 +45,15 @@ describe("M9 a first trade (no account, equity unknown) is capped at the side ro
     expect(sideOverFillable(1n * LOT, t.growthCapQ)).toBe(false);
     expect(sideOverFillable(100n * LOT, null)).toBe(false);
   });
-  it("a closing part of an opposite position adds to what can be ordered", () => {
+  it("a flip by a holder (equity unknown): the cap is the closing leg PLUS the side's room", () => {
+    const g = view();
     const t = deriveTicketLimits(input({ direction: "short", takerPosQ: 3n * LOT }));
-    // closing 3 lots + the short side's room (never less than the closing part)
-    expect(t.growthCapQ! >= 3n * LOT).toBe(true);
+    expect(g.short.headroomQ! > 0n).toBe(true);
+    expect(t.growthCapQ).toBe(3n * LOT + g.short.headroomQ!);
+    const l = deriveTicketLimits(input({ direction: "long", takerPosQ: -2n * LOT }));
+    expect(l.growthCapQ).toBe(2n * LOT + ROOM);
+    // adding to the same side has no closing part
+    expect(deriveTicketLimits(input({ direction: "long", takerPosQ: 2n * LOT })).growthCapQ).toBe(ROOM);
   });
   it("a known-equity account keeps its (tighter) gate cap, never loosened", () => {
     const t = deriveTicketLimits(input({ takerEquity: 1_379_387_398n, takerPosQ: 40n * LOT }));
@@ -63,9 +70,35 @@ describe("M9 the busy-side surcharge is in the Fee even with no matcher quote", 
     expect(estimatedTotalFeeBps(30n, ticketFeeForEstimate(t))).toBe(30n + util);
     expect(gateFeeBps(30n, input())).toBe(30n + util);
   });
-  it("with a matcher quote the surcharge was already counted and is not doubled", () => {
-    const t = deriveTicketLimits(input({ limits: marketLimits() }));
-    expect(estimatedTotalFeeBps(30n, ticketFeeForEstimate(t))).toBe(estimatedTotalFeeBps(30n, t.fee));
+  it("with a CHARGED matcher quote the quote fee and the surcharge are each counted once", () => {
+    const base0 = marketLimits();
+    const charged = marketLimits({
+      matcher: { ...base0.matcher!, kind: 1, v2: undefined, maxTotalBps: 60 },
+      flags: { ...ALL_ON, p2FeeCharged: true },
+      riskLimits: { sideOiCapQ: 0n, lpFloorAtoms: 0n, lpExposureKBps: 0, execBandBps: 0, matcherExtMode: 1, maxRequestedFeeBps: 100, allDefault: false },
+    });
+    const t = deriveTicketLimits(input({ limits: charged }));
+    expect(t.fee?.charged).toBe(true);
+    expect(t.fee!.requestedBps).toBe(60n);
+    const util = BigInt(t.growth!.fee!.utilFeeBps);
+    expect(util > 0n).toBe(true);
+    expect(t.fee!.utilFeeBps).toBe(util); // the surcharge is already inside the quote's fee
+    expect(estimatedTotalFeeBps(30n, ticketFeeForEstimate(t))).toBe(30n + 60n + util);
+  });
+  it("the tooltip names only the parts that are charged", () => {
+    expect(feeExtrasLabel(null)).toBe("");
+    expect(feeExtrasLabel({ charged: false, requestedBps: 0n, utilFeeBps: 443n })).toBe("the busy-side fee");
+    expect(feeExtrasLabel({ charged: true, requestedBps: 60n })).toBe("the market maker's quote fee");
+    expect(feeExtrasLabel({ charged: true, requestedBps: 60n, utilFeeBps: 5n })).toBe("the market maker's quote fee and the busy-side fee");
+    expect(feeExtrasLabel({ charged: true, requestedBps: 0n, utilFeeBps: 0n })).toBe("");
+  });
+  it("deposit level: the engine gate fee includes the busy fee, so the engine need rises and the tradable balance falls", () => {
+    const withUtil = gateFeeBps(30n, input());
+    expect(withUtil > 30n).toBe(true);
+    const notional = 1_000n * USD_ATOMS;
+    expect(engineOpenNeedAtoms(notional, 1_000n, withUtil).fee).toBeGreaterThan(engineOpenNeedAtoms(notional, 1_000n, 30n).fee);
+    const tradable = (feeBps: bigint) => tradableMarginAtoms({ inMarketAvailable: 0n, walletAtoms: 39_000n * USD_ATOMS, leverage100: 100, feeBps, initialMarginBps: 1_000n });
+    expect(tradable(withUtil)).toBeLessThan(tradable(30n));
   });
   it("round-1 numbers: $5,000 asked, ~$950 room -> quote on the fillable amount", () => {
     // 10.6165 SOL fillable at ~$89.5: the typed 55.8 SOL is clamped; deposit scales with the fill, not the ask.

@@ -293,7 +293,7 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
       quoteFeeBps: out.fee?.requestedBps ?? 0n,
     };
     if (i.takerEquity == null) {
-      // M9: a first trade (no account yet, equity unknown) cannot run the equity gate, but the program still clips the open to the side's
+      // M9: a first trade or a funding-mode order (no account yet or a bundled deposit, so equity is unknown) cannot run the equity gate, but the program still clips the open to the side's
       // room. Without this cap the Max and the size clamp ignored the room and the quote (deposit, margin, fee) priced the whole ask.
       const side = i.direction === "long" ? i.growth.long : i.growth.short;
       if (side.growthOn) {

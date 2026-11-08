@@ -19,6 +19,22 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/hooks/useWalletCompat", () => ({ useWalletCompat: mocks.useWalletCompat, useConnectionCompat: mocks.useConnectionCompat }));
 vi.mock("@/hooks/useUserAccount", () => ({ useUserAccount: mocks.useUserAccount, useUserAccountScanPending: () => false }));
 vi.mock("@/components/providers/SlabProvider", () => ({ useSlabState: mocks.useSlabState }));
+// Probe: GrowthTicketPanelLive is a real child of the ticket. Its layout effect runs in the SAME commit as the render that follows an edit,
+// after the DOM is updated and BEFORE the ticket's passive clamp effect, so it sees the pre-clamp state that act() otherwise hides.
+const probe = vi.hoisted(() => ({ commits: [] as Array<{ size: string; disabled: boolean; label: string }> }));
+vi.mock("@/components/trade/GrowthTicketPanelLive", async () => {
+  const React = await import("react");
+  return {
+    GrowthTicketPanelLive: () => {
+      React.useLayoutEffect(() => {
+        const input = document.querySelector('[data-testid="trade-size-input"]') as HTMLInputElement | null;
+        const btn = document.querySelector('[data-testid="trade-submit"]') as HTMLButtonElement | null;
+        if (input && btn) probe.commits.push({ size: input.value, disabled: btn.disabled, label: btn.textContent ?? "" });
+      });
+      return null;
+    },
+  };
+});
 vi.mock("@/hooks/useMarketLimits", () => ({ useMarketLimits: mocks.useMarketLimits }));
 vi.mock("@/hooks/useEngineState", () => ({ useEngineState: mocks.useEngineState }));
 vi.mock("@/hooks/useInitUser", () => ({ useInitUser: () => ({ initUser: vi.fn(), loading: false, error: null }) }));
@@ -107,8 +123,12 @@ describe("M9 mounted: the quote follows the fillable room (first trade, wallet 3
     // Whatever the summary / deposit field says, it is on 350, never on 5,000.
     const body = document.body.textContent ?? "";
     expect(body).not.toMatch(/5,?000\.00 USDC/);
-    const deposit = screen.queryByTestId("first-trade-deposit") as HTMLInputElement | null;
-    if (deposit) expect(Number(deposit.value)).toBeLessThan(400);
+    // The bundled deposit field is the first-trade quote: it must be there and sized on the 350 fill (margin + fee + buffer), not on 5,000.
+    await waitFor(() => expect(document.getElementById("first-trade-deposit")).not.toBeNull());
+    const deposit = document.getElementById("first-trade-deposit") as HTMLInputElement;
+    const quoted = Number(deposit.placeholder.replace(/,/g, "")); // the field is empty until edited; the placeholder is the quoted deposit
+    expect(quoted).toBeGreaterThan(350); // margin + fee + buffer on the 350 fill
+    expect(quoted).toBeLessThan(450); // the 5,000 ask would quote ~5,500
     expect(submit.textContent).not.toContain("Over the max fillable size");
   });
 
@@ -121,6 +141,11 @@ describe("M9 mounted: the quote follows the fillable room (first trade, wallet 3
     const fee = Number((summary.match(/Fee \(est\.\)([0-9.,]+)/) ?? [])[1]?.replace(/,/g, ""));
     // 300 notional at the 30 bps base alone would be 0.90; the busy-side part makes it larger.
     expect(fee).toBeGreaterThan(0.9);
+    // The tooltip names the busy-side fee, and does NOT credit a matcher quote fee that does not exist on this market.
+    const tip = Array.from(document.querySelectorAll('[role="tooltip"]')).map((e) => e.textContent ?? "").find((t) => t.startsWith("Estimated") && t.includes("base fee"));
+    expect(tip).toBeTruthy();
+    expect(tip).toContain("the busy-side fee");
+    expect(tip).not.toContain("quote fee");
   });
 
   it("(4) a funded wallet with an impossible size has no enabled Get-test-funds / deposit CTA", async () => {
@@ -131,5 +156,25 @@ describe("M9 mounted: the quote follows the fillable room (first trade, wallet 3
     expect(btn().textContent).not.toContain("Get test funds");
     await waitFor(() => expect((screen.getByTestId("trade-size-input") as HTMLInputElement).value).toBe("350.00"));
     expect(btn().textContent).not.toContain("Get test funds");
+  });
+
+  it("(5) in the render BEFORE the clamp lands, an oversize ask is already blocked and labelled, never 'Get test funds'", async () => {
+    await mount();
+    probe.commits.length = 0;
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "5000" } });
+    const pre = probe.commits.find((c) => c.size === "5000");
+    expect(pre).toBeTruthy();
+    expect(pre!.disabled).toBe(true);
+    expect(pre!.label).toContain("Over the max fillable size");
+    expect(pre!.label).not.toContain("Get test funds");
+    probe.commits.length = 0;
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "999999999" } });
+    const pre2 = probe.commits.find((c) => c.size === "999999999");
+    expect(pre2).toBeTruthy();
+    expect(pre2!.disabled).toBe(true);
+    expect(pre2!.label).not.toContain("Get test funds");
+    // And once the clamp lands the order is the fillable one and submit is live again.
+    await waitFor(() => expect((screen.getByTestId("trade-size-input") as HTMLInputElement).value).toBe("350.00"));
+    expect((screen.getByTestId("trade-submit") as HTMLButtonElement).disabled).toBe(false);
   });
 });

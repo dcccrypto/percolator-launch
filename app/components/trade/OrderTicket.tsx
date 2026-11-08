@@ -111,7 +111,7 @@ import { clippedFillBody, readClippedFill } from "@/lib/v22/clipped-fill";
 import { isPortfolioClosable } from "@/lib/close-trading-account";
 import { defaultFeeCapMarginBps } from "@/lib/limits/fee-channel";
 import { OrderTicketLimits, reasonCopy } from "@/components/limits/OrderTicketLimits";
-import { estimatedTotalFeeBps, feeHasExtras, gateFeeBps, ticketFeeForEstimate } from "@/lib/limits/estimated-fee";
+import { estimatedTotalFeeBps, feeHasExtras, feeExtrasLabel, gateFeeBps, ticketFeeForEstimate } from "@/lib/limits/estimated-fee";
 import { sideOverFillable } from "@/lib/limits/fillable-quote";
 import { isUsdLikeCollateral } from "@/lib/v22/tier-config";
 import { GrowthTicketPanelLive } from "@/components/trade/GrowthTicketPanelLive";
@@ -1127,8 +1127,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   };
   const ticketLimits = deriveTicketLimits(limitsInput);
   // Product review T-1: show what the fill is expected to charge (base + matcher quote fee + busy-side fee), not the base alone.
-  // Display only; the signed cap and the deposit math above are unchanged.
-  // M9: the busy-side surcharge is part of it even with no matcher quote (ticketFeeForEstimate).
+  // M9: the busy-side surcharge is part of it even with no matcher quote (ticketFeeForEstimate). The signed cap is unchanged, but the
+  // same estimate (gateFeeBps, via ticketFeeForEstimate) now also sizes the engine gate: openNeed / the bundled deposit,
+  // exceedsBalance and the balance-bound Max include the busy-side fee on a no-matcher growth market (#3553: the engine charges it before the IM gate).
   const estFeeBps = estimatedTotalFeeBps(tradingFeeBps, ticketFeeForEstimate(ticketLimits));
   const estFee = hasOrder ? computeTradingFee((positionSize * oracleE6) / 1_000_000n, estFeeBps) : 0n;
   const estFeeHasExtras = feeHasExtras(tradingFeeBps, estFeeBps);
@@ -2332,7 +2333,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             /* A trader saw what they pay and nothing about where it goes. #2565. Product review T-1: the extras are named too. */
             tooltip={
               estFeeHasExtras
-                ? `Estimated ${(Number(estFeeBps) / 100).toFixed(2)}%: the market's ${(Number(tradingFeeBps) / 100).toFixed(2)}% base fee plus the market maker's quote fee${ticketLimits.fee?.utilFeeBps ? " and the busy-side fee" : ""}. The extra parts go to the market's liquidity (Earn). Your signature caps the total.${feeDestinationTitle ? ` Base fee split: ${feeDestinationTitle}` : ""}`
+                ? `Estimated ${(Number(estFeeBps) / 100).toFixed(2)}%: the market's ${(Number(tradingFeeBps) / 100).toFixed(2)}% base fee plus ${feeExtrasLabel(ticketFeeForEstimate(ticketLimits))}. The extra parts go to the market's liquidity (Earn). Your signature caps the total.${feeDestinationTitle ? ` Base fee split: ${feeDestinationTitle}` : ""}`
                 : feeDestinationTitle
             }
           />
@@ -2560,7 +2561,6 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           onClick={() => {
             if (submitDisabled) return;
             // UX WP-6: more deposit than the wallet holds => get funds first (nothing to sign yet).
-            if (overFillable) return;
             if (fundOverWallet || (exceedsBalance && !fundingMode)) {
               toggleInlineDeposit("deposit");
               return;
