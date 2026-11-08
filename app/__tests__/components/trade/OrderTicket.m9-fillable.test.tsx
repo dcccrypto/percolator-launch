@@ -7,6 +7,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const slow = vi.hoisted(() => ({ on: false }));
 const mocks = vi.hoisted(() => ({
   useWalletCompat: vi.fn(),
   useConnectionCompat: vi.fn(),
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   useSlabState: vi.fn(),
   useEngineState: vi.fn(),
   useMarketLimits: vi.fn(),
+  useMarketFillCap: vi.fn(),
 }));
 
 vi.mock("@/hooks/useWalletCompat", () => ({ useWalletCompat: mocks.useWalletCompat, useConnectionCompat: mocks.useConnectionCompat }));
@@ -35,6 +37,7 @@ vi.mock("@/components/trade/GrowthTicketPanelLive", async () => {
     },
   };
 });
+vi.mock("@/hooks/useSlowFlag", async (orig) => ({ ...(await orig<object>()), useSlowFlag: (active: boolean) => active && slow.on }));
 vi.mock("@/hooks/useMarketLimits", () => ({ useMarketLimits: mocks.useMarketLimits }));
 vi.mock("@/hooks/useEngineState", () => ({ useEngineState: mocks.useEngineState }));
 vi.mock("@/hooks/useInitUser", () => ({ useInitUser: () => ({ initUser: vi.fn(), loading: false, error: null }) }));
@@ -42,7 +45,7 @@ vi.mock("@/hooks/useFirstTrade", () => ({ useFirstTrade: () => ({ fundAndTrade: 
 vi.mock("@solana/spl-token", () => ({ getAssociatedTokenAddressSync: vi.fn(() => new PublicKey("11111111111111111111111111111111")) }));
 vi.mock("@/hooks/useTrade", () => ({ useTrade: () => ({ trade: vi.fn(), loading: false, error: null }), prewarmTradeSubmission: vi.fn() }));
 vi.mock("@/hooks/useBandRentView", () => ({ useBandRentView: () => null }));
-vi.mock("@/hooks/useMarketFillCap", () => ({ useMarketFillCap: () => null }));
+vi.mock("@/hooks/useMarketFillCap", () => ({ useMarketFillCap: mocks.useMarketFillCap }));
 vi.mock("@/hooks/useTokenMeta", () => ({ useTokenMeta: () => ({ symbol: "USDC", decimals: 6 }) }));
 vi.mock("@/hooks/useMarketInfo", () => ({ useMarketInfo: () => ({ market: { symbol: "SOL-PERP", max_leverage: 10 } }) }));
 vi.mock("@/hooks/useOracleFreshness", () => ({ useOracleFreshness: () => ({ isStale: false, stale: false }) }));
@@ -83,6 +86,7 @@ const view = () =>
   })!;
 
 beforeEach(() => {
+  mocks.useMarketFillCap.mockReturnValue(null);
   const g = view();
   mocks.useMarketLimits.mockReturnValue(marketLimits({ matcher: null, growth: g, flags: { p1: false, p2: false, p2FeeCharged: false, p3: false } }));
   __setDevnetV22ForTest(true);
@@ -203,8 +207,40 @@ describe("M9 mounted: the room is a required input (loading / failed room read f
         expect(screen.queryByTestId("limits-max-size-inline")).toBeNull();
       }
       expect(document.body.textContent).not.toContain("Reduced to the most available");
+      // No quote for the unfillable size: no deposit box / explain / summary Fee+Margin, only the calm note.
+      expect(document.getElementById("first-trade-deposit")).toBeNull();
+      expect(screen.queryByTestId("deposit-amount-input")).toBeNull();
+      expect(screen.queryByTestId("fund-explain")).toBeNull();
+      expect(screen.queryByTestId("starter-deposit-error")).toBeNull();
+      expect(screen.queryByTestId("ticket-summary")).toBeNull();
+      expect(screen.getByTestId("room-unknown-note").textContent).toContain(state === "loading" ? "Checking room" : "Market room unavailable");
+      expect(document.body.textContent).not.toMatch(/5,?516|1,?002,?999,?998/);
     });
   }
+
+  it("(8) a NON-null fill cap (LP inventory room) does not clamp or message while the room is unknown", async () => {
+    mocks.useMarketFillCap.mockReturnValue({ maxFillAbs: 252_489_196n * LOT, sideRoomQ: () => 252_489_196n * LOT });
+    unknown("loading");
+    await mountUnknown();
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "999999999" } });
+    await new Promise((r) => setTimeout(r, 50));
+    expect((screen.getByTestId("trade-size-input") as HTMLInputElement).value).toBe("999999999");
+    expect(document.body.textContent).not.toContain("Reduced to the most available");
+    expect(document.getElementById("first-trade-deposit")).toBeNull();
+    expect(btn().disabled).toBe(true);
+    expect(btn().textContent).toContain("Checking room");
+  });
+
+  it("(9) a stuck 'loading' turns into 'Market room unavailable' once the slow flag fires", async () => {
+    unknown("loading");
+    await mountUnknown();
+    expect(btn().textContent).toContain("Checking room");
+    slow.on = true;
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "300" } }); // re-render (memoised ticket)
+    await waitFor(() => expect(btn().textContent).toContain("Market room unavailable"));
+    expect(btn().disabled).toBe(true);
+    slow.on = false;
+  });
 
   it("(7) control: once the room loads, Max is the room and an in-room order is submittable again", async () => {
     unknown("loading");
@@ -220,5 +256,19 @@ describe("M9 mounted: the room is a required input (loading / failed room read f
     fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "300" } });
     await waitFor(() => expect(btn().disabled).toBe(false));
     expect(btn().textContent).not.toContain("Checking room");
+  });
+
+  it("(10) a reduce of the open position is not held on the room read (opposite side, no larger than the position)", async () => {
+    mocks.useUserAccount.mockReturnValue({ idx: 3, account: { capital: 500_000_000n, positionSize: 200n * LOT, entryPrice: 1_000_000n, pnl: 0n, feeCredits: 0n } });
+    unknown("loading");
+    await mountUnknown();
+    // Same-direction (long) add is held on the room ...
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "50" } });
+    expect(btn().textContent).toContain("Checking room");
+    // ... a short smaller than the long position is a reduce: not held by the room read.
+    fireEvent.click(screen.getByTestId("trade-side-short"));
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "50" } });
+    expect(btn().textContent).not.toContain("Checking room");
+    expect(btn().textContent).not.toContain("Market room unavailable");
   });
 });

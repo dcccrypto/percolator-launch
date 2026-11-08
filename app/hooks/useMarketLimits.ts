@@ -168,7 +168,7 @@ export interface MarketLimits {
   /**
    * M9 (round 4): is the side room a ROOM-LIMITED v2.2 market reports known? "known" = the growth view is there; "none" = this asset has no growth
    * record (genuinely no room limit); "loading" / "error" = the asset has a growth record but the view cannot be built yet (slab / LP read pending,
-   * clock unknown) or the LP read failed. The ticket fails CLOSED on loading / error (no wallet-bound Max, no deposit quote, submit held).
+   * clock unknown) or a completed LP read found no usable LP (discovery failed / read error). The ticket fails CLOSED on loading / error (no wallet-bound Max, no deposit quote, submit held).
    * Only ever set on a v2.2 build; undefined elsewhere (legacy paths unchanged).
    */
   growthRoom?: "known" | "none" | "loading" | "error";
@@ -525,7 +525,7 @@ export function useMarketLimits(
       sameOwnerPending: false,
       sameOwnerUnresolved: false,
       growth,
-      ...(v21 && isDevnetV22Enabled() ? { growthRoom: growthRoomState(growth, raw, assetIndex, !!accPart?.error && !accPart.lp) } : {}),
+      ...(v21 && isDevnetV22Enabled() ? { growthRoom: growthRoomState(growth, raw, assetIndex, !!accPart && !accPart.lp) } : {}),
     };
   }, [
     v21,
