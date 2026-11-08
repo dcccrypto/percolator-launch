@@ -148,8 +148,7 @@ as $$
 $$;
 
 -- ─── status: public poll state (no per-wallet data) ─────────────────────────
-drop function if exists perc_vote.status(bytea);
-create function perc_vote.status(p_client_key bytea)
+create or replace function perc_vote.status(p_client_key bytea)
 returns table (outcome text, retry_after_seconds integer, state text, poll_key text,
                starts_at text, ends_at text, server_now text)
 language plpgsql volatile security definer set search_path = pg_catalog, pg_temp
@@ -178,8 +177,7 @@ $$;
 
 -- ─── issue_nonce: single-use challenge for one wallet + one choice ──────────
 -- outcome: invalid | rate_limited | not_started | closed | not_eligible | ok
-drop function if exists perc_vote.issue_nonce(text, text, bytea);
-create function perc_vote.issue_nonce(p_owner text, p_choice text, p_client_key bytea)
+create or replace function perc_vote.issue_nonce(p_owner text, p_choice text, p_client_key bytea)
 returns table (outcome text, retry_after_seconds integer, poll_key text, nonce text,
                issued_at text, expires_at text, message text)
 language plpgsql volatile security definer set search_path = pg_catalog, pg_temp
@@ -238,8 +236,7 @@ $$;
 -- ─── cast_vote: called ONLY after the app verified the Ed25519 signature ────
 -- outcome: invalid | rate_limited | not_started | closed | not_eligible |
 --          bad_nonce | expired | message_mismatch | superseded | recorded
-drop function if exists perc_vote.cast_vote(text, text, text, text, text, text, bytea, bytea);
-create function perc_vote.cast_vote(p_owner text, p_choice text, p_nonce text, p_issued_at text, p_expires_at text,
+create or replace function perc_vote.cast_vote(p_owner text, p_choice text, p_nonce text, p_issued_at text, p_expires_at text,
                                     p_message text, p_signature bytea, p_client_key bytea)
 returns table (outcome text, retry_after_seconds integer, choice text, revision integer, cast_at text, ends_at text)
 language plpgsql volatile security definer set search_path = pg_catalog, pg_temp
@@ -326,8 +323,7 @@ $$;
 -- ─── tally: aggregate result, only after the window closed ──────────────────
 -- winner is weekly-fee-claims only on a strict balance majority; ties and zero
 -- votes resolve to buy-and-burn.
-drop function if exists perc_vote.tally(bytea);
-create function perc_vote.tally(p_client_key bytea)
+create or replace function perc_vote.tally(p_client_key bytea)
 returns table (outcome text, retry_after_seconds integer, state text, poll_key text, ends_at text,
                weekly_fee_claims_raw text, buy_and_burn_raw text, weekly_fee_claims_wallets integer,
                buy_and_burn_wallets integer, eligible_raw_total text, eligible_wallets integer,
@@ -387,8 +383,7 @@ end
 $$;
 
 -- ─── submit_gate: per-client/global limiter run BEFORE signature checks ─────
-drop function if exists perc_vote.submit_gate(bytea);
-create function perc_vote.submit_gate(p_client_key bytea)
+create or replace function perc_vote.submit_gate(p_client_key bytea)
 returns integer
 language plpgsql volatile security definer set search_path = pg_catalog, pg_temp
 as $$
@@ -409,8 +404,7 @@ end
 $$;
 
 -- ─── admin: attempt limiter (called before the secret is compared) ──────────
-drop function if exists perc_vote.admin_gate(bytea);
-create function perc_vote.admin_gate(p_client_key bytea)
+create or replace function perc_vote.admin_gate(p_client_key bytea)
 returns integer
 language plpgsql volatile security definer set search_path = pg_catalog, pg_temp
 as $$
@@ -429,8 +423,7 @@ $$;
 
 -- ─── start_poll: one-shot, 24h from now, pinned to the active snapshot ──────
 -- outcome: started | already_started | no_snapshot | invalid
-drop function if exists perc_vote.start_poll(text);
-create function perc_vote.start_poll(p_poll_key text)
+create or replace function perc_vote.start_poll(p_poll_key text)
 returns table (outcome text, starts_at text, ends_at text, snapshot_label text)
 language plpgsql volatile security definer set search_path = pg_catalog, pg_temp
 as $$
