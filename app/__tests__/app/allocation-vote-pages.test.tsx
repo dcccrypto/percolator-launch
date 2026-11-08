@@ -17,6 +17,7 @@ vi.mock("next/navigation", () => ({
 
 import AllocationPage, { metadata as allocationMeta } from "@/app/allocation/page";
 import VotePage, { metadata as voteMeta } from "@/app/vote/page";
+import VoteAdminPage, { metadata as adminMeta } from "@/app/vote/admin/page";
 
 const render = async (Page: () => Promise<JSX.Element>) => renderToStaticMarkup(await Page());
 
@@ -50,20 +51,30 @@ describe("/allocation", () => {
 });
 
 describe("/vote", () => {
-  it("says voting is not open and has no start/sign/submit control", async () => {
+  it("states the rules; server HTML has no vote control (state is loaded from the server API)", async () => {
     const html = await render(VotePage);
-    expect(html).toContain("Voting is not open.");
+    expect(html).toContain("Votes are weighted by snapshot balance");
+    expect(html).toContain("A tie or no votes means buy and burn.");
+    expect(html).toContain("It is not a transaction, costs nothing and moves no");
+    expect(html).toContain("Loading vote status");
     expect(html).not.toMatch(/<form|<input|<button|<textarea/i);
-    expect(html).not.toMatch(/start|sign message|submit/i);
+    expect(html).not.toMatch(/[1-9A-HJ-NP-Za-km-z]{32,44}/);
   });
 
-  it("is noindex, nofollow", () => {
+  it("is noindex, nofollow (admin page too)", () => {
     expect(voteMeta.robots).toMatchObject({ index: false, follow: false, googleBot: { index: false, follow: false } });
+    expect(adminMeta.robots).toMatchObject({ index: false, follow: false, googleBot: { index: false, follow: false } });
+  });
+
+  it("admin page holds no secret: one password field, nothing prefilled", async () => {
+    const html = await render(VoteAdminPage);
+    expect(html.match(/type="password"/g)).toHaveLength(1);
+    expect(html).not.toMatch(/value="[^"]+"/);
   });
 });
 
 describe("copy stays minimal", () => {
-  it.each([VotePage])("vote page: no raise figures, dollar amounts, or em dashes", async (Page) => {
+  it.each([VotePage, VoteAdminPage])("vote pages: no raise figures, dollar amounts, or em dashes", async (Page) => {
     const html = await render(Page);
     expect(html).not.toMatch(/\$|raise|USD|—/i);
   });
@@ -76,6 +87,7 @@ describe("pages 404 on any other host", () => {
       currentHost = host;
       await expect(AllocationPage()).rejects.toThrow("NEXT_NOT_FOUND");
       await expect(VotePage()).rejects.toThrow("NEXT_NOT_FOUND");
+      await expect(VoteAdminPage()).rejects.toThrow("NEXT_NOT_FOUND");
     },
   );
 });

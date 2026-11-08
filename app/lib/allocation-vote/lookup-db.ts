@@ -19,7 +19,8 @@ const SQL =
 let pool: Pool | null = null;
 let poolKey = "";
 
-function getPool(cfg: AllocationConfig): Pool {
+/** Shared with the vote (vote-db.ts): one small pool per instance for the one runtime role. */
+export function getPool(cfg: AllocationConfig): Pool {
   const key = `${cfg.connectionString}|${cfg.ssl ? "tls" : "local"}`;
   if (pool && poolKey === key) return pool;
   if (pool) void pool.end().catch(() => {});
