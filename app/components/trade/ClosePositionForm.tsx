@@ -4,7 +4,7 @@ import { catchUpAvailableLine } from "@/lib/limits/catchup-estimate";
 import { priceBehindLine } from "@/lib/oracle-stale-gate";
 import { FC, useId, useMemo, useState } from "react";
 import { formatTokenAmount } from "@/lib/format";
-import { SPREAD_LABEL, spreadCostAtoms, spreadValueText, type SpreadEstimate } from "@/lib/v22/spread-estimate";
+import { SPREAD_LABEL, spreadCostAtoms, spreadCostIsMinimum, spreadValueText, type SpreadEstimate } from "@/lib/v22/spread-estimate";
 import { formatLotPriceE6, formatLotQ } from "@/lib/v22/lot";
 import { computeMarkPnl, computeMarkPnlLinear, clampClosePercent, UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
 
@@ -340,7 +340,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
           <span className="text-[var(--text-dim)]">{SPREAD_LABEL}:</span>
           <span className="text-right font-mono font-medium text-[var(--text-secondary)]">
             {spreadValueText(preview.spread)}
-            {preview.spreadCost > 0n && ` −${formatTokenAmount(preview.spreadCost, decimals)} ${colSym}`}
+            {preview.spreadCost > 0n && ` ${spreadCostIsMinimum(preview.spread) ? "at least " : ""}−${formatTokenAmount(preview.spreadCost, decimals)} ${colSym}`}
           </span>
         </div>
         <div className="flex justify-between">

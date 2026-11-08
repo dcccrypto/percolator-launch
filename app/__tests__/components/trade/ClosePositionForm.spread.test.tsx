@@ -57,4 +57,8 @@ describe("ClosePositionForm spread line (M7)", () => {
     render(<ClosePositionForm {...props} closeFeeBpsFor={() => 30n} spreadEstimateFor={() => ({ kind: "quote", bps: 23, execPriceE6: null })} />);
     expect(screen.getByText(/43\.788/)).toBeInTheDocument(); // 44 - 0.12 - 0.092
   });
+  it("a range's cost is only a floor: the close row says 'at least'", () => {
+    render(<ClosePositionForm {...props} spreadEstimateFor={() => ({ kind: "range", minBps: 20, maxBps: 80 })} />);
+    expect(screen.getByTestId("close-spread")).toHaveTextContent("at least −0.08 USDC");
+  });
 });

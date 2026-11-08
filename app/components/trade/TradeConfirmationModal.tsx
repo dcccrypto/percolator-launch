@@ -14,7 +14,7 @@ import { describeLiqPrice, type LiqPriceDisplay } from "@/lib/liq-price-display"
 import { LiqPriceValue } from "./LiqPriceValue";
 import { orderHeading } from "@/lib/trading";
 import { FIRST_TRADE_COPY } from "@/lib/first-trade";
-import { SPREAD_LABEL, spreadCostAtoms, spreadValueText, type SpreadEstimate } from "@/lib/v22/spread-estimate";
+import { SPREAD_LABEL, spreadCostAtoms, spreadCostIsMinimum, spreadValueText, type SpreadEstimate } from "@/lib/v22/spread-estimate";
 
 interface TradeConfirmationModalProps {
   direction: "long" | "short";
@@ -322,7 +322,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
               {spreadValueText(spreadEstimate)}
               {(() => {
                 const cost = spreadCostAtoms(spreadEstimate, notional);
-                return cost !== null && cost > 0n ? ` ~${formatTokenAmount(cost, decimals)} ${settleSymbol}` : "";
+                return cost !== null && cost > 0n ? ` ${spreadCostIsMinimum(spreadEstimate) ? "at least " : "~"}${formatTokenAmount(cost, decimals)} ${settleSymbol}` : "";
               })()}
             </span>
           </div>

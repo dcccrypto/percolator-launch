@@ -11,6 +11,7 @@ import { usePortfolio } from "@/hooks/usePortfolio";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { PublicKey } from "@solana/web3.js";
 import { AccountKind } from "@percolatorct/sdk";
+import { recordRealized } from "@/lib/realized-pnl";
 
 vi.mock("next/link", () => ({
   default: ({ children, href }: any) => <a href={href}>{children}</a>,
@@ -93,6 +94,9 @@ const sweptProfitPosition = () => ({
 
 
 const mountWith = (positions: ReturnType<typeof sweptProfitPosition>[], totalPnl = 0n) => {
+  // M7: "profit" is only worded for a measured gain, so this swept-PROFIT fixture carries the finished trade's recorded gain.
+  localStorage.clear();
+  for (const p of positions) recordRealized(mockPublicKey.toBase58(), p.slabAddress, 5_000_000n);
   vi.mocked(useWalletCompat).mockReturnValue({ connected: true, publicKey: mockPublicKey } as never);
   vi.mocked(usePortfolio).mockReturnValue({
     positions,

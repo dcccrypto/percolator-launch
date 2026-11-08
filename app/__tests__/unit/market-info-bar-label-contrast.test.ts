@@ -8,7 +8,7 @@ import fs from "fs";
 import path from "path";
 
 const src = fs.readFileSync(path.resolve(__dirname, "../../components/trade/MarketInfoBar.tsx"), "utf8");
-const LABELS = ["Vol 24h", "Open Interest", "24h High", "24h Low", "Spread", "Funding / 8h"];
+const LABELS = ["Vol 24h", "Open Interest", "24h High", "24h Low", "Mark–index gap", "Funding / 8h"];
 
 describe("#60: MarketInfoBar stat labels", () => {
   for (const label of LABELS) {

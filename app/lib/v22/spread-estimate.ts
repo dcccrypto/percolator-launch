@@ -62,3 +62,8 @@ export function spreadCostAtoms(e: SpreadEstimate | null, notionalAtoms: bigint)
   const bps = e.kind === "quote" ? e.bps : e.minBps;
   return (notionalAtoms * BigInt(bps)) / 10_000n;
 }
+
+/** True when the cost from spreadCostAtoms is only a FLOOR (a range estimate): callers must word it "at least". */
+export function spreadCostIsMinimum(e: SpreadEstimate | null): boolean {
+  return !!e && e.kind === "range" && !e.inFee;
+}

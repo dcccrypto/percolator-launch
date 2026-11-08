@@ -106,4 +106,8 @@ describe("readExecFill", () => {
     const getTransaction = vi.fn().mockRejectedValue(new Error("boom"));
     expect(await readExecFill({ getTransaction } as never, "sigX", WRAPPER, { market: SWORDCAT }, async () => {}, 3)).toBeNull();
   });
+  it("a FAILED transaction at the read level is never a fill (meta.err set)", async () => {
+    const getTransaction = vi.fn().mockResolvedValue({ meta: { err: { InstructionError: [0, "Custom"] }, logMessages: clipped.logMessages } });
+    expect(await readExecFill({ getTransaction } as never, clipped.sig, WRAPPER, { market: SWORDCAT }, async () => {})).toBeNull();
+  });
 });

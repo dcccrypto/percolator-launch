@@ -185,10 +185,10 @@ export const MarketStatsCard: FC = () => {
       tooltip: "On-chain oracle index price",
     },
     {
-      label: "Spread",
+      label: "Mark–index gap",
       // Bug #851: full spread value in tooltip since display cell truncates long values
       value: spreadDisplayValue,
-      tooltip: spreadDisplayValue !== "—" ? `${spreadDisplayValue} — Mark–Index spread. Amber if >0.5%.` : "Mark – Index spread. Amber if >0.5%.",
+      tooltip: spreadDisplayValue !== "—" ? `${spreadDisplayValue} — Mark–index gap (not the cost of a trade: the order dialogs show the spread you will pay). Amber if >0.5%.` : "Mark – index gap (not the cost of a trade). Amber if >0.5%.",
       valueClass: spreadColor,
     },
     // Row 2 — Market health

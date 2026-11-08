@@ -44,4 +44,11 @@ describe("TradeConfirmationModal spread line (M7)", () => {
     expect(row).toHaveTextContent("~0.23% (est., included in the trading fee)");
     expect(row.textContent).not.toMatch(/USDC/);
   });
+  it("a range's cost is only a FLOOR and is worded 'at least', never as the approximate cost", () => {
+    render(<TradeConfirmationModal {...base} spreadEstimate={{ kind: "range", minBps: 20, maxBps: 80 }} />);
+    const row = screen.getByTestId("confirm-spread");
+    expect(row).toHaveTextContent("0.20% to 0.80% (est. range)");
+    expect(row).toHaveTextContent("at least 0.08 USDC");
+    expect(row.textContent).not.toMatch(/~0\.08/);
+  });
 });
