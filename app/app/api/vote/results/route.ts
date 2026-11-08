@@ -27,7 +27,7 @@ export async function GET(req: Request) {
   }
   if (t?.outcome === "rate_limited") return rateLimited(t.retry_after_seconds);
   if (t?.outcome !== "ok" || t.poll_key !== VOTE_POLL_KEY) return json(503, VOTE_UNAVAILABLE);
-  if (t.state === "not_started" || t.state === "open") {
+  if (t.state === "not_started" || t.state === "open" || t.state === "tallying") {
     return json(409, { status: t.state, final: false, ends_at: t.ends_at });
   }
   if (

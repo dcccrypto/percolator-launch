@@ -25,7 +25,11 @@
 --     only once the 24h window has closed, aggregates only. Ties and zero
 --     votes resolve to buy-and-burn. No quorum.
 --   * start_poll is one-shot (a poll key can never be restarted or extended);
---     the app only calls it behind the server-only VOTE_ADMIN_SECRET.
+--     the app only calls it behind the server-only VOTE_ADMIN_SECRET. NOTE: the
+--     runtime role can EXECUTE start_poll, so the runtime database credential
+--     must be treated as able to start the poll (it lives only in server env).
+--   * Pinning relies on holder rows of a snapshot never being edited after
+--     import (the definer has SELECT only; only the import/owner role can write).
 --
 -- Idempotent: safe to run more than once. Changes no perc_alloc object.
 
@@ -133,6 +137,16 @@ create or replace function perc_vote._valid_owner(p text) returns boolean
 language sql immutable set search_path = pg_catalog, pg_temp
 as $$ select p is not null and char_length(p) between 32 and 44 and p ~ '^[1-9A-HJ-NP-Za-km-z]{32,44}$' $$;
 
+-- Opportunistic, bounded expiry of old rate-limit buckets (same as the checker's).
+create or replace function perc_vote._purge_limits(p_now timestamptz) returns void
+language sql volatile set search_path = pg_catalog, pg_temp
+as $$
+  delete from perc_alloc.rate_limit
+   where ctid = any (array(select rl.ctid from perc_alloc.rate_limit rl
+                            where rl.expires_at < p_now - interval '1 minute'
+                            limit 50 for update skip locked))
+$$;
+
 -- ─── status: public poll state (no per-wallet data) ─────────────────────────
 drop function if exists perc_vote.status(bytea);
 create function perc_vote.status(p_client_key bytea)
@@ -189,6 +203,7 @@ begin
                             where n.consumed_at is null and n.expires_at < v_now - interval '1 hour'
                             limit 50 for update skip locked));
 
+  perform perc_vote._purge_limits(v_now);
   v_retry := perc_alloc._hit(sha256('perc_vote:nonce:client:60:'::bytea || p_client_key), 60, 20, v_now);
   -- No per-wallet limit here on purpose: anyone may request a challenge for any
   -- wallet, so a per-wallet bucket would let a stranger lock a holder out.
@@ -338,6 +353,15 @@ begin
     return;
   end if;
   select * into v_poll from perc_vote.poll p where p.poll_key = perc_vote._poll_key();
+  -- 'tallying' for 60 s after ends_at: a cast that passed its window check just
+  -- before ends_at may still be committing (the runtime role's statement_timeout
+  -- is 3 s), so no figures are published until every such cast has finished.
+  -- The result is then final and cannot change between calls.
+  if perc_vote._state(v_poll, v_now) = 'closed' and v_now < v_poll.ends_at + interval '60 seconds' then
+    return query select 'ok'::text, 0, 'tallying'::text, perc_vote._poll_key(), perc_vote._ts(v_poll.ends_at),
+      null::text, null::text, null::integer, null::integer, null::text, null::integer, null::smallint, null::text;
+    return;
+  end if;
   if perc_vote._state(v_poll, v_now) <> 'closed' then
     return query select 'ok'::text, 0, perc_vote._state(v_poll, v_now), perc_vote._poll_key(),
       case when v_poll.id is null then null else perc_vote._ts(v_poll.ends_at) end,
@@ -355,7 +379,7 @@ begin
    where b.poll_id = v_poll.id and b.cast_at >= v_poll.starts_at and b.cast_at < v_poll.ends_at;
   return query select 'ok'::text, 0, 'closed'::text, v_poll.poll_key, perc_vote._ts(v_poll.ends_at),
     v_fee::text, v_burn::text, v_fee_n, v_burn_n,
-    (select sum(h.balance_raw)::text from perc_alloc.holder h where h.snapshot_id = v_poll.snapshot_id and h.eligible),
+    (select coalesce(sum(h.balance_raw), 0)::text from perc_alloc.holder h where h.snapshot_id = v_poll.snapshot_id and h.eligible),
     (select count(*)::integer from perc_alloc.holder h where h.snapshot_id = v_poll.snapshot_id and h.eligible),
     v_snap.token_decimals,
     case when v_fee > v_burn then 'weekly-fee-claims' else 'buy-and-burn' end;
@@ -375,6 +399,7 @@ begin
   if p_client_key is null or octet_length(p_client_key) <> 32 then
     return 3600;
   end if;
+  perform perc_vote._purge_limits(v_now);
   v_retry := perc_alloc._hit(sha256('perc_vote:submit:client:60:'::bytea || p_client_key), 60, 20, v_now);
   if v_retry = 0 then
     v_retry := perc_alloc._hit(sha256('perc_vote:submit:global:60'::bytea), 60, 3000, v_now);
@@ -391,14 +416,14 @@ language plpgsql volatile security definer set search_path = pg_catalog, pg_temp
 as $$
 declare
   v_now timestamptz := clock_timestamp();
-  v_retry integer;
 begin
   if p_client_key is null or octet_length(p_client_key) <> 32 then
     return 3600;
   end if;
-  v_retry := perc_alloc._hit(sha256('perc_vote:admin:client:900:'::bytea || p_client_key), 900, 5, v_now);
-  v_retry := greatest(v_retry, perc_alloc._hit(sha256('perc_vote:admin:global:3600'::bytea), 3600, 20, v_now));
-  return v_retry;
+  -- Per client only, on purpose: a global bucket would let one stranger lock the
+  -- admin out of starting the vote. The secret (>= 32 chars) is not guessable
+  -- at 5 attempts per client per 15 minutes.
+  return perc_alloc._hit(sha256('perc_vote:admin:client:900:'::bytea || p_client_key), 900, 5, v_now);
 end
 $$;
 
@@ -443,7 +468,7 @@ begin
   foreach f in array array[
     'perc_vote._poll_key()', 'perc_vote._ts(timestamptz)',
     'perc_vote._message(text, text, text, text, text, text)', 'perc_vote._state(perc_vote.poll, timestamptz)',
-    'perc_vote._valid_owner(text)', 'perc_vote.status(bytea)', 'perc_vote.issue_nonce(text, text, bytea)',
+    'perc_vote._valid_owner(text)', 'perc_vote._purge_limits(timestamptz)', 'perc_vote.status(bytea)', 'perc_vote.issue_nonce(text, text, bytea)',
     'perc_vote.cast_vote(text, text, text, text, text, text, bytea, bytea)', 'perc_vote.tally(bytea)',
     'perc_vote.submit_gate(bytea)', 'perc_vote.admin_gate(bytea)', 'perc_vote.start_poll(text)'] loop
     execute format('alter function %s owner to perc_alloc_definer', f);

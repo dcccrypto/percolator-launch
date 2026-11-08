@@ -121,7 +121,7 @@ async function shiftPoll(startOffset: string) {
 async function closePoll() {
   await su(async (c) => {
     const r = await c.query(
-      "select extract(epoch from (clock_timestamp() - starts_at + interval '24 hours 1 second'))::text as secs from perc_vote.poll",
+      "select extract(epoch from (clock_timestamp() - starts_at + interval '24 hours 61 seconds'))::text as secs from perc_vote.poll",
     );
     if (r.rows.length !== 1) return;
     const secs = r.rows[0].secs as string;
@@ -442,6 +442,13 @@ d("perc_vote schema (local Postgres)", () => {
       expect(t).toMatchObject({ state: "open", weekly_fee_claims_raw: null, buy_and_burn_raw: null, winner: null });
     });
 
+    it("within 60 s after ends_at the result is 'tallying' with no figures (in-flight casts may still commit)", async () => {
+      await vote(voters[0]!, "weekly-fee-claims");
+      await shiftPoll("-24 hours -5 seconds");
+      expect(await tally()).toMatchObject({ state: "tallying", weekly_fee_claims_raw: null, buy_and_burn_raw: null, winner: null });
+      expect((await nonce(voters[1]!.owner, "buy-and-burn")).outcome).toBe("closed");
+    });
+
     it("zero votes -> buy-and-burn", async () => {
       await closePoll();
       expect(await tally()).toMatchObject({ state: "closed", weekly_fee_claims_raw: "0", buy_and_burn_raw: "0", weekly_fee_claims_wallets: 0, buy_and_burn_wallets: 0, winner: "buy-and-burn" });
@@ -485,7 +492,7 @@ d("perc_vote schema (local Postgres)", () => {
 
     it("a ballot whose database time is at/after ends_at is not counted", async () => {
       await vote(voters[0]!, "weekly-fee-claims");
-      await shiftPoll("-24 hours -1 second"); // window now ends before the ballot's cast_at
+      await shiftPoll("-24 hours -61 seconds"); // window ended (past the grace period) before the ballot's cast_at
       expect(await tally()).toMatchObject({ state: "closed", weekly_fee_claims_raw: "0", winner: "buy-and-burn" });
     });
 
@@ -526,6 +533,19 @@ d("perc_vote schema (local Postgres)", () => {
       for (let i = 0; i < 21; i++) outs.push((await vote(voters[3]!, i % 2 ? "buy-and-burn" : "weekly-fee-claims")).outcome);
       expect(outs.slice(0, 20).every((o) => o === "recorded")).toBe(true);
       expect(outs[20]).toBe("rate_limited");
+    });
+
+    it("one client exhausting its admin attempts cannot lock out another client (no global admin bucket)", async () => {
+      const attacker = freshKey();
+      for (let i = 0; i < 40; i++) await reader.query("select perc_vote.admin_gate($1)", [attacker]);
+      expect((await reader.query("select perc_vote.admin_gate($1) as r", [freshKey()])).rows[0].r).toBe(0);
+    });
+
+    it("expired rate-limit buckets are purged by vote calls", async () => {
+      await su((c) => c.query("insert into perc_alloc.rate_limit values (sha256('old-bucket'::bytea), now() - interval '2 hours', 1, now() - interval '1 hour')"));
+      await reader.query("select perc_vote.submit_gate($1)", [freshKey()]);
+      const n = (await su((c) => c.query("select count(*)::int as n from perc_alloc.rate_limit where bucket = sha256('old-bucket'::bytea)"))).rows[0].n;
+      expect(n).toBe(0);
     });
 
     it("admin gate allows 5 attempts per client per 15 minutes", async () => {

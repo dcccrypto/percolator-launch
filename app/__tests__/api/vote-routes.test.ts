@@ -257,7 +257,7 @@ describe("results: aggregate only, after close", () => {
   });
   it("hidden while not started/open", async () => {
     configure();
-    for (const state of ["not_started", "open"]) {
+    for (const state of ["not_started", "open", "tallying"]) {
       db.tally.mockResolvedValue({ outcome: "ok", state, poll_key: "perc-fee-policy-2026-11", ends_at: null });
       const r = await results(req("/api/vote/results"));
       expect(r.status).toBe(409);

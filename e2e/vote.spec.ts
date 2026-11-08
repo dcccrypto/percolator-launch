@@ -256,7 +256,7 @@ test("after close: writes refused; final aggregate is an exact balance tie -> bu
   await su.connect();
   try {
     // Test-only time travel in the throwaway DB: move window AND ballots back by the same amount.
-    const r = await su.query("select extract(epoch from (clock_timestamp() - starts_at + interval '24 hours 1 second'))::text as s from perc_vote.poll");
+    const r = await su.query("select extract(epoch from (clock_timestamp() - starts_at + interval '24 hours 61 seconds'))::text as s from perc_vote.poll");
     const secs = r.rows[0].s as string;
     await su.query("update perc_vote.ballot set cast_at = cast_at - make_interval(secs => $1::float8)", [secs]);
     await su.query("update perc_vote.poll set starts_at = starts_at - make_interval(secs => $1::float8), ends_at = ends_at - make_interval(secs => $1::float8)", [secs]);

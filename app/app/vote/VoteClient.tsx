@@ -2,7 +2,7 @@
 
 import bs58 from "bs58";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { buildVoteMessage, VOTE_CHOICE_LABELS, VOTE_CHOICES, type VoteChoice } from "@/lib/allocation-vote/vote-message";
+import { buildVoteMessage, VOTE_CHOICE_LABELS, VOTE_CHOICES, VOTE_NONCE_RE, VOTE_TS_RE, type VoteChoice } from "@/lib/allocation-vote/vote-message";
 import { connectWallet, discoverWallets, signText, type StdAccount, type StdWallet } from "./wallet-standard";
 
 type Status = { state: "not_started" | "open" | "closed"; starts_at: string | null; ends_at: string | null; server_now: string | null };
@@ -75,6 +75,9 @@ export function VoteClient() {
       const cr = await post("/api/vote/challenge", { wallet: account.address, choice });
       const c = await cr.json().catch(() => null);
       if (!cr.ok || c?.status !== "ok") throw new Error(c?.error ?? "Vote unavailable. Try again later.");
+      if (typeof c.nonce !== "string" || !VOTE_NONCE_RE.test(c.nonce) || typeof c.issuedAt !== "string" || !VOTE_TS_RE.test(c.issuedAt) || typeof c.expiresAt !== "string" || !VOTE_TS_RE.test(c.expiresAt)) {
+        throw new Error("Unexpected signature request. Nothing was signed.");
+      }
       // Sign only the text this page expects for this wallet and choice.
       const expected = buildVoteMessage({ choice, wallet: account.address, nonce: c.nonce, issuedAt: c.issuedAt, expiresAt: c.expiresAt });
       if (c.message !== expected || c.wallet !== account.address || c.choice !== choice) throw new Error("Unexpected signature request. Nothing was signed.");
@@ -121,7 +124,7 @@ export function VoteClient() {
             <p className="mt-2 text-[13px] text-[var(--text-secondary)]">Turnout {results.turnout.percent}% of eligible snapshot balance.</p>
           </div>
         ) : (
-          <p className="text-[14px] text-[var(--text-secondary)]">Results unavailable. Try again later.</p>
+          <p className="text-[14px] text-[var(--text-secondary)]">Final results are being tallied and appear shortly after close. Refresh in a minute.</p>
         )}
       </div>
     );

@@ -138,7 +138,9 @@ not change the voter set or weights). Votes are weighted by exact snapshot
 voted; a tie or zero votes is buy-and-burn. No quorum. One 24 hour window from
 the moment an admin starts it (database clock). One ballot row per wallet;
 a wallet may change its vote while the window is open and its last valid vote
-counts. Results are aggregates only, published only after the window closes.
+counts. Results are aggregates only, published 60 seconds after the window
+closes (`tallying` until then, so a cast committing at the boundary can never
+change a published result).
 
 **Flow.** `POST /api/vote/challenge {"wallet","choice"}` returns a single-use
 5 minute nonce and the exact text to sign:
@@ -181,8 +183,10 @@ migration does not start the vote.
 confirmation and press Start. Equivalent:
 `POST /api/vote/admin/start` with header `Authorization: Bearer <secret>` and body
 `{"confirm":"START perc-fee-policy-2026-11"}`. The secret is never accepted
-from a URL or cookie. Attempts are limited to 5 per client per 15 minutes and
-20 per hour overall, counted before the secret is compared. A second start
+from a URL or cookie. Attempts are limited to 5 per client per 15 minutes
+(no global bucket, so strangers cannot lock the admin out), counted before the
+secret is compared. Note: the runtime database role can also execute
+`perc_vote.start_poll`; treat `ALLOCATION_DATABASE_URL` as able to start the poll. A second start
 returns 409 and never extends or restarts the window.
 
 **Not-started check (read-only):** `GET /api/vote/status` -> `"state":"not_started"`,
