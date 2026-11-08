@@ -3,7 +3,7 @@
  * Max is clamped to the room; an oversize ask is clamped / blocked so the deposit, margin and fee never price unfillable size;
  * the busy-side surcharge is in Fee with no matcher quote; a funded wallet with an impossible size sees no "Get test funds".
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   useEngineState: vi.fn(),
   useMarketLimits: vi.fn(),
   useMarketFillCap: vi.fn(),
+  fundAndTrade: vi.fn(),
+  modal: { props: null as null | { onConfirm: () => void } },
 }));
 
 vi.mock("@/hooks/useWalletCompat", () => ({ useWalletCompat: mocks.useWalletCompat, useConnectionCompat: mocks.useConnectionCompat }));
@@ -41,7 +43,7 @@ vi.mock("@/hooks/useSlowFlag", async (orig) => ({ ...(await orig<object>()), use
 vi.mock("@/hooks/useMarketLimits", () => ({ useMarketLimits: mocks.useMarketLimits }));
 vi.mock("@/hooks/useEngineState", () => ({ useEngineState: mocks.useEngineState }));
 vi.mock("@/hooks/useInitUser", () => ({ useInitUser: () => ({ initUser: vi.fn(), loading: false, error: null }) }));
-vi.mock("@/hooks/useFirstTrade", () => ({ useFirstTrade: () => ({ fundAndTrade: vi.fn(), loading: false }) }));
+vi.mock("@/hooks/useFirstTrade", () => ({ useFirstTrade: () => ({ fundAndTrade: mocks.fundAndTrade, loading: false }) }));
 vi.mock("@solana/spl-token", () => ({ getAssociatedTokenAddressSync: vi.fn(() => new PublicKey("11111111111111111111111111111111")) }));
 vi.mock("@/hooks/useTrade", () => ({ useTrade: () => ({ trade: vi.fn(), loading: false, error: null }), prewarmTradeSubmission: vi.fn() }));
 vi.mock("@/hooks/useBandRentView", () => ({ useBandRentView: () => null }));
@@ -57,7 +59,7 @@ vi.mock("@/lib/priceStore/priceStore", async (orig) => ({ ...(await orig<object>
 vi.mock("@/lib/mock-trade-data", () => ({ isMockSlab: () => false, getMockUserAccountIdle: () => null, getMockUserAccount: () => null }));
 vi.mock("@/lib/tx", () => ({ prewarmTxLanding: vi.fn() }));
 vi.mock("@/components/trade/DepositWithdrawCard", () => ({ DepositWithdrawCard: () => <div data-testid="deposit-card" /> }));
-vi.mock("@/components/trade/TradeConfirmationModal", () => ({ TradeConfirmationModal: () => null }));
+vi.mock("@/components/trade/TradeConfirmationModal", () => ({ TradeConfirmationModal: (p: { onConfirm: () => void }) => { mocks.modal.props = p; return <div data-testid="confirm-modal" />; } }));
 vi.mock("@/components/ConnectButton", () => ({ ConnectButton: () => null }));
 vi.mock("@/lib/userAccountScan", async (orig) => ({ ...(await orig<object>()), getPortfolioRawSnapshot: () => null }));
 vi.mock("@/lib/close-trading-account", async (orig) => ({ ...(await orig<object>()), isPortfolioClosable: () => ({ closable: false }) }));
@@ -86,6 +88,8 @@ const view = () =>
   })!;
 
 beforeEach(() => {
+  mocks.modal.props = null;
+  mocks.fundAndTrade.mockReset();
   mocks.useMarketFillCap.mockReturnValue(null);
   const g = view();
   mocks.useMarketLimits.mockReturnValue(marketLimits({ matcher: null, growth: g, flags: { p1: false, p2: false, p2FeeCharged: false, p3: false } }));
@@ -270,5 +274,56 @@ describe("M9 mounted: the room is a required input (loading / failed room read f
     fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "50" } });
     expect(btn().textContent).not.toContain("Checking room");
     expect(btn().textContent).not.toContain("Market room unavailable");
+  });
+
+  it("(11) room unknown: Max and the % chips never exceed the open position on the reducing side, and offer nothing on the adding side, whatever is typed", async () => {
+    mocks.useUserAccount.mockReturnValue({ idx: 3, account: { capital: 500_000_000n, positionSize: 200n * LOT, entryPrice: 1_000_000n, pnl: 0n, feeCredits: 0n } });
+    unknown("loading");
+    await mountUnknown();
+    const input = () => screen.getByTestId("trade-size-input") as HTMLInputElement;
+    const preset = (pct: number) => screen.getAllByTestId("trade-size-preset").find((b) => b.getAttribute("data-percent") === String(pct))!;
+    // Adding side (long on a long position): no Max, chips do nothing.
+    for (const typed of ["", "50"]) {
+      fireEvent.change(input(), { target: { value: typed } });
+      expect(screen.queryByTestId("limits-max-size-inline")).toBeNull();
+      fireEvent.click(preset(100));
+      fireEvent.click(preset(50));
+      expect(input().value).toBe(typed);
+    }
+    // Reducing side (short): Max is at most the position (a full close), for any typed size, and the chips cannot fill above it.
+    fireEvent.click(screen.getByTestId("trade-side-short"));
+    for (const typed of ["", "50", "200"]) {
+      fireEvent.change(input(), { target: { value: typed } });
+      expect(maxQ()).toBe(200n * LOT);
+      fireEvent.click(preset(100));
+      expect(Number(input().value)).toBeLessThanOrEqual(200);
+      expect(Number(input().value)).toBe(200);
+      fireEvent.click(preset(50));
+      expect(Number(input().value)).toBe(100);
+    }
+  });
+
+  it("(12) the confirm modal re-checks the room: a room lost after the modal opened does not send", async () => {
+    await mount();
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "300" } });
+    await waitFor(() => expect(btn().disabled).toBe(false));
+    fireEvent.click(btn());
+    await waitFor(() => expect(screen.queryByTestId("confirm-modal")).not.toBeNull());
+    // The room read is lost while the modal is open (a re-render picks it up, as the poll's state update would).
+    unknown("loading");
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "301" } });
+    await waitFor(() => expect(btn().textContent).toContain("Checking room"));
+    await act(async () => { mocks.modal.props!.onConfirm(); });
+    expect(mocks.fundAndTrade).not.toHaveBeenCalled();
+  });
+
+  it("(12-control) with the room known the same confirm does send", async () => {
+    await mount();
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "300" } });
+    await waitFor(() => expect(btn().disabled).toBe(false));
+    fireEvent.click(btn());
+    await waitFor(() => expect(screen.queryByTestId("confirm-modal")).not.toBeNull());
+    await act(async () => { mocks.modal.props!.onConfirm(); });
+    await waitFor(() => expect(mocks.fundAndTrade).toHaveBeenCalled());
   });
 });

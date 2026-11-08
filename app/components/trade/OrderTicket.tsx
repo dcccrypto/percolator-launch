@@ -1189,7 +1189,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   };
   // The Max the trader sees (and the Max chip fills): the market's cap or what the balance can
   // margin at this leverage, whichever is smaller, in the input's unit.
-  const displayMaxQ = roomUnknown ? 0n : oneMaxQ([marketMaxQ, balanceMaxQ(tradableBalance, leverage, livePriceE6)]);
+  // While the room is unknown (whatever size is typed): nothing on the adding side, and on the reducing side at most the open position (a full close).
+  const reduceOnlyMaxQ = existingPositionSize !== 0n && (existingPositionSize > 0n) !== (direction === "long") ? (existingPositionSize < 0n ? -existingPositionSize : existingPositionSize) : 0n;
+  const displayMaxQ = roomUnknownRaw ? reduceOnlyMaxQ : oneMaxQ([marketMaxQ, balanceMaxQ(tradableBalance, leverage, livePriceE6)]);
 
   // Row 9 (AUTO): over the max, the size is reduced to it and the helper says so for 4 s.
   // Never on a paused side: there is nothing to reduce to, and the paused label says why.
@@ -2048,7 +2050,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const showMax = displayMaxQ !== null && displayMaxQ > 0n && !!livePriceE6 && livePriceE6 > 0n && !ticketState.blocks;
   const maxLabel = showMax ? maxInUnit(displayMaxQ!, sizeUnit, livePriceE6!, baseTicker, lotExp) : null;
   const fillFraction = (pct: number) => {
-    if (roomUnknown) return;
+    if (roomUnknownRaw && !(displayMaxQ !== null && displayMaxQ > 0n && livePriceE6 && livePriceE6 > 0n)) return;
     if (displayMaxQ !== null && displayMaxQ > 0n && livePriceE6 && livePriceE6 > 0n) {
       handleSizeChange(sizeQToInput((displayMaxQ * BigInt(pct)) / 100n, sizeUnit, livePriceE6, lotExp));
       return;
