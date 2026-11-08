@@ -1,15 +1,23 @@
 /**
  * Public launch state for the allocation checker and holder vote on
- * percolator.trade: allocations NOT published, vote DISABLED.
+ * percolator.trade.
  *
- * Every write fails closed server-side, nothing reads env to switch it on,
- * there is no start/admin endpoint, and each handler refuses any host other
- * than the exact waitlist host (defense in depth behind middleware).
+ *  - Allocation checker: one wallet per request, answered from the private
+ *    database through a single lookup function (mocked here; the database side
+ *    is covered by __tests__/db). Unconfigured -> fails closed as unavailable.
+ *  - Vote: DISABLED. Every write fails closed server-side, nothing reads env to
+ *    switch it on, and there is no start/admin endpoint.
+ *  - Each handler refuses any host other than the exact waitlist host (defense
+ *    in depth behind middleware).
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 import * as fs from "fs";
 import * as path from "path";
+
+vi.mock("server-only", () => ({}));
+const lookup = vi.fn();
+vi.mock("@/lib/allocation-vote/lookup-db", () => ({ lookupAllocation: (...a: unknown[]) => lookup(...a) }));
 
 import { GET as allocationStatus } from "@/app/api/allocation/status/route";
 import { POST as allocationCheck } from "@/app/api/allocation/check/route";
@@ -22,30 +30,58 @@ import { GET as voteLog } from "@/app/api/vote/log/route";
 const ROOT = path.resolve(__dirname, "../..");
 // A syntactically valid 32-byte base58 key (the System Program id), not a holder.
 const VALID_SYNTAX = "11111111111111111111111111111111";
+const OTHER_SYNTAX = "So11111111111111111111111111111111111111112";
 
-function req(p: string, init: { host?: string; method?: string; body?: string; type?: string } = {}) {
+function req(p: string, init: { host?: string; method?: string; body?: string | ReadableStream; type?: string; headers?: Record<string, string> } = {}) {
   const host = init.host ?? "percolator.trade";
-  const headers: Record<string, string> = { host };
+  const headers: Record<string, string> = { host, ...init.headers };
   if (init.type) headers["content-type"] = init.type;
   return new NextRequest(`https://${host || "x.invalid"}${p}`, {
     method: init.method ?? "GET",
     headers,
     body: init.body,
+    // @ts-expect-error -- required by undici for stream bodies
+    duplex: "half",
   });
 }
-const post = (p: string, body: unknown, host?: string) =>
-  req(p, { method: "POST", body: JSON.stringify(body), type: "application/json", host });
+const post = (p: string, body: unknown, host?: string, headers?: Record<string, string>) =>
+  req(p, { method: "POST", body: JSON.stringify(body), type: "application/json", host, headers });
 
 function expectPrivateHeaders(res: Response) {
   expect(res.headers.get("x-robots-tag")).toBe("noindex, nofollow");
   expect(res.headers.get("cache-control")).toMatch(/no-store/);
 }
 
-afterEach(() => {
-  for (const k of ["VOTE_ENABLED", "NEXT_PUBLIC_VOTE_ENABLED", "VOTE_STATE", "ALLOCATION_PUBLISHED"]) delete process.env[k];
+const SECRET = "x".repeat(32);
+function configure() {
+  process.env.ALLOCATION_DATABASE_URL = "postgresql://perc_alloc_reader:pw@127.0.0.1:5432/app";
+  process.env.ALLOCATION_RATE_LIMIT_SECRET = SECRET;
+}
+
+const row = (o: Record<string, unknown>) => ({
+  outcome: "eligible",
+  retry_after_seconds: 0,
+  eligible: null,
+  balance_raw: null,
+  token_decimals: null,
+  allocation_usd_cents: null,
+  exclusion_reasons: null,
+  snapshot_label: "7 Nov 2026",
+  allocation_status: "provisional",
+  ...o,
 });
 
-describe("allocation: not published", () => {
+beforeEach(() => {
+  lookup.mockReset();
+});
+afterEach(() => {
+  for (const k of [
+    "VOTE_ENABLED", "NEXT_PUBLIC_VOTE_ENABLED", "VOTE_STATE", "ALLOCATION_PUBLISHED",
+    "ALLOCATION_DATABASE_URL", "ALLOCATION_RATE_LIMIT_SECRET", "ALLOCATION_DATABASE_CA_PEM",
+  ]) delete process.env[k];
+});
+
+describe("allocation: unconfigured fails closed", () => {
   it("status reports unpublished / unavailable", async () => {
     const res = await allocationStatus(req("/api/allocation/status"));
     expect(res.status).toBe(200);
@@ -53,13 +89,35 @@ describe("allocation: not published", () => {
     expectPrivateHeaders(res);
   });
 
-  it("a syntactically valid wallet gets 503 unavailable, never a figure", async () => {
+  it("a syntactically valid wallet gets 503 unavailable, never a figure, and no lookup", async () => {
     const res = await allocationCheck(post("/api/allocation/check", { wallet: VALID_SYNTAX }));
     expect(res.status).toBe(503);
-    const body = await res.json();
-    expect(body).toEqual({ status: "unavailable", message: "Validated allocation data unavailable" });
+    expect(await res.json()).toEqual({ status: "unavailable", message: "Allocation checker unavailable. Try again later." });
     expectPrivateHeaders(res);
+    expect(lookup).not.toHaveBeenCalled();
   });
+
+  it("publish-looking env flags do nothing", async () => {
+    process.env.ALLOCATION_PUBLISHED = "true";
+    expect((await allocationCheck(post("/api/allocation/check", { wallet: VALID_SYNTAX }))).status).toBe(503);
+    expect((await (await allocationStatus(req("/api/allocation/status"))).json()).published).toBe(false);
+  });
+
+  it.each([
+    ["a non-reader database role", "postgresql://postgres:pw@127.0.0.1:5432/app", SECRET],
+    ["a service-role-looking user", "postgresql://service_role:pw@db.example.com:5432/app", SECRET],
+    ["a short rate-limit secret", "postgresql://perc_alloc_reader:pw@127.0.0.1:5432/app", "short"],
+    ["a non-postgres URL", "https://perc_alloc_reader:pw@example.com/", SECRET],
+  ])("refuses %s (fails closed, no lookup)", async (_l, url, secret) => {
+    process.env.ALLOCATION_DATABASE_URL = url;
+    process.env.ALLOCATION_RATE_LIMIT_SECRET = secret;
+    expect((await allocationCheck(post("/api/allocation/check", { wallet: VALID_SYNTAX }))).status).toBe(503);
+    expect(lookup).not.toHaveBeenCalled();
+  });
+});
+
+describe("allocation: input validation (before any lookup)", () => {
+  beforeEach(configure);
 
   it.each([
     [{ wallet: "" }, "Enter a wallet address (input is empty)."],
@@ -67,26 +125,152 @@ describe("allocation: not published", () => {
     [{ wallet: "1".repeat(31) }, "Address length must be 32 to 44 characters."],
     [{ wallet: 42 }, "Wallet address must be a text string."],
     [{}, "Wallet address must be a text string."],
-  ])("invalid input %j → 400 with the source checker message", async (body, msg) => {
+    [{ wallet: `${VALID_SYNTAX},${OTHER_SYNTAX}` }, "Address contains invalid characters (base58 only: no 0, O, I, l, spaces or symbols)."],
+    [{ wallet: `${VALID_SYNTAX} ${OTHER_SYNTAX}` }, "Address contains invalid characters (base58 only: no 0, O, I, l, spaces or symbols)."],
+    [{ wallet: `${VALID_SYNTAX}\n${OTHER_SYNTAX}` }, "Address contains invalid characters (base58 only: no 0, O, I, l, spaces or symbols)."],
+    [{ wallet: [VALID_SYNTAX, OTHER_SYNTAX] }, 'Send exactly one wallet as JSON: {"wallet": "<address>"}'],
+    [{ wallets: [VALID_SYNTAX] }, 'Send exactly one wallet as JSON: {"wallet": "<address>"}'],
+    [{ wallet: VALID_SYNTAX, other: OTHER_SYNTAX }, 'Send exactly one wallet as JSON: {"wallet": "<address>"}'],
+    [[{ wallet: VALID_SYNTAX }], 'Send exactly one wallet as JSON: {"wallet": "<address>"}'],
+    [null, 'Send exactly one wallet as JSON: {"wallet": "<address>"}'],
+    ["11111111111111111111111111111111", 'Send exactly one wallet as JSON: {"wallet": "<address>"}'],
+  ])("invalid input %j -> 400", async (body, msg) => {
     const res = await allocationCheck(post("/api/allocation/check", body));
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ status: "invalid", error: msg });
+    expectPrivateHeaders(res);
+    expect(lookup).not.toHaveBeenCalled();
   });
 
-  it("rejects non-JSON content type (415) and oversize bodies (413)", async () => {
+  it("rejects non-JSON content type (415), oversize bodies (413) and bad JSON (400)", async () => {
     const r1 = await allocationCheck(req("/api/allocation/check", { method: "POST", body: "wallet=x", type: "application/x-www-form-urlencoded" }));
     expect(r1.status).toBe(415);
     const r2 = await allocationCheck(post("/api/allocation/check", { wallet: "1".repeat(2000) }));
     expect(r2.status).toBe(413);
     const r3 = await allocationCheck(req("/api/allocation/check", { method: "POST", body: "{not json", type: "application/json" }));
     expect(r3.status).toBe(400);
+    expect(lookup).not.toHaveBeenCalled();
   });
 
-  it("env cannot publish allocations", async () => {
-    process.env.ALLOCATION_PUBLISHED = "true";
+  it("caps a streamed body with no content-length (413) without buffering it all", async () => {
+    let pulled = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(c) {
+        pulled++;
+        if (pulled > 10_000) return c.close();
+        c.enqueue(new TextEncoder().encode('{"wallet":"' + "1".repeat(500)));
+      },
+    });
+    const res = await allocationCheck(req("/api/allocation/check", { method: "POST", body: stream, type: "application/json" }));
+    expect(res.status).toBe(413);
+    expect(pulled).toBeLessThan(10);
+    expect(lookup).not.toHaveBeenCalled();
+  });
+});
+
+describe("allocation: one wallet's result only", () => {
+  beforeEach(configure);
+
+  it("eligible: exact balance and provisional allocation, nothing else", async () => {
+    lookup.mockResolvedValue(row({ outcome: "eligible", eligible: true, balance_raw: "1234567890123", token_decimals: 6, allocation_usd_cents: "12345", exclusion_reasons: [] }));
+    const res = await allocationCheck(post("/api/allocation/check", { wallet: VALID_SYNTAX }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      status: "eligible",
+      snapshot: "7 Nov 2026",
+      snapshot_balance: "1234567.890123",
+      provisional_allocation_usd: "123.45",
+      allocation_status: "provisional",
+    });
+    expectPrivateHeaders(res);
+    expect(lookup).toHaveBeenCalledTimes(1);
+    const [, owner, key] = lookup.mock.calls[0]!;
+    expect(owner).toBe(VALID_SYNTAX);
+    expect(Buffer.isBuffer(key) && key.length).toBe(32);
+  });
+
+  it("excluded: known reasons, balance, no allocation figure", async () => {
+    lookup.mockResolvedValue(row({ outcome: "excluded", eligible: false, balance_raw: "5", token_decimals: 6, exclusion_reasons: ["off-curve", "LP"] }));
+    const body = await (await allocationCheck(post("/api/allocation/check", { wallet: VALID_SYNTAX }))).json();
+    expect(body).toEqual({
+      status: "excluded",
+      snapshot: "7 Nov 2026",
+      snapshot_balance: "0.000005",
+      exclusion_reasons: [
+        { code: "off-curve", label: "Off-curve address: a program-derived account, not a user wallet" },
+        { code: "LP", label: "Liquidity pool, vault or program-owned account" },
+      ],
+    });
+    expect(body).not.toHaveProperty("provisional_allocation_usd");
+  });
+
+  it("unknown: not_found with no balance and no allocation (never a fabricated zero)", async () => {
+    lookup.mockResolvedValue(row({ outcome: "not_found" }));
+    const res = await allocationCheck(post("/api/allocation/check", { wallet: VALID_SYNTAX }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: "not_found", snapshot: "7 Nov 2026" });
+  });
+
+  it("rate limited: 429 with Retry-After", async () => {
+    lookup.mockResolvedValue(row({ outcome: "rate_limited", retry_after_seconds: 42, snapshot_label: null, allocation_status: null }));
+    const res = await allocationCheck(post("/api/allocation/check", { wallet: VALID_SYNTAX }));
+    expect(res.status).toBe(429);
+    expect(res.headers.get("retry-after")).toBe("42");
+    expect(await res.json()).toEqual({ status: "rate_limited", retry_after_seconds: 42 });
+  });
+
+  it.each([
+    ["no active snapshot", row({ outcome: "unavailable", snapshot_label: null, allocation_status: null })],
+    ["no row", undefined],
+    ["eligible without a figure", row({ outcome: "eligible", eligible: true, balance_raw: "1", token_decimals: 6 })],
+    ["not_found carrying a balance", row({ outcome: "not_found", balance_raw: "0" })],
+    ["excluded with an unknown reason", row({ outcome: "excluded", eligible: false, balance_raw: "1", token_decimals: 6, exclusion_reasons: ["team"] })],
+    ["eligible with a malformed cents value", row({ outcome: "eligible", eligible: true, balance_raw: "1", token_decimals: 6, allocation_usd_cents: "1.5", exclusion_reasons: [] })],
+    ["unexpected outcome", row({ outcome: "everything" })],
+  ])("malformed database answer (%s) fails closed as 503", async (_l, r) => {
+    lookup.mockResolvedValue(r);
     const res = await allocationCheck(post("/api/allocation/check", { wallet: VALID_SYNTAX }));
     expect(res.status).toBe(503);
-    expect((await (await allocationStatus(req("/api/allocation/status"))).json()).published).toBe(false);
+    expect((await res.json()).status).toBe("unavailable");
+  });
+
+  it("a database error is 503 and the log line carries no wallet, URL or message", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    lookup.mockImplementation(() => {
+      throw Object.assign(new Error(`boom ${VALID_SYNTAX} postgresql://perc_alloc_reader:pw@h`), { code: "57014" });
+    });
+    const res = await allocationCheck(post("/api/allocation/check", { wallet: VALID_SYNTAX }));
+    expect(res.status).toBe(503);
+    const logged = err.mock.calls.flat().join(" ");
+    expect(logged).toBe("[allocation] lookup failed (57014)");
+    err.mockRestore();
+  });
+
+  it("client keys are HMACs of the IP: stable per IP, distinct across IPs, never the IP itself", async () => {
+    lookup.mockResolvedValue(row({ outcome: "not_found" }));
+    for (const ip of ["203.0.113.7", "203.0.113.7", "198.51.100.9"]) {
+      await allocationCheck(post("/api/allocation/check", { wallet: VALID_SYNTAX }, undefined, { "x-real-ip": ip }));
+    }
+    const keys = lookup.mock.calls.map((c) => (c[2] as Buffer).toString("hex"));
+    expect(keys[0]).toBe(keys[1]);
+    expect(keys[0]).not.toBe(keys[2]);
+    for (const k of keys) expect(k).not.toContain(Buffer.from("203.0.113.7").toString("hex"));
+  });
+
+  it("no cross-wallet leakage: each request is its own lookup, results are not reused", async () => {
+    lookup
+      .mockResolvedValueOnce(row({ outcome: "eligible", eligible: true, balance_raw: "1000000", token_decimals: 6, allocation_usd_cents: "100", exclusion_reasons: [] }))
+      .mockResolvedValueOnce(row({ outcome: "not_found" }));
+    const a = await (await allocationCheck(post("/api/allocation/check", { wallet: VALID_SYNTAX }))).json();
+    const b = await (await allocationCheck(post("/api/allocation/check", { wallet: OTHER_SYNTAX }))).json();
+    expect(a.status).toBe("eligible");
+    expect(b).toEqual({ status: "not_found", snapshot: "7 Nov 2026" });
+    expect(lookup.mock.calls.map((c) => c[1])).toEqual([VALID_SYNTAX, OTHER_SYNTAX]);
+  });
+
+  it("status reports provisional when configured, without a database call", async () => {
+    expect(await (await allocationStatus(req("/api/allocation/status"))).json()).toEqual({ published: true, data: "provisional" });
+    expect(lookup).not.toHaveBeenCalled();
   });
 });
 
@@ -120,7 +304,8 @@ describe("vote: disabled, fail closed", () => {
     }
   });
 
-  it("env cannot open the vote", async () => {
+  it("env cannot open the vote (even with the allocation checker configured)", async () => {
+    configure();
     process.env.VOTE_ENABLED = "true";
     process.env.NEXT_PUBLIC_VOTE_ENABLED = "true";
     process.env.VOTE_STATE = "OPEN";
@@ -148,25 +333,38 @@ describe("vote: disabled, fail closed", () => {
     ]);
   });
 
-  it("route and lib sources read no env, filesystem, or storage (nothing can switch them on)", () => {
+  it("vote sources and pages read no env, filesystem, or storage (nothing can switch them on)", () => {
     const files = [
       ...["status", "challenge", "submit", "results", "log"].map((r) => `app/api/vote/${r}/route.ts`),
-      ...["status", "check"].map((r) => `app/api/allocation/${r}/route.ts`),
-      ...fs.readdirSync(path.join(ROOT, "lib/allocation-vote")).map((f) => `lib/allocation-vote/${f}`),
+      ...fs.readdirSync(path.join(ROOT, "lib/allocation-vote")).filter((f) => f !== "server-config.ts").map((f) => `lib/allocation-vote/${f}`),
       "app/allocation/page.tsx",
+      "app/allocation/AllocationChecker.tsx",
       "app/vote/page.tsx",
     ];
     for (const f of files) {
       const src = fs.readFileSync(path.join(ROOT, f), "utf8");
       expect(src, f).not.toMatch(/process\.env/);
-      expect(src, f).not.toMatch(/from ["'](node:)?fs["']|supabase|@upstash|@vercel\/blob|localStorage/);
+      expect(src, f).not.toMatch(/from ["'](node:)?fs["']|supabase|@upstash|@vercel\/blob|localStorage|sessionStorage|indexedDB/);
+    }
+  });
+
+  it("the allocation surface's only env reads are the three server-only lookup settings", () => {
+    const src = fs.readFileSync(path.join(ROOT, "lib/allocation-vote/server-config.ts"), "utf8");
+    expect(src).toMatch(/^import "server-only";$/m);
+    const names = [...src.matchAll(/env\.([A-Z0-9_]+)/g)].map((m) => m[1]).sort();
+    expect([...new Set(names)]).toEqual(["ALLOCATION_DATABASE_CA_PEM", "ALLOCATION_DATABASE_URL", "ALLOCATION_RATE_LIMIT_SECRET"]);
+    expect(src).not.toMatch(/NEXT_PUBLIC_/);
+    for (const f of ["lookup-db.ts", "client-key.ts"]) {
+      expect(fs.readFileSync(path.join(ROOT, "lib/allocation-vote", f), "utf8"), f).toMatch(/^import "server-only";$/m);
     }
   });
 });
 
 describe("handlers refuse every host but percolator.trade", () => {
   const hosts = ["mainnet.percolatorlaunch.com", "percolator-launch.vercel.app", "localhost", "evilpercolator.trade", "percolator.trade.evil.com", ""];
-  it.each(hosts)("%s → 404 on every handler", async (host) => {
+  it.each(hosts)("%s -> 404 on every handler (even when configured)", async (host) => {
+    configure();
+    lookup.mockResolvedValue(row({ outcome: "eligible", eligible: true, balance_raw: "1", token_decimals: 6, allocation_usd_cents: "1", exclusion_reasons: [] }));
     const results = await Promise.all([
       allocationStatus(req("/api/allocation/status", { host })),
       allocationCheck(post("/api/allocation/check", { wallet: VALID_SYNTAX }, host)),
@@ -180,5 +378,6 @@ describe("handlers refuse every host but percolator.trade", () => {
       expect(r.status).toBe(404);
       expect(r.headers.get("x-robots-tag")).toBe("noindex, nofollow");
     }
+    expect(lookup).not.toHaveBeenCalled();
   });
 });
