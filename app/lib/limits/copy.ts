@@ -327,7 +327,7 @@ export const TICKET_COPY = {
   /** A side paused because it is FULL (no room left for any add the ticket can place). */
   sidePausedFullSublabel: "Paused (full)",
   result: {
-    full: (size: string, sym: string, side: string, price: string) => `Opened ${size} ${sym} ${side} at ${price}`,
+    full: (size: string, sym: string, side: string, price: string | null) => `Opened ${size} ${sym} ${side}${atPrice(price)}`,
     /** Every line below is worded from the MEASURED position change (lib/order-result.ts), never the request. `price` null = omit it (partial fills). */
     added: (size: string, sym: string, held: string, price: string | null) => `Added ${size} ${sym} to your ${held}${atPrice(price)}`,
     reduced: (size: string, sym: string, held: string, price: string | null) => `Reduced your ${held} by ${size} ${sym}${atPrice(price)}`,

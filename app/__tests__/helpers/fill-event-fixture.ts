@@ -1,7 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 
 /** Builds the logMessages of a wrapper tx carrying one FILL event (layout: v22-fill-events.ts; 100-byte header + 75-byte records). */
-export function fillEventLogs(wrapper: PublicKey, market: PublicKey, recs: Array<{ flags: number; requestedQ: bigint; executedQ: bigint; assetIndex?: number }>): string[] {
+export function fillEventLogs(wrapper: PublicKey, market: PublicKey, recs: Array<{ flags: number; requestedQ: bigint; executedQ: bigint; assetIndex?: number; priceE6?: bigint; quotedPriceE6?: bigint; feeAtoms?: bigint }>): string[] {
   const b = Buffer.alloc(100 + 75 * recs.length);
   b[0] = 1; b[1] = 1; b[2] = 10;
   market.toBuffer().copy(b, 3);
@@ -15,7 +15,9 @@ export function fillEventLogs(wrapper: PublicKey, market: PublicKey, recs: Array
     const i128 = (v: bigint, off: number) => { b.writeBigUInt64LE(v & 0xffffffffffffffffn, off); b.writeBigInt64LE(v >> 64n, off + 8); };
     i128(r.requestedQ, o + 11);
     i128(r.executedQ, o + 27);
-    b.writeBigUInt64LE(100_000_000n, o + 43);
+    b.writeBigUInt64LE(r.priceE6 ?? 100_000_000n, o + 43);
+    b.writeBigUInt64LE(r.quotedPriceE6 ?? 0n, o + 51);
+    b.writeBigUInt64LE(r.feeAtoms ?? 0n, o + 59);
   });
   const w = wrapper.toBase58();
   return [`Program ${w} invoke [1]`, `Program data: ${b.toString("base64")}`, `Program ${w} success`];

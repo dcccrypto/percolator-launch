@@ -403,6 +403,7 @@ const PositionRow: FC<{ slabAddress: string; wrappedRow?: boolean }> = memo(func
           effectiveSizeQ: effectiveSize,
           entryE6: entryPriceE6,
           initialMarginBps,
+          ...((((account as { activeLegCount?: number | null }).activeLegCount ?? 1) <= 1 && account.capital > 0n) ? { capital: account.capital } : {}),
           initialMarkE6: currentPriceE6,
           lotExp,
         }

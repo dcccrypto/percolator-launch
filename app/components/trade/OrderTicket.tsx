@@ -108,6 +108,8 @@ import { takeFillResult } from "@/lib/limits/fill-check";
 import { feeRaiseCopy, takeFeeRaise } from "@/lib/v22/fee-raise-note";
 import { sizeWithLots } from "@/lib/v22/growth-room";
 import { clippedFillBody, readClippedFill } from "@/lib/v22/clipped-fill";
+import { readExecFill, type ExecFill } from "@/lib/v22/exec-fill";
+import { useSpreadQuoter } from "@/hooks/useSpreadQuoter";
 import { isPortfolioClosable } from "@/lib/close-trading-account";
 import { defaultFeeCapMarginBps } from "@/lib/limits/fee-channel";
 import { OrderTicketLimits, reasonCopy } from "@/components/limits/OrderTicketLimits";
@@ -408,6 +410,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   };
   const [engineLockError, setEngineLockError] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  // M7: the matcher's spread / price impact for the confirm dialog (read once while it is open).
+  const spreadFor = useSpreadQuoter(showConfirmModal);
   const [confirmSnapshot, setConfirmSnapshot] = useState<{
     positionSize: bigint;
     marginNative: bigint;
@@ -1415,7 +1419,13 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       // entry, so it is awaited ONCE and shared with the saved-entry step below. Until it
       // resolves the line is the neutral "went through" (true for any order).
       const sigKey = sig ?? null;
-      const price = formatLotPriceE6(submitPriceE6, lotExp);
+      // M7: on v2.2 the fill price is the price the position was BOOKED at (the matcher's execution price, spread included), read from the
+      // landed transaction's FILL event. Never the oracle / mark the ticket showed. Until it is read, and when it cannot be, no price is
+      // claimed. Pre-v2.2 markets keep the submit price (their fills settle at the mark).
+      const v22Fill = isDevnetV22Enabled() && !!sigKey && !!slabProgramId;
+      const execFillP: Promise<ExecFill | null> = v22Fill
+        ? readExecFill(connection, sigKey as string, slabProgramId as PublicKey, { market: new PublicKey(slabAddress) }).catch(() => null)
+        : Promise.resolve(null);
       const measured = takePositionChange(sig).then((change): PositionChange | null => {
         if (change) return change;
         // Fund-and-trade with no measured change (a new portfolio, or a read that failed) leaves
@@ -1426,7 +1436,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         return null;
       });
       setResult({ kind: "sent", body: TICKET_COPY.result.unmeasured, sig: sigKey, tryQ: null });
-      void measured.then((change) => {
+      void Promise.all([measured, execFillP]).then(([change, execFill]) => {
+        const price = v22Fill ? (execFill ? formatLotPriceE6(execFill.priceE6, lotExp) : null) : formatLotPriceE6(submitPriceE6, lotExp);
         const outcome = classifyOrderChange(direction, effectiveSize, change);
         let next: NonNullable<typeof result>;
         if (outcome.effect === "zero") {
@@ -1463,8 +1474,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       // portfolio it just created is a v17 one: idx 0, like every v17 account (lib/userAccountScan.ts).
       const entryIdx = userAccount?.idx ?? (fundingMode ? 0 : null);
       // The fill's price, read now rather than from this render (which may be minutes old after a
-      // long wait in the wallet). Same source as before: the live mark, as for every saved entry.
-      const fillPriceE6 = getLivePriceSnapshot(slabAddress).priceE6 ?? livePriceE6 ?? 0n;
+      // long wait in the wallet). Pre-v2.2: the live mark (those fills settle at it). v2.2 (M7): the BOOKED price from the FILL event
+      // (applied below once read); the mark is never the entry of a v2.2 fill.
+      const markFillPriceE6 = getLivePriceSnapshot(slabAddress).priceE6 ?? livePriceE6 ?? 0n;
+      const applyEntryFill = (fillPriceE6: bigint) => {
       if (fillPriceE6 > 0n && entryIdx !== null) {
         const wallet = publicKey?.toBase58();
         const slab = slabAddress;
@@ -1496,6 +1509,16 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           const lev = opened ? orderLeverage : prior?.leverage ?? undefined;
           saveEntryPrice(slab, entryIdx, next, lev, wallet, change.afterQ);
         });
+      }
+      };
+      if (v22Fill) {
+        void execFillP.then((ef) => {
+          if (ef) applyEntryFill(ef.priceE6);
+          // The booked price could not be read: keep no entry at all (the position panel then derives an "est." one) rather than the mark.
+          else if (entryIdx !== null) clearEntryPrice(slabAddress, entryIdx, publicKey?.toBase58());
+        });
+      } else {
+        applyEntryFill(markFillPriceE6);
       }
       // The site-wide PositionsBar reads usePortfolio, which refreshes its
       // position list on a 30s interval and learns nothing from refreshSlab()
@@ -2727,6 +2750,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           tradingFee={confirmSnapshot.tradingFee}
           tradingFeeEstimated={confirmSnapshot.tradingFeeEstimated ?? false}
           worstFillPriceE6={confirmSnapshot.worstFillPriceE6}
+          spreadEstimate={spreadFor(confirmSnapshot.positionSize, direction === "long")}
           accountEquity={userAccount ? capital : null}
           riskLeverage={confirmSnapshot.riskLeverage}
           depositAmount={confirmSnapshot.depositAtoms}

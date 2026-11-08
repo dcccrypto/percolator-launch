@@ -47,6 +47,10 @@ import { formatTokenAmount } from "@/lib/format";
 import { closeLimitFromEngine } from "@/lib/close-limit";
 import { clearEntryPrice } from "@/lib/entry-price";
 import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
+import { readExecFill, type ExecFill } from "@/lib/v22/exec-fill";
+import { formatLotPriceE6 } from "@/lib/v22/lot";
+import { closeResultText, realizedFromEquity, recordRealized, type EquitySnap } from "@/lib/realized-pnl";
 import { PortfolioTargetError, TARGET_COPY, isPortfolioTargetError, verifyPortfolioTarget } from "@/lib/portfolio-target";
 
 /** M-3: the leg is a prior-reset obligation (owns 0 effective quantity). */
@@ -171,6 +175,41 @@ function getFreshPortfolioData(
   return p;
 }
 
+/**
+ * M7: what a landed close actually did, from the chain: the price the fill was BOOKED at (the FILL event) and the realized result
+ * from the account's value before and after (capital + settled pnl: fees and the spread are inside it). Bounded: a slow RPC gives
+ * up and the toast says only what is known. Either half is null when it could not be read; neither is ever guessed.
+ */
+async function measureCloseResult(o: {
+  connection: Connection;
+  programId: PublicKey;
+  slabAddress: string;
+  owner: PublicKey;
+  targetPk?: PublicKey;
+  sig: string;
+  before: EquitySnap | null;
+  budgetMs?: number;
+}): Promise<{ exec: ExecFill | null; realized: bigint | null }> {
+  const exec = readExecFill(o.connection, o.sig, o.programId, { market: new PublicKey(o.slabAddress) }, undefined, 3).catch(() => null);
+  const realized = (async (): Promise<bigint | null> => {
+    if (!o.before) return null;
+    const data = await readFreshPortfolioData(o.connection, o.programId, o.slabAddress, o.owner, o.targetPk);
+    if (!data) return null;
+    const p = parsePortfolio(data);
+    return realizedFromEquity(o.before, { capital: p.capital, pnl: p.pnl });
+  })().catch(() => null);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const budget = new Promise<[null, null]>((resolve) => {
+    timer = setTimeout(() => resolve([null, null]), o.budgetMs ?? 4000);
+  });
+  try {
+    const [e, r] = await Promise.race([Promise.all([exec, realized]), budget]);
+    return { exec: e, realized: r };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function useClosePosition(slabAddress: string): UseClosePositionReturn {
   const { connection } = useConnectionCompat();
   const wallet = useWalletCompat();
@@ -261,6 +300,8 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
     let freshBasisQ: bigint | null = null;
     let freshEngine: MarketEngineView | null = null;
     let resetLeg = false;
+    // M7: the account's value before the close (capital + settled pnl), for the realized result.
+    let equityBefore: EquitySnap | null = null;
 
     if (isV17Market) {
       // v17: re-fetch via a FRESH on-chain read + parsePortfolioV17.
@@ -294,6 +335,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
           freshPositionSize = 0n;
         } else {
           const portfolio = parsePortfolio(freshData);
+          equityBefore = { capital: portfolio.capital, pnl: portfolio.pnl };
 
           // Re-check the mutable owner after the read — covers both the
           // RPC-side memcmp filter AND the cached-pubkey shortcut (a wrapped
@@ -681,13 +723,30 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         // The one confirmation a close gets: every close surface (dock, ticket, portfolio rows) closes
         // its modal on resolve, so without this a partial close just vanished. A clipped fill already
         // said what filled (toast above), so it gets no success line.
+        // M7: v2.2 closes report what the chain did: the booked (matcher execution) price and the realized result from the account's
+        // value delta, fees and spread included. Recorded per wallet + market for the Portfolio.
+        let measured: { exec: ExecFill | null; realized: bigint | null } | null = null;
+        if (isDevnetV22Enabled() && isV17Market && programId && publicKey && sig) {
+          measured = await measureCloseResult({ connection, programId, slabAddress, owner: publicKey, targetPk, sig, before: equityBefore });
+          if (measured.realized !== null) recordRealized(publicKey.toBase58(), slabAddress, measured.realized);
+        }
+        const closeDetail = (base: string): string =>
+          measured
+            ? closeResultText({
+                base,
+                execPriceText: measured.exec && getLotExp(slabAddress) !== null ? formatLotPriceE6(measured.exec.priceE6, getLotExp(slabAddress) as number) : null,
+                realized: measured.realized,
+                decimals: 6, // playground collateral is sim-USDC (6 decimals) on every market
+                symbol: "USDC",
+              })
+            : base;
         if (outcome !== "partial") {
           const closedAbs = closeSize < 0n ? -closeSize : closeSize;
           // The tx is confirmed (sendTx returns only after confirmation; a timeout throws above), but a
           // fill the app could not measure (post-trade read failed, or the position moved the other
           // way) does not prove the position is closed: say only what is known.
           if (fill?.kind === "unknown") toast(COPY.closeConfirmedUnmeasured, "info");
-          else toast(closePercent >= 100 ? COPY.closeDone : COPY.closeDonePart(fmtQ(closedAbs), fmtQ(freshAbs)), "success");
+          else toast(closeDetail(closePercent >= 100 ? COPY.closeDone : COPY.closeDonePart(fmtQ(closedAbs), fmtQ(freshAbs))), "success");
         }
         setPhase("confirming");
         setTimeout(() => setPhase("idle"), 2000);

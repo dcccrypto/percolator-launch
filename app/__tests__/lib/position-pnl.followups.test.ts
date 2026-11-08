@@ -50,12 +50,15 @@ describe("1. liquidation price on EFFECTIVE size", () => {
   });
 });
 
-describe("4. ROE on EFFECTIVE initial margin (pinned numerically)", () => {
-  it("40 effective tokens: +$5.00 on $399.50 margin = 1.25%", () => {
+describe("4. ROE on the position's capital, over EFFECTIVE size (pinned numerically)", () => {
+  it("40 effective tokens: +$5.00 on $1,000 capital = 0.5% (M7: capital, no longer notional / 10 = $399.50 -> 1.25%)", () => {
     const r = computePositionPnl(base);
     expect(r.unrealizedPnl).toBe(5_000_000n);
-    // IM = 40 x $99.875 x 10% = 399.5 USDC -> 5 / 399.5 = 1.2516%
-    expect(r.roe).toBeCloseTo(1.25, 1);
+    expect(r.roe).toBeCloseTo(0.5, 1);
+    expect(r.roe).not.toBeCloseTo(1.25, 1);
+  });
+  it("several open legs share the capital: the initial-margin basis stays (+$5.00 on $399.50 = 1.25%)", () => {
+    expect(computePositionPnl({ ...base, activeLegCount: 2 }).roe).toBeCloseTo(1.25, 1);
   });
 
   it("NEGATIVE CONTROL: margin on RAW basis (80 tokens) would read half that, 0.63%", () => {

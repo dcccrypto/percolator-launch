@@ -14,6 +14,7 @@ import { describeLiqPrice, type LiqPriceDisplay } from "@/lib/liq-price-display"
 import { LiqPriceValue } from "./LiqPriceValue";
 import { orderHeading } from "@/lib/trading";
 import { FIRST_TRADE_COPY } from "@/lib/first-trade";
+import { SPREAD_LABEL, spreadCostAtoms, spreadValueText, type SpreadEstimate } from "@/lib/v22/spread-estimate";
 
 interface TradeConfirmationModalProps {
   direction: "long" | "short";
@@ -44,6 +45,12 @@ interface TradeConfirmationModalProps {
    * trade anyway.
    */
   worstFillPriceE6?: bigint;
+  /**
+   * M7: the matcher's pre-trade spread / price impact for this size (lib/v22/spread-estimate.ts). The booked price of a fill is the
+   * matcher's execution price, not the mark, so the row is ALWAYS shown: null / omitted reads "Not available before the trade",
+   * never 0%.
+   */
+  spreadEstimate?: SpreadEstimate | null;
   /** Current slab account equity in collateral units. Used to show risk leverage. */
   accountEquity?: bigint | null;
   /**
@@ -84,6 +91,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   tradingFee,
   tradingFeeEstimated = false,
   worstFillPriceE6,
+  spreadEstimate = null,
   accountEquity,
   riskLeverage: riskLeverageAfter,
   depositAmount,
@@ -306,6 +314,16 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
             <span className="text-[var(--text-secondary)]">{tradingFeeEstimated ? "Trading Fee (est.):" : "Trading Fee:"}</span>
             <span className="font-mono font-medium text-[var(--text)]">
               {formatTokenAmount(tradingFee, decimals)} {settleSymbol}
+            </span>
+          </div>
+          <div className="flex justify-between gap-3" data-testid="confirm-spread">
+            <span className="text-[var(--text-secondary)]">{SPREAD_LABEL}:</span>
+            <span className="text-right font-mono font-medium text-[var(--text)]">
+              {spreadValueText(spreadEstimate)}
+              {(() => {
+                const cost = spreadCostAtoms(spreadEstimate, notional);
+                return cost !== null && cost > 0n ? ` ~${formatTokenAmount(cost, decimals)} ${settleSymbol}` : "";
+              })()}
             </span>
           </div>
           {createsAccount && (

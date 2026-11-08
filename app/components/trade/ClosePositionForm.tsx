@@ -4,6 +4,7 @@ import { catchUpAvailableLine } from "@/lib/limits/catchup-estimate";
 import { priceBehindLine } from "@/lib/oracle-stale-gate";
 import { FC, useId, useMemo, useState } from "react";
 import { formatTokenAmount } from "@/lib/format";
+import { SPREAD_LABEL, spreadCostAtoms, spreadValueText, type SpreadEstimate } from "@/lib/v22/spread-estimate";
 import { formatLotPriceE6, formatLotQ } from "@/lib/v22/lot";
 import { computeMarkPnl, computeMarkPnlLinear, clampClosePercent, UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
 
@@ -52,6 +53,12 @@ export interface ClosePositionFormProps {
    * Omitted = `tradingFeeBps` alone. A larger value shows the row as "Trading Fee (est.)", as the confirm screen does for opens.
    */
   closeFeeBpsFor?: (closeAbs: bigint) => bigint;
+  /**
+   * M7: the matcher's pre-trade spread / price impact for a close of `closeAbs` (`takerBuys` = closing a short). The close fills at the
+   * matcher's execution price, not the mark, so the row is always shown and the balance preview subtracts the estimated cost.
+   * Omitted / null result = "Not available before the trade" (never 0%).
+   */
+  spreadEstimateFor?: (closeAbs: bigint, takerBuys: boolean) => SpreadEstimate | null;
   /** Blocks close + shows the oracle-stale warning (matured oracle / no price — what the chain refuses). */
   oracleStale?: boolean;
   /** Price older than 60 s but the chain would accept the close — shows one calm line, never blocks. */
@@ -109,6 +116,7 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
   loading,
   tradingFeeBps = 0n,
   closeFeeBpsFor,
+  spreadEstimateFor,
   oracleStale = false,
   oraclePriceBehind = false,
   priceAgeSecs = 0,
@@ -172,7 +180,9 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
     // #3534: the closed part's PnL on the RISK entry: a loss a settle already moved out of `capital` is not charged again.
     const riskBasis = riskEntryPrice != null && riskEntryPrice > 0n ? riskEntryPrice : entryPrice;
     const balancePnl = riskBasis > 0n ? computeMarkPnlLinear(closePositionSigned, riskBasis, currentPrice) : 0n;
-    const rawBalanceAfter = capital + balancePnl - closeFee;
+    const spread = spreadEstimateFor ? spreadEstimateFor(closeAbs, !isLong) : null;
+    const spreadCost = spreadCostAtoms(spread, closeNotional) ?? 0n;
+    const rawBalanceAfter = capital + balancePnl - closeFee - spreadCost;
     const balanceAfter = rawBalanceAfter > 0n ? rawBalanceAfter : 0n;
 
     const pnlUsd =
@@ -180,8 +190,8 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
         ? (Number(pnlNative) / 10 ** decimals) * priceUsd
         : null;
 
-    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, feeEstimated, balanceAfter };
-  }, [percent, absPosition, isLong, entryPrice, riskEntryPrice, currentPrice, capital, priceUsd, tradingFeeBps, closeFeeBpsFor, decimals]);
+    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, feeEstimated, balanceAfter, spread, spreadCost };
+  }, [percent, absPosition, isLong, entryPrice, riskEntryPrice, currentPrice, capital, priceUsd, tradingFeeBps, closeFeeBpsFor, spreadEstimateFor, decimals]);
 
   // #2660: 0n = unknown entry (see the prop doc) — never a confident zero PnL.
   const entryKnown = entryPrice > 0n;
@@ -326,6 +336,13 @@ export const ClosePositionForm: FC<ClosePositionFormProps> = ({
             </span>
           </div>
         )}
+        <div className="flex justify-between gap-3" data-testid="close-spread">
+          <span className="text-[var(--text-dim)]">{SPREAD_LABEL}:</span>
+          <span className="text-right font-mono font-medium text-[var(--text-secondary)]">
+            {spreadValueText(preview.spread)}
+            {preview.spreadCost > 0n && ` −${formatTokenAmount(preview.spreadCost, decimals)} ${colSym}`}
+          </span>
+        </div>
         <div className="flex justify-between">
           <span className="text-[var(--text-dim)]">Est. Account Balance After:</span>
           <span className="font-mono font-medium text-[var(--text)]" title={entryKnown ? undefined : "Excludes PnL — the entry price is unknown, so the PnL settled on close can't be previewed."}>

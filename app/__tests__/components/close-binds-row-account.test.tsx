@@ -22,6 +22,8 @@ vi.mock("next/dynamic", () => ({ default: () => () => <button>ConnectButton</but
 // #3726: the close modal reads the market's limits for its close-fee estimate. Not under test here; no limits = the base fee.
 vi.mock("@/hooks/useMarketLimits", () => ({ useMarketLimits: () => null }));
 vi.mock("@/hooks/useWalletCompat");
+// M7: the close dialog reads the matcher quote through this hook; these tests are not about it (tested in ClosePositionForm.spread.test.tsx).
+vi.mock("@/hooks/useSpreadQuoter", () => ({ useSpreadQuoter: () => () => null }));
 vi.mock("@/hooks/usePortfolio", async (io) => ({ ...(await io<typeof import("@/hooks/usePortfolio")>()), usePortfolio: vi.fn() }));
 vi.mock("@/hooks/useMultiTokenMeta");
 vi.mock("@/hooks/useLpPositions", () => ({ useLpPositions: () => ({ positions: [], totalRedeemable: 0, loading: false, isRefreshing: false, error: null, refresh: vi.fn() }) }));
