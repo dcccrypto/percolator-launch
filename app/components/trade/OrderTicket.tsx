@@ -107,6 +107,7 @@ import { fmtQ as fmtQLots } from "@/lib/limits/format";
 import { takeFillResult } from "@/lib/limits/fill-check";
 import { feeRaiseCopy, takeFeeRaise } from "@/lib/v22/fee-raise-note";
 import { sizeWithLots } from "@/lib/v22/growth-room";
+import { growthGate } from "@/lib/v22/growth-gate";
 import { clippedFillBody, readClippedFill } from "@/lib/v22/clipped-fill";
 import { feeBpsWithSpread } from "@/lib/v22/spread-estimate";
 import { effectivePriceE6, readExecFill, type ExecFill } from "@/lib/v22/exec-fill";
@@ -565,7 +566,6 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     growthSideCap,
   );
 
-  const availableLeverage = useMemo(() => availableLeverageFor(maxLeverage), [maxLeverage]);
   const capital = userAccount ? userAccount.account.capital : 0n;
   // Margin already "locked" by this market's existing open position (if
   // any), so balance/buying-power reflect what's actually free to size a
@@ -955,13 +955,27 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const fee = hasOrder ? computeTradingFee((positionSize * oracleE6) / 1_000_000n, tradingFeeBps) : 0n;
   // The deposit this order needs (margin + fee + 10%), editable; never more than the wallet holds.
   // GH#2953: the bundled deposit covers the IM floor (marginNeed, above).
-  const marginShort = needsAccount
+  const marginShortEngine = needsAccount
     ? marginNeed
     : vsPosition
       ? vsPosition.shortBy
       : marginNeed > availableBalance
         ? marginNeed - availableBalance
         : 0n;
+  // N2: on a growth market the deployed wrapper checks the WHOLE position after the fill against the dynamic IMR (growth_v19.rs
+  // growth_gate; Custom 92 / 49). A bundled deposit sized to this order's margin alone left an open position at a higher leverage
+  // short of it, and the chain refused. The deposit is at least the equity the gate still needs (lib/v22/growth-gate.ts).
+  const growthDepositFloor = (() => {
+    if (!fundingMode || !hasOrder || !marketLimits.growth || isReducingOrder(existingPositionSize, direction, positionSize)) return 0n;
+    const equityNow = needsAccount || !userAccount
+      ? 0n
+      : capital +
+        (safeExistingPnl < 0n ? safeExistingPnl : 0n) +
+        (!isSentinelValue(userAccount.account.feeCredits) && userAccount.account.feeCredits < 0n ? userAccount.account.feeCredits : 0n);
+    const g = growthGate({ view: marketLimits.growth, direction, takerEffQ: existingPositionSize, askQ: positionSize, takerEquity: equityNow });
+    return g.closed ? 0n : g.extraEquityNeeded;
+  })();
+  const marginShort = growthDepositFloor > marginShortEngine ? growthDepositFloor : marginShortEngine;
   // The engine charges the fee at its price, which can sit above the receipt's feed-priced fee.
   const fundFee = openNeed.fee > fee ? openNeed.fee : fee;
   const fundNeededAtoms = fundingMode && hasOrder ? fundDepositAtoms(marginShort, fundFee, walletAtaBalance ?? 0n, decimals) : 0n;
@@ -1211,11 +1225,20 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   // Row 8 (AUTO): a busy side's step-down lowers the slider max; a chosen leverage above the
   // cap for this size is set to it.
-  const levCapForSize = Math.min(maxLeverage, ticketLimits.stepDown?.maxLeverageAtSize ?? Number.POSITIVE_INFINITY);
+  // N2 (Council round 4): on a growth market the cap for THIS size is the "Max leverage now" the panel shows (the program's limit at
+  // the post-fill open interest), not the zero-size side cap: 10x was selectable while the panel read 6.8x and the chain refused it.
+  const levCapForSize = Math.min(
+    maxLeverage,
+    ticketLimits.stepDown?.maxLeverageAtSize ?? Number.POSITIVE_INFINITY,
+    ticketLimits.growth?.fillMaxLeverage ?? Number.POSITIVE_INFINITY,
+  );
   useEffect(() => {
     if (levCapForSize >= 1 && leverage > levCapForSize) updateLeverage(Math.floor(levCapForSize * 100) / 100);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the cap drops below the choice
   }, [levCapForSize, leverage]);
+  // The selector (input, slider, presets) tops out at that same cap, so no choice above it is ever offered.
+  const selectorMaxLeverage = Math.max(1, Math.floor(levCapForSize * 100) / 100);
+  const availableLeverage = useMemo(() => availableLeverageFor(selectorMaxLeverage), [selectorMaxLeverage]);
 
   const feeOverMax = ticketLimits.issues.some((x) => x.kind === "fee-over-max");
   const feeFitQ = feeOverMax ? feeFitSizeQ(limitsInput) : null;
@@ -2261,7 +2284,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 // the text is kept verbatim so a "." survives long enough to
                 // finish typing, and the value is quantised DOWN rather than
                 // Math.round'ed up. See lib/leverage-control.ts.
-                const next = nextLeverageInputState(e.target.value, maxLeverage);
+                const next = nextLeverageInputState(e.target.value, selectorMaxLeverage);
                 setLeverageText(next.text);
                 if (next.leverage !== null) updateLeverageFromText(next.leverage);
               }}
@@ -2272,7 +2295,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <span className="text-[11px] pointer-coarse:text-base font-medium text-[var(--text)]">x</span>
           </div>
         </div>
-        {maxLeverage > 1 ? (() => {
+        {selectorMaxLeverage > 1 ? (() => {
           // Thumb, fill and labels sit on the preset INDEX scale, so 1/3/5/10/20 stay evenly
           // spaced (lib/leverage-control.ts leverageToPct).
           const thumbPct = leverageToPct(leverage, availableLeverage);
@@ -2282,7 +2305,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           const fromPointer = (e: React.PointerEvent<HTMLDivElement>) => {
             const r = e.currentTarget.getBoundingClientRect();
             if (r.width <= 0) return;
-            const next = pctToLeverage((e.clientX - r.left) / r.width, availableLeverage, maxLeverage);
+            const next = pctToLeverage((e.clientX - r.left) / r.width, availableLeverage, selectorMaxLeverage);
             if (next !== leverage) updateLeverage(next);
           };
 
@@ -2331,7 +2354,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 <input
                   type="range"
                   min={1}
-                  max={maxLeverage}
+                  max={selectorMaxLeverage}
                   step={LEVERAGE_STEP}
                   value={leverage}
                   onChange={(e) => {
@@ -2341,7 +2364,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                     // the computed radius was 1, which at a 0.5 step would pull
                     // every half-step near a preset onto it and make the finer
                     // step decorative. The presets are still one click away.
-                    updateLeverage(clampSliderLeverage(Number(e.target.value), maxLeverage));
+                    updateLeverage(clampSliderLeverage(Number(e.target.value), selectorMaxLeverage));
                   }}
                   onFocus={() => setLeverageFocused(true)}
                   onBlur={() => setLeverageFocused(false)}
@@ -2374,7 +2397,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             </div>
           );
         })() : (
-          <p className="text-[9px] text-[var(--text-dim)] font-mono">{formatLeverageValue(maxLeverage)}x (fixed)</p>
+          <p className="text-[9px] text-[var(--text-dim)] font-mono">{formatLeverageValue(selectorMaxLeverage)}x (fixed)</p>
         )}
       </div>
 
