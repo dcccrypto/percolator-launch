@@ -1,6 +1,7 @@
 /**
  * Create-wizard copy that needs a rule, not just a string (Council 2026-11-06-go1106-ux, Creator seat).
  */
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 
 /** The devnet collateral mint every market is margined in (lib/config.ts testUsdcMint, lib/tokenMeta.ts). */
 function collateralMint(): string {
@@ -16,6 +17,24 @@ export function isCollateralMint(ca: string): boolean {
   const v = ca.trim();
   return v.length > 0 && v === collateralMint();
 }
+
+/**
+ * Owner decision 2026-11-09 (Council R2-11 / R3-10, Creator): dollar stablecoins are not perp underlyings on v2.2. Mainnet USDC and
+ * PYUSD reached an enabled "HOLD TO LAUNCH", priced off USDC/USDT and PYUSD/USDC pools at ~$1; USDT was stopped only by having no
+ * supported pool. Mainnet mints (the address pasted at step 1 is the mainnet reference CA). Off v2.2 nothing changes.
+ */
+const STABLECOIN_PERP_MINTS: ReadonlySet<string> = new Set([
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
+  "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo", // PYUSD
+  "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", // USDT
+]);
+
+export function isStablecoinPerpBlocked(ca: string): boolean {
+  return isDevnetV22Enabled() && STABLECOIN_PERP_MINTS.has(ca.trim());
+}
+
+export const STABLECOIN_PERP_REASON =
+  "This is a dollar stablecoin (USDC, USDT or PYUSD), so it can't be a perp market's token. Paste the mint of the token you want to list.";
 
 export const COLLATERAL_MINT_REASON =
   "This is test USDC, the collateral every market uses, so it can't be a market's token. Paste the mint of the token you want to list.";

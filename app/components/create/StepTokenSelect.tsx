@@ -10,7 +10,7 @@ import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { formatHumanAmount } from "@/lib/parseAmount";
 import { isValidBase58Pubkey } from "@/lib/createWizardUtils";
 import { getNetwork } from "@/lib/config";
-import { COLLATERAL_MINT_REASON, isCollateralMint } from "@/lib/creator-copy";
+import { COLLATERAL_MINT_REASON, STABLECOIN_PERP_REASON, isCollateralMint, isStablecoinPerpBlocked } from "@/lib/creator-copy";
 import type { DuplicateMarket } from "@/hooks/useDuplicateMarket";
 
 /** Derive whether we're on devnet from the live RPC endpoint (not build-time env var). */
@@ -259,8 +259,10 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
   // The devnet collateral mint is stored as every market's mint_address, so the duplicate check "finds" all of them;
   // the real reason is that it is the collateral (Council GO1106-UX Creator). It takes precedence over the duplicate box.
   const collateralPasted = mintValid && isDevnet && isCollateralMint(mintAddress);
-  const duplicateBlocked = mintValid && !collateralPasted && duplicateMarkets.length > 0;
-  const effectiveCanContinue = canContinue && !mintNetworkBlocked && !duplicateBlocked && !collateralPasted;
+  // v2.2: a dollar stablecoin is not a perp underlying (owner 2026-11-09, R2-11 / R3-10). Its own line, ahead of the duplicate box.
+  const stablecoinPasted = mintValid && !collateralPasted && isStablecoinPerpBlocked(mintAddress);
+  const duplicateBlocked = mintValid && !collateralPasted && !stablecoinPasted && duplicateMarkets.length > 0;
+  const effectiveCanContinue = canContinue && !mintNetworkBlocked && !duplicateBlocked && !collateralPasted && !stablecoinPasted;
 
   return (
     <div className="space-y-5">
@@ -356,6 +358,12 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
       {collateralPasted && (
         <div className="border border-[var(--short)]/30 bg-[var(--short)]/[0.04] p-4" role="alert" data-testid="create-collateral-mint-blocked">
           <p className="text-[11px] font-semibold text-[var(--short)]">✗ {COLLATERAL_MINT_REASON}</p>
+        </div>
+      )}
+
+      {stablecoinPasted && (
+        <div className="border border-[var(--short)]/30 bg-[var(--short)]/[0.04] p-4" role="alert" data-testid="create-stablecoin-mint-blocked">
+          <p className="text-[11px] font-semibold text-[var(--short)]">✗ {STABLECOIN_PERP_REASON}</p>
         </div>
       )}
 

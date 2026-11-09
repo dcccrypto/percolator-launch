@@ -43,7 +43,7 @@ import { V21_COPY } from "@/lib/v21/copy";
 import { defaultGrowthLaunch, growthTierX100, validateGrowthLaunch, type GrowthLaunch } from "@/lib/v21/growth-launch";
 import { EMPTY_TIER_EDIT, collateralDecimalsIssue, isUsdLikeCollateral, validateTierEdit } from "@/lib/v22/tier-config";
 import { V22LaunchOptions, type V22OptionsState } from "./V22LaunchOptions";
-import { priceFloorMessage } from "@/lib/creator-copy";
+import { STABLECOIN_PERP_REASON, isStablecoinPerpBlocked, priceFloorMessage } from "@/lib/creator-copy";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { lotMarketsEnabled } from "@/lib/v22/lot";
 import { launchInitialPriceE6, lotLaunchPrice, planLaunchV22, toLaunchParams } from "@/lib/v22/launch-plan";
@@ -498,7 +498,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
   // shows "Connect wallet to continue" in place of Continue). Gates both the
   // Continue click and the one-shot auto-advance, which then fires as soon as
   // the user connects.
-  const step1CanAdvance = step1Valid && !duplicateCheck.checking && duplicateCheck.duplicates.length === 0 && !!publicKey;
+  // v2.2: a dollar stablecoin (USDC, USDT, PYUSD) is not a perp underlying (owner 2026-11-09, Council R2-11 / R3-10). Gates the
+  // Continue click and the auto-advance here (StepTokenSelect unmounts on advance) and, below, the launch itself.
+  const stablecoinBlocked = isStablecoinPerpBlocked(wizard.mintAddress);
+  const step1CanAdvance = step1Valid && !duplicateCheck.checking && duplicateCheck.duplicates.length === 0 && !!publicKey && !stablecoinBlocked;
 
   // Control Room (dial) validation — trading fee, leverage margin, and seed amounts.
   const paramsValid =
@@ -812,9 +815,13 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
   const resumingLaunch = resumeFromStep !== null || chainResume !== null;
   const livePriceLimit = useLivePriceLimit(walletB58, isDevnet && resolvedOracleType === "keeper" && !resumingLaunch);
   const atLivePriceLimit = blocksNewLaunch(livePriceLimit, { keeperPriced: resolvedOracleType === "keeper", resuming: resumingLaunch });
-  const launchDisabled = !allValid || !oracleSettled || !publicKey || p3Issue !== null || growthIssue !== null || v22Issue !== null || tierIssue !== null || decimalsIssue !== null || atLivePriceLimit;
+  // A NEW stablecoin launch never starts; continuing one that already started (its market exists) stays the creator's call.
+  const stablecoinLaunchBlocked = stablecoinBlocked && !resumingLaunch;
+  const launchDisabled = !allValid || !oracleSettled || !publicKey || p3Issue !== null || growthIssue !== null || v22Issue !== null || tierIssue !== null || decimalsIssue !== null || atLivePriceLimit || stablecoinLaunchBlocked;
   const launchDisabledReason: string | undefined = !publicKey
     ? "Connect wallet"
+    : stablecoinLaunchBlocked
+      ? STABLECOIN_PERP_REASON
     : p3Issue
       ? LIMITS_COPY.p3Wizard.issue[p3Issue]
     : growthIssue
