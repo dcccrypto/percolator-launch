@@ -27,6 +27,7 @@ import {
   triggerPortfolioScan,
   triggerHeldNftScan,
   type OwnPortfolioScanResult,
+  SCAN_MIN_INTERVAL_MS,
 } from "@/lib/userAccountScan";
 import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 
@@ -148,6 +149,7 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
             slabAddress,
             publicKey: ownerWalletPk,
             raw: raw!,
+            minIntervalMs: SCAN_MIN_INTERVAL_MS,
           });
 
           if (cancelled) return;
@@ -256,6 +258,7 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
             nftProgramId: PERCOLATOR_NFT_PROGRAM_ID,
             wallet: ownerWalletPk,
             raw: raw!,
+            minIntervalMs: SCAN_MIN_INTERVAL_MS,
           });
           if (cancelled) return;
           const legacyIsStale = await resolveNftLegacyIsStale(connection, PERCOLATOR_NFT_PROGRAM_ID, heldNfts.some((n) => n.data.length === 239));

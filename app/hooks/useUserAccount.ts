@@ -12,6 +12,7 @@ import {
   triggerPortfolioScan,
   portfolioV17ToAccount,
   type UserAccountInfo,
+  SCAN_MIN_INTERVAL_MS,
 } from "@/lib/userAccountScan";
 import { isWrapperAccount } from "@/lib/v22/layout";
 
@@ -74,7 +75,7 @@ export function useUserAccount(): UserAccountInfo | null {
   // mechanism (identity of `raw` across simultaneously-mounted instances).
   useEffect(() => {
     if (!scanKey || !isV17Market || !publicKey || !programId || !slabAddress || raw == null) return;
-    void triggerPortfolioScan({ connection, programId, slabAddress, publicKey, raw });
+    void triggerPortfolioScan({ connection, programId, slabAddress, publicKey, raw, minIntervalMs: SCAN_MIN_INTERVAL_MS });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanKey, isV17Market, publicKeyStr, programIdStr, slabAddress, raw, connection]);
 
