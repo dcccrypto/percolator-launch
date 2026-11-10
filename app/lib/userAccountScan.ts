@@ -202,6 +202,42 @@ export interface OwnPortfolioScanResult {
   portfolio: PortfolioV17;
 }
 
+// ---------------------------------------------------------------------------
+// Background re-scan throttle (Council r4 R3-8)
+// ---------------------------------------------------------------------------
+// Every change of SlabProvider's `raw` re-triggers a getProgramAccounts scan (portfolio: 1, held-NFT: 2). On
+// a live market `raw` changes every keeper push, which measured ~440 gPA calls in 5 idle minutes on /trade.
+// The hooks pass `minIntervalMs`; a trigger that lands inside the interval of the last scan is coalesced into
+// ONE trailing scan (with the latest `raw`) instead of firing now. Anything that means "the user just acted"
+// bypasses the throttle for FRESH_SCAN_WINDOW_MS: a manual slab refresh (trade / deposit / withdraw / NFT flows all call
+// it), or a provisional confirmed-fill patch. Callers that pass no `minIntervalMs`
+// keep the old scan-on-every-new-raw behaviour.
+
+/** Background re-scan floor used by the hooks. */
+export const SCAN_MIN_INTERVAL_MS = 10_000;
+/** How long after a user action every scan is allowed through unthrottled. */
+export const FRESH_SCAN_WINDOW_MS = 20_000;
+
+let freshScansUntil = 0;
+
+/** Lift the background throttle for FRESH_SCAN_WINDOW_MS ("the user just changed something"). */
+export function requestFreshScans(): void {
+  freshScansUntil = Date.now() + FRESH_SCAN_WINDOW_MS;
+}
+
+interface ThrottleState {
+  lastScanStartedAt: number;
+  trailingTimer: ReturnType<typeof setTimeout> | null;
+}
+
+/** Returns ms to wait before a background scan may run, or 0 to run now. */
+function throttleDelayMs(state: ThrottleState, minIntervalMs: number | undefined, scanned: boolean, provisional: boolean): number {
+  if (!minIntervalMs || minIntervalMs <= 0 || !scanned || provisional) return 0;
+  const now = Date.now();
+  if (now < freshScansUntil) return 0;
+  return Math.max(0, state.lastScanStartedAt + minIntervalMs - now);
+}
+
 interface PortfolioEntry {
   /** Raw parsed result, or null if the wallet owns no matching portfolio. */
   raw: OwnPortfolioScanResult | null;
@@ -237,9 +273,12 @@ interface PortfolioEntry {
    *  reset back to `false` (entries are never evicted; a failed later scan
    *  keeps the last good snapshot, which is still a resolved answer). */
   scanned: boolean;
+  throttle: ThrottleState;
 }
 
 const portfolioEntries = new Map<string, PortfolioEntry>();
+const latestPortfolioParams = new Map<string, PortfolioScanParams>();
+const latestHeldNftParams = new Map<string, HeldNftScanParams>();
 
 export function makePortfolioScanKey(programId: PublicKey, slabAddress: string, wallet: PublicKey): string {
   return `${programId.toBase58()}|${slabAddress}|${wallet.toBase58()}`;
@@ -256,6 +295,7 @@ function getOrCreatePortfolioEntry(key: string): PortfolioEntry {
       inFlight: null,
       provisionalUntil: 0,
       scanned: false,
+      throttle: { lastScanStartedAt: 0, trailingTimer: null },
     };
     portfolioEntries.set(key, entry);
   }
@@ -358,6 +398,8 @@ export interface PortfolioScanParams {
   publicKey: PublicKey;
   /** Identity token for dedup — pass SlabProvider's `raw` Uint8Array. */
   raw: Uint8Array;
+  /** Background re-scan floor (see SCAN_MIN_INTERVAL_MS). Omit for scan-on-every-new-raw. */
+  minIntervalMs?: number;
 }
 
 /**
@@ -379,6 +421,22 @@ export function triggerPortfolioScan(params: PortfolioScanParams): Promise<OwnPo
     return entry.inFlight ?? Promise.resolve(entry.raw);
   }
 
+  const wait = throttleDelayMs(entry.throttle, params.minIntervalMs, entry.scanned, entry.provisionalUntil > 0 && Date.now() < entry.provisionalUntil);
+  if (wait > 0) {
+    // Coalesce into one trailing scan that uses the newest `raw`.
+    latestPortfolioParams.set(key, params);
+    if (!entry.throttle.trailingTimer) {
+      entry.throttle.trailingTimer = setTimeout(() => {
+        entry.throttle.trailingTimer = null;
+        const latest = latestPortfolioParams.get(key);
+        latestPortfolioParams.delete(key);
+        if (latest) void triggerPortfolioScan({ ...latest, minIntervalMs: undefined });
+      }, wait);
+    }
+    return entry.inFlight ?? Promise.resolve(entry.raw);
+  }
+
+  entry.throttle.lastScanStartedAt = Date.now();
   entry.lastTriggerRaw = params.raw;
   const promise = runPortfolioScan(entry, params).finally(() => {
     if (entry.inFlight === promise) entry.inFlight = null;
@@ -557,6 +615,9 @@ interface HeldNftEntry {
   listeners: Set<() => void>;
   lastTriggerRaw: Uint8Array | null;
   inFlight: Promise<HeldNftRaw[]> | null;
+  /** True once any scan has succeeded or been attempted-and-settled (throttle only applies after the first). */
+  scanned: boolean;
+  throttle: ThrottleState;
 }
 
 const heldNftEntries = new Map<string, HeldNftEntry>();
@@ -568,7 +629,14 @@ export function makeHeldNftScanKey(nftProgramId: PublicKey, wallet: PublicKey): 
 function getOrCreateHeldNftEntry(key: string): HeldNftEntry {
   let entry = heldNftEntries.get(key);
   if (!entry) {
-    entry = { snapshot: null, listeners: new Set(), lastTriggerRaw: null, inFlight: null };
+    entry = {
+      snapshot: null,
+      listeners: new Set(),
+      lastTriggerRaw: null,
+      inFlight: null,
+      scanned: false,
+      throttle: { lastScanStartedAt: 0, trailingTimer: null },
+    };
     heldNftEntries.set(key, entry);
   }
   return entry;
@@ -620,6 +688,8 @@ export interface HeldNftScanParams {
   wallet: PublicKey;
   /** Identity token for dedup — pass SlabProvider's `raw` Uint8Array. */
   raw: Uint8Array;
+  /** Background re-scan floor (see SCAN_MIN_INTERVAL_MS). Omit for scan-on-every-new-raw. */
+  minIntervalMs?: number;
 }
 
 /**
@@ -635,6 +705,21 @@ export function triggerHeldNftScan(params: HeldNftScanParams): Promise<HeldNftRa
     return entry.inFlight ?? Promise.resolve(entry.snapshot ?? []);
   }
 
+  const wait = throttleDelayMs(entry.throttle, params.minIntervalMs, entry.scanned, false);
+  if (wait > 0) {
+    latestHeldNftParams.set(key, params);
+    if (!entry.throttle.trailingTimer) {
+      entry.throttle.trailingTimer = setTimeout(() => {
+        entry.throttle.trailingTimer = null;
+        const latest = latestHeldNftParams.get(key);
+        latestHeldNftParams.delete(key);
+        if (latest) void triggerHeldNftScan({ ...latest, minIntervalMs: undefined });
+      }, wait);
+    }
+    return entry.inFlight ?? Promise.resolve(entry.snapshot ?? []);
+  }
+
+  entry.throttle.lastScanStartedAt = Date.now();
   entry.lastTriggerRaw = params.raw;
   const promise = runHeldNftScan(entry, params).finally(() => {
     if (entry.inFlight === promise) entry.inFlight = null;
@@ -650,6 +735,7 @@ async function runHeldNftScan(entry: HeldNftEntry, params: HeldNftScanParams): P
       pubkey: r.pubkey,
       data: r.account.data instanceof Uint8Array ? r.account.data : new Uint8Array(r.account.data),
     }));
+    entry.scanned = true;
     publishHeldNftResult(entry, mapped);
     return entry.snapshot ?? [];
   } catch (e) {
