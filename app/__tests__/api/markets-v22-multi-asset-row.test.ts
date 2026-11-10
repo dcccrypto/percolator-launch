@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PublicKey } from "@solana/web3.js";
 
-const MINT = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+const MINT = new PublicKey("CbcyNo7m1amFWqEQm2m4PLv1UNvpcL3C1Ujm6AkzpKoU"); // not USDC: v2.2 lists no stablecoin-underlying market
 const PROG = new PublicKey("6kpg2wi7vwkn7E9rvodXSktYRhna8TWjiZrC1dBek6NM");
 const SINGLE = new PublicKey("BYFuWyuoUGhP1n8wpD8gXH2ciDsegyF1UJCQvBiVx7T5");
 const MULTI = new PublicKey("2xhsLP9NLkUMMsCsyzkHM9R1zsVU2V2vDo6v9WuPBzVw");

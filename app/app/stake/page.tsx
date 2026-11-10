@@ -1,7 +1,7 @@
 "use client";
 
 import { RecoverToStakers } from "@/components/stake/RecoverToStakers";
-import { stakePoolsUrl } from "@/lib/stake-pools-url";
+import { stakePoolsUrl, markStakeTx } from "@/lib/stake-pools-url";
 import { STAKE_COPY, cooldownDuration, stakeCopy, stakeCoverageCopy } from "@/lib/stake-copy";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { useStakeCooldown } from "@/hooks/useStakeCooldown";
@@ -1844,12 +1844,14 @@ export default function StakePage() {
     // Re-fetch both the user's LP position and pool-level TVL/cap data after
     // deposit/withdraw. Without refreshing pools, successful deposits can leave
     // pool cards showing stale TVL until the user manually reloads.
+    markStakeTx();
     setPositionRefreshKey((k) => k + 1);
     setPoolsRefreshKey((k) => k + 1);
 
     // RPC/indexer reads can lag just after confirmation, so do one follow-up
     // refresh to catch the settled vault balance without requiring a reload.
     window.setTimeout(() => setPoolsRefreshKey((k) => k + 1), 2_000);
+    window.setTimeout(() => setPoolsRefreshKey((k) => k + 1), 10_000);
   }, []);
 
   // Pools still loading, or a scan for this wallet not finished yet. A genuinely empty

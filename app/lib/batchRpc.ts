@@ -55,6 +55,23 @@ const FAST_FLUSH_METHODS = new Set([
   "getBalance",
 ]);
 
+/**
+ * Methods whose result must never be handed to a caller that asked AFTER the
+ * original batch left the browser. They keep the original same-window-only dedupe
+ * (a blockhash joined onto a slow in-flight retry loop could already be stale).
+ * Every other read joins an identical request until that request settles.
+ */
+const WINDOW_ONLY_DEDUPE_METHODS = new Set([
+  "getLatestBlockhash",
+  "getRecentPrioritizationFees",
+  "getFeeForMessage",
+  "isBlockhashValid",
+  "requestAirdrop",
+]);
+
+/** Retries for a non-429 transport failure (5xx / network). 429 keeps `maxRetries`. */
+const DEFAULT_MAX_SERVER_ERROR_RETRIES = 2;
+
 /** Pending request waiting to be batched */
 interface PendingRequest {
   id: number;
@@ -78,6 +95,8 @@ export interface BatchRpcConfig {
   maxBackoffMs?: number;
   /** Max retries on 429 (default: 5) */
   maxRetries?: number;
+  /** Max retries on 5xx / network failure (default: 2). A dead RPC must not be hammered 6x per batch. */
+  maxServerErrorRetries?: number;
 }
 
 /**
@@ -92,14 +111,28 @@ export function createBatchRpc(config: BatchRpcConfig) {
     initialBackoffMs = 1000,
     maxBackoffMs = 30_000,
     maxRetries = 5,
+    maxServerErrorRetries = DEFAULT_MAX_SERVER_ERROR_RETRIES,
   } = config;
 
   let queue: PendingRequest[] = [];
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
   let nextId = 1;
   let backoffUntil = 0;
+  /** Consecutive fully-failed batches. Drives the exponential, capped inter-batch cooldown. */
+  let consecutiveFailures = 0;
 
-  /** Cache for deduplication within the current batch window */
+  /**
+   * Cooldown after a batch has failed for good. Doubles per consecutive failed batch from
+   * `initialBackoffMs`, capped at `maxBackoffMs`; cleared by the first success. While it is
+   * active every new read just queues (and dedupes) instead of each firing its own request.
+   */
+  function noteBatchFailure() {
+    consecutiveFailures++;
+    const cooldown = Math.min(initialBackoffMs * 2 ** (consecutiveFailures - 1), maxBackoffMs);
+    backoffUntil = Date.now() + cooldown;
+  }
+
+  /** Dedupe cache: a key stays until its request settles (or, for window-only methods, until flush). */
   const dedupeCache = new Map<string, Promise<string>>();
 
   function dedupeKey(method: string, params: unknown): string {
@@ -111,14 +144,19 @@ export function createBatchRpc(config: BatchRpcConfig) {
 
     if (queue.length === 0) return;
 
-    // Grab the current batch
-    const batch = queue.splice(0);
-    dedupeCache.clear();
-
-    // Wait for backoff if needed
+    // Cooling down after a failed batch: leave the queue in place (it keeps deduping and
+    // absorbing new reads) and flush ONE batch when the cooldown ends, instead of every
+    // 100ms window sleeping on its own and then firing separately.
     const now = Date.now();
     if (backoffUntil > now) {
-      await new Promise((r) => setTimeout(r, backoffUntil - now));
+      if (!flushTimer) flushTimer = setTimeout(flush, backoffUntil - now);
+      return;
+    }
+
+    // Grab the current batch
+    const batch = queue.splice(0);
+    for (const p of batch) {
+      if (WINDOW_ONLY_DEDUPE_METHODS.has(p.method)) dedupeCache.delete(dedupeKey(p.method, p.params));
     }
 
     // Build the JSON-RPC batch payload
@@ -152,7 +190,7 @@ export function createBatchRpc(config: BatchRpcConfig) {
             for (const p of batch) {
               p.resolve(errJson);
             }
-            backoffUntil = Date.now() + currentBackoff;
+            noteBatchFailure();
             return;
           }
           const retryAfter = response.headers.get("Retry-After");
@@ -172,6 +210,7 @@ export function createBatchRpc(config: BatchRpcConfig) {
 
         // Reset backoff on success
         backoffUntil = 0;
+        consecutiveFailures = 0;
 
         const results = await response.json();
 
@@ -220,7 +259,8 @@ export function createBatchRpc(config: BatchRpcConfig) {
         return;
       } catch (error) {
         attempt++;
-        if (attempt > maxRetries) {
+        if (attempt > maxServerErrorRetries) {
+          noteBatchFailure();
           for (const p of batch) {
             p.reject(error instanceof Error ? error : new Error(String(error)));
           }
@@ -258,6 +298,14 @@ export function createBatchRpc(config: BatchRpcConfig) {
 
     if (canDedupe) {
       dedupeCache.set(key, promise);
+      // Window-only methods are removed at flush; everything else when this request settles,
+      // so identical reads arriving while it is on the wire join it rather than re-sending.
+      if (!WINDOW_ONLY_DEDUPE_METHODS.has(method)) {
+        const release = () => {
+          if (dedupeCache.get(key) === promise) dedupeCache.delete(key);
+        };
+        promise.then(release, release);
+      }
     }
 
     // Schedule flush — immediately when the batch is full or the method is

@@ -7,7 +7,7 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
 import { resolveNftLegacyIsStale } from "@/lib/nft-incarnation";
 import { parsePositionNftAccountV3, nftIncarnationStatus, isNftStale, type PositionNftStateV3 } from "@/lib/v22/sdk/nft-v3";
-import { portfolioV17ToAccount, triggerHeldNftScan, type UserAccountInfo } from "@/lib/userAccountScan";
+import { portfolioV17ToAccount, triggerHeldNftScan, SCAN_MIN_INTERVAL_MS, type UserAccountInfo } from "@/lib/userAccountScan";
 import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 
 export interface NftWrappedPosition extends UserAccountInfo {
@@ -78,6 +78,7 @@ export function useNftWrappedPosition(
           nftProgramId: PERCOLATOR_NFT_PROGRAM_ID,
           wallet: publicKey,
           raw: raw!,
+          minIntervalMs: SCAN_MIN_INTERVAL_MS,
         });
         if (cancelled) return;
         const legacyIsStale = await resolveNftLegacyIsStale(connection, PERCOLATOR_NFT_PROGRAM_ID, nfts.some((n) => n.data.length === 239));
