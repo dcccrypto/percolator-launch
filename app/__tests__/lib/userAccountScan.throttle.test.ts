@@ -1,7 +1,7 @@
 /**
  * Council r4 R3-8: background re-scan throttle. SlabProvider's `raw` changes every keeper push; each change used
  * to fire a getProgramAccounts scan. With `minIntervalMs` the scans coalesce into one trailing scan per interval,
- * and user actions (manual refresh / invalidation / provisional fill) lift the throttle.
+ * and user actions (manual refresh / provisional fill) lift the throttle.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PublicKey, type Connection } from "@solana/web3.js";
