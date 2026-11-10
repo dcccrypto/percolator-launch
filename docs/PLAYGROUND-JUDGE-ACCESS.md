@@ -2,13 +2,17 @@
 
 Devnet v2 is locked to the first waitlist cohort (see [PLAYGROUND-ACCESS.md](./PLAYGROUND-ACCESS.md)).
 Judges (Colosseum and similar) are not on the waitlist, so they get their own door: one shareable
-link that issues a normal 24 h session, without touching the waitlist or the team door.
+code that issues a normal 24 h session, without touching the waitlist or the team door.
 
 ```
-https://<playground host>/enter?judge=<PLAYGROUND_JUDGE_ACCESS_CODE>
+POST https://<playground host>/enter   (form field `judge` = PLAYGROUND_JUDGE_ACCESS_CODE)
         verify code (constant time) + door open (not past PLAYGROUND_JUDGE_ACCESS_UNTIL)
         Set-Cookie: pg_access=<session sub=judge:<fp>>   303 → /?signin=1
 ```
+
+The code is accepted **only in a POST body** (the form on `/locked`, shown while the door is open, or
+`curl -d judge=<code> https://<host>/enter`). `GET /enter?judge=<code>` is refused (303 `/locked`, no cookie) so the
+code never lands in URLs, logs, history or Referer headers (Council r4 N11).
 
 ## Environment (Vercel project `percolator-playground`)
 
