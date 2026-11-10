@@ -71,7 +71,7 @@ describe("symbol / name rule", () => {
   beforeEach(() => __setDevnetV22ForTest(true));
   afterAll(() => __setDevnetV22ForTest(null));
 
-  it.each(["USDC", "usdc", "$USDC", "USDT", "USD₮", "PYUSD", "USDS", "FDUSD", "USDe", "sUSDe", "USDG", "DAI", "sDAI", "USD1", "AUSD", "USDY", "USDH", "UXD", "hyUSD", "frxUSD", "USDC.e", "USDCet", "USDTbs", "wUSDC", "aeUSDC", "apUSDT", "jlUSDC", "USDCpo"])(
+  it.each(["USDC", "usdc", "$USDC", "USDT", "USD₮", "PYUSD", "USDS", "FDUSD", "USDe", "sUSDe", "USDG", "DAI", "sDAI", "USD1", "AUSD", "USDY", "USDH", "UXD", "hyUSD", "frxUSD", "UST", "USDC.e", "USDCet", "USDTbs", "wUSDC", "aeUSDC", "apUSDT", "jlUSDC", "USDCpo"])(
     "symbol %s is a hard block",
     (symbol) => {
       expect(stablecoinIdentityVerdict({ symbol })).toBe("block");
@@ -199,13 +199,28 @@ describe("checkStablecoinUnderlying", () => {
     expect(await checkStablecoinUnderlying({ pool: trunc, conn })).toEqual({ ok: false, kind: "unverifiable", retryable: false });
   });
 
-  it("with a mainnet_ca given, an unreadable pool does not block (the address / symbol layers already ran)", async () => {
-    expect(await checkStablecoinUnderlying({ mainnetCa: CONTROL, pool: pool(), conn: fakeConn(new Map(), { fail: true }) })).toEqual({ ok: true });
+  it("an unreadable pool is refused EVEN with a mainnet_ca (the pool is what gets priced)", async () => {
+    const missing = pool();
+    expect(await checkStablecoinUnderlying({ mainnetCa: CONTROL, pool: missing, conn: fakeConn(new Map()) })).toEqual({ ok: false, kind: "unverifiable", retryable: false });
+    expect(await checkStablecoinUnderlying({ mainnetCa: CONTROL, pool: pool(), conn: fakeConn(new Map(), { fail: true }) })).toEqual({ ok: false, kind: "unverifiable", retryable: true });
   });
 
-  it("the pool's base mint disagreeing with a clean mainnet_ca is still caught (the pool is the priced token)", async () => {
+  it("a mainnet_ca must equal the pool's base mint: match passes, mismatch is refused; a stable base is still a stablecoin refusal", async () => {
     const p = pool();
-    expect(await checkStablecoinUnderlying({ mainnetCa: CONTROL, pool: p, conn: fakeConn(new Map([[p, pumpPool(FDUSD, USDC)]])) })).toEqual({ ok: false, kind: "stablecoin" });
+    const conn = fakeConn(new Map([[p, pumpPool(CONTROL, USDC)]]));
+    expect(await checkStablecoinUnderlying({ mainnetCa: CONTROL, pool: p, conn })).toEqual({ ok: true });
+    expect(await checkStablecoinUnderlying({ mainnetCa: Keypair.generate().publicKey.toBase58(), pool: p, conn })).toEqual({ ok: false, kind: "mismatch" });
+    const q = pool();
+    expect(await checkStablecoinUnderlying({ mainnetCa: CONTROL, pool: q, conn: fakeConn(new Map([[q, pumpPool(FDUSD, USDC)]])) })).toEqual({ ok: false, kind: "stablecoin" });
+  });
+
+  it("Token-2022 metadata is used when a Metaplex account exists but does not parse", async () => {
+    const m = Keypair.generate().publicKey;
+    const accts = new Map<string, Acct>([
+      [pda(m).toBase58(), { owner: METAPLEX, data: Buffer.alloc(10) }],
+      [m.toBase58(), token2022Mint("Some Dollar", "USDS")],
+    ]);
+    expect(await checkStablecoinUnderlying({ mainnetCa: m.toBase58(), conn: fakeConn(accts) })).toEqual({ ok: false, kind: "stablecoin" });
   });
 
   it("ON-CHAIN symbol: an unlisted mint whose Metaplex / Token-2022 metadata is a stable identity is refused; a memecoin lookalike only warns", async () => {

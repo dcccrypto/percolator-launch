@@ -6,7 +6,8 @@
  * parser, the one the keeper prices with) and the mints' on-chain metadata (Metaplex PDA, or the Token-2022 metadata extension), then
  * applies the verified address list and the exact-ticker symbol/name rule.
  *
- * Failure policy: a pool-only request whose pool cannot be resolved is REFUSED (never waved through); a metadata read that fails is
+ * Failure policy: a request with a pool that cannot be resolved is REFUSED (never waved through, mainnet_ca or not), and a given mainnet_ca
+ * must equal the pool's base mint; a metadata read that fails is
  * not (the address list already ran, the symbol layer is defence in depth).
  */
 import { Connection, PublicKey } from "@solana/web3.js";
@@ -22,7 +23,9 @@ const WSOL = "So11111111111111111111111111111111111111112";
 export type StablecoinCheck =
   | { ok: true; suspect?: string }
   | { ok: false; kind: "stablecoin" }
-  /** Pool-only request whose pool's tokens could not be read: `retryable` = the mainnet RPC failed (503), else the pool is missing / unsupported (400). */
+  /** A pool AND a mainnet_ca were given and the pool's base mint is not that mint: the stated identity is not what the pool prices. */
+  | { ok: false; kind: "mismatch" }
+  /** Request with a pool whose tokens could not be read: `retryable` = the mainnet RPC failed (503), else the pool is missing / unsupported (400). */
   | { ok: false; kind: "unverifiable"; retryable: boolean };
 
 type Conn = Pick<Connection, "getMultipleAccountsInfo">;
@@ -79,7 +82,10 @@ async function readMintMetas(mints: string[], conn: Conn, timeoutMs: number): Pr
   const infos = await withTimeout(conn.getMultipleAccountsInfo(keys), timeoutMs);
   const out: Record<string, StablecoinTokenMeta> = {};
   mints.forEach((m, i) => {
-    const meta = infos[2 * i + 1] ? parseMetaplexNameSymbol(new Uint8Array(infos[2 * i + 1]!.data)) : infos[2 * i] ? parseToken2022NameSymbol(new Uint8Array(infos[2 * i]!.data)) : null;
+    // Metaplex first; when that account is absent OR does not parse, fall back to the Token-2022 metadata extension on the mint.
+    const mpl = infos[2 * i + 1];
+    const t22 = infos[2 * i];
+    const meta = (mpl ? parseMetaplexNameSymbol(new Uint8Array(mpl.data)) : null) ?? (t22 ? parseToken2022NameSymbol(new Uint8Array(t22.data)) : null);
     if (meta) out[m] = meta;
   });
   return out;
@@ -138,8 +144,10 @@ export async function checkStablecoinUnderlying(input: StablecoinCheckInput): Pr
       // a stable, or when a stable sits on the quote side outside that expected set.
       if (isStablecoinMintAddress(base) || (isStablecoinMintAddress(quote) && !quoteIsPriceable)) return { ok: false, kind: "stablecoin" };
       if (base !== WSOL) underlying.add(base);
-    } else if (!input.mainnetCa) {
-      // Pool-only and unresolved: the token identity is unknown, so it is not registered.
+      // The stated token identity must be the token the pool prices.
+      if (input.mainnetCa && input.mainnetCa !== base) return { ok: false, kind: "mismatch" };
+    } else {
+      // A supplied pool that cannot be resolved is refused, even when a mainnet_ca came with it: the pool is what gets priced.
       return { ok: false, kind: "unverifiable", retryable: rpcFailed };
     }
   }

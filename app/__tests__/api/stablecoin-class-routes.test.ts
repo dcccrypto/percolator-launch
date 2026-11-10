@@ -128,6 +128,16 @@ describe("POST /api/markets", () => {
     expect(down.status).toBe(503);
   });
 
+  it("mainnet_ca + pool: an unreadable pool is refused, and a mainnet_ca that is not the pool's base mint is 400", async () => {
+    const { POST } = await import("@/app/api/markets/route");
+    const unread = await POST(postMarkets({ mainnet_ca: CONTROL, dex_pool_address: kp() }));
+    expect(unread.status).toBe(400);
+    expect(await errOf(unread)).toMatch(/couldn't read this market's token/i);
+    const mismatch = await POST(postMarkets({ mainnet_ca: CONTROL, dex_pool_address: pool(PUMPSWAP, kp(), USDC) }));
+    expect(mismatch.status).toBe(400);
+    expect(await errOf(mismatch)).toMatch(/not the base token of the pool/i);
+  });
+
   it("POOL-ONLY: a normal token pool is not refused by the stablecoin gate", async () => {
     const { POST } = await import("@/app/api/markets/route");
     const res = await POST(postMarkets({ dex_pool_address: pool(METEORA, CONTROL, WSOL) }));

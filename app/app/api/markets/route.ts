@@ -28,7 +28,7 @@ import { validateSymbol, validateName } from "@/lib/market-metadata-validation";
 import { sanitizeLogoUrl } from "@/lib/token-metadata-validators";
 import { computeMarketHealthFromStats } from "@/lib/health";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
-import { STABLECOIN_PERP_REASON, STABLECOIN_UNVERIFIABLE_REASON, isStablecoinPerpBlocked } from "@/lib/v22/stablecoin-perps";
+import { STABLECOIN_PERP_REASON, STABLECOIN_UNVERIFIABLE_REASON, STABLECOIN_MISMATCH_REASON, isStablecoinPerpBlocked } from "@/lib/v22/stablecoin-perps";
 import { checkStablecoinUnderlying } from "@/lib/v22/stablecoin-resolve";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { SLUG_ALIASES } from "@/lib/symbol-utils";
@@ -1277,6 +1277,7 @@ export async function POST(req: NextRequest) {
     const stable = await checkStablecoinUnderlying({ mainnetCa: canonicalMainnetCa, pool: canonicalDexPool, symbol, name });
     if (!stable.ok) {
       if (stable.kind === "stablecoin") return NextResponse.json({ error: STABLECOIN_PERP_REASON }, { status: 400 });
+      if (stable.kind === "mismatch") return NextResponse.json({ error: STABLECOIN_MISMATCH_REASON }, { status: 400 });
       return stable.retryable
         ? NextResponse.json({ error: "Could not verify this market's token on mainnet right now. Try again in a moment." }, { status: 503, headers: { "Retry-After": "5" } })
         : NextResponse.json({ error: STABLECOIN_UNVERIFIABLE_REASON }, { status: 400 });

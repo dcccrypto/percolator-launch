@@ -82,7 +82,7 @@ import {
 } from "@/lib/keeper-register-memo";
 import { UNSUPPORTED_POOL_COPY } from "@/lib/wizard-copy";
 import { NON_USD_QUOTE_REASON } from "@/lib/dex-constants";
-import { STABLECOIN_PERP_REASON, STABLECOIN_UNVERIFIABLE_REASON, isStablecoinPerpBlocked } from "@/lib/v22/stablecoin-perps";
+import { STABLECOIN_PERP_REASON, STABLECOIN_UNVERIFIABLE_REASON, STABLECOIN_MISMATCH_REASON, isStablecoinPerpBlocked } from "@/lib/v22/stablecoin-perps";
 import { checkStablecoinUnderlying } from "@/lib/v22/stablecoin-resolve";
 import { belowLiquidityFloorReason } from "@/lib/pool-liquidity";
 import { isV18MarketHeader } from "@/lib/limits/decode";
@@ -376,6 +376,7 @@ export async function POST(req: NextRequest) {
     name: label,
   });
   if (!stable.ok && stable.kind === "stablecoin") return NextResponse.json({ error: STABLECOIN_PERP_REASON }, { status: 400 });
+  if (!stable.ok && stable.kind === "mismatch") return NextResponse.json({ error: STABLECOIN_MISMATCH_REASON }, { status: 400 });
 
   // Resolve the dexType from the pool's mainnet owner program ONLY. The client
   // dexType string is a hint and is ignored: it cannot tell Meteora DLMM from
@@ -416,7 +417,7 @@ export async function POST(req: NextRequest) {
       { status: 503, headers: { "Retry-After": "5" } },
     );
   }
-  if (!stable.ok) {
+  if (!stable.ok && stable.kind === "unverifiable") {
     return stable.retryable
       ? NextResponse.json({ error: "Could not verify this market's token on mainnet right now. Try again in a moment." }, { status: 503, headers: { "Retry-After": "5" } })
       : NextResponse.json({ error: STABLECOIN_UNVERIFIABLE_REASON }, { status: 400 });
