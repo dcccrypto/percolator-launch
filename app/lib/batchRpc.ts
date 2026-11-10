@@ -18,6 +18,12 @@
  */
 
 import { reportRpcOutcome, rpcErrorCode } from "@/lib/rpc-health";
+import { RPC_MAX_BATCH_SIZE } from "@/lib/rpc-limits";
+
+/** Default cap on queued (not yet sent) reads; beyond it the oldest are rejected. */
+const DEFAULT_MAX_QUEUE_SIZE = 500;
+/** Default timeout for one batch HTTP request (ms). */
+const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 
 /**
  * Methods that must NOT be batched or deduplicated.
@@ -97,6 +103,10 @@ export interface BatchRpcConfig {
   maxRetries?: number;
   /** Max retries on 5xx / network failure (default: 2). A dead RPC must not be hammered 6x per batch. */
   maxServerErrorRetries?: number;
+  /** Max queued reads while backing off; the oldest are rejected beyond it (default: 500). */
+  maxQueueSize?: number;
+  /** Abort a batch HTTP request after this long (ms, default: 20000). */
+  requestTimeoutMs?: number;
 }
 
 /**
@@ -112,7 +122,11 @@ export function createBatchRpc(config: BatchRpcConfig) {
     maxBackoffMs = 30_000,
     maxRetries = 5,
     maxServerErrorRetries = DEFAULT_MAX_SERVER_ERROR_RETRIES,
+    maxQueueSize = DEFAULT_MAX_QUEUE_SIZE,
+    requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
   } = config;
+  /** Never send more entries per request than /api/rpc accepts, whatever maxBatchSize says. */
+  const chunkSize = Math.max(1, Math.min(maxBatchSize, RPC_MAX_BATCH_SIZE));
 
   let queue: PendingRequest[] = [];
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -139,27 +153,11 @@ export function createBatchRpc(config: BatchRpcConfig) {
     return `${method}:${JSON.stringify(params)}`;
   }
 
-  async function flush() {
-    flushTimer = null;
+  /** Outcome of sending one chunk: ok, transport failure (counts toward backoff), or rejected by shape (does not). */
+  type ChunkOutcome = "ok" | "transport-failure" | "rejected";
 
-    if (queue.length === 0) return;
-
-    // Cooling down after a failed batch: leave the queue in place (it keeps deduping and
-    // absorbing new reads) and flush ONE batch when the cooldown ends, instead of every
-    // 100ms window sleeping on its own and then firing separately.
-    const now = Date.now();
-    if (backoffUntil > now) {
-      if (!flushTimer) flushTimer = setTimeout(flush, backoffUntil - now);
-      return;
-    }
-
-    // Grab the current batch
-    const batch = queue.splice(0);
-    for (const p of batch) {
-      if (WINDOW_ONLY_DEDUPE_METHODS.has(p.method)) dedupeCache.delete(dedupeKey(p.method, p.params));
-    }
-
-    // Build the JSON-RPC batch payload
+  /** Send ONE chunk (<= maxBatchSize entries) and settle every caller in it. Never throws. */
+  async function sendChunk(batch: PendingRequest[]): Promise<ChunkOutcome> {
     const payload = batch.map((p) => ({
       jsonrpc: "2.0",
       id: p.id,
@@ -171,11 +169,14 @@ export function createBatchRpc(config: BatchRpcConfig) {
     let currentBackoff = initialBackoffMs;
 
     while (attempt <= maxRetries) {
+      const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+      const timeout = controller ? setTimeout(() => controller.abort(), requestTimeoutMs) : null;
       try {
         const response = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
+          ...(controller ? { signal: controller.signal } : {}),
         });
 
         if (response.status === 429) {
@@ -190,8 +191,7 @@ export function createBatchRpc(config: BatchRpcConfig) {
             for (const p of batch) {
               p.resolve(errJson);
             }
-            noteBatchFailure();
-            return;
+            return "transport-failure";
           }
           const retryAfter = response.headers.get("Retry-After");
           const retryMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : currentBackoff;
@@ -201,16 +201,20 @@ export function createBatchRpc(config: BatchRpcConfig) {
           continue;
         }
 
-        // Non-2xx (excluding 429 handled above): throw so the retry loop catches it.
-        // Without this guard, a 5xx with an empty body causes response.json() to throw
-        // "SyntaxError: Unexpected end of JSON input" — masking the real HTTP error.
+        // Other 4xx = the request itself was refused (shape/size/forbidden), not an RPC outage.
+        // Retrying the identical body cannot help and it must not lengthen the outage backoff
+        // or poison other chunks: reject only this chunk's callers.
+        if (response.status >= 400 && response.status < 500) {
+          const err = new Error(`RPC batch request rejected: HTTP ${response.status}`);
+          for (const p of batch) p.reject(err);
+          return "rejected";
+        }
+
+        // 5xx: throw so the retry loop catches it (an empty 5xx body would otherwise surface
+        // as "SyntaxError: Unexpected end of JSON input", masking the real HTTP error).
         if (!response.ok) {
           throw new Error(`RPC batch request failed: HTTP ${response.status}`);
         }
-
-        // Reset backoff on success
-        backoffUntil = 0;
-        consecutiveFailures = 0;
 
         const results = await response.json();
 
@@ -256,20 +260,70 @@ export function createBatchRpc(config: BatchRpcConfig) {
             }));
           }
         }
-        return;
+        return "ok";
       } catch (error) {
         attempt++;
         if (attempt > maxServerErrorRetries) {
-          noteBatchFailure();
           for (const p of batch) {
             p.reject(error instanceof Error ? error : new Error(String(error)));
           }
-          return;
+          return "transport-failure";
         }
         const jitter = Math.random() * 0.3 * currentBackoff;
         await new Promise((r) => setTimeout(r, currentBackoff + jitter));
         currentBackoff = Math.min(currentBackoff * 2, maxBackoffMs);
+      } finally {
+        if (timeout) clearTimeout(timeout);
       }
+    }
+    return "transport-failure";
+  }
+
+  async function flush() {
+    flushTimer = null;
+
+    if (queue.length === 0) return;
+
+    // Cooling down after a failed batch: leave the queue in place (it keeps deduping and
+    // absorbing new reads) and flush when the cooldown ends, instead of every
+    // 100ms window sleeping on its own and then firing separately.
+    const now = Date.now();
+    if (backoffUntil > now) {
+      if (!flushTimer) flushTimer = setTimeout(flush, backoffUntil - now);
+      return;
+    }
+
+    // Grab the whole queue, then split it so no request exceeds the /api/rpc cap
+    // (the queue can legitimately outgrow it while cooling down after an outage).
+    const all = queue.splice(0);
+    for (const p of all) {
+      if (WINDOW_ONLY_DEDUPE_METHODS.has(p.method)) dedupeCache.delete(dedupeKey(p.method, p.params));
+    }
+    const chunks: PendingRequest[][] = [];
+    for (let i = 0; i < all.length; i += chunkSize) chunks.push(all.slice(i, i + chunkSize));
+
+    // Chunks are independent: one failing must not affect the others.
+    const outcomes = await Promise.all(chunks.map(sendChunk));
+
+    if (outcomes.includes("ok")) {
+      backoffUntil = 0;
+      consecutiveFailures = 0;
+    } else if (outcomes.includes("transport-failure")) {
+      noteBatchFailure();
+    }
+    // All "rejected" (request-shape 4xx): neither an outage nor a recovery; backoff unchanged.
+  }
+
+  /**
+   * Stop later identical reads from joining a request that has ALREADY LEFT (or is on the wire).
+   * Call after a confirmed transaction: a getBalance issued right after it must not share a
+   * response that was sent before the tx landed. Queued-but-unsent reads keep deduping (they
+   * have not been sent yet, so they will observe post-tx state anyway).
+   */
+  function invalidateInflightDedupe() {
+    const queued = new Set(queue.map((p) => dedupeKey(p.method, p.params)));
+    for (const key of Array.from(dedupeCache.keys())) {
+      if (!queued.has(key)) dedupeCache.delete(key);
     }
   }
 
@@ -310,7 +364,14 @@ export function createBatchRpc(config: BatchRpcConfig) {
 
     // Schedule flush — immediately when the batch is full or the method is
     // latency-critical (tx-submission path, see FAST_FLUSH_METHODS).
-    if (queue.length >= maxBatchSize || FAST_FLUSH_METHODS.has(method)) {
+    // Bound the queue (it grows while cooling down after an outage): reject the oldest.
+    while (queue.length > maxQueueSize) {
+      const dropped = queue.shift()!;
+      dedupeCache.delete(dedupeKey(dropped.method, dropped.params));
+      dropped.reject(new Error("RPC read dropped: request queue full while RPC is unavailable"));
+    }
+
+    if (queue.length >= chunkSize || FAST_FLUSH_METHODS.has(method)) {
       if (flushTimer) {
         clearTimeout(flushTimer);
         flushTimer = null;
@@ -438,7 +499,7 @@ export function createBatchRpc(config: BatchRpcConfig) {
     });
   }
 
-  return { batchFetch, enqueue };
+  return { batchFetch, enqueue, invalidateInflightDedupe };
 }
 
 /** Singleton batch RPC instance for the client-side */
@@ -457,10 +518,19 @@ export function getBatchRpc(): ReturnType<typeof createBatchRpc> {
       batchWindowMs: 100,
       // 40 slots (up from 30) accommodates the ~40 RPC calls per trade page mount
       // in a single batch when they all arrive within the 100ms window. Must not
-      // exceed the server's MAX_BATCH_SIZE (app/api/rpc/route.ts) or every batch
-      // above the cap gets rejected with HTTP 400 for all callers in it.
-      maxBatchSize: 40,
+      // exceed RPC_MAX_BATCH_SIZE (lib/rpc-limits.ts, shared with app/api/rpc/route.ts);
+      // batchRpc also chunks any larger queue to that cap.
+      maxBatchSize: RPC_MAX_BATCH_SIZE,
     });
   }
   return _batchRpc;
+}
+
+/**
+ * Call after a transaction confirms (or the user otherwise changed on-chain state): reads issued
+ * from now on will not join an identical request that was sent before the change. No-op when no
+ * client batcher exists (server / not yet created).
+ */
+export function invalidateRpcReadDedupe(): void {
+  _batchRpc?.invalidateInflightDedupe();
 }

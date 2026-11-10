@@ -5,6 +5,7 @@ import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useUserAccount } from "@/hooks/useUserAccount";
+import { useHeldNftSnapshot } from "@/hooks/useHeldNftSnapshot";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
 import {
@@ -77,6 +78,8 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
   const userAccount = useUserAccount();
   const { programId: slabProgramId, raw } = useSlabState();
   const mockMode = isMockMode() && isMockSlab(slabAddress);
+  // Re-run when a throttled trailing held-NFT scan publishes a changed result.
+  const heldNftSnapshot = useHeldNftSnapshot(walletPubkey ?? null);
 
   const [state, setState] = useState<UsePositionNftResult>({
     hasMintedNft: false,
@@ -409,7 +412,7 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
     // Send/Burn into a failing tx (mirrors useUserAccount / useNftWrappedPosition,
     // which both key off `raw`).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isV17, walletPubkeyStr, userIdx, programIdStr, slabAddress, mockMode, raw]);
+  }, [isV17, walletPubkeyStr, userIdx, programIdStr, slabAddress, mockMode, raw, heldNftSnapshot]);
 
   return state;
 }

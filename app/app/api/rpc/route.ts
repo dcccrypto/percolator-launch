@@ -5,6 +5,7 @@ import { createHash, timingSafeEqual } from "crypto";
 import { getClientIp } from "@/lib/get-client-ip";
 import { createUpstashRateLimiter } from "@/lib/upstash-rate-limit";
 import { rpcCallCost } from "@/lib/rpc-call-cost";
+import { RPC_MAX_BATCH_SIZE } from "@/lib/rpc-limits";
 import { checkAdminSecret } from "@/lib/admin-secret";
 import { createAccountInfoCoalescer, parseAccountInfoParams, type Sender, type JsonRpcResponse } from "@/lib/rpc-coalesce";
 import { buildUpstreams, redactJson, safeErrorText, sharedUpstreamPool, UpstreamRateLimitedError, type UpstreamSpec } from "@/lib/rpc-upstreams";
@@ -261,7 +262,7 @@ const ALLOWED_RPC_METHODS = new Set([
 ]);
 
 /** Maximum number of requests allowed in a single batch */
-const MAX_BATCH_SIZE = 40;
+const MAX_BATCH_SIZE = RPC_MAX_BATCH_SIZE;
 
 /**
  * Methods whose responses can be cached briefly (read-only, non-user-specific).
