@@ -46,7 +46,8 @@ describe("keeper-mark-scaling: keeper pushes price x 10^lot_exp (live 2026-10-11
 describe("order ticket: the OPEN summary's entry and worst-fill price are per TOKEN (L-1 browser check)", () => {
   it("OrderTicket formats estEntry and the slippage bound through formatLotPriceE6, never the raw per-lot formatter", () => {
     const s = readFileSync(path.join(__dirname, "../../../components/trade/OrderTicket.tsx"), "utf8");
-    expect(s).toContain('<SummaryCell label="Entry" value={formatLotPriceE6(estEntry, lotExp)} />');
+    // Council r4 N7 renamed the quote's label "Entry" -> "Est. fill" (multi-line JSX); the per-TOKEN formatting is what is pinned.
+    expect(s).toMatch(/<SummaryCell\s+label="Est\. fill"\s+value=\{formatLotPriceE6\(estEntry, lotExp\)\}/);
     expect(s).toContain("formatLotPriceE6(slippageBoundE6, lotExp)");
     expect(s).not.toMatch(/formatUsdPriceE6\(/);
   });
