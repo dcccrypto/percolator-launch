@@ -39,6 +39,7 @@ import {
 import { isMockSlab, getMockSlabState } from "@/lib/mock-trade-data";
 import { isMockMode } from "@/lib/mock-mode";
 import { requestFreshScans } from "@/lib/userAccountScan";
+import { invalidateRpcReadDedupe } from "@/lib/batchRpc";
 import { isKnownProgram } from "@/lib/programAllowlist";
 import { parseV17RiskParams } from "@/lib/v17-engine-config";
 import { parseAssetAdlFactors, type AssetAdlFactors } from "@/lib/v17-adl";
@@ -614,6 +615,8 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
     // An explicit refresh means the user just acted (trade / deposit / mint ...): let the
     // dependent portfolio / NFT scans run unthrottled for a while (lib/userAccountScan.ts).
     requestFreshScans();
+    // ...and identical reads (getBalance, getAccountInfo) must not join a request sent before it landed.
+    invalidateRpcReadDedupe();
     fetchRef.current();
   }, []);
 

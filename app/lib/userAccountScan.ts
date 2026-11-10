@@ -228,14 +228,20 @@ export function requestFreshScans(): void {
 interface ThrottleState {
   lastScanStartedAt: number;
   trailingTimer: ReturnType<typeof setTimeout> | null;
+  /** Consecutive failed scans; stretches the interval (x2 per failure, capped) so a failing RPC is not hammered. */
+  failures?: number;
 }
+
+/** Hard cap on the failure-stretched re-scan interval. */
+const MAX_SCAN_BACKOFF_MS = 60_000;
 
 /** Returns ms to wait before a background scan may run, or 0 to run now. */
 function throttleDelayMs(state: ThrottleState, minIntervalMs: number | undefined, scanned: boolean, provisional: boolean): number {
   if (!minIntervalMs || minIntervalMs <= 0 || !scanned || provisional) return 0;
   const now = Date.now();
   if (now < freshScansUntil) return 0;
-  return Math.max(0, state.lastScanStartedAt + minIntervalMs - now);
+  const interval = Math.min(minIntervalMs * 2 ** Math.min(state.failures ?? 0, 6), Math.max(MAX_SCAN_BACKOFF_MS, minIntervalMs));
+  return Math.max(0, state.lastScanStartedAt + interval - now);
 }
 
 interface PortfolioEntry {
@@ -736,11 +742,16 @@ async function runHeldNftScan(entry: HeldNftEntry, params: HeldNftScanParams): P
       data: r.account.data instanceof Uint8Array ? r.account.data : new Uint8Array(r.account.data),
     }));
     entry.scanned = true;
+    entry.throttle.failures = 0;
     publishHeldNftResult(entry, mapped);
     return entry.snapshot ?? [];
   } catch (e) {
     // Keep-last-good — see runPortfolioScan's identical guard above.
     console.debug("[userAccountScan] held-NFT scan failed, keeping last-good cache", e);
+    // Throttle failures too (with backoff): otherwise a key whose first scan failed is never
+    // throttled and every raw change re-fires the failing query.
+    entry.scanned = true;
+    entry.throttle.failures = (entry.throttle.failures ?? 0) + 1;
     return entry.snapshot ?? [];
   }
 }

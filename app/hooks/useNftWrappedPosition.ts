@@ -7,6 +7,7 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
 import { resolveNftLegacyIsStale } from "@/lib/nft-incarnation";
 import { parsePositionNftAccountV3, nftIncarnationStatus, isNftStale, type PositionNftStateV3 } from "@/lib/v22/sdk/nft-v3";
+import { useHeldNftSnapshot } from "@/hooks/useHeldNftSnapshot";
 import { portfolioV17ToAccount, triggerHeldNftScan, SCAN_MIN_INTERVAL_MS, type UserAccountInfo } from "@/lib/userAccountScan";
 import { parsePortfolio, isWrapperAccount } from "@/lib/v22/layout";
 
@@ -44,6 +45,8 @@ export function useNftWrappedPosition(
   const { publicKey } = useWalletCompat();
   const { raw } = useSlabState();
   const [wrapped, setWrapped] = useState<NftWrappedPosition | null>(null);
+  // Re-run when a throttled trailing held-NFT scan publishes a changed result.
+  const heldNftSnapshot = useHeldNftSnapshot(publicKey ?? null);
 
   const isV17Market = raw != null && raw.length > 0 && isWrapperAccount(raw);
 
@@ -151,7 +154,7 @@ export function useNftWrappedPosition(
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, isV17Market, publicKey?.toBase58(), slabAddress, raw]);
+  }, [enabled, isV17Market, publicKey?.toBase58(), slabAddress, raw, heldNftSnapshot]);
 
   return enabled ? wrapped : null;
 }
