@@ -1043,6 +1043,11 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
     // #3320: the button is disabled at a known limit; this keeps any other caller of handleLaunch
     // from building a transaction for a market that would be refused a live price.
     if (atLivePriceLimit) return false;
+    // Owner 2026-11-09: a NEW stablecoin launch never starts, whichever caller got here (the button and step 1 already refuse it).
+    if (stablecoinLaunchBlocked) {
+      setRetryNote(STABLECOIN_PERP_REASON);
+      return false;
+    }
     const { oracleFeed, priceE6 } = getOracleFeedAndPrice();
     // PERC-470 security: block hyperp launch without valid DEX price
     if (wizard.oracleType === "hyperp_ema" && priceE6 === 0n) {
@@ -1181,6 +1186,11 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
     const blocked = retryBlockedReason({ hasWallet: !!publicKey, configValid, step: createState.step, hasSlab: !!createState.slabAddress });
     setRetryNote(blocked);
     if (blocked) return false;
+    // A retry with no slab yet (step 0) is a NEW launch: a stablecoin one never starts. A retry that has a slab continues a market that exists.
+    if (stablecoinLaunchBlocked && !createState.slabAddress) {
+      setRetryNote(STABLECOIN_PERP_REASON);
+      return false;
+    }
     const { oracleFeed, priceE6 } = getOracleFeedAndPrice();
 
     // PERC-470: Include oracleMode + dexPoolAddress in retry params (fixes #810)

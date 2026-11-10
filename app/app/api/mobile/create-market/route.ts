@@ -27,6 +27,7 @@
  * staging, unset) return 403 (GH#1950).
  */
 import { marketAccountLen } from "@/lib/v22/layout";
+import { STABLECOIN_PERP_REASON, isStablecoinPerpBlocked } from "@/lib/v22/stablecoin-perps";
 import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -200,6 +201,14 @@ export async function POST(req: NextRequest) {
         { error: "Invalid mint address — must be a valid Solana public key" },
         { status: 400 },
       );
+    }
+
+    // v2.2: dollar stablecoins are not perp underlyings (owner 2026-11-09). This route takes no mainnet_ca and ignores
+    // dex_pool_address: the only token it is given is `mint` (the collateral/mint it builds the market around), so that is
+    // what it can refuse. The underlying's identity (mainnet_ca) is first presented at POST /api/markets, which carries
+    // the same refusal; this is the early stop before the deployer signs anything. Off v2.2 this never fires.
+    if (isStablecoinPerpBlocked(mintPk.toBase58())) {
+      return NextResponse.json({ error: STABLECOIN_PERP_REASON }, { status: 400 });
     }
 
     const validTiers: SlabTierKey[] = ["small", "medium", "large"];
