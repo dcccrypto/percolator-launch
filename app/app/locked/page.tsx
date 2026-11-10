@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { cohortCutoff } from "@/lib/playground-access";
+import { cohortCutoff, judgeAccessCode } from "@/lib/playground-access";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { lockedCopy, PLAYGROUND_CHECK_SPOT_URL } from "@/lib/locked-copy";
 
@@ -18,7 +18,11 @@ export const metadata: Metadata = {
 const CHECK_SPOT_URL = PLAYGROUND_CHECK_SPOT_URL;
 const WAITLIST_URL = "https://percolator.trade/waitlist";
 
+// Read per request: the judge form shows only while the judge door is open (env, can change without a build).
+export const dynamic = "force-dynamic";
+
 export default function LockedPage() {
+  const judgeDoorOpen = judgeAccessCode(process.env) !== null;
   const cutoff = cohortCutoff().toLocaleString("en-US");
   const copy = lockedCopy(isDevnetV22Enabled(), cutoff);
   return (
@@ -92,6 +96,29 @@ export default function LockedPage() {
             Join the waitlist
           </a>
         </div>
+        )}
+
+        {judgeDoorOpen && (
+          // POST only: the judge code must never ride in a URL (history, logs, Referer). /enter refuses GET ?judge=.
+          <form method="post" action="/enter" autoComplete="off" className="mt-8 flex flex-col gap-2 border-t border-[var(--border)] pt-6">
+            <label htmlFor="judge-code" className="text-[11px] uppercase tracking-wider text-[var(--text-muted)]">
+              Judge access code
+            </label>
+            <input
+              id="judge-code"
+              name="judge"
+              type="password"
+              required
+              autoComplete="off"
+              className="border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--text)]"
+            />
+            <button
+              type="submit"
+              className="border border-[var(--border)] px-6 py-2 text-xs font-medium uppercase tracking-wider text-[var(--text-secondary)] hover:border-[var(--border-hover)] hover:text-[var(--text)]"
+            >
+              Enter
+            </button>
+          </form>
         )}
       </section>
     </div>
