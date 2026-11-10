@@ -204,7 +204,7 @@ beforeEach(async () => {
   mocks.getAccount.mockResolvedValue({});
   mocks.getAccountInfo.mockResolvedValue({ data: Buffer.alloc(0) });
   mocks.getLatestBlockhash.mockResolvedValue({ blockhash: "bh", lastValidBlockHeight: 1 });
-  mocks.getDevnetMintSigner.mockReturnValue({ publicKey: () => MINT_AUTH, signTransaction: (t: unknown) => t });
+  mocks.getDevnetMintSigner.mockReturnValue({ publicKey: () => MINT_AUTH, signTransaction: (t: unknown) => t, signMessage: () => new Uint8Array(64).fill(7) });
   POST = (await import("@/app/api/faucet/route")).POST;
 });
 afterEach(() => vi.restoreAllMocks());

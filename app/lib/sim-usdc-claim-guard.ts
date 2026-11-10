@@ -8,7 +8,8 @@
  *
  * Layer 1 (this file, in-process): one in-flight claim per wallet per instance (tryAcquireClaimLock).
  * Layer 2 (this file, on chain, no program change): every no-DB claim tx starts with a System-program
- * createAccountWithSeed from the faucet authority to a MARKER address derived from (wallet, UTC day). The address
+ * createAccountWithSeed from the faucet authority to a MARKER address derived from (wallet, UTC day) under a
+ * server-side secret (HMAC; see resolveMarkerKey), so third parties cannot pre-fund it. The address
  * is deterministic, so a second claim for the same wallet and day builds a tx whose first instruction fails with
  * "account already in use" (SystemError::AccountAlreadyInUse = Custom(0)) and the whole tx, mint included, reverts.
  * That holds across instances and across blockhashes, because the runtime serialises writes to the marker account.
@@ -22,7 +23,8 @@
  * UTC midnight would use different markers, so a claim in the last MIDNIGHT_GUARD_MS of a day also reserves the
  * next day's marker. Sequential claims are still bounded by the rolling-24h history check.
  */
-import { createHash } from "crypto";
+import { createHash, createHmac } from "crypto";
+import { getDevnetMintSigner } from "@/lib/devnet-signer";
 import { PublicKey, SystemProgram, type TransactionInstruction } from "@solana/web3.js";
 
 /** Rent-exempt minimum for a 0-byte account (devnet/mainnet: 128 bytes overhead x 6960 lamports/byte-year x 2 yrs). */
@@ -38,8 +40,52 @@ export function utcDay(now: number): number {
   return Math.floor(now / DAY_MS);
 }
 
-/** 32-char seed (max allowed is 32 bytes) from sha256("percolator-sim-usdc-claim|wallet|day"). */
-export function claimMarkerSeed(wallet: string, day: number): string {
+/** Domain tags: keep the marker MAC and the key derivation from ever sharing an input with anything else. */
+const MARKER_SEED_DOMAIN = "percolator-sim-usdc-claim-marker/v2";
+const MARKER_KEY_DOMAIN = "percolator-sim-usdc-claim-marker-key/v1";
+
+/**
+ * Server-only secret that keys the marker seed. Without it the marker address is not computable, so nobody can
+ * pre-fund a victim's marker (which would make their claim fail as "already claimed").
+ *
+ * 1. SIM_USDC_MARKER_KEY (dedicated env var, >= 32 chars of random data, e.g. `openssl rand -base64 32`), if set.
+ *    A set-but-shorter value throws instead of silently falling back, so a weak key is never used.
+ * 2. Otherwise derived from the faucet authority's sealed signer: an Ed25519 signature is deterministic and cannot
+ *    be produced without the secret key, so HMAC(signMessage(domain tag)) is a stable key that never exposes (or
+ *    needs) the secret key itself. The signer's audit log records only the message length.
+ * Throws when neither exists (fail closed: never fall back to a public derivation). Never log the result.
+ */
+export function resolveMarkerKey(env: NodeJS.ProcessEnv = process.env): Buffer {
+  const dedicated = env.SIM_USDC_MARKER_KEY;
+  if (dedicated) {
+    if (dedicated.length < 32) {
+      throw new Error("claim marker key unavailable: SIM_USDC_MARKER_KEY must be at least 32 characters");
+    }
+    return createHmac("sha256", MARKER_KEY_DOMAIN).update(dedicated).digest();
+  }
+  const signer = getDevnetMintSigner();
+  if (signer) {
+    const sig = signer.signMessage(new TextEncoder().encode(MARKER_KEY_DOMAIN));
+    return createHmac("sha256", MARKER_KEY_DOMAIN).update(sig).digest();
+  }
+  throw new Error("claim marker key unavailable: set SIM_USDC_MARKER_KEY or DEVNET_MINT_AUTHORITY_KEYPAIR");
+}
+
+/**
+ * 32-char seed (the createAccountWithSeed maximum): base64url of the first 24 bytes (192 bits) of
+ * HMAC-SHA256(key, domain || 0x00 || wallet || 0x00 || day). base64url is ASCII, so 32 chars = 32 bytes. 192 bits keeps
+ * the birthday bound at ~2^96 markers, far beyond any real claim volume.
+ */
+export function claimMarkerSeed(wallet: string, day: number, key: Uint8Array = resolveMarkerKey()): string {
+  return createHmac("sha256", key)
+    .update(`${MARKER_SEED_DOMAIN}\0${wallet}\0${day}`)
+    .digest()
+    .subarray(0, 24)
+    .toString("base64url");
+}
+
+/** The pre-fix public derivation. Retained ONLY so tests can assert the new addresses differ from it. */
+export function legacyClaimMarkerSeed(wallet: string, day: number): string {
   return createHash("sha256").update(`percolator-sim-usdc-claim|${wallet}|${day}`).digest("hex").slice(0, 32);
 }
 
@@ -57,10 +103,15 @@ export interface ClaimMarker {
 }
 
 /** The marker accounts for (wallet, claim time); also what a reclaim job derives for a past day. */
-export async function markerAddresses(authority: PublicKey, wallet: string, days: number[]): Promise<ClaimMarker[]> {
+export async function markerAddresses(
+  authority: PublicKey,
+  wallet: string,
+  days: number[],
+  key: Uint8Array = resolveMarkerKey(),
+): Promise<ClaimMarker[]> {
   return Promise.all(
     days.map(async (day) => {
-      const seed = claimMarkerSeed(wallet, day);
+      const seed = claimMarkerSeed(wallet, day, key);
       return { day, seed, address: await PublicKey.createWithSeed(authority, seed, SystemProgram.programId) };
     }),
   );
