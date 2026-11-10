@@ -13,8 +13,8 @@ export type FillSide = "buy" | "sell";
  *  anything else (null, unknown) → null. */
 export function fillSide(side: string | null | undefined): FillSide | null {
   const s = side?.toLowerCase();
-  if (s === "long" || s === "buy") return "buy";
-  if (s === "short" || s === "sell") return "sell";
+  if (s === "sell" || s === "short") return "sell";
+  if (s === "buy" || s === "long") return "buy";
   return null;
 }
 
