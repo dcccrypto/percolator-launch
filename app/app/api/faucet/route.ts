@@ -49,6 +49,12 @@ import {
   recordSimUsdcClaimInMemory,
   simUsdcClaimInMemory,
 } from "@/lib/sim-usdc-claim";
+import {
+  SIM_USDC_CLAIM_IN_PROGRESS,
+  buildClaimMarkerInstructions,
+  isClaimMarkerCollision,
+  tryAcquireClaimLock,
+} from "@/lib/sim-usdc-claim-guard";
 
 // ── In-memory rate-limit fallback (when Supabase unavailable) ─────────────────
 const _faucetClaims = new Map<string, number>();
@@ -129,6 +135,8 @@ export async function POST(req: NextRequest) {
    * from the shared DEVNET_MINT_AUTHORITY_KEYPAIR — worse than the leak this fixes.
    */
   let releaseGateClaimOnExit: (() => Promise<void>) | null = null;
+  // N4: per-wallet in-flight lock (layer 1) for Sim-USDC claims, held for the whole request.
+  let releaseClaimLock: (() => void) | null = null;
 
   try {
     if (NETWORK !== "devnet") {
@@ -200,6 +208,17 @@ export async function POST(req: NextRequest) {
         { error: "Invalid wallet address" },
         { status: 400 },
       );
+    }
+
+    // N4 layer 1: one in-flight Sim-USDC claim per wallet on this instance (shared with /api/playground/faucet).
+    if (type === "usdc") {
+      releaseClaimLock = tryAcquireClaimLock(walletAddress);
+      if (!releaseClaimLock) {
+        return NextResponse.json(
+          { error: SIM_USDC_CLAIM_IN_PROGRESS, funded: false, nextClaimAt: null },
+          { status: 429 },
+        );
+      }
     }
 
     // Rate limit: DB-backed when Supabase available, in-memory fallback otherwise.
@@ -538,9 +557,16 @@ export async function POST(req: NextRequest) {
     // Build, send, confirm on-chain first. If anything fails before confirmation,
     // release the faucet gate so the user is not locked out for 24h with no tokens.
     let sig: string;
+    // N4 layer 2: no durable gate => marker account create first in the tx (see lib/sim-usdc-claim-guard.ts).
+    let markerCount = 0;
     try {
       const ata = await getAssociatedTokenAddress(usdcMint, walletPk);
       const tx = new Transaction();
+      if (durableGateUnavailable) {
+        const markerIxs = await buildClaimMarkerInstructions(mintAuthPk, walletAddress);
+        markerCount = markerIxs.length;
+        for (const ix of markerIxs) tx.add(ix);
+      }
 
       let ataExists = false;
       try {
@@ -604,6 +630,17 @@ export async function POST(req: NextRequest) {
         // else: the mint confirmed on re-check — fall through to success.
       }
     } catch (chainErr) {
+      if (markerCount > 0 && isClaimMarkerCollision(chainErr, markerCount)) {
+        // Marker exists: another claim for this wallet and UTC day already landed; this tx minted nothing.
+        return NextResponse.json(
+          {
+            error: SIM_USDC_ALREADY_CLAIMED,
+            funded: false,
+            nextClaimAt: new Date((Math.floor(Date.now() / 86_400_000) + 1) * 86_400_000).toISOString(),
+          },
+          { status: 429 },
+        );
+      }
       if (supabase && gate.claimId) { try { const { releaseFaucetClaim } = await import("@/lib/faucet-rate-gate"); await releaseFaucetClaim(supabase, gate.claimId); } catch { /* best-effort */ } }
       throw chainErr;
     }
@@ -651,5 +688,7 @@ export async function POST(req: NextRequest) {
     // UX WP-10 AC3: raw internal text (which can name env vars) stays in the server log.
     console.error("[faucet] failed:", error instanceof Error ? error.message || String(error) : String(error));
     return NextResponse.json({ error: "Something went wrong and nothing was sent. Try again in a moment." }, { status: 500 });
+  } finally {
+    releaseClaimLock?.();
   }
 }
