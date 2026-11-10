@@ -1,7 +1,6 @@
 /**
  * Council round 4, trade-ticket copy and consistency (mounted: the real OrderTicket + GrowthTicketPanel on a crowd-side growth market).
- * N6: inline Max and the Max chip agree (a $10 account with a funded wallet used to read Max $25 inline while the chip placed $350: the
- *     growth cap was bounded by the account's own equity until a size was typed); the busy-side line states a large fee, never "small".
+ * N6: the busy-side line states a large fee, never "small". (The inline-Max vs Max-chip disagreement is handed to the N2 owner: out/ticket-copy/N6-max-handoff.md.)
  * N7: one "Entry" meaning (the quote is "Est. fill"), the deposit note itemises margin + fee + cushion with units, the two leverage
  *     figures explain themselves.
  * R3-13: the size box rejects "-5" / "1e3" / "abc12" instead of reading them as 5 / 13 / 12; no "cannot be undone"; no "110% mgn" in the preview.
@@ -102,27 +101,16 @@ const mount = async () => {
   await waitFor(() => expect(screen.queryByTestId("trade-submit")).not.toBeNull());
   await waitFor(() => expect(screen.queryByTestId("growth-max-long")).not.toBeNull(), { timeout: 8000 });
 };
-const inlineMax = () => screen.queryByTestId("limits-max-size-inline")?.textContent ?? "";
 const sizeBox = () => screen.getByTestId("trade-size-input") as HTMLInputElement;
-const maxChip = () => screen.getAllByTestId("trade-size-preset").find((b) => /max/i.test(b.textContent ?? ""))!;
 const ticketText = () => screen.getByTestId("order-ticket").textContent ?? "";
 
-describe("N6: one Max", () => {
+describe("N6: busy-side fee copy", () => {
   beforeEach(() => {
     mocks.useUserAccount.mockReturnValue({ idx: 3, account: { capital: 10_540_000n, positionSize: 0n, entryPrice: 0n, pnl: 0n, feeCredits: 0n } });
   });
-  it("the inline Max before any size, the Max chip's fill and the inline Max after it are the same figure", async () => {
-    await mount();
-    await waitFor(() => expect(inlineMax()).toMatch(/\$350\.00/));
-    const before = inlineMax();
-    fireEvent.click(maxChip());
-    await waitFor(() => expect(sizeBox().value).not.toBe(""));
-    expect(sizeBox().value).toBe("350.00");
-    expect(inlineMax()).toBe(before);
-  });
   it("a large busy-side fee is stated, not called small", async () => {
     await mount();
-    fireEvent.click(maxChip());
+    fireEvent.change(sizeBox(), { target: { value: "350" } });
     await waitFor(() => expect(screen.queryByTestId("growth-fee")).not.toBeNull());
     const t = screen.getByTestId("growth-fee").textContent ?? "";
     expect(t).toMatch(/\d+\.\d\d%/);

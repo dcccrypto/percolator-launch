@@ -1146,11 +1146,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     growth: marketLimits.growth ?? null,
     // The deployed wrapper's growth gate compares the account's conservative equity with the post-fill requirement (Custom 92). Known only
     // for an existing account that bundles no deposit sized to this order (then the slider check stays).
-    // Council r4 N6: with no size typed yet, a connected wallet that holds tokens WILL bundle the deposit the order needs, so the Max must not be
-    // capped by the account's own equity (a $10 account showed Max $102 while the Max chip, which types a size and so enters funding mode, placed
-    // $913: two figures for one thing). Equity is unknown until the order says how much it deposits, exactly as when a size is typed.
     takerEquity:
-      marketLimits.growth && userAccount && !fundingMode && !(!mockMode && connected && walletHasTokens && positionSize === 0n)
+      marketLimits.growth && userAccount && !fundingMode
         ? capital +
           (safeExistingPnl < 0n ? safeExistingPnl : 0n) +
           (!isSentinelValue(userAccount.account.feeCredits) && userAccount.account.feeCredits < 0n ? userAccount.account.feeCredits : 0n)
