@@ -18,6 +18,8 @@ export function StatsBar() {
   );
 
   const loading = portfolio.loading;
+  // Council r4 N5: a failed scan is neither "loading" nor "no open positions": say so and offer Retry.
+  const loadError = portfolio.error;
   const positions = liveMetrics.openPositions;
 
   // Current mark-to-market aggregate from the shared price store.
@@ -62,14 +64,14 @@ export function StatsBar() {
       // equity-snapshot source exists (see the issue for the plan).
       label: "Unrealized PnL",
       // Unknown-PnL positions add 0 to the total: "--" when none is known, a caveat otherwise.
-      value: loading ? "..." : noPnlTotal ? "--" : formatSignedUsd(totalPnl),
-      sub: unknownPnlCaveat(liveMetrics.unknownPnlCount) ?? "Open positions",
+      value: loadError ? "—" : loading ? "..." : noPnlTotal ? "--" : formatSignedUsd(totalPnl),
+      sub: loadError ? "Couldn't load your positions" : (unknownPnlCaveat(liveMetrics.unknownPnlCount) ?? "Open positions"),
       color: noPnlTotal ? "text-[var(--text-secondary)]" : totalPnl >= 0 ? "text-[var(--long)]" : "text-[var(--short)]",
     },
     {
       label: "Trade Fee",
-      value: loading ? "..." : feeTierValue,
-      sub: positions.length > 0 ? "Per market" : "No open positions",
+      value: loadError ? "—" : loading ? "..." : feeTierValue,
+      sub: loadError ? "Couldn't load your positions" : loading ? "Loading…" : positions.length > 0 ? "Per market" : "No open positions",
       color: "text-[var(--warning)]",
     },
   ];
@@ -90,7 +92,21 @@ export function StatsBar() {
           >
             {card.value}
           </p>
-          <p className="mt-0.5 text-[10px] text-[var(--text-secondary)]">{card.sub}</p>
+          <p className="mt-0.5 text-[10px] text-[var(--text-secondary)]">
+            {card.sub}
+            {loadError && (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  onClick={portfolio.refresh}
+                  className="text-[var(--accent-text)] underline decoration-dotted underline-offset-2 hover:text-[var(--text)]"
+                >
+                  Retry
+                </button>
+              </>
+            )}
+          </p>
         </div>
       ))}
     </div>
