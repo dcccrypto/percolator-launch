@@ -9,6 +9,9 @@
  * distinct keys grows the Map without bound (memory DoS), because TTL is
  * checked only on read and entries are never otherwise evicted.
  *
+ * Eviction is checked after the write, so a refreshed key never races its own
+ * removal: the cold shelf drains before the warm shelf is re-read.
+ *
  * @param map        the cache Map to mutate
  * @param key        entry key
  * @param value      entry value
