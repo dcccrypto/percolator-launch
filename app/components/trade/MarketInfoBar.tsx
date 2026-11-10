@@ -50,7 +50,7 @@ function fundingRateBpsTo8h(rateBps: bigint): number {
 }
 
 /** P3-3: Market health badge — surfaces oracle/liquidity status in the ticker bar */
-type HealthBadgeState = "live" | "price-delayed" | "price-offline" | "no-oracle" | "no-liquidity" | "inactive" | "settled" | "close-only" | "paused" | "catching-up" | "no-recent-price";
+type HealthBadgeState = "rpc-down" | "live" | "price-delayed" | "price-offline" | "no-oracle" | "no-liquidity" | "inactive" | "settled" | "close-only" | "paused" | "catching-up" | "no-recent-price";
 
 /**
  * The badge follows the status line rendered under this bar (MarketHeaderStatus, the same
@@ -63,8 +63,10 @@ type HealthBadgeState = "live" | "price-delayed" | "price-offline" | "no-oracle"
  * Offline marker reads. A market that would otherwise read "LIVE" reads "DELAYED" / "OFFLINE" when the price has
  * gone quiet, so the header never says LIVE next to a chart that says Offline (Council council-leftovers run 2, #1).
  */
-export function healthBadgeState(oracleDown: boolean, vaultEmpty: boolean, status: HeaderStatus | null, feed: ChartLiveState = "live"): HealthBadgeState {
+export function healthBadgeState(oracleDown: boolean, vaultEmpty: boolean, status: HeaderStatus | null, feed: ChartLiveState = "live", readFailing = false): HealthBadgeState {
   if (status?.kind === "resolved") return "settled";
+  // Council r4 N5: the market reads are failing (RPC down): what is on screen is stale, never "LIVE".
+  if (readFailing) return "rpc-down";
   if (oracleDown && vaultEmpty) return "inactive";
   if (vaultEmpty) return "no-liquidity";
   // C2: one state machine with the status line and the ticket. A price that is only old reads "no recent price" / "catching up", not "no oracle".
@@ -79,11 +81,12 @@ export function healthBadgeState(oracleDown: boolean, vaultEmpty: boolean, statu
   return "live";
 }
 
-export const MarketHealthBadge = memo(function MarketHealthBadge({ oracleDown, vaultEmpty, status, feed = "live", feedAgeMs = null }: { oracleDown: boolean; vaultEmpty: boolean; status: HeaderStatus | null; feed?: ChartLiveState; feedAgeMs?: number | null }) {
-  const state = healthBadgeState(oracleDown, vaultEmpty, status, feed);
+export const MarketHealthBadge = memo(function MarketHealthBadge({ oracleDown, vaultEmpty, status, feed = "live", feedAgeMs = null, readFailing = false }: { oracleDown: boolean; vaultEmpty: boolean; status: HeaderStatus | null; feed?: ChartLiveState; feedAgeMs?: number | null; readFailing?: boolean }) {
+  const state = healthBadgeState(oracleDown, vaultEmpty, status, feed, readFailing);
   const quietFor = feedAgeMs === null ? "No price has arrived yet on this page." : `No new price for ${Math.round(feedAgeMs / 1000)}s.`;
 
   const cfg: Record<HealthBadgeState, { label: string; icon: string; cls: string; pulse: boolean; tooltip: string }> = {
+    "rpc-down":    { label: "NO CONNECTION", icon: "◉", cls: "text-[var(--short)] bg-[var(--short)]/10 border-[var(--short)]/20",     pulse: false, tooltip: "Can't reach the network. The data shown is the last that loaded and may be out of date." },
     live:          { label: "LIVE",         icon: "●",  cls: "text-[var(--long)] bg-[var(--long)]/10 border-[var(--long)]/20",       pulse: false, tooltip: "Oracle healthy - market is live" },
     "price-delayed": { label: "DELAYED",    icon: "◉",  cls: "text-[var(--warning)] bg-[var(--warning)]/10 border-[var(--warning)]/20", pulse: false, tooltip: `${quietFor} The price shown may be behind.` },
     "price-offline": { label: "OFFLINE",    icon: "◉",  cls: "text-[var(--short)] bg-[var(--short)]/10 border-[var(--short)]/20",     pulse: false, tooltip: `${quietFor} The price shown is the last one received.` },
@@ -152,7 +155,9 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
   const { market } = useMarketInfo(slabAddress);
   const { fundingRate, engine, totalOI, insuranceBalance, hasData: engineHasData } = useEngineState();
   const { level: oracleLevel } = useOracleFreshness();
-  const { config: mktConfig, wrapperConfigV17, raw: slabRawForLot } = useSlabState();
+  const { config: mktConfig, wrapperConfigV17, raw: slabRawForLot, error: slabError, readFailing: slabReadFailing } = useSlabState();
+  // Council r4 N5: the market read is failing (first load errored, or polls keep failing): never badge it LIVE.
+  const readFailing = !!slabReadFailing || (!!slabError && !mktConfig);
   // v2.2 lot markets: the store price is per LOT; the header shows per TOKEN (lib/v22/lot.ts).
   const lotExp = lotExpOf(slabRawForLot);
 
@@ -344,7 +349,7 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
 
         {/* P3-3: Market health badge — ml-auto pushes to far right within flex-1 group */}
         <span className="ml-auto hidden md:block h-6 w-px bg-[var(--border)] shrink-0" />
-        <MarketHealthBadge oracleDown={oracleDown} vaultEmpty={vaultEmpty} status={headerStatus} feed={feed.state} feedAgeMs={feed.ageMs} />
+        <MarketHealthBadge oracleDown={oracleDown} vaultEmpty={vaultEmpty} status={headerStatus} feed={feed.state} feedAgeMs={feed.ageMs} readFailing={readFailing} />
       </div>
     </div>
   );

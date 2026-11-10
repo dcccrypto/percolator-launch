@@ -299,7 +299,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // The market's per-trade size ceiling (immutable, resolved once).
   const fillCaps = useMarketFillCap(slabAddress);
   const { engine, params, insuranceBalance: liveInsuranceBalance, totalOI: liveTotalOI, hasData: engineHasData } = useEngineState();
-  const { accounts, config: mktConfig, header, refresh: refreshSlab, programId: slabProgramId, raw: slabRaw, adlFactors: slabAdlFactors, wrapperConfigV17: slabWrapperV17 } = useSlabState();
+  const { accounts, config: mktConfig, header, refresh: refreshSlab, programId: slabProgramId, raw: slabRaw, adlFactors: slabAdlFactors, wrapperConfigV17: slabWrapperV17, error: slabError, readFailing: slabReadFailing } = useSlabState();
   // F-3 / R1 (not flag-gated — deployed engine behaviour): ADL reduce-only after a bankruptcy.
   // The slab's engine view, decoded once per slab update (ADL reduce-only below, and #3459's open limit).
   const engineView = useMemo(() => (slabRaw ? decodeMarketEngineView(slabRaw) : null), [slabRaw]);
@@ -1778,7 +1778,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     ? positionCapBlocksOpen(ownPortfolioRaw.portfolio.legs.filter((l) => l.active).map((l) => l.assetIndex), 0, maxPositions ?? undefined)
     : false;
 
+  // Council r4 N5: market reads failing (RPC down) greys the ticket; say why instead of a silent grey-out.
+  const marketReadFailed = !mockMode && (!!slabReadFailing || (!!slabError && !mktConfig));
+
   const submitDisabled =
+    marketReadFailed ||
     bandReduceHold ||
     positionCapReached ||
     v1Blocked ||
@@ -1884,6 +1888,13 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       return <StatusLine message={{ kind: "first-trade-race", variant: "info", title: "One more approval", body: FIRST_TRADE_COPY.race }} />;
     }
     if (pendingLine) return pendingLine;
+    if (marketReadFailed) {
+      return (
+        <div data-testid="trade-rpc-down">
+          <StatusLine message={{ kind: "rpc-down", variant: "error", title: "Can't reach the network", body: "Market data isn't loading, so orders are paused. Nothing was sent. This retries on its own." }} />
+        </div>
+      );
+    }
     const why = networkWarning ?? undefined;
     if (refusal) {
       return (
