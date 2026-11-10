@@ -39,7 +39,7 @@ describe("GrowthTicketPanel", () => {
   it("the busy-side fee appears only when this order owes one", () => {
     const v = view(60_000_000n, -50_000_000n);
     const { rerender } = render(<GrowthTicketPanel view={v} decision={growthTicketDecision(v, "long", 0n, 20_000_000n)} direction="long" />);
-    expect(screen.getByTestId("growth-fee")).toHaveTextContent(/small extra fee of 3\.00%/);
+    expect(screen.getByTestId("growth-fee")).toHaveTextContent(/high extra fee of 3\.00%/);
     rerender(<GrowthTicketPanel view={v} decision={growthTicketDecision(v, "long", -20_000_000n, 20_000_000n)} direction="long" />);
     expect(screen.queryByTestId("growth-fee")).toBeNull();
   });

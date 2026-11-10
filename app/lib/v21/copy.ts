@@ -39,7 +39,14 @@ export const V21_COPY = {
     maxLeverage: (side: string, lev: number) => `Up to ${x(lev)}x ${side} right now`,
     capacity: "Side capacity",
     capacityUsed: (pct: string) => `${pct} full`,
-    fee: (pct: string) => `This side is busy: a small extra fee of ${pct} applies to the part that opens.`,
+    // Council r4 N6: the busy-side fee grows with the order (0.87% at $500, 5% at the room's edge), so "small" is only true below 1%.
+    // Above that the line states the figure without the adjective, and a large one says it is large and that a smaller order pays less.
+    fee: (pct: string) => {
+      const n = parseFloat(pct);
+      if (!(n >= 1)) return `This side is busy: a small extra fee of ${pct} applies to the part that opens.`;
+      if (n < 3) return `This side is busy: an extra fee of ${pct} applies to the part that opens, on top of the normal fee.`;
+      return `This side is busy: a high extra fee of ${pct} applies to the part that opens, on top of the normal fee. A smaller order pays less.`;
+    },
     feeNone: "No busy-side fee at this size.",
     closeAlways: "Reducing or closing is never limited by this.",
   },

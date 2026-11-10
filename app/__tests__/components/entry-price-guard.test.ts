@@ -61,9 +61,6 @@ const EXEMPT: Record<string, string> = {
     "Renders pre-v17 accounts only: SlabProvider hands it `accounts: []` on a v17 market and fills it " +
     "from parseAllAccounts otherwise, where entry_price IS decoded from chain — so `entryPrice > 0n` is a " +
     "real test there, not the structural zero it is on v17.",
-  "components/trade/OrderTicket.tsx":
-    "Its 'Entry' DiffRow is the PROJECTED fill for the order about to be placed, not a held position's " +
-    "recovered entry. The held entry it passes to the Close panel is checked by the call-site guard below.",
   "components/trade/TradingChart.tsx":
     "Draws an entry LINE (no row/cell) from a cached entry or a PnL-derived one; source 'unknown' draws " +
     "no line at all — an absent line makes no claim and never falls back to the mark. The call-site check " +
@@ -91,7 +88,7 @@ describe("the entry-price surface list is discovered, not hand-maintained", () =
     );
     // Pinned exactly: adding a surface must fail here and get a reviewed edit.
     // 10: + components/trade/perp/PerpChart.tsx (exempt above), + the public trader profile (#3479).
-    expect(names.length).toBe(10);
+    expect(names.length).toBe(9); // OrderTicket no longer shows an "Entry" label: its quote is "Est. fill" (Council r4 N7)
   });
 
   it("every exemption still names a discovered surface, with a real reason", () => {

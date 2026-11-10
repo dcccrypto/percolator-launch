@@ -33,6 +33,15 @@ export type LiqPriceDisplayKind =
   /** Not computable (no position / entry / mark) — never presented as safe. */
   | "unknown";
 
+/**
+ * Newcomer wording for the new-order preview (ticket receipt + confirm): "110% mgn" is margin health, not a price, and a first-timer
+ * cannot read it as one (Council r4 R3-13). A covered position has no liquidation price at this size; the margin health stays in the tooltip.
+ */
+export const COVERED_PLAIN_TEXT = "None (fully covered)";
+export function liqPricePlainText(d: Pick<LiqPriceDisplay, "kind" | "text">): string {
+  return d.kind === "covered" ? COVERED_PLAIN_TEXT : d.text;
+}
+
 export interface LiqPriceDisplay {
   kind: LiqPriceDisplayKind;
   /** What to render in the value cell. */
