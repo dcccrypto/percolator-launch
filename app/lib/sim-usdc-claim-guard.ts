@@ -23,12 +23,7 @@
  * next day's marker. Sequential claims are still bounded by the rolling-24h history check.
  */
 import { createHash } from "crypto";
-import {
-  PublicKey,
-  SystemProgram,
-  type ParsedTransactionWithMeta,
-  type TransactionInstruction,
-} from "@solana/web3.js";
+import { PublicKey, SystemProgram, type TransactionInstruction } from "@solana/web3.js";
 
 /** Rent-exempt minimum for a 0-byte account (devnet/mainnet: 128 bytes overhead x 6960 lamports/byte-year x 2 yrs). */
 export const CLAIM_MARKER_RENT_LAMPORTS = 890_880;
@@ -89,56 +84,6 @@ export async function buildClaimMarkerInstructions(
       programId: SystemProgram.programId,
     }),
   );
-}
-
-// ── Rent sweep (scripts/sweep-claim-markers.ts) ───────────────────────────────────────────────────────────
-
-/**
- * True once a marker created at `createdAtMs` can no longer block any claim. A marker made on day D is for D, or for
- * D+1 when the claim was in the midnight guard (the seed hash does not say which), so wait until D+1 is over too.
- */
-export function isMarkerSweepable(createdAtMs: number, now: number = Date.now()): boolean {
-  return utcDay(createdAtMs) + 1 < utcDay(now);
-}
-
-/**
- * The claim markers a parsed tx created for `authority`: System createAccountWithSeed, base = authority,
- * owner = System, 0 bytes, and the new address really is createWithSeed(authority, seed, System).
- */
-export async function claimMarkerCreatesIn(
-  tx: ParsedTransactionWithMeta | null,
-  authority: PublicKey,
-): Promise<{ address: string; seed: string }[]> {
-  const out: { address: string; seed: string }[] = [];
-  const system = SystemProgram.programId.toBase58();
-  for (const ix of tx?.transaction.message.instructions ?? []) {
-    if (ix.programId.toBase58() !== system || !("parsed" in ix)) continue;
-    const parsed = ix.parsed as { type?: string; info?: Record<string, unknown> } | null;
-    const info = parsed?.info;
-    if (parsed?.type !== "createAccountWithSeed" || !info) continue;
-    if (info.base !== authority.toBase58() || info.owner !== system || info.space !== 0) continue;
-    if (typeof info.seed !== "string" || typeof info.newAccount !== "string") continue;
-    const expected = await PublicKey.createWithSeed(authority, info.seed, SystemProgram.programId);
-    if (expected.toBase58() !== info.newAccount) continue;
-    out.push({ address: info.newAccount, seed: info.seed });
-  }
-  return out;
-}
-
-/** transferWithSeed of `lamports` from a marker back to the authority (all of it closes the 0-byte account). */
-export function buildMarkerSweepInstruction(
-  authority: PublicKey,
-  marker: { address: PublicKey; seed: string },
-  lamports: number,
-): TransactionInstruction {
-  return SystemProgram.transfer({
-    fromPubkey: marker.address,
-    basePubkey: authority,
-    toPubkey: authority,
-    lamports,
-    seed: marker.seed,
-    programId: SystemProgram.programId,
-  });
 }
 
 /**
