@@ -23,7 +23,7 @@ vi.mock("@/lib/supabase", () => {
   const q: Record<string, unknown> = {};
   const chain = () => q;
   Object.assign(q, {
-    select: chain, eq: chain, order: chain,
+    select: chain, eq: chain, order: chain, abortSignal: chain,
     maybeSingle: async () => {
       h.calls += 1;
       if (h.failNext > 0) { h.failNext -= 1; return { data: null, error: { message: "timeout" } }; }
