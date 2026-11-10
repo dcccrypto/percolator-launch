@@ -85,6 +85,18 @@ export function decodeGrowthRecord(raw: Uint8Array | null | undefined, assetInde
   }
 }
 
+/**
+ * Like decodeGrowthRecord, but a decode THROW is told apart from "no record": "undecodable" means the bytes are there and the record cannot be
+ * read (truncated / unknown layout), so whether the asset has a room limit is UNKNOWN. Callers that gate on room must fail closed on it (N3).
+ */
+export function growthRecordPresence(raw: Uint8Array, assetIndex = 0): "present" | "absent" | "undecodable" {
+  try {
+    return decodeAssetGrowthV19(raw, assetIndex) === null ? "absent" : "present";
+  } catch {
+    return "undecodable";
+  }
+}
+
 /** The market's bankruptcy h-lock is latched (the byte is non-zero; it is not only 0/1 any more). */
 export function readBankruptcyHlockActive(raw: Uint8Array | null | undefined): boolean {
   if (!raw) return false;

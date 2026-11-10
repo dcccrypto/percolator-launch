@@ -51,7 +51,7 @@ import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 import { resolveMarketLp } from "@/lib/market-lp";
 import { isDevnetV21Enabled } from "@/lib/v21/flag";
 import { growthMarketView, type GrowthMarketView } from "@/lib/v21/growth-market";
-import { GROWTH_DEPTH_RULES_DEPLOYED, decodeGrowthRecord, growthControllerInputs } from "@/lib/v21/growth-market";
+import { GROWTH_DEPTH_RULES_DEPLOYED, decodeGrowthRecord, growthControllerInputs, growthRecordPresence } from "@/lib/v21/growth-market";
 import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { levGuardPda } from "@/lib/v22/lev-guard";
 import { decodeLevGuardV22, type LevGuardV22 } from "@/lib/v22/sdk";
@@ -185,7 +185,10 @@ export function growthRoomState(
   // Slab bytes not here yet: whether the asset has a growth record is itself unknown.
   if (!raw) return lpReadFailed ? "error" : "loading";
   // Bytes decoded and the record is absent / all-zero: growth is OFF for this asset, no room limit.
-  if (decodeGrowthRecord(raw, assetIndex) === null) return "none";
+  // A decode THROW is not "absent": the record may exist and the bytes are unreadable, so the room is unknown (N3, fail closed).
+  const presence = growthRecordPresence(raw, assetIndex);
+  if (presence === "absent") return "none";
+  if (presence === "undecodable") return "error";
   return lpReadFailed ? "error" : "loading";
 }
 

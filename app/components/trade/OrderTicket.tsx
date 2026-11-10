@@ -2238,7 +2238,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             </button>
           </p>
         )}
-        {lotRoundedDown && positionSize > 0n && (
+        {lotRoundedDown && !roomUnknown && positionSize > 0n && (
           <p data-testid="lot-rounded" className="mt-1 text-[11px] leading-relaxed text-[var(--text-secondary)]">
             {V22_COPY.lot.rounded(fmtQ(positionSize), baseTicker, (positionSize / POS_SCALE_V22).toString(), formatTokenAmount(notionalNative, decimals, 2))}
           </p>
@@ -2727,7 +2727,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           }}
           disabled={submitDisabled}
           className={`w-full rounded-none py-3 text-[12px] font-bold uppercase tracking-[0.12em] transition-[filter] duration-150 hover:brightness-110 disabled:cursor-not-allowed disabled:hover:brightness-100 ${
-            ticketState.blocks
+            ticketState.blocks || roomUnknown
               ? "bg-[var(--bg-elevated)] text-[var(--text-secondary)] disabled:opacity-100"
               : `disabled:opacity-50 ${direction === "long" ? "bg-[var(--long)] text-black" : "bg-[var(--short)] text-white"}`
           }`}
