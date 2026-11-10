@@ -207,7 +207,8 @@ export async function POST(req: NextRequest) {
     // dex_pool_address: the only token it is given is `mint` (the collateral/mint it builds the market around), so that is
     // what it can refuse. The underlying's identity (mainnet_ca) is first presented at POST /api/markets, which carries
     // the same refusal; this is the early stop before the deployer signs anything. Off v2.2 this never fires.
-    if (isStablecoinPerpBlocked(mintPk.toBase58())) {
+    // The client `symbol` / `name` are refuse-only here (a stable ticker adds a refusal; nothing a client sends lifts one).
+    if (isStablecoinPerpBlocked(mintPk.toBase58(), { symbol: typeof symbol === "string" ? symbol : null, name })) {
       return NextResponse.json({ error: STABLECOIN_PERP_REASON }, { status: 400 });
     }
 

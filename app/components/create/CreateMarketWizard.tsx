@@ -498,9 +498,13 @@ export const CreateMarketWizard: FC<{ initialMint?: string; /** /create?resume=<
   // shows "Connect wallet to continue" in place of Continue). Gates both the
   // Continue click and the one-shot auto-advance, which then fires as soon as
   // the user connects.
-  // v2.2: a dollar stablecoin (USDC, USDT, PYUSD) is not a perp underlying (owner 2026-11-09, Council R2-11 / R3-10). Gates the
-  // Continue click and the auto-advance here (StepTokenSelect unmounts on advance) and, below, the launch itself.
-  const stablecoinBlocked = isStablecoinPerpBlocked(wizard.mintAddress);
+  // v2.2: a dollar stablecoin (the whole USD-stable class: USDC, USDT, PYUSD, USDS, FDUSD, USDe, USDG, ...) is not a perp underlying
+  // (owner 2026-11-09, Council R2-11 / R3-10; r5 #2). Gates the Continue click and the auto-advance here (StepTokenSelect unmounts on
+  // advance) and, below, the launch itself. The token's own symbol / name (and the chosen pool's base symbol) count too; the server
+  // re-derives them from chain and never trusts these.
+  const stablecoinBlocked =
+    isStablecoinPerpBlocked(wizard.mintAddress, { symbol: wizard.tokenMeta?.symbol, name: wizard.tokenMeta?.name }) ||
+    isStablecoinPerpBlocked(null, { symbol: wizard.dexPool?.baseSymbol });
   const step1CanAdvance = step1Valid && !duplicateCheck.checking && duplicateCheck.duplicates.length === 0 && !!publicKey && !stablecoinBlocked;
 
   // Control Room (dial) validation — trading fee, leverage margin, and seed amounts.

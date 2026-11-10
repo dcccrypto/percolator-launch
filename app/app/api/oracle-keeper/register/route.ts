@@ -19,6 +19,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/supabase";
 import { PublicKey } from "@solana/web3.js";
 import { signKeeperRequest, verifyKeeperSignature } from "@/lib/keeper-hmac";
+import { STABLECOIN_PERP_REASON, STABLECOIN_UNVERIFIABLE_REASON } from "@/lib/v22/stablecoin-perps";
+import { checkStablecoinUnderlying } from "@/lib/v22/stablecoin-resolve";
 
 export const dynamic = "force-dynamic";
 
@@ -93,6 +95,18 @@ export async function POST(req: NextRequest) {
     if (devnetMint) {
       try { new PublicKey(devnetMint); } catch {
         return NextResponse.json({ error: "Invalid devnetMint" }, { status: 400 });
+      }
+    }
+
+    // v2.2: dollar stablecoins are not perp underlyings (whole USD-stable class, Council r5 #2). This route writes mainnet_ca AND
+    // hot-registers the market with the keeper, so it is an intake path too: refuse by address, by the client symbol (refuse-only) and by
+    // the token's on-chain symbol / name. Off v2.2 this never fires.
+    {
+      const stable = await checkStablecoinUnderlying({ mainnetCa: new PublicKey(mainnetCA).toBase58(), symbol });
+      if (!stable.ok) {
+        return stable.kind === "stablecoin"
+          ? NextResponse.json({ error: STABLECOIN_PERP_REASON }, { status: 400 })
+          : NextResponse.json({ error: STABLECOIN_UNVERIFIABLE_REASON }, { status: 400 });
       }
     }
 
