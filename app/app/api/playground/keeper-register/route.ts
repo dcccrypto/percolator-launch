@@ -82,6 +82,7 @@ import {
 } from "@/lib/keeper-register-memo";
 import { UNSUPPORTED_POOL_COPY } from "@/lib/wizard-copy";
 import { NON_USD_QUOTE_REASON } from "@/lib/dex-constants";
+import { STABLECOIN_PERP_REASON, isStablecoinPerpBlocked } from "@/lib/v22/stablecoin-perps";
 import { belowLiquidityFloorReason } from "@/lib/pool-liquidity";
 import { isV18MarketHeader } from "@/lib/limits/decode";
 import { PublicKey } from "@solana/web3.js";
@@ -184,6 +185,12 @@ export async function POST(req: NextRequest) {
   if (mainnetCA) {
     try { new PublicKey(mainnetCA); } catch {
       return NextResponse.json({ error: "Invalid mainnetCA" }, { status: 400 });
+    }
+    // v2.2 (owner 2026-11-09): dollar stablecoins are not perp underlyings. This write is what makes the keeper price (and
+    // register-poll admit) a market, so refuse it here and the keeper never gets one. Off v2.2 this never fires.
+    // Gap: only the stated mainnetCA is checked; a pool-only request is not resolved to its base mint.
+    if (isStablecoinPerpBlocked(mainnetCA)) {
+      return NextResponse.json({ error: STABLECOIN_PERP_REASON }, { status: 400 });
     }
   }
 
