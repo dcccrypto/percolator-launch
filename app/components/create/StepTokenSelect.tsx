@@ -260,7 +260,7 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
   // the real reason is that it is the collateral (Council GO1106-UX Creator). It takes precedence over the duplicate box.
   const collateralPasted = mintValid && isDevnet && isCollateralMint(mintAddress);
   // v2.2: a dollar stablecoin is not a perp underlying (owner 2026-11-09, R2-11 / R3-10). Its own line, ahead of the duplicate box.
-  const stablecoinPasted = mintValid && !collateralPasted && isStablecoinPerpBlocked(mintAddress);
+  const stablecoinPasted = mintValid && !collateralPasted && isStablecoinPerpBlocked(mintAddress, { symbol: tokenMeta?.symbol, name: tokenMeta?.name });
   const duplicateBlocked = mintValid && !collateralPasted && !stablecoinPasted && duplicateMarkets.length > 0;
   const effectiveCanContinue = canContinue && !mintNetworkBlocked && !duplicateBlocked && !collateralPasted && !stablecoinPasted;
 

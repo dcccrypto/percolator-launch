@@ -28,7 +28,9 @@ import { validateSymbol, validateName } from "@/lib/market-metadata-validation";
 import { sanitizeLogoUrl } from "@/lib/token-metadata-validators";
 import { computeMarketHealthFromStats } from "@/lib/health";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
-import { STABLECOIN_PERP_REASON, isStablecoinPerpBlocked } from "@/lib/v22/stablecoin-perps";
+import { STABLECOIN_PERP_REASON, STABLECOIN_UNVERIFIABLE_REASON, isStablecoinPerpBlocked } from "@/lib/v22/stablecoin-perps";
+import { checkStablecoinUnderlying } from "@/lib/v22/stablecoin-resolve";
+import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { SLUG_ALIASES } from "@/lib/symbol-utils";
 import {
   buildMarketRegistrationMessage,
@@ -190,11 +192,11 @@ function numericOrNull(v: unknown): number | null {
  * The rows come from lib/discovered-market-rows.ts, which /api/stats counts too.
  */
 /**
- * v2.2: a row whose token identity (mainnet_ca) is a dollar stablecoin is never listed, so a market built by script
+ * v2.2: a row whose token identity (mainnet_ca, or its stored symbol / name) is a dollar stablecoin is never listed, so a market built by script
  * (InitMarket is permissionless) and registered before this gate existed does not show. Off v2.2 always true.
  */
-function listable(m: { mainnet_ca?: unknown }): boolean {
-  return !isStablecoinPerpBlocked(typeof m.mainnet_ca === "string" ? m.mainnet_ca : null);
+function listable(m: { mainnet_ca?: unknown; symbol?: unknown; name?: unknown }): boolean {
+  return !isStablecoinPerpBlocked(typeof m.mainnet_ca === "string" ? m.mainnet_ca : null, { symbol: typeof m.symbol === "string" ? m.symbol : null, name: typeof m.name === "string" ? m.name : null });
 }
 
 async function onChainOrStaticResponse(request: NextRequest, reason: string): Promise<NextResponse> {
@@ -1221,12 +1223,11 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // v2.2: dollar stablecoins are not perp underlyings (owner 2026-11-09). Refuse registration on the token identity
-  // (canonical mainnet_ca) so a script-built stablecoin market is never listed. Off v2.2 this never fires.
-  // GAP (documented, not closed): with mainnet_ca omitted the identity is only dex_pool_address, and this route does not
-  // resolve a pool's base mint (classifyPoolsByOwner returns a class, not the mints), so a pool-only POST is not caught here;
-  // closing it needs a pool-mint read (a new RPC call) or the on-chain denylist.
-  if (isStablecoinPerpBlocked(canonicalMainnetCa)) {
+  // v2.2: dollar stablecoins are not perp underlyings (owner 2026-11-09; whole USD-stable class, Council r5 #2). Cheap synchronous
+  // refusal on the token identity (canonical mainnet_ca) and on a client-supplied symbol / name (refuse-only: a client value can never
+  // lift a refusal). The pool-only case and the on-chain symbol rule need the mainnet chain: they run below, once the pool is
+  // canonical (checkStablecoinUnderlying). Off v2.2 none of this fires.
+  if (isStablecoinPerpBlocked(canonicalMainnetCa, { symbol: typeof symbol === "string" ? symbol : null, name: typeof name === "string" ? name : null })) {
     return NextResponse.json({ error: STABLECOIN_PERP_REASON }, { status: 400 });
   }
 
@@ -1267,6 +1268,20 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+  }
+
+  // v2.2: the pool's own tokens and the underlying's on-chain symbol / name, read server-side from mainnet. This closes the
+  // pool-only registration (no mainnet_ca): the pool's base mint is resolved and checked, and a pool that cannot be resolved is
+  // refused rather than waved through.
+  if (isDevnetV22Enabled() && (canonicalDexPool || canonicalMainnetCa)) {
+    const stable = await checkStablecoinUnderlying({ mainnetCa: canonicalMainnetCa, pool: canonicalDexPool, symbol, name });
+    if (!stable.ok) {
+      if (stable.kind === "stablecoin") return NextResponse.json({ error: STABLECOIN_PERP_REASON }, { status: 400 });
+      return stable.retryable
+        ? NextResponse.json({ error: "Could not verify this market's token on mainnet right now. Try again in a moment." }, { status: 503, headers: { "Retry-After": "5" } })
+        : NextResponse.json({ error: STABLECOIN_UNVERIFIABLE_REASON }, { status: 400 });
+    }
+    if (stable.suspect) Sentry.captureMessage(`stablecoin-lookalike registration (allowed): ${stable.suspect}`, { level: "warning" });
   }
 
   // A pool quoted in a token that is neither WSOL nor a USD stable can't be priced in USD

@@ -82,7 +82,8 @@ import {
 } from "@/lib/keeper-register-memo";
 import { UNSUPPORTED_POOL_COPY } from "@/lib/wizard-copy";
 import { NON_USD_QUOTE_REASON } from "@/lib/dex-constants";
-import { STABLECOIN_PERP_REASON, isStablecoinPerpBlocked } from "@/lib/v22/stablecoin-perps";
+import { STABLECOIN_PERP_REASON, STABLECOIN_UNVERIFIABLE_REASON, isStablecoinPerpBlocked } from "@/lib/v22/stablecoin-perps";
+import { checkStablecoinUnderlying } from "@/lib/v22/stablecoin-resolve";
 import { belowLiquidityFloorReason } from "@/lib/pool-liquidity";
 import { isV18MarketHeader } from "@/lib/limits/decode";
 import { PublicKey } from "@solana/web3.js";
@@ -186,10 +187,18 @@ export async function POST(req: NextRequest) {
     try { new PublicKey(mainnetCA); } catch {
       return NextResponse.json({ error: "Invalid mainnetCA" }, { status: 400 });
     }
-    // v2.2 (owner 2026-11-09): dollar stablecoins are not perp underlyings. This write is what makes the keeper price (and
-    // register-poll admit) a market, so refuse it here and the keeper never gets one. Off v2.2 this never fires.
-    // Gap: only the stated mainnetCA is checked; a pool-only request is not resolved to its base mint.
-    if (isStablecoinPerpBlocked(mainnetCA)) {
+  }
+  // v2.2 (owner 2026-11-09; whole USD-stable class, Council r5 #2): dollar stablecoins are not perp underlyings. This write is what
+  // makes the keeper price (and register-poll admit) a market, so refuse it here and the keeper never gets one. Off v2.2 this
+  // never fires. Client symbol / name are refuse-only; the pool's own mints and the on-chain symbol are resolved from mainnet below
+  // (after the pool is classified), so a pool-only request is checked too.
+  {
+    const pm = (payload ?? {}) as Record<string, unknown>;
+    const metas = [{ symbol, name: label }, { symbol: pm.symbol, name: pm.name }].map((m) => ({
+      symbol: typeof m.symbol === "string" ? m.symbol : null,
+      name: typeof m.name === "string" ? m.name : null,
+    }));
+    if (metas.some((m, i) => isStablecoinPerpBlocked(i === 0 ? (mainnetCA ?? null) : null, m))) {
       return NextResponse.json({ error: STABLECOIN_PERP_REASON }, { status: 400 });
     }
   }
@@ -356,6 +365,18 @@ export async function POST(req: NextRequest) {
     ? resolveTokenLogo(mainnetCA).catch(() => null)
     : Promise.resolve(null);
 
+  // v2.2: the pool's base mint and the underlying's on-chain symbol / name, read from mainnet (closes the pool-only request).
+  // Runs BEFORE the pool classification so a stablecoin pool is refused as such (not as "too shallow"). A pool whose tokens cannot be
+  // read falls through to the classification below, which names the reason (missing / unsupported / rpc-failed); if it somehow
+  // classifies fine, the unverifiable verdict is applied right after (never waved through).
+  const stable = await checkStablecoinUnderlying({
+    mainnetCa: mainnetCA ? new PublicKey(mainnetCA).toBase58() : null,
+    pool: new PublicKey(dexPoolAddress).toBase58(),
+    symbol,
+    name: label,
+  });
+  if (!stable.ok && stable.kind === "stablecoin") return NextResponse.json({ error: STABLECOIN_PERP_REASON }, { status: 400 });
+
   // Resolve the dexType from the pool's mainnet owner program ONLY. The client
   // dexType string is a hint and is ignored: it cannot tell Meteora DLMM from
   // DAMM (E2E B21). An unreachable RPC is a retryable 503, never a guess.
@@ -394,6 +415,11 @@ export async function POST(req: NextRequest) {
       { error: "Could not verify the pool on mainnet right now. Try again in a moment." },
       { status: 503, headers: { "Retry-After": "5" } },
     );
+  }
+  if (!stable.ok) {
+    return stable.retryable
+      ? NextResponse.json({ error: "Could not verify this market's token on mainnet right now. Try again in a moment." }, { status: 503, headers: { "Retry-After": "5" } })
+      : NextResponse.json({ error: STABLECOIN_UNVERIFIABLE_REASON }, { status: 400 });
   }
   const normalizedDexType: KeeperDexType = classified;
 

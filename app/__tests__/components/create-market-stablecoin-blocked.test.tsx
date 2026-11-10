@@ -13,6 +13,15 @@ const CONTROL = "CbcyNo7m1amFWqEQm2m4PLv1UNvpcL3C1Ujm6AkzpKoU";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const PYUSD = "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo";
 const USDT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
+// Council r5 #2: the whole USD-stable class. USDS and FDUSD reached an ENABLED HOLD TO LAUNCH before the list was widened.
+const USDS = "USDSwr9ApdHk5bvJKMjzff41FfuX8bSxdKcR81vTwcA";
+const FDUSD = "9zNQRsGLjNKwCUU5Gq5LR8beUCPzQMVMqKAi3SSZh54u";
+const USDE = "DEkqHyPN7GMRJ5cArtQFAWefqbZb33Hyf6s5iCwjEonT";
+const USDG = "2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH";
+const USDC_PORTAL = "A9mUU4qviSctJVPJdBJWkb28deg915LYJKrzQ19ji3FM";
+/** An address NOT in the list whose on-chain metadata (what the wizard shows) is a stable ticker. */
+const UNLISTED_STABLE_LOOKALIKE = "Fx83L7mNvm8WMCAj6Jire6UmNCJAeUVTPo9K9BoDpump";
+let META = { name: "e/acc", symbol: "e/acc" };
 let MINT = CONTROL;
 const POOL = "HC7ArykAUSamJSAJ1aYLrS8aAamvBb1JvqMf1woUtnKo";
 
@@ -69,7 +78,7 @@ vi.mock("@/lib/tokenMeta", async (orig) => ({
   ...(await orig<object>()),
   fetchTokenMeta: vi.fn(async () => {
     await (globalThis as { __gateMeta?: { p: Promise<void> } }).__gateMeta?.p;
-    return { name: "e/acc", symbol: "e/acc", decimals: 6 };
+    return { ...META, decimals: 6 };
   }),
 }));
 
@@ -145,7 +154,7 @@ describe("v2.2: stablecoin perps are not launchable (owner 2026-11-09, R2-11 / R
     __setLotMarketsEnabledForTest(null);
   });
   beforeEach(() => {
-    create.mockReset(); localStorage.clear(); sessionStorage.clear(); createState = IDLE;
+    create.mockReset(); localStorage.clear(); sessionStorage.clear(); createState = IDLE; META = { name: "e/acc", symbol: "e/acc" };
     gateResolve = deferred(); gateDex = deferred(); dexPairs = DEXSCREENER_BODY.pairs;
     view?.unmount(); view = null;
     (window.matchMedia as unknown as ReturnType<typeof vi.fn>).mockImplementation((q: string) => ({
@@ -163,8 +172,8 @@ describe("v2.2: stablecoin perps are not launchable (owner 2026-11-09, R2-11 / R
     expect(screen.queryByTestId("create-stablecoin-mint-blocked")).toBeNull();
   });
 
-  for (const [name, mint] of [["USDC", USDC], ["PYUSD", PYUSD], ["USDT", USDT]] as const) {
-    it(`${name}: step 1 says why, never reaches the launch step, and nothing is built or signed`, async () => {
+  for (const [name, mint] of [["USDC", USDC], ["PYUSD", PYUSD], ["USDT", USDT], ["USDS", USDS], ["FDUSD", FDUSD], ["USDe", USDE], ["USDG", USDG], ["USDCet (Portal)", USDC_PORTAL]] as const) {
+    it(`${name}: step 1 says why, never reaches the launch step (HOLD TO LAUNCH never enabled), and nothing is built or signed`, async () => {
       await paste(mint);
       await waitFor(() => expect(screen.queryByTestId("create-stablecoin-mint-blocked")).not.toBeNull());
       expect(screen.getByTestId("create-stablecoin-mint-blocked").textContent).toMatch(/stablecoin/i);
@@ -174,8 +183,27 @@ describe("v2.2: stablecoin perps are not launchable (owner 2026-11-09, R2-11 / R
       const cont = screen.queryByRole("button", { name: /continue/i }) as HTMLButtonElement | null;
       if (cont) expect(cont.disabled).toBe(true);
       expect(create).not.toHaveBeenCalled();
+      // No enabled HOLD TO LAUNCH anywhere (the audit saw one for USDS / FDUSD).
+      const enabledLaunch = screen.queryAllByRole("button").filter((b) => b.className.includes("rounded-full") && b.hasAttribute("aria-label") && !(b as HTMLButtonElement).disabled);
+      expect(enabledLaunch).toHaveLength(0);
     });
   }
+
+  it("defence in depth: an address NOT in the list whose on-chain symbol is USDC is refused at step 1; a lookalike-but-not-stable ticker is not", async () => {
+    META = { name: "Unstable Coin", symbol: "USDC" };
+    await paste(UNLISTED_STABLE_LOOKALIKE);
+    await waitFor(() => expect(screen.queryByTestId("create-stablecoin-mint-blocked")).not.toBeNull());
+    await act(async () => { await new Promise((r) => setTimeout(r, 300)); });
+    expect(onStep2()).toBe(false);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("USDUC-style memecoin (symbol contains USD but is not a stable ticker) is NOT refused", async () => {
+    META = { name: "Unstable Coin", symbol: "USDUC" };
+    await paste(UNLISTED_STABLE_LOOKALIKE);
+    await waitFor(() => expect(onStep2()).toBe(true));
+    expect(screen.queryByTestId("create-stablecoin-mint-blocked")).toBeNull();
+  });
 });
 
 describe("isStablecoinPerpBlocked", () => {
