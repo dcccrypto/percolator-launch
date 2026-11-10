@@ -191,6 +191,12 @@ describe("POST /api/playground/keeper-register", () => {
     expect(r.error).toMatch(/dollar stablecoin/i);
     expect(h.rowWrites + h.blobWrites).toBe(0);
   });
+  it("mainnetCA that is not the pool's base mint: 400 mismatch, nothing written", async () => {
+    const r = await register({ dexPoolAddress: pool(PUMPSWAP, kp(), USDC), mainnetCA: CONTROL });
+    expect(r.status).toBe(400);
+    expect(r.error).toMatch(/not the base token of the pool/i);
+    expect(h.rowWrites + h.blobWrites).toBe(0);
+  });
   it("a stable symbol (client) with no mainnetCA is refused; v2.2 off is not", async () => {
     const r = await register({ dexPoolAddress: kp(), symbol: "USDS" });
     expect(r.status).toBe(400);

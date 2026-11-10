@@ -84,7 +84,7 @@ describe("symbol / name rule", () => {
     (name) => expect(stablecoinIdentityVerdict({ symbol: "XYZ", name })).toBe("block"),
   );
 
-  it.each(["SOL", "BONK", "WIF", "JUP", "DAIKO", "DAISY", "DAINU", "USDUC", "USDP", "USDARK", "EURC", "XAUT", "PUMP", "e/acc", "USDT0X"])(
+  it.each(["SOL", "BONK", "WIF", "JUP", "DAIKO", "DAISY", "DAINU", "USDUC", "USDP", "USDARK", "EURC", "XAUT", "PUMP", "e/acc", "USDT0X", "JUST", "BUST", "SUST", "AUST", "XUST", "WUST", "STUST", "JLUST", "USTET", "TRUST"])(
     "symbol %s is NOT a hard block (memecoins / non-USD / non-stable)",
     (symbol) => expect(stablecoinIdentityVerdict({ symbol })).not.toBe("block"),
   );

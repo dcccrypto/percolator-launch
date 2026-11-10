@@ -39,12 +39,12 @@ export const STABLECOIN_UNVERIFIABLE_REASON =
   "We couldn't read this market's token from its pool on mainnet, so we can't confirm it isn't a dollar stablecoin. Register it with the token's mint address (mainnet_ca) and a supported Pump.fun or Meteora pool.";
 
 /** Normalised (upper-case, alphanumerics only) tickers of the verified USD stables. USDP / USDD / USDL / USDX are left out on purpose: live memecoins use them. */
-const STABLE_TICKERS = ["USDC", "USDT", "PYUSD", "USDS", "FDUSD", "USDE", "USDG", "DAI", "UXD", "USDH", "USDY", "AUSD", "USD1", "HYUSD", "FRXUSD", "UST"];
+const STABLE_TICKERS = ["USDC", "USDT", "PYUSD", "USDS", "FDUSD", "USDE", "USDG", "DAI", "UXD", "USDH", "USDY", "AUSD", "USD1", "HYUSD", "FRXUSD"];
 /** Wrapper / bridge prefixes (s = staked, w = wrapped, a = aave / allbridge, ae/ap/ab/ac/aa = Allbridge chains, j/jl = Jupiter lend, ...). */
 const WRAP_PREFIXES = ["W", "S", "B", "A", "X", "J", "JL", "ST", "AE", "AP", "AB", "AC", "AA"];
 /** Bridge suffixes (Portal: et / po / bs / av / so, and the ".e" form which normalises to a trailing E for USDC / USDT only). */
 const WRAP_SUFFIXES = ["ET", "PO", "BS", "AV", "SO"];
-const STABLE_SYMBOL_RE = new RegExp(`^(?:${WRAP_PREFIXES.join("|")})?(?:${STABLE_TICKERS.join("|")})(?:${WRAP_SUFFIXES.join("|")})?$|^(?:USDC|USDT)E$`);
+const STABLE_SYMBOL_RE = new RegExp(`^(?:${WRAP_PREFIXES.join("|")})?(?:${STABLE_TICKERS.join("|")})(?:${WRAP_SUFFIXES.join("|")})?$|^(?:USDC|USDT)E$|^UST$`); // UST exact only: a wrapper prefix would hit JUST / BUST / AUST etc.
 
 const NAME_PHRASES = [
   "usd coin", "usdc", "tether usd", "tether usdt", "usdt", "tether", "paypal usd", "pyusd", "first digital usd", "fdusd", "global dollar", "usdg",
