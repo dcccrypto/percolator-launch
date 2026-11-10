@@ -65,6 +65,11 @@ describe('keyed claim-marker seed', () => {
 });
 
 describe('resolveMarkerKey', () => {
+  it('refuses a set-but-short SIM_USDC_MARKER_KEY instead of using it or falling back', () => {
+    expect(() => resolveMarkerKey({ SIM_USDC_MARKER_KEY: 'x'.repeat(16) } as NodeJS.ProcessEnv)).toThrow(/at least 32/);
+    expect(() => resolveMarkerKey({ SIM_USDC_MARKER_KEY: 'x'.repeat(31) } as NodeJS.ProcessEnv)).toThrow(/at least 32/);
+  });
+
   it('prefers SIM_USDC_MARKER_KEY and changes with it', () => {
     const k1 = resolveMarkerKey({ SIM_USDC_MARKER_KEY: 'a'.repeat(32) } as NodeJS.ProcessEnv);
     const k2 = resolveMarkerKey({ SIM_USDC_MARKER_KEY: 'b'.repeat(32) } as NodeJS.ProcessEnv);

@@ -48,7 +48,8 @@ const MARKER_KEY_DOMAIN = "percolator-sim-usdc-claim-marker-key/v1";
  * Server-only secret that keys the marker seed. Without it the marker address is not computable, so nobody can
  * pre-fund a victim's marker (which would make their claim fail as "already claimed").
  *
- * 1. SIM_USDC_MARKER_KEY (dedicated env var, any string of >= 16 chars), if set.
+ * 1. SIM_USDC_MARKER_KEY (dedicated env var, >= 32 chars of random data, e.g. `openssl rand -base64 32`), if set.
+ *    A set-but-shorter value throws instead of silently falling back, so a weak key is never used.
  * 2. Otherwise derived from the faucet authority's sealed signer: an Ed25519 signature is deterministic and cannot
  *    be produced without the secret key, so HMAC(signMessage(domain tag)) is a stable key that never exposes (or
  *    needs) the secret key itself. The signer's audit log records only the message length.
@@ -56,7 +57,10 @@ const MARKER_KEY_DOMAIN = "percolator-sim-usdc-claim-marker-key/v1";
  */
 export function resolveMarkerKey(env: NodeJS.ProcessEnv = process.env): Buffer {
   const dedicated = env.SIM_USDC_MARKER_KEY;
-  if (dedicated && dedicated.length >= 16) {
+  if (dedicated) {
+    if (dedicated.length < 32) {
+      throw new Error("claim marker key unavailable: SIM_USDC_MARKER_KEY must be at least 32 characters");
+    }
     return createHmac("sha256", MARKER_KEY_DOMAIN).update(dedicated).digest();
   }
   const signer = getDevnetMintSigner();
