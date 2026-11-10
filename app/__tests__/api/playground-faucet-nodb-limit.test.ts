@@ -135,6 +135,7 @@ beforeEach(() => {
   mocks.getDevnetMintSigner.mockReturnValue({
     publicKey: () => 'MintAuthority1111111111111111111111111111',
     signTransaction: (tx: unknown) => tx,
+    signMessage: () => new Uint8Array(64).fill(7),
   });
   mocks.getAssociatedTokenAddress.mockResolvedValue({ toBase58: () => 'Ata111111111111111111111111111111111111' });
   mocks.getAccount.mockResolvedValue({});

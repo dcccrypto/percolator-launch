@@ -12,6 +12,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { Keypair, Transaction } from '@solana/web3.js';
+import nacl from 'tweetnacl';
 
 const mocks = vi.hoisted(() => {
   class ServerSignatureExecutionError extends Error {
@@ -39,7 +40,7 @@ const mocks = vi.hoisted(() => {
     checkFundRateLimit: vi.fn(),
     mintAddr: { current: '' },
     mintAuthority: { current: null as null | Uint8Array },
-    signer: { current: null as null | { publicKey: () => string; signTransaction: (t: Transaction) => Transaction } },
+    signer: { current: null as null | { publicKey: () => string; signTransaction: (t: Transaction) => Transaction; signMessage: (m: Uint8Array) => Uint8Array } },
   };
 });
 
@@ -165,6 +166,7 @@ beforeEach(() => {
       t.partialSign(kp);
       return t;
     },
+    signMessage: (m: Uint8Array) => nacl.sign.detached(m, kp.secretKey),
   };
 });
 
