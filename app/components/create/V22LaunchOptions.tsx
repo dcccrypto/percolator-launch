@@ -84,6 +84,7 @@ export const V22LaunchOptions: FC<V22LaunchOptionsProps> = ({ value, onChange, p
       <div className="space-y-0.5 text-[11px] text-[var(--text-secondary)]" data-testid="v22-creator-share">
         <p data-testid="v22-creator-share-fee-only">{V22_COPY.stake.creatorShare.feeOnly}</p>
       </div>
+      <p className="text-[11px] text-[var(--text-secondary)]" data-testid="v22-creator-vesting">{V22_COPY.stake.creatorShare.vesting}</p>
       {plan.protection && tierBounds && (
         <TierControls
           value={value.tiers ?? EMPTY_TIER_EDIT}

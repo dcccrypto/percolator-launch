@@ -162,7 +162,7 @@ function ExitV22Step({ ex, shares, inputKey, estimate, flow, decimals, symbol, v
   const stableShares = useLatchedShares(shares, inputKey);
   const exit = useEarnExitV22({ ...ex, shares: stableShares, mode: flow === 'one-tx' ? 'pair' : 'request', estimateAtoms: estimate });
   useOnSent(exit.state, onSent);
-  return <EarnExitQuote exit={exit} decimals={decimals} symbol={symbol} canQuote={valid && shares > 0n} />;
+  return <EarnExitQuote exit={exit} decimals={decimals} symbol={symbol} canQuote={valid && shares > 0n} stepLabel={flow === 'two-step' ? WC.stepRequest : undefined} />;
 }
 
 /**
@@ -198,7 +198,7 @@ function PendingClaimV22({ ex, shares, amountLabel, decimals, symbol, onRereques
       <p data-testid="earn-pending-claim-v22-title" className="text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--text-secondary)]">{WC.pendingTitle(amountLabel)}</p>
       <p data-testid="earn-pending-claim-v22-ready" className="mb-2 mt-1 font-mono text-[13px] text-[var(--text)]">{WC.ready}</p>
       {/* No collect while the cancel is in flight: a 77 would race the 81. */}
-      <EarnExitQuote exit={exit} decimals={decimals} symbol={symbol} canQuote={shares > 0n && !rerequesting} quoteLabel={`Collect ${amountLabel}`} confirmLabel="Confirm and collect" />
+      <EarnExitQuote exit={exit} decimals={decimals} symbol={symbol} canQuote={shares > 0n && !rerequesting} quoteLabel={`Collect ${amountLabel}`} confirmLabel="Confirm and collect" stepLabel={WC.stepCollect} />
       {/* Only the floor-stuck refusal: an RPC failure or a declined wallet prompt is fixed by trying again, and a
           cancel would restart the wait for nothing. */}
       {exit.state.phase === 'error' && exit.state.floorStuck && onRerequest && (
@@ -344,6 +344,9 @@ export function DepositWithdrawPanel({
   // 88 before it happens (§3.6 item 6): more than the vault can pay out now.
   const maxNow = pricing?.maxNowAtoms ?? null;
   const overMaxNow = tab === 'withdraw' && maxNow !== null && previewCollateral > maxNow;
+  // The typed amount is more than the whole position: the request is for everything, and the user is told.
+  const overClamped =
+    tab === 'withdraw' && rawAmount > 0n && (withdrawUnit === 'shares' ? rawAmount > userLpBalance : userWithdrawableAtoms > 0n && rawAmount > userWithdrawableAtoms);
   const flow = withdrawFlow(cooldownSlots ?? 0n);
   // v2.2: shares are printed in the mint's own decimals, so the count matches the wallet's; the note survives only as the chain says it should
   // (lib/lp-share-wallet-note.ts lpShareWalletNoteV22).
@@ -744,6 +747,11 @@ export function DepositWithdrawPanel({
             <p data-testid="earn-withdraw-receive" className="text-[12px] font-mono tabular-nums text-[var(--text)]">
               {WC.receive(`${formatUsdc(previewCollateral, decimals)} ${collateralSymbol}`, formatShares(withdrawShares, shareDecimals))}
             </p>
+            {overClamped && (
+              <p data-testid="earn-withdraw-clamped" role="status" className="text-[11px] text-[var(--text-secondary)]">
+                {WC.clamped(`${formatUsdc(userWithdrawableAtoms, decimals)} ${collateralSymbol}`)}
+              </p>
+            )}
             {overMaxNow && maxNow !== null && (
               <StatusLine
                 message={{
