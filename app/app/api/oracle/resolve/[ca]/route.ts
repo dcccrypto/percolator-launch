@@ -4,7 +4,7 @@ import { PublicKey } from "@solana/web3.js";
 import { registeredPoolForMint } from "@/lib/registered-pool";
 import { SUPPORTED_DEX_IDS } from "@/lib/dex-constants";
 import { classifyPoolsByOwner, isOfferable, MAX_CLASSIFY_POOLS } from "@/lib/dex-pool-owner";
-import type { KeeperDexType } from "@/lib/dex-type";
+import { KEEPER_DEX_TYPES, type KeeperDexType } from "@/lib/dex-type";
 import { BoundedTtlCache } from "@/lib/bounded-ttl-cache";
 import { fetchJupiterUsdPrice } from "@/lib/jupiter-price";
 import { belowLiquidityFloorReason } from "@/lib/pool-liquidity";
@@ -176,8 +176,35 @@ export async function GET(
     );
   }
 
+  // A token that already has a live market resolves to THAT market's registered pool (the venue
+  // the keeper prices it from), never a re-ranked "best" pair (lib/registered-pool.ts).
+  // A failed registry lookup must not reuse an unverified cached price.
+  let registered: Awaited<ReturnType<typeof registeredPoolForMint>> = null;
+  let cacheable = true;
+  try {
+    registered = await registeredPoolForMint(ca);
+  } catch {
+    return NextResponse.json(
+      { error: "Could not verify the registered price source" },
+      {
+        status: 503,
+        headers: {
+          "Cache-Control": "no-store",
+          "Retry-After": "5",
+        },
+      },
+    );
+  }
+
+
+  // Scope cached prices to the registered market identity.
+  // Unregistered mints retain their existing cache key.
+  const cacheKey = registered
+    ? [ca, registered.slabAddress, registered.pool, registered.dexType ?? ""].join(":")
+    : ca;
+
   // Return a fresh value from the bounded TTL/LRU cache.
-  const cached = cache.get(ca);
+  const cached = cache.get(cacheKey);
 
   if (cached) {
     return NextResponse.json({
@@ -212,20 +239,26 @@ export async function GET(
   }
 
   const [jupResult, dexResult] = await sourceLookup;
-  // A token that already has a live market resolves to THAT market's registered pool (the venue
-  // the keeper prices it from), never a re-ranked "best" pair (lib/registered-pool.ts).
-  // A failed lookup is not "unregistered": answer from the pairs for THIS request, uncached.
-  let registered: Awaited<ReturnType<typeof registeredPoolForMint>> = null;
-  let cacheable = true;
-  try {
-    registered = await registeredPoolForMint(ca);
-  } catch {
-    cacheable = false;
-  }
-
   // Best price: prefer DexScreener for memecoins, Jupiter as fallback
   const priceSource = dexResult ?? jupResult;
   const registeredPrice = registered ? dexResult?.priceByPair[registered.pool] : undefined;
+  if (registered && (
+    registeredPrice === undefined ||
+    !Number.isFinite(registeredPrice) ||
+    registeredPrice <= 0
+  )) {
+    return NextResponse.json(
+      { error: "Registered pool price temporarily unavailable" },
+      {
+        status: 503,
+        headers: {
+          "Cache-Control": "no-store",
+          "Retry-After": "5",
+        },
+      },
+    );
+  }
+
   const price = registeredPrice ?? priceSource?.price ?? 0;
   const symbolFromPrice = priceSource?.symbol ?? null;
 
@@ -263,6 +296,24 @@ export async function GET(
     }
   }
 
+  // A registered pool must have a keeper-supported DEX type.
+  // An address alone is not sufficient to recommend Hyperp.
+  if (
+    registered &&
+    !(KEEPER_DEX_TYPES as readonly string[]).includes(bestDexType ?? "")
+  ) {
+    return NextResponse.json(
+      { error: "Registered pool DEX type could not be verified" },
+      {
+        status: 503,
+        headers: {
+          "Cache-Control": "no-store",
+          "Retry-After": "5",
+        },
+      },
+    );
+  }
+
   if (jupResult || dexResult) {
     // PERC-470: hyperp (keeper-priced on devnet) when the keeper can price a DEX pool
     const hasPool = !!bestPool;
@@ -286,6 +337,6 @@ export async function GET(
   }
 
   // Cache and return (never a result built on a failed lookup)
-  if (cacheable) cache.set(ca, result);
+  if (cacheable) cache.set(cacheKey, result);
   return NextResponse.json({ ...result, cached: false });
 }
