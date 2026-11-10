@@ -32,9 +32,13 @@ export interface EarnExitQuoteProps {
   quoteLabel?: string;
   /** Button text once quoted (default "Withdraw"). */
   confirmLabel?: string;
+  /** Plain "Step n of 2" line for a two-step withdrawal (request, then collect). */
+  stepLabel?: string;
+  /** Button text after a quote expired (default "Refresh the price"): never the stale amount. */
+  refreshLabel?: string;
 }
 
-export function EarnExitQuote({ exit, decimals, symbol, canQuote, quoteLabel = 'See exit price', confirmLabel = 'Withdraw' }: EarnExitQuoteProps) {
+export function EarnExitQuote({ exit, decimals, symbol, canQuote, quoteLabel = 'See exit price', confirmLabel = 'Withdraw', stepLabel, refreshLabel = 'Refresh the price' }: EarnExitQuoteProps) {
   const { state, getQuote, confirm } = exit;
   // N4: confirm() rejects with StaleExitQuoteError when the quote expired or no longer matches; say so calmly.
   const [expired, setExpired] = useState(false);
@@ -61,6 +65,9 @@ export function EarnExitQuote({ exit, decimals, symbol, canQuote, quoteLabel = '
   const quoted = state.phase === 'quoted' && state.quote !== null;
   return (
     <div data-testid="earn-exit-v22" className="mb-2">
+      {stepLabel && (
+        <p data-testid="earn-exit-step" className="mb-2 text-[11px] text-[var(--text-secondary)]">{stepLabel}</p>
+      )}
       {state.phase === 'refreshing' && (
         <p data-testid="earn-exit-refreshing" className="mb-2 text-[11px] text-[var(--text-secondary)]">{V22_COPY.earnExit.refreshing}</p>
       )}
@@ -98,7 +105,7 @@ export function EarnExitQuote({ exit, decimals, symbol, canQuote, quoteLabel = '
           </GlowButton>
         ) : (
           <GlowButton data-testid="earn-exit-get-quote" onClick={() => void onGetQuote()} disabled={!canQuote || busy} variant="primary" size="lg" className="flex-1">
-            {busy ? 'Working…' : quoteLabel}
+            {busy ? 'Working…' : expired ? refreshLabel : quoteLabel}
           </GlowButton>
         )}
       </div>

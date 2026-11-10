@@ -207,6 +207,8 @@ export const V22_COPY = {
      */
     creatorShare: {
       feeOnly: "Your market's stake pool is fee-only: the creator share (16% of fees) is yours.",
+      /** Why the share can read "unclaimed": the program locks creator fees while the first-loss cushion is under its target (tag 90 refuses, VaultLpCreatorFeeVesting). */
+      vesting: "Creator fees are vested: they build up from the start but can only be claimed once the market's first-loss cushion has reached its target. Until then a claim is refused, and nothing is lost.",
     },
     /**
      * The fee split's Stakers row on a fee-only page (agrees with closeOut.feeOnly): a FEE_ONLY pool is paid nothing
