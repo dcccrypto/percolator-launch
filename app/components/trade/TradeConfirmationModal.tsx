@@ -284,7 +284,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
             {orderHeading(direction, positionSize, existingPositionSize)}
           </p>
           <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
-            Review the details carefully before confirming. This trade cannot be undone.
+            Review the details before you confirm. You can close the position later, but fees and price moves still apply.
           </p>
         </div>
 
@@ -341,6 +341,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
           <div className="flex justify-between border-t border-[var(--border)]/30 pt-2">
             <span className="text-[var(--text-secondary)]">Est. Liquidation Price:</span>
             <LiqPriceValue
+              plain
               display={liqDisplay}
               // Neutral, same as the ticket: a new order opens at tier "safe" (#3019), so red here
               // was an alarm that turned grey in the dock once the order filled.

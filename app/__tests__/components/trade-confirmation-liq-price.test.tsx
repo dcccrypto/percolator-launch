@@ -44,7 +44,7 @@ describe("TradeConfirmationModal liquidation price", () => {
       hasResolvedEntry: true,
     });
     render(<TradeConfirmationModal {...props({ estimatedLiqDisplay })} />);
-    expect(screen.getByText("300% mgn")).toBeInTheDocument();
+    expect(screen.getByText("None (fully covered)")).toBeInTheDocument();
     expect(screen.queryByText("N/A")).toBeNull();
   });
 

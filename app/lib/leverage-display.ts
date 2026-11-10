@@ -1,11 +1,12 @@
 export const ORDER_LEVERAGE_LABEL = "Order Lev.";
 export const RISK_LEVERAGE_LABEL = "Risk Lev.";
 
+// Council r4 N7: two leverage figures sit side by side, so each tooltip says what it measures and why they can differ.
 export const ORDER_LEVERAGE_TITLE =
-  "Order leverage is the slider value used to size this trade.";
+  "Order leverage is the leverage you picked for this order: its size divided by the margin it sets aside. It sizes the order; it is not a limit on your account.";
 
 export const RISK_LEVERAGE_TITLE =
-  "Risk leverage is this market account's effective exposure: position notional divided by collateral in this slab account. Extra collateral lowers liquidation risk.";
+  "Risk leverage is your real exposure after this trade: the whole position in this market divided by ALL the collateral in this market account (not only this order's margin). It differs from order leverage when the account holds extra collateral or an earlier position, and it is the number that decides liquidation risk.";
 
 /**
  * Risk Lev. for the confirm modal: the position the account holds AFTER the trade
