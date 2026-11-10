@@ -16,6 +16,7 @@ describe("N11 /enter judge door is POST-only", () => {
   beforeEach(() => {
     vi.stubEnv("PLAYGROUND_ACCESS_SECRET", SECRET);
     vi.stubEnv("PLAYGROUND_JUDGE_ACCESS_CODE", JUDGE);
+    vi.stubEnv("PLAYGROUND_TEAM_BYPASS_SECRET", "t".repeat(40));
   });
   afterEach(() => vi.unstubAllEnvs());
 
@@ -23,6 +24,16 @@ describe("N11 /enter judge door is POST-only", () => {
     const { GET } = await import("@/app/enter/route");
     const res = await GET(new NextRequest(`https://x.test/enter?judge=${JUDGE}`));
     expect(res.status).toBe(303);
+    expect(new URL(res.headers.get("location")!).pathname).toBe("/locked");
+    expect(res.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("GET ?judge= is refused outright: it does not fall through to another door (pins the refusal branch)", async () => {
+    const { GET } = await import("@/app/enter/route");
+    // A valid team door alongside ?judge= would mint a cookie if the GET-refusal branch were removed.
+    const ok = await GET(new NextRequest(`https://x.test/enter?team=${"t".repeat(40)}`));
+    expect(ok.headers.get("set-cookie")).toContain("pg_access=");
+    const res = await GET(new NextRequest(`https://x.test/enter?team=${"t".repeat(40)}&judge=anything`));
     expect(new URL(res.headers.get("location")!).pathname).toBe("/locked");
     expect(res.headers.get("set-cookie")).toBeNull();
   });

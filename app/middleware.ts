@@ -683,6 +683,9 @@ export const config = {
     // Council r4 R3-12: every prefix skip applies only when the rest of the path has no
     // dot-segment / encoded dot-slash / backslash, so `/images/../trade` is NOT skipped
     // and reaches the gate. Real asset URLs never contain those sequences.
-    "/((?!(?:_next/static|_next/image|(?:images|icons|audio|token-metadata|charting_library|tv-theme)/)(?!.*(?:\\.\\.|%2[eEfF]|%5[cC]|\\\\))|favicon.ico|[^/]+\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    // Council r5 #6: every file-like skip is ANCHORED (`favicon\\.ico$`, `_next/image$`) and
+    // directory skips need their trailing slash, so `/favicon.ico/x`, `/favicon.icox`,
+    // `/_next/staticx` and `/_next/image/x` reach the gate instead of skipping middleware.
+    "/((?!(?:_next/static/|(?:images|icons|audio|token-metadata|charting_library|tv-theme)/)(?!.*(?:\\.\\.|%2[eEfF]|%5[cC]|\\\\))|_next/image$|favicon\\.ico$|[^/]+\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };
