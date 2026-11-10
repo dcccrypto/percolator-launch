@@ -7,7 +7,8 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { PublicKey } from "@solana/web3.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const slow = vi.hoisted(() => ({ on: false }));
+const slow = vi.hoisted(() => ({ on: false, lotExp: 0 }));
+vi.mock("@/lib/v22/lot", async (orig) => ({ ...(await orig<object>()), lotExpOf: () => slow.lotExp }));
 const mocks = vi.hoisted(() => ({
   useWalletCompat: vi.fn(),
   useConnectionCompat: vi.fn(),
@@ -58,7 +59,7 @@ vi.mock("@/lib/mock-mode", () => ({ isMockMode: () => false }));
 vi.mock("@/lib/priceStore/priceStore", async (orig) => ({ ...(await orig<object>()), getLivePriceSnapshot: () => ({ priceUsd: 1, priceE6: 1_000_000n }) }));
 vi.mock("@/lib/mock-trade-data", () => ({ isMockSlab: () => false, getMockUserAccountIdle: () => null, getMockUserAccount: () => null }));
 vi.mock("@/lib/tx", () => ({ prewarmTxLanding: vi.fn() }));
-vi.mock("@/components/trade/DepositWithdrawCard", () => ({ DepositWithdrawCard: () => <div data-testid="deposit-card" /> }));
+vi.mock("@/components/trade/DepositWithdrawCard", () => ({ DepositWithdrawCard: (p: { offerFaucet?: boolean }) => <div data-testid="deposit-card" data-offer-faucet={String(!!p.offerFaucet)} /> }));
 vi.mock("@/components/trade/TradeConfirmationModal", () => ({ TradeConfirmationModal: (p: { onConfirm: () => void }) => { mocks.modal.props = p; return <div data-testid="confirm-modal" />; } }));
 vi.mock("@/components/ConnectButton", () => ({ ConnectButton: () => null }));
 vi.mock("@/lib/userAccountScan", async (orig) => ({ ...(await orig<object>()), getPortfolioRawSnapshot: () => null }));
@@ -104,7 +105,7 @@ beforeEach(() => {
   });
   mocks.useEngineState.mockReturnValue({ engine: null, params: { initialMarginBps: 1000n, maintenanceMarginBps: 500n, tradingFeeBps: 30n }, insuranceBalance: 1_000_000n, totalOI: 0n, hasData: true });
 });
-afterEach(() => __setDevnetV22ForTest(null));
+afterEach(() => { __setDevnetV22ForTest(null); slow.lotExp = 0; });
 
 
 const mount = async () => {
@@ -221,6 +222,60 @@ describe("M9 mounted: the room is a required input (loading / failed room read f
       expect(document.body.textContent).not.toMatch(/5,?516|1,?002,?999,?998/);
     });
   }
+
+  // Council r4 N3 (Prover P17 / Skeptic K3): the inline deposit card is reachable while the room is unknown; it must not offer test funds.
+  // An existing account with capital: its "+ Deposit" opens the inline card (offerFaucet={fundOverWallet}); a size past capital + wallet makes fundingMode true.
+  const withAccount = () => mocks.useUserAccount.mockReturnValue({ idx: 0, account: { capital: 5_000_000n, positionSize: 0n, entryPrice: 0n, pnl: 0n } });
+  const openInlineDeposit = async () => {
+    await waitFor(() => expect(screen.queryByTestId("deposit-toggle")).not.toBeNull());
+    fireEvent.click(screen.getByTestId("deposit-toggle"));
+    await waitFor(() => expect(screen.queryByTestId("deposit-card")).not.toBeNull());
+    return screen.getByTestId("deposit-card");
+  };
+  for (const state of ["loading", "error"] as const) {
+    it(`(13-${state}) room ${state}: the inline deposit card does NOT offer test funds for a size no wallet could fund`, async () => {
+      unknown(state);
+      withAccount();
+      await mountUnknown();
+      fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "999999999" } });
+      expect((await openInlineDeposit()).getAttribute("data-offer-faucet")).toBe("false");
+      expect(btn().textContent).not.toContain("Get test funds");
+    });
+  }
+  it("(13-control) room known (none) with the same size: the same card DOES offer test funds, so the assertion above is not vacuous", async () => {
+    mocks.useMarketLimits.mockReturnValue(marketLimits({ matcher: null, growth: null, growthRoom: "none", flags: { p1: false, p2: false, p2FeeCharged: false, p3: false } }));
+    withAccount();
+    await mountUnknown();
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "999999999" } });
+    expect((await openInlineDeposit()).getAttribute("data-offer-faucet")).toBe("true");
+  });
+
+  for (const state of ["loading", "error"] as const) {
+    it(`(14-${state}) room ${state}: no size echo / "Margin and fee are for that size", and the disabled submit does not look like a live green button`, async () => {
+      unknown(state);
+      await mountUnknown();
+      slow.lotExp = 4; // a lot market: a typed size off the lot grid would echo "this opens N (about $X). Margin and fee are for that size."
+      fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "1.5" } });
+      expect(screen.queryByTestId("lot-rounded")).toBeNull();
+      expect(document.body.textContent).not.toContain("Margin and fee are for that size");
+      expect(btn().disabled).toBe(true);
+      expect(btn().className).not.toMatch(/bg-\[var\(--(long|short)\)\]/);
+      expect(btn().className).toContain("bg-[var(--bg-elevated)]");
+    });
+  }
+  it("(14-control-lot) room known on the same lot market: the round-down echo IS shown (so the room-unknown assertion above is not vacuous)", async () => {
+    slow.lotExp = 4;
+    await mount();
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "1.5" } });
+    await waitFor(() => expect(screen.queryByTestId("lot-rounded")).not.toBeNull());
+    expect(document.body.textContent).toContain("Margin and fee are for that size");
+  });
+  it("(14-control) room known: an enabled submit keeps the direction colour", async () => {
+    await mount();
+    fireEvent.change(screen.getByTestId("trade-size-input"), { target: { value: "300" } });
+    await waitFor(() => expect(btn().disabled).toBe(false));
+    expect(btn().className).toMatch(/bg-\[var\(--(long|short)\)\]/);
+  });
 
   it("(8) a NON-null fill cap (LP inventory room) does not clamp or message while the room is unknown", async () => {
     mocks.useMarketFillCap.mockReturnValue({ maxFillAbs: 252_489_196n * LOT, sideRoomQ: () => 252_489_196n * LOT });
