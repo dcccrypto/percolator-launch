@@ -519,16 +519,14 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
       if (cancelled) return;
       try {
         const info = await connection.getAccountInfo(slabPk);
-        pollFailures = 0;
+        pollFailures = 0; // the RPC answered (even "no account"): reset the backoff and readFailing count
         // A good read ends "read failing" even when the bytes are unchanged (parseSlab then skips its setState).
         setState((s) => (s.readFailing ? { ...s, readFailing: false } : s));
         if (info) {
           const bytes = new Uint8Array(info.data);
           setCachedSlab(slabAddress, bytes, info.owner);
           parseSlab(bytes, info.owner);
-          pollFailures = 0;
         } else {
-          pollFailures = 0; // the RPC answered; the account just doesn't exist
           // Slab account doesn't exist on-chain. This bypasses parseSlab entirely
           // (no bytes to parse), so it must flip lastHadError itself — otherwise a
           // later poll that returns the SAME bytes as before this null read would
@@ -547,7 +545,7 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
         // guarding on it was a no-op there and a single background 429 would wipe good v17
         // state with a full-screen error. `config` is the version-agnostic "loaded" signal
         // (set for both v12 and v17) — same guard as `hasNoPriceData` in trade/[slab]/page.tsx.
-        pollFailures++;
+        // One counter (incremented once above) drives both the backoff (#3786) and readFailing (N5).
         setState((s) =>
           s.config
             ? pollFailures >= 2 && !s.readFailing ? { ...s, readFailing: true } : s
