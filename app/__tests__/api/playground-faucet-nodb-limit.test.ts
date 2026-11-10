@@ -79,6 +79,10 @@ vi.mock('@sentry/nextjs', () => ({ captureException: mocks.captureException }));
 vi.mock('@/lib/transaction-confirmation', () => ({ assertSuccessfulConfirmation: vi.fn() }));
 vi.mock('@solana/web3.js', () => {
   class PublicKey {
+    // N4: the claim-marker derivation; a stable fake address is enough for these mocks.
+    static async createWithSeed(_b: unknown, seed: string): Promise<PublicKey> {
+      return new PublicKey(`marker-${seed}`);
+    }
     constructor(private readonly value: unknown) {}
     toBase58(): string {
       return String(this.value);
@@ -100,7 +104,8 @@ vi.mock('@solana/web3.js', () => {
       super(transactionMessage);
     }
   }
-  return { Connection, PublicKey, Transaction, SendTransactionError, LAMPORTS_PER_SOL: 1_000_000_000 };
+  const SystemProgram = { programId: new PublicKey('11111111111111111111111111111111'), createAccountWithSeed: () => ({}) };
+  return { SystemProgram, Connection, PublicKey, Transaction, SendTransactionError, LAMPORTS_PER_SOL: 1_000_000_000 };
 });
 vi.mock('@solana/spl-token', () => ({
   getAssociatedTokenAddress: mocks.getAssociatedTokenAddress,

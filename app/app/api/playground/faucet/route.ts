@@ -74,6 +74,12 @@ import {
   recordSimUsdcClaimInMemory,
   simUsdcClaimInMemory,
 } from "@/lib/sim-usdc-claim";
+import {
+  SIM_USDC_CLAIM_IN_PROGRESS,
+  buildClaimMarkerInstructions,
+  isClaimMarkerCollision,
+  tryAcquireClaimLock,
+} from "@/lib/sim-usdc-claim-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -147,6 +153,8 @@ export async function POST(req: NextRequest) {
    * worse than the leak this fixes.
    */
   let releaseGateClaimOnExit: (() => Promise<void>) | null = null;
+  // N4: per-wallet in-flight lock (layer 1), held for the whole request.
+  let releaseClaimLock: (() => void) | null = null;
 
   try {
     if (NETWORK !== "devnet") {
@@ -189,6 +197,12 @@ export async function POST(req: NextRequest) {
       walletPk = new PublicKey(walletAddress);
     } catch {
       return NextResponse.json({ error: "Invalid wallet address" }, { status: 400 });
+    }
+
+    // N4 layer 1: a second claim for this wallet while one is running on this instance is refused up front.
+    releaseClaimLock = tryAcquireClaimLock(walletAddress);
+    if (!releaseClaimLock) {
+      return NextResponse.json({ error: SIM_USDC_CLAIM_IN_PROGRESS, nextClaimAt: null }, { status: 429 });
     }
 
     // Rate limit: durable Supabase gate (insert-as-gate) when available, the
@@ -298,9 +312,17 @@ export async function POST(req: NextRequest) {
 
     // ── Mint Sim-USDC ───────────────────────────────────────────────────────
     let usdcSig: string | undefined;
+    // N4 layer 2: with no durable gate, the tx starts with a per-(wallet, UTC day) marker account create, so a
+    // concurrent or later claim fails atomically on chain, whatever the instance or blockhash.
+    let markerCount = 0;
     try {
       const ata = await getAssociatedTokenAddress(usdcMint, walletPk);
       const tx = new Transaction();
+      if (durableGateUnavailable) {
+        const markerIxs = await buildClaimMarkerInstructions(mintAuthPk, walletAddress);
+        markerCount = markerIxs.length;
+        for (const ix of markerIxs) tx.add(ix);
+      }
 
       // Create ATA if it doesn't exist
       let ataExists = false;
@@ -353,6 +375,13 @@ export async function POST(req: NextRequest) {
       // catching up to a transaction that already landed.
       await confirmServerSignature(connection, usdcSig, { timeoutMs: 45_000 });
     } catch (mintErr) {
+      if (markerCount > 0 && isClaimMarkerCollision(mintErr, markerCount)) {
+        // The marker exists: another claim for this wallet and UTC day already landed. Nothing was minted by us.
+        return NextResponse.json(
+          { error: SIM_USDC_ALREADY_CLAIMED, nextClaimAt: new Date((Math.floor(Date.now() / 86_400_000) + 1) * 86_400_000).toISOString() },
+          { status: 429 },
+        );
+      }
       const wasBroadcast = typeof usdcSig === "string" && usdcSig.length > 0;
       const definiteFailure = mintErr instanceof ServerSignatureExecutionError;
 
@@ -523,5 +552,7 @@ export async function POST(req: NextRequest) {
     });
     console.error("[playground/faucet] failed:", err instanceof Error ? err.message : String(err));
     return NextResponse.json({ error: "Something went wrong and nothing was sent. Try again in a moment." }, { status: 500 });
+  } finally {
+    releaseClaimLock?.();
   }
 }
