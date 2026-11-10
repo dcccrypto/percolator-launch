@@ -967,6 +967,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // N2: on a growth market the deployed wrapper checks the WHOLE position after the fill against the dynamic IMR (growth_v19.rs
   // growth_gate; Custom 92 / 49). A bundled deposit sized to this order's margin alone left an open position at a higher leverage
   // short of it, and the chain refused. The deposit is at least the equity the gate still needs (lib/v22/growth-gate.ts).
+  // The engine charges the fee at its price, which can sit above the receipt's feed-priced fee.
+  const fundFee = openNeed.fee > fee ? openNeed.fee : fee;
   const growthDepositFloor = (() => {
     if (!fundingMode || !hasOrder || !marketLimits.growth || isReducingOrder(existingPositionSize, direction, positionSize)) return 0n;
     const equityNow = needsAccount || !userAccount
@@ -975,11 +977,15 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         (safeExistingPnl < 0n ? safeExistingPnl : 0n) +
         (!isSentinelValue(userAccount.account.feeCredits) && userAccount.account.feeCredits < 0n ? userAccount.account.feeCredits : 0n);
     const g = growthGate({ view: marketLimits.growth, direction, takerEffQ: existingPositionSize, askQ: positionSize, takerEquity: equityNow });
-    return g.closed ? 0n : g.extraEquityNeeded;
+    if (g.closed) return 0n;
+    // The gate compares equity AFTER the fill fee, so `extraEquityNeeded` already contains that fee, and the deposit adds `fundFee`
+    // on top (fundDepositAtoms / fundMinAtoms). Net out the part both count (review of #3778, Low-1) so the fee is not asked twice;
+    // floored at the smaller of the two fees, the deposit (floor + fundFee) still covers `extraEquityNeeded` in full.
+    const gateFee = equityNow > g.equityAtClip ? equityNow - g.equityAtClip : 0n;
+    const shared = gateFee < fundFee ? gateFee : fundFee;
+    return g.extraEquityNeeded > shared ? g.extraEquityNeeded - shared : 0n;
   })();
   const marginShort = growthDepositFloor > marginShortEngine ? growthDepositFloor : marginShortEngine;
-  // The engine charges the fee at its price, which can sit above the receipt's feed-priced fee.
-  const fundFee = openNeed.fee > fee ? openNeed.fee : fee;
   const fundNeededAtoms = fundingMode && hasOrder ? fundDepositAtoms(marginShort, fundFee, walletAtaBalance ?? 0n, decimals) : 0n;
   const fundMinAtoms = fundingMode && hasOrder ? marginShort + fundFee : 0n;
   const fundEnteredAtoms = fundInput ? parsePercToNative(fundInput, decimals) : 0n;
@@ -1240,6 +1246,14 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   }, [levCapForSize, leverage]);
   // The selector (input, slider, presets) tops out at that same cap, so no choice above it is ever offered.
   const selectorMaxLeverage = Math.max(1, Math.floor(levCapForSize * 100) / 100);
+  // N2 follow-up: the selector's floor is 1x, so a growth cap below 1x for THIS size means no leverage it can offer passes the
+  // wrapper's growth gate. Then 1x is not offered and submit is blocked (a smaller size has a higher cap). Fail-closed only: on the
+  // deployed wrapper (growth_v19::MAX_IMR_BPS = 10_000) the cap bottoms out at exactly 1x. Null on a reduce / close / non-growth market.
+  const growthFillCap = ticketLimits.growth?.fillMaxLeverage ?? null;
+  const growthCapBelowOne = !mockMode && growthFillCap !== null && growthFillCap < 1;
+  // Review of #3778 (security, Low): the cap was enforced only by the clamp effect above. Submit also refuses a leverage above the cap
+  // for this size, so a render where the effect has not yet lowered the choice can never be signed (the effect then sets it to the cap).
+  const leverageOverCap = levCapForSize >= 1 && leverage > Math.floor(levCapForSize * 100) / 100 + 1e-9;
   const availableLeverage = useMemo(() => availableLeverageFor(selectorMaxLeverage), [selectorMaxLeverage]);
 
   const feeOverMax = ticketLimits.issues.some((x) => x.kind === "fee-over-max");
@@ -1797,6 +1811,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     fundTooSmall ||
     overFillable ||
     roomUnknown ||
+    growthCapBelowOne ||
+    leverageOverCap ||
     !marginInput ||
     positionSize <= 0n ||
     (exceedsBalance && !fundingMode && ticketState.row !== "exceeds-balance");
@@ -2297,6 +2313,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               type="text"
               inputMode="decimal"
               value={leverageText}
+              disabled={growthCapBelowOne}
               onChange={(e) => {
                 // GH#2628. Both halves matter and both are in the helper:
                 // the text is kept verbatim so a "." survives long enough to
@@ -2313,7 +2330,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <span className="text-[11px] pointer-coarse:text-base font-medium text-[var(--text)]">x</span>
           </div>
         </div>
-        {selectorMaxLeverage > 1 ? (() => {
+        {growthCapBelowOne ? (
+          <p data-testid="leverage-below-one" role="status" className="text-[9px] text-[var(--text-secondary)] font-mono">
+            {V22_COPY.growth.maxNow}: {formatLeverageValue(Math.floor(growthFillCap! * 100) / 100)}x for this size, below the 1x minimum. Use a smaller size.
+          </p>
+        ) : selectorMaxLeverage > 1 ? (() => {
           // Thumb, fill and labels sit on the preset INDEX scale, so 1/3/5/10/20 stay evenly
           // spaced (lib/leverage-control.ts leverageToPct).
           const thumbPct = leverageToPct(leverage, availableLeverage);
@@ -2774,6 +2795,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                   : ACCOUNT_LOADING_COPY.loading
                 : roomUnknown
                 ? marketLimits.growthRoom === "error" || roomSlow ? "Market room unavailable" : "Checking room…"
+                : growthCapBelowOne && !ticketState.blocks
+                ? "Max leverage below 1x: use a smaller size"
                 : belowOneLot && !ticketState.blocks
                 ? "Below the 1-lot minimum"
                 : overFillable && !ticketState.blocks
@@ -2893,6 +2916,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             setShowConfirmModal(false);
             setConfirmSnapshot(null);
             if (roomUnknown) return; // the room read was lost after the modal opened
+            if (growthCapBelowOne || leverageOverCap) return; // the growth cap for this size fell below the choice after the modal opened
             void handleTrade(
               snapshot.positionSize,
               snapshot.worstFillPriceE6,
