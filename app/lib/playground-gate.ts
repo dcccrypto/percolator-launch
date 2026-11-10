@@ -61,10 +61,13 @@ const EXEMPT_EXACT = new Set([
   "/manifest.webmanifest",
   "/opengraph-image",
   "/twitter-image",
+  // Next image optimiser: exact path only (its ?url= query is not part of the pathname).
+  "/_next/image",
 ]);
 
 const EXEMPT_PREFIXES = [
-  "/_next/",
+  // Static build output only; a blanket "/_next/" also exempted /_next/image/x, /_next/data etc. (Council r5 #6).
+  "/_next/static/",
   "/_vercel/",
   "/.well-known/",
   "/token-metadata/",
