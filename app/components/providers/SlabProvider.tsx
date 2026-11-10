@@ -38,6 +38,7 @@ import {
 } from "@percolatorct/sdk";
 import { isMockSlab, getMockSlabState } from "@/lib/mock-trade-data";
 import { isMockMode } from "@/lib/mock-mode";
+import { requestFreshScans } from "@/lib/userAccountScan";
 import { isKnownProgram } from "@/lib/programAllowlist";
 import { parseV17RiskParams } from "@/lib/v17-engine-config";
 import { parseAssetAdlFactors, type AssetAdlFactors } from "@/lib/v17-adl";
@@ -54,6 +55,12 @@ export interface SlabState {
   accounts: { idx: number; account: Account }[];
   loading: boolean;
   error: string | null;
+  /**
+   * Council r4 N5: the slab READ is failing (RPC down) while the last good bytes are still on screen: the market
+   * data is stale, not live. `error` stays null in that case (the terminal keeps its data), so this is the signal
+   * the header badge and the ticket use. Set after 2 consecutive failed polls; cleared by the next good read.
+   */
+  readFailing?: boolean;
   /** v2.2 flag on only: the account carries the wrapper magic but a VERSION this build does not decode (calm fallback, no numbers). */
   layoutUnsupported?: boolean;
   /** The on-chain program that owns this slab account */
@@ -129,6 +136,17 @@ const POLL_INTERVAL_MS = 3000;
 // roughly every ~7s, so 5s catches every on-chain change even with a fully dead
 // socket, while staying gentle on the RPC. `bytesEqual` dedups no-op re-parses.
 const WS_BACKUP_POLL_MS = 5000;
+/** Backup-poll ceiling while the RPC keeps failing (Council r4 R3-8: no flat-rate retry storm). */
+const WS_BACKUP_POLL_MAX_MS = 60_000;
+
+/**
+ * Delay before the next backup poll: the steady cadence while healthy, doubling per consecutive FAILED
+ * poll and capped at WS_BACKUP_POLL_MAX_MS. The first success returns it to the steady cadence.
+ */
+export function slabPollDelayMs(consecutiveFailures: number): number {
+  if (consecutiveFailures <= 0) return WS_BACKUP_POLL_MS;
+  return Math.min(WS_BACKUP_POLL_MS * 2 ** consecutiveFailures, WS_BACKUP_POLL_MAX_MS);
+}
 
 /**
  * Byte-for-byte comparison of two Uint8Arrays. Used to detect when a poll/WS
@@ -496,10 +514,14 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
     } catch { /* ws not available */ }
 
     let timer: ReturnType<typeof setInterval> | undefined;
+    let pollFailures = 0;
     async function poll() {
       if (cancelled) return;
       try {
         const info = await connection.getAccountInfo(slabPk);
+        pollFailures = 0; // the RPC answered (even "no account"): reset the backoff and readFailing count
+        // A good read ends "read failing" even when the bytes are unchanged (parseSlab then skips its setState).
+        setState((s) => (s.readFailing ? { ...s, readFailing: false } : s));
         if (info) {
           const bytes = new Uint8Array(info.data);
           setCachedSlab(slabAddress, bytes, info.owner);
@@ -515,6 +537,7 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
           setState((s) => ({ ...s, loading: false, error: "Market not found on-chain. It may have been closed or the address is invalid." }));
         }
       } catch (e) {
+        pollFailures++;
         console.error("[SlabProvider] RPC poll error:", e);
         // Set error on first load so page doesn't show loading forever, but keep already-loaded
         // data on a transient background poll error (e.g. RPC 429) instead of blanking the
@@ -522,7 +545,12 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
         // guarding on it was a no-op there and a single background 429 would wipe good v17
         // state with a full-screen error. `config` is the version-agnostic "loaded" signal
         // (set for both v12 and v17) — same guard as `hasNoPriceData` in trade/[slab]/page.tsx.
-        setState((s) => s.config ? s : { ...s, loading: false, error: `RPC error: ${e instanceof Error ? e.message : "connection failed"}` });
+        // One counter (incremented once above) drives both the backoff (#3786) and readFailing (N5).
+        setState((s) =>
+          s.config
+            ? pollFailures >= 2 && !s.readFailing ? { ...s, readFailing: true } : s
+            : { ...s, loading: false, error: `RPC error: ${e instanceof Error ? e.message : "connection failed"}` },
+        );
       }
     }
 
@@ -549,7 +577,7 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
           return;
         }
         poll().then(schedulePoll);
-      }, WS_BACKUP_POLL_MS);
+      }, slabPollDelayMs(pollFailures));
     }
 
     fetchRef.current = poll;
@@ -582,7 +610,12 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
     return () => document.removeEventListener("visibilitychange", handler);
   }, []);
 
-  const refresh = useCallback(() => { fetchRef.current(); }, []);
+  const refresh = useCallback(() => {
+    // An explicit refresh means the user just acted (trade / deposit / mint ...): let the
+    // dependent portfolio / NFT scans run unthrottled for a while (lib/userAccountScan.ts).
+    requestFreshScans();
+    fetchRef.current();
+  }, []);
 
   // Memoize the context value so its identity only changes when `state` changes
   // (i.e. when on-chain data actually changed). Without this, the inline

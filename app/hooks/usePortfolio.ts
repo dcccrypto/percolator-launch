@@ -1341,6 +1341,19 @@ export function loadPortfolioShared(
  *   (Concurrent ENABLED instances are cheap: `loadPortfolioShared` dedups
  *   them into one scan cycle.)
  */
+/** How long one portfolio scan may take before the hook reports a load error instead of loading forever. */
+export const PORTFOLIO_LOAD_TIMEOUT_MS = 25_000;
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("Timed out reading your positions")), ms);
+    p.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e: unknown) => { clearTimeout(t); reject(e); },
+    );
+  });
+}
+
 export function usePortfolio(enabled: boolean = true): PortfolioData {
   const { connection } = useConnectionCompat();
   const { publicKey } = useWalletCompat();
@@ -1457,11 +1470,17 @@ export function usePortfolio(enabled: boolean = true): PortfolioData {
         // mounted for this same (wallet, network) — see loadPortfolioShared's
         // doc comment. This hook instance only applies the result to ITS OWN
         // component state, gated on ITS OWN `cancelled` flag.
-        const snapshot = await loadPortfolioShared(cacheKey, force, () =>
-          // Non-null: this closure only runs inside the `!publicKey` early-return
-          // guard above, same as every other publicKey! use in this file (TS
-          // can't narrow a closed-over value inside a nested function).
-          fetchPortfolioSnapshot(connection, publicKey!, programIds),
+        // Council r4 N5: a scan that never answers (RPC returning 503 / hanging behind retries) left the page on
+        // "Loading" forever. Bound the wait: past PORTFOLIO_LOAD_TIMEOUT_MS this instance reports a load error
+        // (retry offered), and the next 30s refresh tries again.
+        const snapshot = await withTimeout(
+          loadPortfolioShared(cacheKey, force, () =>
+            // Non-null: this closure only runs inside the `!publicKey` early-return
+            // guard above, same as every other publicKey! use in this file (TS
+            // can't narrow a closed-over value inside a nested function).
+            fetchPortfolioSnapshot(connection, publicKey!, programIds),
+          ),
+          PORTFOLIO_LOAD_TIMEOUT_MS,
         );
         if (!cancelled) {
           setPositions(snapshot.positions);

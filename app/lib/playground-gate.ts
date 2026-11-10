@@ -88,7 +88,15 @@ const EXEMPT_API: ReadonlyArray<{ method: string; re: RegExp; v22?: true }> = [
   { method: "GET", re: /^\/api\/earn-share\/[1-9A-HJ-NP-Za-km-z]{32,44}(?:\/image)?\/?$/, v22: true },
 ];
 
+/**
+ * Non-normalised path: a `.`/`..` segment, an encoded dot/slash/backslash, or a raw backslash.
+ * Exemptions are prefix checks on the raw path, so `/images/../trade` would match `/images/` yet
+ * be served as `/trade`. Real asset URLs never contain these, so such paths are never exempt.
+ */
+const NON_NORMALISED_RE = /(?:^|\/)\.{1,2}(?:\/|$)|%2e|%2f|%5c|\\/i;
+
 export function isExempt(pathname: string, method: string): boolean {
+  if (NON_NORMALISED_RE.test(pathname)) return false;
   if (EXEMPT_EXACT.has(pathname)) return true;
   // /locked/ and /enter/ (trailing slash) as well
   if (pathname === LOCKED_PATH + "/" || pathname === ENTER_PATH + "/") return true;

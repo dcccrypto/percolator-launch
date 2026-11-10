@@ -3,6 +3,7 @@ import { isHiddenFromListing } from "@/lib/listing-hidden";
 import { isZombieMarket } from "@/lib/activeMarketFilter";
 import { hasNoPriceSource, isMultiAssetMarket } from "@/lib/listed-markets";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
+import { isStablecoinPerpBlocked } from "@/lib/v22/stablecoin-perps";
 
 /**
  * GH#2705: the ONE definition of which registry rows count as listed markets.
@@ -75,6 +76,8 @@ export function isListedMarket(row: Record<string, unknown>): boolean {
   if (BLOCKED_SLAB_ADDRESSES.has(slab)) return false;
   if (isHiddenFromListing(slab)) return false;
   if (isProvenIncompleteMarket(row)) return false;
+  // v2.2: a dollar-stablecoin underlying is never counted either (/api/markets drops it; keeps /api/stats in step).
+  if (isStablecoinPerpBlocked(typeof row.mainnet_ca === "string" ? row.mainnet_ca : null)) return false;
   if (isMultiAssetMarket(row)) return false;
   // A-6: an orphan with no keeper price source can never be priced (curated seeds are exempt).
   if (hasNoPriceSource(row) && !PLAYGROUND_SLAB_META[slab]) return false;

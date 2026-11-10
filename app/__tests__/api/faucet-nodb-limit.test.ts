@@ -34,6 +34,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@solana/web3.js", () => {
   class PublicKey {
+    // N4: the claim-marker derivation; a stable fake address is enough for these mocks.
+    static async createWithSeed(_b: unknown, seed: string): Promise<PublicKey> {
+      return new PublicKey(`marker-${seed}`);
+    }
     constructor(
       private readonly value: unknown,
     ) {}
@@ -84,8 +88,9 @@ vi.mock("@solana/web3.js", () => {
       mocks.sendRawTransaction;
   }
 
+  const SystemProgram = { programId: new PublicKey('11111111111111111111111111111111'), createAccountWithSeed: () => ({}) };
   return {
-    Connection,
+    SystemProgram, Connection,
     PublicKey,
     Transaction,
     LAMPORTS_PER_SOL: 1_000_000_000,

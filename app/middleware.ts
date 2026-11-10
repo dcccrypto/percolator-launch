@@ -680,6 +680,9 @@ export const config = {
     // files and our theme CSS for it (the chart iframe loads them) — no gate
     // redirect inside the iframe, no per-asset middleware cost. Their headers
     // (CSP for the iframe document, caching) come from next.config.ts.
-    "/((?!_next/static|_next/image|favicon.ico|images/|icons/|audio/|token-metadata/|charting_library/|tv-theme/|[^/]+\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    // Council r4 R3-12: every prefix skip applies only when the rest of the path has no
+    // dot-segment / encoded dot-slash / backslash, so `/images/../trade` is NOT skipped
+    // and reaches the gate. Real asset URLs never contain those sequences.
+    "/((?!(?:_next/static|_next/image|(?:images|icons|audio|token-metadata|charting_library|tv-theme)/)(?!.*(?:\\.\\.|%2[eEfF]|%5[cC]|\\\\))|favicon.ico|[^/]+\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

@@ -28,6 +28,7 @@ import { validateSymbol, validateName } from "@/lib/market-metadata-validation";
 import { sanitizeLogoUrl } from "@/lib/token-metadata-validators";
 import { computeMarketHealthFromStats } from "@/lib/health";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
+import { STABLECOIN_PERP_REASON, isStablecoinPerpBlocked } from "@/lib/v22/stablecoin-perps";
 import { SLUG_ALIASES } from "@/lib/symbol-utils";
 import {
   buildMarketRegistrationMessage,
@@ -188,6 +189,14 @@ function numericOrNull(v: unknown): number | null {
  * falling back to the static devnetMarketDirectoryFallback() list on failure.
  * The rows come from lib/discovered-market-rows.ts, which /api/stats counts too.
  */
+/**
+ * v2.2: a row whose token identity (mainnet_ca) is a dollar stablecoin is never listed, so a market built by script
+ * (InitMarket is permissionless) and registered before this gate existed does not show. Off v2.2 always true.
+ */
+function listable(m: { mainnet_ca?: unknown }): boolean {
+  return !isStablecoinPerpBlocked(typeof m.mainnet_ca === "string" ? m.mainnet_ca : null);
+}
+
 async function onChainOrStaticResponse(request: NextRequest, reason: string): Promise<NextResponse> {
   try {
     const programIdParam = request?.nextUrl?.searchParams?.get("program_id") ?? null;
@@ -200,6 +209,7 @@ async function onChainOrStaticResponse(request: NextRequest, reason: string): Pr
     const rows = await loadDiscoveredMarketRows({
       filter: (m) => {
         if (programIdParam && m.program_id !== programIdParam) return false;
+        if (!listable(m)) return false;
         if (!searchTrimmed) return true;
         const symbol = String(m.symbol ?? "").toLowerCase();
         const name = String(m.name ?? "").toLowerCase();
@@ -266,6 +276,7 @@ function fallbackMarketsResponse(request: NextRequest, reason: string): NextResp
   const filtered = rows
     .filter((m) => !BLOCKED_SLAB_ADDRESSES.has(m.slab_address as string))
     .filter((m) => !programIdParam || m.program_id === programIdParam)
+    .filter(listable)
     .filter((m) => {
       if (!searchTrimmed) return true;
       const symbol = String(m.symbol ?? "").toLowerCase();
@@ -456,6 +467,7 @@ export async function GET(request: NextRequest) {
     // Degrades to exactly the previous behaviour: a slab missing from the map
     // keeps whatever the registry row had.
     const sanitized = mergedRows
+      .filter(listable)
       .map((m) => {
       let oracle_mode = m.oracle_mode as string | null;
       if (!oracle_mode) {
@@ -1207,6 +1219,15 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+  }
+
+  // v2.2: dollar stablecoins are not perp underlyings (owner 2026-11-09). Refuse registration on the token identity
+  // (canonical mainnet_ca) so a script-built stablecoin market is never listed. Off v2.2 this never fires.
+  // GAP (documented, not closed): with mainnet_ca omitted the identity is only dex_pool_address, and this route does not
+  // resolve a pool's base mint (classifyPoolsByOwner returns a class, not the mints), so a pool-only POST is not caught here;
+  // closing it needs a pool-mint read (a new RPC call) or the on-chain denylist.
+  if (isStablecoinPerpBlocked(canonicalMainnetCa)) {
+    return NextResponse.json({ error: STABLECOIN_PERP_REASON }, { status: 400 });
   }
 
   // GH#1963: Validate symbol — alphanumeric + dash/dot/underscore, 1–20 chars.

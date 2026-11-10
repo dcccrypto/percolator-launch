@@ -135,9 +135,15 @@ describe("GET/POST /enter?judge=", () => {
   });
   afterEach(() => vi.unstubAllEnvs());
 
-  it("GET with the right code sets the session and lands on /?signin=1", async () => {
-    const { GET } = await import("@/app/enter/route");
-    const ok = await GET(new NextRequest(`https://pg.test/enter?judge=${JUDGE}`));
+  it("POST with the right code sets the session and lands on /?signin=1", async () => {
+    const { POST } = await import("@/app/enter/route");
+    const ok = await POST(
+      new NextRequest("https://pg.test/enter", {
+        method: "POST",
+        body: new URLSearchParams({ judge: JUDGE }),
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+      }),
+    );
     expect(ok.status).toBe(303);
     const loc = new URL(ok.headers.get("location")!);
     expect(loc.pathname).toBe("/");

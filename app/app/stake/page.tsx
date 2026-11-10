@@ -1,7 +1,7 @@
 "use client";
 
 import { RecoverToStakers } from "@/components/stake/RecoverToStakers";
-import { stakePoolsUrl } from "@/lib/stake-pools-url";
+import { stakePoolsUrl, markStakeTx } from "@/lib/stake-pools-url";
 import { STAKE_COPY, cooldownDuration, stakeCopy, stakeCoverageCopy } from "@/lib/stake-copy";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { useStakeCooldown } from "@/hooks/useStakeCooldown";
@@ -365,12 +365,18 @@ function StakeHeader({
   totalUserDeposited,
   depositsUnknown = false,
   loading,
+  loadError = false,
+  onRetry,
 }: {
   pools: StakePool[];
   totalUserDeposited: number | null;
   /** #3611: a position's value can't be read (its pool has no TVL and its own units read failed): a dash, not "…". */
   depositsUnknown?: boolean;
   loading: boolean;
+  /** Council r4 N5: the pools fetch failed with nothing loaded. On v2.2 the header says so (with a retry) rather than
+   *  guessing a pool kind: the legacy v1 intro it fell back to describes a pool that is not on offer. */
+  loadError?: boolean;
+  onRetry?: () => void;
 }) {
   const { connected } = useWalletCompat();
   // The full fee split is reference material: the intro says what staking does, the split opens on request.
@@ -439,6 +445,16 @@ function StakeHeader({
               <p className="mt-2 max-w-[68ch] text-[14px] leading-relaxed text-[var(--text-secondary)] xl:max-w-none" data-testid="stake-intro-insurance">{V22_COPY.stake.insuranceIntro}</p>
             ) : v22Pools ? (
               <p className="mt-2 max-w-[68ch] text-[14px] leading-relaxed text-[var(--text-secondary)] xl:max-w-none" data-testid="stake-intro-feeonly">{V22_COPY.stake.closeOut.feeOnly}</p>
+            ) : isDevnetV22Enabled() && pools.length === 0 ? (
+              // v2.2 and no pool known yet (still loading, empty, or the read failed): never the legacy v1 intro.
+              loadError ? (
+                <p role="alert" className="mt-2 max-w-[68ch] text-[14px] leading-relaxed text-[var(--text-secondary)] xl:max-w-none" data-testid="stake-intro-error">
+                  Couldn&apos;t load the staking pools, so what a pool pays and risks can&apos;t be shown yet.{" "}
+                  <button type="button" onClick={onRetry} className="text-[var(--accent-text)] underline decoration-dotted underline-offset-4 hover:text-[var(--text)]">
+                    Try again
+                  </button>
+                </p>
+              ) : null
             ) : (
               <p className="mt-2 max-w-[68ch] text-[14px] leading-relaxed text-[var(--text-secondary)] xl:max-w-none" data-testid="stake-intro-legacy">
                 Stake into a market&apos;s pool to receive a share of that market&apos;s trading fees —
@@ -490,7 +506,7 @@ function StakeHeader({
               wrapper tag 87 WithdrawInsuranceReserveToStake -> stake tag 12 AccrueFees, which takes
               insurance pools (pool_mode 0; see lib/pre-resolve.ts decideStakeLeg). Measured: stakers
               C3 +5.86 USDC, U3 +7.01 USDC. The old zero-yield caption was false. */}
-          {!insuranceOnly && !v22Pools && (
+          {!insuranceOnly && !v22Pools && !isDevnetV22Enabled() && (
             <p className="mb-2 text-[11px] text-[var(--text-secondary)]">
               Stakers are paid the insurance share of every trading fee, moved into the stake pool
               automatically.
@@ -1828,12 +1844,14 @@ export default function StakePage() {
     // Re-fetch both the user's LP position and pool-level TVL/cap data after
     // deposit/withdraw. Without refreshing pools, successful deposits can leave
     // pool cards showing stale TVL until the user manually reloads.
+    markStakeTx();
     setPositionRefreshKey((k) => k + 1);
     setPoolsRefreshKey((k) => k + 1);
 
     // RPC/indexer reads can lag just after confirmation, so do one follow-up
     // refresh to catch the settled vault balance without requiring a reload.
     window.setTimeout(() => setPoolsRefreshKey((k) => k + 1), 2_000);
+    window.setTimeout(() => setPoolsRefreshKey((k) => k + 1), 10_000);
   }, []);
 
   // Pools still loading, or a scan for this wallet not finished yet. A genuinely empty
@@ -1882,7 +1900,7 @@ export default function StakePage() {
       {/* Compact header + stats strip (mirrors EarnHeader) */}
       <ErrorBoundary label="Stake Header">
         {/* A failed pools fetch must not read as "0 pools / $0 staked" (#2706). */}
-        <StakeHeader pools={pools} totalUserDeposited={totalUserDeposited} depositsUnknown={depositsUnknown} loading={poolsLoading || (poolsError && pools.length === 0)} />
+        <StakeHeader pools={pools} totalUserDeposited={totalUserDeposited} depositsUnknown={depositsUnknown} loading={poolsLoading || (poolsError && pools.length === 0)} loadError={poolsError && pools.length === 0} onRetry={retryPools} />
       </ErrorBoundary>
 
       {/* Main content */}
