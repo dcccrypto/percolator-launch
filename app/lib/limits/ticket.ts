@@ -361,8 +361,16 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
           caps.push(room > 0n ? room : 0n);
         }
       }
-      for (const c of caps) if (out.growthCapQ == null || c < out.growthCapQ) out.growthCapQ = c;
-      if (fill !== null && (out.growthRoomQ == null || fill < out.growthRoomQ)) out.growthRoomQ = fill;
+      // A close is never checked by the program, so no guard cap may sit below the position being closed (levGuardMaxFillQV22 counts the
+      // whole fill as opening): each guard cap is floored at the closing size, which only ever bounds the opening part beyond it.
+      const closingQ = (i.direction === "long" ? i.takerPosQ < 0n : i.takerPosQ > 0n) ? (i.takerPosQ < 0n ? -i.takerPosQ : i.takerPosQ) : 0n;
+      for (const c0 of caps) {
+        const c = c0 < closingQ ? closingQ : c0;
+        if (out.growthCapQ == null || c < out.growthCapQ) out.growthCapQ = c;
+      }
+      // "Market room" is only what the guard's fill cap admits beyond the close; when that is below the close the figure is the position
+      // itself, not room, so the label must not claim it.
+      if (fill !== null && fill >= closingQ && (out.growthRoomQ == null || fill < out.growthRoomQ)) out.growthRoomQ = fill;
       if (i.sizeQ > 0n && growth && !growth.reducing) {
         const signed = i.direction === "long" ? growth.fillQ : -growth.fillQ;
         // Equity after the fill's fee (the program checks after the fill); unknown equity skips the leverage check only.
