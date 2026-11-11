@@ -117,6 +117,8 @@ function token2022Mint(name: string, symbol: string): Acct {
   const tlvValue = Buffer.concat([Buffer.alloc(64), bstr(name), bstr(symbol), bstr("")]);
   const hdr = Buffer.alloc(4); hdr.writeUInt16LE(19, 0); hdr.writeUInt16LE(tlvValue.length, 2);
   const base = Buffer.alloc(166); // 82-byte mint + padding to 165 + account-type byte
+  base[45] = 1; // is_initialized
+  base[165] = 1; // AccountType::Mint
   return { owner: new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"), data: Buffer.concat([base, hdr, tlvValue]) };
 }
 function pumpPool(base: string, quote: string): Acct {
@@ -132,6 +134,9 @@ function dlmmPool(base: string, quote: string): Acct {
   return { owner: new PublicKey(METEORA), data: d };
 }
 const SPL_TOKEN = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const T22 = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+/** An initialized 82-byte mint. */
+const mintBytes = () => { const b = Buffer.alloc(82); b[45] = 1; return b; };
 /**
  * Fake mainnet. Mint accounts the check reads (a key followed by its Metaplex PDA) are synthesised as SPL mints when the map has none,
  * unless `missingMints` is set (then an absent mint account stays absent).
@@ -144,7 +149,7 @@ function fakeConn(accounts: Map<string, Acct>, opts: { fail?: boolean; missingMi
         const a = accounts.get(k.toBase58());
         if (a) return a;
         const isMintSlot = i + 1 < keys.length && keys[i + 1].equals(pda(k));
-        return isMintSlot && !opts.missingMints ? ({ owner: SPL_TOKEN, data: Buffer.alloc(82) } as Acct) : null;
+        return isMintSlot && !opts.missingMints ? ({ owner: SPL_TOKEN, data: mintBytes() } as Acct) : null;
       });
     },
   } as unknown as Parameters<typeof checkStablecoinUnderlying>[0]["conn"];
@@ -253,16 +258,31 @@ describe("checkStablecoinUnderlying", () => {
     expect(await checkStablecoinUnderlying({ mainnetCa: CONTROL, conn: fakeConn(new Map()) })).toEqual({ ok: true });
   });
 
-  it("r7: a mainnet_ca whose mint account is missing, or not owned by SPL Token / Token-2022, is refused (not retryable)", async () => {
+  it("r7: a mainnet_ca whose account is missing, or is not an initialized SPL Token / Token-2022 MINT, is refused (not retryable)", async () => {
     const refused = { ok: false, kind: "unverifiable", retryable: false };
     expect(await checkStablecoinUnderlying({ mainnetCa: Keypair.generate().publicKey.toBase58(), conn: fakeConn(new Map(), { missingMints: true }) })).toEqual(refused);
     const sys = new PublicKey("11111111111111111111111111111111");
-    const wallet = Keypair.generate().publicKey;
-    const conn = fakeConn(new Map<string, Acct>([[wallet.toBase58(), { owner: sys, data: Buffer.alloc(0) }], [sys.toBase58(), { owner: new PublicKey("NativeLoader1111111111111111111111111111111"), data: Buffer.alloc(0) }]]));
-    expect(await checkStablecoinUnderlying({ mainnetCa: wallet.toBase58(), conn })).toEqual(refused);
-    expect(await checkStablecoinUnderlying({ mainnetCa: sys.toBase58(), conn })).toEqual(refused);
-    // Token-2022 mints are fine
-    const t22 = Keypair.generate().publicKey;
-    expect(await checkStablecoinUnderlying({ mainnetCa: t22.toBase58(), conn: fakeConn(new Map<string, Acct>([[t22.toBase58(), token2022Mint("Okay", "OKAY")]])) })).toEqual({ ok: true });
+    const t22Acct = Buffer.alloc(166); t22Acct[45] = 1; t22Acct[165] = 2; // Token-2022 token ACCOUNT (AccountType::Account)
+    const uninit = Buffer.alloc(82); // 82 bytes but is_initialized = 0
+    const cases: Array<[string, Acct]> = [
+      ["wallet", { owner: sys, data: Buffer.alloc(0) }],
+      ["system program", { owner: new PublicKey("NativeLoader1111111111111111111111111111111"), data: Buffer.alloc(0) }],
+      ["SPL token account (165 B)", { owner: SPL_TOKEN, data: Buffer.alloc(165) }],
+      ["Token-2022 token account (165 B)", { owner: T22, data: Buffer.alloc(165) }],
+      ["Token-2022 token account (extended, type 2)", { owner: T22, data: t22Acct }],
+      ["multisig (355 B)", { owner: SPL_TOKEN, data: Buffer.alloc(355) }],
+      ["empty token-program account", { owner: SPL_TOKEN, data: Buffer.alloc(0) }],
+      ["uninitialized mint", { owner: SPL_TOKEN, data: uninit }],
+    ];
+    for (const [label, acct] of cases) {
+      const k = Keypair.generate().publicKey.toBase58();
+      expect(await checkStablecoinUnderlying({ mainnetCa: k, conn: fakeConn(new Map<string, Acct>([[k, acct]])) }), label).toEqual(refused);
+    }
+    // Real mints are fine: SPL (82 B), Token-2022 base (82 B) and Token-2022 extended (type 1)
+    const t22Mint = Keypair.generate().publicKey.toBase58(), t22Base = Keypair.generate().publicKey.toBase58();
+    expect(await checkStablecoinUnderlying({ mainnetCa: t22Mint, conn: fakeConn(new Map<string, Acct>([[t22Mint, token2022Mint("Okay", "OKAY")]])) })).toEqual({ ok: true });
+    expect(await checkStablecoinUnderlying({ mainnetCa: t22Base, conn: fakeConn(new Map<string, Acct>([[t22Base, { owner: T22, data: mintBytes() }]])) })).toEqual({ ok: true });
+    expect(await checkStablecoinUnderlying({ mainnetCa: CONTROL, conn: fakeConn(new Map()) })).toEqual({ ok: true });
   });
+
 });

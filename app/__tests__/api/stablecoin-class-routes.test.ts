@@ -11,7 +11,7 @@ import { PUMPSWAP, METEORA, USDC, WSOL } from "../lib/pool-quote-gate-fixtures";
 // The first import of the markets route is heavy, and the "v2.2 off" case runs into the route's own slab-read retries.
 vi.setConfig({ testTimeout: 60_000 });
 
-const h = vi.hoisted(() => ({ claims: 0, accounts: new Map<string, { owner: string; data: Uint8Array }>(), rpcDown: false, rowWrites: 0, blobWrites: 0, dbUpdates: 0, keeperFetches: 0 }));
+const h = vi.hoisted(() => ({ rpcCalls: 0, claims: 0, accounts: new Map<string, { owner: string; data: Uint8Array }>(), rpcDown: false, rowWrites: 0, blobWrites: 0, dbUpdates: 0, keeperFetches: 0 }));
 
 process.env.NEXT_PUBLIC_DEFAULT_NETWORK = "devnet";
 process.env.ADMIN_API_SECRET = "stable-class-secret";
@@ -47,6 +47,7 @@ vi.mock("@solana/web3.js", async (importOriginal) => {
   class Connection {
     async getAccountInfo() { throw new Error("mock RPC error"); }
     async getMultipleAccountsInfo(keys: Array<{ toBase58(): string }>) {
+      h.rpcCalls++;
       if (h.rpcDown) throw new Error("rpc down");
       return keys.map((k) => { const a = h.accounts.get(k.toBase58()); return a ? { owner: new real.PublicKey(a.owner), data: Buffer.from(a.data), lamports: 1, executable: false } : null; });
     }
@@ -71,7 +72,7 @@ const kp = () => Keypair.generate().publicKey.toBase58();
 const SPL = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const SYSTEM = "11111111111111111111111111111111";
 /** An SPL mint account on the fake mainnet (the check refuses a mainnet_ca that is not one). */
-const mintAcct = (addr: string) => h.accounts.set(addr, { owner: SPL, data: new Uint8Array(82) });
+const mintAcct = (addr: string) => { const d = new Uint8Array(82); d[45] = 1; h.accounts.set(addr, { owner: SPL, data: d }); };
 function pool(owner: string, base: string, quote: string): string {
   mintAcct(base);
   const addr = kp();
@@ -88,7 +89,7 @@ const postMarkets = (body: Record<string, unknown>) =>
   new Request("http://localhost/api/markets", { method: "POST", headers: { "Content-Type": "application/json", "x-markets-bypass": BYPASS }, body: JSON.stringify({ slab_address: kp(), mint_address: kp(), deployer: DEPLOYER, ...body }) }) as unknown as NextRequest;
 const errOf = async (res: Response) => String(((await res.json()) as { error?: string }).error ?? "");
 
-beforeEach(() => { vi.resetModules(); setV22(true); h.accounts.clear(); mintAcct(CONTROL); h.claims = 0; h.rpcDown = false; h.rowWrites = h.blobWrites = h.dbUpdates = 0; });
+beforeEach(() => { vi.resetModules(); setV22(true); h.accounts.clear(); mintAcct(CONTROL); h.claims = 0; h.rpcCalls = 0; h.rpcDown = false; h.rowWrites = h.blobWrites = h.dbUpdates = 0; });
 afterEach(() => setV22(null));
 
 describe("POST /api/markets", () => {
@@ -154,7 +155,10 @@ describe("POST /api/markets", () => {
     const { POST } = await import("@/app/api/markets/route");
     const wallet = kp();
     h.accounts.set(wallet, { owner: SYSTEM, data: new Uint8Array(0) });
-    for (const ca of [kp(), SYSTEM, wallet]) {
+    const tokenAcct = kp(), multisig = kp();
+    h.accounts.set(tokenAcct, { owner: SPL, data: new Uint8Array(165) }); // e.g. any USDC token account
+    h.accounts.set(multisig, { owner: SPL, data: new Uint8Array(355) });
+    for (const ca of [kp(), SYSTEM, wallet, tokenAcct, multisig]) {
       const res = await POST(postMarkets({ mainnet_ca: ca, symbol: "ZZZ" }));
       expect(res.status, ca).toBe(400);
       expect(await errOf(res)).toMatch(/couldn't read this market's token/i);
@@ -179,6 +183,23 @@ describe("POST /api/markets", () => {
     const retry = await POST(send());
     expect(retry.status).not.toBe(401);
     expect(h.claims).toBe(1);
+  });
+
+  it("r7: a missing or bad signature makes no mainnet RPC call (the token check runs only after the signature verifies) and never claims the nonce", async () => {
+    const { default: nacl } = await import("tweetnacl");
+    const { buildMarketRegistrationMessage } = await import("@/lib/market-registration-auth");
+    const k = nacl.sign.keyPair(), other = nacl.sign.keyPair();
+    const deployer = new PublicKey(k.publicKey).toBase58();
+    const nonce = "550e8400-e29b-41d4-a716-446655440000";
+    const payload = { slab_address: kp(), mint_address: kp(), deployer, mainnet_ca: CONTROL, nonce };
+    const msg = buildMarketRegistrationMessage({ nonce, deployer, payload } as never);
+    const badSig = Buffer.from(nacl.sign.detached(msg, other.secretKey)).toString("base64"); // signed by a different key
+    const { POST } = await import("@/app/api/markets/route");
+    const send = (extra: Record<string, unknown>) => POST(new Request("http://localhost/api/markets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, ...extra }) }) as unknown as NextRequest);
+    expect((await send({ signature: badSig })).status).toBe(401);
+    expect((await send({})).status).toBe(400); // no signature at all
+    expect(h.rpcCalls).toBe(0);
+    expect(h.claims).toBe(0);
   });
 
   it("POOL-ONLY: an unreadable pool is refused (400), an RPC failure is a retryable 503; neither reaches the slab check", async () => {

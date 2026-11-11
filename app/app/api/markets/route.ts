@@ -1112,9 +1112,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // v2.2: the mainnet token-identity check runs HERE, after the signature is verified (no unauthenticated RPC) and BEFORE the nonce is
-    // claimed, so a retryable 503 (mainnet RPC down) does not burn the nonce: the client retries the same signed request. Any other
-    // verdict is applied at the usual place below. Unparseable keys are left to the 400s below.
+    // v2.2: the mainnet token-identity check runs HERE: only after the ed25519 signature has verified against the deployer key (a request
+    // with a missing or bad signature never reaches it, so it makes no mainnet RPC), and BEFORE the nonce is claimed, so a retryable 503
+    // (mainnet RPC down) does not burn the nonce and the client can retry the same signed request. A valid signature only proves the caller
+    // holds SOME keypair, so a self-signed or replayed request does still cost this RPC before the nonce claim rejects it (bounded by the
+    // general per-IP rate limit). Any other verdict is applied at the usual place below. Unparseable keys are left to the 400s below.
     if (isDevnetV22Enabled()) {
       let ca: string | null = null;
       let poolAddr: string | null = null;

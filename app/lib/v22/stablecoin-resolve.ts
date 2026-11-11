@@ -19,7 +19,24 @@ import { isDevnetV22Enabled } from "@/lib/v22/flag";
 import { isStablecoinMintAddress, stablecoinIdentityVerdict, type StablecoinTokenMeta } from "@/lib/v22/stablecoin-perps";
 
 const METAPLEX_METADATA_PROGRAM = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
-const SPL_TOKEN_PROGRAMS: ReadonlySet<string> = new Set(["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"]);
+const SPL_TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+const MINT_LEN = 82;
+const MINT_IS_INITIALIZED_OFF = 45;
+/** Token-2022 account-type byte (after the 165-byte base): 1 = Mint, 2 = Account. */
+const T22_ACCOUNT_TYPE_OFF = 165;
+
+/**
+ * Is this account an initialized mint (not merely owned by a token program: token accounts and multisigs are owned by it too)?
+ * SPL Token: exactly 82 bytes with is_initialized set. Token-2022: the same 82-byte base mint, or an extended account (> 165 bytes)
+ * whose account-type byte is 1 (Mint) and whose base mint is initialized.
+ */
+export function isMintAccount(owner: string, data: Uint8Array): boolean {
+  if (owner !== SPL_TOKEN_PROGRAM && owner !== TOKEN_2022_PROGRAM) return false;
+  if (data.length < MINT_LEN || data[MINT_IS_INITIALIZED_OFF] !== 1) return false;
+  if (data.length === MINT_LEN) return true;
+  return owner === TOKEN_2022_PROGRAM && data.length > T22_ACCOUNT_TYPE_OFF && data[T22_ACCOUNT_TYPE_OFF] === 1;
+}
 const WSOL = "So11111111111111111111111111111111111111112";
 
 export type StablecoinCheck =
@@ -78,7 +95,7 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 /** Thrown when a given mint account does not exist on mainnet or is not an SPL Token / Token-2022 mint. */
 class NotAMintError extends Error {}
 
-/** On-chain name/symbol per mint (base58). A mint whose metadata is absent / unreadable is simply left out. Throws on RPC failure, and NotAMintError when a mint account is missing or not owned by SPL Token / Token-2022. */
+/** On-chain name/symbol per mint (base58). A mint whose metadata is absent / unreadable is simply left out. Throws on RPC failure, and NotAMintError when a mint account is missing or is not an initialized SPL Token / Token-2022 mint (a token account or multisig is not). */
 async function readMintMetas(mints: string[], conn: Conn, timeoutMs: number): Promise<Record<string, StablecoinTokenMeta>> {
   const keys: PublicKey[] = [];
   for (const m of mints) {
@@ -92,7 +109,7 @@ async function readMintMetas(mints: string[], conn: Conn, timeoutMs: number): Pr
     // Metaplex first; when that account is absent OR does not parse, fall back to the Token-2022 metadata extension on the mint.
     const mpl = infos[2 * i + 1];
     const t22 = infos[2 * i];
-    if (!t22 || !SPL_TOKEN_PROGRAMS.has(t22.owner.toBase58())) throw new NotAMintError(m);
+    if (!t22 || !isMintAccount(t22.owner.toBase58(), new Uint8Array(t22.data))) throw new NotAMintError(m);
     const meta = (mpl ? parseMetaplexNameSymbol(new Uint8Array(mpl.data)) : null) ?? (t22 ? parseToken2022NameSymbol(new Uint8Array(t22.data)) : null);
     if (meta) out[m] = meta;
   });
