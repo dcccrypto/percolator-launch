@@ -1238,6 +1238,8 @@ export async function fetchPortfolioSnapshot(
 interface PortfolioCacheEntry {
   snapshot: PortfolioSnapshot;
   ts: number;
+  /** Start order of the scan that produced it; a late older scan never overwrites a newer one. */
+  seq?: number;
 }
 
 /** How long a cached snapshot is served to a NEW (non-forced) caller before a
@@ -1264,7 +1266,10 @@ const PORTFOLIO_CACHE_TTL_MS = 12_000;
 const PORTFOLIO_SEED_MAX_AGE_MS = 5 * 60_000;
 
 const portfolioSnapshotCache = new Map<string, PortfolioCacheEntry>();
-const portfolioInflight = new Map<string, Promise<PortfolioSnapshot>>();
+const portfolioInflight = new Map<string, { promise: Promise<PortfolioSnapshot>; startedAt: number }>();
+let portfolioScanSeq = 0;
+/** A scan still running after this long is treated as hung: the next periodic refresh starts a fresh read instead of joining it. */
+export const PORTFOLIO_HUNG_SCAN_MS = 100_000;
 
 export function portfolioCacheKey(walletBase58: string, network: string): string {
   return `${network}:${walletBase58}`;
@@ -1311,33 +1316,32 @@ export function loadPortfolioShared(
     }
   }
 
+  // A scan that is slow but working is JOINED, not replaced: the 30s refresh waits for it instead of piling up new scans.
+  // Only a scan that has run past its limit is passed over: an explicit refresh (Retry, after a close) after one load timeout,
+  // the periodic refresh after PORTFOLIO_HUNG_SCAN_MS (a scan that truly never answers must not block every later read).
   const existing = portfolioInflight.get(key);
-  if (existing) return existing;
+  if (existing) {
+    const age = Date.now() - existing.startedAt;
+    if (age < (force ? PORTFOLIO_LOAD_TIMEOUT_MS : PORTFOLIO_HUNG_SCAN_MS)) return existing.promise;
+  }
 
-  const p: Promise<PortfolioSnapshot> = fetcher()
+  const seq = ++portfolioScanSeq;
+  const startedAt = Date.now();
+  const promise: Promise<PortfolioSnapshot> = fetcher()
     .then((snapshot) => {
-      // A scan that was abandoned (it timed out and a fresh one replaced it) must not overwrite the newer data.
-      if (!abandonedScans.has(p)) portfolioSnapshotCache.set(key, { snapshot, ts: Date.now() });
+      // A late answer is still used, unless a scan that STARTED after this one has already landed newer data.
+      const cached = portfolioSnapshotCache.get(key);
+      if (!cached || cached.seq === undefined || cached.seq <= seq) {
+        portfolioSnapshotCache.set(key, { snapshot, ts: Date.now(), seq });
+      }
       return snapshot;
     })
     .finally(() => {
-      if (portfolioInflight.get(key) === p) portfolioInflight.delete(key);
-      abandonedScans.delete(p);
+      // Only free the slot if it is still this scan's: a superseded scan settling must not evict the newer one.
+      if (portfolioInflight.get(key)?.promise === promise) portfolioInflight.delete(key);
     });
-  portfolioInflight.set(key, p);
-  return p;
-}
-
-const abandonedScans = new WeakSet<Promise<PortfolioSnapshot>>();
-
-/**
- * Stop new callers joining a scan that never answered: the next loadPortfolioShared() for this key starts a fresh read.
- * The old one is left to settle on its own and its result is discarded. Only the scan the caller waited on is dropped,
- * never a newer one.
- */
-export function abandonPortfolioScan(key: string, scan: Promise<PortfolioSnapshot>): void {
-  abandonedScans.add(scan);
-  if (portfolioInflight.get(key) === scan) portfolioInflight.delete(key);
+  portfolioInflight.set(key, { promise, startedAt });
+  return promise;
 }
 
 /**
@@ -1361,9 +1365,9 @@ export function abandonPortfolioScan(key: string, scan: Promise<PortfolioSnapsho
 /** How long one portfolio scan may take before the hook reports a load error instead of loading forever. */
 export const PORTFOLIO_LOAD_TIMEOUT_MS = 25_000;
 
-function withTimeout<T>(p: Promise<T>, ms: number, onTimeout?: () => void): Promise<T> {
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const t = setTimeout(() => { onTimeout?.(); reject(new Error("Timed out reading your positions")); }, ms);
+    const t = setTimeout(() => reject(new Error("Timed out reading your positions")), ms);
     p.then(
       (v) => { clearTimeout(t); resolve(v); },
       (e: unknown) => { clearTimeout(t); reject(e); },
@@ -1490,14 +1494,16 @@ export function usePortfolio(enabled: boolean = true): PortfolioData {
         // Council r4 N5: a scan that never answers (RPC returning 503 / hanging behind retries) left the page on
         // "Loading" forever. Bound the wait: past PORTFOLIO_LOAD_TIMEOUT_MS this instance reports a load error
         // (retry offered), and the next 30s refresh tries again.
-        const scan = loadPortfolioShared(cacheKey, force, () =>
-          // Non-null: this closure only runs inside the `!publicKey` early-return
-          // guard above, same as every other publicKey! use in this file (TS
-          // can't narrow a closed-over value inside a nested function).
-          fetchPortfolioSnapshot(connection, publicKey!, programIds),
+        // The timeout only bounds THIS wait; the scan keeps running and a later refresh joins it (or starts a fresh one once it has outlived its limit).
+        const snapshot = await withTimeout(
+          loadPortfolioShared(cacheKey, force, () =>
+            // Non-null: this closure only runs inside the `!publicKey` early-return
+            // guard above, same as every other publicKey! use in this file (TS
+            // can't narrow a closed-over value inside a nested function).
+            fetchPortfolioSnapshot(connection, publicKey!, programIds),
+          ),
+          PORTFOLIO_LOAD_TIMEOUT_MS,
         );
-        // On timeout, drop the stuck scan from the shared in-flight slot so Retry and the next refresh start a fresh read.
-        const snapshot = await withTimeout(scan, PORTFOLIO_LOAD_TIMEOUT_MS, () => abandonPortfolioScan(cacheKey, scan));
         if (!cancelled) {
           setPositions(snapshot.positions);
           setTotalPnl(snapshot.totalPnl);
