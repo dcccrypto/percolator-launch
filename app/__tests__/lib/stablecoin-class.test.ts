@@ -238,7 +238,8 @@ describe("checkStablecoinUnderlying", () => {
     expect((warn as { suspect?: string }).suspect).toMatch(/USDUC/);
   });
 
-  it("an unreadable metadata account does not block a clean mint (defence in depth only)", async () => {
-    expect(await checkStablecoinUnderlying({ mainnetCa: CONTROL, conn: fakeConn(new Map(), { fail: true }) })).toEqual({ ok: true });
+  it("a failed metadata READ (RPC error) fails closed as retryable; an absent metadata account does not block a clean mint", async () => {
+    expect(await checkStablecoinUnderlying({ mainnetCa: CONTROL, conn: fakeConn(new Map(), { fail: true }) })).toEqual({ ok: false, kind: "unverifiable", retryable: true });
+    expect(await checkStablecoinUnderlying({ mainnetCa: CONTROL, conn: fakeConn(new Map()) })).toEqual({ ok: true });
   });
 });

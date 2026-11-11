@@ -118,6 +118,32 @@ describe("POST /api/markets", () => {
     expect(await errOf(res)).toMatch(/dollar stablecoin/i);
   });
 
+  it("r7: no pool and no mainnet_ca is refused (400) instead of skipping the check; v2.2 off is not", async () => {
+    const { POST } = await import("@/app/api/markets/route");
+    const res = await POST(postMarkets({ symbol: "OK" }));
+    expect(res.status).toBe(400);
+    expect(await errOf(res)).toMatch(/no token identity/i);
+    setV22(false);
+    vi.resetModules();
+    const off = await import("@/app/api/markets/route");
+    expect(await errOf(await off.POST(postMarkets({ symbol: "OK" })))).not.toMatch(/no token identity/i);
+  });
+
+  it("r7: the token-metadata layer fails closed: mainnet_ca only + RPC down is a retryable 503, not a pass", async () => {
+    const { POST } = await import("@/app/api/markets/route");
+    h.rpcDown = true;
+    const res = await POST(postMarkets({ mainnet_ca: CONTROL }));
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("5");
+  });
+
+  it.each([["USD+", "usdsfJbX78ktZUnoRC7dwvvQz7xH3WdkpGne76gdUia"], ["CASH", "CASHx9KJUStyftLFWGvEVf59SGeG9sh5FfcnZMVPCASH"], ["JupUSD", "JuprjznTrTSp2UFa3ZBUFgwdAmtZCq4MQCwysN55USD"]])("r7: %s mint as mainnet_ca: 400", async (_n, ca) => {
+    const { POST } = await import("@/app/api/markets/route");
+    const res = await POST(postMarkets({ mainnet_ca: ca }));
+    expect(res.status).toBe(400);
+    expect(await errOf(res)).toMatch(/dollar stablecoin/i);
+  });
+
   it("POOL-ONLY: an unreadable pool is refused (400), an RPC failure is a retryable 503; neither reaches the slab check", async () => {
     const { POST } = await import("@/app/api/markets/route");
     const missing = await POST(postMarkets({ dex_pool_address: kp() }));
@@ -221,6 +247,12 @@ describe("POST /api/oracle-keeper/register (hot-registers with the keeper)", () 
     const r = await hit({ slabAddress: kp(), mainnetCA: ca });
     expect(r.status).toBe(400);
     expect(r.error).toMatch(/dollar stablecoin/i);
+    expect(h.dbUpdates).toBe(0);
+  });
+  it("r7: metadata RPC failure fails closed (503), nothing written", async () => {
+    h.rpcDown = true;
+    const r = await hit({ slabAddress: kp(), mainnetCA: CONTROL, symbol: "OK" });
+    expect(r.status).toBe(503);
     expect(h.dbUpdates).toBe(0);
   });
   it("a client symbol that is a stable ticker is refused; a normal token reaches the DB write", async () => {

@@ -6,9 +6,10 @@
  * parser, the one the keeper prices with) and the mints' on-chain metadata (Metaplex PDA, or the Token-2022 metadata extension), then
  * applies the verified address list and the exact-ticker symbol/name rule.
  *
- * Failure policy: a request with a pool that cannot be resolved is REFUSED (never waved through, mainnet_ca or not), and a given mainnet_ca
- * must equal the pool's base mint; a metadata read that fails is
- * not (the address list already ran, the symbol layer is defence in depth).
+ * Failure policy (fail closed): a request with neither a pool nor a mainnet_ca has no token identity to check and is REFUSED; a request
+ * with a pool that cannot be resolved is REFUSED (never waved through, mainnet_ca or not); a given mainnet_ca must equal the pool's base
+ * mint; and an RPC failure while reading the token metadata is REFUSED as retryable (a mint whose metadata account simply does not exist
+ * is fine: the address list and the client symbol already ran).
  */
 import { Connection, PublicKey } from "@solana/web3.js";
 import { parseDexPool } from "@percolatorct/sdk";
@@ -26,7 +27,9 @@ export type StablecoinCheck =
   /** A pool AND a mainnet_ca were given and the pool's base mint is not that mint: the stated identity is not what the pool prices. */
   | { ok: false; kind: "mismatch" }
   /** Request with a pool whose tokens could not be read: `retryable` = the mainnet RPC failed (503), else the pool is missing / unsupported (400). */
-  | { ok: false; kind: "unverifiable"; retryable: boolean };
+  | { ok: false; kind: "unverifiable"; retryable: boolean }
+  /** Neither a pool nor a mainnet_ca was given: there is no token identity to check, so the registration is refused. */
+  | { ok: false; kind: "no-identity" };
 
 type Conn = Pick<Connection, "getMultipleAccountsInfo">;
 
@@ -113,6 +116,10 @@ export async function checkStablecoinUnderlying(input: StablecoinCheckInput): Pr
   if (stablecoinIdentityVerdict(clientMeta) === "block") return { ok: false, kind: "stablecoin" };
   if (isStablecoinMintAddress(input.mainnetCa)) return { ok: false, kind: "stablecoin" };
 
+  // No pool and no mainnet_ca: nothing here says which token the market prices, so it cannot be cleared. (The slab itself holds only the
+  // devnet collateral mint, never the mainnet underlying, so there is nothing on-chain to resolve it from either.)
+  if (!input.mainnetCa && !input.pool) return { ok: false, kind: "no-identity" };
+
   const timeoutMs = input.timeoutMs ?? 8_000;
   const conn: Conn = input.conn ?? new Connection(MAINNET_RPC_URL, "confirmed");
   const underlying = new Set<string>();
@@ -163,8 +170,18 @@ export async function checkStablecoinUnderlying(input: StablecoinCheckInput): Pr
       }
       return suspect ? { ok: true, suspect } : { ok: true };
     } catch {
-      return { ok: true }; // metadata unreadable: the address list already ran (defence in depth only)
+      // Fail closed: the metadata RPC read failed, so the token's on-chain symbol / name is unknown. Refuse, retryable.
+      return { ok: false, kind: "unverifiable", retryable: true };
     }
   }
   return { ok: true };
+}
+
+/**
+ * The registered pool vs the pool the slab pins on-chain (legacy config layout: `dexPool`, set by SetDexPool). `pinned` null = the slab pins
+ * none (never set, or a layout with no such field, e.g. the v17+ wrapper config), so there is nothing to contradict.
+ */
+export function slabPinnedPoolMismatch(registeredPool: string | null | undefined, pinnedPool: string | null | undefined): boolean {
+  if (!registeredPool || !pinnedPool) return false;
+  return registeredPool !== pinnedPool;
 }
