@@ -590,11 +590,18 @@ export async function middleware(request: NextRequest) {
   // this drops the nonce defense-in-depth layer, a deliberate trade for the
   // devnet playground's load speed. No per-request nonce → HTML is cacheable.
   const response = NextResponse.next();
-  addSecurityHeaders(response);
+  // The TradingView library's files carry their own, stricter CSP from next.config.ts (TV_FRAME_CSP:
+  // connect-src 'self', frame-ancestors 'self', data: fonts). A header set here would replace it, so
+  // leave CSP to next.config for that folder and add the rest.
+  addSecurityHeaders(response, undefined, { skipCsp: isChartingLibraryPath(request.nextUrl.pathname) });
   return response;
 }
 
-function addSecurityHeaders(response: NextResponse, nonce?: string) {
+function isChartingLibraryPath(pathname: string): boolean {
+  return pathname.startsWith("/charting_library/");
+}
+
+function addSecurityHeaders(response: NextResponse, nonce?: string, opts: { skipCsp?: boolean } = {}) {
   // CSP with nonce-based inline script protection
   // - 'unsafe-eval' REMOVED (issue #633): audited all 241 production chunks — zero eval(),
   //   new Function(), or string-arg setTimeout calls found. Wallet adapters (Phantom, Solflare)
@@ -658,7 +665,7 @@ function addSecurityHeaders(response: NextResponse, nonce?: string) {
     "base-uri 'self'",
   ].join("; ");
 
-  response.headers.set("Content-Security-Policy", csp);
+  if (!opts.skipCsp) response.headers.set("Content-Security-Policy", csp);
   // HSTS: enforce HTTPS for 2 years, include subdomains, allow preload list submission.
   // Vercel may add this at the edge, but explicit is defense-in-depth.
   response.headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");

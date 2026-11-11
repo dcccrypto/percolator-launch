@@ -37,7 +37,8 @@ function tvLibraryVersion(): string {
 
 /**
  * The same-origin chart iframe document (/charting_library/sameorigin.html) is a
- * static file the middleware matcher skips, so it gets its CSP here. It only
+ * static file that gets its CSP here (middleware.ts leaves the CSP header alone for
+ * /charting_library/ so this one is not replaced by the app-wide policy). It only
  * loads the library's own same-origin bundles; the datafeed runs in the parent
  * page.
  *  - No 'unsafe-eval': the bundles were checked (2026-10-03, v32.2.0) and the chart
