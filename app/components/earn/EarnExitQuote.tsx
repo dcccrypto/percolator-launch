@@ -32,18 +32,23 @@ export interface EarnExitQuoteProps {
   quoteLabel?: string;
   /** Button text once quoted (default "Withdraw"). */
   confirmLabel?: string;
+  /** What the user typed (amount + unit). When it changes after a quote, the quote was dropped by an edit, not by expiry. */
+  amountKey?: string;
   /** Plain "Step n of 2" line for a two-step withdrawal (request, then collect). */
   stepLabel?: string;
   /** Button text after a quote expired (default "Refresh the price"): never the stale amount. */
   refreshLabel?: string;
 }
 
-export function EarnExitQuote({ exit, decimals, symbol, canQuote, quoteLabel = 'See exit price', confirmLabel = 'Withdraw', stepLabel, refreshLabel = 'Refresh the price' }: EarnExitQuoteProps) {
+export function EarnExitQuote({ exit, decimals, symbol, canQuote, quoteLabel = 'See exit price', confirmLabel = 'Withdraw', stepLabel, refreshLabel = 'Refresh the price', amountKey }: EarnExitQuoteProps) {
   const { state, getQuote, confirm } = exit;
   // N4: confirm() rejects with StaleExitQuoteError when the quote expired or no longer matches; say so calmly.
   const [expired, setExpired] = useState(false);
+  // An edit after a quote needs a new quote, but nothing expired: its own flag, its own copy, the normal button label.
+  const [edited, setEdited] = useState(false);
   const onConfirm = async () => {
     setExpired(false);
+    setEdited(false);
     try {
       await confirm();
     } catch (e) {
@@ -53,14 +58,20 @@ export function EarnExitQuote({ exit, decimals, symbol, canQuote, quoteLabel = '
   };
   const onGetQuote = async () => {
     setExpired(false);
+    setEdited(false);
     await getQuote();
   };
   // A quote that times out (EXIT_QUOTE_MAX_AGE_MS) used to vanish without a word: say it expired.
   const prevPhase = useRef(state.phase);
+  const quotedKey = useRef(amountKey);
   useEffect(() => {
-    if (prevPhase.current === 'quoted' && state.phase === 'idle') setExpired(true);
+    if (prevPhase.current === 'quoted' && state.phase === 'idle') {
+      if (amountKey !== quotedKey.current) setEdited(true);
+      else setExpired(true);
+    }
+    if (state.phase === 'quoted') quotedKey.current = amountKey;
     prevPhase.current = state.phase;
-  }, [state.phase]);
+  }, [state.phase, amountKey]);
   const busy = state.phase === 'quoting' || state.phase === 'refreshing' || state.phase === 'sending';
   const quoted = state.phase === 'quoted' && state.quote !== null;
   return (
@@ -89,6 +100,9 @@ export function EarnExitQuote({ exit, decimals, symbol, canQuote, quoteLabel = '
             <p data-testid="earn-exit-dip" className="mt-1 text-[11px] text-[var(--text-secondary)]">{V22_COPY.earnExit.dipTolerance}</p>
           )}
         </div>
+      )}
+      {edited && !expired && !quoted && state.phase === 'idle' && (
+        <p data-testid="earn-exit-amount-changed" className="mb-2 text-[11px] text-[var(--text-secondary)]">{V22_COPY.earnExit.amountChanged}</p>
       )}
       {expired && !quoted && (
         <p data-testid="earn-exit-expired" className="mb-2 text-[11px] text-[var(--text-secondary)]">{V22_COPY.earnExit.quoteExpired}</p>

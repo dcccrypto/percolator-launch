@@ -155,14 +155,14 @@ function useOnSent(state: { phase: string; signature: string | null }, onSent?: 
 }
 
 /** v2.2 quote-first exit (own component so the v2.1 render path has no extra hook). */
-function ExitV22Step({ ex, shares, inputKey, estimate, flow, decimals, symbol, valid, onSent }: { ex: NonNullable<DepositWithdrawPanelProps['exitV22']>; shares: bigint; inputKey: string; estimate: bigint; flow: 'one-tx' | 'two-step'; decimals: number; symbol: string; valid: boolean; onSent?: () => void }) {
+function ExitV22Step({ ex, shares, inputKey, amountKey, estimate, flow, decimals, symbol, valid, onSent }: { ex: NonNullable<DepositWithdrawPanelProps['exitV22']>; shares: bigint; inputKey: string; amountKey: string; estimate: bigint; flow: 'one-tx' | 'two-step'; decimals: number; symbol: string; valid: boolean; onSent?: () => void }) {
   // Council GO1106-UX #1: `shares` is re-derived from the typed USDC at the live share price, so every background
   // poll that moved the price by a hair changed the share count, which is part of the quote key (F6), and wiped the
   // quote 2-4 s after it appeared. Hold the share count while what the user typed is unchanged.
   const stableShares = useLatchedShares(shares, inputKey);
   const exit = useEarnExitV22({ ...ex, shares: stableShares, mode: flow === 'one-tx' ? 'pair' : 'request', estimateAtoms: estimate });
   useOnSent(exit.state, onSent);
-  return <EarnExitQuote exit={exit} decimals={decimals} symbol={symbol} canQuote={valid && shares > 0n} stepLabel={flow === 'two-step' ? WC.stepRequest : undefined} />;
+  return <EarnExitQuote exit={exit} decimals={decimals} symbol={symbol} canQuote={valid && shares > 0n} amountKey={amountKey} stepLabel={flow === 'two-step' ? WC.stepRequest : undefined} />;
 }
 
 /**
@@ -345,8 +345,10 @@ export function DepositWithdrawPanel({
   const maxNow = pricing?.maxNowAtoms ?? null;
   const overMaxNow = tab === 'withdraw' && maxNow !== null && previewCollateral > maxNow;
   // The typed amount is more than the whole position: the request is for everything, and the user is told.
+  // Shares mode never clamps (the button stays disabled), so it gets its own "more than you have" note instead.
   const overClamped =
-    tab === 'withdraw' && rawAmount > 0n && (withdrawUnit === 'shares' ? rawAmount > userLpBalance : userWithdrawableAtoms > 0n && rawAmount > userWithdrawableAtoms);
+    tab === 'withdraw' && rawAmount > 0n && withdrawUnit !== 'shares' && userWithdrawableAtoms > 0n && rawAmount > userWithdrawableAtoms;
+  const overShares = tab === 'withdraw' && rawAmount > 0n && withdrawUnit === 'shares' && rawAmount > userLpBalance;
   const flow = withdrawFlow(cooldownSlots ?? 0n);
   // v2.2: shares are printed in the mint's own decimals, so the count matches the wallet's; the note survives only as the chain says it should
   // (lib/lp-share-wallet-note.ts lpShareWalletNoteV22).
@@ -744,9 +746,16 @@ export function DepositWithdrawPanel({
             shares for USDC IS the withdrawal), and 88 before it happens (max_now). */}
         {vaultAvailable && amountError === null && rawAmount > 0n && tab === 'withdraw' && (
           <div className="mb-4 space-y-2">
-            <p data-testid="earn-withdraw-receive" className="text-[12px] font-mono tabular-nums text-[var(--text)]">
-              {WC.receive(`${formatUsdc(previewCollateral, decimals)} ${collateralSymbol}`, formatShares(withdrawShares, shareDecimals))}
-            </p>
+            {!overShares && (
+              <p data-testid="earn-withdraw-receive" className="text-[12px] font-mono tabular-nums text-[var(--text)]">
+                {WC.receive(`${formatUsdc(previewCollateral, decimals)} ${collateralSymbol}`, formatShares(withdrawShares, shareDecimals))}
+              </p>
+            )}
+            {overShares && (
+              <p data-testid="earn-withdraw-over-shares" role="status" className="text-[11px] text-[var(--text-secondary)]">
+                {WC.overShares(formatShares(userLpBalance, shareDecimals))}
+              </p>
+            )}
             {overClamped && (
               <p data-testid="earn-withdraw-clamped" role="status" className="text-[11px] text-[var(--text-secondary)]">
                 {WC.clamped(`${formatUsdc(userWithdrawableAtoms, decimals)} ${collateralSymbol}`)}
@@ -846,7 +855,7 @@ export function DepositWithdrawPanel({
           </p>
         )}
         {tab === 'withdraw' && isDevnetV22Enabled() && exitV22 ? (
-          <ExitV22Step ex={exitV22} shares={withdrawShares} inputKey={`${amount}|${withdrawUnit}|${userLpBalance}`} estimate={previewCollateral} flow={flow} decimals={decimals} symbol={collateralSymbol} valid={isValid} onSent={() => handleExitSent(false)} />
+          <ExitV22Step ex={exitV22} shares={withdrawShares} inputKey={`${amount}|${withdrawUnit}|${userLpBalance}`} amountKey={`${amount}|${withdrawUnit}`} estimate={previewCollateral} flow={flow} decimals={decimals} symbol={collateralSymbol} valid={isValid} onSent={() => handleExitSent(false)} />
         ) : (
         <div className="flex gap-2">
           <GlowButton
