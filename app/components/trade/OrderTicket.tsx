@@ -84,6 +84,7 @@ import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { formatTokenAmount, toE6, normalizeTokenDecimals } from "@/lib/format";
 import { describeLiqPrice, liqPricePlainText, type LiqPriceDisplay } from "@/lib/liq-price-display";
 import { computeRiskLeverage, formatLeverageValue } from "@/lib/leverage-display";
+import { isEntryKnown } from "@/lib/entry-price-display";
 import { saveEntryPrice, getEntryPrice, clearEntryPrice, entryAfterTrade, getSavedEntry } from "@/lib/entry-price";
 import { takePositionChange, type PositionChange } from "@/lib/position-change";
 import { classifyOrderChange, orderResultBody } from "@/lib/order-result";
@@ -628,6 +629,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       })
     : null;
   const existingEntryKnown = existingResolved != null && existingResolved.source !== "unknown" && existingEntryPriceE6 > 0n;
+  // The Close tab's displayed entry / PnL need a RECORDED entry (server / cache); a back-solve is risk-math only (`existingEntryKnown`).
+  const existingRecordedEntryKnown = isEntryKnown(existingEntryPriceE6, existingResolved?.source);
   const lockedMargin = computePositionInitialMargin(existingPositionSize, existingEntryPriceE6, initialMarginBps);
   const availableBalance = userAccount ? (capital > lockedMargin ? capital - lockedMargin : 0n) : 0n;
   const effectiveBalance = userAccount ? availableBalance : (walletAtaBalance ?? 0n);
@@ -2063,8 +2066,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             previewUnavailable={closeView != null && !closeView.adlKnown}
             portfolioPk={userAccount?.pubkey}
             accountPending={accountPending}
-            entryPriceE6={existingEntryKnown ? existingEntryPriceE6 : 0n}
-            riskEntryPriceE6={existingEntryKnown ? existingRiskEntryE6 : 0n}
+            entryPriceE6={existingRecordedEntryKnown ? existingEntryPriceE6 : 0n}
+            riskEntryPriceE6={existingRecordedEntryKnown ? existingRiskEntryE6 : 0n}
             capital={capital}
             symbol={baseTicker}
             collateralSymbol={collateralSymbol}
@@ -2820,6 +2823,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           </div>
           {/* Council GO1106 (first-timer): "199366.68411 USDC" - 2 dp with thousands separators like every other amount. */}
           <div data-testid="buying-power" className="font-mono tabular-nums text-[var(--text)]">{accountPending || buyingPowerInfo === null ? "—" : `${formatTokenAmount(buyingPower, decimals, 2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} ${collateralSymbol}`}</div>
+          {buyingPowerInfo?.noBalance && !accountPending && (
+            <div data-testid="buying-power-nobalance" className="text-[9px] text-[var(--text-muted)]">No available balance</div>
+          )}
           {buyingPowerInfo?.capped && !accountPending && (
             <div data-testid="buying-power-capped" className="text-[9px] text-[var(--text-muted)]">Limited by market room</div>
           )}

@@ -144,3 +144,15 @@ describe("Buying power uses Max's units at any collateral decimals", () => {
     });
   }
 });
+
+describe("Buying power with no available balance", () => {
+  it("reads 0 and says why (Max may still show the market's room)", async () => {
+    setup({ capital: 0n, feeBps: 30n });
+    mocks.fillCaps = { maxFillAbs: 8_166_666n };
+    render(<OrderTicket slabAddress={SLAB} />);
+    await act(async () => {});
+    expect(bp()).toBe(0);
+    expect(screen.getByTestId("buying-power-nobalance").textContent).toMatch(/No available balance/);
+    expect(screen.queryByTestId("buying-power-capped")).toBeNull();
+  });
+});

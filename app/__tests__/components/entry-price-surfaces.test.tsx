@@ -236,7 +236,7 @@ describe("trade-terminal surfaces feed describeLiqPrice the entry SOURCE, not `e
   it("OrderTicket tracks the existing entry's source", () => {
     const src = read("OrderTicket.tsx");
     expect(src).toMatch(/hasResolvedEntry: existingEntryKnown,/);
-    expect(src).toMatch(/entryPriceE6=\{existingEntryKnown \? existingEntryPriceE6 : 0n\}/);
+    expect(src).toMatch(/entryPriceE6=\{existingRecordedEntryKnown \? existingEntryPriceE6 : 0n\}/);
   });
 });
 
@@ -277,5 +277,32 @@ describe("Portfolio Value keeps the on-chain value of a position whose entry is 
     render(<PortfolioPositionsView />);
     expect(valueText()).toBeCloseTo(capital + valuePnl, 1);
     expect(Math.abs(valueText() - capital)).toBeGreaterThan(Math.abs(valuePnl) / 2);
+  });
+});
+
+describe("Portfolio row: a covered position opened on another device still reads covered (liquidation is equity-based)", () => {
+  const longDerived = (): PortfolioPosition => {
+    const pos = build("2SewEcvf");
+    const size = pos.account.positionSize < 0n ? -pos.account.positionSize : pos.account.positionSize;
+    return {
+      ...pos,
+      liquidationPriceE6: 0n, // no price exists: the collateral covers the position
+      effectiveSize: size,
+      account: { ...pos.account, positionSize: size, capital: 1_000_000_000_000n },
+    } as PortfolioPosition;
+  };
+
+  it("derived entry + no liquidation price -> 'N% mgn' (covered), not the unknown dash", () => {
+    const pos = longDerived();
+    state.positions = [pos];
+    render(<PortfolioPositionsView />);
+    expect(screen.getAllByText(/% mgn/).length).toBeGreaterThan(0);
+  });
+
+  it("CONTROL: a truly unknown entry (nothing resolvable) does not claim covered", () => {
+    const pos = { ...longDerived(), account: { ...longDerived().account, pnl: 0n } } as PortfolioPosition;
+    state.positions = [pos];
+    render(<PortfolioPositionsView />);
+    expect(screen.queryAllByText(/% mgn/).length).toBe(0);
   });
 });

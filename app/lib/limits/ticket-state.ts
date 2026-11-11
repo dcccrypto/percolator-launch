@@ -164,13 +164,14 @@ export function buyingPowerAtoms(p: {
   /** Tightest market cap on the selected side in base q, or null when none applies. */
   marketMaxQ: bigint | null;
   priceE6: bigint | null | undefined;
-}): { atoms: bigint; capped: boolean } | null {
+}): { atoms: bigint; capped: boolean; noBalance?: boolean } | null {
   const { tradableAtoms, leverage, marketMaxQ, priceE6 } = p;
   if (!priceE6 || priceE6 <= 0n || !(leverage > 0) || tradableAtoms < 0n) return null;
   // EXACTLY Max's own sizing (OrderTicket displayMaxQ = oneMaxQ([marketMaxQ, balanceMaxQ(...)])), then valued the way the ticket values
   // any size: q x priceE6 / 1e6 is already collateral atoms (no decimals factor), so the two cannot diverge on any collateral decimals.
   const byBalanceQ = balanceMaxQ(tradableAtoms, leverage, priceE6);
-  if (byBalanceQ === null) return { atoms: 0n, capped: false };
+  // No available balance: nothing can be opened (Max may still show the market's room), so say 0 and why rather than quote the room.
+  if (byBalanceQ === null) return { atoms: 0n, capped: false, noBalance: true };
   const maxQ = oneMaxQ([marketMaxQ, byBalanceQ]) as bigint;
   return { atoms: (maxQ * priceE6) / 1_000_000n, capped: marketMaxQ !== null && marketMaxQ < byBalanceQ };
 }

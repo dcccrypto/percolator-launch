@@ -20,7 +20,7 @@ import {
 } from "@/lib/trading";
 import { onChainMarkE6, terminalPositionPnl } from "@/lib/position-pnl";
 import { bigintToFloat } from "@/lib/formatters";
-import { DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL, isEntryKnown } from "@/lib/entry-price-display";
+import { isEntryKnown } from "@/lib/entry-price-display";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import {
   computePositionLeverage,
@@ -425,7 +425,6 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               pnlUsd={pnlUsd}
               roe={roe}
               pnlIsKnown={pnlIsKnown}
-              isEstimate={pnlResult.isEstimate}
               pnlColor={pnlColor}
               pnlBarWidth={pnlBarWidth}
               hasValidMark={hasValidMark}
@@ -667,8 +666,6 @@ interface PnlSectionProps {
   /** False when entry price is unrecoverable, so `pnlTokens` is a placeholder
    *  zero rather than a real flat reading — see resolveEntryPrice. */
   pnlIsKnown: boolean;
-  /** PnL rests on a back-solved entry - label it "est.". */
-  isEstimate?: boolean;
   pnlColor: string;
   pnlBarWidth: number;
   hasValidMark: boolean;
@@ -685,7 +682,6 @@ const PnlSection: FC<PnlSectionProps> = ({
   pnlUsd,
   roe,
   pnlIsKnown,
-  isEstimate,
   pnlColor,
   pnlBarWidth,
   hasValidMark,
@@ -758,9 +754,6 @@ const PnlSection: FC<PnlSectionProps> = ({
               >
                 ({roe >= 0 ? "+" : ""}{roe.toFixed(1)}% ROE)
               </span>
-              {isEstimate && (
-                <span className="text-[9px] text-[var(--text-dim)]" title={DERIVED_ENTRY_TOOLTIP}>{ESTIMATE_LABEL}</span>
-              )}
             </div>
           ) : (
             <span

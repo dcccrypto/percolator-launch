@@ -3,7 +3,7 @@
 import { lotExpOf } from "@/lib/v22/lot";
 import { FC } from "react";
 import { bigintToFloat } from "@/lib/formatters";
-import { isExactEntrySource, DERIVED_ENTRY_TOOLTIP, ESTIMATE_LABEL } from "@/lib/entry-price-display";
+import { isExactEntrySource } from "@/lib/entry-price-display";
 import { onChainMarkE6, terminalPositionPnl } from "@/lib/position-pnl";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useLivePrice } from "@/hooks/useLivePrice";
@@ -116,9 +116,6 @@ export const ChartPnlBadge: FC<ChartPnlBadgeProps> = ({ slabAddress }) => {
       <div className="flex items-center gap-1.5 rounded-none border border-[var(--border)]/60 bg-[var(--bg)]/90 px-2 py-1 backdrop-blur-sm">
         <span className="text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]">PnL</span>
         <span className={`text-[10px] font-mono ${colorClass}`}>{display}</span>
-        {pnlResult.isEstimate && (
-          <span className="text-[9px] text-[var(--text-dim)]" title={DERIVED_ENTRY_TOOLTIP}>{ESTIMATE_LABEL}</span>
-        )}
       </div>
       {/* The badge group is itself the drag handle — DraggableChartBadges takes
           pointer capture on pointerdown — so stop pointerdown here, otherwise a
