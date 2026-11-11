@@ -8,7 +8,6 @@ import { parseWrapperConfigV17, V17_HEADER_LEN } from "@percolatorct/sdk";
 import { subscribeSlab, getSnapshot, applyOnChainPoll } from "@/lib/priceStore/priceStore";
 import { sanitizePriceE6 } from "@/lib/oraclePrice";
 import { UNKNOWN_ENTRY_TOOLTIP } from "@/lib/trading";
-import { ESTIMATE_LABEL } from "@/lib/entry-price-display";
 import { portfolioPositionPnl } from "@/lib/position-pnl";
 import { positionRowKeys, usePortfolio, type PortfolioPosition } from "@/hooks/usePortfolio";
 import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";

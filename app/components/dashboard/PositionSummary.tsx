@@ -66,8 +66,9 @@ function PositionCard({
   // #2660/#2671: keep the Entry cell's trust verdict aligned with the shared
   // live metric. Unknown entry still renders "--", never fake zero PnL.
   const entryDisplay = describeEntryPrice({
-    entryE6: pos.effectiveEntryPrice,
-    source: pos.entryPriceSource,
+    // Same live resolution as the PnL below: a position opened on this device shows its entry now, not after the next poll.
+    entryE6: live.entry,
+    source: live.entrySource,
     formatPrice: (p) => formatLotPriceE6(p, pos.lotExp ?? 0),
   });
   const hasValidOracle = markE6 > 0n;

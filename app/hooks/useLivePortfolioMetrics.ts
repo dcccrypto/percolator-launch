@@ -30,6 +30,9 @@ export interface LivePositionMetric {
   isEstimate: boolean;
   /** #3534: the PnL that adds to the position's capital in the account's value (differs from `pnl` only on a fully settled leg). */
   valuePnl: bigint;
+  /** Entry from the same live resolution as `pnl` (device cache read now), not the poll-time snapshot. */
+  entry: bigint;
+  entrySource: PortfolioPosition["entryPriceSource"];
 }
 
 export interface LivePortfolioMetrics {
@@ -148,6 +151,8 @@ export function useLivePortfolioMetrics(
         pnlPercent: live.roe ?? 0,
         pnlKnown: live.pnlKnown,
         isEstimate: live.isEstimate,
+        entry: live.entry,
+        entrySource: live.entrySource,
       };
     });
 

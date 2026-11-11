@@ -160,3 +160,47 @@ describe("N7 / R3-13: labels and copy", () => {
   });
 });
 
+
+describe("R7 review follow-ups: ticket copy and cleared size box", () => {
+  beforeEach(() => {
+    mocks.useUserAccount.mockReturnValue({ idx: 3, account: { capital: 10_540_000n, positionSize: 0n, entryPrice: 0n, pnl: 0n, feeCredits: 0n } });
+  });
+  it("a refused size does not come back after a market switch", async () => {
+    const { rerender } = render(<OrderTicket slabAddress={SLAB} />);
+    await waitFor(() => expect(screen.queryByTestId("growth-max-long")).not.toBeNull(), { timeout: 8000 });
+    fireEvent.change(sizeBox(), { target: { value: "-5" } });
+    expect(screen.getByTestId("trade-size-rejection").textContent).toMatch(/./);
+    rerender(<OrderTicket slabAddress="9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin" />);
+    await waitFor(() => expect(sizeBox().value).toBe(""));
+    expect(screen.queryByTestId("trade-size-rejection")).toBeNull();
+  });
+  it("a deposit the user typed is not called a cushion for price moves", async () => {
+    await mount();
+    fireEvent.change(sizeBox(), { target: { value: "100" } });
+    await waitFor(() => expect(screen.queryByTestId("deposit-amount-input")).not.toBeNull());
+    fireEvent.change(screen.getByTestId("deposit-amount-input"), { target: { value: "500" } });
+    const note = screen.getByTestId("fund-explain").textContent ?? "";
+    expect(note).toMatch(/[\d.]+ USDC extra that stays available in your account/);
+    expect(note).not.toMatch(/cushion for price moves/);
+  });
+  it("the Est. fill tooltip says what the estimate is (mark and base fee, no spread)", async () => {
+    await mount();
+    fireEvent.change(sizeBox(), { target: { value: "100" } });
+    await waitFor(() => expect(screen.queryByTestId("ticket-summary")).not.toBeNull());
+    const label = screen.getByText("Est. fill");
+    fireEvent.mouseEnter(label.querySelector("svg")!.parentElement!);
+    const tip = (await screen.findByRole("tooltip")).textContent ?? "";
+    expect(tip).toMatch(/base trading fee/);
+    expect(tip).not.toMatch(/and spread/);
+  });
+  it("the Liq. price tooltip names the Est. fill row, not an 'estimated entry'", async () => {
+    await mount();
+    fireEvent.change(sizeBox(), { target: { value: "100" } });
+    await waitFor(() => expect(screen.queryByTestId("ticket-summary")).not.toBeNull());
+    const label = screen.getByText("Liq. price");
+    fireEvent.mouseEnter(label.querySelector("svg")!.parentElement!);
+    const tip = (await screen.findByRole("tooltip")).textContent ?? "";
+    expect(tip).toMatch(/est\. fill price/);
+    expect(tip).not.toMatch(/estimated entry/);
+  });
+});

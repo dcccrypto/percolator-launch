@@ -776,9 +776,9 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
 
   // Resolve the chart Entry through the same display contract used by the
   // other position surfaces. v17/v18 does not persist entry_price on-chain:
-  // prefer the exact wallet-scoped cache, then allow a PnL-derived entry when
-  // resolveEntryPrice can establish one. source==="unknown" stays hidden —
-  // its numeric .entry is a risk-math fallback, not a trader-visible Entry.
+  // prefer the exact wallet-scoped cache or server entry. A back-solved
+  // ("derived") entry and source==="unknown" stay hidden: displayEntryE6 excludes them, and their numeric .entry is a
+  // risk-math fallback, not a trader-visible Entry.
   const entryPriceNum = (() => {
     const ua = realUserAccount;
     if (!ua) return null;
