@@ -30,9 +30,7 @@ describe("N11 /enter judge door is POST-only", () => {
 
   it("GET ?judge= is refused outright: it does not fall through to another door (pins the refusal branch)", async () => {
     const { GET } = await import("@/app/enter/route");
-    // A valid team door alongside ?judge= would mint a cookie if the GET-refusal branch were removed.
-    const ok = await GET(new NextRequest(`https://x.test/enter?team=${"t".repeat(40)}`));
-    expect(ok.headers.get("set-cookie")).toContain("pg_access=");
+    // A valid team code alongside ?judge= must not mint a cookie either.
     const res = await GET(new NextRequest(`https://x.test/enter?team=${"t".repeat(40)}&judge=anything`));
     expect(new URL(res.headers.get("location")!).pathname).toBe("/locked");
     expect(res.headers.get("set-cookie")).toBeNull();
@@ -72,8 +70,7 @@ describe("R3-12 dot-segment paths are gated", () => {
   it.each(bad)("isExempt(%s) is false", (p) => {
     expect(isExempt(p, "GET")).toBe(false);
   });
-  it("normal asset paths stay exempt", () => {
-    expect(isExempt("/images/logo.png", "GET")).toBe(true);
+  it("allowlisted build output stays exempt", () => {
     expect(isExempt("/_next/static/chunks/a.js", "GET")).toBe(true);
   });
 
@@ -81,7 +78,7 @@ describe("R3-12 dot-segment paths are gated", () => {
     const { config } = await import("@/middleware");
     const re = new RegExp("^" + config.matcher[0] + "$");
     for (const p of bad) expect(re.test(p), p).toBe(true);
-    for (const p of ["/images/logo.png", "/icons/a.svg", "/_next/static/x.js", "/charting_library/a/b.js", "/favicon.ico"]) {
+    for (const p of ["/_next/static/x.js", "/_next/image"]) {
       expect(re.test(p), p).toBe(false);
     }
   });

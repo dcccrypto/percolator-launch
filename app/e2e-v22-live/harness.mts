@@ -141,7 +141,7 @@ export async function installTestWallet(page: Page, kp: Keypair, opts: { autoCon
   return log;
 }
 
-/** The preview's tester-link secret (`/enter?team=`), from the environment only; never written anywhere. */
+/** The preview's tester-link secret (POSTed to `/enter`), from the environment only; never written anywhere. */
 function teamSecret(): string {
   const v = process.env.E2E_TEAM_SECRET?.trim();
   if (!v) throw new Error("set E2E_TEAM_SECRET (the preview's team bypass secret) in the environment");
@@ -189,7 +189,9 @@ export async function openSession(flow: string, opts: { keypair?: string; autoCo
   // tsx keeps function names via an esbuild `__name` helper; functions handed to page.evaluate need it in the page.
   await page.addInitScript("globalThis.__name = globalThis.__name || ((f) => f);");
   const log = await installTestWallet(page, kp, { autoConnect: opts.autoConnect });
-  await page.goto(`${BASE_URL}/enter?team=${encodeURIComponent(teamSecret())}`, { waitUntil: "domcontentloaded" });
+  // POST only: the team code never rides in a URL. The context's request client shares the page's cookie jar.
+  await ctx.request.post(`${BASE_URL}/enter`, { form: { team: teamSecret() } });
+  await page.goto(`${BASE_URL}/`, { waitUntil: "domcontentloaded" });
   await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => {});
   let n = 0;
   const shot = async (name: string) => {

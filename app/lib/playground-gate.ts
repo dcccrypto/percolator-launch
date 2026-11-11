@@ -10,17 +10,20 @@
  * cannot hold a browser cookie and which authenticates itself:
  *
  *   /enter, /locked             the way in, and the door
- *   /_next/*, /_vercel/*        framework assets, Vercel analytics beacons
- *   /images/*, /icons/*, /audio/*   public/ asset folders
- *   /token-metadata/*           on-chain metadata URIs (wallets/explorers fetch these server-side)
- *   /charting_library/*, /tv-theme/*   the TradingView chart library's static files and our
- *                               theme CSS for it (loaded inside the chart iframe). Chart DATA
- *                               is /api/* and stays gated.
+ *   /_next/static/*             hashed build output (JS/CSS/fonts the door page loads)
+ *   /_next/image                the image optimiser (exact path)
+ *   /icon.png, /robots.txt, /sitemap.xml, /opengraph-image, /twitter-image
+ *                               the page icon the door page links, and crawler / link-preview routes
+ *   /token-metadata/sim-usdc.json, /token-metadata/sim-usdc.svg
+ *                               on-chain metadata URI (wallets/explorers fetch it server-side)
+ *   GET/HEAD /_vercel/insights/script.js, POST /_vercel/insights/view and /event
+ *                               Vercel Web Analytics (opt-in); exact paths only
  *   GET/HEAD /<16 hex>/script.js   the hashed Vercel Web Analytics script (#2826); that exact shape only
- *   top-level files by extension   e.g. /chart-empty-state.svg. ONLY top-level: a nested
- *                               /trade/x.png would otherwise render the [slab] page shell.
- *   favicon/icon, robots.txt, sitemap.xml, opengraph-image, twitter-image, manifest
- *   /.well-known/*
+ *
+ * Exemptions are an explicit allowlist of exact paths (plus /_next/static/). There are NO pattern
+ * exemptions (no file-extension, /.well-known/, /_vercel/ or public-folder prefixes): anything else,
+ * including /x.txt, /trade.png, /favicon.ico, /.well-known/x and every public/ asset, needs a session.
+ * Logged-in users get public/ assets through the normal cookie check.
  *   GET  /api/health            uptime monitoring; returns only {status,rpc,indexer,ts}
  *   GET  /api/playground/registered-markets
  *                               polled by the oracle keeper (NAT'd, cookie-less); payload is
@@ -44,40 +47,33 @@ export const ENTER_PATH = "/enter";
 
 export type GateDecision = "pass" | "redirect-locked" | "unauthorized";
 
-/** A single top-level segment ending in a static extension (public/ root files). */
-const TOP_LEVEL_STATIC_RE =
-  /^\/[^/]+\.(?:svg|png|jpg|jpeg|gif|webp|avif|ico|css|js|mjs|map|woff2?|ttf|otf|eot|mp3|ogg|wav|webm|mp4|txt|xml|webmanifest)$/i;
-
 /** Vercel Web Analytics' hashed first-party script path (#2826). Exactly one 16-hex segment. */
 const VERCEL_ANALYTICS_SCRIPT_RE = /^\/[0-9a-f]{16}\/script\.js$/;
 
+/** Exact paths any method may fetch without a session. */
 const EXEMPT_EXACT = new Set([
   ENTER_PATH,
   LOCKED_PATH,
-  "/favicon.ico",
   "/icon.png",
   "/robots.txt",
   "/sitemap.xml",
-  "/manifest.webmanifest",
   "/opengraph-image",
   "/twitter-image",
   // Next image optimiser: exact path only (its ?url= query is not part of the pathname).
   "/_next/image",
+  // On-chain token metadata URI + its image (public/token-metadata); fetched by wallets/explorers.
+  "/token-metadata/sim-usdc.json",
+  "/token-metadata/sim-usdc.svg",
 ]);
 
-const EXEMPT_PREFIXES = [
-  // Static build output only; a blanket "/_next/" also exempted /_next/image/x, /_next/data etc. (Council r5 #6).
-  "/_next/static/",
-  "/_vercel/",
-  "/.well-known/",
-  "/token-metadata/",
-  "/images/",
-  "/icons/",
-  "/audio/",
-  // TradingView chart library (static, build-time fetched) + our theme CSS for it.
-  // The chart's same-origin iframe loads these; data stays gated (/api/*).
-  "/charting_library/",
-  "/tv-theme/",
+/** Static build output only; the sole prefix exemption. */
+const EXEMPT_PREFIXES = ["/_next/static/"];
+
+/** Vercel Web Analytics (opt-in), exact paths by method. */
+const EXEMPT_VERCEL_INSIGHTS: ReadonlyArray<{ methods: readonly string[]; path: string }> = [
+  { methods: ["GET", "HEAD"], path: "/_vercel/insights/script.js" },
+  { methods: ["POST"], path: "/_vercel/insights/view" },
+  { methods: ["POST"], path: "/_vercel/insights/event" },
 ];
 
 /** Server-to-server API routes, by method. Each authenticates itself (see header). */
@@ -111,8 +107,7 @@ export function isExempt(pathname: string, method: string): boolean {
   }
   // Hashed Vercel Analytics script: read-only methods, exact shape, nothing else nested.
   if ((m === "GET" || m === "HEAD") && VERCEL_ANALYTICS_SCRIPT_RE.test(pathname)) return true;
-  // Top-level static files only — never nested, never under /api.
-  return TOP_LEVEL_STATIC_RE.test(pathname);
+  return EXEMPT_VERCEL_INSIGHTS.some((e) => e.path === pathname && e.methods.includes(m));
 }
 
 let warnedNoSecret = false;

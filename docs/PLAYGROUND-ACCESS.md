@@ -44,11 +44,12 @@ re-copy the fixture if `main` ever changes the format, and bump both sides to `:
 
 ## Team door
 
-So the team is never locked out: visit `/enter?team=<PLAYGROUND_TEAM_BYPASS_SECRET>` (or POST a form
-field `team`). The secret is compared in constant time server-side and issues a normal 24 h session.
+So the team is never locked out: POST a form field `team` to `/enter`
+(`curl -d team=<PLAYGROUND_TEAM_BYPASS_SECRET> https://<host>/enter`). `GET /enter?team=…` is refused
+(303 `/locked`, no cookie). The secret is compared in constant time server-side and issues a normal 24 h session.
 Team sessions carry a fingerprint of the team secret, so **rotating or unsetting
-`PLAYGROUND_TEAM_BYPASS_SECRET` revokes every team session at once**. The query string ends up in
-browser history and request logs — use it from your own browser, and rotate it if it is shared.
+`PLAYGROUND_TEAM_BYPASS_SECRET` revokes every team session at once**. It never rides in a URL (history, logs,
+Referer); rotate it if it is shared.
 There are no wallet or email allowlists in code.
 
 Hackathon judges have their own revocable door (POST `/enter` with `judge`) — see [PLAYGROUND-JUDGE-ACCESS.md](./PLAYGROUND-JUDGE-ACCESS.md).
@@ -77,7 +78,7 @@ fails if the exempt set changes, so a new route is gated by default. Admin calls
 1. Set `PLAYGROUND_ACCESS_SECRET` (same value) on **both** Vercel projects, and
    `PLAYGROUND_TEAM_BYPASS_SECRET` on `percolator-playground`. Leave `PLAYGROUND_GATE_ENABLED` unset.
 2. Deploy `playground` (this lock, gate off) and `main` (the gate page).
-3. Team: `/enter?team=…` → confirm you land on `/` with a `pg_access` cookie.
+3. Team: POST `/enter` with `team` → confirm you land on `/` with a `pg_access` cookie.
 4. A cohort member: percolator.trade/playground → sign in → lands on the app.
 5. Set `PLAYGROUND_GATE_ENABLED=true` on `percolator-playground`, redeploy, check a private window is
    sent to `/locked` and `/api/markets` 401s, and that the keeper is still pricing.
