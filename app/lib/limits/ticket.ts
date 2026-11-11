@@ -297,7 +297,10 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
   }
 
   // ── Devnet v2.2: the deployed wrapper's clip + growth gate on the size that FILLS (QA LEV-8) ──────────────
-  if (i.growth && !growth?.reducing) {
+  // The room / collateral caps (growthCapQ, growthRoomQ) describe the SIDE, not the typed order: they are derived whatever size is typed, so
+  // buying power and the Max label do not jump to wallet x leverage the moment the typed order only reduces. Only the order-specific
+  // checks (the gate, the guard refusal, the band halt) are skipped for a reduce.
+  if (i.growth) {
     const params = {
       view: i.growth,
       direction: i.direction,
@@ -327,7 +330,7 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
       out.growthCapQ = growthFillCapQ({ ...params, takerEquity: capEquity });
     }
     if (i.takerEquity != null) {
-      if (i.sizeQ > 0n && !growth?.closed) {
+      if (i.sizeQ > 0n && !growth?.closed && !growth?.reducing) {
         const gate = growthGate({ ...params, askQ: i.sizeQ });
         out.growthGate = gate;
         const fmt = i.format;
@@ -360,7 +363,7 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
       }
       for (const c of caps) if (out.growthCapQ == null || c < out.growthCapQ) out.growthCapQ = c;
       if (fill !== null && (out.growthRoomQ == null || fill < out.growthRoomQ)) out.growthRoomQ = fill;
-      if (i.sizeQ > 0n && growth) {
+      if (i.sizeQ > 0n && growth && !growth.reducing) {
         const signed = i.direction === "long" ? growth.fillQ : -growth.fillQ;
         // Equity after the fill's fee (the program checks after the fill); unknown equity skips the leverage check only.
         const notional = (growth.fillQ * gv.input.priceE6) / 1_000_000n;
