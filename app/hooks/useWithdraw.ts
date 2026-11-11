@@ -25,7 +25,7 @@ import { assertKnownProgram } from "@/lib/programAllowlist";
 import { humanizeError, UserFacingError, userFacingMessage } from "@/lib/errorMessages";
 import { fetchPortfolioIdentity, defaultCrankObservations } from "@/lib/v18-wire";
 import { computePositionInitialMargin, estimateEntryFromPnl } from "@/lib/trading";
-import { getEntryPrice } from "@/lib/entry-price";
+import { getCurrentEntry } from "@/lib/entry-price";
 import { isSentinelValue } from "@/lib/health";
 import {
   WithdrawRefusal,
@@ -321,7 +321,9 @@ export function useWithdraw(slabAddress: string) {
               // lets this pre-check's over-withdraw guard pass an amount that
               // then reverts on-chain. If no entry price can be established at
               // all, fail CLOSED (locked = full capital) rather than open.
-              const cachedEntryPrice = getEntryPrice(slabAddress, 0, wallet.publicKey.toBase58());
+              // Risk math (locked margin): the engine's basis (booked price), and only while the cached record still describes this
+              // position (size check; `positionSize` is the leg's basis, the pre-check is best effort and the chain enforces).
+              const cachedEntryPrice = getCurrentEntry(slabAddress, 0, wallet.publicKey.toBase58(), positionSize).riskEntryE6;
               // v17 markEwmaE6 is already post-inversion (wrapper compose_price_e6): no second invert.
               const wrapperOracleE6 = onChainMarkE6(mktConfig, true) ?? 0n;
               const safePnlForEstimate = isSentinelValue(portfolio.pnl) ? 0n : portfolio.pnl;

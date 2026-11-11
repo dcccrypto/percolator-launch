@@ -121,7 +121,7 @@ import { PositionsBar } from "@/components/layout/PositionsBar";
 import { ChartPnlBadge } from "@/components/trade/ChartPnlBadge";
 import { PositionsDock } from "@/components/trade/PositionsDock";
 import { computePnlCardStats } from "@/lib/pnl-card";
-import { onChainMarkE6, portfolioPositionPnl, terminalPositionPnl, valueAtMark } from "@/lib/position-pnl";
+import { computePositionPnl, onChainMarkE6, portfolioPositionPnl, terminalPositionPnl, valueAtMark } from "@/lib/position-pnl";
 import { computeEngineLiqPrice } from "@/lib/liquidation-risk";
 import { parseAssetAdlFactors } from "@/lib/v17-adl";
 import { computeMarginCushion } from "@/lib/liquidation-risk";
@@ -175,7 +175,11 @@ const usd = (atoms: bigint | null): string => {
 
 function setup(s: Scenario): { pos: PortfolioPosition } {
   localStorage.clear();
-  if (s.cached > 0n) saveEntryPrice(SLAB, 0, s.cached, undefined, OWNER.toBase58());
+  if (s.cached > 0n) {
+    // r8: the entry counts only for the size it was saved for: the leg's ADL-effective size (the one every surface resolves).
+    const eff = computePositionPnl({ basisQ: s.basis, aBasis: s.aBasis, epochSnap: s.epochSnap ?? 0n, adlFactors: s.factors as never, markE6: s.mark, onChainPnl: 0n, initialMarginBps: 1000n, capital: 0n }).effectiveSize;
+    saveEntryPrice(SLAB, 0, s.cached, undefined, OWNER.toBase58(), eff ?? undefined);
+  }
   h.priceE6 = s.mark;
   h.adlFactors = s.factors;
   h.rawOnChainE6 = s.rawOnChain;

@@ -53,6 +53,13 @@ export interface TicketLimitsInput {
    * evaluated on the size that will actually fill (lib/v22/growth-gate.ts) and replaces the slider-based leverage check.
    */
   takerEquity?: bigint | null;
+  /**
+   * The equity the Max / size clamp is bounded by: `takerEquity` plus every deposit the wallet could bundle with the order. It must NOT
+   * depend on the order (size, leverage, whether it needs a deposit): `takerEquity` is null exactly when a deposit is bundled, so
+   * bounding Max by it alone made Max and Buying power switch formula (and fall as leverage rose) the moment a lower leverage needed
+   * a deposit. Absent = `takerEquity` (no deposit possible). Never used for the order's own gate check (that stays on `takerEquity`).
+   */
+  maxEquity?: bigint | null;
   /** Band market: the program's exact minimum leg in Q (`bandMinLegExactQ`, fractional lots); a fill that would leave a smaller leg is refused (113). */
   minLegQ?: bigint | null;
   /** The smallest add the ticket can place (Q): one whole lot on a lot market, the 4 dp display step otherwise. Below it a side reads full. */
@@ -90,6 +97,11 @@ export interface TicketLimits {
   growthGate: GrowthGateResult | null;
   /** The most that can be ordered on this side now (clip AND gate); null when growth does not constrain. */
   growthCapQ: bigint | null;
+  /**
+   * The part of `growthCapQ` that is MARKET ROOM (side headroom, the leverage guard's fill cap), not a collateral limit. The ticket's
+   * "Limited by market room" label is true only when this binds; `growthCapQ` also carries the account's equity bound.
+   */
+  growthRoomQ: bigint | null;
   stepDown: {
     maxLeverage: number;
     stepped: boolean;
@@ -115,6 +127,7 @@ const NONE: TicketLimits = {
   growth: null,
   growthGate: null,
   growthCapQ: null,
+  growthRoomQ: null,
   stepDown: null,
   issues: [],
 };
@@ -292,7 +305,16 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
       takerEquity: i.takerEquity ?? 0n,
       quoteFeeBps: out.fee?.requestedBps ?? 0n,
     };
-    if (i.takerEquity == null) {
+    // The cap's equity: the order-independent one when given (see TicketLimitsInput.maxEquity), else the gate's.
+    const capEquity = i.maxEquity ?? i.takerEquity ?? null;
+    {
+      const side = i.direction === "long" ? i.growth.long : i.growth.short;
+      if (side.growthOn) {
+        const closing = (i.direction === "long" ? i.takerPosQ < 0n : i.takerPosQ > 0n) ? (i.takerPosQ < 0n ? -i.takerPosQ : i.takerPosQ) : 0n;
+        out.growthRoomQ = closing + (side.closed ? 0n : (side.headroomQ ?? 0n));
+      }
+    }
+    if (capEquity == null) {
       // M9: a first trade or a funding-mode order (no account yet or a bundled deposit, so equity is unknown) cannot run the equity gate, but the program still clips the open to the side's
       // room. Without this cap the Max and the size clamp ignored the room and the quote (deposit, margin, fee) priced the whole ask.
       const side = i.direction === "long" ? i.growth.long : i.growth.short;
@@ -301,8 +323,10 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
         out.growthCapQ = closing + (side.closed ? 0n : (side.headroomQ ?? 0n));
       }
     }
+    if (capEquity != null) {
+      out.growthCapQ = growthFillCapQ({ ...params, takerEquity: capEquity });
+    }
     if (i.takerEquity != null) {
-      out.growthCapQ = growthFillCapQ(params);
       if (i.sizeQ > 0n && !growth?.closed) {
         const gate = growthGate({ ...params, askQ: i.sizeQ });
         out.growthGate = gate;
@@ -326,8 +350,8 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
       const caps: bigint[] = [];
       const fill = levGuardMaxFillQV22(gv.limits, gv.input, i.direction, i.takerPosQ);
       if (fill !== null) caps.push(fill);
-      if (i.takerEquity != null) {
-        const pos = levGuardMaxPositionQV22(gv.limits, i.takerEquity, gv.input.priceE6);
+      if (capEquity != null) {
+        const pos = levGuardMaxPositionQV22(gv.limits, capEquity, gv.input.priceE6);
         if (pos !== null) {
           // |taker after| <= pos: a long may move the position up to +pos, a short down to -pos.
           const room = i.direction === "long" ? pos - i.takerPosQ : pos + i.takerPosQ;
@@ -335,6 +359,7 @@ export function deriveTicketLimits(i: TicketLimitsInput): TicketLimits {
         }
       }
       for (const c of caps) if (out.growthCapQ == null || c < out.growthCapQ) out.growthCapQ = c;
+      if (fill !== null && (out.growthRoomQ == null || fill < out.growthRoomQ)) out.growthRoomQ = fill;
       if (i.sizeQ > 0n && growth) {
         const signed = i.direction === "long" ? growth.fillQ : -growth.fillQ;
         // Equity after the fill's fee (the program checks after the fill); unknown equity skips the leverage check only.

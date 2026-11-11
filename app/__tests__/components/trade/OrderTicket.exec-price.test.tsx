@@ -122,7 +122,7 @@ const effectiveOf = (priceE6: bigint, fee = FEE) =>
   effectivePriceE6(execFillFromLogs(landed(priceE6, fee).meta.logMessages, WALLET, { market: new PublicKey(SLAB) })!, BASE_BPS)!;
 
 describe("OrderTicket: the price shown and saved is what the trader effectively paid (M7)", () => {
-  it("the result line shows booked + the fee's spread part (above the mark, not the matcher quote); the saved ENTRY is the BOOKED price, so uPnL is 0 at an unchanged mark (N-1)", async () => {
+  it("the result line shows booked + the fee's spread part (above the mark, not the matcher quote); the saved ENTRY is that price paid, the booked price is kept for risk math (r8)", async () => {
     withPosition(0n);
     mocks.change = { beforeQ: 0n, afterQ: FILLED };
     mocks.getTransaction.mockResolvedValue(landed(BOOKED));
@@ -132,14 +132,19 @@ describe("OrderTicket: the price shown and saved is what the trader effectively 
     const eff = effectiveOf(BOOKED);
     expect(eff > BOOKED).toBe(true);
     expect(eff < BOOKED + 1_000_000n).toBe(true); // and it is not the matcher's quote either
-    // N-1: capital is already net of the fee/spread; the engine measures pnl from the BOOKED price. Saving the effective price as the
-    // entry would count the spread twice (capital AND q x (mark - entry)).
-    expect(getSavedEntry(SLAB, 0, W)).toMatchObject({ entryPriceE6: BOOKED, sizeQ: FILLED });
-    expect(getSavedEntry(SLAB, 0, W)?.entryPriceE6).not.toBe(eff);
+    // r8 (owner decision): the entry the surfaces show is the price actually paid (the same one the toast shows), so PnL is net of the
+    // spread. The booked price is stored beside it: the engine's basis, which RISK math (liquidation price, equity) keeps, because the
+    // spread already left capital as a fee.
+    expect(getSavedEntry(SLAB, 0, W)).toMatchObject({ entryPriceE6: eff, bookedPriceE6: BOOKED, sizeQ: FILLED, pending: false });
     const ONE = 1_000_000_000_000_000n;
-    const pnlAt = (entry: bigint) => computePositionPnl({ basisQ: FILLED, aBasis: ONE, adlFactors: { aLong: ONE, aShort: ONE }, markE6: BOOKED, cachedEntryE6: entry, onChainPnl: 0n, initialMarginBps: 1000n, capital: 1_000_000_000n });
-    expect(pnlAt(getSavedEntry(SLAB, 0, W)!.entryPriceE6).unrealizedPnl).toBe(0n);
-    expect(pnlAt(eff).unrealizedPnl! < 0n).toBe(true); // control: the effective price as entry would book a phantom loss
+    const saved = getSavedEntry(SLAB, 0, W)!;
+    const pnlOf = computePositionPnl({
+      basisQ: FILLED, aBasis: ONE, adlFactors: { aLong: ONE, aShort: ONE }, markE6: BOOKED, cachedEntryE6: saved.entryPriceE6, cachedRiskEntryE6: saved.bookedPriceE6,
+      cachedEntryCheck: { sizeQ: saved.sizeQ, pending: saved.pending }, onChainPnl: 0n, initialMarginBps: 1000n, capital: 1_000_000_000n,
+    });
+    expect(pnlOf.unrealizedPnl! < 0n).toBe(true); // displayed: gross of nothing, the spread is in it
+    expect(pnlOf.riskEntry).toBe(BOOKED); // risk: the engine's basis
+    expect(pnlOf.riskUnrealizedPnl).toBe(0n); // the spread is not counted a second time in the value sums
     const line = screen.getByText(/Opened .* at /);
     expect(line.textContent).toContain((Number(eff) / 1e6).toFixed(2));
     expect(line.textContent).not.toContain("1.20");
@@ -159,7 +164,7 @@ describe("OrderTicket: the price shown and saved is what the trader effectively 
     expect(line.textContent).not.toMatch(/ at /);
   });
 
-  it("an add averages with the BOOKED price of this fill", async () => {
+  it("an add averages the saved entry with the price PAID on this fill (the booked prices are averaged beside it for risk math)", async () => {
     saveEntryPrice(SLAB, 0, 90_000_000n, 3, W, FILLED);
     withPosition(FILLED, 1_000_000n);
     mocks.change = { beforeQ: FILLED, afterQ: 2n * FILLED };
@@ -167,7 +172,8 @@ describe("OrderTicket: the price shown and saved is what the trader effectively 
     render(<OrderTicket slabAddress={SLAB} />);
     await submit("5");
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
-    expect(getSavedEntry(SLAB, 0, W)?.entryPriceE6).toBe((90_000_000n + BOOKED) / 2n);
+    expect(getSavedEntry(SLAB, 0, W)?.entryPriceE6).toBe((90_000_000n + effectiveOf(BOOKED)) / 2n);
+    expect(getSavedEntry(SLAB, 0, W)?.bookedPriceE6).toBe((90_000_000n + BOOKED) / 2n);
   });
 
   it("F3 / probe C: the long on the book was closed on another device, this ticket still RENDERS it (+1), and a short is opened here: the MEASURED size before the trade (0) is used, so no result is fabricated and the new short gets its own book", async () => {

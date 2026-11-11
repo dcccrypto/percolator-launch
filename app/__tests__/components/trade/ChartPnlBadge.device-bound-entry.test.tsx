@@ -107,7 +107,7 @@ function asSecondDevice() {
 /** The browser that placed the trade. */
 function asTradingDevice() {
   localStorage.clear();
-  saveEntryPrice(SLAB, IDX, TRUE_ENTRY_E6, 5, OWNER.toBase58());
+  saveEntryPrice(SLAB, IDX, TRUE_ENTRY_E6, 5, OWNER.toBase58(), POSITION_SIZE); // the EFFECTIVE size (the deleveraged variant is 2x raw at half)
 }
 
 describe("ChartPnlBadge resolves its entry like every other position surface", () => {

@@ -60,7 +60,7 @@ beforeEach(() => {
   localStorage.clear();
   // 10x long: 1 unit at $100 on 10 USDC (mm 5% / im 10%). Engine liquidation at 94.7368.
   h.account = acct({ capital: 10n * E6, positionSize: 1n * E6 });
-  saveEntryPrice("s", 0, 100n * E6, 10, OWNER.toBase58());
+  saveEntryPrice("s", 0, 100n * E6, 10, OWNER.toBase58(), 1n * E6);
 });
 
 const banner = () => document.querySelector("[data-severity]");

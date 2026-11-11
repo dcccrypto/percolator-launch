@@ -42,7 +42,10 @@ vi.mock("@/hooks/useMarketInfo", () => ({ useMarketInfo: () => ({ market: { symb
 vi.mock("@/hooks/useEngineState", () => ({ useEngineState: () => ({ engine: null, insuranceBalance: 0n }) }));
 vi.mock("@/lib/mock-mode", () => ({ isMockMode: () => false }));
 vi.mock("@/lib/mock-trade-data", () => ({ isMockSlab: () => false, getMockUserAccount: () => null }));
-vi.mock("@/lib/entry-price", () => ({ getEntryPrice: () => 1_000_000n }));
+vi.mock("@/lib/entry-price", async (orig) => ({
+  ...(await orig<object>()),
+  getSavedEntry: () => ({ entryPriceE6: 1_000_000n, leverage: null, sizeQ: 40_000_000n, bookedPriceE6: 1_000_000n, pending: false }),
+}));
 vi.mock("@/components/share/PnlShareButton", () => ({
   PnlShareButton: ({ data }: { data: unknown }) => {
     h.shared.push(data);

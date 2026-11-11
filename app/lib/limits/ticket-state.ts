@@ -163,6 +163,11 @@ export function buyingPowerAtoms(p: {
   leverage: number;
   /** Tightest market cap on the selected side in base q, or null when none applies. */
   marketMaxQ: bigint | null;
+  /**
+   * The part of `marketMaxQ` that is market ROOM (not a collateral bound such as the account's equity gate). `capped` (the "Limited by
+   * market room" label) is true only when this is what binds. Omitted = `marketMaxQ` is all room.
+   */
+  roomMaxQ?: bigint | null;
   priceE6: bigint | null | undefined;
 }): { atoms: bigint; capped: boolean; noBalance?: boolean } | null {
   const { tradableAtoms, leverage, marketMaxQ, priceE6 } = p;
@@ -173,7 +178,8 @@ export function buyingPowerAtoms(p: {
   // No available balance: nothing can be opened (Max may still show the market's room), so say 0 and why rather than quote the room.
   if (byBalanceQ === null) return { atoms: 0n, capped: false, noBalance: true };
   const maxQ = oneMaxQ([marketMaxQ, byBalanceQ]) as bigint;
-  return { atoms: (maxQ * priceE6) / 1_000_000n, capped: marketMaxQ !== null && marketMaxQ < byBalanceQ };
+  const room = p.roomMaxQ === undefined ? marketMaxQ : p.roomMaxQ;
+  return { atoms: (maxQ * priceE6) / 1_000_000n, capped: room !== null && room < byBalanceQ && room <= maxQ };
 }
 
 /** One cent in USD atoms (6 dp): the smallest step the ticket's USD size and Max can show. */

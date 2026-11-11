@@ -32,7 +32,9 @@ export interface ClosePositionFormProps {
   entryPrice: bigint;
   /**
    * #3534: the entry the balance-after is valued from (`capital + q x (mark - riskEntry)` is the account's equity). Omitted = `entryPrice`.
-   * It differs only on a fully settled leg, where the display entry (the fill price) would take a loss out of a capital that already paid it.
+   * It differs from the display entry (the price paid) in two cases: a fully settled leg (the fill price would take a loss out of a capital
+   * that already paid it) and a v2.2 fill (the engine's basis is the booked price; the spread already left capital as a fee, so the balance
+   * is valued from the booked price while Est. PnL, from the price paid, is net of it).
    */
   riskEntryPrice?: bigint;
   currentPrice: bigint;

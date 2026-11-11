@@ -98,7 +98,7 @@ afterEach(() => cleanup());
 describe("PositionsDock -> Share-PnL card data", () => {
   it("cached entry: offers the card, with logo_url + mainnet_ca from the market row and no devnet mint", () => {
     // Entry $99.875, mark $100, 40 units long => +$5.
-    saveEntryPrice("s", 0, 99_875_000n, 4, OWNER.toBase58());
+    saveEntryPrice("s", 0, 99_875_000n, 4, OWNER.toBase58(), 40_000_000n);
     h.market = { ...h.market, logo_url: "https://cdn.example/sol.png" };
     render(<PositionsDock slabAddress="s" />);
     const d = lastShared();
@@ -118,7 +118,7 @@ describe("PositionsDock -> Share-PnL card data", () => {
   });
 
   it("pool-capped (legacy v12 engine): the dock flags it, and the card built from the same data shows the payable $2.00, not +$5.00", () => {
-    saveEntryPrice("s", 0, 99_875_000n, 4, OWNER.toBase58());
+    saveEntryPrice("s", 0, 99_875_000n, 4, OWNER.toBase58(), 40_000_000n);
     h.engine = { vault: 500_000n };
     h.insurance = 1_500_000n; // vault + insurance can pay $2 of the +$5
     const { container } = render(<PositionsDock slabAddress="s" />);
@@ -135,7 +135,7 @@ describe("PositionsDock -> Share-PnL card data", () => {
   // S6: on v17/v18 (every live market) the vault is unknown. The insurance balance alone used to
   // become the cap, so a +$5 winner on a market with $2 insurance shared "+$2.00 ... capped".
   it("v17 (no engine block): insurance alone does not cap the PnL; no caveat, the card shows +$5.00", () => {
-    saveEntryPrice("s", 0, 99_875_000n, 4, OWNER.toBase58());
+    saveEntryPrice("s", 0, 99_875_000n, 4, OWNER.toBase58(), 40_000_000n);
     h.insurance = 2_000_000n;
     render(<PositionsDock slabAddress="s" />);
     expect(document.body.textContent ?? "").not.toMatch(/Vault \+ insurance can currently pay/);

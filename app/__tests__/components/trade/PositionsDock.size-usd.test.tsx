@@ -62,7 +62,7 @@ beforeEach(() => {
   localStorage.clear();
   // 1 unit long at $100 on 10 USDC.
   h.account = acct({ capital: 10n * E6, positionSize: 1n * E6 });
-  saveEntryPrice("s", 0, 100n * E6, 10, OWNER.toBase58());
+  saveEntryPrice("s", 0, 100n * E6, 10, OWNER.toBase58(), 1n * E6);
 });
 
 const sizeUsd = () => screen.queryByTestId("position-size-usd");
